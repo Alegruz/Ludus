@@ -1,0 +1,48 @@
+file(GLOB_RECURSE LUDUS_CORE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+
+# Core library
+add_library(LudusCore SHARED
+    ${LUDUS_CORE_SOURCES}
+)
+
+if(WIN32)
+    # Automatically export all symbols on Windows to generate import library
+    set_target_properties(LudusCore PROPERTIES
+        WINDOWS_EXPORT_ALL_SYMBOLS ON
+    )
+endif()
+
+target_precompile_headers(LudusCore PRIVATE
+    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/include/Ludus/Engine/Core/Pch.hpp>"
+    )
+
+target_include_directories(LudusCore
+    PUBLIC
+        ${CMAKE_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(LudusCore
+    PRIVATE
+    LudusBuildSettings
+)
+
+# Set DLL export macro
+target_compile_definitions(LudusCore
+    PRIVATE
+        LUDUS_CORE_EXPORTS
+)
+
+# Set output directory
+set_target_properties(LudusCore PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/bin
+    LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/lib
+    ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/lib
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/bin
+    LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/lib
+    ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/lib
+)

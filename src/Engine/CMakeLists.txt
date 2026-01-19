@@ -1,13 +1,9 @@
-add_library(Ludus SHARED Dummy.cpp)
+add_subdirectory(Core)
 
-if(WIN32)
-    # Automatically export all symbols on Windows to generate import library
-    set_target_properties(Ludus PROPERTIES
-        WINDOWS_EXPORT_ALL_SYMBOLS ON
-    )
-endif()
+# Umbrella library that includes all engine components
+add_library(Ludus INTERFACE)
 
 target_link_libraries(Ludus
-    PRIVATE
-    LudusBuildSettings
-    )
+    INTERFACE
+    LudusCore
+)

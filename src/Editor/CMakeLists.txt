@@ -11,6 +11,13 @@ target_precompile_headers(LudusEditor PRIVATE
     "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/include/Ludus/Editor/Pch.hpp>"
     )
 
+target_include_directories(LudusEditor
+    PUBLIC
+        ${CMAKE_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
 target_link_libraries(LudusEditor
     PRIVATE
     Ludus

@@ -64,6 +64,34 @@
             }
         },
         {
+            "name": "clang_x64",
+            "hidden": true,
+            "displayName": "Clang x64",
+            "description": "Using Clang compiler (x64 architecture)",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
+        },
+        {
+            "name": "clang_x64-debug",
+            "displayName": "Clang x64 - Debug",
+            "inherits": "clang_x64",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "clang_x64-release",
+            "displayName": "Clang x64 - Release",
+            "inherits": "clang_x64",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
             "name": "clang_ubuntu",
             "hidden": true,
             "displayName": "Clang 14.0.0 x86_64-pc-linux-gnu",
