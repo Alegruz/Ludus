@@ -80,6 +80,10 @@ jobs:
         if: runner.os == 'Windows' && contains(matrix.configure_preset, 'ninja') && !contains(matrix.configure_preset, 'ninja_msvc')
         uses: mozilla-actions/sccache-action@v0.0.4
 
+      - name: Setup MSVC environment
+        if: runner.os == 'Windows' && contains(matrix.configure_preset, 'ninja_msvc')
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Configure (CMake preset)
         run: cmake --preset "${{ matrix.configure_preset }}"
 

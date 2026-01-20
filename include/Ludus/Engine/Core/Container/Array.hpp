@@ -2,7 +2,7 @@
 
 #include <Ludus/Engine/Core/Container/Array.h>
 
-#include <Ludus/Engine/Core/Math/Bit.h>
+#include <Ludus/Engine/Core/Math/Bit.hpp>
 
 namespace ludus::core
 {
