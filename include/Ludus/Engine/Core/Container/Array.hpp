@@ -284,7 +284,14 @@ namespace ludus::core
         mSize = 0;
         for(auto it = first; it != last; ++it)
         {
-            PushBack(*it);
+            ++mSize;
+        }
+
+        SetCapacity(mSize);
+        uint32_t index = 0;
+        for(auto it = first; it != last; ++it)
+        {
+            mData[index++] = *it;
         }
     }
     
@@ -346,7 +353,10 @@ namespace ludus::core
             {
                 return mSize > 0 ? mSize - 1 : 0;
             }
-            return mSize;
+            else
+            {
+                return mSize;
+            }
         }
         else
         {
@@ -370,7 +380,10 @@ namespace ludus::core
             {
                 return mCapacity > 0 ? mCapacity - 1 : 0;
             }
-            return mCapacity;
+            else
+            {
+                return mCapacity;
+            }
         }
         else
         {
@@ -477,7 +490,8 @@ namespace ludus::core
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::operator=(std::initializer_list<T> initList) noexcept
     {
-        return __super::operator=(initList);
+        __super::operator=(initList);
+        return *this;
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <concepts>
+#include <cstring>
 
 // MACROS
 #if defined(_MSC_VER)
@@ -24,11 +25,11 @@ namespace ludus::core
     {
         if constexpr (std::is_same_v<CharT, char>)
         {
-            return static_cast<uint32_t>(strlen(str));
+            return static_cast<uint32_t>(::strlen(str));
         }
         else if constexpr (std::is_same_v<CharT, wchar_t>)
         {
-            return static_cast<uint32_t>(wcslen(str));
+            return static_cast<uint32_t>(::wcslen(str));
         }
     }
 }   // namespace ludus::core
