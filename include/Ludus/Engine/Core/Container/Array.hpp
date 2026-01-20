@@ -15,7 +15,7 @@ namespace ludus::core
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     template<typename IteratorType>
         requires std::is_same_v<IteratorType, T> || std::is_same_v<IteratorType, const T>
-    LUDUS_INLINE constexpr typename  ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::IteratorImpl<IteratorType>& ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::IteratorImpl<IteratorType>::operator++() noexcept
+    LUDUS_INLINE constexpr typename  ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::template IteratorImpl<IteratorType>& ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::IteratorImpl<IteratorType>::operator++() noexcept
     {
         ++mCurrentOrNull;
         return *this;

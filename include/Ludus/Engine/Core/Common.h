@@ -3,6 +3,7 @@
 #include <concepts>
 #include <cstdint>
 #include <cstring>
+#include <cwchar>
 
 // MACROS
 #if defined(_MSC_VER)
