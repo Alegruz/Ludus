@@ -15,49 +15,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # VS 2022
-          - name: VS2022 Debug
-            runner: windows-latest   # windows-latest has VS 2022
-            configure_preset: vs22_x64-debug   # (ok to use vs22_x64 too)
-            build_preset: vs22_x64-debug
+          # Ninja with Clang
+          - name: Ninja Clang Debug
+            runner: ubuntu-latest
+            configure_preset: ninja_clang-debug
+            build_preset: ninja_clang-debug
             configuration: Debug
-          - name: VS2022 Release
-            runner: windows-latest
-            configure_preset: vs22_x64-release
-            build_preset: vs22_x64-release
+          - name: Ninja Clang Release
+            runner: ubuntu-latest
+            configure_preset: ninja_clang-release
+            build_preset: ninja_clang-release
             configuration: Release
-          # Clang on x64
-          - name: Clang x64 Debug
-            runner: windows-latest
-            configure_preset: clang_x64-debug
-            build_preset: clang_x64-debug
+          # Ninja with GCC
+          - name: Ninja GCC Debug
+            runner: ubuntu-latest
+            configure_preset: ninja_gcc-debug
+            build_preset: ninja_gcc-debug
             configuration: Debug
-          - name: Clang x64 Release
-            runner: windows-latest
-            configure_preset: clang_x64-release
-            build_preset: clang_x64-release
+          - name: Ninja GCC Release
+            runner: ubuntu-latest
+            configure_preset: ninja_gcc-release
+            build_preset: ninja_gcc-release
             configuration: Release
-          # Clang on Ubuntu
-          - name: Clang Ubuntu Debug
-            runner: ubuntu-latest
-            configure_preset: clang_ubuntu-debug
-            build_preset: clang_ubuntu-debug
+          # Ninja with MSVC
+          - name: Ninja MSVC Debug
+            runner: windows-latest
+            configure_preset: ninja_msvc-debug
+            build_preset: ninja_msvc-debug
             configuration: Debug
-          - name: Clang Ubuntu Release
-            runner: ubuntu-latest
-            configure_preset: clang_ubuntu-release
-            build_preset: clang_ubuntu-release
-            configuration: Release
-          # GCC on Ubuntu
-          - name: GCC Ubuntu Debug
-            runner: ubuntu-latest
-            configure_preset: gcc_ubuntu-debug
-            build_preset: gcc_ubuntu-debug
-            configuration: Debug
-          - name: GCC Ubuntu Release
-            runner: ubuntu-latest
-            configure_preset: gcc_ubuntu-release
-            build_preset: gcc_ubuntu-release
+          - name: Ninja MSVC Release
+            runner: windows-latest
+            configure_preset: ninja_msvc-release
+            build_preset: ninja_msvc-release
             configuration: Release
 
     steps:
@@ -69,6 +58,27 @@ jobs:
       - name: Install dependencies
         if: runner.os == 'Linux'
         run: chmod +x init.sh && ./init.sh
+
+      - name: Install Ninja
+        if: contains(matrix.configure_preset, 'ninja')
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y ninja-build
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            choco install ninja
+          fi
+        shell: bash
+
+      - name: Setup ccache
+        if: runner.os == 'Linux' && contains(matrix.configure_preset, 'ninja')
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.configure_preset }}
+          max-size: 2G
+
+      - name: Setup sccache
+        if: runner.os == 'Windows' && contains(matrix.configure_preset, 'ninja') && !contains(matrix.configure_preset, 'ninja_msvc')
+        uses: mozilla-actions/sccache-action@v0.0.4
 
       - name: Configure (CMake preset)
         run: cmake --preset "${{ matrix.configure_preset }}"

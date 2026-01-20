@@ -7,6 +7,11 @@ endif()
 
 add_executable(LudusEditor ${PLATFORM_SOURCES})
 
+# Set output directory for the executable
+set_target_properties(LudusEditor PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+
 target_precompile_headers(LudusEditor PRIVATE
     "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/include/Ludus/Editor/Pch.hpp>"
     )
@@ -23,33 +28,15 @@ target_link_libraries(LudusEditor
     Ludus
     )
 
-# Copy the built executable into the repo root after every build
-set(_dst "${CMAKE_SOURCE_DIR}/LudusEditor${CMAKE_EXECUTABLE_SUFFIX}")
-message(STATUS "dst: ${_dst}")
-add_custom_command(
-    TARGET LudusEditor POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:LudusEditor>" "${_dst}"
+# Install rules for distribution
+install(TARGETS LudusEditor
+    RUNTIME DESTINATION .
 )
 
-message(STATUS "COPY DIR ${CMAKE_CURRENT_LIST_DIR}/LudusEditor${CMAKE_EXECUTABLE_SUFFIX}")
-if(LUDUS_WINDOWS)
-    # Copy all DLLs from build directory to output directory
-    file(GLOB DLL_FILES "${CMAKE_BINARY_DIR}/*.dll")
-    foreach(DLL_FILE ${DLL_FILES})
-        add_custom_command(TARGET LudusEditor POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${DLL_FILE}"
-                "${CMAKE_CURRENT_LIST_DIR}/LudusEditor${CMAKE_EXECUTABLE_SUFFIX}"
-        )
-    endforeach()
-else()
-    # Copy all shared libraries (.so) from build directory to output directory
-    file(GLOB SO_FILES "${CMAKE_BINARY_DIR}/*.so")
-    foreach(SO_FILE ${SO_FILES})
-        add_custom_command(TARGET LudusEditor POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${SO_FILE}"
-                "${CMAKE_CURRENT_LIST_DIR}/LudusEditor${CMAKE_EXECUTABLE_SUFFIX}"
-        )
-    endforeach()
+# Handle runtime DLLs on Windows
+if(WIN32)
+    install(FILES $<TARGET_RUNTIME_DLLS:LudusEditor>
+        DESTINATION .
+        COMPONENT Runtime
+    )
 endif()

@@ -1,8 +1,11 @@
-file(GLOB_RECURSE LUDUS_CORE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
-
 # Core library
-add_library(LudusCore SHARED
-    ${LUDUS_CORE_SOURCES}
+add_library(LudusCore SHARED)
+
+# Explicitly list source files for better dependency tracking
+target_sources(LudusCore PRIVATE
+    CommandLineOptions.cpp
+    CommandLineManager.cpp
+    Container/String.cpp
 )
 
 if(WIN32)
