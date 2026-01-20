@@ -1,9 +1,13 @@
 #pragma once
 
+#include <Ludus/Engine/Platform/Platform.h>
+
 #include <concepts>
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
+#include <utility>
+#include <variant>
 
 // MACROS
 #if defined(_MSC_VER)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Ludus/Engine/Platform/Platform.h>
+#include <Ludus/Engine/Core/Common.h>
 
 #if defined(LUDUS_WINDOWS)
     // Windows

@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Ludus/Engine/Pch.hpp>
+#include <Ludus/Engine/Core/Common.h>
+#include <Ludus/Engine/Core/Container/String.h>
 
 namespace ludus::core
 {

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <Ludus/Engine/Core/Common.h>
-
 // Always define a known set of macros, even if 0.
 #if defined(_WIN32) || defined(_WIN64)
     #ifndef LUDUS_WINDOWS

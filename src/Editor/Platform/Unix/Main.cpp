@@ -1,6 +1,8 @@
 #include <Ludus/Editor/Pch.hpp>
 
 #include <Ludus/Engine/Core/CommandLineManager.hpp>
+#include <Ludus/Engine/Core/Container/Array.hpp>
+#include <Ludus/Engine/Core/Container/String.hpp>
 
 #include <iostream>
 
