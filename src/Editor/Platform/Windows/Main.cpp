@@ -22,8 +22,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, [[maybe_un
 		OutputDebugStringW(debugOutput.GetData());
 	}
 
-	LUDUS_ASSERT_MSG(arguments.GetSize() > 0, "No command line arguments were provided.");
-
 	WNDCLASSEX windowClassEx
 	{
 		.cbSize        	= sizeof(WNDCLASSEX),

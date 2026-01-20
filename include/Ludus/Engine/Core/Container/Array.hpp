@@ -27,6 +27,7 @@ namespace ludus::core
     LUDUS_INLINE constexpr IteratorType& ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::IteratorImpl<IteratorType>::operator*() noexcept
         requires (!std::is_const_v<IteratorType>)
     {
+        LUDUS_ASSERT_MSG(mCurrentOrNull != nullptr, "Dereferencing a null iterator.");
         return *mCurrentOrNull;
     }
 
@@ -36,6 +37,7 @@ namespace ludus::core
     LUDUS_INLINE constexpr IteratorType& ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::IteratorImpl<IteratorType>::operator*() const noexcept
         requires (std::is_const_v<IteratorType>)
     {
+        LUDUS_ASSERT_MSG(mCurrentOrNull != nullptr, "Dereferencing a null iterator.");
         return *mCurrentOrNull;
     }
 
@@ -133,7 +135,14 @@ namespace ludus::core
         requires (ARRAY_TYPE == ArrayType::Static)
         : mSize(other.mSize)
     {
-        std::memcpy(mData, other.mData, mSize * sizeof(T));
+        if(other.mData != nullptr)
+        {
+            std::memcpy(mData, other.mData, mSize * sizeof(T));
+        }
+        else
+        {
+            mSize = 0;
+        }
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /*= ArrayResizePolicy::Default*/>
@@ -153,6 +162,7 @@ namespace ludus::core
         requires (ARRAY_TYPE == ArrayType::Static)
         : mSize(other.mSize)
     {
+        LUDUS_ASSERT_MSG(other.mData != nullptr, "Source array data is null in move constructor.");
         std::memcpy(mData, other.mData, mSize * sizeof(T));
     }
 
@@ -205,6 +215,7 @@ namespace ludus::core
             else if constexpr (ARRAY_TYPE == ArrayType::Static)
             {
                 mSize = other.mSize;
+                LUDUS_ASSERT_MSG(other.mData != nullptr, "Source array data is null in copy assignment.");
                 std::memcpy(mData, other.mData, mSize * sizeof(T));
             }
         }
@@ -233,6 +244,7 @@ namespace ludus::core
             else if constexpr (ARRAY_TYPE == ArrayType::Static)
             {
                 mSize = other.mSize;
+                LUDUS_ASSERT_MSG(other.mData != nullptr, "Source array data is null in move assignment.");
                 std::memcpy(mData, other.mData, mSize * sizeof(T));
             }
         }
@@ -497,106 +509,114 @@ namespace ludus::core
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr T& ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::At(const uint32_t index) noexcept
     {
-        // Optionally, you can add bounds checking here
+        LUDUS_ASSERT_MSG(index < this->GetSize(), "Index out of bounds in Array::At()");
         return this->mData[index];
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr const T& ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::At(const uint32_t index) const noexcept
     {
-        // Optionally, you can add bounds checking here
+        LUDUS_ASSERT_MSG(index < this->GetSize(), "Index out of bounds in Array::At()");
         return this->mData[index];
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr T& ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::operator[](const uint32_t index) noexcept
     {
-        return this->mData[index];
+        return At(index);
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr const T& ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::operator[](const uint32_t index) const noexcept
     {
-        return this->mData[index];
+        return At(index);
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr T& ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetFront() noexcept
     {
+        LUDUS_ASSERT_MSG(this->GetSize() > 0, "Array is empty in GetFront()");
         return this->mData[0];
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr const T& ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetFront() const noexcept
     {
+        LUDUS_ASSERT_MSG(this->GetSize() > 0, "Array is empty in GetFront()");
         return this->mData[0];
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr T& ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetBack() noexcept
     {
+        LUDUS_ASSERT_MSG(this->GetSize() > 0, "Array is empty in GetBack()");
         return this->mData[this->GetSize() - 1];
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr const T& ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetBack() const noexcept
     {
+        LUDUS_ASSERT_MSG(this->GetSize() > 0, "Array is empty in GetBack()");
         return this->mData[this->GetSize() - 1];
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr T* ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetData() noexcept
     {
-        return Base::GetData();
+        T* data = Base::GetData();
+        LUDUS_ASSERT_MSG(data != nullptr, "Array data is null in GetData()");
+        return data;
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr const T* ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetData() const noexcept
     {
-        return Base::GetData();
+        const T* data = Base::GetData();
+        LUDUS_ASSERT_MSG(data != nullptr, "Array data is null in GetData()");
+        return data;
     }
     
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr T* ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetData() noexcept
     {
-        if constexpr (ARRAY_TYPE == ArrayType::Dynamic)
-        {
-            return mData;
-        }
-        else
-        {
-            return mData;
-        }
+        LUDUS_ASSERT_MSG(mData != nullptr, "Array data is null in GetData()");
+        return mData;
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr const T* ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetData() const noexcept
     {
-        if constexpr (ARRAY_TYPE == ArrayType::Dynamic)
-        {
-            return mData;
-        }
-        else
-        {
-            return mData;
-        }
+        LUDUS_ASSERT_MSG(mData != nullptr, "Array data is null in GetData()");
+        return mData;
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Iterator ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::begin() noexcept
     {
+        if(this->GetSize() == 0)
+        {
+            return end();
+        }
         return Iterator(this->mData[0]);
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::ConstIterator ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::begin() const noexcept
     {
+        if(this->GetSize() == 0)
+        {
+            return cend();
+        }
         return ConstIterator(this->mData[0]);
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::Default */>
     LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::ConstIterator ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::cbegin() const noexcept
     {
+        if(this->GetSize() == 0)
+        {
+            return cend();
+        }
         return ConstIterator(this->mData[0]);
     }
 
