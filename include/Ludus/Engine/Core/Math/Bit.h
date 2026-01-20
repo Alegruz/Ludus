@@ -1,5 +1,7 @@
 #pragma once
 
+#include <concepts>
+
 namespace ludus::core
 {
     template<std::integral T>

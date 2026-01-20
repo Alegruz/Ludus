@@ -2,41 +2,56 @@
 
 #include <Ludus/Engine/Core/Math/Bit.h>
 
+#include <Ludus/Engine/Core/Assert.h>
+
+#include <bit>
+#include <limits>
+#include <type_traits>
+
 namespace ludus::core
 {
     template<std::integral T>
     LUDUS_INLINE constexpr T GetNextPowerOfTwo(const T value) noexcept
     {
-        if(value == 0)
+        if (value <= 1)
         {
             return 1;
         }
         
-        if(value == 1)
-        {
-            return 1;
+        if constexpr (std::signed_integral<T>)
+        { 
+            LUDUS_ASSERT_MSG(value > 0, "GetNextPowerOfTwo expects a non-negative value.");
+            if (value <= 0)
+            {
+                return 1;
+            }
         }
 
-        T v = value - 1;
-        
-        // Set all bits after the highest set bit
-        v |= v >> 1;
-        v |= v >> 2;
-        v |= v >> 4;
-        v |= v >> 8;
-        v |= v >> 16;
-        
-        if constexpr (sizeof(T) >= 8)
-        {
-            v |= v >> 32;
+        using UnsignedT = std::make_unsigned_t<T>;
+        const auto unsignedValue = static_cast<UnsignedT>(value);
+        const auto maxPowerOfTwo = std::bit_floor(std::numeric_limits<UnsignedT>::max());
+
+        LUDUS_ASSERT_MSG(unsignedValue <= maxPowerOfTwo, "GetNextPowerOfTwo overflow.");
+        if (unsignedValue > maxPowerOfTwo)
+        { 
+            return 0;
         }
-        
-        return v + 1;
+        return static_cast<T>(std::bit_ceil(unsignedValue));
     }
 
     template<std::integral T>
     LUDUS_INLINE constexpr bool IsPowerOfTwo(const T value) noexcept
     {
-        return (value > 0) && ((value & (value - 1)) == 0);
+        if constexpr (std::signed_integral<T>)
+        {
+            if (value <= 0)
+            {
+                return false;
+            }
+        }
+
+        using UnsignedT = std::make_unsigned_t<T>;
+        const auto unsignedValue = static_cast<UnsignedT>(value);
+        return std::has_single_bit(unsignedValue);
     }
 } // namespace ludus::core
