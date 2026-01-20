@@ -176,6 +176,18 @@
             "configuration": "Release"
         },
         {
+            "name": "clang_x64-debug",
+            "displayName": "Clang x64 - Debug",
+            "configurePreset": "clang_x64-debug",
+            "configuration": "Debug"
+        },
+        {
+            "name": "clang_x64-release",
+            "displayName": "Clang x64 - Release",
+            "configurePreset": "clang_x64-release",
+            "configuration": "Release"
+        },
+        {
             "name": "clang_ubuntu-debug",
             "displayName": "Clang 14.0.0 x86_64-pc-linux-gnu - Debug",
             "configurePreset": "clang_ubuntu-debug",
