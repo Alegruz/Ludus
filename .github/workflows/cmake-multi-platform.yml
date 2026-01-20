@@ -1,0 +1,87 @@
+name: CMake (Windows, Presets)
+
+on:
+  push:
+    branches: [ "develop" ]
+  pull_request:
+    branches: [ "develop" ]
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # VS 2022
+          - name: VS2022 Debug
+            runner: windows-latest   # windows-latest has VS 2022
+            configure_preset: vs22_x64-debug   # (ok to use vs22_x64 too)
+            build_preset: vs22_x64-debug
+            configuration: Debug
+          - name: VS2022 Release
+            runner: windows-latest
+            configure_preset: vs22_x64-release
+            build_preset: vs22_x64-release
+            configuration: Release
+          # Clang on Windows
+          - name: Clang Windows Debug
+            runner: windows-latest
+            configure_preset: clang_windows-debug
+            build_preset: clang_windows-debug
+            configuration: Debug
+          - name: Clang Windows Release
+            runner: windows-latest
+            configure_preset: clang_windows-release
+            build_preset: clang_windows-release
+            configuration: Release
+          # Clang on Ubuntu
+          - name: Clang Ubuntu Debug
+            runner: ubuntu-latest
+            configure_preset: clang_ubuntu-debug
+            build_preset: clang_ubuntu-debug
+            configuration: Debug
+          - name: Clang Ubuntu Release
+            runner: ubuntu-latest
+            configure_preset: clang_ubuntu-release
+            build_preset: clang_ubuntu-release
+            configuration: Release
+          # GCC on Ubuntu
+          - name: GCC Ubuntu Debug
+            runner: ubuntu-latest
+            configure_preset: gcc_ubuntu-debug
+            build_preset: gcc_ubuntu-debug
+            configuration: Debug
+          - name: GCC Ubuntu Release
+            runner: ubuntu-latest
+            configure_preset: gcc_ubuntu-release
+            build_preset: gcc_ubuntu-release
+            configuration: Release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Optional: ensure MSVC environment is set (usually not needed on GH runners)
+      # - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install dependencies
+        if: runner.os == 'Linux'
+        run: chmod +x init.sh && ./init.sh
+
+      - name: Configure (CMake preset)
+        run: cmake --preset "${{ matrix.configure_preset }}"
+
+      - name: Build (CMake build preset)
+        run: cmake --build --preset "${{ matrix.build_preset }}"
+
+      - name: Test (ctest)
+        shell: pwsh
+        run: |
+          # Compute the preset's build directory exactly as in your presets:
+          $buildDir = Join-Path $PWD "out/build/${{ matrix.build_preset }}"
+          if (-not (Test-Path $buildDir)) {
+            Write-Error "Build directory not found: $buildDir"
+          }
+          ctest --test-dir "$buildDir" -C "${{ matrix.configuration }}" --output-on-failure
