@@ -26,16 +26,16 @@ jobs:
             configure_preset: vs22_x64-release
             build_preset: vs22_x64-release
             configuration: Release
-          # Clang on Windows
-          - name: Clang Windows Debug
+          # Clang on x64
+          - name: Clang x64 Debug
             runner: windows-latest
-            configure_preset: clang_windows-debug
-            build_preset: clang_windows-debug
+            configure_preset: clang_x64-debug
+            build_preset: clang_x64-debug
             configuration: Debug
-          - name: Clang Windows Release
+          - name: Clang x64 Release
             runner: windows-latest
-            configure_preset: clang_windows-release
-            build_preset: clang_windows-release
+            configure_preset: clang_x64-release
+            build_preset: clang_x64-release
             configuration: Release
           # Clang on Ubuntu
           - name: Clang Ubuntu Debug
