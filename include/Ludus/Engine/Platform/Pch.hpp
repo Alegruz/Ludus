@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Ludus/Engine/Core/Common.h>
+#include <Ludus/Engine/Platform/Platform.h>
 
 #if defined(LUDUS_WINDOWS)
     // Windows
@@ -8,6 +8,4 @@
     #define NOMINMAX
     #define UNICODE
     #include <windows.h>
-
-    constexpr wchar_t EDITOR_WINDOW_TITLE[]      = L"Ludus Editor";
 #endif  // defined(LUDUS_WINDOWS)

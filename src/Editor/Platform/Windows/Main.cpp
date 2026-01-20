@@ -5,9 +5,9 @@
 #include <Ludus/Engine/Core/Container/Array.hpp>
 #include <Ludus/Engine/Core/Container/String.hpp>
 
-LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+#include <Ludus/Engine/Platform/Window.hpp>
 
-void PrintWin32Error() noexcept;
+#undef CreateWindow
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, [[maybe_unused]] int commandShowFlag)
 {
@@ -22,46 +22,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, [[maybe_un
 		OutputDebugStringW(debugOutput.GetData());
 	}
 
-	WNDCLASSEX windowClassEx
+	ludus::platform::WindowManager<ludus::platform::CURRENT_PLATFORM_TYPE> windowManager;
+	commandLineManager.ParseCommandLine(windowManager);
+
+	ludus::platform::Window<ludus::platform::CURRENT_PLATFORM_TYPE>::CreateInfo createInfo
 	{
-		.cbSize        	= sizeof(WNDCLASSEX),
-		.style		 	= CS_HREDRAW | CS_VREDRAW,
-		.lpfnWndProc   	= WindowProc,
-		.cbClsExtra   	= 0,
-		.cbWndExtra   	= 0,
-		.hInstance     	= instance,
-		.hIcon        	= LoadIcon(NULL, IDI_APPLICATION),
-		.hCursor      	= LoadCursor(NULL, IDC_ARROW),
-		.hbrBackground	= reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1),
-		.lpszMenuName  	= NULL,
-		.lpszClassName 	= EDITOR_WINDOW_CLASS_NAME,
-		.hIconSm      	= LoadIcon(NULL, IDI_APPLICATION)
+		.Title = ludus::core::ConvertWStringToString(ludus::core::WString(EDITOR_WINDOW_TITLE)),
+		.Instance = instance
 	};
 
-	if( RegisterClassEx(&windowClassEx) == 0 )
-	{
-		PrintWin32Error();
-		return 0;
-	}
-
-	HWND hwnd = CreateWindowEx(
-		0,
-		EDITOR_WINDOW_CLASS_NAME,
-		EDITOR_WINDOW_TITLE,
-		WS_OVERLAPPEDWINDOW,
-		CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-		NULL,
-		NULL,
-		instance,
-		nullptr
-	);
-	if (hwnd == NULL)
-	{
-		PrintWin32Error();
-		return 0;
-	}
-
-	ShowWindow(hwnd, commandShowFlag);
+	const ludus::platform::Window<ludus::platform::CURRENT_PLATFORM_TYPE> window = windowManager.CreateWindow(createInfo);
+	window.Show(commandShowFlag);
 
 	MSG msg = {};
 	while (GetMessage(&msg, NULL, 0, 0) > 0)
@@ -71,32 +42,4 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, [[maybe_un
 	}
 
 	return 0;
-}
-
-
-LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-	return DefWindowProc(hwnd, uMsg, wParam, lParam);
-}
-
-void PrintWin32Error() noexcept
-{
-	DWORD errorCode = GetLastError();
-	LPWSTR messageBuffer = nullptr;
-	
-	FormatMessageW(
-		FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-		nullptr,
-		errorCode,
-		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-		reinterpret_cast<LPWSTR>(&messageBuffer),
-		0,
-		nullptr
-	);
-	
-	if (messageBuffer != nullptr)
-	{
-		OutputDebugStringW(messageBuffer);
-		LocalFree(messageBuffer);
-	}
 }

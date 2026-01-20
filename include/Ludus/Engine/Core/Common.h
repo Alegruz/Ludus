@@ -38,4 +38,7 @@ namespace ludus::core
             return static_cast<uint32_t>(wcslen(str));
         }
     }
+    
+    template<typename T>
+    concept Arithmetic = std::is_arithmetic_v<T>;
 }   // namespace ludus::core

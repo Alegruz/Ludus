@@ -12,4 +12,7 @@ namespace ludus::core
 
     template<typename T>
     concept StringType = std::is_same_v<T, String> || std::is_same_v<T, WString>;
+
+    WString ConvertStringToWString(const String& str) noexcept;
+    String  ConvertWStringToString(const WString& wstr) noexcept;
 }   // namespace ludus::core

@@ -4,14 +4,6 @@
 
 #include <cstdio>
 
-#if defined(_MSC_VER)
-    #define LUDUS_DEBUGBREAK() __debugbreak()
-#elif defined(__GNUC__) || defined(__clang__)
-    #define LUDUS_DEBUGBREAK() __builtin_trap()
-#else
-    #define LUDUS_DEBUGBREAK() ((void)0)
-#endif
-
 namespace ludus::core
 {
     struct AssertInfo final
@@ -53,6 +45,9 @@ namespace ludus::core
         return GetAssertHandler()(info, ignoreAlways);
     }
 } // namespace ludus::core
+
+#define LUDUS_STATIC_ASSERT_MSG(expr, message) static_assert((expr), (message))
+#define LUDUS_STATIC_ASSERT(expr) static_assert((expr))
 
 #if defined(LUDUS_DEBUG)
     #define LUDUS_ASSERT_MSG(expr, message)                                                         \

@@ -419,6 +419,7 @@ FodyWeavers.xsd
 
 # Executable files
 *.exe
+*.dll
 
 # CMake
 build/

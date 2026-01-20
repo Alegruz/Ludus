@@ -9,23 +9,23 @@ namespace ludus::core
 
     enum class ArrayType : uint8_t
     {
-        Dynamic,
-        Static,
-        Count,
+        DYNAMIC,
+        STATIC,
+        COUNT,
 
-        Default = Dynamic,
+        DEFAULT = DYNAMIC,
     };
 
     enum class ArrayResizePolicy : uint8_t
     {
-        Double,
-        FixedIncrement,
-        Count,
+        DOUBLE,
+        FIXED_INCREMENT,
+        COUNT,
 
-        Default = Double,
+        DEFAULT = DOUBLE,
     };
 
-    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY = 0, ArrayResizePolicy RESIZE_POLICY = ArrayResizePolicy::Default>
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY = 0, ArrayResizePolicy RESIZE_POLICY = ArrayResizePolicy::DEFAULT>
     class ArrayImplBase
     {
     private:
@@ -51,36 +51,37 @@ namespace ludus::core
         using ConstIterator = IteratorImpl<const T>;
 
     public:
-        explicit constexpr ArrayImplBase() noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
-        explicit constexpr ArrayImplBase() noexcept requires (ARRAY_TYPE == ArrayType::Static);
-        explicit constexpr ArrayImplBase(const uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic && StringCharType<T>);
-        explicit constexpr ArrayImplBase(const uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic && !StringCharType<T>);
+        explicit constexpr ArrayImplBase() noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        explicit constexpr ArrayImplBase() noexcept requires (ARRAY_TYPE == ArrayType::STATIC);
+        explicit constexpr ArrayImplBase(const uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && StringCharType<T>);
+        explicit constexpr ArrayImplBase(const uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && !StringCharType<T>);
         explicit constexpr ArrayImplBase(const uint32_t size, const T& defaultValue) noexcept;
-        explicit constexpr ArrayImplBase(Iterator first, Iterator last) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
-        explicit constexpr ArrayImplBase(const T* array, uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
-        explicit constexpr ArrayImplBase(const T* str) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic && StringCharType<T>);
-        constexpr ArrayImplBase(const ArrayImplBase& other) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
-        constexpr ArrayImplBase(const ArrayImplBase& other) noexcept requires (ARRAY_TYPE == ArrayType::Static);
-        constexpr ArrayImplBase(ArrayImplBase&& other) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
-        constexpr ArrayImplBase(ArrayImplBase&& other) noexcept requires (ARRAY_TYPE == ArrayType::Static);
+        explicit constexpr ArrayImplBase(Iterator first, Iterator last) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        explicit constexpr ArrayImplBase(const T* array, uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        explicit constexpr ArrayImplBase(const T* str) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && StringCharType<T>);
+        constexpr ArrayImplBase(const ArrayImplBase& other) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        constexpr ArrayImplBase(const ArrayImplBase& other) noexcept requires (ARRAY_TYPE == ArrayType::STATIC);
+        constexpr ArrayImplBase(ArrayImplBase&& other) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        constexpr ArrayImplBase(ArrayImplBase&& other) noexcept requires (ARRAY_TYPE == ArrayType::STATIC);
         explicit constexpr ArrayImplBase(std::initializer_list<T> initList) noexcept;
 
-        constexpr ~ArrayImplBase() noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
-        constexpr ~ArrayImplBase() noexcept requires (ARRAY_TYPE == ArrayType::Static);
+        constexpr ~ArrayImplBase() noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        constexpr ~ArrayImplBase() noexcept requires (ARRAY_TYPE == ArrayType::STATIC);
 
         constexpr ArrayImplBase& operator=(const ArrayImplBase& other) noexcept;
         constexpr ArrayImplBase& operator=(ArrayImplBase&& other) noexcept;
         constexpr ArrayImplBase& operator=(std::initializer_list<T> initList) noexcept;
 
         constexpr void Assign(const uint32_t size, const T& defaultValue) noexcept;
-        constexpr void Assign(Iterator first, Iterator last) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
-        constexpr void Assign(const T* array, uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
-        constexpr void Assign(const T* str) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic && StringCharType<T>);
+        constexpr void Assign(Iterator first, Iterator last) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        constexpr void Assign(const T* array, uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        constexpr void Assign(const T* str) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && StringCharType<T>);
         constexpr void Assign(std::initializer_list<T> initList) noexcept;
 
         // Element Access
         constexpr T* GetData() noexcept;
         [[nodiscard]] constexpr const T* GetData() const noexcept;
+        [[nodiscard]] constexpr const T* GetCStr() const noexcept requires (StringCharType<T>);
 
         // Iterators
         [[nodiscard]] constexpr Iterator begin() noexcept;
@@ -91,15 +92,15 @@ namespace ludus::core
         [[nodiscard]] constexpr ConstIterator cend() const noexcept;
 
         // Capacity
-        constexpr void SetCapacity(uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
+        constexpr void SetCapacity(uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         [[nodiscard]] constexpr uint32_t GetSize() const noexcept;
-        [[nodiscard]] constexpr uint32_t GetLength() const noexcept requires (ARRAY_TYPE == ArrayType::Dynamic && StringCharType<T>);
+        [[nodiscard]] constexpr uint32_t GetLength() const noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && StringCharType<T>);
         [[nodiscard]] constexpr uint32_t GetCapacity() const noexcept;
 
     protected:
-        [[nodiscard]] constexpr uint32_t calculateCapacityToAllocate(const uint32_t requiredCapacity) const noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
+        [[nodiscard]] constexpr uint32_t calculateCapacityToAllocate(const uint32_t requiredCapacity) const noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr void copy(std::initializer_list<T> initList) noexcept;
-        constexpr void updateSize(const uint32_t newSize) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
+        constexpr void updateSize(const uint32_t newSize) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
 
     protected:
         static constexpr uint32_t INITIAL_CAPACITY = 16;
@@ -107,16 +108,16 @@ namespace ludus::core
 
     protected:
         // Conditional members based on array type
-        [[no_unique_address]] std::conditional_t<ARRAY_TYPE == ArrayType::Dynamic, uint32_t, std::monostate> mCapacity;
+        [[no_unique_address]] std::conditional_t<ARRAY_TYPE == ArrayType::DYNAMIC, uint32_t, std::monostate> mCapacity;
 
     private:
-        [[no_unique_address]] std::conditional_t<ARRAY_TYPE == ArrayType::Dynamic, uint32_t, std::monostate> mSize;
+        [[no_unique_address]] std::conditional_t<ARRAY_TYPE == ArrayType::DYNAMIC, uint32_t, std::monostate> mSize;
 
     protected:
-        std::conditional_t<ARRAY_TYPE == ArrayType::Dynamic, T*, T[STATIC_CAPACITY]> mData;
+        std::conditional_t<ARRAY_TYPE == ArrayType::DYNAMIC, T*, T[STATIC_CAPACITY]> mData;
     };
 
-    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY = 0, ArrayResizePolicy RESIZE_POLICY = ArrayResizePolicy::Default>
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY = 0, ArrayResizePolicy RESIZE_POLICY = ArrayResizePolicy::DEFAULT>
     class ArrayImpl final : public ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>
     {
     private:
@@ -134,11 +135,11 @@ namespace ludus::core
 
     public:
         explicit constexpr ArrayImpl() noexcept;
-        explicit constexpr ArrayImpl(const uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
+        explicit constexpr ArrayImpl(const uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         explicit constexpr ArrayImpl(const uint32_t size, const T& defaultValue) noexcept;
-        explicit constexpr ArrayImpl(ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Iterator first, ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Iterator last) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
-        explicit constexpr ArrayImpl(const T* array, uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
-        constexpr ArrayImpl(const T* str) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic && StringCharType<T>);
+        explicit constexpr ArrayImpl(ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Iterator first, ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Iterator last) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        explicit constexpr ArrayImpl(const T* array, uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        constexpr ArrayImpl(const T* str) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && StringCharType<T>);
         constexpr ArrayImpl(const ArrayImpl& other) noexcept;
         constexpr ArrayImpl(ArrayImpl&& other) noexcept;
         explicit constexpr ArrayImpl(std::initializer_list<T> initList) noexcept;
@@ -159,20 +160,39 @@ namespace ludus::core
         [[nodiscard]] constexpr const T& GetBack() const noexcept;
         constexpr T* GetData() noexcept;
         [[nodiscard]] constexpr const T* GetData() const noexcept;
+        [[nodiscard]] constexpr const T* GetCStr() const noexcept requires (StringCharType<T>);
 
         // Capacity
         [[nodiscard]] constexpr bool IsEmpty() const noexcept;
 
         // Modifiers
-        constexpr ArrayImpl& Append(const T* array, const uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
-        constexpr void PushBack(const T& element) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
-        constexpr void PushBack(T&& element) noexcept requires (ARRAY_TYPE == ArrayType::Dynamic);
+        constexpr ArrayImpl& Append(const T* array, const uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        constexpr void PushBack(const T& element) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        constexpr void PushBack(T&& element) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
     };
+
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY = 0, ArrayResizePolicy RESIZE_POLICY = ArrayResizePolicy::DEFAULT>
+    constexpr bool operator==(const ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& lhs, const ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& rhs) noexcept;
+    
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY = 0, ArrayResizePolicy RESIZE_POLICY = ArrayResizePolicy::DEFAULT>
+    constexpr bool operator!=(const ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& lhs, const ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& rhs) noexcept;
+
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY = 0, ArrayResizePolicy RESIZE_POLICY = ArrayResizePolicy::DEFAULT>
+    constexpr bool operator==(const ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& lhs, const T* rhs) noexcept requires (StringCharType<T>);
+    
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY = 0, ArrayResizePolicy RESIZE_POLICY = ArrayResizePolicy::DEFAULT>
+    constexpr bool operator!=(const ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& lhs, const T* rhs) noexcept requires (StringCharType<T>);
+    
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY = 0, ArrayResizePolicy RESIZE_POLICY = ArrayResizePolicy::DEFAULT>
+    constexpr bool operator==(const T* lhs, const ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& rhs) noexcept requires (StringCharType<T>);
+    
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY = 0, ArrayResizePolicy RESIZE_POLICY = ArrayResizePolicy::DEFAULT>
+    constexpr bool operator!=(const T* lhs, const ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& rhs) noexcept requires (StringCharType<T>);
 
     // ARRAY_TYPE aliases for convenience
     template<ArrayElementType T>
-    using DynamicArray = ArrayImpl<T, ArrayType::Dynamic>;
+    using DynamicArray = ArrayImpl<T, ArrayType::DYNAMIC>;
 
     template<ArrayElementType T, uint32_t CAPACITY>
-    using StaticArray = ArrayImpl<T, ArrayType::Static, CAPACITY>;
+    using StaticArray = ArrayImpl<T, ArrayType::STATIC, CAPACITY>;
 }   // namespace ludus::core

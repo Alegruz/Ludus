@@ -7,9 +7,22 @@ endif()
 
 add_executable(LudusEditor ${PLATFORM_SOURCES})
 
-# Set output directory for the executable
+# Set output directory for the executable (multi-config safe)
 set_target_properties(LudusEditor PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_SOURCE_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_SOURCE_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_SOURCE_DIR}"
+)
+
+# Also copy/sync the built exe to the source root after build to ensure the launch task finds it.
+add_custom_command(TARGET LudusEditor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:LudusEditor>" "${CMAKE_SOURCE_DIR}/LudusEditor.exe"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:LudusCore>" "${CMAKE_SOURCE_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:LudusPlatform>" "${CMAKE_SOURCE_DIR}/"
+    COMMAND_EXPAND_LISTS
+    VERBATIM
 )
 
 target_precompile_headers(LudusEditor PRIVATE

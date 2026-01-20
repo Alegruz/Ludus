@@ -16,6 +16,9 @@ namespace ludus::core
         explicit CommandLineManager(DynamicArray<BasicString<CharT>>&& arguments) noexcept;
         ~CommandLineManager() noexcept = default;
 
+        template<typename Manager>
+        void ParseCommandLine(Manager& manager) noexcept;
+
         [[nodiscard]] const DynamicArray<BasicString<CharT>>& GetArguments() const noexcept;
     
     private:
