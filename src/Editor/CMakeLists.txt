@@ -1,8 +1,8 @@
+
+set(PLATFORM_SOURCES "Platform/${PLATFORM_FOLDER}/Main.cpp")
+
 if(WIN32)
-    set(PLATFORM_SOURCES "Platform/${PLATFORM_FOLDER}/Main.cpp")
     set(CMAKE_WIN32_EXECUTABLE true)
-else()
-    message(FATAL_ERROR "Platform ${CMAKE_SYSTEM_NAME} not supported")
 endif()
 
 add_executable(LudusEditor ${PLATFORM_SOURCES})
