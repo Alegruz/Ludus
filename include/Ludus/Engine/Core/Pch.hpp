@@ -9,6 +9,7 @@
 #include <utility>
 #include <variant>
 
+#include <Ludus/Engine/Core/Assert.h>
 #include <Ludus/Engine/Core/Container/Array.hpp>
 #include <Ludus/Engine/Core/Math/Bit.hpp>
 #include <Ludus/Engine/Core/Container/String.hpp>

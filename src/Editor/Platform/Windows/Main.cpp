@@ -1,5 +1,6 @@
 #include <Ludus/Editor/Pch.hpp>
 
+#include <Ludus/Engine/Core/Assert.h>
 #include <Ludus/Engine/Core/CommandLineManager.hpp>
 #include <Ludus/Engine/Core/Container/Array.hpp>
 #include <Ludus/Engine/Core/Container/String.hpp>
@@ -20,6 +21,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, [[maybe_un
 		debugOutput.PushBack(L'\n');
 		OutputDebugStringW(debugOutput.GetData());
 	}
+
+	LUDUS_ASSERT_MSG(arguments.GetSize() > 0, "No command line arguments were provided.");
 
 	WNDCLASSEX windowClassEx
 	{
