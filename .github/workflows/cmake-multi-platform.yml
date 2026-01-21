@@ -99,3 +99,78 @@ jobs:
             Write-Error "Build directory not found: $buildDir"
           }
           ctest --test-dir "$buildDir" -C "${{ matrix.configuration }}" --output-on-failure
+
+  valgrind-memcheck:
+    name: Valgrind Memcheck (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: Clang
+            configure_preset: ninja_clang-debug
+            build_preset: ninja_clang-debug
+          - compiler: GCC
+            configure_preset: ninja_gcc-debug
+            build_preset: ninja_gcc-debug
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          chmod +x init.sh && ./init.sh
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+
+      - name: Install Ninja
+        run: sudo apt-get install -y ninja-build
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.configure_preset }}-valgrind
+          max-size: 2G
+
+      - name: Configure (CMake preset)
+        run: cmake --preset "${{ matrix.configure_preset }}"
+
+      - name: Build (CMake build preset)
+        run: cmake --build --preset "${{ matrix.build_preset }}"
+
+      - name: Run Valgrind Memcheck
+        shell: bash
+        run: |
+          buildDir="out/build/${{ matrix.build_preset }}"
+          if [ ! -d "$buildDir" ]; then
+            echo "Error: Build directory not found: $buildDir"
+            exit 1
+          fi
+
+          # Find all executable targets in the build directory
+          for exe in $(find "$buildDir" -type f -executable -name "Ludus*" 2>/dev/null); do
+            echo "Running Valgrind on: $exe"
+            valgrind \
+              --leak-check=full \
+              --show-leak-kinds=all \
+              --track-origins=yes \
+              --verbose \
+              --log-file="valgrind-report-$(basename "$exe").txt" \
+              "$exe"
+            
+            # Check for memory errors in the log
+            if grep -q "ERROR SUMMARY: [^0]" "valgrind-report-$(basename "$exe").txt"; then
+              echo "Memory errors detected in $exe!"
+              cat "valgrind-report-$(basename "$exe").txt"
+              exit 1
+            fi
+          done
+
+      - name: Upload Valgrind reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: valgrind-reports-${{ matrix.compiler }}
+          path: valgrind-report-*.txt
+          if-no-files-found: ignore
