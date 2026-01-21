@@ -56,6 +56,15 @@ target_compile_options(LudusBuildSettings INTERFACE
 message(STATUS "Current platform: ${CMAKE_SYSTEM_NAME}")
 message(STATUS "Current compiler: ${CMAKE_CXX_COMPILER_ID}")
 
+# Frame pointers: Always enabled in Debug for better profiling and stack traces
+# Even when sanitizers are disabled, frame pointers help with:
+# - Profiling tools (perf, VTune, etc.)
+# - Crash dump analysis
+# - Debug stack unwinding
+target_compile_options(LudusBuildSettings INTERFACE
+    $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-fno-omit-frame-pointer>
+)
+
 # Sanitizers: Enabled by default in Debug and RelWithDebInfo modes for leak/memory detection
 # LSan is implicitly enabled with ASan on Linux; on Windows (MSVC) we use /fsanitize=address
 add_library(ProjectSanitizersSettings INTERFACE)
@@ -65,7 +74,7 @@ option(ENABLE_SANITIZERS "Enable {ASan,UBSan,LSan} sanitizers" ON)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     if(ENABLE_SANITIZERS AND NOT MSVC)
         # GCC/Clang: ASan + UBSan + LSan (LSan is implicit with ASan on Linux, explicit on others)
-        # -fno-omit-frame-pointer: Better stack traces for leak detection
+        # -fno-omit-frame-pointer: Better stack traces for leak detection (also set unconditionally for Debug above)
         # -g: Debug symbols for better leak reports
         target_compile_options(ProjectSanitizersSettings INTERFACE 
             $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-fsanitize=address,undefined,leak -fno-omit-frame-pointer -g>)
@@ -74,7 +83,8 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInf
     elseif(ENABLE_SANITIZERS AND MSVC)
         # MSVC ASan (x64 only, no /GL - incompatible with optimizations)
         # Note: MSVC's ASan doesn't support LSan, but catches heap use-after-free, buffer overflows, etc.
-        add_compile_options($<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/fsanitize=address> /Zi /EHsc)
+        # MSVC /Oy- disables frame pointer omission (equivalent to -fno-omit-frame-pointer)
+        add_compile_options($<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/fsanitize=address> /Zi /Oy- /EHsc)
         add_link_options($<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/INCREMENTAL> /DEBUG)
     endif()
 endif()
