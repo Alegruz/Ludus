@@ -10,21 +10,18 @@ Checks: >
   readability-*,
   cppcoreguidelines-*,
   bugprone-*,
-  -modernize-use-trailing-return-type,
+  cert-*,
   -modernize-use-auto,
-  -modernize-use-nullptr,
   -readability-identifier-length,
-  -readability-magic-numbers,
   -readability-use-concise-preprocessor-directives,
-  -cppcoreguidelines-avoid-magic-numbers,
-  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -readability-function-cognitive-complexity,
+  -readability-implicit-bool-conversion,
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
-  -cppcoreguidelines-pro-type-reinterpret-cast,
-  -modernize-use-nodiscard,
-  -readability-function-cognitive-complexity
+  -cert-msc50-cpp,
+  -cert-msc32-c
 
-WarningsAsErrors: ''
-HeaderFilterRegex: '.*include/Ludus/.*'
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(include/Ludus/.*|src/.*)'
 FormatStyle: file
 CheckOptions:
   - key: readability-identifier-naming.NamespaceCase
@@ -47,13 +44,17 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.PrivateMemberPrefix
     value: m
-  - key: readability-identifier-naming.ProtectedMemberCase
-    value: CamelCase
-  - key: readability-identifier-naming.ProtectedMemberPrefix
-    value: m
   - key: readability-identifier-naming.PublicMemberCase
     value: CamelCase
   - key: readability-identifier-naming.PublicMemberPrefix
+    value: ''
+  - key: readability-identifier-naming.PrivateMemberCase
+    value: CamelCase
+  - key: readability-identifier-naming.PrivateMemberPrefix
+    value: m
+  - key: readability-identifier-naming.ProtectedMemberCase
+    value: CamelCase
+  - key: readability-identifier-naming.ProtectedMemberPrefix
     value: m
   - key: readability-identifier-naming.EnumConstantCase
     value: UPPER_CASE
@@ -64,10 +65,6 @@ CheckOptions:
   - key: readability-identifier-naming.ConstexprVariableCase
     value: UPPER_CASE
   - key: performance-move-const-arg.CheckTriviallyCopyableMove
-    value: false
-  - key: modernize-use-nullptr.NullMacros
-    value: 'NULL'
-  - key: readability-implicit-bool-conversion.AllowPointerConditions
     value: true
   - key: readability-implicit-bool-conversion.AllowIntegerConditions
     value: false

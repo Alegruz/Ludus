@@ -1,14 +1,15 @@
 ---
 # Clang-Format configuration for Ludus Engine
-# Based on Microsoft/LLVM style with custom adjustments
+# Based on LLVM style with game engine customizations
 
-BasedOnStyle: Microsoft
+BasedOnStyle: LLVM
 Language: Cpp
 Standard: c++23
+LineEnding: LF
 
-# Pointer and reference alignment: stick with type (int* ptr, not int *ptr)
-PointerAlignment: Left
-ReferenceAlignment: Left
+# Pointer and reference alignment: stick with type semantics (int *ptr, not int* ptr)
+PointerAlignment: Right
+ReferenceAlignment: Right
 DerivePointerAlignment: false
 
 # Indentation
@@ -19,13 +20,16 @@ AccessModifierOffset: -4
 IndentAccessModifiers: false
 IndentCaseLabels: false
 IndentPPDirectives: BeforeHash
+IndentWrappedFunctionNames: true
+ContinuationIndentWidth: 8
 
 # Braces
-BreakBeforeBraces: Allman
+BreakBeforeBraces: Stroustrup
 AllowShortBlocksOnASingleLine: Empty
 AllowShortFunctionsOnASingleLine: Inline
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
+Cpp11BracedListStyle: true
 
 # Spacing
 SpaceAfterCStyleCast: false
@@ -43,18 +47,20 @@ SpacesInSquareBrackets: false
 # Line breaking
 AlwaysBreakAfterReturnType: None
 AlwaysBreakTemplateDeclarations: Yes
-BreakBeforeBinaryOperators: None
+BreakBeforeBinaryOperators: NonAssignment
 BreakBeforeTernaryOperators: true
 BreakConstructorInitializers: BeforeColon
 BreakInheritanceList: BeforeColon
-ColumnLimit: 120
-MaxEmptyLinesToKeep: 1
-KeepEmptyLinesAtTheStartOfBlocks: false
+ColumnLimit: 100
+BinPackParameters: false
+BinPackArguments: false
+ConstructorInitializerIndentWidth: 4
+PackConstructorInitializers: NextLine
 
 # Alignment
 AlignAfterOpenBracket: Align
-AlignConsecutiveAssignments: None
-AlignConsecutiveDeclarations: None
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveDeclarations: Consecutive
 AlignEscapedNewlines: Left
 AlignOperands: Align
 AlignTrailingComments: true
@@ -62,25 +68,33 @@ AlignTrailingComments: true
 # Namespaces
 CompactNamespaces: false
 FixNamespaceComments: true
-NamespaceIndentation: None
+NamespaceIndentation: All
+MaxEmptyLinesToKeep: 1
+KeepEmptyLinesAtTheStartOfBlocks: false
 
 # Includes
 SortIncludes: CaseInsensitive
 IncludeBlocks: Regroup
 IncludeCategories:
-  # Project headers
-  - Regex: '^<Ludus/'
+  - Regex: '^\.'
     Priority: 1
-  # C system headers
-  - Regex: '^<[a-z_]+\.h>'
+  - Regex: '^"Ludus/'
     Priority: 2
-  # C++ standard library
-  - Regex: '^<[a-z_]+>'
+  - Regex: '^<Ludus/'
     Priority: 3
-  # Other libraries
-  - Regex: '.*'
+  - Regex: '^<sys/.*>'
     Priority: 4
+  - Regex: '^<[a-z_]+\.h>'
+    Priority: 5
+  - Regex: '^<[a-z_]+>'
+    Priority: 6
+  - Regex: '^<.*>'
+    Priority: 7
+  - Regex: '.*'
+    Priority: 8
 
 # Other
-ReflowComments: true
+ReflowComments: false
 SortUsingDeclarations: true
+InsertTrailingCommas: Wrapped
+DeriveLineEnding: true
