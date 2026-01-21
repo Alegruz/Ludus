@@ -87,13 +87,16 @@ if(NOT CLANG_TIDY_CHECK OR NOT CLANG_FORMAT_CHECK)
                 message(STATUS "Retrying LLVM install with elevation (UAC prompt)...")
                 set(LLVM_INSTALL_RESULT_ELEVATED 1)
                 execute_process(
-                    COMMAND powershell -ExecutionPolicy Bypass -Command "Start-Process powershell -Verb RunAs -ArgumentList '-ExecutionPolicy Bypass -File \"${LLVM_INSTALLER}\"' -Wait; exit $LASTEXITCODE"
+                    COMMAND powershell -ExecutionPolicy Bypass -Command "$p = Start-Process powershell -Verb RunAs -ArgumentList '-ExecutionPolicy Bypass -File \"${LLVM_INSTALLER}\"' -Wait -PassThru; exit $p.ExitCode"
                     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
                     RESULT_VARIABLE LLVM_INSTALL_RESULT_ELEVATED
                     OUTPUT_VARIABLE LLVM_INSTALL_ELEVATED_OUT
                     ERROR_VARIABLE LLVM_INSTALL_ELEVATED_ERR
                 )
                 set(LLVM_INSTALL_RESULT ${LLVM_INSTALL_RESULT_ELEVATED})
+                if(NOT LLVM_INSTALL_RESULT_ELEVATED EQUAL 0)
+                    message(WARNING "UAC-elevated LLVM installation failed with exit code: ${LLVM_INSTALL_RESULT_ELEVATED}")
+                endif()
             endif()
 
             if(LLVM_INSTALL_RESULT EQUAL 0)

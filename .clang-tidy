@@ -18,6 +18,7 @@ Checks: >
   -readability-use-concise-preprocessor-directives,
   -cppcoreguidelines-avoid-magic-numbers,
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
   -cppcoreguidelines-pro-type-reinterpret-cast,
   -modernize-use-nodiscard,
   -readability-function-cognitive-complexity

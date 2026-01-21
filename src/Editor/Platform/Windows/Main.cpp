@@ -31,10 +31,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE /*hPrevInstance*/, PWSTR lpCmd
 	ludus::platform::WindowManager<ludus::platform::CURRENT_PLATFORM_TYPE> windowManager;
 	commandLineManager.ParseCommandLine(windowManager);
 
-	const std::wstring_view windowTitle(EDITOR_WINDOW_TITLE);
 	ludus::platform::Window<ludus::platform::CURRENT_PLATFORM_TYPE>::CreateInfo createInfo
 	{
-		.Title = ludus::core::ConvertWStringToString(ludus::core::WString(windowTitle.data(), static_cast<uint32_t>(windowTitle.size()))),
+		.Title = ludus::core::ConvertWStringToString(ludus::core::WString(EDITOR_WINDOW_TITLE)),
 		.Instance = instance
 	};
 	
