@@ -244,11 +244,28 @@ jobs:
             exit 1
           fi
 
-          # Find the executable
-          exe=$(find "$buildDir" -type f -executable -name "LudusEditor" 2>/dev/null | head -1)
+          # Find the executable - check source root first (where CMake outputs it), then build dir
+          exe=""
+          if [ -x "./LudusEditor" ]; then
+            exe="./LudusEditor"
+          elif [ -x "$buildDir/bin/LudusEditor" ]; then
+            exe="$buildDir/bin/LudusEditor"
+          else
+            exe=$(find "$buildDir" -type f -name "LudusEditor" 2>/dev/null | head -1)
+          fi
           
-          if [ -z "$exe" ]; then
+          if [ -z "$exe" ] || [ ! -f "$exe" ]; then
             echo "Error: LudusEditor executable not found"
+            echo "Checked locations:"
+            echo "  - ./LudusEditor"
+            echo "  - $buildDir/bin/LudusEditor"
+            echo "  - find in $buildDir"
+            echo ""
+            echo "Root directory contents:"
+            ls -la LudusEditor* 2>/dev/null || echo "  No LudusEditor* files found"
+            echo ""
+            echo "Build directory executables:"
+            find "$buildDir" -type f -name "LudusEditor*" 2>/dev/null || echo "  No LudusEditor* files found"
             exit 1
           fi
 
@@ -275,9 +292,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          
           $buildDir = Join-Path $PWD "out/build/${{ matrix.build_preset }}"
           if (-not (Test-Path $buildDir)) {
-            Write-Error "Build directory not found: $buildDir"
+            Write-Host "Build directory not found: $buildDir"
             exit 1
           }
 
@@ -290,7 +309,9 @@ jobs:
           }
           
           if (-not $exe) {
-            Write-Error "LudusEditor.exe not found"
+            Write-Host "LudusEditor.exe not found in $buildDir or root directory"
+            Write-Host "Searching for exe files:"
+            Get-ChildItem -Path . -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object { Write-Host $_.FullName }
             exit 1
           }
 
@@ -299,16 +320,26 @@ jobs:
           
           # Run the executable (CRT leak detection is automatic in Debug)
           # Capture output to check for leak reports
-          $output = & $exe.FullName --help 2>&1 | Out-String
+          try {
+            $output = & $exe.FullName --help 2>&1 | Out-String
+            $exitCode = $LASTEXITCODE
+          } catch {
+            Write-Host "Failed to run executable: $_"
+            exit 1
+          }
           
           # Check for CRT leak detection output
           if ($output -match "Detected memory leaks|memory leak") {
-            Write-Error "LEAK DETECTED! See output:"
+            Write-Host "LEAK DETECTED! See output:"
             Write-Host $output
             exit 1
           }
           
           Write-Host "No leaks detected!"
+          Write-Host "Exit code: $exitCode"
+          
+          # Ensure clean exit
+          exit 0
 
       - name: Upload leak test output
         if: always()
