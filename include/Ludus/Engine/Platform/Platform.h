@@ -13,26 +13,24 @@ namespace ludus::platform
         COUNT = MAC,
         DEFAULT = WINDOWS,
     };
+}   // namespace ludus::platform
 
 // Always define a known set of macros, even if 0.
 #if defined(_WIN32) || defined(_WIN64)
     #ifndef LUDUS_WINDOWS
         #define LUDUS_WINDOWS
-        constexpr const PlatformType CURRENT_PLATFORM_TYPE = PlatformType::WINDOWS;
     #endif
 #endif  // defined(_WIN32) || defined(_WIN64)
 
 #if defined(__linux__)
     #ifndef LUDUS_LINUX
         #define LUDUS_LINUX
-        constexpr const PlatformType CURRENT_PLATFORM_TYPE = PlatformType::LINUX;
     #endif
 #endif  // defined(__linux__)
 
 #if defined(__APPLE__)
     #ifndef LUDUS_MAC
         #define LUDUS_MAC
-        constexpr const PlatformType CURRENT_PLATFORM_TYPE = PlatformType::MAC;
     #endif
 #endif  // defined(__APPLE__)
 
@@ -55,10 +53,22 @@ namespace ludus::platform
 #else
     #define LUDUS_DEBUGBREAK() ((void)0)
 #endif
-}   // namespace ludus::platform
 
 #if defined(LUDUS_WINDOWS)
+namespace ludus::platform
+{
+    constexpr const PlatformType CURRENT_PLATFORM_TYPE = PlatformType::WINDOWS;
+}   // namespace ludus::platform
     #include <Ludus/Engine/Platform/Windows/Common.h>
 #elif defined(LUDUS_LINUX)
+namespace ludus::platform
+{
+    constexpr const PlatformType CURRENT_PLATFORM_TYPE = PlatformType::LINUX;
+}   // namespace ludus::platform
     #include <Ludus/Engine/Platform/Unix/Common.h>
+#elif defined(LUDUS_MAC)
+namespace ludus::platform
+{
+    constexpr const PlatformType CURRENT_PLATFORM_TYPE = PlatformType::MAC;
+}   // namespace ludus::platform
 #endif  // defined(LUDUS_WINDOWS)
