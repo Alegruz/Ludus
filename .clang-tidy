@@ -11,6 +11,7 @@ Checks: >
   cppcoreguidelines-*,
   bugprone-*,
   cert-*,
+  -clang-diagnostic-ignored-gch,
   -clang-diagnostic-zero-length-array,
   -modernize-avoid-c-arrays,
   -modernize-use-auto,
