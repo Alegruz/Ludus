@@ -2,11 +2,14 @@
 
 #include <Ludus/Engine/Platform/Platform.h>
 
+#include <climits>
+#include <codecvt>
 #include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
+#include <locale>
 #include <utility>
 #include <variant>
 

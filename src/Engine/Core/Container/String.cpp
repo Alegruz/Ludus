@@ -3,13 +3,6 @@
 #include <Ludus/Engine/Core/Container/Array.hpp>
 #include <Ludus/Engine/Core/Container/String.hpp>
 
-#if defined(LUDUS_WINDOWS)
-    #include <windows.h>
-#else
-    #include <codecvt>
-    #include <locale>
-#endif
-
 namespace ludus::core
 {
     // Explicit template instantiations for the underlying array types
