@@ -22,7 +22,7 @@ namespace ludus::core
     {
         mState = 0u;
         mInc = (stream << 1u) | 1u;
-        uint32_t nextU32 = NextU32();
+        [[maybe_unused]] uint32_t nextU32 = NextU32();
         mState += seed;
         nextU32 = NextU32();
     }
