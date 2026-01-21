@@ -56,26 +56,30 @@ target_compile_options(LudusBuildSettings INTERFACE
 message(STATUS "Current platform: ${CMAKE_SYSTEM_NAME}")
 message(STATUS "Current compiler: ${CMAKE_CXX_COMPILER_ID}")
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    add_library(ProjectSanitizersSettings INTERFACE)
+# Sanitizers: Enabled by default in Debug and RelWithDebInfo modes for leak/memory detection
+# LSan is implicitly enabled with ASan on Linux; on Windows (MSVC) we use /fsanitize=address
+add_library(ProjectSanitizersSettings INTERFACE)
 
-    option(ENABLE_SANITIZERS "Enable {ASan,UBSan,TSan}" OFF)
+option(ENABLE_SANITIZERS "Enable {ASan,UBSan,LSan} sanitizers" ON)
 
+if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     if(ENABLE_SANITIZERS AND NOT MSVC)
-        target_compile_options(ProjectSanitizersSettings INTERFACE $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-fsanitize=address,undefined -fno-omit-frame-pointer -g>)
-        target_link_options(ProjectSanitizersSettings INTERFACE $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-fsanitize=address,undefined -fno-omit-frame-pointer>)
+        # GCC/Clang: ASan + UBSan + LSan (LSan is implicit with ASan on Linux, explicit on others)
+        # -fno-omit-frame-pointer: Better stack traces for leak detection
+        # -g: Debug symbols for better leak reports
+        target_compile_options(ProjectSanitizersSettings INTERFACE 
+            $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-fsanitize=address,undefined,leak -fno-omit-frame-pointer -g>)
+        target_link_options(ProjectSanitizersSettings INTERFACE 
+            $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-fsanitize=address,undefined,leak -fno-omit-frame-pointer>)
+    elseif(ENABLE_SANITIZERS AND MSVC)
+        # MSVC ASan (x64 only, no /GL - incompatible with optimizations)
+        # Note: MSVC's ASan doesn't support LSan, but catches heap use-after-free, buffer overflows, etc.
+        add_compile_options($<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/fsanitize=address> /Zi /EHsc)
+        add_link_options($<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/INCREMENTAL> /DEBUG)
     endif()
 endif()
 
-# MSVC ASan (x64 only, no /GL)
-if(ENABLE_SANITIZERS AND MSVC)
-    add_compile_options(/fsanitize=address /Zi /EHsc)
-    add_link_options(/INCREMENTAL /DEBUG)
-endif()
-
-if(ENABLE_SANITIZERS)
-    target_link_libraries(LudusBuildSettings PRIVATE ProjectSanitizersSettings)
-endif()
+target_link_libraries(LudusBuildSettings INTERFACE ProjectSanitizersSettings)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CONFIG_FOLDER "Debug")

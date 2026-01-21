@@ -56,12 +56,9 @@ namespace ludus::core
 
     template<StringCharType CharT>
     template<typename Manager>
+        requires CommandLineManager_HandleArgument<Manager, CharT>
     void CommandLineManager<CharT>::ParseCommandLine(Manager& manager) noexcept
     {
-        static_assert(
-            requires { { manager.template HandleArgument<CharT>(std::declval<const BasicString<CharT>&>()) }; },
-            "Manager must have a method: void HandleArgument(const BasicString<CharT>& argument) noexcept;"
-        );
         for (const BasicString<CharT>& argument : mArguments)
         {
             manager.template HandleArgument<CharT>(argument);

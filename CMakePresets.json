@@ -33,6 +33,16 @@
             }
         },
         {
+            "name": "ninja_clang-relwithdebinfo",
+            "displayName": "Ninja with Clang - RelWithDebInfo (with Sanitizers)",
+            "inherits": "ninja_clang",
+            "description": "RelWithDebInfo with ASan/LSan for detecting leaks in optimized builds",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "ENABLE_SANITIZERS": "ON"
+            }
+        },
+        {
             "name": "ninja_gcc",
             "hidden": true,
             "displayName": "Ninja with GCC",
@@ -61,6 +71,16 @@
             "inherits": "ninja_gcc",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "ninja_gcc-relwithdebinfo",
+            "displayName": "Ninja with GCC - RelWithDebInfo (with Sanitizers)",
+            "inherits": "ninja_gcc",
+            "description": "RelWithDebInfo with ASan/LSan for detecting leaks in optimized builds",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "ENABLE_SANITIZERS": "ON"
             }
         },
         {
@@ -93,6 +113,16 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
             }
+        },
+        {
+            "name": "ninja_msvc-relwithdebinfo",
+            "displayName": "Ninja with MSVC - RelWithDebInfo (with Sanitizers)",
+            "inherits": "ninja_msvc",
+            "description": "RelWithDebInfo with ASan for detecting heap issues in optimized builds",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "ENABLE_SANITIZERS": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -111,6 +141,13 @@
             "jobs": 0
         },
         {
+            "name": "ninja_clang-relwithdebinfo",
+            "displayName": "Ninja with Clang - RelWithDebInfo",
+            "configurePreset": "ninja_clang-relwithdebinfo",
+            "configuration": "RelWithDebInfo",
+            "jobs": 0
+        },
+        {
             "name": "ninja_gcc-debug",
             "displayName": "Ninja with GCC - Debug",
             "configurePreset": "ninja_gcc-debug",
@@ -125,6 +162,13 @@
             "jobs": 0
         },
         {
+            "name": "ninja_gcc-relwithdebinfo",
+            "displayName": "Ninja with GCC - RelWithDebInfo",
+            "configurePreset": "ninja_gcc-relwithdebinfo",
+            "configuration": "RelWithDebInfo",
+            "jobs": 0
+        },
+        {
             "name": "ninja_msvc-debug",
             "displayName": "Ninja with MSVC - Debug",
             "configurePreset": "ninja_msvc-debug",
@@ -136,6 +180,13 @@
             "displayName": "Ninja with MSVC - Release",
             "configurePreset": "ninja_msvc-release",
             "configuration": "Release",
+            "jobs": 0
+        },
+        {
+            "name": "ninja_msvc-relwithdebinfo",
+            "displayName": "Ninja with MSVC - RelWithDebInfo",
+            "configurePreset": "ninja_msvc-relwithdebinfo",
+            "configuration": "RelWithDebInfo",
             "jobs": 0
         }
     ]

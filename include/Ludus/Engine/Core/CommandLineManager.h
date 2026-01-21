@@ -5,6 +5,12 @@
 
 namespace ludus::core
 {
+    // Concept for manager types that can handle command line arguments
+    template<typename Manager, typename CharT>
+    concept CommandLineManager_HandleArgument = requires(Manager & manager, const BasicString<CharT>& arg) {
+        { manager.template HandleArgument<CharT>(arg) } noexcept;
+    };
+
     template<StringCharType CharT>
     class CommandLineManager final
     {
@@ -17,6 +23,7 @@ namespace ludus::core
         ~CommandLineManager() noexcept = default;
 
         template<typename Manager>
+            requires CommandLineManager_HandleArgument<Manager, CharT>
         void ParseCommandLine(Manager& manager) noexcept;
 
         [[nodiscard]] const DynamicArray<BasicString<CharT>>& GetArguments() const noexcept;
