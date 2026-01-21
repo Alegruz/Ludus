@@ -99,6 +99,12 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CONFIG_FOLDER "Release")
 
     target_compile_definitions(LudusBuildSettings INTERFACE $<$<CONFIG:Release>:LUDUS_RELEASE=1> )
+elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    set(CONFIG_FOLDER "RelWithDebInfo")
+
+    # RelWithDebInfo: Release with debug info (optimized + debuggable)
+    # Used for profiling and leak testing with sanitizers
+    target_compile_definitions(LudusBuildSettings INTERFACE $<$<CONFIG:RelWithDebInfo>:LUDUS_RELEASE=1> )
 else()
     message(FATAL_ERROR "Unsupported build configuration: ${CMAKE_BUILD_TYPE}")
 endif()
