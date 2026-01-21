@@ -175,6 +175,149 @@ jobs:
           path: valgrind-report-*.txt
           if-no-files-found: ignore
 
+  leak-test:
+    name: Leak Test (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux Clang
+            runner: ubuntu-latest
+            configure_preset: ninja_clang-debug
+            build_preset: ninja_clang-debug
+            shell: bash
+          - name: Linux GCC
+            runner: ubuntu-latest
+            configure_preset: ninja_gcc-debug
+            build_preset: ninja_gcc-debug
+            shell: bash
+          - name: Windows MSVC
+            runner: windows-latest
+            configure_preset: ninja_msvc-debug
+            build_preset: ninja_msvc-debug
+            shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: chmod +x init.sh && ./init.sh
+
+      - name: Install Ninja (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ninja-build
+
+      - name: Install Ninja (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja
+
+      - name: Setup ccache (Linux)
+        if: runner.os == 'Linux'
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.configure_preset }}-leak-test
+          max-size: 2G
+
+      - name: Setup MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure (CMake preset)
+        run: cmake --preset "${{ matrix.configure_preset }}"
+
+      - name: Build (CMake build preset)
+        run: cmake --build --preset "${{ matrix.build_preset }}"
+
+      - name: Run Leak Test (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
+          LSAN_OPTIONS: print_suppressions=0:fast_unwind_on_malloc=0
+        run: |
+          buildDir="out/build/${{ matrix.build_preset }}"
+          if [ ! -d "$buildDir" ]; then
+            echo "Error: Build directory not found: $buildDir"
+            exit 1
+          fi
+
+          # Find the executable
+          exe=$(find "$buildDir" -type f -executable -name "LudusEditor" 2>/dev/null | head -1)
+          
+          if [ -z "$exe" ]; then
+            echo "Error: LudusEditor executable not found"
+            exit 1
+          fi
+
+          echo "Running leak test on: $exe"
+          echo "Sanitizers enabled: ASan, LSan, UBSan"
+          
+          # Run the executable (it should exit cleanly with no leaks)
+          # Pass --help or a minimal command to trigger code paths
+          if ! "$exe" --help 2>&1 | tee leak-test-output.txt; then
+            echo "Executable failed to run"
+            cat leak-test-output.txt
+            exit 1
+          fi
+          
+          # Check if there were any leak reports
+          if grep -i "LeakSanitizer\|detected memory leaks" leak-test-output.txt; then
+            echo "LEAK DETECTED! See output above."
+            exit 1
+          fi
+          
+          echo "No leaks detected!"
+
+      - name: Run Leak Test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $buildDir = Join-Path $PWD "out/build/${{ matrix.build_preset }}"
+          if (-not (Test-Path $buildDir)) {
+            Write-Error "Build directory not found: $buildDir"
+            exit 1
+          }
+
+          # Find the executable
+          $exe = Get-ChildItem -Path $buildDir -Recurse -Filter "LudusEditor.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          
+          if (-not $exe) {
+            # Try in root directory
+            $exe = Get-Item "LudusEditor.exe" -ErrorAction SilentlyContinue
+          }
+          
+          if (-not $exe) {
+            Write-Error "LudusEditor.exe not found"
+            exit 1
+          }
+
+          Write-Host "Running leak test on: $($exe.FullName)"
+          Write-Host "CRT leak detection enabled in Debug build"
+          
+          # Run the executable (CRT leak detection is automatic in Debug)
+          # Capture output to check for leak reports
+          $output = & $exe.FullName --help 2>&1 | Out-String
+          
+          # Check for CRT leak detection output
+          if ($output -match "Detected memory leaks|memory leak") {
+            Write-Error "LEAK DETECTED! See output:"
+            Write-Host $output
+            exit 1
+          }
+          
+          Write-Host "No leaks detected!"
+
+      - name: Upload leak test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leak-test-output-${{ matrix.name }}
+          path: leak-test-output.txt
+          if-no-files-found: ignore
+
   # Optional: Dr. Memory for Windows memory testing
   # Uncomment this job to enable runtime memory analysis on Windows
   # Dr. Memory is a robust memory debugging tool similar to Valgrind but for Windows
