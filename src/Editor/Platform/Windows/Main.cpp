@@ -4,6 +4,7 @@
 #include <Ludus/Engine/Core/CommandLineManager.hpp>
 #include <Ludus/Engine/Core/Container/Array.hpp>
 #include <Ludus/Engine/Core/Container/String.hpp>
+#include <Ludus/Engine/Core/LeakDetection.h>
 
 #include <Ludus/Engine/Platform/Window.hpp>
 
@@ -11,6 +12,11 @@
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, [[maybe_unused]] int commandShowFlag)
 {
+#if defined(LUDUS_DEBUG)
+	// Enable CRT memory leak detection in Debug mode
+	ludus::core::debug::InitializeLeakDetection();
+#endif
+
 	ludus::core::CommandLineManager<wchar_t> commandLineManager = ludus::core::CommandLineManager<wchar_t>::Create(commandLine);
 	const ludus::core::DynamicArray<ludus::core::WString>& arguments = commandLineManager.GetArguments();
 	for (const ludus::core::WString& arg : arguments)
@@ -40,6 +46,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, [[maybe_un
 		TranslateMessage(&msg);
 		DispatchMessage(&msg);
 	}
+
+#if defined(LUDUS_DEBUG)
+	// Dump all memory leaks to the debug output
+	ludus::core::debug::DumpMemoryLeaks();
+#endif
 
 	return 0;
 }

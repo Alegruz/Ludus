@@ -174,3 +174,46 @@ jobs:
           name: valgrind-reports-${{ matrix.compiler }}
           path: valgrind-report-*.txt
           if-no-files-found: ignore
+
+  # Optional: Dr. Memory for Windows memory testing
+  # Uncomment this job to enable runtime memory analysis on Windows
+  # Dr. Memory is a robust memory debugging tool similar to Valgrind but for Windows
+  # It provides heap overflow detection, use-after-free detection, and memory leak detection
+  #
+  # drmemory-memcheck:
+  #   name: Dr. Memory Memcheck (MSVC)
+  #   runs-on: windows-latest
+  #   
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Setup MSVC environment
+  #       uses: ilammy/msvc-dev-cmd@v1
+  #
+  #     - name: Install Dr. Memory
+  #       run: choco install drmemory --no-progress
+  #
+  #     - name: Install Ninja
+  #       run: choco install ninja
+  #
+  #     - name: Configure (CMake preset)
+  #       run: cmake --preset ninja_msvc-debug
+  #
+  #     - name: Build (CMake build preset)
+  #       run: cmake --build --preset ninja_msvc-debug
+  #
+  #     - name: Run Dr. Memory Memcheck
+  #       shell: pwsh
+  #       run: |
+  #         $buildDir = Join-Path $PWD "out/build/ninja_msvc-debug"
+  #         if (-not (Test-Path $buildDir)) {
+  #           Write-Error "Build directory not found: $buildDir"
+  #         }
+  #         
+  #         # Find executables
+  #         $exes = Get-ChildItem -Path $buildDir -Recurse -Filter "Ludus*.exe"
+  #         
+  #         foreach ($exe in $exes) {
+  #           Write-Host "Running Dr. Memory on: $($exe.FullName)"
+  #           drmemory -leaks_only -batch -- $exe.FullName
+  #         }
