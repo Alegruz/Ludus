@@ -27,7 +27,7 @@ target_include_directories(LudusCore
 )
 
 target_link_libraries(LudusCore
-    PRIVATE
+    PUBLIC
     LudusBuildSettings
 )
 
