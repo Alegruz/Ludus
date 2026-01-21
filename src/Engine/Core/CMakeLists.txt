@@ -31,6 +31,12 @@ target_link_libraries(LudusCore
     LudusBuildSettings
 )
 
+# Explicit mimalloc linkage if available
+if(TARGET mimalloc)
+    target_link_libraries(LudusCore PRIVATE mimalloc)
+    add_dependencies(LudusCore mimalloc)
+endif()
+
 # Set DLL export macro
 target_compile_definitions(LudusCore
     PRIVATE

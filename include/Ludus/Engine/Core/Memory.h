@@ -15,11 +15,15 @@
 
 #include <Ludus/Engine/Core/Common.h>
 
-#if defined(LUDUS_WINDOWS)
-    #include <cstdlib>  // For size_t
+// mimalloc integration: Use when available, fallback to CRT otherwise
+#if __has_include(<mimalloc.h>)
+    #include <mimalloc.h>
+    #define LUDUS_USE_MIMALLOC 1
 #else
-    #include <cstdlib>
+    #define LUDUS_USE_MIMALLOC 0
 #endif
+
+#include <cstdlib>
 
 namespace ludus::memory
 {
@@ -30,7 +34,11 @@ namespace ludus::memory
     template<typename T>
     [[nodiscard]] LUDUS_INLINE T* Allocate(size_t count = 1) noexcept
     {
+#if LUDUS_USE_MIMALLOC
+        return static_cast<T*>(mi_malloc(count * sizeof(T)));
+#else
         return static_cast<T*>(malloc(count * sizeof(T)));
+#endif
     }
 
     /// @brief Deallocate memory previously allocated with Allocate<T>
@@ -39,7 +47,11 @@ namespace ludus::memory
     template<typename T>
     LUDUS_INLINE void Deallocate(T* ptr) noexcept
     {
+#if LUDUS_USE_MIMALLOC
+        mi_free(ptr);
+#else
         free(ptr);
+#endif
     }
 
     /// @brief Reallocate memory to a new size
@@ -50,7 +62,11 @@ namespace ludus::memory
     template<typename T>
     [[nodiscard]] LUDUS_INLINE T* Reallocate(T* ptr, size_t newCount) noexcept
     {
+#if LUDUS_USE_MIMALLOC
+        return static_cast<T*>(mi_realloc(ptr, newCount * sizeof(T)));
+#else
         return static_cast<T*>(realloc(ptr, newCount * sizeof(T)));
+#endif
     }
 
 #undef CopyMemory

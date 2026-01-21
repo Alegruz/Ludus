@@ -24,20 +24,28 @@ if(ENABLE_MIMALLOC)
     )
     
     set(MI_OVERRIDE ON CACHE BOOL "Override malloc/free with mimalloc" FORCE)
-    set(MI_BUILD_SHARED OFF CACHE BOOL "Build mimalloc as static library" FORCE)
+    set(MI_BUILD_SHARED ON CACHE BOOL "Build mimalloc as shared library" FORCE)
+    set(MI_BUILD_STATIC OFF CACHE BOOL "Disable mimalloc static library" FORCE)
     set(MI_BUILD_TESTS OFF CACHE BOOL "Disable mimalloc tests" FORCE)
     
     FetchContent_MakeAvailable(mimalloc)
-    
     message(STATUS "mimalloc enabled: Override malloc/free")
+    set(MIMALLOC_INCLUDE_DIR "${mimalloc_SOURCE_DIR}/include")
 else()
     message(STATUS "mimalloc disabled (use -DENABLE_MIMALLOC=ON to enable)")
+    set(MIMALLOC_INCLUDE_DIR "")
 endif()
+
 # Common Settings
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
 # Platform and Configuration Settings
 add_library(LudusBuildSettings INTERFACE)
+
+# Add mimalloc includes to build settings
+if(MIMALLOC_INCLUDE_DIR)
+    target_include_directories(LudusBuildSettings INTERFACE ${MIMALLOC_INCLUDE_DIR})
+endif()
 
 if(WIN32)
     set(PLATFORM_FOLDER "Windows")
