@@ -3,7 +3,6 @@
 #include <Ludus/Engine/Core/Common.h>
 
 #include <cstdio>
-#include <print>
 
 namespace ludus::core
 {
@@ -20,8 +19,8 @@ namespace ludus::core
     LUDUS_INLINE bool DefaultAssertHandler(const AssertInfo& info, bool* ignoreAlways) noexcept // NOLINT(readability-non-const-parameter)
     {
         const char* message = info.Message ? info.Message : "(no message)";
-        std::println(stderr,
-            "Assertion failed!\n  Expression: {}\n  Message: {}\n  File: {}\n  Line: {}",
+        std::fprintf(stderr,
+            "Assertion failed!\n  Expression: %s\n  Message: %s\n  File: %s\n  Line: %d\n",
             info.Expression,
             message,
             info.File,

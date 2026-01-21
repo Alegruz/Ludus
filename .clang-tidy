@@ -15,6 +15,7 @@ Checks: >
   -modernize-avoid-c-arrays,
   -modernize-use-auto,
   -modernize-use-nullptr,
+  -modernize-use-std-print,
   -modernize-use-trailing-return-type,
   -readability-identifier-length,
   -readability-use-concise-preprocessor-directives,
