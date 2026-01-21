@@ -58,10 +58,10 @@ namespace ludus::core
         
         while (src < end)
         {
-            wchar_t wc;
-            const size_t converted = std::mbrtowc(&wc, src, end - src, &state);
+            wchar_t wc = L'\0';
+            const long converted = std::mbrtowc(&wc, src, end - src, &state);
             
-            if (converted == static_cast<size_t>(-1) || converted == static_cast<size_t>(-2))
+            if (converted == static_cast<long>(-1) || converted == static_cast<long>(-2))
             {
                 // Invalid sequence, skip byte
                 ++src;

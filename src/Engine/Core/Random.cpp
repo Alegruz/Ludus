@@ -37,7 +37,7 @@ namespace ludus::core
         else
         {
             const uint64_t rdValue = (static_cast<uint64_t>(rd()) << 32U) ^ static_cast<uint64_t>(rd());
-            seed ^= splitMix64(rdValue ^ nowHigh);
+            seed ^= splitMix64(rdValue ^ static_cast<uint64_t>(nowHigh));
         }
 
         return seed;
