@@ -5,7 +5,6 @@
 #include <Ludus/Engine/Core/Container/Array.hpp>
 #include <Ludus/Engine/Core/Container/String.hpp>
 #include <Ludus/Engine/Core/LeakDetection.h>
-#include <Ludus/Engine/Core/Random.hpp>
 
 #include <Ludus/Engine/Platform/Window.hpp>
 
@@ -28,9 +27,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, [[maybe_un
 		debugOutput.PushBack(L'\n');
 		OutputDebugStringW(debugOutput.GetData());
 	}
-
-	ludus::core::Random random = ludus::core::Random::Create(0);
-	const uint32_t randomValue = random.NextU32();
 
 	ludus::platform::WindowManager<ludus::platform::CURRENT_PLATFORM_TYPE> windowManager;
 	commandLineManager.ParseCommandLine(windowManager);
