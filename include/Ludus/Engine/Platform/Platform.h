@@ -59,4 +59,6 @@ namespace ludus::platform
 
 #if defined(LUDUS_WINDOWS)
     #include <Ludus/Engine/Platform/Windows/Common.h>
+#elif defined(LUDUS_LINUX)
+    #include <Ludus/Engine/Platform/Unix/Common.h>
 #endif  // defined(LUDUS_WINDOWS)

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <Ludus/Engine/Platform/Window.h>
-#include <Ludus/Engine/Platform/Windows/Common.h>
 
 #include <Ludus/Engine/Core/Math/Rect.hpp>
 
