@@ -8,7 +8,31 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 project(GameEngine LANGUAGES C CXX)
+# FetchContent for external dependencies
+include(FetchContent)
 
+# mimalloc: High-performance memory allocator
+# Useful for profiling memory performance and reducing allocator overhead
+# Optional: disable with -DENABLE_MIMALLOC=OFF
+option(ENABLE_MIMALLOC "Enable mimalloc memory allocator" ON)
+
+if(ENABLE_MIMALLOC)
+    FetchContent_Declare(mimalloc
+        GIT_REPOSITORY https://github.com/microsoft/mimalloc.git
+        GIT_TAG main  # Use main branch; pin to a tag like v2.1.2 for stability
+        GIT_SHALLOW TRUE
+    )
+    
+    set(MI_OVERRIDE ON CACHE BOOL "Override malloc/free with mimalloc" FORCE)
+    set(MI_BUILD_SHARED OFF CACHE BOOL "Build mimalloc as static library" FORCE)
+    set(MI_BUILD_TESTS OFF CACHE BOOL "Disable mimalloc tests" FORCE)
+    
+    FetchContent_MakeAvailable(mimalloc)
+    
+    message(STATUS "mimalloc enabled: Override malloc/free")
+else()
+    message(STATUS "mimalloc disabled (use -DENABLE_MIMALLOC=ON to enable)")
+endif()
 # Common Settings
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
@@ -64,6 +88,12 @@ message(STATUS "Current compiler: ${CMAKE_CXX_COMPILER_ID}")
 target_compile_options(LudusBuildSettings INTERFACE
     $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-fno-omit-frame-pointer>
 )
+
+# Link mimalloc if enabled
+if(ENABLE_MIMALLOC AND TARGET mimalloc)
+    target_link_libraries(LudusBuildSettings INTERFACE mimalloc)
+    message(STATUS "mimalloc linked to LudusBuildSettings")
+endif()
 
 # Sanitizers: Enabled by default in Debug and RelWithDebInfo modes for leak/memory detection
 # LSan is implicitly enabled with ASan on Linux; on Windows (MSVC) we use /fsanitize=address

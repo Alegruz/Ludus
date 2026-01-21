@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Ludus/Engine/Core/Container/Array.h>
+#include <Ludus/Engine/Core/Memory.h>
 
 #include <Ludus/Engine/Core/Math/Bit.hpp>
 
@@ -121,8 +122,8 @@ namespace ludus::core
     {
         if(other.mData != nullptr)
         {
-            mData = static_cast<T*>(malloc(mCapacity * sizeof(T)));
-            std::memcpy(mData, other.mData, mSize * sizeof(T));
+            mData = memory::Allocate<T>(mCapacity);
+            memory::CopyMemory(mData, other.mData, mSize * sizeof(T));
         }
         else
         {
@@ -137,7 +138,7 @@ namespace ludus::core
     {
         if(other.mData != nullptr)
         {
-            std::memcpy(mData, other.mData, mSize * sizeof(T));
+            memory::CopyMemory(mData, other.mData, mSize * sizeof(T));
         }
         else
         {
@@ -163,7 +164,7 @@ namespace ludus::core
         : mSize(other.mSize)
     {
         LUDUS_ASSERT_MSG(other.mData != nullptr, "Source array data is null in move constructor.");
-        std::memcpy(mData, other.mData, mSize * sizeof(T));
+        memory::CopyMemory(mData, other.mData, mSize * sizeof(T));
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /*= ArrayResizePolicy::DEFAULT*/>
@@ -179,7 +180,7 @@ namespace ludus::core
     {
         if(mData != nullptr)
         {
-            free(mData);
+            memory::Deallocate(mData);
             mSize = 0;
             mCapacity = 0;
         }
@@ -198,14 +199,14 @@ namespace ludus::core
             {
                 if(mData != nullptr)
                 {
-                    free(mData);
+                    memory::Deallocate(mData);
                 }
                 mCapacity = other.mCapacity;
                 mSize = other.mSize;
                 if(other.mData != nullptr)
                 {
-                    mData = static_cast<T*>(malloc(mCapacity * sizeof(T)));
-                    std::memcpy(mData, other.mData, mSize * sizeof(T));
+                    mData = memory::Allocate<T>(mCapacity);
+                    memory::CopyMemory(mData, other.mData, mSize * sizeof(T));
                 }
                 else
                 {
@@ -216,7 +217,7 @@ namespace ludus::core
             {
                 mSize = other.mSize;
                 LUDUS_ASSERT_MSG(other.mData != nullptr, "Source array data is null in copy assignment.");
-                std::memcpy(mData, other.mData, mSize * sizeof(T));
+                memory::CopyMemory(mData, other.mData, mSize * sizeof(T));
             }
         }
         return *this;
@@ -231,7 +232,7 @@ namespace ludus::core
             {
                 if(mData != nullptr)
                 {
-                    free(mData);
+                    memory::Deallocate(mData);
                 }
                 mCapacity = other.mCapacity;
                 mSize = other.mSize;
@@ -245,7 +246,7 @@ namespace ludus::core
             {
                 mSize = other.mSize;
                 LUDUS_ASSERT_MSG(other.mData != nullptr, "Source array data is null in move assignment.");
-                std::memcpy(mData, other.mData, mSize * sizeof(T));
+                memory::CopyMemory(mData, other.mData, mSize * sizeof(T));
             }
         }
         return *this;
@@ -319,7 +320,7 @@ namespace ludus::core
             }
             
             SetCapacity(size);
-            std::memcpy(mData, array, size * sizeof(T));
+            memory::CopyMemory(mData, array, size * sizeof(T));
             mSize = size;
         }
         else
@@ -679,14 +680,14 @@ namespace ludus::core
 
         capacity = calculateCapacityToAllocate(capacity);
 
-        T* newData = static_cast<T*>(malloc(capacity * sizeof(T)));
+        T* newData = memory::Allocate<T>(capacity);
         if(mData != nullptr)
         {
-            std::memcpy(newData, mData, mSize * sizeof(T));
-            free(mData);
+            memory::CopyMemory(newData, mData, mSize * sizeof(T));
+            memory::Deallocate(mData);
         }
         
-        std::memset(newData + mSize, 0, (capacity - mSize) * sizeof(T));
+        memory::ZeroOutMemory(newData + mSize, (capacity - mSize) * sizeof(T));
         mData = newData;
         mCapacity = capacity;
     }
@@ -703,7 +704,7 @@ namespace ludus::core
                 ++nextSize;
             }
             this->SetCapacity(this->calculateCapacityToAllocate(nextSize));
-            std::memcpy(&this->mData[this->GetSize()], array, size * sizeof(T));
+            memory::CopyMemory(&this->mData[this->GetSize()], array, size * sizeof(T));
             this->updateSize(nextSize);
         }
         return *this;
