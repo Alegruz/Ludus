@@ -53,9 +53,9 @@ namespace ludus::core
     public:
         explicit constexpr ArrayImplBase() noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         explicit constexpr ArrayImplBase() noexcept requires (ARRAY_TYPE == ArrayType::STATIC);
-        explicit constexpr ArrayImplBase(const uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && StringCharType<T>);
-        explicit constexpr ArrayImplBase(const uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && !StringCharType<T>);
-        explicit constexpr ArrayImplBase(const uint32_t size, const T& defaultValue) noexcept;
+        explicit constexpr ArrayImplBase(uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && StringCharType<T>);
+        explicit constexpr ArrayImplBase(uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && !StringCharType<T>);
+        explicit constexpr ArrayImplBase(uint32_t size, const T& defaultValue) noexcept;
         explicit constexpr ArrayImplBase(Iterator first, Iterator last) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         explicit constexpr ArrayImplBase(const T* array, uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         explicit constexpr ArrayImplBase(const T* str) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && StringCharType<T>);
@@ -72,7 +72,7 @@ namespace ludus::core
         constexpr ArrayImplBase& operator=(ArrayImplBase&& other) noexcept;
         constexpr ArrayImplBase& operator=(std::initializer_list<T> initList) noexcept;
 
-        constexpr void Assign(const uint32_t size, const T& defaultValue) noexcept;
+        constexpr void Assign(uint32_t size, const T& defaultValue) noexcept;
         constexpr void Assign(Iterator first, Iterator last) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr void Assign(const T* array, uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr void Assign(const T* str) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && StringCharType<T>);
@@ -84,12 +84,12 @@ namespace ludus::core
         [[nodiscard]] constexpr const T* GetCStr() const noexcept requires (StringCharType<T>);
 
         // Iterators
-        [[nodiscard]] constexpr Iterator begin() noexcept;
-        [[nodiscard]] constexpr ConstIterator begin() const noexcept;
-        [[nodiscard]] constexpr ConstIterator cbegin() const noexcept;
-        [[nodiscard]] constexpr Iterator end() noexcept;
-        [[nodiscard]] constexpr ConstIterator end() const noexcept;
-        [[nodiscard]] constexpr ConstIterator cend() const noexcept;
+        [[nodiscard]] constexpr Iterator begin() noexcept;  // NOLINT(readability-identifier-naming)
+        [[nodiscard]] constexpr ConstIterator begin() const noexcept;   // NOLINT(readability-identifier-naming)
+        [[nodiscard]] constexpr ConstIterator cbegin() const noexcept;  // NOLINT(readability-identifier-naming)
+        [[nodiscard]] constexpr Iterator end() noexcept;    // NOLINT(readability-identifier-naming)
+        [[nodiscard]] constexpr ConstIterator end() const noexcept;  // NOLINT(readability-identifier-naming)
+        [[nodiscard]] constexpr ConstIterator cend() const noexcept;    // NOLINT(readability-identifier-naming)
 
         // Capacity
         constexpr void SetCapacity(uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
@@ -98,9 +98,9 @@ namespace ludus::core
         [[nodiscard]] constexpr uint32_t GetCapacity() const noexcept;
 
     protected:
-        [[nodiscard]] constexpr uint32_t calculateCapacityToAllocate(const uint32_t requiredCapacity) const noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        [[nodiscard]] constexpr uint32_t calculateCapacityToAllocate(uint32_t requiredCapacity) const noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr void copy(std::initializer_list<T> initList) noexcept;
-        constexpr void updateSize(const uint32_t newSize) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        constexpr void updateSize(uint32_t newSize) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
 
     protected:
         static constexpr uint32_t INITIAL_CAPACITY = 16;

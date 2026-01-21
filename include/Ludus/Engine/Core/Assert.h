@@ -3,28 +3,29 @@
 #include <Ludus/Engine/Core/Common.h>
 
 #include <cstdio>
+#include <print>
 
 namespace ludus::core
 {
     struct AssertInfo final
     {
-        const char* expression;
-        const char* message;
-        const char* file;
-        int line;
+        const char* Expression = nullptr;
+        const char* Message = nullptr;
+        const char* File = nullptr;
+        int Line = 0;
     };
 
-    using AssertHandler = bool (*)(const AssertInfo& info, bool* ignoreAlways);
+    using AssertHandler = bool (*)(const AssertInfo& info, bool* const ignoreAlways);
 
-    LUDUS_INLINE bool DefaultAssertHandler(const AssertInfo& info, bool* ignoreAlways) noexcept
+    LUDUS_INLINE bool DefaultAssertHandler(const AssertInfo& info, bool* const ignoreAlways) noexcept
     {
-        const char* message = info.message ? info.message : "(no message)";
-        std::fprintf(stderr,
-            "Assertion failed!\n  Expression: %s\n  Message: %s\n  File: %s\n  Line: %d\n",
-            info.expression,
+        const char* message = info.Message ? info.Message : "(no message)";
+        std::println(stderr,
+            "Assertion failed!\n  Expression: {}\n  Message: {}\n  File: {}\n  Line: {}",
+            info.Expression,
             message,
-            info.file,
-            info.line);
+            info.File,
+            info.Line);
         (void)ignoreAlways;
         return true;
     }

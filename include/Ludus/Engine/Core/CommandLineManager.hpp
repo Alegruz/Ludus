@@ -10,7 +10,7 @@ namespace ludus::core
         DynamicArray<BasicString<CharT>> arguments;
         for(int32_t i = 0; i < argc; ++i)
         {
-            arguments.PushBack( BasicString<CharT>(argv[i]) );
+            arguments.PushBack( BasicString<CharT>(argv[i]) );  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         }
         return CommandLineManager( std::move(arguments) );
     }
@@ -53,6 +53,21 @@ namespace ludus::core
         : mArguments( std::move(arguments) )
     {
     }
+
+    template<StringCharType CharT>
+    CommandLineManager<CharT>::CommandLineManager(const CommandLineManager& other) noexcept = default;
+
+    template<StringCharType CharT>
+    CommandLineManager<CharT>::CommandLineManager(CommandLineManager&& other) noexcept = default;
+
+    template<StringCharType CharT>
+    CommandLineManager<CharT>::~CommandLineManager() noexcept = default;
+
+    template<StringCharType CharT>
+    CommandLineManager<CharT>& CommandLineManager<CharT>::operator=(const CommandLineManager& other) noexcept = default;
+
+    template<StringCharType CharT>
+    CommandLineManager<CharT>& CommandLineManager<CharT>::operator=(CommandLineManager&& other) noexcept = default;
 
     template<StringCharType CharT>
     template<typename Manager>

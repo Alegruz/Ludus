@@ -20,8 +20,14 @@ Checks: >
   -readability-implicit-bool-conversion,
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
   -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,
   -cert-msc50-cpp,
-  -cert-msc32-c
+  -cert-msc32-c,
+  -cert-err33-c,
+  -cert-dcl58-cpp,
+  -readability-redundant-access-specifiers
 
 WarningsAsErrors: '*'
 HeaderFilterRegex: '(include/Ludus/.*|src/.*)'
@@ -35,6 +41,14 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.FunctionCase
     value: CamelCase
+  - key: readability-identifier-naming.StaticFunctionCase
+    value: camelBack
+  - key: readability-identifier-naming.MethodCase
+    value: CamelCase
+  - key: readability-identifier-naming.PrivateMethodCase
+    value: camelBack
+  - key: readability-identifier-naming.ProtectedMethodCase
+    value: camelBack
   - key: readability-identifier-naming.VariableCase
     value: camelBack
   - key: readability-identifier-naming.ParameterCase
