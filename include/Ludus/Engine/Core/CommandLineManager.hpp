@@ -10,7 +10,7 @@ namespace ludus::core
         DynamicArray<BasicString<CharT>> arguments;
         for(int32_t i = 0; i < argc; ++i)
         {
-            arguments.PushBack( BasicString<CharT>(argv[i]) );  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            arguments.PushBack( BasicString<CharT>(argv[i]) );
         }
         return CommandLineManager( std::move(arguments) );
     }

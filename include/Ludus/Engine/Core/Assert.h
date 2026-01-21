@@ -15,9 +15,9 @@ namespace ludus::core
         int Line = 0;
     };
 
-    using AssertHandler = bool (*)(const AssertInfo& info, bool* const ignoreAlways);
+    using AssertHandler = bool (*)(const AssertInfo& info, bool* ignoreAlways);
 
-    LUDUS_INLINE bool DefaultAssertHandler(const AssertInfo& info, bool* const ignoreAlways) noexcept
+    LUDUS_INLINE bool DefaultAssertHandler(const AssertInfo& info, bool* ignoreAlways) noexcept // NOLINT(readability-non-const-parameter)
     {
         const char* message = info.Message ? info.Message : "(no message)";
         std::println(stderr,

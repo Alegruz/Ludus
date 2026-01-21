@@ -135,8 +135,8 @@ namespace ludus::core
 
     public:
         explicit constexpr ArrayImpl() noexcept;
-        explicit constexpr ArrayImpl(const uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
-        explicit constexpr ArrayImpl(const uint32_t size, const T& defaultValue) noexcept;
+        explicit constexpr ArrayImpl(uint32_t capacity) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        explicit constexpr ArrayImpl(uint32_t size, const T& defaultValue) noexcept;
         explicit constexpr ArrayImpl(ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Iterator first, ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Iterator last) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         explicit constexpr ArrayImpl(const T* array, uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr ArrayImpl(const T* str) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && StringCharType<T>);
@@ -150,10 +150,10 @@ namespace ludus::core
         constexpr ArrayImpl& operator=(std::initializer_list<T> initList) noexcept;
         
         // Element Access
-        constexpr T& At(const uint32_t index) noexcept;
-        [[nodiscard]] constexpr const T& At(const uint32_t index) const noexcept;
-        constexpr T& operator[](const uint32_t index) noexcept;
-        [[nodiscard]] constexpr const T& operator[](const uint32_t index) const noexcept;
+        constexpr T& At(uint32_t index) noexcept;
+        [[nodiscard]] constexpr const T& At(uint32_t index) const noexcept;
+        constexpr T& operator[](uint32_t index) noexcept;
+        [[nodiscard]] constexpr const T& operator[](uint32_t index) const noexcept;
         constexpr T& GetFront() noexcept;
         [[nodiscard]] constexpr const T& GetFront() const noexcept;
         constexpr T& GetBack() noexcept;
@@ -166,7 +166,7 @@ namespace ludus::core
         [[nodiscard]] constexpr bool IsEmpty() const noexcept;
 
         // Modifiers
-        constexpr ArrayImpl& Append(const T* array, const uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        constexpr ArrayImpl& Append(const T* array, uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr void PushBack(const T& element) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr void PushBack(T&& element) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
     };

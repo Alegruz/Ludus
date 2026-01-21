@@ -11,6 +11,8 @@ Checks: >
   cppcoreguidelines-*,
   bugprone-*,
   cert-*,
+  -clang-diagnostic-zero-length-array,
+  -modernize-avoid-c-arrays,
   -modernize-use-auto,
   -modernize-use-nullptr,
   -modernize-use-trailing-return-type,
@@ -23,6 +25,8 @@ Checks: >
   -cppcoreguidelines-macro-usage,
   -cppcoreguidelines-non-private-member-variables-in-classes,
   -cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,
+  -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
   -cert-msc50-cpp,
   -cert-msc32-c,
   -cert-err33-c,
@@ -30,7 +34,7 @@ Checks: >
   -readability-redundant-access-specifiers
 
 WarningsAsErrors: '*'
-HeaderFilterRegex: '(include/Ludus/.*|src/.*)'
+HeaderFilterRegex: '^(?!.*/out/)(?!.*/_deps/).*/(include/Ludus/.*|src/.*)'
 FormatStyle: file
 CheckOptions:
   - key: readability-identifier-naming.NamespaceCase
