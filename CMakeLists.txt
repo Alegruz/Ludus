@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
 
+# Export compile_commands.json for clang-tidy integration
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -8,6 +11,155 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 project(GameEngine LANGUAGES C CXX)
+
+# Auto-run initialization script if tools are missing
+# This ensures clang-tidy, clang-format, and other dependencies are installed
+set(LLVM_HINT_PATHS
+    "C:/Program Files/LLVM/bin"
+    "C:/Program Files (x86)/LLVM/bin"
+    "$ENV{ProgramFiles}/LLVM/bin"
+    "$ENV{ProgramFiles\(x86\)}/LLVM/bin"
+    "$ENV{ProgramData}/chocolatey/bin"
+    "$ENV{ChocolateyInstall}/bin"
+)
+
+# Clear any cached NOTFOUND values and prepend search paths
+unset(CLANG_TIDY_CHECK CACHE)
+unset(CLANG_FORMAT_CHECK CACHE)
+set(CMAKE_PROGRAM_PATH ${LLVM_HINT_PATHS} ${CMAKE_PROGRAM_PATH})
+
+find_program(CLANG_TIDY_CHECK NAMES clang-tidy HINTS ${LLVM_HINT_PATHS})
+find_program(CLANG_FORMAT_CHECK NAMES clang-format HINTS ${LLVM_HINT_PATHS})
+
+if(NOT CLANG_TIDY_CHECK OR NOT CLANG_FORMAT_CHECK)
+    message(STATUS "Development tools not found. Running initialization script...")
+    
+    if(WIN32)
+        set(INIT_SCRIPT "${CMAKE_SOURCE_DIR}/init.bat")
+        if(EXISTS "${INIT_SCRIPT}")
+            execute_process(
+                COMMAND cmd /c "${INIT_SCRIPT}"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                RESULT_VARIABLE INIT_RESULT
+            )
+            if(INIT_RESULT EQUAL 0)
+                message(STATUS "Initialization completed successfully")
+                # Re-check for tools
+                find_program(CLANG_TIDY_CHECK NAMES clang-tidy HINTS ${LLVM_HINT_PATHS})
+                find_program(CLANG_FORMAT_CHECK NAMES clang-format HINTS ${LLVM_HINT_PATHS})
+            else()
+                message(WARNING "Initialization script failed. Some tools may not be available.")
+            endif()
+        endif()
+    else()
+        set(INIT_SCRIPT "${CMAKE_SOURCE_DIR}/init.sh")
+        if(EXISTS "${INIT_SCRIPT}")
+            execute_process(
+                COMMAND bash "${INIT_SCRIPT}"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                RESULT_VARIABLE INIT_RESULT
+            )
+            if(INIT_RESULT EQUAL 0)
+                message(STATUS "Initialization completed successfully")
+                # Re-check for tools
+                find_program(CLANG_TIDY_CHECK NAMES clang-tidy HINTS ${LLVM_HINT_PATHS})
+                find_program(CLANG_FORMAT_CHECK NAMES clang-format HINTS ${LLVM_HINT_PATHS})
+            else()
+                message(WARNING "Initialization script failed. Some tools may not be available.")
+            endif()
+        endif()
+    endif()
+
+    # If still missing, try optional LLVM installers
+    if(WIN32 AND (NOT CLANG_TIDY_CHECK OR NOT CLANG_FORMAT_CHECK))
+        set(LLVM_INSTALLER "${CMAKE_SOURCE_DIR}/tools/install-llvm.ps1")
+        if(EXISTS "${LLVM_INSTALLER}")
+            message(STATUS "Attempting LLVM install via tools/install-llvm.ps1...")
+            execute_process(
+                COMMAND powershell -ExecutionPolicy Bypass -File "${LLVM_INSTALLER}"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                RESULT_VARIABLE LLVM_INSTALL_RESULT
+                OUTPUT_VARIABLE LLVM_INSTALL_OUT
+                ERROR_VARIABLE LLVM_INSTALL_ERR
+            )
+
+            if(NOT LLVM_INSTALL_RESULT EQUAL 0)
+                message(STATUS "Retrying LLVM install with elevation (UAC prompt)...")
+                set(LLVM_INSTALL_RESULT_ELEVATED 1)
+                execute_process(
+                    COMMAND powershell -ExecutionPolicy Bypass -Command "Start-Process powershell -Verb RunAs -ArgumentList '-ExecutionPolicy Bypass -File \"${LLVM_INSTALLER}\"' -Wait; exit $LASTEXITCODE"
+                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                    RESULT_VARIABLE LLVM_INSTALL_RESULT_ELEVATED
+                    OUTPUT_VARIABLE LLVM_INSTALL_ELEVATED_OUT
+                    ERROR_VARIABLE LLVM_INSTALL_ELEVATED_ERR
+                )
+                set(LLVM_INSTALL_RESULT ${LLVM_INSTALL_RESULT_ELEVATED})
+            endif()
+
+            if(LLVM_INSTALL_RESULT EQUAL 0)
+                find_program(CLANG_TIDY_CHECK NAMES clang-tidy HINTS ${LLVM_HINT_PATHS})
+                find_program(CLANG_FORMAT_CHECK NAMES clang-format HINTS ${LLVM_HINT_PATHS})
+                if(CLANG_TIDY_CHECK)
+                    message(STATUS "clang-tidy available: ${CLANG_TIDY_CHECK}")
+                endif()
+                if(CLANG_FORMAT_CHECK)
+                    message(STATUS "clang-format available: ${CLANG_FORMAT_CHECK}")
+                endif()
+            else()
+                message(WARNING "LLVM install did not complete successfully. Run tools/install-llvm.ps1 as Administrator if needed."
+                    "\nstdout: ${LLVM_INSTALL_OUT}${LLVM_INSTALL_ELEVATED_OUT}"
+                    "\nstderr: ${LLVM_INSTALL_ERR}${LLVM_INSTALL_ELEVATED_ERR}")
+            endif()
+        endif()
+    elseif(UNIX AND NOT APPLE AND (NOT CLANG_TIDY_CHECK OR NOT CLANG_FORMAT_CHECK))
+        message(STATUS "Attempting to install clang-tidy/clang-format via apt (sudo)...")
+        execute_process(
+            COMMAND sudo apt-get update
+            RESULT_VARIABLE APT_UPDATE_RESULT
+            OUTPUT_QUIET
+            ERROR_QUIET
+        )
+        execute_process(
+            COMMAND sudo apt-get install -y clang-tidy clang-format
+            RESULT_VARIABLE APT_INSTALL_RESULT
+            OUTPUT_QUIET
+            ERROR_QUIET
+        )
+        if(APT_UPDATE_RESULT EQUAL 0 AND APT_INSTALL_RESULT EQUAL 0)
+            find_program(CLANG_TIDY_CHECK NAMES clang-tidy HINTS ${LLVM_HINT_PATHS})
+            find_program(CLANG_FORMAT_CHECK NAMES clang-format HINTS ${LLVM_HINT_PATHS})
+            if(CLANG_TIDY_CHECK)
+                message(STATUS "clang-tidy available: ${CLANG_TIDY_CHECK}")
+            endif()
+            if(CLANG_FORMAT_CHECK)
+                message(STATUS "clang-format available: ${CLANG_FORMAT_CHECK}")
+            endif()
+        else()
+            message(WARNING "Automatic apt install failed. Install manually: sudo apt-get install clang-tidy clang-format")
+        endif()
+    elseif(APPLE AND (NOT CLANG_TIDY_CHECK OR NOT CLANG_FORMAT_CHECK))
+        message(STATUS "Attempting to install clang tools via Homebrew (sudo may prompt)...")
+        execute_process(
+            COMMAND brew install llvm
+            RESULT_VARIABLE BREW_INSTALL_RESULT
+            OUTPUT_QUIET
+            ERROR_QUIET
+        )
+        if(BREW_INSTALL_RESULT EQUAL 0)
+            find_program(CLANG_TIDY_CHECK NAMES clang-tidy HINTS ${LLVM_HINT_PATHS})
+            find_program(CLANG_FORMAT_CHECK NAMES clang-format HINTS ${LLVM_HINT_PATHS})
+            if(CLANG_TIDY_CHECK)
+                message(STATUS "clang-tidy available: ${CLANG_TIDY_CHECK}")
+            endif()
+            if(CLANG_FORMAT_CHECK)
+                message(STATUS "clang-format available: ${CLANG_FORMAT_CHECK}")
+            endif()
+        else()
+            message(WARNING "Automatic Homebrew install failed. Install manually: brew install llvm")
+        endif()
+    endif()
+endif()
+
 # FetchContent for external dependencies
 include(FetchContent)
 
@@ -84,7 +236,201 @@ target_compile_options(LudusBuildSettings INTERFACE
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow
     -fno-exceptions -fno-rtti>  # if that’s your policy; otherwise drop
 )
+# Static Analysis: clang-tidy, cppcheck, MSVC /analyze, clang-format
+# Enabled by default in Debug builds for code quality enforcement
+option(ENABLE_CLANG_TIDY "Enable clang-tidy static analysis" ON)
+option(ENABLE_CPPCHECK "Enable cppcheck static analysis" OFF)
+option(ENABLE_MSVC_ANALYZE "Enable MSVC /analyze static analysis" OFF)
 
+# clang-format: auto-detect and enable if available
+find_program(CLANG_FORMAT_EXE NAMES clang-format)
+if(CLANG_FORMAT_EXE)
+    set(ENABLE_CLANG_FORMAT ON)
+else()
+    message(STATUS "clang-format not found, attempting automatic installation...")
+    
+    if(WIN32)
+        # LLVM package includes clang-format
+        execute_process(
+            COMMAND choco install llvm -y --no-progress
+            RESULT_VARIABLE CHOCO_RESULT
+            OUTPUT_QUIET
+            ERROR_QUIET
+        )
+        if(CHOCO_RESULT EQUAL 0)
+            find_program(CLANG_FORMAT_EXE NAMES clang-format)
+            if(CLANG_FORMAT_EXE)
+                set(ENABLE_CLANG_FORMAT ON)
+                message(STATUS "clang-format installed: ${CLANG_FORMAT_EXE}")
+            endif()
+        else()
+            set(ENABLE_CLANG_FORMAT OFF)
+            message(STATUS "Failed to auto-install clang-format. Install manually:\n  choco install llvm\n  or download from https://llvm.org/builds/")
+        endif()
+    elseif(UNIX AND NOT APPLE)
+        execute_process(
+            COMMAND sudo apt-get update
+            OUTPUT_QUIET ERROR_QUIET
+        )
+        execute_process(
+            COMMAND sudo apt-get install -y clang-format
+            RESULT_VARIABLE APT_RESULT
+            OUTPUT_QUIET
+            ERROR_QUIET
+        )
+        if(APT_RESULT EQUAL 0)
+            find_program(CLANG_FORMAT_EXE NAMES clang-format)
+            if(CLANG_FORMAT_EXE)
+                set(ENABLE_CLANG_FORMAT ON)
+                message(STATUS "clang-format installed: ${CLANG_FORMAT_EXE}")
+            endif()
+        else()
+            set(ENABLE_CLANG_FORMAT OFF)
+            message(STATUS "Failed to auto-install clang-format. Install manually:\n  sudo apt-get install clang-format")
+        endif()
+    elseif(APPLE)
+        execute_process(
+            COMMAND brew install llvm
+            RESULT_VARIABLE BREW_RESULT
+            OUTPUT_QUIET
+            ERROR_QUIET
+        )
+        if(BREW_RESULT EQUAL 0)
+            find_program(CLANG_FORMAT_EXE NAMES clang-format)
+            if(CLANG_FORMAT_EXE)
+                set(ENABLE_CLANG_FORMAT ON)
+                message(STATUS "clang-format installed: ${CLANG_FORMAT_EXE}")
+            endif()
+        else()
+            set(ENABLE_CLANG_FORMAT OFF)
+            message(STATUS "Failed to auto-install clang-format. Install manually:\n  brew install llvm")
+        endif()
+    endif()
+endif()
+
+if(ENABLE_CLANG_TIDY)
+    find_program(CLANG_TIDY_EXE NAMES clang-tidy)
+    if(CLANG_TIDY_EXE)
+        # Configure clang-tidy to fail on warnings with -warnings-as-errors
+        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};-warnings-as-errors=*")
+        message(STATUS "clang-tidy enabled (warnings as errors): ${CLANG_TIDY_EXE}")
+    else()
+        message(STATUS "clang-tidy not found, attempting automatic installation...")
+        
+        if(WIN32)
+            # Try to install via Chocolatey on Windows
+            execute_process(
+                COMMAND choco install llvm -y --no-progress
+                RESULT_VARIABLE CHOCO_RESULT
+                OUTPUT_QUIET
+                ERROR_QUIET
+            )
+            if(CHOCO_RESULT EQUAL 0)
+                find_program(CLANG_TIDY_EXE NAMES clang-tidy)
+                if(CLANG_TIDY_EXE)
+                    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};-warnings-as-errors=*")
+                    message(STATUS "clang-tidy installed and enabled (warnings as errors): ${CLANG_TIDY_EXE}")
+                endif()
+            else()
+                message(WARNING "Failed to auto-install clang-tidy. Install manually:\n  choco install llvm\n  or download from https://llvm.org/builds/")
+            endif()
+        elseif(UNIX AND NOT APPLE)
+            # Try to install via apt on Linux
+            execute_process(
+                COMMAND sudo apt-get update
+                OUTPUT_QUIET ERROR_QUIET
+            )
+            execute_process(
+                COMMAND sudo apt-get install -y clang-tidy
+                RESULT_VARIABLE APT_RESULT
+                OUTPUT_QUIET
+                ERROR_QUIET
+            )
+            if(APT_RESULT EQUAL 0)
+                find_program(CLANG_TIDY_EXE NAMES clang-tidy)
+                if(CLANG_TIDY_EXE)
+                    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};-warnings-as-errors=*")
+                    message(STATUS "clang-tidy installed and enabled (warnings as errors): ${CLANG_TIDY_EXE}")
+                endif()
+            else()
+                message(WARNING "Failed to auto-install clang-tidy. Install manually:\n  sudo apt-get install clang-tidy")
+            endif()
+        elseif(APPLE)
+            # Try to install via Homebrew on macOS
+            execute_process(
+                COMMAND brew install llvm
+                RESULT_VARIABLE BREW_RESULT
+                OUTPUT_QUIET
+                ERROR_QUIET
+            )
+            if(BREW_RESULT EQUAL 0)
+                find_program(CLANG_TIDY_EXE NAMES clang-tidy)
+                if(CLANG_TIDY_EXE)
+                    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};-warnings-as-errors=*")
+                    message(STATUS "clang-tidy installed and enabled (warnings as errors): ${CLANG_TIDY_EXE}")
+                endif()
+            else()
+                message(WARNING "Failed to auto-install clang-tidy. Install manually:\n  brew install llvm")
+            endif()
+        endif()
+    endif()
+endif()
+
+if(ENABLE_CLANG_FORMAT)
+    if(CLANG_FORMAT_EXE)
+        message(STATUS "clang-format found: ${CLANG_FORMAT_EXE}")
+        
+        # Add a custom target to check formatting
+        file(GLOB_RECURSE ALL_SOURCE_FILES
+            ${CMAKE_SOURCE_DIR}/src/*.cpp
+            ${CMAKE_SOURCE_DIR}/src/*.c
+            ${CMAKE_SOURCE_DIR}/include/*.h
+            ${CMAKE_SOURCE_DIR}/include/*.hpp
+        )
+        
+        add_custom_target(
+            format-check
+            COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake/CheckFormat.cmake
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            COMMENT "Checking code formatting with clang-format (fails on errors)"
+        )
+        
+        add_custom_target(
+            format-fix
+            COMMAND ${CLANG_FORMAT_EXE} -i ${ALL_SOURCE_FILES}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            COMMENT "Fixing code formatting with clang-format"
+        )
+        
+        message(STATUS "clang-format targets added: format-check, format-fix")
+    endif()
+else()
+    message(STATUS "clang-format not found - install LLVM/clang-format to enable formatting checks")
+endif()
+
+if(ENABLE_CPPCHECK)
+    find_program(CPPCHECK_EXE NAMES cppcheck)
+    if(CPPCHECK_EXE)
+        set(CMAKE_CXX_CPPCHECK 
+            "${CPPCHECK_EXE}"
+            "--enable=warning,performance,portability,style"
+            "--inconclusive"
+            "--inline-suppr"
+            "--suppress=missingIncludeSystem"
+            "--error-exitcode=0"
+        )
+        message(STATUS "cppcheck enabled: ${CPPCHECK_EXE}")
+    else()
+        message(WARNING "cppcheck requested but not found")
+    endif()
+endif()
+
+if(ENABLE_MSVC_ANALYZE AND MSVC)
+    target_compile_options(LudusBuildSettings INTERFACE
+        $<$<CXX_COMPILER_ID:MSVC>:/analyze>
+    )
+    message(STATUS "MSVC /analyze enabled")
+endif()
 message(STATUS "Current platform: ${CMAKE_SYSTEM_NAME}")
 message(STATUS "Current compiler: ${CMAKE_CXX_COMPILER_ID}")
 

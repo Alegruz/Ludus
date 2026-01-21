@@ -50,4 +50,37 @@ echo ========================================
 echo RadDbg installed to: %RADDBG_DIR%
 echo.
 
+REM Check and install LLVM (clang-tidy, clang-format)
+echo Checking for LLVM tools (clang-tidy, clang-format)...
+where clang-tidy >nul 2>nul
+if errorlevel 1 (
+    echo clang-tidy not found. Attempting installation...
+    where choco >nul 2>nul
+    if errorlevel 1 (
+        echo.
+        echo Chocolatey not found. Install it from https://chocolatey.org/install
+        echo Then run: choco install llvm -y
+        goto :skip_llvm_install
+    )
+    
+    echo Installing LLVM via Chocolatey ^(requires admin privileges^)...
+    choco install llvm -y
+    if errorlevel 1 (
+        echo.
+        echo Failed to install LLVM. You may need to run this script as Administrator.
+        echo Or install manually from: https://llvm.org/builds/
+    ) else (
+        echo LLVM installed successfully!
+    )
+) else (
+    echo clang-tidy found!
+)
+
+:skip_llvm_install
+echo.
+echo ========================================
+echo Setup Complete!
+echo ========================================
+echo.
+
 endlocal

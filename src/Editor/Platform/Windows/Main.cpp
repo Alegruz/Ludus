@@ -10,14 +10,14 @@
 
 #undef CreateWindow
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, [[maybe_unused]] int commandShowFlag)
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE /*hPrevInstance*/, PWSTR lpCmdLine, int nShowCmd)
 {
 #if defined(LUDUS_DEBUG)
 	// Enable CRT memory leak detection in Debug mode
 	ludus::core::debug::InitializeLeakDetection();
 #endif
 
-	ludus::core::CommandLineManager<wchar_t> commandLineManager = ludus::core::CommandLineManager<wchar_t>::Create(commandLine);
+	ludus::core::CommandLineManager<wchar_t> commandLineManager = ludus::core::CommandLineManager<wchar_t>::Create(lpCmdLine);
 	const ludus::core::DynamicArray<ludus::core::WString>& arguments = commandLineManager.GetArguments();
 	for (const ludus::core::WString& arg : arguments)
 	{
@@ -31,14 +31,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, [[maybe_un
 	ludus::platform::WindowManager<ludus::platform::CURRENT_PLATFORM_TYPE> windowManager;
 	commandLineManager.ParseCommandLine(windowManager);
 
+	const std::wstring_view windowTitle(EDITOR_WINDOW_TITLE);
 	ludus::platform::Window<ludus::platform::CURRENT_PLATFORM_TYPE>::CreateInfo createInfo
 	{
-		.Title = ludus::core::ConvertWStringToString(ludus::core::WString(EDITOR_WINDOW_TITLE)),
+		.Title = ludus::core::ConvertWStringToString(ludus::core::WString(windowTitle.data(), static_cast<uint32_t>(windowTitle.size()))),
 		.Instance = instance
 	};
-
+	
 	const ludus::platform::Window<ludus::platform::CURRENT_PLATFORM_TYPE> window = windowManager.CreateWindow(createInfo);
-	window.Show(commandShowFlag);
+	window.Show(nShowCmd);
 
 	MSG msg = {};
 	while (GetMessage(&msg, NULL, 0, 0) > 0)

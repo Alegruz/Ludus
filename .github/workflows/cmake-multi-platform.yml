@@ -349,6 +349,82 @@ jobs:
           path: leak-test-output.txt
           if-no-files-found: ignore
 
+  static-analysis:
+    name: Static Analysis (${{ matrix.tool }})
+    runs-on: ${{ matrix.runner }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tool: clang-tidy
+            runner: ubuntu-latest
+            configure_preset: ninja_clang-debug
+            build_preset: ninja_clang-debug
+          - tool: cppcheck
+            runner: ubuntu-latest
+            configure_preset: ninja_gcc-debug
+            build_preset: ninja_gcc-debug
+          - tool: msvc-analyze
+            runner: windows-latest
+            configure_preset: ninja_msvc-debug
+            build_preset: ninja_msvc-debug
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: chmod +x init.sh && ./init.sh
+
+      - name: Install Ninja (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ninja-build
+
+      - name: Install analysis tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          if [ "${{ matrix.tool }}" = "clang-tidy" ]; then
+            sudo apt-get install -y clang-tidy
+          elif [ "${{ matrix.tool }}" = "cppcheck" ]; then
+            sudo apt-get install -y cppcheck
+          fi
+
+      - name: Setup ccache (Linux)
+        if: runner.os == 'Linux'
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.configure_preset }}-static-analysis
+          max-size: 2G
+
+      - name: Setup MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure with Static Analysis
+        run: |
+          if [ "${{ matrix.tool }}" = "clang-tidy" ]; then
+            cmake --preset "${{ matrix.configure_preset }}" -DENABLE_CLANG_TIDY=ON
+          elif [ "${{ matrix.tool }}" = "cppcheck" ]; then
+            cmake --preset "${{ matrix.configure_preset }}" -DENABLE_CPPCHECK=ON
+          elif [ "${{ matrix.tool }}" = "msvc-analyze" ]; then
+            cmake --preset "${{ matrix.configure_preset }}" -DENABLE_MSVC_ANALYZE=ON
+          fi
+        shell: bash
+
+      - name: Build with Static Analysis
+        run: cmake --build --preset "${{ matrix.build_preset }}" 2>&1 | tee static-analysis-output.txt
+        shell: bash
+
+      - name: Upload analysis output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-analysis-${{ matrix.tool }}-output
+          path: static-analysis-output.txt
+          if-no-files-found: ignore
+
   # Optional: Dr. Memory for Windows memory testing
   # Uncomment this job to enable runtime memory analysis on Windows
   # Dr. Memory is a robust memory debugging tool similar to Valgrind but for Windows

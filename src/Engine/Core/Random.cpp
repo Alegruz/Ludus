@@ -16,7 +16,7 @@ namespace ludus::core
 
     uint64_t Random::generateSeed() noexcept
     {
-        uint64_t seed = 0u;
+        uint64_t seed = 0U;
 
         const auto nowHigh = std::chrono::high_resolution_clock::now().time_since_epoch().count();
         const auto nowSteady = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -31,12 +31,12 @@ namespace ludus::core
         std::random_device rd;
         if (rd.entropy() > 0.0)
         {
-            const uint64_t rdValue = (static_cast<uint64_t>(rd()) << 32u) ^ static_cast<uint64_t>(rd());
+            const uint64_t rdValue = (static_cast<uint64_t>(rd()) << 32U) ^ static_cast<uint64_t>(rd());
             seed ^= splitMix64(rdValue);
         }
         else
         {
-            const uint64_t rdValue = (static_cast<uint64_t>(rd()) << 32u) ^ static_cast<uint64_t>(rd());
+            const uint64_t rdValue = (static_cast<uint64_t>(rd()) << 32U) ^ static_cast<uint64_t>(rd());
             seed ^= splitMix64(rdValue ^ nowHigh);
         }
 

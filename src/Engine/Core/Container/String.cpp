@@ -30,20 +30,20 @@ namespace ludus::core
             return WString();
         }
 
-        // Allocate temporary buffer
-        wchar_t* buffer = new wchar_t[requiredSize];
+        // Allocate temporary buffer with proper ownership using the engine's Array class
+        WString buffer(static_cast<uint32_t>(requiredSize));
         
         // Perform conversion
         const int result = ::MultiByteToWideChar(CP_UTF8, 0, data, size, 
-                                                  buffer, requiredSize);
+                                                  buffer.GetData(), requiredSize);
         
         WString wstr;
         if (result > 0)
         {
-            wstr.Append(buffer, static_cast<uint32_t>(result));
+            wstr.Append(buffer.GetData(), static_cast<uint32_t>(result));
         }
         
-        delete[] buffer;
+        // buffer is automatically cleaned up when it goes out of scope
         return wstr;
 #else
         // Linux/Mac: Use standard library conversion (deprecated but functional)
@@ -102,21 +102,21 @@ namespace ludus::core
             return String();
         }
 
-        // Allocate temporary buffer
-        char* buffer = new char[requiredSize];
+        // Allocate temporary buffer with proper ownership using the engine's Array class
+        String buffer(static_cast<uint32_t>(requiredSize));
         
         // Perform conversion
         const int result = ::WideCharToMultiByte(CP_UTF8, 0, data, size, 
-                                                  buffer, requiredSize, 
+                                                  buffer.GetData(), requiredSize, 
                                                   nullptr, nullptr);
         
         String str;
         if (result > 0)
         {
-            str.Append(buffer, static_cast<uint32_t>(result));
+            str.Append(buffer.GetData(), static_cast<uint32_t>(result));
         }
         
-        delete[] buffer;
+        // buffer is automatically cleaned up when it goes out of scope
         return str;
 #else
         // Linux/Mac: Use standard library conversion
