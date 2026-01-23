@@ -459,11 +459,23 @@ jobs:
           if (-not (Test-Path $buildDir)) {
             Write-Error "Build directory not found: $buildDir"
           }
+
+          # Ensure Dr. Memory is discoverable on PATH (Chocolatey does not always refresh PATH for the current session)
+          $drmemory = Get-Command drmemory -ErrorAction SilentlyContinue
+          if (-not $drmemory) {
+            $drmemoryPath = "C:\ProgramData\chocolatey\lib\drmemory\tools\DrMemory\bin\drmemory.exe"
+            if (Test-Path $drmemoryPath) {
+              $drmemory = $drmemoryPath
+            }
+          }
+          if (-not $drmemory) {
+            Write-Error "drmemory not found on PATH or in Chocolatey install location"
+          }
           
           # Find executables
           $exes = Get-ChildItem -Path $buildDir -Recurse -Filter "Ludus*.exe"
           
           foreach ($exe in $exes) {
             Write-Host "Running Dr. Memory on: $($exe.FullName)"
-            drmemory -leaks_only -batch -- $exe.FullName
+            & $drmemory -leaks_only -batch -- $exe.FullName
           }
