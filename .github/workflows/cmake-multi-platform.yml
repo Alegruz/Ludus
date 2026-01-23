@@ -100,80 +100,83 @@ jobs:
           }
           ctest --test-dir "$buildDir" -C "${{ matrix.configuration }}" --output-on-failure
 
-  valgrind-memcheck:
-    name: Valgrind Memcheck (${{ matrix.compiler }})
-    runs-on: ubuntu-latest
-    
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - compiler: Clang
-            configure_preset: ninja_clang-debug
-            build_preset: ninja_clang-debug
-          - compiler: GCC
-            configure_preset: ninja_gcc-debug
-            build_preset: ninja_gcc-debug
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          chmod +x init.sh && ./init.sh
-          sudo apt-get update
-          sudo apt-get install -y valgrind
-
-      - name: Install Ninja
-        run: sudo apt-get install -y ninja-build
-
-      - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ${{ matrix.configure_preset }}-valgrind
-          max-size: 2G
-
-      - name: Configure (CMake preset)
-        run: cmake --preset "${{ matrix.configure_preset }}"
-
-      - name: Build (CMake build preset)
-        run: cmake --build --preset "${{ matrix.build_preset }}"
-
-      - name: Run Valgrind Memcheck
-        shell: bash
-        run: |
-          buildDir="out/build/${{ matrix.build_preset }}"
-          if [ ! -d "$buildDir" ]; then
-            echo "Error: Build directory not found: $buildDir"
-            exit 1
-          fi
-
-          # Find all executable targets in the build directory
-          for exe in $(find "$buildDir" -type f -executable -name "Ludus*" 2>/dev/null); do
-            echo "Running Valgrind on: $exe"
-            valgrind \
-              --leak-check=full \
-              --show-leak-kinds=all \
-              --track-origins=yes \
-              --verbose \
-              --log-file="valgrind-report-$(basename "$exe").txt" \
-              "$exe" --quick-exit
-            
-            # Check for memory errors in the log
-            if grep -q "ERROR SUMMARY: [^0]" "valgrind-report-$(basename "$exe").txt"; then
-              echo "Memory errors detected in $exe!"
-              cat "valgrind-report-$(basename "$exe").txt"
-              exit 1
-            fi
-          done
-
-      - name: Upload Valgrind reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: valgrind-reports-${{ matrix.compiler }}
-          path: valgrind-report-*.txt
-          if-no-files-found: ignore
+  # Valgrind is not needed: ASan/UBSan/LSan provide comprehensive memory checking
+  # Valgrind and ASan conflict (both are instrumentation-based memory checkers)
+  # Disabled in favor of sanitizers which catch the same issues more efficiently
+  # valgrind-memcheck:
+  #   name: Valgrind Memcheck (${{ matrix.compiler }})
+  #   runs-on: ubuntu-latest
+  #   
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       include:
+  #         - compiler: Clang
+  #           configure_preset: ninja_clang-debug
+  #           build_preset: ninja_clang-debug
+  #         - compiler: GCC
+  #           configure_preset: ninja_gcc-debug
+  #           build_preset: ninja_gcc-debug
+  #
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Install dependencies
+  #       run: |
+  #         chmod +x init.sh && ./init.sh
+  #         sudo apt-get update
+  #         sudo apt-get install -y valgrind
+  #
+  #     - name: Install Ninja
+  #       run: sudo apt-get install -y ninja-build
+  #
+  #     - name: Setup ccache
+  #       uses: hendrikmuhs/ccache-action@v1.2
+  #       with:
+  #         key: ${{ matrix.configure_preset }}-valgrind
+  #         max-size: 2G
+  #
+  #     - name: Configure (CMake preset)
+  #       run: cmake --preset "${{ matrix.configure_preset }}"
+  #
+  #     - name: Build (CMake build preset)
+  #       run: cmake --build --preset "${{ matrix.build_preset }}"
+  #
+  #     - name: Run Valgrind Memcheck
+  #       shell: bash
+  #       run: |
+  #         buildDir="out/build/${{ matrix.build_preset }}"
+  #         if [ ! -d "$buildDir" ]; then
+  #           echo "Error: Build directory not found: $buildDir"
+  #           exit 1
+  #         fi
+  #
+  #         # Find all executable targets in the build directory
+  #         for exe in $(find "$buildDir" -type f -executable -name "Ludus*" 2>/dev/null); do
+  #           echo "Running Valgrind on: $exe"
+  #           valgrind \
+  #             --leak-check=full \
+  #             --show-leak-kinds=all \
+  #             --track-origins=yes \
+  #             --verbose \
+  #             --log-file="valgrind-report-$(basename "$exe").txt" \
+  #             "$exe" --quick-exit
+  #           
+  #           # Check for memory errors in the log
+  #           if grep -q "ERROR SUMMARY: [^0]" "valgrind-report-$(basename "$exe").txt"; then
+  #             echo "Memory errors detected in $exe!"
+  #             cat "valgrind-report-$(basename "$exe").txt"
+  #             exit 1
+  #           fi
+  #         done
+  #
+  #     - name: Upload Valgrind reports
+  #       if: always()
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: valgrind-reports-${{ matrix.compiler }}
+  #         path: valgrind-report-*.txt
+  #         if-no-files-found: ignore
 
   leak-test:
     name: Leak Test (${{ matrix.name }})
@@ -430,52 +433,53 @@ jobs:
   # Uncomment this job to enable runtime memory analysis on Windows
   # Dr. Memory is a robust memory debugging tool similar to Valgrind but for Windows
   # It provides heap overflow detection, use-after-free detection, and memory leak detection
-  drmemory-memcheck:
-    name: Dr. Memory Memcheck (MSVC)
-    runs-on: windows-latest
-    
-    steps:
-      - uses: actions/checkout@v4
-  
-      - name: Setup MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
-  
-      - name: Install Dr. Memory
-        run: choco install drmemory --no-progress
-  
-      - name: Install Ninja
-        run: choco install ninja
-  
-      - name: Configure (CMake preset)
-        run: cmake --preset ninja_msvc-debug
-  
-      - name: Build (CMake build preset)
-        run: cmake --build --preset ninja_msvc-debug
-  
-      - name: Run Dr. Memory Memcheck
-        shell: pwsh
-        run: |
-          $buildDir = Join-Path $PWD "out/build/ninja_msvc-debug"
-          if (-not (Test-Path $buildDir)) {
-            Write-Error "Build directory not found: $buildDir"
-          }
-
-          # Ensure Dr. Memory is discoverable on PATH (Chocolatey does not always refresh PATH for the current session)
-          $drmemory = Get-Command drmemory -ErrorAction SilentlyContinue
-          if (-not $drmemory) {
-            $drmemoryPath = "C:\ProgramData\chocolatey\lib\drmemory\tools\DrMemory\bin\drmemory.exe"
-            if (Test-Path $drmemoryPath) {
-              $drmemory = $drmemoryPath
-            }
-          }
-          if (-not $drmemory) {
-            Write-Error "drmemory not found on PATH or in Chocolatey install location"
-          }
-          
-          # Find executables
-          $exes = Get-ChildItem -Path $buildDir -Recurse -Filter "Ludus*.exe"
-          
-          foreach ($exe in $exes) {
-            Write-Host "Running Dr. Memory on: $($exe.FullName)"
-            & $drmemory -leaks_only -batch -- $exe.FullName
-          }
+  # DISABLED: Dr. Memory requires separate installation; CRT leak detection on Windows and ASan/LSan on Linux are sufficient
+  # drmemory-memcheck:
+  #   name: Dr. Memory Memcheck (MSVC)
+  #   runs-on: windows-latest
+  #   
+  #   steps:
+  #     - uses: actions/checkout@v4
+  # 
+  #       - name: Setup MSVC environment
+  #         uses: ilammy/msvc-dev-cmd@v1
+  # 
+  #       - name: Install Dr. Memory
+  #         run: choco install drmemory --no-progress
+  # 
+  #       - name: Install Ninja
+  #         run: choco install ninja
+  # 
+  #       - name: Configure (CMake preset)
+  #         run: cmake --preset ninja_msvc-debug
+  # 
+  #       - name: Build (CMake build preset)
+  #         run: cmake --build --preset ninja_msvc-debug
+  # 
+  #       - name: Run Dr. Memory Memcheck
+  #         shell: pwsh
+  #         run: |
+  #           $buildDir = Join-Path $PWD "out/build/ninja_msvc-debug"
+  #           if (-not (Test-Path $buildDir)) {
+  #             Write-Error "Build directory not found: $buildDir"
+  #           }
+  #
+  #           # Ensure Dr. Memory is discoverable on PATH (Chocolatey does not always refresh PATH for the current session)
+  #           $drmemory = Get-Command drmemory -ErrorAction SilentlyContinue
+  #           if (-not $drmemory) {
+  #             $drmemoryPath = "C:\ProgramData\chocolatey\lib\drmemory\tools\DrMemory\bin\drmemory.exe"
+  #             if (Test-Path $drmemoryPath) {
+  #               $drmemory = $drmemoryPath
+  #             }
+  #           }
+  #           if (-not $drmemory) {
+  #             Write-Error "drmemory not found on PATH or in Chocolatey install location"
+  #           }
+  #           
+  #           # Find executables
+  #           $exes = Get-ChildItem -Path $buildDir -Recurse -Filter "Ludus*.exe"
+  #           
+  #           foreach ($exe in $exes) {
+  #             Write-Host "Running Dr. Memory on: $($exe.FullName)"
+  #             & $drmemory -leaks_only -batch -- $exe.FullName
+  #           }

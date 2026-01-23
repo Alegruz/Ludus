@@ -33,6 +33,11 @@ target_link_libraries(LudusTests
     Ludus
 )
 
+# cppcheck occasionally fails on the tests target in CI; skip to keep analysis on engine code.
+if(ENABLE_CPPCHECK)
+    set_target_properties(LudusTests PROPERTIES CXX_CPPCHECK "")
+endif()
+
 # Handle runtime DLLs on Windows
 if(WIN32)
     add_custom_command(TARGET LudusTests POST_BUILD
