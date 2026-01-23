@@ -236,7 +236,7 @@ LUDUS_TEST(CommandLineManager_BasicParsing)
 	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
 	const DynamicArray<String>& args = manager.GetArguments();
 
-	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 3u);
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 4u);
 	LUDUS_TEST_ASSERT(args[0] == String("program"));
 	LUDUS_TEST_ASSERT(args[1] == String("arg1"));
 	LUDUS_TEST_ASSERT(args[2] == String("arg2"));
@@ -250,7 +250,7 @@ LUDUS_TEST(CommandLineManager_DoubleQuotes)
 	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
 	const DynamicArray<String>& args = manager.GetArguments();
 
-	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 3u);
 	LUDUS_TEST_ASSERT(args[0] == String("program"));
 	LUDUS_TEST_ASSERT(args[1] == String("hello world"));
 	LUDUS_TEST_ASSERT(args[2] == String("arg2"));
@@ -263,7 +263,7 @@ LUDUS_TEST(CommandLineManager_SingleQuotes)
 	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
 	const DynamicArray<String>& args = manager.GetArguments();
 
-	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 3u);
 	LUDUS_TEST_ASSERT(args[0] == String("program"));
 	LUDUS_TEST_ASSERT(args[1] == String("single quoted"));
 	LUDUS_TEST_ASSERT(args[2] == String("arg2"));
@@ -277,7 +277,7 @@ LUDUS_TEST(CommandLineManager_EscapeSequences)
 	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
 	const DynamicArray<String>& args = manager.GetArguments();
 
-	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 3u);
 	LUDUS_TEST_ASSERT(args[0] == String("program"));
 	LUDUS_TEST_ASSERT(args[1] == String("hello\nworld"));
 	LUDUS_TEST_ASSERT(args[2] == String("tab\there"));
@@ -291,7 +291,7 @@ LUDUS_TEST(CommandLineManager_EscapeQuotes)
 	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
 	const DynamicArray<String>& args = manager.GetArguments();
 
-	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 3u);
 	LUDUS_TEST_ASSERT(args[0] == String("program"));
 	LUDUS_TEST_ASSERT(args[1] == String("say \"hello\""));
 	LUDUS_TEST_ASSERT(args[2] == String("don't"));
@@ -304,7 +304,7 @@ LUDUS_TEST(CommandLineManager_EscapeSpace)
 	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
 	const DynamicArray<String>& args = manager.GetArguments();
 
-	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 3u);
 	LUDUS_TEST_ASSERT(args[0] == String("program"));
 	LUDUS_TEST_ASSERT(args[1] == String("hello world"));
 	LUDUS_TEST_ASSERT(args[2] == String("arg2"));
@@ -318,7 +318,7 @@ LUDUS_TEST(CommandLineManager_MixedQuotesAndEscapes)
 	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
 	const DynamicArray<String>& args = manager.GetArguments();
 
-	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 3u);
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 4u);
 	LUDUS_TEST_ASSERT(args[0] == String("program"));
 	LUDUS_TEST_ASSERT(args[1] == String("path\nwith spaces"));
 	LUDUS_TEST_ASSERT(args[2] == String("unquoted value"));
@@ -345,7 +345,7 @@ LUDUS_TEST(CommandLineManager_EmptyQuotes)
 	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
 	const DynamicArray<String>& args = manager.GetArguments();
 
-	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 3u);
 	LUDUS_TEST_ASSERT(args[0] == String("program"));
 	LUDUS_TEST_ASSERT(args[1] == String(""));
 	LUDUS_TEST_ASSERT(args[2] == String("arg2"));
