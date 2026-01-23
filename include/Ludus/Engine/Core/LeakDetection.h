@@ -28,13 +28,14 @@
             int flags = _CrtSetDbgFlag(_CRTDBG_REPORT_FLAG);
             flags |= _CRTDBG_ALLOC_MEM_DF;        // Enable memory allocation tracking
             flags |= _CRTDBG_LEAK_CHECK_DF;       // Check for leaks at program exit
-            flags |= _CRTDBG_DELAY_FREE_MEM_DF;   // Don't actually free memory (helps catch use-after-free)
+            // Note: _CRTDBG_DELAY_FREE_MEM_DF is intentionally not enabled by default.
+            // It keeps freed blocks around, which is useful for UAF debugging but creates noisy reports.
             _CrtSetDbgFlag(flags);
 
             // Send all debug output to the debug console and debugger
-            _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_DEBUG | _CRTDBG_MODE_WNDW);
-            _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG | _CRTDBG_MODE_WNDW);
-            _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG | _CRTDBG_MODE_WNDW);
+            _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_DEBUG);
+            _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG);
+            _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
         }
 
         /// @brief Break on specific allocation
@@ -55,13 +56,8 @@
         /// Output appears in the Debug Output window in Visual Studio.
         LUDUS_INLINE void DumpMemoryLeaks() noexcept
         {
-            // Dump detailed leak information
+            // Dump detailed leak information (no extra stats to avoid noisy warnings)
             _CrtDumpMemoryLeaks();
-            
-            // Additional heap state information
-            _CrtMemState state;
-            _CrtMemCheckpoint(&state);
-            _CrtMemDumpStatistics(&state);
         }
 
         /// @brief Generate a memory snapshot for leak tracking
@@ -117,13 +113,6 @@
             {
                 _CrtMemState endSnapshot;
                 _CrtMemCheckpoint(&endSnapshot);
-                
-                // Show memory differences between start and end
-                _CrtMemState diff;
-                if (_CrtMemDifference(&diff, &mStartSnapshot, &endSnapshot))
-                {
-                    _CrtMemDumpStatistics(&diff);
-                }
                 
                 // Dump all memory leaks with detailed information
                 _CrtDumpMemoryLeaks();

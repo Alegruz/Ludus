@@ -27,5 +27,8 @@ int main(int argc, char** argv)
 		}
 	}
 
+	// Release registry storage before leak detection runs (avoids false positives in CRT dump).
+	ludus::core::UnitTestRegistry::GetInstance().Clear();
+
 	return 0;
 }

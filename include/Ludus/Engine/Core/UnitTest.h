@@ -53,6 +53,7 @@ namespace ludus::core
 
 		void RegisterTest(UnitTest* test);
 		DynamicArray<TestResult> RunAllTests();
+		void Clear() noexcept;
 
 	private:
 		UnitTestRegistry() = default;

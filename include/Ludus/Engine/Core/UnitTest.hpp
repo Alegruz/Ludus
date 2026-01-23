@@ -76,4 +76,9 @@ namespace ludus::core
 
 		return results;
 	}
+
+	inline void UnitTestRegistry::Clear() noexcept
+	{
+		mTests = DynamicArray<UnitTest*>{};
+	}
 }	// namespace ludus::core
