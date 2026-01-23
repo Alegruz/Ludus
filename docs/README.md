@@ -48,11 +48,12 @@ The Ludus engine is organized in layers. Understand them in this order:
 |----------|---------|----------|
 | **[GETTING_STARTED.md](GETTING_STARTED.md)** | Step-by-step setup, first build, running editor and tests | Everyone, especially newcomers |
 
-### 🏗️ Architecture & Design
+### 🏗️ Architecture & Design (Understand the Engine)
 
 | Document | Purpose | Audience |
 |----------|---------|----------|
-| **[MEMORY_ARCHITECTURE.md](MEMORY_ARCHITECTURE.md)** | Memory allocation strategy, mimalloc integration, custom pools | Engine developers, performance engineers |
+| **[ENGINE_ARCHITECTURE.md](ENGINE_ARCHITECTURE.md)** | **START HERE:** High-level module organization, public API, data flow, layer separation | Everyone, especially architects and reviewers |
+| **[MEMORY_ARCHITECTURE.md](MEMORY_ARCHITECTURE.md)** | Deep dive: Memory allocation strategy, mimalloc integration, custom pools | Engine developers, performance engineers |
 | **[BUILD_SYSTEM.md](BUILD_SYSTEM.md)** | CMake philosophy, presets, auto-install behavior, CI integration | DevOps, maintainers, CI/CD engineers |
 
 ### 🧪 Testing & Quality
@@ -76,6 +77,12 @@ The Ludus engine is organized in layers. Understand them in this order:
 
 **I want to...**
 
+- **Understand the engine structure and modules**  
+  → [ENGINE_ARCHITECTURE.md](ENGINE_ARCHITECTURE.md) ← **Start here for architecture overview**
+
+- **Understand what's public API vs internal**  
+  → [ENGINE_ARCHITECTURE.md#public-api-organization](ENGINE_ARCHITECTURE.md#public-api-organization)
+
 - **Get the engine running for the first time**  
   → [GETTING_STARTED.md](GETTING_STARTED.md)
 
@@ -96,6 +103,12 @@ The Ludus engine is organized in layers. Understand them in this order:
 
 - **Profile memory with mimalloc**  
   → [MIMALLOC_INTEGRATION.md](MIMALLOC_INTEGRATION.md)
+
+- **Add a new platform (Windows/Linux/macOS)**  
+  → [ENGINE_ARCHITECTURE.md#adding-a-new-platform](ENGINE_ARCHITECTURE.md#adding-a-new-platform)
+
+- **Add a new Core module (math, container, etc)**  
+  → [ENGINE_ARCHITECTURE.md#adding-a-new-core-module](ENGINE_ARCHITECTURE.md#adding-a-new-core-module)
 
 ---
 

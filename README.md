@@ -136,12 +136,13 @@ cmake --preset ninja_msvc-debug -DENABLE_MIMALLOC=OFF -DENABLE_SANITIZERS=ON
 
 New to Ludus? **Start here:** [docs/README.md](docs/README.md)
 
-It provides a navigation guide to all documentation, explains the learning path (Core → Platform → Editor), and maps each document to its purpose.
+It provides a navigation guide to all documentation. For architecture details, see [docs/ENGINE_ARCHITECTURE.md](docs/ENGINE_ARCHITECTURE.md).
 
 Quick reference to key docs:
 
 | Topic | Document |
 |-------|----------|
+| **🏗️ Engine Architecture & Public API** | [ENGINE_ARCHITECTURE.md](docs/ENGINE_ARCHITECTURE.md) |
 | **Setup & First Build** | [GETTING_STARTED.md](docs/GETTING_STARTED.md) |
 | **Build System & CI** | [BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md) |
 | **Unit Testing** | [UNIT_TESTING.md](docs/UNIT_TESTING.md) |
