@@ -127,7 +127,7 @@ endif()
 if(ENABLE_MIMALLOC)
     FetchContent_Declare(mimalloc
         GIT_REPOSITORY https://github.com/microsoft/mimalloc.git
-        GIT_TAG v2.1.2  # Pinned to stable release for reproducible builds
+        GIT_TAG v2.2.7  # Pinned to stable release for reproducible builds
         GIT_SHALLOW TRUE
     )
     
