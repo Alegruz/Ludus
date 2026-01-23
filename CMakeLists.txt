@@ -255,6 +255,8 @@ if(ENABLE_CPPCHECK)
             "--inconclusive"
             "--inline-suppr"
             "--suppress=missingIncludeSystem"
+            "--suppress=*:${CMAKE_BINARY_DIR}/_deps/*"
+            "--suppress=*:${CMAKE_BINARY_DIR}/out/_deps/*"
             "--error-exitcode=0"
         )
         message(STATUS "cppcheck enabled: ${CPPCHECK_EXE}")
