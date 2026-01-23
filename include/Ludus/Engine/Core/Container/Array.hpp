@@ -61,7 +61,7 @@ namespace ludus::core
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /*= ArrayResizePolicy::DEFAULT*/>
     LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::ArrayImplBase() noexcept
         requires (ARRAY_TYPE == ArrayType::DYNAMIC)
-        : mCapacity(0)
+        : mCapacity(INITIAL_CAPACITY)
         , mSize(0)
         , mData(nullptr) {}
 
@@ -180,6 +180,10 @@ namespace ludus::core
     {
         if(mData != nullptr)
         {
+            for(uint32_t i = 0; i < mSize; ++i)
+            {
+                mData[i].~T();
+            }
             memory::Deallocate(mData);
             mSize = 0;
             mCapacity = 0;
@@ -188,7 +192,14 @@ namespace ludus::core
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /*= ArrayResizePolicy::DEFAULT*/>
     LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::~ArrayImplBase() noexcept
-        requires (ARRAY_TYPE == ArrayType::STATIC) = default;
+        requires (ARRAY_TYPE == ArrayType::STATIC)
+    {
+        LUDUS_ASSERT_MSG(mData != nullptr, "Array data is null in static array destructor.");
+        for(uint32_t i = 0; i < mSize; ++i)
+        {
+            mData[i].~T();
+        }
+    }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /*= ArrayResizePolicy::DEFAULT*/>
     LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::operator=(const ArrayImplBase& other) noexcept
@@ -589,6 +600,10 @@ namespace ludus::core
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
     LUDUS_INLINE constexpr T* ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetData() noexcept
     {
+        if(mData == nullptr)
+        {
+            SetCapacity(mCapacity);
+        }
         LUDUS_ASSERT_MSG(mData != nullptr, "Array data is null in GetData()");
         return mData;
     }
@@ -671,8 +686,13 @@ namespace ludus::core
     LUDUS_INLINE constexpr void ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::SetCapacity(uint32_t capacity) noexcept
         requires (ARRAY_TYPE == ArrayType::DYNAMIC)
     {
-        if(capacity <= mCapacity && mData != nullptr)
+        if(capacity <= mCapacity)
         {
+            if(mData == nullptr)
+            {
+                mData = memory::Allocate<T>(mCapacity);
+                memory::ZeroOutMemory(mData, mCapacity * sizeof(T));
+            }
             return;
         }
 

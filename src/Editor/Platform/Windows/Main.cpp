@@ -6,38 +6,61 @@
 #include <Ludus/Engine/Core/Container/String.hpp>
 #include <Ludus/Engine/Core/LeakDetection.h>
 
+#include <Ludus/Engine/Core/Math/Trigonometry.hpp>
+
 #include <Ludus/Engine/Platform/Window.hpp>
 
 #undef CreateWindow
 
+void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd);
+
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE /*hPrevInstance*/, PWSTR lpCmdLine, int nShowCmd)
 {
-#if defined(LUDUS_DEBUG)
-	// Enable CRT memory leak detection in Debug mode
-	ludus::core::debug::InitializeLeakDetection();
-#endif
+	// Scoped memory leak detector - automatically handles snapshots and reporting
+	LUDUS_LEAK_DETECTOR();
+	
+	// Uncomment to break on specific allocation number from leak report:
+	// LUDUS_BREAK_ON_ALLOC(253);
 
-	ludus::core::CommandLineManager<wchar_t> commandLineManager = ludus::core::CommandLineManager<wchar_t>::Create(lpCmdLine);
-	const ludus::core::DynamicArray<ludus::core::WString>& arguments = commandLineManager.GetArguments();
-	for (const ludus::core::WString& arg : arguments)
+	Main(instance, lpCmdLine, nShowCmd);
+	
+	// Leak detection and reporting happens automatically when scope exits
+	return 0;
+}
+
+void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
+{
+	using namespace ludus;
+	using namespace ludus::core;
+	using namespace ludus::platform;
+
+	CommandLineManager<wchar_t> commandLineManager = CommandLineManager<wchar_t>::Create(lpCmdLine);
+	const DynamicArray<WString>& arguments = commandLineManager.GetArguments();
+	for (const WString& arg : arguments)
 	{
 		// For demonstration purposes, output each argument to the debug console
-		ludus::core::WString debugOutput = L"Argument: ";
+		WString debugOutput = L"Argument: ";
 		debugOutput.Append(arg.GetData(), arg.GetSize());
 		debugOutput.PushBack(L'\n');
 		OutputDebugStringW(debugOutput.GetData());
 	}
 
-	ludus::platform::WindowManager<ludus::platform::CURRENT_PLATFORM_TYPE> windowManager;
+	const float angle = Pi<float>() / 4.0f; // 45 degrees in radians
+	const float sine = Sin(angle);
+	const float cosine = Cos(angle);
+	LUDUS_ASSERT_MSG(sine > 0.7071f && sine < 0.7072f, "Sine calculation is incorrect");	// NOLINT(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
+	LUDUS_ASSERT_MSG(cosine > 0.7071f && cosine < 0.7072f, "Cosine calculation is incorrect");	// NOLINT(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
+
+	WindowManager<CURRENT_PLATFORM_TYPE> windowManager;
 	commandLineManager.ParseCommandLine(windowManager);
 
-	ludus::platform::Window<ludus::platform::CURRENT_PLATFORM_TYPE>::CreateInfo createInfo
+	Window<CURRENT_PLATFORM_TYPE>::CreateInfo createInfo
 	{
-		.Title = ludus::core::ConvertWStringToString(ludus::core::WString(EDITOR_WINDOW_TITLE)),
+		.Title = ConvertWStringToString(WString(EDITOR_WINDOW_TITLE)),
 		.Instance = instance
 	};
 	
-	const ludus::platform::Window<ludus::platform::CURRENT_PLATFORM_TYPE> window = windowManager.CreateWindow(createInfo);
+	const Window<CURRENT_PLATFORM_TYPE> window = windowManager.CreateWindow(createInfo);
 	window.Show(nShowCmd);
 
 	MSG msg = {};
@@ -46,11 +69,4 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE /*hPrevInstance*/, PWSTR lpCmd
 		TranslateMessage(&msg);
 		DispatchMessage(&msg);
 	}
-
-#if defined(LUDUS_DEBUG)
-	// Dump all memory leaks to the debug output
-	ludus::core::debug::DumpMemoryLeaks();
-#endif
-
-	return 0;
 }

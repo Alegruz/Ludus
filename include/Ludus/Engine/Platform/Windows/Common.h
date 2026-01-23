@@ -7,6 +7,12 @@
     #define UNICODE
     #include <windows.h>
 
+// Enable detailed memory tracking in debug builds
+#if defined(LUDUS_DEBUG)
+    #define _CRTDBG_MAP_ALLOC
+    #include <crtdbg.h>
+#endif
+
 namespace ludus::platform
 {
     void PrintWin32Error() noexcept;

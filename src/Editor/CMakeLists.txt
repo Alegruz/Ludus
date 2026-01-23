@@ -25,6 +25,31 @@ add_custom_command(TARGET LudusEditor POST_BUILD
     VERBATIM
 )
 
+# Copy runtime DLLs (including external dependencies like mimalloc) on Windows
+if(WIN32)
+    add_custom_command(TARGET LudusEditor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_RUNTIME_DLLS:LudusEditor>" "${CMAKE_SOURCE_DIR}/"
+        COMMAND_EXPAND_LISTS
+        VERBATIM
+    )
+    # Explicitly copy mimalloc DLLs if mimalloc is enabled
+    if(TARGET mimalloc AND ENABLE_MIMALLOC)
+        add_custom_command(TARGET LudusEditor POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:mimalloc>/mimalloc-redirect.dll" "${CMAKE_SOURCE_DIR}/"
+            VERBATIM
+        )
+    endif()
+    # Copy AddressSanitizer runtime DLL when sanitizers are enabled
+    if(ENABLE_SANITIZERS AND MSVC)
+        add_custom_command(TARGET LudusEditor POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different 
+                "C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/VC/Tools/MSVC/14.29.30133/bin/Hostx64/x64/clang_rt.asan_dbg_dynamic-x86_64.dll" 
+                "${CMAKE_SOURCE_DIR}/"
+            VERBATIM
+        )
+    endif()
+endif()
+
 target_precompile_headers(LudusEditor PRIVATE
     "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/include/Ludus/Editor/Pch.hpp>"
     )

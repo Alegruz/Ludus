@@ -169,7 +169,14 @@ include(FetchContent)
 # mimalloc: High-performance memory allocator
 # Useful for profiling memory performance and reducing allocator overhead
 # Optional: disable with -DENABLE_MIMALLOC=OFF
+# Note: Automatically disabled when sanitizers are enabled to avoid conflicts
 option(ENABLE_MIMALLOC "Enable mimalloc memory allocator" ON)
+
+# Disable mimalloc when sanitizers are enabled to avoid malloc interception conflicts
+if(ENABLE_SANITIZERS)
+    set(ENABLE_MIMALLOC OFF CACHE BOOL "Mimalloc disabled when sanitizers are enabled" FORCE)
+    message(STATUS "mimalloc automatically disabled because sanitizers are enabled (they conflict)")
+endif()
 
 if(ENABLE_MIMALLOC)
     FetchContent_Declare(mimalloc
@@ -452,27 +459,29 @@ if(ENABLE_MIMALLOC AND TARGET mimalloc)
     message(STATUS "mimalloc linked to LudusBuildSettings")
 endif()
 
-# Sanitizers: Enabled by default in Debug and RelWithDebInfo modes for leak/memory detection
-# LSan is implicitly enabled with ASan on Linux; on Windows (MSVC) we use /fsanitize=address
+# Sanitizers: Only enabled for GCC/Clang (MSVC AddressSanitizer disabled due to compatibility issues)
 add_library(ProjectSanitizersSettings INTERFACE)
 
-option(ENABLE_SANITIZERS "Enable {ASan,UBSan,LSan} sanitizers" ON)
+option(ENABLE_SANITIZERS "Enable ASan+UBSan+LSan (GCC/Clang only - MSVC sanitizers disabled)" ON)
+option(ENABLE_APP_VERIFIER "Enable Windows Application Verifier setup (recommended for Windows)" OFF)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     if(ENABLE_SANITIZERS AND NOT MSVC)
-        # GCC/Clang: ASan + UBSan + LSan (LSan is implicit with ASan on Linux, explicit on others)
-        # -fno-omit-frame-pointer: Better stack traces for leak detection (also set unconditionally for Debug above)
-        # -g: Debug symbols for better leak reports
+        # GCC/Clang: ASan + UBSan + LSan
         target_compile_options(ProjectSanitizersSettings INTERFACE 
-            $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-fsanitize=address,undefined,leak -fno-omit-frame-pointer -g>)
+            $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>,$<BOOL:${ENABLE_SANITIZERS}>>:-fsanitize=address,undefined,leak -fno-omit-frame-pointer -g>)
         target_link_options(ProjectSanitizersSettings INTERFACE 
-            $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-fsanitize=address,undefined,leak -fno-omit-frame-pointer>)
+            $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>,$<BOOL:${ENABLE_SANITIZERS}>>:-fsanitize=address,undefined,leak -fno-omit-frame-pointer>)
+        message(STATUS "AddressSanitizer enabled for GCC/Clang")
     elseif(ENABLE_SANITIZERS AND MSVC)
-        # MSVC ASan (x64 only, no /GL - incompatible with optimizations)
-        # Note: MSVC's ASan doesn't support LSan, but catches heap use-after-free, buffer overflows, etc.
-        # MSVC /Oy- disables frame pointer omission (equivalent to -fno-omit-frame-pointer)
-        add_compile_options($<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/fsanitize=address> /Zi /Oy- /EHsc)
-        add_link_options($<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/INCREMENTAL> /DEBUG)
+        # MSVC AddressSanitizer: DISABLED due to Windows 11 compatibility issues
+        message(STATUS "MSVC AddressSanitizer disabled (use -DENABLE_APP_VERIFIER=ON for memory debugging)")
+    endif()
+    
+    # Windows Application Verifier - Recommended alternative to MSVC ASan
+    if(WIN32 AND ENABLE_APP_VERIFIER)
+        message(STATUS "Application Verifier enabled. Configure via: appverif /verify LudusEditor.exe")
+        message(STATUS "Recommended AppVerif tests: Heaps Handles Locks TLS DangerousAPIs Networking")
     endif()
 endif()
 

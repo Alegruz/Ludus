@@ -11,6 +11,12 @@
             "program": "${workspaceFolder}/LudusEditor.exe",
             "cwd": "${workspaceFolder}",
             "stopAtEntry": true,
+            "environment": [
+                {
+                    "name": "ASAN_OPTIONS",
+                    "value": "halt_on_error=1:abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1:mmap_limit_mb=2048"
+                }
+            ]
         },
         {
             "type": "cppvsdbg",
