@@ -15,7 +15,7 @@ namespace ludus::core
 	{
 		String TestName;
 		String Message;
-		bool Passed;
+		bool Passed = false;  // NOLINT(readability-magic-numbers) - bool is initialized
 	};
 
 	// Base class for unit tests
@@ -24,6 +24,12 @@ namespace ludus::core
 	public:
 		explicit UnitTest(const char* name);
 		virtual ~UnitTest() = default;
+	
+		// Disable copy operations - tests are singletons
+		UnitTest(const UnitTest&) = delete;
+		UnitTest& operator=(const UnitTest&) = delete;
+		UnitTest(UnitTest&&) = delete;
+		UnitTest& operator=(UnitTest&&) = delete;
 
 		virtual void Run() = 0;
 		[[nodiscard]] const char* GetName() const noexcept { return mName; }
@@ -31,7 +37,7 @@ namespace ludus::core
 		[[nodiscard]] const String& GetFailureMessage() const noexcept { return mFailureMessage; }
 
 	protected:
-		void Fail(const char* message);
+		void fail(const char* message);
 
 	private:
 		const char* mName;
@@ -87,7 +93,7 @@ namespace ludus::core
 			ludus::core::String msg = "Assertion failed: ";                                        \
 			const char* condStr = #condition;                                                      \
 			msg.Append(condStr, static_cast<uint32_t>(strlen(condStr)));                          \
-			Fail(msg.GetData());                                                                   \
+			fail(msg.GetData());                                                                    \
 			return;                                                                                \
 		}                                                                                          \
 	} while (0)
@@ -103,7 +109,7 @@ namespace ludus::core
 			const char* sepStr = " - ";                                                           \
 			msg.Append(sepStr, 3);                                                                 \
 			msg.Append(message, static_cast<uint32_t>(strlen(message)));                          \
-			Fail(msg.GetData());                                                                   \
+			fail(msg.GetData());                                                                    \
 			return;                                                                                \
 		}                                                                                          \
 	} while (0)
@@ -120,7 +126,7 @@ namespace ludus::core
 			msg.Append(eqStr, 4);                                                                  \
 			const char* actStr = #actual;                                                          \
 			msg.Append(actStr, static_cast<uint32_t>(strlen(actStr)));                            \
-			Fail(msg.GetData());                                                                   \
+			fail(msg.GetData());                                                                   \
 			return;                                                                                \
 		}                                                                                          \
 	} while (0)
@@ -137,7 +143,7 @@ namespace ludus::core
 			msg.Append(neStr, 4);                                                                  \
 			const char* actStr = #actual;                                                          \
 			msg.Append(actStr, static_cast<uint32_t>(strlen(actStr)));                            \
-			Fail(msg.GetData());                                                                   \
+			fail(msg.GetData());                                                                   \
 			return;                                                                                \
 		}                                                                                          \
 	} while (0)
@@ -161,7 +167,7 @@ namespace ludus::core
 			msg.Append(epsStr, static_cast<uint32_t>(strlen(epsStr)));                            \
 			const char* closeStr = ")";                                                            \
 			msg.Append(closeStr, 1);                                                               \
-			Fail(msg.GetData());                                                                   \
+			fail(msg.GetData());                                                                   \
 			return;                                                                                \
 		}                                                                                          \
 	} while (0)

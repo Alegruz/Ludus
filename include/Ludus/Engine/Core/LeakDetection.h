@@ -150,12 +150,12 @@
     namespace ludus::core::debug
     {
         // No-op implementations for non-Windows or non-Debug builds
-        struct _CrtMemState {};
+        struct CrtMemState {};  // Non-reserved name
         
         class ScopedLeakDetector
         {
         public:
-            ScopedLeakDetector() noexcept {}
+            ScopedLeakDetector() noexcept = default;  // Use = default
             static void BreakOnAllocation([[maybe_unused]] long allocationNumber) noexcept {}
         };
 
@@ -167,8 +167,8 @@
         LUDUS_INLINE void SetBreakOnAllocation([[maybe_unused]] long allocationNumber) noexcept {}
         LUDUS_INLINE void DumpMemoryLeaks() noexcept {}
         LUDUS_INLINE bool IsHeapValid() noexcept { return true; }
-        LUDUS_INLINE void TakeMemorySnapshot([[maybe_unused]] _CrtMemState* snapshot) noexcept {}
-        LUDUS_INLINE void CompareMemorySnapshots([[maybe_unused]] const _CrtMemState* oldSnapshot, [[maybe_unused]] const _CrtMemState* newSnapshot) noexcept {}
+        LUDUS_INLINE void TakeMemorySnapshot([[maybe_unused]] CrtMemState* snapshot) noexcept {}  // NOLINT(bugprone-easily-swappable-parameters) - single function, not applicable
+        LUDUS_INLINE void CompareMemorySnapshots([[maybe_unused]] const CrtMemState* snapshot1, [[maybe_unused]] const CrtMemState* snapshot2) noexcept {}  // Renamed for clarity
     }
 
 #endif

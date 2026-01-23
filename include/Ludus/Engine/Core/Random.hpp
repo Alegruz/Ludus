@@ -4,21 +4,31 @@
 
 namespace ludus::core
 {
+    // PCG32 constants
+    inline constexpr uint64_t PCG_MULTIPLIER = 6364136223846793005ULL;
+    inline constexpr uint64_t PCG_INCREMENT_SEED = 0x9E3779B97F4A7C15ULL;
+    inline constexpr uint64_t SPLITMIX64_MULTIPLIER_1 = 0xBF58476D1CE4E5B9ULL;
+    inline constexpr uint64_t SPLITMIX64_MULTIPLIER_2 = 0x94D049BB133111EBULL;
+    inline constexpr uint32_t BIT_WIDTH_32 = 31u;
+    inline constexpr uint32_t BIT_WIDTH_30 = 30u;
+    inline constexpr uint32_t BIT_WIDTH_27 = 27u;
+    inline constexpr uint32_t BIT_WIDTH_31 = 31u;
+
     // Constexpr function implementations
-    inline constexpr Random Random::Create(const uint64_t seed) noexcept
+    constexpr Random Random::Create(uint64_t seed) noexcept
     {
         Random rng;
         rng.Reseed(seed);
         return rng;
     }
 
-    inline constexpr void Random::Reseed(const uint64_t seed) noexcept
+    constexpr void Random::Reseed(uint64_t seed) noexcept
     {
-        const uint64_t stream = splitMix64(seed ^ 0x9E3779B97F4A7C15ULL);
+        const uint64_t stream = splitMix64(seed ^ PCG_INCREMENT_SEED);
         Reseed(seed, stream);
     }
 
-    inline constexpr void Random::Reseed(const uint64_t seed, const uint64_t stream) noexcept
+    constexpr void Random::Reseed(uint64_t seed, uint64_t stream) noexcept  // NOLINT(bugprone-easily-swappable-parameters) - intentional API design
     {
         mState = 0u;
         mInc = (stream << 1u) | 1u;
@@ -27,35 +37,37 @@ namespace ludus::core
         static_cast<void>(NextU32());
     }
 
-    inline constexpr uint32_t Random::NextU32() noexcept
+    constexpr uint32_t Random::NextU32() noexcept
     {
         const uint64_t oldState = mState;
-        mState = oldState * 6364136223846793005ULL + mInc;
+        mState = oldState * PCG_MULTIPLIER + mInc;
         const uint32_t xorshifted = static_cast<uint32_t>(((oldState >> 18u) ^ oldState) >> 27u);
         const uint32_t rot = static_cast<uint32_t>(oldState >> 59u);
-        return (xorshifted >> rot) | (xorshifted << ((0u - rot) & 31u));
+        return (xorshifted >> rot) | (xorshifted << ((0u - rot) & BIT_WIDTH_32));
     }
 
-    inline constexpr uint64_t Random::NextU64() noexcept
+    constexpr uint64_t Random::NextU64() noexcept
     {
         const uint64_t high = static_cast<uint64_t>(NextU32()) << 32u;
         const uint64_t low = static_cast<uint64_t>(NextU32());
         return high | low;
     }
 
-    inline constexpr float Random::NextFloat01() noexcept
+    constexpr float Random::NextFloat01() noexcept
     {
-        constexpr float kInv = 1.0f / 4294967296.0f;
-        return static_cast<float>(NextU32()) * kInv;
+        // NOLINTNEXTLINE(readability-magic-numbers) - 2^32 scale for float normalization
+        constexpr float K_INV = 1.0f / 4294967296.0f;
+        return static_cast<float>(NextU32()) * K_INV;
     }
 
-    inline constexpr double Random::NextDouble01() noexcept
+    constexpr double Random::NextDouble01() noexcept
     {
-        constexpr double kInv = 1.0 / 18446744073709551616.0;
-        return static_cast<double>(NextU64()) * kInv;
+        // NOLINTNEXTLINE(readability-magic-numbers) - 2^64 scale for double normalization
+        constexpr double K_INV = 1.0 / 18446744073709551616.0;
+        return static_cast<double>(NextU64()) * K_INV;
     }
 
-    inline constexpr uint32_t Random::RangeU32(uint32_t minInclusive, uint32_t maxInclusive) noexcept
+    constexpr uint32_t Random::RangeU32(uint32_t minInclusive, uint32_t maxInclusive) noexcept
     {
         if (minInclusive > maxInclusive)
         {
@@ -76,7 +88,7 @@ namespace ludus::core
         return minInclusive + (value % range);
     }
 
-    inline constexpr int32_t Random::RangeI32(int32_t minInclusive, int32_t maxInclusive) noexcept
+    constexpr int32_t Random::RangeI32(int32_t minInclusive, int32_t maxInclusive) noexcept
     {
         if (minInclusive > maxInclusive)
         {
@@ -90,11 +102,11 @@ namespace ludus::core
         return static_cast<int32_t>(static_cast<int64_t>(minInclusive) + value);
     }
 
-    inline constexpr uint64_t Random::splitMix64(uint64_t value) noexcept
+    constexpr uint64_t Random::splitMix64(uint64_t value) noexcept
     {
-        value += 0x9E3779B97F4A7C15ULL;
-        value = (value ^ (value >> 30u)) * 0xBF58476D1CE4E5B9ULL;
-        value = (value ^ (value >> 27u)) * 0x94D049BB133111EBULL;
-        return value ^ (value >> 31u);
+        value += PCG_INCREMENT_SEED;
+        value = (value ^ (value >> BIT_WIDTH_30)) * SPLITMIX64_MULTIPLIER_1;
+        value = (value ^ (value >> BIT_WIDTH_27)) * SPLITMIX64_MULTIPLIER_2;
+        return value ^ (value >> BIT_WIDTH_31);
     }
 }   // namespace ludus::core

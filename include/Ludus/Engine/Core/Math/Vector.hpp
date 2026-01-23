@@ -14,7 +14,7 @@ namespace ludus::core
     }
 
     template<Arithmetic T>
-    LUDUS_INLINE constexpr Vector2<T>::Vector2(T x, T y) noexcept
+    LUDUS_INLINE constexpr Vector2<T>::Vector2(T x, T y) noexcept  // NOLINT(bugprone-easily-swappable-parameters) - names have semantic meaning
         : X(x)
         , Y(y)
     {
@@ -160,7 +160,7 @@ namespace ludus::core
     }
 
     template<Arithmetic T>
-    LUDUS_INLINE constexpr Vector3<T>::Vector3(T x, T y, T z) noexcept
+    LUDUS_INLINE constexpr Vector3<T>::Vector3(T x, T y, T z) noexcept  // NOLINT(bugprone-easily-swappable-parameters) - names have semantic meaning
         : X(x)
         , Y(y)
         , Z(z)
@@ -324,7 +324,7 @@ namespace ludus::core
     }
 
     template<Arithmetic T>
-    LUDUS_INLINE constexpr Vector4<T>::Vector4(T x, T y, T z, T w) noexcept
+    LUDUS_INLINE constexpr Vector4<T>::Vector4(T x, T y, T z, T w) noexcept  // NOLINT(bugprone-easily-swappable-parameters) - names have semantic meaning
         : X(x)
         , Y(y)
         , Z(z)

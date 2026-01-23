@@ -22,6 +22,7 @@ namespace ludus::core
     template<std::floating_point T>
     LUDUS_INLINE constexpr T HalfPi() noexcept
     {
+        // NOLINTNEXTLINE(readability-magic-numbers) - 0.5 is the well-known mathematical constant for π/2
         return static_cast<T>(0.5) * Pi<T>();
     }
 

@@ -11,7 +11,7 @@ namespace ludus::core
 	{
 	}
 
-	inline void UnitTest::Fail(const char* message)
+	inline void UnitTest::fail(const char* message)
 	{
 		mFailed = true;
 		mFailureMessage = message;
