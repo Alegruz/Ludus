@@ -19,32 +19,129 @@ namespace ludus::core
     CommandLineManager<CharT> CommandLineManager<CharT>::Create(CharT* commandLine) noexcept
     {
         DynamicArray<BasicString<CharT>> arguments;
+        DynamicArray<CharT> currentArgument;
         CharT* current = commandLine;
+        bool inQuotes = false;
+        CharT quoteChar = '\0';
+        bool justClosedQuotes = false;
+
         while(*current != '\0')
         {
-            // Skip leading spaces
-            while(*current == ' ')
+            // Handle escape sequences
+            if(*current == '\\' && *(current + 1) != '\0')
             {
+                CharT nextChar = *(current + 1);
+                // Recognize common escape sequences
+                switch(nextChar)
+                {
+                    case 'n':
+                        currentArgument.PushBack('\n');
+                        current += 2;
+                        break;
+                    case 't':
+                        currentArgument.PushBack('\t');
+                        current += 2;
+                        break;
+                    case 'r':
+                        currentArgument.PushBack('\r');
+                        current += 2;
+                        break;
+                    case '\\':
+                        currentArgument.PushBack('\\');
+                        current += 2;
+                        break;
+                    case '"':
+                        currentArgument.PushBack('"');
+                        current += 2;
+                        break;
+                    case '\'':
+                        currentArgument.PushBack('\'');
+                        current += 2;
+                        break;
+                    case ' ':
+                        currentArgument.PushBack(' ');
+                        current += 2;
+                        break;
+                    default:
+                        // Unknown escape sequence - keep the backslash
+                        currentArgument.PushBack('\\');
+                        ++current;
+                        break;
+                }
+                justClosedQuotes = false;
+                continue;
+            }
+
+            // Handle quote characters
+            if((*current == '"' || *current == '\'') && !inQuotes)
+            {
+                inQuotes = true;
+                quoteChar = *current;
+                justClosedQuotes = false;
                 ++current;
+                continue;
             }
 
-            if(*current == '\0')
+            if(*current == quoteChar && inQuotes)
             {
-                break;
-            }
-
-            // Find the end of the argument
-            CharT* start = current;
-            while(*current != ' ' && *current != '\0')
-            {
+                inQuotes = false;
+                quoteChar = '\0';
+                justClosedQuotes = true;
                 ++current;
+                continue;
             }
 
-            // Extract the argument
-            const uint32_t length = static_cast<uint32_t>(current - start);
-            BasicString<CharT> argument(start, length);
-            arguments.PushBack( std::move(argument) );
+            // Handle spaces (argument separator if not in quotes)
+            if(*current == ' ' && !inQuotes)
+            {
+                // Skip consecutive spaces
+                while(*current == ' ')
+                {
+                    ++current;
+                }
+
+                // Add the argument if we have one or if we just closed quotes (even if empty)
+                if(currentArgument.GetSize() > 0 || justClosedQuotes)
+                {
+                    // Handle empty quoted strings
+                    if(currentArgument.GetSize() == 0)
+                    {
+                        arguments.PushBack( BasicString<CharT>() );
+                    }
+                    else
+                    {
+                        currentArgument.PushBack('\0');
+                        BasicString<CharT> argument(currentArgument.GetData(), currentArgument.GetSize() - 1);
+                        arguments.PushBack( std::move(argument) );
+                    }
+                    currentArgument = DynamicArray<CharT>();
+                    justClosedQuotes = false;
+                }
+                continue;
+            }
+
+            // Regular character
+            currentArgument.PushBack(*current);
+            justClosedQuotes = false;
+            ++current;
         }
+
+        // Add the final argument if we have one or if we just closed quotes
+        if(currentArgument.GetSize() > 0 || justClosedQuotes)
+        {
+            // Handle empty quoted strings
+            if(currentArgument.GetSize() == 0)
+            {
+                arguments.PushBack( BasicString<CharT>() );
+            }
+            else
+            {
+                currentArgument.PushBack('\0');
+                BasicString<CharT> argument(currentArgument.GetData(), currentArgument.GetSize() - 1);
+                arguments.PushBack( std::move(argument) );
+            }
+        }
+
         return CommandLineManager( std::move(arguments) );
     }
 

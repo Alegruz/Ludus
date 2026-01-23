@@ -1,6 +1,7 @@
 #include <Ludus/Engine/Core/UnitTest.hpp>
 #include <Ludus/Engine/Core/Math/Vector.hpp>
 #include <Ludus/Engine/Core/Math/Trigonometry.hpp>
+#include <Ludus/Engine/Core/CommandLineManager.hpp>
 #include <Ludus/Engine/Core/Container/Array.hpp>
 #include <Ludus/Engine/Core/Container/String.hpp>
 
@@ -222,6 +223,144 @@ LUDUS_TEST(String_Equality)
 
 	LUDUS_TEST_ASSERT(str1 == str2);
 	LUDUS_TEST_ASSERT(str1 != str3);
+}
+
+// ========================================
+// CommandLineManager Tests
+// ========================================
+
+LUDUS_TEST(CommandLineManager_BasicParsing)
+{
+	// Simple space-separated arguments
+	char cmdLine[] = "program arg1 arg2 arg3";
+	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
+	const DynamicArray<String>& args = manager.GetArguments();
+
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 3u);
+	LUDUS_TEST_ASSERT(args[0] == String("program"));
+	LUDUS_TEST_ASSERT(args[1] == String("arg1"));
+	LUDUS_TEST_ASSERT(args[2] == String("arg2"));
+	LUDUS_TEST_ASSERT(args[3] == String("arg3"));
+}
+
+LUDUS_TEST(CommandLineManager_DoubleQuotes)
+{
+	// Arguments with spaces inside double quotes
+	char cmdLine[] = "program \"hello world\" arg2";
+	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
+	const DynamicArray<String>& args = manager.GetArguments();
+
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
+	LUDUS_TEST_ASSERT(args[0] == String("program"));
+	LUDUS_TEST_ASSERT(args[1] == String("hello world"));
+	LUDUS_TEST_ASSERT(args[2] == String("arg2"));
+}
+
+LUDUS_TEST(CommandLineManager_SingleQuotes)
+{
+	// Arguments with spaces inside single quotes
+	char cmdLine[] = "program 'single quoted' arg2";
+	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
+	const DynamicArray<String>& args = manager.GetArguments();
+
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
+	LUDUS_TEST_ASSERT(args[0] == String("program"));
+	LUDUS_TEST_ASSERT(args[1] == String("single quoted"));
+	LUDUS_TEST_ASSERT(args[2] == String("arg2"));
+}
+
+LUDUS_TEST(CommandLineManager_EscapeSequences)
+{
+	// Test escape sequences
+	// NOLINTNEXTLINE(modernize-raw-string-literal) - Testing parser's escape handling, not C++ escapes
+	char cmdLine[] = "program \"hello\\nworld\" \"tab\\there\"";
+	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
+	const DynamicArray<String>& args = manager.GetArguments();
+
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
+	LUDUS_TEST_ASSERT(args[0] == String("program"));
+	LUDUS_TEST_ASSERT(args[1] == String("hello\nworld"));
+	LUDUS_TEST_ASSERT(args[2] == String("tab\there"));
+}
+
+LUDUS_TEST(CommandLineManager_EscapeQuotes)
+{
+	// Test escaping quotes inside quoted strings
+	// NOLINTNEXTLINE(modernize-raw-string-literal) - Testing parser's escape handling, not C++ escapes
+	char cmdLine[] = "program \"say \\\"hello\\\"\" 'don\\'t'";
+	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
+	const DynamicArray<String>& args = manager.GetArguments();
+
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
+	LUDUS_TEST_ASSERT(args[0] == String("program"));
+	LUDUS_TEST_ASSERT(args[1] == String("say \"hello\""));
+	LUDUS_TEST_ASSERT(args[2] == String("don't"));
+}
+
+LUDUS_TEST(CommandLineManager_EscapeSpace)
+{
+	// Test escaping spaces outside of quotes
+	char cmdLine[] = "program hello\\ world arg2";
+	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
+	const DynamicArray<String>& args = manager.GetArguments();
+
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
+	LUDUS_TEST_ASSERT(args[0] == String("program"));
+	LUDUS_TEST_ASSERT(args[1] == String("hello world"));
+	LUDUS_TEST_ASSERT(args[2] == String("arg2"));
+}
+
+LUDUS_TEST(CommandLineManager_MixedQuotesAndEscapes)
+{
+	// Complex case mixing quotes and escapes
+	// NOLINTNEXTLINE(modernize-raw-string-literal) - Testing parser's escape handling, not C++ escapes
+	char cmdLine[] = "program \"path\\nwith spaces\" unquoted\\ value 'another arg'";
+	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
+	const DynamicArray<String>& args = manager.GetArguments();
+
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 3u);
+	LUDUS_TEST_ASSERT(args[0] == String("program"));
+	LUDUS_TEST_ASSERT(args[1] == String("path\nwith spaces"));
+	LUDUS_TEST_ASSERT(args[2] == String("unquoted value"));
+	LUDUS_TEST_ASSERT(args[3] == String("another arg"));
+}
+
+LUDUS_TEST(CommandLineManager_MultipleSpaces)
+{
+	// Multiple consecutive spaces should be treated as single separator
+	char cmdLine[] = "program    arg1     arg2";
+	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
+	const DynamicArray<String>& args = manager.GetArguments();
+
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 3u);
+	LUDUS_TEST_ASSERT(args[0] == String("program"));
+	LUDUS_TEST_ASSERT(args[1] == String("arg1"));
+	LUDUS_TEST_ASSERT(args[2] == String("arg2"));
+}
+
+LUDUS_TEST(CommandLineManager_EmptyQuotes)
+{
+	// Empty quoted strings should produce empty arguments
+	char cmdLine[] = "program \"\" arg2";
+	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
+	const DynamicArray<String>& args = manager.GetArguments();
+
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
+	LUDUS_TEST_ASSERT(args[0] == String("program"));
+	LUDUS_TEST_ASSERT(args[1] == String(""));
+	LUDUS_TEST_ASSERT(args[2] == String("arg2"));
+}
+
+LUDUS_TEST(CommandLineManager_BackslashAtEnd)
+{
+	// Trailing backslash should be preserved
+	char cmdLine[] = "program test\\\\";
+	CommandLineManager<char> manager = CommandLineManager<char>::Create(cmdLine);
+	const DynamicArray<String>& args = manager.GetArguments();
+
+	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
+	LUDUS_TEST_ASSERT(args[0] == String("program"));
+	LUDUS_TEST_ASSERT(args[1] == String("test\\"));
 }
 
 // NOLINTEND(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
