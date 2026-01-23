@@ -12,6 +12,17 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 project(GameEngine LANGUAGES C CXX)
 
+# ============================================================================
+# Build Configuration Options
+# Define all options early so they can be referenced throughout the build
+# ============================================================================
+option(ENABLE_MIMALLOC "Enable mimalloc memory allocator" ON)
+option(ENABLE_SANITIZERS "Enable ASan+UBSan+LSan (GCC/Clang only - MSVC sanitizers disabled)" ON)
+option(ENABLE_APP_VERIFIER "Enable Windows Application Verifier setup (recommended for Windows)" OFF)
+option(ENABLE_CLANG_TIDY "Enable clang-tidy static analysis" ON)
+option(ENABLE_CPPCHECK "Enable cppcheck static analysis" OFF)
+option(ENABLE_MSVC_ANALYZE "Enable MSVC /analyze static analysis" OFF)
+
 # Tool search hints (standard install locations):
 set(LLVM_HINT_PATHS
     "C:/Program Files/LLVM/bin"
@@ -112,11 +123,11 @@ endfunction()
 # FetchContent for external dependencies
 include(FetchContent)
 
+# ============================================================================
 # mimalloc: High-performance memory allocator
 # Useful for profiling memory performance and reducing allocator overhead
-# Optional: disable with -DENABLE_MIMALLOC=OFF
 # Note: Automatically disabled when sanitizers are enabled to avoid conflicts
-option(ENABLE_MIMALLOC "Enable mimalloc memory allocator" ON)
+# ============================================================================
 
 # Disable mimalloc when sanitizers are enabled to avoid malloc interception conflicts
 if(ENABLE_SANITIZERS)
@@ -192,11 +203,12 @@ target_compile_options(LudusBuildSettings INTERFACE
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow
     -fno-exceptions -fno-rtti>  # if that’s your policy; otherwise drop
 )
-# Static Analysis: clang-tidy, cppcheck, MSVC /analyze, clang-format
-# Optional dev tools with auto-install for convenience
-option(ENABLE_CLANG_TIDY "Enable clang-tidy static analysis" ON)
-option(ENABLE_CPPCHECK "Enable cppcheck static analysis" OFF)
-option(ENABLE_MSVC_ANALYZE "Enable MSVC /analyze static analysis" OFF)
+
+# ============================================================================
+# Static Analysis Tools
+# Auto-install for convenience (clang-tidy, clang-format)
+# Options defined at top of file
+# ============================================================================
 
 # Find or install clang-format
 find_or_install_dev_tool(CLANG_FORMAT_EXE clang-format)
@@ -276,6 +288,10 @@ if(ENABLE_MSVC_ANALYZE AND MSVC)
     )
     message(STATUS "MSVC /analyze enabled")
 endif()
+
+# ============================================================================
+# Compiler and Platform Information
+# ============================================================================
 message(STATUS "Current platform: ${CMAKE_SYSTEM_NAME}")
 message(STATUS "Current compiler: ${CMAKE_CXX_COMPILER_ID}")
 
@@ -294,11 +310,12 @@ if(ENABLE_MIMALLOC AND TARGET mimalloc)
     message(STATUS "mimalloc linked to LudusBuildSettings")
 endif()
 
-# Sanitizers: Only enabled for GCC/Clang (MSVC AddressSanitizer disabled due to compatibility issues)
+# ============================================================================
+# Sanitizers Configuration
+# Only enabled for GCC/Clang (MSVC AddressSanitizer disabled due to compatibility issues)
+# Options defined at top of file
+# ============================================================================
 add_library(ProjectSanitizersSettings INTERFACE)
-
-option(ENABLE_SANITIZERS "Enable ASan+UBSan+LSan (GCC/Clang only - MSVC sanitizers disabled)" ON)
-option(ENABLE_APP_VERIFIER "Enable Windows Application Verifier setup (recommended for Windows)" OFF)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     if(ENABLE_SANITIZERS AND NOT MSVC)
