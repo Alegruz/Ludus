@@ -300,6 +300,11 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInf
             $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>,$<BOOL:${ENABLE_SANITIZERS}>>:-fsanitize=address,undefined,leak -fno-omit-frame-pointer -g>)
         target_link_options(ProjectSanitizersSettings INTERFACE 
             $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>,$<BOOL:${ENABLE_SANITIZERS}>>:-fsanitize=address,undefined,leak -fno-omit-frame-pointer>)
+        # Disable PIE on Linux with ASan to avoid shadow memory conflicts (Linux 4.12+ issue)
+        if(UNIX AND NOT APPLE)
+            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -no-pie")
+            set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -no-pie")
+        endif()
         message(STATUS "AddressSanitizer enabled for GCC/Clang")
     elseif(ENABLE_SANITIZERS AND MSVC)
         # MSVC AddressSanitizer: DISABLED due to Windows 11 compatibility issues
