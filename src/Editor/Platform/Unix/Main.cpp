@@ -3,7 +3,6 @@
 #include <Ludus/Engine/Core/CommandLineManager.hpp>
 #include <Ludus/Engine/Core/Container/Array.hpp>
 #include <Ludus/Engine/Core/Container/String.hpp>
-#include <Ludus/Engine/Core/UnitTest.hpp>
 
 #include <iostream>
 
@@ -12,12 +11,7 @@ int main(int argc, char** argv)
 	ludus::core::CommandLineManager<char> commandLineManager = ludus::core::CommandLineManager<char>::Create(argc, argv);
 	const ludus::core::DynamicArray<ludus::core::String>& arguments = commandLineManager.GetArguments();
 	bool quickExit = false;
-	bool runTests = false;
 	
-#ifdef LUDUS_RUN_TESTS
-	runTests = true;
-#endif
-
 	for (const ludus::core::String& arg : arguments)
 	{
 		// For demonstration purposes, output each argument to the debug console
@@ -31,19 +25,6 @@ int main(int argc, char** argv)
 		{
 			quickExit = true;
 		}
-		
-		// Check for test flag
-		if (arg == "--run-tests" || arg == "--test" || arg == "--tests")
-		{
-			runTests = true;
-		}
-	}
-
-	// Run unit tests if requested
-	if (runTests)
-	{
-		ludus::core::UnitTestRegistry::GetInstance().RunAllTests();
-		return 0;
 	}
 
 	// Exit early if quick exit flag is set

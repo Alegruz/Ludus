@@ -36,5 +36,75 @@
             "args": [
             ]
         },
+        {
+            "type": "cppvsdbg",
+            "request": "launch",
+            "name": "Debug LudusCore Tests (x64-Debug)",
+            "program": "${workspaceFolder}/build/bin/Debug/LudusCore.dll",
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [
+                {
+                    "name": "ASAN_OPTIONS",
+                    "value": "halt_on_error=1:abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1:mmap_limit_mb=2048"
+                }
+            ]
+        },
+        {
+            "type": "cppdbg",
+            "request": "launch",
+            "name": "Debug LudusCore Tests (UNIX)",
+            "program": "${workspaceFolder}/build/bin/LudusCore.so",
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [
+                {
+                    "name": "ASAN_OPTIONS",
+                    "value": "halt_on_error=1:abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1:mmap_limit_mb=2048"
+                }
+            ]
+        },
+        {
+            "type": "cppvsdbg",
+            "request": "launch",
+            "name": "Run Unit Tests (test_msvc - Windows)",
+            "program": "${workspaceFolder}/out/build/test_msvc/bin/LudusTests.exe",
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [
+                {
+                    "name": "ASAN_OPTIONS",
+                    "value": "halt_on_error=1:abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1:mmap_limit_mb=2048"
+                }
+            ]
+        },
+        {
+            "type": "cppdbg",
+            "request": "launch",
+            "name": "Run Unit Tests (test_clang - Linux)",
+            "program": "${workspaceFolder}/out/build/test_clang/bin/LudusTests",
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [
+                {
+                    "name": "ASAN_OPTIONS",
+                    "value": "halt_on_error=1:abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1:mmap_limit_mb=2048"
+                }
+            ]
+        },
+        {
+            "type": "cppdbg",
+            "request": "launch",
+            "name": "Run Unit Tests (test_gcc - Linux)",
+            "program": "${workspaceFolder}/out/build/test_gcc/bin/LudusTests",
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "environment": [
+                {
+                    "name": "ASAN_OPTIONS",
+                    "value": "halt_on_error=1:abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1:mmap_limit_mb=2048"
+                }
+            ]
+        }
     ]
 }

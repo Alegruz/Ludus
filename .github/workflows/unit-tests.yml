@@ -67,7 +67,7 @@ jobs:
         shell: pwsh
         run: |
           $buildDir = "out/build/${{ matrix.build_preset }}"
-          $exe = Join-Path $buildDir "bin/LudusEditor.exe"
+          $exe = Join-Path $buildDir "bin/LudusTests.exe"
           
           if (-not (Test-Path $exe)) {
             Write-Error "Executable not found: $exe"
@@ -75,7 +75,7 @@ jobs:
           }
           
           Write-Host "Running unit tests..."
-          & $exe --run-tests
+          & $exe
           
           if ($LASTEXITCODE -ne 0) {
             Write-Error "Unit tests failed with exit code $LASTEXITCODE"
@@ -87,7 +87,7 @@ jobs:
         shell: bash
         run: |
           buildDir="out/build/${{ matrix.build_preset }}"
-          exe="$buildDir/bin/LudusEditor"
+          exe="$buildDir/bin/LudusTests"
           
           if [ ! -f "$exe" ]; then
             echo "Error: Executable not found: $exe"
@@ -95,7 +95,7 @@ jobs:
           fi
           
           echo "Running unit tests..."
-          "$exe" --run-tests
+          "$exe"
           
           exitCode=$?
           if [ $exitCode -ne 0 ]; then

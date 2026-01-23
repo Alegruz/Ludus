@@ -26,17 +26,17 @@ namespace ludus::core
 		virtual ~UnitTest() = default;
 
 		virtual void Run() = 0;
-		[[nodiscard]] const char* GetName() const noexcept { return m_Name; }
-		[[nodiscard]] bool HasFailed() const noexcept { return m_Failed; }
-		[[nodiscard]] const String& GetFailureMessage() const noexcept { return m_FailureMessage; }
+		[[nodiscard]] const char* GetName() const noexcept { return mName; }
+		[[nodiscard]] bool HasFailed() const noexcept { return mFailed; }
+		[[nodiscard]] const String& GetFailureMessage() const noexcept { return mFailureMessage; }
 
 	protected:
 		void Fail(const char* message);
 
 	private:
-		const char* m_Name;
-		bool m_Failed = false;
-		String m_FailureMessage;
+		const char* mName;
+		bool mFailed = false;
+		String mFailureMessage;
 	};
 
 	// Registry for all unit tests
@@ -50,7 +50,7 @@ namespace ludus::core
 
 	private:
 		UnitTestRegistry() = default;
-		DynamicArray<UnitTest*> m_Tests;
+		DynamicArray<UnitTest*> mTests;
 	};
 
 	// Helper class to auto-register tests

@@ -7,14 +7,14 @@
 namespace ludus::core
 {
 	inline UnitTest::UnitTest(const char* name)
-		: m_Name(name)
+		: mName(name)
 	{
 	}
 
 	inline void UnitTest::Fail(const char* message)
 	{
-		m_Failed = true;
-		m_FailureMessage = message;
+		mFailed = true;
+		mFailureMessage = message;
 	}
 
 	inline UnitTestRegistry& UnitTestRegistry::GetInstance()
@@ -25,7 +25,7 @@ namespace ludus::core
 
 	inline void UnitTestRegistry::RegisterTest(UnitTest* test)
 	{
-		m_Tests.PushBack(test);
+		mTests.PushBack(test);
 	}
 
 	inline DynamicArray<TestResult> UnitTestRegistry::RunAllTests()
@@ -39,7 +39,7 @@ namespace ludus::core
 		uint32_t passed = 0;
 		uint32_t failed = 0;
 
-		for (UnitTest* test : m_Tests)
+		for (UnitTest* test : mTests)
 		{
 			std::cout << "Running test: " << test->GetName() << "... ";
 			
