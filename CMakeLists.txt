@@ -208,8 +208,9 @@ if(ENABLE_CLANG_TIDY)
     if(CLANG_TIDY_EXE)
         # Suppress warnings from external dependencies (mimalloc, etc.) to avoid false positives
         # --system-headers=false prevents checking system/external headers
-        # -clang-diagnostic-* filters exclude all compiler diagnostics from static analysis
-        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};-warnings-as-errors=*;--header-filter=.*include/Ludus/.*;--system-headers=false;--checks=-clang-diagnostic-*")
+        # --header-filter excludes external library headers from analysis
+        # -clang-diagnostic-* filters exclude compiler diagnostics to avoid mimalloc incompatibility issues
+        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};-warnings-as-errors=*;--header-filter=.*include/Ludus/.*;--system-headers=false;--checks=-clang-diagnostic-error,-clang-diagnostic-*")
         message(STATUS "clang-tidy enabled (warnings as errors): ${CLANG_TIDY_EXE}")
     else()
         message(STATUS "clang-tidy disabled (not found)")

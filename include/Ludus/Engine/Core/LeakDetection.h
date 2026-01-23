@@ -160,7 +160,7 @@
         };
 
         // Debug macros that do nothing in non-debug builds
-        #define LUDUS_LEAK_DETECTOR() ludus::core::debug::ScopedLeakDetector leakDetector_
+        #define LUDUS_LEAK_DETECTOR() [[maybe_unused]] ludus::core::debug::ScopedLeakDetector leakDetector_
         #define LUDUS_BREAK_ON_ALLOC(num) leakDetector_.BreakOnAllocation(num)
         
         LUDUS_INLINE void InitializeLeakDetection() noexcept {}
