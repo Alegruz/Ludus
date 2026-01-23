@@ -42,7 +42,7 @@ If LLVM tools aren’t found, CMake will invoke `init.bat` or prompt to install 
 
 - `ENABLE_MIMALLOC=ON|OFF` (default ON): Use mimalloc and override malloc/free. Auto‑disabled with sanitizers.
 - `ENABLE_SANITIZERS=ON|OFF` (default ON for Clang/GCC Debug/RelWithDebInfo): ASan/UBSan/LSan for non‑MSVC toolchains.
-- `ENABLE_CLANG_TIDY=ON|OFF` (default ON): Sets `-warnings-as-errors=*` via `CMAKE_CXX_CLANG_TIDY` if available.
+- `ENABLE_CLANG_TIDY=ON|OFF` (default ON): Enables clang-tidy if available; gracefully disables if not found.
 - `ENABLE_CPPCHECK=ON|OFF`, `ENABLE_MSVC_ANALYZE=ON|OFF`: Optional static analyzers.
 
 Useful targets when `clang-format` is available:
@@ -65,6 +65,7 @@ cmake --build --preset ninja_msvc-debug -t format-fix
 ## Documentation Map
 
 - Start here: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)
+- Build system philosophy & CI integration: [docs/BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md)
 - Memory model: [docs/MEMORY_ARCHITECTURE.md](docs/MEMORY_ARCHITECTURE.md)
 - Leak detection overview: [docs/LEAK_DETECTION.md](docs/LEAK_DETECTION.md)
 - Leak detection quick ref: [docs/LEAK_DETECTION_QUICK_REFERENCE.md](docs/LEAK_DETECTION_QUICK_REFERENCE.md)
@@ -74,7 +75,7 @@ cmake --build --preset ninja_msvc-debug -t format-fix
 
 ## Troubleshooting
 
-- clang‑tidy/format not found: CMake tries `init.bat` and Chocolatey on Windows; otherwise install LLVM from https://llvm.org/ and re‑configure.
+- clang‑tidy/format auto-install failed: CMake attempts install via Chocolatey (Windows), Homebrew (macOS), or apt (Linux). For manual installation, see [docs/BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md).
 - Missing Ninja: install via `choco install ninja` (Windows) or your package manager; or use a Visual Studio generator instead.
 - Editor exe location: `LudusEditor.exe` and runtime DLLs are copied to the repo root after build. Libraries are under `build/lib/`, tests under `build/bin/`.
 
