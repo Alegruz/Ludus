@@ -14,6 +14,7 @@ The Ludus build system follows these principles:
 2. **Optional, graceful fallbacks**
    - If auto-install fails or is disabled, the build **succeeds anyway**—only formatting and analysis targets are unavailable.
    - CI environments can disable auto-install by setting `ENABLE_CLANG_TIDY=OFF` or by pre-installing tools.
+   - Use `-DENABLE_AUTO_INSTALL_TOOLS=OFF` to prevent any auto-install attempts.
 
 3. **Stable external dependencies**
    - mimalloc is pinned to a stable version (e.g., `v2.1.2`) in `CMakeLists.txt`, not `main` branch.
@@ -72,20 +73,20 @@ powershell -ExecutionPolicy Bypass -File tools/install-llvm.ps1
 # or
 choco install llvm
 
-# Then configure with auto-install disabled (optional, but explicit)
-cmake --preset ninja_msvc-debug -DENABLE_CLANG_TIDY=ON
+# Then configure with auto-install disabled
+cmake --preset ninja_msvc-debug -DENABLE_AUTO_INSTALL_TOOLS=OFF -DENABLE_CLANG_TIDY=ON
 ```
 
 **macOS:**
 ```bash
 brew install llvm
-cmake --preset ninja_clang-debug
+cmake --preset ninja_clang-debug -DENABLE_AUTO_INSTALL_TOOLS=OFF
 ```
 
 **Linux (Debian/Ubuntu):**
 ```bash
 sudo apt-get install clang-tools
-cmake --preset ninja_clang-debug
+cmake --preset ninja_clang-debug -DENABLE_AUTO_INSTALL_TOOLS=OFF
 ```
 
 ## CI/CD Integration
@@ -163,7 +164,7 @@ For CI environments, disable auto-install to ensure builds are deterministic and
 
 ```bash
 # Windows CI: disable auto-install, assume tools are already present
-cmake --preset ninja_msvc-debug -DENABLE_CLANG_TIDY=OFF
+cmake --preset ninja_msvc-debug -DENABLE_AUTO_INSTALL_TOOLS=OFF -DENABLE_CLANG_TIDY=OFF
 
 # Or pre-install tools, then auto-install doesn't matter (tools already found)
 choco install llvm
@@ -190,7 +191,7 @@ RUN cmake --build --preset ninja_clang-debug -t LudusEditor
 A: No. It checks first with `find_program()`. If tools are already found, auto-install is skipped. Only missing tools trigger install attempts.
 
 **Q: Can I disable auto-install?**  
-A: Yes. Set `ENABLE_CLANG_TIDY=OFF` to skip clang-tidy auto-install. Pre-installing tools disables the auto-install trigger for those tools.
+A: Yes. Set `ENABLE_AUTO_INSTALL_TOOLS=OFF` to disable all auto-install attempts. You can also set `ENABLE_CLANG_TIDY=OFF` to skip clang-tidy entirely, or pre-install tools so auto-install is never triggered.
 
 **Q: What if auto-install fails?**  
 A: The build succeeds. CMake prints a message indicating why the install failed. You can manually install LLVM afterwards and reconfigure.

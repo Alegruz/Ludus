@@ -128,6 +128,7 @@ cmake --preset ninja_msvc-debug -DENABLE_MIMALLOC=OFF -DENABLE_SANITIZERS=ON
 - `ENABLE_MIMALLOC=ON|OFF` (default ON): High-performance memory allocator. Auto-disabled with sanitizers.
 - `ENABLE_SANITIZERS=ON|OFF` (default ON for Clang/GCC): AddressSanitizer, UndefinedBehaviorSanitizer, LeakSanitizer.
 - `ENABLE_CLANG_TIDY=ON|OFF` (default ON): Static analysis with clang-tidy.
+- `ENABLE_AUTO_INSTALL_TOOLS=ON|OFF` (default ON): Allow CMake to auto-install clang-format/clang-tidy if missing.
 - `ENABLE_CPPCHECK=ON|OFF`, `ENABLE_MSVC_ANALYZE=ON|OFF`: Optional additional analyzers.
 
 ---

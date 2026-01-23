@@ -22,6 +22,7 @@ option(ENABLE_APP_VERIFIER "Enable Windows Application Verifier setup (recommend
 option(ENABLE_CLANG_TIDY "Enable clang-tidy static analysis" ON)
 option(ENABLE_CPPCHECK "Enable cppcheck static analysis" OFF)
 option(ENABLE_MSVC_ANALYZE "Enable MSVC /analyze static analysis" OFF)
+option(ENABLE_AUTO_INSTALL_TOOLS "Allow CMake to auto-install clang-format/clang-tidy when missing" ON)
 
 # Tool search hints (standard install locations):
 set(LLVM_HINT_PATHS
@@ -39,6 +40,12 @@ function(find_or_install_dev_tool VAR_NAME TOOL_NAME)
     find_program(${VAR_NAME} NAMES ${TOOL_NAME} HINTS ${LLVM_HINT_PATHS})
     
     if(NOT ${VAR_NAME})
+        if(NOT ENABLE_AUTO_INSTALL_TOOLS)
+            message(STATUS "${TOOL_NAME} not found and auto-install is disabled.")
+            set(${VAR_NAME} ${${VAR_NAME}} PARENT_SCOPE)
+            return()
+        endif()
+
         message(STATUS "${TOOL_NAME} not found. Attempting auto-install...")
         
         if(WIN32)
