@@ -2,11 +2,11 @@
 add_library(LudusCore SHARED)
 
 # Explicitly list source files for better dependency tracking
+# Note: CoreTests.cpp is compiled separately into the test executable to avoid ODR violations
 target_sources(LudusCore PRIVATE
     CommandLineOptions.cpp
     CommandLineManager.cpp
     Random.cpp
-    CoreTests.cpp
     Container/String.cpp
 )
 

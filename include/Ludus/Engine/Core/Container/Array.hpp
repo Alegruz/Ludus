@@ -576,6 +576,7 @@ namespace ludus::core
     LUDUS_INLINE constexpr ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::operator=(ArrayImpl&& other) noexcept = default;
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
+    // cppcheck-suppress duplInheritedMember ; Intentional override to return derived type instead of base type
     LUDUS_INLINE constexpr ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::operator=(std::initializer_list<T> initList) noexcept
     {
         Base::operator=(initList);
@@ -637,6 +638,7 @@ namespace ludus::core
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
+    // cppcheck-suppress duplInheritedMember ; Intentional override to add runtime assertion for safety
     LUDUS_INLINE constexpr T* ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetData() noexcept
     {
         T* data = Base::GetData();
@@ -645,6 +647,7 @@ namespace ludus::core
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
+    // cppcheck-suppress duplInheritedMember ; Intentional override to add runtime assertion for safety
     LUDUS_INLINE constexpr const T* ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetData() const noexcept
     {
         const T* data = Base::GetData();
@@ -723,6 +726,7 @@ namespace ludus::core
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
+    // cppcheck-suppress functionConst ; end() returns mutable iterator, cannot be const
     LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Iterator ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::end() noexcept  // NOLINT(readability-identifier-naming)
     {
         return Iterator(*(this->mData + this->GetSize()));

@@ -18,6 +18,7 @@ int main(int argc, char** argv)
 	const ludus::core::DynamicArray<ludus::core::TestResult> results = ludus::core::UnitTestRegistry::GetInstance().RunAllTests();
 
 	// Return non-zero if any tests failed
+	// cppcheck-suppress useStlAlgorithm ; Range-based for loop is clearer and more maintainable than std::any_of for early return
 	for (const ludus::core::TestResult& result : results)
 	{
 		if (!result.Passed)
