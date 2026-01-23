@@ -728,7 +728,8 @@ namespace ludus::core
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
     // cppcheck-suppress functionConst ; end() returns mutable iterator, cannot be const
-    LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Iterator ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::end() noexcept  // NOLINT(readability-identifier-naming)
+// cppcheck-suppress functionConst
+LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Iterator ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::end() noexcept  // NOLINT(readability-identifier-naming)
     {
         return Iterator(*(this->mData + this->GetSize()));
     }

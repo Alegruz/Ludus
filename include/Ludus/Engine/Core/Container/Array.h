@@ -87,6 +87,7 @@ namespace ludus::core
         [[nodiscard]] constexpr Iterator begin() noexcept;  // NOLINT(readability-identifier-naming)
         [[nodiscard]] constexpr ConstIterator begin() const noexcept;   // NOLINT(readability-identifier-naming)
         [[nodiscard]] constexpr ConstIterator cbegin() const noexcept;  // NOLINT(readability-identifier-naming)
+        // cppcheck-suppress functionConst
         [[nodiscard]] constexpr Iterator end() noexcept;    // NOLINT(readability-identifier-naming)
         [[nodiscard]] constexpr ConstIterator end() const noexcept;  // NOLINT(readability-identifier-naming)
         [[nodiscard]] constexpr ConstIterator cend() const noexcept;    // NOLINT(readability-identifier-naming)

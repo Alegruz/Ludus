@@ -258,6 +258,7 @@ if(ENABLE_CPPCHECK)
             "--enable=warning,performance,portability,style"
             "--inconclusive"
             "--inline-suppr"
+            "--suppress=useStlAlgorithm"
             "--suppress=missingIncludeSystem"
             "--suppress=*:${CMAKE_BINARY_DIR}/_deps/*"
             "--suppress=*:${CMAKE_BINARY_DIR}/out/_deps/*"
