@@ -123,7 +123,18 @@ namespace ludus::core
         if(other.mData != nullptr)
         {
             mData = memory::Allocate<T>(mCapacity);
-            memory::CopyMemory(mData, other.mData, mSize * sizeof(T));
+            // Use placement new for non-trivial types, memcpy for trivial types
+            if constexpr (std::is_trivially_copyable_v<T>)
+            {
+                memory::CopyMemory(mData, other.mData, mSize * sizeof(T));
+            }
+            else
+            {
+                for(uint32_t i = 0; i < mSize; ++i)
+                {
+                    new (&mData[i]) T(other.mData[i]);
+                }
+            }
         }
         else
         {
@@ -208,16 +219,24 @@ namespace ludus::core
         {
             if constexpr (ARRAY_TYPE == ArrayType::DYNAMIC)
             {
-                if(mData != nullptr)
-                {
-                    memory::Deallocate(mData);
-                }
+                destroyAndDeallocate();
                 mCapacity = other.mCapacity;
                 mSize = other.mSize;
                 if(other.mData != nullptr)
                 {
                     mData = memory::Allocate<T>(mCapacity);
-                    memory::CopyMemory(mData, other.mData, mSize * sizeof(T));
+                    // Use placement new for non-trivial types, memcpy for trivial types
+                    if constexpr (std::is_trivially_copyable_v<T>)
+                    {
+                        memory::CopyMemory(mData, other.mData, mSize * sizeof(T));
+                    }
+                    else
+                    {
+                        for(uint32_t i = 0; i < mSize; ++i)
+                        {
+                            new (&mData[i]) T(other.mData[i]);
+                        }
+                    }
                 }
                 else
                 {
@@ -241,10 +260,7 @@ namespace ludus::core
         {
             if constexpr (ARRAY_TYPE == ArrayType::DYNAMIC)
             {
-                if(mData != nullptr)
-                {
-                    memory::Deallocate(mData);
-                }
+                destroyAndDeallocate();
                 mCapacity = other.mCapacity;
                 mSize = other.mSize;
                 mData = other.mData;
@@ -325,14 +341,28 @@ namespace ludus::core
     {
         if(array != nullptr && size > 0)
         {
+            uint32_t assignSize = size;
             if constexpr (StringCharType<T>)
             {
-                ++size;
+                ++assignSize;
             }
             
-            SetCapacity(size);
-            memory::CopyMemory(mData, array, size * sizeof(T));
-            mSize = size;
+            SetCapacity(assignSize);
+            
+            // Use placement new for non-trivial types, memcpy for trivial types
+            if constexpr (std::is_trivially_copyable_v<T>)
+            {
+                memory::CopyMemory(mData, array, size * sizeof(T));
+            }
+            else
+            {
+                for(uint32_t i = 0; i < size; ++i)
+                {
+                    new (&mData[i]) T(array[i]);
+                }
+            }
+            
+            mSize = assignSize;
         }
         else
         {
@@ -434,27 +464,39 @@ namespace ludus::core
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
     LUDUS_INLINE constexpr void ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::copy(std::initializer_list<T> initList) noexcept
     {
-        const uint32_t remainder = mSize % 4;
-        const uint32_t vectorizedEnd = mSize - remainder;
-        
         auto it = initList.begin();
         
-        // Process four elements at a time
-        for(uint32_t i = 0; i < vectorizedEnd; i += 4)
+        if constexpr (std::is_trivially_copyable_v<T>)
         {
-            mData[i + 0] = *it++;
-            mData[i + 1] = *it++;
-            mData[i + 2] = *it++;
-            mData[i + 3] = *it++;
+            // Vectorized copy for trivial types
+            const uint32_t remainder = mSize % 4;
+            const uint32_t vectorizedEnd = mSize - remainder;
+            
+            // Process four elements at a time
+            for(uint32_t i = 0; i < vectorizedEnd; i += 4)
+            {
+                mData[i + 0] = *it++;
+                mData[i + 1] = *it++;
+                mData[i + 2] = *it++;
+                mData[i + 3] = *it++;
+            }
+            
+            // Handle remainder elements
+            switch(remainder)
+            {
+                case 3: mData[vectorizedEnd + 2] = *it++; [[fallthrough]];
+                case 2: mData[vectorizedEnd + 1] = *it++; [[fallthrough]];
+                case 1: mData[vectorizedEnd + 0] = *it++; break;
+                default: break;
+            }
         }
-        
-        // Handle remainder elements
-        switch(remainder)
+        else
         {
-            case 3: mData[vectorizedEnd + 2] = *it++; [[fallthrough]];
-            case 2: mData[vectorizedEnd + 1] = *it++; [[fallthrough]];
-            case 1: mData[vectorizedEnd + 0] = *it++; break;
-            default: break;
+            // Use placement new for non-trivial types
+            for(uint32_t i = 0; i < mSize; ++i)
+            {
+                new (&mData[i]) T(*it++);
+            }
         }
     }
 
@@ -463,6 +505,24 @@ namespace ludus::core
         requires (ARRAY_TYPE == ArrayType::DYNAMIC)
     {
         mSize = newSize;
+    }
+
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
+    LUDUS_INLINE constexpr void ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::destroyAndDeallocate() noexcept
+        requires (ARRAY_TYPE == ArrayType::DYNAMIC)
+    {
+        if(mData != nullptr)
+        {
+            // Call destructors on all existing elements
+            for(uint32_t i = 0; i < mSize; ++i)
+            {
+                mData[i].~T();
+            }
+            memory::Deallocate(mData);
+            mData = nullptr;
+            mSize = 0;
+            mCapacity = 0;
+        }
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
@@ -701,7 +761,19 @@ namespace ludus::core
         T* newData = memory::Allocate<T>(capacity);
         if(mData != nullptr)
         {
-            memory::CopyMemory(newData, mData, mSize * sizeof(T));
+            // Use placement new for non-trivial types, memcpy for trivial types
+            if constexpr (std::is_trivially_copyable_v<T>)
+            {
+                memory::CopyMemory(newData, mData, mSize * sizeof(T));
+            }
+            else
+            {
+                for(uint32_t i = 0; i < mSize; ++i)
+                {
+                    new (&newData[i]) T(std::move(mData[i]));
+                    mData[i].~T();
+                }
+            }
             memory::Deallocate(mData);
         }
         
@@ -746,6 +818,20 @@ namespace ludus::core
         this->SetCapacity(this->calculateCapacityToAllocate(nextSize));
         (void)(this->mData[this->GetSize()] = std::move(element));
         this->updateSize(nextSize);
+    }
+
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
+    LUDUS_INLINE constexpr void ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::PopBack() noexcept
+        requires (ARRAY_TYPE == ArrayType::DYNAMIC)
+    {
+        LUDUS_ASSERT_MSG(this->GetSize() > 0, "Cannot PopBack from an empty array");
+        const uint32_t newSize = this->GetSize() - 1;
+        // Explicitly call destructor for the element being removed
+        if constexpr (!std::is_trivially_destructible_v<T>)
+        {
+            this->mData[newSize].~T();
+        }
+        this->updateSize(newSize);
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>

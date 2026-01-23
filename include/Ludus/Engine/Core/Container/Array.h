@@ -101,6 +101,7 @@ namespace ludus::core
         [[nodiscard]] constexpr uint32_t calculateCapacityToAllocate(uint32_t requiredCapacity) const noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr void copy(std::initializer_list<T> initList) noexcept;
         constexpr void updateSize(uint32_t newSize) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        constexpr void destroyAndDeallocate() noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
 
     protected:
         static constexpr uint32_t INITIAL_CAPACITY = 16;
@@ -169,6 +170,7 @@ namespace ludus::core
         constexpr ArrayImpl& Append(const T* array, uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr void PushBack(const T& element) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr void PushBack(T&& element) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        constexpr void PopBack() noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
     };
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY = 0, ArrayResizePolicy RESIZE_POLICY = ArrayResizePolicy::DEFAULT>

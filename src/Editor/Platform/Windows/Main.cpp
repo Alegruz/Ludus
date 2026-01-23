@@ -7,6 +7,7 @@
 #include <Ludus/Engine/Core/LeakDetection.h>
 
 #include <Ludus/Engine/Core/Math/Trigonometry.hpp>
+#include <Ludus/Engine/Core/UnitTest.hpp>
 
 #include <Ludus/Engine/Platform/Window.hpp>
 
@@ -37,6 +38,12 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 	CommandLineManager<wchar_t> commandLineManager = CommandLineManager<wchar_t>::Create(lpCmdLine);
 	const DynamicArray<WString>& arguments = commandLineManager.GetArguments();
 	bool quickExit = false;
+	bool runTests = false;
+	
+#ifdef LUDUS_RUN_TESTS
+	runTests = true;
+#endif
+
 	for (const WString& arg : arguments)
 	{
 		// For demonstration purposes, output each argument to the debug console
@@ -50,6 +57,19 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 		{
 			quickExit = true;
 		}
+		
+		// Check for test flag
+		if (arg == L"--run-tests" || arg == L"--test" || arg == L"--tests")
+		{
+			runTests = true;
+		}
+	}
+
+	// Run unit tests if requested
+	if (runTests)
+	{
+		UnitTestRegistry::GetInstance().RunAllTests();
+		return;
 	}
 
 	const float angle = Pi<float>() / 4.0f; // 45 degrees in radians

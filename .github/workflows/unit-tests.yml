@@ -1,0 +1,128 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [ "develop", "main" ]
+  pull_request:
+    branches: [ "develop", "main" ]
+
+jobs:
+  unit-tests:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Unit Tests (MSVC - Windows)
+            runner: windows-latest
+            configure_preset: test_msvc
+            build_preset: test_msvc
+            configuration: Debug
+          - name: Unit Tests (Clang - Linux)
+            runner: ubuntu-latest
+            configure_preset: test_clang
+            build_preset: test_clang
+            configuration: Debug
+          - name: Unit Tests (GCC - Linux)
+            runner: ubuntu-latest
+            configure_preset: test_gcc
+            build_preset: test_gcc
+            configuration: Debug
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x init.sh && ./init.sh
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - name: Install Ninja (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja
+
+      - name: Setup ccache (Linux)
+        if: runner.os == 'Linux'
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.configure_preset }}
+          max-size: 2G
+
+      - name: Setup MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure CMake
+        run: cmake --preset "${{ matrix.configure_preset }}"
+
+      - name: Build
+        run: cmake --build --preset "${{ matrix.build_preset }}"
+
+      - name: Run Unit Tests (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $buildDir = "out/build/${{ matrix.build_preset }}"
+          $exe = Join-Path $buildDir "bin/LudusEditor.exe"
+          
+          if (-not (Test-Path $exe)) {
+            Write-Error "Executable not found: $exe"
+            exit 1
+          }
+          
+          Write-Host "Running unit tests..."
+          & $exe --run-tests
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Unit tests failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+      - name: Run Unit Tests (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          buildDir="out/build/${{ matrix.build_preset }}"
+          exe="$buildDir/bin/LudusEditor"
+          
+          if [ ! -f "$exe" ]; then
+            echo "Error: Executable not found: $exe"
+            exit 1
+          fi
+          
+          echo "Running unit tests..."
+          "$exe" --run-tests
+          
+          exitCode=$?
+          if [ $exitCode -ne 0 ]; then
+            echo "Error: Unit tests failed with exit code $exitCode"
+            exit $exitCode
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.name }}
+          path: out/build/${{ matrix.build_preset }}/bin/
+          retention-days: 7
+
+  test-summary:
+    name: Test Summary
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check test results
+        run: |
+          if [ "${{ needs.unit-tests.result }}" != "success" ]; then
+            echo "❌ Unit tests failed!"
+            exit 1
+          else
+            echo "✅ All unit tests passed!"
+          fi

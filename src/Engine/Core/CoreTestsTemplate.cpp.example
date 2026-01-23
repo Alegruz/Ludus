@@ -1,0 +1,137 @@
+// Example Template for Adding New Unit Tests to Ludus Engine
+// Copy this template and modify as needed
+
+#include <Ludus/Engine/Core/UnitTest.hpp>
+// Include the headers for the systems you want to test
+#include <Ludus/Engine/Core/Math/Vector.hpp>
+
+using namespace ludus::core;
+
+// ========================================
+// Your Test Category Name
+// ========================================
+
+// Basic test template
+LUDUS_TEST(YourTestName)
+{
+	// Arrange - Set up test data
+	Vector2<float> v(3.0f, 4.0f);
+	
+	// Act - Perform the operation
+	float length = v.Length();
+	
+	// Assert - Verify the result
+	LUDUS_TEST_ASSERT_NEAR(length, 5.0f, 0.0001f);
+}
+
+// Test with equality checks
+LUDUS_TEST(TestEquality)
+{
+	int expected = 42;
+	int actual = 40 + 2;
+	
+	LUDUS_TEST_ASSERT_EQ(expected, actual);
+}
+
+// Test with inequality checks
+LUDUS_TEST(TestInequality)
+{
+	int a = 10;
+	int b = 20;
+	
+	LUDUS_TEST_ASSERT_NE(a, b);
+}
+
+// Test with boolean condition
+LUDUS_TEST(TestCondition)
+{
+	bool isValid = true;
+	
+	LUDUS_TEST_ASSERT(isValid);
+}
+
+// Test with custom error message
+LUDUS_TEST(TestWithMessage)
+{
+	int value = 100;
+	
+	LUDUS_TEST_ASSERT_MSG(value > 0, "Value should be positive");
+}
+
+// Test for floating-point comparisons
+LUDUS_TEST(TestFloatingPoint)
+{
+	float pi = 3.14159f;
+	float approxPi = 22.0f / 7.0f;
+	
+	// Use NEAR for floating-point comparisons with an epsilon
+	LUDUS_TEST_ASSERT_NEAR(pi, approxPi, 0.01f);
+}
+
+// Test multiple related operations
+LUDUS_TEST(TestComplexScenario)
+{
+	// Test setup
+	Vector2<float> v1(1.0f, 0.0f);
+	Vector2<float> v2(0.0f, 1.0f);
+	
+	// Test 1: Dot product of perpendicular vectors
+	float dot = v1.Dot(v2);
+	LUDUS_TEST_ASSERT_EQ(dot, 0.0f);
+	
+	// Test 2: Lengths
+	LUDUS_TEST_ASSERT_NEAR(v1.Length(), 1.0f, 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(v2.Length(), 1.0f, 0.0001f);
+	
+	// Test 3: Addition
+	Vector2<float> sum = v1 + v2;
+	LUDUS_TEST_ASSERT_EQ(sum.X, 1.0f);
+	LUDUS_TEST_ASSERT_EQ(sum.Y, 1.0f);
+}
+
+/*
+ * AVAILABLE ASSERTION MACROS:
+ * 
+ * LUDUS_TEST_ASSERT(condition)
+ *   - Basic assertion that a condition is true
+ *   - Example: LUDUS_TEST_ASSERT(value > 0)
+ * 
+ * LUDUS_TEST_ASSERT_MSG(condition, message)
+ *   - Assert with a custom error message
+ *   - Example: LUDUS_TEST_ASSERT_MSG(ptr != nullptr, "Pointer should not be null")
+ * 
+ * LUDUS_TEST_ASSERT_EQ(expected, actual)
+ *   - Assert that two values are equal
+ *   - Example: LUDUS_TEST_ASSERT_EQ(42, result)
+ * 
+ * LUDUS_TEST_ASSERT_NE(expected, actual)
+ *   - Assert that two values are not equal
+ *   - Example: LUDUS_TEST_ASSERT_NE(0, count)
+ * 
+ * LUDUS_TEST_ASSERT_NEAR(expected, actual, epsilon)
+ *   - Assert floating-point near-equality
+ *   - Example: LUDUS_TEST_ASSERT_NEAR(3.14159f, pi, 0.0001f)
+ */
+
+/*
+ * NAMING CONVENTIONS:
+ * 
+ * Test names should follow the pattern: Category_Operation
+ * Examples:
+ *   - Vector2_Addition
+ *   - Vector2_Normalization
+ *   - String_Construction
+ *   - Array_PushBack
+ *   - Trigonometry_Sin
+ * 
+ * Use descriptive names that clearly indicate what is being tested.
+ */
+
+/*
+ * ADDING YOUR TESTS TO THE BUILD:
+ * 
+ * 1. Create a .cpp file in src/Engine/Core/ (or appropriate subdirectory)
+ * 2. Add the file to src/Engine/Core/CMakeLists.txt in target_sources()
+ * 3. Rebuild the project
+ * 4. Tests will automatically register and run
+ */

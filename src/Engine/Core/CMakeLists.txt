@@ -6,6 +6,7 @@ target_sources(LudusCore PRIVATE
     CommandLineOptions.cpp
     CommandLineManager.cpp
     Random.cpp
+    CoreTests.cpp
     Container/String.cpp
 )
 

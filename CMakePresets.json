@@ -123,6 +123,33 @@
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
                 "ENABLE_SANITIZERS": "ON"
             }
+        },
+        {
+            "name": "test_msvc",
+            "displayName": "Unit Tests - MSVC Debug",
+            "inherits": "ninja_msvc-debug",
+            "description": "Debug build with unit tests enabled",
+            "cacheVariables": {
+                "CMAKE_CXX_FLAGS": "/DLUDUS_RUN_TESTS"
+            }
+        },
+        {
+            "name": "test_clang",
+            "displayName": "Unit Tests - Clang Debug",
+            "inherits": "ninja_clang-debug",
+            "description": "Debug build with unit tests enabled",
+            "cacheVariables": {
+                "CMAKE_CXX_FLAGS": "-DLUDUS_RUN_TESTS"
+            }
+        },
+        {
+            "name": "test_gcc",
+            "displayName": "Unit Tests - GCC Debug",
+            "inherits": "ninja_gcc-debug",
+            "description": "Debug build with unit tests enabled",
+            "cacheVariables": {
+                "CMAKE_CXX_FLAGS": "-DLUDUS_RUN_TESTS"
+            }
         }
     ],
     "buildPresets": [
@@ -187,6 +214,27 @@
             "displayName": "Ninja with MSVC - RelWithDebInfo",
             "configurePreset": "ninja_msvc-relwithdebinfo",
             "configuration": "RelWithDebInfo",
+            "jobs": 0
+        },
+        {
+            "name": "test_msvc",
+            "displayName": "Unit Tests - MSVC Debug",
+            "configurePreset": "test_msvc",
+            "configuration": "Debug",
+            "jobs": 0
+        },
+        {
+            "name": "test_clang",
+            "displayName": "Unit Tests - Clang Debug",
+            "configurePreset": "test_clang",
+            "configuration": "Debug",
+            "jobs": 0
+        },
+        {
+            "name": "test_gcc",
+            "displayName": "Unit Tests - GCC Debug",
+            "configurePreset": "test_gcc",
+            "configuration": "Debug",
             "jobs": 0
         }
     ]
