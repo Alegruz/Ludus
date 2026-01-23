@@ -1,85 +1,198 @@
 # Ludus Game Engine
 
-Modern C++ (C++23) game/visualization engine skeleton with a small, batteries‑included core, platform abstraction, an Editor app, and a minimal unit test runner. The build is CMake‑first with presets for MSVC, Clang, and GCC, optional sanitizers, and integrated tooling (clang‑tidy/format, cppcheck, mimalloc).
+## Mission
 
-## Quick Start (Windows)
+**Ludus** is a modern C++23 game and visualization engine designed for educational and research purposes. It provides a **lightweight, well-architected foundation** with a focus on clarity, safety, and practical performance—not a production game engine.
 
-- Prerequisites: Visual Studio 2022 (Desktop C++), CMake 3.26+, Git. Ninja is optional but used by presets. LLVM tools (clang‑format/clang‑tidy) are auto‑installed by `init.bat` when missing.
-- Configure & build (MSVC, Debug):
+## Engine Scope
+
+Ludus includes:
+
+- **Core Library (`LudusCore`)**: Utilities, math, containers, assertions, command-line helpers, and memory allocation strategies.
+- **Platform Abstraction (`LudusPlatform`)**: Cross-platform support with unified interfaces and platform-specific implementations.
+- **Editor App (`LudusEditor`)**: A sample desktop application showcasing the engine's capabilities.
+- **Test Suite (`LudusTests`)**: A minimal, batteries-included unit test framework integrated into the build.
+
+## Supported Platforms
+
+- **Windows**: MSVC (Visual Studio 2022), Clang
+- **Linux**: GCC, Clang
+- **macOS**: Clang/LLVM
+
+All platforms use a unified CMake build system with preset configurations for convenience.
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- **Windows**: Visual Studio 2022 (Desktop C++), CMake 3.26+, Git
+- **Linux**: GCC or Clang, CMake 3.26+, Git
+- **macOS**: Xcode Command Line Tools, CMake 3.26+, Git
+
+Ninja is optional but recommended for faster builds. LLVM tools (clang-format, clang-tidy) are auto-installed by the build system if missing.
+
+### Build & Run (Windows MSVC)
 
 ```powershell
+# Configure and build
 cmake --preset ninja_msvc-debug
 cmake --build --preset ninja_msvc-debug -t LudusEditor
-```
 
-- Run the editor: built binaries are in `build/bin/`:
-
-```powershell
+# Run the editor
 ./build/bin/LudusEditor.exe --quick-exit
 ```
 
-- Run tests: tests are built in `build/bin/`:
+### Build & Run Tests
 
 ```powershell
+# Build tests
 cmake --build --preset ninja_msvc-debug -t LudusTests
+
+# Run tests
 ./build/bin/LudusTests.exe
 ```
 
-If LLVM tools aren’t found, CMake will invoke `init.bat` or prompt to install via Chocolatey. You can also run `tools/install-llvm.ps1` manually from an elevated PowerShell.
+### Other Platforms
 
-## Project Structure
+- **Clang**: Use `ninja_clang-debug`, `ninja_clang-release`, or `ninja_clang-relwithdebinfo`
+- **GCC (Linux)**: Use `ninja_gcc-debug`, `ninja_gcc-release`, or `ninja_gcc-relwithdebinfo`
 
-- include/Ludus/...: Public headers for core, math, containers, platform and editor.
-- src/Engine/Core: Core library `LudusCore` (shared). Utilities, math, containers, assertions, CLI.
-- src/Engine/Platform: Platform library `LudusPlatform` (shared). Platform glue under `Windows/`, `Unix/`, `MacOs/`.
-- src/Engine: Interface target `Ludus` that links `LudusCore` + `LudusPlatform`.
-- src/Editor: Executable `LudusEditor` with platform entry points under `Editor/Platform/<Platform>/Main.cpp`.
-- src/Tests: Console test runner `LudusTests` using the built‑in minimal unit test registry.
-- build/bin/: Built executables and DLLs (out-of-source, clean separation from source).
-- build/lib/: Built libraries.
-- cmake/: Helper CMake scripts (format checks).
-- tools/: Scripts (e.g., `install-llvm.ps1`).
+See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for detailed step-by-step setup and troubleshooting.
 
-## Build Options (CMake)
+---
 
-- `ENABLE_MIMALLOC=ON|OFF` (default ON): Use mimalloc and override malloc/free. Auto‑disabled with sanitizers.
-- `ENABLE_SANITIZERS=ON|OFF` (default ON for Clang/GCC Debug/RelWithDebInfo): ASan/UBSan/LSan for non‑MSVC toolchains.
-- `ENABLE_CLANG_TIDY=ON|OFF` (default ON): Enables clang-tidy if available; gracefully disables if not found.
-- `ENABLE_CPPCHECK=ON|OFF`, `ENABLE_MSVC_ANALYZE=ON|OFF`: Optional static analyzers.
+## Project Architecture
 
-Useful targets when `clang-format` is available:
+### Directory Structure
 
-```powershell
-cmake --build --preset ninja_msvc-debug -t format-check
-cmake --build --preset ninja_msvc-debug -t format-fix
+```
+include/Ludus/
+├── Engine/
+│   ├── Core/          # Utilities, math, containers, assertions
+│   └── Platform/      # Platform abstraction layer
+└── Editor/            # Editor app headers
+
+src/
+├── Engine/
+│   ├── Core/          # LudusCore implementation
+│   ├── Platform/      # LudusPlatform + platform-specific code
+│   │   ├── Windows/
+│   │   ├── Unix/
+│   │   └── MacOs/
+│   └── Renderer/      # Renderer module (placeholder)
+├── Editor/
+│   └── Platform/      # Platform entry points (Windows/Unix/MacOs)
+└── Tests/             # LudusTests implementation
+
+build/
+├── bin/               # Executables and DLLs
+└── lib/               # Libraries
 ```
 
-## Cross‑Platform Notes
+### Component Map
 
-- Linux: use `ninja_clang-*` or `ninja_gcc-*` presets. Sanitizers are enabled in Debug/RelWithDebInfo for Clang/GCC.
-- macOS: use `ninja_clang-*`. Install LLVM with Homebrew if needed (`brew install llvm`).
-- Windows AddressSanitizer via MSVC is disabled in this repo due to compatibility issues; prefer Clang on Windows if you need ASan.
+```
+LudusCore (shared library)
+    ↓
+    Core utilities, math, containers, memory
+    
+LudusPlatform (shared library)
+    ↓
+    Platform abstraction, window management, system calls
+    
+Ludus (interface library)
+    ↓
+    Umbrella target linking LudusCore + LudusPlatform
+    
+LudusEditor (executable)
+    ↓
+    Application using Ludus + platform-specific entry point
+    
+LudusTests (executable)
+    ↓
+    Test runner using in-house test registry
+```
 
-## Start Here
+---
 
-- New to the repo? Read the step‑by‑step guide in [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md). It covers setup, builds, running the editor, tests, and where to go next.
+## Build Options
 
-## Documentation Map
+Enable or disable features via CMake options:
 
-- Start here: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)
-- Build system philosophy & CI integration: [docs/BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md)
-- Memory model: [docs/MEMORY_ARCHITECTURE.md](docs/MEMORY_ARCHITECTURE.md)
-- Leak detection overview: [docs/LEAK_DETECTION.md](docs/LEAK_DETECTION.md)
-- Leak detection quick ref: [docs/LEAK_DETECTION_QUICK_REFERENCE.md](docs/LEAK_DETECTION_QUICK_REFERENCE.md)
-- Mimalloc integration: [docs/MIMALLOC_INTEGRATION.md](docs/MIMALLOC_INTEGRATION.md)
-- Static analysis: [docs/STATIC_ANALYSIS.md](docs/STATIC_ANALYSIS.md)
-- Unit testing: [docs/UNIT_TESTING.md](docs/UNIT_TESTING.md)
+```powershell
+cmake --preset ninja_msvc-debug -DENABLE_MIMALLOC=OFF -DENABLE_SANITIZERS=ON
+```
+
+- `ENABLE_MIMALLOC=ON|OFF` (default ON): High-performance memory allocator. Auto-disabled with sanitizers.
+- `ENABLE_SANITIZERS=ON|OFF` (default ON for Clang/GCC): AddressSanitizer, UndefinedBehaviorSanitizer, LeakSanitizer.
+- `ENABLE_CLANG_TIDY=ON|OFF` (default ON): Static analysis with clang-tidy.
+- `ENABLE_CPPCHECK=ON|OFF`, `ENABLE_MSVC_ANALYZE=ON|OFF`: Optional additional analyzers.
+
+---
+
+## Documentation
+
+New to Ludus? **Start here:** [docs/README.md](docs/README.md)
+
+It provides a navigation guide to all documentation, explains the learning path (Core → Platform → Editor), and maps each document to its purpose.
+
+Quick reference to key docs:
+
+| Topic | Document |
+|-------|----------|
+| **Setup & First Build** | [GETTING_STARTED.md](docs/GETTING_STARTED.md) |
+| **Build System & CI** | [BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md) |
+| **Unit Testing** | [UNIT_TESTING.md](docs/UNIT_TESTING.md) |
+| **Memory Architecture** | [MEMORY_ARCHITECTURE.md](docs/MEMORY_ARCHITECTURE.md) |
+| **Leak Detection** | [LEAK_DETECTION.md](docs/LEAK_DETECTION.md) |
+| **Mimalloc Integration** | [MIMALLOC_INTEGRATION.md](docs/MIMALLOC_INTEGRATION.md) |
+| **Static Analysis** | [STATIC_ANALYSIS.md](docs/STATIC_ANALYSIS.md) |
+
+---
+
+## Common Tasks
+
+### Add a Unit Test
+
+1. Write test in `src/Engine/Core/CoreTests.cpp` or create a new file in `src/Engine/Core/`
+2. Register via `LUDUS_TEST` macro
+3. Run: `./build/bin/LudusTests.exe`
+
+See [UNIT_TESTING.md](docs/UNIT_TESTING.md) for details.
+
+### Add a New Platform
+
+1. Create `src/Engine/Platform/<YourPlatform>/Common.cpp`
+2. Add corresponding headers under `include/Ludus/Engine/Platform/<YourPlatform>/`
+3. Update CMake's `PLATFORM_FOLDER` mapping
+4. Implement platform-specific entry point in `src/Editor/Platform/<YourPlatform>/Main.cpp`
+
+### Debug Memory Leaks
+
+Use the built-in leak detector:
+
+```cpp
+LUDUS_LEAK_DETECTOR(ScopeName) {
+    // Code to profile
+}
+```
+
+See [LEAK_DETECTION.md](docs/LEAK_DETECTION.md) and [LEAK_DETECTION_QUICK_REFERENCE.md](docs/LEAK_DETECTION_QUICK_REFERENCE.md).
+
+---
 
 ## Troubleshooting
 
-- clang‑tidy/format auto-install failed: CMake attempts install via Chocolatey (Windows), Homebrew (macOS), or apt (Linux). For manual installation, see [docs/BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md).
-- Missing Ninja: install via `choco install ninja` (Windows) or your package manager; or use a Visual Studio generator instead.
-- Build artifacts location: All outputs go to `build/bin/` (executables), `build/lib/` (libraries). Source root stays clean.
+| Issue | Solution |
+|-------|----------|
+| **LLVM tools not found** | CMake attempts auto-install via Chocolatey/Homebrew/apt. See [BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md) for manual install steps. |
+| **Missing Ninja** | Install: `choco install ninja` (Windows), `brew install ninja` (macOS), `apt install ninja-build` (Linux). |
+| **Build artifacts in source root** | Delete old `.exe`, `.dll`, `.ilk` files. New builds output to `build/bin/` and `build/lib/`. |
+| **ASan on Windows** | MSVC ASan is disabled; use Clang presets (`ninja_clang-*`) instead. |
+
+---
 
 ## License
 
