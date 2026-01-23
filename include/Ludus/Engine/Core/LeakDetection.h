@@ -156,7 +156,7 @@
         {
         public:
             ScopedLeakDetector() noexcept {}
-            void BreakOnAllocation([[maybe_unused]] long allocationNumber) const noexcept {}
+            static void BreakOnAllocation([[maybe_unused]] long allocationNumber) noexcept {}
         };
 
         // Debug macros that do nothing in non-debug builds

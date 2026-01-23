@@ -39,7 +39,7 @@ Checks: >
   -readability-redundant-access-specifiers
 
 WarningsAsErrors: '*'
-HeaderFilterRegex: '^(?!.*/(out|_deps)/).*/(include/Ludus|src)/'
+HeaderFilterRegex: '^(?!.*(_deps|out)).*/(include/Ludus/|src/)'
 FormatStyle: file
 CheckOptions:
   - key: readability-identifier-naming.NamespaceCase

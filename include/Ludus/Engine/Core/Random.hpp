@@ -22,9 +22,9 @@ namespace ludus::core
     {
         mState = 0u;
         mInc = (stream << 1u) | 1u;
-        [[maybe_unused]] uint32_t nextU32 = NextU32();
+        static_cast<void>(NextU32());
         mState += seed;
-        nextU32 = NextU32();
+        static_cast<void>(NextU32());
     }
 
     inline constexpr uint32_t Random::NextU32() noexcept
@@ -65,10 +65,6 @@ namespace ludus::core
         }
 
         const uint32_t range = maxInclusive - minInclusive + 1u;
-        if (range == 0u)
-        {
-            return NextU32();
-        }
 
         const uint32_t threshold = (0u - range) % range;
         uint32_t value = 0u;
