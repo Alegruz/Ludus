@@ -691,6 +691,7 @@ namespace ludus::core
             return mData;
         }
         
+        // NOLINTNEXTLINE(readability-identifier-naming) - Local function static, not a constant
         static const T emptyString[] = { static_cast<T>(0) };
         return emptyString;
     }

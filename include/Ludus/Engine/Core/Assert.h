@@ -19,6 +19,7 @@ namespace ludus::core
     LUDUS_INLINE bool DefaultAssertHandler(const AssertInfo& info, bool* ignoreAlways) noexcept // NOLINT(readability-non-const-parameter)
     {
         const char* message = info.Message ? info.Message : "(no message)";
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg) - fprintf is appropriate for low-level error reporting
         std::fprintf(stderr,
             "Assertion failed!\n  Expression: %s\n  Message: %s\n  File: %s\n  Line: %d\n",
             info.Expression,
