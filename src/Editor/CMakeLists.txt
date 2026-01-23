@@ -7,35 +7,27 @@ endif()
 
 add_executable(LudusEditor ${PLATFORM_SOURCES})
 
-# Set output directory for the executable (multi-config safe)
+# Set output directory for the executable to build/bin (multi-config safe)
+# This avoids polluting the source root with build artifacts
 set_target_properties(LudusEditor PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_SOURCE_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_SOURCE_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_SOURCE_DIR}"
-)
-
-# Also copy/sync the built exe to the source root after build to ensure the launch task finds it.
-add_custom_command(TARGET LudusEditor POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:LudusEditor>" "${CMAKE_SOURCE_DIR}/LudusEditor.exe"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:LudusCore>" "${CMAKE_SOURCE_DIR}/"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:LudusPlatform>" "${CMAKE_SOURCE_DIR}/"
-    COMMAND_EXPAND_LISTS
-    VERBATIM
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}/bin"
 )
 
 # Copy runtime DLLs (including external dependencies like mimalloc) on Windows
 if(WIN32)
     add_custom_command(TARGET LudusEditor POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_RUNTIME_DLLS:LudusEditor>" "${CMAKE_SOURCE_DIR}/"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_RUNTIME_DLLS:LudusEditor>" "${CMAKE_BINARY_DIR}/bin/"
         COMMAND_EXPAND_LISTS
         VERBATIM
     )
     # Explicitly copy mimalloc DLLs if mimalloc is enabled
     if(TARGET mimalloc AND ENABLE_MIMALLOC)
         add_custom_command(TARGET LudusEditor POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:mimalloc>/mimalloc-redirect.dll" "${CMAKE_SOURCE_DIR}/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:mimalloc>/mimalloc-redirect.dll" "${CMAKE_BINARY_DIR}/bin/"
             VERBATIM
         )
     endif()
@@ -67,7 +59,7 @@ if(WIN32)
 
         if(ASAN_RUNTIME_DLL)
             add_custom_command(TARGET LudusEditor POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ASAN_RUNTIME_DLL}" "${CMAKE_SOURCE_DIR}/"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ASAN_RUNTIME_DLL}" "${CMAKE_BINARY_DIR}/bin/"
                 VERBATIM
             )
         else()
@@ -92,7 +84,7 @@ target_link_libraries(LudusEditor
     Ludus
     )
 
-# Install rules for distribution
+# Install rules for distribution (puts exe in root of install prefix)
 install(TARGETS LudusEditor
     RUNTIME DESTINATION .
 )

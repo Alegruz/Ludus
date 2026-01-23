@@ -12,13 +12,13 @@ cmake --preset ninja_msvc-debug
 cmake --build --preset ninja_msvc-debug -t LudusEditor
 ```
 
-- Run the editor: the build copies the binaries next to the repo root for convenience:
+- Run the editor: built binaries are in `build/bin/`:
 
 ```powershell
-./LudusEditor.exe --quick-exit
+./build/bin/LudusEditor.exe --quick-exit
 ```
 
-- Run tests:
+- Run tests: tests are built in `build/bin/`:
 
 ```powershell
 cmake --build --preset ninja_msvc-debug -t LudusTests
@@ -35,6 +35,8 @@ If LLVM tools aren’t found, CMake will invoke `init.bat` or prompt to install 
 - src/Engine: Interface target `Ludus` that links `LudusCore` + `LudusPlatform`.
 - src/Editor: Executable `LudusEditor` with platform entry points under `Editor/Platform/<Platform>/Main.cpp`.
 - src/Tests: Console test runner `LudusTests` using the built‑in minimal unit test registry.
+- build/bin/: Built executables and DLLs (out-of-source, clean separation from source).
+- build/lib/: Built libraries.
 - cmake/: Helper CMake scripts (format checks).
 - tools/: Scripts (e.g., `install-llvm.ps1`).
 
@@ -77,7 +79,7 @@ cmake --build --preset ninja_msvc-debug -t format-fix
 
 - clang‑tidy/format auto-install failed: CMake attempts install via Chocolatey (Windows), Homebrew (macOS), or apt (Linux). For manual installation, see [docs/BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md).
 - Missing Ninja: install via `choco install ninja` (Windows) or your package manager; or use a Visual Studio generator instead.
-- Editor exe location: `LudusEditor.exe` and runtime DLLs are copied to the repo root after build. Libraries are under `build/lib/`, tests under `build/bin/`.
+- Build artifacts location: All outputs go to `build/bin/` (executables), `build/lib/` (libraries). Source root stays clean.
 
 ## License
 

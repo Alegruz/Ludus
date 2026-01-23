@@ -30,11 +30,12 @@ Alternative presets:
 ## 3) Run the Editor
 
 ```powershell
-./LudusEditor.exe --quick-exit
+./build/bin/LudusEditor.exe --quick-exit
 ```
 
 - Windows entry point: `src/Editor/Platform/Windows/Main.cpp`
 - The sample shows command line parsing, math utilities, window creation, and a message pump.
+- Binaries are in `build/bin/` for clean separation from source.
 
 ## 4) Run the Tests
 
@@ -77,12 +78,16 @@ cmake --preset ninja_clang-relwithdebinfo -DENABLE_MIMALLOC=OFF
 - `LudusCore` (shared lib): Core utilities, containers, math, assertions, command line helpers.
   - Headers: `include/Ludus/Engine/Core/...`
   - Sources: `src/Engine/Core/*`
+  - Output: `build/lib/LudusCore.dll` (Windows) or `.so`/`.dylib` (Unix/macOS)
 - `LudusPlatform` (shared lib): Platform abstraction layer.
   - Headers: `include/Ludus/Engine/Platform/...`
   - Platform-specific sources under `src/Engine/Platform/<Platform>/` (e.g., `Windows/Common.cpp`)
+  - Output: `build/lib/LudusPlatform.dll` (Windows) or `.so`/`.dylib` (Unix/macOS)
 - `Ludus` (interface lib): Convenience umbrella target that links `LudusCore` + `LudusPlatform`.
 - `LudusEditor` (exe): Editor app with platform entry points under `src/Editor/Platform/<Platform>/Main.cpp`.
+  - Output: `build/bin/LudusEditor.exe` (Windows) or `LudusEditor` (Unix/macOS)
 - `LudusTests` (exe): Minimal console test runner using an in-house registry.
+  - Output: `build/bin/LudusTests.exe` (Windows) or `LudusTests` (Unix/macOS)
 
 ## Source & Include Layout
 
@@ -113,4 +118,4 @@ cmake --preset ninja_clang-relwithdebinfo -DENABLE_MIMALLOC=OFF
 - Formatting/clang-tidy not running: if auto-install failed, manually install tools and reconfigure. See [docs/BUILD_SYSTEM.md](../docs/BUILD_SYSTEM.md) for manual install steps.
 - Sanitizers on Windows: prefer Clang presets (`ninja_clang-*`). MSVC ASan is disabled here.
 - Mimalloc conflicts with sanitizers: it auto-disables when sanitizers are ON.
-- Editor exe location: `LudusEditor.exe` and runtime DLLs are copied to repo root after build.
+- Build artifacts in source root: if you see `.exe`, `.dll`, or `.ilk` files in the repo root, they're from an old build. Delete them and rebuild—new builds output to `build/bin/` and `build/lib/` only.

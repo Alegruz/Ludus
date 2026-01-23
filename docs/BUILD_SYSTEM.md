@@ -25,6 +25,31 @@ The Ludus build system follows these principles:
 
 ## Development Setup
 
+### Out-of-Source Builds
+
+All build artifacts are kept separate from source code:
+
+```
+ludus/                    # Source root (stays clean, version-controlled)
+├── src/                  # Source files
+├── include/              # Public headers
+├── CMakeLists.txt
+├── docs/
+└── build/                # Build artifacts (NOT version-controlled, ignored by .gitignore)
+    ├── bin/              # Executables and DLLs
+    │   ├── LudusEditor.exe
+    │   ├── LudusTests.exe
+    │   ├── LudusCore.dll
+    │   ├── LudusPlatform.dll
+    │   └── [runtime DLLs: mimalloc, ASan, etc.]
+    ├── lib/              # Static/import libraries
+    │   ├── LudusCore.lib
+    │   └── LudusPlatform.lib
+    └── CMakeFiles/       # CMake cache and intermediate files
+```
+
+This keeps the source tree clean and follows CMake best practices. Builds are reproducible and easy to clean.
+
 ### For Local Development (Auto-Install)
 
 Just configure and build. CMake will auto-install LLVM tools if needed:

@@ -417,12 +417,19 @@ FodyWeavers.xsd
 *.msm
 *.msp
 
-# Executable files
+# Runtime and build artifacts (should only be in build/ or out/ directories)
 *.exe
 *.dll
+*.ilk
+*.pdb
+*.pyd
+*.so
+*.dylib
 
-# CMake
+# CMake build directories
 build/
+out/
+cmake-build-*/
 
 # Debugging files
 raddbg

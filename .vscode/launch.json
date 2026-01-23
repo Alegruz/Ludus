@@ -8,8 +8,8 @@
             "type": "cppvsdbg",
             "request": "launch",
             "name": "Debug LudusEditor (x64-Debug)",
-            "program": "${workspaceFolder}/LudusEditor.exe",
-            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/build/bin/LudusEditor.exe",
+            "cwd": "${workspaceFolder}/build/bin",
             "stopAtEntry": true,
             "environment": [
                 {
@@ -22,16 +22,16 @@
             "type": "cppvsdbg",
             "request": "launch",
             "name": "Debug LudusEditor (x64-Release)",
-            "program": "${workspaceFolder}/LudusEditor.exe",
-            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/build/bin/LudusEditor.exe",
+            "cwd": "${workspaceFolder}/build/bin",
             "stopAtEntry": true,
         },
         {
             "type": "cppdbg",
             "request": "launch",
             "name": "Debug LudusEditor (UNIX)",
-            "program": "${workspaceFolder}/LudusEditor",
-            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/build/bin/LudusEditor",
+            "cwd": "${workspaceFolder}/build/bin",
             "stopAtEntry": true,
             "args": [
             ]
@@ -39,9 +39,9 @@
         {
             "type": "cppvsdbg",
             "request": "launch",
-            "name": "Debug LudusCore Tests (x64-Debug)",
-            "program": "${workspaceFolder}/build/bin/Debug/LudusCore.dll",
-            "cwd": "${workspaceFolder}",
+            "name": "Run Unit Tests (MSVC - Windows)",
+            "program": "${workspaceFolder}/build/bin/LudusTests.exe",
+            "cwd": "${workspaceFolder}/build/bin",
             "stopAtEntry": false,
             "environment": [
                 {
@@ -53,9 +53,9 @@
         {
             "type": "cppdbg",
             "request": "launch",
-            "name": "Debug LudusCore Tests (UNIX)",
-            "program": "${workspaceFolder}/build/bin/LudusCore.so",
-            "cwd": "${workspaceFolder}",
+            "name": "Run Unit Tests (Clang - Linux)",
+            "program": "${workspaceFolder}/build/bin/LudusTests",
+            "cwd": "${workspaceFolder}/build/bin",
             "stopAtEntry": false,
             "environment": [
                 {
@@ -68,8 +68,8 @@
             "type": "cppvsdbg",
             "request": "launch",
             "name": "Run Unit Tests (test_msvc - Windows)",
-            "program": "${workspaceFolder}/out/build/test_msvc/bin/LudusTests.exe",
-            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/build/bin/LudusTests.exe",
+            "cwd": "${workspaceFolder}/build/bin",
             "stopAtEntry": false,
             "environment": [
                 {
@@ -82,8 +82,8 @@
             "type": "cppdbg",
             "request": "launch",
             "name": "Run Unit Tests (test_clang - Linux)",
-            "program": "${workspaceFolder}/out/build/test_clang/bin/LudusTests",
-            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/build/bin/LudusTests",
+            "cwd": "${workspaceFolder}/build/bin",
             "stopAtEntry": false,
             "environment": [
                 {
@@ -96,8 +96,9 @@
             "type": "cppdbg",
             "request": "launch",
             "name": "Run Unit Tests (test_gcc - Linux)",
-            "program": "${workspaceFolder}/out/build/test_gcc/bin/LudusTests",
-            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/build/bin/LudusTests",
+            "cwd": "${workspaceFolder}/build/bin",
+            "stopAtEntry": false,
             "stopAtEntry": false,
             "environment": [
                 {
