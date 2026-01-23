@@ -27,6 +27,9 @@
 
 namespace ludus::memory
 {
+    // This header defines the engine's low-level allocation API.
+    // It intentionally wraps malloc/free (or mimalloc) for performance and control.
+    // NOLINTBEGIN(cppcoreguidelines-no-malloc, cppcoreguidelines-owning-memory)
     /// @brief Allocate memory for a single object of type T
     /// @tparam T Type to allocate
     /// @param count Number of objects to allocate (default 1)
@@ -68,6 +71,7 @@ namespace ludus::memory
         return static_cast<T*>(realloc(ptr, newCount * sizeof(T)));
 #endif
     }
+    // NOLINTEND(cppcoreguidelines-no-malloc, cppcoreguidelines-owning-memory)
 
 #undef CopyMemory
     /// @brief Copy memory from source to destination
