@@ -36,6 +36,7 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 
 	CommandLineManager<wchar_t> commandLineManager = CommandLineManager<wchar_t>::Create(lpCmdLine);
 	const DynamicArray<WString>& arguments = commandLineManager.GetArguments();
+	bool quickExit = false;
 	for (const WString& arg : arguments)
 	{
 		// For demonstration purposes, output each argument to the debug console
@@ -43,6 +44,12 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 		debugOutput.Append(arg.GetData(), arg.GetSize());
 		debugOutput.PushBack(L'\n');
 		OutputDebugStringW(debugOutput.GetData());
+		
+		// Check for quick exit flag
+		if (arg == L"--quick-exit" || arg == L"--exit")
+		{
+			quickExit = true;
+		}
 	}
 
 	const float angle = Pi<float>() / 4.0f; // 45 degrees in radians
@@ -62,6 +69,12 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 	
 	const Window<CURRENT_PLATFORM_TYPE> window = windowManager.CreateWindow(createInfo);
 	window.Show(nShowCmd);
+
+	// Exit early if quick exit flag is set
+	if (quickExit)
+	{
+		return;
+	}
 
 	MSG msg = {};
 	while (GetMessage(&msg, NULL, 0, 0) > 0)

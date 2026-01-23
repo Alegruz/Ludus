@@ -157,7 +157,7 @@ jobs:
               --track-origins=yes \
               --verbose \
               --log-file="valgrind-report-$(basename "$exe").txt" \
-              "$exe"
+              "$exe" --quick-exit
             
             # Check for memory errors in the log
             if grep -q "ERROR SUMMARY: [^0]" "valgrind-report-$(basename "$exe").txt"; then
@@ -273,8 +273,8 @@ jobs:
           echo "Sanitizers enabled: ASan, LSan, UBSan"
           
           # Run the executable (it should exit cleanly with no leaks)
-          # Pass --help or a minimal command to trigger code paths
-          if ! "$exe" --help 2>&1 | tee leak-test-output.txt; then
+          # Pass --quick-exit to escape the main loop immediately
+          if ! "$exe" --quick-exit 2>&1 | tee leak-test-output.txt; then
             echo "Executable failed to run"
             cat leak-test-output.txt
             exit 1
@@ -319,9 +319,10 @@ jobs:
           Write-Host "CRT leak detection enabled in Debug build"
           
           # Run the executable (CRT leak detection is automatic in Debug)
+          # Pass --quick-exit to escape the main loop immediately
           # Capture output to check for leak reports
           try {
-            $output = & $exe.FullName --help 2>&1 | Out-String
+            $output = & $exe.FullName --quick-exit 2>&1 | Out-String
             $exitCode = $LASTEXITCODE
           } catch {
             Write-Host "Failed to run executable: $_"

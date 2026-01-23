@@ -10,6 +10,7 @@ int main(int argc, char** argv)
 {
 	ludus::core::CommandLineManager<char> commandLineManager = ludus::core::CommandLineManager<char>::Create(argc, argv);
 	const ludus::core::DynamicArray<ludus::core::String>& arguments = commandLineManager.GetArguments();
+	bool quickExit = false;
 	for (const ludus::core::String& arg : arguments)
 	{
 		// For demonstration purposes, output each argument to the debug console
@@ -17,6 +18,18 @@ int main(int argc, char** argv)
 		debugOutput.Append(arg.GetData(), arg.GetSize());
 		debugOutput.PushBack('\n');
 		std::cout << debugOutput.GetData();
+		
+		// Check for quick exit flag
+		if (arg == "--quick-exit" || arg == "--exit")
+		{
+			quickExit = true;
+		}
+	}
+
+	// Exit early if quick exit flag is set
+	if (quickExit)
+	{
+		return 0;
 	}
 
 	return 0;
