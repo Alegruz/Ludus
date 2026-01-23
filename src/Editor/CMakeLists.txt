@@ -41,12 +41,38 @@ if(WIN32)
     endif()
     # Copy AddressSanitizer runtime DLL when sanitizers are enabled
     if(ENABLE_SANITIZERS AND MSVC)
-        add_custom_command(TARGET LudusEditor POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different 
-                "C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/VC/Tools/MSVC/14.29.30133/bin/Hostx64/x64/clang_rt.asan_dbg_dynamic-x86_64.dll" 
-                "${CMAKE_SOURCE_DIR}/"
-            VERBATIM
+        # The ASan runtime lives under the VS LLVM tools directory; locate it instead of hardcoding a version-specific path
+        set(ASAN_DLL_NAMES
+            clang_rt.asan_dbg_dynamic-x86_64.dll
+            clang_rt.asan_dynamic-x86_64.dll
         )
+
+        # Common Visual Studio locations (VS 2022 first, then 2019 fallbacks)
+        set(ASAN_HINT_DIRS
+            "$ENV{VCToolsInstallDir}/../Llvm/x64/bin"
+            "$ENV{VSINSTALLDIR}/VC/Tools/Llvm/x64/bin"
+            "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/Llvm/x64/bin"
+            "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/Llvm/x64/bin"
+            "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/Llvm/x64/bin"
+            "C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC/Tools/Llvm/x64/bin"
+            "C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/VC/Tools/Llvm/x64/bin"
+            "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/Llvm/x64/bin"
+        )
+
+        find_file(ASAN_RUNTIME_DLL
+            NAMES ${ASAN_DLL_NAMES}
+            HINTS ${ASAN_HINT_DIRS}
+            PATH_SUFFIXES bin
+        )
+
+        if(ASAN_RUNTIME_DLL)
+            add_custom_command(TARGET LudusEditor POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ASAN_RUNTIME_DLL}" "${CMAKE_SOURCE_DIR}/"
+                VERBATIM
+            )
+        else()
+            message(WARNING "ENABLE_SANITIZERS is ON, but the ASan runtime DLL was not found. Skipping copy; ensure LLVM/clang tools are installed in Visual Studio.")
+        endif()
     endif()
 endif()
 

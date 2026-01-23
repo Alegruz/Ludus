@@ -1,10 +1,14 @@
 # Platform library
 add_library(LudusPlatform SHARED)
 
-# Explicitly list source files for better dependency tracking
-target_sources(LudusPlatform PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/${PLATFORM_FOLDER}/Common.cpp"
-)
+# Resolve platform-specific source up front so configuration fails fast if a file is missing
+set(LUDUS_PLATFORM_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/${PLATFORM_FOLDER}/Common.cpp")
+
+if(NOT EXISTS "${LUDUS_PLATFORM_SOURCE}")
+    message(FATAL_ERROR "Expected platform source missing: ${LUDUS_PLATFORM_SOURCE}")
+endif()
+
+target_sources(LudusPlatform PRIVATE "${LUDUS_PLATFORM_SOURCE}")
 
 if(WIN32)
     # Automatically export all symbols on Windows to generate import library
