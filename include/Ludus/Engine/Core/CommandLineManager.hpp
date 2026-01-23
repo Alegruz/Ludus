@@ -18,8 +18,10 @@ namespace ludus::core
     template<StringCharType CharT>
     CommandLineManager<CharT> CommandLineManager<CharT>::Create(CharT* commandLine) noexcept
     {
+        static constexpr uint32_t ARGUMENT_BUFFER_SIZE = 4096;
+        
         DynamicArray<BasicString<CharT>> arguments;
-        CharT buffer[4096]; // Temporary buffer for building arguments
+        CharT buffer[ARGUMENT_BUFFER_SIZE]; // Temporary buffer for building arguments
         uint32_t bufferPos = 0;
         
         CharT* current = commandLine;
