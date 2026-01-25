@@ -4,6 +4,7 @@
 
 #include <Ludus/Engine/Core/Math/Rect.h>
 #include <Ludus/Engine/Core/Container/String.h>
+#include <Ludus/Engine/Core/SmartPtr.h>
 
 #undef CreateWindow
 
@@ -15,12 +16,35 @@ namespace ludus::platform
     public:
         template<PlatformType PT>
         friend class WindowManager;
+        
+        template<typename T, typename... Args>
+        friend core::UniquePtr<T> core::MakeUnique(Args&&... args);
 
     public:
+        template<PlatformType PT>
+        struct ProcedureParams final
+        {
+        };
+
+        template<>
+        struct ProcedureParams<PlatformType::WINDOWS> final
+        {
+            LRESULT OutResult;
+            HWND WindowHandle;
+            UINT Message;
+            WPARAM WParam;
+            LPARAM LParam;
+            Window<PLATFORM_TYPE>& Window;
+        };
+
+        template<PlatformType PT>
+        using WindowProcType = bool(*)(const ProcedureParams<PT>& params);
+
         struct CreateInfo final
         {
             core::String Title;
             core::RectU* RectOrNull = nullptr;
+            WindowProcType<PLATFORM_TYPE> WindowProcedureOrNull = nullptr;
             [[no_unique_address]] std::conditional_t<PLATFORM_TYPE == PlatformType::WINDOWS, HINSTANCE, std::monostate> Instance;
         };
 
@@ -33,6 +57,8 @@ namespace ludus::platform
         // Accessors
         [[nodiscard]] constexpr const core::String& GetTitle() const noexcept;
         [[nodiscard]] constexpr const core::RectU& GetRect() const noexcept;
+        [[nodiscard]] constexpr uint32_t GetWidth() const noexcept;
+        [[nodiscard]] constexpr uint32_t GetHeight() const noexcept;
 
         void Show(const int32_t commandShowFlag) const noexcept;
 
@@ -42,9 +68,10 @@ namespace ludus::platform
     private:
         core::String mTitle;
         core::RectU mRect;
+        WindowProcType<PLATFORM_TYPE> mWindowProcedureOrNull;
         // Initialize platform handles so failure paths remain safe to call.
-        [[no_unique_address]] std::conditional_t<PLATFORM_TYPE == PlatformType::WINDOWS, HINSTANCE, std::monostate> mInstance{};
-        [[no_unique_address]] std::conditional_t<PLATFORM_TYPE == PlatformType::WINDOWS, HWND, std::monostate> mWindowHandle{};
+        [[no_unique_address]] std::conditional_t<PLATFORM_TYPE == PlatformType::WINDOWS, HINSTANCE, std::monostate> mInstance;
+        [[no_unique_address]] std::conditional_t<PLATFORM_TYPE == PlatformType::WINDOWS, HWND, std::monostate> mWindowHandle;
     };
 
     template<PlatformType PLATFORM_TYPE>
@@ -58,10 +85,10 @@ namespace ludus::platform
         void HandleArgument(const core::BasicString<CharT>& argument) noexcept;
 
         // Window Management
-        constexpr Window<PLATFORM_TYPE>& CreateWindow(const typename Window<PLATFORM_TYPE>::CreateInfo& createInfo) noexcept;
+        Window<PLATFORM_TYPE>& CreateWindow(const typename Window<PLATFORM_TYPE>::CreateInfo& createInfo) noexcept;
 
     private:
         core::RectU mDefaultWindowRect;
-        core::DynamicArray<Window<PLATFORM_TYPE>> mWindows;
+        core::DynamicArray<core::UniquePtr<Window<PLATFORM_TYPE>>> mWindows;
     };
 }   // namespace ludus::platform

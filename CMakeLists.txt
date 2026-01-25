@@ -24,6 +24,25 @@ option(ENABLE_CPPCHECK "Enable cppcheck static analysis" OFF)
 option(ENABLE_MSVC_ANALYZE "Enable MSVC /analyze static analysis" OFF)
 option(ENABLE_AUTO_INSTALL_TOOLS "Allow CMake to auto-install clang-format/clang-tidy when missing" ON)
 
+# Graphics API selection
+set(GRAPHICS_API "Cpu" CACHE STRING "Graphics API to use (Cpu, Vulkan, D3D12, Metal)")
+set_property(CACHE GRAPHICS_API PROPERTY STRINGS Cpu Vulkan D3D12 Metal)
+
+# Validate graphics API selection
+if(NOT GRAPHICS_API MATCHES "^(Cpu|Vulkan|D3D12|Metal)$")
+    message(FATAL_ERROR "Invalid GRAPHICS_API: ${GRAPHICS_API}. Must be one of: Cpu, Vulkan, D3D12, Metal")
+endif()
+
+# Platform-specific validation
+if(GRAPHICS_API STREQUAL "D3D12" AND NOT WIN32)
+    message(FATAL_ERROR "D3D12 is only available on Windows")
+endif()
+if(GRAPHICS_API STREQUAL "Metal" AND NOT APPLE)
+    message(FATAL_ERROR "Metal is only available on macOS")
+endif()
+
+message(STATUS "Graphics API: ${GRAPHICS_API}")
+
 # Tool search hints (standard install locations):
 set(LLVM_HINT_PATHS
     "C:/Program Files/LLVM/bin"
@@ -197,6 +216,12 @@ target_compile_definitions(LudusBuildSettings INTERFACE
   # Config
   $<$<CONFIG:Debug>:LUDUS_DEBUG=1>
   $<$<CONFIG:Release>:LUDUS_RELEASE=1>
+
+  # Graphics API
+  $<$<STREQUAL:${GRAPHICS_API},Cpu>:LUDUS_GRAPHICS_CPU=1>
+  $<$<STREQUAL:${GRAPHICS_API},Vulkan>:LUDUS_GRAPHICS_VULKAN=1>
+  $<$<STREQUAL:${GRAPHICS_API},D3D12>:LUDUS_GRAPHICS_D3D12=1>
+  $<$<STREQUAL:${GRAPHICS_API},Metal>:LUDUS_GRAPHICS_METAL=1>
 
   # Feature toggles (examples)
   LUDUS_ENABLE_ASSERTS=1

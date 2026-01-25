@@ -15,39 +15,87 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Ninja with Clang
-          - name: Ninja Clang Debug
+          # Ninja with Clang - CPU
+          - name: Ninja Clang Debug CPU
             runner: ubuntu-latest
             configure_preset: ninja_clang-debug
             build_preset: ninja_clang-debug
             configuration: Debug
-          - name: Ninja Clang Release
+          # DISABLED: Vulkan builds not needed for now
+          # - name: Ninja Clang Debug Vulkan
+          #   runner: ubuntu-latest
+          #   configure_preset: ninja_clang-debug-vulkan
+          #   build_preset: ninja_clang-debug-vulkan
+          #   configuration: Debug
+          - name: Ninja Clang Release CPU
             runner: ubuntu-latest
             configure_preset: ninja_clang-release
             build_preset: ninja_clang-release
             configuration: Release
+          # DISABLED: Vulkan builds not needed for now
+          # - name: Ninja Clang Release Vulkan
+          #   runner: ubuntu-latest
+          #   configure_preset: ninja_clang-release-vulkan
+          #   build_preset: ninja_clang-release-vulkan
+          #   configuration: Release
           # Ninja with GCC
-          - name: Ninja GCC Debug
+          - name: Ninja GCC Debug CPU
             runner: ubuntu-latest
             configure_preset: ninja_gcc-debug
             build_preset: ninja_gcc-debug
             configuration: Debug
-          - name: Ninja GCC Release
+          # DISABLED: Vulkan builds not needed for now
+          # - name: Ninja GCC Debug Vulkan
+          #   runner: ubuntu-latest
+          #   configure_preset: ninja_gcc-debug-vulkan
+          #   build_preset: ninja_gcc-debug-vulkan
+          #   configuration: Debug
+          - name: Ninja GCC Release CPU
             runner: ubuntu-latest
             configure_preset: ninja_gcc-release
             build_preset: ninja_gcc-release
             configuration: Release
+          # DISABLED: Vulkan builds not needed for now
+          # - name: Ninja GCC Release Vulkan
+          #   runner: ubuntu-latest
+          #   configure_preset: ninja_gcc-release-vulkan
+          #   build_preset: ninja_gcc-release-vulkan
+          #   configuration: Release
           # Ninja with MSVC
-          - name: Ninja MSVC Debug
+          - name: Ninja MSVC Debug CPU
             runner: windows-latest
             configure_preset: ninja_msvc-debug
             build_preset: ninja_msvc-debug
             configuration: Debug
-          - name: Ninja MSVC Release
+          # DISABLED: Vulkan builds not needed for now
+          # - name: Ninja MSVC Debug Vulkan
+          #   runner: windows-latest
+          #   configure_preset: ninja_msvc-debug-vulkan
+          #   build_preset: ninja_msvc-debug-vulkan
+          #   configuration: Debug
+          # DISABLED: D3D12 builds not needed for now
+          # - name: Ninja MSVC Debug D3D12
+          #   runner: windows-latest
+          #   configure_preset: ninja_msvc-debug-d3d12
+          #   build_preset: ninja_msvc-debug-d3d12
+          #   configuration: Debug
+          - name: Ninja MSVC Release CPU
             runner: windows-latest
             configure_preset: ninja_msvc-release
             build_preset: ninja_msvc-release
             configuration: Release
+          # DISABLED: Vulkan builds not needed for now
+          # - name: Ninja MSVC Release Vulkan
+          #   runner: windows-latest
+          #   configure_preset: ninja_msvc-release-vulkan
+          #   build_preset: ninja_msvc-release-vulkan
+          #   configuration: Release
+          # DISABLED: D3D12 builds not needed for now
+          # - name: Ninja MSVC Release D3D12
+          #   runner: windows-latest
+          #   configure_preset: ninja_msvc-release-d3d12
+          #   build_preset: ninja_msvc-release-d3d12
+          #   configuration: Release
 
     steps:
       - uses: actions/checkout@v4

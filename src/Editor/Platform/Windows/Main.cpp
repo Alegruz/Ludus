@@ -10,9 +10,15 @@
 
 #include <Ludus/Engine/Platform/Window.hpp>
 
+#include <Ludus/Engine/RHI/Common.h>
+#include <Ludus/Engine/RHI/Texture.h>
+
+#include <Ludus/Engine/Renderer/Renderer.hpp>
+
 #undef CreateWindow
 
 void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd);
+bool WindowProcedure(const ludus::platform::Window<ludus::platform::CURRENT_PLATFORM_TYPE>::ProcedureParams<ludus::platform::CURRENT_PLATFORM_TYPE>& params);
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE /*hPrevInstance*/, PWSTR lpCmdLine, int nShowCmd)
 {
@@ -28,11 +34,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE /*hPrevInstance*/, PWSTR lpCmd
 	return 0;
 }
 
+static ludus::renderer::Renderer<ludus::rhi::CURRENT_GRAPHICS_API>* gRenderer = nullptr;	// TODO: Remove global, NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 {
 	using namespace ludus;
 	using namespace ludus::core;
 	using namespace ludus::platform;
+	using namespace ludus::rhi;
+	using namespace ludus::renderer;
 
 	CommandLineManager<wchar_t> commandLineManager = CommandLineManager<wchar_t>::Create(lpCmdLine);
 	const DynamicArray<WString>& arguments = commandLineManager.GetArguments();
@@ -65,10 +74,21 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 	Window<CURRENT_PLATFORM_TYPE>::CreateInfo createInfo
 	{
 		.Title = ConvertWStringToString(WString(EDITOR_WINDOW_TITLE)),
-		.Instance = instance
+		.WindowProcedureOrNull = WindowProcedure,
+		.Instance = instance,
 	};
 	
-	const Window<CURRENT_PLATFORM_TYPE> window = windowManager.CreateWindow(createInfo);
+	Window<CURRENT_PLATFORM_TYPE>& window = windowManager.CreateWindow(createInfo);
+
+	const Renderer<CURRENT_GRAPHICS_API>::CreateInfo rendererCreateInfo
+	{
+		.Width = window.GetWidth(),
+		.Height = window.GetHeight(),
+		.Format = TextureFormat::RGBA8_UNORM,
+	};
+	Renderer<CURRENT_GRAPHICS_API> renderer(rendererCreateInfo);
+	gRenderer = &renderer;
+
 	window.Show(nShowCmd);
 
 	// Exit early if quick exit flag is set
@@ -82,5 +102,91 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 	{
 		TranslateMessage(&msg);
 		DispatchMessage(&msg);
+	}
+}
+
+bool WindowProcedure(const ludus::platform::Window<ludus::platform::CURRENT_PLATFORM_TYPE>::ProcedureParams<ludus::platform::CURRENT_PLATFORM_TYPE>& params)
+{
+	using namespace ludus;
+	using namespace ludus::core;
+	using namespace ludus::platform;
+	using namespace ludus::rhi;
+	using namespace ludus::renderer;
+
+	switch (params.Message)
+	{
+		case WM_PAINT:
+		{
+			PAINTSTRUCT ps;
+			HDC hdc = BeginPaint(params.WindowHandle, &ps);
+
+			gRenderer->RenderFrame();
+			const Texture<CURRENT_GRAPHICS_API>& backBufferTexture = gRenderer->GetBackBufferTexture();
+			const TextureFormat format = backBufferTexture.GetFormat();
+			const uint32_t width = backBufferTexture.GetWidth();
+			const uint32_t height = backBufferTexture.GetHeight();
+
+			DWORD bitmapInfoCompression = BI_RGB;
+			switch(format)
+			{
+				case TextureFormat::RGBA8_UNORM:
+					[[fallthrough]];
+				case TextureFormat::BGRA8_UNORM:
+					bitmapInfoCompression = BI_RGB;
+					break;
+				case TextureFormat::RGBA16_FLOAT:
+					[[fallthrough]];
+				case TextureFormat::RGBA32_FLOAT:
+					// For simplicity, treat float formats as RGB for bitmap creation
+					bitmapInfoCompression = BI_RGB;
+					break;
+				default:
+					LUDUS_ASSERT_MSG(false, "Unsupported texture format for bitmap creation");
+					break;
+			}
+			
+			const BITMAPINFO bitmapInfo =
+			{
+				.bmiHeader =
+				{
+					.biSize		  	 = sizeof(BITMAPINFOHEADER),
+					.biWidth         = static_cast<LONG>(width),
+					.biHeight        = -static_cast<LONG>(height), // Negative height for top-down bitmap
+					.biPlanes        = 1,
+					.biBitCount      = static_cast<WORD>(GetBytesPerPixel(format) * 8),
+					.biCompression   = bitmapInfoCompression,
+					.biSizeImage     = 0,
+					.biXPelsPerMeter = 0,
+					.biYPelsPerMeter = 0,
+					.biClrUsed       = 0,
+					.biClrImportant  = 0,
+				},
+			};
+
+			void* bits = nullptr;
+			HBITMAP hBitmap = CreateDIBSection(hdc, &bitmapInfo, DIB_RGB_COLORS, &bits, NULL, 0);
+			if (hBitmap != NULL && bits != nullptr)
+			{
+				// Copy texture data to bitmap
+				const core::DynamicArray<uint8_t>& textureData = backBufferTexture.GetData();
+
+				// Assuming format is RGBA8_UNORM for simplicity
+				memcpy(bits, textureData.GetData(), static_cast<size_t>(width) * static_cast<size_t>(height) * static_cast<size_t>(GetBytesPerPixel(format))); // 4 bytes per pixel
+
+				HDC memDC = CreateCompatibleDC(hdc);
+				HGDIOBJ oldBitmap = SelectObject(memDC, hBitmap);
+
+				BitBlt(hdc, 0, 0, static_cast<int>(width), static_cast<int>(height), memDC, 0, 0, SRCCOPY);
+
+				SelectObject(memDC, oldBitmap);
+				DeleteDC(memDC);
+				DeleteObject(hBitmap);
+			}
+
+			EndPaint(params.WindowHandle, &ps);
+			return true; // Message was processed
+		}
+		default:
+			return false; // Message was not processed
 	}
 }

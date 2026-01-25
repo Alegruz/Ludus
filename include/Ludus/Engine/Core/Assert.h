@@ -47,7 +47,7 @@ namespace ludus::core
     }
 } // namespace ludus::core
 
-#define LUDUS_STATIC_ASSERT_MSG(expr, message) static_assert((expr), (message))
+#define LUDUS_STATIC_ASSERT_MSG(expr, message) static_assert(expr, message)
 #define LUDUS_STATIC_ASSERT(expr) static_assert((expr))
 
 #if defined(LUDUS_DEBUG)

@@ -5,7 +5,7 @@
 namespace ludus::core
 {
     template<typename T>
-    concept ArrayElementType = std::is_copy_constructible_v<T> && std::is_move_constructible_v<T>;
+    concept ArrayElementType = std::is_move_constructible_v<T>;
 
     enum class ArrayType : uint8_t
     {
@@ -59,8 +59,8 @@ namespace ludus::core
         explicit constexpr ArrayImplBase(Iterator first, Iterator last) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         explicit constexpr ArrayImplBase(const T* array, uint32_t size) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         explicit constexpr ArrayImplBase(const T* str) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && StringCharType<T>);
-        constexpr ArrayImplBase(const ArrayImplBase& other) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
-        constexpr ArrayImplBase(const ArrayImplBase& other) noexcept requires (ARRAY_TYPE == ArrayType::STATIC);
+        constexpr ArrayImplBase(const ArrayImplBase& other) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC && std::is_copy_constructible_v<T>);
+        constexpr ArrayImplBase(const ArrayImplBase& other) noexcept requires (ARRAY_TYPE == ArrayType::STATIC && std::is_copy_constructible_v<T>);
         constexpr ArrayImplBase(ArrayImplBase&& other) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr ArrayImplBase(ArrayImplBase&& other) noexcept requires (ARRAY_TYPE == ArrayType::STATIC);
         explicit constexpr ArrayImplBase(std::initializer_list<T> initList) noexcept;
@@ -68,7 +68,7 @@ namespace ludus::core
         constexpr ~ArrayImplBase() noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr ~ArrayImplBase() noexcept requires (ARRAY_TYPE == ArrayType::STATIC);
 
-        constexpr ArrayImplBase& operator=(const ArrayImplBase& other) noexcept;
+        constexpr ArrayImplBase& operator=(const ArrayImplBase& other) noexcept requires std::is_copy_constructible_v<T>;
         constexpr ArrayImplBase& operator=(ArrayImplBase&& other) noexcept;
         constexpr ArrayImplBase& operator=(std::initializer_list<T> initList) noexcept;
 

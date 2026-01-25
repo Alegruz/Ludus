@@ -116,7 +116,7 @@ namespace ludus::core
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /*= ArrayResizePolicy::DEFAULT*/>
     LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::ArrayImplBase(const ArrayImplBase& other) noexcept
-        requires (ARRAY_TYPE == ArrayType::DYNAMIC)
+        requires (ARRAY_TYPE == ArrayType::DYNAMIC && std::is_copy_constructible_v<T>)
         : mCapacity(other.mCapacity)
         , mSize(other.mSize)
     {
@@ -144,7 +144,7 @@ namespace ludus::core
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /*= ArrayResizePolicy::DEFAULT*/>
     LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::ArrayImplBase(const ArrayImplBase& other) noexcept
-        requires (ARRAY_TYPE == ArrayType::STATIC)
+        requires (ARRAY_TYPE == ArrayType::STATIC && std::is_copy_constructible_v<T>)
         : mSize(other.mSize)
     {
         if(other.mData != nullptr)
@@ -214,6 +214,7 @@ namespace ludus::core
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /*= ArrayResizePolicy::DEFAULT*/>
     LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::operator=(const ArrayImplBase& other) noexcept
+        requires std::is_copy_constructible_v<T>
     {
         if(this != &other)
         {

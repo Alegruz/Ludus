@@ -7,22 +7,30 @@
 namespace ludus::platform
 {
     template<PlatformType PLATFORM_TYPE>
-    LRESULT CALLBACK Window<PLATFORM_TYPE>::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) requires (PLATFORM_TYPE == PlatformType::WINDOWS)
+    LRESULT CALLBACK Window<PLATFORM_TYPE>::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) requires (PLATFORM_TYPE == PlatformType::WINDOWS)
     {
-        Window<PLATFORM_TYPE>* window = nullptr;
+        Window<PLATFORM_TYPE>* pWindow = nullptr;
         
-        if (uMsg == WM_NCCREATE)
+        if (message == WM_NCCREATE)
         {
-            auto* createStruct = reinterpret_cast<CREATESTRUCT*>(lParam);
-            window = static_cast<Window<PLATFORM_TYPE>*>(createStruct->lpCreateParams);
-            SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(window));
+            CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lParam);
+            pWindow = static_cast<Window<PLATFORM_TYPE>*>(createStruct->lpCreateParams);
+            SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pWindow));
+            pWindow->mWindowHandle = hwnd;  // Store window handle immediately
         }
         else
         {
-            window = reinterpret_cast<Window<PLATFORM_TYPE>*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+            pWindow = reinterpret_cast<Window<PLATFORM_TYPE>*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
         }
         
-        switch (uMsg)
+        if(pWindow == nullptr)
+        {
+            return DefWindowProc(hwnd, message, wParam, lParam);
+        }
+
+        Window<PLATFORM_TYPE>& window = *pWindow;
+
+        switch (message)
         {
             case WM_DESTROY:
             {
@@ -31,7 +39,23 @@ namespace ludus::platform
             }
             default:
             {
-                return DefWindowProc(hwnd, uMsg, wParam, lParam);
+                const bool isMessageProcessed = window.mWindowProcedureOrNull != nullptr
+                    ? window.mWindowProcedureOrNull(ProcedureParams<PlatformType::WINDOWS>{
+                        .OutResult = 0,
+                        .WindowHandle = hwnd,
+                        .Message = message,
+                        .WParam = wParam,
+                        .LParam = lParam,
+                        .Window = window,
+                    })
+                    : false;
+                    
+                if (isMessageProcessed)
+                {
+                    return 0; // Message was processed by custom procedure
+                }
+
+                return DefWindowProc(hwnd, message, wParam, lParam);
             }
         }
     }
@@ -40,12 +64,12 @@ namespace ludus::platform
     LUDUS_INLINE constexpr Window<PLATFORM_TYPE>::Window(const CreateInfo& createInfo) noexcept
         : mTitle(createInfo.Title)
         , mRect(createInfo.RectOrNull != nullptr ? *createInfo.RectOrNull : core::RectU{})
+        , mWindowProcedureOrNull(createInfo.WindowProcedureOrNull)
     {
         if constexpr (PLATFORM_TYPE == PlatformType::WINDOWS)
         {
             const core::WString titleWStr = core::ConvertStringToWString(mTitle);
             mInstance = createInfo.Instance;
-            
             const WNDCLASSEX windowClassEx
             {
                 .cbSize        	= sizeof(WNDCLASSEX),
@@ -109,6 +133,18 @@ namespace ludus::platform
     }
 
     template<PlatformType PLATFORM_TYPE>
+    LUDUS_INLINE constexpr uint32_t Window<PLATFORM_TYPE>::GetWidth() const noexcept
+    {
+        return mRect.Width;
+    }
+
+    template<PlatformType PLATFORM_TYPE>
+    LUDUS_INLINE constexpr uint32_t Window<PLATFORM_TYPE>::GetHeight() const noexcept
+    {
+        return mRect.Height;
+    }
+
+    template<PlatformType PLATFORM_TYPE>
     LUDUS_INLINE void Window<PLATFORM_TYPE>::Show(const int32_t commandShowFlag) const noexcept
     {
         if constexpr (PLATFORM_TYPE == PlatformType::WINDOWS)
@@ -154,14 +190,14 @@ namespace ludus::platform
     }
 
     template<PlatformType PLATFORM_TYPE>
-    LUDUS_INLINE constexpr Window<PLATFORM_TYPE>& WindowManager<PLATFORM_TYPE>::CreateWindow(const typename Window<PLATFORM_TYPE>::CreateInfo& createInfo) noexcept
+    LUDUS_INLINE Window<PLATFORM_TYPE>& WindowManager<PLATFORM_TYPE>::CreateWindow(const typename Window<PLATFORM_TYPE>::CreateInfo& createInfo) noexcept
     {
         typename Window<PLATFORM_TYPE>::CreateInfo info = createInfo;
         if(info.RectOrNull == nullptr)
         {
             info.RectOrNull = &mDefaultWindowRect;
         }
-        mWindows.PushBack( Window<PLATFORM_TYPE>(info) );
-        return mWindows.GetBack();
+        mWindows.PushBack(core::MakeUnique<Window<PLATFORM_TYPE>>(info));
+        return *mWindows.GetBack();
     }
 }   // namespace ludus::platform
