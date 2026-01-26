@@ -1,4 +1,6 @@
 #include <Ludus/Engine/Platform/Hardware.h>
+
+#include <Ludus/Engine/Core/Assert.h>
 #include <Ludus/Engine/Platform/Platform.h>
 
 #if defined(LUDUS_MAC)
