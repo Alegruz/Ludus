@@ -24,6 +24,10 @@
 
 namespace ludus::core
 {
+    // Constants
+    constexpr uint32_t POINTER_SIZE_64BIT = 8U;
+    constexpr uint32_t POINTER_SIZE_32BIT = 4U;
+
     template<typename CharT>
     concept StringCharType = std::is_same_v<CharT, char> || std::is_same_v<CharT, wchar_t>;
     

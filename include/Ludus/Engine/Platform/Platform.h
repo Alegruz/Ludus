@@ -13,6 +13,8 @@ namespace ludus::platform
         COUNT = MAC,
         DEFAULT = WINDOWS,
     };
+
+    [[nodiscard]] bool PreflightPlatformOrNotify() noexcept;
 }   // namespace ludus::platform
 
 // Always define a known set of macros, even if 0.

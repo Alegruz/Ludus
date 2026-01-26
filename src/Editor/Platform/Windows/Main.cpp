@@ -43,6 +43,11 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 	using namespace ludus::rhi;
 	using namespace ludus::renderer;
 
+	if (!PreflightPlatformOrNotify())
+	{
+		return;
+	}
+
 	CommandLineManager<wchar_t> commandLineManager = CommandLineManager<wchar_t>::Create(lpCmdLine);
 	const DynamicArray<WString>& arguments = commandLineManager.GetArguments();
 	bool quickExit = false;
