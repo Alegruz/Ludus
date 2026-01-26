@@ -12,7 +12,7 @@
 #include <Ludus/Engine/RHI/Texture.h>
 #include <Ludus/Engine/Renderer/Renderer.hpp>
 
-// Window-related code is omitted for Linux for now
+// Window-related code is omitted for MacOS for now
 
 void Main(int argc, char** argv);
 
@@ -58,7 +58,7 @@ void Main(int argc, char** argv)
     LUDUS_ASSERT_MSG(sine > 0.7071f && sine < 0.7072f, "Sine calculation is incorrect");
     LUDUS_ASSERT_MSG(cosine > 0.7071f && cosine < 0.7072f, "Cosine calculation is incorrect");
 
-    // Window creation and rendering loop omitted for Linux for now
+    // Window creation and rendering loop omitted for MacOS for now
 
     // Exit early if quick exit flag is set
     if (quickExit)
