@@ -25,6 +25,22 @@ A good change in Ludus usually has these characteristics:
 
 ## Development workflow
 
+### Branching and PR flow
+
+We use a lightweight, release-friendly model:
+
+- **`main`**: always release-ready. Only merged from `release/*` or `hotfix/*`.
+- **`develop`**: integration branch for active work.
+- **`feature/*`**: short-lived branches for most changes (target `develop`).
+- **`hotfix/*`**: urgent fixes branched from `main` (merge back to `main` and `develop`).
+- **`release/*`** (optional): stabilization branch cut from `develop` when preparing a release.
+
+PR policy:
+
+- Default PR target is **`develop`**.
+- **`main`** accepts only `release/*` or `hotfix/*` PRs.
+- Use **squash merge** for `feature/*` PRs to keep history clean.
+
 ### 1) Set up the build
 
 Follow the platform-specific instructions in [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md).
