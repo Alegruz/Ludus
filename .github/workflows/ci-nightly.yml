@@ -1,0 +1,167 @@
+name: CI (Nightly)
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  linux-sanitize-leak:
+    name: Linux Sanitizers + Leak Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache xvfb
+
+      - name: Setup ccache (Linux)
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ci_sanitize_clang
+          max-size: 2G
+
+      - name: Configure (CMake preset)
+        run: cmake --preset "ci_sanitize_clang"
+
+      - name: Build (CMake build preset)
+        run: cmake --build --preset "ci_sanitize_clang"
+
+      - name: Run Leak Test (Linux, headless)
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
+          LSAN_OPTIONS: print_suppressions=0:fast_unwind_on_malloc=0
+        run: |
+          buildDir="out/build/ci_sanitize_clang"
+          if [ ! -d "$buildDir" ]; then
+            echo "Error: Build directory not found: $buildDir"
+            exit 1
+          fi
+
+          exe=""
+          if [ -x "./LudusEditor" ]; then
+            exe="./LudusEditor"
+          elif [ -x "$buildDir/bin/LudusEditor" ]; then
+            exe="$buildDir/bin/LudusEditor"
+          else
+            exe=$(find "$buildDir" -type f -name "LudusEditor" 2>/dev/null | head -1)
+          fi
+
+          if [ -z "$exe" ] || [ ! -f "$exe" ]; then
+            echo "Error: LudusEditor executable not found"
+            exit 1
+          fi
+
+          echo "Running leak test on: $exe"
+          if ! xvfb-run -a "$exe" --quick-exit 2>&1 | tee leak-test-output.txt; then
+            echo "Executable failed to run"
+            cat leak-test-output.txt
+            exit 1
+          fi
+
+          if grep -i "LeakSanitizer\|detected memory leaks" leak-test-output.txt; then
+            echo "LEAK DETECTED! See output above."
+            exit 1
+          fi
+
+      - name: Upload leak test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leak-test-output-linux
+          path: leak-test-output.txt
+          if-no-files-found: ignore
+
+  static-analysis:
+    name: Static Analysis (${{ matrix.tool }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tool: clang-tidy
+            os: ubuntu-latest
+            configure_preset: ci_tidy_clang
+            build_preset: ci_tidy_clang
+          - tool: cppcheck
+            os: ubuntu-latest
+            configure_preset: ci_cppcheck_gcc
+            build_preset: ci_cppcheck_gcc
+          - tool: msvc-analyze
+            os: windows-latest
+            configure_preset: ci_msvc_analyze
+            build_preset: ci_msvc_analyze
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build clang-tidy cppcheck ccache
+
+      - name: Install Ninja (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja
+
+      - name: Setup ccache (Linux)
+        if: runner.os == 'Linux'
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.configure_preset }}-analysis
+          max-size: 2G
+
+      - name: Setup MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure (CMake preset)
+        run: cmake --preset "${{ matrix.configure_preset }}"
+
+      - name: Build with Static Analysis (Linux)
+        if: runner.os == 'Linux'
+        run: cmake --build --preset "${{ matrix.build_preset }}" 2>&1 | tee static-analysis-output.txt
+        shell: bash
+
+      - name: Build with Static Analysis (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $output = cmake --build --preset "${{ matrix.build_preset }}" 2>&1 | Out-String
+          $output | Set-Content -Path static-analysis-output.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload analysis output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-analysis-${{ matrix.tool }}-output
+          path: static-analysis-output.txt
+          if-no-files-found: ignore
+
+  linux-gcc-compat:
+    name: Linux GCC Debug Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache
+
+      - name: Setup ccache (Linux)
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ci_linux_gcc_debug
+          max-size: 2G
+
+      - name: Configure (CMake preset)
+        run: cmake --preset "ci_linux_gcc_debug"
+
+      - name: Build (CMake build preset)
+        run: cmake --build --preset "ci_linux_gcc_debug"

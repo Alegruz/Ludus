@@ -1,0 +1,95 @@
+name: CI (PR)
+
+on:
+  pull_request:
+    branches: [ "develop", "main" ]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "LICENSE"
+
+jobs:
+  build-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows MSVC Debug + Tests
+            os: windows-latest
+            configure_preset: ci_test_msvc
+            build_preset: ci_test_msvc
+            run_tests: true
+            test_exe: out/build/ci_test_msvc/bin/LudusTests.exe
+          - name: Linux Clang Debug + Tests
+            os: ubuntu-latest
+            configure_preset: ci_test_clang
+            build_preset: ci_test_clang
+            run_tests: true
+            test_exe: out/build/ci_test_clang/bin/LudusTests
+          - name: macOS Clang Debug (Build)
+            os: macos-latest
+            configure_preset: ci_macos_clang_debug
+            build_preset: ci_macos_clang_debug
+            run_tests: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Install Ninja (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja
+
+      - name: Setup MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup ccache (Linux)
+        if: runner.os == 'Linux'
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.configure_preset }}
+          max-size: 2G
+
+      - name: Configure (CMake preset)
+        run: cmake --preset "${{ matrix.configure_preset }}"
+
+      - name: Build (CMake build preset)
+        run: cmake --build --preset "${{ matrix.build_preset }}"
+
+      - name: Run Unit Tests (Windows)
+        if: runner.os == 'Windows' && matrix.run_tests
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "${{ matrix.test_exe }}"
+          if (-not (Test-Path $exe)) {
+            Write-Error "Executable not found: $exe"
+            exit 1
+          }
+          & $exe
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Unit tests failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+      - name: Run Unit Tests (Linux)
+        if: runner.os == 'Linux' && matrix.run_tests
+        shell: bash
+        run: |
+          exe="${{ matrix.test_exe }}"
+          if [ ! -f "$exe" ]; then
+            echo "Error: Executable not found: $exe"
+            exit 1
+          fi
+          "$exe"

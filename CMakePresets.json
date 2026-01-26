@@ -287,6 +287,152 @@
             "cacheVariables": {
                 "CMAKE_CXX_FLAGS": "-DLUDUS_RUN_TESTS"
             }
+        },
+        {
+            "name": "ci_base",
+            "hidden": true,
+            "displayName": "CI Base (tooling off)",
+            "description": "CI baseline: disable auto-install and static analysis unless explicitly enabled",
+            "cacheVariables": {
+                "ENABLE_AUTO_INSTALL_TOOLS": "OFF",
+                "ENABLE_CLANG_TIDY": "OFF",
+                "ENABLE_CPPCHECK": "OFF",
+                "ENABLE_MSVC_ANALYZE": "OFF",
+                "ENABLE_SANITIZERS": "OFF"
+            }
+        },
+        {
+            "name": "ci_linux_clang_debug",
+            "displayName": "CI Linux Clang Debug",
+            "inherits": [
+                "ninja_clang-debug",
+                "ci_base"
+            ]
+        },
+        {
+            "name": "ci_linux_clang_release",
+            "displayName": "CI Linux Clang Release",
+            "inherits": [
+                "ninja_clang-release",
+                "ci_base"
+            ]
+        },
+        {
+            "name": "ci_linux_gcc_debug",
+            "displayName": "CI Linux GCC Debug",
+            "inherits": [
+                "ninja_gcc-debug",
+                "ci_base"
+            ]
+        },
+        {
+            "name": "ci_windows_msvc_debug",
+            "displayName": "CI Windows MSVC Debug",
+            "inherits": [
+                "ninja_msvc-debug",
+                "ci_base"
+            ]
+        },
+        {
+            "name": "ci_windows_msvc_release",
+            "displayName": "CI Windows MSVC Release",
+            "inherits": [
+                "ninja_msvc-release",
+                "ci_base"
+            ]
+        },
+        {
+            "name": "ci_macos_clang_debug",
+            "displayName": "CI macOS Clang Debug",
+            "inherits": [
+                "ninja_clang-debug",
+                "ci_base"
+            ],
+            "cacheVariables": {
+                "CMAKE_C_COMPILER_LAUNCHER": "",
+                "CMAKE_CXX_COMPILER_LAUNCHER": ""
+            }
+        },
+        {
+            "name": "ci_macos_clang_release",
+            "displayName": "CI macOS Clang Release",
+            "inherits": [
+                "ninja_clang-release",
+                "ci_base"
+            ],
+            "cacheVariables": {
+                "CMAKE_C_COMPILER_LAUNCHER": "",
+                "CMAKE_CXX_COMPILER_LAUNCHER": ""
+            }
+        },
+        {
+            "name": "ci_test_msvc",
+            "displayName": "CI Unit Tests - MSVC Debug",
+            "inherits": [
+                "test_msvc",
+                "ci_base"
+            ]
+        },
+        {
+            "name": "ci_test_clang",
+            "displayName": "CI Unit Tests - Clang Debug",
+            "inherits": [
+                "test_clang",
+                "ci_base"
+            ]
+        },
+        {
+            "name": "ci_test_gcc",
+            "displayName": "CI Unit Tests - GCC Debug",
+            "inherits": [
+                "test_gcc",
+                "ci_base"
+            ]
+        },
+        {
+            "name": "ci_sanitize_clang",
+            "displayName": "CI Sanitizers - Clang RelWithDebInfo",
+            "description": "RelWithDebInfo with ASan/UBSan/LSan enabled",
+            "inherits": [
+                "ninja_clang-relwithdebinfo",
+                "ci_base"
+            ],
+            "cacheVariables": {
+                "ENABLE_SANITIZERS": "ON"
+            }
+        },
+        {
+            "name": "ci_tidy_clang",
+            "displayName": "CI Static Analysis - clang-tidy",
+            "inherits": [
+                "ninja_clang-debug",
+                "ci_base"
+            ],
+            "cacheVariables": {
+                "ENABLE_CLANG_TIDY": "ON"
+            }
+        },
+        {
+            "name": "ci_cppcheck_gcc",
+            "displayName": "CI Static Analysis - cppcheck",
+            "inherits": [
+                "ninja_gcc-debug",
+                "ci_base"
+            ],
+            "cacheVariables": {
+                "ENABLE_CPPCHECK": "ON"
+            }
+        },
+        {
+            "name": "ci_msvc_analyze",
+            "displayName": "CI Static Analysis - MSVC /analyze",
+            "inherits": [
+                "ninja_msvc-debug",
+                "ci_base"
+            ],
+            "cacheVariables": {
+                "ENABLE_MSVC_ANALYZE": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -373,6 +519,124 @@
             "configurePreset": "test_gcc",
             "configuration": "Debug",
             "jobs": 0
+        },
+        {
+            "name": "ci_linux_clang_debug",
+            "displayName": "CI Linux Clang Debug",
+            "configurePreset": "ci_linux_clang_debug",
+            "configuration": "Debug",
+            "jobs": 0
+        },
+        {
+            "name": "ci_linux_clang_release",
+            "displayName": "CI Linux Clang Release",
+            "configurePreset": "ci_linux_clang_release",
+            "configuration": "Release",
+            "jobs": 0
+        },
+        {
+            "name": "ci_linux_gcc_debug",
+            "displayName": "CI Linux GCC Debug",
+            "configurePreset": "ci_linux_gcc_debug",
+            "configuration": "Debug",
+            "jobs": 0
+        },
+        {
+            "name": "ci_windows_msvc_debug",
+            "displayName": "CI Windows MSVC Debug",
+            "configurePreset": "ci_windows_msvc_debug",
+            "configuration": "Debug",
+            "jobs": 0
+        },
+        {
+            "name": "ci_windows_msvc_release",
+            "displayName": "CI Windows MSVC Release",
+            "configurePreset": "ci_windows_msvc_release",
+            "configuration": "Release",
+            "jobs": 0
+        },
+        {
+            "name": "ci_macos_clang_debug",
+            "displayName": "CI macOS Clang Debug",
+            "configurePreset": "ci_macos_clang_debug",
+            "configuration": "Debug",
+            "jobs": 0
+        },
+        {
+            "name": "ci_macos_clang_release",
+            "displayName": "CI macOS Clang Release",
+            "configurePreset": "ci_macos_clang_release",
+            "configuration": "Release",
+            "jobs": 0
+        },
+        {
+            "name": "ci_test_msvc",
+            "displayName": "CI Unit Tests - MSVC Debug",
+            "configurePreset": "ci_test_msvc",
+            "configuration": "Debug",
+            "jobs": 0
+        },
+        {
+            "name": "ci_test_clang",
+            "displayName": "CI Unit Tests - Clang Debug",
+            "configurePreset": "ci_test_clang",
+            "configuration": "Debug",
+            "jobs": 0
+        },
+        {
+            "name": "ci_test_gcc",
+            "displayName": "CI Unit Tests - GCC Debug",
+            "configurePreset": "ci_test_gcc",
+            "configuration": "Debug",
+            "jobs": 0
+        },
+        {
+            "name": "ci_sanitize_clang",
+            "displayName": "CI Sanitizers - Clang RelWithDebInfo",
+            "configurePreset": "ci_sanitize_clang",
+            "configuration": "RelWithDebInfo",
+            "jobs": 0
+        },
+        {
+            "name": "ci_tidy_clang",
+            "displayName": "CI Static Analysis - clang-tidy",
+            "configurePreset": "ci_tidy_clang",
+            "configuration": "Debug",
+            "jobs": 0
+        },
+        {
+            "name": "ci_cppcheck_gcc",
+            "displayName": "CI Static Analysis - cppcheck",
+            "configurePreset": "ci_cppcheck_gcc",
+            "configuration": "Debug",
+            "jobs": 0
+        },
+        {
+            "name": "ci_msvc_analyze",
+            "displayName": "CI Static Analysis - MSVC /analyze",
+            "configurePreset": "ci_msvc_analyze",
+            "configuration": "Debug",
+            "jobs": 0
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "ci_test_msvc",
+            "displayName": "CI Tests - MSVC Debug",
+            "configurePreset": "ci_test_msvc",
+            "configuration": "Debug"
+        },
+        {
+            "name": "ci_test_clang",
+            "displayName": "CI Tests - Clang Debug",
+            "configurePreset": "ci_test_clang",
+            "configuration": "Debug"
+        },
+        {
+            "name": "ci_test_gcc",
+            "displayName": "CI Tests - GCC Debug",
+            "configurePreset": "ci_test_gcc",
+            "configuration": "Debug"
         }
     ]
 }
