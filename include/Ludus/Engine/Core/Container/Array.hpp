@@ -61,7 +61,7 @@ namespace ludus::core
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /*= ArrayResizePolicy::DEFAULT*/>
     LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::ArrayImplBase() noexcept
         requires (ARRAY_TYPE == ArrayType::DYNAMIC)
-        : mCapacity(INITIAL_CAPACITY)
+        : mCapacity(StringCharType<T> ? INITIAL_CAPACITY + 1 : INITIAL_CAPACITY)
         , mSize(0)
         , mData(nullptr) {}
 
@@ -290,14 +290,15 @@ namespace ludus::core
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /*= ArrayResizePolicy::DEFAULT*/>
     LUDUS_INLINE constexpr void ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Assign(const uint32_t size, const T& defaultValue) noexcept
     {
-        mSize = size;
+        const uint32_t logicalSize = size;
+        const uint32_t requiredSize = logicalSize + (StringCharType<T> ? 1U : 0U);
         if constexpr (ARRAY_TYPE == ArrayType::DYNAMIC)
         {
-            SetCapacity(size);
+            SetCapacity(requiredSize);
         }
 
-        const uint32_t remainder = mSize % 4;
-        const uint32_t vectorizedEnd = mSize - remainder;
+        const uint32_t remainder = logicalSize % 4;
+        const uint32_t vectorizedEnd = logicalSize - remainder;
         
         // Process four elements at a time
         for(uint32_t i = 0; i < vectorizedEnd; i += 4)
@@ -316,23 +317,40 @@ namespace ludus::core
             case 1: mData[vectorizedEnd + 0] = defaultValue; break;
             default: break;
         }
+
+        if constexpr (StringCharType<T>)
+        {
+            mData[logicalSize] = STRING_NULL_CHAR(T{});
+        }
+        mSize = requiredSize;
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
     LUDUS_INLINE constexpr void ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Assign(Iterator first, Iterator last) noexcept
         requires (ARRAY_TYPE == ArrayType::DYNAMIC)
     {
-        mSize = 0;
+        uint32_t logicalSize = 0;
         for(auto it = first; it != last; ++it)
         {
-            ++mSize;
+            ++logicalSize;
         }
 
-        SetCapacity(mSize);
+        const uint32_t requiredSize = logicalSize + (StringCharType<T> ? 1U : 0U);
+        SetCapacity(requiredSize);
         uint32_t index = 0;
         for(auto it = first; it != last; ++it)
         {
             mData[index++] = *it;
+        }
+
+        if constexpr (StringCharType<T>)
+        {
+            mData[logicalSize] = STRING_NULL_CHAR(T{});
+            mSize = requiredSize;
+        }
+        else
+        {
+            mSize = logicalSize;
         }
     }
     
@@ -342,13 +360,8 @@ namespace ludus::core
     {
         if(array != nullptr && size > 0)
         {
-            uint32_t assignSize = size;
-            if constexpr (StringCharType<T>)
-            {
-                ++assignSize;
-            }
-            
-            SetCapacity(assignSize);
+            const uint32_t requiredSize = size + (StringCharType<T> ? 1U : 0U);
+            SetCapacity(requiredSize);
             
             // Use placement new for non-trivial types, memcpy for trivial types
             if constexpr (std::is_trivially_copyable_v<T>)
@@ -363,7 +376,17 @@ namespace ludus::core
                 }
             }
             
-            mSize = assignSize;
+            if constexpr (StringCharType<T>)
+            {
+                mData[size] = STRING_NULL_CHAR(T{});
+            }
+            mSize = requiredSize;
+        }
+        else if constexpr (StringCharType<T>)
+        {
+            SetCapacity(1);
+            mData[0] = STRING_NULL_CHAR(T{});
+            mSize = 1;
         }
         else
         {
@@ -383,20 +406,34 @@ namespace ludus::core
         }
         else
         {
-            mSize = 0;
+            SetCapacity(1);
+            mData[0] = STRING_NULL_CHAR(T{});
+            mSize = 1;
         }
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /*= ArrayResizePolicy::DEFAULT*/>
     LUDUS_INLINE constexpr void ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Assign(std::initializer_list<T> initList) noexcept
     {
-        mSize = static_cast<uint32_t>(initList.size());
+        const uint32_t logicalSize = static_cast<uint32_t>(initList.size());
+        const uint32_t requiredSize = logicalSize + (StringCharType<T> ? 1U : 0U);
         if constexpr (ARRAY_TYPE == ArrayType::DYNAMIC)
         {
-            SetCapacity(mSize);
+            SetCapacity(requiredSize);
         }
 
+        mSize = logicalSize;
         copy(initList);
+
+        if constexpr (StringCharType<T>)
+        {
+            mData[logicalSize] = STRING_NULL_CHAR(T{});
+            mSize = requiredSize;
+        }
+        else
+        {
+            mSize = logicalSize;
+        }
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /*= ArrayResizePolicy::DEFAULT*/>
@@ -415,7 +452,7 @@ namespace ludus::core
         }
         else
         {
-            return STATIC_CAPACITY;
+            return mSize;
         }
     }
 
@@ -505,7 +542,17 @@ namespace ludus::core
     LUDUS_INLINE constexpr void ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::updateSize(const uint32_t newSize) noexcept
         requires (ARRAY_TYPE == ArrayType::DYNAMIC)
     {
-        mSize = newSize;
+        if constexpr (StringCharType<T>)
+        {
+            const uint32_t requiredSize = newSize + 1U;
+            LUDUS_ASSERT_MSG(requiredSize <= mCapacity, "String capacity insufficient during resize");
+            mSize = requiredSize;
+            mData[newSize] = STRING_NULL_CHAR(T{});
+        }
+        else
+        {
+            mSize = newSize;
+        }
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
@@ -799,12 +846,9 @@ LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLI
     {
         if(array != nullptr && size > 0)
         {
-            uint32_t nextSize = this->GetSize() + size;
-            if constexpr (StringCharType<T>)
-            {
-                ++nextSize;
-            }
-            this->SetCapacity(this->calculateCapacityToAllocate(nextSize));
+            const uint32_t nextSize = this->GetSize() + size;
+            const uint32_t requiredCapacity = nextSize + (StringCharType<T> ? 1U : 0U);
+            this->SetCapacity(requiredCapacity);
             memory::CopyMemory(&this->mData[this->GetSize()], array, size * sizeof(T));
             this->updateSize(nextSize);
         }
@@ -816,7 +860,8 @@ LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLI
         requires (ARRAY_TYPE == ArrayType::DYNAMIC)
     {
         const uint32_t nextSize = this->GetSize() + 1;
-        this->SetCapacity(this->calculateCapacityToAllocate(nextSize));
+        const uint32_t requiredCapacity = nextSize + (StringCharType<T> ? 1U : 0U);
+        this->SetCapacity(requiredCapacity);
         this->mData[this->GetSize()] = element;
         this->updateSize(nextSize);
     }
@@ -826,7 +871,8 @@ LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLI
         requires (ARRAY_TYPE == ArrayType::DYNAMIC)
     {
         const uint32_t nextSize = this->GetSize() + 1;
-        this->SetCapacity(this->calculateCapacityToAllocate(nextSize));
+        const uint32_t requiredCapacity = nextSize + (StringCharType<T> ? 1U : 0U);
+        this->SetCapacity(requiredCapacity);
         (void)(this->mData[this->GetSize()] = std::move(element));
         this->updateSize(nextSize);
     }

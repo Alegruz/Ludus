@@ -27,11 +27,10 @@ namespace ludus::core
     template<typename CharT>
     concept StringCharType = std::is_same_v<CharT, char> || std::is_same_v<CharT, wchar_t>;
     
-    template<StringCharType CharT>
-    LUDUS_INLINE constexpr CharT StringNullChar() noexcept
-    {
-        return static_cast<CharT>(0);
-    }
+    // NOLINTNEXTLINE(readability-identifier-naming) - Macro-style naming is intentional for cross-char helper.
+    LUDUS_INLINE constexpr char STRING_NULL_CHAR(char unusedChar) noexcept { (void)unusedChar; return '\0'; }
+    // NOLINTNEXTLINE(readability-identifier-naming) - Macro-style naming is intentional for cross-char helper.
+    LUDUS_INLINE constexpr wchar_t STRING_NULL_CHAR(wchar_t unusedChar) noexcept { (void)unusedChar; return L'\0'; }
 
     template<StringCharType CharT>
     LUDUS_INLINE constexpr uint32_t GetStringLength(const CharT* str) noexcept
