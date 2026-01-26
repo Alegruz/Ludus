@@ -3,7 +3,7 @@
 #include <Ludus/Engine/Platform/Platform.h>
 #include <Ludus/Engine/Core/Assert.h>
 
-#if defined(LUDUS_LINUX) || defined(LUDUS_MAC)
+#if defined(LUDUS_LINUX)
     #include <unistd.h>
 
 namespace ludus::platform::hardware
@@ -60,4 +60,4 @@ namespace ludus::platform
         return hardware::Enforce64BitOrNotify();
     }
 }   // namespace ludus::platform
-#endif  // defined(LUDUS_LINUX) || defined(LUDUS_MAC)
+#endif  // defined(LUDUS_LINUX)
