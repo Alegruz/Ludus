@@ -19,6 +19,10 @@ namespace ludus::rhi
 
     public:
         explicit Texture(const CreateInfo& createInfo) requires(TApi == GraphicsApi::CPU);
+        Texture(const Texture&) = default;
+        Texture& operator=(const Texture&) = default;
+        Texture(Texture&&) noexcept = default;
+        Texture& operator=(Texture&&) noexcept = default;
         ~Texture() = default;
 
         [[nodiscard]] LUDUS_INLINE constexpr uint32_t GetWidth() const noexcept { return mWidth; }

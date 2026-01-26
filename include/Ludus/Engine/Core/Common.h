@@ -27,8 +27,11 @@ namespace ludus::core
     template<typename CharT>
     concept StringCharType = std::is_same_v<CharT, char> || std::is_same_v<CharT, wchar_t>;
     
-    constexpr StringCharType auto STRING_NULL_CHAR(char);
-    constexpr StringCharType auto STRING_NULL_CHAR(wchar_t);
+    template<StringCharType CharT>
+    LUDUS_INLINE constexpr CharT StringNullChar() noexcept
+    {
+        return static_cast<CharT>(0);
+    }
 
     template<StringCharType CharT>
     LUDUS_INLINE constexpr uint32_t GetStringLength(const CharT* str) noexcept
