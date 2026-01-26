@@ -23,6 +23,17 @@ All platforms use a unified CMake build system with preset configurations for co
 
 ---
 
+## Start Here (Recommended Reading Order)
+
+If you're new to Ludus, read these in order:
+
+1. [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) — environment setup, build, and troubleshooting.
+2. [`docs/ENGINE_ARCHITECTURE.md`](docs/ENGINE_ARCHITECTURE.md) — the layered model and module responsibilities.
+3. [`CONTRIBUTING.md`](CONTRIBUTING.md) — contributor workflow, layering guardrails, and expectations.
+4. [`docs/MAINTAINABILITY_REVIEW.md`](docs/MAINTAINABILITY_REVIEW.md) — a blunt assessment of risks and a prioritized roadmap.
+
+---
+
 ## Quick Start
 
 ### Prerequisites

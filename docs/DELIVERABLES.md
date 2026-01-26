@@ -34,7 +34,7 @@
 ## Documentation Files
 
 ### User Documentation
-- [x] **docs/COMMAND_LINE_PARSING.md**
+- [x] **[COMMAND_LINE_PARSING.md](COMMAND_LINE_PARSING.md)**
   - User guide and reference
   - Escape sequence table
   - Usage examples
@@ -42,7 +42,7 @@
   - Known limitations
 
 ### Technical Documentation
-- [x] **docs/COMMAND_LINE_PARSER_DESIGN.md**
+- [x] **[COMMAND_LINE_PARSER_DESIGN.md](COMMAND_LINE_PARSER_DESIGN.md)**
   - Problem statement
   - Architecture overview
   - State machine design
@@ -53,7 +53,7 @@
   - Future enhancements
 
 ### Reference Documentation
-- [x] **docs/COMMAND_LINE_PARSER_QUICK_REF.md**
+- [x] **[COMMAND_LINE_PARSER_QUICK_REF.md](COMMAND_LINE_PARSER_QUICK_REF.md)**
   - Quick examples
   - Escape sequence reference
   - Common patterns
@@ -62,7 +62,7 @@
   - Testing instructions
 
 ### Summary Documentation
-- [x] **docs/COMMAND_LINE_PARSER_SUMMARY.md**
+- [x] **[COMMAND_LINE_PARSER_SUMMARY.md](COMMAND_LINE_PARSER_SUMMARY.md)**
   - Implementation overview
   - File modifications
   - Test results
@@ -70,7 +70,7 @@
   - Quality metrics
   - Validation steps
 
-- [x] **docs/COMMAND_LINE_PARSER_COMPLETION_CHECKLIST.md**
+- [x] **[COMMAND_LINE_PARSER_COMPLETION_CHECKLIST.md](COMMAND_LINE_PARSER_COMPLETION_CHECKLIST.md)**
   - Implementation checklist
   - Feature verification
   - Test coverage matrix
@@ -78,21 +78,21 @@
   - Sign-off confirmation
 
 ### High-Level Documentation
-- [x] **COMMAND_LINE_PARSER_README.md**
+- [x] **[COMMAND_LINE_PARSER_README.md](COMMAND_LINE_PARSER_README.md)**
   - Executive summary
   - Feature demonstration
   - Test results
   - Use cases
   - Verification instructions
 
-- [x] **COMMAND_LINE_PARSER_COMPLETION.md**
+- [x] **[COMMAND_LINE_PARSER_COMPLETION.md](COMMAND_LINE_PARSER_COMPLETION.md)**
   - Visual overview
   - Accomplishments summary
   - Quality metrics
   - File list
   - Production readiness
 
-- [x] **IMPLEMENTATION_COMPLETE.md**
+- [x] **[IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md)**
   - Task completion summary
   - Deliverables list
   - Test results
@@ -268,22 +268,22 @@ Core Implementation (2):
   ✓ src/Engine/Core/CoreTests.cpp
 
 User Documentation (1):
-  ✓ docs/COMMAND_LINE_PARSING.md
+  ✓ [COMMAND_LINE_PARSING.md](COMMAND_LINE_PARSING.md)
 
 Technical Documentation (1):
-  ✓ docs/COMMAND_LINE_PARSER_DESIGN.md
+  ✓ [COMMAND_LINE_PARSER_DESIGN.md](COMMAND_LINE_PARSER_DESIGN.md)
 
 Reference Documentation (1):
-  ✓ docs/COMMAND_LINE_PARSER_QUICK_REF.md
+  ✓ [COMMAND_LINE_PARSER_QUICK_REF.md](COMMAND_LINE_PARSER_QUICK_REF.md)
 
 Summary Documentation (3):
-  ✓ docs/COMMAND_LINE_PARSER_SUMMARY.md
-  ✓ docs/COMMAND_LINE_PARSER_COMPLETION_CHECKLIST.md
-  ✓ COMMAND_LINE_PARSER_README.md
+  ✓ [COMMAND_LINE_PARSER_SUMMARY.md](COMMAND_LINE_PARSER_SUMMARY.md)
+  ✓ [COMMAND_LINE_PARSER_COMPLETION_CHECKLIST.md](COMMAND_LINE_PARSER_COMPLETION_CHECKLIST.md)
+  ✓ [COMMAND_LINE_PARSER_README.md](COMMAND_LINE_PARSER_README.md)
 
 Overview Documentation (2):
-  ✓ COMMAND_LINE_PARSER_COMPLETION.md
-  ✓ IMPLEMENTATION_COMPLETE.md
+  ✓ [COMMAND_LINE_PARSER_COMPLETION.md](COMMAND_LINE_PARSER_COMPLETION.md)
+  ✓ [IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md)
 
 Tools (1):
   ✓ tools/validate_parser.py
@@ -327,9 +327,9 @@ Tools (1):
 | Document | Purpose |
 |----------|---------|
 | [COMMAND_LINE_PARSER_README.md](COMMAND_LINE_PARSER_README.md) | Start here for overview |
-| [docs/COMMAND_LINE_PARSING.md](docs/COMMAND_LINE_PARSING.md) | User guide and examples |
-| [docs/COMMAND_LINE_PARSER_DESIGN.md](docs/COMMAND_LINE_PARSER_DESIGN.md) | Technical design details |
-| [docs/COMMAND_LINE_PARSER_QUICK_REF.md](docs/COMMAND_LINE_PARSER_QUICK_REF.md) | Quick reference |
+| [COMMAND_LINE_PARSING.md](COMMAND_LINE_PARSING.md) | User guide and examples |
+| [COMMAND_LINE_PARSER_DESIGN.md](COMMAND_LINE_PARSER_DESIGN.md) | Technical design details |
+| [COMMAND_LINE_PARSER_QUICK_REF.md](COMMAND_LINE_PARSER_QUICK_REF.md) | Quick reference |
 | [tools/validate_parser.py](tools/validate_parser.py) | Run validation tests |
 
 ---
