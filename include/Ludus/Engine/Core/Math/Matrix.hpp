@@ -179,6 +179,11 @@ namespace ludus::core
     LUDUS_INLINE constexpr Vector3<T> Matrix4<T>::TransformPoint(const Vector3<T>& value) const noexcept
     {
         const Vector4<T> transformed = (*this) * Vector4<T>(value.X, value.Y, value.Z, static_cast<T>(1));
+        if (transformed.W != static_cast<T>(0))
+        {
+            return {transformed.X / transformed.W, transformed.Y / transformed.W, transformed.Z / transformed.W};
+        }
+        // If W is zero, return as before (likely at infinity or invalid transform)
         return {transformed.X, transformed.Y, transformed.Z};
     }
 
