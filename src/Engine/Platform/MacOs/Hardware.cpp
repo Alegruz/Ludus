@@ -7,6 +7,13 @@
 
 namespace ludus::platform::hardware
 {
+    bool Enforce64BitOrNotify() noexcept
+    {
+        const HardwareInfo& info = GetHardwareInfo();
+        LUDUS_ASSERT_MSG(ludus::core::POINTER_SIZE_64BIT == info.Compile.PointerSizeBytes, "Pointer size must be 8 bytes");
+        return info.Compile.PointerSizeBytes == ludus::core::POINTER_SIZE_64BIT;
+    }
+
     static uint64_t QuerySysctlUint64(const char* name) noexcept
     {
         uint64_t value = 0;
