@@ -73,4 +73,7 @@ namespace ludus::platform
 {
     constexpr const PlatformType CURRENT_PLATFORM_TYPE = PlatformType::MAC;
 }   // namespace ludus::platform
+    #include <Ludus/Engine/Platform/MacOs/Common.h>
+#else
+    #error "Unsupported platform"
 #endif  // defined(LUDUS_WINDOWS)
