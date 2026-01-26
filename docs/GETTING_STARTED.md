@@ -1,6 +1,11 @@
 # Getting Started
 
-This guide gets you from clone â†’ build â†’ run in minutes, then orients you to the codebase and deeper docs.
+Status: draft
+Owner: maintainers
+Last updated: 2026-01-26
+
+
+This guide gets you from clone ??build ??run in minutes, then orients you to the codebase and deeper docs.
 
 ## 1) Prerequisites
 
@@ -46,7 +51,7 @@ cmake --build --preset ninja_msvc-debug -t LudusTests
 
 - Test main: `src/Tests/Main.cpp`
 - Example tests live alongside core: `src/Engine/Core/CoreTests.cpp`
-- The test registry reports failures via `main`â€™s exit code.
+- The test registry reports failures via `main`?™s exit code.
 
 ## 5) Formatting and Analysis
 
@@ -100,7 +105,7 @@ cmake --preset ninja_clang-relwithdebinfo -DENABLE_MIMALLOC=OFF
 ## Common Workflows
 
 - Add a new unit test: place it in `src/Engine/Core/CoreTests.cpp` or add a new file under `src/Engine/Core/`, register via the test registry API and rebuild `LudusTests`.
-- Add a new platform: create `src/Engine/Platform/<YourPlatform>/Common.cpp` and corresponding headers under `include/Ludus/Engine/Platform/<YourPlatform>/`, then ensure `PLATFORM_FOLDER` maps correctly in top-level CMake (itâ€™s auto-set by platform ID).
+- Add a new platform: create `src/Engine/Platform/<YourPlatform>/Common.cpp` and corresponding headers under `include/Ludus/Engine/Platform/<YourPlatform>/`, then ensure `PLATFORM_FOLDER` maps correctly in top-level CMake (it?™s auto-set by platform ID).
 - Debug memory/leaks: see [docs/LEAK_DETECTION.md](LEAK_DETECTION.md) and use `LUDUS_LEAK_DETECTOR()` scopes as shown in `src/Editor/Platform/Windows/Main.cpp` and `src/Tests/Main.cpp`.
 
 ## Where to Read Next
@@ -118,4 +123,4 @@ cmake --preset ninja_clang-relwithdebinfo -DENABLE_MIMALLOC=OFF
 - Formatting/clang-tidy not running: if auto-install failed, manually install tools and reconfigure. See [docs/BUILD_SYSTEM.md](../docs/BUILD_SYSTEM.md) for manual install steps.
 - Sanitizers on Windows: prefer Clang presets (`ninja_clang-*`). MSVC ASan is disabled here.
 - Mimalloc conflicts with sanitizers: it auto-disables when sanitizers are ON.
-- Build artifacts in source root: if you see `.exe`, `.dll`, or `.ilk` files in the repo root, they're from an old build. Delete them and rebuildâ€”new builds output to `build/bin/` and `build/lib/` only.
+- Build artifacts in source root: if you see `.exe`, `.dll`, or `.ilk` files in the repo root, they're from an old build. Delete them and rebuild?”new builds output to `build/bin/` and `build/lib/` only.

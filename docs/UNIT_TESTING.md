@@ -1,5 +1,10 @@
 # Ludus Unit Test Framework
 
+Status: draft
+Owner: maintainers
+Last updated: 2026-01-26
+
+
 A simple, lightweight unit test framework for the Ludus game engine core systems.
 
 ## Overview
@@ -29,7 +34,7 @@ target_compile_definitions(YourTarget PRIVATE LUDUS_RUN_TESTS)
 ```
 
 **Visual Studio:**
-Add `LUDUS_RUN_TESTS` to Project Properties → C/C++ → Preprocessor → Preprocessor Definitions
+Add `LUDUS_RUN_TESTS` to Project Properties ??C/C++ ??Preprocessor ??Preprocessor Definitions
 
 **Command Line:**
 ```bash

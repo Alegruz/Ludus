@@ -1,5 +1,10 @@
 # Memory Allocation Architecture
 
+Status: draft
+Owner: maintainers
+Last updated: 2026-01-26
+
+
 ## Overview
 
 The Ludus engine uses a centralized memory allocation strategy to ensure:
@@ -31,10 +36,10 @@ The Ludus engine uses a centralized memory allocation strategy to ensure:
 
 | Allocator | Games | Linux/Mac | Stats | Override | Complexity |
 |-----------|-------|----------|-------|----------|-----------|
-| **mimalloc** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ✅ | Low |
-| **jemalloc** | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⚠️ | Medium |
-| **tcmalloc** | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⚠️ | High |
-| **System malloc** | ⭐⭐ | ⭐⭐ | ⚠️ | N/A | N/A |
+| **mimalloc** | ⭐⭐⭐⭐�?| ⭐⭐⭐⭐�?| ⭐⭐⭐⭐�?| ??| Low |
+| **jemalloc** | ⭐⭐⭐⭐ | ⭐⭐⭐⭐�?| ⭐⭐⭐⭐�?| ?�️ | Medium |
+| **tcmalloc** | ⭐⭐�?| ⭐⭐�?| ⭐⭐⭐⭐ | ?�️ | High |
+| **System malloc** | ⭐⭐ | ⭐⭐ | ?�️ | N/A | N/A |
 
 ---
 
@@ -60,13 +65,13 @@ mimalloc is linked to `LudusBuildSettings`, which is inherited by all engine tar
 
 ```
 LudusBuildSettings (INTERFACE)
-    ├── ProjectSanitizersSettings
-    └── mimalloc (MI_OVERRIDE=ON)
+    ?��??� ProjectSanitizersSettings
+    ?��??� mimalloc (MI_OVERRIDE=ON)
 
 Targets using LudusBuildSettings:
-    ├── LudusCore (shared lib)
-    ├── LudusPlatform (shared lib)
-    └── LudusEditor (executable)
+    ?��??� LudusCore (shared lib)
+    ?��??� LudusPlatform (shared lib)
+    ?��??� LudusEditor (executable)
 ```
 
 **Effect**: All malloc/free calls throughout the engine automatically use mimalloc.
@@ -110,7 +115,7 @@ ZeroOutMemory(sensitive, size);
 The current [Array](../include/Ludus/Engine/Core/Container/Array.hpp) implementation uses raw `malloc`/`free`:
 
 ```cpp
-// ❌ Current (problematic)
+// ??Current (problematic)
 T* newData = static_cast<T*>(malloc(capacity * sizeof(T)));
 free(mData);
 memcpy(mData, src, size);
@@ -126,7 +131,7 @@ memcpy(mData, src, size);
 ### Solution: Migrate to Memory API
 
 ```cpp
-// ✅ Improved (type-safe)
+// ??Improved (type-safe)
 T* newData = Allocate<T>(capacity);
 Deallocate(mData);
 CopyMemory(mData, src, size);  // Still OK for trivially copyable types
@@ -136,21 +141,21 @@ CopyMemory(mData, src, size);  // Still OK for trivially copyable types
 
 ## Migration Path
 
-### Phase 1: API Introduction (✅ Complete)
+### Phase 1: API Introduction (??Complete)
 - [x] Create `ludus::memory` namespace with allocation functions
 - [x] Document API in [Memory.h](../include/Ludus/Engine/Core/Memory.h)
 
-### Phase 2: Container Updates (✅ Complete)
+### Phase 2: Container Updates (??Complete)
 - [x] Update [Array](../include/Ludus/Engine/Core/Container/Array.hpp) to use Memory API
 - [ ] Update [String](../include/Ludus/Engine/Core/Container/String.hpp) for UTF conversions (next)
 - [ ] Add constructor/destructor support for non-trivial types (future)
 
-### Phase 3: Subsystem Integration (🔄 Pending)
+### Phase 3: Subsystem Integration (?�� Pending)
 - [ ] Update `CommandLineManager` allocations (depends on Array updates)
 - [ ] Add platform-specific allocations (Windows/Linux/macOS)
 - [ ] Implement custom heaps for hot-path subsystems
 
-### Phase 4: Profiling & Optimization (🔄 Pending)
+### Phase 4: Profiling & Optimization (?�� Pending)
 - [ ] Add memory statistics gathering
 - [ ] Profile real workloads
 - [ ] Identify and optimize hot allocations
@@ -226,12 +231,12 @@ xcrun xctrace record --template "System Trace" ./LudusEditor
 
 ## Container Code: Critical Areas
 
-### Array (✅ Migrated)
+### Array (??Migrated)
 
 Current: [Array.hpp](../include/Ludus/Engine/Core/Container/Array.hpp)
 
 ```cpp
-// ✅ Now using Memory API
+// ??Now using Memory API
 T* newData = ludus::memory::Allocate<T>(capacity);
 ludus::memory::CopyMemory(newData, mData, mSize * sizeof(T));
 ludus::memory::Deallocate(mData);
@@ -251,7 +256,7 @@ wchar_t* buffer = new wchar_t[requiredSize];
 wchar_t* buffer = ludus::memory::Allocate<wchar_t>(requiredSize);
 ```
 
-**Impact**: All string conversions (UTF-8 ↔ UTF-16 on Windows).
+**Impact**: All string conversions (UTF-8 ??UTF-16 on Windows).
 
 ### CommandLineManager (Needs Update)
 

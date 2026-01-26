@@ -1,21 +1,26 @@
 # Memory Leak Detection Quick Reference
 
+Status: draft
+Owner: maintainers
+Last updated: 2026-01-26
+
+
 ## What Changed?
 
 Three key improvements to catch memory leaks in the Ludus container code:
 
 ### 1. **Linux/macOS: ASan + LSan (Default)**
-- ✅ Enabled automatically in Debug builds
-- ✅ Also works in RelWithDebInfo optimized builds  
+- ??Enabled automatically in Debug builds
+- ??Also works in RelWithDebInfo optimized builds  
 - Catches: buffer overflows, use-after-free, leaks
 
 ### 2. **Linux: Valgrind (CI)**
-- ✅ Runs automatically on GitHub Actions
+- ??Runs automatically on GitHub Actions
 - Catches: leaks ASan might miss, deep validation
 - Reports uploaded as artifacts
 
 ### 3. **Windows: CRT Leak Detection (Default)**
-- ✅ Enabled automatically in Debug builds
+- ??Enabled automatically in Debug builds
 - Leaks reported in Visual Studio Debug Output on exit
 - API available: `ludus::core::debug::*` functions
 
@@ -82,9 +87,9 @@ ludus::core::debug::DumpMemoryLeaks();             // Manual dump
 
 | Platform | Build | Tool | Automatic |
 |----------|-------|------|-----------|
-| Linux | Debug | ASan/LSan + Valgrind | ✅ Yes |
-| Windows | Debug | CRT Leak Check + ASan | ✅ Yes |
-| macOS | Debug | ASan/LSan | ✅ Yes |
+| Linux | Debug | ASan/LSan + Valgrind | ??Yes |
+| Windows | Debug | CRT Leak Check + ASan | ??Yes |
+| macOS | Debug | ASan/LSan | ??Yes |
 
 ---
 
@@ -92,9 +97,9 @@ ludus::core::debug::DumpMemoryLeaks();             // Manual dump
 
 - **General guide**: See [LEAK_DETECTION.md](../docs/LEAK_DETECTION.md)
 - **Implementation details**: See [MEMORY_LEAK_DETECTION_IMPLEMENTATION.md](../docs/MEMORY_LEAK_DETECTION_IMPLEMENTATION.md)
-- **Visual Studio UI**: Debug → Performance Profiler → Memory Usage
+- **Visual Studio UI**: Debug ??Performance Profiler ??Memory Usage
 - **Dr. Memory (Windows)**: Optional - see workflow comments for enablement
 
 ---
 
-**Status**: All three memory leak detection strategies now active! 🎉
+**Status**: All three memory leak detection strategies now active! ?��

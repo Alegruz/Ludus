@@ -1,5 +1,10 @@
 # mimalloc Integration
 
+Status: draft
+Owner: maintainers
+Last updated: 2026-01-26
+
+
 ## Overview
 
 [mimalloc](https://github.com/microsoft/mimalloc) is a high-performance memory allocator from Microsoft and the **chosen base allocator** for the Ludus engine.

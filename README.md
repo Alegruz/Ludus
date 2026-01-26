@@ -2,7 +2,7 @@
 
 ## Mission
 
-**Ludus** is a modern C++23 game and visualization engine designed for educational and research purposes. It provides a **lightweight, well-architected foundation** with a focus on clarity, safety, and practical performance—not a production game engine.
+**Ludus** is a modern C++23 game and visualization engine designed for educational and research purposes. It provides a **lightweight, well-architected foundation** with a focus on clarity, safety, and practical performance, not a production game engine.
 
 ## Engine Scope
 
@@ -27,10 +27,10 @@ All platforms use a unified CMake build system with preset configurations for co
 
 If you're new to Ludus, read these in order:
 
-1. [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) — environment setup, build, and troubleshooting.
-2. [`docs/ENGINE_ARCHITECTURE.md`](docs/ENGINE_ARCHITECTURE.md) — the layered model and module responsibilities.
-3. [`CONTRIBUTING.md`](CONTRIBUTING.md) — contributor workflow, layering guardrails, and expectations.
-4. [`docs/MAINTAINABILITY_REVIEW.md`](docs/MAINTAINABILITY_REVIEW.md) — a blunt assessment of risks and a prioritized roadmap.
+1. [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) - environment setup, build, and troubleshooting.
+2. [`docs/ENGINE_ARCHITECTURE.md`](docs/ENGINE_ARCHITECTURE.md) - the layered model and module responsibilities.
+3. [`CONTRIBUTING.md`](CONTRIBUTING.md) - contributor workflow, layering guardrails, and expectations.
+4. [`docs/MAINTAINABILITY_REVIEW.md`](docs/MAINTAINABILITY_REVIEW.md) - a blunt assessment of risks and a prioritized roadmap.
 
 ---
 
@@ -80,50 +80,50 @@ See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for detailed step-by-step
 
 ```
 include/Ludus/
-├── Engine/
-│   ├── Core/          # Utilities, math, containers, assertions
-│   └── Platform/      # Platform abstraction layer
-└── Editor/            # Editor app headers
+|-- Engine/
+|   |-- Core/          # Utilities, math, containers, assertions
+|   `-- Platform/      # Platform abstraction layer
+`-- Editor/            # Editor app headers
 
 src/
-├── Engine/
-│   ├── Core/          # LudusCore implementation
-│   ├── Platform/      # LudusPlatform + platform-specific code
-│   │   ├── Windows/
-│   │   ├── Unix/
-│   │   └── MacOs/
-│   └── Renderer/      # Renderer module (placeholder)
-├── Editor/
-│   └── Platform/      # Platform entry points (Windows/Unix/MacOs)
-└── Tests/             # LudusTests implementation
+|-- Engine/
+|   |-- Core/          # LudusCore implementation
+|   |-- Platform/      # LudusPlatform + platform-specific code
+|   |   |-- Windows/
+|   |   |-- Unix/
+|   |   `-- MacOs/
+|   `-- Renderer/      # Renderer module (placeholder)
+|-- Editor/
+|   `-- Platform/      # Platform entry points (Windows/Unix/MacOs)
+`-- Tests/             # LudusTests implementation
 
 build/
-├── bin/               # Executables and DLLs
-└── lib/               # Libraries
+|-- bin/               # Executables and DLLs
+`-- lib/               # Libraries
 ```
 
 ### Component Map
 
 ```
 LudusCore (shared library)
-    ↓
-    Core utilities, math, containers, memory
-    
+    |
+    |-- Core utilities, math, containers, memory
+
 LudusPlatform (shared library)
-    ↓
-    Platform abstraction, window management, system calls
-    
+    |
+    |-- Platform abstraction, window management, system calls
+
 Ludus (interface library)
-    ↓
-    Umbrella target linking LudusCore + LudusPlatform
-    
+    |
+    |-- Umbrella target linking LudusCore + LudusPlatform
+
 LudusEditor (executable)
-    ↓
-    Application using Ludus + platform-specific entry point
-    
+    |
+    |-- Application using Ludus + platform-specific entry point
+
 LudusTests (executable)
-    ↓
-    Test runner using in-house test registry
+    |
+    `-- Test runner using in-house test registry
 ```
 
 ---
@@ -154,7 +154,7 @@ Quick reference to key docs:
 
 | Topic | Document |
 |-------|----------|
-| **🏗️ Engine Architecture & Public API** | [ENGINE_ARCHITECTURE.md](docs/ENGINE_ARCHITECTURE.md) |
+| **Engine Architecture & Public API** | [ENGINE_ARCHITECTURE.md](docs/ENGINE_ARCHITECTURE.md) |
 | **Setup & First Build** | [GETTING_STARTED.md](docs/GETTING_STARTED.md) |
 | **Build System & CI** | [BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md) |
 | **Unit Testing** | [UNIT_TESTING.md](docs/UNIT_TESTING.md) |

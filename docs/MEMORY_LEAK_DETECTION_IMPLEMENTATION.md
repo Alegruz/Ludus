@@ -1,5 +1,10 @@
 # Memory Leak Detection Implementation Summary
 
+Status: draft
+Owner: maintainers
+Last updated: 2026-01-26
+
+
 ## Overview
 
 This document summarizes the comprehensive memory leak detection infrastructure added to the Ludus project. Memory detection is critical for the codebase due to manual memory management in container classes (Array, String, etc.).
@@ -93,15 +98,15 @@ Complete guide covering:
 
 | Platform | Build Type | Tool | Enabled | Status |
 |----------|-----------|------|---------|--------|
-| **Linux** | Debug | ASan/LSan | Default | ✅ Automatic |
-| **Linux** | RelWithDebInfo | ASan/LSan | Default | ✅ New preset |
-| **Linux** | Debug | Valgrind | CI only | ✅ New CI job |
-| **macOS** | Debug | ASan/LSan | Default | ✅ Automatic |
-| **macOS** | RelWithDebInfo | ASan/LSan | Default | ✅ New preset |
-| **Windows** | Debug | CRT Leak Check | Default | ✅ Now integrated |
-| **Windows** | Debug | MSVC ASan | Default | ✅ Automatic |
-| **Windows** | RelWithDebInfo | MSVC ASan | Default | ✅ New preset |
-| **Windows** | Debug | Dr. Memory | Optional | 💬 Commented in CI |
+| **Linux** | Debug | ASan/LSan | Default | ??Automatic |
+| **Linux** | RelWithDebInfo | ASan/LSan | Default | ??New preset |
+| **Linux** | Debug | Valgrind | CI only | ??New CI job |
+| **macOS** | Debug | ASan/LSan | Default | ??Automatic |
+| **macOS** | RelWithDebInfo | ASan/LSan | Default | ??New preset |
+| **Windows** | Debug | CRT Leak Check | Default | ??Now integrated |
+| **Windows** | Debug | MSVC ASan | Default | ??Automatic |
+| **Windows** | RelWithDebInfo | MSVC ASan | Default | ??New preset |
+| **Windows** | Debug | Dr. Memory | Optional | ?�� Commented in CI |
 
 ---
 
@@ -264,7 +269,7 @@ Some edge cases (e.g., leaks only on shutdown) might not be caught by ASan:
 
 ---
 
-**Status**: ✅ Complete - All three memory leak detection strategies implemented:
-1. ✅ ASan/LSan enabled by default in Debug builds (Linux/macOS)
-2. ✅ Valgrind added to CI pipeline (Linux)
-3. ✅ CRT leak detection added to Windows Debug builds
+**Status**: ??Complete - All three memory leak detection strategies implemented:
+1. ??ASan/LSan enabled by default in Debug builds (Linux/macOS)
+2. ??Valgrind added to CI pipeline (Linux)
+3. ??CRT leak detection added to Windows Debug builds

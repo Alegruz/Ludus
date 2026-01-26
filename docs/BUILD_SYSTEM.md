@@ -1,5 +1,10 @@
 # Build System & CI Integration
 
+Status: draft
+Owner: maintainers
+Last updated: 2026-01-26
+
+
 This document explains the Ludus build philosophy, auto-install convenience feature, and how to integrate safely into CI/CD environments.
 
 ## Philosophy: Developer-Friendly with CI Flexibility
@@ -12,7 +17,7 @@ The Ludus build system follows these principles:
    - Reduces setup friction for newcomers and local development.
 
 2. **Optional, graceful fallbacks**
-   - If auto-install fails or is disabled, the build **succeeds anyway**â€”only formatting and analysis targets are unavailable.
+   - If auto-install fails or is disabled, the build **succeeds anyway**?”only formatting and analysis targets are unavailable.
    - CI environments can disable auto-install by setting `ENABLE_CLANG_TIDY=OFF` or by pre-installing tools.
    - Use `-DENABLE_AUTO_INSTALL_TOOLS=OFF` to prevent any auto-install attempts.
 
@@ -32,21 +37,21 @@ All build artifacts are kept separate from source code:
 
 ```
 ludus/                    # Source root (stays clean, version-controlled)
-â”œâ”€â”€ src/                  # Source files
-â”œâ”€â”€ include/              # Public headers
-â”œâ”€â”€ CMakeLists.txt
-â”œâ”€â”€ docs/
-â””â”€â”€ build/                # Build artifacts (NOT version-controlled, ignored by .gitignore)
-    â”œâ”€â”€ bin/              # Executables and DLLs
-    â”‚   â”œâ”€â”€ LudusEditor.exe
-    â”‚   â”œâ”€â”€ LudusTests.exe
-    â”‚   â”œâ”€â”€ LudusCore.dll
-    â”‚   â”œâ”€â”€ LudusPlatform.dll
-    â”‚   â””â”€â”€ [runtime DLLs: mimalloc, ASan, etc.]
-    â”œâ”€â”€ lib/              # Static/import libraries
-    â”‚   â”œâ”€â”€ LudusCore.lib
-    â”‚   â””â”€â”€ LudusPlatform.lib
-    â””â”€â”€ CMakeFiles/       # CMake cache and intermediate files
+?œâ??€ src/                  # Source files
+?œâ??€ include/              # Public headers
+?œâ??€ CMakeLists.txt
+?œâ??€ docs/
+?”â??€ build/                # Build artifacts (NOT version-controlled, ignored by .gitignore)
+    ?œâ??€ bin/              # Executables and DLLs
+    ??  ?œâ??€ LudusEditor.exe
+    ??  ?œâ??€ LudusTests.exe
+    ??  ?œâ??€ LudusCore.dll
+    ??  ?œâ??€ LudusPlatform.dll
+    ??  ?”â??€ [runtime DLLs: mimalloc, ASan, etc.]
+    ?œâ??€ lib/              # Static/import libraries
+    ??  ?œâ??€ LudusCore.lib
+    ??  ?”â??€ LudusPlatform.lib
+    ?”â??€ CMakeFiles/       # CMake cache and intermediate files
 ```
 
 This keeps the source tree clean and follows CMake best practices. Builds are reproducible and easy to clean.
@@ -60,7 +65,7 @@ cmake --preset ninja_msvc-debug
 cmake --build --preset ninja_msvc-debug -t LudusEditor
 ```
 
-CMake will attempt to install clang-format/clang-tidy via Chocolatey, Homebrew, or apt. On Windows, if Chocolatey isn't available, it will try the PowerShell installer. If all auto-installs fail, the build still succeedsâ€”you just won't have formatting targets.
+CMake will attempt to install clang-format/clang-tidy via Chocolatey, Homebrew, or apt. On Windows, if Chocolatey isn't available, it will try the PowerShell installer. If all auto-installs fail, the build still succeeds?”you just won't have formatting targets.
 
 ### Manual Tool Installation (No Auto-Install)
 

@@ -1,5 +1,10 @@
 # Memory Leak Detection Guide
 
+Status: draft
+Owner: maintainers
+Last updated: 2026-01-26
+
+
 This document outlines the memory leak detection strategies for the Ludus project across different platforms and configurations.
 
 ## Overview
@@ -91,7 +96,7 @@ Leak reports appear in the **Debug Output** window in Visual Studio.
 #### 1. Heap Snapshots (Diagnostics Hub)
 
 - Build in Debug mode
-- Run: **Debug** → **Performance Profiler**
+- Run: **Debug** ??**Performance Profiler**
 - Select **Memory Usage**
 - Click **Take Snapshot** at start and end of operations
 - Compare snapshots to find retained allocations

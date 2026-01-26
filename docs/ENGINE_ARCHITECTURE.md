@@ -1,50 +1,53 @@
 # Engine Architecture
 
+Status: draft
+Owner: maintainers
+Last updated: 2026-01-26
+
+
 ## Overview
 
-Ludus is organized as a **layered architecture** with clear separation of concerns. This document maps the high-level structure, module dependencies, and data flow.
+Ludus is organized as a layered architecture with clear separation of concerns. This document maps the high-level structure, module dependencies, and data flow.
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  LudusEditor.exe                    │
-│            (Application / Entry Point)              │
-└──────────────────────┬──────────────────────────────┘
-                       │
-        ┌──────────────┴───────────────┐
-        │ Platform-specific Main.cpp   │
-        │ - Windows/Main.cpp           │
-        │ - Unix/Main.cpp              │
-        │ - MacOs/Main.cpp             │
-        └──────────────┬────────────────┘
-                       │
-       ┌───────────────▼────────────────┐
-       │  Ludus (Umbrella Interface)    │
-       │  Links Core + Platform         │
-       └───────────────┬────────────────┘
-       ┌───────────────┴────────────────┐
-       │                                │
-   ┌───▼──────────┐           ┌────────▼─────┐
-   │ LudusCore    │           │LudusPlatform │
-   │ (Shared Lib) │           │ (Shared Lib) │
-   └───┬──────────┘           └────────┬─────┘
-       │                               │
-       │ Public API                    │ Public API
-       │ include/Ludus/Engine/Core/    │ include/Ludus/Engine/Platform/
-       │ ├── Math                      │ ├── Platform.h (detection)
-       │ ├── Container                 │ ├── Window.h (cross-platform)
-       │ ├── Memory                    │ ├── Windows/Common.h
-       │ ├── Assert                    │ ├── Unix/Common.h
-       │ └── UnitTest                  │ └── MacOs/Common.h
-       │                               │
-       └───────────────┬───────────────┘
-                       │
-    ┌──────────────────▼────────────────┐
-    │    External Dependencies          │
-    │ ├── mimalloc (optional)           │
-    │ ├── System APIs                   │
-    │ │   (Windows.h, unistd.h, etc)   │
-    │ └── C++ Standard Library          │
-    └───────────────────────────────────┘
++-------------------------------------------------------------+
+|                       LudusEditor.exe                       |
+|                 (Application / Entry Point)                 |
++------------------------------+------------------------------+
+                               |
+                               v
++-------------------------------------------------------------+
+|                Platform-specific Main.cpp                   |
+|  - Windows/Main.cpp     - Unix/Main.cpp     - MacOs/Main.cpp |
++------------------------------+------------------------------+
+                               |
+                               v
++-------------------------------------------------------------+
+|                 Ludus (Umbrella Interface)                  |
+|                 Links Core + Platform                       |
++------------------------------+------------------------------+
+               |                                |
+               v                                v
++------------------------------+   +------------------------------+
+|          LudusCore           |   |        LudusPlatform          |
+|        (Shared Lib)          |   |        (Shared Lib)           |
++------------------------------+   +------------------------------+
+| Public API                   |   | Public API                   |
+| include/Ludus/Engine/Core/   |   | include/Ludus/Engine/Platform/|
+| - Math                        |   | - Platform.h (detection)     |
+| - Container                   |   | - Window.h (cross-platform)  |
+| - Memory                      |   | - Windows/Common.h           |
+| - Assert                      |   | - Unix/Common.h              |
+| - UnitTest                    |   | - MacOs/Common.h             |
++------------------------------+   +------------------------------+
+                               |
+                               v
++-------------------------------------------------------------+
+|                   External Dependencies                     |
+| - mimalloc (optional)                                      |
+| - System APIs (Windows.h, unistd.h, etc)                    |
+| - C++ Standard Library                                     |
++-------------------------------------------------------------+
 ```
 
 ---
@@ -79,11 +82,11 @@ Ludus is organized as a **layered architecture** with clear separation of concer
 | `Integration.h` | Math | Numerical integration (quadrature) |
 
 #### Public Namespaces:
-- `ludus::core` — Core utilities
-- `ludus::memory` — Memory allocation
-- `ludus::math` — Math types and functions
-- `ludus::container` — Container types
-- `ludus::testing` — Unit test framework
+- `ludus::core` - Core utilities
+- `ludus::memory` - Memory allocation
+- `ludus::math` - Math types and functions
+- `ludus::container` - Container types
+- `ludus::testing` - Unit test framework
 
 ---
 
@@ -105,8 +108,8 @@ Ludus is organized as a **layered architecture** with clear separation of concer
 | `Common.h` | Platform | macOS-specific utilities and helpers |
 
 #### Public Namespaces:
-- `ludus::platform` — Platform detection and OS utilities
-- `ludus::window` — Window management API
+- `ludus::platform` - Platform detection and OS utilities
+- `ludus::window` - Window management API
 
 ---
 
@@ -115,9 +118,9 @@ Ludus is organized as a **layered architecture** with clear separation of concer
 **Purpose:** Application layer demonstrating engine usage. Entry points are platform-specific.
 
 #### Entry Points:
-- **Windows:** `src/Editor/Platform/Windows/Main.cpp` — Windows message pump, DLL integration
-- **Unix/Linux:** `src/Editor/Platform/Unix/Main.cpp` — X11/Wayland event loop
-- **macOS:** `src/Editor/Platform/MacOs/Main.cpp` — Cocoa event loop
+- **Windows:** `src/Editor/Platform/Windows/Main.cpp` - Windows message pump, DLL integration
+- **Unix/Linux:** `src/Editor/Platform/Unix/Main.cpp` - X11/Wayland event loop
+- **macOS:** `src/Editor/Platform/MacOs/Main.cpp` - Cocoa event loop
 
 ---
 
@@ -127,21 +130,20 @@ Ludus is organized as a **layered architecture** with clear separation of concer
 
 ```
 LudusEditor (exe)
-    ↓
-    depends on: Ludus (interface lib)
-    ├── LudusCore (shared lib)
-    │   ├── mimalloc (optional, external)
-    │   ├── C++ Standard Library
-    │   └── System: <climits>, <cstring>, etc
-    │
-    └── LudusPlatform (shared lib)
-        ├── LudusCore (shared lib)
-        │   └── (same deps as above)
-        ├── Platform-specific APIs
-        │   ├── Windows: Windows.h, winsock.h, dxgi.h (placeholders)
-        │   ├── Unix: unistd.h, sys/*, X11 (placeholders)
-        │   └── macOS: Cocoa, CoreGraphics (placeholders)
-        └── C++ Standard Library
+    |
+    |-- depends on: Ludus (interface lib)
+    |   |-- LudusCore (shared lib)
+    |   |   |-- mimalloc (optional, external)
+    |   |   |-- C++ Standard Library
+    |   |   `-- System: <climits>, <cstring>, etc
+    |   `-- LudusPlatform (shared lib)
+    |       |-- LudusCore (shared lib)
+    |       |   `-- (same deps as above)
+    |       |-- Platform-specific APIs
+    |       |   |-- Windows: Windows.h, winsock.h, dxgi.h (placeholders)
+    |       |   |-- Unix: unistd.h, sys/*, X11 (placeholders)
+    |       |   `-- macOS: Cocoa, CoreGraphics (placeholders)
+    |       `-- C++ Standard Library
 ```
 
 ### No Circular Dependencies
@@ -157,35 +159,35 @@ LudusEditor (exe)
 
 ```
 1. LudusEditor.exe starts
-   ↓
+   |
 2. Platform-specific Main.cpp called (Windows/Unix/MacOs)
-   ├─ Initialize platform subsystem
-   ├─ Create window via LudusPlatform::Window
-   ├─ Parse command line via LudusCore::CommandLineManager
-   ├─ Initialize memory tracking (LudusCore::LeakDetection)
-   └─ Setup signal handlers
-   ↓
+   |-- Initialize platform subsystem
+   |-- Create window via LudusPlatform::Window
+   |-- Parse command line via LudusCore::CommandLineManager
+   |-- Initialize memory tracking (LudusCore::LeakDetection)
+   `-- Setup signal handlers
+
 3. Enter message/event loop
-   ├─ Service OS events (mouse, keyboard, resize)
-   ├─ Update application state
-   └─ Render (placeholder for future graphics)
-   ↓
+   |-- Service OS events (mouse, keyboard, resize)
+   |-- Update application state
+   `-- Render (placeholder for future graphics)
+
 4. Cleanup on shutdown
-   ├─ Destroy window
-   ├─ Report memory leaks
-   └─ Exit
+   |-- Destroy window
+   |-- Report memory leaks
+   `-- Exit
 ```
 
 ### Runtime: Math Computation Example
 
 ```
 Application code calls: ludus::math::Vector2 v = ludus::math::Lerp(start, end, t);
-   ↓
+   |
 Routed to: include/Ludus/Engine/Core/Math/Vector.h (public API)
-   ├─ Inline template instantiation
-   ├─ Executes floating-point math
-   └─ Returns result
-   ↓
+   |-- Inline template instantiation
+   |-- Executes floating-point math
+   `-- Returns result
+
 No platform code involved (pure computation)
 ```
 
@@ -193,15 +195,15 @@ No platform code involved (pure computation)
 
 ```
 OS sends event (e.g., mouse click)
-   ↓
+   |
 Platform-specific event handler (e.g., Windows WNDPROC)
-   ├─ src/Engine/Platform/Windows/Common.cpp
-   └─ Translates to ludus::window::Event
-   ↓
+   |-- src/Engine/Platform/Windows/Common.cpp
+   `-- Translates to ludus::window::Event
+
 Routed to: LudusEditor
-   ├─ Processes event via public API (Window.h)
-   └─ Updates state
-   ↓
+   |-- Processes event via public API (Window.h)
+   `-- Updates state
+
 Application continues (event handled)
 ```
 
@@ -209,13 +211,13 @@ Application continues (event handled)
 
 ```
 Application code calls: auto ptr = ludus::memory::Allocate<MyType>();
-   ↓
+   |
 Routed to: include/Ludus/Engine/Core/Memory.h (public API)
-   ├─ If LUDUS_USE_MIMALLOC: calls mi_malloc()
-   └─ Otherwise: calls system malloc()
-   ↓
+   |-- If LUDUS_USE_MIMALLOC: calls mi_malloc()
+   `-- Otherwise: calls system malloc()
+
 Optional leak tracking: tracked in LeakDetection scope
-   ↓
+
 Memory returned to caller
 ```
 
@@ -226,11 +228,11 @@ Memory returned to caller
 ### Layer 1: LudusCore (Foundation)
 
 **Characteristics:**
-- ✅ No platform dependencies
-- ✅ No external libraries (except mimalloc, optional)
-- ✅ Pure computation and data structure utilities
-- ✅ Single responsibility: math, memory, containers, assertions
-- ✅ Easily testable in isolation
+- No platform dependencies
+- No external libraries (except mimalloc, optional)
+- Pure computation and data structure utilities
+- Single responsibility: math, memory, containers, assertions
+- Easily testable in isolation
 
 **What goes here:**
 - Math (vectors, matrices, interpolation, integration)
@@ -239,7 +241,7 @@ Memory returned to caller
 - Unit test framework
 - Assertions and debugging utilities
 
-**What doesn't:**
+**What does not:**
 - Window creation or OS events
 - Network or file I/O
 - Graphics or rendering
@@ -248,10 +250,10 @@ Memory returned to caller
 ### Layer 2: LudusPlatform (OS Integration)
 
 **Characteristics:**
-- ✅ Depends on LudusCore
-- ✅ Platform-specific implementations hidden behind public interface
-- ✅ Single responsibility: platform abstraction
-- ✅ Unified API across Windows/Linux/macOS
+- Depends on LudusCore
+- Platform-specific implementations hidden behind public interface
+- Single responsibility: platform abstraction
+- Unified API across Windows/Linux/macOS
 
 **What goes here:**
 - Window creation and management
@@ -260,7 +262,7 @@ Memory returned to caller
 - OS utilities (file paths, environment, etc)
 - Graphics/rendering hooks (future)
 
-**What doesn't:**
+**What does not:**
 - Application logic
 - Game/simulation code
 - Complex business logic
@@ -269,9 +271,9 @@ Memory returned to caller
 ### Layer 3: LudusEditor (Application)
 
 **Characteristics:**
-- ✅ Depends on Ludus (umbrella of Core + Platform)
-- ✅ Platform-specific entry points (`Platform/<OS>/Main.cpp`)
-- ✅ Demonstrates engine usage patterns
+- Depends on Ludus (umbrella of Core + Platform)
+- Platform-specific entry points (`Platform/<OS>/Main.cpp`)
+- Demonstrates engine usage patterns
 
 **What goes here:**
 - Application entry point
@@ -287,43 +289,43 @@ Memory returned to caller
 ### What's Internal?
 
 **Implementation files** (in `src/`) are not part of the public API:
-- `src/Engine/Core/*.cpp` — Internal implementations of public headers
-- `src/Engine/Platform/Windows/*.cpp` — Windows-specific implementations
-- `src/Engine/Platform/Unix/*.cpp` — Unix/Linux-specific implementations
-- `src/Engine/Platform/MacOs/*.cpp` — macOS-specific implementations
-- `src/Editor/Platform/*/Main.cpp` — Platform entry points
+- `src/Engine/Core/*.cpp` - Internal implementations of public headers
+- `src/Engine/Platform/Windows/*.cpp` - Windows-specific implementations
+- `src/Engine/Platform/Unix/*.cpp` - Unix/Linux-specific implementations
+- `src/Engine/Platform/MacOs/*.cpp` - macOS-specific implementations
+- `src/Editor/Platform/*/Main.cpp` - Platform entry points
 
 ### How to Identify Public vs Internal
 
 **Public (in `include/Ludus/`)**
 ```
 include/Ludus/Engine/Core/Vector.h
-  │
-  └─ Define public API
-     - Classes: Vector2, Vector3
-     - Functions: operator*, Dot(), Cross()
-     - Namespaces: ludus::math
+  |
+  |-- Define public API
+      - Classes: Vector2, Vector3
+      - Functions: operator*, Dot(), Cross()
+      - Namespaces: ludus::math
 ```
 
 **Internal (in `src/`)**
 ```
 src/Engine/Core/Container/String.cpp
-  │
-  └─ Implementation details
-     - Private helper functions
-     - Optimization code
-     - Platform workarounds
+  |
+  `-- Implementation details
+      - Private helper functions
+      - Optimization code
+      - Platform workarounds
 ```
 
 ### Rule of Thumb
 
 | Location | Status | Usage |
 |----------|--------|-------|
-| `include/Ludus/**/*.h` | Public | ✅ Use freely in client code |
-| `include/Ludus/**/*.hpp` | Public | ✅ Template implementations, use in client code |
-| `src/**/*.cpp` | Internal | ❌ Never depend on; implementation may change |
-| `src/**/*.h` | Internal | ❌ Use only within `src/` directory |
-| `raddbg/**` | External | ⚠️ Third-party debugging support (optional) |
+| `include/Ludus/**/*.h` | Public | Use freely in client code |
+| `include/Ludus/**/*.hpp` | Public | Template implementations, use in client code |
+| `src/**/*.cpp` | Internal | Never depend on; implementation may change |
+| `src/**/*.h` | Internal | Use only within `src/` directory |
+| `raddbg/**` | External | Third-party debugging support (optional) |
 
 ---
 
@@ -375,20 +377,20 @@ Each platform has a dedicated entry point:
 1. **Create platform-specific headers:**
    ```
    include/Ludus/Engine/Platform/<NewPlatform>/
-   └── Common.h (utilities, macros)
+   `-- Common.h (utilities, macros)
    ```
 
 2. **Create platform-specific implementation:**
    ```
    src/Engine/Platform/<NewPlatform>/
-   ├── Common.cpp
-   └── Window.cpp (if implementing Window interface)
+   |-- Common.cpp
+   `-- Window.cpp (if implementing Window interface)
    ```
 
 3. **Create entry point:**
    ```
    src/Editor/Platform/<NewPlatform>/
-   └── Main.cpp
+   `-- Main.cpp
    ```
 
 4. **Update CMake** (`CMakeLists.txt`):
@@ -439,11 +441,11 @@ Each platform has a dedicated entry point:
 
 ### Build System Features
 
-- **Out-of-source builds:** All artifacts in `build/`, source stays clean
-- **Presets:** CMakePresets.json for MSVC, Clang, GCC with Debug/Release variants
-- **Static analysis:** clang-tidy, cppcheck, MSVC /analyze (optional)
-- **Sanitizers:** AddressSanitizer, UndefinedBehaviorSanitizer, LeakSanitizer (Clang/GCC only)
-- **Code formatting:** clang-format with format-check and format-fix targets
+- Out-of-source builds: all artifacts in `build/`, source stays clean
+- Presets: CMakePresets.json for MSVC, Clang, GCC with Debug/Release variants
+- Static analysis: clang-tidy, cppcheck, MSVC /analyze (optional)
+- Sanitizers: ASan, UBSan, LSan (Clang/GCC only)
+- Code formatting: clang-format with format-check and format-fix targets
 
 ---
 
@@ -469,11 +471,11 @@ Each platform has a dedicated entry point:
 ### No External Runtime Dependencies
 
 After build, binaries have minimal runtime dependencies:
-- ✅ LudusCore.dll/so/dylib (built)
-- ✅ LudusPlatform.dll/so/dylib (built)
-- ✅ LudusEditor.exe/bin (built)
-- ✅ mimalloc.dll/so/dylib (optional, built)
-- ✅ C++ runtime (vcruntime, libc++, etc—platform-specific)
+- LudusCore.dll/so/dylib (built)
+- LudusPlatform.dll/so/dylib (built)
+- LudusEditor.exe/bin (built)
+- mimalloc.dll/so/dylib (optional, built)
+- C++ runtime (vcruntime, libc++, etc, platform-specific)
 
 ---
 
@@ -483,4 +485,3 @@ After build, binaries have minimal runtime dependencies:
 - **Understand Platform:** See [GETTING_STARTED.md](GETTING_STARTED.md) for cross-platform setup
 - **Write Tests:** See [UNIT_TESTING.md](UNIT_TESTING.md) for test patterns
 - **Debug:** See [LEAK_DETECTION.md](LEAK_DETECTION.md) for memory profiling
-

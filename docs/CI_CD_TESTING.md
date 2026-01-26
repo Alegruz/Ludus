@@ -1,5 +1,10 @@
 # CI/CD Quick Reference - Unit Testing
 
+Status: draft
+Owner: maintainers
+Last updated: 2026-01-26
+
+
 ## Local Testing with Presets
 
 ### Quick Start
@@ -26,9 +31,9 @@ cmake --preset test_gcc && cmake --build --preset test_gcc
 - Pull requests to `develop` or `main` branches
 
 **Test Matrix:**
-- ✅ Windows (MSVC Debug)
-- ✅ Linux (Clang Debug)
-- ✅ Linux (GCC Debug)
+- ??Windows (MSVC Debug)
+- ??Linux (Clang Debug)
+- ??Linux (GCC Debug)
 
 ### Workflow Steps
 1. Checkout code
@@ -64,7 +69,7 @@ All test presets:
 1. Write tests in `.cpp` file (see `CoreTests.cpp`)
 2. Add file to `src/Engine/Core/CMakeLists.txt`
 3. Tests auto-register via static initialization
-4. Push to branch → CI runs automatically
+4. Push to branch ??CI runs automatically
 
 ## Troubleshooting CI
 
@@ -85,14 +90,14 @@ All test presets:
 
 ## Best Practices
 
-✅ **DO:**
+??**DO:**
 - Run tests locally before pushing
 - Use presets for consistency
 - Keep tests fast (< 5 seconds total)
 - Write deterministic tests
 - Test on all supported platforms
 
-❌ **DON'T:**
+??**DON'T:**
 - Commit code without running tests
 - Write tests that depend on external state
 - Use sleeps or arbitrary timeouts

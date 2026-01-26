@@ -1,8 +1,12 @@
 # Maintainability Review (Brutal but Actionable)
 
+Status: authoritative
+Owner: maintainers
+Last updated: 2026-01-26
+
 This review is intentionally direct. The codebase has many strengths, but it is currently *documentation-heavy and policy-light*. That combination makes it harder than necessary for newcomers to understand what matters, what is stable, and where to make changes.
 
-Use this document as a prioritized roadmap rather than a critique for critique’s sake.
+Use this document as a prioritized roadmap rather than a critique for critique's sake.
 
 ---
 
@@ -17,7 +21,7 @@ Use this document as a prioritized roadmap rather than a critique for critique�
 ### What is currently risky
 
 1. **The documentation surface area is large and fragmented.** Newcomers must guess which doc is authoritative.
-2. **There is no contributor contract.** The repo lacks an explicit “how we work” and “how we keep layers clean” guide.
+2. **There is no contributor contract.** The repo lacks an explicit "how we work" and "how we keep layers clean" guide.
 3. **The build system is doing too much *policy* work.** Auto-installing toolchains (including `sudo apt-get`) inside CMake makes builds less predictable and harder to reason about.
 4. **Module boundaries are described, but not enforced.** There are few guardrails to prevent accidental cross-layer coupling over time.
 
@@ -27,14 +31,14 @@ Use this document as a prioritized roadmap rather than a critique for critique�
 
 ### 1) Documentation is abundant but not curated
 
-**Problem:** There are many docs, but no clear map of “read these in this order.” This increases the cognitive load for both users and contributors.
+**Problem:** There are many docs, but no clear map of "read these in this order." This increases the cognitive load for both users and contributors.
 
 **Recommendation:** Establish a documentation spine.
 
 Suggested approach:
 
 - Treat [`README.md`](../README.md) as the *front door*.
-- Add a short “Start here” section that routes readers to:
+- Add a short "Start here" section that routes readers to:
   - [`docs/GETTING_STARTED.md`](GETTING_STARTED.md) for setup.
   - [`docs/ENGINE_ARCHITECTURE.md`](ENGINE_ARCHITECTURE.md) for conceptual mapping.
   - [`CONTRIBUTING.md`](../CONTRIBUTING.md) for developer behavior and guardrails.
@@ -62,13 +66,13 @@ A pragmatic path:
   - a pointer to a dedicated setup script or documentation section.
 - Provide a separate `tools/bootstrap.*` script that developers run intentionally.
 
-**Why this matters:** Deterministic builds are a prerequisite for maintainability. If “configure” can modify the machine, debugging becomes much harder.
+**Why this matters:** Deterministic builds are a prerequisite for maintainability. If "configure" can modify the machine, debugging becomes much harder.
 
 ---
 
 ### 3) Architectural layering needs enforcement, not just documentation
 
-**Problem:** The architecture is explained well, but there are no automated checks that prevent Core → Platform drift.
+**Problem:** The architecture is explained well, but there are no automated checks that prevent Core/Platform drift.
 
 **Recommendation:** Add lightweight architectural tests.
 
@@ -101,26 +105,26 @@ Examples that scale well:
 
 This plan is intentionally scoped to be realistic for a small engine project.
 
-### First 30 days — reduce newcomer confusion
+### First 30 days - reduce newcomer confusion
 
-- Add a “Start here” section to the root README that curates the doc order.
-- Create a short “docs index” inside `docs/README.md` that labels each doc as one of:
+- Add a "Start here" section to the root README that curates the doc order.
+- Create a short "docs index" inside `docs/README.md` that labels each doc as one of:
   - onboarding,
   - reference,
   - design notes,
   - historical/implementation detail.
 - Ensure `GETTING_STARTED.md` covers the most common failure cases and how to recover quickly.
 
-### 60 days — add guardrails and trim policy from CMake
+### 60 days - add guardrails and trim policy from CMake
 
 - Move tool installation to `tools/bootstrap.*` and keep CMake side-effect-free.
 - Add at least one architectural check (even a small one) to CI.
-- Make a small set of “golden path” commands that always work and document them once.
+- Make a small set of "golden path" commands that always work and document them once.
 
-### 90 days — codify subsystem boundaries
+### 90 days - codify subsystem boundaries
 
 - Introduce per-subsystem overview docs (1 page each) for Core, Platform, and Renderer.
-- Require a short “design note” for any new subsystem or public API.
+- Require a short "design note" for any new subsystem or public API.
 - Audit public headers for unnecessary includes and tighten them.
 
 ---

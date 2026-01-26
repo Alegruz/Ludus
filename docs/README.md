@@ -1,317 +1,104 @@
 # Ludus Documentation Hub
 
-Welcome to the Ludus documentation. This guide maps out all documentation, explains the learning path for contributors, and helps you find what you need.
+Status: authoritative  
+Owner: maintainers  
+Last updated: 2026-01-26
+
+This is the canonical index of all docs. If a doc exists, it must be listed here with a short purpose and audience.
 
 ---
 
-## Learning Path: Core → Platform → Editor
+## Start Here (Recommended Reading Order)
 
-The Ludus engine is organized in layers. Understand them in this order:
-
-```
-┌──────────────────────────────────────────────┐
-│         LudusEditor (Application)            │
-│  (Runs on top of Ludus via entry points)     │
-└────────────────────┬─────────────────────────┘
-                     │
-┌────────────────────▼─────────────────────────┐
-│    Ludus (Interface/Umbrella Library)        │
-│  (Links Core + Platform together)            │
-└────────────────────┬─────────────────────────┘
-       ┌────────────┴────────────┐
-       │                         │
-┌──────▼──────────┐   ┌─────────▼────────┐
-│   LudusCore     │   │  LudusPlatform   │
-│                 │   │                  │
-│ - Math          │   │ - Window/Events  │
-│ - Containers    │   │ - System calls   │
-│ - Utilities     │   │ - Platform glue  │
-│ - Assertions    │   │ - Multi-platform │
-│ - Memory        │   │   (Win/Lin/Mac)  │
-└─────────────────┘   └──────────────────┘
-```
-
-**Start here if you're new to the codebase:**
-
-1. **[GETTING_STARTED.md](GETTING_STARTED.md)** — Setup, build, run for the first time
-2. **[Understand Core →](GETTING_STARTED.md#where-to-read-next)** [MEMORY_ARCHITECTURE.md](MEMORY_ARCHITECTURE.md) — How memory allocation works
-3. **Understand Platform** — How to add support for new platforms or extend window/OS integration
-4. **Understand Editor** — How to extend the sample application
+1. [GETTING_STARTED.md](GETTING_STARTED.md) - setup, first build, and troubleshooting
+2. [ENGINE_ARCHITECTURE.md](ENGINE_ARCHITECTURE.md) - layered architecture and public API map
+3. [CONTRIBUTING.md](../CONTRIBUTING.md) - workflow, layering guardrails, and expectations
+4. [MAINTAINABILITY_REVIEW.md](MAINTAINABILITY_REVIEW.md) - blunt risks and priorities
 
 ---
 
-## Complete Documentation Map
+## Documentation Map
 
-### 🚀 Getting Started (Start Here!)
-
-| Document | Purpose | Audience |
-|----------|---------|----------|
-| **[GETTING_STARTED.md](GETTING_STARTED.md)** | Step-by-step setup, first build, running editor and tests | Everyone, especially newcomers |
-
-### 🏗️ Architecture & Design (Understand the Engine)
+### Onboarding
 
 | Document | Purpose | Audience |
 |----------|---------|----------|
-| **[ENGINE_ARCHITECTURE.md](ENGINE_ARCHITECTURE.md)** | **START HERE:** High-level module organization, public API, data flow, layer separation | Everyone, especially architects and reviewers |
-| **[MEMORY_ARCHITECTURE.md](MEMORY_ARCHITECTURE.md)** | Deep dive: Memory allocation strategy, mimalloc integration, custom pools | Engine developers, performance engineers |
-| **[BUILD_SYSTEM.md](BUILD_SYSTEM.md)** | CMake philosophy, presets, auto-install behavior, CI integration | DevOps, maintainers, CI/CD engineers |
+| [GETTING_STARTED.md](GETTING_STARTED.md) | First build, presets, and recovery from common failures | New contributors |
 
-### 🧪 Testing & Quality
+### Architecture and Design
 
 | Document | Purpose | Audience |
 |----------|---------|----------|
-| **[UNIT_TESTING.md](UNIT_TESTING.md)** | Writing and running unit tests, test registry API | Developers adding/maintaining tests |
-| **[STATIC_ANALYSIS.md](STATIC_ANALYSIS.md)** | clang-tidy, cppcheck, MSVC analysis setup and integration | Code quality engineers |
+| [ENGINE_ARCHITECTURE.md](ENGINE_ARCHITECTURE.md) | Layer model, public API, and module boundaries | Everyone |
+| [MEMORY_ARCHITECTURE.md](MEMORY_ARCHITECTURE.md) | Memory strategy, pools, mimalloc integration | Engine developers |
+| [COMMAND_LINE_PARSER_DESIGN.md](COMMAND_LINE_PARSER_DESIGN.md) | Design notes for CLI parser | Engine developers |
 
-### 🔍 Debugging & Profiling
+### Build, Tooling, and CI
 
 | Document | Purpose | Audience |
 |----------|---------|----------|
-| **[LEAK_DETECTION.md](LEAK_DETECTION.md)** | Memory leak detection with sanitizers and custom detectors | Debug-focused developers |
-| **[LEAK_DETECTION_QUICK_REFERENCE.md](LEAK_DETECTION_QUICK_REFERENCE.md)** | Quick syntax reference for leak detection macros | Developers using leak detector |
-| **[MIMALLOC_INTEGRATION.md](MIMALLOC_INTEGRATION.md)** | Mimalloc setup, statistics gathering, profiling | Performance engineers |
+| [BUILD_SYSTEM.md](BUILD_SYSTEM.md) | CMake philosophy, presets, and build policy | Maintainers |
+| [CI_CD_TESTING.md](CI_CD_TESTING.md) | CI behavior and test policy | Maintainers |
+| [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md) | clang-tidy, cppcheck, MSVC /analyze | Code quality |
+
+### Testing and Quality
+
+| Document | Purpose | Audience |
+|----------|---------|----------|
+| [UNIT_TESTING.md](UNIT_TESTING.md) | Writing and running tests | Developers |
+
+### Debugging and Profiling
+
+| Document | Purpose | Audience |
+|----------|---------|----------|
+| [LEAK_DETECTION.md](LEAK_DETECTION.md) | Leak detection system and sanitizers | Debug-focused developers |
+| [LEAK_DETECTION_QUICK_REFERENCE.md](LEAK_DETECTION_QUICK_REFERENCE.md) | Macro reference | Developers |
+| [MIMALLOC_INTEGRATION.md](MIMALLOC_INTEGRATION.md) | Mimalloc setup and profiling | Performance engineers |
+| [MEMORY_LEAK_DETECTION_IMPLEMENTATION.md](MEMORY_LEAK_DETECTION_IMPLEMENTATION.md) | Implementation details | Engine developers |
+
+### Command-Line Parser (Subsystem)
+
+| Document | Purpose | Audience |
+|----------|---------|----------|
+| [COMMAND_LINE_PARSER_README.md](COMMAND_LINE_PARSER_README.md) | Canonical usage and behavior | Developers |
+| [COMMAND_LINE_PARSER_QUICK_REF.md](COMMAND_LINE_PARSER_QUICK_REF.md) | Quick reference | Developers |
+| [COMMAND_LINE_PARSER_DESIGN.md](COMMAND_LINE_PARSER_DESIGN.md) | Design decisions | Maintainers |
+
+### Project Process
+
+| Document | Purpose | Audience |
+|----------|---------|----------|
+| [BRANCHING.md](BRANCHING.md) | Branching strategy and flow | Contributors |
+| [DELIVERABLES.md](DELIVERABLES.md) | Project deliverables and scope | Maintainers |
+
+### History and Logs
+
+| Document | Purpose | Audience |
+|----------|---------|----------|
+| [devlog/2026-01-Week04.md](devlog/2026-01-Week04.md) | Weekly devlog | Anyone |
+| [IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md) | Historical milestone | Maintainers |
 
 ---
 
 ## Quick Navigation by Task
 
-**I want to...**
-
-- **Understand the engine structure and modules**  
-  → [ENGINE_ARCHITECTURE.md](ENGINE_ARCHITECTURE.md) ← **Start here for architecture overview**
-
-- **Understand what's public API vs internal**  
-  → [ENGINE_ARCHITECTURE.md#public-api-organization](ENGINE_ARCHITECTURE.md#public-api-organization)
-
-- **Get the engine running for the first time**  
-  → [GETTING_STARTED.md](GETTING_STARTED.md)
-
-- **Write a unit test**  
-  → [UNIT_TESTING.md](UNIT_TESTING.md)
-
-- **Debug a memory leak**  
-  → [LEAK_DETECTION.md](LEAK_DETECTION.md) or [LEAK_DETECTION_QUICK_REFERENCE.md](LEAK_DETECTION_QUICK_REFERENCE.md)
-
-- **Understand how memory is allocated**  
-  → [MEMORY_ARCHITECTURE.md](MEMORY_ARCHITECTURE.md)
-
-- **Set up CI/CD or modify the build system**  
-  → [BUILD_SYSTEM.md](BUILD_SYSTEM.md)
-
-- **Enable static analysis (clang-tidy, cppcheck)**  
-  → [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md)
-
-- **Profile memory with mimalloc**  
-  → [MIMALLOC_INTEGRATION.md](MIMALLOC_INTEGRATION.md)
-
-- **Add a new platform (Windows/Linux/macOS)**  
-  → [ENGINE_ARCHITECTURE.md#adding-a-new-platform](ENGINE_ARCHITECTURE.md#adding-a-new-platform)
-
-- **Add a new Core module (math, container, etc)**  
-  → [ENGINE_ARCHITECTURE.md#adding-a-new-core-module](ENGINE_ARCHITECTURE.md#adding-a-new-core-module)
+- Engine structure and modules: [ENGINE_ARCHITECTURE.md](ENGINE_ARCHITECTURE.md)
+- Public API vs internal: [ENGINE_ARCHITECTURE.md#public-api-organization](ENGINE_ARCHITECTURE.md#public-api-organization)
+- First build: [GETTING_STARTED.md](GETTING_STARTED.md)
+- Unit tests: [UNIT_TESTING.md](UNIT_TESTING.md)
+- Leak debugging: [LEAK_DETECTION.md](LEAK_DETECTION.md)
+- Build presets and CI: [BUILD_SYSTEM.md](BUILD_SYSTEM.md), [CI_CD_TESTING.md](CI_CD_TESTING.md)
+- Static analysis: [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md)
 
 ---
 
-## Architecture Overview
+## Doc Maintenance Rules
 
-### LudusCore
-
-**Headers:** `include/Ludus/Engine/Core/`  
-**Implementation:** `src/Engine/Core/`  
-**Output:** `build/lib/LudusCore.dll` (Windows) or `.so`/`.dylib` (Unix/macOS)
-
-Contains the **engine's foundation**:
-- Math utilities (`Vector`, `Rect`, `Interpolation`, `Trigonometry`, `Bit` operations)
-- Container types (`Array`, `String`)
-- Memory management and tracking
-- Assertions and error handling
-- Command-line parsing
-- Minimal unit test framework
-
-**Key Files:**
-- `Memory.h` — Allocation/deallocation API
-- `Random.h` — Random number generation
-- `Assert.h` — Assertion macros
-- `UnitTest.h` — Test registration API
-
-**When to use:** Implement low-level engine systems, math-heavy code, or utilities that don't touch OS APIs.
-
-### LudusPlatform
-
-**Headers:** `include/Ludus/Engine/Platform/`  
-**Implementation:** `src/Engine/Platform/`  
-**Platform-specific code:** `src/Engine/Platform/{Windows,Unix,MacOs}/`  
-**Output:** `build/lib/LudusPlatform.dll` (Windows) or `.so`/`.dylib` (Unix/macOS)
-
-Provides **platform abstraction** and OS integration:
-- Window management (`Window` class)
-- Event handling
-- Platform detection and constants
-- System-level glue code
-
-**Key Files:**
-- `Platform.h` — Platform detection, OS constants
-- `Window.h` — Cross-platform window interface
-- `Windows/Common.h`, `Unix/Common.h` — Platform-specific helpers
-
-**When to use:** Need to create windows, interact with OS events, or add new platform support.
-
-### Ludus (Umbrella)
-
-**Purpose:** Interface library that combines `LudusCore` + `LudusPlatform`
-
-Targets that depend on `Ludus` automatically get both libraries without managing two dependencies. This is the recommended target for applications.
-
-### LudusEditor
-
-**Entry points:**  
-- Windows: `src/Editor/Platform/Windows/Main.cpp`
-- Unix/Linux: `src/Editor/Platform/Unix/Main.cpp`
-- macOS: `src/Editor/Platform/MacOs/Main.cpp`
-
-**Output:** `build/bin/LudusEditor.exe` (Windows) or `LudusEditor` (Unix/macOS)
-
-A sample **desktop application** demonstrating:
-- Platform entry point pattern
-- Window creation and event handling
-- Memory leak detection setup
-- Integration with LudusCore and LudusPlatform
-
-**When to modify:** Extending the sample app, adding UI frameworks, or testing platform-specific features.
-
-### LudusTests
-
-**Entry point:** `src/Tests/Main.cpp`  
-**Test files:** `src/Engine/Core/CoreTests.cpp` and others  
-**Output:** `build/bin/LudusTests.exe` (Windows) or `LudusTests` (Unix/macOS)
-
-Minimal **test runner** using the in-house `LUDUS_TEST` registry.
-
-**When to use:** Add unit tests for Core systems, math utilities, containers, or other low-level components.
+1. If you add or rename a doc, update this index in the same commit.
+2. List each doc once, in the most appropriate category.
+3. Use concise, factual summaries.
+4. Keep diagrams ASCII-only to avoid encoding issues.
 
 ---
 
-## Common Workflows
-
-### Adding a Unit Test
-
-1. **Write your test:**
-   ```cpp
-   // In src/Engine/Core/CoreTests.cpp or a new file
-   #include "Ludus/Engine/Core/UnitTest.h"
-   
-   LUDUS_TEST(MyMathTest) {
-       LUDUS_ASSERT(2 + 2 == 4);
-       return true;
-   }
-   ```
-
-2. **Build and run:**
-   ```powershell
-   cmake --build --preset ninja_msvc-debug -t LudusTests
-   ./build/bin/LudusTests.exe
-   ```
-
-See [UNIT_TESTING.md](UNIT_TESTING.md) for details.
-
-### Adding a New Platform
-
-1. **Create platform-specific code:**
-   ```
-   src/Engine/Platform/<NewPlatform>/
-   ├── Common.cpp
-   └── include/Ludus/Engine/Platform/<NewPlatform>/
-       └── Common.h
-   ```
-
-2. **Update CMake** to detect and include your platform.
-
-3. **Create an entry point:**
-   ```
-   src/Editor/Platform/<NewPlatform>/Main.cpp
-   ```
-
-4. **Link and rebuild.**
-
-### Using Memory Leak Detection
-
-**Quick example:**
-```cpp
-#include "Ludus/Engine/Core/LeakDetection.h"
-
-int main() {
-    LUDUS_LEAK_DETECTOR(MainScope) {
-        // Your code here
-        // Leaks reported on scope exit
-    }
-    return 0;
-}
-```
-
-See [LEAK_DETECTION_QUICK_REFERENCE.md](LEAK_DETECTION_QUICK_REFERENCE.md) for more.
-
----
-
-## Contributing & Code Organization
-
-### Directory Conventions
-
-- **`include/Ludus/`** — All public headers, mirroring the namespace and module structure
-- **`src/`** — Implementation files, organized by module
-- **`build/`** — Build output (generated, not in version control)
-- **`cmake/`** — Helper CMake scripts
-- **`tools/`** — Scripts and utilities (install-llvm.ps1, etc.)
-- **`docs/`** — This documentation
-
-### Header Organization
-
-- Public headers in `include/Ludus/Engine/Core/` use `.h` extension for interfaces
-- Implementation headers in `include/Ludus/Engine/Core/` use `.hpp` for templates and inline functions
-- Example: `Array.h` (interface) + `Array.hpp` (template implementation)
-
-### Testing
-
-- Test files live alongside their implementation in `src/Engine/Core/`
-- Register tests using the `LUDUS_TEST` macro
-- Run via `LudusTests` executable
-
-### Code Quality
-
-- **clang-format** (auto-installed) enforces style
-- **clang-tidy** (auto-installed) checks best practices and warnings-as-errors
-- **cppcheck** (optional) for additional static analysis
-- **Sanitizers** (ASan, UBSan, LSan) enabled by default on Clang/GCC
-
-Enable all checks:
-```powershell
-cmake --preset ninja_clang-debug -DENABLE_SANITIZERS=ON -DENABLE_CLANG_TIDY=ON -DENABLE_CPPCHECK=ON
-```
-
----
-
-## Troubleshooting
-
-**Still stuck?** Check the relevant document:
-
-| Problem | Document |
-|---------|----------|
-| Build fails | [BUILD_SYSTEM.md](BUILD_SYSTEM.md) |
-| Tests won't run | [UNIT_TESTING.md](UNIT_TESTING.md) |
-| Memory leak suspected | [LEAK_DETECTION.md](LEAK_DETECTION.md) |
-| Clang-tidy/format issues | [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md) |
-| Performance concerns | [MEMORY_ARCHITECTURE.md](MEMORY_ARCHITECTURE.md) or [MIMALLOC_INTEGRATION.md](MIMALLOC_INTEGRATION.md) |
-
----
-
-## Document Maintenance
-
-This hub is your one-stop reference. When adding new documentation:
-
-1. Add an entry to this file in the appropriate section
-2. Include a one-line purpose and intended audience
-3. Ensure cross-links are updated
-4. Keep sections organized by theme (Getting Started → Architecture → Testing → Debugging)
-
----
-
-**Ready to start?** Begin with [GETTING_STARTED.md](GETTING_STARTED.md).
+Ready to start? Begin with [GETTING_STARTED.md](GETTING_STARTED.md).

@@ -1,5 +1,10 @@
 # Static Analysis Setup
 
+Status: draft
+Owner: maintainers
+Last updated: 2026-01-26
+
+
 ## Overview
 
 The project now has fully automated clang-tidy and clang-format integration with automatic installation and PATH configuration.
