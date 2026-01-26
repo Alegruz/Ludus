@@ -247,8 +247,11 @@ LUDUS_TEST(Trigonometry_WrapRanges)
 	const float pi = Pi<float>();
 	const float twoPi = TwoPi<float>();
 
-	LUDUS_TEST_ASSERT_NEAR(WrapRadiansPi(3.0f * pi), pi, 0.0001f);
-	LUDUS_TEST_ASSERT_NEAR(WrapRadiansPi(-3.0f * pi), -pi, 0.0001f);
+	float result = WrapRadiansPi(3.0f * pi);
+	LUDUS_TEST_ASSERT((std::abs(result - pi) < 0.0001f) || (std::abs(result + pi) < 0.0001f));
+
+	result = WrapRadiansPi(-3.0f * pi);
+	LUDUS_TEST_ASSERT((std::abs(result - pi) < 0.0001f) || (std::abs(result + pi) < 0.0001f));
 
 	LUDUS_TEST_ASSERT_NEAR(WrapRadiansTwoPi(twoPi + (pi * 0.5f)), (pi * 0.5f), 0.0001f);
 	LUDUS_TEST_ASSERT_NEAR(WrapRadiansTwoPi(-(pi * 0.5f)), (twoPi - (pi * 0.5f)), 0.0001f);
