@@ -1,6 +1,10 @@
 #include <Ludus/Engine/Core/UnitTest.hpp>
 #include <Ludus/Engine/Core/Math/Vector.hpp>
 #include <Ludus/Engine/Core/Math/Trigonometry.hpp>
+#include <Ludus/Engine/Core/Math/Rect.hpp>
+#include <Ludus/Engine/Core/Math/Interpolation.hpp>
+#include <Ludus/Engine/Core/Math/Integration.hpp>
+#include <Ludus/Engine/Core/Math/Bit.hpp>
 #include <Ludus/Engine/Core/CommandLineManager.hpp>
 #include <Ludus/Engine/Core/Container/Array.hpp>
 #include <Ludus/Engine/Core/Container/String.hpp>
@@ -95,6 +99,35 @@ LUDUS_TEST(Vector2_Normalize)
 	LUDUS_TEST_ASSERT_NEAR(normalized.Length(), 1.0f, 0.0001f);
 }
 
+LUDUS_TEST(Vector2_NormalizeZero)
+{
+	Vector2<float> v;
+	Vector2<float> normalized = v.Normalized();
+
+	LUDUS_TEST_ASSERT_EQ(normalized.X, 0.0f);
+	LUDUS_TEST_ASSERT_EQ(normalized.Y, 0.0f);
+}
+
+LUDUS_TEST(Vector2_CompoundOps)
+{
+	Vector2<float> v(1.0f, 2.0f);
+	v += Vector2<float>(3.0f, 4.0f);
+	LUDUS_TEST_ASSERT_EQ(v.X, 4.0f);
+	LUDUS_TEST_ASSERT_EQ(v.Y, 6.0f);
+
+	v -= Vector2<float>(1.0f, 1.0f);
+	LUDUS_TEST_ASSERT_EQ(v.X, 3.0f);
+	LUDUS_TEST_ASSERT_EQ(v.Y, 5.0f);
+
+	v *= Vector2<float>(2.0f, 3.0f);
+	LUDUS_TEST_ASSERT_EQ(v.X, 6.0f);
+	LUDUS_TEST_ASSERT_EQ(v.Y, 15.0f);
+
+	v /= Vector2<float>(2.0f, 5.0f);
+	LUDUS_TEST_ASSERT_EQ(v.X, 3.0f);
+	LUDUS_TEST_ASSERT_EQ(v.Y, 3.0f);
+}
+
 // ========================================
 // Vector3 Tests
 // ========================================
@@ -134,6 +167,48 @@ LUDUS_TEST(Vector3_CrossProduct)
 	LUDUS_TEST_ASSERT_EQ(cross.Z, 1.0f);
 }
 
+LUDUS_TEST(Vector3_LengthAndNormalizeZero)
+{
+	Vector3<float> v(1.0f, 2.0f, 2.0f);
+	LUDUS_TEST_ASSERT_NEAR(v.Length(), 3.0f, 0.0001f);
+
+	Vector3<float> zero;
+	Vector3<float> normalized = zero.Normalized();
+	LUDUS_TEST_ASSERT_EQ(normalized.X, 0.0f);
+	LUDUS_TEST_ASSERT_EQ(normalized.Y, 0.0f);
+	LUDUS_TEST_ASSERT_EQ(normalized.Z, 0.0f);
+}
+
+// ========================================
+// Vector4 Tests
+// ========================================
+
+LUDUS_TEST(Vector4_BasicOps)
+{
+	Vector4<float> v1(1.0f, 2.0f, 3.0f, 4.0f);
+	Vector4<float> v2(4.0f, 3.0f, 2.0f, 1.0f);
+
+	Vector4<float> sum = v1 + v2;
+	LUDUS_TEST_ASSERT_EQ(sum.X, 5.0f);
+	LUDUS_TEST_ASSERT_EQ(sum.Y, 5.0f);
+	LUDUS_TEST_ASSERT_EQ(sum.Z, 5.0f);
+	LUDUS_TEST_ASSERT_EQ(sum.W, 5.0f);
+
+	Vector4<float> scaled = 2.0f * v1;
+	LUDUS_TEST_ASSERT_EQ(scaled.X, 2.0f);
+	LUDUS_TEST_ASSERT_EQ(scaled.Y, 4.0f);
+	LUDUS_TEST_ASSERT_EQ(scaled.Z, 6.0f);
+	LUDUS_TEST_ASSERT_EQ(scaled.W, 8.0f);
+}
+
+LUDUS_TEST(Vector4_DotLength)
+{
+	Vector4<float> v(1.0f, 2.0f, 2.0f, 1.0f);
+	LUDUS_TEST_ASSERT_EQ(v.Dot(v), 10.0f);
+	LUDUS_TEST_ASSERT_NEAR(v.Length(), 3.1622776f, 0.0001f);
+	LUDUS_TEST_ASSERT_EQ(v.LengthSquared(), 10.0f);
+}
+
 // ========================================
 // Trigonometry Tests
 // ========================================
@@ -165,6 +240,157 @@ LUDUS_TEST(Trigonometry_SinCos)
 	
 	LUDUS_TEST_ASSERT_NEAR(result.Sin, 0.7071067f, 0.0001f);
 	LUDUS_TEST_ASSERT_NEAR(result.Cos, 0.7071067f, 0.0001f);
+}
+
+LUDUS_TEST(Trigonometry_WrapRanges)
+{
+	const float pi = Pi<float>();
+	const float twoPi = TwoPi<float>();
+
+	LUDUS_TEST_ASSERT_NEAR(WrapRadiansPi(3.0f * pi), pi, 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(WrapRadiansPi(-3.0f * pi), -pi, 0.0001f);
+
+	LUDUS_TEST_ASSERT_NEAR(WrapRadiansTwoPi(twoPi + (pi * 0.5f)), (pi * 0.5f), 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(WrapRadiansTwoPi(-(pi * 0.5f)), (twoPi - (pi * 0.5f)), 0.0001f);
+}
+
+LUDUS_TEST(Trigonometry_FastSinCosAccuracy)
+{
+	const float angle = Pi<float>() / 3.0f;
+	const SinCosPair<float> fast = FastSinCos(angle);
+	const SinCosPair<float> exact = SinCos(angle);
+
+	LUDUS_TEST_ASSERT_NEAR(fast.Sin, exact.Sin, 0.01f);
+	LUDUS_TEST_ASSERT_NEAR(fast.Cos, exact.Cos, 0.01f);
+}
+
+// ========================================
+// Rect Tests
+// ========================================
+
+LUDUS_TEST(Rect_BoundsAndContains)
+{
+	Rect<int> rect(10, 20, 30, 40);
+	LUDUS_TEST_ASSERT_EQ(rect.GetLeft(), 10);
+	LUDUS_TEST_ASSERT_EQ(rect.GetRight(), 40);
+	LUDUS_TEST_ASSERT_EQ(rect.GetTop(), 20);
+	LUDUS_TEST_ASSERT_EQ(rect.GetBottom(), 60);
+
+	LUDUS_TEST_ASSERT(rect.Contains(10, 20));
+	LUDUS_TEST_ASSERT(rect.Contains(39, 59));
+	LUDUS_TEST_ASSERT(!rect.Contains(40, 20));
+	LUDUS_TEST_ASSERT(!rect.Contains(10, 60));
+}
+
+LUDUS_TEST(Rect_Intersects)
+{
+	Rect<int> a(0, 0, 10, 10);
+	Rect<int> b(5, 5, 10, 10);
+	Rect<int> c(10, 0, 5, 5);
+
+	LUDUS_TEST_ASSERT(a.Intersects(b));
+	LUDUS_TEST_ASSERT(b.Intersects(a));
+	LUDUS_TEST_ASSERT(!a.Intersects(c));
+}
+
+// ========================================
+// Interpolation Tests
+// ========================================
+
+LUDUS_TEST(Interpolation_ClampAndLerp)
+{
+	LUDUS_TEST_ASSERT_EQ(Clamp(5.0f, 0.0f, 10.0f), 5.0f);
+	LUDUS_TEST_ASSERT_EQ(Clamp(-2.0f, 0.0f, 10.0f), 0.0f);
+	LUDUS_TEST_ASSERT_EQ(Clamp(12.0f, 0.0f, 10.0f), 10.0f);
+	LUDUS_TEST_ASSERT_EQ(Clamp(2.0f, 5.0f, 1.0f), 2.0f); // min > max: passthrough
+
+	LUDUS_TEST_ASSERT_EQ(Lerp(0.0f, 10.0f, 0.5f), 5.0f);
+	LUDUS_TEST_ASSERT_EQ(LerpClamped(0.0f, 10.0f, 2.0f), 10.0f);
+}
+
+LUDUS_TEST(Interpolation_InverseLerpMoveTowards)
+{
+	LUDUS_TEST_ASSERT_EQ(InverseLerp(0.0f, 10.0f, 5.0f), 0.5f);
+	LUDUS_TEST_ASSERT_EQ(InverseLerp(1.0f, 1.0f, 5.0f), 0.0f);
+
+	LUDUS_TEST_ASSERT_EQ(MoveTowards(0.0f, 10.0f, 3.0f), 3.0f);
+	LUDUS_TEST_ASSERT_EQ(MoveTowards(0.0f, 10.0f, 30.0f), 10.0f);
+	LUDUS_TEST_ASSERT_EQ(MoveTowards(5.0f, -5.0f, 2.0f), 3.0f);
+}
+
+LUDUS_TEST(Interpolation_SmoothSteps)
+{
+	LUDUS_TEST_ASSERT_EQ(SmoothStep(0.0f, 1.0f, -1.0f), 0.0f);
+	LUDUS_TEST_ASSERT_EQ(SmoothStep(0.0f, 1.0f, 2.0f), 1.0f);
+	LUDUS_TEST_ASSERT_EQ(SmootherStep(0.0f, 1.0f, -1.0f), 0.0f);
+	LUDUS_TEST_ASSERT_EQ(SmootherStep(0.0f, 1.0f, 2.0f), 1.0f);
+}
+
+LUDUS_TEST(Interpolation_ExpDecay)
+{
+	LUDUS_TEST_ASSERT_EQ(ExpDecay(0.0f, 10.0f, 0.0f, 1.0f), 0.0f);
+	LUDUS_TEST_ASSERT_EQ(ExpDecay(0.0f, 10.0f, 1.0f, 0.0f), 10.0f);
+
+	const float value = ExpDecay(0.0f, 10.0f, 1.0f, 1.0f);
+	LUDUS_TEST_ASSERT_NEAR(value, 5.0f, 0.0001f);
+
+	LUDUS_TEST_ASSERT_EQ(ExpDecayRate(0.0f, 10.0f, 0.0f, 2.0f), 0.0f);
+	LUDUS_TEST_ASSERT_EQ(ExpDecayRate(0.0f, 10.0f, 1.0f, 0.0f), 10.0f);
+}
+
+LUDUS_TEST(Interpolation_EaseOutShift)
+{
+	LUDUS_TEST_ASSERT_EQ(EaseOutShift(0, 100, 0), 100);
+	LUDUS_TEST_ASSERT_EQ(EaseOutShift(0, 100, 100), 100);
+	LUDUS_TEST_ASSERT_EQ(EaseOutShift(0, 100, 2), 25);
+}
+
+// ========================================
+// Integration Tests
+// ========================================
+
+LUDUS_TEST(Integration_ImplicitEuler1D)
+{
+	IntegratorState1D state{.Position = 10.0f, .Velocity = 0.0f};
+	const float resultSame = IntegrateImplicitEuler(state, 1.0f, 0.5f, 0.0f).Position;
+	LUDUS_TEST_ASSERT_EQ(resultSame, 10.0f);
+
+	IntegratorState1D moving{.Position = 0.0f, .Velocity = 5.0f};
+	const IntegratorState1D result = IntegrateImplicitEuler(moving, 0.0f, 0.0f, 2.0f);
+	LUDUS_TEST_ASSERT_EQ(result.Velocity, 5.0f);
+	LUDUS_TEST_ASSERT_EQ(result.Position, 10.0f);
+}
+
+LUDUS_TEST(Integration_ImplicitEulerVector)
+{
+	IntegratorState<float> state{.Position = Vector3<float>(1.0f, 0.0f, 0.0f), .Velocity = Vector3<float>(2.0f, 0.0f, 0.0f)};
+	const IntegratorState<float> result = IntegrateImplicitEuler(state, 0.0f, 0.0f, 3.0f);
+
+	LUDUS_TEST_ASSERT_EQ(result.Velocity.X, 2.0f);
+	LUDUS_TEST_ASSERT_EQ(result.Position.X, 7.0f);
+	LUDUS_TEST_ASSERT_EQ(result.Position.Y, 0.0f);
+	LUDUS_TEST_ASSERT_EQ(result.Position.Z, 0.0f);
+}
+
+// ========================================
+// Bit Tests
+// ========================================
+
+LUDUS_TEST(Bit_IsPowerOfTwo)
+{
+	LUDUS_TEST_ASSERT(!IsPowerOfTwo(0u));
+	LUDUS_TEST_ASSERT(IsPowerOfTwo(1u));
+	LUDUS_TEST_ASSERT(IsPowerOfTwo(2u));
+	LUDUS_TEST_ASSERT(!IsPowerOfTwo(3u));
+}
+
+LUDUS_TEST(Bit_GetNextPowerOfTwo)
+{
+	LUDUS_TEST_ASSERT_EQ(GetNextPowerOfTwo(0u), 1u);
+	LUDUS_TEST_ASSERT_EQ(GetNextPowerOfTwo(1u), 1u);
+	LUDUS_TEST_ASSERT_EQ(GetNextPowerOfTwo(2u), 2u);
+	LUDUS_TEST_ASSERT_EQ(GetNextPowerOfTwo(3u), 4u);
+	LUDUS_TEST_ASSERT_EQ(GetNextPowerOfTwo(9u), 16u);
 }
 
 // ========================================
