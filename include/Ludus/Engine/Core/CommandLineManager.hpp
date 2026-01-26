@@ -138,10 +138,17 @@ namespace ludus::core
             }
 
             // Regular character
-            if(bufferPos + 1 >= ARGUMENT_BUFFER_SIZE) {
-                buffer[bufferPos] = '\0';
-                arguments.PushBack( BasicString<CharT>(buffer) );
+            if(bufferPos + 1 >= ARGUMENT_BUFFER_SIZE)
+            {
+                LUDUS_ASSERT_MSG(false, "Command line argument too long: buffer overflow detected; argument will be ignored.");
+                // Skip this token until next separator
+                while(*current != ' ' && *current != '\0')
+                {
+                    ++current;
+                }
                 bufferPos = 0;
+                justClosedQuotes = false;
+                continue;
             }
             buffer[bufferPos++] = *current;
             justClosedQuotes = false;
