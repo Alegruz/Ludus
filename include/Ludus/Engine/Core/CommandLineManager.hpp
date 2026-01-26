@@ -39,6 +39,22 @@ namespace ludus::core
                 switch(nextChar)
                 {
                     case 'n':
+                    case 't':
+                    case 'r':
+                    case '\\':
+                    case '"':
+                    case '\'':
+                    case ' ':
+                        if(bufferPos + 1 >= ARGUMENT_BUFFER_SIZE) {
+                            buffer[bufferPos] = '\0';
+                            arguments.PushBack( BasicString<CharT>(buffer) );
+                            bufferPos = 0;
+                        }
+                        break;
+                }
+                switch(nextChar)
+                {
+                    case 'n':
                         buffer[bufferPos++] = '\n';
                         current += 2;
                         break;
@@ -67,6 +83,13 @@ namespace ludus::core
                         current += 2;
                         break;
                     default:
+                        if(bufferPos + 1 >= ARGUMENT_BUFFER_SIZE) 
+                        {
+                            LUDUS_ASSERT_MSG(false, "Argument buffer overflow");
+                            buffer[bufferPos] = '\0';
+                            arguments.PushBack( BasicString<CharT>(buffer) );
+                            bufferPos = 0;
+                        }
                         // Unknown escape sequence - keep the backslash
                         buffer[bufferPos++] = '\\';
                         ++current;
@@ -106,7 +129,6 @@ namespace ludus::core
                     bufferPos = 0;
                     justClosedQuotes = false;
                 }
-                
                 // Skip consecutive spaces
                 while(*current == ' ')
                 {
@@ -116,6 +138,18 @@ namespace ludus::core
             }
 
             // Regular character
+            if(bufferPos + 1 >= ARGUMENT_BUFFER_SIZE)
+            {
+                LUDUS_ASSERT_MSG(false, "Command line argument too long: buffer overflow detected; argument will be ignored.");
+                // Skip this token until next separator
+                while(*current != ' ' && *current != '\0')
+                {
+                    ++current;
+                }
+                bufferPos = 0;
+                justClosedQuotes = false;
+                continue;
+            }
             buffer[bufferPos++] = *current;
             justClosedQuotes = false;
             ++current;
