@@ -24,11 +24,14 @@ IndentWrappedFunctionNames: true
 ContinuationIndentWidth: 8
 
 # Braces
-BreakBeforeBraces: Stroustrup
-AllowShortBlocksOnASingleLine: Empty
-AllowShortFunctionsOnASingleLine: Inline
-AllowShortIfStatementsOnASingleLine: Never
+BreakBeforeBraces: Allman
+AllowShortBlocksOnASingleLine: false
+AllowShortFunctionsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: false
 AllowShortLoopsOnASingleLine: false
+# Enforce braces for all control statements, even single-line blocks
+AlwaysBreakAfterControlStatements: true
+RequireBraces: All
 Cpp11BracedListStyle: true
 
 # Spacing
