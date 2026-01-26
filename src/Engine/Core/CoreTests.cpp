@@ -1,5 +1,7 @@
 #include <Ludus/Engine/Core/UnitTest.hpp>
 #include <Ludus/Engine/Core/Math/Vector.hpp>
+#include <Ludus/Engine/Core/Math/Matrix.hpp>
+#include <Ludus/Engine/Core/Math/Quaternion.hpp>
 #include <Ludus/Engine/Core/Math/Trigonometry.hpp>
 #include <Ludus/Engine/Core/Math/Rect.hpp>
 #include <Ludus/Engine/Core/Math/Interpolation.hpp>
@@ -207,6 +209,165 @@ LUDUS_TEST(Vector4_DotLength)
 	LUDUS_TEST_ASSERT_EQ(v.Dot(v), 10.0f);
 	LUDUS_TEST_ASSERT_NEAR(v.Length(), 3.1622776f, 0.0001f);
 	LUDUS_TEST_ASSERT_EQ(v.LengthSquared(), 10.0f);
+}
+
+// ========================================
+// Matrix3 Tests
+// ========================================
+
+LUDUS_TEST(Matrix3_IdentityVector)
+{
+	const Matrix3<float> identity = Matrix3<float>::Identity();
+	const Vector3<float> v(1.0f, 2.0f, 3.0f);
+	const Vector3<float> result = identity * v;
+
+	LUDUS_TEST_ASSERT_EQ(result.X, 1.0f);
+	LUDUS_TEST_ASSERT_EQ(result.Y, 2.0f);
+	LUDUS_TEST_ASSERT_EQ(result.Z, 3.0f);
+}
+
+LUDUS_TEST(Matrix3_Multiplication)
+{
+	const Matrix3<float> a(
+		1.0f, 2.0f, 3.0f,
+		4.0f, 5.0f, 6.0f,
+		7.0f, 8.0f, 9.0f);
+	const Matrix3<float> b(
+		9.0f, 8.0f, 7.0f,
+		6.0f, 5.0f, 4.0f,
+		3.0f, 2.0f, 1.0f);
+	const Matrix3<float> result = a * b;
+
+	LUDUS_TEST_ASSERT_EQ(result.M00, 30.0f);
+	LUDUS_TEST_ASSERT_EQ(result.M01, 24.0f);
+	LUDUS_TEST_ASSERT_EQ(result.M02, 18.0f);
+	LUDUS_TEST_ASSERT_EQ(result.M10, 84.0f);
+	LUDUS_TEST_ASSERT_EQ(result.M11, 69.0f);
+	LUDUS_TEST_ASSERT_EQ(result.M12, 54.0f);
+	LUDUS_TEST_ASSERT_EQ(result.M20, 138.0f);
+	LUDUS_TEST_ASSERT_EQ(result.M21, 114.0f);
+	LUDUS_TEST_ASSERT_EQ(result.M22, 90.0f);
+}
+
+LUDUS_TEST(Matrix3_Transpose)
+{
+	const Matrix3<float> m(
+		1.0f, 2.0f, 3.0f,
+		4.0f, 5.0f, 6.0f,
+		7.0f, 8.0f, 9.0f);
+	const Matrix3<float> t = m.Transposed();
+
+	LUDUS_TEST_ASSERT_EQ(t.M00, 1.0f);
+	LUDUS_TEST_ASSERT_EQ(t.M01, 4.0f);
+	LUDUS_TEST_ASSERT_EQ(t.M02, 7.0f);
+	LUDUS_TEST_ASSERT_EQ(t.M10, 2.0f);
+	LUDUS_TEST_ASSERT_EQ(t.M11, 5.0f);
+	LUDUS_TEST_ASSERT_EQ(t.M12, 8.0f);
+	LUDUS_TEST_ASSERT_EQ(t.M20, 3.0f);
+	LUDUS_TEST_ASSERT_EQ(t.M21, 6.0f);
+	LUDUS_TEST_ASSERT_EQ(t.M22, 9.0f);
+}
+
+// ========================================
+// Matrix4 Tests
+// ========================================
+
+LUDUS_TEST(Matrix4_TransformPointVector)
+{
+	Matrix4<float> m = Matrix4<float>::Identity();
+	m.M03 = 10.0f;
+	m.M13 = 20.0f;
+	m.M23 = 30.0f;
+
+	const Vector3<float> point(1.0f, 2.0f, 3.0f);
+	const Vector3<float> vector(1.0f, 2.0f, 3.0f);
+
+	const Vector3<float> transformedPoint = m.TransformPoint(point);
+	const Vector3<float> transformedVector = m.TransformVector(vector);
+
+	LUDUS_TEST_ASSERT_EQ(transformedPoint.X, 11.0f);
+	LUDUS_TEST_ASSERT_EQ(transformedPoint.Y, 22.0f);
+	LUDUS_TEST_ASSERT_EQ(transformedPoint.Z, 33.0f);
+
+	LUDUS_TEST_ASSERT_EQ(transformedVector.X, 1.0f);
+	LUDUS_TEST_ASSERT_EQ(transformedVector.Y, 2.0f);
+	LUDUS_TEST_ASSERT_EQ(transformedVector.Z, 3.0f);
+}
+
+// ========================================
+// Quaternion Tests
+// ========================================
+
+LUDUS_TEST(Quaternion_IdentityRotate)
+{
+	const Quaternion<float> q = Quaternion<float>::Identity();
+	const Vector3<float> v(1.0f, 2.0f, 3.0f);
+	const Vector3<float> result = q.Rotate(v);
+
+	LUDUS_TEST_ASSERT_EQ(result.X, 1.0f);
+	LUDUS_TEST_ASSERT_EQ(result.Y, 2.0f);
+	LUDUS_TEST_ASSERT_EQ(result.Z, 3.0f);
+}
+
+LUDUS_TEST(Quaternion_AxisAngleRotate)
+{
+	const Vector3<float> axis(0.0f, 0.0f, 1.0f);
+	const float angle = Pi<float>() * 0.5f;
+	const Quaternion<float> q = Quaternion<float>::FromAxisAngle(axis, angle);
+
+	const Vector3<float> v(1.0f, 0.0f, 0.0f);
+	const Vector3<float> result = q.Rotate(v);
+
+	LUDUS_TEST_ASSERT_NEAR(result.X, 0.0f, 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(result.Y, 1.0f, 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(result.Z, 0.0f, 0.0001f);
+}
+
+LUDUS_TEST(Quaternion_Inverse)
+{
+	const Vector3<float> axis(0.0f, 1.0f, 0.0f);
+	const float angle = Pi<float>() * 0.25f;
+	const Quaternion<float> q = Quaternion<float>::FromAxisAngle(axis, angle);
+	const Quaternion<float> inv = q.Inverse();
+	const Quaternion<float> identity = q * inv;
+
+	LUDUS_TEST_ASSERT_NEAR(identity.X, 0.0f, 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(identity.Y, 0.0f, 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(identity.Z, 0.0f, 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(identity.W, 1.0f, 0.0001f);
+}
+
+LUDUS_TEST(Quaternion_MatrixRoundTrip)
+{
+	const Vector3<float> axis(1.0f, 0.0f, 0.0f);
+	const float angle = Pi<float>() * 0.75f;
+	const Quaternion<float> q = Quaternion<float>::FromAxisAngle(axis, angle);
+	const Matrix3<float> matrix = q.ToRotationMatrix();
+	Quaternion<float> q2 = Quaternion<float>::FromRotationMatrix(matrix);
+
+	if (q.Dot(q2) < 0.0f)
+	{
+		q2 = -q2;
+	}
+
+	LUDUS_TEST_ASSERT_NEAR(q.X, q2.X, 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(q.Y, q2.Y, 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(q.Z, q2.Z, 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(q.W, q2.W, 0.0001f);
+}
+
+LUDUS_TEST(Quaternion_NlerpShortestPath)
+{
+	const Vector3<float> axis(0.0f, 0.0f, 1.0f);
+	const float angle = Pi<float>() * 0.5f;
+	const Quaternion<float> q = Quaternion<float>::FromAxisAngle(axis, angle);
+	const Quaternion<float> qNeg = -q;
+	const Quaternion<float> blended = Quaternion<float>::Nlerp(q, qNeg, 0.5f);
+
+	LUDUS_TEST_ASSERT_NEAR(blended.X, q.X, 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(blended.Y, q.Y, 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(blended.Z, q.Z, 0.0001f);
+	LUDUS_TEST_ASSERT_NEAR(blended.W, q.W, 0.0001f);
 }
 
 // ========================================
