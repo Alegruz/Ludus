@@ -150,6 +150,61 @@ endfunction()
 include(FetchContent)
 
 # ============================================================================
+# Vulkan (volk) integration
+# Primary Vulkan loader for Vulkan presets
+# ============================================================================
+if(GRAPHICS_API STREQUAL "Vulkan")
+    # Vulkan-Headers (for vulkan/vulkan.h)
+    # Allow override of VulkanHeaders and volk tags from command line
+
+    if(NOT DEFINED VULKAN_HEADERS_TAG)
+        set(VULKAN_HEADERS_TAG v1.3.275)
+    endif()
+
+    # Automatically fetch latest volk tag if not set
+    if(NOT DEFINED VOLK_TAG)
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} -E env PYTHONIOENCODING=utf-8 python "${CMAKE_SOURCE_DIR}/tools/get_latest_volk_tag.py"
+            OUTPUT_VARIABLE VOLK_TAG
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        message(STATUS "Auto-fetched latest volk tag: ${VOLK_TAG}")
+    endif()
+
+    FetchContent_Declare(VulkanHeaders
+        GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+        GIT_TAG ${VULKAN_HEADERS_TAG}
+        GIT_SHALLOW TRUE
+    )
+
+    # volk: meta-loader for Vulkan
+    set(VOLK_STATIC ON CACHE BOOL "Build volk as a static library" FORCE)
+    set(VOLK_INSTALL OFF CACHE BOOL "Disable volk install step" FORCE)
+    set(VOLK_TESTS OFF CACHE BOOL "Disable volk tests" FORCE)
+
+    FetchContent_Declare(volk
+        GIT_REPOSITORY https://github.com/zeux/volk.git
+        GIT_TAG ${VOLK_TAG}
+        GIT_SHALLOW TRUE
+    )
+
+    FetchContent_MakeAvailable(VulkanHeaders volk)
+
+    add_library(LudusVulkanDeps INTERFACE)
+    target_include_directories(LudusVulkanDeps INTERFACE
+        ${VulkanHeaders_SOURCE_DIR}/include
+    )
+
+    if(TARGET volk::volk)
+        target_link_libraries(LudusVulkanDeps INTERFACE volk::volk)
+    elseif(TARGET volk)
+        target_link_libraries(LudusVulkanDeps INTERFACE volk)
+    else()
+        message(FATAL_ERROR "volk target not found after FetchContent_MakeAvailable")
+    endif()
+endif()
+
+# ============================================================================
 # mimalloc: High-performance memory allocator
 # Useful for profiling memory performance and reducing allocator overhead
 # Note: Automatically disabled when sanitizers are enabled to avoid conflicts

@@ -122,6 +122,7 @@ bool WindowProcedure(const ludus::platform::Window<ludus::platform::CURRENT_PLAT
 	{
 		case WM_PAINT:
 		{
+#if defined(LUDUS_GRAPHICS_CPU)
 			PAINTSTRUCT ps;
 			HDC hdc = BeginPaint(params.WindowHandle, &ps);
 
@@ -190,6 +191,9 @@ bool WindowProcedure(const ludus::platform::Window<ludus::platform::CURRENT_PLAT
 
 			EndPaint(params.WindowHandle, &ps);
 			return true; // Message was processed
+#else	// defined(LUDUS_GRAPHICS_CPU)
+			return false; // Message was not processed
+#endif	// defined(LUDUS_GRAPHICS_CPU)
 		}
 		default:
 			return false; // Message was not processed

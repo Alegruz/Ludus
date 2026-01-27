@@ -34,6 +34,10 @@ target_link_libraries(LudusRHI
     LudusBuildSettings
 )
 
+if(GRAPHICS_API STREQUAL "Vulkan")
+    target_link_libraries(LudusRHI PRIVATE LudusVulkanDeps)
+endif()
+
 # Generate debug symbols for MSVC
 if(MSVC)
     target_compile_options(LudusRHI PRIVATE $<$<CONFIG:Debug>:/Zi>)

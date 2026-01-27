@@ -22,12 +22,22 @@ jobs:
             build_preset: ci_test_msvc
             run_tests: true
             test_exe: out/build/ci_test_msvc/bin/LudusTests.exe
+          - name: Windows MSVC Debug (Vulkan)
+            os: windows-latest
+            configure_preset: ci_windows_msvc_debug_vulkan
+            build_preset: ci_windows_msvc_debug_vulkan
+            run_tests: false
           - name: Linux Clang Debug + Tests
             os: ubuntu-latest
             configure_preset: ci_test_clang
             build_preset: ci_test_clang
             run_tests: true
             test_exe: out/build/ci_test_clang/bin/LudusTests
+          - name: Linux Clang Debug (Vulkan)
+            os: ubuntu-latest
+            configure_preset: ci_linux_clang_debug_vulkan
+            build_preset: ci_linux_clang_debug_vulkan
+            run_tests: false
           - name: macOS Clang Debug (Build)
             os: macos-latest
             configure_preset: ci_macos_clang_debug

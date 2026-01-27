@@ -165,3 +165,26 @@ jobs:
 
       - name: Build (CMake build preset)
         run: cmake --build --preset "ci_linux_gcc_debug"
+
+  linux-vulkan-compat:
+    name: Linux Clang Debug Vulkan Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache
+
+      - name: Setup ccache (Linux)
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ci_linux_clang_debug_vulkan
+          max-size: 2G
+
+      - name: Configure (CMake preset)
+        run: cmake --preset "ci_linux_clang_debug_vulkan"
+
+      - name: Build (CMake build preset)
+        run: cmake --build --preset "ci_linux_clang_debug_vulkan"
