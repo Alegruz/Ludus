@@ -193,6 +193,7 @@ if(GRAPHICS_API STREQUAL "Vulkan")
     add_library(LudusVulkanDeps INTERFACE)
     target_include_directories(LudusVulkanDeps INTERFACE
         ${VulkanHeaders_SOURCE_DIR}/include
+        ${volk_SOURCE_DIR}
     )
 
     if(TARGET volk::volk)

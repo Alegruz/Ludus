@@ -2,13 +2,18 @@
 add_library(LudusRHI SHARED)
 
 # Resolve platform-specific source up front so configuration fails fast if a file is missing
-set(LUDUS_RHI_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/Texture.cpp")
+set(LUDUS_RHI_SOURCES 
+    "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/Texture.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/Instance.cpp"
+    )
 
-if(NOT EXISTS "${LUDUS_RHI_SOURCE}")
-    message(FATAL_ERROR "Expected rhi source missing: ${LUDUS_RHI_SOURCE}")
-endif()
+foreach(LUDUS_RHI_SOURCE IN LISTS LUDUS_RHI_SOURCES)
+     if(NOT EXISTS "${LUDUS_RHI_SOURCE}")
+         message(FATAL_ERROR "Expected rhi source missing: ${LUDUS_RHI_SOURCE}")
+     endif()
+endforeach()
 
-target_sources(LudusRHI PRIVATE "${LUDUS_RHI_SOURCE}")
+target_sources(LudusRHI PRIVATE ${LUDUS_RHI_SOURCES})
 
 if(WIN32)
     # Automatically export all symbols on Windows to generate import library
