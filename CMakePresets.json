@@ -283,9 +283,8 @@
             "name": "ci_base",
             "hidden": true,
             "displayName": "CI Base (tooling off)",
-            "description": "CI baseline: disable auto-install and static analysis unless explicitly enabled",
+            "description": "CI baseline: disable static analysis unless explicitly enabled",
             "cacheVariables": {
-                "ENABLE_AUTO_INSTALL_TOOLS": "OFF",
                 "ENABLE_CLANG_TIDY": "OFF",
                 "ENABLE_CPPCHECK": "OFF",
                 "ENABLE_MSVC_ANALYZE": "OFF",
@@ -724,3 +723,5 @@
         }
     ]
 }
+
+

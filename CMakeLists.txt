@@ -22,7 +22,6 @@ option(ENABLE_APP_VERIFIER "Enable Windows Application Verifier setup (recommend
 option(ENABLE_CLANG_TIDY "Enable clang-tidy static analysis" ON)
 option(ENABLE_CPPCHECK "Enable cppcheck static analysis" OFF)
 option(ENABLE_MSVC_ANALYZE "Enable MSVC /analyze static analysis" OFF)
-option(ENABLE_AUTO_INSTALL_TOOLS "Allow CMake to auto-install clang-format/clang-tidy when missing" ON)
 
 # Graphics API selection
 set(GRAPHICS_API "Cpu" CACHE STRING "Graphics API to use (Cpu, Vulkan, D3D12, Metal)")
@@ -53,91 +52,12 @@ set(LLVM_HINT_PATHS
     "$ENV{ChocolateyInstall}/bin"
 )
 
-# Helper: Find a dev tool and attempt auto-install if missing
-# Auto-install enhances user convenience for clang-format/clang-tidy
-function(find_or_install_dev_tool VAR_NAME TOOL_NAME)
+# Helper: Find a dev tool (no auto-install; onboarding handles installs)
+function(find_dev_tool VAR_NAME TOOL_NAME)
     find_program(${VAR_NAME} NAMES ${TOOL_NAME} HINTS ${LLVM_HINT_PATHS})
     
     if(NOT ${VAR_NAME})
-        if(NOT ENABLE_AUTO_INSTALL_TOOLS)
-            message(STATUS "${TOOL_NAME} not found and auto-install is disabled.")
-            set(${VAR_NAME} ${${VAR_NAME}} PARENT_SCOPE)
-            return()
-        endif()
-
-        message(STATUS "${TOOL_NAME} not found. Attempting auto-install...")
-        
-        if(WIN32)
-            # Try Chocolatey first
-            execute_process(
-                COMMAND choco install llvm -y --no-progress
-                RESULT_VARIABLE CHOCO_RESULT
-                OUTPUT_QUIET ERROR_QUIET
-            )
-            if(CHOCO_RESULT EQUAL 0)
-                find_program(${VAR_NAME} NAMES ${TOOL_NAME} HINTS ${LLVM_HINT_PATHS})
-                if(${VAR_NAME})
-                    message(STATUS "  ✓ ${TOOL_NAME} installed via Chocolatey: ${${VAR_NAME}}")
-                else()
-                    message(STATUS "  ✗ Install via Chocolatey succeeded but tool not found in PATH. Run: choco install llvm -y")
-                endif()
-            else()
-                # Fall back to PowerShell installer
-                set(LLVM_INSTALLER "${CMAKE_SOURCE_DIR}/tools/install-llvm.ps1")
-                if(EXISTS "${LLVM_INSTALLER}")
-                    message(STATUS "  Chocolatey unavailable. Trying: powershell -ExecutionPolicy Bypass -File tools/install-llvm.ps1")
-                    execute_process(
-                        COMMAND powershell -ExecutionPolicy Bypass -File "${LLVM_INSTALLER}"
-                        RESULT_VARIABLE PS_RESULT
-                        OUTPUT_QUIET ERROR_QUIET
-                    )
-                    if(PS_RESULT EQUAL 0)
-                        find_program(${VAR_NAME} NAMES ${TOOL_NAME} HINTS ${LLVM_HINT_PATHS})
-                        if(${VAR_NAME})
-                            message(STATUS "  ✓ ${TOOL_NAME} installed via PowerShell script: ${${VAR_NAME}}")
-                        endif()
-                    else()
-                        message(STATUS "  ✗ PowerShell install failed. Requires admin. Manual install: choco install llvm -y")
-                    endif()
-                endif()
-            endif()
-        elseif(APPLE)
-            execute_process(
-                COMMAND brew install llvm
-                RESULT_VARIABLE BREW_RESULT
-                OUTPUT_QUIET ERROR_QUIET
-            )
-            if(BREW_RESULT EQUAL 0)
-                find_program(${VAR_NAME} NAMES ${TOOL_NAME} HINTS ${LLVM_HINT_PATHS})
-                if(${VAR_NAME})
-                    message(STATUS "  ✓ ${TOOL_NAME} installed via Homebrew: ${${VAR_NAME}}")
-                else()
-                    message(STATUS "  ✗ Homebrew install succeeded but tool not found. Run: brew install llvm")
-                endif()
-            else()
-                message(STATUS "  ✗ Homebrew install failed. Manual: brew install llvm")
-            endif()
-        elseif(UNIX AND NOT APPLE)
-            execute_process(
-                COMMAND sudo apt-get update
-                OUTPUT_QUIET ERROR_QUIET
-            )
-            execute_process(
-                COMMAND sudo apt-get install -y clang-tools
-                RESULT_VARIABLE APT_RESULT
-                OUTPUT_QUIET ERROR_QUIET
-            )
-            if(APT_RESULT EQUAL 0)
-                find_program(${VAR_NAME} NAMES ${TOOL_NAME} HINTS ${LLVM_HINT_PATHS})
-                if(${VAR_NAME})
-                    message(STATUS "  ✓ ${TOOL_NAME} installed via apt: ${${VAR_NAME}}")
-                else()
-                    message(STATUS "  ✗ Apt install succeeded but tool not found. Run: sudo apt-get install ${TOOL_NAME}")
-                endif()
-            else()
-                message(STATUS "  ✗ Apt install failed. Manual: sudo apt-get install clang-tools")
-            endif()
-        endif()
+        message(STATUS "${TOOL_NAME} not found. Run the onboarding app (init.bat/init.sh) to install prerequisites.")
     else()
         message(STATUS "${TOOL_NAME} found: ${${VAR_NAME}}")
     endif()
@@ -161,14 +81,9 @@ if(GRAPHICS_API STREQUAL "Vulkan")
         set(VULKAN_HEADERS_TAG v1.3.275)
     endif()
 
-    # Automatically fetch latest volk tag if not set
+    # Default volk tag (set via onboarding or -DVOLK_TAG=...)
     if(NOT DEFINED VOLK_TAG)
-        execute_process(
-            COMMAND ${CMAKE_COMMAND} -E env PYTHONIOENCODING=utf-8 python "${CMAKE_SOURCE_DIR}/tools/get_latest_volk_tag.py"
-            OUTPUT_VARIABLE VOLK_TAG
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
-        message(STATUS "Auto-fetched latest volk tag: ${VOLK_TAG}")
+        set(VOLK_TAG 1.3.275)
     endif()
 
     FetchContent_Declare(VulkanHeaders
@@ -337,22 +252,22 @@ target_compile_options(LudusBuildSettings INTERFACE
     # GCC/Clang
     $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow
-    -fno-exceptions -fno-rtti>  # if that’s your policy; otherwise drop
+    -fno-exceptions -fno-rtti>  # if that?�s your policy; otherwise drop
 )
 
 # ============================================================================
 # Static Analysis Tools
-# Auto-install for convenience (clang-tidy, clang-format)
+# Dev tool detection (clang-tidy, clang-format)
 # Options defined at top of file
 # ============================================================================
 
 # Find or install clang-format
-find_or_install_dev_tool(CLANG_FORMAT_EXE clang-format)
+find_dev_tool(CLANG_FORMAT_EXE clang-format)
 set(ENABLE_CLANG_FORMAT ${CLANG_FORMAT_EXE})
 
 # Find or install clang-tidy (optional, for static analysis)
 if(ENABLE_CLANG_TIDY)
-    find_or_install_dev_tool(CLANG_TIDY_EXE clang-tidy)
+    find_dev_tool(CLANG_TIDY_EXE clang-tidy)
     if(CLANG_TIDY_EXE)
         # Suppress warnings from external dependencies (mimalloc, etc.) to avoid false positives
         # --header-filter only analyzes project headers (not external deps like mimalloc)
@@ -361,7 +276,7 @@ if(ENABLE_CLANG_TIDY)
         set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};--checks=-clang-diagnostic-*;-warnings-as-errors=*;--header-filter=.*include/Ludus/.*;--system-headers=false")
         message(STATUS "clang-tidy enabled (warnings as errors): ${CLANG_TIDY_EXE}")
     else()
-        message(STATUS "clang-tidy disabled (not found)")
+        message(STATUS "clang-tidy disabled (not found). Run onboarding to install prerequisites.")
         set(ENABLE_CLANG_TIDY OFF)
     endif()
 endif()
@@ -394,7 +309,7 @@ if(ENABLE_CLANG_FORMAT)
     
     message(STATUS "clang-format targets added: format-check, format-fix")
 else()
-    message(STATUS "clang-format not found - formatting checks disabled")
+    message(STATUS "clang-format not found - formatting checks disabled. Run onboarding to install prerequisites.")
 endif()
 
 # cppcheck (optional static analysis)
@@ -499,3 +414,6 @@ else()
 endif()
 
 add_subdirectory(src)
+
+
+

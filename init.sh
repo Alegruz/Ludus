@@ -1,45 +1,37 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -e
 
-echo "========================================"
-echo "Ludus Project Initialization"
-echo "========================================"
-echo
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
 
-echo
-echo "========================================"
-echo "Initialization Complete!"
-echo "========================================"
-echo
-
-# Check and install LLVM tools (clang-tidy, clang-format)
-echo "Checking for LLVM tools (clang-tidy, clang-format)..."
-if ! command -v clang-tidy &> /dev/null; then
-    echo "clang-tidy not found. Attempting installation..."
-    
-    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        # Linux (Debian/Ubuntu)
-        if command -v apt-get &> /dev/null; then
-            echo "Installing via apt-get..."
-            sudo apt-get update
-            sudo apt-get install -y clang-tidy clang-format
-        else
-            echo "apt-get not found. Install manually: sudo apt-get install clang-tidy clang-format"
-        fi
-    elif [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS
-        if command -v brew &> /dev/null; then
-            echo "Installing via Homebrew..."
-            brew install llvm
-        else
-            echo "Homebrew not found. Install from https://brew.sh"
-            echo "Then run: brew install llvm"
-        fi
-    fi
-else
-    echo "clang-tidy found!"
+PYTHON_BIN=""
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="python3"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
 fi
 
-echo
-echo "========================================"
-echo "Setup Complete!"
-echo "========================================"
+if [ -z "$PYTHON_BIN" ]; then
+  echo "Python not found. Attempting install..."
+  if command -v brew >/dev/null 2>&1; then
+    brew install python
+  elif command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update
+    sudo apt-get install -y python3 python3-tk
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y python3 python3-tkinter
+  else
+    echo "No supported package manager found. Install Python 3.10+ manually."
+  fi
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="python3"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+else
+  echo "Python still not found. Aborting."
+  exit 1
+fi
+
+"$PYTHON_BIN" tools/onboard/onboard.py "$@"

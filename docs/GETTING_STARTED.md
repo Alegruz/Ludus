@@ -2,7 +2,7 @@
 
 Status: draft
 Owner: maintainers
-Last updated: 2026-01-26
+Last updated: 2026-01-30
 
 
 This guide gets you from clone ??build ??run in minutes, then orients you to the codebase and deeper docs.
@@ -13,7 +13,7 @@ This guide gets you from clone ??build ??run in minutes, then orients you to the
 - Linux: Clang or GCC toolchain, CMake 3.26+, Ninja recommended.
 - macOS: Xcode Command Line Tools, CMake 3.26+, Ninja recommended.
 
-**CMake will auto-install LLVM tools** (clang-format/clang-tidy) if missing as a convenience for newcomers. It uses Chocolatey (Windows), Homebrew (macOS), or apt (Linux). If you prefer manual control or are in a restricted environment, see [docs/BUILD_SYSTEM.md](../docs/BUILD_SYSTEM.md).
+**Use the onboarding app** (`init.bat`/`init.sh`) to install prerequisites such as LLVM tools (clang-format/clang-tidy). For manual steps, see [docs/BUILD_SYSTEM.md](../docs/BUILD_SYSTEM.md).
 
 ## 2) Configure and Build
 
@@ -55,21 +55,21 @@ cmake --build --preset ninja_msvc-debug -t LudusTests
 
 ## 5) Formatting and Analysis
 
-- Formatting targets (clang-format auto-installed if missing):
+- Formatting targets (requires clang-format):
 
 ```powershell
 cmake --build --preset ninja_msvc-debug -t format-check
 cmake --build --preset ninja_msvc-debug -t format-fix
 ```
 
-- clang-tidy is enabled by default and auto-installed if missing. It treats warnings as errors. If installation fails, builds succeed normally without clang-tidy.
+- clang-tidy is enabled by default if present. It treats warnings as errors. If clang-tidy is missing, builds succeed normally without it.
 - Optional analyzers: enable `ENABLE_CPPCHECK=ON` or `ENABLE_MSVC_ANALYZE=ON` if those tools are available.
 
 ## 6) Build Options
 
 - `ENABLE_MIMALLOC=ON|OFF` (default ON): Overrides malloc/free for perf profiling. Auto-disabled when sanitizers are on.
 - `ENABLE_SANITIZERS=ON|OFF` (default ON for Clang/GCC in Debug/RelWithDebInfo): Adds ASan/UBSan/LSan. MSVC ASan is disabled here due to Windows compatibility; use Clang on Windows if you need ASan.
-- `ENABLE_CLANG_TIDY=ON|OFF` (default ON): Enables clang-tidy with auto-install if missing.
+- `ENABLE_CLANG_TIDY=ON|OFF` (default ON): Enables clang-tidy when available.
 - `ENABLE_CPPCHECK=ON|OFF` (default OFF): Optional static analysis if cppcheck is available.
 
 Example with options:
@@ -119,8 +119,11 @@ cmake --preset ninja_clang-relwithdebinfo -DENABLE_MIMALLOC=OFF
 
 ## Troubleshooting
 
-- LLVM tools auto-install failed: CMake attempts install via Chocolatey/Homebrew/apt. If it fails, you can manually install LLVM from https://llvm.org/, then re-configure.
-- Formatting/clang-tidy not running: if auto-install failed, manually install tools and reconfigure. See [docs/BUILD_SYSTEM.md](../docs/BUILD_SYSTEM.md) for manual install steps.
+- LLVM tools missing: run the onboarding app (`init.bat`/`init.sh`) or install LLVM manually from https://llvm.org/, then re-configure.
+- Formatting/clang-tidy not running: run onboarding (`init.bat`/`init.sh`) or install tools manually and reconfigure. See [docs/BUILD_SYSTEM.md](../docs/BUILD_SYSTEM.md) for manual install steps.
 - Sanitizers on Windows: prefer Clang presets (`ninja_clang-*`). MSVC ASan is disabled here.
 - Mimalloc conflicts with sanitizers: it auto-disables when sanitizers are ON.
 - Build artifacts in source root: if you see `.exe`, `.dll`, or `.ilk` files in the repo root, they're from an old build. Delete them and rebuild?”new builds output to `build/bin/` and `build/lib/` only.
+
+
+

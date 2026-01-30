@@ -98,7 +98,7 @@ constexpr uint32_t kSomeConstant = 4;
 ## Troubleshooting
 
 ### "clang-tidy not found"
-- Run `cmake --preset <preset>` again - auto-installer should run
+- Run the onboarding app (`init.bat`/`init.sh`) to install LLVM tools
 - Manually run `tools/install-llvm.ps1` as Administrator (Windows)
 - Restart VS Code after installation for PATH changes
 
@@ -129,3 +129,4 @@ Add to `.github/workflows/build.yml`:
 2. **Run format-fix before commits** - keeps code style consistent
 3. **Use NOLINT sparingly** - only for false positives
 4. **Keep .clang-tidy updated** - review and adjust rules as project evolves
+

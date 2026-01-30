@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "description": "Data-driven engine arguments for the onboarding GUI/CLI.",
+  "args": [
+    {
+      "id": "quick_exit",
+      "flag": "--quick-exit",
+      "type": "bool",
+      "default": false,
+      "description": "Exit after initialization for smoke testing."
+    },
+    {
+      "id": "width",
+      "flag": "--width",
+      "type": "int",
+      "default": 1024,
+      "description": "Window width."
+    },
+    {
+      "id": "height",
+      "flag": "--height",
+      "type": "int",
+      "default": 768,
+      "description": "Window height."
+    }
+  ],
+  "freeform_allowed": true
+}

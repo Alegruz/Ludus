@@ -50,25 +50,12 @@ Suggested approach:
 
 ### 2) The build system currently mixes configuration with environment management
 
-**Problem:** `CMakeLists.txt` attempts to install developer tooling automatically, including invoking `sudo apt-get` on Linux. This is convenient, but it also:
+**Status:** Addressed in 2026-01 onboarding work.
 
-- breaks the expectation that configure/build steps are side-effect-free,
-- makes CI and local builds behave differently in subtle ways,
-- creates unclear failure modes when tools are partially installed.
-
-**Recommendation:** Move auto-install behavior behind an explicit script and make it opt-in.
-
-A pragmatic path:
-
-- Keep detection in CMake.
-- Replace auto-install attempts with:
-  - a clear warning message, and
-  - a pointer to a dedicated setup script or documentation section.
-- Provide a separate `tools/bootstrap.*` script that developers run intentionally.
+**Resolution:** CMake no longer installs system packages. Missing tools now emit guidance to run the onboarding app (`init.bat`/`init.sh`).
 
 **Why this matters:** Deterministic builds are a prerequisite for maintainability. If "configure" can modify the machine, debugging becomes much harder.
 
----
 
 ### 3) Architectural layering needs enforcement, not just documentation
 
