@@ -19,6 +19,9 @@ DEFAULT_ARGS_FILE = ONBOARD_DIR / "engine_args.json"
 VSCODE_EXT_FILE = ONBOARD_DIR / "vscode_extensions.json"
 STATE_FILE = ONBOARD_DIR / "onboard_state.json"
 VSCODE_SETTINGS = ROOT_DIR / ".vscode" / "settings.json"
+PRESET_REQ_FILE = ONBOARD_DIR / "preset_requirements.json"
+
+MIN_VULKAN_SDK_VERSION = (1, 3, 0)
 
 
 def run_command(cmd, check=False, cwd=None):
@@ -174,6 +177,40 @@ def detect_tool(cmd):
     return False, "not found"
 
 
+def parse_version_tuple(text):
+    parts = []
+    for token in text.replace("\r", "").replace("\n", "").strip().split("."):
+        if token.isdigit():
+            parts.append(int(token))
+        else:
+            break
+    return tuple(parts)
+
+
+def detect_vulkan_sdk():
+    sdk_path = os.environ.get("VULKAN_SDK")
+    if sdk_path:
+        sdk_root = Path(sdk_path)
+        header = sdk_root / "Include" / "vulkan" / "vulkan.h"
+        version_file = sdk_root / "version.txt"
+        if header.exists():
+            version = None
+            if version_file.exists():
+                version = parse_version_tuple(version_file.read_text(encoding="utf-8"))
+            if version and version < MIN_VULKAN_SDK_VERSION:
+                return False, f"Vulkan SDK {'.'.join(map(str, version))} < required {'.'.join(map(str, MIN_VULKAN_SDK_VERSION))}"
+            return True, f"{sdk_root}"
+    # Fallback header checks (Linux/macOS)
+    if (Path("/usr/include/vulkan/vulkan.h").exists() or Path("/usr/local/include/vulkan/vulkan.h").exists()):
+        return True, "system Vulkan headers"
+    return False, "Vulkan SDK not found"
+
+
+def detect_volk():
+    # Volk is provided via FetchContent; no system install required.
+    return True, "FetchContent (no install required)"
+
+
 def get_package_manager():
     if is_windows():
         if which("winget"):
@@ -205,6 +242,7 @@ def install_with_manager(tool_key):
         "vscode": {"winget": ["winget", "install", "--id", "Microsoft.VisualStudioCode", "-e"], "choco": ["choco", "install", "vscode", "-y"]},
         "python": {"winget": ["winget", "install", "--id", "Python.Python.3.12", "-e"], "choco": ["choco", "install", "python", "-y"]},
         "vs2022": {"winget": ["winget", "install", "--id", "Microsoft.VisualStudio.2022.Community", "-e"], "choco": ["choco", "install", "visualstudio2022community", "-y"]},
+        "vulkan_sdk": {"winget": ["winget", "install", "--id", "KhronosGroup.VulkanSDK", "-e"], "choco": ["choco", "install", "vulkan-sdk", "-y"]},
     }
 
     mac_map = {
@@ -214,6 +252,7 @@ def install_with_manager(tool_key):
         "llvm": ["brew", "install", "llvm"],
         "vscode": ["brew", "install", "--cask", "visual-studio-code"],
         "python": ["brew", "install", "python"],
+        "vulkan_sdk": ["brew", "install", "vulkan-sdk"],
     }
 
     linux_map = {
@@ -223,6 +262,7 @@ def install_with_manager(tool_key):
         "llvm": ["sudo", "apt-get", "install", "-y", "clang", "clang-tools", "clang-tidy", "clang-format"],
         "vscode": ["sudo", "apt-get", "install", "-y", "code"],
         "python": ["sudo", "apt-get", "install", "-y", "python3"],
+        "vulkan_sdk": ["sudo", "apt-get", "install", "-y", "vulkan-sdk"],
     }
 
     cmd = None
@@ -290,7 +330,59 @@ def install_llvm_windows_fallback():
     return result.returncode == 0
 
 
-def check_tools(role):
+def load_preset_requirements():
+    if PRESET_REQ_FILE.exists():
+        try:
+            return json.loads(PRESET_REQ_FILE.read_text(encoding="utf-8")).get("presets", [])
+        except Exception:
+            return []
+    return []
+
+
+def resolve_preset_cache(preset_name):
+    presets_path = ROOT_DIR / "CMakePresets.json"
+    if not presets_path.exists():
+        return {}
+    data = json.loads(presets_path.read_text(encoding="utf-8"))
+    presets = {p.get("name"): p for p in data.get("configurePresets", [])}
+
+    def merge_cache(name, visited):
+        if name in visited or name not in presets:
+            return {}
+        visited.add(name)
+        preset = presets[name]
+        cache = {}
+        for parent in preset.get("inherits", []) if isinstance(preset.get("inherits"), list) else ([preset.get("inherits")] if preset.get("inherits") else []):
+            cache.update(merge_cache(parent, visited))
+        cache.update(preset.get("cacheVariables", {}) or {})
+        return cache
+
+    return merge_cache(preset_name, set())
+
+
+def get_preset_requirements(preset_name):
+    cache = resolve_preset_cache(preset_name)
+    requirements = []
+    rules = load_preset_requirements()
+    for rule in rules:
+        when = rule.get("when", {})
+        match = True
+        for key, expected in when.items():
+            if str(cache.get(key, "")) != str(expected):
+                match = False
+                break
+        if match:
+            requirements.extend(rule.get("requirements", []))
+    # Fallback: if preset name contains "vulkan"
+    if preset_name and "vulkan" in preset_name.lower():
+        if "vulkan_sdk" not in requirements:
+            requirements.append("vulkan_sdk")
+        if "volk" not in requirements:
+            requirements.append("volk")
+    return requirements
+
+
+def check_tools(role, preset_name=""):
     tools = []
     tools.append(("git", "Git", *detect_tool("git"), True))
     tools.append(("cmake", "CMake", *detect_tool("cmake"), True))
@@ -314,6 +406,12 @@ def check_tools(role):
         raddbg_ok, raddbg_details = detect_raddbg()
         tools.append(("raddbg", "RadDbg", raddbg_ok, raddbg_details, True))
 
+    preset_reqs = get_preset_requirements(preset_name)
+    if "vulkan_sdk" in preset_reqs:
+        tools.append(("vulkan_sdk", "Vulkan SDK", *detect_vulkan_sdk(), True))
+    if "volk" in preset_reqs:
+        tools.append(("volk", "volk", *detect_volk(), True))
+
     return tools
 
 
@@ -324,8 +422,8 @@ def print_tools(tools):
         print(f"{label:28} {status:8} ({req}) - {details}")
 
 
-def install_missing(role):
-    tools = check_tools(role)
+def install_missing(role, preset_name=""):
+    tools = check_tools(role, preset_name)
     missing = [t for t in tools if not t[2] and t[4]]
     if not missing:
         print("All required tools already installed.")
@@ -343,6 +441,9 @@ def install_missing(role):
             if install_with_manager("llvm"):
                 continue
             install_llvm_windows_fallback()
+            continue
+        if key == "vulkan_sdk":
+            install_with_manager("vulkan_sdk")
             continue
         if key == "raddbg":
             install_raddbg()
@@ -484,7 +585,7 @@ def build_preset(name, target):
 
 
 def one_click_setup(role, preset, target):
-    install_missing(role)
+    install_missing(role, preset)
     if not detect_vscode()[0]:
         install_with_manager("vscode")
     install_vscode_extensions()
@@ -550,14 +651,14 @@ def launch_gui():
     def refresh_prereqs(*_args):
         for row in tree.get_children():
             tree.delete(row)
-        tools = check_tools(role_var.get())
+        tools = check_tools(role_var.get(), preset_var.get() if "preset_var" in locals() else "")
         for _, label, ok, details, required in tools:
             tree.insert("", tk.END, values=(label, "OK" if ok else "MISSING", "required" if required else "optional", details))
         state["role"] = role_var.get()
         save_state(state)
 
     def install_missing_clicked():
-        install_missing(role_var.get())
+        install_missing(role_var.get(), preset_var.get() if "preset_var" in locals() else "")
         refresh_prereqs()
 
     def install_vscode_clicked():
@@ -698,6 +799,7 @@ def launch_gui():
     ttk.Combobox(build_frame, textvariable=preset_var, values=presets, width=32).pack(side="left")
     ttk.Button(build_frame, text="Set Preset + Open VS Code", command=one_click_clicked).pack(side="left", padx=6)
     preset_var.trace_add("write", lambda *_: (state.__setitem__("preset", preset_var.get()), save_state(state)))
+    preset_var.trace_add("write", refresh_prereqs)
 
     run_frame = ttk.LabelFrame(root, text="Run / Debug")
     run_frame.pack(fill="x", padx=12, pady=6)
@@ -747,6 +849,7 @@ def main():
     parser.add_argument("--gui", action="store_true", help="Launch GUI")
     parser.add_argument("--check", action="store_true", help="Print prerequisite status")
     parser.add_argument("--install", action="store_true", help="Install missing prerequisites")
+    parser.add_argument("--preset", default="", help="Preset name used for preset-specific prerequisites")
     parser.add_argument("--install-vscode", action="store_true", help="Install VS Code")
     parser.add_argument("--install-vscode-extensions", action="store_true", help="Install VS Code extensions")
     parser.add_argument("--open-vscode", action="store_true", help="Open VS Code in repo")
@@ -773,9 +876,9 @@ def main():
         return
 
     if args.check:
-        print_tools(check_tools(args.role))
+        print_tools(check_tools(args.role, args.preset))
     if args.install:
-        install_missing(args.role)
+        install_missing(args.role, args.preset)
     if args.install_vscode:
         install_with_manager("vscode")
     if args.install_vscode_extensions:
