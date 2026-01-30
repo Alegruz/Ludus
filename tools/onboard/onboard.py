@@ -633,6 +633,7 @@ def set_vscode_preset(preset):
     return True
 
 
+
 def launch_gui():
     try:
         import tkinter as tk
@@ -643,22 +644,30 @@ def launch_gui():
 
     root = tk.Tk()
     root.title("Ludus Onboarding")
-    root.geometry("860x620")
+    root.geometry("980x700")
 
     state = load_state()
     role_var = tk.StringVar(value=state.get("role", "user"))
 
+    presets = []
+    presets_path = ROOT_DIR / "CMakePresets.json"
+    if presets_path.exists():
+        data = json.loads(presets_path.read_text(encoding="utf-8"))
+        presets = [p["name"] for p in data.get("configurePresets", []) if not p.get("hidden")]
+    default_preset = state.get("preset", presets[0] if presets else "")
+    preset_var = tk.StringVar(value=default_preset if default_preset in presets else (presets[0] if presets else ""))
+
     def refresh_prereqs(*_args):
-        for row in tree.get_children():
-            tree.delete(row)
-        tools = check_tools(role_var.get(), preset_var.get() if "preset_var" in locals() else "")
+        for row in prereq_tree.get_children():
+            prereq_tree.delete(row)
+        tools = check_tools(role_var.get(), preset_var.get())
         for _, label, ok, details, required in tools:
-            tree.insert("", tk.END, values=(label, "OK" if ok else "MISSING", "required" if required else "optional", details))
+            prereq_tree.insert("", tk.END, values=(label, "OK" if ok else "MISSING", "required" if required else "optional", details))
         state["role"] = role_var.get()
         save_state(state)
 
     def install_missing_clicked():
-        install_missing(role_var.get(), preset_var.get() if "preset_var" in locals() else "")
+        install_missing(role_var.get(), preset_var.get())
         refresh_prereqs()
 
     def install_vscode_clicked():
@@ -757,57 +766,111 @@ def launch_gui():
     header = ttk.Label(root, text="Ludus Onboarding", font=("Segoe UI", 16, "bold"))
     header.pack(pady=10)
 
-    role_frame = ttk.Frame(root)
-    role_frame.pack(fill="x", padx=12)
-    ttk.Label(role_frame, text="Profile:").pack(side="left")
-    ttk.Combobox(role_frame, textvariable=role_var, values=["user", "contributor", "debugger"], width=16, state="readonly").pack(side="left", padx=8)
-    ttk.Button(role_frame, text="Refresh", command=refresh_prereqs).pack(side="left", padx=6)
-    ttk.Button(role_frame, text="Install Missing", command=install_missing_clicked).pack(side="left", padx=6)
-    role_var.trace_add("write", refresh_prereqs)
+    notebook = ttk.Notebook(root)
+    notebook.pack(fill="both", expand=True, padx=10, pady=6)
 
-    prereq_frame = ttk.LabelFrame(root, text="Prerequisites")
-    prereq_frame.pack(fill="both", expand=False, padx=12, pady=8)
+    onboarding_tab = ttk.Frame(notebook)
+    run_tab = ttk.Frame(notebook)
+    notebook.add(onboarding_tab, text="Onboarding")
+    notebook.add(run_tab, text="Run / Debug")
 
+    # Onboarding wizard
+    wizard_frame = ttk.Frame(onboarding_tab)
+    wizard_frame.pack(fill="both", expand=True, padx=12, pady=8)
+
+    steps = []
+    step_index = tk.IntVar(value=0)
+
+    # Step 1: Profile selection
+    step1 = ttk.Frame(wizard_frame)
+    ttk.Label(step1, text="Step 1: Choose a profile", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=6)
+    ttk.Label(step1, text="Pick what you want to do so we can tailor prerequisites.").pack(anchor="w")
+    role_row = ttk.Frame(step1)
+    role_row.pack(anchor="w", pady=8)
+    ttk.Label(role_row, text="Profile:").pack(side="left")
+    ttk.Combobox(role_row, textvariable=role_var, values=["user", "contributor", "debugger"], width=18, state="readonly").pack(side="left", padx=8)
+    steps.append(step1)
+
+    # Step 2: Prerequisites
+    step2 = ttk.Frame(wizard_frame)
+    ttk.Label(step2, text="Step 2: Install prerequisites", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=6)
+    ttk.Label(step2, text="We only install what is missing or incompatible.").pack(anchor="w")
+
+    prereq_frame = ttk.LabelFrame(step2, text="Prerequisites (profile + preset)")
+    prereq_frame.pack(fill="x", padx=4, pady=8)
     columns = ("tool", "status", "required", "details")
-    tree = ttk.Treeview(prereq_frame, columns=columns, show="headings", height=6)
-    tree.heading("tool", text="Tool")
-    tree.heading("status", text="Status")
-    tree.heading("required", text="Required")
-    tree.heading("details", text="Details")
-    tree.column("tool", width=180)
-    tree.column("status", width=90)
-    tree.column("required", width=90)
-    tree.column("details", width=420)
-    tree.pack(fill="x", padx=6, pady=6)
+    prereq_tree = ttk.Treeview(prereq_frame, columns=columns, show="headings", height=7)
+    prereq_tree.heading("tool", text="Tool")
+    prereq_tree.heading("status", text="Status")
+    prereq_tree.heading("required", text="Required")
+    prereq_tree.heading("details", text="Details")
+    prereq_tree.column("tool", width=180)
+    prereq_tree.column("status", width=90)
+    prereq_tree.column("required", width=90)
+    prereq_tree.column("details", width=460)
+    prereq_tree.pack(fill="x", padx=6, pady=6)
 
-    vscode_frame = ttk.LabelFrame(root, text="VS Code")
-    vscode_frame.pack(fill="x", padx=12, pady=6)
-    ttk.Button(vscode_frame, text="Install VS Code", command=install_vscode_clicked).pack(side="left", padx=6, pady=6)
-    ttk.Button(vscode_frame, text="Install Extensions", command=install_extensions_clicked).pack(side="left", padx=6)
-    ttk.Button(vscode_frame, text="Open VS Code", command=open_vscode_clicked).pack(side="left", padx=6)
+    prereq_buttons = ttk.Frame(step2)
+    prereq_buttons.pack(anchor="w", pady=6)
+    ttk.Button(prereq_buttons, text="Install Missing", command=install_missing_clicked).pack(side="left", padx=4)
+    ttk.Button(prereq_buttons, text="Install VS Code", command=install_vscode_clicked).pack(side="left", padx=4)
+    ttk.Button(prereq_buttons, text="Install Extensions", command=install_extensions_clicked).pack(side="left", padx=4)
+    steps.append(step2)
 
-    build_frame = ttk.LabelFrame(root, text="VS Code Preset")
-    build_frame.pack(fill="x", padx=12, pady=6)
-    presets = []
-    presets_path = ROOT_DIR / "CMakePresets.json"
-    if presets_path.exists():
-        data = json.loads(presets_path.read_text(encoding="utf-8"))
-        presets = [p["name"] for p in data.get("configurePresets", []) if not p.get("hidden")]
-    default_preset = state.get("preset", presets[0] if presets else "")
-    preset_var = tk.StringVar(value=default_preset if default_preset in presets else (presets[0] if presets else ""))
-    ttk.Label(build_frame, text="Preset:").pack(side="left", padx=6)
-    ttk.Combobox(build_frame, textvariable=preset_var, values=presets, width=32).pack(side="left")
-    ttk.Button(build_frame, text="Set Preset + Open VS Code", command=one_click_clicked).pack(side="left", padx=6)
-    preset_var.trace_add("write", lambda *_: (state.__setitem__("preset", preset_var.get()), save_state(state)))
-    preset_var.trace_add("write", refresh_prereqs)
+    # Step 3: VS Code preset + open
+    step3 = ttk.Frame(wizard_frame)
+    ttk.Label(step3, text="Step 3: Open VS Code", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=6)
+    ttk.Label(step3, text="Choose a preset, then open VS Code with it set.").pack(anchor="w")
 
-    run_frame = ttk.LabelFrame(root, text="Run / Debug")
-    run_frame.pack(fill="x", padx=12, pady=6)
+    preset_row = ttk.Frame(step3)
+    preset_row.pack(anchor="w", pady=8)
+    ttk.Label(preset_row, text="Preset:").pack(side="left")
+    ttk.Combobox(preset_row, textvariable=preset_var, values=presets, width=32).pack(side="left", padx=8)
+    ttk.Button(step3, text="Set Preset + Open VS Code", command=one_click_clicked).pack(anchor="w", pady=6)
+    ttk.Button(step3, text="Open VS Code", command=open_vscode_clicked).pack(anchor="w", pady=2)
+    steps.append(step3)
+
+    nav = ttk.Frame(onboarding_tab)
+    nav.pack(fill="x", padx=12, pady=10)
+    back_btn = ttk.Button(nav, text="Back")
+    next_btn = ttk.Button(nav, text="Next")
+    back_btn.pack(side="left")
+    next_btn.pack(side="right")
+
+    def show_step(index):
+        for s in steps:
+            s.pack_forget()
+        steps[index].pack(fill="both", expand=True)
+        step_index.set(index)
+        back_btn["state"] = "normal" if index > 0 else "disabled"
+        next_btn["text"] = "Finish" if index == len(steps) - 1 else "Next"
+        if index == 1:
+            refresh_prereqs()
+
+    def go_back():
+        idx = step_index.get()
+        if idx > 0:
+            show_step(idx - 1)
+
+    def go_next():
+        idx = step_index.get()
+        if idx < len(steps) - 1:
+            show_step(idx + 1)
+        else:
+            notebook.select(run_tab)
+
+    back_btn.configure(command=go_back)
+    next_btn.configure(command=go_next)
+
+    # Run/Debug tab
+    run_frame = ttk.LabelFrame(run_tab, text="Run / Debug")
+    run_frame.pack(fill="x", padx=12, pady=12)
     args_file_var = tk.StringVar(value=str(DEFAULT_ARGS_FILE))
     extra_args_var = tk.StringVar(value="")
     binary_var = tk.StringVar(value="")
     target_options = ["LudusEditor", "LudusTests", "Custom..."]
     target_var = tk.StringVar(value=target_options[0])
+
     def on_target_change(*_args):
         name = target_var.get()
         if name == "Custom...":
@@ -817,6 +880,7 @@ def launch_gui():
             binary_var.set(str(exe))
         else:
             binary_var.set("")
+
     ttk.Label(run_frame, text="Args file:").grid(row=0, column=0, sticky="w", padx=6, pady=4)
     ttk.Entry(run_frame, textvariable=args_file_var, width=60).grid(row=0, column=1, padx=6, pady=4, sticky="w")
     ttk.Button(run_frame, text="Reload Args", command=reload_args_clicked).grid(row=0, column=2, padx=6)
@@ -833,12 +897,16 @@ def launch_gui():
     ttk.Entry(run_frame, textvariable=extra_args_var, width=60).grid(row=4, column=1, padx=6, pady=4, sticky="w")
     ttk.Button(run_frame, text="Run Target", command=run_clicked).grid(row=3, column=2, padx=6)
     ttk.Button(run_frame, text="Debug Target", command=debug_clicked).grid(row=4, column=2, padx=6)
+
     target_var.trace_add("write", on_target_change)
     on_target_change()
 
-    refresh_prereqs()
-    root.mainloop()
+    role_var.trace_add("write", refresh_prereqs)
+    preset_var.trace_add("write", lambda *_: (state.__setitem__("preset", preset_var.get()), save_state(state)))
+    preset_var.trace_add("write", refresh_prereqs)
 
+    show_step(0)
+    root.mainloop()
 
 def main():
     parser = argparse.ArgumentParser(
@@ -904,3 +972,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
