@@ -74,7 +74,7 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 	LUDUS_ASSERT_MSG(cosine > 0.7071f && cosine < 0.7072f, "Cosine calculation is incorrect");	// NOLINT(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
 
 	WindowManager<CURRENT_PLATFORM_TYPE> windowManager;
-	commandLineManager.ParseCommandLine(windowManager);
+	windowManager.ParseCommandLineWithContext(commandLineManager);
 
 	Window<CURRENT_PLATFORM_TYPE>::CreateInfo createInfo
 	{

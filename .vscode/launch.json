@@ -9,6 +9,7 @@
             "request": "launch",
             "name": "Debug LudusEditor (MSVC-Debug-CPU)",
             "program": "${workspaceFolder}/out/build/ninja_msvc-debug/bin/LudusEditor.exe",
+            "args": ["--width", "1920", "--height", "1080"],
             "cwd": "${workspaceFolder}/out/build/ninja_msvc-debug/bin",
             "stopAtEntry": true,
             "environment": [
@@ -23,6 +24,7 @@
             "request": "launch",
             "name": "Debug LudusEditor (MSVC-Debug-Vulkan)",
             "program": "${workspaceFolder}/out/build/ninja_msvc-debug-vulkan/bin/LudusEditor.exe",
+            "args": ["--width", "1920", "--height", "1080"],
             "cwd": "${workspaceFolder}/out/build/ninja_msvc-debug-vulkan/bin",
             "stopAtEntry": true,
             "environment": [
@@ -52,6 +54,7 @@
             "request": "launch",
             "name": "Debug LudusEditor (MSVC-Release-CPU)",
             "program": "${workspaceFolder}/out/build/ninja_msvc-release/bin/LudusEditor.exe",
+            "args": ["--width", "1920", "--height", "1080"],
             "cwd": "${workspaceFolder}/out/build/ninja_msvc-release/bin",
             "stopAtEntry": true
         },
@@ -60,6 +63,7 @@
             "request": "launch",
             "name": "Debug LudusEditor (MSVC-Release-Vulkan)",
             "program": "${workspaceFolder}/out/build/ninja_msvc-release-vulkan/bin/LudusEditor.exe",
+            "args": ["--width", "1920", "--height", "1080"],
             "cwd": "${workspaceFolder}/out/build/ninja_msvc-release-vulkan/bin",
             "stopAtEntry": true
         },
@@ -79,8 +83,7 @@
             "program": "${workspaceFolder}/out/build/ninja_clang-debug/bin/LudusEditor",
             "cwd": "${workspaceFolder}/out/build/ninja_clang-debug/bin",
             "stopAtEntry": true,
-            "args": [
-            ]
+            "args": ["--width", "1920", "--height", "1080"]
         },
         {
             "type": "cppdbg",
@@ -89,8 +92,7 @@
             "program": "${workspaceFolder}/out/build/ninja_clang-debug-vulkan/bin/LudusEditor",
             "cwd": "${workspaceFolder}/out/build/ninja_clang-debug-vulkan/bin",
             "stopAtEntry": true,
-            "args": [
-            ]
+            "args": ["--width", "1920", "--height", "1080"]
         },
         {
             "type": "cppdbg",
@@ -99,8 +101,7 @@
             "program": "${workspaceFolder}/out/build/ninja_gcc-debug/bin/LudusEditor",
             "cwd": "${workspaceFolder}/out/build/ninja_gcc-debug/bin",
             "stopAtEntry": true,
-            "args": [
-            ]
+            "args": ["--width", "1920", "--height", "1080"]
         },
         {
             "type": "cppdbg",
@@ -109,8 +110,7 @@
             "program": "${workspaceFolder}/out/build/ninja_gcc-debug-vulkan/bin/LudusEditor",
             "cwd": "${workspaceFolder}/out/build/ninja_gcc-debug-vulkan/bin",
             "stopAtEntry": true,
-            "args": [
-            ]
+            "args": ["--width", "1920", "--height", "1080"]
         },
         {
             "type": "cppvsdbg",

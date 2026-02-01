@@ -147,4 +147,58 @@ namespace ludus::core
         return str;
 #endif
     }
+
+    bool StringToInt32(const char* str, int32_t& outValue) noexcept
+    {
+        if (str == nullptr || *str == '\0')
+        {
+            return false;
+        }
+
+        char* endPtr = nullptr;
+        errno = 0;
+        const long result = std::strtol(str, &endPtr, 10);
+
+        // Check for conversion errors
+        if (errno == ERANGE || result < INT32_MIN || result > INT32_MAX)
+        {
+            return false;
+        }
+
+        // Check if any characters were actually converted
+        if (endPtr == str)
+        {
+            return false;
+        }
+
+        outValue = static_cast<int32_t>(result);
+        return true;
+    }
+
+    bool StringToInt32(const wchar_t* str, int32_t& outValue) noexcept
+    {
+        if (str == nullptr || *str == L'\0')
+        {
+            return false;
+        }
+
+        wchar_t* endPtr = nullptr;
+        errno = 0;
+        const long result = std::wcstol(str, &endPtr, 10);
+
+        // Check for conversion errors
+        if (errno == ERANGE || result < INT32_MIN || result > INT32_MAX)
+        {
+            return false;
+        }
+
+        // Check if any characters were actually converted
+        if (endPtr == str)
+        {
+            return false;
+        }
+
+        outValue = static_cast<int32_t>(result);
+        return true;
+    }
 } // namespace ludus::core

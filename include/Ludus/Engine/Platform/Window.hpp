@@ -158,34 +158,95 @@ namespace ludus::platform
     }
 
     template<PlatformType PLATFORM_TYPE>
-    LUDUS_INLINE constexpr WindowManager<PLATFORM_TYPE>::WindowManager() noexcept = default;
+    LUDUS_INLINE constexpr WindowManager<PLATFORM_TYPE>::WindowManager() noexcept
+        : mDefaultWindowRect{ 100, 100, 800, 600 }
+        , mWindows()
+    {
+    }
 
     template<PlatformType PLATFORM_TYPE>
     LUDUS_INLINE WindowManager<PLATFORM_TYPE>::~WindowManager() noexcept = default;
 
     template<PlatformType PLATFORM_TYPE>
     template<core::StringCharType CharT>
-    LUDUS_INLINE void WindowManager<PLATFORM_TYPE>::HandleArgument(const core::BasicString<CharT>& argument) noexcept
+    LUDUS_INLINE void WindowManager<PLATFORM_TYPE>::ParseCommandLineWithContext(
+        const core::CommandLineManager<CharT>& commandLine) noexcept
     {
-        core::String argStr;
-        if constexpr (std::is_same_v<CharT, wchar_t>)
-        {
-            argStr = core::ConvertWStringToString(argument);
-        }
-        else
-        {
-            argStr = argument;
-        }
+        const size_t argCount = commandLine.GetArgumentCount();
         
-        if(argStr == "--width" || argStr == "-w")
+        for (size_t i = 0; i < argCount; ++i)
         {
-            // Handle width argument
-            this->mDefaultWindowRect.Width = 1024; // Example width
-        }
-        else if(argStr == "--height" || argStr == "-h")
-        {
-            // Handle height argument
-            this->mDefaultWindowRect.Height = 768; // Example height
+            core::BasicString<CharT> arg;
+            if (!commandLine.TryGetArgument(i, arg))
+            {
+                continue;
+            }
+
+            core::String argStr;
+            if constexpr (std::is_same_v<CharT, wchar_t>)
+            {
+                argStr = core::ConvertWStringToString(arg);
+            }
+            else
+            {
+                argStr = arg;
+            }
+
+            // Handle paired arguments (flag + value)
+            if (argStr == "--width" || argStr == "-w")
+            {
+                core::BasicString<CharT> valueArg;
+                if (commandLine.TryGetArgument(i + 1, valueArg))
+                {
+                    core::String valueStr;
+                    if constexpr (std::is_same_v<CharT, wchar_t>)
+                    {
+                        valueStr = core::ConvertWStringToString(valueArg);
+                    }
+                    else
+                    {
+                        valueStr = valueArg;
+                    }
+                    
+                    // Parse width value
+                    if (!valueStr.IsEmpty())
+                    {
+                        int32_t width = 0;
+                        if (core::StringToInt32(valueStr.GetCStr(), width) && width > 0)
+                        {
+                            this->mDefaultWindowRect.Width = static_cast<uint32_t>(width);
+                            ++i; // Skip the value argument
+                        }
+                    }
+                }
+            }
+            else if (argStr == "--height" || argStr == "-h")
+            {
+                core::BasicString<CharT> valueArg;
+                if (commandLine.TryGetArgument(i + 1, valueArg))
+                {
+                    core::String valueStr;
+                    if constexpr (std::is_same_v<CharT, wchar_t>)
+                    {
+                        valueStr = core::ConvertWStringToString(valueArg);
+                    }
+                    else
+                    {
+                        valueStr = valueArg;
+                    }
+                    
+                    // Parse height value
+                    if (!valueStr.IsEmpty())
+                    {
+                        int32_t height = 0;
+                        if (core::StringToInt32(valueStr.GetCStr(), height) && height > 0)
+                        {
+                            this->mDefaultWindowRect.Height = static_cast<uint32_t>(height);
+                            ++i; // Skip the value argument
+                        }
+                    }
+                }
+            }
         }
     }
 

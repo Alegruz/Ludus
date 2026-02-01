@@ -81,8 +81,9 @@ namespace ludus::platform
         constexpr WindowManager() noexcept;
         ~WindowManager() noexcept;
 
+        // Parse command line arguments with lookahead support for paired arguments
         template<core::StringCharType CharT>
-        void HandleArgument(const core::BasicString<CharT>& argument) noexcept;
+        void ParseCommandLineWithContext(const core::CommandLineManager<CharT>& commandLine) noexcept;
 
         // Window Management
         Window<PLATFORM_TYPE>& CreateWindow(const typename Window<PLATFORM_TYPE>::CreateInfo& createInfo) noexcept;
