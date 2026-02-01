@@ -280,7 +280,7 @@ if(GRAPHICS_API STREQUAL "Vulkan")
     # Allow override of VulkanHeaders and volk tags from command line
 
     if(NOT DEFINED VULKAN_HEADERS_TAG)
-        set(VULKAN_HEADERS_TAG v1.3.275)
+        set(VULKAN_HEADERS_TAG v1.4.342)
     endif()
 
     # Default volk tag (set via onboarding or -DVOLK_TAG=...)
