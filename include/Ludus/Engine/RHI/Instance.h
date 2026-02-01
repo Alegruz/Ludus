@@ -25,8 +25,9 @@ namespace ludus::rhi
         };
 
     public:
-        explicit Instance() requires(GRAPHICS_API == GraphicsApi::CPU);
-        explicit Instance() requires(GRAPHICS_API == GraphicsApi::VULKAN);
+        explicit Instance() noexcept requires(GRAPHICS_API == GraphicsApi::CPU);
+        explicit Instance() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN);
+        explicit Instance() noexcept requires(GRAPHICS_API == GraphicsApi::D3D12);
         Instance() = default;
         LUDUS_INLINE ~Instance() noexcept { Shutdown(); }
 
@@ -36,9 +37,11 @@ namespace ludus::rhi
     private:
         bool initialize(const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::CPU);
         bool initialize(const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN);
+        bool initialize(const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::D3D12);
         bool initialize(const CreateInfo& createInfo) noexcept = delete;  // Unsupported Graphics API
         void shutdown() noexcept requires(GRAPHICS_API == GraphicsApi::CPU);
         void shutdown() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN);
+        void shutdown() noexcept requires(GRAPHICS_API == GraphicsApi::D3D12);
         void shutdown() noexcept = delete;  // Unsupported Graphics API
 
     private:

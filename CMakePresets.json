@@ -182,7 +182,6 @@
         },
         {
             "name": "ninja_msvc-debug-d3d12",
-            "hidden": true,
             "displayName": "Ninja with MSVC - Debug (D3D12)",
             "inherits": "ninja_msvc",
             "cacheVariables": {
@@ -210,7 +209,6 @@
         },
         {
             "name": "ninja_msvc-release-d3d12",
-            "hidden": true,
             "displayName": "Ninja with MSVC - Release (D3D12)",
             "inherits": "ninja_msvc",
             "cacheVariables": {
@@ -242,7 +240,6 @@
         },
         {
             "name": "ninja_msvc-relwithdebinfo-d3d12",
-            "hidden": true,
             "displayName": "Ninja with MSVC - RelWithDebInfo (D3D12, Sanitizers)",
             "inherits": "ninja_msvc",
             "description": "RelWithDebInfo with ASan for detecting heap issues in optimized builds",
@@ -344,6 +341,22 @@
             "displayName": "CI Windows MSVC Release",
             "inherits": [
                 "ninja_msvc-release",
+                "ci_base"
+            ]
+        },
+        {
+            "name": "ci_windows_msvc_debug_d3d12",
+            "displayName": "CI Windows MSVC Debug (D3D12)",
+            "inherits": [
+                "ninja_msvc-debug-d3d12",
+                "ci_base"
+            ]
+        },
+        {
+            "name": "ci_windows_msvc_release_d3d12",
+            "displayName": "CI Windows MSVC Release (D3D12)",
+            "inherits": [
+                "ninja_msvc-release-d3d12",
                 "ci_base"
             ]
         },
@@ -555,6 +568,27 @@
             "jobs": 0
         },
         {
+            "name": "ninja_msvc-debug-d3d12",
+            "displayName": "Ninja with MSVC - Debug (D3D12)",
+            "configurePreset": "ninja_msvc-debug-d3d12",
+            "configuration": "Debug",
+            "jobs": 0
+        },
+        {
+            "name": "ninja_msvc-release-d3d12",
+            "displayName": "Ninja with MSVC - Release (D3D12)",
+            "configurePreset": "ninja_msvc-release-d3d12",
+            "configuration": "Release",
+            "jobs": 0
+        },
+        {
+            "name": "ninja_msvc-relwithdebinfo-d3d12",
+            "displayName": "Ninja with MSVC - RelWithDebInfo (D3D12)",
+            "configurePreset": "ninja_msvc-relwithdebinfo-d3d12",
+            "configuration": "RelWithDebInfo",
+            "jobs": 0
+        },
+        {
             "name": "ninja_msvc-relwithdebinfo",
             "displayName": "Ninja with MSVC - RelWithDebInfo",
             "configurePreset": "ninja_msvc-relwithdebinfo",
@@ -635,6 +669,20 @@
             "name": "ci_windows_msvc_release",
             "displayName": "CI Windows MSVC Release",
             "configurePreset": "ci_windows_msvc_release",
+            "configuration": "Release",
+            "jobs": 0
+        },
+        {
+            "name": "ci_windows_msvc_debug_d3d12",
+            "displayName": "CI Windows MSVC Debug (D3D12)",
+            "configurePreset": "ci_windows_msvc_debug_d3d12",
+            "configuration": "Debug",
+            "jobs": 0
+        },
+        {
+            "name": "ci_windows_msvc_release_d3d12",
+            "displayName": "CI Windows MSVC Release (D3D12)",
+            "configurePreset": "ci_windows_msvc_release_d3d12",
             "configuration": "Release",
             "jobs": 0
         },

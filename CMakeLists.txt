@@ -13,11 +13,15 @@ option(LUDUS_AUTO_RUN_INIT "Attempt to run init script during CMake configure" O
 
 set(LUDUS_ONBOARD_ARGS "--gui")
 if(LUDUS_IS_CI)
+    # CI environments: Always use headless install mode (no GUI, prevents hangs)
     set(LUDUS_ONBOARD_ARGS "--install")
     if(DEFINED CMAKE_PRESET_NAME AND NOT CMAKE_PRESET_NAME STREQUAL "")
         list(APPEND LUDUS_ONBOARD_ARGS "--preset" "${CMAKE_PRESET_NAME}")
     endif()
 endif()
+
+# Note: D3D12 SDK will be auto-downloaded on first D3D12 preset configure
+# if dependencies are not yet available
 
 # ============================================================================
 # Onboarding Check
@@ -180,6 +184,61 @@ if(CMAKE_GENERATOR MATCHES "Ninja")
 endif()
 
 project(GameEngine LANGUAGES C CXX)
+
+# ============================================================================
+# D3D12 Agility SDK Fetch (auto-download before configuration)
+# ============================================================================
+if(DEFINED GRAPHICS_API AND GRAPHICS_API STREQUAL "D3D12")
+    message(STATUS "D3D12 graphics API selected - fetching Agility SDK...")
+    include(FetchContent)
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+    include(FindD3D12AgilitySDK)
+endif()
+
+# ============================================================================
+# D3D12 Agility SDK Validation (after fetch attempt)
+# ============================================================================
+# If D3D12 graphics API is selected, verify the SDK exists before proceeding
+# This prevents partial build.ninja creation if SDK download fails
+if(DEFINED GRAPHICS_API AND GRAPHICS_API STREQUAL "D3D12")
+    set(_D3D12_SDK_CACHE_DIR "${CMAKE_BINARY_DIR}/_deps/d3d12-agility-sdk")
+    set(_D3D12_SDK_PATH "${_D3D12_SDK_CACHE_DIR}/d3d12-sdk")
+    
+    if(NOT EXISTS "${_D3D12_SDK_PATH}/include/d3d12.h" OR NOT EXISTS "${_D3D12_SDK_PATH}/bin/x64/D3D12Core.dll")
+        message(FATAL_ERROR
+            "\n"
+            "========================================================================\n"
+            "D3D12 Agility SDK Download Failed\n"
+            "========================================================================\n"
+            "\n"
+            "The DirectX 12 Agility SDK could not be downloaded or extracted.\n"
+            "This may be due to:\n"
+            "  - Network connectivity issues\n"
+            "  - Missing PowerShell or CMake\n"
+            "  - Insufficient disk space\n"
+            "  - Permissions issues\n"
+            "\n"
+            "Please try one of the following:\n"
+            "\n"
+            "1. Run initialization again:\n"
+            "     Windows:  .\\init.bat --install --preset ${CMAKE_PRESET_NAME}\n"
+            "     Linux/Mac: ./init.sh --install --preset ${CMAKE_PRESET_NAME}\n"
+            "\n"
+            "2. Or manually clean and retry:\n"
+            "     Remove: ${_D3D12_SDK_CACHE_DIR}\n"
+            "     Then:   cmake --preset ${CMAKE_PRESET_NAME}\n"
+            "\n"
+            "SDK destination: ${_D3D12_SDK_CACHE_DIR}\n"
+            "Expected files:\n"
+            "  - ${_D3D12_SDK_PATH}/include/d3d12.h\n"
+            "  - ${_D3D12_SDK_PATH}/bin/x64/D3D12Core.dll\n"
+            "\n"
+            "========================================================================\n"
+        )
+    endif()
+    
+    message(STATUS "D3D12 Agility SDK validated successfully")
+endif()
 
 # ============================================================================
 # Generator Prerequisite Check (Ninja)

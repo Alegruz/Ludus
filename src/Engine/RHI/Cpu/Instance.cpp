@@ -10,7 +10,7 @@ namespace ludus::rhi
     };
 
     template<GraphicsApi GRAPHICS_API>
-    Instance<GRAPHICS_API>::Instance() requires(GRAPHICS_API == GraphicsApi::CPU)
+    Instance<GRAPHICS_API>::Instance() noexcept requires(GRAPHICS_API == GraphicsApi::CPU)
         : mMemberVariables(core::MakeUnique<InstanceMemberVariablesCpu>())
     {
     }
