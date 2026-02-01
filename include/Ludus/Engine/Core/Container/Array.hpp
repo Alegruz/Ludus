@@ -691,7 +691,6 @@ namespace ludus::core
     LUDUS_INLINE constexpr T* ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetData() noexcept
     {
         T* data = Base::GetData();
-        LUDUS_ASSERT_MSG(data != nullptr, "Array data is null in GetData()");
         return data;
     }
 
@@ -700,7 +699,6 @@ namespace ludus::core
     LUDUS_INLINE constexpr const T* ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetData() const noexcept
     {
         const T* data = Base::GetData();
-        LUDUS_ASSERT_MSG(data != nullptr, "Array data is null in GetData()");
         return data;
     }
 
@@ -716,18 +714,40 @@ namespace ludus::core
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
     LUDUS_INLINE constexpr T* ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetData() noexcept
     {
-        if(mData == nullptr)
+        if constexpr (ARRAY_TYPE == ArrayType::DYNAMIC)
         {
-            SetCapacity(mCapacity);
+            if(mData == nullptr)
+            {
+                SetCapacity(mCapacity);
+            }
+            LUDUS_ASSERT_MSG(mSize <= 0 || mData != nullptr, "Array data is null in GetData()");
         }
-        LUDUS_ASSERT_MSG(mData != nullptr, "Array data is null in GetData()");
+        else if constexpr (ARRAY_TYPE == ArrayType::STATIC)
+        {
+            LUDUS_ASSERT_MSG(mData != nullptr, "Array data is null in GetData()");
+        }
+        else
+        {
+            LUDUS_STATIC_ASSERT_MSG(false, "Unsupported ArrayType in GetData()");
+        }
         return mData;
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
     LUDUS_INLINE constexpr const T* ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::GetData() const noexcept
     {
-        LUDUS_ASSERT_MSG(mData != nullptr, "Array data is null in GetData()");
+        if constexpr (ARRAY_TYPE == ArrayType::DYNAMIC)
+        {
+            LUDUS_ASSERT_MSG(mSize <= 0 || mData != nullptr, "Array data is null in GetData()");
+        }
+        else if constexpr (ARRAY_TYPE == ArrayType::STATIC)
+        {
+            LUDUS_ASSERT_MSG(mData != nullptr, "Array data is null in GetData()");
+        }
+        else
+        {
+            LUDUS_STATIC_ASSERT_MSG(false, "Unsupported ArrayType in GetData()");
+        }
         return mData;
     }
 

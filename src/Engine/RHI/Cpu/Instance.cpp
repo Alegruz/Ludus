@@ -23,6 +23,12 @@ namespace ludus::rhi
         return true;
     }
 
+    template<GraphicsApi GRAPHICS_API>
+    void Instance<GRAPHICS_API>::shutdown() noexcept requires(GRAPHICS_API == GraphicsApi::CPU)
+    {
+        // CPU RHI instance shutdown logic (if any) goes here.
+    }
+
     template class Instance<GraphicsApi::CPU>;
 }   // namespace ludus::rhi
 #endif  // defined(LUDUS_GRAPHICS_CPU)

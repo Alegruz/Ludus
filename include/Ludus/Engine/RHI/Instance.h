@@ -28,14 +28,18 @@ namespace ludus::rhi
         explicit Instance() requires(GRAPHICS_API == GraphicsApi::CPU);
         explicit Instance() requires(GRAPHICS_API == GraphicsApi::VULKAN);
         Instance() = default;
-        ~Instance() = default;
+        LUDUS_INLINE ~Instance() noexcept { Shutdown(); }
 
-        LUDUS_INLINE bool Initialize(const CreateInfo& createInfo) noexcept { return initialize(createInfo); }
+        [[nodiscard]] LUDUS_INLINE bool Initialize(const CreateInfo& createInfo) noexcept { return initialize(createInfo); }
+        [[nodiscard]] LUDUS_INLINE void Shutdown() noexcept { shutdown(); }
 
     private:
         bool initialize(const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::CPU);
         bool initialize(const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN);
         bool initialize(const CreateInfo& createInfo) noexcept = delete;  // Unsupported Graphics API
+        void shutdown() noexcept requires(GRAPHICS_API == GraphicsApi::CPU);
+        void shutdown() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN);
+        void shutdown() noexcept = delete;  // Unsupported Graphics API
 
     private:
         core::UniquePtr<InstanceMemberVariablesBase> mMemberVariables;

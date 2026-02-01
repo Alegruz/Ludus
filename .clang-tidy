@@ -53,6 +53,8 @@ CheckOptions:
   - key: readability-identifier-naming.StaticFunctionCase
     value: camelBack
   - key: readability-identifier-naming.MethodCase
+    value: camelBack
+  - key: readability-identifier-naming.PublicMethodCase
     value: CamelCase
   - key: readability-identifier-naming.PrivateMethodCase
     value: camelBack
