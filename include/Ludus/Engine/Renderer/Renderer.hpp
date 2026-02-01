@@ -9,15 +9,22 @@
 namespace ludus::renderer
 {
     template<rhi::GraphicsApi GRAPHICS_API>
-    Renderer<GRAPHICS_API>::Renderer(const CreateInfo& createInfo)
+    Renderer<GRAPHICS_API>::Renderer()
         : mBackBufferTexture()
         , mInstance(core::MakeUnique<rhi::Instance<GRAPHICS_API>>())
+    {
+    }
+
+    template<rhi::GraphicsApi GRAPHICS_API>
+    bool Renderer<GRAPHICS_API>::Initialize(const CreateInfo& createInfo) noexcept
     {
         // TODO: CPU renderer uses a simple texture as back buffer for now, but this should all be abstracted into the swap chain abstraction
         if constexpr (GRAPHICS_API == rhi::GraphicsApi::CPU)
         {
             mBackBufferTexture = core::MakeUnique<rhi::Texture<GRAPHICS_API>>(createInfo.Width, createInfo.Height, createInfo.Format);
         }
+
+        return mInstance->Initialize( createInfo.RhiInstanceCreateInfo );
     }
 
     template<rhi::GraphicsApi GRAPHICS_API>

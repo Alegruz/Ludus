@@ -1,6 +1,7 @@
 #include <Ludus/Engine/RHI/Instance.h>
 
 #if defined(LUDUS_GRAPHICS_VULKAN)
+#include <Ludus/Engine/Core/Container/String.hpp>
 #include <Ludus/Engine/Core/SmartPtr.hpp>
 
 #include <volk.h>
@@ -22,7 +23,7 @@ namespace ludus::rhi
     }
 
     template<GraphicsApi GRAPHICS_API>
-    bool Instance<GRAPHICS_API>::initialize() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+    bool Instance<GRAPHICS_API>::initialize(const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
     {
         VkResult vr = volkInitialize();
         if(vr != VK_SUCCESS)
@@ -37,6 +38,34 @@ namespace ludus::rhi
             LUDUS_ASSERT_MSG(false, "Failed to enumerate Vulkan instance version.");
             return false;
         }
+
+        void* pNext = nullptr;
+
+        const VkApplicationInfo appInfo = 
+        {
+            .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+            .pNext = nullptr,
+            .pApplicationName = createInfo.ApplicationInfo.Name.GetCStr(),
+            .applicationVersion = createInfo.ApplicationInfo.Version,
+            .pEngineName = createInfo.EngineInfo.Name.GetCStr(),
+            .engineVersion = createInfo.EngineInfo.Version,
+            .apiVersion = mMemberVariablesVulkan.InstanceVersion,
+        };
+
+        core::DynamicArray<const char*> enabledLayers;
+        core::DynamicArray<const char*> enabledExtensions;
+
+        const VkInstanceCreateInfo instanceCreateInfo = 
+        {
+            .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+            .pNext = pNext,
+            .flags = 0,
+            .pApplicationInfo = &appInfo,
+            .enabledLayerCount = enabledLayers.GetSize(),
+            .ppEnabledLayerNames = enabledLayers.GetData(),
+            .enabledExtensionCount = enabledExtensions.GetSize(),
+            .ppEnabledExtensionNames = enabledExtensions.GetData(),
+        };
 
         return true;
     }

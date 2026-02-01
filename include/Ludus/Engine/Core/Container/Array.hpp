@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Ludus/Engine/Core/Container/Array.h>
+#include <Ludus/Engine/Core/Assert.h>
 #include <Ludus/Engine/Core/Memory.h>
 
 #include <Ludus/Engine/Core/Math/Bit.hpp>
