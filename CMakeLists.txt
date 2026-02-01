@@ -1,5 +1,61 @@
 cmake_minimum_required(VERSION 3.15)
 
+# ============================================================================
+# Onboarding Check
+# ============================================================================
+# Verify that the user has run the onboarding/initialization script
+# The onboarding script sets up git submodules, environment variables, and dependencies
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/.ludus-initialized")
+    message(STATUS "Launching Ludus onboarding GUI...")
+    
+    # Attempt to launch the onboarding GUI
+    if(WIN32)
+        # Windows: Run init.bat with --gui flag
+        execute_process(
+            COMMAND cmd.exe /c "${CMAKE_SOURCE_DIR}/init.bat" --gui
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            RESULT_VARIABLE INIT_RESULT
+        )
+    else()
+        # Unix/Linux/macOS: Run init.sh with --gui flag
+        execute_process(
+            COMMAND bash "${CMAKE_SOURCE_DIR}/init.sh" --gui
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            RESULT_VARIABLE INIT_RESULT
+        )
+    endif()
+    
+    # Check if the marker file was created by the onboarding script
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/.ludus-initialized")
+        message(FATAL_ERROR
+            "\n"
+            "========================================================================\n"
+            "CMake Configuration Error - Project Not Initialized\n"
+            "========================================================================\n"
+            "\n"
+            "The onboarding script could not be automatically launched, or was\n"
+            "cancelled. Please run the initialization script manually:\n"
+            "\n"
+            "  Windows:  init.bat\n"
+            "  Linux/Mac: ./init.sh\n"
+            "\n"
+            "Or for the latest Vulkan SDK:\n"
+            "  Windows:  init_with_latest_volk.bat\n"
+            "\n"
+            "The initialization script will:\n"
+            "  - Set up git submodules\n"
+            "  - Download required dependencies (Vulkan SDK, build tools, etc.)\n"
+            "  - Configure your environment variables\n"
+            "\n"
+            "Run from the project root directory:\n"
+            "  ${CMAKE_SOURCE_DIR}\n"
+            "\n"
+            "After running the init script, you can retry the CMake configuration.\n"
+            "========================================================================\n"
+        )
+    endif()
+endif()
+
 # Export compile_commands.json for clang-tidy integration
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -252,7 +308,7 @@ target_compile_options(LudusBuildSettings INTERFACE
     # GCC/Clang
     $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow
-    -fno-exceptions -fno-rtti>  # if that?™s your policy; otherwise drop
+    -fno-exceptions -fno-rtti>  # if that?ï¿½s your policy; otherwise drop
 )
 
 # ============================================================================

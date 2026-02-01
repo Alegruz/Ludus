@@ -422,11 +422,18 @@ def print_tools(tools):
         print(f"{label:28} {status:8} ({req}) - {details}")
 
 
+def create_initialization_marker():
+    """Create a marker file to indicate successful onboarding."""
+    marker_file = ROOT_DIR / ".ludus-initialized"
+    marker_file.write_text("Ludus project initialized\n", encoding="utf-8")
+
+
 def install_missing(role, preset_name=""):
     tools = check_tools(role, preset_name)
     missing = [t for t in tools if not t[2] and t[4]]
     if not missing:
         print("All required tools already installed.")
+        create_initialization_marker()
         return True
 
     for key, label, _, _, _ in missing:
@@ -450,6 +457,7 @@ def install_missing(role, preset_name=""):
             continue
         install_with_manager(key)
 
+    create_initialization_marker()
     return True
 
 
@@ -590,6 +598,7 @@ def one_click_setup(role, preset, target):
         install_with_manager("vscode")
     install_vscode_extensions()
     set_vscode_preset(preset)
+    create_initialization_marker()
     open_vscode()
 
 
@@ -857,6 +866,7 @@ def launch_gui():
         if idx < len(steps) - 1:
             show_step(idx + 1)
         else:
+            create_initialization_marker()
             notebook.select(run_tab)
 
     back_btn.configure(command=go_back)
