@@ -23,8 +23,11 @@ jobs:
           key: ci_sanitize_clang
           max-size: 2G
 
+      - name: Run init (Linux)
+        run: bash ./init.sh --install --preset "ci_sanitize_clang"
+
       - name: Configure (CMake preset)
-        run: cmake --preset "ci_sanitize_clang"
+        run: cmake --preset "ci_sanitize_clang" -DLUDUS_AUTO_RUN_INIT=OFF
 
       - name: Build (CMake build preset)
         run: cmake --build --preset "ci_sanitize_clang"
@@ -119,8 +122,17 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Run init (Linux)
+        if: runner.os == 'Linux'
+        run: bash ./init.sh --install --preset "${{ matrix.configure_preset }}"
+
+      - name: Run init (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmd /c "init.bat --install --preset ${{ matrix.configure_preset }}"
+
       - name: Configure (CMake preset)
-        run: cmake --preset "${{ matrix.configure_preset }}"
+        run: cmake --preset "${{ matrix.configure_preset }}" -DLUDUS_AUTO_RUN_INIT=OFF
 
       - name: Build with Static Analysis (Linux)
         if: runner.os == 'Linux'
@@ -160,8 +172,11 @@ jobs:
           key: ci_linux_gcc_debug
           max-size: 2G
 
+      - name: Run init (Linux)
+        run: bash ./init.sh --install --preset "ci_linux_gcc_debug"
+
       - name: Configure (CMake preset)
-        run: cmake --preset "ci_linux_gcc_debug"
+        run: cmake --preset "ci_linux_gcc_debug" -DLUDUS_AUTO_RUN_INIT=OFF
 
       - name: Build (CMake build preset)
         run: cmake --build --preset "ci_linux_gcc_debug"
@@ -183,8 +198,11 @@ jobs:
           key: ci_linux_clang_debug_vulkan
           max-size: 2G
 
+      - name: Run init (Linux)
+        run: bash ./init.sh --install --preset "ci_linux_clang_debug_vulkan"
+
       - name: Configure (CMake preset)
-        run: cmake --preset "ci_linux_clang_debug_vulkan"
+        run: cmake --preset "ci_linux_clang_debug_vulkan" -DLUDUS_AUTO_RUN_INIT=OFF
 
       - name: Build (CMake build preset)
         run: cmake --build --preset "ci_linux_clang_debug_vulkan"

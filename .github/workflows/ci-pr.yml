@@ -72,8 +72,17 @@ jobs:
           key: ${{ matrix.configure_preset }}
           max-size: 2G
 
+      - name: Run init (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: bash ./init.sh --install --preset "${{ matrix.configure_preset }}"
+
+      - name: Run init (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmd /c "init.bat --install --preset ${{ matrix.configure_preset }}"
+
       - name: Configure (CMake preset)
-        run: cmake --preset "${{ matrix.configure_preset }}"
+        run: cmake --preset "${{ matrix.configure_preset }}" -DLUDUS_AUTO_RUN_INIT=OFF
 
       - name: Build (CMake build preset)
         run: cmake --build --preset "${{ matrix.build_preset }}"

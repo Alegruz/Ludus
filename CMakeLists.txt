@@ -1,28 +1,49 @@
 cmake_minimum_required(VERSION 3.15)
 
 # ============================================================================
+# Onboarding Mode (GUI vs Headless)
+# ============================================================================
+set(LUDUS_IS_CI FALSE)
+if(DEFINED ENV{GITHUB_ACTIONS} OR DEFINED ENV{CI})
+    set(LUDUS_IS_CI TRUE)
+endif()
+
+# Opt-in auto-run of onboarding during configure
+option(LUDUS_AUTO_RUN_INIT "Attempt to run init script during CMake configure" ON)
+
+set(LUDUS_ONBOARD_ARGS "--gui")
+if(LUDUS_IS_CI)
+    set(LUDUS_ONBOARD_ARGS "--install")
+    if(DEFINED CMAKE_PRESET_NAME AND NOT CMAKE_PRESET_NAME STREQUAL "")
+        list(APPEND LUDUS_ONBOARD_ARGS "--preset" "${CMAKE_PRESET_NAME}")
+    endif()
+endif()
+
+# ============================================================================
 # Onboarding Check
 # ============================================================================
 # Verify that the user has run the onboarding/initialization script
 # The onboarding script sets up git submodules, environment variables, and dependencies
 if(NOT EXISTS "${CMAKE_SOURCE_DIR}/.ludus-initialized")
-    message(STATUS "Launching Ludus onboarding GUI...")
-    
-    # Attempt to launch the onboarding GUI
-    if(WIN32)
-        # Windows: Run init.bat with --gui flag
-        execute_process(
-            COMMAND cmd.exe /c "${CMAKE_SOURCE_DIR}/init.bat" --gui
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-            RESULT_VARIABLE INIT_RESULT
-        )
-    else()
-        # Unix/Linux/macOS: Run init.sh with --gui flag
-        execute_process(
-            COMMAND bash "${CMAKE_SOURCE_DIR}/init.sh" --gui
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-            RESULT_VARIABLE INIT_RESULT
-        )
+    if(LUDUS_AUTO_RUN_INIT AND NOT LUDUS_IS_CI)
+        message(STATUS "Launching Ludus onboarding GUI...")
+
+        # Attempt to launch the onboarding GUI
+        if(WIN32)
+            # Windows: Run init.bat with --gui flag
+            execute_process(
+                COMMAND cmd.exe /c "${CMAKE_SOURCE_DIR}/init.bat" ${LUDUS_ONBOARD_ARGS}
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                RESULT_VARIABLE INIT_RESULT
+            )
+        else()
+            # Unix/Linux/macOS: Run init.sh with --gui flag
+            execute_process(
+                COMMAND bash "${CMAKE_SOURCE_DIR}/init.sh" ${LUDUS_ONBOARD_ARGS}
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                RESULT_VARIABLE INIT_RESULT
+            )
+        endif()
     endif()
     
     # Check if the marker file was created by the onboarding script
@@ -38,6 +59,9 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/.ludus-initialized")
             "\n"
             "  Windows:  init.bat\n"
             "  Linux/Mac: ./init.sh\n"
+            "\n"
+            "CI/Headless: ./init.sh --install --preset <preset>\n"
+            "              init.bat --install --preset <preset>\n"
             "\n"
             "Or for the latest Vulkan SDK:\n"
             "  Windows:  init_with_latest_volk.bat\n"
@@ -62,18 +86,18 @@ endif()
 function(ludus_fatal_error)
     string(JOIN " " _LUDUS_FATAL_MSG ${ARGV})
 
-    # Try to launch onboarding once to resolve missing prerequisites
-    if(NOT DEFINED LUDUS_INIT_TRIED)
+    # Try to launch onboarding once to resolve missing prerequisites (opt-in)
+    if(LUDUS_AUTO_RUN_INIT AND NOT LUDUS_IS_CI AND NOT DEFINED LUDUS_INIT_TRIED)
         set(LUDUS_INIT_TRIED TRUE PARENT_SCOPE)
         if(WIN32)
             execute_process(
-                COMMAND cmd.exe /c "${CMAKE_SOURCE_DIR}/init.bat" --gui
+                COMMAND cmd.exe /c "${CMAKE_SOURCE_DIR}/init.bat" ${LUDUS_ONBOARD_ARGS}
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
                 RESULT_VARIABLE _LUDUS_INIT_RESULT
             )
         else()
             execute_process(
-                COMMAND bash "${CMAKE_SOURCE_DIR}/init.sh" --gui
+                COMMAND bash "${CMAKE_SOURCE_DIR}/init.sh" ${LUDUS_ONBOARD_ARGS}
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
                 RESULT_VARIABLE _LUDUS_INIT_RESULT
             )
@@ -136,17 +160,17 @@ if(CMAKE_GENERATOR MATCHES "Ninja")
         set(CMAKE_MAKE_PROGRAM "${_LUDUS_NINJA_CANDIDATE}" CACHE FILEPATH "Ninja executable" FORCE)
     else()
         # Try to launch onboarding before project() to avoid generator failure
-        if(NOT DEFINED LUDUS_INIT_TRIED)
+        if(LUDUS_AUTO_RUN_INIT AND NOT LUDUS_IS_CI AND NOT DEFINED LUDUS_INIT_TRIED)
             set(LUDUS_INIT_TRIED TRUE CACHE INTERNAL "Init run attempted" FORCE)
             if(WIN32)
                 execute_process(
-                    COMMAND cmd.exe /c "${CMAKE_SOURCE_DIR}/init.bat" --gui
+                    COMMAND cmd.exe /c "${CMAKE_SOURCE_DIR}/init.bat" ${LUDUS_ONBOARD_ARGS}
                     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
                     RESULT_VARIABLE _LUDUS_INIT_RESULT
                 )
             else()
                 execute_process(
-                    COMMAND bash "${CMAKE_SOURCE_DIR}/init.sh" --gui
+                    COMMAND bash "${CMAKE_SOURCE_DIR}/init.sh" ${LUDUS_ONBOARD_ARGS}
                     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
                     RESULT_VARIABLE _LUDUS_INIT_RESULT
                 )
