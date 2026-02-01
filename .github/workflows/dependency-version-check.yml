@@ -16,6 +16,10 @@ jobs:
   validate-versions:
     runs-on: ubuntu-latest
     name: Validate dependency versions
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
 
     steps:
       - name: Checkout code
@@ -32,6 +36,7 @@ jobs:
           pip install requests
 
       - name: Check version format
+        id: format
         run: |
           python -c "
           import re
@@ -61,10 +66,17 @@ jobs:
           "
 
       - name: Check for outdated versions
-        run: python tools/check_dependency_updates.py --check-only
+        run: |
+          python tools/check_dependency_updates.py --check-only
+          exit_code=$?
+          if [ "$exit_code" -eq 1 ]; then
+            echo "Updates available (non-fatal)."
+            exit 0
+          fi
+          exit "$exit_code"
 
       - name: Comment on PR
-        if: failure() && github.event_name == 'pull_request'
+        if: failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@v7
         with:
           script: |

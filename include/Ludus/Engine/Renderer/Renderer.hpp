@@ -21,7 +21,13 @@ namespace ludus::renderer
         // TODO: CPU renderer uses a simple texture as back buffer for now, but this should all be abstracted into the swap chain abstraction
         if constexpr (GRAPHICS_API == rhi::GraphicsApi::CPU)
         {
-            mBackBufferTexture = core::MakeUnique<rhi::Texture<GRAPHICS_API>>(createInfo.Width, createInfo.Height, createInfo.Format);
+            const typename rhi::Texture<GRAPHICS_API>::CreateInfo textureCreateInfo
+            {
+                .Width = createInfo.Width,
+                .Height = createInfo.Height,
+                .Format = createInfo.Format,
+            };
+            mBackBufferTexture = core::MakeUnique<rhi::Texture<GRAPHICS_API>>(textureCreateInfo);
         }
 
         return mInstance->Initialize( createInfo.RhiInstanceCreateInfo );
