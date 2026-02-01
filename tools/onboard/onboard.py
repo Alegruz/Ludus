@@ -20,6 +20,8 @@ VSCODE_EXT_FILE = ONBOARD_DIR / "vscode_extensions.json"
 STATE_FILE = ONBOARD_DIR / "onboard_state.json"
 VSCODE_SETTINGS = ROOT_DIR / ".vscode" / "settings.json"
 PRESET_REQ_FILE = ONBOARD_DIR / "preset_requirements.json"
+PREREQUISITE_VERSIONS_FILE = ONBOARD_DIR / "prerequisite_versions.json"
+DEPENDENCY_CHECKER = TOOLS_DIR / "check_dependency_updates.py"
 
 MIN_VULKAN_SDK_VERSION = (1, 3, 0)
 
@@ -330,7 +332,152 @@ def install_llvm_windows_fallback():
     return result.returncode == 0
 
 
+def load_prerequisite_versions():
+    """Load prerequisite version requirements from config file"""
+    try:
+        if PREREQUISITE_VERSIONS_FILE.exists():
+            return json.loads(PREREQUISITE_VERSIONS_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"Warning: Could not load prerequisite versions: {e}")
+    return {}
+
+
+def get_prerequisite_requirement(tool_name):
+    """Get minimum and recommended versions for a tool"""
+    config = load_prerequisite_versions()
+    prerequisites = config.get("prerequisites", {})
+    if tool_name in prerequisites:
+        tool_info = prerequisites[tool_name]
+        return {
+            "minimum": tool_info.get("minimum", "unknown"),
+            "recommended": tool_info.get("recommended", "unknown"),
+            "description": tool_info.get("description", ""),
+        }
+    return {"minimum": "unknown", "recommended": "unknown", "description": ""}
+
+
+def check_cmake_version():
+    """Check if CMake version meets minimum requirement"""
+    ok, path = detect_tool("cmake")
+    if not ok:
+        return False, "CMake not found"
+    
+    try:
+        result = subprocess.run(["cmake", "--version"], capture_output=True, text=True)
+        if result.returncode == 0:
+            version_text = result.stdout.split("\n")[0]
+            version = parse_version_tuple(version_text)
+            req = get_prerequisite_requirement("cmake")
+            min_version = parse_version_tuple(req["minimum"])
+            
+            if version < min_version:
+                return False, f"CMake {'.'.join(map(str, version))} < required {req['minimum']}"
+            return True, f"CMake {'.'.join(map(str, version))} ✓ (recommended: {req['recommended']})"
+    except Exception as e:
+        return False, f"Error checking CMake: {e}"
+    
+    return False, "Could not determine CMake version"
+
+
+def check_python_version():
+    """Check if Python version meets minimum requirement"""
+    try:
+        version = sys.version_info
+        version_tuple = (version.major, version.minor, version.micro)
+        req = get_prerequisite_requirement("python")
+        min_version = parse_version_tuple(req["minimum"])
+        
+        if version_tuple < min_version:
+            return False, f"Python {'.'.join(map(str, version_tuple))} < required {req['minimum']}"
+        return True, f"Python {'.'.join(map(str, version_tuple))} ✓ (recommended: {req['recommended']})"
+    except Exception as e:
+        return False, f"Error checking Python: {e}"
+
+
+def check_ninja_version():
+    """Check if Ninja version meets minimum requirement"""
+    ok, path = detect_tool("ninja")
+    if not ok:
+        return False, "Ninja not found (optional, but recommended)"
+    
+    try:
+        result = subprocess.run(["ninja", "--version"], capture_output=True, text=True)
+        if result.returncode == 0:
+            version_text = result.stdout.strip()
+            version = parse_version_tuple(version_text)
+            req = get_prerequisite_requirement("ninja")
+            min_version = parse_version_tuple(req["minimum"])
+            
+            if version < min_version:
+                return False, f"Ninja {version_text} < required {req['minimum']}"
+            return True, f"Ninja {version_text} ✓ (recommended: {req['recommended']})"
+    except Exception as e:
+        return False, f"Error checking Ninja: {e}"
+    
+    return False, "Could not determine Ninja version"
+
+
+def check_git_version():
+    """Check if Git version meets minimum requirement"""
+    ok, path = detect_tool("git")
+    if not ok:
+        return False, "Git not found"
+    
+    try:
+        result = subprocess.run(["git", "--version"], capture_output=True, text=True)
+        if result.returncode == 0:
+            version_text = result.stdout.replace("git version", "").strip().split()[0]
+            version = parse_version_tuple(version_text)
+            req = get_prerequisite_requirement("git")
+            min_version = parse_version_tuple(req["minimum"])
+            
+            if version < min_version:
+                return False, f"Git {version_text} < required {req['minimum']}"
+            return True, f"Git {version_text} ✓ (recommended: {req['recommended']})"
+    except Exception as e:
+        return False, f"Error checking Git: {e}"
+    
+    return False, "Could not determine Git version"
+
+
+def print_prerequisite_report():
+    """Print a detailed report of all prerequisites"""
+    print("\n" + "=" * 70)
+    print("PREREQUISITE VERSION REPORT")
+    print("=" * 70)
+    
+    checks = [
+        ("CMake", check_cmake_version),
+        ("Python", check_python_version),
+        ("Git", check_git_version),
+        ("Ninja", check_ninja_version),
+        ("Vulkan SDK", detect_vulkan_sdk),
+        ("Compiler", detect_compiler),
+    ]
+    
+    has_issues = False
+    for name, check_func in checks:
+        ok, message = check_func()
+        status = "[OK]" if ok else "[FAIL]"
+        print(f"{status} {name:20} {message}")
+        if not ok and "optional" not in message.lower():
+            has_issues = True
+    
+    print("=" * 70)
+    
+    if has_issues:
+        print("\nWARNING: Some required prerequisites are missing or outdated.")
+        print("Run the onboarding script to install them automatically.")
+    else:
+        print("\nSUCCESS: All prerequisites are satisfied!")
+    
+    print("\nFor detailed version requirements, see:")
+    print("  tools/onboard/prerequisite_versions.json")
+    print("\n")
+
+
 def load_preset_requirements():
+    """Load preset requirements from configuration file"""
     if PRESET_REQ_FILE.exists():
         try:
             return json.loads(PRESET_REQ_FILE.read_text(encoding="utf-8")).get("presets", [])
@@ -426,6 +573,65 @@ def create_initialization_marker():
     """Create a marker file to indicate successful onboarding."""
     marker_file = ROOT_DIR / ".ludus-initialized"
     marker_file.write_text("Ludus project initialized\n", encoding="utf-8")
+
+
+def setup_dependency_automation():
+    """Setup pre-commit hook for dependency version validation."""
+    try:
+        setup_script = TOOLS_DIR / "setup_tools.py"
+        if setup_script.exists():
+            result = subprocess.run([sys.executable, str(setup_script)], capture_output=True, text=True)
+            if result.returncode == 0:
+                print("✅ Dependency automation setup complete")
+                
+                # Record dependency versions in onboarding state
+                record_script = ONBOARD_DIR / "record_dependency_versions.py"
+                if record_script.exists():
+                    subprocess.run([sys.executable, str(record_script)], capture_output=True)
+                
+                return True
+            else:
+                print("⚠️  Dependency automation setup had issues")
+                print(result.stderr)
+                return False
+        return False
+    except Exception as e:
+        print(f"⚠️  Could not setup dependency automation: {e}")
+        return False
+
+
+def verify_dependency_versions():
+    """Verify that current dependency versions are valid."""
+    try:
+        import re
+        cmake_file = ROOT_DIR / "CMakeLists.txt"
+        if not cmake_file.exists():
+            return True
+        
+        content = cmake_file.read_text()
+        
+        # Check VOLK_TAG format
+        volk_match = re.search(r'set\(VOLK_TAG\s+(\S+)\)', content)
+        if volk_match:
+            tag = volk_match.group(1)
+            if not re.match(r'vulkan-sdk-\d+\.\d+\.\d+\.\d+', tag):
+                print(f"⚠️  WARNING: Invalid VOLK_TAG format: {tag}")
+                print("   Expected: vulkan-sdk-X.Y.Z.W (e.g., vulkan-sdk-1.4.335.0)")
+                return False
+        
+        # Check VULKAN_HEADERS_TAG format
+        headers_match = re.search(r'set\(VULKAN_HEADERS_TAG\s+(\S+)\)', content)
+        if headers_match:
+            tag = headers_match.group(1)
+            if not re.match(r'v\d+\.\d+\.\d+', tag):
+                print(f"⚠️  WARNING: Invalid VULKAN_HEADERS_TAG format: {tag}")
+                print("   Expected: vX.Y.Z (e.g., v1.3.275)")
+                return False
+        
+        return True
+    except Exception as e:
+        print(f"⚠️  Could not verify dependency versions: {e}")
+        return False
 
 
 def install_missing(role, preset_name=""):
@@ -545,7 +751,27 @@ def debug_editor(extra_args, args_file, binary):
         print("RadDbg not installed. Install it with onboarding first.")
         return False
     exe = find_editor_executable(binary)
-    if not exe:
+    
+    # Setup dependency automation
+    print("\n📦 Setting up dependency automation...")
+    setup_dependency_automation()
+    verify_dependency_versions()
+    
+    create_initialization_marker()
+    
+    # Provide helpful next steps
+    print("\n✨ Onboarding complete!")
+    print("\n📚 Next steps:")
+    print("   1. Review docs/DEPENDENCY_UPDATES_QUICKSTART.md for dependency management")
+    print("   2. Dependencies will be automatically checked every Monday")
+    print("   3. You can manually check with: python tools/check_dependency_updates.py")
+    
+    open_vscode()
+
+
+def debug_editor(extra_args="", args_file="", binary=""):
+    exe, ok = get_ludus_editor(binary)
+    if not ok:
         print("LudusEditor executable not found. Build the project first.")
         return False
     raddbg_path = details if details.endswith(".exe") else which("raddbg")
@@ -926,6 +1152,7 @@ def main():
     parser.add_argument("--role", choices=["user", "contributor", "debugger"], default="user")
     parser.add_argument("--gui", action="store_true", help="Launch GUI")
     parser.add_argument("--check", action="store_true", help="Print prerequisite status")
+    parser.add_argument("--check-prerequisites", action="store_true", help="Print detailed prerequisite version report")
     parser.add_argument("--install", action="store_true", help="Install missing prerequisites")
     parser.add_argument("--preset", default="", help="Preset name used for preset-specific prerequisites")
     parser.add_argument("--install-vscode", action="store_true", help="Install VS Code")
@@ -955,6 +1182,8 @@ def main():
 
     if args.check:
         print_tools(check_tools(args.role, args.preset))
+    if args.check_prerequisites:
+        print_prerequisite_report()
     if args.install:
         install_missing(args.role, args.preset)
     if args.install_vscode:

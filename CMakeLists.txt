@@ -138,8 +138,9 @@ if(GRAPHICS_API STREQUAL "Vulkan")
     endif()
 
     # Default volk tag (set via onboarding or -DVOLK_TAG=...)
+    # Note: Volk uses vulkan-sdk version tags, not bare version numbers
     if(NOT DEFINED VOLK_TAG)
-        set(VOLK_TAG 1.3.275)
+        set(VOLK_TAG vulkan-sdk-1.4.335.0)
     endif()
 
     FetchContent_Declare(VulkanHeaders
