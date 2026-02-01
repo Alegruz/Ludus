@@ -9,7 +9,7 @@ set(LUDUS_RHI_SOURCES
 
 foreach(LUDUS_RHI_SOURCE IN LISTS LUDUS_RHI_SOURCES)
      if(NOT EXISTS "${LUDUS_RHI_SOURCE}")
-         message(FATAL_ERROR "Expected rhi source missing: ${LUDUS_RHI_SOURCE}")
+         ludus_fatal_error("Expected rhi source missing: ${LUDUS_RHI_SOURCE}")
      endif()
 endforeach()
 

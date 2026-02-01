@@ -9,7 +9,7 @@ set(LUDUS_PLATFORM_SOURCES
 
 foreach(LUDUS_PLATFORM_SOURCE IN LISTS LUDUS_PLATFORM_SOURCES)
     if(NOT EXISTS "${LUDUS_PLATFORM_SOURCE}")
-        message(FATAL_ERROR "Expected platform source missing: ${LUDUS_PLATFORM_SOURCE}")
+        ludus_fatal_error("Expected platform source missing: ${LUDUS_PLATFORM_SOURCE}")
     endif()
 endforeach()
 

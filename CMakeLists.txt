@@ -56,6 +56,48 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/.ludus-initialized")
     endif()
 endif()
 
+# ============================================================================
+# Common Error Helper
+# ============================================================================
+function(ludus_fatal_error)
+    string(JOIN " " _LUDUS_FATAL_MSG ${ARGV})
+
+    # Try to launch onboarding once to resolve missing prerequisites
+    if(NOT DEFINED LUDUS_INIT_TRIED)
+        set(LUDUS_INIT_TRIED TRUE PARENT_SCOPE)
+        if(WIN32)
+            execute_process(
+                COMMAND cmd.exe /c "${CMAKE_SOURCE_DIR}/init.bat" --gui
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                RESULT_VARIABLE _LUDUS_INIT_RESULT
+            )
+        else()
+            execute_process(
+                COMMAND bash "${CMAKE_SOURCE_DIR}/init.sh" --gui
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                RESULT_VARIABLE _LUDUS_INIT_RESULT
+            )
+        endif()
+    endif()
+
+    message(FATAL_ERROR
+        "\n"
+        "========================================================================\n"
+        "CMake Configuration Error\n"
+        "========================================================================\n"
+        "\n"
+        "${_LUDUS_FATAL_MSG}\n"
+        "\n"
+        "An attempt was made to launch the onboarding script. If it did not\n"
+        "run or was cancelled, please run it manually:\n"
+        "  Windows:  init.bat\n"
+        "  Linux/Mac: ./init.sh\n"
+        "\n"
+        "Then re-run CMake configuration.\n"
+        "========================================================================\n"
+    )
+endfunction()
+
 # Export compile_commands.json for clang-tidy integration
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -66,7 +108,87 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+# ============================================================================
+# Pre-Project Generator Fixup (Ninja)
+# ============================================================================
+if(CMAKE_GENERATOR MATCHES "Ninja")
+    set(_LUDUS_NINJA_CANDIDATE "")
+
+    if(DEFINED CMAKE_MAKE_PROGRAM AND EXISTS "${CMAKE_MAKE_PROGRAM}")
+        set(_LUDUS_NINJA_CANDIDATE "${CMAKE_MAKE_PROGRAM}")
+    elseif(DEFINED CMAKE_MAKE_PROGRAM AND NOT EXISTS "${CMAKE_MAKE_PROGRAM}")
+        set(_LUDUS_NINJA_CANDIDATE "")
+    endif()
+
+    if(NOT _LUDUS_NINJA_CANDIDATE)
+        find_program(_LUDUS_NINJA_EXE NAMES ninja
+            PATHS
+                "${CMAKE_PROGRAM_PATH}"
+                "$ENV{ProgramFiles}/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja"
+                "$ENV{ProgramFiles\(x86\)}/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja"
+        )
+        if(_LUDUS_NINJA_EXE)
+            set(_LUDUS_NINJA_CANDIDATE "${_LUDUS_NINJA_EXE}")
+        endif()
+    endif()
+
+    if(_LUDUS_NINJA_CANDIDATE)
+        set(CMAKE_MAKE_PROGRAM "${_LUDUS_NINJA_CANDIDATE}" CACHE FILEPATH "Ninja executable" FORCE)
+    else()
+        # Try to launch onboarding before project() to avoid generator failure
+        if(NOT DEFINED LUDUS_INIT_TRIED)
+            set(LUDUS_INIT_TRIED TRUE CACHE INTERNAL "Init run attempted" FORCE)
+            if(WIN32)
+                execute_process(
+                    COMMAND cmd.exe /c "${CMAKE_SOURCE_DIR}/init.bat" --gui
+                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                    RESULT_VARIABLE _LUDUS_INIT_RESULT
+                )
+            else()
+                execute_process(
+                    COMMAND bash "${CMAKE_SOURCE_DIR}/init.sh" --gui
+                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                    RESULT_VARIABLE _LUDUS_INIT_RESULT
+                )
+            endif()
+        endif()
+    endif()
+endif()
+
 project(GameEngine LANGUAGES C CXX)
+
+# ============================================================================
+# Generator Prerequisite Check (Ninja)
+# ============================================================================
+if(CMAKE_GENERATOR MATCHES "Ninja")
+    set(_LUDUS_NINJA_MISSING TRUE)
+
+    if(DEFINED CMAKE_MAKE_PROGRAM AND EXISTS "${CMAKE_MAKE_PROGRAM}")
+        set(_LUDUS_NINJA_MISSING FALSE)
+    elseif(DEFINED CMAKE_MAKE_PROGRAM AND NOT EXISTS "${CMAKE_MAKE_PROGRAM}")
+        set(_LUDUS_NINJA_MISSING TRUE)
+    else()
+        find_program(_LUDUS_NINJA_EXE NAMES ninja
+            PATHS
+                "${CMAKE_PROGRAM_PATH}"
+                "$ENV{ProgramFiles}/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja"
+                "$ENV{ProgramFiles\(x86\)}/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja"
+            NO_DEFAULT_PATH
+        )
+        if(_LUDUS_NINJA_EXE)
+            set(_LUDUS_NINJA_MISSING FALSE)
+        else()
+            find_program(_LUDUS_NINJA_EXE_DEFAULT NAMES ninja)
+            if(_LUDUS_NINJA_EXE_DEFAULT)
+                set(_LUDUS_NINJA_MISSING FALSE)
+            endif()
+        endif()
+    endif()
+
+    if(_LUDUS_NINJA_MISSING)
+        ludus_fatal_error("This preset uses the Ninja generator, but Ninja was not found.")
+    endif()
+endif()
 
 # ============================================================================
 # Build Configuration Options
@@ -85,15 +207,15 @@ set_property(CACHE GRAPHICS_API PROPERTY STRINGS Cpu Vulkan D3D12 Metal)
 
 # Validate graphics API selection
 if(NOT GRAPHICS_API MATCHES "^(Cpu|Vulkan|D3D12|Metal)$")
-    message(FATAL_ERROR "Invalid GRAPHICS_API: ${GRAPHICS_API}. Must be one of: Cpu, Vulkan, D3D12, Metal")
+    ludus_fatal_error("Invalid GRAPHICS_API: ${GRAPHICS_API}. Must be one of: Cpu, Vulkan, D3D12, Metal")
 endif()
 
 # Platform-specific validation
 if(GRAPHICS_API STREQUAL "D3D12" AND NOT WIN32)
-    message(FATAL_ERROR "D3D12 is only available on Windows")
+    ludus_fatal_error("D3D12 is only available on Windows")
 endif()
 if(GRAPHICS_API STREQUAL "Metal" AND NOT APPLE)
-    message(FATAL_ERROR "Metal is only available on macOS")
+    ludus_fatal_error("Metal is only available on macOS")
 endif()
 
 message(STATUS "Graphics API: ${GRAPHICS_API}")
@@ -173,7 +295,7 @@ if(GRAPHICS_API STREQUAL "Vulkan")
     elseif(TARGET volk)
         target_link_libraries(LudusVulkanDeps INTERFACE volk)
     else()
-        message(FATAL_ERROR "volk target not found after FetchContent_MakeAvailable")
+        ludus_fatal_error("volk target not found after FetchContent_MakeAvailable")
     endif()
 endif()
 
@@ -232,7 +354,7 @@ elseif(APPLE)
 elseif(UNIX)
     set(PLATFORM_FOLDER "Unix")
 else()
-    message(FATAL_ERROR "Unsupported platform ${CMAKE_SYSTEM_NAME}")
+    ludus_fatal_error("Unsupported platform ${CMAKE_SYSTEM_NAME}")
 endif()
 
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" LUDUS_SYS_PROC_LOWER)
@@ -467,7 +589,7 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     # Used for profiling and leak testing with sanitizers
     target_compile_definitions(LudusBuildSettings INTERFACE $<$<CONFIG:RelWithDebInfo>:LUDUS_RELEASE=1> )
 else()
-    message(FATAL_ERROR "Unsupported build configuration: ${CMAKE_BUILD_TYPE}")
+    ludus_fatal_error("Unsupported build configuration: ${CMAKE_BUILD_TYPE}")
 endif()
 
 add_subdirectory(src)
