@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Ludus/Engine/Core/Common.h>
+#include <Ludus/Engine/Core/Compiler.h>
 
 #include <cstdio>
 

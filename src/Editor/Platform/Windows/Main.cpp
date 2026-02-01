@@ -15,6 +15,8 @@
 
 #include <Ludus/Engine/Renderer/Renderer.hpp>
 
+#include <Ludus/Engine/Common.h>
+
 #undef CreateWindow
 
 void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd);
@@ -73,8 +75,15 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 	LUDUS_ASSERT_MSG(sine > 0.7071f && sine < 0.7072f, "Sine calculation is incorrect");	// NOLINT(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
 	LUDUS_ASSERT_MSG(cosine > 0.7071f && cosine < 0.7072f, "Cosine calculation is incorrect");	// NOLINT(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
 
+	// Note: appInfo is NOT constexpr because String uses non-constexpr strlen in its constructor
+	const core::ProjectInfo appInfo  // NOLINT(readability-identifier-naming)
+	{
+		.Name = ConvertWStringToString(WString(EDITOR_WINDOW_TITLE)),
+		.Version = LUDUS_MAKE_API_VERSION(0, 0, 1, 0),
+	};
+
 	WindowManager<CURRENT_PLATFORM_TYPE> windowManager;
-	commandLineManager.ParseCommandLine(windowManager);
+	windowManager.ParseCommandLineWithContext(commandLineManager);
 
 	Window<CURRENT_PLATFORM_TYPE>::CreateInfo createInfo
 	{
@@ -90,9 +99,19 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 		.Width = window.GetWidth(),
 		.Height = window.GetHeight(),
 		.Format = TextureFormat::RGBA8_UNORM,
+		.RhiInstanceCreateInfo =
+		{
+			.ApplicationInfo = appInfo,
+			.EngineInfo = ENGINE_INFO,
+		},
 	};
-	Renderer<CURRENT_GRAPHICS_API> renderer(rendererCreateInfo);
-	gRenderer = &renderer;
+	Renderer<CURRENT_GRAPHICS_API> Renderer_obj{};  // NOLINT(readability-identifier-naming)
+	if (Renderer_obj.Initialize(rendererCreateInfo) == false)
+	{
+		LUDUS_ASSERT_MSG(false, "Failed to initialize renderer");
+		return;
+	}
+	gRenderer = &Renderer_obj;
 
 	window.Show(nShowCmd);
 
@@ -122,6 +141,7 @@ bool WindowProcedure(const ludus::platform::Window<ludus::platform::CURRENT_PLAT
 	{
 		case WM_PAINT:
 		{
+#if defined(LUDUS_GRAPHICS_CPU)
 			PAINTSTRUCT ps;
 			HDC hdc = BeginPaint(params.WindowHandle, &ps);
 
@@ -190,6 +210,9 @@ bool WindowProcedure(const ludus::platform::Window<ludus::platform::CURRENT_PLAT
 
 			EndPaint(params.WindowHandle, &ps);
 			return true; // Message was processed
+#else	// defined(LUDUS_GRAPHICS_CPU)
+			return false; // Message was not processed
+#endif	// defined(LUDUS_GRAPHICS_CPU)
 		}
 		default:
 			return false; // Message was not processed

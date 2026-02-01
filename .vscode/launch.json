@@ -9,6 +9,7 @@
             "request": "launch",
             "name": "Debug LudusEditor (MSVC-Debug-CPU)",
             "program": "${workspaceFolder}/out/build/ninja_msvc-debug/bin/LudusEditor.exe",
+            "args": ["--width", "1920", "--height", "1080"],
             "cwd": "${workspaceFolder}/out/build/ninja_msvc-debug/bin",
             "stopAtEntry": true,
             "environment": [
@@ -18,21 +19,21 @@
                 }
             ]
         },
-        // DISABLED: Vulkan builds not needed for now
-        // {
-        //     "type": "cppvsdbg",
-        //     "request": "launch",
-        //     "name": "Debug LudusEditor (MSVC-Debug-Vulkan)",
-        //     "program": "${workspaceFolder}/out/build/ninja_msvc-debug-vulkan/bin/LudusEditor.exe",
-        //     "cwd": "${workspaceFolder}/out/build/ninja_msvc-debug-vulkan/bin",
-        //     "stopAtEntry": true,
-        //     "environment": [
-        //         {
-        //             "name": "ASAN_OPTIONS",
-        //             "value": "halt_on_error=1:abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1:mmap_limit_mb=2048"
-        //         }
-        //     ]
-        // },
+        {
+            "type": "cppvsdbg",
+            "request": "launch",
+            "name": "Debug LudusEditor (MSVC-Debug-Vulkan)",
+            "program": "${workspaceFolder}/out/build/ninja_msvc-debug-vulkan/bin/LudusEditor.exe",
+            "args": ["--width", "1920", "--height", "1080"],
+            "cwd": "${workspaceFolder}/out/build/ninja_msvc-debug-vulkan/bin",
+            "stopAtEntry": true,
+            "environment": [
+                {
+                    "name": "ASAN_OPTIONS",
+                    "value": "halt_on_error=1:abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1:mmap_limit_mb=2048"
+                }
+            ]
+        },
         // DISABLED: D3D12 builds not needed for now
         // {
         //     "type": "cppvsdbg",
@@ -53,18 +54,19 @@
             "request": "launch",
             "name": "Debug LudusEditor (MSVC-Release-CPU)",
             "program": "${workspaceFolder}/out/build/ninja_msvc-release/bin/LudusEditor.exe",
+            "args": ["--width", "1920", "--height", "1080"],
             "cwd": "${workspaceFolder}/out/build/ninja_msvc-release/bin",
             "stopAtEntry": true
         },
-        // DISABLED: Vulkan builds not needed for now
-        // {
-        //     "type": "cppvsdbg",
-        //     "request": "launch",
-        //     "name": "Debug LudusEditor (MSVC-Release-Vulkan)",
-        //     "program": "${workspaceFolder}/out/build/ninja_msvc-release-vulkan/bin/LudusEditor.exe",
-        //     "cwd": "${workspaceFolder}/out/build/ninja_msvc-release-vulkan/bin",
-        //     "stopAtEntry": true
-        // },
+        {
+            "type": "cppvsdbg",
+            "request": "launch",
+            "name": "Debug LudusEditor (MSVC-Release-Vulkan)",
+            "program": "${workspaceFolder}/out/build/ninja_msvc-release-vulkan/bin/LudusEditor.exe",
+            "args": ["--width", "1920", "--height", "1080"],
+            "cwd": "${workspaceFolder}/out/build/ninja_msvc-release-vulkan/bin",
+            "stopAtEntry": true
+        },
         // DISABLED: D3D12 builds not needed for now
         // {
         //     "type": "cppvsdbg",
@@ -81,20 +83,17 @@
             "program": "${workspaceFolder}/out/build/ninja_clang-debug/bin/LudusEditor",
             "cwd": "${workspaceFolder}/out/build/ninja_clang-debug/bin",
             "stopAtEntry": true,
-            "args": [
-            ]
+            "args": ["--width", "1920", "--height", "1080"]
         },
-        // DISABLED: Vulkan builds not needed for now
-        // {
-        //     "type": "cppdbg",
-        //     "request": "launch",
-        //     "name": "Debug LudusEditor (Clang-Debug-Vulkan)",
-        //     "program": "${workspaceFolder}/out/build/ninja_clang-debug-vulkan/bin/LudusEditor",
-        //     "cwd": "${workspaceFolder}/out/build/ninja_clang-debug-vulkan/bin",
-        //     "stopAtEntry": true,
-        //     "args": [
-        //     ]
-        // },
+        {
+            "type": "cppdbg",
+            "request": "launch",
+            "name": "Debug LudusEditor (Clang-Debug-Vulkan)",
+            "program": "${workspaceFolder}/out/build/ninja_clang-debug-vulkan/bin/LudusEditor",
+            "cwd": "${workspaceFolder}/out/build/ninja_clang-debug-vulkan/bin",
+            "stopAtEntry": true,
+            "args": ["--width", "1920", "--height", "1080"]
+        },
         {
             "type": "cppdbg",
             "request": "launch",
@@ -102,20 +101,17 @@
             "program": "${workspaceFolder}/out/build/ninja_gcc-debug/bin/LudusEditor",
             "cwd": "${workspaceFolder}/out/build/ninja_gcc-debug/bin",
             "stopAtEntry": true,
-            "args": [
-            ]
+            "args": ["--width", "1920", "--height", "1080"]
         },
-        // DISABLED: Vulkan builds not needed for now
-        // {
-        //     "type": "cppdbg",
-        //     "request": "launch",
-        //     "name": "Debug LudusEditor (GCC-Debug-Vulkan)",
-        //     "program": "${workspaceFolder}/out/build/ninja_gcc-debug-vulkan/bin/LudusEditor",
-        //     "cwd": "${workspaceFolder}/out/build/ninja_gcc-debug-vulkan/bin",
-        //     "stopAtEntry": true,
-        //     "args": [
-        //     ]
-        // },
+        {
+            "type": "cppdbg",
+            "request": "launch",
+            "name": "Debug LudusEditor (GCC-Debug-Vulkan)",
+            "program": "${workspaceFolder}/out/build/ninja_gcc-debug-vulkan/bin/LudusEditor",
+            "cwd": "${workspaceFolder}/out/build/ninja_gcc-debug-vulkan/bin",
+            "stopAtEntry": true,
+            "args": ["--width", "1920", "--height", "1080"]
+        },
         {
             "type": "cppvsdbg",
             "request": "launch",

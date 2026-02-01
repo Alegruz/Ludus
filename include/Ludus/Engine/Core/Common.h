@@ -1,6 +1,7 @@
 #pragma once
 
-#include <Ludus/Engine/Platform/Platform.h>
+#include <Ludus/Engine/Core/Compiler.h>
+#include <Ludus/Engine/Core/PlatformDetection.h>
 
 #include <climits>
 #include <codecvt>
@@ -9,18 +10,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
+#include <initializer_list>
 #include <locale>
+#include <type_traits>
 #include <utility>
 #include <variant>
-
-// MACROS
-#if defined(_MSC_VER)
-    #define LUDUS_INLINE __forceinline
-#elif defined(__GNUC__) || defined(__clang__)
-    #define LUDUS_INLINE __attribute__((always_inline)) inline
-#else
-    #define LUDUS_INLINE inline
-#endif
 
 namespace ludus::core
 {

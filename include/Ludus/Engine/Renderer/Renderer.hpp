@@ -4,16 +4,33 @@
 
 #include <Ludus/Engine/Core/SmartPtr.hpp>
 
+#include <Ludus/Engine/RHI/Instance.h>
+
 namespace ludus::renderer
 {
     template<rhi::GraphicsApi GRAPHICS_API>
-    Renderer<GRAPHICS_API>::Renderer(const CreateInfo& createInfo)
-        : mBackBufferTexture(core::MakeUnique<rhi::Texture<GRAPHICS_API>>(typename rhi::Texture<GRAPHICS_API>::CreateInfo{
-              .Width = createInfo.Width,
-              .Height = createInfo.Height,
-              .Format = createInfo.Format,
-          }))
+    Renderer<GRAPHICS_API>::Renderer()
+        : mBackBufferTexture()
+        , mInstance(core::MakeUnique<rhi::Instance<GRAPHICS_API>>())
     {
+    }
+
+    template<rhi::GraphicsApi GRAPHICS_API>
+    bool Renderer<GRAPHICS_API>::Initialize(const CreateInfo& createInfo) noexcept
+    {
+        // TODO: CPU renderer uses a simple texture as back buffer for now, but this should all be abstracted into the swap chain abstraction
+        if constexpr (GRAPHICS_API == rhi::GraphicsApi::CPU)
+        {
+            const typename rhi::Texture<GRAPHICS_API>::CreateInfo textureCreateInfo
+            {
+                .Width = createInfo.Width,
+                .Height = createInfo.Height,
+                .Format = createInfo.Format,
+            };
+            mBackBufferTexture = core::MakeUnique<rhi::Texture<GRAPHICS_API>>(textureCreateInfo);
+        }
+
+        return mInstance->Initialize( createInfo.RhiInstanceCreateInfo );
     }
 
     template<rhi::GraphicsApi GRAPHICS_API>
@@ -57,6 +74,7 @@ namespace ludus::renderer
         else
         {
             // Other API rendering logic would go here
+            LUDUS_ASSERT_MSG(false, "RenderFrame not implemented for this Graphics API yet.");
         }
     }
 }   // namespace ludus::renderer

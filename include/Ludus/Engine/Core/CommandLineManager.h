@@ -32,6 +32,11 @@ namespace ludus::core
         void ParseCommandLine(Manager& manager) noexcept;
 
         [[nodiscard]] const DynamicArray<BasicString<CharT>>& GetArguments() const noexcept;
+        
+        // Indexed access with lookahead support for paired arguments
+        [[nodiscard]] bool TryGetArgument(size_t index, BasicString<CharT>& outArg) const noexcept;
+        [[nodiscard]] bool TryGetArgumentPair(size_t index, BasicString<CharT>& outKey, BasicString<CharT>& outValue) const noexcept;
+        [[nodiscard]] size_t GetArgumentCount() const noexcept;
     
     private:
         DynamicArray<BasicString<CharT>> mArguments;

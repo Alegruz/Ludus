@@ -1,0 +1,201 @@
+{
+  "schema_version": 1,
+  "description": "Prerequisite version requirements for Ludus engine",
+  "prerequisites": {
+    "cmake": {
+      "minimum": "3.26.0",
+      "recommended": "3.31.0",
+      "description": "Build system generator",
+      "windows": {
+        "installer": "cmake",
+        "package_manager": "winget"
+      },
+      "macos": {
+        "installer": "cmake",
+        "package_manager": "brew"
+      },
+      "linux": {
+        "installer": "cmake",
+        "package_manager": "apt"
+      }
+    },
+    "ninja": {
+      "minimum": "1.11.0",
+      "recommended": "1.12.0",
+      "description": "Fast build system (recommended over Unix Makefiles)",
+      "windows": {
+        "installer": "ninja",
+        "package_manager": "winget"
+      },
+      "macos": {
+        "installer": "ninja",
+        "package_manager": "brew"
+      },
+      "linux": {
+        "installer": "ninja",
+        "package_manager": "apt"
+      }
+    },
+    "git": {
+      "minimum": "2.40.0",
+      "recommended": "2.42.0",
+      "description": "Version control system",
+      "windows": {
+        "installer": "git",
+        "package_manager": "winget"
+      },
+      "macos": {
+        "installer": "git",
+        "package_manager": "brew"
+      },
+      "linux": {
+        "installer": "git",
+        "package_manager": "apt"
+      }
+    },
+    "python": {
+      "minimum": "3.8.0",
+      "recommended": "3.11.0",
+      "description": "Python runtime (for onboarding & tools)",
+      "windows": {
+        "installer": "python",
+        "package_manager": "winget"
+      },
+      "macos": {
+        "installer": "python",
+        "package_manager": "brew"
+      },
+      "linux": {
+        "installer": "python",
+        "package_manager": "apt"
+      }
+    },
+    "llvm": {
+      "minimum": "14.0.0",
+      "recommended": "17.0.0",
+      "description": "LLVM toolchain (clang-format, clang-tidy)",
+      "windows": {
+        "installer": "llvm",
+        "package_manager": "winget"
+      },
+      "macos": {
+        "installer": "llvm",
+        "package_manager": "brew"
+      },
+      "linux": {
+        "installer": "llvm",
+        "package_manager": "apt"
+      }
+    },
+    "vulkan_sdk": {
+      "minimum": "1.3.275",
+      "recommended": "1.3.280+",
+      "description": "Vulkan SDK with headers and validation layers",
+      "windows": {
+        "installer": "vulkan_sdk",
+        "package_manager": "winget"
+      },
+      "macos": {
+        "installer": "vulkan_sdk",
+        "package_manager": "brew"
+      },
+      "linux": {
+        "installer": "vulkan_sdk",
+        "package_manager": "apt"
+      }
+    },
+    "visual_studio_2022": {
+      "minimum": "17.0.0",
+      "recommended": "17.8.0+",
+      "description": "Visual Studio 2022 with C++ Desktop development (Windows only)",
+      "windows": {
+        "installer": "vs2022",
+        "package_manager": "winget"
+      },
+      "required_on": ["windows"]
+    },
+    "clang": {
+      "minimum": "14.0.0",
+      "recommended": "17.0.0",
+      "description": "Clang C++ compiler (Linux/macOS/Windows alternative)",
+      "linux": {
+        "installer": "llvm",
+        "package_manager": "apt"
+      },
+      "macos": {
+        "installer": "llvm",
+        "package_manager": "brew"
+      }
+    },
+    "gcc": {
+      "minimum": "10.0.0",
+      "recommended": "13.0.0",
+      "description": "GCC C++ compiler (Linux alternative)",
+      "linux": {
+        "installer": "gcc",
+        "package_manager": "apt"
+      }
+    },
+    "vscode": {
+      "minimum": "1.70.0",
+      "recommended": "latest",
+      "description": "Visual Studio Code IDE (optional but recommended)",
+      "windows": {
+        "installer": "vscode",
+        "package_manager": "winget"
+      },
+      "macos": {
+        "installer": "vscode",
+        "package_manager": "brew"
+      },
+      "linux": {
+        "installer": "vscode",
+        "package_manager": "apt"
+      }
+    }
+  },
+  "platform_requirements": {
+    "windows": {
+      "description": "Windows development requirements",
+      "required": ["cmake", "ninja", "git", "python", "visual_studio_2022", "vulkan_sdk"],
+      "optional": ["llvm", "vscode"],
+      "alternatives": {
+        "ninja": "Visual Studio native build",
+        "clang": "use MSVC instead"
+      }
+    },
+    "macos": {
+      "description": "macOS development requirements",
+      "required": ["cmake", "ninja", "git", "python", "vulkan_sdk"],
+      "optional": ["llvm", "clang", "vscode"],
+      "alternatives": {
+        "ninja": "Unix Makefiles"
+      }
+    },
+    "linux": {
+      "description": "Linux development requirements",
+      "required": ["cmake", "ninja", "git", "python", "vulkan_sdk"],
+      "optional": ["llvm", "clang", "gcc", "vscode"],
+      "alternatives": {
+        "ninja": "Unix Makefiles",
+        "clang": "GCC instead"
+      }
+    }
+  },
+  "version_check_priority": [
+    "cmake",
+    "ninja",
+    "git",
+    "python",
+    "vulkan_sdk",
+    "llvm"
+  ],
+  "notes": {
+    "cmake": "CMake 3.26+ required for preset support. 3.31+ recommended for latest features.",
+    "ninja": "Significantly faster than Unix Makefiles. Recommended for development. Visual Studio projects alternative.",
+    "vulkan_sdk": "Must match Volk tag version. See docs/DEPENDENCY_MANAGEMENT.md",
+    "python": "3.11+ recommended for best performance. Required for onboarding scripts.",
+    "llvm": "Provides clang-format and clang-tidy for code quality checks.",
+    "visual_studio_2022": "Community Edition sufficient. Requires C++ Desktop development workload."
+  }
+}

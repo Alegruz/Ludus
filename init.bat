@@ -1,86 +1,41 @@
 @echo off
 setlocal enabledelayedexpansion
 
-echo ========================================
-echo Ludus Project Initialization
-echo ========================================
-echo.
+set ROOT=%~dp0
+pushd "%ROOT%"
 
-REM Download and extract RadDbg
-set RADDBG_URL=https://github.com/EpicGamesExt/raddebugger/releases/download/v0.9.24-alpha/raddbg.zip
-set RADDBG_ZIP=raddbg.zip
-set RADDBG_DIR=raddbg
-
-REM Check if raddbg already exists
-if exist "%RADDBG_DIR%" (
-    echo RadDbg already exists, skipping download.
-) else (
-    echo Downloading RadDbg...
-    
-    REM Download using PowerShell
-    powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%RADDBG_URL%' -OutFile '%RADDBG_ZIP%'}"
-    
-    if !errorlevel! neq 0 (
-        echo Failed to download RadDbg
-        exit /b 1
-    )
-    
-    echo RadDbg downloaded successfully!
-    
-    REM Extract the zip file
-    echo Extracting RadDbg...
-    powershell -Command "& {Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('%RADDBG_ZIP%', '%RADDBG_DIR%')}"
-    
-    if !errorlevel! neq 0 (
-        echo Failed to extract RadDbg
-        exit /b 1
-    )
-    
-    echo RadDbg extracted successfully!
-    
-    REM Clean up the zip file
-    echo Cleaning up...
-    del "%RADDBG_ZIP%"
+set PYTHON=
+for %%P in (python python3) do (
+    where %%P >nul 2>nul && set PYTHON=%%P && goto :found_python
 )
 
-echo.
-echo ========================================
-echo Initialization Complete!
-echo ========================================
-echo RadDbg installed to: %RADDBG_DIR%
-echo.
-
-REM Check and install LLVM (clang-tidy, clang-format)
-echo Checking for LLVM tools (clang-tidy, clang-format)...
-where clang-tidy >nul 2>nul
-if errorlevel 1 (
-    echo clang-tidy not found. Attempting installation...
-    where choco >nul 2>nul
-    if errorlevel 1 (
-        echo.
-        echo Chocolatey not found. Install it from https://chocolatey.org/install
-        echo Then run: choco install llvm -y
-        goto :skip_llvm_install
-    )
-    
-    echo Installing LLVM via Chocolatey ^(requires admin privileges^)...
-    choco install llvm -y
-    if errorlevel 1 (
-        echo.
-        echo Failed to install LLVM. You may need to run this script as Administrator.
-        echo Or install manually from: https://llvm.org/builds/
+:found_python
+if "%PYTHON%"=="" (
+    echo Python not found. Attempting install...
+    where winget >nul 2>nul
+    if !errorlevel! == 0 (
+        winget install --id Python.Python.3.12 -e
     ) else (
-        echo LLVM installed successfully!
+        where choco >nul 2>nul
+        if !errorlevel! == 0 (
+            choco install python -y
+        ) else (
+            echo No package manager found. Install Python 3.10+ from https://www.python.org/downloads/
+        )
     )
-) else (
-    echo clang-tidy found!
 )
 
-:skip_llvm_install
-echo.
-echo ========================================
-echo Setup Complete!
-echo ========================================
-echo.
+set PYTHON=
+for %%P in (python python3) do (
+    where %%P >nul 2>nul && set PYTHON=%%P && goto :run_onboard
+)
 
+echo Python still not found. Aborting.
+goto :done
+
+:run_onboard
+%PYTHON% tools\onboard\onboard.py %*
+
+:done
+popd
 endlocal

@@ -22,6 +22,11 @@ jobs:
             build_preset: ci_test_msvc
             run_tests: true
             test_exe: out/build/ci_test_msvc/bin/LudusTests.exe
+          - name: Windows MSVC Debug (Vulkan)
+            os: windows-latest
+            configure_preset: ci_windows_msvc_debug_vulkan
+            build_preset: ci_windows_msvc_debug_vulkan
+            run_tests: false
           - name: Windows MSVC Release
             os: windows-latest
             configure_preset: ci_windows_msvc_release
@@ -33,6 +38,11 @@ jobs:
             build_preset: ci_test_clang
             run_tests: true
             test_exe: out/build/ci_test_clang/bin/LudusTests
+          - name: Linux Clang Debug (Vulkan)
+            os: ubuntu-latest
+            configure_preset: ci_linux_clang_debug_vulkan
+            build_preset: ci_linux_clang_debug_vulkan
+            run_tests: false
           - name: Linux Clang Release
             os: ubuntu-latest
             configure_preset: ci_linux_clang_release
@@ -72,8 +82,17 @@ jobs:
           key: ${{ matrix.configure_preset }}
           max-size: 2G
 
+      - name: Run init (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: bash ./init.sh --install --preset "${{ matrix.configure_preset }}"
+
+      - name: Run init (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmd /c "init.bat --install --preset ${{ matrix.configure_preset }}"
+
       - name: Configure (CMake preset)
-        run: cmake --preset "${{ matrix.configure_preset }}"
+        run: cmake --preset "${{ matrix.configure_preset }}" -DLUDUS_AUTO_RUN_INIT=OFF
 
       - name: Build (CMake build preset)
         run: cmake --build --preset "${{ matrix.build_preset }}"

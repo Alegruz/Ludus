@@ -1,0 +1,131 @@
+name: Check & Update Dependencies
+
+on:
+  schedule:
+    # Run every Monday at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-dependencies:
+    runs-on: ubuntu-latest
+    name: Check for dependency updates
+    outputs:
+      has_updates: ${{ steps.check.outputs.has_updates }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Check for updates
+        id: check
+        run: |
+          python tools/check_dependency_updates.py --check-only
+          exit_code=$?
+          if [ "$exit_code" -eq 1 ]; then
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+          fi
+          exit 0  # Don't fail the job
+
+      - name: Get update details
+        id: details
+        run: |
+          python tools/check_dependency_updates.py --check-only > dependency-report.txt
+          cat dependency-report.txt
+
+      - name: Update versions (if available)
+        if: steps.check.outputs.has_updates == 'true'
+        run: |
+          python tools/check_dependency_updates.py --update-versions
+
+      - name: Create Pull Request
+        if: steps.check.outputs.has_updates == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          commit-message: 'chore: update external dependencies'
+          title: '🔄 Dependencies: Update Volk and Vulkan-Headers'
+          body: |
+            ## Dependency Update
+            
+            This PR updates external dependencies to their latest versions.
+            
+            ```
+            ${{ steps.details.outputs.report }}
+            ```
+            
+            ### Testing Required
+            - [ ] Full build succeeds
+            - [ ] Unit tests pass
+            - [ ] No new warnings introduced
+            - [ ] Check changelog for breaking changes
+            
+            ### Merge Strategy
+            - Review the changes and changelog
+            - Run full CI pipeline
+            - Merge only if all checks pass
+          branch: 'deps/update-external-dependencies'
+          delete-branch: true
+          labels: 'dependencies,automation'
+          assignees: '${{ github.repository_owner }}'
+          draft: true
+
+      - name: Comment on schedule
+        if: github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('dependency-report.txt', 'utf8');
+            console.log('Dependency check completed:\n' + report);
+
+  build-test-pr:
+    needs: check-dependencies
+    runs-on: windows-latest
+    if: needs.check-dependencies.outputs.has_updates == 'true'
+    name: Build & Test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: 'deps/update-external-dependencies'
+          fetch-depth: 0
+
+      - name: Set up CMake
+        uses: jwlawson/actions-setup-cmake@v1
+        with:
+          cmake-version: '3.31'
+
+      - name: Configure
+        run: |
+          cmake -S . -B out/build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DGRAPHICS_API=Vulkan
+        continue-on-error: true
+
+      - name: Build
+        run: |
+          cmake --build out/build/ci
+        continue-on-error: true
+
+      - name: Report results
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const conclusion = '${{ job.status }}' === 'success' ? '✅ Build passed' : '⚠️ Build had issues';
+            console.log('Build status: ' + conclusion);

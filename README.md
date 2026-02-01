@@ -42,7 +42,17 @@ If you're new to Ludus, read these in order:
 - **Linux**: GCC or Clang, CMake 3.26+, Git
 - **macOS**: Xcode Command Line Tools, CMake 3.26+, Git
 
-Ninja is optional but recommended for faster builds. LLVM tools (clang-format, clang-tidy) are auto-installed by the build system if missing.
+Ninja is optional but recommended for faster builds. LLVM tools (clang-format, clang-tidy) should be installed via the onboarding app (`init.bat`/`init.sh`).
+
+### Onboarding (Recommended)
+
+```powershell
+./init.bat
+```
+
+```bash
+./init.sh
+```
 
 ### Build & Run (Windows MSVC)
 
@@ -139,7 +149,6 @@ cmake --preset ninja_msvc-debug -DENABLE_MIMALLOC=OFF -DENABLE_SANITIZERS=ON
 - `ENABLE_MIMALLOC=ON|OFF` (default ON): High-performance memory allocator. Auto-disabled with sanitizers.
 - `ENABLE_SANITIZERS=ON|OFF` (default ON for Clang/GCC): AddressSanitizer, UndefinedBehaviorSanitizer, LeakSanitizer.
 - `ENABLE_CLANG_TIDY=ON|OFF` (default ON): Static analysis with clang-tidy.
-- `ENABLE_AUTO_INSTALL_TOOLS=ON|OFF` (default ON): Allow CMake to auto-install clang-format/clang-tidy if missing.
 - `ENABLE_CPPCHECK=ON|OFF`, `ENABLE_MSVC_ANALYZE=ON|OFF`: Optional additional analyzers.
 
 ---
@@ -200,7 +209,7 @@ See [LEAK_DETECTION.md](docs/LEAK_DETECTION.md) and [LEAK_DETECTION_QUICK_REFERE
 
 | Issue | Solution |
 |-------|----------|
-| **LLVM tools not found** | CMake attempts auto-install via Chocolatey/Homebrew/apt. See [BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md) for manual install steps. |
+| **LLVM tools not found** | Run the onboarding app (`init.bat`/`init.sh`) or see [BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md) for manual install steps. |
 | **Missing Ninja** | Install: `choco install ninja` (Windows), `brew install ninja` (macOS), `apt install ninja-build` (Linux). |
 | **Build artifacts in source root** | Delete old `.exe`, `.dll`, `.ilk` files. New builds output to `build/bin/` and `build/lib/`. |
 | **ASan on Windows** | MSVC ASan is disabled; use Clang presets (`ninja_clang-*`) instead. |

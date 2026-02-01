@@ -1,5 +1,127 @@
 cmake_minimum_required(VERSION 3.15)
 
+# ============================================================================
+# Onboarding Mode (GUI vs Headless)
+# ============================================================================
+set(LUDUS_IS_CI FALSE)
+if(DEFINED ENV{GITHUB_ACTIONS} OR DEFINED ENV{CI})
+    set(LUDUS_IS_CI TRUE)
+endif()
+
+# Opt-in auto-run of onboarding during configure
+option(LUDUS_AUTO_RUN_INIT "Attempt to run init script during CMake configure" ON)
+
+set(LUDUS_ONBOARD_ARGS "--gui")
+if(LUDUS_IS_CI)
+    set(LUDUS_ONBOARD_ARGS "--install")
+    if(DEFINED CMAKE_PRESET_NAME AND NOT CMAKE_PRESET_NAME STREQUAL "")
+        list(APPEND LUDUS_ONBOARD_ARGS "--preset" "${CMAKE_PRESET_NAME}")
+    endif()
+endif()
+
+# ============================================================================
+# Onboarding Check
+# ============================================================================
+# Verify that the user has run the onboarding/initialization script
+# The onboarding script sets up git submodules, environment variables, and dependencies
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/.ludus-initialized")
+    if(LUDUS_AUTO_RUN_INIT AND NOT LUDUS_IS_CI)
+        message(STATUS "Launching Ludus onboarding GUI...")
+
+        # Attempt to launch the onboarding GUI
+        if(WIN32)
+            # Windows: Run init.bat with --gui flag
+            execute_process(
+                COMMAND cmd.exe /c "${CMAKE_SOURCE_DIR}/init.bat" ${LUDUS_ONBOARD_ARGS}
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                RESULT_VARIABLE INIT_RESULT
+            )
+        else()
+            # Unix/Linux/macOS: Run init.sh with --gui flag
+            execute_process(
+                COMMAND bash "${CMAKE_SOURCE_DIR}/init.sh" ${LUDUS_ONBOARD_ARGS}
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                RESULT_VARIABLE INIT_RESULT
+            )
+        endif()
+    endif()
+    
+    # Check if the marker file was created by the onboarding script
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/.ludus-initialized")
+        message(FATAL_ERROR
+            "\n"
+            "========================================================================\n"
+            "CMake Configuration Error - Project Not Initialized\n"
+            "========================================================================\n"
+            "\n"
+            "The onboarding script could not be automatically launched, or was\n"
+            "cancelled. Please run the initialization script manually:\n"
+            "\n"
+            "  Windows:  init.bat\n"
+            "  Linux/Mac: ./init.sh\n"
+            "\n"
+            "CI/Headless: ./init.sh --install --preset <preset>\n"
+            "              init.bat --install --preset <preset>\n"
+            "\n"
+            "Or for the latest Vulkan SDK:\n"
+            "  Windows:  init_with_latest_volk.bat\n"
+            "\n"
+            "The initialization script will:\n"
+            "  - Set up git submodules\n"
+            "  - Download required dependencies (Vulkan SDK, build tools, etc.)\n"
+            "  - Configure your environment variables\n"
+            "\n"
+            "Run from the project root directory:\n"
+            "  ${CMAKE_SOURCE_DIR}\n"
+            "\n"
+            "After running the init script, you can retry the CMake configuration.\n"
+            "========================================================================\n"
+        )
+    endif()
+endif()
+
+# ============================================================================
+# Common Error Helper
+# ============================================================================
+function(ludus_fatal_error)
+    string(JOIN " " _LUDUS_FATAL_MSG ${ARGV})
+
+    # Try to launch onboarding once to resolve missing prerequisites (opt-in)
+    if(LUDUS_AUTO_RUN_INIT AND NOT LUDUS_IS_CI AND NOT DEFINED LUDUS_INIT_TRIED)
+        set(LUDUS_INIT_TRIED TRUE PARENT_SCOPE)
+        if(WIN32)
+            execute_process(
+                COMMAND cmd.exe /c "${CMAKE_SOURCE_DIR}/init.bat" ${LUDUS_ONBOARD_ARGS}
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                RESULT_VARIABLE _LUDUS_INIT_RESULT
+            )
+        else()
+            execute_process(
+                COMMAND bash "${CMAKE_SOURCE_DIR}/init.sh" ${LUDUS_ONBOARD_ARGS}
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                RESULT_VARIABLE _LUDUS_INIT_RESULT
+            )
+        endif()
+    endif()
+
+    message(FATAL_ERROR
+        "\n"
+        "========================================================================\n"
+        "CMake Configuration Error\n"
+        "========================================================================\n"
+        "\n"
+        "${_LUDUS_FATAL_MSG}\n"
+        "\n"
+        "An attempt was made to launch the onboarding script. If it did not\n"
+        "run or was cancelled, please run it manually:\n"
+        "  Windows:  init.bat\n"
+        "  Linux/Mac: ./init.sh\n"
+        "\n"
+        "Then re-run CMake configuration.\n"
+        "========================================================================\n"
+    )
+endfunction()
+
 # Export compile_commands.json for clang-tidy integration
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -10,7 +132,87 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+# ============================================================================
+# Pre-Project Generator Fixup (Ninja)
+# ============================================================================
+if(CMAKE_GENERATOR MATCHES "Ninja")
+    set(_LUDUS_NINJA_CANDIDATE "")
+
+    if(DEFINED CMAKE_MAKE_PROGRAM AND EXISTS "${CMAKE_MAKE_PROGRAM}")
+        set(_LUDUS_NINJA_CANDIDATE "${CMAKE_MAKE_PROGRAM}")
+    elseif(DEFINED CMAKE_MAKE_PROGRAM AND NOT EXISTS "${CMAKE_MAKE_PROGRAM}")
+        set(_LUDUS_NINJA_CANDIDATE "")
+    endif()
+
+    if(NOT _LUDUS_NINJA_CANDIDATE)
+        find_program(_LUDUS_NINJA_EXE NAMES ninja
+            PATHS
+                "${CMAKE_PROGRAM_PATH}"
+                "$ENV{ProgramFiles}/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja"
+                "$ENV{ProgramFiles\(x86\)}/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja"
+        )
+        if(_LUDUS_NINJA_EXE)
+            set(_LUDUS_NINJA_CANDIDATE "${_LUDUS_NINJA_EXE}")
+        endif()
+    endif()
+
+    if(_LUDUS_NINJA_CANDIDATE)
+        set(CMAKE_MAKE_PROGRAM "${_LUDUS_NINJA_CANDIDATE}" CACHE FILEPATH "Ninja executable" FORCE)
+    else()
+        # Try to launch onboarding before project() to avoid generator failure
+        if(LUDUS_AUTO_RUN_INIT AND NOT LUDUS_IS_CI AND NOT DEFINED LUDUS_INIT_TRIED)
+            set(LUDUS_INIT_TRIED TRUE CACHE INTERNAL "Init run attempted" FORCE)
+            if(WIN32)
+                execute_process(
+                    COMMAND cmd.exe /c "${CMAKE_SOURCE_DIR}/init.bat" ${LUDUS_ONBOARD_ARGS}
+                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                    RESULT_VARIABLE _LUDUS_INIT_RESULT
+                )
+            else()
+                execute_process(
+                    COMMAND bash "${CMAKE_SOURCE_DIR}/init.sh" ${LUDUS_ONBOARD_ARGS}
+                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                    RESULT_VARIABLE _LUDUS_INIT_RESULT
+                )
+            endif()
+        endif()
+    endif()
+endif()
+
 project(GameEngine LANGUAGES C CXX)
+
+# ============================================================================
+# Generator Prerequisite Check (Ninja)
+# ============================================================================
+if(CMAKE_GENERATOR MATCHES "Ninja")
+    set(_LUDUS_NINJA_MISSING TRUE)
+
+    if(DEFINED CMAKE_MAKE_PROGRAM AND EXISTS "${CMAKE_MAKE_PROGRAM}")
+        set(_LUDUS_NINJA_MISSING FALSE)
+    elseif(DEFINED CMAKE_MAKE_PROGRAM AND NOT EXISTS "${CMAKE_MAKE_PROGRAM}")
+        set(_LUDUS_NINJA_MISSING TRUE)
+    else()
+        find_program(_LUDUS_NINJA_EXE NAMES ninja
+            PATHS
+                "${CMAKE_PROGRAM_PATH}"
+                "$ENV{ProgramFiles}/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja"
+                "$ENV{ProgramFiles\(x86\)}/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja"
+            NO_DEFAULT_PATH
+        )
+        if(_LUDUS_NINJA_EXE)
+            set(_LUDUS_NINJA_MISSING FALSE)
+        else()
+            find_program(_LUDUS_NINJA_EXE_DEFAULT NAMES ninja)
+            if(_LUDUS_NINJA_EXE_DEFAULT)
+                set(_LUDUS_NINJA_MISSING FALSE)
+            endif()
+        endif()
+    endif()
+
+    if(_LUDUS_NINJA_MISSING)
+        ludus_fatal_error("This preset uses the Ninja generator, but Ninja was not found.")
+    endif()
+endif()
 
 # ============================================================================
 # Build Configuration Options
@@ -22,7 +224,6 @@ option(ENABLE_APP_VERIFIER "Enable Windows Application Verifier setup (recommend
 option(ENABLE_CLANG_TIDY "Enable clang-tidy static analysis" ON)
 option(ENABLE_CPPCHECK "Enable cppcheck static analysis" OFF)
 option(ENABLE_MSVC_ANALYZE "Enable MSVC /analyze static analysis" OFF)
-option(ENABLE_AUTO_INSTALL_TOOLS "Allow CMake to auto-install clang-format/clang-tidy when missing" ON)
 
 # Graphics API selection
 set(GRAPHICS_API "Cpu" CACHE STRING "Graphics API to use (Cpu, Vulkan, D3D12, Metal)")
@@ -30,15 +231,15 @@ set_property(CACHE GRAPHICS_API PROPERTY STRINGS Cpu Vulkan D3D12 Metal)
 
 # Validate graphics API selection
 if(NOT GRAPHICS_API MATCHES "^(Cpu|Vulkan|D3D12|Metal)$")
-    message(FATAL_ERROR "Invalid GRAPHICS_API: ${GRAPHICS_API}. Must be one of: Cpu, Vulkan, D3D12, Metal")
+    ludus_fatal_error("Invalid GRAPHICS_API: ${GRAPHICS_API}. Must be one of: Cpu, Vulkan, D3D12, Metal")
 endif()
 
 # Platform-specific validation
 if(GRAPHICS_API STREQUAL "D3D12" AND NOT WIN32)
-    message(FATAL_ERROR "D3D12 is only available on Windows")
+    ludus_fatal_error("D3D12 is only available on Windows")
 endif()
 if(GRAPHICS_API STREQUAL "Metal" AND NOT APPLE)
-    message(FATAL_ERROR "Metal is only available on macOS")
+    ludus_fatal_error("Metal is only available on macOS")
 endif()
 
 message(STATUS "Graphics API: ${GRAPHICS_API}")
@@ -53,91 +254,12 @@ set(LLVM_HINT_PATHS
     "$ENV{ChocolateyInstall}/bin"
 )
 
-# Helper: Find a dev tool and attempt auto-install if missing
-# Auto-install enhances user convenience for clang-format/clang-tidy
-function(find_or_install_dev_tool VAR_NAME TOOL_NAME)
+# Helper: Find a dev tool (no auto-install; onboarding handles installs)
+function(find_dev_tool VAR_NAME TOOL_NAME)
     find_program(${VAR_NAME} NAMES ${TOOL_NAME} HINTS ${LLVM_HINT_PATHS})
     
     if(NOT ${VAR_NAME})
-        if(NOT ENABLE_AUTO_INSTALL_TOOLS)
-            message(STATUS "${TOOL_NAME} not found and auto-install is disabled.")
-            set(${VAR_NAME} ${${VAR_NAME}} PARENT_SCOPE)
-            return()
-        endif()
-
-        message(STATUS "${TOOL_NAME} not found. Attempting auto-install...")
-        
-        if(WIN32)
-            # Try Chocolatey first
-            execute_process(
-                COMMAND choco install llvm -y --no-progress
-                RESULT_VARIABLE CHOCO_RESULT
-                OUTPUT_QUIET ERROR_QUIET
-            )
-            if(CHOCO_RESULT EQUAL 0)
-                find_program(${VAR_NAME} NAMES ${TOOL_NAME} HINTS ${LLVM_HINT_PATHS})
-                if(${VAR_NAME})
-                    message(STATUS "  ✓ ${TOOL_NAME} installed via Chocolatey: ${${VAR_NAME}}")
-                else()
-                    message(STATUS "  ✗ Install via Chocolatey succeeded but tool not found in PATH. Run: choco install llvm -y")
-                endif()
-            else()
-                # Fall back to PowerShell installer
-                set(LLVM_INSTALLER "${CMAKE_SOURCE_DIR}/tools/install-llvm.ps1")
-                if(EXISTS "${LLVM_INSTALLER}")
-                    message(STATUS "  Chocolatey unavailable. Trying: powershell -ExecutionPolicy Bypass -File tools/install-llvm.ps1")
-                    execute_process(
-                        COMMAND powershell -ExecutionPolicy Bypass -File "${LLVM_INSTALLER}"
-                        RESULT_VARIABLE PS_RESULT
-                        OUTPUT_QUIET ERROR_QUIET
-                    )
-                    if(PS_RESULT EQUAL 0)
-                        find_program(${VAR_NAME} NAMES ${TOOL_NAME} HINTS ${LLVM_HINT_PATHS})
-                        if(${VAR_NAME})
-                            message(STATUS "  ✓ ${TOOL_NAME} installed via PowerShell script: ${${VAR_NAME}}")
-                        endif()
-                    else()
-                        message(STATUS "  ✗ PowerShell install failed. Requires admin. Manual install: choco install llvm -y")
-                    endif()
-                endif()
-            endif()
-        elseif(APPLE)
-            execute_process(
-                COMMAND brew install llvm
-                RESULT_VARIABLE BREW_RESULT
-                OUTPUT_QUIET ERROR_QUIET
-            )
-            if(BREW_RESULT EQUAL 0)
-                find_program(${VAR_NAME} NAMES ${TOOL_NAME} HINTS ${LLVM_HINT_PATHS})
-                if(${VAR_NAME})
-                    message(STATUS "  ✓ ${TOOL_NAME} installed via Homebrew: ${${VAR_NAME}}")
-                else()
-                    message(STATUS "  ✗ Homebrew install succeeded but tool not found. Run: brew install llvm")
-                endif()
-            else()
-                message(STATUS "  ✗ Homebrew install failed. Manual: brew install llvm")
-            endif()
-        elseif(UNIX AND NOT APPLE)
-            execute_process(
-                COMMAND sudo apt-get update
-                OUTPUT_QUIET ERROR_QUIET
-            )
-            execute_process(
-                COMMAND sudo apt-get install -y clang-tools
-                RESULT_VARIABLE APT_RESULT
-                OUTPUT_QUIET ERROR_QUIET
-            )
-            if(APT_RESULT EQUAL 0)
-                find_program(${VAR_NAME} NAMES ${TOOL_NAME} HINTS ${LLVM_HINT_PATHS})
-                if(${VAR_NAME})
-                    message(STATUS "  ✓ ${TOOL_NAME} installed via apt: ${${VAR_NAME}}")
-                else()
-                    message(STATUS "  ✗ Apt install succeeded but tool not found. Run: sudo apt-get install ${TOOL_NAME}")
-                endif()
-            else()
-                message(STATUS "  ✗ Apt install failed. Manual: sudo apt-get install clang-tools")
-            endif()
-        endif()
+        message(STATUS "${TOOL_NAME} not found. Run the onboarding app (init.bat/init.sh) to install prerequisites.")
     else()
         message(STATUS "${TOOL_NAME} found: ${${VAR_NAME}}")
     endif()
@@ -148,6 +270,58 @@ endfunction()
 
 # FetchContent for external dependencies
 include(FetchContent)
+
+# ============================================================================
+# Vulkan (volk) integration
+# Primary Vulkan loader for Vulkan presets
+# ============================================================================
+if(GRAPHICS_API STREQUAL "Vulkan")
+    # Vulkan-Headers (for vulkan/vulkan.h)
+    # Allow override of VulkanHeaders and volk tags from command line
+
+    if(NOT DEFINED VULKAN_HEADERS_TAG)
+        set(VULKAN_HEADERS_TAG v1.4.342)
+    endif()
+
+    # Default volk tag (set via onboarding or -DVOLK_TAG=...)
+    # Note: Volk uses vulkan-sdk version tags, not bare version numbers
+    if(NOT DEFINED VOLK_TAG)
+        set(VOLK_TAG vulkan-sdk-1.4.335.0)
+    endif()
+
+    FetchContent_Declare(VulkanHeaders
+        GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+        GIT_TAG ${VULKAN_HEADERS_TAG}
+        GIT_SHALLOW TRUE
+    )
+
+    # volk: meta-loader for Vulkan
+    set(VOLK_STATIC ON CACHE BOOL "Build volk as a static library" FORCE)
+    set(VOLK_INSTALL OFF CACHE BOOL "Disable volk install step" FORCE)
+    set(VOLK_TESTS OFF CACHE BOOL "Disable volk tests" FORCE)
+
+    FetchContent_Declare(volk
+        GIT_REPOSITORY https://github.com/zeux/volk.git
+        GIT_TAG ${VOLK_TAG}
+        GIT_SHALLOW TRUE
+    )
+
+    FetchContent_MakeAvailable(VulkanHeaders volk)
+
+    add_library(LudusVulkanDeps INTERFACE)
+    target_include_directories(LudusVulkanDeps INTERFACE
+        ${VulkanHeaders_SOURCE_DIR}/include
+        ${volk_SOURCE_DIR}
+    )
+
+    if(TARGET volk::volk)
+        target_link_libraries(LudusVulkanDeps INTERFACE volk::volk)
+    elseif(TARGET volk)
+        target_link_libraries(LudusVulkanDeps INTERFACE volk)
+    else()
+        ludus_fatal_error("volk target not found after FetchContent_MakeAvailable")
+    endif()
+endif()
 
 # ============================================================================
 # mimalloc: High-performance memory allocator
@@ -204,7 +378,7 @@ elseif(APPLE)
 elseif(UNIX)
     set(PLATFORM_FOLDER "Unix")
 else()
-    message(FATAL_ERROR "Unsupported platform ${CMAKE_SYSTEM_NAME}")
+    ludus_fatal_error("Unsupported platform ${CMAKE_SYSTEM_NAME}")
 endif()
 
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" LUDUS_SYS_PROC_LOWER)
@@ -281,22 +455,22 @@ target_compile_options(LudusBuildSettings INTERFACE
     # GCC/Clang
     $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow
-    -fno-exceptions -fno-rtti>  # if that’s your policy; otherwise drop
+    -fno-exceptions -fno-rtti>  # if that?�s your policy; otherwise drop
 )
 
 # ============================================================================
 # Static Analysis Tools
-# Auto-install for convenience (clang-tidy, clang-format)
+# Dev tool detection (clang-tidy, clang-format)
 # Options defined at top of file
 # ============================================================================
 
 # Find or install clang-format
-find_or_install_dev_tool(CLANG_FORMAT_EXE clang-format)
+find_dev_tool(CLANG_FORMAT_EXE clang-format)
 set(ENABLE_CLANG_FORMAT ${CLANG_FORMAT_EXE})
 
 # Find or install clang-tidy (optional, for static analysis)
 if(ENABLE_CLANG_TIDY)
-    find_or_install_dev_tool(CLANG_TIDY_EXE clang-tidy)
+    find_dev_tool(CLANG_TIDY_EXE clang-tidy)
     if(CLANG_TIDY_EXE)
         # Suppress warnings from external dependencies (mimalloc, etc.) to avoid false positives
         # --header-filter only analyzes project headers (not external deps like mimalloc)
@@ -305,7 +479,7 @@ if(ENABLE_CLANG_TIDY)
         set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};--checks=-clang-diagnostic-*;-warnings-as-errors=*;--header-filter=.*include/Ludus/.*;--system-headers=false")
         message(STATUS "clang-tidy enabled (warnings as errors): ${CLANG_TIDY_EXE}")
     else()
-        message(STATUS "clang-tidy disabled (not found)")
+        message(STATUS "clang-tidy disabled (not found). Run onboarding to install prerequisites.")
         set(ENABLE_CLANG_TIDY OFF)
     endif()
 endif()
@@ -338,7 +512,7 @@ if(ENABLE_CLANG_FORMAT)
     
     message(STATUS "clang-format targets added: format-check, format-fix")
 else()
-    message(STATUS "clang-format not found - formatting checks disabled")
+    message(STATUS "clang-format not found - formatting checks disabled. Run onboarding to install prerequisites.")
 endif()
 
 # cppcheck (optional static analysis)
@@ -439,7 +613,10 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     # Used for profiling and leak testing with sanitizers
     target_compile_definitions(LudusBuildSettings INTERFACE $<$<CONFIG:RelWithDebInfo>:LUDUS_RELEASE=1> )
 else()
-    message(FATAL_ERROR "Unsupported build configuration: ${CMAKE_BUILD_TYPE}")
+    ludus_fatal_error("Unsupported build configuration: ${CMAKE_BUILD_TYPE}")
 endif()
 
 add_subdirectory(src)
+
+
+

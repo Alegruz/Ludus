@@ -202,4 +202,33 @@ namespace ludus::core
     {
         return mArguments;
     }
+
+    template<StringCharType CharT>
+    [[nodiscard]] bool CommandLineManager<CharT>::TryGetArgument(size_t index, BasicString<CharT>& outArg) const noexcept
+    {
+        if (index < static_cast<size_t>(mArguments.GetSize()))
+        {
+            outArg = mArguments[static_cast<uint32_t>(index)];
+            return true;
+        }
+        return false;
+    }
+
+    template<StringCharType CharT>
+    [[nodiscard]] bool CommandLineManager<CharT>::TryGetArgumentPair(size_t index, BasicString<CharT>& outKey, BasicString<CharT>& outValue) const noexcept
+    {
+        if (index + 1 < static_cast<size_t>(mArguments.GetSize()))
+        {
+            outKey = mArguments[static_cast<uint32_t>(index)];
+            outValue = mArguments[static_cast<uint32_t>(index + 1)];
+            return true;
+        }
+        return false;
+    }
+
+    template<StringCharType CharT>
+    [[nodiscard]] size_t CommandLineManager<CharT>::GetArgumentCount() const noexcept
+    {
+        return mArguments.GetSize();
+    }
 }   // namespace ludus::core

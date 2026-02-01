@@ -65,3 +65,8 @@ namespace ludus::rhi
 #error "No graphics API defined. Please define one of LUDUS_GRAPHICS_CPU, LUDUS_GRAPHICS_VULKAN, LUDUS_GRAPHICS_D3D12, or LUDUS_GRAPHICS_METAL."
 #endif  // defined(LUDUS_GRAPHICS_CPU)
 }
+
+#if defined(LUDUS_GRAPHICS_VULKAN)
+// Forward declaration for Vulkan handle type
+typedef struct VkInstance_T* VkInstance;
+#endif  // defined(LUDUS_GRAPHICS_VULKAN)

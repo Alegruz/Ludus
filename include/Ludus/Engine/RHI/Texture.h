@@ -19,6 +19,7 @@ namespace ludus::rhi
 
     public:
         explicit Texture(const CreateInfo& createInfo) requires(TApi == GraphicsApi::CPU);
+        explicit Texture(const CreateInfo& createInfo) requires(TApi == GraphicsApi::VULKAN);
         Texture(const Texture&) = default;
         Texture& operator=(const Texture&) = default;
         Texture(Texture&&) noexcept = default;

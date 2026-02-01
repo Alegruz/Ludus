@@ -15,4 +15,8 @@ namespace ludus::core
 
     WString ConvertStringToWString(const String& str) noexcept;
     String  ConvertWStringToString(const WString& wstr) noexcept;
+
+    // String to integer conversion functions (no exceptions)
+    [[nodiscard]] bool StringToInt32(const char* str, int32_t& outValue) noexcept;
+    [[nodiscard]] bool StringToInt32(const wchar_t* str, int32_t& outValue) noexcept;
 }   // namespace ludus::core

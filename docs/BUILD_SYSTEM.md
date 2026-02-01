@@ -1,97 +1,61 @@
-# Build System & CI Integration
+ï»¿# Build System & CI Integration
 
 Status: draft
 Owner: maintainers
-Last updated: 2026-01-26
+Last updated: 2026-01-30
 
+This document explains the Ludus build philosophy, onboarding flow, and how to integrate into CI/CD environments.
 
-This document explains the Ludus build philosophy, auto-install convenience feature, and how to integrate safely into CI/CD environments.
+## Philosophy: Build = Build, Onboarding = Install
 
-## Philosophy: Developer-Friendly with CI Flexibility
+1. **CMake only builds**
+   - The configure step never installs system packages.
+   - Missing tools are reported with guidance to run the onboarding app.
 
-The Ludus build system follows these principles:
-
-1. **Auto-install development tools for convenience**
-   - clang-format, clang-tidy are auto-installed during `cmake --preset ...` if missing.
-   - Uses Chocolatey (Windows), Homebrew (macOS), or apt (Linux).
-   - Reduces setup friction for newcomers and local development.
-
-2. **Optional, graceful fallbacks**
-   - If auto-install fails or is disabled, the build **succeeds anyway**?”only formatting and analysis targets are unavailable.
-   - CI environments can disable auto-install by setting `ENABLE_CLANG_TIDY=OFF` or by pre-installing tools.
-   - Use `-DENABLE_AUTO_INSTALL_TOOLS=OFF` to prevent any auto-install attempts.
+2. **Onboarding owns prerequisites**
+   - `init.bat` / `init.sh` installs required tools and optional developer utilities.
+   - Role-specific installs are supported (user, contributor, debugger).
 
 3. **Stable external dependencies**
-   - mimalloc is pinned to a stable version (e.g., `v2.1.2`) in `CMakeLists.txt`, not `main` branch.
-   - This ensures reproducible builds and avoids breaking changes.
-
-4. **Clear, helpful messages**
-   - When auto-install attempts are made, CMake prints what it's doing.
-   - If installation fails, messages guide users to manual install steps or indicate graceful degradation.
+   - Dependencies like mimalloc and Vulkan headers are pinned to known versions.
+   - Update via explicit changes (not auto-fetch).
 
 ## Development Setup
 
-### Out-of-Source Builds
+### Onboarding (Recommended)
 
-All build artifacts are kept separate from source code:
-
-```
-ludus/                    # Source root (stays clean, version-controlled)
-?œâ??€ src/                  # Source files
-?œâ??€ include/              # Public headers
-?œâ??€ CMakeLists.txt
-?œâ??€ docs/
-?”â??€ build/                # Build artifacts (NOT version-controlled, ignored by .gitignore)
-    ?œâ??€ bin/              # Executables and DLLs
-    ??  ?œâ??€ LudusEditor.exe
-    ??  ?œâ??€ LudusTests.exe
-    ??  ?œâ??€ LudusCore.dll
-    ??  ?œâ??€ LudusPlatform.dll
-    ??  ?”â??€ [runtime DLLs: mimalloc, ASan, etc.]
-    ?œâ??€ lib/              # Static/import libraries
-    ??  ?œâ??€ LudusCore.lib
-    ??  ?”â??€ LudusPlatform.lib
-    ?”â??€ CMakeFiles/       # CMake cache and intermediate files
-```
-
-This keeps the source tree clean and follows CMake best practices. Builds are reproducible and easy to clean.
-
-### For Local Development (Auto-Install)
-
-Just configure and build. CMake will auto-install LLVM tools if needed:
+Run the onboarding app to install prerequisites and optional tooling:
 
 ```powershell
-cmake --preset ninja_msvc-debug
-cmake --build --preset ninja_msvc-debug -t LudusEditor
+./init.bat
 ```
 
-CMake will attempt to install clang-format/clang-tidy via Chocolatey, Homebrew, or apt. On Windows, if Chocolatey isn't available, it will try the PowerShell installer. If all auto-installs fail, the build still succeeds?”you just won't have formatting targets.
+```bash
+./init.sh
+```
 
-### Manual Tool Installation (No Auto-Install)
+This installs CMake, Git, compiler toolchains (where possible), LLVM tools, VS Code, and optional debugging tools like RadDbg on Windows.
 
-If you prefer to control tool installation or are in a restricted environment, disable auto-install and install manually:
+### Manual Tool Installation
+
+If you prefer manual control or are in a restricted environment:
 
 **Windows:**
 ```powershell
-# Manually install first
+# LLVM tools
 powershell -ExecutionPolicy Bypass -File tools/install-llvm.ps1
-# or
+# Or
 choco install llvm
-
-# Then configure with auto-install disabled
-cmake --preset ninja_msvc-debug -DENABLE_AUTO_INSTALL_TOOLS=OFF -DENABLE_CLANG_TIDY=ON
 ```
 
 **macOS:**
 ```bash
 brew install llvm
-cmake --preset ninja_clang-debug -DENABLE_AUTO_INSTALL_TOOLS=OFF
 ```
 
 **Linux (Debian/Ubuntu):**
 ```bash
-sudo apt-get install clang-tools
-cmake --preset ninja_clang-debug -DENABLE_AUTO_INSTALL_TOOLS=OFF
+sudo apt-get install clang clang-tools
 ```
 
 ## CI/CD Integration
@@ -108,110 +72,68 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Install LLVM (optional, for clang-tidy)
         run: choco install llvm -y
-        
+
       - name: Configure
         run: cmake --preset ninja_msvc-debug
-        
+
       - name: Build
         run: cmake --build --preset ninja_msvc-debug -t LudusEditor
-        
+
       - name: Run Tests
         run: |
           cmake --build --preset ninja_msvc-debug -t LudusTests
           ./build/bin/LudusTests.exe
-          
+
       - name: Check Formatting (optional)
         run: cmake --build --preset ninja_msvc-debug -t format-check
         continue-on-error: true
 ```
 
 **Key points:**
-- The LLVM install step is optional. If skipped, the build still succeeds.
-- Formatting check is optional (wrapped in `continue-on-error: true`).
-- Core tests always run.
+- LLVM install is optional. If missing, clang-tidy/format targets are skipped.
+- Core builds and tests still run.
 
 ### Docker/Linux CI Example
 
 ```dockerfile
 FROM ubuntu:22.04
 
-# Install essentials
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
     ninja-build \
     git
 
-# Optional: install LLVM tools for analysis
-RUN apt-get install -y clang-tools
+RUN apt-get install -y clang clang-tools
 
 WORKDIR /ludus
 COPY . .
 
-# Configure and build
 RUN cmake --preset ninja_clang-debug
 RUN cmake --build --preset ninja_clang-debug -t LudusEditor
 RUN cmake --build --preset ninja_clang-debug -t LudusTests
-
-# Run tests
 RUN ./build/bin/LudusTests
-
-# Optional: format check
-RUN cmake --build --preset ninja_clang-debug -t format-check || echo "Format check skipped"
-```
-
-### Disable Auto-Install in CI
-
-For CI environments, disable auto-install to ensure builds are deterministic and don't depend on package manager availability:
-
-```bash
-# Windows CI: disable auto-install, assume tools are already present
-cmake --preset ninja_msvc-debug -DENABLE_AUTO_INSTALL_TOOLS=OFF -DENABLE_CLANG_TIDY=OFF
-
-# Or pre-install tools, then auto-install doesn't matter (tools already found)
-choco install llvm
-cmake --preset ninja_msvc-debug
-```
-
-Alternatively, pre-install tools in your CI image/container:
-
-```dockerfile
-# Pre-install tools so CMake finds them immediately
-RUN apt-get update && apt-get install -y clang-tools ninja-build cmake
-
-WORKDIR /ludus
-COPY . .
-
-# Configure and build (tools already present, auto-install skipped)
-RUN cmake --preset ninja_clang-debug
-RUN cmake --build --preset ninja_clang-debug -t LudusEditor
 ```
 
 ## FAQ
 
-**Q: Will CMake auto-install tools every time?**  
-A: No. It checks first with `find_program()`. If tools are already found, auto-install is skipped. Only missing tools trigger install attempts.
+**Q: Does CMake install tools automatically?**  
+A: No. Install prerequisites with `init.bat` / `init.sh` or manually.
 
-**Q: Can I disable auto-install?**  
-A: Yes. Set `ENABLE_AUTO_INSTALL_TOOLS=OFF` to disable all auto-install attempts. You can also set `ENABLE_CLANG_TIDY=OFF` to skip clang-tidy entirely, or pre-install tools so auto-install is never triggered.
-
-**Q: What if auto-install fails?**  
-A: The build succeeds. CMake prints a message indicating why the install failed. You can manually install LLVM afterwards and reconfigure.
+**Q: What happens if clang-tidy/clang-format are missing?**  
+A: Builds succeed, but formatting/static analysis targets are unavailable. CMake prints guidance.
 
 **Q: Can I use sanitizers in CI?**  
-A: Yes, on Linux with Clang/GCC. Use a sanitizer-enabled preset like `ninja_clang-relwithdebinfo`. On Windows, MSVC ASan is disabled (use Clang preset instead).
-
-**Q: Why pin mimalloc if it's a moving target?**  
-A: Pinned versions ensure reproducible builds. If you need a newer mimalloc, update the `GIT_TAG` in `CMakeLists.txt` and test thoroughly before merging.
+A: Yes, on Linux with Clang/GCC. Use sanitizer-enabled presets like `ninja_clang-relwithdebinfo`.
 
 ## Stable External Dependency Versions
 
 Keep these pinned versions updated as you test and validate new releases:
 
-- **mimalloc**: Currently `v2.1.2`. Check https://github.com/microsoft/mimalloc/releases for new stable versions.
+- **mimalloc**: Currently `v2.2.7`.
 
 ## Related
 
