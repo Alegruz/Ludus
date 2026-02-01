@@ -39,6 +39,22 @@ namespace ludus::core
         UniquePtr(UniquePtr&& other) noexcept;
         UniquePtr& operator=(UniquePtr&& other) noexcept;
 
+        template<typename U, typename OtherDeleter,
+                 typename = std::enable_if_t<
+                     std::is_base_of_v<T, U> &&
+                     !std::is_same_v<T, U> &&
+                     std::is_same_v<Deleter, DefaultDelete<T>> &&
+                     std::is_same_v<OtherDeleter, DefaultDelete<U>>>>
+        UniquePtr(UniquePtr<U, OtherDeleter>&& other) noexcept;
+
+        template<typename U, typename OtherDeleter,
+                 typename = std::enable_if_t<
+                     std::is_base_of_v<T, U> &&
+                     !std::is_same_v<T, U> &&
+                     std::is_same_v<Deleter, DefaultDelete<T>> &&
+                     std::is_same_v<OtherDeleter, DefaultDelete<U>>>>
+        UniquePtr& operator=(UniquePtr<U, OtherDeleter>&& other) noexcept;
+
         ~UniquePtr() noexcept;
 
         [[nodiscard]] T* Get() const noexcept;

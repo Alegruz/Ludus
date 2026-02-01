@@ -102,7 +102,7 @@ namespace ludus::platform
                 titleWStr.GetCStr(),
                 titleWStr.GetCStr(),
                 WS_OVERLAPPEDWINDOW,
-                CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                mRect.X, mRect.Y, mRect.Width, mRect.Height,
                 NULL,
                 NULL,
                 mInstance,

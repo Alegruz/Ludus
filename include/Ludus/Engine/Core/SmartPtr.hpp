@@ -22,6 +22,14 @@ namespace ludus::core
     }
 
     template<typename T, typename Deleter>
+    template<typename U, typename OtherDeleter, typename>
+    LUDUS_INLINE UniquePtr<T, Deleter>::UniquePtr(UniquePtr<U, OtherDeleter>&& other) noexcept
+        : mPtr(other.Release())
+        , mDeleter(Deleter{})
+    {
+    }
+
+    template<typename T, typename Deleter>
     LUDUS_INLINE UniquePtr<T, Deleter>& UniquePtr<T, Deleter>::operator=(UniquePtr&& other) noexcept
     {
         if(this != &other)
@@ -31,6 +39,16 @@ namespace ludus::core
             mDeleter = std::move(other.mDeleter);
             other.mPtr = nullptr;
         }
+        return *this;
+    }
+
+    template<typename T, typename Deleter>
+    template<typename U, typename OtherDeleter, typename>
+    LUDUS_INLINE UniquePtr<T, Deleter>& UniquePtr<T, Deleter>::operator=(UniquePtr<U, OtherDeleter>&& other) noexcept
+    {
+        Reset();
+        mPtr = other.Release();
+        mDeleter = Deleter{};
         return *this;
     }
 
