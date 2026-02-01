@@ -68,17 +68,11 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 			quickExit = true;
 		}
 	}
-
-	const float angle = Pi<float>() / 4.0f; // 45 degrees in radians
-	const float sine = Sin(angle);
-	const float cosine = Cos(angle);
-	LUDUS_ASSERT_MSG(sine > 0.7071f && sine < 0.7072f, "Sine calculation is incorrect");	// NOLINT(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
-	LUDUS_ASSERT_MSG(cosine > 0.7071f && cosine < 0.7072f, "Cosine calculation is incorrect");	// NOLINT(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
-
-	// Note: appInfo is NOT constexpr because String uses non-constexpr strlen in its constructor
+	
+	// Note: Using string literal for ProjectInfo.Name to avoid heap allocation
 	const core::ProjectInfo appInfo  // NOLINT(readability-identifier-naming)
 	{
-		.Name = ConvertWStringToString(WString(EDITOR_WINDOW_TITLE)),
+		.Name = EDITOR_APP_TITLE,
 		.Version = LUDUS_MAKE_API_VERSION(0, 0, 1, 0),
 	};
 
@@ -91,7 +85,6 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 		.WindowProcedureOrNull = WindowProcedure,
 		.Instance = instance,
 	};
-	
 	Window<CURRENT_PLATFORM_TYPE>& window = windowManager.CreateWindow(createInfo);
 
 	const Renderer<CURRENT_GRAPHICS_API>::CreateInfo rendererCreateInfo
