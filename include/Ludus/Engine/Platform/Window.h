@@ -8,6 +8,12 @@
 
 #undef CreateWindow
 
+namespace ludus::core
+{
+    template<core::StringCharType CharT>
+    class CommandLineManager;
+}   // namespace ludus::core
+
 namespace ludus::platform
 {
     template<PlatformType PLATFORM_TYPE>
@@ -61,6 +67,7 @@ namespace ludus::platform
         [[nodiscard]] constexpr uint32_t GetHeight() const noexcept;
 
         void Show(const int32_t commandShowFlag) const noexcept;
+        uint64_t GetPlatformHandle() const noexcept;
 
     private:
         constexpr explicit Window(const CreateInfo& createInfo) noexcept;

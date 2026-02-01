@@ -6,6 +6,8 @@
 #include <Ludus/Engine/Core/Container/String.h>
 #include <Ludus/Engine/Core/ProjectInfo.h>
 
+#include <Ludus/Engine/Platform/Window.h>
+
 namespace ludus::rhi
 {
     struct InstanceMemberVariablesBase
@@ -22,6 +24,7 @@ namespace ludus::rhi
         {
             core::ProjectInfo ApplicationInfo;
             core::ProjectInfo EngineInfo;
+            const platform::Window<platform::CURRENT_PLATFORM_TYPE>& Window;
         };
 
     public:

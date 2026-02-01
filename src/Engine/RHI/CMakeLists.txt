@@ -36,6 +36,7 @@ target_include_directories(LudusRHI
 target_link_libraries(LudusRHI
     PUBLIC
     LudusCore
+    LudusPlatform
     LudusBuildSettings
 )
 

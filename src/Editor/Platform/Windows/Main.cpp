@@ -103,6 +103,7 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 		{
 			.ApplicationInfo = appInfo,
 			.EngineInfo = ENGINE_INFO,
+			.Window = window,
 		},
 	};
 	Renderer<CURRENT_GRAPHICS_API> Renderer_obj{};  // NOLINT(readability-identifier-naming)

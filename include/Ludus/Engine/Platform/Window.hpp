@@ -158,6 +158,19 @@ namespace ludus::platform
     }
 
     template<PlatformType PLATFORM_TYPE>
+    LUDUS_INLINE uint64_t Window<PLATFORM_TYPE>::GetPlatformHandle() const noexcept
+    {
+        if constexpr (PLATFORM_TYPE == PlatformType::WINDOWS)
+        {
+            return reinterpret_cast<uint64_t>(mWindowHandle);
+        }
+        else
+        {
+            return 0;
+        }
+    }
+
+    template<PlatformType PLATFORM_TYPE>
     LUDUS_INLINE constexpr WindowManager<PLATFORM_TYPE>::WindowManager() noexcept
         : mDefaultWindowRect{ 100, 100, 800, 600 }
         , mWindows()
