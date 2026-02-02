@@ -10,7 +10,7 @@ namespace ludus::rhi
     {
         CPU,
         VULKAN,
-        DIRECT3D12,
+        D3D12,
         METAL,
         COUNT,
 
@@ -58,7 +58,7 @@ namespace ludus::rhi
 #elif defined(LUDUS_GRAPHICS_VULKAN)
     constexpr GraphicsApi CURRENT_GRAPHICS_API = GraphicsApi::VULKAN;
 #elif defined(LUDUS_GRAPHICS_D3D12)
-    constexpr GraphicsApi CURRENT_GRAPHICS_API = GraphicsApi::DIRECT3D12;
+    constexpr GraphicsApi CURRENT_GRAPHICS_API = GraphicsApi::D3D12;
 #elif defined(LUDUS_GRAPHICS_METAL)
     constexpr GraphicsApi CURRENT_GRAPHICS_API = GraphicsApi::METAL;
 #else

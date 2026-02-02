@@ -148,7 +148,7 @@ namespace ludus::rhi
 #define mMemberVariablesVulkan (*static_cast<InstanceMemberVariablesVulkan*>(mMemberVariables.Get()))   // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast,-warnings-as-errors)
 
     template<GraphicsApi GRAPHICS_API>
-    Instance<GRAPHICS_API>::Instance() requires(GRAPHICS_API == GraphicsApi::VULKAN)
+    Instance<GRAPHICS_API>::Instance()  noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
         : mMemberVariables(core::MakeUnique<InstanceMemberVariablesVulkan>())
     {
     }
@@ -210,9 +210,9 @@ namespace ludus::rhi
         {
             .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
             .pNext = nullptr,
-            .pApplicationName = createInfo.ApplicationInfo.Name.GetCStr(),
+            .pApplicationName = createInfo.ApplicationInfo.Name,
             .applicationVersion = createInfo.ApplicationInfo.Version,
-            .pEngineName = createInfo.EngineInfo.Name.GetCStr(),
+            .pEngineName = createInfo.EngineInfo.Name,
             .engineVersion = createInfo.EngineInfo.Version,
             .apiVersion = mMemberVariablesVulkan.InstanceVersion,
         };

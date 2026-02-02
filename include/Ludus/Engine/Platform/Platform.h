@@ -20,3 +20,16 @@ namespace ludus::platform
 #else
     #error "Unsupported platform"
 #endif
+
+namespace ludus::platform
+{
+#if defined(LUDUS_WINDOWS)
+    using LudusInstance = HINSTANCE;
+#elif defined(LUDUS_LINUX)
+    using LudusInstance = void*;
+#elif defined(LUDUS_MAC)
+    using LudusInstance = void*;
+#else
+    #error "Unsupported platform"
+#endif
+}

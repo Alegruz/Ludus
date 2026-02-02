@@ -6,6 +6,8 @@
 #include <Ludus/Engine/Core/Container/String.h>
 #include <Ludus/Engine/Core/ProjectInfo.h>
 
+#include <Ludus/Engine/Platform/Window.h>
+
 namespace ludus::rhi
 {
     struct InstanceMemberVariablesBase
@@ -13,6 +15,12 @@ namespace ludus::rhi
     public:
         virtual ~InstanceMemberVariablesBase() = default;
     };
+
+#define LUDUS_DECLARATATION_BY_GRAPHICS_API(FUNCTION_SIGNATURE) \
+    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::CPU); \
+    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::VULKAN); \
+    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::D3D12); \
+    FUNCTION_SIGNATURE = delete
 
     template<GraphicsApi GRAPHICS_API>
     class Instance final
@@ -22,24 +30,19 @@ namespace ludus::rhi
         {
             core::ProjectInfo ApplicationInfo;
             core::ProjectInfo EngineInfo;
+            const platform::Window<platform::CURRENT_PLATFORM_TYPE>& Window;
         };
 
     public:
-        explicit Instance() requires(GRAPHICS_API == GraphicsApi::CPU);
-        explicit Instance() requires(GRAPHICS_API == GraphicsApi::VULKAN);
-        Instance() = default;
+        LUDUS_DECLARATATION_BY_GRAPHICS_API(explicit Instance() noexcept);
         LUDUS_INLINE ~Instance() noexcept { Shutdown(); }
 
         [[nodiscard]] LUDUS_INLINE bool Initialize(const CreateInfo& createInfo) noexcept { return initialize(createInfo); }
-        [[nodiscard]] LUDUS_INLINE void Shutdown() noexcept { shutdown(); }
+        LUDUS_INLINE void Shutdown() noexcept { shutdown(); }
 
     private:
-        bool initialize(const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::CPU);
-        bool initialize(const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN);
-        bool initialize(const CreateInfo& createInfo) noexcept = delete;  // Unsupported Graphics API
-        void shutdown() noexcept requires(GRAPHICS_API == GraphicsApi::CPU);
-        void shutdown() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN);
-        void shutdown() noexcept = delete;  // Unsupported Graphics API
+        LUDUS_DECLARATATION_BY_GRAPHICS_API([[nodiscard]] bool initialize(const CreateInfo& createInfo) noexcept);
+        LUDUS_DECLARATATION_BY_GRAPHICS_API(void shutdown() noexcept);
 
     private:
         core::UniquePtr<InstanceMemberVariablesBase> mMemberVariables;

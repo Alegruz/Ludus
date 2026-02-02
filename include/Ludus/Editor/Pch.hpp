@@ -10,4 +10,6 @@
 
 #if defined(LUDUS_WINDOWS)
     constexpr wchar_t EDITOR_WINDOW_TITLE[]      = L"Ludus Editor";
+    constexpr char    EDITOR_APP_TITLE[]         = "Ludus Editor";
+    constexpr char8_t EDITOR_APP_TITLE_U8[]      = u8"Ludus Editor";
 #endif  // defined(LUDUS_WINDOWS)

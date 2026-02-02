@@ -213,6 +213,23 @@ def detect_volk():
     return True, "FetchContent (no install required)"
 
 
+def detect_d3d12_agility_sdk():
+    """Check if D3D12 Agility SDK is available in build cache."""
+    # D3D12 Agility SDK is downloaded on-demand by CMake during configuration
+    # This detection checks if it's already been fetched and cached
+    sdk_cache = ROOT_DIR / "out" / "build" / "_deps" / "d3d12-agility-sdk" / "d3d12-sdk"
+    if sdk_cache.exists() and (sdk_cache / "include" / "d3d12.h").exists():
+        return True, f"{sdk_cache}"
+    
+    # Check in binary dir (fallback)
+    sdk_path = ROOT_DIR / ".cmake" / "d3d12-sdk"
+    if sdk_path.exists() and (sdk_path / "include" / "d3d12.h").exists():
+        return True, f"{sdk_path}"
+    
+    # Not cached yet, but will be fetched automatically on D3D12 preset configure
+    return True, "Will be fetched on first D3D12 configure (CMake FetchContent)"
+
+
 def get_package_manager():
     if is_windows():
         if which("winget"):
@@ -526,6 +543,10 @@ def get_preset_requirements(preset_name):
             requirements.append("vulkan_sdk")
         if "volk" not in requirements:
             requirements.append("volk")
+    # Fallback: if preset name contains "d3d12"
+    if preset_name and "d3d12" in preset_name.lower():
+        if "d3d12_agility_sdk" not in requirements:
+            requirements.append("d3d12_agility_sdk")
     return requirements
 
 
@@ -558,6 +579,8 @@ def check_tools(role, preset_name=""):
         tools.append(("vulkan_sdk", "Vulkan SDK", *detect_vulkan_sdk(), True))
     if "volk" in preset_reqs:
         tools.append(("volk", "volk", *detect_volk(), True))
+    if "d3d12_agility_sdk" in preset_reqs:
+        tools.append(("d3d12_agility_sdk", "DirectX 12 Agility SDK", *detect_d3d12_agility_sdk(), False))
 
     return tools
 
@@ -893,13 +916,19 @@ def launch_gui():
     preset_var = tk.StringVar(value=default_preset if default_preset in presets else (presets[0] if presets else ""))
 
     def refresh_prereqs(*_args):
-        for row in prereq_tree.get_children():
-            prereq_tree.delete(row)
-        tools = check_tools(role_var.get(), preset_var.get())
-        for _, label, ok, details, required in tools:
-            prereq_tree.insert("", tk.END, values=(label, "OK" if ok else "MISSING", "required" if required else "optional", details))
-        state["role"] = role_var.get()
-        save_state(state)
+        try:
+            for row in prereq_tree.get_children():
+                prereq_tree.delete(row)
+            tools = check_tools(role_var.get(), preset_var.get())
+            for _, label, ok, details, required in tools:
+                prereq_tree.insert("", tk.END, values=(label, "OK" if ok else "MISSING", "required" if required else "optional", details))
+            state["role"] = role_var.get()
+            state["preset"] = preset_var.get()
+            save_state(state)
+        except Exception as e:
+            print(f"Error refreshing prerequisites: {e}")
+            import traceback
+            traceback.print_exc()
 
     def install_missing_clicked():
         install_missing(role_var.get(), preset_var.get())
@@ -1140,6 +1169,9 @@ def launch_gui():
     role_var.trace_add("write", refresh_prereqs)
     preset_var.trace_add("write", lambda *_: (state.__setitem__("preset", preset_var.get()), save_state(state)))
     preset_var.trace_add("write", refresh_prereqs)
+    
+    # Initial population of prerequisites
+    refresh_prereqs()
 
     show_step(0)
     root.mainloop()
