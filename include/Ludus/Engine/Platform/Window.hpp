@@ -2,6 +2,8 @@
 
 #include <Ludus/Engine/Platform/Window.h>
 
+#include <Ludus/Engine/Core/Container/String.hpp>
+
 namespace ludus::platform
 {
     template<PlatformType PLATFORM_TYPE>

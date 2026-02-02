@@ -1,4 +1,4 @@
-#include <Ludus/Engine/Platform/Window.h>
+#include <Ludus/Engine/Platform/Window.hpp>
 
 #if defined(LUDUS_MAC)
 namespace ludus::platform
