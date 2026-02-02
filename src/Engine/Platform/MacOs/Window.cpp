@@ -16,14 +16,14 @@ namespace ludus::platform
     }
 
     template<PlatformType PLATFORM_TYPE>
-    bool Window<PLATFORM_TYPE>::initialize(const CreateInfo& createInfo) noexcept requires (PLATFORM_TYPE == PlatformType::MAC)
+    bool Window<PLATFORM_TYPE>::initialize([[maybe_unused]] const CreateInfo& createInfo) noexcept requires (PLATFORM_TYPE == PlatformType::MAC)
     {
         LUDUS_ASSERT_MSG(false, "Mac platform windowing not yet implemented.");
         return false;
     }
     
     template<PlatformType PLATFORM_TYPE>
-    void Window<PLATFORM_TYPE>::show(const int32_t commandShowFlag) const noexcept requires (PLATFORM_TYPE == PlatformType::MAC)
+    void Window<PLATFORM_TYPE>::show([[maybe_unused]] const int32_t commandShowFlag) const noexcept requires (PLATFORM_TYPE == PlatformType::MAC)
     {
         LUDUS_ASSERT_MSG(false, "Mac platform windowing not yet implemented.");
     }
