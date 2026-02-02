@@ -30,7 +30,6 @@ int main(int argc, char** argv)
     return 0;
 }
 
-static ludus::renderer::Renderer<ludus::rhi::CURRENT_GRAPHICS_API>* gRenderer = nullptr; // TODO: Remove global, NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 void Main(int argc, char** argv)
 {
     using namespace ludus;
@@ -51,12 +50,6 @@ void Main(int argc, char** argv)
             quickExit = true;
         }
     }
-
-    const float angle = Pi<float>() / 4.0f; // 45 degrees in radians
-    const float sine = Sin(angle);
-    const float cosine = Cos(angle);
-    LUDUS_ASSERT_MSG(sine > 0.7071f && sine < 0.7072f, "Sine calculation is incorrect");
-    LUDUS_ASSERT_MSG(cosine > 0.7071f && cosine < 0.7072f, "Cosine calculation is incorrect");
 
     // Window creation and rendering loop omitted for MacOS for now
 

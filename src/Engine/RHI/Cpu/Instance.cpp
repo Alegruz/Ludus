@@ -16,7 +16,7 @@ namespace ludus::rhi
     }
 
     template<GraphicsApi GRAPHICS_API>
-    bool Instance<GRAPHICS_API>::initialize(const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::CPU)
+    bool Instance<GRAPHICS_API>::initialize([[maybe_unused]] const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::CPU)
     {
         // CPU RHI instance initialization logic (if any) goes here.
 

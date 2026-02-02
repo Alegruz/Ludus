@@ -1,6 +1,8 @@
 #include <Ludus/Engine/Platform/Window.hpp>
 
 #if defined(LUDUS_MAC)
+#include <Ludus/Engine/Core/SmartPtr.hpp>
+
 namespace ludus::platform
 {
     struct WindowMemberVariablesMac final : public WindowMemberVariablesBase

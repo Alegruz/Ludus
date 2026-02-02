@@ -1,6 +1,7 @@
 #include <Ludus/Engine/Platform/Window.hpp>
 
 #if defined(LUDUS_LINUX)
+#include <Ludus/Engine/Core/SmartPtr.hpp>
 #include <Ludus/Engine/Core/Math/Rect.hpp>
 
 namespace ludus::platform
