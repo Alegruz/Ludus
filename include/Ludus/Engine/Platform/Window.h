@@ -47,7 +47,7 @@ namespace ludus::platform
         {
             core::String Title;
             core::RectU* RectOrNull = nullptr;
-            [[no_unique_address]] std::conditional_t<PLATFORM_TYPE == PlatformType::WINDOWS, HINSTANCE, std::monostate> Instance;
+            LudusInstance Instance;
         };
         
 #if defined(LUDUS_WINDOWS)
