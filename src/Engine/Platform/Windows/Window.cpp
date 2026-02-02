@@ -8,7 +8,7 @@ namespace ludus::platform
 {
     struct WindowMemberVariablesWindows final : public WindowMemberVariablesBase    // NOLINT(cppcoreguidelines-special-member-functions)
     {
-        Window<PlatformType::WINDOWS>::WindowProcType<PlatformType::WINDOWS> WindowProcedureOrNull = nullptr;
+        Window<PlatformType::WINDOWS>::WindowProcedure WindowProcedureOrNull = nullptr;
         HINSTANCE Instance = NULL;
         HWND WindowHandle = NULL;
 
@@ -60,22 +60,11 @@ namespace ludus::platform
             }
             default:
             {
-                const bool isMessageProcessed = mMemberVariablesWindowsOf(window).WindowProcedureOrNull != nullptr
-                    ? mMemberVariablesWindowsOf(window).WindowProcedureOrNull(ProcedureParams<PlatformType::WINDOWS>{
-                        .OutResult = 0,
-                        .WindowHandle = hwnd,
-                        .Message = message,
-                        .WParam = wParam,
-                        .LParam = lParam,
-                        .Window = window,
-                    })
-                    : false;
-                    
-                if (isMessageProcessed)
+                if(mMemberVariablesWindowsOf(window).WindowProcedureOrNull != nullptr)
                 {
-                    return 0; // Message was processed by custom procedure
+                    return mMemberVariablesWindowsOf(window).WindowProcedureOrNull(hwnd, message, wParam, lParam);
                 }
-
+                
                 return DefWindowProc(hwnd, message, wParam, lParam);
             }
         }
@@ -95,6 +84,12 @@ namespace ludus::platform
     Window<PLATFORM_TYPE>::Window() noexcept requires (PLATFORM_TYPE == PlatformType::WINDOWS)
         : mMemberVariables(core::MakeUnique<WindowMemberVariablesWindows>())
     {
+    }
+
+    template<PlatformType PLATFORM_TYPE>
+    void Window<PLATFORM_TYPE>::SetWindowProcedure(WindowProcedure windowProc) noexcept requires (PLATFORM_TYPE == PlatformType::WINDOWS)
+    {
+        mMemberVariablesWindows.WindowProcedureOrNull = windowProc;
     }
 
     template<PlatformType PLATFORM_TYPE>

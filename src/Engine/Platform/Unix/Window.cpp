@@ -31,7 +31,7 @@ namespace ludus::platform
     }
 
     template<PlatformType PLATFORM_TYPE>
-    uint64_t Window<PLATFORM_TYPE>::GetPlatformHandle() const noexcept requires (PLATFORM_TYPE == PlatformType::LINUX)
+    uint64_t Window<PLATFORM_TYPE>::getPlatformHandle() const noexcept requires (PLATFORM_TYPE == PlatformType::LINUX)
     {
         LUDUS_ASSERT_MSG(false, "Linux platform windowing not yet implemented.");
         return 0;

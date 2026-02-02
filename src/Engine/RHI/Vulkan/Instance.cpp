@@ -210,9 +210,9 @@ namespace ludus::rhi
         {
             .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
             .pNext = nullptr,
-            .pApplicationName = createInfo.ApplicationInfo.Name.GetCStr(),
+            .pApplicationName = createInfo.ApplicationInfo.Name,
             .applicationVersion = createInfo.ApplicationInfo.Version,
-            .pEngineName = createInfo.EngineInfo.Name.GetCStr(),
+            .pEngineName = createInfo.EngineInfo.Name,
             .engineVersion = createInfo.EngineInfo.Version,
             .apiVersion = mMemberVariablesVulkan.InstanceVersion,
         };

@@ -29,7 +29,7 @@ namespace ludus::platform
     }
 
     template<PlatformType PLATFORM_TYPE>
-    uint64_t Window<PLATFORM_TYPE>::GetPlatformHandle() const noexcept requires (PLATFORM_TYPE == PlatformType::MAC)
+    uint64_t Window<PLATFORM_TYPE>::getPlatformHandle() const noexcept requires (PLATFORM_TYPE == PlatformType::MAC)
     {
         LUDUS_ASSERT_MSG(false, "Mac platform windowing not yet implemented.");
         return 0;

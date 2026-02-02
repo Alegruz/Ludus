@@ -20,7 +20,7 @@
 #undef CreateWindow
 
 void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd);
-bool WindowProcedure(const ludus::platform::Window<ludus::platform::CURRENT_PLATFORM_TYPE>::ProcedureParams<ludus::platform::CURRENT_PLATFORM_TYPE>& params);
+static LRESULT WindowProcedure(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) noexcept;
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE /*hPrevInstance*/, PWSTR lpCmdLine, int nShowCmd)
 {
@@ -82,10 +82,10 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 	Window<CURRENT_PLATFORM_TYPE>::CreateInfo createInfo
 	{
 		.Title = ConvertWStringToString(WString(EDITOR_WINDOW_TITLE)),
-		.WindowProcedureOrNull = WindowProcedure,
 		.Instance = instance,
 	};
 	Window<CURRENT_PLATFORM_TYPE>& window = windowManager.CreateWindow(createInfo);
+	window.SetWindowProcedure(WindowProcedure);
 
 	const Renderer<CURRENT_GRAPHICS_API>::CreateInfo rendererCreateInfo
 	{
@@ -123,7 +123,7 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 	}
 }
 
-bool WindowProcedure(const ludus::platform::Window<ludus::platform::CURRENT_PLATFORM_TYPE>::ProcedureParams<ludus::platform::CURRENT_PLATFORM_TYPE>& params)
+static LRESULT WindowProcedure(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) noexcept	// NOLINT(bugprone-easily-swappable-parameters)
 {
 	using namespace ludus;
 	using namespace ludus::core;
@@ -131,13 +131,13 @@ bool WindowProcedure(const ludus::platform::Window<ludus::platform::CURRENT_PLAT
 	using namespace ludus::rhi;
 	using namespace ludus::renderer;
 
-	switch (params.Message)
+	switch (message)
 	{
 		case WM_PAINT:
 		{
 #if defined(LUDUS_GRAPHICS_CPU)
 			PAINTSTRUCT ps;
-			HDC hdc = BeginPaint(params.WindowHandle, &ps);
+			HDC hdc = BeginPaint(hwnd, &ps);
 
 			gRenderer->RenderFrame();
 			const Texture<CURRENT_GRAPHICS_API>& backBufferTexture = gRenderer->GetBackBufferTexture();
@@ -202,7 +202,7 @@ bool WindowProcedure(const ludus::platform::Window<ludus::platform::CURRENT_PLAT
 				DeleteObject(hBitmap);
 			}
 
-			EndPaint(params.WindowHandle, &ps);
+			EndPaint(hwnd, &ps);
 			return true; // Message was processed
 #else	// defined(LUDUS_GRAPHICS_CPU)
 			return false; // Message was not processed
