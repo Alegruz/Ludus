@@ -9,7 +9,7 @@
 
 namespace ludus::rhi
 {
-    struct InstanceMemberVariablesVulkan final : public InstanceMemberVariablesBase
+    struct InstanceMemberVariablesVulkan final : public InstanceMemberVariablesBase<GraphicsApi::VULKAN>
     {
         uint32_t InstanceVersion = 0;
         VkInstance Instance = VK_NULL_HANDLE;
@@ -281,6 +281,15 @@ namespace ludus::rhi
     }
 
     template<GraphicsApi GRAPHICS_API>
+    bool Instance<GRAPHICS_API>::initializePostSwapChainInitialization([[maybe_unused]] const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+    {
+        // Vulkan RHI post swap chain initialization logic (if any) goes here.
+        LUDUS_ASSERT_MSG(false, "Vulkan RHI Instance post swap chain initialization is not implemented yet.");
+
+        return true;
+    }
+
+    template<GraphicsApi GRAPHICS_API>
     void Instance<GRAPHICS_API>::shutdown() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
     {
         if (mMemberVariablesVulkan.Instance != VK_NULL_HANDLE)
@@ -296,6 +305,14 @@ namespace ludus::rhi
             vkDestroyInstance(mMemberVariablesVulkan.Instance, nullptr);
             mMemberVariablesVulkan.Instance = VK_NULL_HANDLE;
         }
+    }
+
+    template<GraphicsApi GRAPHICS_API>
+    bool Instance<GRAPHICS_API>::createSwapChainImpl([[maybe_unused]] const SwapChain<GRAPHICS_API>::CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+    {
+        LUDUS_ASSERT_MSG(false, "Vulkan RHI SwapChain creation is not implemented yet.");
+
+        return true;
     }
 
 #if defined(LUDUS_DEBUG)

@@ -59,7 +59,13 @@ namespace ludus::core
     }
 
     template<typename T, typename Deleter>
-    LUDUS_INLINE T* UniquePtr<T, Deleter>::Get() const noexcept
+    LUDUS_INLINE T* UniquePtr<T, Deleter>::Get() noexcept
+    {
+        return mPtr;
+    }
+
+    template<typename T, typename Deleter>
+    LUDUS_INLINE const T* UniquePtr<T, Deleter>::Get() const noexcept
     {
         return mPtr;
     }

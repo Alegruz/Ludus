@@ -84,7 +84,14 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 		.Title = ConvertWStringToString(WString(EDITOR_WINDOW_TITLE)),
 		.Instance = instance,
 	};
-	Window<CURRENT_PLATFORM_TYPE>& window = windowManager.CreateWindow(createInfo);
+
+	core::UniquePtr<Window<CURRENT_PLATFORM_TYPE>>& pWindow = windowManager.CreateWindow(createInfo);
+	if( pWindow == nullptr )
+	{
+		LUDUS_ASSERT_MSG(false, "Failed to create main window.");
+		return;
+	}
+	Window<CURRENT_PLATFORM_TYPE>& window = *pWindow;
 	window.SetWindowProcedure(WindowProcedure);
 
 	const Renderer<CURRENT_GRAPHICS_API>::CreateInfo rendererCreateInfo
@@ -123,7 +130,7 @@ void Main(HINSTANCE instance, PWSTR lpCmdLine, int nShowCmd)
 	}
 }
 
-static LRESULT WindowProcedure(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) noexcept	// NOLINT(bugprone-easily-swappable-parameters)
+static LRESULT WindowProcedure([[maybe_unused]] HWND hwnd, UINT message, [[maybe_unused]] WPARAM wParam, [[maybe_unused]] LPARAM lParam) noexcept	// NOLINT(bugprone-easily-swappable-parameters)
 {
 	using namespace ludus;
 	using namespace ludus::core;

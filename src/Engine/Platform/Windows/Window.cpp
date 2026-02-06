@@ -9,14 +9,10 @@ namespace ludus::platform
     struct WindowMemberVariablesWindows final : public WindowMemberVariablesBase    // NOLINT(cppcoreguidelines-special-member-functions)
     {
         Window<PlatformType::WINDOWS>::WindowProcedure WindowProcedureOrNull = nullptr;
-        HINSTANCE Instance = NULL;
-        HWND WindowHandle = NULL;
 
         ~WindowMemberVariablesWindows() noexcept override
         {
             WindowProcedureOrNull = nullptr;
-            Instance = NULL;
-            WindowHandle = NULL;
         }
     };
 
@@ -153,12 +149,6 @@ namespace ludus::platform
             ShowWindow(mMemberVariablesWindows.WindowHandle, commandShowFlag);
             UpdateWindow(mMemberVariablesWindows.WindowHandle);
         }
-    }
-
-    template<PlatformType PLATFORM_TYPE>
-    uint64_t Window<PLATFORM_TYPE>::getPlatformHandle() const noexcept requires (PLATFORM_TYPE == PlatformType::WINDOWS)
-    {
-        return reinterpret_cast<uint64_t>(mMemberVariablesWindows.WindowHandle);
     }
 
     template class Window<PlatformType::WINDOWS>;

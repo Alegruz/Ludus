@@ -2,7 +2,7 @@
 
 #include <Ludus/Engine/Platform/Platform.h>
 
-#include <Ludus/Engine/Core/SmartPtr.h>
+#include <Ludus/Engine/Core/SmartPtr.hpp>
 #include <Ludus/Engine/Core/Container/String.h>
 #include <Ludus/Engine/Core/Math/Rect.hpp>
 
@@ -21,9 +21,15 @@ namespace ludus::platform
     public:
         core::String Title;
         core::RectU Rect;
+        LudusInstance Instance = NULL;
+        LudusWindowHandle WindowHandle = NULL;
 
     public:
-        virtual ~WindowMemberVariablesBase() noexcept = default;
+        LUDUS_INLINE virtual ~WindowMemberVariablesBase() noexcept
+        {
+            Instance = NULL;
+            WindowHandle = NULL;
+        }
     };
 
 #define LUDUS_DECLARATATION_BY_PLATFORM(FUNCTION_SIGNATURE) \
@@ -64,9 +70,10 @@ namespace ludus::platform
         [[nodiscard]] LUDUS_INLINE constexpr uint32_t GetWidth() const noexcept { return mMemberVariables->Rect.Width; }
         [[nodiscard]] LUDUS_INLINE constexpr uint32_t GetHeight() const noexcept { return mMemberVariables->Rect.Height; }
 
-        bool Initialize(const CreateInfo& createInfo) noexcept;
+        [[nodiscard]] bool Initialize(const CreateInfo& createInfo) noexcept;
         LUDUS_INLINE void Show(const int32_t commandShowFlag) const noexcept { show(commandShowFlag); }
-        LUDUS_INLINE uint64_t GetPlatformHandle() const noexcept { return getPlatformHandle(); }
+        [[nodiscard]] LUDUS_INLINE LudusInstance GetPlatformHandle() const noexcept { return mMemberVariables->Instance; }
+        [[nodiscard]] LUDUS_INLINE LudusWindowHandle GetWindowHandle() const noexcept { return mMemberVariables->WindowHandle; }
 
 #if defined(LUDUS_WINDOWS)
         void SetWindowProcedure(WindowProcedure windowProc) noexcept requires (PLATFORM_TYPE == PlatformType::WINDOWS);
@@ -81,7 +88,6 @@ namespace ludus::platform
         LUDUS_DECLARATATION_BY_PLATFORM(explicit Window() noexcept);
         LUDUS_DECLARATATION_BY_PLATFORM(bool initialize(const CreateInfo& createInfo) noexcept);
         LUDUS_DECLARATATION_BY_PLATFORM(void show(const int32_t commandShowFlag) const noexcept);
-        LUDUS_DECLARATATION_BY_PLATFORM(uint64_t getPlatformHandle() const noexcept);
 
     private:
         core::UniquePtr<WindowMemberVariablesBase>  mMemberVariables;
@@ -99,7 +105,7 @@ namespace ludus::platform
         void ParseCommandLineWithContext(const core::CommandLineManager<CharT>& commandLine) noexcept;
 
         // Window Management
-        Window<PLATFORM_TYPE>& CreateWindow(const typename Window<PLATFORM_TYPE>::CreateInfo& createInfo) noexcept;
+        core::UniquePtr<Window<PLATFORM_TYPE>>& CreateWindow(const typename Window<PLATFORM_TYPE>::CreateInfo& createInfo) noexcept;
 
     private:
         core::RectU mDefaultWindowRect;

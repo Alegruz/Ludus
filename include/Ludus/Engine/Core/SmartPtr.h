@@ -57,7 +57,11 @@ namespace ludus::core
 
         ~UniquePtr() noexcept;
 
-        [[nodiscard]] T* Get() const noexcept;
+        [[nodiscard]] LUDUS_INLINE constexpr bool operator==(std::nullptr_t) const noexcept { return mPtr == nullptr; }
+        [[nodiscard]] LUDUS_INLINE constexpr bool operator!=(std::nullptr_t) const noexcept { return operator==(nullptr) == false; }
+
+        [[nodiscard]] T* Get() noexcept;
+        [[nodiscard]] const T* Get() const noexcept;
         [[nodiscard]] Deleter& GetDeleter() noexcept;
         [[nodiscard]] const Deleter& GetDeleter() const noexcept;
 
