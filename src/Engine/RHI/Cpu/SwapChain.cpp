@@ -10,8 +10,9 @@ namespace ludus::rhi
     };
 
     template<GraphicsApi GRAPHICS_API>
-    SwapChain<GRAPHICS_API>::SwapChain() noexcept requires(GRAPHICS_API == GraphicsApi::CPU)
-        : mMemberVariables(core::MakeUnique<SwapChainMemberVariablesCpu>())
+    SwapChain<GRAPHICS_API>::SwapChain(const Instance<GRAPHICS_API>& rhiInstance) noexcept requires(GRAPHICS_API == GraphicsApi::CPU)
+        : InstanceChildObject<GRAPHICS_API>(rhiInstance)
+        , mMemberVariables(core::MakeUnique<SwapChainMemberVariablesCpu>())
     {
     }
 

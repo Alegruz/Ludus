@@ -6,7 +6,6 @@
 #define LUDUS_DXGI_VERSION_1_4  (14)
 #define LUDUS_DXGI_VERSION_1_3  (13)
 #define LUDUS_DXGI_VERSION_1_2  (12)
-#define LUDUS_DXGI_VERSION_1_1  (11)
 #define LUDUS_DXGI_VERSION_1_0  (10)
 
 #if __has_include(<dxgi1_6.h>)
@@ -24,15 +23,15 @@
 #elif __has_include(<dxgi1_2.h>)
     #define LUDUS_DXGI_VERSION  (12)
     #include <dxgi1_2.h>
-#elif __has_include(<dxgi1_1.h>)
-    #define LUDUS_DXGI_VERSION  (11)
-    #include <dxgi1_1.h>
 #elif __has_include(<dxgi.h>)
     #define LUDUS_DXGI_VERSION  (10)
     #include <dxgi.h>
 #else
     #error "DXGI header not found."
 #endif  // __has_include(<dxgi1_6.h>)
+
+#include <d3d12.h>
+
 #include <wrl/client.h>
 
 namespace ludus::rhi
@@ -68,5 +67,17 @@ namespace ludus::rhi
 #else
     using LudusDxgiSwapChain = IDXGISwapChain;
 #endif  // LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_5
+
+#if LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_6
+    using LudusDxgiAdapter = IDXGIAdapter4;
+#elif LUDUS_DXGI_VERSION == LUDUS_DXGI_VERSION_1_4
+    using LudusDxgiAdapter = IDXGIAdapter3;
+#elif LUDUS_DXGI_VERSION == LUDUS_DXGI_VERSION_1_2
+    using LudusDxgiAdapter = IDXGIAdapter2;
+#elif LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_0
+    using LudusDxgiAdapter = IDXGIAdapter1;
+#else
+    using LudusDxgiAdapter = IDXGIAdapter;
+#endif  // LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_6
 }   // namespace ludus::rhi 
 #endif  // defined(LUDUS_GRAPHICS_D3D12)

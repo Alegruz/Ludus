@@ -11,6 +11,11 @@ namespace ludus::rhi
 {
     struct InstanceMemberVariablesVulkan final : public InstanceMemberVariablesBase<GraphicsApi::VULKAN>
     {
+        LUDUS_INLINE explicit InstanceMemberVariablesVulkan(Instance<GraphicsApi::VULKAN>& rhiInstance)
+            : InstanceMemberVariablesBase<GraphicsApi::VULKAN>(rhiInstance)
+        {
+        }
+
         uint32_t InstanceVersion = 0;
         VkInstance Instance = VK_NULL_HANDLE;
 #if defined(LUDUS_DEBUG)
@@ -148,8 +153,8 @@ namespace ludus::rhi
 #define mMemberVariablesVulkan (*static_cast<InstanceMemberVariablesVulkan*>(mMemberVariables.Get()))   // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast,-warnings-as-errors)
 
     template<GraphicsApi GRAPHICS_API>
-    Instance<GRAPHICS_API>::Instance()  noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
-        : mMemberVariables(core::MakeUnique<InstanceMemberVariablesVulkan>())
+    Instance<GRAPHICS_API>::Instance() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+        : mMemberVariables(core::MakeUnique<InstanceMemberVariablesVulkan>(*this))
     {
     }
 
@@ -285,6 +290,15 @@ namespace ludus::rhi
     {
         // Vulkan RHI post swap chain initialization logic (if any) goes here.
         LUDUS_ASSERT_MSG(false, "Vulkan RHI Instance post swap chain initialization is not implemented yet.");
+
+        return true;
+    }
+
+    template<GraphicsApi GRAPHICS_API>
+    bool Instance<GRAPHICS_API>::initializeAdaptersImpl() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+    {
+        // Vulkan RHI adapter initialization logic (if any) goes here.
+        LUDUS_ASSERT_MSG(false, "Vulkan RHI Adapter initialization is not implemented yet.");
 
         return true;
     }

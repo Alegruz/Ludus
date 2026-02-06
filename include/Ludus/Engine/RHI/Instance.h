@@ -3,11 +3,13 @@
 #include <Ludus/Engine/RHI/Common.h>
 
 #include <Ludus/Engine/Core/SmartPtr.h>
+#include <Ludus/Engine/Core/Container/Array.hpp>
 #include <Ludus/Engine/Core/Container/String.h>
 #include <Ludus/Engine/Core/ProjectInfo.h>
 
 #include <Ludus/Engine/Platform/Window.h>
 
+#include <Ludus/Engine/RHI/Adapter.h>
 #include <Ludus/Engine/RHI/SwapChain.h>
 
 namespace ludus::rhi
@@ -16,17 +18,18 @@ namespace ludus::rhi
     struct InstanceMemberVariablesBase
     {
     public:
+        LUDUS_INLINE explicit InstanceMemberVariablesBase(Instance<GRAPHICS_API>& rhiInstance)
+            : SwapChain(rhiInstance)
+        {
+        }
         virtual ~InstanceMemberVariablesBase() = default;
 
     public:
+        static constexpr const int32_t INVALID_ADAPTER_INDEX = -1;
         SwapChain<GRAPHICS_API> SwapChain;
+        core::DynamicArray<Adapter<GRAPHICS_API>> Adapters;
+        int32_t MainAdapterIndex = INVALID_ADAPTER_INDEX;
     };
-
-#define LUDUS_DECLARATATION_BY_GRAPHICS_API(FUNCTION_SIGNATURE) \
-    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::CPU); \
-    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::VULKAN); \
-    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::D3D12); \
-    FUNCTION_SIGNATURE = delete
 
     template<GraphicsApi GRAPHICS_API>
     class Instance final
@@ -50,8 +53,10 @@ namespace ludus::rhi
         LUDUS_DECLARATATION_BY_GRAPHICS_API([[nodiscard]] bool initialize(const CreateInfo& createInfo) noexcept);
         LUDUS_DECLARATATION_BY_GRAPHICS_API([[nodiscard]] bool initializePostSwapChainInitialization(const CreateInfo& createInfo) noexcept);
         LUDUS_DECLARATATION_BY_GRAPHICS_API(void shutdown() noexcept);
-        LUDUS_DECLARATATION_BY_GRAPHICS_API([[nodiscard]] bool createSwapChainImpl(const SwapChain<GRAPHICS_API>::CreateInfo& createInfo) noexcept);
-        [[nodiscard]] bool createSwapChain(const SwapChain<GRAPHICS_API>::CreateInfo& createInfo) noexcept;
+        LUDUS_DECLARATATION_BY_GRAPHICS_API([[nodiscard]] bool initializeAdaptersImpl() noexcept);
+        LUDUS_DECLARATATION_BY_GRAPHICS_API([[nodiscard]] bool createSwapChainImpl(const typename SwapChain<GRAPHICS_API>::CreateInfo& createInfo) noexcept);
+        [[nodiscard]] bool initializeAdapters() noexcept;
+        [[nodiscard]] bool createSwapChain(const typename SwapChain<GRAPHICS_API>::CreateInfo& createInfo) noexcept;
 
     private:
         core::UniquePtr<InstanceMemberVariablesBase<GRAPHICS_API>> mMemberVariables;
@@ -68,7 +73,6 @@ namespace ludus::rhi
 
         typename SwapChain<GRAPHICS_API>::CreateInfo swapChainCreateInfo =
         {
-            .RhiInstance = *this,
             .Window = createInfo.Window,
             .BufferCount = 3,
         };
@@ -89,9 +93,21 @@ namespace ludus::rhi
     }
 
     template<GraphicsApi GRAPHICS_API>
-    LUDUS_INLINE bool Instance<GRAPHICS_API>::createSwapChain(const SwapChain<GRAPHICS_API>::CreateInfo& createInfo) noexcept
+    LUDUS_INLINE bool Instance<GRAPHICS_API>::initializeAdapters() noexcept
     {
-        if( createSwapChainImpl(createInfo) == false )
+        if( this->initializeAdaptersImpl() == false )
+        {
+            LUDUS_ASSERT_MSG(false, "Failed to initialize RHI Adapters.");
+            return false;
+        }
+        typename Adapter<GRAPHICS_API>::CreateInfo adapterCreateInfo = {};
+        return mMemberVariables->Adapters.GetBack().Initialize(adapterCreateInfo);
+    }
+
+    template<GraphicsApi GRAPHICS_API>
+    LUDUS_INLINE bool Instance<GRAPHICS_API>::createSwapChain(const typename SwapChain<GRAPHICS_API>::CreateInfo& createInfo) noexcept
+    {
+        if( this->createSwapChainImpl(createInfo) == false )
         {
             LUDUS_ASSERT_MSG(false, "Failed to create RHI SwapChain.");
             return false;

@@ -5,6 +5,9 @@ add_library(LudusRHI SHARED)
 set(LUDUS_RHI_SOURCES 
     "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/Texture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/Instance.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/Adapter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/Device.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/CommandQueue.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/SwapChain.cpp"
     )
 

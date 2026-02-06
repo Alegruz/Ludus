@@ -53,6 +53,12 @@ namespace ludus::rhi
         return 0u;
     }
     
+#define LUDUS_DECLARATATION_BY_GRAPHICS_API(FUNCTION_SIGNATURE) \
+    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::CPU); \
+    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::VULKAN); \
+    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::D3D12); \
+    FUNCTION_SIGNATURE = delete
+    
 #if defined(LUDUS_GRAPHICS_CPU)
     constexpr GraphicsApi CURRENT_GRAPHICS_API = GraphicsApi::CPU;
 #elif defined(LUDUS_GRAPHICS_VULKAN)

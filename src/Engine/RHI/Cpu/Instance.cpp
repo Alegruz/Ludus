@@ -7,11 +7,15 @@ namespace ludus::rhi
 {   
     struct InstanceMemberVariablesCpu final : public InstanceMemberVariablesBase<GraphicsApi::CPU>
     {
+        LUDUS_INLINE explicit InstanceMemberVariablesCpu(Instance<GraphicsApi::CPU>& rhiInstance)
+            : InstanceMemberVariablesBase<GraphicsApi::CPU>(rhiInstance)
+        {
+        }
     };
 
     template<GraphicsApi GRAPHICS_API>
     Instance<GRAPHICS_API>::Instance() noexcept requires(GRAPHICS_API == GraphicsApi::CPU)
-        : mMemberVariables(core::MakeUnique<InstanceMemberVariablesCpu>())
+        : mMemberVariables(core::MakeUnique<InstanceMemberVariablesCpu>(*this))
     {
     }
 
@@ -38,6 +42,15 @@ namespace ludus::rhi
     {
         // CPU RHI instance shutdown logic (if any) goes here.
         LUDUS_ASSERT_MSG(false, "CPU RHI Instance is not implemented yet.");
+    }
+
+    template<GraphicsApi GRAPHICS_API>
+    bool Instance<GRAPHICS_API>::initializeAdaptersImpl() noexcept requires(GRAPHICS_API == GraphicsApi::CPU)
+    {
+        // CPU RHI adapter initialization logic (if any) goes here.
+        LUDUS_ASSERT_MSG(false, "CPU RHI Adapter initialization is not implemented yet.");
+
+        return true;
     }
 
     template<GraphicsApi GRAPHICS_API>

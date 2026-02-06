@@ -17,8 +17,9 @@ namespace ludus::rhi
 #define mMemberVariablesD3D12 (*static_cast<SwapChainMemberVariablesD3D12*>(mMemberVariables.Get()))   // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast,-warnings-as-errors)
 
     template<GraphicsApi GRAPHICS_API>
-    SwapChain<GRAPHICS_API>::SwapChain() noexcept requires(GRAPHICS_API == GraphicsApi::D3D12)
-        : mMemberVariables(core::MakeUnique<SwapChainMemberVariablesD3D12>())
+    SwapChain<GRAPHICS_API>::SwapChain(const Instance<GRAPHICS_API>& rhiInstance) noexcept requires(GRAPHICS_API == GraphicsApi::D3D12)
+        : InstanceChildObject<GRAPHICS_API>(rhiInstance)
+        , mMemberVariables(core::MakeUnique<SwapChainMemberVariablesD3D12>())
     {
     }
 

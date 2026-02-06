@@ -12,8 +12,9 @@ namespace ludus::rhi
 #define mMemberVariablesVulkan (*static_cast<SwapChainMemberVariablesVulkan*>(mMemberVariables.Get()))   // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast,-warnings-as-errors)
 
     template<GraphicsApi GRAPHICS_API>
-    SwapChain<GRAPHICS_API>::SwapChain()  noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
-        : mMemberVariables(core::MakeUnique<SwapChainMemberVariablesVulkan>())
+    SwapChain<GRAPHICS_API>::SwapChain(const Instance<GRAPHICS_API>& rhiInstance)  noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+        : InstanceChildObject<GRAPHICS_API>(rhiInstance)
+        , mMemberVariables(core::MakeUnique<SwapChainMemberVariablesVulkan>())
     {
     }
 

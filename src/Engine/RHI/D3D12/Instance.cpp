@@ -8,6 +8,7 @@
 #include <Ludus/Engine/Platform/Window.hpp>
 
 #include <Ludus/Engine/RHI/D3D12/Common.h>
+#include <Ludus/Engine/RHI/D3D12/Adapter.h>
 #include <Ludus/Engine/RHI/D3D12/SwapChain.h>
 
 #include <wrl/client.h>
@@ -25,6 +26,11 @@ namespace ludus::rhi
 {
     struct InstanceMemberVariablesD3D12 final : public InstanceMemberVariablesBase<GraphicsApi::D3D12>
     {
+        LUDUS_INLINE explicit InstanceMemberVariablesD3D12(Instance<GraphicsApi::D3D12>& rhiInstance)
+            : InstanceMemberVariablesBase<GraphicsApi::D3D12>(rhiInstance)
+        {
+        }
+
         ComPtr<LudusDxgiFactory> DxgiFactory = nullptr;
     };
 
@@ -32,7 +38,7 @@ namespace ludus::rhi
 
     template<GraphicsApi GRAPHICS_API>
     Instance<GRAPHICS_API>::Instance() noexcept requires(GRAPHICS_API == GraphicsApi::D3D12)
-        : mMemberVariables(core::MakeUnique<InstanceMemberVariablesD3D12>())
+        : mMemberVariables(core::MakeUnique<InstanceMemberVariablesD3D12>(*this))
     {
     }
 
@@ -107,12 +113,79 @@ namespace ludus::rhi
     }
 
     template<GraphicsApi GRAPHICS_API>
+    bool Instance<GRAPHICS_API>::initializeAdaptersImpl() noexcept requires(GRAPHICS_API == GraphicsApi::D3D12)
+    {
+        HRESULT hr = S_OK;
+        uint32_t adapterIndex = 0;
+        while(true)
+        {
+            ComPtr<IDXGIAdapter> dxgiAdapter;
+            if constexpr (LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_6  )
+            {
+                hr = mMemberVariablesD3D12.DxgiFactory->EnumAdapterByGpuPreference(
+                    adapterIndex,
+                    DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+                    IID_PPV_ARGS(dxgiAdapter.GetAddressOf()));
+            }
+            else if constexpr (LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_0)
+            {
+                ComPtr<IDXGIAdapter1> dxgiAdapter1;
+                hr = mMemberVariablesD3D12.DxgiFactory->EnumAdapters1(
+                    adapterIndex,
+                    dxgiAdapter1.GetAddressOf());
+                if (SUCCEEDED(hr))
+                {
+                    hr = dxgiAdapter1.As(&dxgiAdapter);
+                    if( FAILED(hr))
+                    {
+                        LUDUS_ASSERT_MSG(false, "Failed to query IDXGIAdapter interface for D3D12 adapter.");
+                        return false;
+                    }
+                }
+            }
+            else
+            {
+                hr = mMemberVariablesD3D12.DxgiFactory->EnumAdapters(
+                    adapterIndex,
+                    dxgiAdapter.GetAddressOf());
+            }
+            if (hr == DXGI_ERROR_NOT_FOUND)
+            {
+                break;
+            }
+            
+            if (FAILED(hr))
+            {
+                LUDUS_ASSERT_MSG(false, "Failed to enumerate DXGI adapters by GPU preference.");
+                return false;
+            }
+            adapterIndex++;
+            mMemberVariablesD3D12.Adapters.PushBack(Adapter<GraphicsApi::D3D12>(*this));
+            
+            hr = dxgiAdapter.As(&static_cast<AdapterMemberVariablesD3D12&>(*mMemberVariablesD3D12.Adapters.GetBack().mMemberVariables).DxgiAdapter);   // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
+            if (FAILED(hr))
+            {
+                LUDUS_ASSERT_MSG(false, "Failed to query IDXGIAdapter interface for D3D12 adapter.");
+                return false;
+            }
+
+            // TODO: Select main adapter based on criteria (e.g., dedicated GPU)
+            if(mMemberVariablesD3D12.MainAdapterIndex == InstanceMemberVariablesBase<GraphicsApi::D3D12>::INVALID_ADAPTER_INDEX)
+            {
+                mMemberVariablesD3D12.MainAdapterIndex = static_cast<int32_t>(adapterIndex - 1);
+            }
+        }
+
+        return true;
+    }
+
+    template<GraphicsApi GRAPHICS_API>
     void Instance<GRAPHICS_API>::shutdown() noexcept requires(GRAPHICS_API == GraphicsApi::D3D12)
     {
     }
 
     template<GraphicsApi GRAPHICS_API>
-    bool Instance<GRAPHICS_API>::createSwapChainImpl([[maybe_unused]] const SwapChain<GRAPHICS_API>::CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::D3D12)
+    bool Instance<GRAPHICS_API>::createSwapChainImpl([[maybe_unused]] const typename SwapChain<GRAPHICS_API>::CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::D3D12)
     {
         // D3D12 RHI swap chain creation logic (if any) goes here.
         LUDUS_ASSERT_MSG(false, "D3D12 RHI SwapChain creation is not implemented yet.");
