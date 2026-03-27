@@ -27,7 +27,7 @@ REPOS = {
         "tag_key": "name",
         "is_tags_endpoint": True,
         "changelog_key": "body",
-        "version_regex": r"v(\d+\.\d+\.\d+)(?![.]|$)",  # Match v1.3.275 format
+        "version_regex": r"^v(\d+\.\d+\.\d+)$",  # Match exact v1.3.275 format
     },
 }
 
