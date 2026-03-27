@@ -7,6 +7,28 @@ namespace ludus::core
     template<typename T>
     concept ArrayElementType = std::is_move_constructible_v<T>;
 
+    template<typename T>
+    concept ArrayDefaultSortable = requires(const T& lhs, const T& rhs)
+    {
+        { lhs < rhs } -> std::convertible_to<bool>;
+    };
+
+    template<typename Comparator, typename T>
+    concept ArrayComparator = requires(const Comparator& comparator, const T& lhs, const T& rhs)
+    {
+        { comparator(lhs, rhs) } -> std::convertible_to<bool>;
+    };
+
+    template<typename T>
+    struct ArrayLess final
+    {
+        [[nodiscard]] constexpr bool operator()(const T& lhs, const T& rhs) const noexcept(noexcept(lhs < rhs))
+            requires ArrayDefaultSortable<T>
+        {
+            return lhs < rhs;
+        }
+    };
+
     enum class ArrayType : uint8_t
     {
         DYNAMIC,
@@ -172,6 +194,21 @@ namespace ludus::core
         constexpr void PushBack(const T& element) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr void PushBack(T&& element) noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
         constexpr void PopBack() noexcept requires (ARRAY_TYPE == ArrayType::DYNAMIC);
+        constexpr void Sort() noexcept(noexcept(std::declval<ArrayImpl&>().Sort(ArrayLess<T>{}))) requires (ArrayComparator<ArrayLess<T>, T> && std::is_move_assignable_v<T>);
+        template<typename Comparator>
+        constexpr void Sort(const Comparator& comparator) noexcept(noexcept(comparator(std::declval<const T&>(), std::declval<const T&>())) && std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>) requires (ArrayComparator<Comparator, T> && std::is_move_assignable_v<T>);
+
+    private:
+        static constexpr uint32_t SORT_INSERTION_THRESHOLD = 16;
+
+    private:
+        static constexpr void swapElements(T& lhs, T& rhs) noexcept(std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>);
+        template<typename Comparator>
+        constexpr void insertionSort(uint32_t first, uint32_t last, const Comparator& comparator) noexcept(noexcept(comparator(std::declval<const T&>(), std::declval<const T&>())) && std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>) requires (ArrayComparator<Comparator, T> && std::is_move_assignable_v<T>);
+        template<typename Comparator>
+        constexpr uint32_t partition(uint32_t first, uint32_t last, const Comparator& comparator) noexcept(noexcept(comparator(std::declval<const T&>(), std::declval<const T&>())) && std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>) requires (ArrayComparator<Comparator, T> && std::is_move_assignable_v<T>);
+        template<typename Comparator>
+        constexpr void quickSort(uint32_t first, uint32_t last, const Comparator& comparator) noexcept(noexcept(comparator(std::declval<const T&>(), std::declval<const T&>())) && std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>) requires (ArrayComparator<Comparator, T> && std::is_move_assignable_v<T>);
     };
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY = 0, ArrayResizePolicy RESIZE_POLICY = ArrayResizePolicy::DEFAULT>

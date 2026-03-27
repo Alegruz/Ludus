@@ -913,6 +913,105 @@ LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLI
     }
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
+    LUDUS_INLINE constexpr void ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Sort() noexcept(noexcept(std::declval<ArrayImpl&>().Sort(ArrayLess<T>{})))
+        requires (ArrayComparator<ArrayLess<T>, T> && std::is_move_assignable_v<T>)
+    {
+        Sort(ArrayLess<T>{});
+    }
+
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
+    template<typename Comparator>
+    LUDUS_INLINE constexpr void ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::Sort(const Comparator& comparator) noexcept(noexcept(comparator(std::declval<const T&>(), std::declval<const T&>())) && std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>)
+        requires (ArrayComparator<Comparator, T> && std::is_move_assignable_v<T>)
+    {
+        const uint32_t size = this->GetSize();
+        if(size < 2)
+        {
+            return;
+        }
+
+        quickSort(0, size - 1, comparator);
+    }
+
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
+    LUDUS_INLINE constexpr void ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::swapElements(T& lhs, T& rhs) noexcept(std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>)
+    {
+        if(&lhs == &rhs)
+        {
+            return;
+        }
+
+        T temp(std::move(lhs));
+        lhs = std::move(rhs);
+        rhs = std::move(temp);
+    }
+
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
+    template<typename Comparator>
+    LUDUS_INLINE constexpr void ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::insertionSort(const uint32_t first, const uint32_t last, const Comparator& comparator) noexcept(noexcept(comparator(std::declval<const T&>(), std::declval<const T&>())) && std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>)
+        requires (ArrayComparator<Comparator, T> && std::is_move_assignable_v<T>)
+    {
+        for(uint32_t i = first + 1; i <= last; ++i)
+        {
+            uint32_t currentIndex = i;
+            while(currentIndex > first && comparator(this->mData[currentIndex], this->mData[currentIndex - 1]))
+            {
+                swapElements(this->mData[currentIndex - 1], this->mData[currentIndex]);
+                --currentIndex;
+            }
+        }
+    }
+
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
+    template<typename Comparator>
+    LUDUS_INLINE constexpr uint32_t ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::partition(const uint32_t first, const uint32_t last, const Comparator& comparator) noexcept(noexcept(comparator(std::declval<const T&>(), std::declval<const T&>())) && std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>)
+        requires (ArrayComparator<Comparator, T> && std::is_move_assignable_v<T>)
+    {
+        const uint32_t pivotIndex = first + ((last - first) / 2);
+        swapElements(this->mData[pivotIndex], this->mData[last]);
+
+        uint32_t storeIndex = first;
+        for(uint32_t i = first; i < last; ++i)
+        {
+            if(comparator(this->mData[i], this->mData[last]))
+            {
+                swapElements(this->mData[i], this->mData[storeIndex]);
+                ++storeIndex;
+            }
+        }
+
+        swapElements(this->mData[storeIndex], this->mData[last]);
+        return storeIndex;
+    }
+
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
+    template<typename Comparator>
+    LUDUS_INLINE constexpr void ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::quickSort(const uint32_t first, const uint32_t last, const Comparator& comparator) noexcept(noexcept(comparator(std::declval<const T&>(), std::declval<const T&>())) && std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>)
+        requires (ArrayComparator<Comparator, T> && std::is_move_assignable_v<T>)
+    {
+        if(first >= last)
+        {
+            return;
+        }
+
+        if((last - first + 1) <= SORT_INSERTION_THRESHOLD)
+        {
+            insertionSort(first, last, comparator);
+            return;
+        }
+
+        const uint32_t pivotIndex = partition(first, last, comparator);
+        if(pivotIndex > first)
+        {
+            quickSort(first, pivotIndex - 1, comparator);
+        }
+        if(pivotIndex < last)
+        {
+            quickSort(pivotIndex + 1, last, comparator);
+        }
+    }
+
+    template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /* = ArrayResizePolicy::DEFAULT */>
     LUDUS_INLINE constexpr bool operator==(const ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& lhs, const ArrayImpl<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>& rhs) noexcept
     {
         if(lhs.GetSize() != rhs.GetSize())

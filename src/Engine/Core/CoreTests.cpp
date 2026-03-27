@@ -24,6 +24,12 @@ namespace
 		uint32_t Count = 0;
 	};
 
+	struct SortableRecord final
+	{
+		String Name;
+		uint32_t Priority = 0;
+	};
+
 	void CaptureLogSink(const LogMessage& message, void* userData) noexcept
 	{
 		auto* captured = static_cast<CapturedLog*>(userData);
@@ -611,6 +617,67 @@ LUDUS_TEST(DynamicArray_PopBack)
 	LUDUS_TEST_ASSERT_EQ(arr.GetSize(), 2u);
 	LUDUS_TEST_ASSERT_EQ(arr[0], 1);
 	LUDUS_TEST_ASSERT_EQ(arr[1], 2);
+}
+
+LUDUS_TEST(DynamicArray_SortDefaultComparator)
+{
+	DynamicArray<int> arr;
+	arr.PushBack(7);
+	arr.PushBack(3);
+	arr.PushBack(9);
+	arr.PushBack(1);
+	arr.PushBack(5);
+
+	arr.Sort();
+
+	LUDUS_TEST_ASSERT_EQ(arr.GetSize(), 5u);
+	LUDUS_TEST_ASSERT_EQ(arr[0], 1);
+	LUDUS_TEST_ASSERT_EQ(arr[1], 3);
+	LUDUS_TEST_ASSERT_EQ(arr[2], 5);
+	LUDUS_TEST_ASSERT_EQ(arr[3], 7);
+	LUDUS_TEST_ASSERT_EQ(arr[4], 9);
+}
+
+LUDUS_TEST(DynamicArray_SortCustomComparatorNonPod)
+{
+	DynamicArray<SortableRecord> arr;
+	arr.PushBack({ String("Render"), 30 });
+	arr.PushBack({ String("Physics"), 20 });
+	arr.PushBack({ String("Animation"), 20 });
+	arr.PushBack({ String("Audio"), 10 });
+
+	arr.Sort([](const SortableRecord& lhs, const SortableRecord& rhs) noexcept
+	{
+		if (lhs.Priority != rhs.Priority)
+		{
+			return lhs.Priority < rhs.Priority;
+		}
+
+		return std::strcmp(lhs.Name.GetCStr(), rhs.Name.GetCStr()) < 0;
+	});
+
+	LUDUS_TEST_ASSERT_EQ(arr.GetSize(), 4u);
+	LUDUS_TEST_ASSERT(arr[0].Name == "Audio");
+	LUDUS_TEST_ASSERT(arr[1].Name == "Animation");
+	LUDUS_TEST_ASSERT(arr[2].Name == "Physics");
+	LUDUS_TEST_ASSERT(arr[3].Name == "Render");
+}
+
+LUDUS_TEST(StaticArray_SortCustomComparator)
+{
+	StaticArray<int, 5> arr { 4, 1, 5, 2, 3 };
+
+	arr.Sort([](const int lhs, const int rhs) noexcept
+	{
+		return lhs > rhs;
+	});
+
+	LUDUS_TEST_ASSERT_EQ(arr.GetSize(), 5u);
+	LUDUS_TEST_ASSERT_EQ(arr[0], 5);
+	LUDUS_TEST_ASSERT_EQ(arr[1], 4);
+	LUDUS_TEST_ASSERT_EQ(arr[2], 3);
+	LUDUS_TEST_ASSERT_EQ(arr[3], 2);
+	LUDUS_TEST_ASSERT_EQ(arr[4], 1);
 }
 
 LUDUS_TEST(String_Construction)
