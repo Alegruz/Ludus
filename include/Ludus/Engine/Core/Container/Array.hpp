@@ -181,7 +181,7 @@ namespace ludus::core
 
     template<ArrayElementType T, ArrayType ARRAY_TYPE, uint32_t STATIC_CAPACITY /*= 0*/, ArrayResizePolicy RESIZE_POLICY /*= ArrayResizePolicy::DEFAULT*/>
     LUDUS_INLINE constexpr ArrayImplBase<T, ARRAY_TYPE, STATIC_CAPACITY, RESIZE_POLICY>::ArrayImplBase(std::initializer_list<T> initList) noexcept
-        : ArrayImplBase(static_cast<uint32_t>(initList.size()))
+        : ArrayImplBase()
     {
         Assign(initList);
     }
