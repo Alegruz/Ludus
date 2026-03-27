@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Ludus/Engine/Core/Compiler.h>
+#include <Ludus/Engine/Core/Logger.h>
 
 #include <cstdio>
 
@@ -19,13 +20,17 @@ namespace ludus::core
     LUDUS_INLINE bool DefaultAssertHandler(const AssertInfo& info, bool* ignoreAlways) noexcept // NOLINT(readability-non-const-parameter)
     {
         const char* message = info.Message ? info.Message : "(no message)";
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg) - fprintf is appropriate for low-level error reporting
-        std::fprintf(stderr,
-            "Assertion failed!\n  Expression: %s\n  Message: %s\n  File: %s\n  Line: %d\n",
+        const std::string formattedMessage = std::format(
+            "Assertion failed: expr=`{}` message=`{}`",
             info.Expression,
-            message,
+            message);
+        LogWrite(
+            LogLevel::Fatal,
+            "Assert",
             info.File,
-            info.Line);
+            "Assert",
+            static_cast<uint32_t>(info.Line),
+            formattedMessage.c_str());
         (void)ignoreAlways;
         return true;
     }

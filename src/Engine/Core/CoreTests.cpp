@@ -10,8 +10,34 @@
 #include <Ludus/Engine/Core/CommandLineManager.hpp>
 #include <Ludus/Engine/Core/Container/Array.hpp>
 #include <Ludus/Engine/Core/Container/String.hpp>
+#include <Ludus/Engine/Core/Logger.h>
 
 using namespace ludus::core;
+
+namespace
+{
+	struct CapturedLog final
+	{
+		LogLevel Level = LogLevel::Off;
+		String Category;
+		String Text;
+		uint32_t Count = 0;
+	};
+
+	void CaptureLogSink(const LogMessage& message, void* userData) noexcept
+	{
+		auto* captured = static_cast<CapturedLog*>(userData);
+		if (captured == nullptr)
+		{
+			return;
+		}
+
+		captured->Level = message.Level;
+		captured->Category = message.Category != nullptr ? String(message.Category) : String("");
+		captured->Text = message.Text != nullptr ? String(message.Text) : String("");
+		++captured->Count;
+	}
+} // namespace
 
 // Suppress magic number warnings for test values - tests should have explicit, readable values
 // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
@@ -751,6 +777,83 @@ LUDUS_TEST(CommandLineManager_BackslashAtEnd)
 	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
 	LUDUS_TEST_ASSERT(args[0] == String("program"));
 	LUDUS_TEST_ASSERT(args[1] == String("test\\"));
+}
+
+// ========================================
+// Logger Tests
+// ========================================
+
+LUDUS_TEST(Logger_FormatsAndDispatchesToCustomSink)
+{
+	ResetLogger();
+	SetStandardLogSinkEnabled(false);
+	SetDebuggerLogSinkEnabled(false);
+
+	CapturedLog captured;
+	LUDUS_TEST_ASSERT(AddLogSink(CaptureLogSink, &captured));
+
+	LUDUS_LOG_INFO("CoreTest", "Frame {} ready in {} ms", 7, 3.5f);
+
+	LUDUS_TEST_ASSERT_EQ(captured.Count, 1u);
+	LUDUS_TEST_ASSERT(captured.Category == String("CoreTest"));
+	LUDUS_TEST_ASSERT(captured.Text == String("Frame 7 ready in 3.5 ms"));
+	LUDUS_TEST_ASSERT(captured.Level == LogLevel::Info);
+	LUDUS_TEST_ASSERT(RemoveLogSink(CaptureLogSink, &captured));
+}
+
+LUDUS_TEST(Logger_RespectsRuntimeLevelFiltering)
+{
+	ResetLogger();
+	SetStandardLogSinkEnabled(false);
+	SetDebuggerLogSinkEnabled(false);
+	SetLogLevel(LogLevel::Warning);
+
+	CapturedLog captured;
+	LUDUS_TEST_ASSERT(AddLogSink(CaptureLogSink, &captured));
+
+	LUDUS_LOG_INFO("CoreTest", "This should be filtered");
+	LUDUS_TEST_ASSERT_EQ(captured.Count, 0u);
+
+	LUDUS_LOG_ERROR("CoreTest", "This should pass");
+	LUDUS_TEST_ASSERT_EQ(captured.Count, 1u);
+	LUDUS_TEST_ASSERT(captured.Text == String("This should pass"));
+	LUDUS_TEST_ASSERT(RemoveLogSink(CaptureLogSink, &captured));
+}
+
+LUDUS_TEST(Logger_ResetClearsCustomSinksAndRestoresDefaults)
+{
+	ResetLogger();
+	SetStandardLogSinkEnabled(false);
+	SetDebuggerLogSinkEnabled(false);
+	SetLogLevel(LogLevel::Fatal);
+
+	CapturedLog captured;
+	LUDUS_TEST_ASSERT(AddLogSink(CaptureLogSink, &captured));
+
+	ResetLogger();
+	SetStandardLogSinkEnabled(false);
+	SetDebuggerLogSinkEnabled(false);
+
+	LUDUS_TEST_ASSERT(GetLogLevel() == GetDefaultLogLevel());
+	LUDUS_LOG_INFO("CoreTest", "Reset should remove prior test sink");
+	LUDUS_TEST_ASSERT_EQ(captured.Count, 0u);
+}
+
+LUDUS_TEST(Logger_SupportsIntegerBaseFormatting)
+{
+	ResetLogger();
+	SetStandardLogSinkEnabled(false);
+	SetDebuggerLogSinkEnabled(false);
+
+	CapturedLog captured;
+	LUDUS_TEST_ASSERT(AddLogSink(CaptureLogSink, &captured));
+
+	const uint32_t value = 42u;
+	LUDUS_LOG_INFO("CoreTest", "bin={:#010b} oct={:#06o} hex={:#06x}", value, value, value);
+
+	LUDUS_TEST_ASSERT_EQ(captured.Count, 1u);
+	LUDUS_TEST_ASSERT(captured.Text == String("bin=0b00101010 oct=00052 hex=0x002a"));
+	LUDUS_TEST_ASSERT(RemoveLogSink(CaptureLogSink, &captured));
 }
 
 // NOLINTEND(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
