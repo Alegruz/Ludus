@@ -6,6 +6,7 @@ add_library(LudusCore SHARED)
 target_sources(LudusCore PRIVATE
     CommandLineOptions.cpp
     CommandLineManager.cpp
+    Logger.cpp
     Random.cpp
     Container/String.cpp
 )

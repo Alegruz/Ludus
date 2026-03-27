@@ -7,38 +7,10 @@
 
 #include <Ludus/Engine/Platform/Window.hpp>
 
-#define LUDUS_DXGI_VERSION_1_6  (16)
-#define LUDUS_DXGI_VERSION_1_5  (15)
-#define LUDUS_DXGI_VERSION_1_4  (14)
-#define LUDUS_DXGI_VERSION_1_3  (13)
-#define LUDUS_DXGI_VERSION_1_2  (12)
-#define LUDUS_DXGI_VERSION_1_1  (11)
-#define LUDUS_DXGI_VERSION_1_0  (10)
+#include <Ludus/Engine/RHI/D3D12/Common.h>
+#include <Ludus/Engine/RHI/D3D12/Adapter.h>
+#include <Ludus/Engine/RHI/D3D12/SwapChain.h>
 
-#if __has_include(<dxgi1_6.h>)
-    #define LUDUS_DXGI_VERSION  (16)
-    #include <dxgi1_6.h>
-#elif __has_include(<dxgi1_5.h>)
-    #define LUDUS_DXGI_VERSION  (15)
-    #include <dxgi1_5.h>
-#elif __has_include(<dxgi1_4.h>)
-    #define LUDUS_DXGI_VERSION  (14)
-    #include <dxgi1_4.h>
-#elif __has_include(<dxgi1_3.h>)
-    #define LUDUS_DXGI_VERSION  (13)
-    #include <dxgi1_3.h>
-#elif __has_include(<dxgi1_2.h>)
-    #define LUDUS_DXGI_VERSION  (12)
-    #include <dxgi1_2.h>
-#elif __has_include(<dxgi1_1.h>)
-    #define LUDUS_DXGI_VERSION  (11)
-    #include <dxgi1_1.h>
-#elif __has_include(<dxgi.h>)
-    #define LUDUS_DXGI_VERSION  (10)
-    #include <dxgi.h>
-#else
-    #error "DXGI header not found."
-#endif  // __has_include(<dxgi1_6.h>)
 #include <wrl/client.h>
 
 using Microsoft::WRL::ComPtr;
@@ -52,28 +24,13 @@ extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\
 
 namespace ludus::rhi
 {
-#if LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_6
-    using LudusDxgiFactory = IDXGIFactory7;
-#elif LUDUS_DXGI_VERSION == LUDUS_DXGI_VERSION_1_5
-    using LudusDxgiFactory = IDXGIFactory5;
-#elif LUDUS_DXGI_VERSION == LUDUS_DXGI_VERSION_1_4
-    using LudusDxgiFactory = IDXGIFactory4;
-#elif LUDUS_DXGI_VERSION == LUDUS_DXGI_VERSION_1_3
-    using LudusDxgiFactory = IDXGIFactory3;
-#elif LUDUS_DXGI_VERSION == LUDUS_DXGI_VERSION_1_2
-    using LudusDxgiFactory = IDXGIFactory2;
-#elif LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_0
-    using LudusDxgiFactory = IDXGIFactory1;
-#endif  // LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_6
-
-#if LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_3
-    using LudusDxgiCreatingFactory = IDXGIFactory2;
-#else
-    using LudusDxgiCreatingFactory = IDXGIFactory1;
-#endif  // LUDUS_DXGI_VERSION < LUDUS_DXGI_VERSION_1_3
-
-    struct InstanceMemberVariablesD3D12 final : public InstanceMemberVariablesBase
+    struct InstanceMemberVariablesD3D12 final : public InstanceMemberVariablesBase<GraphicsApi::D3D12>
     {
+        LUDUS_INLINE explicit InstanceMemberVariablesD3D12(Instance<GraphicsApi::D3D12>& rhiInstance)
+            : InstanceMemberVariablesBase<GraphicsApi::D3D12>(rhiInstance)
+        {
+        }
+
         ComPtr<LudusDxgiFactory> DxgiFactory = nullptr;
     };
 
@@ -81,7 +38,7 @@ namespace ludus::rhi
 
     template<GraphicsApi GRAPHICS_API>
     Instance<GRAPHICS_API>::Instance() noexcept requires(GRAPHICS_API == GraphicsApi::D3D12)
-        : mMemberVariables(core::MakeUnique<InstanceMemberVariablesD3D12>())
+        : mMemberVariables(core::MakeUnique<InstanceMemberVariablesD3D12>(*this))
     {
     }
 
@@ -119,16 +76,6 @@ namespace ludus::rhi
                 return false;
             }
         }
-
-        const HWND windowHandle = reinterpret_cast<HWND>(createInfo.Window.GetPlatformHandle());  // NOLINT(performance-no-int-to-ptr)
-        LUDUS_ASSERT_MSG(windowHandle != NULL, "Invalid window handle for D3D12 instance initialization.");
-
-        hr = mMemberVariablesD3D12.DxgiFactory->MakeWindowAssociation(windowHandle, DXGI_MWA_NO_ALT_ENTER);
-        if (FAILED(hr))
-        {
-            LUDUS_ASSERT_MSG(false, "Failed to make window association for D3D12.");
-            return false;
-        }
         
         if constexpr (LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_2)
         {
@@ -150,8 +97,171 @@ namespace ludus::rhi
     }
 
     template<GraphicsApi GRAPHICS_API>
+    bool Instance<GRAPHICS_API>::initializePostSwapChainInitialization([[maybe_unused]] const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::D3D12)
+    {
+        const HWND windowHandle = reinterpret_cast<HWND>(createInfo.Window.GetWindowHandle());  // NOLINT(performance-no-int-to-ptr)
+        LUDUS_ASSERT_MSG(windowHandle != NULL, "Invalid window handle for D3D12 instance initialization.");
+        
+        HRESULT hr = mMemberVariablesD3D12.DxgiFactory->MakeWindowAssociation(windowHandle, DXGI_MWA_NO_ALT_ENTER);
+        if (FAILED(hr))
+        {
+            LUDUS_ASSERT_MSG(false, "Failed to make window association for D3D12.");
+            return false;
+        }
+
+        return true;
+    }
+
+    template<GraphicsApi GRAPHICS_API>
+    bool Instance<GRAPHICS_API>::initializeAdaptersImpl() noexcept requires(GRAPHICS_API == GraphicsApi::D3D12)
+    {
+        HRESULT hr = S_OK;
+        uint32_t adapterIndex = 0;
+        while(true)
+        {
+            ComPtr<IDXGIAdapter> dxgiAdapter;
+            if constexpr (LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_6  )
+            {
+                hr = mMemberVariablesD3D12.DxgiFactory->EnumAdapterByGpuPreference(
+                    adapterIndex,
+                    DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+                    IID_PPV_ARGS(dxgiAdapter.GetAddressOf()));
+            }
+            else if constexpr (LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_0)
+            {
+                ComPtr<IDXGIAdapter1> dxgiAdapter1;
+                hr = mMemberVariablesD3D12.DxgiFactory->EnumAdapters1(
+                    adapterIndex,
+                    dxgiAdapter1.GetAddressOf());
+                if (SUCCEEDED(hr))
+                {
+                    hr = dxgiAdapter1.As(&dxgiAdapter);
+                    if( FAILED(hr))
+                    {
+                        LUDUS_ASSERT_MSG(false, "Failed to query IDXGIAdapter interface for D3D12 adapter.");
+                        return false;
+                    }
+                }
+            }
+            else
+            {
+                hr = mMemberVariablesD3D12.DxgiFactory->EnumAdapters(
+                    adapterIndex,
+                    dxgiAdapter.GetAddressOf());
+            }
+            if (hr == DXGI_ERROR_NOT_FOUND)
+            {
+                break;
+            }
+            
+            if (FAILED(hr))
+            {
+                LUDUS_ASSERT_MSG(false, "Failed to enumerate DXGI adapters by GPU preference.");
+                return false;
+            }
+            adapterIndex++;
+            mMemberVariablesD3D12.Adapters.PushBack(Adapter<GraphicsApi::D3D12>(*this));
+            
+            hr = dxgiAdapter.As(&static_cast<AdapterMemberVariablesD3D12&>(*mMemberVariablesD3D12.Adapters.GetBack().mMemberVariables).DxgiAdapter);   // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
+            if (FAILED(hr))
+            {
+                LUDUS_ASSERT_MSG(false, "Failed to query IDXGIAdapter interface for D3D12 adapter.");
+                return false;
+            }
+
+            // TODO: Select main adapter based on criteria (e.g., dedicated GPU)
+            if(mMemberVariablesD3D12.MainAdapterIndex == InstanceMemberVariablesBase<GraphicsApi::D3D12>::INVALID_ADAPTER_INDEX)
+            {
+                mMemberVariablesD3D12.MainAdapterIndex = static_cast<int32_t>(adapterIndex - 1);
+            }
+        }
+
+        return true;
+    }
+
+    template<GraphicsApi GRAPHICS_API>
     void Instance<GRAPHICS_API>::shutdown() noexcept requires(GRAPHICS_API == GraphicsApi::D3D12)
     {
+    }
+
+    template<GraphicsApi GRAPHICS_API>
+    bool Instance<GRAPHICS_API>::createSwapChainImpl([[maybe_unused]] const typename SwapChain<GRAPHICS_API>::CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::D3D12)
+    {
+        // D3D12 RHI swap chain creation logic (if any) goes here.
+        LUDUS_ASSERT_MSG(false, "D3D12 RHI SwapChain creation is not implemented yet.");
+        
+        HRESULT hr = S_OK;
+        const HWND windowHandle = reinterpret_cast<HWND>(createInfo.Window.GetWindowHandle()); // NOLINT(performance-no-int-to-ptr)
+        if constexpr (LUDUS_DXGI_VERSION >= LUDUS_DXGI_VERSION_1_2)
+        {
+            const DXGI_SWAP_CHAIN_DESC1 swapChainDesc1 = 
+            {
+                .Width = createInfo.Window.GetWidth(),
+                .Height = createInfo.Window.GetHeight(),
+                .Format = DXGI_FORMAT_R8G8B8A8_UNORM,   // TODO: Make configurable
+                .Stereo = FALSE,
+                .SampleDesc = DXGI_SAMPLE_DESC{ .Count = 1, .Quality = 0 },
+                .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
+                .BufferCount = createInfo.BufferCount,  // TODO: Make configurable
+                .Scaling = DXGI_SCALING_ASPECT_RATIO_STRETCH,
+                .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
+                .AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED,       // TODO: Check which alpha mode to use
+                .Flags = 0, // TODO: Check which flags to use
+            };
+
+            ComPtr<IDXGISwapChain1> dxgiSwapChain1;
+            hr = mMemberVariablesD3D12.DxgiFactory->CreateSwapChainForHwnd(nullptr, windowHandle, &swapChainDesc1, nullptr, nullptr, dxgiSwapChain1.GetAddressOf());
+            if (FAILED(hr))
+            {
+                LUDUS_ASSERT_MSG(false, "Failed to create DXGI SwapChain1 for D3D12.");
+                return false;
+            }
+
+            hr = static_cast<SwapChainMemberVariablesD3D12&>(*mMemberVariablesD3D12.SwapChain.mMemberVariables).DxgiSwapChain.As(&dxgiSwapChain1); // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
+            if (FAILED(hr))
+            {
+                LUDUS_ASSERT_MSG(false, "Failed to query IDXGISwapChain3 interface from SwapChain1.");
+                return false;
+            }
+        }
+        else
+        {
+            DXGI_SWAP_CHAIN_DESC swapChainDesc = 
+            {
+                .BufferDesc = DXGI_MODE_DESC
+                {
+                    .Width = createInfo.Window.GetWidth(),
+                    .Height = createInfo.Window.GetHeight(),
+                    // TODO: Make configurable
+                    .RefreshRate = DXGI_RATIONAL{ .Numerator = 60, .Denominator = 1 }, // NOLINT(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
+                    .Format = DXGI_FORMAT_R8G8B8A8_UNORM,   // TODO: Make configurable
+                    .ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED,   // TODO: Check which ordering to use
+                    .Scaling = DXGI_SCALING_ASPECT_RATIO_STRETCH,
+                },
+                .SampleDesc = DXGI_SAMPLE_DESC{ .Count = 1, .Quality = 0 },
+                .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
+                .BufferCount = createInfo.BufferCount,  // TODO: Make configurable
+                .OutputWindow = windowHandle,
+                .Windowed = TRUE,
+                .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
+                .Flags = 0, // TODO: Check which flags to use
+            };
+            ComPtr<IDXGISwapChain> dxgiSwapChain;
+            hr = mMemberVariablesD3D12.DxgiFactory->CreateSwapChain(nullptr, &swapChainDesc, dxgiSwapChain.GetAddressOf());
+            if (FAILED(hr))
+            {
+                LUDUS_ASSERT_MSG(false, "Failed to create DXGI SwapChain for D3D12.");
+                return false;
+            }
+            hr = static_cast<SwapChainMemberVariablesD3D12&>(*mMemberVariablesD3D12.SwapChain.mMemberVariables).DxgiSwapChain.As(&dxgiSwapChain);  // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
+            if (FAILED(hr))
+            {
+                LUDUS_ASSERT_MSG(false, "Failed to query IDXGISwapChain3 interface from SwapChain.");
+                return false;
+            }
+        }
+
+        return true;
     }
 
     template class Instance<GraphicsApi::D3D12>;

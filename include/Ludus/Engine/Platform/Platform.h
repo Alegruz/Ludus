@@ -25,10 +25,13 @@ namespace ludus::platform
 {
 #if defined(LUDUS_WINDOWS)
     using LudusInstance = HINSTANCE;
+    using LudusWindowHandle = HWND;
 #elif defined(LUDUS_LINUX)
     using LudusInstance = void*;
+    using LudusWindowHandle = void*;
 #elif defined(LUDUS_MAC)
     using LudusInstance = void*;
+    using LudusWindowHandle = void*;
 #else
     #error "Unsupported platform"
 #endif

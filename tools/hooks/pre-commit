@@ -17,20 +17,25 @@ def check_cmake_versions():
     content = cmake_file.read_text()
     errors = []
     
+    def extract_tag(var_name: str):
+        match = re.search(rf'set\({var_name}\s+([^\)]+)\)', content)
+        if not match:
+            return None
+        # Support optional quoted values in CMake set(...)
+        return match.group(1).strip().strip('"\'')
+
     # Check VOLK_TAG
-    volk_match = re.search(r'set\(VOLK_TAG\s+(\S+)\)', content)
-    if volk_match:
-        tag = volk_match.group(1)
-        if not re.match(r'vulkan-sdk-\d+\.\d+\.\d+\.\d+', tag):
-            errors.append(f"Invalid VOLK_TAG: {tag}")
+    volk_tag = extract_tag("VOLK_TAG")
+    if volk_tag:
+        if not re.fullmatch(r'vulkan-sdk-\d+\.\d+\.\d+\.\d+', volk_tag):
+            errors.append(f"Invalid VOLK_TAG: {volk_tag}")
             errors.append("  Expected: vulkan-sdk-X.Y.Z.W (e.g., vulkan-sdk-1.4.335.0)")
     
     # Check VULKAN_HEADERS_TAG
-    headers_match = re.search(r'set\(VULKAN_HEADERS_TAG\s+(\S+)\)', content)
-    if headers_match:
-        tag = headers_match.group(1)
-        if not re.match(r'v\d+\.\d+\.\d+', tag):
-            errors.append(f"Invalid VULKAN_HEADERS_TAG: {tag}")
+    headers_tag = extract_tag("VULKAN_HEADERS_TAG")
+    if headers_tag:
+        if not re.fullmatch(r'v\d+\.\d+\.\d+', headers_tag):
+            errors.append(f"Invalid VULKAN_HEADERS_TAG: {headers_tag}")
             errors.append("  Expected: vX.Y.Z (e.g., v1.3.275)")
     
     if errors:

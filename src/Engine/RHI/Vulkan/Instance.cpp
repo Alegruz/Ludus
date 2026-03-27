@@ -9,8 +9,13 @@
 
 namespace ludus::rhi
 {
-    struct InstanceMemberVariablesVulkan final : public InstanceMemberVariablesBase
+    struct InstanceMemberVariablesVulkan final : public InstanceMemberVariablesBase<GraphicsApi::VULKAN>
     {
+        LUDUS_INLINE explicit InstanceMemberVariablesVulkan(Instance<GraphicsApi::VULKAN>& rhiInstance)
+            : InstanceMemberVariablesBase<GraphicsApi::VULKAN>(rhiInstance)
+        {
+        }
+
         uint32_t InstanceVersion = 0;
         VkInstance Instance = VK_NULL_HANDLE;
 #if defined(LUDUS_DEBUG)
@@ -148,8 +153,8 @@ namespace ludus::rhi
 #define mMemberVariablesVulkan (*static_cast<InstanceMemberVariablesVulkan*>(mMemberVariables.Get()))   // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast,-warnings-as-errors)
 
     template<GraphicsApi GRAPHICS_API>
-    Instance<GRAPHICS_API>::Instance()  noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
-        : mMemberVariables(core::MakeUnique<InstanceMemberVariablesVulkan>())
+    Instance<GRAPHICS_API>::Instance() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+        : mMemberVariables(core::MakeUnique<InstanceMemberVariablesVulkan>(*this))
     {
     }
 
@@ -281,6 +286,24 @@ namespace ludus::rhi
     }
 
     template<GraphicsApi GRAPHICS_API>
+    bool Instance<GRAPHICS_API>::initializePostSwapChainInitialization([[maybe_unused]] const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+    {
+        // Vulkan RHI post swap chain initialization logic (if any) goes here.
+        LUDUS_ASSERT_MSG(false, "Vulkan RHI Instance post swap chain initialization is not implemented yet.");
+
+        return true;
+    }
+
+    template<GraphicsApi GRAPHICS_API>
+    bool Instance<GRAPHICS_API>::initializeAdaptersImpl() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+    {
+        // Vulkan RHI adapter initialization logic (if any) goes here.
+        LUDUS_ASSERT_MSG(false, "Vulkan RHI Adapter initialization is not implemented yet.");
+
+        return true;
+    }
+
+    template<GraphicsApi GRAPHICS_API>
     void Instance<GRAPHICS_API>::shutdown() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
     {
         if (mMemberVariablesVulkan.Instance != VK_NULL_HANDLE)
@@ -296,6 +319,14 @@ namespace ludus::rhi
             vkDestroyInstance(mMemberVariablesVulkan.Instance, nullptr);
             mMemberVariablesVulkan.Instance = VK_NULL_HANDLE;
         }
+    }
+
+    template<GraphicsApi GRAPHICS_API>
+    bool Instance<GRAPHICS_API>::createSwapChainImpl([[maybe_unused]] const SwapChain<GRAPHICS_API>::CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+    {
+        LUDUS_ASSERT_MSG(false, "Vulkan RHI SwapChain creation is not implemented yet.");
+
+        return true;
     }
 
 #if defined(LUDUS_DEBUG)

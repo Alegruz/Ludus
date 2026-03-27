@@ -30,13 +30,6 @@ namespace ludus::platform
         LUDUS_ASSERT_MSG(false, "Mac platform windowing not yet implemented.");
     }
 
-    template<PlatformType PLATFORM_TYPE>
-    uint64_t Window<PLATFORM_TYPE>::getPlatformHandle() const noexcept requires (PLATFORM_TYPE == PlatformType::MAC)
-    {
-        LUDUS_ASSERT_MSG(false, "Mac platform windowing not yet implemented.");
-        return 0;
-    }
-
     template class Window<PlatformType::MAC>;
     template class WindowManager<PlatformType::MAC>;
 }   // namespace ludus::platform

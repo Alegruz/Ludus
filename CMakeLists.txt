@@ -283,6 +283,7 @@ option(ENABLE_APP_VERIFIER "Enable Windows Application Verifier setup (recommend
 option(ENABLE_CLANG_TIDY "Enable clang-tidy static analysis" ON)
 option(ENABLE_CPPCHECK "Enable cppcheck static analysis" OFF)
 option(ENABLE_MSVC_ANALYZE "Enable MSVC /analyze static analysis" OFF)
+option(ENABLE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 
 # Graphics API selection
 set(GRAPHICS_API "Cpu" CACHE STRING "Graphics API to use (Cpu, Vulkan, D3D12, Metal)")
@@ -516,6 +517,13 @@ target_compile_options(LudusBuildSettings INTERFACE
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow
     -fno-exceptions -fno-rtti>  # if that?�s your policy; otherwise drop
 )
+
+if(ENABLE_WARNINGS_AS_ERRORS)
+    target_compile_options(LudusBuildSettings INTERFACE
+        $<$<CXX_COMPILER_ID:MSVC>:/WX>
+        $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-Werror>
+    )
+endif()
 
 # ============================================================================
 # Static Analysis Tools

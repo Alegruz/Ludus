@@ -100,7 +100,7 @@ namespace ludus::platform
     }
 
     template<PlatformType PLATFORM_TYPE>
-    LUDUS_INLINE Window<PLATFORM_TYPE>& WindowManager<PLATFORM_TYPE>::CreateWindow(const typename Window<PLATFORM_TYPE>::CreateInfo& createInfo) noexcept
+    LUDUS_INLINE core::UniquePtr<Window<PLATFORM_TYPE>>& WindowManager<PLATFORM_TYPE>::CreateWindow(const typename Window<PLATFORM_TYPE>::CreateInfo& createInfo) noexcept
     {
         typename Window<PLATFORM_TYPE>::CreateInfo info = createInfo;
         if(info.RectOrNull == nullptr)
@@ -108,7 +108,14 @@ namespace ludus::platform
             info.RectOrNull = &mDefaultWindowRect;
         }
         mWindows.PushBack(core::MakeUnique<Window<PLATFORM_TYPE>>());
-        mWindows.GetBack()->Initialize(info);
-        return *mWindows.GetBack();
+        const bool result = mWindows.GetBack()->Initialize(info);
+        if(result == false)
+        {
+            LUDUS_ASSERT_MSG(false, "Failed to create window.");
+            static core::UniquePtr<Window<PLATFORM_TYPE>> nullPtr = nullptr;
+            return nullPtr;
+        }
+
+        return mWindows.GetBack();
     }
 }   // namespace ludus::platform
