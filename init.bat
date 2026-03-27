@@ -10,15 +10,17 @@ if exist "out\build" (
         if exist "%%D\build.ninja" (
             findstr /M "CMakeFiles\\rules\.ninja" "%%D\build.ninja" >nul 2>nul
             if !errorlevel! == 0 (
-                echo.
-                echo WARNING: Corrupted build directory detected: %%~nxD
-                echo This can happen if CMake configuration fails before completing.
-                echo.
-                set /p CLEAN_BUILDS="Remove corrupted builds? (y/n): "
-                if /i "!CLEAN_BUILDS!"=="y" (
-                    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\clean-build.ps1"
+                if not exist "%%D\CMakeFiles\rules.ninja" (
+                    echo.
+                    echo WARNING: Corrupted build directory detected: %%~nxD
+                    echo This can happen if CMake configuration fails before completing.
+                    echo.
+                    set /p CLEAN_BUILDS="Remove corrupted builds? (y/n): "
+                    if /i "!CLEAN_BUILDS!"=="y" (
+                        powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\clean-build.ps1"
+                    )
+                    exit /b 0
                 )
-                exit /b 0
             )
         )
     )
