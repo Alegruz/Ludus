@@ -2,7 +2,7 @@
 
 #include <Ludus/Engine/RHI/Common.h>
 
-#include <Ludus/Engine/Core/Container/HashMap.h>
+#include <Ludus/Engine/Core/Container/HashMap.hpp>
 #include <Ludus/Engine/Core/Container/String.h>
 #include <Ludus/Engine/Core/SmartPtr.h>
 

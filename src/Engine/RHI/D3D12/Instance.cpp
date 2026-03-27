@@ -99,7 +99,7 @@ namespace ludus::rhi
     template<GraphicsApi GRAPHICS_API>
     bool Instance<GRAPHICS_API>::initializePostSwapChainInitialization([[maybe_unused]] const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::D3D12)
     {
-        const HWND windowHandle = reinterpret_cast<HWND>(createInfo.Window.GetPlatformHandle());  // NOLINT(performance-no-int-to-ptr)
+        const HWND windowHandle = reinterpret_cast<HWND>(createInfo.Window.GetWindowHandle());  // NOLINT(performance-no-int-to-ptr)
         LUDUS_ASSERT_MSG(windowHandle != NULL, "Invalid window handle for D3D12 instance initialization.");
         
         HRESULT hr = mMemberVariablesD3D12.DxgiFactory->MakeWindowAssociation(windowHandle, DXGI_MWA_NO_ALT_ENTER);
