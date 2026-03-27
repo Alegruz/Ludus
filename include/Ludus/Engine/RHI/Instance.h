@@ -31,6 +31,12 @@ namespace ludus::rhi
         int32_t MainAdapterIndex = INVALID_ADAPTER_INDEX;
     };
 
+#define LUDUS_DECLARATATION_BY_GRAPHICS_API(FUNCTION_SIGNATURE) \
+    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::CPU); \
+    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::VULKAN); \
+    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::D3D12); \
+    FUNCTION_SIGNATURE = delete
+
     template<GraphicsApi GRAPHICS_API>
     class Instance final
     {
