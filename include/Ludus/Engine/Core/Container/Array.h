@@ -135,7 +135,7 @@ namespace ludus::core
         [[no_unique_address]] std::conditional_t<ARRAY_TYPE == ArrayType::DYNAMIC, uint32_t, std::monostate> mCapacity;
 
     private:
-        [[no_unique_address]] std::conditional_t<ARRAY_TYPE == ArrayType::DYNAMIC, uint32_t, std::monostate> mSize;
+        uint32_t mSize = 0;
 
     protected:
         std::conditional_t<ARRAY_TYPE == ArrayType::DYNAMIC, T*, T[STATIC_CAPACITY ? STATIC_CAPACITY : 1]> mData;
