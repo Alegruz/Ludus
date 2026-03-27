@@ -71,17 +71,22 @@ jobs:
           "
 
       - name: Check for outdated versions
+        id: outdated
         run: |
-          python tools/check_dependency_updates.py --check-only
-          exit_code=$?
-          if [ "$exit_code" -eq 1 ]; then
-            echo "Updates available (non-fatal)."
-            exit 0
+          if python tools/check_dependency_updates.py --check-only; then
+            echo "Dependency update check completed."
+          else
+            exit_code=$?
+            if [ "$exit_code" -eq 1 ]; then
+              echo "Updates available (non-fatal)."
+              exit 0
+            fi
+            echo "Dependency update check failed with exit code $exit_code"
+            exit "$exit_code"
           fi
-          exit "$exit_code"
 
       - name: Comment on PR
-        if: failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        if: steps.format.outcome == 'failure' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@v7
         with:
           script: |
