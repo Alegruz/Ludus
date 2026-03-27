@@ -919,7 +919,7 @@ LUDUS_TEST(Logger_SupportsIntegerBaseFormatting)
 	LUDUS_LOG_INFO("CoreTest", "bin={:#010b} oct={:#06o} hex={:#06x}", value, value, value);
 
 	LUDUS_TEST_ASSERT_EQ(captured.Count, 1u);
-	LUDUS_TEST_ASSERT(captured.Text == String("bin=0b00101010 oct=00052 hex=0x002a"));
+	LUDUS_TEST_ASSERT(captured.Text == String("bin=0b00101010 oct=000052 hex=0x002a"));
 	LUDUS_TEST_ASSERT(RemoveLogSink(CaptureLogSink, &captured));
 }
 
