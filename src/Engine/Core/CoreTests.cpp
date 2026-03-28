@@ -10,8 +10,40 @@
 #include <Ludus/Engine/Core/CommandLineManager.hpp>
 #include <Ludus/Engine/Core/Container/Array.hpp>
 #include <Ludus/Engine/Core/Container/String.hpp>
+#include <Ludus/Engine/Core/Logger.h>
 
 using namespace ludus::core;
+
+namespace
+{
+	struct CapturedLog final
+	{
+		LogLevel Level = LogLevel::Off;
+		String Category;
+		String Text;
+		uint32_t Count = 0;
+	};
+
+	struct SortableRecord final
+	{
+		String Name;
+		uint32_t Priority = 0;
+	};
+
+	void CaptureLogSink(const LogMessage& message, void* userData) noexcept
+	{
+		auto* captured = static_cast<CapturedLog*>(userData);
+		if (captured == nullptr)
+		{
+			return;
+		}
+
+		captured->Level = message.Level;
+		captured->Category = message.Category != nullptr ? String(message.Category) : String("");
+		captured->Text = message.Text != nullptr ? String(message.Text) : String("");
+		++captured->Count;
+	}
+} // namespace
 
 // Suppress magic number warnings for test values - tests should have explicit, readable values
 // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)
@@ -587,6 +619,67 @@ LUDUS_TEST(DynamicArray_PopBack)
 	LUDUS_TEST_ASSERT_EQ(arr[1], 2);
 }
 
+LUDUS_TEST(DynamicArray_SortDefaultComparator)
+{
+	DynamicArray<int> arr;
+	arr.PushBack(7);
+	arr.PushBack(3);
+	arr.PushBack(9);
+	arr.PushBack(1);
+	arr.PushBack(5);
+
+	arr.Sort();
+
+	LUDUS_TEST_ASSERT_EQ(arr.GetSize(), 5u);
+	LUDUS_TEST_ASSERT_EQ(arr[0], 1);
+	LUDUS_TEST_ASSERT_EQ(arr[1], 3);
+	LUDUS_TEST_ASSERT_EQ(arr[2], 5);
+	LUDUS_TEST_ASSERT_EQ(arr[3], 7);
+	LUDUS_TEST_ASSERT_EQ(arr[4], 9);
+}
+
+LUDUS_TEST(DynamicArray_SortCustomComparatorNonPod)
+{
+	DynamicArray<SortableRecord> arr;
+	arr.PushBack({ String("Render"), 30 });
+	arr.PushBack({ String("Physics"), 20 });
+	arr.PushBack({ String("Animation"), 20 });
+	arr.PushBack({ String("Audio"), 10 });
+
+	arr.Sort([](const SortableRecord& lhs, const SortableRecord& rhs) noexcept
+	{
+		if (lhs.Priority != rhs.Priority)
+		{
+			return lhs.Priority < rhs.Priority;
+		}
+
+		return std::strcmp(lhs.Name.GetCStr(), rhs.Name.GetCStr()) < 0;
+	});
+
+	LUDUS_TEST_ASSERT_EQ(arr.GetSize(), 4u);
+	LUDUS_TEST_ASSERT(arr[0].Name == "Audio");
+	LUDUS_TEST_ASSERT(arr[1].Name == "Animation");
+	LUDUS_TEST_ASSERT(arr[2].Name == "Physics");
+	LUDUS_TEST_ASSERT(arr[3].Name == "Render");
+}
+
+LUDUS_TEST(StaticArray_SortCustomComparator)
+{
+	StaticArray<int, 5> arr { 4, 1, 5, 2, 3 };
+
+	arr.Sort([](const int lhs, const int rhs) noexcept
+	{
+		return lhs > rhs;
+	});
+
+	LUDUS_TEST_ASSERT_EQ(arr.GetSize(), 5u);
+	LUDUS_TEST_ASSERT_EQ(arr[0], 5);
+	LUDUS_TEST_ASSERT_EQ(arr[1], 4);
+	LUDUS_TEST_ASSERT_EQ(arr[2], 3);
+	LUDUS_TEST_ASSERT_EQ(arr[3], 2);
+	LUDUS_TEST_ASSERT_EQ(arr[4], 1);
+}
+
 LUDUS_TEST(String_Construction)
 {
 	String str("Hello");
@@ -751,6 +844,83 @@ LUDUS_TEST(CommandLineManager_BackslashAtEnd)
 	LUDUS_TEST_ASSERT_EQ(args.GetSize(), 2u);
 	LUDUS_TEST_ASSERT(args[0] == String("program"));
 	LUDUS_TEST_ASSERT(args[1] == String("test\\"));
+}
+
+// ========================================
+// Logger Tests
+// ========================================
+
+LUDUS_TEST(Logger_FormatsAndDispatchesToCustomSink)
+{
+	ResetLogger();
+	SetStandardLogSinkEnabled(false);
+	SetDebuggerLogSinkEnabled(false);
+
+	CapturedLog captured;
+	LUDUS_TEST_ASSERT(AddLogSink(CaptureLogSink, &captured));
+
+	LUDUS_LOG_INFO("CoreTest", "Frame {} ready in {} ms", 7, 3.5f);
+
+	LUDUS_TEST_ASSERT_EQ(captured.Count, 1u);
+	LUDUS_TEST_ASSERT(captured.Category == String("CoreTest"));
+	LUDUS_TEST_ASSERT(captured.Text == String("Frame 7 ready in 3.5 ms"));
+	LUDUS_TEST_ASSERT(captured.Level == LogLevel::Info);
+	LUDUS_TEST_ASSERT(RemoveLogSink(CaptureLogSink, &captured));
+}
+
+LUDUS_TEST(Logger_RespectsRuntimeLevelFiltering)
+{
+	ResetLogger();
+	SetStandardLogSinkEnabled(false);
+	SetDebuggerLogSinkEnabled(false);
+	SetLogLevel(LogLevel::Warning);
+
+	CapturedLog captured;
+	LUDUS_TEST_ASSERT(AddLogSink(CaptureLogSink, &captured));
+
+	LUDUS_LOG_INFO("CoreTest", "This should be filtered");
+	LUDUS_TEST_ASSERT_EQ(captured.Count, 0u);
+
+	LUDUS_LOG_ERROR("CoreTest", "This should pass");
+	LUDUS_TEST_ASSERT_EQ(captured.Count, 1u);
+	LUDUS_TEST_ASSERT(captured.Text == String("This should pass"));
+	LUDUS_TEST_ASSERT(RemoveLogSink(CaptureLogSink, &captured));
+}
+
+LUDUS_TEST(Logger_ResetClearsCustomSinksAndRestoresDefaults)
+{
+	ResetLogger();
+	SetStandardLogSinkEnabled(false);
+	SetDebuggerLogSinkEnabled(false);
+	SetLogLevel(LogLevel::Fatal);
+
+	CapturedLog captured;
+	LUDUS_TEST_ASSERT(AddLogSink(CaptureLogSink, &captured));
+
+	ResetLogger();
+	SetStandardLogSinkEnabled(false);
+	SetDebuggerLogSinkEnabled(false);
+
+	LUDUS_TEST_ASSERT(GetLogLevel() == GetDefaultLogLevel());
+	LUDUS_LOG_INFO("CoreTest", "Reset should remove prior test sink");
+	LUDUS_TEST_ASSERT_EQ(captured.Count, 0u);
+}
+
+LUDUS_TEST(Logger_SupportsIntegerBaseFormatting)
+{
+	ResetLogger();
+	SetStandardLogSinkEnabled(false);
+	SetDebuggerLogSinkEnabled(false);
+
+	CapturedLog captured;
+	LUDUS_TEST_ASSERT(AddLogSink(CaptureLogSink, &captured));
+
+	const uint32_t value = 42u;
+	LUDUS_LOG_INFO("CoreTest", "bin={:#010b} oct={:#06o} hex={:#06x}", value, value, value);
+
+	LUDUS_TEST_ASSERT_EQ(captured.Count, 1u);
+	LUDUS_TEST_ASSERT(captured.Text == String("bin=0b00101010 oct=000052 hex=0x002a"));
+	LUDUS_TEST_ASSERT(RemoveLogSink(CaptureLogSink, &captured));
 }
 
 // NOLINTEND(cppcoreguidelines-avoid-magic-numbers, readability-magic-numbers)

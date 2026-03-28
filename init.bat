@@ -4,6 +4,28 @@ setlocal enabledelayedexpansion
 set ROOT=%~dp0
 pushd "%ROOT%"
 
+REM Check for corrupted build directories and offer to clean
+if exist "out\build" (
+    for /d %%D in (out\build\*) do (
+        if exist "%%D\build.ninja" (
+            findstr /M "CMakeFiles\\rules\.ninja" "%%D\build.ninja" >nul 2>nul
+            if !errorlevel! == 0 (
+                if not exist "%%D\CMakeFiles\rules.ninja" (
+                    echo.
+                    echo WARNING: Corrupted build directory detected: %%~nxD
+                    echo This can happen if CMake configuration fails before completing.
+                    echo.
+                    set /p CLEAN_BUILDS="Remove corrupted builds? (y/n): "
+                    if /i "!CLEAN_BUILDS!"=="y" (
+                        powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\clean-build.ps1"
+                    )
+                    exit /b 0
+                )
+            )
+        )
+    )
+)
+
 set PYTHON=
 for %%P in (python python3) do (
     where %%P >nul 2>nul && set PYTHON=%%P && goto :found_python

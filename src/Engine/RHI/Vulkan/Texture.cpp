@@ -2,9 +2,9 @@
 
 namespace ludus::rhi
 {
-    template<GraphicsApi TApi>
-    Texture<TApi>::Texture(const CreateInfo& createInfo)
-        requires(TApi == GraphicsApi::VULKAN)
+    template<GraphicsApi GRAPHICS_API>
+    Texture<GRAPHICS_API>::Texture(const CreateInfo& createInfo)
+        requires(GRAPHICS_API == GraphicsApi::VULKAN)
         : mWidth(createInfo.Width)
         , mHeight(createInfo.Height)
         , mFormat(createInfo.Format)

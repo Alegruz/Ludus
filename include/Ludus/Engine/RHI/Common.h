@@ -10,7 +10,7 @@ namespace ludus::rhi
     {
         CPU,
         VULKAN,
-        DIRECT3D12,
+        D3D12,
         METAL,
         COUNT,
 
@@ -53,12 +53,18 @@ namespace ludus::rhi
         return 0u;
     }
     
+#define LUDUS_DECLARATATION_BY_GRAPHICS_API(FUNCTION_SIGNATURE) \
+    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::CPU); \
+    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::VULKAN); \
+    FUNCTION_SIGNATURE requires (GRAPHICS_API == GraphicsApi::D3D12); \
+    FUNCTION_SIGNATURE = delete
+    
 #if defined(LUDUS_GRAPHICS_CPU)
     constexpr GraphicsApi CURRENT_GRAPHICS_API = GraphicsApi::CPU;
 #elif defined(LUDUS_GRAPHICS_VULKAN)
     constexpr GraphicsApi CURRENT_GRAPHICS_API = GraphicsApi::VULKAN;
 #elif defined(LUDUS_GRAPHICS_D3D12)
-    constexpr GraphicsApi CURRENT_GRAPHICS_API = GraphicsApi::DIRECT3D12;
+    constexpr GraphicsApi CURRENT_GRAPHICS_API = GraphicsApi::D3D12;
 #elif defined(LUDUS_GRAPHICS_METAL)
     constexpr GraphicsApi CURRENT_GRAPHICS_API = GraphicsApi::METAL;
 #else
