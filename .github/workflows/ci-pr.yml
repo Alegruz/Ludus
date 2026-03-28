@@ -27,11 +27,6 @@ jobs:
             configure_preset: ci_windows_msvc_debug_vulkan
             build_preset: ci_windows_msvc_debug_vulkan
             run_tests: false
-          - name: Windows MSVC Debug (D3D12)
-            os: windows-latest
-            configure_preset: ci_windows_msvc_debug_d3d12
-            build_preset: ci_windows_msvc_debug_d3d12
-            run_tests: false
           - name: Linux Clang Debug + Tests
             os: ubuntu-latest
             configure_preset: ci_test_clang

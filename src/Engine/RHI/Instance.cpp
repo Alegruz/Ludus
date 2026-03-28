@@ -1,6 +1,5 @@
 #include <Ludus/Engine/RHI/Instance.h>
 
-#if defined(LUDUS_GRAPHICS_VULKAN)
 #include <Ludus/Engine/Core/Container/HashMap.hpp>
 #include <Ludus/Engine/Core/Container/String.hpp>
 #include <Ludus/Engine/Core/SmartPtr.hpp>
@@ -9,10 +8,14 @@
 
 namespace ludus::rhi
 {
-    struct InstanceMemberVariablesVulkan final : public InstanceMemberVariablesBase<GraphicsApi::VULKAN>
+    struct InstanceMemberVariables final
     {
-        LUDUS_INLINE explicit InstanceMemberVariablesVulkan(Instance<GraphicsApi::VULKAN>& rhiInstance)
-            : InstanceMemberVariablesBase<GraphicsApi::VULKAN>(rhiInstance)
+    public:
+        static constexpr const int32_t INVALID_ADAPTER_INDEX = -1;
+
+    public:
+        LUDUS_INLINE explicit InstanceMemberVariables(Instance& rhiInstance)
+            : SwapChain(rhiInstance)
         {
         }
 
@@ -21,7 +24,15 @@ namespace ludus::rhi
 #if defined(LUDUS_DEBUG)
         VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
 #endif  // defined(LUDUS_DEBUG)
+        SwapChain SwapChain;
+        core::DynamicArray<Adapter> Adapters;
+        int32_t MainAdapterIndex = INVALID_ADAPTER_INDEX;
     };
+
+    void InstanceMemberVariablesDeleter::operator()(InstanceMemberVariables* ptr) const noexcept
+    {
+        delete ptr;
+    }
 
     enum class ExtensionValidatorObjectType : uint8_t
     {
@@ -150,16 +161,62 @@ namespace ludus::rhi
         void*                                        pUserData);
 #endif  // defined(LUDUS_DEBUG)
 
-#define mMemberVariablesVulkan (*static_cast<InstanceMemberVariablesVulkan*>(mMemberVariables.Get()))   // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast,-warnings-as-errors)
-
-    template<GraphicsApi GRAPHICS_API>
-    Instance<GRAPHICS_API>::Instance() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
-        : mMemberVariables(core::MakeUnique<InstanceMemberVariablesVulkan>(*this))
+    Instance::Instance() noexcept
+        : mMemberVariables(new InstanceMemberVariables(*this))
     {
     }
 
-    template<GraphicsApi GRAPHICS_API>
-    bool Instance<GRAPHICS_API>::initialize(const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+    bool Instance::Initialize(const CreateInfo& createInfo) noexcept
+    {
+        if( initialize(createInfo) == false )
+        {
+            LUDUS_ASSERT_MSG(false, "Failed to initialize RHI Instance.");
+            return false;
+        }
+
+        SwapChain::CreateInfo swapChainCreateInfo =
+        {
+            .Window = createInfo.Window,
+            .BufferCount = 3,
+        };
+
+        if( createSwapChain(swapChainCreateInfo) == false )
+        {
+            LUDUS_ASSERT_MSG(false, "Failed to create RHI SwapChain.");
+            return false;
+        }
+
+        if( initializePostSwapChainInitialization(createInfo) == false )
+        {
+            LUDUS_ASSERT_MSG(false, "Failed to perform post swap chain initialization for RHI Instance.");
+            return false;
+        }
+
+        return true;
+    }
+
+    bool Instance::initializeAdapters() noexcept
+    {
+        if( this->initializeAdaptersImpl() == false )
+        {
+            LUDUS_ASSERT_MSG(false, "Failed to initialize RHI Adapters.");
+            return false;
+        }
+        Adapter::CreateInfo adapterCreateInfo = {};
+        return mMemberVariables->Adapters.GetBack().Initialize(adapterCreateInfo);
+    }
+
+    bool Instance::createSwapChain(const SwapChain::CreateInfo& createInfo) noexcept
+    {
+        if( this->createSwapChainImpl(createInfo) == false )
+        {
+            LUDUS_ASSERT_MSG(false, "Failed to create RHI SwapChain.");
+            return false;
+        }
+        return mMemberVariables->SwapChain.Initialize(createInfo); 
+    }
+
+    bool Instance::initialize(const CreateInfo& createInfo) noexcept
     {
         VkResult vr = volkInitialize();
         if(vr != VK_SUCCESS)
@@ -168,7 +225,7 @@ namespace ludus::rhi
             return false;
         }
 
-        vr = vkEnumerateInstanceVersion(&mMemberVariablesVulkan.InstanceVersion);
+        vr = vkEnumerateInstanceVersion(&mMemberVariables->InstanceVersion);
         if(vr != VK_SUCCESS)
         {
             LUDUS_ASSERT_MSG(false, "Failed to enumerate Vulkan instance version.");
@@ -219,7 +276,7 @@ namespace ludus::rhi
             .applicationVersion = createInfo.ApplicationInfo.Version,
             .pEngineName = createInfo.EngineInfo.Name,
             .engineVersion = createInfo.EngineInfo.Version,
-            .apiVersion = mMemberVariablesVulkan.InstanceVersion,
+            .apiVersion = mMemberVariables->InstanceVersion,
         };
 
         ExtensionValidator<ExtensionValidatorObjectType::INSTANCE, ExtensionType::LAYER> layerValidator;
@@ -264,29 +321,28 @@ namespace ludus::rhi
             .ppEnabledExtensionNames = extensionValidator.GetEnabledExtensions().GetData(),
         };
 
-        vr = vkCreateInstance(&instanceCreateInfo, nullptr, &mMemberVariablesVulkan.Instance);
+        vr = vkCreateInstance(&instanceCreateInfo, nullptr, &mMemberVariables->Instance);
         if(vr != VK_SUCCESS)
         {
             LUDUS_ASSERT_MSG(false, "Failed to create Vulkan instance.");
-            LUDUS_ASSERT_MSG(mMemberVariablesVulkan.InstanceVersion == VK_API_VERSION_1_0 || vr != VK_ERROR_INCOMPATIBLE_DRIVER, "Vulkan 1.1 or later must not fail with VK_ERROR_INCOMPATIBLE_DRIVER. Report this issue to the Vulkan SDK maintainers.");
+            LUDUS_ASSERT_MSG(mMemberVariables->InstanceVersion == VK_API_VERSION_1_0 || vr != VK_ERROR_INCOMPATIBLE_DRIVER, "Vulkan 1.1 or later must not fail with VK_ERROR_INCOMPATIBLE_DRIVER. Report this issue to the Vulkan SDK maintainers.");
             return false;
         }
 
-        volkLoadInstance(mMemberVariablesVulkan.Instance);
+        volkLoadInstance(mMemberVariables->Instance);
 
 #if defined(LUDUS_DEBUG)
         vr = vkCreateDebugUtilsMessengerEXT(
-            mMemberVariablesVulkan.Instance,
+            mMemberVariables->Instance,
             &debugUtilsMessengerCreateInfo,
             nullptr,
-            &mMemberVariablesVulkan.DebugMessenger);
+            &mMemberVariables->DebugMessenger);
 #endif  // defined(LUDUS_DEBUG)
 
         return true;
     }
 
-    template<GraphicsApi GRAPHICS_API>
-    bool Instance<GRAPHICS_API>::initializePostSwapChainInitialization([[maybe_unused]] const CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+    bool Instance::initializePostSwapChainInitialization([[maybe_unused]] const CreateInfo& createInfo) noexcept
     {
         // Vulkan RHI post swap chain initialization logic (if any) goes here.
         LUDUS_ASSERT_MSG(false, "Vulkan RHI Instance post swap chain initialization is not implemented yet.");
@@ -294,8 +350,7 @@ namespace ludus::rhi
         return true;
     }
 
-    template<GraphicsApi GRAPHICS_API>
-    bool Instance<GRAPHICS_API>::initializeAdaptersImpl() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+    bool Instance::initializeAdaptersImpl() noexcept
     {
         // Vulkan RHI adapter initialization logic (if any) goes here.
         LUDUS_ASSERT_MSG(false, "Vulkan RHI Adapter initialization is not implemented yet.");
@@ -303,26 +358,24 @@ namespace ludus::rhi
         return true;
     }
 
-    template<GraphicsApi GRAPHICS_API>
-    void Instance<GRAPHICS_API>::shutdown() noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+    void Instance::shutdown() noexcept
     {
-        if (mMemberVariablesVulkan.Instance != VK_NULL_HANDLE)
+        if (mMemberVariables->Instance != VK_NULL_HANDLE)
         {
 #if defined(LUDUS_DEBUG)
-            LUDUS_ASSERT_MSG(mMemberVariablesVulkan.DebugMessenger != VK_NULL_HANDLE, "Vulkan debug messenger is null during instance shutdown.");
-            vkDestroyDebugUtilsMessengerEXT(mMemberVariablesVulkan.Instance, mMemberVariablesVulkan.DebugMessenger, nullptr);
-            mMemberVariablesVulkan.DebugMessenger = VK_NULL_HANDLE;
+            LUDUS_ASSERT_MSG(mMemberVariables->DebugMessenger != VK_NULL_HANDLE, "Vulkan debug messenger is null during instance shutdown.");
+            vkDestroyDebugUtilsMessengerEXT(mMemberVariables->Instance, mMemberVariables->DebugMessenger, nullptr);
+            mMemberVariables->DebugMessenger = VK_NULL_HANDLE;
 #endif  // defined(LUDUS_DEBUG)
 
             // Destroy Vulkan instance
             // Note: vkDestroyInstance is loaded by volkInitialize
-            vkDestroyInstance(mMemberVariablesVulkan.Instance, nullptr);
-            mMemberVariablesVulkan.Instance = VK_NULL_HANDLE;
+            vkDestroyInstance(mMemberVariables->Instance, nullptr);
+            mMemberVariables->Instance = VK_NULL_HANDLE;
         }
     }
 
-    template<GraphicsApi GRAPHICS_API>
-    bool Instance<GRAPHICS_API>::createSwapChainImpl([[maybe_unused]] const SwapChain<GRAPHICS_API>::CreateInfo& createInfo) noexcept requires(GRAPHICS_API == GraphicsApi::VULKAN)
+    bool Instance::createSwapChainImpl([[maybe_unused]] const SwapChain::CreateInfo& createInfo) noexcept
     {
         LUDUS_ASSERT_MSG(false, "Vulkan RHI SwapChain creation is not implemented yet.");
 
@@ -342,14 +395,11 @@ namespace ludus::rhi
             return VK_FALSE;
         }
 
-        [[maybe_unused]] Instance<GraphicsApi::VULKAN>& instance = *static_cast<Instance<GraphicsApi::VULKAN>*>(pUserData); // TODO: Use instance if needed
+        [[maybe_unused]] Instance& instance = *static_cast<Instance*>(pUserData); // TODO: Use instance if needed
 
         // Handle debug messages here (e.g., log them)
         // TODO: Implement proper logging mechanism
         return VK_TRUE;
     }
 #endif  // defined(LUDUS_DEBUG)
-
-    template class Instance<GraphicsApi::VULKAN>;
 }   // namespace ludus::rhi 
-#endif  // defined(LUDUS_GRAPHICS_VULKAN)

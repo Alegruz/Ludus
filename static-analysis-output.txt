@@ -1,0 +1,1 @@
+Error: C:/Users/jinju/Documents/Ludus/out/build/ninja_gcc-debug is not a directory

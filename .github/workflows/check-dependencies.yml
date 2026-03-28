@@ -114,7 +114,7 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -S . -B out/build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DGRAPHICS_API=Vulkan
+          cmake -S . -B out/build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release
         continue-on-error: true
 
       - name: Build

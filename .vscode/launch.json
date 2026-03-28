@@ -37,21 +37,6 @@
         {
             "type": "cppvsdbg",
             "request": "launch",
-            "name": "Debug LudusEditor (MSVC-Debug-D3D12)",
-            "program": "${workspaceFolder}/out/build/ninja_msvc-debug-d3d12/bin/LudusEditor.exe",
-            "args": ["--width", "1920", "--height", "1080"],
-            "cwd": "${workspaceFolder}/out/build/ninja_msvc-debug-d3d12/bin",
-            "stopAtEntry": true,
-            "environment": [
-                {
-                    "name": "ASAN_OPTIONS",
-                    "value": "halt_on_error=1:abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1:mmap_limit_mb=2048"
-                }
-            ]
-        },
-        {
-            "type": "cppvsdbg",
-            "request": "launch",
             "name": "Debug LudusEditor (MSVC-Release-CPU)",
             "program": "${workspaceFolder}/out/build/ninja_msvc-release/bin/LudusEditor.exe",
             "args": ["--width", "1920", "--height", "1080"],
@@ -65,15 +50,6 @@
             "program": "${workspaceFolder}/out/build/ninja_msvc-release-vulkan/bin/LudusEditor.exe",
             "args": ["--width", "1920", "--height", "1080"],
             "cwd": "${workspaceFolder}/out/build/ninja_msvc-release-vulkan/bin",
-            "stopAtEntry": true
-        },
-        {
-            "type": "cppvsdbg",
-            "request": "launch",
-            "name": "Debug LudusEditor (MSVC-Release-D3D12)",
-            "program": "${workspaceFolder}/out/build/ninja_msvc-release-d3d12/bin/LudusEditor.exe",
-            "args": ["--width", "1920", "--height", "1080"],
-            "cwd": "${workspaceFolder}/out/build/ninja_msvc-release-d3d12/bin",
             "stopAtEntry": true
         },
         {

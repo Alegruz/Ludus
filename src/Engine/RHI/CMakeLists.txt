@@ -3,12 +3,12 @@ add_library(LudusRHI SHARED)
 
 # Resolve platform-specific source up front so configuration fails fast if a file is missing
 set(LUDUS_RHI_SOURCES 
-    "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/Texture.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/Instance.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/Adapter.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/Device.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/CommandQueue.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/${GRAPHICS_API}/SwapChain.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Texture.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Instance.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Adapter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Device.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/CommandQueue.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/SwapChain.cpp"
     )
 
 foreach(LUDUS_RHI_SOURCE IN LISTS LUDUS_RHI_SOURCES)
@@ -44,16 +44,7 @@ target_link_libraries(LudusRHI
     LudusBuildSettings
 )
 
-if(GRAPHICS_API STREQUAL "Vulkan")
-    target_link_libraries(LudusRHI PRIVATE LudusVulkanDeps)
-elseif(GRAPHICS_API STREQUAL "D3D12")
-    # D3D12 Agility SDK already fetched and included in root CMakeLists.txt
-    # Just link the library and set up runtime files
-    target_link_libraries(LudusRHI PUBLIC D3D12::D3D12)
-    
-    # Copy Agility SDK runtime files to output directory
-    d3d12_setup_runtime_files(LudusRHI ${CMAKE_BINARY_DIR}/bin)
-endif()
+target_link_libraries(LudusRHI PRIVATE LudusVulkanDeps)
 
 # Generate debug symbols for MSVC
 if(MSVC)
@@ -66,16 +57,6 @@ if(TARGET mimalloc)
     target_link_libraries(LudusRHI PRIVATE mimalloc)
     add_dependencies(LudusRHI mimalloc)
 endif()
-
-# Set DLL export macro
-target_compile_definitions(LudusRHI
-    PRIVATE
-        LUDUS_RHI_EXPORTS
-        $<$<STREQUAL:${GRAPHICS_API},Cpu>:LUDUS_GRAPHICS_CPU=1>
-        $<$<STREQUAL:${GRAPHICS_API},Vulkan>:LUDUS_GRAPHICS_VULKAN=1>
-        $<$<STREQUAL:${GRAPHICS_API},D3D12>:LUDUS_GRAPHICS_D3D12=1>
-        $<$<STREQUAL:${GRAPHICS_API},Metal>:LUDUS_GRAPHICS_METAL=1>
-)
 
 # Set output directory
 set_target_properties(LudusRHI PROPERTIES

@@ -2,9 +2,6 @@
   "schema_version": 1,
   "presets": [
     {
-      "when": {
-        "GRAPHICS_API": "Vulkan"
-      },
       "requirements": [
         "vulkan_sdk",
         "volk"

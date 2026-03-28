@@ -1,20 +1,19 @@
 #pragma once
 
 #include <Ludus/Engine/Core/SmartPtr.h>
+#include <Ludus/Engine/Core/ProjectInfo.h>
+
+#include <Ludus/Engine/Platform/Window.h>
+
 #include <Ludus/Engine/RHI/Common.h>
 
 namespace ludus::rhi
 {
-    template<GraphicsApi GRAPHICS_API>
-    class Texture;
-
-    template<GraphicsApi GRAPHICS_API>
     class Instance;
 }
 
 namespace ludus::renderer
 {
-    template<rhi::GraphicsApi GRAPHICS_API>
     class Renderer final
     {
     public:
@@ -24,21 +23,21 @@ namespace ludus::renderer
             uint32_t Height = 600;
             rhi::TextureFormat Format = rhi::TextureFormat::DEFAULT;
 
-            rhi::Instance<GRAPHICS_API>::CreateInfo RhiInstanceCreateInfo{};
+            core::ProjectInfo ApplicationInfo{};
+            core::ProjectInfo EngineInfo{};
+            const platform::Window<platform::CURRENT_PLATFORM_TYPE>* Window = nullptr;
         };
 
     public:
         Renderer();
-        ~Renderer() = default;
+        ~Renderer();
 
         bool Initialize(const CreateInfo& createInfo = {}) noexcept;
         void RenderFrame();
 
-        [[nodiscard]] LUDUS_INLINE constexpr const rhi::Texture<GRAPHICS_API>& GetBackBufferTexture() const noexcept requires(GRAPHICS_API == rhi::GraphicsApi::CPU) { return *mBackBufferTexture; }
-        [[nodiscard]] LUDUS_INLINE constexpr const rhi::Instance<GRAPHICS_API>& GetRhiInstance() const noexcept { return *mInstance; }
+        [[nodiscard]] LUDUS_INLINE const rhi::Instance& GetRhiInstance() const noexcept { return *mInstance; }
 
     private:
-        [[no_unique_address]] std::conditional_t<GRAPHICS_API == rhi::GraphicsApi::CPU, core::UniquePtr<rhi::Texture<GRAPHICS_API>>, std::monostate> mBackBufferTexture;
-        core::UniquePtr<rhi::Instance<GRAPHICS_API>> mInstance;
+        core::UniquePtr<rhi::Instance> mInstance;
     };
 }   // namespace ludus::renderer

@@ -84,6 +84,12 @@ target_link_libraries(LudusEditor
     Ludus
     )
 
+# Generate debug symbols for MSVC
+if(MSVC)
+    target_compile_options(LudusEditor PRIVATE $<$<CONFIG:Debug>:/Zi>)
+    target_link_options(LudusEditor PRIVATE $<$<CONFIG:Debug>:/DEBUG>)
+endif()
+
 # Install rules for distribution (puts exe in root of install prefix)
 install(TARGETS LudusEditor
     RUNTIME DESTINATION .

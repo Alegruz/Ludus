@@ -15,17 +15,16 @@ namespace ludus::platform
 
 namespace ludus::rhi
 {
-    struct SwapChainMemberVariablesBase
+    struct SwapChainMemberVariables
     {
     public:
-        virtual ~SwapChainMemberVariablesBase() = default;
+        ~SwapChainMemberVariables() = default;
     };
 
-    template<GraphicsApi GRAPHICS_API>
-    class SwapChain final : public InstanceChildObject<GRAPHICS_API>
+    class SwapChain final : public InstanceChildObject
     {
     public:
-        friend class Instance<GRAPHICS_API>;
+        friend class Instance;
 
     public:
         struct CreateInfo final
@@ -35,17 +34,17 @@ namespace ludus::rhi
         };
 
     public:
-        LUDUS_DECLARATATION_BY_GRAPHICS_API(explicit SwapChain(const Instance<GRAPHICS_API>& rhiInstance) noexcept);
+        explicit SwapChain(const Instance& rhiInstance) noexcept;
         LUDUS_INLINE ~SwapChain() noexcept { Shutdown(); }
 
         [[nodiscard]] LUDUS_INLINE bool Initialize(const CreateInfo& createInfo) noexcept { return initialize(createInfo); }
         LUDUS_INLINE void Shutdown() noexcept { shutdown(); }
 
     private:
-        LUDUS_DECLARATATION_BY_GRAPHICS_API([[nodiscard]] bool initialize(const CreateInfo& createInfo) noexcept);
-        LUDUS_DECLARATATION_BY_GRAPHICS_API(void shutdown() noexcept);
+        [[nodiscard]] bool initialize(const CreateInfo& createInfo) noexcept;
+        void shutdown() noexcept;
 
     private:
-        core::UniquePtr<SwapChainMemberVariablesBase> mMemberVariables;
+        core::UniquePtr<SwapChainMemberVariables> mMemberVariables;
     };
 }   // namespace ludus::rhi

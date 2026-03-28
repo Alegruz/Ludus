@@ -18,60 +18,28 @@
         },
         {
             "name": "ninja_clang-debug",
-            "displayName": "Ninja with Clang - Debug (CPU)",
+            "displayName": "Ninja with Clang - Debug",
             "inherits": "ninja_clang",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "GRAPHICS_API": "Cpu"
-            }
-        },
-        {
-            "name": "ninja_clang-debug-vulkan",
-            "displayName": "Ninja with Clang - Debug (Vulkan)",
-            "inherits": "ninja_clang",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "GRAPHICS_API": "Vulkan"
+                "CMAKE_BUILD_TYPE": "Debug"
             }
         },
         {
             "name": "ninja_clang-release",
-            "displayName": "Ninja with Clang - Release (CPU)",
+            "displayName": "Ninja with Clang - Release",
             "inherits": "ninja_clang",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "GRAPHICS_API": "Cpu"
-            }
-        },
-        {
-            "name": "ninja_clang-release-vulkan",
-            "displayName": "Ninja with Clang - Release (Vulkan)",
-            "inherits": "ninja_clang",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "GRAPHICS_API": "Vulkan"
+                "CMAKE_BUILD_TYPE": "Release"
             }
         },
         {
             "name": "ninja_clang-relwithdebinfo",
-            "displayName": "Ninja with Clang - RelWithDebInfo (CPU, Sanitizers)",
+            "displayName": "Ninja with Clang - RelWithDebInfo (Sanitizers)",
             "inherits": "ninja_clang",
             "description": "RelWithDebInfo with ASan/LSan for detecting leaks in optimized builds",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "ENABLE_SANITIZERS": "ON",
-                "GRAPHICS_API": "Cpu"
-            }
-        },
-        {
-            "name": "ninja_clang-relwithdebinfo-vulkan",
-            "displayName": "Ninja with Clang - RelWithDebInfo (Vulkan, Sanitizers)",
-            "inherits": "ninja_clang",
-            "description": "RelWithDebInfo with ASan/LSan for detecting leaks in optimized builds",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "ENABLE_SANITIZERS": "ON",
-                "GRAPHICS_API": "Vulkan"
+                "ENABLE_SANITIZERS": "ON"
             }
         },
         {
@@ -91,60 +59,28 @@
         },
         {
             "name": "ninja_gcc-debug",
-            "displayName": "Ninja with GCC - Debug (CPU)",
+            "displayName": "Ninja with GCC - Debug",
             "inherits": "ninja_gcc",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "GRAPHICS_API": "Cpu"
-            }
-        },
-        {
-            "name": "ninja_gcc-debug-vulkan",
-            "displayName": "Ninja with GCC - Debug (Vulkan)",
-            "inherits": "ninja_gcc",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "GRAPHICS_API": "Vulkan"
+                "CMAKE_BUILD_TYPE": "Debug"
             }
         },
         {
             "name": "ninja_gcc-release",
-            "displayName": "Ninja with GCC - Release (CPU)",
+            "displayName": "Ninja with GCC - Release",
             "inherits": "ninja_gcc",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "GRAPHICS_API": "Cpu"
-            }
-        },
-        {
-            "name": "ninja_gcc-release-vulkan",
-            "displayName": "Ninja with GCC - Release (Vulkan)",
-            "inherits": "ninja_gcc",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "GRAPHICS_API": "Vulkan"
+                "CMAKE_BUILD_TYPE": "Release"
             }
         },
         {
             "name": "ninja_gcc-relwithdebinfo",
-            "displayName": "Ninja with GCC - RelWithDebInfo (CPU, Sanitizers)",
+            "displayName": "Ninja with GCC - RelWithDebInfo (Sanitizers)",
             "inherits": "ninja_gcc",
             "description": "RelWithDebInfo with ASan/LSan for detecting leaks in optimized builds",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "ENABLE_SANITIZERS": "ON",
-                "GRAPHICS_API": "Cpu"
-            }
-        },
-        {
-            "name": "ninja_gcc-relwithdebinfo-vulkan",
-            "displayName": "Ninja with GCC - RelWithDebInfo (Vulkan, Sanitizers)",
-            "inherits": "ninja_gcc",
-            "description": "RelWithDebInfo with ASan/LSan for detecting leaks in optimized builds",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "ENABLE_SANITIZERS": "ON",
-                "GRAPHICS_API": "Vulkan"
+                "ENABLE_SANITIZERS": "ON"
             }
         },
         {
@@ -164,89 +100,28 @@
         },
         {
             "name": "ninja_msvc-debug",
-            "displayName": "Ninja with MSVC - Debug (CPU)",
+            "displayName": "Ninja with MSVC - Debug",
             "inherits": "ninja_msvc",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "GRAPHICS_API": "Cpu"
-            }
-        },
-        {
-            "name": "ninja_msvc-debug-vulkan",
-            "displayName": "Ninja with MSVC - Debug (Vulkan)",
-            "inherits": "ninja_msvc",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "GRAPHICS_API": "Vulkan"
-            }
-        },
-        {
-            "name": "ninja_msvc-debug-d3d12",
-            "displayName": "Ninja with MSVC - Debug (D3D12)",
-            "inherits": "ninja_msvc",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "GRAPHICS_API": "D3D12"
+                "CMAKE_BUILD_TYPE": "Debug"
             }
         },
         {
             "name": "ninja_msvc-release",
-            "displayName": "Ninja with MSVC - Release (CPU)",
+            "displayName": "Ninja with MSVC - Release",
             "inherits": "ninja_msvc",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "GRAPHICS_API": "Cpu"
-            }
-        },
-        {
-            "name": "ninja_msvc-release-vulkan",
-            "displayName": "Ninja with MSVC - Release (Vulkan)",
-            "inherits": "ninja_msvc",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "GRAPHICS_API": "Vulkan"
-            }
-        },
-        {
-            "name": "ninja_msvc-release-d3d12",
-            "displayName": "Ninja with MSVC - Release (D3D12)",
-            "inherits": "ninja_msvc",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "GRAPHICS_API": "D3D12"
+                "CMAKE_BUILD_TYPE": "Release"
             }
         },
         {
             "name": "ninja_msvc-relwithdebinfo",
-            "displayName": "Ninja with MSVC - RelWithDebInfo (CPU, Sanitizers)",
+            "displayName": "Ninja with MSVC - RelWithDebInfo (Sanitizers)",
             "inherits": "ninja_msvc",
             "description": "RelWithDebInfo with ASan for detecting heap issues in optimized builds",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "ENABLE_SANITIZERS": "ON",
-                "GRAPHICS_API": "Cpu"
-            }
-        },
-        {
-            "name": "ninja_msvc-relwithdebinfo-vulkan",
-            "displayName": "Ninja with MSVC - RelWithDebInfo (Vulkan, Sanitizers)",
-            "inherits": "ninja_msvc",
-            "description": "RelWithDebInfo with ASan for detecting heap issues in optimized builds",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "ENABLE_SANITIZERS": "ON",
-                "GRAPHICS_API": "Vulkan"
-            }
-        },
-        {
-            "name": "ninja_msvc-relwithdebinfo-d3d12",
-            "displayName": "Ninja with MSVC - RelWithDebInfo (D3D12, Sanitizers)",
-            "inherits": "ninja_msvc",
-            "description": "RelWithDebInfo with ASan for detecting heap issues in optimized builds",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "ENABLE_SANITIZERS": "ON",
-                "GRAPHICS_API": "D3D12"
+                "ENABLE_SANITIZERS": "ON"
             }
         },
         {
@@ -297,14 +172,6 @@
             ]
         },
         {
-            "name": "ci_linux_clang_debug_vulkan",
-            "displayName": "CI Linux Clang Debug (Vulkan)",
-            "inherits": [
-                "ninja_clang-debug-vulkan",
-                "ci_base"
-            ]
-        },
-        {
             "name": "ci_linux_clang_release",
             "displayName": "CI Linux Clang Release",
             "inherits": [
@@ -329,34 +196,10 @@
             ]
         },
         {
-            "name": "ci_windows_msvc_debug_vulkan",
-            "displayName": "CI Windows MSVC Debug (Vulkan)",
-            "inherits": [
-                "ninja_msvc-debug-vulkan",
-                "ci_base"
-            ]
-        },
-        {
             "name": "ci_windows_msvc_release",
             "displayName": "CI Windows MSVC Release",
             "inherits": [
                 "ninja_msvc-release",
-                "ci_base"
-            ]
-        },
-        {
-            "name": "ci_windows_msvc_debug_d3d12",
-            "displayName": "CI Windows MSVC Debug (D3D12)",
-            "inherits": [
-                "ninja_msvc-debug-d3d12",
-                "ci_base"
-            ]
-        },
-        {
-            "name": "ci_windows_msvc_release_d3d12",
-            "displayName": "CI Windows MSVC Release (D3D12)",
-            "inherits": [
-                "ninja_msvc-release-d3d12",
                 "ci_base"
             ]
         },
@@ -463,23 +306,9 @@
             "jobs": 0
         },
         {
-            "name": "ninja_clang-debug-vulkan",
-            "displayName": "Ninja with Clang - Debug (Vulkan)",
-            "configurePreset": "ninja_clang-debug-vulkan",
-            "configuration": "Debug",
-            "jobs": 0
-        },
-        {
             "name": "ninja_clang-release",
             "displayName": "Ninja with Clang - Release",
             "configurePreset": "ninja_clang-release",
-            "configuration": "Release",
-            "jobs": 0
-        },
-        {
-            "name": "ninja_clang-release-vulkan",
-            "displayName": "Ninja with Clang - Release (Vulkan)",
-            "configurePreset": "ninja_clang-release-vulkan",
             "configuration": "Release",
             "jobs": 0
         },
@@ -491,23 +320,9 @@
             "jobs": 0
         },
         {
-            "name": "ninja_clang-relwithdebinfo-vulkan",
-            "displayName": "Ninja with Clang - RelWithDebInfo (Vulkan)",
-            "configurePreset": "ninja_clang-relwithdebinfo-vulkan",
-            "configuration": "RelWithDebInfo",
-            "jobs": 0
-        },
-        {
             "name": "ninja_gcc-debug",
             "displayName": "Ninja with GCC - Debug",
             "configurePreset": "ninja_gcc-debug",
-            "configuration": "Debug",
-            "jobs": 0
-        },
-        {
-            "name": "ninja_gcc-debug-vulkan",
-            "displayName": "Ninja with GCC - Debug (Vulkan)",
-            "configurePreset": "ninja_gcc-debug-vulkan",
             "configuration": "Debug",
             "jobs": 0
         },
@@ -519,23 +334,9 @@
             "jobs": 0
         },
         {
-            "name": "ninja_gcc-release-vulkan",
-            "displayName": "Ninja with GCC - Release (Vulkan)",
-            "configurePreset": "ninja_gcc-release-vulkan",
-            "configuration": "Release",
-            "jobs": 0
-        },
-        {
             "name": "ninja_gcc-relwithdebinfo",
             "displayName": "Ninja with GCC - RelWithDebInfo",
             "configurePreset": "ninja_gcc-relwithdebinfo",
-            "configuration": "RelWithDebInfo",
-            "jobs": 0
-        },
-        {
-            "name": "ninja_gcc-relwithdebinfo-vulkan",
-            "displayName": "Ninja with GCC - RelWithDebInfo (Vulkan)",
-            "configurePreset": "ninja_gcc-relwithdebinfo-vulkan",
             "configuration": "RelWithDebInfo",
             "jobs": 0
         },
@@ -547,13 +348,6 @@
             "jobs": 0
         },
         {
-            "name": "ninja_msvc-debug-vulkan",
-            "displayName": "Ninja with MSVC - Debug (Vulkan)",
-            "configurePreset": "ninja_msvc-debug-vulkan",
-            "configuration": "Debug",
-            "jobs": 0
-        },
-        {
             "name": "ninja_msvc-release",
             "displayName": "Ninja with MSVC - Release",
             "configurePreset": "ninja_msvc-release",
@@ -561,44 +355,9 @@
             "jobs": 0
         },
         {
-            "name": "ninja_msvc-release-vulkan",
-            "displayName": "Ninja with MSVC - Release (Vulkan)",
-            "configurePreset": "ninja_msvc-release-vulkan",
-            "configuration": "Release",
-            "jobs": 0
-        },
-        {
-            "name": "ninja_msvc-debug-d3d12",
-            "displayName": "Ninja with MSVC - Debug (D3D12)",
-            "configurePreset": "ninja_msvc-debug-d3d12",
-            "configuration": "Debug",
-            "jobs": 0
-        },
-        {
-            "name": "ninja_msvc-release-d3d12",
-            "displayName": "Ninja with MSVC - Release (D3D12)",
-            "configurePreset": "ninja_msvc-release-d3d12",
-            "configuration": "Release",
-            "jobs": 0
-        },
-        {
-            "name": "ninja_msvc-relwithdebinfo-d3d12",
-            "displayName": "Ninja with MSVC - RelWithDebInfo (D3D12)",
-            "configurePreset": "ninja_msvc-relwithdebinfo-d3d12",
-            "configuration": "RelWithDebInfo",
-            "jobs": 0
-        },
-        {
             "name": "ninja_msvc-relwithdebinfo",
             "displayName": "Ninja with MSVC - RelWithDebInfo",
             "configurePreset": "ninja_msvc-relwithdebinfo",
-            "configuration": "RelWithDebInfo",
-            "jobs": 0
-        },
-        {
-            "name": "ninja_msvc-relwithdebinfo-vulkan",
-            "displayName": "Ninja with MSVC - RelWithDebInfo (Vulkan)",
-            "configurePreset": "ninja_msvc-relwithdebinfo-vulkan",
             "configuration": "RelWithDebInfo",
             "jobs": 0
         },
@@ -631,13 +390,6 @@
             "jobs": 0
         },
         {
-            "name": "ci_linux_clang_debug_vulkan",
-            "displayName": "CI Linux Clang Debug (Vulkan)",
-            "configurePreset": "ci_linux_clang_debug_vulkan",
-            "configuration": "Debug",
-            "jobs": 0
-        },
-        {
             "name": "ci_linux_clang_release",
             "displayName": "CI Linux Clang Release",
             "configurePreset": "ci_linux_clang_release",
@@ -659,30 +411,9 @@
             "jobs": 0
         },
         {
-            "name": "ci_windows_msvc_debug_vulkan",
-            "displayName": "CI Windows MSVC Debug (Vulkan)",
-            "configurePreset": "ci_windows_msvc_debug_vulkan",
-            "configuration": "Debug",
-            "jobs": 0
-        },
-        {
             "name": "ci_windows_msvc_release",
             "displayName": "CI Windows MSVC Release",
             "configurePreset": "ci_windows_msvc_release",
-            "configuration": "Release",
-            "jobs": 0
-        },
-        {
-            "name": "ci_windows_msvc_debug_d3d12",
-            "displayName": "CI Windows MSVC Debug (D3D12)",
-            "configurePreset": "ci_windows_msvc_debug_d3d12",
-            "configuration": "Debug",
-            "jobs": 0
-        },
-        {
-            "name": "ci_windows_msvc_release_d3d12",
-            "displayName": "CI Windows MSVC Release (D3D12)",
-            "configurePreset": "ci_windows_msvc_release_d3d12",
             "configuration": "Release",
             "jobs": 0
         },

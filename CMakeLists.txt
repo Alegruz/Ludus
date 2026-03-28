@@ -20,9 +20,6 @@ if(LUDUS_IS_CI)
     endif()
 endif()
 
-# Note: D3D12 SDK will be auto-downloaded on first D3D12 preset configure
-# if dependencies are not yet available
-
 # ============================================================================
 # Onboarding Check
 # ============================================================================
@@ -186,61 +183,6 @@ endif()
 project(GameEngine LANGUAGES C CXX)
 
 # ============================================================================
-# D3D12 Agility SDK Fetch (auto-download before configuration)
-# ============================================================================
-if(DEFINED GRAPHICS_API AND GRAPHICS_API STREQUAL "D3D12")
-    message(STATUS "D3D12 graphics API selected - fetching Agility SDK...")
-    include(FetchContent)
-    list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
-    include(FindD3D12AgilitySDK)
-endif()
-
-# ============================================================================
-# D3D12 Agility SDK Validation (after fetch attempt)
-# ============================================================================
-# If D3D12 graphics API is selected, verify the SDK exists before proceeding
-# This prevents partial build.ninja creation if SDK download fails
-if(DEFINED GRAPHICS_API AND GRAPHICS_API STREQUAL "D3D12")
-    set(_D3D12_SDK_CACHE_DIR "${CMAKE_BINARY_DIR}/_deps/d3d12-agility-sdk")
-    set(_D3D12_SDK_PATH "${_D3D12_SDK_CACHE_DIR}/d3d12-sdk")
-    
-    if(NOT EXISTS "${_D3D12_SDK_PATH}/include/d3d12.h" OR NOT EXISTS "${_D3D12_SDK_PATH}/bin/x64/D3D12Core.dll")
-        message(FATAL_ERROR
-            "\n"
-            "========================================================================\n"
-            "D3D12 Agility SDK Download Failed\n"
-            "========================================================================\n"
-            "\n"
-            "The DirectX 12 Agility SDK could not be downloaded or extracted.\n"
-            "This may be due to:\n"
-            "  - Network connectivity issues\n"
-            "  - Missing PowerShell or CMake\n"
-            "  - Insufficient disk space\n"
-            "  - Permissions issues\n"
-            "\n"
-            "Please try one of the following:\n"
-            "\n"
-            "1. Run initialization again:\n"
-            "     Windows:  .\\init.bat --install --preset ${CMAKE_PRESET_NAME}\n"
-            "     Linux/Mac: ./init.sh --install --preset ${CMAKE_PRESET_NAME}\n"
-            "\n"
-            "2. Or manually clean and retry:\n"
-            "     Remove: ${_D3D12_SDK_CACHE_DIR}\n"
-            "     Then:   cmake --preset ${CMAKE_PRESET_NAME}\n"
-            "\n"
-            "SDK destination: ${_D3D12_SDK_CACHE_DIR}\n"
-            "Expected files:\n"
-            "  - ${_D3D12_SDK_PATH}/include/d3d12.h\n"
-            "  - ${_D3D12_SDK_PATH}/bin/x64/D3D12Core.dll\n"
-            "\n"
-            "========================================================================\n"
-        )
-    endif()
-    
-    message(STATUS "D3D12 Agility SDK validated successfully")
-endif()
-
-# ============================================================================
 # Generator Prerequisite Check (Ninja)
 # ============================================================================
 if(CMAKE_GENERATOR MATCHES "Ninja")
@@ -285,25 +227,6 @@ option(ENABLE_CPPCHECK "Enable cppcheck static analysis" OFF)
 option(ENABLE_MSVC_ANALYZE "Enable MSVC /analyze static analysis" OFF)
 option(ENABLE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 
-# Graphics API selection
-set(GRAPHICS_API "Cpu" CACHE STRING "Graphics API to use (Cpu, Vulkan, D3D12, Metal)")
-set_property(CACHE GRAPHICS_API PROPERTY STRINGS Cpu Vulkan D3D12 Metal)
-
-# Validate graphics API selection
-if(NOT GRAPHICS_API MATCHES "^(Cpu|Vulkan|D3D12|Metal)$")
-    ludus_fatal_error("Invalid GRAPHICS_API: ${GRAPHICS_API}. Must be one of: Cpu, Vulkan, D3D12, Metal")
-endif()
-
-# Platform-specific validation
-if(GRAPHICS_API STREQUAL "D3D12" AND NOT WIN32)
-    ludus_fatal_error("D3D12 is only available on Windows")
-endif()
-if(GRAPHICS_API STREQUAL "Metal" AND NOT APPLE)
-    ludus_fatal_error("Metal is only available on macOS")
-endif()
-
-message(STATUS "Graphics API: ${GRAPHICS_API}")
-
 # Tool search hints (standard install locations):
 set(LLVM_HINT_PATHS
     "C:/Program Files/LLVM/bin"
@@ -335,52 +258,50 @@ include(FetchContent)
 # Vulkan (volk) integration
 # Primary Vulkan loader for Vulkan presets
 # ============================================================================
-if(GRAPHICS_API STREQUAL "Vulkan")
-    # Vulkan-Headers (for vulkan/vulkan.h)
-    # Allow override of VulkanHeaders and volk tags from command line
+# Vulkan-Headers (for vulkan/vulkan.h)
+# Allow override of VulkanHeaders and volk tags from command line
 
-    if(NOT DEFINED VULKAN_HEADERS_TAG)
-        set(VULKAN_HEADERS_TAG v1.4.342)
-    endif()
+if(NOT DEFINED VULKAN_HEADERS_TAG)
+    set(VULKAN_HEADERS_TAG v1.4.342)
+endif()
 
-    # Default volk tag (set via onboarding or -DVOLK_TAG=...)
-    # Note: Volk uses vulkan-sdk version tags, not bare version numbers
-    if(NOT DEFINED VOLK_TAG)
-        set(VOLK_TAG vulkan-sdk-1.4.335.0)
-    endif()
+# Default volk tag (set via onboarding or -DVOLK_TAG=...)
+# Note: Volk uses vulkan-sdk version tags, not bare version numbers
+if(NOT DEFINED VOLK_TAG)
+    set(VOLK_TAG vulkan-sdk-1.4.335.0)
+endif()
 
-    FetchContent_Declare(VulkanHeaders
-        GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
-        GIT_TAG ${VULKAN_HEADERS_TAG}
-        GIT_SHALLOW TRUE
-    )
+FetchContent_Declare(VulkanHeaders
+    GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+    GIT_TAG ${VULKAN_HEADERS_TAG}
+    GIT_SHALLOW TRUE
+)
 
-    # volk: meta-loader for Vulkan
-    set(VOLK_STATIC ON CACHE BOOL "Build volk as a static library" FORCE)
-    set(VOLK_INSTALL OFF CACHE BOOL "Disable volk install step" FORCE)
-    set(VOLK_TESTS OFF CACHE BOOL "Disable volk tests" FORCE)
+# volk: meta-loader for Vulkan
+set(VOLK_STATIC ON CACHE BOOL "Build volk as a static library" FORCE)
+set(VOLK_INSTALL OFF CACHE BOOL "Disable volk install step" FORCE)
+set(VOLK_TESTS OFF CACHE BOOL "Disable volk tests" FORCE)
 
-    FetchContent_Declare(volk
-        GIT_REPOSITORY https://github.com/zeux/volk.git
-        GIT_TAG ${VOLK_TAG}
-        GIT_SHALLOW TRUE
-    )
+FetchContent_Declare(volk
+    GIT_REPOSITORY https://github.com/zeux/volk.git
+    GIT_TAG ${VOLK_TAG}
+    GIT_SHALLOW TRUE
+)
 
-    FetchContent_MakeAvailable(VulkanHeaders volk)
+FetchContent_MakeAvailable(VulkanHeaders volk)
 
-    add_library(LudusVulkanDeps INTERFACE)
-    target_include_directories(LudusVulkanDeps INTERFACE
-        ${VulkanHeaders_SOURCE_DIR}/include
-        ${volk_SOURCE_DIR}
-    )
+add_library(LudusVulkanDeps INTERFACE)
+target_include_directories(LudusVulkanDeps INTERFACE
+    ${VulkanHeaders_SOURCE_DIR}/include
+    ${volk_SOURCE_DIR}
+)
 
-    if(TARGET volk::volk)
-        target_link_libraries(LudusVulkanDeps INTERFACE volk::volk)
-    elseif(TARGET volk)
-        target_link_libraries(LudusVulkanDeps INTERFACE volk)
-    else()
-        ludus_fatal_error("volk target not found after FetchContent_MakeAvailable")
-    endif()
+if(TARGET volk::volk)
+    target_link_libraries(LudusVulkanDeps INTERFACE volk::volk)
+elseif(TARGET volk)
+    target_link_libraries(LudusVulkanDeps INTERFACE volk)
+else()
+    ludus_fatal_error("volk target not found after FetchContent_MakeAvailable")
 endif()
 
 # ============================================================================
@@ -484,12 +405,6 @@ target_compile_definitions(LudusBuildSettings INTERFACE
   # Config
   $<$<CONFIG:Debug>:LUDUS_DEBUG=1>
   $<$<CONFIG:Release>:LUDUS_RELEASE=1>
-
-  # Graphics API
-  $<$<STREQUAL:${GRAPHICS_API},Cpu>:LUDUS_GRAPHICS_CPU=1>
-  $<$<STREQUAL:${GRAPHICS_API},Vulkan>:LUDUS_GRAPHICS_VULKAN=1>
-  $<$<STREQUAL:${GRAPHICS_API},D3D12>:LUDUS_GRAPHICS_D3D12=1>
-  $<$<STREQUAL:${GRAPHICS_API},Metal>:LUDUS_GRAPHICS_METAL=1>
 
   # Feature toggles (examples)
   LUDUS_ENABLE_ASSERTS=1

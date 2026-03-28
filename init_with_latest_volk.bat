@@ -13,4 +13,4 @@ for /f "tokens=2 delims=-" %%v in ("!VOLK_TAG!") do (
 )
 
 REM Run CMake with the latest volk tag
-cmake -DCMAKE_BUILD_TYPE=Debug -DGRAPHICS_API=Vulkan -DVOLK_TAG=%VOLK_TAG% -DVULKAN_HEADERS_TAG=%VULKAN_HEADERS_TAG% %*
+cmake -DCMAKE_BUILD_TYPE=Debug -DVOLK_TAG=%VOLK_TAG% -DVULKAN_HEADERS_TAG=%VULKAN_HEADERS_TAG% %*

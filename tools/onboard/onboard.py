@@ -212,24 +212,6 @@ def detect_volk():
     # Volk is provided via FetchContent; no system install required.
     return True, "FetchContent (no install required)"
 
-
-def detect_d3d12_agility_sdk():
-    """Check if D3D12 Agility SDK is available in build cache."""
-    # D3D12 Agility SDK is downloaded on-demand by CMake during configuration
-    # This detection checks if it's already been fetched and cached
-    sdk_cache = ROOT_DIR / "out" / "build" / "_deps" / "d3d12-agility-sdk" / "d3d12-sdk"
-    if sdk_cache.exists() and (sdk_cache / "include" / "d3d12.h").exists():
-        return True, f"{sdk_cache}"
-    
-    # Check in binary dir (fallback)
-    sdk_path = ROOT_DIR / ".cmake" / "d3d12-sdk"
-    if sdk_path.exists() and (sdk_path / "include" / "d3d12.h").exists():
-        return True, f"{sdk_path}"
-    
-    # Not cached yet, but will be fetched automatically on D3D12 preset configure
-    return True, "Will be fetched on first D3D12 configure (CMake FetchContent)"
-
-
 def get_package_manager():
     if is_windows():
         if which("winget"):
@@ -525,28 +507,16 @@ def resolve_preset_cache(preset_name):
 
 
 def get_preset_requirements(preset_name):
-    cache = resolve_preset_cache(preset_name)
+    # Renderer is Vulkan-only, so preset requirements are unconditional.
     requirements = []
     rules = load_preset_requirements()
     for rule in rules:
-        when = rule.get("when", {})
-        match = True
-        for key, expected in when.items():
-            if str(cache.get(key, "")) != str(expected):
-                match = False
-                break
-        if match:
-            requirements.extend(rule.get("requirements", []))
-    # Fallback: if preset name contains "vulkan"
-    if preset_name and "vulkan" in preset_name.lower():
-        if "vulkan_sdk" not in requirements:
-            requirements.append("vulkan_sdk")
-        if "volk" not in requirements:
-            requirements.append("volk")
-    # Fallback: if preset name contains "d3d12"
-    if preset_name and "d3d12" in preset_name.lower():
-        if "d3d12_agility_sdk" not in requirements:
-            requirements.append("d3d12_agility_sdk")
+        requirements.extend(rule.get("requirements", []))
+
+    if "vulkan_sdk" not in requirements:
+        requirements.append("vulkan_sdk")
+    if "volk" not in requirements:
+        requirements.append("volk")
     return requirements
 
 
@@ -579,8 +549,6 @@ def check_tools(role, preset_name=""):
         tools.append(("vulkan_sdk", "Vulkan SDK", *detect_vulkan_sdk(), True))
     if "volk" in preset_reqs:
         tools.append(("volk", "volk", *detect_volk(), True))
-    if "d3d12_agility_sdk" in preset_reqs:
-        tools.append(("d3d12_agility_sdk", "DirectX 12 Agility SDK", *detect_d3d12_agility_sdk(), False))
 
     return tools
 

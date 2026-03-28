@@ -8,6 +8,7 @@ add_library(Ludus INTERFACE)
 
 target_link_libraries(Ludus
     INTERFACE
+    LudusRenderer
     LudusRHI
     LudusPlatform
     LudusCore

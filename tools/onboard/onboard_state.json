@@ -1,4 +1,4 @@
 {
   "role": "debugger",
-  "preset": "ninja_msvc-debug-d3d12"
+  "preset": "ninja_msvc-debug"
 }
