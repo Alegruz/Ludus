@@ -1,203 +1,127 @@
 {
-    "version": 8,
-    "configurePresets": [
-        {
-            "name": "vs19_x64",
-            "hidden": true,
-            "displayName": "Visual Studio Professional 2019 Release - amd64",
-            "description": "Using compilers for Visual Studio 16 2019 (x64 architecture)",
-            "generator": "Visual Studio 16 2019",
-            "toolset": "host=x64",
-            "architecture": "x64",
-            "binaryDir": "${sourceDir}/out/build/${presetName}",
-            "cacheVariables": {
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
-                "CMAKE_C_COMPILER": "cl.exe",
-                "CMAKE_CXX_COMPILER": "cl.exe"
-            }
-        },
-        {
-            "name": "vs19_x64-debug",
-            "displayName": "Visual Studio Professional 2019 Release - amd64 - Debug",
-            "inherits": "vs19_x64",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
-            }
-        },
-        {
-            "name": "vs19_x64-release",
-            "displayName": "Visual Studio Professional 2019 Release - amd64 - Release",
-            "inherits": "vs19_x64",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
-            }
-        },
-        {
-            "name": "vs22_x64",
-            "hidden": true,
-            "displayName": "Visual Studio Community 2022 Preview - amd64",
-            "description": "Using compilers for Visual Studio 17 2022 (x64 architecture)",
-            "generator": "Visual Studio 17 2022",
-            "toolset": "host=x64",
-            "architecture": "x64",
-            "binaryDir": "${sourceDir}/out/build/${presetName}",
-            "cacheVariables": {
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
-                "CMAKE_C_COMPILER": "cl.exe",
-                "CMAKE_CXX_COMPILER": "cl.exe"
-            }
-        },
-        {
-            "name": "vs22_x64-debug",
-            "displayName": "Visual Studio Community 2022 Preview - amd64 - Debug",
-            "inherits": "vs22_x64",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
-            }
-        },
-        {
-            "name": "vs22_x64-release",
-            "displayName": "Visual Studio Community 2022 Preview - amd64 - Release",
-            "inherits": "vs22_x64",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
-            }
-        },
-        {
-            "name": "clang_x64",
-            "hidden": true,
-            "displayName": "Clang x64",
-            "description": "Using Clang compiler (x64 architecture)",
-            "binaryDir": "${sourceDir}/out/build/${presetName}",
-            "cacheVariables": {
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
-                "CMAKE_C_COMPILER": "clang",
-                "CMAKE_CXX_COMPILER": "clang++"
-            }
-        },
-        {
-            "name": "clang_x64-debug",
-            "displayName": "Clang x64 - Debug",
-            "inherits": "clang_x64",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
-            }
-        },
-        {
-            "name": "clang_x64-release",
-            "displayName": "Clang x64 - Release",
-            "inherits": "clang_x64",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
-            }
-        },
-        {
-            "name": "clang_ubuntu",
-            "hidden": true,
-            "displayName": "Clang 14.0.0 x86_64-pc-linux-gnu",
-            "description": "Using compilers: C = /usr/bin/clang, CXX = /usr/bin/clang++",
-            "binaryDir": "${sourceDir}/out/build/${presetName}",
-            "environment": { "CC": "clang", "CXX": "clang++" },
-            "cacheVariables": {
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
-                "CMAKE_C_COMPILER": "/usr/bin/clang",
-                "CMAKE_CXX_COMPILER": "/usr/bin/clang++"
-            }
-        },
-        {
-            "name": "clang_ubuntu-debug",
-            "displayName": "Clang 14.0.0 x86_64-pc-linux-gnu - Debug",
-            "inherits": "clang_ubuntu",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
-            }
-        },
-        {
-            "name": "clang_ubuntu-release",
-            "displayName": "Clang 14.0.0 x86_64-pc-linux-gnu - Release",
-            "inherits": "clang_ubuntu",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
-            }
-        },
-        {
-            "name": "gcc_ubuntu",
-            "hidden": true,
-            "displayName": "GCC 13.2.0 x86_64-linux-gnu",
-            "description": "Using compilers: C = /usr/bin/gcc, CXX = /usr/bin/g++",
-            "binaryDir": "${sourceDir}/out/build/${presetName}",
-            "environment": { "CC": "gcc", "CXX": "g++" },
-            "cacheVariables": {
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
-                "CMAKE_C_COMPILER": "/usr/bin/gcc",
-                "CMAKE_CXX_COMPILER": "/usr/bin/g++"
-            }
-        },
-        {
-            "name": "gcc_ubuntu-debug",
-            "displayName": "GCC 13.2.0 x86_64-linux-gnu - Debug",
-            "inherits": "gcc_ubuntu",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
-            }
-        },
-        {
-            "name": "gcc_ubuntu-release",
-            "displayName": "GCC 13.2.0 x86_64-linux-gnu - Release",
-            "inherits": "gcc_ubuntu",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
-            }
-        }
-    ],
-    "buildPresets": [
-        {
-            "name": "vs19_x64-debug",
-            "displayName": "Visual Studio Professional 2019 Release - amd64 - Debug",
-            "configurePreset": "vs19_x64-debug",
-            "configuration": "Debug"
-        },
-        {
-            "name": "vs19_x64-release",
-            "displayName": "Visual Studio Professional 2019 Release - amd64 - Release",
-            "configurePreset": "vs19_x64-release",
-            "configuration": "Release"
-        },
-        {
-            "name": "vs22_x64-debug",
-            "displayName": "Visual Studio Community 2022 Preview - amd64 - Debug",
-            "configurePreset": "vs22_x64-debug",
-            "configuration": "Debug"
-        },
-        {
-            "name": "vs22_x64-release",
-            "displayName": "Visual Studio Community 2022 Preview - amd64 - Release",
-            "configurePreset": "vs22_x64-release",
-            "configuration": "Release"
-        },
-        {
-            "name": "clang_ubuntu-debug",
-            "displayName": "Clang 14.0.0 x86_64-pc-linux-gnu - Debug",
-            "configurePreset": "clang_ubuntu-debug",
-            "configuration": "Debug"
-        },
-        {
-            "name": "clang_ubuntu-release",
-            "displayName": "Clang 14.0.0 x86_64-pc-linux-gnu - Release",
-            "configurePreset": "clang_ubuntu-release",
-            "configuration": "Release"
-        },
-        {
-            "name": "gcc_ubuntu-debug",
-            "displayName": "GCC 13.2.0 x86_64-linux-gnu - Debug",
-            "configurePreset": "gcc_ubuntu-debug",
-            "configuration": "Debug"
-        },
-        {
-            "name": "gcc_ubuntu-release",
-            "displayName": "GCC 13.2.0 x86_64-linux-gnu - Release",
-            "configurePreset": "gcc_ubuntu-release",
-            "configuration": "Release"
-        }
-    ]
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 29,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "linux-clang-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "environment": {
+        "CONAN_HOME": "${sourceDir}/out/conan/home",
+        "CONAN_NON_INTERACTIVE": "1",
+        "PATH": "${sourceDir}/out/host-tools/bin:${sourceDir}/out/host-tools/venv/bin:$penv{PATH}"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "${sourceDir}/out/host-tools/bin/clang++",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_MAKE_PROGRAM": "${sourceDir}/out/host-tools/venv/bin/ninja",
+        "LUDUS_BUILD_SMOKE_APP": "ON",
+        "LUDUS_ENABLE_CCACHE": "OFF",
+        "LUDUS_ENABLE_COVERAGE": "OFF",
+        "LUDUS_ENABLE_TSAN": "OFF"
+      }
+    },
+    {
+      "name": "linux-clang-debug",
+      "displayName": "Linux Clang Debug",
+      "inherits": "linux-clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/linux-clang-debug/conan_toolchain.cmake",
+        "LUDUS_BUILD_TESTS": "ON",
+        "LUDUS_ENABLE_ASAN": "OFF",
+        "LUDUS_ENABLE_UBSAN": "OFF"
+      }
+    },
+    {
+      "name": "linux-clang-development",
+      "displayName": "Linux Clang Development",
+      "inherits": "linux-clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/linux-clang-development/conan_toolchain.cmake",
+        "LUDUS_BUILD_TESTS": "ON",
+        "LUDUS_ENABLE_ASAN": "OFF",
+        "LUDUS_ENABLE_UBSAN": "OFF"
+      }
+    },
+    {
+      "name": "linux-clang-asan-ubsan",
+      "displayName": "Linux Clang ASan UBSan",
+      "inherits": "linux-clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/linux-clang-asan-ubsan/conan_toolchain.cmake",
+        "LUDUS_BUILD_TESTS": "ON",
+        "LUDUS_ENABLE_ASAN": "ON",
+        "LUDUS_ENABLE_UBSAN": "ON"
+      }
+    },
+    {
+      "name": "linux-clang-release",
+      "displayName": "Linux Clang Release",
+      "inherits": "linux-clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/linux-clang-release/conan_toolchain.cmake",
+        "LUDUS_BUILD_TESTS": "OFF",
+        "LUDUS_ENABLE_ASAN": "OFF",
+        "LUDUS_ENABLE_UBSAN": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "linux-clang-debug",
+      "configurePreset": "linux-clang-debug"
+    },
+    {
+      "name": "linux-clang-development",
+      "configurePreset": "linux-clang-development"
+    },
+    {
+      "name": "linux-clang-asan-ubsan",
+      "configurePreset": "linux-clang-asan-ubsan"
+    },
+    {
+      "name": "linux-clang-release",
+      "configurePreset": "linux-clang-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "linux-clang-debug",
+      "configurePreset": "linux-clang-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-clang-development",
+      "configurePreset": "linux-clang-development",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-clang-asan-ubsan",
+      "configurePreset": "linux-clang-asan-ubsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-clang-release",
+      "configurePreset": "linux-clang-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
 }

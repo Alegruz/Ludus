@@ -1,0 +1,7 @@
+{
+  "name": "@LUDUS_ENGINE_PACKAGE_NAME@",
+  "version": "@PROJECT_VERSION@",
+  "library_type": "static",
+  "cxx_standard": "C++23",
+  "cmake_namespace": "@LUDUS_ENGINE_EXPORT_NAMESPACE@"
+}

@@ -1,0 +1,9 @@
+{
+    "version": "0.5",
+    "requires": [
+        "catch2/3.4.0#f66109133591e5dac29511b9e09a6b57%1726584455.883"
+    ],
+    "build_requires": [],
+    "python_requires": [],
+    "config_requires": []
+}
