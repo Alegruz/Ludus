@@ -2,6 +2,7 @@
 Checks: >
   -*,
   bugprone-*,
+  -bugprone-chained-comparison,
   performance-*,
   portability-*,
   modernize-avoid-bind,
