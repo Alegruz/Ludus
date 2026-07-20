@@ -1,0 +1,12 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "local-development-with-ccache",
+      "inherits": "linux-clang-development",
+      "cacheVariables": {
+        "LUDUS_ENABLE_CCACHE": "ON"
+      }
+    }
+  ]
+}

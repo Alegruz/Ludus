@@ -1,0 +1,13 @@
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.sh text eol=lf
+scripts/bootstrap text eol=lf
+scripts/build text eol=lf
+scripts/check text eol=lf
+scripts/doctor text eol=lf
+scripts/init text eol=lf
+scripts/install-sdk text eol=lf
+scripts/test text eol=lf
+init.sh text eol=lf
