@@ -1,92 +1,101 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.29)
 
-set(CMAKE_CXX_STANDARD 20)
+set(LUDUS_ENGINE_PROJECT_NAME "Ludus")
+set(LUDUS_ENGINE_EXPORT_NAMESPACE "Ludus::")
+set(LUDUS_ENGINE_PACKAGE_NAME "Ludus")
+
+project(${LUDUS_ENGINE_PROJECT_NAME} VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_C_STANDARD 17)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-project(GameEngine LANGUAGES C CXX)
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
-# Common Settings
-include_directories(${CMAKE_SOURCE_DIR}/include)
+include(CTest)
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
-# Platform and Configuration Settings
-add_library(LudusBuildSettings INTERFACE)
+include(EngineOptions)
+include(EngineCompilerWarnings)
+include(EngineSanitizers)
+include(EngineTargets)
 
-if(WIN32)
-    set(PLATFORM_FOLDER "Windows")
-    set(CMAKE_WIN32_EXECUTABLE true)
-    
-    if(MSVC)
-        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
-    endif()
-elseif(APPLE)
-    set(PLATFORM_FOLDER "MacOs")
-elseif(UNIX)
-    set(PLATFORM_FOLDER "Unix")
+option(LUDUS_BUILD_TESTS "Build Ludus tests" ON)
+option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
+option(LUDUS_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+option(LUDUS_ENABLE_COVERAGE "Enable coverage instrumentation" OFF)
+option(LUDUS_ENABLE_CCACHE "Use ccache when available" OFF)
+
+if(DEFINED ENV{CI} AND NOT "$ENV{CI}" STREQUAL "")
+    set(LUDUS_WARNINGS_AS_ERRORS_DEFAULT ON)
 else()
-    message(FATAL_ERROR "Unsupported platform ${CMAKE_SYSTEM_NAME}")
+    set(LUDUS_WARNINGS_AS_ERRORS_DEFAULT OFF)
 endif()
 
-target_compile_definitions(LudusBuildSettings INTERFACE
-  # Platform
-  $<$<PLATFORM_ID:Windows>:LUDUS_WINDOWS=1>
-  $<$<PLATFORM_ID:Linux>:LUDUS_LINUX=1>
-  $<$<PLATFORM_ID:Darwin>:LUDUS_MAC=1>
+option(LUDUS_WARNINGS_AS_ERRORS "Treat project compiler warnings as errors" ${LUDUS_WARNINGS_AS_ERRORS_DEFAULT})
+option(LUDUS_ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(LUDUS_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 
-  # Config
-  $<$<CONFIG:Debug>:LUDUS_DEBUG=1>
-  $<$<CONFIG:Release>:LUDUS_RELEASE=1>
+ludus_configure_project_options(ludus_project_options)
+ludus_configure_project_warnings(ludus_project_warnings)
+ludus_configure_project_sanitizers(ludus_project_options)
 
-  # Feature toggles (examples)
-  LUDUS_ENABLE_ASSERTS=1
-)
-
-target_compile_options(LudusBuildSettings INTERFACE
-    # MSVC
-    $<$<CXX_COMPILER_ID:MSVC>:/W4 /permissive- /Zc:__cplusplus /EHsc /utf-8 /Zc:preprocessor /bigobj>
-    # GCC/Clang
-    $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:
-    -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow
-    -fno-exceptions -fno-rtti>  # if that’s your policy; otherwise drop
-)
-
-message(STATUS "Current platform: ${CMAKE_SYSTEM_NAME}")
-message(STATUS "Current compiler: ${CMAKE_CXX_COMPILER_ID}")
-
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    add_library(ProjectSanitizersSettings INTERFACE)
-
-    option(ENABLE_SANITIZERS "Enable {ASan,UBSan,TSan}" OFF)
-
-    if(ENABLE_SANITIZERS AND NOT MSVC)
-        target_compile_options(ProjectSanitizersSettings INTERFACE $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-fsanitize=address,undefined -fno-omit-frame-pointer -g>)
-        target_link_options(ProjectSanitizersSettings INTERFACE $<$<AND:$<NOT:$<CXX_COMPILER_ID:MSVC>>,$<CONFIG:Debug>>:-fsanitize=address,undefined -fno-omit-frame-pointer>)
+if(LUDUS_ENABLE_CCACHE)
+    find_program(LUDUS_CCACHE_PROGRAM ccache)
+    if(LUDUS_CCACHE_PROGRAM)
+        message(STATUS "Using ccache: ${LUDUS_CCACHE_PROGRAM}")
+        set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${LUDUS_CCACHE_PROGRAM}")
+        set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "${LUDUS_CCACHE_PROGRAM}")
+    else()
+        message(WARNING "LUDUS_ENABLE_CCACHE is ON, but ccache was not found")
     endif()
 endif()
 
-# MSVC ASan (x64 only, no /GL)
-if(ENABLE_SANITIZERS AND MSVC)
-    add_compile_options(/fsanitize=address /Zi /EHsc)
-    add_link_options(/INCREMENTAL /DEBUG)
+add_subdirectory(modules/foundation/base)
+
+if(LUDUS_BUILD_SMOKE_APP)
+    add_subdirectory(apps/smoke)
 endif()
 
-if(ENABLE_SANITIZERS)
-    target_link_libraries(LudusBuildSettings PRIVATE ProjectSanitizersSettings)
+if(LUDUS_BUILD_TESTS)
+    enable_testing()
 endif()
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CONFIG_FOLDER "Debug")
+add_subdirectory(tests)
 
-    target_compile_definitions(LudusBuildSettings INTERFACE $<$<CONFIG:Debug>:LUDUS_DEBUG=1> )
-elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CONFIG_FOLDER "Release")
+install(
+    EXPORT LudusTargets
+    NAMESPACE ${LUDUS_ENGINE_EXPORT_NAMESPACE}
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${LUDUS_ENGINE_PACKAGE_NAME}"
+)
 
-    target_compile_definitions(LudusBuildSettings INTERFACE $<$<CONFIG:Release>:LUDUS_RELEASE=1> )
-else()
-    message(FATAL_ERROR "Unsupported build configuration: ${CMAKE_BUILD_TYPE}")
-endif()
+configure_package_config_file(
+    "${PROJECT_SOURCE_DIR}/cmake/LudusConfig.cmake.in"
+    "${PROJECT_BINARY_DIR}/cmake/LudusConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${LUDUS_ENGINE_PACKAGE_NAME}"
+)
 
-add_subdirectory(src)
+write_basic_package_version_file(
+    "${PROJECT_BINARY_DIR}/cmake/LudusConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+configure_file(
+    "${PROJECT_SOURCE_DIR}/cmake/LudusSdkManifest.json.in"
+    "${PROJECT_BINARY_DIR}/cmake/LudusSdkManifest.json"
+    @ONLY
+    NEWLINE_STYLE UNIX
+)
+
+install(
+    FILES
+        "${PROJECT_BINARY_DIR}/cmake/LudusConfig.cmake"
+        "${PROJECT_BINARY_DIR}/cmake/LudusConfigVersion.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${LUDUS_ENGINE_PACKAGE_NAME}"
+)
+
+install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}/licenses")
+install(FILES "${PROJECT_BINARY_DIR}/cmake/LudusSdkManifest.json" DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}")

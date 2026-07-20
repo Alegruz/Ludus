@@ -1,0 +1,14 @@
+#pragma once
+
+#include <string_view>
+
+namespace ludus::foundation::build_metadata {
+
+inline constexpr int version_major = @PROJECT_VERSION_MAJOR@;
+inline constexpr int version_minor = @PROJECT_VERSION_MINOR@;
+inline constexpr int version_patch = @PROJECT_VERSION_PATCH@;
+inline constexpr std::string_view version_string = "@PROJECT_VERSION@";
+inline constexpr std::string_view git_revision = "@LUDUS_GIT_REVISION@";
+inline constexpr std::string_view compiler_identity = "@LUDUS_COMPILER_ID@ @LUDUS_COMPILER_VERSION@";
+
+} // namespace ludus::foundation::build_metadata

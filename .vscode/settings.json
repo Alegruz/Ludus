@@ -1,0 +1,23 @@
+{
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "clangd.arguments": [
+    "--background-index",
+    "--clang-tidy",
+    "--compile-commands-dir=${workspaceFolder}/out/build/linux-clang-development"
+  ],
+  "cmake.cmakePath": "${workspaceFolder}/out/host-tools/venv/bin/cmake",
+  "cmake.configureEnvironment": {
+    "CONAN_HOME": "${workspaceFolder}/out/conan/home",
+    "CONAN_NON_INTERACTIVE": "1",
+    "PATH": "${workspaceFolder}/out/host-tools/bin:${workspaceFolder}/out/host-tools/venv/bin:${env:PATH}"
+  },
+  "cmake.buildEnvironment": {
+    "PATH": "${workspaceFolder}/out/host-tools/bin:${workspaceFolder}/out/host-tools/venv/bin:${env:PATH}"
+  },
+  "cmake.testEnvironment": {
+    "PATH": "${workspaceFolder}/out/host-tools/bin:${workspaceFolder}/out/host-tools/venv/bin:${env:PATH}"
+  },
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": false,
+  "cmake.buildDirectory": "${workspaceFolder}/out/build/${buildPresetName}"
+}

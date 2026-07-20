@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    name: Ubuntu Clang
+    runs-on: ubuntu-24.04
+    env:
+      CI: "true"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cache pip downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('config/tool_versions.json') }}
+
+      - name: Cache Conan package cache
+        uses: actions/cache@v4
+        with:
+          path: out/conan/home
+          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', 'config/conan/profiles/linux-clang-x86_64', 'conan.lock') }}
+
+      - name: Initialize, build, test, check, and validate SDK
+        run: ./init.sh --ci --validate
