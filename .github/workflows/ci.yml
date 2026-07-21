@@ -28,3 +28,28 @@ jobs:
 
       - name: Initialize, build, test, check, and validate SDK
         run: ./init.sh --ci --validate
+
+  windows:
+    name: Windows MSVC
+    runs-on: windows-2022
+    env:
+      CI: "true"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cache pip downloads
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-${{ hashFiles('config/tool_versions.json') }}
+
+      - name: Cache Conan package cache
+        uses: actions/cache@v4
+        with:
+          path: out/conan/home
+          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', 'config/conan/profiles/windows-msvc-x86_64', 'conan.lock') }}
+
+      - name: Build, test, and validate SDK
+        shell: cmd
+        run: init.cmd windows-msvc-development --ci --validate

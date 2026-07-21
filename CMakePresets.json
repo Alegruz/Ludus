@@ -74,6 +74,59 @@
         "LUDUS_ENABLE_ASAN": "OFF",
         "LUDUS_ENABLE_UBSAN": "OFF"
       }
+    },
+    {
+      "name": "windows-msvc-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "environment": {
+        "CONAN_HOME": "${sourceDir}/out/conan/home",
+        "CONAN_NON_INTERACTIVE": "1",
+        "PATH": "${sourceDir}/out/host-tools/venv/Scripts;$penv{PATH}"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "cl",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_MAKE_PROGRAM": "${sourceDir}/out/host-tools/venv/Scripts/ninja.exe",
+        "LUDUS_BUILD_SMOKE_APP": "ON",
+        "LUDUS_ENABLE_CCACHE": "OFF",
+        "LUDUS_ENABLE_COVERAGE": "OFF",
+        "LUDUS_ENABLE_ASAN": "OFF",
+        "LUDUS_ENABLE_UBSAN": "OFF",
+        "LUDUS_ENABLE_TSAN": "OFF"
+      }
+    },
+    {
+      "name": "windows-msvc-debug",
+      "displayName": "Windows MSVC Debug",
+      "inherits": "windows-msvc-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/windows-msvc-debug/conan_toolchain.cmake",
+        "LUDUS_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "windows-msvc-development",
+      "displayName": "Windows MSVC Development",
+      "inherits": "windows-msvc-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/windows-msvc-development/conan_toolchain.cmake",
+        "LUDUS_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "windows-msvc-release",
+      "displayName": "Windows MSVC Release",
+      "inherits": "windows-msvc-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/windows-msvc-release/conan_toolchain.cmake",
+        "LUDUS_BUILD_TESTS": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -92,6 +145,18 @@
     {
       "name": "linux-clang-release",
       "configurePreset": "linux-clang-release"
+    },
+    {
+      "name": "windows-msvc-debug",
+      "configurePreset": "windows-msvc-debug"
+    },
+    {
+      "name": "windows-msvc-development",
+      "configurePreset": "windows-msvc-development"
+    },
+    {
+      "name": "windows-msvc-release",
+      "configurePreset": "windows-msvc-release"
     }
   ],
   "testPresets": [
@@ -122,6 +187,21 @@
       "output": {
         "outputOnFailure": true
       }
+    },
+    {
+      "name": "windows-msvc-debug",
+      "configurePreset": "windows-msvc-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "windows-msvc-development",
+      "configurePreset": "windows-msvc-development",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "windows-msvc-release",
+      "configurePreset": "windows-msvc-release",
+      "output": { "outputOnFailure": true }
     }
   ]
 }

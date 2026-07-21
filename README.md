@@ -2,13 +2,25 @@
 
 Ludus is currently a minimal C++23 engine skeleton for rendering research and engine architecture experiments. Milestone 0 intentionally contains infrastructure only: one small foundation library, unit tests, a smoke executable, SDK installation, and an external `find_package()` consumer.
 
-## Supported Host
+## Supported Hosts
 
-Milestone 0 is Linux-first and validated for Ubuntu 24.04 with Clang/LLVM 18, LLD, Ninja, CMake, Conan 2, Python 3, clang-format, and clang-tidy.
+Milestone 0 is validated on Ubuntu 24.04 with Clang/LLVM 18 and on Windows with Visual Studio 2022 Build Tools (MSVC). Both hosts use project-pinned Ninja, CMake, and Conan 2 plus Python 3.
 
 The onboarding script installs Ubuntu system prerequisites with `apt-get` when they are missing. On minimal Ubuntu installs it may enable the standard `universe` component because LLVM and Python venv support are often published there. If Ubuntu's helper reports success without changing the deb822 source file, Ludus patches the Ubuntu source component list after keeping a one-time backup. It then installs pinned project-managed CMake, Ninja, and Conan into `out/host-tools/venv/`.
 
 The venv is only for project-managed build tools. Ludus still uses the system Python executable to create it, but avoids installing Python packages globally or depending on whatever CMake, Ninja, or Conan version happens to be on the machine.
+
+On Windows, install Python 3.10+ and Visual Studio 2022 Build Tools with the **Desktop development with C++** workload. Then double-click `init.cmd`, or run one command from Command Prompt, PowerShell, or Windows Terminal:
+
+```powershell
+git clone <repository>
+cd <repository>
+.\init.cmd
+.\scripts\build.ps1
+.\scripts\test.ps1
+```
+
+`init.cmd` locates Visual Studio 2022 and activates its x64 compiler environment automatically, so Developer PowerShell and PowerShell execution-policy changes are not required. It gives actionable installation guidance when Python or the C++ workload is missing, and installs the pinned Python build tools into `out/`; Visual Studio and Python remain system prerequisites.
 
 ## Quick Start
 
@@ -35,9 +47,12 @@ linux-clang-debug
 linux-clang-development
 linux-clang-asan-ubsan
 linux-clang-release
+windows-msvc-debug
+windows-msvc-development
+windows-msvc-release
 ```
 
-`linux-clang-development` is the default local preset.
+`linux-clang-development` is the Linux default. On Windows, `windows-msvc-development` is selected by default.
 
 ## Common Commands
 
@@ -62,7 +77,7 @@ Formatting checks are read-only by default. Use `./scripts/check --format --fix`
 
 ## Current Limitations
 
-Milestone 0 does not include rendering, Vulkan, windowing, input, assets, jobs, ECS, reflection, serialization, plugins, an editor, or game code. Windows launchers exist only as thin future-facing wrappers around the shared Python entry point; the supported automatic onboarding host is Ubuntu Linux.
+Milestone 0 does not include rendering, Vulkan, windowing, input, assets, jobs, ECS, reflection, serialization, plugins, an editor, or game code.
 
 ## More Detail
 
