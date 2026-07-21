@@ -1,11 +1,4 @@
 $RepoDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Python = Get-Command python -ErrorAction SilentlyContinue
-if (-not $Python) {
-    $Python = Get-Command py -ErrorAction SilentlyContinue
-}
-if (-not $Python) {
-    Write-Error "Python is required before Ludus can initialize this host."
-    exit 1
-}
-& $Python.Source "$RepoDir/scripts/python/engine.py" init @args
-exit $LASTEXITCODE
+. "$RepoDir/scripts/powershell-common.ps1"
+$ExitCode = Invoke-LudusEngine -ScriptDir "$RepoDir/scripts" -Command "init" -Arguments $args
+exit $ExitCode
