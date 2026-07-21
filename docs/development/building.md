@@ -24,9 +24,25 @@ Run:
 ./init.sh
 ```
 
-`init.sh` is safe to rerun. On Ubuntu/Debian hosts it installs missing system prerequisites with `apt-get`, creates or updates the project-managed virtual environment, resolves Conan dependencies, and writes Conan generator files for every committed preset. It does not configure or build Ludus engine targets by default, so engine developers can initialize once and then configure/build from VS Code CMake Tools or the command line when they choose.
+On Windows, install Python 3.10+ and Visual Studio 2022 Build Tools with the **Desktop development with C++** workload. Double-click `init.cmd`, or run it from any Command Prompt, PowerShell, or Windows Terminal session:
 
-The default preset for command-line build, test, check, and install scripts is `linux-clang-development`. If you want a lighter initialization that prepares only one preset, use:
+```powershell
+.\init.cmd
+```
+
+The Windows default is `windows-msvc-development`; debug and release variants are `windows-msvc-debug` and `windows-msvc-release`. The same PowerShell wrappers drive local development and the Windows GitHub Actions job:
+
+```powershell
+.\scripts\build.ps1
+.\scripts\test.ps1
+.\scripts\install-sdk.ps1
+```
+
+The project manages CMake, Ninja, and Conan under `out/host-tools/venv`. `init.cmd` finds Visual Studio 2022 through `vswhere` and activates `cl.exe`, the Windows SDK, and the linker environment itself. Its child onboarding process receives that environment; the caller's terminal does not need to be a Visual Studio developer shell.
+
+`init.sh` is safe to rerun. On Ubuntu/Debian hosts it installs missing system prerequisites with `apt-get`, creates or updates the project-managed virtual environment, resolves Conan dependencies, and writes Conan generator files for every Linux preset. The Windows entry point prepares every Windows preset. It does not configure or build Ludus engine targets by default, so engine developers can initialize once and then configure/build from VS Code CMake Tools or the command line when they choose.
+
+The default preset is `linux-clang-development` on Linux and `windows-msvc-development` on Windows. If you want a lighter initialization that prepares only one preset, use:
 
 ```bash
 ./init.sh --preset-only linux-clang-debug
@@ -74,7 +90,7 @@ Normal configure, build, test, check, and SDK install commands use the Conan fil
 
 ## Presets
 
-The default preset is:
+The Linux default preset is:
 
 ```bash
 ./scripts/build linux-clang-development

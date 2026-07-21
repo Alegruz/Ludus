@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 
-DEFAULT_PRESET = "linux-clang-development"
+DEFAULT_PRESET = "windows-msvc-development" if os.name == "nt" else "linux-clang-development"
 PROJECT_CXX_STANDARD = "23"
 BOOTSTRAP_STATE_VERSION = 1
 
@@ -25,6 +25,9 @@ PRESET_BUILD_TYPES: dict[str, str] = {
     "linux-clang-development": "RelWithDebInfo",
     "linux-clang-asan-ubsan": "RelWithDebInfo",
     "linux-clang-release": "Release",
+    "windows-msvc-debug": "Debug",
+    "windows-msvc-development": "RelWithDebInfo",
+    "windows-msvc-release": "Release",
 }
 
 FORMAT_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
@@ -33,6 +36,7 @@ TIDY_ROOTS = ("modules", "apps")
 BOOTSTRAP_INPUTS = (
     "config/tool_versions.json",
     "config/conan/profiles/linux-clang-x86_64",
+    "config/conan/profiles/windows-msvc-x86_64",
     "conanfile.py",
     "conan.lock",
     "CMakePresets.json",
@@ -181,6 +185,7 @@ def run(
             env=env,
             check=True,
             text=True,
+            errors="replace",
             stdout=subprocess.PIPE if capture else None,
             stderr=subprocess.STDOUT if capture else None,
         )
@@ -212,6 +217,7 @@ def capture_command_quiet(
             env=env,
             check=False,
             text=True,
+            errors="replace",
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
@@ -430,7 +436,14 @@ def system_tool_statuses(root: Path, versions: dict[str, dict[str, str]]) -> lis
     minimum = versions["minimum"]
     clang_major = version_tuple(minimum["clang"])[0] if version_tuple(minimum["clang"]) else 14
     shim_dir = host_tools_bin_dir(root)
-    tool_specs: list[tuple[str, bool, Sequence[str], Sequence[str], str]] = [
+    if os.name == "nt":
+        tool_specs: list[tuple[str, bool, Sequence[str], Sequence[str], str]] = [
+            ("Git", True, ("git",), ("--version",), ""),
+            ("Python", True, (sys.executable,), ("--version",), minimum["python"]),
+            ("MSVC", True, ("cl",), (), ""),
+        ]
+    else:
+        tool_specs = [
         ("Git", True, ("git",), ("--version",), ""),
         ("Python", True, (sys.executable,), ("--version",), minimum["python"]),
         ("Clang", True, (str(shim_dir / "clang++"), f"clang++-{clang_major}", "clang++"), ("--version",), minimum["clang"]),
@@ -501,8 +514,9 @@ def managed_tool_statuses(root: Path, versions: dict[str, dict[str, str]]) -> li
 
 
 def project_state_statuses(root: Path) -> list[ToolStatus]:
-    installed_profile = root / "out" / "conan" / "home" / "profiles" / "linux-clang-x86_64"
-    source_profile = root / "config" / "conan" / "profiles" / "linux-clang-x86_64"
+    profile_name = conan_profile_name()
+    installed_profile = root / "out" / "conan" / "home" / "profiles" / profile_name
+    source_profile = root / "config" / "conan" / "profiles" / profile_name
     lockfile = root / "conan.lock"
     environment = venv_dir(root)
     environment_ok = environment.is_dir() and venv_python(root).exists() and venv_has_pip(root)
@@ -808,6 +822,14 @@ def system_prerequisites_need_install(root: Path, versions: dict[str, dict[str, 
 
 
 def install_ubuntu_system_prerequisites(root: Path, versions: dict[str, dict[str, str]]) -> None:
+    if os.name == "nt":
+        if not system_prerequisites_need_install(root, versions):
+            print("Windows system prerequisites are available.")
+            return
+        raise EngineError(
+            "MSVC Build Tools are required. Install Visual Studio 2022 Build Tools with the "
+            "Desktop development with C++ workload, then run this command from Developer PowerShell for VS 2022"
+        )
     configure_system_tool_shims(root, versions)
     if not system_prerequisites_need_install(root, versions):
         print("Ubuntu system prerequisites already satisfy Milestone 0.")
@@ -856,9 +878,19 @@ def validate_managed_tools(root: Path, versions: dict[str, dict[str, str]]) -> N
         raise EngineError("project-managed tools are missing or do not match pinned versions")
 
 
+def conan_profile_name() -> str:
+    return "windows-msvc-x86_64" if os.name == "nt" else "linux-clang-x86_64"
+
+
+def host_presets() -> tuple[str, ...]:
+    prefix = "windows-" if os.name == "nt" else "linux-"
+    return tuple(preset for preset in PRESET_BUILD_TYPES if preset.startswith(prefix))
+
+
 def install_conan_profile(root: Path) -> Path:
-    source = root / "config" / "conan" / "profiles" / "linux-clang-x86_64"
-    destination = root / "out" / "conan" / "home" / "profiles" / "linux-clang-x86_64"
+    profile_name = conan_profile_name()
+    source = root / "config" / "conan" / "profiles" / profile_name
+    destination = root / "out" / "conan" / "home" / "profiles" / profile_name
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
     print(f"Installed Conan profile: {destination}")
@@ -912,14 +944,14 @@ def cmake_cache_repair_reasons(root: Path, preset: str) -> list[str]:
     if not cache_path.is_file():
         return []
 
-    expected_compiler = str(clang_cxx(root))
     expected_ninja = str(ninja(root))
     expected_toolchain = str(root / "out" / "conan" / preset / "conan_toolchain.cmake")
-    checks = (
-        ("CMAKE_CXX_COMPILER", expected_compiler),
+    checks = [
         ("CMAKE_MAKE_PROGRAM", expected_ninja),
         ("CMAKE_TOOLCHAIN_FILE", expected_toolchain),
-    )
+    ]
+    if not preset.startswith("windows-"):
+        checks.insert(0, ("CMAKE_CXX_COMPILER", str(clang_cxx(root))))
 
     reasons: list[str] = []
     for variable, expected in checks:
@@ -1088,9 +1120,10 @@ def ensure_bootstrap_for_preset(root: Path, preset: str) -> None:
 def command_bootstrap(args: argparse.Namespace) -> int:
     root = repo_root()
     versions = load_tool_versions(root)
-    prepare_conan_artifacts(root, versions, tuple(PRESET_BUILD_TYPES))
-    repair_existing_cmake_caches(root, tuple(PRESET_BUILD_TYPES))
-    print("Running minimal CMake configuration smoke test for linux-clang-development.")
+    presets = host_presets()
+    prepare_conan_artifacts(root, versions, presets)
+    repair_existing_cmake_caches(root, presets)
+    print(f"Running minimal CMake configuration smoke test for {DEFAULT_PRESET}.")
     cmake_configure(root, DEFAULT_PRESET)
     if getattr(args, "show_next_commands", True):
         print("")
@@ -1127,7 +1160,7 @@ def command_init(args: argparse.Namespace) -> int:
     if args.preset_only and not run_validation:
         presets = (preset,)
     else:
-        presets = tuple(PRESET_BUILD_TYPES)
+        presets = host_presets()
     prepare_conan_artifacts(root, versions, presets)
     repair_existing_cmake_caches(root, presets)
     if command_doctor(argparse.Namespace()) != 0:
@@ -1137,10 +1170,10 @@ def command_init(args: argparse.Namespace) -> int:
         command_build(argparse.Namespace(preset=preset, extra=[]))
         command_test(argparse.Namespace(preset=preset, label=None))
 
-        if not args.skip_checks:
+        if not args.skip_checks and os.name != "nt":
             command_check(argparse.Namespace(preset=preset, format=False, tidy=False, all=True, fix=False))
 
-        if not args.skip_sanitizers:
+        if not args.skip_sanitizers and os.name != "nt":
             command_build(argparse.Namespace(preset="linux-clang-asan-ubsan", extra=[]))
             command_test(argparse.Namespace(preset="linux-clang-asan-ubsan", label=None))
 
@@ -1289,10 +1322,11 @@ def command_check(args: argparse.Namespace) -> int:
 
 
 def verify_sdk_install(root: Path, prefix: Path) -> None:
+    library_name = "ludus_foundation_base.lib" if os.name == "nt" else "libludus_foundation_base.a"
     required_paths = [
         prefix / "include" / "ludus" / "foundation" / "base" / "version.hpp",
         prefix / "include" / "ludus" / "foundation" / "base" / "build_metadata.hpp",
-        prefix / "lib" / "libludus_foundation_base.a",
+        prefix / "lib" / library_name,
         prefix / "lib" / "cmake" / "Ludus" / "LudusTargets.cmake",
         prefix / "lib" / "cmake" / "Ludus" / "LudusConfig.cmake",
         prefix / "lib" / "cmake" / "Ludus" / "LudusConfigVersion.cmake",
@@ -1337,25 +1371,19 @@ def command_install_sdk(args: argparse.Namespace) -> int:
 
     consumer_source = root / "tests" / "sdk_consumer"
     consumer_build = root / "out" / "build" / "sdk-consumer" / preset
+    compiler = "cl" if os.name == "nt" else str(clang_cxx(root))
     run(
         [
-            cmake(root),
-            "-S",
-            consumer_source,
-            "-B",
-            consumer_build,
-            "-G",
-            "Ninja",
-            f"-DCMAKE_MAKE_PROGRAM={ninja(root)}",
-            f"-DCMAKE_CXX_COMPILER={clang_cxx(root)}",
-            "-DCMAKE_BUILD_TYPE=Release",
-            f"-DCMAKE_PREFIX_PATH={prefix}",
+            cmake(root), "-S", consumer_source, "-B", consumer_build, "-G", "Ninja",
+            f"-DCMAKE_MAKE_PROGRAM={ninja(root)}", f"-DCMAKE_CXX_COMPILER={compiler}",
+            "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_PREFIX_PATH={prefix}",
         ],
         cwd=root,
         env=tool_env(root),
     )
     run([cmake(root), "--build", consumer_build], cwd=root, env=tool_env(root))
-    run([consumer_build / "ludus_sdk_consumer"], cwd=root, env=tool_env(root))
+    executable = consumer_build / ("ludus_sdk_consumer.exe" if os.name == "nt" else "ludus_sdk_consumer")
+    run([executable], cwd=root, env=tool_env(root))
     return 0
 
 

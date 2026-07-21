@@ -5,6 +5,20 @@
     "--clang-tidy",
     "--compile-commands-dir=${workspaceFolder}/out/build/linux-clang-development"
   ],
+  "[windows]": {
+    "cmake.cmakePath": "${workspaceFolder}/out/host-tools/venv/Scripts/cmake.exe",
+    "cmake.configureEnvironment": {
+      "CONAN_HOME": "${workspaceFolder}/out/conan/home",
+      "CONAN_NON_INTERACTIVE": "1",
+      "PATH": "${workspaceFolder}/out/host-tools/Scripts;${workspaceFolder}/out/host-tools/venv/Scripts;${env:PATH}"
+    },
+    "cmake.buildEnvironment": {
+      "PATH": "${workspaceFolder}/out/host-tools/Scripts;${workspaceFolder}/out/host-tools/venv/Scripts;${env:PATH}"
+    },
+    "cmake.testEnvironment": {
+      "PATH": "${workspaceFolder}/out/host-tools/Scripts;${workspaceFolder}/out/host-tools/venv/Scripts;${env:PATH}"
+    }
+  },
   "cmake.cmakePath": "${workspaceFolder}/out/host-tools/venv/bin/cmake",
   "cmake.configureEnvironment": {
     "CONAN_HOME": "${workspaceFolder}/out/conan/home",
