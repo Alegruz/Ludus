@@ -3,7 +3,7 @@
 
 using namespace ludus::foundation::logging;
 
-int main() noexcept
+int main()
 {
     // Console-only synchronous logging is enough for the smoke app; there is no
     // platform layer on this branch to resolve a log directory, so file logging
