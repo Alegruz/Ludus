@@ -1,9 +1,12 @@
 #include <ludus/foundation/base/version.hpp>
 #include <ludus/foundation/logging/log.hpp>
 
+#include <exception>
+#include <iostream>
+
 using namespace ludus::foundation::logging;
 
-int main()
+int main() try
 {
     // Console-only synchronous logging is enough for the smoke app; there is no
     // platform layer on this branch to resolve a log directory, so file logging
@@ -24,4 +27,12 @@ int main()
 
     LogSystem::shutdown();
     return 0;
+}
+catch (const std::exception& exception) {
+    std::cerr << "Smoke app failed: " << exception.what() << '\n';
+    return 1;
+}
+catch (...) {
+    std::cerr << "Smoke app failed with an unknown exception\n";
+    return 1;
 }
