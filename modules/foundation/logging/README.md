@@ -10,7 +10,7 @@ FoundationBase  ←  FoundationLogging  ←  (Platform / Rendering / Runtime / .
 ```
 
 `FoundationBase` must never depend on `FoundationLogging`. The logging module is
-platform-independent: the log directory is injected through `LogConfig::directory`
+platform-independent: the log directory is injected through `LogConfig::Directory`
 rather than resolved inside this module (spec sections 2.1, 21).
 
 ## Usage
@@ -21,14 +21,14 @@ rather than resolved inside this module (spec sections 2.1, 21).
 using namespace ludus::foundation::logging;
 
 LogConfig config{};
-config.global_level = LogLevel::Info;
-config.directory = /* platform::GetUserLogDirectory() when available */;
-LogSystem::initialize(config);
+config.GlobalLevel = LogLevel::Info;
+config.Directory = /* platform::GetUserLogDirectory() when available */;
+LogSystem::Initialize(config);
 
-LUDUS_LOG_INFO(LogCore, "Ludus {} starting", version);
-LUDUS_LOG_WARN(LogCore, "present mode {} unavailable; using {}", requested, fallback);
+LUDUS_LOG_INFO(LOG_CORE, "Ludus {} starting", version);
+LUDUS_LOG_WARN(LOG_CORE, "present mode {} unavailable; using {}", requested, fallback);
 
-LogSystem::shutdown();
+LogSystem::Shutdown();
 ```
 
 Engine code declares its own categories at namespace scope:
@@ -49,7 +49,7 @@ inline constexpr LogCategory LogPlatform{"Platform"};
 - Synchronous console, file, and debugger sinks.
 - Per-process session log files, size-based rotation, session retention.
 - Emergency stderr/debugger path for pre-init, post-shutdown, and Fatal.
-- Thread names (`set_current_thread_name`).
+- Thread names (`SetCurrentThreadName`).
 
 ## Compiled level per build
 
@@ -69,7 +69,7 @@ overridable via the CMake cache / presets:
 
 - **Asynchronous backend** (bounded MPSC queue, worker thread, overflow policy):
   Phase 2. The public API and `LogConfig` already reserve `LogMode`; calling
-  `set_mode(Asynchronous)` currently notes that Phase 1 remains synchronous.
+  `SetMode(LogMode::Asynchronous)` currently notes that Phase 1 remains synchronous.
 - **Spec section 33 (Wayland integration)** and **section 34 (remove the
   `UniquePtr` null-destruction logging comment)**: the Wayland platform code and
   `UniquePtr` do **not** exist on `main` (they live on the `develop` /

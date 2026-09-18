@@ -51,10 +51,11 @@ void pruneOldSessions(const std::filesystem::path& directory, std::uint32_t reta
     }
     std::error_code ec;
     std::vector<std::filesystem::directory_entry> sessions;
-    for (const auto& entry : std::filesystem::directory_iterator(directory, ec)) {
-        if (ec) {
-            return;
-        }
+    std::filesystem::directory_iterator iter(directory, ec);
+    if (ec) {
+        return;
+    }
+    for (const auto& entry : iter) {
         if (!entry.is_regular_file(ec)) {
             continue;
         }
@@ -74,7 +75,12 @@ void pruneOldSessions(const std::filesystem::path& directory, std::uint32_t reta
               [](const std::filesystem::directory_entry& a, const std::filesystem::directory_entry& b) {
                   std::error_code ea;
                   std::error_code eb;
-                  return a.last_write_time(ea) < b.last_write_time(eb);
+                  const auto ta = a.last_write_time(ea);
+                  const auto tb = b.last_write_time(eb);
+                  if (ea || eb) {
+                      return false; // treat unreadable entries as "not older"
+                  }
+                  return ta < tb;
               });
 
     const std::size_t keep = retained > 0 ? static_cast<std::size_t>(retained - 1) : 0;
@@ -90,7 +96,7 @@ void pruneOldSessions(const std::filesystem::path& directory, std::uint32_t reta
 
 } // namespace
 
-std::unique_ptr<FileSink> FileSink::create(const LogConfig& config)
+std::unique_ptr<FileSink> FileSink::Create(const LogConfig& config)
 {
     if (config.Directory.empty()) {
         return nullptr;

@@ -40,12 +40,12 @@ std::atomic<std::uint32_t> gNextThreadId{0};
 
 struct ThreadLocalIdentity
 {
-    std::uint32_t mId;
-    std::string mName;
+    std::uint32_t Id;
+    std::string Name;
 
     ThreadLocalIdentity()
-        : mId(gNextThreadId.fetch_add(1, std::memory_order_relaxed)),
-          mName(mId == 0 ? std::string{"Main"} : std::format("Thread-{}", mId))
+        : Id(gNextThreadId.fetch_add(1, std::memory_order_relaxed)),
+          Name(Id == 0 ? std::string{"Main"} : std::format("Thread-{}", Id))
     {
     }
 };
@@ -123,12 +123,12 @@ void FormatConsoleLine(const LogRecordView& record, bool use_color, std::string&
 
 std::string_view CurrentThreadName() noexcept
 {
-    return identity().mName;
+    return identity().Name;
 }
 
 std::uint32_t CurrentThreadId() noexcept
 {
-    return identity().mId;
+    return identity().Id;
 }
 
 std::uint64_t NowNanoseconds() noexcept
@@ -143,7 +143,7 @@ namespace ludus::foundation::logging {
 
 void SetCurrentThreadName(std::string_view name)
 {
-    internal::identity().mName.assign(name);
+    internal::identity().Name.assign(name);
 }
 
 } // namespace ludus::foundation::logging

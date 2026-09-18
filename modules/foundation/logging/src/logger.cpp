@@ -117,7 +117,7 @@ void LogSystem::Initialize(const LogConfig& config)
             internal::EmergencyNote("file logging requested but LogConfig::Directory is empty; file sink disabled");
         }
         else {
-            auto file_sink = internal::FileSink::create(config);
+            auto file_sink = internal::FileSink::Create(config);
             if (file_sink) {
                 s.Sinks.push_back(std::move(file_sink));
             }

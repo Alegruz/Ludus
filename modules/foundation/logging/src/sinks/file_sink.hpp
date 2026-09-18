@@ -22,7 +22,7 @@ public:
     // Factory: opens the session file under config.Directory. Returns nullptr if
     // the directory cannot be created or the file cannot be opened, so the
     // caller can degrade gracefully rather than crash (spec section 25 spirit).
-    static std::unique_ptr<FileSink> create(const LogConfig& config);
+    static std::unique_ptr<FileSink> Create(const LogConfig& config);
 
     ~FileSink() override;
 
@@ -30,7 +30,7 @@ public:
     void Flush() noexcept override;
 
     // Exposed for tests: the absolute path of the currently active file.
-    [[nodiscard]] const std::filesystem::path& current_path() const noexcept
+    [[nodiscard]] const std::filesystem::path& CurrentPath() const noexcept
     {
         return mActivePath;
     }
