@@ -26,6 +26,7 @@ function(ludus_configure_project_sanitizers target_name)
             message(FATAL_ERROR "Sanitizer presets require Clang or GCC")
         endif()
 
+        target_compile_definitions(${target_name} INTERFACE LUDUS_BUILD_SANITIZED=1)
         list(JOIN enabled_sanitizers "," sanitizer_flags)
         target_compile_options(${target_name} INTERFACE -fsanitize=${sanitizer_flags} -fno-omit-frame-pointer)
         target_link_options(${target_name} INTERFACE -fsanitize=${sanitizer_flags} -fno-omit-frame-pointer)

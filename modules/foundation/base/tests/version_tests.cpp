@@ -1,9 +1,17 @@
+#include <ludus/foundation/base/defines.hpp>
 #include <ludus/foundation/base/version.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <string_view>
 #include <type_traits>
+
+LUDUS_INLINE constexpr int ludus_inline_test() noexcept
+{
+    return 7;
+}
+
+static_assert(ludus_inline_test() == 7);
 
 TEST_CASE("semantic version values are exposed", "[foundation][version]")
 {
