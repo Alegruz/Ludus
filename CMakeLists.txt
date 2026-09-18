@@ -54,6 +54,7 @@ if(LUDUS_ENABLE_CCACHE)
 endif()
 
 add_subdirectory(modules/foundation/base)
+add_subdirectory(modules/foundation/logging)
 
 if(LUDUS_BUILD_SMOKE_APP)
     add_subdirectory(apps/smoke)

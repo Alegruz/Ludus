@@ -24,6 +24,7 @@ PRESET_BUILD_TYPES: dict[str, str] = {
     "linux-clang-debug": "Debug",
     "linux-clang-development": "RelWithDebInfo",
     "linux-clang-asan-ubsan": "RelWithDebInfo",
+    "linux-clang-profile": "RelWithDebInfo",
     "linux-clang-release": "Release",
 }
 

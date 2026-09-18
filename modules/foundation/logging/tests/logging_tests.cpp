@@ -1,0 +1,224 @@
+#include <ludus/foundation/logging/log.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+
+#if defined(_WIN32)
+#    include <process.h>
+#    define LUDUS_TEST_GETPID _getpid
+#else
+#    include <unistd.h>
+#    define LUDUS_TEST_GETPID ::getpid
+#endif
+
+namespace {
+
+using namespace ludus::foundation::logging;
+
+inline constexpr LogCategory LogLifecycleTest{"LifecycleTest"};
+
+std::string read_file(const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) {
+        return {};
+    }
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    return buffer.str();
+}
+
+std::filesystem::path make_temp_log_dir(const std::string& tag)
+{
+    const auto base =
+        std::filesystem::temp_directory_path() / ("ludus_log_test_" + tag + "_" + std::to_string(LUDUS_TEST_GETPID()));
+    std::filesystem::remove_all(base);
+    std::filesystem::create_directories(base);
+    return base;
+}
+
+std::filesystem::path find_log_file(const std::filesystem::path& dir)
+{
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".log") {
+            return entry.path();
+        }
+    }
+    return {};
+}
+
+std::size_t count_log_files(const std::filesystem::path& dir)
+{
+    std::size_t count = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".log") {
+            ++count;
+        }
+    }
+    return count;
+}
+
+} // namespace
+
+TEST_CASE("logging works before initialization and after shutdown without crashing", "[logging][lifecycle]")
+{
+    // Not initialized: Warning+ should be accepted (routes to emergency path),
+    // lower levels rejected. This must not crash.
+    REQUIRE_FALSE(LogSystem::is_initialized());
+    CHECK_FALSE(LogSystem::should_log(LogLevel::Info, LogLifecycleTest));
+    CHECK(LogSystem::should_log(LogLevel::Warning, LogLifecycleTest));
+    CHECK(LogSystem::should_log(LogLevel::Fatal, LogLifecycleTest));
+
+    // These go to stderr via the emergency path; the point is that they are safe.
+    LUDUS_LOG_WARN(LogLifecycleTest, "pre-init warning is safe");
+    LUDUS_LOG_INFO(LogLifecycleTest, "pre-init info is dropped");
+
+    LogConfig config{};
+    config.global_level = LogLevel::Trace;
+    config.enable_console = false;
+    config.enable_debugger = false;
+    config.enable_file = false;
+    LogSystem::initialize(config);
+    REQUIRE(LogSystem::is_initialized());
+    LogSystem::shutdown();
+    REQUIRE_FALSE(LogSystem::is_initialized());
+
+    // Post-shutdown behaves like pre-init.
+    CHECK(LogSystem::should_log(LogLevel::Error, LogLifecycleTest));
+    LUDUS_LOG_ERROR(LogLifecycleTest, "post-shutdown error is safe");
+}
+
+TEST_CASE("synchronous logging makes the record visible before the call returns", "[logging][synchronous]")
+{
+    const auto dir = make_temp_log_dir("sync");
+
+    LogConfig config{};
+    config.global_level = LogLevel::Trace;
+    config.mode = LogMode::Synchronous;
+    config.enable_console = false;
+    config.enable_debugger = false;
+    config.enable_file = true;
+    config.directory = dir;
+    LogSystem::initialize(config);
+
+    LUDUS_LOG_INFO(LogLifecycleTest, "synchronous visibility marker");
+    // In synchronous mode the record must already be in the file sink's stream
+    // by the time the macro returns. We flush to defeat OS buffering, then read.
+    LogSystem::flush();
+
+    const std::string contents = read_file(find_log_file(dir));
+    CHECK(contents.find("synchronous visibility marker") != std::string::npos);
+
+    LogSystem::shutdown();
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("file sink creates a uniquely named session file and writes to it", "[logging][file]")
+{
+    const auto dir = make_temp_log_dir("file_create");
+
+    LogConfig config{};
+    config.global_level = LogLevel::Info;
+    config.enable_console = false;
+    config.enable_debugger = false;
+    config.enable_file = true;
+    config.directory = dir;
+    LogSystem::initialize(config);
+
+    const std::filesystem::path path = find_log_file(dir);
+    REQUIRE_FALSE(path.empty());
+    const std::string name = path.filename().string();
+    // Session naming carries the pid (spec section 20) so concurrent processes
+    // never collide.
+    CHECK(name.find("_pid-") != std::string::npos);
+
+    LUDUS_LOG_INFO(LogLifecycleTest, "written to session file");
+    LogSystem::flush();
+    LogSystem::shutdown();
+
+    const std::string contents = read_file(path);
+    CHECK(contents.find("written to session file") != std::string::npos);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("shutdown drains and flushes buffered records to the file", "[logging][file][lifecycle]")
+{
+    const auto dir = make_temp_log_dir("drain");
+
+    LogConfig config{};
+    config.global_level = LogLevel::Trace;
+    config.enable_console = false;
+    config.enable_debugger = false;
+    config.enable_file = true;
+    config.directory = dir;
+    LogSystem::initialize(config);
+
+    const std::filesystem::path path = find_log_file(dir);
+    LUDUS_LOG_DEBUG(LogLifecycleTest, "record before shutdown");
+    // Do NOT flush explicitly; shutdown() must flush on its own (spec section 24).
+    LogSystem::shutdown();
+
+    const std::string contents = read_file(path);
+    CHECK(contents.find("record before shutdown") != std::string::npos);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("file retention prunes old session files", "[logging][file][retention]")
+{
+    const auto dir = make_temp_log_dir("retention");
+
+    // Pre-seed the directory with old-looking session files beyond the retention
+    // limit. The next initialize() should prune down to retained_sessions total.
+    for (int i = 0; i < 5; ++i) {
+        std::ofstream stale(dir / ("2020-01-01_00-00-0" + std::to_string(i) + "_pid-100" + std::to_string(i) + ".log"));
+        stale << "old session " << i << '\n';
+    }
+    REQUIRE(count_log_files(dir) == 5);
+
+    LogConfig config{};
+    config.global_level = LogLevel::Info;
+    config.enable_console = false;
+    config.enable_debugger = false;
+    config.enable_file = true;
+    config.directory = dir;
+    config.retained_sessions = 3;
+    LogSystem::initialize(config);
+    LogSystem::shutdown();
+
+    // At most `retained_sessions` files remain (the new one plus kept old ones).
+    CHECK(count_log_files(dir) <= 3);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("statistics count submitted and written records", "[logging][statistics]")
+{
+    const auto dir = make_temp_log_dir("stats");
+
+    LogConfig config{};
+    config.global_level = LogLevel::Trace;
+    config.enable_console = false;
+    config.enable_debugger = false;
+    config.enable_file = true;
+    config.directory = dir;
+    LogSystem::initialize(config);
+
+    const LogStatistics before = LogSystem::statistics();
+    LUDUS_LOG_INFO(LogLifecycleTest, "counted record 1");
+    LUDUS_LOG_INFO(LogLifecycleTest, "counted record 2");
+    const LogStatistics after = LogSystem::statistics();
+
+    CHECK(after.submitted >= before.submitted + 2);
+    CHECK(after.written >= before.written + 2);
+    // Synchronous mode never drops.
+    CHECK(after.dropped == 0);
+
+    LogSystem::shutdown();
+    std::filesystem::remove_all(dir);
+}
