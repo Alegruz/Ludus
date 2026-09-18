@@ -19,70 +19,70 @@ using namespace ludus::foundation::logging;
 
 inline constexpr LogCategory LogCatTest{"CatTest"};
 
-int g_side_effect_counter = 0;
+int gSideEffectCounter = 0;
 
-int increment_and_return() noexcept
+int incrementAndReturn() noexcept
 {
-    ++g_side_effect_counter;
-    return g_side_effect_counter;
+    ++gSideEffectCounter;
+    return gSideEffectCounter;
 }
 
 } // namespace
 
 TEST_CASE("constexpr category hashing is stable and order-sensitive", "[logging][category]")
 {
-    STATIC_REQUIRE(hash_log_category("Platform") == hash_log_category("Platform"));
-    STATIC_REQUIRE(hash_log_category("Platform") != hash_log_category("Rendering"));
+    STATIC_REQUIRE(HashLogCategory("Platform") == HashLogCategory("Platform"));
+    STATIC_REQUIRE(HashLogCategory("Platform") != HashLogCategory("Rendering"));
     // The id stored in a category matches the standalone hash of its name.
-    STATIC_REQUIRE(LogCatTest.id == hash_log_category("CatTest"));
-    CHECK(LogCatTest.name == std::string_view{"CatTest"});
+    STATIC_REQUIRE(LogCatTest.Id == HashLogCategory("CatTest"));
+    CHECK(LogCatTest.Name == std::string_view{"CatTest"});
 }
 
 TEST_CASE("compiled-out log statements do not evaluate their arguments", "[logging][category][compiletime]")
 {
-    g_side_effect_counter = 0;
+    gSideEffectCounter = 0;
 
     // Sanity: the function is live and does have an observable side effect when
     // actually called. This also anchors the function as "used" so its later
     // elision inside the macros is what keeps the counter at zero, not dead-code
     // removal of the function itself.
-    REQUIRE(increment_and_return() == 1);
-    g_side_effect_counter = 0;
+    REQUIRE(incrementAndReturn() == 1);
+    gSideEffectCounter = 0;
 
     // TRACE/DEBUG/INFO/WARN are below the compiled level (Error) in this TU, so
-    // these must expand to ((void)0) and never call increment_and_return().
-    LUDUS_LOG_TRACE(LogCatTest, "{}", increment_and_return());
-    LUDUS_LOG_DEBUG(LogCatTest, "{}", increment_and_return());
-    LUDUS_LOG_INFO(LogCatTest, "{}", increment_and_return());
-    LUDUS_LOG_WARN(LogCatTest, "{}", increment_and_return());
+    // these must expand to ((void)0) and never call incrementAndReturn().
+    LUDUS_LOG_TRACE(LogCatTest, "{}", incrementAndReturn());
+    LUDUS_LOG_DEBUG(LogCatTest, "{}", incrementAndReturn());
+    LUDUS_LOG_INFO(LogCatTest, "{}", incrementAndReturn());
+    LUDUS_LOG_WARN(LogCatTest, "{}", incrementAndReturn());
 
-    CHECK(g_side_effect_counter == 0);
+    CHECK(gSideEffectCounter == 0);
 }
 
 TEST_CASE("per-category runtime override changes effective threshold", "[logging][category][filtering]")
 {
     LogConfig config{};
-    config.global_level = LogLevel::Warning;
-    config.enable_console = false;
-    config.enable_debugger = false;
-    config.enable_file = false;
-    LogSystem::initialize(config);
+    config.GlobalLevel = LogLevel::Warning;
+    config.EnableConsole = false;
+    config.EnableDebugger = false;
+    config.EnableFile = false;
+    LogSystem::Initialize(config);
 
     // Global is Warning, so Info is filtered for an unconfigured category.
-    CHECK_FALSE(LogSystem::should_log(LogLevel::Info, LogCatTest));
+    CHECK_FALSE(LogSystem::ShouldLog(LogLevel::Info, LogCatTest));
 
     // Lower this category to Trace: now Info passes.
-    LogSystem::set_category_level(LogCatTest, LogLevel::Trace);
-    CHECK(LogSystem::should_log(LogLevel::Info, LogCatTest));
+    LogSystem::SetCategoryLevel(LogCatTest, LogLevel::Trace);
+    CHECK(LogSystem::ShouldLog(LogLevel::Info, LogCatTest));
 
     // Other categories still follow the global level.
-    CHECK_FALSE(LogSystem::should_log(LogLevel::Info, LogCore));
+    CHECK_FALSE(LogSystem::ShouldLog(LogLevel::Info, LOG_CORE));
 
     // Fatal is always eligible regardless of thresholds.
-    CHECK(LogSystem::should_log(LogLevel::Fatal, LogCatTest));
+    CHECK(LogSystem::ShouldLog(LogLevel::Fatal, LogCatTest));
 
-    LogSystem::clear_category_levels();
-    CHECK_FALSE(LogSystem::should_log(LogLevel::Info, LogCatTest));
+    LogSystem::ClearCategoryLevels();
+    CHECK_FALSE(LogSystem::ShouldLog(LogLevel::Info, LogCatTest));
 
-    LogSystem::shutdown();
+    LogSystem::Shutdown();
 }

@@ -14,7 +14,7 @@ namespace {
 
 // ANSI SGR color codes keyed by level (spec section 19). Trace is dim; Debug and
 // Info are default; Warning yellow; Error red; Fatal bright red.
-[[nodiscard]] std::string_view color_for(LogLevel level) noexcept
+[[nodiscard]] std::string_view colorFor(LogLevel level) noexcept
 {
     switch (level) {
         case LogLevel::Trace:
@@ -32,20 +32,20 @@ namespace {
     return "";
 }
 
-constexpr std::string_view color_reset = "\x1b[0m";
+constexpr std::string_view COLOR_RESET = "\x1b[0m";
 
 // Monotonic thread-id allocator. Not the OS tid: a small, stable, readable
 // counter so log output is deterministic across runs for a given thread order.
-std::atomic<std::uint32_t> g_next_thread_id{0};
+std::atomic<std::uint32_t> gNextThreadId{0};
 
 struct ThreadLocalIdentity
 {
-    std::uint32_t id;
-    std::string name;
+    std::uint32_t mId;
+    std::string mName;
 
     ThreadLocalIdentity()
-        : id(g_next_thread_id.fetch_add(1, std::memory_order_relaxed)),
-          name(id == 0 ? std::string{"Main"} : "Thread-" + std::to_string(id))
+        : mId(gNextThreadId.fetch_add(1, std::memory_order_relaxed)),
+          mName(mId == 0 ? std::string{"Main"} : std::format("Thread-{}", mId))
     {
     }
 };
@@ -58,12 +58,12 @@ ThreadLocalIdentity& identity() noexcept
 
 } // namespace
 
-bool source_visible_for(LogLevel level) noexcept
+bool SourceVisibleFor(LogLevel level) noexcept
 {
     return level >= LogLevel::Warning;
 }
 
-std::size_t format_timestamp(std::uint64_t timestamp_ns, char* out, std::size_t capacity) noexcept
+std::size_t FormatTimestamp(std::uint64_t timestamp_ns, char* out, std::size_t capacity) noexcept
 {
     if (capacity < 13) {
         if (capacity > 0) {
@@ -88,50 +88,50 @@ std::size_t format_timestamp(std::uint64_t timestamp_ns, char* out, std::size_t 
     return written > 0 ? static_cast<std::size_t>(written) : 0;
 }
 
-void format_console_line(const LogRecordView& record, bool use_color, std::string& buffer)
+void FormatConsoleLine(const LogRecordView& record, bool use_color, std::string& buffer)
 {
     buffer.clear();
 
     char timestamp[16];
-    const std::size_t ts_len = format_timestamp(record.timestamp_ns, timestamp, sizeof(timestamp));
+    const std::size_t ts_len = FormatTimestamp(record.TimestampNs, timestamp, sizeof(timestamp));
     buffer.append(timestamp, ts_len);
 
     buffer.append(" [");
-    buffer.append(record.thread_name.empty() ? std::string_view{"?"} : record.thread_name);
+    buffer.append(record.ThreadName.empty() ? std::string_view{"?"} : record.ThreadName);
     buffer.append("] [");
 
     if (use_color) {
-        buffer.append(color_for(record.level));
+        buffer.append(colorFor(record.Level));
     }
-    buffer.append(to_padded_string(record.level));
+    buffer.append(ToPaddedString(record.Level));
     if (use_color) {
-        buffer.append(color_reset);
+        buffer.append(COLOR_RESET);
     }
 
     buffer.append("] [");
-    buffer.append(record.category.name);
+    buffer.append(record.Category.Name);
     buffer.append("] ");
-    buffer.append(record.message);
+    buffer.append(record.Message);
 
-    if (source_visible_for(record.level) && !record.file.empty()) {
+    if (SourceVisibleFor(record.Level) && !record.File.empty()) {
         buffer.append("\n    ");
-        buffer.append(record.file);
+        buffer.append(record.File);
         buffer.push_back(':');
-        buffer.append(std::to_string(record.line));
+        buffer.append(std::format("{}", record.Line));
     }
 }
 
-std::string_view current_thread_name() noexcept
+std::string_view CurrentThreadName() noexcept
 {
-    return identity().name;
+    return identity().mName;
 }
 
-std::uint32_t current_thread_id() noexcept
+std::uint32_t CurrentThreadId() noexcept
 {
-    return identity().id;
+    return identity().mId;
 }
 
-std::uint64_t now_nanoseconds() noexcept
+std::uint64_t NowNanoseconds() noexcept
 {
     const auto now = std::chrono::system_clock::now().time_since_epoch();
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
@@ -141,9 +141,9 @@ std::uint64_t now_nanoseconds() noexcept
 
 namespace ludus::foundation::logging {
 
-void set_current_thread_name(std::string_view name)
+void SetCurrentThreadName(std::string_view name)
 {
-    internal::identity().name.assign(name);
+    internal::identity().mName.assign(name);
 }
 
 } // namespace ludus::foundation::logging

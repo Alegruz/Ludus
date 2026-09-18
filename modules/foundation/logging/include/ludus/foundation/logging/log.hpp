@@ -39,7 +39,7 @@ namespace ludus::foundation::logging {
 // This overload takes the source location as the leading runtime argument so it
 // can precede the variadic pack; the macros supply it automatically.
 template <typename... Args>
-void log(LogLevel level,
+void Log(LogLevel level,
          LogCategory category,
          const std::source_location& location,
          std::format_string<Args...> format,
@@ -51,33 +51,33 @@ void log(LogLevel level,
 class LogSystem
 {
 public:
-    static void initialize(const LogConfig& config);
-    static void shutdown();
+    static void Initialize(const LogConfig& config);
+    static void Shutdown();
 
-    static void flush();
+    static void Flush();
 
-    static void set_mode(LogMode mode);
-    static void set_global_level(LogLevel level);
-    static void set_category_level(LogCategory category, LogLevel level);
+    static void SetMode(LogMode mode);
+    static void SetGlobalLevel(LogLevel level);
+    static void SetCategoryLevel(LogCategory category, LogLevel level);
 
-    static void clear_category_levels();
+    static void ClearCategoryLevels();
 
-    [[nodiscard]] static LogStatistics statistics();
+    [[nodiscard]] static LogStatistics Statistics();
 
     // True between a successful initialize() and shutdown(). Normal code never
     // needs to check this before logging (spec section 25); it exists for tests
     // and diagnostics.
-    [[nodiscard]] static bool is_initialized() noexcept;
+    [[nodiscard]] static bool IsInitialized() noexcept;
 
     // Cheap predicate used by the macros to skip formatting when a record would
     // be filtered out at runtime. Safe to call before initialize().
-    [[nodiscard]] static bool should_log(LogLevel level, LogCategory category) noexcept;
+    [[nodiscard]] static bool ShouldLog(LogLevel level, LogCategory category) noexcept;
 };
 
 // Assign a human-readable name to the calling thread (spec section 29). Log
 // output prefers this name (e.g. "[Render]") over an opaque numeric id. Safe to
 // call before initialize(); the name is stored in thread-local state.
-void set_current_thread_name(std::string_view name);
+void SetCurrentThreadName(std::string_view name);
 
 } // namespace ludus::foundation::logging
 
@@ -94,8 +94,8 @@ void set_current_thread_name(std::string_view name);
 // macro remains a single expression usable anywhere a statement is expected.
 // -----------------------------------------------------------------------------
 #define LUDUS_LOG_IMPL(level_enum, category, ...)                                                                      \
-    (::ludus::foundation::logging::LogSystem::should_log((level_enum), (category))                                     \
-         ? ::ludus::foundation::logging::log((level_enum), (category), ::std::source_location::current(), __VA_ARGS__) \
+    (::ludus::foundation::logging::LogSystem::ShouldLog((level_enum), (category))                                      \
+         ? ::ludus::foundation::logging::Log((level_enum), (category), ::std::source_location::current(), __VA_ARGS__) \
          : (void)0)
 
 #if LUDUS_COMPILED_LOG_LEVEL <= LUDUS_LOG_LEVEL_TRACE
@@ -150,17 +150,17 @@ namespace ludus::foundation::logging::detail {
 // Formats into a thread-local scratch buffer and dispatches to the sinks. Defined
 // in logger.cpp; declared here so the templated log() can call it without pulling
 // sink details into the public header.
-void dispatch_formatted(LogLevel level,
-                        LogCategory category,
-                        const std::source_location& location,
-                        std::string_view formatted_message);
+void DispatchFormatted(LogLevel level,
+                       LogCategory category,
+                       const std::source_location& location,
+                       std::string_view formatted_message);
 
 } // namespace ludus::foundation::logging::detail
 
 namespace ludus::foundation::logging {
 
 template <typename... Args>
-void log(LogLevel level,
+void Log(LogLevel level,
          LogCategory category,
          const std::source_location& location,
          std::format_string<Args...> format,
@@ -170,7 +170,7 @@ void log(LogLevel level,
     // forward the string as-is and skip std::format entirely for that common
     // "static message" case.
     if constexpr (sizeof...(Args) == 0) {
-        detail::dispatch_formatted(level, category, location, format.get());
+        detail::DispatchFormatted(level, category, location, format.get());
     }
     else {
         // vformat avoids a second template instantiation per call site and keeps
@@ -179,7 +179,7 @@ void log(LogLevel level,
         // replace it with a thread-local scratch buffer + std::format_to in the
         // performance pass (spec section 16). Correctness first (spec section 45).
         const std::string formatted = std::vformat(format.get(), std::make_format_args(args...));
-        detail::dispatch_formatted(level, category, location, formatted);
+        detail::DispatchFormatted(level, category, location, formatted);
     }
 }
 

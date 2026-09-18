@@ -9,25 +9,25 @@ extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent(void);
 
 namespace ludus::foundation::logging::internal {
 
-DebuggerSink::DebuggerSink() : active_(false), scratch_()
+DebuggerSink::DebuggerSink() : mActive(false), mScratch()
 {
 #if defined(_WIN32)
-    active_ = IsDebuggerPresent() != 0;
+    mActive = IsDebuggerPresent() != 0;
 #endif
-    scratch_.reserve(256);
+    mScratch.reserve(256);
 }
 
-void DebuggerSink::write([[maybe_unused]] const LogRecordView& record) noexcept
+void DebuggerSink::Write([[maybe_unused]] const LogRecordView& record) noexcept
 {
 #if defined(_WIN32)
-    if (!active_) {
+    if (!mActive) {
         return;
     }
     try {
         // Debugger output never uses ANSI color.
-        format_console_line(record, /*use_color=*/false, scratch_);
-        scratch_.push_back('\n');
-        OutputDebugStringA(scratch_.c_str());
+        FormatConsoleLine(record, /*use_color=*/false, mScratch);
+        mScratch.push_back('\n');
+        OutputDebugStringA(mScratch.c_str());
     }
     catch (...) {
         // Drop on allocation failure rather than propagate.
@@ -36,7 +36,7 @@ void DebuggerSink::write([[maybe_unused]] const LogRecordView& record) noexcept
     // Non-Windows: intentional no-op in Phase 1.
 }
 
-void DebuggerSink::flush() noexcept
+void DebuggerSink::Flush() noexcept
 {
     // Debugger output is unbuffered from our side; nothing to flush.
 }

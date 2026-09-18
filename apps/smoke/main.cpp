@@ -13,19 +13,19 @@ try {
     // is left disabled (spec sections 21, 31: the directory is injected by the
     // platform layer when one exists).
     LogConfig config{};
-    config.global_level = LogLevel::Trace;
-    config.enable_console = true;
-    config.enable_debugger = true;
-    config.enable_file = false;
-    LogSystem::initialize(config);
+    config.GlobalLevel = LogLevel::Trace;
+    config.EnableConsole = true;
+    config.EnableDebugger = true;
+    config.EnableFile = false;
+    LogSystem::Initialize(config);
 
-    set_current_thread_name("Main");
+    SetCurrentThreadName("Main");
 
-    LUDUS_LOG_INFO(LogCore, "Ludus {} starting", ludus::foundation::version_string());
-    LUDUS_LOG_INFO(LogCore, "Revision: {}", ludus::foundation::git_revision());
-    LUDUS_LOG_INFO(LogCore, "Compiler: {}", ludus::foundation::compiler_identity());
+    LUDUS_LOG_INFO(LOG_CORE, "Ludus {} starting", ludus::foundation::version_string());
+    LUDUS_LOG_INFO(LOG_CORE, "Revision: {}", ludus::foundation::git_revision());
+    LUDUS_LOG_INFO(LOG_CORE, "Compiler: {}", ludus::foundation::compiler_identity());
 
-    LogSystem::shutdown();
+    LogSystem::Shutdown();
     return 0;
 }
 catch (const std::exception& exception) {

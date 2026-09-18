@@ -15,16 +15,16 @@ namespace ludus::foundation::logging::internal {
 // the header in the queue's byte stream; it is never a std::string per record.
 struct LogRecordHeader
 {
-    std::uint64_t timestamp_ns; // steady/wall clock nanoseconds since epoch
-    std::uint32_t thread_id;    // internal numeric thread id
-    std::uint32_t category_id;  // LogCategory::id
+    std::uint64_t TimestampNs; // steady/wall clock nanoseconds since epoch
+    std::uint32_t ThreadId;    // internal numeric thread id
+    std::uint32_t CategoryId;  // LogCategory::Id
 
-    std::uint32_t file_id; // interned source-file id (0 = not interned yet)
-    std::uint32_t line;    // std::source_location::line()
+    std::uint32_t FileId; // interned source-file id (0 = not interned yet)
+    std::uint32_t Line;   // std::source_location::line()
 
-    LogLevel level;
-    std::uint8_t reserved0 = 0;
-    std::uint16_t message_size = 0; // bytes of message text following the header
+    LogLevel Level;
+    std::uint8_t Reserved0 = 0;
+    std::uint16_t MessageSize = 0; // bytes of message text following the header
 };
 
 static_assert(sizeof(LogRecordHeader) <= 32, "LogRecordHeader must stay compact for queue copies");
@@ -36,24 +36,24 @@ static_assert(sizeof(LogRecordHeader) <= 32, "LogRecordHeader must stay compact 
 // Write() call, so sinks must copy anything they retain.
 struct LogRecordView
 {
-    LogLevel level = LogLevel::Info;
-    LogCategory category = LogCore;
+    LogLevel Level = LogLevel::Info;
+    LogCategory Category = LOG_CORE;
 
-    std::string_view message;
+    std::string_view Message;
 
     // Source metadata (spec section 10). Present in the record even when a sink
     // chooses to hide it for low-severity levels.
-    std::string_view file;
-    std::string_view function;
-    std::uint32_t line = 0;
+    std::string_view File;
+    std::string_view Function;
+    std::uint32_t Line = 0;
 
     // Human-readable thread name (e.g. "Main", "Render") plus the numeric id.
-    std::string_view thread_name;
-    std::uint32_t thread_id = 0;
+    std::string_view ThreadName;
+    std::uint32_t ThreadId = 0;
 
     // Wall-clock timestamp in nanoseconds since the Unix epoch; sinks format it
     // as they see fit (console uses HH:MM:SS.mmm).
-    std::uint64_t timestamp_ns = 0;
+    std::uint64_t TimestampNs = 0;
 };
 
 } // namespace ludus::foundation::logging::internal

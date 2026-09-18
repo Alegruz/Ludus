@@ -20,14 +20,14 @@ namespace ludus::foundation::logging::internal {
 //
 // `message` is already-formatted text; the emergency path performs no
 // std::format work of its own so it stays allocation-free.
-void emergency_log(LogLevel level,
-                   LogCategory category,
-                   std::string_view message,
-                   const std::source_location& location) noexcept;
+void EmergencyLog(LogLevel level,
+                  LogCategory category,
+                  std::string_view message,
+                  const std::source_location& location) noexcept;
 
 // Convenience wrapper for internal diagnostics that do not have a meaningful
 // call site (e.g. "dropped N records"). Uses the current source location.
-void emergency_note(std::string_view message,
-                    const std::source_location& location = std::source_location::current()) noexcept;
+void EmergencyNote(std::string_view message,
+                   const std::source_location& location = std::source_location::current()) noexcept;
 
 } // namespace ludus::foundation::logging::internal

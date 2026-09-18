@@ -22,10 +22,10 @@ public:
 
     // Consume one record. The view's referenced storage is only valid for the
     // duration of this call; a sink that defers work must copy what it needs.
-    virtual void write(const LogRecordView& record) noexcept = 0;
+    virtual void Write(const LogRecordView& record) noexcept = 0;
 
     // Push any buffered bytes toward durable storage / the terminal.
-    virtual void flush() noexcept = 0;
+    virtual void Flush() noexcept = 0;
 };
 
 } // namespace ludus::foundation::logging::internal

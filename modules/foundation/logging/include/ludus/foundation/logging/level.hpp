@@ -22,7 +22,7 @@ enum class LogLevel : std::uint8_t
 // Fixed-width, right-padded five-character label used by the console and file
 // sinks (e.g. "INFO ", "TRACE"). Returns "?????" for out-of-range values so a
 // corrupted record can never index out of bounds.
-[[nodiscard]] constexpr std::string_view to_padded_string(LogLevel level) noexcept
+[[nodiscard]] constexpr std::string_view ToPaddedString(LogLevel level) noexcept
 {
     switch (level) {
         case LogLevel::Trace:
@@ -41,7 +41,7 @@ enum class LogLevel : std::uint8_t
     return "?????";
 }
 
-[[nodiscard]] constexpr std::string_view to_string(LogLevel level) noexcept
+[[nodiscard]] constexpr std::string_view ToString(LogLevel level) noexcept
 {
     switch (level) {
         case LogLevel::Trace:

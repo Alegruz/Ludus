@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -34,7 +35,7 @@ std::string read_file(const std::filesystem::path& path)
 std::filesystem::path make_temp_log_dir(const std::string& tag)
 {
     const auto base =
-        std::filesystem::temp_directory_path() / ("ludus_log_test_" + tag + "_" + std::to_string(LUDUS_TEST_GETPID()));
+        std::filesystem::temp_directory_path() / std::format("ludus_log_test_{}_{}", tag, LUDUS_TEST_GETPID());
     std::filesystem::remove_all(base);
     std::filesystem::create_directories(base);
     return base;
@@ -62,16 +63,16 @@ TEST_CASE("format arguments are substituted into the message", "[logging][format
     const auto dir = make_temp_log_dir("fmt_args");
 
     LogConfig config{};
-    config.global_level = LogLevel::Trace;
-    config.enable_console = false;
-    config.enable_debugger = false;
-    config.enable_file = true;
-    config.directory = dir;
-    LogSystem::initialize(config);
+    config.GlobalLevel = LogLevel::Trace;
+    config.EnableConsole = false;
+    config.EnableDebugger = false;
+    config.EnableFile = true;
+    config.Directory = dir;
+    LogSystem::Initialize(config);
 
     LUDUS_LOG_INFO(LogFormatTest, "Window created: {}x{}", 1280, 720);
-    LogSystem::flush();
-    LogSystem::shutdown();
+    LogSystem::Flush();
+    LogSystem::Shutdown();
 
     const std::string contents = read_file(find_log_file(dir));
     CHECK(contents.find("Window created: 1280x720") != std::string::npos);
@@ -84,17 +85,17 @@ TEST_CASE("source metadata is appended for warnings and above", "[logging][forma
     const auto dir = make_temp_log_dir("fmt_source");
 
     LogConfig config{};
-    config.global_level = LogLevel::Trace;
-    config.enable_console = false;
-    config.enable_debugger = false;
-    config.enable_file = true;
-    config.directory = dir;
-    LogSystem::initialize(config);
+    config.GlobalLevel = LogLevel::Trace;
+    config.EnableConsole = false;
+    config.EnableDebugger = false;
+    config.EnableFile = true;
+    config.Directory = dir;
+    LogSystem::Initialize(config);
 
     LUDUS_LOG_INFO(LogFormatTest, "info line");
     LUDUS_LOG_WARN(LogFormatTest, "warn line");
-    LogSystem::flush();
-    LogSystem::shutdown();
+    LogSystem::Flush();
+    LogSystem::Shutdown();
 
     const std::string contents = read_file(find_log_file(dir));
     // The warning line carries a "file:line" suffix; the info line does not.
@@ -108,8 +109,8 @@ TEST_CASE("source metadata is appended for warnings and above", "[logging][forma
 
 TEST_CASE("levels render with fixed-width labels", "[logging][formatting]")
 {
-    CHECK(to_padded_string(LogLevel::Info) == "INFO ");
-    CHECK(to_padded_string(LogLevel::Warning) == "WARN ");
-    CHECK(to_padded_string(LogLevel::Trace) == "TRACE");
-    CHECK(to_padded_string(LogLevel::Fatal) == "FATAL");
+    CHECK(ToPaddedString(LogLevel::Info) == "INFO ");
+    CHECK(ToPaddedString(LogLevel::Warning) == "WARN ");
+    CHECK(ToPaddedString(LogLevel::Trace) == "TRACE");
+    CHECK(ToPaddedString(LogLevel::Fatal) == "FATAL");
 }

@@ -29,10 +29,10 @@ void append(std::array<char, 512>& buffer, std::size_t& length, std::string_view
 
 } // namespace
 
-void emergency_log(LogLevel level,
-                   LogCategory category,
-                   std::string_view message,
-                   const std::source_location& location) noexcept
+void EmergencyLog(LogLevel level,
+                  LogCategory category,
+                  std::string_view message,
+                  const std::source_location& location) noexcept
 {
     // Build a single line in a fixed stack buffer, then issue one write. The
     // format is intentionally minimal and dependency-free:
@@ -41,9 +41,9 @@ void emergency_log(LogLevel level,
     std::size_t length = 0;
 
     append(buffer, length, "[LUDUS:");
-    append(buffer, length, to_string(level));
+    append(buffer, length, ToString(level));
     append(buffer, length, "] [");
-    append(buffer, length, category.name);
+    append(buffer, length, category.Name);
     append(buffer, length, "] ");
     append(buffer, length, message);
 
@@ -71,9 +71,9 @@ void emergency_log(LogLevel level,
 #endif
 }
 
-void emergency_note(std::string_view message, const std::source_location& location) noexcept
+void EmergencyNote(std::string_view message, const std::source_location& location) noexcept
 {
-    emergency_log(LogLevel::Warning, LogCategory{0u, "Logging"}, message, location);
+    EmergencyLog(LogLevel::Warning, LogCategory{0u, "Logging"}, message, location);
 }
 
 } // namespace ludus::foundation::logging::internal

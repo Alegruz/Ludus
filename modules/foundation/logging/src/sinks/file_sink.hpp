@@ -19,38 +19,38 @@ namespace ludus::foundation::logging::internal {
 class FileSink final : public ILogSink
 {
 public:
-    // Factory: opens the session file under config.directory. Returns nullptr if
+    // Factory: opens the session file under config.Directory. Returns nullptr if
     // the directory cannot be created or the file cannot be opened, so the
     // caller can degrade gracefully rather than crash (spec section 25 spirit).
     static std::unique_ptr<FileSink> create(const LogConfig& config);
 
     ~FileSink() override;
 
-    void write(const LogRecordView& record) noexcept override;
-    void flush() noexcept override;
+    void Write(const LogRecordView& record) noexcept override;
+    void Flush() noexcept override;
 
     // Exposed for tests: the absolute path of the currently active file.
     [[nodiscard]] const std::filesystem::path& current_path() const noexcept
     {
-        return active_path_;
+        return mActivePath;
     }
 
 private:
     FileSink(std::FILE* file,
              std::filesystem::path directory,
              std::filesystem::path base_path,
-             std::uint64_t max_file_size_bytes);
+             std::uint64_t maxFileSizeBytes);
 
-    void rotate_if_needed(std::size_t incoming_bytes) noexcept;
+    void rotateIfNeeded(std::size_t incoming_bytes) noexcept;
 
-    std::FILE* file_;
-    std::filesystem::path directory_;
-    std::filesystem::path base_path_; // first file of the session (no rotation suffix)
-    std::filesystem::path active_path_;
-    std::uint64_t max_file_size_bytes_;
-    std::uint64_t bytes_written_;
-    std::uint32_t rotation_index_;
-    std::string scratch_;
+    std::FILE* mFile;
+    std::filesystem::path mDirectory;
+    std::filesystem::path mBasePath; // first file of the session (no rotation suffix)
+    std::filesystem::path mActivePath;
+    std::uint64_t mMaxFileSizeBytes;
+    std::uint64_t mBytesWritten;
+    std::uint32_t mRotationIndex;
+    std::string mScratch;
 };
 
 } // namespace ludus::foundation::logging::internal

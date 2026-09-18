@@ -15,13 +15,13 @@ class DebuggerSink final : public ILogSink
 public:
     DebuggerSink();
 
-    void write(const LogRecordView& record) noexcept override;
-    void flush() noexcept override;
+    void Write(const LogRecordView& record) noexcept override;
+    void Flush() noexcept override;
 
 private:
     // Only read on Windows; kept on all platforms so the layout is uniform.
-    [[maybe_unused]] bool active_;
-    [[maybe_unused]] std::string scratch_;
+    [[maybe_unused]] bool mActive;
+    [[maybe_unused]] std::string mScratch;
 };
 
 } // namespace ludus::foundation::logging::internal

@@ -14,15 +14,15 @@ class ConsoleSink final : public ILogSink
 public:
     ConsoleSink();
 
-    void write(const LogRecordView& record) noexcept override;
-    void flush() noexcept override;
+    void Write(const LogRecordView& record) noexcept override;
+    void Flush() noexcept override;
 
 private:
-    bool stdout_is_tty_;
-    bool stderr_is_tty_;
+    bool mStdoutIsTty;
+    bool mStderrIsTty;
 
     // Reused across write() calls to avoid per-line allocation on the hot path.
-    std::string scratch_;
+    std::string mScratch;
 };
 
 } // namespace ludus::foundation::logging::internal

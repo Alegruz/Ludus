@@ -8,15 +8,15 @@ namespace ludus::foundation::logging {
 // Compile-time FNV-1a hash used to derive a stable 32-bit category id from the
 // category name. Runtime filtering compares these integer ids rather than
 // performing a string-map lookup on every logging call (spec section 5).
-[[nodiscard]] constexpr std::uint32_t hash_log_category(std::string_view name) noexcept
+[[nodiscard]] constexpr std::uint32_t HashLogCategory(std::string_view name) noexcept
 {
-    constexpr std::uint32_t fnv_offset_basis = 2166136261u;
-    constexpr std::uint32_t fnv_prime = 16777619u;
+    constexpr std::uint32_t FNV_OFFSET_BASIS = 2166136261u;
+    constexpr std::uint32_t FNV_PRIME = 16777619u;
 
-    std::uint32_t hash = fnv_offset_basis;
+    std::uint32_t hash = FNV_OFFSET_BASIS;
     for (const char character : name) {
         hash ^= static_cast<std::uint32_t>(static_cast<unsigned char>(character));
-        hash *= fnv_prime;
+        hash *= FNV_PRIME;
     }
     return hash;
 }
@@ -26,31 +26,31 @@ namespace ludus::foundation::logging {
 // registration is needed on the logging hot path.
 struct LogCategory
 {
-    std::uint32_t id;
-    std::string_view name;
+    std::uint32_t Id;
+    std::string_view Name;
 
     consteval LogCategory(std::string_view category_name) noexcept
-        : id(hash_log_category(category_name)), name(category_name)
+        : Id(HashLogCategory(category_name)), Name(category_name)
     {
     }
 
     // Explicit two-argument form kept for parity with the specification's
     // examples and for tests that construct categories at runtime.
     constexpr LogCategory(std::uint32_t category_id, std::string_view category_name) noexcept
-        : id(category_id), name(category_name)
+        : Id(category_id), Name(category_name)
     {
     }
 
     [[nodiscard]] friend constexpr bool operator==(LogCategory lhs, LogCategory rhs) noexcept
     {
-        return lhs.id == rhs.id && lhs.name == rhs.name;
+        return lhs.Id == rhs.Id && lhs.Name == rhs.Name;
     }
 };
 
 // Foundation-owned categories. Engine modules declare their own categories in
 // their own headers; these are the baseline set from spec section 5 that the
 // foundation and early bring-up code can rely on.
-inline constexpr LogCategory LogCore{"Core"};
-inline constexpr LogCategory LogTemp{"Temp"};
+inline constexpr LogCategory LOG_CORE{"Core"};
+inline constexpr LogCategory LOG_TEMP{"Temp"};
 
 } // namespace ludus::foundation::logging

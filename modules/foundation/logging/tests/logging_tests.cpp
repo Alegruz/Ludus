@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -35,7 +36,7 @@ std::string read_file(const std::filesystem::path& path)
 std::filesystem::path make_temp_log_dir(const std::string& tag)
 {
     const auto base =
-        std::filesystem::temp_directory_path() / ("ludus_log_test_" + tag + "_" + std::to_string(LUDUS_TEST_GETPID()));
+        std::filesystem::temp_directory_path() / std::format("ludus_log_test_{}_{}", tag, LUDUS_TEST_GETPID());
     std::filesystem::remove_all(base);
     std::filesystem::create_directories(base);
     return base;
@@ -68,27 +69,27 @@ TEST_CASE("logging works before initialization and after shutdown without crashi
 {
     // Not initialized: Warning+ should be accepted (routes to emergency path),
     // lower levels rejected. This must not crash.
-    REQUIRE_FALSE(LogSystem::is_initialized());
-    CHECK_FALSE(LogSystem::should_log(LogLevel::Info, LogLifecycleTest));
-    CHECK(LogSystem::should_log(LogLevel::Warning, LogLifecycleTest));
-    CHECK(LogSystem::should_log(LogLevel::Fatal, LogLifecycleTest));
+    REQUIRE_FALSE(LogSystem::IsInitialized());
+    CHECK_FALSE(LogSystem::ShouldLog(LogLevel::Info, LogLifecycleTest));
+    CHECK(LogSystem::ShouldLog(LogLevel::Warning, LogLifecycleTest));
+    CHECK(LogSystem::ShouldLog(LogLevel::Fatal, LogLifecycleTest));
 
     // These go to stderr via the emergency path; the point is that they are safe.
     LUDUS_LOG_WARN(LogLifecycleTest, "pre-init warning is safe");
     LUDUS_LOG_INFO(LogLifecycleTest, "pre-init info is dropped");
 
     LogConfig config{};
-    config.global_level = LogLevel::Trace;
-    config.enable_console = false;
-    config.enable_debugger = false;
-    config.enable_file = false;
-    LogSystem::initialize(config);
-    REQUIRE(LogSystem::is_initialized());
-    LogSystem::shutdown();
-    REQUIRE_FALSE(LogSystem::is_initialized());
+    config.GlobalLevel = LogLevel::Trace;
+    config.EnableConsole = false;
+    config.EnableDebugger = false;
+    config.EnableFile = false;
+    LogSystem::Initialize(config);
+    REQUIRE(LogSystem::IsInitialized());
+    LogSystem::Shutdown();
+    REQUIRE_FALSE(LogSystem::IsInitialized());
 
     // Post-shutdown behaves like pre-init.
-    CHECK(LogSystem::should_log(LogLevel::Error, LogLifecycleTest));
+    CHECK(LogSystem::ShouldLog(LogLevel::Error, LogLifecycleTest));
     LUDUS_LOG_ERROR(LogLifecycleTest, "post-shutdown error is safe");
 }
 
@@ -97,23 +98,23 @@ TEST_CASE("synchronous logging makes the record visible before the call returns"
     const auto dir = make_temp_log_dir("sync");
 
     LogConfig config{};
-    config.global_level = LogLevel::Trace;
-    config.mode = LogMode::Synchronous;
-    config.enable_console = false;
-    config.enable_debugger = false;
-    config.enable_file = true;
-    config.directory = dir;
-    LogSystem::initialize(config);
+    config.GlobalLevel = LogLevel::Trace;
+    config.Mode = LogMode::Synchronous;
+    config.EnableConsole = false;
+    config.EnableDebugger = false;
+    config.EnableFile = true;
+    config.Directory = dir;
+    LogSystem::Initialize(config);
 
     LUDUS_LOG_INFO(LogLifecycleTest, "synchronous visibility marker");
     // In synchronous mode the record must already be in the file sink's stream
     // by the time the macro returns. We flush to defeat OS buffering, then read.
-    LogSystem::flush();
+    LogSystem::Flush();
 
     const std::string contents = read_file(find_log_file(dir));
     CHECK(contents.find("synchronous visibility marker") != std::string::npos);
 
-    LogSystem::shutdown();
+    LogSystem::Shutdown();
     std::filesystem::remove_all(dir);
 }
 
@@ -122,12 +123,12 @@ TEST_CASE("file sink creates a uniquely named session file and writes to it", "[
     const auto dir = make_temp_log_dir("file_create");
 
     LogConfig config{};
-    config.global_level = LogLevel::Info;
-    config.enable_console = false;
-    config.enable_debugger = false;
-    config.enable_file = true;
-    config.directory = dir;
-    LogSystem::initialize(config);
+    config.GlobalLevel = LogLevel::Info;
+    config.EnableConsole = false;
+    config.EnableDebugger = false;
+    config.EnableFile = true;
+    config.Directory = dir;
+    LogSystem::Initialize(config);
 
     const std::filesystem::path path = find_log_file(dir);
     REQUIRE_FALSE(path.empty());
@@ -137,8 +138,8 @@ TEST_CASE("file sink creates a uniquely named session file and writes to it", "[
     CHECK(name.find("_pid-") != std::string::npos);
 
     LUDUS_LOG_INFO(LogLifecycleTest, "written to session file");
-    LogSystem::flush();
-    LogSystem::shutdown();
+    LogSystem::Flush();
+    LogSystem::Shutdown();
 
     const std::string contents = read_file(path);
     CHECK(contents.find("written to session file") != std::string::npos);
@@ -151,17 +152,17 @@ TEST_CASE("shutdown drains and flushes buffered records to the file", "[logging]
     const auto dir = make_temp_log_dir("drain");
 
     LogConfig config{};
-    config.global_level = LogLevel::Trace;
-    config.enable_console = false;
-    config.enable_debugger = false;
-    config.enable_file = true;
-    config.directory = dir;
-    LogSystem::initialize(config);
+    config.GlobalLevel = LogLevel::Trace;
+    config.EnableConsole = false;
+    config.EnableDebugger = false;
+    config.EnableFile = true;
+    config.Directory = dir;
+    LogSystem::Initialize(config);
 
     const std::filesystem::path path = find_log_file(dir);
     LUDUS_LOG_DEBUG(LogLifecycleTest, "record before shutdown");
     // Do NOT flush explicitly; shutdown() must flush on its own (spec section 24).
-    LogSystem::shutdown();
+    LogSystem::Shutdown();
 
     const std::string contents = read_file(path);
     CHECK(contents.find("record before shutdown") != std::string::npos);
@@ -176,20 +177,20 @@ TEST_CASE("file retention prunes old session files", "[logging][file][retention]
     // Pre-seed the directory with old-looking session files beyond the retention
     // limit. The next initialize() should prune down to retained_sessions total.
     for (int i = 0; i < 5; ++i) {
-        std::ofstream stale(dir / ("2020-01-01_00-00-0" + std::to_string(i) + "_pid-100" + std::to_string(i) + ".log"));
+        std::ofstream stale(dir / std::format("2020-01-01_00-00-0{}_pid-100{}.log", i, i));
         stale << "old session " << i << '\n';
     }
     REQUIRE(count_log_files(dir) == 5);
 
     LogConfig config{};
-    config.global_level = LogLevel::Info;
-    config.enable_console = false;
-    config.enable_debugger = false;
-    config.enable_file = true;
-    config.directory = dir;
-    config.retained_sessions = 3;
-    LogSystem::initialize(config);
-    LogSystem::shutdown();
+    config.GlobalLevel = LogLevel::Info;
+    config.EnableConsole = false;
+    config.EnableDebugger = false;
+    config.EnableFile = true;
+    config.Directory = dir;
+    config.RetainedSessions = 3;
+    LogSystem::Initialize(config);
+    LogSystem::Shutdown();
 
     // At most `retained_sessions` files remain (the new one plus kept old ones).
     CHECK(count_log_files(dir) <= 3);
@@ -202,23 +203,23 @@ TEST_CASE("statistics count submitted and written records", "[logging][statistic
     const auto dir = make_temp_log_dir("stats");
 
     LogConfig config{};
-    config.global_level = LogLevel::Trace;
-    config.enable_console = false;
-    config.enable_debugger = false;
-    config.enable_file = true;
-    config.directory = dir;
-    LogSystem::initialize(config);
+    config.GlobalLevel = LogLevel::Trace;
+    config.EnableConsole = false;
+    config.EnableDebugger = false;
+    config.EnableFile = true;
+    config.Directory = dir;
+    LogSystem::Initialize(config);
 
-    const LogStatistics before = LogSystem::statistics();
+    const LogStatistics before = LogSystem::Statistics();
     LUDUS_LOG_INFO(LogLifecycleTest, "counted record 1");
     LUDUS_LOG_INFO(LogLifecycleTest, "counted record 2");
-    const LogStatistics after = LogSystem::statistics();
+    const LogStatistics after = LogSystem::Statistics();
 
-    CHECK(after.submitted >= before.submitted + 2);
-    CHECK(after.written >= before.written + 2);
+    CHECK(after.Submitted >= before.Submitted + 2);
+    CHECK(after.Written >= before.Written + 2);
     // Synchronous mode never drops.
-    CHECK(after.dropped == 0);
+    CHECK(after.Dropped == 0);
 
-    LogSystem::shutdown();
+    LogSystem::Shutdown();
     std::filesystem::remove_all(dir);
 }
