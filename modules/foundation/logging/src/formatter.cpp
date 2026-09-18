@@ -42,9 +42,12 @@ struct ThreadLocalIdentity
 {
     std::uint32_t id;
     std::string name;
-    bool name_set;
 
-    ThreadLocalIdentity() : id(g_next_thread_id.fetch_add(1, std::memory_order_relaxed)), name(), name_set(false) {}
+    ThreadLocalIdentity()
+        : id(g_next_thread_id.fetch_add(1, std::memory_order_relaxed)),
+          name(id == 0 ? std::string{"Main"} : "Thread-" + std::to_string(id))
+    {
+    }
 };
 
 ThreadLocalIdentity& identity() noexcept
@@ -120,12 +123,7 @@ void format_console_line(const LogRecordView& record, bool use_color, std::strin
 
 std::string_view current_thread_name() noexcept
 {
-    ThreadLocalIdentity& self = identity();
-    if (self.name_set) {
-        return self.name;
-    }
-    // First thread seen in the process is conventionally the main thread.
-    return self.id == 0 ? std::string_view{"Main"} : std::string_view{"Thread"};
+    return identity().name;
 }
 
 std::uint32_t current_thread_id() noexcept
@@ -145,9 +143,7 @@ namespace ludus::foundation::logging {
 
 void set_current_thread_name(std::string_view name)
 {
-    internal::ThreadLocalIdentity& self = internal::identity();
-    self.name.assign(name);
-    self.name_set = true;
+    internal::identity().name.assign(name);
 }
 
 } // namespace ludus::foundation::logging
