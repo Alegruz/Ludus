@@ -5,5 +5,6 @@ target_link_libraries(
     PRIVATE
         Ludus::FoundationBase
         Ludus::FoundationLogging
+        Ludus::Platform
 )
 ludus_apply_project_defaults(ludus_smoke)

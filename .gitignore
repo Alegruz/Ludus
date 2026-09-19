@@ -15,4 +15,4 @@ __pycache__/
 .vscode/*.code-workspace
 !.vscode/settings.json
 !.vscode/extensions.json
-build/
+/build/

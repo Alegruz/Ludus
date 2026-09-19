@@ -55,6 +55,7 @@ endif()
 
 add_subdirectory(modules/foundation/base)
 add_subdirectory(modules/foundation/logging)
+add_subdirectory(modules/platform)
 
 if(LUDUS_BUILD_SMOKE_APP)
     add_subdirectory(apps/smoke)
