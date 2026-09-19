@@ -10,7 +10,8 @@
 #include <memory>
 #include <string>
 
-namespace ludus::foundation::logging::internal {
+namespace ludus::foundation::logging::internal
+{
 
 // Persistent per-process file sink (spec sections 20-23). One session file per
 // process, named to avoid collisions between concurrent Ludus processes; writes
@@ -43,13 +44,13 @@ private:
 
     void rotateIfNeeded(std::size_t incoming_bytes) noexcept;
 
-    std::FILE* mFile;
+    std::FILE* mFile = nullptr;
     std::filesystem::path mDirectory;
     std::filesystem::path mBasePath; // first file of the session (no rotation suffix)
     std::filesystem::path mActivePath;
-    std::uint64_t mMaxFileSizeBytes;
-    std::uint64_t mBytesWritten;
-    std::uint32_t mRotationIndex;
+    std::uint64_t mMaxFileSizeBytes = 0;
+    std::uint64_t mBytesWritten = 0;
+    std::uint32_t mRotationIndex = 0;
     std::string mScratch;
 };
 

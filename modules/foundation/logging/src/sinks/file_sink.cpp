@@ -18,9 +18,11 @@
 #    define LUDUS_GETPID ::getpid
 #endif
 
-namespace ludus::foundation::logging::internal {
+namespace ludus::foundation::logging::internal
+{
 
-namespace {
+namespace
+{
 
 // Build "YYYY-MM-DD_HH-MM-SS_pid-NNNNN.log" (spec section 20). Filesystem-safe
 // on all target platforms (no colons).
@@ -46,28 +48,34 @@ std::string sessionFileName()
 // files in the directory are left alone (spec section 22).
 void pruneOldSessions(const std::filesystem::path& directory, std::uint32_t retained) noexcept
 {
-    if (retained == 0) {
+    if (retained == 0)
+    {
         return;
     }
     std::error_code ec;
     std::vector<std::filesystem::directory_entry> sessions;
     std::filesystem::directory_iterator iter(directory, ec);
-    if (ec) {
+    if (ec)
+    {
         return;
     }
-    for (const auto& entry : iter) {
-        if (!entry.is_regular_file(ec)) {
+    for (const auto& entry : iter)
+    {
+        if (!entry.is_regular_file(ec))
+        {
             continue;
         }
         const std::string name = entry.path().filename().string();
-        if (name.find("_pid-") != std::string::npos && name.size() >= 4 && name.substr(name.size() - 4) == ".log") {
+        if (name.find("_pid-") != std::string::npos && name.size() >= 4 && name.substr(name.size() - 4) == ".log")
+        {
             sessions.push_back(entry);
         }
     }
 
     // Keep (retained - 1) existing files so that adding the new one lands at
     // exactly `retained`. Sort by last-write time, oldest first.
-    if (sessions.size() < retained) {
+    if (sessions.size() < retained)
+    {
         return;
     }
     std::sort(sessions.begin(),
@@ -77,18 +85,21 @@ void pruneOldSessions(const std::filesystem::path& directory, std::uint32_t reta
                   std::error_code eb;
                   const auto ta = a.last_write_time(ea);
                   const auto tb = b.last_write_time(eb);
-                  if (ea || eb) {
+                  if (ea || eb)
+                  {
                       return false; // treat unreadable entries as "not older"
                   }
                   return ta < tb;
               });
 
     const std::size_t keep = retained > 0 ? static_cast<std::size_t>(retained - 1) : 0;
-    if (sessions.size() <= keep) {
+    if (sessions.size() <= keep)
+    {
         return;
     }
     const std::size_t to_remove = sessions.size() - keep;
-    for (std::size_t i = 0; i < to_remove; ++i) {
+    for (std::size_t i = 0; i < to_remove; ++i)
+    {
         std::error_code remove_ec;
         std::filesystem::remove(sessions[i].path(), remove_ec);
     }
@@ -98,13 +109,15 @@ void pruneOldSessions(const std::filesystem::path& directory, std::uint32_t reta
 
 std::unique_ptr<FileSink> FileSink::Create(const LogConfig& config)
 {
-    if (config.Directory.empty()) {
+    if (config.Directory.empty())
+    {
         return nullptr;
     }
 
     std::error_code ec;
     std::filesystem::create_directories(config.Directory, ec);
-    if (ec) {
+    if (ec)
+    {
         return nullptr;
     }
 
@@ -112,7 +125,8 @@ std::unique_ptr<FileSink> FileSink::Create(const LogConfig& config)
 
     const std::filesystem::path base_path = config.Directory / sessionFileName();
     std::FILE* file = std::fopen(base_path.string().c_str(), "wb");
-    if (file == nullptr) {
+    if (file == nullptr)
+    {
         return nullptr;
     }
 
@@ -124,14 +138,15 @@ FileSink::FileSink(std::FILE* file,
                    std::filesystem::path base_path,
                    std::uint64_t maxFileSizeBytes)
     : mFile(file), mDirectory(std::move(directory)), mBasePath(std::move(base_path)), mActivePath(mBasePath),
-      mMaxFileSizeBytes(maxFileSizeBytes), mBytesWritten(0), mRotationIndex(0), mScratch()
+      mMaxFileSizeBytes(maxFileSizeBytes)
 {
     mScratch.reserve(256);
 }
 
 FileSink::~FileSink()
 {
-    if (mFile != nullptr) {
+    if (mFile != nullptr)
+    {
         std::fflush(mFile);
         std::fclose(mFile);
         mFile = nullptr;
@@ -140,10 +155,12 @@ FileSink::~FileSink()
 
 void FileSink::rotateIfNeeded(std::size_t incoming_bytes) noexcept
 {
-    if (mMaxFileSizeBytes == 0 || mFile == nullptr) {
+    if (mMaxFileSizeBytes == 0 || mFile == nullptr)
+    {
         return;
     }
-    if (mBytesWritten + incoming_bytes <= mMaxFileSizeBytes) {
+    if (mBytesWritten + incoming_bytes <= mMaxFileSizeBytes)
+    {
         return;
     }
 
@@ -159,7 +176,8 @@ void FileSink::rotateIfNeeded(std::size_t incoming_bytes) noexcept
     std::filesystem::path next = std::format("{}.{}.log", rotated.string(), mRotationIndex);
 
     std::FILE* new_file = std::fopen(next.string().c_str(), "wb");
-    if (new_file == nullptr) {
+    if (new_file == nullptr)
+    {
         // Could not rotate; leave mFile null so we stop writing rather than
         // grow unbounded. A note would be nice but must not recurse into the
         // logging path here.
@@ -173,19 +191,23 @@ void FileSink::rotateIfNeeded(std::size_t incoming_bytes) noexcept
 
 void FileSink::Write(const LogRecordView& record) noexcept
 {
-    if (mFile == nullptr) {
+    if (mFile == nullptr)
+    {
         return;
     }
-    try {
+    try
+    {
         FormatConsoleLine(record, /*use_color=*/false, mScratch);
         mScratch.push_back('\n');
     }
-    catch (...) {
+    catch (...)
+    {
         return;
     }
 
     rotateIfNeeded(mScratch.size());
-    if (mFile == nullptr) {
+    if (mFile == nullptr)
+    {
         return;
     }
 
@@ -195,7 +217,8 @@ void FileSink::Write(const LogRecordView& record) noexcept
 
 void FileSink::Flush() noexcept
 {
-    if (mFile != nullptr) {
+    if (mFile != nullptr)
+    {
         std::fflush(mFile);
     }
 }

@@ -9,9 +9,11 @@ extern "C" __declspec(dllimport) void __stdcall OutputDebugStringA(const char*);
 extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent(void);
 #endif
 
-namespace ludus::foundation::logging::internal {
+namespace ludus::foundation::logging::internal
+{
 
-namespace {
+namespace
+{
 
 // Append a NUL-terminated C string to a fixed buffer, never overflowing. Updates
 // `length` and always leaves the buffer NUL-terminated. Allocation-free.
@@ -20,7 +22,8 @@ void append(std::array<char, 512>& buffer, std::size_t& length, std::string_view
     const std::size_t capacity = buffer.size() - 1; // reserve space for terminator
     const std::size_t remaining = capacity - length;
     const std::size_t count = text.size() < remaining ? text.size() : remaining;
-    if (count > 0) {
+    if (count > 0)
+    {
         std::memcpy(buffer.data() + length, text.data(), count);
         length += count;
     }
@@ -54,7 +57,8 @@ void EmergencyLog(LogLevel level,
     std::array<char, 16> line_digits{};
     const int written =
         std::snprintf(line_digits.data(), line_digits.size(), "%u", static_cast<unsigned>(location.line()));
-    if (written > 0) {
+    if (written > 0)
+    {
         append(buffer, length, std::string_view(line_digits.data(), static_cast<std::size_t>(written)));
     }
     append(buffer, length, ")\n");
@@ -65,7 +69,8 @@ void EmergencyLog(LogLevel level,
     std::fflush(stderr);
 
 #if defined(_WIN32)
-    if (IsDebuggerPresent()) {
+    if (IsDebuggerPresent())
+    {
         OutputDebugStringA(buffer.data());
     }
 #endif

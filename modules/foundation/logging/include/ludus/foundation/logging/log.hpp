@@ -29,7 +29,8 @@
 #    define LUDUS_COMPILED_LOG_LEVEL LUDUS_LOG_LEVEL_INFO
 #endif
 
-namespace ludus::foundation::logging {
+namespace ludus::foundation::logging
+{
 
 // Strongly-typed logging entry point that the LUDUS_LOG_* macros forward into.
 // The format string is validated at compile time against the argument types by
@@ -145,7 +146,8 @@ void SetCurrentThreadName(std::string_view name);
 // format checking. The heavy lifting - filtering re-check, source capture into
 // the record, sink dispatch - lives in logger.cpp behind log_formatted().
 // -----------------------------------------------------------------------------
-namespace ludus::foundation::logging::detail {
+namespace ludus::foundation::logging::detail
+{
 
 // Formats into a thread-local scratch buffer and dispatches to the sinks. Defined
 // in logger.cpp; declared here so the templated log() can call it without pulling
@@ -157,7 +159,8 @@ void DispatchFormatted(LogLevel level,
 
 } // namespace ludus::foundation::logging::detail
 
-namespace ludus::foundation::logging {
+namespace ludus::foundation::logging
+{
 
 template <typename... Args>
 void Log(LogLevel level,
@@ -169,10 +172,12 @@ void Log(LogLevel level,
     // Zero-argument calls carry a plain format string with no substitutions, so
     // forward the string as-is and skip std::format entirely for that common
     // "static message" case.
-    if constexpr (sizeof...(Args) == 0) {
+    if constexpr (sizeof...(Args) == 0)
+    {
         detail::DispatchFormatted(level, category, location, format.get());
     }
-    else {
+    else
+    {
         // vformat avoids a second template instantiation per call site and keeps
         // the formatting in one place. The result is a temporary std::string;
         // Phase 1 accepts this allocation for messages with arguments and will

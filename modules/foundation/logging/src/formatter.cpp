@@ -8,15 +8,18 @@
 #include <ctime>
 #include <string>
 
-namespace ludus::foundation::logging::internal {
+namespace ludus::foundation::logging::internal
+{
 
-namespace {
+namespace
+{
 
 // ANSI SGR color codes keyed by level (spec section 19). Trace is dim; Debug and
 // Info are default; Warning yellow; Error red; Fatal bright red.
-[[nodiscard]] std::string_view colorFor(LogLevel level) noexcept
+[[nodiscard]] std::string_view GetColorForLevel(LogLevel level) noexcept
 {
-    switch (level) {
+    switch (level)
+    {
         case LogLevel::Trace:
             return "\x1b[2m";
         case LogLevel::Debug:
@@ -43,14 +46,22 @@ struct ThreadLocalIdentity
     std::uint32_t Id;
     std::string Name;
 
-    ThreadLocalIdentity()
-        : Id(gNextThreadId.fetch_add(1, std::memory_order_relaxed)),
-          Name(Id == 0 ? std::string{"Main"} : std::format("Thread-{}", Id))
+    ThreadLocalIdentity() noexcept : Id(gNextThreadId.fetch_add(1, std::memory_order_relaxed))
     {
+        if (Id == 0)
+        {
+            Name = "Main";
+        }
+        else
+        {
+            char buffer[32];
+            std::snprintf(buffer, sizeof(buffer), "Thread-%u", Id);
+            Name = buffer;
+        }
     }
 };
 
-ThreadLocalIdentity& identity() noexcept
+ThreadLocalIdentity& GetThreadLocalIdentity() noexcept
 {
     thread_local ThreadLocalIdentity value;
     return value;
@@ -58,15 +69,17 @@ ThreadLocalIdentity& identity() noexcept
 
 } // namespace
 
-bool SourceVisibleFor(LogLevel level) noexcept
+bool IsSourceVisibleFor(LogLevel level) noexcept
 {
     return level >= LogLevel::Warning;
 }
 
 std::size_t FormatTimestamp(std::uint64_t timestamp_ns, char* out, std::size_t capacity) noexcept
 {
-    if (capacity < 13) {
-        if (capacity > 0) {
+    if (capacity < 13)
+    {
+        if (capacity > 0)
+        {
             out[0] = '\0';
         }
         return 0;
@@ -100,11 +113,13 @@ void FormatConsoleLine(const LogRecordView& record, bool use_color, std::string&
     buffer.append(record.ThreadName.empty() ? std::string_view{"?"} : record.ThreadName);
     buffer.append("] [");
 
-    if (use_color) {
-        buffer.append(colorFor(record.Level));
+    if (use_color)
+    {
+        buffer.append(GetColorForLevel(record.Level));
     }
     buffer.append(ToPaddedString(record.Level));
-    if (use_color) {
+    if (use_color)
+    {
         buffer.append(COLOR_RESET);
     }
 
@@ -113,7 +128,8 @@ void FormatConsoleLine(const LogRecordView& record, bool use_color, std::string&
     buffer.append("] ");
     buffer.append(record.Message);
 
-    if (SourceVisibleFor(record.Level) && !record.File.empty()) {
+    if (IsSourceVisibleFor(record.Level) && !record.File.empty())
+    {
         buffer.append("\n    ");
         buffer.append(record.File);
         buffer.push_back(':');
@@ -121,17 +137,17 @@ void FormatConsoleLine(const LogRecordView& record, bool use_color, std::string&
     }
 }
 
-std::string_view CurrentThreadName() noexcept
+std::string_view GetCurrentThreadName() noexcept
 {
-    return identity().Name;
+    return GetThreadLocalIdentity().Name;
 }
 
-std::uint32_t CurrentThreadId() noexcept
+std::uint32_t GetCurrentThreadId() noexcept
 {
-    return identity().Id;
+    return GetThreadLocalIdentity().Id;
 }
 
-std::uint64_t NowNanoseconds() noexcept
+std::uint64_t GetNowNanoseconds() noexcept
 {
     const auto now = std::chrono::system_clock::now().time_since_epoch();
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
@@ -139,11 +155,12 @@ std::uint64_t NowNanoseconds() noexcept
 
 } // namespace ludus::foundation::logging::internal
 
-namespace ludus::foundation::logging {
+namespace ludus::foundation::logging
+{
 
 void SetCurrentThreadName(std::string_view name)
 {
-    internal::identity().Name.assign(name);
+    internal::GetThreadLocalIdentity().Name.assign(name);
 }
 
 } // namespace ludus::foundation::logging

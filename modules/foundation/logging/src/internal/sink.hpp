@@ -2,7 +2,8 @@
 
 #include "internal/log_record.hpp"
 
-namespace ludus::foundation::logging::internal {
+namespace ludus::foundation::logging::internal
+{
 
 // Internal sink abstraction (spec section 18). This interface is a private
 // implementation detail: engine code logs through the LUDUS_LOG_* macros and

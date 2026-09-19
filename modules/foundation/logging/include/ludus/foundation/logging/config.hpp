@@ -5,7 +5,8 @@
 #include <cstdint>
 #include <filesystem>
 
-namespace ludus::foundation::logging {
+namespace ludus::foundation::logging
+{
 
 // Execution strategy for the logging backend. Only Synchronous is implemented
 // in Phase 1; Asynchronous is reserved so the public API and configuration

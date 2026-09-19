@@ -6,7 +6,8 @@
 int main()
 {
     const auto value = ludus::foundation::version();
-    if (value.major != ludus::foundation::build_metadata::version_major) {
+    if (value.major != ludus::foundation::build_metadata::version_major)
+    {
         return 1;
     }
 

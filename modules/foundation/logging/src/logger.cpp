@@ -16,9 +16,11 @@
 #include <unordered_map>
 #include <vector>
 
-namespace ludus::foundation::logging {
+namespace ludus::foundation::logging
+{
 
-namespace {
+namespace
+{
 
 // All mutable logger state lives behind a single struct with a function-local
 // static instance. This gives well-defined construction order (no static-init
@@ -57,7 +59,8 @@ LoggerState& state() noexcept
 LogLevel effectiveLevelLocked(const LoggerState& s, LogCategory category) noexcept
 {
     const auto found = s.CategoryLevels.find(category.Id);
-    if (found != s.CategoryLevels.end()) {
+    if (found != s.CategoryLevels.end())
+    {
         return found->second;
     }
     return s.GlobalLevel.load(std::memory_order_relaxed);
@@ -71,13 +74,15 @@ bool LogSystem::ShouldLog(LogLevel level, LogCategory category) noexcept
 
     // Fatal is always eligible: it must reach the emergency path even before
     // Initialize() and even if a category is turned down (spec sections 25, 26).
-    if (level == LogLevel::Fatal) {
+    if (level == LogLevel::Fatal)
+    {
         return true;
     }
 
     // Before initialization, only Warning and above are eligible; they go out
     // via the emergency path (spec section 25).
-    if (!s.Initialized.load(std::memory_order_acquire)) {
+    if (!s.Initialized.load(std::memory_order_acquire))
+    {
         return level >= LogLevel::Warning;
     }
 
@@ -95,7 +100,8 @@ void LogSystem::Initialize(const LogConfig& config)
     LoggerState& s = state();
     std::unique_lock lock(s.Mutex);
 
-    if (s.Initialized.load(std::memory_order_acquire)) {
+    if (s.Initialized.load(std::memory_order_acquire))
+    {
         // Idempotent-ish: re-initialization replaces sinks and levels rather
         // than stacking them. Emit a note so double-init is visible in tests.
         internal::EmergencyNote("LogSystem::Initialize called while already initialized; reconfiguring");
@@ -106,22 +112,29 @@ void LogSystem::Initialize(const LogConfig& config)
     s.Mode.store(config.Mode, std::memory_order_relaxed);
     s.CategoryLevels.clear();
 
-    if (config.EnableConsole) {
+    if (config.EnableConsole)
+    {
         s.Sinks.push_back(std::make_unique<internal::ConsoleSink>());
     }
-    if (config.EnableDebugger) {
+    if (config.EnableDebugger)
+    {
         s.Sinks.push_back(std::make_unique<internal::DebuggerSink>());
     }
-    if (config.EnableFile) {
-        if (config.Directory.empty()) {
+    if (config.EnableFile)
+    {
+        if (config.Directory.empty())
+        {
             internal::EmergencyNote("file logging requested but LogConfig::Directory is empty; file sink disabled");
         }
-        else {
+        else
+        {
             auto file_sink = internal::FileSink::Create(config);
-            if (file_sink) {
+            if (file_sink)
+            {
                 s.Sinks.push_back(std::move(file_sink));
             }
-            else {
+            else
+            {
                 internal::EmergencyNote("failed to open log file; file sink disabled");
             }
         }
@@ -135,11 +148,13 @@ void LogSystem::Shutdown()
     LoggerState& s = state();
     std::unique_lock lock(s.Mutex);
 
-    if (!s.Initialized.load(std::memory_order_acquire)) {
+    if (!s.Initialized.load(std::memory_order_acquire))
+    {
         return;
     }
 
-    for (auto& sink : s.Sinks) {
+    for (auto& sink : s.Sinks)
+    {
         sink->Flush();
     }
     s.Sinks.clear();
@@ -154,7 +169,8 @@ void LogSystem::Flush()
 {
     LoggerState& s = state();
     std::shared_lock lock(s.Mutex);
-    for (auto& sink : s.Sinks) {
+    for (auto& sink : s.Sinks)
+    {
         sink->Flush();
     }
 }
@@ -165,7 +181,8 @@ void LogSystem::SetMode(LogMode mode)
     // future async builds share one API; note when async is requested so the
     // behavior gap is visible rather than silent (spec sections 11, 40).
     state().Mode.store(mode, std::memory_order_relaxed);
-    if (mode == LogMode::Asynchronous) {
+    if (mode == LogMode::Asynchronous)
+    {
         internal::EmergencyNote("LogMode::Asynchronous requested; Phase 1 backend is synchronous only");
     }
 }
@@ -199,7 +216,8 @@ LogStatistics LogSystem::Statistics()
     return stats;
 }
 
-namespace detail {
+namespace detail
+{
 
 void DispatchFormatted(LogLevel level,
                        LogCategory category,
@@ -212,8 +230,10 @@ void DispatchFormatted(LogLevel level,
     // Pre-init / post-shutdown: route through the hardened emergency path. Only
     // Warning+ reaches here because ShouldLog() gates lower levels, but we
     // re-check defensively (spec sections 25, 26).
-    if (!s.Initialized.load(std::memory_order_acquire)) {
-        if (level >= LogLevel::Warning) {
+    if (!s.Initialized.load(std::memory_order_acquire))
+    {
+        if (level >= LogLevel::Warning)
+        {
             internal::EmergencyLog(level, category, formatted_message, location);
         }
         return;
@@ -226,13 +246,14 @@ void DispatchFormatted(LogLevel level,
     record.File = location.file_name();
     record.Function = location.function_name();
     record.Line = location.line();
-    record.ThreadName = internal::CurrentThreadName();
-    record.ThreadId = internal::CurrentThreadId();
-    record.TimestampNs = internal::NowNanoseconds();
+    record.ThreadName = internal::GetCurrentThreadName();
+    record.ThreadId = internal::GetCurrentThreadId();
+    record.TimestampNs = internal::GetNowNanoseconds();
 
     {
         std::shared_lock lock(s.Mutex);
-        for (auto& sink : s.Sinks) {
+        for (auto& sink : s.Sinks)
+        {
             sink->Write(record);
         }
 
@@ -240,8 +261,10 @@ void DispatchFormatted(LogLevel level,
         // Fatal, flush before returning so the record is externally visible even
         // if the process dies on the next statement. Fatal additionally goes to
         // the emergency path as a belt-and-suspenders guarantee.
-        if (level >= LogLevel::Error) {
-            for (auto& sink : s.Sinks) {
+        if (level >= LogLevel::Error)
+        {
+            for (auto& sink : s.Sinks)
+            {
                 sink->Flush();
             }
         }
@@ -249,7 +272,8 @@ void DispatchFormatted(LogLevel level,
 
     s.Written.fetch_add(1, std::memory_order_relaxed);
 
-    if (level == LogLevel::Fatal) {
+    if (level == LogLevel::Fatal)
+    {
         internal::EmergencyLog(level, category, formatted_message, location);
     }
 }

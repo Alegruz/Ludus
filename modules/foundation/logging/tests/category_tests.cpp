@@ -13,7 +13,8 @@
 
 #include <string_view>
 
-namespace {
+namespace
+{
 
 using namespace ludus::foundation::logging;
 

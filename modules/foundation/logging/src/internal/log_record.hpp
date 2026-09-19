@@ -6,7 +6,8 @@
 #include <cstdint>
 #include <string_view>
 
-namespace ludus::foundation::logging::internal {
+namespace ludus::foundation::logging::internal
+{
 
 // Fixed-size, trivially copyable record header (spec section 14). Phase 1 is
 // synchronous and does not enqueue records, but the header is defined now so the

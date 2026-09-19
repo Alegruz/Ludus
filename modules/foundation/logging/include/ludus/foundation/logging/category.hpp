@@ -3,7 +3,8 @@
 #include <cstdint>
 #include <string_view>
 
-namespace ludus::foundation::logging {
+namespace ludus::foundation::logging
+{
 
 // Compile-time FNV-1a hash used to derive a stable 32-bit category id from the
 // category name. Runtime filtering compares these integer ids rather than
@@ -14,7 +15,8 @@ namespace ludus::foundation::logging {
     constexpr std::uint32_t FNV_PRIME = 16777619u;
 
     std::uint32_t hash = FNV_OFFSET_BASIS;
-    for (const char character : name) {
+    for (const char character : name)
+    {
         hash ^= static_cast<std::uint32_t>(static_cast<unsigned char>(character));
         hash *= FNV_PRIME;
     }

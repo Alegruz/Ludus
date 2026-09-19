@@ -4,7 +4,8 @@
 
 #include <string>
 
-namespace ludus::foundation::logging::internal {
+namespace ludus::foundation::logging::internal
+{
 
 // Routes records to the attached debugger's output window (spec section 18).
 // On Windows this uses OutputDebugStringA when a debugger is present. On other
@@ -20,7 +21,7 @@ public:
 
 private:
     // Only read on Windows; kept on all platforms so the layout is uniform.
-    [[maybe_unused]] bool mActive;
+    [[maybe_unused]] bool mActive = false;
     [[maybe_unused]] std::string mScratch;
 };
 

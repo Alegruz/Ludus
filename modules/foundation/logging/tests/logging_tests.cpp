@@ -16,7 +16,8 @@
 #    define LUDUS_TEST_GETPID ::getpid
 #endif
 
-namespace {
+namespace
+{
 
 using namespace ludus::foundation::logging;
 
@@ -25,7 +26,8 @@ inline constexpr LogCategory LogLifecycleTest{"LifecycleTest"};
 std::string read_file(const std::filesystem::path& path)
 {
     std::ifstream stream(path, std::ios::binary);
-    if (!stream) {
+    if (!stream)
+    {
         return {};
     }
     std::ostringstream buffer;
@@ -44,8 +46,10 @@ std::filesystem::path make_temp_log_dir(const std::string& tag)
 
 std::filesystem::path find_log_file(const std::filesystem::path& dir)
 {
-    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".log") {
+    for (const auto& entry : std::filesystem::directory_iterator(dir))
+    {
+        if (entry.is_regular_file() && entry.path().extension() == ".log")
+        {
             return entry.path();
         }
     }
@@ -55,8 +59,10 @@ std::filesystem::path find_log_file(const std::filesystem::path& dir)
 std::size_t count_log_files(const std::filesystem::path& dir)
 {
     std::size_t count = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".log") {
+    for (const auto& entry : std::filesystem::directory_iterator(dir))
+    {
+        if (entry.is_regular_file() && entry.path().extension() == ".log")
+        {
             ++count;
         }
     }
@@ -176,7 +182,8 @@ TEST_CASE("file retention prunes old session files", "[logging][file][retention]
 
     // Pre-seed the directory with old-looking session files beyond the retention
     // limit. The next initialize() should prune down to retained_sessions total.
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 5; ++i)
+    {
         std::ofstream stale(dir / std::format("2020-01-01_00-00-0{}_pid-100{}.log", i, i));
         stale << "old session " << i << '\n';
     }

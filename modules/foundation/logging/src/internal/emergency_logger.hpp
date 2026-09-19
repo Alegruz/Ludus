@@ -6,7 +6,8 @@
 #include <source_location>
 #include <string_view>
 
-namespace ludus::foundation::logging::internal {
+namespace ludus::foundation::logging::internal
+{
 
 // The emergency path (spec sections 25, 26). It exists to make logging safe in
 // three windows where the normal backend cannot be trusted:

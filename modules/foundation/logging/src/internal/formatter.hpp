@@ -6,12 +6,13 @@
 #include <string>
 #include <string_view>
 
-namespace ludus::foundation::logging::internal {
+namespace ludus::foundation::logging::internal
+{
 
 // Whether a sink should append the "file:line" source suffix for a given level.
 // Warning and above always show source; lower levels hide it in normal output
 // even though the record still carries it (spec section 10).
-[[nodiscard]] bool SourceVisibleFor(LogLevel level) noexcept;
+[[nodiscard]] bool IsSourceVisibleFor(LogLevel level) noexcept;
 
 // Format the wall-clock timestamp (ns since epoch) as "HH:MM:SS.mmm" into `out`,
 // which must have room for at least 12 characters plus a terminator. Returns the
@@ -30,13 +31,13 @@ void FormatConsoleLine(const LogRecordView& record, bool use_color, std::string&
 // The current thread's human-readable name (spec section 29). Defaults to
 // "Main" for the process's first-seen thread and "Thread-<id>" otherwise until
 // set explicitly.
-[[nodiscard]] std::string_view CurrentThreadName() noexcept;
+[[nodiscard]] std::string_view GetCurrentThreadName() noexcept;
 
 // The current thread's stable numeric id (a small monotonic counter, not the OS
 // tid, so log output is stable and readable).
-[[nodiscard]] std::uint32_t CurrentThreadId() noexcept;
+[[nodiscard]] std::uint32_t GetCurrentThreadId() noexcept;
 
 // Wall-clock nanoseconds since the Unix epoch.
-[[nodiscard]] std::uint64_t NowNanoseconds() noexcept;
+[[nodiscard]] std::uint64_t GetNowNanoseconds() noexcept;
 
 } // namespace ludus::foundation::logging::internal

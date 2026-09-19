@@ -7,9 +7,10 @@ extern "C" __declspec(dllimport) void __stdcall OutputDebugStringA(const char*);
 extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent(void);
 #endif
 
-namespace ludus::foundation::logging::internal {
+namespace ludus::foundation::logging::internal
+{
 
-DebuggerSink::DebuggerSink() : mActive(false), mScratch()
+DebuggerSink::DebuggerSink()
 {
 #if defined(_WIN32)
     mActive = IsDebuggerPresent() != 0;
@@ -20,17 +21,22 @@ DebuggerSink::DebuggerSink() : mActive(false), mScratch()
 void DebuggerSink::Write([[maybe_unused]] const LogRecordView& record) noexcept
 {
 #if defined(_WIN32)
-    if (!mActive) {
+    if (!mActive)
+    {
         return;
     }
-    try {
+    try
+    {
         // Debugger output never uses ANSI color.
         FormatConsoleLine(record, /*use_color=*/false, mScratch);
         mScratch.push_back('\n');
         OutputDebugStringA(mScratch.c_str());
     }
-    catch (...) {
+    catch (...)
+    {
         // Drop on allocation failure rather than propagate.
+        // NOLINT(bugprone-empty-catch)
+        (void)0;
     }
 #endif
     // Non-Windows: intentional no-op in Phase 1.

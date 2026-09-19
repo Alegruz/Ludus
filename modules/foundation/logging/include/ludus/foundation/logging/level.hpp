@@ -3,7 +3,8 @@
 #include <cstdint>
 #include <string_view>
 
-namespace ludus::foundation::logging {
+namespace ludus::foundation::logging
+{
 
 // Severity levels, ordered from most to least verbose. The underlying integer
 // ordering is load-bearing: runtime and compile-time filtering both rely on
@@ -24,7 +25,8 @@ enum class LogLevel : std::uint8_t
 // corrupted record can never index out of bounds.
 [[nodiscard]] constexpr std::string_view ToPaddedString(LogLevel level) noexcept
 {
-    switch (level) {
+    switch (level)
+    {
         case LogLevel::Trace:
             return "TRACE";
         case LogLevel::Debug:
@@ -43,7 +45,8 @@ enum class LogLevel : std::uint8_t
 
 [[nodiscard]] constexpr std::string_view ToString(LogLevel level) noexcept
 {
-    switch (level) {
+    switch (level)
+    {
         case LogLevel::Trace:
             return "Trace";
         case LogLevel::Debug:

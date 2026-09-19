@@ -14,11 +14,13 @@
 #    define LUDUS_FILENO ::fileno
 #endif
 
-namespace ludus::foundation::logging::internal {
+namespace ludus::foundation::logging::internal
+{
 
-namespace {
+namespace
+{
 
-[[nodiscard]] bool streamIsTty(std::FILE* stream) noexcept
+[[nodiscard]] bool IsStreamTty(std::FILE* stream) noexcept
 {
     const int fd = LUDUS_FILENO(stream);
     return fd >= 0 && LUDUS_ISATTY(fd) != 0;
@@ -26,7 +28,7 @@ namespace {
 
 } // namespace
 
-ConsoleSink::ConsoleSink() : mStdoutIsTty(streamIsTty(stdout)), mStderrIsTty(streamIsTty(stderr)), mScratch()
+ConsoleSink::ConsoleSink() : mStdoutIsTty(IsStreamTty(stdout)), mStderrIsTty(IsStreamTty(stderr))
 {
     mScratch.reserve(256);
 }
@@ -41,13 +43,17 @@ void ConsoleSink::Write(const LogRecordView& record) noexcept
     // FormatConsoleLine can throw only via std::string growth (bad_alloc); if
     // that happens we simply drop the line rather than propagate into engine
     // code, honoring the noexcept contract.
-    try {
+    try
+    {
         FormatConsoleLine(record, use_color, mScratch);
         mScratch.push_back('\n');
         std::fwrite(mScratch.data(), 1, mScratch.size(), stream);
     }
-    catch (...) {
+    catch (...)
+    {
         // Best-effort: nothing safe left to do on the console path.
+        // NOLINT(bugprone-empty-catch)
+        (void)0;
     }
 }
 

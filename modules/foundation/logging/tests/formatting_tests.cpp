@@ -16,13 +16,15 @@
 #    define LUDUS_TEST_GETPID ::getpid
 #endif
 
-namespace {
+namespace
+{
 
 // Read an entire file into a string. Returns empty if it does not exist.
 std::string read_file(const std::filesystem::path& path)
 {
     std::ifstream stream(path, std::ios::binary);
-    if (!stream) {
+    if (!stream)
+    {
         return {};
     }
     std::ostringstream buffer;
@@ -46,8 +48,10 @@ using namespace ludus::foundation::logging;
 // Helper to find the single session .log file in a directory.
 std::filesystem::path find_log_file(const std::filesystem::path& dir)
 {
-    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".log") {
+    for (const auto& entry : std::filesystem::directory_iterator(dir))
+    {
+        if (entry.is_regular_file() && entry.path().extension() == ".log")
+        {
             return entry.path();
         }
     }
