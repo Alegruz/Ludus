@@ -4,7 +4,8 @@
 
 #include "internal/version_format.hpp"
 
-namespace ludus::foundation {
+namespace ludus::foundation
+{
 
 Version version() noexcept
 {
