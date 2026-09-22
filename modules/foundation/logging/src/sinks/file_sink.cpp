@@ -195,15 +195,9 @@ void FileSink::Write(const LogRecordView& record) noexcept
     {
         return;
     }
-    try
-    {
-        FormatConsoleLine(record, /*use_color=*/false, mScratch);
-        mScratch.push_back('\n');
-    }
-    catch (...)
-    {
-        return;
-    }
+    // The engine builds with -fno-exceptions; formatting cannot throw here.
+    FormatConsoleLine(record, /*use_color=*/false, mScratch);
+    mScratch.push_back('\n');
 
     rotateIfNeeded(mScratch.size());
     if (mFile == nullptr)

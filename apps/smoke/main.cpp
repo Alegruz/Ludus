@@ -3,13 +3,14 @@
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/platform/base/window.h>
 
-#include <exception>
-#include <iostream>
+#include <string>
 
 using namespace ludus::foundation::logging;
 
+// Ludus does not use C++ exceptions (see AGENTS.md); engine code is compiled
+// with -fno-exceptions, so there is nothing to catch here. Fatal conditions are
+// reported through LUDUS_LOG_FATAL and surfaced via the return code.
 int main()
-try
 {
     LogConfig config{};
     config.GlobalLevel = LogLevel::Trace;
@@ -52,14 +53,4 @@ try
 
     LogSystem::Shutdown();
     return 0;
-}
-catch (const std::exception& exception)
-{
-    std::cerr << "Unhandled exception in smoke app: " << exception.what() << '\n';
-    return 1;
-}
-catch (...)
-{
-    std::cerr << "Unhandled non-standard exception in smoke app\n";
-    return 1;
 }

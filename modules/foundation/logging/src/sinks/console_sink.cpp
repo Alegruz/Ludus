@@ -40,21 +40,13 @@ void ConsoleSink::Write(const LogRecordView& record) noexcept
     std::FILE* stream = record.Level >= LogLevel::Warning ? stderr : stdout;
     const bool use_color = stream == stderr ? mStderrIsTty : mStdoutIsTty;
 
-    // FormatConsoleLine can throw only via std::string growth (bad_alloc); if
-    // that happens we simply drop the line rather than propagate into engine
-    // code, honoring the noexcept contract.
-    try
-    {
-        FormatConsoleLine(record, use_color, mScratch);
-        mScratch.push_back('\n');
-        std::fwrite(mScratch.data(), 1, mScratch.size(), stream);
-    }
-    catch (...)
-    {
-        // Best-effort: nothing safe left to do on the console path.
-        // NOLINT(bugprone-empty-catch)
-        (void)0;
-    }
+    // The engine builds with -fno-exceptions, so formatting cannot throw a
+    // catchable exception here; a genuine allocation failure terminates the
+    // process (the log line is the least of the caller's problems at that
+    // point). The reserved scratch buffer keeps ordinary lines allocation-free.
+    FormatConsoleLine(record, use_color, mScratch);
+    mScratch.push_back('\n');
+    std::fwrite(mScratch.data(), 1, mScratch.size(), stream);
 }
 
 void ConsoleSink::Flush() noexcept

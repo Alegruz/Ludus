@@ -1,3 +1,11 @@
+# Ludus coding standards enforcement. See AGENTS.md for the full rules.
+#
+# C++ exceptions are banned project-wide. This is enforced primarily by the
+# compiler: engine code builds with -fno-exceptions (cmake/EngineOptions.cmake),
+# so any throw / try / catch in engine code is a hard compile error. The
+# hicpp-exception-baseclass check below is an additional guard. Do not add
+# exception-based error handling; use status codes / std::optional / return
+# values instead.
 ---
 Checks: >
   -*,
@@ -5,6 +13,7 @@ Checks: >
   -bugprone-chained-comparison,
   performance-*,
   portability-*,
+  hicpp-exception-baseclass,
   modernize-avoid-bind,
   modernize-use-default-member-init,
   modernize-use-nodiscard,

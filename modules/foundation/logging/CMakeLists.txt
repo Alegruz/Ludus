@@ -107,6 +107,7 @@ if(LUDUS_BUILD_TESTS)
             Catch2::Catch2WithMain
     )
     ludus_apply_project_defaults(ludus_foundation_logging_tests)
+    ludus_enable_test_exceptions(ludus_foundation_logging_tests)
 
     add_test(NAME ludus_foundation_logging_tests COMMAND ludus_foundation_logging_tests)
     set_tests_properties(ludus_foundation_logging_tests PROPERTIES LABELS "unit;foundation;logging")
