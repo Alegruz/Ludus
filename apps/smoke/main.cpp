@@ -1,6 +1,8 @@
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/base/version.hpp>
 #include <ludus/foundation/logging/log.hpp>
+#include <ludus/foundation/logging/log_format.hpp>
+#include <ludus/foundation/logging/log_system.hpp>
 #include <ludus/platform/base/window.h>
 
 #include <string>

@@ -5,6 +5,7 @@ import sys
 
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 for mode, expected, message in (
+    ("emergency", 0, "shared Base emergency transport"),
     ("sink", 0, "inside real console sink with logger lock held"),
     ("check", 0, "post-shutdown Check"),
     ("pre-fatal", -signal.SIGABRT, "before logger initialization"),

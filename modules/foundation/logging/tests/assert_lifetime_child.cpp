@@ -1,9 +1,11 @@
 #include "../../base/tests/assert_transport.hpp"
 #include <ludus/foundation/base/assert.hpp>
 #include <ludus/foundation/logging/log.hpp>
+#include <ludus/foundation/logging/log_system.hpp>
 
 #include <cstdio>
 #include <cstring>
+#include <unistd.h>
 
 namespace
 {
@@ -33,6 +35,14 @@ int main(int argc, char** argv)
     {
         return 1;
     }
+    if (std::strcmp(argv[1], "emergency") == 0)
+    {
+        // Prove the new Base report adapter reaches the configured transport,
+        // independently of stdio/stderr and without initializing Logging.
+        (void)::close(STDERR_FILENO);
+        LUDUS_LOG_TEXT(LogCategory{"AssertionTransportTest"}, Warning, "shared Base emergency transport");
+        return 0;
+    }
     if (std::strcmp(argv[1], "pre-fatal") == 0)
     {
         LUDUS_FATAL("before logger initialization");
@@ -53,7 +63,7 @@ int main(int argc, char** argv)
     if (config.EnableConsole)
     {
         gAssertInSink = true;
-        LUDUS_LOG_WARN(LogCategory{"AssertionSinkTest"}, "sink probe");
+        LUDUS_LOG_TEXT(LogCategory{"AssertionSinkTest"}, Warning, "sink probe");
         if (gAssertInSink)
         {
             return 6;

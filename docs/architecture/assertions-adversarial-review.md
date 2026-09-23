@@ -295,3 +295,49 @@ toolchains change. Stderr fallback is still potentially blocking for ordinary
 Logging, and a configured datagram channel is lossy under pressure. An owned
 packet is not durable storage. These limits and the noisy literal-message
 build-cost result prevent treating this test matrix as production certification.
+
+## Integration with main's Logging redesign
+
+Merged `main` at `b73b7f0` into the assertion branch after its build-budget fix.
+The three textual conflicts were in `EngineTargets.cmake`, Base's source list,
+and Logging's emergency adapter. The resolution retains both runtimes and the
+shared per-target exception-policy fix. Assertions still use the explicit SDK
+build-flavor policy rather than deriving it from the CMake configuration.
+
+Logging now calls `base::EmergencyReport`, which retains its report construction
+and reentry guard but sends final bytes through `diagnostics::WriteEmergencyBytes`.
+The configured socket is shared; ordinary emergency stderr fallback can still
+block. Assertions never call this report builder or normal Logging: their owned
+packets and `TryWriteEmergencyBytes`-only transport remain unchanged.
+
+Integration also required migrating tests from the removed `Log()` API and
+including the new `log_system.hpp` lifecycle header. Formatter/regression test
+translation units enable all logging severities so Release tests exercise the
+backend instead of losing their inputs to compile-time stripping. The separate
+`category_tests.cpp` stripping tests remain enabled, and production logging
+thresholds are unchanged. A new subprocess case closes stderr and verifies
+that a pre-initialization Logging emergency report reaches the configured Base
+socket, proving the resolved adapter uses the shared transport.
+
+Validation on the integrated tree (Clang 18):
+
+- `./scripts/test linux-clang-development`, `linux-clang-debug`, and
+  `linux-clang-profile`: 12/12 each.
+- `./scripts/test linux-clang-asan-ubsan`: 11/11.
+- `cmake --build out/build/linux-clang-release-assert-tests -j2` followed by
+  `ctest --test-dir out/build/linux-clang-release-assert-tests --output-on-failure -j2`:
+  12/12, warnings-as-errors enabled.
+- The same build/ctest commands for `out/build/linux-clang-assert-tsan`: 11/11,
+  warnings-as-errors enabled, including the incoming Logging concurrency tests.
+- `./scripts/check linux-clang-development --all`: format and Clang-Tidy passed.
+- `./scripts/install-sdk linux-clang-development`: exported SDK and consumer passed.
+- `CMAKE_BUILD_PARALLEL_LEVEL=6 ./scripts/check-build-budget --profile`: passed;
+  combined frontend 70.9 s, build wall 21.16 s, `log.hpp` average 492 ms and
+  `log_format.hpp` 156 ms. These are local combined-graph measurements, not CI
+  calibration or a controlled comparison with the earlier assertion-only graph.
+- `git diff --cached --check`: passed; no unresolved index entries or conflict markers.
+
+CMake/CTest above used the pinned `out/host-tools/venv/bin/` executables. Native
+socket, death, and sanitizer tests ran outside sandbox restrictions. These are
+local results; CI still needs to validate the resulting merge commit. The
+historical measurements and platform limitations above remain qualified as such.

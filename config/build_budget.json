@@ -24,15 +24,40 @@
     "This is conservative calibration from the pre-optimization CI measurement, not a claim of",
     "post-optimization CI timing. Keep per-header limits unchanged. Evidence and local before/after",
     "measurements: docs/development/build-profiling.md, Assertion test graph budget recalibration.",
+    "That calibration predates main's Logging redesign; current per-header limits follow",
+    "the newer logging_redesign_note below. The combined graph must be remeasured in CI.",
     "Re-measure on the CI runner before changing these budgets again."
+  ],
+  "$logging_redesign_note": [
+    "The logging redesign (.kiro/specs/logging-redesign) split the public logging",
+    "headers so log.hpp/log_format.hpp/log_system.hpp no longer pull <format> or",
+    "<filesystem> and hold to the default budget (log.hpp CI ~491 ms).",
+    "",
+    "A design review of the PIMPLs then reverted them in favor of readable classes",
+    "(see the PR discussion):",
+    "  - file_sink.hpp: stores paths as std::string (UTF-8) instead of",
+    "    std::filesystem::path, so the header needs no <filesystem>/<memory>;",
+    "    <filesystem> stays in file_sink.cpp. Measured ~172 ms self-parse locally,",
+    "    no <format>/<filesystem> pulled -> held to the default, no override.",
+    "  - backend.hpp: a plain class (not PIMPL) whose std::thread / std::mutex /",
+    "    std::condition_variable members and owned std::vector<unique_ptr<>> must",
+    "    be complete in the header; those pull <format> on libstdc++ and cannot be",
+    "    forward-declared. Its ONLY consumer (logger.cpp) already includes all of",
+    "    those headers for its synchronous backend, so a PIMPL would not reduce",
+    "    that TU's real build time (measured: PIMPL vs plain-class logger TU",
+    "    frontend ~907 vs ~900 ms, within noise). Rather than relocate code purely",
+    "    to satisfy the per-header metric, backend.hpp carries a documented",
+    "    override. Its self-parse (~565 ms local, method bodies live in",
+    "    backend.cpp) scales to roughly the pre-PIMPL CI figure (~3022 ms avg);",
+    "    the override below adds the usual ~40% headroom. Re-measure on the CI",
+    "    Build-time budget job summary and tighten if the actual figure is lower;",
+    "    do NOT raise it further to hide a real regression (AGENTS.md / ADR 0005)."
   ],
   "preset": "linux-clang-development",
   "default_header_avg_ms": 2000,
   "total_frontend_seconds": 100,
   "header_overrides_avg_ms": {
-    "modules/foundation/logging/include/ludus/foundation/logging/log.hpp": 3200,
-    "modules/foundation/logging/src/sinks/file_sink.hpp": 2400,
-    "modules/foundation/logging/src/sinks/debugger_sink.hpp": 2000
+    "modules/foundation/logging/src/internal/backend.hpp": 4000
   },
   "ignore_headers": []
 }

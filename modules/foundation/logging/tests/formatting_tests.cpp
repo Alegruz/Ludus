@@ -1,4 +1,13 @@
+// Runtime/formatter tests must exercise every severity in every build flavor.
+// Compile-time stripping is tested separately in category_tests.cpp.
+#if defined(LUDUS_COMPILED_LOG_LEVEL)
+#    undef LUDUS_COMPILED_LOG_LEVEL
+#endif
+#define LUDUS_COMPILED_LOG_LEVEL 0
+
 #include <ludus/foundation/logging/log.hpp>
+#include <ludus/foundation/logging/log_format.hpp>
+#include <ludus/foundation/logging/log_system.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -72,10 +81,11 @@ TEST_CASE("format arguments are substituted into the message", "[logging][format
     config.EnableConsole = false;
     config.EnableDebugger = false;
     config.EnableFile = true;
-    config.Directory = dir;
+    const std::string dir_str = dir.string();
+    config.Directory = dir_str;
     LogSystem::Initialize(config);
 
-    Log(LogLevel::Info, LogFormatTest, std::source_location::current(), "Window created: {}x{}", 1280, 720);
+    LUDUS_LOG_INFO(LogFormatTest, "Window created: {}x{}", 1280, 720);
     LogSystem::Flush();
     LogSystem::Shutdown();
 
@@ -94,10 +104,11 @@ TEST_CASE("source metadata is appended for warnings and above", "[logging][forma
     config.EnableConsole = false;
     config.EnableDebugger = false;
     config.EnableFile = true;
-    config.Directory = dir;
+    const std::string dir_str = dir.string();
+    config.Directory = dir_str;
     LogSystem::Initialize(config);
 
-    Log(LogLevel::Info, LogFormatTest, std::source_location::current(), "info line");
+    LUDUS_LOG_TEXT(LogFormatTest, Info, "info line");
     LUDUS_LOG_WARN(LogFormatTest, "warn line");
     LogSystem::Flush();
     LogSystem::Shutdown();

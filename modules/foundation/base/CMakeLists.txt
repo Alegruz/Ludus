@@ -57,6 +57,7 @@ target_sources(
         src/diagnostics_linux.cpp
         src/internal/diagnostic_platform.hpp
         src/internal/diagnostic_record.hpp
+        src/diagnostic.cpp
         src/internal/version_format.hpp
     PUBLIC
         FILE_SET public_headers
@@ -75,6 +76,7 @@ target_sources(
             "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}/ludus/foundation/base/build_metadata.hpp"
             "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}/ludus/foundation/base/assert_config.hpp"
             include/ludus/foundation/base/pointer.hpp
+            include/ludus/foundation/base/diagnostic.hpp
 )
 
 target_include_directories(
