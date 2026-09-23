@@ -61,6 +61,10 @@ class AptPackageGroup:
     """Represents one prerequisite that can be satisfied by one of several apt packages."""
     purpose: str
     candidates: tuple[str, ...]
+    # Optional groups are installed when a candidate is available but do not fail
+    # onboarding when none is found. Used for prerequisites the build can do
+    # without (e.g. Wayland, which the platform module falls back from).
+    optional: bool = False
 
 
 def find_repo_root(start: Path) -> Path:
@@ -607,6 +611,15 @@ def required_ubuntu_package_groups(root: Path, versions: dict[str, dict[str, str
     major = llvm_major_version(versions)
     groups = [
         AptPackageGroup("CA certificates for HTTPS package downloads", ("ca-certificates",)),
+        # Wayland is the Linux windowing backend for modules/platform. The dev
+        # headers, the xdg-shell protocol XML, and the wayland-scanner code
+        # generator are build-time prerequisites; without them the platform
+        # module cannot be configured. If Wayland is unavailable the platform
+        # module still builds (it falls back to a headless window backend), so
+        # these are best-effort: missing candidates are tolerated below.
+        AptPackageGroup("Wayland client development headers", ("libwayland-dev",), optional=True),
+        AptPackageGroup("Wayland protocol definitions", ("wayland-protocols",), optional=True),
+        AptPackageGroup("Wayland protocol code generator", ("wayland-scanner", "libwayland-bin"), optional=True),
     ]
 
     for status in system_tool_statuses(root, versions):
@@ -641,12 +654,21 @@ def apt_package_has_candidate(root: Path, package: str) -> bool:
 
 
 def resolve_apt_package_groups(root: Path, groups: Sequence[AptPackageGroup]) -> tuple[list[str], list[AptPackageGroup]]:
+    """Resolve each group to an installable package name.
+
+    Returns the selected package names and the list of REQUIRED groups that could
+    not be satisfied. Optional groups that cannot be satisfied are skipped
+    silently (with a note) rather than reported as missing, so a host without
+    those packages still completes onboarding.
+    """
     selected: list[str] = []
     missing: list[AptPackageGroup] = []
     for group in groups:
         package = next((candidate for candidate in group.candidates if apt_package_has_candidate(root, candidate)), "")
         if package:
             selected.append(package)
+        elif group.optional:
+            print(f"Optional prerequisite not available, skipping: {group.purpose} ({' or '.join(group.candidates)})")
         else:
             missing.append(group)
     return selected, missing
