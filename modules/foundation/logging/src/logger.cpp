@@ -39,13 +39,13 @@ struct LoggerState
 
     // Per-category overrides keyed by category id (spec section 8). Read under
     // the shared lock; small and rarely mutated.
-    std::unordered_map<std::uint32_t, LogLevel> CategoryLevels;
+    std::unordered_map<uint32, LogLevel> CategoryLevels;
 
     std::vector<std::unique_ptr<internal::ILogSink>> Sinks;
 
-    std::atomic<std::uint64_t> Submitted{0};
-    std::atomic<std::uint64_t> Written{0};
-    std::atomic<std::uint64_t> Dropped{0};
+    std::atomic<uint64> Submitted{0};
+    std::atomic<uint64> Written{0};
+    std::atomic<uint64> Dropped{0};
 };
 
 LoggerState& state() noexcept

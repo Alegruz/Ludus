@@ -1,6 +1,7 @@
 #pragma once
 
-#include <cstdint>
+#include <ludus/foundation/base/types.h>
+
 #include <string_view>
 
 namespace ludus::foundation::logging
@@ -10,7 +11,7 @@ namespace ludus::foundation::logging
 // ordering is load-bearing: runtime and compile-time filtering both rely on
 // `level >= threshold` comparisons, so the numeric order must never change
 // without updating the filtering logic and the compiled-level macros.
-enum class LogLevel : std::uint8_t
+enum class LogLevel : uint8
 {
     Trace = 0,
     Debug = 1,

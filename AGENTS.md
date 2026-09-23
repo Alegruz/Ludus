@@ -83,6 +83,35 @@ engine code. Discuss such cases in the PR before adding them.
   in `.clang-tidy` (types, functions, and members as used by existing modules).
   Match the surrounding code rather than introducing a new style.
 
+### Primitive types
+
+- Use the Ludus fixed-width aliases from `ludus/foundation/base/types.h`:
+  `uint8` / `uint16` / `uint32` / `uint64`, `int8` / `int16` / `int32` /
+  `int64`, `usize` (sizes/indices), `isize`, and `float32` / `float64`.
+- Do not write `std::uint32_t`, `std::size_t`, raw `float`/`double`, etc. in new
+  code. The aliases are exact aliases of the `<cstdint>` / `<cstddef>` types, so
+  they interoperate with the standard library while keeping widths explicit.
+- `usize` is the size/index type (aliases `std::size_t`) — use it for `sizeof`
+  results, container sizes, and array indices; do not substitute `uint64`.
+
+### Standard library and C runtime usage
+
+The full policy — what is banned, allowed, and slated for future replacement —
+is `docs/decisions/0003-standard-library-usage-policy.md`. Summary for engine
+code (`modules/` and `apps/`):
+
+- **Banned:** `<iostream>` / `std::cout` / `std::cerr` / `std::endl`, C++
+  exceptions, `std::` primitive-type spellings, `<sstream>`, and `printf`-family
+  for diagnostics. Route all diagnostics through `LUDUS_LOG_*`.
+- **Allowed:** `<string_view>`, `<atomic>` / `<mutex>` / `<shared_mutex>`,
+  `<source_location>`, `<chrono>`, `<type_traits>` / `<utility>`, `<new>`; and
+  `<cstdio>` only inside logging sinks / the emergency path. `<cstdint>` /
+  `<cstddef>` only inside `types.h`.
+- **Slated for future replacement (fine to use now, do not spread):**
+  `std::string`, `std::vector`, `std::unordered_map`, `std::format`,
+  `<filesystem>`, `<cstring>`. These become Ludus-owned types once a custom
+  allocator exists; replacing one is its own change, not a drive-by edit.
+
 ### Module and dependency layout
 
 - Engine modules live under `modules/<layer>/<module>/` with public headers in

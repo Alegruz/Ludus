@@ -1,8 +1,8 @@
 #pragma once
 
+#include <ludus/foundation/base/types.h>
 #include <ludus/foundation/logging/level.hpp>
 
-#include <cstdint>
 #include <filesystem>
 
 namespace ludus::foundation::logging
@@ -11,7 +11,7 @@ namespace ludus::foundation::logging
 // Execution strategy for the logging backend. Only Synchronous is implemented
 // in Phase 1; Asynchronous is reserved so the public API and configuration
 // surface do not change when the bounded MPSC backend lands (spec section 11).
-enum class LogMode : std::uint8_t
+enum class LogMode : uint8
 {
     Synchronous,
     Asynchronous,
@@ -34,9 +34,9 @@ struct LogConfig
     // path rather than guessing a Directory.
     std::filesystem::path Directory;
 
-    std::uint32_t FlushIntervalMilliseconds = 1000;
-    std::uint64_t MaxFileSizeBytes = 32ull * 1024ull * 1024ull;
-    std::uint32_t RetainedSessions = 10;
+    uint32 FlushIntervalMilliseconds = 1000;
+    uint64 MaxFileSizeBytes = 32ull * 1024ull * 1024ull;
+    uint32 RetainedSessions = 10;
 };
 
 // Counters describing logging throughput and back-pressure. In synchronous Mode
@@ -44,9 +44,9 @@ struct LogConfig
 // a stable shape across execution Modes (spec section 17).
 struct LogStatistics
 {
-    std::uint64_t Submitted = 0;
-    std::uint64_t Written = 0;
-    std::uint64_t Dropped = 0;
+    uint64 Submitted = 0;
+    uint64 Written = 0;
+    uint64 Dropped = 0;
 };
 
 } // namespace ludus::foundation::logging

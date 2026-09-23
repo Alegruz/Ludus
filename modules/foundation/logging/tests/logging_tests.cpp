@@ -19,6 +19,7 @@
 namespace
 {
 
+using namespace ludus::foundation;
 using namespace ludus::foundation::logging;
 
 inline constexpr LogCategory LogLifecycleTest{"LifecycleTest"};
@@ -56,9 +57,9 @@ std::filesystem::path find_log_file(const std::filesystem::path& dir)
     return {};
 }
 
-std::size_t count_log_files(const std::filesystem::path& dir)
+usize count_log_files(const std::filesystem::path& dir)
 {
-    std::size_t count = 0;
+    usize count = 0;
     for (const auto& entry : std::filesystem::directory_iterator(dir))
     {
         if (entry.is_regular_file() && entry.path().extension() == ".log")
