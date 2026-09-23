@@ -190,7 +190,11 @@ void onGlobalRegistry([[maybe_unused]] void* data,
     LUDUS_LOG_TRACE(LOG_PLATFORM, "Wayland global: name={}, interface={}, version={}", name, interface, version);
 }
 
-void onGlobalRegistryRemove([[maybe_unused]] void* data, [[maybe_unused]] wl_registry* registry, uint32_t name) noexcept
+// `name` is only referenced by a LUDUS_LOG_TRACE call, which compiles out below
+// the Trace level, so mark it maybe_unused to stay warning-clean in every build.
+void onGlobalRegistryRemove([[maybe_unused]] void* data,
+                            [[maybe_unused]] wl_registry* registry,
+                            [[maybe_unused]] uint32_t name) noexcept
 {
     LUDUS_LOG_TRACE(LOG_PLATFORM, "Wayland global removed: name={}", name);
 }
@@ -271,10 +275,13 @@ void onXdgSurfaceConfigure(void* data, [[maybe_unused]] xdg_surface* xdgSurface,
 
 // Signature is dictated by the Wayland xdg_toplevel listener; the adjacent
 // width/height parameters cannot be reordered.
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+// Signature is dictated by the Wayland xdg_toplevel listener; the adjacent
+// width/height parameters cannot be reordered. The suppression must sit on the
+// parameter lines themselves (a leading NOLINTNEXTLINE does not cover a
+// multi-line signature, since the diagnostic points at the parameters).
 void onXdgToplevelConfigure(void* data,
                             [[maybe_unused]] xdg_toplevel* xdgToplevel,
-                            [[maybe_unused]] int32_t width,
+                            [[maybe_unused]] int32_t width, // NOLINT(bugprone-easily-swappable-parameters)
                             [[maybe_unused]] int32_t height,
                             [[maybe_unused]] wl_array* states) noexcept
 {
@@ -300,10 +307,9 @@ void onXdgToplevelClose(void* data, [[maybe_unused]] xdg_toplevel* xdgToplevel) 
 
 // Signature is dictated by the Wayland xdg_toplevel listener; the adjacent
 // width/height parameters cannot be reordered.
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 void onXdgToplevelConfigureBounds([[maybe_unused]] void* data,
                                   [[maybe_unused]] xdg_toplevel* xdgToplevel,
-                                  [[maybe_unused]] int32_t width,
+                                  [[maybe_unused]] int32_t width, // NOLINT(bugprone-easily-swappable-parameters)
                                   [[maybe_unused]] int32_t height) noexcept
 {
 }

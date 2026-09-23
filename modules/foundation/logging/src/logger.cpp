@@ -219,10 +219,10 @@ LogStatistics LogSystem::Statistics()
 namespace detail
 {
 
-void DispatchFormatted(LogLevel level,
-                       LogCategory category,
-                       const std::source_location& location,
-                       std::string_view formatted_message)
+void DispatchMessage(LogLevel level,
+                     LogCategory category,
+                     const std::source_location& location,
+                     std::string_view formatted_message)
 {
     LoggerState& s = state();
     s.Submitted.fetch_add(1, std::memory_order_relaxed);
@@ -276,6 +276,21 @@ void DispatchFormatted(LogLevel level,
     {
         internal::EmergencyLog(level, category, formatted_message, location);
     }
+}
+
+void VLog(LogLevel level,
+          LogCategory category,
+          const std::source_location& location,
+          std::string_view format,
+          std::format_args args)
+{
+    // std::vformat (and the entire <format> instantiation) lives here, compiled
+    // exactly once for the whole engine rather than in every logging TU. Phase 1
+    // accepts the temporary std::string allocation for messages with arguments;
+    // a thread-local scratch buffer is a later performance-pass concern
+    // (spec section 16).
+    const std::string formatted = std::vformat(format, args);
+    DispatchMessage(level, category, location, formatted);
 }
 
 } // namespace detail
