@@ -13,11 +13,23 @@
     "track small run-to-run noise. Raise a budget only with a profile-build measurement and",
     "a note in the PR."
   ],
+  "$calibration": [
+    "Budgets are calibrated to the GitHub Actions ubuntu-24.04 runner (the host",
+    "that enforces this gate), which is ~2x slower than a typical dev laptop, with",
+    "~40% headroom over the observed CI baseline so the gate catches a real",
+    "regression (a heavy include entering a header) without flapping on runner",
+    "noise. Baseline CI averages that informed these numbers: log.hpp ~2240 ms,",
+    "file_sink.hpp ~1660 ms, debugger_sink.hpp ~1290 ms, frontend ~45 s.",
+    "Re-measure on the CI runner (the Build-time budget job summary) before",
+    "changing these; do not calibrate from a fast local machine."
+  ],
   "preset": "linux-clang-development",
-  "default_header_avg_ms": 900,
-  "total_frontend_seconds": 45,
+  "default_header_avg_ms": 2000,
+  "total_frontend_seconds": 65,
   "header_overrides_avg_ms": {
-    "modules/foundation/logging/include/ludus/foundation/logging/log.hpp": 2000
+    "modules/foundation/logging/include/ludus/foundation/logging/log.hpp": 3200,
+    "modules/foundation/logging/src/sinks/file_sink.hpp": 2400,
+    "modules/foundation/logging/src/sinks/debugger_sink.hpp": 2000
   },
   "ignore_headers": []
 }
