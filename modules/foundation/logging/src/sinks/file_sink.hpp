@@ -4,13 +4,17 @@
 
 #include "internal/sink.hpp"
 
+#include <cstdio>
+#include <string>
 #include <string_view>
 
-// This private header is kept free of <filesystem>/<memory>/<string> so it stays
-// within the build-time budget: those headers (especially <filesystem>, and
-// <memory> which drags in <format> on libstdc++) are heavy, and file_sink.hpp is
-// included by more than one TU. All the filesystem/session state lives behind a
-// PIMPL in file_sink.cpp (ADR 0004/0005; requirements R21).
+// This private header stores its path state as std::string (UTF-8) rather than
+// std::filesystem::path, so it needs neither <filesystem> nor <memory> (the
+// latter drags in <format> on libstdc++). The actual filesystem operations use
+// std::filesystem inside file_sink.cpp, below this boundary. This keeps the
+// header a plain, readable class (no PIMPL) that stays within the build-time
+// budget (ADR 0004/0005; requirements R21). Paths are already round-tripped to
+// UTF-8 for fopen, so std::string members change no behavior.
 
 namespace ludus::foundation::logging::internal
 {
@@ -40,10 +44,16 @@ public:
     // Opens a fresh, exclusively-created session file under config.Directory.
     // Returns nullptr if the directory cannot be created or no unique file could
     // be created after bounded retries, so the caller degrades gracefully. The
-    // caller owns the returned pointer (wraps it in a unique_ptr).
+    // caller owns the returned pointer (logger.cpp wraps it in a unique_ptr);
+    // a raw owning pointer keeps <memory> out of this header.
     static FileSink* Create(const FileSinkConfig& config);
 
     ~FileSink() override;
+
+    FileSink(const FileSink&) = delete;
+    FileSink& operator=(const FileSink&) = delete;
+    FileSink(FileSink&&) = delete;
+    FileSink& operator=(FileSink&&) = delete;
 
     SinkStatus Write(const LogRecordView& record) noexcept override;
     SinkStatus Flush() noexcept override;
@@ -51,15 +61,36 @@ public:
 
     // Exposed for tests: the absolute path of the currently active file, as a
     // UTF-8 string (avoids exposing std::filesystem::path in the header).
-    [[nodiscard]] std::string_view CurrentPathUtf8() const noexcept;
+    [[nodiscard]] std::string_view CurrentPathUtf8() const noexcept
+    {
+        return mActivePathUtf8;
+    }
 
-    [[nodiscard]] bool Healthy() const noexcept;
+    [[nodiscard]] bool Healthy() const noexcept
+    {
+        return mHealthy;
+    }
 
 private:
-    struct Impl;
-    explicit FileSink(Impl* impl) noexcept : mImpl(impl) {}
+    // Constructed by Create() with an already-open file handle and the UTF-8
+    // paths of the session's first segment.
+    FileSink(std::FILE* file, std::string directoryUtf8, std::string basePathUtf8, const FileSinkConfig& config);
 
-    Impl* mImpl = nullptr; // owned; freed in the destructor
+    // Rotate to the next numbered segment when the incoming write would exceed
+    // the per-segment cap. On failure marks the sink unhealthy and stops file
+    // output rather than silently exceeding the budget.
+    void RotateIfNeeded(usize incomingBytes) noexcept;
+
+    std::FILE* mFile = nullptr;
+    std::string mDirectoryUtf8;
+    std::string mBasePathUtf8; // first segment of the session (no rotation suffix)
+    std::string mActivePathUtf8;
+    uint64 mMaxFileSizeBytes = 0;
+    uint64 mBytesWritten = 0;        // bytes in the current segment
+    uint64 mSessionBytesWritten = 0; // bytes across all segments this session
+    uint32 mRotationIndex = 0;
+    bool mHealthy = true;
+    std::string mScratch;
 };
 
 } // namespace ludus::foundation::logging::internal

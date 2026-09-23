@@ -418,12 +418,8 @@ LogInitResult LogSystem::Initialize(const LogConfig& config)
         // sinks for the async session (requirements R36). The synchronous timed
         // flush thread is NOT started; the worker owns the flush cadence.
         s.Async = std::make_unique<internal::AsyncBackend>();
-        for (auto& sink : s.Sinks)
-        {
-            s.Async->AdoptSink(sink.release()); // transfer ownership to the worker
-        }
+        s.Async->Start(std::move(s.Sinks), config.FlushIntervalMilliseconds);
         s.Sinks.clear();
-        s.Async->Start(config.FlushIntervalMilliseconds);
     }
 
     // Publish Accepting last, so ShouldLog/dispatch only admit once sinks exist.

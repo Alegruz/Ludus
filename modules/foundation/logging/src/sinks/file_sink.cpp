@@ -313,134 +313,6 @@ std::FILE* exclusiveCreate(const std::filesystem::path& path) noexcept
 
 } // namespace
 
-// All filesystem/session state lives here so file_sink.hpp needs no
-// <filesystem>/<memory>/<string> (keeps the header within the build budget).
-struct FileSink::Impl
-{
-    std::FILE* file = nullptr;
-    std::filesystem::path directory;
-    std::filesystem::path basePath; // first segment of the session
-    std::filesystem::path activePath;
-    std::string activePathUtf8;
-    uint64 maxFileSizeBytes = 0;
-    uint64 bytesWritten = 0;        // bytes in the current segment
-    uint64 sessionBytesWritten = 0; // bytes across all segments this session
-    uint32 rotationIndex = 0;
-    bool healthy = true;
-    std::string scratch;
-
-    Impl(std::FILE* f, std::filesystem::path dir, std::filesystem::path base, const FileSinkConfig& config)
-        : file(f), directory(std::move(dir)), basePath(std::move(base)), activePath(basePath),
-          activePathUtf8(activePath.string()), maxFileSizeBytes(config.MaxFileSizeBytes)
-    {
-        scratch.reserve(256);
-    }
-
-    ~Impl()
-    {
-        if (file != nullptr)
-        {
-            std::fflush(file);
-            std::fclose(file);
-            file = nullptr;
-        }
-    }
-
-    void RotateIfNeeded(usize incomingBytes) noexcept
-    {
-        if (maxFileSizeBytes == 0 || file == nullptr)
-        {
-            return;
-        }
-        if (bytesWritten + incomingBytes <= maxFileSizeBytes)
-        {
-            return;
-        }
-
-        ++rotationIndex;
-        std::filesystem::path rotated = basePath;
-        rotated.replace_extension(); // drop ".log"
-        const std::filesystem::path next = std::format("{}.{}.log", rotated.string(), rotationIndex);
-
-        // Open the replacement BEFORE relinquishing the old handle so a failed
-        // rotation leaves the current segment usable (requirements R44).
-        std::FILE* newFile = exclusiveCreate(next);
-        if (newFile == nullptr)
-        {
-            healthy = false;
-            return;
-        }
-
-        std::fflush(file);
-        std::fclose(file);
-        file = newFile;
-        activePath = next;
-        activePathUtf8 = activePath.string();
-        bytesWritten = 0;
-    }
-
-    SinkStatus Write(const LogRecordView& record) noexcept
-    {
-        if (file == nullptr)
-        {
-            return SinkStatus::Failed;
-        }
-        FormatConsoleLine(record, /*use_color=*/false, scratch);
-        scratch.push_back('\n');
-
-        RotateIfNeeded(scratch.size());
-        if (file == nullptr)
-        {
-            healthy = false;
-            return SinkStatus::Failed;
-        }
-
-        const usize n = std::fwrite(scratch.data(), 1, scratch.size(), file);
-        bytesWritten += n;
-        sessionBytesWritten += n;
-        if (n != scratch.size())
-        {
-            healthy = false;
-            return SinkStatus::Failed;
-        }
-        return SinkStatus::Ok;
-    }
-
-    SinkStatus Flush() noexcept
-    {
-        if (file == nullptr)
-        {
-            return SinkStatus::Failed;
-        }
-        return std::fflush(file) == 0 ? SinkStatus::Ok : SinkStatus::Failed;
-    }
-
-    SinkStatus FlushDurable() noexcept
-    {
-        if (file == nullptr)
-        {
-            return SinkStatus::Failed;
-        }
-        if (std::fflush(file) != 0)
-        {
-            return SinkStatus::Failed;
-        }
-        // fflush drains C-library buffering only; a durable flush needs an OS
-        // sync of the file's storage (requirements R46). This can stall and is
-        // only issued on an explicit Durable flush request.
-#if defined(_WIN32)
-        return SinkStatus::Ok; // FlushFileBuffers wiring is a platform-adapter task
-#else
-        const int fd = ::fileno(file);
-        if (fd < 0)
-        {
-            return SinkStatus::Failed;
-        }
-        return ::fdatasync(fd) == 0 ? SinkStatus::Ok : SinkStatus::Failed;
-#endif
-    }
-};
-
 FileSink* FileSink::Create(const FileSinkConfig& config)
 {
     if (config.Directory.empty())
@@ -479,37 +351,120 @@ FileSink* FileSink::Create(const FileSinkConfig& config)
     const std::string active_key = sessionBaseKey(base_path.filename().string());
     pruneSessions(directory, active_key, limits);
 
-    return new FileSink(new Impl(file, std::move(directory), std::move(base_path), config));
+    // Store the paths as UTF-8 strings; the header carries no <filesystem>.
+    return new FileSink(file, directory.string(), base_path.string(), config);
+}
+
+FileSink::FileSink(std::FILE* file, std::string directoryUtf8, std::string basePathUtf8, const FileSinkConfig& config)
+    : mFile(file), mDirectoryUtf8(std::move(directoryUtf8)), mBasePathUtf8(std::move(basePathUtf8)),
+      mActivePathUtf8(mBasePathUtf8), mMaxFileSizeBytes(config.MaxFileSizeBytes)
+{
+    mScratch.reserve(256);
 }
 
 FileSink::~FileSink()
 {
-    delete mImpl;
+    if (mFile != nullptr)
+    {
+        std::fflush(mFile);
+        std::fclose(mFile);
+        mFile = nullptr;
+    }
+}
+
+void FileSink::RotateIfNeeded(usize incomingBytes) noexcept
+{
+    if (mMaxFileSizeBytes == 0 || mFile == nullptr)
+    {
+        return;
+    }
+    if (mBytesWritten + incomingBytes <= mMaxFileSizeBytes)
+    {
+        return;
+    }
+
+    ++mRotationIndex;
+    // Reconstruct the base path locally to compute the next numbered segment.
+    // mBasePathUtf8 ends in ".log"; insert ".<n>" before the extension.
+    std::filesystem::path rotated{mBasePathUtf8};
+    rotated.replace_extension(); // drop ".log"
+    const std::filesystem::path next = std::format("{}.{}.log", rotated.string(), mRotationIndex);
+
+    // Open the replacement BEFORE relinquishing the old handle so a failed
+    // rotation leaves the current segment usable (requirements R44).
+    std::FILE* newFile = exclusiveCreate(next);
+    if (newFile == nullptr)
+    {
+        mHealthy = false;
+        return;
+    }
+
+    std::fflush(mFile);
+    std::fclose(mFile);
+    mFile = newFile;
+    mActivePathUtf8 = next.string();
+    mBytesWritten = 0;
 }
 
 SinkStatus FileSink::Write(const LogRecordView& record) noexcept
 {
-    return mImpl->Write(record);
+    if (mFile == nullptr)
+    {
+        return SinkStatus::Failed;
+    }
+    FormatConsoleLine(record, /*use_color=*/false, mScratch);
+    mScratch.push_back('\n');
+
+    RotateIfNeeded(mScratch.size());
+    if (mFile == nullptr)
+    {
+        mHealthy = false;
+        return SinkStatus::Failed;
+    }
+
+    const usize n = std::fwrite(mScratch.data(), 1, mScratch.size(), mFile);
+    mBytesWritten += n;
+    mSessionBytesWritten += n;
+    if (n != mScratch.size())
+    {
+        mHealthy = false;
+        return SinkStatus::Failed;
+    }
+    return SinkStatus::Ok;
 }
 
 SinkStatus FileSink::Flush() noexcept
 {
-    return mImpl->Flush();
+    if (mFile == nullptr)
+    {
+        return SinkStatus::Failed;
+    }
+    return std::fflush(mFile) == 0 ? SinkStatus::Ok : SinkStatus::Failed;
 }
 
 SinkStatus FileSink::FlushDurable() noexcept
 {
-    return mImpl->FlushDurable();
-}
-
-std::string_view FileSink::CurrentPathUtf8() const noexcept
-{
-    return mImpl->activePathUtf8;
-}
-
-bool FileSink::Healthy() const noexcept
-{
-    return mImpl->healthy;
+    if (mFile == nullptr)
+    {
+        return SinkStatus::Failed;
+    }
+    if (std::fflush(mFile) != 0)
+    {
+        return SinkStatus::Failed;
+    }
+    // fflush drains C-library buffering only; a durable flush needs an OS sync of
+    // the file's storage (requirements R46). This can stall and is only issued on
+    // an explicit Durable flush request.
+#if defined(_WIN32)
+    return SinkStatus::Ok; // FlushFileBuffers wiring is a platform-adapter task
+#else
+    const int fd = ::fileno(mFile);
+    if (fd < 0)
+    {
+        return SinkStatus::Failed;
+    }
+    return ::fdatasync(fd) == 0 ? SinkStatus::Ok : SinkStatus::Failed;
+#endif
 }
 
 } // namespace ludus::foundation::logging::internal
