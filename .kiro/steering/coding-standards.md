@@ -27,6 +27,19 @@ Ludus does not use C++ exceptions.
   `ludus_enable_test_exceptions()` in `cmake/EngineTargets.cmake`. Never apply
   it to engine libraries or applications.
 
+## Primitive types (fixed-width aliases)
+
+Use the Ludus aliases from `ludus/foundation/base/types.h` instead of the `std::`
+spellings or raw `float`/`double`:
+
+- `uint8` / `uint16` / `uint32` / `uint64`, `int8` / `int16` / `int32` / `int64`
+- `usize` (sizes, indices, `sizeof` results; aliases `std::size_t`), `isize`
+- `f32` / `f64`
+
+Do not write `std::uint32_t`, `std::size_t`, etc. in new code. These are exact
+aliases of the `<cstdint>` / `<cstddef>` types, so they stay interoperable with
+the standard library while keeping widths explicit.
+
 ## Other standing rules
 
 - C++23, no compiler extensions; pinned Clang/LLVM 18 toolchain.

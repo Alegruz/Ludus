@@ -2,7 +2,8 @@
 
 #include "internal/log_record.hpp"
 
-#include <cstdint>
+#include <ludus/foundation/base/types.h>
+
 #include <string>
 #include <string_view>
 
@@ -17,7 +18,7 @@ namespace ludus::foundation::logging::internal
 // Format the wall-clock timestamp (ns since epoch) as "HH:MM:SS.mmm" into `out`,
 // which must have room for at least 12 characters plus a terminator. Returns the
 // number of characters written. Allocation-free.
-std::size_t FormatTimestamp(std::uint64_t timestamp_ns, char* out, std::size_t capacity) noexcept;
+usize FormatTimestamp(uint64 timestamp_ns, char* out, usize capacity) noexcept;
 
 // Render one record as a full console/file line (without trailing newline) into
 // `buffer`, reusing its capacity to avoid per-call allocation where possible.
@@ -35,9 +36,9 @@ void FormatConsoleLine(const LogRecordView& record, bool use_color, std::string&
 
 // The current thread's stable numeric id (a small monotonic counter, not the OS
 // tid, so log output is stable and readable).
-[[nodiscard]] std::uint32_t GetCurrentThreadId() noexcept;
+[[nodiscard]] uint32 GetCurrentThreadId() noexcept;
 
 // Wall-clock nanoseconds since the Unix epoch.
-[[nodiscard]] std::uint64_t GetNowNanoseconds() noexcept;
+[[nodiscard]] uint64 GetNowNanoseconds() noexcept;
 
 } // namespace ludus::foundation::logging::internal

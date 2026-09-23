@@ -83,6 +83,17 @@ engine code. Discuss such cases in the PR before adding them.
   in `.clang-tidy` (types, functions, and members as used by existing modules).
   Match the surrounding code rather than introducing a new style.
 
+### Primitive types
+
+- Use the Ludus fixed-width aliases from `ludus/foundation/base/types.h`:
+  `uint8` / `uint16` / `uint32` / `uint64`, `int8` / `int16` / `int32` /
+  `int64`, `usize` (sizes/indices), `isize`, and `f32` / `f64`.
+- Do not write `std::uint32_t`, `std::size_t`, raw `float`/`double`, etc. in new
+  code. The aliases are exact aliases of the `<cstdint>` / `<cstddef>` types, so
+  they interoperate with the standard library while keeping widths explicit.
+- `usize` is the size/index type (aliases `std::size_t`) — use it for `sizeof`
+  results, container sizes, and array indices; do not substitute `uint64`.
+
 ### Module and dependency layout
 
 - Engine modules live under `modules/<layer>/<module>/` with public headers in

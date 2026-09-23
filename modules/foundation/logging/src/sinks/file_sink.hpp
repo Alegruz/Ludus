@@ -1,10 +1,10 @@
 #pragma once
 
+#include <ludus/foundation/base/types.h>
 #include <ludus/foundation/logging/config.hpp>
 
 #include "internal/sink.hpp"
 
-#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <memory>
@@ -40,17 +40,17 @@ private:
     FileSink(std::FILE* file,
              std::filesystem::path directory,
              std::filesystem::path base_path,
-             std::uint64_t maxFileSizeBytes);
+             uint64 maxFileSizeBytes);
 
-    void rotateIfNeeded(std::size_t incoming_bytes) noexcept;
+    void rotateIfNeeded(usize incoming_bytes) noexcept;
 
     std::FILE* mFile = nullptr;
     std::filesystem::path mDirectory;
     std::filesystem::path mBasePath; // first file of the session (no rotation suffix)
     std::filesystem::path mActivePath;
-    std::uint64_t mMaxFileSizeBytes = 0;
-    std::uint64_t mBytesWritten = 0;
-    std::uint32_t mRotationIndex = 0;
+    uint64 mMaxFileSizeBytes = 0;
+    uint64 mBytesWritten = 0;
+    uint32 mRotationIndex = 0;
     std::string mScratch;
 };
 
