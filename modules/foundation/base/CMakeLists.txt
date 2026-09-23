@@ -114,8 +114,15 @@ if(LUDUS_BUILD_TESTS)
 
     find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
     find_package(Threads REQUIRED)
-    add_executable(ludus_assert_child tests/assert_child.cpp)
-    target_include_directories(ludus_assert_child PRIVATE src)
+    # Both backends use identical driver code and compiler policy. Compile its
+    # concurrency-heavy includes once, but keep each runtime in its own binary.
+    # Do not link Base here: the fake executable provides a separate runtime.
+    add_library(ludus_assert_test_driver OBJECT tests/assert_child.cpp)
+    target_include_directories(ludus_assert_test_driver PRIVATE src include "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}")
+    target_link_libraries(ludus_assert_test_driver PRIVATE Threads::Threads)
+    ludus_apply_project_defaults(ludus_assert_test_driver)
+
+    add_executable(ludus_assert_child $<TARGET_OBJECTS:ludus_assert_test_driver>)
     target_link_libraries(ludus_assert_child PRIVATE Ludus::FoundationBase Threads::Threads)
     ludus_apply_project_defaults(ludus_assert_child)
 
@@ -146,7 +153,7 @@ if(LUDUS_BUILD_TESTS)
             "$<TARGET_FILE:ludus_assert_allocation_child>")
     set_tests_properties(ludus_assert_blocked_output PROPERTIES LABELS "foundation;assert-death" TIMEOUT 30)
 
-    add_executable(ludus_assert_fake_child tests/assert_child.cpp tests/assert_platform_fake.cpp
+    add_executable(ludus_assert_fake_child $<TARGET_OBJECTS:ludus_assert_test_driver> tests/assert_platform_fake.cpp
         src/assert.cpp src/diagnostic_output.cpp src/diagnostic_format.cpp)
     target_include_directories(ludus_assert_fake_child PRIVATE src include "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}")
     target_link_libraries(ludus_assert_fake_child PRIVATE Threads::Threads)
