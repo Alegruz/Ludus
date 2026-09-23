@@ -64,6 +64,19 @@
       }
     },
     {
+      "name": "linux-clang-profile",
+      "displayName": "Linux Clang Profile",
+      "inherits": "linux-clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/linux-clang-profile/conan_toolchain.cmake",
+        "LUDUS_BUILD_TESTS": "ON",
+        "LUDUS_ENABLE_ASAN": "OFF",
+        "LUDUS_ENABLE_UBSAN": "OFF",
+        "LUDUS_COMPILED_LOG_LEVEL": "2"
+      }
+    },
+    {
       "name": "linux-clang-release",
       "displayName": "Linux Clang Release",
       "inherits": "linux-clang-base",
@@ -90,6 +103,10 @@
       "configurePreset": "linux-clang-asan-ubsan"
     },
     {
+      "name": "linux-clang-profile",
+      "configurePreset": "linux-clang-profile"
+    },
+    {
       "name": "linux-clang-release",
       "configurePreset": "linux-clang-release"
     }
@@ -112,6 +129,13 @@
     {
       "name": "linux-clang-asan-ubsan",
       "configurePreset": "linux-clang-asan-ubsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-clang-profile",
+      "configurePreset": "linux-clang-profile",
       "output": {
         "outputOnFailure": true
       }

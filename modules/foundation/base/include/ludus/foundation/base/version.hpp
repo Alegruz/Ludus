@@ -2,7 +2,8 @@
 
 #include <string_view>
 
-namespace ludus::foundation {
+namespace ludus::foundation
+{
 
 struct Version
 {

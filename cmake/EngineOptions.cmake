@@ -15,6 +15,18 @@ function(ludus_configure_project_options target_name)
         target_link_options(${target_name} INTERFACE -fuse-ld=lld)
     endif()
 
+    # Ludus does not use C++ exceptions (see AGENTS.md and the steering rule
+    # "no-exceptions"). Compile them out entirely so error handling stays
+    # explicit (status/optional/return values) and so any accidental throw /
+    # try / catch fails to compile rather than slipping through review. Test
+    # executables re-enable exceptions via ludus_enable_test_exceptions()
+    # because Catch2 reports failures by throwing.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+        target_compile_options(${target_name} INTERFACE -fno-exceptions)
+    elseif(MSVC)
+        target_compile_options(${target_name} INTERFACE /EHs-c-)
+    endif()
+
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
         target_compile_options(${target_name} INTERFACE $<$<CXX_COMPILER_ID:Clang,GNU>:-UNDEBUG>)
     endif()
