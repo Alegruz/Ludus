@@ -1,0 +1,54 @@
+[
+  {
+    "header": "empty",
+    "median_ms": 92.16,
+    "runs_ms": [
+      101.99,
+      100.51,
+      83.32,
+      91.93,
+      92.16
+    ],
+    "preprocessed_bytes": 188,
+    "preprocessed_lines": 8
+  },
+  {
+    "header": "category",
+    "median_ms": 308.2,
+    "runs_ms": [
+      587.85,
+      367.98,
+      308.2,
+      294.19,
+      283.99
+    ],
+    "preprocessed_bytes": 520395,
+    "preprocessed_lines": 19786
+  },
+  {
+    "header": "config",
+    "median_ms": 1631.63,
+    "runs_ms": [
+      1631.63,
+      1071.75,
+      1554.85,
+      2096.21,
+      3497.26
+    ],
+    "preprocessed_bytes": 1661168,
+    "preprocessed_lines": 61704
+  },
+  {
+    "header": "log",
+    "median_ms": 1958.51,
+    "runs_ms": [
+      2998.93,
+      1806.56,
+      1987.05,
+      1958.51,
+      1707.77
+    ],
+    "preprocessed_bytes": 1928451,
+    "preprocessed_lines": 71304
+  }
+]

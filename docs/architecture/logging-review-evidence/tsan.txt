@@ -1,0 +1,64 @@
+==================
+WARNING: ThreadSanitizer: data race (pid=7)
+  Write of size 8 at 0x7230000000a8 by thread T2 (mutexes: read M0):
+    #0 std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_M_length(unsigned long) /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/basic_string.h:218:26 (probe-tsan+0xf1b95) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #1 std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_M_set_length(unsigned long) /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/basic_string.h:256:2 (probe-tsan+0xf1b95)
+    #2 std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::clear() /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/basic_string.h:1212:9 (probe-tsan+0xf1b95)
+    #3 ludus::foundation::logging::internal::FormatConsoleLine(ludus::foundation::logging::internal::LogRecordView const&, bool, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&) /home/alegruz/workspace/Ludus/modules/foundation/logging/src/formatter.cpp:106:12 (probe-tsan+0xf1b95)
+    #4 ludus::foundation::logging::internal::FileSink::Write(ludus::foundation::logging::internal::LogRecordView const&) /home/alegruz/workspace/Ludus/modules/foundation/logging/src/sinks/file_sink.cpp:199:5 (probe-tsan+0xf57a9) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #5 ludus::foundation::logging::detail::DispatchMessage(ludus::foundation::logging::LogLevel, ludus::foundation::logging::LogCategory, std::source_location const&, std::basic_string_view<char, std::char_traits<char>>) /home/alegruz/workspace/Ludus/modules/foundation/logging/src/logger.cpp:257:19 (probe-tsan+0xe521f) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #6 ludus::foundation::logging::detail::VLog(ludus::foundation::logging::LogLevel, ludus::foundation::logging::LogCategory, std::source_location const&, std::basic_string_view<char, std::char_traits<char>>, std::basic_format_args<std::basic_format_context<std::__format::_Sink_iter<char>, char>>) /home/alegruz/workspace/Ludus/modules/foundation/logging/src/logger.cpp:293:5 (probe-tsan+0xe564e) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #7 void ludus::foundation::logging::Log<unsigned int const&, unsigned int&>(ludus::foundation::logging::LogLevel, ludus::foundation::logging::LogCategory, std::source_location const&, std::basic_format_string<char, std::type_identity<unsigned int const&>::type, std::type_identity<unsigned int&>::type>, unsigned int const&, unsigned int&) /home/alegruz/workspace/Ludus/modules/foundation/logging/include/ludus/foundation/logging/log.hpp:197:9 (probe-tsan+0xe354d) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #8 main::$_0::operator()() const /tmp/ludus-logging-review/probe.cpp:25:21 (probe-tsan+0xe354d)
+    #9 void std::__invoke_impl<void, main::$_0>(std::__invoke_other, main::$_0&&) /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/invoke.h:61:14 (probe-tsan+0xe354d)
+    #10 std::__invoke_result<main::$_0>::type std::__invoke<main::$_0>(main::$_0&&) /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/invoke.h:96:14 (probe-tsan+0xe354d)
+    #11 void std::thread::_Invoker<std::tuple<main::$_0>>::_M_invoke<0ul>(std::_Index_tuple<0ul>) /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/std_thread.h:292:13 (probe-tsan+0xe354d)
+    #12 std::thread::_Invoker<std::tuple<main::$_0>>::operator()() /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/std_thread.h:299:11 (probe-tsan+0xe354d)
+    #13 std::thread::_State_impl<std::thread::_Invoker<std::tuple<main::$_0>>>::_M_run() /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/std_thread.h:244:13 (probe-tsan+0xe354d)
+    #14 <null> <null> (libstdc++.so.6+0xecdb3) (BuildId: 753c6c8608b61d4e67be8f0c890e03e0aa046b8b)
+
+  Previous write of size 8 at 0x7230000000a8 by thread T1 (mutexes: read M0):
+    #0 std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_M_length(unsigned long) /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/basic_string.h:218:26 (probe-tsan+0xf1b95) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #1 std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_M_set_length(unsigned long) /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/basic_string.h:256:2 (probe-tsan+0xf1b95)
+    #2 std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::clear() /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/basic_string.h:1212:9 (probe-tsan+0xf1b95)
+    #3 ludus::foundation::logging::internal::FormatConsoleLine(ludus::foundation::logging::internal::LogRecordView const&, bool, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&) /home/alegruz/workspace/Ludus/modules/foundation/logging/src/formatter.cpp:106:12 (probe-tsan+0xf1b95)
+    #4 ludus::foundation::logging::internal::FileSink::Write(ludus::foundation::logging::internal::LogRecordView const&) /home/alegruz/workspace/Ludus/modules/foundation/logging/src/sinks/file_sink.cpp:199:5 (probe-tsan+0xf57a9) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #5 ludus::foundation::logging::detail::DispatchMessage(ludus::foundation::logging::LogLevel, ludus::foundation::logging::LogCategory, std::source_location const&, std::basic_string_view<char, std::char_traits<char>>) /home/alegruz/workspace/Ludus/modules/foundation/logging/src/logger.cpp:257:19 (probe-tsan+0xe521f) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #6 ludus::foundation::logging::detail::VLog(ludus::foundation::logging::LogLevel, ludus::foundation::logging::LogCategory, std::source_location const&, std::basic_string_view<char, std::char_traits<char>>, std::basic_format_args<std::basic_format_context<std::__format::_Sink_iter<char>, char>>) /home/alegruz/workspace/Ludus/modules/foundation/logging/src/logger.cpp:293:5 (probe-tsan+0xe564e) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #7 void ludus::foundation::logging::Log<unsigned int const&, unsigned int&>(ludus::foundation::logging::LogLevel, ludus::foundation::logging::LogCategory, std::source_location const&, std::basic_format_string<char, std::type_identity<unsigned int const&>::type, std::type_identity<unsigned int&>::type>, unsigned int const&, unsigned int&) /home/alegruz/workspace/Ludus/modules/foundation/logging/include/ludus/foundation/logging/log.hpp:197:9 (probe-tsan+0xe354d) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #8 main::$_0::operator()() const /tmp/ludus-logging-review/probe.cpp:25:21 (probe-tsan+0xe354d)
+    #9 void std::__invoke_impl<void, main::$_0>(std::__invoke_other, main::$_0&&) /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/invoke.h:61:14 (probe-tsan+0xe354d)
+    #10 std::__invoke_result<main::$_0>::type std::__invoke<main::$_0>(main::$_0&&) /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/invoke.h:96:14 (probe-tsan+0xe354d)
+    #11 void std::thread::_Invoker<std::tuple<main::$_0>>::_M_invoke<0ul>(std::_Index_tuple<0ul>) /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/std_thread.h:292:13 (probe-tsan+0xe354d)
+    #12 std::thread::_Invoker<std::tuple<main::$_0>>::operator()() /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/std_thread.h:299:11 (probe-tsan+0xe354d)
+    #13 std::thread::_State_impl<std::thread::_Invoker<std::tuple<main::$_0>>>::_M_run() /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/std_thread.h:244:13 (probe-tsan+0xe354d)
+    #14 <null> <null> (libstdc++.so.6+0xecdb3) (BuildId: 753c6c8608b61d4e67be8f0c890e03e0aa046b8b)
+
+  Location is heap block of size 192 at 0x723000000000 allocated by main thread:
+    #0 operator new(unsigned long) <null> (probe-tsan+0xe1ebb) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #1 ludus::foundation::logging::internal::FileSink::Create(ludus::foundation::logging::LogConfig const&) /home/alegruz/workspace/Ludus/modules/foundation/logging/src/sinks/file_sink.cpp:133:38 (probe-tsan+0xf45a1) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #2 ludus::foundation::logging::LogSystem::Initialize(ludus::foundation::logging::LogConfig const&) /home/alegruz/workspace/Ludus/modules/foundation/logging/src/logger.cpp:131:30 (probe-tsan+0xe40f4) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #3 main /tmp/ludus-logging-review/probe.cpp:17:5 (probe-tsan+0xe2eac) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+
+  Mutex M0 (0x555556a7bc68) created at:
+    #0 pthread_rwlock_wrlock <null> (probe-tsan+0x65aae) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #1 std::__glibcxx_rwlock_wrlock(pthread_rwlock_t*) /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/shared_mutex:83:3 (probe-tsan+0xe3d85) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #2 std::__shared_mutex_pthread::lock() /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/shared_mutex:196:19 (probe-tsan+0xe3d85)
+    #3 std::shared_mutex::lock() /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/shared_mutex:423:27 (probe-tsan+0xe3d85)
+    #4 std::unique_lock<std::shared_mutex>::lock() /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/unique_lock.h:141:17 (probe-tsan+0xe3d85)
+    #5 std::unique_lock<std::shared_mutex>::unique_lock(std::shared_mutex&) /usr/bin/../lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/bits/unique_lock.h:71:2 (probe-tsan+0xe3d85)
+    #6 ludus::foundation::logging::LogSystem::Initialize(ludus::foundation::logging::LogConfig const&) /home/alegruz/workspace/Ludus/modules/foundation/logging/src/logger.cpp:101:22 (probe-tsan+0xe3d85)
+    #7 main /tmp/ludus-logging-review/probe.cpp:17:5 (probe-tsan+0xe2eac) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+
+  Thread T2 (tid=10, running) created by main thread at:
+    #0 pthread_create <null> (probe-tsan+0x6293f) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #1 std::thread::_M_start_thread(std::unique_ptr<std::thread::_State, std::default_delete<std::thread::_State>>, void (*)()) <null> (libstdc++.so.6+0xeceb0) (BuildId: 753c6c8608b61d4e67be8f0c890e03e0aa046b8b)
+    #2 __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16 (libc.so.6+0x2a1c9) (BuildId: a4a7992a8e66555c8141ab2a08a8465ff6e0ea65)
+
+  Thread T1 (tid=9, running) created by main thread at:
+    #0 pthread_create <null> (probe-tsan+0x6293f) (BuildId: df2eea971308463556e558e55231d09e9624e841)
+    #1 std::thread::_M_start_thread(std::unique_ptr<std::thread::_State, std::default_delete<std::thread::_State>>, void (*)()) <null> (libstdc++.so.6+0xeceb0) (BuildId: 753c6c8608b61d4e67be8f0c890e03e0aa046b8b)
+    #2 __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16 (libc.so.6+0x2a1c9) (BuildId: a4a7992a8e66555c8141ab2a08a8465ff6e0ea65)
+
+SUMMARY: ThreadSanitizer: data race /home/alegruz/workspace/Ludus/modules/foundation/logging/src/formatter.cpp:106:12 in ludus::foundation::logging::internal::FormatConsoleLine(ludus::foundation::logging::internal::LogRecordView const&, bool, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&)
+==================
