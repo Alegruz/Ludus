@@ -3,5 +3,11 @@
   "version": "@PROJECT_VERSION@",
   "library_type": "static",
   "cxx_standard": "C++23",
-  "cmake_namespace": "@LUDUS_ENGINE_EXPORT_NAMESPACE@"
+  "cmake_namespace": "@LUDUS_ENGINE_EXPORT_NAMESPACE@",
+  "sdk_variant": "@LUDUS_SDK_VARIANT@",
+  "build_flavor": "@LUDUS_BUILD_FLAVOR@",
+  "build_flavor_id": @LUDUS_BUILD_FLAVOR_ID@,
+  "assert_policy_version": @LUDUS_ASSERT_POLICY_VERSION@,
+  "enable_asserts": @LUDUS_ENABLE_ASSERTS@,
+  "break_on_check": @LUDUS_BREAK_ON_CHECK@
 }

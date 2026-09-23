@@ -37,7 +37,7 @@ void EmergencyLog(LogLevel level,
 {
     // Thin adapter over the FoundationBase primitive. Logging owns no independent
     // emergency implementation any more: the reporter lives below Logging so
-    // Base and the (proposed) assertion subsystem share it without depending
+    // Logging and assertions share Base byte output without depending
     // upward on Logging (requirements R5, R31).
     base::EmergencyReport(ToDiagnosticSeverity(level), category.Name, message, location);
 }

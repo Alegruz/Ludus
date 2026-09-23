@@ -1,4 +1,5 @@
 #include <ludus/foundation/base/diagnostic.hpp>
+#include <ludus/foundation/base/diagnostic_output.hpp>
 
 #include <array>
 #include <atomic>
@@ -71,8 +72,7 @@ void EmergencyReport(DiagnosticSeverity severity,
         // fixed literal and count it (requirements R32).
         gReentryCount.fetch_add(1, std::memory_order_relaxed);
         static constexpr char kNested[] = "[LUDUS:Diagnostic] nested emergency suppressed\n";
-        std::fwrite(kNested, 1, sizeof(kNested) - 1, stderr);
-        std::fflush(stderr);
+        (void)diagnostics::WriteEmergencyBytes(kNested, sizeof(kNested) - 1);
         return;
     }
     tInEmergency = true;
@@ -118,9 +118,9 @@ void EmergencyReport(DiagnosticSeverity severity,
         buffer[length++] = '\n';
     }
 
-    // Direct, unbuffered write to stderr; does not depend on the logging backend.
-    std::fwrite(buffer.data(), 1, length, stderr);
-    std::fflush(stderr);
+    // Share Base byte transport without entering normal Logging. Its stderr
+    // fallback can block; assertions use only TryWriteEmergencyBytes instead.
+    (void)diagnostics::WriteEmergencyBytes(buffer.data(), length);
 
 #if defined(_WIN32)
     if (IsDebuggerPresent())

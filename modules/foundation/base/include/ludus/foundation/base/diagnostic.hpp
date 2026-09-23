@@ -3,10 +3,10 @@
 // -----------------------------------------------------------------------------
 // FoundationBase emergency diagnostic primitive.
 //
-// This is the lowest-level, dependency-free reporting path in the engine. It
-// lives in FoundationBase so that FoundationBase itself, the (proposed)
-// assertion subsystem, and FoundationLogging's own fallback path can all report
-// a failure WITHOUT depending upward on FoundationLogging
+// This formats controlled emergency reports in FoundationBase so Base clients
+// and FoundationLogging's fallback can report without depending upward on
+// FoundationLogging. Assertions build their own owned reports and use only the
+// nonblocking TryWriteEmergencyBytes transport; they do not call this API
 // (.kiro/specs/logging-redesign/design.md sections 1, 10; requirements
 // R5, R31, R32).
 //
@@ -20,8 +20,8 @@
 //     most a minimal literal and increments a counter instead of recursing
 //     (requirements R32).
 //
-// It is NOT async-signal-safe: stdio has locks and internal state, and a write
-// can block. It is the "controlled diagnostic failure" path, not a crash-handler
+// It is NOT async-signal-safe and its stderr fallback can block. It is the
+// "controlled diagnostic failure" path, not a crash-handler
 // writer (requirements R33). A real signal/crash handler is a separate,
 // narrowly-audited facility owned by the crash subsystem.
 // -----------------------------------------------------------------------------
@@ -47,8 +47,8 @@ enum class DiagnosticSeverity : uint8
 
 // Report one emergency diagnostic. `message` is already-final text; the primitive
 // performs no formatting of its own beyond composing the fixed header and the
-// source suffix, so it stays allocation-free. Writes one line to stderr
-// (and, on Windows with a debugger attached, to the debugger output).
+// source suffix, so it stays allocation-free. Uses Base's emergency byte writer:
+// a configured diagnostic socket, otherwise potentially blocking stderr.
 //
 // Reentry: if called again while a previous call on this thread is still in
 // progress (e.g. a fault during the write), it emits a minimal literal and

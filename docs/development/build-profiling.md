@@ -100,3 +100,91 @@ Most expensive headers, by aggregate parse time across all TUs:
 
 These are candidates, not commitments — each must show a win in
 `profile-build` output before it lands.
+
+## Assertion test graph budget recalibration
+
+The supplied assertion-branch CI log shows successful compilation followed by
+an aggregate-budget failure: **73.8 s summed frontend time against 65 s**. Build wall
+time was **18.51 s**. These are different metrics: the frontend number adds
+time across concurrent compiler invocations, including tests and dependency
+scanning; it is not the developer's elapsed build time.
+
+All project headers listed in that CI report passed their existing limits:
+`log.hpp` averaged 2443 ms (limit 3200), `file_sink.hpp` 1748 ms (2400),
+`version.hpp` 547 ms (2000), `debugger_sink.hpp` 1250 ms (2000), and
+`formatter.hpp` 623 ms (2000). The aggregate limit had been calibrated to
+approximately 45 s before adding the assertion runtime, unit tests, native and
+fake backend death tests, allocation probes, logger-lifetime tests, and build
+contract tests. The new assertion headers do not include the heavy standard
+headers seen in the report. In particular, `<barrier>` is test-only; its two
+expensive inclusions came from compiling the same death-test driver twice.
+
+### Optimization and measurement
+
+Compile `assert_child.cpp` once in the private `ludus_assert_test_driver` object
+target and use that object in both child executables. Their compiler flags were
+identical before this change and remain identical afterward. The driver does
+not link FoundationBase: the native child still links the production archive,
+while the fake child still compiles its isolated runtime and fake platform
+backend. Both executables retain their own state, native termination, and
+complete test coverage. No runtime, public API, or installed target changes.
+
+Clean before/after runs used the pinned Clang 18 toolchain, time traces on,
+ccache off, and a fixed six-job limit on the same development host:
+
+```bash
+CMAKE_BUILD_PARALLEL_LEVEL=6 ./scripts/profile-build linux-clang-development
+./scripts/check-build-budget
+```
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Summed frontend | 52.1 s | 49.4 s |
+| Summed backend | 21.4 s | 22.1 s |
+| Build wall (script) | 14.67 s | 14.06 s |
+| Compile database entries | 30 | 29 |
+| ClangBuildAnalyzer compilation events, including scans | 56 | 54 |
+
+This is one controlled pair, not a statistically established speedup. Removing
+the duplicate compiler invocation is deterministic; the timing deltas include
+host noise. An initial run without the six-job limit measured 133.0 s frontend
+and is not comparable to this pair. Neither local timing is used to calibrate
+the CI budget. Raw local evidence is retained under the ignored
+`out/assert-budget-review/` directory.
+
+### Budget decision
+
+Raise only `total_frontend_seconds` from **65 to 100**, approximately 35%
+headroom over the supplied **73.8 s CI measurement**. This accepts the expanded
+test graph while retaining the original policy of headroom for runner noise.
+It conservatively uses the observed CI run before the driver optimization;
+post-optimization CI timing is not yet measured. All per-header limits and all
+tests remain enabled. Local `check-build-budget` passed with 49.4 s frontend.
+
+Existing Logging header costs still warrant their separately reviewed
+optimization work; this adjustment does not declare them cheap or raise their
+limits. Recalibrate again after integrating the Logging redesign on `main`,
+using the actual combined CI graph rather than adding speculative allowances.
+
+### Follow-up validation
+
+`./scripts/test` passed 12/12 for each of `linux-clang-debug`,
+`linux-clang-development`, and `linux-clang-profile`, and 11/11 for
+`linux-clang-asan-ubsan`. The existing dedicated build trees were validated with
+the following commands (the ordinary Release preset disables tests):
+
+```bash
+out/host-tools/venv/bin/cmake --build out/build/linux-clang-release-assert-tests -j2
+out/host-tools/venv/bin/ctest --test-dir out/build/linux-clang-release-assert-tests --output-on-failure -j2
+out/host-tools/venv/bin/cmake --build out/build/linux-clang-assert-tsan -j2
+out/host-tools/venv/bin/ctest --test-dir out/build/linux-clang-assert-tsan --output-on-failure -j2
+./scripts/check linux-clang-development --all
+./scripts/install-sdk linux-clang-development
+git diff --check
+```
+
+Release passed 12/12, TSan 11/11, format/tidy passed, and the installed SDK
+consumer built and ran. Socket/death and sanitizer tests required execution
+outside the sandbox's socket/process-inspection restrictions. Replaying the
+supplied CI report through the budget checker reproduced the 65 s failure and
+passed at 100 s; probes at 100.1 s total and 3201 ms for `log.hpp` still failed.

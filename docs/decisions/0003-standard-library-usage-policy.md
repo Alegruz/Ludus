@@ -39,9 +39,23 @@ the logging sinks and the emergency path, where a direct, allocation-free,
 exception-free write to a file handle or `stderr` is exactly what is wanted.
 Do not use it for general engine diagnostics.
 
+Assertions have a sanctioned independent emergency path in FoundationBase.
+They must not call normal Logging: the logger can itself be failing or holding
+locks. This path uses bounded buffers and private native OS byte output, not
+stdio or printf. `<atomic>` is private to the failure runtime; `<cstdlib>` is
+allowed privately for `abort`/immediate exit. Neither enters the assertion
+header. Ordinary diagnostics still use `LUDUS_LOG_*`. Logging shares Base's final
+emergency byte writer; assertion formatting is a separate opt-in layer with a
+closed argument set and an implementation-only parser.
+
 ### Allowed for now (keep; no reason to replace yet)
 
 - `<string_view>` — non-owning, zero-allocation; preferred for read-only text.
+- `<charconv>` / `std::to_chars` — only in the assertion formatter `.cpp`.
+  Fixed-buffer integer/float conversion avoids a custom numerical algorithm;
+  no public-header cost, no locale or exceptions. Allocation probes and binary
+  measurements are required for each supported standard-library/toolchain change.
+  This does not grant signal-safety or a general formatting-library exemption.
 - `<span>` when needed — non-owning view over contiguous data.
 - `<atomic>`, `<mutex>`, `<shared_mutex>` — concurrency primitives; correctness
   first. Revisit only when a custom job/threading system exists.
@@ -86,4 +100,4 @@ replacements (`String`, `Array`, allocator, hash map, VFS) are deferred until
 Ludus has the requirements — most naturally a custom allocator — to do them
 once rather than churn twice. Until then, engine code leans on a small,
 well-understood subset of the standard library and routes all diagnostics
-through `FoundationLogging`.
+through `FoundationLogging`, except the independent Base assertion failure path.

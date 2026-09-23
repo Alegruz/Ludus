@@ -14,14 +14,19 @@
     "a note in the PR."
   ],
   "$calibration": [
-    "Budgets are calibrated to the GitHub Actions ubuntu-24.04 runner (the host",
-    "that enforces this gate), which is ~2x slower than a typical dev laptop, with",
-    "~40% headroom over the observed CI baseline so the gate catches a real",
-    "regression (a heavy include entering a header) without flapping on runner",
-    "noise. Baseline CI averages that informed these numbers: log.hpp ~2240 ms,",
-    "file_sink.hpp ~1660 ms, debugger_sink.hpp ~1290 ms, frontend ~45 s.",
-    "Re-measure on the CI runner (the Build-time budget job summary) before",
-    "changing these; do not calibrate from a fast local machine."
+    "Budgets are calibrated to the GitHub Actions ubuntu-24.04 runner, not a fast local machine.",
+    "Original header baselines: log.hpp ~2240 ms, file_sink.hpp ~1660 ms, debugger_sink.hpp ~1290 ms.",
+    "The assertion-subsystem CI profile measured 73.8 s summed frontend time and 18.51 s build wall",
+    "time with the expanded test graph; all reported project headers remained within their limits.",
+    "The previous 65 s total budget was based on ~45 s before the assertion runtime and tests.",
+    "Raise only the aggregate budget to 100 s (~35% headroom over the observed 73.8 s CI run).",
+    "The shared assertion test driver also removes one duplicate compilation; no test is disabled.",
+    "This is conservative calibration from the pre-optimization CI measurement, not a claim of",
+    "post-optimization CI timing. Keep per-header limits unchanged. Evidence and local before/after",
+    "measurements: docs/development/build-profiling.md, Assertion test graph budget recalibration.",
+    "That calibration predates main's Logging redesign; current per-header limits follow",
+    "the newer logging_redesign_note below. The combined graph must be remeasured in CI.",
+    "Re-measure on the CI runner before changing these budgets again."
   ],
   "$logging_redesign_note": [
     "The logging redesign (.kiro/specs/logging-redesign) split the public logging",
@@ -50,7 +55,7 @@
   ],
   "preset": "linux-clang-development",
   "default_header_avg_ms": 2000,
-  "total_frontend_seconds": 65,
+  "total_frontend_seconds": 100,
   "header_overrides_avg_ms": {
     "modules/foundation/logging/src/internal/backend.hpp": 4000
   },

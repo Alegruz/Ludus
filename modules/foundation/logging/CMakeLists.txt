@@ -98,6 +98,15 @@ install(
 )
 
 if(LUDUS_BUILD_TESTS)
+    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+    add_executable(ludus_assert_logging_child tests/assert_lifetime_child.cpp)
+    target_link_libraries(ludus_assert_logging_child PRIVATE Ludus::FoundationLogging)
+    target_link_options(ludus_assert_logging_child PRIVATE -Wl,--wrap=fwrite)
+    ludus_apply_project_defaults(ludus_assert_logging_child)
+    add_test(NAME ludus_assert_logging_lifetime
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/assertions/logging_lifetime_tests.py"
+            "$<TARGET_FILE:ludus_assert_logging_child>")
+    set_tests_properties(ludus_assert_logging_lifetime PROPERTIES LABELS "logging;assert-death" TIMEOUT 40)
     find_package(Catch2 3 REQUIRED CONFIG)
 
     add_executable(ludus_foundation_logging_tests)

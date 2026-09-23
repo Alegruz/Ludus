@@ -1,0 +1,13 @@
+# Runs before any target install rule, including with --prefix / DESTDIR.
+set(prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+set(manifest "${prefix}/@CMAKE_INSTALL_DATADIR@/Ludus/LudusSdkManifest.json")
+if(EXISTS "${manifest}")
+    file(READ "${manifest}" contents)
+    string(JSON variant ERROR_VARIABLE variant_error GET "${contents}" sdk_variant)
+    if(variant_error OR NOT variant STREQUAL "@LUDUS_SDK_VARIANT@")
+        message(FATAL_ERROR "Incompatible Ludus SDK at ${prefix}; install this variant to a clean, separate prefix")
+    endif()
+elseif(EXISTS "${prefix}/@CMAKE_INSTALL_INCLUDEDIR@/ludus" OR
+       EXISTS "${prefix}/@CMAKE_INSTALL_LIBDIR@/cmake/Ludus")
+    message(FATAL_ERROR "Unversioned Ludus SDK at ${prefix}; use a clean, separate prefix")
+endif()

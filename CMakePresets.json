@@ -36,7 +36,8 @@
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/linux-clang-debug/conan_toolchain.cmake",
         "LUDUS_BUILD_TESTS": "ON",
         "LUDUS_ENABLE_ASAN": "OFF",
-        "LUDUS_ENABLE_UBSAN": "OFF"
+        "LUDUS_ENABLE_UBSAN": "OFF",
+        "LUDUS_BUILD_FLAVOR": "Debug"
       }
     },
     {
@@ -48,7 +49,8 @@
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/linux-clang-development/conan_toolchain.cmake",
         "LUDUS_BUILD_TESTS": "ON",
         "LUDUS_ENABLE_ASAN": "OFF",
-        "LUDUS_ENABLE_UBSAN": "OFF"
+        "LUDUS_ENABLE_UBSAN": "OFF",
+        "LUDUS_BUILD_FLAVOR": "Development"
       }
     },
     {
@@ -60,7 +62,8 @@
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/linux-clang-asan-ubsan/conan_toolchain.cmake",
         "LUDUS_BUILD_TESTS": "ON",
         "LUDUS_ENABLE_ASAN": "ON",
-        "LUDUS_ENABLE_UBSAN": "ON"
+        "LUDUS_ENABLE_UBSAN": "ON",
+        "LUDUS_BUILD_FLAVOR": "Development"
       }
     },
     {
@@ -73,7 +76,8 @@
         "LUDUS_BUILD_TESTS": "ON",
         "LUDUS_ENABLE_ASAN": "OFF",
         "LUDUS_ENABLE_UBSAN": "OFF",
-        "LUDUS_COMPILED_LOG_LEVEL": "2"
+        "LUDUS_COMPILED_LOG_LEVEL": "2",
+        "LUDUS_BUILD_FLAVOR": "Profile"
       }
     },
     {
@@ -85,7 +89,8 @@
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/linux-clang-release/conan_toolchain.cmake",
         "LUDUS_BUILD_TESTS": "OFF",
         "LUDUS_ENABLE_ASAN": "OFF",
-        "LUDUS_ENABLE_UBSAN": "OFF"
+        "LUDUS_ENABLE_UBSAN": "OFF",
+        "LUDUS_BUILD_FLAVOR": "Release"
       }
     }
   ],

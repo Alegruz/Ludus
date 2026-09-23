@@ -48,6 +48,7 @@ option(LUDUS_WARNINGS_AS_ERRORS "Treat project compiler warnings as errors" ${LU
 option(LUDUS_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(LUDUS_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 
+include(EngineBuildFlavor)
 ludus_configure_project_options(ludus_project_options)
 ludus_configure_project_warnings(ludus_project_warnings)
 ludus_configure_project_sanitizers(ludus_project_options)
@@ -64,6 +65,9 @@ if(LUDUS_ENABLE_CCACHE)
         message(WARNING "LUDUS_ENABLE_CCACHE is ON, but ccache was not found")
     endif()
 endif()
+
+configure_file(cmake/CheckSdkVariant.cmake.in "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" @ONLY)
+install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENTS)
 
 add_subdirectory(modules/foundation/base)
 add_subdirectory(modules/foundation/logging)

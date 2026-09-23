@@ -101,13 +101,6 @@ UniquePtr<ElementType, DeleterType>::operator=(UniquePtr<OtherType, OtherDeleter
 template <typename ElementType, Deleter DeleterType>
 UniquePtr<ElementType, DeleterType>::~UniquePtr()
 {
-#if defined(LUDUS_BUILD_DEVELOPMENT)
-    if (!mPtr)
-    {
-        // TODO: Implement logging or assertion for null pointer deletion
-        // In development builds, you might want to log or assert if deleting a null pointer
-    }
-#endif
     mDeleter(mPtr);
 }
 

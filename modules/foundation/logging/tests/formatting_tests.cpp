@@ -1,3 +1,10 @@
+// Runtime/formatter tests must exercise every severity in every build flavor.
+// Compile-time stripping is tested separately in category_tests.cpp.
+#if defined(LUDUS_COMPILED_LOG_LEVEL)
+#    undef LUDUS_COMPILED_LOG_LEVEL
+#endif
+#define LUDUS_COMPILED_LOG_LEVEL 0
+
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
@@ -64,6 +71,7 @@ inline constexpr LogCategory LogFormatTest{"FormatTest"};
 
 } // namespace
 
+// Test backend formatting independently of per-preset macro stripping.
 TEST_CASE("format arguments are substituted into the message", "[logging][formatting]")
 {
     const auto dir = make_temp_log_dir("fmt_args");
@@ -100,7 +108,7 @@ TEST_CASE("source metadata is appended for warnings and above", "[logging][forma
     config.Directory = dir_str;
     LogSystem::Initialize(config);
 
-    LUDUS_LOG_INFO(LogFormatTest, "info line");
+    LUDUS_LOG_TEXT(LogFormatTest, Info, "info line");
     LUDUS_LOG_WARN(LogFormatTest, "warn line");
     LogSystem::Flush();
     LogSystem::Shutdown();

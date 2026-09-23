@@ -8,6 +8,13 @@
 // configuration; a lightweight concurrent smoke test is included here so the
 // default suite exercises multi-producer dispatch even without TSan.
 
+// Runtime/formatter tests must exercise every severity in every build flavor.
+// Compile-time stripping is tested separately in category_tests.cpp.
+#if defined(LUDUS_COMPILED_LOG_LEVEL)
+#    undef LUDUS_COMPILED_LOG_LEVEL
+#endif
+#define LUDUS_COMPILED_LOG_LEVEL 0
+
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
