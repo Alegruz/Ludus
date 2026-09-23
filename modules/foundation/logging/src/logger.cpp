@@ -393,10 +393,10 @@ LogInitResult LogSystem::Initialize(const LogConfig& config)
             fileConfig.MaxTotalBytes = config.MaxTotalBytes;
             fileConfig.MaxSessionAgeDays = config.MaxSessionAgeDays;
             fileConfig.RetainedSessions = config.RetainedSessions;
-            auto file_sink = internal::FileSink::Create(fileConfig);
-            if (file_sink)
+            internal::FileSink* file_sink = internal::FileSink::Create(fileConfig);
+            if (file_sink != nullptr)
             {
-                s.Sinks.push_back(std::move(file_sink));
+                s.Sinks.push_back(std::unique_ptr<internal::ILogSink>(file_sink));
             }
             else
             {
