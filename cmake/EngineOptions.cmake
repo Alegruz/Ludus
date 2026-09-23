@@ -39,4 +39,17 @@ function(ludus_configure_project_options target_name)
             message(FATAL_ERROR "LUDUS_ENABLE_COVERAGE is only supported for Clang and GCC in Milestone 0")
         endif()
     endif()
+
+    # Build-time profiling. -ftime-trace makes Clang emit a per-translation-unit
+    # JSON flame graph (next to each .o) describing where compile time went:
+    # headers parsed, template instantiations, constexpr evaluation. The traces
+    # are aggregated by scripts/profile-build (see ClangBuildAnalyzer). This is a
+    # diagnostic build mode only; leave it OFF for normal builds.
+    if(LUDUS_ENABLE_TIME_TRACE)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+            target_compile_options(${target_name} INTERFACE -ftime-trace)
+        else()
+            message(FATAL_ERROR "LUDUS_ENABLE_TIME_TRACE requires Clang")
+        endif()
+    endif()
 endfunction()

@@ -26,7 +26,17 @@ option(LUDUS_BUILD_TESTS "Build Ludus tests" ON)
 option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
 option(LUDUS_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(LUDUS_ENABLE_COVERAGE "Enable coverage instrumentation" OFF)
-option(LUDUS_ENABLE_CCACHE "Use ccache when available" OFF)
+
+# ccache defaults on when the environment requests it (e.g. CI exports
+# LUDUS_ENABLE_CCACHE=1), otherwise off for plain local builds.
+if(DEFINED ENV{LUDUS_ENABLE_CCACHE} AND NOT "$ENV{LUDUS_ENABLE_CCACHE}" STREQUAL "" AND NOT "$ENV{LUDUS_ENABLE_CCACHE}" STREQUAL "0")
+    set(LUDUS_ENABLE_CCACHE_DEFAULT ON)
+else()
+    set(LUDUS_ENABLE_CCACHE_DEFAULT OFF)
+endif()
+
+option(LUDUS_ENABLE_CCACHE "Use ccache when available" ${LUDUS_ENABLE_CCACHE_DEFAULT})
+option(LUDUS_ENABLE_TIME_TRACE "Emit Clang -ftime-trace per-TU compile profiles" OFF)
 
 if(DEFINED ENV{CI} AND NOT "$ENV{CI}" STREQUAL "")
     set(LUDUS_WARNINGS_AS_ERRORS_DEFAULT ON)
@@ -46,8 +56,10 @@ if(LUDUS_ENABLE_CCACHE)
     find_program(LUDUS_CCACHE_PROGRAM ccache)
     if(LUDUS_CCACHE_PROGRAM)
         message(STATUS "Using ccache: ${LUDUS_CCACHE_PROGRAM}")
-        set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${LUDUS_CCACHE_PROGRAM}")
-        set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "${LUDUS_CCACHE_PROGRAM}")
+        # Wrap compilation only. ccache is a compiler cache, not a linker, so it
+        # must not be attached to the link rule (doing so corrupts link commands).
+        set(CMAKE_C_COMPILER_LAUNCHER "${LUDUS_CCACHE_PROGRAM}" CACHE STRING "" FORCE)
+        set(CMAKE_CXX_COMPILER_LAUNCHER "${LUDUS_CCACHE_PROGRAM}" CACHE STRING "" FORCE)
     else()
         message(WARNING "LUDUS_ENABLE_CCACHE is ON, but ccache was not found")
     endif()

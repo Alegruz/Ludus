@@ -10,6 +10,8 @@ import re
 import shutil
 import subprocess
 import sys
+import time
+import urllib.request
 import venv
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +21,12 @@ from typing import Iterable, Sequence
 DEFAULT_PRESET = "linux-clang-development"
 PROJECT_CXX_STANDARD = "23"
 BOOTSTRAP_STATE_VERSION = 1
+
+# ClangBuildAnalyzer aggregates Clang -ftime-trace outputs into a single ranked
+# report. Pinned so the profiling harness is reproducible. It is fetched/built
+# on demand by `profile-build` only, never by init.sh.
+CLANG_BUILD_ANALYZER_VERSION = "1.5.0"
+CLANG_BUILD_ANALYZER_REPO = "https://github.com/aras-p/ClangBuildAnalyzer"
 
 PRESET_BUILD_TYPES: dict[str, str] = {
     "linux-clang-debug": "Debug",
@@ -1382,6 +1390,189 @@ def command_install_sdk(args: argparse.Namespace) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- #
+# Build-time profiling
+# --------------------------------------------------------------------------- #
+
+
+def clang_build_analyzer_dir(root: Path) -> Path:
+    return root / "out" / "host-tools" / "clang-build-analyzer"
+
+
+def clang_build_analyzer_binary(root: Path) -> Path:
+    suffix = ".exe" if os.name == "nt" else ""
+    return clang_build_analyzer_dir(root) / "build" / f"ClangBuildAnalyzer{suffix}"
+
+
+def ensure_clang_build_analyzer(root: Path) -> Path:
+    """Fetch and build the pinned ClangBuildAnalyzer on demand.
+
+    Kept out of the init.sh path deliberately: it is only needed for profiling,
+    so we build it lazily into out/host-tools/ using the project-managed CMake,
+    Ninja, and Clang toolchain. Returns the path to the built binary.
+    """
+    binary = clang_build_analyzer_binary(root)
+    if binary.is_file():
+        return binary
+
+    source_dir = clang_build_analyzer_dir(root)
+    if not (source_dir / "CMakeLists.txt").is_file():
+        archive_url = f"{CLANG_BUILD_ANALYZER_REPO}/archive/refs/tags/v{CLANG_BUILD_ANALYZER_VERSION}.tar.gz"
+        archive_path = root / "out" / "host-tools" / f"clang-build-analyzer-{CLANG_BUILD_ANALYZER_VERSION}.tar.gz"
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"Network access: downloading ClangBuildAnalyzer {CLANG_BUILD_ANALYZER_VERSION}.")
+        try:
+            with urllib.request.urlopen(archive_url) as response:  # noqa: S310 (pinned https URL)
+                archive_path.write_bytes(response.read())
+        except OSError as exc:
+            raise EngineError(f"failed to download ClangBuildAnalyzer: {exc}") from exc
+
+        extract_root = root / "out" / "host-tools"
+        import tarfile
+
+        with tarfile.open(archive_path, "r:gz") as tar:
+            tar.extractall(extract_root)  # noqa: S202 (trusted pinned release)
+        extracted = extract_root / f"ClangBuildAnalyzer-{CLANG_BUILD_ANALYZER_VERSION}"
+        if source_dir.exists():
+            shutil.rmtree(source_dir)
+        extracted.rename(source_dir)
+
+    build_dir = source_dir / "build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    env = tool_env(root)
+    run(
+        [
+            cmake(root),
+            "-S",
+            source_dir,
+            "-B",
+            build_dir,
+            "-G",
+            "Ninja",
+            f"-DCMAKE_MAKE_PROGRAM={ninja(root)}",
+            f"-DCMAKE_CXX_COMPILER={clang_cxx(root)}",
+            "-DCMAKE_BUILD_TYPE=Release",
+        ],
+        cwd=root,
+        env=env,
+    )
+    run([cmake(root), "--build", build_dir], cwd=root, env=env)
+    if not binary.is_file():
+        raise EngineError(f"ClangBuildAnalyzer build did not produce {binary}")
+    return binary
+
+
+def summarize_ninja_log(build_dir: Path) -> dict[str, object]:
+    """Parse .ninja_log into per-target durations and the total/critical figures.
+
+    .ninja_log v5 lines are: start_ms  end_ms  restat_mtime  output  cmdhash.
+    The build wall-time is the span from the earliest start to the latest end;
+    the summed per-edge time divided by the wall-time approximates achieved
+    parallelism.
+    """
+    log_path = build_dir / ".ninja_log"
+    if not log_path.is_file():
+        return {}
+
+    edges: list[tuple[int, int, str]] = []
+    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 5:
+            continue
+        try:
+            start_ms = int(parts[0])
+            end_ms = int(parts[1])
+        except ValueError:
+            continue
+        edges.append((start_ms, end_ms, parts[3]))
+
+    if not edges:
+        return {}
+
+    wall_ms = max(end for _, end, _ in edges) - min(start for start, _, _ in edges)
+    summed_ms = sum(end - start for start, end, _ in edges)
+    slowest = sorted(edges, key=lambda e: e[1] - e[0], reverse=True)[:15]
+    return {
+        "edge_count": len(edges),
+        "wall_ms": wall_ms,
+        "summed_ms": summed_ms,
+        "parallelism": round(summed_ms / wall_ms, 2) if wall_ms else 0,
+        "slowest_targets": [{"target": t, "ms": end - start} for start, end, t in slowest],
+    }
+
+
+def command_profile_build(args: argparse.Namespace) -> int:
+    """Profile a clean build: time configure and build separately, capture Ninja
+    edge timings, and (with Clang -ftime-trace) aggregate per-TU compile costs
+    via ClangBuildAnalyzer. Writes a machine-readable report to out/profile/."""
+    root = repo_root()
+    preset = args.preset
+    ensure_bootstrap_for_preset(root, preset)
+
+    build_dir = build_dir_for_preset(root, preset)
+    profile_dir = root / "out" / "profile"
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    # Always start from a clean build tree so numbers are comparable run to run.
+    if build_dir.exists():
+        print(f"Removing existing build tree for a clean profile: {build_dir}")
+        shutil.rmtree(build_dir)
+
+    extra_configure = ["-DLUDUS_ENABLE_TIME_TRACE=ON"] if not args.no_time_trace else []
+    if args.ccache:
+        extra_configure.append("-DLUDUS_ENABLE_CCACHE=ON")
+
+    print(f"Profiling clean build of preset '{preset}'.")
+    configure_start = time.monotonic()
+    cmake_configure(root, preset, extra_configure)
+    configure_seconds = time.monotonic() - configure_start
+
+    build_start = time.monotonic()
+    cmake_build(root, preset)
+    build_seconds = time.monotonic() - build_start
+
+    report: dict[str, object] = {
+        "preset": preset,
+        "build_type": PRESET_BUILD_TYPES[preset],
+        "time_trace": not args.no_time_trace,
+        "ccache": bool(args.ccache),
+        "configure_seconds": round(configure_seconds, 2),
+        "build_seconds": round(build_seconds, 2),
+        "ninja": summarize_ninja_log(build_dir),
+    }
+
+    # Aggregate -ftime-trace outputs into a ranked report of the most expensive
+    # headers and template instantiations across the whole build.
+    if not args.no_time_trace:
+        analyzer = ensure_clang_build_analyzer(root)
+        capture_file = profile_dir / f"{preset}-cba.bin"
+        run([analyzer, "--all", build_dir, capture_file], cwd=root, env=tool_env(root))
+        analysis_text = capture_command([analyzer, "--analyze", capture_file], cwd=root, env=tool_env(root))
+        analysis_path = profile_dir / f"{preset}-analysis.txt"
+        analysis_path.write_text(analysis_text + "\n", encoding="utf-8")
+        report["clang_build_analyzer_report"] = str(analysis_path.relative_to(root))
+        print("")
+        print(analysis_text)
+
+    report_path = profile_dir / f"{preset}-profile.json"
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print("")
+    print("Build profile summary")
+    print(f"  preset:            {preset} ({PRESET_BUILD_TYPES[preset]})")
+    print(f"  configure:         {configure_seconds:.2f}s")
+    print(f"  build:             {build_seconds:.2f}s")
+    ninja_summary = report["ninja"]
+    if isinstance(ninja_summary, dict) and ninja_summary:
+        print(f"  compile edges:     {ninja_summary.get('edge_count')}")
+        print(f"  build wall (ninja):{int(ninja_summary.get('wall_ms', 0)) / 1000:.2f}s")
+        print(f"  achieved parallel: {ninja_summary.get('parallelism')}x")
+    print(f"  report:            {report_path.relative_to(root)}")
+    return 0
+
+
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ludus development orchestration")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1425,6 +1616,16 @@ def make_parser() -> argparse.ArgumentParser:
     install_parser = subparsers.add_parser("install-sdk", help="install the SDK and run the external consumer")
     install_parser.add_argument("preset", nargs="?", default=DEFAULT_PRESET)
     install_parser.set_defaults(func=command_install_sdk)
+
+    profile_parser = subparsers.add_parser(
+        "profile-build", help="profile a clean build (configure/build timing, Ninja + Clang -ftime-trace)"
+    )
+    profile_parser.add_argument("preset", nargs="?", default=DEFAULT_PRESET)
+    profile_parser.add_argument(
+        "--no-time-trace", action="store_true", help="skip Clang -ftime-trace and ClangBuildAnalyzer aggregation"
+    )
+    profile_parser.add_argument("--ccache", action="store_true", help="enable ccache for the profiled build")
+    profile_parser.set_defaults(func=command_profile_build)
 
     return parser
 
