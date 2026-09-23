@@ -1,12 +1,11 @@
 #include "internal/formatter.hpp"
 
-#include <ludus/foundation/logging/log.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <ctime>
 #include <string>
+#include <thread>
 
 namespace ludus::foundation::logging::internal
 {
@@ -14,8 +13,8 @@ namespace ludus::foundation::logging::internal
 namespace
 {
 
-// ANSI SGR color codes keyed by level (spec section 19). Trace is dim; Debug and
-// Info are default; Warning yellow; Error red; Fatal bright red.
+// ANSI SGR color codes keyed by level. Trace dim; Debug/Info default; Warning
+// yellow; Error red; Fatal bright red.
 [[nodiscard]] std::string_view GetColorForLevel(LogLevel level) noexcept
 {
     switch (level)
@@ -37,8 +36,9 @@ namespace
 
 constexpr std::string_view COLOR_RESET = "\x1b[0m";
 
-// Monotonic thread-id allocator. Not the OS tid: a small, stable, readable
-// counter so log output is deterministic across runs for a given thread order.
+// Monotonic readable thread-id allocator (not the OS tid): a small, stable,
+// readable counter so log output is deterministic across runs for a given
+// thread order.
 std::atomic<uint32> gNextThreadId{0};
 
 struct ThreadLocalIdentity
@@ -67,14 +67,29 @@ ThreadLocalIdentity& GetThreadLocalIdentity() noexcept
     return value;
 }
 
-} // namespace
-
-bool IsSourceVisibleFor(LogLevel level) noexcept
+// Session clock anchor: captured once, maps monotonic ticks to wall-clock time
+// for rendering. Monotonic ticks drive ordering; wall time is derived only for
+// human-readable output (requirements R23; F11).
+struct SessionClockAnchor
 {
-    return level >= LogLevel::Warning;
+    std::chrono::steady_clock::time_point SteadyEpoch;
+    std::chrono::system_clock::time_point SystemEpoch;
+
+    SessionClockAnchor() noexcept
+        : SteadyEpoch(std::chrono::steady_clock::now()), SystemEpoch(std::chrono::system_clock::now())
+    {
+    }
+};
+
+const SessionClockAnchor& GetSessionClockAnchor() noexcept
+{
+    static SessionClockAnchor anchor;
+    return anchor;
 }
 
-usize FormatTimestamp(uint64 timestamp_ns, char* out, usize capacity) noexcept
+// Convert producer monotonic ticks to a wall-clock "HH:MM:SS.mmm" via the
+// session anchor. Allocation-free.
+usize FormatTimestampFromTicks(uint64 monotonic_ticks_ns, char* out, usize capacity) noexcept
 {
     if (capacity < 13)
     {
@@ -85,8 +100,15 @@ usize FormatTimestamp(uint64 timestamp_ns, char* out, usize capacity) noexcept
         return 0;
     }
 
-    const uint64 total_seconds = timestamp_ns / 1'000'000'000ull;
-    const uint32 milliseconds = static_cast<uint32>((timestamp_ns / 1'000'000ull) % 1000ull);
+    const SessionClockAnchor& anchor = GetSessionClockAnchor();
+    const auto steady_epoch_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(anchor.SteadyEpoch.time_since_epoch()).count();
+    const int64 delta_ns = static_cast<int64>(monotonic_ticks_ns) - static_cast<int64>(steady_epoch_ns);
+    const auto wall = anchor.SystemEpoch + std::chrono::nanoseconds(delta_ns);
+    const auto wall_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(wall.time_since_epoch()).count();
+
+    const uint64 total_seconds = static_cast<uint64>(wall_ns) / 1'000'000'000ull;
+    const uint32 milliseconds = static_cast<uint32>((static_cast<uint64>(wall_ns) / 1'000'000ull) % 1000ull);
 
     const std::time_t seconds = static_cast<std::time_t>(total_seconds);
     std::tm broken{};
@@ -101,12 +123,19 @@ usize FormatTimestamp(uint64 timestamp_ns, char* out, usize capacity) noexcept
     return written > 0 ? static_cast<usize>(written) : 0;
 }
 
+} // namespace
+
+bool IsSourceVisibleFor(LogLevel level) noexcept
+{
+    return level >= LogLevel::Warning;
+}
+
 void FormatConsoleLine(const LogRecordView& record, bool use_color, std::string& buffer)
 {
     buffer.clear();
 
     char timestamp[16];
-    const usize ts_len = FormatTimestamp(record.TimestampNs, timestamp, sizeof(timestamp));
+    const usize ts_len = FormatTimestampFromTicks(record.MonotonicTicks, timestamp, sizeof(timestamp));
     buffer.append(timestamp, ts_len);
 
     buffer.append(" [");
@@ -133,7 +162,12 @@ void FormatConsoleLine(const LogRecordView& record, bool use_color, std::string&
         buffer.append("\n    ");
         buffer.append(record.File);
         buffer.push_back(':');
-        buffer.append(std::format("{}", record.Line));
+        char line_digits[16];
+        const int n = std::snprintf(line_digits, sizeof(line_digits), "%u", static_cast<unsigned>(record.Line));
+        if (n > 0)
+        {
+            buffer.append(line_digits, static_cast<usize>(n));
+        }
     }
 }
 
@@ -147,9 +181,16 @@ uint32 GetCurrentThreadId() noexcept
     return GetThreadLocalIdentity().Id;
 }
 
-uint64 GetNowNanoseconds() noexcept
+uint64 GetNativeThreadId() noexcept
 {
-    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    // A stable hash of std::thread::id; portable and correlates across a run.
+    const usize h = std::hash<std::thread::id>{}(std::this_thread::get_id());
+    return static_cast<uint64>(h);
+}
+
+uint64 GetMonotonicTicks() noexcept
+{
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
     return static_cast<uint64>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
 }
 

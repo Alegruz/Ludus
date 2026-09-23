@@ -13,12 +13,19 @@ target_sources(
     PRIVATE
         src/logger.cpp
         src/formatter.cpp
+        src/internal/format_engine.cpp
+        src/internal/backend.cpp
         src/emergency_logger.cpp
         src/sinks/console_sink.cpp
         src/sinks/file_sink.cpp
         src/sinks/debugger_sink.cpp
         src/internal/log_record.hpp
         src/internal/sink.hpp
+        src/internal/category_registry.hpp
+        src/internal/breadcrumb.hpp
+        src/internal/mpsc_queue.hpp
+        src/internal/backend.hpp
+        src/internal/format_engine.hpp
         src/internal/emergency_logger.hpp
         src/internal/formatter.hpp
         src/sinks/console_sink.hpp
@@ -31,9 +38,10 @@ target_sources(
             include
         FILES
             include/ludus/foundation/logging/log.hpp
+            include/ludus/foundation/logging/log_format.hpp
+            include/ludus/foundation/logging/log_system.hpp
             include/ludus/foundation/logging/level.hpp
             include/ludus/foundation/logging/category.hpp
-            include/ludus/foundation/logging/config.hpp
 )
 
 # Private include root so translation units can reference "internal/..." and
@@ -99,6 +107,7 @@ if(LUDUS_BUILD_TESTS)
             tests/logging_tests.cpp
             tests/category_tests.cpp
             tests/formatting_tests.cpp
+            tests/regression_tests.cpp
     )
     target_link_libraries(
         ludus_foundation_logging_tests
@@ -106,6 +115,10 @@ if(LUDUS_BUILD_TESTS)
             Ludus::FoundationLogging
             Catch2::Catch2WithMain
     )
+    # Tests may reach internal headers (e.g. the breadcrumb ring) to verify
+    # implementation-level contracts; these headers are never installed.
+    target_include_directories(ludus_foundation_logging_tests PRIVATE src)
+
     ludus_apply_project_defaults(ludus_foundation_logging_tests)
     ludus_enable_test_exceptions(ludus_foundation_logging_tests)
 

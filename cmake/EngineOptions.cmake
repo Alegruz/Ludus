@@ -21,10 +21,22 @@ function(ludus_configure_project_options target_name)
     # try / catch fails to compile rather than slipping through review. Test
     # executables re-enable exceptions via ludus_enable_test_exceptions()
     # because Catch2 reports failures by throwing.
+    #
+    # The exception flag is gated on the per-target LUDUS_TEST_EXCEPTIONS
+    # property rather than emitted unconditionally. Emitting both
+    # `-fexceptions` (from the test helper) and `-fno-exceptions` (from this
+    # interface) on the same command line let the *last* flag win, and CMake
+    # orders linked-interface options after a target's own options, so
+    # `-fno-exceptions` silently won even in test targets (the helper's
+    # documented "last -f wins" intent did not hold). Gating removes the flag
+    # entirely for opted-in test targets, so there is no conflicting pair and
+    # the result is order-independent. See EngineTargets.cmake.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
-        target_compile_options(${target_name} INTERFACE -fno-exceptions)
+        target_compile_options(${target_name} INTERFACE
+            $<$<NOT:$<BOOL:$<TARGET_PROPERTY:LUDUS_TEST_EXCEPTIONS>>>:-fno-exceptions>)
     elseif(MSVC)
-        target_compile_options(${target_name} INTERFACE /EHs-c-)
+        target_compile_options(${target_name} INTERFACE
+            $<$<NOT:$<BOOL:$<TARGET_PROPERTY:LUDUS_TEST_EXCEPTIONS>>>:/EHs-c->)
     endif()
 
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")

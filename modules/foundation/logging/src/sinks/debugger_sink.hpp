@@ -16,8 +16,8 @@ class DebuggerSink final : public ILogSink
 public:
     DebuggerSink();
 
-    void Write(const LogRecordView& record) noexcept override;
-    void Flush() noexcept override;
+    SinkStatus Write(const LogRecordView& record) noexcept override;
+    SinkStatus Flush() noexcept override;
 
 private:
     // Only read on Windows; kept on all platforms so the layout is uniform.

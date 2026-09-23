@@ -37,6 +37,7 @@ target_sources(
     ludus_foundation_base
     PRIVATE
         src/version.cpp
+        src/diagnostic.cpp
         src/internal/version_format.hpp
     PUBLIC
         FILE_SET public_headers
@@ -50,6 +51,7 @@ target_sources(
             include/ludus/foundation/base/version.hpp
             "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}/ludus/foundation/base/build_metadata.hpp"
             include/ludus/foundation/base/pointer.hpp
+            include/ludus/foundation/base/diagnostic.hpp
 )
 
 target_include_directories(

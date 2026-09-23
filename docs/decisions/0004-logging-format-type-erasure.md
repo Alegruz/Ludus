@@ -71,3 +71,39 @@ This establishes a project rule (see `AGENTS.md`): **do not instantiate heavy
 standard-library templates in public headers.** Expensive facilities are
 type-erased or PIMPL'd behind a `.cpp` boundary; templated public APIs erase to
 a non-template implementation as early as possible.
+
+
+
+## Amendment (logging redesign, phases 0–4)
+
+The original decision type-erased `std::format` to `std::format_args` so that the
+`std::vformat` **instantiation** happened once instead of per translation unit.
+That removed replicated *execution machinery*, but it did **not** remove the cost
+of *parsing* `<format>` (and its transitive `<chrono>`), which every logging TU
+still paid because `log.hpp` included `<format>`. Erasure of execution and
+elimination of parse cost are different things; this ADR previously conflated
+them.
+
+The logging redesign supersedes the `std::format` boundary with a narrow,
+bounded, no-heap typed formatter (`internal/format_engine.{hpp,cpp}`), selected
+after measuring both candidates on the pinned toolchain
+(`.kiro/specs/logging-redesign/decision-log.md`):
+
+- **Build:** the common `log.hpp` no longer includes `<format>`/`<filesystem>`;
+  measured preprocessed expansion fell from ~79,790 to ~20,232 lines, and the
+  opt-in `log_format.hpp` from ~65,599 to ~21,213 lines (clang-18, this host).
+- **Contract:** unlike `std::vformat`, the narrow formatter never allocates and
+  never terminates on a bad/oversize format under `-fno-exceptions`; it returns
+  `{BytesWritten, Truncated, FormatError}`. This is a hard acceptance gate the
+  `std::format` path could not meet, and was the deciding factor — not build time
+  alone.
+- **Cost accepted:** the narrow packer adds ~40 bytes of `.text` per call site
+  versus `make_format_args`; this is bounded and tracked, and does not violate
+  any hard gate.
+
+`std::format` is therefore no longer used anywhere in the logging headers or
+engine translation units. The temporary `log_compat_format.hpp` adapter
+contemplated by the spec was not needed: every existing call site already fits
+the narrow grammar. The rule this ADR established — *do not instantiate heavy
+standard-library templates in public headers* — still holds and is now enforced
+by header parse budgets (ADR 0005) plus the split-header structure.

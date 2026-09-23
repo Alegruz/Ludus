@@ -9,32 +9,30 @@
 namespace ludus::foundation::logging::internal
 {
 
-// Fixed-size, trivially copyable record header (spec section 14). Phase 1 is
-// synchronous and does not enqueue records, but the header is defined now so the
-// asynchronous backend can copy `header + message bytes` into a bounded ring
-// buffer without redesign. The textual message is stored separately and follows
-// the header in the queue's byte stream; it is never a std::string per record.
+// Fixed-size, trivially copyable record header for the (future) asynchronous
+// queue (design.md section 4). Kept compact so the async backend can copy
+// `header + message bytes` into a bounded slot without redesign. The textual
+// message follows the header in the queue byte stream; it is never a
+// std::string per record.
 struct LogRecordHeader
 {
-    uint64 TimestampNs; // steady/wall clock nanoseconds since epoch
-    uint32 ThreadId;    // internal numeric thread id
-    uint32 CategoryId;  // LogCategory::Id
-
-    uint32 FileId; // interned source-file id (0 = not interned yet)
-    uint32 Line;   // std::source_location::line()
-
+    uint64 Sequence;       // successful reservation position (NOT event time)
+    uint64 MonotonicTicks; // steady_clock ticks captured on the producer
+    uint32 NativeThreadId; // OS thread id (requirements R23)
+    uint32 CategoryId;     // LogCategory::Id
+    uint32 SourceId;       // interned source-file/line descriptor id (0 = none)
+    uint32 Line;           // std::source_location::line()
     LogLevel Level;
-    uint8 Reserved0 = 0;
+    uint8 Flags = 0;        // Truncated | FormatError | EmergencyMirror | ...
     uint16 MessageSize = 0; // bytes of message text following the header
 };
 
-static_assert(sizeof(LogRecordHeader) <= 32, "LogRecordHeader must stay compact for queue copies");
+static_assert(sizeof(LogRecordHeader) <= 40, "LogRecordHeader must stay compact for queue copies");
 
 // The view a sink receives. In synchronous mode this borrows the caller's
-// thread-local scratch buffer and source metadata; in asynchronous mode the
-// consumer thread will reconstruct an equivalent view over the dequeued bytes.
-// All members are non-owning references valid only for the duration of the
-// Write() call, so sinks must copy anything they retain.
+// source metadata and formatted message; all members are non-owning references
+// valid only for the duration of the Write() call, so sinks must copy anything
+// they retain (requirements R24).
 struct LogRecordView
 {
     LogLevel Level = LogLevel::Info;
@@ -42,19 +40,24 @@ struct LogRecordView
 
     std::string_view Message;
 
-    // Source metadata (spec section 10). Present in the record even when a sink
-    // chooses to hide it for low-severity levels.
+    // Source metadata (present even when a sink hides it for low severities).
     std::string_view File;
     std::string_view Function;
     uint32 Line = 0;
 
-    // Human-readable thread name (e.g. "Main", "Render") plus the numeric id.
+    // Human-readable thread name plus the readable counter id and the native OS
+    // thread id (requirements R23; F11: native id enables debugger correlation).
     std::string_view ThreadName;
     uint32 ThreadId = 0;
+    uint64 NativeThreadId = 0;
 
-    // Wall-clock timestamp in nanoseconds since the Unix epoch; sinks format it
-    // as they see fit (console uses HH:MM:SS.mmm).
-    uint64 TimestampNs = 0;
+    // Monotonic tick count captured on the producer; the backend converts to
+    // wall-clock text via the session anchor. Monotonic ordering never reverses
+    // under a wall-clock correction (requirements R23; F11).
+    uint64 MonotonicTicks = 0;
+
+    // Successful submission sequence; correlates completion, not physical time.
+    uint64 Sequence = 0;
 };
 
 } // namespace ludus::foundation::logging::internal

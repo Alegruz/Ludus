@@ -33,26 +33,27 @@ ConsoleSink::ConsoleSink() : mStdoutIsTty(IsStreamTty(stdout)), mStderrIsTty(IsS
     mScratch.reserve(256);
 }
 
-void ConsoleSink::Write(const LogRecordView& record) noexcept
+SinkStatus ConsoleSink::Write(const LogRecordView& record) noexcept
 {
     // Warning and above are diagnostics that belong on stderr so they interleave
     // correctly with other error output and survive stdout redirection.
     std::FILE* stream = record.Level >= LogLevel::Warning ? stderr : stdout;
     const bool use_color = stream == stderr ? mStderrIsTty : mStdoutIsTty;
 
-    // The engine builds with -fno-exceptions, so formatting cannot throw a
-    // catchable exception here; a genuine allocation failure terminates the
-    // process (the log line is the least of the caller's problems at that
-    // point). The reserved scratch buffer keeps ordinary lines allocation-free.
+    // The reserved scratch buffer keeps ordinary lines allocation-free. The
+    // caller serializes Write across producers, so mScratch is single-owner
+    // here (fixes F1).
     FormatConsoleLine(record, use_color, mScratch);
     mScratch.push_back('\n');
-    std::fwrite(mScratch.data(), 1, mScratch.size(), stream);
+    const usize written = std::fwrite(mScratch.data(), 1, mScratch.size(), stream);
+    return written == mScratch.size() ? SinkStatus::Ok : SinkStatus::Failed;
 }
 
-void ConsoleSink::Flush() noexcept
+SinkStatus ConsoleSink::Flush() noexcept
 {
-    std::fflush(stdout);
-    std::fflush(stderr);
+    const int a = std::fflush(stdout);
+    const int b = std::fflush(stderr);
+    return (a == 0 && b == 0) ? SinkStatus::Ok : SinkStatus::Failed;
 }
 
 } // namespace ludus::foundation::logging::internal

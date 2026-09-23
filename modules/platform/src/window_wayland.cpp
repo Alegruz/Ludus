@@ -12,6 +12,7 @@
 #include <ludus/foundation/base/defines.h>
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/logging/log.hpp>
+#include <ludus/foundation/logging/log_format.hpp>
 
 #include <ludus/platform/base/window.h>
 #include <ludus/platform/log_categories.h>

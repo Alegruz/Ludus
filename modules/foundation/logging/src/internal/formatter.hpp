@@ -12,33 +12,32 @@ namespace ludus::foundation::logging::internal
 
 // Whether a sink should append the "file:line" source suffix for a given level.
 // Warning and above always show source; lower levels hide it in normal output
-// even though the record still carries it (spec section 10).
+// even though the record still carries it.
 [[nodiscard]] bool IsSourceVisibleFor(LogLevel level) noexcept;
-
-// Format the wall-clock timestamp (ns since epoch) as "HH:MM:SS.mmm" into `out`,
-// which must have room for at least 12 characters plus a terminator. Returns the
-// number of characters written. Allocation-free.
-usize FormatTimestamp(uint64 timestamp_ns, char* out, usize capacity) noexcept;
 
 // Render one record as a full console/file line (without trailing newline) into
 // `buffer`, reusing its capacity to avoid per-call allocation where possible.
-// The produced line follows spec section 19:
+// Layout:
 //   HH:MM:SS.mmm [Thread] [LEVEL] [Category] message
 // and, when source is visible for the level, a following indented line:
 //       file:line
 // `use_color` toggles ANSI SGR sequences around the level field.
 void FormatConsoleLine(const LogRecordView& record, bool use_color, std::string& buffer);
 
-// The current thread's human-readable name (spec section 29). Defaults to
-// "Main" for the process's first-seen thread and "Thread-<id>" otherwise until
-// set explicitly.
+// The current thread's human-readable name. Defaults to "Main" for the first
+// thread that logs and "Thread-<id>" otherwise until set explicitly.
 [[nodiscard]] std::string_view GetCurrentThreadName() noexcept;
 
-// The current thread's stable numeric id (a small monotonic counter, not the OS
-// tid, so log output is stable and readable).
+// The current thread's stable readable id (a small monotonic counter, not the
+// OS tid, so log output is stable and readable).
 [[nodiscard]] uint32 GetCurrentThreadId() noexcept;
 
-// Wall-clock nanoseconds since the Unix epoch.
-[[nodiscard]] uint64 GetNowNanoseconds() noexcept;
+// The current thread's native OS thread id (requirements R23; enables debugger
+// correlation, unlike the readable counter).
+[[nodiscard]] uint64 GetNativeThreadId() noexcept;
+
+// Monotonic steady-clock ticks (nanoseconds) captured on the producer. A
+// wall-clock correction never moves this backwards (requirements R23; F11).
+[[nodiscard]] uint64 GetMonotonicTicks() noexcept;
 
 } // namespace ludus::foundation::logging::internal
