@@ -23,11 +23,23 @@
     "Re-measure on the CI runner (the Build-time budget job summary) before",
     "changing these; do not calibrate from a fast local machine."
   ],
+  "$logging_redesign_note": [
+    "The logging redesign (.kiro/specs/logging-redesign) removed <format> and",
+    "<filesystem> from the public logging headers. log.hpp no longer needs its",
+    "prior 3200 ms override (which existed because it pulled <format> -> <chrono>",
+    "+ Unicode/format machinery): measured deterministic preprocessed expansion",
+    "fell from ~79,790 to ~20,232 lines. Its override is removed so it is held to",
+    "the default header budget instead. The opt-in log_format.hpp uses the narrow",
+    "bounded formatter (no <format>) and is likewise held to the default. Re-run",
+    "the Build-time budget CI job to confirm the default is comfortably met and to",
+    "set a tighter override if desired; do NOT raise a budget to accommodate a",
+    "regression (AGENTS.md / ADR 0005). file_sink.hpp / debugger_sink.hpp remain",
+    "private .cpp-side headers that still legitimately use <filesystem>."
+  ],
   "preset": "linux-clang-development",
   "default_header_avg_ms": 2000,
   "total_frontend_seconds": 65,
   "header_overrides_avg_ms": {
-    "modules/foundation/logging/include/ludus/foundation/logging/log.hpp": 3200,
     "modules/foundation/logging/src/sinks/file_sink.hpp": 2400,
     "modules/foundation/logging/src/sinks/debugger_sink.hpp": 2000
   },

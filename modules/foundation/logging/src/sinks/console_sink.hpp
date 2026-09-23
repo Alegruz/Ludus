@@ -15,8 +15,8 @@ class ConsoleSink final : public ILogSink
 public:
     ConsoleSink();
 
-    void Write(const LogRecordView& record) noexcept override;
-    void Flush() noexcept override;
+    SinkStatus Write(const LogRecordView& record) noexcept override;
+    SinkStatus Flush() noexcept override;
 
 private:
     bool mStdoutIsTty = false;

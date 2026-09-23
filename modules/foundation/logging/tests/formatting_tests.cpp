@@ -1,4 +1,6 @@
 #include <ludus/foundation/logging/log.hpp>
+#include <ludus/foundation/logging/log_format.hpp>
+#include <ludus/foundation/logging/log_system.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -71,7 +73,8 @@ TEST_CASE("format arguments are substituted into the message", "[logging][format
     config.EnableConsole = false;
     config.EnableDebugger = false;
     config.EnableFile = true;
-    config.Directory = dir;
+    const std::string dir_str = dir.string();
+    config.Directory = dir_str;
     LogSystem::Initialize(config);
 
     LUDUS_LOG_INFO(LogFormatTest, "Window created: {}x{}", 1280, 720);
@@ -93,7 +96,8 @@ TEST_CASE("source metadata is appended for warnings and above", "[logging][forma
     config.EnableConsole = false;
     config.EnableDebugger = false;
     config.EnableFile = true;
-    config.Directory = dir;
+    const std::string dir_str = dir.string();
+    config.Directory = dir_str;
     LogSystem::Initialize(config);
 
     LUDUS_LOG_INFO(LogFormatTest, "info line");

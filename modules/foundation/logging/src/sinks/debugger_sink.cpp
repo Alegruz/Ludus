@@ -18,25 +18,32 @@ DebuggerSink::DebuggerSink()
     mScratch.reserve(256);
 }
 
-void DebuggerSink::Write([[maybe_unused]] const LogRecordView& record) noexcept
+SinkStatus DebuggerSink::Write([[maybe_unused]] const LogRecordView& record) noexcept
 {
 #if defined(_WIN32)
+    // Re-check attachment rather than trusting a stale ctor-time snapshot
+    // (fixes F10): a debugger may attach after Initialize().
+    mActive = IsDebuggerPresent() != 0;
     if (!mActive)
     {
-        return;
+        return SinkStatus::Disabled;
     }
-    // Debugger output never uses ANSI color. The engine builds with
-    // -fno-exceptions, so formatting cannot throw a catchable exception.
+    // Debugger output never uses ANSI color.
     FormatConsoleLine(record, /*use_color=*/false, mScratch);
     mScratch.push_back('\n');
     OutputDebugStringA(mScratch.c_str());
+    return SinkStatus::Ok;
+#else
+    // Non-Windows: no universal debugger output window. Report Disabled so the
+    // backend does not count a delivery here.
+    return SinkStatus::Disabled;
 #endif
-    // Non-Windows: intentional no-op in Phase 1.
 }
 
-void DebuggerSink::Flush() noexcept
+SinkStatus DebuggerSink::Flush() noexcept
 {
     // Debugger output is unbuffered from our side; nothing to flush.
+    return SinkStatus::Ok;
 }
 
 } // namespace ludus::foundation::logging::internal

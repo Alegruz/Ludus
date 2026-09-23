@@ -8,6 +8,8 @@
 #define LUDUS_COMPILED_LOG_LEVEL 4 // Error+
 
 #include <ludus/foundation/logging/log.hpp>
+#include <ludus/foundation/logging/log_format.hpp>
+#include <ludus/foundation/logging/log_system.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -70,20 +72,20 @@ TEST_CASE("per-category runtime override changes effective threshold", "[logging
     LogSystem::Initialize(config);
 
     // Global is Warning, so Info is filtered for an unconfigured category.
-    CHECK_FALSE(LogSystem::ShouldLog(LogLevel::Info, LogCatTest));
+    CHECK_FALSE(ShouldLog(LogLevel::Info, LogCatTest));
 
     // Lower this category to Trace: now Info passes.
     LogSystem::SetCategoryLevel(LogCatTest, LogLevel::Trace);
-    CHECK(LogSystem::ShouldLog(LogLevel::Info, LogCatTest));
+    CHECK(ShouldLog(LogLevel::Info, LogCatTest));
 
     // Other categories still follow the global level.
-    CHECK_FALSE(LogSystem::ShouldLog(LogLevel::Info, LOG_CORE));
+    CHECK_FALSE(ShouldLog(LogLevel::Info, LOG_CORE));
 
     // Fatal is always eligible regardless of thresholds.
-    CHECK(LogSystem::ShouldLog(LogLevel::Fatal, LogCatTest));
+    CHECK(ShouldLog(LogLevel::Fatal, LogCatTest));
 
     LogSystem::ClearCategoryLevels();
-    CHECK_FALSE(LogSystem::ShouldLog(LogLevel::Info, LogCatTest));
+    CHECK_FALSE(ShouldLog(LogLevel::Info, LogCatTest));
 
     LogSystem::Shutdown();
 }
