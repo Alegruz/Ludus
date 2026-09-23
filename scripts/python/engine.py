@@ -1169,7 +1169,11 @@ def command_init(args: argparse.Namespace) -> int:
         command_test(argparse.Namespace(preset=preset, label=None))
 
         if not args.skip_checks:
-            command_check(argparse.Namespace(preset=preset, format=False, tidy=False, all=True, fix=False))
+            command_check(
+                argparse.Namespace(
+                    preset=preset, format=False, tidy=False, include_cleaner=False, all=True, fix=False
+                )
+            )
 
         if not args.skip_sanitizers:
             command_build(argparse.Namespace(preset="linux-clang-asan-ubsan", extra=[]))
@@ -1349,7 +1353,9 @@ def run_include_cleaner(root: Path, preset: str) -> None:
 def command_check(args: argparse.Namespace) -> int:
     root = repo_root()
     ensure_bootstrap_for_preset(root, args.preset)
-    explicit = args.format or args.tidy or args.include_cleaner
+    # getattr guards callers that build the Namespace by hand (e.g. command_init).
+    include_cleaner = getattr(args, "include_cleaner", False)
+    explicit = args.format or args.tidy or include_cleaner
     run_all = args.all or not explicit
 
     if args.format or run_all:
@@ -1358,7 +1364,7 @@ def command_check(args: argparse.Namespace) -> int:
         cmake_configure(root, args.preset)
         run_tidy(root, args.preset)
     # Advisory: only when explicitly requested, never part of --all / the default.
-    if args.include_cleaner:
+    if include_cleaner:
         cmake_configure(root, args.preset)
         run_include_cleaner(root, args.preset)
     return 0
