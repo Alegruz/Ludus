@@ -4,7 +4,7 @@
 #include <cstdint>
 
 // Ludus fixed-width primitive types. Engine code uses these spellings
-// (uint32, int64, usize, f32, ...) instead of std::uint32_t / std::size_t /
+// (uint32, int64, usize, float32, ...) instead of std::uint32_t / std::size_t /
 // float so that widths are explicit and consistent across the codebase.
 //
 // These are aliases of the standard <cstdint> / <cstddef> types, not
@@ -32,17 +32,17 @@ using int64 = std::int64_t;
 using usize = std::size_t;
 using isize = std::ptrdiff_t;
 
-// Floating point. f32/f64 make the width explicit at call sites.
-using f32 = float;
-using f64 = double;
+// Floating point. float32/float64 make the width explicit at call sites.
+using float32 = float;
+using float64 = double;
 } // namespace ludus::foundation::core
 
 // Re-export into ludus::foundation so most engine code can use the short-scoped
 // names, mirroring how nullptr_t is surfaced from defines.h.
 namespace ludus::foundation
 {
-using core::f32;
-using core::f64;
+using core::float32;
+using core::float64;
 using core::int16;
 using core::int32;
 using core::int64;

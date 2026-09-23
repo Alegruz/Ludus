@@ -34,7 +34,7 @@ spellings or raw `float`/`double`:
 
 - `uint8` / `uint16` / `uint32` / `uint64`, `int8` / `int16` / `int32` / `int64`
 - `usize` (sizes, indices, `sizeof` results; aliases `std::size_t`), `isize`
-- `f32` / `f64`
+- `float32` / `float64`
 
 Do not write `std::uint32_t`, `std::size_t`, etc. in new code. These are exact
 aliases of the `<cstdint>` / `<cstddef>` types, so they stay interoperable with

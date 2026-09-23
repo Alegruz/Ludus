@@ -87,7 +87,7 @@ engine code. Discuss such cases in the PR before adding them.
 
 - Use the Ludus fixed-width aliases from `ludus/foundation/base/types.h`:
   `uint8` / `uint16` / `uint32` / `uint64`, `int8` / `int16` / `int32` /
-  `int64`, `usize` (sizes/indices), `isize`, and `f32` / `f64`.
+  `int64`, `usize` (sizes/indices), `isize`, and `float32` / `float64`.
 - Do not write `std::uint32_t`, `std::size_t`, raw `float`/`double`, etc. in new
   code. The aliases are exact aliases of the `<cstdint>` / `<cstddef>` types, so
   they interoperate with the standard library while keeping widths explicit.
