@@ -46,6 +46,7 @@ target_sources(
             "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}"
         FILES
             include/ludus/foundation/base/defines.h
+            include/ludus/foundation/base/types.h
             include/ludus/foundation/base/version.hpp
             "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}/ludus/foundation/base/build_metadata.hpp"
             include/ludus/foundation/base/pointer.hpp

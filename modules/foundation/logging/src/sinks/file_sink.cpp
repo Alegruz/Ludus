@@ -46,7 +46,7 @@ std::string sessionFileName()
 // Delete oldest session files so at most `retained` remain (counting the file we
 // are about to create). Matches on the "*_pid-*.log" session naming so unrelated
 // files in the directory are left alone (spec section 22).
-void pruneOldSessions(const std::filesystem::path& directory, std::uint32_t retained) noexcept
+void pruneOldSessions(const std::filesystem::path& directory, uint32 retained) noexcept
 {
     if (retained == 0)
     {
@@ -92,13 +92,13 @@ void pruneOldSessions(const std::filesystem::path& directory, std::uint32_t reta
                   return ta < tb;
               });
 
-    const std::size_t keep = retained > 0 ? static_cast<std::size_t>(retained - 1) : 0;
+    const usize keep = retained > 0 ? static_cast<usize>(retained - 1) : 0;
     if (sessions.size() <= keep)
     {
         return;
     }
-    const std::size_t to_remove = sessions.size() - keep;
-    for (std::size_t i = 0; i < to_remove; ++i)
+    const usize to_remove = sessions.size() - keep;
+    for (usize i = 0; i < to_remove; ++i)
     {
         std::error_code remove_ec;
         std::filesystem::remove(sessions[i].path(), remove_ec);
@@ -136,7 +136,7 @@ std::unique_ptr<FileSink> FileSink::Create(const LogConfig& config)
 FileSink::FileSink(std::FILE* file,
                    std::filesystem::path directory,
                    std::filesystem::path base_path,
-                   std::uint64_t maxFileSizeBytes)
+                   uint64 maxFileSizeBytes)
     : mFile(file), mDirectory(std::move(directory)), mBasePath(std::move(base_path)), mActivePath(mBasePath),
       mMaxFileSizeBytes(maxFileSizeBytes)
 {
@@ -153,7 +153,7 @@ FileSink::~FileSink()
     }
 }
 
-void FileSink::rotateIfNeeded(std::size_t incoming_bytes) noexcept
+void FileSink::rotateIfNeeded(usize incoming_bytes) noexcept
 {
     if (mMaxFileSizeBytes == 0 || mFile == nullptr)
     {
@@ -205,7 +205,7 @@ void FileSink::Write(const LogRecordView& record) noexcept
         return;
     }
 
-    const std::size_t n = std::fwrite(mScratch.data(), 1, mScratch.size(), mFile);
+    const usize n = std::fwrite(mScratch.data(), 1, mScratch.size(), mFile);
     mBytesWritten += n;
 }
 

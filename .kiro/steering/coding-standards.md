@@ -27,6 +27,34 @@ Ludus does not use C++ exceptions.
   `ludus_enable_test_exceptions()` in `cmake/EngineTargets.cmake`. Never apply
   it to engine libraries or applications.
 
+## Primitive types (fixed-width aliases)
+
+Use the Ludus aliases from `ludus/foundation/base/types.h` instead of the `std::`
+spellings or raw `float`/`double`:
+
+- `uint8` / `uint16` / `uint32` / `uint64`, `int8` / `int16` / `int32` / `int64`
+- `usize` (sizes, indices, `sizeof` results; aliases `std::size_t`), `isize`
+- `float32` / `float64`
+
+Do not write `std::uint32_t`, `std::size_t`, etc. in new code. These are exact
+aliases of the `<cstdint>` / `<cstddef>` types, so they stay interoperable with
+the standard library while keeping widths explicit.
+
+## Standard library / C runtime usage
+
+Full policy: `docs/decisions/0003-standard-library-usage-policy.md`. In engine
+code (`modules/`, `apps/`):
+
+- Banned: `<iostream>`/`cout`/`cerr`/`endl`, C++ exceptions, `std::` primitive
+  spellings, `<sstream>`, `printf`-family diagnostics. Use `LUDUS_LOG_*`.
+- Allowed: `<string_view>`, `<atomic>`/`<mutex>`/`<shared_mutex>`,
+  `<source_location>`, `<chrono>`, `<type_traits>`/`<utility>`, `<new>`;
+  `<cstdio>` only in logging sinks / emergency path; `<cstdint>`/`<cstddef>`
+  only in `types.h`.
+- Slated for future replacement (use now, don't spread): `std::string`,
+  `std::vector`, `std::unordered_map`, `std::format`, `<filesystem>`,
+  `<cstring>`.
+
 ## Other standing rules
 
 - C++23, no compiler extensions; pinned Clang/LLVM 18 toolchain.
