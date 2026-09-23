@@ -10,9 +10,13 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       CI: "true"
+      LUDUS_ENABLE_CCACHE: "1"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Install ccache
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ccache
 
       - name: Cache pip downloads
         uses: actions/cache@v4
@@ -26,5 +30,36 @@ jobs:
           path: out/conan/home
           key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', 'config/conan/profiles/linux-clang-x86_64', 'conan.lock') }}
 
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ github.ref }}-
+            ccache-${{ runner.os }}-
+
+      - name: Reset ccache statistics
+        run: ccache --zero-stats
+
       - name: Initialize, build, test, check, and validate SDK
-        run: ./init.sh --ci --validate
+        run: |
+          start_time=$(date +%s)
+          ./init.sh --ci --validate
+          end_time=$(date +%s)
+          echo "LUDUS_BUILD_WALL_SECONDS=$(( end_time - start_time ))" >> "$GITHUB_ENV"
+
+      - name: Print build wall-time and ccache statistics
+        if: always()
+        run: |
+          echo "### Build metrics" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Total wall-time | ${LUDUS_BUILD_WALL_SECONDS:-?}s |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### ccache statistics" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "--- ccache stats ---"
+          ccache --show-stats

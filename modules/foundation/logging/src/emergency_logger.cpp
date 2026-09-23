@@ -17,11 +17,11 @@ namespace
 
 // Append a NUL-terminated C string to a fixed buffer, never overflowing. Updates
 // `length` and always leaves the buffer NUL-terminated. Allocation-free.
-void append(std::array<char, 512>& buffer, std::size_t& length, std::string_view text) noexcept
+void append(std::array<char, 512>& buffer, usize& length, std::string_view text) noexcept
 {
-    const std::size_t capacity = buffer.size() - 1; // reserve space for terminator
-    const std::size_t remaining = capacity - length;
-    const std::size_t count = text.size() < remaining ? text.size() : remaining;
+    const usize capacity = buffer.size() - 1; // reserve space for terminator
+    const usize remaining = capacity - length;
+    const usize count = text.size() < remaining ? text.size() : remaining;
     if (count > 0)
     {
         std::memcpy(buffer.data() + length, text.data(), count);
@@ -41,7 +41,7 @@ void EmergencyLog(LogLevel level,
     // format is intentionally minimal and dependency-free:
     //   [LUDUS:LEVEL] [Category] message (file:line)
     std::array<char, 512> buffer{};
-    std::size_t length = 0;
+    usize length = 0;
 
     append(buffer, length, "[LUDUS:");
     append(buffer, length, ToString(level));
@@ -59,7 +59,7 @@ void EmergencyLog(LogLevel level,
         std::snprintf(line_digits.data(), line_digits.size(), "%u", static_cast<unsigned>(location.line()));
     if (written > 0)
     {
-        append(buffer, length, std::string_view(line_digits.data(), static_cast<std::size_t>(written)));
+        append(buffer, length, std::string_view(line_digits.data(), static_cast<usize>(written)));
     }
     append(buffer, length, ")\n");
 

@@ -1,6 +1,7 @@
 #pragma once
 
-#include <cstdint>
+#include <ludus/foundation/base/types.h>
+
 #include <string_view>
 
 namespace ludus::foundation::logging
@@ -9,15 +10,15 @@ namespace ludus::foundation::logging
 // Compile-time FNV-1a hash used to derive a stable 32-bit category id from the
 // category name. Runtime filtering compares these integer ids rather than
 // performing a string-map lookup on every logging call (spec section 5).
-[[nodiscard]] constexpr std::uint32_t HashLogCategory(std::string_view name) noexcept
+[[nodiscard]] constexpr uint32 HashLogCategory(std::string_view name) noexcept
 {
-    constexpr std::uint32_t FNV_OFFSET_BASIS = 2166136261u;
-    constexpr std::uint32_t FNV_PRIME = 16777619u;
+    constexpr uint32 FNV_OFFSET_BASIS = 2166136261u;
+    constexpr uint32 FNV_PRIME = 16777619u;
 
-    std::uint32_t hash = FNV_OFFSET_BASIS;
+    uint32 hash = FNV_OFFSET_BASIS;
     for (const char character : name)
     {
-        hash ^= static_cast<std::uint32_t>(static_cast<unsigned char>(character));
+        hash ^= static_cast<uint32>(static_cast<unsigned char>(character));
         hash *= FNV_PRIME;
     }
     return hash;
@@ -28,7 +29,7 @@ namespace ludus::foundation::logging
 // registration is needed on the logging hot path.
 struct LogCategory
 {
-    std::uint32_t Id;
+    uint32 Id;
     std::string_view Name;
 
     consteval LogCategory(std::string_view category_name) noexcept
@@ -38,7 +39,7 @@ struct LogCategory
 
     // Explicit two-argument form kept for parity with the specification's
     // examples and for tests that construct categories at runtime.
-    constexpr LogCategory(std::uint32_t category_id, std::string_view category_name) noexcept
+    constexpr LogCategory(uint32 category_id, std::string_view category_name) noexcept
         : Id(category_id), Name(category_name)
     {
     }

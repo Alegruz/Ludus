@@ -39,11 +39,11 @@ constexpr std::string_view COLOR_RESET = "\x1b[0m";
 
 // Monotonic thread-id allocator. Not the OS tid: a small, stable, readable
 // counter so log output is deterministic across runs for a given thread order.
-std::atomic<std::uint32_t> gNextThreadId{0};
+std::atomic<uint32> gNextThreadId{0};
 
 struct ThreadLocalIdentity
 {
-    std::uint32_t Id;
+    uint32 Id;
     std::string Name;
 
     ThreadLocalIdentity() noexcept : Id(gNextThreadId.fetch_add(1, std::memory_order_relaxed))
@@ -74,7 +74,7 @@ bool IsSourceVisibleFor(LogLevel level) noexcept
     return level >= LogLevel::Warning;
 }
 
-std::size_t FormatTimestamp(std::uint64_t timestamp_ns, char* out, std::size_t capacity) noexcept
+usize FormatTimestamp(uint64 timestamp_ns, char* out, usize capacity) noexcept
 {
     if (capacity < 13)
     {
@@ -85,8 +85,8 @@ std::size_t FormatTimestamp(std::uint64_t timestamp_ns, char* out, std::size_t c
         return 0;
     }
 
-    const std::uint64_t total_seconds = timestamp_ns / 1'000'000'000ull;
-    const std::uint32_t milliseconds = static_cast<std::uint32_t>((timestamp_ns / 1'000'000ull) % 1000ull);
+    const uint64 total_seconds = timestamp_ns / 1'000'000'000ull;
+    const uint32 milliseconds = static_cast<uint32>((timestamp_ns / 1'000'000ull) % 1000ull);
 
     const std::time_t seconds = static_cast<std::time_t>(total_seconds);
     std::tm broken{};
@@ -98,7 +98,7 @@ std::size_t FormatTimestamp(std::uint64_t timestamp_ns, char* out, std::size_t c
 
     const int written =
         std::snprintf(out, capacity, "%02d:%02d:%02d.%03u", broken.tm_hour, broken.tm_min, broken.tm_sec, milliseconds);
-    return written > 0 ? static_cast<std::size_t>(written) : 0;
+    return written > 0 ? static_cast<usize>(written) : 0;
 }
 
 void FormatConsoleLine(const LogRecordView& record, bool use_color, std::string& buffer)
@@ -106,7 +106,7 @@ void FormatConsoleLine(const LogRecordView& record, bool use_color, std::string&
     buffer.clear();
 
     char timestamp[16];
-    const std::size_t ts_len = FormatTimestamp(record.TimestampNs, timestamp, sizeof(timestamp));
+    const usize ts_len = FormatTimestamp(record.TimestampNs, timestamp, sizeof(timestamp));
     buffer.append(timestamp, ts_len);
 
     buffer.append(" [");
@@ -142,15 +142,15 @@ std::string_view GetCurrentThreadName() noexcept
     return GetThreadLocalIdentity().Name;
 }
 
-std::uint32_t GetCurrentThreadId() noexcept
+uint32 GetCurrentThreadId() noexcept
 {
     return GetThreadLocalIdentity().Id;
 }
 
-std::uint64_t GetNowNanoseconds() noexcept
+uint64 GetNowNanoseconds() noexcept
 {
     const auto now = std::chrono::system_clock::now().time_since_epoch();
-    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+    return static_cast<uint64>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
 }
 
 } // namespace ludus::foundation::logging::internal
