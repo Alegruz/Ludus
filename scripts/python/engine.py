@@ -1370,10 +1370,15 @@ def command_check(args: argparse.Namespace) -> int:
     return 0
 
 
-def verify_sdk_install(root: Path, prefix: Path) -> None:
+def verify_sdk_install(root: Path, prefix: Path, build_dir: Path) -> None:
     required_paths = [
         prefix / "include" / "ludus" / "foundation" / "base" / "version.hpp",
         prefix / "include" / "ludus" / "foundation" / "base" / "build_metadata.hpp",
+        prefix / "include" / "ludus" / "foundation" / "base" / "assert_config.hpp",
+        prefix / "include" / "ludus" / "foundation" / "base" / "assert.hpp",
+        prefix / "include" / "ludus" / "foundation" / "base" / "assert_format.hpp",
+        prefix / "include" / "ludus" / "foundation" / "base" / "compiler.hpp",
+        prefix / "include" / "ludus" / "foundation" / "base" / "diagnostic_output.hpp",
         prefix / "lib" / "libludus_foundation_base.a",
         prefix / "lib" / "cmake" / "Ludus" / "LudusTargets.cmake",
         prefix / "lib" / "cmake" / "Ludus" / "LudusConfig.cmake",
@@ -1394,7 +1399,7 @@ def verify_sdk_install(root: Path, prefix: Path) -> None:
             print(f"Private header leaked into SDK install: {path}")
         raise EngineError("private headers must not be installed")
 
-    forbidden_roots = [root / "modules", root / "apps", root / "cmake"]
+    forbidden_roots = [root / "modules", root / "apps", root / "cmake", root / "out" / "build"]
     package_files = list((prefix / "lib" / "cmake" / "Ludus").glob("*.cmake"))
     for package_file in package_files:
         text = package_file.read_text(encoding="utf-8")
@@ -1402,7 +1407,17 @@ def verify_sdk_install(root: Path, prefix: Path) -> None:
             if str(forbidden) in text:
                 raise EngineError(f"installed CMake package references source-tree path {forbidden} in {package_file}")
 
-    print(f"Installed SDK artifacts verified: {prefix}")
+    manifest = json.loads((prefix / "share" / "Ludus" / "LudusSdkManifest.json").read_text())
+    expected = json.loads((build_dir / "cmake" / "LudusSdkManifest.json").read_text())
+    if manifest != expected:
+        raise EngineError("installed SDK manifest does not match the built variant")
+    config = (prefix / "include" / "ludus" / "foundation" / "base" / "assert_config.hpp").read_text()
+    for macro, key in (("LUDUS_ENABLE_ASSERTS", "enable_asserts"), ("LUDUS_BREAK_ON_CHECK", "break_on_check"),
+                       ("LUDUS_BUILD_FLAVOR_ID", "build_flavor_id"), ("LUDUS_ASSERT_POLICY_VERSION", "assert_policy_version")):
+        match = re.search(rf"^#define {macro} ([0-9]+)$", config, re.MULTILINE)
+        if not match or int(match.group(1)) != manifest[key]:
+            raise EngineError(f"installed assertion policy mismatch: {macro}")
+    print(f"Installed SDK artifacts and assertion policy verified: {prefix}")
 
 
 def command_install_sdk(args: argparse.Namespace) -> int:
@@ -1415,7 +1430,7 @@ def command_install_sdk(args: argparse.Namespace) -> int:
     build_dir = root / "out" / "build" / preset
     prefix = root / "out" / "install" / preset
     run([cmake(root), "--install", build_dir, "--prefix", prefix], cwd=root, env=tool_env(root))
-    verify_sdk_install(root, prefix)
+    verify_sdk_install(root, prefix, build_dir)
 
     consumer_source = root / "tests" / "sdk_consumer"
     consumer_build = root / "out" / "build" / "sdk-consumer" / preset
@@ -1437,7 +1452,13 @@ def command_install_sdk(args: argparse.Namespace) -> int:
         env=tool_env(root),
     )
     run([cmake(root), "--build", consumer_build], cwd=root, env=tool_env(root))
-    run([consumer_build / "ludus_sdk_consumer"], cwd=root, env=tool_env(root))
+    result = run([consumer_build / "ludus_sdk_consumer"], cwd=root, env=tool_env(root), capture=True)
+    print(result.stdout, end="")
+    manifest = json.loads((prefix / "share" / "Ludus" / "LudusSdkManifest.json").read_text())
+    runtime_policy = (f"flavor={manifest['build_flavor']} asserts={manifest['enable_asserts']} "
+                      f"policy-version={manifest['assert_policy_version']} check-break={manifest['break_on_check']}")
+    if runtime_policy not in result.stdout:
+        raise EngineError("installed assertion runtime policy does not match the SDK header/manifest")
     return 0
 
 

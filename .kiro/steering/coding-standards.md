@@ -46,7 +46,8 @@ Full policy: `docs/decisions/0003-standard-library-usage-policy.md`. In engine
 code (`modules/`, `apps/`):
 
 - Banned: `<iostream>`/`cout`/`cerr`/`endl`, C++ exceptions, `std::` primitive
-  spellings, `<sstream>`, `printf`-family diagnostics. Use `LUDUS_LOG_*`.
+  spellings, `<sstream>`, `printf`-family diagnostics. Use `LUDUS_LOG_*` for
+  ordinary diagnostics; assertions use the independent Base path (ADR 0003).
 - Allowed: `<string_view>`, `<atomic>`/`<mutex>`/`<shared_mutex>`,
   `<source_location>`, `<chrono>`, `<type_traits>`/`<utility>`, `<new>`;
   `<cstdio>` only in logging sinks / emergency path; `<cstdint>`/`<cstddef>`

@@ -16,6 +16,35 @@ out/logs/                   reserved for local logs
 
 The install tree is treated as the SDK boundary. The external consumer test uses `find_package()` against `out/install/<preset>/` rather than `add_subdirectory()` on the engine.
 
+## Build flavor and assertion policy
+
+Every preset now supplies an explicit `LUDUS_BUILD_FLAVOR`. Debug uses CMake
+Debug; Development and Profile both use RelWithDebInfo; Release uses Release
+(or MinSizeRel for a manual build). Direct CMake invocations must supply the
+matching flavor. Profile is its own engine flavor even though its optimization
+configuration matches Development. Assertion policy never follows `NDEBUG`.
+
+Debug/Development enable `LUDUS_ASSERT` and Check inspection breaks. Profile and
+Release compile Assert away and disable Check breaks. Require/Check/Fatal stay
+active everywhere, and fatal failures terminate after any debugger continuation.
+See [the implemented plain API](../architecture/assertions-m0-m1.md).
+
+The installed `assert_config.hpp` and SDK manifest carry the built variant's
+policy. A Release consumer of a Development SDK uses Development's assertion
+policy. Do not override the generated macros or mix headers/libraries from
+different variants. Use separate prefixes. Installation refuses an incompatible
+or legacy unversioned Ludus prefix before overwriting files; move an old generated
+`out/install/<preset>` aside, then rerun `scripts/install-sdk`. Multi-config SDK
+generation is explicitly unsupported until per-configuration packages exist.
+
+To run Release policy tests without changing the production preset:
+
+```bash
+out/host-tools/venv/bin/cmake --preset linux-clang-release -B out/build/linux-clang-release-assert-tests -DLUDUS_BUILD_TESTS=ON -DLUDUS_WARNINGS_AS_ERRORS=ON
+out/host-tools/venv/bin/cmake --build out/build/linux-clang-release-assert-tests
+out/host-tools/venv/bin/ctest --test-dir out/build/linux-clang-release-assert-tests --output-on-failure
+```
+
 ## One-Command Onboarding
 
 Run:

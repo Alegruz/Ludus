@@ -102,7 +102,8 @@ code (`modules/` and `apps/`):
 
 - **Banned:** `<iostream>` / `std::cout` / `std::cerr` / `std::endl`, C++
   exceptions, `std::` primitive-type spellings, `<sstream>`, and `printf`-family
-  for diagnostics. Route all diagnostics through `LUDUS_LOG_*`.
+  for diagnostics. Route ordinary diagnostics through `LUDUS_LOG_*`; assertion
+  failures use the independent FoundationBase emergency path (ADR 0003).
 - **Allowed:** `<string_view>`, `<atomic>` / `<mutex>` / `<shared_mutex>`,
   `<source_location>`, `<chrono>`, `<type_traits>` / `<utility>`, `<new>`; and
   `<cstdio>` only inside logging sinks / the emergency path. `<cstdint>` /

@@ -4,15 +4,13 @@ function(ludus_configure_project_options target_name)
     target_compile_features(${target_name} INTERFACE cxx_std_23)
 
     target_compile_definitions(${target_name} INTERFACE
-        $<$<CONFIG:Debug>:LUDUS_BUILD_DEBUG=1>
-        $<$<CONFIG:RelWithDebInfo>:LUDUS_BUILD_DEVELOPMENT=1>
-        $<$<CONFIG:Release>:LUDUS_BUILD_RELEASE=1>
-        $<$<CONFIG:MinSizeRel>:LUDUS_BUILD_RELEASE=1>
-        $<$<CONFIG:Profile>:LUDUS_BUILD_PROFILE=1>
+        LUDUS_BUILD_${LUDUS_BUILD_FLAVOR_DEFINE}=1
     )
 
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_link_options(${target_name} INTERFACE -fuse-ld=lld)
+        # Map diagnostic literals without breaking DWARF's source/comp-dir pair.
+        target_compile_options(${target_name} INTERFACE "-fmacro-prefix-map=${PROJECT_SOURCE_DIR}/=")
     endif()
 
     # Ludus does not use C++ exceptions (see AGENTS.md and the steering rule
@@ -22,9 +20,11 @@ function(ludus_configure_project_options target_name)
     # executables re-enable exceptions via ludus_enable_test_exceptions()
     # because Catch2 reports failures by throwing.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
-        target_compile_options(${target_name} INTERFACE -fno-exceptions)
+        target_compile_options(${target_name} INTERFACE
+            $<$<NOT:$<BOOL:$<TARGET_PROPERTY:LUDUS_TEST_EXCEPTIONS>>>:-fno-exceptions>)
     elseif(MSVC)
-        target_compile_options(${target_name} INTERFACE /EHs-c-)
+        target_compile_options(${target_name} INTERFACE
+            $<$<NOT:$<BOOL:$<TARGET_PROPERTY:LUDUS_TEST_EXCEPTIONS>>>:/EHs-c->)
     endif()
 
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")

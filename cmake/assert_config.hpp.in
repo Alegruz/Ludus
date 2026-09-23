@@ -1,0 +1,13 @@
+#pragma once
+
+// Generated SDK variant policy. Never override per translation unit or infer
+// it from NDEBUG. Use a separately configured/installed SDK to change policy.
+#if defined(LUDUS_ENABLE_ASSERTS) || defined(LUDUS_BREAK_ON_CHECK) || defined(LUDUS_ASSERT_POLICY_VERSION) || \
+    defined(LUDUS_BUILD_FLAVOR_ID)
+#    error "Ludus assertion configuration is owned by the SDK; overrides are forbidden"
+#endif
+
+#define LUDUS_ASSERT_POLICY_VERSION @LUDUS_ASSERT_POLICY_VERSION@
+#define LUDUS_BUILD_FLAVOR_ID @LUDUS_BUILD_FLAVOR_ID@
+#define LUDUS_ENABLE_ASSERTS @LUDUS_ENABLE_ASSERTS@
+#define LUDUS_BREAK_ON_CHECK @LUDUS_BREAK_ON_CHECK@

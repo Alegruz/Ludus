@@ -100,6 +100,8 @@ TEST_CASE("logging works before initialization and after shutdown without crashi
     LUDUS_LOG_ERROR(LogLifecycleTest, "post-shutdown error is safe");
 }
 
+// Backend tests use Log directly so Release's macro stripping does not erase
+// their inputs. Macro stripping has separate coverage in category_tests.cpp.
 TEST_CASE("synchronous logging makes the record visible before the call returns", "[logging][synchronous]")
 {
     const auto dir = make_temp_log_dir("sync");
@@ -113,9 +115,9 @@ TEST_CASE("synchronous logging makes the record visible before the call returns"
     config.Directory = dir;
     LogSystem::Initialize(config);
 
-    LUDUS_LOG_INFO(LogLifecycleTest, "synchronous visibility marker");
+    Log(LogLevel::Info, LogLifecycleTest, std::source_location::current(), "synchronous visibility marker");
     // In synchronous mode the record must already be in the file sink's stream
-    // by the time the macro returns. We flush to defeat OS buffering, then read.
+    // by the time Log returns. We flush to defeat OS buffering, then read.
     LogSystem::Flush();
 
     const std::string contents = read_file(find_log_file(dir));
@@ -144,7 +146,7 @@ TEST_CASE("file sink creates a uniquely named session file and writes to it", "[
     // never collide.
     CHECK(name.find("_pid-") != std::string::npos);
 
-    LUDUS_LOG_INFO(LogLifecycleTest, "written to session file");
+    Log(LogLevel::Info, LogLifecycleTest, std::source_location::current(), "written to session file");
     LogSystem::Flush();
     LogSystem::Shutdown();
 
@@ -167,7 +169,9 @@ TEST_CASE("shutdown drains and flushes buffered records to the file", "[logging]
     LogSystem::Initialize(config);
 
     const std::filesystem::path path = find_log_file(dir);
-    LUDUS_LOG_DEBUG(LogLifecycleTest, "record before shutdown");
+    // Exercise backend flushing even when the preset strips Debug macros.
+    // Error would flush before Shutdown and weaken the test.
+    Log(LogLevel::Debug, LogLifecycleTest, std::source_location::current(), "record before shutdown");
     // Do NOT flush explicitly; shutdown() must flush on its own (spec section 24).
     LogSystem::Shutdown();
 
@@ -219,8 +223,8 @@ TEST_CASE("statistics count submitted and written records", "[logging][statistic
     LogSystem::Initialize(config);
 
     const LogStatistics before = LogSystem::Statistics();
-    LUDUS_LOG_INFO(LogLifecycleTest, "counted record 1");
-    LUDUS_LOG_INFO(LogLifecycleTest, "counted record 2");
+    Log(LogLevel::Info, LogLifecycleTest, std::source_location::current(), "counted record 1");
+    Log(LogLevel::Info, LogLifecycleTest, std::source_location::current(), "counted record 2");
     const LogStatistics after = LogSystem::Statistics();
 
     CHECK(after.Submitted >= before.Submitted + 2);

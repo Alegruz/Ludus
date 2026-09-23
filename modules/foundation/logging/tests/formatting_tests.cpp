@@ -62,6 +62,7 @@ inline constexpr LogCategory LogFormatTest{"FormatTest"};
 
 } // namespace
 
+// Test backend formatting independently of per-preset macro stripping.
 TEST_CASE("format arguments are substituted into the message", "[logging][formatting]")
 {
     const auto dir = make_temp_log_dir("fmt_args");
@@ -74,7 +75,7 @@ TEST_CASE("format arguments are substituted into the message", "[logging][format
     config.Directory = dir;
     LogSystem::Initialize(config);
 
-    LUDUS_LOG_INFO(LogFormatTest, "Window created: {}x{}", 1280, 720);
+    Log(LogLevel::Info, LogFormatTest, std::source_location::current(), "Window created: {}x{}", 1280, 720);
     LogSystem::Flush();
     LogSystem::Shutdown();
 
@@ -96,7 +97,7 @@ TEST_CASE("source metadata is appended for warnings and above", "[logging][forma
     config.Directory = dir;
     LogSystem::Initialize(config);
 
-    LUDUS_LOG_INFO(LogFormatTest, "info line");
+    Log(LogLevel::Info, LogFormatTest, std::source_location::current(), "info line");
     LUDUS_LOG_WARN(LogFormatTest, "warn line");
     LogSystem::Flush();
     LogSystem::Shutdown();

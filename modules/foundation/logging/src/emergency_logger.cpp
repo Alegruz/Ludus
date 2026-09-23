@@ -1,5 +1,7 @@
 #include "internal/emergency_logger.hpp"
 
+#include <ludus/foundation/base/diagnostic_output.hpp>
+
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -63,10 +65,9 @@ void EmergencyLog(LogLevel level,
     }
     append(buffer, length, ")\n");
 
-    // Direct, unbuffered write to stderr. std::fwrite to stderr does not throw
-    // and does not depend on the logging backend.
-    std::fwrite(buffer.data(), 1, length, stderr);
-    std::fflush(stderr);
+    // Shared Base byte boundary. Stderr fallback may block; assertion failure
+    // handling uses only the separate nonblocking try-write entry.
+    (void)diagnostics::WriteEmergencyBytes(buffer.data(), length);
 
 #if defined(_WIN32)
     if (IsDebuggerPresent())

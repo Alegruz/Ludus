@@ -64,6 +64,25 @@ jobs:
           echo "--- ccache stats ---"
           ccache --show-stats
 
+  assertion-policy:
+    name: Assertion policy (${{ matrix.preset }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [linux-clang-debug, linux-clang-profile, linux-clang-release]
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare selected dependencies
+        run: ./init.sh --preset-only ${{ matrix.preset }}
+      - name: Build with tests even for the production Release policy
+        run: |
+          out/host-tools/venv/bin/cmake --preset ${{ matrix.preset }} -B out/build/assertion-policy -DLUDUS_BUILD_TESTS=ON -DLUDUS_WARNINGS_AS_ERRORS=ON
+          out/host-tools/venv/bin/cmake --build out/build/assertion-policy --parallel 2
+          out/host-tools/venv/bin/ctest --test-dir out/build/assertion-policy --output-on-failure
+
   build-budget:
     # Heavy, separate job: -ftime-trace + ClangBuildAnalyzer are slow, so this is
     # kept out of the fast "Ubuntu Clang" job and the local iteration loop. It
