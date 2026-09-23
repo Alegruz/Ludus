@@ -94,6 +94,24 @@ engine code. Discuss such cases in the PR before adding them.
 - `usize` is the size/index type (aliases `std::size_t`) — use it for `sizeof`
   results, container sizes, and array indices; do not substitute `uint64`.
 
+### Standard library and C runtime usage
+
+The full policy — what is banned, allowed, and slated for future replacement —
+is `docs/decisions/0003-standard-library-usage-policy.md`. Summary for engine
+code (`modules/` and `apps/`):
+
+- **Banned:** `<iostream>` / `std::cout` / `std::cerr` / `std::endl`, C++
+  exceptions, `std::` primitive-type spellings, `<sstream>`, and `printf`-family
+  for diagnostics. Route all diagnostics through `LUDUS_LOG_*`.
+- **Allowed:** `<string_view>`, `<atomic>` / `<mutex>` / `<shared_mutex>`,
+  `<source_location>`, `<chrono>`, `<type_traits>` / `<utility>`, `<new>`; and
+  `<cstdio>` only inside logging sinks / the emergency path. `<cstdint>` /
+  `<cstddef>` only inside `types.h`.
+- **Slated for future replacement (fine to use now, do not spread):**
+  `std::string`, `std::vector`, `std::unordered_map`, `std::format`,
+  `<filesystem>`, `<cstring>`. These become Ludus-owned types once a custom
+  allocator exists; replacing one is its own change, not a drive-by edit.
+
 ### Module and dependency layout
 
 - Engine modules live under `modules/<layer>/<module>/` with public headers in
