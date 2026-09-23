@@ -1306,16 +1306,61 @@ def run_tidy(root: Path, preset: str) -> None:
         )
 
 
+def run_include_cleaner(root: Path, preset: str) -> None:
+    """Advisory include-hygiene report using clang-tidy's misc-include-cleaner.
+
+    This is intentionally NON-gating: misc-include-cleaner is noisy for a codebase
+    that uses aggregation headers and re-exported type aliases, so it is a tool
+    for pruning includes on demand, not a CI gate. The build-time budget
+    (check-build-budget) is the enforced mechanism (see ADR 0005).
+    """
+    versions = load_tool_versions(root)
+    clang_tidy = find_system_tool(root, "clang-tidy", versions)
+    build_dir = root / "out" / "build" / preset
+    if not (build_dir / "compile_commands.json").is_file():
+        cmake_configure(root, preset)
+
+    compiled_files = compile_database_files(build_dir)
+    requested_files = [path.resolve() for path in source_files(root, {".cpp", ".cc", ".cxx"}, TIDY_ROOTS)]
+    targets = [path for path in requested_files if path in compiled_files]
+    header_filter = f"^{re.escape(str(root))}/(modules|apps)/.*"
+    print("Advisory include-cleaner report (not a gate; see check-build-budget for enforcement):")
+    for path in targets:
+        # No --warnings-as-errors: report only.
+        return_code, output = capture_command_quiet(
+            [
+                clang_tidy,
+                "-p",
+                build_dir,
+                "--quiet",
+                "--checks=-*,misc-include-cleaner",
+                f"--header-filter={header_filter}",
+                path,
+            ],
+            cwd=root,
+        )
+        findings = [line for line in output.splitlines() if "include-cleaner" in line]
+        if findings:
+            print(f"  {path.relative_to(root)}: {len(findings)} suggestion(s)")
+            for line in findings:
+                print(f"    {line.replace(str(root) + '/', '')}")
+
+
 def command_check(args: argparse.Namespace) -> int:
     root = repo_root()
     ensure_bootstrap_for_preset(root, args.preset)
-    run_all = args.all or not args.format and not args.tidy
+    explicit = args.format or args.tidy or args.include_cleaner
+    run_all = args.all or not explicit
 
     if args.format or run_all:
         run_format_check(root, fix=args.fix)
     if args.tidy or run_all:
         cmake_configure(root, args.preset)
         run_tidy(root, args.preset)
+    # Advisory: only when explicitly requested, never part of --all / the default.
+    if args.include_cleaner:
+        cmake_configure(root, args.preset)
+        run_include_cleaner(root, args.preset)
     return 0
 
 
@@ -1573,6 +1618,121 @@ def command_profile_build(args: argparse.Namespace) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- #
+# Build-time budget gate
+# --------------------------------------------------------------------------- #
+
+# Matches a ClangBuildAnalyzer "Expensive headers" line, e.g.:
+#   7794 ms: /abs/path/log.hpp (included 7 times, avg 1113 ms), included via:
+_EXPENSIVE_HEADER_RE = re.compile(
+    r"^\s*(\d+)\s*ms:\s*(?P<path>.+?)\s*\(included\s+(?P<count>\d+)\s+times,\s*avg\s+(?P<avg>\d+)\s*ms\)"
+)
+
+
+def load_build_budget(root: Path) -> dict[str, object]:
+    budget_path = root / "config" / "build_budget.json"
+    try:
+        data = json.loads(budget_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise EngineError(f"failed to read {budget_path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise EngineError(f"failed to parse {budget_path}: {exc}") from exc
+    return data
+
+
+def parse_expensive_headers(analysis_text: str) -> list[tuple[str, int, int]]:
+    """Return (absolute_path, include_count, avg_ms) for each Expensive-headers entry."""
+    results: list[tuple[str, int, int]] = []
+    in_section = False
+    for line in analysis_text.splitlines():
+        if line.startswith("**** Expensive headers"):
+            in_section = True
+            continue
+        if in_section and line.startswith("****"):
+            break
+        match = _EXPENSIVE_HEADER_RE.match(line)
+        if match:
+            results.append((match.group("path"), int(match.group("count")), int(match.group("avg"))))
+    return results
+
+
+def command_check_build_budget(args: argparse.Namespace) -> int:
+    """Fail if a project header's average per-include parse time, or total frontend
+    parse time, exceeds the committed budget in config/build_budget.json. Consumes
+    the reports produced by `profile-build`; run that first (or pass --profile to
+    run it here). See docs/decisions/0005-build-time-budgets.md."""
+    root = repo_root()
+    budget = load_build_budget(root)
+    preset = args.preset or str(budget.get("preset", DEFAULT_PRESET))
+
+    profile_dir = root / "out" / "profile"
+    analysis_path = profile_dir / f"{preset}-analysis.txt"
+    report_path = profile_dir / f"{preset}-profile.json"
+
+    if args.profile or not analysis_path.is_file() or not report_path.is_file():
+        print("Profiling build to produce budget inputs.")
+        command_profile_build(argparse.Namespace(preset=preset, no_time_trace=False, ccache=False))
+
+    if not analysis_path.is_file():
+        raise EngineError(f"missing profiling report: {analysis_path}; run ./scripts/profile-build {preset}")
+
+    default_avg = int(budget.get("default_header_avg_ms", 0))
+    overrides = {str(k): int(v) for k, v in dict(budget.get("header_overrides_avg_ms", {})).items()}
+    ignored = {str(p) for p in list(budget.get("ignore_headers", []))}
+    total_frontend_budget_s = float(budget.get("total_frontend_seconds", 0))
+
+    analysis_text = analysis_path.read_text(encoding="utf-8")
+    headers = parse_expensive_headers(analysis_text)
+
+    root_str = str(root) + "/"
+    breaches: list[str] = []
+    checked = 0
+    for absolute_path, _count, avg_ms in headers:
+        # Only budget the project's own headers (under modules/); third-party and
+        # standard headers are out of our control and handled by include hygiene.
+        if root_str not in absolute_path:
+            continue
+        relative = absolute_path.replace(root_str, "")
+        if not relative.startswith("modules/"):
+            continue
+        if relative in ignored:
+            continue
+        checked += 1
+        limit = overrides.get(relative, default_avg)
+        status = "OK" if avg_ms <= limit else "OVER"
+        print(f"  [{status}] {relative}: avg {avg_ms} ms (budget {limit} ms)")
+        if avg_ms > limit:
+            breaches.append(
+                f"{relative}: average per-include parse {avg_ms} ms exceeds budget {limit} ms"
+            )
+
+    # Total frontend parse budget from the ClangBuildAnalyzer time summary.
+    frontend_match = re.search(r"Parsing \(frontend\):\s*([\d.]+)\s*s", analysis_text)
+    if frontend_match and total_frontend_budget_s > 0:
+        frontend_s = float(frontend_match.group(1))
+        status = "OK" if frontend_s <= total_frontend_budget_s else "OVER"
+        print(f"  [{status}] total frontend parsing: {frontend_s:.1f} s (budget {total_frontend_budget_s:.0f} s)")
+        if frontend_s > total_frontend_budget_s:
+            breaches.append(
+                f"total frontend parsing {frontend_s:.1f} s exceeds budget {total_frontend_budget_s:.0f} s"
+            )
+
+    print("")
+    if breaches:
+        print("Build-time budget exceeded:")
+        for breach in breaches:
+            print(f"  - {breach}")
+        print("")
+        print("A heavy include likely leaked into a header. Investigate with")
+        print(f"  ./scripts/profile-build {preset}")
+        print("then reduce the include (type-erase / move to .cpp) or, if justified,")
+        print("raise the budget in config/build_budget.json with a note in the PR.")
+        raise EngineError("build-time budget check failed")
+
+    print(f"Build-time budget check passed ({checked} project headers within budget).")
+    return 0
+
+
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ludus development orchestration")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1609,6 +1769,12 @@ def make_parser() -> argparse.ArgumentParser:
     check_parser.add_argument("preset", nargs="?", default=DEFAULT_PRESET)
     check_parser.add_argument("--format", action="store_true", help="verify clang-format")
     check_parser.add_argument("--tidy", action="store_true", help="run targeted clang-tidy")
+    check_parser.add_argument(
+        "--include-cleaner",
+        action="store_true",
+        dest="include_cleaner",
+        help="advisory include-hygiene report (misc-include-cleaner); not a gate, not part of --all",
+    )
     check_parser.add_argument("--all", action="store_true", help="run all checks")
     check_parser.add_argument("--fix", action="store_true", help="allow clang-format to update files")
     check_parser.set_defaults(func=command_check)
@@ -1626,6 +1792,15 @@ def make_parser() -> argparse.ArgumentParser:
     )
     profile_parser.add_argument("--ccache", action="store_true", help="enable ccache for the profiled build")
     profile_parser.set_defaults(func=command_profile_build)
+
+    budget_parser = subparsers.add_parser(
+        "check-build-budget", help="fail if project headers or total parse time exceed config/build_budget.json"
+    )
+    budget_parser.add_argument("preset", nargs="?", default=None)
+    budget_parser.add_argument(
+        "--profile", action="store_true", help="run profile-build first instead of reusing existing reports"
+    )
+    budget_parser.set_defaults(func=command_check_build_budget)
 
     return parser
 

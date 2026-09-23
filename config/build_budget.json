@@ -1,0 +1,23 @@
+{
+  "$comment": [
+    "Build-time budgets enforced by scripts/check-build-budget (engine.py check-build-budget).",
+    "Budgets are measured with Clang -ftime-trace aggregated by ClangBuildAnalyzer;",
+    "see docs/decisions/0005-build-time-budgets.md and docs/development/build-profiling.md.",
+    "The gate fails when a project header's average per-include parse time exceeds its",
+    "budget, or when total frontend parse time exceeds the global budget.",
+    "Rationale for avg-per-include (not total): total scales with how many TUs happen to",
+    "include a header, so it grows as the codebase grows even if the header is unchanged.",
+    "Average per-include measures the header's intrinsic weight - the thing we control.",
+    "Absolute ms are host-dependent; budgets carry deliberate headroom over the CI baseline",
+    "and are meant to catch regressions (a heavy include sneaking into a header), not to",
+    "track small run-to-run noise. Raise a budget only with a profile-build measurement and",
+    "a note in the PR."
+  ],
+  "preset": "linux-clang-development",
+  "default_header_avg_ms": 900,
+  "total_frontend_seconds": 45,
+  "header_overrides_avg_ms": {
+    "modules/foundation/logging/include/ludus/foundation/logging/log.hpp": 2000
+  },
+  "ignore_headers": []
+}

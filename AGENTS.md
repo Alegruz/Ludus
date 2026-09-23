@@ -112,6 +112,23 @@ code (`modules/` and `apps/`):
   `<filesystem>`, `<cstring>`. These become Ludus-owned types once a custom
   allocator exists; replacing one is its own change, not a drive-by edit.
 
+### Build-time hygiene (heavy headers)
+
+- **Do not instantiate heavy standard-library templates in public headers, and
+  do not `#include` heavy headers (`<format>`, `<chrono>`, `<filesystem>`,
+  `<regex>`, `<iostream>`) from a public header.** Type-erase or PIMPL the
+  expensive facility behind a `.cpp` boundary; templated public APIs should erase
+  to a non-template implementation as early as possible (see ADR 0004: the
+  logging `Log()` erases to `std::format_args`).
+- Build time is budgeted, not vibes. `config/build_budget.json` sets a per-header
+  average parse-time budget; the `Build-time budget` CI job (and
+  `./scripts/check-build-budget`) fails if a project header exceeds it. If a build
+  gets slow, run `./scripts/profile-build` and fix the offending include; raise a
+  budget only with a measurement and a note in the PR. See
+  `docs/development/build-profiling.md` and ADR 0005.
+- `./scripts/check --include-cleaner` gives an advisory include-hygiene report;
+  it is not a gate.
+
 ### Module and dependency layout
 
 - Engine modules live under `modules/<layer>/<module>/` with public headers in
