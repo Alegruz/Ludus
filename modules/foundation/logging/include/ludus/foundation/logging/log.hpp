@@ -149,13 +149,26 @@ void SetCurrentThreadName(std::string_view name);
 namespace ludus::foundation::logging::detail
 {
 
-// Formats into a thread-local scratch buffer and dispatches to the sinks. Defined
-// in logger.cpp; declared here so the templated log() can call it without pulling
-// sink details into the public header.
-void DispatchFormatted(LogLevel level,
-                       LogCategory category,
-                       const std::source_location& location,
-                       std::string_view formatted_message);
+// Type-erased logging entry points, both defined once in logger.cpp.
+//
+// The whole point of this boundary is build time: std::vformat and the entire
+// <format> instantiation machinery are compiled a SINGLE time here, instead of
+// being re-instantiated in every translation unit that logs. Call sites only
+// instantiate the trivial std::make_format_args pack expansion, which is cheap
+// (see docs/decisions/0004-logging-format-type-erasure.md).
+
+// Format-and-dispatch: performs std::vformat internally, then routes to sinks.
+void VLog(LogLevel level,
+          LogCategory category,
+          const std::source_location& location,
+          std::string_view format,
+          std::format_args args);
+
+// Fast path for messages with no arguments: no formatting, forward the literal.
+void DispatchMessage(LogLevel level,
+                     LogCategory category,
+                     const std::source_location& location,
+                     std::string_view message);
 
 } // namespace ludus::foundation::logging::detail
 
@@ -174,17 +187,14 @@ void Log(LogLevel level,
     // "static message" case.
     if constexpr (sizeof...(Args) == 0)
     {
-        detail::DispatchFormatted(level, category, location, format.get());
+        detail::DispatchMessage(level, category, location, format.get());
     }
     else
     {
-        // vformat avoids a second template instantiation per call site and keeps
-        // the formatting in one place. The result is a temporary std::string;
-        // Phase 1 accepts this allocation for messages with arguments and will
-        // replace it with a thread-local scratch buffer + std::format_to in the
-        // performance pass (spec section 16). Correctness first (spec section 45).
-        const std::string formatted = std::vformat(format.get(), std::make_format_args(args...));
-        detail::DispatchFormatted(level, category, location, formatted);
+        // Erase the arguments to std::format_args HERE and hand them to the
+        // non-template VLog. std::vformat itself is instantiated only inside
+        // logger.cpp, so no per-call-site <format> machinery is generated.
+        detail::VLog(level, category, location, format.get(), std::make_format_args(args...));
     }
 }
 

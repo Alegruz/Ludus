@@ -76,15 +76,26 @@ Most expensive headers, by aggregate parse time across all TUs:
 | `<chrono>` | ~2.3 s (6×) | dragged in transitively by `<format>` and Catch2 |
 | `foundation/logging/src/sinks/file_sink.hpp` | ~1.7 s (2×) | pulls `<filesystem>` |
 
+### Applied optimizations
+
+- **Type-erase `std::format` at the logging boundary** (ADR 0004). `Log(...)`
+  now erases to `std::format_args` and calls a single non-template `VLog` in
+  `logger.cpp`, so `std::vformat` is instantiated once instead of per TU.
+  Measured on `linux-clang-development`: frontend 52.5 s → 22.5 s (−57%),
+  backend 21.9 s → 9.0 s (−59%), `log.hpp` aggregate ~19 s → ~9 s.
+
 ### Improvement backlog (measure each before/after)
 
-- **`log.hpp` include surface** is the highest-leverage target: `<format>` and
-  its transitive `<chrono>` dominate. Options: a precompiled header for the
-  stable heavy STL headers; or shrinking `log.hpp`'s public include surface
-  (e.g. moving `std::format` usage behind the .cpp boundary where feasible).
+- **`log.hpp` residual cost** is now `<format>` being *parsed* (still included
+  for `std::format_string`/`std::make_format_args`) plus transitive `<chrono>`.
+  Next lever: a precompiled header for the stable heavy STL headers, or trimming
+  the header further.
 - **Precompiled headers** for `<format>`/`<chrono>`/`<string>` once more modules
   consume them.
-- **ccache** warm-cache rebuild time (now enabled in CI; measure hit rate).
+- **`file_sink.hpp`** still pulls `<filesystem>`/`<format>` into a header — move
+  those into the `.cpp`.
+- **`version.hpp`** is unexpectedly heavy for a version header — IWYU candidate.
+- **ccache** warm-cache rebuild time (enabled in CI; watch hit rate).
 - **include-what-you-use** pass to prune transitive includes at the root.
 
 These are candidates, not commitments — each must show a win in
