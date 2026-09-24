@@ -83,7 +83,8 @@ bool Initialize(const ApplicationInfo& appInfo) noexcept
 
     std::vector<const char*> enabledExtensions;
     enabledExtensions.reserve(listOfExtensionsToEnable.size());
-    for (const auto& extension : extensions)
+    // Info logging is compiled out in Release.
+    for ([[maybe_unused]] const auto& extension : extensions)
     {
         LUDUS_LOG_INFO(LOG_RHI, "Vulkan instance extension: {}", extension.extensionName);
     }
@@ -165,7 +166,7 @@ void Shutdown() noexcept
 
 VkBool32 DebugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
                                      [[maybe_unused]] VkDebugUtilsMessageTypeFlagsEXT messageType,
-                                     const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+                                     [[maybe_unused]] const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
                                      [[maybe_unused]] void* pUserData) noexcept
 {
     if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
