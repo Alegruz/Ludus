@@ -1,0 +1,212 @@
+#pragma once
+
+// Lifetime and relocation primitives for Ludus contiguous containers.
+//
+// This is the ONLY place object lifetime is begun/ended in raw storage and the
+// ONLY place memcpy/memmove touch element storage. Centralizing it means the
+// (subtle) correctness argument lives in one auditable location:
+//
+//   * Objects are created with std::construct_at and destroyed with
+//     std::destroy_at (the standard-blessed lifetime operations).
+//   * The trivial fast paths (skip destructors, memcpy relocation) are guarded
+//     by std::is_trivially_destructible_v / IsTriviallyRelocatable so they are
+//     only taken where the standard (or an explicit, audited opt-in) permits.
+//   * Nothing here relies on undefined behaviour. For a non-trivially-relocatable
+//     type, relocation is move-construct + destroy, never a byte copy.
+//
+// Ludus is compiled with -fno-exceptions, so element constructors/moves cannot
+// throw; these helpers therefore do not need rollback-on-throw logic. They do,
+// however, track exactly how many objects have been constructed so the caller
+// (Vector) can destroy precisely the live range on teardown.
+//
+// This lives under include/.../internal because Vector is a header template and
+// must reach these helpers at the point of instantiation. It is a detail header:
+// consumers include vector.hpp, not this file. It is installed with the SDK
+// because the template requires it, but is not part of the supported API.
+
+#include <ludus/foundation/containers/relocation.hpp>
+
+#include <ludus/foundation/base/types.h>
+
+#include <cstring> // std::memcpy / std::memmove for the trivial fast paths
+#include <memory>  // std::construct_at / std::destroy_at
+#include <type_traits>
+#include <utility>
+
+namespace ludus::foundation::core::internal
+{
+// Construct one object at raw storage `at`, forwarding arguments.
+template <typename ElementType, typename... Args>
+LUDUS_INLINE constexpr ElementType* ConstructAt(ElementType* at, Args&&... args)
+{
+    return std::construct_at(at, static_cast<Args&&>(args)...);
+}
+
+// Destroy the live range [first, last). No-op (compiled away) for trivially
+// destructible element types.
+template <typename ElementType>
+LUDUS_INLINE constexpr void DestroyRange(ElementType* first, ElementType* last) noexcept
+{
+    if constexpr (!std::is_trivially_destructible_v<ElementType>)
+    {
+        for (; first != last; ++first)
+        {
+            std::destroy_at(first);
+        }
+    }
+}
+
+// Value-initialize `count` objects at uninitialized `dst` (T() — zeroes scalars).
+template <typename ElementType>
+constexpr void UninitializedValueConstruct(ElementType* dst, usize count)
+{
+    for (usize i = 0; i < count; ++i)
+    {
+        ConstructAt(dst + i);
+    }
+}
+
+// Copy-construct `count` copies of `value` into uninitialized `dst`.
+template <typename ElementType>
+constexpr void UninitializedFill(ElementType* dst, usize count, const ElementType& value)
+{
+    for (usize i = 0; i < count; ++i)
+    {
+        ConstructAt(dst + i, value);
+    }
+}
+
+// Copy-construct from [src, src+count) into uninitialized `dst`.
+// Trivial fast path: memcpy (dst and src must not overlap).
+template <typename ElementType>
+constexpr void UninitializedCopy(ElementType* dst, const ElementType* src, usize count)
+{
+    if (count == 0)
+    {
+        return;
+    }
+    if constexpr (std::is_trivially_copyable_v<ElementType>)
+    {
+        // Not constexpr-evaluable, but Vector copy runs at runtime; the loop
+        // below is the constant-evaluation fallback.
+        if (!std::is_constant_evaluated())
+        {
+            std::memcpy(dst, src, count * sizeof(ElementType));
+            return;
+        }
+    }
+    for (usize i = 0; i < count; ++i)
+    {
+        ConstructAt(dst + i, src[i]);
+    }
+}
+
+// Relocate [src, src+count) into uninitialized `dst` (non-overlapping blocks):
+// for each element, "move-construct at dst then destroy source", i.e. the source
+// range is left with no live objects. This is exactly what reallocation needs.
+//
+//   * Trivially relocatable (incl. trivially copyable): one memcpy, and NO
+//     source destructors (the bytes ARE the moved-to objects). Legal today for
+//     trivially copyable; legal for opt-in types by the LUDUS_TRIVIALLY_RELOCATABLE
+//     contract.
+//   * Otherwise: per-element move-construct then destroy the source object.
+template <typename ElementType>
+constexpr void UninitializedRelocate(ElementType* dst, ElementType* src, usize count)
+{
+    if (count == 0)
+    {
+        return;
+    }
+    if constexpr (IsTriviallyRelocatable<ElementType>)
+    {
+        if (!std::is_constant_evaluated())
+        {
+            std::memcpy(dst, src, count * sizeof(ElementType));
+            return;
+        }
+        // constexpr fallback: move + destroy (trivially copyable in constant
+        // evaluation still needs real lifetime operations).
+        for (usize i = 0; i < count; ++i)
+        {
+            ConstructAt(dst + i, static_cast<ElementType&&>(src[i]));
+            std::destroy_at(src + i);
+        }
+        return;
+    }
+    else
+    {
+        for (usize i = 0; i < count; ++i)
+        {
+            ConstructAt(dst + i, static_cast<ElementType&&>(src[i]));
+            std::destroy_at(src + i);
+        }
+    }
+}
+
+// Move a *live* range of trivially-relocatable/copyable or movable elements
+// within the SAME buffer, possibly overlapping, toward higher addresses by
+// `shift` slots. Used by ordered Insert to open a gap. The last `shift` elements
+// move into uninitialized storage; the rest are move-assigned. To keep the
+// reasoning simple and correct for all types, callers use the element-count
+// helpers below rather than open-coding pointer arithmetic.
+
+// Shift the live range [first, last) right by one slot to open a gap at `first`.
+// Precondition: slot at `last` is uninitialized (capacity available). After the
+// call, [first+1, last+1) hold the elements and `first` is a live, moved-from
+// object ready to be assigned the inserted value.
+template <typename ElementType>
+constexpr void ShiftRightByOne(ElementType* first, ElementType* last)
+{
+    if (first == last)
+    {
+        return;
+    }
+    if constexpr (IsTriviallyRelocatable<ElementType>)
+    {
+        if (!std::is_constant_evaluated())
+        {
+            std::memmove(first + 1, first, static_cast<usize>(last - first) * sizeof(ElementType));
+            return;
+        }
+    }
+    // General path: move-construct the last element into the fresh slot, then
+    // move-assign the remainder backwards.
+    ElementType* dst = last;         // uninitialized
+    ElementType* src = last - 1;     // last live element
+    ConstructAt(dst, static_cast<ElementType&&>(*src));
+    while (src != first)
+    {
+        --dst;
+        --src;
+        *dst = static_cast<ElementType&&>(*src);
+    }
+    // *first is now a moved-from live object; caller assigns into it.
+}
+
+// Erase-shift: after destroying the element at `pos`, move the live range
+// (pos+1, last) left by one to fill the gap, leaving one moved-from live object
+// at (last-1) for the caller to destroy. Used by ordered Erase.
+template <typename ElementType>
+constexpr void ShiftLeftByOne(ElementType* pos, ElementType* last)
+{
+    // pos is the (now to-be-overwritten) slot; [pos+1, last) are live.
+    if constexpr (IsTriviallyRelocatable<ElementType>)
+    {
+        if (!std::is_constant_evaluated())
+        {
+            if (last - (pos + 1) > 0)
+            {
+                std::memmove(pos, pos + 1, static_cast<usize>(last - (pos + 1)) * sizeof(ElementType));
+            }
+            return;
+        }
+    }
+    ElementType* dst = pos;
+    ElementType* src = pos + 1;
+    for (; src != last; ++src, ++dst)
+    {
+        *dst = static_cast<ElementType&&>(*src);
+    }
+    // (last-1) is now a moved-from live object; caller destroys it.
+}
+} // namespace ludus::foundation::core::internal
