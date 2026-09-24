@@ -7,5 +7,6 @@ target_link_libraries(
         Ludus::FoundationLogging
         Ludus::Platform
         Ludus::DiagnosticsIntegration
+        Ludus::GraphicsRhi
 )
 ludus_apply_project_defaults(ludus_smoke)

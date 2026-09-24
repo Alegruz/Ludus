@@ -109,7 +109,15 @@ DiagnosticArg MakeDiagnosticArg(const char (&value)[N]) noexcept
     return MakeCStringArg(value, N);
 }
 template <typename T>
-DiagnosticArg MakeDiagnosticArg(const T&) = delete;
+DiagnosticArg MakeDiagnosticArg(const T&) noexcept
+{
+    static_assert(false,
+                  "Unsupported Ludus assertion argument. Wrap char* or const char* with "
+                  "ludus::foundation::diagnostics::DiagnosticCString(ptr), or use DiagnosticText{data, size}. "
+                  "For object addresses use DiagnosticAddress(ptr). Convert other unsupported types explicitly "
+                  "to a Ludus fixed-width number, bool, or diagnostic text.");
+    return {};
+}
 
 [[noreturn]] LUDUS_COLD void FinishFatalArgs(DiagnosticText format, const DiagnosticArg* args, usize count) noexcept;
 LUDUS_COLD void FinishAssertArgs(DiagnosticText format, const DiagnosticArg* args, usize count) noexcept;

@@ -72,6 +72,7 @@ install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENT
 add_subdirectory(modules/foundation/base)
 add_subdirectory(modules/foundation/logging)
 add_subdirectory(modules/platform)
+add_subdirectory(modules/graphics/rhi)
 
 # Startup-only development diagnostic integration (depends on Base; Base does
 # not depend on it). Provides InitializeDiagnosticSession and the Python helper.

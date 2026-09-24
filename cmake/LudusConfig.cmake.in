@@ -1,5 +1,8 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+find_dependency(volk CONFIG)
+
 set(Ludus_BUILD_FLAVOR "@LUDUS_BUILD_FLAVOR@")
 set(Ludus_BUILD_FLAVOR_ID @LUDUS_BUILD_FLAVOR_ID@)
 set(Ludus_ASSERT_POLICY_VERSION @LUDUS_ASSERT_POLICY_VERSION@)
