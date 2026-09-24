@@ -2,6 +2,7 @@
 #include <ludus/foundation/base/assert_format.hpp>
 #include <ludus/foundation/base/build_metadata.hpp>
 #include <ludus/foundation/base/version.hpp>
+#include <ludus/graphics/rhi/rhi.h>
 
 #include <iostream>
 #include <ludus/foundation/base/diagnostic_output.hpp>
@@ -15,6 +16,9 @@ int PolicyWithoutNdebug();
 
 int main()
 {
+    // Verify the lifecycle API and static link without requiring Vulkan on CI.
+    static_assert(noexcept(ludus::graphics::rhi::Initialize({})));
+    ludus::graphics::rhi::Shutdown();
     int endpoints[2];
     if (socketpair(AF_UNIX, SOCK_DGRAM, 0, endpoints) != 0 ||
         !ludus::foundation::diagnostics::ConfigureEmergencySocket(endpoints[0]))

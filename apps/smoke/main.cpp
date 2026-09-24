@@ -10,6 +10,8 @@
 
 #include <string>
 
+#include <ludus/graphics/rhi/rhi.h>
+
 using namespace ludus::foundation::logging;
 
 // Ludus does not use C++ exceptions (see AGENTS.md); engine code is compiled
@@ -53,11 +55,22 @@ int main()
     LUDUS_LOG_INFO(LOG_CORE, "Revision: {}", ludus::foundation::git_revision());
     LUDUS_LOG_INFO(LOG_CORE, "Compiler: {}", ludus::foundation::compiler_identity());
 
+    ludus::graphics::rhi::ApplicationInfo appInfo{};
+    appInfo.Name = "Smoke App";
+    appInfo.Version = 1;
+
+    if (!ludus::graphics::rhi::Initialize(appInfo))
+    {
+        LUDUS_LOG_FATAL(LOG_CORE, "Failed to initialize Vulkan RHI");
+        return 1;
+    }
+
     ludus::platform::WindowManager windowManager;
     constexpr ludus::platform::WindowManager::InitializeInfo info = {};
     if (!windowManager.Initialize(info))
     {
         LUDUS_LOG_FATAL(LOG_CORE, "Failed to initialize window manager");
+        ludus::graphics::rhi::Shutdown();
         LogSystem::Shutdown();
         return 1;
     }
@@ -70,6 +83,7 @@ int main()
     if (!windowManager.CreateWindow(createInfo, window))
     {
         LUDUS_LOG_FATAL(LOG_CORE, "Failed to create window");
+        ludus::graphics::rhi::Shutdown();
         LogSystem::Shutdown();
         return 1;
     }
@@ -92,6 +106,7 @@ int main()
         }
     }
 
+    ludus::graphics::rhi::Shutdown();
     LogSystem::Shutdown();
     return 0;
 }

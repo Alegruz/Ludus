@@ -49,14 +49,28 @@ def main():
         result = syntax(f'void probe() {{ (void)LUDUS_CHECK_F(false, "{{}}", {expression}); }}')
         assert result.returncode == 0, (expression, result.stderr)
     for declaration, expression in (("int value;", "&value"), ("void* value = nullptr;", "value"),
-                                    ("const char* value = nullptr;", "value"), ("", "nullptr"),
+                                    ("const char* value = nullptr;", "value"),
+                                    ("char* value = nullptr;", "value"), ("", "nullptr"),
                                     ("struct Object {} value;", "value"),
                                     ("struct Object { operator bool() const; } value;", "value"),
                                     ("enum class E { Value };", "E::Value"),
                                     ("void function();", "&function"),
                                     ("struct Object { int Member; };", "&Object::Member")):
         result = syntax(f'void probe() {{ {declaration} (void)LUDUS_CHECK_F(false, "{{}}", {expression}); }}')
-        assert result.returncode != 0 and "deleted" in result.stderr, (expression, result.stderr)
+        assert result.returncode != 0 and "Unsupported Ludus assertion argument" in result.stderr, (expression, result.stderr)
+        assert "DiagnosticCString(ptr)" in result.stderr and "DiagnosticAddress(ptr)" in result.stderr, result.stderr
+    for macro, invocation in (("ASSERT", 'LUDUS_ASSERT_F(false, "{}", value)'),
+                              ("REQUIRE", 'LUDUS_REQUIRE_F(false, "{}", value)'),
+                              ("CHECK", '(void)LUDUS_CHECK_F(false, "{}", value)'),
+                              ("FATAL", 'LUDUS_FATAL_F("{}", value)')):
+        result = syntax(f'void probe([[maybe_unused]] const char* value) {{ {invocation}; }}')
+        should_fail = macro != "ASSERT" or enabled
+        assert (result.returncode != 0) == bool(should_fail), result.stderr
+        if should_fail:
+            assert "DiagnosticCString(ptr)" in result.stderr, result.stderr
+        wrapped_invocation = invocation.replace(", value)", ", DiagnosticCString(value))")
+        result = syntax(f'void probe([[maybe_unused]] const char* value) {{ {wrapped_invocation}; }}')
+        assert result.returncode == 0, result.stderr
     for count in (8, 9):
         result = syntax('void probe() { (void)LUDUS_CHECK_F(false, "' + '{} ' * count + '", ' + ','.join(['1'] * count) + '); }')
         assert (result.returncode == 0) == (count == 8), result.stderr
