@@ -11,6 +11,10 @@ jobs:
     env:
       CI: "true"
       LUDUS_ENABLE_CCACHE: "1"
+      # Diagnostics stay report-only in CI. CI is auto-detected, but set the
+      # noninteractive policy explicitly so an interactive assertion prompt can
+      # never hang a runner even if detection changes.
+      LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -73,6 +77,9 @@ jobs:
         preset: [linux-clang-debug, linux-clang-profile, linux-clang-release]
     env:
       CI: "true"
+      # Report-only diagnostics: even the Debug preset here must not attempt an
+      # interactive assertion prompt on a headless runner.
+      LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
     steps:
       - uses: actions/checkout@v4
       - name: Prepare selected dependencies
@@ -93,6 +100,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       CI: "true"
+      LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

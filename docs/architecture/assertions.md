@@ -348,6 +348,67 @@ new behavior lives entirely in the runtime `.cpp` reached through the existing
 `FinishFatal*` entry points, gated on `LUDUS_ASSERT_RESUMABLE` and the runtime
 conditions above.
 
+### 5.2 Startup and report delivery (external diagnostic helper)
+
+This subsection is authoritative for the *startup/report-delivery* layer that
+supports interactive development. It is implemented independently of, and ahead
+of, the resumable-`ASSERT` decision itself: this layer establishes the channels
+and delivers reports, and it deliberately **does not change any assertion's
+fatal action**. See the
+[startup validation record](assertions-startup-validation.md) for exactly what
+was tested.
+
+**External diagnostic helper.** Interactive presentation and durable report
+capture are the job of a small, separate **external process**
+(`apps/diagnostic_helper`, `ludus_diagnostic_helper`), never of the engine's
+failure handler. The helper owns the collector ends of two channels, launches
+the engine binary, and cleans up when the engine exits:
+
+- **Report channel** — a connected `AF_UNIX`/`SOCK_DGRAM` pair. This reuses the
+  existing nonblocking datagram report transport
+  ([§11](#11-logging-and-emergency-output)); the engine end is configured with
+  `ConfigureEmergencySocket` and written with `TryWriteEmergencyBytes`. The
+  helper drains report datagrams to its own output so `ASSERT`/`FATAL`/`CHECK`
+  reports and formatted messages are visible/captured **independently of normal
+  Logging**, including before logger initialization and after shutdown.
+- **Control channel** — a connected `AF_UNIX`/`SOCK_SEQPACKET` pair carrying a
+  **versioned** handshake (`CONTROL_PROTOCOL_MAGIC`/`CONTROL_PROTOCOL_VERSION`,
+  fixed-size `ControlFrame`). At healthy startup the engine sends `Hello` and the
+  helper replies `HelloAck`; a mismatch or absent ack leaves the endpoint
+  `Failed` and the engine runs report-only. `DecisionRequest`/`DecisionReply`
+  frames are defined for a **later** explicit-decision milestone but are not sent
+  by this milestone's runtime.
+
+**Startup-only integration.** `InitializeDiagnostics()`
+(`ludus/foundation/base/diagnostic_startup.hpp`) is called once, early in
+`main`, **before engine workers and before logger setup**. It reads the
+inherited descriptors from the environment (`LUDUS_DIAGNOSTIC_REPORT_FD`,
+`LUDUS_DIAGNOSTIC_CONTROL_FD`), configures both transports, resolves the
+presentation mode, and returns an explicit status. It **never launches** the
+helper or any UI — configuration only — and adds nothing to the success path.
+
+**Descriptor ownership.** Both transports duplicate the inherited descriptor
+with `F_DUPFD_CLOEXEC` and retain the owned copy for process lifetime; there is
+no replacement or teardown, so a published descriptor can never race a failure.
+The caller may close its originals. The helper owns and closes the collector
+ends on child exit.
+
+**Mode resolution and the CI veto.** Interactive presentation is eligible only
+in a local, non-CI, resumable (Debug) build; Development, Profile, and Release
+are report-only and need no display or dialog helper. CI is auto-detected
+([§12](#12-debugger-and-platform-behavior)) and always forces report-only —
+even for a locally built Debug binary executed under CI — and CI workflows also
+set the noninteractive policy explicitly. A local headless Debug run can opt into
+report-only (`LUDUS_DIAGNOSTIC_INTERACTIVE=0` or the API's `ReportOnly`).
+
+**Validate capability, not availability.** When interactive is eligible and
+intended, startup validates a *usable* channel — a controlling terminal, or a
+**live display connection** probed by connecting to the Wayland/X11 socket — not
+merely that a dialog executable exists on `PATH`. If validation fails, startup
+degrades to report-only and **reports the failure visibly** (through the ordinary
+blocking emergency writer, not the nonblocking assertion transport). Failed
+interactive setup never aborts startup and never changes an assertion's action.
+
 ## 6. Header and binary architecture
 
 ### File ownership

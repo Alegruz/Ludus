@@ -37,6 +37,34 @@ or legacy unversioned Ludus prefix before overwriting files; move an old generat
 `out/install/<preset>` aside, then rerun `scripts/install-sdk`. Multi-config SDK
 generation is explicitly unsupported until per-configuration packages exist.
 
+### Diagnostic helper and report delivery
+
+The external diagnostic helper (`ludus_diagnostic_helper`, from
+`apps/diagnostic_helper`) launches an engine binary with the diagnostic channels
+wired up so assertion/`FATAL`/`CHECK` reports are captured independently of
+normal Logging. It is built by default (`LUDUS_BUILD_DIAGNOSTIC_HELPER=ON`) and
+installed to the SDK `bin` directory. Run an engine binary under it with:
+
+```bash
+ludus_diagnostic_helper -- <engine-binary> [args...]
+```
+
+The engine calls `InitializeDiagnostics()` (from
+`ludus/foundation/base/diagnostic_startup.hpp`) once at the top of `main`, before
+workers or the logger. It reads these descriptors/policy from the environment:
+
+- `LUDUS_DIAGNOSTIC_REPORT_FD` — connected `AF_UNIX`/`SOCK_DGRAM` report socket.
+- `LUDUS_DIAGNOSTIC_CONTROL_FD` — connected `AF_UNIX`/`SOCK_SEQPACKET` control
+  socket (versioned Hello/HelloAck handshake).
+- `LUDUS_DIAGNOSTIC_INTERACTIVE=0` — force report-only (local headless Debug).
+
+The helper sets the first two for its child; a directly launched binary with no
+helper simply runs report-only with no transport. Interactive presentation is
+eligible only in a local, non-CI Debug build with a live terminal/display; CI is
+auto-detected and forced report-only, and CI workflows additionally set
+`LUDUS_DIAGNOSTIC_INTERACTIVE=0` explicitly. This layer changes no assertion's
+fatal action.
+
 To run Release policy tests without changing the production preset:
 
 ```bash

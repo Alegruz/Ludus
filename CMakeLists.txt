@@ -24,6 +24,7 @@ include(EngineTargets)
 
 option(LUDUS_BUILD_TESTS "Build Ludus tests" ON)
 option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
+option(LUDUS_BUILD_DIAGNOSTIC_HELPER "Build the external Linux diagnostic helper" ON)
 option(LUDUS_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(LUDUS_ENABLE_COVERAGE "Enable coverage instrumentation" OFF)
 
@@ -75,6 +76,10 @@ add_subdirectory(modules/platform)
 
 if(LUDUS_BUILD_SMOKE_APP)
     add_subdirectory(apps/smoke)
+endif()
+
+if(LUDUS_BUILD_DIAGNOSTIC_HELPER)
+    add_subdirectory(apps/diagnostic_helper)
 endif()
 
 if(LUDUS_BUILD_TESTS)

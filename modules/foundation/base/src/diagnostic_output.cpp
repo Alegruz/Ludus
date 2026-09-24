@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <sys/socket.h>
@@ -13,6 +14,12 @@ namespace
 {
 // Configuration is explicitly single-threaded before diagnostics are launched.
 constinit int gEmergencySocket = -1;
+constinit int gControlSocket = -1;
+constinit ControlState gControlState = ControlState::Unconfigured;
+
+// Bounded startup handshake: never block engine launch indefinitely on a
+// misbehaving helper. This is a startup wait, not a failure-path bound.
+constexpr int CONTROL_HANDSHAKE_TIMEOUT_MS = 2000;
 } // namespace
 
 bool ConfigureEmergencySocket(int descriptor) noexcept
@@ -134,5 +141,99 @@ bool WriteEmergencyBytes(const char* data, usize size) noexcept
     (void)pthread_sigmask(SIG_SETMASK, &previous, nullptr);
     errno = saved_errno;
     return delivered;
+}
+
+namespace
+{
+// Bounded, EINTR-aware receive of exactly one frame within the handshake
+// deadline. Returns true only for a complete, well-formed frame of the expected
+// type/version. Never blocks past the deadline; a slow/absent helper fails.
+bool ReceiveControlFrame(int descriptor, ControlFrame& frame, ControlMessageType expected, int timeout_ms) noexcept
+{
+    pollfd waiter{};
+    waiter.fd = descriptor;
+    waiter.events = POLLIN;
+    const int ready = ::poll(&waiter, 1, timeout_ms);
+    if (ready <= 0 || (waiter.revents & POLLIN) == 0)
+    {
+        return false;
+    }
+    ControlFrame received{};
+    // SEQPACKET preserves message boundaries: one recv yields one whole frame.
+    const auto count = ::recv(descriptor, &received, sizeof(received), MSG_DONTWAIT);
+    if (count != static_cast<ssize_t>(sizeof(received)))
+    {
+        return false;
+    }
+    if (received.Magic != CONTROL_PROTOCOL_MAGIC || received.Version != CONTROL_PROTOCOL_VERSION ||
+        received.Type != static_cast<uint16>(expected))
+    {
+        return false;
+    }
+    frame = received;
+    return true;
+}
+} // namespace
+
+ControlState ConfigureControlEndpoint(int descriptor) noexcept
+{
+    if (gControlSocket != -1)
+    {
+        return gControlState;
+    }
+    const int saved_errno = errno;
+    int type = 0;
+    socklen_t length = sizeof(type);
+    sockaddr_storage peer{};
+    socklen_t peer_length = sizeof(peer);
+    const bool valid = getsockopt(descriptor, SOL_SOCKET, SO_TYPE, &type, &length) == 0 && type == SOCK_SEQPACKET &&
+                       getpeername(descriptor, reinterpret_cast<sockaddr*>(&peer), &peer_length) == 0 &&
+                       peer.ss_family == AF_UNIX;
+    if (!valid)
+    {
+        gControlState = ControlState::Failed;
+        errno = saved_errno;
+        return gControlState;
+    }
+    const int owned = fcntl(descriptor, F_DUPFD_CLOEXEC, 3);
+    if (owned == -1)
+    {
+        gControlState = ControlState::Failed;
+        errno = saved_errno;
+        return gControlState;
+    }
+    gControlSocket = owned;
+
+    ControlFrame hello{};
+    hello.Type = static_cast<uint16>(ControlMessageType::Hello);
+    hello.Pid = static_cast<uint32>(::getpid());
+    hello.Payload = 0;
+    ssize_t sent = -1;
+    for (uint32 attempt = 0; attempt < 4; ++attempt)
+    {
+        sent = ::send(gControlSocket, &hello, sizeof(hello), MSG_NOSIGNAL);
+        if (sent >= 0 || errno != EINTR)
+        {
+            break;
+        }
+    }
+    if (sent != static_cast<ssize_t>(sizeof(hello)))
+    {
+        gControlState = ControlState::Failed;
+        errno = saved_errno;
+        return gControlState;
+    }
+
+    ControlFrame ack{};
+    const bool acked =
+        ReceiveControlFrame(gControlSocket, ack, ControlMessageType::HelloAck, CONTROL_HANDSHAKE_TIMEOUT_MS);
+    gControlState = acked ? ControlState::Ready : ControlState::Failed;
+    errno = saved_errno;
+    return gControlState;
+}
+
+ControlState ControlEndpointState() noexcept
+{
+    return gControlState;
 }
 } // namespace ludus::foundation::diagnostics

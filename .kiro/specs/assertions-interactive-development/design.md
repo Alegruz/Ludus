@@ -184,6 +184,31 @@ under CI terminates — no launcher handshake is assumed.
 - Both are `noexcept`, add no public-header surface, and are only referenced from
   the cold `FinishFatalImpl` path.
 
+### 5.1 Startup / report-delivery layer (implemented — T1.5)
+
+Ahead of the decision itself, the channels and report delivery are built by a
+separate milestone (see `docs/architecture/assertions.md` §5.2). It provides,
+without changing any assertion action:
+
+- A versioned control endpoint in `diagnostic_output.hpp/.cpp`
+  (`ConfigureControlEndpoint`, `ControlFrame`, `Hello`/`HelloAck`,
+  `SOCK_SEQPACKET`). `DecisionRequest`/`DecisionReply` frames are defined but not
+  yet sent — they are the wire form the T2/T3 `PromptAssertDecision`/debugger
+  decision will use.
+- A public startup API `diagnostic_startup.hpp` (`InitializeDiagnostics`) that
+  reads inherited descriptors, configures the report (reused `SOCK_DGRAM`) and
+  control transports, resolves interactive vs report-only, validates a live
+  terminal/display, and reports failed setup visibly. It never launches a helper
+  or UI.
+- The external `ludus_diagnostic_helper` process (owns collector ends, launches
+  the engine, drains reports, answers the handshake, cleans up on child exit).
+- Startup-only CI detection and terminal/display probes at the private OS
+  boundary. `DetectContinuousIntegration` here is the same query the failure-path
+  CI veto (R31) will reuse.
+
+T2 therefore adds only the prompt and the decision-frame exchange over this
+existing channel; T3 wires the decision into `FinishFatalImpl`.
+
 ## 6. What explicitly does **not** change
 
 - `assert.hpp` / `assert_format.hpp` contents, line counts, include graph (R7,

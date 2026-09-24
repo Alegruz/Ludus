@@ -50,10 +50,52 @@ already used in the assertion program. Docs (this milestone) are already done.
   unit/ASan/UBSan/consumer checks green; `assertion-policy` CI job green.
 - **Non-goals:** any behavior change; the value is inert until T2.
 
+## T1.5 — Startup / report-delivery layer (IMPLEMENTED)
+
+Establishes the channels and delivers reports so a later explicit decision has
+something to talk over. It changes **no** assertion action. Traces to
+`docs/architecture/assertions.md` §5.2.
+
+- **Reqs:** R5, R6 (no SDK leak), R31 (CI detection, startup use), R34/R45
+  (degrade/never block), R36 (direct-executable startup), plus the milestone's
+  own delivery/handshake/helper-cleanup requirements.
+- **Areas:** `modules/foundation/base/include/ludus/foundation/base/diagnostic_output.hpp`
+  (versioned control endpoint), `.../diagnostic_startup.hpp` (new public startup
+  API), `modules/foundation/base/src/{diagnostic_output.cpp,diagnostic_startup.cpp,diagnostics_linux.cpp}`,
+  `apps/diagnostic_helper/` (external helper), `apps/smoke/main.cpp` (init before
+  workers/logger), `.github/workflows/ci.yml` (explicit report-only),
+  Base `CMakeLists.txt` + root `CMakeLists.txt`, `tests/assertions/startup_tests.py`,
+  `modules/foundation/base/tests/diagnostic_startup_child.cpp`.
+- **Done:**
+  - Versioned control endpoint (`ConfigureControlEndpoint` + Hello/HelloAck,
+    `SOCK_SEQPACKET`); `DecisionRequest`/`DecisionReply` frames defined but not
+    sent (reserved for T3).
+  - `InitializeDiagnostics()` reads inherited fds, configures the report
+    (`SOCK_DGRAM`, reused transport) and control transports, resolves mode, and
+    reports failed interactive setup visibly; never launches a helper/UI.
+  - Startup-only CI detection + terminal/live-display probing at the private OS
+    boundary (validate capability, not a found executable).
+  - External `ludus_diagnostic_helper`: owns collector ends, launches the engine
+    with fds via env, drains report datagrams to its own output, answers the
+    handshake, and cleans up on child exit.
+  - Smoke initializes diagnostics before workers/logger; CI sets
+    `LUDUS_DIAGNOSTIC_INTERACTIVE=0` explicitly.
+- **Tests (implemented):** `ludus_diagnostic_startup` CTest — helper handshake +
+  pre-init/post-shutdown report drain independent of Logging; helper cleanup on
+  child exit; CI forces report-only (control unconfigured); direct/no-helper
+  report-only; malformed handshake ⇒ control `Failed`; stderr-closed still
+  delivers via datagram; full report socket bounded (no block).
+- **Gate:** the standard build/test/check/ASan-UBSan/SDK matrix on the pinned
+  Clang 18 toolchain; no assertion action changed; `assert.hpp` unchanged.
+- **Non-goals:** the ASSERT continue-once **decision** (T2/T3); any prompt UI;
+  Windows/macOS.
+
 ## T2 — Detached backend primitives (Base, private)
 
 - **Reqs:** R5, R6, R31 (query only), R34 (degrade), R35, R45, R47.
-  **Findings:** design §1, §5.
+  **Findings:** design §1, §5. **Depends on:** T1.5 (control endpoint + CI
+  detection already exist; T2 adds the `PromptAssertDecision` prompt and the
+  decision-frame exchange over the T1.5 control channel).
 - **Areas:** `modules/foundation/base/src/internal/diagnostic_platform.hpp`
   (add `ResumeDecision`, `DetectContinuousIntegration`, `PromptAssertDecision`),
   `modules/foundation/base/src/diagnostics_linux.cpp` (Linux impls),
@@ -118,8 +160,9 @@ already used in the assertion program. Docs (this milestone) are already done.
 
 | Requirement group | Batch |
 | --- | --- |
-| R50–R52 (docs/policy contract) | T0 (this milestone) |
+| R50–R52 (docs/policy contract) | T0 |
 | R20–R23 (generated policy, SDK identity) | T1 |
+| R5/R6/R31/R34/R36/R45 (startup + helper + control endpoint) | T1.5 (implemented) |
 | R31/R34/R35/R45/R47 (backend primitives) | T2 |
 | R10–R13, R30–R33, R36, R40–R44, R46 (runtime branch) | T3 |
 | R36/R45/R52 (deployment verification) | T4 |

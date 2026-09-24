@@ -54,6 +54,7 @@ target_sources(
         src/internal/diagnostic_format.hpp
         src/internal/diagnostic_text.hpp
         src/diagnostic_output.cpp
+        src/diagnostic_startup.cpp
         src/diagnostics_linux.cpp
         src/internal/diagnostic_platform.hpp
         src/internal/diagnostic_record.hpp
@@ -71,6 +72,7 @@ target_sources(
             include/ludus/foundation/base/assert_format.hpp
             include/ludus/foundation/base/compiler.hpp
             include/ludus/foundation/base/diagnostic_output.hpp
+            include/ludus/foundation/base/diagnostic_startup.hpp
             include/ludus/foundation/base/types.h
             include/ludus/foundation/base/version.hpp
             "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}/ludus/foundation/base/build_metadata.hpp"
@@ -154,6 +156,32 @@ if(LUDUS_BUILD_TESTS)
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/assertions/blocked_output_tests.py"
             "$<TARGET_FILE:ludus_assert_allocation_child>")
     set_tests_properties(ludus_assert_blocked_output PROPERTIES LABELS "foundation;assert-death" TIMEOUT 30)
+
+    # Startup/report-delivery milestone: the startup integration + external
+    # diagnostic helper. The child links Base and calls InitializeDiagnostics;
+    # the driver exercises the helper handshake, report drain, CI veto,
+    # missing-helper, malformed handshake, stderr-closed, and bounded transport.
+    # It changes no assertion action and triggers no native death.
+    add_executable(ludus_diagnostic_startup_child tests/diagnostic_startup_child.cpp)
+    target_include_directories(ludus_diagnostic_startup_child PRIVATE src)
+    target_link_libraries(ludus_diagnostic_startup_child PRIVATE Ludus::FoundationBase)
+    ludus_apply_project_defaults(ludus_diagnostic_startup_child)
+
+    if(TARGET ludus_diagnostic_helper)
+        set(_ludus_diagnostic_helper_target ludus_diagnostic_helper)
+    else()
+        # Tests need the helper even if the app option is off; build a local copy.
+        add_executable(ludus_diagnostic_helper_for_tests "${PROJECT_SOURCE_DIR}/apps/diagnostic_helper/main.cpp")
+        target_link_libraries(ludus_diagnostic_helper_for_tests PRIVATE Ludus::FoundationBase)
+        ludus_apply_project_defaults(ludus_diagnostic_helper_for_tests)
+        set(_ludus_diagnostic_helper_target ludus_diagnostic_helper_for_tests)
+    endif()
+
+    add_test(NAME ludus_diagnostic_startup
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/assertions/startup_tests.py"
+            "$<TARGET_FILE:${_ludus_diagnostic_helper_target}>"
+            "$<TARGET_FILE:ludus_diagnostic_startup_child>")
+    set_tests_properties(ludus_diagnostic_startup PROPERTIES LABELS "foundation;diagnostic-startup" TIMEOUT 60)
 
     add_executable(ludus_assert_fake_child $<TARGET_OBJECTS:ludus_assert_test_driver> tests/assert_platform_fake.cpp
         src/assert.cpp src/diagnostic_output.cpp src/diagnostic_format.cpp)
