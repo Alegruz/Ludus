@@ -1,10 +1,10 @@
-// Allocation-count tests: verify Vector's allocation behaviour precisely.
+// Allocation-count tests: verify Array's allocation behaviour precisely.
 // We replace global operator new/delete with counting versions. This TU is built
 // into its own executable (see CMakeLists) and only when sanitizers are OFF (the
 // sanitizer runtimes provide their own operator new/delete).
 
 #include <ludus/foundation/containers/array.hpp>
-#include <ludus/foundation/containers/vector.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -117,7 +117,7 @@ void operator delete(void* p, std::size_t, std::align_val_t) noexcept
 }
 
 using ludus::foundation::Array;
-using ludus::foundation::Vector;
+using ludus::foundation::StaticArray;
 
 namespace
 {
@@ -135,22 +135,22 @@ struct TrackGuard
 };
 } // namespace
 
-TEST_CASE("Default-constructed Vector never allocates", "[alloc]")
+TEST_CASE("Default-constructed Array never allocates", "[alloc]")
 {
     TrackGuard g;
     {
-        Vector<int> v;
-        (void)v.Empty();
+        Array<int> v;
+        (void)v.IsEmpty();
     }
     REQUIRE(gCounters.news == 0);
     REQUIRE(gCounters.deletes == 0);
 }
 
-TEST_CASE("Array never allocates", "[alloc]")
+TEST_CASE("StaticArray never allocates", "[alloc]")
 {
     TrackGuard g;
     {
-        Array<int, 32> a{};
+        StaticArray<int, 32> a{};
         a.Fill(7);
         volatile int sink = a[0];
         (void)sink;
@@ -158,15 +158,15 @@ TEST_CASE("Array never allocates", "[alloc]")
     REQUIRE(gCounters.news == 0);
 }
 
-TEST_CASE("Reserve(n) + n push_backs allocates exactly once", "[alloc]")
+TEST_CASE("EnsureCapacity(n) + n Adds allocates exactly once", "[alloc]")
 {
     TrackGuard g;
     {
-        Vector<int> v;
-        v.Reserve(256);
+        Array<int> v;
+        v.EnsureCapacity(256);
         for (int i = 0; i < 256; ++i)
         {
-            v.PushBack(i);
+            v.Add(i);
         }
         REQUIRE(gCounters.news == 1);
     }
@@ -176,11 +176,11 @@ TEST_CASE("Reserve(n) + n push_backs allocates exactly once", "[alloc]")
 
 TEST_CASE("Clear does not free or allocate", "[alloc]")
 {
-    Vector<int> v;
-    v.Reserve(64);
+    Array<int> v;
+    v.EnsureCapacity(64);
     for (int i = 0; i < 64; ++i)
     {
-        v.PushBack(i);
+        v.Add(i);
     }
     {
         TrackGuard g;
@@ -188,17 +188,17 @@ TEST_CASE("Clear does not free or allocate", "[alloc]")
         REQUIRE(gCounters.news == 0);
         REQUIRE(gCounters.deletes == 0);
     }
-    REQUIRE(v.Capacity() >= 64);
+    REQUIRE(v.GetCapacity() >= 64);
 }
 
 TEST_CASE("Growth reallocates a bounded number of times", "[alloc]")
 {
     TrackGuard g;
     {
-        Vector<int> v;
+        Array<int> v;
         for (int i = 0; i < 10000; ++i)
         {
-            v.PushBack(i);
+            v.Add(i);
         }
         // Geometric growth => O(log n) reallocations, far fewer than n.
         REQUIRE(gCounters.news < 40);
@@ -210,15 +210,15 @@ TEST_CASE("Allocation/deallocation symmetry after churn", "[alloc]")
 {
     TrackGuard g;
     {
-        Vector<int> v;
+        Array<int> v;
         for (int i = 0; i < 1000; ++i)
         {
-            v.PushBack(i);
+            v.Add(i);
         }
-        v.ShrinkToFit();
-        Vector<int> moved = std::move(v);
+        v.TrimCapacity();
+        Array<int> moved = std::move(v);
         moved.Clear();
-        moved.ShrinkToFit();
+        moved.TrimCapacity();
     }
     REQUIRE(gCounters.news == gCounters.deletes);
 }

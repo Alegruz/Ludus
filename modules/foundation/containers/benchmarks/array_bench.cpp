@@ -1,14 +1,14 @@
-// Benchmarks: Ludus::Vector / Ludus::Array vs std::vector / std::array.
+// Benchmarks: Ludus::Array / Ludus::Array vs std::vector / std::array.
 //
 // Goal is NOT to manufacture a win over std::vector (a good std::vector on
-// trivially-copyable types is already near-optimal). Goal: prove Ludus::Vector
+// trivially-copyable types is already near-optimal). Goal: prove Ludus::Array
 // is not materially worse on representative engine workloads, and record honest
 // numbers. Compiled at -O2 with the pinned Clang 18. Simple wall-clock harness;
 // each workload runs enough iterations to be measurable and is repeated, taking
 // the best (min) time to reduce noise.
 
 #include <ludus/foundation/containers/array.hpp>
-#include <ludus/foundation/containers/vector.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
 
 #include <array>
 #include <chrono>
@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-using ludus::foundation::Vector;
+using ludus::foundation::Array;
 using Clock = std::chrono::steady_clock;
 
 namespace
@@ -88,18 +88,18 @@ int main()
     constexpr int kReps = 7;
     constexpr long N = 100000;
 
-    std::printf("=== Ludus::Vector vs std::vector  (Clang 18, -O2; ns per element, best of %d) ===\n", kReps);
+    std::printf("=== Ludus::Array vs std::vector  (Clang 18, -O2; ns per element, best of %d) ===\n", kReps);
 
     // --- push N uint32 (trivial scalar) ---
     {
         auto ludus = BestNs(
             [] {
-                Vector<std::uint32_t> v;
+                Array<std::uint32_t> v;
                 for (long i = 0; i < N; ++i)
                 {
-                    v.PushBack(static_cast<std::uint32_t>(i));
+                    v.Add(static_cast<std::uint32_t>(i));
                 }
-                DoNotOptimize(v.Data());
+                DoNotOptimize(v.GetData());
             },
             kReps,
             N);
@@ -121,13 +121,13 @@ int main()
     {
         auto ludus = BestNs(
             [] {
-                Vector<std::uint32_t> v;
-                v.Reserve(N);
+                Array<std::uint32_t> v;
+                v.EnsureCapacity(N);
                 for (long i = 0; i < N; ++i)
                 {
-                    v.PushBack(static_cast<std::uint32_t>(i));
+                    v.Add(static_cast<std::uint32_t>(i));
                 }
-                DoNotOptimize(v.Data());
+                DoNotOptimize(v.GetData());
             },
             kReps,
             N);
@@ -150,12 +150,12 @@ int main()
     {
         auto ludus = BestNs(
             [] {
-                Vector<Pod32> v;
+                Array<Pod32> v;
                 for (long i = 0; i < N; ++i)
                 {
-                    v.PushBack(Pod32{});
+                    v.Add(Pod32{});
                 }
-                DoNotOptimize(v.Data());
+                DoNotOptimize(v.GetData());
             },
             kReps,
             N);
@@ -178,12 +178,12 @@ int main()
         constexpr long M = 20000;
         auto ludus = BestNs(
             [] {
-                Vector<NonTrivial> v;
+                Array<NonTrivial> v;
                 for (long i = 0; i < M; ++i)
                 {
-                    v.EmplaceBack(static_cast<int>(i));
+                    v.AddInPlace(static_cast<int>(i));
                 }
-                DoNotOptimize(v.Data());
+                DoNotOptimize(v.GetData());
             },
             kReps,
             M);
@@ -203,11 +203,11 @@ int main()
 
     // --- iteration / sum ---
     {
-        Vector<std::uint32_t> lv;
+        Array<std::uint32_t> lv;
         std::vector<std::uint32_t> sv;
         for (long i = 0; i < N; ++i)
         {
-            lv.PushBack(static_cast<std::uint32_t>(i));
+            lv.Add(static_cast<std::uint32_t>(i));
             sv.push_back(static_cast<std::uint32_t>(i));
         }
         auto ludus = BestNs(
@@ -237,11 +237,11 @@ int main()
 
     // --- random access ---
     {
-        Vector<std::uint32_t> lv;
+        Array<std::uint32_t> lv;
         std::vector<std::uint32_t> sv;
         for (long i = 0; i < N; ++i)
         {
-            lv.PushBack(static_cast<std::uint32_t>((i * 2654435761u) % N));
+            lv.Add(static_cast<std::uint32_t>((i * 2654435761u) % N));
             sv.push_back(static_cast<std::uint32_t>((i * 2654435761u) % N));
         }
         auto ludus = BestNs(
@@ -278,9 +278,9 @@ int main()
         }
         auto ludus = BestNs(
             [&] {
-                Vector<std::uint32_t> v;
-                v.Append(std::span<const std::uint32_t>(src.data(), src.size()));
-                DoNotOptimize(v.Data());
+                Array<std::uint32_t> v;
+                v.AddRange(std::span<const std::uint32_t>(src.data(), src.size()));
+                DoNotOptimize(v.GetData());
             },
             kReps,
             N);
@@ -297,17 +297,17 @@ int main()
 
     // --- copy whole ---
     {
-        Vector<Pod32> lv;
+        Array<Pod32> lv;
         std::vector<Pod32> sv;
         for (long i = 0; i < N; ++i)
         {
-            lv.PushBack(Pod32{});
+            lv.Add(Pod32{});
             sv.push_back(Pod32{});
         }
         auto ludus = BestNs(
             [&] {
-                Vector<Pod32> c = lv;
-                DoNotOptimize(c.Data());
+                Array<Pod32> c = lv;
+                DoNotOptimize(c.GetData());
             },
             kReps,
             N);
@@ -322,11 +322,11 @@ int main()
     }
 
     std::printf("\n=== sizeof ===\n");
-    std::printf("sizeof(Ludus::Vector<int>)=%zu  sizeof(std::vector<int>)=%zu\n",
-                sizeof(Vector<int>),
+    std::printf("sizeof(Ludus::Array<int>)=%zu  sizeof(std::vector<int>)=%zu\n",
+                sizeof(Array<int>),
                 sizeof(std::vector<int>));
-    std::printf("sizeof(Ludus::Array<int,16>)=%zu  sizeof(std::array<int,16>)=%zu\n",
-                sizeof(ludus::foundation::Array<int, 16>),
+    std::printf("sizeof(Ludus::StaticArray<int,16>)=%zu  sizeof(std::array<int,16>)=%zu\n",
+                sizeof(ludus::foundation::StaticArray<int, 16>),
                 sizeof(std::array<int, 16>));
 
     return 0;

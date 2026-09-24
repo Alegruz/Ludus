@@ -14,7 +14,7 @@
 #include "internal/trace_chunk.hpp"
 #include "internal/trace_event.hpp"
 
-#include <ludus/foundation/containers/vector.hpp>
+#include <ludus/foundation/containers/array.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -34,7 +34,7 @@ namespace
 // what the exporter does; used here to assert structural correctness.
 struct Drained
 {
-    ludus::foundation::Vector<internal::TraceEvent> events;
+    ludus::foundation::Array<internal::TraceEvent> events;
     uint64 beginCount = 0;
     uint64 endCount = 0;
     uint64 instantCount = 0;
@@ -48,14 +48,14 @@ Drained drainAll()
     Drained result;
     internal::TraceRecorder& recorder = internal::TraceRecorder::Instance();
     internal::TraceChunk* chunk = recorder.DrainFullChunks();
-    ludus::foundation::Vector<internal::TraceChunk*> chunks;
+    ludus::foundation::Array<internal::TraceChunk*> chunks;
     while (chunk != nullptr)
     {
         internal::TraceChunk* next = chunk->PoolNext;
         for (uint32 i = 0; i < chunk->Count; ++i)
         {
             const internal::TraceEvent& event = chunk->Events[i];
-            result.events.PushBack(event);
+            result.events.Add(event);
             switch (static_cast<internal::TraceEventKind>(event.Kind))
             {
                 case internal::TraceEventKind::Begin:
@@ -78,7 +78,7 @@ Drained drainAll()
                     break;
             }
         }
-        chunks.PushBack(chunk);
+        chunks.Add(chunk);
         chunk = next;
     }
     for (internal::TraceChunk* c : chunks)
