@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <numeric>
-#include <ranges>
 #include <span>
 #include <type_traits>
 
@@ -77,7 +76,7 @@ TEST_CASE("Array iterators and std algorithms", "[array][interop]")
     REQUIRE(a[4] == 5);
     const int total = std::accumulate(a.begin(), a.end(), 0);
     REQUIRE(total == 15);
-    REQUIRE(std::ranges::find(a, 4) != a.end());
+    REQUIRE(std::find(a.begin(), a.end(), 4) != a.end());
 }
 
 TEST_CASE("Array span interop and Data", "[array][interop]")
