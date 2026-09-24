@@ -44,6 +44,11 @@ CLEAN_ENV = {k: v for k, v in os.environ.items()
                           "LUDUS_DIAGNOSTIC_INTERACTIVE")}
 
 HELPER = None
+# LUDUS_ASSERT_DIALOGS_AVAILABLE for the built startup child. The control
+# endpoint / interactive mode is only configured when the build is
+# dialog-eligible (non-CI Debug). Under any CI build this is 0, so the child
+# stays report-only with no handshake even outside CI at run time.
+DIALOGS = False
 
 
 def run_under_helper(child, mode, extra_env=None, timeout=10):
@@ -73,11 +78,15 @@ def test_helper_end_to_end(child):
     result = run_under_helper(child, "pre-post")
     assert result.returncode == 0, (result.returncode, result.stderr)
     assert "STARTUP report=1" in result.stdout, result.stdout
-    assert "control=1" in result.stdout, ("handshake should complete", result.stdout)
+    # The control handshake is attempted only when the build is dialog-eligible
+    # (non-CI Debug). Report delivery is independent of that and always works.
+    expected_control = "control=1" if DIALOGS else "control=0"
+    assert expected_control in result.stdout, ("control state", DIALOGS, result.stdout)
     assert "[LUDUS report] pre-init" in result.stdout, result.stdout
     assert "[LUDUS report] post-shutdown" in result.stdout, result.stdout
     assert "PRE=delivered" in result.stdout and "POST=delivered" in result.stdout, result.stdout
-    print("  helper end-to-end: byte-encoded handshake + pre/post report delivery OK")
+    print(f"  helper end-to-end: report delivery OK (dialogs={int(DIALOGS)}, "
+          f"handshake {'completed' if DIALOGS else 'not attempted'})")
 
 
 def test_helper_cleanup_on_child_exit(child):
@@ -122,6 +131,18 @@ def test_malformed_handshake(child):
                     driver_side.send(bad)
         except OSError:
             pass
+
+    if not DIALOGS:
+        # A non-dialog-eligible build never configures the control endpoint, so
+        # no Hello is sent; the byte-level malformed-ack path is covered by the
+        # decision tests on an eligible build. Just confirm it stays report-only.
+        for s in (engine_side, driver_side, report_recv, report_send):
+            s.close()
+        result = run_direct(child, "default", timeout=8)
+        assert result.returncode == 0, (result.returncode, result.stderr)
+        assert "control=0" in result.stdout, result.stdout
+        print("  malformed handshake: n/a for non-eligible build, stays report-only OK")
+        return
 
     worker = threading.Thread(target=responder)
     worker.start()
@@ -211,9 +232,10 @@ def test_headless_capture_without_zenity(child):
 
 
 def main():
-    global HELPER
+    global HELPER, DIALOGS
     HELPER = sys.argv[1]
     child = sys.argv[2]
+    DIALOGS = len(sys.argv) > 3 and sys.argv[3] == "1"
     test_helper_end_to_end(child)
     test_helper_cleanup_on_child_exit(child)
     test_ci_forces_report_only(child)

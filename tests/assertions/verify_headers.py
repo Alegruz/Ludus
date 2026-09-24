@@ -95,12 +95,17 @@ def main():
             assert b"MESSAGE_7ead" not in linked.read_bytes() and b"CONDITION_7ead" not in linked.read_bytes()
         assembly = (output / (kind + ".s")).read_text()
         binary = (output / (kind + ".o")).read_bytes()
+        # ASSERT/ASSERT_F use the resumable BeginAssert entry; CHECK/CHECK_F use
+        # BeginCheck; REQUIRE/FATAL keep the terminal BeginFatal.
+        expected_entry = ("BeginAssert" if kind.startswith("ASSERT")
+                          else "BeginCheck" if kind.startswith("CHECK")
+                          else "BeginFatal")
         if kind.startswith("ASSERT") and not enabled:
             assert b"MESSAGE_7ead" not in binary and b"CONDITION_7ead" not in binary
-            assert "BeginFatal" not in assembly and "FinishFatal" not in assembly
+            assert "BeginAssert" not in assembly and "FinishAssert" not in assembly
         else:
             assert b"MESSAGE_7ead" in binary and b"CONDITION_7ead > 0" in binary
-            assert ("BeginCheck" if kind.startswith("CHECK") else "BeginFatal") in assembly
+            assert expected_entry in assembly
         # No TLS/atomic/allocator/debugger machinery at the call sites.
         for token in ("%fs:", "__tls", "lock\t", "malloc", "QueryDebugger", "clock_gettime"):
             assert token not in assembly, (kind, token)

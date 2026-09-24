@@ -46,7 +46,8 @@ if(LUDUS_BUILD_TESTS)
     add_test(NAME ludus_diagnostic_startup
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/startup_tests.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/ludus_diagnostic_helper.py"
-            "$<TARGET_FILE:ludus_diagnostic_startup_child>")
+            "$<TARGET_FILE:ludus_diagnostic_startup_child>"
+            "${LUDUS_ASSERT_DIALOGS_AVAILABLE}")
     set_tests_properties(ludus_diagnostic_startup PROPERTIES LABELS "tools;diagnostic-startup" TIMEOUT 60)
 
     # Resumable-ASSERT decision test: a controlled helper scripts the
