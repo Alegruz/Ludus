@@ -17,7 +17,7 @@
 
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/containers/array.hpp>
-#include <ludus/foundation/containers/vector.hpp>
+#include <ludus/foundation/containers/static_array.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -88,7 +88,7 @@ struct LoggerState
 
     internal::CategoryRegistry Categories;
 
-    foundation::Vector<foundation::UniquePtr<internal::ILogSink>> Sinks;
+    foundation::Array<foundation::UniquePtr<internal::ILogSink>> Sinks;
 
     // Timed-flush worker (requirements R46). Only runs while Accepting and only
     // when a positive interval is configured.
@@ -386,11 +386,11 @@ LogInitResult LogSystem::Initialize(const LogConfig& config)
 
     if (config.EnableConsole)
     {
-        s.Sinks.PushBack(MakeSink<internal::ConsoleSink>());
+        s.Sinks.Add(MakeSink<internal::ConsoleSink>());
     }
     if (config.EnableDebugger)
     {
-        s.Sinks.PushBack(MakeSink<internal::DebuggerSink>());
+        s.Sinks.Add(MakeSink<internal::DebuggerSink>());
     }
     if (config.EnableFile)
     {
@@ -414,7 +414,7 @@ LogInitResult LogSystem::Initialize(const LogConfig& config)
                 // through the base is correct.
                 internal::ILogSink* owned = file_sink;
                 file_sink = nullptr;
-                s.Sinks.PushBack(foundation::UniquePtr<internal::ILogSink>(owned));
+                s.Sinks.Add(foundation::UniquePtr<internal::ILogSink>(owned));
             }
             else
             {
@@ -619,11 +619,11 @@ void SubmitFormat(LogLevel level,
     // allocation, no throw, no terminate: a bad/oversized format degrades to a
     // bounded marker and sets a flag (requirements R19/R25/R38). The bounded
     // buffer is the common-path storage; nothing borrowed escapes this call.
-    foundation::Array<char, kMaxMessageBytes> buffer;
+    foundation::StaticArray<char, kMaxMessageBytes> buffer;
     const internal::FormatOutcome outcome =
-        internal::FormatInto(std::span<char>(buffer.Data(), buffer.Size()), format, args);
+        internal::FormatInto(std::span<char>(buffer.GetData(), buffer.GetSize()), format, args);
 
-    const std::string_view message(buffer.Data(), outcome.BytesWritten);
+    const std::string_view message(buffer.GetData(), outcome.BytesWritten);
     dispatchAdmitted(level, category, location, message);
 }
 

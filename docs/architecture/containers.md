@@ -2,12 +2,17 @@
 
 > Status: **Implemented and migrated.** This document began as the design/
 > architecture deliverable; the containers have since been implemented, tested,
-> benchmarked, and the Ludus-owned codebase migrated onto them. See §32
-> (Implementation & migration results) for what was actually built, the one
-> measured design change (growth factor 1.5× → 2×, §15/§32.2), the migration
-> outcome, and the remaining documented STL exceptions. Sections 1–31 are the
-> original design and are preserved as written; where implementation differed,
-> §32 is authoritative.
+> benchmarked, and the Ludus-owned codebase migrated onto them.
+>
+> **§34 is the current authoritative naming and API.** An architectural
+> correction renamed the types to the Ludus-native taxonomy
+> (`StaticArray<T, N>` fixed-size, `Array<T>` dynamic — freeing `Vector` for
+> mathematics) and moved the member API off STL spellings onto the engine's
+> verb-oriented convention (`GetSize`/`IsEmpty`/`GetData`/`EnsureCapacity`/`Add`/
+> `RemoveLast`/…). Where §§1–33 use the old names (`Array<T,N>`/`Vector<T>`,
+> `Size()`/`PushBack()`/`Reserve()`), read them through §34's mapping. §32
+> (measured results) and §33 (audit corrections) remain valid for behaviour and
+> the growth-factor decision (2×).
 >
 > Audience: Ludus engine contributors and reviewers.
 > Scope: two owning contiguous containers — a fixed-size static array and a
@@ -1762,3 +1767,114 @@ found correct. The two remaining engine STL-container usages (`diagnostic.cpp`
 emergency path — blocked by the `FoundationBase`→`FoundationContainers`
 dependency direction; `file_sink.cpp` — entangled with `std::filesystem`, pending
 the VFS layer) were re-verified as genuine, not convenience.
+
+
+---
+
+## 34. Ludus-native taxonomy and API (authoritative naming)
+
+An architectural correction moved the containers off STL-mimicking names onto
+Ludus's own conventions. This section is authoritative for naming; earlier
+sections describe the same designs under their original working names.
+
+### 34.1 Type taxonomy
+
+> **Decision:** two owning contiguous types, named so the *storage discipline* is
+> obvious at a glance, with `Vector` deliberately reserved for mathematics.
+>
+> | Concept | Name | Was |
+> |---|---|---|
+> | fixed-size (compile-time count) contiguous owning storage | `ludus::foundation::StaticArray<T, N>` | `Array<T, N>` |
+> | dynamically-sized contiguous owning storage | `ludus::foundation::Array<T>` | `Vector<T>` |
+> | mathematical vector | *(reserved — future `Vec2`/`Vec3`/`Vec4`)* | — |
+>
+> **Rationale.** `Vector` is the single most overloaded word in a rendering/
+> physics engine (position, direction, velocity, `Vec3`…); using it for a
+> growable byte container guarantees a lifetime of "which vector?" ambiguity.
+> Reserving `Vector` for math and naming the growable sequence `Array` removes
+> that collision. `Array<T>` reads naturally as "an array of T" and is the common
+> case, so it earns the short name; `StaticArray<T, N>` makes the fixed,
+> compile-time size explicit at every use. This is a coherent long-term taxonomy
+> (the future `FixedVector`/`SmallVector` in §26 become `FixedArray`/
+> `SmallArray`, keeping "Array" as the sequence family and "Vector" as math).
+>
+> **Trade-offs.** `Array<T>` (dynamic) reads slightly less "obviously heap" than
+> `Vector<T>` would to an STL native; mitigated by the taxonomy being consistent
+> and documented, and by `StaticArray` making the fixed sibling unmistakable.
+
+### 34.2 Member API — verb-oriented, not STL spellings
+
+Ludus functions begin with a verb/verb-phrase (`GetX`, `IsX`, `EnsureX`,
+`AddX`, `RemoveX`), a convention already established across the engine
+(`GetCurrentThreadId`, `IsInitialized`, `HasPending`, `SetGlobalLevel`). The
+container API now follows it. STL spellings are used only where they are
+*independently* the clearest Ludus choice and are needed for ecosystem interop
+(`operator[]`, `begin/end`, `data/size`, `std::span` conversion, `operator==`).
+
+| Old (STL-ish) | Ludus | Notes |
+|---|---|---|
+| `Size()` | `GetSize()` | |
+| `Capacity()` | `GetCapacity()` | |
+| `Empty()` | `IsEmpty()` | predicate → `Is` |
+| `Data()` | `GetData()` | |
+| `MaxSize()` | `GetMaxSize()` | |
+| `Front()` | `GetFirst()` | |
+| `Back()` | `GetLast()` | |
+| `Reserve(n)` | `EnsureCapacity(n)` / `TryEnsureCapacity(n)` | name states the postcondition: `GetCapacity() >= n`; never shrinks; no-op if already satisfied |
+| `ShrinkToFit()` | `TrimCapacity()` | releases excess; best-effort |
+| `PushBack(v)` | `Add(v)` / `TryAdd(v)` | |
+| `EmplaceBack(args…)` | `AddInPlace(args…)` / `TryAddInPlace(args…)` | |
+| `PopBack()` | `RemoveLast()` | |
+| `Insert(i,v)` | `InsertAt(i,v)` | |
+| `EmplaceAt(i,args…)` | `InsertAtInPlace(i,args…)` | |
+| `Erase(i)` | `RemoveAt(i)` | order-preserving, O(n) |
+| `EraseRange(f,l)` | `RemoveRange(f,l)` | order-preserving, O(n) |
+| `EraseUnordered(i)` | `RemoveAtSwap(i)` | O(1) swap-with-last; name makes the reorder explicit |
+| `Append(span)` | `AddRange(span)` / `TryAddRange(span)` | |
+| `From(span)` | `FromRange(span)` | static factory |
+| `Resize`, `Clear`, `Swap`, `Fill` | unchanged | already verbs |
+| `operator[]`, `begin/end/cbegin/cend`, `data/size`, `AsSpan`, `operator==`/`<=>` | unchanged | interop surface (range-for, ranges, `std::sort`, GPU pointer+count) |
+
+`EnsureCapacity(n)` is deliberately **not** `Reserve(n)` or `SetCapacity(n)`: the
+name states its contract (ensure at least `n`; do nothing if already met; never
+shrink). An exact-capacity `SetCapacity` was **not** introduced — Ludus has no
+call site that needs an exact resulting capacity, and exact-shrink semantics
+would be a sharper, less obviously-correct tool; releasing excess is the explicit
+`TrimCapacity()`.
+
+Files were renamed to match: `static_array.hpp` (`StaticArray`), `array.hpp`
+(`Array`, formerly `vector.hpp`), `src/array_support.cpp`. The detail header
+`detail/contiguous_storage.hpp` and the relocation trait are unchanged in
+behaviour.
+
+### 34.3 Migration completeness (requirement: actually migrate)
+
+Every Ludus-owned owning `std::array`/`std::vector` is now migrated, **including
+the log-retention path that a prior audit had deferred**:
+
+- `logging/logger.cpp`: sink list → `Array<UniquePtr<ILogSink>>`; producer
+  format buffer → `StaticArray<char, N>`.
+- `logging/internal/backend.{hpp,cpp}`: worker sink list → `Array<UniquePtr<…>>`.
+- `logging/sinks/file_sink.cpp`: the retention grouping (`std::vector<Group>`,
+  `std::vector<Group*>`, and `Group::Segments` `std::vector<path>`) → Ludus
+  `Array`. The **element** types `std::filesystem::path` and `std::string` stay
+  STL — they are `<filesystem>`/String facilities on their own replacement track,
+  not container replacements. Pointer stability is preserved (the `Group*`
+  snapshot is built only after `groups` stops growing), and `std::sort` still
+  operates over the array's contiguous iterators.
+- `profiling/export_perfetto.cpp` and `profiling/tests/scope_tests.cpp`:
+  event/chunk buffers → `Array<…>`.
+
+### 34.4 Remaining STL exception (verified genuine)
+
+- `foundation/base/src/diagnostic.cpp` — `std::array<char, N>` in the emergency
+  diagnostic/assertion path. This is a **hard** boundary, not convenience:
+  `FoundationBase` must not depend on `FoundationContainers` (the containers
+  module depends on Base; using `StaticArray` there would be a circular module
+  dependency), and the emergency path must stay dependency-free and must not
+  invoke `LUDUS_ASSERT` (which `StaticArray::operator[]` uses). It remains the
+  only Ludus-owned owning-STL-container usage, and it is correct that it does.
+
+Test-only `std::vector<std::thread>` pools and the benchmark's `std::vector`/
+`std::array` comparison baselines remain (threads are not a container; the
+benchmark's purpose is to compare against STL).

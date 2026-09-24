@@ -4,17 +4,17 @@
 
 #include "lifetime_type.hpp"
 
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/containers/relocation.hpp>
-#include <ludus/foundation/containers/vector.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
 #include <type_traits>
 
+using ludus::foundation::Array;
 using ludus::foundation::IsTriviallyRelocatable;
 using ludus::foundation::usize;
-using ludus::foundation::Vector;
 namespace tst = ludus::containers::testing;
 
 TEST_CASE("IsTriviallyRelocatable defaults to trivially copyable", "[relocation][trait]")
@@ -43,17 +43,17 @@ TEST_CASE("Opt-in LUDUS_TRIVIALLY_RELOCATABLE enables the trait", "[relocation][
 TEST_CASE("Relocatable existing elements relocate via memcpy (bulk moves stay tiny)", "[relocation]")
 {
     tst::LifetimeLedger led;
-    Vector<tst::Relocatable> v;
+    Array<tst::Relocatable> v;
     // Force many reallocations.
     for (int i = 0; i < 300; ++i)
     {
-        v.EmplaceBack(&led, i);
+        v.AddInPlace(&led, i);
     }
     // The Relocatable move ctor increments MoveCtor. The EXISTING elements are
     // relocated with memcpy on each growth (never move-constructed), which is the
     // property that keeps reallocation O(bytes) not O(n) constructor calls. The
     // newly-emplaced element is materialized into a local and moved into place
-    // once per growth (self-reference safety, see EmplaceBack) — so total moves
+    // once per growth (self-reference safety, see AddInPlace) — so total moves
     // are bounded by the number of reallocations (O(log n)), NOT the element
     // count. If the memcpy relocation of existing elements regressed to
     // per-element move-construction, this would be ~hundreds instead of ~dozen.
@@ -68,15 +68,15 @@ TEST_CASE("Relocatable existing elements relocate via memcpy (bulk moves stay ti
 TEST_CASE("Relocatable bulk relocation performs zero moves when pushes do not grow", "[relocation]")
 {
     // With capacity reserved up-front there is no reallocation, so no relocation
-    // of existing elements and no grow-path local: EmplaceBack constructs the
+    // of existing elements and no grow-path local: AddInPlace constructs the
     // element directly in place. Zero move constructions confirms the direct
     // (non-grow) fast path does not spuriously move.
     tst::LifetimeLedger led;
-    Vector<tst::Relocatable> v;
-    v.Reserve(300);
+    Array<tst::Relocatable> v;
+    v.EnsureCapacity(300);
     for (int i = 0; i < 300; ++i)
     {
-        v.EmplaceBack(&led, i);
+        v.AddInPlace(&led, i);
     }
     REQUIRE(led.MoveCtor == 0);
 }
@@ -84,28 +84,28 @@ TEST_CASE("Relocatable bulk relocation performs zero moves when pushes do not gr
 TEST_CASE("Non-relocatable type reallocates via move+destroy", "[relocation]")
 {
     tst::LifetimeLedger led;
-    Vector<tst::Tracked> v;
-    v.Reserve(2);
-    v.EmplaceBack(&led, 1);
-    v.EmplaceBack(&led, 2);
+    Array<tst::Tracked> v;
+    v.EnsureCapacity(2);
+    v.AddInPlace(&led, 1);
+    v.AddInPlace(&led, 2);
     const long movesBefore = led.MoveCtor;
     const long dtorsBefore = led.Dtor;
-    v.PushBack(tst::Tracked(&led, 3)); // triggers reallocation of the 2 existing
+    v.Add(tst::Tracked(&led, 3)); // triggers reallocation of the 2 existing
     // The two existing elements were move-constructed into new storage and the
     // old ones destroyed.
     REQUIRE(led.MoveCtor > movesBefore);
     REQUIRE(led.Dtor > dtorsBefore);
-    REQUIRE(v.Size() == 3);
+    REQUIRE(v.GetSize() == 3);
     REQUIRE(v[0].Value() == 1);
     REQUIRE(v[2].Value() == 3);
 }
 
 TEST_CASE("Relocatable correctness after growth", "[relocation]")
 {
-    Vector<tst::Relocatable> v;
+    Array<tst::Relocatable> v;
     for (int i = 0; i < 1000; ++i)
     {
-        v.EmplaceBack(nullptr, i * 2);
+        v.AddInPlace(nullptr, i * 2);
     }
     for (int i = 0; i < 1000; ++i)
     {
