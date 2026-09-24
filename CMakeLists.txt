@@ -71,6 +71,7 @@ install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENT
 
 add_subdirectory(modules/foundation/base)
 add_subdirectory(modules/foundation/logging)
+add_subdirectory(modules/foundation/profiling)
 add_subdirectory(modules/platform)
 
 # Startup-only development diagnostic integration (depends on Base; Base does

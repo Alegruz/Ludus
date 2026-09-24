@@ -1,0 +1,18 @@
+// Generated from cmake/profiling_config.hpp.in by the build system. Do not edit.
+//
+// This header carries the SDK-owned profiling policy: whether CPU trace
+// instrumentation is compiled in for this build flavor. It mirrors the
+// generated assert_config.hpp pattern (SDK-owned, no per-TU override) so a
+// consumer cannot silently disagree with the SDK it links against.
+#pragma once
+
+// LUDUS_PROFILING_ENABLED selects whether the trace instrumentation macros
+// (LUDUS_PROFILE_SCOPE / _FUNCTION / _FRAME / _MARK) expand to real recording
+// code (1) or to `((void)0)` with no argument evaluation (0). It is injected by
+// EngineProfilingFlavor logic from the build flavor; predefining it is a hard
+// error so the value always matches the SDK variant.
+#if defined(LUDUS_PROFILING_ENABLED)
+#    error "LUDUS_PROFILING_ENABLED is generated from the build flavor; do not predefine it"
+#endif
+
+#define LUDUS_PROFILING_ENABLED @LUDUS_PROFILING_ENABLED@

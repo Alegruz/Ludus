@@ -5,6 +5,7 @@ target_link_libraries(
     PRIVATE
         Ludus::FoundationBase
         Ludus::FoundationLogging
+        Ludus::FoundationProfiling
         Ludus::Platform
         Ludus::DiagnosticsIntegration
 )

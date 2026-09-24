@@ -4,6 +4,8 @@
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
+#include <ludus/foundation/profiling/profiling.hpp>
+#include <ludus/foundation/profiling/trace_system.hpp>
 #include <ludus/platform/base/window.h>
 
 #include <string>
@@ -39,6 +41,14 @@ int main()
                    diagnostics.ControlEndpointReady,
                    diagnostics.Mode == ludus::diagnostics::SessionMode::Interactive ? "interactive" : "report-only",
                    diagnostics.DetectedCi);
+
+    // Profiling demo: register the main thread and capture the startup phase.
+    // In an enabled build this records CPU scopes and writes a Perfetto/Chrome
+    // trace on shutdown; in a Release (profiling-disabled) build every macro
+    // compiles to nothing (see docs/architecture/profiling-final.md).
+    ludus::foundation::profiling::RegisterThreadForTrace("Main");
+    const bool profilingCapture = ludus::foundation::profiling::BeginCapture();
+
     LUDUS_LOG_INFO(LOG_CORE, "Ludus {} starting", ludus::foundation::version_string());
     LUDUS_LOG_INFO(LOG_CORE, "Revision: {}", ludus::foundation::git_revision());
     LUDUS_LOG_INFO(LOG_CORE, "Compiler: {}", ludus::foundation::compiler_identity());
@@ -66,7 +76,20 @@ int main()
 
     while (window->HandleEvent({}))
     {
+        LUDUS_PROFILE_SCOPE(Frame);
         // Main loop
+        LUDUS_PROFILE_FRAME();
+    }
+
+    // Close the capture and write a trace next to the executable. Guarded so a
+    // profiling-disabled build (where BeginCapture returned false) does nothing.
+    if (profilingCapture)
+    {
+        ludus::foundation::profiling::EndCapture();
+        if (ludus::foundation::profiling::ExportPerfettoTrace("ludus_smoke_trace.json"))
+        {
+            LUDUS_LOG_INFO(LOG_CORE, "Wrote profiling trace: ludus_smoke_trace.json");
+        }
     }
 
     LogSystem::Shutdown();
