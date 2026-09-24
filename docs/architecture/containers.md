@@ -1557,9 +1557,11 @@ only on `Ludus::FoundationBase`):
 - `include/ludus/foundation/containers/array.hpp` — `Array<T, N>` (+ `Array<T,0>`
   specialization).
 - `include/ludus/foundation/containers/vector.hpp` — `Vector<T>`.
-- `include/ludus/foundation/containers/internal/contiguous_storage.hpp` —
+- `include/ludus/foundation/containers/detail/contiguous_storage.hpp` —
   lifetime/relocation primitives (installed detail header; the header template
-  needs it at instantiation).
+  needs it at instantiation). Placed under `detail/` rather than `internal/`
+  because the SDK-install check forbids installing headers whose path contains
+  `internal`.
 - `include/ludus/foundation/containers/containers.hpp` — umbrella.
 - `src/vector_support.cpp` — out-of-line allocation seam, growth math, OOM/overflow
   fatal sinks.

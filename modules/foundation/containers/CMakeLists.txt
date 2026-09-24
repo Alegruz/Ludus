@@ -22,7 +22,7 @@ target_sources(
             include/ludus/foundation/containers/vector.hpp
             include/ludus/foundation/containers/relocation.hpp
             include/ludus/foundation/containers/containers.hpp
-            include/ludus/foundation/containers/internal/contiguous_storage.hpp
+            include/ludus/foundation/containers/detail/contiguous_storage.hpp
 )
 
 # Dependency direction: FoundationContainers may use FoundationBase (types,

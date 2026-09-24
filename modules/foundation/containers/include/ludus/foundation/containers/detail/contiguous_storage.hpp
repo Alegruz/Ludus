@@ -19,10 +19,13 @@
 // however, track exactly how many objects have been constructed so the caller
 // (Vector) can destroy precisely the live range on teardown.
 //
-// This lives under include/.../internal because Vector is a header template and
-// must reach these helpers at the point of instantiation. It is a detail header:
-// consumers include vector.hpp, not this file. It is installed with the SDK
-// because the template requires it, but is not part of the supported API.
+// This lives under include/.../detail because Vector is a header template and
+// must reach these helpers at the point of instantiation, so the file is
+// installed with the SDK. It is NOT part of the supported API: consumers include
+// vector.hpp, never this file. It is under detail/ (not internal/) because the
+// SDK-install validation forbids installing headers whose path contains
+// "internal"; detail/ is the conventional "unstable implementation" marker for a
+// header that must nonetheless ship.
 
 #include <ludus/foundation/containers/relocation.hpp>
 

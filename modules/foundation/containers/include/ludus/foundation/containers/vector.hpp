@@ -24,10 +24,10 @@
 //
 // The heavy/cold paths (allocation, growth math, OOM/overflow handling) live
 // out-of-line in vector_support.cpp so this header stays cheap to parse and the
-// common inline paths stay small. Element lifetime lives in the private
-// internal/contiguous_storage.hpp helpers.
+// common inline paths stay small. Element lifetime lives in the
+// detail/contiguous_storage.hpp helpers.
 
-#include <ludus/foundation/containers/internal/contiguous_storage.hpp>
+#include <ludus/foundation/containers/detail/contiguous_storage.hpp>
 #include <ludus/foundation/containers/relocation.hpp>
 
 #include <ludus/foundation/base/assert.hpp>
