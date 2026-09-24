@@ -66,7 +66,9 @@ inline constexpr uint16 CONTROL_PROTOCOL_VERSION = 1u;
 inline constexpr usize CONTROL_HEADER_SIZE = 16u;
 inline constexpr usize CONTROL_MAX_PAYLOAD = 2048u; // matches the report bound
 
-enum class ControlMessageType : uint16
+// C++ base type is uint8 (the four kinds fit); the wire still encodes `kind` as
+// a fixed 2-byte little-endian field via the header helpers, independent of this.
+enum class ControlMessageType : uint8
 {
     Hello = 1,    // engine -> helper: announce protocol; empty payload
     HelloAck = 2, // helper -> engine: accept the agreed version; empty payload

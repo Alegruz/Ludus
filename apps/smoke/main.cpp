@@ -21,7 +21,8 @@ int main()
     // ready. Interactive presentation is auto-resolved: CI and headless runs stay
     // report-only, require no display/dialog helper, and never block. This never
     // launches a helper/UI and never changes any assertion's fatal action.
-    const ludus::diagnostics::SessionResult diagnostics = ludus::diagnostics::InitializeDiagnosticSession();
+    [[maybe_unused]] const ludus::diagnostics::SessionResult diagnostics =
+        ludus::diagnostics::InitializeDiagnosticSession();
 
     LogConfig config{};
     config.GlobalLevel = LogLevel::Trace;
