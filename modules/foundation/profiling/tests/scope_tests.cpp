@@ -1,9 +1,12 @@
 // CPU-scope correctness matrix (final design §11): single, nested, recursive,
 // early return, multi-thread, frame-boundary crossing, and incomplete scope.
 //
-// This TU is an ENABLED-profiling build (the module target defines
-// LUDUS_PROFILING_ENABLED=1 via the generated config). We inspect the internal
-// recorder to count events, since the event stream is the ground truth (C1).
+// These cases assert real recording, so they are only meaningful when the SDK
+// build has profiling compiled in (Debug/Development/Profile). In a Release
+// build (LUDUS_PROFILING_ENABLED == 0) the macros are no-ops and this TU
+// intentionally contributes no test cases — the compile-out contract itself is
+// covered by disabled_tests.cpp. We inspect the internal recorder to count
+// events, since the event stream is the ground truth (C1).
 #include <ludus/foundation/profiling/profiling.hpp>
 #include <ludus/foundation/profiling/trace_system.hpp>
 
@@ -15,6 +18,8 @@
 
 #include <thread>
 #include <vector>
+
+#if LUDUS_PROFILING_ENABLED
 
 using namespace ludus::foundation::profiling;
 using ludus::foundation::uint32;
@@ -266,3 +271,5 @@ TEST_CASE("buffer saturation drops with a count and never crashes", "[profiling]
     // No corruption: recorded is bounded by the single chunk capacity.
     CHECK(health.EventsRecorded <= 4096);
 }
+
+#endif // LUDUS_PROFILING_ENABLED

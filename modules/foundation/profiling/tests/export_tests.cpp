@@ -6,22 +6,37 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdio>
-#include <fstream>
-#include <sstream>
 #include <string>
+
+// Only meaningful with profiling compiled in; a Release build produces no test
+// cases here (the compile-out contract lives in disabled_tests.cpp).
+#if LUDUS_PROFILING_ENABLED
 
 using namespace ludus::foundation::profiling;
 using ludus::foundation::uint64;
+using ludus::foundation::usize;
 
 namespace
 {
 
+// Read a whole file via <cstdio> (<iostream>/<sstream> are banned by AGENTS.md;
+// <cstdio> is the allowed choice, matching the rest of the module).
 std::string readFile(const std::string& path)
 {
-    std::ifstream in(path, std::ios::binary);
-    std::stringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
+    std::string contents;
+    std::FILE* file = std::fopen(path.c_str(), "rb");
+    if (file == nullptr)
+    {
+        return contents;
+    }
+    char buffer[4096];
+    usize read = 0;
+    while ((read = std::fread(buffer, 1, sizeof(buffer), file)) > 0)
+    {
+        contents.append(buffer, read);
+    }
+    std::fclose(file);
+    return contents;
 }
 
 std::string tempPath(const char* name)
@@ -103,3 +118,5 @@ TEST_CASE("an open scope at capture end is exported as incomplete, not fabricate
     // Let the leaked zone destruct without an active capture (no-op emit).
     delete leaked;
 }
+
+#endif // LUDUS_PROFILING_ENABLED
