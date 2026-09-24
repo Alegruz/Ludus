@@ -231,6 +231,7 @@ TEST_CASE("multi-threaded scope generation is lossless within capacity", "[profi
     constexpr int kThreads = 8;
     constexpr int kScopesPerThread = 20000;
     std::vector<std::thread> threads;
+    threads.reserve(kThreads); // pre-allocate (performance-inefficient-vector-operation)
     for (int t = 0; t < kThreads; ++t)
     {
         threads.emplace_back([] {

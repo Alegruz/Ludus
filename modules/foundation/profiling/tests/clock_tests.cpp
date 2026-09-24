@@ -46,8 +46,10 @@ TEST_CASE("clock is non-decreasing across threads reading concurrently", "[profi
 {
     // Not a cross-core-ordering proof (that is gate C7); this only asserts each
     // thread sees a monotonic sequence and no read faults under contention.
+    constexpr int kThreads = 4;
     std::vector<std::thread> threads;
-    for (int t = 0; t < 4; ++t)
+    threads.reserve(kThreads); // pre-allocate (performance-inefficient-vector-operation)
+    for (int t = 0; t < kThreads; ++t)
     {
         threads.emplace_back([] {
             uint64 previous = NowTicks();
