@@ -72,6 +72,7 @@ target_link_libraries(
     ludus_foundation_profiling
     PUBLIC
         Ludus::FoundationBase
+        Ludus::FoundationContainers
 )
 
 find_package(Threads REQUIRED)

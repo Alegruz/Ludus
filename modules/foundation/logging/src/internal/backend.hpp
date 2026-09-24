@@ -1,27 +1,31 @@
 #pragma once
 
+#include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/base/types.h>
+#include <ludus/foundation/containers/vector.hpp>
 
 #include "internal/mpsc_queue.hpp"
 #include "internal/sink.hpp"
 
 #include <atomic>
 #include <condition_variable>
-#include <memory>
 #include <mutex>
 #include <thread>
-#include <vector>
 
 // This is a plain class, not a PIMPL. The concurrency members (std::thread,
 // std::mutex, std::condition_variable) and the owned sink vector are visible
 // here; their method DEFINITIONS live in backend.cpp so the header stays free of
 // heavy inline bodies. These standard members necessarily pull <thread>/
-// <condition_variable>/<memory> into the header, which drag in <format> on
-// libstdc++; that is a real cost, but backend.hpp has a single consumer
-// (logger.cpp) which already includes all of those headers for its own
-// synchronous backend, so hiding them behind a PIMPL would not reduce that TU's
-// build time. The build-time budget carries a documented per-header override for
-// this header instead (see config/build_budget.json / ADR 0005).
+// <condition_variable> into the header, which drag in <format> on libstdc++;
+// that is a real cost, but backend.hpp has a single consumer (logger.cpp) which
+// already includes those headers for its own synchronous backend, so hiding them
+// behind a PIMPL would not reduce that TU's build time. The build-time budget
+// carries a documented per-header override for this header instead (see
+// config/build_budget.json / ADR 0005).
+//
+// The owned sink list is Ludus::Vector<UniquePtr<ILogSink>> (migrated from
+// std::vector<std::unique_ptr>): it drops the <memory>/<vector> includes and
+// their transitive <format> pull, and matches the engine container policy.
 
 namespace ludus::foundation::logging::internal
 {
@@ -41,7 +45,7 @@ public:
 
     // Takes ownership of the sinks and starts the worker. The worker becomes the
     // sole owner/user of the sinks until Stop().
-    void Start(std::vector<std::unique_ptr<ILogSink>>&& sinks, uint32 flushIntervalMs) noexcept;
+    void Start(foundation::Vector<foundation::UniquePtr<ILogSink>>&& sinks, uint32 flushIntervalMs) noexcept;
 
     // Producer: enqueue an owned record. Returns false if dropped (queue full /
     // contention). Never blocks. Wakes the worker.
@@ -75,7 +79,7 @@ private:
     void Run() noexcept;
 
     Queue mQueue;
-    std::vector<std::unique_ptr<ILogSink>> mSinks; // worker-owned
+    foundation::Vector<foundation::UniquePtr<ILogSink>> mSinks; // worker-owned
     std::thread mWorker;
 
     std::atomic<bool> mStop{false};

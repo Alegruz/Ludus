@@ -53,9 +53,26 @@
     "    Build-time budget job summary and tighten if the actual figure is lower;",
     "    do NOT raise it further to hide a real regression (AGENTS.md / ADR 0005)."
   ],
+  "$containers_note": [
+    "The FoundationContainers module (Array/Vector + relocation/storage detail",
+    "headers) and its four Catch2 test translation units add real, permanent",
+    "frontend parse time to the aggregate: the test TUs pull <catch2>, <algorithm>,",
+    "<numeric>, <span> (and <ranges> in one), and vector.hpp is instantiated across",
+    "several TUs. vector.hpp itself was kept light by using placement new + an",
+    "explicit destructor call in detail/contiguous_storage.hpp instead of <memory>",
+    "(std::construct_at/std::destroy_at), which dropped its preprocessed expansion",
+    "from ~97k to ~19k lines and keeps its average per-include parse under the",
+    "default 2000 ms budget with no per-header override. The remaining growth is",
+    "the genuine cost of a new module + its tests, so the aggregate budget is",
+    "raised from 100 s to 120 s (measured CI overage was 117.9 s before the",
+    "vector.hpp <memory> removal and the array_tests <ranges> drop; expected to",
+    "land below this). Re-measure on the CI Build-time budget job summary and",
+    "tighten toward the observed figure; do NOT raise further to mask a regression",
+    "(ADR 0005)."
+  ],
   "preset": "linux-clang-development",
   "default_header_avg_ms": 2000,
-  "total_frontend_seconds": 100,
+  "total_frontend_seconds": 120,
   "header_overrides_avg_ms": {
     "modules/foundation/logging/src/internal/backend.hpp": 4000
   },

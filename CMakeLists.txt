@@ -70,6 +70,7 @@ configure_file(cmake/CheckSdkVariant.cmake.in "${PROJECT_BINARY_DIR}/cmake/Check
 install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENTS)
 
 add_subdirectory(modules/foundation/base)
+add_subdirectory(modules/foundation/containers)
 add_subdirectory(modules/foundation/logging)
 add_subdirectory(modules/foundation/profiling)
 add_subdirectory(modules/platform)
