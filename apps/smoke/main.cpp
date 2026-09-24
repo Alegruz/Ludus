@@ -1,4 +1,4 @@
-#include <ludus/foundation/base/diagnostic_startup.hpp>
+#include <ludus/diagnostics/session.hpp>
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/base/version.hpp>
 #include <ludus/foundation/logging/log.hpp>
@@ -21,8 +21,7 @@ int main()
     // ready. Interactive presentation is auto-resolved: CI and headless runs stay
     // report-only, require no display/dialog helper, and never block. This never
     // launches a helper/UI and never changes any assertion's fatal action.
-    const ludus::foundation::diagnostics::DiagnosticStartupResult diagnostics =
-        ludus::foundation::diagnostics::InitializeDiagnostics();
+    const ludus::diagnostics::SessionResult diagnostics = ludus::diagnostics::InitializeDiagnosticSession();
 
     LogConfig config{};
     config.GlobalLevel = LogLevel::Trace;
@@ -37,8 +36,7 @@ int main()
                    "Diagnostics: report={} control={} mode={} ci={}",
                    diagnostics.ReportTransportReady,
                    diagnostics.ControlEndpointReady,
-                   diagnostics.Mode == ludus::foundation::diagnostics::DiagnosticMode::Interactive ? "interactive"
-                                                                                                   : "report-only",
+                   diagnostics.Mode == ludus::diagnostics::SessionMode::Interactive ? "interactive" : "report-only",
                    diagnostics.DetectedCi);
     LUDUS_LOG_INFO(LOG_CORE, "Ludus {} starting", ludus::foundation::version_string());
     LUDUS_LOG_INFO(LOG_CORE, "Revision: {}", ludus::foundation::git_revision());

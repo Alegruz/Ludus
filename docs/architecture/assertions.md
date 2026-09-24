@@ -359,10 +359,14 @@ fatal action**. See the
 was tested.
 
 **External diagnostic helper.** Interactive presentation and durable report
-capture are the job of a small, separate **external process**
-(`apps/diagnostic_helper`, `ludus_diagnostic_helper`), never of the engine's
-failure handler. The helper owns the collector ends of two channels, launches
-the engine binary, and cleans up when the engine exits:
+capture are the job of a small, separate **external process** — a Python
+development helper at `tools/diagnostics/ludus_diagnostic_helper.py` (installed
+as `ludus_diagnostic_helper`), never the engine's failure handler, window
+manager, render thread, main-thread queue, or normal logger. It uses only the
+Python standard library for this milestone; the graphical Continue-once /
+Terminate dialog (Zenity) is a later milestone. The helper owns the collector
+ends of two channels, launches the engine binary with the engine-side
+descriptors, and cleans up when the engine exits:
 
 - **Report channel** — a connected `AF_UNIX`/`SOCK_DGRAM` pair. This reuses the
   existing nonblocking datagram report transport
@@ -370,22 +374,33 @@ the engine binary, and cleans up when the engine exits:
   `ConfigureEmergencySocket` and written with `TryWriteEmergencyBytes`. The
   helper drains report datagrams to its own output so `ASSERT`/`FATAL`/`CHECK`
   reports and formatted messages are visible/captured **independently of normal
-  Logging**, including before logger initialization and after shutdown.
-- **Control channel** — a connected `AF_UNIX`/`SOCK_SEQPACKET` pair carrying a
-  **versioned** handshake (`CONTROL_PROTOCOL_MAGIC`/`CONTROL_PROTOCOL_VERSION`,
-  fixed-size `ControlFrame`). At healthy startup the engine sends `Hello` and the
-  helper replies `HelloAck`; a mismatch or absent ack leaves the endpoint
-  `Failed` and the engine runs report-only. `DecisionRequest`/`DecisionReply`
-  frames are defined for a **later** explicit-decision milestone but are not sent
-  by this milestone's runtime.
+  Logging**, including before logger initialization and after shutdown, and it
+  keeps draining while any future dialog is open.
+- **Control channel** — a separate connected `AF_UNIX`/`SOCK_SEQPACKET` pair so
+  report traffic can never masquerade as a decision reply. Its wire format is an
+  **explicit little-endian byte encoding**, not a compiler-padded C++ struct: a
+  fixed 16-byte header (`magic`, `version`, `kind`, `incidentId`, `length`)
+  followed by `length` payload bytes, encoded/decoded through
+  `EncodeControlHeader`/`DecodeControlHeader`. At healthy startup the engine
+  sends `Hello` and the helper replies `HelloAck`; a mismatch or absent ack
+  leaves the endpoint `Failed` and the engine runs report-only. The
+  `DecisionRequest`/`DecisionReply` kinds (carrying an incident id and bounded
+  owned report bytes / a one-byte decision) are defined in the layout for a
+  **later** explicit-decision milestone but are not sent by this milestone's
+  runtime. This IPC protocol version is independent of the terminal
+  fatal-packet version.
 
-**Startup-only integration.** `InitializeDiagnostics()`
-(`ludus/foundation/base/diagnostic_startup.hpp`) is called once, early in
-`main`, **before engine workers and before logger setup**. It reads the
-inherited descriptors from the environment (`LUDUS_DIAGNOSTIC_REPORT_FD`,
-`LUDUS_DIAGNOSTIC_CONTROL_FD`), configures both transports, resolves the
+**Startup-only integration.** The integration lives in a small target
+**above** FoundationBase — `Ludus::DiagnosticsIntegration`
+(`tools/diagnostics/`, header `ludus/diagnostics/session.hpp`) — which depends on
+Base; **Base does not depend on it**, and it pulls in neither Logging nor
+Platform. `InitializeDiagnosticSession()` is called once, early in `main`,
+**before engine workers and before logger setup**. It reads the inherited
+descriptors from the environment (`LUDUS_DIAGNOSTIC_REPORT_FD`,
+`LUDUS_DIAGNOSTIC_CONTROL_FD`), configures both Base transports, resolves the
 presentation mode, and returns an explicit status. It **never launches** the
-helper or any UI — configuration only — and adds nothing to the success path.
+helper or any UI — configuration only — and adds nothing to any engine public
+header or to the assertion success path.
 
 **Descriptor ownership.** Both transports duplicate the inherited descriptor
 with `F_DUPFD_CLOEXEC` and retain the owned copy for process lifetime; there is

@@ -18,22 +18,10 @@ LUDUS_NOINLINE void BreakForDebugger() noexcept;
 [[noreturn]] void TerminateForAssertion() noexcept;
 [[noreturn]] void TerminateImmediately() noexcept;
 
-// Startup-only environment probes. These read the process environment and are
-// used by the startup integration to pick interactive vs report-only mode; the
-// CI probe is also the failure-path CI veto for a later ASSERT-decision
-// milestone (cheap, no allocation, no side effects). Never launch a helper/UI.
-
-// True when the process appears to run under continuous integration. Biases
-// toward true on ambiguity so a runner is never prompted (spec R31/D2).
+// True when the process appears to run under continuous integration. Reads the
+// environment; biases toward true on ambiguity so a runner is never prompted.
+// This is the shared source of the CI decision: the startup integration uses it
+// to force report-only, and the failure-path CI veto (later ASSERT-decision
+// milestone) reuses the same primitive. Cheap, no allocation, no side effects.
 bool DetectContinuousIntegration() noexcept;
-
-// True when a controlling terminal is present on the given descriptor and the
-// process is not headless. Used to reject a prompt when I/O is unusable.
-bool HasInteractiveTerminal(int descriptor) noexcept;
-
-// Startup-only check that a usable graphical presentation channel exists. A
-// found executable is NOT proof of working presentation: this validates a live
-// display connection (Wayland/X11 env plus an openable endpoint), not merely
-// that a dialog binary is on PATH. Returns false when headless.
-bool HasGraphicalDisplay() noexcept;
 } // namespace ludus::foundation::diagnostics::internal

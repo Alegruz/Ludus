@@ -190,21 +190,25 @@ Ahead of the decision itself, the channels and report delivery are built by a
 separate milestone (see `docs/architecture/assertions.md` §5.2). It provides,
 without changing any assertion action:
 
-- A versioned control endpoint in `diagnostic_output.hpp/.cpp`
-  (`ConfigureControlEndpoint`, `ControlFrame`, `Hello`/`HelloAck`,
-  `SOCK_SEQPACKET`). `DecisionRequest`/`DecisionReply` frames are defined but not
-  yet sent — they are the wire form the T2/T3 `PromptAssertDecision`/debugger
-  decision will use.
-- A public startup API `diagnostic_startup.hpp` (`InitializeDiagnostics`) that
-  reads inherited descriptors, configures the report (reused `SOCK_DGRAM`) and
-  control transports, resolves interactive vs report-only, validates a live
-  terminal/display, and reports failed setup visibly. It never launches a helper
-  or UI.
-- The external `ludus_diagnostic_helper` process (owns collector ends, launches
-  the engine, drains reports, answers the handshake, cleans up on child exit).
-- Startup-only CI detection and terminal/display probes at the private OS
-  boundary. `DetectContinuousIntegration` here is the same query the failure-path
-  CI veto (R31) will reuse.
+- A versioned control endpoint in Base `diagnostic_output.hpp/.cpp`
+  (`ConfigureControlEndpoint`, `SOCK_SEQPACKET`, `Hello`/`HelloAck`). Its wire
+  format is an **explicit little-endian byte encoding** (16-byte header +
+  payload) via `EncodeControlHeader`/`DecodeControlHeader`, not a padded C++
+  struct. `DecisionRequest`/`DecisionReply` kinds are reserved in the layout but
+  not yet sent — they are the wire form the T2/T3 decision will use.
+- A startup integration target **above** Base, `Ludus::DiagnosticsIntegration`
+  (`tools/diagnostics/`, header `ludus/diagnostics/session.hpp`,
+  `InitializeDiagnosticSession`) that reads inherited descriptors, configures the
+  report (reused `SOCK_DGRAM`) and control transports, resolves interactive vs
+  report-only, validates a live terminal/display, and reports failed setup
+  visibly. It never launches a helper or UI. Base does not depend on it.
+- The external Python helper `tools/diagnostics/ludus_diagnostic_helper.py`
+  (owns collector ends, launches the engine, drains reports to its own output,
+  answers the byte-encoded handshake, cleans up on child exit).
+- Shared CI detection: Base `IsContinuousIntegration()` (over the private
+  `DetectContinuousIntegration`) is used by startup to force report-only and is
+  the same query the failure-path CI veto (R31) will reuse. The terminal/display
+  probes live in the integration layer (startup-only).
 
 T2 therefore adds only the prompt and the decision-frame exchange over this
 existing channel; T3 wires the decision into `FinishFatalImpl`.

@@ -228,11 +228,14 @@ feature is not "solved" by violating them.
   set a common variable.
 - **`[OPEN]` D3 — Resume budget sharing.** Whether resumed `ASSERT` shares the
   64-report `CHECK` slot budget or uses a distinct counter (R44).
-- **`[OPEN]` D4 — Missing source plan.** The prompt referenced
-  `docs/architecture/assertions-interactive-development-plan.md`, which does not
-  exist in the repository. This spec is authored from ADR 0006 / §5.1 / the
-  prompt. If that plan document exists elsewhere, it should be added and this
-  spec reconciled against it.
+- **`[RESOLVED]` D4 — Source plan.** The authoritative
+  `docs/architecture/assertions-interactive-development-plan.md` is now present in
+  the repository (it was added on `main` after this branch first diverged, and
+  has since been merged in). The spec and the implemented startup/report-delivery
+  layer have been reconciled against it: the external helper is the Python tool
+  under `tools/diagnostics/`, the startup integration is a target **above** Base
+  (`Ludus::DiagnosticsIntegration`, Base does not depend on it), and the control
+  protocol uses an explicit byte encoding rather than a padded C++ struct.
 
 ## 9. Non-goals (explicit)
 

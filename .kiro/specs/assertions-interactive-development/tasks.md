@@ -60,24 +60,31 @@ something to talk over. It changes **no** assertion action. Traces to
   (degrade/never block), R36 (direct-executable startup), plus the milestone's
   own delivery/handshake/helper-cleanup requirements.
 - **Areas:** `modules/foundation/base/include/ludus/foundation/base/diagnostic_output.hpp`
-  (versioned control endpoint), `.../diagnostic_startup.hpp` (new public startup
-  API), `modules/foundation/base/src/{diagnostic_output.cpp,diagnostic_startup.cpp,diagnostics_linux.cpp}`,
-  `apps/diagnostic_helper/` (external helper), `apps/smoke/main.cpp` (init before
-  workers/logger), `.github/workflows/ci.yml` (explicit report-only),
-  Base `CMakeLists.txt` + root `CMakeLists.txt`, `tests/assertions/startup_tests.py`,
-  `modules/foundation/base/tests/diagnostic_startup_child.cpp`.
+  (versioned byte-encoded control endpoint + `IsContinuousIntegration`),
+  `modules/foundation/base/src/{diagnostic_output.cpp,diagnostics_linux.cpp}`,
+  `modules/foundation/base/src/internal/diagnostic_platform.hpp`,
+  `tools/diagnostics/` (new `Ludus::DiagnosticsIntegration` target: public
+  `ludus/diagnostics/session.hpp`, `src/session.cpp`, the Python helper
+  `ludus_diagnostic_helper.py`, and `tests/`), `apps/smoke/main.cpp` (init before
+  workers/logger), `apps/smoke/CMakeLists.txt`, `.github/workflows/ci.yml`
+  (explicit report-only), Base + root `CMakeLists.txt`.
 - **Done:**
   - Versioned control endpoint (`ConfigureControlEndpoint` + Hello/HelloAck,
-    `SOCK_SEQPACKET`); `DecisionRequest`/`DecisionReply` frames defined but not
-    sent (reserved for T3).
-  - `InitializeDiagnostics()` reads inherited fds, configures the report
-    (`SOCK_DGRAM`, reused transport) and control transports, resolves mode, and
-    reports failed interactive setup visibly; never launches a helper/UI.
-  - Startup-only CI detection + terminal/live-display probing at the private OS
-    boundary (validate capability, not a found executable).
-  - External `ludus_diagnostic_helper`: owns collector ends, launches the engine
-    with fds via env, drains report datagrams to its own output, answers the
-    handshake, and cleans up on child exit.
+    `SOCK_SEQPACKET`) using an **explicit little-endian byte encoding**
+    (16-byte header + payload; `EncodeControlHeader`/`DecodeControlHeader`), not
+    a padded C++ struct. `DecisionRequest`/`DecisionReply` kinds reserved in the
+    layout but not sent (T3).
+  - `ludus::diagnostics::InitializeDiagnosticSession()` (in the
+    `Ludus::DiagnosticsIntegration` target **above** Base; Base does not depend
+    on it) reads inherited fds, configures the report (`SOCK_DGRAM`, reused
+    transport) and control transports, resolves mode, and reports failed
+    interactive setup visibly; never launches a helper/UI.
+  - Shared CI detection: Base `IsContinuousIntegration()` (over private
+    `DetectContinuousIntegration`); terminal/live-display probing lives in the
+    integration layer (validate capability, not a found executable).
+  - External **Python** helper `ludus_diagnostic_helper.py`: owns collector ends,
+    launches the engine with fds via env, drains report datagrams to its own
+    output, answers the byte-encoded handshake, cleans up on child exit.
   - Smoke initializes diagnostics before workers/logger; CI sets
     `LUDUS_DIAGNOSTIC_INTERACTIVE=0` explicitly.
 - **Tests (implemented):** `ludus_diagnostic_startup` CTest — helper handshake +
@@ -174,5 +181,7 @@ something to talk over. It changes **no** assertion action. Traces to
 - `[OPEN]` D2 — CI-detection signal set: resolve in T2.
 - `[OPEN]` D3 — resumed-`ASSERT` budget sharing vs dedicated counter: resolve in
   T3.
-- `[OPEN]` D4 — the referenced `assertions-interactive-development-plan.md` is
-  absent from the repo; reconcile this spec with it if/when it is supplied.
+- `[RESOLVED]` D4 — `assertions-interactive-development-plan.md` is now present
+  (merged from `main`); the spec and T1.5 implementation are reconciled against
+  it (Python helper under `tools/diagnostics/`, integration above Base, explicit
+  byte-encoded control protocol).

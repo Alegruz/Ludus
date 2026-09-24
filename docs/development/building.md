@@ -39,19 +39,23 @@ generation is explicitly unsupported until per-configuration packages exist.
 
 ### Diagnostic helper and report delivery
 
-The external diagnostic helper (`ludus_diagnostic_helper`, from
-`apps/diagnostic_helper`) launches an engine binary with the diagnostic channels
-wired up so assertion/`FATAL`/`CHECK` reports are captured independently of
-normal Logging. It is built by default (`LUDUS_BUILD_DIAGNOSTIC_HELPER=ON`) and
-installed to the SDK `bin` directory. Run an engine binary under it with:
+The external diagnostic helper is a Python development tool,
+`tools/diagnostics/ludus_diagnostic_helper.py` (installed to the SDK `bin`
+directory as `ludus_diagnostic_helper`). It launches an engine binary with the
+diagnostic channels wired up so assertion/`FATAL`/`CHECK` reports are captured
+independently of normal Logging. Run an engine binary under it with:
 
 ```bash
+python3 tools/diagnostics/ludus_diagnostic_helper.py -- <engine-binary> [args...]
+# or, from an installed SDK:
 ludus_diagnostic_helper -- <engine-binary> [args...]
 ```
 
-The engine calls `InitializeDiagnostics()` (from
-`ludus/foundation/base/diagnostic_startup.hpp`) once at the top of `main`, before
-workers or the logger. It reads these descriptors/policy from the environment:
+The engine calls `ludus::diagnostics::InitializeDiagnosticSession()` (from
+`ludus/diagnostics/session.hpp`, in the `Ludus::DiagnosticsIntegration` target,
+which depends on FoundationBase but is not part of it) once at the top of `main`,
+before workers or the logger. It reads these descriptors/policy from the
+environment:
 
 - `LUDUS_DIAGNOSTIC_REPORT_FD` — connected `AF_UNIX`/`SOCK_DGRAM` report socket.
 - `LUDUS_DIAGNOSTIC_CONTROL_FD` — connected `AF_UNIX`/`SOCK_SEQPACKET` control

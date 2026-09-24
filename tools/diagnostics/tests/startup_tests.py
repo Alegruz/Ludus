@@ -1,16 +1,16 @@
 """Startup/report-delivery milestone tests.
 
-Exercises the external diagnostic helper + the engine startup integration end to
+Exercises the external Python diagnostic helper + the startup integration end to
 end, plus direct-launch (no helper) behavior. Nothing here changes or triggers an
 assertion's fatal action; this milestone only wires report delivery and the
 versioned control handshake.
 
-argv: <helper-binary> <startup-child-binary>
+argv: <helper.py> <startup-child-binary>
 
 Verified properties:
-  * Under the helper (non-CI), the versioned Hello/HelloAck handshake completes,
-    reports are drained to the helper's own stdout independently of Logging, and
-    the helper exits cleanly after the child (cleanup on child exit).
+  * Under the helper (non-CI), the explicit byte-encoded Hello/HelloAck handshake
+    completes, reports are drained to the helper's own stdout independently of
+    Logging, and the helper exits cleanly after the child (cleanup on child exit).
   * A CI environment forces report-only and never configures the control channel.
   * Direct launch with no helper degrades to report-only with no transport, no
     crash (missing-helper / headless).
@@ -22,34 +22,36 @@ Verified properties:
 """
 
 import os
-import signal
 import socket
 import struct
 import subprocess
 import sys
 import threading
 
-# ControlFrame layout: uint32 magic, uint16 version, uint16 type, uint32 pid,
-# uint32 payload  ->  "<IHHII" (little-endian, matches x86-64 struct layout).
-FRAME = struct.Struct("<IHHII")
+# ControlHeader byte layout: uint32 magic, uint16 version, uint16 kind,
+# uint32 incidentId, uint32 length. Explicit little-endian, matching
+# diagnostic_output.hpp (NOT a padded C++ struct).
+HEADER = struct.Struct("<IHHII")
 MAGIC = 0x4C554443
 VERSION = 1
-HELLO = 1
-HELLO_ACK = 2
+HEADER_SIZE = HEADER.size
+KIND_HELLO = 1
+KIND_HELLO_ACK = 2
 
 CLEAN_ENV = {k: v for k, v in os.environ.items()
              if k not in ("CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI",
                           "BUILDKITE", "JENKINS_URL", "TEAMCITY_VERSION", "LUDUS_CI",
                           "LUDUS_DIAGNOSTIC_INTERACTIVE")}
 
+HELPER = None
 
-def run_under_helper(helper, child, mode, extra_env=None, timeout=10):
+
+def run_under_helper(child, mode, extra_env=None, timeout=10):
     env = {**CLEAN_ENV}
     if extra_env:
         env.update(extra_env)
-    result = subprocess.run([helper, "--", child, mode], capture_output=True,
-                            text=True, timeout=timeout, env=env)
-    return result
+    return subprocess.run([sys.executable, HELPER, "--", child, mode],
+                          capture_output=True, text=True, timeout=timeout, env=env)
 
 
 def run_direct(child, mode, extra_env=None, report_fd=None, control_fd=None, timeout=10):
@@ -67,41 +69,34 @@ def run_direct(child, mode, extra_env=None, report_fd=None, control_fd=None, tim
                           timeout=timeout, env=env, pass_fds=tuple(pass_fds))
 
 
-def test_helper_end_to_end(helper, child):
-    # Non-CI run through the helper. Piped stdio => report-only mode, but the
-    # control handshake still completes and reports are drained to helper stdout.
-    result = run_under_helper(helper, child, "pre-post")
+def test_helper_end_to_end(child):
+    result = run_under_helper(child, "pre-post")
     assert result.returncode == 0, (result.returncode, result.stderr)
     assert "STARTUP report=1" in result.stdout, result.stdout
     assert "control=1" in result.stdout, ("handshake should complete", result.stdout)
-    # Reports were drained to the helper's stdout, not via engine Logging.
     assert "[LUDUS report] pre-init" in result.stdout, result.stdout
     assert "[LUDUS report] post-shutdown" in result.stdout, result.stdout
     assert "PRE=delivered" in result.stdout and "POST=delivered" in result.stdout, result.stdout
-    print("  helper end-to-end: handshake + pre/post report delivery OK")
+    print("  helper end-to-end: byte-encoded handshake + pre/post report delivery OK")
 
 
-def test_helper_cleanup_on_child_exit(helper, child):
-    # The helper must return the child's exit code and not hang after the child
-    # exits (cleanup on child exit). Short timeout guards against a hang.
-    result = run_under_helper(helper, child, "default", timeout=5)
+def test_helper_cleanup_on_child_exit(child):
+    result = run_under_helper(child, "default", timeout=5)
     assert result.returncode == 0, (result.returncode, result.stderr)
     assert "DELIVERY=delivered" in result.stdout, result.stdout
     print("  helper cleanup on child exit OK")
 
 
-def test_ci_forces_report_only(helper, child):
-    result = run_under_helper(helper, child, "pre-post", extra_env={"CI": "true"})
+def test_ci_forces_report_only(child):
+    result = run_under_helper(child, "pre-post", extra_env={"CI": "true"})
     assert result.returncode == 0, (result.returncode, result.stderr)
     assert "ci=1" in result.stdout, result.stdout
     assert "control=0" in result.stdout, ("CI must not configure control", result.stdout)
-    # Reporting still works under CI.
     assert "[LUDUS report] pre-init" in result.stdout, result.stdout
     print("  CI forces report-only, control endpoint unconfigured OK")
 
 
 def test_direct_no_helper(child):
-    # No descriptors passed: no transport, report-only, no crash.
     result = run_direct(child, "pre-post")
     assert result.returncode == 0, (result.returncode, result.stderr)
     assert "report=0 control=0" in result.stdout, result.stdout
@@ -110,8 +105,8 @@ def test_direct_no_helper(child):
 
 
 def test_malformed_handshake(child):
-    # Provide a real control socket but answer with a malformed ack. The engine
-    # must mark the control endpoint Failed and keep running (report-only).
+    # Real control socket, but answer with a malformed (bad-magic) ack. The
+    # engine must mark the control endpoint Failed and keep running.
     engine_side, driver_side = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
     report_recv, report_send = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
     got_hello = threading.Event()
@@ -119,12 +114,11 @@ def test_malformed_handshake(child):
     def responder():
         try:
             data = driver_side.recv(4096)
-            if len(data) == FRAME.size:
-                magic, version, mtype, pid, payload = FRAME.unpack(data)
-                if magic == MAGIC and mtype == HELLO:
+            if len(data) >= HEADER_SIZE:
+                magic, version, kind, incident, length = HEADER.unpack(data[:HEADER_SIZE])
+                if magic == MAGIC and version == VERSION and kind == KIND_HELLO:
                     got_hello.set()
-                    # Deliberately malformed: wrong magic in the ack.
-                    bad = FRAME.pack(0xDEADBEEF, version, HELLO_ACK, pid, 0)
+                    bad = struct.pack("<IHHII", 0xDEADBEEF, version, KIND_HELLO_ACK, incident, 0)
                     driver_side.send(bad)
         except OSError:
             pass
@@ -146,8 +140,6 @@ def test_malformed_handshake(child):
 
 
 def test_stderr_closed(child):
-    # Report through the datagram transport with stderr closed; delivery must be
-    # unaffected because the assertion transport is not stderr.
     report_recv, report_send = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
     packets = []
     report_recv.settimeout(0.2)
@@ -175,8 +167,6 @@ def test_stderr_closed(child):
 
 
 def test_full_socket_no_block(child):
-    # Fill the report socket so sends fail, then confirm startup + reporting do
-    # not block (bounded core transport). Short timeout guards a hang.
     report_recv, report_send = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
     try:
         try:
@@ -184,11 +174,9 @@ def test_full_socket_no_block(child):
                 report_send.send(b"x" * 2048, socket.MSG_DONTWAIT)
         except BlockingIOError:
             pass
-        # Do not drain: the socket stays full. The child must still finish fast.
         result = run_direct(child, "default", report_fd=report_send.fileno(), timeout=5)
         assert result.returncode == 0, (result.returncode, result.stderr)
         assert "report=1" in result.stdout, result.stdout
-        # Delivery may be failed (full), but the process must not block.
         assert "DELIVERY=" in result.stdout, result.stdout
     finally:
         report_recv.close()
@@ -197,16 +185,17 @@ def test_full_socket_no_block(child):
 
 
 def main():
-    helper = sys.argv[1]
+    global HELPER
+    HELPER = sys.argv[1]
     child = sys.argv[2]
-    test_helper_end_to_end(helper, child)
-    test_helper_cleanup_on_child_exit(helper, child)
-    test_ci_forces_report_only(helper, child)
+    test_helper_end_to_end(child)
+    test_helper_cleanup_on_child_exit(child)
+    test_ci_forces_report_only(child)
     test_direct_no_helper(child)
     test_malformed_handshake(child)
     test_stderr_closed(child)
     test_full_socket_no_block(child)
-    print("Passed startup/report-delivery: helper handshake, cleanup, CI veto, "
+    print("Passed startup/report-delivery: byte-encoded helper handshake, cleanup, CI veto, "
           "missing-helper, malformed handshake, stderr-closed, bounded transport")
 
 
