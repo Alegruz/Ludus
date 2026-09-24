@@ -265,7 +265,15 @@ int main(int argc, char** argv)
     if (std::strcmp(mode, "formatted-assert") == 0)
     {
         LUDUS_ASSERT_F(Condition(), "{}", diagnostics::DiagnosticCString(Message()));
-        return gConditions == 0 && gMessages == 0 && !LUDUS_ENABLE_ASSERTS ? 0 : 67;
+        // Reached only when disabled (no evaluation) or when an enabled ASSERT
+        // resumed (condition+message ran exactly once). A terminal ASSERT never
+        // returns here. The driver decides which outcome to expect.
+        Mark("ASSERT-RETURNED\n");
+        if (!LUDUS_ENABLE_ASSERTS)
+        {
+            return gConditions == 0 && gMessages == 0 ? 0 : 67;
+        }
+        return gConditions == 1 && gMessages == 1 ? 0 : 67;
     }
     if (std::strcmp(mode, "formatted-malformed") == 0)
     {
@@ -286,7 +294,25 @@ int main(int argc, char** argv)
     if (std::strcmp(mode, "assert") == 0)
     {
         LUDUS_ASSERT(Condition(), Message());
-        return gConditions == 0 && gMessages == 0 && !LUDUS_ENABLE_ASSERTS ? 0 : 89;
+        // Reached only when disabled or when an enabled ASSERT resumed. A
+        // terminal ASSERT never returns here.
+        Mark("ASSERT-RETURNED\n");
+        if (!LUDUS_ENABLE_ASSERTS)
+        {
+            return gConditions == 0 && gMessages == 0 ? 0 : 89;
+        }
+        return gConditions == 1 && gMessages == 1 ? 0 : 89;
+    }
+    if (std::strcmp(mode, "assert-repeated") == 0)
+    {
+        // Two independent failing ASSERTs. If both resume, each evaluates its
+        // condition/message once and control returns after each; a later failure
+        // must be independently reportable (the slot is released each time).
+        LUDUS_ASSERT(Condition(), Message());
+        const int after_first = gConditions;
+        LUDUS_ASSERT(Condition(), "second");
+        Mark("ASSERT-RETURNED\n");
+        return after_first == 1 && gConditions == 2 ? 0 : 96;
     }
     if (std::strcmp(mode, "require") == 0)
     {

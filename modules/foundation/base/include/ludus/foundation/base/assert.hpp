@@ -34,9 +34,18 @@ namespace detail
 // Macro implementation only. Begin/Finish must pair on one thread; no exceptions,
 // cancellation, longjmp or suspension may cross this region. Begin guards and
 // copies the site BEFORE the macro evaluates optional diagnostic expressions.
+//
+// REQUIRE/FATAL use the terminal Begin/Finish pair: FinishFatal never returns,
+// including after a debugger continues. ASSERT/ASSERT_F use the separate
+// resumable pair: FinishAssert may RETURN when a developer explicitly continues
+// (debugger continue, or the external-helper Continue-once dialog) in an
+// eligible local non-CI Debug build; otherwise it terminates like a fatal. CHECK
+// is unchanged: it reports best-effort and returns false.
 LUDUS_COLD LUDUS_NOINLINE void BeginFatal(FailureKind kind, const AssertionSite& site) noexcept;
+LUDUS_COLD LUDUS_NOINLINE void BeginAssert(const AssertionSite& site) noexcept;
 LUDUS_COLD LUDUS_NOINLINE bool BeginCheck(const AssertionSite& site) noexcept;
 [[noreturn]] LUDUS_COLD LUDUS_NOINLINE void FinishFatal(const char* message = nullptr) noexcept;
+LUDUS_COLD LUDUS_NOINLINE void FinishAssert(const char* message = nullptr) noexcept;
 LUDUS_COLD LUDUS_NOINLINE bool FinishCheck(const char* message = nullptr) noexcept;
 } // namespace detail
 } // namespace ludus::foundation::diagnostics
@@ -56,10 +65,8 @@ LUDUS_COLD LUDUS_NOINLINE bool FinishCheck(const char* message = nullptr) noexce
         {                                                                                                              \
             if (!static_cast<bool>(condition)) [[unlikely]]                                                            \
             {                                                                                                          \
-                ::ludus::foundation::diagnostics::detail::BeginFatal(                                                  \
-                    ::ludus::foundation::diagnostics::FailureKind::Assert,                                             \
-                    LUDUS_DETAIL_ASSERT_SITE(#condition));                                                             \
-                ::ludus::foundation::diagnostics::detail::FinishFatal(__VA_ARGS__);                                    \
+                ::ludus::foundation::diagnostics::detail::BeginAssert(LUDUS_DETAIL_ASSERT_SITE(#condition));           \
+                ::ludus::foundation::diagnostics::detail::FinishAssert(__VA_ARGS__);                                   \
             }                                                                                                          \
         } while (false)
 #else

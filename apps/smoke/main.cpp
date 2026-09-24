@@ -1,3 +1,4 @@
+#include <ludus/diagnostics/session.hpp>
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/base/version.hpp>
 #include <ludus/foundation/logging/log.hpp>
@@ -14,6 +15,15 @@ using namespace ludus::foundation::logging;
 // reported through LUDUS_LOG_FATAL and surfaced via the return code.
 int main()
 {
+    // Initialize the diagnostic transport BEFORE any engine worker or the logger
+    // is set up, so an assertion during startup/logger init is still captured and
+    // (in an eligible local non-CI Debug run with a helper) the control channel is
+    // ready. Interactive presentation is auto-resolved: CI and headless runs stay
+    // report-only, require no display/dialog helper, and never block. This never
+    // launches a helper/UI and never changes any assertion's fatal action.
+    [[maybe_unused]] const ludus::diagnostics::SessionResult diagnostics =
+        ludus::diagnostics::InitializeDiagnosticSession();
+
     LogConfig config{};
     config.GlobalLevel = LogLevel::Trace;
     config.EnableConsole = true;
@@ -23,6 +33,12 @@ int main()
 
     SetCurrentThreadName("Main");
 
+    LUDUS_LOG_INFO(LOG_CORE,
+                   "Diagnostics: report={} control={} mode={} ci={}",
+                   diagnostics.ReportTransportReady,
+                   diagnostics.ControlEndpointReady,
+                   diagnostics.Mode == ludus::diagnostics::SessionMode::Interactive ? "interactive" : "report-only",
+                   diagnostics.DetectedCi);
     LUDUS_LOG_INFO(LOG_CORE, "Ludus {} starting", ludus::foundation::version_string());
     LUDUS_LOG_INFO(LOG_CORE, "Revision: {}", ludus::foundation::git_revision());
     LUDUS_LOG_INFO(LOG_CORE, "Compiler: {}", ludus::foundation::compiler_identity());

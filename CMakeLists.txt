@@ -73,6 +73,10 @@ add_subdirectory(modules/foundation/base)
 add_subdirectory(modules/foundation/logging)
 add_subdirectory(modules/platform)
 
+# Startup-only development diagnostic integration (depends on Base; Base does
+# not depend on it). Provides InitializeDiagnosticSession and the Python helper.
+add_subdirectory(tools/diagnostics)
+
 if(LUDUS_BUILD_SMOKE_APP)
     add_subdirectory(apps/smoke)
 endif()

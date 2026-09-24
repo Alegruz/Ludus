@@ -3,6 +3,18 @@
 Status: implementation contract. M0/M1 and the approved M2/M3 hardening and
 closed formatting layer are implemented, together with narrow M4 byte-writer
 integration. See the [adversarial audit and evidence](assertions-adversarial-review.md).
+An amendment adds **resumable enabled `ASSERT`/`ASSERT_F` in eligible non-CI
+builds** ([§5.1](#51-interactive-development-resumable-assert),
+[§5.2](#52-startup-and-report-delivery-external-diagnostic-helper),
+[ADR 0006](../decisions/0006-resumable-development-assertions.md),
+the authoritative [interactive-development plan](assertions-interactive-development-plan.md),
+and the [interactive-development spec](../../.kiro/specs/assertions-interactive-development/requirements.md)).
+That behavior is now **implemented**: `ASSERT`/`ASSERT_F` split from the terminal
+fatal path onto a resumable one, a debugger Continue (Debug or Development, non-CI)
+or an explicit external-helper Continue-once (non-CI Debug, no debugger) returns
+past the assertion, and the SDK assertion-policy version is bumped to 2.
+`REQUIRE`/`FATAL` stay terminal in every build (including after a debugger
+Continue) and `CHECK` stays boolean.
 The [M0/M1 record](assertions-m0-m1.md) is historical. Rich crash collection,
 stack capture, asynchronous logging hooks, and other-platform backends remain
 prospective; successful tests alone are not production-readiness certification.
@@ -22,11 +34,16 @@ Use macros only to preserve expression text, capture the caller, suppress
 evaluation, and place message evaluation behind the failure branch. Compile
 formatting, reporting, debugger detection, and termination once in `.cpp` files.
 
-An enabled invariant assertion **never returns on failure**, including after a
-debugger resumes execution. A recoverable `CHECK` returns `false`; its caller
-must implement a valid recovery branch. Neither form replaces normal error
-handling. Report through an independent emergency path first; normal logging
-and a future crash reporter are optional consumers of the already-built report.
+An enabled `REQUIRE`/`FATAL` invariant **never returns on failure**, including
+after a debugger resumes execution. An enabled `ASSERT`/`ASSERT_F` is terminal
+by default, but is **resumable through explicit developer action** in a tightly
+scoped configuration — locally built, non-CI Debug builds only (see the
+[interactive-development policy](#51-interactive-development-resumable-assert)
+and [ADR 0006](../decisions/0006-resumable-development-assertions.md)). A
+recoverable `CHECK` returns `false`; its caller must implement a valid recovery
+branch. None of these forms replaces normal error handling. Report through an
+independent emergency path first; normal logging and a future crash reporter are
+optional consumers of the already-built report.
 
 This is a handful of headers and implementation files, not a handler framework,
 general formatting library, replacement string library, or crash reporter.
@@ -96,8 +113,14 @@ code; use source and CMake as the implementation baseline.
 - Recovering from arbitrary memory corruption or invalid diagnostic pointers.
 - A signal-safe general assertion API, stack-overflow recovery, or GPU-side
   shader assertions. Those require separate fault entry points.
-- UI dialogs, remote commands, per-site ignore registries, runtime handler
-  chains, automatic debugger attachment, or resumable fatal assertions.
+- Remote commands, per-site ignore registries, runtime handler chains, or
+  automatic debugger attachment. Resumable **`REQUIRE`/`FATAL`** invariants
+  remain a non-goal: those forms are terminal in every build. A single,
+  non-persistent "Continue once" decision for enabled `ASSERT`/`ASSERT_F` is an
+  explicit, tightly scoped exception introduced by
+  [ADR 0006](../decisions/0006-resumable-development-assertions.md); it is not a
+  general dialog/handler framework or a per-site ignore registry (see
+  [§5.1](#51-interactive-development-resumable-assert)).
 - A general-purpose formatter, arbitrary object printers, reflection, or
   allocation-heavy symbolication on the failing thread.
 - Guaranteed log durability in the presence of a hung kernel/device/process.
@@ -131,7 +154,7 @@ once`, and lower-case implementation locals consistent with surrounding code.
 
 | API | Result | Failed condition | Condition evaluated |
 | --- | --- | --- | --- |
-| `LUDUS_ASSERT(condition [, literal])` | Statement | Report, optional debugger break, terminate | Only when development assertions are enabled |
+| `LUDUS_ASSERT(condition [, literal])` | Statement | Report, optional debugger break, terminate — resumable by explicit developer action in local non-CI Debug builds ([§5.1](#51-interactive-development-resumable-assert)) | Only when development assertions are enabled |
 | `LUDUS_REQUIRE(condition [, literal])` | Statement | Same, in every build | Exactly once, every build |
 | `LUDUS_CHECK(condition [, literal])` | `bool` expression | Best-effort report, optional development break, return `false` | Exactly once, every build |
 | `LUDUS_FATAL(literal)` | Nonreturning statement | Unconditional fatal report | Not applicable |
@@ -210,21 +233,35 @@ parameter, explicit `_F` arguments, and `FATAL` respectively.
 
 ## 5. Build configuration contract
 
-| Configuration | `ASSERT` / `ASSERT_F` | `REQUIRE`, `CHECK`, `FATAL` | Break for fatal failure when debugger attached | Break for failed `CHECK` |
-| --- | --- | --- | --- | --- |
-| Debug | Enabled | Enabled | Yes | Yes |
-| Development / sanitizer development | Enabled | Enabled | Yes | Yes |
-| Profile | Disabled | Enabled | Yes | No |
-| Shipping / Release / MinSizeRel | Disabled | Enabled | Yes | No |
+| Configuration | `ASSERT` / `ASSERT_F` | `REQUIRE`, `CHECK`, `FATAL` | Break for fatal failure when debugger attached | Break for failed `CHECK` | `ASSERT` resumable |
+| --- | --- | --- | --- | --- | --- |
+| Debug | Enabled | Enabled | Yes | Yes | **Yes (non-CI): debugger Continue, or no-debugger dialog** |
+| Development / sanitizer development | Enabled | Enabled | Yes | Yes | Debugger Continue only (non-CI); no dialog |
+| Profile | Disabled | Enabled | Yes | No | n/a |
+| Shipping / Release / MinSizeRel | Disabled | Enabled | Yes | No | n/a |
 
 Profile excludes optional checks so profiling represents release workloads;
 `REQUIRE` still protects critical invariants. Expensive optional checks can be
 enabled in a separately named diagnostic profiling build, with that fact in
-its build metadata. A debugger break is an inspection opportunity, never an
-authorization to resume past a failed fatal invariant.
+its build metadata. A debugger break for a **`REQUIRE`/`FATAL`** failure is an
+inspection opportunity, never an authorization to resume past the failed
+invariant. A debugger break for an enabled **`ASSERT`/`ASSERT_F`** failure is
+resumable in Debug **and** Development when not under CI (continuing returns past
+the assertion); the **no-debugger Continue-once dialog** is additionally
+available only in a non-CI Debug build. Under CI, and for every other kind,
+continuing a break still proceeds to termination.
 
-Add numeric `LUDUS_ENABLE_ASSERTS` and `LUDUS_BREAK_ON_CHECK` values to a tiny
-generated public `assert_config.hpp`. Generate it per configured SDK variant;
+Add numeric `LUDUS_ENABLE_ASSERTS`, `LUDUS_BREAK_ON_CHECK`, and
+`LUDUS_ASSERT_DIALOGS_AVAILABLE` values to a tiny generated public
+`assert_config.hpp`. `LUDUS_ASSERT_DIALOGS_AVAILABLE` is `1` **only** for a
+non-CI Debug build (generated from the explicit flavor and the CI build setting)
+and `0` elsewhere; it expresses build-time *eligibility* for the no-debugger
+interactive dialog in [§5.1](#51-interactive-development-resumable-assert).
+Whether a given run actually resumes is a further runtime decision (CI veto,
+attached debugger, or an explicit helper Continue-once). A debugger Continue can
+resume `ASSERT` in Development too, so it is deliberately not gated by this
+value. Adding this policy value bumps `LUDUS_ASSERT_POLICY_VERSION` (now 2) and
+is recorded in the SDK manifest. Generate the header per configured SDK variant;
 export the matching include directory and file through Base's public file set.
 The source build and installed SDK must use the same values. Do not infer policy
 from `NDEBUG`, `DEBUG`, or `defines.hpp`, and do not permit per-TU overrides of
@@ -241,6 +278,177 @@ Mixing assertion settings in public inline/template definitions risks an ODR
 violation even if class layouts match. Treat the SDK variant as part of its
 build contract, record it in the SDK manifest, and test the installed consumer.
 Changing assertion settings intentionally recompiles consuming TUs.
+
+### 5.1 Interactive development: resumable `ASSERT`
+
+This subsection is authoritative for the resumable-`ASSERT` behavior introduced
+by [ADR 0006](../decisions/0006-resumable-development-assertions.md). It
+supersedes, for `ASSERT`/`ASSERT_F` only, the earlier blanket statement that an
+enabled invariant assertion never returns. `REQUIRE`, `REQUIRE_F`, `FATAL`, and
+`FATAL_F` are unchanged and terminal in every build; `CHECK`/`CHECK_F` are
+unchanged and recoverable.
+
+**What "resumable" means.** A failed enabled `ASSERT`/`ASSERT_F` may, through an
+explicit per-hit developer action, return to its caller instead of terminating.
+It is a single "Continue once" decision, never a persistent "ignore always,"
+never automatic, and never a recovery mechanism the program may depend on. Code
+after a resumed `ASSERT` runs with the invariant *known broken*; this is the
+price of the workflow and the reason it is confined to Debug and to `ASSERT`.
+
+**Where it is eligible (build-time).** `LUDUS_ASSERT_DIALOGS_AVAILABLE` is `1`
+only in a non-CI Debug build; it gates the **no-debugger dialog** path only.
+Profile/Release do not compile `ASSERT` at all. Development compiles `ASSERT` and
+follows the plan's execution matrix: with a debugger attached (non-CI) an
+`ASSERT` break and a debugger Continue **resume** just as in Debug; **without** a
+debugger Development is **report-only** and terminates (it never opens a dialog
+and needs no display/helper). The dialog is the Debug-only difference, not the
+debugger break.
+
+**Whether it actually resumes (runtime).** Even in an eligible Debug binary, a
+failed `ASSERT` resumes only when *all* of the following hold at the moment of
+failure:
+
+1. **Not CI.** The process must not detect a CI environment. A CI detection
+   *vetoes* resume and forces the terminal fatal path, even for a Debug binary
+   that was built locally and later executed under CI. This "runtime CI veto"
+   prevents a prompt from hanging a runner or a continue from masking a defect.
+2. **Explicit action, by exactly one mechanism:**
+   - **Debugger attached:** the existing inspection breakpoint is the resume
+     point. Continuing past the break returns from the failed `ASSERT` to the
+     caller. (For `REQUIRE`/`FATAL` the break still falls through to
+     termination — unchanged.)
+   - **No debugger attached:** present a **separate decision prompt** offering
+     exactly **Continue once** and **Terminate**. "Continue once" returns to the
+     caller for that single hit; "Terminate" takes the normal terminal fatal
+     path. This prompt exists *only* in a local, non-CI Debug build with usable
+     interactive I/O.
+3. **Interactive I/O is available.** If the prompt cannot be presented — no
+   controlling terminal, headless/detached run, closed or non-interactive
+   stdin/stdout, or the prompt is delegated to a helper that is absent or has
+   exited — the outcome is **Terminate**. There is no default-continue and no
+   silent skip.
+
+**Ordering with the existing failure runtime.** Resume is decided *after* the
+owned report has been constructed and published and after the primary emergency
+write attempt, i.e. at the point where the current design breaks-then-
+terminates. The complete report and the minimal fatal header are committed
+before any prompt is shown, so an interrupted or faulting prompt still leaves
+the full diagnostic evidence. A resumed `ASSERT` must release the reporting slot
+and clear its per-thread entry state exactly like a completed `CHECK`, so a
+subsequent failure on any thread can acquire the slot again; it must not leave
+the process in the "fatal owner committed" state. Recursion and owner contention
+are never resumable: a recursive `ASSERT` on the same thread, or an `ASSERT`
+that fails while another failure owns the reporting slot, takes the immediate
+secondary/recursive termination path with no prompt. The `REQUIRE`/`FATAL`
+primary fatal packet is still never released or reused; a resumable `ASSERT`
+that continues must not have consumed that terminal packet.
+
+**Report lifetime across a resume.** Because `ASSERT` can now return, its report
+storage must follow the recoverable-`CHECK` lifetime rules, not the terminal
+fatal-packet rules: owned bytes valid only for the synchronous report, no
+retained borrowed pointers, and no publication into the single-incident terminal
+crash packet. A resumed `ASSERT` counts against the same presentation budget
+discipline as `CHECK` so a hot resumed `ASSERT` cannot flood diagnostics; the
+condition is still evaluated exactly once per encounter regardless of budget.
+
+**Runtime split and success-path surface.** `ASSERT`/`ASSERT_F` use their own
+private `detail::BeginAssert` / `FinishAssert` (and `FinishAssertRendered` /
+`FinishAssertArgs`) entry points that are **not** declared `[[noreturn]]`;
+`REQUIRE`/`FATAL` keep the terminal `BeginFatal` / `FinishFatal*` pair. The
+`ASSERT`/`ASSERT_F` macro expansions are otherwise unchanged and the success path
+is untouched: no success-path helper call, TLS, atomic, lock, clock, debugger or
+CI query, allocation, or per-site state. The resumable decision lives entirely in
+`assert.cpp`'s cold `FinishAssert` path via a private `ResolveAssertDecision`,
+which reuses the detached OS-primitive boundary (`QueryDebugger` /
+`BreakForDebugger`), the shared `IsContinuousIntegration()` CI query, and — only
+under `LUDUS_ASSERT_DIALOGS_AVAILABLE` — the versioned control endpoint
+(see [§5.2](#52-startup-and-report-delivery-external-diagnostic-helper)). None of
+this adds anything to `assert.hpp` or any public header; the failing thread runs
+no UI code.
+
+**Report lifetime and CHECK budget interaction.** In the current implementation
+a resumed `ASSERT` uses a bounded stack-owned report delivered through the
+nonblocking transport (never `gFatalPacket`); it releases the slot and clears TLS
+exactly once, so a later failure is independently reportable. On `Terminate` it
+publishes that already-built report into the single-incident fatal packet without
+re-evaluating anything, then aborts. `CHECK`'s existing report budget is
+unchanged, and `CHECK` inspection breaks are additionally suppressed under CI.
+
+### 5.2 Startup and report delivery (external diagnostic helper)
+
+This subsection is authoritative for the *startup/report-delivery* layer that
+supports interactive development. It is implemented independently of, and ahead
+of, the resumable-`ASSERT` decision itself: this layer establishes the channels
+and delivers reports, and it deliberately **does not change any assertion's
+fatal action**. See the
+[startup validation record](assertions-startup-validation.md) for exactly what
+was tested.
+
+**External diagnostic helper.** Interactive presentation and durable report
+capture are the job of a small, separate **external process** — a Python
+development helper at `tools/diagnostics/ludus_diagnostic_helper.py` (installed
+as `ludus_diagnostic_helper`), never the engine's failure handler, window
+manager, render thread, main-thread queue, or normal logger. It uses only the
+Python standard library for this milestone; the graphical Continue-once /
+Terminate dialog (Zenity) is a later milestone. The helper owns the collector
+ends of two channels, launches the engine binary with the engine-side
+descriptors, and cleans up when the engine exits:
+
+- **Report channel** — a connected `AF_UNIX`/`SOCK_DGRAM` pair. This reuses the
+  existing nonblocking datagram report transport
+  ([§11](#11-logging-and-emergency-output)); the engine end is configured with
+  `ConfigureEmergencySocket` and written with `TryWriteEmergencyBytes`. The
+  helper drains report datagrams to its own output so `ASSERT`/`FATAL`/`CHECK`
+  reports and formatted messages are visible/captured **independently of normal
+  Logging**, including before logger initialization and after shutdown, and it
+  keeps draining while any future dialog is open.
+- **Control channel** — a separate connected `AF_UNIX`/`SOCK_SEQPACKET` pair so
+  report traffic can never masquerade as a decision reply. Its wire format is an
+  **explicit little-endian byte encoding**, not a compiler-padded C++ struct: a
+  fixed 16-byte header (`magic`, `version`, `kind`, `incidentId`, `length`)
+  followed by `length` payload bytes, encoded/decoded through
+  `EncodeControlHeader`/`DecodeControlHeader`. At healthy startup the engine
+  sends `Hello` and the helper replies `HelloAck`; a mismatch or absent ack
+  leaves the endpoint `Failed` and the engine runs report-only. The
+  `DecisionRequest`/`DecisionReply` kinds (carrying an incident id and bounded
+  owned report bytes / a one-byte decision) are defined in the layout for a
+  **later** explicit-decision milestone but are not sent by this milestone's
+  runtime. This IPC protocol version is independent of the terminal
+  fatal-packet version.
+
+**Startup-only integration.** The integration lives in a small target
+**above** FoundationBase — `Ludus::DiagnosticsIntegration`
+(`tools/diagnostics/`, header `ludus/diagnostics/session.hpp`) — which depends on
+Base; **Base does not depend on it**, and it pulls in neither Logging nor
+Platform. `InitializeDiagnosticSession()` is called once, early in `main`,
+**before engine workers and before logger setup**. It reads the inherited
+descriptors from the environment (`LUDUS_DIAGNOSTIC_REPORT_FD`,
+`LUDUS_DIAGNOSTIC_CONTROL_FD`), configures both Base transports, resolves the
+presentation mode, and returns an explicit status. It **never launches** the
+helper or any UI — configuration only — and adds nothing to any engine public
+header or to the assertion success path.
+
+**Descriptor ownership.** Both transports duplicate the inherited descriptor
+with `F_DUPFD_CLOEXEC` and retain the owned copy for process lifetime; there is
+no replacement or teardown, so a published descriptor can never race a failure.
+The caller may close its originals. The helper owns and closes the collector
+ends on child exit.
+
+**Mode resolution and the CI veto.** Interactive presentation is eligible only
+in a local, non-CI, resumable (Debug) build; Development, Profile, and Release
+are report-only and need no display or dialog helper. CI is auto-detected
+([§12](#12-debugger-and-platform-behavior)) and always forces report-only —
+even for a locally built Debug binary executed under CI — and CI workflows also
+set the noninteractive policy explicitly. A local headless Debug run can opt into
+report-only (`LUDUS_DIAGNOSTIC_INTERACTIVE=0` or the API's `ReportOnly`).
+
+**Validate capability, not availability.** When interactive is eligible and
+intended, startup validates a *usable* channel — a controlling terminal, or a
+**live display connection** probed by connecting to the Wayland/X11 socket — not
+merely that a dialog executable exists on `PATH`. If validation fails, startup
+degrades to report-only and **reports the failure visibly** (through the ordinary
+blocking emergency writer, not the nonblocking assertion transport). Failed
+interactive setup never aborts startup and never changes an assertion's action.
 
 ## 6. Header and binary architecture
 
@@ -869,10 +1077,27 @@ placement with measured code/header costs. Source metadata remains authoritative
 when optimization removes frames or locals; do not promise full local-variable
 recovery in optimized code.
 
-Without a debugger: report and terminate for invariant/fatal failures; report
+Without a debugger: report and terminate for `REQUIRE`/`FATAL` failures; report
 and return false for Checks. There is no unconditional trap for a recoverable
-Check. Continuing from an inspection breakpoint in a fatal report proceeds to
-termination, never to the invalid operation.
+Check. Continuing from an inspection breakpoint in a `REQUIRE`/`FATAL` report
+proceeds to termination, never to the invalid operation.
+
+The one exception is an enabled `ASSERT`/`ASSERT_F` under the interactive-
+development policy ([§5.1](#51-interactive-development-resumable-assert),
+[ADR 0006](../decisions/0006-resumable-development-assertions.md)): in a local,
+non-CI Debug build, continuing past the inspection breakpoint of a failed
+`ASSERT` returns to the caller instead of terminating, and when no debugger is
+attached a separate Continue-once / Terminate prompt offers the same choice.
+This requires two additional private, detached backend capabilities beyond the
+table below — a **CI-environment query** and an **interactive Continue-once /
+Terminate prompt** — both Debug-only, both on the failure path only, and both
+degrading to Terminate when unavailable (headless, no terminal, absent helper).
+They must not poll on success, must not be a public-header dependency, and must
+sit at the same private OS boundary as `QueryDebugger`/`BreakForDebugger`.
+`BreakForDebugger` already "deliberately may return on debugger resume"; §5.1
+defines what returning means per kind. For `REQUIRE`/`FATAL`, and for `ASSERT`
+outside the eligible Debug scope, a returned break still falls through to
+termination.
 
 Only Linux/Clang is the repository's present reference platform. Windows/macOS
 rows are port contracts, not claims of tested support. Unsupported backend
@@ -1084,6 +1309,10 @@ than inventing an engine-wide type-erasure or variant abstraction.
 | Pre-init, post-shutdown, static destructor | Base runtime requires no logger lifetime; emergency report still attempted |
 | Assertion inside logger/sink/allocator | No normal logger call; use independent runtime and emergency transport |
 | Message argument asserts recursively | Begin has already guarded the site; recursive fatal exits, recursive Check returns false |
+| Resumable `ASSERT` continued (Debug, local, non-CI, explicit action) | Return to caller after committing the report; release slot/clear TLS like a Check; invariant now known broken (§5.1) |
+| `ASSERT` failure while headless / no terminal / helper absent | No prompt possible; outcome is Terminate, never default-continue |
+| `ASSERT` failure detected under CI (even a local Debug binary) | Runtime CI veto: no prompt, no resume-to-caller; terminal fatal path |
+| Recursive/contended `ASSERT` in resumable build | Never resumable; immediate secondary/recursive termination with no prompt |
 | Message argument dereferences corrupt pointer | May fault; minimal fatal header already committed; no portable C++ recovery promised |
 | Null `DiagnosticCString` / null base message | Explicit null marker for wrapped string; omitted message for base null |
 | Invalid non-null text pointer | Caller contract violation; bounded length does not validate memory mapping |

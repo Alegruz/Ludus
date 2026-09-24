@@ -17,4 +17,5 @@ DebuggerState QueryDebugger() noexcept;
 LUDUS_NOINLINE void BreakForDebugger() noexcept;
 [[noreturn]] void TerminateForAssertion() noexcept;
 [[noreturn]] void TerminateImmediately() noexcept;
+
 } // namespace ludus::foundation::diagnostics::internal

@@ -128,6 +128,58 @@ void InspectIfAttached() noexcept
         internal::BreakForDebugger();
     }
 }
+
+// Per-process incident id for the control decision exchange. Only ever touched
+// while owning the reporting slot, so a plain counter is sufficient.
+constinit uint32 gAssertIncident = 0;
+
+// Resolve a failed enabled ASSERT to Continue-once or Terminate. This is the only
+// place the resumable path decides to return. It never runs on success, never on
+// a recursive/contended incident (those terminate before reaching here), and
+// never for REQUIRE/FATAL.
+//
+//   * LUDUS_ASSERT_DIALOGS_AVAILABLE == 0 (Development/Profile/Release, or a
+//     CI-built Debug binary)                      -> Terminate (report-only).
+//   * Runtime CI veto: IsContinuousIntegration()  -> Terminate, even for a
+//     locally built dialog-capable Debug binary run under CI.
+//   * Debugger attached: break; a debugger Continue returns here             ->
+//     ContinueOnce (no dialog when a debugger is present).
+//   * No debugger, control endpoint Ready: ask the external helper. Anything but
+//     an explicit ContinueOnce for this incident                            ->
+//     Terminate. No control endpoint -> Terminate (no default-continue).
+ControlDecision ResolveAssertDecision(uint32 incident, const char* report, usize size) noexcept
+{
+    // Runtime CI veto first: CI performs no interaction and no intentional
+    // debugger stop, even for a locally built dialog-capable Debug binary.
+    if (IsContinuousIntegration())
+    {
+        return ControlDecision::Terminate;
+    }
+    // With a debugger attached (Debug or Development, non-CI), the inspection
+    // break IS the resume point: a debugger Continue returns here and resumes
+    // past the ASSERT. This is not gated by dialog availability — only the
+    // no-debugger dialog below is Debug-only.
+    if (internal::QueryDebugger() == internal::DebuggerState::Attached)
+    {
+        internal::BreakForDebugger(); // Returns iff the developer continues.
+        return ControlDecision::ContinueOnce;
+    }
+#if LUDUS_ASSERT_DIALOGS_AVAILABLE
+    // No debugger: only an eligible non-CI Debug build with a live control
+    // channel may ask the external helper for an explicit decision.
+    if (ControlEndpointState() == ControlState::Ready)
+    {
+        return RequestAssertDecision(incident, report, size);
+    }
+#else
+    (void)incident;
+    (void)report;
+    (void)size;
+#endif
+    // Development without a debugger, or Debug with no usable dialog channel:
+    // report-only, terminate. Never a default continue.
+    return ControlDecision::Terminate;
+}
 } // namespace
 
 namespace detail
@@ -184,6 +236,33 @@ bool BeginCheck(const AssertionSite& site) noexcept
     return true;
 }
 
+// Resumable ASSERT entry. Recursion/contention are never resumable: they take
+// the same immediate/secondary termination path as a fatal, preserving the first
+// incident's evidence. On success it owns the reporting slot and records the site
+// but, unlike BeginFatal, does NOT publish the terminal fatal packet: a resumable
+// ASSERT report is stack-owned and only reaches gFatalPacket if it terminates.
+void BeginAssert(const AssertionSite& site) noexcept
+{
+    if (gEntry.Active)
+    {
+        constexpr char marker[] = "[LUDUS recursive assert; immediate termination]\n";
+        Compromised(marker, sizeof(marker) - 1);
+    }
+    gEntry.Active = true;
+    gEntry.Kind = FailureKind::Assert;
+    gEntry.Site = site;
+    gEntry.ThreadId = internal::NativeThreadId();
+    if (gOwner.test_and_set(std::memory_order_acquire))
+    {
+        char secondary[512];
+        TextWriter writer(secondary, sizeof(secondary));
+        writer.Raw("[secondary assert; immediate termination] ");
+        SiteText(writer, gEntry, true);
+        Compromised(secondary, writer.Finish());
+    }
+    gAssertIncident += 1;
+}
+
 [[noreturn]] static void FinishFatalImpl(const char* message, const DiagnosticText* rendered) noexcept
 {
     if (!gEntry.Active || gEntry.Kind == FailureKind::Check)
@@ -210,7 +289,10 @@ static bool FinishCheckImpl(const char* message, const DiagnosticText* rendered)
     char report[2048];
     const usize size = CompleteReport(report, sizeof(report), message, rendered);
     (void)TryWriteEmergencyBytes(report, size);
-    if (LUDUS_BREAK_ON_CHECK != 0)
+    // CHECK stays boolean and keeps its budget; the inspection break is suppressed
+    // under CI (no intentional debugger stop in CI), matching the ASSERT/dialog
+    // policy. CHECK never opens a dialog and never waits.
+    if (LUDUS_BREAK_ON_CHECK != 0 && !IsContinuousIntegration())
     {
         InspectIfAttached();
     }
@@ -218,9 +300,67 @@ static bool FinishCheckImpl(const char* message, const DiagnosticText* rendered)
     gOwner.clear(std::memory_order_release);
     return false;
 }
+
+// Resumable ASSERT finish. Builds a stack-owned report and delivers it (report
+// visibility is independent of Logging). Then resolves the explicit developer
+// decision. On ContinueOnce it releases the slot and clears TLS exactly once and
+// RETURNS to the caller, so a later failure is independently reportable; the
+// invariant is now known-broken. On Terminate it publishes terminal evidence into
+// the fatal packet from the already-owned incident — without re-evaluating any
+// diagnostic expression — and aborts. It never reuses the fatal packet on the
+// continue path.
+static void FinishAssertImpl(const char* message, const DiagnosticText* rendered) noexcept
+{
+    if (!gEntry.Active || gEntry.Kind != FailureKind::Assert)
+    {
+        constexpr char marker[] = "[LUDUS invalid assert protocol]\n";
+        Compromised(marker, sizeof(marker) - 1);
+    }
+    char report[2048];
+    const usize size = CompleteReport(report, sizeof(report), message, rendered);
+    const DeliveryStatus delivery = TryWriteEmergencyBytes(report, size);
+
+    // A resumed ASSERT is never budgeted: unlike a hot CHECK it cannot flood
+    // autonomously, because each hit blocks on an explicit human/debugger action
+    // (see the interactive-development plan). A per-site "ignore always" is
+    // deliberately absent, and a budget could only silently continue (forbidden)
+    // or terminate a legitimate later ASSERT.
+    if (ResolveAssertDecision(gAssertIncident, report, size) == ControlDecision::ContinueOnce)
+    {
+        // Explicit developer continue: skip this assertion once. Release the slot
+        // and clear TLS exactly once so the next failure owns cleanly.
+        gEntry = {};
+        gOwner.clear(std::memory_order_release);
+        return;
+    }
+
+    // Terminate: publish the already-built report as terminal evidence, without
+    // re-evaluating anything, then abort. The owned slot is intentionally never
+    // released on this path. Delivery status reflects the real emergency write.
+    auto& packet = internal::gFatalPacket;
+    TextWriter minimal(packet.Minimal, sizeof(packet.Minimal));
+    SiteText(minimal, gEntry, true);
+    packet.MinimalSize = minimal.Finish();
+    packet.MinimalDelivery = delivery;
+    packet.MinimalReady.store(true, std::memory_order_release);
+    for (usize i = 0; i < size && i < sizeof(packet.Complete) - 1; ++i)
+    {
+        packet.Complete[i] = report[i];
+    }
+    packet.CompleteSize = size < sizeof(packet.Complete) - 1 ? size : sizeof(packet.Complete) - 1;
+    packet.Complete[packet.CompleteSize] = '\0';
+    packet.CompleteDelivery = delivery;
+    packet.CompleteReady.store(true, std::memory_order_release);
+    packet.DeliveryReady.store(true, std::memory_order_release);
+    internal::TerminateForAssertion();
+}
 [[noreturn]] void FinishFatal(const char* message) noexcept
 {
     FinishFatalImpl(message, nullptr);
+}
+void FinishAssert(const char* message) noexcept
+{
+    FinishAssertImpl(message, nullptr);
 }
 bool FinishCheck(const char* message) noexcept
 {
@@ -229,6 +369,10 @@ bool FinishCheck(const char* message) noexcept
 [[noreturn]] void FinishFatalRendered(DiagnosticText message) noexcept
 {
     FinishFatalImpl(nullptr, &message);
+}
+void FinishAssertRendered(DiagnosticText message) noexcept
+{
+    FinishAssertImpl(nullptr, &message);
 }
 bool FinishCheckRendered(DiagnosticText message) noexcept
 {

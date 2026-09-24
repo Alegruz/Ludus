@@ -170,7 +170,8 @@ if(LUDUS_BUILD_TESTS)
         endif()
         add_test(NAME ludus_assert_${backend}_death
             COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/assertions/death_tests.py"
-                "$<TARGET_FILE:${child}>" "${LUDUS_ENABLE_ASSERTS}" "${LUDUS_BREAK_ON_CHECK}" "${backend}")
+                "$<TARGET_FILE:${child}>" "${LUDUS_ENABLE_ASSERTS}" "${LUDUS_BREAK_ON_CHECK}" "${backend}"
+                "${LUDUS_ASSERT_DIALOGS_AVAILABLE}")
         set_tests_properties(ludus_assert_${backend}_death
             PROPERTIES LABELS "foundation;assert-death;assert-concurrency" TIMEOUT 120)
     endforeach()

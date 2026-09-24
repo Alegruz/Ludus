@@ -7,5 +7,6 @@ namespace ludus::foundation::diagnostics::detail
 // Keeping the dependency in this direction leaves plain-only binaries free of
 // the parser and floating conversion. Begin has already established ownership.
 [[noreturn]] void FinishFatalRendered(DiagnosticText message) noexcept;
+void FinishAssertRendered(DiagnosticText message) noexcept;
 bool FinishCheckRendered(DiagnosticText message) noexcept;
 } // namespace ludus::foundation::diagnostics::detail

@@ -112,6 +112,7 @@ template <typename T>
 DiagnosticArg MakeDiagnosticArg(const T&) = delete;
 
 [[noreturn]] LUDUS_COLD void FinishFatalArgs(DiagnosticText format, const DiagnosticArg* args, usize count) noexcept;
+LUDUS_COLD void FinishAssertArgs(DiagnosticText format, const DiagnosticArg* args, usize count) noexcept;
 LUDUS_COLD bool FinishCheckArgs(DiagnosticText format, const DiagnosticArg* args, usize count) noexcept;
 
 // Fixed-array input, not a claim that C++ can require a literal here. The runtime
@@ -129,6 +130,20 @@ template <usize N, typename... Args>
     {
         const DiagnosticArg packed[] = {MakeDiagnosticArg(args)...};
         FinishFatalArgs({format, N}, packed, sizeof...(Args));
+    }
+}
+template <usize N, typename... Args>
+void FinishAssertFormatted(const char (&format)[N], const Args&... args) noexcept
+{
+    static_assert(sizeof...(Args) <= 8, "Assertions accept at most eight diagnostic arguments");
+    if constexpr (sizeof...(Args) == 0)
+    {
+        FinishAssertArgs({format, N}, nullptr, 0);
+    }
+    else
+    {
+        const DiagnosticArg packed[] = {MakeDiagnosticArg(args)...};
+        FinishAssertArgs({format, N}, packed, sizeof...(Args));
     }
 }
 template <usize N, typename... Args>
@@ -154,10 +169,8 @@ bool FinishCheckFormatted(const char (&format)[N], const Args&... args) noexcept
         {                                                                                                              \
             if (!static_cast<bool>(condition)) [[unlikely]]                                                            \
             {                                                                                                          \
-                ::ludus::foundation::diagnostics::detail::BeginFatal(                                                  \
-                    ::ludus::foundation::diagnostics::FailureKind::Assert,                                             \
-                    LUDUS_DETAIL_ASSERT_SITE(#condition));                                                             \
-                ::ludus::foundation::diagnostics::detail::FinishFatalFormatted(__VA_ARGS__);                           \
+                ::ludus::foundation::diagnostics::detail::BeginAssert(LUDUS_DETAIL_ASSERT_SITE(#condition));           \
+                ::ludus::foundation::diagnostics::detail::FinishAssertFormatted(__VA_ARGS__);                          \
             }                                                                                                          \
         } while (false)
 #else

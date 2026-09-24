@@ -1,5 +1,7 @@
 #include "internal/diagnostic_platform.hpp"
 
+#include <ludus/foundation/base/diagnostic_output.hpp>
+
 #include <cerrno>
 #include <cstdlib>
 #include <fcntl.h>
