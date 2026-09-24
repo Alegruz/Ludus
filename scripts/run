@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Launch a Ludus binary under the external diagnostic helper so assertion /
+# FATAL / CHECK reports are captured, and — in a local, non-CI Debug build with a
+# usable terminal or display — a failed ASSERT can present the Continue-once /
+# Terminate dialog. This is a convenience launcher; a binary run directly still
+# works (it configures diagnostics at startup on its own and simply runs
+# report-only when no helper/channel is present).
+#
+# Usage:
+#   scripts/run [--report-only] <binary> [args...]
+#
+# It never forces interactivity: CI is auto-detected and forced report-only, and
+# a headless run degrades to report-only. Do not use this to "make" a CI job
+# interactive.
+set -euo pipefail
+
+script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(CDPATH= cd -- "${script_dir}/.." && pwd)"
+
+# Prefer an installed SDK helper on PATH, then a known install prefix, then the
+# source-tree Python helper. No absolute checkout path is baked into anything
+# installed; this resolution happens at run time.
+helper=""
+if command -v ludus_diagnostic_helper >/dev/null 2>&1; then
+    helper="$(command -v ludus_diagnostic_helper)"
+    exec "${helper}" "$@"
+fi
+for prefix in "${repo_dir}"/out/install/*/bin; do
+    if [ -x "${prefix}/ludus_diagnostic_helper" ]; then
+        exec "${prefix}/ludus_diagnostic_helper" "$@"
+    fi
+done
+
+# Source-tree fallback: run the Python helper directly.
+exec python3 "${repo_dir}/tools/diagnostics/ludus_diagnostic_helper.py" "$@"

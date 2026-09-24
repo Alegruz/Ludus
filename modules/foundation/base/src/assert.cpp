@@ -318,8 +318,13 @@ static void FinishAssertImpl(const char* message, const DiagnosticText* rendered
     }
     char report[2048];
     const usize size = CompleteReport(report, sizeof(report), message, rendered);
-    (void)TryWriteEmergencyBytes(report, size);
+    const DeliveryStatus delivery = TryWriteEmergencyBytes(report, size);
 
+    // A resumed ASSERT is never budgeted: unlike a hot CHECK it cannot flood
+    // autonomously, because each hit blocks on an explicit human/debugger action
+    // (see the interactive-development plan). A per-site "ignore always" is
+    // deliberately absent, and a budget could only silently continue (forbidden)
+    // or terminate a legitimate later ASSERT.
     if (ResolveAssertDecision(gAssertIncident, report, size) == ControlDecision::ContinueOnce)
     {
         // Explicit developer continue: skip this assertion once. Release the slot
@@ -331,11 +336,12 @@ static void FinishAssertImpl(const char* message, const DiagnosticText* rendered
 
     // Terminate: publish the already-built report as terminal evidence, without
     // re-evaluating anything, then abort. The owned slot is intentionally never
-    // released on this path.
+    // released on this path. Delivery status reflects the real emergency write.
     auto& packet = internal::gFatalPacket;
     TextWriter minimal(packet.Minimal, sizeof(packet.Minimal));
     SiteText(minimal, gEntry, true);
     packet.MinimalSize = minimal.Finish();
+    packet.MinimalDelivery = delivery;
     packet.MinimalReady.store(true, std::memory_order_release);
     for (usize i = 0; i < size && i < sizeof(packet.Complete) - 1; ++i)
     {
@@ -343,8 +349,8 @@ static void FinishAssertImpl(const char* message, const DiagnosticText* rendered
     }
     packet.CompleteSize = size < sizeof(packet.Complete) - 1 ? size : sizeof(packet.Complete) - 1;
     packet.Complete[packet.CompleteSize] = '\0';
+    packet.CompleteDelivery = delivery;
     packet.CompleteReady.store(true, std::memory_order_release);
-    packet.CompleteDelivery = DeliveryStatus::Delivered;
     packet.DeliveryReady.store(true, std::memory_order_release);
     internal::TerminateForAssertion();
 }

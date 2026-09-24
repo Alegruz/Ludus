@@ -53,10 +53,21 @@ diagnostic channels wired up so assertion/`FATAL`/`CHECK` reports are captured
 independently of normal Logging. Run an engine binary under it with:
 
 ```bash
+# Convenience launcher (resolves the installed or source-tree helper):
+scripts/run out/build/linux-clang-debug/apps/smoke/ludus_smoke
+# Or invoke the helper directly:
 python3 tools/diagnostics/ludus_diagnostic_helper.py -- <engine-binary> [args...]
 # or, from an installed SDK:
 ludus_diagnostic_helper -- <engine-binary> [args...]
 ```
+
+A binary launched **directly** (without the helper) also works: it configures
+diagnostics at startup and runs report-only when no helper/channel is present.
+In a local, non-CI **Debug** build with a usable terminal or live display, a
+failed `ASSERT` presents a **Continue once / Terminate** prompt; *Continue once*
+resumes past that assertion (the invariant is now known-broken), a second failure
+is reported again, and *Terminate* exits. CI and headless runs stay report-only
+and never wait for input.
 
 The engine calls `ludus::diagnostics::InitializeDiagnosticSession()` (from
 `ludus/diagnostics/session.hpp`, in the `Ludus::DiagnosticsIntegration` target,

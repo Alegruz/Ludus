@@ -152,3 +152,96 @@ Adds the ASSERT continue-once decision on top of the startup/report layer
   coordination; `CHECK` budget and return contract are unchanged; the terminal
   `gFatalPacket` protocol is unchanged; no Windows/macOS backend was added; no
   native death behavior was faked.
+
+
+---
+
+# Audit-and-complete pass (plan Prompt 4)
+
+A review pass over the full feature diff (not just test results), plus the gaps
+it surfaced and the evidence gathered. Sandbox toolchain limits are unchanged
+(Clang 15 only; no Conan/Catch2/Zenity/GDB), so the pinned-toolchain and
+real-GUI/debugger gates below still run in CI / on a real runner.
+
+## Diff audit findings (no blocking defects)
+
+- No stale `[[noreturn]]` on the ASSERT path: `FinishAssert` /
+  `FinishAssertRendered` / `FinishAssertArgs` / `FinishAssertFormatted` are all
+  non-`[[noreturn]]`; only `FinishFatal*` keep it.
+- No TLS/ownership leak after Continue: the resume path clears the TLS entry and
+  releases the owner slot exactly once, then returns; a second failure re-owns
+  cleanly (verified by `repeated`).
+- Terminal `gFatalPacket` is written only on the Terminate path, never on
+  Continue; no reuse of terminal storage by a resumed ASSERT.
+- No borrowed data escaping: the report is a stack-local buffer delivered
+  synchronously; `RequestAssertDecision` copies bytes into its frame; the helper
+  copies before replying.
+- No normal-logger recursion (assertions use the nonblocking emergency transport
+  only); no implicit continuation (every non-explicit outcome is Terminate); no
+  production GUI dependency in Base or the integration library.
+- Success-path codegen at `-O2`: a passing `ASSERT` is a compare + branch, with
+  the `BeginAssert`/`FinishAssert` calls in the cold out-of-line block after the
+  return; no success-path call/TLS/atomic. Disabled (`asserts=0`) objects contain
+  no unique diagnostic string and no `BeginAssert`/`FinishAssert` symbol.
+
+## One refinement made
+
+- `FinishAssertImpl` now records the **actual** emergency-write delivery status
+  into the terminal packet's `MinimalDelivery`/`CompleteDelivery` on the Terminate
+  path (previously hardcoded `Delivered`), matching the fatal path's honesty.
+
+## Resolved open decision (spec D3 / R44)
+
+- A resumed `ASSERT` is **deliberately not** subject to the `CHECK` presentation
+  budget. The authoritative plan does not require it, and each resumable ASSERT
+  hit blocks on an explicit human/debugger action, so it cannot flood
+  autonomously. A budget could only silently continue (forbidden) or terminate a
+  legitimate later ASSERT. This supersedes the spec's tentative R44.
+
+## Added verification (runnable here)
+
+- **`decision_tests.py` extended to 13 cases** with a per-run subprocess
+  **watchdog** (`timeout`) that turns an accidental input-wait into a test
+  failure rather than a hang, and report-datagram capture so visible text is
+  asserted: ContinueOnce resumes with `expression=FailingCondition()` and the
+  message visible; Terminate aborts; repeated resume; wrong-id / wrong-kind /
+  malformed / helper-exit ⇒ Terminate; **REQUIRE and FATAL never resume**;
+  **formatted `ASSERT_F`** resumes with the typed argument visible;
+  **application-lock-held** during resume (no deadlock/self-recursion);
+  **`CHECK`** returns false with a visible report and never sends a
+  DecisionRequest; **CI vetoes an interactive request** (no DecisionRequest,
+  terminate).
+- **`startup_tests.py` extended to 9 cases**: a present-but-dead
+  `DISPLAY`/`WAYLAND_DISPLAY` still resolves to report-only (found ≠ working
+  presentation), and headless capture works with no Zenity on `PATH`.
+- **Real interactive tty** (via a pseudo-terminal driving the production Python
+  helper): the Continue-once / Terminate prompt appears; answering *continue*
+  resumes past the ASSERT (post-assert work runs); answering *terminate* exits
+  with the ASSERT never returning. This is real Linux interactive validation of
+  the GUI-less tty dialog path, distinct from the automated protocol coverage.
+- **`scripts/run`** launcher added and exercised end to end (report text +
+  expression visible; report-only run terminates and never auto-continues).
+
+## Still CI / real-runner only (not run in this sandbox)
+
+- Pinned **Clang 18 + lld** build of all four flavors + a test-enabled Release
+  tree; **Catch2** unit suite and the full `ctest` matrix; **ASan/UBSan** and
+  **TSan**; allocation-interception on the core failure paths;
+  `./scripts/check --all` (clang-tidy 18); `./scripts/install-sdk` and the
+  installed SDK consumer / manifest checks (including `assert_dialogs_available`).
+- **Real GDB/LLDB** attach proving ASSERT continues but REQUIRE/FATAL terminate
+  afterward (the fake backend is not a substitute for a native debugger death
+  test).
+- **Real Zenity/Wayland** graphical dialog on a live desktop session (the tty
+  path is validated above; the graphical path is protocol-validated only).
+- A **Logging-linked** recursion/lifecycle test (needs the full engine build);
+  report visibility independent of Logging is covered pre-init/post-shutdown by
+  the startup child, which links no logger.
+
+## No overclaims
+
+This change does not claim all-thread suspension (only the failing thread
+pauses), guaranteed recovery (a continued ASSERT runs with a known-broken
+invariant), all-failure delivery (transport is bounded best-effort), or tested
+Windows/macOS support (unsupported backends fail configuration). Build budgets
+were not changed; the public assertion include graph pulls no heavy STL.

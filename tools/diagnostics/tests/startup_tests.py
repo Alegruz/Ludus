@@ -184,6 +184,32 @@ def test_full_socket_no_block(child):
     print("  full report socket: startup/reporting bounded, no block OK")
 
 
+def test_found_display_is_not_working_presentation(child):
+    # A DISPLAY/WAYLAND_DISPLAY *variable* is not proof of a working display.
+    # Under the helper, stdio is piped (no TTY); a bogus display name has no live
+    # socket, so an eligible Debug build must still resolve to report-only and say
+    # so, not silently claim interactive.
+    result = run_under_helper(child, "pre-post", extra_env={
+        "DISPLAY": ":99",
+        "WAYLAND_DISPLAY": "wayland-nonexistent-xyz",
+        "XDG_RUNTIME_DIR": "/run/user/nonexistent-xyz",
+    })
+    assert result.returncode == 0, (result.returncode, result.stderr)
+    assert "mode=0" in result.stdout, ("must be report-only with no live display", result.stdout)
+    assert "[LUDUS report] pre-init" in result.stdout, result.stdout
+    print("  found DISPLAY/WAYLAND_DISPLAY is not working presentation => report-only OK")
+
+
+def test_headless_capture_without_zenity(child):
+    # Headless capture must work with no Zenity and no display: reports are still
+    # drained by the helper. (Zenity is only reached on the no-debugger dialog
+    # path, which this piped/non-CI startup run never enters.)
+    result = run_under_helper(child, "pre-post", extra_env={"PATH": "/nonexistent"})
+    assert result.returncode == 0, (result.returncode, result.stderr)
+    assert "PRE=delivered" in result.stdout and "POST=delivered" in result.stdout, result.stdout
+    print("  headless capture without Zenity OK")
+
+
 def main():
     global HELPER
     HELPER = sys.argv[1]
@@ -195,8 +221,11 @@ def main():
     test_malformed_handshake(child)
     test_stderr_closed(child)
     test_full_socket_no_block(child)
+    test_found_display_is_not_working_presentation(child)
+    test_headless_capture_without_zenity(child)
     print("Passed startup/report-delivery: byte-encoded helper handshake, cleanup, CI veto, "
-          "missing-helper, malformed handshake, stderr-closed, bounded transport")
+          "missing-helper, malformed handshake, stderr-closed, bounded transport, "
+          "found-display-not-live, headless-no-zenity")
 
 
 if __name__ == "__main__":

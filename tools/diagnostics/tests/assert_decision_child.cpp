@@ -7,11 +7,12 @@
 // There is no debugger here (native /proc TracerPid), so ResolveAssertDecision
 // takes the control-endpoint branch. The driver scripts the helper's replies.
 
-#include <ludus/foundation/base/assert.hpp>
+#include <ludus/foundation/base/assert_format.hpp>
 #include <ludus/foundation/base/diagnostic_output.hpp>
 
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <unistd.h>
 
 namespace fb = ludus::foundation;
@@ -85,6 +86,39 @@ int main(int argc, char** argv)
         LUDUS_REQUIRE(FailingCondition(), "require-must-terminate");
         Mark("REQUIRE-RETURNED\n"); // Must never print.
         return 62;
+    }
+    if (std::strcmp(mode, "fatal") == 0)
+    {
+        // FATAL is unconditional and terminal, regardless of the helper reply.
+        LUDUS_FATAL("fatal-must-terminate");
+    }
+    if (std::strcmp(mode, "formatted") == 0)
+    {
+        // Formatted ASSERT_F resumes on ContinueOnce; the condition and the
+        // typed argument are evaluated exactly once.
+        const int index = 7;
+        LUDUS_ASSERT_F(FailingCondition(), "formatted index={}", index);
+        Mark("ASSERT-RETURNED\n");
+        return gConditions == 1 ? 0 : 64;
+    }
+    if (std::strcmp(mode, "app-lock") == 0)
+    {
+        // A resumed ASSERT while the caller holds an application lock must return
+        // normally without deadlock or self-recursion: the runtime never touches
+        // the application's lock.
+        std::mutex application_mutex;
+        const std::lock_guard lock(application_mutex);
+        LUDUS_ASSERT(FailingCondition(), "under-app-lock");
+        Mark("ASSERT-RETURNED\n");
+        return gConditions == 1 ? 0 : 65;
+    }
+    if (std::strcmp(mode, "check") == 0)
+    {
+        // CHECK stays boolean and returns false with a visible report; it never
+        // opens a dialog or sends a DecisionRequest.
+        const bool ok = LUDUS_CHECK(FailingCondition(), "check-recovery-probe");
+        Mark(ok ? "CHECK-TRUE\n" : "CHECK-FALSE\n");
+        return !ok && gConditions == 1 ? 0 : 66;
     }
 
     Mark("UNKNOWN-MODE\n");

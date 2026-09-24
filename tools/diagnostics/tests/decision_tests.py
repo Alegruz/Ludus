@@ -58,18 +58,22 @@ def decode(frame):
     return kind, incident, frame[HEADER_SIZE:]
 
 
-def run(binary, mode, responder, timeout=10):
+def run(binary, mode, responder, timeout=8, extra_env=None):
     """Launch the child with report+control sockets; `responder(control)` plays
-    the helper on a worker thread. Returns the CompletedProcess."""
+    the helper on a worker thread. The `timeout` is a watchdog: an accidental
+    input wait (a runtime that blocks for a reply that never authorizes continue)
+    surfaces as a TimeoutExpired failure rather than a hang. Captured report
+    datagrams are appended to `result.report` so tests can assert visible text."""
     report_recv, report_send = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
     control_helper, control_engine = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
     report_recv.settimeout(0.1)
     stop = threading.Event()
+    packets = []
 
     def drain():
         while not stop.is_set():
             try:
-                report_recv.recv(4096)
+                packets.append(report_recv.recv(4096))
             except (socket.timeout, OSError):
                 pass
 
@@ -86,6 +90,8 @@ def run(binary, mode, responder, timeout=10):
     env = {**CLEAN_ENV,
            "LUDUS_DIAGNOSTIC_REPORT_FD": str(report_send.fileno()),
            "LUDUS_DIAGNOSTIC_CONTROL_FD": str(control_engine.fileno())}
+    if extra_env:
+        env.update(extra_env)
     try:
         result = subprocess.run([binary, mode], capture_output=True, text=True, timeout=timeout,
                                 env=env, pass_fds=(report_send.fileno(), control_engine.fileno()))
@@ -95,6 +101,7 @@ def run(binary, mode, responder, timeout=10):
         drainer.join(timeout=2)
         for s in (report_recv, report_send, control_helper, control_engine):
             s.close()
+    result.report = b"".join(packets).decode("utf-8", "replace")
     return result
 
 
@@ -126,7 +133,10 @@ def test_continue(binary):
     assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
     assert "ASSERT-RETURNED" in result.stdout, result.stdout
     assert result.stdout.count("CONDITION\n") == 1
-    print("  ContinueOnce resumes the ASSERT OK")
+    # The report is visible with its expression and message text.
+    assert "expression=FailingCondition()" in result.report, result.report
+    assert "decision-probe" in result.report, result.report
+    print("  ContinueOnce resumes the ASSERT (report text + expression visible) OK")
 
 
 def test_terminate(binary):
@@ -215,6 +225,85 @@ def test_require_never_resumes(binary):
     print("  REQUIRE never resumes OK")
 
 
+def test_fatal_never_resumes(binary):
+    def responder(control):
+        assert expect_hello(control)
+        try:
+            incident = read_decision_request(control)
+            if incident is not None:
+                control.sendall(encode(KIND_DECISION_REPLY, incident, bytes([CONTINUE_ONCE])))
+        except OSError:
+            pass
+    result = run(binary, "fatal", responder)
+    assert result.returncode == -signal.SIGABRT, (result.returncode, result.stderr)
+    assert "fatal-must-terminate" in result.report, result.report
+    print("  FATAL never resumes OK")
+
+
+def test_formatted_continue(binary):
+    def responder(control):
+        assert expect_hello(control)
+        incident = read_decision_request(control)
+        control.sendall(encode(KIND_DECISION_REPLY, incident, bytes([CONTINUE_ONCE])))
+    result = run(binary, "formatted", responder)
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    assert "ASSERT-RETURNED" in result.stdout, result.stdout
+    assert result.stdout.count("CONDITION\n") == 1
+    assert "formatted index=7" in result.report, result.report
+    print("  Formatted ASSERT_F resumes (typed arg evaluated once, visible) OK")
+
+
+def test_app_lock_continue(binary):
+    def responder(control):
+        assert expect_hello(control)
+        incident = read_decision_request(control)
+        control.sendall(encode(KIND_DECISION_REPLY, incident, bytes([CONTINUE_ONCE])))
+    result = run(binary, "app-lock", responder)
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    assert "ASSERT-RETURNED" in result.stdout, result.stdout
+    print("  Resume while application lock held: no deadlock/self-recursion OK")
+
+
+def test_check_returns_false(binary):
+    # CHECK must never send a DecisionRequest; it returns false with a visible
+    # report. If the child ever asked for a decision, that is a defect.
+    asked = {"decision": False}
+
+    def responder(control):
+        assert expect_hello(control)
+        try:
+            if read_decision_request(control) is not None:
+                asked["decision"] = True
+        except OSError:
+            pass
+    result = run(binary, "check", responder)
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    assert "CHECK-FALSE" in result.stdout, result.stdout
+    assert "check-recovery-probe" in result.report, result.report
+    assert not asked["decision"], "CHECK must not send a DecisionRequest"
+    print("  CHECK returns false with visible report, no dialog OK")
+
+
+def test_ci_overrides_interactive_request(binary):
+    # Even with a helper that would reply ContinueOnce, a CI environment must
+    # veto: the runtime terminates and never sends a DecisionRequest. An
+    # interactive request cannot override CI.
+    asked = {"decision": False}
+
+    def responder(control):
+        assert expect_hello(control)
+        try:
+            if read_decision_request(control) is not None:
+                asked["decision"] = True
+                # Offer continue anyway; the runtime must have already terminated.
+        except OSError:
+            pass
+    result = run(binary, "single", responder, extra_env={"CI": "true"})
+    assert result.returncode == -signal.SIGABRT, (result.returncode, result.stderr)
+    assert not asked["decision"], "CI veto must prevent any DecisionRequest"
+    print("  CI vetoes an interactive request (no DecisionRequest, terminate) OK")
+
+
 def main():
     binary = sys.argv[1]
     test_continue(binary)
@@ -225,8 +314,14 @@ def main():
     test_malformed(binary)
     test_helper_exit(binary)
     test_require_never_resumes(binary)
-    print("Passed resumable-ASSERT decision: continue, terminate, repeated, wrong-id, "
-          "wrong-kind, malformed, helper-exit, REQUIRE-terminal")
+    test_fatal_never_resumes(binary)
+    test_formatted_continue(binary)
+    test_app_lock_continue(binary)
+    test_check_returns_false(binary)
+    test_ci_overrides_interactive_request(binary)
+    print("Passed resumable-ASSERT decision: continue(+visible text), terminate, repeated, "
+          "wrong-id, wrong-kind, malformed, helper-exit, REQUIRE/FATAL-terminal, formatted, "
+          "app-lock, CHECK-false, CI-veto")
 
 
 if __name__ == "__main__":
