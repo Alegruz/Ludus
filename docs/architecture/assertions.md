@@ -3,12 +3,18 @@
 Status: implementation contract. M0/M1 and the approved M2/M3 hardening and
 closed formatting layer are implemented, together with narrow M4 byte-writer
 integration. See the [adversarial audit and evidence](assertions-adversarial-review.md).
-An amendment adds **resumable enabled `ASSERT`/`ASSERT_F` in local non-CI Debug
+An amendment adds **resumable enabled `ASSERT`/`ASSERT_F` in eligible non-CI
 builds** ([§5.1](#51-interactive-development-resumable-assert),
-[ADR 0006](../decisions/0006-resumable-development-assertions.md), and the
-[interactive-development spec](../../.kiro/specs/assertions-interactive-development/requirements.md));
-that behavior is specified but **not yet implemented** — the shipped runtime is
-still terminal for every enabled fatal kind.
+[§5.2](#52-startup-and-report-delivery-external-diagnostic-helper),
+[ADR 0006](../decisions/0006-resumable-development-assertions.md),
+the authoritative [interactive-development plan](assertions-interactive-development-plan.md),
+and the [interactive-development spec](../../.kiro/specs/assertions-interactive-development/requirements.md)).
+That behavior is now **implemented**: `ASSERT`/`ASSERT_F` split from the terminal
+fatal path onto a resumable one, a debugger Continue (Debug or Development, non-CI)
+or an explicit external-helper Continue-once (non-CI Debug, no debugger) returns
+past the assertion, and the SDK assertion-policy version is bumped to 2.
+`REQUIRE`/`FATAL` stay terminal in every build (including after a debugger
+Continue) and `CHECK` stays boolean.
 The [M0/M1 record](assertions-m0-m1.md) is historical. Rich crash collection,
 stack capture, asynchronous logging hooks, and other-platform backends remain
 prospective; successful tests alone are not production-readiness certification.
@@ -229,8 +235,8 @@ parameter, explicit `_F` arguments, and `FATAL` respectively.
 
 | Configuration | `ASSERT` / `ASSERT_F` | `REQUIRE`, `CHECK`, `FATAL` | Break for fatal failure when debugger attached | Break for failed `CHECK` | `ASSERT` resumable |
 | --- | --- | --- | --- | --- | --- |
-| Debug | Enabled | Enabled | Yes | Yes | **Yes — local non-CI only** |
-| Development / sanitizer development | Enabled | Enabled | Yes | Yes | No (report-only) |
+| Debug | Enabled | Enabled | Yes | Yes | **Yes (non-CI): debugger Continue, or no-debugger dialog** |
+| Development / sanitizer development | Enabled | Enabled | Yes | Yes | Debugger Continue only (non-CI); no dialog |
 | Profile | Disabled | Enabled | Yes | No | n/a |
 | Shipping / Release / MinSizeRel | Disabled | Enabled | Yes | No | n/a |
 
@@ -240,18 +246,22 @@ enabled in a separately named diagnostic profiling build, with that fact in
 its build metadata. A debugger break for a **`REQUIRE`/`FATAL`** failure is an
 inspection opportunity, never an authorization to resume past the failed
 invariant. A debugger break for an enabled **`ASSERT`/`ASSERT_F`** failure is
-resumable only under the interactive-development policy below; in every other
-flavor, and for every other kind, continuing the break still proceeds to
-termination.
+resumable in Debug **and** Development when not under CI (continuing returns past
+the assertion); the **no-debugger Continue-once dialog** is additionally
+available only in a non-CI Debug build. Under CI, and for every other kind,
+continuing a break still proceeds to termination.
 
 Add numeric `LUDUS_ENABLE_ASSERTS`, `LUDUS_BREAK_ON_CHECK`, and
-`LUDUS_ASSERT_RESUMABLE` values to a tiny generated public `assert_config.hpp`.
-`LUDUS_ASSERT_RESUMABLE` is `1` **only** for the Debug flavor and `0` elsewhere;
-it expresses build-time *eligibility* for the interactive-development policy in
-[§5.1](#51-interactive-development-resumable-assert). Whether a given run
-actually resumes is a further runtime decision (local, non-CI, explicit action).
-Adding this policy value bumps `LUDUS_ASSERT_POLICY_VERSION` and is recorded in
-the SDK manifest. Generate the header per configured SDK variant;
+`LUDUS_ASSERT_DIALOGS_AVAILABLE` values to a tiny generated public
+`assert_config.hpp`. `LUDUS_ASSERT_DIALOGS_AVAILABLE` is `1` **only** for a
+non-CI Debug build (generated from the explicit flavor and the CI build setting)
+and `0` elsewhere; it expresses build-time *eligibility* for the no-debugger
+interactive dialog in [§5.1](#51-interactive-development-resumable-assert).
+Whether a given run actually resumes is a further runtime decision (CI veto,
+attached debugger, or an explicit helper Continue-once). A debugger Continue can
+resume `ASSERT` in Development too, so it is deliberately not gated by this
+value. Adding this policy value bumps `LUDUS_ASSERT_POLICY_VERSION` (now 2) and
+is recorded in the SDK manifest. Generate the header per configured SDK variant;
 export the matching include directory and file through Base's public file set.
 The source build and installed SDK must use the same values. Do not infer policy
 from `NDEBUG`, `DEBUG`, or `defines.hpp`, and do not permit per-TU overrides of
@@ -285,12 +295,14 @@ never automatic, and never a recovery mechanism the program may depend on. Code
 after a resumed `ASSERT` runs with the invariant *known broken*; this is the
 price of the workflow and the reason it is confined to Debug and to `ASSERT`.
 
-**Where it is eligible (build-time).** `LUDUS_ASSERT_RESUMABLE` is `1` only in
-the Debug flavor. Development, Profile, and Release are never eligible.
-Development is deliberately **report-only**: an enabled `ASSERT` there reports,
-breaks if a debugger is attached, and then terminates exactly as today, so
-automated Development runs stay deterministic. Profile/Release do not compile
-`ASSERT` at all.
+**Where it is eligible (build-time).** `LUDUS_ASSERT_DIALOGS_AVAILABLE` is `1`
+only in a non-CI Debug build; it gates the **no-debugger dialog** path only.
+Profile/Release do not compile `ASSERT` at all. Development compiles `ASSERT` and
+follows the plan's execution matrix: with a debugger attached (non-CI) an
+`ASSERT` break and a debugger Continue **resume** just as in Debug; **without** a
+debugger Development is **report-only** and terminates (it never opens a dialog
+and needs no display/helper). The dialog is the Debug-only difference, not the
+debugger break.
 
 **Whether it actually resumes (runtime).** Even in an eligible Debug binary, a
 failed `ASSERT` resumes only when *all* of the following hold at the moment of
@@ -339,14 +351,28 @@ crash packet. A resumed `ASSERT` counts against the same presentation budget
 discipline as `CHECK` so a hot resumed `ASSERT` cannot flood diagnostics; the
 condition is still evaluated exactly once per encounter regardless of budget.
 
-**No new public-header surface on the success path.** Interactive I/O, prompt
-parsing, and CI detection are Debug-only *failure-path* concerns implemented
-behind the existing detached OS-primitive boundary (see [§12](#12-debugger-and-platform-behavior)).
-They add nothing to `assert.hpp`, nothing to the success path, and no STL to any
-public header. The macro expansions of `ASSERT`/`ASSERT_F` are unchanged; the
-new behavior lives entirely in the runtime `.cpp` reached through the existing
-`FinishFatal*` entry points, gated on `LUDUS_ASSERT_RESUMABLE` and the runtime
-conditions above.
+**Runtime split and success-path surface.** `ASSERT`/`ASSERT_F` use their own
+private `detail::BeginAssert` / `FinishAssert` (and `FinishAssertRendered` /
+`FinishAssertArgs`) entry points that are **not** declared `[[noreturn]]`;
+`REQUIRE`/`FATAL` keep the terminal `BeginFatal` / `FinishFatal*` pair. The
+`ASSERT`/`ASSERT_F` macro expansions are otherwise unchanged and the success path
+is untouched: no success-path helper call, TLS, atomic, lock, clock, debugger or
+CI query, allocation, or per-site state. The resumable decision lives entirely in
+`assert.cpp`'s cold `FinishAssert` path via a private `ResolveAssertDecision`,
+which reuses the detached OS-primitive boundary (`QueryDebugger` /
+`BreakForDebugger`), the shared `IsContinuousIntegration()` CI query, and — only
+under `LUDUS_ASSERT_DIALOGS_AVAILABLE` — the versioned control endpoint
+(see [§5.2](#52-startup-and-report-delivery-external-diagnostic-helper)). None of
+this adds anything to `assert.hpp` or any public header; the failing thread runs
+no UI code.
+
+**Report lifetime and CHECK budget interaction.** In the current implementation
+a resumed `ASSERT` uses a bounded stack-owned report delivered through the
+nonblocking transport (never `gFatalPacket`); it releases the slot and clears TLS
+exactly once, so a later failure is independently reportable. On `Terminate` it
+publishes that already-built report into the single-incident fatal packet without
+re-evaluating anything, then aborts. `CHECK`'s existing report budget is
+unchanged, and `CHECK` inspection breaks are additionally suppressed under CI.
 
 ### 5.2 Startup and report delivery (external diagnostic helper)
 

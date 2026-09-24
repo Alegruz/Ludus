@@ -82,14 +82,73 @@ run standalone with the available compiler:
   (the sandbox is headless; the display probe was exercised only in its negative,
   no-display path).
 
-## Explicitly unchanged / not covered
+## Explicitly unchanged / not covered (startup milestone)
 
-- No assertion fatal action changed; `assert.hpp` and the success path are
-  untouched. No native death behavior was faked.
-- The ASSERT continue-once **decision** (prompt + decision-frame exchange + the
-  `FinishFatalImpl` branch) is **not** implemented here; the reserved
-  `DecisionRequest`/`DecisionReply` kinds are defined in the wire layout but
-  never sent, and no `LUDUS_ASSERT_DIALOGS_AVAILABLE` capability macro or policy
-  version bump is introduced yet (that is the later decision milestone).
 - Windows/macOS backends are not provided (unsupported backends fail
   configuration, per the existing rule).
+
+---
+
+# Resumable-ASSERT / interactive presentation milestone
+
+Adds the ASSERT continue-once decision on top of the startup/report layer
+(`assertions.md` §5.1, the plan's Prompt 3). `REQUIRE`/`FATAL` stay terminal and
+`CHECK` stays boolean.
+
+## What changed
+
+- `ASSERT`/`ASSERT_F` split onto non-`[[noreturn]]` `BeginAssert`/`FinishAssert`;
+  `REQUIRE`/`FATAL` keep `BeginFatal`/`FinishFatal*`.
+- `ResolveAssertDecision`: runtime CI veto → Terminate; else debugger attached →
+  break, Continue resumes (Debug **and** Development); else, under
+  `LUDUS_ASSERT_DIALOGS_AVAILABLE`, a Ready control endpoint → helper
+  Continue-once/Terminate; else Terminate. A resumed `ASSERT` uses a stack-owned
+  report, releases the slot/TLS once, and never publishes into `gFatalPacket`.
+- Base `RequestAssertDecision` (byte-framed `DecisionRequest`/`DecisionReply`
+  over the control endpoint); the Python helper presents Zenity (graphical) or a
+  `/dev/tty` prompt and replies, draining reports throughout. `CHECK` inspection
+  breaks are additionally suppressed under CI.
+- SDK: `LUDUS_ASSERT_DIALOGS_AVAILABLE` generated (1 only for non-CI Debug),
+  `LUDUS_ASSERT_POLICY_VERSION` bumped to 2, manifest gains
+  `assert_dialogs_available`, `engine.py` verifies it.
+
+## What WAS executed (Clang 15, C++20, `-fno-exceptions`)
+
+- Strict `-Wall -Wextra -Wpedantic -Wconversion -Wshadow` clean on `assert.cpp`,
+  `diagnostic_output.cpp`, `diagnostic_format.cpp`, `diagnostics_linux.cpp`,
+  `session.cpp`, and both new test children.
+- **`death_tests.py`** (native + fake backends) across Debug (dialogs=1),
+  Development (dialogs=0), and simulated CI: native ASSERT terminates; the fake
+  attached-debugger ASSERT resumes in Debug and Development (non-CI) and a second
+  ASSERT is independently reportable; the CI veto forces terminate;
+  `REQUIRE`/`FATAL`/packet always terminate, including under the fake debugger.
+- **`decision_tests.py`** (controlled helper, 8/8): ContinueOnce resumes;
+  Terminate aborts; repeated ASSERTs get independent incident ids and resume;
+  wrong incident id, wrong reply kind, malformed frame, and helper disconnect all
+  Terminate; `REQUIRE` never resumes even when offered ContinueOnce.
+- **`startup_tests.py`** re-run green after the Base changes.
+- `constexpr` passing `ASSERT` (`static_assert`) and single-message `ASSERT`
+  still compile; `clang-format` clean; `py_compile` clean for the helper and all
+  drivers.
+
+## What was NOT executed here (runs in CI on the pinned toolchain)
+
+- Pinned **Clang 18 + lld** engine build; **Catch2** unit tests; **ASan/UBSan**
+  and **TSan**; `./scripts/check --all` (clang-tidy 18); `./scripts/install-sdk`
+  and SDK-consumer/manifest checks (now including `assert_dialogs_available`).
+- **Real GDB/LLDB** attach → Continue resumes ASSERT while REQUIRE/FATAL still
+  abort: exercised only via the fake backend here (the fake backend is not a
+  substitute for a native death/debugger test; that gate runs on a real runner).
+- **Real Zenity/Wayland** dialog interaction: the helper's graphical path was not
+  driven on a live desktop session; the decision protocol was validated with a
+  controlled helper and the tty path is untested interactively here.
+- The `ludus_assert_decision` CTest is registered only for a dialog-eligible
+  (non-CI Debug) build, so it does not run in the CI `assertion-policy` job; CI
+  covers the terminate/veto behavior through the death tests.
+
+## Explicitly unchanged
+
+- `assert.hpp`/`assert_format.hpp` macro *expansions* for the success path add no
+  coordination; `CHECK` budget and return contract are unchanged; the terminal
+  `gFatalPacket` protocol is unchanged; no Windows/macOS backend was added; no
+  native death behavior was faked.

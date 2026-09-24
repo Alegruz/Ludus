@@ -119,8 +119,24 @@ enum class ControlState : uint8
 ControlState ConfigureControlEndpoint(int descriptor) noexcept;
 
 // The last configured state. Cheap, lock-free; safe to read on the failure path
-// by a later milestone before attempting a decision exchange.
+// before attempting a decision exchange.
 [[nodiscard]] ControlState ControlEndpointState() noexcept;
+
+// Ask the external helper for the active incident's Continue-once / Terminate
+// decision. Sends a DecisionRequest (incident id + bounded owned report bytes)
+// and waits for the matching DecisionReply. This is the ONLY function on the
+// assertion failure path that may block: a healthy dialog legitimately waits for
+// a human, so there is no auto-continue timeout. The wait is per this milestone's
+// contract, not a bounded-completion promise.
+//
+// Returns ContinueOnce ONLY for a well-formed reply whose kind is DecisionReply,
+// whose incident id equals `incidentId`, and whose one-byte payload is
+// ContinueOnce. Anything else — endpoint not Ready, a send/recv error, a closed
+// helper, a wrong/duplicate/stale incident id, an unknown kind, a bad length, or
+// a payload that is not exactly ContinueOnce — returns Terminate. Only an
+// eligible caller (non-CI Debug with a completed handshake) should call this;
+// it never itself decides eligibility. No allocation; not signal-safe.
+[[nodiscard]] ControlDecision RequestAssertDecision(uint32 incidentId, const char* report, usize size) noexcept;
 
 // True when the process appears to run under continuous integration. Reads the
 // environment (the generic CI marker plus common runner-specific variables, and

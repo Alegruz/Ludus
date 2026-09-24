@@ -9,5 +9,6 @@
   "build_flavor_id": @LUDUS_BUILD_FLAVOR_ID@,
   "assert_policy_version": @LUDUS_ASSERT_POLICY_VERSION@,
   "enable_asserts": @LUDUS_ENABLE_ASSERTS@,
-  "break_on_check": @LUDUS_BREAK_ON_CHECK@
+  "break_on_check": @LUDUS_BREAK_ON_CHECK@,
+  "assert_dialogs_available": @LUDUS_ASSERT_DIALOGS_AVAILABLE@
 }

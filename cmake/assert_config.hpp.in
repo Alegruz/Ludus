@@ -3,7 +3,7 @@
 // Generated SDK variant policy. Never override per translation unit or infer
 // it from NDEBUG. Use a separately configured/installed SDK to change policy.
 #if defined(LUDUS_ENABLE_ASSERTS) || defined(LUDUS_BREAK_ON_CHECK) || defined(LUDUS_ASSERT_POLICY_VERSION) || \
-    defined(LUDUS_BUILD_FLAVOR_ID)
+    defined(LUDUS_BUILD_FLAVOR_ID) || defined(LUDUS_ASSERT_DIALOGS_AVAILABLE)
 #    error "Ludus assertion configuration is owned by the SDK; overrides are forbidden"
 #endif
 
@@ -11,3 +11,9 @@
 #define LUDUS_BUILD_FLAVOR_ID @LUDUS_BUILD_FLAVOR_ID@
 #define LUDUS_ENABLE_ASSERTS @LUDUS_ENABLE_ASSERTS@
 #define LUDUS_BREAK_ON_CHECK @LUDUS_BREAK_ON_CHECK@
+
+// Build-time eligibility for the interactive ASSERT dialog: 1 only for a non-CI
+// Debug build. A runtime CI veto and the control handshake still gate whether a
+// prompt appears. Never presentation-availability by itself, and never a knob
+// that changes which assertions are compiled in.
+#define LUDUS_ASSERT_DIALOGS_AVAILABLE @LUDUS_ASSERT_DIALOGS_AVAILABLE@

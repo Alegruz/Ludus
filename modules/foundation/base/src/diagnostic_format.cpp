@@ -176,6 +176,14 @@ namespace ludus::foundation::diagnostics::detail
     const usize size = writer.Finish();
     FinishFatalRendered({message, size - 1});
 }
+void FinishAssertArgs(DiagnosticText format, const DiagnosticArg* args, usize count) noexcept
+{
+    char message[2048];
+    internal::TextWriter writer(message, sizeof(message));
+    internal::FormatDiagnostic(writer, format, args, count);
+    const usize size = writer.Finish();
+    FinishAssertRendered({message, size - 1});
+}
 bool FinishCheckArgs(DiagnosticText format, const DiagnosticArg* args, usize count) noexcept
 {
     char message[2048];

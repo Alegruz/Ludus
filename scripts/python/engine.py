@@ -1413,7 +1413,8 @@ def verify_sdk_install(root: Path, prefix: Path, build_dir: Path) -> None:
         raise EngineError("installed SDK manifest does not match the built variant")
     config = (prefix / "include" / "ludus" / "foundation" / "base" / "assert_config.hpp").read_text()
     for macro, key in (("LUDUS_ENABLE_ASSERTS", "enable_asserts"), ("LUDUS_BREAK_ON_CHECK", "break_on_check"),
-                       ("LUDUS_BUILD_FLAVOR_ID", "build_flavor_id"), ("LUDUS_ASSERT_POLICY_VERSION", "assert_policy_version")):
+                       ("LUDUS_BUILD_FLAVOR_ID", "build_flavor_id"), ("LUDUS_ASSERT_POLICY_VERSION", "assert_policy_version"),
+                       ("LUDUS_ASSERT_DIALOGS_AVAILABLE", "assert_dialogs_available")):
         match = re.search(rf"^#define {macro} ([0-9]+)$", config, re.MULTILINE)
         if not match or int(match.group(1)) != manifest[key]:
             raise EngineError(f"installed assertion policy mismatch: {macro}")

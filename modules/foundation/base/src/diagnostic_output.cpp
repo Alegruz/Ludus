@@ -1,6 +1,7 @@
 #include <ludus/foundation/base/diagnostic_output.hpp>
 
 #include <cerrno>
+#include <cstdlib>
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
@@ -307,5 +308,112 @@ ControlState ConfigureControlEndpoint(int descriptor) noexcept
 ControlState ControlEndpointState() noexcept
 {
     return gControlState;
+}
+
+bool IsContinuousIntegration() noexcept
+{
+    const int saved_errno = errno;
+    // Common CI signals. The generic CI variable covers GitHub Actions, GitLab,
+    // CircleCI, Travis, and others; the rest catch environments that omit it.
+    static const char* const signals[] =
+        {"CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "JENKINS_URL", "TEAMCITY_VERSION"};
+    bool detected = false;
+    for (const char* signal : signals)
+    {
+        const char* value = ::getenv(signal);
+        if (value != nullptr && value[0] != '\0')
+        {
+            detected = true;
+            break;
+        }
+    }
+    // Explicit engine opt-out/opt-in wins over heuristics (LUDUS_CI=0/1).
+    if (const char* forced = ::getenv("LUDUS_CI"); forced != nullptr && forced[0] != '\0')
+    {
+        detected = forced[0] != '0';
+    }
+    errno = saved_errno;
+    return detected;
+}
+
+ControlDecision RequestAssertDecision(uint32 incidentId, const char* report, usize size) noexcept
+{
+    if (gControlState != ControlState::Ready || gControlSocket == -1)
+    {
+        return ControlDecision::Terminate;
+    }
+    if (size > CONTROL_MAX_PAYLOAD)
+    {
+        size = CONTROL_MAX_PAYLOAD; // Bound the request; a longer report is clipped.
+    }
+    const int saved_errno = errno;
+
+    // Build request: header + bounded owned report bytes. One SEQPACKET message.
+    char frame[CONTROL_HEADER_SIZE + CONTROL_MAX_PAYLOAD];
+    const usize header_size = EncodeControlHeader(frame,
+                                                  sizeof(frame),
+                                                  ControlMessageType::DecisionRequest,
+                                                  incidentId,
+                                                  static_cast<uint32>(report != nullptr ? size : 0));
+    usize frame_size = header_size;
+    if (report != nullptr && size != 0)
+    {
+        for (usize i = 0; i < size; ++i)
+        {
+            frame[header_size + i] = report[i];
+        }
+        frame_size += size;
+    }
+
+    ssize_t sent = -1;
+    for (uint32 attempt = 0; attempt < 4; ++attempt)
+    {
+        sent = ::send(gControlSocket, frame, frame_size, MSG_NOSIGNAL);
+        if (sent >= 0 || errno != EINTR)
+        {
+            break;
+        }
+    }
+    if (sent != static_cast<ssize_t>(frame_size))
+    {
+        errno = saved_errno;
+        return ControlDecision::Terminate; // Helper gone / short send => never continue.
+    }
+
+    // Block for the reply. No timeout: a healthy dialog waits for a human. A
+    // closed helper makes recv return 0 (=> Terminate); EINTR is retried.
+    ControlDecision decision = ControlDecision::Terminate;
+    for (;;)
+    {
+        char reply[CONTROL_HEADER_SIZE + CONTROL_MAX_PAYLOAD];
+        const auto count = ::recv(gControlSocket, reply, sizeof(reply), 0);
+        if (count < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+            break; // Transport error => Terminate.
+        }
+        if (count == 0)
+        {
+            break; // Helper closed the channel => Terminate.
+        }
+        ControlHeader header{};
+        if (!DecodeControlHeader(reply, static_cast<usize>(count), header))
+        {
+            break; // Malformed => Terminate; do not loop on garbage.
+        }
+        // Only the active incident's explicit ContinueOnce authorizes a resume.
+        if (header.Kind == static_cast<uint16>(ControlMessageType::DecisionReply) && header.IncidentId == incidentId &&
+            header.Length == 1 &&
+            static_cast<uint8>(reply[CONTROL_HEADER_SIZE]) == static_cast<uint8>(ControlDecision::ContinueOnce))
+        {
+            decision = ControlDecision::ContinueOnce;
+        }
+        break; // A stale/duplicate/wrong-id/wrong-kind reply falls through as Terminate.
+    }
+    errno = saved_errno;
+    return decision;
 }
 } // namespace ludus::foundation::diagnostics

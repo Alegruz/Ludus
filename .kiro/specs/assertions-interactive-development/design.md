@@ -58,6 +58,12 @@ these unimplemented so their configuration fails (consistent with the existing
 
 ## 2. Generated policy surface (R20–R23)
 
+> **Implementation note.** This design's working name `LUDUS_ASSERT_RESUMABLE`
+> shipped as **`LUDUS_ASSERT_DIALOGS_AVAILABLE`** (the plan's mandated name),
+> generated `1` only for a **non-CI Debug** build. It gates the no-debugger
+> dialog only: a debugger Continue resumes `ASSERT` in Development too, so that
+> path is not gated by this value. See `tasks.md` T1–T3 and `assertions.md` §5.1.
+
 Add one numeric value to the generated `assert_config.hpp` and its CMake source:
 
 | Symbol | Debug | Development | Profile | Release / MinSizeRel |

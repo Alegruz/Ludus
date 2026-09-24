@@ -26,8 +26,15 @@ configuration matches Development. Assertion policy never follows `NDEBUG`.
 
 Debug/Development enable `LUDUS_ASSERT` and Check inspection breaks. Profile and
 Release compile Assert away and disable Check breaks. Require/Check/Fatal stay
-active everywhere, and fatal failures terminate after any debugger continuation.
-See [the implemented plain API](../architecture/assertions-m0-m1.md).
+active everywhere. `REQUIRE`/`FATAL` always terminate, including after a debugger
+continuation; `CHECK` returns its boolean. Enabled `ASSERT`/`ASSERT_F` is now
+**resumable through explicit developer action** in non-CI runs — a debugger
+Continue (Debug or Development) or, with no debugger in a non-CI Debug build, the
+external helper's Continue-once dialog — otherwise it terminates. This is gated
+by the generated `LUDUS_ASSERT_DIALOGS_AVAILABLE` (1 only for non-CI Debug) plus
+a runtime CI veto; the assertion-policy version is 2. See
+[assertions.md §5.1](../architecture/assertions.md) and
+[ADR 0006](../decisions/0006-resumable-development-assertions.md).
 
 The installed `assert_config.hpp` and SDK manifest carry the built variant's
 policy. A Release consumer of a Development SDK uses Development's assertion

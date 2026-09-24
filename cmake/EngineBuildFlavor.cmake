@@ -22,12 +22,17 @@ else()
         "Release/Release or MinSizeRel.")
 endif()
 
-foreach(policy LUDUS_ENABLE_ASSERTS LUDUS_BREAK_ON_CHECK LUDUS_ASSERT_POLICY_VERSION)
+foreach(policy LUDUS_ENABLE_ASSERTS LUDUS_BREAK_ON_CHECK LUDUS_ASSERT_POLICY_VERSION LUDUS_ASSERT_DIALOGS_AVAILABLE)
     if(DEFINED ${policy})
         message(FATAL_ERROR "${policy} is generated from LUDUS_BUILD_FLAVOR; overrides are forbidden")
     endif()
 endforeach()
-set(LUDUS_ASSERT_POLICY_VERSION 1)
+
+# Bumped to 2: enabled ASSERT/ASSERT_F is now resumable through explicit
+# developer action (debugger continue, or the external-helper Continue-once
+# dialog) in eligible builds. Old headers/runtime assume ASSERT is terminal, so
+# the SDK policy version changes to force a recompile and reject a mismatch.
+set(LUDUS_ASSERT_POLICY_VERSION 2)
 set(LUDUS_ENABLE_ASSERTS 0)
 set(LUDUS_BREAK_ON_CHECK 0)
 if(LUDUS_BUILD_FLAVOR_ID LESS 3)
@@ -35,6 +40,18 @@ if(LUDUS_BUILD_FLAVOR_ID LESS 3)
     set(LUDUS_BREAK_ON_CHECK 1)
 endif()
 
+# Interactive-dialog capability. This is build-time ELIGIBILITY only, generated
+# from the explicit flavor and the CI build setting; a runtime CI veto and the
+# control-endpoint handshake gate whether a prompt actually appears. It can be 1
+# only for a non-CI Debug build. CI is a build input here (defaulting from the CI
+# environment) so a locally built dialog-capable binary is still marked eligible;
+# the runtime veto stops it from prompting when later executed under CI.
+set(LUDUS_CI_BUILD "$ENV{CI}" CACHE STRING "Set for a CI build; forces dialogs unavailable")
+set(LUDUS_ASSERT_DIALOGS_AVAILABLE 0)
+if(LUDUS_BUILD_FLAVOR_ID EQUAL 1 AND NOT LUDUS_CI_BUILD)
+    set(LUDUS_ASSERT_DIALOGS_AVAILABLE 1)
+endif()
+
 string(TOUPPER "${LUDUS_BUILD_FLAVOR}" LUDUS_BUILD_FLAVOR_DEFINE)
 set(LUDUS_SDK_VARIANT
-    "assert-v1-${LUDUS_BUILD_FLAVOR}-${CMAKE_BUILD_TYPE}-asan-${LUDUS_ENABLE_ASAN}-ubsan-${LUDUS_ENABLE_UBSAN}-tsan-${LUDUS_ENABLE_TSAN}")
+    "assert-v${LUDUS_ASSERT_POLICY_VERSION}-${LUDUS_BUILD_FLAVOR}-${CMAKE_BUILD_TYPE}-dialogs-${LUDUS_ASSERT_DIALOGS_AVAILABLE}-asan-${LUDUS_ENABLE_ASAN}-ubsan-${LUDUS_ENABLE_UBSAN}-tsan-${LUDUS_ENABLE_TSAN}")

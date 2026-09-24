@@ -93,46 +93,4 @@ void BreakForDebugger() noexcept
 {
     std::_Exit(134);
 }
-
-namespace
-{
-bool NonEmptyEnv(const char* name) noexcept
-{
-    const char* value = ::getenv(name);
-    return value != nullptr && value[0] != '\0';
-}
-} // namespace
-
-bool DetectContinuousIntegration() noexcept
-{
-    const int saved_errno = errno;
-    // Common CI signals. The generic CI variable covers GitHub Actions, GitLab,
-    // CircleCI, Travis, and others; the rest catch environments that omit it.
-    static const char* const kSignals[] =
-        {"CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "JENKINS_URL", "TEAMCITY_VERSION"};
-    bool detected = false;
-    for (const char* signal : kSignals)
-    {
-        if (NonEmptyEnv(signal))
-        {
-            detected = true;
-            break;
-        }
-    }
-    // Explicit engine opt-out/opt-in wins over heuristics (LUDUS_CI=0/1).
-    if (const char* forced = ::getenv("LUDUS_CI"); forced != nullptr && forced[0] != '\0')
-    {
-        detected = forced[0] != '0';
-    }
-    errno = saved_errno;
-    return detected;
-}
 } // namespace ludus::foundation::diagnostics::internal
-
-namespace ludus::foundation::diagnostics
-{
-bool IsContinuousIntegration() noexcept
-{
-    return internal::DetectContinuousIntegration();
-}
-} // namespace ludus::foundation::diagnostics

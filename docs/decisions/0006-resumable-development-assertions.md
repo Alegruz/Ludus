@@ -2,13 +2,18 @@
 
 ## Status
 
-Accepted (documentation/spec milestone). Amends the assertion behavior contract
-in [`docs/architecture/assertions.md`](../architecture/assertions.md) and is
-detailed by the Kiro spec under
+Accepted and **implemented**. Amends the assertion behavior contract in
+[`docs/architecture/assertions.md`](../architecture/assertions.md) and is
+detailed by the [interactive-development plan](../architecture/assertions-interactive-development-plan.md)
+and the Kiro spec under
 [`.kiro/specs/assertions-interactive-development/`](../../.kiro/specs/assertions-interactive-development/requirements.md).
-No runtime or UI code changes are authorized by this ADR alone; it records the
-decision and its scope so the design, spec, and later implementation milestones
-can proceed against one authoritative policy.
+The runtime split (resumable `ASSERT`/`ASSERT_F` via `BeginAssert`/`FinishAssert`),
+the debugger-continue and external-helper Continue-once decision, the SDK
+`LUDUS_ASSERT_DIALOGS_AVAILABLE` capability, the runtime CI veto, and the
+assertion-policy version bump to 2 have landed. `REQUIRE`/`FATAL` remain terminal
+and `CHECK` remains boolean. One refinement to this ADR's original text: a
+debugger Continue resumes `ASSERT` in Development as well as Debug (the plan's
+execution matrix); only the *no-debugger dialog* is restricted to non-CI Debug.
 
 ## Context
 

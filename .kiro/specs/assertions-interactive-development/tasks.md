@@ -31,16 +31,23 @@ already used in the assertion program. Docs (this milestone) are already done.
   build is claimed for a docs-only change.
 - **Non-goals:** any runtime/config/UI code.
 
-## T1 — Generated policy value and SDK identity (config only)
+## T1 — Generated policy value and SDK identity (config only) — IMPLEMENTED
+
+> **Implemented** with the plan's mandated name `LUDUS_ASSERT_DIALOGS_AVAILABLE`
+> (1 only for a **non-CI Debug** build, derived from the flavor + the CI build
+> setting) rather than the spec's earlier working name `LUDUS_ASSERT_RESUMABLE`.
+> `LUDUS_ASSERT_POLICY_VERSION` bumped to 2; manifest gains
+> `assert_dialogs_available`; override forbidden (CMake `FATAL_ERROR` + header
+> `#error`); `scripts/python/engine.py` verifies the macro/manifest agreement.
 
 - **Reqs:** R20, R21, R22, R23. **Findings:** design §2.
 - **Areas:** `cmake/EngineBuildFlavor.cmake`, `cmake/assert_config.hpp.in`,
   `cmake/LudusSdkManifest.json.in`, `scripts/python/engine.py` (SDK verification
   only), `tests/build_contract/` fixtures, `.github/workflows/ci.yml`
   (assertion-policy matrix), `docs/development/building.md`.
-- **Do:** add `LUDUS_ASSERT_RESUMABLE` (1 for Debug, else 0), forbidden-override
-  guard, bump `LUDUS_ASSERT_POLICY_VERSION` to 2, add `enable_resumable` manifest
-  field. No runtime consumer of the value yet.
+- **Do:** add `LUDUS_ASSERT_DIALOGS_AVAILABLE` (1 for non-CI Debug, else 0),
+  forbidden-override guard, bump `LUDUS_ASSERT_POLICY_VERSION` to 2, add
+  `assert_dialogs_available` manifest field.
 - **Regression tests (deferred impl):** per-preset config fixture asserts
   expected `RESUMABLE`; override/predefinition rejected (CMake + header);
   manifest/header agreement; installed consumer observes the value; multi-config
@@ -97,12 +104,19 @@ something to talk over. It changes **no** assertion action. Traces to
 - **Non-goals:** the ASSERT continue-once **decision** (T2/T3); any prompt UI;
   Windows/macOS.
 
-## T2 — Detached backend primitives (Base, private)
+## T2 — Detached backend primitives (Base, private) — IMPLEMENTED
+
+> **Implemented**, though the prompt lives out of process (in the Python helper),
+> not as a Base `PromptAssertDecision`. Base gained `RequestAssertDecision`
+> (`diagnostic_output`), which sends a `DecisionRequest` over the control channel
+> and awaits a validated `DecisionReply`; the helper presents Zenity/tty and
+> replies. CI detection is the shared `IsContinuousIntegration()`. No UI code
+> enters Base or the failing thread.
 
 - **Reqs:** R5, R6, R31 (query only), R34 (degrade), R35, R45, R47.
   **Findings:** design §1, §5. **Depends on:** T1.5 (control endpoint + CI
-  detection already exist; T2 adds the `PromptAssertDecision` prompt and the
-  decision-frame exchange over the T1.5 control channel).
+  detection already exist; T2 adds the decision-frame exchange over the T1.5
+  control channel and the helper-side prompt).
 - **Areas:** `modules/foundation/base/src/internal/diagnostic_platform.hpp`
   (add `ResumeDecision`, `DetectContinuousIntegration`, `PromptAssertDecision`),
   `modules/foundation/base/src/diagnostics_linux.cpp` (Linux impls),
@@ -120,7 +134,16 @@ something to talk over. It changes **no** assertion action. Traces to
   ASan/UBSan clean; format/tidy.
 - **Non-goals:** wiring into `FinishFatalImpl` (that is T3); Windows/macOS.
 
-## T3 — Resumable `ASSERT` runtime branch
+## T3 — Resumable `ASSERT` runtime branch — IMPLEMENTED
+
+> **Implemented** as a full split rather than a branch inside `FinishFatalImpl`:
+> `ASSERT`/`ASSERT_F` now use non-`[[noreturn]]` `BeginAssert` / `FinishAssert`
+> (+ `FinishAssertRendered` / `FinishAssertArgs`); `REQUIRE`/`FATAL` keep the
+> terminal `BeginFatal` / `FinishFatal*` pair. `ResolveAssertDecision` applies the
+> CI veto, the debugger-Continue resume (Debug **and** Development), and the
+> non-CI-Debug helper decision; a resumed `ASSERT` uses a stack-owned report and
+> releases the slot/TLS once. Verified by the `ludus_assert_*_death` and
+> `ludus_assert_decision` subprocess suites.
 
 - **Reqs:** R10, R11, R12, R13, R30, R31, R32, R33, R36, R40, R41, R42, R43,
   R44, R46. **Findings:** design §3.
