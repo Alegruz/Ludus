@@ -15,7 +15,10 @@
 #include "sinks/debugger_sink.hpp"
 #include "sinks/file_sink.hpp"
 
-#include <array>
+#include <ludus/foundation/base/pointer.hpp>
+#include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/vector.hpp>
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -24,7 +27,7 @@
 #include <span>
 #include <string_view>
 #include <thread>
-#include <vector>
+#include <utility>
 
 namespace
 {
@@ -39,6 +42,16 @@ namespace ludus::foundation::logging
 
 namespace
 {
+
+// Construct an owning UniquePtr<ILogSink> for a concrete sink type. Ludus'
+// UniquePtr takes ownership of an lvalue raw pointer (nulling it), so we hand it
+// a freshly-new'd sink; the base's virtual destructor makes deletion correct.
+template <typename SinkType, typename... Args>
+foundation::UniquePtr<internal::ILogSink> MakeSink(Args&&... args)
+{
+    internal::ILogSink* raw = new SinkType(static_cast<Args&&>(args)...);
+    return foundation::UniquePtr<internal::ILogSink>(raw);
+}
 
 // -----------------------------------------------------------------------------
 // Logger state.
@@ -75,7 +88,7 @@ struct LoggerState
 
     internal::CategoryRegistry Categories;
 
-    std::vector<std::unique_ptr<internal::ILogSink>> Sinks;
+    foundation::Vector<foundation::UniquePtr<internal::ILogSink>> Sinks;
 
     // Timed-flush worker (requirements R46). Only runs while Accepting and only
     // when a positive interval is configured.
@@ -357,7 +370,7 @@ LogInitResult LogSystem::Initialize(const LogConfig& config)
         }
         lock.lock();
         flushSinksLocked(s);
-        s.Sinks.clear();
+        s.Sinks.Clear();
     }
 
     s.GlobalLevel.store(config.GlobalLevel, std::memory_order_relaxed);
@@ -373,11 +386,11 @@ LogInitResult LogSystem::Initialize(const LogConfig& config)
 
     if (config.EnableConsole)
     {
-        s.Sinks.push_back(std::make_unique<internal::ConsoleSink>());
+        s.Sinks.PushBack(MakeSink<internal::ConsoleSink>());
     }
     if (config.EnableDebugger)
     {
-        s.Sinks.push_back(std::make_unique<internal::DebuggerSink>());
+        s.Sinks.PushBack(MakeSink<internal::DebuggerSink>());
     }
     if (config.EnableFile)
     {
@@ -396,7 +409,12 @@ LogInitResult LogSystem::Initialize(const LogConfig& config)
             internal::FileSink* file_sink = internal::FileSink::Create(fileConfig);
             if (file_sink != nullptr)
             {
-                s.Sinks.push_back(std::unique_ptr<internal::ILogSink>(file_sink));
+                // UniquePtr takes ownership via an lvalue base pointer (nulling
+                // it). FileSink derives from ILogSink (virtual dtor), so deleting
+                // through the base is correct.
+                internal::ILogSink* owned = file_sink;
+                file_sink = nullptr;
+                s.Sinks.PushBack(foundation::UniquePtr<internal::ILogSink>(owned));
             }
             else
             {
@@ -419,7 +437,7 @@ LogInitResult LogSystem::Initialize(const LogConfig& config)
         // flush thread is NOT started; the worker owns the flush cadence.
         s.Async = std::make_unique<internal::AsyncBackend>();
         s.Async->Start(std::move(s.Sinks), config.FlushIntervalMilliseconds);
-        s.Sinks.clear();
+        s.Sinks.Clear();
     }
 
     // Publish Accepting last, so ShouldLog/dispatch only admit once sinks exist.
@@ -471,7 +489,7 @@ LogStatus LogSystem::Shutdown()
     {
         std::unique_lock lock(s.DispatchMutex);
         flushSinksLocked(s); // no-op set in async mode (sinks moved to worker)
-        s.Sinks.clear();
+        s.Sinks.Clear();
         s.Categories.Clear();
         s.Lifecycle.store(State::Stopped, std::memory_order_release);
     }
@@ -601,11 +619,11 @@ void SubmitFormat(LogLevel level,
     // allocation, no throw, no terminate: a bad/oversized format degrades to a
     // bounded marker and sets a flag (requirements R19/R25/R38). The bounded
     // buffer is the common-path storage; nothing borrowed escapes this call.
-    std::array<char, kMaxMessageBytes> buffer;
+    foundation::Array<char, kMaxMessageBytes> buffer;
     const internal::FormatOutcome outcome =
-        internal::FormatInto(std::span<char>(buffer.data(), buffer.size()), format, args);
+        internal::FormatInto(std::span<char>(buffer.Data(), buffer.Size()), format, args);
 
-    const std::string_view message(buffer.data(), outcome.BytesWritten);
+    const std::string_view message(buffer.Data(), outcome.BytesWritten);
     dispatchAdmitted(level, category, location, message);
 }
 

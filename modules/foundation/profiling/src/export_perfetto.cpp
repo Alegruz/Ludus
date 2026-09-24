@@ -4,10 +4,11 @@
 #include "internal/trace_chunk.hpp"
 #include "internal/trace_event.hpp"
 
+#include <ludus/foundation/containers/vector.hpp>
+
 #include <algorithm>
 #include <cstdio>
 #include <string>
-#include <vector>
 
 // -----------------------------------------------------------------------------
 // Perfetto / Chrome Trace Event JSON exporter (final design §16 primary path).
@@ -30,9 +31,11 @@
 // chunk) are closed with a synthesized "E" carrying an "incomplete" arg so the
 // duration is visibly untrustworthy rather than silently fabricated (§6, G13).
 //
-// std::string / std::vector / <cstdio> are used deliberately here: this is a
-// cold, off-hot-path .cpp (never a public header), well within the STL policy
-// (ADR 0003 allows these; they are not spread into instrumentation headers).
+// Growable event/chunk buffers use Ludus::Vector (migrated off std::vector).
+// std::string is still used for the JSON output buffer and the file path: it is
+// slated for a Ludus String (ADR 0003) and stays until that exists; this is a
+// cold, off-hot-path .cpp (never a public header). <cstdio> for the file write
+// is within the STL policy on this cold path.
 // -----------------------------------------------------------------------------
 
 namespace ludus::foundation::profiling
@@ -168,21 +171,22 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
 {
     TraceRecorder& recorder = TraceRecorder::Instance();
 
-    // Drain every full chunk. Flatten to a single vector we can stable-sort by
+    // Drain every full chunk. Flatten to a single Vector we can stable-sort by
     // (threadId, ticks) so each thread's B/E stream is monotonic — the viewer
-    // relies on ordering to nest slices.
-    std::vector<FlatEvent> events;
+    // relies on ordering to nest slices. FlatEvent is a POD, so Vector growth
+    // relocates it with a single memcpy.
+    foundation::Vector<FlatEvent> events;
     TraceChunk* chunk = recorder.DrainFullChunks();
-    std::vector<TraceChunk*> drained;
+    foundation::Vector<TraceChunk*> drained;
     while (chunk != nullptr)
     {
         TraceChunk* next = chunk->PoolNext;
         for (uint32 i = 0; i < chunk->Count; ++i)
         {
             const TraceEvent& e = chunk->Events[i];
-            events.push_back(FlatEvent{e.Ticks, chunk->ThreadId, e.SiteId, e.Kind, e.Flags, e.Aux});
+            events.PushBack(FlatEvent{e.Ticks, chunk->ThreadId, e.SiteId, e.Kind, e.Flags, e.Aux});
         }
-        drained.push_back(chunk);
+        drained.PushBack(chunk);
         chunk = next;
     }
 
@@ -192,11 +196,12 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
         recorder.RecycleChunk(c);
     }
 
-    if (events.empty())
+    if (events.Empty())
     {
         return false;
     }
 
+    // Pointer iterators are contiguous, so std::stable_sort works unchanged.
     std::stable_sort(events.begin(), events.end(), [](const FlatEvent& a, const FlatEvent& b) noexcept {
         if (a.ThreadId != b.ThreadId)
         {
@@ -210,23 +215,22 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
     out += "{\"traceEvents\":[\n";
     bool first = true;
 
-    // Per-thread stack depth to synthesize End events for scopes still open at
-    // capture end (incomplete; §6/G13). We track open Begins per thread as we
-    // walk the sorted stream and close leftovers at the end.
-    // Thread ids are small and dense (assigned from 0). Use a simple map-free
-    // approach: since events are grouped by thread after the sort, we detect
-    // thread transitions and flush the pending stack.
-    std::vector<uint64> openTicks; // stack of open-begin timestamps (unused for name; viewer pairs by order)
-    std::vector<std::string> openNames;
-    uint32 currentThread = events.front().ThreadId;
+    // Per-thread open-scope DEPTH used to synthesize End events for scopes still
+    // open at capture end (incomplete; §6/G13). The viewer pairs B/E by order, so
+    // only the *count* of unclosed Begins per thread matters here — the previous
+    // parallel std::vector<uint64>/std::vector<std::string> stacks pushed values
+    // that were never read. A single depth counter is equivalent and clearer
+    // (and removes the std::string dependency entirely).
+    usize openDepth = 0;
+    uint32 currentThread = events.Front().ThreadId;
 
-    uint64 lastTicks = events.front().Ticks;
+    uint64 lastTicks = events.Front().Ticks;
 
     auto flushOpen = [&](uint32 threadId) noexcept {
         // Close any scopes left open on this thread with a synthesized,
         // incomplete End at the last-seen timestamp (§6/G13: labelled, never a
         // silently fabricated duration).
-        while (!openNames.empty())
+        while (openDepth > 0)
         {
             ChromeEvent synth;
             synth.Phase = 'E';
@@ -234,8 +238,7 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
             synth.TicksNs = lastTicks;
             synth.Incomplete = true;
             AppendEventObject(out, first, synth);
-            openNames.pop_back();
-            openTicks.pop_back();
+            --openDepth;
         }
     };
 
@@ -259,16 +262,14 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
             case TraceEventKind::Begin:
                 ce.Phase = 'B';
                 AppendEventObject(out, first, ce);
-                openTicks.push_back(e.Ticks);
-                openNames.emplace_back(name);
+                ++openDepth;
                 break;
             case TraceEventKind::End:
                 ce.Phase = 'E';
                 AppendEventObject(out, first, ce);
-                if (!openNames.empty())
+                if (openDepth > 0)
                 {
-                    openNames.pop_back();
-                    openTicks.pop_back();
+                    --openDepth;
                 }
                 break;
             case TraceEventKind::Instant:

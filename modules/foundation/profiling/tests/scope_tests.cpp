@@ -14,10 +14,12 @@
 #include "internal/trace_chunk.hpp"
 #include "internal/trace_event.hpp"
 
+#include <ludus/foundation/containers/vector.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
-#include <thread>
-#include <vector>
+#include <thread> // std::thread pool in the multithread case (kept: threads are not a container)
+#include <vector> // std::vector<std::thread> only (see above)
 
 #if LUDUS_PROFILING_ENABLED
 
@@ -32,7 +34,7 @@ namespace
 // what the exporter does; used here to assert structural correctness.
 struct Drained
 {
-    std::vector<internal::TraceEvent> events;
+    ludus::foundation::Vector<internal::TraceEvent> events;
     uint64 beginCount = 0;
     uint64 endCount = 0;
     uint64 instantCount = 0;
@@ -46,14 +48,14 @@ Drained drainAll()
     Drained result;
     internal::TraceRecorder& recorder = internal::TraceRecorder::Instance();
     internal::TraceChunk* chunk = recorder.DrainFullChunks();
-    std::vector<internal::TraceChunk*> chunks;
+    ludus::foundation::Vector<internal::TraceChunk*> chunks;
     while (chunk != nullptr)
     {
         internal::TraceChunk* next = chunk->PoolNext;
         for (uint32 i = 0; i < chunk->Count; ++i)
         {
             const internal::TraceEvent& event = chunk->Events[i];
-            result.events.push_back(event);
+            result.events.PushBack(event);
             switch (static_cast<internal::TraceEventKind>(event.Kind))
             {
                 case internal::TraceEventKind::Begin:
@@ -76,7 +78,7 @@ Drained drainAll()
                     break;
             }
         }
-        chunks.push_back(chunk);
+        chunks.PushBack(chunk);
         chunk = next;
     }
     for (internal::TraceChunk* c : chunks)

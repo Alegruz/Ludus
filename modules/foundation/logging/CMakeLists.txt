@@ -58,6 +58,7 @@ target_link_libraries(
     ludus_foundation_logging
     PUBLIC
         Ludus::FoundationBase
+        Ludus::FoundationContainers
 )
 
 # Compile-time minimum level. LUDUS_COMPILED_LOG_LEVEL selects the lowest level

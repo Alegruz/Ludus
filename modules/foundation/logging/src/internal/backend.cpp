@@ -151,7 +151,7 @@ void AsyncBackend::Run() noexcept
     mExitedCv.notify_all();
 }
 
-void AsyncBackend::Start(std::vector<std::unique_ptr<ILogSink>>&& sinks, uint32 flushIntervalMs) noexcept
+void AsyncBackend::Start(foundation::Vector<foundation::UniquePtr<ILogSink>>&& sinks, uint32 flushIntervalMs) noexcept
 {
     mSinks = std::move(sinks);
     mFlushIntervalMs = flushIntervalMs;
@@ -213,7 +213,7 @@ bool AsyncBackend::Stop(uint32 joinTimeoutMs) noexcept
     {
         (void)sink->Flush();
     }
-    mSinks.clear();
+    mSinks.Clear();
     return true;
 }
 
