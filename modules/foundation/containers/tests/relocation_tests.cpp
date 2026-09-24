@@ -13,8 +13,8 @@
 #include <type_traits>
 
 using ludus::foundation::IsTriviallyRelocatable;
-using ludus::foundation::Vector;
 using ludus::foundation::usize;
+using ludus::foundation::Vector;
 namespace tst = ludus::containers::testing;
 
 TEST_CASE("IsTriviallyRelocatable defaults to trivially copyable", "[relocation][trait]")

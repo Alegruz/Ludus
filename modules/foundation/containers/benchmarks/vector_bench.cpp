@@ -60,7 +60,11 @@ double BestNs(Fn&& fn, int reps, long innerIters)
 void Row(const char* name, Result r)
 {
     const double ratio = r.stdNs > 0.0 ? r.ludusNs / r.stdNs : 0.0;
-    std::printf("%-38s  ludus=%10.2f  std=%10.2f  ratio=%.3f%s\n", name, r.ludusNs, r.stdNs, ratio,
+    std::printf("%-38s  ludus=%10.2f  std=%10.2f  ratio=%.3f%s\n",
+                name,
+                r.ludusNs,
+                r.stdNs,
+                ratio,
                 ratio <= 1.05 ? "" : "   (SLOWER)");
 }
 
@@ -97,7 +101,8 @@ int main()
                 }
                 DoNotOptimize(v.Data());
             },
-            kReps, N);
+            kReps,
+            N);
         auto stdv = BestNs(
             [] {
                 std::vector<std::uint32_t> v;
@@ -107,7 +112,8 @@ int main()
                 }
                 DoNotOptimize(v.data());
             },
-            kReps, N);
+            kReps,
+            N);
         Row("push N uint32 (unreserved)", {ludus, stdv});
     }
 
@@ -123,7 +129,8 @@ int main()
                 }
                 DoNotOptimize(v.Data());
             },
-            kReps, N);
+            kReps,
+            N);
         auto stdv = BestNs(
             [] {
                 std::vector<std::uint32_t> v;
@@ -134,7 +141,8 @@ int main()
                 }
                 DoNotOptimize(v.data());
             },
-            kReps, N);
+            kReps,
+            N);
         Row("reserve + push N uint32", {ludus, stdv});
     }
 
@@ -149,7 +157,8 @@ int main()
                 }
                 DoNotOptimize(v.Data());
             },
-            kReps, N);
+            kReps,
+            N);
         auto stdv = BestNs(
             [] {
                 std::vector<Pod32> v;
@@ -159,7 +168,8 @@ int main()
                 }
                 DoNotOptimize(v.data());
             },
-            kReps, N);
+            kReps,
+            N);
         Row("push N POD32 (unreserved)", {ludus, stdv});
     }
 
@@ -175,7 +185,8 @@ int main()
                 }
                 DoNotOptimize(v.Data());
             },
-            kReps, M);
+            kReps,
+            M);
         auto stdv = BestNs(
             [] {
                 std::vector<NonTrivial> v;
@@ -185,7 +196,8 @@ int main()
                 }
                 DoNotOptimize(v.data());
             },
-            kReps, M);
+            kReps,
+            M);
         Row("push N non-trivial (std::string elem)", {ludus, stdv});
     }
 
@@ -207,7 +219,8 @@ int main()
                 }
                 DoNotOptimize(sum);
             },
-            kReps * 4, N);
+            kReps * 4,
+            N);
         auto stdv = BestNs(
             [&] {
                 std::uint64_t sum = 0;
@@ -217,7 +230,8 @@ int main()
                 }
                 DoNotOptimize(sum);
             },
-            kReps * 4, N);
+            kReps * 4,
+            N);
         Row("iterate + sum N uint32", {ludus, stdv});
     }
 
@@ -239,7 +253,8 @@ int main()
                 }
                 DoNotOptimize(sum);
             },
-            kReps, N);
+            kReps,
+            N);
         auto stdv = BestNs(
             [&] {
                 std::uint64_t sum = 0;
@@ -249,7 +264,8 @@ int main()
                 }
                 DoNotOptimize(sum);
             },
-            kReps, N);
+            kReps,
+            N);
         Row("random access N uint32", {ludus, stdv});
     }
 
@@ -266,14 +282,16 @@ int main()
                 v.Append(std::span<const std::uint32_t>(src.data(), src.size()));
                 DoNotOptimize(v.Data());
             },
-            kReps, N);
+            kReps,
+            N);
         auto stdv = BestNs(
             [&] {
                 std::vector<std::uint32_t> v;
                 v.insert(v.end(), src.begin(), src.end());
                 DoNotOptimize(v.data());
             },
-            kReps, N);
+            kReps,
+            N);
         Row("bulk append N uint32", {ludus, stdv});
     }
 
@@ -291,21 +309,25 @@ int main()
                 Vector<Pod32> c = lv;
                 DoNotOptimize(c.Data());
             },
-            kReps, N);
+            kReps,
+            N);
         auto stdv = BestNs(
             [&] {
                 std::vector<Pod32> c = sv;
                 DoNotOptimize(c.data());
             },
-            kReps, N);
+            kReps,
+            N);
         Row("copy N POD32", {ludus, stdv});
     }
 
     std::printf("\n=== sizeof ===\n");
-    std::printf("sizeof(Ludus::Vector<int>)=%zu  sizeof(std::vector<int>)=%zu\n", sizeof(Vector<int>),
+    std::printf("sizeof(Ludus::Vector<int>)=%zu  sizeof(std::vector<int>)=%zu\n",
+                sizeof(Vector<int>),
                 sizeof(std::vector<int>));
     std::printf("sizeof(Ludus::Array<int,16>)=%zu  sizeof(std::array<int,16>)=%zu\n",
-                sizeof(ludus::foundation::Array<int, 16>), sizeof(std::array<int, 16>));
+                sizeof(ludus::foundation::Array<int, 16>),
+                sizeof(std::array<int, 16>));
 
     return 0;
 }

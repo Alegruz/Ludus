@@ -25,7 +25,9 @@ namespace ludus::foundation::core::detail
     return ::operator new(bytes, std::align_val_t{alignment}, std::nothrow);
 }
 
-void FreeBytes(void* ptr, usize bytes, usize alignment) noexcept
+void FreeBytes(void* ptr,
+               usize bytes, // NOLINT(bugprone-easily-swappable-parameters): byte-size / alignment seam signature
+               usize alignment) noexcept
 {
     if (ptr == nullptr)
     {
@@ -53,7 +55,10 @@ void FreeBytes(void* ptr, usize bytes, usize alignment) noexcept
 // yet have; the extra reallocation cost of 1.5x is real today. So the shipped
 // default is 2x. This is one named constant (kGrowthNum/kGrowthDen) and is
 // trivial to revisit once the engine allocator exists.
-[[nodiscard]] usize ComputeGrowthCapacity(usize currentCapacity, usize requested, usize elementSize) noexcept
+[[nodiscard]] usize
+ComputeGrowthCapacity(usize currentCapacity, // NOLINT(bugprone-easily-swappable-parameters): growth-policy inputs
+                      usize requested,
+                      usize elementSize) noexcept
 {
     constexpr usize kGrowthNum = 2; // 2x growth (numerator/denominator form keeps
     constexpr usize kGrowthDen = 1; // the policy explicit and easy to retune).

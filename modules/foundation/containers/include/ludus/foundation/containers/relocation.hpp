@@ -33,8 +33,7 @@ namespace ludus::foundation::core
 // Specialize (via LUDUS_TRIVIALLY_RELOCATABLE) to opt a non-trivially-copyable
 // but bitwise-relocatable type into the memcpy growth path.
 template <typename ElementType>
-struct IsTriviallyRelocatableTrait
-    : std::bool_constant<std::is_trivially_copyable_v<ElementType>>
+struct IsTriviallyRelocatableTrait : std::bool_constant<std::is_trivially_copyable_v<ElementType>>
 {
 };
 

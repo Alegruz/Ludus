@@ -82,6 +82,9 @@ public:
         other.mValue = -1; // moved-from marker (object still alive/valid)
     }
 
+    // Scalar-only members: self-assignment is a harmless no-op; the counter
+    // increment is intentional test instrumentation.
+    // NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
     Tracked& operator=(const Tracked& other) noexcept
     {
         CheckAlive(*this);

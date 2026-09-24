@@ -15,8 +15,8 @@
 #include <span>
 #include <type_traits>
 
-using ludus::foundation::Vector;
 using ludus::foundation::usize;
+using ludus::foundation::Vector;
 namespace tst = ludus::containers::testing;
 
 TEST_CASE("Vector empty representation", "[vector]")
@@ -182,7 +182,7 @@ TEST_CASE("Vector move leaves source empty and valid", "[vector][lifetime]")
         Vector<tst::Tracked> b = std::move(a);
         REQUIRE(led.Constructions() == ctorsBefore); // move steals; no element moves
         REQUIRE(b.Size() == 5);
-        REQUIRE(a.Size() == 0);       // NOLINT: intentional moved-from inspection
+        REQUIRE(a.Size() == 0); // NOLINT: intentional moved-from inspection
         REQUIRE(a.Capacity() == 0);
         REQUIRE(a.Data() == nullptr);
         a.PushBack(tst::Tracked(&led, 42)); // reuse moved-from
@@ -455,7 +455,6 @@ TEST_CASE("Vector MaxSize overflow defense (fallible)", "[vector][overflow]")
     REQUIRE(v.Capacity() == 0);
 }
 
-
 // ---------------------------------------------------------------------------
 // Regression tests for the self-referential insertion bug found in audit
 // (heap-use-after-free / silent wrong value when an argument aliased an element
@@ -470,7 +469,7 @@ TEST_CASE("Vector self-referential PushBack triggering reallocation", "[vector][
     v.PushBack(10);
     v.PushBack(20);
     v.PushBack(30);
-    v.PushBack(40); // size == capacity == 4
+    v.PushBack(40);   // size == capacity == 4
     v.PushBack(v[0]); // arg aliases storage that reallocation frees
     REQUIRE(v.Size() == 5);
     REQUIRE(v[4] == 10);
@@ -487,7 +486,7 @@ TEST_CASE("Vector self-referential EmplaceBack triggering reallocation", "[vecto
     Vector<int> v;
     v.Reserve(2);
     v.PushBack(7);
-    v.PushBack(8); // full
+    v.PushBack(8);       // full
     v.EmplaceBack(v[1]); // realloc happens; arg aliases v[1]
     REQUIRE(v.Size() == 3);
     REQUIRE(v[2] == 8);
@@ -533,7 +532,8 @@ TEST_CASE("Vector self-referential Insert of a shifted element", "[vector][regre
     REQUIRE(v[1] == 2);
 }
 
-TEST_CASE("Vector self-referential PushBack of non-trivial type across growth", "[vector][regression][aliasing][lifetime]")
+TEST_CASE("Vector self-referential PushBack of non-trivial type across growth",
+          "[vector][regression][aliasing][lifetime]")
 {
     tst::LifetimeLedger led;
     {

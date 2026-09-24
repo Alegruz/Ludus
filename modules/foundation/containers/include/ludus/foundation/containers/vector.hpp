@@ -48,15 +48,22 @@ namespace detail
 // This is the single insertion point for a future Ludus engine allocator: no
 // call site changes when it is re-pointed. Returns nullptr on failure (never
 // throws, never terminates here).
-[[nodiscard]] void* AllocateBytes(usize bytes, usize alignment) noexcept;
-void FreeBytes(void* ptr, usize bytes, usize alignment) noexcept;
+[[nodiscard]] void*
+AllocateBytes(usize bytes, // NOLINT(bugprone-easily-swappable-parameters): allocation seam signature
+              usize alignment) noexcept;
+void FreeBytes(void* ptr,
+               usize bytes, // NOLINT(bugprone-easily-swappable-parameters): allocation seam signature
+               usize alignment) noexcept;
 
 // Cold, non-template helpers (defined in vector_support.cpp):
-//   * ComputeGrowthCapacity: 1.5x geometric growth with minimum + overflow check.
+//   * ComputeGrowthCapacity: 2x geometric growth with minimum + overflow check.
 //   * OnAllocationFailure / OnCapacityOverflow: LUDUS_FATAL sinks for the
 //     infallible API, kept out-of-line and cold so the hot path carries no
 //     diagnostic string weight.
-[[nodiscard]] usize ComputeGrowthCapacity(usize currentCapacity, usize requested, usize elementSize) noexcept;
+[[nodiscard]] usize
+ComputeGrowthCapacity(usize currentCapacity, // NOLINT(bugprone-easily-swappable-parameters): growth-policy inputs
+                      usize requested,
+                      usize elementSize) noexcept;
 [[noreturn]] LUDUS_COLD void OnAllocationFailure() noexcept;
 [[noreturn]] LUDUS_COLD void OnCapacityOverflow() noexcept;
 
@@ -79,9 +86,10 @@ class Vector
     // Reallocation of a non-relocatable type uses move-construction; a throwing
     // move would break the strong guarantee. Under -fno-exceptions moves cannot
     // throw, but require noexcept-movability (or copyability) to document intent.
-    static_assert(IsTriviallyRelocatable<ElementType> || std::is_nothrow_move_constructible_v<ElementType> ||
-                      std::is_copy_constructible_v<ElementType>,
-                  "Vector<T> requires T to be trivially relocatable, nothrow-move-constructible, or copy-constructible");
+    static_assert(
+        IsTriviallyRelocatable<ElementType> || std::is_nothrow_move_constructible_v<ElementType> ||
+            std::is_copy_constructible_v<ElementType>,
+        "Vector<T> requires T to be trivially relocatable, nothrow-move-constructible, or copy-constructible");
 
 public:
     using ValueType = ElementType;
@@ -193,7 +201,7 @@ public:
     }
     [[nodiscard]] static constexpr usize MaxSize() noexcept
     {
-        return detail::MaxElementCount(sizeof(ElementType));
+        return detail::MaxElementCount(kElementSize);
     }
 
     void Reserve(usize newCapacity)
@@ -588,13 +596,41 @@ private:
         mSize = 0;
     }
 
+    // Size of one element. Centralizes the (legitimate) sizeof(ElementType),
+    // which may be a pointer type for Vector<T*>; expressed once here so the
+    // pointer-sizeof suppression lives in a single place.
+    // NOLINTNEXTLINE(bugprone-sizeof-expression)
+    static constexpr usize kElementSize = sizeof(ElementType);
+
+    // Byte size of `count` elements.
+    [[nodiscard]] static constexpr usize ByteSize(usize count) noexcept
+    {
+        return count * kElementSize;
+    }
+
+    // Allocate a raw block for `count` elements through the seam (nullptr on
+    // failure). Returns typed storage; the void* cast lives here.
+    [[nodiscard]] static ElementType* AllocateStorage(usize count) noexcept
+    {
+        return static_cast<ElementType*>(detail::AllocateBytes(ByteSize(count), alignof(ElementType)));
+    }
+
+    // Free a raw block of `capacity` elements through the seam. ElementType* ->
+    // void* is a deliberate erase to the byte block (ElementType may be a pointer
+    // type for Vector<T*>).
+    static void FreeStorageBytes(ElementType* data, usize capacity) noexcept
+    {
+        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+        detail::FreeBytes(static_cast<void*>(data), ByteSize(capacity), alignof(ElementType));
+    }
+
     // Free the storage block (elements must already be destroyed). Resets to
     // the canonical empty representation.
     void FreeStorage() noexcept
     {
         if (mData != nullptr)
         {
-            detail::FreeBytes(mData, mCapacity * sizeof(ElementType), alignof(ElementType));
+            FreeStorageBytes(mData, mCapacity);
             mData = nullptr;
             mCapacity = 0;
         }
@@ -609,12 +645,12 @@ private:
         {
             detail::OnCapacityOverflow();
         }
-        void* block = detail::AllocateBytes(capacity * sizeof(ElementType), alignof(ElementType));
+        ElementType* block = AllocateStorage(capacity);
         if (block == nullptr)
         {
             detail::OnAllocationFailure();
         }
-        mData = static_cast<ElementType*>(block);
+        mData = block;
         mCapacity = capacity;
     }
 
@@ -628,17 +664,16 @@ private:
             FreeStorage();
             return true;
         }
-        void* block = detail::AllocateBytes(newCapacity * sizeof(ElementType), alignof(ElementType));
-        if (block == nullptr)
+        ElementType* newData = AllocateStorage(newCapacity);
+        if (newData == nullptr)
         {
             return false;
         }
-        ElementType* newData = static_cast<ElementType*>(block);
         internal::UninitializedRelocate(newData, mData, mSize);
         // Relocate consumed the sources; free only the old raw block.
         if (mData != nullptr)
         {
-            detail::FreeBytes(mData, mCapacity * sizeof(ElementType), alignof(ElementType));
+            FreeStorageBytes(mData, mCapacity);
         }
         mData = newData;
         mCapacity = newCapacity;
@@ -648,7 +683,7 @@ private:
     // Grow to hold at least one more element, infallible (fatal on OOM/overflow).
     LUDUS_NOINLINE void GrowForOne()
     {
-        const usize newCap = detail::ComputeGrowthCapacity(mCapacity, mCapacity + 1, sizeof(ElementType));
+        const usize newCap = detail::ComputeGrowthCapacity(mCapacity, mCapacity + 1, kElementSize);
         if (newCap == 0)
         {
             detail::OnCapacityOverflow();
@@ -662,15 +697,13 @@ private:
     // Fallible growth for one more element.
     [[nodiscard]] bool TryGrowForOne()
     {
-        const usize newCap = detail::ComputeGrowthCapacity(mCapacity, mCapacity + 1, sizeof(ElementType));
+        const usize newCap = detail::ComputeGrowthCapacity(mCapacity, mCapacity + 1, kElementSize);
         if (newCap == 0)
         {
             return false;
         }
         return ReallocateTo(newCap);
     }
-
-
 
     // Resize implementation shared by Resize/TryResize. `fill` is nullptr for
     // value-initialization, or points to the value to copy for new elements.

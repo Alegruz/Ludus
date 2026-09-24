@@ -35,6 +35,24 @@
 
 namespace ludus::foundation::core::internal
 {
+// Raw byte copy/move of `count` trivially-relocatable elements. Centralizes the
+// only two byte-level operations in this header so the object-representation copy
+// is expressed once. The void* casts are explicit (the element type may itself be
+// a pointer type, e.g. Vector<T*>, which is a correct and common use).
+template <typename ElementType>
+LUDUS_INLINE void RawCopyBytes(ElementType* dst, const ElementType* src, usize count) noexcept
+{
+    // NOLINTNEXTLINE(bugprone-sizeof-expression,bugprone-multi-level-implicit-pointer-conversion)
+    std::memcpy(static_cast<void*>(dst), static_cast<const void*>(src), count * sizeof(ElementType));
+}
+
+template <typename ElementType>
+LUDUS_INLINE void RawMoveBytes(ElementType* dst, const ElementType* src, usize count) noexcept
+{
+    // NOLINTNEXTLINE(bugprone-sizeof-expression,bugprone-multi-level-implicit-pointer-conversion)
+    std::memmove(static_cast<void*>(dst), static_cast<const void*>(src), count * sizeof(ElementType));
+}
+
 // Construct one object at raw storage `at`, forwarding arguments.
 template <typename ElementType, typename... Args>
 LUDUS_INLINE constexpr ElementType* ConstructAt(ElementType* at, Args&&... args)
@@ -91,7 +109,7 @@ constexpr void UninitializedCopy(ElementType* dst, const ElementType* src, usize
         // below is the constant-evaluation fallback.
         if (!std::is_constant_evaluated())
         {
-            std::memcpy(dst, src, count * sizeof(ElementType));
+            RawCopyBytes(dst, src, count);
             return;
         }
     }
@@ -121,7 +139,7 @@ constexpr void UninitializedRelocate(ElementType* dst, ElementType* src, usize c
     {
         if (!std::is_constant_evaluated())
         {
-            std::memcpy(dst, src, count * sizeof(ElementType));
+            RawCopyBytes(dst, src, count);
             return;
         }
         // constexpr fallback: move + destroy (trivially copyable in constant
@@ -165,14 +183,14 @@ constexpr void ShiftRightByOne(ElementType* first, ElementType* last)
     {
         if (!std::is_constant_evaluated())
         {
-            std::memmove(first + 1, first, static_cast<usize>(last - first) * sizeof(ElementType));
+            RawMoveBytes(first + 1, first, static_cast<usize>(last - first));
             return;
         }
     }
     // General path: move-construct the last element into the fresh slot, then
     // move-assign the remainder backwards.
-    ElementType* dst = last;         // uninitialized
-    ElementType* src = last - 1;     // last live element
+    ElementType* dst = last;     // uninitialized
+    ElementType* src = last - 1; // last live element
     ConstructAt(dst, static_cast<ElementType&&>(*src));
     while (src != first)
     {
@@ -196,7 +214,7 @@ constexpr void ShiftLeftByOne(ElementType* pos, ElementType* last)
         {
             if (last - (pos + 1) > 0)
             {
-                std::memmove(pos, pos + 1, static_cast<usize>(last - (pos + 1)) * sizeof(ElementType));
+                RawMoveBytes(pos, pos + 1, static_cast<usize>(last - (pos + 1)));
             }
             return;
         }
