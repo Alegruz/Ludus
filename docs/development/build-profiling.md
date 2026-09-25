@@ -90,8 +90,12 @@ Most expensive headers, by aggregate parse time across all TUs:
   for `std::format_string`/`std::make_format_args`) plus transitive `<chrono>`.
   Next lever: a precompiled header for the stable heavy STL headers, or trimming
   the header further.
-- **Precompiled headers** for `<format>`/`<chrono>`/`<string>` once more modules
-  consume them.
+- **Precompiled header** for the foundational vocabulary is now available
+  (`-DLUDUS_ENABLE_PCH=ON`; `cmake/EnginePch.cmake`, ADR 0007). It precompiles
+  `core.h` only — a build accelerator, not a place to park heavy STL. Extending
+  a PCH to cover `<format>`/`<chrono>`/`<string>` for the modules that consume
+  them would be a *separate*, measured decision, and must not turn the PCH into
+  the dependency model.
 - **`file_sink.hpp`** still pulls `<filesystem>`/`<format>` into a header — move
   those into the `.cpp`.
 - **`version.hpp`** is unexpectedly heavy for a version header — IWYU candidate.
