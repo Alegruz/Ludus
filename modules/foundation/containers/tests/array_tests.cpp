@@ -8,14 +8,17 @@
 #include <ludus/foundation/containers/array.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <initializer_list>
 #include <numeric>
 #include <ranges>
 #include <span>
 #include <type_traits>
 
 using ludus::foundation::Array;
+using ludus::foundation::int32;
 using ludus::foundation::usize;
 namespace tst = ludus::containers::testing;
 
@@ -135,6 +138,212 @@ TEST_CASE("Array resize up and down", "[array][lifetime]")
     REQUIRE(vi.GetSize() == 8);
     REQUIRE(vi[7] == 7);
     REQUIRE(vi[4] == 0);
+}
+
+TEST_CASE("Array resize preserves aliased scalar fill", "[array][resize][alias]")
+{
+    const bool fallible = GENERATE(false, true);
+    const usize capacity = GENERATE(usize{3}, usize{8});
+    const usize fillIndex = GENERATE(usize{0}, usize{1}, usize{2});
+    CAPTURE(fallible, capacity, fillIndex);
+
+    Array<int32> values;
+    values.EnsureCapacity(capacity);
+    values.Add(11);
+    values.Add(22);
+    values.Add(33);
+    const int32 expected = values[fillIndex];
+    if (fallible)
+    {
+        REQUIRE(values.TryResize(6, values[fillIndex]));
+    }
+    else
+    {
+        values.Resize(6, values[fillIndex]);
+    }
+
+    REQUIRE(values.GetSize() == 6);
+    REQUIRE(values.GetCapacity() == (capacity < 6 ? 6 : capacity));
+    REQUIRE(values[0] == 11);
+    REQUIRE(values[1] == 22);
+    REQUIRE(values[2] == 33);
+    for (usize index = 3; index < values.GetSize(); ++index)
+    {
+        REQUIRE(values[index] == expected);
+    }
+}
+
+TEST_CASE("Array resize preserves aliased nontrivial fill and lifetimes", "[array][resize][alias][lifetime]")
+{
+    const bool fallible = GENERATE(false, true);
+    const usize capacity = GENERATE(usize{3}, usize{8});
+    const usize fillIndex = GENERATE(usize{0}, usize{1}, usize{2});
+    CAPTURE(fallible, capacity, fillIndex);
+
+    tst::LifetimeLedger ledger;
+    {
+        Array<tst::Tracked> values;
+        values.EnsureCapacity(capacity);
+        values.AddInPlace(&ledger, 11);
+        values.AddInPlace(&ledger, 22);
+        values.AddInPlace(&ledger, 33);
+        const int32 expected = values[fillIndex].Value();
+        if (fallible)
+        {
+            REQUIRE(values.TryResize(6, values[fillIndex]));
+        }
+        else
+        {
+            values.Resize(6, values[fillIndex]);
+        }
+
+        REQUIRE(values.GetSize() == 6);
+        REQUIRE(ledger.Live() == 6);
+        REQUIRE(values[0].Value() == 11);
+        REQUIRE(values[1].Value() == 22);
+        REQUIRE(values[2].Value() == 33);
+        for (usize index = 3; index < values.GetSize(); ++index)
+        {
+            REQUIRE(values[index].Value() == expected);
+            REQUIRE(values[index].Canary() == tst::Tracked::kAlive);
+        }
+    }
+    REQUIRE(ledger.Balanced());
+}
+
+TEST_CASE("Array resize keeps over-aligned aliased fill valid", "[array][resize][alias][alignment]")
+{
+    const bool fallible = GENERATE(false, true);
+    const usize capacity = GENERATE(usize{1}, usize{4});
+    Array<tst::OverAligned> values;
+    values.EnsureCapacity(capacity);
+    values.AddInPlace(42);
+    if (fallible)
+    {
+        REQUIRE(values.TryResize(3, values[0]));
+    }
+    else
+    {
+        values.Resize(3, values[0]);
+    }
+    REQUIRE(values.GetSize() == 3);
+    for (const auto& value : values)
+    {
+        REQUIRE(value.Value == 42);
+    }
+    // The type's alignment is also checked by UBSan on every element access.
+    REQUIRE(reinterpret_cast<usize>(values.GetData()) % alignof(tst::OverAligned) == 0);
+}
+
+TEST_CASE("Array resize does not consume aliased fill when no elements are added", "[array][resize][alias][lifetime]")
+{
+    const bool fallible = GENERATE(false, true);
+    tst::LifetimeLedger ledger;
+    {
+        Array<tst::Tracked> values;
+        values.EnsureCapacity(3);
+        values.AddInPlace(&ledger, 11);
+        values.AddInPlace(&ledger, 22);
+        values.AddInPlace(&ledger, 33);
+        const auto constructions = ledger.Constructions();
+        if (fallible)
+        {
+            REQUIRE(values.TryResize(3, values[1]));
+            REQUIRE(values.TryResize(1, values[2])); // Fill itself is destroyed by shrinking.
+        }
+        else
+        {
+            values.Resize(3, values[1]);
+            values.Resize(1, values[2]);
+        }
+        REQUIRE(values.GetSize() == 1);
+        REQUIRE(values[0].Value() == 11);
+        REQUIRE(ledger.Live() == 1);
+        REQUIRE(ledger.Constructions() == constructions);
+        if (fallible)
+        {
+            REQUIRE(values.TryResize(0, values[0]));
+        }
+        else
+        {
+            values.Resize(0, values[0]);
+        }
+        REQUIRE(values.IsEmpty());
+        REQUIRE(values.GetCapacity() == 3);
+        REQUIRE(ledger.Balanced());
+        REQUIRE(ledger.Constructions() == constructions);
+    }
+    REQUIRE(ledger.Balanced());
+}
+
+TEST_CASE("Array resize accepts external fill on empty and populated storage", "[array][resize][lifetime]")
+{
+    const bool fallible = GENERATE(false, true);
+    tst::LifetimeLedger ledger;
+    {
+        const tst::Tracked fill(&ledger, 42);
+        Array<tst::Tracked> values;
+        for (const usize newSize : {usize{2}, usize{5}})
+        {
+            if (fallible)
+            {
+                REQUIRE(values.TryResize(newSize, fill));
+            }
+            else
+            {
+                values.Resize(newSize, fill);
+            }
+            REQUIRE(values.GetSize() == newSize);
+            for (const auto& value : values)
+            {
+                REQUIRE(value.Value() == 42);
+            }
+        }
+        REQUIRE(fill.Value() == 42);
+        REQUIRE(ledger.Live() == 6); // Five elements and the external fill object.
+    }
+    REQUIRE(ledger.Balanced());
+}
+
+TEST_CASE("Array resize value-initializes the added tail", "[array][resize]")
+{
+    const bool fallible = GENERATE(false, true);
+    const usize capacity = GENERATE(usize{1}, usize{4});
+    Array<int32> values;
+    values.EnsureCapacity(capacity);
+    values.Add(42);
+    if (fallible)
+    {
+        REQUIRE(values.TryResize(3));
+    }
+    else
+    {
+        values.Resize(3);
+    }
+    REQUIRE(values.GetSize() == 3);
+    REQUIRE(values[0] == 42);
+    REQUIRE(values[1] == 0);
+    REQUIRE(values[2] == 0);
+}
+
+TEST_CASE("Array TryResize rejects overflow without consuming aliased fill", "[array][resize][alias][lifetime]")
+{
+    tst::LifetimeLedger ledger;
+    {
+        Array<tst::Tracked> values;
+        values.EnsureCapacity(1);
+        values.AddInPlace(&ledger, 42);
+        const auto* original = values.GetData();
+        const auto constructions = ledger.Constructions();
+        REQUIRE_FALSE(values.TryResize(Array<tst::Tracked>::GetMaxSize() + 1, values[0]));
+        REQUIRE(values.GetData() == original);
+        REQUIRE(values.GetSize() == 1);
+        REQUIRE(values.GetCapacity() == 1);
+        REQUIRE(values[0].Value() == 42);
+        REQUIRE(ledger.Constructions() == constructions);
+        REQUIRE(ledger.Live() == 1);
+    }
+    REQUIRE(ledger.Balanced());
 }
 
 TEST_CASE("Array count/fill constructors", "[array]")

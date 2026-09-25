@@ -729,21 +729,40 @@ private:
         {
             return true;
         }
+        ElementType* resizedData = mData;
         if (newSize > mCapacity)
         {
-            if (!TryEnsureCapacity(newSize))
+            if (newSize > GetMaxSize())
+            {
+                return false;
+            }
+            resizedData = AllocateStorage(newSize);
+            if (resizedData == nullptr)
             {
                 return false;
             }
         }
+        // Fill may refer to a live element in the old block. Construct the tail
+        // before relocating (and therefore consuming) any of those elements.
+        // Allocation failure above leaves both the array and fill untouched.
         const usize added = newSize - mSize;
         if (fill == nullptr)
         {
-            internal::UninitializedValueConstruct(mData + mSize, added);
+            internal::UninitializedValueConstruct(resizedData + mSize, added);
         }
         else
         {
-            internal::UninitializedFill(mData + mSize, added, *fill);
+            internal::UninitializedFill(resizedData + mSize, added, *fill);
+        }
+        if (resizedData != mData)
+        {
+            internal::UninitializedRelocate(resizedData, mData, mSize);
+            if (mData != nullptr)
+            {
+                FreeStorageBytes(mData, mCapacity);
+            }
+            mData = resizedData;
+            mCapacity = newSize;
         }
         mSize = newSize;
         return true;
