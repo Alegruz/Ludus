@@ -14,10 +14,16 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
 using ludus::foundation::Array;
+using ludus::foundation::int32;
+using ludus::foundation::isize;
+using ludus::foundation::uint32;
+using ludus::foundation::usize;
 using Clock = std::chrono::steady_clock;
 
 namespace
@@ -28,10 +34,6 @@ inline void DoNotOptimize(const T& value)
 {
     asm volatile("" : : "r,m"(value) : "memory");
 }
-inline void ClobberMemory()
-{
-    asm volatile("" : : : "memory");
-}
 
 struct Result
 {
@@ -40,6 +42,7 @@ struct Result
 };
 
 template <typename Fn>
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): repetition count, then normalization element count.
 double BestNs(Fn&& fn, int reps, long innerIters)
 {
     double best = 1e300;
@@ -60,7 +63,7 @@ double BestNs(Fn&& fn, int reps, long innerIters)
 void Row(const char* name, Result r)
 {
     const double ratio = r.stdNs > 0.0 ? r.ludusNs / r.stdNs : 0.0;
-    std::printf("%-38s  ludus=%10.2f  std=%10.2f  ratio=%.3f%s\n",
+    std::printf("%-38s  ludus=%10.4f  std=%10.4f  ratio=%.3f%s\n",
                 name,
                 r.ludusNs,
                 r.stdNs,
@@ -319,6 +322,52 @@ int main()
             kReps,
             N);
         Row("copy N POD32", {ludus, stdv});
+    }
+
+    // Resize batches model growing initialized build data, with and without
+    // reserved capacity. External fill is valid on both sides of the alias fix;
+    // timing the formerly dangling self-reference would not be a valid baseline.
+    for (const bool reserveTail : {false, true})
+    {
+        constexpr usize kInitialSize = 64;
+        constexpr usize kFinalSize = 1024;
+        constexpr int32 kBatches = 4096;
+        const uint32 fill = 42;
+        auto ludus = BestNs(
+            [&] {
+                for (int32 batch = 0; batch < kBatches; ++batch)
+                {
+                    Array<uint32> values;
+                    values.EnsureCapacity(reserveTail ? kFinalSize : kInitialSize);
+                    values.Resize(kInitialSize, fill);
+                    values.Resize(kFinalSize, fill);
+                    DoNotOptimize(values.GetData());
+                    if (values[0] + values[kInitialSize] + values.GetLast() != 3 * fill)
+                    {
+                        std::abort();
+                    }
+                }
+            },
+            kReps,
+            static_cast<isize>(kBatches) * static_cast<isize>(kFinalSize));
+        auto stdv = BestNs(
+            [&] {
+                for (int32 batch = 0; batch < kBatches; ++batch)
+                {
+                    std::vector<uint32> values;
+                    values.reserve(reserveTail ? kFinalSize : kInitialSize);
+                    values.resize(kInitialSize, fill);
+                    values.resize(kFinalSize, fill);
+                    DoNotOptimize(values.data());
+                    if (values[0] + values[kInitialSize] + values.back() != 3 * fill)
+                    {
+                        std::abort();
+                    }
+                }
+            },
+            kReps,
+            static_cast<isize>(kBatches) * static_cast<isize>(kFinalSize));
+        Row(reserveTail ? "resize fill uint32 (reserved)" : "resize fill uint32 (growing)", {ludus, stdv});
     }
 
     std::printf("\n=== sizeof ===\n");
