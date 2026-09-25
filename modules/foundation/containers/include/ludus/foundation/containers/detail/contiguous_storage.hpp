@@ -10,7 +10,7 @@
 //     destructor call (the standard lifetime operations). Placement new / an
 //     explicit ~T() is used instead of std::construct_at / std::destroy_at so
 //     this header does not include <memory> (which is very heavy on libstdc++
-//     and would tax every translation unit that uses a Vector). Vector is not a
+//     and would tax every translation unit that uses an Array). Array is not a
 //     constexpr container (see docs/architecture/containers.md), so the
 //     constant-evaluation-only benefit of std::construct_at is not needed.
 //   * The trivial fast paths (skip destructors, memcpy relocation) are guarded
@@ -22,12 +22,12 @@
 // Ludus is compiled with -fno-exceptions, so element constructors/moves cannot
 // throw; these helpers therefore do not need rollback-on-throw logic. They do,
 // however, track exactly how many objects have been constructed so the caller
-// (Vector) can destroy precisely the live range on teardown.
+// (Array) can destroy precisely the live range on teardown.
 //
-// This lives under include/.../detail because Vector is a header template and
+// This lives under include/.../detail because Array is a header template and
 // must reach these helpers at the point of instantiation, so the file is
 // installed with the SDK. It is NOT part of the supported API: consumers include
-// vector.hpp, never this file. It is under detail/ (not internal/) because the
+// array.hpp, never this file. It is under detail/ (not internal/) because the
 // SDK-install validation forbids installing headers whose path contains
 // "internal"; detail/ is the conventional "unstable implementation" marker for a
 // header that must nonetheless ship.
@@ -45,7 +45,7 @@ namespace ludus::foundation::core::internal
 // Raw byte copy/move of `count` trivially-relocatable elements. Centralizes the
 // only two byte-level operations in this header so the object-representation copy
 // is expressed once. The void* casts are explicit (the element type may itself be
-// a pointer type, e.g. Vector<T*>, which is a correct and common use).
+// a pointer type, e.g. Array<T*>, which is a correct and common use).
 template <typename ElementType>
 LUDUS_INLINE void RawCopyBytes(ElementType* dst, const ElementType* src, usize count) noexcept
 {
@@ -61,7 +61,7 @@ LUDUS_INLINE void RawMoveBytes(ElementType* dst, const ElementType* src, usize c
 }
 
 // Construct one object at raw storage `at`, forwarding arguments (placement new).
-// `at` may be a pointer-to-pointer for Vector<T*>; the void* placement address is
+// `at` may be a pointer-to-pointer for Array<T*>; the void* placement address is
 // deliberate.
 template <typename ElementType, typename... Args>
 LUDUS_INLINE ElementType* ConstructAt(ElementType* at, Args&&... args)

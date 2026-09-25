@@ -2,6 +2,8 @@
 
 #include "internal/formatter.hpp"
 
+#include <ludus/foundation/containers/array.hpp>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -11,7 +13,6 @@
 #include <format>
 #include <string>
 #include <system_error>
-#include <vector>
 
 #if defined(_WIN32)
 #    include <io.h>
@@ -128,17 +129,20 @@ void pruneSessions(const std::filesystem::path& directory,
 
     const std::string_view active_key = activeKey;
 
-    // Group segments by session key; collect immutable metadata up front.
+    // Group segments by session key; collect immutable metadata up front. The
+    // owning arrays use Ludus::Array; the element types (std::filesystem::path,
+    // std::string) remain STL — they belong to <filesystem>/String, which are
+    // separate slated facilities, not container replacements.
     struct Group
     {
         std::string Key;
-        std::vector<std::filesystem::path> Segments;
+        foundation::Array<std::filesystem::path> Segments;
         std::filesystem::file_time_type NewestTime;
         bool TimeValid = false;
         uint64 TotalBytes = 0;
         bool IsActive = false;
     };
-    std::vector<Group> groups;
+    foundation::Array<Group> groups;
 
     std::filesystem::directory_iterator end;
     for (; iter != end; iter.increment(ec))
@@ -176,10 +180,10 @@ void pruneSessions(const std::filesystem::path& directory,
         }
         if (group == nullptr)
         {
-            groups.push_back(Group{key, {}, {}, false, 0, key == active_key});
-            group = &groups.back();
+            groups.Add(Group{key, {}, {}, false, 0, key == active_key});
+            group = &groups.GetLast();
         }
-        group->Segments.push_back(entry.path());
+        group->Segments.Add(entry.path());
         if (!sec)
         {
             group->TotalBytes += size;
@@ -209,20 +213,21 @@ void pruneSessions(const std::filesystem::path& directory,
                     std::error_code rec;
                     std::filesystem::remove(seg, rec);
                 }
-                g.Segments.clear();
+                g.Segments.Clear();
             }
         }
     }
 
     // Build the list of surviving inactive groups, sorted oldest-first over an
     // immutable snapshot (strict weak ordering; entries without a valid time
-    // sort last deterministically).
-    std::vector<Group*> inactive;
+    // sort last deterministically). `groups` is not mutated after this point, so
+    // the Group* pointers stay valid.
+    foundation::Array<Group*> inactive;
     for (auto& g : groups)
     {
-        if (!g.IsActive && !g.Segments.empty())
+        if (!g.IsActive && !g.Segments.IsEmpty())
         {
-            inactive.push_back(&g);
+            inactive.Add(&g);
         }
     }
     std::sort(inactive.begin(), inactive.end(), [](const Group* a, const Group* b) {
@@ -246,7 +251,7 @@ void pruneSessions(const std::filesystem::path& directory,
     usize active_count = 0;
     for (const auto& g : groups)
     {
-        if (g.IsActive && !g.Segments.empty())
+        if (g.IsActive && !g.Segments.IsEmpty())
         {
             active_count = 1;
         }
@@ -254,9 +259,9 @@ void pruneSessions(const std::filesystem::path& directory,
     if (retained > 0)
     {
         const usize keep_inactive = retained > active_count ? (retained - active_count) : 0;
-        if (inactive.size() > keep_inactive)
+        if (inactive.GetSize() > keep_inactive)
         {
-            const usize remove_count = inactive.size() - keep_inactive;
+            const usize remove_count = inactive.GetSize() - keep_inactive;
             for (usize i = 0; i < remove_count; ++i)
             {
                 for (const auto& seg : inactive[i]->Segments)
@@ -264,7 +269,7 @@ void pruneSessions(const std::filesystem::path& directory,
                     std::error_code rec;
                     std::filesystem::remove(seg, rec);
                 }
-                inactive[i]->Segments.clear();
+                inactive[i]->Segments.Clear();
             }
         }
     }
@@ -277,9 +282,9 @@ void pruneSessions(const std::filesystem::path& directory,
         {
             total += g.TotalBytes;
         }
-        for (usize i = 0; i < inactive.size() && total > maxTotalBytes; ++i)
+        for (usize i = 0; i < inactive.GetSize() && total > maxTotalBytes; ++i)
         {
-            if (inactive[i]->Segments.empty())
+            if (inactive[i]->Segments.IsEmpty())
             {
                 continue;
             }
@@ -289,7 +294,7 @@ void pruneSessions(const std::filesystem::path& directory,
                 std::filesystem::remove(seg, rec);
             }
             total = total > inactive[i]->TotalBytes ? total - inactive[i]->TotalBytes : 0;
-            inactive[i]->Segments.clear();
+            inactive[i]->Segments.Clear();
         }
     }
 }

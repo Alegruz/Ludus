@@ -11,15 +11,15 @@ set_target_properties(
 target_sources(
     ludus_foundation_containers
     PRIVATE
-        src/vector_support.cpp
+        src/array_support.cpp
     PUBLIC
         FILE_SET public_headers
         TYPE HEADERS
         BASE_DIRS
             include
         FILES
+            include/ludus/foundation/containers/static_array.hpp
             include/ludus/foundation/containers/array.hpp
-            include/ludus/foundation/containers/vector.hpp
             include/ludus/foundation/containers/relocation.hpp
             include/ludus/foundation/containers/containers.hpp
             include/ludus/foundation/containers/detail/contiguous_storage.hpp
@@ -49,8 +49,8 @@ if(LUDUS_BUILD_TESTS)
     target_sources(
         ludus_foundation_containers_tests
         PRIVATE
+            tests/static_array_tests.cpp
             tests/array_tests.cpp
-            tests/vector_tests.cpp
             tests/relocation_tests.cpp
     )
     target_include_directories(ludus_foundation_containers_tests PRIVATE tests)

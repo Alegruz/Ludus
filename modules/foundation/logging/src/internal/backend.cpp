@@ -151,7 +151,7 @@ void AsyncBackend::Run() noexcept
     mExitedCv.notify_all();
 }
 
-void AsyncBackend::Start(foundation::Vector<foundation::UniquePtr<ILogSink>>&& sinks, uint32 flushIntervalMs) noexcept
+void AsyncBackend::Start(foundation::Array<foundation::UniquePtr<ILogSink>>&& sinks, uint32 flushIntervalMs) noexcept
 {
     mSinks = std::move(sinks);
     mFlushIntervalMs = flushIntervalMs;

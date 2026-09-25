@@ -4,7 +4,7 @@
 #include "internal/trace_chunk.hpp"
 #include "internal/trace_event.hpp"
 
-#include <ludus/foundation/containers/vector.hpp>
+#include <ludus/foundation/containers/array.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -31,7 +31,7 @@
 // chunk) are closed with a synthesized "E" carrying an "incomplete" arg so the
 // duration is visibly untrustworthy rather than silently fabricated (§6, G13).
 //
-// Growable event/chunk buffers use Ludus::Vector (migrated off std::vector).
+// Growable event/chunk buffers use Ludus::Array.
 // std::string is still used for the JSON output buffer and the file path: it is
 // slated for a Ludus String (ADR 0003) and stays until that exists; this is a
 // cold, off-hot-path .cpp (never a public header). <cstdio> for the file write
@@ -175,18 +175,18 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
     // (threadId, ticks) so each thread's B/E stream is monotonic — the viewer
     // relies on ordering to nest slices. FlatEvent is a POD, so Vector growth
     // relocates it with a single memcpy.
-    foundation::Vector<FlatEvent> events;
+    foundation::Array<FlatEvent> events;
     TraceChunk* chunk = recorder.DrainFullChunks();
-    foundation::Vector<TraceChunk*> drained;
+    foundation::Array<TraceChunk*> drained;
     while (chunk != nullptr)
     {
         TraceChunk* next = chunk->PoolNext;
         for (uint32 i = 0; i < chunk->Count; ++i)
         {
             const TraceEvent& e = chunk->Events[i];
-            events.PushBack(FlatEvent{e.Ticks, chunk->ThreadId, e.SiteId, e.Kind, e.Flags, e.Aux});
+            events.Add(FlatEvent{e.Ticks, chunk->ThreadId, e.SiteId, e.Kind, e.Flags, e.Aux});
         }
-        drained.PushBack(chunk);
+        drained.Add(chunk);
         chunk = next;
     }
 
@@ -196,7 +196,7 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
         recorder.RecycleChunk(c);
     }
 
-    if (events.Empty())
+    if (events.IsEmpty())
     {
         return false;
     }
@@ -218,13 +218,13 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
     // Per-thread open-scope DEPTH used to synthesize End events for scopes still
     // open at capture end (incomplete; §6/G13). The viewer pairs B/E by order, so
     // only the *count* of unclosed Begins per thread matters here — the previous
-    // parallel std::vector<uint64>/std::vector<std::string> stacks pushed values
-    // that were never read. A single depth counter is equivalent and clearer
-    // (and removes the std::string dependency entirely).
+    // pair of parallel per-thread stacks (ticks and names) pushed values that
+    // were never read. A single depth counter is equivalent and clearer (and
+    // removes the std::string dependency entirely).
     usize openDepth = 0;
-    uint32 currentThread = events.Front().ThreadId;
+    uint32 currentThread = events.GetFirst().ThreadId;
 
-    uint64 lastTicks = events.Front().Ticks;
+    uint64 lastTicks = events.GetFirst().Ticks;
 
     auto flushOpen = [&](uint32 threadId) noexcept {
         // Close any scopes left open on this thread with a synthesized,

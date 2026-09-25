@@ -1,4 +1,4 @@
-// Out-of-line, cold, non-template support for Vector<T>.
+// Out-of-line, cold, non-template support for Array<T>.
 //
 // These are deliberately NOT in the header: keeping the allocation seam, growth
 // math, and OOM/overflow sinks out-of-line keeps vector.hpp cheap to parse and
@@ -115,11 +115,11 @@ ComputeGrowthCapacity(usize currentCapacity, // NOLINT(bugprone-easily-swappable
 
 [[noreturn]] LUDUS_COLD void OnAllocationFailure() noexcept
 {
-    LUDUS_FATAL("Ludus::Vector allocation failed (out of memory)");
+    LUDUS_FATAL("Ludus::Array allocation failed (out of memory)");
 }
 
 [[noreturn]] LUDUS_COLD void OnCapacityOverflow() noexcept
 {
-    LUDUS_FATAL("Ludus::Vector capacity overflow (requested size exceeds MaxSize)");
+    LUDUS_FATAL("Ludus::Array capacity overflow (requested size exceeds MaxSize)");
 }
 } // namespace ludus::foundation::core::detail
