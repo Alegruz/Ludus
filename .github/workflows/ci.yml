@@ -123,7 +123,16 @@ jobs:
           out/host-tools/venv/bin/cmake --preset linux-clang-development -B out/build/pch \
             -DLUDUS_BUILD_TESTS=ON -DLUDUS_WARNINGS_AS_ERRORS=ON -DLUDUS_ENABLE_PCH=ON
           out/host-tools/venv/bin/cmake --build out/build/pch --parallel 2
-          out/host-tools/venv/bin/ctest --test-dir out/build/pch --output-on-failure
+          # This job's purpose is to prove the engine + tests BUILD and the
+          # functional/runtime tests PASS with the PCH on. The build-contract
+          # tests introspect compile_commands.json to verify source/policy
+          # invariants (exception policy, assertion-config overrides, header
+          # self-sufficiency); those invariants are independent of the PCH and
+          # are already fully exercised by the non-PCH jobs. Under a
+          # PCH-augmented compile database they would re-parse the injected
+          # precompiled-header flags, which is out of their scope, so exclude
+          # the build-contract label here.
+          out/host-tools/venv/bin/ctest --test-dir out/build/pch --output-on-failure --label-exclude build-contract
 
   build-budget:
     # Heavy, separate job: -ftime-trace + ClangBuildAnalyzer are slow, so this is
