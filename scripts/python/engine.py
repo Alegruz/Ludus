@@ -1350,6 +1350,19 @@ def run_include_cleaner(root: Path, preset: str) -> None:
                 print(f"    {line.replace(str(root) + '/', '')}")
 
 
+def run_foundational_includes(root: Path) -> None:
+    """Enforce the foundational-header include boundary (ADR 0007).
+
+    Fast, text-only, toolchain-independent gate: the foundational headers must
+    not pull strings/containers/heavy STL, and no public header may include a
+    heavy STL header or a private implementation header. See
+    tools/check_foundational_includes.py and
+    docs/architecture/foundational-headers.md.
+    """
+    script = root / "tools" / "check_foundational_includes.py"
+    run([sys.executable, str(script), str(root)], cwd=root)
+
+
 def command_check(args: argparse.Namespace) -> int:
     root = repo_root()
     ensure_bootstrap_for_preset(root, args.preset)
@@ -1360,6 +1373,10 @@ def command_check(args: argparse.Namespace) -> int:
 
     if args.format or run_all:
         run_format_check(root, fix=args.fix)
+    # Foundational include-boundary gate runs on format-or-all: it is cheap and
+    # needs no configured build.
+    if args.format or run_all:
+        run_foundational_includes(root)
     if args.tidy or run_all:
         cmake_configure(root, args.preset)
         run_tidy(root, args.preset)
