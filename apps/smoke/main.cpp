@@ -6,11 +6,10 @@
 #include <ludus/foundation/logging/log_system.hpp>
 #include <ludus/foundation/profiling/profiling.hpp>
 #include <ludus/foundation/profiling/trace_system.hpp>
+#include <ludus/graphics/rhi/rhi.h>
 #include <ludus/platform/base/window.h>
 
 #include <string>
-
-#include <ludus/graphics/rhi/rhi.h>
 
 using namespace ludus::foundation::logging;
 

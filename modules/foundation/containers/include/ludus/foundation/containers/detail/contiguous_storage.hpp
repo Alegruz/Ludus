@@ -32,9 +32,9 @@
 // "internal"; detail/ is the conventional "unstable implementation" marker for a
 // header that must nonetheless ship.
 
-#include <ludus/foundation/containers/relocation.hpp>
+#include <ludus/foundation/base/core.h>
 
-#include <ludus/foundation/base/types.h>
+#include <ludus/foundation/containers/relocation.hpp>
 
 #include <cstring> // std::memcpy / std::memmove for the trivial fast paths
 #include <new>     // placement new (object lifetime start in raw storage)

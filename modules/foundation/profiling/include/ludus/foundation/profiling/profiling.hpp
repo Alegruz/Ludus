@@ -5,8 +5,12 @@
 //
 // This is THE header included across the engine, so it is deliberately cheap:
 // it pulls in only <ludus/foundation/profiling/zone.hpp> (string_view +
-// source_location) and <atomic> for the fast-path gate, plus the shared clock
-// declaration. It contains NO <chrono>, <format>, <string>, <vector>, iostreams,
+// source_location, and the fixed-width types via <ludus/foundation/base/types.h>),
+// <ludus/foundation/base/compiler.h> for LUDUS_INLINE (Band 0 macros only, no
+// code), and <atomic> for the fast-path gate, plus the shared clock
+// declaration. It deliberately does NOT pull the full core.h (which would add
+// the assertion plumbing) — it includes exactly the Band 0 pieces it uses. It
+// contains NO <chrono>, <format>, <string>, <vector>, iostreams,
 // and instantiates no heavy templates — all real logic is type-erased behind
 // non-template `detail::` functions compiled once in profiling.cpp (ADR 0004,
 // build-time gate G8).
@@ -20,7 +24,7 @@
 // branch and nothing else (§19, G2).
 // -----------------------------------------------------------------------------
 
-#include <ludus/foundation/base/defines.hpp>
+#include <ludus/foundation/base/compiler.h>
 #include <ludus/foundation/profiling/clock.hpp>
 #include <ludus/foundation/profiling/zone.hpp>
 

@@ -19,6 +19,16 @@ if(LUDUS_BUILD_TESTS)
     add_test(NAME ludus_assert_headers
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/assertions/verify_headers.py"
             "${PROJECT_BINARY_DIR}" "${LUDUS_ENABLE_ASSERTS}")
+    # Foundational-header architecture gates (ADR 0007):
+    #  - every public header compiles standalone (self-sufficiency);
+    #  - the foundational headers / public headers respect the include boundary.
+    add_test(NAME ludus_header_self_sufficiency
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/build_contract/verify_header_self_sufficiency.py"
+            "${PROJECT_BINARY_DIR}")
+    add_test(NAME ludus_foundational_includes
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/check_foundational_includes.py"
+            "${PROJECT_SOURCE_DIR}")
     set_tests_properties(ludus_build_contract_tests ludus_compile_policy ludus_assert_policy ludus_assert_headers
-        PROPERTIES LABELS "build-contract" TIMEOUT 60)
+        ludus_header_self_sufficiency ludus_foundational_includes
+        PROPERTIES LABELS "build-contract" TIMEOUT 120)
 endif()

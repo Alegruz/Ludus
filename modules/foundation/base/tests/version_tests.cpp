@@ -1,4 +1,4 @@
-#include <ludus/foundation/base/defines.hpp>
+#include <ludus/foundation/base/compiler.h>
 #include <ludus/foundation/base/version.hpp>
 
 #include <catch2/catch_test_macros.hpp>

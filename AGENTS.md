@@ -85,7 +85,9 @@ engine code. Discuss such cases in the PR before adding them.
 
 ### Primitive types
 
-- Use the Ludus fixed-width aliases from `ludus/foundation/base/types.h`:
+- Use the Ludus fixed-width aliases from `ludus/foundation/base/types.h` (also
+  surfaced, with the rest of the foundational vocabulary, by
+  `ludus/foundation/base/core.h`):
   `uint8` / `uint16` / `uint32` / `uint64`, `int8` / `int16` / `int32` /
   `int64`, `usize` (sizes/indices), `isize`, and `float32` / `float64`.
 - Do not write `std::uint32_t`, `std::size_t`, raw `float`/`double`, etc. in new
@@ -129,6 +131,45 @@ code (`modules/` and `apps/`):
   `docs/development/build-profiling.md` and ADR 0005.
 - `./scripts/check --include-cleaner` gives an advisory include-hygiene report;
   it is not a gate.
+
+### Foundational headers and the include boundary
+
+Ludus has a two-tier include model (ADR 0007;
+`docs/architecture/foundational-headers.md`). Learn these three lists — they are
+enforced by the `ludus_header_self_sufficiency` / `ludus_foundational_includes`
+gates and by `./scripts/check`, not just by convention.
+
+**Allowed everywhere (may be assumed available via `core.h`).**
+`#include <ludus/foundation/base/core.h>` is the single foundational header. It
+guarantees a translation unit has: the fixed-width types (`uint32`, `usize`,
+`float32`, …); the build/OS-family/CPU-arch/compiler configuration macros
+(`LUDUS_BUILD_*`, `LUDUS_PLATFORM_*`, `LUDUS_ARCH_*`, `LUDUS_COMPILER_*`); the
+codegen macros (`LUDUS_INLINE`/`NOINLINE`/`COLD`/`LIKELY`/`UNLIKELY`/
+`DEBUG_BREAK`/`UNREACHABLE`); `Move`/`Forward`/`DerivedFrom`/`nullptr_t`; and the
+assertion entry points (`LUDUS_ASSERT`/`REQUIRE`/`CHECK`/`FATAL`). A file that
+needs only part of this may include the specific Band 0 header instead
+(`types.h`, `config.h`, or `compiler.h`).
+
+**Required explicitly (include the header that declares what you name).**
+Everything above the foundation is opt-in: containers (`vector.hpp`,
+`array.hpp`), `pointer.hpp` (`UniquePtr`), strings/`<string_view>`, logging,
+profiling, platform, graphics, math, threading. Do **not** rely on these
+arriving transitively. `core.h` is what you *may* rely on; it is not mandatory
+boilerplate — if a file already includes exactly what it uses, do not add
+`core.h` just for cohesion.
+
+**Forbidden in the foundational headers.** `core.h`, `config.h`, `compiler.h`,
+and `types.h` must never include a string/container header (Ludus or std),
+`<string_view>`, `<memory>`, `<span>`, a heavy STL header (`<format>`,
+`<chrono>`, `<filesystem>`, `<regex>`, `<iostream>`, …), or any `ludus/` header
+outside `foundation/base`. More generally, no public header may include a heavy
+STL header (type-erase behind a `.cpp`; ADR 0004) or a private `internal/`
+header.
+
+**Include ordering.** In an engine header, include `core.h` (or the specific
+Band 0 header you need) first; then other Ludus headers grouped by layer,
+most-foundational first; then standard-library headers; then third-party
+headers. Separate the groups with a blank line.
 
 ### Module and dependency layout
 

@@ -207,6 +207,44 @@ Run only clang-tidy:
 
 clang-tidy uses the selected preset's `compile_commands.json` and analyzes project sources under `modules/` and `apps/`, not generated, installed, or third-party code.
 
+`--all` (and `--format`) also runs the foundational include-boundary check
+(`tools/check_foundational_includes.py`): a fast, text-only gate that fails if a
+foundational header (`core.h`/`config.h`/`compiler.h`/`types.h`) pulls a
+string/container/heavy STL header, or if any public header pulls a heavy STL or
+private `internal/` header. Header self-sufficiency (every public header
+compiles standalone) is checked by the `ludus_header_self_sufficiency` CTest.
+See `docs/architecture/foundational-headers.md` and ADR 0007.
+
+## Foundational header
+
+Engine files get the universal Ludus vocabulary — fixed-width types, build/OS/
+arch/compiler macros, codegen attributes, `Move`/`Forward`, and the assertion
+macros — from a single header:
+
+```cpp
+#include <ludus/foundation/base/core.h>
+```
+
+Everything heavier (containers, `UniquePtr`, strings, logging, profiling,
+platform, graphics) is included explicitly by the files that use it. `core.h` is
+what a file *may* rely on, not mandatory boilerplate; a file that needs only the
+numeric types may include `<ludus/foundation/base/types.h>` directly. See
+`AGENTS.md` ("Foundational headers and the include boundary") for the
+Allowed / Required-explicitly / Forbidden rules.
+
+## Precompiled header
+
+`core.h` can be precompiled as a pure build accelerator. It is opt-in and off by
+default:
+
+```bash
+cmake --preset linux-clang-development -DLUDUS_ENABLE_PCH=ON
+```
+
+The PCH only ever mirrors `core.h` (never containers/strings/logging), and the
+default build (PCH off) is the guarantee that no file depends on a PCH-only
+symbol. See `cmake/EnginePch.cmake` and ADR 0007.
+
 ## Cleaning Generated State
 
 It is safe to remove generated state under `out/`:

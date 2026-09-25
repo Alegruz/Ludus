@@ -38,10 +38,7 @@
 #include <ludus/foundation/containers/detail/contiguous_storage.hpp>
 #include <ludus/foundation/containers/relocation.hpp>
 
-#include <ludus/foundation/base/assert.hpp>
-#include <ludus/foundation/base/compiler.hpp>
-#include <ludus/foundation/base/defines.h>
-#include <ludus/foundation/base/types.h>
+#include <ludus/foundation/base/core.h>
 
 #include <span>
 #include <type_traits>

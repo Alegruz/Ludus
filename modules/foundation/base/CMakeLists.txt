@@ -66,10 +66,11 @@ target_sources(
             include
             "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}"
         FILES
-            include/ludus/foundation/base/defines.h
+            include/ludus/foundation/base/core.h
+            include/ludus/foundation/base/config.h
+            include/ludus/foundation/base/compiler.h
             include/ludus/foundation/base/assert.hpp
             include/ludus/foundation/base/assert_format.hpp
-            include/ludus/foundation/base/compiler.hpp
             include/ludus/foundation/base/diagnostic_output.hpp
             include/ludus/foundation/base/types.h
             include/ludus/foundation/base/version.hpp

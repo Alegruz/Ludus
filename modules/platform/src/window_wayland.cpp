@@ -9,7 +9,7 @@
 #include <cstring> // TODO: remove all c libraries
 #include <new>     // std::nothrow
 
-#include <ludus/foundation/base/defines.h>
+#include <ludus/foundation/base/core.h>
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>

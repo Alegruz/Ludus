@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ludus/foundation/base/defines.h>
+#include <ludus/foundation/base/core.h>
 
 namespace ludus::foundation::core
 {

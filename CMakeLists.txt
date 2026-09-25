@@ -21,6 +21,7 @@ include(EngineOptions)
 include(EngineCompilerWarnings)
 include(EngineSanitizers)
 include(EngineTargets)
+include(EnginePch)
 
 option(LUDUS_BUILD_TESTS "Build Ludus tests" ON)
 option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)

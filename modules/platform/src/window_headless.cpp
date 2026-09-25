@@ -1,10 +1,9 @@
-#include <new> // std::nothrow
-
-#include <ludus/foundation/base/defines.h>
+#include <ludus/foundation/base/core.h>
 #include <ludus/foundation/base/pointer.hpp>
-
 #include <ludus/platform/base/window.h>
 #include <ludus/platform/headless/window.h>
+
+#include <new> // std::nothrow
 
 namespace ludus::platform::headless
 {
