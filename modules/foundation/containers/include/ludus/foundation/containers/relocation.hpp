@@ -23,7 +23,7 @@
 // single place to widen the default behind its feature-test macro; no container
 // code changes.
 
-#include <ludus/foundation/base/defines.h>
+#include <ludus/foundation/base/core.h>
 
 #include <type_traits>
 

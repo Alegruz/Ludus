@@ -19,8 +19,7 @@
 // still be brace-initialized; treat it as an implementation detail and use the
 // accessors.
 
-#include <ludus/foundation/base/assert.hpp>
-#include <ludus/foundation/base/types.h>
+#include <ludus/foundation/base/core.h>
 
 #include <compare>
 #include <span>

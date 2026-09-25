@@ -6,6 +6,7 @@
 #    error "Wayland support requires LUDUS_PLATFORM_WAYLAND to be enabled."
 #endif
 
+#include <ludus/foundation/base/core.h> // LUDUS_INLINE + foundational vocabulary
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/platform/base/window.h>
 

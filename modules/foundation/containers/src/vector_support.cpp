@@ -5,9 +5,7 @@
 // keeps the per-element-type inline code small (no duplicated diagnostic
 // strings, no allocation machinery inlined into every call site).
 
-#include <ludus/foundation/base/assert.hpp>
-#include <ludus/foundation/base/compiler.hpp>
-#include <ludus/foundation/base/types.h>
+#include <ludus/foundation/base/core.h>
 
 #include <new> // sized/aligned nothrow operator new / delete
 

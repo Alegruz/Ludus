@@ -1,10 +1,9 @@
 #pragma once
 
-#include <ludus/platform/config.h>
-
-#include <ludus/foundation/base/defines.h>
+#include <ludus/foundation/base/core.h> // LUDUS_INLINE + foundational vocabulary
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/platform/base/window.h>
+#include <ludus/platform/config.h>
 
 namespace ludus::platform::headless
 {
