@@ -24,10 +24,10 @@
 // substantial template or adds ABI surface.
 // -----------------------------------------------------------------------------
 
-#include <ludus/foundation/base/types.h>    // uint8..uint64/int*/usize/isize/float32/float64
-#include <ludus/foundation/base/config.h>   // LUDUS_PLATFORM_* / LUDUS_ARCH_* / LUDUS_BUILD_*
-#include <ludus/foundation/base/compiler.h> // LUDUS_INLINE/NOINLINE/COLD/LIKELY/DEBUG_BREAK/...
 #include <ludus/foundation/base/assert.hpp> // LUDUS_ASSERT/REQUIRE/CHECK/FATAL
+#include <ludus/foundation/base/compiler.h> // LUDUS_INLINE/NOINLINE/COLD/LIKELY/DEBUG_BREAK/...
+#include <ludus/foundation/base/config.h>   // LUDUS_PLATFORM_* / LUDUS_ARCH_* / LUDUS_BUILD_*
+#include <ludus/foundation/base/types.h>    // uint8..uint64/int*/usize/isize/float32/float64
 
 #include <type_traits>
 #include <utility>

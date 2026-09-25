@@ -1,3 +1,4 @@
+#include <ludus/diagnostics/session.hpp>
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/base/version.hpp>
 #include <ludus/foundation/logging/log.hpp>
@@ -5,9 +6,8 @@
 #include <ludus/foundation/logging/log_system.hpp>
 #include <ludus/foundation/profiling/profiling.hpp>
 #include <ludus/foundation/profiling/trace_system.hpp>
-#include <ludus/platform/base/window.h>
 #include <ludus/graphics/rhi/rhi.h>
-#include <ludus/diagnostics/session.hpp>
+#include <ludus/platform/base/window.h>
 
 #include <string>
 

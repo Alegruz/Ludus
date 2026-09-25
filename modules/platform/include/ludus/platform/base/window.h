@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ludus/foundation/base/core.h>    // LUDUS_INLINE + foundational vocabulary
+#include <ludus/foundation/base/core.h>      // LUDUS_INLINE + foundational vocabulary
 #include <ludus/foundation/base/pointer.hpp> // ludus::foundation::core::UniquePtr
 #include <ludus/platform/config.h>
 
