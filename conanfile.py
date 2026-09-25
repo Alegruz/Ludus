@@ -9,7 +9,7 @@ class LudusRecipe(ConanFile):
     settings = "os", "arch", "compiler", "build_type"
 
     def requirements(self) -> None:
-        self.requires("volk/1.3.296.0")
+        self.requires("volk/1.4.357.0")
 
     def build_requirements(self) -> None:
         self.test_requires("catch2/3.4.0")

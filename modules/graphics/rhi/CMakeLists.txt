@@ -29,6 +29,10 @@ target_link_libraries(ludus_graphics_rhi
 target_compile_definitions(ludus_graphics_rhi PRIVATE VK_NO_PROTOTYPES)
 ludus_apply_project_defaults(ludus_graphics_rhi)
 
+# Vulkan structs intentionally use partial designated initializers; omitted output
+# fields are zero-initialized. Keep this exception private to the RHI target.
+set_target_properties(ludus_graphics_rhi PROPERTIES LUDUS_ALLOW_PARTIAL_INITIALIZERS ON)
+
 install(TARGETS ludus_graphics_rhi
     EXPORT LudusTargets
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"

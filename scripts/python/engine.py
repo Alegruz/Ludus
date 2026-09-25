@@ -924,6 +924,11 @@ def prepare_conan_artifacts(
     configure_system_tool_shims(root, versions)
     validate_required_system_tools(root, versions)
     profile_path = install_conan_profile(root)
+    run(
+        [conan(root), "remote", "update", "conancenter", "--url", "https://center2.conan.io"],
+        cwd=root,
+        env=tool_env(root),
+    )
     create_conan_lock(root, profile_path)
     for preset in presets:
         conan_install_for_preset(root, profile_path, preset)

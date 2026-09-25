@@ -4,6 +4,10 @@
 
 #include <string>
 
+#if defined(LUDUS_BUILD_DEBUG) || defined(LUDUS_BUILD_DEVELOPMENT)
+#define LUDUS_RHI_ENABLE_VALIDATION_LAYER
+#endif
+
 namespace ludus::graphics::rhi
 {
 struct ApplicationInfo
