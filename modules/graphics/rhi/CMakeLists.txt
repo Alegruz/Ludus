@@ -22,6 +22,7 @@ target_link_libraries(ludus_graphics_rhi
     PUBLIC
         Ludus::FoundationBase
     PRIVATE
+        Ludus::FoundationContainers
         Ludus::FoundationLogging
         volk::volk
 )

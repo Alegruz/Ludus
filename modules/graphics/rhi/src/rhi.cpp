@@ -4,11 +4,11 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
-#include <vector>
 
 #include <ludus/foundation/base/assert.hpp>
 #include <ludus/foundation/base/assert_format.hpp>
 #include <ludus/foundation/base/types.h>
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 
 #include <ludus/graphics/rhi/rhi.h>
@@ -69,20 +69,19 @@ bool Initialize(const ApplicationInfo& appInfo) noexcept
         return false;
     }
 
-    std::vector<VkExtensionProperties> extensions(extensionCount);
-    vr = vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data());
+    Array<VkExtensionProperties> extensions(extensionCount);
+    vr = vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.GetData());
     if (vr != VK_SUCCESS)
     {
         LUDUS_ASSERT(false, "Failed to enumerate Vulkan instance extension properties.");
         return false;
     }
 
-    const std::vector<std::string> listOfExtensionsToEnable = {
-        VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
-    };
+    Array<std::string> listOfExtensionsToEnable;
+    listOfExtensionsToEnable.Add(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
-    std::vector<const char*> enabledExtensions;
-    enabledExtensions.reserve(listOfExtensionsToEnable.size());
+    Array<const char*> enabledExtensions;
+    enabledExtensions.EnsureCapacity(listOfExtensionsToEnable.GetSize());
     // Info logging is compiled out in Release.
     for ([[maybe_unused]] const auto& extension : extensions)
     {
@@ -96,7 +95,7 @@ bool Initialize(const ApplicationInfo& appInfo) noexcept
             }) != extensions.end())
         {
             LUDUS_LOG_INFO(LOG_RHI, "Enabling Vulkan instance extension: {}", extensionToEnable);
-            enabledExtensions.push_back(extensionToEnable.c_str());
+            enabledExtensions.Add(extensionToEnable.c_str());
         }
         else
         {
@@ -135,8 +134,8 @@ bool Initialize(const ApplicationInfo& appInfo) noexcept
                                                      .enabledLayerCount = 0,
                                                      .ppEnabledLayerNames = nullptr,
                                                      .enabledExtensionCount =
-                                                         static_cast<uint32>(enabledExtensions.size()),
-                                                     .ppEnabledExtensionNames = enabledExtensions.data()};
+                                                         static_cast<uint32>(enabledExtensions.GetSize()),
+                                                     .ppEnabledExtensionNames = enabledExtensions.GetData()};
 
     vr = vkCreateInstance(&instanceCreateInfo, nullptr, &vulkanInfo.Instance);
     if (vr != VK_SUCCESS)

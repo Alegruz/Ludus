@@ -23,9 +23,9 @@
 // carries a documented per-header override for this header instead (see
 // config/build_budget.json / ADR 0005).
 //
-// The owned sink list is Ludus::Array<UniquePtr<ILogSink>> (migrated from
-// std::vector<std::unique_ptr>): it drops the <memory>/<vector> includes and
-// their transitive <format> pull, and matches the engine container policy.
+// The owned sink list is Ludus::Array<UniquePtr<ILogSink>>: a Ludus dynamic
+// array of engine unique pointers, matching the engine container policy and
+// avoiding a heavy standard-library owning-container include.
 
 namespace ludus::foundation::logging::internal
 {

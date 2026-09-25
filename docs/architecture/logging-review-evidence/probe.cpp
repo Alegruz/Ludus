@@ -1,8 +1,8 @@
 #include <cstdlib>
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/logging/log.hpp>
 #include <thread>
 #include <unistd.h>
-#include <vector>
 using namespace ludus::foundation;
 using namespace ludus::foundation::logging;
 int main(int argc, char** argv)
@@ -19,9 +19,10 @@ int main(int argc, char** argv)
     const std::string_view mode{argv[1]};
     if (mode == "race")
     {
-        std::vector<std::thread> workers;
+        Array<std::thread> workers;
+        workers.EnsureCapacity(8);
         for (uint32 t = 0; t < 8; ++t)
-            workers.emplace_back([t] {
+            workers.AddInPlace([t] {
                 for (uint32 i = 0; i < 500; ++i)
                     LUDUS_LOG_WARN(LOG_CORE,
                                    "producer={} record={} payload=abcdefghijklmnopqrstuvwxyz0123456789",
