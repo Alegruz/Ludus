@@ -1,9 +1,10 @@
 #include <ludus/foundation/profiling/clock.hpp>
 
+#include <ludus/foundation/containers/array.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <thread>
-#include <vector>
 
 using namespace ludus::foundation::profiling;
 using ludus::foundation::uint64;
@@ -47,11 +48,11 @@ TEST_CASE("clock is non-decreasing across threads reading concurrently", "[profi
     // Not a cross-core-ordering proof (that is gate C7); this only asserts each
     // thread sees a monotonic sequence and no read faults under contention.
     constexpr int kThreads = 4;
-    std::vector<std::thread> threads;
-    threads.reserve(kThreads); // pre-allocate (performance-inefficient-vector-operation)
+    ludus::foundation::Array<std::thread> threads;
+    threads.EnsureCapacity(kThreads);
     for (int t = 0; t < kThreads; ++t)
     {
-        threads.emplace_back([] {
+        threads.AddInPlace([] {
             uint64 previous = NowTicks();
             for (int i = 0; i < 20000; ++i)
             {

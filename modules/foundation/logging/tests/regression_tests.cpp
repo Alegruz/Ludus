@@ -24,6 +24,8 @@
 #include "internal/breadcrumb.hpp"
 #include "internal/mpsc_queue.hpp"
 
+#include <ludus/foundation/containers/array.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
@@ -33,7 +35,6 @@
 #include <sstream>
 #include <string>
 #include <thread>
-#include <vector>
 
 #if defined(_WIN32)
 #    include <process.h>
@@ -365,11 +366,11 @@ TEST_CASE("F1: concurrent producers do not corrupt or lose framing", "[logging][
 
     constexpr int kThreads = 8;
     constexpr int kPerThread = 200;
-    std::vector<std::thread> workers;
-    workers.reserve(kThreads);
+    Array<std::thread> workers;
+    workers.EnsureCapacity(kThreads);
     for (int t = 0; t < kThreads; ++t)
     {
-        workers.emplace_back([t] {
+        workers.AddInPlace([t] {
             for (int i = 0; i < kPerThread; ++i)
             {
                 LUDUS_LOG_WARN(LogRegression, "producer={} record={}", t, i);
@@ -490,11 +491,11 @@ TEST_CASE("breadcrumb ring: concurrent writers and a reader are race-free",
     LogSystem::Initialize(config);
 
     std::atomic<bool> stop{false};
-    std::vector<std::thread> writers;
-    writers.reserve(6);
+    Array<std::thread> writers;
+    writers.EnsureCapacity(6);
     for (int t = 0; t < 6; ++t)
     {
-        writers.emplace_back([t, &stop] {
+        writers.AddInPlace([t, &stop] {
             int i = 0;
             while (!stop.load(std::memory_order_relaxed))
             {
@@ -612,11 +613,11 @@ TEST_CASE("async: many concurrent producers, bounded accounting, no corruption",
 
     constexpr int kThreads = 8;
     constexpr int kPer = 500;
-    std::vector<std::thread> workers;
-    workers.reserve(kThreads);
+    Array<std::thread> workers;
+    workers.EnsureCapacity(kThreads);
     for (int t = 0; t < kThreads; ++t)
     {
-        workers.emplace_back([t] {
+        workers.AddInPlace([t] {
             for (int i = 0; i < kPer; ++i)
             {
                 LUDUS_LOG_INFO(LogRegression, "t={} i={}", t, i);

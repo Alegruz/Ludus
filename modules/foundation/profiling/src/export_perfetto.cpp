@@ -31,7 +31,7 @@
 // chunk) are closed with a synthesized "E" carrying an "incomplete" arg so the
 // duration is visibly untrustworthy rather than silently fabricated (§6, G13).
 //
-// Growable event/chunk buffers use Ludus::Array (migrated off std::vector).
+// Growable event/chunk buffers use Ludus::Array.
 // std::string is still used for the JSON output buffer and the file path: it is
 // slated for a Ludus String (ADR 0003) and stays until that exists; this is a
 // cold, off-hot-path .cpp (never a public header). <cstdio> for the file write
@@ -218,9 +218,9 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
     // Per-thread open-scope DEPTH used to synthesize End events for scopes still
     // open at capture end (incomplete; §6/G13). The viewer pairs B/E by order, so
     // only the *count* of unclosed Begins per thread matters here — the previous
-    // parallel std::vector<uint64>/std::vector<std::string> stacks pushed values
-    // that were never read. A single depth counter is equivalent and clearer
-    // (and removes the std::string dependency entirely).
+    // pair of parallel per-thread stacks (ticks and names) pushed values that
+    // were never read. A single depth counter is equivalent and clearer (and
+    // removes the std::string dependency entirely).
     usize openDepth = 0;
     uint32 currentThread = events.GetFirst().ThreadId;
 

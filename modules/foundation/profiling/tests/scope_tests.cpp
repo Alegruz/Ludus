@@ -18,8 +18,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <thread> // std::thread pool in the multithread case (kept: threads are not a container)
-#include <vector> // std::vector<std::thread> only (see above)
+#include <thread> // std::thread element type for the multithread worker pool
 
 #if LUDUS_PROFILING_ENABLED
 
@@ -232,11 +231,11 @@ TEST_CASE("multi-threaded scope generation is lossless within capacity", "[profi
 
     constexpr int kThreads = 8;
     constexpr int kScopesPerThread = 20000;
-    std::vector<std::thread> threads;
-    threads.reserve(kThreads); // pre-allocate (performance-inefficient-vector-operation)
+    ludus::foundation::Array<std::thread> threads;
+    threads.EnsureCapacity(kThreads);
     for (int t = 0; t < kThreads; ++t)
     {
-        threads.emplace_back([] {
+        threads.AddInPlace([] {
             RegisterThreadForTrace("Worker");
             for (int i = 0; i < kScopesPerThread; ++i)
             {
