@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ludus/foundation/base/assert_config.hpp>
-#include <ludus/foundation/base/compiler.hpp>
+#include <ludus/foundation/base/compiler.h>
 #include <ludus/foundation/base/types.h>
 
 namespace ludus::foundation::diagnostics
