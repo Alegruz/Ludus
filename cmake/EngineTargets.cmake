@@ -5,6 +5,14 @@ function(ludus_apply_project_defaults target_name)
             $<BUILD_INTERFACE:ludus_project_options>
             $<BUILD_INTERFACE:ludus_project_warnings>
     )
+
+    # Apply the foundational precompiled header when LUDUS_ENABLE_PCH is ON.
+    # This is a no-op by default (build accelerator only; see cmake/EnginePch.cmake
+    # and docs/architecture/foundational-headers.md Section 10). ludus_apply_pch is
+    # defined in EnginePch.cmake, included after this module at the top level.
+    if(COMMAND ludus_apply_pch)
+        ludus_apply_pch(${target_name})
+    endif()
 endfunction()
 
 # Re-enable C++ exceptions for a single target. Engine code is compiled with

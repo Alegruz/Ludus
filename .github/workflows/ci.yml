@@ -90,6 +90,41 @@ jobs:
           out/host-tools/venv/bin/cmake --build out/build/assertion-policy --parallel 2
           out/host-tools/venv/bin/ctest --test-dir out/build/assertion-policy --output-on-failure
 
+  pch:
+    # Verifies the optional precompiled-header path builds and tests pass. The
+    # primary "Ubuntu Clang" job above builds with LUDUS_ENABLE_PCH OFF (the
+    # default), which is the "no-pch" guarantee: no translation unit may rely on
+    # a symbol that only the PCH provides. This job flips the option ON so both
+    # configurations are exercised on every change. See cmake/EnginePch.cmake and
+    # docs/architecture/foundational-headers.md Section 10.
+    name: PCH build (LUDUS_ENABLE_PCH=ON)
+    runs-on: ubuntu-24.04
+    env:
+      CI: "true"
+      LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Wayland development packages
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libwayland-dev wayland-protocols
+      - name: Cache pip downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('config/tool_versions.json') }}
+      - name: Cache Conan package cache
+        uses: actions/cache@v4
+        with:
+          path: out/conan/home
+          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', 'config/conan/profiles/linux-clang-x86_64', 'conan.lock') }}
+      - name: Prepare toolchain and dependencies
+        run: ./init.sh --preset-only linux-clang-development
+      - name: Configure, build, and test with the foundational PCH enabled
+        run: |
+          out/host-tools/venv/bin/cmake --preset linux-clang-development -B out/build/pch \
+            -DLUDUS_BUILD_TESTS=ON -DLUDUS_WARNINGS_AS_ERRORS=ON -DLUDUS_ENABLE_PCH=ON
+          out/host-tools/venv/bin/cmake --build out/build/pch --parallel 2
+          out/host-tools/venv/bin/ctest --test-dir out/build/pch --output-on-failure
+
   build-budget:
     # Heavy, separate job: -ftime-trace + ClangBuildAnalyzer are slow, so this is
     # kept out of the fast "Ubuntu Clang" job and the local iteration loop. It
