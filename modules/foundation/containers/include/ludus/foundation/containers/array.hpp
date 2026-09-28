@@ -35,11 +35,12 @@
 // common inline paths stay small. Element lifetime lives in the
 // detail/contiguous_storage.hpp helpers.
 
+#include <ludus/foundation/base/core.h>
+
 #include <ludus/foundation/containers/detail/contiguous_storage.hpp>
 #include <ludus/foundation/containers/relocation.hpp>
 
-#include <ludus/foundation/base/core.h>
-
+#include <initializer_list>
 #include <span>
 #include <type_traits>
 #include <utility>
@@ -102,6 +103,20 @@ public:
 
     // --- Construction / destruction ----------------------------------------
     constexpr Array() noexcept = default;
+
+    // Braces supply elements: Array<int32>{3} holds one value, whereas (3)
+    // value-initializes three elements. The list's const elements are copied.
+    Array(std::initializer_list<ElementType> items) noexcept(std::is_nothrow_copy_constructible_v<ElementType>)
+        requires std::is_copy_constructible_v<ElementType>
+    {
+        const usize count = items.size();
+        if (count > 0)
+        {
+            GrowExact(count);
+            internal_CopyTail(items.begin(), count);
+            mSize = count;
+        }
+    }
 
     explicit Array(usize count)
     {
@@ -570,8 +585,7 @@ public:
         return std::span<const ElementType>(mData, mSize);
     }
 
-    // Build an Array by copying a contiguous view (explicit factory; there is no
-    // implicit range/initializer_list constructor by design — containers.md §12).
+    // Build an Array by copying a contiguous view (explicit range factory).
     [[nodiscard]] static Array FromRange(std::span<const ElementType> items)
     {
         Array result;

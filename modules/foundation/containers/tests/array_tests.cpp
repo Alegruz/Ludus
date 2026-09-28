@@ -22,6 +22,67 @@ using ludus::foundation::int32;
 using ludus::foundation::usize;
 namespace tst = ludus::containers::testing;
 
+static_assert(std::is_constructible_v<Array<int32>, std::initializer_list<int32>>);
+static_assert(!std::is_constructible_v<Array<tst::MoveOnly>, std::initializer_list<tst::MoveOnly>>);
+
+TEST_CASE("Array initializer lists supply elements rather than counts", "[array][initializer-list]")
+{
+    const Array<int32> direct{3, 7, 11};
+    const Array<int32> copied = {3, 7, 11};
+    REQUIRE(direct.GetSize() == 3);
+    REQUIRE(direct[0] == 3);
+    REQUIRE(direct[1] == 7);
+    REQUIRE(direct[2] == 11);
+    REQUIRE(copied == direct);
+
+    const Array<int32> single{3};
+    REQUIRE(single.GetSize() == 1);
+    REQUIRE(single[0] == 3);
+    const Array<int32> counted(3);
+    REQUIRE(counted.GetSize() == 3);
+    REQUIRE(counted[0] == 0);
+    const Array<int32> filled(3, 7);
+    REQUIRE(filled.GetSize() == 3);
+    REQUIRE(filled[2] == 7);
+}
+
+TEST_CASE("Array empty initializer list preserves the empty representation", "[array][initializer-list]")
+{
+    const Array<int32> values(std::initializer_list<int32>{});
+    REQUIRE(values.IsEmpty());
+    REQUIRE(values.GetCapacity() == 0);
+    REQUIRE(values.GetData() == nullptr);
+}
+
+TEST_CASE("Array initializer list copies outlive the backing list", "[array][initializer-list][lifetime]")
+{
+    tst::LifetimeLedger ledger;
+    {
+        Array<tst::Tracked> values = {tst::Tracked(&ledger, 7), tst::Tracked(&ledger, 11)};
+        REQUIRE(ledger.CopyCtor == 2);
+        REQUIRE(ledger.MoveCtor == 0);
+        REQUIRE(ledger.Live() == 2);
+        REQUIRE(values[0].Value() == 7);
+        REQUIRE(values[1].Value() == 11);
+        values.AddInPlace(&ledger, 13);
+        REQUIRE(values[0].Value() == 7);
+        REQUIRE(values[2].Value() == 13);
+    }
+    REQUIRE(ledger.Balanced());
+}
+
+TEST_CASE("Array initializer list accepts designated aggregate elements", "[array][initializer-list]")
+{
+    struct Entry
+    {
+        int32 Value;
+    };
+    const Array<Entry> entries = {{.Value = 7}, {.Value = 11}};
+    REQUIRE(entries.GetSize() == 2);
+    REQUIRE(entries[0].Value == 7);
+    REQUIRE(entries[1].Value == 11);
+}
+
 TEST_CASE("Array empty representation", "[array]")
 {
     Array<int> v;

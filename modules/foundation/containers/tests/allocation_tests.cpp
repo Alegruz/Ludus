@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <initializer_list>
 #include <new>
 
 namespace
@@ -156,6 +157,29 @@ TEST_CASE("StaticArray never allocates", "[alloc]")
         (void)sink;
     }
     REQUIRE(gCounters.news == 0);
+}
+
+TEST_CASE("Array initializer list allocates exactly its element storage", "[alloc][initializer-list]")
+{
+    TrackGuard guard;
+    {
+        Array<ludus::foundation::int32> values{3, 7, 11};
+        REQUIRE(values.GetSize() == 3);
+        REQUIRE(gCounters.news == 1);
+        REQUIRE(gCounters.bytes == 3 * sizeof(ludus::foundation::int32));
+    }
+    REQUIRE(gCounters.deletes == 1);
+}
+
+TEST_CASE("Empty Array initializer list never allocates", "[alloc][initializer-list]")
+{
+    TrackGuard guard;
+    {
+        Array<int> values(std::initializer_list<int>{});
+        (void)values.IsEmpty();
+    }
+    REQUIRE(gCounters.news == 0);
+    REQUIRE(gCounters.deletes == 0);
 }
 
 TEST_CASE("EnsureCapacity(n) + n Adds allocates exactly once", "[alloc]")

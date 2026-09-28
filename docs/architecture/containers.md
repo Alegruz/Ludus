@@ -655,10 +655,9 @@ this split.)
 - `Vector(const Vector&)` / `Vector& operator=(const Vector&)` — deep copy.
 - `Vector(Vector&&) noexcept` / `Vector& operator=(Vector&&) noexcept` — steal.
 - `~Vector()` — destroy live elements, free.
-- Range/span construction: `static Vector From(std::span<const ElementType>)`
-  and a range-accepting factory (see §20) rather than an `initializer_list`
-  constructor by default (the inventory uses no `initializer_list`; an
-  `initializer_list` ctor can be added if a call site wants brace-init — §12).
+- `Array(std::initializer_list<ElementType>)` — copy elements into owned storage;
+  requires a copy-constructible element type (see §12).
+- Range/span construction: `static Array FromRange(std::span<const ElementType>)`.
 
 **Capacity**
 - `Size()`, `Capacity()`, `Empty()`, `Data()`/const.
@@ -748,10 +747,16 @@ boundary STL-based.
 | `std::array<char,N>` stack buffer | logger, diagnostic | **(1)**/**(4)** | `Array<char,N>` where header-light; **keep** in the emergency assertion path unless proven equally light |
 | `std::span<...>` params | logging format APIs | **keep** | not a container; `Vector`/`Array` convert *to* `std::span` |
 
-`initializer_list`: **no** current call site uses it. Decision: **do not** add an
-`initializer_list` constructor to v1 (it pulls `<initializer_list>` and invites
-brace-init ambiguity). Provide `From(std::span<const T>)` and a range factory
-instead. Revisit only if a concrete call site wants brace initialization.
+`initializer_list`: supported by `Array` for explicitly requested brace
+initialization, including lists of designated aggregate elements. The constructor
+copies the list's const elements into one exact-size allocation; an empty list
+does not allocate. It uses the existing fatal-on-OOM/overflow constructor policy.
+The array owns its copies and does not retain the list's backing storage.
+
+Use `Array<int32>{3}` for one element with value 3, `Array<int32>(3)` for three
+value-initialized elements, and `Array<int32>(3, 7)` for three copies of 7. List
+construction requires copyable elements; use `Add`/`AddInPlace` for move-only
+elements. `FromRange(std::span<const T>)` remains available for contiguous views.
 
 This mapping is the guard against API bloat: every member in §11.5 traces to a
 real need or a broadly-useful core operation, and the entangled/STL-shaped
