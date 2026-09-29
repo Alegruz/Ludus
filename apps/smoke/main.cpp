@@ -8,6 +8,7 @@
 #include <ludus/foundation/profiling/trace_system.hpp>
 #include <ludus/graphics/rhi/rhi.h>
 #include <ludus/platform/base/window.h>
+#include <ludus/platform/native_window.h>
 
 #include <string>
 
@@ -74,8 +75,11 @@ int main()
         return 1;
     }
 
-    const ludus::platform::Window::CreateInfo createInfo = {
+    const ludus::platform::Window::CreateInfo createInfo =
+    {
         .Name = std::string("Test Window"),
+        .Width = 800,
+        .Height = 600,
     };
 
     ludus::foundation::core::UniquePtr<ludus::platform::Window> window = nullptr;
@@ -87,10 +91,30 @@ int main()
         return 1;
     }
 
+    const auto nativeWindow = window->GetNativeWindowInfo();
+    if (nativeWindow.System != ludus::platform::WindowSystem::Headless &&
+        !ludus::graphics::rhi::ConnectWindow(nativeWindow))
+    {
+        LUDUS_LOG_FATAL(LOG_CORE, "Failed to connect the window to Vulkan RHI");
+        ludus::graphics::rhi::Shutdown();
+        LogSystem::Shutdown();
+        return 1;
+    }
+
     while (window->HandleEvent({}))
     {
         LUDUS_PROFILE_SCOPE(Frame);
         // Main loop
+        const bool canFrameBegin = ludus::graphics::rhi::BeginFrame();
+        if(canFrameBegin == false)
+        {
+            LUDUS_LOG_ERROR(LOG_CORE, "Failed to begin frame");
+        }
+        const bool canFrameEnd = ludus::graphics::rhi::EndFrame();
+        if(canFrameEnd == false)
+        {
+            LUDUS_LOG_ERROR(LOG_CORE, "Failed to end frame");
+        }
         LUDUS_PROFILE_FRAME();
     }
 

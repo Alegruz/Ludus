@@ -73,11 +73,7 @@ private:
     };
 
 private:
-    LUDUS_INLINE explicit WindowWayland(CreateInfo&& info) noexcept
-        : WindowBase(info.BaseCreateInfo), mSurface(std::move(info.Surface)), mXdgSurface(std::move(info.XdgSurface)),
-          mXdgToplevel(std::move(info.XdgToplevel))
-    {
-    }
+    explicit WindowWayland(CreateInfo&& info) noexcept;
 
 private:
     UniquePtr<wl_surface> mSurface;

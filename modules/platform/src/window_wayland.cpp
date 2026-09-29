@@ -6,8 +6,11 @@
 // compiled directly into this translation unit; the include is intentional.
 #include <xdg-shell-protocol.cpp> // NOLINT(bugprone-suspicious-include)
 
+#include <cerrno>
 #include <cstring> // TODO: remove all c libraries
 #include <new>     // std::nothrow
+
+#include <poll.h>
 
 #include <ludus/foundation/base/core.h>
 #include <ludus/foundation/base/pointer.hpp>
@@ -16,6 +19,7 @@
 
 #include <ludus/platform/base/window.h>
 #include <ludus/platform/log_categories.h>
+#include <ludus/platform/native_window.h>
 #include <ludus/platform/wayland/window.h>
 
 namespace ludus::foundation::core
@@ -111,6 +115,13 @@ static xdg_toplevel_listener gXdgToplevelListener = {.configure = onXdgToplevelC
                                                      .close = onXdgToplevelClose,
                                                      .configure_bounds = onXdgToplevelConfigureBounds,
                                                      .wm_capabilities = onXdgToplevelWmCapabilities};
+
+WindowWayland::WindowWayland(CreateInfo&& info) noexcept
+    : WindowBase(info.BaseCreateInfo), mSurface(std::move(info.Surface)), mXdgSurface(std::move(info.XdgSurface)),
+      mXdgToplevel(std::move(info.XdgToplevel))
+{
+    mNativeWindowInfo = {.System = WindowSystem::Wayland, .Display = gDisplay.Get(), .Surface = mSurface.Get()};
+}
 
 bool InitializeWayland([[maybe_unused]] const WindowManager::InitializeInfo& info) noexcept
 {
@@ -328,8 +339,65 @@ bool WindowWayland::HandleEvent([[maybe_unused]] const Event& event) noexcept
         return false;
     }
 
-    const int result = wl_display_dispatch(gDisplay.Get());
+    wl_display* display = gDisplay.Get();
+    if (display == nullptr)
+    {
+        return false;
+    }
+
+    // Drain queued callbacks before preparing a socket read. Never wait for a
+    // compositor event here: the caller must be able to render an idle window.
+    while (wl_display_prepare_read(display) != 0)
+    {
+        if (wl_display_dispatch_pending(display) < 0 || IsClosed())
+        {
+            return false;
+        }
+    }
+
+    pollfd descriptor{.fd = wl_display_get_fd(display), .events = POLLIN, .revents = 0};
+    if (wl_display_flush(display) < 0)
+    {
+        if (errno != EAGAIN)
+        {
+            wl_display_cancel_read(display);
+            return false;
+        }
+        // Retry when writable, or on the next frame if the socket is still full.
+        descriptor.events |= POLLOUT;
+    }
+
+    const foundation::int32 result = poll(&descriptor, 1, 0);
     if (result < 0)
+    {
+        const foundation::int32 pollError = errno;
+        wl_display_cancel_read(display);
+        return pollError == EINTR && !IsClosed();
+    }
+    if ((descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+    {
+        wl_display_cancel_read(display);
+        return false;
+    }
+
+    // Every successful prepare must end in exactly one read or cancellation.
+    if ((descriptor.revents & POLLIN) != 0)
+    {
+        if (wl_display_read_events(display) < 0)
+        {
+            return false;
+        }
+    }
+    else
+    {
+        wl_display_cancel_read(display);
+    }
+
+    if ((descriptor.revents & POLLOUT) != 0 && wl_display_flush(display) < 0 && errno != EAGAIN)
+    {
+        return false;
+    }
+    if (wl_display_dispatch_pending(display) < 0)
     {
         return false;
     }

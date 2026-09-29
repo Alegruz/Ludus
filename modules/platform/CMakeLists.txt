@@ -49,6 +49,7 @@ target_sources(
         FILES
             include/ludus/platform/config.h
             include/ludus/platform/log_categories.h
+            include/ludus/platform/native_window.h
             include/ludus/platform/base/window.h
             include/ludus/platform/wayland/window.h
             include/ludus/platform/headless/window.h
@@ -109,6 +110,18 @@ else()
 endif()
 
 ludus_apply_project_defaults(ludus_platform)
+
+if(LUDUS_BUILD_TESTS AND LUDUS_PLATFORM_ENABLE_WAYLAND)
+    find_package(Catch2 3 REQUIRED CONFIG)
+    add_executable(ludus_platform_wayland_tests tests/wayland_event_tests.cpp)
+    target_link_libraries(ludus_platform_wayland_tests PRIVATE
+        Ludus::Platform Catch2::Catch2WithMain PkgConfig::WAYLAND_CLIENT)
+    target_compile_definitions(ludus_platform_wayland_tests PRIVATE LUDUS_PLATFORM_WAYLAND=1)
+    ludus_apply_project_defaults(ludus_platform_wayland_tests)
+    ludus_enable_test_exceptions(ludus_platform_wayland_tests)
+    add_test(NAME ludus_platform_wayland_tests COMMAND ludus_platform_wayland_tests)
+    set_tests_properties(ludus_platform_wayland_tests PROPERTIES TIMEOUT 10 SKIP_RETURN_CODE 4)
+endif()
 
 install(
     TARGETS ludus_platform
