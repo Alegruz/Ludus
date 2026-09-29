@@ -17,3 +17,12 @@ loader. See the [volk integration guide](https://github.com/zeux/volk).
 Installed static SDK consumers also need the Conan-generated dependency configs
 on their CMake search path (or the matching Conan toolchain). `LudusConfig.cmake`
 resolves `volk::volk`, including its platform loader library, for final linking.
+
+## Vulkan diagnostics
+
+Implementation files that format `VkResult` in assertions must include
+`internal/vulkan_diagnostics.h` before the assertion call sites. Both
+`LUDUS_LOG_*` and formatted assertion macros then accept the result directly
+with `{}`, preserving its signed numeric code (including unknown result codes).
+The adapter stays private to RHI; Foundation and the installed SDK do not gain
+a Vulkan dependency from diagnostic formatting.

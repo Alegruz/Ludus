@@ -1,5 +1,7 @@
 #include <volk.h>
 
+#include "internal/vulkan_diagnostics.h"
+
 #include <algorithm>
 #include <cstring>
 #include <string>
@@ -277,10 +279,7 @@ bool ConnectWindow(const WindowInfo& windowInfo) noexcept
         volkLoadDevice(gpuInfo.DeviceInfo.Device);
         for (QueueFamilyInfo& family : gpuInfo.QueueFamilyInfo)
         {
-            if (family.Index == gpuInfo.GraphicsQueueFamilyIndex || family.Index == gpuInfo.PresentQueueFamilyIndex)
-            {
-                initializeQueues(family, gpuInfo.DeviceInfo);
-            }
+            initializeQueues(family, gpuInfo.DeviceInfo);
         }
         wsi = candidate;
         if(initializeSwapchain(wsi, gpuInfo.DeviceInfo) == false)
@@ -357,6 +356,27 @@ bool BeginFrame() noexcept
 bool EndFrame() noexcept
 {
     VkResult vr = VK_SUCCESS;
+
+    const QueueFamilyInfo& graphicsQueueFamilyInfo = gVulkanInfo.GetPrimaryGpuInfo().QueueFamilyInfo[gVulkanInfo.GetPrimaryGpuInfo().GraphicsQueueFamilyIndex];
+    const VkSubmitInfo2 submitInfo2 =
+    {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+        .pNext = nullptr,
+        .flags = 0,
+        .waitSemaphoreInfoCount = 0,
+        .pWaitSemaphoreInfos = nullptr,
+        .commandBufferInfoCount = 0,
+        .pCommandBufferInfos = nullptr,
+        .signalSemaphoreInfoCount = 0,
+        .pSignalSemaphoreInfos = nullptr,
+    };
+    vr = vkQueueSubmit2(graphicsQueueFamilyInfo.QueueInfos[0].Queue, 1, &submitInfo2, VK_NULL_HANDLE);
+    if(vr != VK_SUCCESS)
+    {
+        LUDUS_ASSERT_F(false, "Failed to submit to graphics queue: {}", vr);
+        return false;
+    }
+
     const VkPresentInfoKHR presentInfo =
     {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -370,6 +390,11 @@ bool EndFrame() noexcept
     };
     const QueueFamilyInfo& presentQueueFamilyInfo = gVulkanInfo.GetPrimaryGpuInfo().QueueFamilyInfo[gVulkanInfo.GetPrimaryGpuInfo().PresentQueueFamilyIndex];
     vr = vkQueuePresentKHR(presentQueueFamilyInfo.QueueInfos[0].Queue, &presentInfo);
+    if(vr != VK_SUCCESS)
+    {
+        LUDUS_ASSERT_F(false, "Failed to present to present queue: {}", vr);
+        return false;
+    }
     gVulkanInfo.WindowSystemIntegrationInfo.PresentingImageIndex = gVulkanInfo.WindowSystemIntegrationInfo.UpdateImageIndex;
     return vr == VK_SUCCESS;
 }
@@ -922,7 +947,10 @@ bool initializeDeviceInfo(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo, c
     {
         extensionsToRequest.Add({.extensionName = VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME});
     }
-    extensionsToRequest.Add({.extensionName = VK_KHR_PERFORMANCE_QUERY_EXTENSION_NAME});
+    if (vulkanInfo.ApiVersion < VK_API_VERSION_1_3)
+    {
+        extensionsToRequest.Add({.extensionName = VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME});
+    }
     extensionsToRequest.Add({.extensionName = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME});
     extensionsToRequest.Add({.extensionName = VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME});
     extensionsToRequest.Add({.extensionName = VK_KHR_RAY_QUERY_EXTENSION_NAME});
@@ -1105,7 +1133,7 @@ bool initializeDeviceInfo(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo, c
     vr = vkCreateDevice(gpuInfo.PhysicalDevice, &deviceCreateInfo, nullptr, &inoutDeviceInfo.Device);
     if (vr != VK_SUCCESS)
     {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to create Vulkan device: {}", static_cast<int32>(vr));
+        LUDUS_LOG_ERROR(LOG_RHI, "Failed to create Vulkan device: {}", vr);
         return false;
     }
     return true;
@@ -1122,10 +1150,14 @@ void shutdownDevice(DeviceInfo& inoutDeviceInfo) noexcept
 
 void initializeQueues(QueueFamilyInfo& inoutQueueFamilyInfo, const DeviceInfo& deviceInfo) noexcept
 {
-    // All requested queues use flags=0, so the Vulkan 1.0 getter suffices.
-    QueueInfo queueInfo = {};
-    vkGetDeviceQueue(deviceInfo.Device, inoutQueueFamilyInfo.Index, 0, &queueInfo.Queue);
-    inoutQueueFamilyInfo.QueueInfos.Add(queueInfo);
+    const uint32 inoutQueueFamilyIndex = inoutQueueFamilyInfo.Properties.queueFamilyProperties.queueCount;
+    for(uint32 i = 0; i < inoutQueueFamilyIndex; ++i)
+    {
+        QueueInfo queueInfo = {};
+        vkGetDeviceQueue(deviceInfo.Device, inoutQueueFamilyInfo.Index, i, &queueInfo.Queue);
+        inoutQueueFamilyInfo.QueueInfos.Add(queueInfo);
+    }
+    LUDUS_LOG_INFO(LOG_RHI, "Initialized {} queues for family index {}", inoutQueueFamilyInfo.QueueInfos.GetSize(), inoutQueueFamilyInfo.Index);
 }
 
 bool initializeWindowSystemIntegration(WindowSystemIntegrationInfo& inoutWsiInfo, const VulkanInfo& vulkanInfo) noexcept
@@ -1153,7 +1185,7 @@ bool initializeWindowSystemIntegration(WindowSystemIntegrationInfo& inoutWsiInfo
                                    &inoutWsiInfo.SurfaceInfo.Surface);
     if (vr != VK_SUCCESS)
     {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to create Wayland surface: {}", static_cast<int32>(vr));
+        LUDUS_LOG_ERROR(LOG_RHI, "Failed to create Wayland surface: {}", vr);
         return result;
     }
 
@@ -1211,7 +1243,7 @@ bool initializeSwapchain(WindowSystemIntegrationInfo& inoutWsiInfo, const Device
                               &inoutWsiInfo.Swapchain);
     if (vr != VK_SUCCESS)
     {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to create swapchain: {}", static_cast<int32>(vr));
+        LUDUS_LOG_ERROR(LOG_RHI, "Failed to create swapchain: {}", vr);
         return false;
     }
 
@@ -1222,7 +1254,7 @@ bool initializeSwapchain(WindowSystemIntegrationInfo& inoutWsiInfo, const Device
                                  nullptr);
     if (vr != VK_SUCCESS)
     {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to get swapchain image count: {}", static_cast<int32>(vr));
+        LUDUS_LOG_ERROR(LOG_RHI, "Failed to get swapchain image count: {}", vr);
         return false;
     }
 
@@ -1233,7 +1265,7 @@ bool initializeSwapchain(WindowSystemIntegrationInfo& inoutWsiInfo, const Device
                                  reinterpret_cast<VkImage*>(swapchainImages.GetData()));
     if (vr != VK_SUCCESS)
     {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to get swapchain images: {}", static_cast<int32>(vr));
+        LUDUS_LOG_ERROR(LOG_RHI, "Failed to get swapchain images: {}", vr);
         return false;
     }
 

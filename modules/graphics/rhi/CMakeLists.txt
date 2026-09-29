@@ -47,8 +47,9 @@ install(TARGETS ludus_graphics_rhi
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
     add_executable(ludus_graphics_rhi_tests tests/rhi_tests.cpp)
+    target_include_directories(ludus_graphics_rhi_tests PRIVATE src)
     target_link_libraries(ludus_graphics_rhi_tests PRIVATE
-        Ludus::GraphicsRhi volk::volk_headers Catch2::Catch2WithMain)
+        Ludus::GraphicsRhi Ludus::FoundationLogging volk::volk_headers Catch2::Catch2WithMain)
     if(LUDUS_PLATFORM_ENABLE_WAYLAND)
         target_compile_definitions(ludus_graphics_rhi_tests PRIVATE VK_USE_PLATFORM_WAYLAND_KHR)
     endif()
