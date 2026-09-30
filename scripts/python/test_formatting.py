@@ -23,11 +23,26 @@ class FormattingTests(unittest.TestCase):
     def test_designated_initializer_and_idempotence(self):
         source = 'void f() { const Info value = {.Name = "test", .Width = 800}; }\n'
         result = self.formatted(source)
+        self.assertIn('const Info value = { .Name = "test", .Width = 800 };', result)
+        self.assertEqual(self.formatted(result), result)
+
+    def test_the_two_allowed_layouts_and_the_forbidden_layout(self):
+        compact = 'Info str = { .a = 0, .b = 1 };\n'
+        multiline = 'Info str =\n{\n    .a = 0,\n    .b = 1,\n};\n'
+        mixed = 'Info str = {\n    .a = 0,\n    .b = 1,\n};\n'
+        self.assertEqual(self.formatted(compact), compact)
+        self.assertEqual(self.formatted(multiline), multiline)
+        self.assertEqual(self.formatted(mixed), multiline)
+
+    def test_multiline_initializer_brace_is_on_its_own_line(self):
+        source = 'void f() { const Info value = {\n.Name = "test",\n.Width = 800\n}; }\n'
+        result = self.formatted(source)
         self.assertIn('const Info value =\n    {\n        .Name = "test",\n        .Width = 800,\n    };', result)
+        self.assertNotIn('value = {\n', result)
         self.assertEqual(self.formatted(result), result)
 
     def test_nested_and_direct_initializers(self):
-        result = self.formatted('Info value{.Child = {.Value = 1}, .Other = 2};\n')
+        result = self.formatted('Info value{\n.Child = {\n.Value = 1\n},\n.Other = 2\n};\n')
         self.assertIn('Info value\n{', result)
         self.assertIn('.Child =\n    {\n        .Value = 1,\n    },', result)
         self.assertEqual(self.formatted(result), result)
@@ -43,18 +58,34 @@ Info value = {/* {.Fake = 2} */ .Value = 3};
 '''
         result = self.formatted(source)
         self.assertTrue(result.startswith(source[:source.index('// clang-format on')]))
-        self.assertIn('.Value = 3,', result)
+        self.assertIn('.Value = 3', result)
         self.assertEqual(self.formatted(result), result)
 
     def test_numeric_separator_and_ordinary_initializers(self):
         result = self.formatted("Info value = {.Value = 1'000};\nint a[] = {1, 2};\n")
-        self.assertIn(".Value = 1'000,", result)
+        self.assertIn("{ .Value = 1'000 }", result)
         self.assertIn('int a[] = {1, 2};', result)
 
     def test_constructor_member_initializer_indentation(self):
-        result = self.formatted('struct C { C() : first(1), info{.Width = 1, .Height = 2} {} };\n')
+        result = self.formatted('struct C { C() : first(1), info{\n.Width = 1,\n.Height = 2\n} {} };\n')
         self.assertIn('info\n        {\n            .Width = 1,\n            .Height = 2,\n        }', result)
         self.assertEqual(self.formatted(result), result)
+
+    def test_long_compact_initializer_expands(self):
+        name = 'x' * 130
+        result = self.formatted('Info value = {.Name = "' + name + '", .Width = 800};\n')
+        self.assertIn('Info value =\n{\n', result)
+        self.assertIn('.Width = 800,\n};', result)
+        self.assertEqual(self.formatted(result), result)
+
+    def test_compact_spaces_respect_the_column_limit(self):
+        for nested in (False, True):
+            prefix = 'Info value = {.Child = {.Name = "' if nested else 'Info value = {.Name = "'
+            suffix = '"}};\n' if nested else '"};\n'
+            source = prefix + 'x' * (120 - len(prefix) - len(suffix.rstrip())) + suffix
+            result = self.formatted(source)
+            self.assertIn('Info value =\n{\n', result)
+            self.assertEqual(self.formatted(result), result)
 
     def test_raw_string_contents_are_preserved(self):
         literal = 'R"tag(first\n    {.Fake = 2}\nlast)tag"'

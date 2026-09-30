@@ -48,94 +48,55 @@ struct DiagnosticArg
 };
 constexpr DiagnosticArg MakeDiagnosticArg(int8 value) noexcept
 {
-    return {DiagnosticArgKind::Signed,
-            {
-                .Signed = value,
-            }};
+    return {DiagnosticArgKind::Signed, { .Signed = value }};
 }
 constexpr DiagnosticArg MakeDiagnosticArg(int16 value) noexcept
 {
-    return {DiagnosticArgKind::Signed,
-            {
-                .Signed = value,
-            }};
+    return {DiagnosticArgKind::Signed, { .Signed = value }};
 }
 constexpr DiagnosticArg MakeDiagnosticArg(int32 value) noexcept
 {
-    return {DiagnosticArgKind::Signed,
-            {
-                .Signed = value,
-            }};
+    return {DiagnosticArgKind::Signed, { .Signed = value }};
 }
 constexpr DiagnosticArg MakeDiagnosticArg(int64 value) noexcept
 {
-    return {DiagnosticArgKind::Signed,
-            {
-                .Signed = value,
-            }};
+    return {DiagnosticArgKind::Signed, { .Signed = value }};
 }
 constexpr DiagnosticArg MakeDiagnosticArg(uint8 value) noexcept
 {
-    return {DiagnosticArgKind::Unsigned,
-            {
-                .Unsigned = value,
-            }};
+    return {DiagnosticArgKind::Unsigned, { .Unsigned = value }};
 }
 constexpr DiagnosticArg MakeDiagnosticArg(uint16 value) noexcept
 {
-    return {DiagnosticArgKind::Unsigned,
-            {
-                .Unsigned = value,
-            }};
+    return {DiagnosticArgKind::Unsigned, { .Unsigned = value }};
 }
 constexpr DiagnosticArg MakeDiagnosticArg(uint32 value) noexcept
 {
-    return {DiagnosticArgKind::Unsigned,
-            {
-                .Unsigned = value,
-            }};
+    return {DiagnosticArgKind::Unsigned, { .Unsigned = value }};
 }
 constexpr DiagnosticArg MakeDiagnosticArg(uint64 value) noexcept
 {
-    return {DiagnosticArgKind::Unsigned,
-            {
-                .Unsigned = value,
-            }};
+    return {DiagnosticArgKind::Unsigned, { .Unsigned = value }};
 }
 constexpr DiagnosticArg MakeDiagnosticArg(float32 value) noexcept
 {
-    return {DiagnosticArgKind::Floating,
-            {
-                .Floating = static_cast<float64>(value),
-            }};
+    return {DiagnosticArgKind::Floating, { .Floating = static_cast<float64>(value) }};
 }
 constexpr DiagnosticArg MakeDiagnosticArg(float64 value) noexcept
 {
-    return {DiagnosticArgKind::Floating,
-            {
-                .Floating = value,
-            }};
+    return {DiagnosticArgKind::Floating, { .Floating = value }};
 }
 constexpr DiagnosticArg MakeDiagnosticArg(bool value) noexcept
 {
-    return {DiagnosticArgKind::Boolean,
-            {
-                .Boolean = value,
-            }};
+    return {DiagnosticArgKind::Boolean, { .Boolean = value }};
 }
 constexpr DiagnosticArg MakeDiagnosticArg(DiagnosticText value) noexcept
 {
-    return {DiagnosticArgKind::Text,
-            {
-                .Text = value,
-            }};
+    return {DiagnosticArgKind::Text, { .Text = value }};
 }
 constexpr DiagnosticArg MakeDiagnosticArg(DiagnosticAddressValue value) noexcept
 {
-    return {DiagnosticArgKind::Address,
-            {
-                .Address = value.Value,
-            }};
+    return {DiagnosticArgKind::Address, { .Address = value.Value }};
 }
 DiagnosticArg MakeCStringArg(const char* value, usize bound) noexcept;
 inline DiagnosticArg MakeDiagnosticArg(DiagnosticCStringValue value) noexcept

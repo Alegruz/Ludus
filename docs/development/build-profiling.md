@@ -54,6 +54,19 @@ Each run records total build wall-time and `ccache --show-stats` (hit rate) in
 the job summary, so cache effectiveness and build-time trends are visible per
 commit.
 
+The build-budget job uses `CMAKE_BUILD_PARALLEL_LEVEL=2` to keep CPU contention
+stable when summing elapsed frontend timings. Reproduce that job locally with:
+
+```bash
+CMAKE_BUILD_PARALLEL_LEVEL=2 ./scripts/check-build-budget --profile
+```
+
+The previous unrestricted CI profile in [run 36767757513](https://github.com/Alegruz/Ludus/actions/runs/36767757513)
+reported 129.2 s frontend time, 32.98 s build wall time, and 5.71 effective
+parallelism. All reported project headers passed their existing limits. The
+aggregate limit remains 120 s; compare future profiles at the same concurrency
+before treating timing changes as include regressions.
+
 ## Baseline
 
 Captured with the pinned toolchain (Clang 18, libstdc++ 14, Ninja, lld) on the

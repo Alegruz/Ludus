@@ -55,8 +55,9 @@ linux-clang-release
 ```
 
 Formatting checks are read-only by default. Use `./scripts/check --format --fix` to apply
-clang-format 18 and the Ludus designated-initializer convention: opening braces
-on a new line, one member per line, and a trailing comma.
+clang-format 18 and the Ludus designated-initializer convention: compact lists
+may stay on one line (`value = { .A = 0, .B = 1 };`); multiline lists put their
+opening brace on its own line, with one member per line and a trailing comma.
 
 Local `./init.sh` enables automatic formatting of staged C/C++ before each commit.
 Existing checkouts can enable it with `./scripts/install-hooks`. The hook preserves

@@ -35,11 +35,7 @@ public:
 protected:
     WindowBase() = delete;
     LUDUS_INLINE explicit WindowBase(const CreateInfo& info) noexcept
-        : mName(info.Name), mNativeWindowInfo
-        {
-            .Width = info.Width,
-            .Height = info.Height,
-        }
+        : mName(info.Name), mNativeWindowInfo{ .Width = info.Width, .Height = info.Height }
     {
     }
 

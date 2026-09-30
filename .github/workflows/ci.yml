@@ -161,6 +161,8 @@ jobs:
     env:
       CI: "true"
       LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
+      # Time traces measure elapsed parsing time; keep CPU contention stable.
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

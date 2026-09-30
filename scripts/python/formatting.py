@@ -50,15 +50,46 @@ def designated_lists(source: str) -> list[tuple[int, int, int]]:
     return lists
 
 
-def format_source(source: str, filename: Path, clang_format: str) -> str:
-    # A trailing comma asks clang-format to put each member on its own line.
-    for last in sorted((last for _, _, last in designated_lists(source)), reverse=True):
+def add_multiline_commas(source: str) -> str:
+    # Preserve compact lists; a trailing comma keeps multiline members separated.
+    offsets = [last for opening, closing, last in designated_lists(source)
+               if "\n" in source[opening:closing]]
+    for last in sorted(offsets, reverse=True):
         if source[last - 1] != ",":
             source = source[:last] + "," + source[last:]
-    result = subprocess.run(
-        [clang_format, "--style=file", f"--assume-filename={filename}"],
-        input=source, text=True, capture_output=True, check=True,
-    ).stdout
+    return source
+
+
+def format_source(source: str, filename: Path, clang_format: str) -> str:
+    def clang(source: str) -> str:
+        return subprocess.run(
+            [clang_format, "--style=file", f"--assume-filename={filename}"],
+            input=source, text=True, capture_output=True, check=True,
+        ).stdout
+
+    style_path = next(parent / ".clang-format" for parent in filename.parents
+                      if (parent / ".clang-format").is_file())
+    style = style_path.read_text(encoding="utf-8")
+    column_limit = int(re.search(r"^ColumnLimit:\s*(\d+)", style, re.MULTILINE)[1])
+    result = clang(add_multiline_commas(source))
+    compact = [(opening, closing, last) for opening, closing, last in designated_lists(result)
+               if "\n" not in result[opening:closing]]
+    widths = {}
+    for opening, closing, _ in compact:
+        start = result.rfind("\n", 0, opening) + 1
+        end = result.find("\n", closing)
+        if end < 0:
+            end = len(result)
+        body = result[opening + 1:closing]
+        widths[start] = widths.get(start, end - start) + 2 - len(body) + len(body.strip())
+    for opening, _, last in sorted(compact, key=lambda item: item[2], reverse=True):
+        start = result.rfind("\n", 0, opening) + 1
+        if column_limit and widths[start] > column_limit and result[last - 1] != ",":
+            result = result[:last] + "," + result[last:]
+    expanded = add_multiline_commas(result)
+    if expanded != result or any(column_limit and width > column_limit for width in widths.values()):
+        # Lists that overflow the column limit become multiline on the first pass.
+        result = clang(expanded)
 
     # Clang-format 18 cannot wrap initializer opening braces. Change only the
     # whitespace before those braces after it has formatted the member bodies.
@@ -67,6 +98,10 @@ def format_source(source: str, filename: Path, clang_format: str) -> str:
         # Recompute offsets after each outer list so nested lists inherit its
         # indentation, then normalize their own member bodies independently.
         opening, closing, _ = sorted(designated_lists(result))[index]
+        body = result[opening + 1:closing]
+        if "\n" not in body:
+            result = result[:opening + 1] + " " + body.strip() + " " + result[closing:]
+            continue
         line_start = result.rfind("\n", 0, opening) + 1
         prefix = result[line_start:opening]
         indentation = prefix[:len(prefix) - len(prefix.lstrip())]
@@ -76,7 +111,6 @@ def format_source(source: str, filename: Path, clang_format: str) -> str:
             if previous.endswith("="):
                 indentation = previous[:len(previous) - len(previous.lstrip())]
 
-        body = result[opening + 1:closing]
         member = re.search(r"\n([ \t]*)\.", body)
         if member:
             delta = len(indentation) + 4 - len(member[1])

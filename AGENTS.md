@@ -72,8 +72,10 @@ engine code. Discuss such cases in the PR before adding them.
 
 - Format all C/C++ with the project `.clang-format` before committing:
   `./scripts/check --format --fix` (or `--format` to verify only).
-- Designated initializers use a new line for the opening brace, one member per
-  line, and a trailing comma. Use `scripts/check`, which extends clang-format 18
+- Designated initializers may be compact (`value = { .A = 0, .B = 1 };`).
+  Multiline initializers put the opening brace on its own line, with one member
+  per line and a trailing comma. Never use `value = {` followed by multiline
+  members. Use `scripts/check`, which extends clang-format 18
   for initializer braces; direct clang-format 18 does not implement this rule.
 - Local `init.sh` installs the staged auto-formatting hook; existing checkouts
   can enable it with `./scripts/install-hooks`.
