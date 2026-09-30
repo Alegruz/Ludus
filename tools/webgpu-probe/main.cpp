@@ -25,6 +25,7 @@ struct Probe final
     WGPUQueue Queue = nullptr;
     WGPUSurface Surface = nullptr;
     bool Failed = false;
+    bool CompatibilityRequested = false;
     uint32 Frames = 0;
 };
 
@@ -40,7 +41,20 @@ EM_JS(void, showStatus, (const char* state, const char* message), {
 EM_JS(void, reportFrame, (uint32 frames), {
     document.getElementById('status').dataset.frames = String(frames);
 });
+EM_JS(void, appendDiagnostic, (const char* label, const char* message, usize length), {
+    document.getElementById('diagnostics').textContent +=
+        UTF8ToString(label) + ': ' + (message && length ? UTF8ToString(message, length) : '(no message)') + '\n';
+});
 // clang-format on
+
+void diagnose(const char* label, WGPUStringView message) noexcept
+{
+    // The API permits both explicit lengths and null-terminated views.
+    // Bound display output without requiring allocation or trusting termination.
+    constexpr usize maxLength = 4096;
+    const usize length = message.length < maxLength ? message.length : maxLength;
+    appendDiagnostic(label, message.data, length);
+}
 
 void fail(const char* message) noexcept
 {
@@ -142,8 +156,9 @@ EM_BOOL renderFrame(float64 time, void*) noexcept
     return gProbe.Failed ? EM_FALSE : EM_TRUE;
 }
 
-void deviceReady(WGPURequestDeviceStatus status, WGPUDevice device, WGPUStringView, void*, void*) noexcept
+void deviceReady(WGPURequestDeviceStatus status, WGPUDevice device, WGPUStringView message, void*, void*) noexcept
 {
+    diagnose("Device request", message);
     if (status != WGPURequestDeviceStatus_Success || !device)
     {
         fail("WebGPU device request failed. Check browser/GPU support and reload.");
@@ -170,16 +185,47 @@ void deviceReady(WGPURequestDeviceStatus status, WGPUDevice device, WGPUStringVi
     wgpuSurfaceCapabilitiesFreeMembers(capabilities);
     if (!gProbe.Failed)
     {
-        showStatus("ready", "WebGPU is ready. The canvas color should animate.");
+        showStatus("ready",
+                   gProbe.CompatibilityRequested
+                       ? "WebGPU is ready (compatibility request). The canvas color should animate."
+                       : "WebGPU is ready (core request). The canvas color should animate.");
         emscripten_request_animation_frame_loop(renderFrame, nullptr);
     }
 }
 
-void adapterReady(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView, void*, void*) noexcept
+void adapterReady(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView message, void*, void*) noexcept;
+
+void requestAdapter(WGPUFeatureLevel featureLevel) noexcept
 {
+    WGPURequestAdapterOptions options = WGPU_REQUEST_ADAPTER_OPTIONS_INIT;
+    options.featureLevel = featureLevel;
+    options.compatibleSurface = gProbe.Surface;
+    WGPURequestAdapterCallbackInfo callback = WGPU_REQUEST_ADAPTER_CALLBACK_INFO_INIT;
+    callback.mode = WGPUCallbackMode_AllowSpontaneous;
+    callback.callback = adapterReady;
+    (void)wgpuInstanceRequestAdapter(gProbe.Instance, &options, callback);
+}
+
+void adapterReady(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView message, void*, void*) noexcept
+{
+    const auto label = std::format("{} adapter request (status {})",
+                                   gProbe.CompatibilityRequested ? "Compatibility" : "Core",
+                                   static_cast<uint32>(status));
+    diagnose(label.c_str(), message);
     if (status != WGPURequestAdapterStatus_Success || !adapter)
     {
-        fail("No WebGPU adapter is available. Check browser/GPU support and reload.");
+        if (adapter)
+        {
+            wgpuAdapterRelease(adapter);
+        }
+        if (!gProbe.CompatibilityRequested)
+        {
+            gProbe.CompatibilityRequested = true;
+            showStatus("initializing", "Core adapter unavailable; trying WebGPU compatibility mode…");
+            requestAdapter(WGPUFeatureLevel_Compatibility);
+            return;
+        }
+        fail("No WebGPU adapter is available in core or compatibility mode. See diagnostics below.");
         return;
     }
     gProbe.Adapter = adapter;
@@ -187,11 +233,13 @@ void adapterReady(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStri
     WGPUDeviceDescriptor descriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
     descriptor.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
     descriptor.deviceLostCallbackInfo.callback =
-        [](WGPUDevice const*, WGPUDeviceLostReason, WGPUStringView, void*, void*) noexcept {
+        [](WGPUDevice const*, WGPUDeviceLostReason, WGPUStringView message, void*, void*) noexcept {
+            diagnose("Device lost", message);
             fail("WebGPU device lost. Reload to retry.");
         };
     descriptor.uncapturedErrorCallbackInfo.callback =
-        [](WGPUDevice const*, WGPUErrorType, WGPUStringView, void*, void*) noexcept {
+        [](WGPUDevice const*, WGPUErrorType, WGPUStringView message, void*, void*) noexcept {
+            diagnose("Uncaptured error", message);
             fail("WebGPU reported a validation error. Reload to retry.");
         };
     WGPURequestDeviceCallbackInfo callback = WGPU_REQUEST_DEVICE_CALLBACK_INFO_INIT;
@@ -226,12 +274,7 @@ int main()
         fail("WebGPU canvas surface creation failed.");
         return 1;
     }
-    WGPURequestAdapterOptions options = WGPU_REQUEST_ADAPTER_OPTIONS_INIT;
-    options.compatibleSurface = gProbe.Surface;
-    WGPURequestAdapterCallbackInfo callback = WGPU_REQUEST_ADAPTER_CALLBACK_INFO_INIT;
-    callback.mode = WGPUCallbackMode_AllowSpontaneous;
-    callback.callback = adapterReady;
-    (void)wgpuInstanceRequestAdapter(gProbe.Instance, &options, callback);
+    requestAdapter(WGPUFeatureLevel_Core);
     // Emdawnwebgpu keeps pending callbacks alive after main returns.
     return 0;
 }
