@@ -72,6 +72,11 @@ engine code. Discuss such cases in the PR before adding them.
 
 - Format all C/C++ with the project `.clang-format` before committing:
   `./scripts/check --format --fix` (or `--format` to verify only).
+- Designated initializers use a new line for the opening brace, one member per
+  line, and a trailing comma. Use `scripts/check`, which extends clang-format 18
+  for initializer braces; direct clang-format 18 does not implement this rule.
+- Local `init.sh` installs the staged auto-formatting hook; existing checkouts
+  can enable it with `./scripts/install-hooks`.
 - Static analysis must pass: `./scripts/check --tidy` against the project
   `.clang-tidy`. Use the pinned `clang-format` / `clang-tidy` (18); newer local
   versions may report checks that do not exist in the pinned version.

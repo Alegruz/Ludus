@@ -114,12 +114,12 @@ int main()
         LUDUS_PROFILE_SCOPE(Frame);
         // Main loop
         const bool canFrameBegin = ludus::graphics::rhi::BeginFrame();
-        if(canFrameBegin == false)
+        if (!canFrameBegin)
         {
             LUDUS_LOG_ERROR(LOG_CORE, "Failed to begin frame");
         }
         const bool canFrameEnd = ludus::graphics::rhi::EndFrame();
-        if(canFrameEnd == false)
+        if (!canFrameEnd)
         {
             LUDUS_LOG_ERROR(LOG_CORE, "Failed to end frame");
         }

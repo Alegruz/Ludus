@@ -69,12 +69,19 @@ TEST_CASE("Wayland surface and device lifecycle", "[rhi][wayland]")
     } guard;
 
     REQUIRE(manager.Initialize({}));
-    REQUIRE(manager.CreateWindow({.Name = "Ludus Wayland lifecycle test"}, window));
+    REQUIRE(manager.CreateWindow(
+        {
+            .Name = "Ludus Wayland lifecycle test",
+        },
+        window));
     const auto native = window->GetNativeWindowInfo();
     REQUIRE(native.System == platform::WindowSystem::Wayland);
     for (int iteration = 0; iteration < 2; ++iteration)
     {
-        REQUIRE(graphics::rhi::Initialize({.Name = "Wayland lifecycle test"}));
+        REQUIRE(graphics::rhi::Initialize(
+        {
+            .Name = "Wayland lifecycle test",
+        }));
         REQUIRE(vkCreateWaylandSurfaceKHR != nullptr);
         CHECK_FALSE(graphics::rhi::ConnectWindow({}));
         REQUIRE(graphics::rhi::ConnectWindow(native));

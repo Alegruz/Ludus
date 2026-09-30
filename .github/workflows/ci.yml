@@ -5,7 +5,20 @@ on:
   pull_request:
 
 jobs:
+  formatting:
+    name: Source formatting
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned formatter
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18
+      - name: Test formatting and staged-file preservation
+        run: python3 -m unittest discover -s scripts/python -p 'test_formatting.py' -v
+      - name: Verify source formatting before builds
+        run: ./scripts/check --format
+
   linux:
+    needs: formatting
     name: Ubuntu Clang
     runs-on: ubuntu-24.04
     env:
@@ -69,6 +82,7 @@ jobs:
           ccache --show-stats
 
   assertion-policy:
+    needs: formatting
     name: Assertion policy (${{ matrix.preset }})
     runs-on: ubuntu-24.04
     strategy:
@@ -91,6 +105,7 @@ jobs:
           out/host-tools/venv/bin/ctest --test-dir out/build/assertion-policy --output-on-failure
 
   pch:
+    needs: formatting
     # Verifies the optional precompiled-header path builds and tests pass. The
     # primary "Ubuntu Clang" job above builds with LUDUS_ENABLE_PCH OFF (the
     # default), which is the "no-pch" guarantee: no translation unit may rely on
@@ -135,6 +150,7 @@ jobs:
           out/host-tools/venv/bin/ctest --test-dir out/build/pch --output-on-failure --label-exclude build-contract
 
   build-budget:
+    needs: formatting
     # Heavy, separate job: -ftime-trace + ClangBuildAnalyzer are slow, so this is
     # kept out of the fast "Ubuntu Clang" job and the local iteration loop. It
     # enforces the per-header / total parse-time budgets in config/build_budget.json

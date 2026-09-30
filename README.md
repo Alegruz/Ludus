@@ -54,7 +54,15 @@ linux-clang-release
 ./scripts/install-sdk linux-clang-development
 ```
 
-Formatting checks are read-only by default. Use `./scripts/check --format --fix` to apply clang-format.
+Formatting checks are read-only by default. Use `./scripts/check --format --fix` to apply
+clang-format 18 and the Ludus designated-initializer convention: opening braces
+on a new line, one member per line, and a trailing comma.
+
+Local `./init.sh` enables automatic formatting of staged C/C++ before each commit.
+Existing checkouts can enable it with `./scripts/install-hooks`. The hook preserves
+partial staging: it formats the staged snapshot without including unstaged edits.
+Existing custom hooks are preserved; chain `.githooks/pre-commit` from your hook
+when using your own hook setup. CI verifies formatting using the same formatter.
 
 ## SDK Install
 

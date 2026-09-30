@@ -9,7 +9,8 @@ namespace ludus::foundation
 
 Version version() noexcept
 {
-    return Version{
+    return Version
+    {
         .major = build_metadata::version_major,
         .minor = build_metadata::version_minor,
         .patch = build_metadata::version_patch,

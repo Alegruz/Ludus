@@ -107,20 +107,38 @@ static void onXdgToplevelWmCapabilities(void* data, xdg_toplevel* xdgToplevel, w
 static UniquePtr<wl_display> gDisplay = nullptr;
 static UniquePtr<wl_registry> gRegistry = nullptr;
 static UniquePtr<wl_compositor> gCompositor = nullptr;
-static wl_registry_listener gRegistryListener = {.global = onGlobalRegistry, .global_remove = onGlobalRegistryRemove};
+static wl_registry_listener gRegistryListener =
+{
+    .global = onGlobalRegistry,
+    .global_remove = onGlobalRegistryRemove,
+};
 static UniquePtr<xdg_wm_base> gXdgWmBase = nullptr;
-static xdg_wm_base_listener gXdgWmBaseListener = {.ping = onXdgWmBasePing};
-static xdg_surface_listener gXdgSurfaceListener = {.configure = onXdgSurfaceConfigure};
-static xdg_toplevel_listener gXdgToplevelListener = {.configure = onXdgToplevelConfigure,
-                                                     .close = onXdgToplevelClose,
-                                                     .configure_bounds = onXdgToplevelConfigureBounds,
-                                                     .wm_capabilities = onXdgToplevelWmCapabilities};
+static xdg_wm_base_listener gXdgWmBaseListener =
+{
+    .ping = onXdgWmBasePing,
+};
+static xdg_surface_listener gXdgSurfaceListener =
+{
+    .configure = onXdgSurfaceConfigure,
+};
+static xdg_toplevel_listener gXdgToplevelListener =
+{
+    .configure = onXdgToplevelConfigure,
+    .close = onXdgToplevelClose,
+    .configure_bounds = onXdgToplevelConfigureBounds,
+    .wm_capabilities = onXdgToplevelWmCapabilities,
+};
 
 WindowWayland::WindowWayland(CreateInfo&& info) noexcept
     : WindowBase(info.BaseCreateInfo), mSurface(std::move(info.Surface)), mXdgSurface(std::move(info.XdgSurface)),
       mXdgToplevel(std::move(info.XdgToplevel))
 {
-    mNativeWindowInfo = {.System = WindowSystem::Wayland, .Display = gDisplay.Get(), .Surface = mSurface.Get()};
+    mNativeWindowInfo =
+    {
+        .System = WindowSystem::Wayland,
+        .Display = gDisplay.Get(),
+        .Surface = mSurface.Get(),
+    };
 }
 
 bool InitializeWayland([[maybe_unused]] const WindowManager::InitializeInfo& info) noexcept
@@ -218,7 +236,8 @@ void onXdgWmBasePing([[maybe_unused]] void* data, [[maybe_unused]] xdg_wm_base* 
 
 UniquePtr<WindowWayland> CreateWindow(const Window::CreateInfo& info) noexcept
 {
-    WindowWayland::CreateInfo createInfo{
+    WindowWayland::CreateInfo createInfo
+    {
         .BaseCreateInfo = info,
         .Surface = nullptr,
         .XdgSurface = nullptr,
@@ -355,7 +374,12 @@ bool WindowWayland::HandleEvent([[maybe_unused]] const Event& event) noexcept
         }
     }
 
-    pollfd descriptor{.fd = wl_display_get_fd(display), .events = POLLIN, .revents = 0};
+    pollfd descriptor
+    {
+        .fd = wl_display_get_fd(display),
+        .events = POLLIN,
+        .revents = 0,
+    };
     if (wl_display_flush(display) < 0)
     {
         if (errno != EAGAIN)

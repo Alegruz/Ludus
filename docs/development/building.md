@@ -199,6 +199,18 @@ Apply formatting:
 ./scripts/check linux-clang-development --format --fix
 ```
 
+The formatter uses clang-format 18, then places designated-initializer opening
+braces on a new line. Members each occupy a line and have a trailing comma.
+Clang-format 18 alone cannot express the opening-brace rule, so run the project
+command for both applying and checking formatting.
+
+Local `./init.sh` enables the pre-commit formatter. To enable it in an existing
+checkout, run `./scripts/install-hooks`. It formats only staged C/C++ in
+`modules/`, `apps/`, and `tests/`; partially staged files keep their unstaged
+contents, and fully staged files also receive the formatting in the working
+tree. Custom hook paths and existing hooks are preserved. CI checks the same
+formatter in a separate job before starting builds.
+
 Run only clang-tidy:
 
 ```bash
