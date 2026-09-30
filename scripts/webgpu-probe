@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Build, check, and package the isolated W0 probe with the pinned web SDK."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import zipfile
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts" / "python"))
+from formatting import format_source  # noqa: E402
+
+
+def run(command: list[str], *, env: dict[str, str] | None = None) -> str:
+    result = subprocess.run(command, cwd=ROOT, env=env, check=True, text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    print(result.stdout, end="")
+    return result.stdout
+
+
+def tool(name: str) -> str:
+    bundled = ROOT / "out" / "host-tools" / "venv" / "bin" / name
+    found = str(bundled) if bundled.is_file() else shutil.which(name)
+    if not found:
+        raise RuntimeError(f"{name} is missing; prepare the native host tools with ./init.sh")
+    return found
+
+
+def verify_sdk(sdk: Path, lock: dict[str, str]) -> tuple[Path, dict[str, str]]:
+    emscripten = sdk / "upstream" / "emscripten"
+    version = run([str(emscripten / "em++"), "--version"])
+    if not re.search(rf"\b{re.escape(lock['emscripten'])}\b", version):
+        raise RuntimeError(f"Use Emscripten {lock['emscripten']}; see tools/webgpu-probe/README.md")
+    # Verify the vendored remote-port pin before allowing its automatic download.
+    port = (emscripten / "tools" / "ports" / "emdawnwebgpu.py").read_text()
+    if (f"_VERSION = '{lock['emdawnwebgpu']}'" not in port
+            or f"SHA512 = '{lock['emdawnwebgpu_sha512']}'" not in port):
+        raise RuntimeError("The SDK's Emdawnwebgpu version/checksum differs from the lock")
+    env = os.environ.copy()
+    env["PATH"] = str(emscripten) + os.pathsep + str(Path(tool("cmake")).parent) + os.pathsep + env["PATH"]
+    return emscripten, env
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("build", "check", "package"))
+    parser.add_argument("--sdk", type=Path, default=ROOT / "out" / "host-tools" / "emsdk")
+    parser.add_argument("--configuration", choices=("Debug", "Release"), default="Debug")
+    args = parser.parse_args()
+    lock = json.loads((ROOT / "config" / "web_toolchain.json").read_text())
+    source = ROOT / "tools" / "webgpu-probe"
+    build = ROOT / "out" / "build" / f"webgpu-probe-{args.configuration.lower()}"
+    emscripten, env = verify_sdk(args.sdk.resolve(), lock)
+
+    if args.action == "build":
+        run([str(emscripten / "emcmake"), tool("cmake"), "-S", str(source), "-B", str(build),
+             "-G", "Ninja", f"-DCMAKE_MAKE_PROGRAM={tool('ninja')}",
+             f"-DCMAKE_BUILD_TYPE={args.configuration}"], env=env)
+        run([tool("cmake"), "--build", str(build), "--parallel", "2"], env=env)
+    elif args.action == "check":
+        # tools/ is not included by the engine's format/tidy traversal. Apply
+        # exactly the same formatter and checks to this standalone source.
+        code = (source / "main.cpp").read_text()
+        if format_source(code, source / "main.cpp", "clang-format-18") != code:
+            raise RuntimeError("Probe formatting differs from the repository's formatter")
+        run([str(emscripten / "em++"), "--use-port=emdawnwebgpu:cpp_bindings=false",
+             "--cflags"], env=env)
+        # Read compile_commands to retain the actual wasm sysroot and port
+        # includes. Clang-tidy 18 cannot interpret driver-only port options.
+        import shlex
+        database = json.loads((build / "compile_commands.json").read_text())
+        entry = database[0]
+        command = shlex.split(entry["command"])
+        flags: list[str] = []
+        index = 1
+        while index < len(command):
+            flag = command[index]
+            if flag == "-o":
+                index += 2
+                continue
+            if flag == "-c" or flag == entry["file"] or flag.startswith("--use-port="):
+                index += 1
+                continue
+            flags.append(flag)
+            index += 1
+        sysroot = emscripten / "cache" / "sysroot"
+        port_include = emscripten / "cache" / "ports" / "emdawnwebgpu" / "emdawnwebgpu_pkg"
+        headers = list(port_include.rglob("webgpu.h"))
+        if len(headers) != 1:
+            raise RuntimeError("Cannot locate pinned WebGPU headers; build the probe first")
+        run(["clang-tidy-18", "--warnings-as-errors=*", str(source / "main.cpp"), "--", *flags,
+             "--target=wasm32-unknown-emscripten", f"--sysroot={sysroot}",
+             "-DEMSCRIPTEN", "-isystem", str(sysroot / "include" / "compat"),
+             "-isystem", str(sysroot / "include" / "c++" / "v1"),
+             "-isystem", str(headers[0].parent.parent)], env=env)
+    else:
+        files = [build / name for name in ("index.html", "index.js", "index.wasm")]
+        if any(not path.is_file() for path in files):
+            raise RuntimeError("Build this configuration before packaging")
+        destination = ROOT / "out" / "packages" / f"webgpu-probe-{args.configuration.lower()}.zip"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path in files:
+                archive.write(path, path.name)
+            archive.write(source / "iframe.html", "iframe.html")
+            archive.write(ROOT / "LICENSE", "licenses/Ludus.txt")
+            archive.write(emscripten / "LICENSE", "licenses/Emscripten.txt")
+            port_root = emscripten / "cache" / "ports" / "emdawnwebgpu" / "emdawnwebgpu_pkg"
+            for path in sorted(port_root.rglob("*LICENSE*")):
+                if path.is_file():
+                    archive.write(path, "licenses/emdawnwebgpu/" + str(path.relative_to(port_root)))
+        digest = hashlib.sha256(destination.read_bytes()).hexdigest()
+        print(f"{destination}\nSHA256 {digest}")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        if isinstance(error, subprocess.CalledProcessError):
+            print(error.stdout or "", file=sys.stderr)
+        print(f"WebGPU probe: {error}", file=sys.stderr)
+        raise SystemExit(1)

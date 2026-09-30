@@ -1,0 +1,64 @@
+name: WebGPU feasibility probe
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/webgpu-probe.yml'
+      - 'tools/webgpu-probe/**'
+      - 'scripts/webgpu-probe'
+      - 'scripts/python/formatting.py'
+      - 'config/web_toolchain.json'
+      - 'config/tool_versions.json'
+      - 'cmake/EngineCompilerWarnings.cmake'
+      - 'modules/foundation/base/include/ludus/foundation/base/types.h'
+      - '.clang-format'
+      - '.clang-tidy'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-and-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare host tools and pinned SDK
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang-format-18 clang-tidy-18 python3-venv
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import subprocess
+          import urllib.request
+
+          native = json.loads(Path('config/tool_versions.json').read_text())['managed']
+          web = json.loads(Path('config/web_toolchain.json').read_text())
+          venv = Path('out/host-tools/venv')
+          subprocess.run(['python3', '-m', 'venv', str(venv)], check=True)
+          subprocess.run([str(venv / 'bin/pip'), 'install',
+                          f"cmake=={native['cmake']}", f"ninja=={native['ninja']}"], check=True)
+          archive = Path('out/host-tools/emsdk.tar.gz')
+          urllib.request.urlretrieve(web['emsdk_archive'], archive)
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == web['emsdk_archive_sha256']
+          sdk = Path('out/host-tools/emsdk')
+          sdk.mkdir()
+          subprocess.run(['tar', '-xzf', str(archive), '--strip-components=1', '-C', str(sdk)], check=True)
+          subprocess.run([str(sdk / 'emsdk'), 'install', web['emscripten']], check=True)
+          subprocess.run([str(sdk / 'emsdk'), 'activate', web['emscripten']], check=True)
+          PY
+      - name: Build and analyze both probe configurations
+        run: |
+          ./scripts/webgpu-probe build
+          ./scripts/webgpu-probe check
+          ./scripts/webgpu-probe build --configuration Release
+          ./scripts/webgpu-probe check --configuration Release
+          ./scripts/webgpu-probe package --configuration Release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webgpu-probe-release
+          path: out/packages/webgpu-probe-release.zip
+          if-no-files-found: error

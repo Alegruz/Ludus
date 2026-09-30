@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ludus WebGPU feasibility probe</title>
+    <style>
+      body { margin: 24px; color: #eee; background: #181821; font: 16px system-ui, sans-serif; }
+      canvas { display: block; max-width: 100%; height: auto; background: #292936; }
+      [data-state="failed"] { color: #ffb3b3; }
+    </style>
+  </head>
+  <body>
+    <h1>Ludus WebGPU feasibility probe</h1>
+    <p id="status" role="status" data-state="loading" data-frames="0">Loading WebAssembly…</p>
+    <canvas id="canvas" width="640" height="360" aria-label="Animated WebGPU canvas"></canvas>
+    <script>
+      'use strict';
+      var Module = {
+        canvas: document.getElementById('canvas'),
+        onAbort: function () { failStartup('The WebAssembly module stopped. Reload to retry.'); },
+      };
+      function failStartup(message) {
+        const status = document.getElementById('status');
+        status.dataset.state = 'failed';
+        status.textContent = message;
+      }
+      window.addEventListener('error', function () { failStartup('The probe failed to load or run. Check the browser console.'); });
+      window.addEventListener('unhandledrejection', function () { failStartup('A browser request failed. Check the browser console.'); });
+      // Keep module creation behind capability checks so unsupported browsers
+      // get a readable error without invoking unsupported WebGPU imports.
+      if (!window.isSecureContext) {
+        failStartup('WebGPU requires HTTPS or a localhost server.');
+      } else if (!navigator.gpu) {
+        failStartup('WebGPU is unavailable in this browser. Use a supported browser and GPU.');
+      } else {
+        const script = document.createElement('script');
+        script.src = 'index.js';
+        script.onerror = function () { failStartup('Could not load index.js. Check the package contents.'); };
+        document.body.appendChild(script);
+      }
+    </script>
+  </body>
+</html>

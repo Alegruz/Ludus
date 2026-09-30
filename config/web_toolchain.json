@@ -1,0 +1,8 @@
+{
+  "emscripten": "4.0.23",
+  "emsdk_archive": "https://github.com/emscripten-core/emsdk/archive/refs/tags/4.0.23.tar.gz",
+  "emsdk_archive_sha256": "a91a4c1f42dbb0345faac093161e27d43e9b6964840d8c8d80976ab8d3eaf2d3",
+  "sdk_revision": "aaa43392544d695232b70eda706d751f18980c2a",
+  "emdawnwebgpu": "v20251002.162335",
+  "emdawnwebgpu_sha512": "ed15672c2c495a77c764929e6979f4e155bf8b9c46dee5b0f234f3208a708bc2b846d89eef345b725d03454b56d549531f48fc84ff2afe7627d14115893b0fb0"
+}
