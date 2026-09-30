@@ -68,7 +68,7 @@ struct CommandBufferInfo final
 struct CommandPoolInfo final
 {
     VkCommandPool CommandPool = VK_NULL_HANDLE;
-    Array<CommandBufferInfo> CommandBufferInfos = {};
+    Array<CommandBufferInfo> CommandBufferInfos;
 };
 
 struct DeviceInfo final
@@ -89,9 +89,9 @@ struct DeviceInfo final
     VkPhysicalDeviceMemoryPriorityFeaturesEXT MemoryPriorityFeatures = {};
     VkPhysicalDevicePageableDeviceLocalMemoryFeaturesEXT PageableDeviceLocalMemoryFeatures = {};
 
-    Array<CommandPoolInfo> CommandPoolInfos = {};
-    Array<FenceInfo> FenceInfos = {};
-    Array<SemaphoreInfo> SemaphoreInfos = {};
+    Array<CommandPoolInfo> CommandPoolInfos;
+    Array<FenceInfo> FenceInfos;
+    Array<SemaphoreInfo> SemaphoreInfos;
 
 #if defined(LUDUS_RHI_DEVICE_DEBUG_FEATURES_PROFILE)
     VkPhysicalDevicePerformanceQueryFeaturesKHR PerformanceQueryFeatures = {};
@@ -103,7 +103,11 @@ struct DeviceInfo final
     VkPhysicalDeviceFaultFeaturesEXT FaultFeatures = {};
 #endif
 
-    [[nodiscard]] LUDUS_INLINE const SemaphoreInfo& GetSemaphoreInfo(uint32 index) const { LUDUS_ASSERT(index < SemaphoreInfos.GetSize(), "Index out of bounds"); return SemaphoreInfos[index]; }
+    [[nodiscard]] LUDUS_INLINE const SemaphoreInfo& GetSemaphoreInfo(uint32 index) const
+    {
+        LUDUS_ASSERT(index < SemaphoreInfos.GetSize(), "Index out of bounds");
+        return SemaphoreInfos[index];
+    }
 };
 
 struct GpuInfo final
@@ -134,7 +138,11 @@ struct ImageInfo final
 {
     VkImage Image = VK_NULL_HANDLE;
     VkFormat ImageFormat = VK_FORMAT_UNDEFINED;
-    VkExtent2D ImageExtent = { .width = 0, .height = 0 };
+    VkExtent2D ImageExtent =
+    {
+        .width = 0,
+        .height = 0,
+    };
 };
 
 struct WindowSystemIntegrationInfo final
@@ -143,8 +151,8 @@ struct WindowSystemIntegrationInfo final
     WindowInfo WindowInfo = {};
     SurfaceInfo SurfaceInfo = {};
     VkSwapchainKHR Swapchain = VK_NULL_HANDLE;
-    Array<ImageInfo> ImageInfos = {};
-    Array<uint32> RenderFinishedSemaphoreIndices = {};
+    Array<ImageInfo> ImageInfos;
+    Array<uint32> RenderFinishedSemaphoreIndices;
 };
 
 struct VulkanInfo final
@@ -154,7 +162,11 @@ struct VulkanInfo final
     Array<GpuInfo> GpuInfos;
     WindowSystemIntegrationInfo WindowSystemIntegrationInfo = {};
 
-    [[nodiscard]] LUDUS_INLINE const GpuInfo& GetPrimaryGpuInfo() const noexcept { LUDUS_ASSERT(!GpuInfos.IsEmpty(), "GpuInfos is empty."); return GpuInfos[0]; }
+    [[nodiscard]] LUDUS_INLINE const GpuInfo& GetPrimaryGpuInfo() const noexcept
+    {
+        LUDUS_ASSERT(!GpuInfos.IsEmpty(), "GpuInfos is empty.");
+        return GpuInfos[0];
+    }
 };
 
 struct FrameContextInfo final
@@ -170,21 +182,31 @@ struct FrameContextInfo final
 
 struct RenderContextInfo final
 {
-    Array<FrameContextInfo> FrameContextInfos = {};
-    Array<uint32> FrameToUpdateIndices = {};
-    Array<uint32> PresentingImageIndices = {};
+    Array<FrameContextInfo> FrameContextInfos;
+    Array<uint32> FrameToUpdateIndices;
+    Array<uint32> PresentingImageIndices;
 
-    [[nodiscard]] LUDUS_INLINE uint32 GetFrameToUpdateIndex() const noexcept { LUDUS_ASSERT(!FrameToUpdateIndices.IsEmpty(), "FrameToUpdateIndices is empty."); return FrameToUpdateIndices[0]; }
-    [[nodiscard]] LUDUS_INLINE FrameContextInfo& GetFrameContextInfoToUpdate() noexcept { LUDUS_ASSERT(!FrameContextInfos.IsEmpty(), "FrameContextInfos is empty."); return FrameContextInfos[GetFrameToUpdateIndex()]; }
+    [[nodiscard]] LUDUS_INLINE uint32 GetFrameToUpdateIndex() const noexcept
+    {
+        LUDUS_ASSERT(!FrameToUpdateIndices.IsEmpty(), "FrameToUpdateIndices is empty.");
+        return FrameToUpdateIndices[0];
+    }
+    [[nodiscard]] LUDUS_INLINE FrameContextInfo& GetFrameContextInfoToUpdate() noexcept
+    {
+        LUDUS_ASSERT(!FrameContextInfos.IsEmpty(), "FrameContextInfos is empty.");
+        return FrameContextInfos[GetFrameToUpdateIndex()];
+    }
 };
 
 static VulkanInfo gVulkanInfo;
 static RenderContextInfo gRenderContextInfo;
 
+#if defined(LUDUS_RHI_ENABLE_VALIDATION_LAYER)
 static VkBool32 DebugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
                                             VkDebugUtilsMessageTypeFlagsEXT messageType,
                                             const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
                                             void* pUserData) noexcept;
+#endif
 [[nodiscard]] static bool initializeInstance(VulkanInfo& inoutVulkanInfo, const ApplicationInfo& appInfo) noexcept;
 [[nodiscard]] static bool initializeGpuInfos(VulkanInfo& inoutVulkanInfo) noexcept;
 [[nodiscard]] static bool initializeGpuInfo(GpuInfo& inoutGpuInfo, const VulkanInfo& vulkanInfo) noexcept;
@@ -194,8 +216,10 @@ static void shutdownDevice(DeviceInfo& inoutDeviceInfo) noexcept;
 static void initializeQueues(QueueFamilyInfo& inoutQueueFamilyInfo, const DeviceInfo& deviceInfo) noexcept;
 [[nodiscard]] static bool initializeWindowSystemIntegration(WindowSystemIntegrationInfo& inoutWsiInfo,
                                                             const VulkanInfo& vulkanInfo) noexcept;
-static void shutdownWindowSystemIntegration(WindowSystemIntegrationInfo& inoutWsiInfo, const VulkanInfo& vulkanInfo) noexcept;
-[[nodiscard]] static bool initializeSwapchain(WindowSystemIntegrationInfo& inoutWsiInfo, DeviceInfo& deviceInfo) noexcept;
+static void shutdownWindowSystemIntegration(WindowSystemIntegrationInfo& inoutWsiInfo,
+                                            const VulkanInfo& vulkanInfo) noexcept;
+[[nodiscard]] static bool initializeSwapchain(WindowSystemIntegrationInfo& inoutWsiInfo,
+                                              DeviceInfo& deviceInfo) noexcept;
 static void shutdownSwapchain(WindowSystemIntegrationInfo& inoutWsiInfo, const DeviceInfo& deviceInfo) noexcept;
 [[nodiscard]] static bool initializeCommands(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo) noexcept;
 static void shutdownCommands(DeviceInfo& inoutDeviceInfo) noexcept;
@@ -204,7 +228,9 @@ static void shutdownSemaphore(SemaphoreInfo& inoutSemaphoreInfo, DeviceInfo& ino
 [[nodiscard]] static bool initializeFence(uint32& outFenceIndex, DeviceInfo& inoutDeviceInfo) noexcept;
 static void shutdownFence(FenceInfo& inoutFenceInfo, DeviceInfo& inoutDeviceInfo) noexcept;
 
-[[nodiscard]] static bool createCommandBufferInfo(uint32& outCommandBufferInfoIndex, CommandPoolInfo& inoutCommandPoolInfo, const DeviceInfo& deviceInfo) noexcept;
+[[nodiscard]] static bool createCommandBufferInfo(uint32& outCommandBufferInfoIndex,
+                                                  CommandPoolInfo& inoutCommandPoolInfo,
+                                                  const DeviceInfo& deviceInfo) noexcept;
 
 static bool gIsInitialized = false;
 bool Initialize(const ApplicationInfo& appInfo) noexcept
@@ -274,16 +300,24 @@ bool ConnectWindow(const WindowInfo& windowInfo) noexcept
     {
         .WindowInfo = windowInfo,
         .ImageInfos =
-        {
             {
-                .ImageFormat = VK_FORMAT_B8G8R8A8_UNORM,
-                .ImageExtent = { .width = windowInfo.Width, .height = windowInfo.Height },
+                {
+                    .ImageFormat = VK_FORMAT_B8G8R8A8_UNORM,
+                    .ImageExtent =
+                    {
+                        .width = windowInfo.Width,
+                        .height = windowInfo.Height,
+                    },
+                },
+                {
+                    .ImageFormat = VK_FORMAT_B8G8R8A8_UNORM,
+                    .ImageExtent =
+                    {
+                        .width = windowInfo.Width,
+                        .height = windowInfo.Height,
+                    },
+                },
             },
-            {
-                .ImageFormat = VK_FORMAT_B8G8R8A8_UNORM,
-                .ImageExtent = { .width = windowInfo.Width, .height = windowInfo.Height },
-            },
-        },
     };
     if (!initializeWindowSystemIntegration(candidate, gVulkanInfo))
     {
@@ -340,7 +374,7 @@ bool ConnectWindow(const WindowInfo& windowInfo) noexcept
             initializeQueues(family, gpuInfo.DeviceInfo);
         }
         wsi = candidate;
-        if(initializeSwapchain(wsi, gpuInfo.DeviceInfo) == false)
+        if (!initializeSwapchain(wsi, gpuInfo.DeviceInfo))
         {
             shutdownSwapchain(gVulkanInfo.WindowSystemIntegrationInfo, gpuInfo.DeviceInfo);
             continue;
@@ -348,18 +382,18 @@ bool ConnectWindow(const WindowInfo& windowInfo) noexcept
 
         const uint32 backBuffersCount = gVulkanInfo.WindowSystemIntegrationInfo.ImageInfos.GetSize();
         gRenderContextInfo.FrameContextInfos.EnsureCapacity(backBuffersCount);
-        for(uint32 i = 0; i < backBuffersCount; ++i)
+        for (uint32 i = 0; i < backBuffersCount; ++i)
         {
             FrameContextInfo frameContextInfo =
             {
                 .Index = i,
             };
-            if(initializeSemaphore(frameContextInfo.ImageAvailableSemaphoreIndex, gVulkanInfo.GpuInfos[0].DeviceInfo) == false)
+            if (!initializeSemaphore(frameContextInfo.ImageAvailableSemaphoreIndex, gVulkanInfo.GpuInfos[0].DeviceInfo))
             {
                 LUDUS_ASSERT_F(false, "Failed to initialize image available semaphore for frame index {}.", i);
                 return false;
             }
-            if(initializeFence(frameContextInfo.FenceIndex, gVulkanInfo.GpuInfos[0].DeviceInfo) == false)
+            if (!initializeFence(frameContextInfo.FenceIndex, gVulkanInfo.GpuInfos[0].DeviceInfo))
             {
                 LUDUS_ASSERT_F(false, "Failed to initialize fence for frame index {}.", i);
                 return false;
@@ -391,11 +425,14 @@ bool InitializeRendering() noexcept
     }
 
     DeviceInfo& deviceInfo = gVulkanInfo.GpuInfos[0].DeviceInfo;
-    const uint32 swapchainImagesCount = static_cast<uint32>(gVulkanInfo.WindowSystemIntegrationInfo.ImageInfos.GetSize());
+    const uint32 swapchainImagesCount =
+        static_cast<uint32>(gVulkanInfo.WindowSystemIntegrationInfo.ImageInfos.GetSize());
     constexpr uint32 COMMAND_POOL_INDEX = 0;
-    for(uint32 i = 0; i < swapchainImagesCount; ++i)
+    for (uint32 i = 0; i < swapchainImagesCount; ++i)
     {
-        if(createCommandBufferInfo(gRenderContextInfo.FrameContextInfos[i].CommandBufferIndex, deviceInfo.CommandPoolInfos[COMMAND_POOL_INDEX], deviceInfo) == false)
+        if (!createCommandBufferInfo(gRenderContextInfo.FrameContextInfos[i].CommandBufferIndex,
+                                     deviceInfo.CommandPoolInfos[COMMAND_POOL_INDEX],
+                                     deviceInfo))
         {
             LUDUS_LOG_ERROR(LOG_RHI, "Failed to create command buffer info for frame index {}.", i);
             return false;
@@ -449,19 +486,19 @@ bool BeginFrame() noexcept
     FrameContextInfo& frameContextInfo = gRenderContextInfo.GetFrameContextInfoToUpdate();
 
     vr = vkWaitForFences(gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.Device,
-                    1,
-                    &gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.FenceInfos[frameContextInfo.FenceIndex].Fence,
-                    VK_TRUE,
-                    UINT64_MAX);
-    if(vr != VK_SUCCESS)
+                         1,
+                         &gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.FenceInfos[frameContextInfo.FenceIndex].Fence,
+                         VK_TRUE,
+                         UINT64_MAX);
+    if (vr != VK_SUCCESS)
     {
         LUDUS_ASSERT_F(false, "Failed to wait for fence: {}", vr);
         return false;
     }
     vr = vkResetFences(gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.Device,
-                  1,
-                  &gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.FenceInfos[frameContextInfo.FenceIndex].Fence);
-    if(vr != VK_SUCCESS)
+                       1,
+                       &gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.FenceInfos[frameContextInfo.FenceIndex].Fence);
+    if (vr != VK_SUCCESS)
     {
         LUDUS_ASSERT_F(false, "Failed to reset fence: {}", vr);
         return false;
@@ -469,8 +506,9 @@ bool BeginFrame() noexcept
 
     const DeviceInfo& deviceInfo = gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo;
     WindowSystemIntegrationInfo& wsiInfo = gVulkanInfo.WindowSystemIntegrationInfo;
-    const SemaphoreInfo& imageAvailableSemaphoreInfo = deviceInfo.GetSemaphoreInfo(frameContextInfo.ImageAvailableSemaphoreIndex);
-    if(gVulkanInfo.ApiVersion >= VK_API_VERSION_1_1)
+    const SemaphoreInfo& imageAvailableSemaphoreInfo =
+        deviceInfo.GetSemaphoreInfo(frameContextInfo.ImageAvailableSemaphoreIndex);
+    if (gVulkanInfo.ApiVersion >= VK_API_VERSION_1_1)
     {
         const VkAcquireNextImageInfoKHR acquireNextImageInfo =
         {
@@ -487,16 +525,18 @@ bool BeginFrame() noexcept
     else
     {
         vr = vkAcquireNextImageKHR(deviceInfo.Device,
-                                wsiInfo.Swapchain,
-                                UINT64_MAX,
-                                imageAvailableSemaphoreInfo.Semaphore,
-                                VK_NULL_HANDLE,
-                                &frameContextInfo.ImageIndex);
+                                   wsiInfo.Swapchain,
+                                   UINT64_MAX,
+                                   imageAvailableSemaphoreInfo.Semaphore,
+                                   VK_NULL_HANDLE,
+                                   &frameContextInfo.ImageIndex);
     }
 
-    const CommandBufferInfo& commandBufferInfo = gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.CommandPoolInfos[frameContextInfo.CommandPoolIndex].CommandBufferInfos[frameContextInfo.CommandBufferIndex];
+    const CommandBufferInfo& commandBufferInfo = gVulkanInfo.GetPrimaryGpuInfo()
+                                                     .DeviceInfo.CommandPoolInfos[frameContextInfo.CommandPoolIndex]
+                                                     .CommandBufferInfos[frameContextInfo.CommandBufferIndex];
     vr = vkResetCommandBuffer(commandBufferInfo.CommandBuffer, 0);
-    if(vr != VK_SUCCESS)
+    if (vr != VK_SUCCESS)
     {
         LUDUS_ASSERT_F(false, "Failed to reset command buffer: {}", vr);
         return false;
@@ -510,7 +550,7 @@ bool BeginFrame() noexcept
         .pInheritanceInfo = nullptr,
     };
     vr = vkBeginCommandBuffer(commandBufferInfo.CommandBuffer, &commandBufferBeginInfo);
-    if(vr != VK_SUCCESS)
+    if (vr != VK_SUCCESS)
     {
         LUDUS_ASSERT_F(false, "Failed to begin command buffer: {}", vr);
         return false;
@@ -525,15 +565,17 @@ bool EndFrame() noexcept
 
     FrameContextInfo& frameContextInfo = gRenderContextInfo.GetFrameContextInfoToUpdate();
 
-    const CommandBufferInfo& commandBufferInfo = gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.CommandPoolInfos[0].CommandBufferInfos[0];
+    const CommandBufferInfo& commandBufferInfo =
+        gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.CommandPoolInfos[0].CommandBufferInfos[0];
     vr = vkEndCommandBuffer(commandBufferInfo.CommandBuffer);
-    if(vr != VK_SUCCESS)
+    if (vr != VK_SUCCESS)
     {
         LUDUS_ASSERT_F(false, "Failed to end command buffer: {}", vr);
         return false;
     }
 
-    const QueueFamilyInfo& graphicsQueueFamilyInfo = gVulkanInfo.GetPrimaryGpuInfo().QueueFamilyInfo[gVulkanInfo.GetPrimaryGpuInfo().GraphicsQueueFamilyIndex];
+    const QueueFamilyInfo& graphicsQueueFamilyInfo =
+        gVulkanInfo.GetPrimaryGpuInfo().QueueFamilyInfo[gVulkanInfo.GetPrimaryGpuInfo().GraphicsQueueFamilyIndex];
     const VkCommandBufferSubmitInfo commandBufferSubmitInfo =
     {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
@@ -542,7 +584,8 @@ bool EndFrame() noexcept
         .deviceMask = 0,
     };
     const DeviceInfo& deviceInfo = gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo;
-    const SemaphoreInfo& imageAvailableSemaphoreInfo = deviceInfo.GetSemaphoreInfo(frameContextInfo.ImageAvailableSemaphoreIndex);
+    const SemaphoreInfo& imageAvailableSemaphoreInfo =
+        deviceInfo.GetSemaphoreInfo(frameContextInfo.ImageAvailableSemaphoreIndex);
     const VkSemaphoreSubmitInfo waitSemaphoreSubmitInfo =
     {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
@@ -552,7 +595,8 @@ bool EndFrame() noexcept
         .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
     };
     WindowSystemIntegrationInfo& wsiInfo = gVulkanInfo.WindowSystemIntegrationInfo;
-    const VkSemaphore renderFinishedSemaphore = deviceInfo.GetSemaphoreInfo(wsiInfo.RenderFinishedSemaphoreIndices[frameContextInfo.ImageIndex]).Semaphore;
+    const VkSemaphore renderFinishedSemaphore =
+        deviceInfo.GetSemaphoreInfo(wsiInfo.RenderFinishedSemaphoreIndices[frameContextInfo.ImageIndex]).Semaphore;
     const VkSemaphoreSubmitInfo signalSemaphoreSubmitInfo =
     {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
@@ -575,7 +619,7 @@ bool EndFrame() noexcept
     };
     const FenceInfo& fenceInfo = deviceInfo.FenceInfos[frameContextInfo.FenceIndex];
     vr = vkQueueSubmit2(graphicsQueueFamilyInfo.QueueInfos[0].Queue, 1, &submitInfo2, fenceInfo.Fence);
-    if(vr != VK_SUCCESS)
+    if (vr != VK_SUCCESS)
     {
         LUDUS_ASSERT_F(false, "Failed to submit to graphics queue: {}", vr);
         return false;
@@ -592,9 +636,10 @@ bool EndFrame() noexcept
         .pImageIndices = &frameContextInfo.ImageIndex,
         .pResults = nullptr,
     };
-    const QueueFamilyInfo& presentQueueFamilyInfo = gVulkanInfo.GetPrimaryGpuInfo().QueueFamilyInfo[gVulkanInfo.GetPrimaryGpuInfo().PresentQueueFamilyIndex];
+    const QueueFamilyInfo& presentQueueFamilyInfo =
+        gVulkanInfo.GetPrimaryGpuInfo().QueueFamilyInfo[gVulkanInfo.GetPrimaryGpuInfo().PresentQueueFamilyIndex];
     vr = vkQueuePresentKHR(presentQueueFamilyInfo.QueueInfos[0].Queue, &presentInfo);
-    if(vr != VK_SUCCESS)
+    if (vr != VK_SUCCESS)
     {
         LUDUS_ASSERT_F(false, "Failed to present to present queue: {}", vr);
         return false;
@@ -602,6 +647,7 @@ bool EndFrame() noexcept
     return vr == VK_SUCCESS;
 }
 
+#if defined(LUDUS_RHI_ENABLE_VALIDATION_LAYER)
 VkBool32 DebugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
                                      [[maybe_unused]] VkDebugUtilsMessageTypeFlagsEXT messageType,
                                      [[maybe_unused]] const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
@@ -625,6 +671,7 @@ VkBool32 DebugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT mess
     }
     return VK_TRUE;
 }
+#endif
 
 bool initializeInstance(VulkanInfo& inoutVulkanInfo, const ApplicationInfo& appInfo) noexcept
 {
@@ -730,7 +777,8 @@ bool initializeInstance(VulkanInfo& inoutVulkanInfo, const ApplicationInfo& appI
 
     const void* pNext = nullptr;
 #if defined(LUDUS_RHI_ENABLE_VALIDATION_LAYER)
-    const VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo = {
+    const VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo =
+    {
         .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
         .pNext = nullptr,
         .flags = 0,
@@ -740,7 +788,8 @@ bool initializeInstance(VulkanInfo& inoutVulkanInfo, const ApplicationInfo& appI
         .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
         .pfnUserCallback = DebugUtilsMessengerCallback,
-        .pUserData = nullptr};
+        .pUserData = nullptr,
+    };
 
     constexpr StaticArray<VkValidationFeatureEnableEXT, 5> enabledValidationFeatures = {
         VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
@@ -750,33 +799,40 @@ bool initializeInstance(VulkanInfo& inoutVulkanInfo, const ApplicationInfo& appI
         VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
     };
 
-    const VkValidationFeaturesEXT validationFeatures = {
+    const VkValidationFeaturesEXT validationFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,
         .pNext = &debugCreateInfo,
         .enabledValidationFeatureCount = static_cast<uint32>(enabledValidationFeatures.GetSize()),
         .pEnabledValidationFeatures = enabledValidationFeatures.GetData(),
         .disabledValidationFeatureCount = 0,
-        .pDisabledValidationFeatures = nullptr};
+        .pDisabledValidationFeatures = nullptr,
+    };
     pNext = &validationFeatures;
 #endif
 
-    const VkApplicationInfo applicationInfo = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-                                               .pNext = nullptr,
-                                               .pApplicationName = appInfo.Name.c_str(),
-                                               .applicationVersion = appInfo.Version,
-                                               .pEngineName = "Ludus",
-                                               .engineVersion = 0,
-                                               .apiVersion = inoutVulkanInfo.ApiVersion};
+    const VkApplicationInfo applicationInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pNext = nullptr,
+        .pApplicationName = appInfo.Name.c_str(),
+        .applicationVersion = appInfo.Version,
+        .pEngineName = "Ludus",
+        .engineVersion = 0,
+        .apiVersion = inoutVulkanInfo.ApiVersion,
+    };
 
-    const VkInstanceCreateInfo instanceCreateInfo = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-                                                     .pNext = pNext,
-                                                     .flags = 0,
-                                                     .pApplicationInfo = &applicationInfo,
-                                                     .enabledLayerCount = 0,
-                                                     .ppEnabledLayerNames = nullptr,
-                                                     .enabledExtensionCount =
-                                                         static_cast<uint32>(enabledExtensions.GetSize()),
-                                                     .ppEnabledExtensionNames = enabledExtensions.GetData()};
+    const VkInstanceCreateInfo instanceCreateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pNext = pNext,
+        .flags = 0,
+        .pApplicationInfo = &applicationInfo,
+        .enabledLayerCount = 0,
+        .ppEnabledLayerNames = nullptr,
+        .enabledExtensionCount = static_cast<uint32>(enabledExtensions.GetSize()),
+        .ppEnabledExtensionNames = enabledExtensions.GetData(),
+    };
 
     vr = vkCreateInstance(&instanceCreateInfo, nullptr, &inoutVulkanInfo.Instance);
     if (vr != VK_SUCCESS)
@@ -816,7 +872,10 @@ bool initializeGpuInfos(VulkanInfo& inoutVulkanInfo) noexcept
     gpuInfos.EnsureCapacity(gpuCount);
     for (uint32 i = 0; i < gpuCount; ++i)
     {
-        GpuInfo gpuInfo{.PhysicalDevice = gpus[i]};
+        GpuInfo gpuInfo
+        {
+            .PhysicalDevice = gpus[i],
+        };
         const bool isInitialized = initializeGpuInfo(gpuInfo, inoutVulkanInfo);
         if (isInitialized)
         {
@@ -864,22 +923,31 @@ bool initializeGpuInfo(GpuInfo& inoutGpuInfo, const VulkanInfo& vulkanInfo) noex
     inoutGpuInfo.RayTracingPipelineProperties.pNext = pNext;
     pNext = &inoutGpuInfo.RayTracingPipelineProperties;
 
-    inoutGpuInfo.Properties2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-                                .pNext = pNext,
-                                .properties = {}};
+    inoutGpuInfo.Properties2 =
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = pNext,
+        .properties = {},
+    };
     vkGetPhysicalDeviceProperties2(inoutGpuInfo.PhysicalDevice, &inoutGpuInfo.Properties2);
 
     LUDUS_LOG_INFO(LOG_RHI, "Found Vulkan physical device: {}", inoutGpuInfo.Properties2.properties.deviceName);
 
     uint32 queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties2(inoutGpuInfo.PhysicalDevice, &queueFamilyCount, nullptr);
-    Array<VkQueueFamilyProperties2> queueFamilyProperties(
-        queueFamilyCount,
-        VkQueueFamilyProperties2{.sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2, .pNext = nullptr});
+    Array<VkQueueFamilyProperties2> queueFamilyProperties(queueFamilyCount,
+                                                          VkQueueFamilyProperties2
+                                                          {
+                                                              .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2,
+                                                              .pNext = nullptr,
+                                                          });
     Array<VkQueueFamilyGlobalPriorityProperties> queueFamilyGlobalPriorityProperties(
         queueFamilyCount,
-        VkQueueFamilyGlobalPriorityProperties{.sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES_KHR,
-                                              .pNext = nullptr});
+        VkQueueFamilyGlobalPriorityProperties
+        {
+            .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES_KHR,
+            .pNext = nullptr,
+        });
     if (vulkanInfo.ApiVersion >= VK_API_VERSION_1_4)
     {
         for (uint32 i = 0; i < queueFamilyCount; ++i)
@@ -894,9 +962,12 @@ bool initializeGpuInfo(GpuInfo& inoutGpuInfo, const VulkanInfo& vulkanInfo) noex
     inoutGpuInfo.QueueFamilyInfo.EnsureCapacity(queueFamilyCount);
     for (uint32 i = 0; i < queueFamilyCount; ++i)
     {
-        QueueFamilyInfo queueFamilyInfo{.Index = i,
-                                        .Properties = queueFamilyProperties[i],
-                                        .GlobalPriorityProperties = queueFamilyGlobalPriorityProperties[i]};
+        QueueFamilyInfo queueFamilyInfo
+        {
+            .Index = i,
+            .Properties = queueFamilyProperties[i],
+            .GlobalPriorityProperties = queueFamilyGlobalPriorityProperties[i],
+        };
 
         inoutGpuInfo.QueueFamilyInfo.Add(queueFamilyInfo);
     }
@@ -960,10 +1031,17 @@ bool initializeGpuInfo(GpuInfo& inoutGpuInfo, const VulkanInfo& vulkanInfo) noex
     }
 
     pNext = nullptr;
-    inoutGpuInfo.MemoryBudgetProperties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT,
-                                           .pNext = nullptr};
+    inoutGpuInfo.MemoryBudgetProperties =
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT,
+        .pNext = nullptr,
+    };
     pNext = &inoutGpuInfo.MemoryBudgetProperties;
-    inoutGpuInfo.MemoryProperties2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2, .pNext = pNext};
+    inoutGpuInfo.MemoryProperties2 =
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2,
+        .pNext = pNext,
+    };
     vkGetPhysicalDeviceMemoryProperties2(inoutGpuInfo.PhysicalDevice, &inoutGpuInfo.MemoryProperties2);
 
     float32 memoryScore = 0.0f;
@@ -1145,25 +1223,64 @@ bool initializeDeviceInfo(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo, c
     }
 
     Array<VkExtensionProperties> extensionsToRequest;
-    extensionsToRequest.Add({.extensionName = VK_KHR_SWAPCHAIN_EXTENSION_NAME});
+    extensionsToRequest.Add(
+    {
+        .extensionName = VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    });
     if (vulkanInfo.ApiVersion < VK_API_VERSION_1_4)
     {
-        extensionsToRequest.Add({.extensionName = VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME});
+        extensionsToRequest.Add(
+        {
+            .extensionName = VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME,
+        });
     }
     if (vulkanInfo.ApiVersion < VK_API_VERSION_1_3)
     {
-        extensionsToRequest.Add({.extensionName = VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME});
+        extensionsToRequest.Add(
+        {
+            .extensionName = VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+        });
     }
-    extensionsToRequest.Add({.extensionName = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME});
-    extensionsToRequest.Add({.extensionName = VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME});
-    extensionsToRequest.Add({.extensionName = VK_KHR_RAY_QUERY_EXTENSION_NAME});
-    extensionsToRequest.Add({.extensionName = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME});
-    extensionsToRequest.Add({.extensionName = VK_EXT_MESH_SHADER_EXTENSION_NAME});
-    extensionsToRequest.Add({.extensionName = VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME});
-    extensionsToRequest.Add({.extensionName = VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME});
-    extensionsToRequest.Add({.extensionName = VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME});
-    extensionsToRequest.Add({.extensionName = VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME});
-    extensionsToRequest.Add({.extensionName = VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME});
+    extensionsToRequest.Add(
+    {
+        .extensionName = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+    });
+    extensionsToRequest.Add(
+    {
+        .extensionName = VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+    });
+    extensionsToRequest.Add(
+    {
+        .extensionName = VK_KHR_RAY_QUERY_EXTENSION_NAME,
+    });
+    extensionsToRequest.Add(
+    {
+        .extensionName = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME,
+    });
+    extensionsToRequest.Add(
+    {
+        .extensionName = VK_EXT_MESH_SHADER_EXTENSION_NAME,
+    });
+    extensionsToRequest.Add(
+    {
+        .extensionName = VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME,
+    });
+    extensionsToRequest.Add(
+    {
+        .extensionName = VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME,
+    });
+    extensionsToRequest.Add(
+    {
+        .extensionName = VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME,
+    });
+    extensionsToRequest.Add(
+    {
+        .extensionName = VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME,
+    });
+    extensionsToRequest.Add(
+    {
+        .extensionName = VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME,
+    });
 
     for (uint32 i = 0; i < extensionPropertyCount; ++i)
     {
@@ -1190,13 +1307,17 @@ bool initializeDeviceInfo(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo, c
     }
 
     void* pNext = nullptr;
-    inoutDeviceInfo.Features2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-                                 .pNext = nullptr,
-                                 .features = {}};
+    inoutDeviceInfo.Features2 =
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = nullptr,
+        .features = {},
+    };
     pNext = &inoutDeviceInfo.Features2;
     if (vulkanInfo.ApiVersion >= VK_API_VERSION_1_1)
     {
-        inoutDeviceInfo.Vulkan11Features = {
+        inoutDeviceInfo.Vulkan11Features =
+        {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
             .pNext = pNext,
         };
@@ -1204,7 +1325,8 @@ bool initializeDeviceInfo(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo, c
     }
     if (vulkanInfo.ApiVersion >= VK_API_VERSION_1_2)
     {
-        inoutDeviceInfo.Vulkan12Features = {
+        inoutDeviceInfo.Vulkan12Features =
+        {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
             .pNext = pNext,
         };
@@ -1212,7 +1334,8 @@ bool initializeDeviceInfo(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo, c
     }
     if (vulkanInfo.ApiVersion >= VK_API_VERSION_1_3)
     {
-        inoutDeviceInfo.Vulkan13Features = {
+        inoutDeviceInfo.Vulkan13Features =
+        {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
             .pNext = pNext,
         };
@@ -1220,63 +1343,74 @@ bool initializeDeviceInfo(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo, c
     }
     if (vulkanInfo.ApiVersion >= VK_API_VERSION_1_4)
     {
-        inoutDeviceInfo.Vulkan14Features = {
+        inoutDeviceInfo.Vulkan14Features =
+        {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
             .pNext = pNext,
         };
         pNext = &inoutDeviceInfo.Vulkan14Features;
     }
-    inoutDeviceInfo.AccelerationStructureFeatures = {
+    inoutDeviceInfo.AccelerationStructureFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
         .pNext = pNext,
     };
     pNext = &inoutDeviceInfo.AccelerationStructureFeatures;
-    inoutDeviceInfo.RayTracingPipelineFeatures = {
+    inoutDeviceInfo.RayTracingPipelineFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
         .pNext = pNext,
     };
     pNext = &inoutDeviceInfo.RayTracingPipelineFeatures;
-    inoutDeviceInfo.RayQueryFeatures = {
+    inoutDeviceInfo.RayQueryFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
         .pNext = pNext,
     };
     pNext = &inoutDeviceInfo.RayQueryFeatures;
-    inoutDeviceInfo.MeshShaderFeatures = {
+    inoutDeviceInfo.MeshShaderFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,
         .pNext = pNext,
     };
     pNext = &inoutDeviceInfo.MeshShaderFeatures;
-    inoutDeviceInfo.DescriptorBufferFeatures = {
+    inoutDeviceInfo.DescriptorBufferFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT,
         .pNext = pNext,
     };
     pNext = &inoutDeviceInfo.DescriptorBufferFeatures;
-    inoutDeviceInfo.FragmentShadingRateFeatures = {
+    inoutDeviceInfo.FragmentShadingRateFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR,
         .pNext = pNext,
     };
     pNext = &inoutDeviceInfo.FragmentShadingRateFeatures;
 
-    inoutDeviceInfo.GraphicsPipelineLibraryFeatures = {
+    inoutDeviceInfo.GraphicsPipelineLibraryFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT,
         .pNext = pNext,
     };
     pNext = &inoutDeviceInfo.GraphicsPipelineLibraryFeatures;
 
-    inoutDeviceInfo.MemoryPriorityFeatures = {
+    inoutDeviceInfo.MemoryPriorityFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT,
         .pNext = pNext,
     };
     pNext = &inoutDeviceInfo.MemoryPriorityFeatures;
 
-    inoutDeviceInfo.PageableDeviceLocalMemoryFeatures = {
+    inoutDeviceInfo.PageableDeviceLocalMemoryFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PAGEABLE_DEVICE_LOCAL_MEMORY_FEATURES_EXT,
         .pNext = pNext,
     };
     pNext = &inoutDeviceInfo.PageableDeviceLocalMemoryFeatures;
 
 #if defined(LUDUS_RHI_DEVICE_DEBUG_FEATURES_PROFILE)
-    inoutDeviceInfo.PerformanceQueryFeatures = {
+    inoutDeviceInfo.PerformanceQueryFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PERFORMANCE_QUERY_FEATURES_KHR,
         .pNext = pNext,
     };
@@ -1284,19 +1418,22 @@ bool initializeDeviceInfo(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo, c
 #endif
 
 #if defined(LUDUS_RHI_DEVICE_DEBUG_FEATURES)
-    inoutDeviceInfo.PipelineExecutablePropertiesFeatures = {
+    inoutDeviceInfo.PipelineExecutablePropertiesFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
         .pNext = pNext,
     };
     pNext = &inoutDeviceInfo.PipelineExecutablePropertiesFeatures;
 
-    inoutDeviceInfo.DeviceMemoryReportFeatures = {
+    inoutDeviceInfo.DeviceMemoryReportFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_MEMORY_REPORT_FEATURES_EXT,
         .pNext = pNext,
     };
     pNext = &inoutDeviceInfo.DeviceMemoryReportFeatures;
 
-    inoutDeviceInfo.FaultFeatures = {
+    inoutDeviceInfo.FaultFeatures =
+    {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT,
         .pNext = pNext,
     };
@@ -1314,7 +1451,8 @@ bool initializeDeviceInfo(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo, c
         {
             continue;
         }
-        queueCreateInfos.Add(VkDeviceQueueCreateInfo{
+        queueCreateInfos.Add(VkDeviceQueueCreateInfo
+        {
             .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
             .queueFamilyIndex = family.Index,
             .queueCount = 1,
@@ -1322,17 +1460,19 @@ bool initializeDeviceInfo(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo, c
         });
     }
 
-    const VkDeviceCreateInfo deviceCreateInfo{.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-                                              .pNext = pNext,
-                                              .flags = 0,
-                                              .queueCreateInfoCount = static_cast<uint32>(queueCreateInfos.GetSize()),
-                                              .pQueueCreateInfos = queueCreateInfos.GetData(),
-                                              .enabledLayerCount = 0,
-                                              .ppEnabledLayerNames = nullptr,
-                                              .enabledExtensionCount =
-                                                  static_cast<uint32>(requestedExtensions.GetSize()),
-                                              .ppEnabledExtensionNames = requestedExtensions.GetData(),
-                                              .pEnabledFeatures = nullptr};
+    const VkDeviceCreateInfo deviceCreateInfo
+    {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext = pNext,
+        .flags = 0,
+        .queueCreateInfoCount = static_cast<uint32>(queueCreateInfos.GetSize()),
+        .pQueueCreateInfos = queueCreateInfos.GetData(),
+        .enabledLayerCount = 0,
+        .ppEnabledLayerNames = nullptr,
+        .enabledExtensionCount = static_cast<uint32>(requestedExtensions.GetSize()),
+        .ppEnabledExtensionNames = requestedExtensions.GetData(),
+        .pEnabledFeatures = nullptr,
+    };
     vr = vkCreateDevice(gpuInfo.PhysicalDevice, &deviceCreateInfo, nullptr, &inoutDeviceInfo.Device);
     if (vr != VK_SUCCESS)
     {
@@ -1346,12 +1486,12 @@ void shutdownDevice(DeviceInfo& inoutDeviceInfo) noexcept
 {
     if (inoutDeviceInfo.Device != VK_NULL_HANDLE)
     {
-        for(SemaphoreInfo& semaphoreInfo : inoutDeviceInfo.SemaphoreInfos)
+        for (SemaphoreInfo& semaphoreInfo : inoutDeviceInfo.SemaphoreInfos)
         {
             shutdownSemaphore(semaphoreInfo, inoutDeviceInfo);
         }
         inoutDeviceInfo.SemaphoreInfos.Clear();
-        for(FenceInfo& fenceInfo : inoutDeviceInfo.FenceInfos)
+        for (FenceInfo& fenceInfo : inoutDeviceInfo.FenceInfos)
         {
             shutdownFence(fenceInfo, inoutDeviceInfo);
         }
@@ -1365,13 +1505,16 @@ void shutdownDevice(DeviceInfo& inoutDeviceInfo) noexcept
 void initializeQueues(QueueFamilyInfo& inoutQueueFamilyInfo, const DeviceInfo& deviceInfo) noexcept
 {
     const uint32 inoutQueueFamilyIndex = inoutQueueFamilyInfo.Properties.queueFamilyProperties.queueCount;
-    for(uint32 i = 0; i < inoutQueueFamilyIndex; ++i)
+    for (uint32 i = 0; i < inoutQueueFamilyIndex; ++i)
     {
         QueueInfo queueInfo = {};
         vkGetDeviceQueue(deviceInfo.Device, inoutQueueFamilyInfo.Index, i, &queueInfo.Queue);
         inoutQueueFamilyInfo.QueueInfos.Add(queueInfo);
     }
-    LUDUS_LOG_INFO(LOG_RHI, "Initialized {} queues for family index {}", inoutQueueFamilyInfo.QueueInfos.GetSize(), inoutQueueFamilyInfo.Index);
+    LUDUS_LOG_INFO(LOG_RHI,
+                   "Initialized {} queues for family index {}",
+                   inoutQueueFamilyInfo.QueueInfos.GetSize(),
+                   inoutQueueFamilyInfo.Index);
 }
 
 bool initializeWindowSystemIntegration(WindowSystemIntegrationInfo& inoutWsiInfo, const VulkanInfo& vulkanInfo) noexcept
@@ -1409,7 +1552,7 @@ bool initializeWindowSystemIntegration(WindowSystemIntegrationInfo& inoutWsiInfo
     (void)vulkanInfo;
 #endif
 
-    if(result == false)
+    if (!result)
     {
         LUDUS_LOG_ERROR(LOG_RHI, "Failed to initialize window system integration.");
         shutdownWindowSystemIntegration(inoutWsiInfo, vulkanInfo);
@@ -1451,10 +1594,7 @@ bool initializeSwapchain(WindowSystemIntegrationInfo& inoutWsiInfo, DeviceInfo& 
         .oldSwapchain = VK_NULL_HANDLE,
     };
 
-    vr = vkCreateSwapchainKHR(deviceInfo.Device,
-                              &swapchainCreateInfo,
-                              nullptr,
-                              &inoutWsiInfo.Swapchain);
+    vr = vkCreateSwapchainKHR(deviceInfo.Device, &swapchainCreateInfo, nullptr, &inoutWsiInfo.Swapchain);
     if (vr != VK_SUCCESS)
     {
         LUDUS_LOG_ERROR(LOG_RHI, "Failed to create swapchain: {}", vr);
@@ -1462,10 +1602,7 @@ bool initializeSwapchain(WindowSystemIntegrationInfo& inoutWsiInfo, DeviceInfo& 
     }
 
     uint32 swapchainImageCount = 0;
-    vr = vkGetSwapchainImagesKHR(deviceInfo.Device,
-                                 inoutWsiInfo.Swapchain,
-                                 &swapchainImageCount,
-                                 nullptr);
+    vr = vkGetSwapchainImagesKHR(deviceInfo.Device, inoutWsiInfo.Swapchain, &swapchainImageCount, nullptr);
     if (vr != VK_SUCCESS)
     {
         LUDUS_LOG_ERROR(LOG_RHI, "Failed to get swapchain image count: {}", vr);
@@ -1491,7 +1628,7 @@ bool initializeSwapchain(WindowSystemIntegrationInfo& inoutWsiInfo, DeviceInfo& 
         inoutWsiInfo.ImageInfos[i].Image = swapchainImages[i];
 
         uint32 renderFinishedSemaphoreIndex = 0;
-        if(initializeSemaphore(renderFinishedSemaphoreIndex, deviceInfo) == false)
+        if (!initializeSemaphore(renderFinishedSemaphoreIndex, deviceInfo))
         {
             LUDUS_ASSERT(false, "Failed to initialize semaphore.");
         }
@@ -1537,9 +1674,12 @@ void shutdownCommands(DeviceInfo& inoutDeviceInfo) noexcept
     // Implementation for shutting down command pools and related resources
     for (CommandPoolInfo& commandPoolInfo : inoutDeviceInfo.CommandPoolInfos)
     {
-        for(CommandBufferInfo& commandBufferInfo : commandPoolInfo.CommandBufferInfos)
+        for (CommandBufferInfo& commandBufferInfo : commandPoolInfo.CommandBufferInfos)
         {
-            vkFreeCommandBuffers(inoutDeviceInfo.Device, commandPoolInfo.CommandPool, 1, &commandBufferInfo.CommandBuffer);
+            vkFreeCommandBuffers(inoutDeviceInfo.Device,
+                                 commandPoolInfo.CommandPool,
+                                 1,
+                                 &commandBufferInfo.CommandBuffer);
         }
         vkDestroyCommandPool(inoutDeviceInfo.Device, commandPoolInfo.CommandPool, nullptr);
         commandPoolInfo.CommandPool = VK_NULL_HANDLE;
@@ -1607,7 +1747,9 @@ void shutdownFence(FenceInfo& inoutFenceInfo, DeviceInfo& inoutDeviceInfo) noexc
     }
 }
 
-bool createCommandBufferInfo(uint32& outCommandBufferInfoIndex, CommandPoolInfo& inoutCommandPoolInfo, const DeviceInfo& deviceInfo) noexcept
+bool createCommandBufferInfo(uint32& outCommandBufferInfoIndex,
+                             CommandPoolInfo& inoutCommandPoolInfo,
+                             const DeviceInfo& deviceInfo) noexcept
 {
     VkResult vr = VK_SUCCESS;
 

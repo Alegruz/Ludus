@@ -77,7 +77,7 @@ TEST_CASE("Array initializer list accepts designated aggregate elements", "[arra
     {
         int32 Value;
     };
-    const Array<Entry> entries = {{.Value = 7}, {.Value = 11}};
+    const Array<Entry> entries = {{ .Value = 7 }, { .Value = 11 }};
     REQUIRE(entries.GetSize() == 2);
     REQUIRE(entries[0].Value == 7);
     REQUIRE(entries[1].Value == 11);

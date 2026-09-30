@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -16,6 +17,8 @@ import venv
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
+
+from formatting import format_source
 
 
 DEFAULT_PRESET = "linux-clang-development"
@@ -1169,6 +1172,9 @@ def command_init(args: argparse.Namespace) -> int:
     if command_doctor(argparse.Namespace()) != 0:
         raise EngineError("doctor reported an invalid required tool or project state")
 
+    if not args.ci and not os.environ.get("CI"):
+        command_install_hooks(argparse.Namespace())
+
     if run_validation:
         command_build(argparse.Namespace(preset=preset, extra=[]))
         command_test(argparse.Namespace(preset=preset, label=None))
@@ -1259,6 +1265,27 @@ def find_system_tool(root: Path, name: str, versions: dict[str, dict[str, str]])
     raise EngineError(f"unknown tool status requested: {name}")
 
 
+def command_install_hooks(args: argparse.Namespace) -> int:
+    root = repo_root()
+    if not (root / ".git").exists():
+        print("Skipping Git hooks outside a checkout.")
+        return 0
+    configured = subprocess.run(
+        ["git", "config", "--get", "core.hooksPath"], cwd=root, text=True, capture_output=True,
+    ).stdout.strip()
+    if configured and configured != ".githooks":
+        print(f"Keeping existing hooksPath {configured}; add .githooks/pre-commit to your hook chain.")
+        return 0
+    hook_path = run(["git", "rev-parse", "--git-path", "hooks/pre-commit"], cwd=root,
+                    capture=True).stdout.strip()
+    if not configured and (root / hook_path).exists():
+        print("Keeping existing pre-commit hook; add .githooks/pre-commit to your hook chain.")
+        return 0
+    run(["git", "config", "--local", "core.hooksPath", ".githooks"], cwd=root)
+    print("Installed automatic staged C/C++ formatting hook.")
+    return 0
+
+
 def run_format_check(root: Path, *, fix: bool) -> None:
     versions = load_tool_versions(root)
     clang_format = find_system_tool(root, "clang-format", versions)
@@ -1267,10 +1294,26 @@ def run_format_check(root: Path, *, fix: bool) -> None:
         print("No source files found for clang-format.")
         return
 
-    if fix:
-        run([clang_format, "-i", *files], cwd=root)
-    else:
-        run([clang_format, "--dry-run", "-Werror", *files], cwd=root)
+    failures = []
+    for path in files:
+        source = path.read_text(encoding="utf-8")
+        try:
+            formatted = format_source(source, path, clang_format)
+        except subprocess.CalledProcessError as exc:
+            raise EngineError(exc.stderr) from exc
+        if source == formatted:
+            continue
+        if fix:
+            path.write_text(formatted, encoding="utf-8")
+            print(f"Formatted {path.relative_to(root)}")
+        else:
+            failures.append(path)
+            sys.stdout.writelines(difflib.unified_diff(
+                source.splitlines(keepends=True), formatted.splitlines(keepends=True),
+                fromfile=str(path.relative_to(root)), tofile="formatted",
+            ))
+    if failures:
+        raise EngineError("formatting failed; run ./scripts/check --format --fix")
 
 
 def compile_database_files(build_dir: Path) -> set[Path]:
@@ -1370,7 +1413,6 @@ def run_foundational_includes(root: Path) -> None:
 
 def command_check(args: argparse.Namespace) -> int:
     root = repo_root()
-    ensure_bootstrap_for_preset(root, args.preset)
     # getattr guards callers that build the Namespace by hand (e.g. command_init).
     include_cleaner = getattr(args, "include_cleaner", False)
     explicit = args.format or args.tidy or include_cleaner
@@ -1382,6 +1424,8 @@ def command_check(args: argparse.Namespace) -> int:
     # needs no configured build.
     if args.format or run_all:
         run_foundational_includes(root)
+    if args.tidy or run_all or include_cleaner:
+        ensure_bootstrap_for_preset(root, args.preset)
     if args.tidy or run_all:
         cmake_configure(root, args.preset)
         run_tidy(root, args.preset)
@@ -1805,6 +1849,9 @@ def make_parser() -> argparse.ArgumentParser:
 
     bootstrap_parser = subparsers.add_parser("bootstrap", help="install managed tools and prepare Conan/CMake")
     bootstrap_parser.set_defaults(func=command_bootstrap)
+
+    hooks_parser = subparsers.add_parser("install-hooks", help="enable automatic formatting before commits")
+    hooks_parser.set_defaults(func=command_install_hooks)
 
     doctor_parser = subparsers.add_parser("doctor", help="diagnose host and project tool state")
     doctor_parser.set_defaults(func=command_doctor)

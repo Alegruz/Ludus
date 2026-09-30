@@ -29,7 +29,7 @@ TEST_CASE("Wayland event pumping progresses without incoming events", "[platform
 
     ludus::platform::WindowManager manager;
     REQUIRE(manager.Initialize({}));
-    auto window = ludus::platform::wayland::CreateWindow({.Name = "Ludus event pump test"});
+    auto window = ludus::platform::wayland::CreateWindow({ .Name = "Ludus event pump test" });
     REQUIRE(window.Get() != nullptr);
 
     // The surface has no attached buffer, so there are no frame callbacks to
@@ -44,7 +44,7 @@ TEST_CASE("Wayland event pumping progresses without incoming events", "[platform
     bool syncDone = false;
     wl_callback* callback = wl_display_sync(window->GetNativeWindowInfo().Display);
     REQUIRE(callback != nullptr);
-    const wl_callback_listener listener{.done = onSyncDone};
+    const wl_callback_listener listener{ .done = onSyncDone };
     REQUIRE(wl_callback_add_listener(callback, &listener, &syncDone) == 0);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (!syncDone && std::chrono::steady_clock::now() < deadline)

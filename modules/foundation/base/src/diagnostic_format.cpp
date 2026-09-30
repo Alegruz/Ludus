@@ -19,7 +19,7 @@ DiagnosticArg MakeCStringArg(const char* value, usize bound) noexcept
         // Retain the actual readable extent, including short unterminated arrays.
         truncated = size == limit;
     }
-    return {DiagnosticArgKind::Text, {.Text = {value, size}}, truncated};
+    return {DiagnosticArgKind::Text, { .Text = {value, size} }, truncated};
 }
 } // namespace ludus::foundation::diagnostics::detail
 
