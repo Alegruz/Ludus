@@ -1413,7 +1413,6 @@ def run_foundational_includes(root: Path) -> None:
 
 def command_check(args: argparse.Namespace) -> int:
     root = repo_root()
-    ensure_bootstrap_for_preset(root, args.preset)
     # getattr guards callers that build the Namespace by hand (e.g. command_init).
     include_cleaner = getattr(args, "include_cleaner", False)
     explicit = args.format or args.tidy or include_cleaner
@@ -1425,6 +1424,8 @@ def command_check(args: argparse.Namespace) -> int:
     # needs no configured build.
     if args.format or run_all:
         run_foundational_includes(root)
+    if args.tidy or run_all or include_cleaner:
+        ensure_bootstrap_for_preset(root, args.preset)
     if args.tidy or run_all:
         cmake_configure(root, args.preset)
         run_tidy(root, args.preset)
