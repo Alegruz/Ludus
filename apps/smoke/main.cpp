@@ -101,6 +101,14 @@ int main()
         return 1;
     }
 
+    if (!ludus::graphics::rhi::InitializeRendering())
+    {
+        LUDUS_LOG_FATAL(LOG_CORE, "Failed to initialize rendering");
+        ludus::graphics::rhi::Shutdown();
+        LogSystem::Shutdown();
+        return 1;
+    }
+
     while (window->HandleEvent({}))
     {
         LUDUS_PROFILE_SCOPE(Frame);
@@ -129,6 +137,7 @@ int main()
         }
     }
 
+    ludus::graphics::rhi::ShutdownRendering();
     ludus::graphics::rhi::Shutdown();
     LogSystem::Shutdown();
     return 0;

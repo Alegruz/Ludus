@@ -24,6 +24,8 @@ using WindowInfo = ludus::platform::NativeWindowInfo;
 // window may be connected until Shutdown; reconnecting the same window succeeds.
 // The window and its display must remain alive until Shutdown. Headless returns false.
 [[nodiscard]] bool ConnectWindow(const WindowInfo& windowInfo) noexcept;
+[[nodiscard]] bool InitializeRendering() noexcept;
+void ShutdownRendering() noexcept;
 void Shutdown() noexcept;
 
 [[nodiscard]] bool BeginFrame() noexcept;
