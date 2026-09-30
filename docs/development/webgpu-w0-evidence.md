@@ -114,3 +114,23 @@ request failure/loss branches are implemented but not yet runtime-validated.
 Future RHI work must preserve callback lifetimes, avoid `wgpuSurfacePresent`,
 and keep normal logging separate from FoundationBase failures. W0 startup
 handles live until reload; W4 must implement explicit shutdown/cancellation.
+
+## Compatibility retry follow-up
+
+The probe now explicitly requests core WebGPU, retries once with compatibility
+feature level on adapter failure, and shows bounded callback messages/statuses
+and browser version in the page. Device loss and uncaptured errors also retain
+the browser message. This does not establish a compatibility renderer policy for
+the eventual engine; feature/limit negotiation remains later-stage work.
+
+Debug/Release builds and format/tidy checks passed for this follow-up. Local
+in-app Chromium 154 returned null for both adapter requests on the standalone
+page and sandboxed iframe; both failures appeared in Diagnostics. Real-GPU
+rendering and the actual itch.io embed remain pending with this updated package.
+
+Temporary browser request stubs also verified exactly one core→compatibility
+retry, no retry after core adapter success, and propagation of a controlled
+device-request rejection plus the port's device-creation loss message. These
+fixtures were generated outside source/package and do not prove GPU rendering.
+Updated local Release ZIP SHA256:
+`ceb6e6daaf4ed28bb22cfac01991c216c63194c44fc871c869fc7abb56a724bf`.

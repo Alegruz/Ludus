@@ -1,7 +1,8 @@
 # W0 WebGPU feasibility probe
 
 This standalone tool checks the pinned browser C API before porting the engine.
-It requests an adapter/device asynchronously and clears a 640×360 canvas with
+It requests a core adapter, retries once with WebGPU compatibility mode if
+unavailable, requests a device asynchronously, and clears a 640×360 canvas with
 an animated color. It deliberately does not link the Linux-only engine runtime.
 See [ADR 0009](../../docs/decisions/0009-browser-webgpu-toolchain.md) and the
 [implementation plan](../../docs/development/webgpu-implementation-plan.md).
@@ -71,6 +72,12 @@ Do not use `file://`. HTTPS is required when testing on a non-localhost host.
 For actual itch.io validation, upload the Release ZIP to an authorized draft
 HTML5 project, select browser playback, and test its real embed. The local
 sandboxed iframe only approximates hosting behavior.
+
+The Diagnostics panel records browser version and messages from both adapter
+attempts, device requests, device loss, and uncaptured errors. Compatibility
+requests remain WebGPU and may return a core-capable adapter; the status records
+the requested mode, not a detected graphics backend. Older browsers may ignore
+the compatibility option. No software-adapter or browser-flag bypass is enabled.
 
 Confirm the status becomes ready, the color changes, and the console contains
 no WebGPU validation failures. The status element exposes `data-state` and
