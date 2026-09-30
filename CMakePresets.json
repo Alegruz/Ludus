@@ -92,6 +92,43 @@
         "LUDUS_ENABLE_UBSAN": "OFF",
         "LUDUS_BUILD_FLAVOR": "Release"
       }
+    },
+    {
+      "name": "web-emscripten-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "toolchainFile": "${sourceDir}/out/host-tools/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "environment": {
+        "PATH": "${sourceDir}/out/host-tools/emsdk/upstream/emscripten:${sourceDir}/out/host-tools/venv/bin:$penv{PATH}"
+      },
+      "cacheVariables": {
+        "CMAKE_MAKE_PROGRAM": "${sourceDir}/out/host-tools/venv/bin/ninja",
+        "LUDUS_BUILD_TESTS": "OFF",
+        "LUDUS_BUILD_SMOKE_APP": "OFF",
+        "LUDUS_WARNINGS_AS_ERRORS": "ON",
+        "LUDUS_ENABLE_ASAN": "OFF",
+        "LUDUS_ENABLE_UBSAN": "OFF",
+        "LUDUS_ENABLE_TSAN": "OFF",
+        "LUDUS_ENABLE_CCACHE": "OFF"
+      }
+    },
+    {
+      "name": "web-emscripten-development",
+      "inherits": "web-emscripten-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "LUDUS_BUILD_FLAVOR": "Development"
+      }
+    },
+    {
+      "name": "web-emscripten-release",
+      "inherits": "web-emscripten-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "LUDUS_BUILD_FLAVOR": "Release"
+      }
     }
   ],
   "buildPresets": [
@@ -114,6 +151,14 @@
     {
       "name": "linux-clang-release",
       "configurePreset": "linux-clang-release"
+    },
+    {
+      "name": "web-emscripten-development",
+      "configurePreset": "web-emscripten-development"
+    },
+    {
+      "name": "web-emscripten-release",
+      "configurePreset": "web-emscripten-release"
     }
   ],
   "testPresets": [
@@ -148,6 +193,20 @@
     {
       "name": "linux-clang-release",
       "configurePreset": "linux-clang-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "web-emscripten-development",
+      "configurePreset": "web-emscripten-development",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "web-emscripten-release",
+      "configurePreset": "web-emscripten-release",
       "output": {
         "outputOnFailure": true
       }

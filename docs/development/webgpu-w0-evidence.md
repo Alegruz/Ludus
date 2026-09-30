@@ -134,3 +134,19 @@ device-request rejection plus the port's device-creation loss message. These
 fixtures were generated outside source/package and do not prove GPU rendering.
 Updated local Release ZIP SHA256:
 `ceb6e6daaf4ed28bb22cfac01991c216c63194c44fc871c869fc7abb56a724bf`.
+
+## User-hosted itch.io render, 2026-09-30
+
+The user's updated screenshot shows the real itch.io draft embed reporting
+`WebGPU is ready (core request)` with a rendered purple clear frame and no
+visible WebGPU errors. It follows enabling Vulkan in Edge on the previously
+reported Linux/Wayland Intel UHD 620 laptop. The preceding screenshot showed
+null adapters in both core and compatibility mode. This is evidence of adapter,
+device, surface and at least one submitted frame in the actual embed; a still
+screenshot does not independently verify continuous animation. The successful
+configuration uses an experimental Vulkan flag, so the flag-free W0/W8 support
+gate remains open. There is no evidence requiring an external GPU.
+
+The user then explicitly requested continuing implementation. Proceed with W1's
+independent CPU-only Foundation port using the validated toolchain, while
+retaining flag-free GPU support as an unresolved deployment gate.

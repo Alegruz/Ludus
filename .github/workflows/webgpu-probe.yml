@@ -10,7 +10,15 @@ on:
       - 'config/web_toolchain.json'
       - 'config/tool_versions.json'
       - 'cmake/EngineCompilerWarnings.cmake'
-      - 'modules/foundation/base/include/ludus/foundation/base/types.h'
+      - 'modules/foundation/base/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'scripts/python/engine.py'
+      - 'scripts/python/web_build.py'
+      - 'tools/web-foundation-probe/**'
+      - 'tests/build_contract/**'
+      - 'tools/check_foundational_includes.py'
       - '.clang-format'
       - '.clang-tidy'
   workflow_dispatch:
@@ -61,4 +69,19 @@ jobs:
         with:
           name: webgpu-probe-release
           path: out/packages/webgpu-probe-release.zip
+          if-no-files-found: error
+
+      - name: Build and validate browser FoundationBase
+        run: |
+          ./scripts/doctor web-emscripten-development
+          ./scripts/test web-emscripten-development
+          ./scripts/check web-emscripten-development --all
+          ./scripts/test web-emscripten-release
+          ./scripts/check web-emscripten-release --all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-foundation-probes
+          path: |
+            out/build/web-emscripten-development/tools/web-foundation-probe/index.*
+            out/build/web-emscripten-release/tools/web-foundation-probe/index.*
           if-no-files-found: error

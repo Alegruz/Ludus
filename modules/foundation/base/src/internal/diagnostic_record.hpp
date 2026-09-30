@@ -24,5 +24,8 @@ struct FatalPacket
 };
 
 static_assert(std::atomic<bool>::is_always_lock_free);
-extern FatalPacket gFatalPacket;
+// This is a declaration, not an initializer. The sole definition in assert.cpp
+// is constinit; Clang-tidy 18 misclassifies Emscripten libc++ atomic initialization.
+// NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
+extern constinit FatalPacket gFatalPacket;
 } // namespace ludus::foundation::diagnostics::internal

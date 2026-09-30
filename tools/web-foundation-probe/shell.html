@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Ludus browser Foundation probe</title>
+<style>body { font: 16px system-ui; background: #181821; color: #eee; margin: 24px; } pre { white-space: pre-wrap; }</style>
+<h1>Ludus browser Foundation probe</h1>
+<p id="status" role="status">Loading…</p>
+<p>Run: <a href="?mode=normal">normal</a>, <a href="?mode=check">CHECK</a>,
+<a href="?mode=assert">ASSERT</a>, <a href="?mode=require">REQUIRE</a>,
+<a href="?mode=fatal">FATAL</a>, <a href="?mode=trap">explicit trap</a>, <a href="?mode=console-failure">console failure</a>.</p>
+<pre id="output"></pre>
+<script>
+'use strict';
+const mode = new URLSearchParams(location.search).get('mode') || 'normal';
+function status(value) { document.getElementById('status').textContent = value; }
+var Module = {
+  arguments: [mode],
+  onAbort: function () { status(mode + ': module aborted (expected for enabled ASSERT / REQUIRE / FATAL)'); },
+  printErr: function (text) { document.getElementById('output').textContent += String(text) + '\n'; },
+  onExit: function (code) { status(mode + ': exited with status ' + code); },
+};
+window.addEventListener('error', function (event) {
+  document.getElementById('output').textContent += event.message + '\n';
+  status(mode + ': runtime stopped');
+});
+window.addEventListener('unhandledrejection', function (event) {
+  document.getElementById('output').textContent += String(event.reason) + '\n';
+  status(mode + ': runtime stopped');
+});
+</script>
+<script src="index.js"></script>
+</html>

@@ -10,6 +10,9 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+if(EMSCRIPTEN)
+    set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
@@ -25,6 +28,12 @@ include(EnginePch)
 
 option(LUDUS_BUILD_TESTS "Build Ludus tests" ON)
 option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
+if(EMSCRIPTEN)
+    # W1 deliberately exposes only Base until the other modules are ported.
+    if(LUDUS_BUILD_TESTS OR LUDUS_BUILD_SMOKE_APP)
+        message(FATAL_ERROR "Use a web-emscripten preset; native tests/smoke are not browser targets")
+    endif()
+endif()
 option(LUDUS_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(LUDUS_ENABLE_COVERAGE "Enable coverage instrumentation" OFF)
 
@@ -71,25 +80,29 @@ configure_file(cmake/CheckSdkVariant.cmake.in "${PROJECT_BINARY_DIR}/cmake/Check
 install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENTS)
 
 add_subdirectory(modules/foundation/base)
-add_subdirectory(modules/foundation/containers)
-add_subdirectory(modules/foundation/logging)
-add_subdirectory(modules/foundation/profiling)
-add_subdirectory(modules/platform)
-add_subdirectory(modules/graphics/rhi)
+if(EMSCRIPTEN)
+    add_subdirectory(tools/web-foundation-probe)
+else()
+    add_subdirectory(modules/foundation/containers)
+    add_subdirectory(modules/foundation/logging)
+    add_subdirectory(modules/foundation/profiling)
+    add_subdirectory(modules/platform)
+    add_subdirectory(modules/graphics/rhi)
 
-# Startup-only development diagnostic integration (depends on Base; Base does
-# not depend on it). Provides InitializeDiagnosticSession and the Python helper.
-add_subdirectory(tools/diagnostics)
+    # Startup-only development diagnostic integration (depends on Base; Base does
+    # not depend on it). Provides InitializeDiagnosticSession and the Python helper.
+    add_subdirectory(tools/diagnostics)
 
-if(LUDUS_BUILD_SMOKE_APP)
-    add_subdirectory(apps/smoke)
+    if(LUDUS_BUILD_SMOKE_APP)
+        add_subdirectory(apps/smoke)
+    endif()
+
+    if(LUDUS_BUILD_TESTS)
+        enable_testing()
+    endif()
+
+    add_subdirectory(tests)
 endif()
-
-if(LUDUS_BUILD_TESTS)
-    enable_testing()
-endif()
-
-add_subdirectory(tests)
 
 install(
     EXPORT LudusTargets

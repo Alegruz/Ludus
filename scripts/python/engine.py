@@ -1848,12 +1848,14 @@ def make_parser() -> argparse.ArgumentParser:
     init_parser.set_defaults(func=command_init)
 
     bootstrap_parser = subparsers.add_parser("bootstrap", help="install managed tools and prepare Conan/CMake")
+    bootstrap_parser.add_argument("preset", nargs="?", default=None)
     bootstrap_parser.set_defaults(func=command_bootstrap)
 
     hooks_parser = subparsers.add_parser("install-hooks", help="enable automatic formatting before commits")
     hooks_parser.set_defaults(func=command_install_hooks)
 
     doctor_parser = subparsers.add_parser("doctor", help="diagnose host and project tool state")
+    doctor_parser.add_argument("preset", nargs="?", default=None)
     doctor_parser.set_defaults(func=command_doctor)
 
     build_parser = subparsers.add_parser("build", help="configure and build a preset")
@@ -1912,6 +1914,9 @@ def main(argv: Sequence[str]) -> int:
     parser = make_parser()
     args = parser.parse_args(argv)
     try:
+        if str(getattr(args, "preset", "")).startswith("web-emscripten-"):
+            from web_build import command
+            return command(args, sys.modules[__name__])
         return int(args.func(args))
     except EngineError as exc:
         sys.stdout.flush()

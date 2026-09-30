@@ -21,7 +21,8 @@ non-path flags and unions in the include directories (-I / -isystem / -iquote /
 -idirafter and their generated-header variants) from EVERY entry in the compile
 database, so any public header resolves regardless of which module owns it.
 
-Usage: verify_header_self_sufficiency.py <build_dir>
+Usage: verify_header_self_sufficiency.py <build_dir> [module/submodule]
+The optional module selects only public headers exported by a partial SDK.
 """
 
 import json
@@ -150,7 +151,14 @@ def main() -> int:
     failures: list[str] = []
     checked = 0
     skipped: list[str] = []
-    for header in public_headers(root):
+    headers = public_headers(root)
+    if len(sys.argv) > 2:
+        module_root = (root / "modules" / sys.argv[2] / "include").resolve()
+        headers = [header for header in headers if module_root in header.parents]
+        if not headers:
+            print("No public headers found for selected module")
+            return 1
+    for header in headers:
         include = logical_include(header)
         if include in KNOWN_NON_STANDALONE:
             skipped.append(include)

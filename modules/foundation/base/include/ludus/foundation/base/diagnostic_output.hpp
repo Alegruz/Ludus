@@ -11,6 +11,12 @@ enum class DeliveryStatus : uint8
     Failed
 };
 
+// Browser backend: native socket/control configuration is unsupported (false /
+// Failed), decisions always Terminate, and CI interaction is conservatively
+// suppressed. Emergency writes deliver bounded text to console.error and report
+// bridge failure explicitly. No pthreads, sockets, signals, or helper startup.
+// The common wire codec remains available but opens no transport.
+//
 // Healthy startup only, once, before threads can report failures. Duplicates a
 // connected AF_UNIX/SOCK_DGRAM descriptor and retains it until process exit.
 // No replacement/shutdown: published descriptor lifetime cannot race a failure.
