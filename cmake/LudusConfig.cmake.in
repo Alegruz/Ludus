@@ -1,7 +1,9 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-find_dependency(volk CONFIG)
+if(NOT "@CMAKE_SYSTEM_NAME@" STREQUAL "Emscripten")
+    find_dependency(volk CONFIG)
+endif()
 if(@LUDUS_PLATFORM_ENABLE_WAYLAND@)
     find_dependency(PkgConfig)
     pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client)

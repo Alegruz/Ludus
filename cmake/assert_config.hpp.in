@@ -13,7 +13,7 @@
 #define LUDUS_BREAK_ON_CHECK @LUDUS_BREAK_ON_CHECK@
 
 // Build-time eligibility for the interactive ASSERT dialog: 1 only for a non-CI
-// Debug build. A runtime CI veto and the control handshake still gate whether a
+// native Debug build; browser builds have no dialog capability. A runtime CI veto and the control handshake still gate whether a
 // prompt appears. Never presentation-availability by itself, and never a knob
 // that changes which assertions are compiled in.
 #define LUDUS_ASSERT_DIALOGS_AVAILABLE @LUDUS_ASSERT_DIALOGS_AVAILABLE@

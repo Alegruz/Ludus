@@ -48,10 +48,16 @@ endif()
 # the runtime veto stops it from prompting when later executed under CI.
 set(LUDUS_CI_BUILD "$ENV{CI}" CACHE STRING "Set for a CI build; forces dialogs unavailable")
 set(LUDUS_ASSERT_DIALOGS_AVAILABLE 0)
-if(LUDUS_BUILD_FLAVOR_ID EQUAL 1 AND NOT LUDUS_CI_BUILD)
+if(LUDUS_BUILD_FLAVOR_ID EQUAL 1 AND NOT LUDUS_CI_BUILD AND NOT EMSCRIPTEN)
     set(LUDUS_ASSERT_DIALOGS_AVAILABLE 1)
 endif()
 
 string(TOUPPER "${LUDUS_BUILD_FLAVOR}" LUDUS_BUILD_FLAVOR_DEFINE)
 set(LUDUS_SDK_VARIANT
     "assert-v${LUDUS_ASSERT_POLICY_VERSION}-${LUDUS_BUILD_FLAVOR}-${CMAKE_BUILD_TYPE}-dialogs-${LUDUS_ASSERT_DIALOGS_AVAILABLE}-asan-${LUDUS_ENABLE_ASAN}-ubsan-${LUDUS_ENABLE_UBSAN}-tsan-${LUDUS_ENABLE_TSAN}")
+
+# Browser Base has terminal ASSERT semantics and no native control transport.
+# Keep its installed variant distinct from native libraries with the same flavor.
+if(EMSCRIPTEN)
+    string(APPEND LUDUS_SDK_VARIANT "-web-wasm32")
+endif()

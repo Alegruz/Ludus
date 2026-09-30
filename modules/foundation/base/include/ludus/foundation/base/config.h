@@ -21,7 +21,9 @@
 // -----------------------------------------------------------------------------
 // Operating-system family (detection only).
 // -----------------------------------------------------------------------------
-#if defined(_WIN32)
+#if defined(__EMSCRIPTEN__)
+#    define LUDUS_PLATFORM_WEB 1
+#elif defined(_WIN32)
 #    define LUDUS_PLATFORM_WINDOWS 1
 #elif defined(__APPLE__)
 #    define LUDUS_PLATFORM_MACOS 1
@@ -37,7 +39,9 @@
 // CPU architecture (detection only). Needed for SIMD/math/atomics decisions
 // that differ across the backends Ludus targets next.
 // -----------------------------------------------------------------------------
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__wasm32__)
+#    define LUDUS_ARCH_WASM32 1
+#elif defined(__x86_64__) || defined(_M_X64)
 #    define LUDUS_ARCH_X86_64 1
 #elif defined(__aarch64__) || defined(_M_ARM64)
 #    define LUDUS_ARCH_ARM64 1

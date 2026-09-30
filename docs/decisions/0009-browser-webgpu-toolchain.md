@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed for W0. Compiler and package validation do not establish real-device
+Applied to W0 and the W1 FoundationBase browser target. Compiler and package
+validation do not establish flag-free real-device
 or itch.io compatibility. See the implementation plan and probe evidence.
 
 ## Context
@@ -63,6 +64,26 @@ browser infrastructure without coupling assertions to it.
   actual wasm/port include paths. Do not count native tidy as web coverage.
 - Localhost and an iframe harness are preliminary checks. Actual HTTPS/itch.io
   embedding and real-device rendering remain separate acceptance gates.
+
+## W1 extension
+
+The same SDK now compiles the actual FoundationBase target through isolated
+root browser presets. No native Conan libraries, Vulkan/Volk, Wayland, logger,
+profiler, or diagnostic helper enter that graph. Other modules remain native
+until their stages. Foundation macros explicitly identify Web/wasm32. Browser
+ASSERT dialogs are unavailable, debugger attachment is Unknown, and enabled
+ASSERT/REQUIRE/FATAL terminate; CHECK reports and returns. Native behavior and
+policy version 2 are unchanged. Browser SDK variants append `-web-wasm32`.
+
+Emergency records use a bounded console bridge that contains JavaScript errors
+and returns delivery status. The JavaScript catch is inside EM_JS; C++ remains
+exception-free. This promises no JavaScript allocation/latency bound or durable
+console storage. An explicit wasm debug break is non-resumable. The common
+control wire codec is shared, but browser control sockets are unsupported.
+
+Development probe linking uses `-g0 -g2` for named wasm functions without retaining
+DWARF, avoiding the SDK's limited post-link optimization warning. Full engine
+logging/profiling and lifecycle work are separate stages. See the W1 evidence.
 
 ## References
 

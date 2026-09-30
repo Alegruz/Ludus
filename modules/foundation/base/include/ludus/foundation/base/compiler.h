@@ -66,7 +66,10 @@
 #    define LUDUS_UNREACHABLE() ((void)0)
 #endif
 
-#if defined(__clang__)
+// WebAssembly has no resumable native debugger trap. An explicit break traps.
+#if defined(__EMSCRIPTEN__)
+#    define LUDUS_DEBUG_BREAK() __builtin_trap()
+#elif defined(__clang__)
 #    define LUDUS_DEBUG_BREAK() __builtin_debugtrap()
 #elif defined(__GNUC__)
 #    define LUDUS_DEBUG_BREAK() __builtin_trap()

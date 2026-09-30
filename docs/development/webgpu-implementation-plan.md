@@ -1,8 +1,8 @@
 # WebGPU browser export implementation plan
 
 Created: 2026-09-30. Repository baseline inspected: `6ebdf7c`.
-Status: W0 probe implementation in progress; engine browser export is not yet
-implemented. See `webgpu-w0-evidence.md` for actual validation and pending gates.
+Status: W1 FoundationBase browser port implemented; full engine browser export
+is not yet implemented. W0 flag-free GPU acceptance remains pending. See `webgpu-w0-evidence.md` for actual validation and pending gates.
 
 ## Outcome and scope
 
@@ -125,7 +125,10 @@ unavailable, record that gate as pending and continue independent local work.
 
 ### W1 — Cross-compilation and FoundationBase
 
-Prerequisites: W0's toolchain decision and local probe pass.
+Prerequisites: W0's toolchain decision and local probe pass. On 2026-09-30 the
+user authorized continuing after a real itch.io render with Vulkan enabled;
+independent W1 CPU-only work proceeds, while W0's flag-free GPU gate remains
+open and must be resolved before declaring deployment support.
 
 Add proposed `web-emscripten-development` and `web-emscripten-release` presets,
 isolated `out/` trees, and bootstrap/doctor/build support. Teach CMake and Conan
@@ -305,8 +308,8 @@ green run. Editing only this plan does not require engine builds.
 
 | Stage | Status | Evidence / remaining work |
 | --- | --- | --- |
-| W0 | in progress | Probe/pins/package implemented; see webgpu-w0-evidence.md. Real-GPU animation and HTTPS/itch.io checks pending |
-| W1 | not started | Depends on W0 local/toolchain acceptance |
+| W0 | in progress | Actual itch.io core-adapter render proven with Vulkan enabled; continuous animation and flag-free support remain pending. See webgpu-w0-evidence.md |
+| W1 | complete | CPU-only FoundationBase browser port, Development/Release probes, native regressions and SDK consumer validated. See webgpu-w1-evidence.md; W0 GPU gate remains open |
 | W2 | not started | Depends on W1 |
 | W3 | not started | Depends on W2 |
 | W4 | not started | Depends on W3 |
@@ -326,7 +329,18 @@ green run. Editing only this plan does not require engine builds.
   and explicit web toolchain policy. See `webgpu-w0-evidence.md` for commands,
   results, and limitations. Next action: execute the packaged probe on a real
   WebGPU device without flags, then complete authorized HTTPS/itch.io checks.
-  W1 remains gated on real-device local acceptance.
+  Historical gate: W1 was initially gated on real-device local acceptance; see
+  the 2026-09-30 continuation below.
+
+- 2026-09-30 W1: User authorized continuing after the hosted probe rendered on
+  Intel UHD 620/Edge/Linux with Vulkan enabled. Added isolated root browser
+  presets, separate SDK bootstrap/doctor/build/test/check path, Base web platform
+  and output implementations, common control codec, linked browser probes, and
+  CI coverage. See `webgpu-w1-evidence.md` for validation and limitations. Native
+  dialog/debugger policy is unchanged. Browser enabled ASSERT is terminal; CHECK
+  returns after reporting; native transport requests fail without blocking.
+  Next implementation stage: W2 logging/profiling. Keep W0 flag-free GPU support
+  and final W8 hosted-game acceptance open.
 
 ## Primary references
 

@@ -1,8 +1,8 @@
 add_library(ludus_foundation_base STATIC)
 add_library(Ludus::FoundationBase ALIAS ludus_foundation_base)
 
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    message(FATAL_ERROR "Ludus assertions currently require the validated Linux/Clang backend")
+if((NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT EMSCRIPTEN) OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR "Ludus assertions currently require the validated Linux/Clang or pinned Emscripten backend")
 endif()
 
 set_target_properties(
@@ -53,8 +53,7 @@ target_sources(
         src/internal/diagnostic_finish.hpp
         src/internal/diagnostic_format.hpp
         src/internal/diagnostic_text.hpp
-        src/diagnostic_output.cpp
-        src/diagnostics_linux.cpp
+        src/diagnostic_control_codec.cpp
         src/internal/diagnostic_platform.hpp
         src/internal/diagnostic_record.hpp
         src/diagnostic.cpp
@@ -86,8 +85,15 @@ target_include_directories(
         src
 )
 
+if(EMSCRIPTEN)
+    target_sources(ludus_foundation_base PRIVATE src/diagnostics_web.cpp src/diagnostic_output_web.cpp)
+else()
+    target_sources(ludus_foundation_base PRIVATE src/diagnostic_output.cpp src/diagnostics_linux.cpp)
+    set_source_files_properties(src/diagnostics_linux.cpp PROPERTIES COMPILE_OPTIONS "-fno-optimize-sibling-calls")
+endif()
+
 ludus_apply_project_defaults(ludus_foundation_base)
-set_source_files_properties(src/assert.cpp src/diagnostics_linux.cpp
+set_source_files_properties(src/assert.cpp
     PROPERTIES COMPILE_OPTIONS "-fno-optimize-sibling-calls")
 
 install(
@@ -157,7 +163,7 @@ if(LUDUS_BUILD_TESTS)
     set_tests_properties(ludus_assert_blocked_output PROPERTIES LABELS "foundation;assert-death" TIMEOUT 30)
 
     add_executable(ludus_assert_fake_child $<TARGET_OBJECTS:ludus_assert_test_driver> tests/assert_platform_fake.cpp
-        src/assert.cpp src/diagnostic_output.cpp src/diagnostic_format.cpp)
+        src/assert.cpp src/diagnostic_output.cpp src/diagnostic_control_codec.cpp src/diagnostic_format.cpp)
     target_include_directories(ludus_assert_fake_child PRIVATE src include "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}")
     target_link_libraries(ludus_assert_fake_child PRIVATE Threads::Threads)
     target_link_options(ludus_assert_fake_child PRIVATE -Wl,--wrap=sigtimedwait,--wrap=send)
