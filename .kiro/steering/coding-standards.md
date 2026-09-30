@@ -59,6 +59,9 @@ code (`modules/`, `apps/`):
 ## Other standing rules
 
 - C++23, no compiler extensions; pinned Clang/LLVM 18 toolchain.
+- The isolated WebGPU feasibility probe has a separate pinned Emscripten
+  toolchain (`config/web_toolchain.json`, ADR 0009); repository formatting and
+  static analysis still use version 18. All other coding rules apply.
 - Compile warning-clean; CI is warnings-as-errors.
 - Run `./scripts/check --all` (clang-format + clang-tidy) before committing.
 - `#pragma once` for header guards.

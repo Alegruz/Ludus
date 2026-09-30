@@ -60,6 +60,11 @@ engine code. Discuss such cases in the PR before adding them.
   extensions).
 - Supported reference toolchain: Clang/LLVM 18 with LLD on Ubuntu 24.04. Tool
   versions are pinned in `config/tool_versions.json`.
+- The isolated browser feasibility probe uses the Emscripten SDK and WebGPU
+  port pinned in `config/web_toolchain.json` (ADR 0009). Its SDK-provided LLVM
+  is a separate web toolchain; native builds and formatting/static analysis
+  continue to use the reference tools above. This does not enable browser
+  engine targets by itself.
 
 ### Warnings
 
