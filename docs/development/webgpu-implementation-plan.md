@@ -315,7 +315,7 @@ green run. Editing only this plan does not require engine builds.
 | W4 | implemented; acceptance pending | Backend split and async lifecycle tested in wasm/native; real-GPU Ready check remains pending. See webgpu-w4-evidence.md |
 | W5 | implemented; acceptance pending | Resize/clear/submission and private WGSL triangle probe; controlled-provider tests pass. Real-GPU animation/fullscreen remains pending. See webgpu-w5-evidence.md |
 | W6 | implemented; acceptance pending | Shared smoke lifecycle with native/RAF drivers, bounded simulation/input and player shell; controlled-provider tests pass. Real-device gameplay remains pending. See webgpu-w6-evidence.md |
-| W7 | not started | Depends on W6 |
+| W7 | implemented; hosted acceptance pending | Deterministic Release packaging, notices, manifest and clean-extraction shell/failure tests. See webgpu-w7-evidence.md; GPU/itch.io verification remains W8 |
 | W8 | not started | Depends on W7 and hosted test access |
 
 ## Session log
@@ -393,3 +393,10 @@ that every reference prescribes them.
   from the Node provider test target. Embed and fullscreen UI verified in the
   in-app browser, which still has no adapter; hardware gates remain open.
   See `webgpu-w6-evidence.md`. Next: check W6 merge/CI, then W7 reproducible package.
+
+- 2026-10-01 W7: PR #42 is merged with native/web CI successful. Added
+  `scripts/package-web`, Release debug/path hygiene, explicit wasm memory limits,
+  required runtime notices, manifest and sandbox harness. Archive and clean
+  extraction/failure behavior are validated; actual GPU/hosted acceptance remains
+  open. See `webgpu-w7-evidence.md` and `web-packaging.md`. Next: check W7 PR/CI,
+  then W8 hosted acceptance of the exact artifact without experimental flags.

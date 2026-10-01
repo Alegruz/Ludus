@@ -12,6 +12,10 @@ function(ludus_configure_project_options target_name)
         # Map diagnostic literals without breaking DWARF's source/comp-dir pair.
         target_compile_options(${target_name} INTERFACE "-fmacro-prefix-map=${PROJECT_SOURCE_DIR}/=")
     endif()
+    if(EMSCRIPTEN)
+        # Keep __FILE__/source_location diagnostics portable in shipped wasm.
+        target_compile_options(${target_name} INTERFACE "-fmacro-prefix-map=${PROJECT_SOURCE_DIR}/=")
+    endif()
 
     # Ludus does not use C++ exceptions (see AGENTS.md and the steering rule
     # "no-exceptions"). Compile them out entirely so error handling stays
