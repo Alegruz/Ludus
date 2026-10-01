@@ -89,3 +89,13 @@ TEST_CASE("Wayland surface and device lifecycle", "[rhi][wayland]")
     SKIP("Wayland was disabled at build time.");
 #endif
 }
+
+TEST_CASE("Native startup rejects invalid windows without loading a GPU", "[rhi][lifecycle]")
+{
+    graphics::rhi::Shutdown();
+    CHECK(graphics::rhi::Start({}, {}) == graphics::rhi::StartStatus::Failed);
+    CHECK(graphics::rhi::GetStartup().State == graphics::rhi::StartupState::Failed);
+    CHECK(graphics::rhi::GetStartup().Error == graphics::rhi::StartupError::InvalidWindow);
+    CHECK(graphics::rhi::BeginFrameStatus() == graphics::rhi::FrameStatus::NotReady);
+    graphics::rhi::Shutdown();
+}

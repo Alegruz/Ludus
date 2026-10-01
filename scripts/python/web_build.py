@@ -91,7 +91,7 @@ def command(args, engine) -> int:
         if args.format or all_checks:
             run_format_check(root, fix=args.fix)
             run_foundational_includes(root)
-            for probe in ("web-foundation-probe", "web-observability-probe", "web-platform-probe"):
+            for probe in ("web-foundation-probe", "web-observability-probe", "web-platform-probe", "web-rhi-probe"):
                 path = root / "tools" / probe / "main.cpp"
                 original = path.read_text()
                 formatted = format_source(original, path, "clang-format-18")
@@ -114,10 +114,10 @@ def command(args, engine) -> int:
                     if flag == "-o":
                         index += 2
                         continue
-                    if flag not in ("-c", entry["file"]):
+                    if flag not in ("-c", entry["file"]) and not flag.startswith("--use-port="):
                         flags.append(flag)
                     index += 1
-                flags += ["--target=wasm32-unknown-emscripten", f"--sysroot={sysroot}", "-DEMSCRIPTEN",
+                flags += ["-I" + str(sysroot.parent / "ports/emdawnwebgpu/emdawnwebgpu_pkg/webgpu/include"), "--target=wasm32-unknown-emscripten", f"--sysroot={sysroot}", "-DEMSCRIPTEN",
                           "-isystem", str(sysroot / "include/c++/v1"),
                           "-isystem", str(sysroot / "include/compat")]
                 run([tidy, "--warnings-as-errors=*", entry["file"], "--", *flags], cwd=root, env=env)

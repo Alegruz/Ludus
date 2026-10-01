@@ -10,6 +10,8 @@ on:
       - 'config/web_toolchain.json'
       - 'config/tool_versions.json'
       - 'cmake/EngineCompilerWarnings.cmake'
+      - 'modules/graphics/rhi/**'
+      - 'tools/web-rhi-probe/**'
       - 'modules/platform/**'
       - 'tools/web-platform-probe/**'
       - 'modules/foundation/base/**'
@@ -104,4 +106,11 @@ jobs:
           path: |
             out/build/web-emscripten-development/tools/web-platform-probe/index.*
             out/build/web-emscripten-release/tools/web-platform-probe/index.*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-rhi-probes
+          path: |
+            out/build/web-emscripten-development/tools/web-rhi-probe/index.*
+            out/build/web-emscripten-release/tools/web-rhi-probe/index.*
           if-no-files-found: error
