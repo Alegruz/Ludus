@@ -13,6 +13,7 @@ on:
       - 'modules/graphics/rhi/**'
       - 'tools/web-rhi-probe/**'
       - 'tools/web-frame-probe/**'
+      - 'apps/smoke/**'
       - 'modules/platform/**'
       - 'tools/web-platform-probe/**'
       - 'modules/foundation/base/**'
@@ -80,7 +81,7 @@ jobs:
           path: out/packages/webgpu-probe-release.zip
           if-no-files-found: error
 
-      - name: Build and validate browser Foundation and Platform modules
+      - name: Build and validate browser modules and smoke application
         run: |
           ./scripts/doctor web-emscripten-development
           ./scripts/test web-emscripten-development
@@ -123,4 +124,13 @@ jobs:
           path: |
             out/build/web-emscripten-development/tools/web-frame-probe/index.*
             out/build/web-emscripten-release/tools/web-frame-probe/index.*
+          if-no-files-found: error
+
+      - name: Upload integrated browser smoke apps
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-smoke-apps
+          path: |
+            out/build/web-emscripten-development/apps/smoke/index.*
+            out/build/web-emscripten-release/apps/smoke/index.*
           if-no-files-found: error

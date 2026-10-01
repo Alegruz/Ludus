@@ -314,7 +314,7 @@ green run. Editing only this plan does not require engine builds.
 | W3 | complete | Canvas/DPR/input lifecycle and bounded ownership, both web probes, native regressions and SDK validated. See webgpu-w3-evidence.md; CI pending |
 | W4 | implemented; acceptance pending | Backend split and async lifecycle tested in wasm/native; real-GPU Ready check remains pending. See webgpu-w4-evidence.md |
 | W5 | implemented; acceptance pending | Resize/clear/submission and private WGSL triangle probe; controlled-provider tests pass. Real-GPU animation/fullscreen remains pending. See webgpu-w5-evidence.md |
-| W6 | not started | Depends on W5 |
+| W6 | implemented; acceptance pending | Shared smoke lifecycle with native/RAF drivers, bounded simulation/input and player shell; controlled-provider tests pass. Real-device gameplay remains pending. See webgpu-w6-evidence.md |
 | W7 | not started | Depends on W6 |
 | W8 | not started | Depends on W7 and hosted test access |
 
@@ -384,3 +384,12 @@ that every reference prescribes them.
   Real browser embed layout passes, but this browser returns no GPU adapter;
   real-hardware rendering acceptance remains open. See `webgpu-w5-evidence.md`.
   Next session: check W5 PR/CI and target-browser rendering before W6 integration.
+
+- 2026-10-01 W6: PR #40 is merged and both native/web workflows passed. Added
+  shared smoke application/simulation lifecycle with separate native/browser
+  drivers; kept native diagnostics and profiling in its driver. Browser smoke
+  polls readiness, responds to WASD/arrows/pointer, bounds resumed delta, and
+  releases window/GPU ownership on stop/failure. Production web output is separate
+  from the Node provider test target. Embed and fullscreen UI verified in the
+  in-app browser, which still has no adapter; hardware gates remain open.
+  See `webgpu-w6-evidence.md`. Next: check W6 merge/CI, then W7 reproducible package.
