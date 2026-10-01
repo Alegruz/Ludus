@@ -14,6 +14,8 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18
       - name: Test formatting and staged-file preservation
         run: python3 -m unittest discover -s scripts/python -p 'test_formatting.py' -v
+      - name: Test optional RAD tooling contracts
+        run: python3 -m unittest discover -s scripts/python -p 'test_rad_debugger.py' -v
       - name: Verify source formatting before builds
         run: ./scripts/check --format
 

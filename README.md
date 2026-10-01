@@ -26,6 +26,15 @@ VS Code is configured to use the project-managed CMake at `out/host-tools/venv/b
 
 Run `./init.sh --validate` when you want the full build/test/check/sanitizer/SDK-consumer validation pass.
 
+RAD Debugger is available as optional Linux x64 tooling. Use
+`./init.sh --with-rad-debugger` or `./scripts/setup-rad-debugger` to build the
+pinned debugger locally, then `./scripts/debug linux-clang-debug ludus_smoke`.
+VS Code provides **Ludus: Debug target with RAD** through Tasks: Run Task;
+onboarding preserves F5 and existing debugger preferences. See
+[the debugging guide](docs/development/debugging.md) for usage and Linux alpha
+limitations, and [the tooling design](docs/architecture/developer-tools.md) for
+future editor and scripting milestones.
+
 ## Presets
 
 Available committed CMake presets:

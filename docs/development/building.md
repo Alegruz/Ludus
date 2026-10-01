@@ -6,12 +6,14 @@ The source tree contains only hand-written project files. Generated state belong
 
 ```text
 out/host-tools/venv/        pinned CMake, Ninja, and Conan Python packages
+out/host-tools/raddebugger/  optional pinned RAD source builds
 out/conan/home/             project-local Conan cache and installed profile
 out/conan/<preset>/         Conan CMakeToolchain and CMakeDeps files
 out/build/<preset>/         CMake build trees and compile_commands.json
 out/install/<preset>/       installed SDK prefixes
 out/test-results/           reserved for local test output
 out/logs/                   reserved for local logs
+out/debug/rad/              local RAD launch descriptions and debugger sessions
 ```
 
 The install tree is treated as the SDK boundary. The external consumer test uses `find_package()` against `out/install/<preset>/` rather than `add_subdirectory()` on the engine.
@@ -112,6 +114,11 @@ The default preset for command-line build, test, check, and install scripts is `
 ```
 
 `--all-presets` is accepted for clarity, but it is already the default initialization scope.
+
+`--with-rad-debugger` also builds the optional pinned Linux debugger;
+`--no-system-install` applies to its prerequisites too. Existing checkouts can
+use `./scripts/setup-rad-debugger` separately. See [debugging.md](debugging.md)
+for the CLI and VS Code task workflow; installation never modifies keybindings.
 
 Run the full validation path explicitly when you want it:
 

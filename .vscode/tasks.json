@@ -1,0 +1,35 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Ludus: Set up optional RAD Debugger",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/setup-rad-debugger",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ludus: Debug target with RAD",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/debug",
+      "args": ["${input:ludusDebugPreset}", "${input:ludusDebugTarget}"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "ludusDebugPreset",
+      "type": "pickString",
+      "description": "Native debug build preset",
+      "options": ["linux-clang-debug", "linux-clang-development"],
+      "default": "linux-clang-debug"
+    },
+    {
+      "id": "ludusDebugTarget",
+      "type": "promptString",
+      "description": "CMake executable target to build and debug",
+      "default": "ludus_smoke"
+    }
+  ]
+}

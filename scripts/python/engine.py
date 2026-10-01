@@ -1169,6 +1169,8 @@ def command_init(args: argparse.Namespace) -> int:
         presets = tuple(PRESET_BUILD_TYPES)
     prepare_conan_artifacts(root, versions, presets)
     repair_existing_cmake_caches(root, presets)
+    if args.with_rad_debugger:
+        command_setup_rad_debugger(args)
     if command_doctor(argparse.Namespace()) != 0:
         raise EngineError("doctor reported an invalid required tool or project state")
 
@@ -1210,6 +1212,8 @@ def command_init(args: argparse.Namespace) -> int:
 
 
 def command_doctor(_args: argparse.Namespace) -> int:
+    import rad_debugger
+
     root = repo_root()
     versions = load_tool_versions(root)
     statuses = [
@@ -1217,9 +1221,28 @@ def command_doctor(_args: argparse.Namespace) -> int:
         *managed_tool_statuses(root, versions),
         *project_state_statuses(root),
         *[status for status in system_tool_statuses(root, versions) if not status.required],
+        rad_debugger.tool_status(root, sys.modules[__name__]),
     ]
     print_status_table(statuses)
     return 1 if any(status.required and not status.ok for status in statuses) else 0
+
+
+def command_setup_rad_debugger(args: argparse.Namespace) -> int:
+    import rad_debugger
+
+    try:
+        return rad_debugger.setup(args, sys.modules[__name__])
+    except OSError as exc:
+        raise EngineError(f"RAD setup failed: {exc}") from exc
+
+
+def command_debug(args: argparse.Namespace) -> int:
+    import rad_debugger
+
+    try:
+        return rad_debugger.launch(args, sys.modules[__name__])
+    except OSError as exc:
+        raise EngineError(f"RAD launch failed: {exc}") from exc
 
 
 def command_build(args: argparse.Namespace) -> int:
@@ -1838,6 +1861,7 @@ def make_parser() -> argparse.ArgumentParser:
     init_parser = subparsers.add_parser("init", help="install prerequisites and prepare local build dependencies")
     init_parser.add_argument("preset", nargs="?", default=DEFAULT_PRESET)
     init_parser.add_argument("--no-system-install", action="store_true", help="do not install Ubuntu packages automatically")
+    init_parser.add_argument("--with-rad-debugger", action="store_true", help="also build the optional pinned Linux RAD Debugger")
     init_parser.add_argument("--all-presets", action="store_true", help="prepare Conan files for every committed preset (default)")
     init_parser.add_argument("--preset-only", action="store_true", help="prepare only the selected preset")
     init_parser.add_argument("--validate", "--full", action="store_true", help="also build, test, check, and validate the SDK")
@@ -1857,6 +1881,20 @@ def make_parser() -> argparse.ArgumentParser:
     doctor_parser = subparsers.add_parser("doctor", help="diagnose host and project tool state")
     doctor_parser.add_argument("preset", nargs="?", default=None)
     doctor_parser.set_defaults(func=command_doctor)
+
+    rad_parser = subparsers.add_parser("setup-rad-debugger", help="install the optional pinned Linux RAD Debugger")
+    rad_parser.add_argument("--no-system-install", action="store_true", help="require already-installed RAD build prerequisites")
+    rad_parser.set_defaults(func=command_setup_rad_debugger)
+
+    debug_parser = subparsers.add_parser("debug", help="build a native executable target and open RAD (options before preset)")
+    debug_parser.add_argument("--debugger", help="RAD executable path (overrides LUDUS_RAD_DEBUGGER)")
+    debug_parser.add_argument("--cwd", help="game working directory (default: repository root)")
+    debug_parser.add_argument("--no-build", action="store_true", help="reuse an existing CMake File API reply and executable")
+    debug_parser.add_argument("--dry-run", action="store_true", help="prepare the launch and print the command without opening RAD")
+    debug_parser.add_argument("preset", help="linux-clang-debug or linux-clang-development")
+    debug_parser.add_argument("target", help="CMake executable target name")
+    debug_parser.add_argument("arguments", nargs=argparse.REMAINDER, help="game arguments after --")
+    debug_parser.set_defaults(func=command_debug)
 
     build_parser = subparsers.add_parser("build", help="configure and build a preset")
     build_parser.add_argument("preset", nargs="?", default=DEFAULT_PRESET)
@@ -1914,7 +1952,9 @@ def main(argv: Sequence[str]) -> int:
     parser = make_parser()
     args = parser.parse_args(argv)
     try:
-        if str(getattr(args, "preset", "")).startswith("web-emscripten-"):
+        if args.command != "debug" and str(getattr(args, "preset", "")).startswith("web-emscripten-"):
+            if args.command == "init" and args.with_rad_debugger:
+                raise EngineError("RAD is native tooling; run ./scripts/setup-rad-debugger separately from browser init")
             from web_build import command
             return command(args, sys.modules[__name__])
         return int(args.func(args))
