@@ -32,6 +32,7 @@ const server = createServer(async (request, response) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
 let browser;
+const observedPages = [];
 async function until(read, accept, label) {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
@@ -60,6 +61,12 @@ function triangle(bytes) {
 }
 async function context(scenario = 'success', options = {}) {
   const context = await browser.newContext({viewport:{width:640,height:360},...options});
+  context.on('page', page => {
+    const consoleMessages = [];
+    observedPages.push({page,consoleMessages});
+    page.on('console', message => consoleMessages.push({type:message.type(),text:message.text()}));
+    page.on('pageerror', error => consoleMessages.push({type:'pageerror',text:String(error)}));
+  });
   // This test-only wrapper captures real resources or injects request failures.
   await context.addInitScript(scenario => {
     if (scenario === 'missing-webgpu') {
@@ -209,6 +216,24 @@ try {
   }
 } catch(error) {
   report.failure = String(error); process.exitCode = 1;
+  report.diagnostics = [];
+  for (const {page,consoleMessages} of observedPages) {
+    if (page.isClosed()) continue;
+    const entry = {url:page.url(),consoleMessages};
+    report.diagnostics.push(entry);
+    try {
+      entry.dom = await page.evaluate(() => {
+        const canvas = document.querySelector('canvas');
+        const status = document.querySelector('#status');
+        return {visibility:document.visibilityState,status:status?.textContent,
+          attributes:status ? Object.fromEntries(Array.from(status.attributes, a => [a.name,a.value])) : {},
+          canvas:canvas ? {width:canvas.width,height:canvas.height,
+            cssWidth:canvas.clientWidth,cssHeight:canvas.clientHeight} : null,
+          validation:window.__qaValidation};
+      });
+      await page.screenshot({path:resolve(output,`failure-${report.diagnostics.length}.png`)});
+    } catch (diagnosticError) {entry.error = String(diagnosticError);}
+  }
 } finally {
   await browser?.close(); server.close();
   await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2)+'\n');
