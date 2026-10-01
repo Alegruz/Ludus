@@ -316,7 +316,7 @@ green run. Editing only this plan does not require engine builds.
 | W5 | implemented; acceptance pending | Resize/clear/submission and private WGSL triangle probe; controlled-provider tests pass. Real-GPU animation/fullscreen remains pending. See webgpu-w5-evidence.md |
 | W6 | implemented; acceptance pending | Shared smoke lifecycle with native/RAF drivers, bounded simulation/input and player shell; controlled-provider tests pass. Real-device gameplay remains pending. See webgpu-w6-evidence.md |
 | W7 | implemented; hosted acceptance pending | Deterministic Release packaging, notices, manifest and clean-extraction shell/failure tests. See webgpu-w7-evidence.md; GPU/itch.io verification remains W8 |
-| W8 | in progress | Native/web/package CI passed; SwiftShader pixels/input/blur passed under Xvfb; controlled callback suspension and remaining integration checks are rerunning. Local Edge triangle/advancing frames observed; actual flag-free draft acceptance pending |
+| W8 | in progress | Native/web/package CI passed; all eight SwiftShader browser cases passed under Xvfb (run 36925039290). Local Edge triangle/advancing frames observed; actual flag-free draft acceptance pending |
 
 ## Session log
 

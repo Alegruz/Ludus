@@ -42,7 +42,7 @@ user's GPU driver to manufacture a device-loss test.
 | --- | --- | --- |
 | Edge 154.0.4258.37, Linux/Wayland, Intel UHD 620 / Mesa 25.2.8 | User's 2026-09-30 GPU report and W0 hosted clear screenshot after enabling Vulkan | W0 flag-dependent feasibility only; current packaged app and flag-free support pending |
 | Codex in-app browser on Linux | W6/W7 local extracted shell, controls, fullscreen and asset-failure tests; no adapter | Error UX verified; GPU rendering unsupported in this session |
-| CI Chromium 140.0.7339.186 / SwiftShader under Xvfb | Exact-ZIP orange triangle pixels, animated clear pixels, keyboard movement and blur passed; controlled callback suspension and remaining integration checks are rerunning | Full suite pending; software rendering only |
+| CI Chromium 140.0.7339.186 / SwiftShader under Xvfb | All eight exact-ZIP browser cases passed in run 36925039290; pixels, input, resize, fullscreen, restart/loss, controlled suspension and failures, sandbox/DPR | CI verified; software rendering only |
 | Other desktop/mobile browsers and GPUs | No current artifact evidence | Unverified |
 
 The historical GPU report predates the Vulkan flag change and is not a current
@@ -63,8 +63,11 @@ Playwright's forced focus/visibility prevented reliable native tab lifecycle
 testing in CI. Callback suspension now tests real WASM timing under an explicitly
 controlled RAF wrapper; actual tab background/resume remains a hosted hardware
 gate. Sandbox/DPR, missing WebGPU, adapter/device rejection, startup cancellation
-and missing asset cases passed. Full-suite acceptance remains pending, with DOM,
-console and screenshot diagnostics retained on failure.
+and missing asset cases passed. All eight cases passed on commit
+`3fe2c73380bdb9b84b445f84be216e86018bb668` in
+[run 36925039290](https://github.com/Alegruz/Ludus/actions/runs/36925039290).
+Screenshots and report.json are retained in artifact 11193069730. DOM, console
+and screenshot diagnostics are retained on failure. Hosted acceptance is pending.
 
 ## Closing W8
 
