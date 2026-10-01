@@ -312,7 +312,7 @@ green run. Editing only this plan does not require engine builds.
 | W1 | complete | CPU-only FoundationBase browser port, Development/Release probes, native regressions and SDK consumer validated. See webgpu-w1-evidence.md; W0 GPU gate remains open |
 | W2 | complete | Synchronous browser logging, bounded failure/reentry probes, browser clock, virtual trace export/download, Release compile-out and native regressions validated. See webgpu-w2-evidence.md |
 | W3 | complete | Canvas/DPR/input lifecycle and bounded ownership, both web probes, native regressions and SDK validated. See webgpu-w3-evidence.md; CI pending |
-| W4 | not started | Depends on W3 |
+| W4 | implemented; acceptance pending | Backend split and async lifecycle tested in wasm/native; real-GPU Ready check remains pending. See webgpu-w4-evidence.md |
 | W5 | not started | Depends on W4 |
 | W6 | not started | Depends on W5 |
 | W7 | not started | Depends on W6 |
@@ -367,3 +367,11 @@ that every reference prescribes them.
   Development, ASan/UBSan, format/tidy and SDK consumer pass with the existing
   no-display Wayland skip. See `webgpu-w3-evidence.md`. Next stage: W4 RHI split
   and asynchronous lifecycle contract. W0's hardware gates remain open.
+
+- 2026-10-01 W4: Split the native Vulkan implementation from the lifecycle facade;
+  added browser adapter/device/surface startup, explicit states, cancellation,
+  stale-token invalidation and owned teardown. Nine controlled-provider wasm
+  scenarios and native regressions pass. Native SDK consumers migrated. The real
+  in-app browser reports adapter unavailable; target-browser Ready verification
+  remains pending. See `webgpu-w4-evidence.md`. Next implementation: W5 frames,
+  after checking W4 merge/CI and completing the target-browser readiness check.

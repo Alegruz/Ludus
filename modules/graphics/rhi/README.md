@@ -1,22 +1,38 @@
 # Graphics RHI
 
 Link `Ludus::GraphicsRhi` and include `<ludus/graphics/rhi/rhi.h>`.
-`ludus::graphics::rhi::Initialize(ApplicationInfo)` loads Vulkan entry points
-through volk and creates a Vulkan instance. It returns `false` on failure;
-development builds also assert on initialization failures. `Shutdown()` destroys
-the instance and allows subsequent initialization. Serialize lifecycle calls;
-the module does not provide synchronization. The loader remains loaded until
-process exit. Devices, surfaces, and rendering resources are not implemented.
+The build selects a private Vulkan backend on native platforms and the pinned
+Emdawnwebgpu C API backend for Emscripten. Public headers expose no backend handles.
 
-Conan pins volk and its matching Vulkan headers in `conan.lock`. No Vulkan SDK
-or GPU is needed to build. A Vulkan loader is needed for initialization to
-succeed at runtime. Vulkan and volk headers stay out of the public RHI API;
-implementation files use `VK_NO_PROTOTYPES` and must not link a second Vulkan
-loader. See the [volk integration guide](https://github.com/zeux/volk).
+Call `Start(app, window)` once and poll `GetStartup()` on the main thread. Native
+startup completes synchronously; browser startup returns Pending and advances
+through adapter, device and validated surface configuration without blocking.
+Ready means these resources exist, not that frames have been implemented on web.
+The device's negotiated MaxTextureDimension2D is published after configuration;
+W5 will use it for canvas resize and rendering. No optional WebGPU features or
+increased limits are requested. Core adapter failure retries compatibility mode.
 
-Installed static SDK consumers also need the Conan-generated dependency configs
-on their CMake search path (or the matching Conan toolchain). `LudusConfig.cmake`
-resolves `volk::volk`, including its platform loader library, for final linking.
+Start is Busy until Shutdown, including a failed or lost session. Shutdown is
+idempotent and invalidates callbacks before releasing backend handles. Tokens
+never wrap; delayed adapter/device callbacks release returned handles without
+mutating the next session. A callback never retains application memory. Serialize
+all calls on the main thread; this singleton API is not worker-safe. The platform
+window/canvas must remain alive until RHI shutdown. Shutdown cancels the engine's
+interest in a pending browser request; it does not cancel the browser promise.
+
+BeginFrameStatus/EndFrameStatus return NotReady before readiness, InvalidState
+for unpaired frame operations, and Unsupported for web rendering until W5.
+The bool wrappers remain for source compatibility. Native Initialize,
+ConnectWindow and InitializeRendering are retained as synchronous conveniences;
+do not mix them with Start. The smoke app uses Start, and the installed SDK
+consumer compiles and queries the new API. The new exported functions require
+rebuilding downstream binaries; the old entry-point signatures are unchanged.
+
+Conan pins native volk/Vulkan headers; no Vulkan SDK or GPU is required to build.
+A loader and usable Wayland/Vulkan device are required for native startup.
+Emscripten builds resolve their separate pinned port through --use-port, without
+Conan/Volk. The test provider is linked only into the lifecycle probe, and never
+replaces browser navigator.gpu.
 
 ## Vulkan diagnostics
 

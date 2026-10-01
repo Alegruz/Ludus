@@ -59,12 +59,6 @@ int main()
     appInfo.Name = "Smoke App";
     appInfo.Version = 1;
 
-    if (!ludus::graphics::rhi::Initialize(appInfo))
-    {
-        LUDUS_LOG_FATAL(LOG_CORE, "Failed to initialize Vulkan RHI");
-        return 1;
-    }
-
     ludus::platform::WindowManager windowManager;
     constexpr ludus::platform::WindowManager::InitializeInfo info = {};
     if (!windowManager.Initialize(info))
@@ -91,19 +85,11 @@ int main()
         return 1;
     }
 
-    const auto nativeWindow = window->GetNativeWindowInfo();
-    if (nativeWindow.System != ludus::platform::WindowSystem::Headless &&
-        !ludus::graphics::rhi::ConnectWindow(nativeWindow))
+    // Native Start completes synchronously; browser consumers poll GetStartup
+    // from their animation callback instead of entering this blocking loop.
+    if (ludus::graphics::rhi::Start(appInfo, window->GetNativeWindowInfo()) != ludus::graphics::rhi::StartStatus::Ready)
     {
-        LUDUS_LOG_FATAL(LOG_CORE, "Failed to connect the window to Vulkan RHI");
-        ludus::graphics::rhi::Shutdown();
-        LogSystem::Shutdown();
-        return 1;
-    }
-
-    if (!ludus::graphics::rhi::InitializeRendering())
-    {
-        LUDUS_LOG_FATAL(LOG_CORE, "Failed to initialize rendering");
+        LUDUS_LOG_FATAL(LOG_CORE, "Failed to start RHI");
         ludus::graphics::rhi::Shutdown();
         LogSystem::Shutdown();
         return 1;
@@ -118,7 +104,7 @@ int main()
         {
             LUDUS_LOG_ERROR(LOG_CORE, "Failed to begin frame");
         }
-        const bool canFrameEnd = ludus::graphics::rhi::EndFrame();
+        const bool canFrameEnd = canFrameBegin && ludus::graphics::rhi::EndFrame();
         if (!canFrameEnd)
         {
             LUDUS_LOG_ERROR(LOG_CORE, "Failed to end frame");

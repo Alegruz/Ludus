@@ -60,10 +60,10 @@ engine code. Discuss such cases in the PR before adding them.
   extensions).
 - Supported reference toolchain: Clang/LLVM 18 with LLD on Ubuntu 24.04. Tool
   versions are pinned in `config/tool_versions.json`.
-- Browser Foundation modules, Platform, and the isolated feasibility probe use the Emscripten SDK and WebGPU
+- Browser Foundation modules, Platform, RHI, and the isolated feasibility probe use the Emscripten SDK and WebGPU
   port pinned in `config/web_toolchain.json` (ADR 0009). Its SDK-provided LLVM
   is a separate web toolchain; native builds and formatting/static analysis
-  continue to use the reference tools above. Foundation modules and the canvas Platform backend are available as browser engine targets; the RHI is not yet ported.
+  continue to use the reference tools above. Foundation modules, the canvas Platform backend, and the RHI lifecycle are available as browser engine targets; WebGPU frame rendering remains pending.
 
 ### Warnings
 
