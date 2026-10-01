@@ -9,6 +9,7 @@ on:
       - 'scripts/package-web'
       - 'scripts/python/web_package.py'
       - 'scripts/python/test_web_package.py'
+      - 'tools/web-browser-tests/**'
       - 'scripts/python/formatting.py'
       - 'config/web_toolchain.json'
       - 'config/tool_versions.json'
@@ -147,3 +148,36 @@ jobs:
           name: ludus-web-smoke-release
           path: out/packages/ludus-web-smoke-release.zip
           if-no-files-found: error
+
+  browser-software-gpu:
+    name: Packaged browser tests (software GPU)
+    needs: compile-and-package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ludus-web-smoke-release
+          path: out/packages
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+          cache: npm
+          cache-dependency-path: tools/web-browser-tests/package-lock.json
+      - name: Install pinned test runner and Chromium
+        working-directory: tools/web-browser-tests
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Test exact extracted Release ZIP
+        run: |
+          python3 -m zipfile -e out/packages/ludus-web-smoke-release.zip out/browser-qa/extracted
+          cd tools/web-browser-tests
+          xvfb-run -a npm test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-software-gpu-evidence
+          path: out/browser-qa/results
+          if-no-files-found: warn
