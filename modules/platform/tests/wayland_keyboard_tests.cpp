@@ -7,6 +7,7 @@
 #include "internal/evdev_keymap.hpp"
 
 #include <ludus/input/key.h>
+#include <ludus/input/keyboard.h>
 #include <ludus/platform/base/window.h>
 #include <ludus/platform/keyboard_sink.h>
 
@@ -114,4 +115,109 @@ TEST_CASE("Keyboard sink attach/detach stores the trio and clears it", "[platfor
     REQUIRE(empty.OnRecord == nullptr);
     REQUIRE(empty.OnReset == nullptr);
     REQUIRE(empty.UserData == nullptr);
+}
+
+// --- Enter-array and key-event normalization -----------------------------
+// BuildFocusBaseline / BuildKeyRecord are the exact code the wl_keyboard
+// enter/key listeners run. Testing them directly covers the focused-key and
+// held-baseline *normalization* semantics that the real-compositor manual gate
+// would exercise; only the OS->compositor transport is out of reach here.
+
+using ludus::input::FocusBaseline;
+using ludus::input::KeyboardRecord;
+using ludus::input::KeyIndex;
+using ludus::input::KeyTransition;
+using ludus::input::RecordSource;
+using ludus::platform::wayland::BuildFocusBaseline;
+using ludus::platform::wayland::BuildKeyRecord;
+
+TEST_CASE("Enter array normalizes evdev held keys into a focused baseline", "[platform][wayland][keyboard]")
+{
+    // A compositor enter carries the currently-held evdev codes. W + D + an
+    // unsupported media code: the supported keys are marked held, the media key
+    // is skipped, and focus is set without implying press edges.
+    const ludus::foundation::uint32 codes[] = {KEY_W, KEY_D, KEY_PLAYPAUSE};
+    const FocusBaseline baseline = BuildFocusBaseline(codes, 3);
+
+    REQUIRE(baseline.Focused);
+    REQUIRE(baseline.Keys[KeyIndex(Key::KeyW)]);
+    REQUIRE(baseline.Keys[KeyIndex(Key::KeyD)]);
+    // The unsupported media code contributed nothing and never indexed storage.
+    REQUIRE_FALSE(baseline.Keys[KeyIndex(Key::KeyA)]);
+    // Exactly the two supported keys are held.
+    int held = 0;
+    for (bool k : baseline.Keys)
+    {
+        held += k ? 1 : 0;
+    }
+    REQUIRE(held == 2);
+}
+
+TEST_CASE("Empty or null enter array yields a focused, empty baseline", "[platform][wayland][keyboard]")
+{
+    const FocusBaseline fromNull = BuildFocusBaseline(nullptr, 0);
+    REQUIRE(fromNull.Focused);
+    const ludus::foundation::uint32 none[] = {0};
+    const FocusBaseline fromEmpty = BuildFocusBaseline(none, 0);
+    REQUIRE(fromEmpty.Focused);
+    for (bool k : fromEmpty.Keys)
+    {
+        REQUIRE_FALSE(k);
+    }
+}
+
+TEST_CASE("Key event maps press/release to normalized records", "[platform][wayland][keyboard]")
+{
+    KeyboardRecord down;
+    REQUIRE(BuildKeyRecord(KEY_SPACE, /*pressed=*/true, /*timeMs=*/1234, down));
+    REQUIRE(down.PhysicalKey == Key::Space);
+    REQUIRE(down.Transition == KeyTransition::Down);
+    REQUIRE(down.Source == RecordSource::Native);
+    REQUIRE(down.HasNativeTime);
+    REQUIRE(down.NativeTimeMs == 1234);
+    REQUIRE_FALSE(down.Repeat); // compositor repeats never become gameplay presses
+
+    KeyboardRecord up;
+    REQUIRE(BuildKeyRecord(KEY_SPACE, /*pressed=*/false, /*timeMs=*/5678, up));
+    REQUIRE(up.Transition == KeyTransition::Up);
+    REQUIRE(up.NativeTimeMs == 5678);
+}
+
+TEST_CASE("Key event for an unsupported code is dropped with no record", "[platform][wayland][keyboard]")
+{
+    KeyboardRecord record;
+    record.PhysicalKey = Key::KeyZ; // sentinel to prove it is not overwritten
+    REQUIRE_FALSE(BuildKeyRecord(KEY_PLAYPAUSE, true, 0, record));
+    REQUIRE_FALSE(BuildKeyRecord(0 /*KEY_RESERVED*/, true, 0, record));
+    REQUIRE_FALSE(BuildKeyRecord(100000, true, 0, record));
+    REQUIRE(record.PhysicalKey == Key::KeyZ); // untouched on rejection
+}
+
+TEST_CASE("Enter baseline then released keys match a reducer suppression cycle", "[platform][wayland][keyboard]")
+{
+    // End-to-end normalization through the production reducer: a focus-enter with
+    // W held (as the key listener would deliver), then the release+repress that
+    // the manual gate's "regain focus while held / release-repress" step covers.
+    // This exercises the SAME records the native path produces, minus transport.
+    const ludus::foundation::uint32 held[] = {KEY_W};
+    const FocusBaseline baseline = BuildFocusBaseline(held, 1);
+
+    ludus::input::InputSystem system;
+    system.RequestReset(ludus::input::ResetReason::FocusEntered, baseline);
+    REQUIRE(system.ConsumeStep(1) == ludus::input::StepStatus::Ok);
+    // W is physically down but suppressed; no press edge (K06).
+    REQUIRE(system.GetKeyboardSnapshot().Down[KeyIndex(Key::KeyW)]);
+    REQUIRE(system.GetKeyboardSnapshot().Suppressed[KeyIndex(Key::KeyW)]);
+
+    KeyboardRecord wUp;
+    KeyboardRecord wDown;
+    REQUIRE(BuildKeyRecord(KEY_W, false, 10, wUp));
+    REQUIRE(BuildKeyRecord(KEY_W, true, 20, wDown));
+    REQUIRE(system.Ingest(wUp) == ludus::input::AdmissionStatus::Accepted);
+    REQUIRE(system.Ingest(wDown) == ludus::input::AdmissionStatus::Accepted);
+    REQUIRE(system.ConsumeStep(2) == ludus::input::StepStatus::Ok);
+    // Suppression cleared; genuine press now registered.
+    REQUIRE_FALSE(system.GetKeyboardSnapshot().Suppressed[KeyIndex(Key::KeyW)]);
+    REQUIRE(system.GetKeyboardSnapshot().Pressed[KeyIndex(Key::KeyW)]);
+    REQUIRE(system.GetKeyboardSnapshot().Down[KeyIndex(Key::KeyW)]);
 }

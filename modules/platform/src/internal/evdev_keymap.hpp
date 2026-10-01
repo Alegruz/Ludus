@@ -15,6 +15,7 @@
 
 #include <ludus/foundation/base/types.h>
 #include <ludus/input/key.h>
+#include <ludus/input/keyboard_event.h>
 
 #include <linux/input-event-codes.h>
 
@@ -191,5 +192,57 @@ inline constexpr EvdevKeyTable EVDEV_KEY_TABLE{};
         return Key::Unknown;
     }
     return EVDEV_KEY_TABLE.Entries[code];
+}
+
+// --- Pure normalization helpers (compositor-independent) -----------------
+// These encapsulate the exact enter-array normalization and key-event mapping
+// the wl_keyboard listeners perform, so the routing/normalization semantics can
+// be unit-tested without a live compositor (the OS->compositor transport is the
+// only part these cannot cover). The listeners call these; see window_wayland.
+
+// Build a focused held-key baseline from a wl_keyboard.enter key array. `codes`
+// points at `count` native evdev codes (the borrowed wl_array contents, already
+// copied by the caller). Unsupported/out-of-range codes are skipped; valid keys
+// are marked held. No press edges are implied (K06).
+[[nodiscard]] inline ludus::input::FocusBaseline BuildFocusBaseline(const uint32* codes,
+                                                                    ludus::foundation::usize count) noexcept
+{
+    ludus::input::FocusBaseline baseline;
+    baseline.Focused = true;
+    if (codes == nullptr)
+    {
+        return baseline;
+    }
+    for (ludus::foundation::usize i = 0; i < count; ++i)
+    {
+        const Key key = MapEvdevCode(codes[i]);
+        if (ludus::input::IsValidKey(key))
+        {
+            baseline.Keys[ludus::input::KeyIndex(key)] = true;
+        }
+    }
+    return baseline;
+}
+
+// Translate a wl_keyboard.key event (native evdev `code`, `pressed` state, and
+// `timeMs` diagnostic timestamp) into a normalized record. Returns false for an
+// unsupported/unmapped code so the caller drops it with no state change (K01).
+// `pressed` true => Down, false => Up. Native time is carried as diagnostic
+// metadata only (K03).
+[[nodiscard]] inline bool
+BuildKeyRecord(uint32 code, bool pressed, uint32 timeMs, ludus::input::KeyboardRecord& outRecord) noexcept
+{
+    const Key physical = MapEvdevCode(code);
+    if (!ludus::input::IsValidKey(physical))
+    {
+        return false;
+    }
+    outRecord.Source = ludus::input::RecordSource::Native;
+    outRecord.Transition = pressed ? ludus::input::KeyTransition::Down : ludus::input::KeyTransition::Up;
+    outRecord.PhysicalKey = physical;
+    outRecord.Repeat = false; // compositor repeats are not gameplay presses (K04)
+    outRecord.HasNativeTime = true;
+    outRecord.NativeTimeMs = timeMs;
+    return true;
 }
 } // namespace ludus::platform::wayland

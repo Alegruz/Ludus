@@ -492,22 +492,11 @@ void onKeyboardEnter([[maybe_unused]] void* data,
 
     // Copy/normalize the held-key array BEFORE returning; never retain the
     // borrowed wl_array (K06, design section 1). The array holds native evdev
-    // codes of currently-pressed keys.
-    ludus::input::FocusBaseline baseline;
-    baseline.Focused = true;
-    if (keys != nullptr && keys->data != nullptr)
-    {
-        const uint32_t* codes = static_cast<const uint32_t*>(keys->data);
-        const ludus::foundation::usize count = keys->size / sizeof(uint32_t);
-        for (ludus::foundation::usize i = 0; i < count; ++i)
-        {
-            const ludus::input::Key key = MapEvdevCode(codes[i]);
-            if (ludus::input::IsValidKey(key))
-            {
-                baseline.Keys[ludus::input::KeyIndex(key)] = true;
-            }
-        }
-    }
+    // codes of currently-pressed keys. BuildFocusBaseline is the shared,
+    // unit-tested normalization used by both production and the headless tests.
+    const uint32_t* codes = (keys != nullptr) ? static_cast<const uint32_t*>(keys->data) : nullptr;
+    const ludus::foundation::usize count = (keys != nullptr) ? keys->size / sizeof(uint32_t) : 0;
+    const ludus::input::FocusBaseline baseline = BuildFocusBaseline(codes, count);
     deliverReset(window, ludus::input::ResetReason::FocusEntered, baseline);
 }
 
@@ -544,21 +533,13 @@ void onKeyboardKey([[maybe_unused]] void* data,
         return;
     }
 
-    const ludus::input::Key physical = MapEvdevCode(key);
-    if (!ludus::input::IsValidKey(physical))
+    // Shared, unit-tested normalization. An unsupported/vendor/media code yields
+    // false and is dropped with no state change (K01).
+    ludus::input::KeyboardRecord record;
+    if (!BuildKeyRecord(key, state == WL_KEYBOARD_KEY_STATE_PRESSED, time, record))
     {
-        // Unsupported/vendor/media code: drop with no state change (K01).
         return;
     }
-
-    ludus::input::KeyboardRecord record;
-    record.Source = ludus::input::RecordSource::Native;
-    record.Transition =
-        (state == WL_KEYBOARD_KEY_STATE_PRESSED) ? ludus::input::KeyTransition::Down : ludus::input::KeyTransition::Up;
-    record.PhysicalKey = physical;
-    record.Repeat = false; // older protocol has no client repeat; v>=? repeats are ignored for gameplay
-    record.HasNativeTime = true;
-    record.NativeTimeMs = time; // diagnostic only; never compared to engine time
     deliverRecord(gFocusedWindow, record);
 }
 
