@@ -107,7 +107,7 @@ async function run(name, task) {
   catch(error) {entry.status = 'failed'; entry.error = String(error); throw error;}
 }
 try {
-  browser = await chromium.launch({headless:true, channel:'chromium', args:report.launchArgs});
+  browser = await chromium.launch({headless:false, channel:'chromium', args:report.launchArgs});
   report.browserVersion = browser.version();
   await run('real software-GPU pixels, input, blur, resize, fullscreen, restart, loss', async () => {
     const c = await context();

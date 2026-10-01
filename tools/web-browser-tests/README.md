@@ -1,7 +1,7 @@
 # Packaged browser CI tests
 
 This test-only runner executes the exact extracted Release ZIP in pinned
-Playwright 1.55.1 / its bundled Chromium with a forced SwiftShader adapter.
+Playwright 1.55.1 / its bundled Chromium under Xvfb with a forced SwiftShader adapter.
 Node is pinned to 22.16.0 in CI and npm dependencies have a committed integrity
 lock. None of these files or dependencies ship in the game ZIP.
 
@@ -31,7 +31,7 @@ python3 -m zipfile -e out/packages/ludus-web-smoke-release.zip out/browser-qa/ex
 cd tools/web-browser-tests
 npm ci
 npx playwright install --with-deps chromium
-npm test
+xvfb-run -a npm test
 ```
 
 The runner accepts extracted-directory, ZIP and output-directory paths as its
