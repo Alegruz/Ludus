@@ -109,16 +109,34 @@ listeners, surface routing, enter/leave baselines, terminal-reset-on-close),
 extracted to `pumpDisplayOnce()`; `HandleEvent({})` behavior and headless return
 semantics are unchanged.
 
-Gate: PARTIAL. No regressions (26/26, 2 compositor tests skipped without a
+Gate: PARTIAL. No regressions (27/27, 2 compositor tests skipped without a
 display). Normalization + sink seam covered by `ludus_platform_keyboard_tests`.
 Live validation against a real **weston 13.0.3** headless compositor passed for
 seat selection, keyboard-capability binding, listener registration, and a stable
-idle pump (`ludus_platform_wayland_tests`: 10440 assertions;
+idle pump (`ludus_platform_wayland_tests`: 10575 assertions;
 `ludus_platform_live_keyboard_tests`: pass), clean under ASan/UBSan.
-OUTSTANDING: full focused-window key delivery and held-state-on-leave against a
-compositor could NOT be exercised here — the sandbox has no uinput/virtual input
-device and weston's headless shell does not grant keyboard focus to the
-buffer-less test surface. This remains a manual gate (recorded in M5).
+
+Follow-up (branch `feat/keyboard-input-followup`): the enter/key listeners'
+normalization was extracted into pure, shared helpers `BuildFocusBaseline` /
+`BuildKeyRecord` (`src/internal/evdev_keymap.hpp`) that production and tests both
+call, and `ludus_platform_keyboard_tests` now covers them directly (enter-array
+held-key normalization incl. unsupported-code skipping, press/release record
+mapping with native-time + no-repeat, unsupported-code rejection leaving the
+record untouched, and a full enter-baseline -> release/repress suppression cycle
+run through the PRODUCTION reducer). This closes the normalization/routing
+decision portion of the manual matrix with deterministic tests (10 cases / 297
+assertions, clean under ASan/UBSan).
+
+OUTSTANDING (unchanged, environmental): injecting REAL physical key events into
+a focused native window could still not be exercised in-sandbox. Root cause now
+pinned precisely: this container has no `/dev/uinput` and no `/dev/input` (and
+`modprobe` is unavailable), AND weston's headless backend advertises NO `wl_seat`
+global at all (verified by enumerating the compositor's globals), so no
+`wl_keyboard` focus/enter/key/leave can be produced regardless of surface buffers
+or shell choice; the available `wayland-protocols` has no wlroots
+`virtual-keyboard` protocol. Everything up to the OS->compositor transport is now
+covered by automated tests; the transport itself remains a manual gate (recorded
+in M5 and the decision log).
 
 ## M3 - Button/axis actions and rebinding
 
@@ -206,10 +224,14 @@ loop + synthetic fallback, trace/counter dump); root `CMakeLists.txt`. Manual
 matrix recorded in the decision log.
 
 Gate: PASS for every runnable gate (see commands below + ledger). The only
-OUTSTANDING item is the real-compositor focused key-delivery manual matrix:
-the sandbox has no uinput/virtual input device and weston's headless shell does
-not focus a buffer-less surface, so tap/hold/alt-tab-while-held with ACTUAL key
-events on a focused native window could not be exercised here. Seat/keyboard
+OUTSTANDING item is the real-compositor focused key-DELIVERY transport (injecting
+actual physical key events into a focused native window). As of the follow-up
+branch the normalization and routing *decisions* behind that gate are covered by
+deterministic automated tests (`BuildFocusBaseline`/`BuildKeyRecord` + the
+reducer suppression cycle in `ludus_platform_keyboard_tests`), so the residual
+gap is strictly the OS->compositor transport, which cannot run in this container:
+no `/dev/uinput` or `/dev/input`, no `modprobe`, weston headless advertises no
+`wl_seat`, and no wlroots `virtual-keyboard` protocol is available. Seat/keyboard
 binding, routing wiring, and the pump were validated live against weston 13.0.3;
 all keyboard semantics are validated through the production reducer via headless
 fixtures and the installed-SDK consumer.
@@ -237,7 +259,8 @@ backend verification. Run init.sh only if the pinned tools/dependencies need it.
 | --- | --- | --- | --- |
 | M0 | branch `feat/keyboard-input` from `a66f551`; `docs/architecture/keyboard-input-decision-log.md` | Baseline `./scripts/build` + `./scripts/test linux-clang-debug` (22/22) before edits | DONE. Toolchain provisioned (clang-18, cmake 3.29.6, conan 2.8.1, Wayland dev); API/capacities frozen |
 | M1 | `modules/input/**` (5 public headers, `src/{key,keyboard,input_debug}.cpp`, `src/internal/{reducer.hpp,log_categories.h}`, 3 tests); `modules/input/CMakeLists.txt`; root `CMakeLists.txt` | `./scripts/build/test linux-clang-debug` (26/26 incl. input + alloc); `linux-clang-asan-ubsan` input tests clean; `./scripts/check --format` clean; `ludus_header_self_sufficiency`, `ludus_foundational_includes` pass; clang-tidy run manually per-file (clean) | DONE. Remaining gate: project `./scripts/check --tidy` cannot run in this sandbox (pre-existing clang-tidy vs Ninja C++-modules `@modmap` interaction, fails first on unmodified `apps/smoke/main.cpp`); verified my files tidy-clean out-of-band |
-| M2 | `modules/platform/src/window_wayland.cpp`, `src/internal/evdev_keymap.hpp`, `include/ludus/platform/keyboard_sink.h`, `include/ludus/platform/base/window.h`, `modules/platform/CMakeLists.txt`, 2 new tests | `./scripts/build/test linux-clang-debug` (26/26); live `weston 13.0.3` headless run of `ludus_platform_wayland_tests` (10440 assertions) + `ludus_platform_live_keyboard_tests` (debug & ASan/UBSan, clean); `--format` clean; header self-sufficiency pass; per-file clang-tidy clean | DONE w/ outstanding manual gate: focused key delivery + held-loss-on-leave need a compositor granting focus + a virtual input device (absent here) |
+| M2 | `modules/platform/src/window_wayland.cpp`, `src/internal/evdev_keymap.hpp` (+`BuildFocusBaseline`/`BuildKeyRecord`), `include/ludus/platform/keyboard_sink.h`, `include/ludus/platform/base/window.h`, `modules/platform/CMakeLists.txt`, `tests/wayland_keyboard_tests.cpp` (10 cases/297 assertions) + `tests/wayland_live_keyboard_tests.cpp` | `./scripts/build/test linux-clang-debug` (27/27); live `weston 13.0.3` run of `ludus_platform_wayland_tests` (10575 assertions) + `ludus_platform_live_keyboard_tests` (debug & ASan/UBSan, clean); `--format` + per-file clang-tidy clean | DONE. Residual gate narrowed to the OS->compositor key-DELIVERY transport only (no uinput/input device + weston headless has no wl_seat in this container); all normalization/routing decisions now covered by automated tests |
 | M3 | `modules/input/src/internal/reducer.hpp` (action aggregate eval already present from M1), `modules/input/tests/action_tests.cpp`, `modules/input/CMakeLists.txt` | `./scripts/test linux-clang-debug` input (746 assertions); ASan/UBSan input clean; alloc test clean; `--format` clean; action_tests clang-tidy clean | DONE. Demo in M5 |
 | M4 | `modules/input/src/{input_debug.cpp,internal/reducer.hpp}`, `modules/input/tests/trace_tests.cpp`, `modules/input/benchmarks/input_bench.cpp`, `docs/development/keyboard-input-performance.md`, `modules/input/CMakeLists.txt` | `./scripts/test linux-clang-debug` (37 input cases / 833 assertions); ASan/UBSan input clean; `ludus_input_bench` run (1 ctor alloc, 0 hot); `--format` + per-file clang-tidy clean | DONE. Debug dump in M5 |
-| M5 | `tests/sdk_consumer/{main.cpp,CMakeLists.txt}`, `apps/input_demo/{main.cpp,CMakeLists.txt}`, root `CMakeLists.txt`, decision log, this ledger | `build/test linux-clang-debug` (26/26), `linux-clang-development` (25/25), `linux-clang-asan-ubsan` (22/22), `--format` clean, `install-sdk linux-clang-development` (consumer prints "Input: tap + rebind OK"), `check-build-budget --profile` (window.h 129ms/2000ms budget), Wayland ON+OFF reconfigure/build/test, warnings-as-errors rebuild of input/platform, live weston 13.0.3 pump (10165 assertions) + live keyboard tests | DONE except the real-compositor focused-key manual matrix (no uinput / no focus-granting shell in sandbox) |
+| M5 | `tests/sdk_consumer/{main.cpp,CMakeLists.txt}`, `apps/input_demo/{main.cpp,CMakeLists.txt}`, root `CMakeLists.txt`, decision log, this ledger | `build/test linux-clang-debug` (26/26), `linux-clang-development` (25/25), `linux-clang-asan-ubsan` (22/22), `--format` clean, `install-sdk linux-clang-development` (consumer prints "Input: tap + rebind OK"), `check-build-budget --profile` (window.h 129ms/2000ms budget), Wayland ON+OFF reconfigure/build/test, warnings-as-errors rebuild of input/platform, live weston 13.0.3 pump (10165 assertions) + live keyboard tests. Merged to main as PR #39 (`c6a9210`) | DONE except the real-compositor focused-key DELIVERY transport (no uinput/input device + weston headless has no wl_seat); normalization/routing decisions now covered by automated tests on the follow-up branch |
+| Follow-up | `feat/keyboard-input-followup`: `modules/platform/src/internal/evdev_keymap.hpp` (shared `BuildFocusBaseline`/`BuildKeyRecord`), `modules/platform/src/window_wayland.cpp` (listeners call the shared helpers), `modules/platform/tests/wayland_keyboard_tests.cpp` (+4 normalization cases) | `./scripts/build/test linux-clang-debug` (27/27); `ludus_platform_keyboard_tests` 10 cases/297 assertions (debug+ASan); live weston 13.0.3 pump 10575 + live kbd (debug+ASan, clean); `--format` + per-file clang-tidy clean; browser canvas path untouched | DONE. Narrows the M2/M5 outstanding gate from "focused key delivery + normalization unverified" to just the OS->compositor transport |

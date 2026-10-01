@@ -241,24 +241,36 @@ delivery + held-state-on-leave is an outstanding manual gate (M5 matrix).
 
 The following require a compositor that grants keyboard focus to the demo window
 and a real/virtual keyboard delivering key events. The sandbox used for
-implementation has **weston 13.0.3** (headless) but **no uinput / `/dev/input`**
-device and its headless shell does not focus a buffer-less surface, so these
-steps are documented for a maintainer with a desktop Wayland session and are the
-one outstanding gate. The equivalent semantics are each covered by an automated
-headless-fixture test (named in parentheses) through the production reducer.
+implementation has **weston 13.0.3** (headless) which — verified by enumerating
+the compositor's advertised globals — provides **no `wl_seat`** at all (the
+headless backend creates no input devices), and the container has **no
+`/dev/uinput` / `/dev/input`**, no `modprobe`, and no wlroots `virtual-keyboard`
+protocol in the available `wayland-protocols`. There is therefore no in-sandbox
+path to deliver real physical key events; the residual gate is strictly the
+OS->compositor transport. These steps are documented for a maintainer with a
+desktop Wayland session. Every step's semantics are covered by an automated test
+through the production code (named in parentheses); the follow-up branch added
+direct coverage of the enter-array and key-event *normalization* the native
+listeners perform (`BuildFocusBaseline`/`BuildKeyRecord`), so only the transport
+itself is unverified in-sandbox.
 
 | Manual step | Expected | Automated analogue |
 | --- | --- | --- |
-| Tap a bound key | one Pressed+Released, action inactive | action_tests "rapid tap" |
+| Tap a bound key | one Pressed+Released, action inactive | action_tests "rapid tap"; wayland_keyboard_tests "Key event maps press/release" |
 | Hold a bound key across frames | Pressed once, held after; one Released on up | reducer_tests "Down, repeated Down, held idle step, Up" |
 | Press simultaneous opposite axis keys | axis Value 0 | action_tests "opposite directions cancel" |
 | Alternative keys (W or UpArrow) | releasing one keeps action active | action_tests "multiple alternative keys" |
 | Alt-tab (focus leave) while held | action cancelled, held cleared | reducer_tests "Focus leave with queued tap/held key" |
-| Regain focus while key still held | key Down but suppressed; no activation | reducer_tests "Focus enter with held W" |
-| Release+repress the held key | suppression clears; genuine press | reducer_tests "Focus enter ... suppressed" |
+| Regain focus while key still held | key Down but suppressed; no activation | reducer_tests "Focus enter with held W"; wayland_keyboard_tests "Enter array normalizes evdev held keys" |
+| Release+repress the held key | suppression clears; genuine press | wayland_keyboard_tests "Enter baseline then released keys match a reducer suppression cycle" |
 | Rebind while a key is held | old action cancels; held key suppressed under new map | action_tests "Switch map while held" |
 | Close the window | final WindowClosed reset to the sink | window_wayland HandleEvent close path (code) |
-| Idle rendering (no keys) | pump stable; snapshot held state retained | wayland_event_tests + reducer idle-step tests |
+| Idle rendering (no keys) | pump stable; snapshot held state retained | wayland_event_tests + reducer idle-step tests (live weston) |
+
+The native enter/key listeners call the SAME `BuildFocusBaseline` /
+`BuildKeyRecord` helpers these tests exercise, so a maintainer running the matrix
+on a desktop session is validating only that the compositor delivers the evdev
+codes — the normalization and routing are already proven.
 
 To run the demo on a real session:
 
@@ -276,4 +288,6 @@ Record the compositor and its version in the PR when performing this matrix.
   multiple windows only for safe routing.
 - Physical labels (`KeyW`) denote US-reference positions, not the user's layout.
 - No libxkbcommon dependency; keymap fds are closed, never compiled.
-- The real-compositor focused-key manual matrix above is unverified in-sandbox.
+- Only the OS->compositor key-DELIVERY transport in the manual matrix above is
+  unverified in-sandbox (no seat/uinput here); the normalization and routing it
+  feeds are covered by automated tests.
