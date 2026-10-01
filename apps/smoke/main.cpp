@@ -1,16 +1,11 @@
+#include "internal/application.h"
 #include <ludus/diagnostics/session.hpp>
-#include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/base/version.hpp>
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
 #include <ludus/foundation/profiling/profiling.hpp>
 #include <ludus/foundation/profiling/trace_system.hpp>
-#include <ludus/graphics/rhi/rhi.h>
-#include <ludus/platform/base/window.h>
-#include <ludus/platform/native_window.h>
-
-#include <string>
 
 using namespace ludus::foundation::logging;
 
@@ -55,61 +50,12 @@ int main()
     LUDUS_LOG_INFO(LOG_CORE, "Revision: {}", ludus::foundation::git_revision());
     LUDUS_LOG_INFO(LOG_CORE, "Compiler: {}", ludus::foundation::compiler_identity());
 
-    ludus::graphics::rhi::ApplicationInfo appInfo{};
-    appInfo.Name = "Smoke App";
-    appInfo.Version = 1;
-
-    ludus::platform::WindowManager windowManager;
-    constexpr ludus::platform::WindowManager::InitializeInfo info = {};
-    if (!windowManager.Initialize(info))
+    ludus::smoke::Application application;
+    const bool started = application.Start();
+    auto state = application.GetState();
+    while (started && (state == ludus::smoke::State::Loading || state == ludus::smoke::State::Playing))
     {
-        LUDUS_LOG_FATAL(LOG_CORE, "Failed to initialize window manager");
-        ludus::graphics::rhi::Shutdown();
-        LogSystem::Shutdown();
-        return 1;
-    }
-
-    const ludus::platform::Window::CreateInfo createInfo =
-    {
-        .Name = std::string("Test Window"),
-        .Width = 800,
-        .Height = 600,
-    };
-
-    ludus::foundation::core::UniquePtr<ludus::platform::Window> window = nullptr;
-    if (!windowManager.CreateWindow(createInfo, window))
-    {
-        LUDUS_LOG_FATAL(LOG_CORE, "Failed to create window");
-        ludus::graphics::rhi::Shutdown();
-        LogSystem::Shutdown();
-        return 1;
-    }
-
-    // Native Start completes synchronously; browser consumers poll GetStartup
-    // from their animation callback instead of entering this blocking loop.
-    if (ludus::graphics::rhi::Start(appInfo, window->GetNativeWindowInfo()) != ludus::graphics::rhi::StartStatus::Ready)
-    {
-        LUDUS_LOG_FATAL(LOG_CORE, "Failed to start RHI");
-        ludus::graphics::rhi::Shutdown();
-        LogSystem::Shutdown();
-        return 1;
-    }
-
-    while (window->HandleEvent({}))
-    {
-        LUDUS_PROFILE_SCOPE(Frame);
-        // Main loop
-        const bool canFrameBegin = ludus::graphics::rhi::BeginFrame();
-        if (!canFrameBegin)
-        {
-            LUDUS_LOG_ERROR(LOG_CORE, "Failed to begin frame");
-        }
-        const bool canFrameEnd = canFrameBegin && ludus::graphics::rhi::EndFrame();
-        if (!canFrameEnd)
-        {
-            LUDUS_LOG_ERROR(LOG_CORE, "Failed to end frame");
-        }
-        LUDUS_PROFILE_FRAME();
+        state = application.Tick();
     }
 
     // Close the capture and write a trace next to the executable. Guarded so a
@@ -123,8 +69,7 @@ int main()
         }
     }
 
-    ludus::graphics::rhi::ShutdownRendering();
-    ludus::graphics::rhi::Shutdown();
+    application.Shutdown();
     LogSystem::Shutdown();
-    return 0;
+    return state == ludus::smoke::State::Failed || state == ludus::smoke::State::DeviceLost ? 1 : 0;
 }

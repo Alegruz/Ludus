@@ -65,7 +65,8 @@ engine code. Discuss such cases in the PR before adding them.
   is a separate web toolchain; native builds and formatting/static analysis
   continue to use the reference tools above. Foundation modules, the canvas
   Platform backend, and the RHI lifecycle/frame clear path are available as
-  browser engine targets; the W5 probe privately owns its WGSL triangle pipeline.
+  browser engine targets; the W5 probe and integrated W6 smoke app privately
+  own their WGSL triangle pipelines. Web presets also build apps/smoke.
 
 ### Warnings
 

@@ -106,7 +106,7 @@
       "cacheVariables": {
         "CMAKE_MAKE_PROGRAM": "${sourceDir}/out/host-tools/venv/bin/ninja",
         "LUDUS_BUILD_TESTS": "OFF",
-        "LUDUS_BUILD_SMOKE_APP": "OFF",
+        "LUDUS_BUILD_SMOKE_APP": "ON",
         "LUDUS_WARNINGS_AS_ERRORS": "ON",
         "LUDUS_ENABLE_ASAN": "OFF",
         "LUDUS_ENABLE_UBSAN": "OFF",

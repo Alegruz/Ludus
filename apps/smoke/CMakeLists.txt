@@ -1,13 +1,38 @@
-add_executable(ludus_smoke)
-target_sources(ludus_smoke PRIVATE main.cpp)
-target_link_libraries(
-    ludus_smoke
-    PRIVATE
-        Ludus::FoundationBase
-        Ludus::FoundationLogging
-        Ludus::FoundationProfiling
-        Ludus::Platform
-        Ludus::DiagnosticsIntegration
-        Ludus::GraphicsRhi
-)
+add_executable(ludus_smoke application.cpp simulation.cpp)
+target_link_libraries(ludus_smoke PRIVATE Ludus::FoundationBase Ludus::FoundationLogging
+    Ludus::FoundationProfiling Ludus::Platform Ludus::GraphicsRhi)
 ludus_apply_project_defaults(ludus_smoke)
+if(EMSCRIPTEN)
+    target_sources(ludus_smoke PRIVATE main_web.cpp renderer_web.cpp)
+    # W5's private smoke interop; no backend types enter the installed SDK.
+    target_include_directories(ludus_smoke PRIVATE "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/src")
+    target_compile_options(ludus_smoke PRIVATE "--use-port=emdawnwebgpu:cpp_bindings=false")
+    target_link_options(ludus_smoke PRIVATE -fno-exceptions -g0 -g2 -sENVIRONMENT=web -sALLOW_MEMORY_GROWTH=1 -sASSERTIONS=1)
+    set_target_properties(ludus_smoke PROPERTIES OUTPUT_NAME index SUFFIX ".js")
+    configure_file(shell.html index.html COPYONLY)
+
+    # Controlled providers are linked into a separate test executable only.
+    add_executable(ludus_web_smoke_test application.cpp simulation.cpp main_web.cpp renderer_web.cpp)
+    target_link_libraries(ludus_web_smoke_test PRIVATE Ludus::GraphicsRhi Ludus::FoundationProfiling)
+    target_include_directories(ludus_web_smoke_test PRIVATE "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/src")
+    target_compile_options(ludus_web_smoke_test PRIVATE "--use-port=emdawnwebgpu:cpp_bindings=false")
+    ludus_apply_project_defaults(ludus_web_smoke_test)
+    target_link_options(ludus_web_smoke_test PRIVATE -fno-exceptions -g0 -g2 -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1 -sASSERTIONS=1 "--pre-js=${CMAKE_CURRENT_SOURCE_DIR}/tests/node_gpu_fixture.js")
+    set_target_properties(ludus_web_smoke_test PROPERTIES OUTPUT_NAME smoke-test SUFFIX ".js")
+    set_property(TARGET ludus_web_smoke_test APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/node_gpu_fixture.js")
+    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME ludus_web_smoke_semantics COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_semantics.py" "${CMAKE_CROSSCOMPILING_EMULATOR}" "$<TARGET_FILE:ludus_web_smoke_test>")
+    set_tests_properties(ludus_web_smoke_semantics PROPERTIES LABELS "web;smoke" TIMEOUT 120)
+else()
+    target_sources(ludus_smoke PRIVATE main.cpp renderer_native.cpp)
+    target_link_libraries(ludus_smoke PRIVATE Ludus::DiagnosticsIntegration)
+    if(LUDUS_BUILD_TESTS)
+        find_package(Catch2 3 REQUIRED)
+        add_executable(ludus_smoke_simulation_tests tests/simulation_tests.cpp simulation.cpp)
+        target_link_libraries(ludus_smoke_simulation_tests PRIVATE Ludus::Platform Catch2::Catch2WithMain)
+        ludus_apply_project_defaults(ludus_smoke_simulation_tests)
+        ludus_enable_test_exceptions(ludus_smoke_simulation_tests)
+        add_test(NAME ludus_smoke_simulation_tests COMMAND ludus_smoke_simulation_tests)
+        set_tests_properties(ludus_smoke_simulation_tests PROPERTIES LABELS "unit;smoke")
+    endif()
+endif()
