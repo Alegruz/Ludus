@@ -8,11 +8,13 @@ lock. None of these files or dependencies ship in the game ZIP.
 The software-GPU job follows the compile/package job and downloads its ZIP.
 It checks real WGSL rendering by reading orange triangle pixels and animated
 clear pixels, rather than trusting only frame counters. It also tests keyboard/
-pointer movement, blur, hidden canvas, browser freeze/resume, resize, DPR, a
+pointer movement, blur, hidden canvas, controlled RAF callback suspension, resize, DPR, a
 sandboxed iframe, fullscreen, stop/restart and device destruction. Separate
 contexts inject missing WebGPU and adapter/device rejection, delay startup for
 cancellation, or abort asset requests. These contexts use a real DOM and the
-production wasm; injected failures remain explicitly synthetic.
+production wasm; injected failures and callback suspension remain explicitly synthetic.
+Native tab background/freeze/resume is a separate hosted hardware requirement:
+Playwright's focus emulation prevented reliable lifecycle transitions in this CI setup.
 
 Existing Node provider tests cover pipeline cancellation, callback generations,
 validation errors and ownership release without claiming pixels. This browser

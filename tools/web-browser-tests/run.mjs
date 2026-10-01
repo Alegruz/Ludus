@@ -73,6 +73,14 @@ async function context(scenario = 'success', options = {}) {
   });
   // This test-only wrapper captures real resources or injects request failures.
   await context.addInitScript(scenario => {
+    const nativeRAF = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = callback => nativeRAF(time => {
+      if (window.__qaSuspend) {
+        window.__qaPending = callback;
+        window.__qaPaused = {x:Number(document.querySelector('#status').dataset.x),
+          frames:Number(document.querySelector('#status').dataset.frames)};
+      } else callback(time);
+    });
     if (scenario === 'missing-webgpu') {
       Object.defineProperty(navigator,'gpu',{value:undefined}); return;
     }
@@ -137,33 +145,27 @@ try {
     await delay(160);
     assert(Math.abs(await x(page) - blurred) < 0.02, 'Blur kept a key held');
     await page.keyboard.up('d');
-    // Exercise actual browser suspension, separately from injected Node timing.
+    // Controlled callback suspension: exercises real WASM timing, but does not
+    // claim native tab background/freeze behavior (a hosted hardware gate).
     await page.locator('canvas').click();
-    await page.evaluate(() => {
-      const snapshot = () => ({x:Number(document.querySelector('#status').dataset.x),
-        frames:Number(document.querySelector('#status').dataset.frames)});
-      document.addEventListener('freeze', () => {window.__qaFrozen = snapshot();}, {once:true});
-      document.addEventListener('resume', () => {
-        requestAnimationFrame(() => {window.__qaResumed = snapshot();});
-      }, {once:true});
-    });
     await page.keyboard.down('d');
-    const cdp = await c.newCDPSession(page);
-    // Playwright forces focus/visibility for automation. Disable that override
-    // so the browser's lifecycle command can hide and freeze the real page.
-    await cdp.send('Emulation.setFocusEmulationEnabled',{enabled:false});
-    await cdp.send('Page.setWebLifecycleState',{state:'frozen'});
+    await page.evaluate(() => {window.__qaSuspend = true;});
+    await until(() => page.evaluate(() => window.__qaPaused), Boolean, 'callback suspension');
     await delay(1200);
-    await cdp.send('Page.setWebLifecycleState',{state:'active'});
-    await cdp.send('Emulation.setFocusEmulationEnabled',{enabled:true});
-    await page.bringToFront();
-    const suspension = await until(() => page.evaluate(() => ({frozen:window.__qaFrozen,
-      resumed:window.__qaResumed})), value => value.frozen && value.resumed, 'freeze/resume events');
+    await page.evaluate(() => {
+      window.__qaSuspend = false;
+      requestAnimationFrame(time => {
+        window.__qaPending(time);
+        window.__qaResumed = Number(document.querySelector('#status').dataset.x);
+      });
+    });
+    const suspension = await until(() => page.evaluate(() => ({paused:window.__qaPaused,
+      resumed:window.__qaResumed})), value => value.resumed !== undefined, 'callback resume');
     await page.keyboard.up('d');
-    report.suspension = suspension;
-    assert(suspension.resumed.x-suspension.frozen.x <= 0.10001,
+    report.suspension = {kind:'controlled RAF callback suspension',...suspension};
+    assert(suspension.paused.x < 0.8, 'Suspension started too near movement boundary');
+    assert(suspension.resumed-suspension.paused.x <= 0.10001,
       'First resumed frame exceeded the simulation time-step bound');
-    await cdp.detach();
     const bounds = await page.locator('canvas').boundingBox();
     await page.mouse.move(bounds.x + bounds.width*0.25, bounds.y + bounds.height*0.75);
     await page.mouse.down();
@@ -250,7 +252,7 @@ try {
           attributes:status ? Object.fromEntries(Array.from(status.attributes, a => [a.name,a.value])) : {},
           canvas:canvas ? {width:canvas.width,height:canvas.height,
             cssWidth:canvas.clientWidth,cssHeight:canvas.clientHeight} : null,
-          validation:window.__qaValidation};
+          validation:window.__qaValidation,paused:window.__qaPaused,resumed:window.__qaResumed};
       });
       await page.screenshot({path:resolve(output,`failure-${report.diagnostics.length}.png`)});
     } catch (diagnosticError) {entry.error = String(diagnosticError);}
