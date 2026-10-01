@@ -316,7 +316,7 @@ green run. Editing only this plan does not require engine builds.
 | W5 | implemented; acceptance pending | Resize/clear/submission and private WGSL triangle probe; controlled-provider tests pass. Real-GPU animation/fullscreen remains pending. See webgpu-w5-evidence.md |
 | W6 | implemented; acceptance pending | Shared smoke lifecycle with native/RAF drivers, bounded simulation/input and player shell; controlled-provider tests pass. Real-device gameplay remains pending. See webgpu-w6-evidence.md |
 | W7 | implemented; hosted acceptance pending | Deterministic Release packaging, notices, manifest and clean-extraction shell/failure tests. See webgpu-w7-evidence.md; GPU/itch.io verification remains W8 |
-| W8 | not started | Depends on W7 and hosted test access |
+| W8 | in progress | W7 merged with CI success; packaged browser software-GPU CI and hosted support record added. First browser CI run and actual flag-free draft acceptance pending |
 
 ## Session log
 
@@ -400,3 +400,10 @@ that every reference prescribes them.
   extraction/failure behavior are validated; actual GPU/hosted acceptance remains
   open. See `webgpu-w7-evidence.md` and `web-packaging.md`. Next: check W7 PR/CI,
   then W8 hosted acceptance of the exact artifact without experimental flags.
+
+- 2026-10-01 W8: PR #43 is merged and native/web CI passed. Added pinned
+  Chromium/SwiftShader pixel/DOM tests of the exact package, with explicit
+  synthetic failure contexts and separate hardware evidence. The user supplied
+  draft project 5081459; upload is waiting for Edge extension file access.
+  See `webgpu-hosted-acceptance.md`. Keep the milestone open until browser CI
+  and real-device hosted/flag-free evidence pass; do not publish the draft.
