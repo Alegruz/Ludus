@@ -53,6 +53,8 @@ public:
     friend UniquePtr<WindowWayland> CreateWindow(const Window::CreateInfo& info) noexcept;
 
 public:
+    ~WindowWayland() noexcept override;
+
     bool HandleEvent(const Event& event) noexcept override;
     [[nodiscard]] bool IsClosed() const noexcept
     {

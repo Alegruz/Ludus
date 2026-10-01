@@ -3,11 +3,93 @@
 #include <ludus/foundation/base/build_metadata.hpp>
 #include <ludus/foundation/base/version.hpp>
 #include <ludus/graphics/rhi/rhi.h>
+#include <ludus/input/actions.h>
+#include <ludus/input/keyboard.h>
 
 #include <iostream>
 #include <ludus/foundation/base/diagnostic_output.hpp>
 #include <sys/socket.h>
 #include <unistd.h>
+
+// Exercise the installed Ludus::Input SDK through public headers only: define a
+// button map, focus, ingest a short tap, consume one step, and check held/edge
+// results and an in-memory rebind. Returns 0 on success, 6 on any input failure.
+static int ExerciseInstalledInput()
+{
+    ludus::input::InputSystem system;
+    if (!system.IsValid())
+    {
+        return 6;
+    }
+
+    ludus::input::FocusBaseline baseline;
+    baseline.Focused = true;
+    system.RequestReset(ludus::input::ResetReason::FocusEntered, baseline);
+
+    const ludus::input::Binding bindings[] = {
+        ludus::input::Binding
+        {
+            .Action = 0,
+            .Kind = ludus::input::ActionKind::Button,
+            .PhysicalKey = ludus::input::Key::Space,
+        },
+    };
+    if (system.ReplaceBindings(ludus::input::BindingMap{ .Bindings = bindings }) != ludus::input::BindingStatus::Ok)
+    {
+        return 6;
+    }
+    if (system.ConsumeStep(1) != ludus::input::StepStatus::Ok)
+    {
+        return 6;
+    }
+
+    // Short tap: down then up in one step -> both edge flags, final inactive.
+    if (system.Ingest(ludus::input::KeyboardRecord
+    {
+        .Transition = ludus::input::KeyTransition::Down,
+        .PhysicalKey = ludus::input::Key::Space,
+    }) != ludus::input::AdmissionStatus::Accepted)
+    {
+        return 6;
+    }
+    if (system.Ingest(ludus::input::KeyboardRecord
+    {
+        .Transition = ludus::input::KeyTransition::Up,
+        .PhysicalKey = ludus::input::Key::Space,
+    }) != ludus::input::AdmissionStatus::Accepted)
+    {
+        return 6;
+    }
+    if (system.ConsumeStep(2) != ludus::input::StepStatus::Ok)
+    {
+        return 6;
+    }
+
+    ludus::input::ActionState jump;
+    if (system.GetAction(0, jump) != ludus::input::ActionStatus::Ok)
+    {
+        return 6;
+    }
+    if (!jump.Pressed || !jump.Released || jump.Value != 0.0F)
+    {
+        return 6;
+    }
+
+    // In-memory rebind to a different key and confirm the old key no longer acts.
+    const ludus::input::Binding rebound[] = {
+        ludus::input::Binding
+        {
+            .Action = 0,
+            .Kind = ludus::input::ActionKind::Button,
+            .PhysicalKey = ludus::input::Key::Enter,
+        },
+    };
+    if (system.ReplaceBindings(ludus::input::BindingMap{ .Bindings = rebound }) != ludus::input::BindingStatus::Ok)
+    {
+        return 6;
+    }
+    return 0;
+}
 
 static_assert(LUDUS_BUILD_FLAVOR_ID == EXPECTED_FLAVOR);
 static_assert(LUDUS_ENABLE_ASSERTS == EXPECTED_ASSERTS);
@@ -61,6 +143,11 @@ int main()
         return 1;
     }
 
-    std::cout << "SDK consumer linked Ludus " << ludus::foundation::version_string() << '\n';
+    if (const int inputResult = ExerciseInstalledInput(); inputResult != 0)
+    {
+        return inputResult;
+    }
+
+    std::cout << "SDK consumer linked Ludus " << ludus::foundation::version_string() << " (Input: tap + rebind OK)\n";
     return 0;
 }

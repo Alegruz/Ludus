@@ -83,6 +83,9 @@ add_subdirectory(modules/foundation/base)
 add_subdirectory(modules/foundation/containers)
 add_subdirectory(modules/foundation/logging)
 add_subdirectory(modules/foundation/profiling)
+# Input is configured before Platform: Platform depends on Input for the
+# normalized keyboard record/sink vocabulary (one-way dependency).
+add_subdirectory(modules/input)
 if(EMSCRIPTEN)
     add_subdirectory(modules/platform)
     add_subdirectory(modules/graphics/rhi)
@@ -101,6 +104,7 @@ else()
 
     if(LUDUS_BUILD_SMOKE_APP)
         add_subdirectory(apps/smoke)
+        add_subdirectory(apps/input_demo)
     endif()
 
     if(LUDUS_BUILD_TESTS)
