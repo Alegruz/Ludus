@@ -63,6 +63,7 @@ if(LUDUS_BUILD_TESTS)
         PRIVATE
             tests/key_tests.cpp
             tests/reducer_tests.cpp
+            tests/action_tests.cpp
     )
     # Tests reach into src/internal to instantiate the capacity-parameterized
     # reducer directly (tiny-capacity overflow / sequence-exhaustion coverage).

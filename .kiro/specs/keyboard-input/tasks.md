@@ -124,25 +124,31 @@ buffer-less test surface. This remains a manual gate (recorded in M5).
 
 Requirements: K06-K09, K12, K14. Prerequisite: M1; M2 is needed for demo proof.
 
-- [ ] Implement owned bounded binding records and stable dense action IDs.
+- [x] Implement owned bounded binding records and stable dense action IDs.
   Validate replacement before modifying active configuration.
-- [ ] Evaluate button alternatives and Axis1D after each accepted transition;
+- [x] Evaluate button alternatives and Axis1D after each accepted transition;
   cache values and step flags. Exclude baseline-held suppressed keys.
-- [ ] Implement active-map replacement/reset, old-ID cancellation visibility,
+- [x] Implement active-map replacement/reset, old-ID cancellation visibility,
   and explicit map version in published snapshots.
-- [ ] Demonstrate configurable Jump, MoveX/MoveY, Quit bindings in application
-  code; no hard-coded gameplay actions inside the core.
+- [x] Demonstrate configurable Jump, MoveX/MoveY, Quit bindings in application
+  code; no hard-coded gameplay actions inside the core. (Delivered in M5's
+  input demo; the core carries no gameplay defaults.)
 
-Tests: multi-key OR release behavior; rapid button tap; two taps ordered;
-opposite directions/neutral axis; +1/-1 changes; left/right modifiers bound
-separately; shared keys across actions; no modifiers/chords inferred; invalid
-map transaction preserves old map; full capacities; removed-ID cancellation;
-switch while held; switch with queued presses; reset plus fresh press in the
-same step; focus/overflow suppression. Axis edge expectations must match design.
+Tests (`modules/input/tests/action_tests.cpp`): multi-key OR release behavior;
+rapid button tap; two taps ordered; opposite directions/neutral axis;
++1/-1 through-zero edges and steady-hold no-repeat; left/right modifiers bound
+separately; shared keys across actions; invalid map transaction preserves old
+map (InvalidAction/InvalidKey/ConflictingType/DuplicateBinding/CapacityExceeded);
+full capacities; removed-ID cancellation; switch while held; reset plus fresh
+press in the same step (Cancelled coexists with Pressed). Focus/overflow
+suppression lives in `reducer_tests.cpp`.
 
-Gate: gameplay queries never scan bindings or call native APIs; changing
-bindings does not require reducer changes; old-map events cannot activate the
-new map and newly bound held keys cannot activate until release/repress.
+Gate: PASS. Action values/flags are cached (O(1) queries; no binding scan or
+native call in GetAction); binding evaluation lives entirely in the reducer, so
+changing bindings needs no reducer change; old-map events cannot activate the
+new map (MapReplaced reset discards old-map pending) and newly bound held keys
+are suppressed until release/repress. 32 input test cases / 746 assertions pass
+(debug); ASan/UBSan clean; hot-path alloc test clean.
 
 ## M4 - Trace, replay fixtures, and bounded performance evidence
 
@@ -206,6 +212,6 @@ backend verification. Run init.sh only if the pinned tools/dependencies need it.
 | M0 | branch `feat/keyboard-input` from `a66f551`; `docs/architecture/keyboard-input-decision-log.md` | Baseline `./scripts/build` + `./scripts/test linux-clang-debug` (22/22) before edits | DONE. Toolchain provisioned (clang-18, cmake 3.29.6, conan 2.8.1, Wayland dev); API/capacities frozen |
 | M1 | `modules/input/**` (5 public headers, `src/{key,keyboard,input_debug}.cpp`, `src/internal/{reducer.hpp,log_categories.h}`, 3 tests); `modules/input/CMakeLists.txt`; root `CMakeLists.txt` | `./scripts/build/test linux-clang-debug` (26/26 incl. input + alloc); `linux-clang-asan-ubsan` input tests clean; `./scripts/check --format` clean; `ludus_header_self_sufficiency`, `ludus_foundational_includes` pass; clang-tidy run manually per-file (clean) | DONE. Remaining gate: project `./scripts/check --tidy` cannot run in this sandbox (pre-existing clang-tidy vs Ninja C++-modules `@modmap` interaction, fails first on unmodified `apps/smoke/main.cpp`); verified my files tidy-clean out-of-band |
 | M2 | `modules/platform/src/window_wayland.cpp`, `src/internal/evdev_keymap.hpp`, `include/ludus/platform/keyboard_sink.h`, `include/ludus/platform/base/window.h`, `modules/platform/CMakeLists.txt`, 2 new tests | `./scripts/build/test linux-clang-debug` (26/26); live `weston 13.0.3` headless run of `ludus_platform_wayland_tests` (10440 assertions) + `ludus_platform_live_keyboard_tests` (debug & ASan/UBSan, clean); `--format` clean; header self-sufficiency pass; per-file clang-tidy clean | DONE w/ outstanding manual gate: focused key delivery + held-loss-on-leave need a compositor granting focus + a virtual input device (absent here) |
-| M3 | Pending | None | Not implemented |
+| M3 | `modules/input/src/internal/reducer.hpp` (action aggregate eval already present from M1), `modules/input/tests/action_tests.cpp`, `modules/input/CMakeLists.txt` | `./scripts/test linux-clang-debug` input (746 assertions); ASan/UBSan input clean; alloc test clean; `--format` clean; action_tests clang-tidy clean | DONE. Demo in M5 |
 | M4 | Pending | None | Not implemented |
 | M5 | Pending | None | Not implemented |
