@@ -9,18 +9,25 @@ remaining gates. Preserve working code and unrelated specs.
 
 Requirements: K01-K15. Prerequisite: none.
 
-- [ ] Read AGENTS.md, applicable steering, ADRs 0003-0005/0007/0008, containers
+- [x] Read AGENTS.md, applicable steering, ADRs 0003-0005/0007/0008, containers
   and memory docs, and current Platform/pump/SDK/test tooling.
-- [ ] Compare checked-out Platform with the research baseline. Record actual
+- [x] Compare checked-out Platform with the research baseline. Record actual
   revision and any existing input/browser work; reuse compatible code. Identify
   source collisions before editing; do not overwrite another implementation.
-- [ ] Finalize key table/explicit values, status enums, public signatures,
+- [x] Finalize key table/explicit values, status enums, public signatures,
   sink lifetime, reset mailbox, map/snapshot versioning, and fixed capacities.
   Illustrate zero-step and three-step loop behavior with a small sequence.
-- [ ] Define neutral/invalid query results, cancellation for removed action IDs,
+- [x] Define neutral/invalid query results, cancellation for removed action IDs,
   sequence exhaustion, seat selection, and supported evdev mapping assumptions.
-- [ ] Record material deviations in a decision log with evidence. Keep source
+- [x] Record material deviations in a decision log with evidence. Keep source
   files compilable; no unrelated systems or dependency migrations.
+
+M0 record: `docs/architecture/keyboard-input-decision-log.md`. Actual `main`
+tip is `a66f551` (design baseline `6ebdf7c` treated as historical). The existing
+browser canvas input path (`browser::Key`/`InputEvent`/`WindowState`,
+`PollBrowserInput`) is preserved untouched; the new backend-independent
+`ludus_input` reducer does not compete with it. Frozen API and capacities are in
+the decision log.
 
 Gate: reviewed API can express every required truth-table case with no circular
 dependency or native public types. Ordinary implementation choices are delegated
@@ -33,14 +40,14 @@ Requirements: K01-K07, K11, K12, K14. Prerequisite: M0.
 Affected areas: new modules/input target/public/private files, root CMake,
 input tests, header/export checks.
 
-- [ ] Implement normalized records, live Down, pending ring, output step view,
+- [x] Implement normalized records, live Down, pending ring, output step view,
   and published keyboard snapshot. All mutation is instance-owned/main-thread.
-- [ ] Implement increasing-step checks, per-transition edges, repeat/duplicate
+- [x] Implement increasing-step checks, per-transition edges, repeat/duplicate
   filtering, validated enum access, separate live/simulation masks.
-- [ ] Implement reset mailbox/epochs, focused baselines, suppression, immediate
+- [x] Implement reset mailbox/epochs, focused baselines, suppression, immediate
   queue invalidation, and safe overflow recovery including the rejected event's
   effect on live Down. Never need queue room to reset.
-- [ ] Add the production injection path and deterministic Catch2 fixtures.
+- [x] Add the production injection path and deterministic Catch2 fixtures.
 
 Tests must include:
 
@@ -62,8 +69,16 @@ Tests must include:
 | Multiple resets before consumption | Latest baseline, retained reason accounting |
 | Small test counter near exhaustion | Explicit failure/reset contract, no silent wrap |
 
-Gate: core tests pass without display or Platform, sanitizers pass, new headers
-compile standalone, and hot reducer paths allocate no memory.
+All rows implemented in `modules/input/tests/reducer_tests.cpp` (plus
+`key_tests.cpp` for enum validation and `allocation_tests.cpp` for the
+zero-allocation gate). Tiny-capacity overflow and sequence exhaustion use the
+internal capacity-parameterized `Reducer<4,8,16>` / `Reducer<256,8,16,3>`.
+
+Gate: PASS. `ludus_input_tests` + `ludus_input_alloc_tests` pass on
+`linux-clang-debug` with no display or Platform linked; `linux-clang-asan-ubsan`
+is clean; all five new public headers pass `ludus_header_self_sufficiency`; the
+alloc test proves exactly one allocation at construction and zero across 2000
+ingest/consume/query iterations.
 
 ## M2 - Native Wayland keyboard adapter
 
@@ -174,8 +189,8 @@ backend verification. Run init.sh only if the pinned tools/dependencies need it.
 
 | Milestone | Revision / paths | Checks actually run | Result / remaining gate |
 | --- | --- | --- | --- |
-| M0 | Pending | None | Not implemented |
-| M1 | Pending | None | Not implemented |
+| M0 | branch `feat/keyboard-input` from `a66f551`; `docs/architecture/keyboard-input-decision-log.md` | Baseline `./scripts/build` + `./scripts/test linux-clang-debug` (22/22) before edits | DONE. Toolchain provisioned (clang-18, cmake 3.29.6, conan 2.8.1, Wayland dev); API/capacities frozen |
+| M1 | `modules/input/**` (5 public headers, `src/{key,keyboard,input_debug}.cpp`, `src/internal/{reducer.hpp,log_categories.h}`, 3 tests); `modules/input/CMakeLists.txt`; root `CMakeLists.txt` | `./scripts/build/test linux-clang-debug` (26/26 incl. input + alloc); `linux-clang-asan-ubsan` input tests clean; `./scripts/check --format` clean; `ludus_header_self_sufficiency`, `ludus_foundational_includes` pass; clang-tidy run manually per-file (clean) | DONE. Remaining gate: project `./scripts/check --tidy` cannot run in this sandbox (pre-existing clang-tidy vs Ninja C++-modules `@modmap` interaction, fails first on unmodified `apps/smoke/main.cpp`); verified my files tidy-clean out-of-band |
 | M2 | Pending | None | Not implemented |
 | M3 | Pending | None | Not implemented |
 | M4 | Pending | None | Not implemented |
