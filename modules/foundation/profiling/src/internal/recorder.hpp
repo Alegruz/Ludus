@@ -32,7 +32,10 @@ namespace ludus::foundation::profiling::internal
 // active, an enabled-build instrumentation site costs a single relaxed atomic
 // load + predicted-not-taken branch and nothing else (§19, gate G2). Defined in
 // recorder.cpp.
-extern std::atomic<bool> gCaptureActive;
+// Clang-tidy 18 misclassifies extern atomics with the SDK libc++ headers.
+// The matching constinit definition enforces constant initialization.
+// NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
+extern constinit std::atomic<bool> gCaptureActive;
 
 [[nodiscard]] inline bool IsCaptureActive() noexcept
 {

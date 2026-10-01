@@ -32,13 +32,22 @@ configure_file(
     NEWLINE_STYLE UNIX
 )
 
+if(EMSCRIPTEN)
+    target_sources(ludus_foundation_profiling PRIVATE src/clock_web.cpp)
+else()
+    target_sources(ludus_foundation_profiling PRIVATE src/clock.cpp)
+endif()
+
+if(EMSCRIPTEN AND NOT LUDUS_PROFILING_ENABLED)
+    target_sources(ludus_foundation_profiling PRIVATE src/profiling_disabled.cpp)
+else()
+    target_sources(ludus_foundation_profiling PRIVATE
+        src/recorder.cpp src/profiling.cpp src/export_perfetto.cpp)
+endif()
+
 target_sources(
     ludus_foundation_profiling
     PRIVATE
-        src/clock.cpp
-        src/recorder.cpp
-        src/profiling.cpp
-        src/export_perfetto.cpp
         src/internal/trace_event.hpp
         src/internal/trace_chunk.hpp
         src/internal/recorder.hpp
@@ -75,8 +84,10 @@ target_link_libraries(
         Ludus::FoundationContainers
 )
 
-find_package(Threads REQUIRED)
-target_link_libraries(ludus_foundation_profiling PUBLIC Threads::Threads)
+if(NOT EMSCRIPTEN)
+    find_package(Threads REQUIRED)
+    target_link_libraries(ludus_foundation_profiling PUBLIC Threads::Threads)
+endif()
 
 ludus_apply_project_defaults(ludus_foundation_profiling)
 

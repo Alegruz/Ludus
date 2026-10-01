@@ -8,17 +8,19 @@ set_target_properties(
         EXPORT_NAME FoundationLogging
 )
 
+if(EMSCRIPTEN)
+    target_sources(ludus_foundation_logging PRIVATE src/logger_web.cpp)
+else()
+    target_sources(ludus_foundation_logging PRIVATE
+        src/logger.cpp src/formatter.cpp src/internal/backend.cpp
+        src/sinks/console_sink.cpp src/sinks/file_sink.cpp src/sinks/debugger_sink.cpp)
+endif()
+
 target_sources(
     ludus_foundation_logging
     PRIVATE
-        src/logger.cpp
-        src/formatter.cpp
         src/internal/format_engine.cpp
-        src/internal/backend.cpp
         src/emergency_logger.cpp
-        src/sinks/console_sink.cpp
-        src/sinks/file_sink.cpp
-        src/sinks/debugger_sink.cpp
         src/internal/log_record.hpp
         src/internal/sink.hpp
         src/internal/category_registry.hpp

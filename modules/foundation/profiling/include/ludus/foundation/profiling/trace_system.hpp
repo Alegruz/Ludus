@@ -50,6 +50,9 @@ void EndCapture() noexcept;
 // Serialise the most recent capture to a Chrome/Perfetto trace-event JSON file
 // (final design §16 primary viewer path). Off the hot path. Returns false on I/O
 // failure or when nothing was captured. Safe no-op in a disabled build.
+// On web this writes the Emscripten virtual filesystem (normally in-memory
+// MEMFS), not a persistent host file. The application must explicitly download
+// the bytes before page teardown; see tools/web-observability-probe/shell.html.
 bool ExportPerfettoTrace(std::string_view path) noexcept;
 
 // Health snapshot.

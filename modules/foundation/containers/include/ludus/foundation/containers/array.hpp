@@ -616,7 +616,9 @@ private:
     // Size of one element. Centralizes the (legitimate) sizeof(ElementType),
     // which may be a pointer type for Array<T*>; expressed once here so the
     // pointer-sizeof suppression lives in a single place.
-    // NOLINTNEXTLINE(bugprone-sizeof-expression)
+    // Clang-tidy 18 with the web SDK misclassifies dependent constexpr
+    // initializers; constexpr forbids dynamic initialization here.
+    // NOLINTNEXTLINE(bugprone-sizeof-expression,bugprone-dynamic-static-initializers)
     static constexpr usize kElementSize = sizeof(ElementType);
 
     // Byte size of `count` elements.
