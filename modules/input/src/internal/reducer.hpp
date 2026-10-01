@@ -653,7 +653,7 @@ private:
 
     void appendStepEvent(const StepEvent& event) noexcept
     {
-        if (mStepEventCount < kStepEventCap)
+        if (mStepEventCount < stepEventCap())
         {
             mStepEvents[mStepEventCount++] = event;
         }
@@ -700,7 +700,14 @@ private:
         });
     }
 
-    static constexpr usize kStepEventCap = PendingCap + 1; // batch + reset marker
+    // Output step-event buffer capacity: the full pending batch plus its reset
+    // marker. A static constexpr member in a header trips
+    // bugprone-dynamic-static-initializers under some clang-tidy configs, so this
+    // is a constant-expression function (purely compile-time) instead.
+    static constexpr usize stepEventCap() noexcept
+    {
+        return PendingCap + 1;
+    }
 
     // --- Live (callback-visible) state ----------------------------------
     bool mLiveDown[KEY_COUNT];
@@ -722,7 +729,7 @@ private:
     uint64 mLastStepId;
     bool mHasConsumed;
     KeyboardSnapshot mSnapshot;
-    StepEvent mStepEvents[kStepEventCap];
+    StepEvent mStepEvents[PendingCap + 1]; // batch + reset marker (see stepEventCap())
     usize mStepEventCount;
 
     // --- Actions / bindings --------------------------------------------

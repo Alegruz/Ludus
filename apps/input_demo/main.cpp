@@ -86,7 +86,10 @@ KeyboardRecord synthUp(Key key) noexcept
     return KeyboardRecord{ .Source = RecordSource::Synthetic, .Transition = KeyTransition::Up, .PhysicalKey = key };
 }
 
-void logActions(InputSystem& system, const char* label)
+// `label` is only consumed by LUDUS_LOG_INFO, which compiles out at log levels
+// above Info (e.g. Release builds). Mark it maybe_unused so the demo stays
+// warning-clean under -Werror at every compiled log level.
+void logActions(InputSystem& system, [[maybe_unused]] const char* label)
 {
     ActionState jump;
     ActionState moveX;
@@ -293,15 +296,17 @@ int main()
     }
 
     // Bounded diagnostic trace dump (NOT per-key logging by default). No disk
-    // writes; uses the existing logger.
-    const auto view = trace.View();
+    // writes; uses the existing logger. These feed only LUDUS_LOG_INFO, which
+    // compiles out above the Info level, so they are maybe_unused to stay
+    // warning-clean under -Werror in Release.
+    [[maybe_unused]] const auto view = trace.View();
     LUDUS_LOG_INFO(LOG_DEMO,
                    "Trace: {} entries recorded (total {}), wrapped={} complete-for-replay={}",
                    view.size(),
                    trace.GetTotalRecorded(),
                    trace.HasWrapped(),
                    trace.IsCompleteForReplay());
-    const auto& counters = system.GetCounters();
+    [[maybe_unused]] const auto& counters = system.GetCounters();
     LUDUS_LOG_INFO(LOG_DEMO,
                    "Counters: accepted={} ignored={} rejected={} repeats={} overflows={} resets={}",
                    counters.Accepted,
