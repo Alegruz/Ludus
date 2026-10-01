@@ -57,7 +57,8 @@ enum class FrameStatus : ludus::foundation::uint8
     NotReady,
     InvalidState,
     Unsupported,
-    Failed
+    Failed,
+    Skipped
 };
 struct StartupInfo final
 {
@@ -69,6 +70,19 @@ struct StartupInfo final
 // Duplicate Start is Busy until Shutdown, including failed/lost sessions.
 [[nodiscard]] StartStatus Start(const ApplicationInfo& appInfo, const WindowInfo& windowInfo) noexcept;
 [[nodiscard]] StartupInfo GetStartup() noexcept;
+// WebGPU surface settings for the next frame. Zero dimensions skip acquisition.
+// Call only between frames after Ready; dimensions must fit negotiated limits.
+// Native Vulkan currently returns Unsupported and retains its own swapchain path.
+struct FrameTarget final
+{
+    ludus::foundation::uint32 Width = 0;
+    ludus::foundation::uint32 Height = 0;
+    ludus::foundation::float64 Red = 0;
+    ludus::foundation::float64 Green = 0;
+    ludus::foundation::float64 Blue = 0;
+    ludus::foundation::float64 Alpha = 1;
+};
+[[nodiscard]] FrameStatus SetFrameTarget(const FrameTarget& target) noexcept;
 [[nodiscard]] FrameStatus BeginFrameStatus() noexcept;
 [[nodiscard]] FrameStatus EndFrameStatus() noexcept;
 

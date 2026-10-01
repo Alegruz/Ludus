@@ -18,12 +18,17 @@ int main()
 {
     // Verify the lifecycle API and static link without requiring Vulkan on CI.
     static_assert(noexcept(ludus::graphics::rhi::Initialize({})));
+    static_assert(noexcept(ludus::graphics::rhi::SetFrameTarget({})));
     static_assert(noexcept(ludus::graphics::rhi::GetStartup()));
     static_assert(noexcept(ludus::graphics::rhi::Start({}, {})));
     ludus::graphics::rhi::Shutdown();
     if (ludus::graphics::rhi::GetStartup().State != ludus::graphics::rhi::StartupState::Idle)
     {
         return 2;
+    }
+    if (ludus::graphics::rhi::SetFrameTarget({}) != ludus::graphics::rhi::FrameStatus::NotReady)
+    {
+        return 5;
     }
     int endpoints[2];
     if (socketpair(AF_UNIX, SOCK_DGRAM, 0, endpoints) != 0 ||

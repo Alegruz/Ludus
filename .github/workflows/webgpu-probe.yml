@@ -12,6 +12,7 @@ on:
       - 'cmake/EngineCompilerWarnings.cmake'
       - 'modules/graphics/rhi/**'
       - 'tools/web-rhi-probe/**'
+      - 'tools/web-frame-probe/**'
       - 'modules/platform/**'
       - 'tools/web-platform-probe/**'
       - 'modules/foundation/base/**'
@@ -113,4 +114,13 @@ jobs:
           path: |
             out/build/web-emscripten-development/tools/web-rhi-probe/index.*
             out/build/web-emscripten-release/tools/web-rhi-probe/index.*
+          if-no-files-found: error
+
+      - name: Upload W5 frame probes
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-frame-probes
+          path: |
+            out/build/web-emscripten-development/tools/web-frame-probe/index.*
+            out/build/web-emscripten-release/tools/web-frame-probe/index.*
           if-no-files-found: error

@@ -63,7 +63,9 @@ engine code. Discuss such cases in the PR before adding them.
 - Browser Foundation modules, Platform, RHI, and the isolated feasibility probe use the Emscripten SDK and WebGPU
   port pinned in `config/web_toolchain.json` (ADR 0009). Its SDK-provided LLVM
   is a separate web toolchain; native builds and formatting/static analysis
-  continue to use the reference tools above. Foundation modules, the canvas Platform backend, and the RHI lifecycle are available as browser engine targets; WebGPU frame rendering remains pending.
+  continue to use the reference tools above. Foundation modules, the canvas
+  Platform backend, and the RHI lifecycle/frame clear path are available as
+  browser engine targets; the W5 probe privately owns its WGSL triangle pipeline.
 
 ### Warnings
 

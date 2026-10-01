@@ -79,6 +79,18 @@ StartupInfo GetStartup() noexcept
     result.SelectedBackend = backend::Kind();
     return result;
 }
+FrameStatus SetFrameTarget(const FrameTarget& target) noexcept
+{
+    if (gStartup.State != StartupState::Ready)
+    {
+        return FrameStatus::NotReady;
+    }
+    if (gFrame)
+    {
+        return FrameStatus::InvalidState;
+    }
+    return backend::SetTarget(target);
+}
 FrameStatus BeginFrameStatus() noexcept
 {
     if (gStartup.State != StartupState::Ready)
