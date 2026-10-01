@@ -10,6 +10,8 @@ on:
       - 'config/web_toolchain.json'
       - 'config/tool_versions.json'
       - 'cmake/EngineCompilerWarnings.cmake'
+      - 'modules/platform/**'
+      - 'tools/web-platform-probe/**'
       - 'modules/foundation/base/**'
       - 'modules/foundation/containers/**'
       - 'modules/foundation/logging/**'
@@ -75,7 +77,7 @@ jobs:
           path: out/packages/webgpu-probe-release.zip
           if-no-files-found: error
 
-      - name: Build and validate browser Foundation modules
+      - name: Build and validate browser Foundation and Platform modules
         run: |
           ./scripts/doctor web-emscripten-development
           ./scripts/test web-emscripten-development
@@ -95,4 +97,11 @@ jobs:
           path: |
             out/build/web-emscripten-development/tools/web-observability-probe/index.*
             out/build/web-emscripten-release/tools/web-observability-probe/index.*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-platform-probes
+          path: |
+            out/build/web-emscripten-development/tools/web-platform-probe/index.*
+            out/build/web-emscripten-release/tools/web-platform-probe/index.*
           if-no-files-found: error

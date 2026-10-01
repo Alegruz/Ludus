@@ -311,7 +311,7 @@ green run. Editing only this plan does not require engine builds.
 | W0 | in progress | Actual itch.io core-adapter render proven with Vulkan enabled; continuous animation and flag-free support remain pending. See webgpu-w0-evidence.md |
 | W1 | complete | CPU-only FoundationBase browser port, Development/Release probes, native regressions and SDK consumer validated. See webgpu-w1-evidence.md; W0 GPU gate remains open |
 | W2 | complete | Synchronous browser logging, bounded failure/reentry probes, browser clock, virtual trace export/download, Release compile-out and native regressions validated. See webgpu-w2-evidence.md |
-| W3 | not started | Depends on W2 |
+| W3 | complete | Canvas/DPR/input lifecycle and bounded ownership, both web probes, native regressions and SDK validated. See webgpu-w3-evidence.md; CI pending |
 | W4 | not started | Depends on W3 |
 | W5 | not started | Depends on W4 |
 | W6 | not started | Depends on W5 |
@@ -360,3 +360,10 @@ that every reference prescribes them.
   execution. Native Development, ASan/UBSan, format/tidy, and SDK consumer checks
   pass. See `webgpu-w2-evidence.md`. Next stage: W3 canvas platform/input.
   W0's flag-free GPU support gate remains open.
+
+- 2026-10-01 W3: Added browser Platform backend, borrowed canvas descriptor,
+  copied input snapshots/events, CSS/DPR/clamped framebuffer dimensions and
+  callback teardown. Development/Release wasm and real DOM probes pass. Native
+  Development, ASan/UBSan, format/tidy and SDK consumer pass with the existing
+  no-display Wayland skip. See `webgpu-w3-evidence.md`. Next stage: W4 RHI split
+  and asynchronous lifecycle contract. W0's hardware gates remain open.

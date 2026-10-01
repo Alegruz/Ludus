@@ -48,7 +48,7 @@ FOUNDATION_EXTRA_FORBIDDEN_STL = {
 
 def public_headers(root: Path):
     seen = set()
-    for pattern in ("modules/*/*/include", "tools/*/include"):
+    for pattern in ("modules/*/include", "modules/*/*/include", "tools/*/include"):
         for include_dir in root.glob(pattern):
             for suffix in ("*.h", "*.hpp"):
                 for header in include_dir.rglob(suffix):

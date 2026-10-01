@@ -47,6 +47,7 @@ target_sources(
         BASE_DIRS
             include
         FILES
+            include/ludus/platform/browser/window.h
             include/ludus/platform/config.h
             include/ludus/platform/log_categories.h
             include/ludus/platform/native_window.h
@@ -68,7 +69,11 @@ target_link_libraries(
         Ludus::FoundationLogging
 )
 
-if(LUDUS_PLATFORM_ENABLE_WAYLAND)
+if(EMSCRIPTEN)
+    message(STATUS "Ludus platform: browser canvas backend enabled")
+    target_sources(ludus_platform PRIVATE src/window_web.cpp)
+    target_compile_definitions(ludus_platform PRIVATE LUDUS_PLATFORM_BROWSER=1)
+elseif(LUDUS_PLATFORM_ENABLE_WAYLAND)
     message(STATUS "Ludus platform: Wayland backend enabled")
 
     pkg_get_variable(WAYLAND_PROTOCOLS_PKGDATADIR wayland-protocols pkgdatadir)
@@ -110,6 +115,17 @@ else()
 endif()
 
 ludus_apply_project_defaults(ludus_platform)
+
+if(LUDUS_BUILD_TESTS)
+    find_package(Catch2 3 REQUIRED CONFIG)
+    add_executable(ludus_platform_headless_tests tests/headless_tests.cpp src/window_headless.cpp)
+    target_include_directories(ludus_platform_headless_tests PRIVATE include)
+    target_link_libraries(ludus_platform_headless_tests PRIVATE Ludus::FoundationBase Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_platform_headless_tests)
+    ludus_enable_test_exceptions(ludus_platform_headless_tests)
+    add_test(NAME ludus_platform_headless_tests COMMAND ludus_platform_headless_tests)
+    set_tests_properties(ludus_platform_headless_tests PROPERTIES LABELS "unit;platform")
+endif()
 
 if(LUDUS_BUILD_TESTS AND LUDUS_PLATFORM_ENABLE_WAYLAND)
     find_package(Catch2 3 REQUIRED CONFIG)

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Ludus browser platform probe</title>
+<style>body { font: 16px system-ui; background: #181821; color: #eee; margin: 24px; } canvas { display:block; width:100%; height:360px; max-width:900px; border:0; padding:0; } #status { white-space:pre-wrap; }</style>
+<h1>Ludus browser platform probe</h1>
+<p id="result" role="status">Loading…</p>
+<p id="status"></p>
+<canvas id="canvas" aria-label="Game input canvas"></canvas>
+<p><button id="restart">Restart backend</button> <input id="outside" aria-label="Outside game input" placeholder="Click here to test focus loss"></p>
+<p>Resize the browser to change the canvas. Input is owned by the focused canvas; Tab and browser shortcuts remain available.</p>
+<script>
+'use strict';
+var Module = {
+  arguments: new URLSearchParams(location.search).has('automated') ? ['automated'] : [],
+  onAbort: function () { document.getElementById('result').textContent = 'W3 probe aborted'; },
+};
+document.getElementById('restart').addEventListener('click', function () { Module._W3Restart(); });
+</script>
+<script src="index.js"></script>
+</html>

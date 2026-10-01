@@ -91,7 +91,7 @@ def command(args, engine) -> int:
         if args.format or all_checks:
             run_format_check(root, fix=args.fix)
             run_foundational_includes(root)
-            for probe in ("web-foundation-probe", "web-observability-probe"):
+            for probe in ("web-foundation-probe", "web-observability-probe", "web-platform-probe"):
                 path = root / "tools" / probe / "main.cpp"
                 original = path.read_text()
                 formatted = format_source(original, path, "clang-format-18")
