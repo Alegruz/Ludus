@@ -101,6 +101,7 @@ else()
 
     if(LUDUS_BUILD_SMOKE_APP)
         add_subdirectory(apps/smoke)
+        add_subdirectory(apps/input_demo)
     endif()
 
     if(LUDUS_BUILD_TESTS)

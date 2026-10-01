@@ -185,19 +185,34 @@ claim.
 
 Requirements: K10-K15. Prerequisites: M1-M4.
 
-- [ ] Update tests/sdk_consumer to include public Input headers, link
+- [x] Update tests/sdk_consumer to include public Input headers, link
   Ludus::Input, define a map, ingest a short tap, consume it, and check results.
   No private/native headers or source-tree include paths.
-- [ ] Extend smoke or add a small input demo according to checked-out conventions.
+- [x] Extend smoke or add a small input demo according to checked-out conventions.
   Show held movement/action values, tap edges, focus cancellation, and one
   in-memory rebinding example. Respect existing graphics behavior.
-- [ ] Document manual steps: tap, hold, simultaneous opposites, alternative keys,
+- [x] Document manual steps: tap, hold, simultaneous opposites, alternative keys,
   alt-tab while held, regain focus while held, release/repress, rebinding while
   held, close window, and idle rendering. Record compositor/backend versions.
-- [ ] Complete pinned validation below and re-review diff against AGENTS.md.
+- [x] Complete pinned validation below and re-review diff against AGENTS.md.
   Report unrelated baseline failures separately; never mark them passed.
-- [ ] Publish actual implementation API/limitations and checked evidence paths;
+- [x] Publish actual implementation API/limitations and checked evidence paths;
   update statuses only when gates really pass.
+
+Implementation: `tests/sdk_consumer/{main.cpp,CMakeLists.txt}` (links
+`Ludus::Input`, exercises a tap + rebind through installed public headers only);
+`apps/input_demo/` (new demo: configurable Jump/MoveX/MoveY/Quit, native pump
+loop + synthetic fallback, trace/counter dump); root `CMakeLists.txt`. Manual
+matrix recorded in the decision log.
+
+Gate: PASS for every runnable gate (see commands below + ledger). The only
+OUTSTANDING item is the real-compositor focused key-delivery manual matrix:
+the sandbox has no uinput/virtual input device and weston's headless shell does
+not focus a buffer-less surface, so tap/hold/alt-tab-while-held with ACTUAL key
+events on a focused native window could not be exercised here. Seat/keyboard
+binding, routing wiring, and the pump were validated live against weston 13.0.3;
+all keyboard semantics are validated through the production reducer via headless
+fixtures and the installed-SDK consumer.
 
 ```bash
 ./scripts/build linux-clang-debug
@@ -225,4 +240,4 @@ backend verification. Run init.sh only if the pinned tools/dependencies need it.
 | M2 | `modules/platform/src/window_wayland.cpp`, `src/internal/evdev_keymap.hpp`, `include/ludus/platform/keyboard_sink.h`, `include/ludus/platform/base/window.h`, `modules/platform/CMakeLists.txt`, 2 new tests | `./scripts/build/test linux-clang-debug` (26/26); live `weston 13.0.3` headless run of `ludus_platform_wayland_tests` (10440 assertions) + `ludus_platform_live_keyboard_tests` (debug & ASan/UBSan, clean); `--format` clean; header self-sufficiency pass; per-file clang-tidy clean | DONE w/ outstanding manual gate: focused key delivery + held-loss-on-leave need a compositor granting focus + a virtual input device (absent here) |
 | M3 | `modules/input/src/internal/reducer.hpp` (action aggregate eval already present from M1), `modules/input/tests/action_tests.cpp`, `modules/input/CMakeLists.txt` | `./scripts/test linux-clang-debug` input (746 assertions); ASan/UBSan input clean; alloc test clean; `--format` clean; action_tests clang-tidy clean | DONE. Demo in M5 |
 | M4 | `modules/input/src/{input_debug.cpp,internal/reducer.hpp}`, `modules/input/tests/trace_tests.cpp`, `modules/input/benchmarks/input_bench.cpp`, `docs/development/keyboard-input-performance.md`, `modules/input/CMakeLists.txt` | `./scripts/test linux-clang-debug` (37 input cases / 833 assertions); ASan/UBSan input clean; `ludus_input_bench` run (1 ctor alloc, 0 hot); `--format` + per-file clang-tidy clean | DONE. Debug dump in M5 |
-| M5 | Pending | None | Not implemented |
+| M5 | `tests/sdk_consumer/{main.cpp,CMakeLists.txt}`, `apps/input_demo/{main.cpp,CMakeLists.txt}`, root `CMakeLists.txt`, decision log, this ledger | `build/test linux-clang-debug` (26/26), `linux-clang-development` (25/25), `linux-clang-asan-ubsan` (22/22), `--format` clean, `install-sdk linux-clang-development` (consumer prints "Input: tap + rebind OK"), `check-build-budget --profile` (window.h 129ms/2000ms budget), Wayland ON+OFF reconfigure/build/test, warnings-as-errors rebuild of input/platform, live weston 13.0.3 pump (10165 assertions) + live keyboard tests | DONE except the real-compositor focused-key manual matrix (no uinput / no focus-granting shell in sandbox) |

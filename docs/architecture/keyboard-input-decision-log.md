@@ -217,3 +217,63 @@ focused key-delivery assertion could not be performed in-sandbox. The live test
 therefore verifies seat/keyboard binding, listener registration, and pump
 stability, and records a WARN when focus is not granted. Full focus + key
 delivery + held-state-on-leave is an outstanding manual gate (M5 matrix).
+
+## M3-M5 summary
+
+- **M3 (actions/rebinding):** the capacity-parameterized reducer already carried
+  the button/axis aggregate from M1; M3 added the full action test suite
+  (`modules/input/tests/action_tests.cpp`). Clarification recorded while writing
+  the tests: a 1-D axis with separate +/- keys cannot change sign without
+  passing through zero, so a "+1 to -1" change in one step DOES fire a real
+  Released+Pressed (per-transition, OR-accumulated); the design's "without an
+  intervening zero" clause describes the degenerate single-transition sign flip
+  that these bindings cannot produce. A steady held axis across an idle step
+  fires no repeated edge.
+- **M4 (trace/replay/perf):** `InputDebugTrace`, trace recording in the reducer
+  (accepted transitions traced at step time with their assigned StepId), replay
+  fixtures, and the `input_bench` harness. Footprint and timings:
+  `docs/development/keyboard-input-performance.md` (15.8 KiB reducer + 16.0 KiB
+  trace; 1 construction allocation, 0 hot-path allocations).
+- **M5 (SDK/demo/validation):** the installed SDK consumer links `Ludus::Input`
+  and exercises a tap + rebind; `apps/input_demo` demonstrates the loop.
+
+## Manual verification matrix (M5)
+
+The following require a compositor that grants keyboard focus to the demo window
+and a real/virtual keyboard delivering key events. The sandbox used for
+implementation has **weston 13.0.3** (headless) but **no uinput / `/dev/input`**
+device and its headless shell does not focus a buffer-less surface, so these
+steps are documented for a maintainer with a desktop Wayland session and are the
+one outstanding gate. The equivalent semantics are each covered by an automated
+headless-fixture test (named in parentheses) through the production reducer.
+
+| Manual step | Expected | Automated analogue |
+| --- | --- | --- |
+| Tap a bound key | one Pressed+Released, action inactive | action_tests "rapid tap" |
+| Hold a bound key across frames | Pressed once, held after; one Released on up | reducer_tests "Down, repeated Down, held idle step, Up" |
+| Press simultaneous opposite axis keys | axis Value 0 | action_tests "opposite directions cancel" |
+| Alternative keys (W or UpArrow) | releasing one keeps action active | action_tests "multiple alternative keys" |
+| Alt-tab (focus leave) while held | action cancelled, held cleared | reducer_tests "Focus leave with queued tap/held key" |
+| Regain focus while key still held | key Down but suppressed; no activation | reducer_tests "Focus enter with held W" |
+| Release+repress the held key | suppression clears; genuine press | reducer_tests "Focus enter ... suppressed" |
+| Rebind while a key is held | old action cancels; held key suppressed under new map | action_tests "Switch map while held" |
+| Close the window | final WindowClosed reset to the sink | window_wayland HandleEvent close path (code) |
+| Idle rendering (no keys) | pump stable; snapshot held state retained | wayland_event_tests + reducer idle-step tests |
+
+To run the demo on a real session:
+
+```bash
+./scripts/build linux-clang-debug
+./out/build/linux-clang-debug/apps/input_demo/ludus_input_demo
+```
+
+Record the compositor and its version in the PR when performing this matrix.
+
+## Known limitations (as implemented)
+
+- Keyboard only; mouse/gamepad/touch/text/IME/layout display are deferred.
+- One attached gameplay window and one selected seat; the backend tracks
+  multiple windows only for safe routing.
+- Physical labels (`KeyW`) denote US-reference positions, not the user's layout.
+- No libxkbcommon dependency; keymap fds are closed, never compiled.
+- The real-compositor focused-key manual matrix above is unverified in-sandbox.
