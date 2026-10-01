@@ -42,7 +42,7 @@ user's GPU driver to manufacture a device-loss test.
 | --- | --- | --- |
 | Edge 154.0.4258.37, Linux/Wayland, Intel UHD 620 / Mesa 25.2.8 | User's 2026-09-30 GPU report and W0 hosted clear screenshot after enabling Vulkan | W0 flag-dependent feasibility only; current packaged app and flag-free support pending |
 | Codex in-app browser on Linux | W6/W7 local extracted shell, controls, fullscreen and asset-failure tests; no adapter | Error UX verified; GPU rendering unsupported in this session |
-| CI Chromium 140.0.7339.186 / SwiftShader | First exact-ZIP run acquired the Google SwiftShader adapter and reached playing, then timed out waiting for advancing frames | Failed; diagnostic rerun pending; software rendering only |
+| CI Chromium 140.0.7339.186 / SwiftShader under Xvfb | Exact-ZIP orange triangle pixels, animated clear pixels, keyboard movement and blur passed; lifecycle test corrections are rerunning | Full suite pending; software rendering only |
 | Other desktop/mobile browsers and GPUs | No current artifact evidence | Unverified |
 
 The historical GPU report predates the Vulkan flag change and is not a current
@@ -58,7 +58,11 @@ server. Its frame counter advanced from 73 to 559 during inspection and the
 captured warning/error log was empty. This is local rendering evidence only:
 the current browser flags and hosted upload remain unverified. The first W8
 native CI and web compile/package jobs passed; the software-GPU browser failure
-remains open and now captures DOM, console and screenshot diagnostics.
+was resolved with Chromium's software Vulkan configuration and an Xvfb display.
+The subsequent lifecycle test exposed Playwright's forced focus/visibility;
+the runner disables that emulation during suspension and records the actual
+freeze/resume boundaries. Full-suite acceptance remains pending, with DOM,
+console and screenshot diagnostics retained on failure.
 
 ## Closing W8
 

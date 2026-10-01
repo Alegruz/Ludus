@@ -104,7 +104,7 @@ async function run(name, task) {
   const entry = {name,status:'running'};
   report.cases.push(entry);
   try {await task(); entry.status = 'passed';}
-  catch(error) {entry.status = 'failed'; entry.error = String(error); throw error;}
+  catch(error) {entry.status = 'failed'; entry.error = String(error);}
 }
 try {
   browser = await chromium.launch({headless:false, channel:'chromium', args:report.launchArgs});
@@ -233,6 +233,8 @@ try {
       await c.close();
     });
   }
+  const failed = report.cases.filter(entry => entry.status === 'failed');
+  if (failed.length) throw new Error(failed.map(entry => entry.name + ': ' + entry.error).join('; '));
 } catch(error) {
   report.failure = String(error); process.exitCode = 1;
   report.diagnostics = [];
