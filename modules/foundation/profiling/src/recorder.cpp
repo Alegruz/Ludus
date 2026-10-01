@@ -7,7 +7,7 @@
 namespace ludus::foundation::profiling::internal
 {
 
-std::atomic<bool> gCaptureActive{false};
+constinit std::atomic<bool> gCaptureActive{false};
 
 // -----------------------------------------------------------------------------
 // MVP collector topology (documented deviation from the design's §23 diagram).

@@ -91,13 +91,14 @@ def command(args, engine) -> int:
         if args.format or all_checks:
             run_format_check(root, fix=args.fix)
             run_foundational_includes(root)
-            path = root / "tools/web-foundation-probe/main.cpp"
-            original = path.read_text()
-            formatted = format_source(original, path, "clang-format-18")
-            if args.fix:
-                path.write_text(formatted)
-            elif formatted != original:
-                raise EngineError("Browser Foundation probe needs repository formatting")
+            for probe in ("web-foundation-probe", "web-observability-probe"):
+                path = root / "tools" / probe / "main.cpp"
+                original = path.read_text()
+                formatted = format_source(original, path, "clang-format-18")
+                if args.fix:
+                    path.write_text(formatted)
+                elif formatted != original:
+                    raise EngineError(f"Browser {probe} needs repository formatting")
         if args.tidy or all_checks:
             tidy = shutil.which("clang-tidy-18")
             if not tidy:

@@ -1,7 +1,7 @@
 # WebGPU browser export implementation plan
 
 Created: 2026-09-30. Repository baseline inspected: `6ebdf7c`.
-Status: W1 FoundationBase browser port implemented; full engine browser export
+Status: W2 browser logging and profiling implemented; full engine browser export
 is not yet implemented. W0 flag-free GPU acceptance remains pending. See `webgpu-w0-evidence.md` for actual validation and pending gates.
 
 ## Outcome and scope
@@ -310,7 +310,7 @@ green run. Editing only this plan does not require engine builds.
 | --- | --- | --- |
 | W0 | in progress | Actual itch.io core-adapter render proven with Vulkan enabled; continuous animation and flag-free support remain pending. See webgpu-w0-evidence.md |
 | W1 | complete | CPU-only FoundationBase browser port, Development/Release probes, native regressions and SDK consumer validated. See webgpu-w1-evidence.md; W0 GPU gate remains open |
-| W2 | not started | Depends on W1 |
+| W2 | complete | Synchronous browser logging, bounded failure/reentry probes, browser clock, virtual trace export/download, Release compile-out and native regressions validated. See webgpu-w2-evidence.md |
 | W3 | not started | Depends on W2 |
 | W4 | not started | Depends on W3 |
 | W5 | not started | Depends on W4 |
@@ -339,7 +339,7 @@ green run. Editing only this plan does not require engine builds.
   CI coverage. See `webgpu-w1-evidence.md` for validation and limitations. Native
   dialog/debugger policy is unchanged. Browser enabled ASSERT is terminal; CHECK
   returns after reporting; native transport requests fail without blocking.
-  Next implementation stage: W2 logging/profiling. Keep W0 flag-free GPU support
+  Next implementation stage at that point: W2 logging/profiling. Keep W0 flag-free GPU support
   and final W8 hosted-game acceptance open.
 
 ## Primary references
@@ -354,3 +354,9 @@ that every reference prescribes them.
 - [Emscripten runtime environment](https://emscripten.org/docs/porting/emscripten-runtime-environment.html): browser event loop, virtual files, and application lifetime.
 - [WebGPU adapter acquisition](https://developer.mozilla.org/en-US/docs/Web/API/GPU/requestAdapter): asynchronous acquisition, secure contexts, and adapter availability.
 - [itch.io HTML5 upload requirements](https://itch.io/docs/creators/html5): ZIP entry point, relative assets, limits, and embed settings.
+
+- 2026-10-01 W2: Implemented browser logging/profiling on merged W1. Both
+  browser configurations pass eight wasm/build-contract tests and browser page
+  execution. Native Development, ASan/UBSan, format/tidy, and SDK consumer checks
+  pass. See `webgpu-w2-evidence.md`. Next stage: W3 canvas platform/input.
+  W0's flag-free GPU support gate remains open.

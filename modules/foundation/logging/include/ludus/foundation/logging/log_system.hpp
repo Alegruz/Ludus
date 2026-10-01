@@ -129,6 +129,10 @@ struct LogHealth
 class LogSystem
 {
 public:
+    // Web builds run on the browser main thread, always synchronously. Requests
+    // for async, file, or debugger sinks return Degraded with Synchronous mode;
+    // unsupported requested sinks report unhealthy. No timed flush worker runs.
+    // Reentrant console callbacks cannot change lifecycle (Incomplete).
     static LogInitResult Initialize(const LogConfig& config);
     static LogStatus Shutdown();
 
@@ -137,6 +141,9 @@ public:
     // complete the requested flush kind, then reports status and the
     // acknowledged sequence (requirements R28, R29). A timeout is honest: it
     // cannot cancel an in-progress blocking OS write.
+    // Web Visible acknowledges completed synchronous console calls; Durable
+    // returns Unsupported. Neither promises developer-tools display or disk
+    // persistence. A failed console call returns SinkFailed until recovery.
     static FlushResult Flush(FlushKind kind = FlushKind::Visible, uint32 timeoutMilliseconds = 1000);
 
     static void SetGlobalLevel(LogLevel level);

@@ -11,12 +11,16 @@ on:
       - 'config/tool_versions.json'
       - 'cmake/EngineCompilerWarnings.cmake'
       - 'modules/foundation/base/**'
+      - 'modules/foundation/containers/**'
+      - 'modules/foundation/logging/**'
+      - 'modules/foundation/profiling/**'
       - 'cmake/**'
       - 'CMakeLists.txt'
       - 'CMakePresets.json'
       - 'scripts/python/engine.py'
       - 'scripts/python/web_build.py'
       - 'tools/web-foundation-probe/**'
+      - 'tools/web-observability-probe/**'
       - 'tests/build_contract/**'
       - 'tools/check_foundational_includes.py'
       - '.clang-format'
@@ -71,7 +75,7 @@ jobs:
           path: out/packages/webgpu-probe-release.zip
           if-no-files-found: error
 
-      - name: Build and validate browser FoundationBase
+      - name: Build and validate browser Foundation modules
         run: |
           ./scripts/doctor web-emscripten-development
           ./scripts/test web-emscripten-development
@@ -84,4 +88,11 @@ jobs:
           path: |
             out/build/web-emscripten-development/tools/web-foundation-probe/index.*
             out/build/web-emscripten-release/tools/web-foundation-probe/index.*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-observability-probes
+          path: |
+            out/build/web-emscripten-development/tools/web-observability-probe/index.*
+            out/build/web-emscripten-release/tools/web-observability-probe/index.*
           if-no-files-found: error

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Ludus browser logging and profiling probe</title>
+<style>body { font: 16px system-ui; background: #181821; color: #eee; margin: 24px; } pre { white-space: pre-wrap; }</style>
+<h1>Ludus browser logging and profiling probe</h1>
+<p id="status" role="status">Loading…</p>
+<p>Logs appear in the browser console. Trace files live in memory for this page session.</p>
+<button id="download" disabled>Download Perfetto trace</button>
+<pre id="output"></pre>
+<script>
+'use strict';
+let traceBytes;
+var Module = {
+  printErr: function (text) { document.getElementById('output').textContent += String(text) + '\n'; },
+  probeFinished: function (code) {
+    document.getElementById('status').textContent = code === 0 ? 'W2 probe passed' : 'W2 probe failed: ' + code;
+    if (code === 0 && Module.FS.analyzePath('/trace.json').exists) traceBytes = Module.FS.readFile('/trace.json');
+    document.getElementById('download').disabled = !traceBytes;
+  },
+  onAbort: function () { document.getElementById('status').textContent = 'W2 probe aborted'; },
+};
+document.getElementById('download').addEventListener('click', function () {
+  const url = URL.createObjectURL(new Blob([traceBytes], {type: 'application/json'}));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'ludus-trace.json';
+  link.click();
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+});
+</script>
+<script src="index.js"></script>
+</html>

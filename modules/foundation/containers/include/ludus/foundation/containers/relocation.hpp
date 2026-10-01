@@ -38,6 +38,9 @@ struct IsTriviallyRelocatableTrait : std::bool_constant<std::is_trivially_copyab
 };
 
 template <typename ElementType>
+// Clang-tidy 18 with the web SDK misclassifies dependent constexpr
+// initializers; constexpr forbids dynamic initialization here.
+// NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
 inline constexpr bool IsTriviallyRelocatable = IsTriviallyRelocatableTrait<ElementType>::value;
 
 template <typename ElementType>
