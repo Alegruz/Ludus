@@ -90,6 +90,7 @@ if(LUDUS_BUILD_TESTS)
             tests/shaping_tests.cpp
             tests/rasterization_tests.cpp
             tests/lifetime_tests.cpp
+            tests/audit_tests.cpp
     )
     target_include_directories(ludus_text_tests PRIVATE src tests)
     # Fixture font locations are injected so tests load real packaged bytes

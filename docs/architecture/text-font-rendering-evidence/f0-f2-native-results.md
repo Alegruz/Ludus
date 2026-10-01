@@ -86,7 +86,7 @@ Implemented in `modules/text`:
 | Check | Command | Result |
 | --- | --- | --- |
 | Native development build | `scripts/build linux-clang-development` | PASS (warning-clean) |
-| Native tests | `scripts/test linux-clang-development` | PASS 25/25 (text = 34 cases / 230 assertions) |
+| Native tests | `scripts/test linux-clang-development` | PASS 25/25 (text = 39 cases / 285 assertions after the audit pass added `audit_tests.cpp`) |
 | Format | `scripts/check linux-clang-development --format` | PASS |
 | Static analysis | `scripts/check linux-clang-development --tidy` | PASS (0 project errors) |
 | Headers / foundational includes | ctest `header_self_sufficiency`, `foundational_includes` | PASS |

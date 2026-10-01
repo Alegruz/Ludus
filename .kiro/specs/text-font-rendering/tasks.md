@@ -58,7 +58,8 @@ Requirements: T03–T06, T11, T14, T15.
 - [x] Test `AV`, `office`, Hangul, Arabic joining in RTL, spaces, empty input,
   missing glyphs, malformed UTF-8, mismatched script, unsupported controls, and
   run/glyph/font limits. (34 cases / 230 assertions; see evidence. Dedicated
-  combining-accent and negative-bearing fixture cases still to add.)
+  combining-accent and negative-bearing fixture cases added in the audit pass —
+  see `audit_tests.cpp`.)
 - [x] Test source-byte lifetime, font removal while layouts exist, alternating
   sizes, stale/invalid handles, and resource limits. (Generation-wrap and engine
   allocation-failure injection cases still to add.)
@@ -76,9 +77,11 @@ Requirements: T07–T09, T14.
 
 - [x] Implement outline light-hinted grayscale rasterization and borrowed scratch
   lifetime. Normalize signed pitch, non-256 gray ranges, and top-down rows.
-  (In `RasterizeGlyph`; tested for coverage range, zero-area glyphs, scratch
-  lifetime, format rejection. The rest of F2 — the bounded atlas/cache in
-  GraphicsText — is **not** implemented in this pass.)
+  (In `RasterizeGlyph`; tested for coverage range, anti-aliased partial values,
+  zero-area glyphs, scratch lifetime, format rejection, negative bearings, and
+  deterministic size-stable coverage — see `audit_tests.cpp`. The rest of F2 —
+  the bounded atlas/cache in GraphicsText — is **not** implemented in this pass;
+  synthetic positive/negative-pitch bitmap fixtures still to add there.)
 - [ ] Implement deterministic shelf placement, zero gutters, no-image glyphs,
   fixed lookup/metadata capacity, complete keys, and append-only CPU shadow pages.
 - [ ] Implement explicit preparation, dirty-region coalescing, visible capacity
@@ -229,8 +232,8 @@ or raw copyrighted book pages belong in the implementation package.
 | Milestone | Implementation commit | Native results | Web results | Actual GPU evidence / pending gates |
 | --- | --- | --- | --- | --- |
 | F0 | branch `feat/text-font-rendering` | DONE: FreeType 2.14.3 + HarfBuzz 14.5.1 build/link static via Conan (local HB recipe); fixtures + licenses + hashes recorded (`dependency-manifest.md`) | pending (no Emscripten SDK) | not applicable |
-| F1 | branch `feat/text-font-rendering` | DONE: build/tests/tidy/format/headers/budget/ASan-UBSan pass; 34 text cases / 230 assertions (`f0-f2-native-results.md`) | pending (no Emscripten SDK) | not applicable |
-| F2 | branch `feat/text-font-rendering` | PARTIAL: grayscale rasterization + scratch lifetime done & tested; bounded atlas/cache (GraphicsText) not yet implemented | pending (no Emscripten SDK) | not applicable |
+| F1 | branch `feat/text-font-rendering` | DONE: build/tests/tidy/format/headers/budget/ASan-UBSan pass; 39 text cases / 285 assertions incl. combining marks + kerning (`f0-f2-native-results.md`, `audit-findings.md`) | pending (no Emscripten SDK) | not applicable |
+| F2 | branch `feat/text-font-rendering` | PARTIAL: grayscale rasterization + scratch lifetime done & tested (negative bearings, deterministic/size-stable coverage, AA values); bounded atlas/cache (GraphicsText) not yet implemented | pending (no Emscripten SDK) | not applicable |
 | F3 | pending | pending (no Vulkan loader / GPU) | pending (no Emscripten/WebGPU) | pending on both |
 | F4 | pending | pending | pending | pending on both |
 | F5 | pending | pending | pending | measurements pending |
