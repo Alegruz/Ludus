@@ -139,15 +139,26 @@ try {
     await page.keyboard.up('d');
     // Exercise actual browser suspension, separately from injected Node timing.
     await page.locator('canvas').click();
+    await page.evaluate(() => {
+      const snapshot = () => ({x:Number(document.querySelector('#status').dataset.x),
+        frames:Number(document.querySelector('#status').dataset.frames)});
+      document.addEventListener('freeze', () => {window.__qaFrozen = snapshot();}, {once:true});
+      document.addEventListener('resume', () => {
+        requestAnimationFrame(() => {window.__qaResumed = snapshot();});
+      }, {once:true});
+    });
     await page.keyboard.down('d');
-    const suspendedX = await x(page);
     const cdp = await c.newCDPSession(page);
     await cdp.send('Page.setWebLifecycleState',{state:'frozen'});
     await delay(1200);
     await cdp.send('Page.setWebLifecycleState',{state:'active'});
+    const suspension = await until(() => page.evaluate(() => ({frozen:window.__qaFrozen,
+      resumed:window.__qaResumed})), value => value.frozen && value.resumed, 'freeze/resume events');
     await page.keyboard.up('d');
-    const resumedX = await x(page);
-    assert(resumedX-suspendedX <= 0.25, 'Suspension produced an unbounded movement jump');
+    report.suspension = suspension;
+    assert(suspension.frozen.x < 0.8, 'Suspension started too near the movement boundary');
+    assert(suspension.resumed.x-suspension.frozen.x <= 0.10001,
+      'First resumed frame exceeded the simulation time-step bound');
     await cdp.detach();
     const bounds = await page.locator('canvas').boundingBox();
     await page.mouse.move(bounds.x + bounds.width*0.25, bounds.y + bounds.height*0.75);
