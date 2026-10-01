@@ -87,24 +87,38 @@ Requirements: K01, K03-K07, K10-K12, K14. Prerequisite: M1.
 Affected areas: modules/platform registry/listeners/private routing, WindowBase
 sink attachment, Wayland teardown and pump error paths, platform tests/CMake.
 
-- [ ] Add optional seat/keyboard lifecycle and deterministic single-seat choice;
+- [x] Add optional seat/keyboard lifecycle and deterministic single-seat choice;
   negotiate supported versions and register all relevant listeners.
-- [ ] Normalize keys through a tested private mapping table. Implement focus
+- [x] Normalize keys through a tested private mapping table. Implement focus
   enter baseline, leave/reset, sink attach/detach, and surface routing.
-- [ ] Close keymap fds on all paths, ignore gameplay repeats safely, and handle
+- [x] Close keymap fds on all paths, ignore gameplay repeats safely, and handle
   modifiers/repeat_info without adding text/IME, XKB, or a timer.
-- [ ] Reset on close, keyboard capability removal, seat global removal, and
+- [x] Reset on close, keyboard capability removal, seat global removal, and
   terminal display failure. Keep windows usable when there is no keyboard.
-- [ ] Preserve prepare/read/cancel pairing, zero-timeout poll, EINTR/EAGAIN, and
+- [x] Preserve prepare/read/cancel pairing, zero-timeout poll, EINTR/EAGAIN, and
   existing HandleEvent({}) and headless return semantics.
-- [ ] Exercise normalization/lifecycle using backend seams independent of a
+- [x] Exercise normalization/lifecycle using backend seams independent of a
   compositor; retain existing Wayland event tests. Use a real compositor for
-  attachment, focus, routing, and idle-pump validation.
+  attachment, focus, routing, and idle-pump validation. (See gate note.)
 
-Gate: no regressions in platform tests; attach/detach/window destruction has no
-stale callback user data; fd accounting stays flat across repeated keymap
-callbacks including unsupported/no-sink cases; a real focused window receives
-keyboard transitions and loses held state on focus leave.
+Implementation: `modules/platform/src/window_wayland.cpp` (seat/keyboard
+listeners, surface routing, enter/leave baselines, terminal-reset-on-close),
+`src/internal/evdev_keymap.hpp` (tested evdev->Key table, no +8 offset),
+`include/ludus/platform/keyboard_sink.h` (noexcept fn-ptr sink seam),
+`WindowBase::AttachKeyboardSink`/`DetachKeyboardSink`. The pump body was
+extracted to `pumpDisplayOnce()`; `HandleEvent({})` behavior and headless return
+semantics are unchanged.
+
+Gate: PARTIAL. No regressions (26/26, 2 compositor tests skipped without a
+display). Normalization + sink seam covered by `ludus_platform_keyboard_tests`.
+Live validation against a real **weston 13.0.3** headless compositor passed for
+seat selection, keyboard-capability binding, listener registration, and a stable
+idle pump (`ludus_platform_wayland_tests`: 10440 assertions;
+`ludus_platform_live_keyboard_tests`: pass), clean under ASan/UBSan.
+OUTSTANDING: full focused-window key delivery and held-state-on-leave against a
+compositor could NOT be exercised here — the sandbox has no uinput/virtual input
+device and weston's headless shell does not grant keyboard focus to the
+buffer-less test surface. This remains a manual gate (recorded in M5).
 
 ## M3 - Button/axis actions and rebinding
 
@@ -191,7 +205,7 @@ backend verification. Run init.sh only if the pinned tools/dependencies need it.
 | --- | --- | --- | --- |
 | M0 | branch `feat/keyboard-input` from `a66f551`; `docs/architecture/keyboard-input-decision-log.md` | Baseline `./scripts/build` + `./scripts/test linux-clang-debug` (22/22) before edits | DONE. Toolchain provisioned (clang-18, cmake 3.29.6, conan 2.8.1, Wayland dev); API/capacities frozen |
 | M1 | `modules/input/**` (5 public headers, `src/{key,keyboard,input_debug}.cpp`, `src/internal/{reducer.hpp,log_categories.h}`, 3 tests); `modules/input/CMakeLists.txt`; root `CMakeLists.txt` | `./scripts/build/test linux-clang-debug` (26/26 incl. input + alloc); `linux-clang-asan-ubsan` input tests clean; `./scripts/check --format` clean; `ludus_header_self_sufficiency`, `ludus_foundational_includes` pass; clang-tidy run manually per-file (clean) | DONE. Remaining gate: project `./scripts/check --tidy` cannot run in this sandbox (pre-existing clang-tidy vs Ninja C++-modules `@modmap` interaction, fails first on unmodified `apps/smoke/main.cpp`); verified my files tidy-clean out-of-band |
-| M2 | Pending | None | Not implemented |
+| M2 | `modules/platform/src/window_wayland.cpp`, `src/internal/evdev_keymap.hpp`, `include/ludus/platform/keyboard_sink.h`, `include/ludus/platform/base/window.h`, `modules/platform/CMakeLists.txt`, 2 new tests | `./scripts/build/test linux-clang-debug` (26/26); live `weston 13.0.3` headless run of `ludus_platform_wayland_tests` (10440 assertions) + `ludus_platform_live_keyboard_tests` (debug & ASan/UBSan, clean); `--format` clean; header self-sufficiency pass; per-file clang-tidy clean | DONE w/ outstanding manual gate: focused key delivery + held-loss-on-leave need a compositor granting focus + a virtual input device (absent here) |
 | M3 | Pending | None | Not implemented |
 | M4 | Pending | None | Not implemented |
 | M5 | Pending | None | Not implemented |

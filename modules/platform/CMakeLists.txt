@@ -49,6 +49,7 @@ target_sources(
         FILES
             include/ludus/platform/browser/window.h
             include/ludus/platform/config.h
+            include/ludus/platform/keyboard_sink.h
             include/ludus/platform/log_categories.h
             include/ludus/platform/native_window.h
             include/ludus/platform/base/window.h
@@ -67,6 +68,9 @@ target_link_libraries(
     PUBLIC
         Ludus::FoundationBase
         Ludus::FoundationLogging
+        # One-way dependency: Platform depends on Input for the normalized
+        # keyboard record/sink vocabulary. Input never depends on Platform.
+        Ludus::Input
 )
 
 if(EMSCRIPTEN)
@@ -120,7 +124,8 @@ if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
     add_executable(ludus_platform_headless_tests tests/headless_tests.cpp src/window_headless.cpp)
     target_include_directories(ludus_platform_headless_tests PRIVATE include)
-    target_link_libraries(ludus_platform_headless_tests PRIVATE Ludus::FoundationBase Catch2::Catch2WithMain)
+    # base/window.h now includes keyboard_sink.h, which uses the Input vocabulary.
+    target_link_libraries(ludus_platform_headless_tests PRIVATE Ludus::FoundationBase Ludus::Input Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_platform_headless_tests)
     ludus_enable_test_exceptions(ludus_platform_headless_tests)
     add_test(NAME ludus_platform_headless_tests COMMAND ludus_platform_headless_tests)
@@ -137,6 +142,30 @@ if(LUDUS_BUILD_TESTS AND LUDUS_PLATFORM_ENABLE_WAYLAND)
     ludus_enable_test_exceptions(ludus_platform_wayland_tests)
     add_test(NAME ludus_platform_wayland_tests COMMAND ludus_platform_wayland_tests)
     set_tests_properties(ludus_platform_wayland_tests PROPERTIES TIMEOUT 10 SKIP_RETURN_CODE 4)
+
+    # Compositor-INDEPENDENT keyboard-normalization tests: exercise the private
+    # evdev->Key table and the sink seam without a running compositor. These
+    # always run (no SKIP) since they need only Linux input-event-codes + Input.
+    add_executable(ludus_platform_keyboard_tests tests/wayland_keyboard_tests.cpp)
+    target_include_directories(ludus_platform_keyboard_tests PRIVATE src include)
+    target_link_libraries(ludus_platform_keyboard_tests PRIVATE
+        Ludus::Platform Ludus::Input Catch2::Catch2WithMain PkgConfig::WAYLAND_CLIENT)
+    target_compile_definitions(ludus_platform_keyboard_tests PRIVATE LUDUS_PLATFORM_WAYLAND=1)
+    ludus_apply_project_defaults(ludus_platform_keyboard_tests)
+    ludus_enable_test_exceptions(ludus_platform_keyboard_tests)
+    add_test(NAME ludus_platform_keyboard_tests COMMAND ludus_platform_keyboard_tests)
+    set_tests_properties(ludus_platform_keyboard_tests PROPERTIES LABELS "unit;platform;input")
+
+    # LIVE compositor keyboard lifecycle. Skips (code 4) unless LUDUS_TEST_WAYLAND
+    # is set with a running compositor.
+    add_executable(ludus_platform_live_keyboard_tests tests/wayland_live_keyboard_tests.cpp)
+    target_link_libraries(ludus_platform_live_keyboard_tests PRIVATE
+        Ludus::Platform Ludus::Input Catch2::Catch2WithMain PkgConfig::WAYLAND_CLIENT)
+    target_compile_definitions(ludus_platform_live_keyboard_tests PRIVATE LUDUS_PLATFORM_WAYLAND=1)
+    ludus_apply_project_defaults(ludus_platform_live_keyboard_tests)
+    ludus_enable_test_exceptions(ludus_platform_live_keyboard_tests)
+    add_test(NAME ludus_platform_live_keyboard_tests COMMAND ludus_platform_live_keyboard_tests)
+    set_tests_properties(ludus_platform_live_keyboard_tests PROPERTIES TIMEOUT 15 SKIP_RETURN_CODE 4)
 endif()
 
 install(

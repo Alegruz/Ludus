@@ -3,6 +3,7 @@
 #include <ludus/foundation/base/core.h>      // LUDUS_INLINE + foundational vocabulary
 #include <ludus/foundation/base/pointer.hpp> // ludus::foundation::core::UniquePtr
 #include <ludus/platform/config.h>
+#include <ludus/platform/keyboard_sink.h>
 #include <ludus/platform/native_window.h>
 
 #include <string> // owned strings are required for stable window names
@@ -61,6 +62,25 @@ public:
         return mNativeWindowInfo;
     }
 
+    // Attach a normalized keyboard sink to THIS window (K10). The sink and its
+    // user data are borrowed: detach (or destroy the window) before the sink's
+    // user data goes away. Backends that deliver keyboard transitions (Wayland)
+    // route native events to the sink of the attached gameplay window; backends
+    // without keyboard delivery (headless) simply retain it. Attaching replaces
+    // any previous sink. This does not synthesize events by itself.
+    LUDUS_INLINE void AttachKeyboardSink(const KeyboardSink& sink) noexcept
+    {
+        mKeyboardSink = sink;
+    }
+    LUDUS_INLINE void DetachKeyboardSink() noexcept
+    {
+        mKeyboardSink = KeyboardSink{};
+    }
+    [[nodiscard]] LUDUS_INLINE const KeyboardSink& GetKeyboardSink() const noexcept
+    {
+        return mKeyboardSink;
+    }
+
 protected:
     WindowBase() = delete;
     LUDUS_INLINE explicit WindowBase(const CreateInfo& info) noexcept
@@ -71,6 +91,7 @@ protected:
 protected:
     std::string mName;
     NativeWindowInfo mNativeWindowInfo = {};
+    KeyboardSink mKeyboardSink = {};
 };
 
 using Window = WindowBase;

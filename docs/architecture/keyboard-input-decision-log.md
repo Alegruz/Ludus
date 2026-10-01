@@ -176,3 +176,44 @@ cmake 3.29.6, ninja 1.11.1.3, conan 2.8.1. The pinned tools were provisioned
 `out/host-tools/bin/clang-tidy` wrapper reorders `clang-tidy-18 --version` output
 so the detector reads a parseable first line; the real binary is pinned
 clang-tidy 18.1.8. No repository file was changed to accommodate the environment.
+
+## M2 — Native Wayland keyboard adapter
+
+### Sink seam
+
+Rather than repurposing the empty `WindowBase::Event`, a new public header
+`ludus/platform/keyboard_sink.h` defines a `KeyboardSink` of three `noexcept`
+function pointers (`OnRecord`, `OnReset`) plus a borrowed `void* UserData`.
+`WindowBase` gained `AttachKeyboardSink`/`DetachKeyboardSink`/`GetKeyboardSink`.
+The sink is stored on the window; the Wayland backend routes native events to
+the focused window's sink. Callbacks never retain borrowed Wayland payloads —
+the focus-enter key array is normalized into a copied `FocusBaseline` before the
+callback returns.
+
+### Pump preservation
+
+The original `HandleEvent({})` body (prepare/flush/poll(0)/read-or-cancel with
+EINTR/EAGAIN) was extracted verbatim into `pumpDisplayOnce()`. `HandleEvent`
+now calls it and, only when it returns false, submits a single `WindowClosed`
+reset to the focused window's sink before returning false. Headless return
+semantics are unchanged. The live `ludus_platform_wayland_tests` regression
+(10440 assertions) confirms unchanged pump behavior against a real compositor.
+
+### evdev mapping
+
+`src/internal/evdev_keymap.hpp` maps the raw Linux evdev code carried by
+`wl_keyboard.key` directly to `Key` via a compile-time table. The XKB `+8`
+offset is deliberately NOT applied (it is only for a future XKB *keysym* lookup).
+Out-of-range / unmapped / vendor / media codes normalize to `Key::Unknown`. The
+table is zero-initialized and relies on `Key::Unknown == 0` (static_assert'd).
+
+### Compositor validation tooling (environment)
+
+The reference compositor used for live validation here is **weston 13.0.3**
+(headless backend), installed into the sandbox. The sandbox has no uinput /
+`/dev/input` virtual input device, and weston's headless desktop-shell does not
+grant keyboard focus to a buffer-less surface, so synthetic key injection and a
+focused key-delivery assertion could not be performed in-sandbox. The live test
+therefore verifies seat/keyboard binding, listener registration, and pump
+stability, and records a WARN when focus is not granted. Full focus + key
+delivery + held-state-on-leave is an outstanding manual gate (M5 matrix).
