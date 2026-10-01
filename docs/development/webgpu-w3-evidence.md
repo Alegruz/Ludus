@@ -97,3 +97,27 @@ Next is W4: RHI split and asynchronous lifecycle contract. Check this PR's merge
 status and branch from updated main before continuing. W0 flag-free GPU support
 and continuous animation on the user's target browser remain open; W3's CPU/DOM
 success does not close that hardware deployment gate.
+
+## Small-embed follow-up
+
+The initial diagnostic shell clipped in a 640×360 itch.io iframe: its canvas
+alone had a fixed 360px height, in addition to margins, heading and controls.
+The shell now uses the available viewport height, with a flex canvas stage and
+compact controls. At 640×360 the tested canvas is 616×197 CSS pixels and the
+controls end at y=327; document scroll dimensions equal viewport dimensions.
+At 320×240 the compact layout has a 308×139 canvas and controls end at y=234,
+also without scrolling. Canvas size remains separate from DPR-scaled framebuffer
+size; the engine's sizing and input implementation are unchanged.
+
+The probe no longer acquires a Canvas2D context: its background, instruction and
+single pointer marker use DOM/CSS. This removes the probe drawing path where the
+user observed speckles and trails, and leaves the canvas context unclaimed for
+WebGPU. Clean screenshots were verified locally, but the original user's GPU/
+browser artifact cause was not reproduced or identified; target-laptop recheck
+is still required. This is a diagnostic display change, not a WebGPU driver fix.
+
+After the follow-up, Development and Release each pass all ten web tests and
+format/tidy checks. Both real browser automated lifecycle pages pass, and the
+640×360 iframe retains keyboard, focus-loss and restart behavior. Prior native
+and sanitizer evidence above remains applicable: this follow-up changes only
+the probe shell and its private EM_JS display function, plus this evidence.

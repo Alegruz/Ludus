@@ -71,15 +71,13 @@ EM_JS(void, DrawState,
         ' | held keys ' + held + ' | buttons ' + buttons + ' | events ' + events + ' | keydowns ' + keys +
         ' | pointer ' + Math.round(x) + ', ' + Math.round(y);
     const canvas = document.querySelector('#canvas');
-    if (!canvas || !width || !height) return;
-    const context = canvas.getContext('2d');
-    if (!context) return;
-    context.fillStyle = focused ? '#25496a' : '#292b36';
-    context.fillRect(0, 0, width, height);
-    context.fillStyle = '#ffffff'; context.font = Math.max(14, Math.round(18 * ratio)) + 'px system-ui';
-    context.fillText('Click here, then try W / arrows / pointer / wheel', 12 * ratio, 32 * ratio);
-    context.fillStyle = '#ffae65';
-    context.fillRect(x * ratio - 5, y * ratio - 5, 10, 10);
+    if (!canvas) return;
+    // W3 tests DOM/input ownership, not rendering. Keep the canvas context
+    // unclaimed for the later WebGPU renderer; diagnostics use DOM/CSS only.
+    canvas.style.backgroundColor = focused ? '#25496a' : '#292b36';
+    const pointer = document.getElementById('pointer');
+    pointer.hidden = !visible || x < 0 || y < 0 || x >= cssWidth || y >= cssHeight;
+    pointer.style.transform = 'translate(' + (x - 5) + 'px, ' + (y - 5) + 'px)';
 });
 EM_JS(void, ReportResult, (int32 passed), {
     if (typeof document != 'undefined') {
