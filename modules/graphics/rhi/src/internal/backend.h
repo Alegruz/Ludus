@@ -15,6 +15,7 @@ void ShutdownRendering() noexcept;
 void Shutdown() noexcept;
 bool BeginFrame() noexcept;
 bool EndFrame() noexcept;
+FrameStatus SetTarget(const FrameTarget&) noexcept;
 FrameStatus Begin() noexcept;
 FrameStatus End() noexcept;
 } // namespace ludus::graphics::rhi::backend

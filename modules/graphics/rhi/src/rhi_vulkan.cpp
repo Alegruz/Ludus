@@ -1815,6 +1815,10 @@ StartupError Start(const ApplicationInfo& app, const WindowInfo& window, ludus::
     internal::Complete(token, StartupError::None, 0);
     return StartupError::None;
 }
+FrameStatus SetTarget(const FrameTarget&) noexcept
+{
+    return FrameStatus::Unsupported;
+}
 FrameStatus Begin() noexcept
 {
     return BeginFrame() ? FrameStatus::Ready : FrameStatus::Failed;

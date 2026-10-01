@@ -8,6 +8,7 @@ using ludus::foundation::uint32;
 uint32 PendingToken = 0;
 uint32 ShutdownCount = 0;
 StartupError ImmediateError = StartupError::None;
+FrameStatus NextFrame = FrameStatus::Ready;
 Backend Kind() noexcept
 {
     return Backend::WebGPU;
@@ -42,9 +43,13 @@ bool EndFrame() noexcept
 {
     return false;
 }
-FrameStatus Begin() noexcept
+FrameStatus SetTarget(const FrameTarget&) noexcept
 {
     return FrameStatus::Ready;
+}
+FrameStatus Begin() noexcept
+{
+    return NextFrame;
 }
 FrameStatus End() noexcept
 {
@@ -112,4 +117,24 @@ TEST_CASE("RHI request failures remain explicit and require shutdown before retr
     }
     Shutdown();
     backend::ImmediateError = StartupError::None;
+}
+
+TEST_CASE("Skipped RHI frames never open a frame and targets cannot change during encoding", "[rhi][lifecycle]")
+{
+    Shutdown();
+    backend::ImmediateError = StartupError::None;
+    CHECK(SetFrameTarget({}) == FrameStatus::NotReady);
+    REQUIRE(Start({}, {}) == StartStatus::Pending);
+    internal::Complete(backend::PendingToken, StartupError::None, 4096);
+    backend::NextFrame = FrameStatus::Skipped;
+    CHECK(SetFrameTarget({}) == FrameStatus::Ready);
+    CHECK(BeginFrameStatus() == FrameStatus::Skipped);
+    CHECK(EndFrameStatus() == FrameStatus::InvalidState);
+    CHECK(SetFrameTarget({ .Width = 640, .Height = 360 }) == FrameStatus::Ready);
+    backend::NextFrame = FrameStatus::Ready;
+    REQUIRE(BeginFrameStatus() == FrameStatus::Ready);
+    CHECK(SetFrameTarget({}) == FrameStatus::InvalidState);
+    internal::Fail(backend::PendingToken, StartupError::DeviceLost);
+    CHECK(EndFrameStatus() == FrameStatus::NotReady);
+    Shutdown();
 }

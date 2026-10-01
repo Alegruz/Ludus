@@ -1,5 +1,6 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/webgpu_probe.h"
 #include <ludus/foundation/base/core.h>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/graphics/rhi/rhi.h>
@@ -23,6 +24,42 @@ WGPUSurface gSurface = nullptr;
 bool gConfigured = false;
 bool gCompatibility = false;
 uint32 gMaxDimension = 0;
+uint32 gSession = 0;
+FrameTarget gTarget;
+WGPUSurfaceConfiguration gConfiguration = WGPU_SURFACE_CONFIGURATION_INIT;
+WGPUTexture gTexture = nullptr;
+WGPUTextureView gView = nullptr;
+WGPUCommandEncoder gEncoder = nullptr;
+WGPURenderPassEncoder gPass = nullptr;
+
+void ReleaseFrame() noexcept
+{
+    if (gPass != nullptr)
+    {
+        wgpuRenderPassEncoderRelease(gPass);
+    }
+    if (gEncoder != nullptr)
+    {
+        wgpuCommandEncoderRelease(gEncoder);
+    }
+    if (gView != nullptr)
+    {
+        wgpuTextureViewRelease(gView);
+    }
+    if (gTexture != nullptr)
+    {
+        wgpuTextureRelease(gTexture);
+    }
+    gPass = nullptr;
+    gEncoder = nullptr;
+    gView = nullptr;
+    gTexture = nullptr;
+}
+FrameStatus FrameFailure() noexcept
+{
+    internal::Fail(gSession, StartupError::RenderingUnavailable);
+    return FrameStatus::Failed;
+}
 
 // Validate the foreign target before the port's assertion-based surface API.
 // No callback borrows this selector or application storage.
@@ -131,13 +168,15 @@ void DeviceReady(WGPURequestDeviceStatus status,
     WGPUSurfaceConfiguration configuration = WGPU_SURFACE_CONFIGURATION_INIT;
     configuration.device = device;
     configuration.format = capabilities.formats[0];
-    // W4 configures a minimal surface; W5 owns resize and per-frame textures.
+    // The port orders its preferred browser format first (ADR 0009).
+    // Validate startup with a minimal surface; frames reconfigure to actual pixels.
     configuration.width = 1;
     configuration.height = 1;
     configuration.presentMode = WGPUPresentMode_Fifo;
     wgpuDevicePushErrorScope(device, WGPUErrorFilter_Validation);
     wgpuSurfaceConfigure(gSurface, &configuration);
     gConfigured = true;
+    gConfiguration = configuration;
     wgpuSurfaceCapabilitiesFreeMembers(capabilities);
     WGPUPopErrorScopeCallbackInfo callback = WGPU_POP_ERROR_SCOPE_CALLBACK_INFO_INIT;
     callback.mode = WGPUCallbackMode_AllowSpontaneous;
@@ -258,12 +297,14 @@ StartupError Start(const ApplicationInfo&, const WindowInfo& window, uint32 toke
         return StartupError::SurfaceUnavailable;
     }
     gCompatibility = false;
+    gSession = token;
     RequestAdapter(token);
     return StartupError::None;
 }
 void Shutdown() noexcept
 {
     // The facade invalidates callback tokens before this can trigger device loss.
+    ReleaseFrame();
     if (gConfigured && gSurface != nullptr)
     {
         wgpuSurfaceUnconfigure(gSurface);
@@ -296,6 +337,9 @@ void Shutdown() noexcept
     gSurface = nullptr;
     gInstance = nullptr;
     gMaxDimension = 0;
+    gSession = 0;
+    gTarget = {};
+    gConfiguration = WGPU_SURFACE_CONFIGURATION_INIT;
 }
 bool Initialize(const ApplicationInfo&) noexcept
 {
@@ -318,12 +362,98 @@ bool EndFrame() noexcept
 {
     return false;
 }
+namespace
+{
+bool ValidColor(float64 value) noexcept
+{
+    return value >= 0 && value <= 1;
+}
+} // namespace
+FrameStatus SetTarget(const FrameTarget& target) noexcept
+{
+    if (target.Width > gMaxDimension || target.Height > gMaxDimension || !ValidColor(target.Red) ||
+        !ValidColor(target.Green) || !ValidColor(target.Blue) || !ValidColor(target.Alpha))
+    {
+        return FrameStatus::InvalidState;
+    }
+    gTarget = target;
+    return FrameStatus::Ready;
+}
 FrameStatus Begin() noexcept
 {
-    return FrameStatus::Unsupported;
+    if (gTarget.Width == 0 || gTarget.Height == 0)
+    {
+        return FrameStatus::Skipped;
+    }
+    if (!gConfigured || gConfiguration.width != gTarget.Width || gConfiguration.height != gTarget.Height)
+    {
+        gConfiguration.width = gTarget.Width;
+        gConfiguration.height = gTarget.Height;
+        wgpuSurfaceConfigure(gSurface, &gConfiguration);
+        gConfigured = true;
+    }
+    WGPUSurfaceTexture current = WGPU_SURFACE_TEXTURE_INIT;
+    wgpuSurfaceGetCurrentTexture(gSurface, &current);
+    gTexture = current.texture;
+    if (current.status == WGPUSurfaceGetCurrentTextureStatus_Timeout ||
+        current.status == WGPUSurfaceGetCurrentTextureStatus_Outdated)
+    {
+        ReleaseFrame();
+        // Reconfigure at the next nonzero frame; do not fabricate presentation.
+        if (current.status != WGPUSurfaceGetCurrentTextureStatus_Timeout)
+        {
+            wgpuSurfaceUnconfigure(gSurface);
+            gConfigured = false;
+        }
+        return FrameStatus::Skipped;
+    }
+    if ((current.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
+         current.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) ||
+        gTexture == nullptr)
+    {
+        return FrameFailure();
+    }
+    gView = wgpuTextureCreateView(gTexture, nullptr);
+    gEncoder = wgpuDeviceCreateCommandEncoder(gDevice, nullptr);
+    if (gView == nullptr || gEncoder == nullptr)
+    {
+        return FrameFailure();
+    }
+    WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+    color.view = gView;
+    color.loadOp = WGPULoadOp_Clear;
+    color.storeOp = WGPUStoreOp_Store;
+    color.clearValue = { .r = gTarget.Red, .g = gTarget.Green, .b = gTarget.Blue, .a = gTarget.Alpha };
+    WGPURenderPassDescriptor descriptor = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    descriptor.colorAttachmentCount = 1;
+    descriptor.colorAttachments = &color;
+    gPass = wgpuCommandEncoderBeginRenderPass(gEncoder, &descriptor);
+    return gPass != nullptr ? FrameStatus::Ready : FrameFailure();
 }
 FrameStatus End() noexcept
 {
-    return FrameStatus::Unsupported;
+    wgpuRenderPassEncoderEnd(gPass);
+    WGPUCommandBuffer commands = wgpuCommandEncoderFinish(gEncoder, nullptr);
+    if (commands == nullptr)
+    {
+        return FrameFailure();
+    }
+    wgpuQueueSubmit(gQueue, 1, &commands);
+    wgpuCommandBufferRelease(commands);
+    ReleaseFrame();
+    // WebGPU presents the canvas after submission; there is no Vulkan-style present.
+    return FrameStatus::Ready;
+}
+WGPUDevice ProbeDevice() noexcept
+{
+    return gDevice;
+}
+WGPUTextureFormat ProbeFormat() noexcept
+{
+    return gConfiguration.format;
+}
+WGPURenderPassEncoder ProbePass() noexcept
+{
+    return gPass;
 }
 } // namespace ludus::graphics::rhi::backend

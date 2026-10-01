@@ -313,7 +313,7 @@ green run. Editing only this plan does not require engine builds.
 | W2 | complete | Synchronous browser logging, bounded failure/reentry probes, browser clock, virtual trace export/download, Release compile-out and native regressions validated. See webgpu-w2-evidence.md |
 | W3 | complete | Canvas/DPR/input lifecycle and bounded ownership, both web probes, native regressions and SDK validated. See webgpu-w3-evidence.md; CI pending |
 | W4 | implemented; acceptance pending | Backend split and async lifecycle tested in wasm/native; real-GPU Ready check remains pending. See webgpu-w4-evidence.md |
-| W5 | not started | Depends on W4 |
+| W5 | implemented; acceptance pending | Resize/clear/submission and private WGSL triangle probe; controlled-provider tests pass. Real-GPU animation/fullscreen remains pending. See webgpu-w5-evidence.md |
 | W6 | not started | Depends on W5 |
 | W7 | not started | Depends on W6 |
 | W8 | not started | Depends on W7 and hosted test access |
@@ -375,3 +375,12 @@ that every reference prescribes them.
   in-app browser reports adapter unavailable; target-browser Ready verification
   remains pending. See `webgpu-w4-evidence.md`. Next implementation: W5 frames,
   after checking W4 merge/CI and completing the target-browser readiness check.
+
+- 2026-10-01 W5: Branched from merged W4 (PR #38). Implemented WebGPU frame
+  target/configuration, acquisition, command submission and handle cleanup.
+  Added a separate RAF-driven WGSL triangle probe with async validation handling,
+  square viewport and responsive shell. Controlled-provider frame tests cover
+  restart, resize/DPR/hide/resume, shader/acquisition failures and device loss.
+  Real browser embed layout passes, but this browser returns no GPU adapter;
+  real-hardware rendering acceptance remains open. See `webgpu-w5-evidence.md`.
+  Next session: check W5 PR/CI and target-browser rendering before W6 integration.
