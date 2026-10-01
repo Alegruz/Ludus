@@ -27,8 +27,11 @@ Requirements: T01, T02, T15.
   F3: glslang feeds the Vulkan pipeline, which is pending without a GPU.)
 - [x] Enable C carefully and add Text target and public-header file sets. Keep
   vendored checks separate from Ludus format/tidy/warnings gates. (FreeType C
-  build via Conan; FT/HB headers are SYSTEM includes. **GraphicsText target
-  pending** — belongs to the atlas/GPU milestones.)
+  build via Conan; FT/HB headers are SYSTEM includes. The Text target is added
+  only in the **native** configure; it is intentionally not added to the
+  Emscripten configure until the web FreeType/HarfBuzz source-bootstrap exists
+  (otherwise the browser configure fails `find_package(freetype)`). **GraphicsText
+  target pending** — belongs to the atlas/GPU milestones.)
 - [x] Add fixed licensed Latin/Hangul/Arabic fixture font assets with hashes.
   Test asset loading without system fonts or runtime network. (Native done;
   **browser packaging pending** with the web path.)

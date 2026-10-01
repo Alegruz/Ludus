@@ -89,7 +89,12 @@ add_subdirectory(modules/input)
 if(EMSCRIPTEN)
     add_subdirectory(modules/platform)
     add_subdirectory(modules/graphics/rhi)
-    add_subdirectory(modules/text)
+    # NOTE: Ludus::Text is intentionally NOT built for the Emscripten target yet.
+    # Its FreeType/HarfBuzz dependencies are resolved natively through Conan; the
+    # separate pinned web source-bootstrap for those libraries is still pending
+    # (see .kiro/specs/text-font-rendering/tasks.md F0 "web source-bootstrap
+    # pending"). Add it back here once that web dependency path exists, so the
+    # browser configure does not fail finding freetype/harfbuzz.
     add_subdirectory(tools/web-rhi-probe)
     add_subdirectory(tools/web-frame-probe)
     add_subdirectory(tools/web-platform-probe)
