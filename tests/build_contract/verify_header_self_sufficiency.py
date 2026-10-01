@@ -81,7 +81,7 @@ def include_flags(entry) -> list[str]:
 
 def public_headers(root: Path) -> list[Path]:
     headers: list[Path] = []
-    for module_include in root.glob("modules/*/*/include"):
+    for module_include in (*root.glob("modules/*/include"), *root.glob("modules/*/*/include")):
         headers.extend(module_include.rglob("*.h"))
         headers.extend(module_include.rglob("*.hpp"))
     for tool_include in root.glob("tools/*/include"):

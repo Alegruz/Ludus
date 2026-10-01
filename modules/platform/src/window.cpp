@@ -5,7 +5,9 @@
 
 #include <utility>
 
-#if defined(LUDUS_PLATFORM_WAYLAND)
+#if defined(LUDUS_PLATFORM_BROWSER)
+#    include "internal/window_web.hpp"
+#elif defined(LUDUS_PLATFORM_WAYLAND)
 #    include <ludus/platform/wayland/window.h>
 #elif defined(LUDUS_PLATFORM_HEADLESS)
 #    include <ludus/platform/headless/window.h>
@@ -17,7 +19,9 @@ namespace ludus::platform
 {
 bool WindowManager::Initialize(const InitializeInfo& info) noexcept
 {
-#if defined(LUDUS_PLATFORM_WAYLAND)
+#if defined(LUDUS_PLATFORM_BROWSER)
+    return browser::InitializeBrowser(info);
+#elif defined(LUDUS_PLATFORM_WAYLAND)
     return wayland::InitializeWayland(info);
 #elif defined(LUDUS_PLATFORM_HEADLESS)
     return headless::InitializeHeadless(info);
@@ -27,14 +31,18 @@ bool WindowManager::Initialize(const InitializeInfo& info) noexcept
 bool WindowManager::CreateWindow(const WindowBase::CreateInfo& info,
                                  ludus::foundation::core::UniquePtr<Window>& outWindow) noexcept
 {
-#if defined(LUDUS_PLATFORM_WAYLAND)
+    // Replacing an output window must destroy its callbacks before creation.
+    outWindow.Reset();
+#if defined(LUDUS_PLATFORM_BROWSER)
+    auto window = browser::CreateWindow(info);
+#elif defined(LUDUS_PLATFORM_WAYLAND)
     auto window = wayland::CreateWindow(info);
 #elif defined(LUDUS_PLATFORM_HEADLESS)
     auto window = headless::CreateWindow(info);
 #endif
     if (!window)
     {
-        outWindow = nullptr;
+        outWindow.Reset();
         return false;
     }
 
