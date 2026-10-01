@@ -64,6 +64,7 @@ if(LUDUS_BUILD_TESTS)
             tests/key_tests.cpp
             tests/reducer_tests.cpp
             tests/action_tests.cpp
+            tests/trace_tests.cpp
     )
     # Tests reach into src/internal to instantiate the capacity-parameterized
     # reducer directly (tiny-capacity overflow / sequence-exhaustion coverage).
@@ -97,5 +98,14 @@ if(LUDUS_BUILD_TESTS)
         ludus_enable_test_exceptions(ludus_input_alloc_tests)
         add_test(NAME ludus_input_alloc_tests COMMAND ludus_input_alloc_tests)
         set_tests_properties(ludus_input_alloc_tests PROPERTIES LABELS "unit;input;alloc")
+    endif()
+
+    # Performance-evidence harness (M4). Built with tests but NOT a ctest: it is
+    # run manually to produce the numbers committed in the evidence doc. Excluded
+    # under sanitizers (they skew timings and intercept the allocator).
+    if(NOT LUDUS_ENABLE_ASAN AND NOT LUDUS_ENABLE_UBSAN AND NOT LUDUS_ENABLE_TSAN)
+        add_executable(ludus_input_bench benchmarks/input_bench.cpp)
+        target_link_libraries(ludus_input_bench PRIVATE Ludus::Input)
+        ludus_apply_project_defaults(ludus_input_bench)
     endif()
 endif()

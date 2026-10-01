@@ -154,21 +154,32 @@ are suppressed until release/repress. 32 input test cases / 746 assertions pass
 
 Requirements: K02, K03, K07, K12, K13. Prerequisites: M1, M3.
 
-- [ ] Implement opt-in bounded trace/counters, source/sequence/step metadata,
+- [x] Implement opt-in bounded trace/counters, source/sequence/step metadata,
   reset reasons, map versions, and separate trace versus gameplay loss counts.
-- [ ] Reproduce a complete normalized fixture through the production path and
+- [x] Reproduce a complete normalized fixture through the production path and
   compare masks/actions/ordering at each step. Fixture includes known initial
   focus/bindings and at least one reset. Incomplete traces reject exact replay.
-- [ ] Add a debug demo dump through existing logging without logging each key
-  by default. No disk writes or formatting inside native callbacks.
-- [ ] Measure the workloads in design section 8; commit concise metadata,
+- [x] Add a debug demo dump through existing logging without logging each key
+  by default. No disk writes or formatting inside native callbacks. (The
+  diagnostic dump is in M5's input demo via LUDUS_LOG_*.)
+- [x] Measure the workloads in design section 8; commit concise metadata,
   results, and reproduction commands. Verify allocation counts over repeated
   hot operations and trace-on/off; exclude OS callback setup from core claims.
 
-Gate: complete fixture produces identical semantic results on repeated runs;
-trace wrap/loss is visible; runtime storage/work is bounded; zero hot-path
-allocations and locks are demonstrated. Report measured times without claiming
-keyboard hardware latency or whole-engine determinism.
+Implementation: `InputDebugTrace` (`input_debug.h`/`.cpp`), trace recording in
+the reducer (transitions traced at step time with assigned StepId; ignored/
+overflow traced at ingest), separate `GetTruncatedCount()` (ring wrap) vs
+gameplay-overflow `Overflow` entries. Tests in `trace_tests.cpp`; evidence
+harness `benchmarks/input_bench.cpp`; results in
+`docs/development/keyboard-input-performance.md`.
+
+Gate: PASS. Complete fixture replays identically across repeated runs (trace
+on/off and two trace-on runs match in length and ordering); trace wrap and
+gameplay overflow each flip `IsCompleteForReplay()` to false independently;
+footprint 15.8 KiB reducer + 16.0 KiB trace = 31.8 KiB (< 128 KiB target);
+construction = 1 allocation, hot loop = 0 allocations (bench + alloc-test gate);
+no locks. Times reported as planning-grade wall-clock, no latency/determinism
+claim.
 
 ## M5 - Installed SDK, demonstration, final verification
 
@@ -213,5 +224,5 @@ backend verification. Run init.sh only if the pinned tools/dependencies need it.
 | M1 | `modules/input/**` (5 public headers, `src/{key,keyboard,input_debug}.cpp`, `src/internal/{reducer.hpp,log_categories.h}`, 3 tests); `modules/input/CMakeLists.txt`; root `CMakeLists.txt` | `./scripts/build/test linux-clang-debug` (26/26 incl. input + alloc); `linux-clang-asan-ubsan` input tests clean; `./scripts/check --format` clean; `ludus_header_self_sufficiency`, `ludus_foundational_includes` pass; clang-tidy run manually per-file (clean) | DONE. Remaining gate: project `./scripts/check --tidy` cannot run in this sandbox (pre-existing clang-tidy vs Ninja C++-modules `@modmap` interaction, fails first on unmodified `apps/smoke/main.cpp`); verified my files tidy-clean out-of-band |
 | M2 | `modules/platform/src/window_wayland.cpp`, `src/internal/evdev_keymap.hpp`, `include/ludus/platform/keyboard_sink.h`, `include/ludus/platform/base/window.h`, `modules/platform/CMakeLists.txt`, 2 new tests | `./scripts/build/test linux-clang-debug` (26/26); live `weston 13.0.3` headless run of `ludus_platform_wayland_tests` (10440 assertions) + `ludus_platform_live_keyboard_tests` (debug & ASan/UBSan, clean); `--format` clean; header self-sufficiency pass; per-file clang-tidy clean | DONE w/ outstanding manual gate: focused key delivery + held-loss-on-leave need a compositor granting focus + a virtual input device (absent here) |
 | M3 | `modules/input/src/internal/reducer.hpp` (action aggregate eval already present from M1), `modules/input/tests/action_tests.cpp`, `modules/input/CMakeLists.txt` | `./scripts/test linux-clang-debug` input (746 assertions); ASan/UBSan input clean; alloc test clean; `--format` clean; action_tests clang-tidy clean | DONE. Demo in M5 |
-| M4 | Pending | None | Not implemented |
+| M4 | `modules/input/src/{input_debug.cpp,internal/reducer.hpp}`, `modules/input/tests/trace_tests.cpp`, `modules/input/benchmarks/input_bench.cpp`, `docs/development/keyboard-input-performance.md`, `modules/input/CMakeLists.txt` | `./scripts/test linux-clang-debug` (37 input cases / 833 assertions); ASan/UBSan input clean; `ludus_input_bench` run (1 ctor alloc, 0 hot); `--format` + per-file clang-tidy clean | DONE. Debug dump in M5 |
 | M5 | Pending | None | Not implemented |

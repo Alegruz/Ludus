@@ -29,6 +29,8 @@ struct PendingTransition final
     Key PhysicalKey = Key::Unknown;
     RecordSource Source = RecordSource::Synthetic;
     uint64 Sequence = 0;
+    bool HasNativeTime = false;
+    uint32 NativeTimeMs = 0;
 };
 
 // Coalesced reset mailbox, independent of the pending-queue capacity (K05-K07,
@@ -184,7 +186,11 @@ public:
         };
         ++mPendingCount;
         ++mCounters.Accepted;
-        traceTransition(record, sequence);
+        // Accepted transitions are traced at step time (applyTransition) so the
+        // entry carries its assigned step id. Carry the record's native-time and
+        // source on the pending entry for that later trace.
+        mPending[slot].HasNativeTime = record.HasNativeTime;
+        mPending[slot].NativeTimeMs = record.NativeTimeMs;
         return AdmissionStatus::Accepted;
     }
 
@@ -545,6 +551,22 @@ private:
             .Sequence = pending.Sequence,
             .StepId = stepId,
         });
+
+        if (mTrace != nullptr)
+        {
+            mTrace->Record(TraceEntry
+            {
+                .Kind = TraceKind::Transition,
+                .Source = pending.Source,
+                .Transition = pending.Transition,
+                .PhysicalKey = pending.PhysicalKey,
+                .HasNativeTime = pending.HasNativeTime,
+                .NativeTimeMs = pending.NativeTimeMs,
+                .MapVersion = mMapVersion,
+                .Sequence = pending.Sequence,
+                .StepId = stepId,
+            });
+        }
     }
 
     // Recompute every action bound to `key` after the key's effective-down state
@@ -645,25 +667,6 @@ private:
         mSnapshot.LastReset = mLastResetReason;
         mSnapshot.ResetEpoch = mResetEpoch;
         // Down/Pressed/Released/Suppressed already maintained during the step.
-    }
-
-    void traceTransition(const KeyboardRecord& record, uint64 sequence) noexcept
-    {
-        if (mTrace == nullptr)
-        {
-            return;
-        }
-        mTrace->Record(TraceEntry
-        {
-            .Kind = TraceKind::Transition,
-            .Source = record.Source,
-            .Transition = record.Transition,
-            .PhysicalKey = record.PhysicalKey,
-            .HasNativeTime = record.HasNativeTime,
-            .NativeTimeMs = record.NativeTimeMs,
-            .MapVersion = mMapVersion,
-            .Sequence = sequence,
-        });
     }
 
     void traceIgnored(const KeyboardRecord& record) noexcept
