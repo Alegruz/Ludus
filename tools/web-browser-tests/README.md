@@ -20,7 +20,7 @@ runner adds compositor/shader/DOM coverage. It fails if SwiftShader cannot rende
 there is no skip or automatic mock fallback for the pixel case.
 
 The CI-only launch arguments are recorded in report.json. The forced adapter
-follows [Chromium's SwiftShader web-test configuration](https://chromium.googlesource.com/chromium/src/+/HEAD/third_party/blink/web_tests/FlagSpecificConfig).
+follows [Chromium's SwiftShader Vulkan pixel-test configuration](https://chromium.googlesource.com/chromium/src/+/354553e304d2ac575cd02d5dcb0d1551a09eac6f%5E%21/).
 Experimental CI flags never establish flag-free player compatibility and must
 not be copied into a user-browser acceptance procedure.
 

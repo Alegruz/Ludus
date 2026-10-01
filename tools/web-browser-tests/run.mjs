@@ -15,7 +15,11 @@ const output = resolve(process.argv[4] || '../../out/browser-qa/results');
 await mkdir(output, {recursive:true});
 const report = {kind:'software-GPU CI, not hardware acceptance',
   zipSha256:createHash('sha256').update(await readFile(zip)).digest('hex'),
-  launchArgs:['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader', '--use-angle=swiftshader'],
+  // Match Chromium's software Vulkan pixel-test configuration so compositor and
+  // WebGPU share the intended software backend on hosts without a physical GPU.
+  launchArgs:['--enable-unsafe-webgpu', '--enable-features=Vulkan',
+    '--use-webgpu-adapter=swiftshader', '--use-angle=swiftshader',
+    '--use-vulkan=swiftshader', '--disable-vulkan-surface'],
   cases:[], requests:[]};
 const server = createServer(async (request, response) => {
   const pathname = new URL(request.url, 'http://localhost').pathname;
