@@ -89,6 +89,7 @@ add_subdirectory(modules/input)
 if(EMSCRIPTEN)
     add_subdirectory(modules/platform)
     add_subdirectory(modules/graphics/rhi)
+    add_subdirectory(modules/text)
     add_subdirectory(tools/web-rhi-probe)
     add_subdirectory(tools/web-frame-probe)
     add_subdirectory(tools/web-platform-probe)
@@ -100,6 +101,7 @@ if(EMSCRIPTEN)
 else()
     add_subdirectory(modules/platform)
     add_subdirectory(modules/graphics/rhi)
+    add_subdirectory(modules/text)
 
     # Startup-only development diagnostic integration (depends on Base; Base does
     # not depend on it). Provides InitializeDiagnosticSession and the Python helper.

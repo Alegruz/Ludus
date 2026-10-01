@@ -3,9 +3,15 @@
     "requires": [
         "vulkan-headers/1.4.357.0#1a38d7d226af6397679de25505ea13a9%1789470998.122",
         "volk/1.4.357.0#4469847ca407a836f5927bbecacad8bf%1789470996.207",
-        "catch2/3.4.0#f66109133591e5dac29511b9e09a6b57%1726584455.883"
+        "harfbuzz/14.5.1#e3623b9b9c8b255282b298619d005330%1790885077.9188352",
+        "freetype/2.14.3#4ee27b7918b546a96d7e6898e3a02b34%1774443541.191",
+        "catch2/3.4.0#038a6bb740f3f5d7e16f4c2a7ad48d8f%1736250262.33"
     ],
-    "build_requires": [],
+    "build_requires": [
+        "pkgconf/2.5.1#93c2051284cba1279494a43a4fcfeae2%1757684701.089",
+        "ninja/1.13.2#c8c5dc2a52ed6e4e42a66d75b4717ceb%1764096931.974",
+        "meson/1.10.2#9d2d10681fe7fe61c788c58626c89b25%1775558003.754"
+    ],
     "python_requires": [],
     "config_requires": []
 }
