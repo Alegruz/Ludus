@@ -6,6 +6,9 @@ on:
       - '.github/workflows/webgpu-probe.yml'
       - 'tools/webgpu-probe/**'
       - 'scripts/webgpu-probe'
+      - 'scripts/package-web'
+      - 'scripts/python/web_package.py'
+      - 'scripts/python/test_web_package.py'
       - 'scripts/python/formatting.py'
       - 'config/web_toolchain.json'
       - 'config/tool_versions.json'
@@ -133,4 +136,14 @@ jobs:
           path: |
             out/build/web-emscripten-development/apps/smoke/index.*
             out/build/web-emscripten-release/apps/smoke/index.*
+          if-no-files-found: error
+
+      - name: Validate and package integrated Release app
+        run: |
+          python3 -m unittest discover -s scripts/python -p 'test_web_package.py' -v
+          ./scripts/package-web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ludus-web-smoke-release
+          path: out/packages/ludus-web-smoke-release.zip
           if-no-files-found: error

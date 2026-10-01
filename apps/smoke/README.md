@@ -31,5 +31,6 @@ The production index build is web-only and contains no controlled provider.
 A separate smoke-test.js/node target links the explicit test DOM/GPU provider and
 runs the same Application/renderer sources. CI publishes only index.* artifacts.
 Native Catch2 tests verify shared timing, hidden/blurred input and pointer mapping.
-For hardware acceptance and the next packaging stage, see
-../../docs/development/webgpu-w6-evidence.md.
+Build a self-contained Release ZIP with `./scripts/package-web`; see
+../../docs/development/web-packaging.md for clean extraction and itch.io settings.
+Hardware acceptance remains tracked in ../../docs/development/webgpu-w6-evidence.md.

@@ -7,7 +7,9 @@ if(EMSCRIPTEN)
     # W5's private smoke interop; no backend types enter the installed SDK.
     target_include_directories(ludus_smoke PRIVATE "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/src")
     target_compile_options(ludus_smoke PRIVATE "--use-port=emdawnwebgpu:cpp_bindings=false")
-    target_link_options(ludus_smoke PRIVATE -fno-exceptions -g0 -g2 -sENVIRONMENT=web -sALLOW_MEMORY_GROWTH=1 -sASSERTIONS=1)
+    target_link_options(ludus_smoke PRIVATE -fno-exceptions -g0 $<$<NOT:$<CONFIG:Release>>:-g2>
+        -sENVIRONMENT=web -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=33554432
+        -sMAXIMUM_MEMORY=268435456 -sSTACK_SIZE=65536 -sASSERTIONS=1)
     set_target_properties(ludus_smoke PROPERTIES OUTPUT_NAME index SUFFIX ".js")
     configure_file(shell.html index.html COPYONLY)
 
