@@ -524,6 +524,21 @@ RunResult RunStaticEntry(const HostConfig& config, StaticEntryFn entry) noexcept
     return services.OutstandingAllocations() == 0 ? RunResult::Ok : RunResult::Internal;
 }
 
+usize HostSession::ReadActiveProperties(ludus::foundation::uint8* buffer, usize capacity) noexcept
+{
+    if (Instance_ == nullptr || !Active_.IsLoaded() || Active_.Table().ReadProperties == nullptr || buffer == nullptr)
+    {
+        return 0;
+    }
+    ByteSpan span = {buffer, capacity};
+    usize written = 0;
+    if (Active_.Table().ReadProperties(Instance_, span, &written) != Status::Ok)
+    {
+        return 0;
+    }
+    return written;
+}
+
 RunResult HostSession::RunLoop(uint64 maxFrames) noexcept
 {
     if (State_ != PlayState::Running && State_ != PlayState::Paused)

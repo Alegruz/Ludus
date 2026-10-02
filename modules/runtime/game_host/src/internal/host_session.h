@@ -27,6 +27,7 @@ namespace ludus::runtime::game_host
 {
 using ludus::foundation::int32;
 using ludus::foundation::uint64;
+using ludus::foundation::usize;
 
 // PlayState mirrored from design section 4. The host owns transitions.
 enum class PlayState : ludus::foundation::uint8
@@ -73,6 +74,26 @@ public:
     {
         return State_;
     }
+
+    [[nodiscard]] uint64 ActiveGeneration() const noexcept
+    {
+        return ActiveGeneration_;
+    }
+
+    [[nodiscard]] uint64 OutstandingHostAllocations() const noexcept
+    {
+        return Services_.OutstandingAllocations();
+    }
+
+    // Advance the active instance one frame (deterministic test driver). No I/O.
+    void AdvanceOneFrame() noexcept
+    {
+        StepFrame();
+    }
+
+    // Read the active instance's live property values into a caller buffer for
+    // state-equality checks. Returns bytes written, or 0 on failure.
+    [[nodiscard]] usize ReadActiveProperties(ludus::foundation::uint8* buffer, usize capacity) noexcept;
 
     // Reload the active module to a new generation at a frame boundary. Keeps A
     // alive until B validates; recoverable rejection resumes A unchanged

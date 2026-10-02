@@ -159,4 +159,17 @@ if(LUDUS_BUILD_TESTS)
         LUDUS_FIXTURE_BADID_PATH="$<TARGET_FILE:ludus_game_fixture_badid>")
     add_test(NAME ludus_game_host_session_tests COMMAND ludus_game_host_session_tests)
     set_tests_properties(ludus_game_host_session_tests PROPERTIES TIMEOUT 120 LABELS "unit;runtime;session;reload")
+
+    add_executable(ludus_game_host_reload_tests tests/reload_tests.cpp)
+    target_include_directories(ludus_game_host_reload_tests PRIVATE src "${LUDUS_GAME_HOST_GENERATED_INCLUDE_DIR}")
+    target_link_libraries(ludus_game_host_reload_tests PRIVATE
+        Ludus::GameHost Ludus::GameApi Ludus::FoundationLogging Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
+    ludus_apply_project_defaults(ludus_game_host_reload_tests)
+    ludus_enable_test_exceptions(ludus_game_host_reload_tests)
+    add_dependencies(ludus_game_host_reload_tests ludus_game_fixture_A ludus_game_fixture_B)
+    target_compile_definitions(ludus_game_host_reload_tests PRIVATE
+        LUDUS_FIXTURE_A_PATH="$<TARGET_FILE:ludus_game_fixture_A>"
+        LUDUS_FIXTURE_B_PATH="$<TARGET_FILE:ludus_game_fixture_B>")
+    add_test(NAME ludus_game_host_reload_tests COMMAND ludus_game_host_reload_tests)
+    set_tests_properties(ludus_game_host_reload_tests PROPERTIES TIMEOUT 180 LABELS "unit;runtime;reload;stress")
 endif()

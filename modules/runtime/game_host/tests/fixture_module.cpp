@@ -15,6 +15,7 @@
 #include <ludus/runtime/game_api/properties.h>
 #include <ludus/runtime/game_api/services.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <new>
 
@@ -42,6 +43,15 @@ constexpr const char* kVariantName = LUDUS_FIXTURE_STRINGIFY(LUDUS_FIXTURE_VARIA
 constexpr const char* kIdentity = LUDUS_FIXTURE_IDENTITY;
 
 constexpr bool kIsVariantB = (kVariantName[0] == 'B');
+
+// Failure injection for pre-commit reload stages (tasks.md L3). A test sets
+// LUDUS_FIXTURE_FAIL to a stage name; the matching callback returns an error so
+// the host must preserve A and resume it unchanged. Read once per call; cheap.
+[[nodiscard]] bool ShouldFail(const char* stage) noexcept
+{
+    const char* want = std::getenv("LUDUS_FIXTURE_FAIL");
+    return want != nullptr && std::strcmp(want, stage) == 0;
+}
 
 // Checkpoint/property schema versions. Variant B bumps the checkpoint schema to
 // exercise explicit migration (design 8).
@@ -244,6 +254,10 @@ Status FixtureQuiesce(GameInstance* instance) noexcept
     {
         return Status::InvalidArgument;
     }
+    if (ShouldFail("quiesce"))
+    {
+        return Status::Internal; // must leave A resumable (not mutated here)
+    }
     state->Paused = true;
     return Status::Ok;
 }
@@ -264,6 +278,10 @@ Status FixtureCheckpointSize(GameInstance* instance, usize* outBodySize) noexcep
     if (instance == nullptr || outBodySize == nullptr)
     {
         return Status::InvalidArgument;
+    }
+    if (ShouldFail("checkpoint"))
+    {
+        return Status::Internal;
     }
     *outBodySize = kIsVariantB ? sizeof(CheckpointBodyV2) : sizeof(CheckpointBodyV1);
     return Status::Ok;
@@ -329,6 +347,10 @@ Status FixtureCreateCandidate(const CreateInfo* info,
     {
         return Status::InvalidArgument;
     }
+    if (ShouldFail("stage"))
+    {
+        return Status::Internal; // candidate B discarded; A resumes
+    }
     // Validate digest and bounds before trusting the body (design 8).
     if (header->BodyLength != body.Size || Fnv1a(body.Data, body.Size) != header->BodyDigest)
     {
@@ -360,8 +382,10 @@ Status FixtureCreateCandidate(const CreateInfo* info,
         std::memcpy(state->Label, b.Label, sizeof(state->Label));
         state->Energy = 0.0F; // declared default when migrating A -> B
     }
-    else if (kIsVariantB && header->SchemaVersion == kCheckpointSchemaB && body.Size >= sizeof(CheckpointBodyV2))
+    else if (header->SchemaVersion == kCheckpointSchemaB && body.Size >= sizeof(CheckpointBodyV2))
     {
+        // Both variants accept a schema-2 body. A reads the shared V1 prefix and
+        // drops Energy (a forward-compatible downgrade); B reads it in full.
         CheckpointBodyV2 b;
         std::memcpy(&b, body.Data, sizeof(b));
         state->PositionX = b.PositionX;
@@ -393,6 +417,10 @@ Status FixtureValidateCandidate(GameCandidate* candidate) noexcept
     if (state == nullptr)
     {
         return Status::InvalidArgument;
+    }
+    if (ShouldFail("validate"))
+    {
+        return Status::OutOfRange;
     }
     // Reject impossible migrated state (design 8: validate before commit).
     if (state->Speed < 0.0F || state->Bounces < 0)
