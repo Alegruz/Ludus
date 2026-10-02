@@ -12,7 +12,8 @@ namespace ludus::foundation::math
 Matrix3 ToMatrix3(Quaternion q) noexcept
 {
     LUDUS_ASSERT(IsFinite(q));
-    const float64 x = q.X, y = q.Y, z = q.Z, w = q.W;
+    const float64 x = static_cast<float64>(q.X), y = static_cast<float64>(q.Y), z = static_cast<float64>(q.Z),
+                  w = static_cast<float64>(q.W);
     const float64 xx = x * x, yy = y * y, zz = z * z;
     const float64 xy = x * y, xz = x * z, yz = y * z;
     const float64 wx = w * x, wy = w * y, wz = w * z;
@@ -396,10 +397,10 @@ void Load4(const Matrix4& m, float64 a[4][4]) noexcept
     for (int c = 0; c < 4; ++c)
     {
         const Vector4& col = m.Columns[c];
-        a[0][c] = col.X;
-        a[1][c] = col.Y;
-        a[2][c] = col.Z;
-        a[3][c] = col.W;
+        a[0][c] = static_cast<float64>(col.X);
+        a[1][c] = static_cast<float64>(col.Y);
+        a[2][c] = static_cast<float64>(col.Z);
+        a[3][c] = static_cast<float64>(col.W);
     }
 }
 Matrix4 Store4(const float64 a[4][4]) noexcept

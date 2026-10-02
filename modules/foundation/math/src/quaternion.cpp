@@ -77,7 +77,11 @@ MathStatus TryNormalize(Quaternion q, Quaternion& out) noexcept
     {
         return MathStatus::NonFiniteInput;
     }
-    return NarrowUnit(Quat4d{q.X, q.Y, q.Z, q.W}, out);
+    return NarrowUnit(Quat4d{static_cast<float64>(q.X),
+                             static_cast<float64>(q.Y),
+                             static_cast<float64>(q.Z),
+                             static_cast<float64>(q.W)},
+                      out);
 }
 
 MathStatus TryFromAxisAngle(Vector3 axis, float32 angleRadians, Quaternion& out) noexcept
@@ -102,8 +106,9 @@ Vector3 Rotate(Quaternion q, Vector3 v) noexcept
     LUDUS_ASSERT(IsFinite(q) && IsFinite(v));
     // t = 2 * cross(q.xyz, v); result = v + q.w * t + cross(q.xyz, t). Standard
     // expansion; matches ToMatrix3(q) * v. Done in float64 then narrowed.
-    const float64 qx = q.X, qy = q.Y, qz = q.Z, qw = q.W;
-    const float64 vx = v.X, vy = v.Y, vz = v.Z;
+    const float64 qx = static_cast<float64>(q.X), qy = static_cast<float64>(q.Y), qz = static_cast<float64>(q.Z),
+                  qw = static_cast<float64>(q.W);
+    const float64 vx = static_cast<float64>(v.X), vy = static_cast<float64>(v.Y), vz = static_cast<float64>(v.Z);
     const float64 tx = 2.0 * (qy * vz - qz * vy);
     const float64 ty = 2.0 * (qz * vx - qx * vz);
     const float64 tz = 2.0 * (qx * vy - qy * vx);
@@ -200,7 +205,10 @@ Quaternion NlerpShortest(Quaternion a, Quaternion b, float32 t) noexcept
     const Quaternion bc = NegateIfNeeded(a, b);
     const float64 ta = 1.0 - static_cast<float64>(t);
     const float64 tb = static_cast<float64>(t);
-    Quat4d blend{ta * a.X + tb * bc.X, ta * a.Y + tb * bc.Y, ta * a.Z + tb * bc.Z, ta * a.W + tb * bc.W};
+    Quat4d blend{ta * static_cast<float64>(a.X) + tb * static_cast<float64>(bc.X),
+                 ta * static_cast<float64>(a.Y) + tb * static_cast<float64>(bc.Y),
+                 ta * static_cast<float64>(a.Z) + tb * static_cast<float64>(bc.Z),
+                 ta * static_cast<float64>(a.W) + tb * static_cast<float64>(bc.W)};
     const float64 len = Len4d(blend);
     if (len == 0.0)
     {
@@ -227,7 +235,10 @@ Quaternion SlerpShortest(Quaternion a, Quaternion b, float32 t) noexcept
     const float64 sinTheta = std::sin(theta);
     const float64 wa = std::sin((1.0 - static_cast<float64>(t)) * theta) / sinTheta;
     const float64 wb = std::sin(static_cast<float64>(t) * theta) / sinTheta;
-    Quat4d blend{wa * a.X + wb * bc.X, wa * a.Y + wb * bc.Y, wa * a.Z + wb * bc.Z, wa * a.W + wb * bc.W};
+    Quat4d blend{wa * static_cast<float64>(a.X) + wb * static_cast<float64>(bc.X),
+                 wa * static_cast<float64>(a.Y) + wb * static_cast<float64>(bc.Y),
+                 wa * static_cast<float64>(a.Z) + wb * static_cast<float64>(bc.Z),
+                 wa * static_cast<float64>(a.W) + wb * static_cast<float64>(bc.W)};
     const float64 len = Len4d(blend);
     if (len == 0.0)
     {
@@ -250,8 +261,14 @@ bool SameRotation(Quaternion a, Quaternion b, float32 toleranceRadians) noexcept
         return false;
     }
     // Validate unit inputs within a small rounding slack.
-    const float64 la = Len4d(Quat4d{a.X, a.Y, a.Z, a.W});
-    const float64 lb = Len4d(Quat4d{b.X, b.Y, b.Z, b.W});
+    const float64 la = Len4d(Quat4d{static_cast<float64>(a.X),
+                                    static_cast<float64>(a.Y),
+                                    static_cast<float64>(a.Z),
+                                    static_cast<float64>(a.W)});
+    const float64 lb = Len4d(Quat4d{static_cast<float64>(b.X),
+                                    static_cast<float64>(b.Y),
+                                    static_cast<float64>(b.Z),
+                                    static_cast<float64>(b.W)});
     if (std::fabs(la - 1.0) > 1e-4 || std::fabs(lb - 1.0) > 1e-4)
     {
         return false;

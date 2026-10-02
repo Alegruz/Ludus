@@ -13,8 +13,8 @@ namespace
 // Returns the status; on success fills the 2x2 inverse (column-major doubles).
 [[nodiscard]] MathStatus Invert2x2(const Affine2& a, InversePolicy policy, float64 inv[2][2]) noexcept
 {
-    const float64 m00 = a.Columns[0].X, m10 = a.Columns[0].Y;
-    const float64 m01 = a.Columns[1].X, m11 = a.Columns[1].Y;
+    const float64 m00 = static_cast<float64>(a.Columns[0].X), m10 = static_cast<float64>(a.Columns[0].Y);
+    const float64 m01 = static_cast<float64>(a.Columns[1].X), m11 = static_cast<float64>(a.Columns[1].Y);
     if (!std::isfinite(m00) || !std::isfinite(m10) || !std::isfinite(m01) || !std::isfinite(m11))
     {
         return MathStatus::NonFiniteInput;
@@ -62,7 +62,7 @@ MathStatus TryInverse(const Affine2& a, InversePolicy policy, Affine2& out) noex
         return status;
     }
     // t' = -inv(L) * t, in double.
-    const float64 tx = a.Translation.X, ty = a.Translation.Y;
+    const float64 tx = static_cast<float64>(a.Translation.X), ty = static_cast<float64>(a.Translation.Y);
     const float64 ntx = -(inv[0][0] * tx + inv[0][1] * ty);
     const float64 nty = -(inv[1][0] * tx + inv[1][1] * ty);
     const Vector2 c0{static_cast<float32>(inv[0][0]), static_cast<float32>(inv[1][0])};
@@ -85,7 +85,8 @@ MathStatus TryInverse(const Affine3& a, InversePolicy policy, Affine3& out) noex
         return status;
     }
     // t' = -invL * t, in double.
-    const float64 tx = a.Translation.X, ty = a.Translation.Y, tz = a.Translation.Z;
+    const float64 tx = static_cast<float64>(a.Translation.X), ty = static_cast<float64>(a.Translation.Y),
+                  tz = static_cast<float64>(a.Translation.Z);
     const float64 ntx = -((float64)invL.At(0, 0) * tx + (float64)invL.At(0, 1) * ty + (float64)invL.At(0, 2) * tz);
     const float64 nty = -((float64)invL.At(1, 0) * tx + (float64)invL.At(1, 1) * ty + (float64)invL.At(1, 2) * tz);
     const float64 ntz = -((float64)invL.At(2, 0) * tx + (float64)invL.At(2, 1) * ty + (float64)invL.At(2, 2) * tz);
@@ -165,8 +166,10 @@ MathStatus TryToAffine3(const TransformTRS& trs, float32 rotationUnitTol, Affine
         return MathStatus::InvalidArgument;
     }
     // Validate unit rotation.
-    const float64 qlen2 = (float64)trs.Rotation.X * trs.Rotation.X + (float64)trs.Rotation.Y * trs.Rotation.Y +
-                          (float64)trs.Rotation.Z * trs.Rotation.Z + (float64)trs.Rotation.W * trs.Rotation.W;
+    const float64 qlen2 = (float64)trs.Rotation.X * static_cast<float64>(trs.Rotation.X) +
+                          (float64)trs.Rotation.Y * static_cast<float64>(trs.Rotation.Y) +
+                          (float64)trs.Rotation.Z * static_cast<float64>(trs.Rotation.Z) +
+                          (float64)trs.Rotation.W * static_cast<float64>(trs.Rotation.W);
     if (std::fabs(std::sqrt(qlen2) - 1.0) > static_cast<float64>(rotationUnitTol))
     {
         return MathStatus::Degenerate;
@@ -191,9 +194,9 @@ MathStatus TryPerspectiveDivide(Vector4 clip, float32 minAbsW, Vector3& out) noe
         return MathStatus::InvalidArgument;
     }
     const float64 iw = 1.0 / static_cast<float64>(w);
-    const float32 x = static_cast<float32>(clip.X * iw);
-    const float32 y = static_cast<float32>(clip.Y * iw);
-    const float32 z = static_cast<float32>(clip.Z * iw);
+    const float32 x = static_cast<float32>(static_cast<float64>(clip.X) * iw);
+    const float32 y = static_cast<float32>(static_cast<float64>(clip.Y) * iw);
+    const float32 z = static_cast<float32>(static_cast<float64>(clip.Z) * iw);
     if (!IsFinite(x) || !IsFinite(y) || !IsFinite(z))
     {
         return MathStatus::OutOfRange;

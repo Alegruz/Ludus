@@ -45,17 +45,18 @@ constexpr float64 kInf = std::numeric_limits<float64>::infinity();
     {
         return false;
     }
-    const float64 len2 =
-        (float64)p.Normal.X * p.Normal.X + (float64)p.Normal.Y * p.Normal.Y + (float64)p.Normal.Z * p.Normal.Z;
+    const float64 len2 = (float64)p.Normal.X * static_cast<float64>(p.Normal.X) +
+                         (float64)p.Normal.Y * static_cast<float64>(p.Normal.Y) +
+                         (float64)p.Normal.Z * static_cast<float64>(p.Normal.Z);
     const float64 len = std::sqrt(len2);
     if (std::fabs(len - 1.0) > 1e-4)
     {
         return false;
     }
-    nx = p.Normal.X;
-    ny = p.Normal.Y;
-    nz = p.Normal.Z;
-    d = p.D;
+    nx = static_cast<float64>(p.Normal.X);
+    ny = static_cast<float64>(p.Normal.Y);
+    nz = static_cast<float64>(p.Normal.Z);
+    d = static_cast<float64>(p.D);
     return true;
 }
 } // namespace
@@ -74,7 +75,8 @@ MathStatus TryMakePlane(Vector3 normal, Vector3 point, Plane& out) noexcept
     {
         return MathStatus::Degenerate;
     }
-    const float64 d = -(nx * point.X + ny * point.Y + nz * point.Z);
+    const float64 d =
+        -(nx * static_cast<float64>(point.X) + ny * static_cast<float64>(point.Y) + nz * static_cast<float64>(point.Z));
     const float32 fx = (float32)nx, fy = (float32)ny, fz = (float32)nz, fd = (float32)d;
     if (!IsFinite(fx) || !IsFinite(fy) || !IsFinite(fz) || !IsFinite(fd))
     {
@@ -95,7 +97,8 @@ MathStatus TryPlaneSignedDistance(const Plane& plane, Vector3 p, float32& out) n
     {
         return MathStatus::Degenerate;
     }
-    const float64 dist = nx * p.X + ny * p.Y + nz * p.Z + d;
+    const float64 dist =
+        nx * static_cast<float64>(p.X) + ny * static_cast<float64>(p.Y) + nz * static_cast<float64>(p.Z) + d;
     const float32 f = (float32)dist;
     if (!IsFinite(f))
     {
@@ -133,10 +136,11 @@ MathStatus TryReflectVector(const Plane& plane, Vector3 v, Vector3& out) noexcep
     {
         return MathStatus::Degenerate;
     }
-    const float64 dot = nx * v.X + ny * v.Y + nz * v.Z;
-    const Vector3 result{(float32)(v.X - 2.0 * dot * nx),
-                         (float32)(v.Y - 2.0 * dot * ny),
-                         (float32)(v.Z - 2.0 * dot * nz)};
+    const float64 dot =
+        nx * static_cast<float64>(v.X) + ny * static_cast<float64>(v.Y) + nz * static_cast<float64>(v.Z);
+    const Vector3 result{(float32)(static_cast<float64>(v.X) - 2.0 * dot * nx),
+                         (float32)(static_cast<float64>(v.Y) - 2.0 * dot * ny),
+                         (float32)(static_cast<float64>(v.Z) - 2.0 * dot * nz)};
     if (!IsFinite(result))
     {
         return MathStatus::OutOfRange;
@@ -208,18 +212,26 @@ MathStatus TryTransformAabb(const Affine3& a, const Aabb3& box, Aabb3& out) noex
         return MathStatus::NonFiniteInput;
     }
     // Center/extents in double; transformed center = L*c + t, extents = |L|*e.
-    const float64 cx = ((float64)box.Min.X + box.Max.X) * 0.5;
-    const float64 cy = ((float64)box.Min.Y + box.Max.Y) * 0.5;
-    const float64 cz = ((float64)box.Min.Z + box.Max.Z) * 0.5;
-    const float64 ex = ((float64)box.Max.X - box.Min.X) * 0.5;
-    const float64 ey = ((float64)box.Max.Y - box.Min.Y) * 0.5;
-    const float64 ez = ((float64)box.Max.Z - box.Min.Z) * 0.5;
+    const float64 cx = ((float64)box.Min.X + static_cast<float64>(box.Max.X)) * 0.5;
+    const float64 cy = ((float64)box.Min.Y + static_cast<float64>(box.Max.Y)) * 0.5;
+    const float64 cz = ((float64)box.Min.Z + static_cast<float64>(box.Max.Z)) * 0.5;
+    const float64 ex = ((float64)box.Max.X - static_cast<float64>(box.Min.X)) * 0.5;
+    const float64 ey = ((float64)box.Max.Y - static_cast<float64>(box.Min.Y)) * 0.5;
+    const float64 ez = ((float64)box.Max.Z - static_cast<float64>(box.Min.Z)) * 0.5;
     const float64 L[3][3] = {
-        {a.Columns[0].X, a.Columns[1].X, a.Columns[2].X},
-        {a.Columns[0].Y, a.Columns[1].Y, a.Columns[2].Y},
-        {a.Columns[0].Z, a.Columns[1].Z, a.Columns[2].Z},
+        {static_cast<float64>(a.Columns[0].X),
+         static_cast<float64>(a.Columns[1].X),
+         static_cast<float64>(a.Columns[2].X)},
+        {static_cast<float64>(a.Columns[0].Y),
+         static_cast<float64>(a.Columns[1].Y),
+         static_cast<float64>(a.Columns[2].Y)},
+        {static_cast<float64>(a.Columns[0].Z),
+         static_cast<float64>(a.Columns[1].Z),
+         static_cast<float64>(a.Columns[2].Z)},
     };
-    const float64 t[3] = {a.Translation.X, a.Translation.Y, a.Translation.Z};
+    const float64 t[3] = {static_cast<float64>(a.Translation.X),
+                          static_cast<float64>(a.Translation.Y),
+                          static_cast<float64>(a.Translation.Z)};
     const float64 c[3] = {cx, cy, cz};
     const float64 e[3] = {ex, ey, ez};
     float64 lo[3];
@@ -229,8 +241,10 @@ MathStatus TryTransformAabb(const Affine3& a, const Aabb3& box, Aabb3& out) noex
         const float64 tc = L[r][0] * c[0] + L[r][1] * c[1] + L[r][2] * c[2] + t[r];
         const float64 te = std::fabs(L[r][0]) * e[0] + std::fabs(L[r][1]) * e[1] + std::fabs(L[r][2]) * e[2];
         // Outward rounding: nudge lower down and upper up to stay conservative.
-        lo[r] = std::nextafter(static_cast<float32>(tc - te), -std::numeric_limits<float32>::infinity());
-        hi[r] = std::nextafter(static_cast<float32>(tc + te), std::numeric_limits<float32>::infinity());
+        lo[r] = static_cast<float64>(
+            std::nextafter(static_cast<float32>(tc - te), -std::numeric_limits<float32>::infinity()));
+        hi[r] = static_cast<float64>(
+            std::nextafter(static_cast<float32>(tc + te), std::numeric_limits<float32>::infinity()));
     }
     const Vector3 mn{(float32)lo[0], (float32)lo[1], (float32)lo[2]};
     const Vector3 mx{(float32)hi[0], (float32)hi[1], (float32)hi[2]};
@@ -257,12 +271,13 @@ MathStatus TryTransformAabb(const Affine2& a, const Aabb2& box, Aabb2& out) noex
     {
         return MathStatus::NonFiniteInput;
     }
-    const float64 cx = ((float64)box.Min.X + box.Max.X) * 0.5;
-    const float64 cy = ((float64)box.Min.Y + box.Max.Y) * 0.5;
-    const float64 ex = ((float64)box.Max.X - box.Min.X) * 0.5;
-    const float64 ey = ((float64)box.Max.Y - box.Min.Y) * 0.5;
-    const float64 L[2][2] = {{a.Columns[0].X, a.Columns[1].X}, {a.Columns[0].Y, a.Columns[1].Y}};
-    const float64 t[2] = {a.Translation.X, a.Translation.Y};
+    const float64 cx = ((float64)box.Min.X + static_cast<float64>(box.Max.X)) * 0.5;
+    const float64 cy = ((float64)box.Min.Y + static_cast<float64>(box.Max.Y)) * 0.5;
+    const float64 ex = ((float64)box.Max.X - static_cast<float64>(box.Min.X)) * 0.5;
+    const float64 ey = ((float64)box.Max.Y - static_cast<float64>(box.Min.Y)) * 0.5;
+    const float64 L[2][2] = {{static_cast<float64>(a.Columns[0].X), static_cast<float64>(a.Columns[1].X)},
+                             {static_cast<float64>(a.Columns[0].Y), static_cast<float64>(a.Columns[1].Y)}};
+    const float64 t[2] = {static_cast<float64>(a.Translation.X), static_cast<float64>(a.Translation.Y)};
     const float64 c[2] = {cx, cy};
     const float64 e[2] = {ex, ey};
     float64 lo[2];
@@ -271,8 +286,10 @@ MathStatus TryTransformAabb(const Affine2& a, const Aabb2& box, Aabb2& out) noex
     {
         const float64 tc = L[r][0] * c[0] + L[r][1] * c[1] + t[r];
         const float64 te = std::fabs(L[r][0]) * e[0] + std::fabs(L[r][1]) * e[1];
-        lo[r] = std::nextafter(static_cast<float32>(tc - te), -std::numeric_limits<float32>::infinity());
-        hi[r] = std::nextafter(static_cast<float32>(tc + te), std::numeric_limits<float32>::infinity());
+        lo[r] = static_cast<float64>(
+            std::nextafter(static_cast<float32>(tc - te), -std::numeric_limits<float32>::infinity()));
+        hi[r] = static_cast<float64>(
+            std::nextafter(static_cast<float32>(tc + te), std::numeric_limits<float32>::infinity()));
     }
     const Vector2 mn{(float32)lo[0], (float32)lo[1]};
     const Vector2 mx{(float32)hi[0], (float32)hi[1]};
@@ -342,10 +359,18 @@ MathStatus TryRayAabb(const Ray3& ray, const Aabb3& box, const RayInterval& inte
 
     float64 entry = interval.MinT;
     float64 exit = interval.MaxT;
-    const float64 o[3] = {ray.Origin.X, ray.Origin.Y, ray.Origin.Z};
-    const float64 dcomp[3] = {ray.Direction.X, ray.Direction.Y, ray.Direction.Z};
-    const float64 lo[3] = {box.Min.X, box.Min.Y, box.Min.Z};
-    const float64 hi[3] = {box.Max.X, box.Max.Y, box.Max.Z};
+    const float64 o[3] = {static_cast<float64>(ray.Origin.X),
+                          static_cast<float64>(ray.Origin.Y),
+                          static_cast<float64>(ray.Origin.Z)};
+    const float64 dcomp[3] = {static_cast<float64>(ray.Direction.X),
+                              static_cast<float64>(ray.Direction.Y),
+                              static_cast<float64>(ray.Direction.Z)};
+    const float64 lo[3] = {static_cast<float64>(box.Min.X),
+                           static_cast<float64>(box.Min.Y),
+                           static_cast<float64>(box.Min.Z)};
+    const float64 hi[3] = {static_cast<float64>(box.Max.X),
+                           static_cast<float64>(box.Max.Y),
+                           static_cast<float64>(box.Max.Z)};
 
     for (int i = 0; i < 3; ++i)
     {
@@ -404,13 +429,14 @@ MathStatus TryRaySphere(const Ray3& ray, const Sphere& sphere, const RayInterval
         return MathStatus::InvalidArgument;
     }
 
-    const float64 ox = (float64)ray.Origin.X - sphere.Center.X;
-    const float64 oy = (float64)ray.Origin.Y - sphere.Center.Y;
-    const float64 oz = (float64)ray.Origin.Z - sphere.Center.Z;
-    const float64 dx = ray.Direction.X, dy = ray.Direction.Y, dz = ray.Direction.Z;
+    const float64 ox = (float64)ray.Origin.X - static_cast<float64>(sphere.Center.X);
+    const float64 oy = (float64)ray.Origin.Y - static_cast<float64>(sphere.Center.Y);
+    const float64 oz = (float64)ray.Origin.Z - static_cast<float64>(sphere.Center.Z);
+    const float64 dx = static_cast<float64>(ray.Direction.X), dy = static_cast<float64>(ray.Direction.Y),
+                  dz = static_cast<float64>(ray.Direction.Z);
     const float64 a = dx * dx + dy * dy + dz * dz;
     const float64 b = ox * dx + oy * dy + oz * dz; // half-b
-    const float64 c = ox * ox + oy * oy + oz * oz - (float64)sphere.Radius * sphere.Radius;
+    const float64 c = ox * ox + oy * oy + oz * oz - (float64)sphere.Radius * static_cast<float64>(sphere.Radius);
     const float64 discriminant = b * b - a * c;
     if (discriminant < 0.0)
     {
@@ -460,7 +486,9 @@ struct D3
 };
 [[nodiscard]] D3 Sub(Vector3 a, Vector3 b) noexcept
 {
-    return D3{(float64)a.X - b.X, (float64)a.Y - b.Y, (float64)a.Z - b.Z};
+    return D3{(float64)a.X - static_cast<float64>(b.X),
+              (float64)a.Y - static_cast<float64>(b.Y),
+              (float64)a.Z - static_cast<float64>(b.Z)};
 }
 [[nodiscard]] float64 DotD(const D3& a, const D3& b) noexcept
 {
@@ -506,12 +534,12 @@ MathStatus TryClosestPointsSegments(Vector3 p0, Vector3 p1, Vector3 q0, Vector3 
     float64 bestT = 0.0;
     auto consider = [&](float64 s, float64 t) {
         // Closest points for parameters s,t.
-        const float64 cp1x = p0.X + s * u.x;
-        const float64 cp1y = p0.Y + s * u.y;
-        const float64 cp1z = p0.Z + s * u.z;
-        const float64 cp2x = q0.X + t * v.x;
-        const float64 cp2y = q0.Y + t * v.y;
-        const float64 cp2z = q0.Z + t * v.z;
+        const float64 cp1x = static_cast<float64>(p0.X) + s * u.x;
+        const float64 cp1y = static_cast<float64>(p0.Y) + s * u.y;
+        const float64 cp1z = static_cast<float64>(p0.Z) + s * u.z;
+        const float64 cp2x = static_cast<float64>(q0.X) + t * v.x;
+        const float64 cp2y = static_cast<float64>(q0.Y) + t * v.y;
+        const float64 cp2z = static_cast<float64>(q0.Z) + t * v.z;
         const float64 dxp = cp1x - cp2x, dyp = cp1y - cp2y, dzp = cp1z - cp2z;
         const float64 sq = dxp * dxp + dyp * dyp + dzp * dzp;
         if (sq < bestSq || (sq == bestSq && (s < bestS || (s == bestS && t < bestT))))
@@ -564,12 +592,12 @@ MathStatus TryClosestPointsSegments(Vector3 p0, Vector3 p1, Vector3 q0, Vector3 
         return MathStatus::Degenerate; // should not happen for finite input
     }
 
-    const float32 cp1x = (float32)(p0.X + bestS * u.x);
-    const float32 cp1y = (float32)(p0.Y + bestS * u.y);
-    const float32 cp1z = (float32)(p0.Z + bestS * u.z);
-    const float32 cp2x = (float32)(q0.X + bestT * v.x);
-    const float32 cp2y = (float32)(q0.Y + bestT * v.y);
-    const float32 cp2z = (float32)(q0.Z + bestT * v.z);
+    const float32 cp1x = (float32)(static_cast<float64>(p0.X) + bestS * u.x);
+    const float32 cp1y = (float32)(static_cast<float64>(p0.Y) + bestS * u.y);
+    const float32 cp1z = (float32)(static_cast<float64>(p0.Z) + bestS * u.z);
+    const float32 cp2x = (float32)(static_cast<float64>(q0.X) + bestT * v.x);
+    const float32 cp2y = (float32)(static_cast<float64>(q0.Y) + bestT * v.y);
+    const float32 cp2z = (float32)(static_cast<float64>(q0.Z) + bestT * v.z);
     const Vector3 c1{cp1x, cp1y, cp1z};
     const Vector3 c2{cp2x, cp2y, cp2z};
     if (!IsFinite(c1) || !IsFinite(c2))
@@ -623,14 +651,30 @@ MathStatus TryExtractFrustum(const Matrix4& worldToClip, FrustumMode mode, Frust
         bool required;
     };
     Cand cands[6] = {
-        {(float64)r3.X + r0.X, (float64)r3.Y + r0.Y, (float64)r3.Z + r0.Z, (float64)r3.W + r0.W, true}, // left
-        {(float64)r3.X - r0.X, (float64)r3.Y - r0.Y, (float64)r3.Z - r0.Z, (float64)r3.W - r0.W, true}, // right
-        {(float64)r3.X + r1.X, (float64)r3.Y + r1.Y, (float64)r3.Z + r1.Z, (float64)r3.W + r1.W, true}, // bottom
-        {(float64)r3.X - r1.X, (float64)r3.Y - r1.Y, (float64)r3.Z - r1.Z, (float64)r3.W - r1.W, true}, // top
-        {(float64)r3.X - r2.X,
-         (float64)r3.Y - r2.Y,
-         (float64)r3.Z - r2.Z,
-         (float64)r3.W - r2.W,
+        {(float64)r3.X + static_cast<float64>(r0.X),
+         (float64)r3.Y + static_cast<float64>(r0.Y),
+         (float64)r3.Z + static_cast<float64>(r0.Z),
+         (float64)r3.W + static_cast<float64>(r0.W),
+         true}, // left
+        {(float64)r3.X - static_cast<float64>(r0.X),
+         (float64)r3.Y - static_cast<float64>(r0.Y),
+         (float64)r3.Z - static_cast<float64>(r0.Z),
+         (float64)r3.W - static_cast<float64>(r0.W),
+         true}, // right
+        {(float64)r3.X + static_cast<float64>(r1.X),
+         (float64)r3.Y + static_cast<float64>(r1.Y),
+         (float64)r3.Z + static_cast<float64>(r1.Z),
+         (float64)r3.W + static_cast<float64>(r1.W),
+         true}, // bottom
+        {(float64)r3.X - static_cast<float64>(r1.X),
+         (float64)r3.Y - static_cast<float64>(r1.Y),
+         (float64)r3.Z - static_cast<float64>(r1.Z),
+         (float64)r3.W - static_cast<float64>(r1.W),
+         true}, // top
+        {(float64)r3.X - static_cast<float64>(r2.X),
+         (float64)r3.Y - static_cast<float64>(r2.Y),
+         (float64)r3.Z - static_cast<float64>(r2.Z),
+         (float64)r3.W - static_cast<float64>(r2.W),
          true},                                                             // near (depthUpper)
         {(float64)r2.X, (float64)r2.Y, (float64)r2.Z, (float64)r2.W, true}, // far (depthLower)
     };
@@ -708,13 +752,15 @@ TryClassifySphere(const Frustum& frustum, const Sphere& sphere, float32 margin, 
             continue;
         }
         const Plane& p = frustum.Planes[i];
-        const float64 absSum = std::fabs((float64)p.Normal.X * sphere.Center.X) +
-                               std::fabs((float64)p.Normal.Y * sphere.Center.Y) +
-                               std::fabs((float64)p.Normal.Z * sphere.Center.Z) + std::fabs((float64)p.D);
-        const float64 dist = (float64)p.Normal.X * sphere.Center.X + (float64)p.Normal.Y * sphere.Center.Y +
-                             (float64)p.Normal.Z * sphere.Center.Z + p.D;
+        const float64 absSum = std::fabs((float64)p.Normal.X * static_cast<float64>(sphere.Center.X)) +
+                               std::fabs((float64)p.Normal.Y * static_cast<float64>(sphere.Center.Y)) +
+                               std::fabs((float64)p.Normal.Z * static_cast<float64>(sphere.Center.Z)) +
+                               std::fabs((float64)p.D);
+        const float64 dist = (float64)p.Normal.X * static_cast<float64>(sphere.Center.X) +
+                             (float64)p.Normal.Y * static_cast<float64>(sphere.Center.Y) +
+                             (float64)p.Normal.Z * static_cast<float64>(sphere.Center.Z) + static_cast<float64>(p.D);
         const float64 allowance = DistanceAllowance(absSum);
-        const float64 r = (float64)sphere.Radius + margin;
+        const float64 r = (float64)sphere.Radius + static_cast<float64>(margin);
         if (dist < -r - allowance)
         {
             out = FrustumRelation::Outside;
@@ -748,12 +794,12 @@ MathStatus TryClassifyAabb(const Frustum& frustum, const Aabb3& box, float32 mar
     {
         return MathStatus::NonFiniteInput;
     }
-    const float64 cx = ((float64)box.Min.X + box.Max.X) * 0.5;
-    const float64 cy = ((float64)box.Min.Y + box.Max.Y) * 0.5;
-    const float64 cz = ((float64)box.Min.Z + box.Max.Z) * 0.5;
-    const float64 ex = ((float64)box.Max.X - box.Min.X) * 0.5;
-    const float64 ey = ((float64)box.Max.Y - box.Min.Y) * 0.5;
-    const float64 ez = ((float64)box.Max.Z - box.Min.Z) * 0.5;
+    const float64 cx = ((float64)box.Min.X + static_cast<float64>(box.Max.X)) * 0.5;
+    const float64 cy = ((float64)box.Min.Y + static_cast<float64>(box.Max.Y)) * 0.5;
+    const float64 cz = ((float64)box.Min.Z + static_cast<float64>(box.Max.Z)) * 0.5;
+    const float64 ex = ((float64)box.Max.X - static_cast<float64>(box.Min.X)) * 0.5;
+    const float64 ey = ((float64)box.Max.Y - static_cast<float64>(box.Min.Y)) * 0.5;
+    const float64 ez = ((float64)box.Max.Z - static_cast<float64>(box.Min.Z)) * 0.5;
     bool anyIntersecting = false;
     for (int i = 0; i < 6; ++i)
     {
@@ -762,18 +808,19 @@ MathStatus TryClassifyAabb(const Frustum& frustum, const Aabb3& box, float32 mar
             continue;
         }
         const Plane& p = frustum.Planes[i];
-        const float64 nx = p.Normal.X, ny = p.Normal.Y, nz = p.Normal.Z, d = p.D;
+        const float64 nx = static_cast<float64>(p.Normal.X), ny = static_cast<float64>(p.Normal.Y),
+                      nz = static_cast<float64>(p.Normal.Z), d = static_cast<float64>(p.D);
         const float64 s = nx * cx + ny * cy + nz * cz + d;                                  // center distance
         const float64 rproj = std::fabs(nx) * ex + std::fabs(ny) * ey + std::fabs(nz) * ez; // projected radius
         const float64 absSum = std::fabs(nx * cx) + std::fabs(ny * cy) + std::fabs(nz * cz) + std::fabs(d) +
                                std::fabs(nx) * ex + std::fabs(ny) * ey + std::fabs(nz) * ez;
         const float64 allowance = DistanceAllowance(absSum);
-        if (s < -rproj - margin - allowance)
+        if (s < -rproj - static_cast<float64>(margin) - allowance)
         {
             out = FrustumRelation::Outside;
             return MathStatus::Success;
         }
-        if (!(s > rproj + margin + allowance))
+        if (!(s > rproj + static_cast<float64>(margin) + allowance))
         {
             anyIntersecting = true;
         }
