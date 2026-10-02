@@ -64,6 +64,67 @@ class ProtocolError(Exception):
     """Fatal protocol framing/version/type failure; cleans up then exits 2."""
 
 
+class BuildTreeBusy(Exception):
+    """Raised when another editor instance already owns this build tree."""
+
+
+class BuildTreeLock:
+    """Cooperative, nonblocking per-build-tree exclusion held for one operation.
+
+    A single editor instance owns a build tree for the whole configure/build/run
+    operation, including runtime ownership (design section 7). A second instance
+    attempting the same tree gets Busy rather than racing configure/build/run.
+    The lock is a flock on a file inside the tree's `.cmake` directory, so it is
+    scoped to exactly one binary tree and released when the fd is closed.
+
+    This is cooperative: existing external CLI invocations do not honor it, which
+    is a documented limitation (concurrently modifying the same build tree with a
+    separate CLI build is unsupported).
+    """
+
+    def __init__(self, build_dir: Path) -> None:
+        self._build_dir = build_dir
+        self._handle = None
+
+    def acquire(self) -> None:
+        import fcntl
+
+        lock_dir = self._build_dir / ".cmake"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        handle = (lock_dir / ".ludus-editor.lock").open("a")
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            handle.close()
+            raise BuildTreeBusy(
+                "another editor instance is using this build tree; "
+                "concurrent operations on the same tree are not supported"
+            ) from exc
+        self._handle = handle
+
+    def release(self) -> None:
+        if self._handle is None:
+            return
+        import fcntl
+
+        try:
+            fcntl.flock(self._handle, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            self._handle.close()
+        except OSError:
+            pass
+        self._handle = None
+
+    def __enter__(self) -> "BuildTreeLock":
+        self.acquire()
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.release()
+
+
 # --------------------------------------------------------------------------- #
 # Encoding helpers
 # --------------------------------------------------------------------------- #
@@ -611,6 +672,12 @@ class Supervisor:
         err_decoder = IncrementalDecoder()
         stderr_bytes = 0
         open_streams = {"stdout", "stderr"}
+        # Once the leader has exited we stop waiting for stream EOF: a surviving
+        # descendant may still hold the inherited pipe open (that is exactly the
+        # "exiting leader with a surviving writer" case). We drain whatever is
+        # immediately available, then let finalize_normal clean up descendants
+        # with deadlines. This also avoids a pipe deadlock on a slow descendant.
+        leader_exited = False
         try:
             while True:
                 for key, _ in sel.select(timeout=0.1):
@@ -638,11 +705,36 @@ class Supervisor:
                         else:
                             stderr_bytes += len(data)
                             self._writer.output(stage, "stderr", err_decoder.decode(data))
-                # The command is done when both pipes are at EOF and the leader
-                # has exited; observe without reaping first.
-                if not open_streams:
+
+                # Completion is driven by the LEADER's exit, not by stream EOF.
+                if not leader_exited:
                     observed = child.wait_exit_nowait()
-                    if observed is not None:
+                    if observed is not None and (observed[0] is not None or observed[1] is not None):
+                        leader_exited = True
+                if leader_exited:
+                    # Both pipes already at EOF: nothing more will arrive. Done.
+                    if not open_streams:
+                        break
+                    # Otherwise a descendant still holds a pipe. Give one more
+                    # non-blocking drain pass, then stop waiting and let
+                    # finalize_normal terminate the surviving descendants.
+                    drained_any = False
+                    for fd, tag in ((child.stdout_fd, "stdout"), (child.stderr_fd, "stderr")):
+                        if tag not in open_streams:
+                            continue
+                        try:
+                            data = os.read(fd, CHILD_READ_CHUNK)
+                        except (BlockingIOError, InterruptedError):
+                            continue
+                        except OSError:
+                            data = b""
+                        if not data:
+                            open_streams.discard(tag)
+                            continue
+                        drained_any = True
+                        decoder = out_decoder if tag == "stdout" else err_decoder
+                        self._writer.output(stage, tag, decoder.decode(data))
+                    if not drained_any:
                         break
         finally:
             sel.close()
@@ -717,42 +809,13 @@ class Operation:
             descriptor = self._load_clean_descriptor()
             plan = build_plan(self._context, descriptor, self._project_path.parent)
 
-            # Named codemodel query before configure; the reply is read after a
-            # successful configure.
-            self._context.cmake_targets.query_codemodel(plan.build_dir, FILE_API_CLIENT)
-            self._check_cancel()
-            self._run_stage("configuring", configure_argv(plan), plan.source_dir, plan.env, "ConfigureFailed")
-
-            # Discover executable targets; verify source/build identity.
-            self._context.cmake_targets.verify_identity(plan.build_dir, plan.source_dir,
-                                                        self._context.engine, client=FILE_API_CLIENT)
-            names = self._context.cmake_targets.list_executable_targets(
-                plan.build_dir, self._context.engine, client=FILE_API_CLIENT)
-            self._writer.targets(names, descriptor.preset)
-
-            if self._operation == "configure":
-                return OperationResult("success", "configuring", "Ok", "configure complete")
-
-            # Resolve the selected executable target before building it.
-            self._resolve_executable(plan)
-            self._check_cancel()
-            self._run_stage("building", build_argv(plan), plan.source_dir, plan.env, "BuildFailed")
-
-            # CMake may regenerate during build: reread the current codemodel and
-            # re-resolve the artifact before Run.
-            self._context.cmake_targets.verify_identity(plan.build_dir, plan.source_dir,
-                                                        self._context.engine, client=FILE_API_CLIENT)
-            artifact = self._resolve_executable(plan)
-            if not (artifact.is_file() and os.access(artifact, os.X_OK)):
-                raise _StageFailed("building", "ArtifactInvalid", None,
-                                   message=f"built artifact is missing or not executable: {artifact}")
-
-            if self._operation == "build":
-                return OperationResult("success", "building", "Ok", "build complete")
-
-            # Cancellation wins if accepted before runtime spawn.
-            self._check_cancel()
-            return self._launch_runtime(plan, artifact)
+            # Acquire the cooperative per-build-tree lock for the WHOLE operation,
+            # including runtime ownership. A second editor instance on the same
+            # tree gets Busy here rather than racing configure/build/run.
+            with BuildTreeLock(plan.build_dir):
+                return self._execute_locked(descriptor, plan)
+        except BuildTreeBusy as exc:
+            return OperationResult("failed", self._stage, "Busy", str(exc))
         except Cancelled as exc:
             confirmed = exc.report.confirmed if exc.report is not None else True
             code = "Cancelled" if confirmed else "CleanupUnknown"
@@ -774,6 +837,45 @@ class Operation:
             # File API read/validation or bootstrap failure after configure:
             # a reply/identity problem, not a crash.
             return OperationResult("failed", self._stage, "ReplyInvalid", str(exc))
+
+    def _execute_locked(self, descriptor: editor_project.Descriptor, plan: Plan) -> OperationResult:
+        """Run the operation while holding the per-build-tree lock."""
+        # Named codemodel query before configure; the reply is read after a
+        # successful configure.
+        self._context.cmake_targets.query_codemodel(plan.build_dir, FILE_API_CLIENT)
+        self._check_cancel()
+        self._run_stage("configuring", configure_argv(plan), plan.source_dir, plan.env, "ConfigureFailed")
+
+        # Discover executable targets; verify source/build identity.
+        self._context.cmake_targets.verify_identity(plan.build_dir, plan.source_dir,
+                                                    self._context.engine, client=FILE_API_CLIENT)
+        names = self._context.cmake_targets.list_executable_targets(
+            plan.build_dir, self._context.engine, client=FILE_API_CLIENT)
+        self._writer.targets(names, descriptor.preset)
+
+        if self._operation == "configure":
+            return OperationResult("success", "configuring", "Ok", "configure complete")
+
+        # Resolve the selected executable target before building it.
+        self._resolve_executable(plan)
+        self._check_cancel()
+        self._run_stage("building", build_argv(plan), plan.source_dir, plan.env, "BuildFailed")
+
+        # CMake may regenerate during build: reread the current codemodel and
+        # re-resolve the artifact before Run.
+        self._context.cmake_targets.verify_identity(plan.build_dir, plan.source_dir,
+                                                    self._context.engine, client=FILE_API_CLIENT)
+        artifact = self._resolve_executable(plan)
+        if not (artifact.is_file() and os.access(artifact, os.X_OK)):
+            raise _StageFailed("building", "ArtifactInvalid", None,
+                               message=f"built artifact is missing or not executable: {artifact}")
+
+        if self._operation == "build":
+            return OperationResult("success", "building", "Ok", "build complete")
+
+        # Cancellation wins if accepted before runtime spawn.
+        self._check_cancel()
+        return self._launch_runtime(plan, artifact)
 
     def _resolve_executable(self, plan: Plan) -> Path:
         try:

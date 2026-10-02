@@ -11,6 +11,38 @@ never substitutes for interactive Wayland or installed-SDK acceptance.
 - Branch: `main`, baseline commit `3ac97af` ("docs(editor): specify first
   workspace milestone and Kiro handoff"). Working tree was clean at start
   (`git status --porcelain` empty).
+- First implementation batch committed on branch `editor-workspace-e0` as
+  `df4bf56`.
+
+## Update log
+
+**Session 2 (continuation).** The build environment is unchanged (still no
+Clang 18, no Qt 6, no display, no managed CMake/venv — re-verified), so the
+C++/Qt/native gates remain BLOCKED. Work this session closed real gaps in the
+runnable Python layer (E0.2/E0.3 acceptance), with evidence:
+
+- **Implemented the mandated cooperative per-build-tree lock** (E0.2 /
+  design §7), which was missing: `editor_tool.BuildTreeLock` takes a nonblocking
+  `flock` on `<build_dir>/.cmake/.ludus-editor.lock` held for the whole
+  operation (including runtime ownership); a second instance gets a `Busy`
+  result. Covered by `test_second_instance_on_same_build_tree_is_busy`.
+- **Fixed a real pipe-deadlock bug** in the supervisor loop: completion was
+  gated on *both* child pipes reaching EOF, so an exiting leader whose
+  descendant kept the inherited stdout pipe open hung the operation. Completion
+  is now driven by the **leader's** non-reaping exit observation; a surviving
+  descendant is then cleaned up by `finalize_normal` with deadlines. Covered by
+  `test_exiting_leader_with_surviving_writer_is_cleaned_up` (regression-guarded
+  by the exact-argv and nonzero-exit tests, which still pass).
+- **Added nine real-process acceptance tests** enumerated by the E0.3 gate but
+  previously untested (TERM-ignoring child → KILL escalation, surviving writer,
+  simultaneous stdout/stderr, failed executable spawn, repeated Stop, build
+  success racing Stop, duplicate/stale credit idempotence, unrelated process
+  never signaled, Busy on a locked tree).
+- **Broadened the acceptance interpreter matrix**: the editor + RAD suites pass
+  under the project-minimum Python 3.10.20 and 3.12.13, not only system 3.9.
+
+No specification file was rewritten; no standard was weakened; no dependency was
+auto-installed; nothing was pushed.
 
 ## Build environment reality (material deviation from the design baseline)
 
@@ -68,10 +100,10 @@ Commands were run from the repository root unless noted.
 
 - **Python tooling test suite** (system Python 3.9.25):
   `python3 -m unittest discover -s scripts/python -p 'test_*.py'`
-  → `Ran 65 tests ... OK (skipped=13)`. The 13 skips are the pre-existing
+  → `Ran 75 tests ... OK (skipped=13)`. The 13 skips are the pre-existing
   `test_web_package` tests that require Node; they are unrelated to the editor.
-  The baseline before this change was 40 tests; the editor adds 25 and the RAD
-  suite remains 22, with **no regressions**.
+  The pre-editor baseline was 40 tests; the editor adds 35 (`test_editor_tool`)
+  and the RAD suite remains 22, with **no regressions**.
 - **RAD behavior preserved after File API extraction**:
   `python3 -m unittest test_rad_debugger` → `Ran 22 tests ... OK`. RAD now
   delegates its codemodel query/resolution to `cmake_targets.py` while keeping
@@ -84,17 +116,33 @@ Commands were run from the repository root unless noted.
   custom artifact paths, library/ambiguous/missing rejection, wrong codemodel
   version, multi-config rejection, source/build identity mismatch, reference
   traversal rejection, oversized-file bound.
-- **Real-process / protocol behavior** (`RealProcessTests`, 13 tests, real OS
+- **Real-process / protocol behavior** (`RealProcessTests`, 22 tests, real OS
   pipes and real child processes — not mocked Popen):
   - configure discovers targets and succeeds; digest mismatch → `Conflict`;
+    a malformed/wrong-version File API reply → `ReplyInvalid`;
   - build_run preserves the **exact** argument list and cwd (empty, `a b`,
     `日本語`, `$(echo hi)`, `"quoted"`, `--flag`) observed through a real child;
   - a failed build launches **no** runtime even with a stale successful binary
     present (`BuildFailed`, no `runtime_started`);
   - cancel cleans up an **ordinary grandchild** (verified the grandchild PID is
     dead after cancel), `cleanup_confirmed=true`, exit 130;
+  - a **SIGTERM-ignoring** runtime is escalated to SIGKILL within the deadline
+    and cleanup is still confirmed (PID dead afterward);
+  - an **exiting leader with a surviving writer** (grandchild holding the
+    inherited stdout pipe) completes only after the descendant is cleaned up —
+    this test also drove a real bug fix (see below);
+  - **simultaneous stdout and stderr** are both delivered;
+  - a **failed executable spawn** (non-executable artifact) reports
+    `ArtifactInvalid`/`SpawnFailed` and never starts a runtime;
+  - **repeated Stop** is idempotent (exactly one terminal result);
+  - a **build success racing Stop** does not launch (stop latched during a slow
+    configure prevents the later spawn);
   - cancel accepted before spawn prevents the launch;
   - stdin EOF (parent loss) cancels;
+  - **duplicate/stale credit** acknowledgements are idempotent (not errors);
+  - an **unrelated process** started outside the owned group is never signaled
+    by cleanup (it runs to completion);
+  - a **second editor instance** holding the per-build-tree lock forces `Busy`;
   - nonzero runtime exit → `RuntimeFailed` with the exit code; a runtime signal
     → `RuntimeSignaled` with the signal number;
   - no-newline (300 KiB) output stays bounded per frame; invalid UTF-8 output is
@@ -102,8 +150,9 @@ Commands were run from the repository root unless noted.
     offset are `ProtocolError` (exit 2).
   The suite also runs clean under `-W error::ResourceWarning` (no fd/process
   leaks).
-- **Python compile** of all `scripts/python/*.py` (`py_compile`) and import under
-  the managed-equivalent Python 3.10.20 both succeed.
+- **Python compile** of all `scripts/python/*.py` (`py_compile`) and the full
+  editor + RAD suite pass under the managed-equivalent **Python 3.10.20** (the
+  project minimum) and **3.12.13** (`57 tests ... OK` each), not only system 3.9.
 
 ### BLOCKED (environment-limited; remain incomplete)
 
@@ -139,6 +188,12 @@ exist on this host. They are **not** claimed as passing.
   process groups, `waitid(WNOWAIT)` non-reaping observation, TERM→KILL deadlines,
   and `/proc`-based descendant inspection — no worker threads, no
   `communicate()` full buffers, no `startDetached`, no shell concatenation.
+  Completion is driven by the leader's exit (not stream EOF), so a surviving
+  descendant holding an inherited pipe cannot deadlock the operation.
+- **Cooperative per-build-tree exclusion**: a nonblocking `flock` on
+  `<build_dir>/.cmake/.ludus-editor.lock` is held for the whole operation; a
+  concurrent instance on the same tree gets `Busy`. It is cooperative by design
+  (external CLI builds do not honor it; documented as unsupported).
 - **Bounded protocol**: fixed 256 KiB output-credit window, 1 MiB aggregate
   control cap with a 4 KiB terminal-result reserve, 256 KiB line cap, 2 MiB
   framing backlog cap, 1 MiB retained log with visible truncation markers.
@@ -157,7 +212,7 @@ exist on this host. They are **not** claimed as passing.
 | E06/E07 (configure/File API/build/no-stale-launch) | `cmake_targets.py` + adapter; `FileApiTests` + `RealProcessTests` PASS | PASS (real processes) |
 | E08 (exact argv/cwd, no shell) | `RealProcessTests.test_build_run_preserves_exact_arguments_and_cwd` PASS | PASS |
 | E09 (one operation, stale/reentrant) | `workspace_tests.cpp` + `controller_tests.cpp` authored; transition logic | **C++ run BLOCKED**; logic verified by review and by adapter tests |
-| E10 (async, Stop, deadlines, EOF, CleanupUnknown) | `RealProcessTests` cancel/EOF/grandchild PASS | PASS (adapter); **native Close BLOCKED** |
+| E10 (async, Stop, deadlines, EOF, CleanupUnknown) | `RealProcessTests` cancel/EOF/grandchild/TERM-ignoring/surviving-writer/repeated-Stop/unrelated-process/Busy PASS | PASS (adapter); **native Close BLOCKED** |
 | E11 (bounded output) | `log_buffer_tests.cpp` authored; `RealProcessTests` no-newline/invalid-UTF-8 PASS | PASS (adapter); **C++ log test run BLOCKED** |
 | E12 (Copy Job Details, no telemetry) | `controller_tests.cpp` authored | **C++ run BLOCKED**; implemented in `controller.cpp` |
 | E13 (engine + external SDK samples) | `examples/*` authored | **install-sdk consumer run BLOCKED** |

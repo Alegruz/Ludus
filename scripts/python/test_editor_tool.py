@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sys
 import tempfile
 import threading
 import time
@@ -234,7 +235,12 @@ class ProtocolClient:
             os.close(self._out_write)
 
     def send(self, obj: dict) -> None:
-        os.write(self._in_write, (json.dumps(obj) + "\n").encode("utf-8"))
+        try:
+            os.write(self._in_write, (json.dumps(obj) + "\n").encode("utf-8"))
+        except (BrokenPipeError, OSError):
+            # The adapter may have already finished and closed its stdin read
+            # end; a late control write racing a fast operation is harmless.
+            pass
 
     def close_stdin(self) -> None:
         os.close(self._in_write)
@@ -330,7 +336,9 @@ elif "--build" in args:
     os.makedirs(os.path.dirname(artifact), exist_ok=True)
     import shutil
     shutil.copy(os.environ["FAKE_RUNTIME"], artifact)
-    os.chmod(artifact, 0o755)
+    # build_nonexec produces a non-executable artifact so the pre-spawn
+    # validation (or the spawn itself) fails; otherwise mark it runnable.
+    os.chmod(artifact, 0o644 if control == "build_nonexec" else 0o755)
     sys.exit(0)
 sys.exit(0)
 '''
@@ -618,6 +626,193 @@ class RealProcessTests(unittest.TestCase):
         events = client.events()
         self.assertEqual(events[-1]["code"], "ProtocolError")
         self.assertEqual(client.exit_code, 2)
+
+    # --- additional E0.3 real-process acceptance scenarios ----------------- #
+    def test_term_ignoring_child_is_force_killed_and_confirmed(self) -> None:
+        # The runtime installs a SIGTERM handler that ignores it, so cancellation
+        # must escalate to SIGKILL within the deadline and still confirm cleanup.
+        pidfile = self.root / "term_ignore.pid"
+        ready = self.root / "ready.flag"
+        digest = self.write_project()
+        runtime = self.make_runtime(
+            "import os, signal, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+            f"open({str(ready)!r}, 'w').write('up')\n"
+            "while True:\n    time.sleep(0.1)\n"
+        )
+        client = self.client(self.context(runtime))
+        client.send(self.request("build_run", digest))
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and not (pidfile.exists() and ready.exists()):
+            time.sleep(0.02)
+        self.assertTrue(pidfile.exists(), "term-ignoring runtime did not start")
+        child_pid = int(pidfile.read_text())
+        client.send({"protocol": 1, "job": "0000000000000001", "type": "cancel"})
+        events = client.events()
+        result = events[-1]
+        self.assertEqual(result["outcome"], "cancelled")
+        self.assertTrue(result["cleanup_confirmed"])  # KILL escalation confirmed
+        self.assertEqual(client.exit_code, 130)
+        self._assert_dead_within(child_pid, 6.0)
+
+    def test_exiting_leader_with_surviving_writer_is_cleaned_up(self) -> None:
+        # The leader spawns a grandchild that keeps a pipe open, then the leader
+        # exits. Normal finalize must still clean up the surviving descendant.
+        gpidfile = self.root / "writer.pid"
+        ready = self.root / "ready.flag"
+        digest = self.write_project()
+        writer = self.root / "writer.py"
+        writer.write_text(
+            "import os, time\n"
+            f"open({str(gpidfile)!r}, 'w').write(str(os.getpid()))\n"
+            # Keep stdout open (inherited) and live well past the leader's exit.
+            "time.sleep(120)\n"
+        )
+        runtime = self.make_runtime(
+            "import subprocess, sys, time\n"
+            f"subprocess.Popen([sys.executable, {str(writer)!r}])\n"
+            f"open({str(ready)!r}, 'w').write('up')\n"
+            # Leader exits quickly while the grandchild writer survives.
+            "time.sleep(0.3)\n"
+            "sys.exit(0)\n"
+        )
+        client = self.client(self.context(runtime))
+        client.send(self.request("build_run", digest))
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and not gpidfile.exists():
+            time.sleep(0.02)
+        self.assertTrue(gpidfile.exists(), "surviving writer did not start")
+        writer_pid = int(gpidfile.read_text())
+        events = client.events()
+        result = events[-1]
+        # The run completes (leader exited 0) only after the descendant is gone.
+        self.assertTrue(result["cleanup_confirmed"])
+        self._assert_dead_within(writer_pid, 6.0)
+
+    def test_simultaneous_stdout_and_stderr_are_both_delivered(self) -> None:
+        digest = self.write_project()
+        runtime = self.make_runtime(
+            "import sys\n"
+            "sys.stdout.write('to-out\\n'); sys.stdout.flush()\n"
+            "sys.stderr.write('to-err\\n'); sys.stderr.flush()\n"
+            "sys.exit(0)\n"
+        )
+        client = self.client(self.context(runtime))
+        client.send(self.request("build_run", digest))
+        events = client.events()
+        streams = {e.get("stream") for e in events if e.get("type") == "output"}
+        self.assertIn("stdout", streams)
+        self.assertIn("stderr", streams)
+        self.assertEqual(events[-1]["outcome"], "success")
+
+    def test_failed_executable_spawn_reports_spawn_failed(self) -> None:
+        # Build an artifact without the execute bit so the pre-spawn validation
+        # (or the spawn itself) fails and no runtime starts.
+        digest = self.write_project()
+        runtime = self.make_runtime("import sys; sys.exit(0)\n")
+        client = self.client(self.context(runtime, control="build_nonexec"))
+        client.send(self.request("build_run", digest))
+        events = client.events()
+        result = events[-1]
+        self.assertIn(result["code"], ("ArtifactInvalid", "SpawnFailed"))
+        self.assertNotIn("runtime_started", [e.get("type") for e in events])
+
+    def test_repeated_stop_is_idempotent(self) -> None:
+        ready = self.root / "ready.flag"
+        digest = self.write_project()
+        runtime = self.make_runtime(
+            f"import time;open({str(ready)!r},'w').write('x');time.sleep(120)\n")
+        client = self.client(self.context(runtime))
+        client.send(self.request("build_run", digest))
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and not ready.exists():
+            time.sleep(0.02)
+        self.assertTrue(ready.exists())
+        # Multiple cancels must not error or produce a second terminal result.
+        for _ in range(3):
+            client.send({"protocol": 1, "job": "0000000000000001", "type": "cancel"})
+        events = client.events()
+        results = [e for e in events if e.get("type") == "result"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["outcome"], "cancelled")
+
+    def test_build_success_racing_stop_does_not_launch(self) -> None:
+        # Cancel is latched during a slow configure; the subsequent build success
+        # must not launch the runtime (stop wins before spawn).
+        configuring = self.root / "configuring.flag"
+        launched = self.root / "launched.flag"
+        digest = self.write_project()
+        runtime = self.make_runtime(f"open({str(launched)!r},'w').write('x')\n")
+        client = self.client(self.context(runtime, control="configure_slow", configure_ready=configuring))
+        client.send(self.request("build_run", digest))
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and not configuring.exists():
+            time.sleep(0.02)
+        self.assertTrue(configuring.exists())
+        client.send({"protocol": 1, "job": "0000000000000001", "type": "cancel"})
+        events = client.events()
+        self.assertEqual(events[-1]["outcome"], "cancelled")
+        self.assertFalse(launched.exists(), "a late build success must not launch after Stop")
+
+    def test_duplicate_credit_is_idempotent(self) -> None:
+        # A credit acknowledging an already-acknowledged boundary is idempotent,
+        # not a protocol error. 0 is always a valid (initial) boundary.
+        digest = self.write_project()
+        runtime = self.make_runtime("import sys;sys.exit(0)\n")
+        client = self.client(self.context(runtime))
+        client.send(self.request("build_run", digest))
+        client.send({"protocol": 1, "job": "0000000000000001", "type": "credit",
+                     "through": "0000000000000000"})
+        client.send({"protocol": 1, "job": "0000000000000001", "type": "credit",
+                     "through": "0000000000000000"})
+        events = client.events()
+        self.assertEqual(events[-1]["outcome"], "success")
+        self.assertEqual(client.exit_code, 0)
+
+    def test_unrelated_process_is_never_signaled(self) -> None:
+        # A process started OUTSIDE the adapter's owned group must survive a full
+        # cancel; the adapter only signals its own start_new_session group.
+        import subprocess as sp
+
+        marker = self.root / "bystander_done.flag"
+        bystander = sp.Popen(
+            [sys.executable, "-c",
+             f"import time;time.sleep(2.5);open({str(marker)!r},'w').write('alive')"])
+        self.addCleanup(lambda: (bystander.poll() is None and bystander.kill()))
+        ready = self.root / "ready.flag"
+        digest = self.write_project()
+        runtime = self.make_runtime(
+            f"import time;open({str(ready)!r},'w').write('x');time.sleep(120)\n")
+        client = self.client(self.context(runtime))
+        client.send(self.request("build_run", digest))
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and not ready.exists():
+            time.sleep(0.02)
+        self.assertTrue(ready.exists())
+        client.send({"protocol": 1, "job": "0000000000000001", "type": "cancel"})
+        client.events()
+        # The bystander must run to completion and write its marker.
+        self.assertEqual(bystander.wait(timeout=10), 0)
+        self.assertTrue(marker.exists(), "an unrelated process was signaled by cleanup")
+
+    def test_second_instance_on_same_build_tree_is_busy(self) -> None:
+        # A separate editor instance holding the per-build-tree lock forces Busy.
+        import fcntl
+
+        digest = self.write_project()
+        runtime = self.make_runtime("import sys;sys.exit(0)\n")
+        lock_dir = self.build / ".cmake"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        holder = (lock_dir / ".ludus-editor.lock").open("a")
+        self.addCleanup(holder.close)
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        client = self.client(self.context(runtime))
+        client.send(self.request("build_run", digest))
+        events = client.events()
+        result = events[-1]
+        self.assertEqual(result["code"], "Busy")
+        self.assertEqual(client.exit_code, 1)
 
     # --- helpers ----------------------------------------------------------- #
     @staticmethod

@@ -142,6 +142,13 @@ confirmed, the editor enters **CleanupUnknown**: no new operation and no
 automatic close until explicit operator recovery (restart), with the known
 job/PID details available through Copy Job Details.
 
+An operation holds a cooperative, nonblocking lock on its build tree for the
+whole configure/build/run (including runtime ownership). A second editor
+instance targeting the same build tree gets a `Busy` result rather than racing
+it. This lock is cooperative: an independent CLI build against the same tree
+does not honor it, which is why concurrently modifying one build tree from two
+tools is unsupported (see Known limitations).
+
 ## Copy Job Details
 
 Produces a bounded, telemetry-free text record: descriptor digest,
