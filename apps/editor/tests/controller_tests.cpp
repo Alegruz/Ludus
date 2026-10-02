@@ -41,10 +41,9 @@ QString WriteDescriptor(QTemporaryDir& dir, const QByteArray& bytes)
 
 QByteArray ValidDescriptor()
 {
-    return QByteArrayLiteral(
-        "{\n  \"version\": 1,\n  \"name\": \"demo\",\n  \"provider\": \"cmake\",\n"
-        "  \"source_dir\": \".\",\n  \"preset\": \"linux-clang-debug\",\n  \"target\": \"app\",\n"
-        "  \"run\": {\n    \"cwd\": \".\",\n    \"args\": []\n  }\n}\n");
+    return QByteArrayLiteral("{\n  \"version\": 1,\n  \"name\": \"demo\",\n  \"provider\": \"cmake\",\n"
+                             "  \"source_dir\": \".\",\n  \"preset\": \"linux-clang-debug\",\n  \"target\": \"app\",\n"
+                             "  \"run\": {\n    \"cwd\": \".\",\n    \"args\": []\n  }\n}\n");
 }
 } // namespace
 
@@ -81,8 +80,7 @@ TEST_CASE("A failed open leaves the previous workspace intact", "[editor][contro
     CHECK(controller.State().Result.Kind == Outcome::Failed);
 }
 
-TEST_CASE("Editing produces a dirty draft; Save makes it clean and survives reload",
-          "[editor][controller]")
+TEST_CASE("Editing produces a dirty draft; Save makes it clean and survives reload", "[editor][controller]")
 {
     QTemporaryDir dir;
     const QString path = WriteDescriptor(dir, ValidDescriptor());
@@ -116,7 +114,7 @@ TEST_CASE("A failed Save keeps the dirty draft", "[editor][controller]")
     edited.Name = QStringLiteral("willfail");
     controller.EditDraft(edited);
     controller.Save();
-    CHECK(controller.State().Dirty());           // draft retained
+    CHECK(controller.State().Dirty()); // draft retained
     CHECK(controller.State().Result.Kind == Outcome::Failed);
 }
 

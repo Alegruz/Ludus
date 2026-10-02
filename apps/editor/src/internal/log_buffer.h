@@ -28,8 +28,8 @@ class LogBuffer
 {
 public:
     // Conservative initial bounds (design section 10); measured in E0.5.
-    static constexpr usize MaxBytes = 1u * 1024u * 1024u;   // <= 1 MiB UTF-8
-    static constexpr usize MaxBlocks = 5000u;               // <= 5000 text blocks
+    static constexpr usize MaxBytes = 1u * 1024u * 1024u; // <= 1 MiB UTF-8
+    static constexpr usize MaxBlocks = 5000u;             // <= 5000 text blocks
 
     LogBuffer() = default;
 
@@ -44,15 +44,27 @@ public:
     // The retained text as a list of blocks (oldest first), each tagged with its
     // stream only implicitly by content; callers that need per-stream separation
     // can keep two buffers. Here output is interleaved in arrival order.
-    [[nodiscard]] const QStringList& Blocks() const noexcept { return Blocks_; }
+    [[nodiscard]] const QStringList& Blocks() const noexcept
+    {
+        return Blocks_;
+    }
 
     // Combined retained text, with a leading omission marker when output was
     // dropped so truncation is always visible in what the user copies/reads.
     [[nodiscard]] QString Text() const;
 
-    [[nodiscard]] uint64 DroppedBlocks() const noexcept { return DroppedBlocks_; }
-    [[nodiscard]] uint64 DroppedBytes() const noexcept { return DroppedBytes_; }
-    [[nodiscard]] usize RetainedBytes() const noexcept { return RetainedBytes_; }
+    [[nodiscard]] uint64 DroppedBlocks() const noexcept
+    {
+        return DroppedBlocks_;
+    }
+    [[nodiscard]] uint64 DroppedBytes() const noexcept
+    {
+        return DroppedBytes_;
+    }
+    [[nodiscard]] usize RetainedBytes() const noexcept
+    {
+        return RetainedBytes_;
+    }
 
 private:
     void EnforceBounds();

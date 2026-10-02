@@ -47,9 +47,12 @@ const char* ToolOperationName(ToolOperation op) noexcept
 {
     switch (op)
     {
-    case ToolOperation::Configure: return "configure";
-    case ToolOperation::Build: return "build";
-    case ToolOperation::BuildRun: return "build_run";
+        case ToolOperation::Configure:
+            return "configure";
+        case ToolOperation::Build:
+            return "build";
+        case ToolOperation::BuildRun:
+            return "build_run";
     }
     return "configure";
 }
@@ -101,8 +104,7 @@ bool ToolProcess::Start(const ToolLaunch& launch)
     // Launch the adapter with --stdio using the program/argument-list form so no
     // shell is involved and argument boundaries are preserved end to end.
     QStringList args;
-    args << launch.AdapterPath << QStringLiteral("--stdio")
-         << QStringLiteral("--tooling-root") << launch.ToolingRoot;
+    args << launch.AdapterPath << QStringLiteral("--stdio") << QStringLiteral("--tooling-root") << launch.ToolingRoot;
     Process_.setProgram(launch.PythonPath);
     Process_.setArguments(args);
     ReadyTimer_.start();
@@ -321,8 +323,7 @@ bool ToolProcess::DispatchFrame(const QByteArray& line)
         event.Text = object.value(QStringLiteral("text")).toString();
         // Each output frame consumes its complete encoded byte count including
         // the newline; end_offset is the cumulative encoded-output total.
-        const std::optional<uint64> endOffset =
-            DecodeHex16(object.value(QStringLiteral("end_offset")).toString());
+        const std::optional<uint64> endOffset = DecodeHex16(object.value(QStringLiteral("end_offset")).toString());
         if (!endOffset.has_value() || endOffset.value() < OutputBytesSeen_)
         {
             FailProtocol(QStringLiteral("non-monotonic output end_offset"));

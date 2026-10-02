@@ -42,9 +42,7 @@ std::vector<ProtocolEvent> RunAdapter(const QString& adapterBody, ToolOperation 
 
     ToolProcess tool;
     std::vector<ProtocolEvent> events;
-    QObject::connect(&tool, &ToolProcess::Event, &tool, [&events](const ProtocolEvent& e) {
-        events.push_back(e);
-    });
+    QObject::connect(&tool, &ToolProcess::Event, &tool, [&events](const ProtocolEvent& e) { events.push_back(e); });
 
     ToolLaunch launch;
     launch.PythonPath = QStringLiteral("python3");
@@ -104,12 +102,12 @@ TEST_CASE("Ready then a well-formed result is dispatched in order", "[editor][to
 
 TEST_CASE("A job mismatch is a protocol error", "[editor][tool]")
 {
-    const QString body = QStringLiteral(
-        "import sys, json\n"
-        "sys.stdout.write(json.dumps({'protocol':1,'type':'ready'})+'\\n'); sys.stdout.flush()\n"
-        "sys.stdin.readline()\n"
-        "sys.stdout.write(json.dumps({'protocol':1,'job':'000000000000ffff','type':'phase',"
-        "'stage':'configuring'})+'\\n'); sys.stdout.flush()\n");
+    const QString body =
+        QStringLiteral("import sys, json\n"
+                       "sys.stdout.write(json.dumps({'protocol':1,'type':'ready'})+'\\n'); sys.stdout.flush()\n"
+                       "sys.stdin.readline()\n"
+                       "sys.stdout.write(json.dumps({'protocol':1,'job':'000000000000ffff','type':'phase',"
+                       "'stage':'configuring'})+'\\n'); sys.stdout.flush()\n");
     const auto events = RunAdapter(body);
     bool sawError = false;
     for (const ProtocolEvent& e : events)
@@ -143,11 +141,11 @@ TEST_CASE("Unknown event type is rejected in version 1", "[editor][tool]")
 
 TEST_CASE("Exit without a terminal result is never success", "[editor][tool]")
 {
-    const QString body = QStringLiteral(
-        "import sys, json\n"
-        "sys.stdout.write(json.dumps({'protocol':1,'type':'ready'})+'\\n'); sys.stdout.flush()\n"
-        "sys.stdin.readline()\n"
-        "sys.exit(0)\n");
+    const QString body =
+        QStringLiteral("import sys, json\n"
+                       "sys.stdout.write(json.dumps({'protocol':1,'type':'ready'})+'\\n'); sys.stdout.flush()\n"
+                       "sys.stdin.readline()\n"
+                       "sys.exit(0)\n");
     const auto events = RunAdapter(body);
     bool sawCleanupUnknown = false;
     for (const ProtocolEvent& e : events)
@@ -163,15 +161,15 @@ TEST_CASE("Exit without a terminal result is never success", "[editor][tool]")
 
 TEST_CASE("Output frames carry text and a monotonic end_offset", "[editor][tool]")
 {
-    const QString body = QStringLiteral(
-        "import sys, json\n"
-        "sys.stdout.write(json.dumps({'protocol':1,'type':'ready'})+'\\n'); sys.stdout.flush()\n"
-        "job = json.loads(sys.stdin.readline())['job']\n"
-        "sys.stdout.write(json.dumps({'protocol':1,'job':job,'type':'output','stage':'building',"
-        "'stream':'stdout','text':'hello','end_offset':'0000000000000010'})+'\\n')\n"
-        "sys.stdout.write(json.dumps({'protocol':1,'job':job,'type':'result','outcome':'success',"
-        "'stage':'building','code':'Ok','message':'','cleanup_confirmed':True,'exit_code':0,"
-        "'signal':None})+'\\n'); sys.stdout.flush()\n");
+    const QString body =
+        QStringLiteral("import sys, json\n"
+                       "sys.stdout.write(json.dumps({'protocol':1,'type':'ready'})+'\\n'); sys.stdout.flush()\n"
+                       "job = json.loads(sys.stdin.readline())['job']\n"
+                       "sys.stdout.write(json.dumps({'protocol':1,'job':job,'type':'output','stage':'building',"
+                       "'stream':'stdout','text':'hello','end_offset':'0000000000000010'})+'\\n')\n"
+                       "sys.stdout.write(json.dumps({'protocol':1,'job':job,'type':'result','outcome':'success',"
+                       "'stage':'building','code':'Ok','message':'','cleanup_confirmed':True,'exit_code':0,"
+                       "'signal':None})+'\\n'); sys.stdout.flush()\n");
     const auto events = RunAdapter(body, ToolOperation::Build);
     bool sawOutput = false;
     for (const ProtocolEvent& e : events)

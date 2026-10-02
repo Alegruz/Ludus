@@ -60,8 +60,7 @@ TEST_CASE("Clean saved document permits build and run", "[editor][workspace]")
     CHECK(caps.CanBuildRun);
 }
 
-TEST_CASE("Exactly one owned operation; duplicate starts cannot create a second job",
-          "[editor][workspace]")
+TEST_CASE("Exactly one owned operation; duplicate starts cannot create a second job", "[editor][workspace]")
 {
     WorkspaceState state = LoadedState();
     REQUIRE(CanStartJob(state, ActionKind::Configure));

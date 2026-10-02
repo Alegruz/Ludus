@@ -100,7 +100,9 @@ TEST_CASE("Short write preserves the previous destination and reports failure", 
 
     // Now inject a short write for a different draft; destination must be intact.
     ProjectStore::FaultHooks hooks;
-    hooks.TruncateWriteTo = [](const QByteArray& bytes) { return static_cast<ludus::foundation::isize>(bytes.size() / 2); };
+    hooks.TruncateWriteTo = [](const QByteArray& bytes) {
+        return static_cast<ludus::foundation::isize>(bytes.size() / 2);
+    };
     store.SetFaultHooks(hooks);
     ProjectDescriptor second = first;
     second.Name = QStringLiteral("changed");

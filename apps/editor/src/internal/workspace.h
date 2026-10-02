@@ -62,7 +62,7 @@ struct LastResult
     Outcome Kind = Outcome::None;
     Phase Stage = Phase::Idle; // stage reached when the result was produced
     ResultCode Code = ResultCode::Ok;
-    QString Message;           // bounded, user-readable
+    QString Message; // bounded, user-readable
     std::optional<foundation::int32> ExitCode;
     std::optional<foundation::int32> Signal;
     bool CleanupConfirmed = true;
@@ -88,13 +88,13 @@ enum class ActionKind : foundation::uint8
 // Typed events delivered back from tooling/time, tagged with the owning job id.
 enum class EventKind : foundation::uint8
 {
-    JobStarted,       // adapter ready + request sent
-    PhaseChanged,     // phase: configuring/building/launching/running/stopping
+    JobStarted,   // adapter ready + request sent
+    PhaseChanged, // phase: configuring/building/launching/running/stopping
     TargetsDiscovered,
-    RuntimeStarted,   // the only event that may confirm Launching -> Running
-    JobResult,        // terminal result (after cleanup)
+    RuntimeStarted, // the only event that may confirm Launching -> Running
+    JobResult,      // terminal result (after cleanup)
     ProtocolError,
-    SupervisorLost,   // bridge died without a terminal result
+    SupervisorLost, // bridge died without a terminal result
 };
 
 // Immutable identity for the whole workspace state. The transition function
@@ -103,15 +103,15 @@ enum class EventKind : foundation::uint8
 struct WorkspaceState
 {
     DocumentState Document = DocumentState::NoProject;
-    QString DescriptorPath;        // absolute path of the open descriptor
-    QString SavedDigest;           // digest of the saved document on disk
-    ProjectDescriptor Saved;       // last successfully saved settings
-    ProjectDescriptor Draft;       // in-progress edits
+    QString DescriptorPath;  // absolute path of the open descriptor
+    QString SavedDigest;     // digest of the saved document on disk
+    ProjectDescriptor Saved; // last successfully saved settings
+    ProjectDescriptor Draft; // in-progress edits
     bool HasSaved = false;
 
-    uint64 ProjectEpoch = 0;       // bumped on every successful Open/Reload
-    uint64 ActiveJob = 0;          // 0 when no job is owned
-    uint64 NextJob = 1;            // monotonic; never wraps silently
+    uint64 ProjectEpoch = 0; // bumped on every successful Open/Reload
+    uint64 ActiveJob = 0;    // 0 when no job is owned
+    uint64 NextJob = 1;      // monotonic; never wraps silently
     Phase OperationPhase = Phase::Idle;
     bool StopLatched = false;      // Stop accepted; wins before runtime spawn
     QStringList DiscoveredTargets; // executable targets from last Configure
@@ -119,7 +119,10 @@ struct WorkspaceState
     LastResult Result;
 
     // Dirty is the semantic inequality of saved and draft (design section 4).
-    [[nodiscard]] bool Dirty() const noexcept { return !HasSaved || !(Saved == Draft); }
+    [[nodiscard]] bool Dirty() const noexcept
+    {
+        return !HasSaved || !(Saved == Draft);
+    }
 
     // True while an operation is owned (not Idle/CleanupUnknown is "busy").
     [[nodiscard]] bool Busy() const noexcept
@@ -159,10 +162,8 @@ struct Capabilities
 // Apply a phase event tagged with jobId. Returns the next state. A phase/job
 // mismatch, a late Running after Stop, or a disallowed transition leaves the
 // state unchanged (ignored stale event). Only RuntimeStarted confirms Running.
-[[nodiscard]] WorkspaceState ApplyPhaseEvent(const WorkspaceState& state,
-                                             uint64 jobId,
-                                             Phase requested,
-                                             bool runtimeConfirmed);
+[[nodiscard]] WorkspaceState
+ApplyPhaseEvent(const WorkspaceState& state, uint64 jobId, Phase requested, bool runtimeConfirmed);
 
 // Latch a Stop for the current job. Idempotent. Once latched the state never
 // transitions back to Running or launches another child.
@@ -172,9 +173,7 @@ struct Capabilities
 // a second terminal result for the same job, is ignored. Clears ActiveJob and
 // moves OperationPhase to Idle (or CleanupUnknown when cleanup is unconfirmed),
 // while preserving the LastResult (an error is a result, not a busy state).
-[[nodiscard]] WorkspaceState ApplyResult(const WorkspaceState& state,
-                                         uint64 jobId,
-                                         const LastResult& result);
+[[nodiscard]] WorkspaceState ApplyResult(const WorkspaceState& state, uint64 jobId, const LastResult& result);
 
 // Begin a job: assign the next job id, advance to Starting, clear StopLatched,
 // and reset the live result. Caller must have checked CanStartJob first.

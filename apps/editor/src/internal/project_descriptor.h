@@ -64,13 +64,13 @@ enum class ResultCode : foundation::uint8
 // never relative to the editor launch directory.
 struct ProjectDescriptor
 {
-    QString Name;                   // nonempty, <= 128 UTF-8 bytes
+    QString Name; // nonempty, <= 128 UTF-8 bytes
     Provider ProviderKind = Provider::Ludus;
-    QString SourceDir;              // relative, <= 4096 UTF-8 bytes
-    QString Preset;                 // linux-clang-debug | linux-clang-development
-    QString Target;                 // ASCII [A-Za-z0-9_][A-Za-z0-9_.+-]*, <= 256 bytes
-    QString RunCwd;                 // relative, <= 4096 UTF-8 bytes
-    QStringList RunArgs;            // <= 64 items, each <= 4096 bytes, total <= 32 KiB; empties valid
+    QString SourceDir;   // relative, <= 4096 UTF-8 bytes
+    QString Preset;      // linux-clang-debug | linux-clang-development
+    QString Target;      // ASCII [A-Za-z0-9_][A-Za-z0-9_.+-]*, <= 256 bytes
+    QString RunCwd;      // relative, <= 4096 UTF-8 bytes
+    QStringList RunArgs; // <= 64 items, each <= 4096 bytes, total <= 32 KiB; empties valid
 
     [[nodiscard]] friend bool operator==(const ProjectDescriptor& lhs, const ProjectDescriptor& rhs) = default;
 };
@@ -84,7 +84,10 @@ struct ParseOutcome
     ProjectDescriptor Descriptor;
     QString Message;
 
-    [[nodiscard]] bool Ok() const noexcept { return Code == ResultCode::Ok; }
+    [[nodiscard]] bool Ok() const noexcept
+    {
+        return Code == ResultCode::Ok;
+    }
 };
 
 // Documented size limits (design section 4). Centralized so C++ and Python

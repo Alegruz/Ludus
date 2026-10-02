@@ -14,11 +14,16 @@ LUDUS_DEFINE_LOG_CATEGORY(LOG_EDITOR_CTRL, "Editor");
 
 Phase PhaseFromStage(const QString& stage)
 {
-    if (stage == QStringLiteral("configuring")) return Phase::Configuring;
-    if (stage == QStringLiteral("building")) return Phase::Building;
-    if (stage == QStringLiteral("launching")) return Phase::Launching;
-    if (stage == QStringLiteral("running")) return Phase::Running;
-    if (stage == QStringLiteral("stopping")) return Phase::Stopping;
+    if (stage == QStringLiteral("configuring"))
+        return Phase::Configuring;
+    if (stage == QStringLiteral("building"))
+        return Phase::Building;
+    if (stage == QStringLiteral("launching"))
+        return Phase::Launching;
+    if (stage == QStringLiteral("running"))
+        return Phase::Running;
+    if (stage == QStringLiteral("stopping"))
+        return Phase::Stopping;
     return Phase::Starting;
 }
 
@@ -26,14 +31,22 @@ const char* PhaseName(Phase phase)
 {
     switch (phase)
     {
-    case Phase::Idle: return "Idle";
-    case Phase::Starting: return "Starting";
-    case Phase::Configuring: return "Configuring";
-    case Phase::Building: return "Building";
-    case Phase::Launching: return "Launching";
-    case Phase::Running: return "Running";
-    case Phase::Stopping: return "Stopping";
-    case Phase::CleanupUnknown: return "CleanupUnknown";
+        case Phase::Idle:
+            return "Idle";
+        case Phase::Starting:
+            return "Starting";
+        case Phase::Configuring:
+            return "Configuring";
+        case Phase::Building:
+            return "Building";
+        case Phase::Launching:
+            return "Launching";
+        case Phase::Running:
+            return "Running";
+        case Phase::Stopping:
+            return "Stopping";
+        case Phase::CleanupUnknown:
+            return "CleanupUnknown";
     }
     return "Idle";
 }
@@ -200,9 +213,18 @@ void EditorController::StartJob(ActionKind kind, ToolOperation operation)
     Publish();
 }
 
-void EditorController::Configure() { StartJob(ActionKind::Configure, ToolOperation::Configure); }
-void EditorController::Build() { StartJob(ActionKind::Build, ToolOperation::Build); }
-void EditorController::BuildRun() { StartJob(ActionKind::BuildRun, ToolOperation::BuildRun); }
+void EditorController::Configure()
+{
+    StartJob(ActionKind::Configure, ToolOperation::Configure);
+}
+void EditorController::Build()
+{
+    StartJob(ActionKind::Build, ToolOperation::Build);
+}
+void EditorController::BuildRun()
+{
+    StartJob(ActionKind::BuildRun, ToolOperation::BuildRun);
+}
 
 void EditorController::Stop()
 {
@@ -258,89 +280,85 @@ void EditorController::OnToolEvent(const ProtocolEvent& event)
 
     switch (event.Kind)
     {
-    case ProtocolEvent::Type::Ready:
-        break;
-    case ProtocolEvent::Type::Phase:
-    {
-        const Phase before = State_.OperationPhase;
-        State_ = ApplyPhaseEvent(State_, event.Job, PhaseFromStage(event.Stage), /*runtimeConfirmed=*/false);
-        if (State_.OperationPhase != before && Transitions_.size() < 256)
-        {
-            Transitions_.append(QString::fromLatin1(PhaseName(State_.OperationPhase)));
+        case ProtocolEvent::Type::Ready:
+            break;
+        case ProtocolEvent::Type::Phase: {
+            const Phase before = State_.OperationPhase;
+            State_ = ApplyPhaseEvent(State_, event.Job, PhaseFromStage(event.Stage), /*runtimeConfirmed=*/false);
+            if (State_.OperationPhase != before && Transitions_.size() < 256)
+            {
+                Transitions_.append(QString::fromLatin1(PhaseName(State_.OperationPhase)));
+            }
+            break;
         }
-        break;
-    }
-    case ProtocolEvent::Type::Command:
-        RecordCommand(event.Stage, event.Argv, event.Cwd);
-        break;
-    case ProtocolEvent::Type::Targets:
-        // Target discovery never changes the document silently; it only updates
-        // the discovery cache for the current preset.
-        State_.DiscoveredTargets = event.Targets;
-        State_.DiscoveredPreset = event.Preset;
-        break;
-    case ProtocolEvent::Type::Output:
-        Log_.Append(event.Stream == ProtocolEvent::OutputStreamTag::Stderr ? OutputStream::Stderr
-                                                                           : OutputStream::Stdout,
-                    event.Text);
-        break;
-    case ProtocolEvent::Type::RuntimeStarted:
-    {
-        LastPid_ = event.Pid;
-        const Phase before = State_.OperationPhase;
-        State_ = ApplyPhaseEvent(State_, event.Job, Phase::Running, /*runtimeConfirmed=*/true);
-        if (State_.OperationPhase != before && Transitions_.size() < 256)
-        {
-            Transitions_.append(QString::fromLatin1(PhaseName(State_.OperationPhase)));
+        case ProtocolEvent::Type::Command:
+            RecordCommand(event.Stage, event.Argv, event.Cwd);
+            break;
+        case ProtocolEvent::Type::Targets:
+            // Target discovery never changes the document silently; it only updates
+            // the discovery cache for the current preset.
+            State_.DiscoveredTargets = event.Targets;
+            State_.DiscoveredPreset = event.Preset;
+            break;
+        case ProtocolEvent::Type::Output:
+            Log_.Append(event.Stream == ProtocolEvent::OutputStreamTag::Stderr ? OutputStream::Stderr
+                                                                               : OutputStream::Stdout,
+                        event.Text);
+            break;
+        case ProtocolEvent::Type::RuntimeStarted: {
+            LastPid_ = event.Pid;
+            const Phase before = State_.OperationPhase;
+            State_ = ApplyPhaseEvent(State_, event.Job, Phase::Running, /*runtimeConfirmed=*/true);
+            if (State_.OperationPhase != before && Transitions_.size() < 256)
+            {
+                Transitions_.append(QString::fromLatin1(PhaseName(State_.OperationPhase)));
+            }
+            break;
         }
-        break;
-    }
-    case ProtocolEvent::Type::Result:
-    {
-        LastResult result;
-        result.Stage = State_.OperationPhase;
-        if (event.Outcome == QStringLiteral("success"))
-        {
-            result.Kind = Outcome::Success;
+        case ProtocolEvent::Type::Result: {
+            LastResult result;
+            result.Stage = State_.OperationPhase;
+            if (event.Outcome == QStringLiteral("success"))
+            {
+                result.Kind = Outcome::Success;
+            }
+            else if (event.Outcome == QStringLiteral("cancelled"))
+            {
+                result.Kind = Outcome::Cancelled;
+            }
+            else
+            {
+                result.Kind = Outcome::Failed;
+            }
+            result.Code = event.Code;
+            result.Message = event.Message;
+            result.ExitCode = event.ExitCode;
+            result.Signal = event.Signal;
+            result.CleanupConfirmed = event.CleanupConfirmed;
+            if (!event.CleanupConfirmed)
+            {
+                result.Kind = Outcome::CleanupUnknown;
+            }
+            State_ = ApplyResult(State_, event.Job, result);
+            break;
         }
-        else if (event.Outcome == QStringLiteral("cancelled"))
-        {
-            result.Kind = Outcome::Cancelled;
+        case ProtocolEvent::Type::Error: {
+            LastResult result;
+            result.Stage = State_.OperationPhase;
+            result.Kind = event.Code == ResultCode::CleanupUnknown ? Outcome::CleanupUnknown : Outcome::Failed;
+            result.Code = event.Code;
+            result.Message = event.Message;
+            result.CleanupConfirmed = event.Code != ResultCode::CleanupUnknown;
+            if (State_.ActiveJob != 0)
+            {
+                State_ = ApplyResult(State_, State_.ActiveJob, result);
+            }
+            else
+            {
+                State_.Result = result;
+            }
+            break;
         }
-        else
-        {
-            result.Kind = Outcome::Failed;
-        }
-        result.Code = event.Code;
-        result.Message = event.Message;
-        result.ExitCode = event.ExitCode;
-        result.Signal = event.Signal;
-        result.CleanupConfirmed = event.CleanupConfirmed;
-        if (!event.CleanupConfirmed)
-        {
-            result.Kind = Outcome::CleanupUnknown;
-        }
-        State_ = ApplyResult(State_, event.Job, result);
-        break;
-    }
-    case ProtocolEvent::Type::Error:
-    {
-        LastResult result;
-        result.Stage = State_.OperationPhase;
-        result.Kind = event.Code == ResultCode::CleanupUnknown ? Outcome::CleanupUnknown : Outcome::Failed;
-        result.Code = event.Code;
-        result.Message = event.Message;
-        result.CleanupConfirmed = event.Code != ResultCode::CleanupUnknown;
-        if (State_.ActiveJob != 0)
-        {
-            State_ = ApplyResult(State_, State_.ActiveJob, result);
-        }
-        else
-        {
-            State_.Result = result;
-        }
-        break;
-    }
     }
     Publish();
 }
@@ -354,8 +372,7 @@ QString EditorController::JobDetails() const
     out += QStringLiteral("job: %1\n").arg(State_.ActiveJob, 16, 16, QLatin1Char('0'));
     out += QStringLiteral("descriptor_digest: %1\n").arg(State_.SavedDigest);
     out += QStringLiteral("provider: %1\n")
-               .arg(State_.Saved.ProviderKind == Provider::Ludus ? QStringLiteral("ludus")
-                                                                 : QStringLiteral("cmake"));
+               .arg(State_.Saved.ProviderKind == Provider::Ludus ? QStringLiteral("ludus") : QStringLiteral("cmake"));
     out += QStringLiteral("preset: %1\n").arg(State_.Saved.Preset);
     out += QStringLiteral("target: %1\n").arg(State_.Saved.Target);
     out += QStringLiteral("transitions: %1\n").arg(Transitions_.join(QStringLiteral(" -> ")));
@@ -371,8 +388,7 @@ QString EditorController::JobDetails() const
     {
         out += QStringLiteral("runtime_pid: %1\n").arg(LastPid_);
     }
-    out += QStringLiteral("last_result: %1 (%2)\n")
-               .arg(ResultCodeName(State_.Result.Code), State_.Result.Message);
+    out += QStringLiteral("last_result: %1 (%2)\n").arg(ResultCodeName(State_.Result.Code), State_.Result.Message);
     if (State_.Result.ExitCode.has_value())
     {
         out += QStringLiteral("exit_code: %1\n").arg(State_.Result.ExitCode.value());

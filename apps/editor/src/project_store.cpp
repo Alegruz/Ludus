@@ -103,41 +103,39 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
 {
     if (static_cast<usize>(bytes.size()) > limits::MaxFileBytes)
     {
-        return Fail(ResultCode::InvalidProject,
-                    QStringLiteral("descriptor exceeds the 64 KiB size limit"));
+        return Fail(ResultCode::InvalidProject, QStringLiteral("descriptor exceeds the 64 KiB size limit"));
     }
     // Reject invalid UTF-8 / unpaired surrogates / embedded NUL before JSON.
     // QString::fromUtf8 replaces invalid sequences; detect by round-tripping.
     const QString text = QString::fromUtf8(bytes);
     if (text.toUtf8() != bytes)
     {
-        return Fail(ResultCode::InvalidProject,
-                    QStringLiteral("descriptor is not valid UTF-8"));
+        return Fail(ResultCode::InvalidProject, QStringLiteral("descriptor is not valid UTF-8"));
     }
     if (text.contains(QChar(u'\0')))
     {
-        return Fail(ResultCode::InvalidProject,
-                    QStringLiteral("descriptor contains a NUL byte"));
+        return Fail(ResultCode::InvalidProject, QStringLiteral("descriptor contains a NUL byte"));
     }
 
     QJsonParseError error{};
     const QJsonDocument document = QJsonDocument::fromJson(bytes, &error);
     if (error.error != QJsonParseError::NoError || !document.isObject())
     {
-        return Fail(ResultCode::InvalidProject,
-                    QStringLiteral("malformed JSON: %1").arg(error.errorString()));
+        return Fail(ResultCode::InvalidProject, QStringLiteral("malformed JSON: %1").arg(error.errorString()));
     }
     const QJsonObject root = document.object();
 
-    static const QStringList rootKeys{QStringLiteral("version"),    QStringLiteral("name"),
-                                      QStringLiteral("provider"),   QStringLiteral("source_dir"),
-                                      QStringLiteral("preset"),     QStringLiteral("target"),
+    static const QStringList rootKeys{QStringLiteral("version"),
+                                      QStringLiteral("name"),
+                                      QStringLiteral("provider"),
+                                      QStringLiteral("source_dir"),
+                                      QStringLiteral("preset"),
+                                      QStringLiteral("target"),
                                       QStringLiteral("run")};
     const QString unknown = UnknownKey(root, rootKeys);
     if (!unknown.isEmpty())
     {
-        return Fail(ResultCode::InvalidProject,
-                    QStringLiteral("unknown field '%1'").arg(unknown));
+        return Fail(ResultCode::InvalidProject, QStringLiteral("unknown field '%1'").arg(unknown));
     }
 
     // version: a JSON number numerically equal to 1; reject bool/string/float.
@@ -174,8 +172,7 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
     }
     if (ContainsNul(descriptor.Name) || !WithinBytes(descriptor.Name, limits::MaxNameBytes))
     {
-        return Fail(ResultCode::InvalidProject,
-                    QStringLiteral("'name' exceeds 128 UTF-8 bytes or contains NUL"));
+        return Fail(ResultCode::InvalidProject, QStringLiteral("'name' exceeds 128 UTF-8 bytes or contains NUL"));
     }
 
     // provider
@@ -195,8 +192,7 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
     }
     else
     {
-        return Fail(ResultCode::InvalidProject,
-                    QStringLiteral("'provider' must be exactly 'ludus' or 'cmake'"));
+        return Fail(ResultCode::InvalidProject, QStringLiteral("'provider' must be exactly 'ludus' or 'cmake'"));
     }
 
     // source_dir
@@ -206,8 +202,8 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
         return Fail(ResultCode::InvalidProject, QStringLiteral("'source_dir' must be a string"));
     }
     descriptor.SourceDir = sourceValue.toString();
-    if (!IsRelativePath(descriptor.SourceDir) || ContainsNul(descriptor.SourceDir)
-        || !WithinBytes(descriptor.SourceDir, limits::MaxPathBytes))
+    if (!IsRelativePath(descriptor.SourceDir) || ContainsNul(descriptor.SourceDir) ||
+        !WithinBytes(descriptor.SourceDir, limits::MaxPathBytes))
     {
         return Fail(ResultCode::InvalidProject,
                     QStringLiteral("'source_dir' must be a relative path within 4096 UTF-8 bytes"));
@@ -220,8 +216,8 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
         return Fail(ResultCode::InvalidProject, QStringLiteral("'preset' must be a string"));
     }
     descriptor.Preset = presetValue.toString();
-    if (descriptor.Preset != QStringLiteral("linux-clang-debug")
-        && descriptor.Preset != QStringLiteral("linux-clang-development"))
+    if (descriptor.Preset != QStringLiteral("linux-clang-debug") &&
+        descriptor.Preset != QStringLiteral("linux-clang-development"))
     {
         return Fail(ResultCode::InvalidProject,
                     QStringLiteral("'preset' must be linux-clang-debug or linux-clang-development"));
@@ -255,8 +251,7 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
     const QString runUnknown = UnknownKey(run, runKeys);
     if (!runUnknown.isEmpty())
     {
-        return Fail(ResultCode::InvalidProject,
-                    QStringLiteral("unknown field 'run.%1'").arg(runUnknown));
+        return Fail(ResultCode::InvalidProject, QStringLiteral("unknown field 'run.%1'").arg(runUnknown));
     }
 
     const QJsonValue cwdValue = run.value(QStringLiteral("cwd"));
@@ -265,8 +260,8 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
         return Fail(ResultCode::InvalidProject, QStringLiteral("'run.cwd' must be a string"));
     }
     descriptor.RunCwd = cwdValue.toString();
-    if (!IsRelativePath(descriptor.RunCwd) || ContainsNul(descriptor.RunCwd)
-        || !WithinBytes(descriptor.RunCwd, limits::MaxPathBytes))
+    if (!IsRelativePath(descriptor.RunCwd) || ContainsNul(descriptor.RunCwd) ||
+        !WithinBytes(descriptor.RunCwd, limits::MaxPathBytes))
     {
         return Fail(ResultCode::InvalidProject,
                     QStringLiteral("'run.cwd' must be a relative path within 4096 UTF-8 bytes"));
@@ -284,36 +279,31 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
     const QJsonArray args = argsValue.toArray();
     if (static_cast<usize>(args.size()) > limits::MaxArgCount)
     {
-        return Fail(ResultCode::InvalidProject,
-                    QStringLiteral("'run.args' exceeds 64 entries"));
+        return Fail(ResultCode::InvalidProject, QStringLiteral("'run.args' exceeds 64 entries"));
     }
     usize total = 0;
     for (const QJsonValue& item : args)
     {
         if (!item.isString())
         {
-            return Fail(ResultCode::InvalidProject,
-                        QStringLiteral("every 'run.args' entry must be a string"));
+            return Fail(ResultCode::InvalidProject, QStringLiteral("every 'run.args' entry must be a string"));
         }
         const QString value = item.toString();
         if (ContainsNul(value))
         {
-            return Fail(ResultCode::InvalidProject,
-                        QStringLiteral("'run.args' entries must not contain NUL"));
+            return Fail(ResultCode::InvalidProject, QStringLiteral("'run.args' entries must not contain NUL"));
         }
         const usize bytes = static_cast<usize>(value.toUtf8().size());
         if (bytes > limits::MaxArgBytes)
         {
-            return Fail(ResultCode::InvalidProject,
-                        QStringLiteral("a 'run.args' entry exceeds 4096 UTF-8 bytes"));
+            return Fail(ResultCode::InvalidProject, QStringLiteral("a 'run.args' entry exceeds 4096 UTF-8 bytes"));
         }
         total += bytes;
         descriptor.RunArgs.append(value); // empty strings are valid
     }
     if (total > limits::MaxArgsTotalBytes)
     {
-        return Fail(ResultCode::InvalidProject,
-                    QStringLiteral("'run.args' total exceeds 32 KiB"));
+        return Fail(ResultCode::InvalidProject, QStringLiteral("'run.args' total exceeds 32 KiB"));
     }
 
     ParseOutcome outcome;
@@ -335,22 +325,36 @@ QByteArray SerializeDescriptor(const ProjectDescriptor& descriptor)
             const ushort u = c.unicode();
             switch (u)
             {
-            case u'"': out += QStringLiteral("\\\""); break;
-            case u'\\': out += QStringLiteral("\\\\"); break;
-            case u'\b': out += QStringLiteral("\\b"); break;
-            case u'\f': out += QStringLiteral("\\f"); break;
-            case u'\n': out += QStringLiteral("\\n"); break;
-            case u'\r': out += QStringLiteral("\\r"); break;
-            case u'\t': out += QStringLiteral("\\t"); break;
-            default:
-                if (u < 0x20)
-                {
-                    out += QStringLiteral("\\u%1").arg(u, 4, 16, QLatin1Char('0'));
-                }
-                else
-                {
-                    out += c;
-                }
+                case u'"':
+                    out += QStringLiteral("\\\"");
+                    break;
+                case u'\\':
+                    out += QStringLiteral("\\\\");
+                    break;
+                case u'\b':
+                    out += QStringLiteral("\\b");
+                    break;
+                case u'\f':
+                    out += QStringLiteral("\\f");
+                    break;
+                case u'\n':
+                    out += QStringLiteral("\\n");
+                    break;
+                case u'\r':
+                    out += QStringLiteral("\\r");
+                    break;
+                case u'\t':
+                    out += QStringLiteral("\\t");
+                    break;
+                default:
+                    if (u < 0x20)
+                    {
+                        out += QStringLiteral("\\u%1").arg(u, 4, 16, QLatin1Char('0'));
+                    }
+                    else
+                    {
+                        out += c;
+                    }
             }
         }
         return out;
@@ -396,14 +400,13 @@ LoadOutcome ProjectStore::Load(const QString& descriptorPath) const
     const QFileInfo info(descriptorPath);
     if (info.size() > static_cast<qint64>(limits::MaxFileBytes))
     {
-        outcome.Parse = Fail(ResultCode::InvalidProject,
-                             QStringLiteral("descriptor exceeds the 64 KiB size limit"));
+        outcome.Parse = Fail(ResultCode::InvalidProject, QStringLiteral("descriptor exceeds the 64 KiB size limit"));
         return outcome;
     }
     if (!file.open(QIODevice::ReadOnly))
     {
-        outcome.Parse = Fail(ResultCode::InvalidProject,
-                             QStringLiteral("cannot open descriptor: %1").arg(file.errorString()));
+        outcome.Parse =
+            Fail(ResultCode::InvalidProject, QStringLiteral("cannot open descriptor: %1").arg(file.errorString()));
         return outcome;
     }
     outcome.Bytes = file.readAll();
@@ -413,9 +416,8 @@ LoadOutcome ProjectStore::Load(const QString& descriptorPath) const
     return outcome;
 }
 
-SaveOutcome ProjectStore::Save(const QString& descriptorPath,
-                               const ProjectDescriptor& draft,
-                               const QString& expectedDigest) const
+SaveOutcome
+ProjectStore::Save(const QString& descriptorPath, const ProjectDescriptor& draft, const QString& expectedDigest) const
 {
     SaveOutcome outcome;
 
@@ -501,9 +503,8 @@ SaveOutcome ProjectStore::Save(const QString& descriptorPath,
         // Short/failed write: abandon the temporary file; destination unchanged.
         save.cancelWriting();
         outcome.Code = ResultCode::InvalidProject;
-        outcome.Message = QStringLiteral("short write while saving descriptor (%1 of %2 bytes)")
-                              .arg(written)
-                              .arg(bytes.size());
+        outcome.Message =
+            QStringLiteral("short write while saving descriptor (%1 of %2 bytes)").arg(written).arg(bytes.size());
         return outcome;
     }
 

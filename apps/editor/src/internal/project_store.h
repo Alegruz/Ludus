@@ -27,7 +27,10 @@ struct SaveOutcome
     QString Digest; // 64 lowercase hex of committed bytes, valid only when Ok
     QString Message;
 
-    [[nodiscard]] bool Ok() const noexcept { return Code == ResultCode::Ok; }
+    [[nodiscard]] bool Ok() const noexcept
+    {
+        return Code == ResultCode::Ok;
+    }
 };
 
 // Result of reading a descriptor from disk. Carries the raw bytes' digest so the
@@ -38,7 +41,10 @@ struct LoadOutcome
     QString Digest; // sha256 of the exact bytes parsed
     QByteArray Bytes;
 
-    [[nodiscard]] bool Ok() const noexcept { return Parse.Ok(); }
+    [[nodiscard]] bool Ok() const noexcept
+    {
+        return Parse.Ok();
+    }
 };
 
 // Lowercase-hex sha256 of a byte buffer. Shared by load/save and the protocol
@@ -73,7 +79,10 @@ public:
         std::function<bool()> FailCommit;
     };
 
-    void SetFaultHooks(FaultHooks hooks) { Hooks_ = std::move(hooks); }
+    void SetFaultHooks(FaultHooks hooks)
+    {
+        Hooks_ = std::move(hooks);
+    }
 
     // Read a descriptor file (bounded) and parse it. Does not change any
     // caller-held workspace on failure; callers decide what to keep.
@@ -86,9 +95,8 @@ public:
     //
     // expectedDigest is the digest recorded at Open/last Save; pass an empty
     // string only for an initial write to a nonexistent path.
-    [[nodiscard]] SaveOutcome Save(const QString& descriptorPath,
-                                   const ProjectDescriptor& draft,
-                                   const QString& expectedDigest) const;
+    [[nodiscard]] SaveOutcome
+    Save(const QString& descriptorPath, const ProjectDescriptor& draft, const QString& expectedDigest) const;
 
 private:
     FaultHooks Hooks_;

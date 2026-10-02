@@ -9,24 +9,42 @@ const char* ResultCodeName(ResultCode code) noexcept
 {
     switch (code)
     {
-    case ResultCode::Ok: return "Ok";
-    case ResultCode::InvalidProject: return "InvalidProject";
-    case ResultCode::UnsupportedVersion: return "UnsupportedVersion";
-    case ResultCode::Conflict: return "Conflict";
-    case ResultCode::MissingTools: return "MissingTools";
-    case ResultCode::BootstrapStale: return "BootstrapStale";
-    case ResultCode::Busy: return "Busy";
-    case ResultCode::ConfigureFailed: return "ConfigureFailed";
-    case ResultCode::TargetInvalid: return "TargetInvalid";
-    case ResultCode::ReplyInvalid: return "ReplyInvalid";
-    case ResultCode::BuildFailed: return "BuildFailed";
-    case ResultCode::ArtifactInvalid: return "ArtifactInvalid";
-    case ResultCode::SpawnFailed: return "SpawnFailed";
-    case ResultCode::RuntimeFailed: return "RuntimeFailed";
-    case ResultCode::RuntimeSignaled: return "RuntimeSignaled";
-    case ResultCode::ProtocolError: return "ProtocolError";
-    case ResultCode::Cancelled: return "Cancelled";
-    case ResultCode::CleanupUnknown: return "CleanupUnknown";
+        case ResultCode::Ok:
+            return "Ok";
+        case ResultCode::InvalidProject:
+            return "InvalidProject";
+        case ResultCode::UnsupportedVersion:
+            return "UnsupportedVersion";
+        case ResultCode::Conflict:
+            return "Conflict";
+        case ResultCode::MissingTools:
+            return "MissingTools";
+        case ResultCode::BootstrapStale:
+            return "BootstrapStale";
+        case ResultCode::Busy:
+            return "Busy";
+        case ResultCode::ConfigureFailed:
+            return "ConfigureFailed";
+        case ResultCode::TargetInvalid:
+            return "TargetInvalid";
+        case ResultCode::ReplyInvalid:
+            return "ReplyInvalid";
+        case ResultCode::BuildFailed:
+            return "BuildFailed";
+        case ResultCode::ArtifactInvalid:
+            return "ArtifactInvalid";
+        case ResultCode::SpawnFailed:
+            return "SpawnFailed";
+        case ResultCode::RuntimeFailed:
+            return "RuntimeFailed";
+        case ResultCode::RuntimeSignaled:
+            return "RuntimeSignaled";
+        case ResultCode::ProtocolError:
+            return "ProtocolError";
+        case ResultCode::Cancelled:
+            return "Cancelled";
+        case ResultCode::CleanupUnknown:
+            return "CleanupUnknown";
     }
     return "Unknown";
 }
@@ -74,15 +92,15 @@ bool CanStartJob(const WorkspaceState& state, ActionKind kind)
     }
     switch (kind)
     {
-    case ActionKind::Configure:
-        return true;
-    case ActionKind::Build:
-    case ActionKind::BuildRun:
-        // Build/BuildRun require a clean saved document; unsaved edits must be
-        // saved first (design section 5).
-        return !state.Dirty();
-    default:
-        return false;
+        case ActionKind::Configure:
+            return true;
+        case ActionKind::Build:
+        case ActionKind::BuildRun:
+            // Build/BuildRun require a clean saved document; unsaved edits must be
+            // saved first (design section 5).
+            return !state.Dirty();
+        default:
+            return false;
     }
 }
 
@@ -114,25 +132,22 @@ bool AllowedForward(Phase from, Phase to)
 {
     switch (from)
     {
-    case Phase::Starting:
-        return to == Phase::Configuring;
-    case Phase::Configuring:
-        return to == Phase::Building || to == Phase::Launching;
-    case Phase::Building:
-        return to == Phase::Launching;
-    case Phase::Launching:
-        // Launching -> Running is handled only by RuntimeStarted, not here.
-        return false;
-    default:
-        return false;
+        case Phase::Starting:
+            return to == Phase::Configuring;
+        case Phase::Configuring:
+            return to == Phase::Building || to == Phase::Launching;
+        case Phase::Building:
+            return to == Phase::Launching;
+        case Phase::Launching:
+            // Launching -> Running is handled only by RuntimeStarted, not here.
+            return false;
+        default:
+            return false;
     }
 }
 } // namespace
 
-WorkspaceState ApplyPhaseEvent(const WorkspaceState& state,
-                               uint64 jobId,
-                               Phase requested,
-                               bool runtimeConfirmed)
+WorkspaceState ApplyPhaseEvent(const WorkspaceState& state, uint64 jobId, Phase requested, bool runtimeConfirmed)
 {
     // Ignore events for a retired/non-current job.
     if (jobId == 0 || jobId != state.ActiveJob)
@@ -163,8 +178,8 @@ WorkspaceState ApplyPhaseEvent(const WorkspaceState& state,
     if (runtimeConfirmed)
     {
         // Only a runtime-started confirmation moves Launching -> Running.
-        if (state.OperationPhase != Phase::Launching && state.OperationPhase != Phase::Building
-            && state.OperationPhase != Phase::Configuring && state.OperationPhase != Phase::Starting)
+        if (state.OperationPhase != Phase::Launching && state.OperationPhase != Phase::Building &&
+            state.OperationPhase != Phase::Configuring && state.OperationPhase != Phase::Starting)
         {
             return state;
         }

@@ -49,12 +49,24 @@ class EditorController : public QObject
 public:
     explicit EditorController(ToolingPaths tooling, QObject* parent = nullptr);
 
-    [[nodiscard]] const WorkspaceState& State() const noexcept { return State_; }
-    [[nodiscard]] const LogBuffer& Log() const noexcept { return Log_; }
-    [[nodiscard]] Capabilities Caps() const { return ComputeCapabilities(State_); }
+    [[nodiscard]] const WorkspaceState& State() const noexcept
+    {
+        return State_;
+    }
+    [[nodiscard]] const LogBuffer& Log() const noexcept
+    {
+        return Log_;
+    }
+    [[nodiscard]] Capabilities Caps() const
+    {
+        return ComputeCapabilities(State_);
+    }
 
     // Expose the store so tests can inject fault hooks.
-    [[nodiscard]] ProjectStore& Store() noexcept { return Store_; }
+    [[nodiscard]] ProjectStore& Store() noexcept
+    {
+        return Store_;
+    }
 
     // Actions (validated centrally). Each applies at most one transition and
     // emits StateChanged exactly once when it changes state.

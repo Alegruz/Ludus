@@ -30,17 +30,17 @@ void ForwardQtMessage(QtMsgType type, const QMessageLogContext& /*context*/, con
     const std::string_view view(utf8.constData(), static_cast<std::size_t>(utf8.size()));
     switch (type)
     {
-    case QtDebugMsg:
-    case QtInfoMsg:
-        LUDUS_LOG_TEXT(LOG_EDITOR_MAIN, Info, view);
-        break;
-    case QtWarningMsg:
-        LUDUS_LOG_TEXT(LOG_EDITOR_MAIN, Warning, view);
-        break;
-    case QtCriticalMsg:
-    case QtFatalMsg:
-        LUDUS_LOG_TEXT(LOG_EDITOR_MAIN, Error, view);
-        break;
+        case QtDebugMsg:
+        case QtInfoMsg:
+            LUDUS_LOG_TEXT(LOG_EDITOR_MAIN, Info, view);
+            break;
+        case QtWarningMsg:
+            LUDUS_LOG_TEXT(LOG_EDITOR_MAIN, Warning, view);
+            break;
+        case QtCriticalMsg:
+        case QtFatalMsg:
+            LUDUS_LOG_TEXT(LOG_EDITOR_MAIN, Error, view);
+            break;
     }
 }
 } // namespace

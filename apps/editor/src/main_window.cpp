@@ -5,11 +5,11 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
-#include <QKeySequence>
 #include <QComboBox>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -27,8 +27,7 @@
 namespace ludus::editor
 {
 
-MainWindow::MainWindow(EditorController* controller, QWidget* parent)
-    : QMainWindow(parent), Controller_(controller)
+MainWindow::MainWindow(EditorController* controller, QWidget* parent) : QMainWindow(parent), Controller_(controller)
 {
     setWindowTitle(QStringLiteral("Ludus Editor"));
     BuildUi();
@@ -144,8 +143,7 @@ ProjectDescriptor MainWindow::DraftFromFields() const
 {
     ProjectDescriptor draft = Controller_->State().Draft;
     draft.Name = NameEdit_->text();
-    draft.ProviderKind =
-        ProviderBox_->currentText() == QStringLiteral("cmake") ? Provider::Cmake : Provider::Ludus;
+    draft.ProviderKind = ProviderBox_->currentText() == QStringLiteral("cmake") ? Provider::Cmake : Provider::Ludus;
     draft.SourceDir = SourceDirEdit_->text();
     draft.Preset = PresetBox_->currentText();
     draft.Target = TargetBox_->currentText();
@@ -194,8 +192,10 @@ void MainWindow::OnRemoveArgument()
 
 void MainWindow::OnOpenRequested()
 {
-    const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Open Project Descriptor"),
-                                                      QString(), QStringLiteral("Ludus Project (*.json)"));
+    const QString path = QFileDialog::getOpenFileName(this,
+                                                      QStringLiteral("Open Project Descriptor"),
+                                                      QString(),
+                                                      QStringLiteral("Ludus Project (*.json)"));
     if (path.isEmpty())
     {
         return;
@@ -203,10 +203,10 @@ void MainWindow::OnOpenRequested()
     // Dirty-document confirmation is offered asynchronously via a message box.
     if (Controller_->State().Dirty() && Controller_->State().Document == DocumentState::ProjectLoaded)
     {
-        const auto choice = QMessageBox::question(
-            this, QStringLiteral("Unsaved changes"),
-            QStringLiteral("Save changes before opening another project?"),
-            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+        const auto choice = QMessageBox::question(this,
+                                                  QStringLiteral("Unsaved changes"),
+                                                  QStringLiteral("Save changes before opening another project?"),
+                                                  QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
         if (choice == QMessageBox::Cancel)
         {
             return;
@@ -223,16 +223,19 @@ void MainWindow::OnOpenRequested()
     Controller_->OpenProject(path);
 }
 
-void MainWindow::OnSaveRequested() { Controller_->Save(); }
+void MainWindow::OnSaveRequested()
+{
+    Controller_->Save();
+}
 
 void MainWindow::OnReloadRequested()
 {
     if (Controller_->State().Dirty())
     {
-        const auto choice = QMessageBox::question(
-            this, QStringLiteral("Unsaved changes"),
-            QStringLiteral("Discard changes and reload from disk?"),
-            QMessageBox::Discard | QMessageBox::Cancel);
+        const auto choice = QMessageBox::question(this,
+                                                  QStringLiteral("Unsaved changes"),
+                                                  QStringLiteral("Discard changes and reload from disk?"),
+                                                  QMessageBox::Discard | QMessageBox::Cancel);
         if (choice != QMessageBox::Discard)
         {
             return;
@@ -295,7 +298,10 @@ void MainWindow::RenderFields()
         auto* item = new QListWidgetItem(arg, ArgsList_);
         item->setFlags(item->flags() | Qt::ItemIsEditable);
     }
-    connect(ArgsList_->model(), &QAbstractItemModel::dataChanged, this, &MainWindow::OnFieldEdited,
+    connect(ArgsList_->model(),
+            &QAbstractItemModel::dataChanged,
+            this,
+            &MainWindow::OnFieldEdited,
             Qt::UniqueConnection);
 
     // Render output and runtime status.
@@ -334,21 +340,36 @@ void MainWindow::RenderStatus()
     QString phase;
     switch (state.OperationPhase)
     {
-    case Phase::Idle: phase = QStringLiteral("Idle"); break;
-    case Phase::Starting: phase = QStringLiteral("Starting"); break;
-    case Phase::Configuring: phase = QStringLiteral("Configuring"); break;
-    case Phase::Building: phase = QStringLiteral("Building"); break;
-    case Phase::Launching: phase = QStringLiteral("Launching"); break;
-    case Phase::Running: phase = QStringLiteral("Running"); break;
-    case Phase::Stopping: phase = QStringLiteral("Stopping"); break;
-    case Phase::CleanupUnknown: phase = QStringLiteral("Cleanup unknown"); break;
+        case Phase::Idle:
+            phase = QStringLiteral("Idle");
+            break;
+        case Phase::Starting:
+            phase = QStringLiteral("Starting");
+            break;
+        case Phase::Configuring:
+            phase = QStringLiteral("Configuring");
+            break;
+        case Phase::Building:
+            phase = QStringLiteral("Building");
+            break;
+        case Phase::Launching:
+            phase = QStringLiteral("Launching");
+            break;
+        case Phase::Running:
+            phase = QStringLiteral("Running");
+            break;
+        case Phase::Stopping:
+            phase = QStringLiteral("Stopping");
+            break;
+        case Phase::CleanupUnknown:
+            phase = QStringLiteral("Cleanup unknown");
+            break;
     }
 
     QString status = phase;
     if (state.Result.Kind != Outcome::None)
     {
-        status += QStringLiteral("  —  last result: %1")
-                      .arg(QString::fromLatin1(ResultCodeName(state.Result.Code)));
+        status += QStringLiteral("  —  last result: %1").arg(QString::fromLatin1(ResultCodeName(state.Result.Code)));
         if (!state.Result.Message.isEmpty())
         {
             status += QStringLiteral(" (%1)").arg(state.Result.Message);
@@ -362,9 +383,9 @@ void MainWindow::RenderStatus()
 
     if (state.OperationPhase == Phase::Running)
     {
-        RuntimeLabel_->setText(QStringLiteral(
-            "The application is running in its own window. This status area describes it; "
-            "it does not embed the game's framebuffer."));
+        RuntimeLabel_->setText(
+            QStringLiteral("The application is running in its own window. This status area describes it; "
+                           "it does not embed the game's framebuffer."));
     }
     else
     {
@@ -381,10 +402,11 @@ void MainWindow::closeEvent(QCloseEvent* event)
     }
     // Busy: offer Stop and Close or Keep Open. Do not block on a nested loop
     // while output flows; the actual close happens when cleanup is confirmed.
-    const auto choice = QMessageBox::question(
-        this, QStringLiteral("Operation running"),
-        QStringLiteral("An operation is running. Stop it and close, or keep the editor open?"),
-        QMessageBox::Close | QMessageBox::Cancel);
+    const auto choice =
+        QMessageBox::question(this,
+                              QStringLiteral("Operation running"),
+                              QStringLiteral("An operation is running. Stop it and close, or keep the editor open?"),
+                              QMessageBox::Close | QMessageBox::Cancel);
     if (choice == QMessageBox::Close)
     {
         CloseConfirmed_ = true;

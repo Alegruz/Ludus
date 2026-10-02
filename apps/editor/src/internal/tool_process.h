@@ -75,7 +75,7 @@ struct ProtocolEvent
     qint64 Pid = 0;
     QString Executable;
     // Result
-    QString Outcome;      // success/failed/cancelled
+    QString Outcome; // success/failed/cancelled
     ResultCode Code = ResultCode::Ok;
     QString Message;
     bool CleanupConfirmed = false;
@@ -86,13 +86,13 @@ struct ProtocolEvent
 // Launch parameters for a single tool run.
 struct ToolLaunch
 {
-    QString PythonPath;      // absolute managed interpreter
-    QString AdapterPath;     // absolute editor_tool.py in the trusted tooling root
-    QString ToolingRoot;     // absolute tooling checkout
-    QString ProjectPath;     // absolute descriptor path
-    QString ExpectedSha256;  // digest of the clean saved descriptor
+    QString PythonPath;     // absolute managed interpreter
+    QString AdapterPath;    // absolute editor_tool.py in the trusted tooling root
+    QString ToolingRoot;    // absolute tooling checkout
+    QString ProjectPath;    // absolute descriptor path
+    QString ExpectedSha256; // digest of the clean saved descriptor
     ToolOperation Operation = ToolOperation::Configure;
-    uint64 Job = 0;          // 16-hex-encoded on the wire
+    uint64 Job = 0; // 16-hex-encoded on the wire
 };
 
 class ToolProcess : public QObject
@@ -118,9 +118,15 @@ public:
 
     // True from Start() until the terminal result is delivered and the process
     // has finished and streams are drained.
-    [[nodiscard]] bool Active() const noexcept { return Active_; }
+    [[nodiscard]] bool Active() const noexcept
+    {
+        return Active_;
+    }
 
-    [[nodiscard]] uint64 Job() const noexcept { return Job_; }
+    [[nodiscard]] uint64 Job() const noexcept
+    {
+        return Job_;
+    }
 
 Q_SIGNALS:
     // One parsed event. Controller binds this to its QObject context and tags
@@ -155,11 +161,11 @@ private:
     bool CancelLatched_ = false;
     bool TerminalDelivered_ = false;
 
-    QByteArray StdoutBacklog_;   // undecoded protocol stream (JSON lines)
-    usize StderrBytes_ = 0;      // bounded adapter diagnostics counter
+    QByteArray StdoutBacklog_; // undecoded protocol stream (JSON lines)
+    usize StderrBytes_ = 0;    // bounded adapter diagnostics counter
 
     // Output-credit accounting as nonwrapping totals (design section 8).
-    uint64 OutputBytesSeen_ = 0;        // cumulative encoded output bytes seen
+    uint64 OutputBytesSeen_ = 0;         // cumulative encoded output bytes seen
     uint64 OutputBytesAcknowledged_ = 0; // last acknowledged boundary
     uint64 ControlBytesSeen_ = 0;        // aggregate control-event bytes (<= 1 MiB)
 };
