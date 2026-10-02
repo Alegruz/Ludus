@@ -16,9 +16,10 @@ Requirements: AU01-AU04, AU08, AU14-AU15. No prerequisite.
   audio work and preserve Input/Text/RHI/Platform/smoke/shader work and other specs.
 - [ ] Freeze API status/handle fields, capacity maxima, memory accounting and
   supported source formats. Create `docs/architecture/audio-decision-log.md`.
-- [ ] Include the Game Audio Programming 1/3/4 adaptations: separate preparation/
-  voice state machines, resident group quotas, split listener and numeric silence
-  causes. Preserve their bounded scope; do not require private PDFs or volumes 2/5.
+- [ ] Include the Game Audio Programming 1-4 adaptations: preparation/voice
+  states, resident groups, split listener, numeric silence causes, explicit PCM/
+  phase contracts, user sliders and bounded application event/context policy.
+  Preserve their bounded scope; do not require private PDFs or volume 5.
 - [ ] Lock miniaudio 0.11.23 source/hash/license/options and audit exact C APIs,
   allocation callbacks and low-level resampler call graph. Verify a native
   callback-only playback probe with stable owner lifetime.
@@ -51,7 +52,8 @@ Requirements: AU02-AU07, AU09, AU16. Prerequisite: A0 API freeze.
 - [ ] Implement explicit state transition causes, immutable published batches
   and transactional resident group MaxAdmitted charges with GroupCapacity.
 - [ ] Implement cached debug snapshot handoff with no racing double buffer;
-  terminal ownership must remain independent of snapshot/trace loss.
+  terminal ownership must remain independent of snapshot/trace loss. Queries
+  overlay accepted reservations/acquired terminals onto stale renderer views.
 - [ ] Start an offline audio gym with named scenarios, owner-side filtering/
   numeric-tag correlation, admission/preparation errors and snapshot export.
 - [ ] Add production-path tests and tiny-capacity/counter-exhaustion seams.
@@ -79,6 +81,7 @@ Gate: these truth-table cases pass without any device, worker, Platform or windo
 | Group terminal with snapshots dropped | Charge released only through acquired terminal acknowledgment |
 | Producer update flood / consumer paused mid-read | Published work stays immutable; no retraction, overwrite or consumer starvation |
 | Cancel preparation then receive late success | Cannot reopen admission, resurrect playback or reuse owned storage early |
+| Query newly accepted voice / stale pre-terminal snapshot | Pending is immediately known; acquired terminal cannot regress to cached active state |
 
 ## A2 Resident playback and bounded DSP
 
@@ -89,7 +92,8 @@ Requirements: AU04, AU08-AU11. Prerequisite: A1.
 - [ ] Implement per-instance cursors, EOF, half-open loops, frame conversion,
   scheduled offsets and sample ramps that persist across buffer partitions.
 - [ ] Integrate preallocated audited resampling, Rate 0.5-2.0 and bounded input
-  scratch. Establish rate-transition/phase/history rules; no callback init/free.
+  scratch. Derive ratios from rates, not buffer lengths; preserve fractional
+  phase/history and guard neighbor reads. No callback init/free.
 - [ ] Implement independent panning/attenuation positions, per-voice origin
   choice and listener validation; preserve true emitter positions and stereo beds.
 - [ ] Implement logical/physical budgets, deterministic priority selection,
@@ -114,6 +118,11 @@ a group quota; Stop during Virtualizing never resurrecting; unchanged variation
 on reentry; split listener with player-fixed distance and camera-driven pan;
 camera-relative attenuation override; multiple simultaneous silence causes;
 invalid descriptor fields and redundant owner-side transform updates.
+Test 44100/48000 conversions in both directions, partial/one-frame tails and
+partition parity; checked frame/sample capacities and distinct L/R impulses
+through production planar/interleaved adapters. Repeated mute/unmute and mix-state
+cycles must expire finite virtual sounds without stale playback bursts, leaked
+pins or growing logical counts; virtualization must not free shared clip PCM.
 No warm render/submit allocation or free including dependency calls.
 
 ## A3 Buses and mix control
@@ -124,17 +133,34 @@ Requirements: AU05, AU10-AU12, AU16. Prerequisite: A2.
   gains applied exactly once at each bus edge.
 - [ ] Add user/base gain, base snapshot batch, bounded modifier instances,
   generation checks, fade removal and specified dB composition.
-- [ ] Add meters, clipping/nonfinite counters and owner-side display data.
+- [ ] Add per-channel input/post-gain meters with fixed windows, clipping/
+  nonfinite counters and owner-side dBFS display with explicit silent values.
+- [ ] Demonstrate dB sliders (initial 40 dB range), exact mute, remembered slider
+  settings and category controls separate from gameplay mix.
 - [ ] Demonstrate application-owned categories, dialogue attenuation and mute
   without hard-coded gameplay categories in the mixer.
 - [ ] Demonstrate context policy above the mixer with resolved gain/priority/
   modifier commands and numeric policy tags; inspect contributions in the gym.
+- [ ] Demonstrate a thin application adapter with owned-loop teardown, bounded
+  event/owner cooldown and AlreadyActive suppression before admission, explicit
+  clock/table-full reporting, and accepted-handle tracking independent of Mixed
+  snapshots. Add a shared dialogue duck that releases only after the last durable
+  terminal; reserve playback/required modifier together with failure rollback.
 
 Gate: cyclic/invalid bus topology rejected before mutation; parent attenuation
 not applied twice; user mute persists through mix changes; two identical active
 modifiers have independent lifetimes; replacement/removal ramps from current
 values; active/fading modifiers remain within eight slots; metered/clamped PCM
-matches fixtures. No general graph/effect/editor work in this milestone.
+matches fixtures at each documented tap. Slider u=0/0.5/1 gives gain 0/0.1/1;
+mute/unmute restores settings, interruptions ramp from current gain and invalid
+inputs reject. Failed Play must not consume cooldown or create active/duck state;
+same-owner duplicates include Pending/virtual voices; table saturation is explicit.
+Overlapping dialogue ends in either order without premature unduck, even with
+dropped snapshots, cancellation, errors or a terminal already reclaimed/reused
+before the adapter polls. Policy entries reclaim after inactivity/cooldown and
+owner generations prevent suppression of a newly created entity. Entity teardown stops owned loops
+while detached one-shots can finish at their copied pose. No general graph,
+macro interpreter, ECS integration or editor work in this milestone.
 
 ## A4 Preparation worker and music streaming
 

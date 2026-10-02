@@ -4,7 +4,7 @@ Status: proposed, 2026-10-01. Implementation and all performance/quality gates
 are outstanding. [Requirements](requirements.md) define AU01-AU17;
 [tasks](tasks.md) define A0-A7. [Research](../../../docs/architecture/audio-research.md)
 records the primary sources, private Gems findings and the follow-up review of
-Game Audio Programming volumes 1, 3 and 4. Volumes 2 and 5 were not consulted.
+Game Audio Programming volumes 1-4. Volume 5 was not consulted.
 
 ## 1 Architecture and module boundary
 
@@ -97,7 +97,7 @@ explicit cold operations; web setup/shutdown is asynchronous.
 | Stop(voice) | Generation-tagged stop mailbox, independent of normal queue room. Fixed default 5 ms fade for audible resident/stream voices; cancel pending starts. Idempotent for a terminal handle still known to the owner. |
 | StopAll() | Advance voice cancellation epoch; affects all voices admitted before that call, including queued plays. New plays use the new epoch. Bus/user mix settings remain valid. Never needs queue space. |
 | Service() | Main/control owner drains diagnostics, acknowledges terminals, frees retired storage, advances setup/worker/backend lifecycle. No mixer tick and no dependence of output continuity on game FPS. |
-| GetState / GetVoiceInfo / GetDebugSnapshot | Owner-thread cached views. Distinguish Pending, Scheduled, Mixed, Virtualizing, Virtual, Stopping, Terminal and stale; report snapshot sample frame/age, silence causes and terminal reason. |
+| GetState / GetVoiceInfo / GetDebugSnapshot | Owner-owned views: current admission/terminal accounting plus cached renderer details. Distinguish Pending, Scheduled, Mixed, Virtualizing, Virtual, Stopping, Terminal and stale; report snapshot sample frame/age, silence causes and terminal reason. |
 | RenderOffline(output, frames) | Explicit Offline mode only. Runs the production render entry serially on caller thread; rejects concurrent device rendering. Frames/output capacity validated. |
 | ResumeFromUserGesture() | Browser host invokes directly in a genuine DOM activation handler; schedules resume, returns Pending/result. Synthetic gameplay input is insufficient. |
 | BeginShutdown / GetShutdownState | Close admission, quiesce renderer/worker, reclaim after proof. Native may finish synchronously outside callback; browser remains alive until async completion. |
@@ -210,6 +210,17 @@ for releasing asset pins, independent of any debug/event ring. Worker-owned
 stream slots additionally require WorkerRetiredGeneration. Ordinary completion
 notifications may be lossy; ownership acknowledgments may not be.
 
+GetVoiceInfo must expose an accepted reservation immediately, even before the
+first renderer snapshot, and acquired terminal information must override older
+cached state. Service observes durable terminals for owner accounting; DSP
+cursor/gain details remain sample-stamped snapshots. Application policies track
+accepted handles until this authoritative terminal observation, never infer
+ownership from the most recent Mixed count or a missing diagnostic record.
+For a handle previously accepted by that adapter, a reclaimed/stale generation
+also proves it no longer owns a live slot; remove its membership even if the
+detailed terminal reason has left the cache. Do not keep an unbounded completion
+history or confuse a reused slot's new generation with the old member.
+
 ## 5 Sample timeline and bounded rendering
 
 Use an audio-owned `uint64 RenderFrame`, meaning frames already generated in
@@ -236,6 +247,15 @@ and calculate bus/voice targets. Then process bounded spans, preserving ramps,
 filter history and source cursor across callback boundaries. Fill every output
 sample. Unsupported output layout produces silence plus an error status; never
 write past supplied capacity. Zero frames is a no-op.
+
+Buffer contracts name channel meaning (Mono or Stereo), layout (interleaved or
+planar), frame count and writable sample capacity explicitly. A frame contains
+one sample per channel; checked `usize` multiplication gives SampleValues =
+Frames * Channels. Validate each planar channel's capacity independently. Channel
+count alone does not identify a speaker layout or an encoded soundfield. Reject
+unsupported formats instead of guessing. Keep one common prepared PCM contract;
+private adapters map native/offline interleaved and worklet planar output. Test
+distinct left/right impulses and short buffers through those production adapters.
 
 PlayClip supports immediate start (next applied boundary) or an absolute
 StartFrame no more than **two session seconds** ahead of the owner's latest
@@ -279,6 +299,15 @@ low-level miniaudio resampler with low-pass filtering when downsampling. Bound
 input requirement using maximum rate, interpolation/history and output span;
 assemble wrap-aware source scratch from immutable PCM. Never assume input
 frames equal output frames. Preserve phase and produced/consumed counts.
+
+Derive conversion ratios from source/session sample rates and playback Rate,
+never from the lengths of supplied input and requested output buffers. Prepared
+resident PCM is already at session rate, so its playback ratio is Rate. Partial
+chunks, filter history and EOF padding change buffer lengths without changing
+that ratio. Carry fractional phase/history across calls; safely supply required
+neighbor samples at EOF and loop seams. Test preparation at 44100/48000 Hz in
+both directions, noninteger ratios, one-frame tails and differently partitioned
+output requests. A per-call phase reset or unguarded next-sample read is invalid.
 
 At Rate 1, a direct PCM path is desirable only if switching to/from the resampler
 preserves cursor/phase and filter continuity. A0/A2 must establish that contract;
@@ -399,6 +428,14 @@ fades any existing physical output, then terminally acknowledges; a voice
 never mixed can terminate directly. Scheduled voices do not advance before
 StartFrame. Stops terminate both policies; virtualization is not a lifetime exit.
 
+Advance-policy finite sounds also expire while a bus is muted or a gameplay
+modifier makes them inaudible. Unmuting must not release a backlog of expired
+transients. Descriptors choose policy explicitly: advancing loops and killable
+transients are useful application presets, not implicit policies inherited from
+bus mute. Resident virtualization saves DSP; it does not evict shared clip PCM.
+Virtual voices still charge logical/group capacity and asset pins until terminal
+acknowledgment. Test repeated mute/context cycles, expiry and bounded reclamation.
+
 Streams stay physically allocated, consume at rate 1 even under user mute, and
 do not seek for virtualization. This limits v1 music/dialogue streaming to four
 instances but avoids unbounded decoder seeks/reentry. No compressed-stream
@@ -443,6 +480,30 @@ counts and tune content/headroom. A limiter with lookahead would require its own
 quality/latency contract and is deferred. Numeric nonfinite output becomes zero
 and a fault counter; do not log from the callback.
 
+For every bus, expose per-channel input and post-gain peak/RMS over a documented
+fixed metering window. Input is the sum of directly routed voices plus children
+after each child's own gain, before this bus's gain; post-gain is after this
+bus's actual ramped gain and before forwarding/final clamp. Root post-gain is
+therefore pre-clamp output. These taps distinguish quiet content from attenuation
+without applying ancestors twice. Display dBFS as `20*log10(amplitude)` on the
+owner; represent zero explicitly as silence. Sample peak/RMS are not true-peak
+or perceptual LUFS measurements. Show current gain and target separately.
+
+### User volume controls
+
+Keep UserGain an amplitude API. Application/demo sliders use normalized u in
+[0,1] with an explicit dB range R, initially 40 dB:
+
+`UserGain(u) = 0 when u == 0; otherwise 10^((u - 1) * R / 20)`.
+
+Thus u=0.5 gives 0.1 (-20 dB), u=1 gives 1, and zero means exact mute. Validate
+finite inputs/range and convert on the owner before ordinary gain submission;
+the zero endpoint still uses the normal ramp. This is a tunable useful control
+curve, not a universal model of perceived loudness. Persist slider position and
+a separate mute flag; unmute restores the remembered setting. Gameplay base
+mix/modifiers must not overwrite it. Applications choose category controls,
+including dialogue/accessibility controls; no master/music-only restriction.
+
 Gameplay requests a dialogue attenuation modifier when needed, with attack and
 release weights. This is explicit state ducking, not a signal-driven compressor.
 A true sidechain ducker or low-pass/reverb stage can be added privately later
@@ -456,6 +517,16 @@ For overlapping states, each modifier owner removes only its own instance;
 interrupting any ramp starts at the current value. A state-graph director,
 importance-bucket EQ and event replacement rules are extensions above this API,
 not a second render-thread policy engine.
+
+For overlapping dialogue, an application context tracks accepted voice handles
+and owns one shared duck modifier while any remain nonterminal. Add membership
+only after successful admission; a failed batch creates no phantom speaker or
+duck. Remove membership through durable terminal observation, including natural
+completion, cancellation and errors; release the modifier only after the last
+member or explicit context teardown. If modifier creation is part of playback,
+reserve/publish both transactionally through the batch. Never restore a bus to
+gain 1 on Stop: removing the owned modifier preserves user settings and other
+contexts. Modifier fade/removal still follows its renderer acknowledgment rules.
 
 ## 9 Streaming and content preparation
 
@@ -561,6 +632,32 @@ position once; moving sources update while relevant. Suppressing redundant
 updates is allowed on the owner before publication. World-scale emitter grids,
 spatial activation, aggregation and update-rate LOD remain outside this mixer.
 
+### Application presentation and event policy
+
+Keep a thin application-owned adapter between typed game actions/data and audio
+commands. It copies resolved parameters, tracks accepted handles, and owns loop/
+modifier lifetimes without retaining entity pointers in the renderer. A detached
+one-shot may finish at its last copied pose after entity removal; persistent
+entity-owned loops must receive Stop on owner removal. State contexts release
+their modifiers on teardown. No ECS, general event bus or MVVM framework is an
+Audio dependency.
+
+Group quotas limit simultaneous voices, not sequential duplicate triggers. The
+demo adapter should demonstrate a fixed-capacity policy table keyed by numeric
+event ID and owner tag: optional cooldown and suppression while an accepted
+instance is still active. Track Pending and virtual instances too. Evaluate
+policy before reserving a voice or pin; report owner-side PolicySuppressed with
+Cooldown/AlreadyActive causes, creating no VoiceHandle. Reject a new policy key
+explicitly if the bounded table is full. Reclaim inactive entries after their
+cooldown expires; owner-key reuse needs a generation or unique lifetime tag.
+Update cooldown/active membership only
+after successful engine admission; QueueFull/NotReady/GroupCapacity must not
+consume cooldown or leave active/duck state behind. Use an explicitly chosen
+application clock (for example simulation ticks), record policy decisions/time
+for diagnostics, and do not use stale RenderFrame snapshots as that clock.
+This is an application example using ordinary commands, not an engine macro
+interpreter, RTPC language or per-frame gameplay query system.
+
 ## 10 Output lifecycle and browser integration
 
 Modes are explicit: Device, Offline, Disabled. A failed Device init returns a
@@ -634,6 +731,13 @@ starvation/EOF/errors, assets/bytes, peak/RMS/clipping and active bus modifiers.
 Per voice show handle/tag, selected asset, start/cursor, effective gain,
 priority, virtualization/termination reason and source starvation. Include
 snapshot frame and whether the cached view is stale.
+
+Include virtual age in rendered frames, logical/group high-water and unreclaimed
+terminal counts so retained finite voices and pins are visible. Owner diagnostics
+include policy suppression separately from engine admission failures; tag them
+with the event/owner key and chosen policy clock. A stale renderer snapshot must
+not regress owner-known Pending or terminal state. Meter records include tap,
+window and channel units defined in section 8.
 
 Make silence explainable without listening alone. Per-voice snapshots expose
 state and independent cause flags for NotStarted, DistanceZero, UserMuted,
@@ -738,3 +842,12 @@ mixing, dynamic group limits, restart/pause-on-virtual policies and large-world
 emitter management. Preserve the seams described above, but require a consumer
 and measurements before adding them. The follow-up review strengthens v1's
 existing ownership and policy boundaries rather than expanding its DSP graph.
+
+Retain direct bounded mixing in the device/worklet callback. A separate producer
+mixing ahead into an output FIFO is a valid alternative, but adds output latency,
+another thread and underflow/clock/drain ownership contracts. Revisit only if
+measured callback workload or a platform requirement justifies it, with a fixed
+FIFO and explicit latency, starvation and quiescence tests. Source PCM decode
+prefill is distinct from an output FIFO and does not impose its latency. Thread
+priority can help scheduling but is not proof of meeting deadlines; renderer
+spinlocks, semaphore waits and unbounded queue draining remain forbidden.

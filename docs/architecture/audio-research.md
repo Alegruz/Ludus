@@ -157,9 +157,9 @@ overlap analysis and spatial loading belong to a future asset/world system.
 The catalog's *Game Programming Gems 6* “Real-Time Mixing Busses” by James Boer
 is relevant, but the local PDF did not expose searchable chapter text in the
 attempted extraction. No finding here is attributed to that chapter.
-Game Audio Programming volumes **1, 3 and 4** were subsequently added locally
-and reviewed below. Volumes **2 and 5** are unavailable and were deliberately
-excluded as requested. No finding is attributed to them. Chapters not listed
+Game Audio Programming volumes **1, 3 and 4**, followed by **2**, were added
+locally and reviewed below. Volume **5** is unavailable and remains excluded.
+No finding is attributed to it. Chapters not listed
 below, including other catalog entries on automated testing, remain reading
 pointers rather than evidence. Kiro needs neither these PDFs nor companion CDs.
 
@@ -368,6 +368,180 @@ terminal/HTML tools first, with an optional later UI consumer of the same record
 No ImGui dependency, raw object-pointer clipboard feature or callback-time
 breakpoint is needed. The book's middleware/engine version details do not
 establish current compatibility for Ludus.
+
+## Follow-up: Game Audio Programming 2
+
+Source: local private `references/Game Audio Programming 2 Principles and Practices.pdf`.
+Eight relevant chapters/selected sections were reviewed, as scoped below, bringing
+the Game Audio Programming review to eighteen chapter entries across volumes 1-4.
+This is not a cover-to-cover review. Printed/PDF locators are one-based; in this
+copy PDF page = printed page + 27. Figure 19.2 (printed p. 310, PDF p. 337) and
+Figure 13.1 (printed p. 227, PDF p. 254) were rendered and visually inspected.
+The curve and presentation-boundary findings below are original paraphrases;
+no extracted pages, figures, example code or private PDFs enter the Kiro package.
+
+### Volume 2 review decisions
+
+| Finding | Ludus decision | Implementation/acceptance location |
+| --- | --- | --- |
+| Sliders need an intentional gain curve and exact mute | Add an owner-side normalized-to-dB example, initially 40 dB; keep UserGain amplitude-based and player settings separate | Design 8; AU12; A3 |
+| Muted finite voices can become stale playback backlogs | Reinforce natural expiry/kill policy, retained PCM pins and mute-cycle reclamation tests | Design 7/11; AU10/AU16; A2 |
+| Concurrency caps do not suppress successive duplicate events | Add a bounded application cooldown/AlreadyActive example before admission, with explicit clock and rollback | Design 9; AU16; A3 |
+| Presentation and mix-state owners need clear lifetimes | Copy typed action data; stop owned loops on entity removal; release shared dialogue duck only after the last durable terminal | Design 8/9; AU12/AU16; A1/A3 |
+| Buffer sizes do not determine resampling ratios or channel meaning | Specify rate-derived ratios, continuous phase/history and checked frame/layout capacities; test partial tails and adapter parity | Design 5/6; AU08; A2 |
+| Meters can mislead without taps, units and windows | Specify per-channel input/post-gain peak/RMS, current/target gain and owner-side dBFS display | Design 8/11; AU12/AU16; A3 |
+| A mixer thread plus FIFO is an architectural tradeoff | Retain bounded direct callback DSP; defer output mixing ahead until measured need and explicit latency/underflow/quiescence contracts | Design 13; AU04; A0/A7 |
+
+### Volume 2, chapter 19: useful volume controls
+
+Guy Somberg, “Implementing Volume Sliders,” printed pp. 307-316,
+PDF pp. 334-343.
+
+Linear amplitude does not give evenly spaced dB changes. A normalized slider
+mapped through an explicit dB interval gives a useful predictable control, with
+zero treated separately as exact mute. Adopt a 40 dB initial range: halfway is
+-20 dB (amplitude 0.1), full is 0 dB, and zero mutes. Convert on the control
+owner and use existing gain ramps, including at the discontinuous zero endpoint.
+Persist slider position and a separate mute flag rather than the composed mix
+gain, so gameplay modifiers cannot erase the player's preference.
+
+The curve/range is a tunable application choice, not a universal perceptual law.
+Do not adopt the chapter's master/music-only control recommendation: Ludus leaves
+category and accessibility controls to the application. No new render-time
+slider subsystem is needed.
+
+### Volume 2, chapter 9: finite virtual voices and ownership
+
+Nic Taylor, “Understanding Wwise Virtual Voices,” printed pp. 147-156,
+PDF pp. 174-183.
+
+Threshold-based virtualization can result from bus mute, mix state or distance,
+not just a quiet sample. Restart/resume behavior for finite fire-and-forget cues
+can retain old sounds and make them reappear after an unmute or scene change.
+Use the chapter's failure cases to strengthen Ludus acceptance tests: advancing
+finite voices reach EOF while muted; kill-policy cues terminate; repeated context
+cycles create no stale burst or retained-slot/pin growth.
+
+Keep the existing two policies. Do not add paused/restart virtual modes merely
+because middleware supports them, or silently derive policy from a bus. Ludus
+resident virtualization avoids DSP but retains shared prepared PCM; it is not
+asset eviction. Expose virtual age and ownership counts. The chapter's historical
+Wwise versions and buffer-flushing behavior do not define Ludus stream semantics;
+streams remain protected, consuming their prepared PCM at rate 1 under mute.
+
+### Volume 2, chapter 5: resampling across unequal buffers
+
+Guy Somberg, “Audio Resampling,” printed pp. 85-96, PDF pp. 112-123.
+
+Interpolation need not materialize a large least-common-multiple-rate stream.
+However, a buffer-length ratio only describes a rate ratio when both buffers
+represent the same time interval. Real partial chunks, history and tails violate
+that assumption. Specify source/session rates and playback Rate independently
+of buffer sizes; retain fractional phase, history and consumed/produced counts
+across calls. Guard neighbor reads at EOF and loop seams, and test 44100/48000
+conversion, tiny tails and alternate output partitions.
+
+The pedagogical implementation is not a production kernel: per-call phase reset,
+unguarded next-sample access and absent anti-alias filtering require additional
+work. Retain the audited preallocated low-pass resampler and quality gates;
+neither copy the example nor call unfiltered linear interpolation high quality.
+
+### Volume 2, chapter 13: a thin presentation adapter
+
+Jon Mitchell, “Techniques for Improving Data Drivability of Gameplay Audio Code,”
+printed pp. 225-234, PDF pp. 252-261.
+
+A presentation layer can translate game model values into audio actions and
+parameters without coupling sound-engine objects to every game object. Adopt
+that boundary as a small application adapter: typed actions/data, copied resolved
+values, prepared descriptors and tracked accepted handles. Detached one-shots
+can finish after entity removal; owned persistent loops must stop. Context owners
+release their modifiers at teardown. Never pass game pointers into rendering.
+
+Do not require the book's MVVM machinery, parameter/remapping trees or a general
+RTPC language. Neighborhood mixing, spatial hashes and staggered updates are
+large-world extensions; the chapter's update cadence is an example, not a Ludus
+timing constant. The common mixer remains independent of ECS and world queries.
+
+### Volume 2, chapter 14: suppression before admission
+
+Akihiro Minami and Yuichi Nishimatsu, “Data-Driven Sound Limitation System,”
+printed pp. 235-243, PDF pp. 262-270.
+
+Content policies can reject duplicate/recent events, limit categories or attenuate
+other categories. Ludus groups already cover simultaneous admission/selection;
+they do not stop a fast sequence of short repeated triggers. Demonstrate a
+fixed-capacity application table keyed by numeric event/owner, with explicit
+cooldown and AlreadyActive suppression before slot/pin reservation. Count accepted
+Pending/virtual handles, not a lagging Mixed snapshot. Update policy state only
+after successful admission; engine failure must not consume cooldown, leave
+phantom activity or create a duck. Record suppression reasons and the chosen
+application clock; table exhaustion is an explicit application failure.
+
+For overlapping dialogue, own one shared attenuation context and remove its
+modifier only after the final accepted member durably terminates. Never restore
+category gain to 1 on Stop, which would override user gain or another context.
+Preserve batch rollback and durable completion despite dropped diagnostics. A
+runtime macro interpreter, class per policy command and renderer gameplay query
+system are unnecessary for these small examples.
+
+### Volume 2, chapter 15: mix intent and trustworthy meters
+
+Tomas Neumann, “Realtime Audio Mixing,” printed pp. 245-257, PDF pp. 272-284.
+
+Importance, audibility, resource limits and game state are related but distinct
+mix inputs. Existing numeric priority, group quotas and owner-resolved modifiers
+fit this distinction. State lifetime needs explicit cleanup so abandoned owners
+do not leave attenuation active. Strengthen the metering contract: per-channel
+peak/RMS input and post-gain taps, fixed windows, actual ramped versus target
+gain, and explicit dBFS conversion/silence on the owner. Child gain is already
+included at its parent's input; each ancestor still applies once.
+
+Do not infer perceptual loudness or true peaks from sample peak/RMS. Automatic
+HDR windows, signal-driven compression and spectral analysis remain extensions
+with consumers and quality/cost evidence. A captured offline signal can support
+later analysis without adding FFT or display work to the callback.
+
+### Volume 2, chapter 3: direct mixing versus output mixing ahead
+
+Dan Murray, “Multithreading for Game Audio.” Reviewed printed pp. 33-42 and
+49-56, PDF pp. 60-69 and 76-83: sections 3.1-3.4, the opening of 3.5, section
+3.6 and Appendices A/B. The remaining worker discussion and platform Appendix C
+were not reviewed.
+
+Device pull must progress independently of game frames. A producer mixer thread
+and PCM output ring can isolate expensive processing, but its buffering adds
+output latency and another scheduling/ownership boundary. Coherent command
+publication matters in either architecture. Preserve Ludus's bounded batches,
+immutable publication and limited application work; do not copy examples that
+ignore push failure or drain indefinitely. Decode-source prefill is distinct
+from an output FIFO.
+
+Retain direct bounded DSP in the device/worklet callback. This is compatible
+with [PortAudio's callback guidance](https://portaudio.com/docs/v19-doxydocs/writing_a_callback.html),
+whose example generates samples there while its guidance excludes potentially
+unbounded calls. It does not prove Ludus performance. A mixer thread is a later
+measured alternative with bounded FIFO, underflow/timeline, latency and teardown
+contracts. Spinlocks, semaphore waits and priority assumptions cannot substitute
+for bounded renderer work or measured scheduling evidence.
+
+### Volume 2, chapter 4: channel meaning and layout
+
+Ethan Geller, “Designing a Channel-Agnostic Audio Engine.” Reviewed printed
+pp. 61-67 and 81-84, PDF pp. 88-94 and 108-111: introductory format/layout
+discussion and concluding design tradeoffs. The intervening graph implementation
+was not reviewed.
+
+A channel count is insufficient to identify a speaker arrangement or encoded
+soundfield. Explicit formats and layout conversions prevent plausible-looking
+but incorrect output. Tighten Ludus's small PCM contract: mono/stereo meaning,
+interleaved/planar layout, frames versus sample values and checked capacities.
+Adapt through private boundaries, with distinct L/R impulse tests across offline,
+native and worklet output. Reject unsupported layouts instead of guessing.
+
+This does not require arbitrary channel graphs, intermediary panning formats,
+ambisonics or plugin mixer hierarchies. Keep stereo v1; a future format consumer
+must bring routing, speaker semantics and quality/CPU fixtures.
 
 ## Repository fit and alternatives
 

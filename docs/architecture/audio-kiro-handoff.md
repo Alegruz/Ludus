@@ -11,9 +11,9 @@ Use **Prompt 1** after these five files are in Kiro's checkout:
 The package selects a small Ludus software mixer, private miniaudio device/codec/
 resampler primitives, bounded voices/commands/buses, a separate streaming worker,
 and native, Wasm AudioWorklet and offline adapters. It includes seven private
-Gems chapter findings, a review of ten relevant chapters/selected sections from
-Game Audio Programming **1, 3 and 4**, and current primary references. Volumes
-2 and 5 were excluded. Kiro needs no PDF, book
+Gems chapter findings, a review of eighteen relevant chapters/selected sections
+from Game Audio Programming **1-4**, and current primary references. Volume 5
+remains excluded. Kiro needs no PDF, book
 figure or companion CD. This package proposes architecture; no audio code,
 dependency acquisition, benchmark or playback verification has been performed.
 
@@ -24,6 +24,14 @@ validation and explainable silence. These changes are already integrated into
 requirements/design/tasks; use the revised prompts below. Larger importance
 directors, spatial world management and additional virtualization policies remain
 extensions, with their rationale recorded in the research.
+
+Volume 2 further tightens PCM format/capacity and resampler phase contracts,
+muted finite-voice expiry, dB slider mapping and metering taps. It adds small
+application examples for duplicate/cooldown suppression, owned-loop teardown and
+overlapping dialogue duck lifetime. Accepted reservations and durable terminals
+remain authoritative despite stale snapshots. The architecture retains direct
+bounded callback mixing; an extra output FIFO/thread and general policy/channel
+frameworks remain deferred.
 
 ## Prompt 1 Implement the complete sequence
 
@@ -75,6 +83,13 @@ Implement sample-clock starts, 128-frame control boundaries, exact output fillin
 fractional cursors, audited rate conversion, explicit loops/EOF, persistent ramps,
 mono meter-based panning, stereo beds, deterministic priority/audibility selection,
 virtual loop advance and fade transitions counted within the 64-voice budget.
+Name mono/stereo meaning, interleaved/planar layout and checked frame/sample
+capacities explicitly. Derive resampling ratios from rates, not buffer lengths;
+preserve phase/history across partial chunks and guard next-sample reads at EOF/
+loops. Test noninteger conversion, one-frame tails and adapter L/R impulse parity.
+Finite advancing virtual voices expire under mute; unmute cannot resurrect old
+transients. Virtual residents still charge logical/group limits and shared PCM
+pins until terminal acknowledgment; virtualization is not PCM eviction.
 Keep selection envelopes out of selection scores. Support separate listener
 panning/attenuation positions with a per-voice attenuation-origin choice, preserving
 true emitter positions. Keep gameplay importance/director policy on the owner
@@ -85,6 +100,23 @@ encoded bytes and streams decoded PCM; do not claim HTTP streaming memory bounds
 Cold worker decode yields after <=4096 prepared output frames to recheck refill
 deadlines and cancellation. Measure blocking calls/runway and preparation latency
 separately from applied Play and device latency; priority alone cannot preempt I/O.
+
+Keep UserGain amplitude-based and map demo sliders to dB on the owner (initial
+40 dB range; u=0/0.5/1 gives 0/0.1/1), with exact mute and remembered settings.
+Expose input/post-gain per-channel peak/RMS with fixed windows/taps, current and
+target gain, and owner-side dBFS display; do not claim true-peak or LUFS metering.
+Build a thin application action/data adapter using copied values and accepted
+handles. Stop owned loops on entity removal; detached one-shots may finish.
+Demonstrate bounded event/owner cooldown and AlreadyActive suppression before
+admission, including Pending/virtual handles, explicit clock and table-full result.
+Only successful admission updates policy state. Queries expose accepted Pending
+and acquired terminals independently of stale renderer details. Overlapping
+dialogue owns a shared duck until its last durable terminal; admission failure
+must create no activity/duck. Reserve required play/modifier changes transactionally.
+Reclaimed/stale generations of previously accepted handles also clear adapter
+membership; bound policy entry lifetime and use generation-aware owner tags.
+Remove the owned modifier rather than restoring gain to 1. These are application
+examples; no engine macro language, ECS framework or gameplay queries in rendering.
 
 Use the same production renderer offline, on Linux through a stable miniaudio
 device owner, and on a pinned Emscripten Wasm AudioWorklet. Add a separate audio
@@ -164,6 +196,14 @@ incremental cold work not starving refill; independent silence cause flags;
 descriptor validation and audio gym reproductions. Verify publication/retirement
 memory ordering and immutable consumer progress under producer floods.
 
+Check frame/sample capacities and planar/interleaved L/R parity; rate-derived
+conversion with persistent phase across partial buffers; finite expiry while
+muted and no unmute backlog; retained virtual PCM pins and bounded reclamation.
+Verify accepted Pending/durable terminal overrides of stale snapshots; suppression
+before admission and cooldown/activity rollback; owned-loop teardown; overlapping
+dialogue duck cleanup despite dropped diagnostics. Test dB slider endpoints,
+remembered mute settings and per-channel metering at documented taps/windows.
+
 Verify native device callback quiescence and loss/restart, actual browser shared
 worklet/worker build, genuine gesture resume, suspension/processor failures,
 late callbacks and async context close before reclamation. Check isolated and
@@ -183,17 +223,23 @@ Use this only if Kiro has already begun implementing the previous specification.
 
 ```text
 Reconcile existing Ludus audio work with the revised requirements/design/tasks
-under .kiro/specs/audio/ and the Game Audio Programming 1/3/4 follow-up in
+under .kiro/specs/audio/ and the Game Audio Programming 1-4 follow-ups in
 docs/architecture/audio-research.md. Read AGENTS.md and steering first. Inspect
 actual code and evidence; preserve completed conforming work and unrelated edits.
-No private PDFs or volumes 2/5 are needed, and no new architecture survey is needed.
+No private PDFs or volume 5 are needed, and no new architecture survey is needed.
 
 Implement missing explicit state transitions, resident concurrency-group admission/
 selection, split listener, incremental cold-worker scheduling and explainable
 diagnostics/descriptor validation/audio gym. Default group zero and coincident
 listener positions preserve prior behavior. Keep the 64 mixed-voice hard cap,
-durable retirement and callback restrictions. Test the new adversarial/state/
-group/spatial/worker cases through production paths. Update milestone evidence
+durable retirement and callback restrictions. Incorporate volume 2's explicit
+PCM layout/capacity and continuous resampler phase, muted finite expiry, dB sliders
+and metering taps. Add bounded application duplicate/cooldown policy and owned
+loop/context lifetimes; use authoritative accepted/terminal accounting, not stale
+Mixed snapshots, and roll back policy/duck state on admission failure. Keep direct
+bounded callback mixing and the application policy boundary. Test the new state/
+group/spatial/worker/format/mute/policy cases through production paths. Update
+milestone evidence
 honestly; never mark unavailable device/browser or performance checks passed.
 Report implemented deltas, validation and remaining gates. Do not push, merge
 or deploy unless separately instructed.
