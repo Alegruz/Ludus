@@ -424,9 +424,11 @@ const GameApiTable& Table() noexcept
 }
 } // namespace
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) — fixed ABI entry signature
 extern "C" LUDUS_GAME_API_EXPORT ludus::runtime::game_api::Status LudusGetGameApi(
     ludus::foundation::uint32 hostAbiMajor, ludus::foundation::uint32 hostAbiMinor,
     ludus::runtime::game_api::GameApiTable* outTable) noexcept
+// NOLINTEND(bugprone-easily-swappable-parameters)
 {
     using namespace ludus::runtime::game_api;
     (void)hostAbiMinor;

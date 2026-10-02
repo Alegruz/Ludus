@@ -51,6 +51,8 @@ enum class PlayState : ludus::foundation::uint8
 class HostSession final
 {
 public:
+    // projectId/gameId/controlFd are a fixed construction signature.
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     HostSession(uint64 projectId, uint64 gameId, int32 controlFd) noexcept;
     ~HostSession() noexcept;
 

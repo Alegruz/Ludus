@@ -35,7 +35,7 @@ using protocol::Message;
 using protocol::ReloadPhase;
 
 // Checkpoint body cap (design 8): 16 MiB.
-constexpr usize kMaxCheckpointBody = 16u * 1024u * 1024u;
+constexpr usize kMaxCheckpointBody = static_cast<usize>(16) * 1024 * 1024;
 } // namespace
 
 std::string_view PlayStateName(PlayState state) noexcept
@@ -62,6 +62,7 @@ std::string_view PlayStateName(PlayState state) noexcept
     return "Unknown";
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 HostSession::HostSession(uint64 projectId, uint64 gameId, int32 controlFd) noexcept
     : ProjectId_(projectId), GameId_(gameId), ControlFd_(controlFd)
 {

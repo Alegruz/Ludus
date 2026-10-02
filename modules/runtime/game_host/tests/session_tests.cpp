@@ -31,6 +31,7 @@ using protocol::Message;
 
 namespace
 {
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 void SendCommand(int fd, const Message& m)
 {
     std::vector<ludus::foundation::uint8> frame;
@@ -47,6 +48,7 @@ void SendCommand(int fd, const Message& m)
 // Collect events for a short window using a caller-owned reader so partial
 // frames survive across calls. Uses poll with a timeout so a quiet channel
 // never blocks the test.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 std::vector<Message> DrainEvents(int fd, FrameReader& reader, int budgetMs)
 {
     std::vector<Message> events;

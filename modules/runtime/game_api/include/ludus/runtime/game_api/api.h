@@ -172,7 +172,11 @@ using GetGameApiFn = Status (*)(uint32 hostAbiMajor, uint32 hostAbiMinor, GameAp
 
 // The exported symbol is unmangled C linkage with a platform-default calling
 // convention (design 6). A module defines exactly this and nothing else public.
+// The hostAbiMajor/hostAbiMinor parameter order is the fixed ABI entry
+// signature; a module definition should carry the same NOLINT.
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
 extern "C" LUDUS_GAME_API_EXPORT ::ludus::runtime::game_api::Status
 LudusGetGameApi(::ludus::foundation::uint32 hostAbiMajor,
                 ::ludus::foundation::uint32 hostAbiMinor,
                 ::ludus::runtime::game_api::GameApiTable* outTable) noexcept;
+// NOLINTEND(bugprone-easily-swappable-parameters)

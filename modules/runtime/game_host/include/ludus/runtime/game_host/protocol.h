@@ -27,15 +27,17 @@ using ludus::foundation::usize;
 inline constexpr uint32 kProtocolVersion = 1;
 
 // Bounds (design 10). Enforced by the framer and the command queue.
-inline constexpr usize kMaxControlFrameBytes = 64u * 1024;    // 64 KiB control frame
-inline constexpr usize kMaxSchemaTransferBytes = 256u * 1024; // 256 KiB schema transfer
-inline constexpr uint32 kMaxPendingCommands = 128;            // 128 pending commands
-inline constexpr usize kMaxCommandQueueBytes = 1024u * 1024;  // 1 MiB total command queue
-inline constexpr uint32 kMaxPropertyBatch = 64;               // 64 property values per batch
-inline constexpr uint32 kMaxRetainedResults = 128;            // mutation-result ledger
-inline constexpr usize kMaxStringFieldBytes = 4096;           // 4 KiB string field
+inline constexpr usize kMaxControlFrameBytes = static_cast<usize>(64) * 1024;    // 64 KiB control frame
+inline constexpr usize kMaxSchemaTransferBytes = static_cast<usize>(256) * 1024; // 256 KiB schema transfer
+inline constexpr uint32 kMaxPendingCommands = 128;                               // 128 pending commands
+inline constexpr usize kMaxCommandQueueBytes = static_cast<usize>(1024) * 1024;  // 1 MiB total command queue
+inline constexpr uint32 kMaxPropertyBatch = 64;                                  // 64 property values per batch
+inline constexpr uint32 kMaxRetainedResults = 128;                               // mutation-result ledger
+inline constexpr usize kMaxStringFieldBytes = 4096;                              // 4 KiB string field
 
-// Editor/supervisor -> host commands (design 10 minimum set).
+// Editor/supervisor -> host commands (design 10 minimum set). The 32-bit base
+// is a fixed ABI wire width, not a value-count choice.
+// NOLINTNEXTLINE(performance-enum-size)
 enum class CommandKind : uint32
 {
     Hello = 0,
@@ -52,6 +54,7 @@ enum class CommandKind : uint32
 };
 
 // Host -> editor/supervisor events (design 10).
+// NOLINTNEXTLINE(performance-enum-size)
 enum class EventKind : uint32
 {
     SessionReady = 0,
@@ -65,6 +68,7 @@ enum class EventKind : uint32
 // Terminal command status. Reuses the editor failure vocabulary plus the new
 // explicit statuses required by the design. Ordinary returned failure,
 // native HostFailed and CleanupUnknown stay distinguishable.
+// NOLINTNEXTLINE(performance-enum-size)
 enum class CommandStatus : uint32
 {
     Ok = 0,
@@ -82,6 +86,7 @@ enum class CommandStatus : uint32
 };
 
 // Reload phases reported in a ReloadPhase event (design 4/7).
+// NOLINTNEXTLINE(performance-enum-size)
 enum class ReloadPhase : uint32
 {
     Validate = 0,
