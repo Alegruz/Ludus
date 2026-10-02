@@ -52,6 +52,7 @@ struct Matrix3
     // so a resumed assertion yields a defined in-bounds read rather than an
     // out-of-range access (MA05). Direct Columns[] indexing keeps ordinary C++
     // preconditions; this SDK indexed helper is memory-safe regardless.
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): (row, column) is the conventional element-accessor order.
     [[nodiscard]] constexpr float32 At(usize row, usize column) const noexcept
     {
         LUDUS_ASSERT(row < 3 && column < 3);
@@ -103,6 +104,7 @@ struct Matrix4
 
     // See Matrix3::At: resumable-assertion-safe (index clamped after the assert
     // so a resumed assertion cannot cause an out-of-range access; MA05).
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): (row, column) is the conventional element-accessor order.
     [[nodiscard]] constexpr float32 At(usize row, usize column) const noexcept
     {
         LUDUS_ASSERT(row < 4 && column < 4);
