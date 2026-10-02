@@ -18,6 +18,13 @@ namespace
 {
     return std::fabs(a - b) <= t;
 }
+// Overload so a float32 result (e.g. a Plane coefficient) can be compared
+// without an implicit float->double promotion at the call site
+// (-Wdouble-promotion -Werror). The widening is explicit here instead.
+[[nodiscard]] bool Close(float a, double b, double t = 1e-5)
+{
+    return std::fabs(static_cast<double>(a) - b) <= t;
+}
 constexpr double kInf = std::numeric_limits<double>::infinity();
 } // namespace
 
@@ -147,15 +154,15 @@ namespace
     for (int i = 0; i <= kSteps; ++i)
     {
         const double s = static_cast<double>(i) / kSteps;
-        const double ax = p0.X + s * (static_cast<double>(p1.X) - p0.X);
-        const double ay = p0.Y + s * (static_cast<double>(p1.Y) - p0.Y);
-        const double az = p0.Z + s * (static_cast<double>(p1.Z) - p0.Z);
+        const double ax = static_cast<double>(p0.X) + s * (static_cast<double>(p1.X) - static_cast<double>(p0.X));
+        const double ay = static_cast<double>(p0.Y) + s * (static_cast<double>(p1.Y) - static_cast<double>(p0.Y));
+        const double az = static_cast<double>(p0.Z) + s * (static_cast<double>(p1.Z) - static_cast<double>(p0.Z));
         for (int j = 0; j <= kSteps; ++j)
         {
             const double t = static_cast<double>(j) / kSteps;
-            const double bx = q0.X + t * (static_cast<double>(q1.X) - q0.X);
-            const double by = q0.Y + t * (static_cast<double>(q1.Y) - q0.Y);
-            const double bz = q0.Z + t * (static_cast<double>(q1.Z) - q0.Z);
+            const double bx = static_cast<double>(q0.X) + t * (static_cast<double>(q1.X) - static_cast<double>(q0.X));
+            const double by = static_cast<double>(q0.Y) + t * (static_cast<double>(q1.Y) - static_cast<double>(q0.Y));
+            const double bz = static_cast<double>(q0.Z) + t * (static_cast<double>(q1.Z) - static_cast<double>(q0.Z));
             const double dx = ax - bx, dy = ay - by, dz = az - bz;
             best = std::fmin(best, dx * dx + dy * dy + dz * dz);
         }
