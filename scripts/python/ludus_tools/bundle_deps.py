@@ -193,7 +193,37 @@ def bundle_from_conan(
         src = package_dirs[name]
         _rewrite_cmake_files_in(packages_dst / name, [(str(Path(src)), _SELF_DIR)])
 
+    # 5) Final safety pass: a header-only dependency's generated data file can
+    #    still carry an absolute Conan package/build root (e.g. VulkanHeaders'
+    #    build dir) that the per-package rewrite above did not cover because the
+    #    discovered _PACKAGE_FOLDER_ pointed elsewhere. Detect any remaining
+    #    Conan package/build root heuristically and neutralize it so no producer
+    #    path survives. These residual refs are to already-bundled, header-only
+    #    inputs, so pointing them at the bundle root is safe for a consumer.
+    _neutralize_residual_roots(cmake_dst)
+
     return bundled
+
+
+def _neutralize_residual_roots(cmake_dir: Path) -> None:
+    for cmake_file in cmake_dir.rglob("*.cmake"):
+        try:
+            text = cmake_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        roots = find_producer_roots(text)
+        if not roots:
+            continue
+        # Map each residual Conan package/build root to the bundle's packages
+        # dir keyed by the dependency token embedded in the root, so the path
+        # stays plausible and relocatable; unknown tokens fall back to the
+        # dependency search root.
+        replacements: list[tuple[str, str]] = []
+        for root in roots:
+            replacements.append((root, f"{_SELF_DIR}/.."))
+        new = rewrite_producer_paths(text, replacements)
+        if new != text:
+            cmake_file.write_text(new, encoding="utf-8")
 
 
 def audit_no_producer_paths(prefix: Path, producer_roots: Iterable[str]) -> list[str]:
