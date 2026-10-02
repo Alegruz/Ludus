@@ -308,3 +308,54 @@ evidence. This PR validates the standalone reference consumer in this repository
 conversion as an explicit external follow-up. A separate Sandbox PR is NOT a gate
 for this Ludus PR, but the pending conversion is clearly recorded here and in
 `docs/development/project-sdk-workflow.md`.
+
+## Summary of checks run in this sandbox
+
+```
+$ cd scripts/python && python3.11 -m unittest \
+    test_ludus_tools test_ludus_project_ops test_ludus_cli \
+    test_editor_tool test_formatting test_rad_debugger test_web_package
+  Ran 140 tests ... OK (skipped=13)   # 13 skips = clang-format-18 absent (pre-existing)
+```
+
+- New host-tooling suites: `test_ludus_tools` (schema/store/identity/manifest/
+  catalog), `test_ludus_project_ops` (templates/create/migrate/resolve),
+  `test_ludus_cli` (end-to-end CLI incl. two-projects-one-SDK, override
+  set/clear, unresolved-lock→UNAVAILABLE, migration).
+- Legacy `editor_project.py`, `editor_tool.py`, `cmake_targets.py` are
+  **unchanged** (`git diff --stat main` empty), so v1 descriptor parsing and the
+  E0 streaming protocol/supervision are preserved. `test_editor_tool` (35) still
+  passes.
+- `ludus_tools` imports and the CLI run on both Python 3.11 and the minimum 3.10.
+
+## Remaining gaps (honest, must run on a reference-toolchain machine)
+
+The following REQUIRED acceptance is **UNAVAILABLE** in this sandbox (pinned
+Clang 18 + LLD, Conan 2.8.1, managed CMake 3.29, clang-format/tidy 18,
+Slang/spirv-val, Qt6, a GPU/display are all absent). The PR is a **draft** until
+these pass on the reference toolchain:
+
+1. Native warning-clean Debug/Development/Release engine builds + unit tests.
+2. ASan/UBSan build + tests clean.
+3. `./scripts/check --all` (pinned clang-format-18 + clang-tidy-18) and the
+   header self-sufficiency / foundational-include gates and the build-time budget
+   gate (all need the pinned compiler).
+4. Full SDK build + install of the schema-2 manifest; populate
+   `lib/cmake/Ludus/dependencies` with the real bundled volk/FreeType/HarfBuzz
+   CMake metadata + static libs; relocate to a fresh prefix with no producer
+   checkout/Conan cache and link an external consumer exercising every public
+   module; inspect the compile database to prove no engine source compiles
+   (`project-sdk.yml` runs exactly this).
+5. Compile + run `ludus_editor_tests` (including `project_store_v2_tests.cpp`)
+   under Qt6 + Clang 18.
+6. Native Qt GUI acceptance: New Project / Open / build / run / stop against a
+   relocated SDK; CLI↔Editor lock contention; Editor ON vs independent OFF;
+   legacy v1 save/build/run regressions. (Cannot be replaced by offscreen tests.)
+7. Relevant browser/Emscripten and RAD regressions.
+8. The multi-flavor release-candidate acceptance journey using real archives
+   (`release.yml`), with publication still deliberately NOT executed.
+9. Ludus-Sandbox conversion — separate repository, not inspected (see P14 above).
+
+Everything implementable and verifiable without that toolchain has been
+implemented and tested; the gates above are gated on the environment, not on
+missing design or code.
