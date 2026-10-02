@@ -211,3 +211,44 @@ and Clang 18 + a real SDK), and inspecting its compile database to prove no
 engine source compiles. The `operations.py` path that drives this is
 implemented and unit-covered up to the `cmake` invocation; the compile itself is
 deferred to the reference toolchain.
+
+## P4 — Editor v2 schema sharing (implementation + GUI gap)
+
+Implemented:
+
+- `apps/editor/src/internal/project_descriptor.h`: added `Version`,
+  `EngineRequirement`, `TemplateRef`, the `HasEngine`/`HasTemplate` flags and the
+  version-2 limit constants (kept equal to `ludus_tools.descriptor`).
+- `apps/editor/src/project_store.cpp`: `ParseDescriptor` now accepts version 1
+  **and** 2. Version-dependent root keys preserve the old-reader rule (a v1 file
+  still rejects v2's extra fields and the Release preset); v2 adds the
+  `linux-clang-release` preset, the required-for-cmake / forbidden-for-ludus
+  `engine` object (exact non-floating version, bounded unique components/
+  features) and the optional `template` object. `SerializeDescriptor` is now
+  version-aware and round-trips the v2 fields.
+- New shared v2 fixtures `apps/editor/tests/fixtures/cases_v2.json` (+ the six
+  `valid_v2_*`/`invalid_v2_*` files) consumed by BOTH readers.
+- `apps/editor/tests/project_store_v2_tests.cpp` runs the C++ reader against
+  `cases_v2.json` and a v2 serialize round-trip; wired into `ludus_editor_tests`.
+- `scripts/python/test_ludus_tools.py` runs the Python v2 reader against the same
+  `cases_v2.json`. The legacy v1-only `editor_project.py` and its
+  `test_editor_tool.py` fixture checks are untouched, so v1 behavior and the
+  "old reader rejects v2" rule are both preserved.
+
+Checks run here:
+
+```
+$ python -m unittest test_ludus_tools test_ludus_project_ops test_ludus_cli test_editor_tool   # 95 OK
+    # includes DescriptorV1Compat.test_shared_v2_fixture_cases (Python v2 reader vs cases_v2.json)
+    # and test_legacy_reader_still_rejects_v2.
+```
+
+**UNAVAILABLE (needs Qt6 + Clang 18, neither present):** compiling
+`ludus_editor_tests` to execute `project_store_v2_tests.cpp`; and all native Qt
+GUI acceptance — the asynchronous New Project / SDK install+select stages, the
+engine identity/profile/override controls, Editor↔CLI build-lock contention,
+form-retention on failure, and the Editor ON vs independent OFF checks. Per the
+handoff, native GUI acceptance **cannot** be replaced by offscreen tests, so it
+is explicitly deferred to a reference-toolchain machine. The C++↔Python schema
+*sharing* is implemented and cross-checked through the shared fixtures (the C++
+half is verified only when the editor is compiled on that machine).

@@ -58,19 +58,49 @@ enum class ResultCode : foundation::uint8
 // message so logs and Copy Job Details can label a result unambiguously.
 [[nodiscard]] const char* ResultCodeName(ResultCode code) noexcept;
 
-// The documented, persisted fields of a version-1 descriptor. Only these are
-// serialized, in a stable order (design section 4). Paths are stored exactly as
-// written in the file (relative); resolution/canonicalization happens later and
-// never relative to the editor launch directory.
+// The committed engine requirement (version-2, provider `cmake` only). Mirrors
+// ludus_tools.descriptor.EngineRequirement. `Version` is an exact release token,
+// never a floating range. Only populated when Version == 2 and provider cmake.
+struct EngineRequirement
+{
+    QString Version;         // exact release token, <= 128 bytes
+    QStringList Components;  // requested public modules
+    QStringList Features;    // required feature flags
+
+    [[nodiscard]] friend bool operator==(const EngineRequirement&, const EngineRequirement&) = default;
+};
+
+// Identifies the generation inputs (version-2). Mirrors
+// ludus_tools.descriptor.TemplateRef.
+struct TemplateRef
+{
+    QString Id;                 // bounded identifier token
+    foundation::uint64 Version = 0; // positive integer
+
+    [[nodiscard]] friend bool operator==(const TemplateRef&, const TemplateRef&) = default;
+};
+
+// The documented, persisted fields of a descriptor. Version 1 keeps exactly the
+// original fields; version 2 additionally carries `engine` (provider cmake only)
+// and `template`. Only these are serialized, in a stable order (design section
+// 4). Paths are stored exactly as written in the file (relative); resolution/
+// canonicalization happens later and never relative to the editor launch
+// directory.
 struct ProjectDescriptor
 {
-    QString Name; // nonempty, <= 128 UTF-8 bytes
+    foundation::uint32 Version = 1; // 1 or 2
+    QString Name;                   // nonempty, <= 128 UTF-8 bytes
     Provider ProviderKind = Provider::Ludus;
     QString SourceDir;   // relative, <= 4096 UTF-8 bytes
-    QString Preset;      // linux-clang-debug | linux-clang-development
+    QString Preset;      // v1: linux-clang-{debug,development}; v2 adds -release
     QString Target;      // ASCII [A-Za-z0-9_][A-Za-z0-9_.+-]*, <= 256 bytes
     QString RunCwd;      // relative, <= 4096 UTF-8 bytes
     QStringList RunArgs; // <= 64 items, each <= 4096 bytes, total <= 32 KiB; empties valid
+
+    bool HasEngine = false;     // true only for a version-2 cmake project
+    EngineRequirement Engine;   // valid only when HasEngine
+    bool HasTemplate = false;   // optional version-2 field
+    TemplateRef Template;       // valid only when HasTemplate
 
     [[nodiscard]] friend bool operator==(const ProjectDescriptor& lhs, const ProjectDescriptor& rhs) = default;
 };
@@ -101,6 +131,13 @@ inline constexpr usize MaxTargetBytes = 256u;
 inline constexpr usize MaxArgCount = 64u;
 inline constexpr usize MaxArgBytes = 4096u;
 inline constexpr usize MaxArgsTotalBytes = 32u * 1024u;
+// Version-2 additions (kept equal to ludus_tools.descriptor).
+inline constexpr usize MaxVersionBytes = 128u;
+inline constexpr usize MaxComponentCount = 64u;
+inline constexpr usize MaxComponentBytes = 128u;
+inline constexpr usize MaxFeatureCount = 64u;
+inline constexpr usize MaxFeatureBytes = 128u;
+inline constexpr usize MaxTemplateIdBytes = 128u;
 } // namespace limits
 
 } // namespace ludus::editor

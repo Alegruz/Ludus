@@ -126,6 +126,32 @@ class DescriptorV1Compat(unittest.TestCase):
         self.assertEqual(d.provider, "ludus")
         self.assertIsNone(d.engine)
 
+    def test_shared_v2_fixture_cases(self) -> None:
+        """The v2-aware reader must match the shared v2 fixtures (also consumed
+        by the C++ ProjectStore v2 test, so the schema cannot drift)."""
+        cases = json.loads((FIXTURES / "cases_v2.json").read_text())
+        self.assertTrue(cases)
+        for case in cases:
+            data = (FIXTURES / case["file"]).read_bytes()
+            if case["valid"]:
+                d = descriptor.parse_descriptor_bytes(data)
+                self.assertEqual(d.version, case["version"])
+                self.assertEqual(d.name, case["name"])
+                self.assertEqual(d.provider, case["provider"])
+                self.assertEqual(d.preset, case["preset"])
+                self.assertEqual(d.run_args, case["run_args"])
+                if case.get("has_engine", True) and case["provider"] == "cmake":
+                    self.assertIsNotNone(d.engine)
+                    self.assertEqual(d.engine.version, case["engine_version"])
+                    self.assertEqual(d.engine.components, case.get("components", []))
+                    self.assertEqual(d.engine.features, case.get("features", []))
+                else:
+                    self.assertIsNone(d.engine)
+            else:
+                with self.assertRaises(ToolingError) as ctx:
+                    descriptor.parse_descriptor_bytes(data)
+                self.assertEqual(ctx.exception.code, case["code"])
+
     def test_legacy_reader_still_rejects_v2(self) -> None:
         # editor_project.py (the v1-only reader) must keep rejecting v2 so old
         # Editor builds fail usefully (P09 "Old Editor versions reject v2").

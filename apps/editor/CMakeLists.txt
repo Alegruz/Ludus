@@ -85,6 +85,7 @@ if(LUDUS_BUILD_TESTS)
     add_executable(ludus_editor_tests
         tests/workspace_tests.cpp
         tests/project_store_tests.cpp
+        tests/project_store_v2_tests.cpp
         tests/tool_process_tests.cpp
         tests/log_buffer_tests.cpp
         tests/controller_tests.cpp

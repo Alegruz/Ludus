@@ -79,6 +79,100 @@ bool ValidTargetName(const QString& value)
     return true;
 }
 
+// Validate a bounded array of pattern-constrained, unique, nonempty strings.
+// Used for engine.components / engine.features. Returns true on success and
+// fills `out`; on failure returns false and sets `message`.
+bool ParseStringList(const QJsonValue& value,
+                     const QString& context,
+                     usize maxCount,
+                     usize maxBytes,
+                     bool (*validChar)(QChar, bool),
+                     QStringList& out,
+                     QString& message)
+{
+    if (!value.isArray())
+    {
+        message = QStringLiteral("'%1' must be an array").arg(context);
+        return false;
+    }
+    const QJsonArray array = value.toArray();
+    if (static_cast<usize>(array.size()) > maxCount)
+    {
+        message = QStringLiteral("'%1' exceeds its entry limit").arg(context);
+        return false;
+    }
+    QSet<QString> seen;
+    for (const QJsonValue& item : array)
+    {
+        if (!item.isString())
+        {
+            message = QStringLiteral("every '%1' entry must be a string").arg(context);
+            return false;
+        }
+        const QString s = item.toString();
+        if (s.isEmpty() || s.contains(QChar(u'\0')) || static_cast<usize>(s.toUtf8().size()) > maxBytes)
+        {
+            message = QStringLiteral("invalid '%1' entry").arg(context);
+            return false;
+        }
+        bool first = true;
+        for (const QChar c : s)
+        {
+            if (!validChar(c, first))
+            {
+                message = QStringLiteral("invalid '%1' entry").arg(context);
+                return false;
+            }
+            first = false;
+        }
+        if (seen.contains(s))
+        {
+            message = QStringLiteral("duplicate '%1' entry").arg(context);
+            return false;
+        }
+        seen.insert(s);
+        out.append(s);
+    }
+    return true;
+}
+
+// Component token: [A-Za-z][A-Za-z0-9]* (matches ludus_tools COMPONENT_RE).
+bool ComponentChar(QChar c, bool first)
+{
+    const ushort u = c.unicode();
+    if (first)
+    {
+        return (u >= u'A' && u <= u'Z') || (u >= u'a' && u <= u'z');
+    }
+    return (u >= u'A' && u <= u'Z') || (u >= u'a' && u <= u'z') || (u >= u'0' && u <= u'9');
+}
+
+// Feature token: [A-Za-z0-9][A-Za-z0-9_.-]* (matches ludus_tools FEATURE_RE).
+bool FeatureChar(QChar c, bool first)
+{
+    const ushort u = c.unicode();
+    const bool alnum = (u >= u'A' && u <= u'Z') || (u >= u'a' && u <= u'z') || (u >= u'0' && u <= u'9');
+    if (first)
+    {
+        return alnum;
+    }
+    return alnum || u == u'_' || u == u'.' || u == u'-';
+}
+
+// Engine version / template id token: [A-Za-z0-9][A-Za-z0-9_.+-]* and
+// [A-Za-z0-9][A-Za-z0-9_.-]* respectively; both share this permissive first-
+// char rule, with the trailing set passed per use.
+bool TokenChar(QChar c, bool first, bool allowPlus)
+{
+    const ushort u = c.unicode();
+    const bool alnum = (u >= u'A' && u <= u'Z') || (u >= u'a' && u <= u'z') || (u >= u'0' && u <= u'9');
+    if (first)
+    {
+        return alnum;
+    }
+    return alnum || u == u'_' || u == u'.' || u == u'-' || (allowPlus && u == u'+');
+}
+
 // Reject any object key not in `allowed` (unknown fields fail at every level).
 QString UnknownKey(const QJsonObject& object, const QStringList& allowed)
 {
@@ -125,20 +219,9 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
     }
     const QJsonObject root = document.object();
 
-    static const QStringList rootKeys{QStringLiteral("version"),
-                                      QStringLiteral("name"),
-                                      QStringLiteral("provider"),
-                                      QStringLiteral("source_dir"),
-                                      QStringLiteral("preset"),
-                                      QStringLiteral("target"),
-                                      QStringLiteral("run")};
-    const QString unknown = UnknownKey(root, rootKeys);
-    if (!unknown.isEmpty())
-    {
-        return Fail(ResultCode::InvalidProject, QStringLiteral("unknown field '%1'").arg(unknown));
-    }
-
-    // version: a JSON number numerically equal to 1; reject bool/string/float.
+    // version: a JSON number numerically equal to 1 or 2; reject bool/string/
+    // non-integer float. The allowed root keys depend on the version so a v1
+    // file still rejects v2's extra fields (old-reader behavior preserved).
     if (!root.contains(QStringLiteral("version")))
     {
         return Fail(ResultCode::InvalidProject, QStringLiteral("missing field 'version'"));
@@ -146,18 +229,45 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
     const QJsonValue versionValue = root.value(QStringLiteral("version"));
     if (versionValue.type() != QJsonValue::Double)
     {
-        return Fail(ResultCode::UnsupportedVersion, QStringLiteral("'version' must be the number 1"));
+        return Fail(ResultCode::UnsupportedVersion, QStringLiteral("'version' must be the number 1 or 2"));
     }
+    foundation::uint32 schemaVersion = 0;
     {
         const double raw = versionValue.toDouble();
-        if (raw != 1.0)
+        if (raw == 1.0)
+        {
+            schemaVersion = 1;
+        }
+        else if (raw == 2.0)
+        {
+            schemaVersion = 2;
+        }
+        else
         {
             return Fail(ResultCode::UnsupportedVersion,
-                        QStringLiteral("unsupported descriptor version; only version 1 is supported"));
+                        QStringLiteral("unsupported descriptor version; supported versions are 1 and 2"));
         }
     }
 
+    QStringList rootKeys{QStringLiteral("version"),
+                         QStringLiteral("name"),
+                         QStringLiteral("provider"),
+                         QStringLiteral("source_dir"),
+                         QStringLiteral("preset"),
+                         QStringLiteral("target"),
+                         QStringLiteral("run")};
+    if (schemaVersion == 2)
+    {
+        rootKeys << QStringLiteral("engine") << QStringLiteral("template");
+    }
+    const QString unknown = UnknownKey(root, rootKeys);
+    if (!unknown.isEmpty())
+    {
+        return Fail(ResultCode::InvalidProject, QStringLiteral("unknown field '%1'").arg(unknown));
+    }
+
     ProjectDescriptor descriptor;
+    descriptor.Version = schemaVersion;
 
     // name
     const QJsonValue nameValue = root.value(QStringLiteral("name"));
@@ -216,11 +326,19 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
         return Fail(ResultCode::InvalidProject, QStringLiteral("'preset' must be a string"));
     }
     descriptor.Preset = presetValue.toString();
-    if (descriptor.Preset != QStringLiteral("linux-clang-debug") &&
-        descriptor.Preset != QStringLiteral("linux-clang-development"))
     {
-        return Fail(ResultCode::InvalidProject,
-                    QStringLiteral("'preset' must be linux-clang-debug or linux-clang-development"));
+        const bool v1Preset = descriptor.Preset == QStringLiteral("linux-clang-debug") ||
+                              descriptor.Preset == QStringLiteral("linux-clang-development");
+        // Version 2 additionally permits the Release preset (design: extend the
+        // E0 two-preset contract to Release). Version 1 keeps the original two.
+        const bool v2Release = schemaVersion == 2 && descriptor.Preset == QStringLiteral("linux-clang-release");
+        if (!v1Preset && !v2Release)
+        {
+            return Fail(ResultCode::InvalidProject,
+                        schemaVersion == 2
+                            ? QStringLiteral("'preset' must be linux-clang-{debug,development,release}")
+                            : QStringLiteral("'preset' must be linux-clang-debug or linux-clang-development"));
+        }
     }
 
     // target
@@ -306,6 +424,150 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
         return Fail(ResultCode::InvalidProject, QStringLiteral("'run.args' total exceeds 32 KiB"));
     }
 
+    // Version-2 engine/template objects.
+    if (schemaVersion == 2)
+    {
+        // engine: required for provider cmake, forbidden for provider ludus.
+        if (descriptor.ProviderKind == Provider::Cmake)
+        {
+            if (!root.contains(QStringLiteral("engine")))
+            {
+                return Fail(ResultCode::InvalidProject,
+                            QStringLiteral("version-2 'cmake' projects require an 'engine' object"));
+            }
+            const QJsonValue engineValue = root.value(QStringLiteral("engine"));
+            if (!engineValue.isObject())
+            {
+                return Fail(ResultCode::InvalidProject, QStringLiteral("'engine' must be an object"));
+            }
+            const QJsonObject engine = engineValue.toObject();
+            static const QStringList engineKeys{QStringLiteral("version"),
+                                                QStringLiteral("components"),
+                                                QStringLiteral("features")};
+            const QString engineUnknown = UnknownKey(engine, engineKeys);
+            if (!engineUnknown.isEmpty())
+            {
+                return Fail(ResultCode::InvalidProject,
+                            QStringLiteral("unknown field 'engine.%1'").arg(engineUnknown));
+            }
+            const QJsonValue engineVersionValue = engine.value(QStringLiteral("version"));
+            if (!engineVersionValue.isString())
+            {
+                return Fail(ResultCode::InvalidProject, QStringLiteral("'engine.version' must be a string"));
+            }
+            const QString engineVersion = engineVersionValue.toString();
+            if (engineVersion.isEmpty() || !WithinBytes(engineVersion, limits::MaxVersionBytes))
+            {
+                return Fail(ResultCode::InvalidProject,
+                            QStringLiteral("'engine.version' must be an exact release token"));
+            }
+            bool firstEngine = true;
+            for (const QChar c : engineVersion)
+            {
+                if (!TokenChar(c, firstEngine, /*allowPlus=*/true))
+                {
+                    return Fail(ResultCode::InvalidProject,
+                                QStringLiteral("'engine.version' must be an exact release token"));
+                }
+                firstEngine = false;
+            }
+            descriptor.Engine.Version = engineVersion;
+
+            if (engine.contains(QStringLiteral("components")))
+            {
+                QString msg;
+                if (!ParseStringList(engine.value(QStringLiteral("components")),
+                                     QStringLiteral("engine.components"),
+                                     limits::MaxComponentCount,
+                                     limits::MaxComponentBytes,
+                                     ComponentChar,
+                                     descriptor.Engine.Components,
+                                     msg))
+                {
+                    return Fail(ResultCode::InvalidProject, msg);
+                }
+            }
+            if (engine.contains(QStringLiteral("features")))
+            {
+                QString msg;
+                if (!ParseStringList(engine.value(QStringLiteral("features")),
+                                     QStringLiteral("engine.features"),
+                                     limits::MaxFeatureCount,
+                                     limits::MaxFeatureBytes,
+                                     FeatureChar,
+                                     descriptor.Engine.Features,
+                                     msg))
+                {
+                    return Fail(ResultCode::InvalidProject, msg);
+                }
+            }
+            descriptor.HasEngine = true;
+        }
+        else // provider ludus must not declare an engine requirement
+        {
+            if (root.contains(QStringLiteral("engine")))
+            {
+                return Fail(ResultCode::InvalidProject,
+                            QStringLiteral("provider 'ludus' must not declare an 'engine' requirement"));
+            }
+        }
+
+        // template: optional { id, version }.
+        if (root.contains(QStringLiteral("template")))
+        {
+            const QJsonValue templateValue = root.value(QStringLiteral("template"));
+            if (!templateValue.isObject())
+            {
+                return Fail(ResultCode::InvalidProject, QStringLiteral("'template' must be an object"));
+            }
+            const QJsonObject templateObj = templateValue.toObject();
+            static const QStringList templateKeys{QStringLiteral("id"), QStringLiteral("version")};
+            const QString templateUnknown = UnknownKey(templateObj, templateKeys);
+            if (!templateUnknown.isEmpty())
+            {
+                return Fail(ResultCode::InvalidProject,
+                            QStringLiteral("unknown field 'template.%1'").arg(templateUnknown));
+            }
+            const QJsonValue idValue = templateObj.value(QStringLiteral("id"));
+            if (!idValue.isString())
+            {
+                return Fail(ResultCode::InvalidProject, QStringLiteral("'template.id' must be a string"));
+            }
+            const QString templateId = idValue.toString();
+            if (templateId.isEmpty() || !WithinBytes(templateId, limits::MaxTemplateIdBytes))
+            {
+                return Fail(ResultCode::InvalidProject, QStringLiteral("'template.id' must be a bounded token"));
+            }
+            bool firstTid = true;
+            for (const QChar c : templateId)
+            {
+                if (!TokenChar(c, firstTid, /*allowPlus=*/false))
+                {
+                    return Fail(ResultCode::InvalidProject, QStringLiteral("'template.id' must be a bounded token"));
+                }
+                firstTid = false;
+            }
+            if (!templateObj.contains(QStringLiteral("version")))
+            {
+                return Fail(ResultCode::InvalidProject, QStringLiteral("missing field 'template.version'"));
+            }
+            const QJsonValue templateVersionValue = templateObj.value(QStringLiteral("version"));
+            if (templateVersionValue.type() != QJsonValue::Double)
+            {
+                return Fail(ResultCode::InvalidProject, QStringLiteral("'template.version' must be a positive integer"));
+            }
+            const double rawTemplateVersion = templateVersionValue.toDouble();
+            if (rawTemplateVersion < 1.0 || rawTemplateVersion > 1000000.0 ||
+                rawTemplateVersion != static_cast<double>(static_cast<foundation::uint64>(rawTemplateVersion)))
+            {
+                return Fail(ResultCode::InvalidProject, QStringLiteral("'template.version' must be a positive integer"));
+            }
+            descriptor.Template.Id = templateId;
+            descriptor.Template.Version = static_cast<foundation::uint64>(rawTemplateVersion);
+            descriptor.HasTemplate = true;
+        }
+    }
+
     ParseOutcome outcome;
     outcome.Code = ResultCode::Ok;
     outcome.Descriptor = descriptor;
@@ -362,10 +624,11 @@ QByteArray SerializeDescriptor(const ProjectDescriptor& descriptor)
 
     const QString provider =
         descriptor.ProviderKind == Provider::Ludus ? QStringLiteral("ludus") : QStringLiteral("cmake");
+    const foundation::uint32 version = descriptor.Version == 2 ? 2u : 1u;
 
     QString text;
     text += QStringLiteral("{\n");
-    text += QStringLiteral("  \"version\": 1,\n");
+    text += QStringLiteral("  \"version\": %1,\n").arg(version);
     text += QStringLiteral("  \"name\": \"%1\",\n").arg(escape(descriptor.Name));
     text += QStringLiteral("  \"provider\": \"%1\",\n").arg(provider);
     text += QStringLiteral("  \"source_dir\": \"%1\",\n").arg(escape(descriptor.SourceDir));
@@ -388,7 +651,40 @@ QByteArray SerializeDescriptor(const ProjectDescriptor& descriptor)
         }
         text += QStringLiteral("    ]\n");
     }
-    text += QStringLiteral("  }\n");
+    // Close run with a comma when a version-2 engine/template object follows.
+    const bool hasTrailer = version == 2 && (descriptor.HasEngine || descriptor.HasTemplate);
+    text += hasTrailer ? QStringLiteral("  },\n") : QStringLiteral("  }\n");
+
+    const auto emitStringArray = [&](const QString& key, const QStringList& items, bool trailingComma) {
+        if (items.isEmpty())
+        {
+            text += QStringLiteral("    \"%1\": []%2\n").arg(key, trailingComma ? QStringLiteral(",") : QString());
+            return;
+        }
+        text += QStringLiteral("    \"%1\": [\n").arg(key);
+        for (int i = 0; i < items.size(); ++i)
+        {
+            const bool last = i + 1 == items.size();
+            text += QStringLiteral("      \"%1\"%2\n").arg(escape(items.at(i)), last ? QString() : QStringLiteral(","));
+        }
+        text += QStringLiteral("    ]%1\n").arg(trailingComma ? QStringLiteral(",") : QString());
+    };
+
+    if (version == 2 && descriptor.HasEngine)
+    {
+        text += QStringLiteral("  \"engine\": {\n");
+        text += QStringLiteral("    \"version\": \"%1\",\n").arg(escape(descriptor.Engine.Version));
+        emitStringArray(QStringLiteral("components"), descriptor.Engine.Components, /*trailingComma=*/true);
+        emitStringArray(QStringLiteral("features"), descriptor.Engine.Features, /*trailingComma=*/false);
+        text += descriptor.HasTemplate ? QStringLiteral("  },\n") : QStringLiteral("  }\n");
+    }
+    if (version == 2 && descriptor.HasTemplate)
+    {
+        text += QStringLiteral("  \"template\": {\n");
+        text += QStringLiteral("    \"id\": \"%1\",\n").arg(escape(descriptor.Template.Id));
+        text += QStringLiteral("    \"version\": %1\n").arg(descriptor.Template.Version);
+        text += QStringLiteral("  }\n");
+    }
     text += QStringLiteral("}\n");
     return text.toUtf8();
 }
