@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import difflib
 import hashlib
 import json
@@ -942,7 +943,11 @@ def prepare_conan_artifacts(
     root: Path,
     versions: dict[str, dict[str, str]],
     presets: Sequence[str],
+    *,
+    locked: bool = False,
 ) -> None:
+    if locked and not (root / "conan.lock").is_file():
+        raise EngineError("Locked initialization requires the committed conan.lock")
     check_current_python(root, versions["minimum"]["python"])
     create_or_update_venv(root)
     install_managed_tools(root, versions)
@@ -956,9 +961,10 @@ def prepare_conan_artifacts(
         env=tool_env(root),
     )
     export_local_recipes(root)
-    create_conan_lock(root, profile_path)
+    if not locked:
+        create_conan_lock(root, profile_path)
     for preset in presets:
-        conan_install_for_preset(root, profile_path, preset)
+        conan_install_for_preset(root, profile_path, preset, locked=locked)
 
 
 def cmake_cache_value(cache_path: Path, name: str) -> str | None:
@@ -1052,7 +1058,7 @@ def create_conan_lock(root: Path, profile_path: Path) -> None:
         raise
 
 
-def conan_install_for_preset(root: Path, profile_path: Path, preset: str) -> None:
+def conan_install_for_preset(root: Path, profile_path: Path, preset: str, *, locked: bool = False) -> None:
     build_type = PRESET_BUILD_TYPES[preset]
     output_dir = root / "out" / "conan" / preset
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1077,7 +1083,7 @@ def conan_install_for_preset(root: Path, profile_path: Path, preset: str) -> Non
             "build_type=Release",
             "--lockfile",
             str(root / "conan.lock"),
-            "--lockfile-partial",
+            *([] if locked else ["--lockfile-partial"]),
             "--build=missing",
             "--conf:host",
             f"user.ludus:build_tests={build_tests}",
@@ -1197,7 +1203,7 @@ def command_init(args: argparse.Namespace) -> int:
         presets = tuple(PRESET_BUILD_TYPES)
     from init_options import save_options
     save_options(root, presets, args)
-    prepare_conan_artifacts(root, versions, presets)
+    prepare_conan_artifacts(root, versions, presets, locked=args.locked)
     repair_existing_cmake_caches(root, presets)
     if args.with_rad_debugger:
         command_setup_rad_debugger(args)
@@ -1413,19 +1419,45 @@ def run_tidy(root: Path, preset: str) -> None:
         return
 
     header_filter = f"^{re.escape(str(root))}/(modules|apps)/.*"
-    for path in tidy_files:
-        run(
-            [
-                clang_tidy,
-                "-p",
-                build_dir,
-                "--quiet",
-                "--warnings-as-errors=*",
-                f"--header-filter={header_filter}",
-                path,
-            ],
-            cwd=root,
-        )
+    commands = [
+        [clang_tidy, "-p", build_dir, "--quiet", "--warnings-as-errors=*",
+         f"--header-filter={header_filter}", path]
+        for path in tidy_files
+    ]
+    run_analysis_commands(root, commands)
+
+
+def run_analysis_commands(root: Path, commands: Sequence[Sequence[object]]) -> None:
+    """Bound analysis concurrency and report complete, ordered diagnostics."""
+    try:
+        jobs = int(os.environ.get("LUDUS_TIDY_JOBS", "1"))
+    except ValueError as exc:
+        raise EngineError("LUDUS_TIDY_JOBS must be a positive integer") from exc
+    if jobs < 1:
+        raise EngineError("LUDUS_TIDY_JOBS must be a positive integer")
+    if not commands:
+        return
+
+    def analyze(command: Sequence[object]) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                [str(arg) for arg in command], cwd=root, check=False, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+        except OSError as exc:
+            raise EngineError(f"Cannot launch analysis: {command_line(command)}: {exc}") from exc
+
+    failures = 0
+    with ThreadPoolExecutor(max_workers=min(jobs, len(commands))) as pool:
+        for command, result in zip(commands, pool.map(analyze, commands)):
+            print(f"+ {command_line(command)}", flush=True)
+            if result.stdout:
+                print(result.stdout, end="", flush=True)
+            if result.returncode:
+                failures += 1
+                print(f"Analysis exited with code {result.returncode}", flush=True)
+    if failures:
+        raise EngineError(f"Static analysis failed for {failures} translation unit(s)")
 
 
 def run_include_cleaner(root: Path, preset: str) -> None:
@@ -1738,8 +1770,7 @@ def command_profile_build(args: argparse.Namespace) -> int:
         shutil.rmtree(build_dir)
 
     extra_configure = ["-DLUDUS_ENABLE_TIME_TRACE=ON"] if not args.no_time_trace else []
-    if args.ccache:
-        extra_configure.append("-DLUDUS_ENABLE_CCACHE=ON")
+    extra_configure.append("-DLUDUS_ENABLE_CCACHE=" + ("ON" if args.ccache else "OFF"))
 
     print(f"Profiling clean build of preset '{preset}'.")
     configure_start = time.monotonic()
@@ -1940,6 +1971,7 @@ def make_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--skip-checks", action="store_true", help="skip clang-format and clang-tidy checks during validation")
     init_parser.add_argument("--skip-sanitizers", action="store_true", help="skip the ASan/UBSan preset during validation")
     init_parser.add_argument("--skip-sdk", action="store_true", help="skip the installed SDK consumer test during validation")
+    init_parser.add_argument("--locked", action="store_true", help="consume conan.lock without updating it or permitting unlocked dependencies")
     init_parser.add_argument("--ci", action="store_true", help="run validation with CI=true for warnings-as-errors")
     init_parser.set_defaults(func=command_init)
 

@@ -1,0 +1,73 @@
+name: Prepare native CI
+description: Install pinned tools and prepare one locked native preset
+inputs:
+  preset:
+    description: Native preset to prepare
+    required: true
+  compiler-cache:
+    description: Enable compiler caching (disable for timing profiles)
+    default: 'true'
+  cache-variant:
+    description: Distinguish compiler configurations such as PCH
+    default: native
+  editor:
+    description: Install and build the optional editor
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Install native prerequisites
+      shell: bash
+      env:
+        WITH_EDITOR: ${{ inputs.editor }}
+      run: |
+        packages=(clang-18 lld-18 clang-format-18 clang-tidy-18 python3-venv ccache libwayland-dev wayland-protocols libwayland-bin)
+        if [[ "$WITH_EDITOR" == true ]]; then
+          packages+=(qt6-base-dev qt6-wayland)
+        fi
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq "${packages[@]}"
+    - name: Cache pip downloads
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: pip-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('config/tool_versions.json') }}
+    - name: Cache selected Conan packages
+      uses: actions/cache@v4
+      with:
+        path: out/conan/home
+        # Save a refreshed snapshot after a fallback restore; caches are immutable.
+        key: conan-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ hashFiles('conanfile.py', 'conan.lock', 'third_party/**', 'config/conan/**', 'config/tool_versions.json', 'CMakePresets.json') }}-${{ github.sha }}
+        restore-keys: |
+          conan-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ hashFiles('conanfile.py', 'conan.lock', 'third_party/**', 'config/conan/**', 'config/tool_versions.json', 'CMakePresets.json') }}-
+    - name: Cache compiler outputs
+      if: inputs.compiler-cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**') }}-${{ github.sha }}
+        restore-keys: |
+          ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**') }}-
+    - name: Configure compiler caching
+      shell: bash
+      env:
+        COMPILER_CACHE: ${{ inputs.compiler-cache }}
+      run: |
+        if [[ "$COMPILER_CACHE" == true ]]; then
+          echo 'LUDUS_ENABLE_CCACHE=1' >> "$GITHUB_ENV"
+          ccache --zero-stats
+        else
+          echo 'LUDUS_ENABLE_CCACHE=0' >> "$GITHUB_ENV"
+        fi
+    - name: Prepare selected locked preset
+      shell: bash
+      env:
+        PRESET: ${{ inputs.preset }}
+        WITH_EDITOR: ${{ inputs.editor }}
+      run: |
+        options=(--cli --no-system-install --locked --with-tests --preset-only "$PRESET")
+        if [[ "$WITH_EDITOR" == true ]]; then
+          options+=(--with-editor)
+        fi
+        ./init.sh "${options[@]}"
+        git diff --exit-code -- conan.lock
