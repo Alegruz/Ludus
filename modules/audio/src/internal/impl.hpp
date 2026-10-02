@@ -19,7 +19,9 @@
 #include "internal/control_owner.hpp"
 #include "internal/handles.hpp"
 #include "internal/mixer.hpp"
+#include "internal/physical_voice.hpp"
 #include "internal/spsc_ring.hpp"
+#include "internal/voice_kernel.hpp"
 
 #include <span>
 
@@ -32,6 +34,31 @@ using internal::VoiceSlot;
 
 struct AudioSystem::Impl final
 {
+    Impl() noexcept = default;
+
+    // Free all owned PCM and resampler heaps at destruction. The warm paths
+    // never allocate/free; this cold teardown releases everything acquired by
+    // PrepareClip and the preinitialized physical-voice resamplers.
+    ~Impl() noexcept
+    {
+        for (uint32 i = 0; i < static_cast<uint32>(LOGICAL_VOICE_CAPACITY); ++i)
+        {
+            if (Clips[i].Pcm != nullptr)
+            {
+                Clips[i].ReleasePcm();
+            }
+        }
+        for (uint32 i = 0; i < static_cast<uint32>(MIXED_VOICE_CAPACITY); ++i)
+        {
+            Physical[i].Uninit();
+        }
+    }
+
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
+    Impl(Impl&&) = delete;
+    Impl& operator=(Impl&&) = delete;
+
     // --- Configuration (frozen at Initialize) ------------------------------
     SystemConfig Config{};
     uint32 Session = 0;
@@ -59,6 +86,18 @@ struct AudioSystem::Impl final
     internal::BusState Buses[BUS_CAPACITY]{};
     internal::ModifierState Modifiers[MODIFIER_CAPACITY]{};
     ListenerPose Listener{};
+
+    // Physical voice pool (DSP kernels) sized to the mixed-voice budget.
+    internal::PhysicalVoice Physical[MIXED_VOICE_CAPACITY]{};
+    bool PhysicalInitialized = false;
+    uint32 LpfOrder = 4; // anti-alias filter order for downsampling (frozen in A2)
+
+    // Shared per-span DSP scratch (interleaved; input + output staging). One
+    // shared buffer is safe because rendering is serial on one thread.
+    float32 Scratch[2 * internal::VOICE_SCRATCH_FRAMES * 2] = {};
+
+    // Stereo mix accumulator for the current span (interleaved L/R).
+    float32 MixAccum[internal::VOICE_SCRATCH_FRAMES * 2] = {};
 
     SpscRing<QueuedCommand, COMMAND_QUEUE_CAPACITY> CommandRing;
     SpscRing<internal::SnapshotRecord, 4> SnapshotRing;
@@ -107,6 +146,21 @@ struct AudioSystem::Impl final
 
     void RecomputeBusGains() noexcept;
     [[nodiscard]] float32 BusChainGain(uint32 busIndex) const noexcept;
+
+    // --- Spatial + selection (control_owner.cpp / spatial.cpp) -------------
+    // Compute per-voice attenuation, equal-power pan and the audibility-score
+    // contributions for the current boundary. Fills the voice's Score* fields,
+    // Pan, and TargetGainL/R via out-params.
+    void ComputeVoiceGains(VoiceSlot& v, float32& outGainL, float32& outGainR) noexcept;
+    [[nodiscard]] float32 EstimateAudibility(const VoiceSlot& v) const noexcept;
+
+    // Bind/unbind a logical voice to a free physical slot. Returns the physical
+    // index or MixedCapacity on none free.
+    [[nodiscard]] uint32 BindPhysical(uint32 logicalSlot) noexcept;
+    void UnbindPhysical(uint32 physicalIndex) noexcept;
+    [[nodiscard]] uint32 FindPhysicalFor(uint32 logicalSlot) const noexcept;
+
+    [[nodiscard]] bool EnsurePhysicalInitialized() noexcept;
 
     [[nodiscard]] Status
     RenderFrames(std::span<float32> output, ChannelLayout layout, BufferLayout bufferLayout, uint32 frames) noexcept;

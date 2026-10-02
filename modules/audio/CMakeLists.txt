@@ -16,7 +16,10 @@ target_sources(
         src/control_owner.cpp
         src/facade.cpp
         src/audio_gym.cpp
+        src/spatial.cpp
         src/internal/decode.cpp
+        src/internal/resampler.cpp
+        src/internal/voice_kernel.cpp
     PUBLIC
         FILE_SET public_headers
         TYPE HEADERS
@@ -75,6 +78,7 @@ if(LUDUS_BUILD_TESTS)
             tests/admission_tests.cpp
             tests/lifecycle_tests.cpp
             tests/gym_tests.cpp
+            tests/dsp_tests.cpp
     )
     # Tests reach into src/internal for the SPSC ring and handle helpers.
     target_include_directories(ludus_audio_tests PRIVATE src include)

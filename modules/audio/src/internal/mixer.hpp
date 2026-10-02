@@ -97,6 +97,13 @@ struct VoiceSlot final
     float32 FadeGain = 0.0F;
     float32 FadeTarget = 1.0F;
 
+    // Physical binding (MIXED_VOICE_CAPACITY == unbound).
+    uint32 PhysicalIndex = 0xFFFFFFFFU;
+
+    // Per-boundary target per-channel gains (pan*attenuation*voice*bus*fade).
+    float32 TargetGainL = 0.0F;
+    float32 TargetGainR = 0.0F;
+
     // Virtual bookkeeping.
     uint64 VirtualSinceFrame = 0;
 
@@ -119,6 +126,12 @@ struct VoiceSlot final
     StopMailbox Stop{};
     TerminalMailbox Terminal{};
 };
+
+// A physical voice slot: a preinitialized DSP kernel (mono + stereo resamplers)
+// bound to a logical voice while it is mixed/fading (design section 7). The
+// pool size is the mixed-voice budget. Resamplers are initialized once outside
+// rendering and never re-created in Play/Stop.
+struct PhysicalVoice; // defined in physical_voice.hpp (needs voice_kernel.hpp)
 
 // Resident concurrency group with transactional MaxAdmitted / deterministic
 // MaxSelected quotas (design section 7.1).

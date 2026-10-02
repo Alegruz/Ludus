@@ -87,23 +87,23 @@ Gate: these truth-table cases pass without any device, worker, Platform or windo
 
 Requirements: AU04, AU08-AU11. Prerequisite: A1.
 
-- [ ] Decode WAV/FLAC resident mono/stereo PCM at session rate with source byte,
+- [x] Decode WAV/FLAC resident mono/stereo PCM at session rate with source byte,
   frame/channel/size/finite validation and fallible rollback.
-- [ ] Implement per-instance cursors, EOF, half-open loops, frame conversion,
+- [x] Implement per-instance cursors, EOF, half-open loops, frame conversion,
   scheduled offsets and sample ramps that persist across buffer partitions.
-- [ ] Integrate preallocated audited resampling, Rate 0.5-2.0 and bounded input
+- [x] Integrate preallocated audited resampling, Rate 0.5-2.0 and bounded input
   scratch. Derive ratios from rates, not buffer lengths; preserve fractional
   phase/history and guard neighbor reads. No callback init/free.
-- [ ] Implement independent panning/attenuation positions, per-voice origin
+- [x] Implement independent panning/attenuation positions, per-voice origin
   choice and listener validation; preserve true emitter positions and stereo beds.
-- [ ] Implement logical/physical budgets, deterministic priority selection,
+- [x] Implement logical/physical budgets, deterministic priority selection,
   per-group MaxSelected quotas, hysteresis, charged tails, virtual advance and
   kill policy. Keep selection fades out of audibility scores.
-- [ ] Implement reversible Virtualizing and irreversible Stopping transitions;
+- [x] Implement reversible Virtualizing and irreversible Stopping transitions;
   preserve variation/rate/cursor on reentry and expose silence/score causes.
 - [ ] Validate application event descriptors and extend gym scenarios with
   group saturation, third-person listener and interrupted/reversed fades.
-- [ ] Add allocation probes and DSP correctness/quality fixtures.
+- [x] Add allocation probes and DSP correctness/quality fixtures.
 
 Gate tests: simultaneous independent voices sharing one clip; 1-frame/empty/
 malformed/huge clips; mono/stereo channel placement; Rate 0.5/1/2 duration and
@@ -278,7 +278,7 @@ Fill this during implementation. A checked box is not evidence by itself.
 | --- | --- | --- | --- |
 | A0 | `6ed9836` on `feat/audio-system` (base `8972388`). Added `third_party/miniaudio/` (vendored 0.11.23, hash lock, C impl units, CMake), root `CMakeLists.txt` (C dep + audio module), `docs/architecture/audio-decision-log.md`. | miniaudio.h sha256 `7e4f3f13c8fe66df2080ac3dd12a89193e3c2463cb7f067c798abd7331cd8ee6` (4,099,492 bytes) verified on download and at configure; option macros verified against the pinned header; resampler/decoder call graph audited (see decision log). Toolchain provisioned: Clang/LLD/clang-format/clang-tidy 18.1.8, CMake 3.29.6, Ninja 1.11.1.3, Conan 2.8.1. miniaudio compiled as C and linked into `libludus_audio.a`. | Native callback-only playback probe and the browser AudioWorklet/shutdown-quiescence subgate remain **pending** (emsdk not installed; no device/browser in this sandbox). Common-mixer architecture is feasible with the pinned dependency and no exceptions; proceeding on native/offline work. |
 | A1 | `6ed9836`. Added `modules/audio/` (public headers, control owner, SPSC ring, decode, tests). | `build linux-clang-debug` + `linux-clang-development` green; `ctest` 28/28 pass (adds `ludus_audio_tests` 26 cases/643 assertions and `ludus_audio_alloc_tests`). clang-format and clang-tidy (pinned 18) clean on all audio TUs; zero warm-path allocations verified. Truth-table rows exercised: invalid/stale/fabricated handles, invalid-last-record rollback, oversized batch, Stop-before-start, Stop/StopAll with full queue, StopAll-then-Play, disabled play, group admission rollback, dropped-snapshot terminal reclaim, retire-with-active-play, scheduled start offset, far-future rejection, render-partition parity, zero-frame no-op, slider u=0/0.5/1 -> 0/0.1/1. | Passed (device-independent). |
-| A2 | Not started | None | Pending |
+| A2 | Added `modules/audio/src/internal/resampler.{hpp,cpp}`, `voice_kernel.{hpp,cpp}`, `physical_voice.hpp`, `spatial.cpp`, `decode.cpp` (real miniaudio decode), selection/render in `control_owner.cpp`, `tests/dsp_tests.cpp`. | `build linux-clang-debug` 28/28 ctest green (9 DSP cases, 19198 assertions). ASan+UBSan build green and **leak-free** across all 40 audio cases (fixed the clip/resampler teardown). Zero warm submit/render allocation verified with decode+resampler active. clang-format/clang-tidy (pinned 18) clean. Verified: hard-L/R pan, planar/interleaved L/R parity, Rate 0.5/1/2 duration ordering, looping, 44100<->48000 both directions, distance falloff, listener/distance validation, group MaxSelected with virtual/advance policy. | Numeric DSP correctness passed. Listening/spectral alias-rejection quality gate and real device output remain **pending** (no device in sandbox). |
 | A3 | Not started | None | Pending |
 | A4 | Not started | None | Pending |
 | A5 | Not started | None | Real Linux device gate pending |

@@ -135,3 +135,74 @@ claim a green checkbox; independent native/offline work proceeds.
 - Supported source formats: WAV and FLAC only; everything else rejected with a
   specific status.
 - See the public headers under `modules/audio/include/ludus/audio/`.
+
+## A2 — resident playback and bounded DSP
+
+### Decode and resident PCM
+
+- `PrepareClip` decodes WAV/FLAC via the pinned private `ma_decoder`
+  (`ma_decoder_init_memory` + `ma_decoder_read_pcm_frames`), converting to
+  float32 at the session rate, validating channel count (mono/stereo only),
+  finiteness and the sample-value product against the resident PCM cap.
+- The clip owns the produced PCM immutably; voices share it via pins. The
+  `Impl` destructor frees all clip PCM and resampler heaps (verified leak-free
+  under ASan). PrepareClip is cold; it never runs in rendering.
+
+### Resampler (rate 0.5-2.0, phase/history preserved)
+
+- One `ma_resampler` is preinitialized per physical voice slot and channel
+  count (mono + stereo), using `ma_resampler_init_preallocated` with an
+  external heap acquired once outside rendering (`ma_resampler_get_heap_size`).
+  `Process`/`SetRate`/`RequiredInputFrames`/`Reset` are the only warm calls; none
+  allocates. Verified zero warm-path allocation with the full DSP active.
+- The conversion ratio is derived from rates, never buffer lengths: the
+  resampler is configured `rateIn = sessionRate`, `rateOut = round(sessionRate /
+  Rate)`, so it consumes ~Rate source frames per output frame. Fractional phase
+  and filter history live inside the resampler and persist across partial spans;
+  the kernel tracks the integer source cursor to resolve EOF and half-open loop
+  seams, assembling wrap-aware source scratch from immutable PCM.
+- Anti-alias low-pass filtering uses `linear.lpfOrder` (frozen initial value 4;
+  `MA_MAX_FILTER_ORDER` is 8). The rate-1 direct-PCM fast path stays deferred;
+  the resampler is active consistently so cursor/phase/filter continuity holds.
+- Verified by tests: hard-L/hard-R pan routing, planar vs. interleaved L/R
+  parity (identical content, channels not collapsed), Rate 0.5/1/2 duration
+  ordering, looping past clip length, 44100<->48000 both directions (finite,
+  audible), distance-attenuation falloff near/mid/far, listener-basis NaN and
+  invalid-distance rejection.
+
+### Selection, groups and virtualization
+
+- At each 128-frame boundary a deterministic ordered candidate list is built by
+  bounded insertion (priority desc, then estimated audibility desc, stable ties
+  prefer incumbents then admission order). Selection respects each group's
+  MaxSelected and the global steady-state budget (56); losers follow
+  AdvanceWhenVirtual (-> Virtualizing -> Virtual) or KillWhenInaudible
+  (-> Stopping -> Terminal). A Virtual/Virtualizing voice reverses into Mixed
+  when reselected within quota; Stopping cannot reverse. The audibility estimate
+  excludes the selection fade envelope (so a fading voice is not driven
+  permanently virtual). Score contributions (voice gain, prepared peak, distance
+  gain, bus-chain gain) are exposed separately.
+- Physical voices are a pool sized to the mixed-voice budget; a logical voice
+  binds a physical slot (and its preinitialized resamplers) only while mixing or
+  fading, and reuses the authoritative cursor on devirtualization. Finite
+  advancing virtual voices expire at nonloop EOF even while muted.
+
+### Spatial (mono emitters, equal-power pan, finite attenuation)
+
+- Meter coordinates; default pose +X right, +Y up, Forward = -Z. Distance
+  attenuation `A = (1-t)^2` with `t = clamp((d-Min)/(Max-Min),0,1)`; A=1 within
+  Min, A=0 beyond Max; negative Min or Max<=Min rejected. Pan is
+  `dot(normalize(panDisplacement), Right)` with Right = normalize(cross(Forward,
+  Up)); equal-power gains `sqrt((1-p)/2)`, `sqrt((1+p)/2)`. Separate panning and
+  attenuation positions with a per-voice `AttenuationOrigin`; the true emitter
+  position is retained. Stereo beds preserve L/R via scalar gain.
+
+### Validation
+
+- `build linux-clang-debug` 28/28 ctest green (adds 9 DSP cases). ASan+UBSan
+  build green and leak-free across all 40 audio cases. clang-format and
+  clang-tidy (pinned 18) clean. Zero warm submit/render allocation verified with
+  the resampler and decode paths exercised.
+- Listening/alias-rejection spectral quality gates and real device output remain
+  pending (no audio device in this sandbox); the DSP is validated numerically
+  and for finiteness/channel-routing/duration here.

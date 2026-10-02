@@ -232,33 +232,168 @@ void AudioSystem::Impl::SelectAndCharge() noexcept
         Groups[g].Selected = 0;
         Groups[g].Fading = 0;
     }
-    // A1: deterministic admission charges are maintained at submit time
-    // (MaxAdmitted). Steady-state MaxSelected selection competition is A2. Here
-    // we only tally selected/fading for diagnostics.
+
+    // Build a deterministic ordered candidate list of resident voices eligible
+    // for steady-state selection (Mixed / Virtual / Virtualizing wanting to
+    // reverse). Rank by priority (desc), then estimated audibility (desc), with
+    // stable ties preferring incumbents then admission (slot) order. Selection
+    // uses a bounded insertion into a fixed array (O(V*P)), no heap growth.
+    uint32 order[LOGICAL_VOICE_CAPACITY];
+    uint32 candidateCount = 0;
     for (uint32 i = 0; i < LogicalCapacity; ++i)
     {
         VoiceSlot& v = Voices[i];
-        if (!v.InUse)
+        if (!v.InUse || v.IsStream)
         {
             continue;
         }
-        if (v.IsStream)
+        if (v.State == VoiceState::Stopping || v.State == VoiceState::Terminal || v.State == VoiceState::Pending ||
+            v.State == VoiceState::Scheduled)
         {
             continue;
         }
-        if (v.State == VoiceState::Mixed)
+        // Compute gains/score for this boundary (fills Score*/Pan).
+        float32 gl = 0.0F;
+        float32 gr = 0.0F;
+        ComputeVoiceGains(v, gl, gr);
+        v.TargetGainL = gl;
+        v.TargetGainR = gr;
+
+        // Insertion into the ordered list.
+        const float32 estI = EstimateAudibility(v);
+        uint32 pos = candidateCount;
+        while (pos > 0)
         {
-            if (v.GroupIndex < GroupCount)
+            const VoiceSlot& prev = Voices[order[pos - 1]];
+            const float32 estP = EstimateAudibility(prev);
+            bool iBefore = false;
+            if (v.Priority != prev.Priority)
             {
-                ++Groups[v.GroupIndex].Selected;
+                iBefore = v.Priority > prev.Priority;
             }
+            else if (estI != estP)
+            {
+                iBefore = estI > estP;
+            }
+            else
+            {
+                // Stable: incumbents (currently Mixed) before non-incumbents;
+                // then lower slot (earlier admission) first.
+                const bool iInc = v.State == VoiceState::Mixed;
+                const bool pInc = prev.State == VoiceState::Mixed;
+                if (iInc != pInc)
+                {
+                    iBefore = iInc;
+                }
+                else
+                {
+                    iBefore = i < order[pos - 1];
+                }
+            }
+            if (!iBefore)
+            {
+                break;
+            }
+            order[pos] = order[pos - 1];
+            --pos;
         }
-        else if (v.State == VoiceState::Virtualizing || v.State == VoiceState::Stopping)
+        order[pos] = i;
+        ++candidateCount;
+    }
+
+    // Select top candidates subject to each group's MaxSelected and the global
+    // resident steady-state budget. Hysteresis: within equal priority an
+    // incumbent needs the challenger to exceed it (already ordered); a voice
+    // below the virtualize threshold is not selected.
+    uint32 globalSelected = 0;
+    const uint32 globalBudget = static_cast<uint32>(RESIDENT_STEADY_SELECT);
+
+    for (uint32 k = 0; k < candidateCount; ++k)
+    {
+        VoiceSlot& v = Voices[order[k]];
+        const uint32 g = v.GroupIndex;
+        const float32 est = EstimateAudibility(v);
+
+        // Audibility gate: below the virtualize threshold (-60 dB ~ 0.001) a
+        // voice is not selected; it virtualizes or (reentry) stays virtual until
+        // above the reentry threshold (-57 dB). Mixed incumbents use the lower
+        // (virtualize) threshold; virtual challengers use the higher (reentry).
+        const float32 virtualizeThresh = 0.001F; // ~ -60 dB
+        const float32 reentryThresh = 0.001413F; // ~ -57 dB
+        const bool incumbent = v.State == VoiceState::Mixed || v.State == VoiceState::Virtualizing;
+        const float32 thresh = incumbent ? virtualizeThresh : reentryThresh;
+
+        bool select = est >= thresh;
+        if (select && Groups[g].Selected >= Groups[g].MaxSelected)
         {
-            if (v.GroupIndex < GroupCount)
+            select = false; // group quota reached
+        }
+        if (select && globalSelected >= globalBudget)
+        {
+            select = false; // global steady-state budget reached
+        }
+
+        if (select)
+        {
+            ++Groups[g].Selected;
+            ++globalSelected;
+            v.Silence = SilenceCause::None;
+            // Transition toward Mixed. A Virtual or Virtualizing voice reverses
+            // into Mixed (the Virtualizing fade reverses in place from its
+            // current value); an incumbent Mixed voice simply retargets to full.
+            if (v.State == VoiceState::Virtual || v.State == VoiceState::Virtualizing)
             {
-                ++Groups[v.GroupIndex].Fading;
+                v.State = VoiceState::Mixed;
+                v.LastCause = StateCause::ReselectedReversed;
             }
+            v.FadeTarget = 1.0F;
+        }
+        else
+        {
+            // Not selected: follow policy. Mixed -> Virtualizing (advance) or
+            // Stopping (kill). Virtualizing continues. Virtual stays virtual.
+            if (est < thresh)
+            {
+                v.Silence |= SilenceCause::BelowThreshold;
+            }
+            if (Groups[g].Selected >= Groups[g].MaxSelected)
+            {
+                v.Silence |= SilenceCause::GroupQuota;
+            }
+            if (globalSelected >= globalBudget)
+            {
+                v.Silence |= SilenceCause::GlobalBudget;
+            }
+            if (v.State == VoiceState::Mixed)
+            {
+                if (v.Policy == VirtualPolicy::AdvanceWhenVirtual)
+                {
+                    v.State = VoiceState::Virtualizing;
+                    v.LastCause = StateCause::LostSelectionGroupQuota;
+                    v.FadeTarget = 0.0F;
+                }
+                else
+                {
+                    v.State = VoiceState::Stopping;
+                    v.LastCause = StateCause::LostSelectionAudibility;
+                    v.FadeTarget = 0.0F;
+                }
+            }
+            // Virtualizing continues toward Virtual; Virtual stays.
+        }
+    }
+
+    // Tally fading tails for diagnostics.
+    for (uint32 i = 0; i < LogicalCapacity; ++i)
+    {
+        const VoiceSlot& v = Voices[i];
+        if (!v.InUse || v.IsStream)
+        {
+            continue;
+        }
+        if ((v.State == VoiceState::Virtualizing || v.State == VoiceState::Stopping) && v.GroupIndex < GroupCount)
+        {
+            ++Groups[v.GroupIndex].Fading;
         }
     }
 }
@@ -307,10 +442,10 @@ void AudioSystem::Impl::ProcessControlBoundary() noexcept
 }
 
 // ---------------------------------------------------------------------------
-// Render (design section 5). A1 fills the output completely with silence for
-// the actual samples (no PCM read yet); it still advances the sample clock,
-// processes control boundaries at 128-frame multiples, and resolves EOF for
-// finite voices so lifetimes are correct. A2 installs the resident DSP.
+// Render (design sections 5-8). Walks the request in 128-frame control quanta,
+// applies a boundary at each multiple, selects/binds physical voices, runs the
+// resident DSP kernel into a stereo accumulator, applies the bus clamp and
+// metering, and writes interleaved/planar output. Bounded, allocation-free.
 // ---------------------------------------------------------------------------
 Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
                                        ChannelLayout layout,
@@ -320,30 +455,38 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
     const uint32 channels = ChannelCount(layout);
     if (channels != 2)
     {
-        // v1 output is stereo; reject other layouts rather than guessing.
-        return Status::Unsupported;
+        return Status::Unsupported; // v1 output is stereo
     }
     if (frames == 0)
     {
-        return Status::Ok; // zero frames is a no-op
+        return Status::Ok;
     }
-    // Checked capacity: SampleValues = frames * channels.
     const uint64 required = static_cast<uint64>(frames) * channels;
     if (output.size() < required)
     {
         return Status::InvalidArgument;
     }
 
-    // Zero the whole output up front (silence is the A1 signal). Interleaved and
-    // planar both just clear here.
+    // Preinitialize physical voice DSP (resamplers) once, outside the per-span
+    // loop (still cold relative to steady rendering; first call only).
+    if (!EnsurePhysicalInitialized())
+    {
+        for (uint64 i = 0; i < required; ++i)
+        {
+            output[i] = 0.0F;
+        }
+        ++Errors;
+        return Status::OutOfMemory;
+    }
+
+    // Clear output.
     for (uint64 i = 0; i < required; ++i)
     {
         output[i] = 0.0F;
     }
-    (void)bufferLayout;
 
-    // Walk the request in 128-frame control quanta, applying a boundary at each
-    // multiple (including frame zero within this call when aligned).
+    const uint32 rampFrames = (DEFAULT_RAMP_MS * SampleRate) / 1000U;
+
     uint32 produced = 0;
     while (produced < frames)
     {
@@ -358,10 +501,18 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
         {
             span = toNextBoundary;
         }
+        if (span > internal::VOICE_SCRATCH_FRAMES)
+        {
+            span = internal::VOICE_SCRATCH_FRAMES;
+        }
 
-        // Advance finite voices for lifetime correctness. In A1 the output stays
-        // silent, but EOF/stop lifetimes still resolve so group/pin accounting
-        // is exercised. A2 replaces this with the actual DSP read.
+        // Clear the stereo accumulator for this span.
+        for (uint32 i = 0; i < span * 2; ++i)
+        {
+            MixAccum[i] = 0.0F;
+        }
+
+        // Render every mixing/fading resident voice through the DSP kernel.
         for (uint32 i = 0; i < LogicalCapacity; ++i)
         {
             VoiceSlot& v = Voices[i];
@@ -369,10 +520,150 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
             {
                 continue;
             }
-            if (v.State == VoiceState::Mixed || v.State == VoiceState::Virtual || v.State == VoiceState::Virtualizing ||
-                v.State == VoiceState::Stopping)
+            const bool audiblePhase =
+                v.State == VoiceState::Mixed || v.State == VoiceState::Virtualizing || v.State == VoiceState::Stopping;
+            if (audiblePhase)
             {
-                v.CursorFrame += span; // placeholder transport advance (A2: rate-aware)
+                // Bind a physical slot if needed.
+                uint32 phys = v.PhysicalIndex;
+                if (phys >= MixedCapacity || !Physical[phys].Bound || Physical[phys].LogicalSlot != i)
+                {
+                    phys = FindPhysicalFor(i);
+                    if (phys >= MixedCapacity)
+                    {
+                        phys = BindPhysical(i);
+                    }
+                    v.PhysicalIndex = phys;
+                }
+                if (phys >= MixedCapacity)
+                {
+                    // No physical slot free: wait virtually for this span.
+                    v.Silence |= SilenceCause::WaitingForFadeSlot;
+                    continue;
+                }
+
+                internal::PhysicalVoice& ph = Physical[phys];
+                const internal::ClipSlot& c = Clips[v.ClipSlotIndex];
+
+                // Fade target: 1 for Mixed, 0 for Virtualizing/Stopping. The
+                // kernel ramps the per-channel gain from the carried current.
+                const float32 fade = v.FadeTarget;
+                internal::KernelInput in{};
+                in.Clip = &c;
+                in.Dsp = &ph.DspFor(c.Channels);
+                in.SessionRate = SampleRate;
+                in.Rate = v.Rate;
+                in.Looping = v.Looping;
+                in.LoopBegin = c.LoopBegin;
+                in.LoopEnd = c.LoopEnd;
+                in.TargetGainL = v.TargetGainL * fade;
+                in.TargetGainR = v.TargetGainR * fade;
+                in.CurrentGainL = &ph.CurrentGainL;
+                in.CurrentGainR = &ph.CurrentGainR;
+                in.RampFrames = rampFrames;
+
+                const uint32 before = produced; // output frame offset
+                (void)before;
+                const uint32 producedFrames =
+                    internal::RenderResidentVoice(in, MixAccum, span, Scratch, internal::VOICE_SCRATCH_FRAMES);
+
+                v.CursorFrame = in.Dsp->SourceCursor;
+                v.FadeGain = (in.CurrentGainL != nullptr) ? 1.0F : v.FadeGain; // informational
+
+                // Natural EOF of a finite nonloop voice.
+                if (in.Dsp->AtEof && !v.Looping)
+                {
+                    ++EofEvents;
+                    UnbindPhysical(phys);
+                    v.PhysicalIndex = 0xFFFFFFFFU;
+                    TerminateVoice(i, TerminalReason::Completed, StateCause::NaturalEof);
+                    continue;
+                }
+                // Fade completion for Virtualizing/Stopping (gain reached 0).
+                if ((v.State == VoiceState::Virtualizing || v.State == VoiceState::Stopping) &&
+                    ph.CurrentGainL <= 0.0001F && ph.CurrentGainR <= 0.0001F)
+                {
+                    UnbindPhysical(phys);
+                    v.PhysicalIndex = 0xFFFFFFFFU;
+                    if (v.State == VoiceState::Stopping)
+                    {
+                        TerminateVoice(i, TerminalReason::Stopped, StateCause::FadeComplete);
+                    }
+                    else
+                    {
+                        v.State = VoiceState::Virtual;
+                        v.LastCause = StateCause::FadeComplete;
+                        v.VirtualSinceFrame = RenderFrame;
+                    }
+                }
+                (void)producedFrames;
+            }
+            else if (v.State == VoiceState::Virtual)
+            {
+                // Advance the virtual cursor without DSP. Finite nonloop voices
+                // expire; this happens even while muted (advance policy).
+                const internal::ClipSlot& c = Clips[v.ClipSlotIndex];
+                internal::VoiceDsp tmp{};
+                tmp.SourceCursor = v.CursorFrame;
+                const bool alive =
+                    internal::AdvanceVirtualVoice(tmp, c.Frames, v.Rate, v.Looping, c.LoopBegin, c.LoopEnd, span);
+                v.CursorFrame = tmp.SourceCursor;
+                if (!alive)
+                {
+                    ++EofEvents;
+                    TerminateVoice(i, TerminalReason::Expired, StateCause::Expired);
+                }
+            }
+        }
+
+        // Bus headroom: sum is already in MixAccum (one bus level in A2; the
+        // full bus-tree accumulation lands in A3). Count pre-clamp overs, map
+        // nonfinite to zero, then clamp to [-1,1]. Write to the output span.
+        for (uint32 f = 0; f < span; ++f)
+        {
+            float32 l = MixAccum[f * 2 + 0];
+            float32 r = MixAccum[f * 2 + 1];
+            if (!std::isfinite(l))
+            {
+                l = 0.0F;
+                ++NonFiniteFaults;
+            }
+            if (!std::isfinite(r))
+            {
+                r = 0.0F;
+                ++NonFiniteFaults;
+            }
+            if (l > 1.0F || l < -1.0F || r > 1.0F || r < -1.0F)
+            {
+                ++PreClipFrames;
+            }
+            if (l > 1.0F)
+            {
+                l = 1.0F;
+            }
+            if (l < -1.0F)
+            {
+                l = -1.0F;
+            }
+            if (r > 1.0F)
+            {
+                r = 1.0F;
+            }
+            if (r < -1.0F)
+            {
+                r = -1.0F;
+            }
+
+            const uint32 outFrame = produced + f;
+            if (bufferLayout == BufferLayout::Interleaved)
+            {
+                output[static_cast<uint64>(outFrame) * 2 + 0] = l;
+                output[static_cast<uint64>(outFrame) * 2 + 1] = r;
+            }
+            else // Planar: [L...][R...]
+            {
+                output[outFrame] = l;
+                output[static_cast<uint64>(frames) + outFrame] = r;
             }
         }
 
@@ -383,8 +674,9 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
     return Status::Ok;
 }
 
-void AudioSystem::Impl::FillSnapshot(SystemSnapshot& s) const noexcept
+void AudioSystem::Impl::FillSnapshot(SystemSnapshot& out) const noexcept
 {
+    SystemSnapshot& s = out;
     s = SystemSnapshot{};
     s.State = State;
     s.SystemMode = SystemMode;

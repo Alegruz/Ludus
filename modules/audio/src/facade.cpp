@@ -310,8 +310,7 @@ BatchResult AudioSystem::TrySubmitBatch(std::span<const Command> commands) noexc
     }
 
     // --- Phase 1: validate the whole batch, no mutation --------------------
-    // Count Plays, validate every record and batch-local references.
-    uint32 playCount = 0;
+    // Validate every record and batch-local references before any reservation.
     for (usize i = 0; i < commands.size(); ++i)
     {
         const Command& cmd = commands[i];
@@ -330,7 +329,6 @@ BatchResult AudioSystem::TrySubmitBatch(std::span<const Command> commands) noexc
                     ++s.RejectedCommands;
                     return result;
                 }
-                ++playCount;
                 break;
             case CommandKind::UpdateVoice: {
                 const int32 local = cmd.Update.BatchLocalPlayIndex;

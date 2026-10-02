@@ -75,17 +75,25 @@ TEST_CASE("Gym group-saturation scenario reports admitted/selected counts", "[au
     for (int i = 0; i < 4; ++i)
     {
         VoiceHandle v{};
-        REQUIRE(IsOk(scenario.System().PlayClip({ .Clip = clip }, v)));
+        PlayParams p{};
+        p.Clip = clip;
+        p.Looping = true;                             // keep them alive
+        p.Policy = VirtualPolicy::AdvanceWhenVirtual; // unselected -> Virtual, still admitted
+        REQUIRE(IsOk(scenario.System().PlayClip(p, v)));
         scenario.Track(v);
     }
     // Fifth exceeds MaxAdmitted.
     VoiceHandle extra{};
-    REQUIRE(scenario.System().PlayClip({ .Clip = clip }, extra) == Status::GroupCapacity);
+    PlayParams pe{};
+    pe.Clip = clip;
+    REQUIRE(scenario.System().PlayClip(pe, extra) == Status::GroupCapacity);
 
     REQUIRE(IsOk(scenario.Advance(128)));
     GroupInfo gi{};
     REQUIRE(IsOk(scenario.System().GetGroupInfo(0, gi)));
+    // All four remain admitted; only MaxSelected are selected, the rest virtual.
     REQUIRE(gi.Admitted == 4);
+    REQUIRE(gi.Selected <= 2);
 }
 
 TEST_CASE("A batch straddling the 64-command boundary budget makes progress", "[audio][gym]")
