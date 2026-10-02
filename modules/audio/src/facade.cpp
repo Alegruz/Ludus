@@ -862,14 +862,11 @@ void AudioSystem::GetSystemSnapshot(SystemSnapshot& out) const noexcept
     {
         return;
     }
-    // Recompute a live view directly (owner thread).
-    const_cast<Impl&>(*mImpl).PublishSnapshot();
-    internal::SnapshotRecord rec{};
-    if (mImpl->SnapshotRing.Peek(rec))
-    {
-        const_cast<Impl&>(*mImpl).SnapshotRing.ConsumeOne();
-        out = rec.System;
-    }
+    // Compute a fresh live view directly on the owner thread. This is the
+    // owner-authoritative accounting; the SPSC snapshot ring is for a separate
+    // async sink consumer (design section 11) and uses FIFO semantics, so it is
+    // not read here.
+    mImpl->FillSnapshot(out);
 }
 
 // ===========================================================================

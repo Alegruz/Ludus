@@ -252,6 +252,41 @@ TEST_CASE("User-gain slider mapping: u=0/0.5/1 -> 0/0.1/1 at 40 dB", "[audio][li
     REQUIRE_THAT(static_cast<double>(AudioSystem::UserGainFromSlider(1.0F, 40.0F)), WithinAbs(1.0, 1e-6));
 }
 
+TEST_CASE("A stale handle cannot modify a reused slot's new generation", "[audio][lifecycle]")
+{
+    AudioSystem sys;
+    InitOffline(sys);
+    ClipHandle clip = PrepareSine(sys, 128);
+
+    // Play, stop, render + service so the slot terminates and is reclaimed.
+    VoiceHandle old{};
+    REQUIRE(IsOk(sys.PlayClip({ .Clip = clip }, old)));
+    REQUIRE(IsOk(sys.Stop(old)));
+    std::vector<float32> out(static_cast<usize>(128) * 2);
+    REQUIRE(IsOk(sys.RenderOffline(std::span<float32>(out.data(), out.size()),
+                                   ChannelLayout::Stereo,
+                                   BufferLayout::Interleaved,
+                                   128)));
+    sys.Service();
+
+    // Stop on a terminal handle still known to the owner is idempotent (Ok),
+    // not an error (design section 3).
+    REQUIRE(IsOk(sys.Stop(old)));
+
+    // A fresh play reuses the same physical slot with a NEW generation. The
+    // stale handle's identity (old generation) must no longer match it: queries
+    // and stops targeting the old handle are rejected and cannot mutate the new
+    // generation.
+    VoiceHandle fresh{};
+    REQUIRE(IsOk(sys.PlayClip({ .Clip = clip }, fresh)));
+    REQUIRE(fresh.Slot == old.Slot);             // same physical slot reused
+    REQUIRE(fresh.Generation != old.Generation); // new generation
+    VoiceInfo info{};
+    REQUIRE(sys.GetVoiceInfo(old, info) == Status::InvalidHandle);
+    REQUIRE(sys.Stop(old) == Status::InvalidHandle);
+    REQUIRE(IsOk(sys.GetVoiceInfo(fresh, info)));
+}
+
 TEST_CASE("Dropped snapshots still allow terminal acknowledgment and reclaim", "[audio][lifecycle]")
 {
     AudioSystem sys;

@@ -383,10 +383,9 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
     return Status::Ok;
 }
 
-void AudioSystem::Impl::PublishSnapshot() noexcept
+void AudioSystem::Impl::FillSnapshot(SystemSnapshot& s) const noexcept
 {
-    internal::SnapshotRecord rec{};
-    SystemSnapshot& s = rec.System;
+    s = SystemSnapshot{};
     s.State = State;
     s.SystemMode = SystemMode;
     s.Session = Session;
@@ -458,7 +457,12 @@ void AudioSystem::Impl::PublishSnapshot() noexcept
     s.SnapshotLosses = SnapshotLosses;
     s.PreClipFrames = PreClipFrames;
     s.NonFiniteFaults = NonFiniteFaults;
+}
 
+void AudioSystem::Impl::PublishSnapshot() noexcept
+{
+    internal::SnapshotRecord rec{};
+    FillSnapshot(rec.System);
     std::span<const internal::SnapshotRecord> one(&rec, 1);
     if (!SnapshotRing.TryPublishBatch(one))
     {

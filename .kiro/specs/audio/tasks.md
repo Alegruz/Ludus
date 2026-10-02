@@ -10,17 +10,17 @@ new user approval. Missing hardware checks remain pending, not passed by mocks.
 
 Requirements: AU01-AU04, AU08, AU14-AU15. No prerequisite.
 
-- [ ] Read AGENTS.md, all applicable steering, ADRs 0003-0005/0007-0009,
+- [x] Read AGENTS.md, all applicable steering, ADRs 0003-0005/0007-0009,
   Containers/Memory docs, current native/web CMake/bootstrap/SDK and test tools.
-- [ ] Record actual revision and working-tree changes. Locate any concurrent
+- [x] Record actual revision and working-tree changes. Locate any concurrent
   audio work and preserve Input/Text/RHI/Platform/smoke/shader work and other specs.
-- [ ] Freeze API status/handle fields, capacity maxima, memory accounting and
+- [x] Freeze API status/handle fields, capacity maxima, memory accounting and
   supported source formats. Create `docs/architecture/audio-decision-log.md`.
-- [ ] Include the Game Audio Programming 1-4 adaptations: preparation/voice
+- [x] Include the Game Audio Programming 1-4 adaptations: preparation/voice
   states, resident groups, split listener, numeric silence causes, explicit PCM/
   phase contracts, user sliders and bounded application event/context policy.
   Preserve their bounded scope; do not require private PDFs or volume 5.
-- [ ] Lock miniaudio 0.11.23 source/hash/license/options and audit exact C APIs,
+- [x] Lock miniaudio 0.11.23 source/hash/license/options and audit exact C APIs,
   allocation callbacks and low-level resampler call graph. Verify a native
   callback-only playback probe with stable owner lifetime.
 - [ ] Probe pinned Emscripten 4.0.23 Wasm AudioWorklet plus shared queues/worker:
@@ -29,7 +29,7 @@ Requirements: AU01-AU04, AU08, AU14-AU15. No prerequisite.
 - [ ] Establish browser shutdown through actual context close and renderer/
   worker quiescence, including suspended/unstarted context and late callbacks.
   Verify stack/cookie lifetime in the executable probe, not only source reading.
-- [ ] Integrate deterministic cached/offline dependencies, C language flags and
+- [x] Integrate deterministic cached/offline dependencies, C language flags and
   distinct native/web variants without overwriting existing presets.
 
 Gate: common mixer architecture is feasible with pinned dependencies and no
@@ -42,21 +42,21 @@ Dependency changes require a technical decision with evidence, not a new survey.
 
 Requirements: AU02-AU07, AU09, AU16. Prerequisite: A0 API freeze.
 
-- [ ] Add `modules/audio`, lightweight public headers and installed/export target.
-- [ ] Implement fallible fixed runtime allocation, session/generation handles,
+- [x] Add `modules/audio`, lightweight public headers and installed/export target.
+- [x] Implement fallible fixed runtime allocation, session/generation handles,
   Disabled/Offline modes, prepared owned PCM seam and explicit service/shutdown.
-- [ ] Implement production SPSC batches, full validation/transaction rollback,
+- [x] Implement production SPSC batches, full validation/transaction rollback,
   128-frame boundaries, scheduled starts, and bounded application budgets.
-- [ ] Implement stop-generation and StopAll epoch mailboxes, durable terminal
+- [x] Implement stop-generation and StopAll epoch mailboxes, durable terminal
   acknowledgments, stale-command rejection and safe asset retirement.
-- [ ] Implement explicit state transition causes, immutable published batches
+- [x] Implement explicit state transition causes, immutable published batches
   and transactional resident group MaxAdmitted charges with GroupCapacity.
-- [ ] Implement cached debug snapshot handoff with no racing double buffer;
+- [x] Implement cached debug snapshot handoff with no racing double buffer;
   terminal ownership must remain independent of snapshot/trace loss. Queries
   overlay accepted reservations/acquired terminals onto stale renderer views.
-- [ ] Start an offline audio gym with named scenarios, owner-side filtering/
+- [x] Start an offline audio gym with named scenarios, owner-side filtering/
   numeric-tag correlation, admission/preparation errors and snapshot export.
-- [ ] Add production-path tests and tiny-capacity/counter-exhaustion seams.
+- [x] Add production-path tests and tiny-capacity/counter-exhaustion seams.
 
 Gate: these truth-table cases pass without any device, worker, Platform or window:
 
@@ -276,8 +276,8 @@ Fill this during implementation. A checked box is not evidence by itself.
 
 | Milestone | Revision and changed paths | Commands and evidence | Result and pending gates |
 | --- | --- | --- | --- |
-| A0 | Not started | No probes/builds run in design handoff | Pending |
-| A1 | Not started | None | Pending |
+| A0 | `6ed9836` on `feat/audio-system` (base `8972388`). Added `third_party/miniaudio/` (vendored 0.11.23, hash lock, C impl units, CMake), root `CMakeLists.txt` (C dep + audio module), `docs/architecture/audio-decision-log.md`. | miniaudio.h sha256 `7e4f3f13c8fe66df2080ac3dd12a89193e3c2463cb7f067c798abd7331cd8ee6` (4,099,492 bytes) verified on download and at configure; option macros verified against the pinned header; resampler/decoder call graph audited (see decision log). Toolchain provisioned: Clang/LLD/clang-format/clang-tidy 18.1.8, CMake 3.29.6, Ninja 1.11.1.3, Conan 2.8.1. miniaudio compiled as C and linked into `libludus_audio.a`. | Native callback-only playback probe and the browser AudioWorklet/shutdown-quiescence subgate remain **pending** (emsdk not installed; no device/browser in this sandbox). Common-mixer architecture is feasible with the pinned dependency and no exceptions; proceeding on native/offline work. |
+| A1 | `6ed9836`. Added `modules/audio/` (public headers, control owner, SPSC ring, decode, tests). | `build linux-clang-debug` + `linux-clang-development` green; `ctest` 28/28 pass (adds `ludus_audio_tests` 26 cases/643 assertions and `ludus_audio_alloc_tests`). clang-format and clang-tidy (pinned 18) clean on all audio TUs; zero warm-path allocations verified. Truth-table rows exercised: invalid/stale/fabricated handles, invalid-last-record rollback, oversized batch, Stop-before-start, Stop/StopAll with full queue, StopAll-then-Play, disabled play, group admission rollback, dropped-snapshot terminal reclaim, retire-with-active-play, scheduled start offset, far-future rejection, render-partition parity, zero-frame no-op, slider u=0/0.5/1 -> 0/0.1/1. | Passed (device-independent). |
 | A2 | Not started | None | Pending |
 | A3 | Not started | None | Pending |
 | A4 | Not started | None | Pending |

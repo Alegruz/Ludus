@@ -111,6 +111,7 @@ struct AudioSystem::Impl final
     [[nodiscard]] Status
     RenderFrames(std::span<float32> output, ChannelLayout layout, BufferLayout bufferLayout, uint32 frames) noexcept;
 
+    void FillSnapshot(SystemSnapshot& out) const noexcept;
     void PublishSnapshot() noexcept;
     void TerminateVoice(uint32 slot, TerminalReason reason, StateCause cause) noexcept;
 };

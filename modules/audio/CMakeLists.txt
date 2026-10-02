@@ -15,6 +15,7 @@ target_sources(
         src/audio_system.cpp
         src/control_owner.cpp
         src/facade.cpp
+        src/audio_gym.cpp
         src/internal/decode.cpp
     PUBLIC
         FILE_SET public_headers
@@ -25,6 +26,7 @@ target_sources(
             include/ludus/audio/audio_types.h
             include/ludus/audio/audio_system.h
             include/ludus/audio/audio_debug.h
+            include/ludus/audio/audio_gym.h
 )
 
 # Private implementation include root (src/internal/*) and the private miniaudio
@@ -72,6 +74,7 @@ if(LUDUS_BUILD_TESTS)
             tests/handle_tests.cpp
             tests/admission_tests.cpp
             tests/lifecycle_tests.cpp
+            tests/gym_tests.cpp
     )
     # Tests reach into src/internal for the SPSC ring and handle helpers.
     target_include_directories(ludus_audio_tests PRIVATE src include)
