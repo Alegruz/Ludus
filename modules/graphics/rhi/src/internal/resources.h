@@ -1,5 +1,9 @@
 #pragma once
+#include <ludus/foundation/base/types.h>
+
 #include <ludus/graphics/rhi/render.h>
+
+#include <span>
 namespace ludus::graphics::rhi::internal
 {
 inline constexpr ludus::foundation::usize RESOURCE_CAPACITY = 8;

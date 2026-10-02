@@ -539,6 +539,88 @@ bool ConnectWindow(const WindowInfo& window) noexcept
     {
         return false;
     }
+    const auto connectAdapter = [&window]() noexcept {
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(gPhysical, &properties);
+        if (properties.apiVersion < VK_API_VERSION_1_1)
+        {
+            LUDUS_LOG_ERROR(LOG_RHI, "Vulkan 1.1 is required for the generated SPIR-V profile");
+            return false;
+        }
+        gMaxDimension = properties.limits.maxImageDimension2D;
+        const float32 priority = 1;
+        VkDeviceQueueCreateInfo queue{};
+        queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queue.queueFamilyIndex = gFamily;
+        queue.queueCount = 1;
+        queue.pQueuePriorities = &priority;
+        const char* extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME};
+        VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT maintenance{};
+        maintenance.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
+        if (!gHeadless)
+        {
+            uint32 countExtensions = 0;
+            if (!gInstanceMaintenance ||
+                !Check(vkEnumerateDeviceExtensionProperties(gPhysical, nullptr, &countExtensions, nullptr)) ||
+                countExtensions > 512)
+            {
+                LUDUS_LOG_ERROR(LOG_RHI,
+                                "Wayland rendering requires surface/swapchain maintenance1 for safe retirement");
+                return false;
+            }
+            VkExtensionProperties propertiesExtensions[512]{};
+            if (!Check(
+                    vkEnumerateDeviceExtensionProperties(gPhysical, nullptr, &countExtensions, propertiesExtensions)))
+            {
+                return false;
+            }
+            bool supported = false;
+            for (usize i = 0; i < countExtensions; ++i)
+            {
+                supported = supported || std::strcmp(propertiesExtensions[i].extensionName, extensions[1]) == 0;
+            }
+            if (!supported)
+            {
+                LUDUS_LOG_ERROR(LOG_RHI, "VK_EXT_swapchain_maintenance1 is required for safe presentation retirement");
+                return false;
+            }
+            VkPhysicalDeviceFeatures2 features{};
+            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+            features.pNext = &maintenance;
+            vkGetPhysicalDeviceFeatures2(gPhysical, &features);
+            if (maintenance.swapchainMaintenance1 != VK_TRUE)
+            {
+                return false;
+            }
+        }
+        VkDeviceCreateInfo device{};
+        device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        device.queueCreateInfoCount = 1;
+        device.pQueueCreateInfos = &queue;
+        device.enabledExtensionCount = gHeadless ? 0U : 2U;
+        device.ppEnabledExtensionNames = extensions;
+        device.pNext = gHeadless ? nullptr : &maintenance;
+        if (!Check(vkCreateDevice(gPhysical, &device, nullptr, &gDevice)))
+        {
+            return false;
+        }
+        volkLoadDevice(gDevice);
+        vkGetDeviceQueue(gDevice, gFamily, 0, &gQueue);
+        gTarget.Width = window.Width;
+        gTarget.Height = window.Height;
+        if (gTarget.Width == 0 || gTarget.Height == 0 || gTarget.Width > gMaxDimension ||
+            gTarget.Height > gMaxDimension)
+        {
+            return false;
+        }
+        gRequestedExtent = { .width = gTarget.Width, .height = gTarget.Height };
+        if (!CreateTargets())
+        {
+            return false;
+        }
+        LUDUS_LOG_INFO(LOG_RHI, "Vulkan adapter: {}", properties.deviceName);
+        return true;
+    };
     for (usize i = 0; i < count; ++i)
     {
         uint32 families = 0;
@@ -567,87 +649,27 @@ bool ConnectWindow(const WindowInfo& window) noexcept
         }
         if (gPhysical != VK_NULL_HANDLE)
         {
-            break;
+            if (connectAdapter())
+            {
+                return true;
+            }
+            ReleaseTargets();
+            if (gDevice != VK_NULL_HANDLE)
+            {
+                vkDestroyRenderPass(gDevice, gPass, nullptr);
+                vkDestroyDevice(gDevice, nullptr);
+            }
+            gDevice = VK_NULL_HANDLE;
+            gPhysical = VK_NULL_HANDLE;
+            gQueue = VK_NULL_HANDLE;
+            gPass = VK_NULL_HANDLE;
+            gFormat = VK_FORMAT_UNDEFINED;
+            gEncoding = false;
         }
     }
-    if (gPhysical == VK_NULL_HANDLE)
-    {
-        return false;
-    }
-    VkPhysicalDeviceProperties properties{};
-    vkGetPhysicalDeviceProperties(gPhysical, &properties);
-    if (properties.apiVersion < VK_API_VERSION_1_1)
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "Vulkan 1.1 is required for the generated SPIR-V profile");
-        return false;
-    }
-    gMaxDimension = properties.limits.maxImageDimension2D;
-    LUDUS_LOG_INFO(LOG_RHI, "Vulkan adapter: {}", properties.deviceName);
-    const float32 priority = 1;
-    VkDeviceQueueCreateInfo queue{};
-    queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queue.queueFamilyIndex = gFamily;
-    queue.queueCount = 1;
-    queue.pQueuePriorities = &priority;
-    const char* extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME};
-    VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT maintenance{};
-    maintenance.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
-    if (!gHeadless)
-    {
-        uint32 countExtensions = 0;
-        if (!gInstanceMaintenance ||
-            !Check(vkEnumerateDeviceExtensionProperties(gPhysical, nullptr, &countExtensions, nullptr)) ||
-            countExtensions > 512)
-        {
-            LUDUS_LOG_ERROR(LOG_RHI, "Wayland rendering requires surface/swapchain maintenance1 for safe retirement");
-            return false;
-        }
-        VkExtensionProperties propertiesExtensions[512]{};
-        if (!Check(vkEnumerateDeviceExtensionProperties(gPhysical, nullptr, &countExtensions, propertiesExtensions)))
-        {
-            return false;
-        }
-        bool supported = false;
-        for (usize i = 0; i < countExtensions; ++i)
-        {
-            supported = supported || std::strcmp(propertiesExtensions[i].extensionName, extensions[1]) == 0;
-        }
-        if (!supported)
-        {
-            LUDUS_LOG_ERROR(LOG_RHI, "VK_EXT_swapchain_maintenance1 is required for safe presentation retirement");
-            return false;
-        }
-        VkPhysicalDeviceFeatures2 features{};
-        features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        features.pNext = &maintenance;
-        vkGetPhysicalDeviceFeatures2(gPhysical, &features);
-        if (maintenance.swapchainMaintenance1 != VK_TRUE)
-        {
-            return false;
-        }
-    }
-    VkDeviceCreateInfo device{};
-    device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    device.queueCreateInfoCount = 1;
-    device.pQueueCreateInfos = &queue;
-    device.enabledExtensionCount = gHeadless ? 0U : 2U;
-    device.ppEnabledExtensionNames = extensions;
-    device.pNext = gHeadless ? nullptr : &maintenance;
-    if (!Check(vkCreateDevice(gPhysical, &device, nullptr, &gDevice)))
-    {
-        return false;
-    }
-    volkLoadDevice(gDevice);
-    vkGetDeviceQueue(gDevice, gFamily, 0, &gQueue);
-    gTarget.Width = window.Width;
-    gTarget.Height = window.Height;
-    if (gTarget.Width == 0 || gTarget.Height == 0 || gTarget.Width > gMaxDimension || gTarget.Height > gMaxDimension)
-    {
-        return false;
-    }
-    gRequestedExtent = { .width = gTarget.Width, .height = gTarget.Height };
-    return CreateTargets();
+    return false;
 }
+
 bool InitializeRendering() noexcept
 {
     if (gDevice == VK_NULL_HANDLE)
