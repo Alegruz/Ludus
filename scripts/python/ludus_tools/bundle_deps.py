@@ -31,7 +31,28 @@ from typing import Iterable
 # The dependencies whose closure must travel with the SDK (see conanfile.py and
 # the manifest inventory). volk is a public CONFIG dependency; freetype/harfbuzz
 # are PRIVATE deps of Ludus::Text that remain in the final static link line.
+# volk's CMake config transitively finds VulkanHeaders, so its generator config
+# must be bundled too even though it is header-only.
 BUNDLED_DEPENDENCIES = ("volk", "freetype", "harfbuzz")
+
+# Package names whose GENERATOR cmake files are part of the find_package closure
+# of the bundled dependencies (bundled deps + their transitive CONFIG deps).
+# Matched case-insensitively against the generator filename prefix.
+_GENERATOR_PACKAGE_NAMES = ("volk", "vulkanheaders", "freetype", "harfbuzz")
+
+# Shared CMakeDeps helper file that the per-package configs include.
+_SHARED_GENERATOR_FILES = ("cmakedeps_macros.cmake",)
+
+# Generator files that must NOT be bundled: build-only toolchain/runtime files
+# and test-only dependencies. They embed producer paths and are irrelevant to a
+# consumer linking the runtime SDK.
+_EXCLUDED_GENERATOR_SUBSTRINGS = (
+    "conan_toolchain",
+    "conanbuild",
+    "conanrun",
+    "conandeps",
+    "catch2",
+)
 
 # Bundled layout, relative to the dependency search root
 # <prefix>/lib/cmake/Ludus/dependencies:
@@ -111,24 +132,50 @@ def bundle_from_conan(
     cmake_dst.mkdir(parents=True, exist_ok=True)
     packages_dst.mkdir(parents=True, exist_ok=True)
 
-    # 1) Copy every generator CMake file (config/targets/data/macros) so
-    #    find_package(<dep>) resolves from the bundle.
+    # 1) Copy ONLY the generator CMake files that belong to the bundled
+    #    dependencies' find_package closure (plus the shared macros file). Copying
+    #    the whole folder would drag in build-only (conan_toolchain) and test-only
+    #    (Catch2) files that embed producer paths and are not part of the runtime
+    #    SDK's link closure.
     generators_dir = Path(generators_dir)
     if generators_dir.is_dir():
         for item in generators_dir.iterdir():
-            if item.is_file() and item.suffix == ".cmake":
+            if not (item.is_file() and item.suffix == ".cmake"):
+                continue
+            lower = item.name.lower()
+            if item.name in _SHARED_GENERATOR_FILES:
+                shutil.copy2(item, cmake_dst / item.name)
+                continue
+            if any(ex in lower for ex in _EXCLUDED_GENERATOR_SUBSTRINGS):
+                continue
+            # Keep a generator file only when its name starts with a package we
+            # bundle (e.g. volk-config.cmake, volkTargets.cmake,
+            # VulkanHeaders-release-...-data.cmake, Freetype*.cmake).
+            if any(lower.startswith(name) for name in _GENERATOR_PACKAGE_NAMES):
                 shutil.copy2(item, cmake_dst / item.name)
 
-    # 2) Copy each dependency package payload.
+    # 2) Copy each dependency package payload, plus any transitive CONFIG-dep
+    #    package whose generator config we kept (e.g. volk pulls VulkanHeaders).
+    #    Every package root we copy must also be rewritten in the generator files
+    #    so no producer path survives.
+    payload_names = list(dict.fromkeys(list(dependencies) + list(package_dirs.keys())))
     bundled: list[str] = []
+    requested = set(dependencies)
     package_replacements: list[tuple[str, str]] = []
-    for name in dependencies:
+    for name in payload_names:
         src = package_dirs.get(name)
         if src is None or not Path(src).exists():
             continue
+        # Only bundle a package payload when it is a requested dependency OR a
+        # transitive package whose generator config was kept above.
+        if name not in requested and not any(
+            n in name.lower() or name.lower() in n for n in _GENERATOR_PACKAGE_NAMES
+        ):
+            continue
         dest = packages_dst / name
         _copy_tree(Path(src), dest)
-        bundled.append(name)
+        if name in requested:
+            bundled.append(name)
         # The generator cmake files sit in dependencies/cmake/, so the bundled
         # package is at ../packages/<name> relative to a generator cmake file.
         package_replacements.append((str(Path(src)), f"{_SELF_DIR}/../packages/{name}"))

@@ -560,6 +560,38 @@ class BundleDeps(unittest.TestCase):
                 self.bundle_deps.audit_no_producer_paths(prefix, [str(pkg), str(gen)]), []
             )
 
+    def test_excludes_build_and_test_only_generator_files(self) -> None:
+        # Regression: copying the whole generators folder dragged in Catch2 /
+        # conan_toolchain files that embed producer paths and are not part of the
+        # runtime link closure. Only the bundled deps' configs must be copied.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            pkg = root / "cache" / "volk" / "p"
+            (pkg / "lib").mkdir(parents=True)
+            (pkg / "lib" / "libvolk.a").write_bytes(b"\x00ar")
+            gen = root / "conan-out"
+            gen.mkdir()
+            (gen / "volk-config.cmake").write_text("# volk\n")
+            (gen / "VulkanHeaders-release-x86_64-data.cmake").write_text("# vh\n")
+            (gen / "cmakedeps_macros.cmake").write_text("# macros\n")
+            # These must NOT be copied (they embed producer paths):
+            (gen / "Catch2-release-x86_64-data.cmake").write_text(f'set(c "{root}/leak")\n')
+            (gen / "conan_toolchain.cmake").write_text(f'set(t "{root}/leak")\n')
+            prefix = root / "prefix"
+            prefix.mkdir()
+            self.bundle_deps.bundle_from_conan(
+                prefix=prefix, generators_dir=gen, package_dirs={"volk": pkg}, dependencies=("volk",),
+            )
+            cmake_dir = prefix / "lib" / "cmake" / "Ludus" / "dependencies" / "cmake"
+            names = {p.name for p in cmake_dir.iterdir()}
+            self.assertIn("volk-config.cmake", names)
+            self.assertIn("VulkanHeaders-release-x86_64-data.cmake", names)
+            self.assertIn("cmakedeps_macros.cmake", names)
+            self.assertNotIn("Catch2-release-x86_64-data.cmake", names)
+            self.assertNotIn("conan_toolchain.cmake", names)
+            # And the audit for the broad producer root is clean.
+            self.assertEqual(self.bundle_deps.audit_no_producer_paths(prefix, [str(root)]), [])
+
     def test_audit_detects_leak(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             prefix = Path(td) / "prefix"
