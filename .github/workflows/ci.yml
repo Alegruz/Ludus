@@ -2,7 +2,21 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CI: "true"
+  LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
+  CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
 jobs:
   formatting:
@@ -10,78 +24,93 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install pinned formatter
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18
+      - name: Install pinned formatter and GUI test dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18 python3-tk xvfb xauth
       - name: Test formatting and staged-file preservation
         run: python3 -m unittest discover -s scripts/python -p 'test_formatting.py' -v
       - name: Test optional RAD tooling contracts
         run: python3 -m unittest discover -s scripts/python -p 'test_rad_debugger.py' -v
+      - name: Test graphical and CLI initialization routing
+        run: xvfb-run -a env LUDUS_TEST_GUI=1 python3 -m unittest discover -s scripts/python -p 'test_init*.py' -v
+      - name: Test CI initialization and analysis contracts
+        run: python3 -m unittest discover -s scripts/python -p 'test_ci.py' -v
       - name: Verify source formatting before builds
         run: ./scripts/check --format
 
-  linux:
+  development:
     needs: formatting
-    name: Ubuntu Clang
+    name: Development and SDK
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/native-setup
+        with:
+          preset: linux-clang-development
+      - name: Build Development without PCH
+        run: ./scripts/build linux-clang-development
+      - name: Test Development
+        run: out/host-tools/venv/bin/ctest --preset linux-clang-development --no-tests=error
+      - name: Validate installed SDK and consumer
+        run: ./scripts/install-sdk linux-clang-development
+      - name: Report compiler cache
+        if: always()
+        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
+
+  sanitizers:
+    needs: formatting
+    name: ASan and UBSan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/native-setup
+        with:
+          preset: linux-clang-asan-ubsan
+      - name: Build with sanitizers
+        run: ./scripts/build linux-clang-asan-ubsan
+      - name: Test with sanitizers
+        run: out/host-tools/venv/bin/ctest --preset linux-clang-asan-ubsan --no-tests=error
+      - name: Report compiler cache
+        if: always()
+        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
+
+  analysis:
+    needs: formatting
+    name: Clang static analysis
     runs-on: ubuntu-24.04
     env:
-      CI: "true"
-      LUDUS_ENABLE_CCACHE: "1"
-      # Diagnostics stay report-only in CI. CI is auto-detected, but set the
-      # noninteractive policy explicitly so an interactive assertion prompt can
-      # never hang a runner even if detection changes.
-      LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
+      LUDUS_TIDY_JOBS: "2"
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Install ccache
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ccache
-
-      - name: Cache pip downloads
-        uses: actions/cache@v4
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/native-setup
         with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('config/tool_versions.json') }}
-
-      - name: Cache Conan package cache
-        uses: actions/cache@v4
-        with:
-          path: out/conan/home
-          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', 'config/conan/profiles/linux-clang-x86_64', 'conan.lock') }}
-
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ccache-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
-          restore-keys: |
-            ccache-${{ runner.os }}-${{ github.ref }}-
-            ccache-${{ runner.os }}-
-
-      - name: Reset ccache statistics
-        run: ccache --zero-stats
-
-      - name: Initialize, build, test, check, and validate SDK
-        run: |
-          start_time=$(date +%s)
-          ./init.sh --ci --validate
-          end_time=$(date +%s)
-          echo "LUDUS_BUILD_WALL_SECONDS=$(( end_time - start_time ))" >> "$GITHUB_ENV"
-
-      - name: Print build wall-time and ccache statistics
+          preset: linux-clang-development
+      # Generated headers/sources must exist before analyzing the compile database.
+      - name: Build analysis inputs
+        run: ./scripts/build linux-clang-development
+      - name: Analyze every project translation unit
+        run: ./scripts/check linux-clang-development --tidy
+      - name: Report compiler cache
         if: always()
-        run: |
-          echo "### Build metrics" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Total wall-time | ${LUDUS_BUILD_WALL_SECONDS:-?}s |" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### ccache statistics" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "--- ccache stats ---"
-          ccache --show-stats
+        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
+
+  editor:
+    needs: formatting
+    name: Optional editor
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/native-setup
+        with:
+          preset: linux-clang-development
+          editor: 'true'
+          cache-variant: editor
+      - name: Build editor tests without rebuilding every engine test target
+        run: out/host-tools/venv/bin/cmake --build --preset linux-clang-development --target ludus_editor_tests
+      - name: Verify editor initialization and offscreen tests
+        run: out/host-tools/venv/bin/ctest --preset linux-clang-development --label-regex editor --no-tests=error
+      - name: Report compiler cache
+        if: always()
+        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
 
   assertion-policy:
     needs: formatting
@@ -91,105 +120,56 @@ jobs:
       fail-fast: false
       matrix:
         preset: [linux-clang-debug, linux-clang-profile, linux-clang-release]
-    env:
-      CI: "true"
-      # Report-only diagnostics: even the Debug preset here must not attempt an
-      # interactive assertion prompt on a headless runner.
-      LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare selected dependencies
-        run: ./init.sh --preset-only ${{ matrix.preset }}
-      - name: Build with tests even for the production Release policy
+      - uses: ./.github/actions/native-setup
+        with:
+          preset: ${{ matrix.preset }}
+      - name: Build and test all assertion policies including Release
         run: |
           out/host-tools/venv/bin/cmake --preset ${{ matrix.preset }} -B out/build/assertion-policy -DLUDUS_BUILD_TESTS=ON -DLUDUS_WARNINGS_AS_ERRORS=ON
           out/host-tools/venv/bin/cmake --build out/build/assertion-policy --parallel 2
           out/host-tools/venv/bin/ctest --test-dir out/build/assertion-policy --output-on-failure
+      - name: Report compiler cache
+        if: always()
+        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
 
   pch:
     needs: formatting
-    # Verifies the optional precompiled-header path builds and tests pass. The
-    # primary "Ubuntu Clang" job above builds with LUDUS_ENABLE_PCH OFF (the
-    # default), which is the "no-pch" guarantee: no translation unit may rely on
-    # a symbol that only the PCH provides. This job flips the option ON so both
-    # configurations are exercised on every change. See cmake/EnginePch.cmake and
-    # docs/architecture/foundational-headers.md Section 10.
     name: PCH build (LUDUS_ENABLE_PCH=ON)
     runs-on: ubuntu-24.04
-    env:
-      CI: "true"
-      LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
     steps:
       - uses: actions/checkout@v4
-      - name: Install Wayland development packages
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libwayland-dev wayland-protocols
-      - name: Cache pip downloads
-        uses: actions/cache@v4
+      - uses: ./.github/actions/native-setup
         with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('config/tool_versions.json') }}
-      - name: Cache Conan package cache
-        uses: actions/cache@v4
-        with:
-          path: out/conan/home
-          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', 'config/conan/profiles/linux-clang-x86_64', 'conan.lock') }}
-      - name: Prepare toolchain and dependencies
-        run: ./init.sh --preset-only linux-clang-development
+          preset: linux-clang-development
+          cache-variant: pch
       - name: Configure, build, and test with the foundational PCH enabled
         run: |
           out/host-tools/venv/bin/cmake --preset linux-clang-development -B out/build/pch \
             -DLUDUS_BUILD_TESTS=ON -DLUDUS_WARNINGS_AS_ERRORS=ON -DLUDUS_ENABLE_PCH=ON
           out/host-tools/venv/bin/cmake --build out/build/pch --parallel 2
-          # This job's purpose is to prove the engine + tests BUILD and the
-          # functional/runtime tests PASS with the PCH on. The build-contract
-          # tests introspect compile_commands.json to verify source/policy
-          # invariants (exception policy, assertion-config overrides, header
-          # self-sufficiency); those invariants are independent of the PCH and
-          # are already fully exercised by the non-PCH jobs. Under a
-          # PCH-augmented compile database they would re-parse the injected
-          # precompiled-header flags, which is out of their scope, so exclude
-          # the build-contract label here.
+          # Compile-policy/header contracts run in the non-PCH jobs; their
+          # standalone reparsing does not support injected PCH flags.
           out/host-tools/venv/bin/ctest --test-dir out/build/pch --output-on-failure --label-exclude build-contract
+      - name: Report compiler cache
+        if: always()
+        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
 
   build-budget:
     needs: formatting
-    # Heavy, separate job: -ftime-trace + ClangBuildAnalyzer are slow, so this is
-    # kept out of the fast "Ubuntu Clang" job and the local iteration loop. It
-    # enforces the per-header / total parse-time budgets in config/build_budget.json
-    # (see docs/decisions/0005-build-time-budgets.md). Wayland is installed so the
-    # full build graph (including the Wayland backend) is profiled.
     name: Build-time budget
     runs-on: ubuntu-24.04
-    env:
-      CI: "true"
-      LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
-      # Time traces measure elapsed parsing time; keep CPU contention stable.
-      CMAKE_BUILD_PARALLEL_LEVEL: "2"
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Install Wayland development packages
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libwayland-dev wayland-protocols
-
-      - name: Cache pip downloads
-        uses: actions/cache@v4
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/native-setup
         with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('config/tool_versions.json') }}
-
-      - name: Cache Conan package cache
-        uses: actions/cache@v4
-        with:
-          path: out/conan/home
-          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', 'config/conan/profiles/linux-clang-x86_64', 'conan.lock') }}
-
-      - name: Prepare toolchain and dependencies
-        run: ./init.sh --ci
-
+          preset: linux-clang-development
+          compiler-cache: 'false'
+      # Setup only: --ci would repeat all native validation before profiling.
+      # Keep the clean profile uncached and concurrency stable for timing budgets.
       - name: Enforce build-time budget
         run: ./scripts/check-build-budget --profile
-
       - name: Publish build-time profile summary
         if: always()
         run: |
@@ -197,3 +177,32 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           sed -n '/Time summary/,/Expensive headers/p' out/profile/*-analysis.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Save detailed build profile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-build-profile
+          path: out/profile/
+          if-no-files-found: warn
+
+  linux:
+    # Preserve the existing required check name after splitting its validation.
+    # A failed/skipped dependency must fail this gate rather than skip it.
+    name: Ubuntu Clang
+    needs: [formatting, development, sanitizers, analysis, editor, assertion-policy, pch, build-budget]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every native validation job to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          results = json.loads(os.environ['RESULTS'])
+          failed = {name: job['result'] for name, job in results.items() if job['result'] != 'success'}
+          if failed:
+              raise SystemExit(f"Native validation did not succeed: {failed}")
+          print('All native CI gates passed.')
+          PYTHON

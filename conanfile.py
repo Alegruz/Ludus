@@ -27,7 +27,8 @@ class LudusRecipe(ConanFile):
         self.options["freetype"].with_bzip2 = False
 
     def build_requirements(self) -> None:
-        self.test_requires("catch2/3.4.0")
+        if self.conf.get("user.ludus:build_tests", default=True, check_type=bool):
+            self.test_requires("catch2/3.4.0")
 
     def generate(self) -> None:
         deps = CMakeDeps(self)

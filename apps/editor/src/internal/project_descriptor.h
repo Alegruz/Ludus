@@ -124,13 +124,13 @@ struct ParseOutcome
 // validation cannot drift (both consume the shared fixtures).
 namespace limits
 {
-inline constexpr usize MaxFileBytes = 64u * 1024u;
+inline constexpr usize MaxFileBytes = usize{64} * 1024u;
 inline constexpr usize MaxNameBytes = 128u;
 inline constexpr usize MaxPathBytes = 4096u;
 inline constexpr usize MaxTargetBytes = 256u;
 inline constexpr usize MaxArgCount = 64u;
 inline constexpr usize MaxArgBytes = 4096u;
-inline constexpr usize MaxArgsTotalBytes = 32u * 1024u;
+inline constexpr usize MaxArgsTotalBytes = usize{32} * 1024u;
 // Version-2 additions (kept equal to ludus_tools.descriptor).
 inline constexpr usize MaxVersionBytes = 128u;
 inline constexpr usize MaxComponentCount = 64u;

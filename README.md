@@ -18,9 +18,83 @@ cd <repository>
 ./init.sh
 ```
 
-That one command prepares the development environment for all committed presets: system prerequisites, project-managed CMake/Ninja/Conan, and Conan dependency files. It does not configure or build Ludus engine targets by default. Use the VS Code CMake extension or the command-line scripts when you want to configure/build.
+On an interactive desktop, that command opens a graphical setup window. Choose
+Engine contributor (all native presets), Application developer (one native
+preset), Browser developer (one Emscripten preset), or Full validation, then
+review the preset and optional tools before pressing **Initialize**. Closing or
+cancelling the window runs no setup actions. Setup progress and any sudo password
+prompt appear in the launching terminal after the window closes.
 
-Conan may still build missing third-party packages such as Catch2 while preparing the dependency cache. That is dependency setup, not a Ludus engine target build. If an existing CMake cache points at stale tool paths, init may fresh-configure that generated build tree to repair it, but it still does not compile or link Ludus targets.
+The default Engine contributor workflow prepares system prerequisites,
+project-managed CMake/Ninja/Conan, and Conan dependency files for all native
+presets. It does not configure or build Ludus engine targets by default. Use the
+VS Code CMake extension or the command-line scripts when you want to
+configure/build. Browser setup installs its separate pinned toolchain and
+configures the selected browser preset.
+
+Use `--cli` for terminal setup. CI, redirected input/output, and headless Linux
+sessions automatically use the CLI. The GUI uses Python's optional Tkinter
+module (`sudo apt-get install python3-tk` on Ubuntu); if Tk or a desktop display
+is unavailable, default setup falls back to the CLI. `--gui` requires a window
+and reports an error before setup if it cannot open one. Both interfaces share
+the same setup code and flags; these options also work through `scripts/init`
+and the PowerShell wrappers (the supported native host remains Ubuntu).
+
+```bash
+./init.sh --cli                                      # existing terminal workflow
+./init.sh --cli --persona application                # one native development preset
+./init.sh --cli --persona browser                    # browser development tools
+./init.sh --cli --persona validation                 # complete native validation
+./init.sh --gui --with-rad-debugger                   # review optional debugger setup
+./init.sh --cli --with-editor                        # Qt prerequisites + native editor build
+./init.sh --cli --no-editor                          # omit optional editor setup (default)
+```
+
+`--persona` supplies defaults; an explicit preset and scope flags override those
+defaults. Full validation prepares all native presets even when `--preset-only`
+is supplied. Tests are excluded by default: `--with-tests` enables native test
+targets and Catch2 dependencies for later builds, while `--run-tests` also builds
+and executes them during setup. `--validate`, the Full validation workflow, and
+`--ci` explicitly opt into tests as part of validation. They reject `--no-tests`.
+
+| Workflow | Tests | Sample applications | Browser probes | Editor / RAD |
+| --- | --- | --- | --- | --- |
+| Engine contributor | Off | On | Off | Off |
+| Application developer | Off | Off | Off | Off |
+| Browser developer | Off | On | Off | Off |
+| Full validation | On, executed | On | Off | Off |
+
+Use `--with-smoke-app` / `--no-smoke-app` to select the smoke app and native input
+demo, and `--with-web-probes` / `--no-web-probes` for browser feasibility probes.
+`--with-shader-probe` / `--no-shader-probe` controls the isolated native shader
+probe (off by default); it requires its separate pinned shader tools. Required engine
+modules and the native diagnostics helper remain available for applications and
+the editor. Browser presets reject native tests, RAD, editor setup,
+`--all-presets`, `--validate`, and `--ci`.
+
+```bash
+./init.sh --cli --persona application                # engine libraries, no samples/tests/editor
+./init.sh --cli --with-tests --preset-only            # include tests in future builds; do not execute
+./init.sh --cli --run-tests --preset-only             # build and run tests now
+./init.sh --cli --persona browser --with-web-probes   # opt into browser probes
+```
+
+Selections are saved locally under `out/init/options.json` for the prepared
+presets and apply to subsequent CLI, direct CMake preset, and VS Code builds.
+Reinitialize to change them. `--no-editor` also disables the editor for those
+presets. Custom CMake users can bypass saved choices with
+`-DLUDUS_USE_INIT_OPTIONS=OFF` and set their own target options. Existing checkouts
+without saved choices retain the committed developer preset settings.
+
+The optional **Build Ludus editor** checkbox is off by default. Selecting it
+installs `qt6-base-dev` and `qt6-wayland` on Ubuntu/Debian when missing, enables
+`LUDUS_BUILD_EDITOR`, and builds `ludus_editor` for the selected Debug or
+Development preset. `--no-system-install` uses your existing Qt 6.4+ installation
+instead. Launch it afterwards with `./scripts/editor --preset <preset>`.
+Qt remains an optional editor dependency outside Conan and the installed SDK.
+See [the editor guide](docs/development/editor-workspace.md).
+
+Conan may still build missing third-party packages while preparing the dependency cache; Catch2 is included only when tests are enabled. That is dependency setup, not a Ludus engine target build. If an existing CMake cache points at stale tool paths, init may fresh-configure that generated build tree to repair it, but it still does not compile or link Ludus targets.
 
 VS Code is configured to use the project-managed CMake at `out/host-tools/venv/bin/cmake`. If VS Code was already open while `./init.sh` ran, reload the window before pressing the CMake Tools Build button.
 

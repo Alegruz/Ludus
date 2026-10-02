@@ -22,7 +22,6 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_MAKE_PROGRAM": "${sourceDir}/out/host-tools/venv/bin/ninja",
         "LUDUS_BUILD_SMOKE_APP": "ON",
-        "LUDUS_ENABLE_CCACHE": "OFF",
         "LUDUS_ENABLE_COVERAGE": "OFF",
         "LUDUS_ENABLE_TSAN": "OFF"
       }

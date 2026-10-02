@@ -103,9 +103,9 @@ public:
     ~ToolProcess() override;
 
     // Fixed protocol/credit bounds (design section 10).
-    static constexpr usize OutputCreditWindow = 256u * 1024u; // encoded bytes
-    static constexpr usize MaxProtocolLine = 256u * 1024u;    // including framing
-    static constexpr usize MaxFramingBacklog = 2u * 1024u * 1024u;
+    static constexpr usize OutputCreditWindow = usize{256} * 1024u; // encoded bytes
+    static constexpr usize MaxProtocolLine = usize{256} * 1024u;    // including framing
+    static constexpr usize MaxFramingBacklog = usize{2} * 1024u * 1024u;
     static constexpr int ReadyTimeoutMs = 5000;
 
     // Start the adapter and send exactly one request after it reports ready.
