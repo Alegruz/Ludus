@@ -10,6 +10,7 @@ from unittest.mock import patch
 import engine
 import init_editor
 import init_ui
+import init_options
 
 
 class InitTests(unittest.TestCase):
@@ -154,6 +155,7 @@ class EditorSetupTests(unittest.TestCase):
                     stack.enter_context(patch.object(engine, name))
                 stack.enter_context(patch.object(engine, "load_tool_versions", return_value={"minimum": {"python": "3.10"}}))
                 stack.enter_context(patch.object(engine, "command_doctor", return_value=0))
+                stack.enter_context(patch.object(init_options, "save_options"))
                 setup = stack.enter_context(patch.object(init_editor, "setup_editor"))
                 stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
                 self.assertEqual(engine.command_init(args), 0)
@@ -221,6 +223,21 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(result.preset, "web-emscripten-development")
         self.assertTrue(result.preset_only)
         self.assertFalse(result.all_presets or result.with_rad_debugger or result.with_editor or result.validate or result.ci)
+
+    def test_tests_are_opt_in_and_running_implies_building(self):
+        def accept(window, widgets):
+            tests = next(widget for widget in widgets if widget.winfo_class() == "TCheckbutton"
+                         and widget.cget("text").startswith("Include native test"))
+            self.assertFalse(window.getvar(tests.cget("variable")))
+            run = next(widget for widget in widgets if widget.winfo_class() == "TCheckbutton"
+                       and widget.cget("text") == "Build and run native tests after setup")
+            run.invoke()
+            self.assertTrue(window.getvar(tests.cget("variable")))
+            next(widget for widget in widgets if widget.winfo_class() == "TButton"
+                 and widget.cget("text") == "Initialize").invoke()
+        result = self.select(accept, "--persona", "application")
+        self.assertTrue(result.with_tests and result.run_tests)
+        self.assertFalse(result.with_smoke_app or result.with_editor or result.with_shader_probe)
 
     def test_close_cancels(self):
         self.assertIsNone(self.select(lambda window, _widgets: window.destroy()))

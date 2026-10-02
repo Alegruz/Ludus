@@ -20,8 +20,9 @@ managed Python venv). Qt is not added to Conan or the SDK. Default initializatio
 skips editor setup; select **Build Ludus editor** in the setup window or use
 `./init.sh --cli --with-editor` to install missing Ubuntu/Debian Qt packages and
 build the selected native Debug or Development editor. `--no-editor` explicitly
-skips this optional setup. Existing manually configured CMake options are not
-reset by skipping editor setup.
+disables the editor for the prepared presets. Initialization also excludes test
+targets by default; use `--with-tests` to include editor tests or `--run-tests` to
+build and execute the enabled tests after setup.
 Editor tests also require Qt Test, supplied by the same Qt base development
 package on Ubuntu/Debian.
 
@@ -44,7 +45,7 @@ native preset with the option ON using the managed CMake, then build the target:
 # Or manage Qt and the editor build yourself:
 ./init.sh                                   # pinned tools + managed venv (once)
 # Editor ON configure/build (managed cmake shown as `cmake` for brevity):
-cmake --preset linux-clang-development -DLUDUS_BUILD_EDITOR=ON
+cmake --preset linux-clang-development -DLUDUS_USE_INIT_OPTIONS=OFF -DLUDUS_BUILD_EDITOR=ON
 cmake --build --preset linux-clang-development --target ludus_editor
 ```
 

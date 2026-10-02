@@ -131,10 +131,17 @@ def bootstrap_marker_path(root: Path, preset: str) -> Path:
     return root / "out" / "conan" / preset / ".ludus-bootstrap.json"
 
 
+def preset_bootstrap_fingerprint(root: Path, preset: str) -> dict[str, object]:
+    from init_options import read_options
+    result = bootstrap_fingerprint(root)
+    result["build_tests"] = read_options(root, preset).get("LUDUS_BUILD_TESTS", True)
+    return result
+
+
 def write_bootstrap_marker(root: Path, preset: str) -> None:
     marker = bootstrap_marker_path(root, preset)
     marker.write_text(
-        json.dumps(bootstrap_fingerprint(root), indent=2, sort_keys=True) + "\n",
+        json.dumps(preset_bootstrap_fingerprint(root, preset), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 
@@ -147,7 +154,7 @@ def bootstrap_marker_is_current(root: Path, preset: str) -> bool:
         actual = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
-    return actual == bootstrap_fingerprint(root)
+    return actual == preset_bootstrap_fingerprint(root, preset)
 
 
 def version_tuple(version: str) -> tuple[int, ...]:
@@ -1050,7 +1057,9 @@ def conan_install_for_preset(root: Path, profile_path: Path, preset: str) -> Non
     output_dir = root / "out" / "conan" / preset
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Network access: populating Conan cache and generator files for {preset}.")
-    print("Conan may build missing third-party packages such as Catch2; this does not build Ludus engine targets.")
+    from init_options import read_options
+    build_tests = read_options(root, preset).get("LUDUS_BUILD_TESTS", True)
+    print("Conan may build missing third-party packages; test dependencies are included only when tests are enabled.")
     run(
         [
             conan(root),
@@ -1070,6 +1079,8 @@ def conan_install_for_preset(root: Path, profile_path: Path, preset: str) -> Non
             str(root / "conan.lock"),
             "--lockfile-partial",
             "--build=missing",
+            "--conf:host",
+            f"user.ludus:build_tests={build_tests}",
         ],
         cwd=root,
         env=tool_env(root),
@@ -1184,6 +1195,8 @@ def command_init(args: argparse.Namespace) -> int:
         presets = (preset,)
     else:
         presets = tuple(PRESET_BUILD_TYPES)
+    from init_options import save_options
+    save_options(root, presets, args)
     prepare_conan_artifacts(root, versions, presets)
     repair_existing_cmake_caches(root, presets)
     if args.with_rad_debugger:
@@ -1197,6 +1210,9 @@ def command_init(args: argparse.Namespace) -> int:
     if getattr(args, "with_editor", False):
         from init_editor import setup_editor
         setup_editor(args, sys.modules[__name__])
+
+    if getattr(args, "run_tests", False) and not run_validation:
+        command_test(argparse.Namespace(preset=preset, label=None))
 
     if run_validation:
         command_build(argparse.Namespace(preset=preset, extra=[]))
@@ -1220,11 +1236,14 @@ def command_init(args: argparse.Namespace) -> int:
     if run_validation:
         print("Ludus initialization and validation complete.")
     else:
-        if getattr(args, "with_editor", False):
+        if getattr(args, "run_tests", False):
+            print("Ludus initialization complete. Opted-in tests were built and executed.")
+        elif getattr(args, "with_editor", False):
             print("Ludus initialization complete. The optional editor and its dependencies were built.")
-            print(f"Launch the editor: ./scripts/editor --preset {preset}")
         else:
             print("Ludus initialization complete. No engine targets were built.")
+        if getattr(args, "with_editor", False):
+            print(f"Launch the editor: ./scripts/editor --preset {preset}")
         print("Prepared presets: " + ", ".join(presets))
         print("VS Code CMake Tools is configured to use:")
         print(f"  {cmake(root)}")
@@ -1280,6 +1299,9 @@ def command_build(args: argparse.Namespace) -> int:
 
 def command_test(args: argparse.Namespace) -> int:
     root = repo_root()
+    from init_options import read_options
+    if not read_options(root, args.preset).get("LUDUS_BUILD_TESTS", True):
+        raise EngineError("Tests are disabled for this preset; opt in with ./init.sh --cli --with-tests " + args.preset + " --preset-only")
     ensure_bootstrap_for_preset(root, args.preset)
     cmake_configure(root, args.preset)
     ctest(root, args.preset, args.label)
@@ -1902,6 +1924,16 @@ def make_parser() -> argparse.ArgumentParser:
     editor.add_argument("--no-editor", dest="with_editor", action="store_false",
                         help="skip optional editor setup (default)")
     init_parser.set_defaults(with_editor=False)
+    for name, label in (("tests", "native test targets and Catch2 dependencies"),
+                        ("smoke-app", "sample applications (smoke and native input demo)"),
+                        ("web-probes", "browser feasibility probes"),
+                        ("shader-probe", "isolated native shader feasibility probe")):
+        group = init_parser.add_mutually_exclusive_group()
+        dest = "with_" + name.replace("-", "_")
+        group.add_argument("--with-" + name, dest=dest, action="store_true", help="enable " + label)
+        group.add_argument("--no-" + name, dest=dest, action="store_false", help="disable " + label)
+        init_parser.set_defaults(**{dest: None})
+    init_parser.add_argument("--run-tests", action="store_true", help="build and execute native tests after setup (implies --with-tests)")
     init_parser.add_argument("--all-presets", action="store_true", help="prepare Conan files for all native presets (contributor default)")
     init_parser.add_argument("--preset-only", action="store_true", help="prepare only the selected preset")
     init_parser.add_argument("--validate", "--full", action="store_true", help="also build, test, check, and validate the SDK")
@@ -1991,6 +2023,7 @@ def main(argv: Sequence[str]) -> int:
         sys.stdout.reconfigure(line_buffering=True)
     parser = make_parser()
     args = parser.parse_args(argv)
+    from init_options import OptionsError
     try:
         if args.command == "init":
             from init_ui import prepare_init
@@ -2002,7 +2035,7 @@ def main(argv: Sequence[str]) -> int:
             from web_build import command
             return command(args, sys.modules[__name__])
         return int(args.func(args))
-    except EngineError as exc:
+    except (EngineError, OptionsError) as exc:
         sys.stdout.flush()
         print(f"error: {exc}")
         return 1

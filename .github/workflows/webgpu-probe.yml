@@ -30,6 +30,8 @@ on:
       - 'scripts/python/engine.py'
       - 'scripts/python/init_ui.py'
       - 'scripts/python/init_editor.py'
+      - 'scripts/python/init_options.py'
+      - 'cmake/EngineInitOptions.cmake'
       - 'scripts/python/web_build.py'
       - 'tools/web-foundation-probe/**'
       - 'tools/web-observability-probe/**'

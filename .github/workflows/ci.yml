@@ -17,7 +17,7 @@ jobs:
       - name: Test optional RAD tooling contracts
         run: python3 -m unittest discover -s scripts/python -p 'test_rad_debugger.py' -v
       - name: Test graphical and CLI initialization routing
-        run: xvfb-run -a env LUDUS_TEST_GUI=1 python3 -m unittest discover -s scripts/python -p 'test_init_ui.py' -v
+        run: xvfb-run -a env LUDUS_TEST_GUI=1 python3 -m unittest discover -s scripts/python -p 'test_init*.py' -v
       - name: Verify source formatting before builds
         run: ./scripts/check --format
 
@@ -72,7 +72,7 @@ jobs:
 
       - name: Verify optional editor initialization and offscreen tests
         run: |
-          ./init.sh --cli --with-editor --preset-only
+          ./init.sh --cli --with-editor --with-tests --preset-only
           ./scripts/test linux-clang-development --label editor
 
       - name: Print build wall-time and ccache statistics
@@ -106,7 +106,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Prepare selected dependencies
-        run: ./init.sh --preset-only ${{ matrix.preset }}
+        run: ./init.sh --with-tests --preset-only ${{ matrix.preset }}
       - name: Build with tests even for the production Release policy
         run: |
           out/host-tools/venv/bin/cmake --preset ${{ matrix.preset }} -B out/build/assertion-policy -DLUDUS_BUILD_TESTS=ON -DLUDUS_WARNINGS_AS_ERRORS=ON
@@ -141,7 +141,7 @@ jobs:
           path: out/conan/home
           key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', 'config/conan/profiles/linux-clang-x86_64', 'conan.lock') }}
       - name: Prepare toolchain and dependencies
-        run: ./init.sh --preset-only linux-clang-development
+        run: ./init.sh --with-tests --preset-only linux-clang-development
       - name: Configure, build, and test with the foundational PCH enabled
         run: |
           out/host-tools/venv/bin/cmake --preset linux-clang-development -B out/build/pch \

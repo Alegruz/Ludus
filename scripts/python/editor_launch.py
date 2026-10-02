@@ -31,7 +31,7 @@ def _preparation_help(root: Path, preset: str) -> str:
     return (
         "The editor is not built for this preset. Prepare it explicitly, then retry:\n"
         f"  ./init.sh --cli --with-editor {preset}\n"
-        f"  {engine.cmake(root)} --preset {preset} -DLUDUS_BUILD_EDITOR=ON\n"
+        f"  {engine.cmake(root)} --preset {preset} -DLUDUS_USE_INIT_OPTIONS=OFF -DLUDUS_BUILD_EDITOR=ON\n"
         f"  {engine.cmake(root)} --build --preset {preset} --target {EDITOR_TARGET}\n"
         "Use --no-system-install with existing Qt 6.4+ packages; Qt is only installed by opted-in editor setup."
     )

@@ -32,11 +32,18 @@ def command(args, engine) -> int:
         raise EngineError("Browser SDK installation/profiling is not supported by this stage")
     if args.command == "init" and (args.all_presets or args.validate or args.ci):
         raise EngineError("Use web init --preset-only, then web build/test/check separately")
+    if args.command == "test":
+        from init_options import read_options
+        if not read_options(root, args.preset).get("LUDUS_BUILD_WEB_PROBES", True):
+            raise EngineError("Browser probes are disabled; opt in with ./init.sh --cli " + args.preset + " --with-web-probes")
     lock = json.loads((root / "config/web_toolchain.json").read_text())
     sdk = root / "out/host-tools/emsdk"
     host_bin = root / "out/host-tools/venv/bin"
 
     try:
+        if args.command == "init":
+            from init_options import save_options
+            save_options(root, (args.preset,), args)
         if args.command in ("init", "bootstrap"):
             native = json.loads((root / "config/tool_versions.json").read_text())["managed"]
             if not (host_bin / "python").exists():

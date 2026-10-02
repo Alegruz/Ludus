@@ -20,6 +20,7 @@ class Persona:
     preset: str
     preset_only: bool = False
     validate: bool = False
+    smoke_app: bool = True
 
 
 PERSONAS = (
@@ -28,7 +29,7 @@ PERSONAS = (
             "linux-clang-development"),
     Persona("application", "Application developer",
             "Prepare one native preset for building applications with Ludus.",
-            "linux-clang-development", preset_only=True),
+            "linux-clang-development", preset_only=True, smoke_app=False),
     Persona("browser", "Browser developer",
             "Install the pinned Emscripten tools and configure one browser preset.",
             "web-emscripten-development", preset_only=True),
@@ -49,13 +50,24 @@ def apply_defaults(args: argparse.Namespace) -> argparse.Namespace:
     if not args.all_presets and not args.preset_only:
         result.preset_only = persona.preset_only or result.preset.startswith("web-emscripten-")
     result.validate = args.validate or persona.validate
+    for name, default in (("with_tests", result.validate or args.ci or args.run_tests),
+                          ("with_smoke_app", persona.smoke_app),
+                          ("with_web_probes", False), ("with_shader_probe", False)):
+        if getattr(result, name) is None:
+            setattr(result, name, default)
     return result
 
 
 def validate_options(args: argparse.Namespace, engine) -> None:
     if args.all_presets and args.preset_only:
         raise engine.EngineError("--all-presets and --preset-only describe conflicting initialization scopes")
+    if (args.validate or args.ci or args.run_tests) and not args.with_tests:
+        raise engine.EngineError("Running tests or full validation requires --with-tests; remove --no-tests")
     if args.preset.startswith("web-emscripten-"):
+        if args.with_shader_probe:
+            raise engine.EngineError("The shader probe is a native-only target")
+        if args.with_tests or args.run_tests:
+            raise engine.EngineError("Native test targets are unsupported in browser presets; use browser probes instead")
         if args.with_rad_debugger:
             raise engine.EngineError("RAD is native tooling; run ./scripts/setup-rad-debugger separately from browser init")
         from web_build import PRESETS
@@ -64,6 +76,8 @@ def validate_options(args: argparse.Namespace, engine) -> None:
         if args.all_presets or args.validate or args.ci:
             raise engine.EngineError("Use web init --preset-only, then web build/test/check separately")
     else:
+        if args.with_web_probes:
+            raise engine.EngineError("Browser probes require a web-emscripten preset")
         engine.ensure_known_preset(args.preset)
     from init_editor import validate_editor_options
     validate_editor_options(args, engine)
@@ -110,7 +124,7 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
     selection = None
     try:
         window.title("Ludus setup")
-        window.minsize(660, 560)
+        window.minsize(680, 680)
         panel = ttk.Frame(window, padding=24)
         panel.grid(sticky="nsew")
         window.columnconfigure(0, weight=1)
@@ -126,7 +140,8 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
         description = tk.StringVar()
         summary = tk.StringVar()
         flags = {name: tk.BooleanVar(value=getattr(args, name)) for name in (
-            "preset_only", "no_system_install", "with_rad_debugger", "with_editor", "validate",
+            "preset_only", "no_system_install", "with_rad_debugger", "with_editor", "with_tests",
+            "run_tests", "with_smoke_app", "with_web_probes", "with_shader_probe", "validate",
             "skip_checks", "skip_sanitizers", "skip_sdk", "ci",
         )}
 
@@ -147,6 +162,11 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
             ("no_system_install", "Use existing system packages (skip automatic apt installation)"),
             ("with_rad_debugger", "Build optional RAD Debugger (Linux x64)"),
             ("with_editor", "Build Ludus editor (Linux x64; installs optional Qt 6 packages)"),
+            ("with_tests", "Include native test targets and their dependencies"),
+            ("run_tests", "Build and run native tests after setup"),
+            ("with_smoke_app", "Include sample applications (smoke and native input demo)"),
+            ("with_web_probes", "Include browser feasibility probes"),
+            ("with_shader_probe", "Include native shader feasibility probe (separate pinned tools required)"),
             ("validate", "Build and run full validation after setup"),
             ("skip_checks", "Skip formatting and static analysis during validation"),
             ("skip_sanitizers", "Skip sanitizer build and tests during validation"),
@@ -167,7 +187,7 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
             browser = preset.get().startswith("web-")
             if browser:
                 flags["preset_only"].set(True)
-                for name in ("with_rad_debugger", "with_editor", "validate", "ci"):
+                for name in ("with_rad_debugger", "with_editor", "with_tests", "run_tests", "with_shader_probe", "validate", "ci"):
                     flags[name].set(False)
             from init_editor import SUPPORTED_PRESETS
             editor_supported = preset.get() in SUPPORTED_PRESETS
@@ -175,6 +195,14 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
                 flags["with_editor"].set(False)
             controls["with_editor"].configure(state="normal" if editor_supported else "disabled")
             validating = flags["validate"].get() or flags["ci"].get()
+            if validating or flags["run_tests"].get():
+                flags["with_tests"].set(True)
+            if not browser:
+                flags["with_web_probes"].set(False)
+            controls["with_shader_probe"].configure(state="disabled" if browser else "normal")
+            controls["with_web_probes"].configure(state="normal" if browser else "disabled")
+            controls["with_tests"].configure(state="disabled" if browser or validating or flags["run_tests"].get() else "normal")
+            controls["run_tests"].configure(state="disabled" if browser or validating else "normal")
             for name in ("preset_only", "with_rad_debugger", "validate", "ci"):
                 controls[name].configure(state="disabled" if browser else "normal")
             for name in ("skip_checks", "skip_sanitizers", "skip_sdk"):
@@ -185,7 +213,11 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
             action = "Setup, engine builds and validation" if validating else "Tool and dependency setup"
             if flags["with_editor"].get() and not validating:
                 action = "Tool and dependency setup plus the optional editor build"
-            summary.set(f"{action} for {scope}.\n"
+            if flags["run_tests"].get() and not validating:
+                action = "Setup plus test builds and execution"
+            included = [label for name, label in (("with_tests", "tests"), ("with_smoke_app", "samples"),
+                        ("with_web_probes", "browser probes"), ("with_shader_probe", "shader probe"), ("with_editor", "editor")) if flags[name].get()]
+            summary.set(f"{action} for {scope}.\nOptional targets: {', '.join(included) or 'none'}.\n"
                         "Progress and any sudo password prompt appear in the launching terminal.")
 
         def change_workflow(_event=None):
@@ -195,6 +227,11 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
             flags["preset_only"].set(chosen.preset_only)
             flags["validate"].set(chosen.validate)
             flags["ci"].set(False)
+            flags["with_tests"].set(chosen.validate)
+            flags["run_tests"].set(False)
+            flags["with_smoke_app"].set(chosen.smoke_app)
+            flags["with_web_probes"].set(False)
+            flags["with_shader_probe"].set(False)
             refresh()
 
         for row, (name, label) in enumerate(labels, start=5):

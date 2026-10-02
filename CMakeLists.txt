@@ -36,6 +36,8 @@ option(LUDUS_BUILD_SHADER_PROBE "Build the isolated offline shader feasibility p
 # subdirectory (see apps/editor/CMakeLists.txt), never globally. See
 # .kiro/specs/editor-workspace/{requirements,design}.md (E01/E02).
 option(LUDUS_BUILD_EDITOR "Build the optional native Qt editor workspace (apps/editor)" OFF)
+option(LUDUS_BUILD_WEB_PROBES "Build browser feasibility probes" ON)
+include(EngineInitOptions)
 if(EMSCRIPTEN)
     # Native Catch2 test targets are not browser executables.
     if(LUDUS_BUILD_TESTS)
@@ -116,12 +118,14 @@ if(EMSCRIPTEN)
     # (see .kiro/specs/text-font-rendering/tasks.md F0 "web source-bootstrap
     # pending"). Add it back here once that web dependency path exists, so the
     # browser configure does not fail finding freetype/harfbuzz.
-    add_subdirectory(tools/web-rhi-probe)
-    add_subdirectory(tools/web-frame-probe)
-    add_subdirectory(tools/web-platform-probe)
-    add_subdirectory(tools/web-foundation-probe)
-    add_subdirectory(tools/web-math-probe)
-    add_subdirectory(tools/web-observability-probe)
+    if(LUDUS_BUILD_WEB_PROBES)
+        add_subdirectory(tools/web-rhi-probe)
+        add_subdirectory(tools/web-frame-probe)
+        add_subdirectory(tools/web-platform-probe)
+        add_subdirectory(tools/web-foundation-probe)
+        add_subdirectory(tools/web-math-probe)
+        add_subdirectory(tools/web-observability-probe)
+    endif()
     if(LUDUS_BUILD_SMOKE_APP)
         add_subdirectory(apps/smoke)
     endif()
