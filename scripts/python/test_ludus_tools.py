@@ -484,6 +484,74 @@ class Store(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "InstallCancelled")
 
 
+class BundleDeps(unittest.TestCase):
+    def setUp(self) -> None:
+        from ludus_tools import bundle_deps
+
+        self.bundle_deps = bundle_deps
+
+    def test_rewrite_producer_paths(self) -> None:
+        text = (
+            'set(volk_INCLUDE_DIR "/home/u/.conan2/p/volka1b2/p/include")\n'
+            'set(volk_LIB "/home/u/.conan2/p/volka1b2/p/lib/libvolk.a")\n'
+        )
+        out = self.bundle_deps.rewrite_producer_paths(text, ["/home/u/.conan2/p/volka1b2/p"])
+        self.assertNotIn("/home/u/.conan2", out)
+        self.assertIn("${CMAKE_CURRENT_LIST_DIR}/include", out)
+        self.assertIn("${CMAKE_CURRENT_LIST_DIR}/lib/libvolk.a", out)
+
+    def test_rewrite_longest_root_first(self) -> None:
+        # A nested root must not be partially rewritten by a shorter one.
+        text = 'set(x "/a/b/c/p/include")\n'
+        out = self.bundle_deps.rewrite_producer_paths(text, ["/a", "/a/b/c/p"])
+        self.assertEqual(out.strip(), 'set(x "${CMAKE_CURRENT_LIST_DIR}/include")')
+
+    def test_find_producer_roots(self) -> None:
+        text = (
+            'target "/home/runner/.conan2/p/freetf0add/p/lib/libfreetype.a"\n'
+            'build "/w/out/conan/b/harfb12/p/include"\n'
+        )
+        roots = self.bundle_deps.find_producer_roots(text)
+        self.assertIn("/home/runner/.conan2/p/freetf0add/p", roots)
+        self.assertIn("/w/out/conan/b/harfb12/p", roots)
+
+    def test_bundle_and_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # Fake a volk Conan package with an absolute path in its config.
+            pkg = root / "conan" / "volk"
+            (pkg / "lib").mkdir(parents=True)
+            (pkg / "include").mkdir(parents=True)
+            (pkg / "lib" / "libvolk.a").write_bytes(b"\x00ar")
+            cfg = pkg / "volk-config.cmake"
+            cfg.write_text(f'set(volk_LIB "{pkg}/lib/libvolk.a")\n')
+            prefix = root / "prefix"
+            prefix.mkdir()
+            producer_roots = [str(pkg)]
+            bundled = self.bundle_deps.bundle_from_conan_packages(
+                prefix=prefix,
+                package_dirs={"volk": pkg},
+                producer_roots=producer_roots,
+                dependencies=("volk",),
+            )
+            self.assertEqual(bundled, ["volk"])
+            dest_cfg = prefix / "lib" / "cmake" / "Ludus" / "dependencies" / "volk" / "volk-config.cmake"
+            self.assertTrue(dest_cfg.is_file())
+            self.assertNotIn(str(pkg), dest_cfg.read_text())
+            self.assertIn("${CMAKE_CURRENT_LIST_DIR}/lib/libvolk.a", dest_cfg.read_text())
+            # Audit finds no leaked producer path.
+            self.assertEqual(self.bundle_deps.audit_no_producer_paths(prefix, producer_roots), [])
+
+    def test_audit_detects_leak(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            prefix = Path(td) / "prefix"
+            dep = prefix / "lib" / "cmake" / "Ludus" / "dependencies" / "volk"
+            dep.mkdir(parents=True)
+            (dep / "volk-config.cmake").write_text('set(x "/producer/cache/p/abc/p/lib/x.a")\n')
+            leaks = self.bundle_deps.audit_no_producer_paths(prefix, ["/producer/cache/p/abc/p"])
+            self.assertEqual(len(leaks), 1)
+
+
 class CatalogDownload(unittest.TestCase):
     def setUp(self) -> None:
         from ludus_tools import catalog
