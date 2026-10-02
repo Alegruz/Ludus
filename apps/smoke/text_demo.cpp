@@ -157,18 +157,19 @@ bool RunDemo() noexcept
                        view.Metrics.Ink.Bottom);
 
         // Walk glyphs and accumulate the pen position from each XAdvance, exactly
-        // as a GPU renderer would when placing textured quads.
-        float32 penX = 0.0F;
+        // as a GPU renderer would when placing textured quads. The per-glyph x
+        // position is computed inline in the log call so it is not an unused
+        // local in builds where LUDUS_LOG_INFO compiles out (e.g. Release).
+        [[maybe_unused]] float32 penX = 0.0F;
         for (usize i = 0; i < view.Glyphs.size(); ++i)
         {
             const text::ShapedGlyph& glyph = view.Glyphs[i];
-            const float32 x = penX + static_cast<float32>(glyph.XOffset) / kFixed;
             LUDUS_LOG_INFO(LOG_CORE,
                            "  glyph[{}] id={} cluster={} penX={:.1f} advance={:.1f}{}",
                            i,
                            glyph.GlyphId,
                            glyph.Cluster,
-                           x,
+                           penX + static_cast<float32>(glyph.XOffset) / kFixed,
                            static_cast<float32>(glyph.XAdvance) / kFixed,
                            glyph.IsMissing ? " (missing/.notdef)" : "");
             penX += static_cast<float32>(glyph.XAdvance) / kFixed;
