@@ -1,0 +1,126 @@
+WEBGL 2 FALLBACK — KIRO IMPLEMENTATION PROMPTS
+
+Run prompts 1–3 in Ludus, then prompt 4 in Ludus-Sandbox. Each is a bounded
+implementation task, not a request to produce another roadmap. Carry forward
+the completed stage's evidence and handoff. Do not start a dependent stage if
+its feasibility gate failed. Reinspect the current checkout at every stage.
+
+Design contract: docs/development/webgl-fallback-kiro-handoff.md
+Engine workspace: /home/alegruz/workspace/Ludus
+Game repository: https://github.com/Alegruz/Ludus-Sandbox.git
+
+This request supersedes the earlier prohibition on WebGL in the ocean prompts.
+Retain authored Slang and generated backend artifacts. Read AGENTS.md,
+.kiro/steering/ and referenced standards before edits. Preserve unrelated
+working-tree changes, including existing prompt files. Do not publish, upload,
+commit or open a PR merely because these prompts request implementation.
+
+PROMPT 1 — PROVE GLSL ES OUTPUT AND EXTEND THE SHADER HELPER
+
+Implement the shader feasibility stage of the design contract. Inspect the
+public fullscreen rendering API, installed shader helper, pinned Slang tools
+and SDK consumer diagnostic. First prove the pinned Slang compiler can produce
+GLSL ES 3.00 vertex/fragment artifacts that compile, link and render changing
+mixed-layout uniforms in actual WebGL 2. Desktop GLSL is not acceptance.
+
+If direct emission fails, evaluate a reproducibly pinned build-time SPIR-V to
+GLSL ES translator as described in the contract. Do not introduce handwritten
+ocean shaders, runtime compiler downloads or unchecked generated-text patches.
+If no valid path works, deliver exact failure evidence and stop dependent work.
+
+After feasibility passes, extend the reusable CMake/Python shader helper and
+generated descriptions with GLSL ES artifacts, entries, verified layout data,
+manifest hashes and accurate dependencies. Keep existing SPIR-V/WGSL builds
+working and verify no-op and source/include/option rebuild behavior through a
+clean installed SDK. Preserve backend-independent public headers. Add a new
+ADR for the extended browser decision and tooling, with observed limitations.
+
+Deliver code, exact compilation/validation commands, reflection and real
+program block-layout evidence, diagnostic pixels, tool pins/licenses, checks
+and a backend integration note. Treat temporary private probe use as confined
+to feasibility; downstream game integration must use public SDK APIs.
+
+PROMPT 2 — IMPLEMENT WEBGL 2 AND SAFE AUTOMATIC STARTUP FALLBACK
+
+Using the accepted shader stage, implement the engine/backend selection design
+in docs/development/webgl-fallback-kiro-handoff.md. Reuse the public RHI and its
+opaque resource handles. Add Auto, forced WebGPU and forced WebGL2 selection
+with compatible existing call sites; native remains Vulkan. Auto attempts
+WebGPU and its existing compatibility retry before one WebGL2 attempt on the
+specified capability/startup failures. Record the selected backend and bounded
+attempt diagnostics. Do not hide shader validation or invalid-call defects.
+
+Resolve canvas ownership before coding fallback. Prefer acquiring an adapter
+and device before committing the live canvas context. If replacement is needed
+after surface failure, Platform owns replacement and listener/focus/resize
+rebinding. Prove attempt/session generation isolation, late-callback cleanup,
+cancel/restart and shutdown behavior. A WebGPU compatibility request alone
+does not satisfy this task.
+
+Implement only the existing fullscreen contract in private ES 3 code: shader
+compilation/linking, uniform blocks, bounded buffers/pipelines, fullscreen
+drawing, frame information, resize and resource destruction. Honor update and
+stale-handle rules, validate layout/limits, prevent per-frame resource allocation,
+and handle context loss/restoration with explicit restart and invalidated old
+handles. Extend installed target link settings for the pinned Emscripten SDK.
+
+Validate real diagnostic pixels, orientation, color, uniforms, both failure
+paths, forced selection, context loss, restart during pending requests and
+partial cleanup. Run applicable native/browser tests, sanitizers, pinned
+format/tidy, public header gates, budgets and SDK install/consumer checks.
+Deliver exact outcomes and remaining hardware/hosted gates; do not count mocked
+providers as GPU rendering. Keep Vulkan changes limited to API compatibility.
+
+PROMPT 3 — COMPLETE BROWSER DEMO AND PACKAGE ACCEPTANCE
+
+Integrate the new backend into apps/smoke and existing browser/package tests.
+Read the design contract and prior stage evidence. Remove assumptions that
+browser input/framebuffer handling applies only to Backend::WebGPU. Make the
+demo draw and animate on both browser paths through public rendering APIs
+where practical; preserve native behavior and existing tests.
+
+Make loading/fallback/final failure readable and accessible. Do not cover the
+status with controls; keep controls inactive before playing. Add useful backend
+and startup failure metadata for QA without exposing implementation details in
+ordinary player text. Retain working stop/restart, fullscreen and asset-failure
+behavior.
+
+Extend the exact-ZIP browser harness with Auto WebGPU success, missing API,
+adapter/device rejection, both unavailable, forced paths, late callbacks,
+context loss/restoration, repeated restart, resize/DPR, visibility/focus/input
+and narrow error layouts. Exercise actual WebGL compilation/linking and pixels,
+not only stubs. Package/extract and verify relative assets. Document software
+and physical GPU evidence separately; use no experimental flags for claimed
+flag-free acceptance. Run required repository checks and clean SDK consumers.
+
+Deliver an engine-to-Sandbox handoff with revision/patch dependency, exact
+build/install commands, selection API, shader helper usage, uniform layout,
+artifact paths, package identity and all unresolved acceptance gates. Update
+current support documentation without rewriting historical failures as passes.
+
+PROMPT 4 — INTEGRATE AND VERIFY DRIFT IN LUDUS-SANDBOX
+
+Work in the separate Ludus-Sandbox repository. Inspect its current rules,
+integration and shader/controls sources before edits. Consume the verified
+installed SDK and handoff from prompts 1–3; do not include engine private
+headers or introduce ocean code into Ludus.
+
+Enable Auto selection, regenerate the same authored Slang ocean shader for
+Vulkan, WebGPU and WebGL2, and use independently verified upload layouts.
+Preserve visual intent and controls. Investigate any ocean-specific compiler
+limitations with exact diagnostics rather than duplicating shader source.
+Fix the observed controls/error overlap using a responsive reserved status
+area, useful loading/failure/restart behavior and accessible status reporting.
+
+Verify ocean animation, parameter changes, pointer/keyboard input, resize/DPR,
+fullscreen, stop/restart and lost-context restart. Test forced WebGL2 and Auto
+with missing/rejected WebGPU, plus both APIs unavailable. Compare orientation,
+aspect ratio and representative colors across successful backends. Create and
+identify a local distributable ZIP, test extracted assets and the real HTTPS
+iframe when an authorized existing deployment is accessible. Package creation
+does not authorize upload, publication or account changes.
+
+Run Sandbox's required checks; record exact SDK revision, tools, ZIP SHA256,
+browser/OS/flags, selected backend, screenshots/logs, checks and unavailable
+hardware/hosted gates. Finish with a playable local build and a truthful support
+matrix. Do not claim all browsers work or call unexecuted acceptance complete.
