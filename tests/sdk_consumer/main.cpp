@@ -2,6 +2,11 @@
 #include <ludus/foundation/base/assert_format.hpp>
 #include <ludus/foundation/base/build_metadata.hpp>
 #include <ludus/foundation/base/version.hpp>
+#include <ludus/foundation/math/matrix.hpp>
+#include <ludus/foundation/math/quaternion.hpp>
+#include <ludus/foundation/math/random.hpp>
+#include <ludus/foundation/math/transform.hpp>
+#include <ludus/foundation/math/vector.hpp>
 #include <ludus/graphics/rhi/rhi.h>
 #include <ludus/input/actions.h>
 #include <ludus/input/keyboard.h>
@@ -91,6 +96,43 @@ static int ExerciseInstalledInput()
     return 0;
 }
 
+// Exercise the installed Ludus::FoundationMath SDK through public headers only.
+// Returns 0 on success, 7 on any math failure.
+static int ExerciseInstalledMath()
+{
+    namespace m = ludus::foundation::math;
+
+    // Quaternion rotation agrees with its matrix action.
+    m::Quaternion q{};
+    if (m::TryFromAxisAngle(m::Vector3{0.0F, 0.0F, 1.0F}, m::kHalfPiF, q) != m::MathStatus::Success)
+    {
+        return 7;
+    }
+    const m::Vector3 byQuat = m::Rotate(q, m::Vector3{1.0F, 0.0F, 0.0F});
+    const m::Vector3 byMatrix = m::ToMatrix3(q) * m::Vector3{1.0F, 0.0F, 0.0F};
+    if (!(m::Distance(byQuat, byMatrix) < 1e-5F))
+    {
+        return 7;
+    }
+
+    // Checked inverse round-trip.
+    m::Matrix4 mat = m::Matrix4::Identity();
+    mat.Columns[3] = m::Vector4{3.0F, 4.0F, 5.0F, 1.0F};
+    m::Matrix4 inv{};
+    if (m::TryInverse(mat, inv) != m::MathStatus::Success)
+    {
+        return 7;
+    }
+
+    // PCG known-answer (bit-exact contract).
+    m::RandomStream rng;
+    if (!rng.TryReseed(42, 54) || rng.NextUInt32() != 0xa15c02b7U)
+    {
+        return 7;
+    }
+    return 0;
+}
+
 static_assert(LUDUS_BUILD_FLAVOR_ID == EXPECTED_FLAVOR);
 static_assert(LUDUS_ENABLE_ASSERTS == EXPECTED_ASSERTS);
 static_assert(LUDUS_BREAK_ON_CHECK == EXPECTED_CHECK_BREAK);
@@ -148,6 +190,12 @@ int main()
         return inputResult;
     }
 
-    std::cout << "SDK consumer linked Ludus " << ludus::foundation::version_string() << " (Input: tap + rebind OK)\n";
+    if (const int mathResult = ExerciseInstalledMath(); mathResult != 0)
+    {
+        return mathResult;
+    }
+
+    std::cout << "SDK consumer linked Ludus " << ludus::foundation::version_string()
+              << " (Input: tap + rebind OK; Math: rotate/inverse/PCG OK)\n";
     return 0;
 }

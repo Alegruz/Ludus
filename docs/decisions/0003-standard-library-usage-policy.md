@@ -56,6 +56,20 @@ closed argument set and an implementation-only parser.
   no public-header cost, no locale or exceptions. Allocation probes and binary
   measurements are required for each supported standard-library/toolchain change.
   This does not grant signal-safety or a general formatting-library exemption.
+- `<cmath>` and `<limits>` — allowed **only** inside FoundationMath
+  implementation files (`modules/foundation/math/src/*.cpp`) and its tests, for
+  standard numeric facilities: `std::sqrt`/`std::sin`/`std::cos`/`std::atan2`,
+  `std::isfinite`/`std::isnan`, `std::copysign`/`std::nextafter`/`std::expm1`,
+  `std::numeric_limits`, etc. (ADR 0010). These are header-only, free-standing
+  math functions: they allocate nothing, throw nothing (Math builds with
+  `-fno-exceptions` like the rest of the engine), and keep no global state. They
+  must **not** appear in a public math header — only `.cpp` files include
+  `<cmath>`/`<limits>`, so no heavy facility or substantial template is added to
+  the installed API or the build-time budget. This is not a general STL
+  exemption and grants nothing beyond standard numeric functions; it does not
+  authorise `<random>` distributions (FoundationMath ships its own PCG32), and
+  the checked numerical path still forbids fast math and FMA contraction (it is
+  compiled with `-ffp-contract=off`).
 - `<span>` when needed — non-owning view over contiguous data.
 - `<atomic>`, `<mutex>`, `<shared_mutex>` — concurrency primitives; correctness
   first. Revisit only when a custom job/threading system exists.

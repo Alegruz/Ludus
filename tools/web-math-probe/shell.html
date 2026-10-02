@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Ludus browser FoundationMath numeric corpus</title>
+<style>body { font: 16px system-ui; background: #181821; color: #eee; margin: 24px; } pre { white-space: pre-wrap; }</style>
+<h1>Ludus browser FoundationMath numeric corpus</h1>
+<p id="status" role="status">Loading…</p>
+<p>This runs the CPU numerical corpus on the pinned Emscripten wasm build. It is
+not a GPU test; the WebGPU shader fixture verifies transfer convention separately.</p>
+<pre id="output"></pre>
+<script>
+'use strict';
+function status(value) { document.getElementById('status').textContent = value; }
+var Module = {
+  printErr: function (text) { document.getElementById('output').textContent += String(text) + '\n'; },
+  print: function (text) { document.getElementById('output').textContent += String(text) + '\n'; },
+  onExit: function (code) { status(code === 0 ? 'math corpus: 0 failures' : 'math corpus: FAILURES (status ' + code + ')'); },
+};
+window.addEventListener('error', function (event) {
+  document.getElementById('output').textContent += event.message + '\n';
+  status('runtime stopped');
+});
+</script>
+<script src="index.js"></script>
+</html>
