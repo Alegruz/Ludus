@@ -582,3 +582,26 @@ exercised on real tools by the PR's `Development and SDK` CI job (which
 configures the external consumer with the same Clang 18 the SDK was built with,
 so the gate passes) — a mismatched compiler would now fail at configure with an
 actionable message rather than at link.
+
+### Follow-up: residual-root fix regressed the real SDK install (self-caught)
+
+The repaired finding-#5 neutralizer was initially made to **fail** when a
+residual Conan root had no matching bundled payload. The PR's `Development and
+SDK` CI job then failed on real Conan: volk's generated `volkTargets.cmake`
+references the transitive, header-only **VulkanHeaders** package root
+(`.../p/vulka…/p`), which is not in the discovered `package_dirs`, so the
+too-strict guard rejected the bundle. This confirms the review's underlying point
+(the old neutralizer pointed VulkanHeaders at the wrong place) while showing a
+hard failure is also wrong.
+
+Final behavior: `_bundle_and_rewrite_residual_roots` copies each residual root's
+payload **from the referenced root itself** into `packages/<unique-token>` and
+rewrites to it, so the path both relocates and points at the real headers. It
+fails only when the referenced root does not exist on disk (then no correct
+bundling is possible). Regressions: `test_residual_transitive_root_is_bundled_not_rejected`
+(reproduces the VulkanHeaders case) and `test_residual_root_missing_on_disk_fails`.
+
+```
+$ cd scripts/python && python3 -m unittest test_ludus_tools.BundleDeps   # 8 OK
+$ python3 -m unittest test_ludus_tools test_ludus_project_ops test_ludus_cli test_ludus_failure_scenarios  # 96 OK
+```

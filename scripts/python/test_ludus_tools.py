@@ -592,6 +592,64 @@ class BundleDeps(unittest.TestCase):
             # And the audit for the broad producer root is clean.
             self.assertEqual(self.bundle_deps.audit_no_producer_paths(prefix, [str(root)]), [])
 
+    def test_residual_transitive_root_is_bundled_not_rejected(self) -> None:
+        # Regression (CI "Development and SDK"): a kept generator config can
+        # reference a transitive, header-only package root (e.g. VulkanHeaders
+        # pulled by volk) that is NOT in package_dirs. The bundler must copy that
+        # payload FROM the referenced root and rewrite to it — not fail, and not
+        # leave a producer path.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # volk package (in package_dirs) ...
+            volk = root / "cache" / "volk" / "p"
+            (volk / "include").mkdir(parents=True)
+            (volk / "include" / "volk.h").write_text("// volk\n")
+            # ... and a VulkanHeaders package root that is NOT in package_dirs but
+            # is referenced by volk's generated config, under a Conan /p/<tok>/p.
+            vh = root / "cache" / "p" / "vulka2b5ed468eaac1" / "p"
+            (vh / "include" / "vulkan").mkdir(parents=True)
+            (vh / "include" / "vulkan" / "vulkan.h").write_text("// vulkan\n")
+            gen = root / "conan-out"
+            gen.mkdir()
+            (gen / "volk-config.cmake").write_text("# volk\n")
+            (gen / "volkTargets.cmake").write_text(
+                f'set_property(TARGET volk::volk_headers PROPERTY '
+                f'INTERFACE_INCLUDE_DIRECTORIES "{vh}/include")\n'
+            )
+            prefix = root / "prefix"
+            prefix.mkdir()
+            bundled = self.bundle_deps.bundle_from_conan(
+                prefix=prefix, generators_dir=gen, package_dirs={"volk": volk}, dependencies=("volk",),
+            )
+            self.assertEqual(bundled, ["volk"])
+            dep_root = prefix / "lib" / "cmake" / "Ludus" / "dependencies"
+            targets = (dep_root / "cmake" / "volkTargets.cmake").read_text()
+            # The VulkanHeaders root was rewritten to a bundled payload...
+            self.assertNotIn(str(vh), targets)
+            self.assertIn("${CMAKE_CURRENT_LIST_DIR}/../packages/vulka2b5ed468eaac1/include", targets)
+            # ...and its payload was actually copied so the include dir exists.
+            self.assertTrue((dep_root / "packages" / "vulka2b5ed468eaac1" / "include" / "vulkan" / "vulkan.h").is_file())
+            # No producer path survives anywhere in the bundle.
+            self.assertEqual(self.bundle_deps.audit_no_producer_paths(prefix, [str(vh), str(volk), str(gen)]), [])
+
+    def test_residual_root_missing_on_disk_fails(self) -> None:
+        # If a config references a Conan root that no longer exists, the bundler
+        # cannot copy the payload and must fail rather than ship a broken path.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            gen = root / "conan-out"
+            gen.mkdir()
+            (gen / "volk-config.cmake").write_text(
+                'set(x "/nonexistent/.conan2/p/ghost00000000/p/include")\n'
+            )
+            prefix = root / "prefix"
+            prefix.mkdir()
+            with self.assertRaises(ToolingError) as ctx:
+                self.bundle_deps.bundle_from_conan(
+                    prefix=prefix, generators_dir=gen, package_dirs={}, dependencies=(),
+                )
+            self.assertEqual(ctx.exception.code, "ArchiveInvalid")
+
     def test_audit_detects_leak(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             prefix = Path(td) / "prefix"

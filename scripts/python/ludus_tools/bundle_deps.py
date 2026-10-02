@@ -195,56 +195,63 @@ def bundle_from_conan(
         src = package_dirs[name]
         _rewrite_cmake_files_in(packages_dst / name, [(str(Path(src)), _SELF_DIR)])
 
-    # 5) Final safety pass: a generated data file can still carry an absolute
-    #    Conan package/build root that the per-package rewrite above did not
-    #    cover (e.g. a header-only dep's build dir). Map each residual root to
-    #    the ACTUAL bundled payload for that dependency (../packages/<name>),
-    #    identified by matching the dependency token embedded in the root against
-    #    the payloads we copied. If a residual root cannot be mapped to a bundled
-    #    payload, FAIL rather than rewrite it to a plausible-but-wrong location —
-    #    a silently-wrong relocatable path is worse than an explicit error.
-    bundled_payload_names = [p.name for p in packages_dst.iterdir() if p.is_dir()] if packages_dst.is_dir() else []
-    _neutralize_residual_roots(cmake_dst, bundled_payload_names)
+    # 5) Final pass: a kept generator file can still reference an absolute Conan
+    #    package root that step 2 did not copy (e.g. a transitive, header-only
+    #    dependency like VulkanHeaders whose _PACKAGE_FOLDER_ was not discovered
+    #    in package_dirs). For EACH residual root, bundle that package payload
+    #    FROM THE ROOT ITSELF (the root is the package dir) into
+    #    packages/<token>, then rewrite the reference to it — so the path both
+    #    relocates AND points at the real payload. Only fail if the root does not
+    #    exist on disk (then we cannot bundle it and must not ship a broken path).
+    _bundle_and_rewrite_residual_roots(cmake_dst, packages_dst)
 
     return bundled
 
 
-def _map_residual_root(root: str, bundled_payload_names: list[str]) -> str:
-    """Map a residual Conan root to the bundled payload for its dependency.
+def _residual_payload_name(root: str) -> str:
+    """Derive a stable payload directory name from a Conan package root.
 
-    The dependency name is embedded in the Conan folder token (e.g.
-    ``.../p/vulka2b5ed468eaac1/p`` -> ``vulkanheaders``). We match the leading
-    alphabetic prefix of that token against a bundled payload name. Raises when
-    no bundled payload matches, so the caller fails instead of guessing.
+    ``.../p/vulka2b5ed468eaac1/p`` -> ``vulka2b5ed468eaac1`` (the folder token
+    before the trailing ``/p``), which is unique per package build.
     """
-    import re
-
-    # The folder token is the segment just before the trailing ``/p``.
     parts = [p for p in root.split("/") if p]
-    token = parts[-2] if len(parts) >= 2 else ""
-    prefix = re.match(r"[a-z]+", token.lower())
-    prefix_str = prefix.group(0) if prefix else ""
-    for name in bundled_payload_names:
-        lname = name.lower()
-        if prefix_str and (lname.startswith(prefix_str) or prefix_str.startswith(lname)):
-            return f"{_SELF_DIR}/../packages/{name}"
-    raise ToolingError(
-        ARCHIVE_INVALID,
-        f"bundled dependency references a Conan root {root!r} with no matching bundled payload "
-        f"(payloads: {bundled_payload_names}); refusing to ship a broken relocatable path",
-    )
+    return parts[-2] if len(parts) >= 2 else parts[-1]
 
 
-def _neutralize_residual_roots(cmake_dir: Path, bundled_payload_names: list[str]) -> None:
+def _bundle_and_rewrite_residual_roots(cmake_dir: Path, packages_dst: Path) -> None:
+    # First collect every residual root referenced by any kept generator file.
+    residual: set[str] = set()
     for cmake_file in cmake_dir.rglob("*.cmake"):
         try:
             text = cmake_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        roots = find_producer_roots(text)
-        if not roots:
+        residual.update(find_producer_roots(text))
+
+    # Bundle each residual root's payload (keyed by its unique folder token) and
+    # build the rewrite map. A root that no longer exists on disk cannot be
+    # bundled: fail rather than ship a broken relocatable path.
+    replacements: list[tuple[str, str]] = []
+    for root in sorted(residual):
+        name = _residual_payload_name(root)
+        dest = packages_dst / name
+        if not dest.exists():
+            if not Path(root).exists():
+                raise ToolingError(
+                    ARCHIVE_INVALID,
+                    f"bundled dependency references a Conan root {root!r} that does not exist; "
+                    "refusing to ship a broken relocatable path",
+                )
+            _copy_tree(Path(root), dest)
+        replacements.append((root, f"{_SELF_DIR}/../packages/{name}"))
+
+    if not replacements:
+        return
+    for cmake_file in cmake_dir.rglob("*.cmake"):
+        try:
+            text = cmake_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
             continue
-        replacements = [(root, _map_residual_root(root, bundled_payload_names)) for root in roots]
         new = rewrite_producer_paths(text, replacements)
         if new != text:
             cmake_file.write_text(new, encoding="utf-8")
