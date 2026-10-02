@@ -1,8 +1,17 @@
 #include "internal/renderer.h"
+
+#include "internal/text_demo.h"
+
 namespace ludus::smoke::renderer
 {
 State Prepare() noexcept
 {
+    // Example: exercise the Ludus::Text CPU font API (shape + measure +
+    // rasterize) once when the renderer becomes ready. The native renderer does
+    // not yet draw text to the framebuffer (there is no GPU text/atlas module in
+    // the tree), so the example reports its results through the logger. Run it
+    // once so repeated Prepare() calls stay cheap.
+    (void)text_demo::RunOnce();
     return State::Ready;
 }
 void Shutdown() noexcept {}
