@@ -16,3 +16,7 @@ __pycache__/
 !.vscode/settings.json
 !.vscode/extensions.json
 /build/
+
+# Editor workspace cooperative save-lock directory (QLockFile), created beside a
+# project descriptor. Generated at save time; never committed.
+.ludus/

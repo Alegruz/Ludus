@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "Ludus external SDK sample",
+  "provider": "cmake",
+  "source_dir": ".",
+  "preset": "linux-clang-development",
+  "target": "sample_app",
+  "run": {
+    "cwd": ".",
+    "args": []
+  }
+}

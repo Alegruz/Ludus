@@ -1,0 +1,36 @@
+[
+  {
+    "file": "valid_ludus.json",
+    "valid": true,
+    "name": "Ludus smoke workspace",
+    "provider": "ludus",
+    "run_args": []
+  },
+  {
+    "file": "valid_cmake_unicode_args.json",
+    "valid": true,
+    "name": "External sample 日本語",
+    "provider": "cmake",
+    "run_args": ["", "a b", "日本語", "$(echo hi)", "\"quoted\"", "--level=1"]
+  },
+  {
+    "file": "invalid_bad_version.json",
+    "valid": false,
+    "code": "UnsupportedVersion"
+  },
+  {
+    "file": "invalid_unknown_field.json",
+    "valid": false,
+    "code": "InvalidProject"
+  },
+  {
+    "file": "invalid_absolute_source.json",
+    "valid": false,
+    "code": "InvalidProject"
+  },
+  {
+    "file": "invalid_bad_target.json",
+    "valid": false,
+    "code": "InvalidProject"
+  }
+]

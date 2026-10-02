@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "Ludus smoke workspace",
+  "provider": "ludus",
+  "source_dir": "../..",
+  "preset": "linux-clang-debug",
+  "target": "ludus_smoke",
+  "run": {
+    "cwd": ".",
+    "args": []
+  }
+}

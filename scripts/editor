@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Launch the already-built optional Ludus editor (apps/editor/ludus_editor).
+#
+# This locates the built editor via the shared CMake File API helper and starts
+# it with the trusted managed Python interpreter, the editor_tool.py adapter and
+# this tooling root. It does NOT build or install anything; if the editor is not
+# built it prints the preparation commands and exits nonzero.
+#
+# Usage:
+#   ./scripts/editor [--preset linux-clang-development] [--project path/to/ludus.project.json]
+set -euo pipefail
+
+script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "${script_dir}/python/editor_launch.py" "$@"
