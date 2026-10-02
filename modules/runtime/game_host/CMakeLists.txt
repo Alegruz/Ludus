@@ -172,4 +172,21 @@ if(LUDUS_BUILD_TESTS)
         LUDUS_FIXTURE_B_PATH="$<TARGET_FILE:ludus_game_fixture_B>")
     add_test(NAME ludus_game_host_reload_tests COMMAND ludus_game_host_reload_tests)
     set_tests_properties(ludus_game_host_reload_tests PROPERTIES TIMEOUT 180 LABELS "unit;runtime;reload;stress")
+
+    # Debugger acceptance (tasks.md L14): drives the pinned LLDB against the host
+    # and the loaded module. Registered only when an LLDB is discoverable, and
+    # labeled so it can be opted into; it is not required for the unit label.
+    find_program(LUDUS_LLDB NAMES lldb-18 lldb)
+    find_package(Python3 3.10 COMPONENTS Interpreter)
+    if(LUDUS_LLDB AND Python3_Interpreter_FOUND)
+        add_test(NAME ludus_game_host_debugger_acceptance
+            COMMAND Python3::Interpreter
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/lldb_acceptance.py"
+                "${LUDUS_LLDB}"
+                "$<TARGET_FILE:ludus_game_host_app>"
+                "$<TARGET_FILE:ludus_game_fixture_A>"
+                "$<TARGET_FILE:ludus_game_fixture_B>")
+        set_tests_properties(ludus_game_host_debugger_acceptance PROPERTIES
+            TIMEOUT 180 LABELS "runtime;debugger;acceptance")
+    endif()
 endif()
