@@ -26,8 +26,14 @@ if(EMSCRIPTEN)
     add_test(NAME ludus_web_smoke_semantics COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_semantics.py" "${CMAKE_CROSSCOMPILING_EMULATOR}" "$<TARGET_FILE:ludus_web_smoke_test>")
     set_tests_properties(ludus_web_smoke_semantics PROPERTIES LABELS "web;smoke" TIMEOUT 120)
 else()
-    target_sources(ludus_smoke PRIVATE main.cpp renderer_native.cpp)
-    target_link_libraries(ludus_smoke PRIVATE Ludus::DiagnosticsIntegration)
+    target_sources(ludus_smoke PRIVATE main.cpp renderer_native.cpp text_demo.cpp)
+    # Ludus::Text is the CPU font API (shaping + rasterization). It is built on
+    # the native target only; the Emscripten/web build does not link it yet (the
+    # FreeType/HarfBuzz web source-bootstrap is pending), so the text example is
+    # native-only. The example reads a bundled OFL font; point it at the fixture.
+    target_link_libraries(ludus_smoke PRIVATE Ludus::DiagnosticsIntegration Ludus::Text)
+    target_compile_definitions(ludus_smoke PRIVATE
+        "LUDUS_SMOKE_FONT_PATH=\"${PROJECT_SOURCE_DIR}/modules/text/tests/fixtures/NotoSans-Regular.ttf\"")
     if(LUDUS_BUILD_TESTS)
         find_package(Catch2 3 REQUIRED)
         add_executable(ludus_smoke_simulation_tests tests/simulation_tests.cpp simulation.cpp)
