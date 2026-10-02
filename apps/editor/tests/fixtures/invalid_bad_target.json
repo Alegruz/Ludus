@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "bad target",
+  "provider": "cmake",
+  "source_dir": ".",
+  "preset": "linux-clang-development",
+  "target": "has spaces",
+  "run": {
+    "cwd": ".",
+    "args": []
+  }
+}

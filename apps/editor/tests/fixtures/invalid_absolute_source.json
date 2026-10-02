@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "absolute source",
+  "provider": "cmake",
+  "source_dir": "/etc",
+  "preset": "linux-clang-debug",
+  "target": "app",
+  "run": {
+    "cwd": ".",
+    "args": []
+  }
+}

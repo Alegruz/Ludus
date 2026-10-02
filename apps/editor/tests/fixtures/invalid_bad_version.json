@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "name": "wrong version",
+  "provider": "ludus",
+  "source_dir": "../..",
+  "preset": "linux-clang-debug",
+  "target": "ludus_smoke",
+  "run": {
+    "cwd": ".",
+    "args": []
+  }
+}

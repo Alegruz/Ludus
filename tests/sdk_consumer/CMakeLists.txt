@@ -11,7 +11,7 @@ find_package(Ludus CONFIG REQUIRED)
 
 if(NOT EMSCRIPTEN)
     add_executable(ludus_sdk_consumer main.cpp policy.cpp)
-    target_link_libraries(ludus_sdk_consumer PRIVATE Ludus::FoundationBase Ludus::GraphicsRhi Ludus::Input)
+    target_link_libraries(ludus_sdk_consumer PRIVATE Ludus::FoundationBase Ludus::FoundationMath Ludus::GraphicsRhi Ludus::Input)
     target_compile_definitions(ludus_sdk_consumer PRIVATE
         EXPECTED_FLAVOR=${Ludus_BUILD_FLAVOR_ID}
         EXPECTED_ASSERTS=${Ludus_ENABLE_ASSERTS}

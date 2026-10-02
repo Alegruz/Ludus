@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "name": "unknown field",
+  "provider": "ludus",
+  "source_dir": "../..",
+  "preset": "linux-clang-debug",
+  "target": "ludus_smoke",
+  "run": {
+    "cwd": ".",
+    "args": []
+  },
+  "unexpected": "field"
+}

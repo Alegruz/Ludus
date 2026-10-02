@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "External sample 日本語",
+  "provider": "cmake",
+  "source_dir": ".",
+  "preset": "linux-clang-development",
+  "target": "sample_app",
+  "run": {
+    "cwd": ".",
+    "args": ["", "a b", "日本語", "$(echo hi)", "\"quoted\"", "--level=1"]
+  }
+}

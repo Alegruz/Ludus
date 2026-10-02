@@ -1,0 +1,30 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 29,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "linux-clang-debug",
+      "displayName": "External SDK sample (Debug)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/linux-clang-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}"
+      }
+    },
+    {
+      "name": "linux-clang-development",
+      "displayName": "External SDK sample (Development)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/linux-clang-development",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}"
+      }
+    }
+  ]
+}

@@ -30,6 +30,12 @@ include(LudusShaders)
 option(LUDUS_BUILD_TESTS "Build Ludus tests" ON)
 option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
 option(LUDUS_BUILD_SHADER_PROBE "Build the isolated offline shader feasibility probe" OFF)
+# The Editor workspace (apps/editor) is an OPTIONAL developer tool, OFF by
+# default. When OFF, configure/build/install and browser targets must not search
+# for, link, or export Qt. Qt discovery happens only inside the enabled app
+# subdirectory (see apps/editor/CMakeLists.txt), never globally. See
+# .kiro/specs/editor-workspace/{requirements,design}.md (E01/E02).
+option(LUDUS_BUILD_EDITOR "Build the optional native Qt editor workspace (apps/editor)" OFF)
 if(EMSCRIPTEN)
     # Native Catch2 test targets are not browser executables.
     if(LUDUS_BUILD_TESTS)
@@ -83,6 +89,9 @@ install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENT
 
 add_subdirectory(modules/foundation/base)
 add_subdirectory(modules/foundation/containers)
+# FoundationMath depends only on FoundationBase. It is added before any consumer
+# and outside the native-only branch so native and browser targets share it.
+add_subdirectory(modules/foundation/math)
 add_subdirectory(modules/foundation/logging)
 add_subdirectory(modules/foundation/profiling)
 # Input is configured before Platform: Platform depends on Input for the
@@ -101,6 +110,7 @@ if(EMSCRIPTEN)
     add_subdirectory(tools/web-frame-probe)
     add_subdirectory(tools/web-platform-probe)
     add_subdirectory(tools/web-foundation-probe)
+    add_subdirectory(tools/web-math-probe)
     add_subdirectory(tools/web-observability-probe)
     if(LUDUS_BUILD_SMOKE_APP)
         add_subdirectory(apps/smoke)
@@ -117,6 +127,13 @@ else()
     if(LUDUS_BUILD_SMOKE_APP)
         add_subdirectory(apps/smoke)
         add_subdirectory(apps/input_demo)
+    endif()
+
+    # Optional native editor workspace. Guarded so a default (OFF) native
+    # configure never calls find_package(Qt6); the subdirectory owns all Qt
+    # discovery and the unsupported-host diagnostic.
+    if(LUDUS_BUILD_EDITOR)
+        add_subdirectory(apps/editor)
     endif()
 
     if(LUDUS_BUILD_TESTS)

@@ -11,6 +11,8 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
+import cmake_targets
+
 
 DEBUG_PRESETS = ("linux-clang-debug", "linux-clang-development")
 RAD_PACKAGES = (
@@ -203,31 +205,33 @@ def setup_locked(root: Path, directory: Path, data: dict[str, str], args: Any, e
     return 0
 
 
+# RAD's File API query/read delegates to the shared cmake_targets module (see
+# the import at the top). RAD keeps its historical client name and user-facing
+# error strings and its laxer (non-version-checked, unbounded) behavior; only the
+# resolution logic is shared with the editor. See scripts/python/cmake_targets.py.
+RAD_FILE_API_CLIENT = "ludus-debug"
+_RAD_MESSAGES = {
+    "no_reply": "no CMake File API reply; run scripts/debug without --no-build first",
+    "bad_reply": "invalid CMake File API reply; reconfigure without --no-build",
+    "not_one": "CMake target {target!r} does not resolve to one target in {build_dir}",
+    "not_executable": "CMake target {target!r} is not an executable",
+}
+
+
 def query_codemodel(build_dir: Path) -> None:
-    query = build_dir / ".cmake" / "api" / "v1" / "query" / "client-ludus-debug"
-    query.mkdir(parents=True, exist_ok=True)
-    (query / "codemodel-v2").touch()
+    cmake_targets.query_codemodel(build_dir, RAD_FILE_API_CLIENT)
 
 
 def target_executable(build_dir: Path, target: str, engine: Any) -> Path:
-    reply = build_dir / ".cmake" / "api" / "v1" / "reply"
-    indexes = sorted(reply.glob("index-*.json"))
-    if not indexes:
-        raise engine.EngineError("no CMake File API reply; run scripts/debug without --no-build first")
-    try:
-        index = read_json(indexes[-1], engine)
-        reference = index["reply"]["client-ludus-debug"]["codemodel-v2"]["jsonFile"]
-        model = read_json(reply / reference, engine)
-        matches = [entry for config in model["configurations"] for entry in config["targets"]
-                   if entry["name"] == target]
-        if len(matches) != 1:
-            raise engine.EngineError(f"CMake target {target!r} does not resolve to one target in {build_dir}")
-        detail = read_json(reply / matches[0]["jsonFile"], engine)
-        if detail["type"] != "EXECUTABLE" or len(detail.get("artifacts", [])) != 1:
-            raise engine.EngineError(f"CMake target {target!r} is not an executable")
-        return (build_dir / detail["artifacts"][0]["path"]).resolve()
-    except (KeyError, TypeError) as exc:
-        raise engine.EngineError("invalid CMake File API reply; reconfigure without --no-build") from exc
+    return cmake_targets.target_executable(
+        build_dir,
+        target,
+        engine,
+        client=RAD_FILE_API_CLIENT,
+        require_version=False,
+        bounded=False,
+        messages=_RAD_MESSAGES,
+    )
 
 
 def validate_arguments(arguments: list[str], engine: Any) -> None:
