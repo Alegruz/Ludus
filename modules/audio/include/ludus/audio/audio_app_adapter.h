@@ -59,6 +59,51 @@ struct TriggerRequest final
     bool IsOwnedLoop = false;        // track for explicit teardown on owner removal
 };
 
+inline constexpr usize MAX_VARIATIONS = 16; // bounded variation list per event
+
+// A typed, application-owned event descriptor (design section 9): it selects a
+// prepared clip from a bounded variation list plus bus/group/priority/gain and
+// spatial defaults. Validated before playback; invalid fields are reported with
+// a specific code so a designer can find the offending field without listening.
+struct EventDescriptor final
+{
+    uint32 EventId = 0;
+    uint32 VariationCount = 0;               // 1..MAX_VARIATIONS
+    ClipHandle Variations[MAX_VARIATIONS]{}; // prepared clip handles
+    uint32 BusIndex = 0;
+    uint32 GroupIndex = 0;
+    uint8 Priority = PRIORITY_MIN;
+    float32 DefaultGain = 1.0F;
+    float32 Rate = 1.0F;
+    bool Looping = false;
+    VirtualPolicy Policy = VirtualPolicy::KillWhenInaudible;
+    bool Positional = false;
+    float32 MinDistance = 1.0F;
+    float32 MaxDistance = 100.0F;
+};
+
+// The specific descriptor field that failed validation (design section 9:
+// "Diagnostics identify the descriptor/tag and invalid field").
+enum class DescriptorField : uint8
+{
+    None,
+    VariationCount,  // empty or exceeds MAX_VARIATIONS
+    VariationHandle, // a variation clip handle is invalid/unprepared
+    BusIndex,
+    GroupIndex,
+    Priority,
+    Gain,
+    Rate,
+    Distance, // MinDistance negative or MaxDistance <= MinDistance
+};
+
+struct DescriptorValidation final
+{
+    bool Valid = false;
+    DescriptorField Field = DescriptorField::None;
+    uint32 BadVariationIndex = 0; // meaningful when Field == VariationHandle
+};
+
 // A thin adapter owning a bounded policy table, tracked owned loops, and one
 // shared dialogue duck context. All members are fixed-size; it allocates nothing
 // after construction.
@@ -76,6 +121,24 @@ public:
     // consumes no cooldown and leaves no active/duck state. A full policy table
     // for a new key returns TableFull. Reports owner events to the attached sink.
     [[nodiscard]] TriggerResult Trigger(const TriggerRequest& req, uint64 nowTicks) noexcept;
+
+    // --- Typed event descriptors (design section 9) ---------------------
+    // Validate a descriptor's fields before any playback: nonempty bounded
+    // variation list, prepared variation handles, in-range bus/group IDs, finite
+    // gain/rate and valid distances. Returns the first offending field. No
+    // engine state is touched; this is owner-side authoring validation.
+    [[nodiscard]] DescriptorValidation ValidateDescriptor(const EventDescriptor& desc) const noexcept;
+
+    // Trigger a validated descriptor: select one variation deterministically from
+    // `seed` (recorded in the trace; never re-rolled on reentry), resolve the
+    // play parameters, and run the policed admission path. An invalid descriptor
+    // is reported owner-side (OwnerEvent) and admits nothing.
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): named descriptor args.
+    [[nodiscard]] TriggerResult TriggerDescriptor(const EventDescriptor& desc,
+                                                  uint32 ownerTag,
+                                                  uint64 cooldownTicks,
+                                                  uint32 seed,
+                                                  uint64 nowTicks) noexcept;
 
     // Call every service tick: observe durable terminals so active/cooldown and
     // dialogue-duck membership release correctly, and reclaim expired entries.

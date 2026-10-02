@@ -306,3 +306,80 @@ collapsed); planar/interleaved L/R parity; adapter cleanup via handle validity.
 - Listening/spectral alias-rejection quality, p99 callback workload, 10-minute
   stress, installed-SDK consumer and build-time budget profiling (A7).
 - Streaming worker / music streaming (A4) is not yet implemented.
+
+## Reconciliation pass (post-A3) — spec gap closure
+
+A reconciliation of the implemented A0-A3 code against the revised
+requirements/design and the Game Audio Programming 1-4 follow-ups closed the
+following gaps WITHOUT disturbing conforming work (groups, split listener,
+transactional admission, SPSC ring, bus tree, dB sliders, adapter cooldown/duck
+all preserved). Default group zero (256/56) and coincident listener positions
+preserve prior behavior.
+
+### Fixed in this pass
+
+1. **Sub-span scheduled start (design section 5, AU09).** A voice whose exact
+   StartFrame fell inside a 128-frame span previously began mixing at the span
+   boundary (up to 127 frames early). The render loop now computes a per-voice
+   start offset within the span: `MixAccum[0..offset)` stays zero and the kernel
+   writes from the offset, so each voice emits zero before its start then
+   samples. Test: a StartFrame=300 voice is exactly silent in [0,300) and
+   audible after.
+
+2. **Independent silence-cause flags completed and recomputed per boundary
+   (design section 11).** Previously only BelowThreshold/GroupQuota/GlobalBudget/
+   WaitingForFadeSlot were set, and flags leaked across boundaries. `SelectAndCharge`
+   now resets every live voice's `Silence` each boundary and populates the base
+   causes NotStarted (Pending/Scheduled), Stopping, DistanceZero (positional,
+   fully attenuated) and UserMuted (any zero UserGain in the bus chain); the
+   selection loop adds the not-selected causes without clearing the base ones (a
+   selected voice on a user-muted bus still reports UserMuted). `TerminateVoice`
+   clears transient causes so a terminal/stale slot reports its terminal reason,
+   not stale flags. Tests cover NotStarted, UserMuted, GroupQuota and the
+   per-boundary clear on unmute.
+
+3. **Typed event descriptors + validation + variation selection (design
+   section 9, AU16).** Added `EventDescriptor` (bounded variation list,
+   bus/group/priority/gain/rate/distance/policy) plus
+   `EventAdapter::ValidateDescriptor` returning the specific offending
+   `DescriptorField` (empty/oversized variation list, unprepared variation
+   handle with index, priority/gain/rate/distance), and `TriggerDescriptor`
+   which selects one variation deterministically from a seed (recorded; never
+   re-rolled on reentry since the renderer stores the clip slot at admission) and
+   runs the policed admission path. An invalid descriptor emits an owner-side
+   `PreparationFailed` event and admits nothing. Added `AudioSystem::IsClipReady`
+   so the owner-side validator can check a variation handle without playback.
+
+4. **Incremental cold-worker decode scheduler (design section 9; vol 1 ch.3 /
+   vol 3 ch.9).** Added `internal/decode_scheduler.{hpp,cpp}`: the deadline-first
+   incremental decode DISCIPLINE as a pure, bounded, deterministically-testable
+   unit over an abstract `DecodeSource`. A cold whole-source prepare is split
+   into units of at most `COLD_DECODE_UNIT_FRAMES` (4096) prepared output
+   frames; between units the scheduler honours cancellation, rechecks active
+   streams ordered by time-to-empty (least buffered first), breaks equal
+   deadlines round-robin, and services the most-starved stream before the cold
+   job so a long prepare never starves an established stream. It reports
+   per-pass units/yield-points/frames and the minimum buffered runway rather
+   than claiming hard real-time preemption. Tests: ≤4096 units, no-starvation,
+   deadline-first+round-robin, between-unit cancellation, bounded pass + runway.
+
+### Explicitly NOT done here (unchanged scope / pending gates)
+
+- The full A4 streaming subsystem — stream rings, device/renderer consumption,
+  worker OS thread, starvation fade/hold-cursor, FLAC seek loops, browser
+  encoded preload — is NOT implemented. Only the scheduler discipline (the
+  genuinely missing, offline-testable piece) landed. The rest stays A4-pending.
+- Bus/modifier gains remain boundary-granular (not sample-ramped); modifier
+  release is immediate (not fade-then-acknowledge). Recorded A3 limitations,
+  unchanged.
+- Real Linux device (A5), real browser AudioWorklet/worker (A6) and
+  listening/quality/stress/SDK-consumer measurements (A7) remain pending; no
+  device/browser/perf check is marked passed.
+
+### Validation (this pass)
+
+- Debug `ctest` 28/28 green; audio target **72 cases / 19,480 assertions**.
+- ASan+UBSan leak-free across all 72 cases; TSan clean on SPSC flood + full
+  suite. Zero warm submit/render allocation. clang-format + clang-tidy (pinned
+  18) clean; all 5 public headers compile standalone. No regressions to
+  Input/Text/Platform/RHI/Foundation.

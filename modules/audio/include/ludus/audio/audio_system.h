@@ -88,6 +88,11 @@ public:
     [[nodiscard]] Status RetireClip(ClipHandle clip) noexcept;
     [[nodiscard]] Status RetireStream(StreamHandle stream) noexcept;
 
+    // True when `clip` names a currently-prepared, non-retiring resident clip in
+    // this session. Owner-side; lets application descriptor validators check a
+    // variation handle without attempting playback.
+    [[nodiscard]] bool IsClipReady(ClipHandle clip) const noexcept;
+
     // --- Submission (warm; design section 4) ----------------------------
     // Validate the whole batch (<= MAX_BATCH_RECORDS), copy all records, reserve
     // slots and asset pins transactionally, then publish once. The returned

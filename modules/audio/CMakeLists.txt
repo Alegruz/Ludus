@@ -20,6 +20,7 @@ target_sources(
         src/spatial.cpp
         src/buses.cpp
         src/internal/decode.cpp
+        src/internal/decode_scheduler.cpp
         src/internal/resampler.cpp
         src/internal/voice_kernel.cpp
     PUBLIC
@@ -85,6 +86,9 @@ if(LUDUS_BUILD_TESTS)
             tests/bus_tests.cpp
             tests/adapter_tests.cpp
             tests/batch_order_tests.cpp
+            tests/scheduler_tests.cpp
+            tests/descriptor_tests.cpp
+            tests/diagnostics_tests.cpp
     )
     # Tests reach into src/internal for the SPSC ring and handle helpers.
     target_include_directories(ludus_audio_tests PRIVATE src include)

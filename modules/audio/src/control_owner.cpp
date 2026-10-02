@@ -250,6 +250,47 @@ void AudioSystem::Impl::SelectAndCharge() noexcept
         Groups[g].Fading = 0;
     }
 
+    // Recompute the independent silence-cause flags from scratch each boundary
+    // (design section 11: flags reflect the current boundary, not stale state;
+    // multiple causes can coexist). Base causes that do not depend on selection
+    // are set here; the selection loop below adds BelowThreshold/GroupQuota/
+    // GlobalBudget for voices it does not select.
+    for (uint32 i = 0; i < LogicalCapacity; ++i)
+    {
+        VoiceSlot& v = Voices[i];
+        if (!v.InUse || v.IsStream)
+        {
+            continue;
+        }
+        v.Silence = SilenceCause::None;
+        if (v.State == VoiceState::Pending || v.State == VoiceState::Scheduled)
+        {
+            v.Silence |= SilenceCause::NotStarted;
+        }
+        if (v.State == VoiceState::Stopping)
+        {
+            v.Silence |= SilenceCause::Stopping;
+        }
+        // Distance-zero: a positional voice fully attenuated at/after MaxDistance.
+        if (v.Positional && v.ScoreDistanceGain <= 0.0F)
+        {
+            v.Silence |= SilenceCause::DistanceZero;
+        }
+        // User-muted: the voice's bus chain carries a zero UserGain anywhere.
+        uint32 b = v.BusIndex;
+        uint32 guard = 0;
+        while (b != kNoParent && guard <= BusCount)
+        {
+            if (Buses[b].UserGain == 0.0F)
+            {
+                v.Silence |= SilenceCause::UserMuted;
+                break;
+            }
+            b = Buses[b].ParentIndex;
+            ++guard;
+        }
+    }
+
     // Build a deterministic ordered candidate list of resident voices eligible
     // for steady-state selection (Mixed / Virtual / Virtualizing wanting to
     // reverse). Rank by priority (desc), then estimated audibility (desc), with
@@ -354,7 +395,10 @@ void AudioSystem::Impl::SelectAndCharge() noexcept
         {
             ++Groups[g].Selected;
             ++globalSelected;
-            v.Silence = SilenceCause::None;
+            // Base silence causes (DistanceZero/UserMuted) were already computed
+            // this boundary and are preserved: a selected voice on a user-muted
+            // bus is still silent for that reason. Selection only avoids adding
+            // the not-selected causes below.
             // Transition toward Mixed. A Virtual or Virtualizing voice reverses
             // into Mixed (the Virtualizing fade reverses in place from its
             // current value); an incumbent Mixed voice simply retargets to full.
@@ -446,6 +490,10 @@ void AudioSystem::Impl::TerminateVoice(uint32 slot, TerminalReason reason, State
     VoiceSlot& v = Voices[slot];
     v.State = VoiceState::Terminal;
     v.LastCause = cause;
+    // A terminal voice is not "silent for a reason"; clear transient silence
+    // causes so GetVoiceInfo on a terminal/stale slot does not report stale
+    // flags. The terminal reason is the authoritative explanation.
+    v.Silence = SilenceCause::None;
     v.Terminal.Reason = reason;
     v.Terminal.FinalFrame = RenderFrame;
     // Release-publish the terminal generation; the owner acquires it to reclaim.
@@ -656,10 +704,27 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
                 in.StepL = ph.StepL;
                 in.StepR = ph.StepR;
 
-                const uint32 before = produced; // output frame offset
-                (void)before;
-                const uint32 producedFrames =
-                    internal::RenderResidentVoice(in, MixAccum, span, Scratch, internal::VOICE_SCRATCH_FRAMES);
+                // Sub-span start offset (design section 5): a voice whose exact
+                // StartFrame falls inside this span emits zero before its start,
+                // then samples from the start offset. MixAccum[0..startOffset)
+                // stays zero (cleared above); the kernel writes from the offset.
+                uint32 startOffset = 0;
+                if (v.StartFrame > RenderFrame)
+                {
+                    const uint64 delta = v.StartFrame - RenderFrame;
+                    startOffset = delta >= span ? span : static_cast<uint32>(delta);
+                }
+                const uint32 renderFrames = span - startOffset;
+                if (renderFrames > 0)
+                {
+                    const uint32 producedFrames =
+                        internal::RenderResidentVoice(in,
+                                                      MixAccum + static_cast<usize>(startOffset) * 2,
+                                                      renderFrames,
+                                                      Scratch,
+                                                      internal::VOICE_SCRATCH_FRAMES);
+                    (void)producedFrames;
+                }
 
                 // Route this voice's output to its bus (input tap, before gain).
                 RouteVoiceToBus(v.BusIndex, MixAccum, span);
@@ -694,7 +759,6 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
                         v.VirtualSinceFrame = RenderFrame;
                     }
                 }
-                (void)producedFrames;
             }
             else if (v.State == VoiceState::Virtual)
             {

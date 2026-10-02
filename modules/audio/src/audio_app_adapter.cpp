@@ -182,6 +182,100 @@ TriggerResult EventAdapter::Trigger(const TriggerRequest& req, uint64 nowTicks) 
     return out;
 }
 
+DescriptorValidation EventAdapter::ValidateDescriptor(const EventDescriptor& desc) const noexcept
+{
+    DescriptorValidation out{};
+    if (desc.VariationCount == 0 || desc.VariationCount > MAX_VARIATIONS)
+    {
+        out.Field = DescriptorField::VariationCount;
+        return out;
+    }
+    for (uint32 i = 0; i < desc.VariationCount; ++i)
+    {
+        if (!mSystem.IsClipReady(desc.Variations[i]))
+        {
+            out.Field = DescriptorField::VariationHandle;
+            out.BadVariationIndex = i;
+            return out;
+        }
+    }
+    if (desc.Priority > PRIORITY_MAX)
+    {
+        out.Field = DescriptorField::Priority;
+        return out;
+    }
+    if (!(desc.DefaultGain >= 0.0F) || desc.DefaultGain > 1.0F)
+    {
+        out.Field = DescriptorField::Gain; // also catches NaN (fails >= 0)
+        return out;
+    }
+    if (!(desc.Rate >= RATE_MIN) || desc.Rate > RATE_MAX)
+    {
+        out.Field = DescriptorField::Rate;
+        return out;
+    }
+    if (desc.Positional && (desc.MinDistance < 0.0F || desc.MaxDistance <= desc.MinDistance))
+    {
+        out.Field = DescriptorField::Distance;
+        return out;
+    }
+    // Bus/group IDs are validated by the engine at admission; a descriptor with
+    // an out-of-range id is rejected there. Report range here best-effort via
+    // the engine's own acceptance (left to admission to avoid duplicating bus
+    // count knowledge in the adapter).
+    out.Valid = true;
+    out.Field = DescriptorField::None;
+    return out;
+}
+
+// NOLINTBEGIN(bugprone-easily-swappable-parameters): named descriptor args.
+TriggerResult EventAdapter::TriggerDescriptor(const EventDescriptor& desc,
+                                              uint32 ownerTag,
+                                              uint64 cooldownTicks,
+                                              uint32 seed,
+                                              uint64 nowTicks) noexcept
+// NOLINTEND(bugprone-easily-swappable-parameters)
+{
+    TriggerResult out{};
+    const DescriptorValidation v = ValidateDescriptor(desc);
+    if (!v.Valid)
+    {
+        // Owner-side preparation/validation failure: no voice, no phantom.
+        EmitOwner(OwnerEventKind::PreparationFailed,
+                  Status::InvalidArgument,
+                  PolicyCause::None,
+                  desc.EventId,
+                  ownerTag,
+                  nowTicks);
+        return out;
+    }
+
+    // Deterministic variation selection from the supplied seed. The chosen
+    // variant is resolved ONCE here and carried by the resulting voice; reentry
+    // never re-rolls it (the renderer stores the clip slot at admission).
+    const uint32 variant = desc.VariationCount == 1 ? 0 : (seed % desc.VariationCount);
+
+    TriggerRequest req{};
+    req.EventId = desc.EventId;
+    req.OwnerTag = ownerTag;
+    req.CooldownTicks = cooldownTicks;
+    req.SuppressWhileActive = true;
+    req.IsOwnedLoop = desc.Looping;
+    req.Play.Clip = desc.Variations[variant];
+    req.Play.BusIndex = desc.BusIndex;
+    req.Play.GroupIndex = desc.GroupIndex;
+    req.Play.Priority = desc.Priority;
+    req.Play.Gain = desc.DefaultGain;
+    req.Play.Rate = desc.Rate;
+    req.Play.Looping = desc.Looping;
+    req.Play.Policy = desc.Policy;
+    req.Play.Positional = desc.Positional;
+    req.Play.MinDistance = desc.MinDistance;
+    req.Play.MaxDistance = desc.MaxDistance;
+    req.Play.PolicyTag = desc.EventId; // numeric tag for diagnostic correlation
+    return Trigger(req, nowTicks);
+}
+
 void EventAdapter::Update(uint64 nowTicks) noexcept
 {
     // Release active membership for durably-terminated voices, and reclaim

@@ -252,6 +252,15 @@ Status AudioSystem::PrepareStream(std::span<const uint8> encoded,
     return Status::Unsupported;
 }
 
+bool AudioSystem::IsClipReady(ClipHandle clip) const noexcept
+{
+    if (!mImpl)
+    {
+        return false;
+    }
+    return mImpl->FindClipSlot(clip) < mImpl->LogicalCapacity;
+}
+
 Status AudioSystem::RetireClip(ClipHandle clip) noexcept
 {
     if (!mImpl)
