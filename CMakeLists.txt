@@ -168,20 +168,12 @@ install(
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${LUDUS_ENGINE_PACKAGE_NAME}"
 )
 
-configure_package_config_file(
-    "${PROJECT_SOURCE_DIR}/cmake/LudusConfig.cmake.in"
-    "${PROJECT_BINARY_DIR}/cmake/LudusConfig.cmake"
-    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${LUDUS_ENGINE_PACKAGE_NAME}"
-)
-
-write_basic_package_version_file(
-    "${PROJECT_BINARY_DIR}/cmake/LudusConfigVersion.cmake"
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
-
-# --- SDK identity + redistributable dependency inventory (P02/P03/P11) --------
-# Compiler/source identity at root scope for the SDK manifest. FoundationBase
+# --- SDK identity (P02/P03/P11) ----------------------------------------------
+# Compiler/source identity at root scope. These MUST be set BEFORE
+# configure_package_config_file() below, because LudusConfig.cmake.in substitutes
+# @LUDUS_COMPILER_ID@/@LUDUS_COMPILER_VERSION@ for its toolchain-compatibility
+# gate; configuring the package file with empty values would make the gate
+# compare against an empty SDK identity and reject every consumer. FoundationBase
 # computes the same values for its generated build_metadata.hpp; keep them equal.
 set(LUDUS_COMPILER_ID "${CMAKE_CXX_COMPILER_ID}")
 set(LUDUS_COMPILER_VERSION "${CMAKE_CXX_COMPILER_VERSION}")
@@ -199,6 +191,19 @@ if(Git_FOUND)
     endif()
 endif()
 
+configure_package_config_file(
+    "${PROJECT_SOURCE_DIR}/cmake/LudusConfig.cmake.in"
+    "${PROJECT_BINARY_DIR}/cmake/LudusConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${LUDUS_ENGINE_PACKAGE_NAME}"
+)
+
+write_basic_package_version_file(
+    "${PROJECT_BINARY_DIR}/cmake/LudusConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+# --- Redistributable dependency inventory (P02/P03/P11) ----------------------
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationContainers FoundationMath FoundationLogging

@@ -68,7 +68,8 @@ set(Ludus_SDK_MANIFEST "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/Ludus/Ludu
 # configured with a different compiler must fail BEFORE compiling/linking with
 # an actionable expected-vs-actual message, not with opaque link errors (P03).
 # Opt out only deliberately with -DLUDUS_SKIP_TOOLCHAIN_CHECK=ON.
-if(NOT LUDUS_SKIP_TOOLCHAIN_CHECK AND NOT "@CMAKE_SYSTEM_NAME@" STREQUAL "Emscripten")
+if(NOT LUDUS_SKIP_TOOLCHAIN_CHECK AND NOT "@CMAKE_SYSTEM_NAME@" STREQUAL "Emscripten"
+   AND NOT "@LUDUS_COMPILER_ID@" STREQUAL "")
     if(DEFINED CMAKE_CXX_COMPILER_ID AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "@LUDUS_COMPILER_ID@")
         message(FATAL_ERROR
             "Ludus SDK compiler mismatch: this SDK was built with "

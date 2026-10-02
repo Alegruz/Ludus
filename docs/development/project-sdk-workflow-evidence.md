@@ -605,3 +605,26 @@ bundling is possible). Regressions: `test_residual_transitive_root_is_bundled_no
 $ cd scripts/python && python3 -m unittest test_ludus_tools.BundleDeps   # 8 OK
 $ python3 -m unittest test_ludus_tools test_ludus_project_ops test_ludus_cli test_ludus_failure_scenarios  # 96 OK
 ```
+
+### Follow-up: toolchain gate configured with empty identity (self-caught)
+
+Adding the finding-#1 CMake toolchain gate to `LudusConfig.cmake.in` exposed a
+pre-existing ordering bug: `configure_package_config_file()` ran BEFORE the root
+`CMakeLists.txt` set `LUDUS_COMPILER_ID`/`LUDUS_COMPILER_VERSION`, so the
+*installed* `LudusConfig.cmake` substituted empty strings and the new gate then
+rejected every consumer (`this SDK was built with ' '`). The PR's `Development
+and SDK` job caught it on the real external-consumer configure.
+
+Fix: moved the compiler/git identity `set()` block to BEFORE
+`configure_package_config_file()` in the root CMakeLists (the manifest still
+reads the same vars, which are set earlier now), and hardened the gate to only
+compare when the SDK's recorded compiler id is non-empty. Verified by rendering
+the config and running the gate under `cmake -P`:
+
+```
+$ cmake -DCMAKE_CXX_COMPILER_ID=Clang -DCMAKE_CXX_COMPILER_VERSION=18.1.3 -P gate.cmake  # passes
+$ cmake -DCMAKE_CXX_COMPILER_ID=GNU   -DCMAKE_CXX_COMPILER_VERSION=13.2.0 -P gate.cmake  # FATAL: compiler mismatch (names the SDK's Clang 18.1.3)
+```
+
+This also means the identity fields in the installed `LudusConfig.cmake` were
+previously shipping empty — the gate addition surfaced and fixed that.
