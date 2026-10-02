@@ -58,6 +58,47 @@ analytic/metamorphic/failure/alias harnesses all pass:
 - Header self-sufficiency: all 12 public headers compile standalone.
 - Foundational include-boundary checker (`tools/check_foundational_includes.py`):
   clean.
+- `__FAST_MATH__` / `__FINITE_MATH_ONLY__` consumer rejection fires (compile
+  errors), confirmed by compiling a consumer with `-ffast-math` /
+  `-ffinite-math-only`.
+
+## Post-implementation audit (MA01–MA14 / M0–M6)
+
+A follow-up review against the spec found and fixed two concrete defects, each
+with the affected checks re-run:
+
+1. **`TryClosestPointsSegments` sign error (MA10/M4).** The s=0 endpoint
+   candidate projected `-w` (= q0−p0) instead of `w` (= p0−q0) onto segment 2,
+   so when the true closest approach was at s=0 (or the mirrored s=1) with an
+   *interior* t, the function returned a suboptimal point/distance. An
+   independent brute-force (dense s,t grid) oracle fuzz showed **427/4000**
+   mismatches (gaps up to ~2.5 units) before the fix and **0** after. Fix:
+   `src/queries.cpp` now projects `w`. Regression coverage added in
+   `tests/queries_tests.cpp` (an explicit s-boundary/interior-t case plus an
+   oracle-backed adversarial corpus). The prior test suite missed this because
+   its closest-segments cases happened to have optima on candidates that were
+   correct regardless of the sign.
+
+2. **`Matrix3/4::At` resumable-assertion memory safety (MA05).** The accessor
+   guarded `Columns[column]` only with a development `LUDUS_ASSERT`; since Ludus
+   assertions are resumable (ADR 0006), a resumed assertion with an out-of-range
+   index would perform an out-of-range read. Fix: the index is now clamped into
+   range after the assert, so a resumed assertion yields a defined in-bounds read.
+
+**Sanitizers.** A clang-21 toolchain (bundled with the system Swift install)
+provides the ASan/UBSan runtime that the primary clang-15 lacked. The full test
+suite (222,113 assertions) and the behavioral/allocation probes build and run
+**clean under `-fsanitize=address,undefined -fno-sanitize-recover=undefined`** —
+no undefined behavior, no out-of-bounds access, no leaks. This upgrades the
+previously-pending sanitizer evidence; the *pinned clang-18* ASan/UBSan preset
+still remains to be run on the pinned toolchain.
+
+**Additional independent oracles run in the audit.** 3000 random `Matrix4`
+inverses verified by an independent `A·inv(A)≈I` reconstruction (≤1e-3 abs error
+on all accepted inverses); 19,275 points verified strictly inside the clip volume
+across 200 random projections with **zero false-negative frustum culls**;
+signed-zero (`-0`) ray-direction components, status-vs-miss, output-unchanged on
+failure, and PCG non-consumption on invalid calls all confirmed by direct probes.
 
 ## Accuracy targets (initial, calibrated against the M0 corpus)
 

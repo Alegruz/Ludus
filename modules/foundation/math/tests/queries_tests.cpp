@@ -134,6 +134,82 @@ TEST_CASE("Closest points between segments: skew, parallel, degenerate", "[math]
     REQUIRE(Close(sc.T, 0.5, 1e-6));
 }
 
+namespace
+{
+// Independent brute-force oracle: the minimum squared distance between the two
+// segments over a dense (s,t) grid. Does NOT call the production helper, so it is
+// a real cross-check (design §13: a test oracle must not call what it verifies).
+[[nodiscard]] double BruteForceSegmentSq(Vector3 p0, Vector3 p1, Vector3 q0, Vector3 q1)
+{
+    constexpr int kSteps = 400;
+    double best = kInf;
+    for (int i = 0; i <= kSteps; ++i)
+    {
+        const double s = static_cast<double>(i) / kSteps;
+        const double ax = p0.X + s * (static_cast<double>(p1.X) - p0.X);
+        const double ay = p0.Y + s * (static_cast<double>(p1.Y) - p0.Y);
+        const double az = p0.Z + s * (static_cast<double>(p1.Z) - p0.Z);
+        for (int j = 0; j <= kSteps; ++j)
+        {
+            const double t = static_cast<double>(j) / kSteps;
+            const double bx = q0.X + t * (static_cast<double>(q1.X) - q0.X);
+            const double by = q0.Y + t * (static_cast<double>(q1.Y) - q0.Y);
+            const double bz = q0.Z + t * (static_cast<double>(q1.Z) - q0.Z);
+            const double dx = ax - bx, dy = ay - by, dz = az - bz;
+            best = std::fmin(best, dx * dx + dy * dy + dz * dz);
+        }
+    }
+    return best;
+}
+} // namespace
+
+TEST_CASE("Closest segments: optimum on an s-boundary with interior t", "[math][queries]")
+{
+    // Regression for a sign error in the s=0 endpoint candidate: the true minimum
+    // is at s=0 (segment 1's p0) and an INTERIOR t on segment 2, which no other
+    // candidate pins. A long bar whose near end is closest to the middle of a
+    // crossing segment.
+    SegmentClosest sc{};
+    REQUIRE(TryClosestPointsSegments(Vector3{0, 0, 0}, Vector3{0, 0, 5}, Vector3{-1, 0.5F, -10},
+                                     Vector3{1, 0.5F, 10}, sc) == MathStatus::Success);
+    REQUIRE(Close(sc.SquaredDistance, 0.25, 1e-5));
+    REQUIRE(Close(sc.S, 0.0, 1e-6));
+    REQUIRE(Close(sc.T, 0.5, 1e-3));
+
+    // Mirror: optimum at s=1 with interior t.
+    REQUIRE(TryClosestPointsSegments(Vector3{0, 0, 5}, Vector3{0, 0, 0}, Vector3{-1, 0.5F, -10},
+                                     Vector3{1, 0.5F, 10}, sc) == MathStatus::Success);
+    REQUIRE(Close(sc.SquaredDistance, 0.25, 1e-5));
+    REQUIRE(Close(sc.S, 1.0, 1e-6));
+}
+
+TEST_CASE("Closest segments agree with an independent brute-force oracle", "[math][queries]")
+{
+    struct Pair
+    {
+        Vector3 p0, p1, q0, q1;
+    };
+    // Deterministic adversarial corpus covering boundary and interior optima.
+    const Pair cases[] = {
+        {{0, 0, 0}, {0, 0, 5}, {-1, 0.5F, -10}, {1, 0.5F, 10}},
+        {{-2, 1, 0}, {2, 1, 0}, {0, -1, 3}, {0, -1, -3}},
+        {{1, 2, 3}, {-1, -2, -3}, {3, -1, 2}, {-2, 2, -1}},
+        {{0, 0, 0}, {1, 0, 0}, {5, 0, 1}, {5, 1, 1}},   // optimum at s=1, t boundary/interior
+        {{0, 0, 0}, {0, 1, 0}, {2, 0.3F, 0}, {2, 0.7F, 0}},
+        {{-5, 0, 0}, {5, 0, 0}, {0, 2, 0}, {0, 2, 0}},  // segment vs point
+    };
+    for (const Pair& k : cases)
+    {
+        SegmentClosest sc{};
+        REQUIRE(TryClosestPointsSegments(k.p0, k.p1, k.q0, k.q1, sc) == MathStatus::Success);
+        const double oracle = BruteForceSegmentSq(k.p0, k.p1, k.q0, k.q1);
+        // The grid oracle slightly overestimates the true minimum; the production
+        // result must be <= oracle + grid slack and must not exceed it.
+        REQUIRE(sc.SquaredDistance <= oracle + 1e-3);
+        REQUIRE(std::fabs(std::sqrt(sc.SquaredDistance) - std::sqrt(std::fmax(oracle, 0.0))) < 2e-2);
+    }
+}
+
 TEST_CASE("Frustum extraction and conservative classification", "[math][queries]")
 {
     Matrix4 p{};

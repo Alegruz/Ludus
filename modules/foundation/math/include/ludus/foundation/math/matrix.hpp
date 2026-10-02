@@ -46,13 +46,19 @@ struct Matrix3
         return Matrix3{{Vector3{1, 0, 0}, Vector3{0, 1, 0}, Vector3{0, 0, 1}}};
     }
 
-    // At(row, column): element in [0,3). Direct caller indexing has ordinary C++
-    // bounds preconditions (asserted in development).
+    // At(row, column): element in [0,3). An out-of-range index is a caller
+    // precondition violation, reported by LUDUS_ASSERT in development. Because
+    // assertions are resumable (ADR 0006), the index is also clamped into range
+    // so a resumed assertion yields a defined in-bounds read rather than an
+    // out-of-range access (MA05). Direct Columns[] indexing keeps ordinary C++
+    // preconditions; this SDK indexed helper is memory-safe regardless.
     [[nodiscard]] constexpr float32 At(usize row, usize column) const noexcept
     {
         LUDUS_ASSERT(row < 3 && column < 3);
-        const Vector3& c = Columns[column];
-        return row == 0 ? c.X : (row == 1 ? c.Y : c.Z);
+        const usize safeRow = row < 3 ? row : 2;
+        const usize safeColumn = column < 3 ? column : 2;
+        const Vector3& c = Columns[safeColumn];
+        return safeRow == 0 ? c.X : (safeRow == 1 ? c.Y : c.Z);
     }
 
     [[nodiscard]] friend constexpr bool operator==(const Matrix3&, const Matrix3&) = default;
@@ -95,11 +101,15 @@ struct Matrix4
         return Matrix4{{Vector4{1, 0, 0, 0}, Vector4{0, 1, 0, 0}, Vector4{0, 0, 1, 0}, Vector4{0, 0, 0, 1}}};
     }
 
+    // See Matrix3::At: resumable-assertion-safe (index clamped after the assert
+    // so a resumed assertion cannot cause an out-of-range access; MA05).
     [[nodiscard]] constexpr float32 At(usize row, usize column) const noexcept
     {
         LUDUS_ASSERT(row < 4 && column < 4);
-        const Vector4& c = Columns[column];
-        return row == 0 ? c.X : (row == 1 ? c.Y : (row == 2 ? c.Z : c.W));
+        const usize safeRow = row < 4 ? row : 3;
+        const usize safeColumn = column < 4 ? column : 3;
+        const Vector4& c = Columns[safeColumn];
+        return safeRow == 0 ? c.X : (safeRow == 1 ? c.Y : (safeRow == 2 ? c.Z : c.W));
     }
 
     [[nodiscard]] friend constexpr bool operator==(const Matrix4&, const Matrix4&) = default;

@@ -299,10 +299,24 @@ Add rows as stages are completed; link stable evidence under a new
 book extractions, PDFs, generated build output or machine paths.
 
 Environment note: implemented on Amazon Linux 2023 with system **clang 15**
-(`-std=c++2b`), cmake 3.22, no Conan/clang-18/Emscripten/GPU/compiler-rt
-sanitizer libs. The pinned matrix could not run here (apt-only `./init.sh`);
-rows below record independent verification with the available compiler and name
-the pinned/GPU gates that remain Pending.
+(`-std=c++2b`), cmake 3.22, no Conan/clang-18/Emscripten/GPU. The pinned matrix
+could not run here (apt-only `./init.sh`); rows below record independent
+verification with the available compilers and name the pinned/GPU gates that
+remain Pending. A later audit also found a **clang-21 toolchain** (bundled with
+Swift) that supplies the ASan/UBSan runtime, so sanitizer evidence now exists
+(the *pinned* clang-18 ASan/UBSan preset still remains to be run).
+
+Audit (post-implementation review against MA01–MA14 / M0–M6): two concrete
+defects found and fixed —
+(1) `TryClosestPointsSegments` s=0 endpoint candidate projected `-w` instead of
+`w`, so when the true optimum was at s=0 (or s=1) with an interior t, the result
+was suboptimal (a brute-force oracle fuzz showed 427/4000 mismatches, gaps up to
+2.5 u; after the fix: 0 mismatches). An oracle-backed regression test was added.
+(2) `Matrix3/4::At` relied on a resumable `LUDUS_ASSERT` as the only guard for the
+`Columns[column]` access, so a resumed assertion with an out-of-range index would
+read out of bounds (violating MA05). The index is now clamped after the assert.
+Both fixes are warning-clean (`-Werror`), and the full suite + probes pass under
+ASan+UBSan (clang-21) with no memory errors or UB.
 
 | Stage or gate | Status | Revision and changed paths | Exact command and environment | Result and artifact | Pending limitation |
 | --- | --- | --- | --- | --- | --- |
@@ -310,7 +324,9 @@ the pinned/GPU gates that remain Pending.
 | M1 scalar/vector | Done (independent) | `modules/foundation/math/{include,src}/…/{status,scalar,vector}.*`, module+root CMake, `tools/web-math-probe` | `clang++ -std=c++2b -fno-exceptions -ffp-contract=off -Wall -Wextra` + harness | Warning-clean; all scalar/vector tests pass; 0 allocations | Pinned clang-18 build/test, ASan/UBSan, format/tidy-18, Wasm corpus |
 | M2 rotation/algebra/affine | Done (independent) | `…/{quaternion,matrix,transform}.*` | same compiler + harness | Action agreement, q/−q, opposite/near-opposite, two-sided inverse, shear retention all pass | Pinned clang-18 + Wasm |
 | M3 projections/precision/PCG | Done (independent) | `…/{projection,precision,random}.*` | same | Reverse-Z endpoints, 1e9 precision, PCG known answers `a15c02b7…` all pass | Pinned clang-18 + browser corpus |
-| M4 geometry/batches | Done (independent) | `…/{geometry,queries,batch}.*` | same | Ray/box/sphere, closest-segments, frustum vs clip inequalities, batch transaction/overlap all pass; 0 allocations | Pinned clang-18 + Wasm |
+| M4 geometry/batches | Done (independent; 1 bug fixed in audit) | `…/{queries.cpp}` (closest-segments sign fix), `tests/queries_tests.cpp` (oracle regression) | same + brute-force oracle fuzz | Ray/box/sphere, closest-segments (now oracle-verified, 0/4000 mismatch), frustum vs clip inequalities (19,275 inside pts, 0 false-neg culls), batch transaction/overlap all pass; 0 allocations | Pinned clang-18 + Wasm |
+| Audit: sanitizers | Done (clang-21, not pinned) | — | `clang++(21) -fsanitize=address,undefined -fno-sanitize-recover=undefined` on suite+probes | 222,113 suite checks + 17 probe checks + alloc probe all ASan+UBSan clean (no UB, no OOB, no leak) | Pinned **clang-18** ASan/UBSan preset still to run |
+| Audit: inverse oracle | Done (independent) | — | 3000 random Matrix4, independent `A·inv(A)≈I` | all accepted inverses within 1e-3 abs I-reconstruction error | — |
 | M5 Vulkan shader fixture | Pending | fixture plan in `docs/architecture/math-evidence/` | — | — | No Vulkan GPU in environment |
 | M5 browser WebGPU fixture | Pending | fixture plan; `tools/web-math-probe` (CPU corpus only) | — | — | No WebGPU/browser GPU in environment |
 | M5 benchmarks and optimization decision | Deferred (scalar kept) | — | — | No profiling evidence or demonstrated hotspot; scalar baseline shipped | Benchmarks need pinned toolchain/hardware |

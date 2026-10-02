@@ -533,9 +533,10 @@ MathStatus TryClosestPointsSegments(Vector3 p0, Vector3 p1, Vector3 q0, Vector3 
 
     // Endpoint-to-segment candidates (cover the constraint boundary and the
     // parallel/degenerate cases). For each of the four endpoints, project onto
-    // the opposite segment.
-    // s=0: q-closest to p0.
-    consider(0.0, ProjectParam(D3{-w.x, -w.y, -w.z}, v, c)); // p0 relative to q0 is -w; project (p0-q0) onto v
+    // the opposite segment. The point on segment 2 closest to a point P (base
+    // q0, direction v) minimises |P-(q0+t*v)|^2 at t=(P-q0).v / (v.v), clamped.
+    // s=0: P = p0, and (p0-q0) = w, so project w (NOT -w) onto v.
+    consider(0.0, ProjectParam(w, v, c));
     // s=1: project (p1 - q0) onto v.
     {
         const D3 p1q0 = Sub(p1, q0);
