@@ -237,6 +237,16 @@ if(NOT EMSCRIPTEN)
     ludus_sdk_register_system_prerequisite("Host shader compiler (pinned Slang) and spirv-val for ludus_compile_shader at build time")
 endif()
 
+# Normalize the ON/OFF sanitizer options to JSON integers (0/1) for the manifest
+# template; the assertion-policy fields are already 0/1 from EngineBuildFlavor.
+foreach(_san ASAN UBSAN TSAN)
+    if(LUDUS_ENABLE_${_san})
+        set(LUDUS_ENABLE_${_san}_JSON 1)
+    else()
+        set(LUDUS_ENABLE_${_san}_JSON 0)
+    endif()
+endforeach()
+
 ludus_sdk_finalize_identity()
 
 configure_file(

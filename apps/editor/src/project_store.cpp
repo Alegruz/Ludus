@@ -447,8 +447,7 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
             const QString engineUnknown = UnknownKey(engine, engineKeys);
             if (!engineUnknown.isEmpty())
             {
-                return Fail(ResultCode::InvalidProject,
-                            QStringLiteral("unknown field 'engine.%1'").arg(engineUnknown));
+                return Fail(ResultCode::InvalidProject, QStringLiteral("unknown field 'engine.%1'").arg(engineUnknown));
             }
             const QJsonValue engineVersionValue = engine.value(QStringLiteral("version"));
             if (!engineVersionValue.isString())
@@ -554,13 +553,15 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
             const QJsonValue templateVersionValue = templateObj.value(QStringLiteral("version"));
             if (templateVersionValue.type() != QJsonValue::Double)
             {
-                return Fail(ResultCode::InvalidProject, QStringLiteral("'template.version' must be a positive integer"));
+                return Fail(ResultCode::InvalidProject,
+                            QStringLiteral("'template.version' must be a positive integer"));
             }
             const double rawTemplateVersion = templateVersionValue.toDouble();
             if (rawTemplateVersion < 1.0 || rawTemplateVersion > 1000000.0 ||
                 rawTemplateVersion != static_cast<double>(static_cast<foundation::uint64>(rawTemplateVersion)))
             {
-                return Fail(ResultCode::InvalidProject, QStringLiteral("'template.version' must be a positive integer"));
+                return Fail(ResultCode::InvalidProject,
+                            QStringLiteral("'template.version' must be a positive integer"));
             }
             descriptor.Template.Id = templateId;
             descriptor.Template.Version = static_cast<foundation::uint64>(rawTemplateVersion);

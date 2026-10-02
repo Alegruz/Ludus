@@ -63,9 +63,9 @@ enum class ResultCode : foundation::uint8
 // never a floating range. Only populated when Version == 2 and provider cmake.
 struct EngineRequirement
 {
-    QString Version;         // exact release token, <= 128 bytes
-    QStringList Components;  // requested public modules
-    QStringList Features;    // required feature flags
+    QString Version;        // exact release token, <= 128 bytes
+    QStringList Components; // requested public modules
+    QStringList Features;   // required feature flags
 
     [[nodiscard]] friend bool operator==(const EngineRequirement&, const EngineRequirement&) = default;
 };
@@ -74,7 +74,7 @@ struct EngineRequirement
 // ludus_tools.descriptor.TemplateRef.
 struct TemplateRef
 {
-    QString Id;                 // bounded identifier token
+    QString Id;                     // bounded identifier token
     foundation::uint64 Version = 0; // positive integer
 
     [[nodiscard]] friend bool operator==(const TemplateRef&, const TemplateRef&) = default;
@@ -97,10 +97,10 @@ struct ProjectDescriptor
     QString RunCwd;      // relative, <= 4096 UTF-8 bytes
     QStringList RunArgs; // <= 64 items, each <= 4096 bytes, total <= 32 KiB; empties valid
 
-    bool HasEngine = false;     // true only for a version-2 cmake project
-    EngineRequirement Engine;   // valid only when HasEngine
-    bool HasTemplate = false;   // optional version-2 field
-    TemplateRef Template;       // valid only when HasTemplate
+    bool HasEngine = false;   // true only for a version-2 cmake project
+    EngineRequirement Engine; // valid only when HasEngine
+    bool HasTemplate = false; // optional version-2 field
+    TemplateRef Template;     // valid only when HasTemplate
 
     [[nodiscard]] friend bool operator==(const ProjectDescriptor& lhs, const ProjectDescriptor& rhs) = default;
 };

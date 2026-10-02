@@ -19,9 +19,9 @@
   "build_flavor_id": @LUDUS_BUILD_FLAVOR_ID@,
   "build_type": "@CMAKE_BUILD_TYPE@",
   "sanitizers": {
-    "asan": @LUDUS_ENABLE_ASAN@,
-    "ubsan": @LUDUS_ENABLE_UBSAN@,
-    "tsan": @LUDUS_ENABLE_TSAN@
+    "asan": @LUDUS_ENABLE_ASAN_JSON@,
+    "ubsan": @LUDUS_ENABLE_UBSAN_JSON@,
+    "tsan": @LUDUS_ENABLE_TSAN_JSON@
   },
   "assert_policy": {
     "policy_version": @LUDUS_ASSERT_POLICY_VERSION@,

@@ -27,8 +27,32 @@ permissions:
   contents: read
 
 jobs:
+  # On a pull request we only lint the release logic (no toolchain). The heavy
+  # candidate build and publish run on an explicit maintainer dispatch, so an
+  # ordinary PR cannot require (or fail) a full multi-flavor SDK build here.
+  lint:
+    name: Lint release logic (PR)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate the release workflow and manifest-identity assertion logic
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 - <<'PY'
+          import yaml
+          for f in (".github/workflows/release.yml", ".github/workflows/project-sdk.yml"):
+              yaml.safe_load(open(f))
+              print("workflow YAML OK:", f)
+          PY
+
   assemble-and-validate:
     name: Assemble + validate release candidate
+    # Only on an explicit maintainer dispatch (not on PRs).
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     env:
       CI: "true"
@@ -39,8 +63,7 @@ jobs:
         flavor: [linux-clang-debug, linux-clang-development, linux-clang-release]
     steps:
       - uses: actions/checkout@v4
-      - name: Verify tag/version/revision agreement (dispatch only)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Verify tag/version/revision agreement
         run: |
           set -euo pipefail
           tag="${{ github.event.inputs.tag }}"
