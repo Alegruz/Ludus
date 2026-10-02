@@ -57,8 +57,9 @@ There is no automatic fallback to fetching/building engine sources.
 
 Keep game execution separate from the Editor initially. Static linking meets
 the current application boundary without requiring a stable game-plugin ABI.
-Embedded play/hot reload will need a separate design when their requirements
-are known. Engine smoke apps remain internal validation tools.
+The optional [project-live-reload architecture](project-live-reload.md) now defines
+that follow-on host/module and live editing boundary; it does not expand this SDK
+milestone. Engine smoke apps remain internal validation tools.
 
 ## New Project and headless use
 
