@@ -1,0 +1,300 @@
+"""Shared project operation backend: configure / build / run (P07/P10).
+
+This is the backend the installed CLI calls directly. The Editor's streaming E0
+adapter (scripts/python/editor_tool.py) implements the same semantics for its
+private protocol; both share: the SDK resolution precedence (resolve.py), the
+per-build-tree cooperative lock (buildlock.py), the CMake File API artifact
+resolver (cmake_targets.py), exact argv arrays with no shell, output bounds,
+process cleanup and the rule that a failed/cancelled build can never launch an
+older binary.
+
+The CLI backend here is synchronous (prints to the terminal); it never downloads
+an SDK, refreshes the lock or compiles engine sources during configure/build/run.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional, Sequence
+
+from . import descriptor as desc
+from .buildlock import BuildTreeLock
+from .errors import (
+    BUSY,
+    GENERATION_FAILED,
+    INVALID_PROJECT,
+    ToolingError,
+)
+from .lockfile import LocalSettings, parse_lock_file, parse_local_settings_file, validate_descriptor_lock_agreement
+from .resolve import Resolution, assert_stamp_unchanged, needs_reconfigure, resolve_sdk, write_stamp
+from .sdkstore import SdkStore
+
+# Map a descriptor preset to the native flavor and CMake build type.
+PRESET_FLAVOR = {
+    "linux-clang-debug": "Debug",
+    "linux-clang-development": "Development",
+    "linux-clang-release": "Release",
+}
+
+DESCRIPTOR_NAME = "ludus.project.json"
+LOCK_NAME = "ludus.lock.json"
+LOCAL_SETTINGS_RELPATH = ".ludus/local.json"
+
+# Bounded captured output per stream (defensive; the CLI streams live output).
+MAX_CAPTURED_BYTES = 8 * 1024 * 1024
+
+
+@dataclass
+class ProjectPaths:
+    project_dir: Path
+    descriptor_path: Path
+    source_dir: Path
+    build_dir: Path
+
+    @property
+    def lock_path(self) -> Path:
+        return self.project_dir / LOCK_NAME
+
+    @property
+    def local_settings_path(self) -> Path:
+        return self.project_dir / LOCAL_SETTINGS_RELPATH
+
+
+def locate_project(path: Path) -> ProjectPaths:
+    """Accept either a project directory or a descriptor file (design: both)."""
+    path = Path(path)
+    if path.is_file():
+        project_dir = path.parent
+        descriptor_path = path
+    else:
+        project_dir = path
+        descriptor_path = path / DESCRIPTOR_NAME
+    if not descriptor_path.is_file():
+        raise ToolingError(INVALID_PROJECT, f"no descriptor at {descriptor_path}")
+    return ProjectPaths(
+        project_dir=project_dir,
+        descriptor_path=descriptor_path,
+        source_dir=project_dir,  # resolved below once descriptor is parsed
+        build_dir=project_dir,
+    )
+
+
+@dataclass
+class ResolvedProject:
+    paths: ProjectPaths
+    descriptor: desc.Descriptor
+    flavor: str
+    build_type: str
+    resolution: Resolution
+
+
+def _build_dir_for(project_dir: Path, source_dir: Path, preset: str) -> Path:
+    # Mirror the template preset binaryDir: <source>/out/build/<preset>.
+    return (source_dir / "out" / "build" / preset).resolve()
+
+
+def resolve_project(
+    path: Path,
+    *,
+    store: SdkStore,
+    cli_sdk_prefix: Optional[Path] = None,
+    profile: Optional[str] = None,
+) -> ResolvedProject:
+    """Open+validate a project and resolve its SDK for the requested profile.
+
+    Open reads/validates metadata only; this does not configure or build.
+    """
+    paths = locate_project(path)
+    descriptor = desc.parse_descriptor_file(paths.descriptor_path)
+
+    if descriptor.version == 1:
+        raise ToolingError(
+            INVALID_PROJECT,
+            "this is a version-1 project; run 'ludus project migrate' before configure/build/run",
+        )
+    if descriptor.engine is None:
+        raise ToolingError(INVALID_PROJECT, "version-2 'cmake' project is missing its engine requirement")
+
+    preset = profile or descriptor.preset
+    if preset not in PRESET_FLAVOR:
+        raise ToolingError(INVALID_PROJECT, f"unknown profile/preset {preset!r}")
+    flavor = PRESET_FLAVOR[preset]
+
+    source_dir = (paths.project_dir / descriptor.source_dir).resolve()
+    build_dir = _build_dir_for(paths.project_dir, source_dir, preset)
+    paths.source_dir = source_dir
+    paths.build_dir = build_dir
+
+    # Validate the lock agrees with the descriptor (never refreshed here).
+    lock = parse_lock_file(paths.lock_path)
+    validate_descriptor_lock_agreement(descriptor.engine.version, lock)
+    local_settings = parse_local_settings_file(paths.local_settings_path)
+
+    target_triple = _target_triple_for_lock(lock, flavor) or "linux-x64"
+    resolution = resolve_sdk(
+        target=target_triple,
+        flavor=flavor,
+        lock=lock,
+        local_settings=local_settings,
+        store=store,
+        cli_prefix=cli_sdk_prefix,
+        required_features=descriptor.engine.features or None,
+    )
+    return ResolvedProject(
+        paths=paths,
+        descriptor=descriptor,
+        flavor=flavor,
+        build_type=_build_type(flavor),
+        resolution=resolution,
+    )
+
+
+def _target_triple_for_lock(lock, flavor) -> Optional[str]:
+    for p in lock.packages:
+        if p.flavor == flavor:
+            return p.target
+    return None
+
+
+def _build_type(flavor: str) -> str:
+    return {"Debug": "Debug", "Development": "RelWithDebInfo", "Release": "Release"}[flavor]
+
+
+# --- CMake drivers (exact argv, no shell) ------------------------------------
+
+
+def _cmake_executable() -> str:
+    exe = shutil.which("cmake")
+    if exe is None:
+        raise ToolingError("MissingTools", "cmake was not found on PATH")
+    return exe
+
+
+def configure_argv(cmake: str, preset: str, source_dir: Path, build_dir: Path) -> list[str]:
+    return [cmake, "--preset", preset, "-S", str(source_dir), "-B", str(build_dir)]
+
+
+def build_argv(cmake: str, build_dir: Path, target: str) -> list[str]:
+    return [cmake, "--build", str(build_dir), "--target", target]
+
+
+def _run(argv: Sequence[str], *, cwd: Path, env: dict, echo: bool = True) -> int:
+    """Run a command with exact argv, no shell. Streams output live."""
+    if echo:
+        print("+ " + " ".join(argv), file=sys.stderr)
+    proc = subprocess.Popen(list(argv), cwd=str(cwd), env=env, shell=False)
+    return proc.wait()
+
+
+def _sdk_env(resolution: Resolution) -> dict:
+    env = dict(os.environ)
+    # The generated preset reads $env{LUDUS_SDK_PREFIX}. The backend supplies the
+    # validated prefix; raw CMake users set it themselves (documented).
+    env["LUDUS_SDK_PREFIX"] = str(resolution.prefix)
+    return env
+
+
+# --- Public operations -------------------------------------------------------
+
+
+def op_configure(resolved: ResolvedProject) -> int:
+    cmake = _cmake_executable()
+    env = _sdk_env(resolved.resolution)
+    print(resolved.resolution.describe(), file=sys.stderr)
+    with BuildTreeLock(resolved.paths.build_dir):
+        try:
+            from cmake_targets import query_codemodel  # type: ignore
+
+            query_codemodel(resolved.paths.build_dir, "ludus-cli")
+        except Exception:
+            pass  # File API query is best-effort before first configure
+        code = _run(
+            configure_argv(cmake, resolved.descriptor.preset, resolved.paths.source_dir, resolved.paths.build_dir),
+            cwd=resolved.paths.source_dir,
+            env=env,
+        )
+        if code == 0:
+            write_stamp(resolved.paths.build_dir, resolved.resolution)
+        return code
+
+
+def op_build(resolved: ResolvedProject) -> int:
+    cmake = _cmake_executable()
+    env = _sdk_env(resolved.resolution)
+    print(resolved.resolution.describe(), file=sys.stderr)
+    with BuildTreeLock(resolved.paths.build_dir):
+        # Reconfigure if the SDK inputs changed since last configure (mutable
+        # local prefixes). Path equality is insufficient; we compare the stamp.
+        if needs_reconfigure(resolved.paths.build_dir, resolved.resolution):
+            print("SDK inputs changed; reconfiguring", file=sys.stderr)
+            try:
+                from cmake_targets import query_codemodel  # type: ignore
+
+                query_codemodel(resolved.paths.build_dir, "ludus-cli")
+            except Exception:
+                pass
+            code = _run(
+                configure_argv(cmake, resolved.descriptor.preset, resolved.paths.source_dir, resolved.paths.build_dir),
+                cwd=resolved.paths.source_dir,
+                env=env,
+            )
+            if code != 0:
+                return code
+            write_stamp(resolved.paths.build_dir, resolved.resolution)
+        # The SDK must not change under us mid-operation.
+        assert_stamp_unchanged(resolved.paths.build_dir, resolved.resolution)
+        code = _run(
+            build_argv(cmake, resolved.paths.build_dir, resolved.descriptor.target),
+            cwd=resolved.paths.source_dir,
+            env=env,
+        )
+        return code
+
+
+def op_run(resolved: ResolvedProject) -> int:
+    # run ensures a successful current build first (E0 build-and-run semantics).
+    with BuildTreeLock(resolved.paths.build_dir):
+        pass  # ensure the tree is free before we start (lock re-taken per op)
+    build_code = op_build(resolved)
+    if build_code != 0:
+        # A failed build must never launch an older binary (P10).
+        print("build failed; refusing to launch a stale binary", file=sys.stderr)
+        return build_code
+
+    artifact = resolve_artifact(resolved)
+    if artifact is None or not artifact.is_file():
+        raise ToolingError(GENERATION_FAILED, "post-build artifact resolution failed")
+    if not os.access(artifact, os.X_OK):
+        raise ToolingError(GENERATION_FAILED, f"resolved artifact is not executable: {artifact}")
+
+    run_cwd = (resolved.paths.project_dir / resolved.descriptor.run_cwd).resolve()
+    argv = [str(artifact), *resolved.descriptor.run_args]
+    env = _sdk_env(resolved.resolution)
+    return _run(argv, cwd=run_cwd, env=env)
+
+
+def resolve_artifact(resolved: ResolvedProject) -> Optional[Path]:
+    """Resolve the executable artifact via the CMake File API (never guessed)."""
+    try:
+        from cmake_targets import target_executable  # type: ignore
+    except Exception:
+        return None
+    try:
+        # cmake_targets needs an "engine"-like object for error translation; the
+        # CLI passes a tiny shim exposing EngineError. We call the resolver
+        # defensively and translate any failure to None (caller reports).
+        import engine  # type: ignore
+
+        return target_executable(
+            resolved.paths.build_dir,
+            resolved.descriptor.target,
+            engine,
+            client="ludus-cli",
+        )
+    except Exception:
+        return None

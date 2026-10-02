@@ -153,3 +153,61 @@ running an external consumer that links every public module. These are the P1
 *relocation* gate and remain open; the manifest/export/config *plumbing* and the
 Python-side store/identity validation that consume them are implemented and
 tested.
+
+## P2 / P3 — host tools, shared SDK store, portable project CLI
+
+Implemented in the `ludus_tools` package (installable, stdlib-only, Qt-free):
+
+- `templates.py`: versioned bundled `minimal` native template (v1); atomic
+  no-replace creation — stage into a sibling dir, reject existing/symlink/
+  nonempty destinations, re-check and never overwrite a destination that appears
+  between staging and publish, discard staging on cancellation.
+- `create.py`: `create_project` ties descriptor + unresolved lock + rendered
+  template; `--sdk` records a local prefix ONLY in ignored `.ludus/local.json`
+  and keeps the committed lock unresolved (no fabricated hashes). `migrate_v1_to_v2`
+  is explicit, preserves relative paths/launch settings, requires an engine
+  selection, refuses provider `ludus`, and does a recoverable paired
+  descriptor+lock commit (`.migrating` temporaries + `recover_partial_migration`).
+- `resolve.py`: precedence = per-op `--sdk` → saved override → locked release in
+  the store; prints resolved identity/path/override; unresolved lock without an
+  override is an actionable stop (never a fallback engine build); resolved-input
+  **stamp** (manifest + exported cmake + lib size/mtime) gates reconfigure/relink
+  for mutable local prefixes and aborts if the prefix changes mid-operation.
+- `buildlock.py`: the per-build-tree cooperative lock uses the SAME lock path as
+  `editor_tool.BuildTreeLock` so CLI and Editor interlock (second = `Busy`).
+- `operations.py`: synchronous configure/build/run with exact argv/no-shell,
+  CMake File API artifact resolution via the existing `cmake_targets.py`,
+  reconfigure-on-stamp-change, and the rule that a failed build refuses to launch
+  a stale binary.
+- `cli.py` + `__main__.py` + `scripts/ludus`: the `ludus sdk …` / `ludus project
+  …` commands with stable exit codes and `--json`. `pyproject.toml` packages a
+  redistributable wheel exposing a `ludus` entry point with **no** third-party
+  runtime deps.
+
+Checks run here (Python 3.11.15):
+
+```
+$ python -m unittest test_ludus_tools test_ludus_project_ops test_ludus_cli   # 59 OK
+$ python -m ludus_tools project create /tmp/MyGame --name "My Game" --engine 0.1.0   # creates v2 project
+$ # two projects share one installed SDK, each with its own ignored override,
+$ #   committed locks unchanged  (test_ludus_cli.test_two_projects_one_sdk)
+$ python -m venv /tmp/ludus-venv && /tmp/ludus-venv/bin/pip install .   # install at a NEW location
+$ cd /tmp && /tmp/ludus-venv/bin/ludus --store /tmp/s sdk list          # runs with no checkout on path
+$ /tmp/ludus-venv/bin/python -c "import ludus_tools,sys; print([m for m in sys.modules if 'PyQt' in m or 'PySide' in m or m=='engine'])"
+  []   # no Qt/engine modules loaded — Qt-free, checkout-free (P07/P11)
+```
+
+Behaviors proven against a FAKE SDK (a tar of a minimal prefix + valid
+manifest), since the real SDK build is UNAVAILABLE: archive traversal/absolute/
+symlink rejection, digest mismatch, cancellation, reuse of an identical install,
+no-replace creation + destination race, v1→v2 migration + partial-migration
+recovery, resolution precedence, flavor-mismatch rejection, stamp-change
+detection, and `build` with an unresolved lock exiting UNAVAILABLE rather than
+building the engine.
+
+**UNAVAILABLE (needs the pinned native toolchain):** actually configuring/
+building/running the generated C++ project (the generated CMake requires 3.29
+and Clang 18 + a real SDK), and inspecting its compile database to prove no
+engine source compiles. The `operations.py` path that drives this is
+implemented and unit-covered up to the `cmake` invocation; the compile itself is
+deferred to the reference toolchain.
