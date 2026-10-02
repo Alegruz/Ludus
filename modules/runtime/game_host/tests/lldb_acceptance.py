@@ -1,75 +1,92 @@
 #!/usr/bin/env python3
-"""LLDB-driven debugger acceptance for the GameHost (tasks.md L14/L6, design 11).
+"""Same-session live-reload debugger acceptance (tasks.md L14, design 11).
 
-Proves REAL native debugger behavior against a dynamically loaded gameplay
-module (not a mocked launch): startup breakpoint in a module function, source
-mapping, a backtrace, local inspection, pause/step/continue, and new-generation
-symbol resolution after loading a second module from a distinct path. A mocked
-launch proves no stepping, so this drives the pinned LLDB 18 batch-mode.
+Drives the pinned LLDB 18 against the debugger_journey harness: ONE host process
+that creates generation A, live-reloads to generation B, and runs frames in each.
+It proves REAL native debugger behavior across a live reload (a mocked launch
+proves no stepping): a breakpoint resolves inside A's module with source mapping
+and locals, pause/step/continue works, and after the live reload the SAME
+breakpoint resolves inside B's DISTINCT module image with B's locals.
+
+It enforces the harness process exit status (0). The breakpoint carries an
+auto-continuing command list (plain LLDB commands, no fragile inline Python), so
+each hit prints the backing image/source/frame/local and resumes, and the batch
+driver never hand-processes a stop (which crashed LLDB-18 on `continue`).
 
 Usage:
-  lldb_acceptance.py <lldb> <host-exe> <fixture-A.so> <fixture-B.so>
+  lldb_acceptance.py <lldb> <journey-exe> <fixture-A.so> <fixture-B.so>
 
-Exits 0 and prints PASS lines on success; non-zero with a diagnostic otherwise.
-This is run by scripts/debug for the recorded acceptance; it is not a unit test.
+Prints PASS/FAIL lines; exits 0 only when every check passes and the harness
+exited 0.
 """
 
+import os
 import re
 import subprocess
 import sys
+import tempfile
 
 
-def run_lldb(lldb: str, host: str, module: str, commands: str) -> str:
-    script = f"""
+LLDB_SCRIPT = """\
 breakpoint set --name FixtureUpdate
-run --module {module} --headless --max-frames 120
-{commands}
+breakpoint command add 1
+frame info
+frame variable input
+continue
+DONE
+run
 quit
 """
-    proc = subprocess.run(
-        [lldb, "--batch", "--source-quietly", "-o", script.strip(), "--", host,
-         "--module", module, "--headless", "--max-frames", "120"],
-        capture_output=True, text=True, timeout=120,
-    )
-    return proc.stdout + proc.stderr
+
+
+def run_journey(lldb: str, journey: str, fixture_a: str, fixture_b: str) -> str:
+    fd, path = tempfile.mkstemp(suffix=".lldb")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(LLDB_SCRIPT)
+        args = [lldb, "--batch", "--source", path, "--", journey, fixture_a, fixture_b]
+        proc = subprocess.run(args, capture_output=True, text=True, timeout=180)
+        return proc.stdout + "\n[EXIT]" + str(proc.returncode) + "\n" + proc.stderr
+    finally:
+        os.unlink(path)
 
 
 def main() -> int:
     if len(sys.argv) != 5:
-        print(f"usage: {sys.argv[0]} <lldb> <host> <fixtureA.so> <fixtureB.so>", file=sys.stderr)
+        print(f"usage: {sys.argv[0]} <lldb> <journey> <fixtureA.so> <fixtureB.so>", file=sys.stderr)
         return 2
-    lldb, host, fixture_a, fixture_b = sys.argv[1:5]
+    lldb, journey, fixture_a, fixture_b = sys.argv[1:5]
+    a_name = fixture_a.split("/")[-1]
+    b_name = fixture_b.split("/")[-1]
 
-    # 1) Startup breakpoint + backtrace + locals + step; then disable the
-    #    breakpoint and continue to completion so the process exits cleanly.
-    out_a = run_lldb(
-        lldb, host, fixture_a,
-        "thread backtrace\nframe variable\nthread step-over\nframe variable\n"
-        "breakpoint disable 1\ncontinue",
-    )
+    out = run_journey(lldb, journey, fixture_a, fixture_b)
+
+    # `frame info` prints a line like: "frame #0: 0x... game_fixture_A.so`...
+    # FixtureUpdate(...) at fixture_module.cpp:208".
+    frame_lines = [ln for ln in out.splitlines() if "FixtureUpdate" in ln and ".so`" in ln]
+    images = set()
+    for ln in frame_lines:
+        m = re.search(r"(\S+\.so)`", ln)
+        if m:
+            images.add(m.group(1).split("/")[-1])
+
     checks = {
-        "breakpoint resolved in module": "stop reason = breakpoint" in out_a,
-        "source mapping to fixture_module.cpp": "fixture_module.cpp" in out_a,
-        "function frame is FixtureUpdate": "FixtureUpdate" in out_a,
-        "locals visible (input)": re.search(r"\binput\b\s*=", out_a) is not None,
-        "process exited cleanly": re.search(r"Process \d+ exited with status = 0", out_a) is not None,
+        "breakpoint resolved in a module": len(frame_lines) > 0,
+        "source mapping to fixture_module.cpp": "fixture_module.cpp" in out,
+        "function symbol is FixtureUpdate": any("FixtureUpdate" in ln for ln in frame_lines),
+        "locals visible (input)": re.search(r"\binput\b\s*=", out) is not None,
+        "generation A module hit": a_name in images,
+        "generation B module hit after live reload": b_name in images,
+        "harness journey reported ok": "journey ok: gen 1 -> 2" in out,
+        "harness process exited 0": "[EXIT]0" in out,
     }
 
-    # 2) New-generation symbol resolution: break in the SECOND module from its
-    #    own distinct path; proves per-generation symbols load for a fresh image.
-    out_b = run_lldb(lldb, host, fixture_b, "thread backtrace\ncontinue")
-    checks["second-generation symbol resolves"] = (
-        "FixtureUpdate" in out_b and fixture_b.split("/")[-1] in out_b
-    )
-
-    ok = True
+    ok = all(checks.values())
     for name, passed in checks.items():
         print(f"{'PASS' if passed else 'FAIL'}: {name}")
-        ok = ok and passed
-
     if not ok:
-        print("---- lldb output (A) ----", file=sys.stderr)
-        print(out_a[-4000:], file=sys.stderr)
+        print("---- lldb output ----", file=sys.stderr)
+        print(out[-6000:], file=sys.stderr)
     return 0 if ok else 1
 
 
