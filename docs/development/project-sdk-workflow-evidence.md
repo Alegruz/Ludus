@@ -252,3 +252,59 @@ handoff, native GUI acceptance **cannot** be replaced by offscreen tests, so it
 is explicitly deferred to a reference-toolchain machine. The C++↔Python schema
 *sharing* is implemented and cross-checked through the shared fixtures (the C++
 half is verified only when the editor is compiled on that machine).
+
+## P2 (catalog) / P5 — release catalog, CI, docs, Sandbox follow-up
+
+Implemented:
+
+- `ludus_tools/catalog.py`: publisher release-catalog model (HTTPS-only URLs,
+  per-entry sha256) + bounded streamed download (declared size + hard cap,
+  truncation + digest verification) that hands the archive to the strict
+  `SdkStore.install_archive`. `ludus sdk install --version … --catalog …` wires
+  it in. Remote metadata is fetched only on explicit install. A project
+  descriptor can never supply a URL/script.
+- `.github/workflows/project-sdk.yml`: candidate-package CI (every push/PR):
+  host-tooling unit tests on pinned Python + install-into-fresh-venv + Qt/engine-
+  free assertion; then a Development SDK candidate build, **relocation to a fresh
+  dir with an empty environment** (`env -i`, no `out/conan`, no checkout on the
+  path), external-consumer link against the relocated prefix, and a
+  compile-database check that no engine source is compiled. Never publishes.
+- `.github/workflows/release.yml`: version-tag assembly/validation for all three
+  flavors with tag/version/revision agreement and resolved-identity +
+  dependency-inventory assertions; a `publish` job gated to
+  `workflow_dispatch` only, `environment: release`, least-privilege
+  `contents: write`, and an explicit guard that refuses to publish from a PR. The
+  publish step is a documented placeholder — this task must not publish a public
+  release.
+- `docs/development/project-sdk-workflow.md`: user guide (install, SDK install/
+  override/refresh, prerequisites, create, migrate, direct CMake, recovery,
+  compatibility limits, Sandbox follow-up).
+
+Checks run here (Python 3.11.15):
+
+```
+$ python -m unittest test_ludus_tools test_ludus_project_ops test_ludus_cli   # 65 OK
+    # CatalogDownload: HTTPS-only parse, digest mismatch, truncation, oversize,
+    # and download->install happy path (injected local opener; no network).
+$ python -c "import yaml; [yaml.safe_load(open(f)) for f in (...workflows...)]"  # YAML valid
+```
+
+**UNAVAILABLE / not performed (by design or environment):**
+
+- The `project-sdk.yml` / `release.yml` jobs that need the pinned native
+  toolchain + Conan + Wayland were authored but not *executed* here (no runner,
+  no toolchain). They are standard GitHub-hosted-runner steps intended to run on
+  `ubuntu-24.04` with the reference toolchain.
+- No release is published, no tag created, no merge performed (task constraint).
+
+### Ludus-Sandbox (P14) — honest status
+
+Ludus-Sandbox is **not** present in this checkout and was **not** inspected or
+modified. Its conversion (remove the mandatory nested engine build; pin an engine
+release; consume `find_package(Ludus CONFIG REQUIRED)` + the `ludus` CLI) is a
+separate change in that repository requiring its own access, implementation and
+evidence. This PR validates the standalone reference consumer in this repository
+(`tests/sdk_consumer` + the generated minimal template) and records the Sandbox
+conversion as an explicit external follow-up. A separate Sandbox PR is NOT a gate
+for this Ludus PR, but the pending conversion is clearly recorded here and in
+`docs/development/project-sdk-workflow.md`.

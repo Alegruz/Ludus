@@ -86,9 +86,29 @@ def cmd_sdk_list(args) -> int:
 
 def cmd_sdk_install(args) -> int:
     store = _store(args)
-    installed = store.install_archive(
-        Path(args.archive), expected_digest=args.digest, repair=args.repair
-    )
+    if args.archive:
+        installed = store.install_archive(
+            Path(args.archive), expected_digest=args.digest, repair=args.repair
+        )
+    elif args.version:
+        from .catalog import download_entry, parse_catalog_file
+
+        if not args.catalog:
+            raise ToolingError("MissingTools", "--version install requires --catalog <catalog.json>")
+        catalog = parse_catalog_file(Path(args.catalog))
+        entry = catalog.find(args.version, args.target, args.flavor)
+        if entry is None:
+            raise ToolingError(
+                "SdkNotFound",
+                f"catalog has no {args.version}/{args.target}/{args.flavor} package",
+            )
+        archive = download_entry(entry, store.tmp_root)
+        try:
+            installed = store.install_archive(archive, expected_digest=entry.sha256, repair=args.repair)
+        finally:
+            Path(archive).unlink(missing_ok=True)
+    else:
+        raise ToolingError("InvalidProject", "provide --archive <path> or --version <release>")
     _emit(args, {"installed": {"flavor": installed.identity.flavor,
                                "digest": installed.digest, "prefix": str(installed.prefix)}})
     if not getattr(args, "json", False):
@@ -225,7 +245,11 @@ def build_parser() -> argparse.ArgumentParser:
     sdk = sub.add_parser("sdk", help="manage installed SDKs").add_subparsers(dest="cmd", required=True)
     sdk.add_parser("list").set_defaults(func=cmd_sdk_list)
     inst = sdk.add_parser("install")
-    inst.add_argument("--archive", required=True)
+    inst.add_argument("--archive", help="install a local SDK archive")
+    inst.add_argument("--version", help="install a release from --catalog")
+    inst.add_argument("--catalog", help="release catalog JSON (required with --version)")
+    inst.add_argument("--target", default="linux-x64")
+    inst.add_argument("--flavor", default="development")
     inst.add_argument("--digest", help="expected sha256 of the archive")
     inst.add_argument("--repair", action="store_true")
     inst.set_defaults(func=cmd_sdk_install)

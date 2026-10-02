@@ -1,0 +1,94 @@
+name: project-sdk
+
+# Candidate-package CI for the independent-project / shared-SDK workflow
+# (requirements P05/P07/P13). Runs on every push and PR. It:
+#   * tests the host-tooling package (ludus_tools) on a pinned Python,
+#   * builds a Development SDK candidate, installs it to a prefix, and RELOCATES
+#     it to a fresh directory with no producer checkout/Conan cache on the
+#     search path, then links an external consumer against the relocated SDK,
+#   * NEVER publishes a release. Publication happens only on a version tag via
+#     release.yml.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tooling:
+    name: Host tooling (ludus_tools) unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install the host tooling into a fresh venv at a new location
+        run: |
+          python3 -m venv /tmp/ludus-venv
+          /tmp/ludus-venv/bin/pip install ./scripts/python
+      - name: Prove the installed CLI runs with no checkout/Qt on the path
+        run: |
+          cd /tmp
+          /tmp/ludus-venv/bin/ludus --version
+          /tmp/ludus-venv/bin/ludus --store /tmp/store sdk list
+          /tmp/ludus-venv/bin/python -c "import ludus_tools, sys; mods=[m for m in sys.modules if 'PyQt' in m or 'PySide' in m or m=='engine']; assert mods==[], mods; print('no Qt/engine imports')"
+      - name: Run host-tooling unit/integration tests
+        run: |
+          cd scripts/python
+          python3 -m unittest test_ludus_tools test_ludus_project_ops test_ludus_cli -v
+
+  sdk-candidate-relocation:
+    name: SDK candidate build + relocation + external link
+    needs: host-tooling
+    runs-on: ubuntu-24.04
+    env:
+      CI: "true"
+      LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Wayland development packages
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libwayland-dev wayland-protocols
+      - name: Cache pip downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('config/tool_versions.json') }}
+      - name: Cache Conan package cache
+        uses: actions/cache@v4
+        with:
+          path: out/conan/home
+          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', 'config/conan/profiles/linux-clang-x86_64', 'conan.lock') }}
+      - name: Prepare toolchain and dependencies
+        run: ./init.sh --preset-only linux-clang-development
+      - name: Build and install the Development SDK candidate
+        run: ./scripts/install-sdk linux-clang-development
+      - name: Relocate the installed SDK and link an external consumer with NO producer paths
+        run: |
+          set -euo pipefail
+          # Copy the installed prefix to a brand-new location, then configure the
+          # external consumer with ONLY the relocated prefix on CMAKE_PREFIX_PATH
+          # (no out/conan, no checkout). This is the relocation gate (P02): a
+          # fresh clone/extraction with no Conan cache must still link.
+          src_prefix="out/install/linux-clang-development"
+          reloc="$RUNNER_TEMP/relocated-sdk"
+          cp -a "$src_prefix" "$reloc"
+          build_dir="$RUNNER_TEMP/consumer-build"
+          env -i PATH="/usr/bin:/bin:$PWD/out/host-tools/venv/bin" \
+            cmake -S tests/sdk_consumer -B "$build_dir" -G Ninja \
+              -DCMAKE_PREFIX_PATH="$reloc" \
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          env -i PATH="/usr/bin:/bin:$PWD/out/host-tools/venv/bin" \
+            cmake --build "$build_dir"
+          "$build_dir/ludus_sdk_consumer"
+      - name: Inspect the compile database for engine source compilation
+        run: |
+          # The external consumer must compile NO engine source (P01). Fail if any
+          # compile command references the engine modules/ source tree.
+          db="$RUNNER_TEMP/consumer-build/compile_commands.json"
+          if [ -f "$db" ] && grep -q "/modules/" "$db"; then
+            echo "engine source compiled by the consumer:"; grep "/modules/" "$db"; exit 1
+          fi
+          echo "no engine source compiled by the external consumer"

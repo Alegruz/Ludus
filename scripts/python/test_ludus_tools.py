@@ -484,5 +484,62 @@ class Store(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "InstallCancelled")
 
 
+class CatalogDownload(unittest.TestCase):
+    def setUp(self) -> None:
+        from ludus_tools import catalog
+
+        self.catalog = catalog
+        self.td = tempfile.TemporaryDirectory()
+        self.root = Path(self.td.name)
+        self.tar = self.root / "sdk.tar.gz"
+        _make_sdk_tar(self.tar, _manifest_json())
+        self.digest = sdkstore.sha256_file(self.tar)
+        self.size = self.tar.stat().st_size
+
+    def tearDown(self) -> None:
+        self.td.cleanup()
+
+    def _opener(self, url):
+        return open(self.tar, "rb")
+
+    def _entry(self, **over):
+        base = dict(release="0.1.0", revision="deadbeef", target="linux-x64",
+                    flavor="development", url="https://example.test/sdk.tar.gz",
+                    size=self.size, sha256=self.digest)
+        base.update(over)
+        return self.catalog.CatalogEntry.from_json(base)
+
+    def test_catalog_parse_requires_https(self) -> None:
+        bad = {"schema_version": 1, "sdks": [
+            {"release": "0.1.0", "target": "linux-x64", "flavor": "development",
+             "url": "http://insecure/x.tar.gz", "size": 1, "sha256": "a" * 64}]}
+        with self.assertRaises(ToolingError):
+            self.catalog.parse_catalog_bytes(json.dumps(bad).encode())
+
+    def test_download_ok_then_install(self) -> None:
+        entry = self._entry()
+        archive = self.catalog.download_entry(entry, self.root / "dl", opener=self._opener)
+        store = sdkstore.SdkStore(self.root / "store")
+        installed = store.install_archive(archive, expected_digest=entry.sha256)
+        self.assertTrue(installed.prefix.is_dir())
+
+    def test_download_digest_mismatch(self) -> None:
+        entry = self._entry(sha256="0" * 64)
+        with self.assertRaises(ToolingError) as ctx:
+            self.catalog.download_entry(entry, self.root / "dl", opener=self._opener)
+        self.assertEqual(ctx.exception.code, "DigestMismatch")
+
+    def test_download_truncated(self) -> None:
+        entry = self._entry(size=self.size + 100)
+        with self.assertRaises(ToolingError) as ctx:
+            self.catalog.download_entry(entry, self.root / "dl", opener=self._opener)
+        self.assertEqual(ctx.exception.code, "ArchiveInvalid")
+
+    def test_download_oversize_rejected(self) -> None:
+        entry = self._entry(size=self.catalog.MAX_DOWNLOAD_BYTES + 1)
+        with self.assertRaises(ToolingError):
+            self.catalog.download_entry(entry, self.root / "dl", opener=self._opener)
+
+
 if __name__ == "__main__":
     unittest.main()

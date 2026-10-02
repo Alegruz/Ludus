@@ -1,0 +1,100 @@
+name: release
+
+# Version-tag release assembly, acceptance and publication for the SDK flavors,
+# host tools and optional Editor (requirement P13). Publication runs ONLY on a
+# version tag and ONLY after candidate acceptance passes in a relocated
+# environment. An ordinary PR/push validates candidates and NEVER publishes.
+#
+# This workflow does not auto-run on a tag push by default: it is manually
+# dispatched by a maintainer after review, and the publish job is additionally
+# gated by validation + an environment that requires approval. Implementation
+# authors may open PRs but must not create tags/releases or merge without
+# authorization (design "Release and application packaging boundaries").
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to assemble (e.g. v0.1.0). Must already exist."
+        required: true
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "cmake/**"
+      - "scripts/python/ludus_tools/**"
+
+permissions:
+  contents: read
+
+jobs:
+  assemble-and-validate:
+    name: Assemble + validate release candidate
+    runs-on: ubuntu-24.04
+    env:
+      CI: "true"
+      LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [linux-clang-debug, linux-clang-development, linux-clang-release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify tag/version/revision agreement (dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag }}"
+          # The tag must match the project version in the root CMakeLists.
+          proj_version="$(grep -oE 'project\(.*VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          if [ "v${proj_version}" != "$tag" ]; then
+            echo "tag $tag disagrees with project version v${proj_version}"; exit 1
+          fi
+          # The tag must exist and point at the checked-out revision.
+          git fetch --tags --quiet
+          tag_rev="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
+          if [ -z "$tag_rev" ]; then echo "tag $tag does not exist"; exit 1; fi
+      - name: Install Wayland development packages
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libwayland-dev wayland-protocols
+      - name: Prepare toolchain and dependencies
+        run: ./init.sh --preset-only ${{ matrix.flavor }}
+      - name: Build + install the SDK candidate for this flavor
+        run: ./scripts/install-sdk ${{ matrix.flavor }}
+      - name: Record candidate digest + manifest identity
+        run: |
+          set -euo pipefail
+          prefix="out/install/${{ matrix.flavor }}"
+          manifest="$prefix/share/Ludus/LudusSdkManifest.json"
+          test -f "$manifest"
+          python3 - "$manifest" <<'PY'
+          import json, sys
+          m = json.load(open(sys.argv[1]))
+          for field in ("target_triple", "compiler_id", "compiler_version", "sdk_variant"):
+              v = m.get(field, "")
+              assert v and "@" not in str(v) and v != "unknown", f"unresolved identity: {field}={v!r}"
+          assert m.get("dependencies"), "missing dependency inventory"
+          print("candidate identity OK:", m["sdk_variant"])
+          PY
+
+  publish:
+    name: Publish immutable release artifacts
+    needs: assemble-and-validate
+    # Publication ONLY on an explicit maintainer dispatch, never on a PR.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    # Least-privilege: contents:write is granted only to this gated job, and the
+    # `release` environment should require manual approval in repo settings.
+    permissions:
+      contents: write
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard — never publish from a pull request
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "refusing to publish from a PR"; exit 1
+          fi
+      - name: Publish catalog + checksummed artifacts (placeholder)
+        run: |
+          echo "Would publish immutable catalog/checksums/notices for ${{ github.event.inputs.tag }}."
+          echo "Fail duplicate asset replacement; use the least-privilege token above."
+          echo "Not implemented in this PR: this task explicitly must not publish a public release."
