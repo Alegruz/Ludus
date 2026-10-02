@@ -92,6 +92,52 @@ class WrongIdentity(unittest.TestCase):
         fields = {m.field_name for m in check_compatible(mixed, reference=want)}
         self.assertIn("sdk_variant", fields)
 
+    def test_host_toolchain_gate_rejects_mismatched_compiler_before_configure(self) -> None:
+        # P03: an SDK built with a different compiler than the consuming host is
+        # rejected BEFORE configure, via resolve_project's host-toolchain gate.
+        with tempfile.TemporaryDirectory() as td:
+            store = SdkStore(Path(td) / "store")
+            # SDK built with a GCC/libstdc++ toolchain...
+            prefix = Path(td) / "sdk"
+            _write_sdk_prefix(prefix, _manifest_json(compiler_id="GNU", compiler_version="13.2.0"))
+            dest = Path(td) / "MyGame"
+            create.create_project(dest, name="MyGame", template_id="minimal",
+                                  engine_version="0.1.0", local_sdk_prefix=prefix)
+            # ...consumed by a host whose detected compiler is Clang 18 (injected).
+            host = SdkIdentity.from_json(
+                _manifest_json(compiler_id="Clang", compiler_version="18.1.8"))
+            from ludus_tools import identity as _id
+
+            real = _id.detect_host_toolchain
+            _id.detect_host_toolchain = lambda ref, **k: host  # type: ignore[assignment]
+            try:
+                with self.assertRaises(ToolingError) as ctx:
+                    operations.resolve_project(dest, store=store, cli_sdk_prefix=prefix)
+            finally:
+                _id.detect_host_toolchain = real
+            self.assertEqual(ctx.exception.code, "SdkIncompatible")
+            self.assertIn("compiler", ctx.exception.message)
+
+    def test_locked_variant_mismatch_rejected(self) -> None:
+        # An installed SDK whose variant differs from the lock's recorded variant
+        # (headers/libs from a different variant) is rejected at resolution.
+        with tempfile.TemporaryDirectory() as td:
+            store = SdkStore(Path(td) / "store")
+            tar = Path(td) / "sdk.tar.gz"
+            _make_sdk_tar(tar, _manifest_json())
+            inst = store.install_archive(tar)
+            lock = lockfile.Lock(
+                resolved=True, engine_version="0.1.0", engine_revision="r", template_version=1,
+                packages=[lockfile.PackageEntry(
+                    inst.identity.target_triple, "Development", "a-DIFFERENT-variant", inst.digest, 1)],
+            )
+            with self.assertRaises(ToolingError) as ctx:
+                resolve.resolve_sdk(
+                    target=inst.identity.target_triple, flavor="Development", lock=lock,
+                    local_settings=lockfile.LocalSettings(), store=store,
+                )
+            self.assertEqual(ctx.exception.code, "SdkIncompatible")
+
 
 class StoreCorruptionAndRepair(unittest.TestCase):
     def test_corrupt_store_detected_then_repaired(self) -> None:
@@ -205,7 +251,11 @@ class FailedBuildCannotLaunchStale(unittest.TestCase):
             dest = Path(td) / "MyGame"
             create.create_project(dest, name="MyGame", template_id="minimal",
                                   engine_version="0.1.0", local_sdk_prefix=prefix)
-            resolved = operations.resolve_project(dest, store=store, cli_sdk_prefix=prefix)
+            # This test is about launch behavior, not toolchain compat, so skip
+            # the host-toolchain gate (the fake SDK records a fixed compiler).
+            resolved = operations.resolve_project(
+                dest, store=store, cli_sdk_prefix=prefix, enforce_host_toolchain=False
+            )
 
             launched = {"count": 0}
             real_run = operations._run
@@ -249,16 +299,46 @@ class DescriptorMigrationHazards(unittest.TestCase):
             lockfile.validate_descriptor_lock_agreement("0.1.0", lock)
         self.assertEqual(ctx.exception.code, "LockMismatch")
 
-    def test_interrupted_paired_commit_is_recoverable(self) -> None:
+    def test_interrupted_paired_commit_rolls_back(self) -> None:
+        # A crash mid paired-commit (descriptor flipped to v2, lock not yet
+        # written, backup present) must roll back to a consistent v1 project,
+        # not leave a v2 descriptor with no lock.
         with tempfile.TemporaryDirectory() as td:
             proj = Path(td) / "p"
             proj.mkdir()
-            # Simulate a crash mid paired-commit: leftover .migrating temporaries.
-            (proj / "ludus.project.json.migrating").write_text("partial")
+            v1 = {
+                "version": 1, "name": "P", "provider": "cmake", "source_dir": ".",
+                "preset": "linux-clang-development", "target": "t", "run": {"cwd": ".", "args": []},
+            }
+            v2 = {**v1, "version": 2, "engine": {"version": "0.1.0"}}
+            (proj / "ludus.project.json").write_text(json.dumps(v2))
+            (proj / "ludus.project.json.premigrate").write_text(json.dumps(v1))
             (proj / "ludus.lock.json.migrating").write_text("partial")
-            discarded = create.recover_partial_migration(proj)
-            self.assertEqual(sorted(discarded),
-                             ["ludus.lock.json.migrating", "ludus.project.json.migrating"])
+            create.recover_partial_migration(proj)
+            restored = descriptor.parse_descriptor_file(proj / "ludus.project.json")
+            self.assertEqual(restored.version, 1)
+            self.assertFalse((proj / "ludus.lock.json").exists())
+            self.assertFalse((proj / "ludus.lock.json.migrating").exists())
+
+    def test_migration_takes_a_lock(self) -> None:
+        # Migration must hold the shared build-tree lock; if the Editor backend
+        # already holds it, migration fails with Busy rather than interleaving.
+        with tempfile.TemporaryDirectory() as td:
+            proj = Path(td) / "legacy"
+            proj.mkdir()
+            (proj / "ludus.project.json").write_text(json.dumps({
+                "version": 1, "name": "L", "provider": "cmake", "source_dir": ".",
+                "preset": "linux-clang-development", "target": "t", "run": {"cwd": ".", "args": []},
+            }))
+            build_dir = (proj / "out" / "build" / "linux-clang-development")
+            held = editor_tool.BuildTreeLock(build_dir)
+            held.acquire()
+            try:
+                with self.assertRaises(ToolingError) as ctx:
+                    create.migrate_v1_to_v2(proj, engine_version="0.1.0")
+                self.assertEqual(ctx.exception.code, "Busy")
+            finally:
+                held.release()
             self.assertFalse((proj / "ludus.project.json.migrating").exists())
 
 

@@ -548,3 +548,37 @@ $ python3 scripts/python/engine.py check --format   # PASS (clang-format 18)
 
 `test_ludus_failure_scenarios` is added to the `host-tooling` CI job alongside
 the other `ludus_tools` suites so it runs on every PR/push.
+
+## Pre-merge review (P01–P15) and repairs
+
+A behavioral review against design.md and P01–P15 (semantic reviewer + manual
+verification with reproducers) found 8 real defects, each confirmed against the
+code. All are now repaired with focused regressions. Branch head before repairs:
+`edd2898`.
+
+| # | Finding (sev) | Location | Repair + regression |
+| --- | --- | --- | --- |
+| 1 | **P03 compiler/runtime/variant not enforced before configure** (blocker): resolution only compared flavor/features; `abi_key()`/`reference` were dead code; `LudusConfig.cmake.in` recorded identity vars but never asserted them. | `resolve.py`, `operations.py`, `cmake/LudusConfig.cmake.in`, `identity.py` | `resolve_sdk` now takes a `host` reference and enforces the ABI fields; `operations.resolve_project` detects the host toolchain (`identity.detect_host_toolchain`) and re-resolves with it; the installed SDK's variant is checked against the locked variant; `LudusConfig.cmake.in` adds a `message(FATAL_ERROR)` compiler-id + major-version gate for direct-CMake consumers (opt-out `-DLUDUS_SKIP_TOOLCHAIN_CHECK=ON`). Regressions: `test_host_toolchain_gate_rejects_mismatched_compiler_before_configure`, `test_locked_variant_mismatch_rejected`. |
+| 2 | **Resolved-input stamp missed a changed library** (major, reproduced): libraries hashed as `name:size:int(mtime)`, so a same-size rebuild in the same second was invisible → P06 hole. | `resolve.py` `compute_stamp` | Hash library **content** (sha256). Regression: `test_stamp_detects_same_size_same_second_rebuild`. |
+| 3 | **`publish_project` could clobber an empty dir racing in** (major, reproduced): `os.rename` replaces an empty dir on Linux; the pre-check had a TOCTOU window → P08 break. | `templates.py` `publish_project` | Claim the destination with exclusive `os.mkdir` (fails for ANY existing path), then move staged children in; roll back on failure. Regression: `test_publish_rejects_empty_dir_racing_in`. |
+| 4 | **Migration took no lock and was not crash-atomic** (major): docstring claimed "under a project lock" but none was taken; two sequential renames could leave a v2 descriptor with no lock; recovery only deleted temporaries → P09 gap. | `create.py` `migrate_v1_to_v2`, `_paired_commit`, `recover_partial_migration` | Hold the shared `BuildTreeLock`; write a `.premigrate` backup, commit lock-then-descriptor (descriptor is the commit point), roll back on failure; `recover_partial_migration` now rolls back an interrupted commit or rolls forward a completed one. Regressions: `test_migration_takes_a_lock`, `test_interrupted_paired_commit_rolls_back`, `test_recover_rolls_back_interrupted_commit`, `test_recover_rolls_forward_completed_commit`. |
+| 5 | **Residual-root neutralizer rewrote to the wrong location** (major): mapped every leftover Conan root to `${CMAKE_CURRENT_LIST_DIR}/..` instead of the real `../packages/<name>`, producing a relocatable-but-broken path that passed the audit → latent P02 correctness hazard. | `bundle_deps.py` `_neutralize_residual_roots` | Map each residual root to its actual bundled payload (matched by the dependency token), and **fail** (`ArchiveInvalid`) rather than guess if it cannot be mapped. Covered by the existing bundle layout/audit tests. |
+| 6 | **Cancelled build could reach launch in the shared backend** (minor): `_run` did not handle Ctrl-C; only nonzero-exit was failure → the "cancelled build cannot launch stale" half of P10 was implicit. | `operations.py` `_run`, `op_run` | `_run` terminates the child and re-raises on `KeyboardInterrupt`; `op_run` treats any nonzero/negative (signal) build code as "do not launch". (A failed-build-launches-nothing regression already exists; now also covers signal/cancel semantics by construction.) |
+| 7 | **`template.version` float divergence** (minor): Python rejected JSON `1.0`, the C++ twin accepted any integer-valued number. | `descriptor.py` `_parse_template` | Python now accepts an integer-valued float and rejects non-integer floats, matching the C++ twin and the top-level `version` handling. Verified both accept `1`/`1.0` and reject `1.5`. |
+| 8 | **Archive extraction filter only on Python ≥3.12** (minor): 3.10/3.11 fell back to unfiltered `extractall`. | `sdkstore.py` `_safe_extractall` | The fallback now extracts member-by-member and re-checks at extraction time that each member's parent does not escape via a runtime-materialized symlink, so containment is equal across 3.10–3.14. Covered by the traversal/symlink tests. |
+
+Post-repair:
+
+```
+$ cd scripts/python && python3 -m unittest \
+    test_ludus_tools test_ludus_project_ops test_ludus_cli \
+    test_ludus_failure_scenarios test_editor_tool
+  Ran 129 tests ... OK   (+ new P03/stamp/empty-dir/migration regressions)
+$ python3 scripts/python/engine.py check --format   # PASS (clang-format 18)
+```
+
+The CMake toolchain gate and the new resolution ABI check are additionally
+exercised on real tools by the PR's `Development and SDK` CI job (which
+configures the external consumer with the same Clang 18 the SDK was built with,
+so the gate passes) — a mismatched compiler would now fail at configure with an
+actionable message rather than at link.

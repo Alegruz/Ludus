@@ -104,10 +104,15 @@ def resolve_project(
     store: SdkStore,
     cli_sdk_prefix: Optional[Path] = None,
     profile: Optional[str] = None,
+    enforce_host_toolchain: bool = True,
 ) -> ResolvedProject:
     """Open+validate a project and resolve its SDK for the requested profile.
 
-    Open reads/validates metadata only; this does not configure or build.
+    Open reads/validates metadata only; this does not configure or build. When
+    ``enforce_host_toolchain`` is set (the default for configure/build/run), the
+    resolved SDK's compiler id/version and C++ runtime ABI are checked against
+    the consuming toolchain before configure, so an incompatible SDK is rejected
+    with expected-vs-actual rather than failing at link time (P03).
     """
     paths = locate_project(path)
     descriptor = desc.parse_descriptor_file(paths.descriptor_path)
@@ -136,6 +141,10 @@ def resolve_project(
     local_settings = parse_local_settings_file(paths.local_settings_path)
 
     target_triple = _target_triple_for_lock(lock, flavor) or "linux-x64"
+    # Resolve once without the host gate to learn the SDK identity, then (when
+    # enforcing) re-resolve with a host-toolchain reference so an incompatible
+    # compiler/runtime ABI is rejected before configure. Resolving twice is cheap
+    # (metadata + a content stamp) and keeps the precedence logic in one place.
     resolution = resolve_sdk(
         target=target_triple,
         flavor=flavor,
@@ -145,6 +154,20 @@ def resolve_project(
         cli_prefix=cli_sdk_prefix,
         required_features=descriptor.engine.features or None,
     )
+    if enforce_host_toolchain:
+        from .identity import detect_host_toolchain
+
+        host = detect_host_toolchain(resolution.identity)
+        resolution = resolve_sdk(
+            target=target_triple,
+            flavor=flavor,
+            lock=lock,
+            local_settings=local_settings,
+            store=store,
+            cli_prefix=cli_sdk_prefix,
+            required_features=descriptor.engine.features or None,
+            host=host,
+        )
     return ResolvedProject(
         paths=paths,
         descriptor=descriptor,
@@ -184,11 +207,26 @@ def build_argv(cmake: str, build_dir: Path, target: str) -> list[str]:
 
 
 def _run(argv: Sequence[str], *, cwd: Path, env: dict, echo: bool = True) -> int:
-    """Run a command with exact argv, no shell. Streams output live."""
+    """Run a command with exact argv, no shell. Streams output live.
+
+    Returns the child's exit status. A child terminated by a signal yields a
+    negative status (nonzero), which callers treat as failure. On Ctrl-C
+    (KeyboardInterrupt) the child is terminated and the interrupt re-raised so an
+    operation unwinds without ever proceeding to a launch.
+    """
     if echo:
         print("+ " + " ".join(argv), file=sys.stderr)
     proc = subprocess.Popen(list(argv), cwd=str(cwd), env=env, shell=False)
-    return proc.wait()
+    try:
+        return proc.wait()
+    except KeyboardInterrupt:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        raise
 
 
 def _sdk_env(resolution: Resolution) -> dict:
@@ -260,10 +298,14 @@ def op_run(resolved: ResolvedProject) -> int:
     # run ensures a successful current build first (E0 build-and-run semantics).
     with BuildTreeLock(resolved.paths.build_dir):
         pass  # ensure the tree is free before we start (lock re-taken per op)
+    # A failed OR cancelled build must never launch an older binary (P10). A
+    # nonzero code covers a compile failure; a signal-terminated build yields a
+    # negative (nonzero) code; and a Ctrl-C raises KeyboardInterrupt out of
+    # op_build before we reach here — in every case we return/propagate without
+    # launching.
     build_code = op_build(resolved)
     if build_code != 0:
-        # A failed build must never launch an older binary (P10).
-        print("build failed; refusing to launch a stale binary", file=sys.stderr)
+        print("build failed or was cancelled; refusing to launch a stale binary", file=sys.stderr)
         return build_code
 
     artifact = resolve_artifact(resolved)

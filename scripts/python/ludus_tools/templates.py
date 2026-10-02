@@ -293,29 +293,42 @@ def _reject_existing_destination(destination: Path) -> None:
 def publish_project(staged: StagedProject) -> Path:
     """Atomically publish the staged project to an absent destination (P08).
 
-    Uses ``os.rename`` which fails if the destination appeared in the meantime
-    (no overwrite). On any failure the staging directory is removed.
+    ``os.rename`` is NOT safe on its own here: on Linux it silently replaces an
+    *empty* destination directory, so a bare pre-check + rename has a TOCTOU
+    window where an empty directory racing in between the check and the rename
+    would be clobbered. Instead we *atomically claim* the destination with an
+    exclusive ``os.mkdir`` (which raises FileExistsError for ANY existing path,
+    empty or not), then move the staged children into the claimed directory. If
+    the claim fails, the destination already exists and we never overwrite it.
     """
-    try:
-        # Re-check right before publishing; a destination appearing here must not
-        # be overwritten. os.rename onto an existing non-empty dir fails anyway,
-        # but the explicit check gives a clean error and covers the empty-dir case.
-        _reject_existing_destination(staged.destination)
-        os.rename(staged.staging, staged.destination)
-        return staged.destination
-    except ToolingError:
-        # Explicit "destination appeared" from the pre-check: clean staging and
-        # re-raise without overwriting the (now-present) destination.
+    destination = staged.destination
+    if destination.is_symlink():
         shutil.rmtree(staged.staging, ignore_errors=True)
-        raise
+        raise ToolingError(DESTINATION_EXISTS, f"destination is a symlink: {destination}")
+    try:
+        # Exclusive create: fails with FileExistsError if anything is already at
+        # the path, closing the empty-directory race that os.rename would miss.
+        os.mkdir(destination)
     except FileExistsError as exc:
         shutil.rmtree(staged.staging, ignore_errors=True)
-        raise ToolingError(DESTINATION_EXISTS, f"destination appeared during publish: {staged.destination}") from exc
+        raise ToolingError(DESTINATION_EXISTS, f"destination already exists: {destination}") from exc
     except OSError as exc:
-        # os.rename onto a nonempty existing directory raises OSError(ENOTEMPTY).
         shutil.rmtree(staged.staging, ignore_errors=True)
-        if staged.destination.exists():
-            raise ToolingError(DESTINATION_EXISTS, f"destination appeared during publish: {staged.destination}") from exc
+        raise ToolingError(GENERATION_FAILED, f"failed to create destination: {exc}") from exc
+
+    try:
+        # Move every staged entry into the freshly-claimed destination. Both the
+        # staging dir and destination are in the same parent (same filesystem),
+        # so each move is an atomic rename.
+        for entry in list(staged.staging.iterdir()):
+            os.rename(entry, destination / entry.name)
+        os.rmdir(staged.staging)
+        return destination
+    except OSError as exc:
+        # Roll back the partial publish: we created the destination, so removing
+        # it leaves the workspace as it was (we never touched a pre-existing dir).
+        shutil.rmtree(destination, ignore_errors=True)
+        shutil.rmtree(staged.staging, ignore_errors=True)
         raise ToolingError(GENERATION_FAILED, f"failed to publish project: {exc}") from exc
 
 

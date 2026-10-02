@@ -299,7 +299,15 @@ def _parse_template(obj: Any) -> TemplateRef:
     if "version" not in obj:
         raise _err(INVALID_PROJECT, "missing field 'template.version'")
     version = obj["version"]
-    if isinstance(version, bool) or not isinstance(version, int) or version < 1 or version > 1_000_000:
+    # Accept an integer-valued JSON number (``1`` or ``1.0``) to match the C++
+    # twin and the top-level ``version`` handling; reject bools and non-integer
+    # floats so the same bytes get the same verdict in both readers.
+    if isinstance(version, bool) or not isinstance(version, (int, float)):
+        raise _err(INVALID_PROJECT, "'template.version' must be a positive integer")
+    if isinstance(version, float) and not version.is_integer():
+        raise _err(INVALID_PROJECT, "'template.version' must be a positive integer")
+    version = int(version)
+    if version < 1 or version > 1_000_000:
         raise _err(INVALID_PROJECT, "'template.version' must be a positive integer")
     return TemplateRef(id=template_id, version=version)
 

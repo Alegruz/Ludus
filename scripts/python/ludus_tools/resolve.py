@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from .errors import SDK_NOT_FOUND, STAMP_CHANGED, UNRESOLVED_LOCK, ToolingError
+from .errors import SDK_INCOMPATIBLE, SDK_NOT_FOUND, STAMP_CHANGED, UNRESOLVED_LOCK, ToolingError
 from .identity import SdkIdentity, load_prefix_manifest, require_compatible
 from .lockfile import Lock, LocalSettings
 from .sdkstore import SdkStore
@@ -61,13 +61,25 @@ def resolve_sdk(
     store: SdkStore,
     cli_prefix: Optional[Path] = None,
     required_features: Optional[list[str]] = None,
+    host: Optional[SdkIdentity] = None,
 ) -> Resolution:
-    """Resolve the SDK for one operation following the documented precedence."""
+    """Resolve the SDK for one operation following the documented precedence.
+
+    ``host`` is the consuming toolchain's identity (compiler id/version, C++
+    runtime ABI, target triple). When supplied, the resolved SDK's ABI fields are
+    checked against it BEFORE configure, so a GCC-vs-Clang or libc++-vs-libstdc++
+    mismatch is rejected with expected-vs-actual rather than failing opaquely at
+    link time (requirement P03). The locked ``sdk_variant`` is always enforced:
+    an installed SDK whose variant differs from the lock (e.g. headers and
+    libraries from different variants) is rejected.
+    """
     # 1) explicit per-operation override
     if cli_prefix is not None:
         prefix = Path(cli_prefix)
         identity = load_prefix_manifest(prefix)
-        require_compatible(identity, required_flavor=flavor, required_features=required_features)
+        require_compatible(
+            identity, required_flavor=flavor, required_features=required_features, reference=host
+        )
         return Resolution(prefix, identity, SOURCE_OPTION, True, compute_stamp(prefix))
 
     # 2) saved local override
@@ -75,7 +87,9 @@ def resolve_sdk(
     if override is not None:
         prefix = Path(override.prefix)
         identity = load_prefix_manifest(prefix)
-        require_compatible(identity, required_flavor=flavor, required_features=required_features)
+        require_compatible(
+            identity, required_flavor=flavor, required_features=required_features, reference=host
+        )
         return Resolution(prefix, identity, SOURCE_LOCAL, True, compute_stamp(prefix))
 
     # 3) locked release in the store
@@ -100,7 +114,17 @@ def resolve_sdk(
             f"locked SDK (digest {entry.digest[:16]}…) is not installed; run "
             f"'ludus sdk install --version {lock.engine_version}'",
         )
-    require_compatible(installed.identity, required_flavor=flavor, required_features=required_features)
+    # The locked variant must match the installed SDK's variant: an SDK whose
+    # headers/policy variant differs from what the lock recorded would mix inputs.
+    if entry.sdk_variant and installed.identity.sdk_variant != entry.sdk_variant:
+        raise ToolingError(
+            SDK_INCOMPATIBLE,
+            "installed SDK variant does not match the lock: expected "
+            f"{entry.sdk_variant!r}, got {installed.identity.sdk_variant!r}",
+        )
+    require_compatible(
+        installed.identity, required_flavor=flavor, required_features=required_features, reference=host
+    )
     return Resolution(installed.prefix, installed.identity, SOURCE_LOCKED, False, compute_stamp(installed.prefix))
 
 
@@ -131,9 +155,24 @@ def compute_stamp(prefix: Path) -> str:
     lib_dir = prefix / "lib"
     if lib_dir.is_dir():
         for lib in sorted(lib_dir.glob("*.a")):
-            st = lib.stat()
-            h.update(f"{lib.name}:{st.st_size}:{int(st.st_mtime)}".encode("utf-8"))
+            # Hash the library *content*, not just size+mtime: an in-place engine
+            # rebuild that lands a same-size .a within the same clock second (or
+            # with mtime restored by a packaging step) must still change the
+            # stamp so needs_reconfigure / assert_stamp_unchanged see it (P06).
+            h.update(lib.name.encode("utf-8"))
+            h.update(_hash_file(lib))
     return h.hexdigest()
+
+
+def _hash_file(path: Path, *, chunk: int = 1024 * 1024) -> bytes:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        while True:
+            block = fh.read(chunk)
+            if not block:
+                break
+            digest.update(block)
+    return digest.digest()
 
 
 def stamp_path(build_dir: Path) -> Path:

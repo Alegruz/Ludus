@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from . import descriptor as desc
+from .buildlock import BuildTreeLock
 from .errors import INVALID_PROJECT, MIGRATION_FAILED, ToolingError
 from .identity import SdkIdentity, load_prefix_manifest
 from .lockfile import Lock, LocalSettings, unresolved_lock
@@ -212,36 +213,76 @@ def migrate_v1_to_v2(
     desc.parse_descriptor_bytes(_canonical_descriptor_json(migrated).encode("utf-8"))
     lock = unresolved_lock(engine_version, template_version=1)
 
-    _paired_commit(
-        project_dir,
-        {
-            DESCRIPTOR_NAME: _canonical_descriptor_json(migrated).encode("utf-8"),
-            LOCK_NAME: lock.serialize(),
-        },
-    )
+    # Hold the SAME cooperative build-tree lock the Editor/CLI use so a migration
+    # cannot interleave with a concurrent save/build on the project, then commit
+    # the descriptor+lock as a recoverable paired write (design: "stage both
+    # descriptor and lock under a project lock, recover safely from partial
+    # multi-file commits").
+    build_dir = (project_dir / current.source_dir / "out" / "build" / migrated.preset).resolve()
+    try:
+        with BuildTreeLock(build_dir):
+            _paired_commit(
+                project_dir,
+                {
+                    DESCRIPTOR_NAME: _canonical_descriptor_json(migrated).encode("utf-8"),
+                    LOCK_NAME: lock.serialize(),
+                },
+            )
+    except ToolingError:
+        raise
     return CreateResult(destination=project_dir, descriptor=migrated, lock=lock)
 
 
+# Sentinel/journal file names used to make the paired descriptor+lock commit
+# crash-recoverable. The backup preserves the pre-migration descriptor so an
+# interrupted commit can be rolled back to a consistent v1 state.
+_MIGRATING_SUFFIX = ".migrating"
+_BACKUP_SUFFIX = ".premigrate"
+
+
 def _paired_commit(project_dir: Path, files: dict[str, bytes]) -> None:
-    """Write multiple files as an atomic-ish paired commit with recovery.
+    """Commit descriptor+lock as a crash-recoverable paired write.
 
-    Each new file is written to ``<name>.migrating`` first; once all temporaries
-    exist, they are renamed into place. If the process dies after some renames,
-    the leftover ``.migrating`` files mark an incomplete migration that can be
-    recovered or discarded (recover_partial_migration).
+    Protocol:
+      1. Write each new file to ``<name>.migrating``.
+      2. Back up the current descriptor to ``<descriptor>.premigrate`` (so a
+         crash mid-commit can be rolled back to the original v1 state).
+      3. ``os.replace`` the lock first, then the descriptor LAST. The descriptor
+         is the commit point: a reader treats a v2 descriptor as authoritative,
+         so the lock must already be in place when the descriptor flips.
+      4. On success remove the temporaries and the backup.
+
+    If the process dies between steps, ``recover_partial_migration`` restores a
+    consistent state: a surviving backup + an un-flipped descriptor means roll
+    back; a flipped v2 descriptor with its lock present means roll forward
+    (just clean the journal).
     """
-    temps: dict[str, Path] = {}
-    try:
-        for name, data in files.items():
-            tmp = project_dir / f"{name}.migrating"
-            tmp.write_bytes(data)
-            temps[name] = tmp
-        for name, tmp in temps.items():
-            import os as _os
+    import os as _os
 
-            _os.replace(tmp, project_dir / name)
+    descriptor_path = project_dir / DESCRIPTOR_NAME
+    lock_path = project_dir / LOCK_NAME
+    descriptor_tmp = project_dir / f"{DESCRIPTOR_NAME}{_MIGRATING_SUFFIX}"
+    lock_tmp = project_dir / f"{LOCK_NAME}{_MIGRATING_SUFFIX}"
+    backup = project_dir / f"{DESCRIPTOR_NAME}{_BACKUP_SUFFIX}"
+
+    original = descriptor_path.read_bytes() if descriptor_path.is_file() else None
+    try:
+        descriptor_tmp.write_bytes(files[DESCRIPTOR_NAME])
+        lock_tmp.write_bytes(files[LOCK_NAME])
+        if original is not None:
+            backup.write_bytes(original)
+        # Lock first, descriptor (commit point) last.
+        _os.replace(lock_tmp, lock_path)
+        _os.replace(descriptor_tmp, descriptor_path)
     except OSError as exc:
-        for tmp in temps.values():
+        # Roll back: restore the original descriptor if we had flipped nothing,
+        # and remove the journal artifacts.
+        if original is not None and backup.is_file():
+            try:
+                _os.replace(backup, descriptor_path)
+            except OSError:
+                pass
+        for tmp in (descriptor_tmp, lock_tmp):
             try:
                 if tmp.exists():
                     tmp.unlink()
@@ -249,15 +290,68 @@ def _paired_commit(project_dir: Path, files: dict[str, bytes]) -> None:
                 pass
         raise ToolingError(MIGRATION_FAILED, f"migration commit failed: {exc}") from exc
 
-
-def recover_partial_migration(project_dir: Path) -> list[str]:
-    """Discard leftover ``.migrating`` temporaries from an interrupted migration."""
-    project_dir = Path(project_dir)
-    discarded = []
-    for tmp in project_dir.glob("*.migrating"):
+    # Success: clear the journal.
+    for artifact in (descriptor_tmp, lock_tmp, backup):
         try:
-            tmp.unlink()
-            discarded.append(tmp.name)
+            if artifact.exists():
+                artifact.unlink()
         except OSError:
             pass
-    return discarded
+
+
+def recover_partial_migration(project_dir: Path) -> list[str]:
+    """Restore a consistent state after an interrupted migration.
+
+    Returns a list of human-readable actions taken. Logic:
+
+    * If a ``<descriptor>.premigrate`` backup exists, a commit was interrupted.
+      Decide roll-forward vs roll-back by whether the migration actually
+      completed: a committed v2 descriptor WITH its lock present is complete
+      (roll forward — just clear the journal); otherwise restore the original
+      descriptor from the backup (roll back) and remove any partial lock.
+    * Always discard leftover ``.migrating`` temporaries.
+    """
+    import os as _os
+
+    project_dir = Path(project_dir)
+    actions: list[str] = []
+    descriptor_path = project_dir / DESCRIPTOR_NAME
+    lock_path = project_dir / LOCK_NAME
+    backup = project_dir / f"{DESCRIPTOR_NAME}{_BACKUP_SUFFIX}"
+
+    if backup.is_file():
+        committed_v2 = False
+        if descriptor_path.is_file():
+            try:
+                parsed = desc.parse_descriptor_file(descriptor_path)
+                committed_v2 = parsed.version == 2 and lock_path.is_file()
+            except ToolingError:
+                committed_v2 = False
+        if committed_v2:
+            # Roll forward: the descriptor flipped to v2 and the lock is present.
+            try:
+                backup.unlink()
+                actions.append("completed migration confirmed; cleared backup")
+            except OSError:
+                pass
+        else:
+            # Roll back to the pre-migration descriptor and drop a partial lock.
+            try:
+                _os.replace(backup, descriptor_path)
+                actions.append("rolled back descriptor to pre-migration state")
+            except OSError:
+                pass
+            if lock_path.is_file():
+                try:
+                    lock_path.unlink()
+                    actions.append("removed partially written lock")
+                except OSError:
+                    pass
+
+    for tmp in project_dir.glob(f"*{_MIGRATING_SUFFIX}"):
+        try:
+            tmp.unlink()
+            actions.append(f"discarded {tmp.name}")
+        except OSError:
+            pass
+    return actions

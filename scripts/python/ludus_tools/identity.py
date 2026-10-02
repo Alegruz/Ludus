@@ -198,3 +198,81 @@ def require_compatible(installed: SdkIdentity, **kwargs: Any) -> None:
             f"{m.field_name}: expected {m.expected!r}, got {m.actual!r}" for m in mismatches
         )
         raise ToolingError(SDK_INCOMPATIBLE, f"SDK is not compatible: {detail}")
+
+
+# --- Host toolchain detection ------------------------------------------------
+# A partial identity describing the CONSUMING machine's toolchain, used as the
+# ``reference`` in resolution so an SDK built with an incompatible compiler /
+# C++ runtime ABI is rejected before configure (P03). Only the ABI-relevant
+# fields are populated; the rest are left as the SDK's own values so they do not
+# spuriously mismatch (the gate compares the ABI fields that actually matter).
+
+_RUNTIME_ABI_FALLBACK = "libstdc++-cxx11"
+
+
+def _detect_compiler(cxx: str) -> tuple[str, str]:
+    """Return (compiler_id, compiler_version) for a C++ compiler, best-effort."""
+    import re
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            [cxx, "--version"], capture_output=True, text=True, timeout=10
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ("", "")
+    lowered = out.lower()
+    if "clang" in lowered:
+        compiler_id = "Clang"
+    elif "g++" in lowered or "gcc" in lowered or "free software foundation" in lowered:
+        compiler_id = "GNU"
+    else:
+        compiler_id = ""
+    match = re.search(r"(\d+\.\d+\.\d+)", out)
+    version = match.group(1) if match else ""
+    return (compiler_id, version)
+
+
+def detect_host_toolchain(
+    reference: SdkIdentity, *, cxx: Optional[str] = None
+) -> SdkIdentity:
+    """Build a host-toolchain reference identity for compatibility checking.
+
+    ``reference`` supplies the non-ABI fields (so only ABI fields can mismatch).
+    ``cxx`` is the C++ compiler to probe (defaults to $CXX, then ``clang++``,
+    then ``c++``). The runtime ABI is taken from $LUDUS_CXX_RUNTIME_ABI when set,
+    else inferred to match the reference's family. When the compiler cannot be
+    probed, the fields are left equal to the reference so detection failure never
+    produces a spurious rejection.
+    """
+    import os
+    import shutil
+
+    candidate = cxx or os.environ.get("CXX") or shutil.which("clang++") or shutil.which("c++")
+    compiler_id, compiler_version = ("", "")
+    if candidate:
+        compiler_id, compiler_version = _detect_compiler(candidate)
+
+    runtime_abi = os.environ.get("LUDUS_CXX_RUNTIME_ABI", "")
+
+    # Clone the reference and overlay only the detected ABI-relevant fields.
+    host = SdkIdentity.from_json(
+        {
+            "name": reference.name,
+            "version": reference.engine_version,
+            "source_revision": reference.source_revision,
+            "target_triple": reference.target_triple,
+            "compiler_id": compiler_id or reference.compiler_id,
+            "compiler_version": compiler_version or reference.compiler_version,
+            "cxx_runtime_abi": runtime_abi or reference.cxx_runtime_abi,
+            "distro_baseline": reference.distro_baseline,
+            "build_flavor": reference.flavor,
+            "sdk_variant": reference.sdk_variant,
+            "cxx_standard": reference.cxx_standard,
+            "library_type": reference.library_type,
+            "features": reference.features,
+            "assert_policy": reference.assert_policy.to_json(),
+            "package_format": reference.package_format,
+        }
+    )
+    return host

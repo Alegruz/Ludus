@@ -75,6 +75,22 @@ class Templates(unittest.TestCase):
             self.assertEqual((dest / "preexisting").read_text(), "keep me")
             self.assertFalse(staged.staging.exists())
 
+    def test_publish_rejects_empty_dir_racing_in(self) -> None:
+        # Regression: os.rename silently replaces an EMPTY dir on Linux, so an
+        # empty directory appearing between the pre-check and the rename must not
+        # be clobbered. publish_project claims the destination with exclusive
+        # os.mkdir, so an empty dir already present is rejected, not overwritten.
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "proj"
+            staged = templates.stage_project([templates.TemplateFile("a.txt", "x")], dest)
+            dest.mkdir()  # empty dir races in
+            with self.assertRaises(ToolingError) as ctx:
+                templates.publish_project(staged)
+            self.assertEqual(ctx.exception.code, "DestinationExists")
+            # Nothing from the staged project leaked into the pre-existing dir.
+            self.assertEqual(list(dest.iterdir()), [])
+            self.assertFalse(staged.staging.exists())
+
 
 class CreateProject(unittest.TestCase):
     def test_create_minimal_unresolved(self) -> None:
@@ -191,14 +207,59 @@ class Migration(unittest.TestCase):
             with self.assertRaises(ToolingError):
                 create.migrate_v1_to_v2(proj, engine_version="0.1.0")
 
-    def test_recover_partial_migration(self) -> None:
+    def test_recover_partial_migration_discards_temporaries(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             proj = Path(td) / "legacy"
             proj.mkdir()
             (proj / "ludus.project.json.migrating").write_text("partial")
             (proj / "ludus.lock.json.migrating").write_text("partial")
-            discarded = create.recover_partial_migration(proj)
-            self.assertEqual(sorted(discarded), ["ludus.lock.json.migrating", "ludus.project.json.migrating"])
+            actions = create.recover_partial_migration(proj)
+            # The .migrating temporaries are discarded (order-independent).
+            self.assertTrue(any("ludus.lock.json.migrating" in a for a in actions))
+            self.assertTrue(any("ludus.project.json.migrating" in a for a in actions))
+            self.assertFalse((proj / "ludus.project.json.migrating").exists())
+            self.assertFalse((proj / "ludus.lock.json.migrating").exists())
+
+    def test_recover_rolls_back_interrupted_commit(self) -> None:
+        # Simulate a crash AFTER the descriptor flipped to v2 but BEFORE the lock
+        # landed: a backup of the original v1 descriptor exists, the descriptor is
+        # v2, and no lock is present. Recovery must roll the descriptor back to v1.
+        with tempfile.TemporaryDirectory() as td:
+            proj = Path(td) / "legacy"
+            proj.mkdir()
+            v1 = {
+                "version": 1, "name": "Legacy", "provider": "cmake", "source_dir": ".",
+                "preset": "linux-clang-development", "target": "legacy_app",
+                "run": {"cwd": ".", "args": []},
+            }
+            v2 = {**v1, "version": 2, "engine": {"version": "0.1.0", "components": [], "features": []}}
+            # On-disk mid-crash state:
+            (proj / "ludus.project.json").write_text(json.dumps(v2))              # flipped to v2
+            (proj / "ludus.project.json.premigrate").write_text(json.dumps(v1))   # backup of v1
+            # (no ludus.lock.json -> commit was interrupted)
+            actions = create.recover_partial_migration(proj)
+            restored = descriptor.parse_descriptor_file(proj / "ludus.project.json")
+            self.assertEqual(restored.version, 1, actions)
+            self.assertFalse((proj / "ludus.project.json.premigrate").exists())
+
+    def test_recover_rolls_forward_completed_commit(self) -> None:
+        # Crash AFTER both files landed but before the backup was cleared:
+        # descriptor is v2 and the lock is present -> roll forward (keep v2).
+        with tempfile.TemporaryDirectory() as td:
+            proj = Path(td) / "legacy"
+            proj.mkdir()
+            v2 = {
+                "version": 2, "name": "Legacy", "provider": "cmake", "source_dir": ".",
+                "preset": "linux-clang-development", "target": "legacy_app",
+                "run": {"cwd": ".", "args": []}, "engine": {"version": "0.1.0"},
+            }
+            (proj / "ludus.project.json").write_text(json.dumps(v2))
+            (proj / "ludus.lock.json").write_text(lockfile.unresolved_lock("0.1.0", 1).serialize().decode())
+            (proj / "ludus.project.json.premigrate").write_text(json.dumps({**v2, "version": 1}))
+            create.recover_partial_migration(proj)
+            kept = descriptor.parse_descriptor_file(proj / "ludus.project.json")
+            self.assertEqual(kept.version, 2)
+            self.assertFalse((proj / "ludus.project.json.premigrate").exists())
 
 
 class Resolution(unittest.TestCase):
@@ -269,6 +330,20 @@ class Resolution(unittest.TestCase):
         )
         self.assertEqual(res.source, resolve.SOURCE_LOCKED)
         self.assertFalse(res.is_override)
+
+    def test_stamp_detects_same_size_same_second_rebuild(self) -> None:
+        # Regression: compute_stamp must hash library CONTENT, so an in-place
+        # rebuild that lands a same-size .a within the same integer-second mtime
+        # (the exact mutable-local-prefix case) still changes the stamp.
+        installed = self._install()
+        lib = installed.prefix / "lib" / "libludus_foundation_base.a"
+        lib.write_bytes(b"A" * 128)
+        st = lib.stat()
+        s1 = resolve.compute_stamp(installed.prefix)
+        lib.write_bytes(b"B" * 128)  # same size
+        os.utime(lib, (st.st_mtime, st.st_mtime))  # restore mtime (same second)
+        s2 = resolve.compute_stamp(installed.prefix)
+        self.assertNotEqual(s1, s2, "content change with identical size+mtime must change the stamp")
 
     def test_stamp_change_detection(self) -> None:
         installed = self._install()

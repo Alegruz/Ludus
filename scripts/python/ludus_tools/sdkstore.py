@@ -312,18 +312,39 @@ def _check_member(member: tarfile.TarInfo) -> None:
 
 def _safe_extractall(tf: tarfile.TarFile, dest: Path, cancel: CancelToken) -> None:
     dest = dest.resolve()
-    for member in tf.getmembers():
+    members = tf.getmembers()
+    for member in members:
         cancel.check()
         _check_member(member)
         target = (dest / member.name).resolve()
         if not str(target).startswith(str(dest) + os.sep) and target != dest:
             raise ToolingError(ARCHIVE_INVALID, f"archive entry escapes destination: {member.name!r}")
-    # Members already validated; extract with a filter where available (3.12+),
-    # falling back to the pre-validated loop otherwise.
+
+    # Prefer the hardened tar data filter when available (Python 3.12+). On
+    # 3.10/3.11 that keyword is absent, so extract member-by-member ourselves
+    # with a guard that re-checks each materialized target does not escape via a
+    # symlink/parent created earlier in the SAME extraction (static pre-checks
+    # above cannot see runtime-materialized links). This keeps containment equal
+    # across all supported Pythons rather than trusting unfiltered extractall.
     try:
         tf.extractall(dest, filter="data")  # type: ignore[call-arg]
+        return
     except TypeError:
-        tf.extractall(dest)
+        pass
+
+    for member in members:
+        cancel.check()
+        # Resolve the parent WITHOUT following into an escaping symlink: the
+        # realpath of the destination of this member must stay within dest.
+        member_path = (dest / member.name)
+        parent = member_path.parent
+        real_parent = os.path.realpath(parent)
+        if real_parent != str(dest) and not real_parent.startswith(str(dest) + os.sep):
+            raise ToolingError(
+                ARCHIVE_INVALID,
+                f"archive entry's parent escapes the destination at extraction time: {member.name!r}",
+            )
+        tf.extract(member, dest)
 
 
 def _locate_prefix(staging: Path) -> Path:
