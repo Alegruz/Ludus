@@ -11,3 +11,7 @@ scripts/init text eol=lf
 scripts/install-sdk text eol=lf
 scripts/test text eol=lf
 init.sh text eol=lf
+
+# Binary font fixtures must never be line-ending normalized.
+*.ttf binary
+*.otf binary

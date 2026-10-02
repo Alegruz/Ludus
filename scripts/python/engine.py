@@ -915,6 +915,22 @@ def clang_cxx(root: Path) -> Path:
     return host_tools_bin_dir(root) / ("clang++.exe" if os.name == "nt" else "clang++")
 
 
+# Local Conan recipes for pinned sources that ConanCenter does not publish at
+# the exact version the engine requires. These are exported into the project
+# Conan cache before the lockfile is resolved so the graph can see them. See
+# third_party/<name>/conanfile.py and the text/font rendering design (section 2).
+LOCAL_CONAN_RECIPES: tuple[str, ...] = ("third_party/harfbuzz",)
+
+
+def export_local_recipes(root: Path) -> None:
+    for recipe in LOCAL_CONAN_RECIPES:
+        recipe_dir = root / recipe
+        if not (recipe_dir / "conanfile.py").is_file():
+            continue
+        print(f"Exporting local Conan recipe: {recipe}")
+        run([conan(root), "export", str(recipe_dir)], cwd=root, env=tool_env(root))
+
+
 def prepare_conan_artifacts(
     root: Path,
     versions: dict[str, dict[str, str]],
@@ -932,6 +948,7 @@ def prepare_conan_artifacts(
         cwd=root,
         env=tool_env(root),
     )
+    export_local_recipes(root)
     create_conan_lock(root, profile_path)
     for preset in presets:
         conan_install_for_preset(root, profile_path, preset)

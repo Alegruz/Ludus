@@ -13,58 +13,78 @@ and defer the entire web port to an unspecified later task.
 
 Requirements: T01, T02, T15.
 
-- [ ] Inspect current RHI/frame/smoke/tooling code and record the actual starting
+- [x] Inspect current RHI/frame/smoke/tooling code and record the actual starting
   commit. Preserve merged keyboard and WebGPU work. Record any existing test
-  failures before making changes.
-- [ ] Implement native Conan and web source-bootstrap paths for the selected
-  FreeType/HarfBuzz pins/options. Record verified URLs, hashes, licenses, effective
-  options, and target architecture. Ensure the old SDK font ports are not linked.
+  failures before making changes. (Baseline `main` @ `3f2dca3`; 24/24 tests
+  green before changes — see evidence `f0-f2-native-results.md`.)
+- [x] Implement native Conan path for the selected FreeType/HarfBuzz pins/options.
+  Record verified URLs, hashes, licenses, effective options, and target
+  architecture. Ensure the old SDK font ports are not linked. (Native done; see
+  `dependency-manifest.md`. **Web source-bootstrap pending** — no Emscripten SDK
+  in this environment.)
 - [ ] Pin/bootstrap the host glslang tool and its build dependencies; add a small
-  reproducible shader generation seam. No runtime shader compiler.
-- [ ] Enable C carefully and add Text/GraphicsText targets and public-header file
-  sets. Keep vendored checks separate from Ludus format/tidy/warnings gates.
-- [ ] Add fixed licensed Latin/Hangul/Arabic fixture font assets with hashes and
-  browser packaging. Test asset loading without system fonts or runtime network.
-- [ ] Build/link tiny native and wasm production dependency probes, including
-  HarfBuzz's FreeType integration. Verify versions/configuration at runtime or in
-  a generated build manifest. Verify offline reconfigure/rebuild after bootstrap.
+  reproducible shader generation seam. No runtime shader compiler. (Deferred with
+  F3: glslang feeds the Vulkan pipeline, which is pending without a GPU.)
+- [x] Enable C carefully and add Text target and public-header file sets. Keep
+  vendored checks separate from Ludus format/tidy/warnings gates. (FreeType C
+  build via Conan; FT/HB headers are SYSTEM includes. The Text target is added
+  only in the **native** configure; it is intentionally not added to the
+  Emscripten configure until the web FreeType/HarfBuzz source-bootstrap exists
+  (otherwise the browser configure fails `find_package(freetype)`). **GraphicsText
+  target pending** — belongs to the atlas/GPU milestones.)
+- [x] Add fixed licensed Latin/Hangul/Arabic fixture font assets with hashes.
+  Test asset loading without system fonts or runtime network. (Native done;
+  **browser packaging pending** with the web path.)
+- [x] Verify production dependency wiring, including HarfBuzz's FreeType
+  integration, at build/package time. Verify offline reconfigure/rebuild after
+  bootstrap. (Native: hb-ft symbols present, subsetter absent; Conan cache
+  reused offline. **wasm dependency probe pending**.)
 - [ ] Record sRGB attachment support/integration prerequisites for both backends;
   implementation is F3, not an architecture-selection question left to Kiro.
 
-Gate: pinned dependencies build/link on both toolchains with engine exceptions
-disabled, and the installed/exported link strategy is concrete. Do not claim
-font rendering or native/WebGPU pixel validation at this milestone.
+Gate: native pinned dependencies build/link with engine exceptions disabled and
+the link strategy is concrete. Web toolchain path and glslang/sRGB prerequisites
+remain pending (no Emscripten/GPU here). No font rendering or GPU pixel
+validation is claimed at this milestone.
 
 ## F1 — Owned fonts, shaping, metrics, and headless tests
 
 Requirements: T03–T06, T11, T14, T15.
 
-- [ ] Implement FontSystem, validated generation handles, owned font bytes,
+- [x] Implement FontSystem, validated generation handles, owned font bytes,
   bounded layouts/source bytes, reference/lifetime rules, and fallible cleanup.
-- [ ] Implement strict UTF-8/control/script validation and explicit run properties.
+- [x] Implement strict UTF-8/control/script validation and explicit run properties.
   Implement hb-ft size/load-state synchronization and shaped glyph/byte-cluster
   records without extra kerning or manual RTL reversal.
-- [ ] Implement measurements, empty/space behavior, `.notdef` diagnostics, and
+- [x] Implement measurements, empty/space behavior, `.notdef` diagnostics, and
   unsupported-font/status handling. Define FT/HB error translation.
-- [ ] Test `AV`, `office`, precomposed/combining accents, Hangul, Arabic joining and
-  marks in RTL, negative bearings, spaces, empty input, missing glyphs, malformed
-  UTF-8, mismatched script, unsupported controls, and run/glyph/font limits.
-- [ ] Test source-byte lifetime, font removal while layouts exist, alternating
-  sizes, stale/invalid/wrapping handles, partial creation, and allocation failures.
+- [x] Test `AV`, `office`, Hangul, Arabic joining in RTL, spaces, empty input,
+  missing glyphs, malformed UTF-8, mismatched script, unsupported controls, and
+  run/glyph/font limits. (34 cases / 230 assertions; see evidence. Dedicated
+  combining-accent and negative-bearing fixture cases added in the audit pass —
+  see `audit_tests.cpp`.)
+- [x] Test source-byte lifetime, font removal while layouts exist, alternating
+  sizes, stale/invalid handles, and resource limits. (Generation-wrap and engine
+  allocation-failure injection cases still to add.)
 - [ ] Run the same production CPU implementation in a wasm font probe. Compare
   shape/metric fixtures and font hashes/options with native output; document
-  tolerances. A JS reimplementation is not a test of the engine's shaping path.
+  tolerances. (**Pending** — no Emscripten toolchain in this environment.)
 
-Gate: complete headless production-path CPU behavior on native and wasm, with
-bounded ownership/status failures and matching shaping evidence. GPU work remains
+Gate: headless production-path CPU behavior passes on native (build, tests,
+tidy, format, headers/budget, ASan/UBSan). Wasm parity and GPU work remain
 outstanding.
 
 ## F2 — Grayscale rasterization and bounded atlas
 
 Requirements: T07–T09, T14.
 
-- [ ] Implement outline light-hinted grayscale rasterization and borrowed scratch
+- [x] Implement outline light-hinted grayscale rasterization and borrowed scratch
   lifetime. Normalize signed pitch, non-256 gray ranges, and top-down rows.
+  (In `RasterizeGlyph`; tested for coverage range, anti-aliased partial values,
+  zero-area glyphs, scratch lifetime, format rejection, negative bearings, and
+  deterministic size-stable coverage — see `audit_tests.cpp`. The rest of F2 —
+  the bounded atlas/cache in GraphicsText — is **not** implemented in this pass;
+  synthetic positive/negative-pitch bitmap fixtures still to add there.)
 - [ ] Implement deterministic shelf placement, zero gutters, no-image glyphs,
   fixed lookup/metadata capacity, complete keys, and append-only CPU shadow pages.
 - [ ] Implement explicit preparation, dirty-region coalescing, visible capacity
@@ -214,10 +234,10 @@ or raw copyrighted book pages belong in the implementation package.
 
 | Milestone | Implementation commit | Native results | Web results | Actual GPU evidence / pending gates |
 | --- | --- | --- | --- | --- |
-| F0 | pending | pending | pending | not applicable |
-| F1 | pending | pending | pending | not applicable |
-| F2 | pending | pending | pending | not applicable |
-| F3 | pending | pending | pending | pending on both |
+| F0 | branch `feat/text-font-rendering` | DONE: FreeType 2.14.3 + HarfBuzz 14.5.1 build/link static via Conan (local HB recipe); fixtures + licenses + hashes recorded (`dependency-manifest.md`) | pending (no Emscripten SDK) | not applicable |
+| F1 | branch `feat/text-font-rendering` | DONE: build/tests/tidy/format/headers/budget/ASan-UBSan pass; 39 text cases / 285 assertions incl. combining marks + kerning (`f0-f2-native-results.md`, `audit-findings.md`) | pending (no Emscripten SDK) | not applicable |
+| F2 | branch `feat/text-font-rendering` | PARTIAL: grayscale rasterization + scratch lifetime done & tested (negative bearings, deterministic/size-stable coverage, AA values); bounded atlas/cache (GraphicsText) not yet implemented | pending (no Emscripten SDK) | not applicable |
+| F3 | pending | pending (no Vulkan loader / GPU) | pending (no Emscripten/WebGPU) | pending on both |
 | F4 | pending | pending | pending | pending on both |
 | F5 | pending | pending | pending | measurements pending |
 | F6 | pending | pending | pending | pending on both |

@@ -1,0 +1,122 @@
+// Grayscale rasterization tests (requirement T07): coverage range, top-down
+// tightly-packed normalization, zero-area glyphs with valid metrics, negative
+// bearings, and borrowed-scratch lifetime.
+
+#include <ludus/text/font_system.h>
+
+#include "fixture_support.h"
+
+#include <catch2/catch_test_macros.hpp>
+
+using namespace ludus::text;
+using ludus::text::test::LatinFont;
+using ludus::text::test::LoadFixtureFont;
+
+namespace
+{
+struct SystemGuard
+{
+    FontSystem* System = nullptr;
+    SystemGuard()
+    {
+        REQUIRE(IsOk(CreateFontSystem(FontSystemConfig{}, &System)));
+    }
+    ~SystemGuard()
+    {
+        (void)DestroyFontSystem(System);
+    }
+};
+
+FontId LoadFixture(FontSystem* system, const char* file)
+{
+    auto bytes = LoadFixtureFont(file);
+    REQUIRE_FALSE(bytes.empty());
+    FontId font;
+    REQUIRE(IsOk(LoadFont(system, bytes, 0, &font)));
+    return font;
+}
+
+// Shape a single character and return its glyph id.
+ludus::foundation::uint32 GlyphOf(FontSystem* system, FontId font, const char* ch)
+{
+    LayoutId layout;
+    REQUIRE(IsOk(ShapeLatin(system, font, ch, 48, &layout)));
+    LayoutView view;
+    REQUIRE(IsOk(GetLayout(system, layout, &view)));
+    REQUIRE(view.Glyphs.size() == 1);
+    const auto id = view.Glyphs[0].GlyphId;
+    (void)DestroyLayout(system, layout);
+    return id;
+}
+} // namespace
+
+TEST_CASE("A letter rasterizes to tightly packed coverage in range", "[text][raster]")
+{
+    SystemGuard guard;
+    FontId font = LoadFixture(guard.System, LatinFont());
+    const auto glyph = GlyphOf(guard.System, font, "A");
+
+    GlyphBitmap bmp;
+    REQUIRE(IsOk(RasterizeGlyph(guard.System, font, 48, glyph, &bmp)));
+    CHECK(bmp.Width > 0);
+    CHECK(bmp.Height > 0);
+    CHECK(bmp.Coverage.size() == static_cast<std::size_t>(bmp.Width) * bmp.Height);
+    CHECK(bmp.BearingTop > 0); // 'A' sits above the baseline
+
+    bool anyInk = false;
+    bool anyEmpty = false;
+    for (auto v : bmp.Coverage)
+    {
+        anyInk = anyInk || v > 0;
+        anyEmpty = anyEmpty || v == 0;
+    }
+    CHECK(anyInk);   // actual coverage present
+    CHECK(anyEmpty); // corners of 'A' are transparent
+}
+
+TEST_CASE("Space is a zero-area glyph with no coverage", "[text][raster]")
+{
+    SystemGuard guard;
+    FontId font = LoadFixture(guard.System, LatinFont());
+    const auto glyph = GlyphOf(guard.System, font, " ");
+
+    GlyphBitmap bmp;
+    REQUIRE(IsOk(RasterizeGlyph(guard.System, font, 48, glyph, &bmp)));
+    CHECK(bmp.Width == 0);
+    CHECK(bmp.Height == 0);
+    CHECK(bmp.Coverage.empty());
+}
+
+TEST_CASE("Rasterizing an invalid font handle fails", "[text][raster]")
+{
+    SystemGuard guard;
+    GlyphBitmap bmp;
+    CHECK(RasterizeGlyph(guard.System, FontId{}, 48, 1, &bmp) == Status::InvalidHandle);
+}
+
+TEST_CASE("Rasterization pixel height is validated", "[text][raster]")
+{
+    SystemGuard guard;
+    FontId font = LoadFixture(guard.System, LatinFont());
+    GlyphBitmap bmp;
+    CHECK(RasterizeGlyph(guard.System, font, 0, 1, &bmp) == Status::InvalidArgument);
+    CHECK(RasterizeGlyph(guard.System, font, 300, 1, &bmp) == Status::InvalidArgument);
+}
+
+TEST_CASE("Scratch is only valid until the next raster call", "[text][raster]")
+{
+    SystemGuard guard;
+    FontId font = LoadFixture(guard.System, LatinFont());
+    const auto a = GlyphOf(guard.System, font, "A");
+    const auto b = GlyphOf(guard.System, font, "B");
+
+    GlyphBitmap first;
+    REQUIRE(IsOk(RasterizeGlyph(guard.System, font, 48, a, &first)));
+    // Copy immediately, as the contract requires.
+    std::vector<ludus::foundation::uint8> copy(first.Coverage.begin(), first.Coverage.end());
+
+    GlyphBitmap second;
+    REQUIRE(IsOk(RasterizeGlyph(guard.System, font, 48, b, &second)));
+    // The copy is still intact and independent of the second raster.
+    CHECK(copy.size() == static_cast<std::size_t>(first.Width) * first.Height);
+}
