@@ -82,6 +82,9 @@ install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENT
 
 add_subdirectory(modules/foundation/base)
 add_subdirectory(modules/foundation/containers)
+# FoundationMath depends only on FoundationBase. It is added before any consumer
+# and outside the native-only branch so native and browser targets share it.
+add_subdirectory(modules/foundation/math)
 add_subdirectory(modules/foundation/logging)
 add_subdirectory(modules/foundation/profiling)
 # Input is configured before Platform: Platform depends on Input for the
@@ -100,6 +103,7 @@ if(EMSCRIPTEN)
     add_subdirectory(tools/web-frame-probe)
     add_subdirectory(tools/web-platform-probe)
     add_subdirectory(tools/web-foundation-probe)
+    add_subdirectory(tools/web-math-probe)
     add_subdirectory(tools/web-observability-probe)
     if(LUDUS_BUILD_SMOKE_APP)
         add_subdirectory(apps/smoke)
