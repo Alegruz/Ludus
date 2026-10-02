@@ -96,7 +96,7 @@ public:
         }
         for (uint32 i = 0; i < count; ++i)
         {
-            mSlots[(write + i) & kMask] = records[i];
+            mSlots[(write + i) & Mask()] = records[i];
         }
         const uint32 newWrite = write + count;
         mWrite.store(newWrite, std::memory_order_release);
@@ -121,7 +121,7 @@ public:
         {
             return false;
         }
-        out = mSlots[read & kMask];
+        out = mSlots[read & Mask()];
         return true;
     }
 
@@ -139,7 +139,7 @@ public:
         }
         for (uint32 i = 0; i < avail; ++i)
         {
-            out[i] = mSlots[(read + i) & kMask];
+            out[i] = mSlots[(read + i) & Mask()];
         }
         if (avail != 0)
         {
@@ -156,7 +156,13 @@ public:
     }
 
 private:
-    static constexpr uint32 kMask = static_cast<uint32>(Capacity) - 1U;
+    // Index mask (Capacity is a power of two). A constexpr function rather than a
+    // static data member so no static initializer appears in this header
+    // (bugprone-dynamic-static-initializers under the web tidy pass).
+    [[nodiscard]] static constexpr uint32 Mask() noexcept
+    {
+        return static_cast<uint32>(Capacity) - 1U;
+    }
 
     RecordType mSlots[Capacity] = {};
     std::atomic<uint32> mWrite{0};
