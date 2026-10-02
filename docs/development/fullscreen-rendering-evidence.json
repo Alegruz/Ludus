@@ -1,0 +1,524 @@
+{
+  "scope": "Public installed C++ SDK, generic fullscreen shader, no game implementation",
+  "base_revision": "3ac97af8bb4e",
+  "required_patch": "public fullscreen rendering API and SDK helper in this checkout",
+  "manifest": {
+    "compiler": {
+      "version": "2026.1.2",
+      "url": "https://github.com/shader-slang/slang/releases/download/v2026.1.2/slang-2026.1.2-linux-x86_64-glibc-2.27.tar.gz",
+      "sha256": "bcffdccca2c16057d39f290a07f6f237b9a765238afc1974b68d09762e874b09",
+      "license": "Apache-2.0 WITH LLVM-exception"
+    },
+    "commands": [
+      [
+        "/home/alegruz/workspace/Ludus/out/shader-tools/slang/bin/slangc",
+        "/home/alegruz/workspace/Ludus/tests/sdk_consumer/shaders/diagnostic.slang",
+        "-target",
+        "spirv",
+        "-profile",
+        "spirv_1_3",
+        "-entry",
+        "vertexMain",
+        "-stage",
+        "vertex",
+        "-o",
+        "/home/alegruz/workspace/Ludus/out/build/render-api-sdk-web/ludus-shaders/ludus_sdk_render_consumer/diagnostic/diagnostic.vertex.spv",
+        "-reflection-json",
+        "/home/alegruz/workspace/Ludus/out/build/render-api-sdk-web/ludus-shaders/ludus_sdk_render_consumer/diagnostic/vertex.reflection.json",
+        "-depfile",
+        "/home/alegruz/workspace/Ludus/out/build/render-api-sdk-web/ludus-shaders/ludus_sdk_render_consumer/diagnostic/vertex.d",
+        "-I",
+        "/home/alegruz/workspace/Ludus/tests/sdk_consumer/shaders"
+      ],
+      [
+        "/home/alegruz/workspace/Ludus/out/shader-tools/slang/bin/slangc",
+        "/home/alegruz/workspace/Ludus/tests/sdk_consumer/shaders/diagnostic.slang",
+        "-target",
+        "spirv",
+        "-profile",
+        "spirv_1_3",
+        "-entry",
+        "fragmentMain",
+        "-stage",
+        "fragment",
+        "-o",
+        "/home/alegruz/workspace/Ludus/out/build/render-api-sdk-web/ludus-shaders/ludus_sdk_render_consumer/diagnostic/diagnostic.fragment.spv",
+        "-reflection-json",
+        "/home/alegruz/workspace/Ludus/out/build/render-api-sdk-web/ludus-shaders/ludus_sdk_render_consumer/diagnostic/fragment.reflection.json",
+        "-depfile",
+        "/home/alegruz/workspace/Ludus/out/build/render-api-sdk-web/ludus-shaders/ludus_sdk_render_consumer/diagnostic/fragment.d",
+        "-I",
+        "/home/alegruz/workspace/Ludus/tests/sdk_consumer/shaders"
+      ],
+      [
+        "/home/alegruz/workspace/Ludus/out/shader-tools/slang/bin/slangc",
+        "/home/alegruz/workspace/Ludus/tests/sdk_consumer/shaders/diagnostic.slang",
+        "-target",
+        "wgsl",
+        "-profile",
+        "sm_6_0",
+        "-entry",
+        "vertexMain",
+        "-entry",
+        "fragmentMain",
+        "-o",
+        "/home/alegruz/workspace/Ludus/out/build/render-api-sdk-web/ludus-shaders/ludus_sdk_render_consumer/diagnostic/diagnostic.wgsl",
+        "-reflection-json",
+        "/home/alegruz/workspace/Ludus/out/build/render-api-sdk-web/ludus-shaders/ludus_sdk_render_consumer/diagnostic/wgsl.reflection.json",
+        "-depfile",
+        "/home/alegruz/workspace/Ludus/out/build/render-api-sdk-web/ludus-shaders/ludus_sdk_render_consumer/diagnostic/wgsl.d",
+        "-I",
+        "/home/alegruz/workspace/Ludus/tests/sdk_consumer/shaders"
+      ]
+    ],
+    "uniform_sizes": {
+      "vertex": 48,
+      "fragment": 48,
+      "wgsl": 48
+    },
+    "spirv_entries": {
+      "vertex": "main",
+      "fragment": "main"
+    },
+    "wgsl_entries": {
+      "vertex": "vertexMain",
+      "fragment": "fragmentMain"
+    },
+    "profiles": {
+      "spirv": "spirv_1_3",
+      "wgsl": "sm_6_0"
+    },
+    "sha256": {
+      "diagnostic.fragment.spv": "de7d2636a17dd2f8388f3f784351954f8b52fed9e07f3b6c17da624a9f9d265d",
+      "diagnostic.vertex.spv": "ba5e0e9eeb200bffb96d36112f81274a69ca3707df63fa7f555da0f3ac34de1b",
+      "diagnostic.wgsl": "4178c9e0d31b48168815645d0b3fcc33b342932cff96bbad66f9156986fd72ac"
+    },
+    "layout": "See separate per-target reflection JSON; never assume packing equality."
+  },
+  "layouts": {
+    "vertex": {
+      "binding": {
+        "kind": "descriptorTableSlot",
+        "index": 0
+      },
+      "size": 48,
+      "fields": [
+        {
+          "name": "resolution",
+          "offset": 0,
+          "size": 8
+        },
+        {
+          "name": "elapsedTime",
+          "offset": 8,
+          "size": 4
+        },
+        {
+          "name": "direction",
+          "offset": 16,
+          "size": 12
+        },
+        {
+          "name": "tint",
+          "offset": 32,
+          "size": 16
+        }
+      ]
+    },
+    "fragment": {
+      "binding": {
+        "kind": "descriptorTableSlot",
+        "index": 0
+      },
+      "size": 48,
+      "fields": [
+        {
+          "name": "resolution",
+          "offset": 0,
+          "size": 8
+        },
+        {
+          "name": "elapsedTime",
+          "offset": 8,
+          "size": 4
+        },
+        {
+          "name": "direction",
+          "offset": 16,
+          "size": 12
+        },
+        {
+          "name": "tint",
+          "offset": 32,
+          "size": 16
+        }
+      ]
+    },
+    "wgsl": {
+      "binding": {
+        "kind": "descriptorTableSlot",
+        "index": 0
+      },
+      "size": 48,
+      "fields": [
+        {
+          "name": "resolution",
+          "offset": 0,
+          "size": 8
+        },
+        {
+          "name": "elapsedTime",
+          "offset": 8,
+          "size": 4
+        },
+        {
+          "name": "direction",
+          "offset": 16,
+          "size": 12
+        },
+        {
+          "name": "tint",
+          "offset": 32,
+          "size": 16
+        }
+      ]
+    }
+  },
+  "native_runtime": {
+    "adapter": "Intel(R) UHD Graphics 620 (WHL GT2)",
+    "type": "integrated physical GPU",
+    "driver": "Mesa 25.2.8-0ubuntu0.24.04.2",
+    "api": "1.4.318",
+    "submitted_frames": 80,
+    "sessions": 2,
+    "pixel_comparisons": 18,
+    "tolerance_per_8bit_channel": 2,
+    "mismatches_beyond_tolerance": 0,
+    "in_flight_burst_and_recorded_frame_abort": true,
+    "context": "outside sandbox; /dev/dri available there",
+    "live_wayland": "not executed"
+  },
+  "browser": {
+    "kind": "real software GPU; hardware acceptance open",
+    "args": [
+      "--enable-unsafe-webgpu",
+      "--enable-features=Vulkan",
+      "--use-webgpu-adapter=swiftshader",
+      "--use-angle=swiftshader",
+      "--use-vulkan=swiftshader",
+      "--disable-vulkan-surface"
+    ],
+    "cases": [
+      {
+        "scenario": "success",
+        "pixels": [
+          {
+            "frame": 1,
+            "width": 96,
+            "height": 64,
+            "elapsed": 0,
+            "maximum": 0
+          },
+          {
+            "frame": 5,
+            "width": 96,
+            "height": 64,
+            "elapsed": 2,
+            "maximum": 0
+          },
+          {
+            "frame": 9,
+            "width": 64,
+            "height": 96,
+            "elapsed": 0,
+            "maximum": 0
+          },
+          {
+            "frame": 13,
+            "width": 64,
+            "height": 96,
+            "elapsed": 2,
+            "maximum": 0
+          },
+          {
+            "frame": 17,
+            "width": 96,
+            "height": 64,
+            "elapsed": 0,
+            "maximum": 0
+          },
+          {
+            "frame": 21,
+            "width": 96,
+            "height": 64,
+            "elapsed": 2,
+            "maximum": 0
+          },
+          {
+            "frame": 25,
+            "width": 64,
+            "height": 96,
+            "elapsed": 0,
+            "maximum": 0
+          },
+          {
+            "frame": 29,
+            "width": 64,
+            "height": 96,
+            "elapsed": 2,
+            "maximum": 0
+          }
+        ],
+        "stats": {
+          "pipelines": 2,
+          "buffers": 2,
+          "submits": 32,
+          "writes": 32,
+          "devices": 2
+        },
+        "outcome": "passed"
+      },
+      {
+        "scenario": "cancel-pending",
+        "pixels": [
+          {
+            "frame": 1,
+            "width": 96,
+            "height": 64,
+            "elapsed": 0,
+            "maximum": 0
+          },
+          {
+            "frame": 5,
+            "width": 96,
+            "height": 64,
+            "elapsed": 2,
+            "maximum": 0
+          },
+          {
+            "frame": 9,
+            "width": 64,
+            "height": 96,
+            "elapsed": 0,
+            "maximum": 0
+          },
+          {
+            "frame": 13,
+            "width": 64,
+            "height": 96,
+            "elapsed": 2,
+            "maximum": 0
+          },
+          {
+            "frame": 17,
+            "width": 96,
+            "height": 64,
+            "elapsed": 0,
+            "maximum": 0
+          },
+          {
+            "frame": 21,
+            "width": 96,
+            "height": 64,
+            "elapsed": 2,
+            "maximum": 0
+          },
+          {
+            "frame": 25,
+            "width": 64,
+            "height": 96,
+            "elapsed": 0,
+            "maximum": 0
+          },
+          {
+            "frame": 29,
+            "width": 64,
+            "height": 96,
+            "elapsed": 2,
+            "maximum": 0
+          }
+        ],
+        "stats": {
+          "pipelines": 2,
+          "buffers": 3,
+          "submits": 32,
+          "writes": 32,
+          "devices": 3
+        },
+        "outcome": "passed"
+      },
+      {
+        "scenario": "invalid-shader",
+        "pixels": [],
+        "stats": {
+          "pipelines": 0,
+          "buffers": 1,
+          "submits": 0,
+          "writes": 0,
+          "devices": 1
+        },
+        "outcome": "passed"
+      },
+      {
+        "scenario": "invalid-pipeline",
+        "pixels": [],
+        "stats": {
+          "pipelines": 1,
+          "buffers": 1,
+          "submits": 0,
+          "writes": 0,
+          "devices": 1
+        },
+        "outcome": "passed"
+      },
+      {
+        "scenario": "device-loss",
+        "pixels": [],
+        "stats": {
+          "pipelines": 1,
+          "buffers": 1,
+          "submits": 3,
+          "writes": 3,
+          "devices": 1
+        },
+        "outcome": "passed"
+      }
+    ],
+    "console": [
+      {
+        "scenario": "success",
+        "type": "info",
+        "text": "WebGPU is experimental on this platform. See https://github.com/gpuweb/gpuweb/wiki/Implementation-Status#implementation-status"
+      },
+      {
+        "scenario": "success",
+        "type": "info",
+        "text": "WebGPU is experimental on this platform. See https://github.com/gpuweb/gpuweb/wiki/Implementation-Status#implementation-status"
+      },
+      {
+        "scenario": "cancel-pending",
+        "type": "info",
+        "text": "WebGPU is experimental on this platform. See https://github.com/gpuweb/gpuweb/wiki/Implementation-Status#implementation-status"
+      },
+      {
+        "scenario": "cancel-pending",
+        "type": "info",
+        "text": "WebGPU is experimental on this platform. See https://github.com/gpuweb/gpuweb/wiki/Implementation-Status#implementation-status"
+      },
+      {
+        "scenario": "cancel-pending",
+        "type": "info",
+        "text": "WebGPU is experimental on this platform. See https://github.com/gpuweb/gpuweb/wiki/Implementation-Status#implementation-status"
+      },
+      {
+        "scenario": "invalid-shader",
+        "type": "info",
+        "text": "WebGPU is experimental on this platform. See https://github.com/gpuweb/gpuweb/wiki/Implementation-Status#implementation-status"
+      },
+      {
+        "scenario": "invalid-shader",
+        "type": "error",
+        "text": "[LUDUS:Warning] [RHI] WebGPU: Error while parsing WGSL: :1:1 error: unexpected token\ninvalid WGSL\n^^^^^^^\n\n\n - While calling [Device].CreateShaderModule([ShaderModuleDescriptor]).\n (modules/graphics/rhi/src/rhi_webgpu.cpp:104)\n"
+      },
+      {
+        "scenario": "invalid-shader",
+        "type": "error",
+        "text": "[LUDUS:Warning] [RHI] WebGPU: Error while parsing WGSL: :1:1 error: unexpected token\ninvalid WGSL\n^^^^^^^\n\n\n - While calling [Device].CreateShaderModule([ShaderModuleDescriptor]).\n (modules/graphics/rhi/src/rhi_webgpu.cpp:104)\n"
+      },
+      {
+        "scenario": "invalid-pipeline",
+        "type": "info",
+        "text": "WebGPU is experimental on this platform. See https://github.com/gpuweb/gpuweb/wiki/Implementation-Status#implementation-status"
+      },
+      {
+        "scenario": "invalid-pipeline",
+        "type": "error",
+        "text": "[LUDUS:Warning] [RHI] WebGPU: Entry point \"\"missing\"\" doesn't exist in the shader module [ShaderModule (unlabeled)].\n - While validating vertex stage ([ShaderModule (unlabeled)], entryPoint: \"missing\").\n - While validating vertex state.\n - While calling [Device].CreateRenderPipeline([RenderPipelineDescriptor]).\n (modules/graphics/rhi/src/rhi_webgpu.cpp:104)\n"
+      },
+      {
+        "scenario": "device-loss",
+        "type": "info",
+        "text": "WebGPU is experimental on this platform. See https://github.com/gpuweb/gpuweb/wiki/Implementation-Status#implementation-status"
+      },
+      {
+        "scenario": "device-loss",
+        "type": "error",
+        "text": "[LUDUS:Warning] [RHI] WebGPU: Device was destroyed. (modules/graphics/rhi/src/rhi_webgpu.cpp:104)\n"
+      }
+    ],
+    "version": "140.0.7339.186",
+    "outcome": "passed"
+  },
+  "default_browser": {
+    "kind": "default browser adapter",
+    "args": [],
+    "cases": [],
+    "console": [
+      {
+        "scenario": "success",
+        "type": "info",
+        "text": "WebGPU is experimental on this platform. See https://github.com/gpuweb/gpuweb/wiki/Implementation-Status#implementation-status"
+      },
+      {
+        "scenario": "success",
+        "type": "warning",
+        "text": "Failed to create WebGPU Context Provider"
+      },
+      {
+        "scenario": "success",
+        "type": "info",
+        "text": "WebGPU is experimental on this platform. See https://github.com/gpuweb/gpuweb/wiki/Implementation-Status#implementation-status"
+      },
+      {
+        "scenario": "success",
+        "type": "warning",
+        "text": "Failed to create WebGPU Context Provider"
+      },
+      {
+        "scenario": "success",
+        "type": "error",
+        "text": "[LUDUS:Warning] [RHI] WebGPU: WebGPU not available on this browser (requestAdapter returned null) (modules/graphics/rhi/src/rhi_webgpu.cpp:102)\n"
+      }
+    ],
+    "version": "140.0.7339.186",
+    "outcome": "failed",
+    "error": "TimeoutError: page.waitForFunction: Timeout 15000ms exceeded.",
+    "lastStatus": {
+      "text": "failed frames=0",
+      "state": "failed",
+      "frames": "0",
+      "error": "3"
+    }
+  },
+  "repository_checks": {
+    "Debug": {
+      "registered_tests": 30,
+      "failures": 0,
+      "skipped_live_wayland": 2,
+      "final_rhi_and_header_checks": 5
+    },
+    "Development": {
+      "registered_tests": 31,
+      "failures": 0,
+      "skipped_live_wayland": 2,
+      "final_rhi_and_header_checks": 5
+    },
+    "ASan/UBSan/LSan": {
+      "registered_tests": 28,
+      "failures": 0,
+      "skipped_live_wayland": 2,
+      "final_rhi_and_header_checks": 5
+    },
+    "Web": {
+      "registered_tests": 14,
+      "failures": 0,
+      "skipped_live_wayland": 0
+    }
+  },
+  "remaining_gates": [
+    "Live Wayland presentation, resize and maintenance1 fence retirement",
+    "Physical/flag-free browser GPU and other browser/OS combinations",
+    "Public WSI sRGB and physical display color management",
+    "Additional shader features and host tool packages"
+  ]
+}

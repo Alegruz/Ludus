@@ -1,60 +1,45 @@
 # Graphics RHI
 
-Link `Ludus::GraphicsRhi` and include `<ludus/graphics/rhi/rhi.h>`.
-The build selects a private Vulkan backend on native platforms and the pinned
-Emdawnwebgpu C API backend for Emscripten. Public headers expose no backend handles.
+Link `Ludus::GraphicsRhi`. Include `<ludus/graphics/rhi/rhi.h>` for lifecycle and
+frames and `<ludus/graphics/rhi/render.h>` for the bounded fullscreen rendering
+slice. The selected private backend is Vulkan on native Linux and WebGPU through
+the pinned Emdawnwebgpu port on Emscripten. Public descriptions use engine types
+and opaque handles; installed consumers need no backend or private headers.
 
-Call `Start(app, window)` once and poll `GetStartup()` on the main thread. Native
-startup completes synchronously; browser startup returns Pending and advances
-through adapter, device and validated surface configuration without blocking.
-Ready means the device and surface exist. SetFrameTarget supplies framebuffer
-dimensions and a linear clear color for browser rendering. Apply the negotiated
-MaxTextureDimension2D to the Platform window before reading its framebuffer size.
-No optional WebGPU features or increased limits are requested. Core adapter failure retries compatibility mode.
+The [public rendering guide](../../../docs/development/fullscreen-rendering.md)
+describes resource ownership, asynchronous readiness, frame updates and errors.
+The [Sandbox handoff](../../../docs/development/fullscreen-rendering-handoff.md)
+contains SDK commands, shader artifacts and validation evidence.
 
-Start is Busy until Shutdown, including a failed or lost session. Shutdown is
-idempotent and invalidates callbacks before releasing backend handles. Tokens
-never wrap; delayed adapter/device callbacks release returned handles without
-mutating the next session. A callback never retains application memory. Serialize
-all calls on the main thread; this singleton API is not worker-safe. The platform
-window/canvas must remain alive until RHI shutdown. Shutdown cancels the engine's
-interest in a pending browser request; it does not cancel the browser promise.
+Serialize calls on the main thread. `Start`/`GetStartup` establishes one session;
+browser startup is asynchronous. Keep the Platform window/canvas alive through
+`Shutdown`. Start is Busy until Shutdown, including failed/lost sessions. Shutdown
+is idempotent and invalidates resource IDs and pending callbacks before releasing
+backend state. Delayed callbacks never retain application memory or affect a new
+session. Legacy synchronous native entry points remain for compatibility; do not
+mix the two lifecycles. The resource API requires the Start lifecycle.
 
-BeginFrameStatus/EndFrameStatus return NotReady before readiness, InvalidState
-for unpaired frame operations, and Skipped for zero-sized or temporarily
-unavailable browser frames. Only end a frame whose begin returned Ready.
-SetFrameTarget returns InvalidState during an open frame, for dimensions above
-the device limit, or for nonfinite/out-of-range color components (each is 0..1).
-The browser backend reconfigures on resize, acquires a texture/view, encodes a
-clear pass, submits and releases all per-frame handles. Browser presentation is
-automatic after submission from a requestAnimationFrame tick. Generic acquisition
-errors stop the session with RenderingUnavailable; validation/device loss stops
-rendering and requires Shutdown/Start. Timeout skips; outdated surfaces
-reconfigure at the next nonzero frame. Lost surfaces stop the session rather than
-retrying an invalid surface. The pinned browser port currently only emits
-SuccessOptimal or Error, so those recoverable statuses are future-facing.
-Native SetFrameTarget returns Unsupported; Vulkan keeps its existing frame path.
-The bool wrappers remain for source compatibility. Native Initialize,
-ConnectWindow and InitializeRendering are retained as synchronous conveniences;
-do not mix them with Start. The smoke app uses Start, and the installed SDK
-consumer compiles and queries the new API. The new exported functions require
-rebuilding downstream binaries; the old entry-point signatures are unchanged.
+Both backends accept `SetFrameTarget` between frames. Zero dimensions skip frame
+acquisition. `GetFrameInfo` gives the actual acquired extent and attachment
+encoding after a successful begin. Resize retains resources unless the native
+surface format changes, in which case the session fails and requires restart.
+Frame acquisition timeout/outdated surfaces skip; device loss and unrecoverable
+surface/validation failures stop the session. Only end a frame that began Ready.
 
-Conan pins native volk/Vulkan headers; no Vulkan SDK or GPU is required to build.
-A loader and usable Wayland/Vulkan device are required for native startup.
-Emscripten builds resolve their separate pinned port through --use-port, without
-Conan/Volk. Controlled test providers are linked only into the lifecycle/frame
-probes, and never replace browser navigator.gpu. The W5 frame probe owns its WGSL and render
-pipeline; a private interop header borrows device/format/active pass for that
-smoke scope only. These handles are not installed or exposed in public headers.
-The probe releases its pipeline before shutdown and ignores stale validation
-callbacks. A general resource/pipeline API belongs to a later stage.
+Native Vulkan uses two fenced command/uniform slots, a graphics/present queue
+family, per-image presentation semaphores and maintenance1 presentation fences.
+Wayland requires surface/swapchain maintenance1 for safe resize/shutdown; missing
+support fails explicitly. Headless windows use an owned offscreen image for
+native rendering tests. Building requires only the existing Conan Volk/headers;
+running requires a Vulkan loader and usable device. Browser packaging propagates
+the existing pinned `--use-port` through the SDK target.
+
+The existing smoke/probe private WGSL interop remains a test boundary. External
+applications use the public rendering API and exported `ludus_compile_shader`.
+Neither compiler tools nor probe headers are installed as engine dependencies.
 
 ## Vulkan diagnostics
 
-Implementation files that format `VkResult` in assertions must include
-`internal/vulkan_diagnostics.h` before the assertion call sites. Both
-`LUDUS_LOG_*` and formatted assertion macros then accept the result directly
-with `{}`, preserving its signed numeric code (including unknown result codes).
-The adapter stays private to RHI; Foundation and the installed SDK do not gain
-a Vulkan dependency from diagnostic formatting.
+Implementation files formatting VkResult use the private
+`internal/vulkan_diagnostics.h` adapter. Ordinary diagnostics use `LUDUS_LOG_*`;
+Foundation and public headers gain no Vulkan dependency from formatting.

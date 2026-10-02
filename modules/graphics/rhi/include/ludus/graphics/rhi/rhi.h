@@ -70,9 +70,9 @@ struct StartupInfo final
 // Duplicate Start is Busy until Shutdown, including failed/lost sessions.
 [[nodiscard]] StartStatus Start(const ApplicationInfo& appInfo, const WindowInfo& windowInfo) noexcept;
 [[nodiscard]] StartupInfo GetStartup() noexcept;
-// WebGPU surface settings for the next frame. Zero dimensions skip acquisition.
+// Surface settings for the next frame. Zero dimensions skip acquisition.
 // Call only between frames after Ready; dimensions must fit negotiated limits.
-// Native Vulkan currently returns Unsupported and retains its own swapchain path.
+// Native Vulkan negotiates/clamps the requested extent against surface limits.
 struct FrameTarget final
 {
     ludus::foundation::uint32 Width = 0;

@@ -1,6 +1,12 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/resources.h"
+#include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>
+
+#include <initializer_list>
+#include <span>
+#include <string_view>
 namespace ludus::graphics::rhi
 {
 namespace
@@ -12,6 +18,7 @@ uint32 gNextToken = 1;
 bool gLegacy = false;
 bool gRendering = false;
 bool gFrame = false;
+bool gDrawn = false;
 } // namespace
 namespace internal
 {
@@ -30,6 +37,7 @@ void Fail(uint32 token, StartupError error) noexcept
     gStartup.State = error == StartupError::DeviceLost ? StartupState::DeviceLost : StartupState::Failed;
     gStartup.Error = error;
     gFrame = false;
+    internal::ReleaseResources();
     backend::Shutdown();
 }
 void Complete(uint32 token, StartupError error, uint32 maxTextureDimension) noexcept
@@ -103,6 +111,7 @@ FrameStatus BeginFrameStatus() noexcept
     }
     const auto result = backend::Begin();
     gFrame = result == FrameStatus::Ready;
+    gDrawn = false;
     return result;
 }
 FrameStatus EndFrameStatus() noexcept
@@ -154,6 +163,7 @@ void ShutdownRendering() noexcept
 void Shutdown() noexcept
 {
     gToken = 0;
+    internal::ReleaseResources();
     backend::Shutdown();
     gStartup = {};
     gLegacy = false;
@@ -167,5 +177,391 @@ bool BeginFrame() noexcept
 bool EndFrame() noexcept
 {
     return gLegacy ? (gRendering && backend::EndFrame()) : EndFrameStatus() == FrameStatus::Ready;
+}
+
+namespace internal
+{
+struct ResourceAccess final
+{
+    template <typename T>
+    static uint32 Id(T handle) noexcept
+    {
+        return handle.Id;
+    }
+    template <typename T>
+    static void Set(T& handle, uint32 id) noexcept
+    {
+        handle.Id = id;
+    }
+};
+} // namespace internal
+namespace
+{
+using foundation::usize;
+using internal::ResourceAccess;
+struct Resource final
+{
+    uint32 Id = 0;
+    ResourceStatus Status = ResourceStatus::Pending;
+    ShaderStage Stage = ShaderStage::Vertex;
+    usize Size = 0;
+    bool Updated = false;
+    usize Vertex = 0;
+    usize Fragment = 0;
+    usize Uniform = 0;
+};
+Resource gShaders[internal::RESOURCE_CAPACITY];
+Resource gUniforms[internal::RESOURCE_CAPACITY];
+Resource gPipelines[internal::RESOURCE_CAPACITY];
+uint32 gNextResource = 1;
+constexpr usize MISSING = internal::RESOURCE_CAPACITY;
+
+usize Find(const Resource* resources, uint32 id) noexcept
+{
+    if (id != 0)
+    {
+        for (usize i = 0; i < internal::RESOURCE_CAPACITY; ++i)
+        {
+            if (resources[i].Id == id)
+            {
+                return i;
+            }
+        }
+    }
+    return MISSING;
+}
+ResourceStatus Status(const Resource* resources, uint32 id) noexcept
+{
+    const auto slot = Find(resources, id);
+    return slot == MISSING ? ResourceStatus::InvalidHandle : resources[slot].Status;
+}
+ResourceStatus Allocate(Resource* resources, usize& slot) noexcept
+{
+    if (gStartup.State != StartupState::Ready)
+    {
+        return ResourceStatus::NotReady;
+    }
+    if (gFrame)
+    {
+        return ResourceStatus::InvalidState;
+    }
+    if (gNextResource == 0)
+    {
+        return ResourceStatus::CapacityExceeded;
+    }
+    for (slot = 0; slot < internal::RESOURCE_CAPACITY; ++slot)
+    {
+        if (resources[slot].Id == 0)
+        {
+            resources[slot] = {};
+            resources[slot].Id = gNextResource++;
+            return ResourceStatus::Ready;
+        }
+    }
+    return ResourceStatus::CapacityExceeded;
+}
+bool ValidEntry(std::string_view entry) noexcept
+{
+    return !entry.empty() && entry.size() < 64 && entry.find('\0') == std::string_view::npos;
+}
+ResourceStatus Finish(Resource& resource, ResourceStatus result) noexcept
+{
+    if (resource.Id == 0 || gStartup.State != StartupState::Ready)
+    {
+        // A synchronous loss callback can invalidate the creation in progress.
+        return ResourceStatus::Failed;
+    }
+    // A provider may complete synchronously before returning Pending.
+    if (resource.Status == ResourceStatus::Pending && result != ResourceStatus::Pending)
+    {
+        internal::ResourceComplete(resource.Id, result);
+    }
+    return resource.Status;
+}
+} // namespace
+namespace internal
+{
+void ResourceComplete(uint32 id, ResourceStatus status) noexcept
+{
+    if (gStartup.State != StartupState::Ready)
+    {
+        return;
+    }
+    const auto shader = Find(gShaders, id);
+    const auto uniform = Find(gUniforms, id);
+    const auto pipeline = Find(gPipelines, id);
+    Resource* resource = nullptr;
+    if (shader != MISSING)
+    {
+        resource = &gShaders[shader];
+    }
+    if (uniform != MISSING)
+    {
+        resource = &gUniforms[uniform];
+    }
+    if (pipeline != MISSING)
+    {
+        resource = &gPipelines[pipeline];
+    }
+    if (resource == nullptr || resource->Status != ResourceStatus::Pending)
+    {
+        return;
+    }
+    resource->Status = status == ResourceStatus::Ready ? status : ResourceStatus::Failed;
+    if (resource->Status == ResourceStatus::Failed)
+    {
+        if (shader != MISSING)
+        {
+            backend::DestroyShader(shader);
+        }
+        if (uniform != MISSING)
+        {
+            backend::DestroyUniform(uniform);
+        }
+        if (pipeline != MISSING)
+        {
+            backend::DestroyPipeline(pipeline);
+        }
+    }
+}
+void ReleaseResources() noexcept
+{
+    // Invalidate all IDs before releasing backend state; callbacks may be delayed.
+    for (auto& resource : gPipelines)
+    {
+        resource.Id = 0;
+    }
+    for (auto& resource : gShaders)
+    {
+        resource.Id = 0;
+    }
+    for (auto& resource : gUniforms)
+    {
+        resource.Id = 0;
+    }
+    for (usize i = 0; i < RESOURCE_CAPACITY; ++i)
+    {
+        backend::DestroyPipeline(i);
+        backend::DestroyShader(i);
+        backend::DestroyUniform(i);
+    }
+}
+} // namespace internal
+ResourceStatus GetStatus(ShaderHandle handle) noexcept
+{
+    return Status(gShaders, ResourceAccess::Id(handle));
+}
+ResourceStatus GetStatus(UniformHandle handle) noexcept
+{
+    return Status(gUniforms, ResourceAccess::Id(handle));
+}
+ResourceStatus GetStatus(PipelineHandle handle) noexcept
+{
+    return Status(gPipelines, ResourceAccess::Id(handle));
+}
+ResourceStatus CreateShader(const ShaderDescription& description, ShaderHandle& handle) noexcept
+{
+    if (ResourceAccess::Id(handle) != 0)
+    {
+        return ResourceStatus::InvalidState;
+    }
+    if (description.UniformSize > internal::UNIFORM_CAPACITY)
+    {
+        return ResourceStatus::InvalidDescription;
+    }
+    const bool native = backend::Kind() == Backend::Vulkan;
+    if ((description.Stage != ShaderStage::Vertex && description.Stage != ShaderStage::Fragment) ||
+        (native && (description.Spirv.size() < 5 || description.Spirv[0] != 0x07230203U ||
+                    !ValidEntry(description.SpirvEntry))) ||
+        (!native && (description.Wgsl.empty() || !ValidEntry(description.WgslEntry))))
+    {
+        return ResourceStatus::InvalidDescription;
+    }
+    usize slot = 0;
+    const auto admission = Allocate(gShaders, slot);
+    if (admission != ResourceStatus::Ready)
+    {
+        return admission;
+    }
+    auto& resource = gShaders[slot];
+    resource.Stage = description.Stage;
+    resource.Size = description.UniformSize;
+    ResourceAccess::Set(handle, resource.Id);
+    return Finish(resource, backend::CreateShader(slot, description, resource.Id));
+}
+ResourceStatus CreateUniform(usize size, UniformHandle& handle) noexcept
+{
+    if (ResourceAccess::Id(handle) != 0)
+    {
+        return ResourceStatus::InvalidState;
+    }
+    if (size < 16 || size > internal::UNIFORM_CAPACITY || size % 16 != 0)
+    {
+        return ResourceStatus::InvalidDescription;
+    }
+    usize slot = 0;
+    const auto admission = Allocate(gUniforms, slot);
+    if (admission != ResourceStatus::Ready)
+    {
+        return admission;
+    }
+    auto& resource = gUniforms[slot];
+    resource.Size = size;
+    ResourceAccess::Set(handle, resource.Id);
+    return Finish(resource, backend::CreateUniform(slot, { .Size = size }, resource.Id));
+}
+ResourceStatus CreatePipeline(const PipelineDescription& description, PipelineHandle& handle) noexcept
+{
+    if (ResourceAccess::Id(handle) != 0)
+    {
+        return ResourceStatus::InvalidState;
+    }
+    const auto vertex = Find(gShaders, ResourceAccess::Id(description.Vertex));
+    const auto fragment = Find(gShaders, ResourceAccess::Id(description.Fragment));
+    const auto uniform = Find(gUniforms, ResourceAccess::Id(description.Uniform));
+    if (vertex == MISSING || fragment == MISSING || uniform == MISSING)
+    {
+        return ResourceStatus::InvalidHandle;
+    }
+    if (gShaders[vertex].Stage != ShaderStage::Vertex || gShaders[fragment].Stage != ShaderStage::Fragment)
+    {
+        return ResourceStatus::InvalidDescription;
+    }
+    for (auto status : {gShaders[vertex].Status, gShaders[fragment].Status, gUniforms[uniform].Status})
+    {
+        if (status == ResourceStatus::Pending)
+        {
+            // Pending is reserved for a creation that owns its output handle.
+            return ResourceStatus::NotReady;
+        }
+        if (status != ResourceStatus::Ready)
+        {
+            return status;
+        }
+    }
+    if (gUniforms[uniform].Size < gShaders[vertex].Size || gUniforms[uniform].Size < gShaders[fragment].Size)
+    {
+        return ResourceStatus::InvalidDescription;
+    }
+    usize slot = 0;
+    const auto admission = Allocate(gPipelines, slot);
+    if (admission != ResourceStatus::Ready)
+    {
+        return admission;
+    }
+    auto& resource = gPipelines[slot];
+    resource.Vertex = vertex;
+    resource.Fragment = fragment;
+    resource.Uniform = uniform;
+    ResourceAccess::Set(handle, resource.Id);
+    return Finish(
+        resource,
+        backend::CreatePipeline(slot, { .Vertex = vertex, .Fragment = fragment, .Uniform = uniform }, resource.Id));
+}
+FrameInfo GetFrameInfo() noexcept
+{
+    return gFrame && gStartup.State == StartupState::Ready ? backend::GetFrameInfo() : FrameInfo{};
+}
+ResourceStatus UpdateUniform(UniformHandle handle, std::span<const foundation::uint8> bytes) noexcept
+{
+    const auto slot = Find(gUniforms, ResourceAccess::Id(handle));
+    if (slot == MISSING)
+    {
+        return ResourceStatus::InvalidHandle;
+    }
+    if (gFrame && gDrawn)
+    {
+        return ResourceStatus::InvalidState;
+    }
+    if (gUniforms[slot].Status != ResourceStatus::Ready)
+    {
+        return gUniforms[slot].Status;
+    }
+    if (bytes.size() != gUniforms[slot].Size)
+    {
+        return ResourceStatus::InvalidDescription;
+    }
+    backend::UpdateUniform(slot, bytes);
+    gUniforms[slot].Updated = true;
+    return ResourceStatus::Ready;
+}
+ResourceStatus Destroy(PipelineHandle handle) noexcept
+{
+    const auto slot = Find(gPipelines, ResourceAccess::Id(handle));
+    if (slot == MISSING)
+    {
+        return ResourceStatus::InvalidHandle;
+    }
+    if (gFrame)
+    {
+        return ResourceStatus::InvalidState;
+    }
+    gPipelines[slot].Id = 0;
+    backend::DestroyPipeline(slot);
+    return ResourceStatus::Ready;
+}
+ResourceStatus Destroy(ShaderHandle handle) noexcept
+{
+    const auto slot = Find(gShaders, ResourceAccess::Id(handle));
+    if (slot == MISSING)
+    {
+        return ResourceStatus::InvalidHandle;
+    }
+    if (gFrame)
+    {
+        return ResourceStatus::InvalidState;
+    }
+    for (const auto& pipeline : gPipelines)
+    {
+        if (pipeline.Id != 0 && pipeline.Status != ResourceStatus::Failed &&
+            (pipeline.Vertex == slot || pipeline.Fragment == slot))
+        {
+            return ResourceStatus::InUse;
+        }
+    }
+    gShaders[slot].Id = 0;
+    backend::DestroyShader(slot);
+    return ResourceStatus::Ready;
+}
+ResourceStatus Destroy(UniformHandle handle) noexcept
+{
+    const auto slot = Find(gUniforms, ResourceAccess::Id(handle));
+    if (slot == MISSING)
+    {
+        return ResourceStatus::InvalidHandle;
+    }
+    if (gFrame)
+    {
+        return ResourceStatus::InvalidState;
+    }
+    for (const auto& pipeline : gPipelines)
+    {
+        if (pipeline.Id != 0 && pipeline.Status != ResourceStatus::Failed && pipeline.Uniform == slot)
+        {
+            return ResourceStatus::InUse;
+        }
+    }
+    gUniforms[slot].Id = 0;
+    backend::DestroyUniform(slot);
+    return ResourceStatus::Ready;
+}
+ResourceStatus DrawFullscreen(PipelineHandle handle) noexcept
+{
+    const auto slot = Find(gPipelines, ResourceAccess::Id(handle));
+    if (slot == MISSING)
+    {
+        return ResourceStatus::InvalidHandle;
+    }
+    if (gPipelines[slot].Status != ResourceStatus::Ready)
+    {
+        return gPipelines[slot].Status;
+    }
+    if (!gFrame || gDrawn || !gUniforms[gPipelines[slot].Uniform].Updated)
+    {
+        return ResourceStatus::InvalidState;
+    }
+    const auto result = backend::Draw(slot);
+    gDrawn = result == ResourceStatus::Ready;
+    return result;
 }
 } // namespace ludus::graphics::rhi

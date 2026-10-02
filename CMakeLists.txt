@@ -25,6 +25,7 @@ include(EngineCompilerWarnings)
 include(EngineSanitizers)
 include(EngineTargets)
 include(EnginePch)
+include(LudusShaders)
 
 option(LUDUS_BUILD_TESTS "Build Ludus tests" ON)
 option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
@@ -163,3 +164,6 @@ install(
 
 install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}/licenses")
 install(FILES "${PROJECT_BINARY_DIR}/cmake/LudusSdkManifest.json" DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}")
+
+install(FILES cmake/LudusShaders.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
+install(FILES cmake/shaders/compile_shader.py config/shader_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")

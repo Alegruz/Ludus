@@ -17,7 +17,7 @@ target_sources(ludus_graphics_rhi
         FILE_SET public_headers
         TYPE HEADERS
         BASE_DIRS include
-        FILES include/ludus/graphics/rhi/rhi.h
+        FILES include/ludus/graphics/rhi/rhi.h include/ludus/graphics/rhi/render.h
 )
 
 target_link_libraries(ludus_graphics_rhi
@@ -74,4 +74,18 @@ if(LUDUS_BUILD_TESTS)
     ludus_apply_project_defaults(ludus_rhi_lifecycle_tests)
     ludus_enable_test_exceptions(ludus_rhi_lifecycle_tests)
     add_test(NAME ludus_rhi_lifecycle_tests COMMAND ludus_rhi_lifecycle_tests)
+endif()
+
+if(LUDUS_BUILD_TESTS AND LUDUS_SLANG_COMPILER AND LUDUS_SPIRV_VALIDATOR)
+    target_compile_definitions(ludus_graphics_rhi PRIVATE LUDUS_RHI_TEST_READBACK=1)
+    add_executable(ludus_rhi_render_tests tests/render_tests.cpp)
+    target_include_directories(ludus_rhi_render_tests PRIVATE src)
+    target_link_libraries(ludus_rhi_render_tests PRIVATE Ludus::GraphicsRhi Ludus::FoundationLogging Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_rhi_render_tests)
+    ludus_enable_test_exceptions(ludus_rhi_render_tests)
+    ludus_compile_shader(TARGET ludus_rhi_render_tests NAME diagnostic
+        SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/diagnostic.slang"
+        VERTEX vertexMain FRAGMENT fragmentMain)
+    add_test(NAME ludus_rhi_render_pixels COMMAND ludus_rhi_render_tests)
+    set_tests_properties(ludus_rhi_render_pixels PROPERTIES LABELS "rhi;gpu" TIMEOUT 60)
 endif()

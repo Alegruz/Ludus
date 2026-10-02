@@ -1,10 +1,14 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/resources.h"
 #include "internal/webgpu_probe.h"
 #include <ludus/foundation/base/core.h>
 #include <ludus/foundation/logging/log_format.hpp>
+#include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>
 
+#include <cstring>
+#include <span>
 #include <string_view>
 
 #include <emscripten.h>
@@ -455,5 +459,201 @@ WGPUTextureFormat ProbeFormat() noexcept
 WGPURenderPassEncoder ProbePass() noexcept
 {
     return gPass;
+}
+
+namespace
+{
+struct Shader final
+{
+    WGPUShaderModule Module = nullptr;
+    char Entry[64]{};
+};
+struct Uniform final
+{
+    WGPUBuffer Buffer = nullptr;
+    uint8 Bytes[internal::UNIFORM_CAPACITY]{};
+    usize Size = 0;
+};
+struct Pipeline final
+{
+    WGPURenderPipeline Object = nullptr;
+    WGPUBindGroupLayout Bindings = nullptr;
+    WGPUPipelineLayout Layout = nullptr;
+    WGPUBindGroup Group = nullptr;
+    usize UniformSlot = 0;
+};
+Shader gShaders[internal::RESOURCE_CAPACITY];
+Uniform gUniforms[internal::RESOURCE_CAPACITY];
+Pipeline gPipelines[internal::RESOURCE_CAPACITY];
+void ResourceChecked(WGPUPopErrorScopeStatus status,
+                     WGPUErrorType error,
+                     WGPUStringView message,
+                     void* data,
+                     void*) noexcept
+{
+    // The facade resolves a never-reused resource ID, not an application pointer.
+    if (status != WGPUPopErrorScopeStatus_Success || error != WGPUErrorType_NoError)
+    {
+        Diagnose(message);
+    }
+    internal::ResourceComplete(Token(data),
+                               status == WGPUPopErrorScopeStatus_Success && error == WGPUErrorType_NoError
+                                   ? ResourceStatus::Ready
+                                   : ResourceStatus::Failed);
+}
+void CheckResource(uint32 id) noexcept
+{
+    WGPUPopErrorScopeCallbackInfo callback = WGPU_POP_ERROR_SCOPE_CALLBACK_INFO_INIT;
+    callback.mode = WGPUCallbackMode_AllowSpontaneous;
+    callback.callback = ResourceChecked;
+    callback.userdata1 = Userdata(id);
+    (void)wgpuDevicePopErrorScope(gDevice, callback);
+}
+} // namespace
+ResourceStatus CreateShader(usize slot, const ShaderDescription& description, uint32 id) noexcept
+{
+    wgpuDevicePushErrorScope(gDevice, WGPUErrorFilter_Validation);
+    WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
+    source.code = { .data = description.Wgsl.data(), .length = description.Wgsl.size() };
+    WGPUShaderModuleDescriptor descriptor = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    descriptor.nextInChain = &source.chain;
+    auto& shader = gShaders[slot];
+    std::memcpy(shader.Entry, description.WgslEntry.data(), description.WgslEntry.size());
+    shader.Entry[description.WgslEntry.size()] = '\0';
+    shader.Module = wgpuDeviceCreateShaderModule(gDevice, &descriptor);
+    CheckResource(id);
+    return shader.Module != nullptr ? ResourceStatus::Pending : ResourceStatus::Failed;
+}
+ResourceStatus CreateUniform(usize slot, const UniformDescription& description, uint32 id) noexcept
+{
+    const usize size = description.Size;
+    wgpuDevicePushErrorScope(gDevice, WGPUErrorFilter_Validation);
+    auto& uniform = gUniforms[slot];
+    uniform.Size = size;
+    WGPUBufferDescriptor descriptor = WGPU_BUFFER_DESCRIPTOR_INIT;
+    descriptor.size = size;
+    descriptor.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    uniform.Buffer = wgpuDeviceCreateBuffer(gDevice, &descriptor);
+    CheckResource(id);
+    return uniform.Buffer != nullptr ? ResourceStatus::Pending : ResourceStatus::Failed;
+}
+ResourceStatus CreatePipeline(usize slot, const PipelineResources& resources, uint32 id) noexcept
+{
+    const usize vertex = resources.Vertex, fragment = resources.Fragment, uniform = resources.Uniform;
+    wgpuDevicePushErrorScope(gDevice, WGPUErrorFilter_Validation);
+    auto& pipeline = gPipelines[slot];
+    pipeline.UniformSlot = uniform;
+    WGPUBindGroupLayoutEntry binding = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+    binding.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
+    binding.buffer.type = WGPUBufferBindingType_Uniform;
+    binding.buffer.minBindingSize = gUniforms[uniform].Size;
+    WGPUBindGroupLayoutDescriptor bindings = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    bindings.entryCount = 1;
+    bindings.entries = &binding;
+    pipeline.Bindings = wgpuDeviceCreateBindGroupLayout(gDevice, &bindings);
+    WGPUPipelineLayoutDescriptor layout = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    layout.bindGroupLayoutCount = 1;
+    layout.bindGroupLayouts = &pipeline.Bindings;
+    pipeline.Layout = wgpuDeviceCreatePipelineLayout(gDevice, &layout);
+    WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
+    entry.buffer = gUniforms[uniform].Buffer;
+    entry.size = gUniforms[uniform].Size;
+    WGPUBindGroupDescriptor group = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    group.layout = pipeline.Bindings;
+    group.entryCount = 1;
+    group.entries = &entry;
+    pipeline.Group = wgpuDeviceCreateBindGroup(gDevice, &group);
+    WGPUColorTargetState color = WGPU_COLOR_TARGET_STATE_INIT;
+    color.format = gConfiguration.format;
+    WGPUFragmentState fragmentState = WGPU_FRAGMENT_STATE_INIT;
+    fragmentState.module = gShaders[fragment].Module;
+    fragmentState.entryPoint = { .data = gShaders[fragment].Entry, .length = WGPU_STRLEN };
+    fragmentState.targetCount = 1;
+    fragmentState.targets = &color;
+    WGPURenderPipelineDescriptor descriptor = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    descriptor.layout = pipeline.Layout;
+    descriptor.vertex.module = gShaders[vertex].Module;
+    descriptor.vertex.entryPoint = { .data = gShaders[vertex].Entry, .length = WGPU_STRLEN };
+    descriptor.fragment = &fragmentState;
+    descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    pipeline.Object = wgpuDeviceCreateRenderPipeline(gDevice, &descriptor);
+    CheckResource(id);
+    return pipeline.Object != nullptr && pipeline.Group != nullptr && pipeline.Layout != nullptr &&
+                   pipeline.Bindings != nullptr
+               ? ResourceStatus::Pending
+               : ResourceStatus::Failed;
+}
+void DestroyShader(usize slot) noexcept
+{
+    if (gShaders[slot].Module != nullptr)
+    {
+        wgpuShaderModuleRelease(gShaders[slot].Module);
+    }
+    gShaders[slot] = {};
+}
+void DestroyUniform(usize slot) noexcept
+{
+    if (gUniforms[slot].Buffer != nullptr)
+    {
+        // Release the host reference. Submitted command buffers retain GPU use;
+        // explicit buffer.destroy would invalidate pending submissions.
+        wgpuBufferRelease(gUniforms[slot].Buffer);
+    }
+    gUniforms[slot] = {};
+}
+void DestroyPipeline(usize slot) noexcept
+{
+    auto& pipeline = gPipelines[slot];
+    if (pipeline.Object != nullptr)
+    {
+        wgpuRenderPipelineRelease(pipeline.Object);
+    }
+    if (pipeline.Group != nullptr)
+    {
+        wgpuBindGroupRelease(pipeline.Group);
+    }
+    if (pipeline.Layout != nullptr)
+    {
+        wgpuPipelineLayoutRelease(pipeline.Layout);
+    }
+    if (pipeline.Bindings != nullptr)
+    {
+        wgpuBindGroupLayoutRelease(pipeline.Bindings);
+    }
+    pipeline = {};
+}
+void UpdateUniform(usize slot, std::span<const uint8> bytes) noexcept
+{
+    std::memcpy(gUniforms[slot].Bytes, bytes.data(), bytes.size());
+}
+FrameInfo GetFrameInfo() noexcept
+{
+    return
+    {
+        .Width = gConfiguration.width,
+        .Height = gConfiguration.height,
+        .Encoding = gConfiguration.format == WGPUTextureFormat_BGRA8UnormSrgb ||
+                            gConfiguration.format == WGPUTextureFormat_RGBA8UnormSrgb
+                        ? SurfaceEncoding::Srgb
+                        : SurfaceEncoding::Unorm,
+    };
+}
+ResourceStatus Draw(usize slot) noexcept
+{
+    const auto& pipeline = gPipelines[slot];
+    const auto& uniform = gUniforms[pipeline.UniformSlot];
+    // Queue order: write N precedes submission N, which precedes write N+1.
+    wgpuQueueWriteBuffer(gQueue, uniform.Buffer, 0, uniform.Bytes, uniform.Size);
+    wgpuRenderPassEncoderSetViewport(gPass,
+                                     0,
+                                     0,
+                                     static_cast<float32>(gTarget.Width),
+                                     static_cast<float32>(gTarget.Height),
+                                     0,
+                                     1);
+    wgpuRenderPassEncoderSetPipeline(gPass, pipeline.Object);
+    wgpuRenderPassEncoderSetBindGroup(gPass, 0, pipeline.Group, 0, nullptr);
+    wgpuRenderPassEncoderDraw(gPass, 3, 1, 0, 0);
+    return ResourceStatus::Ready;
 }
 } // namespace ludus::graphics::rhi::backend

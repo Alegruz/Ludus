@@ -1,7 +1,12 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
-#include <catch2/catch_test_macros.hpp>
+#include "internal/resources.h"
+#include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>
+
+#include <span>
+
+#include <catch2/catch_test_macros.hpp>
 namespace ludus::graphics::rhi::backend
 {
 using ludus::foundation::uint32;
@@ -136,5 +141,201 @@ TEST_CASE("Skipped RHI frames never open a frame and targets cannot change durin
     CHECK(SetFrameTarget({}) == FrameStatus::InvalidState);
     internal::Fail(backend::PendingToken, StartupError::DeviceLost);
     CHECK(EndFrameStatus() == FrameStatus::NotReady);
+    Shutdown();
+}
+
+namespace ludus::graphics::rhi::backend
+{
+using foundation::uint8;
+using foundation::usize;
+ResourceStatus NextResource = ResourceStatus::Ready;
+uint32 LastResource = 0;
+uint32 Released = 0;
+uint32 Draws = 0;
+bool LoseDuringCreation = false;
+ResourceStatus CreateShader(usize, const ShaderDescription&, uint32 id) noexcept
+{
+    LastResource = id;
+    return NextResource;
+}
+ResourceStatus CreateUniform(usize, const UniformDescription&, uint32 id) noexcept
+{
+    LastResource = id;
+    if (LoseDuringCreation)
+    {
+        LoseDuringCreation = false;
+        internal::Fail(PendingToken, StartupError::DeviceLost);
+    }
+    return NextResource;
+}
+ResourceStatus CreatePipeline(usize, const PipelineResources&, uint32 id) noexcept
+{
+    LastResource = id;
+    return NextResource;
+}
+void DestroyShader(usize) noexcept
+{
+    ++Released;
+}
+void DestroyUniform(usize) noexcept
+{
+    ++Released;
+}
+void DestroyPipeline(usize) noexcept
+{
+    ++Released;
+}
+void UpdateUniform(usize, std::span<const uint8>) noexcept {}
+FrameInfo GetFrameInfo() noexcept
+{
+    return { .Width = 96, .Height = 64 };
+}
+ResourceStatus Draw(usize) noexcept
+{
+    ++Draws;
+    return ResourceStatus::Ready;
+}
+} // namespace ludus::graphics::rhi::backend
+TEST_CASE("Public resources reject pending, stale and incomplete draws across sessions", "[rhi][resources]")
+{
+    Shutdown();
+    backend::ImmediateError = StartupError::None;
+    backend::NextFrame = FrameStatus::Ready;
+    REQUIRE(Start({}, {}) == StartStatus::Pending);
+    internal::Complete(backend::PendingToken, StartupError::None, 4096);
+    ShaderHandle vertex, fragment;
+    UniformHandle uniform;
+    PipelineHandle pipeline;
+    const ShaderDescription vertexDesc
+    {
+        .Stage = ShaderStage::Vertex,
+        .UniformSize = 48,
+        .Spirv = {},
+        .Wgsl = "generated vertex",
+        .SpirvEntry = {},
+        .WgslEntry = "vertexMain",
+    };
+    backend::NextResource = ResourceStatus::Pending;
+    REQUIRE(CreateShader(vertexDesc, vertex) == ResourceStatus::Pending);
+    const auto abandoned = backend::LastResource;
+    REQUIRE(Destroy(vertex) == ResourceStatus::Ready);
+    vertex = {};
+    REQUIRE(CreateShader(vertexDesc, vertex) == ResourceStatus::Pending);
+    internal::ResourceComplete(abandoned, ResourceStatus::Ready);
+    REQUIRE(GetStatus(vertex) == ResourceStatus::Pending);
+    internal::ResourceComplete(backend::LastResource, ResourceStatus::Ready);
+    backend::NextResource = ResourceStatus::Ready;
+    REQUIRE(CreateShader(
+                {
+                    .Stage = ShaderStage::Fragment,
+                    .Spirv = {},
+                    .Wgsl = "generated fragment",
+                    .SpirvEntry = {},
+                    .WgslEntry = "fragmentMain",
+                },
+                fragment) == ResourceStatus::Ready);
+    UniformHandle undersized;
+    REQUIRE(CreateUniform(16, undersized) == ResourceStatus::Ready);
+    CHECK(CreatePipeline({vertex, fragment, undersized}, pipeline) == ResourceStatus::InvalidDescription);
+    REQUIRE(Destroy(undersized) == ResourceStatus::Ready);
+    REQUIRE(CreateUniform(48, uniform) == ResourceStatus::Ready);
+    CHECK(CreateUniform(12, uniform) == ResourceStatus::InvalidState);
+    backend::NextResource = ResourceStatus::Pending;
+    ShaderHandle waiting;
+    REQUIRE(CreateShader(vertexDesc, waiting) == ResourceStatus::Pending);
+    CHECK(CreatePipeline({waiting, fragment, uniform}, pipeline) == ResourceStatus::NotReady);
+    CHECK(GetStatus(pipeline) == ResourceStatus::InvalidHandle);
+    REQUIRE(Destroy(waiting) == ResourceStatus::Ready);
+    REQUIRE(CreatePipeline({vertex, fragment, uniform}, pipeline) == ResourceStatus::Pending);
+    const auto abandonedPipeline = backend::LastResource;
+    REQUIRE(Destroy(pipeline) == ResourceStatus::Ready);
+    pipeline = {};
+    REQUIRE(CreatePipeline({vertex, fragment, uniform}, pipeline) == ResourceStatus::Pending);
+    internal::ResourceComplete(abandonedPipeline, ResourceStatus::Ready);
+    const auto pendingPipeline = backend::LastResource;
+    const auto submitted = backend::Draws;
+    CHECK(GetStatus(pipeline) == ResourceStatus::Pending);
+    CHECK(Destroy(vertex) == ResourceStatus::InUse);
+    CHECK(Destroy(uniform) == ResourceStatus::InUse);
+    REQUIRE(BeginFrameStatus() == FrameStatus::Ready);
+    CHECK(DrawFullscreen(pipeline) == ResourceStatus::Pending);
+    CHECK(backend::Draws == submitted);
+    REQUIRE(EndFrameStatus() == FrameStatus::Ready);
+    internal::ResourceComplete(pendingPipeline, ResourceStatus::Ready);
+    backend::NextResource = ResourceStatus::Ready;
+    REQUIRE(BeginFrameStatus() == FrameStatus::Ready);
+    CHECK(DrawFullscreen(pipeline) == ResourceStatus::InvalidState);
+    CHECK(Destroy(pipeline) == ResourceStatus::InvalidState);
+    REQUIRE(EndFrameStatus() == FrameStatus::Ready);
+    ludus::foundation::uint8 bytes[48]{};
+    REQUIRE(UpdateUniform(uniform, bytes) == ResourceStatus::Ready);
+    REQUIRE(BeginFrameStatus() == FrameStatus::Ready);
+    CHECK(UpdateUniform(uniform, bytes) == ResourceStatus::Ready);
+    CHECK(GetFrameInfo().Width == 96);
+    REQUIRE(DrawFullscreen(pipeline) == ResourceStatus::Ready);
+    CHECK(DrawFullscreen(pipeline) == ResourceStatus::InvalidState);
+    CHECK(UpdateUniform(uniform, bytes) == ResourceStatus::InvalidState);
+    REQUIRE(EndFrameStatus() == FrameStatus::Ready);
+    const auto oldPipeline = pipeline;
+    REQUIRE(Destroy(pipeline) == ResourceStatus::Ready);
+    CHECK(GetStatus(oldPipeline) == ResourceStatus::InvalidHandle);
+    pipeline = {};
+    backend::NextResource = ResourceStatus::Failed;
+    const auto partialReleases = backend::Released;
+    REQUIRE(CreatePipeline({vertex, fragment, uniform}, pipeline) == ResourceStatus::Failed);
+    CHECK(backend::Released == partialReleases + 1);
+    CHECK(DrawFullscreen(pipeline) == ResourceStatus::Failed);
+    // Failed creation releases partial state and no longer owns dependencies.
+    REQUIRE(Destroy(uniform) == ResourceStatus::Ready);
+    REQUIRE(Destroy(vertex) == ResourceStatus::Ready);
+    REQUIRE(Destroy(fragment) == ResourceStatus::Ready);
+    REQUIRE(Destroy(pipeline) == ResourceStatus::Ready);
+    backend::NextResource = ResourceStatus::Ready;
+    Shutdown();
+    CHECK(DrawFullscreen(oldPipeline) == ResourceStatus::InvalidHandle);
+}
+TEST_CASE("Public resource failure releases partial backend allocations and capacity is bounded", "[rhi][resources]")
+{
+    Shutdown();
+    backend::ImmediateError = StartupError::None;
+    REQUIRE(Start({}, {}) == StartStatus::Pending);
+    internal::Complete(backend::PendingToken, StartupError::None, 4096);
+    UniformHandle handles[internal::RESOURCE_CAPACITY];
+    backend::NextResource = ResourceStatus::Failed;
+    const auto released = backend::Released;
+    REQUIRE(CreateUniform(16, handles[0]) == ResourceStatus::Failed);
+    CHECK(backend::Released == released + 1);
+    CHECK(GetStatus(handles[0]) == ResourceStatus::Failed);
+    REQUIRE(Destroy(handles[0]) == ResourceStatus::Ready);
+    handles[0] = {};
+    backend::NextResource = ResourceStatus::Ready;
+    for (auto& handle : handles)
+    {
+        REQUIRE(CreateUniform(16, handle) == ResourceStatus::Ready);
+    }
+    UniformHandle overflow;
+    CHECK(CreateUniform(16, overflow) == ResourceStatus::CapacityExceeded);
+    CHECK(CreateUniform(17, overflow) == ResourceStatus::InvalidDescription);
+    CHECK(UpdateUniform(handles[0], {}) == ResourceStatus::InvalidDescription);
+    internal::Fail(backend::PendingToken, StartupError::DeviceLost);
+    for (auto handle : handles)
+    {
+        CHECK(GetStatus(handle) == ResourceStatus::InvalidHandle);
+    }
+    Shutdown();
+    REQUIRE(Start({}, {}) == StartStatus::Pending);
+    internal::Complete(backend::PendingToken, StartupError::None, 4096);
+    REQUIRE(CreateUniform(16, overflow) == ResourceStatus::Ready);
+    CHECK(GetStatus(handles[0]) == ResourceStatus::InvalidHandle);
+    backend::NextResource = ResourceStatus::Pending;
+    backend::LoseDuringCreation = true;
+    UniformHandle interrupted;
+    CHECK(CreateUniform(16, interrupted) == ResourceStatus::Failed);
+    CHECK(GetStartup().State == StartupState::DeviceLost);
+    CHECK(GetStatus(interrupted) == ResourceStatus::InvalidHandle);
+    CHECK(GetStatus(overflow) == ResourceStatus::InvalidHandle);
+    internal::ResourceComplete(backend::LastResource, ResourceStatus::Ready);
+    CHECK(GetStatus(interrupted) == ResourceStatus::InvalidHandle);
+    backend::NextResource = ResourceStatus::Ready;
     Shutdown();
 }

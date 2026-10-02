@@ -1,1803 +1,703 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/resources.h"
 
-#include <volk.h>
-
-#include "internal/vulkan_diagnostics.h"
+#include <ludus/foundation/logging/log_format.hpp>
+#include <ludus/graphics/rhi/render.h>
+#include <ludus/graphics/rhi/rhi.h>
 
 #include <algorithm>
 #include <cstring>
-#include <string>
+#include <initializer_list>
+#include <span>
 
-#include <ludus/foundation/base/assert.hpp>
-#include <ludus/foundation/base/assert_format.hpp>
-#include <ludus/foundation/base/types.h>
-#include <ludus/foundation/containers/array.hpp>
-#include <ludus/foundation/containers/static_array.hpp>
-#include <ludus/foundation/logging/log_format.hpp>
-
-#include <ludus/graphics/rhi/rhi.h>
-#include <ludus/platform/native_window.h>
-#include <vulkan/vulkan_core.h>
-
-#if defined(LUDUS_BUILD_DEBUG) || defined(LUDUS_BUILD_DEVELOPMENT)
-#    define LUDUS_RHI_ENABLE_VALIDATION_LAYER
-#endif
-
-using namespace ludus::foundation;
+#include <volk.h>
 
 namespace ludus::graphics::rhi::backend
 {
-inline constexpr logging::LogCategory LOG_RHI{"RHI"};
-
-struct FenceInfo final
+namespace
 {
+using namespace foundation;
+constexpr logging::LogCategory LOG_RHI{"RHI"};
+constexpr usize FRAMES = 2;
+constexpr usize IMAGES = 8;
+struct Frame final
+{
+    VkCommandBuffer Command = VK_NULL_HANDLE;
     VkFence Fence = VK_NULL_HANDLE;
+    VkSemaphore Acquired = VK_NULL_HANDLE;
 };
-
-struct SemaphoreInfo final
+struct Shader final
 {
-    VkSemaphore Semaphore = VK_NULL_HANDLE;
+    VkShaderModule Module = VK_NULL_HANDLE;
+    char Entry[64]{};
+    ShaderStage Stage = ShaderStage::Vertex;
 };
-
-struct QueueInfo final
+struct Uniform final
 {
-    VkQueue Queue = VK_NULL_HANDLE;
-    uint32 WaitSemaphoreIndex = UINT32_MAX;
+    VkBuffer Buffers[FRAMES]{};
+    VkDeviceMemory Memory[FRAMES]{};
+    void* Mapped[FRAMES]{};
+    uint8 Bytes[internal::UNIFORM_CAPACITY]{};
+    usize Size = 0;
 };
-
-struct QueueFamilyInfo final
+struct Pipeline final
 {
-    uint32 Index = UINT32_MAX;
-    VkQueueFamilyProperties2 Properties = {};
-    VkQueueFamilyGlobalPriorityProperties GlobalPriorityProperties = {};
-    Array<VkPerformanceCounterKHR> PerformanceCounters;
-    Array<VkPerformanceCounterDescriptionKHR> PerformanceCounterDescriptions;
-    Array<QueueInfo> QueueInfos;
+    VkDescriptorSetLayout Bindings = VK_NULL_HANDLE;
+    VkDescriptorPool Pool = VK_NULL_HANDLE;
+    VkDescriptorSet Sets[FRAMES]{};
+    VkPipelineLayout Layout = VK_NULL_HANDLE;
+    VkPipeline Object = VK_NULL_HANDLE;
+    usize UniformSlot = 0;
 };
+VkInstance gInstance = VK_NULL_HANDLE;
+VkPhysicalDevice gPhysical = VK_NULL_HANDLE;
+VkDevice gDevice = VK_NULL_HANDLE;
+VkQueue gQueue = VK_NULL_HANDLE;
+uint32 gFamily = 0;
+VkSurfaceKHR gSurface = VK_NULL_HANDLE;
+VkSwapchainKHR gSwapchain = VK_NULL_HANDLE;
+VkCommandPool gCommands = VK_NULL_HANDLE;
+VkRenderPass gPass = VK_NULL_HANDLE;
+VkImage gImages[IMAGES]{};
+VkImageView gViews[IMAGES]{};
+VkFramebuffer gTargets[IMAGES]{};
+VkSemaphore gFinished[IMAGES]{};
+VkFence gPresentFences[IMAGES]{};
+bool gPresented[IMAGES]{};
+bool gAcquiredWait = false;
+bool gOwnedImage = false;
+bool gInstanceMaintenance = false;
+VkDeviceMemory gHeadlessMemory = VK_NULL_HANDLE;
+uint32 gImageCount = 0;
+uint32 gImage = 0;
+usize gFrame = 0;
+Frame gFrames[FRAMES];
+Shader gShaders[internal::RESOURCE_CAPACITY];
+Uniform gUniforms[internal::RESOURCE_CAPACITY];
+Pipeline gPipelines[internal::RESOURCE_CAPACITY];
+VkFormat gFormat = VK_FORMAT_UNDEFINED;
+VkExtent2D gExtent{};
+VkExtent2D gRequestedExtent{};
+FrameTarget gTarget;
+uint32 gSession = 0;
+uint32 gMaxDimension = 0;
+WindowInfo gWindow;
+bool gHeadless = false;
+bool gEncoding = false;
+bool gResize = true;
+VkResult gLastResult = VK_SUCCESS;
 
-#if defined(LUDUS_BUILD_DEBUG) || defined(LUDUS_BUILD_DEVELOPMENT) || defined(LUDUS_BUILD_PROFILE)
-#    define LUDUS_RHI_DEVICE_DEBUG_FEATURES_PROFILE
-#    if defined(LUDUS_BUILD_PROFILE) == false
-#        define LUDUS_RHI_DEVICE_DEBUG_FEATURES
-#    endif
-#endif
-
-struct CommandBufferInfo final
+bool Check(VkResult result) noexcept
 {
-    VkCommandBuffer CommandBuffer = VK_NULL_HANDLE;
-};
-
-struct CommandPoolInfo final
-{
-    VkCommandPool CommandPool = VK_NULL_HANDLE;
-    Array<CommandBufferInfo> CommandBufferInfos;
-};
-
-struct DeviceInfo final
-{
-    VkDevice Device = VK_NULL_HANDLE;
-    VkPhysicalDeviceFeatures2 Features2 = {};
-    VkPhysicalDeviceVulkan11Features Vulkan11Features = {};
-    VkPhysicalDeviceVulkan12Features Vulkan12Features = {};
-    VkPhysicalDeviceVulkan13Features Vulkan13Features = {};
-    VkPhysicalDeviceVulkan14Features Vulkan14Features = {};
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR AccelerationStructureFeatures = {};
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR RayTracingPipelineFeatures = {};
-    VkPhysicalDeviceRayQueryFeaturesKHR RayQueryFeatures = {};
-    VkPhysicalDeviceMeshShaderFeaturesEXT MeshShaderFeatures = {};
-    VkPhysicalDeviceDescriptorBufferFeaturesEXT DescriptorBufferFeatures = {};
-    VkPhysicalDeviceFragmentShadingRateFeaturesKHR FragmentShadingRateFeatures = {};
-    VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT GraphicsPipelineLibraryFeatures = {};
-    VkPhysicalDeviceMemoryPriorityFeaturesEXT MemoryPriorityFeatures = {};
-    VkPhysicalDevicePageableDeviceLocalMemoryFeaturesEXT PageableDeviceLocalMemoryFeatures = {};
-
-    Array<CommandPoolInfo> CommandPoolInfos;
-    Array<FenceInfo> FenceInfos;
-    Array<SemaphoreInfo> SemaphoreInfos;
-
-#if defined(LUDUS_RHI_DEVICE_DEBUG_FEATURES_PROFILE)
-    VkPhysicalDevicePerformanceQueryFeaturesKHR PerformanceQueryFeatures = {};
-#endif
-
-#if defined(LUDUS_RHI_DEVICE_DEBUG_FEATURES)
-    VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR PipelineExecutablePropertiesFeatures = {};
-    VkPhysicalDeviceDeviceMemoryReportFeaturesEXT DeviceMemoryReportFeatures = {};
-    VkPhysicalDeviceFaultFeaturesEXT FaultFeatures = {};
-#endif
-
-    [[nodiscard]] LUDUS_INLINE const SemaphoreInfo& GetSemaphoreInfo(uint32 index) const
+    gLastResult = result;
+    if (result != VK_SUCCESS)
     {
-        LUDUS_ASSERT(index < SemaphoreInfos.GetSize(), "Index out of bounds");
-        return SemaphoreInfos[index];
+        LUDUS_LOG_ERROR(LOG_RHI, "Vulkan operation failed: {}", static_cast<int32>(result));
+        return false;
     }
-};
-
-struct GpuInfo final
+    return true;
+}
+void WaitIdle() noexcept
 {
-    float32 Score = 0.0f;
-    VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
-    VkPhysicalDeviceProperties2 Properties2 = {};
-    VkPhysicalDeviceVulkan11Properties Vulkan11Properties = {};
-    VkPhysicalDeviceVulkan12Properties Vulkan12Properties = {};
-    VkPhysicalDeviceVulkan13Properties Vulkan13Properties = {};
-    VkPhysicalDeviceVulkan14Properties Vulkan14Properties = {};
-    VkPhysicalDeviceAccelerationStructurePropertiesKHR AccelerationStructureProperties = {};
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR RayTracingPipelineProperties = {};
-    Array<QueueFamilyInfo> QueueFamilyInfo;
-    VkPhysicalDeviceMemoryProperties2 MemoryProperties2 = {};
-    VkPhysicalDeviceMemoryBudgetPropertiesEXT MemoryBudgetProperties = {};
-    DeviceInfo DeviceInfo = {};
-    uint32 GraphicsQueueFamilyIndex = UINT32_MAX;
-    uint32 PresentQueueFamilyIndex = UINT32_MAX;
-};
-
-struct SurfaceInfo final
-{
-    VkSurfaceKHR Surface = VK_NULL_HANDLE;
-};
-
-struct ImageInfo final
-{
-    VkImage Image = VK_NULL_HANDLE;
-    VkFormat ImageFormat = VK_FORMAT_UNDEFINED;
-    VkExtent2D ImageExtent =
+    if (gDevice != VK_NULL_HANDLE)
     {
-        .width = 0,
-        .height = 0,
-    };
-};
-
-struct WindowSystemIntegrationInfo final
-{
-    QueueFamilyInfo* PresentQueueFamilyInfoOrNull = nullptr;
-    WindowInfo WindowInfo = {};
-    SurfaceInfo SurfaceInfo = {};
-    VkSwapchainKHR Swapchain = VK_NULL_HANDLE;
-    Array<ImageInfo> ImageInfos;
-    Array<uint32> RenderFinishedSemaphoreIndices;
-};
-
-struct VulkanInfo final
-{
-    uint32 ApiVersion = 0;
-    VkInstance Instance = VK_NULL_HANDLE;
-    Array<GpuInfo> GpuInfos;
-    WindowSystemIntegrationInfo WindowSystemIntegrationInfo = {};
-
-    [[nodiscard]] LUDUS_INLINE const GpuInfo& GetPrimaryGpuInfo() const noexcept
-    {
-        LUDUS_ASSERT(!GpuInfos.IsEmpty(), "GpuInfos is empty.");
-        return GpuInfos[0];
+        (void)Check(vkDeviceWaitIdle(gDevice));
     }
-};
-
-struct FrameContextInfo final
+}
+bool Allocate(const VkMemoryRequirements& requirements, VkMemoryPropertyFlags flags, VkDeviceMemory& memory) noexcept
 {
-    uint32 Index = 0;
-    uint32 ImageIndex = 0;
-    uint32 ImageAvailableSemaphoreIndex = 0;
-    uint32 FenceIndex = UINT32_MAX;
-
-    uint32 CommandPoolIndex = 0;
-    uint32 CommandBufferIndex = 0;
-};
-
-struct RenderContextInfo final
-{
-    Array<FrameContextInfo> FrameContextInfos;
-    Array<uint32> FrameToUpdateIndices;
-    Array<uint32> PresentingImageIndices;
-
-    [[nodiscard]] LUDUS_INLINE uint32 GetFrameToUpdateIndex() const noexcept
+    VkPhysicalDeviceMemoryProperties properties{};
+    vkGetPhysicalDeviceMemoryProperties(gPhysical, &properties);
+    for (usize i = 0; i < properties.memoryTypeCount; ++i)
     {
-        LUDUS_ASSERT(!FrameToUpdateIndices.IsEmpty(), "FrameToUpdateIndices is empty.");
-        return FrameToUpdateIndices[0];
+        if ((requirements.memoryTypeBits & (1U << i)) != 0 &&
+            (properties.memoryTypes[i].propertyFlags & flags) == flags)
+        {
+            VkMemoryAllocateInfo info{};
+            info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            info.allocationSize = requirements.size;
+            info.memoryTypeIndex = static_cast<uint32>(i);
+            return Check(vkAllocateMemory(gDevice, &info, nullptr, &memory));
+        }
     }
-    [[nodiscard]] LUDUS_INLINE FrameContextInfo& GetFrameContextInfoToUpdate() noexcept
-    {
-        LUDUS_ASSERT(!FrameContextInfos.IsEmpty(), "FrameContextInfos is empty.");
-        return FrameContextInfos[GetFrameToUpdateIndex()];
-    }
-};
-
-static VulkanInfo gVulkanInfo;
-static RenderContextInfo gRenderContextInfo;
-
-#if defined(LUDUS_RHI_ENABLE_VALIDATION_LAYER)
-static VkBool32 DebugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-                                            VkDebugUtilsMessageTypeFlagsEXT messageType,
-                                            const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-                                            void* pUserData) noexcept;
-#endif
-[[nodiscard]] static bool initializeInstance(VulkanInfo& inoutVulkanInfo, const ApplicationInfo& appInfo) noexcept;
-[[nodiscard]] static bool initializeGpuInfos(VulkanInfo& inoutVulkanInfo) noexcept;
-[[nodiscard]] static bool initializeGpuInfo(GpuInfo& inoutGpuInfo, const VulkanInfo& vulkanInfo) noexcept;
-[[nodiscard]] static bool
-initializeDeviceInfo(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo, const VulkanInfo& vulkanInfo) noexcept;
-static void shutdownDevice(DeviceInfo& inoutDeviceInfo) noexcept;
-static void initializeQueues(QueueFamilyInfo& inoutQueueFamilyInfo, const DeviceInfo& deviceInfo) noexcept;
-[[nodiscard]] static bool initializeWindowSystemIntegration(WindowSystemIntegrationInfo& inoutWsiInfo,
-                                                            const VulkanInfo& vulkanInfo) noexcept;
-static void shutdownWindowSystemIntegration(WindowSystemIntegrationInfo& inoutWsiInfo,
-                                            const VulkanInfo& vulkanInfo) noexcept;
-[[nodiscard]] static bool initializeSwapchain(WindowSystemIntegrationInfo& inoutWsiInfo,
-                                              DeviceInfo& deviceInfo) noexcept;
-static void shutdownSwapchain(WindowSystemIntegrationInfo& inoutWsiInfo, const DeviceInfo& deviceInfo) noexcept;
-[[nodiscard]] static bool initializeCommands(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo) noexcept;
-static void shutdownCommands(DeviceInfo& inoutDeviceInfo) noexcept;
-[[nodiscard]] static bool initializeSemaphore(uint32& outSemaphoreIndex, DeviceInfo& inoutDeviceInfo) noexcept;
-static void shutdownSemaphore(SemaphoreInfo& inoutSemaphoreInfo, DeviceInfo& inoutDeviceInfo) noexcept;
-[[nodiscard]] static bool initializeFence(uint32& outFenceIndex, DeviceInfo& inoutDeviceInfo) noexcept;
-static void shutdownFence(FenceInfo& inoutFenceInfo, DeviceInfo& inoutDeviceInfo) noexcept;
-
-[[nodiscard]] static bool createCommandBufferInfo(uint32& outCommandBufferInfoIndex,
-                                                  CommandPoolInfo& inoutCommandPoolInfo,
-                                                  const DeviceInfo& deviceInfo) noexcept;
-
-static bool gIsInitialized = false;
-static bool gManagedRendering = false;
-bool Initialize(const ApplicationInfo& appInfo) noexcept
+    LUDUS_LOG_ERROR(LOG_RHI, "No compatible Vulkan memory type");
+    return false;
+}
+void WaitPresents() noexcept
 {
-    if (gIsInitialized)
+    if (gDevice == VK_NULL_HANDLE)
+    {
+        return;
+    }
+    for (usize i = 0; i < IMAGES; ++i)
+    {
+        if (gPresented[i])
+        {
+            (void)Check(vkWaitForFences(gDevice, 1, &gPresentFences[i], VK_TRUE, UINT64_MAX));
+            gPresented[i] = false;
+        }
+    }
+}
+void RetireAcquiredImage() noexcept
+{
+    if (!gOwnedImage || gDevice == VK_NULL_HANDLE)
+    {
+        return;
+    }
+    if (gAcquiredWait)
+    {
+        // Abort may occur after acquisition but before submission. Consume the
+        // asynchronous acquisition signal before releasing its semaphore.
+        const VkPipelineStageFlags stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        VkSubmitInfo submit{};
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.waitSemaphoreCount = 1;
+        submit.pWaitSemaphores = &gFrames[gFrame].Acquired;
+        submit.pWaitDstStageMask = &stage;
+        (void)Check(vkQueueSubmit(gQueue, 1, &submit, VK_NULL_HANDLE));
+        gAcquiredWait = false;
+    }
+    WaitIdle();
+    VkReleaseSwapchainImagesInfoEXT release{};
+    release.sType = VK_STRUCTURE_TYPE_RELEASE_SWAPCHAIN_IMAGES_INFO_EXT;
+    release.swapchain = gSwapchain;
+    release.imageIndexCount = 1;
+    release.pImageIndices = &gImage;
+    (void)Check(vkReleaseSwapchainImagesEXT(gDevice, &release));
+    gOwnedImage = false;
+}
+void ReleaseTargets() noexcept
+{
+    if (gDevice == VK_NULL_HANDLE)
+    {
+        return;
+    }
+    WaitPresents();
+    for (usize i = 0; i < IMAGES; ++i)
+    {
+        vkDestroyFence(gDevice, gPresentFences[i], nullptr);
+        gPresentFences[i] = VK_NULL_HANDLE;
+        vkDestroyFramebuffer(gDevice, gTargets[i], nullptr);
+        gTargets[i] = VK_NULL_HANDLE;
+        vkDestroyImageView(gDevice, gViews[i], nullptr);
+        gViews[i] = VK_NULL_HANDLE;
+        vkDestroySemaphore(gDevice, gFinished[i], nullptr);
+        gFinished[i] = VK_NULL_HANDLE;
+    }
+    if (gHeadless)
+    {
+        vkDestroyImage(gDevice, gImages[0], nullptr);
+        vkFreeMemory(gDevice, gHeadlessMemory, nullptr);
+        gHeadlessMemory = VK_NULL_HANDLE;
+    }
+    if (gSwapchain != VK_NULL_HANDLE)
+    {
+        vkDestroySwapchainKHR(gDevice, gSwapchain, nullptr);
+    }
+    gSwapchain = VK_NULL_HANDLE;
+    for (auto& image : gImages)
+    {
+        image = VK_NULL_HANDLE;
+    }
+    gImageCount = 0;
+}
+bool CreatePass() noexcept
+{
+    if (gPass != VK_NULL_HANDLE)
     {
         return true;
     }
-
-    VkResult vr = VK_SUCCESS;
-    vr = volkInitialize();
-    if (vr != VK_SUCCESS)
+    VkAttachmentDescription color{};
+    color.format = gFormat;
+    color.samples = VK_SAMPLE_COUNT_1_BIT;
+    color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    color.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    color.finalLayout = gHeadless ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    VkAttachmentReference reference{};
+    reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &reference;
+    VkSubpassDependency dependencies[2]{};
+    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[0].dstSubpass = 0;
+    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependencies[1].srcSubpass = 0;
+    dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependencies[1].dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependencies[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    VkRenderPassCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    info.attachmentCount = 1;
+    info.pAttachments = &color;
+    info.subpassCount = 1;
+    info.pSubpasses = &subpass;
+    info.dependencyCount = 2;
+    info.pDependencies = dependencies;
+    return Check(vkCreateRenderPass(gDevice, &info, nullptr, &gPass));
+}
+bool CreateTargets() noexcept
+{
+    WaitIdle();
+    ReleaseTargets();
+    gExtent = { .width = gTarget.Width, .height = gTarget.Height };
+    if (gHeadless)
     {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to initialize Volk.");
-        return false;
-    }
-
-    VulkanInfo vulkanInfo = {};
-    if (vkEnumerateInstanceVersion != nullptr)
-    {
-        vr = vkEnumerateInstanceVersion(&vulkanInfo.ApiVersion);
-        if (vr != VK_SUCCESS)
+        gFormat = VK_FORMAT_R8G8B8A8_UNORM;
+        gImageCount = 1;
+        VkImageCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        info.imageType = VK_IMAGE_TYPE_2D;
+        info.format = gFormat;
+        info.extent = { .width = gExtent.width, .height = gExtent.height, .depth = 1 };
+        info.mipLevels = 1;
+        info.arrayLayers = 1;
+        info.samples = VK_SAMPLE_COUNT_1_BIT;
+        info.tiling = VK_IMAGE_TILING_OPTIMAL;
+        info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        if (!Check(vkCreateImage(gDevice, &info, nullptr, &gImages[0])))
         {
-            LUDUS_LOG_ERROR(LOG_RHI, "Failed to enumerate Vulkan instance version.");
-            volkFinalize();
+            return false;
+        }
+        VkMemoryRequirements requirements{};
+        vkGetImageMemoryRequirements(gDevice, gImages[0], &requirements);
+        if (!Allocate(requirements, 0, gHeadlessMemory) ||
+            !Check(vkBindImageMemory(gDevice, gImages[0], gHeadlessMemory, 0)))
+        {
             return false;
         }
     }
     else
     {
-        vulkanInfo.ApiVersion = VK_API_VERSION_1_0;
-    }
-    LUDUS_LOG_INFO(LOG_RHI,
-                   "Vulkan instance version: {}.{}.{}",
-                   VK_VERSION_MAJOR(vulkanInfo.ApiVersion),
-                   VK_VERSION_MINOR(vulkanInfo.ApiVersion),
-                   VK_VERSION_PATCH(vulkanInfo.ApiVersion));
-
-    if (!initializeInstance(vulkanInfo, appInfo))
-    {
-        volkFinalize();
-        return false;
-    }
-    volkLoadInstance(vulkanInfo.Instance);
-
-    gVulkanInfo = Move(vulkanInfo);
-    gIsInitialized = true;
-    return true;
-}
-
-bool ConnectWindow(const WindowInfo& windowInfo) noexcept
-{
-    if (!gIsInitialized)
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "RHI is not initialized.");
-        return false;
-    }
-
-    auto& wsi = gVulkanInfo.WindowSystemIntegrationInfo;
-    if (wsi.SurfaceInfo.Surface != VK_NULL_HANDLE)
-    {
-        return wsi.WindowInfo.System == windowInfo.System && wsi.WindowInfo.Display == windowInfo.Display &&
-               wsi.WindowInfo.Surface == windowInfo.Surface;
-    }
-
-    WindowSystemIntegrationInfo candidate =
-    {
-        .WindowInfo = windowInfo,
-        .ImageInfos =
-            {
-                {
-                    .ImageFormat = VK_FORMAT_B8G8R8A8_UNORM,
-                    .ImageExtent =
-                    {
-                        .width = windowInfo.Width,
-                        .height = windowInfo.Height,
-                    },
-                },
-                {
-                    .ImageFormat = VK_FORMAT_B8G8R8A8_UNORM,
-                    .ImageExtent =
-                    {
-                        .width = windowInfo.Width,
-                        .height = windowInfo.Height,
-                    },
-                },
-            },
-    };
-    if (!initializeWindowSystemIntegration(candidate, gVulkanInfo))
-    {
-        return false;
-    }
-    if (!initializeGpuInfos(gVulkanInfo))
-    {
-        vkDestroySurfaceKHR(gVulkanInfo.Instance, candidate.SurfaceInfo.Surface, nullptr);
-        return false;
-    }
-
-    for (GpuInfo& gpuInfo : gVulkanInfo.GpuInfos)
-    {
-        for (const QueueFamilyInfo& family : gpuInfo.QueueFamilyInfo)
+        VkSurfaceCapabilitiesKHR caps{};
+        if (!Check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gPhysical, gSurface, &caps)))
         {
-            if (family.Properties.queueFamilyProperties.queueCount == 0)
+            return false;
+        }
+        if (caps.currentExtent.width != UINT32_MAX)
+        {
+            gExtent = caps.currentExtent;
+        }
+        else
+        {
+            gExtent.width = std::clamp(gExtent.width, caps.minImageExtent.width, caps.maxImageExtent.width);
+            gExtent.height = std::clamp(gExtent.height, caps.minImageExtent.height, caps.maxImageExtent.height);
+        }
+        uint32 count = 0;
+        if (!Check(vkGetPhysicalDeviceSurfaceFormatsKHR(gPhysical, gSurface, &count, nullptr)) || count == 0 ||
+            count > 64)
+        {
+            return false;
+        }
+        VkSurfaceFormatKHR formats[64]{};
+        if (!Check(vkGetPhysicalDeviceSurfaceFormatsKHR(gPhysical, gSurface, &count, formats)))
+        {
+            return false;
+        }
+        VkSurfaceFormatKHR selected{};
+        for (usize i = 0; i < count; ++i)
+        {
+            const auto format = formats[i].format;
+            if (formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR &&
+                (format == VK_FORMAT_UNDEFINED || format == VK_FORMAT_B8G8R8A8_UNORM ||
+                 format == VK_FORMAT_R8G8B8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB ||
+                 format == VK_FORMAT_R8G8B8A8_SRGB))
             {
-                continue;
+                selected = formats[i];
+                if (format == VK_FORMAT_UNDEFINED || format == VK_FORMAT_B8G8R8A8_UNORM)
+                {
+                    selected.format = VK_FORMAT_B8G8R8A8_UNORM;
+                    break;
+                }
             }
-            VkBool32 presentSupported = VK_FALSE;
-            if (vkGetPhysicalDeviceSurfaceSupportKHR(gpuInfo.PhysicalDevice,
-                                                     family.Index,
-                                                     candidate.SurfaceInfo.Surface,
-                                                     &presentSupported) != VK_SUCCESS)
+        }
+        if (selected.format == VK_FORMAT_UNDEFINED)
+        {
+            LUDUS_LOG_ERROR(LOG_RHI, "Surface has no supported RGBA8/BGRA8 UNORM or sRGB format");
+            return false;
+        }
+        if (gFormat != VK_FORMAT_UNDEFINED && gFormat != selected.format)
+        {
+            return false;
+        }
+        gFormat = selected.format;
+        // A minimized surface can negotiate zero pixels. Its format still
+        // defines a valid pipeline; defer framebuffer/swapchain creation.
+        if (gExtent.width == 0 || gExtent.height == 0)
+        {
+            return CreatePass();
+        }
+        uint32 desired = std::max(caps.minImageCount, 2U);
+        if (caps.maxImageCount != 0)
+        {
+            desired = std::min(desired, caps.maxImageCount);
+        }
+        if (desired > IMAGES || (caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0)
+        {
+            return false;
+        }
+        VkSwapchainCreateInfoKHR info{};
+        info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+        info.surface = gSurface;
+        info.minImageCount = desired;
+        info.imageFormat = gFormat;
+        info.imageColorSpace = selected.colorSpace;
+        info.imageExtent = gExtent;
+        info.imageArrayLayers = 1;
+        info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        info.preTransform = caps.currentTransform;
+        for (auto alpha : {VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+                           VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+                           VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+                           VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR})
+        {
+            if ((caps.supportedCompositeAlpha & alpha) != 0)
             {
-                continue;
-            }
-            const bool graphicsSupported =
-                (family.Properties.queueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
-            if (graphicsSupported)
-            {
-                gpuInfo.GraphicsQueueFamilyIndex = family.Index;
-            }
-            if (presentSupported == VK_TRUE)
-            {
-                gpuInfo.PresentQueueFamilyIndex = family.Index;
-            }
-            if (graphicsSupported && presentSupported == VK_TRUE)
-            {
+                info.compositeAlpha = alpha;
                 break;
             }
         }
-        if (gpuInfo.GraphicsQueueFamilyIndex == UINT32_MAX || gpuInfo.PresentQueueFamilyIndex == UINT32_MAX)
+        info.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+        info.clipped = VK_TRUE;
+        if (!Check(vkCreateSwapchainKHR(gDevice, &info, nullptr, &gSwapchain)) ||
+            !Check(vkGetSwapchainImagesKHR(gDevice, gSwapchain, &gImageCount, nullptr)) || gImageCount > IMAGES ||
+            !Check(vkGetSwapchainImagesKHR(gDevice, gSwapchain, &gImageCount, gImages)))
         {
-            continue;
+            return false;
         }
-        if (!initializeDeviceInfo(gpuInfo.DeviceInfo, gpuInfo, gVulkanInfo))
+    }
+    if (!CreatePass())
+    {
+        return false;
+    }
+    for (usize i = 0; i < gImageCount; ++i)
+    {
+        VkImageViewCreateInfo view{};
+        view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view.image = gImages[i];
+        view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view.format = gFormat;
+        view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        view.subresourceRange.levelCount = 1;
+        view.subresourceRange.layerCount = 1;
+        if (!Check(vkCreateImageView(gDevice, &view, nullptr, &gViews[i])))
         {
-            continue;
+            return false;
         }
-        volkLoadDevice(gpuInfo.DeviceInfo.Device);
-        for (QueueFamilyInfo& family : gpuInfo.QueueFamilyInfo)
+        VkFramebufferCreateInfo target{};
+        target.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        target.renderPass = gPass;
+        target.attachmentCount = 1;
+        target.pAttachments = &gViews[i];
+        target.width = gExtent.width;
+        target.height = gExtent.height;
+        target.layers = 1;
+        if (!Check(vkCreateFramebuffer(gDevice, &target, nullptr, &gTargets[i])))
         {
-            initializeQueues(family, gpuInfo.DeviceInfo);
+            return false;
         }
-        wsi = candidate;
-        if (!initializeSwapchain(wsi, gpuInfo.DeviceInfo))
+        if (!gHeadless)
         {
-            shutdownSwapchain(gVulkanInfo.WindowSystemIntegrationInfo, gpuInfo.DeviceInfo);
-            continue;
-        }
-
-        const uint32 backBuffersCount = gVulkanInfo.WindowSystemIntegrationInfo.ImageInfos.GetSize();
-        gRenderContextInfo.FrameContextInfos.EnsureCapacity(backBuffersCount);
-        for (uint32 i = 0; i < backBuffersCount; ++i)
-        {
-            FrameContextInfo frameContextInfo =
+            VkSemaphoreCreateInfo semaphore{};
+            semaphore.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+            VkFenceCreateInfo fence{};
+            fence.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+            if (!Check(vkCreateFence(gDevice, &fence, nullptr, &gPresentFences[i])) ||
+                !Check(vkCreateSemaphore(gDevice, &semaphore, nullptr, &gFinished[i])))
             {
-                .Index = i,
-            };
-            if (!initializeSemaphore(frameContextInfo.ImageAvailableSemaphoreIndex, gVulkanInfo.GpuInfos[0].DeviceInfo))
-            {
-                LUDUS_ASSERT_F(false, "Failed to initialize image available semaphore for frame index {}.", i);
                 return false;
             }
-            if (!initializeFence(frameContextInfo.FenceIndex, gVulkanInfo.GpuInfos[0].DeviceInfo))
-            {
-                LUDUS_ASSERT_F(false, "Failed to initialize fence for frame index {}.", i);
-                return false;
-            }
-            gRenderContextInfo.FrameContextInfos.Add(frameContextInfo);
-            gRenderContextInfo.FrameToUpdateIndices.Add(i);
         }
-        return true;
     }
-
-    shutdownWindowSystemIntegration(gVulkanInfo.WindowSystemIntegrationInfo, gVulkanInfo);
-    LUDUS_LOG_ERROR(LOG_RHI, "No suitable Vulkan device supports presentation to this window.");
-    return false;
-}
-
-bool InitializeRendering() noexcept
-{
-    if (!gIsInitialized)
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "RHI is not initialized.");
-        return false;
-    }
-
-    // TODO: magic number for gpu info
-    if (!initializeCommands(gVulkanInfo.GpuInfos[0].DeviceInfo, gVulkanInfo.GetPrimaryGpuInfo()))
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to initialize rendering commands.");
-        return false;
-    }
-
-    DeviceInfo& deviceInfo = gVulkanInfo.GpuInfos[0].DeviceInfo;
-    const uint32 swapchainImagesCount =
-        static_cast<uint32>(gVulkanInfo.WindowSystemIntegrationInfo.ImageInfos.GetSize());
-    constexpr uint32 COMMAND_POOL_INDEX = 0;
-    for (uint32 i = 0; i < swapchainImagesCount; ++i)
-    {
-        if (!createCommandBufferInfo(gRenderContextInfo.FrameContextInfos[i].CommandBufferIndex,
-                                     deviceInfo.CommandPoolInfos[COMMAND_POOL_INDEX],
-                                     deviceInfo))
-        {
-            LUDUS_LOG_ERROR(LOG_RHI, "Failed to create command buffer info for frame index {}.", i);
-            return false;
-        }
-        gRenderContextInfo.FrameContextInfos[i].CommandPoolIndex = COMMAND_POOL_INDEX;
-    }
-
+    gResize = false;
     return true;
 }
-
-void ShutdownRendering() noexcept
+FrameStatus Failure() noexcept
 {
-    if (gIsInitialized)
-    {
-        shutdownCommands(gVulkanInfo.GpuInfos[0].DeviceInfo);
-    }
+    internal::Fail(gSession,
+                   gLastResult == VK_ERROR_DEVICE_LOST ? StartupError::DeviceLost : StartupError::RenderingUnavailable);
+    return FrameStatus::Failed;
 }
-
-void Shutdown() noexcept
+ResourceStatus ResourceFailure() noexcept
 {
-    if (gManagedRendering)
+    if (gLastResult == VK_ERROR_DEVICE_LOST)
     {
-        ShutdownRendering();
-        gManagedRendering = false;
+        internal::Fail(gSession, StartupError::DeviceLost);
     }
-    if (gIsInitialized || gVulkanInfo.Instance != VK_NULL_HANDLE)
-    {
-        LUDUS_ASSERT(gIsInitialized, "RHI is not initialized.");
-        LUDUS_ASSERT(gVulkanInfo.Instance != VK_NULL_HANDLE, "Vulkan instance is not valid.");
-
-        shutdownSwapchain(gVulkanInfo.WindowSystemIntegrationInfo, gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo);
-        shutdownWindowSystemIntegration(gVulkanInfo.WindowSystemIntegrationInfo, gVulkanInfo);
-
-        for (GpuInfo& gpuInfo : gVulkanInfo.GpuInfos)
-        {
-            shutdownDevice(gpuInfo.DeviceInfo);
-        }
-
-        if (gVulkanInfo.WindowSystemIntegrationInfo.SurfaceInfo.Surface != VK_NULL_HANDLE)
-        {
-            vkDestroySurfaceKHR(gVulkanInfo.Instance,
-                                gVulkanInfo.WindowSystemIntegrationInfo.SurfaceInfo.Surface,
-                                nullptr);
-        }
-        vkDestroyInstance(gVulkanInfo.Instance, nullptr);
-        volkFinalize();
-        gRenderContextInfo = {};
-        gVulkanInfo = {};
-        gIsInitialized = false;
-    }
+    return ResourceStatus::Failed;
 }
-
-bool BeginFrame() noexcept
-{
-    VkResult vr = VK_SUCCESS;
-
-    FrameContextInfo& frameContextInfo = gRenderContextInfo.GetFrameContextInfoToUpdate();
-
-    vr = vkWaitForFences(gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.Device,
-                         1,
-                         &gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.FenceInfos[frameContextInfo.FenceIndex].Fence,
-                         VK_TRUE,
-                         UINT64_MAX);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT_F(false, "Failed to wait for fence: {}", vr);
-        return false;
-    }
-    vr = vkResetFences(gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.Device,
-                       1,
-                       &gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.FenceInfos[frameContextInfo.FenceIndex].Fence);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT_F(false, "Failed to reset fence: {}", vr);
-        return false;
-    }
-
-    const DeviceInfo& deviceInfo = gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo;
-    WindowSystemIntegrationInfo& wsiInfo = gVulkanInfo.WindowSystemIntegrationInfo;
-    const SemaphoreInfo& imageAvailableSemaphoreInfo =
-        deviceInfo.GetSemaphoreInfo(frameContextInfo.ImageAvailableSemaphoreIndex);
-    if (gVulkanInfo.ApiVersion >= VK_API_VERSION_1_1)
-    {
-        const VkAcquireNextImageInfoKHR acquireNextImageInfo =
-        {
-            .sType = VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR,
-            .pNext = nullptr,
-            .swapchain = wsiInfo.Swapchain,
-            .timeout = UINT64_MAX,
-            .semaphore = imageAvailableSemaphoreInfo.Semaphore,
-            .fence = VK_NULL_HANDLE,
-            .deviceMask = 0,
-        };
-        vr = vkAcquireNextImage2KHR(deviceInfo.Device, &acquireNextImageInfo, &frameContextInfo.ImageIndex);
-    }
-    else
-    {
-        vr = vkAcquireNextImageKHR(deviceInfo.Device,
-                                   wsiInfo.Swapchain,
-                                   UINT64_MAX,
-                                   imageAvailableSemaphoreInfo.Semaphore,
-                                   VK_NULL_HANDLE,
-                                   &frameContextInfo.ImageIndex);
-    }
-
-    const CommandBufferInfo& commandBufferInfo = gVulkanInfo.GetPrimaryGpuInfo()
-                                                     .DeviceInfo.CommandPoolInfos[frameContextInfo.CommandPoolIndex]
-                                                     .CommandBufferInfos[frameContextInfo.CommandBufferIndex];
-    vr = vkResetCommandBuffer(commandBufferInfo.CommandBuffer, 0);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT_F(false, "Failed to reset command buffer: {}", vr);
-        return false;
-    }
-
-    const VkCommandBufferBeginInfo commandBufferBeginInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .pNext = nullptr,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        .pInheritanceInfo = nullptr,
-    };
-    vr = vkBeginCommandBuffer(commandBufferInfo.CommandBuffer, &commandBufferBeginInfo);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT_F(false, "Failed to begin command buffer: {}", vr);
-        return false;
-    }
-
-    return vr == VK_SUCCESS;
-}
-
-bool EndFrame() noexcept
-{
-    VkResult vr = VK_SUCCESS;
-
-    FrameContextInfo& frameContextInfo = gRenderContextInfo.GetFrameContextInfoToUpdate();
-
-    const CommandBufferInfo& commandBufferInfo =
-        gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo.CommandPoolInfos[0].CommandBufferInfos[0];
-    vr = vkEndCommandBuffer(commandBufferInfo.CommandBuffer);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT_F(false, "Failed to end command buffer: {}", vr);
-        return false;
-    }
-
-    const QueueFamilyInfo& graphicsQueueFamilyInfo =
-        gVulkanInfo.GetPrimaryGpuInfo().QueueFamilyInfo[gVulkanInfo.GetPrimaryGpuInfo().GraphicsQueueFamilyIndex];
-    const VkCommandBufferSubmitInfo commandBufferSubmitInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .pNext = nullptr,
-        .commandBuffer = commandBufferInfo.CommandBuffer,
-        .deviceMask = 0,
-    };
-    const DeviceInfo& deviceInfo = gVulkanInfo.GetPrimaryGpuInfo().DeviceInfo;
-    const SemaphoreInfo& imageAvailableSemaphoreInfo =
-        deviceInfo.GetSemaphoreInfo(frameContextInfo.ImageAvailableSemaphoreIndex);
-    const VkSemaphoreSubmitInfo waitSemaphoreSubmitInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .pNext = nullptr,
-        .semaphore = imageAvailableSemaphoreInfo.Semaphore,
-        .value = 0,
-        .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-    };
-    WindowSystemIntegrationInfo& wsiInfo = gVulkanInfo.WindowSystemIntegrationInfo;
-    const VkSemaphore renderFinishedSemaphore =
-        deviceInfo.GetSemaphoreInfo(wsiInfo.RenderFinishedSemaphoreIndices[frameContextInfo.ImageIndex]).Semaphore;
-    const VkSemaphoreSubmitInfo signalSemaphoreSubmitInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .pNext = nullptr,
-        .semaphore = renderFinishedSemaphore,
-        .value = 0,
-        .stageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-    };
-    const VkSubmitInfo2 submitInfo2 =
-    {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .pNext = nullptr,
-        .flags = 0,
-        .waitSemaphoreInfoCount = 1,
-        .pWaitSemaphoreInfos = &waitSemaphoreSubmitInfo,
-        .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &commandBufferSubmitInfo,
-        .signalSemaphoreInfoCount = 1,
-        .pSignalSemaphoreInfos = &signalSemaphoreSubmitInfo,
-    };
-    const FenceInfo& fenceInfo = deviceInfo.FenceInfos[frameContextInfo.FenceIndex];
-    vr = vkQueueSubmit2(graphicsQueueFamilyInfo.QueueInfos[0].Queue, 1, &submitInfo2, fenceInfo.Fence);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT_F(false, "Failed to submit to graphics queue: {}", vr);
-        return false;
-    }
-
-    const VkPresentInfoKHR presentInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        .pNext = nullptr,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &renderFinishedSemaphore,
-        .swapchainCount = 1,
-        .pSwapchains = &gVulkanInfo.WindowSystemIntegrationInfo.Swapchain,
-        .pImageIndices = &frameContextInfo.ImageIndex,
-        .pResults = nullptr,
-    };
-    const QueueFamilyInfo& presentQueueFamilyInfo =
-        gVulkanInfo.GetPrimaryGpuInfo().QueueFamilyInfo[gVulkanInfo.GetPrimaryGpuInfo().PresentQueueFamilyIndex];
-    vr = vkQueuePresentKHR(presentQueueFamilyInfo.QueueInfos[0].Queue, &presentInfo);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT_F(false, "Failed to present to present queue: {}", vr);
-        return false;
-    }
-    return vr == VK_SUCCESS;
-}
-
-#if defined(LUDUS_RHI_ENABLE_VALIDATION_LAYER)
-VkBool32 DebugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-                                     [[maybe_unused]] VkDebugUtilsMessageTypeFlagsEXT messageType,
-                                     [[maybe_unused]] const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-                                     [[maybe_unused]] void* pUserData) noexcept
-{
-    if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
-    {
-        LUDUS_ASSERT_F(false, "Vulkan validation error: {}", diagnostics::DiagnosticCString(pCallbackData->pMessage));
-    }
-    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
-    {
-        LUDUS_ASSERT_F(false, "Vulkan validation warning: {}", diagnostics::DiagnosticCString(pCallbackData->pMessage));
-    }
-    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
-    {
-        LUDUS_LOG_INFO(LOG_RHI, "Vulkan validation info: {}", pCallbackData->pMessage);
-    }
-    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT)
-    {
-        LUDUS_LOG_INFO(LOG_RHI, "Vulkan validation verbose: {}", pCallbackData->pMessage);
-    }
-    return VK_TRUE;
-}
-#endif
-
-bool initializeInstance(VulkanInfo& inoutVulkanInfo, const ApplicationInfo& appInfo) noexcept
-{
-    VkResult vr = VK_SUCCESS;
-    uint32 layersCount = 0;
-    vr = vkEnumerateInstanceLayerProperties(&layersCount, nullptr);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT(false, "Failed to enumerate Vulkan instance layer properties.");
-        return false;
-    }
-
-    Array<VkLayerProperties> layers(layersCount);
-    vr = vkEnumerateInstanceLayerProperties(&layersCount, layers.GetData());
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT(false, "Failed to enumerate Vulkan instance layer properties.");
-        return false;
-    }
-
-    Array<std::string> listOfLayersToEnable;
-    // #if defined(LUDUS_RHI_ENABLE_VALIDATION_LAYER)
-    //     listOfLayersToEnable.Add("VK_LAYER_KHRONOS_validation");
-    // #endif
-
-    Array<const char*> enabledLayers;
-    enabledLayers.EnsureCapacity(listOfLayersToEnable.GetSize());
-    // Info logging is compiled out in Release.
-    for ([[maybe_unused]] const auto& layer : layers)
-    {
-        LUDUS_LOG_INFO(LOG_RHI, "Vulkan instance layer: {}", layer.layerName);
-    }
-
-    for (const auto& layerToEnable : listOfLayersToEnable)
-    {
-        if (std::find_if(layers.begin(), layers.end(), [&](const VkLayerProperties& lyr) {
-                return strcmp(lyr.layerName, layerToEnable.c_str()) == 0;
-            }) != layers.end())
-        {
-            LUDUS_LOG_INFO(LOG_RHI, "Enabling Vulkan instance layer: {}", layerToEnable);
-            enabledLayers.Add(layerToEnable.c_str());
-        }
-        else
-        {
-            LUDUS_ASSERT_F(false,
-                           "Vulkan instance layer not supported: {}",
-                           diagnostics::DiagnosticText{layerToEnable.data(), layerToEnable.size()});
-        }
-    }
-
-    uint32 extensionCount = 0;
-    vr = vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT(false, "Failed to enumerate Vulkan instance extension properties.");
-        return false;
-    }
-
-    Array<VkExtensionProperties> extensions(extensionCount);
-    vr = vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.GetData());
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT(false, "Failed to enumerate Vulkan instance extension properties.");
-        return false;
-    }
-
-    Array<std::string> listOfExtensionsToEnable;
-#if defined(LUDUS_RHI_ENABLE_VALIDATION_LAYER)
-    listOfExtensionsToEnable.Add(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-#endif
-    if (inoutVulkanInfo.ApiVersion < VK_API_VERSION_1_1)
-    {
-        listOfExtensionsToEnable.Add(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
-    }
-#if defined(VK_USE_PLATFORM_WAYLAND_KHR)
-    listOfExtensionsToEnable.Add(VK_KHR_SURFACE_EXTENSION_NAME);
-    listOfExtensionsToEnable.Add(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
-#endif
-
-    Array<const char*> enabledExtensions;
-    enabledExtensions.EnsureCapacity(listOfExtensionsToEnable.GetSize());
-    // Info logging is compiled out in Release.
-    for ([[maybe_unused]] const auto& extension : extensions)
-    {
-        LUDUS_LOG_INFO(LOG_RHI, "Vulkan instance extension: {}", extension.extensionName);
-    }
-
-    for (const auto& extensionToEnable : listOfExtensionsToEnable)
-    {
-        if (std::find_if(extensions.begin(), extensions.end(), [&](const VkExtensionProperties& ext) {
-                return strcmp(ext.extensionName, extensionToEnable.c_str()) == 0;
-            }) != extensions.end())
-        {
-            LUDUS_LOG_INFO(LOG_RHI, "Enabling Vulkan instance extension: {}", extensionToEnable);
-            enabledExtensions.Add(extensionToEnable.c_str());
-        }
-        else
-        {
-            LUDUS_LOG_ERROR(LOG_RHI, "Required Vulkan instance extension not supported: {}", extensionToEnable);
-            return false;
-        }
-    }
-
-    const void* pNext = nullptr;
-#if defined(LUDUS_RHI_ENABLE_VALIDATION_LAYER)
-    const VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-        .pNext = nullptr,
-        .flags = 0,
-        .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-                           VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                           VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-        .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                       VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
-        .pfnUserCallback = DebugUtilsMessengerCallback,
-        .pUserData = nullptr,
-    };
-
-    constexpr StaticArray<VkValidationFeatureEnableEXT, 5> enabledValidationFeatures = {
-        VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
-        VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
-        VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
-        VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT,
-        VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
-    };
-
-    const VkValidationFeaturesEXT validationFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,
-        .pNext = &debugCreateInfo,
-        .enabledValidationFeatureCount = static_cast<uint32>(enabledValidationFeatures.GetSize()),
-        .pEnabledValidationFeatures = enabledValidationFeatures.GetData(),
-        .disabledValidationFeatureCount = 0,
-        .pDisabledValidationFeatures = nullptr,
-    };
-    pNext = &validationFeatures;
-#endif
-
-    const VkApplicationInfo applicationInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pNext = nullptr,
-        .pApplicationName = appInfo.Name.c_str(),
-        .applicationVersion = appInfo.Version,
-        .pEngineName = "Ludus",
-        .engineVersion = 0,
-        .apiVersion = inoutVulkanInfo.ApiVersion,
-    };
-
-    const VkInstanceCreateInfo instanceCreateInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        .pNext = pNext,
-        .flags = 0,
-        .pApplicationInfo = &applicationInfo,
-        .enabledLayerCount = 0,
-        .ppEnabledLayerNames = nullptr,
-        .enabledExtensionCount = static_cast<uint32>(enabledExtensions.GetSize()),
-        .ppEnabledExtensionNames = enabledExtensions.GetData(),
-    };
-
-    vr = vkCreateInstance(&instanceCreateInfo, nullptr, &inoutVulkanInfo.Instance);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT(false, "Failed to create Vulkan instance.");
-        return false;
-    }
-    return true;
-}
-
-bool initializeGpuInfos(VulkanInfo& inoutVulkanInfo) noexcept
-{
-    VkResult vr = VK_SUCCESS;
-    if (inoutVulkanInfo.Instance == VK_NULL_HANDLE)
-    {
-        LUDUS_ASSERT(false, "Vulkan instance is not initialized.");
-        return false;
-    }
-
-    uint32 gpuCount = 0;
-    vr = vkEnumeratePhysicalDevices(inoutVulkanInfo.Instance, &gpuCount, nullptr);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT(false, "Failed to enumerate Vulkan physical devices.");
-        return false;
-    }
-
-    Array<VkPhysicalDevice> gpus(gpuCount);
-    vr = vkEnumeratePhysicalDevices(inoutVulkanInfo.Instance, &gpuCount, gpus.GetData());
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_ASSERT(false, "Failed to enumerate Vulkan physical devices.");
-        return false;
-    }
-
-    Array<GpuInfo> gpuInfos;
-    gpuInfos.EnsureCapacity(gpuCount);
-    for (uint32 i = 0; i < gpuCount; ++i)
-    {
-        GpuInfo gpuInfo
-        {
-            .PhysicalDevice = gpus[i],
-        };
-        const bool isInitialized = initializeGpuInfo(gpuInfo, inoutVulkanInfo);
-        if (isInitialized)
-        {
-            gpuInfos.Add(gpuInfo);
-        }
-    }
-
-    // TODO: Sort GPU infos based on its score
-
-    inoutVulkanInfo.GpuInfos = Move(gpuInfos);
-    return !inoutVulkanInfo.GpuInfos.IsEmpty();
-}
-
-bool initializeGpuInfo(GpuInfo& inoutGpuInfo, const VulkanInfo& vulkanInfo) noexcept
-{
-    void* pNext = nullptr;
-    if (vulkanInfo.ApiVersion >= VK_API_VERSION_1_2)
-    {
-        inoutGpuInfo.Vulkan11Properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES;
-        inoutGpuInfo.Vulkan11Properties.pNext = pNext;
-        pNext = &inoutGpuInfo.Vulkan11Properties;
-
-        inoutGpuInfo.Vulkan12Properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES;
-        inoutGpuInfo.Vulkan12Properties.pNext = pNext;
-        pNext = &inoutGpuInfo.Vulkan12Properties;
-    };
-    if (vulkanInfo.ApiVersion >= VK_API_VERSION_1_3)
-    {
-        inoutGpuInfo.Vulkan13Properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES;
-        inoutGpuInfo.Vulkan13Properties.pNext = pNext;
-        pNext = &inoutGpuInfo.Vulkan13Properties;
-    }
-    if (vulkanInfo.ApiVersion >= VK_API_VERSION_1_4)
-    {
-        inoutGpuInfo.Vulkan14Properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_PROPERTIES;
-        inoutGpuInfo.Vulkan14Properties.pNext = pNext;
-        pNext = &inoutGpuInfo.Vulkan14Properties;
-    }
-    inoutGpuInfo.AccelerationStructureProperties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
-    inoutGpuInfo.AccelerationStructureProperties.pNext = pNext;
-    pNext = &inoutGpuInfo.AccelerationStructureProperties;
-    inoutGpuInfo.RayTracingPipelineProperties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-    inoutGpuInfo.RayTracingPipelineProperties.pNext = pNext;
-    pNext = &inoutGpuInfo.RayTracingPipelineProperties;
-
-    inoutGpuInfo.Properties2 =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = pNext,
-        .properties = {},
-    };
-    vkGetPhysicalDeviceProperties2(inoutGpuInfo.PhysicalDevice, &inoutGpuInfo.Properties2);
-
-    LUDUS_LOG_INFO(LOG_RHI, "Found Vulkan physical device: {}", inoutGpuInfo.Properties2.properties.deviceName);
-
-    uint32 queueFamilyCount = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties2(inoutGpuInfo.PhysicalDevice, &queueFamilyCount, nullptr);
-    Array<VkQueueFamilyProperties2> queueFamilyProperties(queueFamilyCount,
-                                                          VkQueueFamilyProperties2
-                                                          {
-                                                              .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2,
-                                                              .pNext = nullptr,
-                                                          });
-    Array<VkQueueFamilyGlobalPriorityProperties> queueFamilyGlobalPriorityProperties(
-        queueFamilyCount,
-        VkQueueFamilyGlobalPriorityProperties
-        {
-            .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES_KHR,
-            .pNext = nullptr,
-        });
-    if (vulkanInfo.ApiVersion >= VK_API_VERSION_1_4)
-    {
-        for (uint32 i = 0; i < queueFamilyCount; ++i)
-        {
-            queueFamilyProperties[i].pNext = &queueFamilyGlobalPriorityProperties[i];
-        }
-    }
-    vkGetPhysicalDeviceQueueFamilyProperties2(inoutGpuInfo.PhysicalDevice,
-                                              &queueFamilyCount,
-                                              queueFamilyProperties.GetData());
-
-    inoutGpuInfo.QueueFamilyInfo.EnsureCapacity(queueFamilyCount);
-    for (uint32 i = 0; i < queueFamilyCount; ++i)
-    {
-        QueueFamilyInfo queueFamilyInfo
-        {
-            .Index = i,
-            .Properties = queueFamilyProperties[i],
-            .GlobalPriorityProperties = queueFamilyGlobalPriorityProperties[i],
-        };
-
-        inoutGpuInfo.QueueFamilyInfo.Add(queueFamilyInfo);
-    }
-
-    // Requirement Check
-    bool hasGraphicsQueue = false;
-    bool hasComputeQueue = false;
-    bool hasTransferQueue = false;
-    for (QueueFamilyInfo& queueFamilyInfo : inoutGpuInfo.QueueFamilyInfo)
-    {
-        if (queueFamilyInfo.Properties.queueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT)
-        {
-            hasGraphicsQueue = true;
-        }
-        if (queueFamilyInfo.Properties.queueFamilyProperties.queueFlags & VK_QUEUE_COMPUTE_BIT)
-        {
-            hasComputeQueue = true;
-        }
-        if (queueFamilyInfo.Properties.queueFamilyProperties.queueFlags & VK_QUEUE_TRANSFER_BIT)
-        {
-            hasTransferQueue = true;
-        }
-    }
-
-    if (!hasGraphicsQueue)
-    {
-        LUDUS_LOG_WARN(LOG_RHI,
-                       "No graphics queue found on the GPU {}. Skipping.",
-                       inoutGpuInfo.Properties2.properties.deviceName);
-        return false;
-    }
-    if (!hasComputeQueue)
-    {
-        LUDUS_LOG_WARN(LOG_RHI,
-                       "No compute queue found on the GPU {}. Skipping.",
-                       inoutGpuInfo.Properties2.properties.deviceName);
-        return false;
-    }
-    if (!hasTransferQueue)
-    {
-        LUDUS_LOG_WARN(LOG_RHI,
-                       "No transfer queue found on the GPU {}. Skipping.",
-                       inoutGpuInfo.Properties2.properties.deviceName);
-        return false;
-    }
-
-    float32 deviceTypeScore = 0.0f;
-    switch (inoutGpuInfo.Properties2.properties.deviceType)
-    {
-        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
-            deviceTypeScore = 1.0f;
-            break;
-        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
-            deviceTypeScore = 0.5f;
-            break;
-        default:
-            LUDUS_LOG_WARN(LOG_RHI,
-                           "The GPU {} is not a discrete or integrated GPU. Skipping.",
-                           inoutGpuInfo.Properties2.properties.deviceName);
-            return false;
-    }
-
-    pNext = nullptr;
-    inoutGpuInfo.MemoryBudgetProperties =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT,
-        .pNext = nullptr,
-    };
-    pNext = &inoutGpuInfo.MemoryBudgetProperties;
-    inoutGpuInfo.MemoryProperties2 =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2,
-        .pNext = pNext,
-    };
-    vkGetPhysicalDeviceMemoryProperties2(inoutGpuInfo.PhysicalDevice, &inoutGpuInfo.MemoryProperties2);
-
-    float32 memoryScore = 0.0f;
-    VkDeviceSize totalMemoryBudget = 0;
-    for (uint32 i = 0; i < inoutGpuInfo.MemoryProperties2.memoryProperties.memoryHeapCount; ++i)
-    {
-        totalMemoryBudget += inoutGpuInfo.MemoryBudgetProperties.heapBudget[i];
-    }
-
-    if (totalMemoryBudget == 0)
-    {
-        LUDUS_LOG_WARN(LOG_RHI,
-                       "The GPU {} has no memory budget. Skipping.",
-                       inoutGpuInfo.Properties2.properties.deviceName);
-        return false;
-    }
-    else if (totalMemoryBudget < (1024ull * 1024 * 1024)) // Less than 1GB
-    {
-        memoryScore = 0.1f;
-    }
-    else if (totalMemoryBudget < (4ull * 1024 * 1024 * 1024)) // Less than 4GB
-    {
-        memoryScore = 0.3f;
-    }
-    else if (totalMemoryBudget < (6ull * 1024 * 1024 * 1024)) // Less than 6GB
-    {
-        memoryScore = 0.5f;
-    }
-    else if (totalMemoryBudget < (8ull * 1024 * 1024 * 1024)) // Less than 8GB
-    {
-        memoryScore = 0.8f;
-    }
-    else if (totalMemoryBudget < (12ull * 1024 * 1024 * 1024)) // Less than 12GB
-    {
-        memoryScore = 0.9f;
-    }
-    else // 12GB or more
-    {
-        memoryScore = 1.0f;
-    }
-
-    float32 queueTopologyScore = 0.0f;
-    if (queueFamilyCount < 3)
-    {
-        queueTopologyScore = 0.0f; // Penalize if there are less than 3 queue families
-    }
-    else
-    {
-        Array<bool> graphicsQueueFamilies(queueFamilyCount);
-        Array<bool> computeQueueFamilies(queueFamilyCount);
-        Array<bool> transferQueueFamilies(queueFamilyCount);
-        for (uint32 i = 0; i < queueFamilyCount; ++i)
-        {
-            QueueFamilyInfo& queueFamilyInfo = inoutGpuInfo.QueueFamilyInfo[i];
-            if (queueFamilyInfo.Properties.queueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT)
-            {
-                graphicsQueueFamilies[i] = true;
-            }
-
-            if (queueFamilyInfo.Properties.queueFamilyProperties.queueFlags & VK_QUEUE_COMPUTE_BIT)
-            {
-                computeQueueFamilies[i] = true;
-            }
-
-            if (queueFamilyInfo.Properties.queueFamilyProperties.queueFlags & VK_QUEUE_TRANSFER_BIT)
-            {
-                transferQueueFamilies[i] = true;
-            }
-        }
-
-        uint32 dedicatedGraphicsQueueFamilyIndex = UINT32_MAX;
-        uint32 dedicatedComputeQueueFamilyIndex = UINT32_MAX;
-        uint32 dedicatedTransferQueueFamilyIndex = UINT32_MAX;
-        for (uint32 i = 0; i < queueFamilyCount; ++i)
-        {
-            if (graphicsQueueFamilies[i] && !computeQueueFamilies[i] && !transferQueueFamilies[i])
-            {
-                dedicatedGraphicsQueueFamilyIndex = i;
-            }
-
-            if (computeQueueFamilies[i] && !graphicsQueueFamilies[i] && !transferQueueFamilies[i])
-            {
-                dedicatedComputeQueueFamilyIndex = i;
-            }
-
-            if (transferQueueFamilies[i] && !graphicsQueueFamilies[i] && !computeQueueFamilies[i])
-            {
-                dedicatedTransferQueueFamilyIndex = i;
-            }
-        }
-
-        for (uint32 i = 0; i < queueFamilyCount; ++i)
-        {
-            if (dedicatedGraphicsQueueFamilyIndex == i || dedicatedComputeQueueFamilyIndex == i ||
-                dedicatedTransferQueueFamilyIndex == i)
-            {
-                continue; // Skip this iteration if the queue family is already dedicated
-            }
-
-            if (dedicatedGraphicsQueueFamilyIndex == UINT32_MAX && graphicsQueueFamilies[i])
-            {
-                dedicatedGraphicsQueueFamilyIndex = i;
-            }
-
-            if (dedicatedComputeQueueFamilyIndex == UINT32_MAX && computeQueueFamilies[i])
-            {
-                dedicatedComputeQueueFamilyIndex = i;
-            }
-
-            if (dedicatedTransferQueueFamilyIndex == UINT32_MAX && transferQueueFamilies[i])
-            {
-                dedicatedTransferQueueFamilyIndex = i;
-            }
-        }
-
-        if (dedicatedGraphicsQueueFamilyIndex != UINT32_MAX)
-        {
-            queueTopologyScore += 1.0f; // Assign a score for having a dedicated graphics queue
-        }
-
-        if (dedicatedComputeQueueFamilyIndex != UINT32_MAX)
-        {
-            queueTopologyScore += 1.0f; // Assign a score for having a dedicated compute queue
-        }
-
-        if (dedicatedTransferQueueFamilyIndex != UINT32_MAX)
-        {
-            queueTopologyScore += 1.0f; // Assign a score for having a dedicated transfer queue
-        }
-        queueTopologyScore /= 3.0f; // Normalize the queue topology score to a maximum of 1.0f
-    }
-
-    inoutGpuInfo.Score = deviceTypeScore + memoryScore + queueTopologyScore;
-
-    for (uint32 i = 0; i < queueFamilyCount; ++i)
-    {
-        QueueFamilyInfo& queueFamilyInfo = inoutGpuInfo.QueueFamilyInfo[i];
-
-        if (vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR != nullptr)
-        {
-            uint32 performanceQueryCounterCount = 0;
-            vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR(inoutGpuInfo.PhysicalDevice,
-                                                                            i,
-                                                                            &performanceQueryCounterCount,
-                                                                            nullptr,
-                                                                            nullptr);
-            queueFamilyInfo.PerformanceCounters.Resize(performanceQueryCounterCount);
-            queueFamilyInfo.PerformanceCounterDescriptions.Resize(performanceQueryCounterCount);
-            vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR(
-                inoutGpuInfo.PhysicalDevice,
-                i,
-                &performanceQueryCounterCount,
-                queueFamilyInfo.PerformanceCounters.GetData(),
-                queueFamilyInfo.PerformanceCounterDescriptions.GetData());
-        }
-    }
-
-    return true;
-}
-
-bool initializeDeviceInfo(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo, const VulkanInfo& vulkanInfo) noexcept
-{
-    VkResult vr = VK_SUCCESS;
-
-    uint32 extensionPropertyCount = 0;
-    vr = vkEnumerateDeviceExtensionProperties(gpuInfo.PhysicalDevice, nullptr, &extensionPropertyCount, nullptr);
-    if (vr != VK_SUCCESS)
-    {
-        return false;
-    }
-    Array<VkExtensionProperties> extensionProperties(extensionPropertyCount);
-    vr = vkEnumerateDeviceExtensionProperties(gpuInfo.PhysicalDevice,
-                                              nullptr,
-                                              &extensionPropertyCount,
-                                              extensionProperties.GetData());
-    if (vr != VK_SUCCESS)
-    {
-        return false;
-    }
-
-    Array<VkExtensionProperties> extensionsToRequest;
-    extensionsToRequest.Add(
-    {
-        .extensionName = VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-    });
-    if (vulkanInfo.ApiVersion < VK_API_VERSION_1_4)
-    {
-        extensionsToRequest.Add(
-        {
-            .extensionName = VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME,
-        });
-    }
-    if (vulkanInfo.ApiVersion < VK_API_VERSION_1_3)
-    {
-        extensionsToRequest.Add(
-        {
-            .extensionName = VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
-        });
-    }
-    extensionsToRequest.Add(
-    {
-        .extensionName = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-    });
-    extensionsToRequest.Add(
-    {
-        .extensionName = VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
-    });
-    extensionsToRequest.Add(
-    {
-        .extensionName = VK_KHR_RAY_QUERY_EXTENSION_NAME,
-    });
-    extensionsToRequest.Add(
-    {
-        .extensionName = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME,
-    });
-    extensionsToRequest.Add(
-    {
-        .extensionName = VK_EXT_MESH_SHADER_EXTENSION_NAME,
-    });
-    extensionsToRequest.Add(
-    {
-        .extensionName = VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME,
-    });
-    extensionsToRequest.Add(
-    {
-        .extensionName = VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME,
-    });
-    extensionsToRequest.Add(
-    {
-        .extensionName = VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME,
-    });
-    extensionsToRequest.Add(
-    {
-        .extensionName = VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME,
-    });
-    extensionsToRequest.Add(
-    {
-        .extensionName = VK_EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_EXTENSION_NAME,
-    });
-
-    for (uint32 i = 0; i < extensionPropertyCount; ++i)
-    {
-        LUDUS_LOG_INFO(LOG_RHI, "Found device extension: {}", extensionProperties[i].extensionName);
-    }
-
-    uint32 extensionsToRequestCount = static_cast<uint32>(extensionsToRequest.GetSize());
-    Array<const char*> requestedExtensions;
-    for (uint32 i = 0; i < extensionsToRequestCount; ++i)
-    {
-        if (std::find_if(extensionProperties.GetData(),
-                         extensionProperties.GetData() + extensionPropertyCount,
-                         [&](const VkExtensionProperties& ext) {
-                             return strcmp(ext.extensionName, extensionsToRequest[i].extensionName) == 0;
-                         }) != extensionProperties.GetData() + extensionPropertyCount)
-        {
-            LUDUS_LOG_INFO(LOG_RHI, "Requesting device extension: {}", extensionsToRequest[i].extensionName);
-            requestedExtensions.Add(extensionsToRequest[i].extensionName);
-        }
-        else
-        {
-            LUDUS_LOG_WARN(LOG_RHI, "Device extension not found: {}", extensionsToRequest[i].extensionName);
-        }
-    }
-
-    void* pNext = nullptr;
-    inoutDeviceInfo.Features2 =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-        .pNext = nullptr,
-        .features = {},
-    };
-    pNext = &inoutDeviceInfo.Features2;
-    if (vulkanInfo.ApiVersion >= VK_API_VERSION_1_1)
-    {
-        inoutDeviceInfo.Vulkan11Features =
-        {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
-            .pNext = pNext,
-        };
-        pNext = &inoutDeviceInfo.Vulkan11Features;
-    }
-    if (vulkanInfo.ApiVersion >= VK_API_VERSION_1_2)
-    {
-        inoutDeviceInfo.Vulkan12Features =
-        {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-            .pNext = pNext,
-        };
-        pNext = &inoutDeviceInfo.Vulkan12Features;
-    }
-    if (vulkanInfo.ApiVersion >= VK_API_VERSION_1_3)
-    {
-        inoutDeviceInfo.Vulkan13Features =
-        {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-            .pNext = pNext,
-        };
-        pNext = &inoutDeviceInfo.Vulkan13Features;
-    }
-    if (vulkanInfo.ApiVersion >= VK_API_VERSION_1_4)
-    {
-        inoutDeviceInfo.Vulkan14Features =
-        {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
-            .pNext = pNext,
-        };
-        pNext = &inoutDeviceInfo.Vulkan14Features;
-    }
-    inoutDeviceInfo.AccelerationStructureFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
-        .pNext = pNext,
-    };
-    pNext = &inoutDeviceInfo.AccelerationStructureFeatures;
-    inoutDeviceInfo.RayTracingPipelineFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
-        .pNext = pNext,
-    };
-    pNext = &inoutDeviceInfo.RayTracingPipelineFeatures;
-    inoutDeviceInfo.RayQueryFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
-        .pNext = pNext,
-    };
-    pNext = &inoutDeviceInfo.RayQueryFeatures;
-    inoutDeviceInfo.MeshShaderFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,
-        .pNext = pNext,
-    };
-    pNext = &inoutDeviceInfo.MeshShaderFeatures;
-    inoutDeviceInfo.DescriptorBufferFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT,
-        .pNext = pNext,
-    };
-    pNext = &inoutDeviceInfo.DescriptorBufferFeatures;
-    inoutDeviceInfo.FragmentShadingRateFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR,
-        .pNext = pNext,
-    };
-    pNext = &inoutDeviceInfo.FragmentShadingRateFeatures;
-
-    inoutDeviceInfo.GraphicsPipelineLibraryFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT,
-        .pNext = pNext,
-    };
-    pNext = &inoutDeviceInfo.GraphicsPipelineLibraryFeatures;
-
-    inoutDeviceInfo.MemoryPriorityFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT,
-        .pNext = pNext,
-    };
-    pNext = &inoutDeviceInfo.MemoryPriorityFeatures;
-
-    inoutDeviceInfo.PageableDeviceLocalMemoryFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PAGEABLE_DEVICE_LOCAL_MEMORY_FEATURES_EXT,
-        .pNext = pNext,
-    };
-    pNext = &inoutDeviceInfo.PageableDeviceLocalMemoryFeatures;
-
-#if defined(LUDUS_RHI_DEVICE_DEBUG_FEATURES_PROFILE)
-    inoutDeviceInfo.PerformanceQueryFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PERFORMANCE_QUERY_FEATURES_KHR,
-        .pNext = pNext,
-    };
-    pNext = &inoutDeviceInfo.PerformanceQueryFeatures;
-#endif
-
-#if defined(LUDUS_RHI_DEVICE_DEBUG_FEATURES)
-    inoutDeviceInfo.PipelineExecutablePropertiesFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
-        .pNext = pNext,
-    };
-    pNext = &inoutDeviceInfo.PipelineExecutablePropertiesFeatures;
-
-    inoutDeviceInfo.DeviceMemoryReportFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_MEMORY_REPORT_FEATURES_EXT,
-        .pNext = pNext,
-    };
-    pNext = &inoutDeviceInfo.DeviceMemoryReportFeatures;
-
-    inoutDeviceInfo.FaultFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT,
-        .pNext = pNext,
-    };
-    pNext = &inoutDeviceInfo.FaultFeatures;
-#endif
-
-    // One queue from each selected family; a shared graphics/present family is
-    // requested only once. Priority storage remains alive through vkCreateDevice.
-    constexpr float32 queuePriority = 1.0f;
-    Array<VkDeviceQueueCreateInfo> queueCreateInfos;
-    queueCreateInfos.EnsureCapacity(2);
-    for (const QueueFamilyInfo& family : gpuInfo.QueueFamilyInfo)
-    {
-        if (family.Index != gpuInfo.GraphicsQueueFamilyIndex && family.Index != gpuInfo.PresentQueueFamilyIndex)
-        {
-            continue;
-        }
-        queueCreateInfos.Add(VkDeviceQueueCreateInfo
-        {
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = family.Index,
-            .queueCount = 1,
-            .pQueuePriorities = &queuePriority,
-        });
-    }
-
-    const VkDeviceCreateInfo deviceCreateInfo
-    {
-        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = pNext,
-        .flags = 0,
-        .queueCreateInfoCount = static_cast<uint32>(queueCreateInfos.GetSize()),
-        .pQueueCreateInfos = queueCreateInfos.GetData(),
-        .enabledLayerCount = 0,
-        .ppEnabledLayerNames = nullptr,
-        .enabledExtensionCount = static_cast<uint32>(requestedExtensions.GetSize()),
-        .ppEnabledExtensionNames = requestedExtensions.GetData(),
-        .pEnabledFeatures = nullptr,
-    };
-    vr = vkCreateDevice(gpuInfo.PhysicalDevice, &deviceCreateInfo, nullptr, &inoutDeviceInfo.Device);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to create Vulkan device: {}", vr);
-        return false;
-    }
-    return true;
-}
-
-void shutdownDevice(DeviceInfo& inoutDeviceInfo) noexcept
-{
-    if (inoutDeviceInfo.Device != VK_NULL_HANDLE)
-    {
-        for (SemaphoreInfo& semaphoreInfo : inoutDeviceInfo.SemaphoreInfos)
-        {
-            shutdownSemaphore(semaphoreInfo, inoutDeviceInfo);
-        }
-        inoutDeviceInfo.SemaphoreInfos.Clear();
-        for (FenceInfo& fenceInfo : inoutDeviceInfo.FenceInfos)
-        {
-            shutdownFence(fenceInfo, inoutDeviceInfo);
-        }
-        inoutDeviceInfo.FenceInfos.Clear();
-
-        vkDestroyDevice(inoutDeviceInfo.Device, nullptr);
-        inoutDeviceInfo = {};
-    }
-}
-
-void initializeQueues(QueueFamilyInfo& inoutQueueFamilyInfo, const DeviceInfo& deviceInfo) noexcept
-{
-    const uint32 inoutQueueFamilyIndex = inoutQueueFamilyInfo.Properties.queueFamilyProperties.queueCount;
-    for (uint32 i = 0; i < inoutQueueFamilyIndex; ++i)
-    {
-        QueueInfo queueInfo = {};
-        vkGetDeviceQueue(deviceInfo.Device, inoutQueueFamilyInfo.Index, i, &queueInfo.Queue);
-        inoutQueueFamilyInfo.QueueInfos.Add(queueInfo);
-    }
-    LUDUS_LOG_INFO(LOG_RHI,
-                   "Initialized {} queues for family index {}",
-                   inoutQueueFamilyInfo.QueueInfos.GetSize(),
-                   inoutQueueFamilyInfo.Index);
-}
-
-bool initializeWindowSystemIntegration(WindowSystemIntegrationInfo& inoutWsiInfo, const VulkanInfo& vulkanInfo) noexcept
-{
-    bool result = false;
-#if defined(VK_USE_PLATFORM_WAYLAND_KHR)
-    if (inoutWsiInfo.WindowInfo.System != platform::WindowSystem::Wayland ||
-        inoutWsiInfo.WindowInfo.Display == nullptr || inoutWsiInfo.WindowInfo.Surface == nullptr ||
-        vkCreateWaylandSurfaceKHR == nullptr)
-    {
-        return result;
-    }
-    VkResult vr = VK_SUCCESS;
-
-    const VkWaylandSurfaceCreateInfoKHR waylandSurfaceCreateInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
-        .display = inoutWsiInfo.WindowInfo.Display,
-        .surface = inoutWsiInfo.WindowInfo.Surface,
-    };
-
-    vr = vkCreateWaylandSurfaceKHR(vulkanInfo.Instance,
-                                   &waylandSurfaceCreateInfo,
-                                   nullptr,
-                                   &inoutWsiInfo.SurfaceInfo.Surface);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to create Wayland surface: {}", vr);
-        return result;
-    }
-
-    result = true;
-#else
-    (void)inoutWsiInfo;
-    (void)vulkanInfo;
-#endif
-
-    if (!result)
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to initialize window system integration.");
-        shutdownWindowSystemIntegration(inoutWsiInfo, vulkanInfo);
-        return false;
-    }
-
-    return result;
-}
-
-void shutdownWindowSystemIntegration(WindowSystemIntegrationInfo& inoutWsiInfo, const VulkanInfo& vulkanInfo) noexcept
-{
-    if (inoutWsiInfo.SurfaceInfo.Surface != VK_NULL_HANDLE)
-    {
-        vkDestroySurfaceKHR(vulkanInfo.Instance, inoutWsiInfo.SurfaceInfo.Surface, nullptr);
-        inoutWsiInfo.SurfaceInfo.Surface = VK_NULL_HANDLE;
-    }
-    inoutWsiInfo = {};
-}
-
-bool initializeSwapchain(WindowSystemIntegrationInfo& inoutWsiInfo, DeviceInfo& deviceInfo) noexcept
-{
-    VkResult vr = VK_SUCCESS;
-
-    const VkSwapchainCreateInfoKHR swapchainCreateInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .surface = inoutWsiInfo.SurfaceInfo.Surface,
-        .minImageCount = static_cast<uint32>(inoutWsiInfo.ImageInfos.GetSize()),
-        .imageFormat = inoutWsiInfo.ImageInfos[0].ImageFormat,
-        .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
-        .imageExtent = inoutWsiInfo.ImageInfos[0].ImageExtent,
-        .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
-        .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode = VK_PRESENT_MODE_FIFO_KHR,
-        .clipped = VK_TRUE,
-        .oldSwapchain = VK_NULL_HANDLE,
-    };
-
-    vr = vkCreateSwapchainKHR(deviceInfo.Device, &swapchainCreateInfo, nullptr, &inoutWsiInfo.Swapchain);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to create swapchain: {}", vr);
-        return false;
-    }
-
-    uint32 swapchainImageCount = 0;
-    vr = vkGetSwapchainImagesKHR(deviceInfo.Device, inoutWsiInfo.Swapchain, &swapchainImageCount, nullptr);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to get swapchain image count: {}", vr);
-        return false;
-    }
-
-    Array<VkImage> swapchainImages(swapchainImageCount);
-    vr = vkGetSwapchainImagesKHR(deviceInfo.Device,
-                                 inoutWsiInfo.Swapchain,
-                                 &swapchainImageCount,
-                                 reinterpret_cast<VkImage*>(swapchainImages.GetData()));
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to get swapchain images: {}", vr);
-        return false;
-    }
-
-    inoutWsiInfo.RenderFinishedSemaphoreIndices.EnsureCapacity(swapchainImageCount);
-    ImageInfo imageInfoCopy = inoutWsiInfo.ImageInfos[0];
-    inoutWsiInfo.ImageInfos.Resize(swapchainImageCount, imageInfoCopy);
-    for (uint32 i = 0; i < swapchainImageCount; ++i)
-    {
-        inoutWsiInfo.ImageInfos[i].Image = swapchainImages[i];
-
-        uint32 renderFinishedSemaphoreIndex = 0;
-        if (!initializeSemaphore(renderFinishedSemaphoreIndex, deviceInfo))
-        {
-            LUDUS_ASSERT(false, "Failed to initialize semaphore.");
-        }
-        inoutWsiInfo.RenderFinishedSemaphoreIndices.Add(renderFinishedSemaphoreIndex);
-    }
-
-    return true;
-}
-
-void shutdownSwapchain(WindowSystemIntegrationInfo& inoutWsiInfo, const DeviceInfo& deviceInfo) noexcept
-{
-    if (inoutWsiInfo.Swapchain != VK_NULL_HANDLE)
-    {
-        vkDestroySwapchainKHR(deviceInfo.Device, inoutWsiInfo.Swapchain, nullptr);
-        inoutWsiInfo.Swapchain = VK_NULL_HANDLE;
-    }
-}
-
-bool initializeCommands(DeviceInfo& inoutDeviceInfo, const GpuInfo& gpuInfo) noexcept
-{
-    VkResult vr = VK_SUCCESS;
-    CommandPoolInfo commandPoolInfo = {};
-    const VkCommandPoolCreateInfo commandPoolCreateInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = gpuInfo.GraphicsQueueFamilyIndex,
-    };
-    vr = vkCreateCommandPool(inoutDeviceInfo.Device, &commandPoolCreateInfo, nullptr, &commandPoolInfo.CommandPool);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to create command pool: {}", vr);
-        return false;
-    }
-    inoutDeviceInfo.CommandPoolInfos.Add(commandPoolInfo);
-
-    return true;
-}
-
-void shutdownCommands(DeviceInfo& inoutDeviceInfo) noexcept
-{
-    // Implementation for shutting down command pools and related resources
-    for (CommandPoolInfo& commandPoolInfo : inoutDeviceInfo.CommandPoolInfos)
-    {
-        for (CommandBufferInfo& commandBufferInfo : commandPoolInfo.CommandBufferInfos)
-        {
-            vkFreeCommandBuffers(inoutDeviceInfo.Device,
-                                 commandPoolInfo.CommandPool,
-                                 1,
-                                 &commandBufferInfo.CommandBuffer);
-        }
-        vkDestroyCommandPool(inoutDeviceInfo.Device, commandPoolInfo.CommandPool, nullptr);
-        commandPoolInfo.CommandPool = VK_NULL_HANDLE;
-    }
-    inoutDeviceInfo.CommandPoolInfos.Clear();
-}
-
-bool initializeSemaphore(uint32& outSemaphoreIndex, DeviceInfo& inoutDeviceInfo) noexcept
-{
-    VkResult vr = VK_SUCCESS;
-    SemaphoreInfo semaphoreInfo = {};
-    const VkSemaphoreCreateInfo semaphoreCreateInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-    };
-    vr = vkCreateSemaphore(inoutDeviceInfo.Device, &semaphoreCreateInfo, nullptr, &semaphoreInfo.Semaphore);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to create semaphore: {}", vr);
-        return false;
-    }
-    outSemaphoreIndex = inoutDeviceInfo.SemaphoreInfos.GetSize();
-    inoutDeviceInfo.SemaphoreInfos.Add(semaphoreInfo);
-    return true;
-}
-
-void shutdownSemaphore(SemaphoreInfo& inoutSemaphoreInfo, DeviceInfo& inoutDeviceInfo) noexcept
-{
-    if (inoutSemaphoreInfo.Semaphore != VK_NULL_HANDLE)
-    {
-        vkDestroySemaphore(inoutDeviceInfo.Device, inoutSemaphoreInfo.Semaphore, nullptr);
-        inoutSemaphoreInfo.Semaphore = VK_NULL_HANDLE;
-    }
-}
-
-bool initializeFence(uint32& outFenceIndex, DeviceInfo& inoutDeviceInfo) noexcept
-{
-    VkResult vr = VK_SUCCESS;
-    FenceInfo fenceInfo = {};
-    const VkFenceCreateInfo fenceCreateInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = VK_FENCE_CREATE_SIGNALED_BIT,
-    };
-    vr = vkCreateFence(inoutDeviceInfo.Device, &fenceCreateInfo, nullptr, &fenceInfo.Fence);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to create fence: {}", vr);
-        return false;
-    }
-    outFenceIndex = inoutDeviceInfo.FenceInfos.GetSize();
-    inoutDeviceInfo.FenceInfos.Add(fenceInfo);
-    return true;
-}
-
-void shutdownFence(FenceInfo& inoutFenceInfo, DeviceInfo& inoutDeviceInfo) noexcept
-{
-    if (inoutFenceInfo.Fence != VK_NULL_HANDLE)
-    {
-        vkDestroyFence(inoutDeviceInfo.Device, inoutFenceInfo.Fence, nullptr);
-        inoutFenceInfo.Fence = VK_NULL_HANDLE;
-    }
-}
-
-bool createCommandBufferInfo(uint32& outCommandBufferInfoIndex,
-                             CommandPoolInfo& inoutCommandPoolInfo,
-                             const DeviceInfo& deviceInfo) noexcept
-{
-    VkResult vr = VK_SUCCESS;
-
-    CommandBufferInfo commandBufferInfo = {};
-    const VkCommandBufferAllocateInfo commandBufferAllocateInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .pNext = nullptr,
-        .commandPool = inoutCommandPoolInfo.CommandPool,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
-    };
-    vr = vkAllocateCommandBuffers(deviceInfo.Device, &commandBufferAllocateInfo, &commandBufferInfo.CommandBuffer);
-    if (vr != VK_SUCCESS)
-    {
-        LUDUS_LOG_ERROR(LOG_RHI, "Failed to allocate command buffer: {}", vr);
-        return false;
-    }
-    outCommandBufferInfoIndex = inoutCommandPoolInfo.CommandBufferInfos.GetSize();
-    inoutCommandPoolInfo.CommandBufferInfos.Add(commandBufferInfo);
-
-    return true;
-}
-} // namespace ludus::graphics::rhi::backend
-
-namespace ludus::graphics::rhi::backend
-{
+} // namespace
 Backend Kind() noexcept
 {
     return Backend::Vulkan;
 }
-StartupError Start(const ApplicationInfo& app, const WindowInfo& window, ludus::foundation::uint32 token) noexcept
+bool Initialize(const ApplicationInfo& app) noexcept
 {
-    if (window.System != ludus::platform::WindowSystem::Wayland || window.Display == nullptr ||
-        window.Surface == nullptr)
+    if (gInstance != VK_NULL_HANDLE)
+    {
+        return true;
+    }
+    if (!Check(volkInitialize()))
+    {
+        return false;
+    }
+    const char* extensions[4] = {VK_KHR_SURFACE_EXTENSION_NAME, "VK_KHR_wayland_surface"};
+    uint32 extensionCount = 0;
+#if defined(VK_USE_PLATFORM_WAYLAND_KHR)
+    extensionCount = 2;
+    uint32 availableCount = 0;
+    if (!Check(vkEnumerateInstanceExtensionProperties(nullptr, &availableCount, nullptr)) || availableCount > 128)
+    {
+        volkFinalize();
+        return false;
+    }
+    VkExtensionProperties available[128]{};
+    if (!Check(vkEnumerateInstanceExtensionProperties(nullptr, &availableCount, available)))
+    {
+        volkFinalize();
+        return false;
+    }
+    bool caps = false, maintenance = false;
+    for (usize i = 0; i < availableCount; ++i)
+    {
+        caps = caps || std::strcmp(available[i].extensionName, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME) == 0;
+        maintenance =
+            maintenance || std::strcmp(available[i].extensionName, VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME) == 0;
+    }
+    gInstanceMaintenance = caps && maintenance;
+    if (gInstanceMaintenance)
+    {
+        extensions[extensionCount++] = VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
+        extensions[extensionCount++] = VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
+    }
+#endif
+    VkApplicationInfo application{};
+    application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    application.pApplicationName = app.Name.c_str();
+    application.applicationVersion = app.Version;
+    application.apiVersion = VK_API_VERSION_1_1;
+    VkInstanceCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    info.pApplicationInfo = &application;
+    info.enabledExtensionCount = extensionCount;
+    info.ppEnabledExtensionNames = extensions;
+    if (!Check(vkCreateInstance(&info, nullptr, &gInstance)))
+    {
+        volkFinalize();
+        return false;
+    }
+    volkLoadInstance(gInstance);
+    return true;
+}
+bool ConnectWindow(const WindowInfo& window) noexcept
+{
+    if (gInstance == VK_NULL_HANDLE)
+    {
+        return false;
+    }
+    if (gDevice != VK_NULL_HANDLE)
+    {
+        return gWindow.System == window.System && gWindow.Display == window.Display &&
+               gWindow.Surface == window.Surface;
+    }
+    gWindow = window;
+    gHeadless = window.System == platform::WindowSystem::Headless;
+    if (!gHeadless)
+    {
+#if defined(VK_USE_PLATFORM_WAYLAND_KHR)
+        if (window.System != platform::WindowSystem::Wayland || window.Display == nullptr || window.Surface == nullptr)
+        {
+            return false;
+        }
+        VkWaylandSurfaceCreateInfoKHR info{};
+        info.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
+        info.display = window.Display;
+        info.surface = window.Surface;
+        if (!Check(vkCreateWaylandSurfaceKHR(gInstance, &info, nullptr, &gSurface)))
+        {
+            return false;
+        }
+#else
+        return false;
+#endif
+    }
+    uint32 count = 0;
+    if (!Check(vkEnumeratePhysicalDevices(gInstance, &count, nullptr)) || count == 0 || count > 32)
+    {
+        return false;
+    }
+    VkPhysicalDevice devices[32]{};
+    if (!Check(vkEnumeratePhysicalDevices(gInstance, &count, devices)))
+    {
+        return false;
+    }
+    for (usize i = 0; i < count; ++i)
+    {
+        uint32 families = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(devices[i], &families, nullptr);
+        if (families > 32)
+        {
+            continue;
+        }
+        VkQueueFamilyProperties properties[32]{};
+        vkGetPhysicalDeviceQueueFamilyProperties(devices[i], &families, properties);
+        for (usize j = 0; j < families; ++j)
+        {
+            VkBool32 present = VK_TRUE;
+            if (!gHeadless &&
+                !Check(vkGetPhysicalDeviceSurfaceSupportKHR(devices[i], static_cast<uint32>(j), gSurface, &present)))
+            {
+                continue;
+            }
+            if (properties[j].queueCount != 0 && (properties[j].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0 &&
+                present == VK_TRUE)
+            {
+                gPhysical = devices[i];
+                gFamily = static_cast<uint32>(j);
+                break;
+            }
+        }
+        if (gPhysical != VK_NULL_HANDLE)
+        {
+            break;
+        }
+    }
+    if (gPhysical == VK_NULL_HANDLE)
+    {
+        return false;
+    }
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(gPhysical, &properties);
+    if (properties.apiVersion < VK_API_VERSION_1_1)
+    {
+        LUDUS_LOG_ERROR(LOG_RHI, "Vulkan 1.1 is required for the generated SPIR-V profile");
+        return false;
+    }
+    gMaxDimension = properties.limits.maxImageDimension2D;
+    LUDUS_LOG_INFO(LOG_RHI, "Vulkan adapter: {}", properties.deviceName);
+    const float32 priority = 1;
+    VkDeviceQueueCreateInfo queue{};
+    queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queue.queueFamilyIndex = gFamily;
+    queue.queueCount = 1;
+    queue.pQueuePriorities = &priority;
+    const char* extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME};
+    VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT maintenance{};
+    maintenance.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
+    if (!gHeadless)
+    {
+        uint32 countExtensions = 0;
+        if (!gInstanceMaintenance ||
+            !Check(vkEnumerateDeviceExtensionProperties(gPhysical, nullptr, &countExtensions, nullptr)) ||
+            countExtensions > 512)
+        {
+            LUDUS_LOG_ERROR(LOG_RHI, "Wayland rendering requires surface/swapchain maintenance1 for safe retirement");
+            return false;
+        }
+        VkExtensionProperties propertiesExtensions[512]{};
+        if (!Check(vkEnumerateDeviceExtensionProperties(gPhysical, nullptr, &countExtensions, propertiesExtensions)))
+        {
+            return false;
+        }
+        bool supported = false;
+        for (usize i = 0; i < countExtensions; ++i)
+        {
+            supported = supported || std::strcmp(propertiesExtensions[i].extensionName, extensions[1]) == 0;
+        }
+        if (!supported)
+        {
+            LUDUS_LOG_ERROR(LOG_RHI, "VK_EXT_swapchain_maintenance1 is required for safe presentation retirement");
+            return false;
+        }
+        VkPhysicalDeviceFeatures2 features{};
+        features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        features.pNext = &maintenance;
+        vkGetPhysicalDeviceFeatures2(gPhysical, &features);
+        if (maintenance.swapchainMaintenance1 != VK_TRUE)
+        {
+            return false;
+        }
+    }
+    VkDeviceCreateInfo device{};
+    device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    device.queueCreateInfoCount = 1;
+    device.pQueueCreateInfos = &queue;
+    device.enabledExtensionCount = gHeadless ? 0U : 2U;
+    device.ppEnabledExtensionNames = extensions;
+    device.pNext = gHeadless ? nullptr : &maintenance;
+    if (!Check(vkCreateDevice(gPhysical, &device, nullptr, &gDevice)))
+    {
+        return false;
+    }
+    volkLoadDevice(gDevice);
+    vkGetDeviceQueue(gDevice, gFamily, 0, &gQueue);
+    gTarget.Width = window.Width;
+    gTarget.Height = window.Height;
+    if (gTarget.Width == 0 || gTarget.Height == 0 || gTarget.Width > gMaxDimension || gTarget.Height > gMaxDimension)
+    {
+        return false;
+    }
+    gRequestedExtent = { .width = gTarget.Width, .height = gTarget.Height };
+    return CreateTargets();
+}
+bool InitializeRendering() noexcept
+{
+    if (gDevice == VK_NULL_HANDLE)
+    {
+        return false;
+    }
+    if (gCommands != VK_NULL_HANDLE)
+    {
+        return true;
+    }
+    VkCommandPoolCreateInfo pool{};
+    pool.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pool.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    pool.queueFamilyIndex = gFamily;
+    if (!Check(vkCreateCommandPool(gDevice, &pool, nullptr, &gCommands)))
+    {
+        return false;
+    }
+    for (auto& frame : gFrames)
+    {
+        VkCommandBufferAllocateInfo allocate{};
+        allocate.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocate.commandPool = gCommands;
+        allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocate.commandBufferCount = 1;
+        if (!Check(vkAllocateCommandBuffers(gDevice, &allocate, &frame.Command)))
+        {
+            return false;
+        }
+        VkFenceCreateInfo fence{};
+        fence.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fence.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        VkSemaphoreCreateInfo semaphore{};
+        semaphore.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        if (!Check(vkCreateFence(gDevice, &fence, nullptr, &frame.Fence)) ||
+            !Check(vkCreateSemaphore(gDevice, &semaphore, nullptr, &frame.Acquired)))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+StartupError Start(const ApplicationInfo& app, const WindowInfo& window, uint32 token) noexcept
+{
+    if (window.System != platform::WindowSystem::Headless &&
+        (window.System != platform::WindowSystem::Wayland || window.Display == nullptr || window.Surface == nullptr))
     {
         return StartupError::InvalidWindow;
     }
+    gSession = token;
     if (!backend::Initialize(app))
     {
         return StartupError::InstanceUnavailable;
@@ -1808,23 +708,606 @@ StartupError Start(const ApplicationInfo& app, const WindowInfo& window, ludus::
     }
     if (!InitializeRendering())
     {
-        ShutdownRendering();
         return StartupError::RenderingUnavailable;
     }
-    gManagedRendering = true;
-    internal::Complete(token, StartupError::None, 0);
+    internal::Complete(token, StartupError::None, gMaxDimension);
     return StartupError::None;
 }
-FrameStatus SetTarget(const FrameTarget&) noexcept
+void ShutdownRendering() noexcept
 {
-    return FrameStatus::Unsupported;
+    if (gDevice == VK_NULL_HANDLE)
+    {
+        return;
+    }
+    RetireAcquiredImage();
+    WaitIdle();
+    WaitPresents();
+    for (auto& frame : gFrames)
+    {
+        vkDestroyFence(gDevice, frame.Fence, nullptr);
+        vkDestroySemaphore(gDevice, frame.Acquired, nullptr);
+        frame = {};
+    }
+    vkDestroyCommandPool(gDevice, gCommands, nullptr);
+    gCommands = VK_NULL_HANDLE;
+    gEncoding = false;
+}
+void Shutdown() noexcept
+{
+    ShutdownRendering();
+    ReleaseTargets();
+    if (gDevice != VK_NULL_HANDLE)
+    {
+        vkDestroyRenderPass(gDevice, gPass, nullptr);
+        gPass = VK_NULL_HANDLE;
+        vkDestroyDevice(gDevice, nullptr);
+        gDevice = VK_NULL_HANDLE;
+    }
+    if (gInstance != VK_NULL_HANDLE)
+    {
+        if (gSurface != VK_NULL_HANDLE)
+        {
+            vkDestroySurfaceKHR(gInstance, gSurface, nullptr);
+        }
+        gSurface = VK_NULL_HANDLE;
+        vkDestroyInstance(gInstance, nullptr);
+        gInstance = VK_NULL_HANDLE;
+        volkFinalize();
+    }
+    gPhysical = VK_NULL_HANDLE;
+    gQueue = VK_NULL_HANDLE;
+    gFrame = 0;
+    gSession = 0;
+    gMaxDimension = 0;
+    gAcquiredWait = false;
+    gOwnedImage = false;
+    gInstanceMaintenance = false;
+    gResize = true;
+    gFormat = VK_FORMAT_UNDEFINED;
+    gTarget = {};
+    gExtent = {};
+    gRequestedExtent = {};
+}
+namespace
+{
+bool ValidColor(float64 value) noexcept
+{
+    return value >= 0 && value <= 1;
+}
+} // namespace
+FrameStatus SetTarget(const FrameTarget& target) noexcept
+{
+    if (target.Width > gMaxDimension || target.Height > gMaxDimension || !ValidColor(target.Red) ||
+        !ValidColor(target.Green) || !ValidColor(target.Blue) || !ValidColor(target.Alpha))
+    {
+        return FrameStatus::InvalidState;
+    }
+    if (target.Width != 0 && target.Height != 0)
+    {
+        // Compare requests, not the clamped acquired extent. A minimized tick
+        // or a persistent surface clamp must not recreate targets every frame.
+        gResize = gResize || target.Width != gRequestedExtent.width || target.Height != gRequestedExtent.height;
+        gRequestedExtent = { .width = target.Width, .height = target.Height };
+    }
+    gTarget = target;
+    return FrameStatus::Ready;
 }
 FrameStatus Begin() noexcept
 {
-    return BeginFrame() ? FrameStatus::Ready : FrameStatus::Failed;
+    if (gTarget.Width == 0 || gTarget.Height == 0)
+    {
+        return FrameStatus::Skipped;
+    }
+    if (gResize && !CreateTargets())
+    {
+        return Failure();
+    }
+    if (gExtent.width == 0 || gExtent.height == 0)
+    {
+        return FrameStatus::Skipped;
+    }
+    auto& frame = gFrames[gFrame];
+    if (!Check(vkWaitForFences(gDevice, 1, &frame.Fence, VK_TRUE, 5000000000ULL)))
+    {
+        return Failure();
+    }
+    gImage = 0;
+    if (!gHeadless)
+    {
+        const auto result =
+            vkAcquireNextImageKHR(gDevice, gSwapchain, 5000000000ULL, frame.Acquired, VK_NULL_HANDLE, &gImage);
+        if (result == VK_ERROR_OUT_OF_DATE_KHR)
+        {
+            gResize = true;
+            return FrameStatus::Skipped;
+        }
+        if (result == VK_TIMEOUT || result == VK_NOT_READY)
+        {
+            return FrameStatus::Skipped;
+        }
+        if (result == VK_SUBOPTIMAL_KHR)
+        {
+            gResize = true;
+        }
+        else if (!Check(result))
+        {
+            return Failure();
+        }
+    }
+    if (!gHeadless)
+    {
+        gAcquiredWait = true;
+        gOwnedImage = true;
+        if (gPresented[gImage])
+        {
+            if (!Check(vkWaitForFences(gDevice, 1, &gPresentFences[gImage], VK_TRUE, 5000000000ULL)) ||
+                !Check(vkResetFences(gDevice, 1, &gPresentFences[gImage])))
+            {
+                return Failure();
+            }
+            gPresented[gImage] = false;
+        }
+    }
+    if (!Check(vkResetCommandBuffer(frame.Command, 0)))
+    {
+        return Failure();
+    }
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (!Check(vkBeginCommandBuffer(frame.Command, &begin)))
+    {
+        return Failure();
+    }
+    VkClearValue clear{};
+    clear.color.float32[0] = static_cast<float32>(gTarget.Red);
+    clear.color.float32[1] = static_cast<float32>(gTarget.Green);
+    clear.color.float32[2] = static_cast<float32>(gTarget.Blue);
+    clear.color.float32[3] = static_cast<float32>(gTarget.Alpha);
+    VkRenderPassBeginInfo pass{};
+    pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    pass.renderPass = gPass;
+    pass.framebuffer = gTargets[gImage];
+    pass.renderArea.extent = gExtent;
+    pass.clearValueCount = 1;
+    pass.pClearValues = &clear;
+    vkCmdBeginRenderPass(frame.Command, &pass, VK_SUBPASS_CONTENTS_INLINE);
+    gEncoding = true;
+    return FrameStatus::Ready;
 }
 FrameStatus End() noexcept
 {
-    return EndFrame() ? FrameStatus::Ready : FrameStatus::Failed;
+    auto& frame = gFrames[gFrame];
+    vkCmdEndRenderPass(frame.Command);
+    gEncoding = false;
+    if (!Check(vkEndCommandBuffer(frame.Command)) || !Check(vkResetFences(gDevice, 1, &frame.Fence)))
+    {
+        return Failure();
+    }
+    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &frame.Command;
+    if (!gHeadless)
+    {
+        submit.waitSemaphoreCount = 1;
+        submit.pWaitSemaphores = &frame.Acquired;
+        submit.pWaitDstStageMask = &waitStage;
+        submit.signalSemaphoreCount = 1;
+        submit.pSignalSemaphores = &gFinished[gImage];
+    }
+    if (!Check(vkQueueSubmit(gQueue, 1, &submit, frame.Fence)))
+    {
+        return Failure();
+    }
+    gAcquiredWait = false;
+    gFrame = (gFrame + 1) % FRAMES;
+    if (!gHeadless)
+    {
+        VkSwapchainPresentFenceInfoEXT fence{};
+        fence.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT;
+        fence.swapchainCount = 1;
+        fence.pFences = &gPresentFences[gImage];
+        VkPresentInfoKHR present{};
+        present.pNext = &fence;
+        present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        present.waitSemaphoreCount = 1;
+        present.pWaitSemaphores = &gFinished[gImage];
+        present.swapchainCount = 1;
+        present.pSwapchains = &gSwapchain;
+        present.pImageIndices = &gImage;
+        const auto result = vkQueuePresentKHR(gQueue, &present);
+        // Outdated/lost surfaces still enqueue the wait and presentation fence.
+        if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR ||
+            result == VK_ERROR_SURFACE_LOST_KHR)
+        {
+            gPresented[gImage] = true;
+            gOwnedImage = false;
+        }
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+        {
+            gResize = true;
+            return result == VK_ERROR_OUT_OF_DATE_KHR ? FrameStatus::Skipped : FrameStatus::Ready;
+        }
+        if (!Check(result))
+        {
+            return Failure();
+        }
+    }
+    return FrameStatus::Ready;
 }
+bool BeginFrame() noexcept
+{
+    return Begin() == FrameStatus::Ready;
+}
+bool EndFrame() noexcept
+{
+    return End() == FrameStatus::Ready;
+}
+ResourceStatus CreateShader(usize slot, const ShaderDescription& description, uint32) noexcept
+{
+    // Check the declared SPIR-V entry/stage before passing it to the driver.
+    bool found = false;
+    for (usize offset = 5; offset < description.Spirv.size();)
+    {
+        const uint32 word = description.Spirv[offset];
+        const usize count = word >> 16;
+        if (count == 0 || count > description.Spirv.size() - offset)
+        {
+            return ResourceFailure();
+        }
+        if ((word & 65535U) == 15 && count >= 4)
+        {
+            const auto* name = reinterpret_cast<const char*>(description.Spirv.data() + offset + 3);
+            const usize capacity = (count - 3) * sizeof(uint32);
+            const usize length = description.SpirvEntry.size();
+            const uint32 stage = description.Stage == ShaderStage::Vertex ? 0U : 4U;
+            found = found || (description.Spirv[offset + 1] == stage && length < capacity && name[length] == '\0' &&
+                              std::memcmp(name, description.SpirvEntry.data(), length) == 0);
+        }
+        offset += count;
+    }
+    if (!found)
+    {
+        return ResourceFailure();
+    }
+    auto& shader = gShaders[slot];
+    shader.Stage = description.Stage;
+    std::memcpy(shader.Entry, description.SpirvEntry.data(), description.SpirvEntry.size());
+    shader.Entry[description.SpirvEntry.size()] = '\0';
+    VkShaderModuleCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    info.codeSize = description.Spirv.size_bytes();
+    info.pCode = description.Spirv.data();
+    return Check(vkCreateShaderModule(gDevice, &info, nullptr, &shader.Module)) ? ResourceStatus::Ready
+                                                                                : ResourceFailure();
+}
+void DestroyShader(usize slot) noexcept
+{
+    if (gDevice != VK_NULL_HANDLE)
+    {
+        vkDestroyShaderModule(gDevice, gShaders[slot].Module, nullptr);
+    }
+    gShaders[slot] = {};
+}
+ResourceStatus CreateUniform(usize slot, const UniformDescription& description, uint32) noexcept
+{
+    const usize size = description.Size;
+    auto& uniform = gUniforms[slot];
+    uniform.Size = size;
+    for (usize i = 0; i < FRAMES; ++i)
+    {
+        VkBufferCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        info.size = size;
+        info.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        if (!Check(vkCreateBuffer(gDevice, &info, nullptr, &uniform.Buffers[i])))
+        {
+            return ResourceFailure();
+        }
+        VkMemoryRequirements requirements{};
+        vkGetBufferMemoryRequirements(gDevice, uniform.Buffers[i], &requirements);
+        if (!Allocate(requirements,
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                      uniform.Memory[i]) ||
+            !Check(vkBindBufferMemory(gDevice, uniform.Buffers[i], uniform.Memory[i], 0)) ||
+            !Check(vkMapMemory(gDevice, uniform.Memory[i], 0, size, 0, &uniform.Mapped[i])))
+        {
+            return ResourceFailure();
+        }
+    }
+    return ResourceStatus::Ready;
+}
+void UpdateUniform(usize slot, std::span<const uint8> bytes) noexcept
+{
+    std::memcpy(gUniforms[slot].Bytes, bytes.data(), bytes.size());
+}
+void DestroyUniform(usize slot) noexcept
+{
+    auto& uniform = gUniforms[slot];
+    if (gDevice != VK_NULL_HANDLE)
+    {
+        if (uniform.Size != 0)
+        {
+            WaitIdle();
+        }
+        for (usize i = 0; i < FRAMES; ++i)
+        {
+            if (uniform.Mapped[i] != nullptr)
+            {
+                vkUnmapMemory(gDevice, uniform.Memory[i]);
+            }
+            vkDestroyBuffer(gDevice, uniform.Buffers[i], nullptr);
+            vkFreeMemory(gDevice, uniform.Memory[i], nullptr);
+        }
+    }
+    uniform = {};
+}
+ResourceStatus CreatePipeline(usize slot, const PipelineResources& resources, uint32) noexcept
+{
+    if (gPass == VK_NULL_HANDLE)
+    {
+        return ResourceFailure();
+    }
+    const usize vertex = resources.Vertex, fragment = resources.Fragment, uniform = resources.Uniform;
+    auto& pipeline = gPipelines[slot];
+    pipeline.UniformSlot = uniform;
+    VkDescriptorSetLayoutBinding binding{};
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    binding.descriptorCount = 1;
+    binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorSetLayoutCreateInfo bindings{};
+    bindings.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    bindings.bindingCount = 1;
+    bindings.pBindings = &binding;
+    if (!Check(vkCreateDescriptorSetLayout(gDevice, &bindings, nullptr, &pipeline.Bindings)))
+    {
+        return ResourceFailure();
+    }
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSize.descriptorCount = FRAMES;
+    VkDescriptorPoolCreateInfo pool{};
+    pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool.maxSets = FRAMES;
+    pool.poolSizeCount = 1;
+    pool.pPoolSizes = &poolSize;
+    if (!Check(vkCreateDescriptorPool(gDevice, &pool, nullptr, &pipeline.Pool)))
+    {
+        return ResourceFailure();
+    }
+    VkDescriptorSetLayout layouts[FRAMES] = {pipeline.Bindings, pipeline.Bindings};
+    VkDescriptorSetAllocateInfo allocate{};
+    allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocate.descriptorPool = pipeline.Pool;
+    allocate.descriptorSetCount = FRAMES;
+    allocate.pSetLayouts = layouts;
+    if (!Check(vkAllocateDescriptorSets(gDevice, &allocate, pipeline.Sets)))
+    {
+        return ResourceFailure();
+    }
+    for (usize i = 0; i < FRAMES; ++i)
+    {
+        VkDescriptorBufferInfo buffer{};
+        buffer.buffer = gUniforms[uniform].Buffers[i];
+        buffer.range = gUniforms[uniform].Size;
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = pipeline.Sets[i];
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        write.pBufferInfo = &buffer;
+        vkUpdateDescriptorSets(gDevice, 1, &write, 0, nullptr);
+    }
+    VkPipelineLayoutCreateInfo layout{};
+    layout.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layout.setLayoutCount = 1;
+    layout.pSetLayouts = &pipeline.Bindings;
+    if (!Check(vkCreatePipelineLayout(gDevice, &layout, nullptr, &pipeline.Layout)))
+    {
+        return ResourceFailure();
+    }
+    VkPipelineShaderStageCreateInfo stages[2]{};
+    stages[0].sType = stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].module = gShaders[vertex].Module;
+    stages[0].pName = gShaders[vertex].Entry;
+    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    stages[1].module = gShaders[fragment].Module;
+    stages[1].pName = gShaders[fragment].Entry;
+    VkPipelineVertexInputStateCreateInfo input{};
+    input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    VkPipelineInputAssemblyStateCreateInfo assembly{};
+    assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPipelineViewportStateCreateInfo viewport{};
+    viewport.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport.viewportCount = 1;
+    viewport.scissorCount = 1;
+    VkPipelineRasterizationStateCreateInfo raster{};
+    raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    raster.polygonMode = VK_POLYGON_MODE_FILL;
+    raster.lineWidth = 1;
+    VkPipelineMultisampleStateCreateInfo samples{};
+    samples.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    samples.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    VkPipelineColorBlendAttachmentState color{};
+    color.colorWriteMask = 15;
+    VkPipelineColorBlendStateCreateInfo blend{};
+    blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    blend.attachmentCount = 1;
+    blend.pAttachments = &color;
+    VkDynamicState states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dynamic{};
+    dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamic.dynamicStateCount = 2;
+    dynamic.pDynamicStates = states;
+    VkGraphicsPipelineCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    info.stageCount = 2;
+    info.pStages = stages;
+    info.pVertexInputState = &input;
+    info.pInputAssemblyState = &assembly;
+    info.pViewportState = &viewport;
+    info.pRasterizationState = &raster;
+    info.pMultisampleState = &samples;
+    info.pColorBlendState = &blend;
+    info.pDynamicState = &dynamic;
+    info.layout = pipeline.Layout;
+    info.renderPass = gPass;
+    return Check(vkCreateGraphicsPipelines(gDevice, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline.Object))
+               ? ResourceStatus::Ready
+               : ResourceFailure();
+}
+void DestroyPipeline(usize slot) noexcept
+{
+    auto& pipeline = gPipelines[slot];
+    if (gDevice != VK_NULL_HANDLE)
+    {
+        if (pipeline.Object != VK_NULL_HANDLE)
+        {
+            WaitIdle();
+        }
+        vkDestroyPipeline(gDevice, pipeline.Object, nullptr);
+        vkDestroyPipelineLayout(gDevice, pipeline.Layout, nullptr);
+        vkDestroyDescriptorPool(gDevice, pipeline.Pool, nullptr);
+        vkDestroyDescriptorSetLayout(gDevice, pipeline.Bindings, nullptr);
+    }
+    pipeline = {};
+}
+FrameInfo GetFrameInfo() noexcept
+{
+    return
+    {
+        .Width = gExtent.width,
+        .Height = gExtent.height,
+        .Encoding = gFormat == VK_FORMAT_B8G8R8A8_SRGB || gFormat == VK_FORMAT_R8G8B8A8_SRGB ? SurfaceEncoding::Srgb
+                                                                                             : SurfaceEncoding::Unorm,
+    };
+}
+ResourceStatus Draw(usize slot) noexcept
+{
+    auto& pipeline = gPipelines[slot];
+    auto& uniform = gUniforms[pipeline.UniformSlot];
+    std::memcpy(uniform.Mapped[gFrame], uniform.Bytes, uniform.Size);
+    const auto command = gFrames[gFrame].Command;
+    VkViewport viewport{};
+    viewport.width = static_cast<float32>(gExtent.width);
+    viewport.height = static_cast<float32>(gExtent.height);
+    viewport.maxDepth = 1;
+    VkRect2D scissor{};
+    scissor.extent = gExtent;
+    vkCmdSetViewport(command, 0, 1, &viewport);
+    vkCmdSetScissor(command, 0, 1, &scissor);
+    vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Object);
+    vkCmdBindDescriptorSets(command,
+                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipeline.Layout,
+                            0,
+                            1,
+                            &pipeline.Sets[gFrame],
+                            0,
+                            nullptr);
+    vkCmdDraw(command, 3, 1, 0, 0);
+    return ResourceStatus::Ready;
+}
+
+#if defined(LUDUS_RHI_TEST_READBACK)
+bool ReadHeadlessPixels(std::span<uint8> pixels) noexcept
+{
+    if (!gHeadless || gEncoding || pixels.size() != static_cast<usize>(gExtent.width) * gExtent.height * 4)
+    {
+        return false;
+    }
+    struct Readback final
+    {
+        VkBuffer Buffer = VK_NULL_HANDLE;
+        VkDeviceMemory Memory = VK_NULL_HANDLE;
+        VkCommandBuffer Command = VK_NULL_HANDLE;
+        ~Readback() noexcept
+        {
+            WaitIdle();
+            if (Command != VK_NULL_HANDLE)
+            {
+                vkFreeCommandBuffers(gDevice, gCommands, 1, &Command);
+            }
+            vkDestroyBuffer(gDevice, Buffer, nullptr);
+            vkFreeMemory(gDevice, Memory, nullptr);
+        }
+    } copy;
+    WaitIdle();
+    VkBufferCreateInfo buffer{};
+    buffer.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer.size = pixels.size();
+    buffer.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    if (!Check(vkCreateBuffer(gDevice, &buffer, nullptr, &copy.Buffer)))
+    {
+        return false;
+    }
+    VkMemoryRequirements requirements{};
+    vkGetBufferMemoryRequirements(gDevice, copy.Buffer, &requirements);
+    if (!Allocate(requirements,
+                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                  copy.Memory) ||
+        !Check(vkBindBufferMemory(gDevice, copy.Buffer, copy.Memory, 0)))
+    {
+        return false;
+    }
+    VkCommandBufferAllocateInfo allocate{};
+    allocate.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocate.commandPool = gCommands;
+    allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocate.commandBufferCount = 1;
+    if (!Check(vkAllocateCommandBuffers(gDevice, &allocate, &copy.Command)))
+    {
+        return false;
+    }
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    if (!Check(vkBeginCommandBuffer(copy.Command, &begin)))
+    {
+        return false;
+    }
+    VkBufferImageCopy region{};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent = { .width = gExtent.width, .height = gExtent.height, .depth = 1 };
+    vkCmdCopyImageToBuffer(copy.Command, gImages[0], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, copy.Buffer, 1, &region);
+    VkMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    vkCmdPipelineBarrier(copy.Command,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_HOST_BIT,
+                         0,
+                         1,
+                         &barrier,
+                         0,
+                         nullptr,
+                         0,
+                         nullptr);
+    if (!Check(vkEndCommandBuffer(copy.Command)))
+    {
+        return false;
+    }
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &copy.Command;
+    if (!Check(vkQueueSubmit(gQueue, 1, &submit, VK_NULL_HANDLE)) || !Check(vkQueueWaitIdle(gQueue)))
+    {
+        return false;
+    }
+    void* mapped = nullptr;
+    if (!Check(vkMapMemory(gDevice, copy.Memory, 0, pixels.size(), 0, &mapped)))
+    {
+        return false;
+    }
+    std::memcpy(pixels.data(), mapped, pixels.size());
+    vkUnmapMemory(gDevice, copy.Memory);
+    return true;
+}
+#endif
 } // namespace ludus::graphics::rhi::backend
