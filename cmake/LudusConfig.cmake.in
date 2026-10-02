@@ -13,9 +13,12 @@
 
 include(CMakeFindDependencyMacro)
 
-# Package-local dependency search root. Falls back silently when a producer-side
-# configure (which still has the Conan generators on CMAKE_PREFIX_PATH) is used.
-set(_ludus_dep_search "${CMAKE_CURRENT_LIST_DIR}/dependencies")
+# Package-local dependency search root. The install-time bundler copies the
+# Conan generator CMake files into <...>/dependencies/cmake and each dependency
+# payload into <...>/dependencies/packages/<dep>. Prepend the generator dir so
+# find_dependency(<dep>) resolves from the bundle. Falls back silently to the
+# producer Conan generators on CMAKE_PREFIX_PATH when configured in-tree.
+set(_ludus_dep_search "${CMAKE_CURRENT_LIST_DIR}/dependencies/cmake")
 set(_ludus_saved_prefix_path "${CMAKE_PREFIX_PATH}")
 if(EXISTS "${_ludus_dep_search}")
     list(PREPEND CMAKE_PREFIX_PATH "${_ludus_dep_search}")
@@ -30,10 +33,10 @@ endif()
 # CMake metadata is present, resolve the imported targets so a Text consumer
 # links cleanly from the relocated SDK.
 if(NOT "@CMAKE_SYSTEM_NAME@" STREQUAL "Emscripten")
-    if(EXISTS "${_ludus_dep_search}/freetype" OR EXISTS "${_ludus_dep_search}/lib/cmake/freetype")
+    if(EXISTS "${_ludus_dep_search}/freetype-config.cmake" OR EXISTS "${_ludus_dep_search}/FreetypeConfig.cmake")
         find_dependency(freetype CONFIG)
     endif()
-    if(EXISTS "${_ludus_dep_search}/harfbuzz" OR EXISTS "${_ludus_dep_search}/lib/cmake/harfbuzz")
+    if(EXISTS "${_ludus_dep_search}/harfbuzz-config.cmake")
         find_dependency(harfbuzz CONFIG)
     endif()
 endif()

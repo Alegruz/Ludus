@@ -1591,13 +1591,13 @@ def bundle_sdk_dependencies(root: Path, preset: str, prefix: Path) -> None:
     conan_dir = root / "out" / "conan" / preset
     package_dirs = _conan_package_dirs(conan_dir)
     # Absolute producer roots that must never survive into the relocated bundle.
-    producer_roots = [str(root), str(root / "out")]
+    producer_roots = [str(root), str(root / "out"), str(conan_dir)]
     for folder in package_dirs.values():
         producer_roots.append(str(folder))
-    bundled = bundle_deps.bundle_from_conan_packages(
+    bundled = bundle_deps.bundle_from_conan(
         prefix=prefix,
+        generators_dir=conan_dir,
         package_dirs=package_dirs,
-        producer_roots=producer_roots,
     )
     print(f"Bundled SDK dependencies: {', '.join(bundled) if bundled else '(none found)'}")
     leaks = bundle_deps.audit_no_producer_paths(prefix, producer_roots)
