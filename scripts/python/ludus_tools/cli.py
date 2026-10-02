@@ -1,0 +1,310 @@
+"""The installed ``ludus`` CLI: SDK and project commands (P07).
+
+This is one client of the shared backend; the Editor is the other. The CLI works
+without Qt or a Ludus checkout. No command string is ever passed through a shell.
+Human output uses stable exit statuses; ``--json`` emits a versioned structured
+result for scripting (the Editor does not parse human text — it uses the private
+streaming protocol in editor_tool.py).
+
+Commands:
+
+    ludus sdk list
+    ludus sdk install --archive <sdk-archive> [--repair] [--store <dir>]
+    ludus sdk remove --digest <sha256>
+    ludus project create <destination> --name <name> --template minimal
+                         (--engine <release> | --sdk <prefix>)
+    ludus project configure <project> [--profile <preset>] [--sdk <prefix>]
+    ludus project build     <project> [--profile <preset>] [--sdk <prefix>]
+    ludus project run       <project> [--profile <preset>] [--sdk <prefix>]
+    ludus project engine    <project> (--sdk <prefix> | --clear-override)
+                                       [--profile <preset>]
+    ludus project migrate   <project> --engine <release>
+"""
+
+from __future__ import annotations
+
+import argparse
+import json as _json
+import sys
+from pathlib import Path
+from typing import Optional
+
+from . import __version__, create
+from .errors import (
+    EXIT_CANCELLED,
+    EXIT_FAILED,
+    EXIT_OK,
+    EXIT_UNAVAILABLE,
+    EXIT_USAGE,
+    INSTALL_CANCELLED,
+    SDK_NOT_FOUND,
+    UNRESOLVED_LOCK,
+    ToolingError,
+)
+from .lockfile import parse_local_settings_file
+from .sdkstore import SdkStore
+
+
+def _emit(args, payload: dict) -> None:
+    if getattr(args, "json", False):
+        print(_json.dumps({"schema": 1, **payload}, ensure_ascii=False))
+
+
+def _store(args) -> SdkStore:
+    root = Path(args.store) if getattr(args, "store", None) else None
+    return SdkStore(root)
+
+
+def _exit_for_code(code: str) -> int:
+    if code == INSTALL_CANCELLED:
+        return EXIT_CANCELLED
+    if code in (SDK_NOT_FOUND, UNRESOLVED_LOCK, "MissingTools"):
+        return EXIT_UNAVAILABLE
+    return EXIT_FAILED
+
+
+# --- sdk commands ------------------------------------------------------------
+
+
+def cmd_sdk_list(args) -> int:
+    store = _store(args)
+    installed = store.list_installed()
+    _emit(args, {"sdks": [
+        {"flavor": s.identity.flavor, "variant": s.identity.sdk_variant,
+         "version": s.identity.engine_version, "revision": s.identity.source_revision,
+         "digest": s.digest, "prefix": str(s.prefix)}
+        for s in installed
+    ]})
+    if not getattr(args, "json", False):
+        if not installed:
+            print(f"No SDKs installed under {store.sdk_root}")
+        for s in installed:
+            print(f"{s.identity.flavor:12} {s.identity.engine_version:10} "
+                  f"rev={s.identity.source_revision or '?':12} {s.digest[:16]}  {s.prefix}")
+    return EXIT_OK
+
+
+def cmd_sdk_install(args) -> int:
+    store = _store(args)
+    if args.archive:
+        installed = store.install_archive(
+            Path(args.archive), expected_digest=args.digest, repair=args.repair
+        )
+    elif args.version:
+        from .catalog import download_entry, parse_catalog_file
+
+        if not args.catalog:
+            raise ToolingError("MissingTools", "--version install requires --catalog <catalog.json>")
+        catalog = parse_catalog_file(Path(args.catalog))
+        entry = catalog.find(args.version, args.target, args.flavor)
+        if entry is None:
+            raise ToolingError(
+                "SdkNotFound",
+                f"catalog has no {args.version}/{args.target}/{args.flavor} package",
+            )
+        archive = download_entry(entry, store.tmp_root)
+        try:
+            installed = store.install_archive(archive, expected_digest=entry.sha256, repair=args.repair)
+        finally:
+            Path(archive).unlink(missing_ok=True)
+    else:
+        raise ToolingError("InvalidProject", "provide --archive <path> or --version <release>")
+    _emit(args, {"installed": {"flavor": installed.identity.flavor,
+                               "digest": installed.digest, "prefix": str(installed.prefix)}})
+    if not getattr(args, "json", False):
+        print(f"Installed {installed.identity.flavor} SDK at {installed.prefix}")
+    return EXIT_OK
+
+
+def cmd_sdk_remove(args) -> int:
+    store = _store(args)
+    removed = store.remove(args.digest)
+    _emit(args, {"removed": removed})
+    if not getattr(args, "json", False):
+        print("Removed" if removed else "No matching SDK")
+    return EXIT_OK if removed else EXIT_FAILED
+
+
+# --- project commands --------------------------------------------------------
+
+
+def cmd_project_create(args) -> int:
+    components = [c for c in (args.components or "FoundationBase").split(",") if c]
+    local_prefix: Optional[Path] = Path(args.sdk) if args.sdk else None
+    if not args.engine and not local_prefix:
+        raise ToolingError("InvalidProject", "create requires --engine <release> or --sdk <prefix>")
+    result = create.create_project(
+        Path(args.destination),
+        name=args.name,
+        template_id=args.template,
+        engine_version=args.engine or "",
+        components=components,
+        preset=args.profile or "linux-clang-development",
+        local_sdk_prefix=local_prefix,
+    )
+    _emit(args, {"created": str(result.destination), "resolved": result.lock.resolved})
+    if not getattr(args, "json", False):
+        print(f"Created project at {result.destination}")
+        if not result.lock.resolved:
+            print("Lock is unresolved (no published release yet); build requires a local SDK override.")
+    return EXIT_OK
+
+
+def _resolve(args):
+    from . import operations
+
+    store = _store(args)
+    return operations.resolve_project(
+        Path(args.project),
+        store=store,
+        cli_sdk_prefix=Path(args.sdk) if getattr(args, "sdk", None) else None,
+        profile=getattr(args, "profile", None),
+    )
+
+
+def cmd_project_configure(args) -> int:
+    from . import operations
+
+    resolved = _resolve(args)
+    return EXIT_OK if operations.op_configure(resolved) == 0 else EXIT_FAILED
+
+
+def cmd_project_build(args) -> int:
+    from . import operations
+
+    resolved = _resolve(args)
+    return EXIT_OK if operations.op_build(resolved) == 0 else EXIT_FAILED
+
+
+def cmd_project_run(args) -> int:
+    from . import operations
+
+    resolved = _resolve(args)
+    code = operations.op_run(resolved)
+    return EXIT_OK if code == 0 else EXIT_FAILED
+
+
+def cmd_project_engine(args) -> int:
+    # Explicit local override set/clear. Never rewrites the committed lock.
+    from . import operations
+
+    paths = operations.locate_project(Path(args.project))
+    settings = parse_local_settings_file(paths.local_settings_path)
+    profile = args.profile or "linux-clang-development"
+    flavor = operations.PRESET_FLAVOR.get(profile)
+    if flavor is None:
+        raise ToolingError("InvalidProject", f"unknown profile {profile!r}")
+    # target triple derived from the lock or defaulted.
+    from .lockfile import parse_lock_file
+
+    lock = parse_lock_file(paths.lock_path)
+    target = operations._target_triple_for_lock(lock, flavor) or "linux-x64"
+    if args.clear_override:
+        changed = settings.clear_override(target, flavor)
+        paths.local_settings_path.parent.mkdir(parents=True, exist_ok=True)
+        paths.local_settings_path.write_bytes(settings.serialize())
+        if not getattr(args, "json", False):
+            print("Cleared override" if changed else "No override to clear")
+        _emit(args, {"cleared": changed})
+        return EXIT_OK
+    if not args.sdk:
+        raise ToolingError("InvalidProject", "engine requires --sdk <prefix> or --clear-override")
+    from .identity import load_prefix_manifest, require_compatible
+
+    identity = load_prefix_manifest(Path(args.sdk))
+    require_compatible(identity, required_flavor=flavor)
+    settings.set_override(target, flavor, str(Path(args.sdk).resolve()))
+    paths.local_settings_path.parent.mkdir(parents=True, exist_ok=True)
+    paths.local_settings_path.write_bytes(settings.serialize())
+    if not getattr(args, "json", False):
+        print(f"Set local override for {flavor}: {Path(args.sdk).resolve()}")
+        print("The committed lock is unchanged.")
+    _emit(args, {"override": str(Path(args.sdk).resolve()), "flavor": flavor})
+    return EXIT_OK
+
+
+def cmd_project_migrate(args) -> int:
+    components = [c for c in (args.components or "FoundationBase").split(",") if c]
+    result = create.migrate_v1_to_v2(Path(args.project), engine_version=args.engine, components=components)
+    _emit(args, {"migrated": str(result.destination)})
+    if not getattr(args, "json", False):
+        print(f"Migrated {result.destination} to version 2 (lock unresolved; select an SDK to build).")
+    return EXIT_OK
+
+
+# --- parser ------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="ludus", description="Ludus host tooling CLI")
+    p.add_argument("--version", action="version", version=f"ludus {__version__}")
+    p.add_argument("--json", action="store_true", help="emit a versioned JSON result")
+    p.add_argument("--store", help="SDK store root (default: $LUDUS_SDK_STORE or ~/.local/share/ludus)")
+    sub = p.add_subparsers(dest="group", required=True)
+
+    sdk = sub.add_parser("sdk", help="manage installed SDKs").add_subparsers(dest="cmd", required=True)
+    sdk.add_parser("list").set_defaults(func=cmd_sdk_list)
+    inst = sdk.add_parser("install")
+    inst.add_argument("--archive", help="install a local SDK archive")
+    inst.add_argument("--version", help="install a release from --catalog")
+    inst.add_argument("--catalog", help="release catalog JSON (required with --version)")
+    inst.add_argument("--target", default="linux-x64")
+    inst.add_argument("--flavor", default="development")
+    inst.add_argument("--digest", help="expected sha256 of the archive")
+    inst.add_argument("--repair", action="store_true")
+    inst.set_defaults(func=cmd_sdk_install)
+    rm = sdk.add_parser("remove")
+    rm.add_argument("--digest", required=True)
+    rm.set_defaults(func=cmd_sdk_remove)
+
+    proj = sub.add_parser("project", help="create and operate projects").add_subparsers(dest="cmd", required=True)
+    cr = proj.add_parser("create")
+    cr.add_argument("destination")
+    cr.add_argument("--name", required=True)
+    cr.add_argument("--template", default="minimal")
+    cr.add_argument("--engine", help="exact engine release")
+    cr.add_argument("--sdk", help="local SDK prefix (recorded only in ignored local settings)")
+    cr.add_argument("--components", help="comma-separated public modules to link")
+    cr.add_argument("--profile", help="default preset")
+    cr.set_defaults(func=cmd_project_create)
+
+    for name, func in (("configure", cmd_project_configure), ("build", cmd_project_build), ("run", cmd_project_run)):
+        sp = proj.add_parser(name)
+        sp.add_argument("project")
+        sp.add_argument("--profile")
+        sp.add_argument("--sdk", help="per-operation local SDK override")
+        sp.set_defaults(func=func)
+
+    eng = proj.add_parser("engine")
+    eng.add_argument("project")
+    eng.add_argument("--sdk")
+    eng.add_argument("--clear-override", action="store_true")
+    eng.add_argument("--profile")
+    eng.set_defaults(func=cmd_project_engine)
+
+    mig = proj.add_parser("migrate")
+    mig.add_argument("project")
+    mig.add_argument("--engine", required=True)
+    mig.add_argument("--components")
+    mig.set_defaults(func=cmd_project_migrate)
+
+    return p
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.func(args)
+    except ToolingError as exc:
+        if getattr(args, "json", False):
+            print(_json.dumps({"schema": 1, "error": {"code": exc.code, "message": exc.message}}))
+        else:
+            print(f"error [{exc.code}]: {exc.message}", file=sys.stderr)
+        return _exit_for_code(exc.code)
+    except KeyboardInterrupt:
+        return EXIT_CANCELLED
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

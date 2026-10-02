@@ -1560,6 +1560,7 @@ def verify_sdk_install(root: Path, prefix: Path, build_dir: Path) -> None:
         prefix / "lib" / "cmake" / "Ludus" / "shaders" / "compile_shader.py",
         prefix / "lib" / "cmake" / "Ludus" / "shaders" / "shader_toolchain.json",
         prefix / "share" / "Ludus" / "licenses" / "LICENSE",
+        prefix / "share" / "Ludus" / "licenses" / "THIRD_PARTY_NOTICES.md",
         prefix / "share" / "Ludus" / "LudusSdkManifest.json",
     ]
 
@@ -1583,10 +1584,31 @@ def verify_sdk_install(root: Path, prefix: Path, build_dir: Path) -> None:
             if str(forbidden) in text:
                 raise EngineError(f"installed CMake package references source-tree path {forbidden} in {package_file}")
 
+    # Relocatability audit (P02): no installed CMake metadata, anywhere under the
+    # package's cmake tree (including bundled dependency configs), may embed an
+    # absolute producer path. This is stricter than the Ludus-only check above.
+    dep_cmake_root = prefix / "lib" / "cmake" / "Ludus"
+    producer_markers = [str(root), str(root / "out")]
+    for package_file in dep_cmake_root.rglob("*.cmake"):
+        text = package_file.read_text(encoding="utf-8")
+        for marker in producer_markers:
+            if marker and marker in text:
+                raise EngineError(
+                    f"installed CMake metadata leaks producer path {marker} in {package_file}"
+                )
+
     manifest = json.loads((prefix / "share" / "Ludus" / "LudusSdkManifest.json").read_text())
     expected = json.loads((build_dir / "cmake" / "LudusSdkManifest.json").read_text())
     if manifest != expected:
         raise EngineError("installed SDK manifest does not match the built variant")
+
+    # Identity must be derived from real build inputs, not placeholders (P03).
+    for required_field in ("target_triple", "compiler_id", "compiler_version", "sdk_variant"):
+        value = manifest.get(required_field, "")
+        if not value or "@" in str(value) or value == "unknown":
+            raise EngineError(f"SDK manifest identity field {required_field!r} is unresolved: {value!r}")
+    if not isinstance(manifest.get("dependencies"), list) or not manifest["dependencies"]:
+        raise EngineError("SDK manifest is missing its redistributable dependency inventory")
     config = (prefix / "include" / "ludus" / "foundation" / "base" / "assert_config.hpp").read_text()
     for macro, key in (("LUDUS_ENABLE_ASSERTS", "enable_asserts"), ("LUDUS_BREAK_ON_CHECK", "break_on_check"),
                        ("LUDUS_BUILD_FLAVOR_ID", "build_flavor_id"), ("LUDUS_ASSERT_POLICY_VERSION", "assert_policy_version"),
@@ -1595,6 +1617,56 @@ def verify_sdk_install(root: Path, prefix: Path, build_dir: Path) -> None:
         if not match or int(match.group(1)) != manifest[key]:
             raise EngineError(f"installed assertion policy mismatch: {macro}")
     print(f"Installed SDK artifacts and assertion policy verified: {prefix}")
+
+
+def _conan_package_dirs(conan_dir: Path) -> dict:
+    """Discover each dependency's Conan package root from CMakeDeps data files.
+
+    CMakeDeps emits ``<pkg>-release-*-data.cmake`` (and config files) that set
+    ``<pkg>_PACKAGE_FOLDER_<CONFIG> "<abs package root>"``. We read those to learn
+    where each dependency's lib/include/cmake files live, without hard-coding the
+    Conan cache layout.
+    """
+    package_dirs: dict = {}
+    if not conan_dir.is_dir():
+        return package_dirs
+    pattern = re.compile(r'set\(([A-Za-z0-9_]+)_PACKAGE_FOLDER_[A-Z]+\s+"([^"]+)"')
+    for data_file in conan_dir.rglob("*-data.cmake"):
+        text = data_file.read_text(encoding="utf-8")
+        for match in pattern.finditer(text):
+            name = match.group(1).lower()
+            folder = Path(match.group(2))
+            if folder.is_dir():
+                package_dirs.setdefault(name, folder)
+    return package_dirs
+
+
+def bundle_sdk_dependencies(root: Path, preset: str, prefix: Path) -> None:
+    """Copy the redistributable dependency closure into the installed prefix and
+    rewrite absolute producer paths so the SDK relocates (P02)."""
+    try:
+        from ludus_tools import bundle_deps
+    except ImportError:
+        sys.path.insert(0, str(root / "scripts" / "python"))
+        from ludus_tools import bundle_deps
+
+    conan_dir = root / "out" / "conan" / preset
+    package_dirs = _conan_package_dirs(conan_dir)
+    # Absolute producer roots that must never survive into the relocated bundle.
+    producer_roots = [str(root), str(root / "out"), str(conan_dir)]
+    for folder in package_dirs.values():
+        producer_roots.append(str(folder))
+    bundled = bundle_deps.bundle_from_conan(
+        prefix=prefix,
+        generators_dir=conan_dir,
+        package_dirs=package_dirs,
+    )
+    print(f"Bundled SDK dependencies: {', '.join(bundled) if bundled else '(none found)'}")
+    leaks = bundle_deps.audit_no_producer_paths(prefix, producer_roots)
+    if leaks:
+        for leak in leaks:
+            print(f"Leaked producer path in bundled dependency: {leak}")
+        raise EngineError("bundled dependency metadata leaks a producer path")
 
 
 def command_install_sdk(args: argparse.Namespace) -> int:
@@ -1607,6 +1679,12 @@ def command_install_sdk(args: argparse.Namespace) -> int:
     build_dir = root / "out" / "build" / preset
     prefix = root / "out" / "install" / preset
     run([cmake(root), "--install", build_dir, "--prefix", prefix], cwd=root, env=tool_env(root))
+
+    # Bundle the redistributable dependency closure into the prefix so the SDK is
+    # relocatable without the producer Conan cache (P02). Done before verify so
+    # the relocation audit covers the bundled dependency metadata too.
+    bundle_sdk_dependencies(root, preset, prefix)
+
     verify_sdk_install(root, prefix, build_dir)
 
     consumer_source = root / "tests" / "sdk_consumer"

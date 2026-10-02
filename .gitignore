@@ -6,6 +6,11 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Python packaging artifacts (e.g. from `pip install ./scripts/python`).
+*.egg-info/
+scripts/python/build/
+scripts/python/dist/
+
 .cache/
 .clangd/
 .cmake/

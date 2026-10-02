@@ -26,6 +26,7 @@ include(EngineSanitizers)
 include(EngineTargets)
 include(EnginePch)
 include(LudusShaders)
+include(EngineSdkIdentity)
 
 option(LUDUS_BUILD_TESTS "Build Ludus tests" ON)
 option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
@@ -167,6 +168,29 @@ install(
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${LUDUS_ENGINE_PACKAGE_NAME}"
 )
 
+# --- SDK identity (P02/P03/P11) ----------------------------------------------
+# Compiler/source identity at root scope. These MUST be set BEFORE
+# configure_package_config_file() below, because LudusConfig.cmake.in substitutes
+# @LUDUS_COMPILER_ID@/@LUDUS_COMPILER_VERSION@ for its toolchain-compatibility
+# gate; configuring the package file with empty values would make the gate
+# compare against an empty SDK identity and reject every consumer. FoundationBase
+# computes the same values for its generated build_metadata.hpp; keep them equal.
+set(LUDUS_COMPILER_ID "${CMAKE_CXX_COMPILER_ID}")
+set(LUDUS_COMPILER_VERSION "${CMAKE_CXX_COMPILER_VERSION}")
+find_package(Git QUIET)
+set(LUDUS_GIT_REVISION "unknown")
+if(Git_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${PROJECT_SOURCE_DIR}" rev-parse --short=12 HEAD
+        OUTPUT_VARIABLE LUDUS_GIT_REVISION_OUTPUT
+        ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(LUDUS_GIT_REVISION_OUTPUT)
+        set(LUDUS_GIT_REVISION "${LUDUS_GIT_REVISION_OUTPUT}")
+    endif()
+endif()
+
 configure_package_config_file(
     "${PROJECT_SOURCE_DIR}/cmake/LudusConfig.cmake.in"
     "${PROJECT_BINARY_DIR}/cmake/LudusConfig.cmake"
@@ -178,6 +202,61 @@ write_basic_package_version_file(
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
+
+# --- Redistributable dependency inventory (P02/P03/P11) ----------------------
+# Public exported components (one per installed Ludus:: module target).
+foreach(_component
+    FoundationBase FoundationContainers FoundationMath FoundationLogging
+    FoundationProfiling Input Audio)
+    ludus_sdk_register_component(${_component})
+    ludus_sdk_register_feature(${_component})
+endforeach()
+if(NOT EMSCRIPTEN)
+    foreach(_component Platform GraphicsRhi Text)
+        ludus_sdk_register_component(${_component})
+        ludus_sdk_register_feature(${_component})
+    endforeach()
+else()
+    foreach(_component Platform GraphicsRhi)
+        ludus_sdk_register_component(${_component})
+        ludus_sdk_register_feature(${_component})
+    endforeach()
+endif()
+
+# Redistributable static link-closure dependencies. These are the libraries the
+# FINAL consumer links even when it only names one Ludus:: target (PRIVATE link
+# deps of a static library are still part of the consumer's link line). Audited
+# from conanfile.py + the module CMakeLists (GraphicsRhi->volk, Text->
+# FreeType/HarfBuzz, assertion/concurrency paths->Threads).
+ludus_sdk_register_dependency(volk        "1.4.357.0" "MIT"                 bundled)
+if(NOT EMSCRIPTEN)
+    ludus_sdk_register_dependency(freetype "2.14.3"   "FTL-or-GPLv2"        bundled)
+    ludus_sdk_register_dependency(harfbuzz "14.5.1"   "MIT-modern"          bundled)
+endif()
+ludus_sdk_register_dependency(Threads     "system"    "system"             system)
+
+# System prerequisites that cannot reasonably be bundled.
+ludus_sdk_register_system_prerequisite("libc / libstdc++ runtime matching the recorded cxx_runtime_abi")
+if(NOT EMSCRIPTEN)
+    ludus_sdk_register_system_prerequisite("Vulkan loader (libvulkan.so.1) and a Vulkan-capable GPU/driver for RHI runtime")
+    ludus_sdk_register_system_prerequisite("POSIX threads (pthread)")
+    if(LUDUS_PLATFORM_ENABLE_WAYLAND)
+        ludus_sdk_register_system_prerequisite("Wayland client development package (wayland-client) for the Wayland Platform backend")
+    endif()
+    ludus_sdk_register_system_prerequisite("Host shader compiler (pinned Slang) and spirv-val for ludus_compile_shader at build time")
+endif()
+
+# Normalize the ON/OFF sanitizer options to JSON integers (0/1) for the manifest
+# template; the assertion-policy fields are already 0/1 from EngineBuildFlavor.
+foreach(_san ASAN UBSAN TSAN)
+    if(LUDUS_ENABLE_${_san})
+        set(LUDUS_ENABLE_${_san}_JSON 1)
+    else()
+        set(LUDUS_ENABLE_${_san}_JSON 0)
+    endif()
+endforeach()
+
+ludus_sdk_finalize_identity()
 
 configure_file(
     "${PROJECT_SOURCE_DIR}/cmake/LudusSdkManifest.json.in"
@@ -195,6 +274,25 @@ install(
 
 install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}/licenses")
 install(FILES "${PROJECT_BINARY_DIR}/cmake/LudusSdkManifest.json" DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}")
+
+# Redistributable dependency notices (P02). Bundle the third-party license
+# notices alongside the engine LICENSE so a relocated SDK carries its obligations.
+install(
+    FILES "${PROJECT_SOURCE_DIR}/cmake/sdk/THIRD_PARTY_NOTICES.md"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}/licenses"
+)
+
+# Package-local dependency CMake metadata directory. When a build exports the
+# bundled dependency configs (volk/freetype/harfbuzz), they are staged under this
+# directory so LudusConfig.cmake resolves them without the producer Conan cache.
+# The directory is created at install time; the release packaging step populates
+# it with the actual dependency *.cmake + static libraries (see
+# docs/development/project-sdk-workflow.md). Create it unconditionally so a
+# relocated consumer finds a stable, documented search root.
+install(
+    DIRECTORY
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${LUDUS_ENGINE_PACKAGE_NAME}/dependencies"
+)
 
 install(FILES cmake/LudusShaders.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
 install(FILES cmake/shaders/compile_shader.py config/shader_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
