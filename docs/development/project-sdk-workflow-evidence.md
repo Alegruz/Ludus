@@ -474,3 +474,77 @@ all green. The relocation closure is documented as the one capability still
 being hardened on the reference toolchain.
 
 Post-fix: 106 Python tests OK; `check --format` PASS.
+
+## Continuation batch — pinned-toolchain CI validation + observable failure scenarios
+
+Starting point for this batch: branch head `35b83de` (after the `main` merge).
+Preserved all unrelated merged work (CI restructure #54, init UI, editor changes)
+and legacy E0/browser/RAD behavior (those test suites and jobs still pass).
+
+### Pinned-toolchain gates now proven in CI (not just the authoring sandbox)
+
+After merging `main`, this PR's CI runs the reference toolchain (Clang 18, LLD,
+Conan, Qt6, xvfb). The following jobs are GREEN on commit `35b83de` and exercise
+the code added by this PR on real tools — upgrading several ledger items from
+"UNAVAILABLE in sandbox" to validated:
+
+| CI job | What it proves for this spec |
+| --- | --- |
+| `Development and SDK` | Builds Development; runs `./scripts/install-sdk`, i.e. the extended `verify_sdk_install` + the new `bundle_sdk_dependencies` + the external `sdk_consumer` link, on real Conan. |
+| `Assertion policy (debug/profile/release)` | All three native flavors build + test warning-clean; proves the schema-2 manifest/policy headers across flavors. |
+| `Clang static analysis` | clang-tidy-18 over every TU, including the extended `apps/editor/src/project_store.cpp` and v2 header. |
+| `ASan and UBSan` | Sanitizer build + tests clean with the merged changes. |
+| `Optional editor` | Compiles the editor with Qt6 + Clang 18 and runs `ludus_editor_tests`, which includes the new `project_store_v2_tests.cpp` consuming the shared `cases_v2.json`. The C++ and Python v2 readers are thus cross-checked on real tools. |
+| `Build-time budget` / `PCH` / `Source formatting` | Build-time budget respected; PCH path builds; clang-format-18 clean. |
+| `Packaged browser tests` | Browser/Emscripten regression intact. |
+| `Host tooling (ludus_tools)` | The stdlib-only tooling + Qt-free assertion. |
+
+This is recorded honestly: the jobs run in CI, not in the authoring sandbox,
+which lacks the pinned toolchain. The remaining genuinely-pending gates are the
+fully-relocated external link in an empty environment (project-sdk.yml relocation
+job, scoped to push-main/dispatch) and native *windowed* New Project GUI
+acceptance (needs a compositor/GPU + the GUI itself), plus the external
+Ludus-Sandbox conversion.
+
+### Observable failure-scenario acceptance (new)
+
+`scripts/python/test_ludus_failure_scenarios.py` (16 tests, all pass locally and
+in the `host-tooling` CI job) provides the handoff's required "observable
+results" for the review failure list, driving real paths rather than mirroring
+helpers:
+
+```
+$ cd scripts/python && python3 -m unittest test_ludus_failure_scenarios -v   # Ran 16 OK
+```
+
+- missing locked SDK on a fresh clone -> `SdkNotFound` with an install hint.
+- wrong compiler/runtime/flavor and mixed header/library variant -> rejected via
+  the `sdk_variant`/compiler/runtime ABI key (not a version string).
+- SDK corruption: deletes a published manifest -> listing skips it, re-install
+  reports `SdkCorrupt` and names `--repair`, repair recovers.
+- local refresh mid-operation -> `StampChanged` abort (no mixed inputs).
+- concurrent CLI/Editor build on one tree -> real cross-backend flock contention
+  between `editor_tool.BuildTreeLock` and `ludus_tools.buildlock.BuildTreeLock`,
+  both directions, with a lock-path-parity assertion.
+- failed build -> `op_run` returns the failure and launches NO binary (spied).
+- install cancellation + archive traversal/absolute/symlink -> rejected.
+- destination creation race -> no-replace, unrelated files preserved.
+- descriptor already v2 / lock disagreement during migration -> `MigrationFailed`
+  / `LockMismatch`; interrupted paired commit -> recoverable `.migrating` cleanup.
+- paths with spaces + Unicode -> project created, target a valid identifier.
+- Qt absent -> CLI run in a subprocess with `import PyQt6/PySide6` poisoned to
+  raise still exits 0 (the tooling never imports Qt).
+- competing installers of one identity -> second gets `Busy` on the install lock.
+
+### Totals for this batch
+
+```
+$ cd scripts/python && python3 -m unittest \
+    test_ludus_tools test_ludus_project_ops test_ludus_cli \
+    test_ludus_failure_scenarios test_editor_tool
+  Ran 122 tests ... OK
+$ python3 scripts/python/engine.py check --format   # PASS (clang-format 18)
+```
+
+`test_ludus_failure_scenarios` is added to the `host-tooling` CI job alongside
+the other `ludus_tools` suites so it runs on every PR/push.

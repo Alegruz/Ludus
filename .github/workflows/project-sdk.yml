@@ -39,7 +39,7 @@ jobs:
       - name: Run host-tooling unit/integration tests
         run: |
           cd scripts/python
-          python3 -m unittest test_ludus_tools test_ludus_project_ops test_ludus_cli -v
+          python3 -m unittest test_ludus_tools test_ludus_project_ops test_ludus_cli test_ludus_failure_scenarios -v
 
   sdk-candidate-relocation:
     name: SDK candidate build + relocation + external link
