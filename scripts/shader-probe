@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""Acquire/check the isolated shader tools, or compile and verify the probe offline."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import platform
+from pathlib import Path
+import re
+import shlex
+import shutil
+import struct
+import subprocess
+import sys
+import tarfile
+import urllib.request
+
+ROOT = Path(__file__).resolve().parent.parent
+TOOLS = ROOT / "out/shader-tools"
+SOURCE = ROOT / "tools/shader-probe"
+LOCK = json.loads((ROOT / "config/shader_toolchain.json").read_text())
+OFFSETS = {"resolution": 0, "elapsedTime": 8, "direction": 16, "tint": 32}
+
+
+def run(command: list[str], *, echo_output: bool = True) -> str:
+    print("+ " + " ".join(map(str, command)), flush=True)
+    result = subprocess.run(command, check=True, text=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT)
+    if echo_output:
+        print(result.stdout, end="")
+    return result.stdout
+
+
+def digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise RuntimeError(message)
+
+
+def bootstrap() -> None:
+    require(platform.system() == "Linux" and platform.machine() == "x86_64",
+            "This bounded bootstrap supports Linux x86_64 only")
+    TOOLS.mkdir(parents=True, exist_ok=True)
+    for name in ("slang", "spirv_tools"):
+        pin = LOCK[name]
+        archive = TOOLS / ("slang.tar.gz" if name == "slang" else "spirv-tools.deb")
+        if not archive.exists() or digest(archive) != pin["sha256"]:
+            temporary = archive.with_suffix(".download")
+            urllib.request.urlretrieve(pin["url"], temporary)
+            require(digest(temporary) == pin["sha256"], f"Integrity failure: {name}")
+            temporary.replace(archive)
+        destination = TOOLS / name.replace("_", "-")
+        # Re-extract verified archives; never trust an old marker to skip integrity.
+        if destination.exists():
+            shutil.rmtree(destination)
+        destination.mkdir()
+        if name == "slang":
+            with tarfile.open(archive) as contents:
+                # Allow the release's relative library symlinks within this root.
+                for member in contents.getmembers():
+                    target = (destination / member.name).resolve()
+                    require(target.is_relative_to(destination.resolve()) and
+                            (member.isfile() or member.isdir() or member.issym()), "Unsafe archive member")
+                    if member.issym():
+                        require((target.parent / member.linkname).resolve().is_relative_to(destination.resolve()),
+                                "Unsafe archive symlink")
+                contents.extractall(destination)
+        else:
+            run(["dpkg-deb", "-x", str(archive), str(destination)])
+    verify_tools()
+
+
+def verify_tools() -> tuple[Path, Path, Path]:
+    slang = TOOLS / "slang/bin/slangc"
+    val = TOOLS / "spirv-tools/usr/bin/spirv-val"
+    dis = TOOLS / "spirv-tools/usr/bin/spirv-dis"
+    require(run([str(slang), "-version"]).strip() == LOCK["slang"]["version"],
+            "Slang version differs from pin")
+    # All Slang compiler libraries are covered by the archive hash at acquisition.
+    for path, key in ((val, "val_sha256"), (dis, "dis_sha256")):
+        require(digest(path) == LOCK["spirv_tools"][key], f"Validator pin differs: {path}")
+    return slang, val, dis
+
+
+def check_reflection(path: Path) -> dict:
+    data = json.loads(path.read_text())
+    require(len(data["parameters"]) == 1, "Unexpected resource count")
+    resource = data["parameters"][0]
+    require(resource["name"] == "probe" and resource["binding"]["index"] == 0 and
+            resource["binding"]["kind"] == "descriptorTableSlot" and
+            resource["type"]["kind"] == "constantBuffer",
+            "Unexpected uniform binding")
+    fields = resource["type"]["elementType"]["fields"]
+    require({f["name"]: f["binding"]["offset"] for f in fields} == OFFSETS,
+            "Reflection offsets differ from CPU contract")
+    require([f["binding"]["size"] for f in fields] == [8, 4, 12, 16],
+            "Reflection field sizes differ")
+    require([f["type"]["kind"] for f in fields] == ["vector", "scalar", "vector", "vector"],
+            "Reflection field types differ")
+    for field in fields:
+        scalar = field["type"].get("elementType", field["type"])
+        require(scalar["scalarType"] == "float32", "Uniform field is not float32")
+    require(resource["type"]["elementVarLayout"]["binding"]["size"] == 48,
+            "Reflection block size differs")
+    return data
+
+
+def check_wgsl(code: str) -> dict:
+    # Deliberately narrow verifier for this shader, not a generic WGSL parser.
+    # Independently apply WGSL AlignOf/SizeOf with emitted @align annotations.
+    match = re.search(r"struct (ProbeUniforms\w*)\s*\{([^}]+)\}", code)
+    require(match is not None, "Missing WGSL uniform struct")
+    members = re.findall(r"@align\((\d+)\)\s+(\w+)\s*:\s*(vec[234]<f32>|f32),", match[2])
+    require(len(members) == 4, "WGSL uniform shape changed; review verifier")
+    offset = 0
+    alignment = 1
+    offsets = {}
+    for emitted_align, name, kind in members:
+        count = 1 if kind == "f32" else int(kind[3])
+        natural_align = {1: 4, 2: 8, 3: 16, 4: 16}[count]
+        align = int(emitted_align)
+        require(align >= natural_align and align & (align - 1) == 0, "Invalid WGSL alignment")
+        offset = (offset + align - 1) // align * align
+        offsets[name.removesuffix("_0")] = offset
+        offset += count * 4
+        alignment = max(alignment, align)
+    size = (offset + alignment - 1) // alignment * alignment
+    require([kind for _, _, kind in members] == ["vec2<f32>", "f32", "vec3<f32>", "vec4<f32>"],
+            "WGSL field types differ from upload contract")
+    require(offsets == OFFSETS and size == 48 and alignment == 16, "WGSL CPU layout mismatch")
+    require(re.search(r"@binding\(0\) @group\(0\) var<uniform> probe_\d+ : " + match[1], code)
+            is not None, "WGSL binding differs")
+    require(re.findall(r"@(vertex|fragment)\s+fn (\w+)", code) ==
+            [("vertex", "vertexMain"), ("fragment", "fragmentMain")], "WGSL entry points differ")
+    return {"offsets": offsets, "size": size, "alignment": alignment,
+            "group": 0, "binding": 0, "entry_points": ["vertexMain", "fragmentMain"]}
+
+
+def compile_probe(output: Path) -> None:
+    slang, val, dis = verify_tools()
+    output.mkdir(parents=True, exist_ok=True)
+    commands = []
+    for stage, entry in (("vertex", "vertexMain"), ("fragment", "fragmentMain")):
+        binary = output / f"probe.{stage}.spv"
+        reflection = output / f"{stage}.reflection.json"
+        command = [str(slang), str(SOURCE / "probe.slang"), "-target", "spirv", "-profile",
+                   "spirv_1_3", "-entry", entry, "-stage", stage, "-o", str(binary),
+                   "-reflection-json", str(reflection)]
+        commands.append(command)
+        run(command)
+        check_reflection(reflection)
+        run([str(val), "--target-env", "vulkan1.1", str(binary)])
+        assembly = run([str(dis), str(binary)], echo_output=False)
+        (output / f"probe.{stage}.spvasm").write_text(assembly)
+        require(re.search(r'OpEntryPoint \w+ %\w+ "main"', assembly) is not None,
+                "SPIR-V entry point differs")
+        if stage == "fragment":
+            for declaration in ("%float = OpTypeFloat 32", "%v2float = OpTypeVector %float 2",
+                                "%v3float = OpTypeVector %float 3", "%v4float = OpTypeVector %float 4",
+                                "%ProbeUniforms_std140 = OpTypeStruct %v2float %float %v3float %v4float"):
+                require(declaration in assembly, "SPIR-V uniform type shape differs")
+            require(re.findall(r"OpMemberDecorate %ProbeUniforms\w* (\d+) Offset (\d+)", assembly)
+                    == [(str(i), str(offset)) for i, offset in enumerate(OFFSETS.values())],
+                    "SPIR-V decorations disagree with reflection/CPU")
+            require("OpDecorate %probe Binding 0" in assembly and
+                    "OpDecorate %probe DescriptorSet 0" in assembly, "SPIR-V binding differs")
+            require("OpExecutionMode %fragmentMain OriginUpperLeft" in assembly,
+                    "SPIR-V fragment origin differs")
+    wgsl = output / "probe.wgsl"
+    command = [str(slang), str(SOURCE / "probe.slang"), "-target", "wgsl", "-profile", "sm_6_0",
+               "-entry", "vertexMain", "-entry", "fragmentMain", "-o", str(wgsl),
+               "-reflection-json", str(output / "wgsl.reflection.json")]
+    commands.append(command)
+    run(command)
+    check_reflection(output / "wgsl.reflection.json")
+    contract = check_wgsl(wgsl.read_text())
+    (output / "contract.json").write_text(json.dumps({"wgsl": contract, "spirv": {
+        "offsets": OFFSETS, "size": 48, "alignment": 16, "set": 0, "binding": 0,
+        "entry_points": ["main", "main"], "layout": "std140 (emitted struct/decorations)"}}, indent=2) + "\n")
+    header = "#pragma once\n#include <ludus/foundation/base/types.h>\nnamespace ludus::shader_probe {\n"
+    for stage in ("vertex", "fragment"):
+        data = (output / f"probe.{stage}.spv").read_bytes()
+        words = struct.unpack(f"<{len(data)//4}I", data)
+        header += f"inline constexpr foundation::uint32 {stage.upper()}_SPIRV[] = {{\n"
+        header += ",\n".join("    " + ", ".join(f"0x{v:08x}U" for v in words[i:i+8])
+                            for i in range(0, len(words), 8)) + "\n};\n"
+    (output / "shaders.h").write_text(header + "}\n")
+    for filename in ("index.html", "browser.js"):
+        shutil.copyfile(SOURCE / filename, output / filename)
+    (output / "build-evidence.json").write_text(json.dumps({"lock": LOCK, "commands": commands,
+        "artifacts": {p.name: digest(p) for p in sorted(output.iterdir())
+                      if p.suffix in (".spv", ".wgsl", ".slang")},
+        "source_sha256": digest(SOURCE / "probe.slang"),
+        "runtime_validation": "Not established by compilation; run both pixel probes"}, indent=2) + "\n")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("bootstrap", "compile", "check", "format"))
+    parser.add_argument("--output", type=Path, default=ROOT / "out/shader-probe")
+    args = parser.parse_args()
+    if args.action == "bootstrap":
+        bootstrap()
+    elif args.action == "compile":
+        compile_probe(args.output.resolve())
+    else:
+        sys.path.insert(0, str(ROOT / "scripts/python"))
+        from formatting import format_source
+        for path in (SOURCE / "uniform_layout.h", SOURCE / "native.cpp"):
+            code = path.read_text()
+            formatted = format_source(code, path, "clang-format-18")
+            if args.action == "format":
+                path.write_text(formatted)
+            else:
+                require(formatted == code, f"Format mismatch: {path}")
+        if args.action == "check":
+            entries = json.loads((ROOT / "out/build/linux-clang-development/compile_commands.json").read_text())
+            entry = next(e for e in entries if e["file"] == str(SOURCE / "native.cpp"))
+            command = shlex.split(entry["command"])
+            flags = []
+            index = 1
+            while index < len(command):
+                flag = command[index]
+                if flag == "-o":
+                    index += 2
+                    continue
+                # Tidy performs analysis only: omit Ninja module response files
+                # and the compiler's time-trace output option, retain policy flags.
+                if flag not in ("-c", entry["file"], "-ftime-trace") and not flag.startswith("@"):
+                    flags.append(flag)
+                index += 1
+            run(["clang-tidy-18", "--warnings-as-errors=*",
+                 f"--header-filter=^{re.escape(str(ROOT))}/(tools/shader-probe|modules|apps)/.*",
+                 str(SOURCE / "native.cpp"), "--", *flags])
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
+        if isinstance(error, subprocess.CalledProcessError):
+            print(error.stdout or "", file=sys.stderr)
+        print(f"Shader probe: {error}", file=sys.stderr)
+        sys.exit(1)

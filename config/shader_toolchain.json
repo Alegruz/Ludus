@@ -1,0 +1,23 @@
+{
+  "host": "linux-x86_64-glibc-2.38-or-newer",
+  "slang": {
+    "version": "2026.1.2",
+    "url": "https://github.com/shader-slang/slang/releases/download/v2026.1.2/slang-2026.1.2-linux-x86_64-glibc-2.27.tar.gz",
+    "sha256": "bcffdccca2c16057d39f290a07f6f237b9a765238afc1974b68d09762e874b09",
+    "license": "Apache-2.0 WITH LLVM-exception"
+  },
+  "spirv_tools": {
+    "version": "2025.1~rc1-1~ubuntu0.24.04.2",
+    "url": "https://security.ubuntu.com/ubuntu/pool/universe/s/spirv-tools/spirv-tools_2025.1~rc1-1~ubuntu0.24.04.2_amd64.deb",
+    "sha256": "529e396c337d15beb8ed0f03fcbeb2a066e5a818e032e197b6ef2d3328dc7ae9",
+    "val_sha256": "20c5998a46f02310f56bf11be238c34d374bb50104b7ccf85bb909f9da883ff9",
+    "dis_sha256": "7e69bcb69d0bad2dc46556a7959fa5c2f0334b3b016712657d70ac5c67902a90",
+    "license": "Apache-2.0"
+  },
+  "wgsl_validator": {
+    "playwright": "1.55.1",
+    "chromium_revision": "1193",
+    "chromium_version": "140.0.7339.186",
+    "acquisition": "tools/web-browser-tests/package-lock.json; npx playwright install chromium"
+  }
+}

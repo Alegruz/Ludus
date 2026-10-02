@@ -1,0 +1,270 @@
+{
+  "date": "2026-10-01 America/Toronto",
+  "scope": "shader feasibility on software GPUs; no public RHI integration or hardware acceptance",
+  "source_sha256": "85426139d63f9d5a447786ca3954874337135d9ea28916b8414b489c8cb527f7",
+  "artifact_sha256": {
+    "probe.fragment.spv": "38f3a4f01dc9c8cbf66c523edc24ee39f55941eec01c65da3b745f2b7abb7f45",
+    "probe.vertex.spv": "ba5e0e9eeb200bffb96d36112f81274a69ca3707df63fa7f555da0f3ac34de1b",
+    "probe.wgsl": "22eb7329689f1afe532dd228578fbfd487a87f02bf6a741a0627aad9b9992e3c"
+  },
+  "compiler_version": "2026.1.2",
+  "commands": [
+    [
+      "out/shader-tools/slang/bin/slangc",
+      "tools/shader-probe/probe.slang",
+      "-target",
+      "spirv",
+      "-profile",
+      "spirv_1_3",
+      "-entry",
+      "vertexMain",
+      "-stage",
+      "vertex",
+      "-o",
+      "out/shader-probe/probe.vertex.spv",
+      "-reflection-json",
+      "out/shader-probe/vertex.reflection.json"
+    ],
+    [
+      "out/shader-tools/slang/bin/slangc",
+      "tools/shader-probe/probe.slang",
+      "-target",
+      "spirv",
+      "-profile",
+      "spirv_1_3",
+      "-entry",
+      "fragmentMain",
+      "-stage",
+      "fragment",
+      "-o",
+      "out/shader-probe/probe.fragment.spv",
+      "-reflection-json",
+      "out/shader-probe/fragment.reflection.json"
+    ],
+    [
+      "out/shader-tools/slang/bin/slangc",
+      "tools/shader-probe/probe.slang",
+      "-target",
+      "wgsl",
+      "-profile",
+      "sm_6_0",
+      "-entry",
+      "vertexMain",
+      "-entry",
+      "fragmentMain",
+      "-o",
+      "out/shader-probe/probe.wgsl",
+      "-reflection-json",
+      "out/shader-probe/wgsl.reflection.json"
+    ]
+  ],
+  "contract": {
+    "wgsl": {
+      "offsets": {
+        "resolution": 0,
+        "elapsedTime": 8,
+        "direction": 16,
+        "tint": 32
+      },
+      "size": 48,
+      "alignment": 16,
+      "group": 0,
+      "binding": 0,
+      "entry_points": [
+        "vertexMain",
+        "fragmentMain"
+      ]
+    },
+    "spirv": {
+      "offsets": {
+        "resolution": 0,
+        "elapsedTime": 8,
+        "direction": 16,
+        "tint": 32
+      },
+      "size": 48,
+      "alignment": 16,
+      "set": 0,
+      "binding": 0,
+      "entry_points": [
+        "main",
+        "main"
+      ],
+      "layout": "std140 (emitted struct/decorations)"
+    }
+  },
+  "vulkan": {
+    "adapter": "llvmpipe (LLVM 20.1.2, 256 bits)",
+    "mesa": "25.2.8-0ubuntu0.24.04.2",
+    "validation": "SPIRV-Tools + VkResult + pixel oracle; no Vulkan validation layer installed",
+    "cases": [
+      {
+        "width": 96,
+        "height": 64,
+        "srgb": false,
+        "elapsed": 0,
+        "mismatches_beyond_2_byte_values": 0
+      },
+      {
+        "width": 96,
+        "height": 64,
+        "srgb": false,
+        "elapsed": 2,
+        "mismatches_beyond_2_byte_values": 0
+      },
+      {
+        "width": 64,
+        "height": 96,
+        "srgb": false,
+        "elapsed": 0,
+        "mismatches_beyond_2_byte_values": 0
+      },
+      {
+        "width": 64,
+        "height": 96,
+        "srgb": false,
+        "elapsed": 2,
+        "mismatches_beyond_2_byte_values": 0
+      },
+      {
+        "width": 96,
+        "height": 64,
+        "srgb": true,
+        "elapsed": 0,
+        "mismatches_beyond_2_byte_values": 0
+      },
+      {
+        "width": 96,
+        "height": 64,
+        "srgb": true,
+        "elapsed": 2,
+        "mismatches_beyond_2_byte_values": 0
+      },
+      {
+        "width": 64,
+        "height": 96,
+        "srgb": true,
+        "elapsed": 0,
+        "mismatches_beyond_2_byte_values": 0
+      },
+      {
+        "width": 64,
+        "height": 96,
+        "srgb": true,
+        "elapsed": 2,
+        "mismatches_beyond_2_byte_values": 0
+      }
+    ]
+  },
+  "browser_software": {
+    "kind": "real software GPU; no hardware acceptance",
+    "flags": [
+      "--enable-unsafe-webgpu",
+      "--enable-features=Vulkan",
+      "--use-webgpu-adapter=swiftshader",
+      "--use-angle=swiftshader",
+      "--use-vulkan=swiftshader",
+      "--disable-vulkan-surface"
+    ],
+    "wgslSha256": "22eb7329689f1afe532dd228578fbfd487a87f02bf6a741a0627aad9b9992e3c",
+    "errors": [],
+    "browserVersion": "140.0.7339.186",
+    "report": {
+      "state": "passed",
+      "cases": [
+        {
+          "format": "rgba8unorm",
+          "width": 96,
+          "height": 64,
+          "elapsed": 0,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "format": "rgba8unorm",
+          "width": 96,
+          "height": 64,
+          "elapsed": 2,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "format": "rgba8unorm",
+          "width": 64,
+          "height": 96,
+          "elapsed": 0,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "format": "rgba8unorm",
+          "width": 64,
+          "height": 96,
+          "elapsed": 2,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "format": "rgba8unorm-srgb",
+          "width": 96,
+          "height": 64,
+          "elapsed": 0,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "format": "rgba8unorm-srgb",
+          "width": 96,
+          "height": 64,
+          "elapsed": 2,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "format": "rgba8unorm-srgb",
+          "width": 64,
+          "height": 96,
+          "elapsed": 0,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "format": "rgba8unorm-srgb",
+          "width": 64,
+          "height": 96,
+          "elapsed": 2,
+          "mismatches": 0,
+          "maxError": 0
+        }
+      ],
+      "errors": [],
+      "frames": 23,
+      "adapter": {
+        "vendor": "google",
+        "architecture": "swiftshader",
+        "device": "",
+        "description": ""
+      },
+      "compilationMessages": [],
+      "canvasFormat": "bgra8unorm"
+    },
+    "outcome": "passed"
+  },
+  "browser_default": {
+    "kind": "default browser adapter",
+    "flags": [],
+    "wgslSha256": "22eb7329689f1afe532dd228578fbfd487a87f02bf6a741a0627aad9b9992e3c",
+    "errors": [],
+    "browserVersion": "140.0.7339.186",
+    "report": {
+      "state": "failed",
+      "cases": [],
+      "errors": [
+        "Error: No WebGPU adapter"
+      ],
+      "frames": 0
+    },
+    "outcome": "failed",
+    "failure": "AssertionError [ERR_ASSERTION]: {\"state\":\"failed\",\"cases\":[],\"errors\":[\"Error: No WebGPU adapter\"],\"frames\":0}\n\n'failed' !== 'passed'\n"
+  }
+}

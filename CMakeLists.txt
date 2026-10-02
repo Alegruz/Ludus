@@ -28,6 +28,7 @@ include(EnginePch)
 
 option(LUDUS_BUILD_TESTS "Build Ludus tests" ON)
 option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
+option(LUDUS_BUILD_SHADER_PROBE "Build the isolated offline shader feasibility probe" OFF)
 if(EMSCRIPTEN)
     # Native Catch2 test targets are not browser executables.
     if(LUDUS_BUILD_TESTS)
@@ -122,6 +123,10 @@ else()
     endif()
 
     add_subdirectory(tests)
+endif()
+
+if(LUDUS_BUILD_SHADER_PROBE)
+    add_subdirectory(tools/shader-probe)
 endif()
 
 install(
