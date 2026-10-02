@@ -39,16 +39,23 @@ target_sources(ludus_runtime_game_host
     PRIVATE
         src/host.cpp
         src/host_services.cpp
+        src/host_session.cpp
         src/identity.cpp
         src/module_loader.cpp
+        src/protocol.cpp
+        src/protocol_codec.cpp
         src/internal/host_services.h
+        src/internal/host_session.h
         src/internal/identity.h
         src/internal/module_loader.h
+        src/internal/protocol_codec.h
     PUBLIC
         FILE_SET public_headers
         TYPE HEADERS
         BASE_DIRS include
-        FILES include/ludus/runtime/game_host/host.h
+        FILES
+            include/ludus/runtime/game_host/host.h
+            include/ludus/runtime/game_host/protocol.h
 )
 
 target_include_directories(ludus_runtime_game_host
@@ -80,6 +87,7 @@ install(TARGETS ludus_runtime_game_host
 # dispatch, and rejection of missing/incompatible modules.
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
+    find_package(Threads REQUIRED)
 
     # Fixture module A and B share one source but differ by a compile define, so
     # each has its own code and the test can prove A and B run their own copy.
@@ -128,4 +136,27 @@ if(LUDUS_BUILD_TESTS)
         LUDUS_FIXTURE_NOENTRY_PATH="$<TARGET_FILE:ludus_game_fixture_noentry>")
     add_test(NAME ludus_game_host_loader_tests COMMAND ludus_game_host_loader_tests)
     set_tests_properties(ludus_game_host_loader_tests PROPERTIES TIMEOUT 120 LABELS "unit;runtime;loader")
+
+    add_executable(ludus_game_host_protocol_tests tests/protocol_tests.cpp)
+    target_include_directories(ludus_game_host_protocol_tests PRIVATE src)
+    target_link_libraries(ludus_game_host_protocol_tests PRIVATE
+        Ludus::GameHost Ludus::FoundationLogging Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_game_host_protocol_tests)
+    ludus_enable_test_exceptions(ludus_game_host_protocol_tests)
+    add_test(NAME ludus_game_host_protocol_tests COMMAND ludus_game_host_protocol_tests)
+    set_tests_properties(ludus_game_host_protocol_tests PROPERTIES TIMEOUT 60 LABELS "unit;runtime;protocol")
+
+    add_executable(ludus_game_host_session_tests tests/session_tests.cpp)
+    target_include_directories(ludus_game_host_session_tests PRIVATE src "${LUDUS_GAME_HOST_GENERATED_INCLUDE_DIR}")
+    target_link_libraries(ludus_game_host_session_tests PRIVATE
+        Ludus::GameHost Ludus::GameApi Ludus::FoundationLogging Catch2::Catch2WithMain Threads::Threads ${CMAKE_DL_LIBS})
+    ludus_apply_project_defaults(ludus_game_host_session_tests)
+    ludus_enable_test_exceptions(ludus_game_host_session_tests)
+    add_dependencies(ludus_game_host_session_tests ludus_game_fixture_A ludus_game_fixture_B ludus_game_fixture_badid)
+    target_compile_definitions(ludus_game_host_session_tests PRIVATE
+        LUDUS_FIXTURE_A_PATH="$<TARGET_FILE:ludus_game_fixture_A>"
+        LUDUS_FIXTURE_B_PATH="$<TARGET_FILE:ludus_game_fixture_B>"
+        LUDUS_FIXTURE_BADID_PATH="$<TARGET_FILE:ludus_game_fixture_badid>")
+    add_test(NAME ludus_game_host_session_tests COMMAND ludus_game_host_session_tests)
+    set_tests_properties(ludus_game_host_session_tests PROPERTIES TIMEOUT 120 LABELS "unit;runtime;session;reload")
 endif()
