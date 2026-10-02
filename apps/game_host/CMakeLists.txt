@@ -9,7 +9,7 @@ target_link_libraries(ludus_game_host_app PRIVATE
     Ludus::GameHost Ludus::FoundationLogging)
 ludus_apply_project_defaults(ludus_game_host_app)
 
-# The host must dlopen the gameplay module with its own exported symbols
-# available for RTLD_LOCAL modules that resolve host-provided weak references;
-# export dynamic so the loader scope works even for a stripped install.
-set_target_properties(ludus_game_host_app PROPERTIES ENABLE_EXPORTS ON)
+# Do NOT export the host's whole symbol table. The gameplay module calls back
+# only through the passed host service table (design 6), never host-exported
+# C++ symbols, and is loaded RTLD_LOCAL — so ENABLE_EXPORTS is unnecessary and
+# would leak the host engine ABI into the module's symbol scope.

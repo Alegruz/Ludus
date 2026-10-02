@@ -80,8 +80,10 @@ public:
     }
 
     // Release the loader reference. Idempotent. Does not run module Destroy; the
-    // caller retires module objects first (design 8).
-    void Close() noexcept;
+    // caller retires module objects first (design 8). Returns false if dlclose
+    // reported an error (residency uncertain -> caller requires restart); a
+    // not-loaded module returns true (nothing to release).
+    bool Close() noexcept;
 
 private:
     friend LoadStatus LoadModule(std::string_view path,

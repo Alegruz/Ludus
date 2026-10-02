@@ -21,6 +21,43 @@ using ludus::foundation::usize;
 // A module reporting a smaller table cannot provide the mandatory operations.
 constexpr usize kMinTableSize = offsetof(GameApiTable, Quiesce);
 
+// A field is present in a negotiated table only if the reported StructSize
+// covers all of its bytes. A capability callback beyond StructSize is treated
+// as absent even if the host struct would place a pointer there.
+template <typename FieldPtr>
+[[nodiscard]] bool FieldWithin(uint32 structSize, FieldPtr GameApiTable::*member) noexcept
+{
+    const GameApiTable probe{};
+    const auto* base = reinterpret_cast<const unsigned char*>(&probe);
+    const auto* field = reinterpret_cast<const unsigned char*>(&(probe.*member));
+    const usize offset = static_cast<usize>(field - base);
+    return offset + sizeof(FieldPtr) <= structSize;
+}
+
+// Validate that every callback a capability needs is both within the negotiated
+// table size and non-null. A module advertising a capability with a null or
+// truncated callback is rejected before any use (review finding 2).
+[[nodiscard]] bool CapabilityComplete(const GameApiTable& t, game_api::Capability cap) noexcept
+{
+    switch (cap)
+    {
+        case game_api::Capability::Reload:
+            return FieldWithin(t.StructSize, &GameApiTable::DiscardCandidate) && t.Quiesce != nullptr &&
+                   t.Resume != nullptr && t.CheckpointSize != nullptr && t.WriteCheckpoint != nullptr &&
+                   t.CreateCandidate != nullptr && t.ValidateCandidate != nullptr && t.CommitCandidate != nullptr &&
+                   t.DiscardCandidate != nullptr;
+        case game_api::Capability::Properties:
+            return FieldWithin(t.StructSize, &GameApiTable::DiscardEdits) && t.DescribePropertiesSize != nullptr &&
+                   t.DescribeProperties != nullptr && t.ReadProperties != nullptr && t.PrepareEdits != nullptr &&
+                   t.CommitEdits != nullptr && t.DiscardEdits != nullptr;
+        case game_api::Capability::AssetReload:
+            return FieldWithin(t.StructSize, &GameApiTable::ReloadAsset) && t.ReloadAsset != nullptr;
+        case game_api::Capability::None:
+            return true;
+    }
+    return false;
+}
+
 // Compare two bounded identity strings exactly. The module's Identity is a
 // null-padded fixed buffer of IdentityLength used bytes.
 [[nodiscard]] bool IdentityMatches(const GameMetadata& metadata, std::string_view hostIdentity) noexcept
@@ -94,19 +131,23 @@ LoadedModule& LoadedModule::operator=(LoadedModule&& other) noexcept
     return *this;
 }
 
-void LoadedModule::Close() noexcept
+bool LoadedModule::Close() noexcept
 {
+    bool ok = true;
     if (Handle_ != nullptr)
     {
         // Releasing the loader reference. This is logical retirement; it does
         // not prove the OS unmapped every page (design 8). The owner must have
-        // destroyed all module instances/candidates first.
-        ::dlclose(Handle_);
+        // destroyed all module instances/candidates first. A dlclose error is
+        // surfaced so the caller can require a restart rather than assume the
+        // image was retired.
+        ok = (::dlclose(Handle_) == 0);
         Handle_ = nullptr;
     }
     Table_ = {};
     Metadata_ = {};
     Generation_ = 0;
+    return ok;
 }
 
 LoadStatus LoadModule(std::string_view path,
@@ -160,13 +201,17 @@ LoadStatus LoadModule(std::string_view path,
         return LoadStatus::AbiRejected;
     }
 
-    // The module must report a compatible ABI major and a usable table size.
-    if (table.AbiMajor != hostAbiMajor || table.StructSize < kMinTableSize || table.StructSize > sizeof(GameApiTable))
+    // The module must report a compatible ABI major, a minor it does not exceed
+    // the host's, and a usable, in-range table size (size negotiation, design 6).
+    if (table.AbiMajor != hostAbiMajor || table.AbiMinor > hostAbiMinor || table.StructSize < kMinTableSize ||
+        table.StructSize > sizeof(GameApiTable))
     {
         ::dlclose(handle);
         return LoadStatus::AbiRejected;
     }
-    if (table.Query == nullptr || table.Create == nullptr || table.Destroy == nullptr || table.Update == nullptr)
+    // The mandatory callbacks must be present and within the negotiated size.
+    if (!FieldWithin(table.StructSize, &GameApiTable::Update) || table.Query == nullptr || table.Create == nullptr ||
+        table.Destroy == nullptr || table.Update == nullptr)
     {
         ::dlclose(handle);
         return LoadStatus::AbiRejected;
@@ -181,10 +226,26 @@ LoadStatus LoadModule(std::string_view path,
         ::dlclose(handle);
         return LoadStatus::QueryFailed;
     }
-    if (metadata.AbiMajor != hostAbiMajor || metadata.IdentityLength > game_api::kIdentityMax)
+    // Query must agree with the table on ABI, report a consistent metadata size,
+    // and a bounded identity. Published and query metadata must agree (L04).
+    if (metadata.StructSize < sizeof(GameMetadata) || metadata.AbiMajor != hostAbiMajor ||
+        metadata.AbiMinor != table.AbiMinor || metadata.IdentityLength > game_api::kIdentityMax)
     {
         ::dlclose(handle);
         return LoadStatus::MetadataInconsistent;
+    }
+    // Every advertised capability must have all its callbacks present and
+    // non-null within the negotiated table (review finding 2): a module that
+    // advertises Reload/Properties/AssetReload with a null or truncated callback
+    // is rejected before any use.
+    for (const auto cap :
+         {game_api::Capability::Reload, game_api::Capability::Properties, game_api::Capability::AssetReload})
+    {
+        if (game_api::HasCapability(metadata.Capabilities, cap) && !CapabilityComplete(table, cap))
+        {
+            ::dlclose(handle);
+            return LoadStatus::MetadataInconsistent;
+        }
     }
 
     // Reject a module whose embedded identity differs from the host identity

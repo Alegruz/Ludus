@@ -17,6 +17,23 @@
 
 include_guard(GLOBAL)
 
+# Apply the required Ludus runtime policy to a gameplay target built against the
+# installed SDK (design 2/15): C++23, no GNU extensions, no C++ exceptions,
+# warning-clean, hidden visibility default. Gameplay/runtime targets are
+# production targets and must carry the same policy as engine code; the SDK does
+# not relax it for external consumers.
+function(_ludus_apply_game_policy target)
+    target_compile_features(${target} PRIVATE cxx_std_23)
+    set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(${target} PRIVATE
+            -fno-exceptions
+            -Wall -Wextra -Wpedantic -Werror)
+    elseif(MSVC)
+        target_compile_options(${target} PRIVATE /EHs-c- /W4 /WX)
+    endif()
+endfunction()
+
 function(ludus_add_game)
     set(options "")
     set(oneValue NAME)
@@ -42,14 +59,17 @@ function(ludus_add_game)
         C_VISIBILITY_PRESET hidden
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN ON)
+    _ludus_apply_game_policy(${GAME_NAME}_module)
 
     # --- Project-owned host executable ---
     if(TARGET Ludus::GameHost)
         add_executable(${GAME_NAME}_host "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/LudusGameHostMain.cpp")
         target_link_libraries(${GAME_NAME}_host PRIVATE Ludus::GameHost)
-        set_target_properties(${GAME_NAME}_host PROPERTIES
-            OUTPUT_NAME "${GAME_NAME}_host"
-            ENABLE_EXPORTS ON)
+        set_target_properties(${GAME_NAME}_host PROPERTIES OUTPUT_NAME "${GAME_NAME}_host")
+        _ludus_apply_game_policy(${GAME_NAME}_host)
+        # Do NOT set ENABLE_EXPORTS: the module calls back only through the
+        # passed host service table, never host-exported C++ symbols, so the host
+        # must not export its whole symbol table (design 6).
 
         # --- Static shipping executable: same game sources linked directly ---
         add_executable(${GAME_NAME}_shipping
@@ -61,5 +81,6 @@ function(ludus_add_game)
             target_compile_definitions(${GAME_NAME}_shipping PRIVATE LUDUS_EXAMPLE_IDENTITY="${Ludus_SDK_IDENTITY}")
         endif()
         set_target_properties(${GAME_NAME}_shipping PROPERTIES OUTPUT_NAME "${GAME_NAME}")
+        _ludus_apply_game_policy(${GAME_NAME}_shipping)
     endif()
 endfunction()

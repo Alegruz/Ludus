@@ -115,7 +115,7 @@ Status GameUpdate(GameInstance* instance, const FrameInput* input, RenderParams*
     {
         return Status::InvalidArgument;
     }
-    if (!state->Paused && input->Paused == 0)
+    if (input->Paused == 0)
     {
         state->Sim.SimTime = input->ElapsedSeconds;
         state->Sim.PositionX += state->Sim.Velocity * state->Sim.Speed * static_cast<float32>(input->DeltaSeconds);

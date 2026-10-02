@@ -27,6 +27,8 @@ public:
 
     HostServiceProvider(const HostServiceProvider&) = delete;
     HostServiceProvider& operator=(const HostServiceProvider&) = delete;
+    HostServiceProvider(HostServiceProvider&& other) noexcept;
+    HostServiceProvider& operator=(HostServiceProvider&& other) noexcept;
 
     [[nodiscard]] const game_api::HostServices& Services() const noexcept
     {

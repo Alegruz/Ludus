@@ -171,6 +171,105 @@ TEST_CASE("session performs a full reload transaction over the protocol", "[sess
     ::close(hostEnd);
 }
 
+namespace
+{
+// Pull a uint field out of the newest Status CommandResult in a drained batch.
+bool LatestStatusUint(const std::vector<Message>& events, const char* field, ludus::foundation::uint64& out)
+{
+    bool found = false;
+    for (const Message& m : events)
+    {
+        std::string e;
+        ludus::foundation::uint64 v = 0;
+        if (m.GetString("event", e) && e == "CommandResult" && m.GetUint(field, v))
+        {
+            out = v;
+            found = true;
+        }
+    }
+    return found;
+}
+} // namespace
+
+TEST_CASE("pause then step advances exactly one simulation tick (no catch-up)", "[session][pause]")
+{
+    int sv[2] = {-1, -1};
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    const int editorEnd = sv[0];
+    const int hostEnd = sv[1];
+    FrameReader reader;
+
+    HostSession session(0x11, 0x22, hostEnd);
+    REQUIRE(session.LoadInitial(LUDUS_FIXTURE_A_PATH));
+    RunResult result = RunResult::Internal;
+    std::thread hostThread([&] { result = session.RunLoop(0); });
+    (void)DrainEvents(editorEnd, reader, 80);
+
+    // Pause.
+    {
+        Message pause;
+        pause.SetString("command", protocol::CommandKindName(CommandKind::Pause));
+        pause.SetHexId("request", 1);
+        SendCommand(editorEnd, pause);
+    }
+    (void)DrainEvents(editorEnd, reader, 60);
+
+    // Status: record sim ticks while paused.
+    {
+        Message status;
+        status.SetString("command", protocol::CommandKindName(CommandKind::Status));
+        status.SetHexId("request", 2);
+        SendCommand(editorEnd, status);
+    }
+    auto s1 = DrainEvents(editorEnd, reader, 60);
+    ludus::foundation::uint64 ticksPaused = 0;
+    REQUIRE(LatestStatusUint(s1, "sim_ticks", ticksPaused));
+
+    // Let the loop spin while paused; ticks must NOT advance (no catch-up).
+    (void)DrainEvents(editorEnd, reader, 60);
+    {
+        Message status;
+        status.SetString("command", protocol::CommandKindName(CommandKind::Status));
+        status.SetHexId("request", 3);
+        SendCommand(editorEnd, status);
+    }
+    auto s2 = DrainEvents(editorEnd, reader, 60);
+    ludus::foundation::uint64 ticksStillPaused = 0;
+    REQUIRE(LatestStatusUint(s2, "sim_ticks", ticksStillPaused));
+    REQUIRE(ticksStillPaused == ticksPaused);
+
+    // One Step: exactly one additional simulation tick.
+    {
+        Message step;
+        step.SetString("command", protocol::CommandKindName(CommandKind::Step));
+        step.SetHexId("request", 4);
+        SendCommand(editorEnd, step);
+    }
+    (void)DrainEvents(editorEnd, reader, 60);
+    {
+        Message status;
+        status.SetString("command", protocol::CommandKindName(CommandKind::Status));
+        status.SetHexId("request", 5);
+        SendCommand(editorEnd, status);
+    }
+    auto s3 = DrainEvents(editorEnd, reader, 60);
+    ludus::foundation::uint64 ticksAfterStep = 0;
+    REQUIRE(LatestStatusUint(s3, "sim_ticks", ticksAfterStep));
+    REQUIRE(ticksAfterStep == ticksPaused + 1);
+
+    {
+        Message stop;
+        stop.SetString("command", protocol::CommandKindName(CommandKind::Stop));
+        stop.SetHexId("request", 6);
+        SendCommand(editorEnd, stop);
+    }
+    (void)DrainEvents(editorEnd, reader, 80);
+    hostThread.join();
+    REQUIRE(result == RunResult::Ok);
+    ::close(editorEnd);
+    ::close(hostEnd);
+}
+
 TEST_CASE("reload to an incompatible module keeps the session alive", "[session]")
 {
     int sv[2] = {-1, -1};

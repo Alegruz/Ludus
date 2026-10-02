@@ -24,9 +24,16 @@ target_sources(ludus_runtime_game_api
             include/ludus/runtime/game_api/properties.h
 )
 
-# The ABI headers need only the fixed-width aliases. FoundationBase is a
-# header-only Band-0 dependency; no higher-level engine module is pulled in.
-target_link_libraries(ludus_runtime_game_api INTERFACE Ludus::FoundationBase)
+# The ABI headers need ONLY the Band-0 fixed-width aliases from
+# <ludus/foundation/base/types.h>, which is a pure <cstdint>/<cstddef> alias
+# header with no symbols. GameApi must NOT link the FoundationBase STATIC
+# archive (that would pull the engine runtime into a gameplay module). Propagate
+# only the base include directories as a usage requirement; linking is omitted.
+# In the installed SDK the base headers live in the common include dir, so a
+# consumer that `find_package(Ludus)`-es GameApi only needs the include path.
+target_include_directories(ludus_runtime_game_api INTERFACE
+    $<BUILD_INTERFACE:$<TARGET_PROPERTY:ludus_foundation_base,INTERFACE_INCLUDE_DIRECTORIES>>
+)
 
 install(TARGETS ludus_runtime_game_api
     EXPORT LudusTargets

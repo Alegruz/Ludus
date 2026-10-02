@@ -210,7 +210,9 @@ Status FixtureUpdate(GameInstance* instance, const FrameInput* input, RenderPara
     {
         return Status::InvalidArgument;
     }
-    if (!state->Paused && input->Paused == 0)
+    // Advance iff the host says this frame is not paused. Pause/Step is driven
+    // by input.Paused alone so a single Step advances exactly one tick (design 8).
+    if (input->Paused == 0)
     {
         state->SimTime = input->ElapsedSeconds;
         state->PositionX += state->Velocity * state->Speed * static_cast<float32>(input->DeltaSeconds);

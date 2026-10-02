@@ -162,6 +162,27 @@ HostServiceProvider::HostServiceProvider() noexcept : Context_(new(std::nothrow)
     Services_.ResolveResource = &ResolveResourceCallback;
 }
 
+HostServiceProvider::HostServiceProvider(HostServiceProvider&& other) noexcept
+    : Context_(other.Context_), Services_(other.Services_)
+{
+    // The Context pointer is heap-stable; the moved table still references it.
+    other.Context_ = nullptr;
+    other.Services_ = {};
+}
+
+HostServiceProvider& HostServiceProvider::operator=(HostServiceProvider&& other) noexcept
+{
+    if (this != &other)
+    {
+        delete Context_;
+        Context_ = other.Context_;
+        Services_ = other.Services_;
+        other.Context_ = nullptr;
+        other.Services_ = {};
+    }
+    return *this;
+}
+
 HostServiceProvider::~HostServiceProvider() noexcept
 {
     delete Context_;
