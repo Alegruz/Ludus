@@ -64,8 +64,7 @@ TEST_CASE("Shared v2 fixtures parse with the same verdicts as the Python v2 read
         {
             INFO("expected valid: " << fileName.toStdString());
             REQUIRE(outcome.Ok());
-            CHECK(outcome.Descriptor.Version ==
-                  static_cast<foundation::uint32>(testCase.value(QStringLiteral("version")).toInt()));
+            CHECK(static_cast<int>(outcome.Descriptor.Version) == testCase.value(QStringLiteral("version")).toInt());
             CHECK(outcome.Descriptor.Name == testCase.value(QStringLiteral("name")).toString());
             CHECK(outcome.Descriptor.Preset == testCase.value(QStringLiteral("preset")).toString());
             if (testCase.value(QStringLiteral("provider")).toString() == QStringLiteral("cmake") &&
