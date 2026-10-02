@@ -43,6 +43,11 @@ enum class PlayState : ludus::foundation::uint8
 
 [[nodiscard]] std::string_view PlayStateName(PlayState state) noexcept;
 
+// Run a statically linked gameplay implementation (shipping build, no dlopen,
+// no reload). Builds the table from the in-process entry, runs the bounded
+// frame loop, and retires the instance.
+[[nodiscard]] RunResult RunStaticEntry(const HostConfig& config, StaticEntryFn entry) noexcept;
+
 class HostSession final
 {
 public:

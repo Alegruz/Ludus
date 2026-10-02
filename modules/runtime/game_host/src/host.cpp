@@ -44,4 +44,13 @@ RunResult Run(const HostConfig& config) noexcept
     }
     return session.RunLoop(config.MaxFrames);
 }
+
+RunResult RunStatic(const HostConfig& config, StaticEntryFn entry) noexcept
+{
+    if (entry == nullptr)
+    {
+        return RunResult::BadArguments;
+    }
+    return RunStaticEntry(config, entry);
+}
 } // namespace ludus::runtime::game_host

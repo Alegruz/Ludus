@@ -1,0 +1,20 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 29, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "linux-clang-development",
+      "displayName": "Live-edit game (Development)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/linux-clang-development",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_COMPILER": "clang++-18",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "linux-clang-development", "configurePreset": "linux-clang-development" }
+  ]
+}

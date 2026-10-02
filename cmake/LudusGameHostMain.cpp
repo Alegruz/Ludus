@@ -1,0 +1,177 @@
+// Project-owned GameHost executable (project-live-reload design 1/2/3).
+//
+// A thin front end over Ludus::GameHost::Run. It parses argv/cwd exactly as the
+// v1 executable Run contract requires (positional args and cwd are preserved and
+// not reinterpreted), resolves the control fd inherited from the supervisor, and
+// runs one play session. The same binary runs headless (no control fd, bounded
+// frames) for local smoke and acceptance.
+//
+// Usage:
+//   game_host --module <abs-path> [--control-fd N] [--max-frames N]
+//             [--project-id HEX] [--game-id HEX] [--headless]
+//
+// This executable intentionally links no Qt. The editor supervises it over the
+// protocol; it never embeds the editor.
+
+#include <ludus/runtime/game_host/host.h>
+
+#include <ludus/foundation/base/types.h>
+#include <ludus/foundation/logging/log_system.hpp>
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <string_view>
+
+namespace
+{
+using ludus::foundation::int32;
+using ludus::foundation::uint64;
+
+[[nodiscard]] bool ParseU64(std::string_view text, uint64& out)
+{
+    if (text.empty())
+    {
+        return false;
+    }
+    uint64 value = 0;
+    for (const char c : text)
+    {
+        if (c < '0' || c > '9')
+        {
+            return false;
+        }
+        value = value * 10 + static_cast<uint64>(c - '0');
+    }
+    out = value;
+    return true;
+}
+
+[[nodiscard]] bool ParseHex(std::string_view text, uint64& out)
+{
+    if (text.empty() || text.size() > 16)
+    {
+        return false;
+    }
+    uint64 value = 0;
+    for (const char c : text)
+    {
+        value <<= 4;
+        if (c >= '0' && c <= '9')
+        {
+            value |= static_cast<uint64>(c - '0');
+        }
+        else if (c >= 'a' && c <= 'f')
+        {
+            value |= static_cast<uint64>(c - 'a' + 10);
+        }
+        else if (c >= 'A' && c <= 'F')
+        {
+            value |= static_cast<uint64>(c - 'A' + 10);
+        }
+        else
+        {
+            return false;
+        }
+    }
+    out = value;
+    return true;
+}
+} // namespace
+
+int main(int argc, char** argv)
+{
+    ludus::foundation::logging::LogConfig logConfig;
+    logConfig.EnableConsole = true;
+    logConfig.EnableFile = false;
+    logConfig.Mode = ludus::foundation::logging::LogMode::Synchronous;
+    (void)ludus::foundation::logging::LogSystem::Initialize(logConfig);
+
+    ludus::runtime::game_host::HostConfig config;
+    config.Source = ludus::runtime::game_host::GameplaySource::DynamicModule;
+    config.Mode = ludus::runtime::game_host::Presentation::Windowed;
+
+    std::string modulePath;
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string_view arg = argv[i];
+        auto nextValue = [&](std::string_view& out) -> bool {
+            if (i + 1 >= argc)
+            {
+                return false;
+            }
+            out = argv[++i];
+            return true;
+        };
+
+        if (arg == "--module")
+        {
+            std::string_view value;
+            if (!nextValue(value))
+            {
+                return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
+            }
+            modulePath = std::string(value);
+        }
+        else if (arg == "--control-fd")
+        {
+            std::string_view value;
+            uint64 fd = 0;
+            if (!nextValue(value) || !ParseU64(value, fd))
+            {
+                return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
+            }
+            config.ControlFd = static_cast<int32>(fd);
+        }
+        else if (arg == "--max-frames")
+        {
+            std::string_view value;
+            uint64 frames = 0;
+            if (!nextValue(value) || !ParseU64(value, frames))
+            {
+                return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
+            }
+            config.MaxFrames = frames;
+        }
+        else if (arg == "--project-id")
+        {
+            std::string_view value;
+            if (!nextValue(value) || !ParseHex(value, config.ProjectId))
+            {
+                return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
+            }
+        }
+        else if (arg == "--game-id")
+        {
+            std::string_view value;
+            if (!nextValue(value) || !ParseHex(value, config.GameId))
+            {
+                return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
+            }
+        }
+        else if (arg == "--headless")
+        {
+            config.Mode = ludus::runtime::game_host::Presentation::Headless;
+        }
+        else if (arg == "--identity")
+        {
+            // Report the host ABI identity and exit (acceptance/debug helper).
+            const std::string_view id = ludus::runtime::game_host::HostIdentity();
+            (void)::fwrite(id.data(), 1, id.size(), stdout);
+            (void)::fputc('\n', stdout);
+            (void)ludus::foundation::logging::LogSystem::Shutdown();
+            return 0;
+        }
+    }
+
+    if (modulePath.empty())
+    {
+        return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
+    }
+    config.ModulePath = modulePath;
+
+    const ludus::runtime::game_host::RunResult result = ludus::runtime::game_host::Run(config);
+    (void)ludus::foundation::logging::LogSystem::Shutdown();
+    return static_cast<int>(result);
+}

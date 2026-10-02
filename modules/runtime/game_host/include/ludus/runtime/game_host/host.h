@@ -91,6 +91,16 @@ struct HostConfig final
 // the play protocol loop. Never throws.
 [[nodiscard]] RunResult Run(const HostConfig& config) noexcept;
 
+// Entry signature of a statically linked gameplay implementation. A shipping
+// build passes its in-process LudusGetGameApi here; selecting static dispatch
+// replaces only the module lookup (design 2) — the same host run loop drives it.
+using StaticEntryFn = int (*)(uint32 hostAbiMajor, uint32 hostAbiMinor, void* outTable) noexcept;
+
+// Run one host session against a statically linked gameplay implementation. No
+// dlopen, no module path, no reload (a shipping build does not hot reload).
+// `entry` is the project's LudusGetGameApi reinterpreted to StaticEntryFn.
+[[nodiscard]] RunResult RunStatic(const HostConfig& config, StaticEntryFn entry) noexcept;
+
 // The host's own ABI identity string (the compatibility key it stamps and
 // compares against a module's embedded identity). Exposed for the host
 // executable to report in Hello and for acceptance tooling.

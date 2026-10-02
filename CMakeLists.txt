@@ -154,6 +154,10 @@ else()
         add_subdirectory(apps/input_demo)
     endif()
 
+    # Reference GameHost executable (project-live-reload). Built alongside the
+    # smoke apps; it links Ludus::GameHost and no Qt.
+    add_subdirectory(apps/game_host)
+
     # Optional native editor workspace. Guarded so a default (OFF) native
     # configure never calls find_package(Qt6); the subdirectory owns all Qt
     # discovery and the unsupported-host diagnostic.
@@ -177,6 +181,17 @@ install(
     NAMESPACE ${LUDUS_ENGINE_EXPORT_NAMESPACE}
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${LUDUS_ENGINE_PACKAGE_NAME}"
 )
+
+# Compiler/target identity for the installed config (project-live-reload). These
+# feed Ludus_SDK_IDENTITY so a gameplay module can stamp the matching key.
+set(LUDUS_COMPILER_ID "${CMAKE_CXX_COMPILER_ID}")
+set(LUDUS_COMPILER_VERSION "${CMAKE_CXX_COMPILER_VERSION}")
+if(NOT DEFINED LUDUS_TARGET_TRIPLE OR LUDUS_TARGET_TRIPLE STREQUAL "")
+    set(LUDUS_TARGET_TRIPLE "${CMAKE_CXX_COMPILER_TARGET}")
+endif()
+if(LUDUS_TARGET_TRIPLE STREQUAL "")
+    set(LUDUS_TARGET_TRIPLE "${CMAKE_SYSTEM_PROCESSOR}-${CMAKE_SYSTEM_NAME}")
+endif()
 
 configure_package_config_file(
     "${PROJECT_SOURCE_DIR}/cmake/LudusConfig.cmake.in"
@@ -208,4 +223,12 @@ install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATAD
 install(FILES "${PROJECT_BINARY_DIR}/cmake/LudusSdkManifest.json" DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}")
 
 install(FILES cmake/LudusShaders.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
+# Gameplay project helper + host/shipping main templates (project-live-reload).
+if(NOT EMSCRIPTEN)
+    install(FILES
+        cmake/LudusGame.cmake
+        cmake/LudusGameHostMain.cpp
+        cmake/LudusGameShippingMain.cpp
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
+endif()
 install(FILES cmake/shaders/compile_shader.py config/shader_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")

@@ -475,6 +475,54 @@ CommandStatus HostSession::ReloadTo(std::string_view newModulePath, uint64 newGe
     return CommandStatus::Ok;
 }
 
+RunResult RunStaticEntry(const HostConfig& config, StaticEntryFn entry) noexcept
+{
+    // Fill the table in-process (static dispatch replaces only the module
+    // lookup; design 2). No identity check is needed — the implementation is
+    // compiled into this binary against this SDK.
+    game_api::GameApiTable table = {};
+    table.StructSize = static_cast<uint32>(sizeof(game_api::GameApiTable));
+    table.AbiMajor = CurrentAbiMajor();
+    table.AbiMinor = CurrentAbiMinor();
+    const int fillStatus = entry(CurrentAbiMajor(), CurrentAbiMinor(), &table);
+    if (fillStatus != 0 || table.Create == nullptr || table.Update == nullptr || table.Destroy == nullptr)
+    {
+        return RunResult::IncompatibleModule;
+    }
+
+    HostServiceProvider services;
+    CreateInfo info = {};
+    info.StructSize = static_cast<uint32>(sizeof(CreateInfo));
+    info.Services = &services.Services();
+    info.ProjectId = config.ProjectId;
+    info.GameId = config.GameId;
+    info.ModuleGeneration = 1;
+    GameInstance* instance = nullptr;
+    if (table.Create(&info, &instance) != Status::Ok || instance == nullptr)
+    {
+        return RunResult::Internal;
+    }
+
+    const uint64 frames = config.MaxFrames == 0 ? 1 : config.MaxFrames;
+    for (uint64 i = 0; i < frames; ++i)
+    {
+        FrameInput input = {};
+        input.FrameIndex = i;
+        input.DeltaSeconds = 1.0 / 60.0;
+        input.ElapsedSeconds = static_cast<ludus::foundation::float64>(i) / 60.0;
+        input.Width = 800;
+        input.Height = 600;
+        RenderParams render = {};
+        if (table.Update(instance, &input, &render) != Status::Ok)
+        {
+            table.Destroy(instance);
+            return RunResult::Internal;
+        }
+    }
+    table.Destroy(instance);
+    return services.OutstandingAllocations() == 0 ? RunResult::Ok : RunResult::Internal;
+}
+
 RunResult HostSession::RunLoop(uint64 maxFrames) noexcept
 {
     if (State_ != PlayState::Running && State_ != PlayState::Paused)
