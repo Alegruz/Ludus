@@ -45,7 +45,7 @@ TEST_CASE("VkResult keeps its signed code in logging and assertions", "[rhi][dia
 TEST_CASE("A window cannot connect before RHI initialization", "[rhi]")
 {
     graphics::rhi::Shutdown();
-    CHECK_FALSE(graphics::rhi::ConnectWindow({}));
+    CHECK_FALSE(graphics::rhi::ConnectWindow({ .System = platform::WindowSystem::WebCanvas }));
     graphics::rhi::Shutdown();
 }
 
@@ -76,7 +76,7 @@ TEST_CASE("Wayland surface and device lifecycle", "[rhi][wayland]")
     {
         REQUIRE(graphics::rhi::Initialize({ .Name = "Wayland lifecycle test" }));
         REQUIRE(vkCreateWaylandSurfaceKHR != nullptr);
-        CHECK_FALSE(graphics::rhi::ConnectWindow({}));
+        CHECK_FALSE(graphics::rhi::ConnectWindow({ .System = platform::WindowSystem::WebCanvas }));
         REQUIRE(graphics::rhi::ConnectWindow(native));
         REQUIRE(graphics::rhi::ConnectWindow(native));
         auto invalid = native;
@@ -93,7 +93,8 @@ TEST_CASE("Wayland surface and device lifecycle", "[rhi][wayland]")
 TEST_CASE("Native startup rejects invalid windows without loading a GPU", "[rhi][lifecycle]")
 {
     graphics::rhi::Shutdown();
-    CHECK(graphics::rhi::Start({}, {}) == graphics::rhi::StartStatus::Failed);
+    CHECK(graphics::rhi::Start({}, { .System = platform::WindowSystem::WebCanvas }) ==
+          graphics::rhi::StartStatus::Failed);
     CHECK(graphics::rhi::GetStartup().State == graphics::rhi::StartupState::Failed);
     CHECK(graphics::rhi::GetStartup().Error == graphics::rhi::StartupError::InvalidWindow);
     CHECK(graphics::rhi::BeginFrameStatus() == graphics::rhi::FrameStatus::NotReady);
