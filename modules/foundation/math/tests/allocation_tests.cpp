@@ -7,8 +7,8 @@
 #include <ludus/foundation/math/batch.hpp>
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/projection.hpp>
-#include <ludus/foundation/math/queries.hpp>
 #include <ludus/foundation/math/quaternion.hpp>
+#include <ludus/foundation/math/queries.hpp>
 #include <ludus/foundation/math/random.hpp>
 #include <ludus/foundation/math/transform.hpp>
 
@@ -156,8 +156,10 @@ TEST_CASE("Checked math operations never allocate", "[math][alloc]")
 
     // Queries.
     RayHit hit{};
-    REQUIRE(TryRaySphere(Ray3{Vector3{-5, 0, 0}, Vector3{1, 0, 0}}, Sphere{Vector3{0, 0, 0}, 1.0f},
-                         RayInterval{0.0, 1e30}, hit) == MathStatus::Success);
+    REQUIRE(TryRaySphere(Ray3{Vector3{-5, 0, 0}, Vector3{1, 0, 0}},
+                         Sphere{Vector3{0, 0, 0}, 1.0f},
+                         RayInterval{0.0, 1e30},
+                         hit) == MathStatus::Success);
 
     // Random stream.
     RandomStream rng;
@@ -167,10 +169,13 @@ TEST_CASE("Checked math operations never allocate", "[math][alloc]")
     // Batch (caller-owned stack buffers; no heap scratch inside).
     std::array<Vector3, 8> input{};
     std::array<Vector3, 8> output{};
-    REQUIRE(TryTransformPoints([] {
-        Affine3 a = Affine3::Identity();
-        return a;
-    }(), std::span<const Vector3>(input), std::span<Vector3>(output)) == MathStatus::Success);
+    REQUIRE(TryTransformPoints(
+                [] {
+                    Affine3 a = Affine3::Identity();
+                    return a;
+                }(),
+                std::span<const Vector3>(input),
+                std::span<Vector3>(output)) == MathStatus::Success);
 
     REQUIRE(gNews == 0);
     REQUIRE(gDeletes == 0);

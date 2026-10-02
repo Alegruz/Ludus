@@ -83,7 +83,8 @@ TEST_CASE("LookAt degeneracy and basic validity", "[math][projection]")
 {
     Matrix4 v{};
     REQUIRE(TryLookAt(Vector3{0, 0, 0}, Vector3{0, 0, 0}, Vector3{0, 1, 0}, v) == MathStatus::Degenerate);
-    REQUIRE(TryLookAt(Vector3{0, 0, 5}, Vector3{0, 0, 0}, Vector3{0, 0, 1}, v) == MathStatus::Degenerate); // up parallel
+    REQUIRE(TryLookAt(Vector3{0, 0, 5}, Vector3{0, 0, 0}, Vector3{0, 0, 1}, v) ==
+            MathStatus::Degenerate); // up parallel
     REQUIRE(TryLookAt(Vector3{0, 0, 5}, Vector3{0, 0, 0}, Vector3{0, 1, 0}, v) == MathStatus::Success);
 }
 

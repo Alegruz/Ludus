@@ -163,14 +163,8 @@ template <typename ScalarType>
 // blend is computed as -expm1(-rate*dt) in float64; a very large rate*dt
 // saturates the blend to 1 without forming an invalid product. This is NOT a
 // spring, velocity model or moving-target integrator.
-[[nodiscard]] MathStatus TryApproachExponential(float32 current,
-                                                 float32 target,
-                                                 float32 rate,
-                                                 float32 dt,
-                                                 float32& out) noexcept;
-[[nodiscard]] MathStatus TryApproachExponential(float64 current,
-                                                 float64 target,
-                                                 float64 rate,
-                                                 float64 dt,
-                                                 float64& out) noexcept;
+[[nodiscard]] MathStatus
+TryApproachExponential(float32 current, float32 target, float32 rate, float32 dt, float32& out) noexcept;
+[[nodiscard]] MathStatus
+TryApproachExponential(float64 current, float64 target, float64 rate, float64 dt, float64& out) noexcept;
 } // namespace ludus::foundation::math

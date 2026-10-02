@@ -42,7 +42,9 @@ class RandomStream
 {
 public:
     // Default construction uses a DETERMINISTIC seed=0/selector=0 (not entropy).
-    constexpr RandomStream() noexcept : mState(0), mIncrement(0)
+    // mState/mIncrement have default member initializers; SeedInternal overwrites
+    // them with the documented two-step PCG seeding for seed=0, selector=0.
+    constexpr RandomStream() noexcept
     {
         SeedInternal(0, 0);
     }
@@ -51,6 +53,7 @@ public:
     // <= 0x7fffffffffffffff (a higher selector would alias its high bit and is
     // rejected). Returns false and leaves the stream unchanged on an invalid
     // selector. seed is any uint64.
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): the (seed, selector) pair is the documented PCG API order.
     [[nodiscard]] bool TryReseed(uint64 seed, uint64 selector) noexcept
     {
         if (selector > 0x7fffffffffffffffULL)
@@ -94,6 +97,7 @@ public:
     }
 
 private:
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): the (seed, selector) pair is the documented PCG API order.
     void SeedInternal(uint64 seed, uint64 selector) noexcept
     {
         // Reference sequence: state=0, inc=(selector<<1)|1, step, +seed, step.
@@ -108,7 +112,7 @@ private:
         mState = mState * 6364136223846793005ULL + mIncrement;
     }
 
-    uint64 mState;
-    uint64 mIncrement;
+    uint64 mState = 0;
+    uint64 mIncrement = 0;
 };
 } // namespace ludus::foundation::math

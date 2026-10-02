@@ -107,10 +107,10 @@ template <typename ScalarType>
 
 template <typename ScalarType>
 [[nodiscard]] MathStatus TryApproachExponentialImpl(ScalarType current,
-                                                     ScalarType target,
-                                                     ScalarType rate,
-                                                     ScalarType dt,
-                                                     ScalarType& out) noexcept
+                                                    ScalarType target,
+                                                    ScalarType rate,
+                                                    ScalarType dt,
+                                                    ScalarType& out) noexcept
 {
     if (!std::isfinite(current) || !std::isfinite(target) || !std::isfinite(rate) || !std::isfinite(dt))
     {
@@ -131,7 +131,8 @@ template <typename ScalarType>
     // invalid product (expm1 of -inf is -1). Work in float64 then narrow.
     const float64 product = static_cast<float64>(rate) * static_cast<float64>(dt);
     const float64 blend = -std::expm1(-product);
-    const float64 result = static_cast<float64>(current) + blend * (static_cast<float64>(target) - static_cast<float64>(current));
+    const float64 result =
+        static_cast<float64>(current) + blend * (static_cast<float64>(target) - static_cast<float64>(current));
     out = static_cast<ScalarType>(result);
     return MathStatus::Success;
 }

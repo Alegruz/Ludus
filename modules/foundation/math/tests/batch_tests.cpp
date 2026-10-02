@@ -78,11 +78,13 @@ TEST_CASE("Batch size mismatch, empty, and transactional failure", "[math][batch
     REQUIRE(TryTransformPoints(a, std::span<const Vector3>(), std::span<Vector3>()) == MathStatus::Success);
 
     // A non-finite element rejects the whole batch, leaving output untouched.
-    std::array<Vector3, 3> bad{Vector3{1, 2, 3}, Vector3{std::numeric_limits<float>::quiet_NaN(), 0, 0},
+    std::array<Vector3, 3> bad{Vector3{1, 2, 3},
+                               Vector3{std::numeric_limits<float>::quiet_NaN(), 0, 0},
                                Vector3{4, 5, 6}};
     std::array<Vector3, 3> out{Vector3{9, 9, 9}, Vector3{9, 9, 9}, Vector3{9, 9, 9}};
     const std::array<Vector3, 3> keep = out;
-    REQUIRE(TryTransformPoints(a, std::span<const Vector3>(bad), std::span<Vector3>(out)) == MathStatus::NonFiniteInput);
+    REQUIRE(TryTransformPoints(a, std::span<const Vector3>(bad), std::span<Vector3>(out)) ==
+            MathStatus::NonFiniteInput);
     REQUIRE(out == keep); // all-or-nothing
 }
 
@@ -92,7 +94,8 @@ TEST_CASE("Batch sphere classification matches scalar and rejects overlap", "[ma
     REQUIRE(TryPerspectiveReverseZ(DegreesToRadians(90.0f), 1.0f, 0.1f, 100.0f, p) == MathStatus::Success);
     Frustum fr{};
     REQUIRE(TryExtractFrustum(p, FrustumMode::FinitePerspectiveOrOrthographic, fr) == MathStatus::Success);
-    std::array<Sphere, 3> spheres{Sphere{Vector3{0, 0, -10}, 0.1f}, Sphere{Vector3{0, 0, 10}, 0.1f},
+    std::array<Sphere, 3> spheres{Sphere{Vector3{0, 0, -10}, 0.1f},
+                                  Sphere{Vector3{0, 0, 10}, 0.1f},
                                   Sphere{Vector3{0, 0, -0.1f}, 0.5f}};
     std::array<FrustumRelation, 3> out{};
     REQUIRE(TryClassifySpheres(fr, std::span<const Sphere>(spheres), 0.0f, std::span<FrustumRelation>(out)) ==

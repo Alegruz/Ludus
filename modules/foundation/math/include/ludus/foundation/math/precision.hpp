@@ -26,8 +26,6 @@ using core::float64;
 // double difference must be finite and within [-maxAbsComponent, maxAbsComponent]
 // before casting; the narrowed result is re-checked for finiteness. There is no
 // default range on purpose. Output unchanged on failure.
-[[nodiscard]] MathStatus TryMakeRelative(Vector3d position,
-                                         Vector3d origin,
-                                         float64 maxAbsComponent,
-                                         Vector3& out) noexcept;
+[[nodiscard]] MathStatus
+TryMakeRelative(Vector3d position, Vector3d origin, float64 maxAbsComponent, Vector3& out) noexcept;
 } // namespace ludus::foundation::math

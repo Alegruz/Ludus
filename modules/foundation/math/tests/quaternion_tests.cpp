@@ -56,7 +56,8 @@ TEST_CASE("TryFromAxisAngle rejects zero axis / non-finite", "[math][quaternion]
     const Quaternion keep = q;
     REQUIRE(TryFromAxisAngle(Vector3{0, 0, 0}, 1.0f, q) == MathStatus::Degenerate);
     REQUIRE(q == keep);
-    REQUIRE(TryFromAxisAngle(Vector3{1, 0, 0}, std::numeric_limits<float>::infinity(), q) == MathStatus::NonFiniteInput);
+    REQUIRE(TryFromAxisAngle(Vector3{1, 0, 0}, std::numeric_limits<float>::infinity(), q) ==
+            MathStatus::NonFiniteInput);
     REQUIRE(q == keep);
 }
 

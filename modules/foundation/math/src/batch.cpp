@@ -15,7 +15,7 @@ namespace
 // [bBegin,bEnd), computed on uintptr_t with overflow checks. Returns:
 //   0 = disjoint, 1 = exactly identical range, 2 = partial (any other) overlap.
 // Using uintptr_t avoids UB from comparing pointers into different objects.
-enum class Overlap
+enum class Overlap : uint8
 {
     Disjoint,
     Exact,
@@ -48,8 +48,8 @@ enum class Overlap
 }
 } // namespace
 
-MathStatus TryTransformPoints(const Affine3& transform, std::span<const Vector3> input,
-                              std::span<Vector3> output) noexcept
+MathStatus
+TryTransformPoints(const Affine3& transform, std::span<const Vector3> input, std::span<Vector3> output) noexcept
 {
     if (input.size() != output.size())
     {
@@ -64,8 +64,7 @@ MathStatus TryTransformPoints(const Affine3& transform, std::span<const Vector3>
         return MathStatus::Success;
     }
 
-    const Overlap overlap =
-        ClassifyOverlap(input.data(), input.size_bytes(), output.data(), output.size_bytes());
+    const Overlap overlap = ClassifyOverlap(input.data(), input.size_bytes(), output.data(), output.size_bytes());
     if (overlap == Overlap::Partial)
     {
         return MathStatus::InvalidArgument; // only exact in-place or disjoint allowed
@@ -97,7 +96,9 @@ MathStatus TryTransformPoints(const Affine3& transform, std::span<const Vector3>
     return MathStatus::Success;
 }
 
-MathStatus TryClassifySpheres(const Frustum& frustum, std::span<const Sphere> input, float32 margin,
+MathStatus TryClassifySpheres(const Frustum& frustum,
+                              std::span<const Sphere> input,
+                              float32 margin,
                               std::span<FrustumRelation> output) noexcept
 {
     if (input.size() != output.size())
@@ -118,8 +119,7 @@ MathStatus TryClassifySpheres(const Frustum& frustum, std::span<const Sphere> in
     }
     // Input and output must be disjoint (different element types, but a buffer
     // can still be reinterpreted; reject any overlap).
-    const Overlap overlap =
-        ClassifyOverlap(input.data(), input.size_bytes(), output.data(), output.size_bytes());
+    const Overlap overlap = ClassifyOverlap(input.data(), input.size_bytes(), output.data(), output.size_bytes());
     if (overlap != Overlap::Disjoint)
     {
         return MathStatus::InvalidArgument;

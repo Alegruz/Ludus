@@ -128,8 +128,9 @@ TEST_CASE("Closest points between segments: skew, parallel, degenerate", "[math]
             MathStatus::Success);
     REQUIRE(Close(sc.SquaredDistance, 1.0, 1e-6));
     // Point vs segment.
-    REQUIRE(TryClosestPointsSegments(Vector3{0.5f, 2, 0}, Vector3{0.5f, 2, 0}, Vector3{0, 0, 0}, Vector3{1, 0, 0}, sc) ==
-            MathStatus::Success);
+    REQUIRE(
+        TryClosestPointsSegments(Vector3{0.5f, 2, 0}, Vector3{0.5f, 2, 0}, Vector3{0, 0, 0}, Vector3{1, 0, 0}, sc) ==
+        MathStatus::Success);
     REQUIRE(Close(sc.SquaredDistance, 4.0, 1e-6));
     REQUIRE(Close(sc.T, 0.5, 1e-6));
 }
@@ -170,15 +171,21 @@ TEST_CASE("Closest segments: optimum on an s-boundary with interior t", "[math][
     // candidate pins. A long bar whose near end is closest to the middle of a
     // crossing segment.
     SegmentClosest sc{};
-    REQUIRE(TryClosestPointsSegments(Vector3{0, 0, 0}, Vector3{0, 0, 5}, Vector3{-1, 0.5F, -10},
-                                     Vector3{1, 0.5F, 10}, sc) == MathStatus::Success);
+    REQUIRE(TryClosestPointsSegments(Vector3{0, 0, 0},
+                                     Vector3{0, 0, 5},
+                                     Vector3{-1, 0.5F, -10},
+                                     Vector3{1, 0.5F, 10},
+                                     sc) == MathStatus::Success);
     REQUIRE(Close(sc.SquaredDistance, 0.25, 1e-5));
     REQUIRE(Close(sc.S, 0.0, 1e-6));
     REQUIRE(Close(sc.T, 0.5, 1e-3));
 
     // Mirror: optimum at s=1 with interior t.
-    REQUIRE(TryClosestPointsSegments(Vector3{0, 0, 5}, Vector3{0, 0, 0}, Vector3{-1, 0.5F, -10},
-                                     Vector3{1, 0.5F, 10}, sc) == MathStatus::Success);
+    REQUIRE(TryClosestPointsSegments(Vector3{0, 0, 5},
+                                     Vector3{0, 0, 0},
+                                     Vector3{-1, 0.5F, -10},
+                                     Vector3{1, 0.5F, 10},
+                                     sc) == MathStatus::Success);
     REQUIRE(Close(sc.SquaredDistance, 0.25, 1e-5));
     REQUIRE(Close(sc.S, 1.0, 1e-6));
 }
@@ -194,9 +201,9 @@ TEST_CASE("Closest segments agree with an independent brute-force oracle", "[mat
         {{0, 0, 0}, {0, 0, 5}, {-1, 0.5F, -10}, {1, 0.5F, 10}},
         {{-2, 1, 0}, {2, 1, 0}, {0, -1, 3}, {0, -1, -3}},
         {{1, 2, 3}, {-1, -2, -3}, {3, -1, 2}, {-2, 2, -1}},
-        {{0, 0, 0}, {1, 0, 0}, {5, 0, 1}, {5, 1, 1}},   // optimum at s=1, t boundary/interior
+        {{0, 0, 0}, {1, 0, 0}, {5, 0, 1}, {5, 1, 1}}, // optimum at s=1, t boundary/interior
         {{0, 0, 0}, {0, 1, 0}, {2, 0.3F, 0}, {2, 0.7F, 0}},
-        {{-5, 0, 0}, {5, 0, 0}, {0, 2, 0}, {0, 2, 0}},  // segment vs point
+        {{-5, 0, 0}, {5, 0, 0}, {0, 2, 0}, {0, 2, 0}}, // segment vs point
     };
     for (const Pair& k : cases)
     {
@@ -231,8 +238,7 @@ TEST_CASE("Frustum extraction and conservative classification", "[math][queries]
     REQUIRE(rel == FrustumRelation::Outside);
 }
 
-TEST_CASE("Infinite frustum marks far plane inactive and does not cull distant objects",
-          "[math][queries]")
+TEST_CASE("Infinite frustum marks far plane inactive and does not cull distant objects", "[math][queries]")
 {
     Matrix4 p{};
     REQUIRE(TryPerspectiveReverseZInfinite(DegreesToRadians(90.0f), 1.0f, 0.1f, p) == MathStatus::Success);
@@ -244,8 +250,7 @@ TEST_CASE("Infinite frustum marks far plane inactive and does not cull distant o
     REQUIRE(rel == FrustumRelation::Inside); // no false-negative far culling
 }
 
-TEST_CASE("Classification agrees with direct clip inequalities (no false-negative culling)",
-          "[math][queries]")
+TEST_CASE("Classification agrees with direct clip inequalities (no false-negative culling)", "[math][queries]")
 {
     Matrix4 p{};
     REQUIRE(TryPerspectiveReverseZ(DegreesToRadians(70.0f), 1.3f, 0.2f, 50.0f, p) == MathStatus::Success);

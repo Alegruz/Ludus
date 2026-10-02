@@ -282,6 +282,6 @@ struct Vector3d
 // (which must itself be a finite unit vector within unitTol, else
 // InvalidArgument). It never invents a default direction. Non-finite v still
 // fails NonFiniteInput. Prefer TryNormalize unless a validated fallback exists.
-[[nodiscard]] MathStatus TryNormalizeOr(Vector3 v, float32 minLength, Vector3 fallback, float32 unitTol,
-                                        Vector3& out) noexcept;
+[[nodiscard]] MathStatus
+TryNormalizeOr(Vector3 v, float32 minLength, Vector3 fallback, float32 unitTol, Vector3& out) noexcept;
 } // namespace ludus::foundation::math

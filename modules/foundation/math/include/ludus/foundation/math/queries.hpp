@@ -57,14 +57,15 @@ using core::float64;
 // components are valid). Returns Success with Hit/Miss, or a failing status for
 // invalid ray/interval/box. On Hit, EntryT/ExitT are clipped to the interval;
 // an inside start returns EntryT = interval.MinT (no fabricated surface).
-[[nodiscard]] MathStatus TryRayAabb(const Ray3& ray, const Aabb3& box, const RayInterval& interval, RayHit& out) noexcept;
+[[nodiscard]] MathStatus
+TryRayAabb(const Ray3& ray, const Aabb3& box, const RayInterval& interval, RayHit& out) noexcept;
 
 // Ray/Sphere. Cancellation-resistant quadratic; tangent counts as a Hit; a start
 // inside returns EntryT = interval.MinT. Negative radius / non-finite -> failing
 // status. Returns the intersection of the sphere's closed inside interval with
 // the query interval.
-[[nodiscard]] MathStatus TryRaySphere(const Ray3& ray, const Sphere& sphere, const RayInterval& interval,
-                                      RayHit& out) noexcept;
+[[nodiscard]] MathStatus
+TryRaySphere(const Ray3& ray, const Sphere& sphere, const RayInterval& interval, RayHit& out) noexcept;
 
 // --- Closest points between two segments ------------------------------------
 // Segment 1 = [p0,p1], segment 2 = [q0,q1]. Handles zero-length segments and
@@ -72,8 +73,8 @@ using core::float64;
 // four endpoint projections, selecting the minimum squared distance (ties: lower
 // S then lower T). Non-finite endpoints -> NonFiniteInput. Not an exact topology
 // claim; near-parallel locations may jump while distance stays useful.
-[[nodiscard]] MathStatus TryClosestPointsSegments(Vector3 p0, Vector3 p1, Vector3 q0, Vector3 q1,
-                                                  SegmentClosest& out) noexcept;
+[[nodiscard]] MathStatus
+TryClosestPointsSegments(Vector3 p0, Vector3 p1, Vector3 q0, Vector3 q1, SegmentClosest& out) noexcept;
 
 // --- Frustum ----------------------------------------------------------------
 // Extract six inward normalized planes from a world-to-clip Matrix4 in the named
@@ -90,8 +91,8 @@ using core::float64;
 // (never culls an object that is actually inside/intersecting) within the tested
 // range. Empty boxes are Outside. Non-finite inputs / negative margin / radius
 // fail with output unchanged.
-[[nodiscard]] MathStatus TryClassifySphere(const Frustum& frustum, const Sphere& sphere, float32 margin,
-                                           FrustumRelation& out) noexcept;
-[[nodiscard]] MathStatus TryClassifyAabb(const Frustum& frustum, const Aabb3& box, float32 margin,
-                                         FrustumRelation& out) noexcept;
+[[nodiscard]] MathStatus
+TryClassifySphere(const Frustum& frustum, const Sphere& sphere, float32 margin, FrustumRelation& out) noexcept;
+[[nodiscard]] MathStatus
+TryClassifyAabb(const Frustum& frustum, const Aabb3& box, float32 margin, FrustumRelation& out) noexcept;
 } // namespace ludus::foundation::math

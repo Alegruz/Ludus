@@ -30,9 +30,8 @@ using core::float32;
 // writing anything; if any transformed point would be non-finite, the whole
 // batch is rejected (OutOfRange) with outputs unchanged. Empty matching spans
 // succeed. Exact in-place supported; partial overlap rejected (InvalidArgument).
-[[nodiscard]] MathStatus TryTransformPoints(const Affine3& transform,
-                                            std::span<const Vector3> input,
-                                            std::span<Vector3> output) noexcept;
+[[nodiscard]] MathStatus
+TryTransformPoints(const Affine3& transform, std::span<const Vector3> input, std::span<Vector3> output) noexcept;
 
 // Classify a batch of spheres against a frustum with a caller margin. Spans must
 // match in length. Validates the margin and every sphere before writing; input

@@ -88,7 +88,10 @@ MathStatus TryLookAt(Vector3 eye, Vector3 target, Vector3 upHint, Matrix4& outVi
     return FromRows(rows, outView);
 }
 
-MathStatus TryPerspectiveReverseZ(float32 verticalFovRadians, float32 aspect, float32 nearPlane, float32 farPlane,
+MathStatus TryPerspectiveReverseZ(float32 verticalFovRadians,
+                                  float32 aspect,
+                                  float32 nearPlane,
+                                  float32 farPlane,
                                   Matrix4& out) noexcept
 {
     if (!std::isfinite(verticalFovRadians) || !std::isfinite(aspect) || !std::isfinite(nearPlane) ||
@@ -112,8 +115,8 @@ MathStatus TryPerspectiveReverseZ(float32 verticalFovRadians, float32 aspect, fl
     return FromRows(rows, out);
 }
 
-MathStatus TryPerspectiveReverseZInfinite(float32 verticalFovRadians, float32 aspect, float32 nearPlane,
-                                          Matrix4& out) noexcept
+MathStatus
+TryPerspectiveReverseZInfinite(float32 verticalFovRadians, float32 aspect, float32 nearPlane, Matrix4& out) noexcept
 {
     if (!std::isfinite(verticalFovRadians) || !std::isfinite(aspect) || !std::isfinite(nearPlane))
     {
@@ -134,8 +137,13 @@ MathStatus TryPerspectiveReverseZInfinite(float32 verticalFovRadians, float32 as
     return FromRows(rows, out);
 }
 
-MathStatus TryOrthographicReverseZ(float32 left, float32 right, float32 bottom, float32 top, float32 nearPlane,
-                                   float32 farPlane, Matrix4& out) noexcept
+MathStatus TryOrthographicReverseZ(float32 left,
+                                   float32 right,
+                                   float32 bottom,
+                                   float32 top,
+                                   float32 nearPlane,
+                                   float32 farPlane,
+                                   Matrix4& out) noexcept
 {
     if (!std::isfinite(left) || !std::isfinite(right) || !std::isfinite(bottom) || !std::isfinite(top) ||
         !std::isfinite(nearPlane) || !std::isfinite(farPlane))

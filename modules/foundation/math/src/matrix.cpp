@@ -32,6 +32,7 @@ Matrix3 ToMatrix3(Quaternion q) noexcept
 namespace
 {
 // Read element (row,col) of a column-major Matrix3 as double.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): (row, column) index pair.
 [[nodiscard]] float64 M3(const Matrix3& m, int r, int c) noexcept
 {
     const Vector3& col = m.Columns[c];
@@ -49,8 +50,8 @@ MathStatus TryToRotation(const Matrix3& basis, RotationExtractionPolicy policy, 
     // Column lengths ~ 1.
     for (int c = 0; c < 3; ++c)
     {
-        const float64 len2 = M3(basis, 0, c) * M3(basis, 0, c) + M3(basis, 1, c) * M3(basis, 1, c) +
-                             M3(basis, 2, c) * M3(basis, 2, c);
+        const float64 len2 =
+            M3(basis, 0, c) * M3(basis, 0, c) + M3(basis, 1, c) * M3(basis, 1, c) + M3(basis, 2, c) * M3(basis, 2, c);
         if (std::fabs(len2 - 1.0) > tol * 2.0 + tol * tol)
         {
             return MathStatus::Degenerate;
@@ -58,17 +59,17 @@ MathStatus TryToRotation(const Matrix3& basis, RotationExtractionPolicy policy, 
     }
     // Pairwise orthogonality.
     auto coldot = [&](int a, int b) {
-        return M3(basis, 0, a) * M3(basis, 0, b) + M3(basis, 1, a) * M3(basis, 1, b) + M3(basis, 2, a) * M3(basis, 2, b);
+        return M3(basis, 0, a) * M3(basis, 0, b) + M3(basis, 1, a) * M3(basis, 1, b) +
+               M3(basis, 2, a) * M3(basis, 2, b);
     };
     if (std::fabs(coldot(0, 1)) > tol || std::fabs(coldot(0, 2)) > tol || std::fabs(coldot(1, 2)) > tol)
     {
         return MathStatus::Degenerate;
     }
     // Determinant near +1 (rejects reflection and scale).
-    const float64 det =
-        M3(basis, 0, 0) * (M3(basis, 1, 1) * M3(basis, 2, 2) - M3(basis, 1, 2) * M3(basis, 2, 1)) -
-        M3(basis, 0, 1) * (M3(basis, 1, 0) * M3(basis, 2, 2) - M3(basis, 1, 2) * M3(basis, 2, 0)) +
-        M3(basis, 0, 2) * (M3(basis, 1, 0) * M3(basis, 2, 1) - M3(basis, 1, 1) * M3(basis, 2, 0));
+    const float64 det = M3(basis, 0, 0) * (M3(basis, 1, 1) * M3(basis, 2, 2) - M3(basis, 1, 2) * M3(basis, 2, 1)) -
+                        M3(basis, 0, 1) * (M3(basis, 1, 0) * M3(basis, 2, 2) - M3(basis, 1, 2) * M3(basis, 2, 0)) +
+                        M3(basis, 0, 2) * (M3(basis, 1, 0) * M3(basis, 2, 1) - M3(basis, 1, 1) * M3(basis, 2, 0));
     if (std::fabs(det - 1.0) > tol * 4.0)
     {
         return MathStatus::Degenerate;
@@ -302,7 +303,9 @@ template <int N>
 }
 
 template <int N, typename MatrixType>
-[[nodiscard]] MathStatus InvertChecked(const MatrixType& m, InversePolicy policy, MatrixType& out,
+[[nodiscard]] MathStatus InvertChecked(const MatrixType& m,
+                                       InversePolicy policy,
+                                       MatrixType& out,
                                        void (*load)(const MatrixType&, float64[N][N]),
                                        MatrixType (*store)(const float64[N][N])) noexcept
 {
@@ -383,7 +386,8 @@ Matrix3 Store3(const float64 a[3][3]) noexcept
     Matrix3 m{};
     for (int c = 0; c < 3; ++c)
     {
-        m.Columns[c] = Vector3{static_cast<float32>(a[0][c]), static_cast<float32>(a[1][c]), static_cast<float32>(a[2][c])};
+        m.Columns[c] =
+            Vector3{static_cast<float32>(a[0][c]), static_cast<float32>(a[1][c]), static_cast<float32>(a[2][c])};
     }
     return m;
 }

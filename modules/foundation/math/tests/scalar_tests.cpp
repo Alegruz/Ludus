@@ -51,7 +51,7 @@ TEST_CASE("NearlyEqual tolerance and infinity rules", "[math][scalar]")
     REQUIRE(NearlyEqual(1.0f, 1.0f + 1e-7f, 0.0f, 1e-5f));
     REQUIRE_FALSE(NearlyEqual(1.0f, 2.0f, 0.0f, 1e-5f));
     const float inf = std::numeric_limits<float>::infinity();
-    REQUIRE_FALSE(NearlyEqual(inf, inf, 1.0f, 1.0f)); // infinities never nearly equal
+    REQUIRE_FALSE(NearlyEqual(inf, inf, 1.0f, 1.0f));    // infinities never nearly equal
     REQUIRE_FALSE(NearlyEqual(1.0f, 1.0f, -1.0f, 0.0f)); // negative tol -> false
     REQUIRE(NearlyEqual(1000.0f, 1000.1f, 0.0f, 1e-3f)); // relative tolerance
 }

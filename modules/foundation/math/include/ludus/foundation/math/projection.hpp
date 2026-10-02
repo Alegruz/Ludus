@@ -38,10 +38,8 @@ using core::float32;
 // Infinite reverse-Z perspective (far at infinity). Named factory, NOT a
 // far=infinity sentinel. aspect > 0, near > 0, verticalFov in (0, Pi). A finite
 // camera point at z<0 has depth near/(-z).
-[[nodiscard]] MathStatus TryPerspectiveReverseZInfinite(float32 verticalFovRadians,
-                                                        float32 aspect,
-                                                        float32 nearPlane,
-                                                        Matrix4& out) noexcept;
+[[nodiscard]] MathStatus
+TryPerspectiveReverseZInfinite(float32 verticalFovRadians, float32 aspect, float32 nearPlane, Matrix4& out) noexcept;
 
 // Finite reverse-Z orthographic. left<right, bottom<top, 0<=near<far. All inputs
 // finite and correctly ordered; an interval too narrow to produce representable

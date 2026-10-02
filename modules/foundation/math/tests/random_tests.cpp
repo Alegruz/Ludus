@@ -18,8 +18,7 @@ TEST_CASE("PCG32 known-answer sequence for seed=42 selector=54", "[math][random]
     }
 }
 
-TEST_CASE("Bounded sampling: bound=1 is always 0; bound=0 is invalid and non-consuming",
-          "[math][random]")
+TEST_CASE("Bounded sampling: bound=1 is always 0; bound=0 is invalid and non-consuming", "[math][random]")
 {
     RandomStream rng;
     const RandomState before = rng.GetState();
@@ -61,8 +60,7 @@ TEST_CASE("NextFloat01 is in [0,1) deterministically", "[math][random]")
     }
 }
 
-TEST_CASE("State save/restore replay is bit-exact; bad state rejected non-destructively",
-          "[math][random]")
+TEST_CASE("State save/restore replay is bit-exact; bad state rejected non-destructively", "[math][random]")
 {
     RandomStream rng;
     (void)rng.NextUInt32();

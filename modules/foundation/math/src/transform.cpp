@@ -32,7 +32,8 @@ namespace
     inv[1][1] = m00 * invDet;
     // rcond via inf norms
     const float64 na = std::fmax(std::fabs(m00) + std::fabs(m01), std::fabs(m10) + std::fabs(m11));
-    const float64 ni = std::fmax(std::fabs(inv[0][0]) + std::fabs(inv[0][1]), std::fabs(inv[1][0]) + std::fabs(inv[1][1]));
+    const float64 ni =
+        std::fmax(std::fabs(inv[0][0]) + std::fabs(inv[0][1]), std::fabs(inv[1][0]) + std::fabs(inv[1][1]));
     const float64 rcond = (na > 0.0 && ni > 0.0) ? 1.0 / (na * ni) : 0.0;
     if (!(rcond >= static_cast<float64>(policy.MinReciprocalCondition)))
     {

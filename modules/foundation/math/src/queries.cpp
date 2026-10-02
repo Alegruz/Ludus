@@ -13,6 +13,7 @@ namespace
 constexpr float64 kInf = std::numeric_limits<float64>::infinity();
 
 // Robustly normalize a float32 vector in double; false for zero / non-finite.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): (ox, oy, oz) are the x/y/z out components.
 [[nodiscard]] bool NormalizeD3(Vector3 v, float64& ox, float64& oy, float64& oz, float64& outLen) noexcept
 {
     if (!IsFinite(v))
@@ -37,14 +38,15 @@ constexpr float64 kInf = std::numeric_limits<float64>::infinity();
     return true;
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): (nx, ny, nz, d) are the plane's normalized coefficient outs.
 [[nodiscard]] bool PlaneUnitFinite(const Plane& p, float64& nx, float64& ny, float64& nz, float64& d) noexcept
 {
     if (!IsFinite(p.Normal) || !IsFinite(p.D))
     {
         return false;
     }
-    const float64 len2 = (float64)p.Normal.X * p.Normal.X + (float64)p.Normal.Y * p.Normal.Y +
-                         (float64)p.Normal.Z * p.Normal.Z;
+    const float64 len2 =
+        (float64)p.Normal.X * p.Normal.X + (float64)p.Normal.Y * p.Normal.Y + (float64)p.Normal.Z * p.Normal.Z;
     const float64 len = std::sqrt(len2);
     if (std::fabs(len - 1.0) > 1e-4)
     {
@@ -132,7 +134,9 @@ MathStatus TryReflectVector(const Plane& plane, Vector3 v, Vector3& out) noexcep
         return MathStatus::Degenerate;
     }
     const float64 dot = nx * v.X + ny * v.Y + nz * v.Z;
-    const Vector3 result{(float32)(v.X - 2.0 * dot * nx), (float32)(v.Y - 2.0 * dot * ny), (float32)(v.Z - 2.0 * dot * nz)};
+    const Vector3 result{(float32)(v.X - 2.0 * dot * nx),
+                         (float32)(v.Y - 2.0 * dot * ny),
+                         (float32)(v.Z - 2.0 * dot * nz)};
     if (!IsFinite(result))
     {
         return MathStatus::OutOfRange;
@@ -155,7 +159,7 @@ Aabb3 Merge(const Aabb3& a, const Aabb3& b) noexcept
         return a;
     }
     return Aabb3{Vector3{Min(a.Min.X, b.Min.X), Min(a.Min.Y, b.Min.Y), Min(a.Min.Z, b.Min.Z)},
-                Vector3{Max(a.Max.X, b.Max.X), Max(a.Max.Y, b.Max.Y), Max(a.Max.Z, b.Max.Z)}};
+                 Vector3{Max(a.Max.X, b.Max.X), Max(a.Max.Y, b.Max.Y), Max(a.Max.Z, b.Max.Z)}};
 }
 Aabb2 Merge(const Aabb2& a, const Aabb2& b) noexcept
 {
@@ -168,7 +172,7 @@ Aabb2 Merge(const Aabb2& a, const Aabb2& b) noexcept
         return a;
     }
     return Aabb2{Vector2{Min(a.Min.X, b.Min.X), Min(a.Min.Y, b.Min.Y)},
-                Vector2{Max(a.Max.X, b.Max.X), Max(a.Max.Y, b.Max.Y)}};
+                 Vector2{Max(a.Max.X, b.Max.X), Max(a.Max.Y, b.Max.Y)}};
 }
 bool Contains(const Aabb3& box, Vector3 point) noexcept
 {
@@ -309,7 +313,9 @@ namespace
     {
         return false;
     }
-    return !(ray.Direction.X == 0.0f && ray.Direction.Y == 0.0f && ray.Direction.Z == 0.0f);
+    // Valid when at least one component is non-zero (a wholly zero direction is
+    // rejected; individual zero components are fine).
+    return ray.Direction.X != 0.0f || ray.Direction.Y != 0.0f || ray.Direction.Z != 0.0f;
 }
 } // namespace
 
@@ -403,7 +409,7 @@ MathStatus TryRaySphere(const Ray3& ray, const Sphere& sphere, const RayInterval
     const float64 oz = (float64)ray.Origin.Z - sphere.Center.Z;
     const float64 dx = ray.Direction.X, dy = ray.Direction.Y, dz = ray.Direction.Z;
     const float64 a = dx * dx + dy * dy + dz * dz;
-    const float64 b = ox * dx + oy * dy + oz * dz;      // half-b
+    const float64 b = ox * dx + oy * dy + oz * dz; // half-b
     const float64 c = ox * ox + oy * oy + oz * oz - (float64)sphere.Radius * sphere.Radius;
     const float64 discriminant = b * b - a * c;
     if (discriminant < 0.0)
@@ -581,6 +587,7 @@ namespace
 {
 // Normalize a candidate plane (nx,ny,nz,d) by the xyz length; false if the xyz
 // length is zero (a degenerate plane).
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): (nx, ny, nz, d) are the plane's raw coefficients.
 [[nodiscard]] bool NormalizePlaneD(float64 nx, float64 ny, float64 nz, float64 d, Plane& out) noexcept
 {
     const float64 len = std::sqrt(nx * nx + ny * ny + nz * nz);
@@ -620,8 +627,12 @@ MathStatus TryExtractFrustum(const Matrix4& worldToClip, FrustumMode mode, Frust
         {(float64)r3.X - r0.X, (float64)r3.Y - r0.Y, (float64)r3.Z - r0.Z, (float64)r3.W - r0.W, true}, // right
         {(float64)r3.X + r1.X, (float64)r3.Y + r1.Y, (float64)r3.Z + r1.Z, (float64)r3.W + r1.W, true}, // bottom
         {(float64)r3.X - r1.X, (float64)r3.Y - r1.Y, (float64)r3.Z - r1.Z, (float64)r3.W - r1.W, true}, // top
-        {(float64)r3.X - r2.X, (float64)r3.Y - r2.Y, (float64)r3.Z - r2.Z, (float64)r3.W - r2.W, true}, // near (depthUpper)
-        {(float64)r2.X, (float64)r2.Y, (float64)r2.Z, (float64)r2.W, true},                            // far (depthLower)
+        {(float64)r3.X - r2.X,
+         (float64)r3.Y - r2.Y,
+         (float64)r3.Z - r2.Z,
+         (float64)r3.W - r2.W,
+         true},                                                             // near (depthUpper)
+        {(float64)r2.X, (float64)r2.Y, (float64)r2.Z, (float64)r2.W, true}, // far (depthLower)
     };
     // Plane slot order: Left, Right, Bottom, Top, Near, Far.
     Frustum result{};
@@ -633,8 +644,8 @@ MathStatus TryExtractFrustum(const Matrix4& worldToClip, FrustumMode mode, Frust
         if (i == 5 && mode == FrustumMode::InfiniteReverseZPerspective)
         {
             // depthLower must have zero xyz and a positive constant; mark inactive.
-            const float64 xyzLen = std::sqrt(cands[i].nx * cands[i].nx + cands[i].ny * cands[i].ny +
-                                             cands[i].nz * cands[i].nz);
+            const float64 xyzLen =
+                std::sqrt(cands[i].nx * cands[i].nx + cands[i].ny * cands[i].ny + cands[i].nz * cands[i].nz);
             if (xyzLen > 1e-5 || !(cands[i].d > 0.0))
             {
                 return MathStatus::Degenerate;
@@ -678,7 +689,8 @@ namespace
 }
 } // namespace
 
-MathStatus TryClassifySphere(const Frustum& frustum, const Sphere& sphere, float32 margin, FrustumRelation& out) noexcept
+MathStatus
+TryClassifySphere(const Frustum& frustum, const Sphere& sphere, float32 margin, FrustumRelation& out) noexcept
 {
     if (!IsFinite(sphere.Center) || !std::isfinite(sphere.Radius) || !std::isfinite(margin))
     {
@@ -751,7 +763,7 @@ MathStatus TryClassifyAabb(const Frustum& frustum, const Aabb3& box, float32 mar
         }
         const Plane& p = frustum.Planes[i];
         const float64 nx = p.Normal.X, ny = p.Normal.Y, nz = p.Normal.Z, d = p.D;
-        const float64 s = nx * cx + ny * cy + nz * cz + d;               // center distance
+        const float64 s = nx * cx + ny * cy + nz * cz + d;                                  // center distance
         const float64 rproj = std::fabs(nx) * ex + std::fabs(ny) * ey + std::fabs(nz) * ez; // projected radius
         const float64 absSum = std::fabs(nx * cx) + std::fabs(ny * cy) + std::fabs(nz * cz) + std::fabs(d) +
                                std::fabs(nx) * ex + std::fabs(ny) * ey + std::fabs(nz) * ez;

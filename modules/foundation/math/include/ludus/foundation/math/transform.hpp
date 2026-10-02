@@ -87,8 +87,8 @@ struct Affine3
     const Vector3 lb0 = a.Columns[0] * b.Columns[0].X + a.Columns[1] * b.Columns[0].Y + a.Columns[2] * b.Columns[0].Z;
     const Vector3 lb1 = a.Columns[0] * b.Columns[1].X + a.Columns[1] * b.Columns[1].Y + a.Columns[2] * b.Columns[1].Z;
     const Vector3 lb2 = a.Columns[0] * b.Columns[2].X + a.Columns[1] * b.Columns[2].Y + a.Columns[2] * b.Columns[2].Z;
-    const Vector3 t =
-        a.Columns[0] * b.Translation.X + a.Columns[1] * b.Translation.Y + a.Columns[2] * b.Translation.Z + a.Translation;
+    const Vector3 t = a.Columns[0] * b.Translation.X + a.Columns[1] * b.Translation.Y + a.Columns[2] * b.Translation.Z +
+                      a.Translation;
     return Affine3{{lb0, lb1, lb2}, t};
 }
 [[nodiscard]] constexpr bool IsFinite(const Affine3& a) noexcept
