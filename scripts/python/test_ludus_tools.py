@@ -310,6 +310,75 @@ class Identity(unittest.TestCase):
         self.assertTrue(ident.assert_policy.enable_asserts)
 
 
+class ManifestTemplate(unittest.TestCase):
+    """The extended SDK manifest template renders to valid, schema-conformant JSON.
+
+    A real CMake configure is unavailable in this environment (pinned CMake 3.29
+    absent), so this test substitutes representative @VAR@ values exactly as
+    configure_file(@ONLY) would and asserts the result parses into the identity
+    model and keeps the legacy flat fields that engine.verify_sdk_install and
+    CheckSdkVariant.cmake.in still read.
+    """
+
+    SUBS = {
+        "LUDUS_ENGINE_PACKAGE_NAME": "Ludus",
+        "PROJECT_VERSION": "0.1.0",
+        "LUDUS_GIT_REVISION": "abc123def456",
+        "LUDUS_ENGINE_EXPORT_NAMESPACE": "Ludus::",
+        "LUDUS_TARGET_TRIPLE": "x86_64-linux-gnu",
+        "CMAKE_SYSTEM_NAME": "Linux",
+        "CMAKE_SYSTEM_PROCESSOR": "x86_64",
+        "LUDUS_COMPILER_ID": "Clang",
+        "LUDUS_COMPILER_VERSION": "18.1.8",
+        "LUDUS_CXX_RUNTIME_ABI": "libstdc++-cxx11",
+        "LUDUS_DISTRO_BASELINE": "ubuntu-24.04",
+        "LUDUS_SDK_VARIANT": "assert-v2-Development-RelWithDebInfo-dialogs-0-asan-0-ubsan-0-tsan-0",
+        "LUDUS_BUILD_FLAVOR": "Development",
+        "LUDUS_BUILD_FLAVOR_ID": "2",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "LUDUS_ENABLE_ASAN": "0",
+        "LUDUS_ENABLE_UBSAN": "0",
+        "LUDUS_ENABLE_TSAN": "0",
+        "LUDUS_ASSERT_POLICY_VERSION": "2",
+        "LUDUS_ENABLE_ASSERTS": "1",
+        "LUDUS_BREAK_ON_CHECK": "1",
+        "LUDUS_ASSERT_DIALOGS_AVAILABLE": "0",
+        "LUDUS_SDK_FEATURES_JSON": '"GraphicsRhi", "Text"',
+        "LUDUS_SDK_COMPONENTS_JSON": '"FoundationBase", "GraphicsRhi", "Text"',
+        "LUDUS_SDK_DEPENDENCIES_JSON": (
+            '{"name": "volk", "version": "1.4.357.0", "licenses": "MIT", "kind": "bundled"}, '
+            '{"name": "freetype", "version": "2.14.3", "licenses": "FTL-or-GPLv2", "kind": "bundled"}'
+        ),
+        "LUDUS_SDK_SYSTEM_PREREQS_JSON": '"Vulkan loader", "POSIX threads"',
+    }
+
+    def _render(self) -> dict:
+        import re
+
+        tmpl = (REPO_ROOT / "cmake" / "LudusSdkManifest.json.in").read_text()
+
+        def repl(m):
+            key = m.group(1)
+            self.assertIn(key, self.SUBS, f"unsubstituted @{key}@ in manifest template")
+            return self.SUBS[key]
+
+        return json.loads(re.sub(r"@([A-Z0-9_]+)@", repl, tmpl))
+
+    def test_renders_valid_json(self) -> None:
+        d = self._render()
+        self.assertEqual(d["schema_version"], 2)
+        ident = identity.SdkIdentity.from_json(d)
+        self.assertEqual(ident.target_triple, "x86_64-linux-gnu")
+        self.assertEqual(ident.components, ["FoundationBase", "GraphicsRhi", "Text"])
+        self.assertEqual([dep["name"] for dep in ident.dependencies], ["volk", "freetype"])
+
+    def test_keeps_legacy_flat_fields(self) -> None:
+        d = self._render()
+        for key in ("enable_asserts", "break_on_check", "assert_policy_version",
+                    "assert_dialogs_available", "build_flavor_id", "sdk_variant"):
+            self.assertIn(key, d, f"legacy flat field {key} must remain for verify_sdk_install")
+
+
 class Store(unittest.TestCase):
     def setUp(self) -> None:
         self.td = tempfile.TemporaryDirectory()

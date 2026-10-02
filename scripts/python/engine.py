@@ -1498,6 +1498,7 @@ def verify_sdk_install(root: Path, prefix: Path, build_dir: Path) -> None:
         prefix / "lib" / "cmake" / "Ludus" / "shaders" / "compile_shader.py",
         prefix / "lib" / "cmake" / "Ludus" / "shaders" / "shader_toolchain.json",
         prefix / "share" / "Ludus" / "licenses" / "LICENSE",
+        prefix / "share" / "Ludus" / "licenses" / "THIRD_PARTY_NOTICES.md",
         prefix / "share" / "Ludus" / "LudusSdkManifest.json",
     ]
 
@@ -1521,10 +1522,31 @@ def verify_sdk_install(root: Path, prefix: Path, build_dir: Path) -> None:
             if str(forbidden) in text:
                 raise EngineError(f"installed CMake package references source-tree path {forbidden} in {package_file}")
 
+    # Relocatability audit (P02): no installed CMake metadata, anywhere under the
+    # package's cmake tree (including bundled dependency configs), may embed an
+    # absolute producer path. This is stricter than the Ludus-only check above.
+    dep_cmake_root = prefix / "lib" / "cmake" / "Ludus"
+    producer_markers = [str(root), str(root / "out")]
+    for package_file in dep_cmake_root.rglob("*.cmake"):
+        text = package_file.read_text(encoding="utf-8")
+        for marker in producer_markers:
+            if marker and marker in text:
+                raise EngineError(
+                    f"installed CMake metadata leaks producer path {marker} in {package_file}"
+                )
+
     manifest = json.loads((prefix / "share" / "Ludus" / "LudusSdkManifest.json").read_text())
     expected = json.loads((build_dir / "cmake" / "LudusSdkManifest.json").read_text())
     if manifest != expected:
         raise EngineError("installed SDK manifest does not match the built variant")
+
+    # Identity must be derived from real build inputs, not placeholders (P03).
+    for required_field in ("target_triple", "compiler_id", "compiler_version", "sdk_variant"):
+        value = manifest.get(required_field, "")
+        if not value or "@" in str(value) or value == "unknown":
+            raise EngineError(f"SDK manifest identity field {required_field!r} is unresolved: {value!r}")
+    if not isinstance(manifest.get("dependencies"), list) or not manifest["dependencies"]:
+        raise EngineError("SDK manifest is missing its redistributable dependency inventory")
     config = (prefix / "include" / "ludus" / "foundation" / "base" / "assert_config.hpp").read_text()
     for macro, key in (("LUDUS_ENABLE_ASSERTS", "enable_asserts"), ("LUDUS_BREAK_ON_CHECK", "break_on_check"),
                        ("LUDUS_BUILD_FLAVOR_ID", "build_flavor_id"), ("LUDUS_ASSERT_POLICY_VERSION", "assert_policy_version"),

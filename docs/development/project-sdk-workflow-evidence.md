@@ -91,3 +91,65 @@ SDK identity is derived from the actual CMake build inputs, not a version string
 Compatibility is checked **before** configure; mismatched flavor/toolchain/policy
 is rejected with expected-vs-actual detail and never falls back to building the
 engine.
+
+## P1 — relocatable runtime SDK (implementation + what remains)
+
+Implemented (reviewable by inspection + the Python checks noted):
+
+- `cmake/LudusSdkManifest.json.in` extended to **schema 2**: adds source
+  revision, target triple/os/arch, compiler id/version, `cxx_runtime_abi`,
+  `distro_baseline`, build type, sanitizer block, a nested `assert_policy`
+  block, sorted `features`, `components`, a redistributable `dependencies`
+  inventory (name/version/licenses/kind) and `system_prerequisites`. The legacy
+  flat `enable_asserts`/`break_on_check`/`assert_policy_version`/
+  `assert_dialogs_available`/`build_flavor_id`/`sdk_variant` fields are retained
+  so `engine.verify_sdk_install` and `cmake/CheckSdkVariant.cmake.in` keep
+  working unchanged.
+- `cmake/EngineSdkIdentity.cmake` (new): derives triple / C++ runtime ABI tag /
+  distro baseline from the actual build inputs and accumulates the component,
+  feature, dependency and system-prerequisite inventory via GLOBAL properties,
+  serialized to the manifest `@…_JSON@` placeholders by
+  `ludus_sdk_finalize_identity()`.
+- Root `CMakeLists.txt`: computes compiler/source identity at root scope,
+  registers the audited link-closure dependencies (volk bundled; FreeType +
+  HarfBuzz bundled, consumed PRIVATE by `Ludus::Text` but still in the final
+  consumer's static link line; Threads system), the system prerequisites
+  (Vulkan loader, pthreads, Wayland when enabled, host Slang/spirv-val) and the
+  components, then installs `THIRD_PARTY_NOTICES.md` and a stable package-local
+  dependency search directory `lib/cmake/Ludus/dependencies`.
+- `cmake/LudusConfig.cmake.in`: prepends the bundled dependency directory to
+  `CMAKE_PREFIX_PATH` *locally* (restored at the end so global consumer search
+  state is never mutated), resolves volk/FreeType/HarfBuzz/Threads from the
+  bundled metadata when present, exports the full identity as `Ludus_*` vars, and
+  adds a public `ludus_apply_app_policy()` helper (C++23 + no-exceptions) for
+  templates so they never reference the checkout-only
+  `ludus_apply_project_defaults`.
+- `cmake/sdk/THIRD_PARTY_NOTICES.md` (new): records bundled vs system
+  dependencies and their obligations; the manifest `dependencies` array is the
+  machine-readable twin.
+- `scripts/python/engine.py` `verify_sdk_install`: now also requires the notices
+  file, audits ALL installed `lib/cmake/Ludus/**.cmake` for producer-path
+  leakage (not just the Ludus package files), and asserts the manifest identity
+  fields are resolved (no `@…@`/`unknown`) with a non-empty dependency inventory.
+
+Checks run here (Python 3.11.15):
+
+```
+$ cmake -P (EngineSdkIdentity triple/abi/distro + accumulators)   # triple/abi derive OK;
+    # GLOBAL-property accumulation is NOT scriptable under `cmake -P` (CMake limitation),
+    # so the accumulator path is exercised only in a real configure (UNAVAILABLE here).
+$ python -m unittest test_ludus_tools  # 33 OK — includes ManifestTemplate rendering the
+    # extended template to valid JSON, parsing it into SdkIdentity, and asserting the
+    # legacy flat fields remain.
+$ python -m unittest test_editor_tool  # 35 OK — engine.py edits did not regress E0.
+```
+
+**UNAVAILABLE (requires the pinned toolchain + Conan, deferred):** the actual
+`cmake --install` of the extended manifest; building Debug/Development/Release
+candidate archives with hashes; populating `lib/cmake/Ludus/dependencies` with
+the real bundled volk/FreeType/HarfBuzz CMake metadata + static libs; extracting
+at a fresh prefix with no producer checkout/Conan cache and configuring/building/
+running an external consumer that links every public module. These are the P1
+*relocation* gate and remain open; the manifest/export/config *plumbing* and the
+Python-side store/identity validation that consume them are implemented and
+tested.
