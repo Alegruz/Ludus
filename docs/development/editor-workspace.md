@@ -11,14 +11,22 @@ See the specification package for the authoritative contract:
 `.kiro/specs/editor-workspace/{requirements,design,tasks}.md` and
 `docs/architecture/editor-workspace-research.md`.
 
-## Prerequisites (explicit; not installed by init)
+## Prerequisites (optional editor setup)
 
 The editor needs Qt 6 (6.4-compatible) with the Core/Gui/Widgets modules and a
 Wayland platform plugin, in addition to the normal reference toolchain
 (`./init.sh` prepares pinned Clang 18 / LLD / managed CMake/Ninja/Conan and the
-managed Python venv). Qt is **not** added to Conan, `init.sh`, or the SDK.
+managed Python venv). Qt is not added to Conan or the SDK. Default initialization
+skips editor setup; select **Build Ludus editor** in the setup window or use
+`./init.sh --cli --with-editor` to install missing Ubuntu/Debian Qt packages and
+build the selected native Debug or Development editor. `--no-editor` explicitly
+skips this optional setup. Existing manually configured CMake options are not
+reset by skipping editor setup.
+Editor tests also require Qt Test, supplied by the same Qt base development
+package on Ubuntu/Debian.
 
-Install Qt once, outside init (names vary by distribution):
+To manage Qt yourself, install it once (names vary by distribution) and use
+`./init.sh --cli --with-editor --no-system-install`:
 
 - Debian/Ubuntu: `sudo apt-get install -y qt6-base-dev qt6-wayland`
 - Fedora/Amazon Linux: `sudo dnf install -y qt6-qtbase-devel qt6-qtwayland`
@@ -32,6 +40,8 @@ The editor is gated behind `LUDUS_BUILD_EDITOR` (OFF by default). Configure a
 native preset with the option ON using the managed CMake, then build the target:
 
 ```bash
+./init.sh --cli --with-editor                # optional Qt prerequisites + editor build
+# Or manage Qt and the editor build yourself:
 ./init.sh                                   # pinned tools + managed venv (once)
 # Editor ON configure/build (managed cmake shown as `cmake` for brevity):
 cmake --preset linux-clang-development -DLUDUS_BUILD_EDITOR=ON

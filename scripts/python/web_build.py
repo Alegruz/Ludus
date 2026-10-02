@@ -17,7 +17,7 @@ PRESETS = ("web-emscripten-development", "web-emscripten-release")
 
 
 def command(args, engine) -> int:
-    # Native workflows never import this module. Reuse the calling engine module
+    # Native workflows never invoke this handler. Reuse the calling engine module
     # so errors retain its identity when the CLI runs as __main__.
     EngineError = engine.EngineError
     repo_root = engine.repo_root

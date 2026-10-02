@@ -1,5 +1,6 @@
 #include "internal/controller.h"
 
+#include <ludus/foundation/base/types.h>
 #include <ludus/foundation/logging/category.hpp>
 #include <ludus/foundation/logging/log.hpp>
 
@@ -15,15 +16,25 @@ LUDUS_DEFINE_LOG_CATEGORY(LOG_EDITOR_CTRL, "Editor");
 Phase PhaseFromStage(const QString& stage)
 {
     if (stage == QStringLiteral("configuring"))
+    {
         return Phase::Configuring;
+    }
     if (stage == QStringLiteral("building"))
+    {
         return Phase::Building;
+    }
     if (stage == QStringLiteral("launching"))
+    {
         return Phase::Launching;
+    }
     if (stage == QStringLiteral("running"))
+    {
         return Phase::Running;
+    }
     if (stage == QStringLiteral("stopping"))
+    {
         return Phase::Stopping;
+    }
     return Phase::Starting;
 }
 
@@ -388,7 +399,8 @@ QString EditorController::JobDetails() const
     {
         out += QStringLiteral("runtime_pid: %1\n").arg(LastPid_);
     }
-    out += QStringLiteral("last_result: %1 (%2)\n").arg(ResultCodeName(State_.Result.Code), State_.Result.Message);
+    out += QStringLiteral("last_result: %1 (%2)\n")
+               .arg(QString::fromLatin1(ResultCodeName(State_.Result.Code)), State_.Result.Message);
     if (State_.Result.ExitCode.has_value())
     {
         out += QStringLiteral("exit_code: %1\n").arg(State_.Result.ExitCode.value());
@@ -402,9 +414,9 @@ QString EditorController::JobDetails() const
     out += QStringLiteral("dropped_output_blocks: %1\n").arg(Log_.DroppedBlocks());
     out += QStringLiteral("dropped_output_bytes: %1\n").arg(Log_.DroppedBytes());
     // Bound the whole record to 1 MiB.
-    if (static_cast<usize>(out.toUtf8().size()) > 1u * 1024u * 1024u)
+    if (static_cast<usize>(out.toUtf8().size()) > usize{1} * 1024u * 1024u)
     {
-        out.truncate(1024 * 1024);
+        out.truncate(foundation::isize{1024} * 1024);
         out += QStringLiteral("\n[... job details truncated ...]\n");
     }
     return out;

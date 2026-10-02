@@ -28,8 +28,8 @@ class LogBuffer
 {
 public:
     // Conservative initial bounds (design section 10); measured in E0.5.
-    static constexpr usize MaxBytes = 1u * 1024u * 1024u; // <= 1 MiB UTF-8
-    static constexpr usize MaxBlocks = 5000u;             // <= 5000 text blocks
+    static constexpr usize MaxBytes = usize{1} * 1024u * 1024u; // <= 1 MiB UTF-8
+    static constexpr usize MaxBlocks = 5000u;                   // <= 5000 text blocks
 
     LogBuffer() = default;
 

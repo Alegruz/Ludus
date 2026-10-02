@@ -410,7 +410,11 @@ void MainWindow::closeEvent(QCloseEvent* event)
     if (choice == QMessageBox::Close)
     {
         CloseConfirmed_ = true;
-        Controller_->RequestClose(); // begins asynchronous cancellation
+        if (Controller_->RequestClose())
+        {
+            event->accept();
+            return;
+        }
     }
     else
     {

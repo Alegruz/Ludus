@@ -1194,6 +1194,10 @@ def command_init(args: argparse.Namespace) -> int:
     if not args.ci and not os.environ.get("CI"):
         command_install_hooks(argparse.Namespace())
 
+    if getattr(args, "with_editor", False):
+        from init_editor import setup_editor
+        setup_editor(args, sys.modules[__name__])
+
     if run_validation:
         command_build(argparse.Namespace(preset=preset, extra=[]))
         command_test(argparse.Namespace(preset=preset, label=None))
@@ -1216,7 +1220,11 @@ def command_init(args: argparse.Namespace) -> int:
     if run_validation:
         print("Ludus initialization and validation complete.")
     else:
-        print("Ludus initialization complete. No engine targets were built.")
+        if getattr(args, "with_editor", False):
+            print("Ludus initialization complete. The optional editor and its dependencies were built.")
+            print(f"Launch the editor: ./scripts/editor --preset {preset}")
+        else:
+            print("Ludus initialization complete. No engine targets were built.")
         print("Prepared presets: " + ", ".join(presets))
         print("VS Code CMake Tools is configured to use:")
         print(f"  {cmake(root)}")
@@ -1880,10 +1888,21 @@ def make_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init_parser = subparsers.add_parser("init", help="install prerequisites and prepare local build dependencies")
-    init_parser.add_argument("preset", nargs="?", default=DEFAULT_PRESET)
+    init_parser.add_argument("preset", nargs="?", default=None)
+    interface = init_parser.add_mutually_exclusive_group()
+    interface.add_argument("--cli", action="store_true", help="use terminal setup without opening a window")
+    interface.add_argument("--gui", action="store_true", help="require the graphical setup window")
+    init_parser.add_argument("--persona", choices=("contributor", "application", "browser", "validation"),
+                             default="contributor", help="setup defaults (default: contributor); explicit options override them")
     init_parser.add_argument("--no-system-install", action="store_true", help="do not install Ubuntu packages automatically")
     init_parser.add_argument("--with-rad-debugger", action="store_true", help="also build the optional pinned Linux RAD Debugger")
-    init_parser.add_argument("--all-presets", action="store_true", help="prepare Conan files for every committed preset (default)")
+    editor = init_parser.add_mutually_exclusive_group()
+    editor.add_argument("--with-editor", dest="with_editor", action="store_true",
+                        help="install optional Qt prerequisites and build the native Ludus editor")
+    editor.add_argument("--no-editor", dest="with_editor", action="store_false",
+                        help="skip optional editor setup (default)")
+    init_parser.set_defaults(with_editor=False)
+    init_parser.add_argument("--all-presets", action="store_true", help="prepare Conan files for all native presets (contributor default)")
     init_parser.add_argument("--preset-only", action="store_true", help="prepare only the selected preset")
     init_parser.add_argument("--validate", "--full", action="store_true", help="also build, test, check, and validate the SDK")
     init_parser.add_argument("--skip-checks", action="store_true", help="skip clang-format and clang-tidy checks during validation")
@@ -1973,9 +1992,13 @@ def main(argv: Sequence[str]) -> int:
     parser = make_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "init":
+            from init_ui import prepare_init
+            args = prepare_init(args, sys.modules[__name__])
+            if args is None:
+                print("Initialization cancelled. No setup actions were run.")
+                return 0
         if args.command != "debug" and str(getattr(args, "preset", "")).startswith("web-emscripten-"):
-            if args.command == "init" and args.with_rad_debugger:
-                raise EngineError("RAD is native tooling; run ./scripts/setup-rad-debugger separately from browser init")
             from web_build import command
             return command(args, sys.modules[__name__])
         return int(args.func(args))

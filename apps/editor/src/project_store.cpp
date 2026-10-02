@@ -282,7 +282,7 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
         return Fail(ResultCode::InvalidProject, QStringLiteral("'run.args' exceeds 64 entries"));
     }
     usize total = 0;
-    for (const QJsonValue& item : args)
+    for (const auto& item : args)
     {
         if (!item.isString())
         {
@@ -293,12 +293,12 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
         {
             return Fail(ResultCode::InvalidProject, QStringLiteral("'run.args' entries must not contain NUL"));
         }
-        const usize bytes = static_cast<usize>(value.toUtf8().size());
-        if (bytes > limits::MaxArgBytes)
+        const usize valueBytes = static_cast<usize>(value.toUtf8().size());
+        if (valueBytes > limits::MaxArgBytes)
         {
             return Fail(ResultCode::InvalidProject, QStringLiteral("a 'run.args' entry exceeds 4096 UTF-8 bytes"));
         }
-        total += bytes;
+        total += valueBytes;
         descriptor.RunArgs.append(value); // empty strings are valid
     }
     if (total > limits::MaxArgsTotalBytes)

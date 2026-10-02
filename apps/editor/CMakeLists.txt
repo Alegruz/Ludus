@@ -24,7 +24,8 @@ endif()
 
 # --- Qt discovery (local to the enabled editor only) -------------------------
 # Use APIs available in Qt 6.4; require at least 6.4. Core/Gui/Widgets only, as
-# dynamic system libraries. Do not add Qt to the engine Conan recipe or init.
+# dynamic system libraries. Qt is installed only by opted-in editor setup;
+# it is never added to the engine Conan recipe or SDK.
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets)
 
 # QT_NO_KEYWORDS forbids the unprefixed signals/slots/emit macros so Qt's macro
@@ -37,6 +38,7 @@ find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets)
 # buffer live in a library so offscreen tests can exercise them without creating
 # widgets or launching tools. All headers are private (src/internal).
 add_library(ludus_editor_core STATIC
+    src/internal/tool_process.h
     src/workspace.cpp
     src/project_store.cpp
     src/tool_process.cpp
@@ -56,6 +58,8 @@ ludus_apply_project_defaults(ludus_editor_core)
 
 # --- Editor application ------------------------------------------------------
 add_executable(ludus_editor
+    src/internal/controller.h
+    src/internal/main_window.h
     main.cpp
     src/main_window.cpp
     src/controller.cpp
@@ -82,7 +86,11 @@ ludus_apply_project_defaults(ludus_editor)
 # They do NOT prove native Wayland interaction or that a game rendered a frame.
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED)
+    find_package(Qt6 6.4 REQUIRED COMPONENTS Test)
     add_executable(ludus_editor_tests
+        src/internal/controller.h
+        src/internal/main_window.h
+        tests/main.cpp
         tests/workspace_tests.cpp
         tests/project_store_tests.cpp
         tests/tool_process_tests.cpp
@@ -103,9 +111,10 @@ if(LUDUS_BUILD_TESTS)
             Qt6::Core
             Qt6::Gui
             Qt6::Widgets
+            Qt6::Test
             Ludus::FoundationBase
             Ludus::FoundationLogging
-            Catch2::Catch2WithMain)
+            Catch2::Catch2)
     ludus_apply_project_defaults(ludus_editor_tests)
     # Catch2 reports assertion failures by throwing; test targets (only) re-enable
     # exceptions. Engine/app targets above stay exception-free (-fno-exceptions).
@@ -115,5 +124,6 @@ if(LUDUS_BUILD_TESTS)
     # display. This is for display-free tests only, never native acceptance.
     set_tests_properties(ludus_editor_tests PROPERTIES
         LABELS "unit;editor"
+        TIMEOUT 120
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
