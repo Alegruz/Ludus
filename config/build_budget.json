@@ -53,6 +53,29 @@
     "    Build-time budget job summary and tighten if the actual figure is lower;",
     "    do NOT raise it further to hide a real regression (AGENTS.md / ADR 0005)."
   ],
+  "$audio_note": [
+    "The Audio module (.kiro/specs/audio) adds Ludus::Audio -- public headers",
+    "(audio_types/audio_system/audio_debug/audio_gym/audio_app_adapter), the",
+    "control owner / renderer / resampler / voice kernel / bus / spatial /",
+    "scheduler sources, and 13 Catch2 test translation units -- plus the private",
+    "vendored miniaudio C unit. Every AUDIO PUBLIC HEADER stays well under the",
+    "default 2000 ms per-include budget (measured locally: audio_types.h ~304 ms,",
+    "audio_system.h ~245 ms; the others lighter) -- they are intentionally",
+    "lightweight (plain enums over fixed-width types, <span>, no heavy STL, no",
+    "container/format/filesystem/chrono includes, miniaudio confined to .cpp).",
+    "The aggregate rose because the module ships a thorough test suite: each",
+    "Catch2 test TU parses ~2.5-3.5 s of <catch2> headers, and 13 new audio test",
+    "TUs add real, permanent summed frontend parse time. This is the same",
+    "'total scales with TU count' growth the $comment calls out, not a heavy",
+    "include leaking into a header. Measured summed frontend parsing after the",
+    "audio reconciliation: 145.1 s locally (pinned clang-18, linux-clang-",
+    "development). Raise the aggregate from 120 s to 170 s (~17 % headroom over",
+    "the local 145.1 s). Per-header limits are UNCHANGED. Re-measure on the CI",
+    "Build-time budget job summary and tighten toward the observed figure; do NOT",
+    "raise further to mask a real regression (ADR 0005 / AGENTS.md).",
+    "miniaudio.h (third-party, not under modules/) is out of scope for per-header",
+    "budgeting and compiled once as C."
+  ],
   "$containers_note": [
     "The FoundationContainers module (Array/Vector + relocation/storage detail",
     "headers) and its four Catch2 test translation units add real, permanent",
@@ -72,7 +95,7 @@
   ],
   "preset": "linux-clang-development",
   "default_header_avg_ms": 2000,
-  "total_frontend_seconds": 120,
+  "total_frontend_seconds": 170,
   "header_overrides_avg_ms": {
     "modules/foundation/logging/src/internal/backend.hpp": 4000
   },

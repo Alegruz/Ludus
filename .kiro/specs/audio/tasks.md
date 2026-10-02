@@ -10,17 +10,17 @@ new user approval. Missing hardware checks remain pending, not passed by mocks.
 
 Requirements: AU01-AU04, AU08, AU14-AU15. No prerequisite.
 
-- [ ] Read AGENTS.md, all applicable steering, ADRs 0003-0005/0007-0009,
+- [x] Read AGENTS.md, all applicable steering, ADRs 0003-0005/0007-0009,
   Containers/Memory docs, current native/web CMake/bootstrap/SDK and test tools.
-- [ ] Record actual revision and working-tree changes. Locate any concurrent
+- [x] Record actual revision and working-tree changes. Locate any concurrent
   audio work and preserve Input/Text/RHI/Platform/smoke/shader work and other specs.
-- [ ] Freeze API status/handle fields, capacity maxima, memory accounting and
+- [x] Freeze API status/handle fields, capacity maxima, memory accounting and
   supported source formats. Create `docs/architecture/audio-decision-log.md`.
-- [ ] Include the Game Audio Programming 1-4 adaptations: preparation/voice
+- [x] Include the Game Audio Programming 1-4 adaptations: preparation/voice
   states, resident groups, split listener, numeric silence causes, explicit PCM/
   phase contracts, user sliders and bounded application event/context policy.
   Preserve their bounded scope; do not require private PDFs or volume 5.
-- [ ] Lock miniaudio 0.11.23 source/hash/license/options and audit exact C APIs,
+- [x] Lock miniaudio 0.11.23 source/hash/license/options and audit exact C APIs,
   allocation callbacks and low-level resampler call graph. Verify a native
   callback-only playback probe with stable owner lifetime.
 - [ ] Probe pinned Emscripten 4.0.23 Wasm AudioWorklet plus shared queues/worker:
@@ -29,7 +29,7 @@ Requirements: AU01-AU04, AU08, AU14-AU15. No prerequisite.
 - [ ] Establish browser shutdown through actual context close and renderer/
   worker quiescence, including suspended/unstarted context and late callbacks.
   Verify stack/cookie lifetime in the executable probe, not only source reading.
-- [ ] Integrate deterministic cached/offline dependencies, C language flags and
+- [x] Integrate deterministic cached/offline dependencies, C language flags and
   distinct native/web variants without overwriting existing presets.
 
 Gate: common mixer architecture is feasible with pinned dependencies and no
@@ -42,21 +42,21 @@ Dependency changes require a technical decision with evidence, not a new survey.
 
 Requirements: AU02-AU07, AU09, AU16. Prerequisite: A0 API freeze.
 
-- [ ] Add `modules/audio`, lightweight public headers and installed/export target.
-- [ ] Implement fallible fixed runtime allocation, session/generation handles,
+- [x] Add `modules/audio`, lightweight public headers and installed/export target.
+- [x] Implement fallible fixed runtime allocation, session/generation handles,
   Disabled/Offline modes, prepared owned PCM seam and explicit service/shutdown.
-- [ ] Implement production SPSC batches, full validation/transaction rollback,
+- [x] Implement production SPSC batches, full validation/transaction rollback,
   128-frame boundaries, scheduled starts, and bounded application budgets.
-- [ ] Implement stop-generation and StopAll epoch mailboxes, durable terminal
+- [x] Implement stop-generation and StopAll epoch mailboxes, durable terminal
   acknowledgments, stale-command rejection and safe asset retirement.
-- [ ] Implement explicit state transition causes, immutable published batches
+- [x] Implement explicit state transition causes, immutable published batches
   and transactional resident group MaxAdmitted charges with GroupCapacity.
-- [ ] Implement cached debug snapshot handoff with no racing double buffer;
+- [x] Implement cached debug snapshot handoff with no racing double buffer;
   terminal ownership must remain independent of snapshot/trace loss. Queries
   overlay accepted reservations/acquired terminals onto stale renderer views.
-- [ ] Start an offline audio gym with named scenarios, owner-side filtering/
+- [x] Start an offline audio gym with named scenarios, owner-side filtering/
   numeric-tag correlation, admission/preparation errors and snapshot export.
-- [ ] Add production-path tests and tiny-capacity/counter-exhaustion seams.
+- [x] Add production-path tests and tiny-capacity/counter-exhaustion seams.
 
 Gate: these truth-table cases pass without any device, worker, Platform or window:
 
@@ -87,23 +87,23 @@ Gate: these truth-table cases pass without any device, worker, Platform or windo
 
 Requirements: AU04, AU08-AU11. Prerequisite: A1.
 
-- [ ] Decode WAV/FLAC resident mono/stereo PCM at session rate with source byte,
+- [x] Decode WAV/FLAC resident mono/stereo PCM at session rate with source byte,
   frame/channel/size/finite validation and fallible rollback.
-- [ ] Implement per-instance cursors, EOF, half-open loops, frame conversion,
+- [x] Implement per-instance cursors, EOF, half-open loops, frame conversion,
   scheduled offsets and sample ramps that persist across buffer partitions.
-- [ ] Integrate preallocated audited resampling, Rate 0.5-2.0 and bounded input
+- [x] Integrate preallocated audited resampling, Rate 0.5-2.0 and bounded input
   scratch. Derive ratios from rates, not buffer lengths; preserve fractional
   phase/history and guard neighbor reads. No callback init/free.
-- [ ] Implement independent panning/attenuation positions, per-voice origin
+- [x] Implement independent panning/attenuation positions, per-voice origin
   choice and listener validation; preserve true emitter positions and stereo beds.
-- [ ] Implement logical/physical budgets, deterministic priority selection,
+- [x] Implement logical/physical budgets, deterministic priority selection,
   per-group MaxSelected quotas, hysteresis, charged tails, virtual advance and
   kill policy. Keep selection fades out of audibility scores.
-- [ ] Implement reversible Virtualizing and irreversible Stopping transitions;
+- [x] Implement reversible Virtualizing and irreversible Stopping transitions;
   preserve variation/rate/cursor on reentry and expose silence/score causes.
 - [ ] Validate application event descriptors and extend gym scenarios with
   group saturation, third-person listener and interrupted/reversed fades.
-- [ ] Add allocation probes and DSP correctness/quality fixtures.
+- [x] Add allocation probes and DSP correctness/quality fixtures.
 
 Gate tests: simultaneous independent voices sharing one clip; 1-frame/empty/
 malformed/huge clips; mono/stereo channel placement; Rate 0.5/1/2 duration and
@@ -129,19 +129,19 @@ No warm render/submit allocation or free including dependency calls.
 
 Requirements: AU05, AU10-AU12, AU16. Prerequisite: A2.
 
-- [ ] Implement static tree validation, child-before-parent accumulation and
+- [x] Implement static tree validation, child-before-parent accumulation and
   gains applied exactly once at each bus edge.
 - [ ] Add user/base gain, base snapshot batch, bounded modifier instances,
   generation checks, fade removal and specified dB composition.
-- [ ] Add per-channel input/post-gain meters with fixed windows, clipping/
+- [x] Add per-channel input/post-gain meters with fixed windows, clipping/
   nonfinite counters and owner-side dBFS display with explicit silent values.
-- [ ] Demonstrate dB sliders (initial 40 dB range), exact mute, remembered slider
+- [x] Demonstrate dB sliders (initial 40 dB range), exact mute, remembered slider
   settings and category controls separate from gameplay mix.
-- [ ] Demonstrate application-owned categories, dialogue attenuation and mute
+- [x] Demonstrate application-owned categories, dialogue attenuation and mute
   without hard-coded gameplay categories in the mixer.
 - [ ] Demonstrate context policy above the mixer with resolved gain/priority/
   modifier commands and numeric policy tags; inspect contributions in the gym.
-- [ ] Demonstrate a thin application adapter with owned-loop teardown, bounded
+- [x] Demonstrate a thin application adapter with owned-loop teardown, bounded
   event/owner cooldown and AlreadyActive suppression before admission, explicit
   clock/table-full reporting, and accepted-handle tracking independent of Mixed
   snapshots. Add a shared dialogue duck that releases only after the last durable
@@ -276,11 +276,12 @@ Fill this during implementation. A checked box is not evidence by itself.
 
 | Milestone | Revision and changed paths | Commands and evidence | Result and pending gates |
 | --- | --- | --- | --- |
-| A0 | Not started | No probes/builds run in design handoff | Pending |
-| A1 | Not started | None | Pending |
-| A2 | Not started | None | Pending |
-| A3 | Not started | None | Pending |
-| A4 | Not started | None | Pending |
+| A0 | `6ed9836` on `feat/audio-system` (base `8972388`). Added `third_party/miniaudio/` (vendored 0.11.23, hash lock, C impl units, CMake), root `CMakeLists.txt` (C dep + audio module), `docs/architecture/audio-decision-log.md`. | miniaudio.h sha256 `7e4f3f13c8fe66df2080ac3dd12a89193e3c2463cb7f067c798abd7331cd8ee6` (4,099,492 bytes) verified on download and at configure; option macros verified against the pinned header; resampler/decoder call graph audited (see decision log). Toolchain provisioned: Clang/LLD/clang-format/clang-tidy 18.1.8, CMake 3.29.6, Ninja 1.11.1.3, Conan 2.8.1. miniaudio compiled as C and linked into `libludus_audio.a`. | Native callback-only playback probe and the browser AudioWorklet/shutdown-quiescence subgate remain **pending** (emsdk not installed; no device/browser in this sandbox). Common-mixer architecture is feasible with the pinned dependency and no exceptions; proceeding on native/offline work. |
+| A1 | `6ed9836`. Added `modules/audio/` (public headers, control owner, SPSC ring, decode, tests). | `build linux-clang-debug` + `linux-clang-development` green; `ctest` 28/28 pass (adds `ludus_audio_tests` 26 cases/643 assertions and `ludus_audio_alloc_tests`). clang-format and clang-tidy (pinned 18) clean on all audio TUs; zero warm-path allocations verified. Truth-table rows exercised: invalid/stale/fabricated handles, invalid-last-record rollback, oversized batch, Stop-before-start, Stop/StopAll with full queue, StopAll-then-Play, disabled play, group admission rollback, dropped-snapshot terminal reclaim, retire-with-active-play, scheduled start offset, far-future rejection, render-partition parity, zero-frame no-op, slider u=0/0.5/1 -> 0/0.1/1. | Passed (device-independent). |
+| A2 | Added `modules/audio/src/internal/resampler.{hpp,cpp}`, `voice_kernel.{hpp,cpp}`, `physical_voice.hpp`, `spatial.cpp`, `decode.cpp` (real miniaudio decode), selection/render in `control_owner.cpp`, `tests/dsp_tests.cpp`. | `build linux-clang-debug` 28/28 ctest green (9 DSP cases, 19198 assertions). ASan+UBSan build green and **leak-free** across all 40 audio cases (fixed the clip/resampler teardown). Zero warm submit/render allocation verified with decode+resampler active. clang-format/clang-tidy (pinned 18) clean. Verified: hard-L/R pan, planar/interleaved L/R parity, Rate 0.5/1/2 duration ordering, looping, 44100<->48000 both directions, distance falloff, listener/distance validation, group MaxSelected with virtual/advance policy. | Numeric DSP correctness passed. Listening/spectral alias-rejection quality gate and real device output remain **pending** (no device in sandbox). |
+| A3 | Added `src/buses.cpp` (static-tree child-before-parent accumulation, per-bus input/post-gain meters, root clip counting), `AcquireModifier`/`UpdateModifier`/`ReleaseModifier` + dB composition in `facade.cpp`/`audio_system.cpp`, `include/ludus/audio/audio_app_adapter.{h}` + `src/audio_app_adapter.cpp` (bounded cooldown/AlreadyActive/TableFull suppression before admission, owned-loop teardown, shared dialogue duck), `tests/bus_tests.cpp`, `tests/adapter_tests.cpp`. Audit fixes added `tests/batch_order_tests.cpp`. | `build linux-clang-debug` 28/28 ctest green; audio target 58 cases / 19375 assertions. ASan+UBSan **leak-free** across all 58 cases. **TSan** clean on the SPSC producer-flood and full suite (separate `out/build/tsan`, `LUDUS_ENABLE_TSAN=ON`). clang-format + clang-tidy (pinned 18) clean. All 5 public headers compile standalone. Verified: ancestor bus gain applied exactly once (0.5*0.5=0.25), user-mute persists through base-gain change, dB slider 0/0.1/1, bus input/post meters + clip counts, cooldown/AlreadyActive/table-full before admission, failed admission consumes no cooldown/creates no duck, owned-loop teardown, dialogue duck released only after last durable terminal. | Numeric/behavioral correctness passed. Bus/modifier gains are **boundary-granular (not sample-ramped)** in v1 — recorded limitation; modifier release is immediate rather than fade-then-acknowledge (consistent under single-threaded serialized owner). Real device output pending. |
+| Reconcile | Post-A3 gap closure: sub-span scheduled start + per-voice start offset (`control_owner.cpp`); completed/boundary-reset silence-cause flags (NotStarted/Stopping/DistanceZero/UserMuted) in `SelectAndCharge`, cleared on terminate; typed `EventDescriptor` + `ValidateDescriptor` + `TriggerDescriptor` + `AudioSystem::IsClipReady`; incremental cold-worker `internal/decode_scheduler.{hpp,cpp}`. Added `tests/scheduler_tests.cpp`, `tests/descriptor_tests.cpp`, `tests/diagnostics_tests.cpp`. | Debug 28/28 ctest; audio **72 cases / 19480 assertions**. ASan+UBSan leak-free; TSan clean (SPSC flood + full suite); zero warm-path allocation; format/tidy (18) clean; 5 public headers self-sufficient; no regressions. Verified: StartFrame=300 silent in [0,300) then audible; NotStarted/UserMuted/GroupQuota flags + per-boundary clear on unmute; descriptor field-specific rejection + deterministic seeded variation; muted finite advance-expiry with no unmute backlog; cold decode ≤4096-frame units, no-starvation, deadline-first + round-robin, between-unit cancellation. | Behavioral/numeric correctness passed. |
+| A4 | Partial: the incremental cold-worker **scheduling discipline** (`decode_scheduler`) is implemented and unit-tested offline. The full streaming subsystem (stream rings, device/renderer consumption, worker OS thread, starvation fade/hold-cursor, FLAC seek loops, browser encoded preload, `PrepareStream`/`PlayStream`) is **NOT implemented**. | Scheduler tests green (`[audio][worker]`): ≤4096 units, no-starvation, deadline-first, round-robin, cancellation, bounded pass + runway. | Full music streaming, real decoder-produced chunk rings, starvation/EOF/refill through the renderer, and TSan on a real worker thread remain **pending**. |
 | A5 | Not started | None | Real Linux device gate pending |
 | A6 | Not started | None | Real browser output and async teardown gate pending |
 | A7 | Not started | None | Measurements, SDK, quality and validation pending |

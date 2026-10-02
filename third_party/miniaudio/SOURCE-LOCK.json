@@ -1,0 +1,30 @@
+{
+  "name": "miniaudio",
+  "version": "0.11.23",
+  "released": "2025-09-11",
+  "license": "MIT-0",
+  "source_url": "https://raw.githubusercontent.com/mackron/miniaudio/0.11.23/miniaudio.h",
+  "release_url": "https://github.com/mackron/miniaudio/releases/tag/0.11.23",
+  "file": "miniaudio.h",
+  "size_bytes": 4099492,
+  "sha256": "7e4f3f13c8fe66df2080ac3dd12a89193e3c2463cb7f067c798abd7331cd8ee6",
+  "notes": "Locked source bootstrap. The exact bytes are vendored in this directory and verified at CMake configure time against this hash. No download occurs during ordinary build/configure; an absent/mismatched source cache fails with an actionable diagnostic. Native and web builds compile the same bytes.",
+  "common_options": [
+    "MA_NO_MP3",
+    "MA_NO_VORBIS",
+    "MA_NO_ENCODING",
+    "MA_NO_ENGINE",
+    "MA_NO_RESOURCE_MANAGER",
+    "MA_NO_NODE_GRAPH",
+    "MA_NO_GENERATION"
+  ],
+  "web_only_options": [
+    "MA_NO_DEVICE_IO",
+    "MA_NO_THREADING"
+  ],
+  "kept": [
+    "ma_decoder (WAV, FLAC)",
+    "ma_resampler (linear, configurable lpfOrder, external-heap init)",
+    "native device I/O (Linux backend selection private to the adapter)"
+  ]
+}
