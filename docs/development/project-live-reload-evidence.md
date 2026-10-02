@@ -35,8 +35,17 @@ workflow summary that contains a failed `continue-on-error` step is NOT a PASS.
 | L0 / L04 header budgets & self-sufficiency | `ludus_runtime_game_api_header_check`, `scripts/check --format` foundational-includes | **PASS** | Each public ABI header compiles standalone; foundational include boundary OK. |
 | L0 two-generation load | `ludus_game_host_loader_tests` (Debug) | **PASS** | 8 cases/25 assertions: A+B coexist, distinct per-variant code, hidden symbol scope, missing-entry/wrong-identity rejected before Create, non-absolute path rejected, headless mandatory lifecycle. |
 | L0 under ASan/UBSan | `ludus_game_host_loader_tests` (asan-ubsan, `ASAN_OPTIONS=detect_leaks=1`) | **PASS** | All pass, no leaks reported. |
-| L0 clang-tidy-18 | `clang-tidy-18 --warnings-as-errors='*'` on runtime sources | **PASS** | Clean. Intentional fixed-width ABI enums carry `NOLINT(performance-enum-size)`. |
-| L1–L6 | Pending | Not run | Implementation in progress. |
+| L0 clang-tidy-18 | `clang-tidy-18 --warnings-as-errors='*'` on runtime sources | **PASS** | Clean. Intentional fixed-width ABI enums carry `NOLINT(performance-enum-size)`; the fixed ABI entry/ctor signatures carry `NOLINT(bugprone-easily-swappable-parameters)`. |
+| L1 host lifecycle / play / restart | `ludus_game_host_session_tests` over a real socketpair | **PASS** | SessionReady+ModuleReady declared; Pause/Resume/Step/Status/Stop; EOF ends session; SessionEnded emitted. |
+| L1 host executable + static shipping + external SDK sample | `examples/live-edit-game` built vs a fresh installed-SDK prefix | **PASS** | module+host+shipping compile NO engine source; module exports exactly `LudusGetGameApi`; NO Qt symbols in any artifact; static shipping runs; host loads module headless. |
+| L1/L13 protocol codec | `ludus_game_host_protocol_tests` | **PASS** | 56 assertions: typed round-trip, 64-bit hex ids, split-read framing, oversize/backlog/malformed rejection. |
+| L3 reload transaction | `ludus_game_host_reload_tests` (Validate..Done) | **PASS** | Function-body edit A->B preserves bounces/state (read-back equality); all phases observed over the protocol. |
+| L3 pre-commit failure injection | `ludus_game_host_reload_tests` (quiesce/checkpoint/stage/validate) | **PASS** | Each injected failure leaves A at gen 1 with unchanged state and zero leaked host allocations. |
+| L6 100-reload ASan/UBSan | `ludus_game_host_reload_tests [stress]` under `ASAN_OPTIONS=detect_leaks=1 halt_on_error=1` | **PASS** | 235 assertions; live host allocations == 0 every iteration (bounded residency); no leak/UB. |
+| L6 reload-pause timing | ad-hoc 200-reload harness (Debug, headless) | **PASS (measured)** | mean 0.046 ms, p50 0.045 ms, p95 0.059 ms, max 0.070 ms (< 100 ms target). No RHI/GPU frame-sync in this environment. |
+| L01/L14/L15 rendered on-screen frame & real debugger stepping | — | **UNAVAILABLE (hardware) / in progress** | No GPU/display: rendered-window acceptance cannot be produced here. LLDB-18 debugger acceptance pending (achievable headlessly). |
+| L2 build generations / File API resolver | Pending | Not run | Implementation in progress. |
+| L4 editing during play (ABI side) | covered by fixture property edits in reload_tests | **PARTIAL** | ABI PrepareEdits/CommitEdits + property read exercised; Qt inspector UNAVAILABLE (no Qt6). |
 
 ## Usage (so far)
 
