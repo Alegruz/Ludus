@@ -117,10 +117,16 @@ struct GameApiTable final
     Status (*Resume)(GameInstance* instance) noexcept = nullptr;
     // Size negotiation then bounded write of a read-only checkpoint.
     Status (*CheckpointSize)(GameInstance* instance, usize* outBodySize) noexcept = nullptr;
-    Status (*WriteCheckpoint)(GameInstance* instance, CheckpointHeader* outHeader, ByteSpan body, usize* outBytesWritten) noexcept = nullptr;
+    Status (*WriteCheckpoint)(GameInstance* instance,
+                              CheckpointHeader* outHeader,
+                              ByteSpan body,
+                              usize* outBytesWritten) noexcept = nullptr;
     // Create and validate a candidate from a checkpoint during staging. Staging
     // must not mutate active resources or perform side effects (design 7).
-    Status (*CreateCandidate)(const CreateInfo* info, const CheckpointHeader* header, ByteView body, GameCandidate** outCandidate) noexcept = nullptr;
+    Status (*CreateCandidate)(const CreateInfo* info,
+                              const CheckpointHeader* header,
+                              ByteView body,
+                              GameCandidate** outCandidate) noexcept = nullptr;
     Status (*ValidateCandidate)(GameCandidate* candidate) noexcept = nullptr;
     // Promote a validated candidate to the live instance (non-failing swap in
     // the module's own storage; the host commit is allocation-free). Returns the
@@ -140,7 +146,10 @@ struct GameApiTable final
     // --- Supported asset reload (Capability::AssetReload) ---
     // Swap one supported logical asset to a validated immutable artifact at the
     // owning subsystem's safe point; old resource disposal is deferred (design 12).
-    Status (*ReloadAsset)(GameInstance* instance, uint64 logicalAssetId, ByteView cookedArtifact, uint64 artifactDigest) noexcept = nullptr;
+    Status (*ReloadAsset)(GameInstance* instance,
+                          uint64 logicalAssetId,
+                          ByteView cookedArtifact,
+                          uint64 artifactDigest) noexcept = nullptr;
 };
 
 // The single exported entry symbol. Spelled as a macro so host and module agree.
@@ -151,9 +160,19 @@ struct GameApiTable final
 using GetGameApiFn = Status (*)(uint32 hostAbiMajor, uint32 hostAbiMinor, GameApiTable* outTable) noexcept;
 } // namespace ludus::runtime::game_api
 
+// Visibility of the single public entry. A gameplay module builds with hidden
+// default visibility and marks EXACTLY this symbol visible, so dlsym resolves
+// the one entry and nothing else (design 5/6). On non-GCC/Clang toolchains this
+// expands to nothing and the explicit linker export policy applies instead.
+#if defined(__GNUC__) || defined(__clang__)
+#    define LUDUS_GAME_API_EXPORT __attribute__((visibility("default")))
+#else
+#    define LUDUS_GAME_API_EXPORT
+#endif
+
 // The exported symbol is unmangled C linkage with a platform-default calling
 // convention (design 6). A module defines exactly this and nothing else public.
-extern "C" ::ludus::runtime::game_api::Status LudusGetGameApi(
-    ::ludus::foundation::uint32 hostAbiMajor,
-    ::ludus::foundation::uint32 hostAbiMinor,
-    ::ludus::runtime::game_api::GameApiTable* outTable) noexcept;
+extern "C" LUDUS_GAME_API_EXPORT ::ludus::runtime::game_api::Status
+LudusGetGameApi(::ludus::foundation::uint32 hostAbiMajor,
+                ::ludus::foundation::uint32 hostAbiMinor,
+                ::ludus::runtime::game_api::GameApiTable* outTable) noexcept;

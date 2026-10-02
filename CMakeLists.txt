@@ -140,6 +140,11 @@ else()
     add_subdirectory(modules/graphics/rhi)
     add_subdirectory(modules/text)
 
+    # Qt-free static GameHost runtime library and loader (project-live-reload
+    # design section 2). Native-only: it uses dlopen and the Platform/RHI
+    # session. The editor never links it; a project-owned host executable does.
+    add_subdirectory(modules/runtime/game_host)
+
     # Startup-only development diagnostic integration (depends on Base; Base does
     # not depend on it). Provides InitializeDiagnosticSession and the Python helper.
     add_subdirectory(tools/diagnostics)

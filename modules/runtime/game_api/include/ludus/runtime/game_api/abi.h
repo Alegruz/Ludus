@@ -36,7 +36,9 @@ inline constexpr uint32 kIdentityMax = 256;
 
 // Explicit status for every boundary call. Ok is always success. The host never
 // treats a non-zero status as a crash; native crashes/hangs are host failures
-// handled by the supervisor, not catchable reload statuses (design 6/7).
+// handled by the supervisor, not catchable reload statuses (design 6/7). The
+// 32-bit base is a fixed part of the ABI wire layout, not a value-count choice.
+// NOLINTNEXTLINE(performance-enum-size)
 enum class Status : uint32
 {
     Ok = 0,
@@ -56,6 +58,8 @@ enum class Status : uint32
 // Optional capabilities a module advertises in its metadata. Mandatory
 // operations (Query/Create/Destroy/Update) are always present; these flags gate
 // the reload and live-edit tables. A module lacking Reload offers only Restart.
+// The 32-bit base is the fixed ABI capability bitset width.
+// NOLINTNEXTLINE(performance-enum-size)
 enum class Capability : uint32
 {
     None = 0,

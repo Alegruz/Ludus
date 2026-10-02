@@ -1,0 +1,37 @@
+#pragma once
+
+// Generated GameHost/module ABI identity (project-live-reload design 6/7).
+//
+// This is the single source of the compatibility key a GameHost stamps into a
+// generation manifest and compares, byte for byte, against a module's embedded
+// Query identity before Create. It is derived from ACTUAL build inputs (SDK
+// variant, flavor, assert policy, sanitizers, compiler id/version, target
+// triple) — never inferred from a version string. A gameplay module compiled
+// against the installed SDK gets the same values, so a mismatch in any policy
+// field is rejected before the module runs.
+
+#include <ludus/foundation/base/types.h>
+
+#include <string_view>
+
+namespace ludus::runtime::game_host::identity
+{
+inline constexpr ludus::foundation::uint32 kAbiMajor = @LUDUS_GAME_ABI_MAJOR@;
+inline constexpr ludus::foundation::uint32 kAbiMinor = @LUDUS_GAME_ABI_MINOR@;
+
+// The composite SDK variant string (assert policy, flavor, build type,
+// sanitizers). Mirrors LUDUS_SDK_VARIANT.
+inline constexpr std::string_view kSdkVariant = "@LUDUS_SDK_VARIANT@";
+
+// Compiler identity and target triple so a module built with a different
+// compiler/runtime is rejected even at the same SDK variant.
+inline constexpr std::string_view kCompilerId = "@LUDUS_COMPILER_ID@";
+inline constexpr std::string_view kCompilerVersion = "@LUDUS_COMPILER_VERSION@";
+inline constexpr std::string_view kTargetTriple = "@LUDUS_TARGET_TRIPLE@";
+
+// The full identity string: "<sdk_variant>|<compiler_id> <compiler_version>|
+// <target_triple>|abi-<major>.<minor>". Both host and module stamp this; the
+// host compares it exactly. Kept under game_api::kIdentityMax bytes.
+inline constexpr std::string_view kIdentityString =
+    "@LUDUS_SDK_VARIANT@|@LUDUS_COMPILER_ID@ @LUDUS_COMPILER_VERSION@|@LUDUS_TARGET_TRIPLE@|abi-@LUDUS_GAME_ABI_MAJOR@.@LUDUS_GAME_ABI_MINOR@";
+} // namespace ludus::runtime::game_host::identity

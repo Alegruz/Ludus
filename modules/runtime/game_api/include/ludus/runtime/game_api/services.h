@@ -25,7 +25,9 @@ using ludus::foundation::uint8;
 using ludus::foundation::usize;
 
 // Diagnostic severity mirrored across the ABI as an explicit integer. The host
-// maps these onto LUDUS_LOG_* so the module needs no logging headers.
+// maps these onto LUDUS_LOG_* so the module needs no logging headers. The
+// 32-bit base is a fixed part of the ABI wire layout.
+// NOLINTNEXTLINE(performance-enum-size)
 enum class LogSeverity : uint32
 {
     Trace = 0,

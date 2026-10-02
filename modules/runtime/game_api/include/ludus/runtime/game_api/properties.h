@@ -27,7 +27,8 @@ inline constexpr uint32 kMaxEditBatch = 64;
 inline constexpr uint32 kMaxLabelBytes = 64;
 
 // Supported property value kinds for this phase: bool, int32, finite float32,
-// enum and bounded UTF-8 string (design 9).
+// enum and bounded UTF-8 string (design 9). Fixed 32-bit ABI wire width.
+// NOLINTNEXTLINE(performance-enum-size)
 enum class PropertyKind : uint32
 {
     Bool = 0,
@@ -39,23 +40,25 @@ enum class PropertyKind : uint32
 
 // Persistence scope: whether a value is a persistable authored parameter or a
 // read-only simulation field. Only persistable fields reach Apply to Document.
+// Fixed 32-bit ABI wire width.
+// NOLINTNEXTLINE(performance-enum-size)
 enum class PropertyScope : uint32
 {
-    SessionOnly = 0,  // Live-editable, not persistable.
-    Persistable = 1,  // Authored parameter, eligible for Apply to Document.
-    ReadOnly = 2      // Simulation output; never pretends to be editable.
+    SessionOnly = 0, // Live-editable, not persistable.
+    Persistable = 1, // Authored parameter, eligible for Apply to Document.
+    ReadOnly = 2     // Simulation output; never pretends to be editable.
 };
 
 // One property descriptor. Values/bounds are typed; the host validates against
 // kind and range at receipt and again at the safe boundary (design 10).
 struct PropertyDescriptor final
 {
-    uint64 ObjectId = 0;    // Stable object identity, preserved across reload.
-    uint64 PropertyId = 0;  // Stable property identity within the object.
-    uint32 Kind = 0;        // PropertyKind.
-    uint32 Scope = 0;       // PropertyScope.
-    uint8 Writable = 0;     // 1 if the module accepts edits to this property.
-    uint8 LabelLength = 0;  // Bytes of Label used (<= kMaxLabelBytes).
+    uint64 ObjectId = 0;   // Stable object identity, preserved across reload.
+    uint64 PropertyId = 0; // Stable property identity within the object.
+    uint32 Kind = 0;       // PropertyKind.
+    uint32 Scope = 0;      // PropertyScope.
+    uint8 Writable = 0;    // 1 if the module accepts edits to this property.
+    uint8 LabelLength = 0; // Bytes of Label used (<= kMaxLabelBytes).
     uint8 Reserved0 = 0;
     uint8 Reserved1 = 0;
 
@@ -75,10 +78,10 @@ struct PropertyValue final
     uint64 ObjectId = 0;
     uint64 PropertyId = 0;
     uint64 ObjectRevision = 0;
-    uint32 Kind = 0;        // PropertyKind.
-    uint32 IntOrEnum = 0;   // Bool (0/1), Int32 (reinterpret), or enum ordinal.
+    uint32 Kind = 0;      // PropertyKind.
+    uint32 IntOrEnum = 0; // Bool (0/1), Int32 (reinterpret), or enum ordinal.
     float32 Float = 0;
-    uint32 StringLength = 0; // Bytes of String used for String kind.
+    uint32 StringLength = 0;                // Bytes of String used for String kind.
     char String[kMaxStringBytes / 16] = {}; // Bounded inline string (256 bytes).
 };
 
@@ -99,8 +102,8 @@ struct PropertyEdit final
 struct EditBatchHeader final
 {
     uint32 StructSize = 0;
-    uint32 Count = 0;        // Number of PropertyEdit entries (<= kMaxEditBatch).
+    uint32 Count = 0; // Number of PropertyEdit entries (<= kMaxEditBatch).
     uint32 SchemaVersion = 0;
-    uint32 CommandId = 0;    // For duplicate/lost reply reconciliation.
+    uint32 CommandId = 0; // For duplicate/lost reply reconciliation.
 };
 } // namespace ludus::runtime::game_api
