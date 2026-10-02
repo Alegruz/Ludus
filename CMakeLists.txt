@@ -109,6 +109,12 @@ add_subdirectory(third_party/miniaudio)
 # for both native and web targets (same production renderer; design section 1).
 add_subdirectory(modules/audio)
 
+# Ludus::GameApi is a header-only INTERFACE target defining the gameplay module
+# ABI (project-live-reload design section 2). It links no engine implementation,
+# so it is available to both native and browser configures; the native GameHost
+# runtime library and the loader live under the native branch below.
+add_subdirectory(modules/runtime/game_api)
+
 if(EMSCRIPTEN)
     add_subdirectory(modules/platform)
     add_subdirectory(modules/graphics/rhi)
