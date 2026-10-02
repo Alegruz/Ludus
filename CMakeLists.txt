@@ -87,6 +87,16 @@ add_subdirectory(modules/foundation/profiling)
 # Input is configured before Platform: Platform depends on Input for the
 # normalized keyboard record/sink vocabulary (one-way dependency).
 add_subdirectory(modules/input)
+# Private pinned miniaudio C dependency (locked source bootstrap, hash-verified
+# at configure time). Added before the audio module, which links it PRIVATE. It
+# deliberately enables the C language for its own targets; the root project
+# otherwise declares CXX only (audio spec design section 2, decision log A0).
+add_subdirectory(third_party/miniaudio)
+# Audio depends only on FoundationBase/Containers/Logging and the private
+# miniaudio dependency; it does not depend on Platform/RHI/Input/Text. It builds
+# for both native and web targets (same production renderer; design section 1).
+add_subdirectory(modules/audio)
+
 if(EMSCRIPTEN)
     add_subdirectory(modules/platform)
     add_subdirectory(modules/graphics/rhi)

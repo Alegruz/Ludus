@@ -94,6 +94,13 @@ def main():
         # Skip the precompiled-header build entry (LUDUS_ENABLE_PCH=ON).
         if is_pch_entry(entry):
             continue
+        # The C++ exception policy applies to C++ translation units. The pinned
+        # private miniaudio dependency (audio spec design section 2) is compiled
+        # as C with its own language flags; re-forcing "-x c++" on a -std=gnu11
+        # command is invalid and the no-exceptions contract does not apply to a
+        # third-party C unit. Skip C sources.
+        if entry.get("file", "").endswith((".c",)):
+            continue
         expected = "_tests.dir/" in command
         result = subprocess.run(
             compiler_options(entry) + ["-x", "c++", "-dM", "-E", "-"],
