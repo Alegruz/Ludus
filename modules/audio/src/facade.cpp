@@ -511,49 +511,47 @@ BatchResult AudioSystem::TrySubmitBatch(std::span<const Command> commands) noexc
         v.Stop.StopGeneration.store(0, std::memory_order_relaxed);
         v.Terminal.TerminalGeneration.store(0, std::memory_order_relaxed);
 
-        // Build the queued command record.
-        QueuedCommand& q = s.BatchScratch[scratchCount++];
-        q = QueuedCommand{};
-        q.Kind = CommandKind::Play;
-        q.VoiceSlotIndex = slot;
-        q.VoiceGeneration = v.Generation.Value;
-        q.ClipSlotIndex = clipSlot;
-        q.BusIndex = p.BusIndex;
-        q.GroupIndex = p.GroupIndex;
-        q.Priority = p.Priority;
-        q.Gain = p.Gain;
-        q.Rate = p.Rate;
-        q.Looping = p.Looping;
-        q.Policy = p.Policy;
-        q.StartFrame = p.StartFrame;
-        q.Positional = p.Positional;
-        q.EmitterPosition = p.EmitterPosition;
-        q.Origin = p.Origin;
-        q.MinDistance = p.MinDistance;
-        q.MaxDistance = p.MaxDistance;
-        q.ExplicitPan = p.ExplicitPan;
-        q.PolicyTag = p.PolicyTag;
-        q.IsStream = false;
-        q.AdmissionEpoch = s.StopAllEpoch;
-
         // Record the returned handle in submission order.
         s.LastBatchVoices[s.LastBatchVoiceCount++] = s.MakeVoiceHandle(slot);
     }
 
-    // Build queued records for the non-Play commands, resolving batch-local
-    // references to concrete slots.
+    // Build the queued records in ORIGINAL command order (never Plays-first):
+    // reordering a mixed batch would break Play/Stop ordering (design section 4).
+    // Batch-local Update/Stop references resolve to the slot reserved above.
     for (usize i = 0; i < commands.size(); ++i)
     {
         const Command& cmd = commands[i];
-        if (cmd.Kind == CommandKind::Play)
-        {
-            continue;
-        }
         QueuedCommand& q = s.BatchScratch[scratchCount++];
         q = QueuedCommand{};
         q.Kind = cmd.Kind;
         switch (cmd.Kind)
         {
+            case CommandKind::Play: {
+                const PlayParams& p = cmd.Play;
+                const uint32 slot = slotForCommand[i];
+                const VoiceSlot& v = s.Voices[slot];
+                q.VoiceSlotIndex = slot;
+                q.VoiceGeneration = v.Generation.Value;
+                q.ClipSlotIndex = v.ClipSlotIndex;
+                q.BusIndex = p.BusIndex;
+                q.GroupIndex = p.GroupIndex;
+                q.Priority = p.Priority;
+                q.Gain = p.Gain;
+                q.Rate = p.Rate;
+                q.Looping = p.Looping;
+                q.Policy = p.Policy;
+                q.StartFrame = p.StartFrame;
+                q.Positional = p.Positional;
+                q.EmitterPosition = p.EmitterPosition;
+                q.Origin = p.Origin;
+                q.MinDistance = p.MinDistance;
+                q.MaxDistance = p.MaxDistance;
+                q.ExplicitPan = p.ExplicitPan;
+                q.PolicyTag = p.PolicyTag;
+                q.IsStream = false;
+                q.AdmissionEpoch = s.StopAllEpoch;
+                break;
+            }
             case CommandKind::UpdateVoice: {
                 uint32 slot = s.LogicalCapacity;
                 if (cmd.Update.BatchLocalPlayIndex >= 0)
@@ -612,9 +610,14 @@ BatchResult AudioSystem::TrySubmitBatch(std::span<const Command> commands) noexc
                 }
                 break;
             }
-            case CommandKind::Play:
-                break;
         }
+    }
+
+    // Stamp the batch length on the leading record so the consumer can defer the
+    // whole batch if it would exceed the remaining boundary budget (no split).
+    if (scratchCount > 0)
+    {
+        s.BatchScratch[0].BatchLength = scratchCount;
     }
 
     // --- Phase 3: publish once ---------------------------------------------
@@ -797,7 +800,7 @@ Status AudioSystem::GetVoiceInfo(VoiceHandle voice, VoiceInfo& out) const noexce
     out.SnapshotFrame = mImpl->RenderFrame;
     out.CursorFrame = v.CursorFrame;
     out.StartFrame = v.StartFrame;
-    out.EffectiveGain = v.Gain * v.FadeGain;
+    out.EffectiveGain = v.FadeGain; // carried per-channel gain (incl. pan/attn)
     out.Priority = v.Priority;
     out.GroupIndex = v.GroupIndex;
     out.BusIndex = v.BusIndex;
@@ -847,7 +850,15 @@ Status AudioSystem::GetBusMeter(uint32 busIndex, BusMeter& out) const noexcept
         return Status::InvalidArgument;
     }
     const internal::BusState& b = mImpl->Buses[busIndex];
-    out = b.Meter;
+    out.InputPeakL = b.InputMeter.OutPeakL;
+    out.InputPeakR = b.InputMeter.OutPeakR;
+    out.InputRmsL = b.InputMeter.OutRmsL;
+    out.InputRmsR = b.InputMeter.OutRmsR;
+    out.PostPeakL = b.PostMeter.OutPeakL;
+    out.PostPeakR = b.PostMeter.OutPeakR;
+    out.PostRmsL = b.PostMeter.OutRmsL;
+    out.PostRmsR = b.PostMeter.OutRmsR;
+    out.ClippedFrames = b.ClippedFrames;
     out.CurrentGain = b.CurrentEffective;
     out.TargetGain = b.TargetEffective;
     return Status::Ok;
@@ -926,6 +937,110 @@ void AudioSystem::SetDebugSink(AudioDebugSnapshotSink* sink) noexcept
     {
         mImpl->Sink = sink;
     }
+}
+
+Status AudioSystem::AcquireModifier(std::span<const ModifierValue> values,
+                                    float32 weight,
+                                    ModifierHandle& outModifier) noexcept
+{
+    outModifier = ModifierHandle{};
+    if (!mImpl)
+    {
+        return Status::NotReady;
+    }
+    if (values.size() > BUS_CAPACITY || !std::isfinite(weight) || weight < 0.0F || weight > 1.0F)
+    {
+        return Status::InvalidArgument;
+    }
+    Impl& s = *mImpl;
+    // Validate bus indices and dB ranges before reserving.
+    for (const ModifierValue& mv : values)
+    {
+        if (mv.BusIndex >= s.BusCount || !std::isfinite(mv.TargetDb) || mv.TargetDb < MODIFIER_DB_MIN ||
+            mv.TargetDb > MODIFIER_DB_MAX)
+        {
+            return Status::InvalidArgument;
+        }
+    }
+    // Reserve a free modifier slot (fading-out instances still count).
+    uint32 slot = MODIFIER_CAPACITY;
+    for (uint32 i = 0; i < MODIFIER_CAPACITY; ++i)
+    {
+        if (!s.Modifiers[i].InUse && !s.Modifiers[i].Generation.IsExhausted())
+        {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == MODIFIER_CAPACITY)
+    {
+        return Status::AssetCapacity;
+    }
+    internal::ModifierState& m = s.Modifiers[slot];
+    if (!m.Generation.Advance())
+    {
+        return Status::AssetCapacity;
+    }
+    m.InUse = true;
+    m.Removing = false;
+    m.Weight = weight;
+    m.TargetWeight = weight;
+    for (uint32 i = 0; i < BUS_CAPACITY; ++i)
+    {
+        m.HasBus[i] = false;
+        m.Db[i] = 0.0F;
+    }
+    for (const ModifierValue& mv : values)
+    {
+        m.Db[mv.BusIndex] = mv.TargetDb;
+        m.HasBus[mv.BusIndex] = true;
+    }
+    outModifier = ModifierHandle{s.Session, slot, m.Generation.Value};
+    return Status::Ok;
+}
+
+Status AudioSystem::UpdateModifier(ModifierHandle modifier, float32 weight) noexcept
+{
+    if (!mImpl)
+    {
+        return Status::NotReady;
+    }
+    if (!std::isfinite(weight) || weight < 0.0F || weight > 1.0F)
+    {
+        return Status::InvalidArgument;
+    }
+    const uint32 slot = mImpl->FindModifierSlot(modifier);
+    if (slot >= MODIFIER_CAPACITY)
+    {
+        return Status::InvalidHandle;
+    }
+    internal::ModifierState& m = mImpl->Modifiers[slot];
+    m.Weight = weight;
+    m.TargetWeight = weight;
+    return Status::Ok;
+}
+
+Status AudioSystem::ReleaseModifier(ModifierHandle modifier) noexcept
+{
+    if (!mImpl)
+    {
+        return Status::NotReady;
+    }
+    const uint32 slot = mImpl->FindModifierSlot(modifier);
+    if (slot >= MODIFIER_CAPACITY)
+    {
+        return Status::InvalidHandle;
+    }
+    internal::ModifierState& m = mImpl->Modifiers[slot];
+    // Fade the weight to zero and retire the slot. Removing one instance never
+    // removes another (each has its own slot/generation). A1/A3 apply the final
+    // state immediately on the serialized owner thread; the slot is freed so a
+    // later acquire gets a new generation.
+    m.Weight = 0.0F;
+    m.TargetWeight = 0.0F;
+    m.Removing = true;
+    m.InUse = false;
+    return Status::Ok;
 }
 
 float32 AudioSystem::UserGainFromSlider(float32 u, float32 dbRange) noexcept

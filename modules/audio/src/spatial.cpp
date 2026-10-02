@@ -73,17 +73,29 @@ void AudioSystem::Impl::ComputeVoiceGains(VoiceSlot& v, float32& outGainL, float
     v.ScoreVoiceGain = v.Gain;
     v.ScorePreparedPeak = v.PreparedPeakScore;
 
+    // Output gains exclude the bus-chain gain: the bus stage applies each bus
+    // gain exactly once at its edge (design section 8). The bus-chain gain is
+    // retained only as a selection-score contribution.
     if (!v.Positional)
     {
-        // Nonspatial: explicit pan (mono) or stereo bed (scalar). Equal-power.
-        const float32 p = Clamp(v.ExplicitPan, -1.0F, 1.0F);
-        const float32 gl = std::sqrt((1.0F - p) * 0.5F);
-        const float32 gr = std::sqrt((1.0F + p) * 0.5F);
-        v.Pan = p;
         v.ScoreDistanceGain = 1.0F;
-        const float32 base = v.Gain * busChain;
-        outGainL = base * gl;
-        outGainR = base * gr;
+        const bool stereoBed = Clips[v.ClipSlotIndex].Channels == 2;
+        if (stereoBed)
+        {
+            // Stereo bed: preserve L/R with a scalar gain; do not collapse it
+            // through equal-power panning (design section 6).
+            v.Pan = 0.0F;
+            outGainL = v.Gain;
+            outGainR = v.Gain;
+        }
+        else
+        {
+            // Mono nonspatial: explicit equal-power pan.
+            const float32 p = Clamp(v.ExplicitPan, -1.0F, 1.0F);
+            v.Pan = p;
+            outGainL = v.Gain * std::sqrt((1.0F - p) * 0.5F);
+            outGainR = v.Gain * std::sqrt((1.0F + p) * 0.5F);
+        }
         return;
     }
 
@@ -119,7 +131,7 @@ void AudioSystem::Impl::ComputeVoiceGains(VoiceSlot& v, float32& outGainL, float
     const float32 gl = std::sqrt((1.0F - p) * 0.5F);
     const float32 gr = std::sqrt((1.0F + p) * 0.5F);
 
-    const float32 base = v.Gain * attn * busChain;
+    const float32 base = v.Gain * attn; // bus gain applied by the bus stage
     outGainL = base * gl;
     outGainR = base * gr;
 }

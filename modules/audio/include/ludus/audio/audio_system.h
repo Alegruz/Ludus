@@ -146,6 +146,21 @@ public:
     // ownership; the sink must outlive the attachment. Null detaches.
     void SetDebugSink(AudioDebugSnapshotSink* sink) noexcept;
 
+    // --- Attenuation modifiers (design section 8) -----------------------
+    // Acquire a bounded attenuation-modifier instance with per-bus dB targets
+    // and a weight in [0,1]. Returns a generation-checked ModifierHandle.
+    // Overlapping owners get distinct instances. AssetCapacity-style failure is
+    // reported as Status (no handle). The modifier ramps in on acquisition.
+    [[nodiscard]] Status
+    AcquireModifier(std::span<const ModifierValue> values, float32 weight, ModifierHandle& outModifier) noexcept;
+
+    // Update a modifier's weight (ramps). Generation-checked.
+    [[nodiscard]] Status UpdateModifier(ModifierHandle modifier, float32 weight) noexcept;
+
+    // Release a modifier: fades its weight to zero, then retires its slot after
+    // the renderer acknowledges. Removing one instance never removes another.
+    [[nodiscard]] Status ReleaseModifier(ModifierHandle modifier) noexcept;
+
     // --- Owner-side user-gain helper (design section 8) -----------------
     // Map a normalized slider u in [0,1] through an explicit dB range to a
     // UserGain amplitude: 0 at u==0 (exact mute), else 10^((u-1)*range/20).

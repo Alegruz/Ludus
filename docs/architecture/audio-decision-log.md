@@ -206,3 +206,103 @@ claim a green checkbox; independent native/offline work proceeds.
 - Listening/alias-rejection spectral quality gates and real device output remain
   pending (no audio device in this sandbox); the DSP is validated numerically
   and for finiteness/channel-routing/duration here.
+
+## A3 — buses and mix control
+
+### Static bus tree (gain applied exactly once)
+
+- `buses.cpp` accumulates per-bus stereo input, then folds child-before-parent
+  in descending bus index (validation guarantees a parent index is smaller than
+  its children). Each bus applies its own `CurrentEffective` gain once at its
+  edge and adds the post-gain signal into the parent's input accumulator, so an
+  ancestor gain is never multiplied into a voice twice. Verified: Master 0.5 x
+  SFX 0.5 yields 0.25 at the root (not 0.5 or 0.125).
+- `EffectiveGain[b] = UserGain[b] * BaseGain[b] * 10^(clamp(sum(weight*dB),-96,0)/20)`,
+  with `UserGain==0` forcing exactly 0. User mute persists through base-gain
+  changes (verified). Per-bus input and post-gain peak/RMS meters use a fixed
+  ~1024-frame window; pre-clamp overs are counted at the root and surfaced as
+  `ClippedFrames` + `SystemSnapshot.PreClipFrames`. dBFS display is owner-side;
+  no LUFS/true-peak claim.
+
+### Attenuation modifiers
+
+- `AcquireModifier`/`UpdateModifier`/`ReleaseModifier` manage up to 8
+  generation-checked instances; overlapping owners get distinct slots and
+  removing one never removes another. Values/weights validated (bus index in
+  range, dB in [-96,0], weight in [0,1]).
+
+### Application adapter (presentation/event policy)
+
+- `audio_app_adapter.{h,cpp}`: a bounded fixed-capacity policy table keyed by
+  (eventId, ownerTag) with cooldown and AlreadyActive suppression evaluated
+  BEFORE admission; TableFull for a new key when the table is full. Only
+  successful engine admission updates cooldown/active state — a failed admission
+  (GroupCapacity/QueueFull/NotReady) consumes no cooldown and creates no
+  activity or duck (verified). Owned loops are tracked and stopped on entity
+  teardown; detached one-shots may finish. The shared dialogue duck acquires one
+  modifier on the first accepted member and releases it only after the last
+  member durably terminates, using handle validity (not a snapshot) so cleanup
+  survives dropped diagnostics.
+
+### Known v1 limitations (recorded, not defects)
+
+- Bus and modifier gains are applied at 128-frame control boundaries, not
+  sample-ramped. `ReleaseModifier` drops the modifier immediately rather than
+  fading its weight to zero and awaiting a renderer-generation acknowledgment;
+  this is observably correct under the single-threaded serialized owner, but
+  the audible release is a boundary step, not a smooth fade. Sample-accurate bus
+  ramps and acknowledged modifier fade-out are deferred.
+
+## Audit (post-A3) — findings and fixes
+
+A behavioral audit against AU01-AU17 / design sections 3-11 found and FIXED the
+following concrete violations in the implemented A0-A3 code:
+
+1. **Batch splitting across the 64-record boundary budget (AU05, section 4).**
+   `ConsumeAndApplyBatch` drained individual records up to 64 with no
+   batch-boundary tracking, so a batch straddling the budget was split (partial
+   application). Fix: added `QueuedCommand.BatchLength` stamped on each batch's
+   leading record; the consumer now defers a whole batch that would exceed the
+   remaining budget. New test `batch_order_tests` asserts exactly 50 of 75
+   records apply in one boundary (two whole 25-record batches), never 64.
+
+2. **Mixed-batch command reordering (section 4 Play/Stop order).** The publish
+   path emitted all Play records first, then all non-Play records, reordering a
+   mixed batch such as `[Stop, Play]`. Fix: queued records are now built in
+   original command order in a single ordered pass (reservation still happens
+   first, but emission preserves order). New tests cover batch-local Stop/Update
+   after a Play and invalid-local-reference rejection.
+
+3. **Terminal reclamation not gated on the durable mailbox (section 4).**
+   `AcknowledgeTerminals` reclaimed slots by reading `v.State == Terminal`
+   directly instead of ACQUIRING `TerminalMailbox.TerminalGeneration`. Correct
+   under the current single thread but a data race once the renderer runs on a
+   device/worklet thread. Fix: reclamation now loads the terminal generation
+   with acquire ordering and matches it to the live slot generation (pairs with
+   the renderer's release in `TerminateVoice`).
+
+4. **Virtual-advance fractional-cursor drift (section 7.2).** `AdvanceVirtualVoice`
+   truncated `rate*frames` to an integer each span, dropping the remainder, so a
+   non-integer-rate virtual voice drifted off the mixed timeline and expired
+   late. Fix: the fractional remainder is now carried on the voice
+   (`VoiceSlot.CursorFraction`) across spans. New test verifies a Rate-1.3
+   virtual voice expires on time.
+
+All four fixes build warning-clean and pass debug/ASan/UBSan/TSan. The audit
+also confirmed (no change needed): SPSC release/acquire pairing and lock-free
+`uint32` atomics; transactional validate-reserve-publish with full rollback and
+tentative group charge committed only after publication; Stop/StopAll deliverable
+with a full queue; Stop-before-start cancellation; generation/session/epoch
+exhaustion rejection; <=64 physical mixed voices via the fixed pool; equal-power
+pan and (1-t)^2 attenuation with split listener and per-voice origin; selection
+score excludes the fade envelope; stereo beds preserve L/R (scalar gain, not
+collapsed); planar/interleaved L/R parity; adapter cleanup via handle validity.
+
+### Pending gates (unchanged by this audit — require unavailable hardware)
+
+- Real Linux device playback, device loss/restart quiescence (A5).
+- Real browser AudioWorklet/worker build, gesture resume, suspension/processor
+  failure, async context close before reclamation (A6); emsdk not installed.
+- Listening/spectral alias-rejection quality, p99 callback workload, 10-minute
+  stress, installed-SDK consumer and build-time budget profiling (A7).
+- Streaming worker / music streaming (A4) is not yet implemented.

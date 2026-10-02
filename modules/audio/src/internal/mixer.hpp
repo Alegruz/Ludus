@@ -22,6 +22,7 @@
 #include "internal/handles.hpp"
 
 #include <atomic>
+#include <cmath>
 #include <span>
 
 namespace ludus::audio::internal
@@ -144,6 +145,58 @@ struct GroupState final
     uint32 Fading = 0;   // Virtualizing/Stopping tails
 };
 
+// Per-bus metering accumulator over a fixed window (design section 8). Peaks
+// are max-abs; RMS is sqrt(mean-square) over the window. Windows reset when a
+// full window of frames has accumulated so meters track recent content.
+struct MeterAccum final
+{
+    float32 PeakL = 0.0F;
+    float32 PeakR = 0.0F;
+    float64 SumSqL = 0.0;
+    float64 SumSqR = 0.0;
+    uint32 Frames = 0;
+    // Published values (updated at window boundaries).
+    float32 OutPeakL = 0.0F;
+    float32 OutPeakR = 0.0F;
+    float32 OutRmsL = 0.0F;
+    float32 OutRmsR = 0.0F;
+
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): L/R channel samples.
+    void Accumulate(float32 l, float32 r) noexcept
+    {
+        const float32 al = l < 0.0F ? -l : l;
+        const float32 ar = r < 0.0F ? -r : r;
+        if (al > PeakL)
+        {
+            PeakL = al;
+        }
+        if (ar > PeakR)
+        {
+            PeakR = ar;
+        }
+        SumSqL += static_cast<float64>(l) * static_cast<float64>(l);
+        SumSqR += static_cast<float64>(r) * static_cast<float64>(r);
+        ++Frames;
+    }
+
+    void MaybePublish(uint32 windowFrames) noexcept
+    {
+        if (Frames < windowFrames)
+        {
+            return;
+        }
+        OutPeakL = PeakL;
+        OutPeakR = PeakR;
+        OutRmsL = Frames > 0 ? static_cast<float32>(std::sqrt(SumSqL / Frames)) : 0.0F;
+        OutRmsR = Frames > 0 ? static_cast<float32>(std::sqrt(SumSqR / Frames)) : 0.0F;
+        PeakL = 0.0F;
+        PeakR = 0.0F;
+        SumSqL = 0.0;
+        SumSqR = 0.0;
+        Frames = 0;
+    }
+};
+
 // Bus node in the static tree with user/base gain and ramped effective gain
 // (design section 8).
 struct BusState final
@@ -154,10 +207,18 @@ struct BusState final
     float32 UserGain = 1.0F;
     float32 BaseGain = 1.0F;
     float32 TargetBaseGain = 1.0F;
-    float32 CurrentEffective = 1.0F; // this bus's own gain (not ancestor chain)
+    float32 CurrentEffective = 1.0F; // this bus's own ramped gain (not chain)
     float32 TargetEffective = 1.0F;
-    // Metering taps.
-    BusMeter Meter{};
+
+    // Per-bus stereo accumulator for the current span (input, before this bus's
+    // gain). Children add their post-gain output here; direct voices add here.
+    float32* AccumL = nullptr; // points into the Impl's shared bus-accum arena
+    float32* AccumR = nullptr;
+
+    // Input and post-gain metering taps.
+    MeterAccum InputMeter{};
+    MeterAccum PostMeter{};
+    uint32 ClippedFrames = 0;
 };
 
 } // namespace ludus::audio::internal

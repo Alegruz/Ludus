@@ -16,7 +16,9 @@ target_sources(
         src/control_owner.cpp
         src/facade.cpp
         src/audio_gym.cpp
+        src/audio_app_adapter.cpp
         src/spatial.cpp
+        src/buses.cpp
         src/internal/decode.cpp
         src/internal/resampler.cpp
         src/internal/voice_kernel.cpp
@@ -30,6 +32,7 @@ target_sources(
             include/ludus/audio/audio_system.h
             include/ludus/audio/audio_debug.h
             include/ludus/audio/audio_gym.h
+            include/ludus/audio/audio_app_adapter.h
 )
 
 # Private implementation include root (src/internal/*) and the private miniaudio
@@ -79,6 +82,9 @@ if(LUDUS_BUILD_TESTS)
             tests/lifecycle_tests.cpp
             tests/gym_tests.cpp
             tests/dsp_tests.cpp
+            tests/bus_tests.cpp
+            tests/adapter_tests.cpp
+            tests/batch_order_tests.cpp
     )
     # Tests reach into src/internal for the SPSC ring and handle helpers.
     target_include_directories(ludus_audio_tests PRIVATE src include)

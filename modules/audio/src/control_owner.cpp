@@ -29,18 +29,35 @@ namespace
 // ---------------------------------------------------------------------------
 void AudioSystem::Impl::ConsumeAndApplyBatch() noexcept
 {
-    // Apply at most CONTROL_BOUNDARY_BUDGET records this boundary. Never split a
-    // published batch; the ring already stores whole batches, and we only ever
-    // publish a batch when it fits the remaining budget is checked by the
-    // producer. Here we drain up to the budget.
+    // Apply whole batches up to the CONTROL_BOUNDARY_BUDGET (64) records per
+    // boundary. A batch is NEVER split: the leading record of each batch carries
+    // its length; if applying it would exceed the remaining budget AND at least
+    // one batch has already been applied this boundary, the whole batch is
+    // deferred to the next boundary (eventual progress, no partial update). A
+    // single batch is bounded by MAX_BATCH_RECORDS (32) < 64, so it always fits
+    // when the boundary starts empty.
     QueuedCommand cmd{};
     uint32 applied = 0;
     while (applied < CONTROL_BOUNDARY_BUDGET && CommandRing.Peek(cmd))
     {
-        CommandRing.ConsumeOne();
-        ++applied;
-        ++AcceptedCommands;
+        const uint32 batchLen = cmd.BatchLength == 0 ? 1 : cmd.BatchLength;
+        if (applied != 0 && applied + batchLen > CONTROL_BOUNDARY_BUDGET)
+        {
+            break; // defer the whole batch; never split it across a boundary
+        }
+        for (uint32 bi = 0; bi < batchLen && CommandRing.Peek(cmd); ++bi)
+        {
+            CommandRing.ConsumeOne();
+            ++applied;
+            ++AcceptedCommands;
+            ApplyOneCommand(cmd);
+        }
+    }
+}
 
+void AudioSystem::Impl::ApplyOneCommand(const QueuedCommand& cmd) noexcept
+{
+    {
         switch (cmd.Kind)
         {
             case CommandKind::Play: {
@@ -407,12 +424,14 @@ void AudioSystem::Impl::AcknowledgeTerminals() noexcept
         {
             continue;
         }
-        if (v.State == VoiceState::Terminal)
+        // Durable terminal acknowledgment (design section 4): reclaim ONLY after
+        // ACQUIRING the per-slot terminal mailbox and matching its generation to
+        // the live slot generation. Reading v.State alone would be a data race
+        // once the renderer runs on a separate device/worklet thread; the
+        // acquire pairs with the renderer's release in TerminateVoice.
+        const uint32 termGen = v.Terminal.TerminalGeneration.load(std::memory_order_acquire);
+        if (termGen != 0 && termGen == v.Generation.Value)
         {
-            // Durable terminal acknowledgment: the renderer already published
-            // TerminalGeneration in TerminateVoice. The owner (same thread in
-            // A1 Offline mode) reclaims storage and releases the asset pin and
-            // the group admission charge.
             if (v.GroupIndex < GroupCount && Groups[v.GroupIndex].Admitted > 0)
             {
                 --Groups[v.GroupIndex].Admitted;
@@ -433,9 +452,55 @@ void AudioSystem::Impl::TerminateVoice(uint32 slot, TerminalReason reason, State
     v.Terminal.TerminalGeneration.store(v.Generation.Value, std::memory_order_release);
 }
 
+void AudioSystem::Impl::ApplyStopMailboxes() noexcept
+{
+    // Acquire each live voice's stop-generation mailbox and the StopAll epoch at
+    // the boundary (design section 4). A Stop is deliverable independently of the
+    // normal command queue. Cancellation takes precedence over Scheduled/Update.
+    for (uint32 i = 0; i < LogicalCapacity; ++i)
+    {
+        VoiceSlot& v = Voices[i];
+        if (!v.InUse || v.State == VoiceState::Terminal)
+        {
+            continue;
+        }
+        // StopAll epoch: a voice admitted before the live epoch is cancelled.
+        if (v.AdmissionEpoch < StopAllEpoch)
+        {
+            if (v.State == VoiceState::Mixed || v.State == VoiceState::Virtualizing)
+            {
+                v.State = VoiceState::Stopping;
+                v.LastCause = StateCause::StopAllEpoch;
+                v.FadeTarget = 0.0F;
+            }
+            else
+            {
+                TerminateVoice(i, TerminalReason::Stopped, StateCause::StopAllEpoch);
+            }
+            continue;
+        }
+        // Individual stop mailbox.
+        const uint32 stopGen = v.Stop.StopGeneration.load(std::memory_order_acquire);
+        if (stopGen == v.Generation.Value)
+        {
+            if (v.State == VoiceState::Mixed || v.State == VoiceState::Virtualizing)
+            {
+                v.State = VoiceState::Stopping;
+                v.LastCause = StateCause::StopRequested;
+                v.FadeTarget = 0.0F;
+            }
+            else if (v.State != VoiceState::Stopping)
+            {
+                TerminateVoice(i, TerminalReason::Stopped, StateCause::StopRequested);
+            }
+        }
+    }
+}
+
 void AudioSystem::Impl::ProcessControlBoundary() noexcept
 {
     ConsumeAndApplyBatch();
+    ApplyStopMailboxes();
     ResolveScheduledStarts();
     RecomputeBusGains();
     SelectAndCharge();
@@ -506,13 +571,12 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
             span = internal::VOICE_SCRATCH_FRAMES;
         }
 
-        // Clear the stereo accumulator for this span.
-        for (uint32 i = 0; i < span * 2; ++i)
-        {
-            MixAccum[i] = 0.0F;
-        }
+        // Clear every bus accumulator for this span (child-before-parent fold
+        // happens after all voices are routed).
+        BeginBusSpan(span);
 
-        // Render every mixing/fading resident voice through the DSP kernel.
+        // Render every mixing/fading resident voice through the DSP kernel into
+        // a per-voice stereo accumulator, then route it to the voice's bus.
         for (uint32 i = 0; i < LogicalCapacity; ++i)
         {
             VoiceSlot& v = Voices[i];
@@ -545,9 +609,38 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
                 internal::PhysicalVoice& ph = Physical[phys];
                 const internal::ClipSlot& c = Clips[v.ClipSlotIndex];
 
+                // Clear this voice's accumulator (the kernel accumulates +=).
+                for (uint32 f = 0; f < span * 2; ++f)
+                {
+                    MixAccum[f] = 0.0F;
+                }
+
                 // Fade target: 1 for Mixed, 0 for Virtualizing/Stopping. The
-                // kernel ramps the per-channel gain from the carried current.
+                // kernel ramps from the carried current toward the target using
+                // a FIXED per-frame step so the fade completes in a bounded
+                // duration (recompute the step only when the target changes).
                 const float32 fade = v.FadeTarget;
+                const float32 targetL = v.TargetGainL * fade;
+                const float32 targetR = v.TargetGainR * fade;
+                if (!ph.HasTarget || targetL != ph.LastTargetL || targetR != ph.LastTargetR)
+                {
+                    const float32 denom = rampFrames == 0 ? 1.0F : static_cast<float32>(rampFrames);
+                    float32 dl = targetL - ph.CurrentGainL;
+                    float32 dr = targetR - ph.CurrentGainR;
+                    if (dl < 0.0F)
+                    {
+                        dl = -dl;
+                    }
+                    if (dr < 0.0F)
+                    {
+                        dr = -dr;
+                    }
+                    ph.StepL = rampFrames == 0 ? 0.0F : dl / denom;
+                    ph.StepR = rampFrames == 0 ? 0.0F : dr / denom;
+                    ph.LastTargetL = targetL;
+                    ph.LastTargetR = targetR;
+                    ph.HasTarget = true;
+                }
                 internal::KernelInput in{};
                 in.Clip = &c;
                 in.Dsp = &ph.DspFor(c.Channels);
@@ -556,19 +649,24 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
                 in.Looping = v.Looping;
                 in.LoopBegin = c.LoopBegin;
                 in.LoopEnd = c.LoopEnd;
-                in.TargetGainL = v.TargetGainL * fade;
-                in.TargetGainR = v.TargetGainR * fade;
+                in.TargetGainL = targetL;
+                in.TargetGainR = targetR;
                 in.CurrentGainL = &ph.CurrentGainL;
                 in.CurrentGainR = &ph.CurrentGainR;
-                in.RampFrames = rampFrames;
+                in.StepL = ph.StepL;
+                in.StepR = ph.StepR;
 
                 const uint32 before = produced; // output frame offset
                 (void)before;
                 const uint32 producedFrames =
                     internal::RenderResidentVoice(in, MixAccum, span, Scratch, internal::VOICE_SCRATCH_FRAMES);
 
+                // Route this voice's output to its bus (input tap, before gain).
+                RouteVoiceToBus(v.BusIndex, MixAccum, span);
+
                 v.CursorFrame = in.Dsp->SourceCursor;
-                v.FadeGain = (in.CurrentGainL != nullptr) ? 1.0F : v.FadeGain; // informational
+                // Informational fade level: the larger carried channel gain.
+                v.FadeGain = ph.CurrentGainL > ph.CurrentGainR ? ph.CurrentGainL : ph.CurrentGainR;
 
                 // Natural EOF of a finite nonloop voice.
                 if (in.Dsp->AtEof && !v.Looping)
@@ -600,14 +698,19 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
             }
             else if (v.State == VoiceState::Virtual)
             {
-                // Advance the virtual cursor without DSP. Finite nonloop voices
-                // expire; this happens even while muted (advance policy).
+                // Advance the virtual cursor without DSP, carrying the fractional
+                // remainder on the voice so the timeline does not drift. Finite
+                // nonloop voices expire; this happens even while muted (advance
+                // policy), and an unmute must not resurrect old transients.
                 const internal::ClipSlot& c = Clips[v.ClipSlotIndex];
-                internal::VoiceDsp tmp{};
-                tmp.SourceCursor = v.CursorFrame;
-                const bool alive =
-                    internal::AdvanceVirtualVoice(tmp, c.Frames, v.Rate, v.Looping, c.LoopBegin, c.LoopEnd, span);
-                v.CursorFrame = tmp.SourceCursor;
+                const bool alive = internal::AdvanceVirtualVoice(v.CursorFrame,
+                                                                 v.CursorFraction,
+                                                                 c.Frames,
+                                                                 v.Rate,
+                                                                 v.Looping,
+                                                                 c.LoopBegin,
+                                                                 c.LoopEnd,
+                                                                 span);
                 if (!alive)
                 {
                     ++EofEvents;
@@ -616,13 +719,18 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
             }
         }
 
-        // Bus headroom: sum is already in MixAccum (one bus level in A2; the
-        // full bus-tree accumulation lands in A3). Count pre-clamp overs, map
-        // nonfinite to zero, then clamp to [-1,1]. Write to the output span.
+        // Fold the bus tree child-before-parent (each bus gain applied once) and
+        // read the root bus's post-gain stereo result. Count pre-clamp overs,
+        // map nonfinite to zero, then clamp to [-1,1]. The root post-gain is the
+        // pre-clamp output tap (design section 8).
+        FoldBusesToRoot(span);
+        const uint32 root = RootBusIndex();
+        const float32* rootL = Buses[root].AccumL;
+        const float32* rootR = Buses[root].AccumR;
         for (uint32 f = 0; f < span; ++f)
         {
-            float32 l = MixAccum[f * 2 + 0];
-            float32 r = MixAccum[f * 2 + 1];
+            float32 l = rootL[f];
+            float32 r = rootR[f];
             if (!std::isfinite(l))
             {
                 l = 0.0F;
@@ -636,6 +744,7 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
             if (l > 1.0F || l < -1.0F || r > 1.0F || r < -1.0F)
             {
                 ++PreClipFrames;
+                ++Buses[root].ClippedFrames;
             }
             if (l > 1.0F)
             {

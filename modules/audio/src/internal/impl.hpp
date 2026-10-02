@@ -96,8 +96,17 @@ struct AudioSystem::Impl final
     // shared buffer is safe because rendering is serial on one thread.
     float32 Scratch[2 * internal::VOICE_SCRATCH_FRAMES * 2] = {};
 
-    // Stereo mix accumulator for the current span (interleaved L/R).
+    // Stereo mix accumulator for one voice's output (interleaved L/R). The
+    // kernel accumulates one voice here; the bus stage routes it to the bus.
     float32 MixAccum[internal::VOICE_SCRATCH_FRAMES * 2] = {};
+
+    // Per-bus planar stereo accumulation arena for the current span. Each bus
+    // owns a [span] L slice and a [span] R slice. Child-before-parent order lets
+    // each bus gain apply exactly once at its edge.
+    float32 BusAccumArena[BUS_CAPACITY * internal::VOICE_SCRATCH_FRAMES * 2] = {};
+
+    // Metering window in frames (fixed; design section 8). ~1024 frames.
+    uint32 MeterWindowFrames = 1024;
 
     SpscRing<QueuedCommand, COMMAND_QUEUE_CAPACITY> CommandRing;
     SpscRing<internal::SnapshotRecord, 4> SnapshotRing;
@@ -140,12 +149,23 @@ struct AudioSystem::Impl final
     // --- Boundary / render (control_owner.cpp) -----------------------------
     void ProcessControlBoundary() noexcept;
     void ConsumeAndApplyBatch() noexcept;
+    void ApplyOneCommand(const QueuedCommand& cmd) noexcept;
+    void ApplyStopMailboxes() noexcept;
     void ResolveScheduledStarts() noexcept;
     void SelectAndCharge() noexcept;
     void AcknowledgeTerminals() noexcept;
 
     void RecomputeBusGains() noexcept;
     [[nodiscard]] float32 BusChainGain(uint32 busIndex) const noexcept;
+
+    // Bus-tree span processing (design section 8): clear per-bus accumulators,
+    // route each voice's output to its bus, then fold children into parents in
+    // child-before-parent order applying each bus gain once, metering input and
+    // post-gain taps. Writes the root's post-gain stereo result to outLR.
+    void BeginBusSpan(uint32 span) noexcept;
+    void RouteVoiceToBus(uint32 busIndex, const float32* mixLR, uint32 span) noexcept;
+    void FoldBusesToRoot(uint32 span) noexcept;
+    [[nodiscard]] uint32 RootBusIndex() const noexcept;
 
     // --- Spatial + selection (control_owner.cpp / spatial.cpp) -------------
     // Compute per-voice attenuation, equal-power pan and the audibility-score

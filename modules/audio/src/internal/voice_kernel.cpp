@@ -6,17 +6,6 @@ namespace ludus::audio::internal
 {
 namespace
 {
-// Clamp a float32 to [-1,1] is NOT done here; the kernel accumulates and the bus
-// stage clamps once (design section 8). This only computes a bounded ramp step.
-[[nodiscard]] float32 RampStep(float32 current, float32 target, uint32 rampFrames) noexcept
-{
-    if (rampFrames == 0)
-    {
-        return 0.0F; // jump: handled by setting current=target before the loop
-    }
-    return (target - current) / static_cast<float32>(rampFrames);
-}
-
 // Effective loop end: whole clip when LoopEnd == 0.
 [[nodiscard]] uint64 EffectiveLoopEnd(uint64 loopEnd, uint64 clipFrames) noexcept
 {
@@ -58,16 +47,20 @@ uint32 RenderResidentVoice(const KernelInput& input,
         }
     }
 
-    // Ramp setup. On a jump (RampFrames==0) snap current to target first.
+    // Ramp setup. The caller supplies a fixed absolute per-frame step (sign
+    // toward the target). A zero step means jump straight to the target.
     float32 curL = input.CurrentGainL != nullptr ? *input.CurrentGainL : input.TargetGainL;
     float32 curR = input.CurrentGainR != nullptr ? *input.CurrentGainR : input.TargetGainR;
-    if (input.RampFrames == 0)
+    if (input.StepL == 0.0F)
     {
         curL = input.TargetGainL;
+    }
+    if (input.StepR == 0.0F)
+    {
         curR = input.TargetGainR;
     }
-    const float32 stepL = RampStep(curL, input.TargetGainL, input.RampFrames);
-    const float32 stepR = RampStep(curR, input.TargetGainR, input.RampFrames);
+    const float32 stepL = curL < input.TargetGainL ? input.StepL : -input.StepL;
+    const float32 stepR = curR < input.TargetGainR ? input.StepR : -input.StepR;
 
     uint32 producedTotal = 0;
     bool endReached = false;
@@ -232,7 +225,8 @@ uint32 RenderResidentVoice(const KernelInput& input,
 }
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters): named transport args.
-bool AdvanceVirtualVoice(VoiceDsp& dsp,
+bool AdvanceVirtualVoice(uint64& cursor,
+                         double& fraction,
                          uint64 clipFrames,
                          float32 rate,
                          bool looping,
@@ -242,26 +236,27 @@ bool AdvanceVirtualVoice(VoiceDsp& dsp,
 // NOLINTEND(bugprone-easily-swappable-parameters)
 {
     const uint64 end = EffectiveLoopEnd(loopEnd, clipFrames);
-    // Advance the integer cursor by rate * frames source frames (fractional part
-    // tracked coarsely; virtual advance does not read PCM so exact subsample
-    // phase is irrelevant until reentry, which rebuilds history around the
-    // integer cursor).
-    const double advance = static_cast<double>(rate) * static_cast<double>(frames);
-    uint64 whole = static_cast<uint64>(advance);
-    dsp.SourceCursor += whole;
+    // Advance the cursor by rate * frames source frames, carrying the fractional
+    // remainder across calls so the virtual timeline does not drift relative to
+    // the mixed (resampled) timeline. Virtual advance does not read PCM, so the
+    // subsample phase only needs to be accounted, not interpolated; reentry
+    // rebuilds resampler history around the integer cursor.
+    const double advance = static_cast<double>(rate) * static_cast<double>(frames) + fraction;
+    const uint64 whole = static_cast<uint64>(advance);
+    fraction = advance - static_cast<double>(whole);
+    cursor += whole;
 
     if (looping && end > loopBegin)
     {
-        while (dsp.SourceCursor >= end)
+        while (cursor >= end)
         {
-            dsp.SourceCursor = loopBegin + (dsp.SourceCursor - end);
+            cursor = loopBegin + (cursor - end);
         }
         return true; // looping voices never expire from advance
     }
-    if (dsp.SourceCursor >= clipFrames)
+    if (cursor >= clipFrames)
     {
-        dsp.SourceCursor = clipFrames;
-        dsp.AtEof = true;
+        cursor = clipFrames;
         return false; // finite nonloop voice expired
     }
     return true;

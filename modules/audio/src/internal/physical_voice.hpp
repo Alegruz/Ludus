@@ -25,9 +25,17 @@ struct PhysicalVoice final
     VoiceDsp Mono{};
     VoiceDsp Stereo{};
 
-    // Carried per-channel gain for ramping across spans.
+    // Carried per-channel gain for ramping across spans, plus the absolute
+    // per-frame ramp step toward the current target. The step is fixed when a
+    // new target is set (not re-derived each span), so a fade completes in a
+    // bounded duration rather than approaching the target geometrically.
     float32 CurrentGainL = 0.0F;
     float32 CurrentGainR = 0.0F;
+    float32 StepL = 0.0F;
+    float32 StepR = 0.0F;
+    float32 LastTargetL = 0.0F;
+    float32 LastTargetR = 0.0F;
+    bool HasTarget = false;
 
     // Preinitialize both resamplers at the session rate. Returns false on
     // allocation failure. lpfOrder enables anti-alias filtering on downsample.
@@ -54,6 +62,11 @@ struct PhysicalVoice final
         d.ConfiguredRateOut = 0;
         CurrentGainL = 0.0F;
         CurrentGainR = 0.0F;
+        StepL = 0.0F;
+        StepR = 0.0F;
+        LastTargetL = 0.0F;
+        LastTargetR = 0.0F;
+        HasTarget = false;
     }
 
     [[nodiscard]] VoiceDsp& DspFor(uint32 channels) noexcept

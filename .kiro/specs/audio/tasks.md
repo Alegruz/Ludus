@@ -129,19 +129,19 @@ No warm render/submit allocation or free including dependency calls.
 
 Requirements: AU05, AU10-AU12, AU16. Prerequisite: A2.
 
-- [ ] Implement static tree validation, child-before-parent accumulation and
+- [x] Implement static tree validation, child-before-parent accumulation and
   gains applied exactly once at each bus edge.
 - [ ] Add user/base gain, base snapshot batch, bounded modifier instances,
   generation checks, fade removal and specified dB composition.
-- [ ] Add per-channel input/post-gain meters with fixed windows, clipping/
+- [x] Add per-channel input/post-gain meters with fixed windows, clipping/
   nonfinite counters and owner-side dBFS display with explicit silent values.
-- [ ] Demonstrate dB sliders (initial 40 dB range), exact mute, remembered slider
+- [x] Demonstrate dB sliders (initial 40 dB range), exact mute, remembered slider
   settings and category controls separate from gameplay mix.
-- [ ] Demonstrate application-owned categories, dialogue attenuation and mute
+- [x] Demonstrate application-owned categories, dialogue attenuation and mute
   without hard-coded gameplay categories in the mixer.
 - [ ] Demonstrate context policy above the mixer with resolved gain/priority/
   modifier commands and numeric policy tags; inspect contributions in the gym.
-- [ ] Demonstrate a thin application adapter with owned-loop teardown, bounded
+- [x] Demonstrate a thin application adapter with owned-loop teardown, bounded
   event/owner cooldown and AlreadyActive suppression before admission, explicit
   clock/table-full reporting, and accepted-handle tracking independent of Mixed
   snapshots. Add a shared dialogue duck that releases only after the last durable
@@ -279,7 +279,7 @@ Fill this during implementation. A checked box is not evidence by itself.
 | A0 | `6ed9836` on `feat/audio-system` (base `8972388`). Added `third_party/miniaudio/` (vendored 0.11.23, hash lock, C impl units, CMake), root `CMakeLists.txt` (C dep + audio module), `docs/architecture/audio-decision-log.md`. | miniaudio.h sha256 `7e4f3f13c8fe66df2080ac3dd12a89193e3c2463cb7f067c798abd7331cd8ee6` (4,099,492 bytes) verified on download and at configure; option macros verified against the pinned header; resampler/decoder call graph audited (see decision log). Toolchain provisioned: Clang/LLD/clang-format/clang-tidy 18.1.8, CMake 3.29.6, Ninja 1.11.1.3, Conan 2.8.1. miniaudio compiled as C and linked into `libludus_audio.a`. | Native callback-only playback probe and the browser AudioWorklet/shutdown-quiescence subgate remain **pending** (emsdk not installed; no device/browser in this sandbox). Common-mixer architecture is feasible with the pinned dependency and no exceptions; proceeding on native/offline work. |
 | A1 | `6ed9836`. Added `modules/audio/` (public headers, control owner, SPSC ring, decode, tests). | `build linux-clang-debug` + `linux-clang-development` green; `ctest` 28/28 pass (adds `ludus_audio_tests` 26 cases/643 assertions and `ludus_audio_alloc_tests`). clang-format and clang-tidy (pinned 18) clean on all audio TUs; zero warm-path allocations verified. Truth-table rows exercised: invalid/stale/fabricated handles, invalid-last-record rollback, oversized batch, Stop-before-start, Stop/StopAll with full queue, StopAll-then-Play, disabled play, group admission rollback, dropped-snapshot terminal reclaim, retire-with-active-play, scheduled start offset, far-future rejection, render-partition parity, zero-frame no-op, slider u=0/0.5/1 -> 0/0.1/1. | Passed (device-independent). |
 | A2 | Added `modules/audio/src/internal/resampler.{hpp,cpp}`, `voice_kernel.{hpp,cpp}`, `physical_voice.hpp`, `spatial.cpp`, `decode.cpp` (real miniaudio decode), selection/render in `control_owner.cpp`, `tests/dsp_tests.cpp`. | `build linux-clang-debug` 28/28 ctest green (9 DSP cases, 19198 assertions). ASan+UBSan build green and **leak-free** across all 40 audio cases (fixed the clip/resampler teardown). Zero warm submit/render allocation verified with decode+resampler active. clang-format/clang-tidy (pinned 18) clean. Verified: hard-L/R pan, planar/interleaved L/R parity, Rate 0.5/1/2 duration ordering, looping, 44100<->48000 both directions, distance falloff, listener/distance validation, group MaxSelected with virtual/advance policy. | Numeric DSP correctness passed. Listening/spectral alias-rejection quality gate and real device output remain **pending** (no device in sandbox). |
-| A3 | Not started | None | Pending |
+| A3 | Added `src/buses.cpp` (static-tree child-before-parent accumulation, per-bus input/post-gain meters, root clip counting), `AcquireModifier`/`UpdateModifier`/`ReleaseModifier` + dB composition in `facade.cpp`/`audio_system.cpp`, `include/ludus/audio/audio_app_adapter.{h}` + `src/audio_app_adapter.cpp` (bounded cooldown/AlreadyActive/TableFull suppression before admission, owned-loop teardown, shared dialogue duck), `tests/bus_tests.cpp`, `tests/adapter_tests.cpp`. Audit fixes added `tests/batch_order_tests.cpp`. | `build linux-clang-debug` 28/28 ctest green; audio target 58 cases / 19375 assertions. ASan+UBSan **leak-free** across all 58 cases. **TSan** clean on the SPSC producer-flood and full suite (separate `out/build/tsan`, `LUDUS_ENABLE_TSAN=ON`). clang-format + clang-tidy (pinned 18) clean. All 5 public headers compile standalone. Verified: ancestor bus gain applied exactly once (0.5*0.5=0.25), user-mute persists through base-gain change, dB slider 0/0.1/1, bus input/post meters + clip counts, cooldown/AlreadyActive/table-full before admission, failed admission consumes no cooldown/creates no duck, owned-loop teardown, dialogue duck released only after last durable terminal. | Numeric/behavioral correctness passed. Bus/modifier gains are **boundary-granular (not sample-ramped)** in v1 — recorded limitation; modifier release is immediate rather than fade-then-acknowledge (consistent under single-threaded serialized owner). Real device output pending. |
 | A4 | Not started | None | Pending |
 | A5 | Not started | None | Real Linux device gate pending |
 | A6 | Not started | None | Real browser output and async teardown gate pending |

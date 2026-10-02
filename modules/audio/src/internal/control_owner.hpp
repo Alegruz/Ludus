@@ -36,6 +36,13 @@ struct QueuedCommand final
 {
     CommandKind Kind = CommandKind::Play;
 
+    // Batch metadata (design section 4): the first record of a published batch
+    // carries the whole batch's record count in BatchLength (other records set
+    // 0). The consumer reads BatchLength on the leading record and defers the
+    // ENTIRE batch if it would exceed the remaining 64-record boundary budget,
+    // so a batch is never split across a control boundary.
+    uint32 BatchLength = 0;
+
     // Resolved voice slot (for Play this is the reserved slot; for Update/Stop
     // the targeted slot). SlotGeneration disambiguates reuse.
     uint32 VoiceSlotIndex = 0;

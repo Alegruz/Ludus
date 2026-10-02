@@ -64,8 +64,11 @@ struct KernelInput final
     // Current gains carried across spans for ramping; updated on return.
     float32* CurrentGainL = nullptr;
     float32* CurrentGainR = nullptr;
-    // Ramp length in frames (e.g. 5 ms at session rate). 0 => jump.
-    uint32 RampFrames = 0;
+    // Absolute per-frame ramp step toward the target (sign set by the caller).
+    // 0 => jump to target. The step is fixed by the caller when the target
+    // changes so a fade completes in a bounded duration.
+    float32 StepL = 0.0F;
+    float32 StepR = 0.0F;
 };
 
 // Returns produced output frames. Writes into mixLR (interleaved stereo, +=).
@@ -76,10 +79,13 @@ struct KernelInput final
                                          uint32 scratchFrames) noexcept;
 
 // Advance a virtual voice's cursor by `frames` output frames WITHOUT reading or
-// filtering PCM (design section 7.2). Loops wrap; nonloops set AtEof. Returns
-// true if the voice is still alive (not expired at nonloop EOF).
+// filtering PCM (design section 7.2). Loops wrap; nonloops set AtEof. The
+// fractional cursor remainder is carried in `fraction` across calls so the
+// virtual timeline matches the mixed (resampled) timeline and does not drift.
+// Returns true if the voice is still alive (not expired at nonloop EOF).
 // NOLINTBEGIN(bugprone-easily-swappable-parameters): named transport args.
-[[nodiscard]] bool AdvanceVirtualVoice(VoiceDsp& dsp,
+[[nodiscard]] bool AdvanceVirtualVoice(uint64& cursor,
+                                       double& fraction,
                                        uint64 clipFrames,
                                        float32 rate,
                                        bool looping,
