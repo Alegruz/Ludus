@@ -13,7 +13,7 @@
 // Where the example reads its font from. The native smoke CMake target injects
 // LUDUS_SMOKE_FONT_PATH pointing at a bundled OFL font (NotoSans-Regular.ttf).
 #ifndef LUDUS_SMOKE_FONT_PATH
-#define LUDUS_SMOKE_FONT_PATH ""
+#    define LUDUS_SMOKE_FONT_PATH ""
 #endif
 
 namespace ludus::smoke::text_demo
