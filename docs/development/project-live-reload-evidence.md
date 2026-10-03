@@ -48,6 +48,29 @@ remain unsupported. Reserved Uniform fields are not a rendered shader effect.
 | Post-commit retirement uncertainty | PASS with the actual supervisor/host in Debug and ASan/UBSan: B commits before retirement failure, B identity and both generation leases remain, Resume rejects, explicit Stop confirms cleanup, and saved tuning stays unchanged |
 | Canonical repaired-preset integration | PASS: 9 affected Python tests, including actual CMake preset discovery and selecting the owned CMake/presets for play |
 
+The first published takeover head `e72f1b78fcf4a032640dd80e7b153d51cd5e8036`
+has the exact validated tree `8195ca5ac5f6d3cf8562c546b89d1347d64dc239`.
+Its native CI passed Debug/GDB/supervisor, Development/SDK, sanitizer, optional
+editor, PCH, analysis and build-budget jobs; browser compile/package and host
+tooling jobs passed. The Release assertion-policy job failed because its actual
+publication acceptance requires embedded symbols and optimized fixtures omitted
+them. The repair retains debug information in test-only module fixtures and the
+thin reference host when tests are enabled, leaving optimization and the full
+acceptance enabled. The previously failing real Release supervisor acceptance
+passes locally after that repair. Release remains unavailable for editor reload.
+
+Debugger guards now inspect traced stopped threads, including workers while the
+leader runs. The supervisor rejects a reload both before Query and if the host
+stops during Query; it releases the rejected candidate lease without queuing a
+later unload. Actual GDB launch/attach source stops in both A/B exercise the
+supervisor rejection with the real inferior PID. Editor notifications disable
+live edits/reload/native simulation controls until debugger Continue. These are
+guards for an attached debugger, not an editor debugger launcher. Final affected
+analysis passes, the final editor play cases pass 35 assertions in both
+Development and ASan/UBSan with strict Catch2 timeout failures, and the pinned
+Python suite passes 292 tests with four explicit environment skips. Final-head
+CI remains required after publishing these repairs.
+
 Raw local logs are retained under `/tmp/ludus-live-reload-*.log`, with final
 runtime logs named `debug-runtime-final`, `asan-runtime-final` and
 `focused-final`. Native Qt hardware acceptance is an explicit hidden test,

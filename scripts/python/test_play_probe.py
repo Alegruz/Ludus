@@ -10,7 +10,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from play_probe import ModuleProbe, ProbeError, elf_identity, validate_metadata
+from play_probe import ModuleProbe, ProbeError, debugger_stopped, elf_identity, validate_metadata
 
 METADATA = dict(sdk_identity="sdk", abi_major=1, abi_minor=0, capabilities=3,
                 property_schema=1, checkpoint_schema=1)
@@ -113,6 +113,18 @@ class ProbeTests(unittest.TestCase):
                         {"sdk_identity":"x\0"}, {"property_schema":0}):
             with self.subTest(changes=changes), self.assertRaises(ProbeError):
                 validate_metadata({**METADATA, **changes})
+
+    def test_debugger_stop_in_worker_blocks_even_when_leader_runs(self):
+        tasks = self.root / "task"
+        (tasks / "1").mkdir(parents=True)
+        (tasks / "2").mkdir()
+        (tasks / "1/status").write_text("State:\tR (running)\nTracerPid:\t7\n")
+        worker = tasks / "2/status"
+        worker.write_text("State:\tt (tracing stop)\nTracerPid:\t7\n")
+        with patch("play_probe.Path", return_value=tasks):
+            self.assertTrue(debugger_stopped(123))
+            worker.write_text("State:\tS (sleeping)\nTracerPid:\t7\n")
+            self.assertFalse(debugger_stopped(123))
 
 
 if __name__ == "__main__":

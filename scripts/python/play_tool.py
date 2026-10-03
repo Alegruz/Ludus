@@ -113,6 +113,7 @@ class PlaySupervisor:
         self.stop_deadline = None
         self.last_host_event = time.monotonic()
         self.hang_reported = False
+        self.debugger_paused = False
         self.heartbeat_request = None
         self.hello_request = None
         self.load_request = None
@@ -344,6 +345,9 @@ class PlaySupervisor:
                 if self.state not in ("Running", "Paused") or self.probe is not None:
                     self.result(request, "Busy", "reload requires an active session with no pending query")
                     return
+                if self.child is not None and debugger_stopped(self.child.pid):
+                    self.result(request, "Busy", "debugger stopped in the host; continue to a safe boundary before reload")
+                    return
                 if hex_id(message["expected_generation"]) != self.active["generation"]:
                     self.result(request, "SchemaChanged", "generation changed; refresh")
                     return
@@ -444,6 +448,13 @@ class PlaySupervisor:
                 self.state = "Stopped"
                 self.result(candidate["request"], "SpawnFailed", str(exc))
         else:
+            # A debugger may have stopped A while the separate Query ran.
+            # Do not leave a reload queued to unload it on a later Continue.
+            if self.child is not None and debugger_stopped(self.child.pid):
+                self.leases.pop(candidate["path"].name).close()
+                self.candidate = None
+                self.result(candidate["request"], "Busy", "debugger stopped during candidate query; continue and reload again")
+                return
             self.send_host({"protocol":1, "session":self.session, "epoch":self.epoch,
                             "request":candidate["request"], "command":"Reload",
                             "expected_generation":self.active["generation"],
@@ -483,6 +494,10 @@ class PlaySupervisor:
     def pump_host(self):
         if self.child is None:
             return
+        stopped = debugger_stopped(self.child.pid)
+        if stopped != self.debugger_paused:
+            self.debugger_paused = stopped
+            self.emit("debugger_state", stopped=stopped, pid=self.child.pid)
         for fd, stream in ((self.child.stdout_fd, "stdout"), (self.child.stderr_fd, "stderr")):
             for _ in range(16):
                 try:
@@ -546,7 +561,6 @@ class PlaySupervisor:
         elif self.stop_deadline is not None and time.monotonic() >= self.stop_deadline:
             self.finish_host(self.child.cleanup(cancelled=True))
         elif time.monotonic()-self.last_host_event > 5 and not self.hang_reported:
-            stopped = debugger_stopped(self.child.pid)
             if not stopped:
                 self.emit("diagnostic", code="HostUnresponsive", message="No host event for 5 seconds; inspect debugger or use Stop/Restart")
                 self.hang_reported = True

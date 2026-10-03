@@ -105,6 +105,10 @@ if(LUDUS_BUILD_TESTS)
             LUDUS_FIXTURE_VARIANT=${variant}
             LUDUS_FIXTURE_IDENTITY="${LUDUS_GAME_COMPATIBILITY_IDENTITY}")
         ludus_apply_project_defaults(ludus_game_fixture_${variant})
+        # Publication acceptance verifies embedded symbols in every policy
+        # profile, including optimized Release. Keep the full acceptance there;
+        # these test-only images retain symbols without changing optimization.
+        target_compile_options(ludus_game_fixture_${variant} PRIVATE -g)
         set_target_properties(ludus_game_fixture_${variant} PROPERTIES
             PREFIX "" OUTPUT_NAME "game_fixture_${variant}"
             C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)

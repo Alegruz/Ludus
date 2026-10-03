@@ -125,8 +125,12 @@ retrying from refreshed state. CleanupUnknown requires an explicit host restart.
 
 Debug symbols stay with leased generations. Separate GDB launch and attach
 acceptance cases verify A/B source breakpoints and stepping in one inferior,
-with A retained while its frame is stopped. The attach harness respects Linux
-ptrace policy without changing system settings. Editor-integrated debugger launch/attach, RAD and other OS
+with A retained while its frame is stopped. The supervisor observes traced
+stopped threads and rejects reload before or after candidate Query; Continue in
+the debugger before requesting reload again. The editor disables live mutations
+and reload while the stop is observed. Explicit Stop can still force process
+cleanup. The attach harness respects Linux ptrace policy without changing
+system settings. Editor-integrated debugger launch/attach, RAD and other OS
 loaders require additional acceptance; use the existing executable/debugger
 workflow or a manual restart where symbol refresh is limited. See the
 [evidence ledger](project-live-reload-evidence.md) for actual verified scope.

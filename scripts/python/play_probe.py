@@ -124,8 +124,18 @@ def validate_metadata(value: Any, expected: dict | None = None) -> dict:
 
 def debugger_stopped(pid: int) -> bool:
     try:
-        fields = dict(line.split(":", 1) for line in Path(f"/proc/{pid}/status").read_text().splitlines())
-        return int(fields.get("TracerPid", "0")) != 0 and fields.get("State", "").strip().startswith(("t", "T"))
+        # Non-stop debugging can suspend a game worker while the leader runs.
+        # Any traced stopped thread keeps that generation's code reachable.
+        for index, thread in enumerate(Path(f"/proc/{pid}/task").iterdir()):
+            if index >= 1024:
+                return True  # unable to prove all threads clear within budget
+            try:
+                fields = dict(line.split(":", 1) for line in (thread / "status").read_text().splitlines())
+            except FileNotFoundError:
+                continue  # thread retired during this observation
+            if int(fields.get("TracerPid", "0")) != 0 and fields.get("State", "").strip().startswith(("t", "T")):
+                return True
+        return False
     except (OSError, ValueError):
         return False
 

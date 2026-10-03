@@ -49,6 +49,34 @@ class ToolingTests(unittest.TestCase):
         self.assertEqual([], closed)
         self.assertEqual({"A", "B"}, set(supervisor.leases))
 
+    def test_debugger_stop_before_or_during_query_does_not_queue_reload(self):
+        in_fd, input_write = os.pipe()
+        out_read, out_fd = os.pipe()
+        for fd in (in_fd, input_write, out_read, out_fd):
+            self.addCleanup(os.close, fd)
+        supervisor = PlaySupervisor(None, in_fd, out_fd)
+        supervisor.epoch = "0000000000000001"
+        supervisor.state = "Paused"
+        supervisor.child = SimpleNamespace(pid=123)
+        supervisor.active = dict(generation="0000000000000001")
+        message = dict(protocol=1, type="reload", epoch=supervisor.epoch,
+                       request="0000000000000001", generation_path="unused",
+                       expected_generation=supervisor.active["generation"])
+        with patch("play_tool.debugger_stopped", return_value=True), \
+             patch.object(supervisor, "verify_generation") as verify:
+            supervisor.command(message)
+            verify.assert_not_called()
+            self.assertEqual("Busy", supervisor.pending[message["request"]]["result"]["status"])
+            closed = []
+            supervisor.candidate = dict(kind="reload", path=Path("B"), request=message["request"])
+            supervisor.leases["B"] = SimpleNamespace(close=lambda:closed.append("B"))
+            supervisor.probe = SimpleNamespace(poll=lambda:{"validated":True})
+            supervisor.poll_probe()
+            self.assertEqual(["B"], closed)
+            self.assertIsNone(supervisor.candidate)
+            self.assertIsNone(supervisor.probe)
+            self.assertFalse(supervisor.host_frames)
+
     def test_v2_uses_canonical_saved_sdk_and_exact_compiler(self):
         sdk = _write_sdk_prefix(self.root / "sdk", _manifest_json())
         project = self.root / "game with spaces"

@@ -55,7 +55,7 @@ bool EditorController::CanPlay() const
 
 bool EditorController::CanBuildReload() const
 {
-    return !State_.Dirty() && !State_.Busy() && !Tool_.Active() && !GenerationJob_ &&
+    return !State_.Dirty() && !State_.Busy() && !Tool_.Active() && !GenerationJob_ && !PlayState_.DebuggerStopped &&
            (PlayState_.Phase == PlayPhase::Running || PlayState_.Phase == PlayPhase::Paused);
 }
 
@@ -116,7 +116,7 @@ void EditorController::SetAutoReload(bool enabled)
 
 void EditorController::ReloadClearConfiguration(const QString& source)
 {
-    if (PlayState_.Phase != PlayPhase::Running && PlayState_.Phase != PlayPhase::Paused)
+    if (PlayState_.DebuggerStopped || (PlayState_.Phase != PlayPhase::Running && PlayState_.Phase != PlayPhase::Paused))
     {
         return;
     }
@@ -174,7 +174,7 @@ void EditorController::ActivateGeneration(const QString& path)
 
 void EditorController::PlayCommand(const QString& command)
 {
-    if (PlayState_.Phase != PlayPhase::Running && PlayState_.Phase != PlayPhase::Paused)
+    if (PlayState_.DebuggerStopped || (PlayState_.Phase != PlayPhase::Running && PlayState_.Phase != PlayPhase::Paused))
     {
         return;
     }
@@ -238,6 +238,15 @@ void EditorController::OnPlayEvent(const QJsonObject& event)
     {
         PlayState_.Message = event.value(QStringLiteral("message")).toString();
     }
+    else if (type == QStringLiteral("debugger_state"))
+    {
+        PlayState_.DebuggerStopped = event.value(QStringLiteral("stopped")).toBool();
+        if (PlayState_.DebuggerStopped)
+        {
+            PlayState_.Message =
+                QStringLiteral("Debugger stopped the host; continue in the debugger before editing/reload");
+        }
+    }
     else if (type == QStringLiteral("host_started"))
     {
         PlayState_.HostPid = static_cast<foundation::int64>(event.value(QStringLiteral("pid")).toInteger());
@@ -258,6 +267,7 @@ void EditorController::OnPlayEvent(const QJsonObject& event)
     }
     else if (type == QStringLiteral("ended"))
     {
+        PlayState_.DebuggerStopped = false;
         PlayState_.Phase =
             event.value(QStringLiteral("cleanup_confirmed")).toBool() ? PlayPhase::Stopped : PlayPhase::CleanupUnknown;
         PlayState_.Message = event.value(QStringLiteral("reason")).toString();
@@ -442,7 +452,8 @@ void EditorController::OnPlayEvent(const QJsonObject& event)
 
 bool EditorController::CanEditProperties() const
 {
-    return EditRequest_.isEmpty() && PropertyRequest_.isEmpty() && !PlayState_.Properties.isEmpty() &&
+    return !PlayState_.DebuggerStopped && EditRequest_.isEmpty() && PropertyRequest_.isEmpty() &&
+           !PlayState_.Properties.isEmpty() &&
            (PlayState_.Phase == PlayPhase::Running || PlayState_.Phase == PlayPhase::Paused);
 }
 

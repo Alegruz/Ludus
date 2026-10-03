@@ -74,6 +74,7 @@ struct PlaySnapshot
     QStringList HostArgv;
     QString HostCwd;
     QString SdkIdentity;
+    bool DebuggerStopped = false;
     uint64 SchemaEpoch = 0;
     uint64 SchemaVersion = 0;
     QJsonArray Properties;

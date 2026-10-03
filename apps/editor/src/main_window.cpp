@@ -414,15 +414,16 @@ void MainWindow::RenderCapabilities()
     PlayAction_->setEnabled(Controller_->CanPlay());
     BuildReloadAction_->setEnabled(Controller_->CanBuildReload());
     const auto play = Controller_->PlayState().Phase;
+    const bool debuggerStopped = Controller_->PlayState().DebuggerStopped;
     AutoReloadAction_->setEnabled(play == PlayPhase::Running || play == PlayPhase::Paused);
-    ReloadAssetAction_->setEnabled(play == PlayPhase::Running || play == PlayPhase::Paused);
+    ReloadAssetAction_->setEnabled(!debuggerStopped && (play == PlayPhase::Running || play == PlayPhase::Paused));
     {
         const QSignalBlocker blocker(AutoReloadAction_);
         AutoReloadAction_->setChecked(Controller_->AutoReloadEnabled());
     }
-    PauseAction_->setEnabled(play == PlayPhase::Running);
-    ResumeAction_->setEnabled(play == PlayPhase::Paused);
-    StepAction_->setEnabled(play == PlayPhase::Paused);
+    PauseAction_->setEnabled(!debuggerStopped && play == PlayPhase::Running);
+    ResumeAction_->setEnabled(!debuggerStopped && play == PlayPhase::Paused);
+    StepAction_->setEnabled(!debuggerStopped && play == PlayPhase::Paused);
     RefreshPropertiesAction_->setEnabled(play == PlayPhase::Running || play == PlayPhase::Paused);
     ApplySessionButton_->setEnabled(Controller_->CanEditProperties());
     ApplyDocumentButton_->setEnabled(Controller_->CanApplyToTuningDocument(Properties_->currentRow()));
