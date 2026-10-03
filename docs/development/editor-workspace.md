@@ -94,15 +94,24 @@ still works and history remains available for the current session.
 ## Create, initialize, repair and update projects
 
 The **Project** menu provides **New Project**, **Check Setup**, and
-**Initialize / Repair / Update Setup**. Setup actions require a saved, clean v2
+**Repair Project Setup**. Setup actions require a saved, clean v2
 CMake project; save pending edits first.
 
-For Ludus-Sandbox, open its `ludus.project.json`, choose the setup action and
-select an installed native SDK matching the descriptor profile and engine
-version. A compatible Web SDK additionally enables the existing web Development
-and Release bases. Blank SDK fields retain previously selected prefixes. To
-update the local SDK selection, choose a new compatible prefix and repair again.
-The operation does not change the project engine requirement or committed lock.
+For Ludus-Sandbox, open its `ludus.project.json`, choose **Repair Project Setup**,
+leave **Use this project's selected engine (recommended)** selected, and click
+**Repair Project**. This reuses the project's saved engine selection or installed
+locked release; no installation paths need to be entered.
+
+An SDK is the installed engine's headers and libraries. A desktop engine is built
+for this computer; a browser engine is built for the web. The dialog asks for a
+folder only after choosing **Choose a different installed engine** or enabling
+**Also set up browser builds**. The latter needs an installed browser engine
+matching the same engine release and enables the web Development and Release
+profiles. Saved browser setup is shown and enabled initially. Turning it off
+repairs only desktop builds and clears the saved browser selection and owned
+web presets, so a missing old browser installation cannot block desktop repair.
+Custom presets stay intact. The operation does not change the project engine
+requirement or committed lock.
 
 Repair verifies the managed CMake, Ninja, Clang 18, required SDK components,
 dependency prefixes and shader tool paths. It generates marked
@@ -115,12 +124,13 @@ succeed, followed by a fresh configure, full build and native CTest. No-tests
 is an error. Web profiles configure and build; browser runtime acceptance is
 separate. The setup signature detects changed SDK contents and moved tools.
 
-The optional **Prepare tools and build/install the native engine SDK** checkbox
-explicitly initializes and builds the trusted tooling checkout, then installs
-the SDK before repairing the game project. This can download dependencies; it
+The **Build and install the engine used by this editor** option explicitly
+initializes and builds the trusted tooling checkout, then installs the desktop
+SDK before repairing the game project. This can download dependencies; it
 does not install system packages or execute the game project’s bootstrap hooks.
 Web SDK acquisition remains an explicit engine-tooling step; select an installed
-Web SDK in this dialog. All child commands use the existing streaming output,
+browser engine in this dialog. The separate New Project dialog still offers
+the engine preparation checkbox. All child commands use the existing streaming output,
 Stop, process-group cleanup and single-operation ownership.
 
 New Project creates the bundled minimal v3 native template in a sibling staging
@@ -135,6 +145,7 @@ The CLI calls the same backend:
 ```bash
 ludus project check /path/to/Ludus-Sandbox --tools /path/to/Ludus
 ludus project repair /path/to/Ludus-Sandbox --tools /path/to/Ludus --sdk /path/to/sdk
+ludus project repair /path/to/Ludus-Sandbox --tools /path/to/Ludus --no-web
 ludus project update /path/to/Ludus-Sandbox --tools /path/to/Ludus --sdk /path/to/new-sdk
 ludus project create /path/to/new-game --name MyGame --sdk /path/to/sdk --tools /path/to/Ludus
 ```

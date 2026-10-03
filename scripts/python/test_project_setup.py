@@ -153,6 +153,42 @@ class ProjectSetupTests(unittest.TestCase):
             self.repair()
         self.assertEqual(before, self.snapshot())
 
+    def test_desktop_only_repair_clears_missing_saved_web_sdk_and_preserves_custom_presets(self):
+        self.repair()
+        saved = setup.read_object(self.project / ".ludus/setup.json")
+        saved["web_sdk"] = str(self.root / "missing-browser-sdk")
+        setup.write_object(self.project / ".ludus/setup.json", saved)
+        path = self.project / "CMakeUserPresets.json"
+        local = setup.read_object(path)
+        web_profile = "web-emscripten-development"
+        for key in ("configurePresets", "buildPresets"):
+            local[key].append({"name": "ludus-local-" + web_profile, "vendor": {setup.OWNER: web_profile}})
+        custom = {"name": "custom", "configurePreset": "linux-clang-development"}
+        local["buildPresets"].append(custom)
+        setup.write_object(path, local)
+        with self.assertRaises(ToolingError):
+            setup.check_project(self.project, tooling_root=self.tools, runner=self.runner)
+        self.calls.clear()
+        # The saved native override suffices: desktop-only repair needs no paths.
+        setup.repair_project(self.project, tooling_root=self.tools, disable_web=True, runner=self.runner)
+        self.assertEqual("", setup.read_object(self.project / ".ludus/setup.json")["web_sdk"])
+        local = setup.read_object(path)
+        self.assertIn(custom, local["buildPresets"])
+        self.assertFalse(any("web-emscripten" in p["name"] for key in ("configurePresets", "buildPresets") for p in local[key]))
+        self.assertTrue(any("--fresh" in argv for argv in self.calls))
+        self.assertTrue(any(Path(argv[0]).name == "ctest" for argv in self.calls))
+        self.calls.clear()
+        setup.repair_project(self.project, tooling_root=self.tools, disable_web=True, runner=self.runner)
+        setup.check_project(self.project, tooling_root=self.tools, runner=self.runner)
+
+    def test_disabling_browser_and_selecting_web_sdk_is_rejected_without_writes(self):
+        before = self.snapshot()
+        with self.assertRaisesRegex(ToolingError, "desktop-only"):
+            setup.repair_project(self.project, tooling_root=self.tools, sdk=self.sdk,
+                                 web_sdk=self.sdk, disable_web=True, runner=self.runner)
+        self.assertEqual(before, self.snapshot())
+        self.assertEqual([], self.calls)
+
     def test_invalid_settings_and_custom_collision_are_preserved(self):
         path = self.project / ".vscode/settings.json"
         path.parent.mkdir()

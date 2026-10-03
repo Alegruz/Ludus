@@ -366,7 +366,7 @@ void EditorController::CheckProjectSetup()
     }
 }
 
-void EditorController::SetupProject(const QString& sdk, const QString& webSdk, bool prepareEngine)
+void EditorController::SetupProject(const QString& sdk, const QString& webSdk, bool prepareEngine, bool disableWeb)
 {
     if (!Caps().CanProjectSetup)
     {
@@ -376,6 +376,7 @@ void EditorController::SetupProject(const QString& sdk, const QString& webSdk, b
     options.SetupSdk = sdk;
     options.SetupWebSdk = webSdk;
     options.PrepareEngine = prepareEngine;
+    options.DisableWeb = disableWeb;
     StartJob(ActionKind::ProjectSetup, ToolOperation::ProjectSetup, options);
 }
 

@@ -109,6 +109,7 @@ struct ToolLaunch
     QString SetupWebSdk;
     QString ProjectName;
     bool PrepareEngine = false;
+    bool DisableWeb = false;
     QString ReleasePlatform;
     QString ItchTarget;
     QString ReleaseProfile;
