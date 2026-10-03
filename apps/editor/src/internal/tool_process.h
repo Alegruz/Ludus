@@ -32,11 +32,14 @@ enum class ToolOperation : foundation::uint8
     Configure,
     Build,
     BuildRun,
+    BuildDebug,
     ProjectCheck,
     ProjectSetup,
     ProjectCreate,
     ReleaseInit,
     Package,
+    BuildGeneration,
+    InspectSetup,
 };
 
 [[nodiscard]] const char* ToolOperationName(ToolOperation op) noexcept;
@@ -53,6 +56,8 @@ struct ProtocolEvent
         Targets,
         Output,
         RuntimeStarted,
+        DebuggerStarted,
+        Generation,
         Result,
         Error, // local framing/protocol error (not from the adapter)
     };
@@ -79,6 +84,7 @@ struct ProtocolEvent
     // RuntimeStarted
     qint64 Pid = 0;
     QString Executable;
+    QString GenerationPath;
     // Result
     QString Outcome; // success/failed/cancelled
     ResultCode Code = ResultCode::Ok;
@@ -97,6 +103,8 @@ struct ToolLaunch
     QString ProjectPath;    // absolute descriptor path
     QString ExpectedSha256; // digest of the clean saved descriptor
     ToolOperation Operation = ToolOperation::Configure;
+    QString DebuggerPath;
+    bool SetupDebugger = false;
     QString SetupSdk;
     QString SetupWebSdk;
     QString ProjectName;
@@ -158,6 +166,7 @@ private Q_SLOTS:
 
 private:
     void SendRequest();
+    void SendCancellation();
     void SendControl(const QByteArray& jsonLine);
     void ConsumeFrames();
     bool DispatchFrame(const QByteArray& line);

@@ -162,8 +162,9 @@ the executable and working directory may contain spaces. Use LLDB/GDB for an
 argv configuration RAD cannot represent. Recheck this restriction on pin upgrades.
 
 The integration accepts Debug and Development presets. Release/Profile stepping,
-sanitizer debugging, browser debugging, and independent installed-SDK game
-projects are separate workflows. There is no debugger attach command yet.
+sanitizer debugging and browser debugging are separate workflows. Independent
+installed-SDK games can use the Editor flow below; scripts/debug still targets
+the engine checkout. There is no debugger attach command yet.
 
 Debugging launches the engine executable directly, using the existing attached
 debugger assertion path. Continue past an enabled resumable assertion only after
@@ -175,3 +176,30 @@ desktop: source breakpoints, locals and watches, stack/thread views, assertion
 break/continue and terminal failures, argv/cwd, restart, and session persistence
 in both Debug and Development. Build success and automated launcher tests do not
 prove interactive stepping or correct DWARF evaluation.
+
+## From the Ludus Editor
+
+Use **Build & Debug** in the Game toolbar or Build menu (F5 inside the Editor).
+The saved native Debug or Development profile is configured and built before
+launching RAD. The executable must contain DWARF symbols and an .eh_frame_hdr
+section. Both engine targets and independent SDK game projects are supported.
+
+RAD remains optional. Opening a project never installs or starts it. When Debug
+cannot find the selected executable, the Editor offers **Set Up RAD**, **Choose
+Existing**, and **Cancel**. Setup explicitly downloads/builds the pinned revision
+without running a privileged system installer. Missing system prerequisites are
+reported in Output. A chosen external executable is identified as unverified.
+The choice is saved in the ignored local .ludus/debugger.json file.
+
+**RAD session open** means the debugger started; the game may be paused or running.
+Use RAD to run, step, inspect variables, and manage breakpoints. The Editor does
+not infer a successful game run from RAD exiting. Stop closes the owned debugger
+session and its game, including a paused child, before enabling another build.
+A failed build or symbol check never launches the previous executable.
+
+Session files stay under the game's out/debug/rad directory, separated by profile,
+target and debugger identity. Existing RAD project/user files and breakpoints are
+preserved. Editor and CLI launches share the same exclusive session locks. The
+pinned Linux RAD argument restrictions described above apply to Editor launches.
+Attach, embedded debugger controls, and browser debugging are future work. The
+interactive compatibility acceptance checklist above remains pending.

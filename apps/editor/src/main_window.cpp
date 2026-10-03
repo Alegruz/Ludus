@@ -16,6 +16,9 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QHeaderView>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
@@ -27,9 +30,15 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSplitter>
+#include <QTableWidget>
 #include <QTimer>
+#include <QToolBar>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <ludus/foundation/base/types.h>
+
+#include <cstring>
 
 namespace ludus::editor
 {
@@ -89,6 +98,28 @@ void MainWindow::BuildUi()
     RuntimeLabel_ = new QLabel(splitter);
     RuntimeLabel_->setText(QStringLiteral("No runtime."));
     RuntimeLabel_->setWordWrap(true);
+    Properties_ = new QTableWidget(splitter);
+    Properties_->setColumnCount(3);
+    Properties_->setHorizontalHeaderLabels(
+        {QStringLiteral("Property"), QStringLiteral("Value"), QStringLiteral("Scope")});
+    Properties_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    Properties_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    Properties_->setSelectionMode(QAbstractItemView::SingleSelection);
+    ApplySessionButton_ = new QPushButton(QStringLiteral("Apply selected value to session"), splitter);
+    connect(ApplySessionButton_, &QPushButton::clicked, this, [this]() {
+        const int row = Properties_->currentRow();
+        if (row >= 0 && Properties_->item(row, 1) != nullptr)
+        {
+            Controller_->EditProperty(row, Properties_->item(row, 1)->text());
+        }
+    });
+    ApplyDocumentButton_ = new QPushButton(QStringLiteral("Copy live value to tuning draft"), splitter);
+    connect(ApplyDocumentButton_, &QPushButton::clicked, this, [this]() {
+        Controller_->ApplyLivePropertyToTuningDocument(Properties_->currentRow());
+    });
+    connect(Properties_, &QTableWidget::currentCellChanged, this, [this]() {
+        ApplyDocumentButton_->setEnabled(Controller_->CanApplyToTuningDocument(Properties_->currentRow()));
+    });
 
     // --- Output panel (read-only) ---
     Output_ = new QPlainTextEdit(splitter);
@@ -97,6 +128,9 @@ void MainWindow::BuildUi()
 
     splitter->addWidget(form);
     splitter->addWidget(RuntimeLabel_);
+    splitter->addWidget(Properties_);
+    splitter->addWidget(ApplySessionButton_);
+    splitter->addWidget(ApplyDocumentButton_);
     splitter->addWidget(Output_);
     splitter->setStretchFactor(2, 1);
 
@@ -144,13 +178,71 @@ void MainWindow::BuildMenus()
     ConfigureAction_ = buildMenu->addAction(QStringLiteral("&Configure / Refresh Targets"));
     BuildAction_ = buildMenu->addAction(QStringLiteral("&Build"));
     BuildRunAction_ = buildMenu->addAction(QStringLiteral("Build and &Run"));
+    BuildDebugAction_ = buildMenu->addAction(QStringLiteral("Build && &Debug in RAD..."));
+    BuildDebugAction_->setObjectName(QStringLiteral("buildDebugAction"));
+    BuildDebugAction_->setToolTip(QStringLiteral("Debug native games in RAD. Optional setup is offered when missing."));
+    BuildDebugAction_->setShortcut(QKeySequence(Qt::Key_F5));
+    connect(BuildDebugAction_, &QAction::triggered, this, [this]() { LaunchAfterPreview(LaunchAction::Debug); });
+    connect(Controller_, &EditorController::DebuggerSetupRequested, this, &MainWindow::OnDebuggerSetupRequested);
     StopAction_ = buildMenu->addAction(QStringLiteral("&Stop"));
+    auto* gameToolbar = addToolBar(QStringLiteral("Game"));
+    gameToolbar->setObjectName(QStringLiteral("gameToolbar"));
+    gameToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    gameToolbar->addAction(BuildAction_);
+    gameToolbar->addAction(BuildRunAction_);
+    gameToolbar->addAction(BuildDebugAction_);
+    gameToolbar->addAction(StopAction_);
 
     QMenu* releaseMenu = menuBar()->addMenu(QStringLiteral("&Release"));
     SetupReleaseAction_ = releaseMenu->addAction(QStringLiteral("Set Up &Releases..."));
     PackageReleaseAction_ = releaseMenu->addAction(QStringLiteral("&Package Release..."));
     connect(SetupReleaseAction_, &QAction::triggered, this, &MainWindow::OnSetupRelease);
     connect(PackageReleaseAction_, &QAction::triggered, this, &MainWindow::OnPackageRelease);
+    QMenu* playMenu = menuBar()->addMenu(QStringLiteral("&Play"));
+    PlayAction_ = playMenu->addAction(QStringLiteral("Build and Play"));
+    PlayAction_->setObjectName(QStringLiteral("play.start"));
+    BuildReloadAction_ = playMenu->addAction(QStringLiteral("Build and Reload Code"));
+    BuildReloadAction_->setObjectName(QStringLiteral("play.reload"));
+    AutoReloadAction_ = playMenu->addAction(QStringLiteral("Automatically Reload Source Changes"));
+    AutoReloadAction_->setCheckable(true);
+    connect(AutoReloadAction_, &QAction::toggled, Controller_, &EditorController::SetAutoReload);
+    ReloadAssetAction_ = playMenu->addAction(QStringLiteral("Reload Frame-clear Configuration..."));
+    connect(ReloadAssetAction_, &QAction::triggered, this, [this]() {
+        const auto directory = QFileInfo(Controller_->State().DescriptorPath).absolutePath();
+        const auto path = QFileDialog::getOpenFileName(this,
+                                                       QStringLiteral("Frame-clear configuration"),
+                                                       directory,
+                                                       QStringLiteral("JSON configuration (*.json)"));
+        if (!path.isEmpty())
+        {
+            Controller_->ReloadClearConfiguration(path);
+        }
+    });
+    PauseAction_ = playMenu->addAction(QStringLiteral("Pause"));
+    StepAction_ = playMenu->addAction(QStringLiteral("Step"));
+    ResumeAction_ = playMenu->addAction(QStringLiteral("Resume"));
+    RefreshPropertiesAction_ = playMenu->addAction(QStringLiteral("Refresh Inspector"));
+    auto* details = playMenu->addAction(QStringLiteral("Refresh Session Details"));
+    connect(details, &QAction::triggered, Controller_, &EditorController::RefreshSessionDetails);
+    UndoSessionAction_ = playMenu->addAction(QStringLiteral("Undo Session Edit"));
+    RedoSessionAction_ = playMenu->addAction(QStringLiteral("Redo Session Edit"));
+    playMenu->addSeparator();
+    UndoTuningAction_ = playMenu->addAction(QStringLiteral("Undo Tuning Document Edit"));
+    RedoTuningAction_ = playMenu->addAction(QStringLiteral("Redo Tuning Document Edit"));
+    SaveTuningAction_ = playMenu->addAction(QStringLiteral("Save Tuning Document"));
+    DiscardTuningAction_ = playMenu->addAction(QStringLiteral("Discard Tuning Draft"));
+    connect(UndoSessionAction_, &QAction::triggered, Controller_, &EditorController::UndoSessionEdit);
+    connect(RedoSessionAction_, &QAction::triggered, Controller_, &EditorController::RedoSessionEdit);
+    connect(UndoTuningAction_, &QAction::triggered, Controller_, &EditorController::UndoTuningDocument);
+    connect(RedoTuningAction_, &QAction::triggered, Controller_, &EditorController::RedoTuningDocument);
+    connect(SaveTuningAction_, &QAction::triggered, Controller_, &EditorController::SaveTuningDocument);
+    connect(DiscardTuningAction_, &QAction::triggered, Controller_, &EditorController::DiscardTuningDocumentDraft);
+    connect(PlayAction_, &QAction::triggered, this, [this]() { LaunchAfterPreview(LaunchAction::Play); });
+    connect(BuildReloadAction_, &QAction::triggered, Controller_, &EditorController::BuildReload);
+    connect(PauseAction_, &QAction::triggered, this, [this]() { Controller_->PlayCommand(QStringLiteral("Pause")); });
+    connect(StepAction_, &QAction::triggered, this, [this]() { Controller_->PlayCommand(QStringLiteral("Step")); });
+    connect(ResumeAction_, &QAction::triggered, this, [this]() { Controller_->PlayCommand(QStringLiteral("Resume")); });
+    connect(RefreshPropertiesAction_, &QAction::triggered, Controller_, &EditorController::RefreshProperties);
 
     QMenu* outputMenu = menuBar()->addMenu(QStringLiteral("&Output"));
     ClearAction_ = outputMenu->addAction(QStringLiteral("&Clear Output"));
@@ -161,40 +253,59 @@ void MainWindow::BuildMenus()
     connect(ReloadAction_, &QAction::triggered, this, &MainWindow::OnReloadRequested);
     connect(ConfigureAction_, &QAction::triggered, Controller_, &EditorController::Configure);
     connect(BuildAction_, &QAction::triggered, Controller_, &EditorController::Build);
-    connect(BuildRunAction_, &QAction::triggered, this, [this]() {
-        if (AudioLaunchPending_)
-        {
-            return;
-        }
-        AudioLaunchPending_ = true;
-        Audio_->ShutdownPreview();
-        BuildRunAction_->setEnabled(false);
-        const auto epoch = Controller_->State().ProjectEpoch;
-        auto* timer = new QTimer(this);
-        timer->setInterval(20);
-        connect(timer, &QTimer::timeout, this, [this, timer, epoch]() {
-            if (!Audio_->PreviewFinished())
-            {
-                return;
-            }
-            timer->stop();
-            timer->deleteLater();
-            AudioLaunchPending_ = false;
-            if (AudioClosing_)
-            {
-                return;
-            }
-            Audio_->ResetPreview();
-            if (epoch == Controller_->State().ProjectEpoch)
-            {
-                Controller_->BuildRun();
-            }
-        });
-        timer->start();
-    });
+    connect(BuildRunAction_, &QAction::triggered, this, [this]() { LaunchAfterPreview(LaunchAction::Run); });
     connect(StopAction_, &QAction::triggered, Controller_, &EditorController::Stop);
     connect(ClearAction_, &QAction::triggered, Controller_, &EditorController::ClearOutput);
     connect(CopyAction_, &QAction::triggered, this, &MainWindow::OnCopyJobDetails);
+}
+
+void MainWindow::LaunchAfterPreview(LaunchAction action, const QString& debugger, bool setup)
+{
+    if (AudioLaunchPending_ || AudioClosing_)
+    {
+        return;
+    }
+    AudioLaunchPending_ = true;
+    Audio_->setEnabled(false);
+    Audio_->ShutdownPreview();
+    RenderCapabilities();
+    const auto epoch = Controller_->State().ProjectEpoch;
+    const auto digest = Controller_->State().SavedDigest;
+    auto* timer = new QTimer(this);
+    timer->setInterval(20);
+    connect(timer, &QTimer::timeout, this, [this, timer, epoch, digest, action, debugger, setup]() {
+        if (!Audio_->PreviewFinished())
+        {
+            return;
+        }
+        timer->stop();
+        timer->deleteLater();
+        AudioLaunchPending_ = false;
+        if (AudioClosing_)
+        {
+            return;
+        }
+        Audio_->ResetPreview();
+        Audio_->setEnabled(Controller_->State().Document == DocumentState::ProjectLoaded);
+        RenderCapabilities();
+        if (epoch != Controller_->State().ProjectEpoch || digest != Controller_->State().SavedDigest)
+        {
+            return;
+        }
+        switch (action)
+        {
+            case LaunchAction::Run:
+                Controller_->BuildRun();
+                break;
+            case LaunchAction::Play:
+                Controller_->Play();
+                break;
+            case LaunchAction::Debug:
+                Controller_->BuildDebug(debugger, setup);
+                break;
+        }
+    });
+    timer->start();
 }
 
 ProjectDescriptor MainWindow::DraftFromFields() const
@@ -328,7 +439,7 @@ void MainWindow::OnStateChanged()
     RenderCapabilities();
     RenderStatus();
     const auto& state = Controller_->State();
-    Audio_->setEnabled(state.Document == DocumentState::ProjectLoaded && !AudioClosing_);
+    Audio_->setEnabled(state.Document == DocumentState::ProjectLoaded && !AudioClosing_ && !AudioLaunchPending_);
     if (state.Document == DocumentState::ProjectLoaded)
     {
         const auto root = QDir(QFileInfo(state.DescriptorPath).absolutePath()).absoluteFilePath(state.Saved.SourceDir);
@@ -336,6 +447,7 @@ void MainWindow::OnStateChanged()
     }
 
     // If a close was requested and the workspace is now closeable, finish.
+    RenderProperties();
     if (CloseConfirmed_ && Controller_->Caps().CanCloseImmediately)
     {
         close();
@@ -392,6 +504,29 @@ void MainWindow::RenderFields()
 void MainWindow::RenderCapabilities()
 {
     const Capabilities caps = Controller_->Caps();
+    PlayAction_->setEnabled(Controller_->CanPlay() && !AudioLaunchPending_);
+    BuildReloadAction_->setEnabled(Controller_->CanBuildReload());
+    const auto play = Controller_->PlayState().Phase;
+    const bool debuggerStopped = Controller_->PlayState().DebuggerStopped;
+    AutoReloadAction_->setEnabled(play == PlayPhase::Running || play == PlayPhase::Paused);
+    ReloadAssetAction_->setEnabled(!debuggerStopped && (play == PlayPhase::Running || play == PlayPhase::Paused));
+    {
+        const QSignalBlocker blocker(AutoReloadAction_);
+        AutoReloadAction_->setChecked(Controller_->AutoReloadEnabled());
+    }
+    PauseAction_->setEnabled(!debuggerStopped && play == PlayPhase::Running);
+    ResumeAction_->setEnabled(!debuggerStopped && play == PlayPhase::Paused);
+    StepAction_->setEnabled(!debuggerStopped && play == PlayPhase::Paused);
+    RefreshPropertiesAction_->setEnabled(play == PlayPhase::Running || play == PlayPhase::Paused);
+    ApplySessionButton_->setEnabled(Controller_->CanEditProperties());
+    ApplyDocumentButton_->setEnabled(Controller_->CanApplyToTuningDocument(Properties_->currentRow()));
+    UndoSessionAction_->setEnabled(Controller_->CanUndoSession());
+    RedoSessionAction_->setEnabled(Controller_->CanRedoSession());
+    const auto& playState = Controller_->PlayState();
+    UndoTuningAction_->setEnabled(playState.TuningDocumentAvailable && playState.TuningCanUndo);
+    RedoTuningAction_->setEnabled(playState.TuningDocumentAvailable && playState.TuningCanRedo);
+    SaveTuningAction_->setEnabled(Controller_->CanSaveTuningDocument());
+    DiscardTuningAction_->setEnabled(playState.TuningDocumentAvailable && playState.TuningDocumentDirty);
     NewProjectAction_->setEnabled(caps.CanProjectCreate);
     CheckSetupAction_->setEnabled(caps.CanProjectCheck);
     SetupProjectAction_->setEnabled(caps.CanProjectSetup);
@@ -401,6 +536,7 @@ void MainWindow::RenderCapabilities()
     ConfigureAction_->setEnabled(caps.CanConfigure);
     BuildAction_->setEnabled(caps.CanBuild);
     BuildRunAction_->setEnabled(caps.CanBuildRun && !AudioLaunchPending_);
+    BuildDebugAction_->setEnabled(caps.CanBuildDebug && !AudioLaunchPending_);
     StopAction_->setEnabled(caps.CanStop);
     SetupReleaseAction_->setEnabled(caps.CanReleaseInit);
     PackageReleaseAction_->setEnabled(caps.CanPackage);
@@ -437,8 +573,14 @@ void MainWindow::RenderStatus()
         case Phase::Building:
             phase = QStringLiteral("Building");
             break;
+        case Phase::Publishing:
+            phase = QStringLiteral("Publishing generation");
+            break;
         case Phase::Launching:
             phase = QStringLiteral("Launching");
+            break;
+        case Phase::Debugging:
+            phase = QStringLiteral("RAD session open");
             break;
         case Phase::Running:
             phase = QStringLiteral("Running");
@@ -464,9 +606,26 @@ void MainWindow::RenderStatus()
     {
         status += QStringLiteral("  —  operator recovery required; see Copy Job Details");
     }
+    if (!state.SetupStatus.isEmpty())
+    {
+        status += QStringLiteral("\n") + state.SetupStatus;
+    }
     StatusLabel_->setText(status);
 
-    if (state.OperationPhase == Phase::Running)
+    if (state.OperationPhase == Phase::Debugging)
+    {
+        RuntimeLabel_->setText(
+            QStringLiteral("Set breakpoints, Run and Step in RAD. The game may be paused or running. "
+                           "Stop ends this debugger session and its game."));
+    }
+    else if (Controller_->PlayState().Phase != PlayPhase::Stopped)
+    {
+        const auto& play = Controller_->PlayState();
+        RuntimeLabel_->setText(QStringLiteral("Play session %1 · generation %2 · PID %4\n%3")
+                                   .arg(play.Session, play.Generation, play.Message)
+                                   .arg(play.HostPid));
+    }
+    else if (state.OperationPhase == Phase::Running)
     {
         RuntimeLabel_->setText(
             QStringLiteral("The application is running in its own window. This status area describes it; "
@@ -508,6 +667,59 @@ QLineEdit* AddDirectoryField(QFormLayout* form, QDialog* dialog, const Directory
     return edit;
 }
 } // namespace
+
+void MainWindow::OnDebuggerSetupRequested()
+{
+    if (!Controller_->Caps().CanBuildDebug)
+    {
+        return;
+    }
+    const uint64 epoch = Controller_->State().ProjectEpoch;
+    const QString digest = Controller_->State().SavedDigest;
+    auto* dialog =
+        new QMessageBox(QMessageBox::Information,
+                        QStringLiteral("Set Up RAD Debugger"),
+                        QStringLiteral("RAD is unavailable. Set Up downloads and builds the pinned debugger locally, "
+                                       "then continues debugging. Missing system dependencies are listed in Output. "
+                                       "You can also choose an existing RAD executable."),
+                        QMessageBox::Cancel,
+                        this);
+    dialog->setObjectName(QStringLiteral("debuggerSetupDialog"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    auto* setup = dialog->addButton(QStringLiteral("Set Up RAD"), QMessageBox::AcceptRole);
+    setup->setObjectName(QStringLiteral("setupRadButton"));
+    auto* choose = dialog->addButton(QStringLiteral("Choose Existing Installation..."), QMessageBox::ActionRole);
+    choose->setObjectName(QStringLiteral("chooseRadButton"));
+    dialog->setDefaultButton(QMessageBox::Cancel);
+    connect(dialog, &QMessageBox::finished, this, [this, dialog, setup, choose, epoch, digest](int) {
+        const auto current = [this, epoch, digest]() {
+            return Controller_->Caps().CanBuildDebug && Controller_->State().ProjectEpoch == epoch &&
+                   Controller_->State().SavedDigest == digest;
+        };
+        if (!current())
+        {
+            return;
+        }
+        if (dialog->clickedButton() == setup)
+        {
+            LaunchAfterPreview(LaunchAction::Debug, {}, true);
+        }
+        else if (dialog->clickedButton() == choose)
+        {
+            auto* picker = new QFileDialog(this, QStringLiteral("Choose RAD Executable"));
+            picker->setAttribute(Qt::WA_DeleteOnClose);
+            picker->setFileMode(QFileDialog::ExistingFile);
+            connect(picker, &QFileDialog::fileSelected, this, [this, current](const QString& path) {
+                if (current())
+                {
+                    LaunchAfterPreview(LaunchAction::Debug, path);
+                }
+            });
+            picker->open();
+        }
+    });
+    dialog->open();
+}
 
 void MainWindow::OnSetupProject()
 {
@@ -703,4 +915,58 @@ void MainWindow::closeEvent(QCloseEvent* event)
     }
     event->ignore();
 }
+
+void MainWindow::RenderProperties()
+{
+    const auto& snapshot = Controller_->PlayState();
+    const QString stamp = QString::fromUtf8(QJsonDocument(snapshot.Properties).toJson(QJsonDocument::Compact));
+    if (stamp == PropertiesStamp_)
+    {
+        return;
+    }
+    PropertiesStamp_ = stamp;
+    const QSignalBlocker blocker(Properties_);
+    Properties_->setRowCount(static_cast<int>(snapshot.Properties.size()));
+    for (int row = 0; row < snapshot.Properties.size(); ++row)
+    {
+        const auto property = snapshot.Properties.at(row).toObject();
+        const int kind = property.value(QStringLiteral("kind")).toInt(-1);
+        QString text;
+        if (kind == 2)
+        {
+            const auto bits = static_cast<foundation::uint32>(property.value(QStringLiteral("bits")).toInteger());
+            foundation::float32 value = 0.0F;
+            std::memcpy(&value, &bits, sizeof(value));
+            text = QString::number(static_cast<foundation::float64>(value), 'g', 9);
+        }
+        else if (kind == 0)
+        {
+            text = property.value(QStringLiteral("value")).toBool() ? QStringLiteral("true") : QStringLiteral("false");
+        }
+        else if (kind == 4)
+        {
+            text = property.value(QStringLiteral("value")).toString();
+        }
+        else
+        {
+            text = QString::number(property.value(QStringLiteral("value")).toInteger());
+        }
+        auto* name = new QTableWidgetItem(property.value(QStringLiteral("label")).toString());
+        auto* value = new QTableWidgetItem(text);
+        const bool writable = property.value(QStringLiteral("writable")).toBool();
+        if (!writable)
+        {
+            value->setFlags(value->flags() & ~Qt::ItemIsEditable);
+        }
+        name->setFlags(name->flags() & ~Qt::ItemIsEditable);
+        auto* scope = new QTableWidgetItem(property.value(QStringLiteral("scope")).toInt() == 1
+                                               ? QStringLiteral("Persistable")
+                                               : QStringLiteral("Session/output"));
+        scope->setFlags(scope->flags() & ~Qt::ItemIsEditable);
+        Properties_->setItem(row, 0, name);
+        Properties_->setItem(row, 1, value);
+        Properties_->setItem(row, 2, scope);
+    }
+}
+
 } // namespace ludus::editor

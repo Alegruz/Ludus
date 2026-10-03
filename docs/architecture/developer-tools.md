@@ -212,8 +212,11 @@ evaluation. Track that evidence separately from implementation completion.
 D0 is documented and D1 is implemented. Optional setup has been built and reused
 on the development host; CLI target resolution and launch preparation have been
 exercised against `ludus_smoke`. Automated tooling tests run in CI without RAD,
-downloads, or a desktop. D2 interactive acceptance is pending. D3-D6 remain
-future work; no editor, scripting runtime, or debugger adapter is introduced.
+downloads, or a desktop. D2 interactive acceptance is pending. The Editor now
+implements an external debugging subset of D3/D4: explicit optional setup, local
+preferences, SDK game launch, preserved sessions and owned cancellation.
+See [Editor debugging](../development/debugging.md#from-the-ludus-editor). Embedded
+debugger controls, attach, scripting and D6 integrations remain future work.
 
 Verification on 2026-10-01:
 

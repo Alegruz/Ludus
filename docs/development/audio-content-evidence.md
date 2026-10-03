@@ -2,7 +2,9 @@
 
 Implementation date: October 3, 2026. Branch: `codex/audio-content-workflow`,
 initially based on `origin/main` at `652ea51`, then rebased onto `ab41334`
-(Editor project creation and shared setup repair, PR #59). Work is isolated in
+(Editor project creation and shared setup repair, PR #59), then merged with
+`41dd763` (world PR #61, live editing PR #55 and optional RAD debugger PR #60).
+Work is isolated in
 `out/worktrees/audio-content`; unrelated changes in the primary checkout and
 the referenced world/level chat were preserved.
 
@@ -117,6 +119,22 @@ yyjson C/header files. Their original release bytes include trailing whitespace;
 they were preserved exactly and verified by the CMake SHA-256 checks rather than
 formatted as Ludus-owned code.
 
+During PR publication, main advanced again to `41dd763`. Conflict resolution
+preserves its world/game API/host SDK components and live/debugger editor features.
+Build and Run, Play and RAD Debug (including setup/install selection continuations)
+now share preview quiescence and project epoch/digest checks. Audio audition is
+disabled while a launch waits for shutdown. The combined Editor ON Debug build
+passes warnings-as-errors; full CTest reports 51 successful outcomes (49 executed,
+two display skips), including expanded editor/live/debugger regressions. The
+combined Editor OFF ASan/UBSan build also passes warnings-as-errors; full CTest
+reports 42 successful outcomes (40 executed, two display skips), with no sanitizer
+findings. Merged editor clang-tidy and project format/foundational include checks
+passed again. A fresh Debug SDK install/bundle/audit includes the new components;
+the installed-SDK sample passed fresh configure/build/test again (2/2).
+Earlier Development/Release/TSan/native/budget evidence predates this final main
+merge; those profiles have not been rebuilt for the combined world/live/debugger
+tree. The audio runtime and source/loader code are unchanged by this integration.
+
 Development Editor OFF built warning-clean with `LUDUS_ENABLE_TIME_TRACE=ON`,
 `LUDUS_ENABLE_CCACHE=OFF`, using its matching cached Conan toolchain. ClangBuildAnalyzer
 captured the complete tree and the existing build-budget evaluator ran against
@@ -216,8 +234,9 @@ policy to reload logical IDs and restart music; exact cursor restoration is excl
   hardware loss/reconnect, format/rate matrix, callback allocation instrumentation,
   stop/start soak and measured active/candidate memory high-water under every
   quota/failure path. Core worker and native playback are implemented and exercised.
-- Full gameplay world/outbox/level candidate binding is pending the separate world
-  implementation. The installed sample is the substitute requested by C5; its
+- Full gameplay world/outbox/level candidate binding remains pending. The separate
+  world implementation merged during publication of this PR; it has not yet been
+  connected to audio. The installed sample is the substitute requested by C5; its
   64 owner slots use monotonically increasing generations/tags without reuse.
 - Editor waveform/import scans are cold bounded work. Cancellation joins on the
   preview worker; pending decoder work is not forcibly interrupted mid-call.

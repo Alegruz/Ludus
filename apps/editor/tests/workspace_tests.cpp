@@ -184,3 +184,34 @@ TEST_CASE("Release actions require a clean v2 CMake project and one owned operat
     CHECK(ComputeCapabilities(packaging).CanStop);
     CHECK_FALSE(ComputeCapabilities(LatchStop(packaging)).CanPackage);
 }
+
+TEST_CASE("Debug sessions require a clean native project and never assert game Running", "[editor][debug]")
+{
+    WorkspaceState state;
+    CHECK_FALSE(ComputeCapabilities(state).CanBuildDebug);
+    state.Document = DocumentState::ProjectLoaded;
+    state.HasSaved = true;
+    state.Saved.Preset = QStringLiteral("linux-clang-development");
+    state.Draft = state.Saved;
+    CHECK(ComputeCapabilities(state).CanBuildDebug);
+    state.Draft.Name = QStringLiteral("dirty");
+    CHECK_FALSE(ComputeCapabilities(state).CanBuildDebug);
+    state.Draft = state.Saved;
+    state.Saved.Preset = state.Draft.Preset = QStringLiteral("web-emscripten-development");
+    CHECK_FALSE(ComputeCapabilities(state).CanBuildDebug);
+    state.Saved.Preset = state.Draft.Preset = QStringLiteral("linux-clang-debug");
+    state = BeginJob(state, ActionKind::BuildDebug);
+    const uint64 job = state.ActiveJob;
+    state = ApplyPhaseEvent(state, job, Phase::Configuring, false);
+    state = ApplyPhaseEvent(state, job, Phase::Launching, false);
+    CHECK(ApplyPhaseEvent(state, job, Phase::Running, true).OperationPhase == Phase::Launching);
+    CHECK(ApplyDebuggerStarted(state, job + 1).OperationPhase == Phase::Launching);
+    CHECK(ApplyDebuggerStarted(LatchStop(state), job).OperationPhase == Phase::Stopping);
+    state = ApplyDebuggerStarted(state, job);
+    CHECK(state.OperationPhase == Phase::Debugging);
+    CHECK(ComputeCapabilities(state).CanStop);
+    CHECK_FALSE(ComputeCapabilities(state).CanBuildDebug);
+    CHECK_FALSE(ComputeCapabilities(state).CanCloseImmediately);
+    CHECK(ApplyPhaseEvent(state, job, Phase::Running, true).OperationPhase == Phase::Debugging);
+    CHECK(LatchStop(state).OperationPhase == Phase::Stopping);
+}

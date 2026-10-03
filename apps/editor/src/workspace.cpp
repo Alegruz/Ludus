@@ -17,6 +17,10 @@ const char* ResultCodeName(ResultCode code) noexcept
             return "UnsupportedVersion";
         case ResultCode::Conflict:
             return "Conflict";
+        case ResultCode::MissingDebugger:
+            return "MissingDebugger";
+        case ResultCode::DebuggerFailed:
+            return "DebuggerFailed";
         case ResultCode::MissingTools:
             return "MissingTools";
         case ResultCode::BootstrapStale:
@@ -45,6 +49,10 @@ const char* ResultCodeName(ResultCode code) noexcept
             return "Cancelled";
         case ResultCode::ReleaseFailed:
             return "ReleaseFailed";
+        case ResultCode::GenerationInvalid:
+            return "GenerationInvalid";
+        case ResultCode::Superseded:
+            return "Superseded";
         case ResultCode::CleanupUnknown:
             return "CleanupUnknown";
     }
@@ -69,6 +77,7 @@ Capabilities ComputeCapabilities(const WorkspaceState& state)
     caps.CanConfigure = CanStartJob(state, ActionKind::Configure);
     caps.CanBuild = CanStartJob(state, ActionKind::Build);
     caps.CanBuildRun = CanStartJob(state, ActionKind::BuildRun);
+    caps.CanBuildDebug = CanStartJob(state, ActionKind::BuildDebug);
     caps.CanProjectCheck = CanStartJob(state, ActionKind::ProjectCheck);
     caps.CanProjectSetup = CanStartJob(state, ActionKind::ProjectSetup);
     caps.CanProjectCreate = CanStartJob(state, ActionKind::ProjectCreate);
@@ -110,6 +119,9 @@ bool CanStartJob(const WorkspaceState& state, ActionKind kind)
             return !state.Dirty() && state.Saved.Version == 2 && state.Saved.ProviderKind == Provider::Cmake;
         case ActionKind::Configure:
             return true;
+        case ActionKind::BuildDebug:
+            return !state.Dirty() && (state.Saved.Preset == QStringLiteral("linux-clang-debug") ||
+                                      state.Saved.Preset == QStringLiteral("linux-clang-development"));
         case ActionKind::Build:
         case ActionKind::BuildRun:
             // Build/BuildRun require a clean saved document; unsaved edits must be
@@ -131,6 +143,7 @@ WorkspaceState BeginJob(const WorkspaceState& state, ActionKind kind)
 {
     WorkspaceState next = state;
     next.ActiveJob = next.NextJob;
+    next.ActiveAction = kind;
     // Counter never wraps silently; a wrap would be a programming error long
     // before 2^64 jobs, but we still advance explicitly.
     next.NextJob = next.NextJob + 1;
@@ -159,7 +172,7 @@ bool AllowedForward(const PhaseStep& step)
         case Phase::Configuring:
             return step.To == Phase::Building || step.To == Phase::Launching;
         case Phase::Building:
-            return step.To == Phase::Launching;
+            return step.To == Phase::Launching || step.To == Phase::Publishing;
         // Launching -> Running is handled only by RuntimeStarted.
         default:
             return false;
@@ -195,6 +208,11 @@ WorkspaceState ApplyPhaseEvent(const WorkspaceState& state, uint64 jobId, Phase 
         return next;
     }
 
+    if (runtimeConfirmed && state.ActiveAction == ActionKind::BuildDebug)
+    {
+        return state;
+    }
+
     if (runtimeConfirmed)
     {
         // Only a runtime-started confirmation moves Launching -> Running.
@@ -218,6 +236,18 @@ WorkspaceState ApplyPhaseEvent(const WorkspaceState& state, uint64 jobId, Phase 
         return state;
     }
     next.OperationPhase = requested;
+    return next;
+}
+
+WorkspaceState ApplyDebuggerStarted(const WorkspaceState& state, uint64 jobId)
+{
+    if (jobId == 0 || jobId != state.ActiveJob || state.ActiveAction != ActionKind::BuildDebug || state.StopLatched ||
+        state.OperationPhase != Phase::Launching)
+    {
+        return state;
+    }
+    WorkspaceState next = state;
+    next.OperationPhase = Phase::Debugging;
     return next;
 }
 

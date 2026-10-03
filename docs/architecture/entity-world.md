@@ -1,6 +1,8 @@
 # Entities and component storage
 
-Status: Proposed. Part of the [game world architecture](game-world.md).
+Status: Baseline implemented. Part of the [game world architecture](game-world.md).
+See [the reference guide](../../apps/world_demo/README.md) for the concrete API,
+bounds and policies; conditional extensions in this document remain proposed.
 
 An entity is identity. Its state lives in explicitly named component pools owned
 by a game world. Systems are ordinary functions over that state. The first
@@ -9,7 +11,7 @@ structural changes committed at known boundaries.
 
 ## Identity and validity
 
-The proposed `EntityId` contains `World` (`uint64`), `Slot` (`uint32`), and
+`EntityId` contains `World` (`uint64`), `Slot` (`uint32`), and
 `Generation` (`uint32`). It is a trivially copyable value. World zero and generation
 zero are reserved as invalid. Do not pack it or expose bit arithmetic before a
 measurement justifies changing the representation.
@@ -75,17 +77,17 @@ bounds, and exact dense owner. A stale generation cannot return another entity's
 component. Only a live registry entity may receive a component. Each entity has
 at most one component of a given type.
 
-Insertion reserves all required storage first with fallible operations, then
-publishes the owner, value, and sparse entry together. A failed insertion leaves
-membership and values unchanged; capacity growth alone may already have occurred.
-Components in the initial pool facility must be nothrow movable and destructible
-plain state, without hidden allocation or external resource creation. Component
+Initialization reserves storage for the full registry capacity with fallible
+operations. Insertion then publishes the owner, value, and sparse entry together. A failed insertion leaves
+membership and values unchanged, without growing storage.
+Components in the initial pool facility must be trivially copyable and trivially
+destructible plain state, without hidden allocation or external resource creation. Component
 construction must not invoke gameplay or arbitrary user callbacks.
 
 Removal swaps the last dense value/owner into the hole, updates the moved owner's
 sparse entry, clears the removed slot's sparse entry, and shrinks the dense arrays.
 Moving a component changes its address and iteration position, not its entity ID.
-Sparse-array memory grows with the registry high-water slot count for each pool;
+Sparse-array memory covers the configured registry capacity for each pool;
 record that cost. This is a chosen simplicity tradeoff, not an unmeasured claim of
 the best possible storage density.
 
@@ -97,8 +99,9 @@ multicomponent cache before profiling establishes a useful need.
 
 ## Initial API vocabulary
 
-These names describe the intended small public surface. Implementers may adjust
-signatures while preserving the contracts; they are not existing SDK functions.
+The identity/storage operations below are implemented by `Ludus::GameplayWorld`.
+The reference application supplies the game-owned command operations. Other games
+may adjust those signatures while preserving the visibility contracts.
 
 | Operation | Contract |
 | --- | --- |
@@ -110,7 +113,7 @@ signatures while preserving the contracts; they are not existing SDK functions.
 | `ComponentPool<T>::TryRemove` | Remove an existing component only during construction/commit; invalid identity and absent component have distinct statuses. |
 | `GameWorld::QueueSpawn` | Own a complete recipe payload and return a request ID or recording failure. |
 | `GameWorld::QueueDestroy` | Validate queue space, record once, then mark pending destruction. |
-| `GameWorld::CommitCommands` | Preflight the batch and publish its structural changes with reserved storage. |
+| `GameWorld::Commit` | Preflight the batch and publish its structural changes with reserved storage. |
 
 Fallible mutating operations return `[[nodiscard]]` statuses and are `noexcept`.
 The initial status vocabulary includes success, invalid entity, duplicate/missing
@@ -125,8 +128,8 @@ gameplay systems; a world construction/commit facade supplies that access.
 Component pointers and spans are borrowed within one phase. They must not survive
 a commit, pool growth, destruction, world replacement, asynchronous dispatch, or
 an API call that can perform structural mutation. Persist handles instead. Debug
-builds track a structural revision and assert on invalid phase use where the API
-can check it. An optional view wrapper can capture that revision; raw pointers
+inspection can read the registry's structural revision. Structural APIs return
+`InvalidPhase` in every build when mutation is disabled. An optional view wrapper can capture that revision; raw pointers
 cannot be made safe after escaping their documented lifetime.
 
 Dense iteration order is an implementation detail. Independent per-entity updates

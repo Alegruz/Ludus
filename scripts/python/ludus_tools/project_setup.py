@@ -50,6 +50,15 @@ def preset_for(source: Path, profile: str) -> str:
     return profile
 
 
+def cmake_for(source: Path, profile: str, fallback: str) -> str:
+    """Select the same owned CMake for CLI, Editor and generation builds."""
+    selected = preset_for(source, profile)
+    for item in read_object(source / "CMakeUserPresets.json").get("configurePresets", []):
+        if item.get("name") == selected and OWNER in item.get("vendor", {}):
+            return str(executable(Path(item["cmakeExecutable"])))
+    return fallback
+
+
 def preset_names(path: Path, seen=None) -> set[str]:
     seen = set() if seen is None else seen
     path = path.resolve()

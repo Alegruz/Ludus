@@ -136,9 +136,11 @@ ownership/build failure/argument regressions remain intact.
   safe generation-aware owner mapping. Exercise the existing event policy adapter.
 - [x] Demonstrate exactly-once delivery, entity-loop teardown, session music across
   levels, restart, pause/single-step policies and user-gain preservation.
-- [x] If the world exists, connect its outbox and candidate leases with focused
-  integration. Otherwise provide equivalent compiled requests in a standalone
-  installed-SDK sample and document the pending world binding.
+- [x] Provide equivalent compiled requests in a standalone installed-SDK sample
+  (the world was not implemented at the first handoff baseline).
+- [ ] Connect the world outbox and level candidate leases with focused integration.
+  The world implementation merged during this PR's publication; the sample remains
+  the exercised substitute, and full world binding is pending.
 - [x] Implement explicit dependency-root validation and loose-file staging with
   catalog/digest manifest, atomic completion publication and last-good preservation.
 - [x] Package a game sample that runs without the source checkout, DAW or editor.

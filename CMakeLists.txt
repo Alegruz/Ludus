@@ -30,6 +30,7 @@ include(EngineSdkIdentity)
 
 option(LUDUS_BUILD_TESTS "Build Ludus tests" ON)
 option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
+option(LUDUS_BUILD_WORLD_DEMO "Build the graphical game world reference (requires shader tools)" OFF)
 option(LUDUS_BUILD_SHADER_PROBE "Build the isolated offline shader feasibility probe" OFF)
 # The Editor workspace (apps/editor) is an OPTIONAL developer tool, OFF by
 # default. When OFF, configure/build/install and browser targets must not search
@@ -87,11 +88,32 @@ if(LUDUS_ENABLE_CCACHE)
     endif()
 endif()
 
+# Gameplay compatibility identity comes from the same actual SDK inputs.
+set(LUDUS_COMPILER_ID "${CMAKE_CXX_COMPILER_ID}")
+set(LUDUS_COMPILER_VERSION "${CMAKE_CXX_COMPILER_VERSION}")
+find_package(Git QUIET)
+set(LUDUS_GIT_REVISION "unknown")
+if(Git_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${PROJECT_SOURCE_DIR}" rev-parse HEAD
+        OUTPUT_VARIABLE LUDUS_GIT_REVISION_OUTPUT
+        ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(LUDUS_GIT_REVISION_OUTPUT)
+        set(LUDUS_GIT_REVISION "${LUDUS_GIT_REVISION_OUTPUT}")
+    endif()
+endif()
+
+set(LUDUS_GAME_COMPATIBILITY_IDENTITY
+    "${LUDUS_GIT_REVISION}|${LUDUS_SDK_VARIANT}|${LUDUS_CXX_RUNTIME_ABI}|${LUDUS_COMPILER_ID} ${LUDUS_COMPILER_VERSION}|${LUDUS_TARGET_TRIPLE}|abi-1.0")
+
 configure_file(cmake/CheckSdkVariant.cmake.in "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" @ONLY)
 install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENTS)
 
 add_subdirectory(modules/foundation/base)
 add_subdirectory(modules/foundation/containers)
+add_subdirectory(modules/gameplay/world)
 # FoundationMath depends only on FoundationBase. It is added before any consumer
 # and outside the native-only branch so native and browser targets share it.
 add_subdirectory(modules/foundation/math)
@@ -100,6 +122,7 @@ add_subdirectory(modules/foundation/profiling)
 # Input is configured before Platform: Platform depends on Input for the
 # normalized keyboard record/sink vocabulary (one-way dependency).
 add_subdirectory(modules/input)
+add_subdirectory(apps/world_demo)
 # Private pinned miniaudio C dependency (locked source bootstrap, hash-verified
 # at configure time). Added before the audio module, which links it PRIVATE. It
 # deliberately enables the C language for its own targets; the root project
@@ -112,6 +135,12 @@ add_subdirectory(modules/audio)
 add_subdirectory(third_party/yyjson)
 add_subdirectory(modules/content)
 add_subdirectory(modules/audio/content)
+
+# Ludus::GameApi is a header-only INTERFACE target defining the gameplay module
+# ABI (project-live-reload design section 2). It links no engine implementation,
+# so it is available to both native and browser configures; the native GameHost
+# runtime library and the loader live under the native branch below.
+add_subdirectory(modules/runtime/game_api)
 
 if(EMSCRIPTEN)
     add_subdirectory(modules/platform)
@@ -138,6 +167,11 @@ else()
     add_subdirectory(modules/graphics/rhi)
     add_subdirectory(modules/text)
 
+    # Qt-free static GameHost runtime library and loader (project-live-reload
+    # design section 2). Native-only: it uses dlopen and the Platform/RHI
+    # session. The editor never links it; a project-owned host executable does.
+    add_subdirectory(modules/runtime/game_host)
+
     # Startup-only development diagnostic integration (depends on Base; Base does
     # not depend on it). Provides InitializeDiagnosticSession and the Python helper.
     add_subdirectory(tools/diagnostics)
@@ -148,6 +182,10 @@ else()
         add_subdirectory(apps/audio_content_demo)
         add_subdirectory(apps/input_demo)
     endif()
+
+    # Reference GameHost executable (project-live-reload). Built alongside the
+    # smoke apps; it links Ludus::GameHost and no Qt.
+    add_subdirectory(apps/game_host)
 
     # Optional native editor workspace. Guarded so a default (OFF) native
     # configure never calls find_package(Qt6); the subdirectory owns all Qt
@@ -173,28 +211,6 @@ install(
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${LUDUS_ENGINE_PACKAGE_NAME}"
 )
 
-# --- SDK identity (P02/P03/P11) ----------------------------------------------
-# Compiler/source identity at root scope. These MUST be set BEFORE
-# configure_package_config_file() below, because LudusConfig.cmake.in substitutes
-# @LUDUS_COMPILER_ID@/@LUDUS_COMPILER_VERSION@ for its toolchain-compatibility
-# gate; configuring the package file with empty values would make the gate
-# compare against an empty SDK identity and reject every consumer. FoundationBase
-# computes the same values for its generated build_metadata.hpp; keep them equal.
-set(LUDUS_COMPILER_ID "${CMAKE_CXX_COMPILER_ID}")
-set(LUDUS_COMPILER_VERSION "${CMAKE_CXX_COMPILER_VERSION}")
-find_package(Git QUIET)
-set(LUDUS_GIT_REVISION "unknown")
-if(Git_FOUND)
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${PROJECT_SOURCE_DIR}" rev-parse --short=12 HEAD
-        OUTPUT_VARIABLE LUDUS_GIT_REVISION_OUTPUT
-        ERROR_QUIET
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    if(LUDUS_GIT_REVISION_OUTPUT)
-        set(LUDUS_GIT_REVISION "${LUDUS_GIT_REVISION_OUTPUT}")
-    endif()
-endif()
 
 configure_package_config_file(
     "${PROJECT_SOURCE_DIR}/cmake/LudusConfig.cmake.in"
@@ -212,12 +228,12 @@ write_basic_package_version_file(
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationContainers FoundationMath FoundationLogging
-    FoundationProfiling Input Audio Content AudioContent)
+    FoundationProfiling Input Audio Content AudioContent GameplayWorld GameApi)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()
 if(NOT EMSCRIPTEN)
-    foreach(_component Platform GraphicsRhi Text)
+    foreach(_component Platform GraphicsRhi Text GameHost)
         ludus_sdk_register_component(${_component})
         ludus_sdk_register_feature(${_component})
     endforeach()
@@ -302,4 +318,13 @@ install(
 )
 
 install(FILES cmake/LudusShaders.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
+# Gameplay project helper + host/shipping main templates (project-live-reload).
+if(NOT EMSCRIPTEN)
+    install(FILES
+        cmake/LudusGame.cmake
+        cmake/LudusGameShippingMain.cpp
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
+    install(FILES apps/game_host/main.cpp
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus" RENAME LudusGameHostMain.cpp)
+endif()
 install(FILES cmake/shaders/compile_shader.py config/shader_toolchain.json config/spirv_cross_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")

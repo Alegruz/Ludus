@@ -64,19 +64,47 @@ def glsl_es_layout(code):
         return {'block': None, 'offsets': {}, 'size': 0, 'alignment': 16, 'binding': 0}
     if re.search(r'layout\(std140\)\s+uniform\s+' + re.escape(match.group(1)), code) is None:
         raise RuntimeError('GLSL ES uniform block is not std140')
-    members = re.findall(r'(?:highp\s+|mediump\s+|lowp\s+)?(vec[234]|float)\s+(\w+)\s*;', match.group(2))
+    # Slang can lower a fixed array to a one-field std140 wrapper struct.
+    # Accept exactly that shape; arbitrary/nested structs remain unsupported.
+    primitive = r'(?:highp\s+|mediump\s+|lowp\s+)?(vec[234]|float)\s+(\w+)\s*(?:\[\s*([0-9]+)\s*\])?'
+    wrappers = {}
+    for type_name, body in re.findall(r'struct\s+(\w+)\s*\{([^}]+)\}\s*;', code):
+        field = re.fullmatch(r'\s*' + primitive + r'\s*;\s*', body)
+        if field and field.group(2) == 'data' and field.group(3):
+            if type_name in wrappers:
+                raise RuntimeError('Duplicate GLSL ES array wrapper')
+            wrappers[type_name] = (field.group(1), field.group(3))
     offset = 0
     alignment = 16
     offsets = {}
-    if len(members) != len([part for part in match.group(2).split(";") if part.strip()]):
-        raise RuntimeError("GLSL ES layout contains unsupported field types; refusing an inferred layout")
-    for kind, name in members:
+    for declaration in match.group(2).split(';'):
+        if not declaration.strip():
+            continue
+        field = re.fullmatch(r'\s*' + primitive + r'\s*', declaration)
+        if field:
+            kind, name, count = field.groups()
+        else:
+            wrapper = re.fullmatch(r'\s*(\w+)\s+(\w+)\s*', declaration)
+            if wrapper is None or wrapper.group(1) not in wrappers:
+                raise RuntimeError('GLSL ES layout contains unsupported field types; refusing an inferred layout')
+            kind, count = wrappers[wrapper.group(1)]
+            name = wrapper.group(2)
+        if name in offsets:
+            raise RuntimeError("Duplicate GLSL ES uniform member")
         size, align = GLSL_ES_KINDS[kind]
+        if count:
+            length = int(count)
+            if length < 1 or length > 256:
+                raise RuntimeError("GLSL ES uniform array exceeds bounded layout support")
+            align = 16
+            size = (size + 15) // 16 * 16 * length
         alignment = max(alignment, align)
         offset = (offset + align - 1) // align * align
         offsets[name] = offset
         offset += size
     size = (offset + alignment - 1) // alignment * alignment
+    if size > 4096:
+        raise RuntimeError('GLSL ES uniform exceeds fullscreen bounds')
     return {'block': match.group(1), 'offsets': offsets, 'size': size, 'alignment': alignment, 'binding': 0}
 
 

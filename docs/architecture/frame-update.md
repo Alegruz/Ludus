@@ -1,6 +1,8 @@
 # Frame and tick updates
 
-Status: Proposed. Part of the [game world architecture](game-world.md).
+Status: Baseline implemented. Part of the [game world architecture](game-world.md).
+See [the reference guide](../../apps/world_demo/README.md) for the concrete API,
+bounds and policies; conditional extensions in this document remain proposed.
 
 A presentation frame services the platform and draws current state. A simulation
 tick advances gameplay by a fixed duration. The game specifies the phase sequence

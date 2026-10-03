@@ -16,6 +16,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+int ExerciseInstalledWorld() noexcept;
+
 // Exercise the installed Ludus::Input SDK through public headers only: define a
 // button map, focus, ingest a short tap, consume one step, and check held/edge
 // results and an in-memory rebind. Returns 0 on success, 6 on any input failure.
@@ -185,6 +187,10 @@ int main()
         return 1;
     }
 
+    if (const int worldResult = ExerciseInstalledWorld(); worldResult != 0)
+    {
+        return worldResult;
+    }
     if (const int inputResult = ExerciseInstalledInput(); inputResult != 0)
     {
         return inputResult;

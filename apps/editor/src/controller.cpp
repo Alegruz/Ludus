@@ -6,6 +6,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonDocument>
 #include <QTimer>
 
 namespace ludus::editor
@@ -23,6 +24,10 @@ Phase PhaseFromStage(const QString& stage)
     if (stage == QStringLiteral("building"))
     {
         return Phase::Building;
+    }
+    if (stage == QStringLiteral("publishing"))
+    {
+        return Phase::Publishing;
     }
     if (stage == QStringLiteral("launching"))
     {
@@ -51,8 +56,12 @@ const char* PhaseName(Phase phase)
             return "Configuring";
         case Phase::Building:
             return "Building";
+        case Phase::Publishing:
+            return "Publishing";
         case Phase::Launching:
             return "Launching";
+        case Phase::Debugging:
+            return "Debugging";
         case Phase::Running:
             return "Running";
         case Phase::Stopping:
@@ -65,12 +74,38 @@ const char* PhaseName(Phase phase)
 } // namespace
 
 EditorController::EditorController(ToolingPaths tooling, QObject* parent)
-    : QObject(parent), Tooling_(std::move(tooling)), Tool_(this)
+    : QObject(parent), Tooling_(std::move(tooling)), Tool_(this), Play_(this)
 {
     // Bind tool events to this controller's lifetime; the queued connection
     // defers delivery to the next event-loop turn so a reentrant mutation from
     // inside a notification cannot corrupt state.
     connect(&Tool_, &ToolProcess::Event, this, &EditorController::OnToolEvent, Qt::QueuedConnection);
+    connect(&Play_, &PlayProcess::Event, this, &EditorController::OnPlayEvent);
+    connect(&Watch_, &SourceWatch::BuildRequested, this, &EditorController::BuildReload);
+    connect(&Watch_, &SourceWatch::Failed, this, [this](const QString& message) {
+        PlayState_.Message = message;
+        Publish();
+    });
+    connect(&Play_, &PlayProcess::Finished, this, [this](bool confirmed) {
+        PlayState_.Phase = confirmed ? PlayPhase::Stopped : PlayPhase::CleanupUnknown;
+        PlayState_.Properties = {};
+        PropertyRequest_.clear();
+        if (confirmed && !TuningDocumentDirty_)
+        {
+            TuningDocumentAvailable_ = false;
+            TuningDocumentDigest_.clear();
+            TuningCanUndo_ = TuningCanRedo_ = false;
+            PlayState_.TuningDocumentAvailable = false;
+            PlayState_.TuningDocumentDirty = false;
+            PlayState_.TuningCanUndo = PlayState_.TuningCanRedo = false;
+        }
+        else if (!confirmed && TuningDocumentDirty_)
+        {
+            PlayState_.Message =
+                QStringLiteral("Play supervisor exited with an unsaved tuning draft; recovery is unknown");
+        }
+        Publish();
+    });
     connect(
         &Tool_,
         &ToolProcess::Finished,
@@ -82,13 +117,25 @@ EditorController::EditorController(ToolingPaths tooling, QObject* parent)
             {
                 OpenProject(QDir(created).filePath(QStringLiteral("ludus.project.json")));
             }
+            const bool prompt = PendingDebuggerPrompt_;
+            PendingDebuggerPrompt_ = false;
             Publish();
+            if (prompt && Caps().CanBuildDebug && State_.Result.Code == ResultCode::MissingDebugger)
+            {
+                Q_EMIT DebuggerSetupRequested();
+            }
         },
         Qt::QueuedConnection);
 }
 
 void EditorController::Publish()
 {
+    if (PlayState_.Phase == PlayPhase::Stopped || PlayState_.Phase == PlayPhase::Stopping ||
+        PlayState_.Phase == PlayPhase::CleanupUnknown)
+    {
+        Watch_.Stop();
+    }
+    Watch_.SetBusy(!CanBuildReload());
     Q_EMIT StateChanged();
 }
 
@@ -131,8 +178,8 @@ void EditorController::OpenProject(const QString& descriptorPath)
     State_.DiscoveredPreset.clear();
     State_.Result = LastResult{};
     LUDUS_LOG_TEXT(LOG_EDITOR_CTRL, Info, "opened project (no project code executed)");
-    Publish();
     ScheduleSetupCheck();
+    Publish();
 }
 
 void EditorController::EditDraft(const ProjectDescriptor& draft)
@@ -178,8 +225,8 @@ void EditorController::Save()
     State_.HasSaved = true;
     State_.Result = LastResult{};
     LUDUS_LOG_TEXT(LOG_EDITOR_CTRL, Info, "saved project");
-    Publish();
     ScheduleSetupCheck();
+    Publish();
 }
 
 void EditorController::Reload()
@@ -206,8 +253,8 @@ void EditorController::Reload()
     State_.ProjectEpoch += 1;
     State_.DiscoveredTargets.clear();
     State_.DiscoveredPreset.clear();
-    Publish();
     ScheduleSetupCheck();
+    Publish();
 }
 
 void EditorController::StartJob(ActionKind kind, ToolOperation operation, const ToolLaunch& options)
@@ -216,7 +263,16 @@ void EditorController::StartJob(ActionKind kind, ToolOperation operation, const 
     {
         return; // duplicate/invalid starts cannot create a second job
     }
+    PendingDebuggerPrompt_ = false;
     State_ = BeginJob(State_, kind);
+    SetupCheckJob_ = operation == ToolOperation::ProjectCheck || operation == ToolOperation::ProjectSetup ||
+                             operation == ToolOperation::InspectSetup
+                         ? State_.ActiveJob
+                         : 0;
+    if (SetupCheckJob_ != 0)
+    {
+        State_.SetupStatus = QStringLiteral("Checking selectable CMake presets and local toolchain…");
+    }
     Commands_.clear();
     Transitions_.clear();
     LastPid_ = 0;
@@ -249,22 +305,43 @@ void EditorController::ScheduleSetupCheck()
 {
     // Open/Reload remain metadata operations. Queue the trusted read-only check
     // with an epoch guard so a later project switch cannot check the old project.
+    SetupCheckPending_ = QFileInfo::exists(Tooling_.AdapterPath);
+    State_.SetupStatus = SetupCheckPending_
+                             ? QStringLiteral("CMake setup check pending")
+                             : QStringLiteral("Setup validation unavailable: managed editor tooling is missing");
     const uint64 epoch = State_.ProjectEpoch;
     QTimer::singleShot(0, this, [this, epoch]() {
-        if (State_.ProjectEpoch == epoch && QFileInfo::exists(Tooling_.AdapterPath))
+        if (State_.ProjectEpoch == epoch)
         {
-            CheckProjectSetup();
+            const bool pending = SetupCheckPending_;
+            SetupCheckPending_ = false;
+            if (pending && State_.Saved.Version == 2)
+            {
+                CheckProjectSetup();
+            }
+            else if (pending && State_.Saved.ProviderKind == Provider::Cmake && Caps().CanConfigure)
+            {
+                StartJob(ActionKind::Configure, ToolOperation::InspectSetup);
+            }
+            Publish();
         }
     });
 }
 
 void EditorController::CheckProjectSetup()
 {
-    StartJob(ActionKind::ProjectCheck, ToolOperation::ProjectCheck);
+    if (Caps().CanProjectCheck)
+    {
+        StartJob(ActionKind::ProjectCheck, ToolOperation::ProjectCheck);
+    }
 }
 
 void EditorController::SetupProject(const QString& sdk, const QString& webSdk, bool prepareEngine)
 {
+    if (!Caps().CanProjectSetup)
+    {
+        return;
+    }
     ToolLaunch options;
     options.SetupSdk = sdk;
     options.SetupWebSdk = webSdk;
@@ -274,7 +351,7 @@ void EditorController::SetupProject(const QString& sdk, const QString& webSdk, b
 
 void EditorController::CreateProject(const ProjectCreationOptions& creation)
 {
-    if (Tool_.Active() || !CanStartJob(State_, ActionKind::ProjectCreate))
+    if (!Caps().CanProjectCreate)
     {
         return;
     }
@@ -289,19 +366,44 @@ void EditorController::CreateProject(const ProjectCreationOptions& creation)
 
 void EditorController::Configure()
 {
-    StartJob(ActionKind::Configure, ToolOperation::Configure);
+    if (Caps().CanConfigure)
+    {
+        StartJob(ActionKind::Configure, ToolOperation::Configure);
+    }
 }
 void EditorController::Build()
 {
-    StartJob(ActionKind::Build, ToolOperation::Build);
+    if (Caps().CanBuild)
+    {
+        StartJob(ActionKind::Build, ToolOperation::Build);
+    }
 }
 void EditorController::BuildRun()
 {
-    StartJob(ActionKind::BuildRun, ToolOperation::BuildRun);
+    if (Caps().CanBuildRun)
+    {
+        StartJob(ActionKind::BuildRun, ToolOperation::BuildRun);
+    }
+}
+
+void EditorController::BuildDebug(const QString& debugger, bool setup)
+{
+    if (!Caps().CanBuildDebug)
+    {
+        return;
+    }
+    ToolLaunch options;
+    options.DebuggerPath = debugger;
+    options.SetupDebugger = setup;
+    StartJob(ActionKind::BuildDebug, ToolOperation::BuildDebug, options);
 }
 
 void EditorController::SetupRelease(const QString& platform, const QString& itchTarget)
 {
+    if (!Caps().CanReleaseInit)
+    {
+        return;
+    }
     ToolLaunch options;
     options.ReleasePlatform = platform;
     options.ItchTarget = itchTarget;
@@ -310,6 +412,10 @@ void EditorController::SetupRelease(const QString& platform, const QString& itch
 
 void EditorController::PackageRelease(const QString& profile, const QString& version, const QString& sdk)
 {
+    if (!Caps().CanPackage)
+    {
+        return;
+    }
     ToolLaunch options;
     options.ReleaseProfile = profile;
     options.ReleaseVersion = version;
@@ -319,8 +425,36 @@ void EditorController::PackageRelease(const QString& profile, const QString& ver
 
 void EditorController::Stop()
 {
+    Watch_.Stop();
+    if (Play_.Active() && TuningDocumentDirty_ &&
+        (PlayState_.Phase == PlayPhase::Stopped || PlayState_.Phase == PlayPhase::Starting))
+    {
+        PlayState_.Message = QStringLiteral("Save or discard the tuning draft before closing Play");
+        Publish();
+        return;
+    }
+    if (Play_.Active() && (PlayState_.Phase == PlayPhase::Running || PlayState_.Phase == PlayPhase::Paused ||
+                           (PlayState_.Phase == PlayPhase::CleanupUnknown && Play_.CanBeginSession())))
+    {
+        PlayState_.Phase = PlayPhase::Stopping;
+        const auto request = NextPlayRequest();
+        if (!Play_.Send(
+                {{QStringLiteral("type"), QStringLiteral("command")},
+                 {QStringLiteral("request"), request},
+                 {QStringLiteral("command"), QJsonObject{{QStringLiteral("command"), QStringLiteral("Stop")}}}}))
+        {
+            PlayState_.Phase = PlayPhase::CleanupUnknown;
+            PlayState_.Message = QStringLiteral("Stop could not be queued; inspect Play status");
+        }
+    }
+    else if (GenerationJob_ || Play_.Active())
+    {
+        PlayState_.Phase = PlayPhase::Stopping;
+        Play_.Close();
+    }
     if (State_.ActiveJob == 0)
     {
+        Publish();
         return;
     }
     // Latch stop first so a late success cannot launch; the latched state wins
@@ -406,6 +540,21 @@ void EditorController::OnToolEvent(const ProtocolEvent& event)
             }
             break;
         }
+        case ProtocolEvent::Type::DebuggerStarted: {
+            LastPid_ = event.Pid;
+            State_ = ApplyDebuggerStarted(State_, event.Job);
+            if (Transitions_.size() < 256)
+            {
+                Transitions_.append(QString::fromLatin1(PhaseName(State_.OperationPhase)));
+            }
+            break;
+        }
+        case ProtocolEvent::Type::Generation:
+            if (GenerationJob_ && !State_.StopLatched)
+            {
+                PublishedGeneration_ = event.GenerationPath;
+            }
+            break;
         case ProtocolEvent::Type::Result: {
             LastResult result;
             result.Stage = State_.OperationPhase;
@@ -430,7 +579,31 @@ void EditorController::OnToolEvent(const ProtocolEvent& event)
             {
                 result.Kind = Outcome::CleanupUnknown;
             }
+            PendingDebuggerPrompt_ = State_.ActiveAction == ActionKind::BuildDebug && !State_.StopLatched &&
+                                     result.Kind == Outcome::Failed && result.Code == ResultCode::MissingDebugger &&
+                                     result.CleanupConfirmed;
+            if (event.Job == SetupCheckJob_)
+            {
+                State_.SetupStatus = result.Kind == Outcome::Success
+                                         ? QStringLiteral("CMake setup ready: %1").arg(result.Message)
+                                         : QStringLiteral("CMake setup needs attention: %1").arg(result.Message);
+                SetupCheckJob_ = 0;
+            }
             State_ = ApplyResult(State_, event.Job, result);
+            if (GenerationJob_)
+            {
+                GenerationJob_ = false;
+                if (result.Kind == Outcome::Success && PlayState_.Phase != PlayPhase::Stopping &&
+                    !PublishedGeneration_.isEmpty())
+                {
+                    ActivateGeneration(PublishedGeneration_);
+                }
+                else if (!Play_.Active())
+                {
+                    PlayState_.Phase = result.CleanupConfirmed ? PlayPhase::Stopped : PlayPhase::CleanupUnknown;
+                }
+                PublishedGeneration_.clear();
+            }
             break;
         }
         case ProtocolEvent::Type::Error: {
@@ -440,6 +613,11 @@ void EditorController::OnToolEvent(const ProtocolEvent& event)
             result.Code = event.Code;
             result.Message = event.Message;
             result.CleanupConfirmed = event.Code != ResultCode::CleanupUnknown;
+            if (SetupCheckJob_ != 0)
+            {
+                State_.SetupStatus = QStringLiteral("CMake setup validation unavailable: %1").arg(event.Message);
+                SetupCheckJob_ = 0;
+            }
             if (State_.ActiveJob != 0)
             {
                 State_ = ApplyResult(State_, State_.ActiveJob, result);
@@ -447,6 +625,11 @@ void EditorController::OnToolEvent(const ProtocolEvent& event)
             else
             {
                 State_.Result = result;
+            }
+            GenerationJob_ = false;
+            if (!Play_.Active() && PlayState_.Phase != PlayPhase::Stopped)
+            {
+                PlayState_.Phase = event.CleanupConfirmed ? PlayPhase::Stopped : PlayPhase::CleanupUnknown;
             }
             break;
         }
@@ -462,6 +645,18 @@ QString EditorController::JobDetails() const
     QString out;
     out += QStringLiteral("job: %1\n").arg(State_.ActiveJob, 16, 16, QLatin1Char('0'));
     out += QStringLiteral("descriptor_digest: %1\n").arg(State_.SavedDigest);
+    out += QStringLiteral("play_epoch: %1\nplay_session: %2\nplay_generation: %3\nplay_status: %4\n")
+               .arg(PlayState_.Epoch, 16, 16, QLatin1Char('0'))
+               .arg(PlayState_.Session, PlayState_.Generation, PlayState_.Message);
+    out += QStringLiteral("play_details: %1\n")
+               .arg(QString::fromUtf8(QJsonDocument(PlayState_.HostStatus).toJson(QJsonDocument::Compact)));
+    out += QStringLiteral("play_host_pid: %1\nplay_sdk_identity: %2\nplay_host_cwd: %3\n")
+               .arg(PlayState_.HostPid)
+               .arg(PlayState_.SdkIdentity, PlayState_.HostCwd);
+    for (const auto& argument : PlayState_.HostArgv)
+    {
+        out += QStringLiteral("play_host_argv: %1\n").arg(argument);
+    }
     out += QStringLiteral("provider: %1\n")
                .arg(State_.Saved.ProviderKind == Provider::Ludus ? QStringLiteral("ludus") : QStringLiteral("cmake"));
     out += QStringLiteral("preset: %1\n").arg(State_.Saved.Preset);
