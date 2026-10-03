@@ -111,6 +111,10 @@ Status ReadAt(int directory, const char* path, usize cap, Bytes& output) noexcep
 #endif
 Status ReadFile(std::string_view root, std::string_view path, usize cap, Bytes& output) noexcept
 {
+    if (root.empty() || !ValidPath(path))
+    {
+        return Status::Invalid;
+    }
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
     Fd directory;
     Text<1024> leaf;
@@ -127,6 +131,10 @@ Status ReadFile(std::string_view root, std::string_view path, usize cap, Bytes& 
 Status
 SaveFile(std::string_view root, std::string_view path, std::span<const uint8> data, const Digest* expected) noexcept
 {
+    if (root.empty() || !ValidPath(path))
+    {
+        return Status::Invalid;
+    }
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
     if (data.size() > usize{32} * 1024 * 1024)
     {
@@ -235,6 +243,10 @@ FileReader::~FileReader() noexcept
 }
 Status FileReader::Open(std::string_view root, std::string_view path) noexcept
 {
+    if (root.empty() || !ValidPath(path))
+    {
+        return Status::Invalid;
+    }
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
     Fd parent;
     Text<1024> leaf;

@@ -1024,7 +1024,7 @@ void AudioSystem::Impl::FillSnapshot(SystemSnapshot& out) const noexcept
             if (stream.InUse)
             {
                 s.StreamEncodedBytes += stream.Data->EncodedBytes;
-                s.StreamRingBytes += sizeof(internal::StreamChunk) * STREAM_CHUNK_COUNT;
+                s.StreamRingBytes += static_cast<uint64>(sizeof(internal::StreamChunk)) * STREAM_CHUNK_COUNT;
             }
         }
     }

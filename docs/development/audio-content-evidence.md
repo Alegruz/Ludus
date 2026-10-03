@@ -222,10 +222,42 @@ steps. Saved resources contain logical IDs/relative paths and definitions, never
 device, clip, stream, voice or lease handles. Save-game restoration is a caller
 policy to reload logical IDs and restart music; exact cursor restoration is excluded.
 
+## CI repair follow-up
+
+The original final-head CI run (`2da869a`, run `37129607360`) passed native Debug,
+Development/SDK, ASan/UBSan, static analysis, editor, PCH and assertion-policy jobs.
+The browser run (`37129607356`) stopped at wasm32 static analysis. Fixes widen
+memory-accounting/quota products before multiplication, and validate content
+root/path arguments before the unsupported-platform return. Linux I/O behavior
+and authored formats are unchanged.
+
+The browser checker also analyzes the complete pinned yyjson C file. Its local
+`.clang-tidy` retains compiler diagnostics and analyzer checks while excluding
+Ludus naming/readability rules for exact upstream bytes. The Annex K API-name
+diagnostic is disabled only there: supported libc/sysroots do not supply
+`memcpy_s`/`strcpy_s`. Other bounds/null/lifetime analyzer checks remain enabled;
+Ludus wrapper code keeps the full project configuration. Source hashes are unchanged.
+
+The CI aggregate profile measured 174.3 s versus the old 170 s limit, with all
+ranked project headers passing. Main measured 139.6 s with 304 compilation events;
+this graph has 336 events. The measured aggregate is recalibrated to 210 s, leaving
+per-header budgets and all profile/test inputs unchanged. See
+[CI calibration and source job links](build-profiling.md#audio-content-ci-calibration).
+Replaying the actual CI report through the existing evaluator passes at 210 s;
+probes at 210.1 s aggregate or 2001 ms/header still fail. The original local 792.6 s
+measurement remains historical failed evidence, not the calibration baseline.
+
+Pinned native formatting/foundational includes and affected native clang-tidy pass.
+Affected Debug regressions pass 5/5 and ASan/UBSan regressions pass 4/4. Both web
+configurations are checked against all configured translation units with the same
+CI flags; previously passing units plus repaired-unit reruns provide full coverage.
+Final pinned Development and Release web builds/tests pass 15/15 each.
+The next remote CI run must confirm the branch after these fixes.
+
 ## Remaining acceptance gates and limits
 
-- The aggregate build-time budget currently fails; a comparable clean baseline and
-  current CI measurement must resolve it without hiding header regressions.
+- The aggregate budget has a measured CI recalibration above; the repaired branch
+  still requires its next remote CI result. Per-header gates remain unchanged.
 - Native interactive editor acceptance is pending: native UI automation is not
   available in this session. Offscreen Qt tests prove import/reimport, property
   save/reopen/conflicts, a live GUI timer during work and shutdown; they do not

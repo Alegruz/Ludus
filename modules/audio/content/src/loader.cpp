@@ -161,14 +161,16 @@ struct Acquisition final
             clipDescriptor.SourceLoopEnd = loop.End;
             const auto frames = Info[i].Frames;
             const auto sourceRate = Info[i].SampleRate;
-            if (frames / sourceRate > RESIDENT_PCM_CAP_BYTES / (sizeof(float32) * Info[i].Channels * Rate))
+            if (frames / sourceRate >
+                RESIDENT_PCM_CAP_BYTES / (static_cast<uint64>(sizeof(float32)) * Info[i].Channels * Rate))
             {
                 Result = ContentStatus::Limit;
                 return;
             }
             const auto targetFrames =
                 (frames / sourceRate) * Rate + ((frames % sourceRate) * Rate + sourceRate - 1) / sourceRate + 2;
-            if (targetFrames > (RESIDENT_PCM_CAP_BYTES - preparedTotal) / (sizeof(float32) * Info[i].Channels))
+            if (targetFrames >
+                (RESIDENT_PCM_CAP_BYTES - preparedTotal) / (static_cast<uint64>(sizeof(float32)) * Info[i].Channels))
             {
                 Result = ContentStatus::Limit;
                 return;

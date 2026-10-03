@@ -1,0 +1,7 @@
+# Preserve the hash-locked upstream C source. Ludus naming/readability rules apply
+# to our wrapper; compiler diagnostics and analyzer checks still inspect the parser.
+InheritParentConfig: true
+# Annex K memcpy_s/strcpy_s are unavailable in the supported libc/sysroots. This
+# name-only diagnostic does not inspect bounds; retain the other analyzer checks.
+Checks: '-*,clang-diagnostic-*,clang-analyzer-*,-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling'
+WarningsAsErrors: '*'

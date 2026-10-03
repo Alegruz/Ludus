@@ -107,7 +107,7 @@ DecodeResidentClip(std::span<const ludus::foundation::uint8> encoded, SourceForm
     }
 
     // Guard the sample-value product against overflow before allocating.
-    if (totalFrames > RESIDENT_PCM_CAP_BYTES / (channels * sizeof(float32)))
+    if (totalFrames > RESIDENT_PCM_CAP_BYTES / (static_cast<uint64>(channels) * sizeof(float32)))
     {
         ma_decoder_uninit(&decoder);
         out.Result = Status::AssetCapacity;
