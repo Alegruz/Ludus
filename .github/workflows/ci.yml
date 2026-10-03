@@ -52,6 +52,19 @@ jobs:
         run: out/host-tools/venv/bin/ctest --preset linux-clang-development --no-tests=error
       - name: Validate installed SDK and consumer
         run: ./scripts/install-sdk linux-clang-development
+      - name: Verify installed shader toolchain and generated backend contracts
+        run: |
+          ./scripts/shader-probe bootstrap
+          ./scripts/bootstrap-spirv-cross
+          python3 tests/sdk_consumer/verify_shader_build.py \
+            --sdk "$PWD/out/install/linux-clang-development" \
+            --cmake "$PWD/out/host-tools/venv/bin/cmake" \
+            --ninja "$PWD/out/host-tools/venv/bin/ninja" \
+            --cxx "$PWD/out/host-tools/bin/clang++" \
+            --slang "$PWD/out/shader-tools/slang/bin/slangc" \
+            --validator "$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
+            --spirv-cross "$PWD/out/shader-tools/spirv-cross/bin/spirv-cross" \
+            --conan "$PWD/out/conan/linux-clang-development"
       - name: Report compiler cache
         if: always()
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"

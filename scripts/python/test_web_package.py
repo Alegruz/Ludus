@@ -44,6 +44,11 @@ class PackageTests(unittest.TestCase):
         header.write_text("// BSD 3-Clause License\n#ifndef WEBGPU_H_\n")
         (self.root / "config").mkdir()
         (self.root / "config/web_toolchain.json").write_text('{"emscripten":"test"}')
+        (self.root / "config/shader_toolchain.json").write_text('{"slang":{"version":"test"}}')
+        (self.root / "config/spirv_cross_toolchain.json").write_text('{"spirv_cross":{"tag":"test"}}')
+        notice = self.root / "out/shader-tools/spirv-cross/LICENSE"
+        notice.parent.mkdir(parents=True)
+        notice.write_text("test translator notice")
 
     def test_repeatable_exact_archive_and_manifest(self):
         self.prepare()

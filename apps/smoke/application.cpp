@@ -19,15 +19,22 @@ void Application::Shutdown() noexcept
 void Application::Fail(State state, rhi::StartupError error) noexcept
 {
     LUDUS_LOG_ERROR(logging::LOG_CORE, "Smoke application stopped: graphics error {}", static_cast<uint32>(error));
+    // Capture the bounded per-attempt diagnostics before Shutdown clears the RHI
+    // session, so QA metadata (which browser paths were tried, and why) survives.
+    const auto startup = rhi::GetStartup();
+    mWebGpuError = startup.WebGpu.Error;
+    mWebGl2Error = startup.WebGL2.Error;
     Shutdown();
     mState = state;
     mError = error;
 }
-bool Application::Start() noexcept
+bool Application::Start(rhi::BackendSelection selection) noexcept
 {
     Shutdown();
     mSimulation = {};
     mFrames = 0;
+    mWebGpuError = rhi::StartupError::None;
+    mWebGl2Error = rhi::StartupError::None;
     platform::WindowManager manager;
     if (!manager.Initialize({}) || !manager.CreateWindow(
                                        {
@@ -40,7 +47,7 @@ bool Application::Start() noexcept
         Fail(State::Failed, rhi::StartupError::InvalidWindow);
         return false;
     }
-    const auto started = rhi::Start({ .Name = "Smoke App", .Version = 1 }, mWindow->GetNativeWindowInfo());
+    const auto started = rhi::Start({ .Name = "Smoke App", .Version = 1 }, mWindow->GetNativeWindowInfo(), selection);
     if (started != rhi::StartStatus::Ready && started != rhi::StartStatus::Pending)
     {
         Fail(State::Failed, rhi::GetStartup().Error);
@@ -87,7 +94,12 @@ State Application::Tick() noexcept
     }
     mState = State::Playing;
     platform::browser::WindowState input;
-    if (startup.SelectedBackend == rhi::Backend::WebGPU)
+    // Browser input/framebuffer handling applies to any browser backend, not
+    // just WebGPU. The window being a browser canvas (not the selected graphics
+    // backend) is what determines whether to read browser state.
+    const bool browser =
+        startup.SelectedBackend == rhi::Backend::WebGPU || startup.SelectedBackend == rhi::Backend::WebGL2;
+    if (browser)
     {
         (void)mWindow->SetBrowserFramebufferLimit(startup.MaxTextureDimension2D);
         (void)mWindow->GetBrowserState(input);

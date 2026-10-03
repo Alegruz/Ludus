@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Explicit acquisition/build of the SDK's pinned offline GLSL ES translator."""
+import hashlib
+import json
+import platform
+from pathlib import Path
+import subprocess
+import tarfile
+import urllib.request
+
+ROOT = Path(__file__).resolve().parent.parent
+pin = json.loads((ROOT / 'config/spirv_cross_toolchain.json').read_text())['spirv_cross']
+if platform.system() != 'Linux' or platform.machine() != 'x86_64':
+    raise SystemExit('Pinned bootstrap currently supports Linux x86_64 only')
+tools = ROOT / 'out/shader-tools'
+archive = tools / 'spirv-cross-src/spirv-cross.tar.gz'
+archive.parent.mkdir(parents=True, exist_ok=True)
+def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
+if not archive.exists() or digest(archive) != pin['source_sha256']:
+    temporary = archive.with_suffix('.download')
+    urllib.request.urlretrieve(pin['source_url'], temporary)
+    if digest(temporary) != pin['source_sha256']:
+        raise SystemExit('SPIRV-Cross source archive integrity failure')
+    temporary.replace(archive)
+source = archive.parent / 'source'
+source.mkdir(exist_ok=True)
+with tarfile.open(archive) as contents:
+    contents.extractall(source, filter='data')
+roots = [p for p in source.iterdir() if p.is_dir()]
+if len(roots) != 1: raise SystemExit('Unexpected source archive layout')
+cmake = ROOT / 'out/host-tools/venv/bin/cmake'
+build = tools / 'spirv-cross-build'
+destination = tools / 'spirv-cross'
+subprocess.run([str(cmake), '-S', str(roots[0]), '-B', str(build), '-G', 'Ninja',
+    '-DCMAKE_MAKE_PROGRAM=' + str(ROOT/'out/host-tools/venv/bin/ninja'),
+    '-DCMAKE_CXX_COMPILER=clang++-18', '-DCMAKE_C_COMPILER=clang-18',
+    '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_INSTALL_PREFIX=' + str(destination),
+    '-DSPIRV_CROSS_ENABLE_TESTS=OFF', '-DSPIRV_CROSS_ENABLE_HLSL=ON',
+    '-DSPIRV_CROSS_ENABLE_MSL=ON', '-DSPIRV_CROSS_ENABLE_CPP=ON'], check=True)
+subprocess.run([str(cmake), '--build', str(build), '-j', '4'], check=True)
+subprocess.run([str(cmake), '--install', str(build)], check=True)
+(destination / 'LICENSE').write_bytes((roots[0]/'LICENSE').read_bytes())
+binary = (destination / 'bin/spirv-cross').resolve()
+manifest = {key:pin[key] for key in ('tag', 'commit', 'source_sha256')}
+manifest['binary_sha256'] = digest(binary)
+manifest['compiler'] = subprocess.check_output(['clang++-18','--version'], text=True).splitlines()[0]
+Path(str(binary) + '.build.json').write_text(json.dumps(manifest, indent=2)+'\n')
+print(binary)

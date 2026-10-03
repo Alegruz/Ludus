@@ -52,12 +52,59 @@ def uniform_size(path):
     return size
 
 
+# Independent std140 derivation from the emitted GLSL ES block. Deliberately
+# narrow for the fullscreen contract, not a general GLSL parser. Does not borrow
+# SPIR-V/WGSL offsets; the backend re-checks against the real linked program.
+GLSL_ES_KINDS = {'float': (4, 4), 'vec2': (8, 8), 'vec3': (12, 16), 'vec4': (16, 16)}
+
+
+def glsl_es_layout(code):
+    match = re.search(r'uniform\s+(\w+)\s*\{([^}]+)\}', code)
+    if match is None:
+        return {'block': None, 'offsets': {}, 'size': 0, 'alignment': 16, 'binding': 0}
+    if re.search(r'layout\(std140\)\s+uniform\s+' + re.escape(match.group(1)), code) is None:
+        raise RuntimeError('GLSL ES uniform block is not std140')
+    members = re.findall(r'(?:highp\s+|mediump\s+|lowp\s+)?(vec[234]|float)\s+(\w+)\s*;', match.group(2))
+    offset = 0
+    alignment = 16
+    offsets = {}
+    if len(members) != len([part for part in match.group(2).split(";") if part.strip()]):
+        raise RuntimeError("GLSL ES layout contains unsupported field types; refusing an inferred layout")
+    for kind, name in members:
+        size, align = GLSL_ES_KINDS[kind]
+        alignment = max(alignment, align)
+        offset = (offset + align - 1) // align * align
+        offsets[name] = offset
+        offset += size
+    size = (offset + alignment - 1) // alignment * alignment
+    return {'block': match.group(1), 'offsets': offsets, 'size': size, 'alignment': alignment, 'binding': 0}
+
+
+def glsl_es_contract(code):
+    # One std140 uniform block at binding 0, a `main` entry, no desktop-only
+    # extensions or base-vertex/instance builtins unsupported by WebGL 2.
+    for forbidden in ('GL_ARB_shader_draw_parameters', 'gl_BaseVertex', 'gl_BaseInstance'):
+        if forbidden in code:
+            raise RuntimeError('GLSL ES uses a feature outside the WebGL 2 contract: ' + forbidden)
+    if not code.lstrip().startswith('#version 300 es'):
+        raise RuntimeError('GLSL ES artifact is not version 300 es')
+    if re.search(r'\bvoid\s+main\s*\(', code) is None:
+        raise RuntimeError('GLSL ES entry point is not main')
+    blocks = re.findall(r'uniform\s+\w+\s*\{', code)
+    if len(blocks) > 1:
+        raise RuntimeError('Emitted GLSL ES exceeds the single-block fullscreen contract')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for key in ('source', 'output', 'name', 'vertex', 'fragment', 'compiler', 'validator', 'lock'):
         parser.add_argument('--' + key, required=True)
     parser.add_argument('--include', action='append', default=[])
     parser.add_argument('--define', action='append', default=[])
+    # Optional build-time SPIR-V -> GLSL ES 3.00 translator for the WebGL 2
+    # browser backend artifact. When absent, SPIR-V/WGSL builds are unchanged.
+    parser.add_argument('--spirv-cross')
+    parser.add_argument('--spirv-cross-lock')
     args = parser.parse_args()
     lock = json.loads(Path(args.lock).read_text())
     if run([args.compiler, '-version']).strip() != lock['slang']['version']:
@@ -66,6 +113,18 @@ def main():
         raise RuntimeError('SPIR-V validator differs from SDK pin')
     if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', args.name):
         raise RuntimeError('Invalid shader name')
+    cross_lock = None
+    if args.spirv_cross:
+        if not args.spirv_cross_lock:
+            raise RuntimeError('GLSL ES build requires --spirv-cross-lock to pin the translator')
+        cross_lock = json.loads(Path(args.spirv_cross_lock).read_text())['spirv_cross']
+        tool = Path(args.spirv_cross).resolve()
+        build = json.loads(Path(str(tool) + '.build.json').read_text())
+        for key in ('tag', 'commit', 'source_sha256'):
+            if build.get(key) != cross_lock[key]:
+                raise RuntimeError('SPIRV-Cross source identity differs from SDK pin')
+        if build.get('binary_sha256') != hashlib.sha256(tool.read_bytes()).hexdigest():
+            raise RuntimeError('SPIRV-Cross binary differs from verified build')
     output = Path(args.output); output.mkdir(parents=True, exist_ok=True)
     extra = [part for path in args.include for part in ('-I', path)] + ['-D' + value for value in args.define]
     commands = []; dependencies = []
@@ -91,6 +150,52 @@ def main():
     wgsl_entries = dict(re.findall(r'@(vertex|fragment)\s+fn\s+(\w+)', code))
     if set(wgsl_entries) != {'vertex', 'fragment'}:
         raise RuntimeError('Expected one vertex and one fragment WGSL entry')
+
+    # Optional GLSL ES 3.00 artifacts (WebGL 2). Each stage is translated from the
+    # GLSL-specific validated SPIR-V by the pinned translator. LUDUS_GLSL_ES
+    # permits the authored source to normalize fragment coordinates without
+    # patching generated text. Its depfiles also participate in rebuilds.
+    glsl_es = {}
+    glsl_es_entries = {}
+    glsl_es_layout_data = None
+    if args.spirv_cross:
+        for stage in ('vertex', 'fragment'):
+            essl = output / f'{args.name}.{stage}.essl'
+            binary = output / f'{args.name}.{stage}.glsl-es.spv'
+            depfile = output / f'{stage}.glsl-es.d'
+            command = [args.compiler, args.source, '-target', 'spirv', '-profile', 'spirv_1_3',
+                       '-entry', args.vertex if stage == 'vertex' else args.fragment, '-stage', stage,
+                       '-D', 'LUDUS_GLSL_ES=1', '-o', str(binary), '-reflection-json',
+                       str(output / f'{stage}.glsl-es.reflection.json'), '-depfile', str(depfile), *extra]
+            commands.append(command); run(command)
+            run([args.validator, '--target-env', 'vulkan1.1', str(binary)])
+            dependencies.append(depfile.read_text().split(':', 1)[1].strip())
+            command = [args.spirv_cross, '--version', '300', '--es', '--fixup-clipspace', '--output', str(essl), str(binary)]
+            commands.append(command); run(command)
+            text = essl.read_text()
+            glsl_es_contract(text)
+            glsl_es[stage] = text
+            # Generated GLSL ES always links through main.
+            glsl_es_entries[stage] = 'main'
+        glsl_es_layout_data = glsl_es_layout(glsl_es['fragment'])
+        if glsl_es_layout_data['size'] != sizes['fragment']:
+            raise RuntimeError('GLSL ES std140 block size differs from the reflected uniform size')
+        if glsl_es_layout_data['binding'] != 0:
+            raise RuntimeError('GLSL ES uniform block is not at binding 0')
+        sizes['glsl_es'] = glsl_es_layout_data['size']
+        if sizes['glsl_es'] != sizes['wgsl']:
+            raise RuntimeError('GLSL ES and WGSL uniform upload sizes differ')
+        for target in ('vertex', 'fragment', 'wgsl'):
+            reflected = json.loads((output / f'{target}.reflection.json').read_text())
+            if reflected.get('parameters'):
+                fields = reflected['parameters'][0]['type']['elementType']['fields']
+                offsets = {field['name']: field['binding']['offset'] for field in fields}
+                if offsets != glsl_es_layout_data['offsets']:
+                    raise RuntimeError('Per-target uniform member offsets differ from GLSL ES std140')
+        vertex_layout = glsl_es_layout(glsl_es['vertex'])
+        if vertex_layout['size'] and vertex_layout != glsl_es_layout_data:
+            raise RuntimeError('GLSL ES stage uniform layouts differ')
+
     header = '#pragma once\n#include <ludus/foundation/base/config.h>\n#include <ludus/graphics/rhi/render.h>\n'
     header += f'namespace ludus::shaders::{args.name} {{\n#if !defined(LUDUS_PLATFORM_WEB)\n'
     for stage in ('vertex', 'fragment'):
@@ -100,21 +205,41 @@ def main():
         header += ',\n'.join('    ' + ', '.join(f'0x{x:08x}U' for x in words[i:i+8]) for i in range(0, len(words), 8)) + '\n};\n'
     if ')LUDUS_WGSL"' in code:
         raise RuntimeError('WGSL conflicts with header delimiter')
-    header += '#else\ninline constexpr char WGSL[] = R"LUDUS_WGSL(' + code + ')LUDUS_WGSL";\n#endif\n'
+    header += '#else\ninline constexpr char WGSL[] = R"LUDUS_WGSL(' + code + ')LUDUS_WGSL";\n'
+    if args.spirv_cross:
+        # C++ raw-string delimiters are limited to 16 characters; keep them short.
+        delimiters = {'vertex': 'LUDUS_ESV', 'fragment': 'LUDUS_ESF'}
+        for stage in ('vertex', 'fragment'):
+            text = glsl_es[stage]
+            delimiter = delimiters[stage]
+            if f'){delimiter}"' in text:
+                raise RuntimeError('GLSL ES conflicts with header delimiter')
+            header += f'inline constexpr char {stage.upper()}_GLSL_ES[] = R"{delimiter}(' + text + f'){delimiter}";\n'
+    header += '#endif\n'
     for stage in ('vertex', 'fragment'):
         header += f'inline graphics::rhi::ShaderDescription {stage.title()}() noexcept {{\n graphics::rhi::ShaderDescription result; result.Stage = graphics::rhi::ShaderStage::{stage.title()};\n'
-        wgsl_size = sizes['wgsl']
-        header += f'#if defined(LUDUS_PLATFORM_WEB)\n result.UniformSize = {wgsl_size}; result.Wgsl = WGSL; result.WgslEntry = "{wgsl_entries[stage]}";\n#else\n result.UniformSize = {sizes[stage]}; result.Spirv = {stage.upper()}_SPIRV; result.SpirvEntry = "{entries[stage]}";\n#endif\n return result;\n}}\n'
+        header += '#if defined(LUDUS_PLATFORM_WEB)\n'
+        header += f' result.UniformSize = {sizes["wgsl"]}; result.Wgsl = WGSL; result.WgslEntry = "{wgsl_entries[stage]}";\n'
+        if args.spirv_cross:
+            header += f' result.GlslEs = {stage.upper()}_GLSL_ES; result.GlslEsEntry = "{glsl_es_entries[stage]}";\n'
+        header += f'#else\n result.UniformSize = {sizes[stage]}; result.Spirv = {stage.upper()}_SPIRV; result.SpirvEntry = "{entries[stage]}";\n#endif\n return result;\n}}\n'
     header += '}\n'
     target = output / f'{args.name}.h'
     # Header last: failed compiler/validator never presents a completed build output.
     target.write_text(header)
     escaped_target = str(target).replace(' ', '\\ ').replace('#', '\\#')
     (output / 'shader.d').write_text(escaped_target + ': ' + ' '.join(dependencies) + '\n')
-    (output / 'manifest.json').write_text(json.dumps({'compiler': lock['slang'], 'commands': commands,
+    manifest = {'compiler': lock['slang'], 'commands': commands,
         'uniform_sizes': sizes, 'spirv_entries': entries, 'wgsl_entries': wgsl_entries, 'profiles': {'spirv': 'spirv_1_3', 'wgsl': 'sm_6_0'},
-        'sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in output.iterdir() if p.suffix in ('.spv', '.wgsl')},
-        'layout': 'See separate per-target reflection JSON; never assume packing equality.'}, indent=2) + '\n')
+        'sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in output.iterdir() if p.suffix in ('.spv', '.wgsl', '.essl')},
+        'layout': 'See separate per-target reflection JSON; never assume packing equality.'}
+    if args.spirv_cross:
+        manifest['profiles']['glsl_es'] = '300 es'
+        manifest['glsl_es_entries'] = glsl_es_entries
+        manifest['glsl_es_translator'] = {'tag': cross_lock.get('tag'), 'commit': cross_lock.get('commit'),
+                                          'source_sha256': cross_lock.get('source_sha256')}
+        manifest['glsl_es_layout'] = glsl_es_layout_data
+    (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
 if __name__ == '__main__':
     try:

@@ -1,0 +1,300 @@
+#include "internal/backend.h"
+#include "internal/lifecycle.h"
+#include "internal/resources.h"
+#include "internal/web_backends.h"
+#include "internal/webgpu_probe.h"
+#include <ludus/foundation/base/core.h>
+#include <ludus/foundation/logging/log_format.hpp>
+#include <ludus/graphics/rhi/render.h>
+#include <ludus/graphics/rhi/rhi.h>
+#include <ludus/platform/browser/window.h>
+
+#include <span>
+
+#include <webgpu/webgpu.h>
+
+// Browser Auto dispatcher. It routes the backend:: facade contract to one of two
+// sub-backends (webgpu, webgl) compiled into the same artifact, and implements
+// the WebGPU -> WebGL 2 startup fallback policy. Forced selections pin a single
+// sub-backend. Native builds never compile this TU.
+namespace ludus::graphics::rhi::backend
+{
+namespace
+{
+using namespace ludus::foundation;
+constexpr logging::LogCategory LOG_RHI{"RHI-Web"};
+
+// The sub-backend currently bound for Kind()/resource/frame dispatch. Null until
+// a backend commits (an attempt is in flight) and after shutdown.
+Backend gActive = Backend::WebGPU;
+bool gBound = false;
+
+// Session context captured for a possible Auto fallback from WebGPU to WebGL 2.
+BackendSelection gSelection = BackendSelection::Auto;
+ApplicationInfo gApp;
+WindowInfo gWindow;
+bool gWebGlTried = false;
+
+bool IsCapabilityFailure(StartupError error) noexcept
+{
+    // Only genuine "this backend cannot start here" conditions trigger fallback.
+    // Shader/validation and invalid-call defects are never concealed by it.
+    return error == StartupError::InstanceUnavailable || error == StartupError::AdapterUnavailable ||
+           error == StartupError::DeviceUnavailable || error == StartupError::SurfaceUnavailable ||
+           error == StartupError::RenderingUnavailable || error == StartupError::DeviceLost;
+}
+
+StartupError StartWebGl(uint32 token, bool afterWebGpu) noexcept
+{
+    // Mark the attempt before preparation: a failed canvas swap must finalize
+    // this attempt rather than recursively initiating another fallback.
+    gWebGlTried = true;
+    gActive = Backend::WebGL2;
+    internal::SelectBackend(token, Backend::WebGL2);
+    // A WebGPU attempt may have committed the canvas to the 'webgpu' context
+    // mode, which blocks 'webgl2' on the same node. Ask Platform (which owns the
+    // DOM node and its listeners) to swap in a fresh canvas before the WebGL 2
+    // attempt. The forced-WebGL2 path (afterWebGpu == false) skips this.
+    if (afterWebGpu && gWindow.CanvasSelector != nullptr)
+    {
+        if (!ludus::platform::browser::ReplaceCanvas(gWindow.CanvasSelector))
+        {
+            internal::RecordAttempt(token, Backend::WebGL2, StartupError::SurfaceUnavailable);
+            return StartupError::SurfaceUnavailable;
+        }
+    }
+    gBound = true;
+    const auto error = webgl::Start(gApp, gWindow, token, gSelection);
+    internal::RecordAttempt(token, Backend::WebGL2, error);
+    return error;
+}
+
+// Fail() consults this before finalizing a Pending session. For Auto, a WebGPU
+// capability failure triggers exactly one WebGL 2 attempt on a fresh generation.
+bool Fallback(uint32 token, StartupError error) noexcept
+{
+    if (gSelection != BackendSelection::Auto || gActive != Backend::WebGPU || gWebGlTried ||
+        !IsCapabilityFailure(error))
+    {
+        return false;
+    }
+    LUDUS_LOG_WARN(LOG_RHI, "WebGPU unavailable; attempting WebGL 2 fallback");
+    internal::RecordAttempt(token, Backend::WebGPU, error);
+    // Invalidate the old attempt BEFORE teardown, which may synchronously deliver
+    // a device-lost callback. Advance to a fresh generation so any late callback
+    // (carrying the old token) is dropped and cannot kill the WebGL 2 attempt.
+    const auto next = internal::Reissue(token);
+    if (next == 0)
+    {
+        return false;
+    }
+    webgpu::Shutdown();
+    gBound = false;
+    const auto error2 = StartWebGl(next, true);
+    if (error2 != StartupError::None)
+    {
+        // The one WebGL 2 attempt also failed; finalize against the current token.
+        internal::Fail(next, error2);
+    }
+    return true;
+}
+} // namespace
+
+Backend Kind() noexcept
+{
+    return gActive;
+}
+bool Supports(BackendSelection selection) noexcept
+{
+    switch (selection)
+    {
+        case BackendSelection::Auto:
+        case BackendSelection::WebGPU:
+        case BackendSelection::WebGL2:
+            return true;
+    }
+    return false;
+}
+StartupError
+Start(const ApplicationInfo& app, const WindowInfo& window, uint32 token, BackendSelection selection) noexcept
+{
+    if (window.System != platform::WindowSystem::WebCanvas || window.CanvasSelector == nullptr)
+    {
+        return StartupError::InvalidWindow;
+    }
+    // A restart may select a different API, or follow a lost context. Platform
+    // rebinds the canvas before either API acquires its one allowed context mode.
+    (void)platform::browser::ReplaceCanvas(window.CanvasSelector);
+    internal::SetFallback(Fallback);
+    gSelection = selection;
+    gApp = app;
+    gWindow = window;
+    gWebGlTried = false;
+    gBound = false;
+
+    if (selection == BackendSelection::WebGL2)
+    {
+        return StartWebGl(token, false);
+    }
+    // Auto and forced WebGPU both begin with WebGPU (including its compatibility
+    // retry). Auto then falls back to WebGL 2 via Fallback(); forced WebGPU does
+    // not (gSelection != Auto makes Fallback() decline).
+    gActive = Backend::WebGPU;
+    gBound = true;
+    internal::SelectBackend(token, Backend::WebGPU);
+    const auto error = webgpu::Start(gApp, gWindow, token, selection);
+    if (error != StartupError::None)
+    {
+        // Synchronous WebGPU failure. For Auto, try WebGL 2 now; otherwise report.
+        internal::RecordAttempt(token, Backend::WebGPU, error);
+        if (selection == BackendSelection::Auto && IsCapabilityFailure(error) && !gWebGlTried)
+        {
+            const auto next = internal::Reissue(token);
+            webgpu::Shutdown();
+            gBound = false;
+            return next != 0 ? StartWebGl(next, true) : error;
+        }
+        webgpu::Shutdown();
+        gBound = false;
+        return error;
+    }
+    return StartupError::None;
+}
+void Shutdown() noexcept
+{
+    // Clear the fallback first so a teardown-induced loss cannot start an attempt.
+    internal::SetFallback(nullptr);
+    if (gBound)
+    {
+        if (gActive == Backend::WebGL2)
+        {
+            webgl::Shutdown();
+        }
+        else
+        {
+            webgpu::Shutdown();
+        }
+    }
+    gBound = false;
+    gActive = Backend::WebGPU;
+    gSelection = BackendSelection::Auto;
+    gWebGlTried = false;
+    gApp = {};
+    gWindow = {};
+}
+bool Initialize(const ApplicationInfo&) noexcept
+{
+    return false;
+}
+bool ConnectWindow(const WindowInfo&) noexcept
+{
+    return false;
+}
+bool InitializeRendering() noexcept
+{
+    return false;
+}
+void ShutdownRendering() noexcept {}
+bool BeginFrame() noexcept
+{
+    return false;
+}
+bool EndFrame() noexcept
+{
+    return false;
+}
+FrameStatus SetTarget(const FrameTarget& target) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::SetTarget(target) : webgpu::SetTarget(target);
+}
+FrameStatus Begin() noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::Begin() : webgpu::Begin();
+}
+FrameStatus End() noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::End() : webgpu::End();
+}
+FrameInfo GetFrameInfo() noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::GetFrameInfo() : webgpu::GetFrameInfo();
+}
+ResourceStatus CreateShader(usize slot, const ShaderDescription& description, uint32 id) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::CreateShader(slot, description, id)
+                                      : webgpu::CreateShader(slot, description, id);
+}
+ResourceStatus CreateUniform(usize slot, const UniformDescription& description, uint32 id) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::CreateUniform(slot, description, id)
+                                      : webgpu::CreateUniform(slot, description, id);
+}
+ResourceStatus CreatePipeline(usize slot, const PipelineResources& resources, uint32 id) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::CreatePipeline(slot, resources, id)
+                                      : webgpu::CreatePipeline(slot, resources, id);
+}
+void DestroyShader(usize slot) noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::DestroyShader(slot);
+    }
+    else
+    {
+        webgpu::DestroyShader(slot);
+    }
+}
+void DestroyUniform(usize slot) noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::DestroyUniform(slot);
+    }
+    else
+    {
+        webgpu::DestroyUniform(slot);
+    }
+}
+void DestroyPipeline(usize slot) noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::DestroyPipeline(slot);
+    }
+    else
+    {
+        webgpu::DestroyPipeline(slot);
+    }
+}
+void UpdateUniform(usize slot, std::span<const uint8> bytes) noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::UpdateUniform(slot, bytes);
+    }
+    else
+    {
+        webgpu::UpdateUniform(slot, bytes);
+    }
+}
+ResourceStatus Draw(usize slot) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::Draw(slot) : webgpu::Draw(slot);
+}
+// WebGPU-only private interop re-exported for the W5/W6 sample renderers. These
+// are only meaningful while the WebGPU sub-backend is bound; the WebGL 2 sample
+// path (Prompt 3) uses the public rendering API instead of these.
+WGPUDevice ProbeDevice() noexcept
+{
+    return gActive == Backend::WebGPU ? webgpu::ProbeDevice() : nullptr;
+}
+WGPUTextureFormat ProbeFormat() noexcept
+{
+    return webgpu::ProbeFormat();
+}
+WGPURenderPassEncoder ProbePass() noexcept
+{
+    return gActive == Backend::WebGPU ? webgpu::ProbePass() : nullptr;
+}
+} // namespace ludus::graphics::rhi::backend

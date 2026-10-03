@@ -20,3 +20,6 @@ __pycache__/
 # Editor workspace cooperative save-lock directory (QLockFile), created beside a
 # project descriptor. Generated at save time; never committed.
 .ludus/
+
+# Installed JavaScript test dependencies.
+node_modules

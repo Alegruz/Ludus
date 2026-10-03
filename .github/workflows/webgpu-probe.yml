@@ -1,11 +1,17 @@
-name: WebGPU feasibility probe
+name: Browser backends and packages
 
 on:
   pull_request:
     paths:
       - '.github/workflows/webgpu-probe.yml'
       - 'tools/webgpu-probe/**'
+      - 'tools/shader-probe/**'
+      - 'scripts/shader-probe'
+      - 'config/shader_toolchain.json'
+      - 'tests/sdk_consumer/**'
       - 'scripts/webgpu-probe'
+      - 'scripts/bootstrap-spirv-cross'
+      - 'config/spirv_cross_toolchain.json'
       - 'scripts/package-web'
       - 'scripts/python/web_package.py'
       - 'scripts/python/test_web_package.py'
@@ -51,13 +57,13 @@ permissions:
 jobs:
   compile-and-package:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: Prepare host tools and pinned SDK
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq clang-format-18 clang-tidy-18 python3-venv
+          sudo apt-get install -y -qq clang-18 clang-format-18 clang-tidy-18 python3-venv
           python3 - <<'PY'
           import hashlib
           import json
@@ -80,6 +86,8 @@ jobs:
           subprocess.run([str(sdk / 'emsdk'), 'install', web['emscripten']], check=True)
           subprocess.run([str(sdk / 'emsdk'), 'activate', web['emscripten']], check=True)
           PY
+          ./scripts/shader-probe bootstrap
+          ./scripts/bootstrap-spirv-cross
       - name: Build and analyze both probe configurations
         run: |
           ./scripts/webgpu-probe build

@@ -190,7 +190,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE void Restart() noexcept
     ludus::platform::WindowManager manager;
     if (manager.Initialize({}) && manager.CreateWindow({}, gWindow))
     {
-        (void)rhi::Start({ .Name = "W5 frames" }, gWindow->GetNativeWindowInfo());
+        (void)rhi::Start({ .Name = "W5 frames" }, gWindow->GetNativeWindowInfo(), rhi::BackendSelection::WebGPU);
     }
 }
 int main()

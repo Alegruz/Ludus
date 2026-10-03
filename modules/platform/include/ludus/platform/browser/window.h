@@ -104,6 +104,14 @@ struct InputEvent final
     float64 WheelY = 0;
 };
 
+// Replace the live canvas identified by selector with a fresh node of the same
+// id/attributes/CSS/DOM position, rebinding Platform's listeners, observer and
+// focus. Platform owns the DOM node; this is the only sanctioned way to recover
+// after a canvas has been committed to a context mode (e.g. a WebGPU attempt)
+// that blocks a different backend (WebGL 2). Returns false off the browser or if
+// no live window owns that canvas. The engine calls this during an Auto fallback.
+bool ReplaceCanvas(const char* selector) noexcept;
+
 // Authoritative main-thread snapshot. Held input is cleared on blur, hidden
 // page/canvas and removal; pointer cancellation clears buttons only. Event overflow never prevents
 // state updates; consumers must use the snapshot after DroppedEvents increases.

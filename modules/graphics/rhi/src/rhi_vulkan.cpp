@@ -439,6 +439,12 @@ Backend Kind() noexcept
 {
     return Backend::Vulkan;
 }
+bool Supports(BackendSelection selection) noexcept
+{
+    // Native builds only ever run Vulkan; a forced browser backend fails
+    // explicitly rather than silently falling back to Vulkan.
+    return selection == BackendSelection::Auto;
+}
 bool Initialize(const ApplicationInfo& app) noexcept
 {
     if (gInstance != VK_NULL_HANDLE)
@@ -712,8 +718,10 @@ bool InitializeRendering() noexcept
     }
     return true;
 }
-StartupError Start(const ApplicationInfo& app, const WindowInfo& window, uint32 token) noexcept
+StartupError Start(const ApplicationInfo& app, const WindowInfo& window, uint32 token, BackendSelection) noexcept
 {
+    // Native ignores the browser selection (the facade already rejected a forced
+    // browser backend via Supports); Vulkan is the only native backend.
     if (window.System != platform::WindowSystem::Headless &&
         (window.System != platform::WindowSystem::Wayland || window.Display == nullptr || window.Surface == nullptr))
     {

@@ -51,12 +51,23 @@ if (typeof window === 'undefined' && typeof process === 'object') {
     let scopes = 0;
     const result = {
       features: new Set(), limits: new Proxy({maxTextureDimension2D: 4096}, {get: (o, k) => o[k] ?? 0}),
-      queue: {submit(commands) {assert(commands.length === 1 && commands[0].ended, 'submit unfinished pass'); ++stats.submitted;}},
+      queue: {
+        submit(commands) {assert(commands.length === 1 && commands[0].ended, 'submit unfinished pass'); ++stats.submitted;},
+        writeBuffer(buffer, offset, data, dataOffset, size) {
+          assert(buffer.kind === 'uniform' && offset === 0 && size === 48, 'uniform upload contract');
+          const bytes = new DataView(data.buffer, data.byteOffset + dataOffset, size);
+          colors.add(bytes.getFloat32(8, true));
+        }
+      },
+      createBuffer(desc) {assert(desc.size === 48, 'uniform buffer size'); return {kind:'uniform',destroy(){}};},
+      createBindGroupLayout(desc) {assert(desc.entries.length === 1 && desc.entries[0].buffer.minBindingSize === 48, 'uniform layout'); return {kind:'bindings'};},
+      createPipelineLayout(desc) {assert(desc.bindGroupLayouts.length === 1, 'pipeline layout'); return {kind:'layout'};},
+      createBindGroup(desc) {assert(desc.entries.length === 1 && desc.entries[0].resource.buffer.kind === 'uniform', 'bind group'); return {kind:'group'};} ,
       lost: new Promise(resolve => {lose = resolve;}),
       pushErrorScope() {},
       popErrorScope() {
         const failure = (++scopes === 1 && scenario === 'surface-failure') || (scopes === 2 && scenario === 'shader-failure');
-        return new Promise(resolve => setTimeout(() => resolve(failure ? new GPUValidationError('injected validation') : null), scenario === 'cancel-pipeline' && scopes === 2 ? 100 : 0));
+        return new Promise(resolve => setTimeout(() => resolve(failure ? new GPUValidationError('injected validation') : null), scenario === 'cancel-pipeline' && scopes === 5 ? 100 : 0));
       },
       createShaderModule(desc) {assert(desc.code.includes('@vertex') && desc.code.includes('@fragment'), 'WGSL missing'); return {kind: 'shader'};},
       createRenderPipeline(desc) {assert(desc.vertex.module && desc.fragment.targets[0].format === 'bgra8unorm', 'pipeline descriptor'); ++stats.pipelines; return {kind: 'pipeline'};},
@@ -65,10 +76,11 @@ if (typeof window === 'undefined' && typeof process === 'object') {
         return {kind: 'frame encoder',
           beginRenderPass(desc) {
             assert(desc.colorAttachments.length === 1 && desc.colorAttachments[0].loadOp === 'clear', 'clear pass');
-            colors.add(desc.colorAttachments[0].clearValue.r);
+            assert(desc.colorAttachments[0].clearValue.r === 0, 'clear remains independent of animation uniforms');
             let bound = false;
             return {kind: 'frame pass',
-              setViewport(x, y, w, h) {assert(w === h && x >= 0 && y >= 0 && x + w <= canvas.width + 0.001 && y + h <= canvas.height + 0.001, 'invalid/stretched viewport');},
+              setViewport(x, y, w, h) {assert(x === 0 && y === 0 && w === canvas.width && h === canvas.height, 'invalid fullscreen viewport');},
+              setBindGroup(index, group) {assert(index === 0 && group.kind === 'group', 'uniform binding');},
               setPipeline(pipeline) {assert(pipeline.kind === 'pipeline', 'wrong pipeline'); bound = true;},
               draw(vertices, instances) {assert(bound && vertices === 3 && instances === 1, 'triangle draw'); ++stats.drawn;},
               end() {ended = true;}
@@ -96,7 +108,7 @@ if (typeof window === 'undefined' && typeof process === 'object') {
     return !Object.values(WebGPU.Internals.jsObjects).some(object => object?.kind?.startsWith('frame'));
   }
   function noOwnedHandles() {
-    return noFrameHandles() && !Object.values(WebGPU.Internals.jsObjects).some(object => object?.kind === 'shader' || object?.kind === 'pipeline');
+    return noFrameHandles() && !Object.values(WebGPU.Internals.jsObjects).some(object => ['shader','pipeline','uniform','bindings','layout','group'].includes(object?.kind));
   }
   let phase = 0, checkpoint = 0, oldX = 0;
   const timer = setInterval(() => {

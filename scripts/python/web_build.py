@@ -79,7 +79,23 @@ def command(args, engine) -> int:
             return 0
 
         cmake = host_bin / "cmake"
-        run([emscripten / "emcmake", cmake, "--preset", args.preset], cwd=root, env=env)
+        from init_options import read_options
+        shader_args = []
+        if read_options(root, args.preset).get("LUDUS_BUILD_SMOKE_APP", True):
+            if args.command in ("init", "bootstrap"):
+                run([root / "scripts/shader-probe", "bootstrap"], cwd=root)
+                run([root / "scripts/bootstrap-spirv-cross"], cwd=root)
+            tools = root / "out/shader-tools"
+            for variable, relative in (
+                ("LUDUS_SLANG_COMPILER", "slang/bin/slangc"),
+                ("LUDUS_SPIRV_VALIDATOR", "spirv-tools/usr/bin/spirv-val"),
+                ("LUDUS_SPIRV_CROSS", "spirv-cross/bin/spirv-cross"),
+            ):
+                path = tools / relative
+                if not path.is_file():
+                    raise EngineError("Missing shader tool; run ./init.sh " + args.preset + " --preset-only")
+                shader_args.append("-D" + variable + "=" + str(path))
+        run([emscripten / "emcmake", cmake, "--preset", args.preset, *shader_args], cwd=root, env=env)
         if args.command in ("init", "bootstrap"):
             print("Browser configure complete; next: ./scripts/build " + args.preset)
             return 0

@@ -16,7 +16,7 @@ EM_JS(ludus::foundation::int32, LudusBrowserAttach,
         if (!(canvas instanceof HTMLCanvasElement)) return 0;
         const registry = Module.ludusBrowserWindows || (Module.ludusBrowserWindows = new Map());
         for (const value of registry.values()) if (value.canvas == canvas) return 0;
-        entry = {canvas, limit, capture: !!capture, listeners: [], observer: null,
+        entry = {canvas, selector: UTF8ToString(selector), limit, capture: !!capture, listeners: [], observer: null,
             originalTabIndex: canvas.getAttribute('tabindex'), alive: true, windowFocused: true, last: ""};
         registry.set(token, entry);
         const signal = (kind, a=0, b=0, x=0, y=0, z=0, w=0) => {
@@ -27,6 +27,11 @@ EM_JS(ludus::foundation::int32, LudusBrowserAttach,
             target.addEventListener(name, guarded, options);
             entry.listeners.push([target, name, guarded, options]);
         };
+        // Bind all canvas-scoped listeners + observer to the current entry.canvas.
+        // Reused by LudusBrowserReplaceCanvas so Platform owns the replacement and
+        // rebinds every listener, observer, focus and native size on the new node.
+        entry.bind = () => {
+        const canvas = entry.canvas;
         if (entry.originalTabIndex == null) canvas.setAttribute('tabindex', '0');
         entry.refresh = () => {
             if (!entry.alive) return;
@@ -102,6 +107,8 @@ EM_JS(ludus::foundation::int32, LudusBrowserAttach,
         entry.observer = new ResizeObserver(entry.refresh);
         entry.observer.observe(canvas);
         entry.refresh();
+        }; // end entry.bind
+        entry.bind();
         return 1;
     } catch (_) {
         if (entry) {
@@ -113,6 +120,40 @@ EM_JS(ludus::foundation::int32, LudusBrowserAttach,
         }
         return 0;
     }
+});
+
+// Platform-owned canvas replacement for the WebGPU -> WebGL 2 fallback: a canvas
+// that acquired a 'webgpu' context cannot acquire 'webgl2', so Platform swaps the
+// committed canvas for a fresh node with the same id/attributes/CSS/DOM position,
+// unbinds the old listeners/observer and rebinds them to the new node. Returns 1
+// if a fresh canvas is in place. Nothing outside Platform touches the DOM node.
+EM_JS(ludus::foundation::int32, LudusBrowserReplaceCanvas, (const char* selector), {
+    try {
+        const registry = Module.ludusBrowserWindows;
+        if (!registry) return 0;
+        const target = document.querySelector(UTF8ToString(selector));
+        let entry = null;
+        for (const value of registry.values()) if (value.canvas == target) { entry = value; break; }
+        if (!entry || !entry.alive) return 0;
+        const old = entry.canvas;
+        const wasFocused = document.activeElement === old;
+        if (!old.parentNode) return 0;
+        const fresh = document.createElement('canvas');
+        for (const attr of old.attributes) fresh.setAttribute(attr.name, attr.value);
+        // Unbind listeners/observer from the committed node.
+        for (const item of entry.listeners) item[0].removeEventListener(item[1], item[2], item[3]);
+        if (entry.observer) entry.observer.disconnect();
+        if (entry.originalTabIndex == null && old.getAttribute('tabindex') == '0') old.removeAttribute('tabindex');
+        old.parentNode.replaceChild(fresh, old);
+        // Rebind everything to the new node and recompute size/focus.
+        entry.canvas = fresh;
+        entry.listeners = [];
+        entry.observer = null;
+        entry.last = "";
+        entry.bind();
+        if (wasFocused) fresh.focus({preventScroll: true});
+        return 1;
+    } catch (_) { return 0; }
 });
 
 EM_JS(void, LudusBrowserDetach, (ludus::foundation::uint32 token), {

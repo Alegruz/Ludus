@@ -25,6 +25,24 @@ manifest records exact expanded commands, emitted entries, profiles, sizes and
 artifact hashes. WGSL receives actual browser shader/pipeline validation through
 resource creation; successful compilation alone does not establish runtime proof.
 
+### Optional GLSL ES 3.00 (WebGL 2) backend artifact
+
+Set `LUDUS_SPIRV_CROSS` to the pinned build-time SPIR-V -> GLSL ES translator
+(`config/spirv_cross_toolchain.json`, SPIRV-Cross `vulkan-sdk-1.4.313.0`) to also
+emit GLSL ES 3.00 for the WebGL 2 fallback. With it unset, SPIR-V/WGSL builds are
+unchanged. When set, each stage's validated SPIR-V is translated to
+`<name>.<stage>.essl`, the browser build of the generated header carries both WGSL
+and GLSL ES, and `ShaderDescription` exposes `GlslEs` / `GlslEsEntry` (which link
+through `main`). The manifest adds `glsl_es_entries`, a `glsl_es_layout` derived
+independently from the emitted std140 block, the `300 es` profile and translator
+provenance. See ADR 0013 and `docs/development/webgl-shader-feasibility-evidence.json`.
+
+Author vertex inputs with `SV_VulkanVertexID` / `SV_VulkanInstanceID` (not
+`SV_VertexID` / `SV_InstanceID`): the latter require base-vertex/instance
+(`SPV_KHR_shader_draw_parameters`), which has no GLSL ES / WebGL 2 equivalent and
+the translator rejects. For a non-indexed, zero-base-vertex draw the values are
+identical on Vulkan, WebGPU and WebGL 2.
+
 The generated `display.h` provides
 `ludus::shaders::display::Vertex()` and `Fragment()` descriptions, with explicit
 backend entry names and minimum uniform sizes from each target's reflection.
@@ -49,6 +67,20 @@ CPU field types or assert that packing matches. The diagnostic's independently
 checked fields are resolution float2 at 0, elapsed float at 8, direction float3 at
 16 and tint float4 at 32: 48 bytes, alignment 16 for each target, padding at
 12..15 and 28..31. These measurements apply to that shader only (ADR 0010).
+
+### Browser backend selection (WebGPU / WebGL 2)
+
+On the browser, `Start(app, window)` selects `BackendSelection::Auto`: it attempts
+WebGPU (including its compatibility retry) and, only on a capability/startup
+failure, makes exactly one WebGL 2 attempt. `Start(app, window, selection)` forces
+`WebGPU` or `WebGL2` for diagnosis; a forced backend that is unavailable fails
+explicitly rather than switching. Native ignores the selection (Vulkan).
+`StartupInfo::SelectedBackend` reports the committed backend, and `WebGpu`/`WebGL2`
+carry bounded per-attempt errors for QA. The GLSL ES artifact requires
+`LUDUS_SPIRV_CROSS` at build time (ADR 0013/0013); otherwise the browser build is
+WebGPU-only. `apps/smoke` is the worked example of a backend-agnostic renderer
+driving this through the public API. See ADR 0014 and
+`docs/development/webgl-fallback-sandbox-handoff.md`.
 
 ## Readiness and ownership
 
