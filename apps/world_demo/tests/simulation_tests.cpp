@@ -196,6 +196,25 @@ TEST_CASE("Gameplay command overflow retains failure context without publishing"
     REQUIRE(world.Transforms().GetOwners().size() == 3);
 }
 
+TEST_CASE("A failed tick cannot publish a newly reached level outcome", "[world-demo]")
+{
+    Level level;
+    REQUIRE(ReadLevel(ExampleLevel(), level).Error == LevelError::None);
+    level.Entities[2].Position = level.Entities[0].Position;
+    GameWorld world;
+    REQUIRE(world.Prepare(level, 3) == Status::Success);
+    while (!world.IsBuilt())
+    {
+        REQUIRE(world.BuildNext() == Status::Success);
+    }
+    uint64 request = 0;
+    REQUIRE(world.QueueSpawn(ExtraGuard(), request) == Status::Success);
+    REQUIRE(world.RunTick({}) == Status::CapacityExceeded);
+    REQUIRE(world.GetPhase() == Phase::Faulted);
+    REQUIRE(world.GetNextLevel().View().empty());
+    REQUIRE(world.GetOutbox().empty());
+}
+
 TEST_CASE("Owned completions reject old world, request and revision values", "[world-demo]")
 {
     auto world = Build();

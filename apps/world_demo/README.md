@@ -84,7 +84,9 @@ preflight; they appear in that tick's render frame and first simulate on the nex
 tick. Preflight conservatively ignores slots freed by that same batch. Spawn
 outcomes remain available until the following BeginTick boundary. Combat uses
 creation order for ties, and trigger contacts distinguish enter, stay and exit.
-The first entering exit in stable order determines the next level.
+The first entering exit in stable order determines the next level. That required
+outcome publishes only after the tick succeeds; a fault discards the pending
+transition together with its presentation records.
 
 A session parses an owned candidate, prepares all pool capacity, builds one recipe
 per `PollLoad`, binds forward references and activates through a nonallocating move

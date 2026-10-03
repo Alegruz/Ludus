@@ -92,8 +92,8 @@ public:
         {
             return Status::CapacityExceeded;
         }
-        const bool valueAdded = mValues.TryAdd(value);
-        const bool ownerAdded = mOwners.TryAdd(entity);
+        [[maybe_unused]] const bool valueAdded = mValues.TryAdd(value);
+        [[maybe_unused]] const bool ownerAdded = mOwners.TryAdd(entity);
         LUDUS_ASSERT(valueAdded && ownerAdded);
         mSparse[entity.Slot] = index;
         return Status::Success;

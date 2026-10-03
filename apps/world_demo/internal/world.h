@@ -253,7 +253,7 @@ private:
     [[nodiscard]] Status Commit() noexcept;
     void Intent(TickInput input) noexcept;
     void MoveAndCollide() noexcept;
-    [[nodiscard]] Status Gameplay(TickInput input) noexcept;
+    [[nodiscard]] Status Gameplay(TickInput input, Name& nextLevel) noexcept;
     void Stage(EventKind kind, Vec2 anchor) noexcept;
     [[nodiscard]] Status Damage(EntityId entity) noexcept;
     gameplay::world::EntityRegistry mRegistry;

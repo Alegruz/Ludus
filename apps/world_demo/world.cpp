@@ -526,7 +526,7 @@ Status GameWorld::Damage(EntityId entity) noexcept
     }
     return Status::Success;
 }
-Status GameWorld::Gameplay(TickInput input) noexcept
+Status GameWorld::Gameplay(TickInput input, Name& nextLevel) noexcept
 {
     LUDUS_PROFILE_SCOPE(WorldGameplay);
     // Damage order is player intent, then stable enemy creation sequence, then
@@ -607,9 +607,9 @@ Status GameWorld::Gameplay(TickInput input) noexcept
         if (exit != nullptr && !exit->Entered)
         {
             exit->Entered = true;
-            if (mNextLevel.View().empty())
+            if (nextLevel.View().empty())
             {
-                mNextLevel = exit->NextLevel;
+                nextLevel = exit->NextLevel;
             }
             Stage(EventKind::Exit, mTransforms.Find(entity)->Current);
         }
@@ -788,7 +788,9 @@ Status GameWorld::RunTick(TickInput input) noexcept
     mPhase = Phase::Motion;
     MoveAndCollide();
     mPhase = Phase::Gameplay;
-    auto status = Gameplay(input);
+    // Required session outcomes are owned tick-local values until commit succeeds.
+    Name nextLevel = mNextLevel;
+    auto status = Gameplay(input, nextLevel);
     trace.Commands = mCommandCount;
     if (status == Status::Success)
     {
@@ -806,6 +808,7 @@ Status GameWorld::RunTick(TickInput input) noexcept
         mPhase = Phase::Faulted;
         return status;
     }
+    mNextLevel = nextLevel;
     // Optional cosmetics may be dropped, required level outcome lives in state.
     for (usize index = 0; index < mStagedCount; ++index)
     {

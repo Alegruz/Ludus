@@ -40,7 +40,7 @@ Status EntityRegistry::TryInitialize(uint32 capacity) noexcept
     }
     for (uint32 index = capacity; index > 0; --index)
     {
-        const bool added = free.TryAdd(index - 1);
+        [[maybe_unused]] const bool added = free.TryAdd(index - 1);
         LUDUS_ASSERT(added);
     }
     auto identity = gNextWorld.load(std::memory_order_relaxed);
@@ -143,7 +143,7 @@ Status EntityRegistry::TryRelease(EntityId entity) noexcept
     if (slot.Generation != std::numeric_limits<uint32>::max())
     {
         ++slot.Generation;
-        const bool added = mFree.TryAdd(entity.Slot);
+        [[maybe_unused]] const bool added = mFree.TryAdd(entity.Slot);
         LUDUS_ASSERT(added);
     }
     ++mRevision;

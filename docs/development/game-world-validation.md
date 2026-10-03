@@ -9,6 +9,7 @@ The checks use the pinned native and browser toolchains in repository config.
 | Development native build, warnings as errors | Passed with the graphical reference enabled. |
 | Native CTest suite | 37 checks: 35 passed; two opt-in live Wayland/keyboard fixtures skipped. |
 | ASan/UBSan CTest suite | 30 checks: 28 passed; the same two live fixtures skipped. |
+| Profile/Release world builds and tests | Passed with assertions disabled and warnings as errors; four world checks in each policy. |
 | Browser build and CTest contracts | Passed; 15 checks passed. |
 | Chromium WebGPU scene and controls | Passed with SwiftShader; actual selected backend and player/guard/exit pixels checked. |
 | Chromium WebGL 2 Auto fallback | Passed with SwiftShader after hiding WebGPU; selected backend and scene pixels checked. |
@@ -35,9 +36,13 @@ allocation interceptor does not replace sanitizer hooks.
 A local clean development profile with `CMAKE_BUILD_PARALLEL_LEVEL=2` reported
 734.4 seconds of summed frontend parsing against the 170-second aggregate limit.
 The reported project headers passed their existing limits. The profile preceded
-the final instrumentation and fault-trace test edits; CI must measure the submitted
+the final instrumentation and fault-trace test edits; CI measures the submitted
 commit on the calibrated runner. No budget or warning rule was relaxed.
-This aggregate gate remains unresolved locally.
+The calibrated CI job subsequently passed on PR commit `caab92eb3f74`: 142.4
+seconds of frontend parsing against the unchanged 170-second limit. See the
+[CI budget log](https://github.com/Alegruz/Ludus/actions/runs/37109322822/job/111164101732).
+The local result demonstrates why these absolute budgets must be interpreted on
+the calibrated runner. Each later PR commit still requires its own CI pass.
 
 ```bash
 CMAKE_BUILD_PARALLEL_LEVEL=2 ./scripts/check-build-budget --profile
