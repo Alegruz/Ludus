@@ -50,3 +50,15 @@ bool WindowManager::CreateWindow(const WindowBase::CreateInfo& info,
     return true;
 }
 } // namespace ludus::platform
+
+#if !defined(LUDUS_PLATFORM_BROWSER)
+#    include <ludus/platform/browser/window.h>
+namespace ludus::platform::browser
+{
+// Canvas replacement is a browser-only recovery; native windowing has no canvas.
+bool ReplaceCanvas(const char*) noexcept
+{
+    return false;
+}
+} // namespace ludus::platform::browser
+#endif

@@ -1,0 +1,246 @@
+{
+  "date": "2026-10-02 America/Toronto",
+  "stage": "WebGL 2 fallback, prompt 1: shader feasibility + GLSL ES shader-helper extension",
+  "scope": "Prove the pinned Slang can produce GLSL ES 3.00 that compiles, links and renders changing mixed-layout uniforms in real WebGL 2. Software GPU only; no hardware or hosted acceptance. No engine WebGL backend yet (prompt 2).",
+  "decision": "docs/decisions/0013-browser-glsl-es-shader-toolchain.md",
+  "direct_slang_glsl_es": {
+    "result": "UNSUITABLE",
+    "root_cause": "Slang's only GLSL target is desktop/Vulkan GLSL (emits #version 450/460); there is no ESSL / #version 300 es target or capability (only glsl_spirv_*).",
+    "evidence": {
+      "fragment_version": "#version 450",
+      "vertex_version_with_SV_VertexID": "#version 460 + #extension GL_ARB_shader_draw_parameters : require, gl_VertexIndex, gl_BaseVertex (desktop-only; absent in WebGL 2)",
+      "vertex_version_with_SV_VulkanVertexID": "#version 450 (still desktop GLSL, not GLSL ES)",
+      "slang_glsl_capabilities": "only glsl_spirv_* (Vulkan-flavored GLSL); no ESSL / #version 300 es capability",
+      "slang_target_label": "glsl: GLSL(Vulkan) source code",
+      "essl_targets_found": 0
+    }
+  },
+  "chosen_path": "build-time SPIR-V -> GLSL ES 3.00 translation with pinned SPIRV-Cross",
+  "tools": {
+    "slang": {
+      "version": "2026.1.2",
+      "license": "Apache-2.0 WITH LLVM-exception",
+      "lock": "config/shader_toolchain.json"
+    },
+    "spirv_cross": {
+      "tag": "vulkan-sdk-1.4.313.0",
+      "commit": "2275d0efc4f2fa46851035d9d3c67c105bc8b99e",
+      "source_url": "https://github.com/KhronosGroup/SPIRV-Cross/archive/refs/tags/vulkan-sdk-1.4.313.0.tar.gz",
+      "source_sha256": "7d1de24918bea9897753f7561d4d154f68ec89c36bb70c13598222b8039d4212",
+      "license": "Apache-2.0",
+      "lock": "config/spirv_cross_toolchain.json",
+      "cli": "spirv-cross --version 300 --es"
+    },
+    "wgsl_and_webgl_validator": {
+      "playwright": "1.55.1",
+      "chromium": "140.0.7339.186 (Playwright build 1193)"
+    }
+  },
+  "authored_source_change": {
+    "what": "tools/shader-probe/probe.slang and tests/sdk_consumer/shaders/diagnostic.slang vertex input SV_VertexID -> SV_VulkanVertexID",
+    "why": "SPIRV-Cross rejects BaseVertex/BaseInstance in the ES profile; Slang maps SV_VertexID to D3D base-relative semantics requiring SPV_KHR_shader_draw_parameters (shader-slang/slang#6992). SV_VulkanVertexID maps to plain VertexIndex / vertex_index / gl_VertexID.",
+    "backend_safety": "Identical value for the non-indexed, zero-base-vertex fullscreen draw. SPIR-V entry stays 'main'; reflection, WGSL entries (vertexMain/fragmentMain) and WGSL std140 layout unchanged.",
+    "verified": "shader-probe check_reflection and check_wgsl both PASS on the updated probe.slang"
+  },
+  "commands": {
+    "direct_glsl_probe": [
+      "out/shader-tools/slang/bin/slangc tests/sdk_consumer/shaders/diagnostic.slang -target glsl -stage fragment -entry fragmentMain -I tests/sdk_consumer/shaders -o <frag.glsl>",
+      "out/shader-tools/slang/bin/slangc tests/sdk_consumer/shaders/diagnostic.slang -target glsl -stage vertex -entry vertexMain -I tests/sdk_consumer/shaders -o <vert.glsl>"
+    ],
+    "spirv_emit": [
+      "out/shader-tools/slang/bin/slangc tools/shader-probe/probe.slang -target spirv -profile spirv_1_3 -entry vertexMain -stage vertex -o out/shader-probe-webgl/probe.vertex.spv",
+      "out/shader-tools/slang/bin/slangc tools/shader-probe/probe.slang -target spirv -profile spirv_1_3 -entry fragmentMain -stage fragment -o out/shader-probe-webgl/probe.fragment.spv"
+    ],
+    "glsl_es_translate": [
+      "out/shader-tools/spirv-cross/bin/spirv-cross --version 300 --es --output out/shader-probe-webgl/probe.vert.essl out/shader-probe-webgl/probe.vertex.spv",
+      "out/shader-tools/spirv-cross/bin/spirv-cross --version 300 --es --output out/shader-probe-webgl/probe.frag.essl out/shader-probe-webgl/probe.fragment.spv"
+    ],
+    "stage_and_render": [
+      "python3 tools/shader-probe/webgl_feasibility.py --output out/shader-probe-webgl",
+      "node tools/shader-probe/webgl-test.mjs out/shader-probe-webgl out/shader-probe-webgl-report"
+    ]
+  },
+  "generated_glsl_es": {
+    "vertex": "#version 300 es; void main(){ gl_Position = ...gl_VertexID...; }  (no gl_BaseVertex, no extensions)",
+    "fragment_block": "layout(std140) uniform ProbeUniforms_std140 { highp vec2 resolution; highp float elapsedTime; highp vec3 direction; highp vec4 tint; } probe;",
+    "fragment_output": "layout(location = 0) out highp vec4; top-left gl_FragCoord"
+  },
+  "artifact_sha256": {
+    "probe.vertex.spv": "3723516347ab4716e200751260b866e5b461c40e644f319deb427a684a7742c8",
+    "probe.fragment.spv": "38f3a4f01dc9c8cbf66c523edc24ee39f55941eec01c65da3b745f2b7abb7f45",
+    "probe.vert.essl": "20f0c5a347143c15b00ed4b6273cd7b5755260faab9c463ebcfc094c9624da53",
+    "probe.frag.essl": "ed601976af14154caf5d8a910ad8a7ea50c70a20bef0605de0c43c0888e6917c"
+  },
+  "note_fragment_spv_unchanged": "probe.fragment.spv sha256 (38f3a4...) equals the ADR 0010 shader-toolchain evidence; only the vertex module changed with SV_VulkanVertexID.",
+  "std140_layout": {
+    "cpu_contract": {
+      "resolution": [
+        0,
+        8
+      ],
+      "elapsedTime": [
+        8,
+        4
+      ],
+      "direction": [
+        16,
+        12
+      ],
+      "tint": [
+        32,
+        16
+      ],
+      "size": 48,
+      "alignment": 16,
+      "binding": 0
+    },
+    "derived_from_emitted_glsl_es": {
+      "resolution": 0,
+      "elapsedTime": 8,
+      "direction": 16,
+      "tint": 32,
+      "size": 48,
+      "alignment": 16
+    },
+    "real_linked_program_query": {
+      "blockSize": 48,
+      "activeUniforms": 4,
+      "offsets": {
+        "resolution": 0,
+        "elapsedTime": 8,
+        "direction": 16,
+        "tint": 32
+      },
+      "source": "WebGL 2 UNIFORM_BLOCK_DATA_SIZE + UNIFORM_OFFSET of the linked program"
+    }
+  },
+  "webgl2_acceptance": {
+    "browser": "140.0.7339.186",
+    "kind": "real software GPU (ANGLE/SwiftShader); no hardware acceptance",
+    "flags": [
+      "--use-gl=angle",
+      "--use-angle=swiftshader",
+      "--enable-unsafe-swiftshader"
+    ],
+    "adapter": {
+      "vendor": "Google Inc. (Google)",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+      "glsl": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)"
+    },
+    "limits": {
+      "maxUniformBlockSize": 65536,
+      "maxVertexUniformBlocks": 14,
+      "maxFragmentUniformBlocks": 14,
+      "maxTextureSize": 8192,
+      "maxViewport": [
+        8192,
+        8192
+      ]
+    },
+    "compile": "both stages compiled; no compilation messages",
+    "link": "program linked; no link log",
+    "frames_animated": 11,
+    "diagnostic_pixels": {
+      "tolerance_per_channel": 2,
+      "cases": [
+        {
+          "encoding": "unorm",
+          "width": 96,
+          "height": 64,
+          "elapsed": 0,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "encoding": "unorm",
+          "width": 96,
+          "height": 64,
+          "elapsed": 2,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "encoding": "unorm",
+          "width": 64,
+          "height": 96,
+          "elapsed": 0,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "encoding": "unorm",
+          "width": 64,
+          "height": 96,
+          "elapsed": 2,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "encoding": "srgb",
+          "width": 96,
+          "height": 64,
+          "elapsed": 0,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "encoding": "srgb",
+          "width": 96,
+          "height": 64,
+          "elapsed": 2,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "encoding": "srgb",
+          "width": 64,
+          "height": 96,
+          "elapsed": 0,
+          "mismatches": 0,
+          "maxError": 0
+        },
+        {
+          "encoding": "srgb",
+          "width": 64,
+          "height": 96,
+          "elapsed": 2,
+          "mismatches": 0,
+          "maxError": 0
+        }
+      ]
+    },
+    "screenshot": "out/shader-probe-webgl-report/probe.png (red right, green down, round blue circle; state passed)"
+  },
+  "helper_extension_checks": {
+    "baseline_no_glsl_es": "manifest keys unchanged; no .essl emitted; SPIR-V/WGSL byte-for-byte identical",
+    "glsl_es_path": "sample.{vertex,fragment}.essl emitted; manifest uniform_sizes.glsl_es=48, glsl_es_entries main/main, profiles.glsl_es='300 es', glsl_es_layout verified, .essl hashed",
+    "generated_header": "compiles with g++ -std=c++23 -Wall -Wextra -Werror in native and -DLUDUS_PLATFORM_WEB configs; web branch carries WGSL + GLSL ES; native branch unchanged",
+    "rebuilds": {
+      "no_op": "header unchanged",
+      "source_diagnostic_slang": "rebuilt",
+      "include_uniforms_slang": "rebuilt (via SPIR-V depfiles)",
+      "option_DIAGNOSTIC_SCALE": "ESSL bytes changed"
+    },
+    "verify_shader_build_assertions": "new GLSL ES block PASS against fixture manifest/artifacts",
+    "spirv_wgsl_entries": {
+      "spirv": {
+        "vertex": "main",
+        "fragment": "main"
+      },
+      "wgsl": {
+        "vertex": "vertexMain",
+        "fragment": "fragmentMain"
+      }
+    }
+  },
+  "backend_integration_note": "ShaderDescription gains backend-independent GlslEs/GlslEsEntry (string_view) + the browser build carries both WGSL and GLSL ES; no backend objects or private headers are exposed. The engine WebGL 2 backend (prompt 2) compiles result.GlslEs, links through main, binds the std140 block at binding 0 (bindBufferBase), uploads the app-verified layout, and re-checks UNIFORM_BLOCK_DATA_SIZE/UNIFORM_OFFSET against the upload struct before drawing. CreateShader borrows GlslEs only during creation, consistent with the existing Spirv/Wgsl contract. Downstream game integration uses only the installed SDK public APIs; the private probe here is confined to feasibility.",
+  "unresolved_gates": [
+    "Hardware (non-software) WebGL 2 compile/link/render",
+    "Hosted HTTPS / itch.io iframe acceptance",
+    "Engine WebGL 2 backend, canvas ownership and WebGPU->WebGL2 startup fallback (prompt 2)",
+    "Pinned spirv-val/spirv-dis and the full pinned helper require glibc 2.38; verified here with Slang (glibc 2.27) + from-source SPIRV-Cross and spirv-val v2025.1",
+    "clang-format/clang-tidy 18 on changed wasm translation units and a clean find_package(Ludus) SDK install consumer run (needs full engine toolchain/Conan)"
+  ],
+  "provenance": "Recovered Kiro feasibility evidence; superseded for the current implementation by webgl-fallback-validation.json. Historical package/tool hashes must not be used as current acceptance."
+}

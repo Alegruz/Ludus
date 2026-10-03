@@ -1,123 +1,126 @@
 #include "internal/renderer.h"
-#include "internal/webgpu_probe.h"
 #include <ludus/foundation/base/core.h>
-#include <ludus/foundation/logging/log_format.hpp>
+#include <ludus/graphics/rhi/render.h>
+
+#include "smoke.h"
+
+#include <span>
+#include <type_traits>
+
+// Backend-agnostic browser renderer. It drives only the public fullscreen
+// rendering API with the SDK-generated generic shader (SPIR-V / WGSL / GLSL ES),
+// so it animates identically on WebGPU and WebGL 2 with no backend handles or
+// private probe headers. Resources are created once and reused every frame.
 namespace ludus::smoke::renderer
 {
 namespace
 {
 using namespace foundation;
 namespace rhi = graphics::rhi;
-WGPURenderPipeline gPipeline = nullptr;
-uint32 gGeneration = 0;
-bool gBuilding = false;
-bool gReady = false;
-bool gDemoFailed = false;
-// WGSL and graphics resources belong to this sample, not the engine.
-constexpr const char* SHADER = R"(
-@vertex fn vertex(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
-    let points = array(vec2f(0.0, 0.7), vec2f(-0.7, -0.7), vec2f(0.7, -0.7));
-    return vec4f(points[i], 0.0, 1.0);
-}
-@fragment fn fragment() -> @location(0) vec4f { return vec4f(1.0, 0.65, 0.15, 1.0); }
-)";
-void ReleaseDemo() noexcept
-{
-    // Never reuse a callback generation within a running page.
-    if (gGeneration != 0xFFFFFFFFU)
-    {
-        ++gGeneration;
-    }
-    if (gPipeline != nullptr)
-    {
-        wgpuRenderPipelineRelease(gPipeline);
-    }
-    gPipeline = nullptr;
-    gReady = false;
-    gBuilding = false;
-}
-void BuildDemo() noexcept
-{
-    gBuilding = true;
-    const auto device = rhi::backend::ProbeDevice();
-    wgpuDevicePushErrorScope(device, WGPUErrorFilter_Validation);
-    WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
-    source.code = { .data = SHADER, .length = WGPU_STRLEN };
-    WGPUShaderModuleDescriptor shaderDescriptor = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
-    shaderDescriptor.nextInChain = &source.chain;
-    WGPUShaderModule shader = wgpuDeviceCreateShaderModule(device, &shaderDescriptor);
-    WGPUColorTargetState color = WGPU_COLOR_TARGET_STATE_INIT;
-    color.format = rhi::backend::ProbeFormat();
-    WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
-    fragment.module = shader;
-    fragment.entryPoint = { .data = "fragment", .length = WGPU_STRLEN };
-    fragment.targetCount = 1;
-    fragment.targets = &color;
-    WGPURenderPipelineDescriptor descriptor = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-    descriptor.vertex.module = shader;
-    descriptor.vertex.entryPoint = { .data = "vertex", .length = WGPU_STRLEN };
-    descriptor.fragment = &fragment;
-    descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
-    if (shader != nullptr)
-    {
-        gPipeline = wgpuDeviceCreateRenderPipeline(device, &descriptor);
-    }
-    if (shader != nullptr)
-    {
-        wgpuShaderModuleRelease(shader);
-    }
-    WGPUPopErrorScopeCallbackInfo callback = WGPU_POP_ERROR_SCOPE_CALLBACK_INFO_INIT;
-    callback.mode = WGPUCallbackMode_AllowSpontaneous;
-    // Opaque generation, never dereferenced by the foreign callback.
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    callback.userdata1 = reinterpret_cast<void*>(static_cast<usize>(gGeneration));
-    callback.callback =
-        [](WGPUPopErrorScopeStatus status, WGPUErrorType error, WGPUStringView, void* data, void*) noexcept {
-            if (static_cast<uint32>(reinterpret_cast<usize>(data)) != gGeneration ||
-                rhi::GetStartup().State != rhi::StartupState::Ready)
-            {
-                return;
-            }
-            if (status != WGPUPopErrorScopeStatus_Success || error != WGPUErrorType_NoError || gPipeline == nullptr)
-            {
-                LUDUS_LOG_WARN(logging::LOG_TEMP, "Smoke WGSL/pipeline validation failed");
-                gDemoFailed = true;
-                ReleaseDemo();
-                return;
-            }
-            gReady = true;
-        };
-    (void)wgpuDevicePopErrorScope(device, callback);
-}
 
+// Mirrors the generic shader's std140 block (see apps/smoke/shaders/smoke.slang).
+struct alignas(16) SmokeUniforms final
+{
+    float32 Resolution[2];
+    float32 Pulse;
+    float32 MarkerSize;
+    float32 Marker[3];
+    float32 Padding;
+    float32 Tint[4];
+};
+static_assert(std::is_standard_layout_v<SmokeUniforms>);
+static_assert(offsetof(SmokeUniforms, Resolution) == 0);
+static_assert(offsetof(SmokeUniforms, Pulse) == 8);
+static_assert(offsetof(SmokeUniforms, MarkerSize) == 12);
+static_assert(offsetof(SmokeUniforms, Marker) == 16);
+static_assert(offsetof(SmokeUniforms, Tint) == 32);
+static_assert(sizeof(SmokeUniforms) == 48 && alignof(SmokeUniforms) == 16);
+
+rhi::ShaderHandle gVertex;
+rhi::ShaderHandle gFragment;
+rhi::UniformHandle gUniform;
+rhi::PipelineHandle gPipeline;
+bool gCreated = false;
+bool gFailed = false;
+
+bool Accepted(rhi::ResourceStatus status) noexcept
+{
+    return status == rhi::ResourceStatus::Ready || status == rhi::ResourceStatus::Pending;
+}
+bool Ready(rhi::ResourceStatus status) noexcept
+{
+    return status == rhi::ResourceStatus::Ready;
+}
 } // namespace
+
 State Prepare() noexcept
 {
-    if (gGeneration == 0xFFFFFFFFU || gDemoFailed)
+    if (gFailed)
     {
         return State::Failed;
     }
-    if (!gBuilding)
+    if (!gCreated)
     {
-        BuildDemo();
+        if (!Accepted(rhi::CreateShader(ludus::shaders::smoke::Vertex(), gVertex)) ||
+            !Accepted(rhi::CreateShader(ludus::shaders::smoke::Fragment(), gFragment)) ||
+            !Accepted(rhi::CreateUniform(sizeof(SmokeUniforms), gUniform)))
+        {
+            gFailed = true;
+            return State::Failed;
+        }
+        gCreated = true;
     }
-    return gReady ? State::Ready : State::Loading;
+    // Poll the shader/uniform creations; Pending is never drawable.
+    for (const auto status : {rhi::GetStatus(gVertex), rhi::GetStatus(gFragment), rhi::GetStatus(gUniform)})
+    {
+        if (status == rhi::ResourceStatus::Pending)
+        {
+            return State::Loading;
+        }
+        if (!Ready(status))
+        {
+            gFailed = true;
+            return State::Failed;
+        }
+    }
+    if (rhi::GetStatus(gPipeline) == rhi::ResourceStatus::InvalidHandle)
+    {
+        if (!Accepted(rhi::CreatePipeline({gVertex, gFragment, gUniform}, gPipeline)))
+        {
+            gFailed = true;
+            return State::Failed;
+        }
+    }
+    const auto pipeline = rhi::GetStatus(gPipeline);
+    if (pipeline == rhi::ResourceStatus::Pending)
+    {
+        return State::Loading;
+    }
+    if (!Ready(pipeline))
+    {
+        gFailed = true;
+        return State::Failed;
+    }
+    return State::Ready;
 }
 void Shutdown() noexcept
 {
-    ReleaseDemo();
-    gDemoFailed = false;
+    // Resource IDs are invalidated by the engine on shutdown/loss; drop ours and
+    // let the next Prepare recreate on a usable context.
+    gVertex = {};
+    gFragment = {};
+    gUniform = {};
+    gPipeline = {};
+    gCreated = false;
+    gFailed = false;
 }
-graphics::rhi::FrameStatus Render(const platform::browser::WindowState& window, const Simulation& simulation) noexcept
+rhi::FrameStatus Render(const platform::browser::WindowState& window, const Simulation& simulation) noexcept
 {
     const float64 pulse = simulation.Phase < 1 ? simulation.Phase : 2 - simulation.Phase;
     const auto target = rhi::SetFrameTarget(
     {
         .Width = window.FramebufferWidth,
         .Height = window.FramebufferHeight,
-        .Red = 0.04 + pulse * 0.06,
-        .Green = 0.06,
-        .Blue = 0.14 + pulse * 0.08,
     });
     if (target != rhi::FrameStatus::Ready)
     {
@@ -128,21 +131,31 @@ graphics::rhi::FrameStatus Render(const platform::browser::WindowState& window, 
     {
         return begun;
     }
-    const auto pass = rhi::backend::ProbePass();
-    const uint32 minimum =
-        window.FramebufferWidth < window.FramebufferHeight ? window.FramebufferWidth : window.FramebufferHeight;
-    const float32 size = static_cast<float32>(minimum) * 0.5F;
-    const float32 travelX = (static_cast<float32>(window.FramebufferWidth) - size) * 0.5F;
-    const float32 travelY = (static_cast<float32>(window.FramebufferHeight) - size) * 0.5F;
-    wgpuRenderPassEncoderSetViewport(pass,
-                                     travelX * static_cast<float32>(1 + simulation.X),
-                                     travelY * static_cast<float32>(1 - simulation.Y),
-                                     size,
-                                     size,
-                                     0,
-                                     1);
-    wgpuRenderPassEncoderSetPipeline(pass, gPipeline);
-    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+    const auto info = rhi::GetFrameInfo();
+    // Simulation X/Y are in [-1, 1]; place the marker in [0, 1] UV space.
+    SmokeUniforms uniforms =
+    {
+        .Resolution = {static_cast<float32>(info.Width), static_cast<float32>(info.Height)},
+        .Pulse = static_cast<float32>(pulse),
+        .MarkerSize = 0.22F,
+        .Marker =
+            {
+                static_cast<float32>(0.5 + simulation.X * 0.5),
+                static_cast<float32>(0.5 - simulation.Y * 0.5),
+                0.0F,
+            },
+        .Padding = 0,
+        .Tint = {1.0F, 0.65F, 0.15F, 1.0F}, // orange marker (QA detects this)
+    };
+    const auto bytes = std::span<const uint8>(reinterpret_cast<const uint8*>(&uniforms), sizeof(uniforms));
+    if (rhi::UpdateUniform(gUniform, bytes) != rhi::ResourceStatus::Ready)
+    {
+        return rhi::FrameStatus::Failed;
+    }
+    if (rhi::DrawFullscreen(gPipeline) != rhi::ResourceStatus::Ready)
+    {
+        return rhi::FrameStatus::Failed;
+    }
     return rhi::EndFrameStatus();
 }
 } // namespace ludus::smoke::renderer

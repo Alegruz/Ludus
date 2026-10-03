@@ -14,12 +14,18 @@
 #include <emscripten.h>
 #include <webgpu/webgpu.h>
 
-namespace ludus::graphics::rhi::backend
+// On the browser Auto build this backend is compiled into backend::webgpu and a
+// dispatcher (rhi_web.cpp) routes to it. When built standalone it keeps defining
+// backend:: directly. LUDUS_RHI_WEBGPU_NAMESPACE selects the leaf namespace.
+#if !defined(LUDUS_RHI_WEBGPU_NAMESPACE)
+#    define LUDUS_RHI_WEBGPU_NAMESPACE backend
+#endif
+namespace ludus::graphics::rhi::LUDUS_RHI_WEBGPU_NAMESPACE
 {
 namespace
 {
 using namespace ludus::foundation;
-constexpr logging::LogCategory LOG_RHI{"RHI"};
+constexpr logging::LogCategory LOG_RHI{"RHI-WebGPU"};
 WGPUInstance gInstance = nullptr;
 WGPUAdapter gAdapter = nullptr;
 WGPUDevice gDevice = nullptr;
@@ -66,14 +72,18 @@ FrameStatus FrameFailure() noexcept
 }
 
 // Validate the foreign target before the port's assertion-based surface API.
-// No callback borrows this selector or application storage.
+// No callback borrows this selector or application storage. Platform prepares a fresh canvas before
+// this check. Acquiring WebGPU commits its context mode; a capability failure
+// asks Platform to replace it before attempting WebGL 2. Check getContext here
+// so an incompatible unmanaged canvas fails before the port assertion.
 // clang-format off
 EM_JS(int32, CanCreateSurface, (const char* selector), {
     try {
         if (typeof navigator.gpu == 'undefined') return -1;
         const canvas = document.querySelector(UTF8ToString(selector));
-        return canvas instanceof HTMLCanvasElement &&
-            canvas.isConnected && !!canvas.getContext('webgpu') ? 1 : 0;
+        if (!(canvas instanceof HTMLCanvasElement) || !canvas.isConnected) return 0;
+        // Validate the actual surface too before the port assertion boundary.
+        return canvas.getContext('webgpu') ? 1 : -1;
     } catch (_) { return 0; }
 });
 // clang-format on
@@ -271,7 +281,11 @@ Backend Kind() noexcept
 {
     return Backend::WebGPU;
 }
-StartupError Start(const ApplicationInfo&, const WindowInfo& window, uint32 token) noexcept
+bool Supports(BackendSelection selection) noexcept
+{
+    return selection == BackendSelection::Auto || selection == BackendSelection::WebGPU;
+}
+StartupError Start(const ApplicationInfo&, const WindowInfo& window, uint32 token, BackendSelection) noexcept
 {
     if (window.System != ludus::platform::WindowSystem::WebCanvas || window.CanvasSelector == nullptr)
     {
@@ -524,7 +538,7 @@ ResourceStatus CreateShader(usize slot, const ShaderDescription& description, ui
     CheckResource(id);
     return shader.Module != nullptr ? ResourceStatus::Pending : ResourceStatus::Failed;
 }
-ResourceStatus CreateUniform(usize slot, const UniformDescription& description, uint32 id) noexcept
+ResourceStatus CreateUniform(usize slot, const backend::UniformDescription& description, uint32 id) noexcept
 {
     const usize size = description.Size;
     wgpuDevicePushErrorScope(gDevice, WGPUErrorFilter_Validation);
@@ -537,7 +551,7 @@ ResourceStatus CreateUniform(usize slot, const UniformDescription& description, 
     CheckResource(id);
     return uniform.Buffer != nullptr ? ResourceStatus::Pending : ResourceStatus::Failed;
 }
-ResourceStatus CreatePipeline(usize slot, const PipelineResources& resources, uint32 id) noexcept
+ResourceStatus CreatePipeline(usize slot, const backend::PipelineResources& resources, uint32 id) noexcept
 {
     const usize vertex = resources.Vertex, fragment = resources.Fragment, uniform = resources.Uniform;
     wgpuDevicePushErrorScope(gDevice, WGPUErrorFilter_Validation);
@@ -656,4 +670,4 @@ ResourceStatus Draw(usize slot) noexcept
     wgpuRenderPassEncoderDraw(gPass, 3, 1, 0, 0);
     return ResourceStatus::Ready;
 }
-} // namespace ludus::graphics::rhi::backend
+} // namespace ludus::graphics::rhi::LUDUS_RHI_WEBGPU_NAMESPACE

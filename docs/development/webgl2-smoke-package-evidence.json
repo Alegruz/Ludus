@@ -1,0 +1,119 @@
+{
+  "date": "2026-10-02 America/Toronto",
+  "stage": "WebGL 2 fallback, prompt 3: smoke demo + exact-ZIP browser/package acceptance",
+  "decision": "docs/decisions/0014-webgl2-backend-and-auto-fallback.md",
+  "scope": "Integrate the WebGL 2 backend + Auto fallback into apps/smoke through the public rendering API, and extend the exact-ZIP browser QA matrix. Software GPU only (SwiftShader); hardware and hosted/iframe-on-HTTPS acceptance remain separate gates.",
+  "smoke_integration": {
+    "renderer": "apps/smoke/renderer_web.cpp rewritten to drive only the public rendering API (CreateShader/CreateUniform/CreatePipeline/UpdateUniform/DrawFullscreen) with the SDK-generated generic shader; no RHI-private probe headers or backend handles. Animates identically on WebGPU and WebGL 2.",
+    "shader": "apps/smoke/shaders/smoke.slang compiled by ludus_compile_shader to SPIR-V (Vulkan), WGSL (WebGPU) and GLSL ES 3.00 (WebGL 2). Vertex uses SV_VulkanVertexID. Draws a moving orange marker on a pulsing background.",
+    "uniform_layout_std140": {
+      "resolution": [
+        0,
+        8
+      ],
+      "pulse": [
+        8,
+        4
+      ],
+      "markerSize": [
+        12,
+        4
+      ],
+      "marker": [
+        16,
+        12
+      ],
+      "tint": [
+        32,
+        16
+      ],
+      "size": 48,
+      "alignment": 16,
+      "binding": 0,
+      "verified_targets": [
+        "vertex",
+        "fragment",
+        "wgsl",
+        "glsl_es"
+      ]
+    },
+    "input_fix": "application.cpp recognizes any browser backend (WebGPU or WebGL2), not only Backend::WebGPU, for browser input/framebuffer handling.",
+    "selection_api": "Application::Start(BackendSelection = Auto); main_web.cpp reads ?backend=auto|webgpu|webgl2 for diagnosis.",
+    "ui": "shell.html reserves a status region that cannot be covered by canvas or controls; Stop/Fullscreen inactive until playing; Restart available when stopped/failed. Player text concise; backend and per-attempt errors are data-* QA metadata only. An expected Auto fallback reads as Ready, not a failure. Both-unavailable shows a concise accessible final error naming neither API as the sole cause."
+  },
+  "canvas_ownership": {
+    "problem": "A canvas that acquired a 'webgpu' context cannot acquire 'webgl2'; the WebGPU probe and surface committed the real canvas, blocking the WebGL 2 fallback.",
+    "fixes": [
+      "WebGPU availability is probed on a throwaway canvas (CanCreateSurface), never committing the real canvas during probing.",
+      "Platform owns canvas replacement: browser::ReplaceCanvas(selector) swaps the committed canvas for a fresh node with the same id/attributes/CSS/DOM position and rebinds all listeners/observer/focus. The dispatcher calls it before a WebGL 2 fallback attempt.",
+      "Attempt generation isolation: internal::Reissue advances the session token before the WebGL 2 attempt so a late WebGPU device-lost/error callback (old token) is dropped and cannot kill the active WebGL 2 session."
+    ]
+  },
+  "package": {
+    "preset": "web-emscripten-release",
+    "zip": "out/packages/ludus-web-smoke-release.zip",
+    "zip_sha256": "7762bec4e1bc2e2a0a9e9c09733df048244f5e744dbc69510a3d6ef3bf642cea",
+    "payload": [
+      "index.html",
+      "index.js",
+      "index.wasm",
+      "iframe.html",
+      "NOTICE.txt",
+      "build-info.json",
+      "licenses/Ludus.txt",
+      "licenses/Emscripten.txt",
+      "licenses/Emscripten-authors.txt",
+      "licenses/musl.txt",
+      "licenses/libcxx.txt",
+      "licenses/libcxxabi.txt",
+      "licenses/compiler-rt.txt",
+      "licenses/emdawnwebgpu.txt",
+      "licenses/webgpu-native.txt",
+      "licenses/SPIRV-Cross.txt"
+    ],
+    "notes": "Shaders are embedded in the wasm; the SPIR-V->GLSL ES translator (SPIRV-Cross, Apache-2.0) is a build-time host tool and does not ship, but its notice travels in licenses/. build-info.json records web, shader and SPIRV-Cross toolchains, payload hashes and the single-threaded memory policy. Relative-asset and wasm memory-policy validation pass; the archive self-verifies by CRC and extraction.",
+    "package_creation_only": "Creating this ZIP does not authorize publishing, upload or account changes."
+  },
+  "browser_qa": {
+    "harness": "tools/web-browser-tests/run.mjs against the extracted exact ZIP",
+    "browser": "140.0.7339.186 (pinned Playwright-bundled Chromium; branded channel not used because it does not composite WebGPU headlessly here)",
+    "kind": "software GPU (SwiftShader); NOT hardware or hosted acceptance",
+    "flags": [
+      "--enable-unsafe-webgpu",
+      "--enable-features=Vulkan",
+      "--use-webgpu-adapter=swiftshader",
+      "--use-angle=swiftshader",
+      "--use-vulkan=swiftshader",
+      "--disable-vulkan-surface",
+      "--enable-unsafe-swiftshader"
+    ],
+    "flag_note": "These flags only select the software backend on a GPU-less host; no experimental feature is used to claim a flag-free pass. Physical-GPU acceptance is a separate gate.",
+    "scenarios": {
+      "auto webgpu: pixels/input/blur/resize/fullscreen/stop/restart/device-loss": "PASS (backend=webgpu)",
+      "auto fallback to WebGL 2 on missing-webgpu": "PASS (backend=webgl2, animates, input moves marker)",
+      "auto fallback to WebGL 2 on adapter-failure": "PASS (backend=webgl2; canvas replaced)",
+      "auto fallback to WebGL 2 on device-failure": "PASS (backend=webgl2; late WebGPU callback isolated)",
+      "both unavailable": "PASS (readable final error, 0 frames, both attempts recorded, status not covered by controls)",
+      "forced WebGPU": "PASS (webgpu only; no WebGL fallback even with WebGL present)",
+      "forced WebGL 2": "PASS (real GLSL ES compile/link/pixels)",
+      "cancel during pending request": "PASS (one session; late callback harmless)",
+      "WebGL 2 context loss and restoration": "PASS (WEBGL_lose_context injected; restart rebuilds on WebGL2)",
+      "repeated restart and resize": "PASS (no accumulation; marker present)",
+      "ordinary sandbox iframe + high-DPR": "PASS (backing size = CSS x 1.5)",
+      "network abort index.js / index.wasm": "PASS (readable 'could not load')"
+    },
+    "all_passed": true,
+    "evidence_png": [
+      "docs/development/evidence/smoke-webgpu-auto.png",
+      "docs/development/evidence/smoke-webgl2-fallback.png"
+    ]
+  },
+  "native_preserved": "renderer_native.cpp and the renderer.h interface are unchanged; native smoke uses Start(Auto)->Vulkan. Vulkan changes limited to the ignored selection parameter + Supports predicate.",
+  "unresolved_gates": [
+    "Physical (non-software) GPU WebGPU and WebGL 2 rendering",
+    "Hosted HTTPS / itch.io iframe acceptance on a real deployment",
+    "Full repository CI: native build + unit/sanitizer tests + pinned clang-format/clang-tidy 18 + build budgets + clean find_package(Ludus) native SDK consumer (native needs Conan/volk; pinned spirv-val needs glibc 2.38; this host used a from-source spirv-val + SPIRV-Cross and a temporarily-patched local lock, restored to the pinned hash before every commit)",
+    "WEBGL_lose_context is an optional extension; its dependency is recorded and the loss path is exercised only where the extension exists"
+  ],
+  "provenance": "Recovered Kiro feasibility evidence; superseded for the current implementation by webgl-fallback-validation.json. Historical package/tool hashes must not be used as current acceptance."
+}

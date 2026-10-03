@@ -1,0 +1,116 @@
+{
+  "date": "2026-10-02",
+  "recovered_base": "a25a88ad45e32b0f892c38a7c436c554f1645a15",
+  "checks": {
+    "native_build": "Clang 18, Development, warnings as errors; passed",
+    "native_tests": "Development CTest: 33 cases, all executed tests passed in final serial run; 2 display-dependent tests skipped.",
+    "native_sanitizers": "ASan/UBSan preset: all 28 tests passed",
+    "format": "Repository formatter and foundational boundary gate passed",
+    "native_tidy": "Full pinned Clang 18 analysis found only brace style in the new lifecycle tests; corrected file passed a focused rerun",
+    "browser_tidy": "Full pinned Clang 18 browser analysis passed; subsequent changed files passed focused rerun",
+    "browser_unit_tests": "15 CTest provider/header/semantic contracts passed",
+    "installed_sdk": "Native SDK manifest, public header boundaries and external consumer passed",
+    "shader_helper": "Real compiler: no-op, include/source/option rebuilds, per-target layouts, bad binding/validator/translator rejected",
+    "package_unit_tests": "5 passed",
+    "workflow_unit_tests": "8 passed",
+    "build_time_budget": "All per-header budgets passed. Aggregate frontend time was 551.5 s against 170 s on a concurrently loaded host; this gate remains failed locally and must pass CI. Budget was not raised."
+  },
+  "smoke_browser": {
+    "kind": "software-GPU CI (SwiftShader), not hardware or hosted acceptance",
+    "zipSha256": "5b216b4ec3302952c7d5fd5a69e6132e540c8d55d7a5dd048b3d7fdd8690d455",
+    "launchArgs": [
+      "--enable-unsafe-webgpu",
+      "--enable-features=Vulkan",
+      "--use-webgpu-adapter=swiftshader",
+      "--use-angle=swiftshader",
+      "--use-vulkan=swiftshader",
+      "--disable-vulkan-surface",
+      "--enable-unsafe-swiftshader"
+    ],
+    "cases": [
+      {
+        "name": "auto webgpu: pixels, input, blur, resize, fullscreen, restart, loss",
+        "status": "passed",
+        "backend": "webgpu"
+      },
+      {
+        "name": "auto fallback to WebGL 2 on missing-webgpu",
+        "status": "passed",
+        "backend": "webgl2"
+      },
+      {
+        "name": "auto fallback to WebGL 2 on adapter-failure",
+        "status": "passed",
+        "backend": "webgl2"
+      },
+      {
+        "name": "auto fallback to WebGL 2 on device-failure",
+        "status": "passed",
+        "backend": "webgl2"
+      },
+      {
+        "name": "auto fallback to WebGL 2 on surface-failure",
+        "status": "passed",
+        "backend": "webgl2"
+      },
+      {
+        "name": "both unavailable: readable final error, no overlap",
+        "status": "passed",
+        "webgpuError": "3",
+        "webglError": "3"
+      },
+      {
+        "name": "failed canvas replacement finalizes one fallback attempt",
+        "status": "passed"
+      },
+      {
+        "name": "forced WebGPU selects only WebGPU",
+        "status": "passed",
+        "backend": "webgpu"
+      },
+      {
+        "name": "forced WebGL 2 compiles/links/renders real GLSL ES",
+        "status": "passed",
+        "backend": "webgl2"
+      },
+      {
+        "name": "cancel during pending request leaves one session",
+        "status": "passed"
+      },
+      {
+        "name": "WebGL 2 context loss and restoration",
+        "status": "passed",
+        "loseContextExtension": true
+      },
+      {
+        "name": "repeated restart and resize stays stable",
+        "status": "passed"
+      },
+      {
+        "name": "ordinary sandbox iframe and high-DPR canvas",
+        "status": "passed"
+      },
+      {
+        "name": "network abort index.js",
+        "status": "passed"
+      },
+      {
+        "name": "network abort index.wasm",
+        "status": "passed"
+      }
+    ],
+    "browserVersion": "140.0.7339.186",
+    "adapter": {
+      "vendor": "google",
+      "architecture": "swiftshader",
+      "device": "",
+      "description": ""
+    }
+  },
+  "unverified": [
+    "physical GPU and flag-free compatibility",
+    "hosted HTTPS/itch.io deployment",
+    "interactive frame-rate acceptance",
+    "CI build-time budget"
+  ]
+}

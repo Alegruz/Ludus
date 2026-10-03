@@ -49,7 +49,11 @@ enum class ShaderStage : ludus::foundation::uint8
     Fragment
 };
 // Artifact storage is borrowed only during CreateShader. Entries are explicit
-// per target (Slang's SPIR-V and WGSL entry names can differ).
+// per target (Slang's SPIR-V and WGSL entry names can differ, and the generated
+// GLSL ES stage always links through main). GlslEs is an additional browser
+// backend artifact (WebGL 2); it is only populated for web builds and never
+// exposes a backend object. A browser build may carry both Wgsl and GlslEs so
+// the engine selects WebGPU or WebGL 2 at startup.
 struct ShaderDescription final
 {
     ShaderStage Stage = ShaderStage::Vertex;
@@ -57,8 +61,10 @@ struct ShaderDescription final
     ludus::foundation::usize UniformSize = 0;
     std::span<const ludus::foundation::uint32> Spirv;
     std::string_view Wgsl;
+    std::string_view GlslEs = "";
     std::string_view SpirvEntry;
     std::string_view WgslEntry;
+    std::string_view GlslEsEntry = "";
 };
 // One binding: set/group 0, binding 0, visible to vertex and fragment.
 struct PipelineDescription final

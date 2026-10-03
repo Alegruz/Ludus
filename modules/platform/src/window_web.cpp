@@ -264,6 +264,10 @@ UniquePtr<Window> CreateWindow(const Window::CreateInfo& info) noexcept
     Window* base = window;
     return UniquePtr<Window>(base);
 }
+bool ReplaceCanvas(const char* selector) noexcept
+{
+    return selector != nullptr && LudusBrowserReplaceCanvas(selector) != 0;
+}
 } // namespace ludus::platform::browser
 
 // Fixed numeric ABI for the private JS bridge, not an engine call-site API.

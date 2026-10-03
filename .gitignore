@@ -26,3 +26,6 @@ scripts/python/dist/
 # project descriptor. Generated at save time; never committed.
 .ludus/
 examples/live-edit-game/out/
+
+# Installed JavaScript test dependencies.
+node_modules

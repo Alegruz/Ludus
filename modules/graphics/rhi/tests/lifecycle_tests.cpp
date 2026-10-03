@@ -14,11 +14,16 @@ uint32 PendingToken = 0;
 uint32 ShutdownCount = 0;
 StartupError ImmediateError = StartupError::None;
 FrameStatus NextFrame = FrameStatus::Ready;
+Backend ActiveKind = Backend::WebGPU;
 Backend Kind() noexcept
 {
-    return Backend::WebGPU;
+    return ActiveKind;
 }
-StartupError Start(const ApplicationInfo&, const WindowInfo&, uint32 token) noexcept
+bool Supports(BackendSelection) noexcept
+{
+    return true;
+}
+StartupError Start(const ApplicationInfo&, const WindowInfo&, uint32 token, BackendSelection) noexcept
 {
     PendingToken = token;
     return ImmediateError;
@@ -337,5 +342,90 @@ TEST_CASE("Public resource failure releases partial backend allocations and capa
     internal::ResourceComplete(backend::LastResource, ResourceStatus::Ready);
     CHECK(GetStatus(interrupted) == ResourceStatus::InvalidHandle);
     backend::NextResource = ResourceStatus::Ready;
+    Shutdown();
+}
+
+TEST_CASE("Fallback generations isolate stale callbacks and retain both attempt outcomes", "[rhi][lifecycle]")
+{
+    Shutdown();
+    backend::ImmediateError = StartupError::None;
+    REQUIRE(Start({}, {}) == StartStatus::Pending);
+    const auto old = backend::PendingToken;
+    internal::SelectBackend(old, Backend::WebGPU);
+    internal::SetFallback([](ludus::foundation::uint32 token, StartupError error) noexcept {
+        internal::RecordAttempt(token, Backend::WebGPU, error);
+        const auto next = internal::Reissue(token);
+        if (next == 0)
+        {
+            return false;
+        }
+        internal::SelectBackend(next, Backend::WebGL2);
+        internal::Complete(next, StartupError::None, 2048);
+        return true;
+    });
+    internal::Fail(old, StartupError::AdapterUnavailable);
+    CHECK(GetStartup().State == StartupState::Ready);
+    CHECK(GetStartup().SelectedBackend == Backend::WebGL2);
+    CHECK(GetStartup().WebGpu.Attempted);
+    CHECK(GetStartup().WebGpu.Error == StartupError::AdapterUnavailable);
+    CHECK(GetStartup().WebGL2.Attempted);
+    CHECK(GetStartup().WebGL2.Error == StartupError::None);
+    CHECK_FALSE(internal::Current(old));
+    internal::Fail(old, StartupError::DeviceLost);
+    internal::Complete(old, StartupError::None, 9999);
+    CHECK(GetStartup().State == StartupState::Ready);
+    CHECK(GetStartup().MaxTextureDimension2D == 2048);
+    backend::ActiveKind = Backend::WebGL2;
+    ShaderHandle shader;
+    ShaderDescription description;
+    description.GlslEs = "#version 300 es\nvoid main() {}";
+    description.GlslEsEntry = "main";
+    CHECK(CreateShader(description, shader) == ResourceStatus::Ready);
+    description.GlslEsEntry = "arbitrary";
+    ShaderHandle bad;
+    CHECK(CreateShader(description, bad) == ResourceStatus::InvalidDescription);
+    Shutdown();
+    CHECK(GetStatus(shader) == ResourceStatus::InvalidHandle);
+    backend::ActiveKind = Backend::WebGPU;
+}
+
+TEST_CASE("Two failed attempts finalize without recursive fallback", "[rhi][lifecycle]")
+{
+    Shutdown();
+    backend::ImmediateError = StartupError::None;
+    REQUIRE(Start({}, {}) == StartStatus::Pending);
+    const auto old = backend::PendingToken;
+    internal::SelectBackend(old, Backend::WebGPU);
+    internal::SetFallback([](ludus::foundation::uint32 token, StartupError error) noexcept {
+        if (GetStartup().SelectedBackend != Backend::WebGPU)
+        {
+            return false;
+        }
+        internal::RecordAttempt(token, Backend::WebGPU, error);
+        const auto next = internal::Reissue(token);
+        if (next == 0)
+        {
+            return false;
+        }
+        internal::SelectBackend(next, Backend::WebGL2);
+        internal::Fail(next, StartupError::DeviceUnavailable);
+        return true;
+    });
+    internal::Fail(old, StartupError::AdapterUnavailable);
+    CHECK(GetStartup().State == StartupState::Failed);
+    CHECK(GetStartup().Error == StartupError::DeviceUnavailable);
+    CHECK(GetStartup().WebGpu.Error == StartupError::AdapterUnavailable);
+    CHECK(GetStartup().WebGL2.Error == StartupError::DeviceUnavailable);
+    CHECK(GetStartup().WebGL2.Attempted);
+    CHECK(BeginFrameStatus() == FrameStatus::NotReady);
+    Shutdown();
+    REQUIRE(Start({}, {}, BackendSelection::WebGPU) == StartStatus::Pending);
+    CHECK(GetStartup().Requested == BackendSelection::WebGPU);
+    internal::Complete(backend::PendingToken, StartupError::None, 4096);
+    internal::SetFallback([](ludus::foundation::uint32, StartupError) noexcept { return true; });
+    // A ready session never hides loss behind a startup fallback, even when a
+    // handler is installed. Shutdown clears it before the next session.
+    internal::Fail(backend::PendingToken, StartupError::DeviceLost);
+    CHECK(GetStartup().State == StartupState::DeviceLost);
     Shutdown();
 }

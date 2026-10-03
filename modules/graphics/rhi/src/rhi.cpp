@@ -19,9 +19,14 @@ bool gLegacy = false;
 bool gRendering = false;
 bool gFrame = false;
 bool gDrawn = false;
+internal::FallbackHandler gFallback = nullptr;
 } // namespace
 namespace internal
 {
+void SetFallback(FallbackHandler handler) noexcept
+{
+    gFallback = handler;
+}
 bool Current(uint32 token) noexcept
 {
     return token != 0 && token == gToken &&
@@ -33,6 +38,14 @@ void Fail(uint32 token, StartupError error) noexcept
     {
         return;
     }
+    // Browser Auto may convert a Pending-attempt failure into another backend
+    // attempt. The handler tears down the failed sub-backend and restarts under
+    // the same session token; the session stays Pending and is not finalized.
+    if (gFallback != nullptr && gStartup.State == StartupState::Pending && gFallback(token, error))
+    {
+        return;
+    }
+    RecordAttempt(token, gStartup.SelectedBackend, error);
     gToken = 0;
     gStartup.State = error == StartupError::DeviceLost ? StartupState::DeviceLost : StartupState::Failed;
     gStartup.Error = error;
@@ -51,26 +64,75 @@ void Complete(uint32 token, StartupError error, uint32 maxTextureDimension) noex
         Fail(token, error);
         return;
     }
+    RecordAttempt(token, gStartup.SelectedBackend, StartupError::None);
     gStartup.MaxTextureDimension2D = maxTextureDimension;
     gStartup.State = StartupState::Ready;
 }
+void SelectBackend(uint32 token, Backend backend) noexcept
+{
+    if (!Current(token))
+    {
+        return;
+    }
+    gStartup.SelectedBackend = backend;
+}
+uint32 Reissue(uint32 token) noexcept
+{
+    if (!Current(token) || gStartup.State != StartupState::Pending)
+    {
+        return 0;
+    }
+    if (gNextToken == 0)
+    {
+        return 0;
+    }
+    gToken = gNextToken++;
+    return gToken;
+}
+void RecordAttempt(uint32 token, Backend backend, StartupError error) noexcept
+{
+    if (!Current(token))
+    {
+        return;
+    }
+    AttemptInfo* attempt = backend == Backend::WebGL2   ? &gStartup.WebGL2
+                           : backend == Backend::WebGPU ? &gStartup.WebGpu
+                                                        : nullptr;
+    if (attempt != nullptr)
+    {
+        attempt->Attempted = true;
+        attempt->Error = error;
+    }
+}
 } // namespace internal
-StartStatus Start(const ApplicationInfo& app, const WindowInfo& window) noexcept
+namespace
+{
+StartStatus StartSelected(const ApplicationInfo& app, const WindowInfo& window, BackendSelection selection) noexcept
 {
     if (gLegacy || gStartup.State != StartupState::Idle)
     {
         return StartStatus::Busy;
     }
-    gStartup.SelectedBackend = backend::Kind();
+    // A forced selection the build cannot provide fails explicitly; it never
+    // silently switches to another backend.
+    if (!backend::Supports(selection))
+    {
+        gStartup.State = StartupState::Failed;
+        gStartup.Error = StartupError::InvalidWindow;
+        gStartup.Requested = selection;
+        return StartStatus::Failed;
+    }
     if (gNextToken == 0)
     {
         gStartup.State = StartupState::Failed;
         gStartup.Error = StartupError::GenerationExhausted;
         return StartStatus::Failed;
     }
+    gStartup.Requested = selection;
+    gStartup.SelectedBackend = backend::Kind();
     gToken = gNextToken++;
     gStartup.State = StartupState::Pending;
-    const auto error = backend::Start(app, window, gToken);
+    const auto error = backend::Start(app, window, gToken, selection);
     if (error != StartupError::None)
     {
         internal::Fail(gToken, error);
@@ -81,11 +143,18 @@ StartStatus Start(const ApplicationInfo& app, const WindowInfo& window) noexcept
     }
     return gStartup.State == StartupState::Pending ? StartStatus::Pending : StartStatus::Failed;
 }
+} // namespace
+StartStatus Start(const ApplicationInfo& app, const WindowInfo& window) noexcept
+{
+    return StartSelected(app, window, BackendSelection::Auto);
+}
+StartStatus Start(const ApplicationInfo& app, const WindowInfo& window, BackendSelection selection) noexcept
+{
+    return StartSelected(app, window, selection);
+}
 StartupInfo GetStartup() noexcept
 {
-    auto result = gStartup;
-    result.SelectedBackend = backend::Kind();
-    return result;
+    return gStartup;
 }
 FrameStatus SetFrameTarget(const FrameTarget& target) noexcept
 {
@@ -162,6 +231,7 @@ void ShutdownRendering() noexcept
 }
 void Shutdown() noexcept
 {
+    gFallback = nullptr;
     gToken = 0;
     internal::ReleaseResources();
     backend::Shutdown();
@@ -369,11 +439,13 @@ ResourceStatus CreateShader(const ShaderDescription& description, ShaderHandle& 
     {
         return ResourceStatus::InvalidDescription;
     }
-    const bool native = backend::Kind() == Backend::Vulkan;
-    if ((description.Stage != ShaderStage::Vertex && description.Stage != ShaderStage::Fragment) ||
-        (native && (description.Spirv.size() < 5 || description.Spirv[0] != 0x07230203U ||
-                    !ValidEntry(description.SpirvEntry))) ||
-        (!native && (description.Wgsl.empty() || !ValidEntry(description.WgslEntry))))
+    const auto kind = backend::Kind();
+    const bool validArtifact =
+        kind == Backend::Vulkan   ? (description.Spirv.size() >= 5 && description.Spirv[0] == 0x07230203U &&
+                                   ValidEntry(description.SpirvEntry))
+        : kind == Backend::WebGL2 ? (!description.GlslEs.empty() && description.GlslEsEntry == "main")
+                                  : (!description.Wgsl.empty() && ValidEntry(description.WgslEntry));
+    if ((description.Stage != ShaderStage::Vertex && description.Stage != ShaderStage::Fragment) || !validArtifact)
     {
         return ResourceStatus::InvalidDescription;
     }

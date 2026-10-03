@@ -1,0 +1,15 @@
+{
+  "host": "linux-x86_64",
+  "spirv_cross": {
+    "role": "build-time SPIR-V -> GLSL ES 3.00 translator (browser/WebGL 2 backend artifact)",
+    "repository": "https://github.com/KhronosGroup/SPIRV-Cross",
+    "tag": "vulkan-sdk-1.4.313.0",
+    "commit": "2275d0efc4f2fa46851035d9d3c67c105bc8b99e",
+    "source_url": "https://github.com/KhronosGroup/SPIRV-Cross/archive/refs/tags/vulkan-sdk-1.4.313.0.tar.gz",
+    "source_sha256": "7d1de24918bea9897753f7561d4d154f68ec89c36bb70c13598222b8039d4212",
+    "cli": "spirv-cross --version 300 --es",
+    "license": "Apache-2.0",
+    "limitations": "SPIRV-Cross rejects BaseVertex/BaseInstance in the ES profile. Author Slang vertex inputs with SV_VulkanVertexID / SV_VulkanInstanceID (not SV_VertexID) so the emitted SPIR-V uses plain VertexIndex/InstanceIndex (no SPV_KHR_shader_draw_parameters).",
+    "build_manifest": "Bootstrap writes <binary>.build.json with verified source identity and the host-built binary hash; the offline helper verifies both before executing."
+  }
+}
