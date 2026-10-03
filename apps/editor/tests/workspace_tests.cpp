@@ -163,3 +163,24 @@ TEST_CASE("Job id counter advances and never silently reuses", "[editor][workspa
     state = BeginJob(state, ActionKind::Configure);
     CHECK(state.ActiveJob == first + 1);
 }
+
+TEST_CASE("Release actions require a clean v2 CMake project and one owned operation", "[editor][workspace][release]")
+{
+    WorkspaceState state = LoadedState();
+    CHECK_FALSE(ComputeCapabilities(state).CanReleaseInit);
+    CHECK_FALSE(ComputeCapabilities(state).CanPackage);
+    state.Saved.Version = 2;
+    state.Saved.ProviderKind = Provider::Cmake;
+    state.Draft = state.Saved;
+    CHECK(ComputeCapabilities(state).CanReleaseInit);
+    CHECK(ComputeCapabilities(state).CanPackage);
+    state.Draft.Name = QStringLiteral("unsaved");
+    CHECK_FALSE(ComputeCapabilities(state).CanReleaseInit);
+    CHECK_FALSE(ComputeCapabilities(state).CanPackage);
+    state.Draft = state.Saved;
+    const WorkspaceState packaging = BeginJob(state, ActionKind::Package);
+    CHECK_FALSE(ComputeCapabilities(packaging).CanPackage);
+    CHECK_FALSE(ComputeCapabilities(packaging).CanReleaseInit);
+    CHECK(ComputeCapabilities(packaging).CanStop);
+    CHECK_FALSE(ComputeCapabilities(LatchStop(packaging)).CanPackage);
+}

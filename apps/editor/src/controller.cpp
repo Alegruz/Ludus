@@ -192,7 +192,7 @@ void EditorController::Reload()
     Publish();
 }
 
-void EditorController::StartJob(ActionKind kind, ToolOperation operation)
+void EditorController::StartJob(ActionKind kind, ToolOperation operation, const ToolLaunch& options)
 {
     if (!CanStartJob(State_, kind))
     {
@@ -204,7 +204,7 @@ void EditorController::StartJob(ActionKind kind, ToolOperation operation)
     LastPid_ = 0;
     Transitions_.append(QString::fromLatin1(PhaseName(State_.OperationPhase)));
 
-    ToolLaunch launch;
+    ToolLaunch launch = options;
     launch.PythonPath = Tooling_.PythonPath;
     launch.AdapterPath = Tooling_.AdapterPath;
     launch.ToolingRoot = Tooling_.ToolingRoot;
@@ -235,6 +235,23 @@ void EditorController::Build()
 void EditorController::BuildRun()
 {
     StartJob(ActionKind::BuildRun, ToolOperation::BuildRun);
+}
+
+void EditorController::SetupRelease(const QString& platform, const QString& itchTarget)
+{
+    ToolLaunch options;
+    options.ReleasePlatform = platform;
+    options.ItchTarget = itchTarget;
+    StartJob(ActionKind::ReleaseInit, ToolOperation::ReleaseInit, options);
+}
+
+void EditorController::PackageRelease(const QString& profile, const QString& version, const QString& sdk)
+{
+    ToolLaunch options;
+    options.ReleaseProfile = profile;
+    options.ReleaseVersion = version;
+    options.ReleaseSdk = sdk;
+    StartJob(ActionKind::Package, ToolOperation::Package, options);
 }
 
 void EditorController::Stop()

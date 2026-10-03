@@ -112,3 +112,31 @@ the updated PR head independently. The initial [ci run 37091095312](https://gith
 also passed source formatting, Development/SDK validation, Clang static analysis,
 ASan/UBSan, Optional Editor, build budget, PCH and assertion-policy variants.
 These are results for the initial commit, not the later loader-rewrite fix.
+
+## Editor/browser/upload follow-up
+
+The follow-up adds no-overwrite existing-project setup, Editor controls, browser
+Release packaging and a generated two-job GitHub upload workflow. Local acceptance
+built a full Release browser SDK, compiled Sandbox with pinned Slang/SPIRV-Tools/
+SPIRV-Cross, and packaged/verified its current JS/Wasm plus licenses. Tests cover
+setup conflicts/cancellation, archive/policy checks, failed builds, SDK mismatch,
+Editor request validation and an isolated upload stub verifying exact private
+snapshot bytes, credential scope, failed/interrupted receipts and no automatic retries.
+
+Validation: 132 host-tool tests, 36 release tests against an installed wheel outside
+the checkout, 35 adapter regression tests and 37 C++ Editor cases (185 assertions).
+The Editor built warning-clean, passed ASan/UBSan and leak checks outside the
+sandbox, and all four changed Editor translation units passed pinned clang-tidy 18.
+Formatting and the foundational include gate passed. A real Qt controller loaded
+Sandbox's descriptor and packaged through its real adapter with cleanup confirmed
+and zero dropped output. Extracted JavaScript passed Node syntax checking and the
+WebAssembly compiled in Node without instantiating or running game code.
+
+Butler 15.31.0 was acquired from the official versioned broth endpoint and its
+archive/executable SHA256s are recorded in `ludus_tools.itch`. No itch.io account
+was authenticated and no live upload/page change was performed. GitHub environment
+secrets/destination and itch.io HTML page configuration remain user-owned setup.
+Browser verification is static and does not establish dynamic JavaScript URL
+closure or hosted runtime behavior. A submitted-upload receipt deliberately does
+not assert processing completion. Native runtime dependency closure is not
+asserted for Sandbox.

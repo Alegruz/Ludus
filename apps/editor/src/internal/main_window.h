@@ -43,6 +43,8 @@ private Q_SLOTS:
     void OnAddArgument();
     void OnRemoveArgument();
     void OnCopyJobDetails();
+    void OnSetupRelease();
+    void OnPackageRelease();
 
 private:
     void BuildUi();
@@ -72,6 +74,8 @@ private:
     QAction* ConfigureAction_ = nullptr;
     QAction* BuildAction_ = nullptr;
     QAction* BuildRunAction_ = nullptr;
+    QAction* SetupReleaseAction_ = nullptr;
+    QAction* PackageReleaseAction_ = nullptr;
     QAction* StopAction_ = nullptr;
     QAction* ClearAction_ = nullptr;
     QAction* CopyAction_ = nullptr;

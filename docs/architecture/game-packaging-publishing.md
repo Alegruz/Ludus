@@ -510,3 +510,6 @@ A service for distributed upload locks, unattended preview uploads on every
 commit, generalized store plugins, remote page automation and automatic game
 updates require separate use cases and designs. The initial workflow should be
 small enough that a generated game's release remains understandable and editable.
+
+The Editor setup, browser Release packaging and explicit CI upload follow-up is
+documented in [Editor-managed game releases](../development/editor-game-releases.md).

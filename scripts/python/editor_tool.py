@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 import editor_project
+from ludus_tools.errors import ToolingError
 
 
 PROTOCOL_VERSION = 1
@@ -279,6 +280,7 @@ class OwnedProcess:
     def __init__(self, argv: list[str], cwd: str, env: dict[str, str]) -> None:
         self.argv = list(argv)
         self.cwd = cwd
+        env = {key: value for key, value in env.items() if key != "BUTLER_API_KEY"}
         self._proc = subprocess.Popen(
             self.argv,
             cwd=cwd,
@@ -497,6 +499,7 @@ class Plan:
     cmake: list[str]            # absolute managed cmake argv prefix
     env: dict[str, str]
     run_cwd: Path
+    resolution: Any = None
 
 
 def _resolve_managed_cmake(context: ToolContext) -> str:
@@ -529,7 +532,17 @@ def build_plan(context: ToolContext, descriptor: editor_project.Descriptor, proj
 
     cmake = [_resolve_managed_cmake(context)]
 
-    if descriptor.provider == "ludus":
+    resolution = None
+    if getattr(descriptor, "version", 1) == 2 and descriptor.provider == "cmake":
+        from ludus_tools.operations import resolve_project, _sdk_env
+        from ludus_tools.sdkstore import SdkStore
+        resolved = resolve_project(project_dir, store=SdkStore())
+        resolution = resolved.resolution
+        build_dir = resolved.paths.build_dir
+        env = engine.tool_env(context.tooling_root)
+        env.update(_sdk_env(resolution))
+        env.pop("BUTLER_API_KEY", None)
+    elif descriptor.provider == "ludus":
         # Verify the opened source is a Ludus checkout and reuse its bootstrap,
         # managed tools and prepared environment. Missing/stale preparation is an
         # actionable error that directs the user to run init explicitly.
@@ -558,6 +571,7 @@ def build_plan(context: ToolContext, descriptor: editor_project.Descriptor, proj
         cmake=cmake,
         env=env,
         run_cwd=run_cwd,
+        resolution=resolution,
     )
 
 
@@ -760,7 +774,8 @@ class Operation:
 
     def __init__(self, context: ToolContext, writer: ProtocolWriter, job: str,
                  operation: str, project_path: Path, expected_sha256: str,
-                 control_fd: int) -> None:
+                 control_fd: int, options: dict | None = None) -> None:
+        self._options = options or {}
         self._context = context
         self._writer = writer
         self._job = job
@@ -788,8 +803,9 @@ class Operation:
         if self._expected and digest != self._expected:
             raise editor_project.ProjectError(
                 "Conflict", "descriptor digest does not match the expected clean snapshot")
-        # Revalidate all fields before executing any tool.
-        return editor_project.parse_descriptor_bytes(data)
+        # Share the v2 parser with the installed backend; preserve v1 behavior.
+        from ludus_tools.descriptor import parse_descriptor_bytes
+        return parse_descriptor_bytes(data)
 
     def _run_stage(self, stage: str, argv: list[str], cwd: Path, env: dict[str, str],
                    code_on_fail: str) -> None:
@@ -807,6 +823,8 @@ class Operation:
     def execute(self) -> OperationResult:
         try:
             descriptor = self._load_clean_descriptor()
+            if self._operation in ("release_init", "package"):
+                return self._execute_release(descriptor)
             plan = build_plan(self._context, descriptor, self._project_path.parent)
 
             # Acquire the cooperative per-build-tree lock for the WHOLE operation,
@@ -831,12 +849,63 @@ class Operation:
         except _StageFailed as exc:
             return OperationResult("failed", exc.stage, exc.code, exc.message,
                                    exit_code=exc.exit_code, signal=exc.signal)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            return OperationResult("failed", self._stage, "ReleaseFailed" if self._operation in ("release_init", "package") else "SpawnFailed", str(exc))
+        except ToolingError as exc:
+            return OperationResult("failed", self._stage, "ReleaseFailed" if self._operation in ("release_init", "package") else "InvalidProject", f"{exc.code}: {exc.message}")
         except editor_project.ProjectError as exc:
             return OperationResult("failed", self._stage, exc.code, exc.message)
         except self._context.engine.EngineError as exc:
             # File API read/validation or bootstrap failure after configure:
             # a reply/identity problem, not a crash.
             return OperationResult("failed", self._stage, "ReplyInvalid", str(exc))
+
+    def _check_release_cancel(self) -> None:
+        self._supervisor._read_control()
+        self._check_cancel()
+
+    def _execute_release(self, descriptor) -> OperationResult:
+        from ludus_tools.release_setup import setup_release
+        from ludus_tools.release import package_project
+        from ludus_tools.sdkstore import SdkStore
+        if descriptor.version != 2 or descriptor.provider != "cmake":
+            raise editor_project.ProjectError("InvalidProject", "release actions require a saved version-2 CMake project")
+        self._stage = "configuring"
+        self._writer.phase(self._stage)
+        self._check_release_cancel()
+        if self._operation == "release_init":
+            env = {k: v for k, v in os.environ.items() if k != "BUTLER_API_KEY"}
+            ref = subprocess.run(["git", "-C", str(self._context.tooling_root), "rev-parse", "HEAD"],
+                                 env=env, capture_output=True, text=True, check=True).stdout.strip()
+            files = setup_release(self._project_path, platform=self._options["platform"],
+                                  itch_target=self._options["itch_target"] or None, tools_ref=ref,
+                                  expected_descriptor_digest=self._expected, cancel_check=self._check_release_cancel)
+            self._writer.output(self._stage, "stdout", "Saved release files: " + ", ".join(files) + "\n")
+            return OperationResult("success", self._stage, "Ok", "release setup saved; review and commit generated files")
+        count = 0
+        def runner(argv, *, cwd, env):
+            nonlocal count
+            # Configure/build/install share the existing supervised process-group
+            # ownership, bounded output and parent-loss cancellation mechanism.
+            stage = "configuring" if count == 0 else "building"
+            count += 1
+            self._check_release_cancel()
+            self._run_stage(stage, list(argv), cwd, env, "BuildFailed")
+            return 0
+        # Use trusted managed tools for the shared backend's CMake/compiler lookup.
+        original_env = os.environ.copy()
+        try:
+            os.environ.update(self._context.engine.tool_env(self._context.tooling_root))
+            os.environ.pop("BUTLER_API_KEY", None)
+            package = package_project(self._project_path, profile=self._options["profile"],
+                                      version=self._options["version"], store=SdkStore(),
+                                      sdk=Path(self._options["sdk"]) if self._options["sdk"] else None,
+                                      run_command=runner, cancel_check=self._check_release_cancel)
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+        self._writer.output(self._stage, "stdout", f"Package: {package}\nSHA256: {package.name}\n")
+        return OperationResult("success", self._stage, "Ok", "release package verified; directory shown in Output")
 
     def _execute_locked(self, descriptor: editor_project.Descriptor, plan: Plan) -> OperationResult:
         """Run the operation while holding the per-build-tree lock."""
@@ -846,6 +915,10 @@ class Operation:
         self._check_cancel()
         self._run_stage("configuring", configure_argv(plan), plan.source_dir, plan.env, "ConfigureFailed")
 
+        if plan.resolution is not None:
+            from ludus_tools.resolve import assert_stamp_unchanged, write_stamp
+            assert_stamp_unchanged(plan.build_dir, plan.resolution)
+            write_stamp(plan.build_dir, plan.resolution)
         # Discover executable targets; verify source/build identity.
         self._context.cmake_targets.verify_identity(plan.build_dir, plan.source_dir,
                                                     self._context.engine, client=FILE_API_CLIENT)
@@ -861,6 +934,9 @@ class Operation:
         self._check_cancel()
         self._run_stage("building", build_argv(plan), plan.source_dir, plan.env, "BuildFailed")
 
+        if plan.resolution is not None:
+            from ludus_tools.resolve import assert_stamp_unchanged
+            assert_stamp_unchanged(plan.build_dir, plan.resolution)
         # CMake may regenerate during build: reread the current codemodel and
         # re-resolve the artifact before Run.
         self._context.cmake_targets.verify_identity(plan.build_dir, plan.source_dir,
@@ -990,7 +1066,7 @@ def _validate_request(message: dict) -> tuple[str, str, Path, str]:
     except ValueError as exc:
         raise ProtocolError("request job is not hex") from exc
     operation = message.get("operation")
-    if operation not in ("configure", "build", "build_run"):
+    if operation not in ("configure", "build", "build_run", "release_init", "package"):
         raise ProtocolError("unknown operation")
     project = message.get("project")
     if not isinstance(project, str) or not os.path.isabs(project):
@@ -998,6 +1074,11 @@ def _validate_request(message: dict) -> tuple[str, str, Path, str]:
     expected = message.get("expected_sha256", "")
     if not isinstance(expected, str) or (expected and len(expected) != 64):
         raise ProtocolError("expected_sha256 must be 64 hex characters")
+    fields = {"platform": 16, "itch_target": 128} if operation == "release_init" else {"profile": 64, "version": 128, "sdk": 4096} if operation == "package" else {}
+    for key, maximum in fields.items():
+        value = message.get(key)
+        if not isinstance(value, str) or len(value.encode()) > maximum or any(ord(c) < 32 for c in value):
+            raise ProtocolError("invalid release request field: " + key)
     return job, operation, Path(project), expected
 
 
@@ -1025,7 +1106,7 @@ def run_stdio(context: ToolContext, in_fd: int, out_fd: int) -> int:
         return 2
 
     writer = ProtocolWriter(job, write)
-    operation_obj = Operation(context, writer, job, operation, project, expected, in_fd)
+    operation_obj = Operation(context, writer, job, operation, project, expected, in_fd, message)
 
     # SIGTERM/SIGINT only latch cancellation; cleanup runs before exit.
     def _handle_signal(_signum, _frame):

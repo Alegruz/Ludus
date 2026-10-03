@@ -42,12 +42,12 @@ jobs:
       - name: Run host-tooling unit/integration tests
         run: |
           cd scripts/python
-          PATH=/tmp/ludus-venv/bin:$PATH python3 -m unittest test_ludus_tools test_ludus_project_ops test_ludus_cli test_ludus_failure_scenarios test_ludus_release -v
+          PATH=/tmp/ludus-venv/bin:$PATH python3 -m unittest test_ludus_tools test_ludus_project_ops test_ludus_cli test_ludus_failure_scenarios test_ludus_release test_ludus_itch_release -v
 
       - name: Exercise the installed release backend outside the checkout
         working-directory: /tmp
         run: |
-          PATH=/tmp/ludus-venv/bin:$PATH PYTHONPATH=/tmp/ludus-venv/lib/python3.11/site-packages:${{ github.workspace }}/scripts/python /tmp/ludus-venv/bin/python -m unittest test_ludus_release -v
+          PATH=/tmp/ludus-venv/bin:$PATH PYTHONPATH=/tmp/ludus-venv/lib/python3.11/site-packages:${{ github.workspace }}/scripts/python /tmp/ludus-venv/bin/python -m unittest test_ludus_release test_ludus_itch_release -v
 
   sdk-candidate-relocation:
     name: SDK candidate build + relocation + external link

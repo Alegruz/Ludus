@@ -75,7 +75,7 @@ def _archive(payload: Path, archive: Path, records: list[dict], manifest: dict) 
 
 
 def package_project(project: Path, *, profile: str, version: str,
-                    store: SdkStore, sdk: Path | None = None) -> Path:
+                    store: SdkStore, sdk: Path | None = None, run_command=None, cancel_check=None) -> Path:
     """Build, install, validate and atomically publish an exact Release package."""
     version = _version(version)
     paths = operations.locate_project(project)
@@ -84,6 +84,9 @@ def package_project(project: Path, *, profile: str, version: str,
     if profile not in config.profiles:
         fail(f"unknown release profile {profile!r}")
     selected = config.profiles[profile]
+    if selected.target_platform == "web":
+        from .package_web import package_web
+        return package_web(project, profile=profile, version=version, sdk=sdk, run_command=run_command, cancel_check=cancel_check)
     resolved = operations.resolve_project(project, store=store, cli_sdk_prefix=sdk, profile="linux-clang-release")
     if resolved.resolution.identity.target_triple != "x86_64-linux-gnu":
         fail("SDK target does not match release profile", "SdkIncompatible")
@@ -93,6 +96,7 @@ def package_project(project: Path, *, profile: str, version: str,
     lock_digest = file_digest(paths.lock_path)
     descriptor_digest = file_digest(paths.descriptor_path)
     source = _source_state(root)
+    runner = run_command or operations._run
     cmake = operations._cmake_executable()
     env = operations._sdk_env(resolved.resolution)
     package_parent = root / "out" / "packages" / profile
@@ -107,7 +111,7 @@ def package_project(project: Path, *, profile: str, version: str,
             operations.configure_argv(cmake, "linux-clang-release", resolved.paths.source_dir, resolved.paths.build_dir),
             operations.build_argv(cmake, resolved.paths.build_dir, selected.target),
         ):
-            if operations._run(argv, cwd=resolved.paths.source_dir, env=env) != 0:
+            if runner(argv, cwd=resolved.paths.source_dir, env=env) != 0:
                 fail("release build failed; refusing to package a stale executable", "BuildFailed")
             assert_stamp_unchanged(resolved.paths.build_dir, resolved.resolution)
         write_stamp(resolved.paths.build_dir, resolved.resolution)
@@ -122,7 +126,7 @@ def package_project(project: Path, *, profile: str, version: str,
         payload.mkdir()
         install = [cmake, "--install", str(resolved.paths.build_dir), "--config", "Release",
                    "--component", selected.install_component, "--prefix", str(payload)]
-        if operations._run(install, cwd=resolved.paths.source_dir, env=env) != 0:
+        if runner(install, cwd=resolved.paths.source_dir, env=env) != 0:
             fail("release installation failed", "BuildFailed")
         records = inventory(payload)
         external = validate_native(payload, selected.entry_point)
@@ -162,6 +166,8 @@ def package_project(project: Path, *, profile: str, version: str,
             "toolVersion": __version__, "checks": ["payload", "native", "clean-extraction"],
         }))
         verify_package(completed)
+        if cancel_check:
+            cancel_check()
         destination = package_parent / archive_digest
         # Lock package publication independently of the build tree in case
         # two valid projects share a chosen output profile.
@@ -174,7 +180,7 @@ def package_project(project: Path, *, profile: str, version: str,
         return destination
 
 
-def publish_plan(project: Path, package: Path, *, destination: str, allow_local_inputs: bool = False) -> dict:
+def publish_plan(project: Path, package: Path, *, destination: str, allow_local_inputs: bool = False, target_override: str | None = None) -> dict:
     """Offline plan only: never resolve an SDK, execute a game or authenticate."""
     paths = operations.locate_project(project)
     model = descriptor.parse_descriptor_file(paths.descriptor_path)
@@ -185,7 +191,11 @@ def publish_plan(project: Path, package: Path, *, destination: str, allow_local_
         fail("project has no engine requirement")
     validate_descriptor_lock_agreement(model.engine.version, parse_lock_file(paths.lock_path))
     config = load_release(paths.project_dir)
-    if destination not in config.destinations or config.itch_target is None:
+    from .release_model import ITCH_TARGET
+    target = target_override or config.itch_target
+    if target_override and (not ITCH_TARGET.fullmatch(target_override) or (config.itch_target and target_override != config.itch_target)):
+        fail("itch target override is invalid or differs from configured destination", "Conflict")
+    if destination not in config.destinations or target is None:
         fail(f"unknown itch.io destination {destination!r}")
     verified = verify_package(package)
     manifest = verified["manifest"]
@@ -198,10 +208,10 @@ def publish_plan(project: Path, package: Path, *, destination: str, allow_local_
     if manifest["localInputs"] and not allow_local_inputs:
         fail("package used dirty/unknown sources or an SDK override; pass --allow-local-inputs to inspect its upload plan")
     return {"operation": "offline-upload-plan", "destination": destination,
-            "target": config.itch_target, "channel": channel, "version": verified["version"],
+            "target": target, "channel": channel, "version": verified["version"],
             "archiveSha256": verified["archiveSha256"], "localInputs": manifest["localInputs"],
             "expandedBytes": sum(record["size"] for record in manifest["files"]),
             "argv": ["butler", "push", "<verified-private-snapshot>/game.zip",
-                     f"{config.itch_target}:{channel}", "--userversion", verified["version"]],
-            "prerequisites": ["live uploader and pinned butler setup are not implemented",
+                     f"{target}:{channel}", "--userversion", verified["version"]],
+            "prerequisites": ["pinned butler setup and explicit upload authorization",
                               "existing itch.io project with appropriate visibility and authentication"]}

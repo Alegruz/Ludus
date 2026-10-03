@@ -32,6 +32,8 @@ enum class ToolOperation : foundation::uint8
     Configure,
     Build,
     BuildRun,
+    ReleaseInit,
+    Package,
 };
 
 [[nodiscard]] const char* ToolOperationName(ToolOperation op) noexcept;
@@ -92,6 +94,11 @@ struct ToolLaunch
     QString ProjectPath;    // absolute descriptor path
     QString ExpectedSha256; // digest of the clean saved descriptor
     ToolOperation Operation = ToolOperation::Configure;
+    QString ReleasePlatform;
+    QString ItchTarget;
+    QString ReleaseProfile;
+    QString ReleaseVersion;
+    QString ReleaseSdk;
     uint64 Job = 0; // 16-hex-encoded on the wire
 };
 

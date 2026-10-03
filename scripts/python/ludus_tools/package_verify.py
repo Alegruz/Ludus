@@ -128,8 +128,11 @@ def extract_archive(archive: Path, destination: Path) -> dict:
     fields(manifest, {"schemaVersion", "profile", "targetPlatform", "entryPoint", "version", "source",
                       "engineLockSha256", "releaseConfigSha256", "sdk", "localInputs", "policy",
                       "systemLibraries", "files"}, set(), "build-info.json")
+    from .package_web import WEB_POLICY, validate_web
+    web = manifest["targetPlatform"] == "web"
+    policy = WEB_POLICY if web else POLICY
     if (type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 1
-            or manifest["policy"] != POLICY or manifest["targetPlatform"] != "linux-x64"
+            or manifest["policy"] != policy or manifest["targetPlatform"] not in ("linux-x64", "web")
             or type(manifest["localInputs"]) is not bool):
         fail("unsupported package manifest/policy", "InvalidPackage")
     payload_path(manifest["entryPoint"])
@@ -150,7 +153,7 @@ def extract_archive(archive: Path, destination: Path) -> dict:
     from dataclasses import fields as dataclass_fields
     from .identity import SdkIdentity
     fields(manifest["sdk"], {field.name for field in dataclass_fields(SdkIdentity)}, set(), "sdk")
-    if (manifest["sdk"]["target_triple"] != "x86_64-linux-gnu" or manifest["sdk"]["flavor"] != "Release"
+    if (manifest["sdk"]["target_triple"] != ("wasm32-unknown-emscripten" if web else "x86_64-linux-gnu") or manifest["sdk"]["flavor"] != "Release"
             or manifest["sdk"]["cxx_standard"] != "C++23"):
         fail("package SDK is not a supported native Release SDK", "InvalidPackage")
     records = manifest["files"]
@@ -172,7 +175,7 @@ def extract_archive(archive: Path, destination: Path) -> dict:
             fail(f"payload hash/size/mode mismatch: {record['path']}", "InvalidPackage")
     if records_seen != seen - {"build-info.json"}:
         fail("manifest inventory differs from ZIP", "InvalidPackage")
-    external = validate_native(destination, manifest["entryPoint"])
+    external = (validate_web if web else validate_native)(destination, manifest["entryPoint"])
     if external != manifest["systemLibraries"]:
         fail("system prerequisite inventory mismatch", "InvalidPackage")
     return manifest
@@ -193,12 +196,16 @@ def verify_package(package_dir: Path) -> dict:
         fail("package archive digest/schema mismatch", "InvalidPackage")
     report = read_json(package_dir / "validation.json")
     fields(report, {"schemaVersion", "archiveSha256", "policy", "toolVersion", "checks"}, set(), "validation.json")
+    from .package_web import WEB_POLICY
+    platform_check = "web" if report["policy"] == WEB_POLICY else "native"
     if (type(report["schemaVersion"]) is not int or report["schemaVersion"] != 1
-            or report["archiveSha256"] != sidecar["archiveSha256"] or report["policy"] != POLICY
-            or report["checks"] != ["payload", "native", "clean-extraction"]):
+            or report["archiveSha256"] != sidecar["archiveSha256"] or report["policy"] not in (POLICY, WEB_POLICY)
+            or report["checks"] != ["payload", platform_check, "clean-extraction"]):
         fail("validation report does not describe this package", "InvalidPackage")
     with tempfile.TemporaryDirectory(prefix="ludus-package-verify-") as temp:
         manifest = extract_archive(package_dir / "game.zip", Path(temp))
+        if manifest["policy"] != report["policy"]:
+            fail("validation policy disagrees with payload", "InvalidPackage")
         if sha256((Path(temp) / "build-info.json").read_bytes()) != sidecar["manifestSha256"]:
             fail("package manifest digest mismatch", "InvalidPackage")
     for key in ("profile", "version", "releaseConfigSha256"):

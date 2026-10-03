@@ -23,3 +23,6 @@ The installed CLI supports optional `project create --release`, native
 See [the release guide](../../docs/development/game-packaging-publishing.md).
 The wheel ships the standalone CMake File API resolver; these operations need
 no Qt or engine checkout. Live itch.io uploads are a subsequent phase.
+
+Existing-project Editor setup, browser packaging and CI uploading: see
+[Editor-managed game releases](../../docs/development/editor-game-releases.md).
