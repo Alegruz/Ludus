@@ -5,6 +5,7 @@
 // Mirrors modules/foundation/containers/tests/allocation_tests.cpp.
 
 #include <ludus/foundation/math/batch.hpp>
+#include <ludus/foundation/math/dynamics.hpp>
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/quaternion.hpp>
@@ -160,6 +161,13 @@ TEST_CASE("Checked math operations never allocate", "[math][alloc]")
                          Sphere{Vector3{0, 0, 0}, 1.0f},
                          RayInterval{0.0, 1e30},
                          hit) == MathStatus::Success);
+
+    // Drag integration and swept radial contact.
+    LinearDragStep drag;
+    REQUIRE(TryComputeLinearDragStep(0.7, 1.0 / 60.0, drag) == MathStatus::Success);
+    RadialSweepContact radial;
+    REQUIRE(TrySweepRadialBand({10, 0, 0}, {10, 0, 0}, {}, 0, 20, 2, radial) == MathStatus::Success);
+    REQUIRE(radial.Hit);
 
     // Random stream.
     RandomStream rng;

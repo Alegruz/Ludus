@@ -2,6 +2,7 @@
 #include <ludus/foundation/base/assert_format.hpp>
 #include <ludus/foundation/base/build_metadata.hpp>
 #include <ludus/foundation/base/version.hpp>
+#include <ludus/foundation/math/dynamics.hpp>
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/quaternion.hpp>
 #include <ludus/foundation/math/random.hpp>
@@ -122,6 +123,16 @@ static int ExerciseInstalledMath()
     mat.Columns[3] = m::Vector4{3.0F, 4.0F, 5.0F, 1.0F};
     m::Matrix4 inv{};
     if (m::TryInverse(mat, inv) != m::MathStatus::Success)
+    {
+        return 7;
+    }
+
+    // Installed checked dynamics symbols and header are part of the SDK.
+    m::LinearDragStep drag;
+    m::RadialSweepContact contact;
+    if (!m::IsSuccess(m::TryComputeLinearDragStep(0.0, 0.5, drag)) || drag.DistanceScale != 0.5 ||
+        !m::IsSuccess(m::TrySweepRadialBand({10, 0, 0}, {10, 0, 0}, {}, 0, 20, 2, contact)) || !contact.Hit ||
+        !m::NearlyEqual(contact.Fraction, 0.4, 1e-12, 1e-12))
     {
         return 7;
     }
