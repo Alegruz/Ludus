@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "name": "Floating Engine",
+  "provider": "cmake",
+  "source_dir": ".",
+  "preset": "linux-clang-development",
+  "target": "app",
+  "run": {
+    "cwd": ".",
+    "args": []
+  },
+  "engine": {
+    "version": "^1.0"
+  }
+}

@@ -42,7 +42,15 @@ TEST_CASE("Shared fixtures parse with the same verdicts as the Python validator"
 {
     CHECK(ParseDescriptor(ReadFixture("valid_ludus.json")).Ok());
     CHECK(ParseDescriptor(ReadFixture("valid_cmake_unicode_args.json")).Ok());
-    CHECK(ParseDescriptor(ReadFixture("invalid_bad_version.json")).Code == ResultCode::UnsupportedVersion);
+    // invalid_bad_version.json is version 2 (a provider-ludus project with no
+    // engine object). The v1-only Python reader (editor_project.py) still
+    // rejects it as UnsupportedVersion, but this C++ reader is now v2-aware and
+    // accepts it; the dedicated v2 verdicts live in project_store_v2_tests.cpp.
+    {
+        const ParseOutcome v2 = ParseDescriptor(ReadFixture("invalid_bad_version.json"));
+        CHECK(v2.Ok());
+        CHECK(v2.Descriptor.Version == 2u);
+    }
     CHECK(ParseDescriptor(ReadFixture("invalid_unknown_field.json")).Code == ResultCode::InvalidProject);
     CHECK(ParseDescriptor(ReadFixture("invalid_absolute_source.json")).Code == ResultCode::InvalidProject);
     CHECK(ParseDescriptor(ReadFixture("invalid_bad_target.json")).Code == ResultCode::InvalidProject);

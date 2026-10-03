@@ -1,14 +1,40 @@
 {
+  "schema_version": 2,
   "name": "@LUDUS_ENGINE_PACKAGE_NAME@",
   "version": "@PROJECT_VERSION@",
+  "source_revision": "@LUDUS_GIT_REVISION@",
+  "package_format": "ludus-sdk-tar-1",
   "library_type": "static",
   "cxx_standard": "C++23",
   "cmake_namespace": "@LUDUS_ENGINE_EXPORT_NAMESPACE@",
+  "target_triple": "@LUDUS_TARGET_TRIPLE@",
+  "target_os": "@CMAKE_SYSTEM_NAME@",
+  "target_arch": "@CMAKE_SYSTEM_PROCESSOR@",
+  "compiler_id": "@LUDUS_COMPILER_ID@",
+  "compiler_version": "@LUDUS_COMPILER_VERSION@",
+  "cxx_runtime_abi": "@LUDUS_CXX_RUNTIME_ABI@",
+  "distro_baseline": "@LUDUS_DISTRO_BASELINE@",
   "sdk_variant": "@LUDUS_SDK_VARIANT@",
   "build_flavor": "@LUDUS_BUILD_FLAVOR@",
   "build_flavor_id": @LUDUS_BUILD_FLAVOR_ID@,
+  "build_type": "@CMAKE_BUILD_TYPE@",
+  "sanitizers": {
+    "asan": @LUDUS_ENABLE_ASAN_JSON@,
+    "ubsan": @LUDUS_ENABLE_UBSAN_JSON@,
+    "tsan": @LUDUS_ENABLE_TSAN_JSON@
+  },
+  "assert_policy": {
+    "policy_version": @LUDUS_ASSERT_POLICY_VERSION@,
+    "enable_asserts": @LUDUS_ENABLE_ASSERTS@,
+    "break_on_check": @LUDUS_BREAK_ON_CHECK@,
+    "dialogs_available": @LUDUS_ASSERT_DIALOGS_AVAILABLE@
+  },
   "assert_policy_version": @LUDUS_ASSERT_POLICY_VERSION@,
   "enable_asserts": @LUDUS_ENABLE_ASSERTS@,
   "break_on_check": @LUDUS_BREAK_ON_CHECK@,
-  "assert_dialogs_available": @LUDUS_ASSERT_DIALOGS_AVAILABLE@
+  "assert_dialogs_available": @LUDUS_ASSERT_DIALOGS_AVAILABLE@,
+  "features": [@LUDUS_SDK_FEATURES_JSON@],
+  "components": [@LUDUS_SDK_COMPONENTS_JSON@],
+  "dependencies": [@LUDUS_SDK_DEPENDENCIES_JSON@],
+  "system_prerequisites": [@LUDUS_SDK_SYSTEM_PREREQS_JSON@]
 }

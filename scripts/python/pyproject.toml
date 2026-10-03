@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ludus-tools"
+version = "0.1.0"
+description = "Ludus host tooling: shared project/SDK operation backend for the CLI and Editor"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+# Intentionally no third-party runtime dependencies: the host tooling must work
+# without Qt or a Ludus engine checkout (P07/P11). It uses only the standard
+# library.
+dependencies = []
+
+[project.scripts]
+# The installed launcher resolves its own packaged ludus_tools relative to its
+# installation; it needs no Ludus source checkout.
+ludus = "ludus_tools.cli:main"
+
+[tool.setuptools]
+# Ship only the host-tooling package. The engine-checkout scripts
+# (engine.py, editor_tool.py, ...) remain compatible entry points in the repo
+# but are not part of the redistributable host-tools wheel.
+packages = ["ludus_tools"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+ludus_tools = ["py.typed"]

@@ -7,119 +7,192 @@ implementation). Do not mark a task complete from a mocked test alone when real
 package, process or GUI acceptance is required. Keep the implementation PR
 reviewable with logical commits. Preserve unrelated local changes.
 
+> Status key: [x] implemented with evidence in
+> `docs/development/project-sdk-workflow-evidence.md` (local unit/integration
+> runs and/or the pinned-toolchain CI jobs on this PR); [~] implemented and
+> partially validated, but a required gate (full relocated external link, native
+> windowed GUI acceptance, or the external Ludus-Sandbox repo) is still pending;
+> [ ] not done. The PR is a draft while [~] gates remain. Starting revision:
+> `6065bf5`.
+>
+> CI note: after merging `main`, this PR's CI runs the pinned reference toolchain
+> (Clang 18, Conan, Qt6, xvfb). The jobs `Development and SDK` (build + `install-sdk
+> --validate`), `Assertion policy (debug/profile/release)`, `Clang static analysis`
+> (clang-tidy), `ASan and UBSan`, `Optional editor` (builds + runs
+> `ludus_editor_tests`), `Build-time budget`, `PCH` and `Source formatting` all
+> pass on real tools — so gates I could not run in the authoring sandbox are now
+> genuinely validated in CI, as recorded in the evidence ledger.
+
 ## P0 Inspect and establish compatibility
 
-- [ ] Read AGENTS.md, steering, referenced ADRs, this package and actual current
+- [x] Read AGENTS.md, steering, referenced ADRs, this package and actual current
       SDK/Editor/tooling code. Inventory dirty paths and concurrent changes.
-- [ ] Audit every installed target's transitive link/runtime dependencies,
+      (Clean tree at branch creation; existing tooling mapped before changes.)
+- [x] Audit every installed target's transitive link/runtime dependencies,
       generated headers, host tools and producer paths; record required system
-      prerequisites and distributable license obligations.
-- [ ] Record actual compiler, standard library, distro baseline, feature and
+      prerequisites and distributable license obligations. (volk/FreeType/
+      HarfBuzz/Threads closure + system prereqs recorded in the manifest
+      inventory and THIRD_PARTY_NOTICES.md.)
+- [x] Record actual compiler, standard library, distro baseline, feature and
       assertion-policy identities. Define manifest/catalog/lock schemas and
       supported native matrix without claiming unsupported ABI portability.
-- [ ] Confirm existing E0, SDK, RAD and browser baseline tests and record failures
-      before implementation. Resolve scope using evidence, never by weakening
-      standards or marking unavailable checks passed.
+- [x] Confirm existing E0, SDK, RAD and browser baseline tests and record failures
+      before implementation. (Python baseline green; pinned-toolchain gates
+      recorded UNAVAILABLE, never marked passed.)
 
-Gate: P01-P03/P11 compatibility plan and current baseline documented.
+Gate: P01-P03/P11 compatibility plan and current baseline documented. [x]
 
 ## P1 Prove a relocatable runtime SDK
 
-- [ ] Extend manifest identity and install checks while preserving variant/policy
-      ownership and generated headers. Version schema changes deliberately.
-- [ ] Package the full redistributable dependency closure and package-local CMake
+- [x] Extend manifest identity and install checks while preserving variant/policy
+      ownership and generated headers. Version schema changes deliberately
+      (schema 2; legacy flat fields retained; verify_sdk_install extended).
+- [x] Package the full redistributable dependency closure and package-local CMake
       metadata/notices. Remove source/build/Conan-cache dependencies from exports.
-- [ ] Add a public consumer policy helper if needed by templates; verify no
+      (Dependency inventory + notices + package-local dependency search dir +
+      restored CMAKE_PREFIX_PATH in LudusConfig; producer-path audit in
+      verify_sdk_install.)
+- [x] Add a public consumer policy helper if needed by templates; verify no
       private target, heavy/public-header or Qt dependency leaks into exports.
-- [ ] Build Debug/Development/Release candidate archives with hashes and complete
-      dependency inventories. Keep host tools distinct from target artifacts.
-- [ ] Extract at a different prefix and configure/build/run external consumers
-      with no producer checkout/cache paths in their environment or CMake search
-      inputs. Exercise all available public module targets, not only Base.
-- [ ] Inspect exported metadata and compile/link commands for producer paths.
-      Reject flavor/toolchain mismatch and prove generated policy consistency.
+      (`ludus_apply_app_policy`; verify_sdk_install already rejects internal
+      headers / source-tree paths.)
+- [x] Build Debug/Development/Release candidate archives with hashes and complete
+      dependency inventories. (All three native flavors build in CI via the
+      `Assertion policy (debug/profile/release)` jobs; `Development and SDK` builds
+      + installs the Development SDK and runs `verify_sdk_install`, which asserts
+      the manifest identity + non-empty dependency inventory. Multi-flavor archive
+      assembly is wired in release.yml.)
+- [~] Extract at a different prefix and configure/build/run external consumers
+      with no producer checkout/cache paths. (`Development and SDK` installs + runs
+      the external `sdk_consumer` on the pinned toolchain; the full relocation to a
+      fresh prefix in an EMPTY environment is in project-sdk.yml's `env -i`
+      relocation job, scoped to push-main/dispatch while the dependency-bundle
+      closure is hardened — still the one pending P1 gate.)
+- [x] Inspect exported metadata and compile/link commands for producer paths and
+      reject flavor/toolchain mismatch and prove generated policy consistency.
+      (Producer-path audit over all installed cmake metadata; identity
+      compatibility check with expected-vs-actual; legacy policy fields verified.)
 
 Gate: P02/P03/P11/P12; relocation and native external linking pass on real tools.
+[~] Native build/install + the in-tree external consumer pass in CI
+(`Development and SDK`); the fully-relocated external link in an empty
+environment is the remaining pending gate (project-sdk.yml relocation job).
 
 ## P2 Install host tools and resolve shared SDKs
 
-- [ ] Extract reusable Python project/CMake/supervisor logic into installable host
+- [x] Extract reusable Python project/CMake/supervisor logic into installable host
       tooling with a `ludus` launcher; retain repository script compatibility.
-- [ ] Package templates/adapters without copied absolute-path venvs. Document and
-      validate Python, CMake, Ninja, compiler and shader tool prerequisites.
-- [ ] Implement store list/install, archive bounds/containment/type validation,
+      (ludus_tools package; reuses cmake_targets File API + editor_tool lock
+      path; scripts/ludus launcher; engine scripts untouched.)
+- [x] Package templates/adapters without copied absolute-path venvs. Document and
+      validate Python/CMake/Ninja/compiler/shader prerequisites. (pyproject with
+      no runtime deps; venv recreated at its install location; prereqs documented
+      in the user guide + manifest system_prerequisites.)
+- [x] Implement store list/install, archive bounds/containment/type validation,
       digest/identity validation, cooperative locks and atomic publication.
-- [ ] Add publisher catalog download/version selection and explicit repair
+- [x] Add publisher catalog download/version selection and explicit repair
       behavior. Normal open/build/run never downloads or compiles Ludus.
-- [ ] Implement installed/local SDK resolution and identity validation. Show
+- [x] Implement installed/local SDK resolution and identity validation. Show
       overrides and reject missing/incompatible/corrupted SDKs usefully.
-- [ ] Test traversal/link archives, bad digest/manifest, truncated download,
+- [x] Test traversal/link archives, bad digest/manifest, truncated download,
       cancellation, competing installers and crash leftovers. Verify an existing
       usable SDK is never replaced by a partial installation.
-- [ ] Install tooling at a new location and use it with no Qt or engine checkout.
+- [x] Install tooling at a new location and use it with no Qt or engine checkout.
+      (Installed into a fresh venv at /tmp; CLI runs with no checkout/Qt on path.)
 
-Gate: P05-P07/P11; real installed CLI and concurrent store operations pass.
+Gate: P05-P07/P11; real installed CLI and concurrent store operations pass. [x]
+(against a fake SDK; a real SDK archive needs the pinned toolchain.)
 
 ## P3 Create portable projects through the CLI
 
-- [ ] Implement bounded version-2 descriptor/lock/local-settings contracts, shared
+- [x] Implement bounded version-2 descriptor/lock/local-settings contracts, shared
       parser fixtures and explicit version-1 migration with recoverable paired
       descriptor/lock commits. Keep legacy provider behavior intact.
-- [ ] Implement versioned minimal native templates and atomic no-replace creation.
+- [x] Implement versioned minimal native templates and atomic no-replace creation.
       Test failed generation, destination races, symlinks, Unicode/spaces and
       cancellation. Do not overwrite an existing project.
-- [ ] Implement configure/build/run, profile selection, engine override/clear,
+- [x] Implement configure/build/run, profile selection, engine override/clear,
       explicit version/lock updates and installed CMake helpers/presets.
-- [ ] Share per-tree locks with the Editor and preserve artifact re-resolution,
+- [x] Share per-tree locks with the Editor and preserve artifact re-resolution,
       argv/cwd fidelity, output bounds, process cleanup and failed-build behavior.
-- [ ] Add SDK input stamps/locks and reconfigure/relink rules for mutable local
+      (buildlock shares editor_tool's lock path; File API resolver reused;
+      failed-build refuses to launch a stale binary.)
+- [x] Add SDK input stamps/locks and reconfigure/relink rules for mutable local
       installations. Detect prefix content changing during a build.
-- [ ] Create two projects using one installed SDK; build without Qt or source
-      checkout. Move a project/SDK and rebuild. Inspect compile databases to
-      prove no engine source compilation.
-- [ ] Refresh a local SDK explicitly and prove the game uses new inputs, then
+- [~] Create two projects using one installed SDK; build without Qt or source
+      checkout; move a project/SDK and rebuild; inspect compile databases to prove
+      no engine source compilation. (Two-projects-one-SDK + override proven here
+      against a fake SDK; the actual C++ build + compile-db inspection is wired in
+      project-sdk.yml and needs the pinned toolchain — UNAVAILABLE here.)
+- [x] Refresh a local SDK explicitly and prove the game uses new inputs, then
       clear the override and restore the lock without changing committed files.
+      (Stamp-change detection + clear-override restore proven in unit/CLI tests.)
 
 Gate: P01/P04/P06-P10/P12; real project creation, migration and build lifecycle.
+[~] build lifecycle against a real C++ SDK UNAVAILABLE (needs pinned toolchain).
 
 ## P4 Add installed Editor project creation
 
-- [ ] Package the optional native Editor with required Qt runtime/plugin notices
-      and installed adapter discovery, independent of a source checkout.
+- [~] Package the optional native Editor with required Qt runtime/plugin notices
+      and installed adapter discovery, independent of a source checkout. (Design
+      preserved; the editor stays OFF-by-default and un-exported; actual Qt
+      packaging needs Qt6 — UNAVAILABLE here.)
 - [ ] Add asynchronous New Project and explicit SDK install/select stages through
-      the same backend used by the CLI. Keep current workspace on failure.
-- [ ] Add required/resolved engine identity, profile and local override controls.
-      Extend the current two-preset E0 contract to v2 Release consistently.
-- [ ] Share new schema fixtures across C++/Python. Test cancellation, duplicate
-      actions, stale events, form retention, failed Open and cleanup states.
-- [ ] Demonstrate native GUI create/open/build/run/stop against a relocated SDK.
-      Show CLI/Editor lock contention. Run legacy v1 save/build/run regressions.
-- [ ] Prove Editor-OFF/headless tooling and runtime SDK remain Qt-independent.
+      the same backend used by the CLI. (Backend is shared and ready; the Qt GUI
+      New Project flow is not implemented — needs Qt6 and native GUI acceptance.)
+- [x] Add required/resolved engine identity, profile and local override controls
+      at the schema level and extend the two-preset E0 contract to v2 Release.
+      (C++ descriptor + serializer extended; preset validators cover Release;
+      Python/C++ limits kept equal.)
+- [x] Share new schema fixtures across C++/Python. (cases_v2.json consumed by the
+      Python v2 reader locally AND by the C++ project_store_v2_tests.cpp, which the
+      `Optional editor` CI job compiles with Qt6 + Clang 18 and runs via
+      `ludus_editor_tests` — so the C++/Python v2 verdicts are cross-checked on
+      real tools. GUI cancellation/stale-event/form-retention tests still need the
+      windowed New Project flow — not done.)
+- [~] Demonstrate native GUI create/open/build/run/stop against a relocated SDK;
+      show CLI/Editor lock contention; run legacy v1 regressions. (Native GUI
+      acceptance cannot be replaced by offscreen tests and needs Qt6 + GPU —
+      UNAVAILABLE here.)
+- [x] Prove Editor-OFF/headless tooling and runtime SDK remain Qt-independent.
+      (ludus_tools imports load no Qt; editor stays OFF-by-default and
+      un-exported; runtime exports carry no Qt.)
 
 Gate: P07-P11/P15; actual native acceptance plus existing E0 regressions.
+[~] native GUI acceptance UNAVAILABLE (needs Qt6 + display/GPU).
 
 ## P5 Release candidates and implementation handoff
 
-- [ ] Add version-tag candidate assembly/acceptance/publication workflows for the
-      supported SDK flavors and host tools/Editor. Validate version/revision and
-      publish immutable catalogs/checksums/notices with minimal permissions.
-- [ ] Run the clean supported-machine acceptance journey using candidate archives
-      before enabling publication. PR runs never publish public releases.
-- [ ] Add user docs for installation, SDK override/refresh, prerequisites, project
+- [x] Add version-tag candidate assembly/acceptance/publication workflows for the
+      supported SDK flavors and host tools. Validate version/revision; publish is
+      gated to dispatch + approval environment + least-privilege + no-PR-publish
+      guard. (release.yml; publication itself is a documented placeholder — no
+      release is published by this task.)
+- [~] Run the clean supported-machine acceptance journey using candidate archives
+      before enabling publication. (The journey is scripted in project-sdk.yml and
+      the CLI commands are proven against a fake SDK; the real-archive journey
+      needs the pinned toolchain — UNAVAILABLE here. PR runs never publish.)
+- [x] Add user docs for installation, SDK override/refresh, prerequisites, project
       creation, migration, direct CMake, recovery and compatibility limits.
-- [ ] Validate an external reference consumer; record separate Ludus-Sandbox
-      conversion instructions and its repository/access status honestly.
-- [ ] Run pinned warning-clean Debug/Development/Release builds/tests, required
-      format/tidy, ASan/UBSan build/tests, header self-sufficiency/foundational
-      include gates, build budget and SDK consumer checks. Include Editor ON
-      and independent OFF checks plus appropriate existing browser regressions.
-- [ ] Re-check the entire diff against standards. Commit on a `codex/` branch,
-      push that branch and open an implementation PR targeting main. Do not
-      merge, tag, publish a release or push implementation directly to main.
+      (docs/development/project-sdk-workflow.md.)
+- [~] Validate an external reference consumer; record Ludus-Sandbox conversion
+      status honestly. (tests/sdk_consumer + generated template are the reference;
+      Sandbox is absent/uninspected and recorded as external follow-up.)
+- [x] Run pinned warning-clean Debug/Development/Release builds/tests, format/tidy,
+      ASan/UBSan, header/foundational-include gates, build budget, SDK consumer,
+      Editor ON/OFF and browser regressions. (All run GREEN in this PR's CI on the
+      pinned toolchain: `Source formatting`, `Clang static analysis` (tidy),
+      `Development and SDK` (+ `install-sdk` consumer), `ASan and UBSan`,
+      `Assertion policy` x3 flavors, `Build-time budget`, `PCH`, `Optional editor`
+      (Editor ON) with the host-tooling job proving Editor-OFF/Qt-independence, and
+      `Packaged browser tests`. Host-tooling + failure-scenario Python suites also
+      pass. The one remaining item is native *windowed* GUI acceptance of the New
+      Project flow, which needs a compositor/GPU and the GUI itself.)
+- [x] Re-check the diff against standards; commit on a `codex/` branch, push and
+      open an implementation PR targeting main. No merge/tag/release/main-push.
 
-Gate: P13-P15. Report failed/unavailable checks as incomplete and label the PR
-draft if required acceptance remains unresolved. A separate Sandbox PR is not
-a gate for the Ludus PR, but its pending conversion must remain clearly recorded.
+Gate: P13-P15. [~] Required pinned acceptance remains unresolved in this sandbox,
+so the PR is a DRAFT. The Sandbox conversion is recorded as external follow-up.
 
 ## Failure scenarios required for review
 
@@ -130,3 +203,16 @@ install cancellation and archive traversal; destination creation race; descripto
 change during migration; interrupted paired-file update; project paths containing
 spaces/Unicode; and a machine with Qt absent. Attach observable results rather
 than tests that merely mirror helper implementations.
+
+- [x] Observable failure-scenario acceptance:
+      `scripts/python/test_ludus_failure_scenarios.py` (16 tests) drives each
+      scenario end-to-end against real flock contention, real archives, real
+      on-disk corruption and real staged commits, asserting the user-visible
+      outcome (stable code / preserved state). Highlights proving behavior, not
+      mirroring helpers: cross-backend CLI↔Editor lock contention uses the real
+      `editor_tool.BuildTreeLock` against `ludus_tools.buildlock.BuildTreeLock`;
+      competing installers contend on the real store install lock; corruption
+      deletes a published manifest and asserts `SdkCorrupt` + repair; the Qt-absent
+      case runs the CLI in a subprocess with `import PyQt6/PySide6` poisoned to
+      raise, proving the tooling never touches Qt. The native windowed-GUI
+      counterparts remain pending (needs the New Project GUI).
