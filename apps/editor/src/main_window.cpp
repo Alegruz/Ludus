@@ -135,6 +135,7 @@ void MainWindow::BuildUi()
     splitter->setStretchFactor(2, 1);
 
     StatusLabel_ = new QLabel(central);
+    StatusLabel_->setObjectName(QStringLiteral("workspaceStatus"));
     layout->addWidget(splitter);
     layout->addWidget(StatusLabel_);
     setCentralWidget(central);
@@ -142,6 +143,41 @@ void MainWindow::BuildUi()
     Audio_ = new AudioWorkspace(audioDock);
     audioDock->setWidget(Audio_);
     addDockWidget(Qt::RightDockWidgetArea, audioDock);
+
+    RecentDock_ = new QDockWidget(QStringLiteral("Recent Projects"), this);
+    RecentDock_->setObjectName(QStringLiteral("recentProjectsDock"));
+    auto* recentPanel = new QWidget(RecentDock_);
+    auto* recentLayout = new QVBoxLayout(recentPanel);
+    RecentEmptyLabel_ =
+        new QLabel(QStringLiteral("No recent projects yet. Open a project to add it here."), recentPanel);
+    RecentEmptyLabel_->setWordWrap(true);
+    RecentList_ = new QListWidget(recentPanel);
+    RecentList_->setObjectName(QStringLiteral("recentProjectsList"));
+    RecentList_->setAccessibleName(QStringLiteral("Recent projects"));
+    RecentList_->setWordWrap(true);
+    RecentOpenButton_ = new QPushButton(QStringLiteral("Open Selected"), recentPanel);
+    RecentOpenButton_->setObjectName(QStringLiteral("openRecentProjectButton"));
+    BrowseProjectButton_ = new QPushButton(QStringLiteral("Open Project..."), recentPanel);
+    recentLayout->addWidget(RecentEmptyLabel_);
+    recentLayout->addWidget(RecentList_);
+    recentLayout->addWidget(RecentOpenButton_);
+    recentLayout->addWidget(BrowseProjectButton_);
+    RecentDock_->setWidget(recentPanel);
+    addDockWidget(Qt::LeftDockWidgetArea, RecentDock_);
+    connect(RecentList_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
+        const QString path = item->data(Qt::UserRole).toString();
+        QTimer::singleShot(0, this, [this, path]() { OpenProjectPath(path); });
+    });
+    connect(RecentList_, &QListWidget::currentItemChanged, this, [this]() {
+        RecentOpenButton_->setEnabled(Controller_->Caps().CanOpen && RecentList_->currentItem() != nullptr);
+    });
+    connect(RecentOpenButton_, &QPushButton::clicked, this, [this]() {
+        if (const auto* item = RecentList_->currentItem())
+        {
+            OpenProjectPath(item->data(Qt::UserRole).toString());
+        }
+    });
+    connect(BrowseProjectButton_, &QPushButton::clicked, this, &MainWindow::OnOpenRequested);
 
     // Typed signal connections (pointer-to-member); no string-based SIGNAL/SLOT.
     connect(NameEdit_, &QLineEdit::textEdited, this, &MainWindow::OnFieldEdited);
@@ -159,6 +195,12 @@ void MainWindow::BuildMenus()
     QMenu* fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
     OpenAction_ = fileMenu->addAction(QStringLiteral("&Open Project..."));
     OpenAction_->setShortcut(QKeySequence::Open);
+    RecentMenu_ = fileMenu->addMenu(QStringLiteral("Recent &Projects"));
+    RecentMenu_->setObjectName(QStringLiteral("recentProjectsMenu"));
+    connect(RecentMenu_, &QMenu::aboutToShow, this, &MainWindow::RenderRecentProjects);
+    ClearRecentAction_ = fileMenu->addAction(QStringLiteral("Clear Recent Projects"));
+    ClearRecentAction_->setObjectName(QStringLiteral("clearRecentProjectsAction"));
+    connect(ClearRecentAction_, &QAction::triggered, Controller_, &EditorController::ClearRecentProjects);
     SaveAction_ = fileMenu->addAction(QStringLiteral("&Save"));
     SaveAction_->setShortcut(QKeySequence::Save);
     ReloadAction_ = fileMenu->addAction(QStringLiteral("&Reload"));
@@ -247,6 +289,9 @@ void MainWindow::BuildMenus()
     QMenu* outputMenu = menuBar()->addMenu(QStringLiteral("&Output"));
     ClearAction_ = outputMenu->addAction(QStringLiteral("&Clear Output"));
     CopyAction_ = outputMenu->addAction(QStringLiteral("Copy &Job Details"));
+
+    QMenu* viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
+    viewMenu->addAction(RecentDock_->toggleViewAction());
 
     connect(OpenAction_, &QAction::triggered, this, &MainWindow::OnOpenRequested);
     connect(SaveAction_, &QAction::triggered, this, &MainWindow::OnSaveRequested);
@@ -361,19 +406,27 @@ void MainWindow::OnRemoveArgument()
 
 void MainWindow::OnOpenRequested()
 {
-    if (!Audio_->ConfirmDiscard())
+    if (!Controller_->Caps().CanOpen)
+    {
+        return;
+    }
+    const QString directory = Controller_->State().DescriptorPath.isEmpty()
+                                  ? QString()
+                                  : QFileInfo(Controller_->State().DescriptorPath).absolutePath();
+    const QString path = QFileDialog::getOpenFileName(this,
+                                                      QStringLiteral("Open Project Descriptor"),
+                                                      directory,
+                                                      QStringLiteral("Ludus Project (*.json)"));
+    OpenProjectPath(path);
+}
+
+void MainWindow::OpenProjectPath(const QString& path)
+{
+    if (path.isEmpty() || !Controller_->Caps().CanOpen || AudioClosing_ || !Audio_->ConfirmDiscard())
     {
         return;
     }
     Audio_->StopPreview();
-    const QString path = QFileDialog::getOpenFileName(this,
-                                                      QStringLiteral("Open Project Descriptor"),
-                                                      QString(),
-                                                      QStringLiteral("Ludus Project (*.json)"));
-    if (path.isEmpty())
-    {
-        return;
-    }
     // Dirty-document confirmation is offered asynchronously via a message box.
     if (Controller_->State().Dirty() && Controller_->State().Document == DocumentState::ProjectLoaded)
     {
@@ -436,6 +489,7 @@ void MainWindow::OnCopyJobDetails()
 void MainWindow::OnStateChanged()
 {
     RenderFields();
+    RenderRecentProjects();
     RenderCapabilities();
     RenderStatus();
     const auto& state = Controller_->State();
@@ -452,6 +506,56 @@ void MainWindow::OnStateChanged()
     {
         close();
     }
+}
+
+void MainWindow::RenderRecentProjects()
+{
+    const auto& projects = Controller_->RecentProjects();
+    QStringList stamp;
+    for (const RecentProject& project : projects)
+    {
+        stamp.append(project.Name);
+        stamp.append(project.DescriptorPath);
+        stamp.append(QFileInfo(project.DescriptorPath).isFile() ? QString() : QStringLiteral("Missing"));
+    }
+    RecentEmptyLabel_->setVisible(projects.isEmpty());
+    RecentList_->setVisible(!projects.isEmpty());
+    if (stamp == RecentProjectsStamp_)
+    {
+        return;
+    }
+    RecentProjectsStamp_ = stamp;
+    const auto* selected = RecentList_->currentItem();
+    const QString selectedPath = selected != nullptr ? selected->data(Qt::UserRole).toString() : QString();
+    const QSignalBlocker blocker(RecentList_);
+    RecentList_->clear();
+    RecentMenu_->clear();
+    for (const RecentProject& project : projects)
+    {
+        const bool missing = !QFileInfo(project.DescriptorPath).isFile();
+        const QString name = missing ? QStringLiteral("%1 (missing)").arg(project.Name) : project.Name;
+        auto* item = new QListWidgetItem(name + QStringLiteral("\n") + project.DescriptorPath, RecentList_);
+        item->setData(Qt::UserRole, project.DescriptorPath);
+        item->setToolTip(project.DescriptorPath);
+        if (project.DescriptorPath == selectedPath)
+        {
+            RecentList_->setCurrentItem(item);
+        }
+        // Escape ampersands so project names/paths are literal menu labels.
+        QString label = name + QStringLiteral(" — ") + project.DescriptorPath;
+        label.replace(QStringLiteral("&"), QStringLiteral("&&"));
+        auto* action = RecentMenu_->addAction(label);
+        action->setData(project.DescriptorPath);
+        action->setToolTip(project.DescriptorPath);
+        connect(action, &QAction::triggered, this, [this, path = project.DescriptorPath]() {
+            QTimer::singleShot(0, this, [this, path]() { OpenProjectPath(path); });
+        });
+    }
+    if (RecentList_->currentItem() == nullptr && RecentList_->count() != 0)
+    {
+        RecentList_->setCurrentRow(0);
+    }
+    RecentOpenButton_->setEnabled(Controller_->Caps().CanOpen && RecentList_->currentItem() != nullptr);
 }
 
 void MainWindow::RenderFields()
@@ -531,6 +635,11 @@ void MainWindow::RenderCapabilities()
     CheckSetupAction_->setEnabled(caps.CanProjectCheck);
     SetupProjectAction_->setEnabled(caps.CanProjectSetup);
     OpenAction_->setEnabled(caps.CanOpen);
+    RecentMenu_->setEnabled(caps.CanOpen && !Controller_->RecentProjects().isEmpty());
+    RecentList_->setEnabled(caps.CanOpen);
+    RecentOpenButton_->setEnabled(caps.CanOpen && RecentList_->currentItem() != nullptr);
+    BrowseProjectButton_->setEnabled(caps.CanOpen);
+    ClearRecentAction_->setEnabled(caps.CanOpen && !Controller_->RecentProjects().isEmpty());
     SaveAction_->setEnabled(caps.CanSave);
     ReloadAction_->setEnabled(caps.CanReload);
     ConfigureAction_->setEnabled(caps.CanConfigure);

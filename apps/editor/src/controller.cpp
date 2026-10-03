@@ -73,9 +73,13 @@ const char* PhaseName(Phase phase)
 }
 } // namespace
 
-EditorController::EditorController(ToolingPaths tooling, QObject* parent)
-    : QObject(parent), Tooling_(std::move(tooling)), Tool_(this), Play_(this)
+EditorController::EditorController(ToolingPaths tooling, QObject* parent, const QString& recentProjectsPath)
+    : QObject(parent), Tooling_(std::move(tooling)), RecentProjects_(recentProjectsPath), Tool_(this), Play_(this)
 {
+    if (!RecentProjects_.Load())
+    {
+        LUDUS_LOG_TEXT(LOG_EDITOR_CTRL, Warning, "could not load recent projects; starting with an empty history");
+    }
     // Bind tool events to this controller's lifetime; the queued connection
     // defers delivery to the next event-loop turn so a reentrant mutation from
     // inside a notification cannot corrupt state.
@@ -178,7 +182,31 @@ void EditorController::OpenProject(const QString& descriptorPath)
     State_.DiscoveredPreset.clear();
     State_.Result = LastResult{};
     LUDUS_LOG_TEXT(LOG_EDITOR_CTRL, Info, "opened project (no project code executed)");
+    RememberProject();
     ScheduleSetupCheck();
+    Publish();
+}
+
+void EditorController::RememberProject()
+{
+    if (!RecentProjects_.Remember({ .DescriptorPath = State_.DescriptorPath, .Name = State_.Saved.Name }))
+    {
+        LUDUS_LOG_TEXT(LOG_EDITOR_CTRL,
+                       Warning,
+                       "could not save recent projects; history remains available this session");
+    }
+}
+
+void EditorController::ClearRecentProjects()
+{
+    if (!Caps().CanOpen)
+    {
+        return;
+    }
+    if (!RecentProjects_.Clear())
+    {
+        LUDUS_LOG_TEXT(LOG_EDITOR_CTRL, Warning, "could not persist cleared recent projects");
+    }
     Publish();
 }
 
@@ -225,6 +253,7 @@ void EditorController::Save()
     State_.HasSaved = true;
     State_.Result = LastResult{};
     LUDUS_LOG_TEXT(LOG_EDITOR_CTRL, Info, "saved project");
+    RememberProject();
     ScheduleSetupCheck();
     Publish();
 }
@@ -253,6 +282,7 @@ void EditorController::Reload()
     State_.ProjectEpoch += 1;
     State_.DiscoveredTargets.clear();
     State_.DiscoveredPreset.clear();
+    RememberProject();
     ScheduleSetupCheck();
     Publish();
 }

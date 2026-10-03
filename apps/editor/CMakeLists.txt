@@ -43,6 +43,7 @@ add_library(ludus_editor_core STATIC
     src/internal/source_watch.h
     src/workspace.cpp
     src/project_store.cpp
+    src/recent_projects.cpp
     src/tool_process.cpp
     src/play_process.cpp
     src/source_watch.cpp
@@ -113,6 +114,7 @@ if(LUDUS_BUILD_TESTS)
         tests/tool_process_tests.cpp
         tests/log_buffer_tests.cpp
         tests/controller_tests.cpp
+        tests/recent_projects_tests.cpp
         tests/source_watch_tests.cpp
         tests/live_journey_tests.cpp
     )

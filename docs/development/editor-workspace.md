@@ -71,6 +71,26 @@ missing/stale setup in the status area and Output. It never configures, builds,
 downloads, runs project hooks, or changes files. Configure, Build, Build and Run,
 and Stop remain explicit actions.
 
+## Recent projects
+
+The **Recent Projects** panel and **File → Recent Projects** menu reopen saved
+descriptors directly. Double-click a panel entry or select it and choose
+**Open Selected**. The editor remembers the ten most recently opened projects
+across restarts, with their names and absolute descriptor paths. Opening a project
+from the command line or completing New Project adds it too. Failed opens do not
+change the list; opening an entry again moves it to the top.
+
+Reopening uses the same unsaved-change prompts and read-only setup checks as
+**Open Project**. Missing descriptors stay marked **(missing)**; trying to open
+one reports the error and retains the current workspace. **File → Clear Recent
+Projects** clears history without deleting or changing any project. **View →
+Recent Projects** restores a closed panel.
+
+History is local to the user, in `$XDG_CONFIG_HOME/Ludus/Editor/recent-projects.json`
+(normally `~/.config/Ludus/Editor/recent-projects.json`). It is saved atomically,
+separately from project files. If preferences cannot be written, project opening
+still works and history remains available for the current session.
+
 ## Create, initialize, repair and update projects
 
 The **Project** menu provides **New Project**, **Check Setup**, and

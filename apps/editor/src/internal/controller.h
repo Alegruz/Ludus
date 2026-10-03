@@ -5,12 +5,13 @@
 // notification per step (design.md sections 3, 5, 6, 9).
 //
 // Private editor header (not installed). The controller is the only owner of
-// WorkspaceState, ProjectStore, ToolProcess and LogBuffer; MainWindow renders
-// controller state and emits actions. There is no global event bus or singleton.
+// WorkspaceState, project/history stores, ToolProcess and LogBuffer; MainWindow
+// renders controller state and emits actions. There is no global event bus or singleton.
 
 #include "internal/log_buffer.h"
 #include "internal/play_process.h"
 #include "internal/project_store.h"
+#include "internal/recent_projects.h"
 #include "internal/source_watch.h"
 #include "internal/tool_process.h"
 #include "internal/workspace.h"
@@ -89,7 +90,7 @@ class EditorController : public QObject
 {
     Q_OBJECT
 public:
-    explicit EditorController(ToolingPaths tooling, QObject* parent = nullptr);
+    explicit EditorController(ToolingPaths tooling, QObject* parent = nullptr, const QString& recentProjectsPath = {});
 
     [[nodiscard]] const WorkspaceState& State() const noexcept
     {
@@ -98,6 +99,10 @@ public:
     [[nodiscard]] const LogBuffer& Log() const noexcept
     {
         return Log_;
+    }
+    [[nodiscard]] const QList<RecentProject>& RecentProjects() const noexcept
+    {
+        return RecentProjects_.Entries();
     }
     [[nodiscard]] Capabilities Caps() const;
     [[nodiscard]] const PlaySnapshot& PlayState() const noexcept
@@ -116,6 +121,7 @@ public:
     // Actions (validated centrally). Each applies at most one transition and
     // emits StateChanged exactly once when it changes state.
     void OpenProject(const QString& descriptorPath);
+    void ClearRecentProjects();
     void EditDraft(const ProjectDescriptor& draft);
     void Save();
     void Reload();
@@ -175,6 +181,7 @@ private Q_SLOTS:
 private:
     void StartJob(ActionKind kind, ToolOperation operation, const ToolLaunch& options = {});
     void ScheduleSetupCheck();
+    void RememberProject();
     void Publish();
     void RecordCommand(const QString& stage, const QStringList& argv, const QString& cwd);
     [[nodiscard]] QString ResolveDescriptorPath() const;
@@ -187,6 +194,7 @@ private:
     ToolingPaths Tooling_;
     WorkspaceState State_;
     ProjectStore Store_;
+    RecentProjectStore RecentProjects_;
     LogBuffer Log_;
     ToolProcess Tool_;
     PlayProcess Play_;

@@ -11,12 +11,15 @@
 #include "internal/controller.h"
 
 #include <QMainWindow>
+#include <QStringList>
 
 QT_BEGIN_NAMESPACE
 class QComboBox;
+class QDockWidget;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QMenu;
 class QPlainTextEdit;
 class QPushButton;
 class QAction;
@@ -61,11 +64,13 @@ private:
     void LaunchAfterPreview(LaunchAction action, const QString& debugger = {}, bool setup = false);
     void BuildUi();
     void BuildMenus();
+    void OpenProjectPath(const QString& path);
     [[nodiscard]] ProjectDescriptor DraftFromFields() const;
     void RenderFields();
     void RenderCapabilities();
     void RenderStatus();
     void RenderProperties();
+    void RenderRecentProjects();
 
     AudioWorkspace* Audio_ = nullptr;
     bool AudioClosing_ = false;
@@ -84,6 +89,14 @@ private:
     QListWidget* ArgsList_ = nullptr;
 
     // Actions / status.
+    QDockWidget* RecentDock_ = nullptr;
+    QListWidget* RecentList_ = nullptr;
+    QLabel* RecentEmptyLabel_ = nullptr;
+    QPushButton* RecentOpenButton_ = nullptr;
+    QPushButton* BrowseProjectButton_ = nullptr;
+    QMenu* RecentMenu_ = nullptr;
+    QAction* ClearRecentAction_ = nullptr;
+    QStringList RecentProjectsStamp_;
     QAction* NewProjectAction_ = nullptr;
     QAction* CheckSetupAction_ = nullptr;
     QAction* SetupProjectAction_ = nullptr;
