@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "name": "Engine Dev Project",
+  "provider": "ludus",
+  "source_dir": "..",
+  "preset": "linux-clang-development",
+  "target": "ludus_smoke",
+  "run": {
+    "cwd": ".",
+    "args": []
+  }
+}

@@ -5,7 +5,9 @@
 // property, a read-only "Bounces" output, and a tint-colored fullscreen clear
 // so a live edit or a code reload produces an observable rendered change.
 
+#include <ludus/foundation/base/types.h>
 #include <ludus/runtime/game_api/api.h>
+#include <ludus/runtime/game_api/checkpoint.h>
 #include <ludus/runtime/game_api/properties.h>
 #include <ludus/runtime/game_api/services.h>
 
@@ -16,6 +18,7 @@ namespace
 {
 using namespace ludus::runtime::game_api;
 using ludus::foundation::float32;
+using ludus::foundation::float64;
 using ludus::foundation::int32;
 using ludus::foundation::uint32;
 using ludus::foundation::uint64;
@@ -43,12 +46,15 @@ struct Body
     float32 Speed = 1.0F;
     int32 Bounces = 0;
     uint64 Rng = 0x243F6A8885A308D3ULL;
-    double SimTime = 0.0;
+    float64 SimTime = 0.0;
 };
 
 struct State
 {
     Body Sim;
+    uint64 ProjectId = 0;
+    uint64 GameId = 0;
+    uint64 BuildId = 0;
     uint64 Revision = 1;
     bool Paused = false;
 };
@@ -99,6 +105,9 @@ Status GameCreate(const CreateInfo* info, GameInstance** outInstance) noexcept
     {
         return Status::Internal;
     }
+    state->ProjectId = info->ProjectId;
+    state->GameId = info->GameId;
+    state->BuildId = info->ModuleGeneration;
     *outInstance = reinterpret_cast<GameInstance*>(state);
     return Status::Ok;
 }
@@ -158,58 +167,161 @@ Status GameResume(GameInstance* instance) noexcept
     return Status::Ok;
 }
 
+bool IsFinite(float32 value) noexcept
+{
+    uint32 bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return (bits & 0x7F800000U) != 0x7F800000U;
+}
+
+bool IsFinite(float64 value) noexcept
+{
+    uint64 bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return (bits & 0x7FF0000000000000ULL) != 0x7FF0000000000000ULL;
+}
+
+template <typename T>
+bool WriteScalar(CheckpointWriter& writer, uint32 id, T value) noexcept
+{
+    static_assert(sizeof(T) == 4 || sizeof(T) == 8);
+    uint64 bits = 0;
+    if constexpr (sizeof(T) == 4)
+    {
+        uint32 narrow = 0;
+        std::memcpy(&narrow, &value, sizeof(value));
+        bits = narrow;
+    }
+    else
+    {
+        std::memcpy(&bits, &value, sizeof(value));
+    }
+    uint8 bytes[8] = {};
+    if (!WriteCheckpointUint({bytes, sizeof(value)}, bits))
+    {
+        return false;
+    }
+    return writer.Field(id, {bytes, sizeof(value)});
+}
+
+template <typename T>
+bool ReadScalar(ByteView payload, T& value) noexcept
+{
+    static_assert(sizeof(T) == 4 || sizeof(T) == 8);
+    if (payload.Size != sizeof(value))
+    {
+        return false;
+    }
+    const uint64 bits = ReadCheckpointUint(payload.Data, payload.Size);
+    if constexpr (sizeof(T) == 4)
+    {
+        const uint32 narrow = static_cast<uint32>(bits);
+        std::memcpy(&value, &narrow, sizeof(value));
+    }
+    else
+    {
+        std::memcpy(&value, &bits, sizeof(value));
+    }
+    return true;
+}
+
+constexpr usize kCheckpointBytes = 68;
+
 Status GameCheckpointSize(GameInstance* instance, usize* outBodySize) noexcept
 {
     if (instance == nullptr || outBodySize == nullptr)
     {
         return Status::InvalidArgument;
     }
-    *outBodySize = sizeof(Body);
+    *outBodySize = kCheckpointBytes;
     return Status::Ok;
 }
 
 Status GameWriteCheckpoint(GameInstance* instance, CheckpointHeader* outHeader, ByteSpan body,
-                           usize* outBytesWritten) noexcept
+                              usize* outBytesWritten) noexcept
 {
-    State* s = AsState(instance);
-    if (s == nullptr || outHeader == nullptr || outBytesWritten == nullptr)
+    State* state = AsState(instance);
+    if (state == nullptr || outHeader == nullptr || outBytesWritten == nullptr)
     {
         return Status::InvalidArgument;
     }
-    if (body.Data == nullptr || body.Capacity < sizeof(Body))
-    {
-        return Status::BufferTooSmall;
-    }
-    std::memcpy(body.Data, &s->Sim, sizeof(Body));
+    CheckpointWriter writer{body};
+    bool ok = true;
+    ok = WriteScalar(writer, 1, state->Sim.PositionX) && ok;
+    ok = WriteScalar(writer, 2, state->Sim.Velocity) && ok;
+    ok = WriteScalar(writer, 3, state->Sim.Speed) && ok;
+    ok = WriteScalar(writer, 4, state->Sim.Bounces) && ok;
+    ok = WriteScalar(writer, 5, state->Sim.Rng) && ok;
+    ok = WriteScalar(writer, 6, state->Sim.SimTime) && ok;
+    ok = WriteScalar(writer, 7, state->Revision) && ok;
+    if (!ok) { return Status::BufferTooSmall; }
     outHeader->FormatVersion = 1;
     outHeader->SchemaVersion = kCheckpointSchema;
-    outHeader->BodyLength = sizeof(Body);
-    outHeader->BodyDigest = Fnv1a(body.Data, sizeof(Body));
-    *outBytesWritten = sizeof(Body);
+    outHeader->ProjectId = state->ProjectId;
+    outHeader->GameId = state->GameId;
+    outHeader->ModuleBuildId = state->BuildId;
+    outHeader->BodyLength = writer.Offset;
+    outHeader->BodyDigest = Fnv1a(body.Data, writer.Offset);
+    *outBytesWritten = writer.Offset;
     return Status::Ok;
 }
 
 Status GameCreateCandidate(const CreateInfo* info, const CheckpointHeader* header, ByteView body,
-                           GameCandidate** outCandidate) noexcept
+                              GameCandidate** outCandidate) noexcept
 {
-    if (info == nullptr || header == nullptr || outCandidate == nullptr || body.Data == nullptr)
+    if (info == nullptr || header == nullptr || outCandidate == nullptr || body.Data == nullptr ||
+        header->FormatVersion != 1 || header->ProjectId != info->ProjectId || header->GameId != info->GameId ||
+        header->BodyLength != body.Size || Fnv1a(body.Data, body.Size) != header->BodyDigest)
     {
         return Status::InvalidArgument;
     }
-    if (header->SchemaVersion != kCheckpointSchema || header->BodyLength != body.Size || body.Size < sizeof(Body))
-    {
-        return Status::MigrationUnsupported;
-    }
-    if (Fnv1a(body.Data, body.Size) != header->BodyDigest)
-    {
-        return Status::InvalidArgument;
-    }
+    if (header->SchemaVersion != kCheckpointSchema) { return Status::MigrationUnsupported; }
     auto* state = new (std::nothrow) State();
-    if (state == nullptr)
+    if (state == nullptr) { return Status::Internal; }
+    state->ProjectId = info->ProjectId;
+    state->GameId = info->GameId;
+    state->BuildId = info->ModuleGeneration;
+    CheckpointReader reader{body};
+    uint32 seen = 0;
+    bool ok = true;
+    while (reader.Offset < body.Size && ok)
     {
-        return Status::Internal;
+        uint32 tag = 0;
+        ByteView payload = {};
+        if (!reader.Next(tag, payload) || tag > 7 || (seen & (1U << tag)) != 0)
+        {
+            ok = false;
+            break;
+        }
+        seen |= 1U << tag;
+        switch (tag)
+        {
+            case 1: ok = ReadScalar(payload, state->Sim.PositionX); break;
+            case 2: ok = ReadScalar(payload, state->Sim.Velocity); break;
+            case 3: ok = ReadScalar(payload, state->Sim.Speed); break;
+            case 4: ok = ReadScalar(payload, state->Sim.Bounces); break;
+            case 5: ok = ReadScalar(payload, state->Sim.Rng); break;
+            case 6: ok = ReadScalar(payload, state->Sim.SimTime); break;
+            case 7: ok = ReadScalar(payload, state->Revision); break;
+            default: ok = false; break;
+        }
     }
-    std::memcpy(&state->Sim, body.Data, sizeof(Body));
+    const uint32 required = 254U;
+    if (!ok || reader.Offset != body.Size || seen != required ||
+        !(IsFinite(state->Sim.PositionX) &&
+          IsFinite(state->Sim.Velocity) &&
+          IsFinite(state->Sim.Speed) &&
+          IsFinite(state->Sim.SimTime) &&
+          state->Sim.Speed >= 0.0F &&
+          state->Sim.Speed <= 8.0F &&
+          state->Sim.Bounces >= 0 &&
+          state->Sim.PositionX >= 0.0F &&
+          state->Sim.PositionX <= 1.0F &&
+          state->Revision != 0))
+    {
+        delete state;
+        return Status::InvalidArgument;
+    }
     state->Paused = true;
     *outCandidate = reinterpret_cast<GameCandidate*>(state);
     return Status::Ok;

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "Release Preset In V1",
+  "provider": "cmake",
+  "source_dir": ".",
+  "preset": "linux-clang-release",
+  "target": "app",
+  "run": {
+    "cwd": ".",
+    "args": []
+  }
+}

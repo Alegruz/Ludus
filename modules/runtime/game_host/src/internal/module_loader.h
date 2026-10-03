@@ -85,6 +85,13 @@ public:
     // not-loaded module returns true (nothing to release).
     bool Close() noexcept;
 
+    // Uncertain live references: intentionally retain this OS reference until
+    // process exit. A session may pin at most one retired generation.
+    void PinUntilProcessExit() noexcept
+    {
+        Pinned_ = true;
+    }
+
 private:
     friend LoadStatus LoadModule(std::string_view path,
                                  uint64 generation,
@@ -98,6 +105,7 @@ private:
     game_api::GameMetadata Metadata_ = {};
     std::string Path_;
     uint64 Generation_ = 0;
+    bool Pinned_ = false;
 };
 
 // Load a module and validate it to the point just before Create. The host

@@ -1,9 +1,12 @@
 {
+  "version": 1,
   "name": "live-edit-game",
   "provider": "cmake",
   "source_dir": ".",
   "preset": "linux-clang-development",
   "target": "sample_game_shipping",
-  "run_cwd": ".",
-  "run_args": []
+  "run": {
+    "cwd": ".",
+    "args": []
+  }
 }

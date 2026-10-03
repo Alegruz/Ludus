@@ -2,7 +2,6 @@
 
 #include <ludus/foundation/base/core.h>
 
-#include <cstdio>
 #include <cstring>
 
 namespace ludus::runtime::game_host::protocol
@@ -36,9 +35,11 @@ void AppendEscaped(std::string& out, std::string_view value)
             default:
                 if (static_cast<uint8>(c) < 0x20)
                 {
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned>(static_cast<uint8>(c)));
-                    out += buf;
+                    constexpr char digits[] = "0123456789abcdef";
+                    const uint8 byte = static_cast<uint8>(c);
+                    out += "\\u00";
+                    out.push_back(digits[byte >> 4]);
+                    out.push_back(digits[byte & 0xFU]);
                 }
                 else
                 {
@@ -89,6 +90,37 @@ struct Scanner
         return false;
     }
 
+    [[nodiscard]] bool ParseHexQuad(uint32& code)
+    {
+        if (pos + 4 > text.size())
+        {
+            return false;
+        }
+        code = 0;
+        for (usize i = 0; i < 4; ++i)
+        {
+            const char digit = text[pos++];
+            code <<= 4;
+            if (digit >= '0' && digit <= '9')
+            {
+                code |= static_cast<uint32>(digit - '0');
+            }
+            else if (digit >= 'a' && digit <= 'f')
+            {
+                code |= static_cast<uint32>(digit - 'a' + 10);
+            }
+            else if (digit >= 'A' && digit <= 'F')
+            {
+                code |= static_cast<uint32>(digit - 'A' + 10);
+            }
+            else
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     // Parse a JSON string into out. Rejects nested escapes it does not support.
     [[nodiscard]] bool ParseString(std::string& out)
     {
@@ -104,7 +136,7 @@ struct Scanner
             const char c = text[pos++];
             if (c == '"')
             {
-                return true;
+                return ValidUtf8(out, true);
             }
             if (c == '\\')
             {
@@ -134,40 +166,50 @@ struct Scanner
                         out.push_back('\t');
                         break;
                     case 'u': {
-                        if (pos + 4 > text.size())
+                        uint32 code = 0;
+                        if (!ParseHexQuad(code))
                         {
                             return false;
                         }
-                        unsigned code = 0;
-                        for (int i = 0; i < 4; ++i)
+                        if (code >= 0xD800 && code <= 0xDBFF)
                         {
-                            const char h = text[pos++];
-                            code <<= 4;
-                            if (h >= '0' && h <= '9')
-                            {
-                                code |= static_cast<unsigned>(h - '0');
-                            }
-                            else if (h >= 'a' && h <= 'f')
-                            {
-                                code |= static_cast<unsigned>(h - 'a' + 10);
-                            }
-                            else if (h >= 'A' && h <= 'F')
-                            {
-                                code |= static_cast<unsigned>(h - 'A' + 10);
-                            }
-                            else
+                            if (pos + 2 > text.size() || text.substr(pos, 2) != "\\u")
                             {
                                 return false;
                             }
+                            pos += 2;
+                            uint32 low = 0;
+                            if (!ParseHexQuad(low) || low < 0xDC00 || low > 0xDFFF)
+                            {
+                                return false;
+                            }
+                            code = 0x10000 + ((code - 0xD800) << 10) + low - 0xDC00;
                         }
-                        // Only basic control chars are produced by the writer.
+                        else if (code >= 0xDC00 && code <= 0xDFFF)
+                        {
+                            return false;
+                        }
                         if (code < 0x80)
                         {
                             out.push_back(static_cast<char>(code));
                         }
+                        else if (code < 0x800)
+                        {
+                            out.push_back(static_cast<char>(0xC0 | (code >> 6)));
+                            out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
+                        }
+                        else if (code < 0x10000)
+                        {
+                            out.push_back(static_cast<char>(0xE0 | (code >> 12)));
+                            out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
+                            out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
+                        }
                         else
                         {
-                            return false;
+                            out.push_back(static_cast<char>(0xF0 | (code >> 18)));
+                            out.push_back(static_cast<char>(0x80 | ((code >> 12) & 0x3F)));
+                            out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
+                            out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
                         }
                         break;
                     }
@@ -177,6 +219,10 @@ struct Scanner
             }
             else
             {
+                if (static_cast<uint8>(c) < 0x20)
+                {
+                    return false;
+                }
                 out.push_back(c);
             }
             if (out.size() > kMaxStringFieldBytes)
@@ -210,6 +256,68 @@ struct Scanner
     }
 };
 
+// Exactly one bounded array of flat records; nested objects/arrays are rejected
+// before parsing a child, so untrusted input cannot cause recursive descent.
+[[nodiscard]] bool ParseRecords(Scanner& scanner, std::vector<Message>& records)
+{
+    records.clear();
+    if (!scanner.Expect('['))
+    {
+        return false;
+    }
+    if (scanner.Expect(']'))
+    {
+        return true;
+    }
+    for (;;)
+    {
+        scanner.SkipWs();
+        const usize start = scanner.pos;
+        if (records.size() >= kMaxPropertyBatch || !scanner.Expect('{'))
+        {
+            return false;
+        }
+        bool closed = false;
+        while (scanner.pos < scanner.text.size())
+        {
+            const char c = scanner.text[scanner.pos];
+            if (c == '"')
+            {
+                std::string ignored;
+                if (!scanner.ParseString(ignored))
+                {
+                    return false;
+                }
+                continue;
+            }
+            ++scanner.pos;
+            if (c == '}')
+            {
+                closed = true;
+                break;
+            }
+            if (c == '{' || c == '[' || c == ']')
+            {
+                return false;
+            }
+        }
+        Message record;
+        if (!closed || !Message::Parse(scanner.text.substr(start, scanner.pos - start), record))
+        {
+            return false;
+        }
+        records.push_back(std::move(record));
+        if (scanner.Expect(']'))
+        {
+            return true;
+        }
+        if (!scanner.Expect(','))
+        {
+            return false;
+        }
+    }
+}
+
 [[nodiscard]] bool IsNumber(std::string_view token)
 {
     if (token.empty())
@@ -225,6 +333,10 @@ struct Scanner
         }
         i = 1;
     }
+    if (token[i] == '0' && i + 1 != token.size())
+    {
+        return false;
+    }
     for (; i < token.size(); ++i)
     {
         if (token[i] < '0' || token[i] > '9')
@@ -235,6 +347,65 @@ struct Scanner
     return true;
 }
 } // namespace
+
+bool ValidUtf8(std::string_view text, bool allowNul) noexcept
+{
+    for (usize i = 0; i < text.size();)
+    {
+        const uint8 first = static_cast<uint8>(text[i++]);
+        if (first == 0 && !allowNul)
+        {
+            return false;
+        }
+        if (first < 0x80)
+        {
+            continue;
+        }
+        uint32 code = 0;
+        usize count = 0;
+        uint32 minimum = 0;
+        if (first >= 0xC2 && first <= 0xDF)
+        {
+            code = first & 0x1FU;
+            count = 1;
+            minimum = 0x80;
+        }
+        else if (first >= 0xE0 && first <= 0xEF)
+        {
+            code = first & 0x0FU;
+            count = 2;
+            minimum = 0x800;
+        }
+        else if (first >= 0xF0 && first <= 0xF4)
+        {
+            code = first & 7U;
+            count = 3;
+            minimum = 0x10000;
+        }
+        else
+        {
+            return false;
+        }
+        if (count > text.size() - i)
+        {
+            return false;
+        }
+        for (usize j = 0; j < count; ++j)
+        {
+            const uint8 byte = static_cast<uint8>(text[i++]);
+            if ((byte & 0xC0U) != 0x80U)
+            {
+                return false;
+            }
+            code = (code << 6) | (byte & 0x3FU);
+        }
+        if (code < minimum || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF))
+        {
+            return false;
+        }
+    }
+    return true;
+}
 
 const Message::Field* Message::Find(std::string_view key) const
 {
@@ -250,29 +421,90 @@ const Message::Field* Message::Find(std::string_view key) const
 
 void Message::SetString(std::string_view key, std::string_view value)
 {
-    Fields_.push_back(Field{std::string(key), std::string(value), ValueType::String});
+    Set(Field{std::string(key), std::string(value), ValueType::String});
 }
 
 void Message::SetUint(std::string_view key, uint64 value)
 {
-    Fields_.push_back(Field{std::string(key), std::to_string(value), ValueType::Number});
+    Set(Field{std::string(key), std::to_string(value), ValueType::Number});
 }
 
 void Message::SetInt(std::string_view key, int64 value)
 {
-    Fields_.push_back(Field{std::string(key), std::to_string(value), ValueType::Number});
+    Set(Field{std::string(key), std::to_string(value), ValueType::Number});
 }
 
 void Message::SetBool(std::string_view key, bool value)
 {
-    Fields_.push_back(Field{std::string(key), value ? "true" : "false", ValueType::Bool});
+    Set(Field{std::string(key), value ? "true" : "false", ValueType::Bool});
+}
+
+void Message::SetRecords(std::string_view key, const std::vector<Message>& records)
+{
+    std::string value = "[";
+    for (const auto& record : records)
+    {
+        if (value.size() > 1)
+        {
+            value += ',';
+        }
+        value += record.Serialize();
+    }
+    value += ']';
+    Set(Field{std::string(key), std::move(value), ValueType::Records});
+}
+
+bool Message::GetRecords(std::string_view key, std::vector<Message>& out) const
+{
+    const Field* field = Find(key);
+    if (field == nullptr || field->Type != ValueType::Records)
+    {
+        return false;
+    }
+    Scanner scanner{field->Value, 0};
+    return ParseRecords(scanner, out) && scanner.AtEnd();
+}
+
+bool Message::HasOnly(std::initializer_list<std::string_view> keys) const noexcept
+{
+    for (const auto& field : Fields_)
+    {
+        bool found = false;
+        for (const auto key : keys)
+        {
+            found = found || field.Key == key;
+        }
+        if (!found)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 void Message::SetHexId(std::string_view key, uint64 value)
 {
-    char buf[17];
-    std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(value));
-    Fields_.push_back(Field{std::string(key), std::string(buf, 16), ValueType::String});
+    constexpr char digits[] = "0123456789abcdef";
+    char buf[16] = {};
+    for (usize i = 0; i < sizeof(buf); ++i)
+    {
+        buf[sizeof(buf) - i - 1] = digits[value & 0xFU];
+        value >>= 4;
+    }
+    SetString(key, std::string_view(buf, sizeof(buf)));
+}
+
+void Message::Set(Field field)
+{
+    for (auto& existing : Fields_)
+    {
+        if (existing.Key == field.Key)
+        {
+            existing = std::move(field);
+            return;
+        }
+    }
+    Fields_.push_back(std::move(field));
 }
 
 bool Message::GetString(std::string_view key, std::string& out) const
@@ -300,7 +532,12 @@ bool Message::GetUint(std::string_view key, uint64& out) const
         {
             return false;
         }
-        value = value * 10 + static_cast<uint64>(c - '0');
+        const uint64 digit = static_cast<uint64>(c - '0');
+        if (value > (~uint64{0} - digit) / 10)
+        {
+            return false;
+        }
+        value = value * 10 + digit;
     }
     out = value;
     return true;
@@ -320,16 +557,26 @@ bool Message::GetInt(std::string_view key, int64& out) const
         negative = true;
         digits.remove_prefix(1);
     }
-    int64 value = 0;
+    if (digits.empty())
+    {
+        return false;
+    }
+    uint64 value = 0;
+    const uint64 limit = negative ? (uint64{1} << 63) : (uint64{1} << 63) - 1;
     for (const char c : digits)
     {
         if (c < '0' || c > '9')
         {
             return false;
         }
-        value = value * 10 + (c - '0');
+        const uint64 digit = static_cast<uint64>(c - '0');
+        if (value > (limit - digit) / 10)
+        {
+            return false;
+        }
+        value = value * 10 + digit;
     }
-    out = negative ? -value : value;
+    out = negative && value != 0 ? -static_cast<int64>(value - 1) - 1 : static_cast<int64>(value);
     return true;
 }
 
@@ -407,6 +654,10 @@ std::string Message::Serialize() const
 bool Message::Parse(std::string_view json, Message& out)
 {
     out.Fields_.clear();
+    if (json.size() > kMaxControlFrameBytes)
+    {
+        return false;
+    }
     Scanner s{json, 0};
     if (!s.Expect('{'))
     {
@@ -429,6 +680,10 @@ bool Message::Parse(std::string_view json, Message& out)
         {
             return false;
         }
+        if (out.Has(key))
+        {
+            return false;
+        }
         if (!s.Expect(':'))
         {
             return false;
@@ -447,6 +702,17 @@ bool Message::Parse(std::string_view json, Message& out)
                 return false;
             }
             field.Type = ValueType::String;
+        }
+        else if (s.text[s.pos] == '[')
+        {
+            const usize start = s.pos;
+            std::vector<Message> records;
+            if (!ParseRecords(s, records))
+            {
+                return false;
+            }
+            field.Type = ValueType::Records;
+            field.Value = s.text.substr(start, s.pos - start);
         }
         else
         {

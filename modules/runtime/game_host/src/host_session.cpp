@@ -1,4 +1,5 @@
 #include "internal/host_session.h"
+#include "internal/frame_presenter.h"
 
 #include "internal/identity.h"
 
@@ -7,10 +8,13 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <string>
 #include <vector>
 
 #include <poll.h>
+#include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 namespace ludus::runtime::game_host
@@ -94,46 +98,100 @@ std::string_view PlayStateName(PlayState state) noexcept
 }
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-HostSession::HostSession(uint64 projectId, uint64 gameId, int32 controlFd) noexcept
-    : ProjectId_(projectId), GameId_(gameId), ControlFd_(controlFd)
+HostSession::HostSession(uint64 projectId, uint64 gameId, int32 controlFd, uint64 projectEpoch) noexcept
+    : ProjectId_(projectId), GameId_(gameId), ProjectEpoch_(projectEpoch), ControlFd_(controlFd)
 {
+    SessionId_ = static_cast<uint64>(std::chrono::steady_clock::now().time_since_epoch().count()) ^
+                 (static_cast<uint64>(::getpid()) << 32);
+    if (SessionId_ == 0)
+    {
+        SessionId_ = 1;
+    }
+    Output_.reserve(protocol::kMaxPendingCommands + 2);
+    Results_.reserve(protocol::kMaxRetainedResults);
 }
 
 HostSession::~HostSession() noexcept
 {
+    Services_.Retire();
     if (Instance_ != nullptr && Active_.IsLoaded())
     {
         Active_.Table().Destroy(Instance_);
         Instance_ = nullptr;
     }
-    Active_.Close();
+    if (Services_.OutstandingAllocations() != 0)
+    {
+        Active_.PinUntilProcessExit();
+        Services_.PinUntilProcessExit();
+    }
+    if (!Active_.Close())
+    {
+        Services_.PinUntilProcessExit();
+    }
 }
 
-void HostSession::Emit(const Message& message) noexcept
+void HostSession::Emit(const Message& message, bool priority) noexcept
 {
     if (ControlFd_ < 0)
     {
         return;
     }
-    const std::string payload = message.Serialize();
+    Message event = message;
+    event.SetHexId("epoch", ProjectEpoch_);
+    const std::string payload = event.Serialize();
     std::vector<ludus::foundation::uint8> frame;
     if (!protocol::EncodeFrame(payload, frame))
     {
         return;
     }
-    usize written = 0;
-    while (written < frame.size())
+    constexpr usize kTerminalReserve = 4096;
+    const usize budget = protocol::kMaxCommandQueueBytes - (priority ? 0 : kTerminalReserve);
+    const usize frameBudget = protocol::kMaxPendingCommands + (priority ? 2 : 0);
+    if (OutputBytes_ > budget || frame.size() > budget - OutputBytes_ || Output_.size() >= frameBudget)
     {
-        const ssize_t n = ::write(ControlFd_, frame.data() + written, frame.size() - written);
+        // Never discard a partial frame or silently lose a mutation outcome.
+        // Backpressure stops new mutations; Status/retained results reconcile.
+        return;
+    }
+    OutputBytes_ += frame.size();
+    Output_.push_back({std::move(frame), 0});
+    FlushOutput();
+}
+
+void HostSession::FlushOutput() noexcept
+{
+    while (!Output_.empty() && !ChannelFailed_)
+    {
+        auto& frame = Output_.front();
+        const ssize_t n = ::send(ControlFd_,
+                                 frame.Bytes.data() + frame.Offset,
+                                 frame.Bytes.size() - frame.Offset,
+                                 MSG_DONTWAIT | MSG_NOSIGNAL);
         if (n < 0)
         {
             if (errno == EINTR)
             {
                 continue;
             }
-            return; // broken pipe / closed reader: stop emitting
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                return;
+            }
+            ChannelFailed_ = true;
+            StopLatched_ = true;
+            return;
         }
-        written += static_cast<usize>(n);
+        if (n == 0)
+        {
+            return;
+        }
+        const usize sent = static_cast<usize>(n);
+        frame.Offset += sent;
+        OutputBytes_ -= sent;
+        if (frame.Offset == frame.Bytes.size())
+        {
+            Output_.erase(Output_.begin());
+        }
     }
 }
 
@@ -162,11 +220,21 @@ void HostSession::EmitCommandResult(uint64 requestId, CommandStatus status, std:
     {
         m.SetString("message", message);
     }
-    Emit(m);
+    if (RetainPending_ && requestId == PendingRequest_)
+    {
+        Results_.push_back({requestId, std::move(PendingPayload_), m});
+        RetainPending_ = false;
+    }
+    Emit(m, StopLatched_);
 }
 
 bool HostSession::LoadInitial(std::string_view modulePath) noexcept
 {
+    if (!Services_.IsValid())
+    {
+        State_ = PlayState::Failed;
+        return false;
+    }
     State_ = PlayState::Starting;
     ActiveGeneration_ = 1;
     const LoadStatus loadStatus =
@@ -222,7 +290,7 @@ bool HostSession::LoadInitial(std::string_view modulePath) noexcept
 
 void HostSession::StepFrame() noexcept
 {
-    if (Instance_ == nullptr || !Active_.IsLoaded() || State_ == PlayState::Reloading)
+    if (Instance_ == nullptr || !Active_.IsLoaded() || (State_ != PlayState::Running && State_ != PlayState::Paused))
     {
         return;
     }
@@ -238,6 +306,10 @@ void HostSession::StepFrame() noexcept
     input.ElapsedSeconds = static_cast<ludus::foundation::float64>(SimTicks_) * kFixedDt;
     input.Width = 800;
     input.Height = 600;
+    if (Presenter_ != nullptr)
+    {
+        Presenter_->FillInput(input);
+    }
     // Paused==0 drives the module to advance one tick; the module advances on
     // input.Paused alone (a single Step while paused advances exactly one tick).
     input.Paused = advancing ? 0 : 1;
@@ -264,6 +336,11 @@ void HostSession::StepFrame() noexcept
 
 bool HostSession::PumpControl() noexcept
 {
+    FlushOutput();
+    if (StopLatched_ || ChannelFailed_)
+    {
+        return false;
+    }
     if (ControlFd_ < 0)
     {
         return true;
@@ -276,7 +353,7 @@ bool HostSession::PumpControl() noexcept
     if (ready > 0 && (pfd.revents & (POLLIN | POLLHUP)) != 0)
     {
         std::array<ludus::foundation::uint8, 4096> buffer = {};
-        const ssize_t n = ::read(ControlFd_, buffer.data(), buffer.size());
+        const ssize_t n = ::recv(ControlFd_, buffer.data(), buffer.size(), MSG_DONTWAIT);
         if (n == 0)
         {
             // EOF cancels the session (design 10); it does not reconnect.
@@ -320,16 +397,139 @@ void HostSession::Dispatch(const Message& command) noexcept
         return;
     }
     uint64 requestId = 0;
-    (void)command.GetHexId("request", requestId);
+    uint64 version = 0;
+    uint64 session = 0;
+    uint64 epoch = 0;
+    if (!command.GetUint("protocol", version) || version != protocol::kProtocolVersion ||
+        !command.GetHexId("request", requestId) || requestId == 0 || !command.GetHexId("session", session) ||
+        session != SessionId_ || !command.GetHexId("epoch", epoch) || epoch != ProjectEpoch_)
+    {
+        EmitCommandResult(requestId, CommandStatus::ProtocolError, "protocol/request/session/epoch mismatch");
+        return;
+    }
+    RetainPending_ = false;
+    bool knownFields = false;
+    if (type == "Ack")
+    {
+        knownFields = command.HasOnly({"command", "protocol", "request", "session", "epoch", "acknowledge"});
+    }
+    else if (type == "Status")
+    {
+        knownFields = command.HasOnly({"command", "protocol", "request", "session", "epoch", "reconcile"});
+    }
+    else if (type == "Stop" || type == "Hello")
+    {
+        knownFields = command.HasOnly({"command", "protocol", "request", "session", "epoch"});
+    }
+    else if (type == "Reload")
+    {
+        knownFields = command.HasOnly(
+            {"command", "protocol", "request", "session", "epoch", "expected_generation", "module_path", "generation"});
+    }
+    else if (type == "ApplyEdits")
+    {
+        knownFields = command.HasOnly({"command",
+                                       "protocol",
+                                       "request",
+                                       "session",
+                                       "epoch",
+                                       "expected_generation",
+                                       "schema_epoch",
+                                       "schema_version",
+                                       "edits"});
+    }
+    else if (type == "Pause" || type == "Resume" || type == "Step" || type == "ReadProperties")
+    {
+        knownFields = command.HasOnly({"command", "protocol", "request", "session", "epoch", "expected_generation"});
+    }
+    if (!knownFields)
+    {
+        EmitCommandResult(requestId, CommandStatus::InvalidRequest, "unknown command or fields");
+        return;
+    }
+    if (type == "Ack")
+    {
+        uint64 acknowledged = 0;
+        if (!command.GetHexId("acknowledge", acknowledged))
+        {
+            EmitCommandResult(requestId, CommandStatus::InvalidRequest, "missing acknowledge id");
+            return;
+        }
+        for (auto it = Results_.begin(); it != Results_.end(); ++it)
+        {
+            if (it->Request == acknowledged)
+            {
+                Results_.erase(it);
+                break;
+            }
+        }
+        EmitCommandResult(requestId, CommandStatus::Ok, "acknowledged");
+        return;
+    }
 
     if (type == protocol::CommandKindName(CommandKind::Stop))
     {
         StopLatched_ = true;
-        State_ = PlayState::Stopping;
+        if (State_ != PlayState::CleanupUnknown && State_ != PlayState::Failed)
+        {
+            State_ = PlayState::Stopping;
+        }
         EmitCommandResult(requestId, CommandStatus::Ok, "stopping");
         return;
     }
-    if (type == protocol::CommandKindName(CommandKind::Status))
+    const bool mutation = type != protocol::CommandKindName(CommandKind::Status) && type != "Hello" &&
+                          type != protocol::CommandKindName(CommandKind::ReadProperties);
+    if (mutation)
+    {
+        if (State_ == PlayState::CleanupUnknown || State_ == PlayState::Failed)
+        {
+            EmitCommandResult(requestId, CommandStatus::RestartRequired, "retirement is uncertain; restart the host");
+            return;
+        }
+        const std::string payload = command.Serialize();
+        for (const auto& retained : Results_)
+        {
+            if (retained.Request == requestId)
+            {
+                if (retained.Payload == payload)
+                {
+                    Emit(retained.Result);
+                }
+                else
+                {
+                    EmitCommandResult(requestId, CommandStatus::InvalidRequest, "request id payload mismatch");
+                }
+                return;
+            }
+        }
+        if (requestId <= HighestMutationRequest_)
+        {
+            EmitCommandResult(requestId,
+                              CommandStatus::InvalidRequest,
+                              "outcome no longer retained; reconcile with Status");
+            return;
+        }
+        if (Results_.size() >= protocol::kMaxRetainedResults || OutputBytes_ > protocol::kMaxCommandQueueBytes / 2 ||
+            Output_.size() >= protocol::kMaxPendingCommands / 2)
+        {
+            EmitCommandResult(requestId, CommandStatus::Busy, "acknowledge results or drain output before mutation");
+            return;
+        }
+        PendingRequest_ = requestId;
+        HighestMutationRequest_ = requestId;
+        PendingPayload_ = payload;
+        RetainPending_ = true;
+    }
+    if (mutation || type == "ReadProperties")
+    {
+        uint64 expected = 0;
+        if (!command.GetHexId("expected_generation", expected) || expected != ActiveGeneration_)
+        {
+            EmitCommandResult(requestId, CommandStatus::SchemaChanged, "module generation changed; refresh values");
+            return;
+        }
+    }
+    if (type == "Hello" || type == protocol::CommandKindName(CommandKind::Status))
     {
         Message m;
         m.SetString("event", protocol::EventKindName(EventKind::CommandResult));
@@ -342,6 +542,40 @@ void HostSession::Dispatch(const Message& command) noexcept
         m.SetString("state", PlayStateName(State_));
         m.SetUint("sim_ticks", SimTicks_);
         m.SetUint("frame_index", FrameIndex_);
+        m.SetUint("presented_frames", Presenter_ == nullptr ? 0 : Presenter_->PresentedFrames());
+        m.SetBool("windowed", Presenter_ != nullptr && Presenter_->Windowed());
+        m.SetUint("retained_results", Results_.size());
+        m.SetString("identity", CurrentHostIdentity());
+        m.SetUint("capabilities", Active_.Metadata().Capabilities);
+        m.SetUint("schema_version", Active_.Metadata().PropertySchemaVersion);
+        uint64 reconcile = 0;
+        if (command.Has("reconcile"))
+        {
+            if (!command.GetHexId("reconcile", reconcile))
+            {
+                EmitCommandResult(requestId, CommandStatus::InvalidRequest, "invalid reconciliation id");
+                return;
+            }
+            m.SetHexId("reconciled_request", reconcile);
+            m.SetString("reconciled_status", "NotRetained");
+            for (const auto& retained : Results_)
+            {
+                if (retained.Request == reconcile)
+                {
+                    std::string status;
+                    (void)retained.Result.GetString("status", status);
+                    m.SetString("reconciled_status", status);
+                    break;
+                }
+            }
+        }
+        if (!Results_.empty())
+        {
+            m.SetHexId("last_request", Results_.back().Request);
+            std::string status;
+            (void)Results_.back().Result.GetString("status", status);
+            m.SetString("last_status", status);
+        }
         Emit(m);
         return;
     }
@@ -361,6 +595,10 @@ void HostSession::Dispatch(const Message& command) noexcept
                 }
             }
             State_ = PlayState::Paused;
+            if (Presenter_ != nullptr)
+            {
+                Presenter_->ResetInput();
+            }
         }
         EmitCommandResult(requestId, CommandStatus::Ok, PlayStateName(State_));
         return;
@@ -378,6 +616,10 @@ void HostSession::Dispatch(const Message& command) noexcept
                 }
             }
             State_ = PlayState::Running;
+            if (Presenter_ != nullptr)
+            {
+                Presenter_->ResetInput();
+            }
         }
         EmitCommandResult(requestId, CommandStatus::Ok, PlayStateName(State_));
         return;
@@ -387,6 +629,7 @@ void HostSession::Dispatch(const Message& command) noexcept
         if (State_ == PlayState::Paused)
         {
             StepRequested_ = true;
+            StepFrame();
             EmitCommandResult(requestId, CommandStatus::Ok, "stepped");
         }
         else
@@ -409,12 +652,32 @@ void HostSession::Dispatch(const Message& command) noexcept
         return;
     }
 
+    if (type == "ReadProperties")
+    {
+        const auto status = PublishProperties(requestId);
+        EmitCommandResult(requestId, status, protocol::CommandStatusName(status));
+        return;
+    }
+    if (type == "ApplyEdits")
+    {
+        const auto status = ApplyPropertyEdits(command);
+        EmitCommandResult(requestId, status, protocol::CommandStatusName(status));
+        if (status == CommandStatus::Ok || status == CommandStatus::StaleRevision)
+        {
+            // The retained result proves the mutation outcome. A bounded value
+            // transfer can be retried independently if a slow reader fills it.
+            (void)PublishProperties(requestId);
+        }
+        return;
+    }
+
     EmitCommandResult(requestId, CommandStatus::InvalidRequest, "unsupported command");
 }
 
 CommandStatus HostSession::ReloadTo(std::string_view newModulePath, uint64 newGeneration) noexcept
 {
-    if (Instance_ == nullptr || !Active_.IsLoaded())
+    if (Instance_ == nullptr || !Active_.IsLoaded() || (State_ != PlayState::Running && State_ != PlayState::Paused) ||
+        newGeneration <= ActiveGeneration_)
     {
         return CommandStatus::InvalidRequest;
     }
@@ -423,6 +686,10 @@ CommandStatus HostSession::ReloadTo(std::string_view newModulePath, uint64 newGe
         return CommandStatus::RestartRequired;
     }
 
+    if (Presenter_ != nullptr)
+    {
+        Presenter_->ResetInput();
+    }
     const PlayState priorState = State_;
     State_ = PlayState::Reloading;
 
@@ -511,7 +778,9 @@ CommandStatus HostSession::ReloadTo(std::string_view newModulePath, uint64 newGe
     {
         return reject(CommandStatus::ReloadRejected);
     }
-    if (!ValidateCheckpointEnvelope(header, body.data(), written))
+    if (!ValidateCheckpointEnvelope(header, body.data(), written) || header.ProjectId != ProjectId_ ||
+        header.GameId != GameId_ || header.ModuleBuildId != ActiveGeneration_ ||
+        header.SchemaVersion != Active_.Metadata().CheckpointSchemaVersion)
     {
         return reject(CommandStatus::ReloadRejected);
     }
@@ -523,6 +792,11 @@ CommandStatus HostSession::ReloadTo(std::string_view newModulePath, uint64 newGe
     // here, BEFORE commit. B is created paused.
     EmitReloadPhase(ReloadPhase::Stage);
     HostServiceProvider stagingServices;
+    if (!stagingServices.IsValid())
+    {
+        return reject(CommandStatus::ReloadRejected);
+    }
+    stagingServices.CopyResourcesFrom(Services_);
     CreateInfo info = {};
     info.StructSize = static_cast<uint32>(sizeof(CreateInfo));
     info.Services = &stagingServices.Services();
@@ -530,17 +804,35 @@ CommandStatus HostSession::ReloadTo(std::string_view newModulePath, uint64 newGe
     info.GameId = GameId_;
     info.ModuleGeneration = newGeneration;
     GameCandidate* candidate = nullptr;
+    auto discard = [&](CommandStatus status) -> CommandStatus {
+        if (candidate != nullptr)
+        {
+            stagingServices.Retire();
+            candidateModule.Table().DiscardCandidate(candidate);
+            candidate = nullptr;
+        }
+        const CommandStatus result = reject(status);
+        if (stagingServices.OutstandingAllocations() != 0)
+        {
+            Retired_ = std::move(candidateModule);
+            RetiredServices_ = std::move(stagingServices);
+            Retired_.PinUntilProcessExit();
+            RetiredServices_.PinUntilProcessExit();
+            State_ = PlayState::CleanupUnknown;
+            return CommandStatus::RestartRequired;
+        }
+        return result;
+    };
     ByteView bodyView = {body.data(), body.size()};
     const Status createStatus = candidateModule.Table().CreateCandidate(&info, &header, bodyView, &candidate);
     if (createStatus != Status::Ok || candidate == nullptr)
     {
-        return reject(createStatus == Status::MigrationUnsupported ? CommandStatus::RestartRequired
-                                                                   : CommandStatus::ReloadRejected);
+        return discard(createStatus == Status::MigrationUnsupported ? CommandStatus::RestartRequired
+                                                                    : CommandStatus::ReloadRejected);
     }
     if (candidateModule.Table().ValidateCandidate(candidate) != Status::Ok)
     {
-        candidateModule.Table().DiscardCandidate(candidate);
-        return reject(CommandStatus::ReloadRejected);
+        return discard(CommandStatus::ReloadRejected);
     }
 
     // Promote the candidate to B's live instance (still pre-commit from the
@@ -550,8 +842,7 @@ CommandStatus HostSession::ReloadTo(std::string_view newModulePath, uint64 newGe
     GameInstance* newInstance = nullptr;
     if (candidateModule.Table().CommitCandidate(candidate, &newInstance) != Status::Ok || newInstance == nullptr)
     {
-        candidateModule.Table().DiscardCandidate(candidate);
-        return reject(CommandStatus::ReloadRejected);
+        return discard(CommandStatus::ReloadRejected);
     }
 
     // Phase 5 Commit: the allocation-free, non-failing host swap. From here on
@@ -559,8 +850,8 @@ CommandStatus HostSession::ReloadTo(std::string_view newModulePath, uint64 newGe
     // inside the swap itself.
     EmitReloadPhase(ReloadPhase::Commit);
     GameInstance* oldInstance = Instance_;
-    LoadedModule oldModule = std::move(Active_);
-    HostServiceProvider oldServices = std::move(Services_);
+    Retired_ = std::move(Active_);
+    RetiredServices_ = std::move(Services_);
     Instance_ = newInstance;
     Active_ = std::move(candidateModule);
     Services_ = std::move(stagingServices);
@@ -571,17 +862,21 @@ CommandStatus HostSession::ReloadTo(std::string_view newModulePath, uint64 newGe
     // release A's loader reference (only after its instance is destroyed and its
     // services drained). Uncertain retirement disables further reload.
     EmitReloadPhase(ReloadPhase::Retire);
-    oldModule.Table().Destroy(oldInstance);
-    if (oldServices.OutstandingAllocations() != 0)
+    RetiredServices_.Retire();
+    Retired_.Table().Destroy(oldInstance);
+    if (RetiredServices_.OutstandingAllocations() != 0)
     {
         // A left host allocations outstanding: residency is uncertain. Keep B
         // active but require restart rather than release code with live refs.
         State_ = PlayState::CleanupUnknown;
+        Retired_.PinUntilProcessExit();
+        RetiredServices_.PinUntilProcessExit();
         EmitReloadPhase(ReloadPhase::Rejected);
         return CommandStatus::RestartRequired;
     }
-    if (!oldModule.Close())
+    if (!Retired_.Close())
     {
+        RetiredServices_.PinUntilProcessExit();
         // dlclose failed: the old image's residency is uncertain (design 8).
         State_ = PlayState::CleanupUnknown;
         EmitReloadPhase(ReloadPhase::Rejected);
@@ -616,8 +911,8 @@ RunResult RunStaticEntry(const HostConfig& config, StaticEntryFn entry) noexcept
     table.StructSize = static_cast<uint32>(sizeof(game_api::GameApiTable));
     table.AbiMajor = CurrentAbiMajor();
     table.AbiMinor = CurrentAbiMinor();
-    const int fillStatus = entry(CurrentAbiMajor(), CurrentAbiMinor(), &table);
-    if (fillStatus != 0 || table.Create == nullptr || table.Update == nullptr || table.Destroy == nullptr)
+    const Status fillStatus = entry(CurrentAbiMajor(), CurrentAbiMinor(), &table);
+    if (fillStatus != Status::Ok || table.Create == nullptr || table.Update == nullptr || table.Destroy == nullptr)
     {
         return RunResult::IncompatibleModule;
     }
@@ -635,24 +930,45 @@ RunResult RunStaticEntry(const HostConfig& config, StaticEntryFn entry) noexcept
         return RunResult::Internal;
     }
 
-    const uint64 frames = config.MaxFrames == 0 ? 1 : config.MaxFrames;
-    for (uint64 i = 0; i < frames; ++i)
+    FramePresenter presenter;
+    const auto started = presenter.Start(config.Mode);
+    if (started != RunResult::Ok)
     {
+        services.Retire();
+        table.Destroy(instance);
+        return started;
+    }
+    RunResult result = RunResult::Ok;
+    for (uint64 i = 0; config.MaxFrames == 0 || i < config.MaxFrames; ++i)
+    {
+        if (!presenter.Poll())
+        {
+            break;
+        }
         FrameInput input = {};
         input.FrameIndex = i;
         input.DeltaSeconds = 1.0 / 60.0;
         input.ElapsedSeconds = static_cast<ludus::foundation::float64>(i) / 60.0;
         input.Width = 800;
         input.Height = 600;
+        presenter.FillInput(input);
         RenderParams render = {};
         if (table.Update(instance, &input, &render) != Status::Ok)
         {
-            table.Destroy(instance);
-            return RunResult::Internal;
+            result = RunResult::Internal;
+            break;
         }
+        result = presenter.Present(render);
+        if (result != RunResult::Ok)
+        {
+            break;
+        }
+        const timespec delay = {0, 16000000};
+        (void)::nanosleep(&delay, nullptr);
     }
+    services.Retire();
     table.Destroy(instance);
-    return services.OutstandingAllocations() == 0 ? RunResult::Ok : RunResult::Internal;
+    return services.OutstandingAllocations() == 0 ? result : RunResult::Internal;
 }
 
 usize HostSession::CaptureCheckpoint(ludus::foundation::uint8* buffer, usize capacity) noexcept
@@ -697,26 +1013,57 @@ usize HostSession::ReadActiveProperties(ludus::foundation::uint8* buffer, usize 
     return written;
 }
 
-RunResult HostSession::RunLoop(uint64 maxFrames) noexcept
+RunResult HostSession::RunLoop(uint64 maxFrames, FramePresenter* presenter) noexcept
 {
     if (State_ != PlayState::Running && State_ != PlayState::Paused)
     {
         return RunResult::Internal;
     }
+    Presenter_ = presenter;
+    RunResult result = RunResult::Ok;
     for (;;)
     {
-        if (!PumpControl())
+        if ((presenter != nullptr && !presenter->Poll()) || !PumpControl())
         {
             break;
         }
         StepFrame();
+        if (StopLatched_)
+        {
+            break;
+        }
+        if (presenter != nullptr)
+        {
+            const auto presentedBefore = presenter->PresentedFrames();
+            result = presenter->Present(LastRender_);
+            if (presentedBefore == 0 && presenter->PresentedFrames() == 1)
+            {
+                Message frame;
+                frame.SetString("event", protocol::EventKindName(EventKind::FramePresented));
+                frame.SetUint("protocol", protocol::kProtocolVersion);
+                frame.SetHexId("session", SessionId_);
+                frame.SetHexId("generation", ActiveGeneration_);
+                frame.SetUint("presented_frames", 1);
+                Emit(frame);
+            }
+            if (result != RunResult::Ok)
+            {
+                State_ = PlayState::Failed;
+                break;
+            }
+        }
+        // Fixed simulation ticks, no busy spin and no pause/reload catch-up.
+        const timespec delay = {0, 16000000};
+        (void)::nanosleep(&delay, nullptr);
         if (maxFrames != 0 && FrameIndex_ >= maxFrames)
         {
             break;
         }
     }
 
+    Presenter_ = nullptr;
     // Stop: retire the instance before releasing the loader reference.
+    Services_.Retire();
     if (Instance_ != nullptr && Active_.IsLoaded())
     {
         Active_.Table().Destroy(Instance_);
@@ -726,8 +1073,18 @@ RunResult HostSession::RunLoop(uint64 maxFrames) noexcept
     {
         LUDUS_LOG_ERROR(LOG_SESSION, "module leaked {} host allocations", Services_.OutstandingAllocations());
         State_ = PlayState::CleanupUnknown;
+        Active_.PinUntilProcessExit();
+        Services_.PinUntilProcessExit();
     }
-    Active_.Close();
+    if (!Active_.Close())
+    {
+        Services_.PinUntilProcessExit();
+        State_ = PlayState::CleanupUnknown;
+    }
+    if (State_ != PlayState::CleanupUnknown && State_ != PlayState::Failed)
+    {
+        State_ = PlayState::Stopped;
+    }
 
     {
         Message ended;
@@ -735,14 +1092,24 @@ RunResult HostSession::RunLoop(uint64 maxFrames) noexcept
         ended.SetUint("protocol", protocol::kProtocolVersion);
         ended.SetHexId("session", SessionId_);
         ended.SetString("state", PlayStateName(State_));
-        Emit(ended);
+        Emit(ended, true);
+    }
+    // Bounded terminal flush; a client that never reads cannot hang Stop.
+    for (int i = 0; i < 100 && !Output_.empty() && !ChannelFailed_; ++i)
+    {
+        FlushOutput();
+        if (!Output_.empty())
+        {
+            pollfd pfd = {ControlFd_, POLLOUT, 0};
+            (void)::poll(&pfd, 1, 2);
+        }
     }
 
-    if (State_ == PlayState::CleanupUnknown)
+    if (State_ == PlayState::CleanupUnknown || State_ == PlayState::Failed)
     {
-        return RunResult::Internal;
+        return result == RunResult::Ok ? RunResult::Internal : result;
     }
     State_ = PlayState::Stopped;
-    return RunResult::Ok;
+    return result;
 }
 } // namespace ludus::runtime::game_host

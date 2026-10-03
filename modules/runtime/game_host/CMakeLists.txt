@@ -38,8 +38,12 @@ configure_file(
 target_sources(ludus_runtime_game_host
     PRIVATE
         src/host.cpp
+        src/entry.cpp
+        src/frame_presenter.cpp
+        src/internal/frame_presenter.h
         src/host_services.cpp
         src/host_session.cpp
+        src/property_exchange.cpp
         src/identity.cpp
         src/module_loader.cpp
         src/protocol.cpp
@@ -70,6 +74,9 @@ target_link_libraries(ludus_runtime_game_host
         Ludus::GameApi
     PRIVATE
         Ludus::FoundationLogging
+        Ludus::Input
+        Ludus::Platform
+        Ludus::GraphicsRhi
         ${CMAKE_DL_LIBS}
 )
 
@@ -96,7 +103,7 @@ if(LUDUS_BUILD_TESTS)
         target_link_libraries(ludus_game_fixture_${variant} PRIVATE Ludus::GameApi)
         target_compile_definitions(ludus_game_fixture_${variant} PRIVATE
             LUDUS_FIXTURE_VARIANT=${variant}
-            LUDUS_FIXTURE_IDENTITY="${LUDUS_SDK_VARIANT}|${LUDUS_COMPILER_ID} ${LUDUS_COMPILER_VERSION}|${LUDUS_TARGET_TRIPLE}|abi-${LUDUS_GAME_ABI_MAJOR}.${LUDUS_GAME_ABI_MINOR}")
+            LUDUS_FIXTURE_IDENTITY="${LUDUS_GAME_COMPATIBILITY_IDENTITY}")
         ludus_apply_project_defaults(ludus_game_fixture_${variant})
         set_target_properties(ludus_game_fixture_${variant} PROPERTIES
             PREFIX "" OUTPUT_NAME "game_fixture_${variant}"
@@ -173,25 +180,19 @@ if(LUDUS_BUILD_TESTS)
     add_test(NAME ludus_game_host_reload_tests COMMAND ludus_game_host_reload_tests)
     set_tests_properties(ludus_game_host_reload_tests PROPERTIES TIMEOUT 180 LABELS "unit;runtime;reload;stress")
 
-    # Debugger acceptance (tasks.md L14): drives the pinned LLDB against the host
-    # and the loaded module in ONE host session (startup breakpoint -> live
-    # reload -> breakpoint in new generation -> safe-reload-while-stopped).
-    #
-    # The debugger journey is a deliberate Debug-symbol acceptance: it is
-    # registered ONLY for the Debug flavor with NO sanitizers. An optimized
-    # Release build has no usable source mapping/locals, and LLDB-18 crashes
-    # single-stepping an ASan/UBSan-instrumented target on `continue`. The
-    # Release and sanitizer gates still run every other runtime test; this one
-    # journey legitimately needs Debug symbols (per the committed design 11:
-    # "a mocked launch proves no stepping" — it must run where stepping works).
-    find_program(LUDUS_LLDB NAMES lldb-18 lldb)
+    # Debug-only native source stepping acceptance. Release/ASan run all
+    # runtime regressions; this journey requires usable Debug source/locals.
+    find_program(LUDUS_GDB NAMES gdb)
     find_package(Python3 3.10 COMPONENTS Interpreter)
     set(_ludus_debugger_eligible OFF)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug"
        AND NOT LUDUS_ENABLE_ASAN AND NOT LUDUS_ENABLE_UBSAN AND NOT LUDUS_ENABLE_TSAN)
         set(_ludus_debugger_eligible ON)
     endif()
-    if(LUDUS_LLDB AND Python3_Interpreter_FOUND AND _ludus_debugger_eligible)
+    if(_ludus_debugger_eligible)
+        if(NOT LUDUS_GDB OR NOT Python3_Interpreter_FOUND)
+            message(FATAL_ERROR "Debug gameplay acceptance requires GDB and Python 3.10+; install these tools")
+        endif()
         # Single-process same-session reload journey harness the debugger steps.
         add_executable(ludus_game_host_debugger_journey tests/debugger_journey.cpp)
         target_include_directories(ludus_game_host_debugger_journey PRIVATE src "${LUDUS_GAME_HOST_GENERATED_INCLUDE_DIR}")
@@ -200,14 +201,18 @@ if(LUDUS_BUILD_TESTS)
         ludus_apply_project_defaults(ludus_game_host_debugger_journey)
         add_dependencies(ludus_game_host_debugger_journey ludus_game_fixture_A ludus_game_fixture_B)
 
-        add_test(NAME ludus_game_host_debugger_acceptance
-            COMMAND Python3::Interpreter
-                "${CMAKE_CURRENT_SOURCE_DIR}/tests/lldb_acceptance.py"
-                "${LUDUS_LLDB}"
-                "$<TARGET_FILE:ludus_game_host_debugger_journey>"
-                "$<TARGET_FILE:ludus_game_fixture_A>"
-                "$<TARGET_FILE:ludus_game_fixture_B>")
-        set_tests_properties(ludus_game_host_debugger_acceptance PROPERTIES
-            TIMEOUT 180 LABELS "runtime;debugger;acceptance")
+        if(LUDUS_GDB)
+            add_test(NAME ludus_game_host_debugger_acceptance
+                COMMAND Python3::Interpreter
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/gdb_acceptance.py"
+                    "${LUDUS_GDB}"
+                    "$<TARGET_FILE:ludus_game_host_debugger_journey>"
+                    "$<TARGET_FILE:ludus_game_fixture_A>"
+                    "$<TARGET_FILE:ludus_game_fixture_B>")
+        endif()
+        if(LUDUS_GDB)
+            set_tests_properties(ludus_game_host_debugger_acceptance PROPERTIES
+                TIMEOUT 180 LABELS "runtime;debugger;acceptance")
+        endif()
     endif()
 endif()

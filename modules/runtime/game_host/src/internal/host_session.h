@@ -22,6 +22,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace ludus::runtime::game_host
 {
@@ -42,6 +43,8 @@ enum class PlayState : ludus::foundation::uint8
     CleanupUnknown = 7
 };
 
+class FramePresenter;
+
 [[nodiscard]] std::string_view PlayStateName(PlayState state) noexcept;
 
 // Run a statically linked gameplay implementation (shipping build, no dlopen,
@@ -54,7 +57,7 @@ class HostSession final
 public:
     // projectId/gameId/controlFd are a fixed construction signature.
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-    HostSession(uint64 projectId, uint64 gameId, int32 controlFd) noexcept;
+    HostSession(uint64 projectId, uint64 gameId, int32 controlFd, uint64 projectEpoch = 1) noexcept;
     ~HostSession() noexcept;
 
     HostSession(const HostSession&) = delete;
@@ -68,7 +71,7 @@ public:
     // control channel each frame, dispatches validated commands at the boundary,
     // advances the active instance, and emits events. Returns the terminal
     // RunResult.
-    [[nodiscard]] RunResult RunLoop(uint64 maxFrames) noexcept;
+    [[nodiscard]] RunResult RunLoop(uint64 maxFrames, FramePresenter* presenter = nullptr) noexcept;
 
     [[nodiscard]] PlayState State() const noexcept
     {
@@ -113,13 +116,16 @@ public:
 
 private:
     // Emit an event frame on the control channel (no-op if no control fd).
-    void Emit(const protocol::Message& message) noexcept;
+    void Emit(const protocol::Message& message, bool priority = false) noexcept;
+    void FlushOutput() noexcept;
     void EmitReloadPhase(protocol::ReloadPhase phase) noexcept;
     void EmitCommandResult(uint64 requestId, protocol::CommandStatus status, std::string_view message) noexcept;
 
     // Poll + dispatch any pending control commands. Returns false to stop.
     [[nodiscard]] bool PumpControl() noexcept;
     void Dispatch(const protocol::Message& command) noexcept;
+    [[nodiscard]] protocol::CommandStatus PublishProperties(uint64 requestId) noexcept;
+    [[nodiscard]] protocol::CommandStatus ApplyPropertyEdits(const protocol::Message& command) noexcept;
 
     // One Update tick of the active instance (unless paused/stepping gate it).
     void StepFrame() noexcept;
@@ -128,8 +134,10 @@ private:
     // the optional Quiesce/Resume/checkpoint/candidate callbacks).
     [[nodiscard]] bool ModuleHasReload() const noexcept;
 
+    FramePresenter* Presenter_ = nullptr;
     uint64 ProjectId_ = 0;
     uint64 GameId_ = 0;
+    uint64 ProjectEpoch_ = 1;
     int32 ControlFd_ = -1;
 
     PlayState State_ = PlayState::Stopped;
@@ -144,8 +152,29 @@ private:
 
     LoadedModule Active_;
     HostServiceProvider Services_;
+    LoadedModule Retired_;
+    HostServiceProvider RetiredServices_;
     game_api::GameInstance* Instance_ = nullptr;
 
     protocol::FrameReader Reader_;
+    struct OutputFrame
+    {
+        std::vector<ludus::foundation::uint8> Bytes;
+        usize Offset = 0;
+    };
+    std::vector<OutputFrame> Output_;
+    usize OutputBytes_ = 0;
+    bool ChannelFailed_ = false;
+    struct RetainedResult
+    {
+        uint64 Request = 0;
+        std::string Payload;
+        protocol::Message Result;
+    };
+    std::vector<RetainedResult> Results_;
+    uint64 PendingRequest_ = 0;
+    std::string PendingPayload_;
+    bool RetainPending_ = false;
+    uint64 HighestMutationRequest_ = 0;
 };
 } // namespace ludus::runtime::game_host

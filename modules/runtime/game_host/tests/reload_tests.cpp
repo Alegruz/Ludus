@@ -12,27 +12,40 @@
 // not just a ReloadFailed/ReloadOk message.
 
 #include "internal/host_session.h"
+#include "internal/identity.h"
 
+#include <ludus/runtime/game_api/checkpoint.h>
 #include <ludus/runtime/game_api/properties.h>
 #include <ludus/runtime/game_host/host.h>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <unordered_set>
+
+#include <unistd.h>
+#include <utility>
 #include <vector>
 
 using namespace ludus::runtime::game_host;
+using ludus::foundation::uint32;
+using ludus::foundation::uint64;
+using ludus::foundation::uint8;
+using ludus::foundation::usize;
 using ludus::runtime::game_api::PropertyValue;
 
 namespace
 {
 // Pull the int32 "Bounces" read-only value out of a ReadProperties buffer.
-ludus::foundation::int32 BouncesFrom(const ludus::foundation::uint8* buf, std::size_t size)
+ludus::foundation::int32 BouncesFrom(const ludus::foundation::uint8* buf, usize size)
 {
-    const std::size_t count = size / sizeof(PropertyValue);
-    for (std::size_t i = 0; i < count; ++i)
+    const usize count = size / sizeof(PropertyValue);
+    for (usize i = 0; i < count; ++i)
     {
         PropertyValue v;
         std::memcpy(&v, buf + i * sizeof(PropertyValue), sizeof(PropertyValue));
@@ -47,6 +60,95 @@ ludus::foundation::int32 BouncesFrom(const ludus::foundation::uint8* buf, std::s
 }
 } // namespace
 
+TEST_CASE("generation service storage survives ownership moves", "[reload][services]")
+{
+    HostServiceProvider active;
+    const auto* table = &active.Services();
+    void* allocation = table->AllocateBytes(table->Context, 128, 16);
+    REQUIRE(allocation != nullptr);
+    HostServiceProvider retired = std::move(active);
+    REQUIRE(&retired.Services() == table);
+    REQUIRE(retired.OutstandingAllocations() == 1);
+    retired.Retire();
+    REQUIRE(table->AllocateBytes(table->Context, 16, 16) == nullptr);
+    table->FreeBytes(table->Context, allocation);
+    REQUIRE(retired.OutstandingAllocations() == 0);
+
+    HostServiceProvider staging;
+    const auto* candidateTable = &staging.Services();
+    active = std::move(staging);
+    REQUIRE(&active.Services() == candidateTable);
+    allocation = candidateTable->AllocateBytes(candidateTable->Context, 64, 32);
+    REQUIRE(allocation != nullptr);
+    candidateTable->FreeBytes(candidateTable->Context, allocation);
+    REQUIRE(active.OutstandingAllocations() == 0);
+}
+
+TEST_CASE("candidate rejects malformed tagged checkpoints before promotion", "[reload][checkpoint]")
+{
+    using namespace ludus::runtime::game_api;
+    LoadedModule a;
+    LoadedModule b;
+    REQUIRE(LoadModule(LUDUS_FIXTURE_A_PATH, 1, CurrentHostIdentity(), CurrentAbiMajor(), CurrentAbiMinor(), a) ==
+            LoadStatus::Ok);
+    REQUIRE(LoadModule(LUDUS_FIXTURE_B_PATH, 2, CurrentHostIdentity(), CurrentAbiMajor(), CurrentAbiMinor(), b) ==
+            LoadStatus::Ok);
+    HostServiceProvider services;
+    CreateInfo info = {};
+    info.StructSize = static_cast<uint32>(sizeof(info));
+    info.Services = &services.Services();
+    info.ProjectId = 7;
+    info.GameId = 9;
+    info.ModuleGeneration = 1;
+    GameInstance* instance = nullptr;
+    REQUIRE(a.Table().Create(&info, &instance) == Status::Ok);
+    std::array<uint8, 256> body = {};
+    CheckpointHeader header = {};
+    usize written = 0;
+    REQUIRE(a.Table().WriteCheckpoint(instance, &header, {body.data(), body.size()}, &written) == Status::Ok);
+    REQUIRE(header.ProjectId == 7);
+    REQUIRE(header.GameId == 9);
+    REQUIRE(header.ModuleBuildId == 1);
+    const auto original = body;
+    info.ModuleGeneration = 2;
+    for (int mutation = 0; mutation < 5; ++mutation)
+    {
+        body = original;
+        auto malformedHeader = header;
+        if (mutation == 0)
+        {
+            REQUIRE(WriteCheckpointUint({body.data() + 8, 2}, 1));
+        } // duplicate PositionX
+        if (mutation == 1)
+        {
+            REQUIRE(WriteCheckpointUint({body.data() + 2, 2}, 65535));
+        } // truncated field
+        if (mutation == 2)
+        {
+            REQUIRE(WriteCheckpointUint({body.data() + 4, 4}, 0x7FC00000));
+        } // NaN
+        if (mutation == 3)
+        {
+            REQUIRE(WriteCheckpointUint({body.data(), 2}, 99));
+        } // unknown mandatory tag
+        if (mutation == 4)
+        {
+            malformedHeader.ProjectId = 8;
+        }
+        uint64 digest = 0xCBF29CE484222325ULL;
+        for (usize i = 0; i < written; ++i)
+        {
+            digest = (digest ^ body[i]) * 0x100000001B3ULL;
+        }
+        malformedHeader.BodyDigest = digest;
+        GameCandidate* candidate = nullptr;
+        CHECK(b.Table().CreateCandidate(&info, &malformedHeader, {body.data(), written}, &candidate) ==
+              Status::InvalidArgument);
+        CHECK(candidate == nullptr);
+    }
+    a.Table().Destroy(instance);
+}
+
 TEST_CASE("function-body edit reload preserves simulation state", "[reload]")
 {
     HostSession session(1, 1, -1);
@@ -58,7 +160,7 @@ TEST_CASE("function-body edit reload preserves simulation state", "[reload]")
         session.AdvanceOneFrame();
     }
     std::array<ludus::foundation::uint8, 1024> before = {};
-    const std::size_t beforeSize = session.ReadActiveProperties(before.data(), before.size());
+    const usize beforeSize = session.ReadActiveProperties(before.data(), before.size());
     REQUIRE(beforeSize > 0);
     const auto bouncesBefore = BouncesFrom(before.data(), beforeSize);
     REQUIRE(bouncesBefore > 0);
@@ -68,13 +170,13 @@ TEST_CASE("function-body edit reload preserves simulation state", "[reload]")
     REQUIRE(session.ActiveGeneration() == 2);
 
     std::array<ludus::foundation::uint8, 1024> after = {};
-    const std::size_t afterSize = session.ReadActiveProperties(after.data(), after.size());
+    const usize afterSize = session.ReadActiveProperties(after.data(), after.size());
     REQUIRE(afterSize > 0);
     const auto bouncesAfter = BouncesFrom(after.data(), afterSize);
 
     // State preserved exactly across the reload (not reset).
     REQUIRE(bouncesAfter == bouncesBefore);
-    REQUIRE(session.OutstandingHostAllocations() == 0);
+    REQUIRE(session.OutstandingHostAllocations() == 1);
 }
 
 TEST_CASE("pre-commit failure at each stage preserves A and its state", "[reload]")
@@ -89,7 +191,7 @@ TEST_CASE("pre-commit failure at each stage preserves A and its state", "[reload
             session.AdvanceOneFrame();
         }
         std::array<ludus::foundation::uint8, 1024> before = {};
-        const std::size_t beforeSize = session.ReadActiveProperties(before.data(), before.size());
+        const usize beforeSize = session.ReadActiveProperties(before.data(), before.size());
         const auto bouncesBefore = BouncesFrom(before.data(), beforeSize);
 
         ::setenv("LUDUS_FIXTURE_FAIL", stage, 1);
@@ -102,10 +204,10 @@ TEST_CASE("pre-commit failure at each stage preserves A and its state", "[reload
         REQUIRE(session.ActiveGeneration() == 1);
 
         std::array<ludus::foundation::uint8, 1024> after = {};
-        const std::size_t afterSize = session.ReadActiveProperties(after.data(), after.size());
+        const usize afterSize = session.ReadActiveProperties(after.data(), after.size());
         REQUIRE(afterSize > 0);
         REQUIRE(BouncesFrom(after.data(), afterSize) == bouncesBefore);
-        REQUIRE(session.OutstandingHostAllocations() == 0);
+        REQUIRE(session.OutstandingHostAllocations() == 1);
     }
 }
 
@@ -118,19 +220,19 @@ TEST_CASE("full supported checkpoint state is preserved across reload", "[reload
         session.AdvanceOneFrame();
     }
     std::array<ludus::foundation::uint8, 4096> before = {};
-    const std::size_t beforeSize = session.CaptureCheckpoint(before.data(), before.size());
+    const usize beforeSize = session.CaptureCheckpoint(before.data(), before.size());
     REQUIRE(beforeSize > 0);
 
     REQUIRE(session.ReloadTo(LUDUS_FIXTURE_B_PATH, 2) == protocol::CommandStatus::Ok);
 
     std::array<ludus::foundation::uint8, 4096> after = {};
-    const std::size_t afterSize = session.CaptureCheckpoint(after.data(), after.size());
+    const usize afterSize = session.CaptureCheckpoint(after.data(), after.size());
     REQUIRE(afterSize > 0);
 
     // B's checkpoint is a superset (adds Energy); the shared V1 prefix
     // (position/velocity/speed/bounces/RNG/simtime/tint/label) must be byte-for-
     // byte identical, proving full supported state — not just Bounces — survived.
-    const std::size_t shared = beforeSize < afterSize ? beforeSize : afterSize;
+    const usize shared = beforeSize < afterSize ? beforeSize : afterSize;
     REQUIRE(std::memcmp(before.data(), after.data(), shared) == 0);
 }
 
@@ -164,7 +266,7 @@ TEST_CASE("rejected reload preserves A pause state and continued simulation", "[
         session.AdvanceOneFrame();
     }
     std::array<ludus::foundation::uint8, 4096> before = {};
-    const std::size_t beforeSize = session.CaptureCheckpoint(before.data(), before.size());
+    const usize beforeSize = session.CaptureCheckpoint(before.data(), before.size());
 
     ::setenv("LUDUS_FIXTURE_FAIL", "validate", 1);
     const auto status = session.ReloadTo(LUDUS_FIXTURE_B_PATH, 2);
@@ -174,7 +276,7 @@ TEST_CASE("rejected reload preserves A pause state and continued simulation", "[
 
     // A's full state is byte-identical after the rejected reload (not reset).
     std::array<ludus::foundation::uint8, 4096> after = {};
-    const std::size_t afterSize = session.CaptureCheckpoint(after.data(), after.size());
+    const usize afterSize = session.CaptureCheckpoint(after.data(), after.size());
     REQUIRE(afterSize == beforeSize);
     REQUIRE(std::memcmp(before.data(), after.data(), beforeSize) == 0);
 
@@ -184,34 +286,85 @@ TEST_CASE("rejected reload preserves A pause state and continued simulation", "[
     REQUIRE(session.SimTicks() == ticksBefore + 1);
 }
 
-TEST_CASE("100 reloads keep live resources bounded", "[reload][stress]")
+TEST_CASE("100 distinct successful generations bound allocations mappings and RSS", "[reload][stress]")
 {
+    char pattern[] = "/tmp/ludus-reload-stress-XXXXXX";
+    const char* created = ::mkdtemp(pattern);
+    REQUIRE(created != nullptr);
+    struct Generations
+    {
+        std::filesystem::path Root;
+        ~Generations()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Root, ignored);
+        }
+    } generations{created};
+    const auto modulePath = [&](int index) {
+        const auto path = generations.Root / ("generation-" + std::to_string(index) + ".so");
+        std::filesystem::copy_file(index % 2 == 0 ? LUDUS_FIXTURE_A_PATH : LUDUS_FIXTURE_B_PATH, path);
+        return path.string();
+    };
+    const auto residentBytes = []() {
+        std::ifstream statm("/proc/self/statm");
+        uint64 virtualPages = 0;
+        uint64 residentPages = 0;
+        statm >> virtualPages >> residentPages;
+        REQUIRE(statm.good());
+        const auto pageSize = ::sysconf(_SC_PAGESIZE);
+        REQUIRE(pageSize > 0);
+        return residentPages * static_cast<uint64>(pageSize);
+    };
+    const auto mappedGenerations = [&]() {
+        std::ifstream maps("/proc/self/maps");
+        REQUIRE(maps.good());
+        std::unordered_set<std::string> paths;
+        std::string line;
+        while (std::getline(maps, line))
+        {
+            const auto at = line.find(generations.Root.string());
+            if (at != std::string::npos)
+            {
+                paths.insert(line.substr(at));
+            }
+        }
+        return paths.size();
+    };
     HostSession session(1, 1, -1);
-    REQUIRE(session.LoadInitial(LUDUS_FIXTURE_A_PATH));
-
-    const char* paths[2] = {LUDUS_FIXTURE_A_PATH, LUDUS_FIXTURE_B_PATH};
-    ludus::foundation::uint64 generation = 1;
+    REQUIRE(session.LoadInitial(modulePath(0)));
+    const uint64 baselineRss = residentBytes();
+    uint64 peakRss = baselineRss;
+    usize peakMappings = 0;
     int successes = 0;
     int rejections = 0;
-
-    for (int i = 0; i < 100; ++i)
+    std::ofstream measurements;
+    if (const char* path = std::getenv("LUDUS_RELOAD_METRICS"))
+    {
+        measurements.open(path);
+        REQUIRE(measurements.good());
+    }
+    for (int i = 1; i <= 150; ++i)
     {
         for (int f = 0; f < 10; ++f)
         {
             session.AdvanceOneFrame();
         }
-        ++generation;
-        // Alternate successful reloads with injected pre-commit rejections.
-        const bool inject = (i % 3 == 0);
+        const bool inject = i % 3 == 0;
         if (inject)
         {
             ::setenv("LUDUS_FIXTURE_FAIL", "validate", 1);
         }
-        const auto status = session.ReloadTo(paths[generation % 2], generation);
+        // Every attempt has a never-reused path/inode. Reopening two images
+        // cannot establish a bound on accumulated loader/ASan registrations.
+        const auto path = modulePath(i);
+        const auto begin = std::chrono::steady_clock::now();
+        const auto status = session.ReloadTo(path, static_cast<uint64>(i) + 1);
+        const auto micros =
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - begin).count();
+        ::unsetenv("LUDUS_FIXTURE_FAIL");
         if (inject)
         {
-            ::unsetenv("LUDUS_FIXTURE_FAIL");
-            REQUIRE(status != protocol::CommandStatus::Ok);
+            REQUIRE(status == protocol::CommandStatus::ReloadRejected);
             ++rejections;
         }
         else
@@ -219,11 +372,43 @@ TEST_CASE("100 reloads keep live resources bounded", "[reload][stress]")
             REQUIRE(status == protocol::CommandStatus::Ok);
             ++successes;
         }
-        // Live host allocations never accumulate: exactly one active instance,
-        // all retired generations released (design 8 bounded residency).
-        REQUIRE(session.OutstandingHostAllocations() == 0);
+        REQUIRE(session.OutstandingHostAllocations() == 1);
+        const auto mapped = mappedGenerations();
+        const auto rss = residentBytes();
+        peakMappings = mapped > peakMappings ? mapped : peakMappings;
+        peakRss = rss > peakRss ? rss : peakRss;
+        if (measurements.is_open())
+        {
+            measurements << "{\"attempt\":" << i << ",\"accepted\":" << (!inject ? "true" : "false")
+                         << ",\"active_generation\":" << session.ActiveGeneration()
+                         << ",\"host_allocations\":" << session.OutstandingHostAllocations()
+                         << ",\"mapped_generations\":" << mapped << ",\"rss_bytes\":" << rss
+                         << ",\"reload_us\":" << micros << "}\n";
+            REQUIRE(measurements.good());
+        }
+        INFO("generation=" << i << " mappings=" << mapped << " rss=" << rss);
+        REQUIRE(mapped <= 3);
+        REQUIRE(rss <= baselineRss + uint64{64} * 1024 * 1024);
     }
+    CAPTURE(successes, rejections, peakMappings, baselineRss, peakRss);
+    REQUIRE(successes == 100);
+    REQUIRE(rejections == 50);
+}
 
-    REQUIRE(successes > 0);
-    REQUIRE(rejections > 0);
+TEST_CASE("uncertain old retirement pins services and blocks further gameplay", "[reload][retirement]")
+{
+    HostSession session(1, 1, -1);
+    REQUIRE(session.LoadInitial(LUDUS_FIXTURE_A_PATH));
+    session.AdvanceOneFrame();
+    const auto ticks = session.SimTicks();
+    ::setenv("LUDUS_FIXTURE_FAIL", "retire", 1);
+    const auto outcome = session.ReloadTo(LUDUS_FIXTURE_B_PATH, 2);
+    ::unsetenv("LUDUS_FIXTURE_FAIL");
+    REQUIRE(outcome == protocol::CommandStatus::RestartRequired);
+    REQUIRE(session.State() == PlayState::CleanupUnknown);
+    session.AdvanceOneFrame();
+    REQUIRE(session.SimTicks() == ticks);
+    REQUIRE(session.ReloadTo(LUDUS_FIXTURE_A_PATH, 3) == protocol::CommandStatus::InvalidRequest);
+    REQUIRE(session.RunLoop(1) == RunResult::Internal);
+    REQUIRE(session.State() == PlayState::CleanupUnknown);
 }

@@ -14,6 +14,7 @@
 // includes, no private/heavy headers and non-template boundaries (design 2).
 
 #include <ludus/foundation/base/types.h>
+#include <ludus/runtime/game_api/api.h>
 
 #include <string_view>
 
@@ -80,6 +81,7 @@ struct HostConfig final
     // Project/game identity passed through to the module's Create.
     uint64 ProjectId = 0;
     uint64 GameId = 0;
+    uint64 ProjectEpoch = 1;
 
     // Maximum frames to run before exiting (0 = run until Stop/no events).
     // A bounded run is used by headless acceptance so a CI run terminates.
@@ -94,12 +96,20 @@ struct HostConfig final
 // Entry signature of a statically linked gameplay implementation. A shipping
 // build passes its in-process LudusGetGameApi here; selecting static dispatch
 // replaces only the module lookup (design 2) — the same host run loop drives it.
-using StaticEntryFn = int (*)(uint32 hostAbiMajor, uint32 hostAbiMinor, void* outTable) noexcept;
+using StaticEntryFn = game_api::GetGameApiFn;
+
+// Shared executable entry. Native argv/cwd remain owned by the process;
+// selecting a static entry changes only gameplay lookup, never frame behavior.
+[[nodiscard]] int32 RunMain(int32 argc, const char* const* argv, StaticEntryFn entry = nullptr) noexcept;
 
 // Run one host session against a statically linked gameplay implementation. No
 // dlopen, no module path, no reload (a shipping build does not hot reload).
 // `entry` is the project's LudusGetGameApi reinterpreted to StaticEntryFn.
 [[nodiscard]] RunResult RunStatic(const HostConfig& config, StaticEntryFn entry) noexcept;
+
+// Explicit metadata probe in a separate host process; validates the ABI and
+// SDK identity without creating an instance or starting a graphics session.
+[[nodiscard]] RunResult InspectModule(std::string_view path, game_api::GameMetadata& metadata) noexcept;
 
 // The host's own ABI identity string (the compatibility key it stamps and
 // compares against a module's embedded identity). Exposed for the host

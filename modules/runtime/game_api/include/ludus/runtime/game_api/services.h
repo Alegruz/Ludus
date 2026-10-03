@@ -48,7 +48,8 @@ struct FrameInput final
     uint32 Width = 0;
     uint32 Height = 0;
     // Bitset of currently-held logical actions (sample vocabulary). The host
-    // documents the mapping; the module treats it as opaque held state.
+    // maps bit 0 to Left (A/left arrow), bit 1 to Right (D/right arrow),
+    // and bit 2 to Space. Focus/reset suppression follows Ludus::Input.
     uint32 HeldActions = 0;
     uint8 Paused = 0; // 1 while the host has the session paused.
     uint8 Reserved0 = 0;

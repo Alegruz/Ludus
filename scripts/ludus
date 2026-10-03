@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# The Ludus host-tooling CLI (repository entry point).
+#
+# This wrapper runs the installable ludus_tools package from the checkout for
+# development. The redistributable host-tools distribution installs an
+# equivalent launcher that locates its own packaged ludus_tools relative to its
+# installation, with no dependency on a Ludus source checkout or Qt (P07/P11).
+#
+# Usage: ./scripts/ludus <sdk|project> ...
+set -euo pipefail
+
+script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONPATH="${script_dir}/python${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m ludus_tools "$@"

@@ -195,7 +195,7 @@ void ToolProcess::OnStderr()
     // Adapter diagnostics are bounded; excess is a protocol diagnosis.
     const QByteArray chunk = Process_.readAllStandardError();
     StderrBytes_ += static_cast<usize>(chunk.size());
-    if (StderrBytes_ > 64u * 1024u)
+    if (StderrBytes_ > foundation::usize{64} * 1024)
     {
         FailProtocol(QStringLiteral("adapter diagnostics exceeded 64 KiB"));
     }
@@ -203,7 +203,7 @@ void ToolProcess::OnStderr()
 
 void ToolProcess::ConsumeFrames()
 {
-    int newline = StdoutBacklog_.indexOf('\n');
+    auto newline = StdoutBacklog_.indexOf('\n');
     while (newline >= 0)
     {
         const QByteArray line = StdoutBacklog_.left(newline);
@@ -275,7 +275,7 @@ bool ToolProcess::DispatchFrame(const QByteArray& line)
     if (type != QStringLiteral("output"))
     {
         ControlBytesSeen_ += static_cast<uint64>(line.size()) + 1; // + newline
-        if (ControlBytesSeen_ > 1u * 1024u * 1024u)
+        if (ControlBytesSeen_ > uint64{1} * 1024 * 1024)
         {
             FailProtocol(QStringLiteral("aggregate control output exceeded 1 MiB"));
             return false;
@@ -295,7 +295,7 @@ bool ToolProcess::DispatchFrame(const QByteArray& line)
     if (type == QStringLiteral("command"))
     {
         event.Kind = ProtocolEvent::Type::Command;
-        for (const QJsonValue& value : object.value(QStringLiteral("argv")).toArray())
+        for (const auto& value : object.value(QStringLiteral("argv")).toArray())
         {
             event.Argv.append(value.toString());
         }
@@ -306,7 +306,7 @@ bool ToolProcess::DispatchFrame(const QByteArray& line)
     if (type == QStringLiteral("targets"))
     {
         event.Kind = ProtocolEvent::Type::Targets;
-        for (const QJsonValue& value : object.value(QStringLiteral("targets")).toArray())
+        for (const auto& value : object.value(QStringLiteral("targets")).toArray())
         {
             event.Targets.append(value.toString());
         }
@@ -341,7 +341,7 @@ bool ToolProcess::DispatchFrame(const QByteArray& line)
         event.Pid = static_cast<qint64>(object.value(QStringLiteral("pid")).toDouble());
         event.Executable = object.value(QStringLiteral("executable")).toString();
         event.Cwd = object.value(QStringLiteral("cwd")).toString();
-        for (const QJsonValue& value : object.value(QStringLiteral("args")).toArray())
+        for (const auto& value : object.value(QStringLiteral("args")).toArray())
         {
             event.Argv.append(value.toString());
         }

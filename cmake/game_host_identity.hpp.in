@@ -32,6 +32,5 @@ inline constexpr std::string_view kTargetTriple = "@LUDUS_TARGET_TRIPLE@";
 // The full identity string: "<sdk_variant>|<compiler_id> <compiler_version>|
 // <target_triple>|abi-<major>.<minor>". Both host and module stamp this; the
 // host compares it exactly. Kept under game_api::kIdentityMax bytes.
-inline constexpr std::string_view kIdentityString =
-    "@LUDUS_SDK_VARIANT@|@LUDUS_COMPILER_ID@ @LUDUS_COMPILER_VERSION@|@LUDUS_TARGET_TRIPLE@|abi-@LUDUS_GAME_ABI_MAJOR@.@LUDUS_GAME_ABI_MINOR@";
+inline constexpr std::string_view kIdentityString = "@LUDUS_GAME_COMPATIBILITY_IDENTITY@";
 } // namespace ludus::runtime::game_host::identity

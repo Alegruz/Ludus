@@ -30,10 +30,14 @@ public:
     HostServiceProvider(HostServiceProvider&& other) noexcept;
     HostServiceProvider& operator=(HostServiceProvider&& other) noexcept;
 
-    [[nodiscard]] const game_api::HostServices& Services() const noexcept
+    [[nodiscard]] const game_api::HostServices& Services() const noexcept;
+    [[nodiscard]] bool IsValid() const noexcept
     {
-        return Services_;
+        return Context_ != nullptr;
     }
+    void Retire() noexcept;
+    void PinUntilProcessExit() noexcept;
+    void CopyResourcesFrom(const HostServiceProvider& source) noexcept;
 
     // Count of outstanding host allocations handed to the module. Retire must
     // see this at zero (the module frees everything it took) before the host
@@ -51,6 +55,5 @@ public:
 
 private:
     Context* Context_ = nullptr;
-    game_api::HostServices Services_ = {};
 };
 } // namespace ludus::runtime::game_host

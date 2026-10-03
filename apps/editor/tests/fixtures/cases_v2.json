@@ -1,0 +1,46 @@
+[
+  {
+    "file": "valid_v2_cmake.json",
+    "valid": true,
+    "version": 2,
+    "name": "My Game",
+    "provider": "cmake",
+    "preset": "linux-clang-release",
+    "engine_version": "0.1.0",
+    "components": ["FoundationBase", "GraphicsRhi"],
+    "features": ["rhi"],
+    "template_id": "minimal",
+    "template_version": 1,
+    "run_args": ["--level=1"]
+  },
+  {
+    "file": "valid_v2_ludus.json",
+    "valid": true,
+    "version": 2,
+    "name": "Engine Dev Project",
+    "provider": "ludus",
+    "preset": "linux-clang-development",
+    "has_engine": false,
+    "run_args": []
+  },
+  {
+    "file": "invalid_v2_cmake_no_engine.json",
+    "valid": false,
+    "code": "InvalidProject"
+  },
+  {
+    "file": "invalid_v2_ludus_with_engine.json",
+    "valid": false,
+    "code": "InvalidProject"
+  },
+  {
+    "file": "invalid_v2_floating_version.json",
+    "valid": false,
+    "code": "InvalidProject"
+  },
+  {
+    "file": "invalid_v2_release_in_v1.json",
+    "valid": false,
+    "code": "InvalidProject"
+  }
+]

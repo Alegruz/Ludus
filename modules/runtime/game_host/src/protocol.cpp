@@ -46,6 +46,8 @@ std::string_view EventKindName(EventKind kind) noexcept
             return "PropertiesChanged";
         case EventKind::ReloadPhase:
             return "ReloadPhase";
+        case EventKind::FramePresented:
+            return "FramePresented";
         case EventKind::SessionEnded:
             return "SessionEnded";
     }

@@ -1,9 +1,49 @@
 @PACKAGE_INIT@
 
+# Ludus installed-SDK package config.
+#
+# Relocatability (requirement P02): the SDK must configure, build and link from
+# a fresh extraction at an arbitrary prefix WITHOUT the producer's checkout or
+# Conan cache, and WITHOUT leaking absolute producer paths. To that end the
+# redistributable dependencies and their CMake package metadata are bundled
+# under <prefix>/lib/cmake/Ludus/dependencies, and this config prepends that
+# directory to CMAKE_PREFIX_PATH *locally* (restored at the end) so
+# find_dependency() resolves against the bundled copies rather than mutating the
+# consumer's global search state.
+
 include(CMakeFindDependencyMacro)
+
+# Package-local dependency search root. The install-time bundler copies the
+# Conan generator CMake files into <...>/dependencies/cmake and each dependency
+# payload into <...>/dependencies/packages/<dep>. Prepend the generator dir so
+# find_dependency(<dep>) resolves from the bundle. Falls back silently to the
+# producer Conan generators on CMAKE_PREFIX_PATH when configured in-tree.
+set(_ludus_dep_search "${CMAKE_CURRENT_LIST_DIR}/dependencies/cmake")
+set(_ludus_saved_prefix_path "${CMAKE_PREFIX_PATH}")
+if(EXISTS "${_ludus_dep_search}")
+    list(PREPEND CMAKE_PREFIX_PATH "${_ludus_dep_search}")
+endif()
+
 if(NOT "@CMAKE_SYSTEM_NAME@" STREQUAL "Emscripten")
     find_dependency(volk CONFIG)
 endif()
+
+# Text links FreeType/HarfBuzz statically (PRIVATE on the static lib does not
+# relieve the final consumer of the static link dependency). When their bundled
+# CMake metadata is present, resolve the imported targets so a Text consumer
+# links cleanly from the relocated SDK.
+if(NOT "@CMAKE_SYSTEM_NAME@" STREQUAL "Emscripten")
+    if(EXISTS "${_ludus_dep_search}/freetype-config.cmake" OR EXISTS "${_ludus_dep_search}/FreetypeConfig.cmake")
+        find_dependency(freetype CONFIG)
+    endif()
+    if(EXISTS "${_ludus_dep_search}/harfbuzz-config.cmake")
+        find_dependency(harfbuzz CONFIG)
+    endif()
+endif()
+
+# Threads is a system dependency pulled in by the assertion/concurrency paths.
+find_dependency(Threads)
+
 if(@LUDUS_PLATFORM_ENABLE_WAYLAND@)
     find_dependency(PkgConfig)
     pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client)
@@ -14,12 +54,56 @@ set(Ludus_BUILD_FLAVOR_ID @LUDUS_BUILD_FLAVOR_ID@)
 set(Ludus_ASSERT_POLICY_VERSION @LUDUS_ASSERT_POLICY_VERSION@)
 set(Ludus_ENABLE_ASSERTS @LUDUS_ENABLE_ASSERTS@)
 set(Ludus_BREAK_ON_CHECK @LUDUS_BREAK_ON_CHECK@)
+set(Ludus_SDK_VARIANT "@LUDUS_SDK_VARIANT@")
+set(Ludus_TARGET_TRIPLE "@LUDUS_TARGET_TRIPLE@")
+set(Ludus_COMPILER_ID "@LUDUS_COMPILER_ID@")
+set(Ludus_COMPILER_VERSION "@LUDUS_COMPILER_VERSION@")
+set(Ludus_CXX_RUNTIME_ABI "@LUDUS_CXX_RUNTIME_ABI@")
+set(Ludus_SOURCE_REVISION "@LUDUS_GIT_REVISION@")
+set(Ludus_SDK_MANIFEST "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/Ludus/LudusSdkManifest.json")
+
+# Toolchain compatibility gate for direct CMake consumers that bypass the CLI
+# (design "Resolution and CMake integration": preserve export compatibility
+# checks). The SDK is static C++23 with a specific compiler/ABI; a consumer
+# configured with a different compiler must fail BEFORE compiling/linking with
+# an actionable expected-vs-actual message, not with opaque link errors (P03).
+# Opt out only deliberately with -DLUDUS_SKIP_TOOLCHAIN_CHECK=ON.
+if(NOT LUDUS_SKIP_TOOLCHAIN_CHECK AND NOT "@CMAKE_SYSTEM_NAME@" STREQUAL "Emscripten"
+   AND NOT "@LUDUS_COMPILER_ID@" STREQUAL "")
+    if(DEFINED CMAKE_CXX_COMPILER_ID AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "@LUDUS_COMPILER_ID@")
+        message(FATAL_ERROR
+            "Ludus SDK compiler mismatch: this SDK was built with "
+            "'@LUDUS_COMPILER_ID@ @LUDUS_COMPILER_VERSION@' but you are configuring with "
+            "'${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}'. Install an SDK built for "
+            "your toolchain or configure with the matching compiler. "
+            "(Set -DLUDUS_SKIP_TOOLCHAIN_CHECK=ON to override at your own risk.)")
+    endif()
+    if(DEFINED CMAKE_CXX_COMPILER_VERSION AND "@LUDUS_COMPILER_VERSION@" MATCHES "^([0-9]+)")
+        set(_ludus_sdk_major "${CMAKE_MATCH_1}")
+        if(CMAKE_CXX_COMPILER_VERSION MATCHES "^([0-9]+)")
+            if(NOT "${CMAKE_MATCH_1}" STREQUAL "${_ludus_sdk_major}")
+                message(FATAL_ERROR
+                    "Ludus SDK compiler major-version mismatch: SDK built with "
+                    "'@LUDUS_COMPILER_VERSION@', configuring with "
+                    "'${CMAKE_CXX_COMPILER_VERSION}'. A different compiler major is not ABI "
+                    "compatible for this static C++23 SDK. "
+                    "(Set -DLUDUS_SKIP_TOOLCHAIN_CHECK=ON to override at your own risk.)")
+            endif()
+        endif()
+        unset(_ludus_sdk_major)
+    endif()
+endif()
 
 # Full gameplay-module compatibility identity (project-live-reload). A gameplay
 # module must stamp exactly this so the host accepts it. ludus_add_game injects
 # it as LUDUS_EXAMPLE_IDENTITY/compile definition for the module and shipping
 # targets built against this SDK.
-set(Ludus_SDK_IDENTITY "@LUDUS_SDK_VARIANT@|@LUDUS_COMPILER_ID@ @LUDUS_COMPILER_VERSION@|@LUDUS_TARGET_TRIPLE@|abi-1.0")
+set(Ludus_SDK_IDENTITY "@LUDUS_GAME_COMPATIBILITY_IDENTITY@")
+set(Ludus_SDK_ASAN "@LUDUS_ENABLE_ASAN@")
+set(Ludus_SDK_UBSAN "@LUDUS_ENABLE_UBSAN@")
+set(Ludus_SDK_TSAN "@LUDUS_ENABLE_TSAN@")
+set(Ludus_SDK_COMPILER_ID "@LUDUS_COMPILER_ID@")
+set(Ludus_SDK_COMPILER_VERSION "@LUDUS_COMPILER_VERSION@")
 
 include("${CMAKE_CURRENT_LIST_DIR}/LudusTargets.cmake")
 
@@ -30,5 +114,26 @@ include("${CMAKE_CURRENT_LIST_DIR}/LudusShaders.cmake")
 if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/LudusGame.cmake")
     include("${CMAKE_CURRENT_LIST_DIR}/LudusGame.cmake")
 endif()
+
+# Public application compile/link policy helper for generated templates. Applies
+# C++23 + no-exceptions to an application target WITHOUT exporting engine
+# build-warning flags or any private target (design "Resolution and CMake
+# integration"). Templates call this instead of the checkout-only
+# ludus_apply_project_defaults.
+if(NOT COMMAND ludus_apply_app_policy)
+    function(ludus_apply_app_policy target)
+        target_compile_features(${target} PRIVATE cxx_std_23)
+        if(NOT MSVC)
+            target_compile_options(${target} PRIVATE -fno-exceptions)
+        else()
+            target_compile_options(${target} PRIVATE /EHs-c-)
+        endif()
+    endfunction()
+endif()
+
+# Restore the consumer's global search state (relocatability must not leak).
+set(CMAKE_PREFIX_PATH "${_ludus_saved_prefix_path}")
+unset(_ludus_saved_prefix_path)
+unset(_ludus_dep_search)
 
 check_required_components(Ludus)

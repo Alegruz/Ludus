@@ -74,6 +74,34 @@ TEST_CASE("malformed json is rejected", "[protocol]")
     REQUIRE(Message::Parse("{}", parsed));
 }
 
+TEST_CASE("bounded property records reject nesting and invalid UTF-8", "[protocol][properties]")
+{
+    Message parsed;
+    REQUIRE(Message::Parse(R"({"edits":[{"value":"\u00e9\ud83d\ude00","kind":4}]})", parsed));
+    std::vector<Message> records;
+    REQUIRE(parsed.GetRecords("edits", records));
+    REQUIRE(records.size() == 1);
+    std::string value;
+    REQUIRE(records[0].GetString("value", value));
+    REQUIRE(value == "é😀");
+    REQUIRE(parsed.HasOnly({"edits"}));
+    REQUIRE_FALSE(parsed.HasOnly({"other"}));
+    REQUIRE_FALSE(Message::Parse(R"({"edits":[{"bad":[{}]}]})", parsed));
+    REQUIRE_FALSE(Message::Parse(R"({"edits":[{"bad":{"x":1}}]})", parsed));
+    REQUIRE_FALSE(Message::Parse(R"({"edits":[{"value":"\ud800"}]})", parsed));
+    REQUIRE_FALSE(Message::Parse(R"({"edits":[{"value":"\udc00"}]})", parsed));
+    REQUIRE(Message::Parse(R"({"edits":[{"value":"\u0000"}]})", parsed));
+    REQUIRE_FALSE(ValidUtf8(std::string("\0", 1)));
+    REQUIRE_FALSE(ValidUtf8(std::string("\xc0\x80", 2)));
+    REQUIRE_FALSE(ValidUtf8(std::string("\xed\xa0\x80", 3)));
+    REQUIRE_FALSE(ValidUtf8(std::string("\xf4\x90\x80\x80", 4)));
+    REQUIRE_FALSE(ValidUtf8(std::string("\xe2\x82", 2)));
+    std::vector<Message> edits(kMaxPropertyBatch + 1);
+    Message oversized;
+    oversized.SetRecords("edits", edits);
+    REQUIRE_FALSE(Message::Parse(oversized.Serialize(), parsed));
+}
+
 TEST_CASE("frame encode/decode across split reads", "[protocol]")
 {
     Message m;
@@ -88,7 +116,7 @@ TEST_CASE("frame encode/decode across split reads", "[protocol]")
     // the whole frame has arrived.
     FrameReader reader;
     std::string out;
-    for (std::size_t i = 0; i + 1 < frame.size(); ++i)
+    for (ludus::foundation::usize i = 0; i + 1 < frame.size(); ++i)
     {
         reader.Append(&frame[i], 1);
         REQUIRE_FALSE(reader.Next(out));
@@ -138,4 +166,41 @@ TEST_CASE("payload above frame bound cannot be encoded", "[protocol]")
     const std::string huge(kMaxControlFrameBytes + 1, 'x');
     std::vector<ludus::foundation::uint8> frame;
     REQUIRE_FALSE(EncodeFrame(huge, frame));
+}
+
+TEST_CASE("integer bounds and JSON ambiguity are rejected", "[protocol]")
+{
+    Message parsed;
+    uint64 unsignedValue = 0;
+    int64 signedValue = 0;
+    REQUIRE(Message::Parse("{\"n\":18446744073709551615}", parsed));
+    REQUIRE(parsed.GetUint("n", unsignedValue));
+    REQUIRE(unsignedValue == ~uint64{0});
+    REQUIRE(Message::Parse("{\"n\":18446744073709551616}", parsed));
+    REQUIRE_FALSE(parsed.GetUint("n", unsignedValue));
+    REQUIRE(Message::Parse("{\"n\":-9223372036854775808}", parsed));
+    REQUIRE(parsed.GetInt("n", signedValue));
+    REQUIRE(signedValue == -int64{9223372036854775807} - 1);
+    REQUIRE(Message::Parse("{\"n\":9223372036854775808}", parsed));
+    REQUIRE_FALSE(parsed.GetInt("n", signedValue));
+    REQUIRE(Message::Parse("{\"n\":-9223372036854775809}", parsed));
+    REQUIRE_FALSE(parsed.GetInt("n", signedValue));
+    REQUIRE_FALSE(Message::Parse("{\"n\":01}", parsed));
+    REQUIRE_FALSE(Message::Parse("{\"n\":1,\"n\":2}", parsed));
+    REQUIRE_FALSE(Message::Parse("{\"n\":\"a\nb\"}", parsed));
+}
+TEST_CASE("field update and control escaping round trip", "[protocol]")
+{
+    Message value;
+    value.SetUint("n", 1);
+    value.SetUint("n", 2);
+    value.SetString("text", std::string_view("a\0b", 3));
+    Message parsed;
+    REQUIRE(Message::Parse(value.Serialize(), parsed));
+    uint64 n = 0;
+    std::string text;
+    REQUIRE(parsed.GetUint("n", n));
+    REQUIRE(n == 2);
+    REQUIRE(parsed.GetString("text", text));
+    REQUIRE(text == std::string("a\0b", 3));
 }

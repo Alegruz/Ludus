@@ -159,3 +159,6 @@ Milestone 0 does not include rendering, Vulkan, windowing, input, assets, jobs, 
 ## More Detail
 
 See [docs/development/building.md](docs/development/building.md) and [docs/architecture/milestone-0.md](docs/architecture/milestone-0.md).
+
+The proposed [game world architecture](docs/architecture/game-world.md) covers
+level data, entity storage, and the update flow for the first game.

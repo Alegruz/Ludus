@@ -11,10 +11,13 @@
 // migrate A's checkpoint. The identity string is baked in from the SDK variant
 // so the host accepts a matching module and rejects a mismatched one.
 
+#include <ludus/foundation/base/types.h>
 #include <ludus/runtime/game_api/api.h>
+#include <ludus/runtime/game_api/checkpoint.h>
 #include <ludus/runtime/game_api/properties.h>
 #include <ludus/runtime/game_api/services.h>
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <new>
@@ -72,29 +75,7 @@ constexpr uint64 kPropLabel = 0x2003;   // string, session-only
 // Logical asset ID for the supported asset-reload fixture.
 constexpr uint64 kAssetTint = 0x3001;
 
-// A tagged on-disk checkpoint body with stable field IDs (never a raw dump).
-// Shared across variants; B's reader fills Energy with a declared default when
-// reading an A (schema 1) body.
-struct CheckpointBodyV1
-{
-    float32 PositionX = 0.0F;
-    float32 Velocity = 0.6F;
-    float32 Speed = 1.0F;
-    int32 Bounces = 0;
-    uint64 Rng = 0x9E3779B97F4A7C15ULL;
-    float64 SimTime = 0.0;
-    float32 TintR = 0.2F;
-    float32 TintG = 0.3F;
-    float32 TintB = 0.8F;
-    char Label[32] = "fixture";
-};
-
-struct CheckpointBodyV2 : CheckpointBodyV1
-{
-    float32 Energy = 0.0F; // Added in B; migrated from A with default 0.
-};
-
-// Live simulation state. POD. The body types above are the serialized subset.
+// Live state. Checkpoints below encode tagged fields explicitly.
 struct SimState
 {
     float32 PositionX = 0.0F;
@@ -108,8 +89,12 @@ struct SimState
     float32 TintB = 0.8F;
     float32 Energy = 0.0F;
     char Label[32] = "fixture";
+    uint64 ProjectId = 0;
+    uint64 GameId = 0;
+    uint64 BuildId = 0;
     uint64 Revision = 1; // Advances when a mutable value changes.
     bool Paused = false;
+    bool HostAllocated = false;
     const HostServices* Services = nullptr;
 };
 
@@ -170,7 +155,20 @@ Status FixtureQuery(GameMetadata* out) noexcept
 
 SimState* NewState(const CreateInfo* info) noexcept
 {
-    auto* state = new (std::nothrow) SimState();
+    SimState* state = nullptr;
+    if (info != nullptr && info->Services != nullptr && info->Services->AllocateBytes != nullptr)
+    {
+        void* storage = info->Services->AllocateBytes(info->Services->Context, sizeof(SimState), alignof(SimState));
+        if (storage != nullptr)
+        {
+            state = new (storage) SimState();
+            state->HostAllocated = true;
+        }
+    }
+    else
+    {
+        state = new (std::nothrow) SimState();
+    }
     if (state == nullptr)
     {
         return nullptr;
@@ -178,8 +176,29 @@ SimState* NewState(const CreateInfo* info) noexcept
     if (info != nullptr)
     {
         state->Services = info->Services;
+        state->ProjectId = info->ProjectId;
+        state->GameId = info->GameId;
+        state->BuildId = info->ModuleGeneration;
     }
     return state;
+}
+
+void DestroyState(SimState* state) noexcept
+{
+    if (state == nullptr)
+    {
+        return;
+    }
+    if (state->HostAllocated)
+    {
+        const HostServices* services = state->Services;
+        state->~SimState();
+        services->FreeBytes(services->Context, state);
+    }
+    else
+    {
+        delete state;
+    }
 }
 
 Status FixtureCreate(const CreateInfo* info, GameInstance** outInstance) noexcept
@@ -200,7 +219,11 @@ Status FixtureCreate(const CreateInfo* info, GameInstance** outInstance) noexcep
 
 void FixtureDestroy(GameInstance* instance) noexcept
 {
-    delete AsState(instance);
+    HostLog(AsState(instance), LogSeverity::Debug, "fixture destroy");
+    if (!ShouldFail("retire"))
+    {
+        DestroyState(AsState(instance));
+    }
 }
 
 Status FixtureUpdate(GameInstance* instance, const FrameInput* input, RenderParams* outRender) noexcept
@@ -275,6 +298,52 @@ Status FixtureResume(GameInstance* instance) noexcept
     return Status::Ok;
 }
 
+template <typename T>
+bool WriteScalar(CheckpointWriter& writer, uint32 id, T value) noexcept
+{
+    static_assert(sizeof(T) == 4 || sizeof(T) == 8);
+    uint64 bits = 0;
+    if constexpr (sizeof(T) == 4)
+    {
+        uint32 narrow = 0;
+        std::memcpy(&narrow, &value, sizeof(value));
+        bits = narrow;
+    }
+    else
+    {
+        std::memcpy(&bits, &value, sizeof(value));
+    }
+    uint8 bytes[8] = {};
+    if (!WriteCheckpointUint({bytes, sizeof(value)}, bits))
+    {
+        return false;
+    }
+    return writer.Field(id, {bytes, sizeof(value)});
+}
+
+template <typename T>
+bool ReadScalar(ByteView payload, T& value) noexcept
+{
+    static_assert(sizeof(T) == 4 || sizeof(T) == 8);
+    if (payload.Size != sizeof(value))
+    {
+        return false;
+    }
+    const uint64 bits = ReadCheckpointUint(payload.Data, payload.Size);
+    if constexpr (sizeof(T) == 4)
+    {
+        const uint32 narrow = static_cast<uint32>(bits);
+        std::memcpy(&value, &narrow, sizeof(value));
+    }
+    else
+    {
+        std::memcpy(&value, &bits, sizeof(value));
+    }
+    return true;
+}
+
+constexpr usize kCheckpointBytes = 128;
+
 Status FixtureCheckpointSize(GameInstance* instance, usize* outBodySize) noexcept
 {
     if (instance == nullptr || outBodySize == nullptr)
@@ -285,23 +354,8 @@ Status FixtureCheckpointSize(GameInstance* instance, usize* outBodySize) noexcep
     {
         return Status::Internal;
     }
-    *outBodySize = kIsVariantB ? sizeof(CheckpointBodyV2) : sizeof(CheckpointBodyV1);
+    *outBodySize = kCheckpointBytes + (kIsVariantB ? 8 : 0);
     return Status::Ok;
-}
-
-template <typename BodyT>
-void FillBody(const SimState& state, BodyT& body) noexcept
-{
-    body.PositionX = state.PositionX;
-    body.Velocity = state.Velocity;
-    body.Speed = state.Speed;
-    body.Bounces = state.Bounces;
-    body.Rng = state.Rng;
-    body.SimTime = state.SimTime;
-    body.TintR = state.TintR;
-    body.TintG = state.TintG;
-    body.TintB = state.TintB;
-    std::memcpy(body.Label, state.Label, sizeof(body.Label));
 }
 
 Status FixtureWriteCheckpoint(GameInstance* instance,
@@ -314,29 +368,35 @@ Status FixtureWriteCheckpoint(GameInstance* instance,
     {
         return Status::InvalidArgument;
     }
-    const usize needed = kIsVariantB ? sizeof(CheckpointBodyV2) : sizeof(CheckpointBodyV1);
-    if (body.Data == nullptr || body.Capacity < needed)
+    CheckpointWriter writer{body};
+    bool ok = true;
+    ok = WriteScalar(writer, 1, state->PositionX) && ok;
+    ok = WriteScalar(writer, 2, state->Velocity) && ok;
+    ok = WriteScalar(writer, 3, state->Speed) && ok;
+    ok = WriteScalar(writer, 4, state->Bounces) && ok;
+    ok = WriteScalar(writer, 5, state->Rng) && ok;
+    ok = WriteScalar(writer, 6, state->SimTime) && ok;
+    ok = WriteScalar(writer, 7, state->TintR) && ok;
+    ok = WriteScalar(writer, 8, state->TintG) && ok;
+    ok = WriteScalar(writer, 9, state->TintB) && ok;
+    ok = writer.Field(10, {reinterpret_cast<const uint8*>(state->Label), sizeof(state->Label)}) && ok;
+    ok = WriteScalar(writer, 11, state->Revision) && ok;
+    if (kIsVariantB)
+    {
+        ok = WriteScalar(writer, 12, state->Energy) && ok;
+    }
+    if (!ok)
     {
         return Status::BufferTooSmall;
     }
-    if (kIsVariantB)
-    {
-        CheckpointBodyV2 b;
-        FillBody(*state, b);
-        b.Energy = state->Energy;
-        std::memcpy(body.Data, &b, sizeof(b));
-    }
-    else
-    {
-        CheckpointBodyV1 b;
-        FillBody(*state, b);
-        std::memcpy(body.Data, &b, sizeof(b));
-    }
     outHeader->FormatVersion = 1;
     outHeader->SchemaVersion = kCheckpointSchema;
-    outHeader->BodyLength = needed;
-    outHeader->BodyDigest = Fnv1a(body.Data, needed);
-    *outBytesWritten = needed;
+    outHeader->ProjectId = state->ProjectId;
+    outHeader->GameId = state->GameId;
+    outHeader->ModuleBuildId = state->BuildId;
+    outHeader->BodyLength = writer.Offset;
+    outHeader->BodyDigest = Fnv1a(body.Data, writer.Offset);
+    *outBytesWritten = writer.Offset;
     return Status::Ok;
 }
 
@@ -345,70 +405,103 @@ Status FixtureCreateCandidate(const CreateInfo* info,
                               ByteView body,
                               GameCandidate** outCandidate) noexcept
 {
-    if (info == nullptr || header == nullptr || outCandidate == nullptr || body.Data == nullptr)
+    if (info == nullptr || header == nullptr || outCandidate == nullptr || body.Data == nullptr ||
+        header->FormatVersion != 1 || header->ProjectId != info->ProjectId || header->GameId != info->GameId ||
+        header->BodyLength != body.Size || Fnv1a(body.Data, body.Size) != header->BodyDigest)
     {
         return Status::InvalidArgument;
     }
     if (ShouldFail("stage"))
     {
-        return Status::Internal; // candidate B discarded; A resumes
+        return Status::Internal;
     }
-    // Validate digest and bounds before trusting the body (design 8).
-    if (header->BodyLength != body.Size || Fnv1a(body.Data, body.Size) != header->BodyDigest)
+    if (header->SchemaVersion != 1 && header->SchemaVersion != 2)
     {
-        return Status::InvalidArgument;
+        return Status::MigrationUnsupported;
     }
-
-    SimState* state = NewState(info);
+    auto* state = NewState(info);
     if (state == nullptr)
     {
         return Status::Internal;
     }
-
-    // Explicit schema acceptance / migration. B accepts schema 1 (migrating,
-    // Energy defaulted) and schema 2; A accepts only schema 1. Anything else
-    // is an unsupported migration (host keeps A and offers Restart).
-    if (header->SchemaVersion == kCheckpointSchemaA && body.Size >= sizeof(CheckpointBodyV1))
+    state->ProjectId = info->ProjectId;
+    state->GameId = info->GameId;
+    state->BuildId = info->ModuleGeneration;
+    CheckpointReader reader{body};
+    uint32 seen = 0;
+    bool ok = true;
+    while (reader.Offset < body.Size && ok)
     {
-        CheckpointBodyV1 b;
-        std::memcpy(&b, body.Data, sizeof(b));
-        state->PositionX = b.PositionX;
-        state->Velocity = b.Velocity;
-        state->Speed = b.Speed;
-        state->Bounces = b.Bounces;
-        state->Rng = b.Rng;
-        state->SimTime = b.SimTime;
-        state->TintR = b.TintR;
-        state->TintG = b.TintG;
-        state->TintB = b.TintB;
-        std::memcpy(state->Label, b.Label, sizeof(state->Label));
-        state->Energy = 0.0F; // declared default when migrating A -> B
+        uint32 tag = 0;
+        ByteView payload = {};
+        if (!reader.Next(tag, payload) || tag > 12 || (seen & (1U << tag)) != 0)
+        {
+            ok = false;
+            break;
+        }
+        seen |= 1U << tag;
+        switch (tag)
+        {
+            case 1:
+                ok = ReadScalar(payload, state->PositionX);
+                break;
+            case 2:
+                ok = ReadScalar(payload, state->Velocity);
+                break;
+            case 3:
+                ok = ReadScalar(payload, state->Speed);
+                break;
+            case 4:
+                ok = ReadScalar(payload, state->Bounces);
+                break;
+            case 5:
+                ok = ReadScalar(payload, state->Rng);
+                break;
+            case 6:
+                ok = ReadScalar(payload, state->SimTime);
+                break;
+            case 7:
+                ok = ReadScalar(payload, state->TintR);
+                break;
+            case 8:
+                ok = ReadScalar(payload, state->TintG);
+                break;
+            case 9:
+                ok = ReadScalar(payload, state->TintB);
+                break;
+            case 10:
+                ok = payload.Size == sizeof(state->Label);
+                if (ok)
+                {
+                    std::memcpy(state->Label, payload.Data, payload.Size);
+                    ok = std::memchr(state->Label, '\0', sizeof(state->Label)) != nullptr;
+                }
+                break;
+            case 11:
+                ok = ReadScalar(payload, state->Revision);
+                break;
+            case 12:
+                // Schema 2 adds Energy; schema 1 migration defaults it to zero.
+                // The downgrade explicitly accepts then discards Energy.
+                ok = header->SchemaVersion == 2 && ReadScalar(payload, state->Energy);
+                break;
+            default:
+                ok = false;
+                break;
+        }
     }
-    else if (header->SchemaVersion == kCheckpointSchemaB && body.Size >= sizeof(CheckpointBodyV2))
+    const uint32 required = 4094U | (header->SchemaVersion == 2 ? 4096U : 0U);
+    const bool valuesValid =
+        std::isfinite(state->PositionX) && std::isfinite(state->Velocity) && std::isfinite(state->Speed) &&
+        std::isfinite(state->SimTime) && std::isfinite(state->TintR) && std::isfinite(state->TintG) &&
+        std::isfinite(state->TintB) && std::isfinite(state->Energy) && state->Speed >= 0.0F && state->Speed <= 10.0F &&
+        state->Bounces >= 0 && state->PositionX >= 0.0F && state->PositionX <= 1.0F && state->Revision != 0;
+    if (!ok || reader.Offset != body.Size || seen != required || !valuesValid)
     {
-        // Both variants accept a schema-2 body. A reads the shared V1 prefix and
-        // drops Energy (a forward-compatible downgrade); B reads it in full.
-        CheckpointBodyV2 b;
-        std::memcpy(&b, body.Data, sizeof(b));
-        state->PositionX = b.PositionX;
-        state->Velocity = b.Velocity;
-        state->Speed = b.Speed;
-        state->Bounces = b.Bounces;
-        state->Rng = b.Rng;
-        state->SimTime = b.SimTime;
-        state->TintR = b.TintR;
-        state->TintG = b.TintG;
-        state->TintB = b.TintB;
-        state->Energy = b.Energy;
-        std::memcpy(state->Label, b.Label, sizeof(state->Label));
+        DestroyState(state);
+        return Status::InvalidArgument;
     }
-    else
-    {
-        delete state;
-        return Status::MigrationUnsupported;
-    }
-
-    state->Paused = true; // Candidate starts paused; host resumes after commit.
+    state->Paused = true;
     *outCandidate = reinterpret_cast<GameCandidate*>(state);
     return Status::Ok;
 }
@@ -445,7 +538,10 @@ Status FixtureCommitCandidate(GameCandidate* candidate, GameInstance** outInstan
 
 void FixtureDiscardCandidate(GameCandidate* candidate) noexcept
 {
-    delete reinterpret_cast<SimState*>(candidate);
+    if (!ShouldFail("discard"))
+    {
+        DestroyState(reinterpret_cast<SimState*>(candidate));
+    }
 }
 
 // --- Properties ------------------------------------------------------------

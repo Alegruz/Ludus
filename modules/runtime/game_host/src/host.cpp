@@ -1,5 +1,6 @@
 #include <ludus/runtime/game_host/host.h>
 
+#include "internal/frame_presenter.h"
 #include "internal/host_session.h"
 #include "internal/identity.h"
 
@@ -20,12 +21,21 @@ uint32 HostAbiMinor() noexcept
     return CurrentAbiMinor();
 }
 
+RunResult InspectModule(std::string_view path, game_api::GameMetadata& metadata) noexcept
+{
+    LoadedModule module;
+    const auto loaded = LoadModule(path, 1, CurrentHostIdentity(), CurrentAbiMajor(), CurrentAbiMinor(), module);
+    if (loaded != LoadStatus::Ok)
+    {
+        return loaded == LoadStatus::DlopenFailed || loaded == LoadStatus::PathInvalid ? RunResult::ModuleLoadFailed
+                                                                                       : RunResult::IncompatibleModule;
+    }
+    metadata = module.Metadata();
+    return module.Close() ? RunResult::Ok : RunResult::Internal;
+}
+
 RunResult Run(const HostConfig& config) noexcept
 {
-    // The host owns the gameplay module lifecycle, the frame loop and (when a
-    // ControlFd is set) the play protocol. The windowed path drives a platform
-    // window + RHI session; where no GPU/display exists the host runs the full
-    // lifecycle headlessly (a headless run is NOT proof of rendered behavior).
     if (config.Source != GameplaySource::DynamicModule)
     {
         // Static dispatch is wired by the shipping executable (handled there).
@@ -36,13 +46,19 @@ RunResult Run(const HostConfig& config) noexcept
         return RunResult::BadArguments;
     }
 
-    HostSession session(config.ProjectId, config.GameId, config.ControlFd);
+    FramePresenter presenter;
+    const auto started = presenter.Start(config.Mode);
+    if (started != RunResult::Ok)
+    {
+        return started;
+    }
+    HostSession session(config.ProjectId, config.GameId, config.ControlFd, config.ProjectEpoch);
     if (!session.LoadInitial(config.ModulePath))
     {
         // Distinguish an incompatible module from an ordinary load failure.
         return session.State() == PlayState::Failed ? RunResult::IncompatibleModule : RunResult::ModuleLoadFailed;
     }
-    return session.RunLoop(config.MaxFrames);
+    return session.RunLoop(config.MaxFrames, &presenter);
 }
 
 RunResult RunStatic(const HostConfig& config, StaticEntryFn entry) noexcept

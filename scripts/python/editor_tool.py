@@ -53,6 +53,10 @@ READY_REQUEST_TIMEOUT = 5.0             # seconds to receive the one request
 TERM_DEADLINE = 2.0                     # seconds before escalating TERM -> KILL
 KILL_OBSERVE_DEADLINE = 1.0             # seconds to observe termination after KILL
 
+# Keep uncertain leaders waitable. Reaping before descendant absence is proved
+# would allow PID/process-group reuse while a caller still believes it owns it.
+_UNKNOWN_PROCESS_OWNERS: list["OwnedProcess"] = []
+
 # File API named client for the editor.
 FILE_API_CLIENT = "ludus-editor"
 
@@ -276,7 +280,7 @@ class OwnedProcess:
     reusable as a new group) until descendant cleanup completes.
     """
 
-    def __init__(self, argv: list[str], cwd: str, env: dict[str, str]) -> None:
+    def __init__(self, argv: list[str], cwd: str, env: dict[str, str], *, pass_fds: tuple[int, ...] = ()) -> None:
         self.argv = list(argv)
         self.cwd = cwd
         self._proc = subprocess.Popen(
@@ -288,6 +292,7 @@ class OwnedProcess:
             stderr=subprocess.PIPE,
             close_fds=True,
             start_new_session=True,
+            pass_fds=pass_fds,
         )
         self.pid = self._proc.pid
 
@@ -327,7 +332,7 @@ class OwnedProcess:
         # Killed/dumped by a signal.
         return (None, info.si_status)
 
-    def _group_members(self) -> list[int]:
+    def _group_members(self) -> Optional[list[int]]:
         """Live members of the owned group (excluding the zombie leader).
 
         Reads /proc to find processes whose process-group id equals the leader's
@@ -339,23 +344,25 @@ class OwnedProcess:
         try:
             entries = [p for p in proc_root.iterdir() if p.name.isdigit()]
         except OSError:
-            return members
+            return None
         for entry in entries:
             pid = int(entry.name)
             if pid == self.pid:
                 continue  # exclude the zombie leader itself
             try:
                 stat = (entry / "stat").read_text()
-            except OSError:
+            except FileNotFoundError:
                 continue
+            except OSError:
+                return None
             # pgid is the 5th field after the (comm) which may contain spaces;
             # split on the last ')' to skip the comm field safely.
             try:
                 after = stat.rsplit(")", 1)[1].split()
                 pgid = int(after[2])  # fields: state ppid pgrp ...
             except (IndexError, ValueError):
-                continue
-            if pgid == self.pid:
+                return None
+            if pgid == self.pid and after[0] != "Z":
                 members.append(pid)
         return members
 
@@ -428,10 +435,10 @@ class OwnedProcess:
         # Clean up any surviving descendants with the same escalation, keeping
         # the leader waitable (not reaped) so its pid is not reused as a group.
         members = self._group_members()
-        if members:
+        if members != []:
             self._signal_group(signal.SIGKILL)
             member_deadline = now() + KILL_OBSERVE_DEADLINE
-            while now() < member_deadline and self._group_members():
+            while now() < member_deadline and self._group_members() != []:
                 sleep(0.01)
             members = self._group_members()
 
@@ -439,11 +446,15 @@ class OwnedProcess:
         exit_code, sig = (None, None)
         if leader_exit is not None:
             exit_code, sig = leader_exit
-        reaped = self._reap_leader()
-        if exit_code is None and sig is None:
-            exit_code, sig = reaped
-
-        confirmed = not members
+        confirmed = leader_exit is not None and members == []
+        if confirmed:
+            reaped = self._reap_leader()
+            if exit_code is None and sig is None:
+                exit_code, sig = reaped
+        else:
+            self._close_pipes()
+            if self not in _UNKNOWN_PROCESS_OWNERS:
+                _UNKNOWN_PROCESS_OWNERS.append(self)
         return CleanupReport(confirmed=confirmed, forced=forced, exit_code=exit_code, signal=sig)
 
     def wait_exit_nowait(self) -> Optional[tuple[Optional[int], Optional[int]]]:
@@ -456,26 +467,33 @@ class OwnedProcess:
         The leader has exited; observe it without reaping, verify no descendants
         remain in the owned group, then reap the leader.
         """
-        observed = self._observe_exit_nowait() or (None, None)
+        observed = self._observe_exit_nowait()
+        if observed is None or observed == (None, None):
+            return self.cleanup(cancelled=False)
         members = self._group_members()
-        if members:
+        if members != []:
             # Ordinary descendants outlived the leader (e.g. a surviving writer):
             # terminate them with deadlines before reaping the leader.
             self._signal_group(signal.SIGTERM)
             deadline = time.monotonic() + TERM_DEADLINE
-            while time.monotonic() < deadline and self._group_members():
+            while time.monotonic() < deadline and self._group_members() != []:
                 time.sleep(0.01)
-            if self._group_members():
+            if self._group_members() != []:
                 self._signal_group(signal.SIGKILL)
                 kdeadline = time.monotonic() + KILL_OBSERVE_DEADLINE
-                while time.monotonic() < kdeadline and self._group_members():
+                while time.monotonic() < kdeadline and self._group_members() != []:
                     time.sleep(0.01)
             members = self._group_members()
         exit_code, sig = observed
-        reaped = self._reap_leader()
-        if exit_code is None and sig is None:
-            exit_code, sig = reaped
-        return CleanupReport(confirmed=not members, forced=False, exit_code=exit_code, signal=sig)
+        if members == []:
+            reaped = self._reap_leader()
+            if exit_code is None and sig is None:
+                exit_code, sig = reaped
+        else:
+            self._close_pipes()
+            if self not in _UNKNOWN_PROCESS_OWNERS:
+                _UNKNOWN_PROCESS_OWNERS.append(self)
+        return CleanupReport(confirmed=members == [], forced=False, exit_code=exit_code, signal=sig)
 
 
 # --------------------------------------------------------------------------- #
@@ -642,7 +660,7 @@ class Supervisor:
                 continue
             raise ProtocolError(f"unknown control type {mtype!r}")
 
-    def run_command(self, stage: str, child: OwnedProcess) -> CleanupReport:
+    def run_command(self, stage: str, child: OwnedProcess, *, timeout: Optional[float] = None) -> CleanupReport:
         """Drain the child's streams while servicing control, until it exits.
 
         Returns the finalized CleanupReport. On cancellation or a protocol error
@@ -650,17 +668,25 @@ class Supervisor:
         propagates, so a long-running configure/build child is never leaked.
         """
         try:
-            return self._run_command_loop(stage, child)
+            return self._run_command_loop(stage, child, timeout=timeout)
         except Cancelled:
             # Clean up the owned group with deadlines, then re-raise carrying the
             # cleanup report so the caller can report confirmation accurately.
             report = child.cleanup(cancelled=True)
             raise Cancelled(report)
-        except ProtocolError:
-            child.cleanup(cancelled=True)
+        except ProtocolError as exc:
+            report = child.cleanup(cancelled=True)
+            if not report.confirmed:
+                raise _CleanupUnknown(stage, report) from exc
             raise
+        except OSError as exc:
+            report = child.cleanup(cancelled=True)
+            if not report.confirmed:
+                raise _CleanupUnknown(stage, report) from exc
+            raise ProtocolError(f"child I/O failed: {exc}") from exc
 
-    def _run_command_loop(self, stage: str, child: OwnedProcess) -> CleanupReport:
+    def _run_command_loop(self, stage: str, child: OwnedProcess, *, timeout: Optional[float] = None) -> CleanupReport:
+        deadline = time.monotonic() + timeout if timeout is not None else None
         sel = selectors.DefaultSelector()
         os.set_blocking(self._control_fd, False)
         os.set_blocking(child.stdout_fd, False)
@@ -680,6 +706,8 @@ class Supervisor:
         leader_exited = False
         try:
             while True:
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ProtocolError(f"{stage} exceeded its {timeout:g}-second deadline")
                 for key, _ in sel.select(timeout=0.1):
                     tag = key.data
                     if tag == "control":
@@ -792,13 +820,13 @@ class Operation:
         return editor_project.parse_descriptor_bytes(data)
 
     def _run_stage(self, stage: str, argv: list[str], cwd: Path, env: dict[str, str],
-                   code_on_fail: str) -> None:
+                   code_on_fail: str, *, timeout: Optional[float] = None) -> None:
         self._stage = stage
         self._writer.phase(stage)
         self._writer.command(stage, argv, str(cwd))
         self._check_cancel()
         child = OwnedProcess(argv, str(cwd), env)
-        report = self._supervisor.run_command(stage, child)
+        report = self._supervisor.run_command(stage, child, timeout=timeout)
         if not report.confirmed:
             raise _CleanupUnknown(stage, report)
         if report.exit_code not in (0, None) or report.signal is not None:

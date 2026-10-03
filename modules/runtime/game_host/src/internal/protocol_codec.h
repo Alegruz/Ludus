@@ -1,8 +1,8 @@
 #pragma once
 
 // Bounded framing + minimal JSON codec for the play-session protocol
-// (project-live-reload design 10). The protocol frames are small, flat objects
-// (string/number/bool fields), so a hand-written bounded codec is used instead
+// (project-live-reload design 10). Frames contain scalar fields and one-level
+// bounded arrays of flat property records, so a small codec is used instead
 // of pulling a heavy JSON dependency into the Qt-free host. This is NOT a
 // general JSON library; it accepts exactly the closed, versioned schema and
 // rejects anything else as a protocol error.
@@ -11,6 +11,7 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,6 +32,7 @@ public:
     void SetUint(std::string_view key, uint64 value);
     void SetInt(std::string_view key, int64 value);
     void SetBool(std::string_view key, bool value);
+    void SetRecords(std::string_view key, const std::vector<Message>& records);
     // Hex-encoded 64-bit id (fixed 16 lowercase hex chars) to avoid float loss.
     void SetHexId(std::string_view key, uint64 value);
 
@@ -40,12 +42,14 @@ public:
     [[nodiscard]] bool GetBool(std::string_view key, bool& out) const;
     [[nodiscard]] bool GetHexId(std::string_view key, uint64& out) const;
     [[nodiscard]] bool Has(std::string_view key) const;
+    [[nodiscard]] bool HasOnly(std::initializer_list<std::string_view> keys) const noexcept;
+    [[nodiscard]] bool GetRecords(std::string_view key, std::vector<Message>& out) const;
 
     // Serialize to compact UTF-8 JSON (no trailing newline).
     [[nodiscard]] std::string Serialize() const;
 
     // Parse a compact JSON object. Returns false on any malformed input, a
-    // non-object top level, nested structures, or more than kMaxFields fields.
+    // non-object top level, deeper nesting, or more than kMaxFields fields.
     [[nodiscard]] static bool Parse(std::string_view json, Message& out);
 
     [[nodiscard]] usize FieldCount() const noexcept
@@ -58,7 +62,8 @@ private:
     {
         String,
         Number,
-        Bool
+        Bool,
+        Records
     };
     struct Field
     {
@@ -67,9 +72,14 @@ private:
         ValueType Type = ValueType::String;
     };
     static constexpr usize kMaxFields = 32;
+    void Set(Field field);
     [[nodiscard]] const Field* Find(std::string_view key) const;
     std::vector<Field> Fields_;
 };
+
+// Reject malformed/overlong UTF-8 and surrogate code points. Property strings
+// reject NUL; the JSON codec permits an escaped NUL in an ordinary string.
+[[nodiscard]] bool ValidUtf8(std::string_view text, bool allowNul = false) noexcept;
 
 // Frame a serialized message with a 4-byte little-endian length prefix.
 // Returns false if the payload exceeds kMaxControlFrameBytes.

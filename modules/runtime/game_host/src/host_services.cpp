@@ -30,11 +30,18 @@ struct alignas(std::max_align_t) AllocationHeader
 {
     usize Size = 0;
     void* Base = nullptr; // Original aligned_alloc pointer.
+    HostContext* Owner = nullptr;
+    AllocationHeader* Previous = nullptr;
+    AllocationHeader* Next = nullptr;
 };
 } // namespace
 
 struct HostServiceProvider::Context
 {
+    HostServices Table = {};
+    AllocationHeader* Allocations = nullptr;
+    bool Retired = false;
+    bool Pinned = false;
     std::atomic<uint64> Outstanding{0};
     std::atomic<usize> BytesLive{0};
     std::unordered_map<uint64, uint64> Resources;
@@ -42,6 +49,10 @@ struct HostServiceProvider::Context
 
 namespace
 {
+// One host session can retain at most active, staging and retired contexts.
+// Keep those deliberate process-lifetime pins reachable until process exit.
+HostServiceProvider::Context* pinnedContexts[3] = {};
+
 // The HostContext* handed over the ABI is a reinterpret of our Context. It is
 // opaque to the module; only our service callbacks interpret it.
 [[nodiscard]] HostServiceProvider::Context* Decode(HostContext* ctx) noexcept
@@ -82,7 +93,7 @@ void LogCallback(HostContext* ctx, LogSeverity severity, const char* text, usize
 void* AllocateCallback(HostContext* ctx, usize size, usize alignment) noexcept
 {
     auto* context = Decode(ctx);
-    if (context == nullptr || size == 0 || size > kMaxAllocationBytes)
+    if (context == nullptr || context->Retired || size == 0 || size > kMaxAllocationBytes || alignment > 4096)
     {
         return nullptr;
     }
@@ -119,6 +130,14 @@ void* AllocateCallback(HostContext* ctx, usize size, usize alignment) noexcept
     auto* header = reinterpret_cast<AllocationHeader*>(static_cast<char*>(user) - sizeof(AllocationHeader));
     header->Size = size;
     header->Base = base;
+    header->Owner = ctx;
+    header->Previous = nullptr;
+    header->Next = context->Allocations;
+    if (header->Next != nullptr)
+    {
+        header->Next->Previous = header;
+    }
+    context->Allocations = header;
 
     context->BytesLive.fetch_add(size, std::memory_order_relaxed);
     context->Outstanding.fetch_add(1, std::memory_order_relaxed);
@@ -133,6 +152,22 @@ void FreeCallback(HostContext* ctx, void* ptr) noexcept
         return;
     }
     auto* header = reinterpret_cast<AllocationHeader*>(static_cast<char*>(ptr) - sizeof(AllocationHeader));
+    if (header->Owner != ctx)
+    {
+        return;
+    }
+    if (header->Previous != nullptr)
+    {
+        header->Previous->Next = header->Next;
+    }
+    else
+    {
+        context->Allocations = header->Next;
+    }
+    if (header->Next != nullptr)
+    {
+        header->Next->Previous = header->Previous;
+    }
     const usize size = header->Size;
     void* base = header->Base;
     std::free(base);
@@ -143,7 +178,7 @@ void FreeCallback(HostContext* ctx, void* ptr) noexcept
 uint64 ResolveResourceCallback(HostContext* ctx, uint64 logicalAssetId) noexcept
 {
     auto* context = Decode(ctx);
-    if (context == nullptr)
+    if (context == nullptr || context->Retired)
     {
         return 0;
     }
@@ -154,40 +189,89 @@ uint64 ResolveResourceCallback(HostContext* ctx, uint64 logicalAssetId) noexcept
 
 HostServiceProvider::HostServiceProvider() noexcept : Context_(new(std::nothrow) Context())
 {
-    Services_.StructSize = static_cast<ludus::foundation::uint32>(sizeof(HostServices));
-    Services_.Context = reinterpret_cast<HostContext*>(Context_);
-    Services_.Log = &LogCallback;
-    Services_.AllocateBytes = &AllocateCallback;
-    Services_.FreeBytes = &FreeCallback;
-    Services_.ResolveResource = &ResolveResourceCallback;
+    if (Context_ != nullptr)
+    {
+        auto& table = Context_->Table;
+        table.StructSize = static_cast<ludus::foundation::uint32>(sizeof(HostServices));
+        table.Context = reinterpret_cast<HostContext*>(Context_);
+        table.Log = &LogCallback;
+        table.AllocateBytes = &AllocateCallback;
+        table.FreeBytes = &FreeCallback;
+        table.ResolveResource = &ResolveResourceCallback;
+    }
 }
 
-HostServiceProvider::HostServiceProvider(HostServiceProvider&& other) noexcept
-    : Context_(other.Context_), Services_(other.Services_)
+HostServiceProvider::HostServiceProvider(HostServiceProvider&& other) noexcept : Context_(other.Context_)
 {
     // The Context pointer is heap-stable; the moved table still references it.
     other.Context_ = nullptr;
-    other.Services_ = {};
 }
 
 HostServiceProvider& HostServiceProvider::operator=(HostServiceProvider&& other) noexcept
 {
     if (this != &other)
     {
-        delete Context_;
+        Retire();
+        if (Context_ != nullptr && !Context_->Pinned && OutstandingAllocations() == 0)
+        {
+            delete Context_;
+        }
         Context_ = other.Context_;
-        Services_ = other.Services_;
         other.Context_ = nullptr;
-        other.Services_ = {};
     }
     return *this;
 }
 
 HostServiceProvider::~HostServiceProvider() noexcept
 {
-    delete Context_;
+    Retire();
+    // A failed retirement keeps the table/context alive until process exit.
+    // It must never leave an outstanding caller with dangling service storage.
+    if (Context_ != nullptr && !Context_->Pinned && OutstandingAllocations() == 0)
+    {
+        delete Context_;
+    }
     Context_ = nullptr;
-    Services_ = {};
+}
+
+const HostServices& HostServiceProvider::Services() const noexcept
+{
+    static const HostServices empty = {};
+    return Context_ == nullptr ? empty : Context_->Table;
+}
+
+void HostServiceProvider::PinUntilProcessExit() noexcept
+{
+    Retire();
+    if (Context_ != nullptr && !Context_->Pinned)
+    {
+        Context_->Pinned = true;
+        for (auto& pinned : pinnedContexts)
+        {
+            if (pinned == nullptr)
+            {
+                pinned = Context_;
+                return;
+            }
+        }
+        LUDUS_LOG_ERROR(LOG_GAME_HOST, "process-lifetime service pin bound exceeded; host must exit");
+    }
+}
+
+void HostServiceProvider::Retire() noexcept
+{
+    if (Context_ != nullptr)
+    {
+        Context_->Retired = true;
+    }
+}
+
+void HostServiceProvider::CopyResourcesFrom(const HostServiceProvider& source) noexcept
+{
+    if (Context_ != nullptr && source.Context_ != nullptr)
+    {
+        Context_->Resources = source.Context_->Resources;
+    }
 }
 
 uint64 HostServiceProvider::OutstandingAllocations() const noexcept

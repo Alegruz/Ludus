@@ -62,7 +62,8 @@ enum class EventKind : uint32
     CommandResult = 2,
     PropertiesChanged = 3,
     ReloadPhase = 4,
-    SessionEnded = 5
+    SessionEnded = 5,
+    FramePresented = 6
 };
 
 // Terminal command status. Reuses the editor failure vocabulary plus the new

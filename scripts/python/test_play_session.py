@@ -5,6 +5,9 @@ import os
 import sys
 import tempfile
 import unittest
+import json
+import subprocess
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -19,6 +22,128 @@ class _Engine:
 
 
 class GenerationPublishTests(unittest.TestCase):
+    def test_lease_is_reference_counted(self):
+        leases = play_session.LeaseSet()
+        leases.acquire("generation")
+        leases.acquire("generation")
+        leases.release("generation")
+        self.assertTrue(leases.is_leased("generation"))
+        leases.release("generation")
+        self.assertFalse(leases.is_leased("generation"))
+
+    def test_manifest_fields_are_typed_before_publication(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            module, host, _ = self._artifacts(root)
+            for key, value in (("abi_major", True), ("abi_minor", "0"),
+                               ("sdk_identity", 123), ("project_id", 1)):
+                fields = self._fields()
+                fields[key] = value
+                with self.assertRaises(play_session.PublishError, msg=key):
+                    play_session.publish_generation(
+                        generations_root=root / "generations", module_artifact=module,
+                        host_artifact=host, symbol_artifact=None, manifest_fields=fields,
+                        declared_source_inputs=[module])
+
+    def test_missing_declared_input_cannot_publish(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            module, host, _ = self._artifacts(root)
+            with self.assertRaisesRegex(play_session.PublishError, "source input missing"):
+                play_session.publish_generation(
+                    generations_root=root / "generations", module_artifact=module,
+                    host_artifact=host, symbol_artifact=None, manifest_fields=self._fields(),
+                    declared_source_inputs=[root / "gone.cpp"])
+
+    def test_clock_rollback_does_not_reorder_ids(self):
+        with mock.patch.object(play_session.time, "time", return_value=2000):
+            first = play_session.next_generation_id()
+        with mock.patch.object(play_session.time, "time", return_value=1000):
+            second = play_session.next_generation_id()
+        self.assertLess(first, second)
+
+    def test_change_during_copy_cannot_publish(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            module, host, _ = self._artifacts(root)
+            source = root / "game.cpp"
+            source.write_text("before")
+            before = play_session.source_input_digest([source])
+            real_copy = play_session.shutil.copy2
+            def edit_during_copy(src, dest):
+                result = real_copy(src, dest)
+                source.write_text("after")
+                return result
+            with mock.patch.object(play_session.shutil, "copy2", side_effect=edit_during_copy):
+                with self.assertRaisesRegex(play_session.PublishError, "Superseded"):
+                    play_session.publish_generation(
+                        generations_root=root / "generations", module_artifact=module,
+                        host_artifact=host, symbol_artifact=None, manifest_fields=self._fields(),
+                        declared_source_inputs=[source], pre_build_source_digest=before,
+                    )
+            self.assertFalse(any(p.is_dir() for p in (root / "generations").iterdir()))
+
+    def test_manifest_rejects_unknown_schema_and_escaped_payload(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            module, host, _ = self._artifacts(root)
+            gen = play_session.publish_generation(
+                generations_root=root / "generations", module_artifact=module,
+                host_artifact=host, symbol_artifact=None, manifest_fields=self._fields(),
+                declared_source_inputs=[module],
+            )
+            path = gen / "manifest.json"
+            original = play_session.read_manifest(gen)
+            os.chmod(path, 0o644)
+            for kind in ("schema", "escape", "missing", "symlink"):
+                data = dict(original)
+                data["files"] = dict(original["files"])
+                if kind == "schema": data["schema"] = 999
+                if kind == "escape":
+                    data["files"]["../external"] = data["files"].pop(data["module_file"])
+                    data["module_file"] = "../external"
+                if kind == "missing": data["files"].pop(data["module_file"])
+                if kind == "symlink":
+                    (gen / data["module_file"]).unlink()
+                    (gen / data["module_file"]).symlink_to(module)
+                path.write_text(json.dumps(data))
+                with self.assertRaises(play_session.PublishError, msg=kind):
+                    play_session.read_manifest(gen)
+
+    def test_other_process_lease_prevents_collection(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            module, host, _ = self._artifacts(root)
+            gens = root / "generations"
+            published = [play_session.publish_generation(
+                generations_root=gens, module_artifact=module, host_artifact=host,
+                symbol_artifact=None, manifest_fields=self._fields(),
+                declared_source_inputs=[module]) for _ in range(5)]
+            proc = subprocess.Popen(
+                [sys.executable, "-u", "-c",
+                 "from pathlib import Path; from play_session import GenerationLease; "
+                 "import sys; lease=GenerationLease(Path(sys.argv[1])); "
+                 "print('leased',flush=True); sys.stdin.readline(); lease.close()",
+                 str(published[0])],
+                cwd=Path(play_session.__file__).parent,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(proc.stdout.readline().strip(), "leased")
+                deleted = play_session.collect_generations(gens, play_session.LeaseSet())
+                self.assertNotIn(published[0].name, deleted)
+                self.assertIn(published[1].name, deleted)
+                proc.stdin.write("release\n")
+                proc.stdin.flush()
+                self.assertEqual(proc.wait(timeout=5), 0)
+                self.assertIn(published[0].name,
+                              play_session.collect_generations(gens, play_session.LeaseSet()))
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+                proc.stdin.close()
+                proc.stdout.close()
+
     def _artifacts(self, root: Path):
         module = root / "sample_game.so"
         host = root / "sample_game_host"

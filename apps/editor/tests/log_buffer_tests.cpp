@@ -26,7 +26,7 @@ TEST_CASE("Retained bytes stay within the byte bound", "[editor][log]")
 TEST_CASE("A single giant line without newline is truncated, not unbounded", "[editor][log]")
 {
     LogBuffer buffer;
-    const QString giant(static_cast<int>(LogBuffer::MaxBytes) * 2, QLatin1Char('y'));
+    const QString giant(static_cast<qsizetype>(LogBuffer::MaxBytes) * 2, QLatin1Char('y'));
     buffer.Append(OutputStream::Stdout, giant);
     CHECK(buffer.RetainedBytes() <= LogBuffer::MaxBytes);
     CHECK(buffer.DroppedBytes() > 0);

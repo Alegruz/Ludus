@@ -128,19 +128,18 @@ namespace
 {
 // Allowed forward phase transitions within one job. Running is reached only via
 // RuntimeStarted; this table never allows a bare phase event to assert Running.
-bool AllowedForward(Phase from, Phase to)
+bool AllowedForward(const WorkspaceState& state, Phase requested)
 {
-    switch (from)
+    switch (state.OperationPhase)
     {
         case Phase::Starting:
-            return to == Phase::Configuring;
+            return requested == Phase::Configuring;
         case Phase::Configuring:
-            return to == Phase::Building || to == Phase::Launching;
+            return requested == Phase::Building || requested == Phase::Launching;
         case Phase::Building:
-            return to == Phase::Launching;
+            return requested == Phase::Launching;
         case Phase::Launching:
             // Launching -> Running is handled only by RuntimeStarted, not here.
-            return false;
         default:
             return false;
     }
@@ -192,7 +191,7 @@ WorkspaceState ApplyPhaseEvent(const WorkspaceState& state, uint64 jobId, Phase 
         return next;
     }
 
-    if (!AllowedForward(state.OperationPhase, requested))
+    if (!AllowedForward(state, requested))
     {
         // Reject unexpected/duplicate/backward phase for the current job.
         return state;

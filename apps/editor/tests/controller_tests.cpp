@@ -143,5 +143,5 @@ TEST_CASE("Copy Job Details is bounded and omits telemetry", "[editor][controlle
     CHECK(details.contains(QStringLiteral("cleanup_confirmed:")));
     // No environment dump or upload claims.
     CHECK_FALSE(details.contains(QStringLiteral("PATH=")));
-    CHECK(static_cast<ludus::foundation::usize>(details.toUtf8().size()) <= 1u * 1024u * 1024u);
+    CHECK(static_cast<ludus::foundation::usize>(details.toUtf8().size()) <= ludus::foundation::usize{1} * 1024 * 1024);
 }

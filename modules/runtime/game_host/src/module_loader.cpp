@@ -15,6 +15,7 @@ using game_api::GameApiTable;
 using game_api::GameMetadata;
 using game_api::GetGameApiFn;
 using game_api::Status;
+using ludus::foundation::uint8;
 using ludus::foundation::usize;
 
 // Minimum usable table size: everything through the mandatory Update entry.
@@ -28,8 +29,8 @@ template <typename FieldPtr>
 [[nodiscard]] bool FieldWithin(uint32 structSize, FieldPtr GameApiTable::*member) noexcept
 {
     const GameApiTable probe{};
-    const auto* base = reinterpret_cast<const unsigned char*>(&probe);
-    const auto* field = reinterpret_cast<const unsigned char*>(&(probe.*member));
+    const auto* base = reinterpret_cast<const uint8*>(&probe);
+    const auto* field = reinterpret_cast<const uint8*>(&(probe.*member));
     const usize offset = static_cast<usize>(field - base);
     return offset + sizeof(FieldPtr) <= structSize;
 }
@@ -105,7 +106,7 @@ LoadedModule::~LoadedModule() noexcept
 
 LoadedModule::LoadedModule(LoadedModule&& other) noexcept
     : Handle_(other.Handle_), Table_(other.Table_), Metadata_(other.Metadata_), Path_(std::move(other.Path_)),
-      Generation_(other.Generation_)
+      Generation_(other.Generation_), Pinned_(other.Pinned_)
 {
     other.Handle_ = nullptr;
     other.Table_ = {};
@@ -123,6 +124,7 @@ LoadedModule& LoadedModule::operator=(LoadedModule&& other) noexcept
         Metadata_ = other.Metadata_;
         Path_ = std::move(other.Path_);
         Generation_ = other.Generation_;
+        Pinned_ = other.Pinned_;
         other.Handle_ = nullptr;
         other.Table_ = {};
         other.Metadata_ = {};
@@ -133,6 +135,10 @@ LoadedModule& LoadedModule::operator=(LoadedModule&& other) noexcept
 
 bool LoadedModule::Close() noexcept
 {
+    if (Pinned_)
+    {
+        return false;
+    }
     bool ok = true;
     if (Handle_ != nullptr)
     {
@@ -142,6 +148,11 @@ bool LoadedModule::Close() noexcept
         // surfaced so the caller can require a restart rather than assume the
         // image was retired.
         ok = (::dlclose(Handle_) == 0);
+        if (!ok)
+        {
+            Pinned_ = true;
+            return false;
+        }
         Handle_ = nullptr;
     }
     Table_ = {};
@@ -157,9 +168,12 @@ LoadStatus LoadModule(std::string_view path,
                       uint32 hostAbiMinor,
                       LoadedModule& outModule) noexcept
 {
-    outModule.Close();
+    if (!outModule.Close())
+    {
+        return LoadStatus::MetadataInconsistent;
+    }
 
-    if (path.empty() || path.front() != '/')
+    if (path.size() > 4096 || path.find('\0') != std::string_view::npos || path.empty() || path.front() != '/')
     {
         // Load only from an absolute canonical path inside a leased generation.
         return LoadStatus::PathInvalid;
@@ -228,8 +242,9 @@ LoadStatus LoadModule(std::string_view path,
     }
     // Query must agree with the table on ABI, report a consistent metadata size,
     // and a bounded identity. Published and query metadata must agree (L04).
-    if (metadata.StructSize < sizeof(GameMetadata) || metadata.AbiMajor != hostAbiMajor ||
-        metadata.AbiMinor != table.AbiMinor || metadata.IdentityLength > game_api::kIdentityMax)
+    if (metadata.StructSize != sizeof(GameMetadata) || metadata.AbiMajor != hostAbiMajor ||
+        metadata.AbiMinor != table.AbiMinor || metadata.IdentityLength > game_api::kIdentityMax ||
+        metadata.Reserved != 0 || table.Reserved != 0 || (metadata.Capabilities & ~uint32{7}) != 0)
     {
         ::dlclose(handle);
         return LoadStatus::MetadataInconsistent;

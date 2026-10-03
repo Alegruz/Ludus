@@ -34,6 +34,8 @@ jobs:
         run: xvfb-run -a env LUDUS_TEST_GUI=1 python3 -m unittest discover -s scripts/python -p 'test_init*.py' -v
       - name: Test CI initialization and analysis contracts
         run: python3 -m unittest discover -s scripts/python -p 'test_ci.py' -v
+      - name: Live reload publication tests
+        run: python3 -m unittest discover -s scripts/python -p 'test_play_session.py' -v
       - name: Verify source formatting before builds
         run: ./scripts/check --format
 
@@ -68,7 +70,16 @@ jobs:
       - name: Build with sanitizers
         run: ./scripts/build linux-clang-asan-ubsan
       - name: Test with sanitizers
+        env:
+          LUDUS_RELOAD_METRICS: ${{ runner.temp }}/live-reload-asan-ubsan.jsonl
         run: out/host-tools/venv/bin/ctest --preset linux-clang-asan-ubsan --no-tests=error
+      - name: Upload sanitizer reload measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-reload-asan-ubsan
+          path: ${{ runner.temp }}/live-reload-asan-ubsan.jsonl
+          if-no-files-found: error
       - name: Report compiler cache
         if: always()
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"

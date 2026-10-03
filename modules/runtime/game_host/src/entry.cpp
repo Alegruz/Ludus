@@ -18,18 +18,19 @@
 #include <ludus/foundation/base/types.h>
 #include <ludus/foundation/logging/log_system.hpp>
 
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <string_view>
+
+#include <unistd.h>
 
 namespace
 {
 using ludus::foundation::int32;
 using ludus::foundation::uint64;
 
-[[nodiscard]] bool ParseU64(std::string_view text, uint64& out)
+[[nodiscard]] bool ParseU64(std::string_view text, uint64& out) noexcept
 {
     if (text.empty())
     {
@@ -42,13 +43,18 @@ using ludus::foundation::uint64;
         {
             return false;
         }
-        value = value * 10 + static_cast<uint64>(c - '0');
+        const uint64 digit = static_cast<uint64>(c - '0');
+        if (value > (~uint64{0} - digit) / 10)
+        {
+            return false;
+        }
+        value = value * 10 + digit;
     }
     out = value;
     return true;
 }
 
-[[nodiscard]] bool ParseHex(std::string_view text, uint64& out)
+[[nodiscard]] bool ParseHex(std::string_view text, uint64& out) noexcept
 {
     if (text.empty() || text.size() > 16)
     {
@@ -80,19 +86,28 @@ using ludus::foundation::uint64;
 }
 } // namespace
 
-int main(int argc, char** argv)
+ludus::foundation::int32
+ludus::runtime::game_host::RunMain(ludus::foundation::int32 argc, const char* const* argv, StaticEntryFn entry) noexcept
 {
     ludus::foundation::logging::LogConfig logConfig;
     logConfig.EnableConsole = true;
     logConfig.EnableFile = false;
     logConfig.Mode = ludus::foundation::logging::LogMode::Synchronous;
     (void)ludus::foundation::logging::LogSystem::Initialize(logConfig);
+    struct LogShutdown final
+    {
+        ~LogShutdown() noexcept
+        {
+            (void)ludus::foundation::logging::LogSystem::Shutdown();
+        }
+    } shutdown;
 
     ludus::runtime::game_host::HostConfig config;
-    config.Source = ludus::runtime::game_host::GameplaySource::DynamicModule;
+    config.Source = entry == nullptr ? GameplaySource::DynamicModule : GameplaySource::Static;
     config.Mode = ludus::runtime::game_host::Presentation::Windowed;
 
     std::string modulePath;
+    bool inspect = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string_view arg = argv[i];
@@ -105,7 +120,7 @@ int main(int argc, char** argv)
             return true;
         };
 
-        if (arg == "--module")
+        if (arg == "--module" || arg == "--inspect-module")
         {
             std::string_view value;
             if (!nextValue(value))
@@ -113,12 +128,13 @@ int main(int argc, char** argv)
                 return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
             }
             modulePath = std::string(value);
+            inspect = arg == "--inspect-module";
         }
         else if (arg == "--control-fd")
         {
             std::string_view value;
             uint64 fd = 0;
-            if (!nextValue(value) || !ParseU64(value, fd))
+            if (!nextValue(value) || !ParseU64(value, fd) || fd > 0x7fffffffU)
             {
                 return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
             }
@@ -150,6 +166,14 @@ int main(int argc, char** argv)
                 return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
             }
         }
+        else if (arg == "--project-epoch")
+        {
+            std::string_view value;
+            if (!nextValue(value) || !ParseHex(value, config.ProjectEpoch) || config.ProjectEpoch == 0)
+            {
+                return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
+            }
+        }
         else if (arg == "--headless")
         {
             config.Mode = ludus::runtime::game_host::Presentation::Headless;
@@ -158,20 +182,48 @@ int main(int argc, char** argv)
         {
             // Report the host ABI identity and exit (acceptance/debug helper).
             const std::string_view id = ludus::runtime::game_host::HostIdentity();
-            (void)::fwrite(id.data(), 1, id.size(), stdout);
-            (void)::fputc('\n', stdout);
-            (void)ludus::foundation::logging::LogSystem::Shutdown();
+            (void)::write(STDOUT_FILENO, id.data(), id.size());
+            (void)::write(STDOUT_FILENO, "\n", 1);
             return 0;
         }
     }
 
-    if (modulePath.empty())
+    if (entry == nullptr && modulePath.empty())
     {
         return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
     }
     config.ModulePath = modulePath;
+    if (inspect)
+    {
+        ludus::runtime::game_api::GameMetadata metadata;
+        const auto result = ludus::runtime::game_host::InspectModule(modulePath, metadata);
+        if (result == ludus::runtime::game_host::RunResult::Ok)
+        {
+            // The loader has already checked this identity against the host.
+            std::string identity;
+            for (const char c : std::string_view(metadata.Identity, metadata.IdentityLength))
+            {
+                if (c == '\\' || c == '\"')
+                {
+                    identity.push_back('\\');
+                }
+                if (static_cast<ludus::foundation::uint8>(c) < 0x20)
+                {
+                    return static_cast<int>(ludus::runtime::game_host::RunResult::Internal);
+                }
+                identity.push_back(c);
+            }
+            const std::string record =
+                "{\"sdk_identity\":\"" + identity + "\",\"abi_major\":" + std::to_string(metadata.AbiMajor) +
+                ",\"abi_minor\":" + std::to_string(metadata.AbiMinor) +
+                ",\"capabilities\":" + std::to_string(metadata.Capabilities) +
+                ",\"property_schema\":" + std::to_string(metadata.PropertySchemaVersion) +
+                ",\"checkpoint_schema\":" + std::to_string(metadata.CheckpointSchemaVersion) + "}\n";
+            (void)::write(STDOUT_FILENO, record.data(), record.size());
+        }
+        return static_cast<int>(result);
+    }
 
-    const ludus::runtime::game_host::RunResult result = ludus::runtime::game_host::Run(config);
-    (void)ludus::foundation::logging::LogSystem::Shutdown();
+    const RunResult result = entry == nullptr ? Run(config) : RunStatic(config, entry);
     return static_cast<int>(result);
 }
