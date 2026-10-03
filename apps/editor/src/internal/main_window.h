@@ -25,6 +25,7 @@ QT_END_NAMESPACE
 namespace ludus::editor
 {
 
+class AudioWorkspace;
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -56,6 +57,9 @@ private:
     void RenderCapabilities();
     void RenderStatus();
 
+    AudioWorkspace* Audio_ = nullptr;
+    bool AudioClosing_ = false;
+    bool AudioLaunchPending_ = false;
     EditorController* Controller_ = nullptr;
     bool Rendering_ = false;
     bool CloseConfirmed_ = false;

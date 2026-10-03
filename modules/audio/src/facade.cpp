@@ -5,9 +5,9 @@
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 
-#include "internal/decode.hpp"
 #include "internal/impl.hpp"
 #include "internal/log_categories.h"
+#include "internal/prepared.hpp"
 
 #include <cmath>
 #include <new>
@@ -126,11 +126,16 @@ Status AudioSystem::Initialize(const SystemConfig& config) noexcept
         case Mode::Disabled:
             impl->State = SystemState::Disabled;
             break;
-        case Mode::Device:
-            // A1 has no device adapter yet; A5/A6 provide it. Report Ready for the
-            // offline-compatible control path but note the device is not attached.
+        case Mode::Device: {
+            const auto status = impl->StartDevice();
+            if (status != Status::Ok)
+            {
+                delete impl;
+                return status;
+            }
             impl->State = SystemState::Ready;
             break;
+        }
     }
 
     mImpl = ludus::foundation::core::UniquePtr<Impl>(impl);
@@ -163,16 +168,28 @@ uint32 AudioSystem::GetSampleRate() const noexcept
 Status
 AudioSystem::PrepareClip(std::span<const uint8> encoded, const ClipDescriptor& descriptor, ClipHandle& outClip) noexcept
 {
-    outClip = ClipHandle{};
-    if (!mImpl)
+    outClip = {};
+    if (!mImpl || mImpl->State != SystemState::Ready)
     {
         return Status::NotReady;
     }
-    if (encoded.empty())
+    PreparedClip prepared;
+    const auto status = prepared.Decode(encoded, descriptor, mImpl->SampleRate);
+    return status == Status::Ok ? InstallClip(prepared, outClip) : status;
+}
+Status AudioSystem::InstallClip(PreparedClip& prepared, ClipHandle& outClip) noexcept
+{
+    outClip = {};
+    if (!mImpl || mImpl->State != SystemState::Ready)
+    {
+        return Status::NotReady;
+    }
+    if (prepared.mImpl == nullptr || prepared.mImpl->Rate != mImpl->SampleRate)
     {
         return Status::InvalidArgument;
     }
-
+    auto& data = *prepared.mImpl;
+    auto& decoded = data.Decoded;
     // Find a free clip slot.
     uint32 slot = mImpl->LogicalCapacity;
     for (uint32 i = 0; i < mImpl->LogicalCapacity; ++i)
@@ -188,16 +205,20 @@ AudioSystem::PrepareClip(std::span<const uint8> encoded, const ClipDescriptor& d
         return Status::AssetCapacity;
     }
 
-    internal::DecodedPcm decoded = internal::DecodeResidentClip(encoded, descriptor.Format, mImpl->SampleRate);
-    if (!IsOk(decoded.Result))
+    uint64 residentBytes = decoded.Frames * decoded.Channels * sizeof(float32);
+    for (uint32 i = 0; i < mImpl->LogicalCapacity; ++i)
     {
-        return decoded.Result;
+        residentBytes += mImpl->Clips[i].SampleValues * sizeof(float32);
     }
+    if (residentBytes > RESIDENT_PCM_CAP_BYTES)
+    {
 
+        return Status::AssetCapacity;
+    }
     internal::ClipSlot& c = mImpl->Clips[slot];
     if (!c.Generation.Advance())
     {
-        ::operator delete[](decoded.Pcm, std::nothrow);
+
         return Status::AssetCapacity;
     }
     c.InUse = true;
@@ -208,31 +229,15 @@ AudioSystem::PrepareClip(std::span<const uint8> encoded, const ClipDescriptor& d
     c.SampleValues = decoded.Frames * decoded.Channels;
     c.Pcm = decoded.Pcm;
     c.PreparedPeak = decoded.PreparedPeak;
-    c.AssetHash = descriptor.AssetHash;
+    c.AssetHash = data.AssetHash;
     c.Pins = 0;
 
-    // Convert optional source-rate loop metadata to prepared points via checked
-    // rational rounding. If none supplied, no loop.
-    if (descriptor.SourceLoopEnd > descriptor.SourceLoopBegin)
-    {
-        // Decoder already produced session-rate frames; loop metadata is given
-        // in source frames and must be scaled. Without the source rate recorded
-        // separately we treat supplied metadata as already prepared-rate when
-        // within range; otherwise clamp to PCM. (A2 refines source-rate loop
-        // conversion with the recorded source rate.)
-        uint64 begin = descriptor.SourceLoopBegin;
-        uint64 end = descriptor.SourceLoopEnd;
-        if (end > c.Frames)
-        {
-            end = c.Frames;
-        }
-        if (begin < end)
-        {
-            c.LoopBegin = begin;
-            c.LoopEnd = end;
-        }
-    }
+    c.LoopBegin = data.LoopBegin;
+    c.LoopEnd = data.LoopEnd;
 
+    decoded.Pcm = nullptr;
+    delete prepared.mImpl;
+    prepared.mImpl = nullptr;
     outClip = mImpl->MakeClipHandle(slot);
     return Status::Ok;
 }
@@ -241,15 +246,114 @@ Status AudioSystem::PrepareStream(std::span<const uint8> encoded,
                                   const StreamDescriptor& descriptor,
                                   StreamHandle& outStream) noexcept
 {
-    outStream = StreamHandle{};
-    (void)encoded;
-    (void)descriptor;
-    if (!mImpl)
+    outStream = {};
+    if (!mImpl || mImpl->State != SystemState::Ready)
     {
         return Status::NotReady;
     }
-    // Streaming worker lands in A4. Report explicitly rather than faking a path.
-    return Status::Unsupported;
+    auto& state = *mImpl;
+    uint64 encodedTotal = encoded.size();
+    for (const auto& existing : state.Streams)
+    {
+        if (existing.InUse)
+        {
+            encodedTotal += existing.Data->EncodedBytes;
+        }
+    }
+    if (encodedTotal > BROWSER_ENCODED_CAP_BYTES)
+    {
+        return Status::AssetCapacity;
+    }
+    uint32 index = state.StreamInstances;
+    for (uint32 i = 0; i < state.StreamInstances; ++i)
+    {
+        if (!state.Streams[i].InUse && state.Streams[i].Generation < 0xFFFFFFFEU)
+        {
+            index = i;
+            break;
+        }
+    }
+    if (index == state.StreamInstances)
+    {
+        return Status::StreamCapacity;
+    }
+    auto* data = new (std::nothrow) internal::StreamData();
+    if (data == nullptr)
+    {
+        return Status::OutOfMemory;
+    }
+    auto status = data->Open(encoded, descriptor, state.SampleRate);
+    if (status != Status::Ok)
+    {
+        delete data;
+        return status;
+    }
+    status = state.StartWorker();
+    if (status != Status::Ok)
+    {
+        delete data;
+        return status;
+    }
+    auto& slot = state.Streams[index];
+    ++slot.Generation;
+    slot.InUse = true;
+    slot.Played = false;
+    slot.Retiring = false;
+    slot.Data = data;
+    state.WorkerStreams[index].store(data, std::memory_order_release);
+    outStream = {state.Session, index, slot.Generation};
+    return Status::Ok;
+}
+
+Status AudioSystem::PrepareStream(foundation::core::UniquePtr<StreamInput> input,
+                                  const StreamDescriptor& descriptor,
+                                  StreamHandle& outStream) noexcept
+{
+    outStream = {};
+    if (!mImpl || mImpl->State != SystemState::Ready)
+    {
+        return Status::NotReady;
+    }
+    auto& state = *mImpl;
+    uint32 index = state.StreamInstances;
+    for (uint32 i = 0; i < state.StreamInstances; ++i)
+    {
+        if (!state.Streams[i].InUse && state.Streams[i].Generation < 0xFFFFFFFEU)
+        {
+            index = i;
+            break;
+        }
+    }
+    if (index == state.StreamInstances)
+    {
+        return Status::StreamCapacity;
+    }
+    auto* data = new (std::nothrow) internal::StreamData();
+    if (data == nullptr)
+    {
+        return Status::OutOfMemory;
+    }
+    auto status = data->Open(input.Release(), descriptor, state.SampleRate);
+    if (status != Status::Ok)
+    {
+        delete data;
+        return status;
+    }
+    status = state.StartWorker();
+    if (status != Status::Ok)
+    {
+        delete data;
+        return status;
+    }
+    auto& slot = state.Streams[index];
+    ++slot.Generation;
+    slot.InUse = true;
+    slot.Played = false;
+    slot.Retiring = false;
+    slot.Data = data;
+    state.WorkerStreams[index].store(data, std::memory_order_release);
+    outStream = {state.Session, index, slot.Generation};
+    return Status::Ok;
 }
 
 bool AudioSystem::IsClipReady(ClipHandle clip) const noexcept
@@ -279,12 +383,23 @@ Status AudioSystem::RetireClip(ClipHandle clip) noexcept
 
 Status AudioSystem::RetireStream(StreamHandle stream) noexcept
 {
-    (void)stream;
     if (!mImpl)
     {
         return Status::NotReady;
     }
-    return Status::Unsupported;
+    const auto slot = mImpl->FindStream(stream);
+    if (slot >= mImpl->StreamInstances)
+    {
+        return Status::InvalidHandle;
+    }
+    auto& instance = mImpl->Streams[slot];
+    instance.Retiring = true;
+    // Active playback retains the ring; cancellation follows durable terminal.
+    if (!instance.Played)
+    {
+        instance.Data->Cancel.store(true, std::memory_order_release);
+    }
+    return Status::Ok;
 }
 
 // ===========================================================================
@@ -300,6 +415,11 @@ BatchResult AudioSystem::TrySubmitBatch(std::span<const Command> commands) noexc
     }
     Impl& s = *mImpl;
     s.LastBatchVoiceCount = 0;
+    if (s.State != SystemState::Ready && s.SystemMode != Mode::Disabled)
+    {
+        result.Result = Status::NotReady;
+        return result;
+    }
 
     if (commands.size() > MAX_BATCH_RECORDS)
     {
@@ -318,6 +438,7 @@ BatchResult AudioSystem::TrySubmitBatch(std::span<const Command> commands) noexc
         return result;
     }
 
+    s.CollectRender();
     // --- Phase 1: validate the whole batch, no mutation --------------------
     // Validate every record and batch-local references before any reservation.
     for (usize i = 0; i < commands.size(); ++i)
@@ -355,6 +476,16 @@ BatchResult AudioSystem::TrySubmitBatch(std::span<const Command> commands) noexc
                     result.Result = Status::InvalidHandle;
                     ++s.RejectedCommands;
                     return result;
+                }
+                if (local < 0)
+                {
+                    const auto slot = s.FindVoiceSlot(cmd.Update.Voice);
+                    if (s.Voices[slot].IsStream && (cmd.Update.SetRate || cmd.Update.SetPosition))
+                    {
+                        result.Result = Status::InvalidArgument;
+                        ++s.RejectedCommands;
+                        return result;
+                    }
                 }
                 break;
             }
@@ -557,6 +688,13 @@ BatchResult AudioSystem::TrySubmitBatch(std::span<const Command> commands) noexc
                 q.MaxDistance = p.MaxDistance;
                 q.ExplicitPan = p.ExplicitPan;
                 q.PolicyTag = p.PolicyTag;
+                const auto& clip = s.Clips[v.ClipSlotIndex];
+                q.Pcm = clip.Pcm;
+                q.Frames = clip.Frames;
+                q.Channels = clip.Channels;
+                q.LoopBegin = clip.LoopBegin;
+                q.LoopEnd = clip.LoopEnd;
+                q.Peak = clip.PreparedPeak;
                 q.IsStream = false;
                 q.AdmissionEpoch = s.StopAllEpoch;
                 break;
@@ -688,16 +826,78 @@ Status AudioSystem::PlayStream(StreamHandle stream,
                                float32 gain,
                                VoiceHandle& outVoice) noexcept
 {
-    (void)stream;
-    (void)busIndex;
-    (void)priority;
-    (void)gain;
-    outVoice = VoiceHandle{};
+    outVoice = {};
     if (!mImpl)
     {
         return Status::NotReady;
     }
-    return Status::Unsupported; // A4
+    auto& s = *mImpl;
+    s.CollectRender();
+    if (s.State != SystemState::Ready)
+    {
+        return Status::NotReady;
+    }
+    const auto index = s.FindStream(stream);
+    if (index >= s.StreamInstances)
+    {
+        return Status::InvalidHandle;
+    }
+    auto& instance = s.Streams[index];
+    if (instance.Played)
+    {
+        return Status::NotReady;
+    }
+    if (busIndex >= s.BusCount || priority > 7 || !std::isfinite(gain) || gain < 0 || gain > 1)
+    {
+        return Status::InvalidArgument;
+    }
+    if (s.CommandRing.FreeSlots() == 0)
+    {
+        return Status::QueueFull;
+    }
+    const auto slot = s.ReserveVoiceSlot();
+    if (slot >= s.LogicalCapacity)
+    {
+        return Status::VoiceCapacity;
+    }
+    auto& v = s.Voices[slot];
+    v.IsStream = true;
+    v.StreamSlotIndex = index;
+    v.State = VoiceState::Pending;
+    v.BusIndex = busIndex;
+    v.GroupIndex = 0;
+    v.Priority = priority;
+    v.Gain = gain;
+    v.Rate = 1;
+    v.Looping = instance.Data->Looping;
+    v.AdmissionEpoch = s.StopAllEpoch;
+    v.PlayDrained = false;
+    v.FadeGain = 0;
+    v.FadeTarget = 1;
+    v.Terminal.TerminalGeneration.store(0, std::memory_order_relaxed);
+    v.Stop.StopGeneration.store(0, std::memory_order_relaxed);
+    QueuedCommand q{};
+    q.Kind = CommandKind::Play;
+    q.BatchLength = 1;
+    q.VoiceSlotIndex = slot;
+    q.VoiceGeneration = v.Generation.Value;
+    q.BusIndex = busIndex;
+    q.Priority = priority;
+    q.Gain = gain;
+    q.Rate = 1;
+    q.IsStream = true;
+    q.StreamSlotIndex = index;
+    q.Stream = instance.Data;
+    q.AdmissionEpoch = s.StopAllEpoch;
+    q.Looping = v.Looping;
+    if (!s.CommandRing.TryPublishBatch({&q, 1}))
+    {
+        v.InUse = false;
+        return Status::QueueFull;
+    }
+    instance.Played = true;
+    outVoice = s.MakeVoiceHandle(slot);
+    return Status::Ok;
 }
 
 // ===========================================================================
@@ -737,6 +937,7 @@ void AudioSystem::StopAll() noexcept
         return;
     }
     ++mImpl->StopAllEpoch;
+    mImpl->PublishedStopAll.store(mImpl->StopAllEpoch, std::memory_order_release);
 }
 
 // ===========================================================================
@@ -749,6 +950,12 @@ void AudioSystem::Service() noexcept
         return;
     }
     Impl& s = *mImpl;
+    s.CollectRender();
+    if (s.State == SystemState::Ready && s.DeviceStopped.load(std::memory_order_acquire))
+    {
+        s.State = SystemState::Failed;
+        ++s.Errors;
+    }
 
     // Acknowledge durable terminals and reclaim retired assets. In Offline/A1
     // the renderer runs on this same thread; acknowledgment is still routed
@@ -771,6 +978,17 @@ void AudioSystem::Service() noexcept
         }
     }
 
+    for (uint32 i = 0; i < s.StreamInstances; ++i)
+    {
+        auto& slot = s.Streams[i];
+        if (slot.InUse && slot.Retiring && slot.Data->Cancel.load(std::memory_order_acquire) &&
+            s.WorkerStreams[i].load(std::memory_order_acquire) == nullptr)
+        {
+            delete slot.Data;
+            slot.Data = nullptr;
+            slot.InUse = false;
+        }
+    }
     // Publish a fresh diagnostic snapshot and drain it to the sink.
     s.PublishSnapshot();
     if (s.Sink != nullptr)
@@ -803,7 +1021,13 @@ Status AudioSystem::GetVoiceInfo(VoiceHandle voice, VoiceInfo& out) const noexce
     out.Voice = voice;
     out.State = v.State;
     out.LastCause = v.LastCause;
-    out.Terminal = v.Terminal.Reason;
+    // The renderer writes terminal details before release-publishing generation.
+    // Reading them while a voice is still active races with that publication.
+    if (v.Terminal.TerminalGeneration.load(std::memory_order_acquire) == v.Generation.Value)
+    {
+        out.Terminal = v.Terminal.Reason;
+        out.State = VoiceState::Terminal;
+    }
     out.Silence = v.Silence;
     out.Stale = false;
     out.SnapshotFrame = mImpl->RenderFrame;
@@ -858,6 +1082,7 @@ Status AudioSystem::GetBusMeter(uint32 busIndex, BusMeter& out) const noexcept
     {
         return Status::InvalidArgument;
     }
+    mImpl->CollectRender();
     const internal::BusState& b = mImpl->Buses[busIndex];
     out.InputPeakL = b.InputMeter.OutPeakL;
     out.InputPeakR = b.InputMeter.OutPeakR;
@@ -884,6 +1109,7 @@ void AudioSystem::GetSystemSnapshot(SystemSnapshot& out) const noexcept
     // owner-authoritative accounting; the SPSC snapshot ring is for a separate
     // async sink consumer (design section 11) and uses FIFO semantics, so it is
     // not read here.
+    mImpl->CollectRender();
     mImpl->FillSnapshot(out);
 }
 
@@ -895,7 +1121,7 @@ Status AudioSystem::RenderOffline(std::span<float32> output,
                                   BufferLayout bufferLayout,
                                   uint32 frames) noexcept
 {
-    if (!mImpl)
+    if (!mImpl || mImpl->State != SystemState::Ready)
     {
         return Status::NotReady;
     }
@@ -925,7 +1151,35 @@ Status AudioSystem::BeginShutdown() noexcept
     {
         return Status::NotReady;
     }
-    // Close admission immediately; A1 completes synchronously (no device/worker).
+    if (mImpl->Shutdown == ShutdownState::Complete)
+    {
+        return Status::Ok;
+    }
+    mImpl->State = SystemState::Stopping;
+    mImpl->CloseDevice();
+    mImpl->CloseWorker();
+    // Joining both consumers proves queued payloads are no longer borrowed.
+    for (uint32 i = 0; i < mImpl->LogicalCapacity; ++i)
+    {
+        if (mImpl->Voices[i].InUse)
+        {
+            mImpl->TerminateVoice(i, TerminalReason::Stopped, StateCause::StopRequested);
+        }
+    }
+    mImpl->AcknowledgeTerminals();
+    for (uint32 i = 0; i < mImpl->StreamInstances; ++i)
+    {
+        mImpl->WorkerStreams[i].store(nullptr, std::memory_order_relaxed);
+        delete mImpl->Streams[i].Data;
+        mImpl->Streams[i].Data = nullptr;
+        mImpl->Streams[i].InUse = false;
+    }
+    mImpl->ReleaseStorage();
+    for (auto& clip : mImpl->Clips)
+    {
+        clip.InUse = false;
+    }
+    // Close admission after native renderer and worker quiescence.
     mImpl->State = SystemState::Stopping;
     mImpl->Shutdown = ShutdownState::Complete;
     mImpl->State = SystemState::Disabled;
@@ -1004,6 +1258,25 @@ Status AudioSystem::AcquireModifier(std::span<const ModifierValue> values,
         m.Db[mv.BusIndex] = mv.TargetDb;
         m.HasBus[mv.BusIndex] = true;
     }
+    if (s.SystemMode == Mode::Device)
+    {
+        QueuedCommand q{};
+        q.Kind = CommandKind::AddModifier;
+        q.BatchLength = 1;
+        q.ModifierSlotIndex = slot;
+        q.ModifierGeneration = m.Generation.Value;
+        q.ModifierWeight = weight;
+        q.ModifierValueCount = static_cast<uint32>(values.size());
+        for (usize i = 0; i < values.size(); ++i)
+        {
+            q.ModifierValues[i] = values[i];
+        }
+        if (!s.CommandRing.TryPublishBatch({&q, 1}))
+        {
+            m.InUse = false;
+            return Status::QueueFull;
+        }
+    }
     outModifier = ModifierHandle{s.Session, slot, m.Generation.Value};
     return Status::Ok;
 }
@@ -1024,6 +1297,19 @@ Status AudioSystem::UpdateModifier(ModifierHandle modifier, float32 weight) noex
         return Status::InvalidHandle;
     }
     internal::ModifierState& m = mImpl->Modifiers[slot];
+    if (mImpl->SystemMode == Mode::Device)
+    {
+        QueuedCommand q{};
+        q.Kind = CommandKind::UpdateModifier;
+        q.BatchLength = 1;
+        q.ModifierSlotIndex = slot;
+        q.ModifierGeneration = m.Generation.Value;
+        q.ModifierWeight = weight;
+        if (!mImpl->CommandRing.TryPublishBatch({&q, 1}))
+        {
+            return Status::QueueFull;
+        }
+    }
     m.Weight = weight;
     m.TargetWeight = weight;
     return Status::Ok;
@@ -1041,6 +1327,18 @@ Status AudioSystem::ReleaseModifier(ModifierHandle modifier) noexcept
         return Status::InvalidHandle;
     }
     internal::ModifierState& m = mImpl->Modifiers[slot];
+    if (mImpl->SystemMode == Mode::Device)
+    {
+        QueuedCommand q{};
+        q.Kind = CommandKind::RemoveModifier;
+        q.BatchLength = 1;
+        q.ModifierSlotIndex = slot;
+        q.ModifierGeneration = m.Generation.Value;
+        if (!mImpl->CommandRing.TryPublishBatch({&q, 1}))
+        {
+            return Status::QueueFull;
+        }
+    }
     // Fade the weight to zero and retire the slot. Removing one instance never
     // removes another (each has its own slot/generation). A1/A3 apply the final
     // state immediately on the serialized owner thread; the slot is freed so a

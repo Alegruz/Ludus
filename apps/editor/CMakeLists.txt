@@ -53,6 +53,7 @@ target_link_libraries(ludus_editor_core
     PRIVATE
         Ludus::FoundationBase
         Ludus::FoundationLogging
+        Ludus::AudioContent
 )
 ludus_apply_project_defaults(ludus_editor_core)
 
@@ -60,6 +61,10 @@ ludus_apply_project_defaults(ludus_editor_core)
 add_executable(ludus_editor
     src/internal/controller.h
     src/internal/main_window.h
+    src/internal/audio_workspace.h
+    src/internal/audio_preview.h
+    src/audio_workspace.cpp
+    src/audio_preview.cpp
     main.cpp
     src/main_window.cpp
     src/controller.cpp
@@ -75,6 +80,7 @@ target_link_libraries(ludus_editor
         Qt6::Widgets
         Ludus::FoundationBase
         Ludus::FoundationLogging
+        Ludus::AudioContent
 )
 ludus_apply_project_defaults(ludus_editor)
 
@@ -90,7 +96,12 @@ if(LUDUS_BUILD_TESTS)
     add_executable(ludus_editor_tests
         src/internal/controller.h
         src/internal/main_window.h
+    src/internal/audio_workspace.h
+    src/internal/audio_preview.h
+    src/audio_workspace.cpp
+    src/audio_preview.cpp
         tests/main.cpp
+        tests/audio_content_tests.cpp
         tests/workspace_tests.cpp
         tests/project_store_tests.cpp
         tests/project_store_v2_tests.cpp
@@ -99,7 +110,7 @@ if(LUDUS_BUILD_TESTS)
         tests/controller_tests.cpp
     )
     set_target_properties(ludus_editor_tests PROPERTIES AUTOMOC ON)
-    target_include_directories(ludus_editor_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_include_directories(ludus_editor_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/modules/audio/tests")
     target_compile_definitions(ludus_editor_tests PRIVATE QT_NO_KEYWORDS QT_NO_CAST_FROM_ASCII
         "LUDUS_EDITOR_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\""
         "LUDUS_EDITOR_PROJECT_ROOT=\"${PROJECT_SOURCE_DIR}\"")
@@ -115,6 +126,7 @@ if(LUDUS_BUILD_TESTS)
             Qt6::Test
             Ludus::FoundationBase
             Ludus::FoundationLogging
+            Ludus::AudioContent
             Catch2::Catch2)
     ludus_apply_project_defaults(ludus_editor_tests)
     # Catch2 reports assertion failures by throwing; test targets (only) re-enable

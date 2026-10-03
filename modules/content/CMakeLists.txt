@@ -1,0 +1,17 @@
+add_library(ludus_content STATIC src/json.cpp src/catalog.cpp src/files.cpp src/hash.cpp)
+add_library(Ludus::Content ALIAS ludus_content)
+set_target_properties(ludus_content PROPERTIES EXPORT_NAME Content)
+target_sources(ludus_content PUBLIC FILE_SET public_headers TYPE HEADERS BASE_DIRS include
+    FILES include/ludus/content/content.h include/ludus/content/json.h)
+target_link_libraries(ludus_content PUBLIC Ludus::FoundationBase PRIVATE ludus_yyjson)
+ludus_apply_project_defaults(ludus_content)
+install(TARGETS ludus_content EXPORT LudusTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+if(LUDUS_BUILD_TESTS)
+    find_package(Catch2 3 REQUIRED CONFIG)
+    add_executable(ludus_content_tests tests/content_tests.cpp)
+    target_link_libraries(ludus_content_tests PRIVATE Ludus::Content Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_content_tests)
+    ludus_enable_test_exceptions(ludus_content_tests)
+    add_test(NAME ludus_content_tests COMMAND ludus_content_tests)
+endif()

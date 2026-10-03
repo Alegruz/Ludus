@@ -12,6 +12,10 @@ target_sources(
     ludus_audio
     PRIVATE
         src/status.cpp
+        src/device.cpp
+        src/source.cpp
+        src/prepared.cpp
+        src/stream.cpp
         src/audio_system.cpp
         src/control_owner.cpp
         src/facade.cpp
@@ -29,6 +33,7 @@ target_sources(
         BASE_DIRS
             include
         FILES
+            include/ludus/audio/audio_source.h
             include/ludus/audio/audio_types.h
             include/ludus/audio/audio_system.h
             include/ludus/audio/audio_debug.h
@@ -57,6 +62,7 @@ target_link_libraries(
         Ludus::FoundationBase
     PRIVATE
         Ludus::FoundationContainers
+        Ludus::FoundationMath
         Ludus::FoundationLogging
         Ludus::Miniaudio
 )
@@ -77,6 +83,7 @@ if(LUDUS_BUILD_TESTS)
     target_sources(
         ludus_audio_tests
         PRIVATE
+            tests/stream_tests.cpp
             tests/spsc_ring_tests.cpp
             tests/handle_tests.cpp
             tests/admission_tests.cpp

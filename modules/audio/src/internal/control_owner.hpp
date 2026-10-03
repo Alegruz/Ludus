@@ -15,6 +15,7 @@
 #include "internal/handles.hpp"
 #include "internal/mixer.hpp"
 #include "internal/spsc_ring.hpp"
+#include "internal/stream.hpp"
 
 #include <atomic>
 #include <span>
@@ -69,6 +70,11 @@ struct QueuedCommand final
     uint32 StreamSlotIndex = 0;
     uint32 AdmissionEpoch = 0;
 
+    const float32* Pcm = nullptr;
+    uint64 Frames = 0, LoopBegin = 0, LoopEnd = 0;
+    uint32 Channels = 0;
+    float32 Peak = 0.0F;
+    StreamData* Stream = nullptr;
     // Update payload.
     bool SetGain = false;
     bool SetRate = false;

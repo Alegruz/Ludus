@@ -1,0 +1,3 @@
+add_executable(ludus_content_validate main.cpp)
+target_link_libraries(ludus_content_validate PRIVATE Ludus::AudioContent Ludus::FoundationLogging)
+ludus_apply_project_defaults(ludus_content_validate)

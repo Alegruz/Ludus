@@ -21,6 +21,7 @@
 #include "internal/mixer.hpp"
 #include "internal/physical_voice.hpp"
 #include "internal/spsc_ring.hpp"
+#include "internal/stream.hpp"
 #include "internal/voice_kernel.hpp"
 
 #include <span>
@@ -39,11 +40,12 @@ struct AudioSystem::Impl final
     // Free all owned PCM and resampler heaps at destruction. The warm paths
     // never allocate/free; this cold teardown releases everything acquired by
     // PrepareClip and the preinitialized physical-voice resamplers.
-    ~Impl() noexcept
+    ~Impl() noexcept;
+    void ReleaseStorage() noexcept
     {
         for (uint32 i = 0; i < static_cast<uint32>(LOGICAL_VOICE_CAPACITY); ++i)
         {
-            if (Clips[i].Pcm != nullptr)
+            if (Control == nullptr && Clips[i].Pcm != nullptr)
             {
                 Clips[i].ReleasePcm();
             }
@@ -59,6 +61,48 @@ struct AudioSystem::Impl final
     Impl(Impl&&) = delete;
     Impl& operator=(Impl&&) = delete;
 
+    Impl* Control = nullptr;  // renderer borrows immutable clip payloads
+    Impl* Renderer = nullptr; // owner owns dedicated renderer state in Device mode
+    void* Device = nullptr;
+    void* Worker = nullptr;
+    internal::StreamSlot Streams[STREAM_CAPACITY];
+    std::atomic<internal::StreamData*> WorkerStreams[STREAM_CAPACITY]{};
+    std::atomic<bool> WorkerStop{false};
+    std::atomic<bool> DeviceStopped{false};
+    std::atomic<uint32> PublishedStopAll{1};
+    std::atomic<uint64> PublishedFrame{0};
+    struct RenderRecord final
+    {
+        uint32 Slot = 0;
+        uint32 Generation = 0;
+        VoiceState State = VoiceState::Terminal;
+        uint64 Cursor = 0;
+        float32 Gain = 0.0F;
+        StateCause Cause = StateCause::None;
+        SilenceCause Silence = SilenceCause::None;
+    };
+    SpscRing<RenderRecord, 1024> RenderSnapshots;
+    struct RenderStats final
+    {
+        internal::BusState Buses[BUS_CAPACITY];
+        uint32 Selected[GROUP_CAPACITY]{};
+        uint32 Fading[GROUP_CAPACITY]{};
+        uint64 Starvations = 0;
+        uint64 Eof = 0;
+        uint64 Errors = 0;
+        uint64 Stale = 0;
+        uint64 PreClip = 0;
+        uint64 NonFinite = 0;
+        uint32 Losses = 0;
+    };
+    SpscRing<RenderStats, 4> RenderMetrics;
+    [[nodiscard]] Status StartDevice() noexcept;
+    void CloseDevice() noexcept;
+    [[nodiscard]] Status StartWorker() noexcept;
+    void CloseWorker() noexcept;
+    void CollectRender() noexcept;
+    void PublishRender() noexcept;
+    [[nodiscard]] uint32 FindStream(StreamHandle handle) const noexcept;
     // --- Configuration (frozen at Initialize) ------------------------------
     SystemConfig Config{};
     uint32 Session = 0;

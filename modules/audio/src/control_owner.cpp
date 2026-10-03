@@ -36,18 +36,19 @@ void AudioSystem::Impl::ConsumeAndApplyBatch() noexcept
     // deferred to the next boundary (eventual progress, no partial update). A
     // single batch is bounded by MAX_BATCH_RECORDS (32) < 64, so it always fits
     // when the boundary starts empty.
+    auto& source = Control != nullptr ? Control->CommandRing : CommandRing;
     QueuedCommand cmd{};
     uint32 applied = 0;
-    while (applied < CONTROL_BOUNDARY_BUDGET && CommandRing.Peek(cmd))
+    while (applied < CONTROL_BOUNDARY_BUDGET && source.Peek(cmd))
     {
         const uint32 batchLen = cmd.BatchLength == 0 ? 1 : cmd.BatchLength;
         if (applied != 0 && applied + batchLen > CONTROL_BOUNDARY_BUDGET)
         {
             break; // defer the whole batch; never split it across a boundary
         }
-        for (uint32 bi = 0; bi < batchLen && CommandRing.Peek(cmd); ++bi)
+        for (uint32 bi = 0; bi < batchLen && source.Peek(cmd); ++bi)
         {
-            CommandRing.ConsumeOne();
+            source.ConsumeOne();
             ++applied;
             ++AcceptedCommands;
             ApplyOneCommand(cmd);
@@ -62,6 +63,48 @@ void AudioSystem::Impl::ApplyOneCommand(const QueuedCommand& cmd) noexcept
         {
             case CommandKind::Play: {
                 VoiceSlot& v = Voices[cmd.VoiceSlotIndex];
+                if (Control != nullptr)
+                {
+                    v.Generation.Value = cmd.VoiceGeneration;
+                    v.InUse = true;
+                    v.State = VoiceState::Pending;
+                    v.ClipSlotIndex = cmd.ClipSlotIndex;
+                    v.BusIndex = cmd.BusIndex;
+                    v.GroupIndex = cmd.GroupIndex;
+                    v.Priority = cmd.Priority;
+                    v.Gain = cmd.Gain;
+                    v.Rate = cmd.Rate;
+                    v.Looping = cmd.Looping;
+                    v.Policy = cmd.Policy;
+                    v.Positional = cmd.Positional;
+                    v.Origin = cmd.Origin;
+                    v.MinDistance = cmd.MinDistance;
+                    v.MaxDistance = cmd.MaxDistance;
+                    v.ExplicitPan = cmd.ExplicitPan;
+                    v.EmitterPosition = cmd.EmitterPosition;
+                    v.PolicyTag = cmd.PolicyTag;
+                    v.IsStream = cmd.IsStream;
+                    v.StreamSlotIndex = cmd.StreamSlotIndex;
+                    v.AdmissionEpoch = cmd.AdmissionEpoch;
+                    v.PreparedPeakScore = cmd.Peak;
+                    v.FadeGain = 0;
+                    v.FadeTarget = 1;
+                    v.PlayDrained = false;
+                    v.PhysicalIndex = 0xFFFFFFFFU;
+                    if (!cmd.IsStream)
+                    {
+                        auto& c = Clips[v.ClipSlotIndex];
+                        c.Pcm = const_cast<float32*>(cmd.Pcm);
+                        c.Frames = cmd.Frames;
+                        c.Channels = cmd.Channels;
+                        c.LoopBegin = cmd.LoopBegin;
+                        c.LoopEnd = cmd.LoopEnd;
+                    }
+                    if (cmd.IsStream)
+                    {
+                        Streams[cmd.StreamSlotIndex].Data = cmd.Stream;
+                    }
+                }
                 // Reject a stale command targeting a reused slot.
                 if (v.Generation.Value != cmd.VoiceGeneration || !v.InUse)
                 {
@@ -77,7 +120,8 @@ void AudioSystem::Impl::ApplyOneCommand(const QueuedCommand& cmd) noexcept
                 }
                 // An individual Stop stored before consumption cancels the pending
                 // play (a Stop on Pending waits for this drain).
-                const uint32 stopGen = v.Stop.StopGeneration.load(std::memory_order_acquire);
+                const uint32 stopGen = (Control != nullptr ? Control->Voices[cmd.VoiceSlotIndex].Stop : v.Stop)
+                                           .StopGeneration.load(std::memory_order_acquire);
                 if (stopGen == v.Generation.Value)
                 {
                     v.PlayDrained = true;
@@ -166,6 +210,12 @@ void AudioSystem::Impl::ApplyOneCommand(const QueuedCommand& cmd) noexcept
                 break;
             case CommandKind::AddModifier: {
                 internal::ModifierState& m = Modifiers[cmd.ModifierSlotIndex];
+                if (Control != nullptr && cmd.Kind == CommandKind::AddModifier)
+                {
+                    m.Generation.Value = cmd.ModifierGeneration;
+                    m.InUse = true;
+                    m.Removing = false;
+                }
                 if (m.Generation.Value != cmd.ModifierGeneration || !m.InUse)
                 {
                     ++StaleCommands;
@@ -476,7 +526,7 @@ void AudioSystem::Impl::AcknowledgeTerminals() noexcept
         const uint32 termGen = v.Terminal.TerminalGeneration.load(std::memory_order_acquire);
         if (termGen != 0 && termGen == v.Generation.Value)
         {
-            if (v.GroupIndex < GroupCount && Groups[v.GroupIndex].Admitted > 0)
+            if (!v.IsStream && v.GroupIndex < GroupCount && Groups[v.GroupIndex].Admitted > 0)
             {
                 --Groups[v.GroupIndex].Admitted;
             }
@@ -498,6 +548,13 @@ void AudioSystem::Impl::TerminateVoice(uint32 slot, TerminalReason reason, State
     v.Terminal.FinalFrame = RenderFrame;
     // Release-publish the terminal generation; the owner acquires it to reclaim.
     v.Terminal.TerminalGeneration.store(v.Generation.Value, std::memory_order_release);
+    if (Control != nullptr)
+    {
+        auto& mailbox = Control->Voices[slot].Terminal;
+        mailbox.Reason = reason;
+        mailbox.FinalFrame = RenderFrame;
+        mailbox.TerminalGeneration.store(v.Generation.Value, std::memory_order_release);
+    }
 }
 
 void AudioSystem::Impl::ApplyStopMailboxes() noexcept
@@ -528,7 +585,8 @@ void AudioSystem::Impl::ApplyStopMailboxes() noexcept
             continue;
         }
         // Individual stop mailbox.
-        const uint32 stopGen = v.Stop.StopGeneration.load(std::memory_order_acquire);
+        const uint32 stopGen =
+            (Control != nullptr ? Control->Voices[i].Stop : v.Stop).StopGeneration.load(std::memory_order_acquire);
         if (stopGen == v.Generation.Value)
         {
             if (v.State == VoiceState::Mixed || v.State == VoiceState::Virtualizing)
@@ -547,6 +605,10 @@ void AudioSystem::Impl::ApplyStopMailboxes() noexcept
 
 void AudioSystem::Impl::ProcessControlBoundary() noexcept
 {
+    if (Control != nullptr)
+    {
+        StopAllEpoch = Control->PublishedStopAll.load(std::memory_order_acquire);
+    }
     ConsumeAndApplyBatch();
     ApplyStopMailboxes();
     ResolveScheduledStarts();
@@ -630,6 +692,38 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
             VoiceSlot& v = Voices[i];
             if (!v.InUse)
             {
+                continue;
+            }
+            if (v.IsStream)
+            {
+                if (v.State == VoiceState::Mixed || v.State == VoiceState::Stopping)
+                {
+                    auto* stream = Streams[v.StreamSlotIndex].Data;
+                    for (uint32 f = 0; f < span * 2; ++f)
+                    {
+                        MixAccum[f] = 0;
+                    }
+                    const auto rendered = stream->Render(MixAccum, {span, v.Gain, v.State == VoiceState::Stopping});
+                    const bool terminal = rendered.Terminal, error = rendered.Error;
+                    v.CursorFrame += rendered.Frames;
+                    v.FadeGain = stream->Fade;
+                    if (rendered.Frames < span && !terminal && v.State != VoiceState::Stopping)
+                    {
+                        ++StreamStarvations;
+                    }
+                    RouteVoiceToBus(v.BusIndex, MixAccum, span);
+                    if (terminal)
+                    {
+                        const bool stopped = v.State == VoiceState::Stopping;
+                        TerminateVoice(i,
+                                       error     ? TerminalReason::StreamError
+                                       : stopped ? TerminalReason::Stopped
+                                                 : TerminalReason::Completed,
+                                       error     ? StateCause::None
+                                       : stopped ? StateCause::StopRequested
+                                                 : StateCause::NaturalEof);
+                    }
+                }
                 continue;
             }
             const bool audiblePhase =
@@ -844,6 +938,10 @@ Status AudioSystem::Impl::RenderFrames(std::span<float32> output,
         produced += span;
     }
 
+    if (Control != nullptr)
+    {
+        PublishRender();
+    }
     return Status::Ok;
 }
 
@@ -919,6 +1017,17 @@ void AudioSystem::Impl::FillSnapshot(SystemSnapshot& out) const noexcept
     s.Errors = Errors;
     s.ResidentClips = clips;
     s.ResidentPcmBytes = pcmBytes;
+    if (Control == nullptr)
+    {
+        for (const auto& stream : Streams)
+        {
+            if (stream.InUse)
+            {
+                s.StreamEncodedBytes += stream.Data->EncodedBytes;
+                s.StreamRingBytes += sizeof(internal::StreamChunk) * STREAM_CHUNK_COUNT;
+            }
+        }
+    }
     s.SnapshotLosses = SnapshotLosses;
     s.PreClipFrames = PreClipFrames;
     s.NonFiniteFaults = NonFiniteFaults;

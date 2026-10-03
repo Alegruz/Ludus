@@ -69,3 +69,18 @@ install(TARGETS ludus_miniaudio EXPORT LudusTargets
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-MIT-0.txt"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}/licenses"
     RENAME miniaudio-LICENSE.txt)
+
+set(_audio_dependency_sanitizers "")
+if(LUDUS_ENABLE_ASAN)
+    list(APPEND _audio_dependency_sanitizers address)
+endif()
+if(LUDUS_ENABLE_UBSAN)
+    list(APPEND _audio_dependency_sanitizers undefined)
+endif()
+if(LUDUS_ENABLE_TSAN)
+    list(APPEND _audio_dependency_sanitizers thread)
+endif()
+if(_audio_dependency_sanitizers)
+    list(JOIN _audio_dependency_sanitizers "," _audio_dependency_sanitizer_flags)
+    target_compile_options(ludus_miniaudio PRIVATE -fsanitize=${_audio_dependency_sanitizer_flags} -fno-omit-frame-pointer)
+endif()

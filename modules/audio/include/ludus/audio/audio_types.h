@@ -592,6 +592,8 @@ struct SystemSnapshot final
 
     uint32 ResidentClips = 0;
     uint64 ResidentPcmBytes = 0;
+    uint64 StreamEncodedBytes = 0;
+    uint64 StreamRingBytes = 0;
 
     uint32 SnapshotLosses = 0; // debug ring publication losses
 

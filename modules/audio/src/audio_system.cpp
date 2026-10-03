@@ -173,6 +173,10 @@ uint32 AudioSystem::Impl::ReserveVoiceSlot() noexcept
 void AudioSystem::Impl::ReleaseVoiceSlot(uint32 index) noexcept
 {
     VoiceSlot& v = Voices[index];
+    if (v.IsStream)
+    {
+        Streams[v.StreamSlotIndex].Data->Cancel.store(true, std::memory_order_release);
+    }
     if (!v.IsStream)
     {
         internal::ClipSlot& c = Clips[v.ClipSlotIndex];

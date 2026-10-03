@@ -26,6 +26,8 @@ struct DecodedPcm final
     Status Result = Status::DecodeError;
     float32* Pcm = nullptr; // interleaved, Frames * Channels samples
     uint64 Frames = 0;
+    uint64 SourceFrames = 0;
+    uint32 SourceRate = 0;
     uint32 Channels = 1;
     ChannelLayout Layout = ChannelLayout::Mono;
     float32 PreparedPeak = 0.0F;
