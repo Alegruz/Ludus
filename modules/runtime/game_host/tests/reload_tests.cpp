@@ -28,6 +28,7 @@
 #include <fstream>
 #include <unordered_set>
 
+#include <sys/wait.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -82,6 +83,98 @@ TEST_CASE("generation service storage survives ownership moves", "[reload][servi
     REQUIRE(allocation != nullptr);
     candidateTable->FreeBytes(candidateTable->Context, allocation);
     REQUIRE(active.OutstandingAllocations() == 0);
+}
+
+TEST_CASE("work leases are gated and survive service ownership moves", "[reload][services]")
+{
+    HostServiceProvider services;
+    const auto* table = &services.Services();
+    REQUIRE_FALSE(table->AcquireWorkLease(table->Context));
+    services.Activate();
+    REQUIRE(table->AcquireWorkLease(table->Context));
+    HostServiceProvider moved = std::move(services);
+    REQUIRE(&moved.Services() == table);
+    REQUIRE(moved.OutstandingWork() == 1);
+    moved.GateWork();
+    REQUIRE_FALSE(table->AcquireWorkLease(table->Context));
+    REQUIRE(table->ReleaseWorkLease(table->Context));
+    REQUIRE(moved.OutstandingWork() == 0);
+    REQUIRE_FALSE(table->ReleaseWorkLease(table->Context));
+    moved.Activate();
+    for (usize i = 0; i < 1024; ++i)
+    {
+        REQUIRE(table->AcquireWorkLease(table->Context));
+    }
+    REQUIRE_FALSE(table->AcquireWorkLease(table->Context));
+    moved.Retire();
+    moved.Activate();
+    REQUIRE_FALSE(table->AcquireWorkLease(table->Context));
+    for (usize i = 0; i < 1024; ++i)
+    {
+        REQUIRE(table->ReleaseWorkLease(table->Context));
+    }
+    REQUIRE(moved.OutstandingWork() == 0);
+}
+
+TEST_CASE("allocation cap includes alignment slack and ledger backing", "[reload][services]")
+{
+    HostServiceProvider services;
+    const auto& table = services.Services();
+    constexpr usize kCap = usize{64} * 1024 * 1024;
+    REQUIRE(table.AllocateBytes(table.Context, kCap, 4096) == nullptr);
+    void* large = table.AllocateBytes(table.Context, kCap - 8192, 4096);
+    REQUIRE(large != nullptr);
+    REQUIRE(table.AllocateBytes(table.Context, 4096, 4096) == nullptr);
+    table.FreeBytes(table.Context, large);
+    REQUIRE(services.OutstandingAllocations() == 0);
+}
+
+TEST_CASE("reload rejects a live module worker until its thread is joined", "[reload][services]")
+{
+    HostSession session(1, 1, -1);
+    REQUIRE(session.LoadInitial(LUDUS_FIXTURE_A_PATH));
+    REQUIRE(::setenv("LUDUS_FIXTURE_FAIL", "work_pending", 1) == 0);
+    session.AdvanceOneFrame();
+    CHECK(session.OutstandingWorkLeases() == 1);
+    CHECK(session.ReloadTo(LUDUS_FIXTURE_B_PATH, 2) == protocol::CommandStatus::Busy);
+    CHECK(session.ActiveGeneration() == 1);
+    CHECK(session.State() == PlayState::Running);
+    CHECK(session.OutstandingWorkLeases() == 1);
+    REQUIRE(::unsetenv("LUDUS_FIXTURE_FAIL") == 0);
+    REQUIRE(session.ReloadTo(LUDUS_FIXTURE_B_PATH, 2) == protocol::CommandStatus::Ok);
+    REQUIRE(session.ActiveGeneration() == 2);
+    REQUIRE(session.OutstandingWorkLeases() == 0);
+}
+
+TEST_CASE("Stop retains code and instance when a module worker cannot drain", "[reload][services]")
+{
+    const auto child = ::fork();
+    REQUIRE(child >= 0);
+    if (child == 0)
+    {
+        HostSession session(1, 1, -1);
+        if (!session.LoadInitial(LUDUS_FIXTURE_A_PATH) || ::setenv("LUDUS_FIXTURE_FAIL", "work_pending", 1) != 0)
+        {
+            ::_exit(1);
+        }
+        if (session.RunLoop(1) != RunResult::Internal || session.State() != PlayState::CleanupUnknown ||
+            session.OutstandingWorkLeases() != 1 || session.OutstandingHostAllocations() != 1)
+        {
+            ::_exit(2);
+        }
+        std::ifstream mappings("/proc/self/maps");
+        std::string line;
+        bool retained = false;
+        while (std::getline(mappings, line))
+        {
+            retained = retained || line.find(LUDUS_FIXTURE_A_PATH) != std::string::npos;
+        }
+        ::_exit(retained ? 0 : 3);
+    }
+    int status = 0;
+    REQUIRE(::waitpid(child, &status, 0) == child);
+    REQUIRE(WIFEXITED(status));
+    REQUIRE(WEXITSTATUS(status) == 0);
 }
 
 TEST_CASE("candidate rejects malformed tagged checkpoints before promotion", "[reload][checkpoint]")

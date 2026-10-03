@@ -7,6 +7,7 @@
 
 #include <ludus/foundation/base/types.h>
 #include <ludus/runtime/game_api/api.h>
+#include <ludus/runtime/game_api/authored.h>
 #include <ludus/runtime/game_api/checkpoint.h>
 #include <ludus/runtime/game_api/properties.h>
 #include <ludus/runtime/game_api/services.h>
@@ -108,6 +109,39 @@ Status GameCreate(const CreateInfo* info, GameInstance** outInstance) noexcept
     state->ProjectId = info->ProjectId;
     state->GameId = info->GameId;
     state->BuildId = info->ModuleGeneration;
+    if (info->AuthoredDocument.Size != 0)
+    {
+        AuthoredReader reader;
+        AuthoredRecord record;
+        bool hasSpeed = false;
+        if (!reader.Start(info->AuthoredDocument, info->GameId))
+        {
+            delete state;
+            return Status::InvalidArgument;
+        }
+        while (reader.Next(record))
+        {
+            if (record.Object != kObjectId || record.Property != kPropSpeed || hasSpeed ||
+                record.Kind != static_cast<uint32>(PropertyKind::Float32) || record.Value.Size != 4)
+            {
+                delete state;
+                return Status::InvalidArgument;
+            }
+            const uint32 bits = static_cast<uint32>(ReadCheckpointUint(record.Value.Data, 4));
+            std::memcpy(&state->Sim.Speed, &bits, sizeof(bits));
+            if ((bits & 0x7f800000U) == 0x7f800000U || state->Sim.Speed < 0 || state->Sim.Speed > 8)
+            {
+                delete state;
+                return Status::OutOfRange;
+            }
+            hasSpeed = true;
+        }
+        if (!reader.Complete())
+        {
+            delete state;
+            return Status::InvalidArgument;
+        }
+    }
     *outInstance = reinterpret_cast<GameInstance*>(state);
     return Status::Ok;
 }

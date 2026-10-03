@@ -31,7 +31,7 @@ from typing import Any
 # payload is module + symbols, not a dynamic plugin graph.
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_PAYLOAD_FILES = 16
-MANIFEST_SCHEMA = 1
+MANIFEST_SCHEMA = 2
 
 # Default retention: active, candidate and previous generation (design 5).
 DEFAULT_RETENTION = 3
@@ -54,6 +54,7 @@ class GenerationManifest:
     module_file: str
     host_file: str
     symbol_file: str | None
+    authored_file: str | None
     sdk_identity: str
     build_request_revision: str
     source_input_digest: str
@@ -61,6 +62,10 @@ class GenerationManifest:
     abi_minor: int
     property_schema: int
     checkpoint_schema: int
+    capabilities: int
+    module_build_id: str
+    host_build_id: str
+    embedded_symbols: bool
     files: dict[str, str] = field(default_factory=dict)  # relative path -> sha256
     created_unix: int = 0
 
@@ -134,7 +139,7 @@ def publish_generation(**kwargs: Any) -> Path:
             raise PublishError("generation sequence exhausted; create a new session/store")
         sequence_file.write_text(str(sequence), encoding="ascii")
         generation_id = f"{sequence:016x}-{os.urandom(8).hex()}"
-        return _publish_generation_locked(**kwargs, generation_id=generation_id)
+        return _publish_generation_locked(**kwargs, generation_id=generation_id, publication_fd=lock.fileno())
 
 
 def _publish_generation_locked(
@@ -147,6 +152,9 @@ def _publish_generation_locked(
     declared_source_inputs: list[Path],
     pre_build_source_digest: str | None = None,
     generation_id: str,
+    publication_fd: int,
+    validate_payloads: Any = None,
+    authored_payload: bytes | None = None,
 ) -> Path:
     """Atomically publish one immutable generation; return its directory.
 
@@ -162,6 +170,10 @@ def _publish_generation_locked(
         raise PublishError(f"module artifact missing: {module_artifact}")
     if not host_artifact.is_file():
         raise PublishError(f"host artifact missing: {host_artifact}")
+    artifacts = [module_artifact, host_artifact] + ([symbol_artifact] if symbol_artifact is not None else [])
+    if any(path.stat().st_size > 512 * 1024 * 1024 for path in artifacts) or \
+            sum(path.stat().st_size for path in artifacts) > 1024 * 1024 * 1024:
+        raise PublishError("native payload exceeds the bounded generation inventory")
 
     current_digest = source_input_digest(declared_source_inputs)
     if pre_build_source_digest is not None and current_digest != pre_build_source_digest:
@@ -176,6 +188,10 @@ def _publish_generation_locked(
         module_name = module_artifact.name
         host_name = host_artifact.name
         names = [module_name, host_name] + ([symbol_artifact.name] if symbol_artifact is not None else [])
+        if authored_payload is not None:
+            names.append("authored.bin")
+            if not isinstance(authored_payload, bytes) or len(authored_payload) > 256 * 1024:
+                raise PublishError("invalid authored document transport")
         if len(set(names)) != len(names):
             raise PublishError("generation payload filenames collide")
         for name in names:
@@ -193,6 +209,9 @@ def _publish_generation_locked(
             symbol_name = symbol_artifact.name
             shutil.copy2(symbol_artifact, staging / symbol_name)
             payload_files[symbol_name] = sha256_file(staging / symbol_name)
+        if authored_payload is not None:
+            (staging / "authored.bin").write_bytes(authored_payload)
+            payload_files["authored.bin"] = sha256_file(staging / "authored.bin")
 
         if len(payload_files) > MAX_PAYLOAD_FILES:
             raise PublishError(f"too many payload files ({len(payload_files)} > {MAX_PAYLOAD_FILES})")
@@ -205,6 +224,14 @@ def _publish_generation_locked(
         if symbol_artifact is not None and payload_files[symbol_artifact.name] != sha256_file(symbol_artifact):
             raise PublishError("symbol copy hash mismatch; corrupt staging")
 
+        # Query the immutable COPIES in an owned process before exposure. A
+        # constructor/query crash never executes in the editor or active host.
+        if validate_payloads is not None:
+            manifest_fields = {**manifest_fields, **validate_payloads(staging, module_name, host_name, publication_fd)}
+            for name, expected in payload_files.items():
+                if sha256_file(staging / name) != expected:
+                    raise PublishError("probe changed a staged artifact")
+
         manifest = GenerationManifest(
             schema=MANIFEST_SCHEMA,
             generation_id=gen_id,
@@ -215,6 +242,7 @@ def _publish_generation_locked(
             module_file=module_name,
             host_file=host_name,
             symbol_file=symbol_name,
+            authored_file="authored.bin" if authored_payload is not None else None,
             sdk_identity=manifest_fields.get("sdk_identity", ""),
             build_request_revision=manifest_fields.get("build_request_revision", ""),
             source_input_digest=current_digest,
@@ -222,6 +250,10 @@ def _publish_generation_locked(
             abi_minor=manifest_fields.get("abi_minor", 0),
             property_schema=manifest_fields.get("property_schema", 0),
             checkpoint_schema=manifest_fields.get("checkpoint_schema", 0),
+            capabilities=manifest_fields.get("capabilities"),
+            module_build_id=manifest_fields.get("module_build_id"),
+            host_build_id=manifest_fields.get("host_build_id"),
+            embedded_symbols=manifest_fields.get("embedded_symbols"),
             files=payload_files,
             created_unix=int(time.time()),
         )
@@ -237,14 +269,20 @@ def _publish_generation_locked(
             raise PublishError("source inputs changed during publication; result is Superseded")
         for child in staging.iterdir():
             os.chmod(child, 0o444 | (child.stat().st_mode & 0o111))
+        os.chmod(staging, 0o555)
 
         final = generations_root / gen_id
         if final.exists():
             raise PublishError(f"generation id already exists (never reuse): {gen_id}")
         os.rename(staging, final)
         return final
-    except Exception:
-        shutil.rmtree(staging, ignore_errors=True)
+    except Exception as exc:
+        # Uncertain native ownership pins its files. Staging directories are
+        # deliberately outside the collector's valid-generation inventory.
+        if getattr(exc, "cleanup_confirmed", True):
+            if staging.exists() and not staging.is_symlink():
+                os.chmod(staging, 0o755)
+            shutil.rmtree(staging, ignore_errors=True)
         raise
 
 
@@ -259,6 +297,8 @@ def _validate_manifest(generation_dir: Path, data: Any, generation_id: str) -> N
         raise PublishError("unsupported generation manifest schema")
     if data["generation_id"] != generation_id:
         raise PublishError("generation identity disagrees with its directory")
+    if re.fullmatch(r"[0-9a-f]{16}-[0-9a-f]{16}", generation_id) is None or int(generation_id[:16], 16) == 0:
+        raise PublishError("invalid generation identity")
     for key in ("project_id", "game_id"):
         if not isinstance(data[key], str) or re.fullmatch(r"[0-9a-f]{16}", data[key]) is None:
             raise PublishError(f"invalid {key}")
@@ -267,19 +307,29 @@ def _validate_manifest(generation_dir: Path, data: Any, generation_id: str) -> N
             raise PublishError(f"invalid {key}")
     if not isinstance(data["source_input_digest"], str) or re.fullmatch(r"[0-9a-f]{64}", data["source_input_digest"]) is None:
         raise PublishError("invalid source input digest")
-    for key in ("abi_major", "abi_minor", "property_schema", "checkpoint_schema", "created_unix"):
+    for key in ("abi_major", "abi_minor", "property_schema", "checkpoint_schema", "capabilities", "created_unix"):
         if type(data[key]) is not int or not 0 <= data[key] < 2**64:
             raise PublishError(f"invalid {key}")
     if data["abi_major"] != 1 or data["abi_minor"] != 0:
         raise PublishError(f"unsupported gameplay ABI: {data['abi_major']}.{data['abi_minor']}; expected 1.0")
     if len(data["sdk_identity"].encode("utf-8")) > 256:
         raise PublishError("SDK identity exceeds gameplay ABI bound")
+    if data["capabilities"] & ~7 or (data["capabilities"] & 1 and not data["checkpoint_schema"]) or \
+            (data["capabilities"] & 2 and not data["property_schema"]):
+        raise PublishError("invalid capabilities/schema")
+    for key in ("module_build_id", "host_build_id"):
+        if not isinstance(data[key], str) or re.fullmatch(r"(?:[0-9a-f]{2}){8,64}", data[key]) is None:
+            raise PublishError(f"invalid {key}")
+    if data["embedded_symbols"] is not True:
+        raise PublishError("native live editing requires matching embedded debug symbols")
     files = data["files"]
     if not isinstance(files, dict) or not 2 <= len(files) <= MAX_PAYLOAD_FILES:
         raise PublishError("invalid payload inventory")
     required = {data["module_file"], data["host_file"]}
     if data["symbol_file"] is not None:
         required.add(data["symbol_file"])
+    if data["authored_file"] is not None:
+        required.add(data["authored_file"])
     if set(files) != required or len(required) < 2:
         raise PublishError("payload inventory disagrees with declared artifacts")
     if {p.name for p in generation_dir.iterdir()} != set(files) | {"manifest.json"}:
@@ -290,6 +340,10 @@ def _validate_manifest(generation_dir: Path, data: Any, generation_id: str) -> N
         payload = generation_dir / name
         if payload.is_symlink() or payload.resolve().parent != generation_dir.resolve() or not payload.is_file():
             raise PublishError("payload escapes generation or is missing")
+        if payload.stat().st_size > 512 * 1024 * 1024:
+            raise PublishError("native payload exceeds 512 MiB")
+    if sum((generation_dir / name).stat().st_size for name in files) > 1024 * 1024 * 1024:
+        raise PublishError("generation payload exceeds 1 GiB")
 
 
 def read_manifest(generation_dir: Path) -> dict[str, Any]:
@@ -300,7 +354,8 @@ def read_manifest(generation_dir: Path) -> dict[str, Any]:
     if size > MAX_MANIFEST_BYTES:
         raise PublishError(f"manifest exceeds the 64 KiB bound: {size}")
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        from play_documents import decode
+        data = decode(manifest_path.read_bytes())
         _validate_manifest(generation_dir, data, generation_dir.name)
     except (ValueError, TypeError) as exc:
         raise PublishError("malformed generation manifest") from exc
@@ -346,6 +401,8 @@ class GenerationLease:
     """
     def __init__(self, generation_dir: Path) -> None:
         self._handle = None
+        if generation_dir.is_symlink():
+            raise PublishError("generation lease may not follow a directory symlink")
         generation_dir = generation_dir.resolve()
         root = generation_dir.parent
         with (root / ".publication.lock").open("a+b") as publication:
@@ -366,11 +423,47 @@ class GenerationLease:
             self._handle.close()
             self._handle = None
 
+    def fileno(self) -> int:
+        """Inherit this open description into an owned probe/host.
+
+        Its shared flock then survives supervisor loss until every inheriting
+        process exits. Closing one reference does not unlock the others.
+        """
+        if self._handle is None:
+            raise PublishError("generation lease is closed")
+        return self._handle.fileno()
+
     def __enter__(self) -> "GenerationLease":
         return self
 
     def __exit__(self, *_: Any) -> None:
         self.close()
+
+
+class GenerationStoreLease:
+    """Conservative host/debugger lease inherited across all code replacements.
+
+    A process cannot inherit a newly opened per-generation fd after exec without
+    descriptor passing. The host therefore also inherits one shared store lock:
+    if its supervisor disappears after a reload, every mapped image and its
+    source symbols remain available until that host actually exits. Publication
+    remains unlocked; collection is deferred for the lifetime of a play host.
+    """
+    def __init__(self, root: Path) -> None:
+        lease_dir = root / ".leases"
+        lease_dir.mkdir(parents=True, exist_ok=True)
+        self._handle = (lease_dir / ".store").open("a+b")
+        try:
+            fcntl.flock(self._handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BaseException:
+            self._handle.close()
+            raise
+
+    def fileno(self) -> int:
+        return self._handle.fileno()
+
+    def close(self) -> None:
+        self._handle.close()
 
 
 def collect_generations(
@@ -389,7 +482,6 @@ def collect_generations(
         raise PublishError("retention must keep at least three generations")
     if not generations_root.is_dir():
         return []
-    deleted: list[str] = []
     with (generations_root / ".publication.lock").open("a+b") as publication:
         fcntl.flock(publication, fcntl.LOCK_EX)
         gens = sorted(
@@ -399,23 +491,34 @@ def collect_generations(
         )
         lease_dir = generations_root / ".leases"
         lease_dir.mkdir(exist_ok=True)
-        for gen_id in gens[:-retention]:
-            if leases.is_leased(gen_id):
+        with (lease_dir / ".store").open("a+b") as store:
+            try:
+                fcntl.flock(store, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return []
+            return _collect_unleased(generations_root, lease_dir, gens[:-retention], leases)
+
+
+def _collect_unleased(generations_root: Path, lease_dir: Path, generations: list[str], leases: LeaseSet) -> list[str]:
+    deleted: list[str] = []
+    for gen_id in generations:
+        if leases.is_leased(gen_id):
+            continue
+        lease_path = lease_dir / gen_id
+        with lease_path.open("a+b") as handle:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
                 continue
-            lease_path = lease_dir / gen_id
-            with lease_path.open("a+b") as handle:
-                try:
-                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
-                    continue
-                target = generations_root / gen_id
-                try:
-                    read_manifest(target)
-                except (PublishError, OSError):
-                    continue
-                # Directory ownership permits unlinking read-only payloads.
-                # Never chmod/unlink symlink targets or traverse unknown dirs.
-                shutil.rmtree(target)
-                deleted.append(gen_id)
-                lease_path.unlink()
+            target = generations_root / gen_id
+            try:
+                read_manifest(target)
+            except (PublishError, OSError):
+                continue
+            # Re-enable writes only after taking the exclusive lease and
+            # validating the immutable generation. Never follow symlink targets.
+            os.chmod(target, 0o755)
+            shutil.rmtree(target)
+            deleted.append(gen_id)
+            lease_path.unlink()
     return deleted

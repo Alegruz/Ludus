@@ -17,6 +17,7 @@
 #include <ludus/runtime/game_host/host.h>
 
 #include <cstdio>
+#include <cstring>
 
 using namespace ludus::runtime::game_host;
 
@@ -58,6 +59,13 @@ int main(int argc, char** argv)
     {
         std::fprintf(stderr, "LoadInitial(A) failed\n");
         return 3;
+    }
+
+    // The GDB attach case starts this process independently, observes A's image,
+    // attaches, and releases this owned pipe only after setting source stops.
+    if (argc == 4 && std::strcmp(argv[3], "--wait-attach") == 0 && std::getchar() != 'g')
+    {
+        return 7;
     }
 
     const int genBefore = JourneyBeforeReload(session);

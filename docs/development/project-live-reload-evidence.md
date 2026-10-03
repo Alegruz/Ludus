@@ -5,6 +5,107 @@ initial Kiro ledger: its headless runs and two reused module paths did not prove
 native rendering, complete checkpoint equality, bounded distinct-image residency,
 or actual debugger single stepping. The committed requirements remain unchanged.
 
+## Local takeover and current-main integration, 2026-10-03
+
+The implementation checkout incorporates main
+`ab4133481ea1bf47c19177b961c93b541d822df0` (project creation/setup repair), on top
+of local implementation commit `9e31ea16d3ee` and the preceding release integration.
+Private work remains preserved in stashes; the primary workspace is untouched.
+Results concern this merged implementation tree, rather than the old remote PR
+head `cdd2e48e65509898cdab235e060c9a88ab3e588a`. Final published-head checks and
+mergeability must be verified after publication.
+
+The Qt editor now owns the persistent play actor, an independent generation
+build lane, copied inspector values, session undo and tuning-document controls.
+Source reload is opt-in, debounced and coalesced during builds. Metadata-only
+open uses the shared read-only setup checker. Explicit creation/repair and play
+builds select the same owned CMake/presets as the canonical SDK workflow. The
+single build/setup adapter is independent of the persistent play actor; setup
+repair cannot mutate SDK settings during play.
+
+The current asset is a real host-owned **frame-clear configuration** using
+public RHI SetFrameTarget. Its immutable cooked payload is copied between frames;
+submitted GPU work retains no pointer to it. Texture/model/audio/shader importers
+remain unsupported. Reserved Uniform fields are not a rendered shader effect.
+
+| Validation | Actual result and scope |
+| --- | --- |
+| Debug/Development/ASan-UBSan warning-clean builds | PASS, with pinned tools; Development Editor ON, other two Editor OFF |
+| Full Debug/Development/ASan-UBSan CTest | PASS, 40/39/33 registered tests respectively; two explicit live platform SKIPs in each, not acceptance passes |
+| Final affected runtime cases after retirement repairs | PASS, Debug 7 tests including real GDB; Development 6 runtime tests; ASan-UBSan 6 tests |
+| Actual worker-thread reload/Stop safety | PASS: live worker rejects reload until join; undrainable Stop leaves instance/services/image resident in a child process |
+| Persistent native supervisor | PASS: actual host pause/Step/reload, copied properties, tuning apply/undo/redo/save, source supersession, invalid configuration retains old asset, native Update/destructor crashes, hang and parent EOF recovery |
+| Python regression suite | PASS: 290 tests, four explicitly skipped environment-dependent cases; live tooling tests use pinned CMake/Ninja |
+| Full Development format/tidy/foundational boundary | PASS on the final merged tree with pinned Clang 18 and four bounded tidy workers |
+| Installed SDK consumer | PASS; no Qt export dependency introduced |
+| Native Wayland editor journey, legacy provider | PASS: 39 assertions; actual installed SDK external build, property undo/redo/save, automatic body-edit reload while paused, RHI configuration replacement, Stop/reopen and saved authored value |
+| Native Wayland editor journey, canonical v2 resolver | PASS: 53 assertions, saved local override/unresolved lock, body-edit reload, unsupported checkpoint-schema rejection preserves A, native configuration replacement, reopen and close during build without a protocol error |
+| Current-main integration, Debug/ASan-UBSan full CTest | PASS: 41/33 registered tests, respectively; two explicitly skipped live platform cases in each |
+| Actual Editor creation/setup and play regressions | PASS: 46 cases/277 assertions, with the installed SDK New Project configure/build/test enabled; no setup skip |
+| GDB launch and attach | PASS: separate tests, A already loaded before attach, actual source stops, arguments/locals/stacks/next in A/B and zero inferior exit; no ptrace policy changes |
+| Native current-main setup/play/switch journey | PASS: 127 assertions, real repair, ten warm reloads and ten edits, schema rejection, configuration replacement, A reopen, switch to independent B, close during build, and copied host PID/argv/cwd/SDK diagnostics |
+| Final Qt Play regressions under ASan/UBSan | PASS: 20 assertions in three cases, including unexpected owner teardown and explicit recovery; callbacks retire before owned buffers are destroyed |
+| Post-commit retirement uncertainty | PASS with the actual supervisor/host in Debug and ASan/UBSan: B commits before retirement failure, B identity and both generation leases remain, Resume rejects, explicit Stop confirms cleanup, and saved tuning stays unchanged |
+| Canonical repaired-preset integration | PASS: 9 affected Python tests, including actual CMake preset discovery and selecting the owned CMake/presets for play |
+
+Raw local logs are retained under `/tmp/ludus-live-reload-*.log`, with final
+runtime logs named `debug-runtime-final`, `asan-runtime-final` and
+`focused-final`. Native Qt hardware acceptance is an explicit hidden test,
+separate from default offscreen CTest. Its invocation fails if native Qt/SDK
+prerequisites are absent; default unit test success does not claim hardware
+acceptance:
+
+```bash
+QT_QPA_PLATFORM=wayland LUDUS_SDK_PREFIX=/absolute/path/to/sdk \
+  out/build/linux-clang-development/apps/editor/ludus_editor_tests '[.live-journey]'
+```
+
+The final sanitizer stress log contains 150 unique-path attempts: 100 accepted,
+50 rejected, one peak mapped generation and one live fixture allocation. Reload
+p50/p95 is 422.5/637 microseconds on this host; first/peak RSS is
+26,984,448/37,982,208 bytes. Raw records are in
+`/tmp/ludus-live-reload-asan-metrics-final.jsonl`. These timings cover the host
+transaction, not cold build/publish/property or GPU synchronization latency.
+
+The longer native journey exposed a copied-property readiness race after reload:
+editing could be enabled before the replacement snapshot arrived. The controller
+now starts refresh before publishing edit readiness and requires a copied value.
+The failure also exposed teardown callbacks accessing destroyed Qt owner buffers;
+both process owners now retire those callbacks before member destruction.
+
+The supervisor also distinguishes commit outcome from retirement status. A
+RestartRequired result after B commits retains B as active and keeps A/B symbol
+leases until confirmed process exit. The editor blocks edits/reload and permits
+explicit Stop only through its still-trusted actor connection. Unknown actor
+ownership continues to block automatic recovery.
+
+[Native metrics](project-live-reload-evidence/native-editor-metrics-2026-10-03.json)
+record a cold project-B build phase of 1.643 s, configure 2.853 s, publication
+0.541 s and total request-to-publication 12.106 s. Ten warm no-change requests
+measure total p50/p95 10.5285/14.596 s, including SDK validation and Qt dispatch;
+publication alone measures 0.3525/0.524 s. The **under-1-second warm iteration
+target is missed**. Ten copied-property round trips measure p50/p95
+126.5/147 ms with a 20 ms observation interval. These paused-session round trips
+include the acknowledged edit and refreshed values; they do not prove the
+separate two-running-frame ack target or pixel-visible latency. Static analysis
+and other validation ran concurrently, so this is a contended run rather than
+an idle benchmark. Validation/identity checks have not been weakened.
+
+The [final native run](project-live-reload-evidence/native-editor-final-metrics-2026-10-03.json)
+with all 127 assertions also overlapped static analysis and sanitizer compilation.
+Its warm total p50/p95 is 13.4675/22.025 s, publication 0.3945/0.777 s,
+and copied-property round trips 103/116 ms. The cold project-B total is 4.198 s.
+Both raw runs are retained; neither is an idle or pixel-visible latency claim.
+
+[Raw sanitizer records](project-live-reload-evidence/asan-reload-metrics-2026-10-03.jsonl)
+retain the 100 accepted/50 rejected reload observations described above.
+
+Still incomplete: editor-integrated debugger launch/attach, native pixel/visible
+latency evidence, idle iteration measurements, and final published-head
+CI/mergeability. Windows DLL and macOS
+loader backends and unsupported resource importers are outside the first host
+matrix. The PR stays draft; unchecked acceptance work is not counted as passed.
+
 ## Recorded local repair validation, 2026-10-02
 
 The repair checkout starts at PR #55 head

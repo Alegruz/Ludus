@@ -59,16 +59,16 @@ struct FrameInput final
 
 // Render parameters the module writes each frame. The host owns the RHI session
 // and performs the actual draw; the module only expresses a bounded, validated
-// description (the supported reload fixture is a uniform-backed fullscreen
-// effect, design 9/12). Colors are clamped by the host to [0,1].
+// description. The current public RHI supports frame clearing; colors are
+// clamped by the host to [0,1]. Draw/resource APIs can extend this contract.
 struct RenderParams final
 {
     float32 ClearRed = 0;
     float32 ClearGreen = 0;
     float32 ClearBlue = 0;
     float32 ClearAlpha = 1;
-    // Four scalar uniform channels backing the supported shader effect. The
-    // host copies these into the active uniform between frames.
+    // Reserved scalar channels for a future draw path. The current host
+    // validates finiteness but does not render these channels.
     float32 Uniform0 = 0;
     float32 Uniform1 = 0;
     float32 Uniform2 = 0;
@@ -100,5 +100,16 @@ struct HostServices final
     // Resource identity: translate a logical asset ID (stable across reload)
     // into the host's current resource generation handle. Returns 0 if unknown.
     uint64 (*ResolveResource)(HostContext* ctx, uint64 logicalAssetId) noexcept = nullptr;
+
+    // Optional appended service entries. A deferred callback/job must acquire a
+    // lease before publishing any module-code reference, and release it after
+    // its final use. Quiesce must also join workers: a worker releasing its
+    // lease is not proof that it has returned out of module code. Acquisition
+    // is gated during Create/staging, pause and retirement; start work from
+    // Update or Resume after activation, never from Create/CreateCandidate.
+    // These two calls alone may run on worker threads; other services remain
+    // host-thread calls. Check StructSize before accessing this appended tail.
+    bool (*AcquireWorkLease)(HostContext* ctx) noexcept = nullptr;
+    bool (*ReleaseWorkLease)(HostContext* ctx) noexcept = nullptr;
 };
 } // namespace ludus::runtime::game_api

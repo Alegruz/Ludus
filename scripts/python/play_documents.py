@@ -198,6 +198,14 @@ class TuningDocument:
     def dirty(self) -> bool:
         return self.draft != self.saved
 
+    @property
+    def can_undo(self) -> bool:
+        return bool(self._undo)
+
+    @property
+    def can_redo(self) -> bool:
+        return bool(self._redo)
+
     def apply(self, edits: list[dict], *, expected_digest: str) -> None:
         if expected_digest != digest(self.encoded()):
             raise DocumentError("document draft changed; refresh before applying")
@@ -237,6 +245,11 @@ class TuningDocument:
         self.draft = self._redo.pop()
         return True
 
+    def discard(self) -> None:
+        self.draft = copy.deepcopy(self.saved)
+        self._undo.clear()
+        self._redo.clear()
+
     def encoded(self) -> bytes:
         data = (json.dumps(self.draft, ensure_ascii=False, allow_nan=False, indent=2) + "\n").encode("utf-8")
         if len(data) > MAX_DOCUMENT_BYTES:
@@ -270,3 +283,21 @@ class TuningDocument:
                     os.unlink(name)
             self.saved = copy.deepcopy(self.draft)
             self.saved_digest = digest(data)
+
+
+def encode_authored(obj: dict) -> bytes:
+    """Encode a saved, validated document without native structure layout."""
+    import struct
+    obj = validate_tuning(obj)
+    records = [(o["id"], p) for o in obj["objects"] for p in o["properties"]]
+    payload = bytearray(b"LTUN" + struct.pack("<IQI", 1, int(obj["game"], 16), len(records)))
+    for object_id, prop in records:
+        kind = KINDS.index(prop["kind"])
+        value = prop["value"]
+        encoded = (bytes([value]) if kind == 0 else struct.pack("<i", value) if kind in (1, 3)
+                   else struct.pack("<f", value) if kind == 2 else value.encode("utf-8"))
+        payload.extend(struct.pack("<QQII", int(object_id, 16), int(prop["id"], 16), kind, len(encoded)))
+        payload.extend(encoded)
+    if len(payload) > MAX_DOCUMENT_BYTES:
+        raise DocumentError("authored transport exceeds 256 KiB")
+    return bytes(payload)

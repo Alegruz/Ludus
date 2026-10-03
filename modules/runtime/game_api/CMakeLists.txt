@@ -23,6 +23,8 @@ target_sources(ludus_runtime_game_api
             include/ludus/runtime/game_api/api.h
             include/ludus/runtime/game_api/properties.h
             include/ludus/runtime/game_api/checkpoint.h
+            include/ludus/runtime/game_api/authored.h
+            include/ludus/runtime/game_api/frame_clear.h
 )
 
 # The ABI headers need ONLY the Band-0 fixed-width aliases from
@@ -52,6 +54,8 @@ if(LUDUS_BUILD_TESTS)
         tests/header_check_api.cpp
         tests/header_check_properties.cpp
         tests/header_check_checkpoint.cpp
+        tests/header_check_authored.cpp
+        tests/header_check_frame_clear.cpp
     )
     target_link_libraries(ludus_runtime_game_api_header_check PRIVATE Ludus::GameApi)
     ludus_apply_project_defaults(ludus_runtime_game_api_header_check)

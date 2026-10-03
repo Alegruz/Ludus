@@ -25,7 +25,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install pinned formatter and GUI test dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18 python3-tk xvfb xauth
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18 python3-venv python3-tk xvfb xauth
+      - name: Install pinned CMake and Ninja for live project setup tests
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, "scripts/python")
+          import engine
+          root = Path.cwd()
+          engine.create_or_update_venv(root)
+          engine.install_managed_tools(root, engine.load_tool_versions(root))
+          PY
+          echo "$PWD/out/host-tools/venv/bin" >> "$GITHUB_PATH"
       - name: Test formatting and staged-file preservation
         run: python3 -m unittest discover -s scripts/python -p 'test_formatting.py' -v
       - name: Test optional RAD tooling contracts
@@ -34,10 +46,36 @@ jobs:
         run: xvfb-run -a env LUDUS_TEST_GUI=1 python3 -m unittest discover -s scripts/python -p 'test_init*.py' -v
       - name: Test CI initialization and analysis contracts
         run: python3 -m unittest discover -s scripts/python -p 'test_ci.py' -v
-      - name: Live reload publication tests
-        run: python3 -m unittest discover -s scripts/python -p 'test_play_session.py' -v
+      - name: Live reload tooling tests
+        run: |
+          python3 -m unittest discover -s scripts/python -p 'test_play*.py' -v
+          python3 -m unittest discover -s scripts/python -p 'test_process_ownership.py' -v
       - name: Verify source formatting before builds
         run: ./scripts/check --format
+
+  debug-runtime:
+    needs: formatting
+    name: Debug runtime and source debugger
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/native-setup
+        with:
+          preset: linux-clang-debug
+      - name: Build Debug with native gameplay fixtures
+        run: ./scripts/build linux-clang-debug
+      - name: Test Debug including mandatory GDB and persistent supervisor journeys
+        run: out/host-tools/venv/bin/ctest --preset linux-clang-debug --no-tests=error
+      - name: Preserve native debugger and supervisor diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-reload-debug-diagnostics
+          path: out/build/linux-clang-debug/Testing/Temporary/
+          if-no-files-found: error
+      - name: Report compiler cache
+        if: always()
+        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
 
   development:
     needs: formatting
@@ -213,7 +251,7 @@ jobs:
     # Preserve the existing required check name after splitting its validation.
     # A failed/skipped dependency must fail this gate rather than skip it.
     name: Ubuntu Clang
-    needs: [formatting, development, sanitizers, analysis, editor, assertion-policy, pch, build-budget]
+    needs: [formatting, debug-runtime, development, sanitizers, analysis, editor, assertion-policy, pch, build-budget]
     if: always()
     runs-on: ubuntu-24.04
     steps:

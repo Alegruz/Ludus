@@ -36,6 +36,8 @@ public:
         return Context_ != nullptr;
     }
     void Retire() noexcept;
+    void GateWork() noexcept;
+    void Activate() noexcept;
     void PinUntilProcessExit() noexcept;
     void CopyResourcesFrom(const HostServiceProvider& source) noexcept;
 
@@ -43,6 +45,7 @@ public:
     // see this at zero (the module frees everything it took) before the host
     // releases the loader reference (design 6/8).
     [[nodiscard]] uint64 OutstandingAllocations() const noexcept;
+    [[nodiscard]] uint64 OutstandingWork() const noexcept;
 
     // Register a logical asset ID -> current resource generation handle mapping
     // the module can resolve. Bounded; used by the supported asset fixture.

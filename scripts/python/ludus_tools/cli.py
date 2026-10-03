@@ -128,11 +128,29 @@ def cmd_sdk_remove(args) -> int:
 # --- project commands --------------------------------------------------------
 
 
+def cmd_project_setup(args) -> int:
+    from .project_setup import check_project, repair_project
+    options = dict(tooling_root=Path(args.tools).resolve())
+    if args.cmd == "check":
+        message = check_project(Path(args.project), **options)
+    else:
+        message = repair_project(Path(args.project), sdk=Path(args.sdk) if args.sdk else None,
+                                 web_sdk=Path(args.web_sdk) if args.web_sdk else None, **options)
+    _emit(args, {"setup": message})
+    if not getattr(args, "json", False):
+        print(message)
+    return 0
+
+
 def cmd_project_create(args) -> int:
     components = [c for c in (args.components or "FoundationBase").split(",") if c]
     local_prefix: Optional[Path] = Path(args.sdk) if args.sdk else None
     if not args.engine and not local_prefix:
         raise ToolingError("InvalidProject", "create requires --engine <release> or --sdk <prefix>")
+    verifier = None
+    if args.tools:
+        from .project_setup import repair_project
+        verifier = lambda staged: repair_project(staged, tooling_root=Path(args.tools).resolve(), sdk=local_prefix)
     result = create.create_project(
         Path(args.destination),
         name=args.name,
@@ -141,6 +159,9 @@ def cmd_project_create(args) -> int:
         components=components,
         preset=args.profile or "linux-clang-development",
         local_sdk_prefix=local_prefix,
+        verify_staged=verifier,
+        release=args.release,
+        itch_target=args.itch_target,
     )
     _emit(args, {"created": str(result.destination), "resolved": result.lock.resolved})
     if not getattr(args, "json", False):
@@ -198,7 +219,7 @@ def cmd_project_engine(args) -> int:
     from .lockfile import parse_lock_file
 
     lock = parse_lock_file(paths.lock_path)
-    target = operations._target_triple_for_lock(lock, flavor) or "linux-x64"
+    target = operations._target_triple_for_lock(lock, flavor) or "x86_64-linux-gnu"
     if args.clear_override:
         changed = settings.clear_override(target, flavor)
         paths.local_settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -232,7 +253,69 @@ def cmd_project_migrate(args) -> int:
     return EXIT_OK
 
 
+def cmd_package_dispatch(args) -> int:
+    if args.project == "verify":
+        if not args.package or args.profile or args.version or args.sdk:
+            raise ToolingError("InvalidRelease", "use project package verify <package-directory>")
+        return cmd_package_verify(args)
+    if args.package or not args.profile or not args.version:
+        raise ToolingError("InvalidRelease", "packaging requires --profile and --version")
+    return cmd_project_package(args)
+
+
+def cmd_project_package(args) -> int:
+    from .release import package_project
+
+    package = package_project(Path(args.project), profile=args.profile, version=args.version,
+                              store=_store(args), sdk=Path(args.sdk) if args.sdk else None)
+    _emit(args, {"package": str(package), "archiveSha256": package.name})
+    if not getattr(args, "json", False):
+        print(f"Package: {package}\nSHA256: {package.name}")
+    return EXIT_OK
+
+
+def cmd_package_verify(args) -> int:
+    from .package_verify import verify_package
+
+    result = verify_package(Path(args.package))
+    _emit(args, {"verified": result})
+    if not getattr(args, "json", False):
+        print(f"Verified {result['profile']}: {result['archiveSha256']}")
+    return EXIT_OK
+
+
+def cmd_publish_plan(args) -> int:
+    from .release import publish_plan
+
+    result = publish_plan(Path(args.project), Path(args.package), destination=args.destination,
+                          allow_local_inputs=args.allow_local_inputs)
+    _emit(args, {"plan": result})
+    if not getattr(args, "json", False):
+        print(_json.dumps(result, indent=2))
+    return EXIT_OK
+
+
 # --- parser ------------------------------------------------------------------
+
+
+def cmd_release_init(args) -> int:
+    from .release_setup import setup_release
+    files = setup_release(Path(args.project), platform=args.platform, itch_target=args.itch_target,
+                          tools_ref=args.tools_ref, build_command=args.build_command_json)
+    _emit(args, {"files": files})
+    if not args.json:
+        print("Release setup saved: " + ", ".join(files))
+    return EXIT_OK
+
+
+def cmd_publish_upload(args) -> int:
+    from .itch import upload
+    result = upload(Path(args.project), Path(args.package), destination=args.destination,
+                    allow_local_inputs=args.allow_local_inputs, expected_digest=args.expected_digest, target_override=args.itch_target or None)
+    _emit(args, result)
+    if not args.json:
+        print("Upload submitted; receipt: " + result['receipt'])
+    return EXIT_OK
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -266,6 +349,9 @@ def build_parser() -> argparse.ArgumentParser:
     cr.add_argument("--sdk", help="local SDK prefix (recorded only in ignored local settings)")
     cr.add_argument("--components", help="comma-separated public modules to link")
     cr.add_argument("--profile", help="default preset")
+    cr.add_argument("--tools", help="verify setup/build/tests using this prepared tooling checkout before publishing")
+    cr.add_argument("--release", action="store_true", help="include native release configuration/install rules")
+    cr.add_argument("--itch-target", help="optional username/game for offline release planning")
     cr.set_defaults(func=cmd_project_create)
 
     for name, func in (("configure", cmd_project_configure), ("build", cmd_project_build), ("run", cmd_project_run)):
@@ -274,6 +360,14 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--profile")
         sp.add_argument("--sdk", help="per-operation local SDK override")
         sp.set_defaults(func=func)
+
+    for action in ("check", "repair", "update"):
+        setup = proj.add_parser(action, help="check or verify local CMake setup")
+        setup.add_argument("project")
+        setup.add_argument("--tools", required=True, help="trusted prepared Ludus tooling checkout")
+        setup.add_argument("--sdk")
+        setup.add_argument("--web-sdk")
+        setup.set_defaults(func=cmd_project_setup)
 
     eng = proj.add_parser("engine")
     eng.add_argument("project")
@@ -288,6 +382,39 @@ def build_parser() -> argparse.ArgumentParser:
     mig.add_argument("--components")
     mig.set_defaults(func=cmd_project_migrate)
 
+    pkg = proj.add_parser("package", help="build a native Release package, or verify an existing package")
+    pkg.add_argument("project", help="project path, or the literal 'verify'")
+    pkg.add_argument("package", nargs="?")
+    pkg.add_argument("--profile")
+    pkg.add_argument("--version")
+    pkg.add_argument("--sdk", help="explicit Release SDK override")
+    pkg.set_defaults(func=cmd_package_dispatch)
+
+    setup = proj.add_parser("release", help="set up release files for an existing project").add_subparsers(dest="release_action", required=True)
+    init = setup.add_parser("init")
+    init.add_argument("project")
+    init.add_argument("--platform", choices=("linux-x64", "web"), default="linux-x64")
+    init.add_argument("--itch-target")
+    init.add_argument("--tools-ref")
+    init.add_argument("--build-command-json", type=_json.loads, help="project bootstrap argv as a JSON array, without a shell")
+    init.set_defaults(func=cmd_release_init)
+
+    publish = proj.add_parser("publish", help="inspect an offline upload plan").add_subparsers(dest="action", required=True)
+    plan = publish.add_parser("plan")
+    plan.add_argument("project")
+    plan.add_argument("--package", required=True)
+    plan.add_argument("--destination", required=True)
+    plan.add_argument("--allow-local-inputs", action="store_true")
+    plan.set_defaults(func=cmd_publish_plan)
+
+    upload = publish.add_parser("upload", help="explicitly upload a verified package to itch.io")
+    upload.add_argument("project")
+    upload.add_argument("--package", required=True)
+    upload.add_argument("--destination", required=True)
+    upload.add_argument("--allow-local-inputs", action="store_true")
+    upload.add_argument("--expected-digest")
+    upload.add_argument("--itch-target", help="destination for projects configured through a CI variable")
+    upload.set_defaults(func=cmd_publish_upload)
     return p
 
 
@@ -302,6 +429,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         else:
             print(f"error [{exc.code}]: {exc.message}", file=sys.stderr)
         return _exit_for_code(exc.code)
+    except (OSError, ValueError) as exc:
+        if getattr(args, "json", False):
+            print(_json.dumps({"schema": 1, "error": {"code": "OperationFailed", "message": str(exc)}}))
+        else:
+            print(f"error [OperationFailed]: {exc}", file=sys.stderr)
+        return EXIT_FAILED
     except KeyboardInterrupt:
         return EXIT_CANCELLED
 

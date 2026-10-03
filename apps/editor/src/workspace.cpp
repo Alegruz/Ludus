@@ -43,6 +43,12 @@ const char* ResultCodeName(ResultCode code) noexcept
             return "ProtocolError";
         case ResultCode::Cancelled:
             return "Cancelled";
+        case ResultCode::ReleaseFailed:
+            return "ReleaseFailed";
+        case ResultCode::GenerationInvalid:
+            return "GenerationInvalid";
+        case ResultCode::Superseded:
+            return "Superseded";
         case ResultCode::CleanupUnknown:
             return "CleanupUnknown";
     }
@@ -67,6 +73,11 @@ Capabilities ComputeCapabilities(const WorkspaceState& state)
     caps.CanConfigure = CanStartJob(state, ActionKind::Configure);
     caps.CanBuild = CanStartJob(state, ActionKind::Build);
     caps.CanBuildRun = CanStartJob(state, ActionKind::BuildRun);
+    caps.CanProjectCheck = CanStartJob(state, ActionKind::ProjectCheck);
+    caps.CanProjectSetup = CanStartJob(state, ActionKind::ProjectSetup);
+    caps.CanProjectCreate = CanStartJob(state, ActionKind::ProjectCreate);
+    caps.CanReleaseInit = CanStartJob(state, ActionKind::ReleaseInit);
+    caps.CanPackage = CanStartJob(state, ActionKind::Package);
 
     // Stop is available whenever a job is active or stopping (idempotent).
     caps.CanStop = busy || stopping;
@@ -86,12 +97,21 @@ bool CanStartJob(const WorkspaceState& state, ActionKind kind)
     {
         return false;
     }
+    if (kind == ActionKind::ProjectCreate)
+    {
+        return state.Document == DocumentState::NoProject || !state.Dirty();
+    }
     if (state.Document != DocumentState::ProjectLoaded)
     {
         return false;
     }
     switch (kind)
     {
+        case ActionKind::ProjectCheck:
+        case ActionKind::ProjectSetup:
+        case ActionKind::ReleaseInit:
+        case ActionKind::Package:
+            return !state.Dirty() && state.Saved.Version == 2 && state.Saved.ProviderKind == Provider::Cmake;
         case ActionKind::Configure:
             return true;
         case ActionKind::Build:
@@ -128,18 +148,23 @@ namespace
 {
 // Allowed forward phase transitions within one job. Running is reached only via
 // RuntimeStarted; this table never allows a bare phase event to assert Running.
-bool AllowedForward(const WorkspaceState& state, Phase requested)
+struct PhaseStep
 {
-    switch (state.OperationPhase)
+    Phase From;
+    Phase To;
+};
+
+bool AllowedForward(const PhaseStep& step)
+{
+    switch (step.From)
     {
         case Phase::Starting:
-            return requested == Phase::Configuring;
+            return step.To == Phase::Configuring;
         case Phase::Configuring:
-            return requested == Phase::Building || requested == Phase::Launching;
+            return step.To == Phase::Building || step.To == Phase::Launching;
         case Phase::Building:
-            return requested == Phase::Launching;
-        case Phase::Launching:
-            // Launching -> Running is handled only by RuntimeStarted, not here.
+            return step.To == Phase::Launching || step.To == Phase::Publishing;
+        // Launching -> Running is handled only by RuntimeStarted.
         default:
             return false;
     }
@@ -191,7 +216,7 @@ WorkspaceState ApplyPhaseEvent(const WorkspaceState& state, uint64 jobId, Phase 
         return next;
     }
 
-    if (!AllowedForward(state, requested))
+    if (!AllowedForward({ .From = state.OperationPhase, .To = requested }))
     {
         // Reject unexpected/duplicate/backward phase for the current job.
         return state;

@@ -11,8 +11,8 @@ Templates are addressed by ``(id, version)`` which is recorded in the project
 descriptor's ``template`` object so later template versions never silently
 overwrite user-owned game code (design "Project creation and Editor workflow").
 
-The only bundled template initially is ``minimal`` (version 1): a single native
-application target that initializes the engine and prints useful diagnostics
+The only bundled template initially is ``minimal`` (version 3): a single native
+application target that queries the public engine version
 using public headers only — no new engine subsystem, no scene/ECS/hot reload.
 Placeholders are substituted by exact key, never by executing template content,
 so a file name or value can never trigger an arbitrary command.
@@ -92,12 +92,13 @@ def _minimal_template() -> Template:
             "CMakeLists.txt",
             """cmake_minimum_required(VERSION 3.29)
 
-project({{ NAME }} LANGUAGES CXX)
+project({{ TARGET }} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+include(CTest)
 
 # Resolve the shared Ludus SDK. The CLI/Editor supply LUDUS_SDK_PREFIX via the
 # generated preset; no engine source is compiled by this project (P01/P12).
@@ -108,8 +109,14 @@ target_link_libraries({{ TARGET }} PRIVATE {{ LINK_TARGETS }})
 
 # Apply the supported application compile/link policy (C++23, no exceptions)
 # without importing engine build warnings or private targets.
-if(COMMAND ludus_apply_app_policy)
-    ludus_apply_app_policy({{ TARGET }})
+if(NOT COMMAND ludus_apply_app_policy)
+    message(FATAL_ERROR "The selected SDK lacks the supported Ludus application policy helper")
+endif()
+ludus_apply_app_policy({{ TARGET }})
+
+if(BUILD_TESTING)
+    add_test(NAME version_query COMMAND $<TARGET_FILE:{{ TARGET }}>)
+    set_tests_properties(version_query PROPERTIES TIMEOUT 20)
 endif()
 """,
         ),
@@ -125,7 +132,9 @@ endif()
       "binaryDir": "${sourceDir}/out/build/linux-clang-debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}"
+        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}",
+        "CMAKE_CXX_COMPILER": "clang++-18",
+        "BUILD_TESTING": "ON"
       }
     },
     {
@@ -134,7 +143,9 @@ endif()
       "binaryDir": "${sourceDir}/out/build/linux-clang-development",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}"
+        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}",
+        "CMAKE_CXX_COMPILER": "clang++-18",
+        "BUILD_TESTING": "ON"
       }
     },
     {
@@ -143,7 +154,9 @@ endif()
       "binaryDir": "${sourceDir}/out/build/linux-clang-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}"
+        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}",
+        "CMAKE_CXX_COMPILER": "clang++-18",
+        "BUILD_TESTING": "ON"
       }
     }
   ],
@@ -151,26 +164,25 @@ endif()
     { "name": "linux-clang-debug", "configurePreset": "linux-clang-debug" },
     { "name": "linux-clang-development", "configurePreset": "linux-clang-development" },
     { "name": "linux-clang-release", "configurePreset": "linux-clang-release" }
+  ],
+  "testPresets": [
+    { "name": "linux-clang-debug", "configurePreset": "linux-clang-debug", "output": { "outputOnFailure": true } },
+    { "name": "linux-clang-development", "configurePreset": "linux-clang-development", "output": { "outputOnFailure": true } },
+    { "name": "linux-clang-release", "configurePreset": "linux-clang-release", "output": { "outputOnFailure": true } }
   ]
 }
 """,
         ),
         TemplateFile(
             "src/main.cpp",
-            """// {{ NAME }} — minimal Ludus application template (v1).
-//
-// Demonstrates engine initialization and useful diagnostics using only public
-// SDK headers. It introduces no new engine subsystem (no scenes/ECS/hot reload).
+            """// Minimal Ludus application template (v3).
 #include <ludus/foundation/base/version.hpp>
 
-#include <cstdio>
+#include <string_view>
 
 int main()
 {
-    // The build_metadata / version header is a stable public surface; printing
-    // it proves the SDK linked and the policy headers are consistent.
-    std::printf("{{ NAME }} starting against Ludus SDK\\n");
-    return 0;
+    return ludus::foundation::version_string().empty() ? 1 : 0;
 }
 """,
         ),
@@ -178,6 +190,8 @@ int main()
             ".gitignore",
             """# Ludus project — ignore machine-local state and build output (P04).
 /out/
+/CMakeUserPresets.json
+/.vscode/settings.json
 /.ludus/
 """,
         ),
@@ -188,7 +202,7 @@ int main()
             "",
         ),
     ]
-    return Template(id="minimal", version=1, files=files)
+    return Template(id="minimal", version=3, files=files)
 
 
 _TEMPLATES: dict[str, Template] = {t.id: t for t in (_minimal_template(),)}

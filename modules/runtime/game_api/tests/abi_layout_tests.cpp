@@ -87,10 +87,11 @@ TEST_CASE("measured sizes and offsets on this target", "[abi]")
     STATIC_REQUIRE(sizeof(ByteView) == 2 * sizeof(void*));
     STATIC_REQUIRE(sizeof(ByteSpan) == 2 * sizeof(void*));
 
-    STATIC_REQUIRE(sizeof(HostServices) == 48);
+    STATIC_REQUIRE(sizeof(HostServices) == 64);
     STATIC_REQUIRE(offsetof(HostServices, StructSize) == 0);
     STATIC_REQUIRE(offsetof(HostServices, Context) == 8);
     STATIC_REQUIRE(offsetof(HostServices, Log) == 16);
+    STATIC_REQUIRE(offsetof(HostServices, AcquireWorkLease) == 48);
 
     STATIC_REQUIRE(sizeof(CreateInfo) == 56);
     STATIC_REQUIRE(sizeof(GameApiTable) == 168);

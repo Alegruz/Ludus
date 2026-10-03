@@ -24,6 +24,8 @@ using game_api::LogSeverity;
 // Bounded allocation cap per session so a misbehaving module cannot exhaust the
 // host. 64 MiB is generous for the supported fixtures (design 6: bounded).
 constexpr usize kMaxAllocationBytes = static_cast<usize>(64) * 1024 * 1024;
+constexpr uint64 kWorkClosed = uint64{1} << 63U;
+constexpr uint64 kMaxWorkLeases = 1024;
 
 // Header stored just before each allocation so FreeBytes can account exactly.
 struct alignas(std::max_align_t) AllocationHeader
@@ -42,16 +44,18 @@ struct HostServiceProvider::Context
     AllocationHeader* Allocations = nullptr;
     bool Retired = false;
     bool Pinned = false;
+    Context* NextPinned = nullptr;
     std::atomic<uint64> Outstanding{0};
     std::atomic<usize> BytesLive{0};
+    std::atomic<uint64> Work{kWorkClosed};
     std::unordered_map<uint64, uint64> Resources;
 };
 
 namespace
 {
-// One host session can retain at most active, staging and retired contexts.
-// Keep those deliberate process-lifetime pins reachable until process exit.
-HostServiceProvider::Context* pinnedContexts[3] = {};
+// A session disables reload at its first uncertain retirement. Keep intentional
+// process-lifetime pins reachable even when tests create several sessions.
+HostServiceProvider::Context* pinnedContexts = nullptr;
 
 // The HostContext* handed over the ABI is a reinterpret of our Context. It is
 // opaque to the module; only our service callbacks interpret it.
@@ -106,15 +110,16 @@ void* AllocateCallback(HostContext* ctx, usize size, usize alignment) noexcept
     {
         return nullptr;
     }
+    const usize backingSize = size + sizeof(AllocationHeader) + alignment;
     const usize prior = context->BytesLive.load(std::memory_order_relaxed);
-    if (prior + size > kMaxAllocationBytes)
+    if (backingSize > kMaxAllocationBytes || prior > kMaxAllocationBytes - backingSize)
     {
         return nullptr;
     }
 
     // Over-allocate room for the header plus worst-case alignment slack, then
     // place the user block with std::align (no integer<->pointer casts).
-    void* base = std::malloc(size + sizeof(AllocationHeader) + alignment);
+    void* base = std::malloc(backingSize);
     if (base == nullptr)
     {
         return nullptr;
@@ -128,7 +133,7 @@ void* AllocateCallback(HostContext* ctx, usize size, usize alignment) noexcept
         return nullptr;
     }
     auto* header = reinterpret_cast<AllocationHeader*>(static_cast<char*>(user) - sizeof(AllocationHeader));
-    header->Size = size;
+    header->Size = backingSize;
     header->Base = base;
     header->Owner = ctx;
     header->Previous = nullptr;
@@ -139,7 +144,7 @@ void* AllocateCallback(HostContext* ctx, usize size, usize alignment) noexcept
     }
     context->Allocations = header;
 
-    context->BytesLive.fetch_add(size, std::memory_order_relaxed);
+    context->BytesLive.fetch_add(backingSize, std::memory_order_relaxed);
     context->Outstanding.fetch_add(1, std::memory_order_relaxed);
     return user;
 }
@@ -185,6 +190,42 @@ uint64 ResolveResourceCallback(HostContext* ctx, uint64 logicalAssetId) noexcept
     const auto it = context->Resources.find(logicalAssetId);
     return it == context->Resources.end() ? 0 : it->second;
 }
+
+bool AcquireWorkCallback(HostContext* ctx) noexcept
+{
+    auto* context = Decode(ctx);
+    if (context == nullptr)
+    {
+        return false;
+    }
+    uint64 state = context->Work.load(std::memory_order_acquire);
+    while (state < kMaxWorkLeases)
+    {
+        if (context->Work.compare_exchange_weak(state, state + 1, std::memory_order_acq_rel))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ReleaseWorkCallback(HostContext* ctx) noexcept
+{
+    auto* context = Decode(ctx);
+    if (context == nullptr)
+    {
+        return false;
+    }
+    uint64 state = context->Work.load(std::memory_order_acquire);
+    while ((state & ~kWorkClosed) != 0)
+    {
+        if (context->Work.compare_exchange_weak(state, state - 1, std::memory_order_acq_rel))
+        {
+            return true;
+        }
+    }
+    return false;
+}
 } // namespace
 
 HostServiceProvider::HostServiceProvider() noexcept : Context_(new(std::nothrow) Context())
@@ -198,6 +239,8 @@ HostServiceProvider::HostServiceProvider() noexcept : Context_(new(std::nothrow)
         table.AllocateBytes = &AllocateCallback;
         table.FreeBytes = &FreeCallback;
         table.ResolveResource = &ResolveResourceCallback;
+        table.AcquireWorkLease = &AcquireWorkCallback;
+        table.ReleaseWorkLease = &ReleaseWorkCallback;
     }
 }
 
@@ -212,7 +255,11 @@ HostServiceProvider& HostServiceProvider::operator=(HostServiceProvider&& other)
     if (this != &other)
     {
         Retire();
-        if (Context_ != nullptr && !Context_->Pinned && OutstandingAllocations() == 0)
+        if (OutstandingAllocations() != 0 || OutstandingWork() != 0)
+        {
+            PinUntilProcessExit();
+        }
+        if (Context_ != nullptr && !Context_->Pinned && OutstandingAllocations() == 0 && OutstandingWork() == 0)
         {
             delete Context_;
         }
@@ -225,9 +272,13 @@ HostServiceProvider& HostServiceProvider::operator=(HostServiceProvider&& other)
 HostServiceProvider::~HostServiceProvider() noexcept
 {
     Retire();
+    if (OutstandingAllocations() != 0 || OutstandingWork() != 0)
+    {
+        PinUntilProcessExit();
+    }
     // A failed retirement keeps the table/context alive until process exit.
     // It must never leave an outstanding caller with dangling service storage.
-    if (Context_ != nullptr && !Context_->Pinned && OutstandingAllocations() == 0)
+    if (Context_ != nullptr && !Context_->Pinned && OutstandingAllocations() == 0 && OutstandingWork() == 0)
     {
         delete Context_;
     }
@@ -246,24 +297,39 @@ void HostServiceProvider::PinUntilProcessExit() noexcept
     if (Context_ != nullptr && !Context_->Pinned)
     {
         Context_->Pinned = true;
-        for (auto& pinned : pinnedContexts)
-        {
-            if (pinned == nullptr)
-            {
-                pinned = Context_;
-                return;
-            }
-        }
-        LUDUS_LOG_ERROR(LOG_GAME_HOST, "process-lifetime service pin bound exceeded; host must exit");
+        Context_->NextPinned = pinnedContexts;
+        pinnedContexts = Context_;
     }
 }
 
 void HostServiceProvider::Retire() noexcept
 {
+    GateWork();
     if (Context_ != nullptr)
     {
         Context_->Retired = true;
     }
+}
+
+void HostServiceProvider::GateWork() noexcept
+{
+    if (Context_ != nullptr)
+    {
+        Context_->Work.fetch_or(kWorkClosed, std::memory_order_acq_rel);
+    }
+}
+
+void HostServiceProvider::Activate() noexcept
+{
+    if (Context_ != nullptr && !Context_->Retired)
+    {
+        Context_->Work.fetch_and(~kWorkClosed, std::memory_order_acq_rel);
+    }
+}
+
+uint64 HostServiceProvider::OutstandingWork() const noexcept
+{
+    return Context_ == nullptr ? 0 : Context_->Work.load(std::memory_order_acquire) & ~kWorkClosed;
 }
 
 void HostServiceProvider::CopyResourcesFrom(const HostServiceProvider& source) noexcept

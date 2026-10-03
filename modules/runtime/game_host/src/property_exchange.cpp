@@ -418,6 +418,14 @@ protocol::CommandStatus HostSession::ApplyPropertyEdits(const Message& command) 
         State_ = PlayState::CleanupUnknown; // A non-failing commit contract was violated.
         return CommandStatus::RestartRequired;
     }
+    // Copy post-commit revisions before another simulation tick. Undo must
+    // compare against this outcome, never a later refreshed value that would
+    // accidentally overwrite a simulation/external edit.
+    uint64 request = 0;
+    if (command.GetHexId("request", request))
+    {
+        (void)PublishProperties(request);
+    }
     return CommandStatus::Ok;
 }
 } // namespace ludus::runtime::game_host

@@ -82,6 +82,9 @@ struct HostConfig final
     uint64 ProjectId = 0;
     uint64 GameId = 0;
     uint64 ProjectEpoch = 1;
+    uint64 InitialGeneration = 1;
+    game_api::ByteView AuthoredDocument;
+    bool AwaitLoad = false; // Editor startup: Hello precedes any gameplay Create.
 
     // Maximum frames to run before exiting (0 = run until Stop/no events).
     // A bounded run is used by headless acceptance so a CI run terminates.

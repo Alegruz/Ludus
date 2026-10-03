@@ -22,6 +22,34 @@ class _Engine:
 
 
 class GenerationPublishTests(unittest.TestCase):
+    def test_host_inherits_store_lease_across_supervisor_loss(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            module, host, _ = self._artifacts(root)
+            gens = root / "generations"
+            published = [play_session.publish_generation(
+                generations_root=gens, module_artifact=module, host_artifact=host,
+                symbol_artifact=None, manifest_fields=self._fields(), declared_source_inputs=[module])
+                         for _ in range(5)]
+            lease = play_session.GenerationStoreLease(gens)
+            child = subprocess.Popen([sys.executable, "-c", "import sys; print('ready',flush=True); sys.stdin.read()"],
+                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, pass_fds=(lease.fileno(),))
+            try:
+                self.assertEqual(child.stdout.readline(), b"ready\n")
+                lease.close()  # The supervisor's fd goes away, host still owns it.
+                self.assertEqual(play_session.collect_generations(gens, play_session.LeaseSet()), [])
+                child.stdin.close()
+                self.assertEqual(child.wait(timeout=5), 0)
+                self.assertEqual(play_session.collect_generations(gens, play_session.LeaseSet()),
+                                 [p.name for p in published[:2]])
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait()
+                child.stdout.close()
+                if not child.stdin.closed:
+                    child.stdin.close()
+
     def test_lease_is_reference_counted(self):
         leases = play_session.LeaseSet()
         leases.acquire("generation")
@@ -94,6 +122,7 @@ class GenerationPublishTests(unittest.TestCase):
             )
             path = gen / "manifest.json"
             original = play_session.read_manifest(gen)
+            os.chmod(gen, 0o755)  # Deliberate corruption emulates a user with directory write access.
             os.chmod(path, 0o644)
             for kind in ("schema", "escape", "missing", "symlink"):
                 data = dict(original)
@@ -165,6 +194,10 @@ class GenerationPublishTests(unittest.TestCase):
             "abi_minor": 0,
             "property_schema": 1,
             "checkpoint_schema": 1,
+            "capabilities": 3,
+            "module_build_id": "a1" * 8,
+            "host_build_id": "b1" * 8,
+            "embedded_symbols": True,
         }
 
     def test_publish_is_atomic_and_immutable(self):
@@ -186,6 +219,8 @@ class GenerationPublishTests(unittest.TestCase):
             # Payload is read-only (an active/leased image is not overwritten).
             mode = (gen / "sample_game.so").stat().st_mode & 0o222
             self.assertEqual(mode, 0, "published payload must not be writable")
+            directory_mode = gen.stat().st_mode & 0o222
+            self.assertEqual(directory_mode, 0, "published generation directory must not be writable")
             # Manifest re-verification passes on a clean generation.
             data = play_session.read_manifest(gen)
             self.assertEqual(data["module_file"], "sample_game.so")

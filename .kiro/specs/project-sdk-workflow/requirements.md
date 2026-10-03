@@ -33,13 +33,14 @@ are subsequent milestones. Do not advertise unsupported combinations.
 | P06 | An explicit local installed-SDK override uses the same package interface, is displayed in diagnostics/UI, does not modify the committed lock and never silently builds the engine. Switching SDK identity invalidates or separates affected build trees. |
 | P07 | Installed CLI and Editor call one project operation backend with the same resolution, creation, validation, build planning, locking and lifecycle semantics. The CLI does not require Qt or a Ludus checkout. |
 | P08 | Project creation uses versioned bundled templates, validates the destination, stages complete files and publishes only to an absent destination. Failure/cancellation leaves no partially published project and never overwrites unrelated files. |
-| P09 | Open reads and validates metadata only. Downloads, migration, configure, build and execution are explicit operations. Existing version-1 projects remain readable and usable; migration is explicit and failure-preserving. |
+| P09 | Open reads and validates metadata and local setup only, reporting missing/stale presets, tools, SDK paths and IDE integration with actionable repair steps. Downloads, repair, migration, configure, build and execution are explicit operations. Existing version-1 projects remain readable and usable; migration is explicit and failure-preserving. |
 | P10 | Builds use exact argument arrays, the shared CMake File API resolver and post-build artifact validation. Failed/cancelled builds cannot launch an older binary. Editor and CLI share cooperative build locks and cancellation/cleanup rules. |
 | P11 | Runtime SDK, host tooling and Editor are separately installable. Runtime exports and game builds have no Qt dependency; installed tools do not import adapters from the engine checkout. |
 | P12 | Application source compiles against a supported SDK/toolchain contract using C++23 and no exceptions for the supplied template. CMake describes target structure; project metadata does not become a duplicate build language. |
 | P13 | CI assembles and tests release candidates in clean relocated environments, then publishes immutable checksummed artifacts for explicit version tags. Native Development and Release packages are available; Debug is included in the initial acceptance matrix. |
 | P14 | An external reference project proves the same workflow used by generated projects. Ludus-Sandbox conversion is a separate repository change and requires inspecting that repository; absent access, record the pending follow-up rather than claiming completion. |
 | P15 | Evidence distinguishes tests, real native GUI/runtime acceptance, unavailable gates and pending repository work. Existing runtime, Editor E0, RAD, browser and repository standards remain intact. |
+| P16 | Creation, SDK selection/update and explicit repair share setup checks with Open through the CLI/Editor backend. Supported configure/build/test presets must be selectable through the selected CMake, not only hidden bases. Validate inheritance/conditions, SDK/dependency prefixes, compiler/Ninja/shader tool paths and IDE CMake selection. Preserve custom presets/settings, keep machine paths ignored, refresh stale caches, and verify configure/build/test after repair. |
 
 ## Acceptance journey
 
@@ -55,3 +56,10 @@ reconfigure/rebuild the game. Show the selected revision and override in output.
 Return to the locked SDK without editing committed metadata. Verify mismatched
 flavors/toolchains, missing packages, corrupted installs and cancellation produce
 actionable failures, not fallback engine builds or stale launches.
+
+Exercise a fresh clone with only hidden base presets, missing user presets,
+broken inheritance, disabled presets, absent build/test presets, moved SDK/tools
+and stale IDE CMake selection. Open reports each problem without mutating files
+or starting configure/download/build. Explicit repair restores selectable presets
+and a working configure/build/test. Repeat repair and prove custom presets,
+editor settings and application source survive. Run through both CLI and Editor.

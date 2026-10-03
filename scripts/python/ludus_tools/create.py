@@ -74,6 +74,9 @@ def create_project(
     preset: str = "linux-clang-development",
     local_sdk_prefix: Optional[Path] = None,
     cancel_check: Optional[Callable[[], None]] = None,
+    verify_staged: Optional[Callable[[Path], None]] = None,
+    release: bool = False,
+    itch_target: Optional[str] = None,
 ) -> CreateResult:
     """Create a new version-2 project at an absent destination, atomically."""
     destination = Path(destination)
@@ -113,6 +116,15 @@ def create_project(
     rendered = render_files(template, ProjectInputs(
         name=name, target=target, engine_version=engine_version, components=components, preset=preset,
     ))
+    if itch_target is not None and not release:
+        raise ToolingError(INVALID_PROJECT, "--itch-target requires --release")
+    if release:
+        from .release_template import release_files
+
+        rendered.extend(release_files(target, itch_target))
+        for file in rendered:
+            if file.relpath == "CMakeLists.txt":
+                file.content += '\ninclude(cmake/GameRelease.cmake)\n'
     extra = [
         TemplateFile(DESCRIPTOR_NAME, _canonical_descriptor_json(descriptor)),
         TemplateFile(LOCK_NAME, lock.serialize().decode("utf-8")),
@@ -130,10 +142,17 @@ def create_project(
         extra.append(TemplateFile(LOCAL_SETTINGS_RELPATH, settings.serialize().decode("utf-8")))
 
     staged = stage_project(rendered, destination, extra_files=extra, cancel_check=cancel_check)
-    if cancel_check is not None:
+    if cancel_check is not None or verify_staged is not None:
         try:
-            cancel_check()
-        except ToolingError:
+            if verify_staged is not None:
+                verify_staged(staged.staging)
+                # Build trees and presets contain staging paths. Regenerate at
+                # the published location on first configure, never reuse them.
+                import shutil
+                shutil.rmtree(staged.staging / "out", ignore_errors=True)
+            if cancel_check is not None:
+                cancel_check()
+        except BaseException:
             from .templates import discard_staging
 
             discard_staging(staged)

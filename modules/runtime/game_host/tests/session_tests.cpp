@@ -173,6 +173,54 @@ bool HasStatus(const std::vector<Message>& events, uint64 request, const char* s
 }
 } // namespace
 
+TEST_CASE("initial gameplay waits for Hello and the selected Load", "[session][startup]")
+{
+    int sockets[2] = {-1, -1};
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
+    FrameReader reader;
+    HostSession session(0x11, 0x22, sockets[1]);
+    REQUIRE(session.PrepareInitialLoad(LUDUS_FIXTURE_A_PATH, 42, {}));
+    RunResult result = RunResult::Internal;
+    HostWorker worker(sockets[0], [&] { result = session.RunLoop(0); });
+    const auto ready = DrainEvents(sockets[0], reader, 50);
+    REQUIRE(HasEvent(ready, "SessionReady"));
+    REQUIRE_FALSE(HasEvent(ready, "ModuleReady"));
+    Message load;
+    load.SetString("command", "Load");
+    load.SetHexId("request", 1);
+    load.SetHexId("generation", 42);
+    SendCommand(sockets[0], load);
+    REQUIRE(HasStatus(DrainEvents(sockets[0], reader, 50), 1, "InvalidRequest"));
+    Message hello;
+    hello.SetString("command", "Hello");
+    hello.SetHexId("request", 2);
+    SendCommand(sockets[0], hello);
+    REQUIRE(HasStatus(DrainEvents(sockets[0], reader, 50), 2, "Ok"));
+    load.SetHexId("request", 3);
+    load.SetHexId("generation", 43);
+    SendCommand(sockets[0], load);
+    REQUIRE(HasStatus(DrainEvents(sockets[0], reader, 50), 3, "InvalidRequest"));
+    load.SetHexId("request", 4);
+    load.SetHexId("generation", 42);
+    SendCommand(sockets[0], load);
+    const auto loaded = DrainEvents(sockets[0], reader, 50);
+    REQUIRE(HasEvent(loaded, "ModuleReady"));
+    REQUIRE(HasStatus(loaded, 4, "Ok"));
+    load.SetHexId("request", 5);
+    SendCommand(sockets[0], load);
+    REQUIRE(HasStatus(DrainEvents(sockets[0], reader, 50), 5, "InvalidRequest"));
+    Message stop;
+    stop.SetString("command", "Stop");
+    stop.SetHexId("request", 6);
+    SendCommand(sockets[0], stop);
+    REQUIRE(HasEvent(DrainEvents(sockets[0], reader, 50), "SessionEnded"));
+    worker.join();
+    CHECK(result == RunResult::Ok);
+    CHECK(session.ActiveGeneration() == 42);
+    (void)::close(sockets[0]);
+    (void)::close(sockets[1]);
+}
+
 TEST_CASE("session performs a full reload transaction over the protocol", "[session]")
 {
     int sv[2] = {-1, -1};

@@ -130,3 +130,13 @@ TEST_CASE("host Run rejects an incompatible module", "[loader]")
     config.MaxFrames = 1;
     REQUIRE(Run(config) == RunResult::IncompatibleModule);
 }
+
+TEST_CASE("host Run distinguishes a missing module from an incompatible module", "[loader]")
+{
+    HostConfig config;
+    config.Source = GameplaySource::DynamicModule;
+    config.Mode = Presentation::Headless;
+    config.ModulePath = "/tmp/ludus-missing-live-reload-module.so";
+    config.MaxFrames = 1;
+    REQUIRE(Run(config) == RunResult::ModuleLoadFailed);
+}

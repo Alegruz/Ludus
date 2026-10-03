@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "name": "live-edit-game",
   "provider": "cmake",
   "source_dir": ".",
@@ -8,5 +8,14 @@
   "run": {
     "cwd": ".",
     "args": []
+  },
+  "engine": {
+    "version": "0.1.0",
+    "components": ["GameApi", "GameHost"],
+    "features": []
+  },
+  "template": {
+    "id": "live-edit-game",
+    "version": 1
   }
 }

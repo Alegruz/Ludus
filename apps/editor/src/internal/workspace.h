@@ -32,6 +32,7 @@ enum class Phase : foundation::uint8
     Starting,
     Configuring,
     Building,
+    Publishing,
     Launching,
     Running,
     Stopping,
@@ -79,6 +80,11 @@ enum class ActionKind : foundation::uint8
     Configure,
     Build,
     BuildRun,
+    ProjectCheck,
+    ProjectSetup,
+    ProjectCreate,
+    ReleaseInit,
+    Package,
     Stop,
     ClearOutput,
     CopyJobDetails,
@@ -116,6 +122,7 @@ struct WorkspaceState
     bool StopLatched = false;      // Stop accepted; wins before runtime spawn
     QStringList DiscoveredTargets; // executable targets from last Configure
     QString DiscoveredPreset;      // preset the discovery cache belongs to
+    QString SetupStatus;           // read-only CMake setup result for the saved project
     LastResult Result;
 
     // Dirty is the semantic inequality of saved and draft (design section 4).
@@ -142,6 +149,11 @@ struct Capabilities
     bool CanConfigure = false;
     bool CanBuild = false;
     bool CanBuildRun = false;
+    bool CanProjectCheck = false;
+    bool CanProjectSetup = false;
+    bool CanProjectCreate = false;
+    bool CanReleaseInit = false;
+    bool CanPackage = false;
     bool CanStop = false;
     bool CanClearOutput = true;
     bool CanCopyJobDetails = false;

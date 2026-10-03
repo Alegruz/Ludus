@@ -65,7 +65,10 @@ public:
 
     // Load the initial generation from an absolute leased path. Emits
     // ModuleReady on success. Returns false and sets Failed on rejection.
-    [[nodiscard]] bool LoadInitial(std::string_view modulePath) noexcept;
+    [[nodiscard]] bool
+    LoadInitial(std::string_view modulePath, uint64 generation = 1, game_api::ByteView authored = {}) noexcept;
+    [[nodiscard]] bool
+    PrepareInitialLoad(std::string_view path, uint64 generation, game_api::ByteView authored) noexcept;
 
     // Run the frame loop until Stop (or maxFrames, 0 = unbounded). Polls the
     // control channel each frame, dispatches validated commands at the boundary,
@@ -78,6 +81,11 @@ public:
         return State_;
     }
 
+    [[nodiscard]] RunResult InitialFailure() const noexcept
+    {
+        return InitialFailure_;
+    }
+
     [[nodiscard]] uint64 ActiveGeneration() const noexcept
     {
         return ActiveGeneration_;
@@ -86,6 +94,11 @@ public:
     [[nodiscard]] uint64 OutstandingHostAllocations() const noexcept
     {
         return Services_.OutstandingAllocations();
+    }
+
+    [[nodiscard]] uint64 OutstandingWorkLeases() const noexcept
+    {
+        return Services_.OutstandingWork();
     }
 
     // Advance the active instance one frame (deterministic test driver). No I/O.
@@ -120,6 +133,7 @@ private:
     void FlushOutput() noexcept;
     void EmitReloadPhase(protocol::ReloadPhase phase) noexcept;
     void EmitCommandResult(uint64 requestId, protocol::CommandStatus status, std::string_view message) noexcept;
+    void EmitReady() noexcept;
 
     // Poll + dispatch any pending control commands. Returns false to stop.
     [[nodiscard]] bool PumpControl() noexcept;
@@ -133,6 +147,7 @@ private:
     // Whether the active module advertises the Reload capability (gates calls to
     // the optional Quiesce/Resume/checkpoint/candidate callbacks).
     [[nodiscard]] bool ModuleHasReload() const noexcept;
+    [[nodiscard]] bool RetireActive() noexcept;
 
     FramePresenter* Presenter_ = nullptr;
     uint64 ProjectId_ = 0;
@@ -141,8 +156,18 @@ private:
     int32 ControlFd_ = -1;
 
     PlayState State_ = PlayState::Stopped;
+    RunResult InitialFailure_ = RunResult::IncompatibleModule;
     bool StopLatched_ = false;
+    bool ActiveRetired_ = false;
+    bool InstanceReady_ = false;
+    bool Quiesced_ = false;
     bool StepRequested_ = false;
+    bool ReadyEmitted_ = false;
+    bool HelloReceived_ = false;
+    bool AwaitingLoad_ = false;
+    std::string InitialPath_;
+    uint64 InitialGeneration_ = 0;
+    game_api::ByteView InitialAuthored_;
     uint64 FrameIndex_ = 0;
     uint64 SimTicks_ = 0;                    // Simulation ticks; advance only when not paused (no catch-up).
     game_api::RenderParams LastRender_ = {}; // Last render params from Update (asset/visible-change checks).

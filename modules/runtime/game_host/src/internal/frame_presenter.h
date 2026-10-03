@@ -21,6 +21,12 @@ public:
     [[nodiscard]] RunResult Present(const game_api::RenderParams& render) noexcept;
     void FillInput(game_api::FrameInput& frame) const noexcept;
     void ResetInput() noexcept;
+    [[nodiscard]] bool ReplaceClearConfiguration(game_api::ByteView artifact,
+                                                 ludus::foundation::uint64 digest) noexcept;
+    [[nodiscard]] ludus::foundation::uint64 ClearConfigurationGeneration() const noexcept
+    {
+        return ClearDigest_;
+    }
     [[nodiscard]] ludus::foundation::uint64 PresentedFrames() const noexcept
     {
         return PresentedFrames_;
@@ -35,6 +41,8 @@ private:
     ludus::foundation::uint64 InputStep_ = 0;
     ludus::foundation::core::UniquePtr<ludus::platform::Window> Window_;
     bool Rendering_ = false;
+    game_api::RenderParams ClearConfiguration_ = {};
+    ludus::foundation::uint64 ClearDigest_ = 0;
     ludus::foundation::uint64 PresentedFrames_ = 0;
 };
 } // namespace ludus::runtime::game_host

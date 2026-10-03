@@ -94,7 +94,7 @@ find_package(Git QUIET)
 set(LUDUS_GIT_REVISION "unknown")
 if(Git_FOUND)
     execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${PROJECT_SOURCE_DIR}" rev-parse --short=12 HEAD
+        COMMAND "${GIT_EXECUTABLE}" -C "${PROJECT_SOURCE_DIR}" rev-parse HEAD
         OUTPUT_VARIABLE LUDUS_GIT_REVISION_OUTPUT
         ERROR_QUIET
         OUTPUT_STRIP_TRAILING_WHITESPACE

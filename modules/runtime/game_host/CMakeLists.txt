@@ -98,9 +98,9 @@ if(LUDUS_BUILD_TESTS)
 
     # Fixture module A and B share one source but differ by a compile define, so
     # each has its own code and the test can prove A and B run their own copy.
-    foreach(variant A B)
+    foreach(variant A B C D H)
         add_library(ludus_game_fixture_${variant} MODULE tests/fixture_module.cpp)
-        target_link_libraries(ludus_game_fixture_${variant} PRIVATE Ludus::GameApi)
+        target_link_libraries(ludus_game_fixture_${variant} PRIVATE Ludus::GameApi Threads::Threads)
         target_compile_definitions(ludus_game_fixture_${variant} PRIVATE
             LUDUS_FIXTURE_VARIANT=${variant}
             LUDUS_FIXTURE_IDENTITY="${LUDUS_GAME_COMPATIBILITY_IDENTITY}")
@@ -112,7 +112,7 @@ if(LUDUS_BUILD_TESTS)
 
     # A module whose identity is deliberately wrong (rejected before Create).
     add_library(ludus_game_fixture_badid MODULE tests/fixture_module.cpp)
-    target_link_libraries(ludus_game_fixture_badid PRIVATE Ludus::GameApi)
+    target_link_libraries(ludus_game_fixture_badid PRIVATE Ludus::GameApi Threads::Threads)
     target_compile_definitions(ludus_game_fixture_badid PRIVATE
         LUDUS_FIXTURE_VARIANT=A
         LUDUS_FIXTURE_IDENTITY="wrong-sdk-identity-should-be-rejected")
@@ -184,6 +184,20 @@ if(LUDUS_BUILD_TESTS)
     # runtime regressions; this journey requires usable Debug source/locals.
     find_program(LUDUS_GDB NAMES gdb)
     find_package(Python3 3.10 COMPONENTS Interpreter)
+    if(NOT Python3_Interpreter_FOUND)
+        message(FATAL_ERROR "Native play-supervisor acceptance requires Python 3.10+")
+    endif()
+    add_test(NAME ludus_game_host_supervisor_acceptance
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/python/test_play_host_acceptance.py"
+            --root "${PROJECT_SOURCE_DIR}"
+            --host "$<TARGET_FILE:ludus_game_host_app>"
+            --a "$<TARGET_FILE:ludus_game_fixture_A>"
+            --b "$<TARGET_FILE:ludus_game_fixture_B>"
+            --crash "$<TARGET_FILE:ludus_game_fixture_C>"
+            --hang "$<TARGET_FILE:ludus_game_fixture_H>"
+            --destructor-crash "$<TARGET_FILE:ludus_game_fixture_D>")
+    set_tests_properties(ludus_game_host_supervisor_acceptance PROPERTIES
+        TIMEOUT 120 LABELS "runtime;session;supervisor;reload")
     set(_ludus_debugger_eligible OFF)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug"
        AND NOT LUDUS_ENABLE_ASAN AND NOT LUDUS_ENABLE_UBSAN AND NOT LUDUS_ENABLE_TSAN)
@@ -212,6 +226,15 @@ if(LUDUS_BUILD_TESTS)
         endif()
         if(LUDUS_GDB)
             set_tests_properties(ludus_game_host_debugger_acceptance PROPERTIES
+                TIMEOUT 180 LABELS "runtime;debugger;acceptance")
+            add_test(NAME ludus_game_host_debugger_attach_acceptance
+                COMMAND Python3::Interpreter
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/gdb_acceptance.py"
+                    "${LUDUS_GDB}"
+                    "$<TARGET_FILE:ludus_game_host_debugger_journey>"
+                    "$<TARGET_FILE:ludus_game_fixture_A>"
+                    "$<TARGET_FILE:ludus_game_fixture_B>" --attach)
+            set_tests_properties(ludus_game_host_debugger_attach_acceptance PROPERTIES
                 TIMEOUT 180 LABELS "runtime;debugger;acceptance")
         endif()
     endif()

@@ -102,10 +102,13 @@ Example sidecar (target names must resolve in the actual CMake codemodel):
 ```
 
 Open validates descriptors, source documents and selected SDK metadata, resolves
-paths and displays unavailable capabilities without running CMake, downloading
-dependencies, loading a library or executing project initialization. Build and
-Play are explicit code-executing operations. Dirty source documents may remain
-editable during Play; descriptor/SDK/target changes are for the next session.
+paths and displays unavailable capabilities. The shared project setup inspector
+may invoke the selected CMake executable only for `--list-presets=configure`,
+`--list-presets=build` and `--list-presets=test`; it does not evaluate the
+project's CMakeLists, configure, build, download dependencies or write files.
+Build and Play are explicit code-executing operations. Dirty source documents
+may remain editable during Play; descriptor/SDK/target changes are for the next
+session.
 Never silently save documents just to build. A saved tuning revision is not
 automatically equivalent to the values currently simulated.
 
@@ -171,7 +174,7 @@ visibility and exactly one public entry; do not export the host's whole symbol
 table or rely on RTLD_LOCAL as isolation. Windows later uses a reviewed explicit
 dependency-search policy and generation-specific DLL/PDB files.
 
-Source watching is opt-in, debounced (initial 250 ms), excludes output/.git/SDK
+Source watching is opt-in, debounced (initial 450 ms), excludes output/.git/SDK
 roots, and uses saved files. One active build plus one newest pending revision;
 coalesce bursts and cancel superseded requests where safe. Capture hashes for
 declared source inputs and configured dependency inputs before/after build and

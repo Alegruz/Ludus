@@ -32,6 +32,13 @@ enum class ToolOperation : foundation::uint8
     Configure,
     Build,
     BuildRun,
+    ProjectCheck,
+    ProjectSetup,
+    ProjectCreate,
+    ReleaseInit,
+    Package,
+    BuildGeneration,
+    InspectSetup,
 };
 
 [[nodiscard]] const char* ToolOperationName(ToolOperation op) noexcept;
@@ -48,6 +55,7 @@ struct ProtocolEvent
         Targets,
         Output,
         RuntimeStarted,
+        Generation,
         Result,
         Error, // local framing/protocol error (not from the adapter)
     };
@@ -74,6 +82,7 @@ struct ProtocolEvent
     // RuntimeStarted
     qint64 Pid = 0;
     QString Executable;
+    QString GenerationPath;
     // Result
     QString Outcome; // success/failed/cancelled
     ResultCode Code = ResultCode::Ok;
@@ -92,6 +101,15 @@ struct ToolLaunch
     QString ProjectPath;    // absolute descriptor path
     QString ExpectedSha256; // digest of the clean saved descriptor
     ToolOperation Operation = ToolOperation::Configure;
+    QString SetupSdk;
+    QString SetupWebSdk;
+    QString ProjectName;
+    bool PrepareEngine = false;
+    QString ReleasePlatform;
+    QString ItchTarget;
+    QString ReleaseProfile;
+    QString ReleaseVersion;
+    QString ReleaseSdk;
     uint64 Job = 0; // 16-hex-encoded on the wire
 };
 
@@ -132,6 +150,7 @@ Q_SIGNALS:
     // One parsed event. Controller binds this to its QObject context and tags
     // handling with the job id.
     void Event(const ProtocolEvent& event);
+    void Finished();
 
 private Q_SLOTS:
     void OnStarted();
@@ -143,6 +162,7 @@ private Q_SLOTS:
 
 private:
     void SendRequest();
+    void SendCancellation();
     void SendControl(const QByteArray& jsonLine);
     void ConsumeFrames();
     bool DispatchFrame(const QByteArray& line);

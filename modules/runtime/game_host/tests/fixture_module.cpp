@@ -13,14 +13,19 @@
 
 #include <ludus/foundation/base/types.h>
 #include <ludus/runtime/game_api/api.h>
+#include <ludus/runtime/game_api/authored.h>
 #include <ludus/runtime/game_api/checkpoint.h>
 #include <ludus/runtime/game_api/properties.h>
 #include <ludus/runtime/game_api/services.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <new>
+
+#include <pthread.h>
+#include <unistd.h>
 
 #ifndef LUDUS_FIXTURE_VARIANT
 #    define LUDUS_FIXTURE_VARIANT A
@@ -96,7 +101,36 @@ struct SimState
     bool Paused = false;
     bool HostAllocated = false;
     const HostServices* Services = nullptr;
+    pthread_t Worker = {};
+    std::atomic<bool> WorkerExit{false};
+    bool WorkerLive = false;
 };
+
+void* DeferredWork(void* argument) noexcept
+{
+    auto* state = static_cast<SimState*>(argument);
+    while (!state->WorkerExit.load(std::memory_order_acquire))
+    {
+        const timespec delay = {0, 1000000};
+        (void)::nanosleep(&delay, nullptr);
+    }
+    return nullptr;
+}
+
+bool JoinWork(SimState* state) noexcept
+{
+    if (!state->WorkerLive)
+    {
+        return true;
+    }
+    state->WorkerExit.store(true, std::memory_order_release);
+    if (::pthread_join(state->Worker, nullptr) != 0)
+    {
+        return false;
+    }
+    state->WorkerLive = false;
+    return state->Services->ReleaseWorkLease(state->Services->Context);
+}
 
 // xorshift so the RNG state is deterministic and survives a reload exactly.
 uint64 NextRng(uint64& state) noexcept
@@ -189,6 +223,10 @@ void DestroyState(SimState* state) noexcept
     {
         return;
     }
+    if (!JoinWork(state))
+    {
+        return;
+    }
     if (state->HostAllocated)
     {
         const HostServices* services = state->Services;
@@ -212,6 +250,30 @@ Status FixtureCreate(const CreateInfo* info, GameInstance** outInstance) noexcep
     {
         return Status::Internal;
     }
+    if (info->AuthoredDocument.Size != 0)
+    {
+        AuthoredReader reader;
+        AuthoredRecord record;
+        bool seen = false;
+        bool valid = reader.Start(info->AuthoredDocument, info->GameId);
+        while (valid && reader.Next(record))
+        {
+            valid = !seen && record.Object == kObjectId && record.Property == kPropSpeed &&
+                    record.Kind == static_cast<uint32>(PropertyKind::Float32) && record.Value.Size == 4;
+            if (valid)
+            {
+                const auto bits = static_cast<uint32>(ReadCheckpointUint(record.Value.Data, record.Value.Size));
+                std::memcpy(&state->Speed, &bits, sizeof(bits));
+                valid = std::isfinite(state->Speed) && state->Speed >= 0.0F && state->Speed <= 10.0F;
+                seen = true;
+            }
+        }
+        if (!valid || !reader.Complete())
+        {
+            DestroyState(state);
+            return Status::InvalidArgument;
+        }
+    }
     HostLog(state, LogSeverity::Info, "fixture create");
     *outInstance = reinterpret_cast<GameInstance*>(state);
     return Status::Ok;
@@ -219,6 +281,10 @@ Status FixtureCreate(const CreateInfo* info, GameInstance** outInstance) noexcep
 
 void FixtureDestroy(GameInstance* instance) noexcept
 {
+    if (kVariantName[0] == 'D' || (ShouldFail("work_pending") && AsState(instance)->WorkerLive))
+    {
+        std::abort(); // Native destructor failure / unsafe worker destruction probe.
+    }
     HostLog(AsState(instance), LogSeverity::Debug, "fixture destroy");
     if (!ShouldFail("retire"))
     {
@@ -228,10 +294,38 @@ void FixtureDestroy(GameInstance* instance) noexcept
 
 Status FixtureUpdate(GameInstance* instance, const FrameInput* input, RenderParams* outRender) noexcept
 {
+    if (kVariantName[0] == 'C')
+    {
+        std::abort();
+    }
+    if (kVariantName[0] == 'H')
+    {
+        for (;;)
+        {
+            (void)::pause();
+        }
+    }
     SimState* state = AsState(instance);
     if (state == nullptr || input == nullptr || outRender == nullptr)
     {
         return Status::InvalidArgument;
+    }
+    if (ShouldFail("work_pending") && !state->WorkerLive)
+    {
+        const HostServices* services = state->Services;
+        if (services == nullptr || services->StructSize < sizeof(HostServices) ||
+            services->AcquireWorkLease == nullptr || services->ReleaseWorkLease == nullptr ||
+            !services->AcquireWorkLease(services->Context))
+        {
+            return Status::Internal;
+        }
+        state->WorkerExit.store(false, std::memory_order_release);
+        if (::pthread_create(&state->Worker, nullptr, &DeferredWork, state) != 0)
+        {
+            (void)services->ReleaseWorkLease(services->Context);
+            return Status::Internal;
+        }
+        state->WorkerLive = true;
     }
     // Advance iff the host says this frame is not paused. Pause/Step is driven
     // by input.Paused alone so a single Step advances exactly one tick (design 8).
@@ -282,6 +376,10 @@ Status FixtureQuiesce(GameInstance* instance) noexcept
     if (ShouldFail("quiesce"))
     {
         return Status::Internal; // must leave A resumable (not mutated here)
+    }
+    if (!ShouldFail("work_pending") && !JoinWork(state))
+    {
+        return Status::Internal;
     }
     state->Paused = true;
     return Status::Ok;

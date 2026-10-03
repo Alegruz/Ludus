@@ -205,6 +205,25 @@ headers. Separate the groups with a blank line.
 
 ## Build, test, and validate
 
+### Game project setup checks
+
+When creating, loading, updating, or repairing a game project, check its CMake
+setup as part of the work. Hidden base presets alone are not a usable setup.
+Verify selectable configure/build/test presets for the supported profiles,
+their inheritance and conditions, SDK/dependency prefixes, compiler, Ninja,
+shader tools when required, and the IDE's CMake executable/preset mode. Use the
+selected CMake's `--list-presets=configure`, `--list-presets=build`, and
+`--list-presets=test`; parsing JSON alone does not prove preset availability.
+
+Loading must report missing or stale setup without downloading, configuring,
+building, or rewriting files. Explicit setup/update/repair should regenerate
+owned local settings, preserve custom presets and unrelated editor settings,
+refresh stale CMake caches when SDK/toolchain inputs change, and verify a real
+configure/build/test before reporting success. Keep machine paths in ignored
+local files such as `CMakeUserPresets.json`. Add regressions for a fresh clone,
+missing local presets, moved tools/SDKs, and repeated repair. Future CLI/Editor
+project operations must share these checks (see the project-sdk-workflow spec).
+
 ```bash
 ./init.sh                                   # prepare pinned tools + deps
 ./scripts/build   linux-clang-debug         # build

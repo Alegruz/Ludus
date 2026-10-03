@@ -3,12 +3,18 @@
 #include <QAbstractItemModel>
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QHeaderView>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
@@ -20,9 +26,14 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSplitter>
+#include <QTableWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <ludus/foundation/base/types.h>
+
+#include <cstring>
 
 namespace ludus::editor
 {
@@ -82,6 +93,28 @@ void MainWindow::BuildUi()
     RuntimeLabel_ = new QLabel(splitter);
     RuntimeLabel_->setText(QStringLiteral("No runtime."));
     RuntimeLabel_->setWordWrap(true);
+    Properties_ = new QTableWidget(splitter);
+    Properties_->setColumnCount(3);
+    Properties_->setHorizontalHeaderLabels(
+        {QStringLiteral("Property"), QStringLiteral("Value"), QStringLiteral("Scope")});
+    Properties_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    Properties_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    Properties_->setSelectionMode(QAbstractItemView::SingleSelection);
+    ApplySessionButton_ = new QPushButton(QStringLiteral("Apply selected value to session"), splitter);
+    connect(ApplySessionButton_, &QPushButton::clicked, this, [this]() {
+        const int row = Properties_->currentRow();
+        if (row >= 0 && Properties_->item(row, 1) != nullptr)
+        {
+            Controller_->EditProperty(row, Properties_->item(row, 1)->text());
+        }
+    });
+    ApplyDocumentButton_ = new QPushButton(QStringLiteral("Copy live value to tuning draft"), splitter);
+    connect(ApplyDocumentButton_, &QPushButton::clicked, this, [this]() {
+        Controller_->ApplyLivePropertyToTuningDocument(Properties_->currentRow());
+    });
+    connect(Properties_, &QTableWidget::currentCellChanged, this, [this]() {
+        ApplyDocumentButton_->setEnabled(Controller_->CanApplyToTuningDocument(Properties_->currentRow()));
+    });
 
     // --- Output panel (read-only) ---
     Output_ = new QPlainTextEdit(splitter);
@@ -90,6 +123,9 @@ void MainWindow::BuildUi()
 
     splitter->addWidget(form);
     splitter->addWidget(RuntimeLabel_);
+    splitter->addWidget(Properties_);
+    splitter->addWidget(ApplySessionButton_);
+    splitter->addWidget(ApplyDocumentButton_);
     splitter->addWidget(Output_);
     splitter->setStretchFactor(2, 1);
 
@@ -118,11 +154,73 @@ void MainWindow::BuildMenus()
     SaveAction_->setShortcut(QKeySequence::Save);
     ReloadAction_ = fileMenu->addAction(QStringLiteral("&Reload"));
 
+    QMenu* projectMenu = menuBar()->addMenu(QStringLiteral("&Project"));
+    NewProjectAction_ = projectMenu->addAction(QStringLiteral("&New Project..."));
+    NewProjectAction_->setObjectName(QStringLiteral("newProjectAction"));
+    CheckSetupAction_ = projectMenu->addAction(QStringLiteral("&Check Setup"));
+    CheckSetupAction_->setObjectName(QStringLiteral("checkSetupAction"));
+    SetupProjectAction_ = projectMenu->addAction(QStringLiteral("&Initialize / Repair / Update Setup..."));
+    SetupProjectAction_->setObjectName(QStringLiteral("setupProjectAction"));
+    connect(NewProjectAction_, &QAction::triggered, this, &MainWindow::OnNewProject);
+    connect(CheckSetupAction_, &QAction::triggered, Controller_, &EditorController::CheckProjectSetup);
+    connect(SetupProjectAction_, &QAction::triggered, this, &MainWindow::OnSetupProject);
+
     QMenu* buildMenu = menuBar()->addMenu(QStringLiteral("&Build"));
     ConfigureAction_ = buildMenu->addAction(QStringLiteral("&Configure / Refresh Targets"));
     BuildAction_ = buildMenu->addAction(QStringLiteral("&Build"));
     BuildRunAction_ = buildMenu->addAction(QStringLiteral("Build and &Run"));
     StopAction_ = buildMenu->addAction(QStringLiteral("&Stop"));
+
+    QMenu* releaseMenu = menuBar()->addMenu(QStringLiteral("&Release"));
+    SetupReleaseAction_ = releaseMenu->addAction(QStringLiteral("Set Up &Releases..."));
+    PackageReleaseAction_ = releaseMenu->addAction(QStringLiteral("&Package Release..."));
+    connect(SetupReleaseAction_, &QAction::triggered, this, &MainWindow::OnSetupRelease);
+    connect(PackageReleaseAction_, &QAction::triggered, this, &MainWindow::OnPackageRelease);
+    QMenu* playMenu = menuBar()->addMenu(QStringLiteral("&Play"));
+    PlayAction_ = playMenu->addAction(QStringLiteral("Build and Play"));
+    PlayAction_->setObjectName(QStringLiteral("play.start"));
+    BuildReloadAction_ = playMenu->addAction(QStringLiteral("Build and Reload Code"));
+    BuildReloadAction_->setObjectName(QStringLiteral("play.reload"));
+    AutoReloadAction_ = playMenu->addAction(QStringLiteral("Automatically Reload Source Changes"));
+    AutoReloadAction_->setCheckable(true);
+    connect(AutoReloadAction_, &QAction::toggled, Controller_, &EditorController::SetAutoReload);
+    ReloadAssetAction_ = playMenu->addAction(QStringLiteral("Reload Frame-clear Configuration..."));
+    connect(ReloadAssetAction_, &QAction::triggered, this, [this]() {
+        const auto directory = QFileInfo(Controller_->State().DescriptorPath).absolutePath();
+        const auto path = QFileDialog::getOpenFileName(this,
+                                                       QStringLiteral("Frame-clear configuration"),
+                                                       directory,
+                                                       QStringLiteral("JSON configuration (*.json)"));
+        if (!path.isEmpty())
+        {
+            Controller_->ReloadClearConfiguration(path);
+        }
+    });
+    PauseAction_ = playMenu->addAction(QStringLiteral("Pause"));
+    StepAction_ = playMenu->addAction(QStringLiteral("Step"));
+    ResumeAction_ = playMenu->addAction(QStringLiteral("Resume"));
+    RefreshPropertiesAction_ = playMenu->addAction(QStringLiteral("Refresh Inspector"));
+    auto* details = playMenu->addAction(QStringLiteral("Refresh Session Details"));
+    connect(details, &QAction::triggered, Controller_, &EditorController::RefreshSessionDetails);
+    UndoSessionAction_ = playMenu->addAction(QStringLiteral("Undo Session Edit"));
+    RedoSessionAction_ = playMenu->addAction(QStringLiteral("Redo Session Edit"));
+    playMenu->addSeparator();
+    UndoTuningAction_ = playMenu->addAction(QStringLiteral("Undo Tuning Document Edit"));
+    RedoTuningAction_ = playMenu->addAction(QStringLiteral("Redo Tuning Document Edit"));
+    SaveTuningAction_ = playMenu->addAction(QStringLiteral("Save Tuning Document"));
+    DiscardTuningAction_ = playMenu->addAction(QStringLiteral("Discard Tuning Draft"));
+    connect(UndoSessionAction_, &QAction::triggered, Controller_, &EditorController::UndoSessionEdit);
+    connect(RedoSessionAction_, &QAction::triggered, Controller_, &EditorController::RedoSessionEdit);
+    connect(UndoTuningAction_, &QAction::triggered, Controller_, &EditorController::UndoTuningDocument);
+    connect(RedoTuningAction_, &QAction::triggered, Controller_, &EditorController::RedoTuningDocument);
+    connect(SaveTuningAction_, &QAction::triggered, Controller_, &EditorController::SaveTuningDocument);
+    connect(DiscardTuningAction_, &QAction::triggered, Controller_, &EditorController::DiscardTuningDocumentDraft);
+    connect(PlayAction_, &QAction::triggered, Controller_, &EditorController::Play);
+    connect(BuildReloadAction_, &QAction::triggered, Controller_, &EditorController::BuildReload);
+    connect(PauseAction_, &QAction::triggered, this, [this]() { Controller_->PlayCommand(QStringLiteral("Pause")); });
+    connect(StepAction_, &QAction::triggered, this, [this]() { Controller_->PlayCommand(QStringLiteral("Step")); });
+    connect(ResumeAction_, &QAction::triggered, this, [this]() { Controller_->PlayCommand(QStringLiteral("Resume")); });
+    connect(RefreshPropertiesAction_, &QAction::triggered, Controller_, &EditorController::RefreshProperties);
 
     QMenu* outputMenu = menuBar()->addMenu(QStringLiteral("&Output"));
     ClearAction_ = outputMenu->addAction(QStringLiteral("&Clear Output"));
@@ -256,7 +354,8 @@ void MainWindow::OnStateChanged()
     RenderStatus();
 
     // If a close was requested and the workspace is now closeable, finish.
-    if (CloseConfirmed_ && ComputeCapabilities(Controller_->State()).CanCloseImmediately)
+    RenderProperties();
+    if (CloseConfirmed_ && Controller_->Caps().CanCloseImmediately)
     {
         close();
     }
@@ -311,7 +410,32 @@ void MainWindow::RenderFields()
 
 void MainWindow::RenderCapabilities()
 {
-    const Capabilities caps = ComputeCapabilities(Controller_->State());
+    const Capabilities caps = Controller_->Caps();
+    PlayAction_->setEnabled(Controller_->CanPlay());
+    BuildReloadAction_->setEnabled(Controller_->CanBuildReload());
+    const auto play = Controller_->PlayState().Phase;
+    AutoReloadAction_->setEnabled(play == PlayPhase::Running || play == PlayPhase::Paused);
+    ReloadAssetAction_->setEnabled(play == PlayPhase::Running || play == PlayPhase::Paused);
+    {
+        const QSignalBlocker blocker(AutoReloadAction_);
+        AutoReloadAction_->setChecked(Controller_->AutoReloadEnabled());
+    }
+    PauseAction_->setEnabled(play == PlayPhase::Running);
+    ResumeAction_->setEnabled(play == PlayPhase::Paused);
+    StepAction_->setEnabled(play == PlayPhase::Paused);
+    RefreshPropertiesAction_->setEnabled(play == PlayPhase::Running || play == PlayPhase::Paused);
+    ApplySessionButton_->setEnabled(Controller_->CanEditProperties());
+    ApplyDocumentButton_->setEnabled(Controller_->CanApplyToTuningDocument(Properties_->currentRow()));
+    UndoSessionAction_->setEnabled(Controller_->CanUndoSession());
+    RedoSessionAction_->setEnabled(Controller_->CanRedoSession());
+    const auto& playState = Controller_->PlayState();
+    UndoTuningAction_->setEnabled(playState.TuningDocumentAvailable && playState.TuningCanUndo);
+    RedoTuningAction_->setEnabled(playState.TuningDocumentAvailable && playState.TuningCanRedo);
+    SaveTuningAction_->setEnabled(Controller_->CanSaveTuningDocument());
+    DiscardTuningAction_->setEnabled(playState.TuningDocumentAvailable && playState.TuningDocumentDirty);
+    NewProjectAction_->setEnabled(caps.CanProjectCreate);
+    CheckSetupAction_->setEnabled(caps.CanProjectCheck);
+    SetupProjectAction_->setEnabled(caps.CanProjectSetup);
     OpenAction_->setEnabled(caps.CanOpen);
     SaveAction_->setEnabled(caps.CanSave);
     ReloadAction_->setEnabled(caps.CanReload);
@@ -319,6 +443,8 @@ void MainWindow::RenderCapabilities()
     BuildAction_->setEnabled(caps.CanBuild);
     BuildRunAction_->setEnabled(caps.CanBuildRun);
     StopAction_->setEnabled(caps.CanStop);
+    SetupReleaseAction_->setEnabled(caps.CanReleaseInit);
+    PackageReleaseAction_->setEnabled(caps.CanPackage);
     ClearAction_->setEnabled(caps.CanClearOutput);
     CopyAction_->setEnabled(caps.CanCopyJobDetails);
 
@@ -352,6 +478,9 @@ void MainWindow::RenderStatus()
         case Phase::Building:
             phase = QStringLiteral("Building");
             break;
+        case Phase::Publishing:
+            phase = QStringLiteral("Publishing generation");
+            break;
         case Phase::Launching:
             phase = QStringLiteral("Launching");
             break;
@@ -379,9 +508,20 @@ void MainWindow::RenderStatus()
     {
         status += QStringLiteral("  —  operator recovery required; see Copy Job Details");
     }
+    if (!state.SetupStatus.isEmpty())
+    {
+        status += QStringLiteral("\n") + state.SetupStatus;
+    }
     StatusLabel_->setText(status);
 
-    if (state.OperationPhase == Phase::Running)
+    if (Controller_->PlayState().Phase != PlayPhase::Stopped)
+    {
+        const auto& play = Controller_->PlayState();
+        RuntimeLabel_->setText(QStringLiteral("Play session %1 · generation %2 · PID %4\n%3")
+                                   .arg(play.Session, play.Generation, play.Message)
+                                   .arg(play.HostPid));
+    }
+    else if (state.OperationPhase == Phase::Running)
     {
         RuntimeLabel_->setText(
             QStringLiteral("The application is running in its own window. This status area describes it; "
@@ -393,9 +533,185 @@ void MainWindow::RenderStatus()
     }
 }
 
+namespace
+{
+struct DirectoryFieldOptions
+{
+    QString Label;
+    QString Hint;
+};
+
+QLineEdit* AddDirectoryField(QFormLayout* form, QDialog* dialog, const DirectoryFieldOptions& field)
+{
+    auto* row = new QWidget(dialog);
+    auto* layout = new QHBoxLayout(row);
+    layout->setContentsMargins(0, 0, 0, 0);
+    auto* edit = new QLineEdit(row);
+    edit->setPlaceholderText(field.Hint);
+    auto* browse = new QPushButton(QStringLiteral("Browse..."), row);
+    layout->addWidget(edit);
+    layout->addWidget(browse);
+    QObject::connect(browse, &QPushButton::clicked, dialog, [dialog, edit]() {
+        const QString selected =
+            QFileDialog::getExistingDirectory(dialog, QStringLiteral("Select directory"), edit->text());
+        if (!selected.isEmpty())
+        {
+            edit->setText(selected);
+        }
+    });
+    form->addRow(field.Label, row);
+    return edit;
+}
+} // namespace
+
+void MainWindow::OnSetupProject()
+{
+    auto* dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setObjectName(QStringLiteral("projectSetupDialog"));
+    dialog->setWindowTitle(QStringLiteral("Initialize / Repair / Update Project Setup"));
+    auto* form = new QFormLayout(dialog);
+    auto* sdk = AddDirectoryField(form,
+                                  dialog,
+                                  {
+                                      .Label = QStringLiteral("Native SDK"),
+                                      .Hint = QStringLiteral("Installed SDK prefix; blank keeps saved selection"),
+                                  });
+    sdk->setObjectName(QStringLiteral("setupSdk"));
+    auto* web = AddDirectoryField(form,
+                                  dialog,
+                                  {
+                                      .Label = QStringLiteral("Web SDK"),
+                                      .Hint = QStringLiteral("Optional installed Web SDK; blank keeps saved selection"),
+                                  });
+    auto* prepare = new QCheckBox(QStringLiteral("Prepare tools and build/install the native engine SDK"), dialog);
+    form->addRow(prepare);
+    auto* note = new QLabel(
+        QStringLiteral("Choose a different compatible SDK to update the project. Repair refreshes local CMake presets "
+                       "and caches, then builds and runs tests. Custom presets and unrelated IDE settings are "
+                       "preserved. Engine preparation may download dependencies from the trusted tooling checkout."),
+        dialog);
+    note->setWordWrap(true);
+    form->addRow(note);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::accepted, this, [this, sdk, web, prepare]() {
+        Controller_->SetupProject(sdk->text().trimmed(), web->text().trimmed(), prepare->isChecked());
+    });
+    dialog->open();
+}
+
+void MainWindow::OnNewProject()
+{
+    auto* dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setObjectName(QStringLiteral("newProjectDialog"));
+    dialog->setWindowTitle(QStringLiteral("New Ludus Project"));
+    auto* form = new QFormLayout(dialog);
+    auto* name = new QLineEdit(dialog);
+    name->setObjectName(QStringLiteral("newProjectName"));
+    form->addRow(QStringLiteral("Name"), name);
+    auto* destination = new QLineEdit(dialog);
+    destination->setPlaceholderText(QStringLiteral("Full path to a new directory"));
+    destination->setObjectName(QStringLiteral("newProjectDestination"));
+    form->addRow(QStringLiteral("Destination"), destination);
+    auto* sdk = AddDirectoryField(form,
+                                  dialog,
+                                  {
+                                      .Label = QStringLiteral("Development SDK"),
+                                      .Hint = QStringLiteral("Installed native Development SDK prefix"),
+                                  });
+    auto* prepare = new QCheckBox(QStringLiteral("Prepare tools and build/install the native engine SDK"), dialog);
+    form->addRow(prepare);
+    auto* note = new QLabel(
+        QStringLiteral("Create the minimal native template and verify configure, build and tests before opening it. "
+                       "The destination must be new. Engine preparation may download dependencies."),
+        dialog);
+    note->setWordWrap(true);
+    form->addRow(note);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::accepted, this, [this, name, destination, sdk, prepare]() {
+        ProjectCreationOptions creation;
+        creation.Destination = destination->text().trimmed();
+        creation.Name = name->text().trimmed();
+        creation.Sdk = sdk->text().trimmed();
+        creation.PrepareEngine = prepare->isChecked();
+        Controller_->CreateProject(creation);
+    });
+    dialog->open();
+}
+
+void MainWindow::OnSetupRelease()
+{
+    auto* dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(QStringLiteral("Set Up Releases"));
+    auto* layout = new QFormLayout(dialog);
+    auto* platform = new QComboBox(dialog);
+    platform->addItem(QStringLiteral("Linux native"), QStringLiteral("linux-x64"));
+    platform->addItem(QStringLiteral("Browser (Emscripten)"), QStringLiteral("web"));
+    auto* target = new QLineEdit(dialog);
+    target->setPlaceholderText(QStringLiteral("username/game (optional)"));
+    auto* note = new QLabel(
+        QStringLiteral("Save release files into this project's repository. Setup also adds "
+                       "a GitHub workflow for v* tags and manual releases. Set ITCH_IO_TARGET on GitHub if left blank. "
+                       "Add BUTLER_API_KEY in the "
+                       "itch-release environment on GitHub. Setup never uploads or overwrites existing files."),
+        dialog);
+    note->setWordWrap(true);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    layout->addRow(QStringLiteral("Platform"), platform);
+    layout->addRow(QStringLiteral("itch.io project"), target);
+    layout->addRow(note);
+    layout->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::accepted, this, [this, platform, target]() {
+        Controller_->SetupRelease(platform->currentData().toString(), target->text().trimmed());
+    });
+    dialog->open();
+}
+
+void MainWindow::OnPackageRelease()
+{
+    auto* dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(QStringLiteral("Package Release"));
+    auto* layout = new QFormLayout(dialog);
+    auto* profile = new QComboBox(dialog);
+    profile->setEditable(true);
+    profile->addItem(QStringLiteral("linux-release"));
+    profile->addItem(QStringLiteral("web-release"));
+    auto* version = new QLineEdit(QStringLiteral("0.1.0"), dialog);
+    auto* sdk = new QLineEdit(dialog);
+    sdk->setPlaceholderText(QStringLiteral("Optional Release SDK prefix"));
+    auto* note = new QLabel(
+        QStringLiteral("Build and validate a player package. The package directory appears in Output. "
+                       "Browser projects need a configured web-emscripten-release preset. Packaging never uploads."),
+        dialog);
+    note->setWordWrap(true);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    layout->addRow(QStringLiteral("Package profile"), profile);
+    layout->addRow(QStringLiteral("Version"), version);
+    layout->addRow(QStringLiteral("SDK"), sdk);
+    layout->addRow(note);
+    layout->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::accepted, this, [this, profile, version, sdk]() {
+        Controller_->PackageRelease(profile->currentText(), version->text().trimmed(), sdk->text().trimmed());
+    });
+    dialog->open();
+}
+
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    if (ComputeCapabilities(Controller_->State()).CanCloseImmediately)
+    if (Controller_->Caps().CanCloseImmediately)
     {
         event->accept();
         return;
@@ -421,6 +737,59 @@ void MainWindow::closeEvent(QCloseEvent* event)
         CloseConfirmed_ = false; // a close request is cancellable
     }
     event->ignore();
+}
+
+void MainWindow::RenderProperties()
+{
+    const auto& snapshot = Controller_->PlayState();
+    const QString stamp = QString::fromUtf8(QJsonDocument(snapshot.Properties).toJson(QJsonDocument::Compact));
+    if (stamp == PropertiesStamp_)
+    {
+        return;
+    }
+    PropertiesStamp_ = stamp;
+    const QSignalBlocker blocker(Properties_);
+    Properties_->setRowCount(static_cast<int>(snapshot.Properties.size()));
+    for (int row = 0; row < snapshot.Properties.size(); ++row)
+    {
+        const auto property = snapshot.Properties.at(row).toObject();
+        const int kind = property.value(QStringLiteral("kind")).toInt(-1);
+        QString text;
+        if (kind == 2)
+        {
+            const auto bits = static_cast<foundation::uint32>(property.value(QStringLiteral("bits")).toInteger());
+            foundation::float32 value = 0.0F;
+            std::memcpy(&value, &bits, sizeof(value));
+            text = QString::number(static_cast<foundation::float64>(value), 'g', 9);
+        }
+        else if (kind == 0)
+        {
+            text = property.value(QStringLiteral("value")).toBool() ? QStringLiteral("true") : QStringLiteral("false");
+        }
+        else if (kind == 4)
+        {
+            text = property.value(QStringLiteral("value")).toString();
+        }
+        else
+        {
+            text = QString::number(property.value(QStringLiteral("value")).toInteger());
+        }
+        auto* name = new QTableWidgetItem(property.value(QStringLiteral("label")).toString());
+        auto* value = new QTableWidgetItem(text);
+        const bool writable = property.value(QStringLiteral("writable")).toBool();
+        if (!writable)
+        {
+            value->setFlags(value->flags() & ~Qt::ItemIsEditable);
+        }
+        name->setFlags(name->flags() & ~Qt::ItemIsEditable);
+        auto* scope = new QTableWidgetItem(property.value(QStringLiteral("scope")).toInt() == 1
+                                               ? QStringLiteral("Persistable")
+                                               : QStringLiteral("Session/output"));
+        scope->setFlags(scope->flags() & ~Qt::ItemIsEditable);
+        Properties_->setItem(row, 0, name);
+        Properties_->setItem(row, 1, value);
+        Properties_->setItem(row, 2, scope);
+    }
 }
 
 } // namespace ludus::editor

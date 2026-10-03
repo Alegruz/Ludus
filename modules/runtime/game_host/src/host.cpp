@@ -53,10 +53,13 @@ RunResult Run(const HostConfig& config) noexcept
         return started;
     }
     HostSession session(config.ProjectId, config.GameId, config.ControlFd, config.ProjectEpoch);
-    if (!session.LoadInitial(config.ModulePath))
+    const bool loaded =
+        config.AwaitLoad
+            ? session.PrepareInitialLoad(config.ModulePath, config.InitialGeneration, config.AuthoredDocument)
+            : session.LoadInitial(config.ModulePath, config.InitialGeneration, config.AuthoredDocument);
+    if (!loaded)
     {
-        // Distinguish an incompatible module from an ordinary load failure.
-        return session.State() == PlayState::Failed ? RunResult::IncompatibleModule : RunResult::ModuleLoadFailed;
+        return session.InitialFailure();
     }
     return session.RunLoop(config.MaxFrames, &presenter);
 }

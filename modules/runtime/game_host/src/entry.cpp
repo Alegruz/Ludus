@@ -18,17 +18,76 @@
 #include <ludus/foundation/base/types.h>
 #include <ludus/foundation/logging/log_system.hpp>
 
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <string>
 #include <string_view>
 
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace
 {
 using ludus::foundation::int32;
 using ludus::foundation::uint64;
+using ludus::foundation::uint8;
+using ludus::foundation::usize;
+
+struct AuthoredBytes final
+{
+    uint8* Data = nullptr;
+    usize Size = 0;
+    ~AuthoredBytes() noexcept
+    {
+        delete[] Data;
+    }
+    [[nodiscard]] bool Read(const char* path) noexcept
+    {
+        const int fd = ::open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+        if (fd < 0)
+        {
+            return false;
+        }
+        struct CloseFd final
+        {
+            int Value;
+            ~CloseFd() noexcept
+            {
+                (void)::close(Value);
+            }
+        } closeFd{fd};
+        struct stat info = {};
+        if (::fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size < 20 || info.st_size > 262144)
+        {
+            return false;
+        }
+        Size = static_cast<usize>(info.st_size);
+        Data = new (std::nothrow) uint8[Size];
+        if (Data == nullptr)
+        {
+            return false;
+        }
+        usize offset = 0;
+        while (offset < Size)
+        {
+            const ssize_t count = ::read(fd, Data + offset, Size - offset);
+            if (count < 0 && errno == EINTR)
+            {
+                continue;
+            }
+            if (count <= 0)
+            {
+                return false;
+            }
+            offset += static_cast<usize>(count);
+        }
+        uint8 extra = 0;
+        return ::read(fd, &extra, 1) == 0;
+    }
+};
 
 [[nodiscard]] bool ParseU64(std::string_view text, uint64& out) noexcept
 {
@@ -107,6 +166,8 @@ ludus::runtime::game_host::RunMain(ludus::foundation::int32 argc, const char* co
     config.Mode = ludus::runtime::game_host::Presentation::Windowed;
 
     std::string modulePath;
+    std::string authoredPath;
+    AuthoredBytes authored;
     bool inspect = false;
     for (int i = 1; i < argc; ++i)
     {
@@ -174,6 +235,27 @@ ludus::runtime::game_host::RunMain(ludus::foundation::int32 argc, const char* co
                 return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
             }
         }
+        else if (arg == "--generation")
+        {
+            std::string_view value;
+            if (!nextValue(value) || !ParseHex(value, config.InitialGeneration) || config.InitialGeneration == 0)
+            {
+                return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
+            }
+        }
+        else if (arg == "--authored-document")
+        {
+            std::string_view value;
+            if (!nextValue(value) || value.empty() || !authoredPath.empty())
+            {
+                return static_cast<int>(RunResult::BadArguments);
+            }
+            authoredPath = value;
+        }
+        else if (arg == "--await-load")
+        {
+            config.AwaitLoad = true;
+        }
         else if (arg == "--headless")
         {
             config.Mode = ludus::runtime::game_host::Presentation::Headless;
@@ -224,6 +306,14 @@ ludus::runtime::game_host::RunMain(ludus::foundation::int32 argc, const char* co
         return static_cast<int>(result);
     }
 
+    if (!authoredPath.empty())
+    {
+        if (!authored.Read(authoredPath.c_str()))
+        {
+            return static_cast<int>(RunResult::BadArguments);
+        }
+        config.AuthoredDocument = {authored.Data, authored.Size};
+    }
     const RunResult result = entry == nullptr ? Run(config) : RunStatic(config, entry);
     return static_cast<int>(result);
 }

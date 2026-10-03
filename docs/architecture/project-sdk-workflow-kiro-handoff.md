@@ -14,9 +14,11 @@ Read these five files together:
 - `docs/architecture/project-sdk-workflow.md`
 - `docs/architecture/project-sdk-workflow-kiro-handoff.md`
 
-The documents are self-contained. Ludus-Sandbox is not cloned here and its
-contents have not been inspected. No private PDFs or conversation history are
-needed. Discover actual current code and tools before implementation.
+The documents are self-contained. Ludus-Sandbox lives in a separate repository
+and may be available in a sibling checkout. Inspect its current code and setup
+before changing it; its local setup repair does not establish shared-SDK migration
+acceptance. No private PDFs or conversation history are needed. Discover actual
+current code and tools before implementation.
 
 ## Prompt 1 Implement and open the PR
 
@@ -51,6 +53,14 @@ behavior. Project creation must stage complete output and publish without replac
 an existing destination, including destination races. Keep CMake authoritative.
 Implement local installed-SDK refresh detection and visible override resolution;
 never mix headers/libraries/flavors or run an old binary after failed builds.
+
+Implement P16 setup checks shared by creation, Open, SDK update and explicit
+repair: selectable configure/build/test presets via real CMake discovery,
+SDK/dependency prefixes, compiler/Ninja/shader tools and IDE CMake selection.
+Open reports actionable diagnostics without downloads, configure/build or writes.
+Repair preserves custom presets/settings, refreshes stale caches and verifies
+configure/build/test. Cover missing local presets, hidden/disabled/broken presets,
+moved tools/SDKs, stale IDE paths, fresh clones and repeated repair.
 
 Expose project create/configure/build/run and engine selection through CLI and
 the same backend used by the Editor. Extend v2 native profiles to Release while
@@ -94,7 +104,7 @@ create duplicate PRs, merge, tag, publish releases or push implementation to mai
 ## Prompt 3 Review and repair before merge
 
 ```text
-Review the project-sdk-workflow implementation PR against P01-P15 and design.md.
+Review the project-sdk-workflow implementation PR against P01-P16 and design.md.
 Use code, installed artifacts and real acceptance evidence. Check all exported
 static dependency closures without checkout/Conan access, source-path leakage,
 compiler/runtime/flavor identity, matching policy headers, archive containment

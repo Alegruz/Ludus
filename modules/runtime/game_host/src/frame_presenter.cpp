@@ -6,6 +6,8 @@
 #include <ludus/input/key.h>
 #include <ludus/input/keyboard_event.h>
 #include <ludus/platform/keyboard_sink.h>
+#include <ludus/runtime/game_api/checkpoint.h>
+#include <ludus/runtime/game_api/frame_clear.h>
 
 #include <cstring>
 
@@ -140,15 +142,16 @@ RunResult FramePresenter::Present(const game_api::RenderParams& render) noexcept
         return RunResult::Ok;
     }
     namespace rhi = graphics::rhi;
+    const auto& clear = ClearDigest_ == 0 ? render : ClearConfiguration_;
     const auto window = Window_->GetNativeWindowInfo();
     const auto target = rhi::SetFrameTarget(
     {
         .Width = window.Width,
         .Height = window.Height,
-        .Red = ClampColor(render.ClearRed),
-        .Green = ClampColor(render.ClearGreen),
-        .Blue = ClampColor(render.ClearBlue),
-        .Alpha = ClampColor(render.ClearAlpha),
+        .Red = ClampColor(clear.ClearRed),
+        .Green = ClampColor(clear.ClearGreen),
+        .Blue = ClampColor(clear.ClearBlue),
+        .Alpha = ClampColor(clear.ClearAlpha),
     });
     if (target == rhi::FrameStatus::Skipped)
     {
@@ -169,5 +172,44 @@ RunResult FramePresenter::Present(const game_api::RenderParams& render) noexcept
     }
     ++PresentedFrames_;
     return RunResult::Ok;
+}
+
+bool FramePresenter::ReplaceClearConfiguration(game_api::ByteView artifact, ludus::foundation::uint64 digest) noexcept
+{
+    if (artifact.Data == nullptr || artifact.Size != game_api::kFrameClearArtifactBytes ||
+        std::memcmp(artifact.Data, "LCLR", 4) != 0 || game_api::ReadCheckpointUint(artifact.Data + 4, 4) != 1)
+    {
+        return false;
+    }
+    ludus::foundation::uint64 computed = 0xCBF29CE484222325ULL;
+    for (ludus::foundation::usize i = 0; i < artifact.Size; ++i)
+    {
+        computed = (computed ^ artifact.Data[i]) * 0x100000001B3ULL;
+    }
+    if (computed != digest || digest == 0)
+    {
+        return false;
+    }
+    float32 channels[4] = {};
+    for (ludus::foundation::usize i = 0; i < 4; ++i)
+    {
+        const auto bits = static_cast<uint32>(game_api::ReadCheckpointUint(artifact.Data + 8 + i * 4, 4));
+        std::memcpy(&channels[i], &bits, sizeof(bits));
+        if (!Finite(channels[i]) || channels[i] < 0 || channels[i] > 1)
+        {
+            return false;
+        }
+    }
+    game_api::RenderParams staged = {};
+    staged.ClearRed = channels[0];
+    staged.ClearGreen = channels[1];
+    staged.ClearBlue = channels[2];
+    staged.ClearAlpha = channels[3];
+    // Called between frames. SetFrameTarget copies scalar values; GPU work
+    // retains no pointer into this configuration. Replacing the host copy is
+    // therefore the complete retirement of the old CPU configuration.
+    ClearConfiguration_ = staged;
+    ClearDigest_ = digest;
+    return true;
 }
 } // namespace ludus::runtime::game_host

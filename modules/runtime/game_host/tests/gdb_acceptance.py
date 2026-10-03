@@ -84,18 +84,44 @@ quit
 '''
 
 def main() -> int:
-    if len(sys.argv) != 5:
+    if len(sys.argv) not in (5, 6) or (len(sys.argv) == 6 and sys.argv[5] != "--attach"):
         return 2
+    attach = len(sys.argv) == 6
+    script_text = SCRIPT
+    if attach:
+        # GDB is the parent of the already-running inferior, respecting Linux's
+        # ptrace policy without changing sysctls or granting unrelated tracers.
+        setup = '''python
+import subprocess
+import time
+inferior = subprocess.Popen(gdb.string_to_argv(gdb.parameter("args")) + ["--wait-attach"], stdin=subprocess.PIPE)
+deadline = time.monotonic() + 15
+while "game_fixture_A.so" not in Path(f"/proc/{inferior.pid}/maps").read_text():
+    assert inferior.poll() is None and time.monotonic() < deadline, "inferior did not load A before attach"
+    time.sleep(0.01)
+gdb.execute(f"attach {inferior.pid}")
+print("PASS attach to running host with A already loaded")
+inferior.stdin.write(b"g")
+inferior.stdin.flush()
+end
+continue
+'''
+        # The executable must be supplied explicitly: GDB's args exclude it.
+        setup = setup.replace('gdb.string_to_argv(gdb.parameter("args"))',
+                              '[gdb.current_progspace().filename] + gdb.string_to_argv(gdb.parameter("args"))')
+        script_text = SCRIPT.replace("run\npython\nframe", setup + "python\nframe", 1)
     with tempfile.TemporaryDirectory() as td:
         script = Path(td) / "journey.gdb"
-        script.write_text(SCRIPT)
+        script.write_text(script_text)
         result = subprocess.run(
-            [sys.argv[1], "-q", "--batch", "-x", str(script), "--args", *sys.argv[2:]],
+            [sys.argv[1], "-q", "--batch", "-x", str(script), "--args", *sys.argv[2:5]],
             capture_output=True, text=True, timeout=150)
     output = result.stdout + result.stderr
     print(output)
     required = ("PASS A source", "PASS actual A next", "PASS B source",
                 "PASS actual B next", "PASS inferior exited zero")
+    if attach:
+        required += ("PASS attach to running host",)
     return 0 if result.returncode == 0 and all(marker in output for marker in required) else 1
 
 if __name__ == "__main__":

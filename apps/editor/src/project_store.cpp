@@ -82,7 +82,7 @@ bool ValidTargetName(const QString& value)
 // Validate a bounded array of pattern-constrained, unique, nonempty strings.
 // Used for engine.components / engine.features. Returns true on success and
 // fills `out`; on failure returns false and sets `message`.
-struct StringListBounds
+struct StringListLimits
 {
     usize Count;
     usize Bytes;
@@ -90,7 +90,7 @@ struct StringListBounds
 
 bool ParseStringList(const QJsonValue& value,
                      const QString& context,
-                     StringListBounds bounds,
+                     const StringListLimits& listLimits,
                      bool (*validChar)(QChar, bool),
                      QStringList& out,
                      QString& message)
@@ -101,7 +101,7 @@ bool ParseStringList(const QJsonValue& value,
         return false;
     }
     const QJsonArray array = value.toArray();
-    if (static_cast<usize>(array.size()) > bounds.Count)
+    if (static_cast<usize>(array.size()) > listLimits.Count)
     {
         message = QStringLiteral("'%1' exceeds its entry limit").arg(context);
         return false;
@@ -115,7 +115,7 @@ bool ParseStringList(const QJsonValue& value,
             return false;
         }
         const QString s = item.toString();
-        if (s.isEmpty() || s.contains(QChar(u'\0')) || static_cast<usize>(s.toUtf8().size()) > bounds.Bytes)
+        if (s.isEmpty() || s.contains(QChar(u'\0')) || static_cast<usize>(s.toUtf8().size()) > listLimits.Bytes)
         {
             message = QStringLiteral("invalid '%1' entry").arg(context);
             return false;
@@ -482,7 +482,7 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
                 QString msg;
                 if (!ParseStringList(engine.value(QStringLiteral("components")),
                                      QStringLiteral("engine.components"),
-                                     {limits::MaxComponentCount, limits::MaxComponentBytes},
+                                     { .Count = limits::MaxComponentCount, .Bytes = limits::MaxComponentBytes },
                                      ComponentChar,
                                      descriptor.Engine.Components,
                                      msg))
@@ -495,7 +495,7 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
                 QString msg;
                 if (!ParseStringList(engine.value(QStringLiteral("features")),
                                      QStringLiteral("engine.features"),
-                                     {limits::MaxFeatureCount, limits::MaxFeatureBytes},
+                                     { .Count = limits::MaxFeatureCount, .Bytes = limits::MaxFeatureBytes },
                                      FeatureChar,
                                      descriptor.Engine.Features,
                                      msg))
