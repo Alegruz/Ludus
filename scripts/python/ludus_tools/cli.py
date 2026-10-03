@@ -128,11 +128,29 @@ def cmd_sdk_remove(args) -> int:
 # --- project commands --------------------------------------------------------
 
 
+def cmd_project_setup(args) -> int:
+    from .project_setup import check_project, repair_project
+    options = dict(tooling_root=Path(args.tools).resolve())
+    if args.cmd == "check":
+        message = check_project(Path(args.project), **options)
+    else:
+        message = repair_project(Path(args.project), sdk=Path(args.sdk) if args.sdk else None,
+                                 web_sdk=Path(args.web_sdk) if args.web_sdk else None, **options)
+    _emit(args, {"setup": message})
+    if not getattr(args, "json", False):
+        print(message)
+    return 0
+
+
 def cmd_project_create(args) -> int:
     components = [c for c in (args.components or "FoundationBase").split(",") if c]
     local_prefix: Optional[Path] = Path(args.sdk) if args.sdk else None
     if not args.engine and not local_prefix:
         raise ToolingError("InvalidProject", "create requires --engine <release> or --sdk <prefix>")
+    verifier = None
+    if args.tools:
+        from .project_setup import repair_project
+        verifier = lambda staged: repair_project(staged, tooling_root=Path(args.tools).resolve(), sdk=local_prefix)
     result = create.create_project(
         Path(args.destination),
         name=args.name,
@@ -141,6 +159,7 @@ def cmd_project_create(args) -> int:
         components=components,
         preset=args.profile or "linux-clang-development",
         local_sdk_prefix=local_prefix,
+        verify_staged=verifier,
         release=args.release,
         itch_target=args.itch_target,
     )
@@ -330,6 +349,7 @@ def build_parser() -> argparse.ArgumentParser:
     cr.add_argument("--sdk", help="local SDK prefix (recorded only in ignored local settings)")
     cr.add_argument("--components", help="comma-separated public modules to link")
     cr.add_argument("--profile", help="default preset")
+    cr.add_argument("--tools", help="verify setup/build/tests using this prepared tooling checkout before publishing")
     cr.add_argument("--release", action="store_true", help="include native release configuration/install rules")
     cr.add_argument("--itch-target", help="optional username/game for offline release planning")
     cr.set_defaults(func=cmd_project_create)
@@ -340,6 +360,14 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--profile")
         sp.add_argument("--sdk", help="per-operation local SDK override")
         sp.set_defaults(func=func)
+
+    for action in ("check", "repair", "update"):
+        setup = proj.add_parser(action, help="check or verify local CMake setup")
+        setup.add_argument("project")
+        setup.add_argument("--tools", required=True, help="trusted prepared Ludus tooling checkout")
+        setup.add_argument("--sdk")
+        setup.add_argument("--web-sdk")
+        setup.set_defaults(func=cmd_project_setup)
 
     eng = proj.add_parser("engine")
     eng.add_argument("project")

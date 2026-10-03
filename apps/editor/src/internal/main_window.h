@@ -43,6 +43,8 @@ private Q_SLOTS:
     void OnAddArgument();
     void OnRemoveArgument();
     void OnCopyJobDetails();
+    void OnSetupProject();
+    void OnNewProject();
     void OnSetupRelease();
     void OnPackageRelease();
 
@@ -68,6 +70,9 @@ private:
     QListWidget* ArgsList_ = nullptr;
 
     // Actions / status.
+    QAction* NewProjectAction_ = nullptr;
+    QAction* CheckSetupAction_ = nullptr;
+    QAction* SetupProjectAction_ = nullptr;
     QAction* OpenAction_ = nullptr;
     QAction* SaveAction_ = nullptr;
     QAction* ReloadAction_ = nullptr;

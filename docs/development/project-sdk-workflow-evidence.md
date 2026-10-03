@@ -628,3 +628,47 @@ $ cmake -DCMAKE_CXX_COMPILER_ID=GNU   -DCMAKE_CXX_COMPILER_VERSION=13.2.0 -P gat
 
 This also means the identity fields in the installed `LudusConfig.cmake` were
 previously shipping empty — the gate addition surfaced and fixed that.
+
+
+## Editor project setup acceptance — 2026-10-03
+
+The Editor now exposes New Project, Check Setup, and Initialize / Repair / Update
+Setup. CLI check/repair/update and verified creation use the same
+`ludus_tools.project_setup` backend. Open/Reload/Save queue read-only diagnostics;
+explicit repair owns marked local presets and ignored SDK settings, verifies
+real CMake preset availability, then fresh configure/build/native CTest.
+
+Validation used Clang 18.1.3, managed CMake 3.29.6/Ninja 1.11.1, Qt 6.4.2 and the
+pinned Emscripten/shader toolchain. The work started at Ludus main `652ea51`.
+
+- 175 host-tooling/adapter tests passed, including eight setup regressions for
+  missing local settings, read-only checks, moved SDK/tools, stale tool versions,
+  conditions/test availability, preserved custom settings, repeated repair,
+  staged creation failure/cancellation and web presets.
+- All 40 Editor cases (217 assertions) passed with native Qt Wayland. The real
+  controller created and verified a project against a freshly installed SDK,
+  opened it only after adapter shutdown, then automatically checked its setup.
+  The missing-setup Open test ran the real adapter and proved no project hook or
+  local file was executed/generated.
+- The full native CTest suite passed (32 registrations; two live-input tests
+  skipped). The full ASan/UBSan suite passed (27 registrations; the same two
+  live-input gates skipped); all final Editor cases were rebuilt and passed
+  under ASan/UBSan after the parser/controller refinements.
+- Full repository formatting passed. Pinned clang-tidy covered every configured
+  module/app source. Three existing Editor translation units had diagnostics;
+  those small parser/test issues were fixed and rechecked together with the
+  final controller changes. No remaining analysis failures were observed.
+- A fresh Ludus-Sandbox clone was repaired against a freshly built native SDK,
+  with real native configure/build/ocean CTest. A freshly built web Release SDK
+  additionally passed web Development and Release configure/build, including
+  WGSL and GLSL ES shader translation. Browser rendering was not playtested.
+- The real adapter passed repair, verified creation and read-only check through
+  its streaming protocol. Ordinary CLI build and File API artifact resolution
+  passed after repair. A standalone copy of the distributable host package ran
+  setup checks outside the checkout without importing Qt or engine.py.
+
+Archive-store installation UI, standalone native Editor distribution, and the
+full game-window create/open/build/run/stop acceptance journey remain separate
+P4 follow-ups. Web SDK acquisition is still an explicit engine-tooling step;
+the Project dialog accepts installed web prefixes. Engine preparation in the
+dialog is explicitly opted in and limited to the trusted native tooling root.

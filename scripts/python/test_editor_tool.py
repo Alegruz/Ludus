@@ -481,7 +481,8 @@ class RealProcessTests(unittest.TestCase):
         grandchild = self.root / "grandchild.py"
         grandchild.write_text(
             "import os, time\n"
-            f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+            f"with open({str(pidfile.with_suffix('.tmp'))!r}, 'w') as pid: pid.write(str(os.getpid()))\n"
+            f"os.replace({str(pidfile.with_suffix('.tmp'))!r}, {str(pidfile)!r})\n"
             "time.sleep(120)\n"
         )
         runtime = self.make_runtime(

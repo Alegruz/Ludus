@@ -74,6 +74,7 @@ def create_project(
     preset: str = "linux-clang-development",
     local_sdk_prefix: Optional[Path] = None,
     cancel_check: Optional[Callable[[], None]] = None,
+    verify_staged: Optional[Callable[[Path], None]] = None,
     release: bool = False,
     itch_target: Optional[str] = None,
 ) -> CreateResult:
@@ -141,10 +142,17 @@ def create_project(
         extra.append(TemplateFile(LOCAL_SETTINGS_RELPATH, settings.serialize().decode("utf-8")))
 
     staged = stage_project(rendered, destination, extra_files=extra, cancel_check=cancel_check)
-    if cancel_check is not None:
+    if cancel_check is not None or verify_staged is not None:
         try:
-            cancel_check()
-        except ToolingError:
+            if verify_staged is not None:
+                verify_staged(staged.staging)
+                # Build trees and presets contain staging paths. Regenerate at
+                # the published location on first configure, never reuse them.
+                import shutil
+                shutil.rmtree(staged.staging / "out", ignore_errors=True)
+            if cancel_check is not None:
+                cancel_check()
+        except BaseException:
             from .templates import discard_staging
 
             discard_staging(staged)

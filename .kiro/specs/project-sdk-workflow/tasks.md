@@ -142,10 +142,12 @@ Gate: P01/P04/P06-P10/P12/P16; real project creation, migration and build lifecy
       and installed adapter discovery, independent of a source checkout. (Design
       preserved; the editor stays OFF-by-default and un-exported; actual Qt
       packaging needs Qt6 — UNAVAILABLE here.)
-- [ ] Add asynchronous New Project and explicit SDK install/select stages through
-      the same backend used by the CLI. (Backend is shared and ready; the Qt GUI
-      New Project flow is not implemented — needs Qt6 and native GUI acceptance.)
-- [ ] On Open, show shared setup diagnostics and an explicit Repair action
+- [x] Add asynchronous New Project and explicit local SDK select/prepare stages
+      through the CLI-shared project_setup backend. Verified staging, native
+      configure/build/CTest and bridge-finished opening are implemented and
+      covered by real-adapter and Qt offscreen acceptance. Archive-store SDK
+      installation UI and native windowed acceptance remain separate follow-up.
+- [x] On Open, show shared setup diagnostics and an explicit Repair action
       without automatic downloads/configure/build/settings changes. New Project,
       SDK update and Repair use the same setup checks and acceptance as the CLI.
 - [x] Add required/resolved engine identity, profile and local override controls

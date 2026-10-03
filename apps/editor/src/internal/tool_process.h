@@ -32,6 +32,9 @@ enum class ToolOperation : foundation::uint8
     Configure,
     Build,
     BuildRun,
+    ProjectCheck,
+    ProjectSetup,
+    ProjectCreate,
     ReleaseInit,
     Package,
 };
@@ -94,6 +97,10 @@ struct ToolLaunch
     QString ProjectPath;    // absolute descriptor path
     QString ExpectedSha256; // digest of the clean saved descriptor
     ToolOperation Operation = ToolOperation::Configure;
+    QString SetupSdk;
+    QString SetupWebSdk;
+    QString ProjectName;
+    bool PrepareEngine = false;
     QString ReleasePlatform;
     QString ItchTarget;
     QString ReleaseProfile;
@@ -139,6 +146,7 @@ Q_SIGNALS:
     // One parsed event. Controller binds this to its QObject context and tags
     // handling with the job id.
     void Event(const ProtocolEvent& event);
+    void Finished();
 
 private Q_SLOTS:
     void OnStarted();

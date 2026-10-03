@@ -1,0 +1,316 @@
+"""Shared read-only setup diagnosis and explicit local repair for CLI/Editor.
+
+Only trusted tooling is executed. Open never imports project-owned Python or
+runs bootstrap hooks. Repair owns marked presets and local SDK overrides only.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+from pathlib import Path
+
+from .buildlock import BuildTreeLock
+from .errors import INVALID_PROJECT, ToolingError
+from .identity import load_prefix_manifest
+from .lockfile import parse_local_settings_file
+from .operations import PRESET_FLAVOR, locate_project, resolve_project
+from .resolve import compute_stamp, write_stamp
+from .sdkstore import SdkStore
+from .descriptor import parse_descriptor_file
+
+OWNER = "ludus.dev/project-setup/1"
+
+
+def read_object(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        value = json.loads(path.read_text())
+    except (ValueError, OSError) as exc:
+        raise ToolingError(INVALID_PROJECT, f"Cannot read {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ToolingError(INVALID_PROJECT, f"Expected JSON object: {path}")
+    return value
+
+
+def write_object(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".setup-tmp")
+    temporary.write_text(json.dumps(value, indent=2) + "\n")
+    temporary.replace(path)
+
+
+def preset_for(source: Path, profile: str) -> str:
+    for item in read_object(source / "CMakeUserPresets.json").get("configurePresets", []):
+        if isinstance(item, dict) and item.get("vendor", {}).get(OWNER) == profile:
+            return item["name"]
+    return profile
+
+
+def preset_names(path: Path, seen=None) -> set[str]:
+    seen = set() if seen is None else seen
+    path = path.resolve()
+    if path in seen:
+        return set()
+    if len(seen) >= 32:
+        raise ToolingError(INVALID_PROJECT, "Too many preset includes")
+    seen.add(path)
+    obj = read_object(path)
+    names = {p["name"] for p in obj.get("configurePresets", [])}
+    for include in obj.get("include", []):
+        names.update(preset_names(path.parent / include, seen))
+    return names
+
+
+def executable(path: Path) -> Path:
+    # Keep the managed path, including symlinks, for SDK ABI/tool selection.
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise ToolingError("MissingTools", f"Missing executable: {path}; prepare the tooling checkout")
+    return path
+
+
+def tools(root: Path) -> dict:
+    venv = root / "out/host-tools/venv/bin"
+    return {"cmake": executable(venv / "cmake"), "ctest": executable(venv / "ctest"),
+            "ninja": executable(venv / "ninja"),
+            "compiler": executable(root / "out/host-tools/bin/clang++")}
+
+
+def run_command(argv, *, cwd, env):
+    result = subprocess.run(argv, cwd=cwd, env=env, text=True, capture_output=True, timeout=600)
+    if result.returncode:
+        raise ToolingError("ConfigureFailed", result.stderr[-4096:] or result.stdout[-4096:])
+    print(result.stdout, end="")
+    return result.stdout
+
+
+def environment(root: Path) -> dict:
+    env = os.environ.copy()
+    entries = (root / "out/host-tools/bin", root / "out/host-tools/venv/bin")
+    env["PATH"] = os.pathsep.join(map(str, entries)) + os.pathsep + env.get("PATH", "")
+    env["CONAN_HOME"] = str(root / "out/conan/home")
+    env["CONAN_NON_INTERACTIVE"] = "1"
+    env.pop("BUTLER_API_KEY", None)
+    return env
+
+
+def supported_project(path: Path):
+    paths = locate_project(path)
+    descriptor = parse_descriptor_file(paths.descriptor_path)
+    if descriptor.version != 2 or descriptor.provider != "cmake" or descriptor.preset not in PRESET_FLAVOR:
+        raise ToolingError(INVALID_PROJECT, "Setup requires a saved version-2 native CMake project")
+    source = (paths.project_dir / descriptor.source_dir).resolve()
+    if not (source / "CMakeLists.txt").is_file():
+        raise ToolingError(INVALID_PROJECT, "Missing CMakeLists.txt")
+    return paths, descriptor, source
+
+
+def validate_native_identity(identity, descriptor):
+    if identity.engine_version != descriptor.engine.version or identity.target_triple != "x86_64-linux-gnu":
+        raise ToolingError(INVALID_PROJECT, "Selected native SDK must match the project's engine version and native target")
+    missing = set(descriptor.engine.components) - set(identity.components)
+    if missing:
+        raise ToolingError(INVALID_PROJECT, f"SDK lacks required components: {sorted(missing)}")
+
+
+def _inputs(root: Path, source: Path, sdk: Path, profile: str, web_sdk: Path | None):
+    native = load_prefix_manifest(sdk)
+    configured = tools(root)
+    cache = {"CMAKE_MAKE_PROGRAM": str(configured["ninja"]),
+             "CMAKE_CXX_COMPILER": str(configured["compiler"]),
+             "CMAKE_PREFIX_PATH": str(sdk),
+             "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"}
+    # Package discovery remains in CMake; include prepared dependencies needed by
+    # exported native libraries, without baking machine paths into tracked files.
+    dependencies = root / "out/conan" / profile
+    if dependencies.is_dir():
+        cache["CMAKE_PREFIX_PATH"] += ";" + str(dependencies)
+    shaders = "ludus_compile_shader" in (source / "CMakeLists.txt").read_text()
+    # Shader includes are also common (Sandbox owns cmake/Shaders.cmake).
+    shaders |= any("ludus_compile_shader" in p.read_text() for p in (source / "cmake").glob("*.cmake"))
+    if shaders:
+        cache["LUDUS_SLANG_COMPILER"] = str(executable(root / "out/shader-tools/slang/bin/slangc"))
+        candidates = sorted((root / "out/shader-tools/spirv-tools").glob("**/spirv-val"))
+        if not candidates:
+            raise ToolingError("MissingTools", "Missing pinned spirv-val; prepare shader tools")
+        cache["LUDUS_SPIRV_VALIDATOR"] = str(executable(candidates[0]))
+    records = {profile: {"cacheVariables": cache}}
+    stamps = {str(sdk): compute_stamp(sdk)}
+    if web_sdk:
+        web_identity = load_prefix_manifest(web_sdk)
+        if web_identity.engine_version != native.engine_version or web_identity.target_triple != "wasm32-unknown-emscripten":
+            raise ToolingError(INVALID_PROJECT, "Web SDK must match the engine release and wasm32-unknown-emscripten target")
+        toolchain = root / "out/host-tools/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"
+        if not toolchain.is_file():
+            raise ToolingError("MissingTools", "Web toolchain is missing; prepare Emscripten")
+        cross = executable(root / "out/shader-tools/spirv-cross/bin/spirv-cross")
+        webcache = {k: v for k, v in cache.items() if k != "CMAKE_CXX_COMPILER"}
+        webcache.update(CMAKE_PREFIX_PATH=str(web_sdk), CMAKE_FIND_ROOT_PATH=str(web_sdk), LUDUS_SPIRV_CROSS=str(cross))
+        for webprofile, buildtype in (("web-emscripten-development", "RelWithDebInfo"), ("web-emscripten-release", "Release")):
+            records[webprofile] = {"toolchainFile": str(toolchain),
+                                   "cacheVariables": dict(webcache, CMAKE_BUILD_TYPE=buildtype)}
+        stamps[str(web_sdk)] = compute_stamp(web_sdk)
+    return configured, records, stamps
+
+
+def verify_tool_versions(configured, root: Path, runner, env):
+    pins = read_object(root / "config/tool_versions.json").get("managed", {})
+    expected = {"cmake": pins.get("cmake", "3.29.6"), "ninja": pins.get("ninja", "1.11.1.3").rsplit(".", 1)[0]}
+    for key, pattern in (("cmake", r"cmake version (\d+\.\d+\.\d+)"),
+                         ("ninja", r"(\d+\.\d+\.\d+)"),
+                         ("compiler", r"clang version (\d+)")):
+        output = runner([str(configured[key]), "--version"], cwd=root, env=env)
+        match = re.search(pattern, output)
+        wanted = "18" if key == "compiler" else expected[key]
+        if not match or match.group(1) != wanted:
+            raise ToolingError("MissingTools", f"{key} must use pinned version {wanted}; prepare the tooling checkout")
+
+
+def cache_value(path: Path, key: str):
+    for line in path.read_text().splitlines():
+        if line.startswith(key + ":") and "=" in line:
+            return line.split("=", 1)[1]
+    return None
+
+
+def _signature(configured, records, stamps):
+    payload = {"tools": {k: (str(v), v.stat().st_size, v.stat().st_mtime_ns) for k, v in configured.items()}, "presets": records, "sdks": stamps}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _list(source: Path, configured, profiles, runner, env):
+    for kind in ("configure", "build", "test"):
+        output = runner([str(configured["cmake"]), f"--list-presets={kind}"], cwd=source, env=env)
+        visible = set(re.findall(r'^  "([^"\n]+)"', output, re.MULTILINE))
+        required = {preset_for(source, p) for p in profiles if kind != "test" or not p.startswith("web-")}
+        if not required <= visible:
+            raise ToolingError(INVALID_PROJECT, f"Missing selectable {kind} presets: {sorted(required - visible)}; run repair")
+
+
+def check_project(path: Path, *, tooling_root: Path, runner=run_command, cancel_check=lambda: None):
+    """Read metadata and ask CMake to list presets; never configure or write."""
+    paths, descriptor, source = supported_project(path)
+    settings = read_object(paths.project_dir / ".ludus/setup.json")
+    if not settings:
+        raise ToolingError(INVALID_PROJECT, "Project setup is missing; use Project > Initialize / Repair / Update Setup")
+    resolved = resolve_project(path, store=SdkStore(), enforce_host_toolchain=False)
+    sdk = resolved.resolution.prefix.resolve()
+    validate_native_identity(resolved.resolution.identity, descriptor)
+    web = Path(settings["web_sdk"]) if settings.get("web_sdk") else None
+    configured, records, stamps = _inputs(tooling_root, source, sdk, descriptor.preset, web)
+    if settings.get("signature") != _signature(configured, records, stamps):
+        raise ToolingError(INVALID_PROJECT, "SDK or tool inputs changed; run repair to refresh presets and caches")
+    local = read_object(source / "CMakeUserPresets.json")
+    for profile, fields in records.items():
+        item = next((p for p in local.get("configurePresets", []) if p.get("name") == preset_for(source, profile)), None)
+        if not item or item.get("hidden", False) or item.get("cmakeExecutable") != str(configured["cmake"]) or any(item.get(k) != v for k, v in fields.items()):
+            raise ToolingError(INVALID_PROJECT, f"Stale local preset for {profile}; run repair")
+        cache_path = source / "out/build" / profile / "CMakeCache.txt"
+        if cache_path.is_file():
+            for key in ("CMAKE_PREFIX_PATH", "CMAKE_MAKE_PROGRAM", "CMAKE_CXX_COMPILER"):
+                expected = fields["cacheVariables"].get(key)
+                if expected and cache_value(cache_path, key) != expected:
+                    raise ToolingError(INVALID_PROJECT, f"Stale CMake cache for {profile}: {key}; run repair")
+    ide = read_object(source / ".vscode/settings.json")
+    if ide.get("cmake.useCMakePresets") != "always" or ide.get("cmake.cmakePath", str(configured["cmake"])) != str(configured["cmake"]):
+        raise ToolingError(INVALID_PROJECT, "IDE CMake path or preset mode is stale; run repair")
+    cancel_check()
+    env = environment(tooling_root)
+    verify_tool_versions(configured, tooling_root, runner, env)
+    _list(source, configured, records, runner, env)
+    return "Setup checked: selectable presets, SDKs, tools and IDE settings"
+
+
+def repair_project(path: Path, *, tooling_root: Path, sdk: Path | None = None,
+                   web_sdk: Path | None = None, runner=run_command, cancel_check=lambda: None):
+    paths, descriptor, source = supported_project(path)
+    if sdk is None:
+        sdk = resolve_project(path, store=SdkStore(), enforce_host_toolchain=False).resolution.prefix
+    sdk = sdk.resolve()
+    resolved = resolve_project(path, store=SdkStore(), cli_sdk_prefix=sdk, enforce_host_toolchain=False)
+    identity = resolved.resolution.identity
+    validate_native_identity(identity, descriptor)
+    previous = read_object(paths.project_dir / ".ludus/setup.json")
+    if web_sdk is None and previous.get("web_sdk"):
+        web_sdk = Path(previous["web_sdk"])
+    if web_sdk:
+        web_sdk = web_sdk.resolve()
+    configured, records, stamps = _inputs(tooling_root, source, sdk, descriptor.preset, web_sdk)
+    local = read_object(source / "CMakeUserPresets.json")
+    ide = read_object(source / ".vscode/settings.json")
+    # CMake validates included roots/inheritance/conditions with real list calls.
+    roots = preset_names(source / "CMakePresets.json")
+    for key in ("configurePresets", "buildPresets", "testPresets"):
+        items = local.get(key, [])
+        if not isinstance(items, list) or any(not isinstance(p, dict) for p in items):
+            raise ToolingError(INVALID_PROJECT, f"Invalid {key}; fix JSON before repair")
+        local[key] = [p for p in items if OWNER not in p.get("vendor", {})]
+        if any(p.get("name") == "ludus-local-" + profile for p in local[key] for profile in records):
+            raise ToolingError(INVALID_PROJECT, "Custom preset occupies a managed name; rename it before repair")
+    local["version"] = max(local.get("version", 6), 6)
+    for profile, fields in records.items():
+        if "ludus-local-" + profile in roots:
+            raise ToolingError(INVALID_PROJECT, "Custom root preset occupies a managed name")
+        inherited = profile + "-base" if profile + "-base" in roots else profile
+        if inherited not in roots:
+            raise ToolingError(INVALID_PROJECT, f"Missing supported base preset: {profile}")
+        name = "ludus-local-" + profile
+        marker = {OWNER: profile}
+        local["configurePresets"].append(dict(fields, name=name, inherits=inherited, hidden=False,
+            binaryDir="${sourceDir}/out/build/" + profile, cmakeExecutable=str(configured["cmake"]), vendor=marker))
+        local["buildPresets"].append(dict(name=name, configurePreset=name, vendor=marker))
+        if not profile.startswith("web-"):
+            local["testPresets"].append(dict(name=name, configurePreset=name, vendor=marker,
+                output={"outputOnFailure": True}, execution={"noTestsAction": "error"}))
+    local_settings = parse_local_settings_file(paths.local_settings_path)
+    local_settings.set_override(target=identity.target_triple, flavor=identity.flavor, prefix=str(sdk))
+    env = environment(tooling_root)
+    env["LUDUS_SDK_PREFIX"] = str(sdk)
+    cancel_check()
+    verify_tool_versions(configured, tooling_root, runner, env)
+    # Own the selected native tree for the complete configure/build/test sequence.
+    with BuildTreeLock(resolved.paths.build_dir):
+        # A failed repair must not leave a previous verification stamp valid.
+        (paths.project_dir / ".ludus/setup.json").unlink(missing_ok=True)
+        write_object(source / "CMakeUserPresets.json", local)
+        ide["cmake.useCMakePresets"] = "always"
+        # Machine CMake paths belong to ignored presets, not tracked IDE files.
+        ide.pop("cmake.cmakePath", None)
+        write_object(source / ".vscode/settings.json", ide)
+        write_object(paths.local_settings_path, json.loads(local_settings.serialize()))
+        ignore = source / ".gitignore"
+        contents = ignore.read_text() if ignore.exists() else ""
+        for entry in ("/CMakeUserPresets.json", "/.ludus/"):
+            if entry not in contents.splitlines():
+                contents += "\n" + entry + "\n"
+        ignore.write_text(contents)
+        _list(source, configured, records, runner, env)
+        for profile in records:
+            cancel_check()
+            name = preset_for(source, profile)
+            def verify():
+                from cmake_targets import query_codemodel
+                tree = source / "out/build" / profile
+                for client in ("ludus-cli", "ludus-editor"):
+                    query_codemodel(tree, client)
+                runner([str(configured["cmake"]), "--fresh", "--preset", name], cwd=source, env=env)
+                runner([str(configured["cmake"]), "--build", "--preset", name], cwd=source, env=env)
+                if not profile.startswith("web-"):
+                    runner([str(configured["ctest"]), "--preset", name], cwd=source, env=env)
+            if profile == descriptor.preset:
+                verify()
+            else:
+                with BuildTreeLock(source / "out/build" / profile):
+                    verify()
+        cancel_check()
+        if any(compute_stamp(Path(prefix)) != stamp for prefix, stamp in stamps.items()):
+            raise ToolingError("StampChanged", "SDK changed during repair; retry with stable inputs")
+        # A verified repair replaces the old mutable-SDK stamp, allowing the
+        # ordinary Editor/CLI configure path to use the updated SDK afterward.
+        write_stamp(resolved.paths.build_dir, resolved.resolution)
+        write_object(paths.project_dir / ".ludus/setup.json", {"signature": _signature(configured, records, stamps),
+                     "web_sdk": str(web_sdk) if web_sdk else ""})
+    return check_project(path, tooling_root=tooling_root, runner=runner, cancel_check=cancel_check)
