@@ -20,6 +20,7 @@ class QListWidget;
 class QPlainTextEdit;
 class QPushButton;
 class QAction;
+class QTableWidget;
 QT_END_NAMESPACE
 
 namespace ludus::editor
@@ -55,6 +56,7 @@ private:
     void RenderFields();
     void RenderCapabilities();
     void RenderStatus();
+    void RenderProperties();
 
     EditorController* Controller_ = nullptr;
     bool Rendering_ = false;
@@ -84,6 +86,24 @@ private:
     QAction* StopAction_ = nullptr;
     QAction* ClearAction_ = nullptr;
     QAction* CopyAction_ = nullptr;
+    QAction* PlayAction_ = nullptr;
+    QAction* BuildReloadAction_ = nullptr;
+    QAction* AutoReloadAction_ = nullptr;
+    QAction* ReloadAssetAction_ = nullptr;
+    QAction* PauseAction_ = nullptr;
+    QAction* StepAction_ = nullptr;
+    QAction* ResumeAction_ = nullptr;
+    QAction* RefreshPropertiesAction_ = nullptr;
+    QAction* UndoSessionAction_ = nullptr;
+    QAction* RedoSessionAction_ = nullptr;
+    QAction* UndoTuningAction_ = nullptr;
+    QAction* RedoTuningAction_ = nullptr;
+    QAction* SaveTuningAction_ = nullptr;
+    QAction* DiscardTuningAction_ = nullptr;
+    QTableWidget* Properties_ = nullptr;
+    QPushButton* ApplySessionButton_ = nullptr;
+    QPushButton* ApplyDocumentButton_ = nullptr;
+    QString PropertiesStamp_;
     QPushButton* AddArgButton_ = nullptr;
     QPushButton* RemoveArgButton_ = nullptr;
     QLabel* StatusLabel_ = nullptr;

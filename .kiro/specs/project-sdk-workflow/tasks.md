@@ -226,3 +226,22 @@ than tests that merely mirror helper implementations.
       case runs the CLI in a subprocess with `import PyQt6/PySide6` poisoned to
       raise, proving the tooling never touches Qt. The native windowed-GUI
       counterparts remain pending (needs the New Project GUI).
+
+## P6 Game-project CMake setup lifecycle (AGENTS.md)
+
+- [~] Add one shared read-only CMake setup inspector used by CLI and Editor.
+      It invokes the selected CMake's `--list-presets=configure/build/test`,
+      checks the selected preset, resolved SDK prefix, compiler/Ninja, required
+      shader tools and any existing CMake cache without running configure,
+      build, download or file writes during Open. Current project-live-reload
+      work adds the shared preset validator and Editor Open status; toolchain,
+      shader-tool and cache coverage still needs exact end-to-end validation.
+- [ ] Add an explicit idempotent project setup/repair operation. Regenerate
+      only Ludus-owned local settings, preserve custom presets and unrelated
+      editor settings, keep machine paths ignored, and refresh project-owned
+      CMake caches after SDK/toolchain changes. Require successful real
+      configure/build/test before reporting repair success.
+- [ ] Add regressions for fresh clone, missing local presets, moved CMake/
+      compiler/Ninja/SDK, cache identity drift, custom preset/editor-setting
+      preservation, and repeated repair. Verify selectable presets with the
+      selected CMake executable rather than JSON-only assertions.

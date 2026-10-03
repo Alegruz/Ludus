@@ -9,12 +9,15 @@
 // controller state and emits actions. There is no global event bus or singleton.
 
 #include "internal/log_buffer.h"
+#include "internal/play_process.h"
 #include "internal/project_store.h"
+#include "internal/source_watch.h"
 #include "internal/tool_process.h"
 #include "internal/workspace.h"
 
 #include <ludus/foundation/base/types.h>
 
+#include <QJsonArray>
 #include <QList>
 #include <QObject>
 #include <QString>
@@ -51,6 +54,37 @@ struct CommandRecord
     QString Cwd;
 };
 
+enum class PlayPhase : foundation::uint8
+{
+    Stopped,
+    Starting,
+    Running,
+    Paused,
+    Stopping,
+    CleanupUnknown
+};
+struct PlaySnapshot
+{
+    PlayPhase Phase = PlayPhase::Stopped;
+    uint64 Epoch = 0;
+    QString Session;
+    QString Generation;
+    QString Message;
+    foundation::int64 HostPid = 0;
+    QStringList HostArgv;
+    QString HostCwd;
+    QString SdkIdentity;
+    bool DebuggerStopped = false;
+    uint64 SchemaEpoch = 0;
+    uint64 SchemaVersion = 0;
+    QJsonArray Properties;
+    QJsonObject HostStatus;
+    bool TuningDocumentAvailable = false;
+    bool TuningDocumentDirty = false;
+    bool TuningCanUndo = false;
+    bool TuningCanRedo = false;
+};
+
 class EditorController : public QObject
 {
     Q_OBJECT
@@ -65,19 +99,13 @@ public:
     {
         return Log_;
     }
-    [[nodiscard]] Capabilities Caps() const
+    [[nodiscard]] Capabilities Caps() const;
+    [[nodiscard]] const PlaySnapshot& PlayState() const noexcept
     {
-        Capabilities caps = ComputeCapabilities(State_);
-        if (Tool_.Active() && !State_.Busy())
-        {
-            // Keep the workspace owned until the bridge exits and drains.
-            caps.CanOpen = caps.CanEdit = caps.CanSave = caps.CanReload = false;
-            caps.CanConfigure = caps.CanBuild = caps.CanBuildRun = false;
-            caps.CanProjectCheck = caps.CanProjectSetup = caps.CanProjectCreate = false;
-            caps.CanReleaseInit = caps.CanPackage = caps.CanCloseImmediately = false;
-        }
-        return caps;
+        return PlayState_;
     }
+    [[nodiscard]] bool CanPlay() const;
+    [[nodiscard]] bool CanBuildReload() const;
 
     // Expose the store so tests can inject fault hooks.
     [[nodiscard]] ProjectStore& Store() noexcept
@@ -99,6 +127,30 @@ public:
     void CreateProject(const ProjectCreationOptions& creation);
     void SetupRelease(const QString& platform, const QString& itchTarget);
     void PackageRelease(const QString& profile, const QString& version, const QString& sdk);
+    void Play();
+    void BuildReload();
+    void ReloadClearConfiguration(const QString& source);
+    void SetAutoReload(bool enabled);
+    [[nodiscard]] bool AutoReloadEnabled() const noexcept
+    {
+        return Watch_.Active();
+    }
+    void PlayCommand(const QString& command);
+    void RefreshProperties();
+    void RefreshSessionDetails();
+    [[nodiscard]] bool CanEditProperties() const;
+    void EditProperty(int row, const QString& text);
+    void UndoSessionEdit();
+    void RedoSessionEdit();
+    [[nodiscard]] bool CanUndoSession() const;
+    [[nodiscard]] bool CanRedoSession() const;
+    [[nodiscard]] bool CanApplyToTuningDocument(int row) const;
+    [[nodiscard]] bool CanSaveTuningDocument() const noexcept;
+    void ApplyLivePropertyToTuningDocument(int row);
+    void SaveTuningDocument();
+    void DiscardTuningDocumentDraft();
+    void UndoTuningDocument();
+    void RedoTuningDocument();
     void Stop();
     void ClearOutput();
 
@@ -116,6 +168,7 @@ Q_SIGNALS:
 
 private Q_SLOTS:
     void OnToolEvent(const ProtocolEvent& event);
+    void OnPlayEvent(const QJsonObject& event);
 
 private:
     void StartJob(ActionKind kind, ToolOperation operation, const ToolLaunch& options = {});
@@ -123,12 +176,55 @@ private:
     void Publish();
     void RecordCommand(const QString& stage, const QStringList& argv, const QString& cwd);
     [[nodiscard]] QString ResolveDescriptorPath() const;
+    void ActivateGeneration(const QString& path);
+    [[nodiscard]] QString NextPlayRequest();
+    void SubmitEdit(const QJsonObject& edit);
+    void ReplaySessionEdit(bool undo);
+    void SendTuningDocumentCommand(QJsonObject command, bool closeWhenClean = false);
 
     ToolingPaths Tooling_;
     WorkspaceState State_;
     ProjectStore Store_;
     LogBuffer Log_;
     ToolProcess Tool_;
+    PlayProcess Play_;
+    SourceWatch Watch_;
+    uint64 SetupCheckJob_ = 0;
+    bool SetupCheckPending_ = false;
+    PlaySnapshot PlayState_;
+    uint64 NextPlayRequest_ = 1;
+    bool GenerationJob_ = false;
+    QString PublishedGeneration_;
+    QString PropertyRequest_;
+    QJsonArray PropertyChunks_;
+    uint64 PropertyCount_ = 0;
+    QString EditRequest_;
+    struct SessionEdit
+    {
+        QJsonObject Before;
+        QJsonObject After;
+        QJsonObject Expected;
+        QString Generation;
+        uint64 SchemaEpoch = 0;
+        uint64 SchemaVersion = 0;
+    } PendingEdit_;
+    QList<SessionEdit> SessionUndo_;
+    QList<SessionEdit> SessionRedo_;
+    QJsonObject EditReply_;
+    enum class EditIntent : foundation::uint8
+    {
+        New,
+        Undo,
+        Redo
+    };
+    EditIntent EditIntent_ = EditIntent::New;
+    QString TuningDocumentRequest_;
+    QString TuningDocumentDigest_;
+    bool TuningDocumentDirty_ = false;
+    bool TuningDocumentAvailable_ = false;
+    bool TuningCanUndo_ = false;
+    bool TuningCanRedo_ = false;
+    bool TuningDocumentCloseAfterRequest_ = false;
 
     // Bounded Copy Job Details storage for the current/last job.
     QList<CommandRecord> Commands_;

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import sys
 import tempfile
@@ -201,9 +202,13 @@ class StubEngine:
     def __init__(self, cmake_path: Path, build_dir: Path) -> None:
         self._cmake = cmake_path
         self._build_dir = build_dir
+        self._ninja = Path(shutil.which("ninja") or "/missing/ninja")
 
     def cmake(self, _root: Path) -> Path:
         return self._cmake
+
+    def ninja(self, _root: Path) -> Path:
+        return self._ninja
 
     def ensure_bootstrap_for_preset(self, _root: Path, _preset: str) -> None:
         return None
@@ -298,6 +303,9 @@ def build_dir_from(argv):
     return None
 bd = build_dir_from(args)
 control = os.environ.get("FAKE_CMAKE_CONTROL", "")
+if any(arg.startswith("--list-presets=") for arg in args):
+    print('Available presets:\n\n  "linux-clang-debug"\n  "linux-clang-development"\n  "linux-clang-release"')
+    sys.exit(0)
 if "--preset" in args and "--build" not in args:
     if control == "configure_slow":
         # A readiness flag lets the test synchronize then cancel mid-configure.

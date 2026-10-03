@@ -1,0 +1,110 @@
+{
+  "builds": [
+    {
+      "adapter_total_ms": 3925,
+      "build_ms": 511,
+      "configure_ms": 510,
+      "label": "post-repair-start",
+      "publication_ms": 153
+    },
+    {
+      "adapter_total_ms": 10432,
+      "build_ms": 2046,
+      "configure_ms": 1312,
+      "label": "warm-no-change",
+      "publication_ms": 452
+    },
+    {
+      "adapter_total_ms": 10216,
+      "build_ms": 1458,
+      "configure_ms": 1723,
+      "label": "warm-no-change",
+      "publication_ms": 524
+    },
+    {
+      "adapter_total_ms": 13394,
+      "build_ms": 2132,
+      "configure_ms": 1703,
+      "label": "warm-no-change",
+      "publication_ms": 372
+    },
+    {
+      "adapter_total_ms": 14596,
+      "build_ms": 1966,
+      "configure_ms": 2926,
+      "label": "warm-no-change",
+      "publication_ms": 496
+    },
+    {
+      "adapter_total_ms": 12851,
+      "build_ms": 1524,
+      "configure_ms": 2386,
+      "label": "warm-no-change",
+      "publication_ms": 272
+    },
+    {
+      "adapter_total_ms": 12066,
+      "build_ms": 1129,
+      "configure_ms": 2201,
+      "label": "warm-no-change",
+      "publication_ms": 333
+    },
+    {
+      "adapter_total_ms": 7900,
+      "build_ms": 1053,
+      "configure_ms": 1433,
+      "label": "warm-no-change",
+      "publication_ms": 283
+    },
+    {
+      "adapter_total_ms": 10224,
+      "build_ms": 1784,
+      "configure_ms": 2681,
+      "label": "warm-no-change",
+      "publication_ms": 438
+    },
+    {
+      "adapter_total_ms": 10561,
+      "build_ms": 951,
+      "configure_ms": 2520,
+      "label": "warm-no-change",
+      "publication_ms": 332
+    },
+    {
+      "adapter_total_ms": 10496,
+      "build_ms": 1077,
+      "configure_ms": 2160,
+      "label": "warm-no-change",
+      "publication_ms": 318
+    },
+    {
+      "adapter_total_ms": 13508,
+      "build_ms": 3946,
+      "configure_ms": 2007,
+      "label": "body-edit-with-debounce",
+      "publication_ms": 311
+    },
+    {
+      "adapter_total_ms": 12106,
+      "build_ms": 1643,
+      "configure_ms": 2853,
+      "label": "cold-project-B",
+      "publication_ms": 541
+    }
+  ],
+  "copied_property_roundtrip_ms": [
+    128,
+    141,
+    147,
+    109,
+    142,
+    98,
+    128,
+    107,
+    125,
+    122
+  ],
+  "platform": "wayland",
+  "poll_interval_ms": 20,
+  "conditions": "Ubuntu 24.04 x86-64, Intel UHD 620 Wayland/Vulkan, pinned Clang 18; concurrent native validation and static analysis. Wall times include Qt dispatch/polling and SDK validation. These are not pixel/visible-change measurements."
+}

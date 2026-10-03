@@ -37,6 +37,8 @@ enum class ToolOperation : foundation::uint8
     ProjectCreate,
     ReleaseInit,
     Package,
+    BuildGeneration,
+    InspectSetup,
 };
 
 [[nodiscard]] const char* ToolOperationName(ToolOperation op) noexcept;
@@ -53,6 +55,7 @@ struct ProtocolEvent
         Targets,
         Output,
         RuntimeStarted,
+        Generation,
         Result,
         Error, // local framing/protocol error (not from the adapter)
     };
@@ -79,6 +82,7 @@ struct ProtocolEvent
     // RuntimeStarted
     qint64 Pid = 0;
     QString Executable;
+    QString GenerationPath;
     // Result
     QString Outcome; // success/failed/cancelled
     ResultCode Code = ResultCode::Ok;
@@ -158,6 +162,7 @@ private Q_SLOTS:
 
 private:
     void SendRequest();
+    void SendCancellation();
     void SendControl(const QByteArray& jsonLine);
     void ConsumeFrames();
     bool DispatchFrame(const QByteArray& line);

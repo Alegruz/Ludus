@@ -94,9 +94,26 @@ if(NOT LUDUS_SKIP_TOOLCHAIN_CHECK AND NOT "@CMAKE_SYSTEM_NAME@" STREQUAL "Emscri
     endif()
 endif()
 
+# Full gameplay-module compatibility identity (project-live-reload). A gameplay
+# module must stamp exactly this so the host accepts it. ludus_add_game injects
+# it as LUDUS_EXAMPLE_IDENTITY/compile definition for the module and shipping
+# targets built against this SDK.
+set(Ludus_SDK_IDENTITY "@LUDUS_GAME_COMPATIBILITY_IDENTITY@")
+set(Ludus_SDK_ASAN "@LUDUS_ENABLE_ASAN@")
+set(Ludus_SDK_UBSAN "@LUDUS_ENABLE_UBSAN@")
+set(Ludus_SDK_TSAN "@LUDUS_ENABLE_TSAN@")
+set(Ludus_SDK_COMPILER_ID "@LUDUS_COMPILER_ID@")
+set(Ludus_SDK_COMPILER_VERSION "@LUDUS_COMPILER_VERSION@")
+
 include("${CMAKE_CURRENT_LIST_DIR}/LudusTargets.cmake")
 
 include("${CMAKE_CURRENT_LIST_DIR}/LudusShaders.cmake")
+
+# Gameplay project helper (project-live-reload). Only present when the installed
+# SDK ships the GameHost/GameApi targets.
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/LudusGame.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/LudusGame.cmake")
+endif()
 
 # Public application compile/link policy helper for generated templates. Applies
 # C++23 + no-exceptions to an application target WITHOUT exporting engine

@@ -52,6 +52,8 @@ enum class ResultCode : foundation::uint8
     ProtocolError,
     Cancelled,
     ReleaseFailed,
+    GenerationInvalid,
+    Superseded,
     CleanupUnknown,
 };
 

@@ -140,7 +140,15 @@ def resolve_project(
     validate_descriptor_lock_agreement(descriptor.engine.version, lock)
     local_settings = parse_local_settings_file(paths.local_settings_path)
 
-    target_triple = _target_triple_for_lock(lock, flavor) or "x86_64-linux-gnu"
+    target_triple = _target_triple_for_lock(lock, flavor)
+    if target_triple is None:
+        # An unresolved project created with --sdk records the SDK's actual
+        # triple in local settings (e.g. x86_64-linux-gnu). Respect that saved
+        # namespace instead of looking only for the release label linux-x64.
+        local_targets = {entry.target for entry in local_settings.overrides if entry.flavor == flavor}
+        if len(local_targets) > 1 and cli_sdk_prefix is None:
+            raise ToolingError(INVALID_PROJECT, "multiple local SDK targets for this flavor; select an explicit SDK")
+        target_triple = next(iter(local_targets), "x86_64-linux-gnu")
     # Resolve once without the host gate to learn the SDK identity, then (when
     # enforcing) re-resolve with a host-toolchain reference so an incompatible
     # compiler/runtime ABI is rejected before configure. Resolving twice is cheap
@@ -199,13 +207,9 @@ def _cmake_executable() -> str:
 
 
 def _project_cmake(resolved: ResolvedProject) -> str:
-    from .project_setup import OWNER, executable, read_object, preset_for
-    source = resolved.paths.source_dir
-    selected = preset_for(source, resolved.descriptor.preset)
-    for item in read_object(source / "CMakeUserPresets.json").get("configurePresets", []):
-        if item.get("name") == selected and OWNER in item.get("vendor", {}):
-            return str(executable(Path(item["cmakeExecutable"])))
-    return _cmake_executable()
+    from .project_setup import cmake_for
+    selected = cmake_for(resolved.paths.source_dir, resolved.descriptor.preset, "")
+    return selected or _cmake_executable()
 
 
 def configure_argv(cmake: str, preset: str, source_dir: Path, build_dir: Path) -> list[str]:
@@ -248,12 +252,22 @@ def _sdk_env(resolution: Resolution) -> dict:
     return env
 
 
+def _validate_selected_presets(cmake: str, resolved: ResolvedProject, env: dict) -> None:
+    from .cmake_setup import validate_project_presets
+
+    try:
+        validate_project_presets(cmake, resolved.paths.source_dir, env, resolved.descriptor.preset)
+    except ValueError as exc:
+        raise ToolingError(INVALID_PROJECT, str(exc)) from exc
+
+
 # --- Public operations -------------------------------------------------------
 
 
 def op_configure(resolved: ResolvedProject) -> int:
     cmake = _project_cmake(resolved)
     env = _sdk_env(resolved.resolution)
+    _validate_selected_presets(cmake, resolved, env)
     print(resolved.resolution.describe(), file=sys.stderr)
     with BuildTreeLock(resolved.paths.build_dir):
         try:
@@ -275,6 +289,7 @@ def op_configure(resolved: ResolvedProject) -> int:
 def op_build(resolved: ResolvedProject) -> int:
     cmake = _project_cmake(resolved)
     env = _sdk_env(resolved.resolution)
+    _validate_selected_presets(cmake, resolved, env)
     print(resolved.resolution.describe(), file=sys.stderr)
     with BuildTreeLock(resolved.paths.build_dir):
         # Reconfigure if the SDK inputs changed since last configure (mutable

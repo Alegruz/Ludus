@@ -206,6 +206,31 @@ together; do not alter flavor assertion policy. Resolve requested executable
 targets using the actual CMake File API artifact after configure and after
 successful build. Never guess executable paths.
 
+### Read-only setup inspection and explicit repair
+
+Project Open and CLI inspection use the same tooling backend to run the selected
+managed CMake executable with `--list-presets=configure`, `--list-presets=build`
+and `--list-presets=test`. Require the selected project preset to be selectable
+in all three resolved views. This checks CMake's real inheritance and condition
+resolution; parsing `CMakePresets.json` alone is not evidence. Open also checks
+that the selected CMake, Ninja, compiler, resolved SDK/dependency prefix and any
+shader tools required by the project are available, then compares an existing
+`out/build/<preset>/CMakeCache.txt` to those resolved inputs. It reports missing
+or stale setup without running project CMake code, downloading tools/configs,
+configuring, building or writing project files.
+
+An explicit setup/repair operation may update only Ludus-owned local settings
+and generated presets under ignored local paths. It must preserve custom named
+presets, unrelated editor settings and project-owned source. Machine-specific
+tool and SDK paths stay in ignored files (`CMakeUserPresets.json` and
+`.ludus/local.json`). A toolchain/SDK identity change refreshes only the
+project-owned binary tree after the user explicitly requests repair; success
+requires actual configure, build and test commands with the chosen CMake
+executable. The selected IDE must use CMake preset mode and the same local CMake
+tool path reported by Ludus. Regressions cover a fresh clone, missing local
+presets, moved tools/SDKs, custom preset/editor-setting preservation and repeated
+idempotent repair. Loading never performs repair implicitly.
+
 ## Shared backend and public commands
 
 Keep the existing Python tooling as the initial implementation language.
