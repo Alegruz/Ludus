@@ -53,6 +53,8 @@ const char* PhaseName(Phase phase)
             return "Building";
         case Phase::Launching:
             return "Launching";
+        case Phase::Debugging:
+            return "Debugging";
         case Phase::Running:
             return "Running";
         case Phase::Stopping:
@@ -82,7 +84,13 @@ EditorController::EditorController(ToolingPaths tooling, QObject* parent)
             {
                 OpenProject(QDir(created).filePath(QStringLiteral("ludus.project.json")));
             }
+            const bool prompt = PendingDebuggerPrompt_;
+            PendingDebuggerPrompt_ = false;
             Publish();
+            if (prompt && Caps().CanBuildDebug && State_.Result.Code == ResultCode::MissingDebugger)
+            {
+                Q_EMIT DebuggerSetupRequested();
+            }
         },
         Qt::QueuedConnection);
 }
@@ -216,6 +224,7 @@ void EditorController::StartJob(ActionKind kind, ToolOperation operation, const 
     {
         return; // duplicate/invalid starts cannot create a second job
     }
+    PendingDebuggerPrompt_ = false;
     State_ = BeginJob(State_, kind);
     Commands_.clear();
     Transitions_.clear();
@@ -298,6 +307,14 @@ void EditorController::Build()
 void EditorController::BuildRun()
 {
     StartJob(ActionKind::BuildRun, ToolOperation::BuildRun);
+}
+
+void EditorController::BuildDebug(const QString& debugger, bool setup)
+{
+    ToolLaunch options;
+    options.DebuggerPath = debugger;
+    options.SetupDebugger = setup;
+    StartJob(ActionKind::BuildDebug, ToolOperation::BuildDebug, options);
 }
 
 void EditorController::SetupRelease(const QString& platform, const QString& itchTarget)
@@ -406,6 +423,15 @@ void EditorController::OnToolEvent(const ProtocolEvent& event)
             }
             break;
         }
+        case ProtocolEvent::Type::DebuggerStarted: {
+            LastPid_ = event.Pid;
+            State_ = ApplyDebuggerStarted(State_, event.Job);
+            if (Transitions_.size() < 256)
+            {
+                Transitions_.append(QString::fromLatin1(PhaseName(State_.OperationPhase)));
+            }
+            break;
+        }
         case ProtocolEvent::Type::Result: {
             LastResult result;
             result.Stage = State_.OperationPhase;
@@ -430,6 +456,9 @@ void EditorController::OnToolEvent(const ProtocolEvent& event)
             {
                 result.Kind = Outcome::CleanupUnknown;
             }
+            PendingDebuggerPrompt_ = State_.ActiveAction == ActionKind::BuildDebug && !State_.StopLatched &&
+                                     result.Kind == Outcome::Failed && result.Code == ResultCode::MissingDebugger &&
+                                     result.CleanupConfirmed;
             State_ = ApplyResult(State_, event.Job, result);
             break;
         }

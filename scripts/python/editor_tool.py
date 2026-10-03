@@ -1,4 +1,4 @@
-"""Ludus editor one-operation tooling adapter (configure / build / build_run).
+"""Ludus editor owned tooling adapter (build/run, external debugging, project setup).
 
 This is a one-operation process, not a persistent daemon. The GUI (or a CLI test
 harness) launches it with --stdio, sends exactly one request on stdin, keeps that
@@ -248,6 +248,10 @@ class ProtocolWriter:
     def runtime_started(self, pid: int, executable: str, cwd: str, args: list[str]) -> None:
         self.control({"type": "runtime_started", "pid": pid, "executable": executable,
                       "cwd": cwd, "args": list(args)})
+
+    def debugger_started(self, pid: int, debugger: str, executable: str) -> None:
+        self.control({"type": "debugger_started", "pid": pid, "debugger": debugger,
+                      "executable": executable})
 
     def result(self, outcome: str, stage: str, code: str, message: str,
                cleanup_confirmed: bool, exit_code: Optional[int], sig: Optional[int]) -> None:
@@ -839,6 +843,8 @@ class Operation:
                 return self._execute_setup(descriptor)
             if self._operation in ("release_init", "package"):
                 return self._execute_release(descriptor)
+            if self._operation == "build_debug":
+                return self._execute_debug(descriptor)
             plan = build_plan(self._context, descriptor, self._project_path.parent)
 
             # Acquire the cooperative per-build-tree lock for the WHOLE operation,
@@ -866,7 +872,7 @@ class Operation:
         except (OSError, subprocess.CalledProcessError) as exc:
             return OperationResult("failed", self._stage, "ReleaseFailed" if self._operation in ("release_init", "package") else "SpawnFailed", str(exc))
         except ToolingError as exc:
-            code = "ReleaseFailed" if self._operation in ("release_init", "package") else exc.code if exc.code in ("MissingTools", "ConfigureFailed", "BuildFailed", "Busy", "Conflict") else "InvalidProject"
+            code = "ReleaseFailed" if self._operation in ("release_init", "package") else exc.code if exc.code in ("MissingTools", "MissingDebugger", "ArtifactInvalid", "ConfigureFailed", "BuildFailed", "Busy", "Conflict") else "InvalidProject"
             return OperationResult("failed", self._stage, code, f"{exc.code}: {exc.message}")
         except editor_project.ProjectError as exc:
             return OperationResult("failed", self._stage, exc.code, exc.message)
@@ -874,6 +880,72 @@ class Operation:
             # File API read/validation or bootstrap failure after configure:
             # a reply/identity problem, not a crash.
             return OperationResult("failed", self._stage, "ReplyInvalid", str(exc))
+
+    def _execute_debug(self, descriptor) -> OperationResult:
+        import rad_debugger as rad
+        import editor_debugger
+        root = self._context.tooling_root
+        engine = self._context.engine
+        self._writer.phase("configuring")
+        self._check_release_cancel()
+        try:
+            rad.require_host(engine)
+            if descriptor.preset not in rad.DEBUG_PRESETS:
+                raise engine.EngineError("Debugging requires a native Debug or Development preset")
+            rad.validate_arguments(descriptor.run_args, engine)
+        except engine.EngineError as exc:
+            raise _StageFailed(self._stage, "InvalidProject", None, str(exc)) from exc
+        if not os.environ.get("DISPLAY"):
+            raise _StageFailed(self._stage, "MissingTools", None, "RAD needs an X11/XWayland display")
+        preference = self._project_path.parent / ".ludus/debugger.json"
+        if self._options.get("setup_debugger"):
+            self._run_stage("configuring", [str(root / "scripts/setup-rad-debugger"), "--no-system-install"],
+                            root, engine.tool_env(root), "DebuggerFailed")
+        binary = editor_debugger.resolve_debugger(root, preference, engine,
+                   override=self._options.get("debugger") or None,
+                   managed=self._options.get("setup_debugger", False))
+        self._check_release_cancel()
+        plan = build_plan(self._context, descriptor, self._project_path.parent)
+        if not plan.run_cwd.is_dir():
+            raise _StageFailed(self._stage, "InvalidProject", None, "Game working directory does not exist")
+        # The same build-tree and RAD session locks cover configure, build and
+        # the complete session. CLI and Editor launches cannot race each other.
+        target_session = plan.source_dir / "out/debug/rad" / descriptor.preset / descriptor.target
+        try:
+            with BuildTreeLock(plan.build_dir), rad.debug_session(root, binary, descriptor.preset,
+                    descriptor.target, engine, target_session=target_session) as session:
+                if self._options.get("debugger") or self._options.get("setup_debugger"):
+                    editor_debugger.save_preference(preference, binary,
+                        managed=bool(self._options.get("setup_debugger")))
+                self._debug_session = session
+                return self._execute_locked(descriptor, plan)
+        except rad.SessionBusy as exc:
+            raise _StageFailed(self._stage, "Busy", None, str(exc)) from exc
+
+    def _launch_debugger(self, plan: Plan, artifact: Path) -> OperationResult:
+        import editor_debugger
+        editor_debugger.validate_symbols(artifact)
+        self._stage = "launching"
+        self._writer.phase(self._stage)
+        session = self._debug_session
+        argv = session.prepare_launch(artifact, plan.run_cwd, plan.descriptor.run_args)
+        provider = "managed " + session.managed_pin["version"] if session.managed_pin else "external (unverified)"
+        self._writer.output(self._stage, "stdout",
+            f"RAD: {session.binary} ({provider})\nSession: {session.directory}\n"
+            "Set breakpoints and Run/Step in RAD. The Editor does not observe game pause/run state.\n"
+            "Use Stop to end this session and its game. Do not Save To Project for the temporary target.\n")
+        self._writer.command(self._stage, argv, str(plan.run_cwd))
+        self._check_release_cancel()
+        child = OwnedProcess(argv, str(plan.run_cwd), plan.env)
+        self._stage = "debugging"
+        self._writer.debugger_started(child.pid, str(session.binary), str(artifact))
+        report = self._supervisor.run_command(self._stage, child)
+        if not report.confirmed:
+            raise _CleanupUnknown(self._stage, report)
+        if report.exit_code not in (0, None) or report.signal is not None:
+            raise _StageFailed(self._stage, "DebuggerFailed", report, "RAD session exited abnormally")
+        return OperationResult("success", self._stage, "Ok", "RAD session closed; game outcome is not observed",
+                               exit_code=report.exit_code)
 
     def _check_release_cancel(self) -> None:
         self._supervisor._read_control()
@@ -1016,6 +1088,8 @@ class Operation:
 
         # Cancellation wins if accepted before runtime spawn.
         self._check_cancel()
+        if self._operation == "build_debug":
+            return self._launch_debugger(plan, artifact)
         return self._launch_runtime(plan, artifact)
 
     def _resolve_executable(self, plan: Plan) -> Path:
@@ -1131,7 +1205,7 @@ def _validate_request(message: dict) -> tuple[str, str, Path, str]:
     except ValueError as exc:
         raise ProtocolError("request job is not hex") from exc
     operation = message.get("operation")
-    if operation not in ("configure", "build", "build_run", "release_init", "package", "project_check", "project_setup", "project_create"):
+    if operation not in ("configure", "build", "build_run", "build_debug", "release_init", "package", "project_check", "project_setup", "project_create"):
         raise ProtocolError("unknown operation")
     project = message.get("project")
     if not isinstance(project, str) or not os.path.isabs(project):
@@ -1146,6 +1220,12 @@ def _validate_request(message: dict) -> tuple[str, str, Path, str]:
             fields["name"] = 256
         if not isinstance(message.get("prepare_engine"), bool):
             raise ProtocolError("prepare_engine must be boolean")
+    if operation == "build_debug":
+        fields = {"debugger": 4096}
+        if not isinstance(message.get("setup_debugger"), bool):
+            raise ProtocolError("setup_debugger must be boolean")
+        if message.get("setup_debugger") and message.get("debugger"):
+            raise ProtocolError("Choose setup or an existing debugger, not both")
     for key, maximum in fields.items():
         value = message.get(key)
         if not isinstance(value, str) or len(value.encode()) > maximum or any(ord(c) < 32 for c in value):

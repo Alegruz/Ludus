@@ -183,3 +183,36 @@ TEST_CASE("Output frames carry text and a monotonic end_offset", "[editor][tool]
     }
     CHECK(sawOutput);
 }
+
+TEST_CASE("A debugger frame cannot claim game Running or escape its operation", "[editor][debug][protocol]")
+{
+    const QString prefix = QStringLiteral("import json, sys\n"
+                                          "print(json.dumps({'protocol':1, 'type':'ready'}), flush=True)\n"
+                                          "r=json.loads(sys.stdin.readline())\n"
+                                          "e={'protocol':1, 'job':r['job'], 'pid':123, 'executable':'/game'}\n");
+    for (const QString& body : {
+             QStringLiteral("e['type']='runtime_started'\n"),
+             QStringLiteral("e.update(type='debugger_started', pid=-1)\n"),
+             QStringLiteral("e.update(type='debugger_started', pid=1.5)\n"),
+         })
+    {
+        const auto events =
+            RunAdapter(prefix + body + QStringLiteral("print(json.dumps(e), flush=True)\n"), ToolOperation::BuildDebug);
+        bool rejected = false;
+        for (const auto& event : events)
+        {
+            rejected = rejected || event.Kind == ProtocolEvent::Type::Error;
+            CHECK(event.Kind != ProtocolEvent::Type::DebuggerStarted);
+            CHECK(event.Kind != ProtocolEvent::Type::RuntimeStarted);
+        }
+        CHECK(rejected);
+    }
+    const auto events =
+        RunAdapter(prefix + QStringLiteral("e['type']='debugger_started'\nprint(json.dumps(e), flush=True)\n"));
+    bool rejected = false;
+    for (const auto& event : events)
+    {
+        rejected = rejected || event.Kind == ProtocolEvent::Type::Error;
+    }
+    CHECK(rejected);
+}

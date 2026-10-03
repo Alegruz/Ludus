@@ -72,7 +72,7 @@ public:
         {
             // Keep the workspace owned until the bridge exits and drains.
             caps.CanOpen = caps.CanEdit = caps.CanSave = caps.CanReload = false;
-            caps.CanConfigure = caps.CanBuild = caps.CanBuildRun = false;
+            caps.CanConfigure = caps.CanBuild = caps.CanBuildRun = caps.CanBuildDebug = false;
             caps.CanProjectCheck = caps.CanProjectSetup = caps.CanProjectCreate = false;
             caps.CanReleaseInit = caps.CanPackage = caps.CanCloseImmediately = false;
         }
@@ -94,6 +94,7 @@ public:
     void Configure();
     void Build();
     void BuildRun();
+    void BuildDebug(const QString& debugger = {}, bool setup = false);
     void CheckProjectSetup();
     void SetupProject(const QString& sdk, const QString& webSdk, bool prepareEngine);
     void CreateProject(const ProjectCreationOptions& creation);
@@ -113,6 +114,7 @@ Q_SIGNALS:
     // Published after any state/log change. Rendering reads State()/Log(); it
     // must not trigger new edit actions (reentrancy is deferred by the window).
     void StateChanged();
+    void DebuggerSetupRequested();
 
 private Q_SLOTS:
     void OnToolEvent(const ProtocolEvent& event);
@@ -135,6 +137,7 @@ private:
     QStringList Transitions_;
     qint64 LastPid_ = 0;
     QString PendingCreatedProject_;
+    bool PendingDebuggerPrompt_ = false;
 };
 
 } // namespace ludus::editor

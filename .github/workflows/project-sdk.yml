@@ -42,7 +42,7 @@ jobs:
       - name: Run host-tooling unit/integration tests
         run: |
           cd scripts/python
-          PATH=/tmp/ludus-venv/bin:$PATH python3 -m unittest test_project_setup test_ludus_tools test_ludus_project_ops test_ludus_cli test_ludus_failure_scenarios test_ludus_release test_ludus_itch_release -v
+          PATH=/tmp/ludus-venv/bin:$PATH python3 -m unittest test_editor_debugger test_editor_tool test_project_setup test_ludus_tools test_ludus_project_ops test_ludus_cli test_ludus_failure_scenarios test_ludus_release test_ludus_itch_release -v
 
       - name: Exercise the installed release backend outside the checkout
         working-directory: /tmp

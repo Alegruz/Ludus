@@ -32,6 +32,7 @@ enum class ToolOperation : foundation::uint8
     Configure,
     Build,
     BuildRun,
+    BuildDebug,
     ProjectCheck,
     ProjectSetup,
     ProjectCreate,
@@ -53,6 +54,7 @@ struct ProtocolEvent
         Targets,
         Output,
         RuntimeStarted,
+        DebuggerStarted,
         Result,
         Error, // local framing/protocol error (not from the adapter)
     };
@@ -97,6 +99,8 @@ struct ToolLaunch
     QString ProjectPath;    // absolute descriptor path
     QString ExpectedSha256; // digest of the clean saved descriptor
     ToolOperation Operation = ToolOperation::Configure;
+    QString DebuggerPath;
+    bool SetupDebugger = false;
     QString SetupSdk;
     QString SetupWebSdk;
     QString ProjectName;

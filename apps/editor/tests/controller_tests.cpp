@@ -16,10 +16,13 @@
 #include <QDeadlineTimer>
 #include <QDialog>
 #include <QFile>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTextStream>
+#include <QToolBar>
 
 using namespace ludus::editor;
 
@@ -261,4 +264,163 @@ TEST_CASE("Editor New Project verifies the SDK project and opens it after bridge
     CHECK(controller.State().Result.Message.contains(QStringLiteral("Setup checked")));
     CHECK(QFile::exists(destination + QStringLiteral("/CMakeUserPresets.json")));
     CHECK_FALSE(QFile::exists(destination + QStringLiteral("/out/build/linux-clang-development/CMakeCache.txt")));
+}
+
+namespace
+{
+ToolingPaths DebugTooling(QTemporaryDir& dir)
+{
+    const QString adapter = dir.filePath(QStringLiteral("debug_adapter.py"));
+    QFile file(adapter);
+    REQUIRE(file.open(QIODevice::WriteOnly));
+    file.write(QByteArrayLiteral(R"py(import json, os, sys
+from pathlib import Path
+def send(kind, **fields):
+    fields.update(protocol=1, type=kind)
+    if kind != 'ready': fields['job'] = request['job']
+    print(json.dumps(fields), flush=True)
+send('ready')
+request = json.loads(sys.stdin.readline())
+def finish(code, outcome):
+    send('result', code=code, outcome=outcome, stage='configuring',
+         message='RAD unavailable' if code == 'MissingDebugger' else 'session stopped',
+         cleanup_confirmed=True, exit_code=None, signal=None)
+if not request.get('setup_debugger') and not request.get('debugger'):
+    finish('MissingDebugger', 'failed')
+else:
+    Path(request['project']).with_name('debug_request.json').write_text(json.dumps(request))
+    send('phase', stage='configuring')
+    send('phase', stage='launching')
+    send('debugger_started', pid=os.getpid(), debugger='/fixture/RAD', executable='/fixture/game')
+    for line in sys.stdin:
+        if json.loads(line).get('type') == 'cancel': break
+    finish('Cancelled', 'cancelled')
+)py"));
+    file.close();
+    ToolingPaths paths;
+    paths.PythonPath = QStringLiteral("/usr/bin/python3");
+    paths.AdapterPath = adapter;
+    paths.ToolingRoot = dir.path();
+    return paths;
+}
+
+QMessageBox* WaitForDebugPrompt(MainWindow& window)
+{
+    QDeadlineTimer deadline(10000);
+    QMessageBox* dialog = nullptr;
+    while (dialog == nullptr && !deadline.hasExpired())
+    {
+        QTest::qWait(10);
+        dialog = window.findChild<QMessageBox*>(QStringLiteral("debuggerSetupDialog"));
+    }
+    return dialog;
+}
+
+void WaitForDebugSession(EditorController& controller)
+{
+    QDeadlineTimer deadline(10000);
+    while (controller.State().OperationPhase != Phase::Debugging && !deadline.hasExpired())
+    {
+        QTest::qWait(10);
+    }
+    REQUIRE(controller.State().OperationPhase == Phase::Debugging);
+}
+
+void StopDebugSession(EditorController& controller)
+{
+    controller.Stop();
+    QDeadlineTimer deadline(10000);
+    while (!controller.Caps().CanCloseImmediately && !deadline.hasExpired())
+    {
+        QTest::qWait(10);
+    }
+    REQUIRE(controller.State().OperationPhase == Phase::Idle);
+    CHECK(controller.State().Result.Kind == Outcome::Cancelled);
+}
+} // namespace
+
+TEST_CASE("Debug is visible and optional setup is offered only after a Debug request", "[editor][debug]")
+{
+    QTemporaryDir dir;
+    EditorController controller(DebugTooling(dir));
+    MainWindow window(&controller);
+    auto* action = window.findChild<QAction*>(QStringLiteral("buildDebugAction"));
+    auto* toolbar = window.findChild<QToolBar*>(QStringLiteral("gameToolbar"));
+    REQUIRE(action != nullptr);
+    REQUIRE(toolbar != nullptr);
+    CHECK(toolbar->actions().contains(action));
+    CHECK_FALSE(action->isEnabled());
+    controller.OpenProject(WriteDescriptor(dir, ValidDescriptor()));
+    QTest::qWait(10);
+    CHECK(window.findChild<QMessageBox*>(QStringLiteral("debuggerSetupDialog")) == nullptr);
+    REQUIRE(action->isEnabled());
+    action->trigger();
+    auto* dialog = WaitForDebugPrompt(window);
+    REQUIRE(dialog != nullptr);
+    CHECK(controller.Caps().CanCloseImmediately);
+    CHECK(controller.State().Result.Code == ResultCode::MissingDebugger);
+    REQUIRE(dialog->defaultButton() != nullptr);
+    CHECK(dialog->standardButton(dialog->defaultButton()) == QMessageBox::Cancel);
+    dialog->reject();
+    QTest::qWait(10);
+    CHECK_FALSE(QFile::exists(dir.filePath(QStringLiteral("debug_request.json"))));
+    CHECK(controller.Caps().CanBuildDebug);
+}
+
+TEST_CASE("Explicit RAD setup continues the same clean project and Stop closes the session", "[editor][debug]")
+{
+    QTemporaryDir dir;
+    EditorController controller(DebugTooling(dir));
+    MainWindow window(&controller);
+    const QString project = WriteDescriptor(dir, ValidDescriptor());
+    controller.OpenProject(project);
+    const QString digest = controller.State().SavedDigest;
+    controller.BuildDebug();
+    auto* dialog = WaitForDebugPrompt(window);
+    REQUIRE(dialog != nullptr);
+    auto* setup = dialog->findChild<QPushButton*>(QStringLiteral("setupRadButton"));
+    REQUIRE(setup != nullptr);
+    setup->click();
+    WaitForDebugSession(controller);
+    CHECK_FALSE(controller.Caps().CanBuildDebug);
+    CHECK(controller.Caps().CanStop);
+    CHECK(controller.State().DescriptorPath == project);
+    CHECK(controller.State().SavedDigest == digest);
+    CHECK(controller.State().Saved.Preset == QStringLiteral("linux-clang-debug"));
+    QFile request(dir.filePath(QStringLiteral("debug_request.json")));
+    REQUIRE(request.open(QIODevice::ReadOnly));
+    CHECK(request.readAll().contains("\"setup_debugger\": true"));
+    StopDebugSession(controller);
+}
+
+TEST_CASE("A stale debugger setup dialog cannot debug a different project", "[editor][debug]")
+{
+    QTemporaryDir dir;
+    EditorController controller(DebugTooling(dir));
+    MainWindow window(&controller);
+    controller.OpenProject(WriteDescriptor(dir, ValidDescriptor()));
+    controller.BuildDebug();
+    auto* dialog = WaitForDebugPrompt(window);
+    REQUIRE(dialog != nullptr);
+    auto* setup = dialog->findChild<QPushButton*>(QStringLiteral("setupRadButton"));
+    REQUIRE(setup != nullptr);
+    QTemporaryDir second;
+    const QString project = WriteDescriptor(second, ValidDescriptor());
+    controller.OpenProject(project);
+    setup->click();
+    QTest::qWait(30);
+    CHECK(controller.State().DescriptorPath == project);
+    CHECK(controller.Caps().CanBuildDebug);
+    CHECK_FALSE(QFile::exists(second.filePath(QStringLiteral("debug_request.json"))));
+}
+
+TEST_CASE("An existing RAD executable can open a session without installation", "[editor][debug]")
+{
+    QTemporaryDir dir;
+    EditorController controller(DebugTooling(dir));
+    controller.OpenProject(WriteDescriptor(dir, ValidDescriptor()));
+    controller.BuildDebug(QStringLiteral("/fixture/RAD executable"));
+    WaitForDebugSession(controller);
+    CHECK(controller.State().OperationPhase != Phase::Running);
+    StopDebugSession(controller);
 }

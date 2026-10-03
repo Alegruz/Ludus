@@ -51,6 +51,8 @@ const char* ToolOperationName(ToolOperation op) noexcept
             return "configure";
         case ToolOperation::Build:
             return "build";
+        case ToolOperation::BuildDebug:
+            return "build_debug";
         case ToolOperation::BuildRun:
             return "build_run";
         case ToolOperation::ProjectCheck:
@@ -148,6 +150,11 @@ void ToolProcess::SendRequest()
         request.insert(QStringLiteral("web_sdk"), Launch_.SetupWebSdk);
         request.insert(QStringLiteral("name"), Launch_.ProjectName);
         request.insert(QStringLiteral("prepare_engine"), Launch_.PrepareEngine);
+    }
+    if (Launch_.Operation == ToolOperation::BuildDebug)
+    {
+        request.insert(QStringLiteral("debugger"), Launch_.DebuggerPath);
+        request.insert(QStringLiteral("setup_debugger"), Launch_.SetupDebugger);
     }
     if (Launch_.Operation == ToolOperation::ReleaseInit)
     {
@@ -365,6 +372,11 @@ bool ToolProcess::DispatchFrame(const QByteArray& line)
     }
     if (type == QStringLiteral("runtime_started"))
     {
+        if (Launch_.Operation == ToolOperation::BuildDebug)
+        {
+            FailProtocol(QStringLiteral("a debugger session cannot confirm game runtime state"));
+            return false;
+        }
         event.Kind = ProtocolEvent::Type::RuntimeStarted;
         event.Pid = static_cast<qint64>(object.value(QStringLiteral("pid")).toDouble());
         event.Executable = object.value(QStringLiteral("executable")).toString();
@@ -373,6 +385,26 @@ bool ToolProcess::DispatchFrame(const QByteArray& line)
         {
             event.Argv.append(value.toString());
         }
+        Q_EMIT Event(event);
+        return true;
+    }
+    if (type == QStringLiteral("debugger_started"))
+    {
+        if (Launch_.Operation != ToolOperation::BuildDebug)
+        {
+            FailProtocol(QStringLiteral("unexpected debugger session"));
+            return false;
+        }
+        const auto rawPid = object.value(QStringLiteral("pid")).toDouble(-1);
+        event.Executable = object.value(QStringLiteral("executable")).toString();
+        if (rawPid < 1 || rawPid > 2147483647 ||
+            rawPid != static_cast<foundation::float64>(static_cast<qint64>(rawPid)) || event.Executable.isEmpty())
+        {
+            FailProtocol(QStringLiteral("invalid debugger session identity"));
+            return false;
+        }
+        event.Kind = ProtocolEvent::Type::DebuggerStarted;
+        event.Pid = static_cast<qint64>(rawPid);
         Q_EMIT Event(event);
         return true;
     }
