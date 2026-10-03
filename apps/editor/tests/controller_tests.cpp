@@ -18,6 +18,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSignalSpy>
@@ -455,6 +456,18 @@ TEST_CASE("Explicit RAD setup continues the same clean project and Stop closes t
     setup->click();
     WaitForDebugSession(controller);
     CHECK_FALSE(controller.Caps().CanBuildDebug);
+    auto* recentMenu = window.findChild<QMenu*>(QStringLiteral("recentProjectsMenu"));
+    auto* recentOpen = window.findChild<QPushButton*>(QStringLiteral("openRecentProjectButton"));
+    auto* clearRecent = window.findChild<QAction*>(QStringLiteral("clearRecentProjectsAction"));
+    REQUIRE(recentMenu != nullptr);
+    REQUIRE(recentOpen != nullptr);
+    REQUIRE(clearRecent != nullptr);
+    CHECK_FALSE(recentMenu->isEnabled());
+    CHECK_FALSE(recentOpen->isEnabled());
+    CHECK_FALSE(clearRecent->isEnabled());
+    const auto recentCount = controller.RecentProjects().size();
+    controller.ClearRecentProjects();
+    CHECK(controller.RecentProjects().size() == recentCount);
     CHECK(controller.Caps().CanStop);
     CHECK(controller.State().DescriptorPath == project);
     CHECK(controller.State().SavedDigest == digest);
