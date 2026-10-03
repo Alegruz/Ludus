@@ -113,6 +113,11 @@ Gate: P05-P07/P11; real installed CLI and concurrent store operations pass. [x]
       cancellation. Do not overwrite an existing project.
 - [x] Implement configure/build/run, profile selection, engine override/clear,
       explicit version/lock updates and installed CMake helpers/presets.
+- [ ] Implement shared read-only setup validation and explicit repair (P16):
+      real selectable configure/build/test presets, SDK/tool paths and IDE
+      CMake selection. Creation and SDK updates recheck setup; preserve custom
+      presets/settings and verify configure/build/test after repair. Test fresh
+      clones, hidden/disabled/broken presets, moved SDK/tools and repeated repair.
 - [x] Share per-tree locks with the Editor and preserve artifact re-resolution,
       argv/cwd fidelity, output bounds, process cleanup and failed-build behavior.
       (buildlock shares editor_tool's lock path; File API resolver reused;
@@ -128,7 +133,7 @@ Gate: P05-P07/P11; real installed CLI and concurrent store operations pass. [x]
       clear the override and restore the lock without changing committed files.
       (Stamp-change detection + clear-override restore proven in unit/CLI tests.)
 
-Gate: P01/P04/P06-P10/P12; real project creation, migration and build lifecycle.
+Gate: P01/P04/P06-P10/P12/P16; real project creation, migration and build lifecycle.
 [~] build lifecycle against a real C++ SDK UNAVAILABLE (needs pinned toolchain).
 
 ## P4 Add installed Editor project creation
@@ -140,6 +145,9 @@ Gate: P01/P04/P06-P10/P12; real project creation, migration and build lifecycle.
 - [ ] Add asynchronous New Project and explicit SDK install/select stages through
       the same backend used by the CLI. (Backend is shared and ready; the Qt GUI
       New Project flow is not implemented — needs Qt6 and native GUI acceptance.)
+- [ ] On Open, show shared setup diagnostics and an explicit Repair action
+      without automatic downloads/configure/build/settings changes. New Project,
+      SDK update and Repair use the same setup checks and acceptance as the CLI.
 - [x] Add required/resolved engine identity, profile and local override controls
       at the schema level and extend the two-preset E0 contract to v2 Release.
       (C++ descriptor + serializer extended; preset validators cover Release;
@@ -158,7 +166,7 @@ Gate: P01/P04/P06-P10/P12; real project creation, migration and build lifecycle.
       (ludus_tools imports load no Qt; editor stays OFF-by-default and
       un-exported; runtime exports carry no Qt.)
 
-Gate: P07-P11/P15; actual native acceptance plus existing E0 regressions.
+Gate: P07-P11/P15/P16; actual native acceptance plus existing E0 regressions.
 [~] native GUI acceptance UNAVAILABLE (needs Qt6 + display/GPU).
 
 ## P5 Release candidates and implementation handoff

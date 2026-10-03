@@ -69,8 +69,15 @@ validation, SDK resolution and atomic template generation operations. A failed
 creation leaves the existing workspace intact and no partially published game.
 
 Generated files become user-owned; later template versions do not overwrite
-game source. Opening a project only reads metadata. Configure/build/run use
+game source. Opening a project reads metadata and local setup. Configure/build/run use
 shared process supervision, build locks and CMake artifact resolution.
+
+Creation, project Open, SDK update and explicit repair must also check local
+setup: selectable configure/build/test presets, SDK and dependency paths,
+compiler/Ninja/shader tools, and IDE CMake selection. Open reports problems
+without modifying files or starting builds/downloads. Repair preserves custom
+presets/settings and verifies configure/build/test. These shared CLI/Editor
+checks are required by P16; their implementation remains part of this milestone.
 
 The CLI must work without Qt or a display. A windowed game's runtime still needs
 its documented display/GPU environment. Headless tooling and headless runtime

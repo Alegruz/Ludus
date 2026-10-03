@@ -172,6 +172,26 @@ editable. An installed public CMake helper may apply the supported application
 compile/link policy without exporting engine build warnings or private targets.
 Do not reference checkout-only `ludus_apply_project_defaults` in templates.
 
+Use one setup validator for creation, Open, SDK selection/update and explicit
+repair. Check actual selectable configure/build/test presets with the selected
+CMake (`--list-presets` for each kind), including includes, inheritance and
+conditions. Hidden base presets alone must produce a missing-setup diagnostic.
+Check resolved SDK/dependency prefixes, compiler, Ninja and required shader tools,
+plus IDE preset mode and CMake selection. Put IDE `cmakeExecutable` paths in
+ignored user presets, alongside other machine paths. Open performs read-only
+preflight and reports actionable repair commands; it never automatically writes
+settings, fetches packages or configures/builds the project. Keep GUI checks
+asynchronous through the shared supervisor. Missing setup does not prevent
+opening the project's metadata for repair.
+
+Explicit repair regenerates only owned entries and preserves custom presets,
+editor preferences and source. Invalid custom settings must produce a diagnostic
+instead of being discarded. Validate staged preset files before publication and
+refresh affected build caches when resolved inputs change. Creation and repair
+acceptance must include real configure/build/test, repeated repair, a fresh clone
+without user settings, broken/hidden/disabled presets, moved tools/SDKs and stale
+IDE settings. New Project uses the same validator before reporting completion.
+
 Separate or invalidate build trees on SDK/toolchain identity changes. Use a
 resolved-input stamp including manifest/header/library fingerprints for mutable
 local SDK prefixes; path equality alone is insufficient. Refresh CMake and force
