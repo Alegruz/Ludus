@@ -12,6 +12,8 @@ authoritative, machine-readable inventory (names, versions, kinds) is the
 
 | Component | Version | License | Linked by |
 | --- | --- | --- | --- |
+| yyjson | 0.10.0 | MIT | `Ludus::Content` (PRIVATE JSON parser) |
+| miniaudio | 0.11.23 | MIT-0 | `Ludus::Audio` (PRIVATE decoder/device backend) |
 | volk | 1.4.357.0 | MIT | `Ludus::GraphicsRhi` (Vulkan loader meta-loader) |
 | FreeType | 2.14.3 | FTL **or** GPLv2 (dual) — see FreeType FTL | `Ludus::Text` (PRIVATE, part of the final link closure) |
 | HarfBuzz | 14.5.1 | "Old MIT" / modern MIT-style | `Ludus::Text` (PRIVATE, part of the final link closure) |

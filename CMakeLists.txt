@@ -132,6 +132,9 @@ add_subdirectory(third_party/miniaudio)
 # miniaudio dependency; it does not depend on Platform/RHI/Input/Text. It builds
 # for both native and web targets (same production renderer; design section 1).
 add_subdirectory(modules/audio)
+add_subdirectory(third_party/yyjson)
+add_subdirectory(modules/content)
+add_subdirectory(modules/audio/content)
 
 # Ludus::GameApi is a header-only INTERFACE target defining the gameplay module
 # ABI (project-live-reload design section 2). It links no engine implementation,
@@ -175,6 +178,8 @@ else()
 
     if(LUDUS_BUILD_SMOKE_APP)
         add_subdirectory(apps/smoke)
+        add_subdirectory(apps/content_pack)
+        add_subdirectory(apps/audio_content_demo)
         add_subdirectory(apps/input_demo)
     endif()
 
@@ -223,7 +228,7 @@ write_basic_package_version_file(
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationContainers FoundationMath FoundationLogging
-    FoundationProfiling Input Audio GameplayWorld GameApi)
+    FoundationProfiling Input Audio Content AudioContent GameplayWorld GameApi)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()
@@ -249,6 +254,8 @@ if(NOT EMSCRIPTEN)
     ludus_sdk_register_dependency(freetype "2.14.3"   "FTL-or-GPLv2"        bundled)
     ludus_sdk_register_dependency(harfbuzz "14.5.1"   "MIT-modern"          bundled)
 endif()
+ludus_sdk_register_dependency(yyjson "0.10.0" "MIT" bundled)
+ludus_sdk_register_dependency(miniaudio "0.11.23" "MIT-0" bundled)
 ludus_sdk_register_dependency(Threads     "system"    "system"             system)
 
 # System prerequisites that cannot reasonably be bundled.

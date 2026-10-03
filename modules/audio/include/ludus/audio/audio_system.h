@@ -14,9 +14,12 @@
 // failure is reported explicitly, never through an exception (engine code is
 // -fno-exceptions). No miniaudio / Web Audio type appears in this header.
 
-#include <ludus/audio/audio_types.h>
-#include <ludus/foundation/base/pointer.hpp> // ludus::foundation::core::UniquePtr
 #include <ludus/foundation/base/types.h>
+
+#include <ludus/foundation/base/pointer.hpp> // ludus::foundation::core::UniquePtr
+
+#include <ludus/audio/audio_source.h>
+#include <ludus/audio/audio_types.h>
 
 #include <span>
 
@@ -92,6 +95,14 @@ public:
     // this session. Owner-side; lets application descriptor validators check a
     // variation handle without attempting playback.
     [[nodiscard]] bool IsClipReady(ClipHandle clip) const noexcept;
+
+    // Takes exclusive input ownership, including on failure. File-backed native
+    // inputs keep encoded memory independent of track duration.
+    [[nodiscard]] Status PrepareStream(foundation::core::UniquePtr<StreamInput> input,
+                                       const StreamDescriptor& descriptor,
+                                       StreamHandle& outStream) noexcept;
+
+    [[nodiscard]] Status InstallClip(PreparedClip& prepared, ClipHandle& outClip) noexcept;
 
     // --- Submission (warm; design section 4) ----------------------------
     // Validate the whole batch (<= MAX_BATCH_RECORDS), copy all records, reserve

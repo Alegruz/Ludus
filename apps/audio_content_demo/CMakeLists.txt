@@ -1,0 +1,15 @@
+add_executable(ludus_audio_content_demo "${PROJECT_SOURCE_DIR}/examples/audio-content/main.cpp")
+target_link_libraries(ludus_audio_content_demo PRIVATE Ludus::AudioContent Ludus::FoundationLogging Ludus::FoundationMath)
+ludus_apply_project_defaults(ludus_audio_content_demo)
+if(LUDUS_BUILD_TESTS)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(_content_fixture "${CMAKE_CURRENT_BINARY_DIR}/content")
+    add_test(NAME ludus_audio_content_fixture COMMAND Python3::Interpreter
+        "${PROJECT_SOURCE_DIR}/examples/audio-content/generate_fixtures.py" "${_content_fixture}")
+    set_tests_properties(ludus_audio_content_fixture PROPERTIES FIXTURES_SETUP audio_content LABELS "audio;content")
+    add_test(NAME ludus_audio_content_demo COMMAND ludus_audio_content_demo --offline "${_content_fixture}")
+    set_tests_properties(ludus_audio_content_demo PROPERTIES FIXTURES_REQUIRED audio_content LABELS "audio;content")
+    add_test(NAME ludus_audio_content_package COMMAND Python3::Interpreter
+        "${PROJECT_SOURCE_DIR}/tests/audio_content_package_tests.py" "$<TARGET_FILE:ludus_content_validate>")
+    set_tests_properties(ludus_audio_content_package PROPERTIES LABELS "audio;content;packaging")
+endif()

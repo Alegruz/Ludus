@@ -138,7 +138,8 @@ public:
                                                   uint32 ownerTag,
                                                   uint64 cooldownTicks,
                                                   uint32 seed,
-                                                  uint64 nowTicks) noexcept;
+                                                  uint64 nowTicks,
+                                                  bool suppressWhileActive = true) noexcept;
 
     // Call every service tick: observe durable terminals so active/cooldown and
     // dialogue-duck membership release correctly, and reclaim expired entries.

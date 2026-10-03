@@ -1,4 +1,5 @@
 #include "internal/main_window.h"
+#include "internal/audio_workspace.h"
 
 #include <QAbstractItemModel>
 #include <QAction>
@@ -9,7 +10,10 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QDockWidget>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -134,6 +138,10 @@ void MainWindow::BuildUi()
     layout->addWidget(splitter);
     layout->addWidget(StatusLabel_);
     setCentralWidget(central);
+    auto* audioDock = new QDockWidget(QStringLiteral("Audio content"), this);
+    Audio_ = new AudioWorkspace(audioDock);
+    audioDock->setWidget(Audio_);
+    addDockWidget(Qt::RightDockWidgetArea, audioDock);
 
     // Typed signal connections (pointer-to-member); no string-based SIGNAL/SLOT.
     connect(NameEdit_, &QLineEdit::textEdited, this, &MainWindow::OnFieldEdited);
@@ -174,7 +182,7 @@ void MainWindow::BuildMenus()
     BuildDebugAction_->setObjectName(QStringLiteral("buildDebugAction"));
     BuildDebugAction_->setToolTip(QStringLiteral("Debug native games in RAD. Optional setup is offered when missing."));
     BuildDebugAction_->setShortcut(QKeySequence(Qt::Key_F5));
-    connect(BuildDebugAction_, &QAction::triggered, Controller_, [this]() { Controller_->BuildDebug(); });
+    connect(BuildDebugAction_, &QAction::triggered, this, [this]() { LaunchAfterPreview(LaunchAction::Debug); });
     connect(Controller_, &EditorController::DebuggerSetupRequested, this, &MainWindow::OnDebuggerSetupRequested);
     StopAction_ = buildMenu->addAction(QStringLiteral("&Stop"));
     auto* gameToolbar = addToolBar(QStringLiteral("Game"));
@@ -229,7 +237,7 @@ void MainWindow::BuildMenus()
     connect(RedoTuningAction_, &QAction::triggered, Controller_, &EditorController::RedoTuningDocument);
     connect(SaveTuningAction_, &QAction::triggered, Controller_, &EditorController::SaveTuningDocument);
     connect(DiscardTuningAction_, &QAction::triggered, Controller_, &EditorController::DiscardTuningDocumentDraft);
-    connect(PlayAction_, &QAction::triggered, Controller_, &EditorController::Play);
+    connect(PlayAction_, &QAction::triggered, this, [this]() { LaunchAfterPreview(LaunchAction::Play); });
     connect(BuildReloadAction_, &QAction::triggered, Controller_, &EditorController::BuildReload);
     connect(PauseAction_, &QAction::triggered, this, [this]() { Controller_->PlayCommand(QStringLiteral("Pause")); });
     connect(StepAction_, &QAction::triggered, this, [this]() { Controller_->PlayCommand(QStringLiteral("Step")); });
@@ -245,10 +253,59 @@ void MainWindow::BuildMenus()
     connect(ReloadAction_, &QAction::triggered, this, &MainWindow::OnReloadRequested);
     connect(ConfigureAction_, &QAction::triggered, Controller_, &EditorController::Configure);
     connect(BuildAction_, &QAction::triggered, Controller_, &EditorController::Build);
-    connect(BuildRunAction_, &QAction::triggered, Controller_, &EditorController::BuildRun);
+    connect(BuildRunAction_, &QAction::triggered, this, [this]() { LaunchAfterPreview(LaunchAction::Run); });
     connect(StopAction_, &QAction::triggered, Controller_, &EditorController::Stop);
     connect(ClearAction_, &QAction::triggered, Controller_, &EditorController::ClearOutput);
     connect(CopyAction_, &QAction::triggered, this, &MainWindow::OnCopyJobDetails);
+}
+
+void MainWindow::LaunchAfterPreview(LaunchAction action, const QString& debugger, bool setup)
+{
+    if (AudioLaunchPending_ || AudioClosing_)
+    {
+        return;
+    }
+    AudioLaunchPending_ = true;
+    Audio_->setEnabled(false);
+    Audio_->ShutdownPreview();
+    RenderCapabilities();
+    const auto epoch = Controller_->State().ProjectEpoch;
+    const auto digest = Controller_->State().SavedDigest;
+    auto* timer = new QTimer(this);
+    timer->setInterval(20);
+    connect(timer, &QTimer::timeout, this, [this, timer, epoch, digest, action, debugger, setup]() {
+        if (!Audio_->PreviewFinished())
+        {
+            return;
+        }
+        timer->stop();
+        timer->deleteLater();
+        AudioLaunchPending_ = false;
+        if (AudioClosing_)
+        {
+            return;
+        }
+        Audio_->ResetPreview();
+        Audio_->setEnabled(Controller_->State().Document == DocumentState::ProjectLoaded);
+        RenderCapabilities();
+        if (epoch != Controller_->State().ProjectEpoch || digest != Controller_->State().SavedDigest)
+        {
+            return;
+        }
+        switch (action)
+        {
+            case LaunchAction::Run:
+                Controller_->BuildRun();
+                break;
+            case LaunchAction::Play:
+                Controller_->Play();
+                break;
+            case LaunchAction::Debug:
+                Controller_->BuildDebug(debugger, setup);
+                break;
+        }
+    });
+    timer->start();
 }
 
 ProjectDescriptor MainWindow::DraftFromFields() const
@@ -304,6 +361,11 @@ void MainWindow::OnRemoveArgument()
 
 void MainWindow::OnOpenRequested()
 {
+    if (!Audio_->ConfirmDiscard())
+    {
+        return;
+    }
+    Audio_->StopPreview();
     const QString path = QFileDialog::getOpenFileName(this,
                                                       QStringLiteral("Open Project Descriptor"),
                                                       QString(),
@@ -337,11 +399,21 @@ void MainWindow::OnOpenRequested()
 
 void MainWindow::OnSaveRequested()
 {
+    const auto& state = Controller_->State();
+    if (state.Draft.SourceDir != state.Saved.SourceDir && !Audio_->ConfirmDiscard())
+    {
+        return;
+    }
     Controller_->Save();
 }
 
 void MainWindow::OnReloadRequested()
 {
+    if (!Audio_->ConfirmDiscard())
+    {
+        return;
+    }
+    Audio_->StopPreview();
     if (Controller_->State().Dirty())
     {
         const auto choice = QMessageBox::question(this,
@@ -366,6 +438,13 @@ void MainWindow::OnStateChanged()
     RenderFields();
     RenderCapabilities();
     RenderStatus();
+    const auto& state = Controller_->State();
+    Audio_->setEnabled(state.Document == DocumentState::ProjectLoaded && !AudioClosing_ && !AudioLaunchPending_);
+    if (state.Document == DocumentState::ProjectLoaded)
+    {
+        const auto root = QDir(QFileInfo(state.DescriptorPath).absolutePath()).absoluteFilePath(state.Saved.SourceDir);
+        Audio_->SetRoot(QDir(root).absoluteFilePath(QStringLiteral("content")));
+    }
 
     // If a close was requested and the workspace is now closeable, finish.
     RenderProperties();
@@ -425,7 +504,7 @@ void MainWindow::RenderFields()
 void MainWindow::RenderCapabilities()
 {
     const Capabilities caps = Controller_->Caps();
-    PlayAction_->setEnabled(Controller_->CanPlay());
+    PlayAction_->setEnabled(Controller_->CanPlay() && !AudioLaunchPending_);
     BuildReloadAction_->setEnabled(Controller_->CanBuildReload());
     const auto play = Controller_->PlayState().Phase;
     const bool debuggerStopped = Controller_->PlayState().DebuggerStopped;
@@ -456,8 +535,8 @@ void MainWindow::RenderCapabilities()
     ReloadAction_->setEnabled(caps.CanReload);
     ConfigureAction_->setEnabled(caps.CanConfigure);
     BuildAction_->setEnabled(caps.CanBuild);
-    BuildRunAction_->setEnabled(caps.CanBuildRun);
-    BuildDebugAction_->setEnabled(caps.CanBuildDebug);
+    BuildRunAction_->setEnabled(caps.CanBuildRun && !AudioLaunchPending_);
+    BuildDebugAction_->setEnabled(caps.CanBuildDebug && !AudioLaunchPending_);
     StopAction_->setEnabled(caps.CanStop);
     SetupReleaseAction_->setEnabled(caps.CanReleaseInit);
     PackageReleaseAction_->setEnabled(caps.CanPackage);
@@ -623,7 +702,7 @@ void MainWindow::OnDebuggerSetupRequested()
         }
         if (dialog->clickedButton() == setup)
         {
-            Controller_->BuildDebug({}, true);
+            LaunchAfterPreview(LaunchAction::Debug, {}, true);
         }
         else if (dialog->clickedButton() == choose)
         {
@@ -633,7 +712,7 @@ void MainWindow::OnDebuggerSetupRequested()
             connect(picker, &QFileDialog::fileSelected, this, [this, current](const QString& path) {
                 if (current())
                 {
-                    Controller_->BuildDebug(path);
+                    LaunchAfterPreview(LaunchAction::Debug, path);
                 }
             });
             picker->open();
@@ -683,6 +762,11 @@ void MainWindow::OnSetupProject()
 
 void MainWindow::OnNewProject()
 {
+    if (!Audio_->ConfirmDiscard())
+    {
+        return;
+    }
+    Audio_->StopPreview();
     auto* dialog = new QDialog(this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setObjectName(QStringLiteral("newProjectDialog"));
@@ -789,30 +873,45 @@ void MainWindow::OnPackageRelease()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    if (!AudioClosing_)
+    {
+        if (!Audio_->ConfirmDiscard())
+        {
+            event->ignore();
+            return;
+        }
+        const bool busy = !Controller_->Caps().CanCloseImmediately;
+        if (busy && !CloseConfirmed_)
+        {
+            const auto choice = QMessageBox::question(
+                this,
+                QStringLiteral("Operation running"),
+                QStringLiteral("An operation is running. Stop it and close, or keep the editor open?"),
+                QMessageBox::Close | QMessageBox::Cancel);
+            if (choice != QMessageBox::Close)
+            {
+                event->ignore();
+                return;
+            }
+            CloseConfirmed_ = true;
+        }
+        AudioClosing_ = true;
+        Audio_->ShutdownPreview();
+        if (busy)
+        {
+            (void)Controller_->RequestClose();
+        }
+    }
+    if (!Audio_->PreviewFinished())
+    {
+        event->ignore();
+        QTimer::singleShot(20, this, [this]() { close(); });
+        return;
+    }
     if (Controller_->Caps().CanCloseImmediately)
     {
         event->accept();
         return;
-    }
-    // Busy: offer Stop and Close or Keep Open. Do not block on a nested loop
-    // while output flows; the actual close happens when cleanup is confirmed.
-    const auto choice =
-        QMessageBox::question(this,
-                              QStringLiteral("Operation running"),
-                              QStringLiteral("An operation is running. Stop it and close, or keep the editor open?"),
-                              QMessageBox::Close | QMessageBox::Cancel);
-    if (choice == QMessageBox::Close)
-    {
-        CloseConfirmed_ = true;
-        if (Controller_->RequestClose())
-        {
-            event->accept();
-            return;
-        }
-    }
-    else
-    {
-        CloseConfirmed_ = false; // a close request is cancellable
     }
     event->ignore();
 }

@@ -233,7 +233,8 @@ TriggerResult EventAdapter::TriggerDescriptor(const EventDescriptor& desc,
                                               uint32 ownerTag,
                                               uint64 cooldownTicks,
                                               uint32 seed,
-                                              uint64 nowTicks) noexcept
+                                              uint64 nowTicks,
+                                              bool suppressWhileActive) noexcept
 // NOLINTEND(bugprone-easily-swappable-parameters)
 {
     TriggerResult out{};
@@ -259,7 +260,7 @@ TriggerResult EventAdapter::TriggerDescriptor(const EventDescriptor& desc,
     req.EventId = desc.EventId;
     req.OwnerTag = ownerTag;
     req.CooldownTicks = cooldownTicks;
-    req.SuppressWhileActive = true;
+    req.SuppressWhileActive = suppressWhileActive;
     req.IsOwnedLoop = desc.Looping;
     req.Play.Clip = desc.Variations[variant];
     req.Play.BusIndex = desc.BusIndex;

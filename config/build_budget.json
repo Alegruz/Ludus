@@ -95,9 +95,26 @@
   ],
   "preset": "linux-clang-development",
   "default_header_avg_ms": 2000,
-  "total_frontend_seconds": 170,
+  "total_frontend_seconds": 210,
   "header_overrides_avg_ms": {
     "modules/foundation/logging/src/internal/backend.hpp": 4000
   },
-  "ignore_headers": []
+  "ignore_headers": [],
+  "$audio_content_note": [
+    "Audio content/native streaming adds production translation units, a pinned C",
+    "parser, and three native Catch2 test translation units. The full CI profile",
+    "on ubuntu-24.04, pinned Clang 18, two uncached build jobs measured 174.3 s",
+    "summed frontend parsing over 336 compilation events (run 37129607360).",
+    "The same main baseline at 41dd763 measured 139.6 s over 304 compilation",
+    "events (run 37128917880). These are separate runners, not a noise-free",
+    "paired timing experiment. All ranked project headers remain below 2000 ms:",
+    "audio_types.h 167 ms, core.h 42 ms, audio_system.h 150 ms, audio_source.h 123 ms.",
+    "The new public content headers contain no heavy standard-library includes.",
+    "Recalibrate only the aggregate from 170 to 210 s, approximately 20% headroom",
+    "over the measured complete graph, consistent with the prior CI baseline",
+    "headroom (170 versus 139.6 s). Keep every per-header limit unchanged; no",
+    "source, test, or profile input is excluded. Evidence and CI links are in",
+    "docs/development/build-profiling.md, Audio content CI calibration.",
+    "Re-measure the next CI profile and tighten this aggregate when justified."
+  ]
 }

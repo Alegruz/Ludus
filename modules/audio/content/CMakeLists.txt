@@ -1,0 +1,18 @@
+add_library(ludus_audio_content STATIC src/definitions.cpp src/loader.cpp)
+add_library(Ludus::AudioContent ALIAS ludus_audio_content)
+set_target_properties(ludus_audio_content PROPERTIES EXPORT_NAME AudioContent)
+target_sources(ludus_audio_content PUBLIC FILE_SET public_headers TYPE HEADERS BASE_DIRS include
+    FILES include/ludus/audio/content/definitions.h include/ludus/audio/content/loader.h)
+target_link_libraries(ludus_audio_content PUBLIC Ludus::Content Ludus::Audio PRIVATE Ludus::FoundationMath)
+ludus_apply_project_defaults(ludus_audio_content)
+install(TARGETS ludus_audio_content EXPORT LudusTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+if(LUDUS_BUILD_TESTS)
+    find_package(Catch2 3 REQUIRED CONFIG)
+    add_executable(ludus_audio_content_tests tests/content_tests.cpp)
+    target_include_directories(ludus_audio_content_tests PRIVATE "${PROJECT_SOURCE_DIR}/modules/audio/tests" "${PROJECT_SOURCE_DIR}/examples/audio-content")
+    target_link_libraries(ludus_audio_content_tests PRIVATE Ludus::AudioContent Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_audio_content_tests)
+    ludus_enable_test_exceptions(ludus_audio_content_tests)
+    add_test(NAME ludus_audio_content_tests COMMAND ludus_audio_content_tests)
+endif()

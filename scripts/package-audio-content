@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Validate explicit audio roots and publish immutable loose-file packages."""
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import tempfile
+
+
+def encoded(value):
+    return (json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
+
+
+def open_source(root_fd, path):
+    parts = path.split("/")
+    if not parts or any(part in ("", ".", "..") for part in parts):
+        raise ValueError("unsafe package path")
+    directory = os.dup(root_fd)
+    try:
+        for part in parts[:-1]:
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = next_fd
+        return os.fdopen(os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory), "rb")
+    finally:
+        os.close(directory)
+
+
+def fingerprint(root_fd, path, destination=None):
+    digest = hashlib.sha256()
+    with open_source(root_fd, path) as source:
+        before = os.fstat(source.fileno())
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("source is not a regular file")
+        target = open(destination, "xb") if destination else None
+        try:
+            while block := source.read(65536):
+                digest.update(block)
+                if target:
+                    target.write(block)
+            after = os.fstat(source.fileno())
+            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                raise ValueError("source changed during copy")
+            if target:
+                target.flush()
+                os.fsync(target.fileno())
+        finally:
+            if target:
+                target.close()
+    return digest.hexdigest(), before.st_size
+
+
+def write_complete(path, payload):
+    with open(path, "xb") as target:
+        target.write(payload)
+        target.flush()
+        os.fsync(target.fileno())
+
+
+def sync_directory(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def package(validator, content, output, roots):
+    validator = str(Path(validator).resolve(strict=True))
+    content = Path(content).resolve(strict=True)
+    output = Path(output).absolute()
+    if output == content or content in output.parents or output in content.parents:
+        raise ValueError("package output must be separate from source content")
+    output.mkdir(parents=True, exist_ok=True)
+    with os.fdopen(os.open(output / ".package.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600), "r+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        root_fd = os.open(content, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with tempfile.TemporaryDirectory(prefix=".staging-", dir=output) as temporary:
+                stage = Path(temporary)
+                subprocess.run([validator, str(content), str(stage), *roots], check=True)
+                plan = json.loads((stage / "closure.json").read_text())
+                (stage / "closure.json").unlink()
+                for item in plan["files"]:
+                    destination = stage / item["path"]
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    if fingerprint(root_fd, item["path"], destination) != (item["sha256"], item["size"]):
+                        raise ValueError("source does not match validated revision")
+                write_complete(stage / "catalog.json", encoded(plan["catalog"]))
+                # Use the same strict engine reader against the completed copy.
+                with tempfile.TemporaryDirectory(prefix=".validation-", dir=output) as check:
+                    subprocess.run([validator, str(stage), check, *roots], check=True)
+                    copied = json.loads((Path(check) / "closure.json").read_text())
+                    if copied["catalog"] != plan["catalog"] or copied["files"] != plan["files"]:
+                        raise ValueError("copied dependency closure changed")
+                if fingerprint(root_fd, "catalog.json")[0] != plan["input_catalog_sha256"]:
+                    raise ValueError("catalog changed during packaging")
+                for item in plan["files"]:
+                    if fingerprint(root_fd, item["path"]) != (item["sha256"], item["size"]):
+                        raise ValueError("source changed during packaging")
+                manifest = {"version": 1, "roots": sorted(set(roots)), "files": plan["files"],
+                            "catalog_sha256": hashlib.sha256((stage / "catalog.json").read_bytes()).hexdigest()}
+                payload = encoded(manifest)
+                write_complete(stage / "manifest.json", payload)
+                revision = hashlib.sha256(payload).hexdigest()
+                destination = output / revision
+                if destination.is_symlink():
+                    raise ValueError("package revision is a symlink")
+                if destination.exists():
+                    if (destination / "manifest.json").read_bytes() != payload:
+                        raise ValueError("existing package revision differs")
+                    existing_fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                    try:
+                        for item in manifest["files"]:
+                            if fingerprint(existing_fd, item["path"]) != (item["sha256"], item["size"]):
+                                raise ValueError("existing immutable package is corrupt")
+                        if fingerprint(existing_fd, "catalog.json")[0] != manifest["catalog_sha256"]:
+                            raise ValueError("existing package catalog is corrupt")
+                    finally:
+                        os.close(existing_fd)
+                else:
+                    for directory in sorted((p for p in stage.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
+                        sync_directory(directory)
+                    sync_directory(stage)
+                    os.rename(stage, destination)
+                    sync_directory(output)
+                    # TemporaryDirectory cleanup tolerates a renamed staging directory.
+                pointer = encoded({"version": 1, "path": revision, "manifest_sha256": revision})
+                fd, temporary_pointer = tempfile.mkstemp(prefix=".current-", dir=output)
+                try:
+                    with os.fdopen(fd, "wb") as target:
+                        target.write(pointer)
+                        target.flush()
+                        os.fsync(target.fileno())
+                    os.replace(temporary_pointer, output / "current.json")
+                    sync_directory(output)
+                finally:
+                    if os.path.exists(temporary_pointer):
+                        os.unlink(temporary_pointer)
+                return destination
+        finally:
+            os.close(root_fd)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--validator", required=True)
+    parser.add_argument("--content", required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("roots", nargs="+")
+    args = parser.parse_args()
+    try:
+        print(package(args.validator, args.content, args.output, args.roots))
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        parser.exit(1, f"Audio package failed: {error}\n")
+
+
+if __name__ == "__main__":
+    main()

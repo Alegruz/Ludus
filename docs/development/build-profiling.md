@@ -205,3 +205,33 @@ consumer built and ran. Socket/death and sanitizer tests required execution
 outside the sandbox's socket/process-inspection restrictions. Replaying the
 supplied CI report through the budget checker reproduced the 65 s failure and
 passed at 100 s; probes at 100.1 s total and 3201 ms for `log.hpp` still failed.
+
+## Audio content CI calibration
+
+PR #62 adds native streaming/device sources, Content/AudioContent, a pinned C
+parser, the packager/sample and three native Catch2 translation units. Its full
+uncached CI profile uses the same Ubuntu 24.04 runner class, pinned Clang 18,
+Development preset and two-job concurrency as main:
+
+| Measurement | Main `41dd763` | Audio `2da869a` |
+| --- | ---: | ---: |
+| ClangBuildAnalyzer compilation events | 304 | 336 |
+| Summed frontend parsing | 139.6 s | 174.3 s |
+| `audio_types.h` average/include | 172 ms | 167 ms |
+| `audio_system.h` average/include | 134 ms | 150 ms |
+| `core.h` average/include | 29 ms | 42 ms |
+
+Sources: [main CI profile](https://github.com/Alegruz/Ludus/actions/runs/37128917880/job/111221053785)
+and [audio CI profile](https://github.com/Alegruz/Ludus/actions/runs/37129607360/job/111222059306).
+These run on separate hosts; their difference is not an exact attribution of
+feature cost. The audio run fails only the aggregate 170 s limit. All ranked
+project headers pass, including `audio_source.h` at 123 ms. New content public
+headers contain no `<format>`, `<filesystem>` or `<chrono>` includes.
+
+Recalibrate `total_frontend_seconds` to **210 s**, about 20% headroom over the
+measured expanded graph, consistent with the preceding main headroom (170 s over
+139.6 s). Per-header budgets, overrides, profile inputs and tests are unchanged.
+No header is ignored. This replaces the earlier heavily contended local 792.6 s
+measurement as the CI calibration input; it does not claim that local measurement
+passes. The next CI profile must verify the updated limit; tighten it when repeated
+measurements justify doing so.

@@ -34,6 +34,21 @@ DecodeResidentClip(std::span<const ludus::foundation::uint8> encoded, SourceForm
         return out;
     }
 
+    if (format != SourceFormat::Wav && format != SourceFormat::Flac)
+    {
+        out.Result = Status::Unsupported;
+        return out;
+    }
+    const bool wav = encoded.size() >= 12 && encoded[0] == 'R' && encoded[1] == 'I' && encoded[2] == 'F' &&
+                     encoded[3] == 'F' && encoded[8] == 'W' && encoded[9] == 'A' && encoded[10] == 'V' &&
+                     encoded[11] == 'E';
+    const bool flac =
+        encoded.size() >= 4 && encoded[0] == 'f' && encoded[1] == 'L' && encoded[2] == 'a' && encoded[3] == 'C';
+    if ((format == SourceFormat::Wav && !wav) || (format == SourceFormat::Flac && !flac))
+    {
+        out.Result = Status::DecodeError;
+        return out;
+    }
     // Restrict the decoder to the requested codec so an unexpected container is
     // rejected rather than silently decoded.
     ma_decoding_backend_vtable* backends[1] = {};
@@ -52,6 +67,25 @@ DecodeResidentClip(std::span<const ludus::foundation::uint8> encoded, SourceForm
         return out;
     }
 
+    ma_format sourceFormat{};
+    ma_uint32 sourceChannels = 0, sourceRate = 0;
+    if (ma_data_source_get_data_format(decoder.pBackend, &sourceFormat, &sourceChannels, &sourceRate, nullptr, 0) !=
+            MA_SUCCESS ||
+        sourceRate == 0)
+    {
+        ma_decoder_uninit(&decoder);
+        out.Result = Status::DecodeError;
+        return out;
+    }
+    ma_uint64 sourceFrames = 0;
+    if (ma_data_source_get_length_in_pcm_frames(decoder.pBackend, &sourceFrames) != MA_SUCCESS || sourceFrames == 0)
+    {
+        ma_decoder_uninit(&decoder);
+        out.Result = Status::DecodeError;
+        return out;
+    }
+    out.SourceFrames = sourceFrames;
+    out.SourceRate = sourceRate;
     // Confirm the actual codec matches the declared format.
     // (miniaudio decodes by content; we additionally gate channel layout.)
     (void)format;
@@ -73,6 +107,12 @@ DecodeResidentClip(std::span<const ludus::foundation::uint8> encoded, SourceForm
     }
 
     // Guard the sample-value product against overflow before allocating.
+    if (totalFrames > RESIDENT_PCM_CAP_BYTES / (static_cast<uint64>(channels) * sizeof(float32)))
+    {
+        ma_decoder_uninit(&decoder);
+        out.Result = Status::AssetCapacity;
+        return out;
+    }
     const uint64 sampleValues = static_cast<uint64>(totalFrames) * channels;
     if (sampleValues == 0 || sampleValues > (RESIDENT_PCM_CAP_BYTES / sizeof(float32)))
     {
@@ -93,7 +133,7 @@ DecodeResidentClip(std::span<const ludus::foundation::uint8> encoded, SourceForm
     const ma_result readResult = ma_decoder_read_pcm_frames(&decoder, pcm, totalFrames, &framesRead);
     ma_decoder_uninit(&decoder);
 
-    if (readResult != MA_SUCCESS && readResult != MA_AT_END)
+    if ((readResult != MA_SUCCESS && readResult != MA_AT_END) || framesRead == 0 || framesRead + 1 < totalFrames)
     {
         ::operator delete[](pcm, std::nothrow);
         out.Result = Status::DecodeError;
