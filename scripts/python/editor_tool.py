@@ -576,7 +576,8 @@ def build_plan(context: ToolContext, descriptor: editor_project.Descriptor, proj
 
 
 def configure_argv(plan: Plan) -> list[str]:
-    return [*plan.cmake, "--preset", plan.descriptor.preset, "-B", str(plan.build_dir)]
+    from ludus_tools.project_setup import preset_for
+    return [*plan.cmake, "--preset", preset_for(plan.source_dir, plan.descriptor.preset), "-B", str(plan.build_dir)]
 
 
 def build_argv(plan: Plan) -> list[str]:
@@ -614,7 +615,16 @@ class Supervisor:
         self._on_control = on_control
         self._control_buf = b""
         self.cancel_latched = False
+        self.captured_stdout = ""
+        self.capture_stdout = False
         self._stderr_decoders: dict[int, IncrementalDecoder] = {}
+
+    def _output(self, stage, stream, text):
+        if self.capture_stdout and stream == "stdout":
+            if len((self.captured_stdout + text).encode()) > MAX_PROTOCOL_LINE:
+                raise ProtocolError("captured command output exceeded its bound")
+            self.captured_stdout += text
+        self._writer.output(stage, stream, text)
 
     def latch_cancel(self) -> None:
         self.cancel_latched = True
@@ -707,7 +717,7 @@ class Supervisor:
                             except KeyError:
                                 pass
                         else:
-                            self._writer.output(stage, "stdout", out_decoder.decode(data))
+                            self._output(stage, "stdout", out_decoder.decode(data))
                     elif tag == "stderr":
                         data = child.read_stderr(CHILD_READ_CHUNK)
                         if not data:
@@ -718,7 +728,7 @@ class Supervisor:
                                 pass
                         else:
                             stderr_bytes += len(data)
-                            self._writer.output(stage, "stderr", err_decoder.decode(data))
+                            self._output(stage, "stderr", err_decoder.decode(data))
 
                 # Completion is driven by the LEADER's exit, not by stream EOF.
                 if not leader_exited:
@@ -747,7 +757,7 @@ class Supervisor:
                             continue
                         drained_any = True
                         decoder = out_decoder if tag == "stdout" else err_decoder
-                        self._writer.output(stage, tag, decoder.decode(data))
+                        self._output(stage, tag, decoder.decode(data))
                     if not drained_any:
                         break
         finally:
@@ -822,7 +832,11 @@ class Operation:
 
     def execute(self) -> OperationResult:
         try:
+            if self._operation == "project_create":
+                return self._execute_setup(None)
             descriptor = self._load_clean_descriptor()
+            if self._operation in ("project_check", "project_setup"):
+                return self._execute_setup(descriptor)
             if self._operation in ("release_init", "package"):
                 return self._execute_release(descriptor)
             plan = build_plan(self._context, descriptor, self._project_path.parent)
@@ -852,7 +866,8 @@ class Operation:
         except (OSError, subprocess.CalledProcessError) as exc:
             return OperationResult("failed", self._stage, "ReleaseFailed" if self._operation in ("release_init", "package") else "SpawnFailed", str(exc))
         except ToolingError as exc:
-            return OperationResult("failed", self._stage, "ReleaseFailed" if self._operation in ("release_init", "package") else "InvalidProject", f"{exc.code}: {exc.message}")
+            code = "ReleaseFailed" if self._operation in ("release_init", "package") else exc.code if exc.code in ("MissingTools", "ConfigureFailed", "BuildFailed", "Busy", "Conflict") else "InvalidProject"
+            return OperationResult("failed", self._stage, code, f"{exc.code}: {exc.message}")
         except editor_project.ProjectError as exc:
             return OperationResult("failed", self._stage, exc.code, exc.message)
         except self._context.engine.EngineError as exc:
@@ -863,6 +878,56 @@ class Operation:
     def _check_release_cancel(self) -> None:
         self._supervisor._read_control()
         self._check_cancel()
+
+    def _execute_setup(self, descriptor) -> OperationResult:
+        from ludus_tools.project_setup import check_project, repair_project, supported_project
+        from ludus_tools.create import create_project
+        self._stage = "configuring"
+        self._writer.phase(self._stage)
+        self._check_release_cancel()
+        if descriptor is not None:
+            supported_project(self._project_path)
+        elif self._project_path.exists():
+            raise ToolingError("DestinationExists", "New Project destination already exists")
+        def runner(argv, *, cwd, env):
+            capture = "--version" in argv or any(arg.startswith("--list-presets=") for arg in argv)
+            self._supervisor.capture_stdout = capture
+            self._supervisor.captured_stdout = ""
+            try:
+                self._check_release_cancel()
+                self._run_stage("building" if "--build" in argv or "ctest" in Path(argv[0]).name else "configuring",
+                                list(argv), cwd, env, "BuildFailed" if "--build" in argv else "ConfigureFailed")
+                return self._supervisor.captured_stdout
+            finally:
+                self._supervisor.capture_stdout = False
+        options = dict(tooling_root=self._context.tooling_root, runner=runner, cancel_check=self._check_release_cancel)
+        if self._operation == "project_check":
+            message = check_project(self._project_path, **options)
+        else:
+            sdk = Path(self._options["sdk"]) if self._options["sdk"] else None
+            web = Path(self._options["web_sdk"]) if self._options["web_sdk"] else None
+            if self._options.get("prepare_engine"):
+                root = self._context.tooling_root
+                profile = descriptor.preset if descriptor else "linux-clang-development"
+                env = self._context.engine.tool_env(root)
+                env.update(CI="true")
+                self._run_stage("configuring", [str(root / "scripts/init"), profile, "--preset-only", "--cli", "--no-system-install"], root, env, "ConfigureFailed")
+                self._run_stage("building", [str(root / "scripts/build"), profile], root, env, "BuildFailed")
+                if descriptor and "GraphicsRhi" in descriptor.engine.components:
+                    self._run_stage("building", [str(root / "scripts/shader-probe"), "bootstrap"], root, env, "BuildFailed")
+                sdk = sdk or root / "out/install" / profile
+                self._run_stage("building", [str(self._context.engine.cmake(root)), "--install", str(root / "out/build" / profile), "--prefix", str(sdk)], root, env, "BuildFailed")
+            if self._operation == "project_create":
+                if sdk is None:
+                    raise ToolingError("InvalidProject", "New Project needs an installed SDK or explicit engine preparation")
+                create_project(self._project_path, name=self._options["name"], template_id="minimal",
+                               engine_version="", local_sdk_prefix=sdk, cancel_check=self._check_release_cancel,
+                               verify_staged=lambda staged: repair_project(staged, sdk=sdk, web_sdk=web, **options))
+                message = "Project created and verified; ready to open"
+            else:
+                message = repair_project(self._project_path, sdk=sdk, web_sdk=web, **options)
+        self._writer.output(self._stage, "stdout", message + "\n")
+        return OperationResult("success", self._stage, "Ok", message)
 
     def _execute_release(self, descriptor) -> OperationResult:
         from ludus_tools.release_setup import setup_release
@@ -1066,7 +1131,7 @@ def _validate_request(message: dict) -> tuple[str, str, Path, str]:
     except ValueError as exc:
         raise ProtocolError("request job is not hex") from exc
     operation = message.get("operation")
-    if operation not in ("configure", "build", "build_run", "release_init", "package"):
+    if operation not in ("configure", "build", "build_run", "release_init", "package", "project_check", "project_setup", "project_create"):
         raise ProtocolError("unknown operation")
     project = message.get("project")
     if not isinstance(project, str) or not os.path.isabs(project):
@@ -1075,6 +1140,12 @@ def _validate_request(message: dict) -> tuple[str, str, Path, str]:
     if not isinstance(expected, str) or (expected and len(expected) != 64):
         raise ProtocolError("expected_sha256 must be 64 hex characters")
     fields = {"platform": 16, "itch_target": 128} if operation == "release_init" else {"profile": 64, "version": 128, "sdk": 4096} if operation == "package" else {}
+    if operation in ("project_setup", "project_create"):
+        fields = {"sdk": 4096, "web_sdk": 4096}
+        if operation == "project_create":
+            fields["name"] = 256
+        if not isinstance(message.get("prepare_engine"), bool):
+            raise ProtocolError("prepare_engine must be boolean")
     for key, maximum in fields.items():
         value = message.get(key)
         if not isinstance(value, str) or len(value.encode()) > maximum or any(ord(c) < 32 for c in value):

@@ -35,6 +35,14 @@ struct ToolingPaths
     QString ToolingRoot; // absolute tooling checkout
 };
 
+struct ProjectCreationOptions
+{
+    QString Destination;
+    QString Name;
+    QString Sdk;
+    bool PrepareEngine = false;
+};
+
 // One recorded command invocation for Copy Job Details (bounded).
 struct CommandRecord
 {
@@ -59,7 +67,16 @@ public:
     }
     [[nodiscard]] Capabilities Caps() const
     {
-        return ComputeCapabilities(State_);
+        Capabilities caps = ComputeCapabilities(State_);
+        if (Tool_.Active() && !State_.Busy())
+        {
+            // Keep the workspace owned until the bridge exits and drains.
+            caps.CanOpen = caps.CanEdit = caps.CanSave = caps.CanReload = false;
+            caps.CanConfigure = caps.CanBuild = caps.CanBuildRun = false;
+            caps.CanProjectCheck = caps.CanProjectSetup = caps.CanProjectCreate = false;
+            caps.CanReleaseInit = caps.CanPackage = caps.CanCloseImmediately = false;
+        }
+        return caps;
     }
 
     // Expose the store so tests can inject fault hooks.
@@ -77,6 +94,9 @@ public:
     void Configure();
     void Build();
     void BuildRun();
+    void CheckProjectSetup();
+    void SetupProject(const QString& sdk, const QString& webSdk, bool prepareEngine);
+    void CreateProject(const ProjectCreationOptions& creation);
     void SetupRelease(const QString& platform, const QString& itchTarget);
     void PackageRelease(const QString& profile, const QString& version, const QString& sdk);
     void Stop();
@@ -99,6 +119,7 @@ private Q_SLOTS:
 
 private:
     void StartJob(ActionKind kind, ToolOperation operation, const ToolLaunch& options = {});
+    void ScheduleSetupCheck();
     void Publish();
     void RecordCommand(const QString& stage, const QStringList& argv, const QString& cwd);
     [[nodiscard]] QString ResolveDescriptorPath() const;
@@ -113,6 +134,7 @@ private:
     QList<CommandRecord> Commands_;
     QStringList Transitions_;
     qint64 LastPid_ = 0;
+    QString PendingCreatedProject_;
 };
 
 } // namespace ludus::editor

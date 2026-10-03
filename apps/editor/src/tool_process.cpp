@@ -53,6 +53,12 @@ const char* ToolOperationName(ToolOperation op) noexcept
             return "build";
         case ToolOperation::BuildRun:
             return "build_run";
+        case ToolOperation::ProjectCheck:
+            return "project_check";
+        case ToolOperation::ProjectSetup:
+            return "project_setup";
+        case ToolOperation::ProjectCreate:
+            return "project_create";
         case ToolOperation::ReleaseInit:
             return "release_init";
         case ToolOperation::Package:
@@ -136,6 +142,13 @@ void ToolProcess::SendRequest()
     request.insert(QStringLiteral("operation"), QString::fromLatin1(ToolOperationName(Launch_.Operation)));
     request.insert(QStringLiteral("project"), Launch_.ProjectPath);
     request.insert(QStringLiteral("expected_sha256"), Launch_.ExpectedSha256);
+    if (Launch_.Operation == ToolOperation::ProjectSetup || Launch_.Operation == ToolOperation::ProjectCreate)
+    {
+        request.insert(QStringLiteral("sdk"), Launch_.SetupSdk);
+        request.insert(QStringLiteral("web_sdk"), Launch_.SetupWebSdk);
+        request.insert(QStringLiteral("name"), Launch_.ProjectName);
+        request.insert(QStringLiteral("prepare_engine"), Launch_.PrepareEngine);
+    }
     if (Launch_.Operation == ToolOperation::ReleaseInit)
     {
         request.insert(QStringLiteral("platform"), Launch_.ReleasePlatform);
@@ -472,6 +485,7 @@ void ToolProcess::Finish()
 {
     Active_ = false;
     ReadyTimer_.stop();
+    Q_EMIT Finished();
 }
 
 } // namespace ludus::editor

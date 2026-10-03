@@ -3,6 +3,7 @@
 #include <QAbstractItemModel>
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -119,6 +120,17 @@ void MainWindow::BuildMenus()
     SaveAction_ = fileMenu->addAction(QStringLiteral("&Save"));
     SaveAction_->setShortcut(QKeySequence::Save);
     ReloadAction_ = fileMenu->addAction(QStringLiteral("&Reload"));
+
+    QMenu* projectMenu = menuBar()->addMenu(QStringLiteral("&Project"));
+    NewProjectAction_ = projectMenu->addAction(QStringLiteral("&New Project..."));
+    NewProjectAction_->setObjectName(QStringLiteral("newProjectAction"));
+    CheckSetupAction_ = projectMenu->addAction(QStringLiteral("&Check Setup"));
+    CheckSetupAction_->setObjectName(QStringLiteral("checkSetupAction"));
+    SetupProjectAction_ = projectMenu->addAction(QStringLiteral("&Initialize / Repair / Update Setup..."));
+    SetupProjectAction_->setObjectName(QStringLiteral("setupProjectAction"));
+    connect(NewProjectAction_, &QAction::triggered, this, &MainWindow::OnNewProject);
+    connect(CheckSetupAction_, &QAction::triggered, Controller_, &EditorController::CheckProjectSetup);
+    connect(SetupProjectAction_, &QAction::triggered, this, &MainWindow::OnSetupProject);
 
     QMenu* buildMenu = menuBar()->addMenu(QStringLiteral("&Build"));
     ConfigureAction_ = buildMenu->addAction(QStringLiteral("&Configure / Refresh Targets"));
@@ -264,7 +276,7 @@ void MainWindow::OnStateChanged()
     RenderStatus();
 
     // If a close was requested and the workspace is now closeable, finish.
-    if (CloseConfirmed_ && ComputeCapabilities(Controller_->State()).CanCloseImmediately)
+    if (CloseConfirmed_ && Controller_->Caps().CanCloseImmediately)
     {
         close();
     }
@@ -319,7 +331,10 @@ void MainWindow::RenderFields()
 
 void MainWindow::RenderCapabilities()
 {
-    const Capabilities caps = ComputeCapabilities(Controller_->State());
+    const Capabilities caps = Controller_->Caps();
+    NewProjectAction_->setEnabled(caps.CanProjectCreate);
+    CheckSetupAction_->setEnabled(caps.CanProjectCheck);
+    SetupProjectAction_->setEnabled(caps.CanProjectSetup);
     OpenAction_->setEnabled(caps.CanOpen);
     SaveAction_->setEnabled(caps.CanSave);
     ReloadAction_->setEnabled(caps.CanReload);
@@ -403,6 +418,119 @@ void MainWindow::RenderStatus()
     }
 }
 
+namespace
+{
+struct DirectoryFieldOptions
+{
+    QString Label;
+    QString Hint;
+};
+
+QLineEdit* AddDirectoryField(QFormLayout* form, QDialog* dialog, const DirectoryFieldOptions& field)
+{
+    auto* row = new QWidget(dialog);
+    auto* layout = new QHBoxLayout(row);
+    layout->setContentsMargins(0, 0, 0, 0);
+    auto* edit = new QLineEdit(row);
+    edit->setPlaceholderText(field.Hint);
+    auto* browse = new QPushButton(QStringLiteral("Browse..."), row);
+    layout->addWidget(edit);
+    layout->addWidget(browse);
+    QObject::connect(browse, &QPushButton::clicked, dialog, [dialog, edit]() {
+        const QString selected =
+            QFileDialog::getExistingDirectory(dialog, QStringLiteral("Select directory"), edit->text());
+        if (!selected.isEmpty())
+        {
+            edit->setText(selected);
+        }
+    });
+    form->addRow(field.Label, row);
+    return edit;
+}
+} // namespace
+
+void MainWindow::OnSetupProject()
+{
+    auto* dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setObjectName(QStringLiteral("projectSetupDialog"));
+    dialog->setWindowTitle(QStringLiteral("Initialize / Repair / Update Project Setup"));
+    auto* form = new QFormLayout(dialog);
+    auto* sdk = AddDirectoryField(form,
+                                  dialog,
+                                  {
+                                      .Label = QStringLiteral("Native SDK"),
+                                      .Hint = QStringLiteral("Installed SDK prefix; blank keeps saved selection"),
+                                  });
+    sdk->setObjectName(QStringLiteral("setupSdk"));
+    auto* web = AddDirectoryField(form,
+                                  dialog,
+                                  {
+                                      .Label = QStringLiteral("Web SDK"),
+                                      .Hint = QStringLiteral("Optional installed Web SDK; blank keeps saved selection"),
+                                  });
+    auto* prepare = new QCheckBox(QStringLiteral("Prepare tools and build/install the native engine SDK"), dialog);
+    form->addRow(prepare);
+    auto* note = new QLabel(
+        QStringLiteral("Choose a different compatible SDK to update the project. Repair refreshes local CMake presets "
+                       "and caches, then builds and runs tests. Custom presets and unrelated IDE settings are "
+                       "preserved. Engine preparation may download dependencies from the trusted tooling checkout."),
+        dialog);
+    note->setWordWrap(true);
+    form->addRow(note);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::accepted, this, [this, sdk, web, prepare]() {
+        Controller_->SetupProject(sdk->text().trimmed(), web->text().trimmed(), prepare->isChecked());
+    });
+    dialog->open();
+}
+
+void MainWindow::OnNewProject()
+{
+    auto* dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setObjectName(QStringLiteral("newProjectDialog"));
+    dialog->setWindowTitle(QStringLiteral("New Ludus Project"));
+    auto* form = new QFormLayout(dialog);
+    auto* name = new QLineEdit(dialog);
+    name->setObjectName(QStringLiteral("newProjectName"));
+    form->addRow(QStringLiteral("Name"), name);
+    auto* destination = new QLineEdit(dialog);
+    destination->setPlaceholderText(QStringLiteral("Full path to a new directory"));
+    destination->setObjectName(QStringLiteral("newProjectDestination"));
+    form->addRow(QStringLiteral("Destination"), destination);
+    auto* sdk = AddDirectoryField(form,
+                                  dialog,
+                                  {
+                                      .Label = QStringLiteral("Development SDK"),
+                                      .Hint = QStringLiteral("Installed native Development SDK prefix"),
+                                  });
+    auto* prepare = new QCheckBox(QStringLiteral("Prepare tools and build/install the native engine SDK"), dialog);
+    form->addRow(prepare);
+    auto* note = new QLabel(
+        QStringLiteral("Create the minimal native template and verify configure, build and tests before opening it. "
+                       "The destination must be new. Engine preparation may download dependencies."),
+        dialog);
+    note->setWordWrap(true);
+    form->addRow(note);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::accepted, this, [this, name, destination, sdk, prepare]() {
+        ProjectCreationOptions creation;
+        creation.Destination = destination->text().trimmed();
+        creation.Name = name->text().trimmed();
+        creation.Sdk = sdk->text().trimmed();
+        creation.PrepareEngine = prepare->isChecked();
+        Controller_->CreateProject(creation);
+    });
+    dialog->open();
+}
+
 void MainWindow::OnSetupRelease()
 {
     auto* dialog = new QDialog(this);
@@ -468,7 +596,7 @@ void MainWindow::OnPackageRelease()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
-    if (ComputeCapabilities(Controller_->State()).CanCloseImmediately)
+    if (Controller_->Caps().CanCloseImmediately)
     {
         event->accept();
         return;

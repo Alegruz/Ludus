@@ -198,8 +198,19 @@ def _cmake_executable() -> str:
     return exe
 
 
+def _project_cmake(resolved: ResolvedProject) -> str:
+    from .project_setup import OWNER, executable, read_object, preset_for
+    source = resolved.paths.source_dir
+    selected = preset_for(source, resolved.descriptor.preset)
+    for item in read_object(source / "CMakeUserPresets.json").get("configurePresets", []):
+        if item.get("name") == selected and OWNER in item.get("vendor", {}):
+            return str(executable(Path(item["cmakeExecutable"])))
+    return _cmake_executable()
+
+
 def configure_argv(cmake: str, preset: str, source_dir: Path, build_dir: Path) -> list[str]:
-    return [cmake, "--preset", preset, "-S", str(source_dir), "-B", str(build_dir)]
+    from .project_setup import preset_for
+    return [cmake, "--preset", preset_for(source_dir, preset), "-S", str(source_dir), "-B", str(build_dir)]
 
 
 def build_argv(cmake: str, build_dir: Path, target: str) -> list[str]:
@@ -241,7 +252,7 @@ def _sdk_env(resolution: Resolution) -> dict:
 
 
 def op_configure(resolved: ResolvedProject) -> int:
-    cmake = _cmake_executable()
+    cmake = _project_cmake(resolved)
     env = _sdk_env(resolved.resolution)
     print(resolved.resolution.describe(), file=sys.stderr)
     with BuildTreeLock(resolved.paths.build_dir):
@@ -262,7 +273,7 @@ def op_configure(resolved: ResolvedProject) -> int:
 
 
 def op_build(resolved: ResolvedProject) -> int:
-    cmake = _cmake_executable()
+    cmake = _project_cmake(resolved)
     env = _sdk_env(resolved.resolution)
     print(resolved.resolution.describe(), file=sys.stderr)
     with BuildTreeLock(resolved.paths.build_dir):

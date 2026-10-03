@@ -53,7 +53,7 @@ TEST_CASE("Shared v2 fixtures parse with the same verdicts as the Python v2 read
     REQUIRE(error.error == QJsonParseError::NoError);
     REQUIRE(manifest.isArray());
 
-    for (const QJsonValue& caseValue : manifest.array())
+    for (const auto& caseValue : manifest.array())
     {
         const QJsonObject testCase = caseValue.toObject();
         const QString fileName = testCase.value(QStringLiteral("file")).toString();

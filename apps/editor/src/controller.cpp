@@ -6,6 +6,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QTimer>
 
 namespace ludus::editor
 {
@@ -70,6 +71,20 @@ EditorController::EditorController(ToolingPaths tooling, QObject* parent)
     // defers delivery to the next event-loop turn so a reentrant mutation from
     // inside a notification cannot corrupt state.
     connect(&Tool_, &ToolProcess::Event, this, &EditorController::OnToolEvent, Qt::QueuedConnection);
+    connect(
+        &Tool_,
+        &ToolProcess::Finished,
+        this,
+        [this]() {
+            const QString created = PendingCreatedProject_;
+            PendingCreatedProject_.clear();
+            if (!created.isEmpty() && State_.Result.Kind == Outcome::Success)
+            {
+                OpenProject(QDir(created).filePath(QStringLiteral("ludus.project.json")));
+            }
+            Publish();
+        },
+        Qt::QueuedConnection);
 }
 
 void EditorController::Publish()
@@ -84,7 +99,7 @@ QString EditorController::ResolveDescriptorPath() const
 
 void EditorController::OpenProject(const QString& descriptorPath)
 {
-    if (!ComputeCapabilities(State_).CanOpen)
+    if (!Caps().CanOpen)
     {
         return; // a failed attempt leaves the existing workspace intact
     }
@@ -117,11 +132,12 @@ void EditorController::OpenProject(const QString& descriptorPath)
     State_.Result = LastResult{};
     LUDUS_LOG_TEXT(LOG_EDITOR_CTRL, Info, "opened project (no project code executed)");
     Publish();
+    ScheduleSetupCheck();
 }
 
 void EditorController::EditDraft(const ProjectDescriptor& draft)
 {
-    if (!ComputeCapabilities(State_).CanEdit)
+    if (!Caps().CanEdit)
     {
         return;
     }
@@ -141,7 +157,7 @@ void EditorController::EditDraft(const ProjectDescriptor& draft)
 
 void EditorController::Save()
 {
-    if (!ComputeCapabilities(State_).CanSave)
+    if (!Caps().CanSave)
     {
         return;
     }
@@ -163,11 +179,12 @@ void EditorController::Save()
     State_.Result = LastResult{};
     LUDUS_LOG_TEXT(LOG_EDITOR_CTRL, Info, "saved project");
     Publish();
+    ScheduleSetupCheck();
 }
 
 void EditorController::Reload()
 {
-    if (!ComputeCapabilities(State_).CanReload)
+    if (!Caps().CanReload)
     {
         return;
     }
@@ -190,11 +207,12 @@ void EditorController::Reload()
     State_.DiscoveredTargets.clear();
     State_.DiscoveredPreset.clear();
     Publish();
+    ScheduleSetupCheck();
 }
 
 void EditorController::StartJob(ActionKind kind, ToolOperation operation, const ToolLaunch& options)
 {
-    if (!CanStartJob(State_, kind))
+    if (Tool_.Active() || !CanStartJob(State_, kind))
     {
         return; // duplicate/invalid starts cannot create a second job
     }
@@ -208,8 +226,11 @@ void EditorController::StartJob(ActionKind kind, ToolOperation operation, const 
     launch.PythonPath = Tooling_.PythonPath;
     launch.AdapterPath = Tooling_.AdapterPath;
     launch.ToolingRoot = Tooling_.ToolingRoot;
-    launch.ProjectPath = State_.DescriptorPath;
-    launch.ExpectedSha256 = State_.SavedDigest;
+    if (operation != ToolOperation::ProjectCreate)
+    {
+        launch.ProjectPath = State_.DescriptorPath;
+        launch.ExpectedSha256 = State_.SavedDigest;
+    }
     launch.Operation = operation;
     launch.Job = State_.ActiveJob;
 
@@ -222,6 +243,48 @@ void EditorController::StartJob(ActionKind kind, ToolOperation operation, const 
         State_ = ApplyResult(State_, State_.ActiveJob, result);
     }
     Publish();
+}
+
+void EditorController::ScheduleSetupCheck()
+{
+    // Open/Reload remain metadata operations. Queue the trusted read-only check
+    // with an epoch guard so a later project switch cannot check the old project.
+    const uint64 epoch = State_.ProjectEpoch;
+    QTimer::singleShot(0, this, [this, epoch]() {
+        if (State_.ProjectEpoch == epoch && QFileInfo::exists(Tooling_.AdapterPath))
+        {
+            CheckProjectSetup();
+        }
+    });
+}
+
+void EditorController::CheckProjectSetup()
+{
+    StartJob(ActionKind::ProjectCheck, ToolOperation::ProjectCheck);
+}
+
+void EditorController::SetupProject(const QString& sdk, const QString& webSdk, bool prepareEngine)
+{
+    ToolLaunch options;
+    options.SetupSdk = sdk;
+    options.SetupWebSdk = webSdk;
+    options.PrepareEngine = prepareEngine;
+    StartJob(ActionKind::ProjectSetup, ToolOperation::ProjectSetup, options);
+}
+
+void EditorController::CreateProject(const ProjectCreationOptions& creation)
+{
+    if (Tool_.Active() || !CanStartJob(State_, ActionKind::ProjectCreate))
+    {
+        return;
+    }
+    ToolLaunch options;
+    options.ProjectPath = QFileInfo(creation.Destination).absoluteFilePath();
+    options.ProjectName = creation.Name;
+    options.SetupSdk = creation.Sdk;
+    options.PrepareEngine = creation.PrepareEngine;
+    PendingCreatedProject_ = options.ProjectPath;
+    StartJob(ActionKind::ProjectCreate, ToolOperation::ProjectCreate, options);
 }
 
 void EditorController::Configure()
@@ -275,7 +338,7 @@ void EditorController::ClearOutput()
 
 bool EditorController::RequestClose()
 {
-    if (ComputeCapabilities(State_).CanCloseImmediately)
+    if (Caps().CanCloseImmediately)
     {
         return true;
     }

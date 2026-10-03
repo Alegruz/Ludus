@@ -11,7 +11,7 @@ Templates are addressed by ``(id, version)`` which is recorded in the project
 descriptor's ``template`` object so later template versions never silently
 overwrite user-owned game code (design "Project creation and Editor workflow").
 
-The only bundled template initially is ``minimal`` (version 2): a single native
+The only bundled template initially is ``minimal`` (version 3): a single native
 application target that queries the public engine version
 using public headers only — no new engine subsystem, no scene/ECS/hot reload.
 Placeholders are substituted by exact key, never by executing template content,
@@ -112,6 +112,9 @@ if(NOT COMMAND ludus_apply_app_policy)
     message(FATAL_ERROR "The selected SDK lacks the supported Ludus application policy helper")
 endif()
 ludus_apply_app_policy({{ TARGET }})
+
+enable_testing()
+add_test(NAME version_query COMMAND {{ TARGET }})
 """,
         ),
         TemplateFile(
@@ -158,7 +161,7 @@ ludus_apply_app_policy({{ TARGET }})
         ),
         TemplateFile(
             "src/main.cpp",
-            """// Minimal Ludus application template (v2).
+            """// Minimal Ludus application template (v3).
 #include <ludus/foundation/base/version.hpp>
 
 #include <string_view>
@@ -173,6 +176,8 @@ int main()
             ".gitignore",
             """# Ludus project — ignore machine-local state and build output (P04).
 /out/
+/CMakeUserPresets.json
+/.vscode/settings.json
 /.ludus/
 """,
         ),
@@ -183,7 +188,7 @@ int main()
             "",
         ),
     ]
-    return Template(id="minimal", version=2, files=files)
+    return Template(id="minimal", version=3, files=files)
 
 
 _TEMPLATES: dict[str, Template] = {t.id: t for t in (_minimal_template(),)}

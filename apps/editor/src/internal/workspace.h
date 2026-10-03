@@ -79,6 +79,9 @@ enum class ActionKind : foundation::uint8
     Configure,
     Build,
     BuildRun,
+    ProjectCheck,
+    ProjectSetup,
+    ProjectCreate,
     ReleaseInit,
     Package,
     Stop,
@@ -144,6 +147,9 @@ struct Capabilities
     bool CanConfigure = false;
     bool CanBuild = false;
     bool CanBuildRun = false;
+    bool CanProjectCheck = false;
+    bool CanProjectSetup = false;
+    bool CanProjectCreate = false;
     bool CanReleaseInit = false;
     bool CanPackage = false;
     bool CanStop = false;

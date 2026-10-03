@@ -65,8 +65,62 @@ anything; if the editor is not built it prints the preparation commands above.
                  --project examples/editor-workspace/ludus.project.json
 ```
 
-Opening a descriptor **reads** it only: it runs no CMake, bootstrap, download, or
-game. Configure, Build, Build and Run, and Stop are explicit actions.
+Opening a descriptor reads metadata and queues a read-only setup check for v2
+SDK projects. The check uses the selected CMake to list presets and reports
+missing/stale setup in the status area and Output. It never configures, builds,
+downloads, runs project hooks, or changes files. Configure, Build, Build and Run,
+and Stop remain explicit actions.
+
+## Create, initialize, repair and update projects
+
+The **Project** menu provides **New Project**, **Check Setup**, and
+**Initialize / Repair / Update Setup**. Setup actions require a saved, clean v2
+CMake project; save pending edits first.
+
+For Ludus-Sandbox, open its `ludus.project.json`, choose the setup action and
+select an installed native SDK matching the descriptor profile and engine
+version. A compatible Web SDK additionally enables the existing web Development
+and Release bases. Blank SDK fields retain previously selected prefixes. To
+update the local SDK selection, choose a new compatible prefix and repair again.
+The operation does not change the project engine requirement or committed lock.
+
+Repair verifies the managed CMake, Ninja, Clang 18, required SDK components,
+dependency prefixes and shader tool paths. It generates marked
+`ludus-local-<profile>` presets in ignored `CMakeUserPresets.json`, keeping custom
+presets and their includes. Machine paths stay in ignored presets and
+`.ludus/local.json`; the IDE uses preset mode and each preset selects its CMake
+executable. Related stale IDE CMake-path overrides are removed; unrelated
+settings are preserved. Real CMake configure/build/test preset discovery must
+succeed, followed by a fresh configure, full build and native CTest. No-tests
+is an error. Web profiles configure and build; browser runtime acceptance is
+separate. The setup signature detects changed SDK contents and moved tools.
+
+The optional **Prepare tools and build/install the native engine SDK** checkbox
+explicitly initializes and builds the trusted tooling checkout, then installs
+the SDK before repairing the game project. This can download dependencies; it
+does not install system packages or execute the game project’s bootstrap hooks.
+Web SDK acquisition remains an explicit engine-tooling step; select an installed
+Web SDK in this dialog. All child commands use the existing streaming output,
+Stop, process-group cleanup and single-operation ownership.
+
+New Project creates the bundled minimal v3 native template in a sibling staging
+directory, verifies setup/configure/build/tests, then publishes to an absent
+destination and opens it. Failure/cancellation before publication discards the
+stage and leaves the current workspace intact. Staging build artifacts are
+discarded because their CMake paths belong to the staging directory. The next
+Configure builds at the final location.
+
+The CLI calls the same backend:
+
+```bash
+ludus project check /path/to/Ludus-Sandbox --tools /path/to/Ludus
+ludus project repair /path/to/Ludus-Sandbox --tools /path/to/Ludus --sdk /path/to/sdk
+ludus project update /path/to/Ludus-Sandbox --tools /path/to/Ludus --sdk /path/to/new-sdk
+ludus project create /path/to/new-game --name MyGame --sdk /path/to/sdk --tools /path/to/Ludus
+```
+
+`create --engine` without `--tools` can still generate metadata without an SDK.
+Use `--tools` with an installed SDK for the verified creation journey.
 
 ## The project descriptor (version 1)
 
