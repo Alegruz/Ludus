@@ -204,7 +204,7 @@ def check_project(path: Path, *, tooling_root: Path, runner=run_command, cancel_
     paths, descriptor, source = supported_project(path)
     settings = read_object(paths.project_dir / ".ludus/setup.json")
     if not settings:
-        raise ToolingError(INVALID_PROJECT, "Project setup is missing; use Project > Initialize / Repair / Update Setup")
+        raise ToolingError(INVALID_PROJECT, "Project setup is missing; use Project > Repair Project Setup")
     resolved = resolve_project(path, store=SdkStore(), enforce_host_toolchain=False)
     sdk = resolved.resolution.prefix.resolve()
     validate_native_identity(resolved.resolution.identity, descriptor)
@@ -234,7 +234,10 @@ def check_project(path: Path, *, tooling_root: Path, runner=run_command, cancel_
 
 
 def repair_project(path: Path, *, tooling_root: Path, sdk: Path | None = None,
-                   web_sdk: Path | None = None, runner=run_command, cancel_check=lambda: None):
+                   web_sdk: Path | None = None, disable_web: bool = False,
+                   runner=run_command, cancel_check=lambda: None):
+    if disable_web and web_sdk is not None:
+        raise ToolingError(INVALID_PROJECT, "Choose browser setup or desktop-only repair, not both")
     paths, descriptor, source = supported_project(path)
     if sdk is None:
         sdk = resolve_project(path, store=SdkStore(), enforce_host_toolchain=False).resolution.prefix
@@ -243,7 +246,7 @@ def repair_project(path: Path, *, tooling_root: Path, sdk: Path | None = None,
     identity = resolved.resolution.identity
     validate_native_identity(identity, descriptor)
     previous = read_object(paths.project_dir / ".ludus/setup.json")
-    if web_sdk is None and previous.get("web_sdk"):
+    if not disable_web and web_sdk is None and previous.get("web_sdk"):
         web_sdk = Path(previous["web_sdk"])
     if web_sdk:
         web_sdk = web_sdk.resolve()

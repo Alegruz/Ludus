@@ -1086,6 +1086,7 @@ class Operation:
         else:
             sdk = Path(self._options["sdk"]) if self._options["sdk"] else None
             web = Path(self._options["web_sdk"]) if self._options["web_sdk"] else None
+            options["disable_web"] = self._options.get("disable_web", False)
             if self._options.get("prepare_engine"):
                 root = self._context.tooling_root
                 profile = descriptor.preset if descriptor else "linux-clang-development"
@@ -1329,6 +1330,10 @@ def _validate_request(message: dict) -> tuple[str, str, Path, str]:
             fields["name"] = 256
         if not isinstance(message.get("prepare_engine"), bool):
             raise ProtocolError("prepare_engine must be boolean")
+        if not isinstance(message.get("disable_web", False), bool):
+            raise ProtocolError("disable_web must be boolean")
+        if message.get("disable_web") and message.get("web_sdk"):
+            raise ProtocolError("Choose browser setup or desktop-only repair, not both")
     if operation == "build_debug":
         fields = {"debugger": 4096}
         if not isinstance(message.get("setup_debugger"), bool):

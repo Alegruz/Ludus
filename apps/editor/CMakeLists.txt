@@ -72,6 +72,7 @@ add_executable(ludus_editor
     src/audio_preview.cpp
     main.cpp
     src/main_window.cpp
+    src/project_setup_dialog.cpp
     src/controller.cpp
     src/controller_play.cpp
 )
@@ -114,6 +115,7 @@ if(LUDUS_BUILD_TESTS)
         tests/tool_process_tests.cpp
         tests/log_buffer_tests.cpp
         tests/controller_tests.cpp
+        tests/project_setup_dialog_tests.cpp
         tests/recent_projects_tests.cpp
         tests/source_watch_tests.cpp
         tests/live_journey_tests.cpp
@@ -125,7 +127,7 @@ if(LUDUS_BUILD_TESTS)
         "LUDUS_EDITOR_PROJECT_ROOT=\"${PROJECT_SOURCE_DIR}\"")
     # Controller/MainWindow sources are compiled directly into the test binary so
     # tests can drive the controller and (offscreen) widgets.
-    target_sources(ludus_editor_tests PRIVATE src/controller.cpp src/controller_play.cpp src/main_window.cpp)
+    target_sources(ludus_editor_tests PRIVATE src/controller.cpp src/controller_play.cpp src/main_window.cpp src/project_setup_dialog.cpp)
     target_link_libraries(ludus_editor_tests
         PRIVATE
             ludus_editor_core

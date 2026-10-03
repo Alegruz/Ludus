@@ -1,5 +1,6 @@
 #include "internal/main_window.h"
 #include "internal/audio_workspace.h"
+#include "internal/project_setup_dialog.h"
 
 #include <QAbstractItemModel>
 #include <QAction>
@@ -210,7 +211,7 @@ void MainWindow::BuildMenus()
     NewProjectAction_->setObjectName(QStringLiteral("newProjectAction"));
     CheckSetupAction_ = projectMenu->addAction(QStringLiteral("&Check Setup"));
     CheckSetupAction_->setObjectName(QStringLiteral("checkSetupAction"));
-    SetupProjectAction_ = projectMenu->addAction(QStringLiteral("&Initialize / Repair / Update Setup..."));
+    SetupProjectAction_ = projectMenu->addAction(QStringLiteral("&Repair Project Setup..."));
     SetupProjectAction_->setObjectName(QStringLiteral("setupProjectAction"));
     connect(NewProjectAction_, &QAction::triggered, this, &MainWindow::OnNewProject);
     connect(CheckSetupAction_, &QAction::triggered, Controller_, &EditorController::CheckProjectSetup);
@@ -832,39 +833,15 @@ void MainWindow::OnDebuggerSetupRequested()
 
 void MainWindow::OnSetupProject()
 {
-    auto* dialog = new QDialog(this);
+    const auto epoch = Controller_->State().ProjectEpoch;
+    auto* dialog = new ProjectSetupDialog(QFileInfo(Controller_->State().DescriptorPath).absolutePath(), this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setObjectName(QStringLiteral("projectSetupDialog"));
-    dialog->setWindowTitle(QStringLiteral("Initialize / Repair / Update Project Setup"));
-    auto* form = new QFormLayout(dialog);
-    auto* sdk = AddDirectoryField(form,
-                                  dialog,
-                                  {
-                                      .Label = QStringLiteral("Native SDK"),
-                                      .Hint = QStringLiteral("Installed SDK prefix; blank keeps saved selection"),
-                                  });
-    sdk->setObjectName(QStringLiteral("setupSdk"));
-    auto* web = AddDirectoryField(form,
-                                  dialog,
-                                  {
-                                      .Label = QStringLiteral("Web SDK"),
-                                      .Hint = QStringLiteral("Optional installed Web SDK; blank keeps saved selection"),
-                                  });
-    auto* prepare = new QCheckBox(QStringLiteral("Prepare tools and build/install the native engine SDK"), dialog);
-    form->addRow(prepare);
-    auto* note = new QLabel(
-        QStringLiteral("Choose a different compatible SDK to update the project. Repair refreshes local CMake presets "
-                       "and caches, then builds and runs tests. Custom presets and unrelated IDE settings are "
-                       "preserved. Engine preparation may download dependencies from the trusted tooling checkout."),
-        dialog);
-    note->setWordWrap(true);
-    form->addRow(note);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
-    form->addRow(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
-    connect(dialog, &QDialog::accepted, this, [this, sdk, web, prepare]() {
-        Controller_->SetupProject(sdk->text().trimmed(), web->text().trimmed(), prepare->isChecked());
+    connect(dialog, &QDialog::accepted, this, [this, dialog, epoch]() {
+        if (Controller_->State().ProjectEpoch == epoch)
+        {
+            const auto options = dialog->Options();
+            Controller_->SetupProject(options.Sdk, options.WebSdk, options.PrepareEngine, options.DisableWeb);
+        }
     });
     dialog->open();
 }

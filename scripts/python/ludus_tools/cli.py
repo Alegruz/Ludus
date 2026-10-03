@@ -135,7 +135,8 @@ def cmd_project_setup(args) -> int:
         message = check_project(Path(args.project), **options)
     else:
         message = repair_project(Path(args.project), sdk=Path(args.sdk) if args.sdk else None,
-                                 web_sdk=Path(args.web_sdk) if args.web_sdk else None, **options)
+                                 web_sdk=Path(args.web_sdk) if args.web_sdk else None,
+                                 disable_web=args.no_web, **options)
     _emit(args, {"setup": message})
     if not getattr(args, "json", False):
         print(message)
@@ -367,6 +368,8 @@ def build_parser() -> argparse.ArgumentParser:
         setup.add_argument("--tools", required=True, help="trusted prepared Ludus tooling checkout")
         setup.add_argument("--sdk")
         setup.add_argument("--web-sdk")
+        if action != "check":
+            setup.add_argument("--no-web", action="store_true", help="repair desktop builds only; clear saved browser setup")
         setup.set_defaults(func=cmd_project_setup)
 
     eng = proj.add_parser("engine")

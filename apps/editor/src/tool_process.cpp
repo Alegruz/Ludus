@@ -157,6 +157,7 @@ void ToolProcess::SendRequest()
         request.insert(QStringLiteral("web_sdk"), Launch_.SetupWebSdk);
         request.insert(QStringLiteral("name"), Launch_.ProjectName);
         request.insert(QStringLiteral("prepare_engine"), Launch_.PrepareEngine);
+        request.insert(QStringLiteral("disable_web"), Launch_.DisableWeb);
     }
     if (Launch_.Operation == ToolOperation::BuildDebug)
     {
