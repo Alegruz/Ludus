@@ -74,6 +74,8 @@ def create_project(
     preset: str = "linux-clang-development",
     local_sdk_prefix: Optional[Path] = None,
     cancel_check: Optional[Callable[[], None]] = None,
+    release: bool = False,
+    itch_target: Optional[str] = None,
 ) -> CreateResult:
     """Create a new version-2 project at an absent destination, atomically."""
     destination = Path(destination)
@@ -113,6 +115,15 @@ def create_project(
     rendered = render_files(template, ProjectInputs(
         name=name, target=target, engine_version=engine_version, components=components, preset=preset,
     ))
+    if itch_target is not None and not release:
+        raise ToolingError(INVALID_PROJECT, "--itch-target requires --release")
+    if release:
+        from .release_template import release_files
+
+        rendered.extend(release_files(target, itch_target))
+        for file in rendered:
+            if file.relpath == "CMakeLists.txt":
+                file.content += '\ninclude(cmake/GameRelease.cmake)\n'
     extra = [
         TemplateFile(DESCRIPTOR_NAME, _canonical_descriptor_json(descriptor)),
         TemplateFile(LOCK_NAME, lock.serialize().decode("utf-8")),

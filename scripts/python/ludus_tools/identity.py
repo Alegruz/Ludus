@@ -216,8 +216,11 @@ def _detect_compiler(cxx: str) -> tuple[str, str]:
     import subprocess
 
     try:
+        import os
+
+        env = {key: value for key, value in os.environ.items() if key != "BUTLER_API_KEY"}
         out = subprocess.run(
-            [cxx, "--version"], capture_output=True, text=True, timeout=10
+            [cxx, "--version"], capture_output=True, text=True, timeout=10, env=env
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return ("", "")
