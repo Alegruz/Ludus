@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "host_target": "sample_game_host",
+  "module_target": "sample_game_module",
+  "startup_document": "game.tuning.json",
+  "watch_roots": ["src"]
+}

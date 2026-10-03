@@ -112,6 +112,18 @@ class ProjectSetupTests(unittest.TestCase):
         with self.assertRaisesRegex(ToolingError, "selectable configure"):
             setup.check_project(self.project, tooling_root=self.tools, runner=self.runner)
 
+    def test_play_builds_select_the_repaired_owned_presets_and_cmake(self):
+        from ludus_tools.cmake_setup import validate_project_presets
+        self.repair()
+        chosen = setup.cmake_for(self.project, "linux-clang-development", "/missing/system-cmake")
+        self.assertEqual(str(self.tools / "out/host-tools/venv/bin/cmake"), chosen)
+        validate_project_presets(chosen, self.project, setup.environment(self.tools), "linux-clang-development")
+        local = setup.read_object(self.project / "CMakeUserPresets.json")
+        local["buildPresets"] = []
+        setup.write_object(self.project / "CMakeUserPresets.json", local)
+        with self.assertRaisesRegex(ValueError, "selectable build preset.*ludus-local-"):
+            validate_project_presets(chosen, self.project, setup.environment(self.tools), "linux-clang-development")
+
     def test_web_profiles_use_the_sdk_target_and_real_selectable_presets(self):
         web = _write_sdk_prefix(self.root / "web-sdk", _manifest_json(target_triple="wasm32-unknown-emscripten"))
         toolchain = self.tools / "out/host-tools/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"

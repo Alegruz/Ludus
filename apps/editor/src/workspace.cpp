@@ -49,6 +49,10 @@ const char* ResultCodeName(ResultCode code) noexcept
             return "Cancelled";
         case ResultCode::ReleaseFailed:
             return "ReleaseFailed";
+        case ResultCode::GenerationInvalid:
+            return "GenerationInvalid";
+        case ResultCode::Superseded:
+            return "Superseded";
         case ResultCode::CleanupUnknown:
             return "CleanupUnknown";
     }
@@ -168,7 +172,7 @@ bool AllowedForward(const PhaseStep& step)
         case Phase::Configuring:
             return step.To == Phase::Building || step.To == Phase::Launching;
         case Phase::Building:
-            return step.To == Phase::Launching;
+            return step.To == Phase::Launching || step.To == Phase::Publishing;
         // Launching -> Running is handled only by RuntimeStarted.
         default:
             return false;

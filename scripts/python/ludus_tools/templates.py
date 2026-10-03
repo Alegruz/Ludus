@@ -98,6 +98,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+include(CTest)
 
 # Resolve the shared Ludus SDK. The CLI/Editor supply LUDUS_SDK_PREFIX via the
 # generated preset; no engine source is compiled by this project (P01/P12).
@@ -113,8 +114,10 @@ if(NOT COMMAND ludus_apply_app_policy)
 endif()
 ludus_apply_app_policy({{ TARGET }})
 
-enable_testing()
-add_test(NAME version_query COMMAND {{ TARGET }})
+if(BUILD_TESTING)
+    add_test(NAME version_query COMMAND $<TARGET_FILE:{{ TARGET }}>)
+    set_tests_properties(version_query PROPERTIES TIMEOUT 20)
+endif()
 """,
         ),
         TemplateFile(
@@ -129,7 +132,9 @@ add_test(NAME version_query COMMAND {{ TARGET }})
       "binaryDir": "${sourceDir}/out/build/linux-clang-debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}"
+        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}",
+        "CMAKE_CXX_COMPILER": "clang++-18",
+        "BUILD_TESTING": "ON"
       }
     },
     {
@@ -138,7 +143,9 @@ add_test(NAME version_query COMMAND {{ TARGET }})
       "binaryDir": "${sourceDir}/out/build/linux-clang-development",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}"
+        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}",
+        "CMAKE_CXX_COMPILER": "clang++-18",
+        "BUILD_TESTING": "ON"
       }
     },
     {
@@ -147,7 +154,9 @@ add_test(NAME version_query COMMAND {{ TARGET }})
       "binaryDir": "${sourceDir}/out/build/linux-clang-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}"
+        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}",
+        "CMAKE_CXX_COMPILER": "clang++-18",
+        "BUILD_TESTING": "ON"
       }
     }
   ],
@@ -155,6 +164,11 @@ add_test(NAME version_query COMMAND {{ TARGET }})
     { "name": "linux-clang-debug", "configurePreset": "linux-clang-debug" },
     { "name": "linux-clang-development", "configurePreset": "linux-clang-development" },
     { "name": "linux-clang-release", "configurePreset": "linux-clang-release" }
+  ],
+  "testPresets": [
+    { "name": "linux-clang-debug", "configurePreset": "linux-clang-debug", "output": { "outputOnFailure": true } },
+    { "name": "linux-clang-development", "configurePreset": "linux-clang-development", "output": { "outputOnFailure": true } },
+    { "name": "linux-clang-release", "configurePreset": "linux-clang-release", "output": { "outputOnFailure": true } }
   ]
 }
 """,

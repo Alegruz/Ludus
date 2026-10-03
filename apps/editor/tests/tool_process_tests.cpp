@@ -3,21 +3,176 @@
 // emits protocol frames, so framing/decoding is exercised against a real process
 // without a compiler toolchain. These use an event loop, never waitFor*.
 
+#include "internal/controller.h"
+#include "internal/play_process.h"
 #include "internal/tool_process.h"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QElapsedTimer>
 #include <QEventLoop>
+#include <QFile>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTest>
 #include <QTextStream>
 #include <QTimer>
 
 #include <vector>
 
 using namespace ludus::editor;
+
+namespace
+{
+template <typename Predicate>
+bool WaitForPlay(Predicate&& predicate)
+{
+    QElapsedTimer timer;
+    timer.start();
+    while (!predicate() && timer.elapsed() < 5000)
+    {
+        QTest::qWait(10);
+    }
+    return predicate();
+}
+} // namespace
+
+TEST_CASE("Debugger stop notifications disable reload until Continue", "[editor][play][debugger]")
+{
+    QTemporaryDir dir;
+    REQUIRE(QDir().mkpath(dir.filePath(QStringLiteral("scripts/python"))));
+    QFile adapter(dir.filePath(QStringLiteral("scripts/python/play_tool.py")));
+    REQUIRE(adapter.open(QIODevice::WriteOnly));
+    adapter.write(
+        "import sys, json\n"
+        "print(json.dumps({'protocol':1,'type':'ready'}), flush=True)\n"
+        "request = json.loads(sys.stdin.readline())\n"
+        "epoch = request['epoch']\n"
+        "print(json.dumps({'protocol':1,'type':'result','epoch':epoch,'request':'0000000000000001',"
+        "'status':'Ok','host':{'state':'Paused'}}), flush=True)\n"
+        "print(json.dumps({'protocol':1,'type':'debugger_state','epoch':epoch,'stopped':True,'pid':123}), flush=True)\n"
+        "request = json.loads(sys.stdin.readline())\n"
+        "if request['type'] == 'ack': request = json.loads(sys.stdin.readline())\n"
+        "assert request['type'] == 'command' and request['command']['command'] == 'Status', request\n"
+        "print(json.dumps({'protocol':1,'type':'debugger_state','epoch':epoch,'stopped':False,'pid':123}), "
+        "flush=True)\n"
+        "request = json.loads(sys.stdin.readline())\n"
+        "assert request['type'] == 'close', request\n"
+        "print(json.dumps({'protocol':1,'type':'ended','epoch':epoch,'cleanup_confirmed':True,'reason':'Stopped'}), "
+        "flush=True)\n");
+    adapter.close();
+    EditorController controller({});
+    QFile project(dir.filePath(QStringLiteral("ludus.project.json")));
+    REQUIRE(project.open(QIODevice::WriteOnly));
+    project.write("{\"version\":1,\"name\":\"debug guard\",\"provider\":\"cmake\",\"source_dir\":\".\","
+                  "\"preset\":\"linux-clang-debug\",\"target\":\"game\",\"run\":{\"cwd\":\".\",\"args\":[]}}");
+    project.close();
+    controller.OpenProject(project.fileName());
+    REQUIRE(controller.State().Document == DocumentState::ProjectLoaded);
+    auto* play = controller.findChild<PlayProcess*>();
+    REQUIRE(play != nullptr);
+    PlayLaunch launch;
+    launch.Python = QStringLiteral("python3");
+    launch.ToolingRoot = dir.path();
+    launch.Epoch = 1;
+    launch.StartRequest = {{QStringLiteral("type"), QStringLiteral("start")}};
+    REQUIRE(play->Start(launch));
+    REQUIRE(WaitForPlay([&]() { return controller.PlayState().DebuggerStopped; }));
+    CHECK_FALSE(controller.CanBuildReload());
+    CHECK_FALSE(controller.CanEditProperties());
+    controller.PlayCommand(QStringLiteral("Resume"));
+    controller.RefreshSessionDetails();
+    REQUIRE(WaitForPlay([&]() { return !controller.PlayState().DebuggerStopped; }));
+    CHECK(controller.CanBuildReload());
+    play->Close();
+    REQUIRE(WaitForPlay([&]() { return !play->Active(); }));
+}
+
+TEST_CASE("Trusted host cleanup uncertainty blocks edits and permits explicit Stop", "[editor][play][recovery]")
+{
+    QTemporaryDir dir;
+    REQUIRE(QDir().mkpath(dir.filePath(QStringLiteral("scripts/python"))));
+    QFile adapter(dir.filePath(QStringLiteral("scripts/python/play_tool.py")));
+    REQUIRE(adapter.open(QIODevice::WriteOnly));
+    adapter.write(
+        "import sys, json\n"
+        "print(json.dumps({'protocol':1,'type':'ready'}), flush=True)\n"
+        "request = json.loads(sys.stdin.readline())\n"
+        "epoch = request['epoch']\n"
+        "print(json.dumps({'protocol':1,'type':'result','epoch':epoch,'request':'0000000000000001',"
+        "'status':'RestartRequired','host':{'state':'CleanupUnknown','generation':'0000000000000002'}}), flush=True)\n"
+        "stop = json.loads(sys.stdin.readline())\n"
+        "if stop['type'] == 'ack': stop = json.loads(sys.stdin.readline())\n"
+        "assert stop['command']['command'] == 'Stop', stop\n"
+        "print(json.dumps({'protocol':1,'type':'ended','epoch':epoch,'cleanup_confirmed':True,'reason':'Stopped'}), "
+        "flush=True)\n"
+        "sys.stdin.readline()\n");
+    adapter.close();
+    EditorController controller({});
+    auto* play = controller.findChild<PlayProcess*>();
+    REQUIRE(play != nullptr);
+    PlayLaunch launch;
+    launch.Python = QStringLiteral("python3");
+    launch.ToolingRoot = dir.path();
+    launch.Epoch = 1;
+    launch.StartRequest = {{QStringLiteral("type"), QStringLiteral("start")}};
+    REQUIRE(play->Start(launch));
+    REQUIRE(WaitForPlay([&]() { return controller.PlayState().Phase == PlayPhase::CleanupUnknown; }));
+    CHECK_FALSE(controller.CanEditProperties());
+    CHECK_FALSE(controller.CanBuildReload());
+    CHECK_FALSE(controller.Caps().CanOpen);
+    CHECK(controller.Caps().CanStop);
+    controller.Stop();
+    REQUIRE(WaitForPlay([&]() { return controller.Caps().CanOpen; }));
+    CHECK(controller.PlayState().Phase == PlayPhase::Stopped);
+}
+
+TEST_CASE("Unexpected Play owner teardown retires callbacks before member destruction", "[editor][play][lifetime]")
+{
+    QTemporaryDir dir;
+    REQUIRE(QDir().mkpath(dir.filePath(QStringLiteral("scripts/python"))));
+    QFile adapter(dir.filePath(QStringLiteral("scripts/python/play_tool.py")));
+    REQUIRE(adapter.open(QIODevice::WriteOnly));
+    adapter.write(
+        "import sys, json\n"
+        "print(json.dumps({'protocol':1,'type':'ready'}), flush=True)\n"
+        "request = json.loads(sys.stdin.readline())\n"
+        "print(json.dumps({'protocol':1,'type':'phase','epoch':request['epoch'],'phase':'Running'}), flush=True)\n"
+        "sys.stdin.read()\n");
+    adapter.close();
+    QObject observation;
+    bool tearingDown = false;
+    int lateCallbacks = 0;
+    {
+        PlayProcess play;
+        QObject::connect(&play, &PlayProcess::Finished, &observation, [&](bool) {
+            if (tearingDown)
+            {
+                ++lateCallbacks;
+            }
+        });
+        QObject::connect(&play, &PlayProcess::Event, &observation, [&](const QJsonObject&) {
+            if (tearingDown)
+            {
+                ++lateCallbacks;
+            }
+        });
+        QSignalSpy events(&play, &PlayProcess::Event);
+        PlayLaunch launch;
+        launch.Python = QStringLiteral("python3");
+        launch.ToolingRoot = dir.path();
+        launch.Epoch = 1;
+        launch.StartRequest = {{QStringLiteral("type"), QStringLiteral("start")}};
+        REQUIRE(play.Start(launch));
+        REQUIRE(WaitForPlay([&]() { return !events.isEmpty(); }));
+        REQUIRE(play.Active());
+        tearingDown = true;
+    }
+    CHECK(lateCallbacks == 0);
+}
 
 namespace
 {

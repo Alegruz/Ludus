@@ -32,6 +32,7 @@ enum class Phase : foundation::uint8
     Starting,
     Configuring,
     Building,
+    Publishing,
     Launching,
     Running,
     Debugging,
@@ -124,6 +125,7 @@ struct WorkspaceState
     bool StopLatched = false;      // Stop accepted; wins before runtime spawn
     QStringList DiscoveredTargets; // executable targets from last Configure
     QString DiscoveredPreset;      // preset the discovery cache belongs to
+    QString SetupStatus;           // read-only CMake setup result for the saved project
     LastResult Result;
 
     // Dirty is the semantic inequality of saved and draft (design section 4).

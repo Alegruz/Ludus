@@ -141,6 +141,19 @@ class DebuggerTests(unittest.TestCase):
         self.assertEqual(events[-1]["code"], "BuildFailed")
         self.assertFalse(any(e["type"] == "debugger_started" for e in events))
 
+    def test_debug_uses_the_selected_descriptor_path(self):
+        project = self.fixture.project
+        self.fixture.project = project.with_name("custom-game.project.json")
+        project.rename(self.fixture.project)
+        events = self.finish(self.start())
+        self.assertEqual(events[-1]["outcome"], "success")
+
+    def test_debug_checks_selectable_presets_before_configuring(self):
+        with patch("ludus_tools.cmake_setup.validate_project_presets", side_effect=ValueError("missing selectable build preset")):
+            events = self.finish(self.start())
+        self.assertEqual(events[-1]["code"], "InvalidProject")
+        self.assertFalse(any(e["type"] == "command" for e in events))
+
     def test_stripped_game_fails_before_debugger_spawn(self):
         subprocess.run(["strip", str(self.game)], check=True)
         events = self.finish(self.start())

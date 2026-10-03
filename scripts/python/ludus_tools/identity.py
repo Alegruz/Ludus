@@ -237,7 +237,7 @@ def _detect_compiler(cxx: str) -> tuple[str, str]:
 
 
 def detect_host_toolchain(
-    reference: SdkIdentity, *, cxx: Optional[str] = None
+    reference: SdkIdentity, *, cxx: Optional[str] = None, strict: bool = False
 ) -> SdkIdentity:
     """Build a host-toolchain reference identity for compatibility checking.
 
@@ -255,6 +255,8 @@ def detect_host_toolchain(
     compiler_id, compiler_version = ("", "")
     if candidate:
         compiler_id, compiler_version = _detect_compiler(candidate)
+    if strict and (not compiler_id or not compiler_version):
+        raise ToolingError(SDK_INCOMPATIBLE, "cannot identify the selected C++ compiler; prepare the pinned toolchain")
 
     runtime_abi = os.environ.get("LUDUS_CXX_RUNTIME_ABI", "")
 
