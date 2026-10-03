@@ -279,6 +279,26 @@ def cmd_publish_plan(args) -> int:
 # --- parser ------------------------------------------------------------------
 
 
+def cmd_release_init(args) -> int:
+    from .release_setup import setup_release
+    files = setup_release(Path(args.project), platform=args.platform, itch_target=args.itch_target,
+                          tools_ref=args.tools_ref, build_command=args.build_command_json)
+    _emit(args, {"files": files})
+    if not args.json:
+        print("Release setup saved: " + ", ".join(files))
+    return EXIT_OK
+
+
+def cmd_publish_upload(args) -> int:
+    from .itch import upload
+    result = upload(Path(args.project), Path(args.package), destination=args.destination,
+                    allow_local_inputs=args.allow_local_inputs, expected_digest=args.expected_digest, target_override=args.itch_target or None)
+    _emit(args, result)
+    if not args.json:
+        print("Upload submitted; receipt: " + result['receipt'])
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ludus", description="Ludus host tooling CLI")
     p.add_argument("--version", action="version", version=f"ludus {__version__}")
@@ -342,6 +362,15 @@ def build_parser() -> argparse.ArgumentParser:
     pkg.add_argument("--sdk", help="explicit Release SDK override")
     pkg.set_defaults(func=cmd_package_dispatch)
 
+    setup = proj.add_parser("release", help="set up release files for an existing project").add_subparsers(dest="release_action", required=True)
+    init = setup.add_parser("init")
+    init.add_argument("project")
+    init.add_argument("--platform", choices=("linux-x64", "web"), default="linux-x64")
+    init.add_argument("--itch-target")
+    init.add_argument("--tools-ref")
+    init.add_argument("--build-command-json", type=_json.loads, help="project bootstrap argv as a JSON array, without a shell")
+    init.set_defaults(func=cmd_release_init)
+
     publish = proj.add_parser("publish", help="inspect an offline upload plan").add_subparsers(dest="action", required=True)
     plan = publish.add_parser("plan")
     plan.add_argument("project")
@@ -350,6 +379,14 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--allow-local-inputs", action="store_true")
     plan.set_defaults(func=cmd_publish_plan)
 
+    upload = publish.add_parser("upload", help="explicitly upload a verified package to itch.io")
+    upload.add_argument("project")
+    upload.add_argument("--package", required=True)
+    upload.add_argument("--destination", required=True)
+    upload.add_argument("--allow-local-inputs", action="store_true")
+    upload.add_argument("--expected-digest")
+    upload.add_argument("--itch-target", help="destination for projects configured through a CI variable")
+    upload.set_defaults(func=cmd_publish_upload)
     return p
 
 

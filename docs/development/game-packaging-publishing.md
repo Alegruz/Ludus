@@ -4,8 +4,8 @@ The installed `ludus` host tools can build and validate a native Linux x64 Relea
 package for a version-2 CMake game project. Packaging is independent of an
 itch.io account. This implements the first part of the
 [packaging and publishing architecture](../architecture/game-packaging-publishing.md).
-Live upload, generated deployment workflows, Editor release controls and browser
-game packaging are subsequent phases.
+Editor setup, browser packaging and automated uploads are described in
+[Editor-managed game releases](editor-game-releases.md).
 
 ## Create a project with release files
 
@@ -29,8 +29,8 @@ to add runtime assets, dependencies and the corresponding notices. The generated
 notice is a starting point: the game author must complete the license inventory.
 CMake remains authoritative for the payload; no build-tree directory sweep occurs.
 
-Existing projects can add these files manually, using a newly generated project
-as a reference. There is no `release init` migration command yet.
+Existing projects can use `ludus project release init` or the Editor release setup
+action; see the [setup guide](editor-game-releases.md).
 
 ## Build and inspect the package
 
@@ -87,7 +87,8 @@ Planning validates the archive, manifest, profile, current release configuration
 and engine lock. It needs no installed SDK, butler, account login or network.
 It reports destination/channel, version, exact digest, payload bytes and a future
 butler argument plan with a placeholder for a verified private snapshot.
-The reported plan is not an executable upload command.
+The reported plan is not an executable upload command. Explicit uploading is
+available through `project publish upload`, described in the setup guide.
 
 Packages from dirty/unknown sources or local SDK overrides require the explicit
 local-input option. This is a planning choice; no upload occurs. A channel named
@@ -107,5 +108,6 @@ the pinned tools on PATH. Release tests compile real native executables, exercis
 CMake installation, corruption/failure cases and clean-extraction execution.
 They use a small fixture SDK to avoid graphics dependencies and do not establish
 relocation or license closure for a full production SDK. Full SDK acceptance,
-itch.io transport and real hosted gameplay need their own evidence. See the
+Real hosted gameplay needs its own evidence. The transport is tested with
+isolated stubs; no live-account upload is part of local validation. See the
 [evidence ledger](game-packaging-publishing-evidence.md).

@@ -6,6 +6,8 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -123,6 +125,12 @@ void MainWindow::BuildMenus()
     BuildAction_ = buildMenu->addAction(QStringLiteral("&Build"));
     BuildRunAction_ = buildMenu->addAction(QStringLiteral("Build and &Run"));
     StopAction_ = buildMenu->addAction(QStringLiteral("&Stop"));
+
+    QMenu* releaseMenu = menuBar()->addMenu(QStringLiteral("&Release"));
+    SetupReleaseAction_ = releaseMenu->addAction(QStringLiteral("Set Up &Releases..."));
+    PackageReleaseAction_ = releaseMenu->addAction(QStringLiteral("&Package Release..."));
+    connect(SetupReleaseAction_, &QAction::triggered, this, &MainWindow::OnSetupRelease);
+    connect(PackageReleaseAction_, &QAction::triggered, this, &MainWindow::OnPackageRelease);
 
     QMenu* outputMenu = menuBar()->addMenu(QStringLiteral("&Output"));
     ClearAction_ = outputMenu->addAction(QStringLiteral("&Clear Output"));
@@ -319,6 +327,8 @@ void MainWindow::RenderCapabilities()
     BuildAction_->setEnabled(caps.CanBuild);
     BuildRunAction_->setEnabled(caps.CanBuildRun);
     StopAction_->setEnabled(caps.CanStop);
+    SetupReleaseAction_->setEnabled(caps.CanReleaseInit);
+    PackageReleaseAction_->setEnabled(caps.CanPackage);
     ClearAction_->setEnabled(caps.CanClearOutput);
     CopyAction_->setEnabled(caps.CanCopyJobDetails);
 
@@ -391,6 +401,69 @@ void MainWindow::RenderStatus()
     {
         RuntimeLabel_->setText(QStringLiteral("No runtime."));
     }
+}
+
+void MainWindow::OnSetupRelease()
+{
+    auto* dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(QStringLiteral("Set Up Releases"));
+    auto* layout = new QFormLayout(dialog);
+    auto* platform = new QComboBox(dialog);
+    platform->addItem(QStringLiteral("Linux native"), QStringLiteral("linux-x64"));
+    platform->addItem(QStringLiteral("Browser (Emscripten)"), QStringLiteral("web"));
+    auto* target = new QLineEdit(dialog);
+    target->setPlaceholderText(QStringLiteral("username/game (optional)"));
+    auto* note = new QLabel(
+        QStringLiteral("Save release files into this project's repository. Setup also adds "
+                       "a GitHub workflow for v* tags and manual releases. Set ITCH_IO_TARGET on GitHub if left blank. "
+                       "Add BUTLER_API_KEY in the "
+                       "itch-release environment on GitHub. Setup never uploads or overwrites existing files."),
+        dialog);
+    note->setWordWrap(true);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    layout->addRow(QStringLiteral("Platform"), platform);
+    layout->addRow(QStringLiteral("itch.io project"), target);
+    layout->addRow(note);
+    layout->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::accepted, this, [this, platform, target]() {
+        Controller_->SetupRelease(platform->currentData().toString(), target->text().trimmed());
+    });
+    dialog->open();
+}
+
+void MainWindow::OnPackageRelease()
+{
+    auto* dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(QStringLiteral("Package Release"));
+    auto* layout = new QFormLayout(dialog);
+    auto* profile = new QComboBox(dialog);
+    profile->setEditable(true);
+    profile->addItem(QStringLiteral("linux-release"));
+    profile->addItem(QStringLiteral("web-release"));
+    auto* version = new QLineEdit(QStringLiteral("0.1.0"), dialog);
+    auto* sdk = new QLineEdit(dialog);
+    sdk->setPlaceholderText(QStringLiteral("Optional Release SDK prefix"));
+    auto* note = new QLabel(
+        QStringLiteral("Build and validate a player package. The package directory appears in Output. "
+                       "Browser projects need a configured web-emscripten-release preset. Packaging never uploads."),
+        dialog);
+    note->setWordWrap(true);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    layout->addRow(QStringLiteral("Package profile"), profile);
+    layout->addRow(QStringLiteral("Version"), version);
+    layout->addRow(QStringLiteral("SDK"), sdk);
+    layout->addRow(note);
+    layout->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::accepted, this, [this, profile, version, sdk]() {
+        Controller_->PackageRelease(profile->currentText(), version->text().trimmed(), sdk->text().trimmed());
+    });
+    dialog->open();
 }
 
 void MainWindow::closeEvent(QCloseEvent* event)

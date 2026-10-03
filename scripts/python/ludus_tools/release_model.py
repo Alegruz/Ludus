@@ -93,6 +93,7 @@ class ReleaseProfile:
     target: str
     install_component: str
     entry_point: str
+    configure_preset: str = "linux-clang-release"
 
 
 @dataclass(frozen=True)
@@ -121,22 +122,27 @@ def load_release(project_dir: Path) -> ReleaseConfig:
     for name, profile in raw.items():
         identifier(name, "profile name")
         fields(profile, {"targetPlatform", "buildProfile", "target", "installComponent", "entryPoint"},
-               set(), f"profiles.{name}")
-        if profile["targetPlatform"] != "linux-x64" or profile["buildProfile"] != "release":
-            fail("only linux-x64 Release packaging is supported", "UnsupportedReleaseTarget")
+               {"configurePreset"}, f"profiles.{name}")
+        platform = profile["targetPlatform"]
+        if platform not in ("linux-x64", "web") or profile["buildProfile"] != "release":
+            fail("only linux-x64 and web Release packaging are supported", "UnsupportedReleaseTarget")
+        preset = profile.get("configurePreset", "web-emscripten-release" if platform == "web" else "linux-clang-release")
+        if preset != ("web-emscripten-release" if platform == "web" else "linux-clang-release"):
+            fail("release configurePreset does not match target platform")
         target = string(profile["target"], "target", 256)
         component = string(profile["installComponent"], "installComponent", 64)
         if not TARGET_NAME_RE.fullmatch(target) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", component):
             fail("invalid target or installComponent")
-        profiles[name] = ReleaseProfile("linux-x64", "release", target, component,
-                                        payload_path(profile["entryPoint"]))
+        profiles[name] = ReleaseProfile(platform, "release", target, component,
+                                        payload_path(profile["entryPoint"]), preset)
     itch_target, destinations = None, {}
     if "itch" in obj:
         itch = obj["itch"]
-        fields(itch, {"target", "channels"}, set(), "itch")
-        itch_target = string(itch["target"], "itch.target", 128)
-        if not ITCH_TARGET.fullmatch(itch_target):
-            fail("itch.target must be lower-case username/game")
+        fields(itch, {"channels"}, {"target"}, "itch")
+        if "target" in itch:
+            itch_target = string(itch["target"], "itch.target", 128)
+            if not ITCH_TARGET.fullmatch(itch_target):
+                fail("itch.target must be lower-case username/game")
         if not isinstance(itch["channels"], dict) or not 1 <= len(itch["channels"]) <= 32:
             fail("itch.channels must contain between 1 and 32 entries")
         channels = set()
@@ -150,8 +156,13 @@ def load_release(project_dir: Path) -> ReleaseConfig:
             channels.add(channel)
             destinations[name] = (profile, channel)
     if "automation" in obj:
-        fields(obj["automation"], {"provider", "releaseTags"}, set(), "automation")
+        fields(obj["automation"], {"provider", "releaseTags"}, {"buildCommand"}, "automation")
         if (obj["automation"]["provider"] != "github-actions"
                 or type(obj["automation"]["releaseTags"]) is not bool):
             fail("invalid automation provider or releaseTags")
+        argv = obj["automation"].get("buildCommand", [])
+        if not isinstance(argv, list) or len(argv) > 16:
+            fail("automation.buildCommand must be an argument list of at most 16 items")
+        for arg in argv:
+            string(arg, "build argument", 4096)
     return ReleaseConfig(profiles, itch_target, destinations, sha256(data))

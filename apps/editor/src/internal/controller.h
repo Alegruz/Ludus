@@ -77,6 +77,8 @@ public:
     void Configure();
     void Build();
     void BuildRun();
+    void SetupRelease(const QString& platform, const QString& itchTarget);
+    void PackageRelease(const QString& profile, const QString& version, const QString& sdk);
     void Stop();
     void ClearOutput();
 
@@ -96,7 +98,7 @@ private Q_SLOTS:
     void OnToolEvent(const ProtocolEvent& event);
 
 private:
-    void StartJob(ActionKind kind, ToolOperation operation);
+    void StartJob(ActionKind kind, ToolOperation operation, const ToolLaunch& options = {});
     void Publish();
     void RecordCommand(const QString& stage, const QStringList& argv, const QString& cwd);
     [[nodiscard]] QString ResolveDescriptorPath() const;

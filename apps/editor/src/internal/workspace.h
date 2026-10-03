@@ -79,6 +79,8 @@ enum class ActionKind : foundation::uint8
     Configure,
     Build,
     BuildRun,
+    ReleaseInit,
+    Package,
     Stop,
     ClearOutput,
     CopyJobDetails,
@@ -142,6 +144,8 @@ struct Capabilities
     bool CanConfigure = false;
     bool CanBuild = false;
     bool CanBuildRun = false;
+    bool CanReleaseInit = false;
+    bool CanPackage = false;
     bool CanStop = false;
     bool CanClearOutput = true;
     bool CanCopyJobDetails = false;
