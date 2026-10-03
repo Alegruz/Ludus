@@ -7,7 +7,8 @@ import os
 import platform
 import re
 import shutil
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -245,6 +246,71 @@ def validate_arguments(arguments: list[str], engine: Any) -> None:
             )
 
 
+class SessionBusy(RuntimeError):
+    """A cooperating CLI/Editor session owns the target or managed RAD build."""
+
+
+@dataclass
+class DebugSession:
+    binary: Path
+    directory: Path
+    preset: str
+    target: str
+    identity: str
+    managed_pin: dict | None
+
+    def prepare_launch(self, exe: Path, cwd: Path, arguments: list[str]) -> list[str]:
+        # RAD's rd_init treats absolute Linux paths as flags. A ./ relative path
+        # is unambiguously an executable, including names starting with a hyphen.
+        relative_exe = "./" + os.path.relpath(exe, cwd)
+        user = self.directory / "session.raddbg_user"
+        project = self.directory / "session.raddbg_project"
+        for path, kind in ((user, "user"), (project, "project")):
+            if not path.exists():
+                path.write_text(f"// raddbg 0.9.29 {kind}\n", encoding="utf-8")
+        description = {"preset": self.preset, "target": self.target, "executable": str(exe),
+                       "arguments": arguments, "cwd": str(cwd), "debugger": str(self.binary),
+                       "debugger_identity": self.identity, "managed_pin": self.managed_pin}
+        (self.directory / "launch.json").write_text(json.dumps(description, indent=2) + "\n", encoding="utf-8")
+        command = [self.binary, f"--user:{user}", f"--project:{project}", f"--logs:{self.directory / 'logs'}",
+                   "--", relative_exe, *arguments]
+        return list(map(str, command))
+
+
+@contextmanager
+def debug_session(root: Path, binary: Path, preset: str, target: str, engine: Any,
+                  *, target_session: Path | None = None):
+    """Shared launch/session policy; the caller owns execution and cancellation."""
+    target_session = target_session or root / "out/debug/rad" / preset / target
+    target_session.mkdir(parents=True, exist_ok=True)
+    import fcntl
+
+    with (target_session / "session.lock").open("a") as lock, ExitStack() as resources:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise SessionBusy(f"a RAD session for {target} is already open") from exc
+        directory = managed_directory(root, binary)
+        installed_pin = None
+        if directory is not None:
+            setup_lock = resources.enter_context((directory / "setup.lock").open("a"))
+            try:
+                fcntl.flock(setup_lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise SessionBusy("RAD setup is running; retry the launch when it completes") from exc
+            stamp = read_json(directory / "build.json", engine)
+            installed_pin = stamp.get("pin") if isinstance(stamp, dict) else None
+            if (not isinstance(installed_pin, dict)
+                    or installed_pin.get("revision") != directory.name
+                    or installed_pin.get("repository") != "https://github.com/EpicGames/raddebugger.git"
+                    or not isinstance(installed_pin.get("version"), str)):
+                raise engine.EngineError("managed RAD build is incomplete; rerun scripts/setup-rad-debugger")
+        identity = debugger_identity(root, binary)
+        session = target_session / "versions" / identity
+        session.mkdir(parents=True, exist_ok=True)
+        yield DebugSession(binary, session, preset, target, identity, installed_pin)
+
+
 def launch(args: Any, engine: Any) -> int:
     require_host(engine)
     if args.preset not in DEBUG_PRESETS:
@@ -259,61 +325,25 @@ def launch(args: Any, engine: Any) -> int:
         raise engine.EngineError(f"debug working directory does not exist: {cwd}")
     if not args.dry_run and not os.environ.get("DISPLAY"):
         raise engine.EngineError("RAD needs an X11 display (XWayland on Wayland); use --dry-run on headless hosts")
-    target_session = root / "out" / "debug" / "rad" / args.preset / args.target
-    target_session.mkdir(parents=True, exist_ok=True)
-    import fcntl
-
-    with (target_session / "session.lock").open("a") as lock, ExitStack() as resources:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise engine.EngineError(f"a RAD session for {args.target} is already open") from exc
-        directory = managed_directory(root, binary)
-        installed_pin = None
-        if directory is not None:
-            setup_lock = resources.enter_context((directory / "setup.lock").open("a"))
-            try:
-                fcntl.flock(setup_lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
-            except BlockingIOError as exc:
-                raise engine.EngineError("RAD setup is running; retry the launch when it completes") from exc
-            stamp = read_json(directory / "build.json", engine)
-            installed_pin = stamp.get("pin") if isinstance(stamp, dict) else None
-            if (not isinstance(installed_pin, dict)
-                    or installed_pin.get("revision") != directory.name
-                    or installed_pin.get("repository") != "https://github.com/EpicGames/raddebugger.git"
-                    or not isinstance(installed_pin.get("version"), str)):
-                raise engine.EngineError("managed RAD build is incomplete; rerun scripts/setup-rad-debugger")
-        build_dir = engine.build_dir_for_preset(root, args.preset)
-        if not args.no_build:
-            engine.ensure_bootstrap_for_preset(root, args.preset)
-            query_codemodel(build_dir)
-            engine.cmake_configure(root, args.preset)
-        exe = target_executable(build_dir, args.target, engine)
-        if not args.no_build:
-            engine.cmake_build(root, args.preset, ["--target", args.target])
-        if not executable(exe):
-            raise engine.EngineError(f"debug target is not built or executable: {exe}")
-        identity = debugger_identity(root, binary)
-        session = target_session / "versions" / identity
-        session.mkdir(parents=True, exist_ok=True)
-        # RAD's rd_init treats absolute Linux paths as flags. A ./ relative path
-        # is unambiguously an executable, including names starting with a hyphen.
-        relative_exe = "./" + os.path.relpath(exe, cwd)
-        user = session / "session.raddbg_user"
-        project = session / "session.raddbg_project"
-        for path, kind in ((user, "user"), (project, "project")):
-            if not path.exists():
-                path.write_text(f"// raddbg 0.9.29 {kind}\n", encoding="utf-8")
-        description = {"preset": args.preset, "target": args.target, "executable": str(exe),
-                       "arguments": args.arguments, "cwd": str(cwd), "debugger": str(binary),
-                       "debugger_identity": identity, "managed_pin": installed_pin}
-        (session / "launch.json").write_text(json.dumps(description, indent=2) + "\n", encoding="utf-8")
-        command = [binary, f"--user:{user}", f"--project:{project}", f"--logs:{session / 'logs'}",
-                   "--", relative_exe, *args.arguments]
-        print(f"RAD target: {exe}\nWorking directory: {cwd}\nSession: {session}")
-        print("Set breakpoints and run the temporary command-line target in RAD; do not Save To Project.")
-        if args.dry_run:
-            print(engine.command_line(command))
-            return 0
-        engine.run(command, cwd=cwd)
+    try:
+        with debug_session(root, binary, args.preset, args.target, engine) as session:
+            build_dir = engine.build_dir_for_preset(root, args.preset)
+            if not args.no_build:
+                engine.ensure_bootstrap_for_preset(root, args.preset)
+                query_codemodel(build_dir)
+                engine.cmake_configure(root, args.preset)
+            exe = target_executable(build_dir, args.target, engine)
+            if not args.no_build:
+                engine.cmake_build(root, args.preset, ["--target", args.target])
+            if not executable(exe):
+                raise engine.EngineError(f"debug target is not built or executable: {exe}")
+            command = session.prepare_launch(exe, cwd, args.arguments)
+            print(f"RAD target: {exe}\nWorking directory: {cwd}\nSession: {session.directory}")
+            print("Set breakpoints and run the temporary command-line target in RAD; do not Save To Project.")
+            if args.dry_run:
+                print(engine.command_line(command))
+                return 0
+            engine.run(command, cwd=cwd)
+    except SessionBusy as exc:
+        raise engine.EngineError(str(exc)) from exc
     return 0

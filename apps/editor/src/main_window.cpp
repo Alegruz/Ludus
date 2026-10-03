@@ -28,6 +28,7 @@
 #include <QSplitter>
 #include <QTableWidget>
 #include <QTimer>
+#include <QToolBar>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -169,7 +170,20 @@ void MainWindow::BuildMenus()
     ConfigureAction_ = buildMenu->addAction(QStringLiteral("&Configure / Refresh Targets"));
     BuildAction_ = buildMenu->addAction(QStringLiteral("&Build"));
     BuildRunAction_ = buildMenu->addAction(QStringLiteral("Build and &Run"));
+    BuildDebugAction_ = buildMenu->addAction(QStringLiteral("Build && &Debug in RAD..."));
+    BuildDebugAction_->setObjectName(QStringLiteral("buildDebugAction"));
+    BuildDebugAction_->setToolTip(QStringLiteral("Debug native games in RAD. Optional setup is offered when missing."));
+    BuildDebugAction_->setShortcut(QKeySequence(Qt::Key_F5));
+    connect(BuildDebugAction_, &QAction::triggered, Controller_, [this]() { Controller_->BuildDebug(); });
+    connect(Controller_, &EditorController::DebuggerSetupRequested, this, &MainWindow::OnDebuggerSetupRequested);
     StopAction_ = buildMenu->addAction(QStringLiteral("&Stop"));
+    auto* gameToolbar = addToolBar(QStringLiteral("Game"));
+    gameToolbar->setObjectName(QStringLiteral("gameToolbar"));
+    gameToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    gameToolbar->addAction(BuildAction_);
+    gameToolbar->addAction(BuildRunAction_);
+    gameToolbar->addAction(BuildDebugAction_);
+    gameToolbar->addAction(StopAction_);
 
     QMenu* releaseMenu = menuBar()->addMenu(QStringLiteral("&Release"));
     SetupReleaseAction_ = releaseMenu->addAction(QStringLiteral("Set Up &Releases..."));
@@ -443,6 +457,7 @@ void MainWindow::RenderCapabilities()
     ConfigureAction_->setEnabled(caps.CanConfigure);
     BuildAction_->setEnabled(caps.CanBuild);
     BuildRunAction_->setEnabled(caps.CanBuildRun);
+    BuildDebugAction_->setEnabled(caps.CanBuildDebug);
     StopAction_->setEnabled(caps.CanStop);
     SetupReleaseAction_->setEnabled(caps.CanReleaseInit);
     PackageReleaseAction_->setEnabled(caps.CanPackage);
@@ -485,6 +500,9 @@ void MainWindow::RenderStatus()
         case Phase::Launching:
             phase = QStringLiteral("Launching");
             break;
+        case Phase::Debugging:
+            phase = QStringLiteral("RAD session open");
+            break;
         case Phase::Running:
             phase = QStringLiteral("Running");
             break;
@@ -515,7 +533,13 @@ void MainWindow::RenderStatus()
     }
     StatusLabel_->setText(status);
 
-    if (Controller_->PlayState().Phase != PlayPhase::Stopped)
+    if (state.OperationPhase == Phase::Debugging)
+    {
+        RuntimeLabel_->setText(
+            QStringLiteral("Set breakpoints, Run and Step in RAD. The game may be paused or running. "
+                           "Stop ends this debugger session and its game."));
+    }
+    else if (Controller_->PlayState().Phase != PlayPhase::Stopped)
     {
         const auto& play = Controller_->PlayState();
         RuntimeLabel_->setText(QStringLiteral("Play session %1 · generation %2 · PID %4\n%3")
@@ -564,6 +588,59 @@ QLineEdit* AddDirectoryField(QFormLayout* form, QDialog* dialog, const Directory
     return edit;
 }
 } // namespace
+
+void MainWindow::OnDebuggerSetupRequested()
+{
+    if (!Controller_->Caps().CanBuildDebug)
+    {
+        return;
+    }
+    const uint64 epoch = Controller_->State().ProjectEpoch;
+    const QString digest = Controller_->State().SavedDigest;
+    auto* dialog =
+        new QMessageBox(QMessageBox::Information,
+                        QStringLiteral("Set Up RAD Debugger"),
+                        QStringLiteral("RAD is unavailable. Set Up downloads and builds the pinned debugger locally, "
+                                       "then continues debugging. Missing system dependencies are listed in Output. "
+                                       "You can also choose an existing RAD executable."),
+                        QMessageBox::Cancel,
+                        this);
+    dialog->setObjectName(QStringLiteral("debuggerSetupDialog"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    auto* setup = dialog->addButton(QStringLiteral("Set Up RAD"), QMessageBox::AcceptRole);
+    setup->setObjectName(QStringLiteral("setupRadButton"));
+    auto* choose = dialog->addButton(QStringLiteral("Choose Existing Installation..."), QMessageBox::ActionRole);
+    choose->setObjectName(QStringLiteral("chooseRadButton"));
+    dialog->setDefaultButton(QMessageBox::Cancel);
+    connect(dialog, &QMessageBox::finished, this, [this, dialog, setup, choose, epoch, digest](int) {
+        const auto current = [this, epoch, digest]() {
+            return Controller_->Caps().CanBuildDebug && Controller_->State().ProjectEpoch == epoch &&
+                   Controller_->State().SavedDigest == digest;
+        };
+        if (!current())
+        {
+            return;
+        }
+        if (dialog->clickedButton() == setup)
+        {
+            Controller_->BuildDebug({}, true);
+        }
+        else if (dialog->clickedButton() == choose)
+        {
+            auto* picker = new QFileDialog(this, QStringLiteral("Choose RAD Executable"));
+            picker->setAttribute(Qt::WA_DeleteOnClose);
+            picker->setFileMode(QFileDialog::ExistingFile);
+            connect(picker, &QFileDialog::fileSelected, this, [this, current](const QString& path) {
+                if (current())
+                {
+                    Controller_->BuildDebug(path);
+                }
+            });
+            picker->open();
+        }
+    });
+    dialog->open();
+}
 
 void MainWindow::OnSetupProject()
 {

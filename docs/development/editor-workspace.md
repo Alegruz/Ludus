@@ -237,3 +237,19 @@ This first milestone does **not** promise:
 - that "Running" proves the game rendered a frame; it means the process started.
 
 Windows/macOS process backends and a browser editor are out of scope for E0.
+
+
+## Debug a native game
+
+The Game toolbar and Build menu offer **Build & Debug in RAD** (F5 in the Editor)
+for a clean, saved Debug or Development project. It builds the selected target
+and verifies native symbols before opening RAD. RAD stays optional for all other
+project operations. If it is missing, choose **Set Up RAD**, **Choose Existing
+Installation**, or **Cancel**. Setup downloads/builds the pinned local revision;
+missing system prerequisites are reported in Output.
+
+The status says **RAD session open**. Run, breakpoints and stepping happen in RAD;
+Stop closes the owned session and game. Local debugger preferences and existing
+breakpoints survive repeated launches. The pinned Linux argument limitations apply
+only to this debugging action. See [Native debugging](debugging.md#from-the-ludus-editor)
+for setup, session files and compatibility acceptance.

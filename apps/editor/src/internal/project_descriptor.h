@@ -39,6 +39,8 @@ enum class ResultCode : foundation::uint8
     UnsupportedVersion,
     Conflict,
     MissingTools,
+    MissingDebugger,
+    DebuggerFailed,
     BootstrapStale,
     Busy,
     ConfigureFailed,

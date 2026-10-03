@@ -25,7 +25,7 @@ engine targets must still build without Editor dependencies.
 
 Deferred: scene graph/ECS, reflection, gizmos, undo/redo, importing, asset database,
 embedded rendering, scripting, plugins, docking customization, hot reload,
-remote control, live game-state IPC, debugger UI and distribution bundles.
+remote control, live game-state IPC, embedded debugger UI and distribution bundles.
 RAD remains optional; Build/Run never depend on it. This milestone implements a
 subset of developer-tools D3/D4, not their complete debugger/tool-management scope.
 
@@ -504,3 +504,19 @@ job provenance and deterministic failure fixtures; dependency compatibility
 spike; atomic persistence/conflict handling and process ownership verification.
 The research separates article evidence from Ludus decisions and rejected
 historical mechanisms. No book code, private figures or PDF access is required.
+
+## External RAD debugging extension
+
+BuildDebug uses the existing owned adapter job to configure/build a saved native
+Debug/Development project, check ELF symbols and launch external RAD. A typed
+debugger_started frame transitions Launching to Debugging, displayed as RAD
+session open; runtime_started cannot establish game Running for this operation.
+The job owns the debugger process group through cancellation and terminal cleanup.
+
+MissingDebugger is an actionable result after bridge drain: a window-modal,
+asynchronous setup/choose/cancel dialog. Setup is explicit, cancellable and uses
+the pinned installer without system installation. Project epoch and saved digest
+guards prevent an old dialog from acting on another project. Load stays read-only.
+Local tool preferences are ignored machine state; RAD configs retain breakpoints.
+Editor and CLI share session and managed-install locks. External executables are
+unverified; interactive RAD compatibility acceptance remains a separate gate.

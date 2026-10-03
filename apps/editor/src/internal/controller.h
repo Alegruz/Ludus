@@ -122,6 +122,7 @@ public:
     void Configure();
     void Build();
     void BuildRun();
+    void BuildDebug(const QString& debugger = {}, bool setup = false);
     void CheckProjectSetup();
     void SetupProject(const QString& sdk, const QString& webSdk, bool prepareEngine);
     void CreateProject(const ProjectCreationOptions& creation);
@@ -165,6 +166,7 @@ Q_SIGNALS:
     // Published after any state/log change. Rendering reads State()/Log(); it
     // must not trigger new edit actions (reentrancy is deferred by the window).
     void StateChanged();
+    void DebuggerSetupRequested();
 
 private Q_SLOTS:
     void OnToolEvent(const ProtocolEvent& event);
@@ -231,6 +233,7 @@ private:
     QStringList Transitions_;
     qint64 LastPid_ = 0;
     QString PendingCreatedProject_;
+    bool PendingDebuggerPrompt_ = false;
 };
 
 } // namespace ludus::editor

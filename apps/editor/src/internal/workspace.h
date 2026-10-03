@@ -35,6 +35,7 @@ enum class Phase : foundation::uint8
     Publishing,
     Launching,
     Running,
+    Debugging,
     Stopping,
     CleanupUnknown,
 };
@@ -80,6 +81,7 @@ enum class ActionKind : foundation::uint8
     Configure,
     Build,
     BuildRun,
+    BuildDebug,
     ProjectCheck,
     ProjectSetup,
     ProjectCreate,
@@ -119,6 +121,7 @@ struct WorkspaceState
     uint64 ActiveJob = 0;    // 0 when no job is owned
     uint64 NextJob = 1;      // monotonic; never wraps silently
     Phase OperationPhase = Phase::Idle;
+    ActionKind ActiveAction = ActionKind::Configure;
     bool StopLatched = false;      // Stop accepted; wins before runtime spawn
     QStringList DiscoveredTargets; // executable targets from last Configure
     QString DiscoveredPreset;      // preset the discovery cache belongs to
@@ -149,6 +152,7 @@ struct Capabilities
     bool CanConfigure = false;
     bool CanBuild = false;
     bool CanBuildRun = false;
+    bool CanBuildDebug = false;
     bool CanProjectCheck = false;
     bool CanProjectSetup = false;
     bool CanProjectCreate = false;
@@ -176,6 +180,9 @@ struct Capabilities
 // state unchanged (ignored stale event). Only RuntimeStarted confirms Running.
 [[nodiscard]] WorkspaceState
 ApplyPhaseEvent(const WorkspaceState& state, uint64 jobId, Phase requested, bool runtimeConfirmed);
+
+// Only a typed debugger confirmation can establish an external RAD session.
+[[nodiscard]] WorkspaceState ApplyDebuggerStarted(const WorkspaceState& state, uint64 jobId);
 
 // Latch a Stop for the current job. Idempotent. Once latched the state never
 // transitions back to Running or launches another child.

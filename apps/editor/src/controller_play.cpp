@@ -17,7 +17,8 @@ Capabilities EditorController::Caps() const
     const bool owned = Play_.Active() || GenerationJob_ || PlayState_.Phase != PlayPhase::Stopped;
     if (owned)
     {
-        caps.CanOpen = caps.CanReload = caps.CanConfigure = caps.CanBuild = caps.CanBuildRun = false;
+        caps.CanOpen = caps.CanReload = caps.CanConfigure = caps.CanBuild = caps.CanBuildRun = caps.CanBuildDebug =
+            false;
         caps.CanReleaseInit = caps.CanPackage = false;
         caps.CanProjectCheck = caps.CanProjectSetup = caps.CanProjectCreate = false;
         caps.CanCloseImmediately = false;
@@ -32,7 +33,7 @@ Capabilities EditorController::Caps() const
         if (!State_.Busy())
         {
             caps.CanOpen = caps.CanEdit = caps.CanSave = caps.CanReload = false;
-            caps.CanConfigure = caps.CanBuild = caps.CanBuildRun = false;
+            caps.CanConfigure = caps.CanBuild = caps.CanBuildRun = caps.CanBuildDebug = false;
             caps.CanProjectCheck = caps.CanProjectSetup = caps.CanProjectCreate = false;
             caps.CanReleaseInit = caps.CanPackage = false;
         }
