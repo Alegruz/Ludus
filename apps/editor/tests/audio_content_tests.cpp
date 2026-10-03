@@ -5,10 +5,10 @@
 #include <QDoubleSpinBox>
 #include <QListWidget>
 #include <QPushButton>
-#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
-#include <QTimer>
+#include <QThread>
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <ludus/audio/content/definitions.h>
 
@@ -116,25 +116,37 @@ TEST_CASE("Audio import runs away from GUI, preserves ID on reimport and quiesce
     const auto wav = audio::test::MakeSineWav(44100, 1, 44100);
     const auto exportRoot = exported.path().toUtf8();
     REQUIRE(content::SaveFile(exportRoot.constData(), "export.wav", wav, nullptr) == content::Status::Ok);
+    std::atomic<uint32> imported{0};
+    std::atomic<bool> importedOnGui{false};
     ludus::editor::AudioPreview preview;
-    QSignalSpy imported(&preview, &ludus::editor::AudioPreview::Imported);
-    QTimer timer;
-    int ticks = 0;
-    QObject::connect(&timer, &QTimer::timeout, [&]() { ++ticks; });
-    timer.start(5);
+    const auto* guiThread = QThread::currentThread();
+    // Observe the emitting thread directly: a fast import need not outlast a GUI timer.
+    QObject::connect(
+        &preview,
+        &ludus::editor::AudioPreview::Imported,
+        &preview,
+        [&imported, &importedOnGui, guiThread]() {
+            if (QThread::currentThread() == guiThread)
+            {
+                importedOnGui.store(true, std::memory_order_relaxed);
+            }
+            imported.fetch_add(1, std::memory_order_release);
+        },
+        Qt::DirectConnection);
     preview.Import(directory.path(), exported.path() + QStringLiteral("/export.wav"), QStringLiteral("source/hit"));
-    for (int i = 0; i < 500 && imported.count() == 0; ++i)
+    for (int i = 0; i < 500 && imported.load(std::memory_order_acquire) == 0; ++i)
     {
         QTest::qWait(10);
     }
-    REQUIRE(imported.count() == 1);
-    REQUIRE(ticks > 0);
+    REQUIRE(imported.load(std::memory_order_acquire) == 1);
+    REQUIRE_FALSE(importedOnGui.load(std::memory_order_relaxed));
     preview.Import(directory.path(), exported.path() + QStringLiteral("/export.wav"), QStringLiteral("source/hit"));
-    for (int i = 0; i < 500 && imported.count() < 2; ++i)
+    for (int i = 0; i < 500 && imported.load(std::memory_order_acquire) < 2; ++i)
     {
         QTest::qWait(10);
     }
-    REQUIRE(imported.count() == 2);
+    REQUIRE(imported.load(std::memory_order_acquire) == 2);
+    REQUIRE_FALSE(importedOnGui.load(std::memory_order_relaxed));
     const auto root = directory.path().toUtf8();
     content::Bytes bytes;
     content::Catalog catalog;
