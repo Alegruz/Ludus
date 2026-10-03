@@ -30,6 +30,7 @@ include(EngineSdkIdentity)
 
 option(LUDUS_BUILD_TESTS "Build Ludus tests" ON)
 option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
+option(LUDUS_BUILD_WORLD_DEMO "Build the graphical game world reference (requires shader tools)" OFF)
 option(LUDUS_BUILD_SHADER_PROBE "Build the isolated offline shader feasibility probe" OFF)
 # The Editor workspace (apps/editor) is an OPTIONAL developer tool, OFF by
 # default. When OFF, configure/build/install and browser targets must not search
@@ -92,6 +93,7 @@ install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENT
 
 add_subdirectory(modules/foundation/base)
 add_subdirectory(modules/foundation/containers)
+add_subdirectory(modules/gameplay/world)
 # FoundationMath depends only on FoundationBase. It is added before any consumer
 # and outside the native-only branch so native and browser targets share it.
 add_subdirectory(modules/foundation/math)
@@ -100,6 +102,7 @@ add_subdirectory(modules/foundation/profiling)
 # Input is configured before Platform: Platform depends on Input for the
 # normalized keyboard record/sink vocabulary (one-way dependency).
 add_subdirectory(modules/input)
+add_subdirectory(apps/world_demo)
 # Private pinned miniaudio C dependency (locked source bootstrap, hash-verified
 # at configure time). Added before the audio module, which links it PRIVATE. It
 # deliberately enables the C language for its own targets; the root project
@@ -207,7 +210,7 @@ write_basic_package_version_file(
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationContainers FoundationMath FoundationLogging
-    FoundationProfiling Input Audio)
+    FoundationProfiling Input Audio GameplayWorld)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()

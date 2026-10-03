@@ -1,6 +1,8 @@
 # Level data and loading
 
-Status: Proposed. Part of the [game world architecture](game-world.md).
+Status: Baseline implemented. Part of the [game world architecture](game-world.md).
+See [the reference guide](../../apps/world_demo/README.md) for the concrete API,
+bounds and policies; conditional extensions in this document remain proposed.
 
 A level describes initial content. Loading validates that content and builds a
 candidate world before replacing the active world. Authors work with a small,
@@ -105,7 +107,7 @@ must be positive in version 1; mirror sprites through an explicit visual propert
 if needed. Bounds must have strictly ordered minima/maxima, extents must be
 positive, and all numeric values must be finite and within game-defined limits.
 
-`seed` is an unsigned 32-bit integer. A game's stream selectors are named constants
+`seed` is an unsigned 64-bit integer. A game's stream selectors are named constants
 in code. Content does not select simulation rate, update order, runtime capacities,
 backend objects, or executable script names. These are application policies.
 
@@ -149,7 +151,9 @@ Keep the authored-ID mapping for inspection and authoring diagnostics.
 
 Parsing and validation return a status and a bounded diagnostic record, including
 source file, property path, and line/column where the chosen parser provides them.
-For example: `first-room.json entities[1].properties.target: unknown entity
+The bounded reference codec currently returns an error code and byte offset;
+file/path context and richer editor diagnostics are future tooling work.
+For example, a future editor can show: `first-room.json entities[1].properties.target: unknown entity
 'player-strat'`. Ordinary malformed content is not an assertion failure.
 
 Reject duplicate JSON object keys, duplicate IDs, unknown versions/kinds/fields,

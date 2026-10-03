@@ -1,7 +1,8 @@
 # Game world architecture
 
-Status: Proposed. Architecture only; the world, level loader, component pools,
-tick driver, and render extraction described here are not implemented.
+Status: Baseline implemented in `Ludus::GameplayWorld` and
+[the reference game](../../apps/world_demo/README.md). Conditional extensions below
+remain proposed; the reference guide records the implemented policies and limits.
 
 This design gives Ludus's first game a readable path from level data to gameplay
 and pixels. The selected architecture is a game-owned world with typed component
@@ -24,9 +25,9 @@ fiber scheduler, or editor before the game can run.
 | [Frame and tick updates](frame-update.md) | When do input, gameplay, events, async results, and rendering take effect? |
 | [Gems article review](game-world-gems-review.md) | Which chapters were read, which changes did they justify, and which techniques were deferred? |
 
-The contracts in those documents are the proposed implementation baseline.
-Illustrative types and function names are proposed API vocabulary, not existing
-SDK entry points. Game examples use 2D movement; the ownership and scheduling
+The contracts in those documents describe the implementation baseline and future
+extensions. The identity/storage APIs now exist in the SDK; game-owned types and
+function names remain illustrative outside the reference application. Game examples use 2D movement; the ownership and scheduling
 design also applies to 3D. The game genre, physics library, and rendering feature
 set remain product choices.
 
@@ -42,7 +43,7 @@ Existing unrelated working-tree edits are outside this proposal.
 | [Foundation math](../../modules/foundation/math/README.md) | Preserve its coordinate, angle, and numeric guarantees. Fixed ticks do not imply bit-exact floating-point simulation. |
 | [Input action records](../../modules/input/include/ludus/input/actions.h) | Preserve `Pressed`, `Released`, and `Cancelled` semantics when bridging presentation frames to simulation ticks. |
 | [RHI ownership contract](../../modules/graphics/rhi/README.md) | Keep all current RHI operations serialized on the main thread. |
-| [Bounded public rendering](../decisions/0011-public-fullscreen-rendering.md) | The current fullscreen triangle API cannot render a general sprite or mesh world. World rendering requires a separate graphics feature slice. |
+| [Bounded public rendering](../decisions/0011-public-fullscreen-rendering.md) | The reference game composes bounded procedural rectangles in one fullscreen shader. Textured sprites and general meshes still require a separate graphics feature slice. |
 | [Memory proposal](../decisions/0008-memory-management.md) | Reserve and reuse current containers first. A world must not require the proposed memory module or frame arena to exist. |
 | [Contributor guide](../../AGENTS.md) | C++23, no engine exceptions, explicit errors, Ludus primitive aliases, narrow headers, and the pinned validation workflow remain mandatory. |
 
@@ -91,7 +92,7 @@ sequence behavior on the owner thread; CPU jobs are a separate execution choice.
 
 ## Dependency boundaries
 
-The proposed reusable module is `modules/gameplay/world`, exported as
+The reusable module is `modules/gameplay/world`, exported as
 `Ludus::GameplayWorld`. It contains `EntityId`, `EntityRegistry`, and the small
 typed `ComponentPool<T>` facility. It depends on Base and Containers. It does not
 depend on Platform, Input, RHI, Audio, Text, or game-specific component types.
@@ -118,7 +119,7 @@ module. The diagrams describe ownership, not permission to add dependency cycles
 ## Selected decisions and alternatives
 
 These are Ludus design judgments informed by the sources below. They are not
-performance claims about an implementation that does not yet exist.
+performance guarantees for a particular game or machine.
 
 | Decision | Why selected | Alternative and revisit condition |
 | --- | --- | --- |
@@ -189,8 +190,8 @@ browser callbacks must still return promptly.
 For code implementation, apply the full contributor gates: warning-clean native
 builds, appropriate tests, ASan/UBSan, pinned format/tidy, include/header gates, and
 installed-SDK consumer validation. Add browser build and hosted acceptance for the
-game path. This documentation change makes no claim that those new features have
-passed their future implementation gates.
+game path. The reference guide describes the concrete validation workflow and its scope;
+conditional extensions still require their own implementation gates.
 
 ## Evidence and limits
 

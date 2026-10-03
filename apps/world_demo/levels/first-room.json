@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "id": "first-room",
+  "seed": 42,
+  "settings": {
+    "bounds": {
+      "min": [
+        -12,
+        -7
+      ],
+      "max": [
+        12,
+        7
+      ]
+    },
+    "camera": {
+      "center": [
+        0,
+        0
+      ],
+      "vertical_extent": 14
+    }
+  },
+  "collision": [
+    {
+      "id": "floor",
+      "shape": "box",
+      "center": [
+        0,
+        -4
+      ],
+      "half_extent": [
+        10,
+        0.5
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "id": "player-start",
+      "kind": "player",
+      "transform": {
+        "position": [
+          -6,
+          0
+        ],
+        "rotation": 0,
+        "scale": [
+          1,
+          1
+        ]
+      },
+      "properties": {
+        "speed": 4,
+        "health": 3,
+        "sprite": "player"
+      }
+    },
+    {
+      "id": "guard-a",
+      "kind": "enemy",
+      "transform": {
+        "position": [
+          2,
+          0
+        ],
+        "rotation": 0,
+        "scale": [
+          1,
+          1
+        ]
+      },
+      "properties": {
+        "speed": 2,
+        "health": 2,
+        "sprite": "guard",
+        "target": "player-start"
+      }
+    },
+    {
+      "id": "exit-a",
+      "kind": "exit",
+      "transform": {
+        "position": [
+          8,
+          0
+        ],
+        "rotation": 0,
+        "scale": [
+          1,
+          1
+        ]
+      },
+      "properties": {
+        "half_extent": [
+          0.5,
+          1
+        ],
+        "next_level": "second-room"
+      }
+    }
+  ]
+}
