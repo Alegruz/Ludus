@@ -11,7 +11,7 @@ Templates are addressed by ``(id, version)`` which is recorded in the project
 descriptor's ``template`` object so later template versions never silently
 overwrite user-owned game code (design "Project creation and Editor workflow").
 
-The only bundled template initially is ``minimal`` (version 2): a single native
+The only bundled template initially is ``minimal`` (version 3): a single native
 application target that queries the public engine version
 using public headers only — no new engine subsystem, no scene/ECS/hot reload.
 Placeholders are substituted by exact key, never by executing template content,
@@ -98,6 +98,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+include(CTest)
 
 # Resolve the shared Ludus SDK. The CLI/Editor supply LUDUS_SDK_PREFIX via the
 # generated preset; no engine source is compiled by this project (P01/P12).
@@ -112,6 +113,11 @@ if(NOT COMMAND ludus_apply_app_policy)
     message(FATAL_ERROR "The selected SDK lacks the supported Ludus application policy helper")
 endif()
 ludus_apply_app_policy({{ TARGET }})
+
+if(BUILD_TESTING)
+    add_test(NAME version_query COMMAND $<TARGET_FILE:{{ TARGET }}>)
+    set_tests_properties(version_query PROPERTIES TIMEOUT 20)
+endif()
 """,
         ),
         TemplateFile(
@@ -126,7 +132,9 @@ ludus_apply_app_policy({{ TARGET }})
       "binaryDir": "${sourceDir}/out/build/linux-clang-debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}"
+        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}",
+        "CMAKE_CXX_COMPILER": "clang++-18",
+        "BUILD_TESTING": "ON"
       }
     },
     {
@@ -135,7 +143,9 @@ ludus_apply_app_policy({{ TARGET }})
       "binaryDir": "${sourceDir}/out/build/linux-clang-development",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}"
+        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}",
+        "CMAKE_CXX_COMPILER": "clang++-18",
+        "BUILD_TESTING": "ON"
       }
     },
     {
@@ -144,7 +154,9 @@ ludus_apply_app_policy({{ TARGET }})
       "binaryDir": "${sourceDir}/out/build/linux-clang-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}"
+        "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}",
+        "CMAKE_CXX_COMPILER": "clang++-18",
+        "BUILD_TESTING": "ON"
       }
     }
   ],
@@ -152,13 +164,18 @@ ludus_apply_app_policy({{ TARGET }})
     { "name": "linux-clang-debug", "configurePreset": "linux-clang-debug" },
     { "name": "linux-clang-development", "configurePreset": "linux-clang-development" },
     { "name": "linux-clang-release", "configurePreset": "linux-clang-release" }
+  ],
+  "testPresets": [
+    { "name": "linux-clang-debug", "configurePreset": "linux-clang-debug", "output": { "outputOnFailure": true } },
+    { "name": "linux-clang-development", "configurePreset": "linux-clang-development", "output": { "outputOnFailure": true } },
+    { "name": "linux-clang-release", "configurePreset": "linux-clang-release", "output": { "outputOnFailure": true } }
   ]
 }
 """,
         ),
         TemplateFile(
             "src/main.cpp",
-            """// Minimal Ludus application template (v2).
+            """// Minimal Ludus application template (v3).
 #include <ludus/foundation/base/version.hpp>
 
 #include <string_view>
@@ -173,6 +190,8 @@ int main()
             ".gitignore",
             """# Ludus project — ignore machine-local state and build output (P04).
 /out/
+/CMakeUserPresets.json
+/.vscode/settings.json
 /.ludus/
 """,
         ),
@@ -183,7 +202,7 @@ int main()
             "",
         ),
     ]
-    return Template(id="minimal", version=2, files=files)
+    return Template(id="minimal", version=3, files=files)
 
 
 _TEMPLATES: dict[str, Template] = {t.id: t for t in (_minimal_template(),)}

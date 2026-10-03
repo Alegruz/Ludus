@@ -24,7 +24,7 @@ checks or optionalized failures as real acceptance.
 - [ ] Add Qt-free static GameHost library, project-owned host and static shipping
       dispatch using the same game implementation. Build an external installed-SDK
       sample with a visible frame/tuning effect, not a log-only rendering claim.
-- [ ] Implement bounded host protocol and persistent play supervisor with owned
+- [x] Implement bounded host protocol and persistent play supervisor with owned
       pipes/socketpair, exact argv/cwd, Hello/ready, Pause/Step/Resume/Stop/Status.
 - [ ] Add editor session state and optional play sidecar. Exercise open-without-
       code, failed open, dirty documents, stop-before-spawn, duplicate start,
@@ -33,9 +33,9 @@ checks or optionalized failures as real acceptance.
 
 ## L2 Build during play and immutable generations
 
-- [ ] Extend canonical File API resolver for MODULE_LIBRARY and host artifacts;
+- [x] Extend canonical File API resolver for MODULE_LIBRARY and host artifacts;
       split new-path build locks/session leases without removing E0 protection.
-- [ ] Implement complete manifest/symbol/hash publication and lease-aware cleanup.
+- [x] Implement complete manifest/symbol/hash publication and lease-aware cleanup.
       Build while A runs; failed/cancelled builds cannot activate old outputs.
 - [ ] Implement manual build/reload then opt-in debounce/coalescing. Test source
       edits during build, CMake regeneration, two editors/CLI lock contention,
@@ -60,7 +60,7 @@ checks or optionalized failures as real acceptance.
 
 - [ ] Add copied schema/property reads, small standard Qt inspector controls and
       atomic conditional multi-property edits with expected revisions.
-- [ ] Add small versioned tuning documents, atomic save/conflicts, document undo/
+- [x] Add small versioned tuning documents, atomic save/conflicts, document undo/
       redo, session-only edit default and explicit Apply to Document.
 - [ ] Exercise stale objects, simulation edits, old schema, out-of-range/NaN/
       over-limit strings, rejected batch without partial mutation, duplicate/lost
@@ -112,7 +112,10 @@ checks or optionalized failures as real acceptance.
 
 | Phase/requirement | Revision and command | Result | Evidence/blocker |
 | --- | --- | --- | --- |
-| L0 / L04 | Pending | Not run | Implementation required |
+| L1 protocol / L13 | Native host protocol and supervisor CTest; Debug CI at ffdb0f4 | PASS | Actual socket/pipe lifecycle, retained results, bounded queues and crash/hang/EOF recovery; evidence ledger |
+| L2 artifacts / L05 | Python generation/File API/lease tests and installed-SDK native editor journey at ffdb0f4 | PASS | Immutable module/host/symbol identities; failed or superseded publication rejects; independent build/session leases |
+| L4 documents / L11 | Python document tests and 127-assertion native Qt journey at ffdb0f4 | PASS | Session edits, explicit Apply/Save, independent undo/redo, conflicts and saved value after reopen |
+| L6 delivery / L16 | Existing PR #55 | INCOMPLETE | Required editor debugger and pixel/running-frame acceptance still pending; retain draft |
 
 Use PASS/FAIL/SKIP/UNAVAILABLE explicitly. A successful workflow containing a
 failed continue-on-error step is not PASS for that requirement.

@@ -209,6 +209,68 @@ def target_executable(
     return (build_dir / detail["artifacts"][0]["path"]).resolve()
 
 
+# Target types the project-live-reload build generation resolver accepts
+# (design section 5): the gameplay module (MODULE_LIBRARY) and the host
+# EXECUTABLE. Resolving the actual artifact path from the codemodel avoids
+# guessing platform suffixes or deriving output paths from target names.
+_ARTIFACT_TYPES = ("EXECUTABLE", "MODULE_LIBRARY", "SHARED_LIBRARY")
+
+
+def target_artifact(
+    build_dir: Path,
+    target: str,
+    engine: Any,
+    *,
+    expected_type: str,
+    client: str = "ludus-editor",
+) -> Path:
+    """Resolve `target` to its single artifact of `expected_type` via the File API.
+
+    A strict, bounded, version-checked sibling of `target_executable` that also
+    resolves MODULE_LIBRARY artifacts (the reloadable gameplay module) and the
+    host EXECUTABLE (project-live-reload design section 5). Returns the resolved
+    absolute artifact path; it never guesses a conventional layout or a platform
+    suffix. `expected_type` must be one of _ARTIFACT_TYPES.
+
+    Does NOT replace `target_executable`: the editor/RAD executable path is
+    unchanged. New-path callers (the play-session build) use this to resolve the
+    module and host artifacts of one generation.
+    """
+    if expected_type not in _ARTIFACT_TYPES:
+        raise engine.EngineError(f"unsupported artifact type requested: {expected_type!r}")
+    reply, model, aggregate = _latest_codemodel(build_dir, client, engine, require_version=True)
+    try:
+        configuration = _select_configuration(model, build_dir, engine)
+        targets = configuration["targets"]
+    except (KeyError, TypeError) as exc:
+        raise engine.EngineError(_DEFAULT_MESSAGES["bad_reply"]) from exc
+    if len(targets) > MAX_TARGET_ENTRIES:
+        raise engine.EngineError(
+            f"CMake codemodel lists {len(targets)} targets, exceeding the {MAX_TARGET_ENTRIES} bound"
+        )
+    matches = [entry for entry in targets if isinstance(entry, dict) and entry.get("name") == target]
+    if len(matches) != 1:
+        raise engine.EngineError(
+            f"CMake target {target!r} does not resolve to exactly one target in {build_dir}"
+        )
+    try:
+        detail_path = _reply_reference(reply, matches[0]["jsonFile"], engine)
+        detail = _bounded_read_json(detail_path, aggregate, engine)
+    except (KeyError, TypeError) as exc:
+        raise engine.EngineError(_DEFAULT_MESSAGES["bad_reply"]) from exc
+    actual_type = detail.get("type")
+    if actual_type != expected_type:
+        raise engine.EngineError(
+            f"CMake target {target!r} is a {actual_type!r}, expected {expected_type!r}"
+        )
+    artifacts = detail.get("artifacts", [])
+    if len(artifacts) != 1:
+        raise engine.EngineError(
+            f"CMake target {target!r} does not have exactly one artifact ({len(artifacts)})"
+        )
+    return (build_dir / artifacts[0]["path"]).resolve()
+
+
 def list_executable_targets(build_dir: Path, engine: Any, client: str = "ludus-editor") -> list[str]:
     """Return sorted unique executable target names satisfying the name contract.
 

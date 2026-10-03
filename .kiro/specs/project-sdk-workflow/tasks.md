@@ -142,10 +142,12 @@ Gate: P01/P04/P06-P10/P12/P16; real project creation, migration and build lifecy
       and installed adapter discovery, independent of a source checkout. (Design
       preserved; the editor stays OFF-by-default and un-exported; actual Qt
       packaging needs Qt6 — UNAVAILABLE here.)
-- [ ] Add asynchronous New Project and explicit SDK install/select stages through
-      the same backend used by the CLI. (Backend is shared and ready; the Qt GUI
-      New Project flow is not implemented — needs Qt6 and native GUI acceptance.)
-- [ ] On Open, show shared setup diagnostics and an explicit Repair action
+- [x] Add asynchronous New Project and explicit local SDK select/prepare stages
+      through the CLI-shared project_setup backend. Verified staging, native
+      configure/build/CTest and bridge-finished opening are implemented and
+      covered by real-adapter and Qt offscreen acceptance. Archive-store SDK
+      installation UI and native windowed acceptance remain separate follow-up.
+- [x] On Open, show shared setup diagnostics and an explicit Repair action
       without automatic downloads/configure/build/settings changes. New Project,
       SDK update and Repair use the same setup checks and acceptance as the CLI.
 - [x] Add required/resolved engine identity, profile and local override controls
@@ -224,3 +226,22 @@ than tests that merely mirror helper implementations.
       case runs the CLI in a subprocess with `import PyQt6/PySide6` poisoned to
       raise, proving the tooling never touches Qt. The native windowed-GUI
       counterparts remain pending (needs the New Project GUI).
+
+## P6 Game-project CMake setup lifecycle (AGENTS.md)
+
+- [~] Add one shared read-only CMake setup inspector used by CLI and Editor.
+      It invokes the selected CMake's `--list-presets=configure/build/test`,
+      checks the selected preset, resolved SDK prefix, compiler/Ninja, required
+      shader tools and any existing CMake cache without running configure,
+      build, download or file writes during Open. Current project-live-reload
+      work adds the shared preset validator and Editor Open status; toolchain,
+      shader-tool and cache coverage still needs exact end-to-end validation.
+- [ ] Add an explicit idempotent project setup/repair operation. Regenerate
+      only Ludus-owned local settings, preserve custom presets and unrelated
+      editor settings, keep machine paths ignored, and refresh project-owned
+      CMake caches after SDK/toolchain changes. Require successful real
+      configure/build/test before reporting repair success.
+- [ ] Add regressions for fresh clone, missing local presets, moved CMake/
+      compiler/Ninja/SDK, cache identity drift, custom preset/editor-setting
+      preservation, and repeated repair. Verify selectable presets with the
+      selected CMake executable rather than JSON-only assertions.

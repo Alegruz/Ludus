@@ -25,6 +25,7 @@ Bridge exit codes: 0 success, 1 failed, 2 protocol failure, 130 cancelled.
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import errno
 import json
 import os
@@ -38,6 +39,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 import editor_project
+from ludus_tools.descriptor import parse_descriptor_bytes
 from ludus_tools.errors import ToolingError
 
 
@@ -53,6 +55,10 @@ STDERR_CAP = 64 * 1024                  # adapter stderr per operation
 READY_REQUEST_TIMEOUT = 5.0             # seconds to receive the one request
 TERM_DEADLINE = 2.0                     # seconds before escalating TERM -> KILL
 KILL_OBSERVE_DEADLINE = 1.0             # seconds to observe termination after KILL
+
+# Keep uncertain leaders waitable. Reaping before descendant absence is proved
+# would allow PID/process-group reuse while a caller still believes it owns it.
+_UNKNOWN_PROCESS_OWNERS: list["OwnedProcess"] = []
 
 # File API named client for the editor.
 FILE_API_CLIENT = "ludus-editor"
@@ -176,9 +182,11 @@ class ProtocolWriter:
     output is dropped and counted rather than buffered.
     """
 
-    def __init__(self, job: str, write: Callable[[bytes], None]) -> None:
+    def __init__(self, job: str, write: Callable[[bytes], None],
+                 flush: Callable[[], None] = lambda: None) -> None:
         self._job = job
         self._write = write
+        self.flush = flush
         self._credit = OUTPUT_CREDIT_WINDOW
         self._output_total = 0        # cumulative encoded output bytes emitted
         self._acknowledged = 0        # last acknowledged boundary
@@ -219,6 +227,7 @@ class ProtocolWriter:
         if not text:
             return
         obj = {"job": self._job, "type": "output", "stage": stage, "stream": stream, "text": text}
+        obj["end_offset"] = hex16(0)
         line = self._emit(obj)
         # Determine the encoded size up front so end_offset reflects it.
         size = len(line)
@@ -277,7 +286,7 @@ class OwnedProcess:
     reusable as a new group) until descendant cleanup completes.
     """
 
-    def __init__(self, argv: list[str], cwd: str, env: dict[str, str]) -> None:
+    def __init__(self, argv: list[str], cwd: str, env: dict[str, str], *, pass_fds: tuple[int, ...] = ()) -> None:
         self.argv = list(argv)
         self.cwd = cwd
         env = {key: value for key, value in env.items() if key != "BUTLER_API_KEY"}
@@ -290,6 +299,7 @@ class OwnedProcess:
             stderr=subprocess.PIPE,
             close_fds=True,
             start_new_session=True,
+            pass_fds=pass_fds,
         )
         self.pid = self._proc.pid
 
@@ -329,7 +339,7 @@ class OwnedProcess:
         # Killed/dumped by a signal.
         return (None, info.si_status)
 
-    def _group_members(self) -> list[int]:
+    def _group_members(self) -> Optional[list[int]]:
         """Live members of the owned group (excluding the zombie leader).
 
         Reads /proc to find processes whose process-group id equals the leader's
@@ -341,23 +351,25 @@ class OwnedProcess:
         try:
             entries = [p for p in proc_root.iterdir() if p.name.isdigit()]
         except OSError:
-            return members
+            return None
         for entry in entries:
             pid = int(entry.name)
             if pid == self.pid:
                 continue  # exclude the zombie leader itself
             try:
                 stat = (entry / "stat").read_text()
-            except OSError:
+            except FileNotFoundError:
                 continue
+            except OSError:
+                return None
             # pgid is the 5th field after the (comm) which may contain spaces;
             # split on the last ')' to skip the comm field safely.
             try:
                 after = stat.rsplit(")", 1)[1].split()
                 pgid = int(after[2])  # fields: state ppid pgrp ...
             except (IndexError, ValueError):
-                continue
-            if pgid == self.pid:
+                return None
+            if pgid == self.pid and after[0] != "Z":
                 members.append(pid)
         return members
 
@@ -368,6 +380,11 @@ class OwnedProcess:
             pass
         except PermissionError:
             pass
+
+    def request_terminate(self) -> None:
+        """Signal the still-owned, unreaped group without waiting for cleanup."""
+        if self._proc.returncode is None:
+            self._signal_group(signal.SIGTERM)
 
     def _close_pipes(self) -> None:
         for stream in (self._proc.stdout, self._proc.stderr):
@@ -430,10 +447,10 @@ class OwnedProcess:
         # Clean up any surviving descendants with the same escalation, keeping
         # the leader waitable (not reaped) so its pid is not reused as a group.
         members = self._group_members()
-        if members:
+        if members != []:
             self._signal_group(signal.SIGKILL)
             member_deadline = now() + KILL_OBSERVE_DEADLINE
-            while now() < member_deadline and self._group_members():
+            while now() < member_deadline and self._group_members() != []:
                 sleep(0.01)
             members = self._group_members()
 
@@ -441,11 +458,15 @@ class OwnedProcess:
         exit_code, sig = (None, None)
         if leader_exit is not None:
             exit_code, sig = leader_exit
-        reaped = self._reap_leader()
-        if exit_code is None and sig is None:
-            exit_code, sig = reaped
-
-        confirmed = not members
+        confirmed = leader_exit is not None and members == []
+        if confirmed:
+            reaped = self._reap_leader()
+            if exit_code is None and sig is None:
+                exit_code, sig = reaped
+        else:
+            self._close_pipes()
+            if self not in _UNKNOWN_PROCESS_OWNERS:
+                _UNKNOWN_PROCESS_OWNERS.append(self)
         return CleanupReport(confirmed=confirmed, forced=forced, exit_code=exit_code, signal=sig)
 
     def wait_exit_nowait(self) -> Optional[tuple[Optional[int], Optional[int]]]:
@@ -458,26 +479,33 @@ class OwnedProcess:
         The leader has exited; observe it without reaping, verify no descendants
         remain in the owned group, then reap the leader.
         """
-        observed = self._observe_exit_nowait() or (None, None)
+        observed = self._observe_exit_nowait()
+        if observed is None or observed == (None, None):
+            return self.cleanup(cancelled=False)
         members = self._group_members()
-        if members:
+        if members != []:
             # Ordinary descendants outlived the leader (e.g. a surviving writer):
             # terminate them with deadlines before reaping the leader.
             self._signal_group(signal.SIGTERM)
             deadline = time.monotonic() + TERM_DEADLINE
-            while time.monotonic() < deadline and self._group_members():
+            while time.monotonic() < deadline and self._group_members() != []:
                 time.sleep(0.01)
-            if self._group_members():
+            if self._group_members() != []:
                 self._signal_group(signal.SIGKILL)
                 kdeadline = time.monotonic() + KILL_OBSERVE_DEADLINE
-                while time.monotonic() < kdeadline and self._group_members():
+                while time.monotonic() < kdeadline and self._group_members() != []:
                     time.sleep(0.01)
             members = self._group_members()
         exit_code, sig = observed
-        reaped = self._reap_leader()
-        if exit_code is None and sig is None:
-            exit_code, sig = reaped
-        return CleanupReport(confirmed=not members, forced=False, exit_code=exit_code, signal=sig)
+        if members == []:
+            reaped = self._reap_leader()
+            if exit_code is None and sig is None:
+                exit_code, sig = reaped
+        else:
+            self._close_pipes()
+            if self not in _UNKNOWN_PROCESS_OWNERS:
+                _UNKNOWN_PROCESS_OWNERS.append(self)
+        return CleanupReport(confirmed=members == [], forced=False, exit_code=exit_code, signal=sig)
 
 
 # --------------------------------------------------------------------------- #
@@ -499,7 +527,9 @@ class Plan:
     cmake: list[str]            # absolute managed cmake argv prefix
     env: dict[str, str]
     run_cwd: Path
-    resolution: Any = None
+    resolution: Any = None     # canonical installed SDK resolution for v2 projects
+    compiler: Optional[Path] = None
+    runtime_identity: Optional[str] = None
 
 
 def _resolve_managed_cmake(context: ToolContext) -> str:
@@ -512,7 +542,8 @@ def _resolve_managed_cmake(context: ToolContext) -> str:
     return str(cmake_path)
 
 
-def build_plan(context: ToolContext, descriptor: editor_project.Descriptor, project_dir: Path) -> Plan:
+def build_plan(context: ToolContext, descriptor: editor_project.Descriptor, project_dir: Path,
+               *, descriptor_path: Optional[Path] = None) -> Plan:
     """Resolve directories, tools and environment for the descriptor's provider.
 
     Paths are resolved relative to the descriptor directory (source_dir) and the
@@ -532,17 +563,7 @@ def build_plan(context: ToolContext, descriptor: editor_project.Descriptor, proj
 
     cmake = [_resolve_managed_cmake(context)]
 
-    resolution = None
-    if getattr(descriptor, "version", 1) == 2 and descriptor.provider == "cmake":
-        from ludus_tools.operations import resolve_project, _sdk_env
-        from ludus_tools.sdkstore import SdkStore
-        resolved = resolve_project(project_dir, store=SdkStore())
-        resolution = resolved.resolution
-        build_dir = resolved.paths.build_dir
-        env = engine.tool_env(context.tooling_root)
-        env.update(_sdk_env(resolution))
-        env.pop("BUTLER_API_KEY", None)
-    elif descriptor.provider == "ludus":
+    if descriptor.provider == "ludus":
         # Verify the opened source is a Ludus checkout and reuse its bootstrap,
         # managed tools and prepared environment. Missing/stale preparation is an
         # actionable error that directs the user to run init explicitly.
@@ -564,6 +585,42 @@ def build_plan(context: ToolContext, descriptor: editor_project.Descriptor, proj
         # The external sample supplies CMAKE_PREFIX_PATH via $env{LUDUS_SDK_PREFIX}
         # in its preset; the adapter does not choose/build/install an SDK.
 
+    resolution = None
+    compiler = None
+    if getattr(descriptor, "version", 1) == 2 and descriptor.provider == "cmake":
+        from ludus_tools.identity import detect_host_toolchain, require_compatible
+        from ludus_tools.operations import resolve_project
+        from ludus_tools.sdkstore import SdkStore, default_store_root
+
+        # Resolve metadata from the same backend as the installed CLI. The
+        # adapter owns streaming process supervision, not another SDK resolver.
+        resolved = resolve_project(descriptor_path or project_dir / "ludus.project.json",
+                                   store=SdkStore(default_store_root()), enforce_host_toolchain=False)
+        resolution = resolved.resolution
+        compiler = context.tooling_root / "out" / "host-tools" / "bin" / "clang++"
+        if not compiler.is_file():
+            raise editor_project.ProjectError("MissingTools", "prepare the pinned Clang toolchain before building")
+        host = detect_host_toolchain(resolution.identity, cxx=str(compiler), strict=True)
+        require_compatible(resolution.identity, required_flavor=resolved.flavor,
+                           required_features=descriptor.engine.features or None, reference=host)
+        source_dir = resolved.paths.source_dir
+        build_dir = resolved.paths.build_dir
+        from ludus_tools.project_setup import cmake_for
+        cmake = [cmake_for(source_dir, descriptor.preset, cmake[0])]
+        run_cwd = (project_dir / descriptor.run_cwd).resolve()
+        env["LUDUS_SDK_PREFIX"] = str(resolution.prefix)
+
+    env.pop("BUTLER_API_KEY", None)
+
+    sdk_identity = resolution.identity if resolution is not None else None
+    if sdk_identity is None and env.get("LUDUS_SDK_PREFIX"):
+        from ludus_tools.identity import load_prefix_manifest
+        sdk_identity = load_prefix_manifest(Path(env["LUDUS_SDK_PREFIX"]))
+    runtime_identity = None
+    if sdk_identity is not None:
+        runtime_identity = (f"{sdk_identity.source_revision}|{sdk_identity.sdk_variant}|{sdk_identity.cxx_runtime_abi}|"
+                            f"{sdk_identity.compiler_id} {sdk_identity.compiler_version}|{sdk_identity.target_triple}|abi-1.0")
+
     return Plan(
         descriptor=descriptor,
         source_dir=source_dir,
@@ -572,11 +629,21 @@ def build_plan(context: ToolContext, descriptor: editor_project.Descriptor, proj
         env=env,
         run_cwd=run_cwd,
         resolution=resolution,
+        compiler=compiler,
+        runtime_identity=runtime_identity,
     )
 
 
 def configure_argv(plan: Plan) -> list[str]:
-    return [*plan.cmake, "--preset", plan.descriptor.preset, "-B", str(plan.build_dir)]
+    from ludus_tools.project_setup import preset_for
+    argv = [*plan.cmake, "--preset", preset_for(plan.source_dir, plan.descriptor.preset), "-B", str(plan.build_dir)]
+    if plan.resolution is not None:
+        from ludus_tools.operations import configure_argv as sdk_configure_argv
+        argv = sdk_configure_argv(plan.cmake[0], plan.descriptor.preset, plan.source_dir, plan.build_dir)
+        # Resolution compared this exact compiler with the SDK. Do not let a
+        # preset silently choose a different system compiler during configure.
+        argv.append(f"-DCMAKE_CXX_COMPILER={plan.compiler}")
+    return argv
 
 
 def build_argv(plan: Plan) -> list[str]:
@@ -614,12 +681,22 @@ class Supervisor:
         self._on_control = on_control
         self._control_buf = b""
         self.cancel_latched = False
+        self.captured_stdout = ""
+        self.capture_stdout = False
         self._stderr_decoders: dict[int, IncrementalDecoder] = {}
+
+    def _output(self, stage, stream, text):
+        if self.capture_stdout and stream == "stdout":
+            if len((self.captured_stdout + text).encode()) > MAX_PROTOCOL_LINE:
+                raise ProtocolError("captured command output exceeded its bound")
+            self.captured_stdout += text
+        self._writer.output(stage, stream, text)
 
     def latch_cancel(self) -> None:
         self.cancel_latched = True
 
     def _read_control(self) -> None:
+        self._dispatch_control_lines()
         try:
             chunk = os.read(self._control_fd, CHILD_READ_CHUNK)
         except (BlockingIOError, InterruptedError):
@@ -633,6 +710,9 @@ class Supervisor:
         self._control_buf += chunk
         if len(self._control_buf) > MAX_PROTOCOL_LINE:
             raise ProtocolError("inbound control line exceeded its bound")
+        self._dispatch_control_lines()
+
+    def _dispatch_control_lines(self) -> None:
         while b"\n" in self._control_buf:
             line, self._control_buf = self._control_buf.split(b"\n", 1)
             if not line.strip():
@@ -656,7 +736,7 @@ class Supervisor:
                 continue
             raise ProtocolError(f"unknown control type {mtype!r}")
 
-    def run_command(self, stage: str, child: OwnedProcess) -> CleanupReport:
+    def run_command(self, stage: str, child: OwnedProcess, *, timeout: Optional[float] = None) -> CleanupReport:
         """Drain the child's streams while servicing control, until it exits.
 
         Returns the finalized CleanupReport. On cancellation or a protocol error
@@ -664,17 +744,25 @@ class Supervisor:
         propagates, so a long-running configure/build child is never leaked.
         """
         try:
-            return self._run_command_loop(stage, child)
+            return self._run_command_loop(stage, child, timeout=timeout)
         except Cancelled:
             # Clean up the owned group with deadlines, then re-raise carrying the
             # cleanup report so the caller can report confirmation accurately.
             report = child.cleanup(cancelled=True)
             raise Cancelled(report)
-        except ProtocolError:
-            child.cleanup(cancelled=True)
+        except ProtocolError as exc:
+            report = child.cleanup(cancelled=True)
+            if not report.confirmed:
+                raise _CleanupUnknown(stage, report) from exc
             raise
+        except OSError as exc:
+            report = child.cleanup(cancelled=True)
+            if not report.confirmed:
+                raise _CleanupUnknown(stage, report) from exc
+            raise ProtocolError(f"child I/O failed: {exc}") from exc
 
-    def _run_command_loop(self, stage: str, child: OwnedProcess) -> CleanupReport:
+    def _run_command_loop(self, stage: str, child: OwnedProcess, *, timeout: Optional[float] = None) -> CleanupReport:
+        deadline = time.monotonic() + timeout if timeout is not None else None
         sel = selectors.DefaultSelector()
         os.set_blocking(self._control_fd, False)
         os.set_blocking(child.stdout_fd, False)
@@ -694,6 +782,9 @@ class Supervisor:
         leader_exited = False
         try:
             while True:
+                self._writer.flush()
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ProtocolError(f"{stage} exceeded its {timeout:g}-second deadline")
                 for key, _ in sel.select(timeout=0.1):
                     tag = key.data
                     if tag == "control":
@@ -707,7 +798,7 @@ class Supervisor:
                             except KeyError:
                                 pass
                         else:
-                            self._writer.output(stage, "stdout", out_decoder.decode(data))
+                            self._output(stage, "stdout", out_decoder.decode(data))
                     elif tag == "stderr":
                         data = child.read_stderr(CHILD_READ_CHUNK)
                         if not data:
@@ -718,7 +809,7 @@ class Supervisor:
                                 pass
                         else:
                             stderr_bytes += len(data)
-                            self._writer.output(stage, "stderr", err_decoder.decode(data))
+                            self._output(stage, "stderr", err_decoder.decode(data))
 
                 # Completion is driven by the LEADER's exit, not by stream EOF.
                 if not leader_exited:
@@ -747,7 +838,7 @@ class Supervisor:
                             continue
                         drained_any = True
                         decoder = out_decoder if tag == "stdout" else err_decoder
-                        self._writer.output(stage, tag, decoder.decode(data))
+                        self._output(stage, tag, decoder.decode(data))
                     if not drained_any:
                         break
         finally:
@@ -789,6 +880,8 @@ class Operation:
         self._supervisor.latch_cancel()
 
     def _check_cancel(self) -> None:
+        self._writer.flush()
+        self._supervisor._read_control()
         if self._supervisor.cancel_latched:
             raise Cancelled()
 
@@ -803,18 +896,17 @@ class Operation:
         if self._expected and digest != self._expected:
             raise editor_project.ProjectError(
                 "Conflict", "descriptor digest does not match the expected clean snapshot")
-        # Share the v2 parser with the installed backend; preserve v1 behavior.
-        from ludus_tools.descriptor import parse_descriptor_bytes
+        # Revalidate all fields before executing any tool.
         return parse_descriptor_bytes(data)
 
     def _run_stage(self, stage: str, argv: list[str], cwd: Path, env: dict[str, str],
-                   code_on_fail: str) -> None:
+                   code_on_fail: str, *, timeout: Optional[float] = None) -> None:
         self._stage = stage
         self._writer.phase(stage)
         self._writer.command(stage, argv, str(cwd))
         self._check_cancel()
         child = OwnedProcess(argv, str(cwd), env)
-        report = self._supervisor.run_command(stage, child)
+        report = self._supervisor.run_command(stage, child, timeout=timeout)
         if not report.confirmed:
             raise _CleanupUnknown(stage, report)
         if report.exit_code not in (0, None) or report.signal is not None:
@@ -822,10 +914,36 @@ class Operation:
 
     def execute(self) -> OperationResult:
         try:
+            if self._operation == "project_create":
+                return self._execute_setup(None)
             descriptor = self._load_clean_descriptor()
+            if self._operation in ("project_check", "project_setup"):
+                return self._execute_setup(descriptor)
             if self._operation in ("release_init", "package"):
                 return self._execute_release(descriptor)
-            plan = build_plan(self._context, descriptor, self._project_path.parent)
+            plan = build_plan(self._context, descriptor, self._project_path.parent,
+                              descriptor_path=self._project_path)
+            from ludus_tools.cmake_setup import validate_project_presets
+
+            try:
+                validate_project_presets(plan.cmake[0], plan.source_dir, plan.env, descriptor.preset)
+            except ValueError as exc:
+                raise editor_project.ProjectError("InvalidProject", str(exc)) from exc
+
+            if self._operation == "inspect_setup":
+                from ludus_tools.cmake_setup import inspect_project_setup
+
+                compiler = plan.compiler
+                if compiler is None:
+                    compiler = shutil.which("clang++-18", path=plan.env.get("PATH"))
+                sdk_prefix = str(plan.resolution.prefix) if plan.resolution is not None else None
+                inspect_project_setup(
+                    plan.cmake[0], str(self._context.engine.ninja(self._context.tooling_root)),
+                    plan.source_dir, plan.build_dir, plan.env, descriptor.preset,
+                    compiler=str(compiler) if compiler is not None else None,
+                    sdk_prefix=sdk_prefix,
+                )
+                return OperationResult("success", "configuring", "Ok", "CMake project setup is ready")
 
             # Acquire the cooperative per-build-tree lock for the WHOLE operation,
             # including runtime ownership. A second editor instance on the same
@@ -852,17 +970,66 @@ class Operation:
         except (OSError, subprocess.CalledProcessError) as exc:
             return OperationResult("failed", self._stage, "ReleaseFailed" if self._operation in ("release_init", "package") else "SpawnFailed", str(exc))
         except ToolingError as exc:
-            return OperationResult("failed", self._stage, "ReleaseFailed" if self._operation in ("release_init", "package") else "InvalidProject", f"{exc.code}: {exc.message}")
+            code = "ReleaseFailed" if self._operation in ("release_init", "package") else exc.code if exc.code in ("MissingTools", "ConfigureFailed", "BuildFailed", "Busy", "Conflict") else "InvalidProject"
+            return OperationResult("failed", self._stage, code, f"{exc.code}: {exc.message}")
         except editor_project.ProjectError as exc:
             return OperationResult("failed", self._stage, exc.code, exc.message)
         except self._context.engine.EngineError as exc:
-            # File API read/validation or bootstrap failure after configure:
-            # a reply/identity problem, not a crash.
             return OperationResult("failed", self._stage, "ReplyInvalid", str(exc))
 
     def _check_release_cancel(self) -> None:
         self._supervisor._read_control()
         self._check_cancel()
+
+    def _execute_setup(self, descriptor) -> OperationResult:
+        from ludus_tools.project_setup import check_project, repair_project, supported_project
+        from ludus_tools.create import create_project
+        self._stage = "configuring"
+        self._writer.phase(self._stage)
+        self._check_release_cancel()
+        if descriptor is not None:
+            supported_project(self._project_path)
+        elif self._project_path.exists():
+            raise ToolingError("DestinationExists", "New Project destination already exists")
+        def runner(argv, *, cwd, env):
+            capture = "--version" in argv or any(arg.startswith("--list-presets=") for arg in argv)
+            self._supervisor.capture_stdout = capture
+            self._supervisor.captured_stdout = ""
+            try:
+                self._check_release_cancel()
+                self._run_stage("building" if "--build" in argv or "ctest" in Path(argv[0]).name else "configuring",
+                                list(argv), cwd, env, "BuildFailed" if "--build" in argv else "ConfigureFailed")
+                return self._supervisor.captured_stdout
+            finally:
+                self._supervisor.capture_stdout = False
+        options = dict(tooling_root=self._context.tooling_root, runner=runner, cancel_check=self._check_release_cancel)
+        if self._operation == "project_check":
+            message = check_project(self._project_path, **options)
+        else:
+            sdk = Path(self._options["sdk"]) if self._options["sdk"] else None
+            web = Path(self._options["web_sdk"]) if self._options["web_sdk"] else None
+            if self._options.get("prepare_engine"):
+                root = self._context.tooling_root
+                profile = descriptor.preset if descriptor else "linux-clang-development"
+                env = self._context.engine.tool_env(root)
+                env.update(CI="true")
+                self._run_stage("configuring", [str(root / "scripts/init"), profile, "--preset-only", "--cli", "--no-system-install"], root, env, "ConfigureFailed")
+                self._run_stage("building", [str(root / "scripts/build"), profile], root, env, "BuildFailed")
+                if descriptor and "GraphicsRhi" in descriptor.engine.components:
+                    self._run_stage("building", [str(root / "scripts/shader-probe"), "bootstrap"], root, env, "BuildFailed")
+                sdk = sdk or root / "out/install" / profile
+                self._run_stage("building", [str(self._context.engine.cmake(root)), "--install", str(root / "out/build" / profile), "--prefix", str(sdk)], root, env, "BuildFailed")
+            if self._operation == "project_create":
+                if sdk is None:
+                    raise ToolingError("InvalidProject", "New Project needs an installed SDK or explicit engine preparation")
+                create_project(self._project_path, name=self._options["name"], template_id="minimal",
+                               engine_version="", local_sdk_prefix=sdk, cancel_check=self._check_release_cancel,
+                               verify_staged=lambda staged: repair_project(staged, sdk=sdk, web_sdk=web, **options))
+                message = "Project created and verified; ready to open"
+            else:
+                message = repair_project(self._project_path, sdk=sdk, web_sdk=web, **options)
+        self._writer.output(self._stage, "stdout", message + "\n")
+        return OperationResult("success", self._stage, "Ok", message)
 
     def _execute_release(self, descriptor) -> OperationResult:
         from ludus_tools.release_setup import setup_release
@@ -914,7 +1081,6 @@ class Operation:
         self._context.cmake_targets.query_codemodel(plan.build_dir, FILE_API_CLIENT)
         self._check_cancel()
         self._run_stage("configuring", configure_argv(plan), plan.source_dir, plan.env, "ConfigureFailed")
-
         if plan.resolution is not None:
             from ludus_tools.resolve import assert_stamp_unchanged, write_stamp
             assert_stamp_unchanged(plan.build_dir, plan.resolution)
@@ -932,11 +1098,13 @@ class Operation:
         # Resolve the selected executable target before building it.
         self._resolve_executable(plan)
         self._check_cancel()
-        self._run_stage("building", build_argv(plan), plan.source_dir, plan.env, "BuildFailed")
-
         if plan.resolution is not None:
             from ludus_tools.resolve import assert_stamp_unchanged
             assert_stamp_unchanged(plan.build_dir, plan.resolution)
+        self._run_stage("building", build_argv(plan), plan.source_dir, plan.env, "BuildFailed")
+        if plan.resolution is not None:
+            assert_stamp_unchanged(plan.build_dir, plan.resolution)
+
         # CMake may regenerate during build: reread the current codemodel and
         # re-resolve the artifact before Run.
         self._context.cmake_targets.verify_identity(plan.build_dir, plan.source_dir,
@@ -1025,7 +1193,7 @@ class _CleanupUnknown(Exception):
 # --------------------------------------------------------------------------- #
 # stdio handshake and main
 # --------------------------------------------------------------------------- #
-def _read_one_request(control_fd: int, deadline: float) -> dict:
+def _read_one_request(control_fd: int, deadline: float) -> tuple[dict, bytes]:
     """Read exactly one request line within the deadline. Raises on timeout/EOF."""
     buf = b""
     os.set_blocking(control_fd, False)
@@ -1044,12 +1212,12 @@ def _read_one_request(control_fd: int, deadline: float) -> dict:
                 if len(buf) > MAX_PROTOCOL_LINE:
                     raise ProtocolError("request line exceeded its bound")
                 if b"\n" in buf:
-                    line, _ = buf.split(b"\n", 1)
+                    line, remaining = buf.split(b"\n", 1)
                     try:
                         message = json.loads(line.decode("utf-8"))
                     except (ValueError, UnicodeDecodeError) as exc:
                         raise ProtocolError("malformed request frame") from exc
-                    return message
+                    return message, remaining
         raise ProtocolError("no request received within 5 seconds")
     finally:
         sel.close()
@@ -1066,7 +1234,7 @@ def _validate_request(message: dict) -> tuple[str, str, Path, str]:
     except ValueError as exc:
         raise ProtocolError("request job is not hex") from exc
     operation = message.get("operation")
-    if operation not in ("configure", "build", "build_run", "release_init", "package"):
+    if operation not in ("configure", "build", "build_run", "build_generation", "inspect_setup", "release_init", "package", "project_check", "project_setup", "project_create"):
         raise ProtocolError("unknown operation")
     project = message.get("project")
     if not isinstance(project, str) or not os.path.isabs(project):
@@ -1075,6 +1243,12 @@ def _validate_request(message: dict) -> tuple[str, str, Path, str]:
     if not isinstance(expected, str) or (expected and len(expected) != 64):
         raise ProtocolError("expected_sha256 must be 64 hex characters")
     fields = {"platform": 16, "itch_target": 128} if operation == "release_init" else {"profile": 64, "version": 128, "sdk": 4096} if operation == "package" else {}
+    if operation in ("project_setup", "project_create"):
+        fields = {"sdk": 4096, "web_sdk": 4096}
+        if operation == "project_create":
+            fields["name"] = 256
+        if not isinstance(message.get("prepare_engine"), bool):
+            raise ProtocolError("prepare_engine must be boolean")
     for key, maximum in fields.items():
         value = message.get(key)
         if not isinstance(value, str) or len(value.encode()) > maximum or any(ord(c) < 32 for c in value):
@@ -1084,8 +1258,44 @@ def _validate_request(message: dict) -> tuple[str, str, Path, str]:
 
 def run_stdio(context: ToolContext, in_fd: int, out_fd: int) -> int:
     """Run the single-operation stdio protocol. Returns the bridge exit code."""
+    frames: deque[bytes] = deque()
+    queued_bytes = 0
+    os.set_blocking(out_fd, False)
+    def flush() -> None:
+        nonlocal queued_bytes
+        for _ in range(64):
+            if not frames:
+                break
+            try:
+                count = os.write(out_fd, frames[0])
+            except (BlockingIOError, InterruptedError):
+                break
+            if count <= 0:
+                raise ProtocolError("frontend output pipe closed")
+            queued_bytes -= count
+            if count == len(frames[0]):
+                frames.popleft()
+            else:
+                frames[0] = frames[0][count:]
+                break
     def write(data: bytes) -> None:
-        os.write(out_fd, data)
+        nonlocal queued_bytes
+        # Aggregate control + the fixed output-credit window + terminal reserve.
+        if queued_bytes+len(data) > CONTROL_AGGREGATE_CAP+OUTPUT_CREDIT_WINDOW+CONTROL_RESERVE_BYTES:
+            raise ProtocolError("frontend output queue exceeded its bound")
+        frames.append(data)
+        queued_bytes += len(data)
+        flush()
+
+    def finish(code: int) -> int:
+        deadline = time.monotonic()+2
+        with selectors.DefaultSelector() as selector:
+            selector.register(out_fd, selectors.EVENT_WRITE)
+            while frames and time.monotonic() < deadline:
+                flush()
+                if frames:
+                    selector.select(0.02)
+        return code if not frames else 1
 
     # Minimal pre-handshake writer (no job yet) just for the `ready` frame.
     def write_ready() -> None:
@@ -1093,7 +1303,7 @@ def run_stdio(context: ToolContext, in_fd: int, out_fd: int) -> int:
 
     try:
         write_ready()
-        message = _read_one_request(in_fd, time.monotonic() + READY_REQUEST_TIMEOUT)
+        message, remaining = _read_one_request(in_fd, time.monotonic() + READY_REQUEST_TIMEOUT)
         job, operation, project, expected = _validate_request(message)
     except ProtocolError as exc:
         try:
@@ -1103,10 +1313,15 @@ def run_stdio(context: ToolContext, in_fd: int, out_fd: int) -> int:
                   .encode("utf-8"))
         except OSError:
             pass
-        return 2
+        return finish(2)
 
-    writer = ProtocolWriter(job, write)
-    operation_obj = Operation(context, writer, job, operation, project, expected, in_fd, message)
+    writer = ProtocolWriter(job, write, flush)
+    if operation == "build_generation":
+        from play_build import GenerationOperation
+        operation_obj = GenerationOperation(context, writer, job, operation, project, expected, in_fd, message)
+    else:
+        operation_obj = Operation(context, writer, job, operation, project, expected, in_fd, message)
+    operation_obj._supervisor._control_buf = remaining
 
     # SIGTERM/SIGINT only latch cancellation; cleanup runs before exit.
     def _handle_signal(_signum, _frame):
@@ -1122,18 +1337,18 @@ def run_stdio(context: ToolContext, in_fd: int, out_fd: int) -> int:
         result = operation_obj.execute()
     except ProtocolError as exc:
         writer.result("failed", operation_obj._stage, "ProtocolError", str(exc), True, None, None)
-        return 2
+        return finish(2)
 
     writer.result(result.outcome, result.stage, result.code, result.message,
                   result.cleanup_confirmed, result.exit_code, result.signal)
 
     if not result.cleanup_confirmed:
-        return 1
+        return finish(1)
     if result.outcome == "cancelled":
-        return 130
+        return finish(130)
     if result.outcome == "success":
-        return 0
-    return 1
+        return finish(0)
+    return finish(1)
 
 
 def _make_context(tooling_root: Path) -> ToolContext:

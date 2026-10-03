@@ -25,6 +25,7 @@ scripts/python/dist/
 # Editor workspace cooperative save-lock directory (QLockFile), created beside a
 # project descriptor. Generated at save time; never committed.
 .ludus/
+examples/live-edit-game/out/
 
 # Installed JavaScript test dependencies.
 node_modules

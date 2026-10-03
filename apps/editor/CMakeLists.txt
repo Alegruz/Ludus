@@ -39,9 +39,13 @@ find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets)
 # widgets or launching tools. All headers are private (src/internal).
 add_library(ludus_editor_core STATIC
     src/internal/tool_process.h
+    src/internal/play_process.h
+    src/internal/source_watch.h
     src/workspace.cpp
     src/project_store.cpp
     src/tool_process.cpp
+    src/play_process.cpp
+    src/source_watch.cpp
     src/log_buffer.cpp
 )
 set_target_properties(ludus_editor_core PROPERTIES AUTOMOC ON)
@@ -63,6 +67,7 @@ add_executable(ludus_editor
     main.cpp
     src/main_window.cpp
     src/controller.cpp
+    src/controller_play.cpp
 )
 set_target_properties(ludus_editor PROPERTIES AUTOMOC ON)
 target_include_directories(ludus_editor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -97,6 +102,8 @@ if(LUDUS_BUILD_TESTS)
         tests/tool_process_tests.cpp
         tests/log_buffer_tests.cpp
         tests/controller_tests.cpp
+        tests/source_watch_tests.cpp
+        tests/live_journey_tests.cpp
     )
     set_target_properties(ludus_editor_tests PROPERTIES AUTOMOC ON)
     target_include_directories(ludus_editor_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -105,7 +112,7 @@ if(LUDUS_BUILD_TESTS)
         "LUDUS_EDITOR_PROJECT_ROOT=\"${PROJECT_SOURCE_DIR}\"")
     # Controller/MainWindow sources are compiled directly into the test binary so
     # tests can drive the controller and (offscreen) widgets.
-    target_sources(ludus_editor_tests PRIVATE src/controller.cpp src/main_window.cpp)
+    target_sources(ludus_editor_tests PRIVATE src/controller.cpp src/controller_play.cpp src/main_window.cpp)
     target_link_libraries(ludus_editor_tests
         PRIVATE
             ludus_editor_core

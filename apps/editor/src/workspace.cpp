@@ -45,6 +45,10 @@ const char* ResultCodeName(ResultCode code) noexcept
             return "Cancelled";
         case ResultCode::ReleaseFailed:
             return "ReleaseFailed";
+        case ResultCode::GenerationInvalid:
+            return "GenerationInvalid";
+        case ResultCode::Superseded:
+            return "Superseded";
         case ResultCode::CleanupUnknown:
             return "CleanupUnknown";
     }
@@ -69,6 +73,9 @@ Capabilities ComputeCapabilities(const WorkspaceState& state)
     caps.CanConfigure = CanStartJob(state, ActionKind::Configure);
     caps.CanBuild = CanStartJob(state, ActionKind::Build);
     caps.CanBuildRun = CanStartJob(state, ActionKind::BuildRun);
+    caps.CanProjectCheck = CanStartJob(state, ActionKind::ProjectCheck);
+    caps.CanProjectSetup = CanStartJob(state, ActionKind::ProjectSetup);
+    caps.CanProjectCreate = CanStartJob(state, ActionKind::ProjectCreate);
     caps.CanReleaseInit = CanStartJob(state, ActionKind::ReleaseInit);
     caps.CanPackage = CanStartJob(state, ActionKind::Package);
 
@@ -90,12 +97,18 @@ bool CanStartJob(const WorkspaceState& state, ActionKind kind)
     {
         return false;
     }
+    if (kind == ActionKind::ProjectCreate)
+    {
+        return state.Document == DocumentState::NoProject || !state.Dirty();
+    }
     if (state.Document != DocumentState::ProjectLoaded)
     {
         return false;
     }
     switch (kind)
     {
+        case ActionKind::ProjectCheck:
+        case ActionKind::ProjectSetup:
         case ActionKind::ReleaseInit:
         case ActionKind::Package:
             return !state.Dirty() && state.Saved.Version == 2 && state.Saved.ProviderKind == Provider::Cmake;
@@ -150,7 +163,7 @@ bool AllowedForward(const PhaseStep& step)
         case Phase::Configuring:
             return step.To == Phase::Building || step.To == Phase::Launching;
         case Phase::Building:
-            return step.To == Phase::Launching;
+            return step.To == Phase::Launching || step.To == Phase::Publishing;
         // Launching -> Running is handled only by RuntimeStarted.
         default:
             return false;

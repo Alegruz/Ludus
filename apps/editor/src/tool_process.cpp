@@ -53,10 +53,20 @@ const char* ToolOperationName(ToolOperation op) noexcept
             return "build";
         case ToolOperation::BuildRun:
             return "build_run";
+        case ToolOperation::ProjectCheck:
+            return "project_check";
+        case ToolOperation::ProjectSetup:
+            return "project_setup";
+        case ToolOperation::ProjectCreate:
+            return "project_create";
         case ToolOperation::ReleaseInit:
             return "release_init";
         case ToolOperation::Package:
             return "package";
+        case ToolOperation::BuildGeneration:
+            return "build_generation";
+        case ToolOperation::InspectSetup:
+            return "inspect_setup";
     }
     return "configure";
 }
@@ -77,6 +87,9 @@ ToolProcess::ToolProcess(QObject* parent) : QObject(parent)
 
 ToolProcess::~ToolProcess()
 {
+    Process_.disconnect(this);
+    ReadyTimer_.stop();
+    ReadyTimer_.disconnect(this);
     // The destructor must not be used as cancellation. If a process somehow
     // outlives this object (it should not: the controller confirms cleanup
     // first), ask it to terminate without blocking the GUI thread.
@@ -136,6 +149,13 @@ void ToolProcess::SendRequest()
     request.insert(QStringLiteral("operation"), QString::fromLatin1(ToolOperationName(Launch_.Operation)));
     request.insert(QStringLiteral("project"), Launch_.ProjectPath);
     request.insert(QStringLiteral("expected_sha256"), Launch_.ExpectedSha256);
+    if (Launch_.Operation == ToolOperation::ProjectSetup || Launch_.Operation == ToolOperation::ProjectCreate)
+    {
+        request.insert(QStringLiteral("sdk"), Launch_.SetupSdk);
+        request.insert(QStringLiteral("web_sdk"), Launch_.SetupWebSdk);
+        request.insert(QStringLiteral("name"), Launch_.ProjectName);
+        request.insert(QStringLiteral("prepare_engine"), Launch_.PrepareEngine);
+    }
     if (Launch_.Operation == ToolOperation::ReleaseInit)
     {
         request.insert(QStringLiteral("platform"), Launch_.ReleasePlatform);
@@ -168,6 +188,14 @@ void ToolProcess::Cancel()
         return;
     }
     CancelLatched_ = true;
+    if (ReadyReceived_)
+    {
+        SendCancellation();
+    }
+}
+
+void ToolProcess::SendCancellation()
+{
     QJsonObject cancel;
     cancel.insert(QStringLiteral("protocol"), 1);
     cancel.insert(QStringLiteral("job"), EncodeJob(Job_));
@@ -271,6 +299,10 @@ bool ToolProcess::DispatchFrame(const QByteArray& line)
         ReadyReceived_ = true;
         ReadyTimer_.stop();
         SendRequest();
+        if (CancelLatched_)
+        {
+            SendCancellation();
+        }
         ProtocolEvent event;
         event.Kind = ProtocolEvent::Type::Ready;
         event.Job = Job_;
@@ -310,7 +342,7 @@ bool ToolProcess::DispatchFrame(const QByteArray& line)
     if (type == QStringLiteral("command"))
     {
         event.Kind = ProtocolEvent::Type::Command;
-        for (const QJsonValue value : object.value(QStringLiteral("argv")).toArray())
+        for (const auto& value : object.value(QStringLiteral("argv")).toArray())
         {
             event.Argv.append(value.toString());
         }
@@ -321,7 +353,7 @@ bool ToolProcess::DispatchFrame(const QByteArray& line)
     if (type == QStringLiteral("targets"))
     {
         event.Kind = ProtocolEvent::Type::Targets;
-        for (const QJsonValue value : object.value(QStringLiteral("targets")).toArray())
+        for (const auto& value : object.value(QStringLiteral("targets")).toArray())
         {
             event.Targets.append(value.toString());
         }
@@ -350,13 +382,25 @@ bool ToolProcess::DispatchFrame(const QByteArray& line)
         AcknowledgeCredit();
         return true;
     }
+    if (type == QStringLiteral("generation"))
+    {
+        event.Kind = ProtocolEvent::Type::Generation;
+        event.GenerationPath = object.value(QStringLiteral("path")).toString();
+        if (Launch_.Operation != ToolOperation::BuildGeneration || event.GenerationPath.isEmpty())
+        {
+            FailProtocol(QStringLiteral("unexpected generation publication"));
+            return false;
+        }
+        Q_EMIT Event(event);
+        return true;
+    }
     if (type == QStringLiteral("runtime_started"))
     {
         event.Kind = ProtocolEvent::Type::RuntimeStarted;
         event.Pid = static_cast<qint64>(object.value(QStringLiteral("pid")).toDouble());
         event.Executable = object.value(QStringLiteral("executable")).toString();
         event.Cwd = object.value(QStringLiteral("cwd")).toString();
-        for (const QJsonValue value : object.value(QStringLiteral("args")).toArray())
+        for (const auto& value : object.value(QStringLiteral("args")).toArray())
         {
             event.Argv.append(value.toString());
         }
@@ -381,7 +425,7 @@ bool ToolProcess::DispatchFrame(const QByteArray& line)
         }
         // The named result code maps to the stable ResultCode vocabulary.
         const QString codeName = object.value(QStringLiteral("code")).toString();
-        event.Code = ResultCode::Ok;
+        event.Code = ResultCode::ProtocolError;
         for (foundation::uint8 i = 0; i <= static_cast<foundation::uint8>(ResultCode::CleanupUnknown); ++i)
         {
             if (codeName == QString::fromLatin1(ResultCodeName(static_cast<ResultCode>(i))))
@@ -437,6 +481,7 @@ void ToolProcess::OnErrorOccurred(QProcess::ProcessError error)
         event.Code = ResultCode::SpawnFailed;
         event.Message = QStringLiteral("failed to start the editor tool adapter");
         Q_EMIT Event(event);
+        Finish();
     }
 }
 
@@ -472,6 +517,7 @@ void ToolProcess::Finish()
 {
     Active_ = false;
     ReadyTimer_.stop();
+    Q_EMIT Finished();
 }
 
 } // namespace ludus::editor
