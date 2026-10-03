@@ -11,8 +11,8 @@ Templates are addressed by ``(id, version)`` which is recorded in the project
 descriptor's ``template`` object so later template versions never silently
 overwrite user-owned game code (design "Project creation and Editor workflow").
 
-The only bundled template initially is ``minimal`` (version 1): a single native
-application target that initializes the engine and prints useful diagnostics
+The only bundled template initially is ``minimal`` (version 2): a single native
+application target that queries the public engine version
 using public headers only — no new engine subsystem, no scene/ECS/hot reload.
 Placeholders are substituted by exact key, never by executing template content,
 so a file name or value can never trigger an arbitrary command.
@@ -92,7 +92,7 @@ def _minimal_template() -> Template:
             "CMakeLists.txt",
             """cmake_minimum_required(VERSION 3.29)
 
-project({{ NAME }} LANGUAGES CXX)
+project({{ TARGET }} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -108,9 +108,10 @@ target_link_libraries({{ TARGET }} PRIVATE {{ LINK_TARGETS }})
 
 # Apply the supported application compile/link policy (C++23, no exceptions)
 # without importing engine build warnings or private targets.
-if(COMMAND ludus_apply_app_policy)
-    ludus_apply_app_policy({{ TARGET }})
+if(NOT COMMAND ludus_apply_app_policy)
+    message(FATAL_ERROR "The selected SDK lacks the supported Ludus application policy helper")
 endif()
+ludus_apply_app_policy({{ TARGET }})
 """,
         ),
         TemplateFile(
@@ -157,20 +158,14 @@ endif()
         ),
         TemplateFile(
             "src/main.cpp",
-            """// {{ NAME }} — minimal Ludus application template (v1).
-//
-// Demonstrates engine initialization and useful diagnostics using only public
-// SDK headers. It introduces no new engine subsystem (no scenes/ECS/hot reload).
+            """// Minimal Ludus application template (v2).
 #include <ludus/foundation/base/version.hpp>
 
-#include <cstdio>
+#include <string_view>
 
 int main()
 {
-    // The build_metadata / version header is a stable public surface; printing
-    // it proves the SDK linked and the policy headers are consistent.
-    std::printf("{{ NAME }} starting against Ludus SDK\\n");
-    return 0;
+    return ludus::foundation::version_string().empty() ? 1 : 0;
 }
 """,
         ),
@@ -188,7 +183,7 @@ int main()
             "",
         ),
     ]
-    return Template(id="minimal", version=1, files=files)
+    return Template(id="minimal", version=2, files=files)
 
 
 _TEMPLATES: dict[str, Template] = {t.id: t for t in (_minimal_template(),)}

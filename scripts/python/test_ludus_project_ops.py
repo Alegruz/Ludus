@@ -33,7 +33,7 @@ class Templates(unittest.TestCase):
         )
         by = {f.relpath: f.content for f in files}
         self.assertIn("CMakeLists.txt", by)
-        self.assertIn("project(My Game", by["CMakeLists.txt"])
+        self.assertIn("project(my_game", by["CMakeLists.txt"])
         self.assertIn("Ludus::FoundationBase Ludus::GraphicsRhi", by["CMakeLists.txt"])
         self.assertIn("linux-clang-release", by["CMakePresets.json"])
         self.assertNotIn("{{", by["CMakeLists.txt"])

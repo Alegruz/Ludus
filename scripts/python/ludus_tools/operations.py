@@ -140,7 +140,7 @@ def resolve_project(
     validate_descriptor_lock_agreement(descriptor.engine.version, lock)
     local_settings = parse_local_settings_file(paths.local_settings_path)
 
-    target_triple = _target_triple_for_lock(lock, flavor) or "linux-x64"
+    target_triple = _target_triple_for_lock(lock, flavor) or "x86_64-linux-gnu"
     # Resolve once without the host gate to learn the SDK identity, then (when
     # enforcing) re-resolve with a host-toolchain reference so an incompatible
     # compiler/runtime ABI is rejected before configure. Resolving twice is cheap
@@ -230,7 +230,7 @@ def _run(argv: Sequence[str], *, cwd: Path, env: dict, echo: bool = True) -> int
 
 
 def _sdk_env(resolution: Resolution) -> dict:
-    env = dict(os.environ)
+    env = {key: value for key, value in os.environ.items() if key != "BUTLER_API_KEY"}
     # The generated preset reads $env{LUDUS_SDK_PREFIX}. The backend supplies the
     # validated prefix; raw CMake users set it themselves (documented).
     env["LUDUS_SDK_PREFIX"] = str(resolution.prefix)
@@ -330,7 +330,9 @@ def resolve_artifact(resolved: ResolvedProject) -> Optional[Path]:
         # cmake_targets needs an "engine"-like object for error translation; the
         # CLI passes a tiny shim exposing EngineError. We call the resolver
         # defensively and translate any failure to None (caller reports).
-        import engine  # type: ignore
+        from types import SimpleNamespace
+
+        engine = SimpleNamespace(EngineError=ValueError)
 
         return target_executable(
             resolved.paths.build_dir,

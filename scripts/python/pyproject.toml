@@ -20,10 +20,12 @@ dependencies = []
 ludus = "ludus_tools.cli:main"
 
 [tool.setuptools]
-# Ship only the host-tooling package. The engine-checkout scripts
+# Ship the host-tooling package and standalone File API resolver. The engine-checkout scripts
 # (engine.py, editor_tool.py, ...) remain compatible entry points in the repo
 # but are not part of the redistributable host-tools wheel.
 packages = ["ludus_tools"]
+# Shared File API resolver is standalone and has no engine/Qt imports.
+py-modules = ["cmake_targets"]
 include-package-data = true
 
 [tool.setuptools.package-data]

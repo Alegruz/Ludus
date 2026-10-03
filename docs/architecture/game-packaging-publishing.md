@@ -13,6 +13,12 @@ upload those exact packages through butler. The Editor and CI use the same
 operations as the CLI. Packaging works without an itch.io account, network,
 Qt or an engine source checkout once required tools and SDKs are installed.
 
+The first implementation is described in the
+[native release guide](../development/game-packaging-publishing.md) and
+[evidence ledger](../development/game-packaging-publishing-evidence.md). Those
+records distinguish implemented CLI operations from pending production SDK,
+transport, CI, Editor and browser acceptance.
+
 ## Scope and prerequisites
 
 First deliver a Linux x64 Release package and explicit itch.io upload for an
