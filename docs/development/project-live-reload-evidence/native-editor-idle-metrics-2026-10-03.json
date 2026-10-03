@@ -1,0 +1,109 @@
+{
+    "builds": [
+        {
+            "adapter_total_ms": 1727,
+            "build_ms": 223,
+            "configure_ms": 296,
+            "label": "post-repair-start",
+            "publication_ms": 82
+        },
+        {
+            "adapter_total_ms": 2100,
+            "build_ms": 234,
+            "configure_ms": 316,
+            "label": "warm-no-change",
+            "publication_ms": 71
+        },
+        {
+            "adapter_total_ms": 1850,
+            "build_ms": 234,
+            "configure_ms": 316,
+            "label": "warm-no-change",
+            "publication_ms": 81
+        },
+        {
+            "adapter_total_ms": 1911,
+            "build_ms": 233,
+            "configure_ms": 296,
+            "label": "warm-no-change",
+            "publication_ms": 72
+        },
+        {
+            "adapter_total_ms": 1920,
+            "build_ms": 244,
+            "configure_ms": 314,
+            "label": "warm-no-change",
+            "publication_ms": 82
+        },
+        {
+            "adapter_total_ms": 1892,
+            "build_ms": 235,
+            "configure_ms": 327,
+            "label": "warm-no-change",
+            "publication_ms": 81
+        },
+        {
+            "adapter_total_ms": 1899,
+            "build_ms": 244,
+            "configure_ms": 305,
+            "label": "warm-no-change",
+            "publication_ms": 71
+        },
+        {
+            "adapter_total_ms": 1899,
+            "build_ms": 233,
+            "configure_ms": 335,
+            "label": "warm-no-change",
+            "publication_ms": 82
+        },
+        {
+            "adapter_total_ms": 1971,
+            "build_ms": 245,
+            "configure_ms": 326,
+            "label": "warm-no-change",
+            "publication_ms": 80
+        },
+        {
+            "adapter_total_ms": 1888,
+            "build_ms": 254,
+            "configure_ms": 315,
+            "label": "warm-no-change",
+            "publication_ms": 81
+        },
+        {
+            "adapter_total_ms": 1950,
+            "build_ms": 265,
+            "configure_ms": 325,
+            "label": "warm-no-change",
+            "publication_ms": 71
+        },
+        {
+            "adapter_total_ms": 2808,
+            "build_ms": 660,
+            "configure_ms": 369,
+            "label": "body-edit-with-debounce",
+            "publication_ms": 82
+        },
+        {
+            "adapter_total_ms": 1826,
+            "build_ms": 223,
+            "configure_ms": 315,
+            "label": "cold-project-B",
+            "publication_ms": 71
+        }
+    ],
+    "copied_property_roundtrip_ms": [
+        84,
+        64,
+        84,
+        84,
+        83,
+        83,
+        85,
+        84,
+        63,
+        84
+    ],
+    "platform": "wayland",
+    "poll_interval_ms": 20
+}

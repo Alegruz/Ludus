@@ -106,8 +106,9 @@ ownership continues to block automatic recovery.
 record a cold project-B build phase of 1.643 s, configure 2.853 s, publication
 0.541 s and total request-to-publication 12.106 s. Ten warm no-change requests
 measure total p50/p95 10.5285/14.596 s, including SDK validation and Qt dispatch;
-publication alone measures 0.3525/0.524 s. The **under-1-second warm iteration
-target is missed**. Ten copied-property round trips measure p50/p95
+publication alone measures 0.3525/0.524 s. The full warm request-to-publication
+interval exceeds one second; the isolated publication phase is below one second.
+Ten copied-property round trips measure p50/p95
 126.5/147 ms with a 20 ms observation interval. These paused-session round trips
 include the acknowledged edit and refreshed values; they do not prove the
 separate two-running-frame ack target or pixel-visible latency. Static analysis
@@ -120,11 +121,22 @@ Its warm total p50/p95 is 13.4675/22.025 s, publication 0.3945/0.777 s,
 and copied-property round trips 103/116 ms. The cold project-B total is 4.198 s.
 Both raw runs are retained; neither is an idle or pixel-visible latency claim.
 
+The [idle native run](project-live-reload-evidence/native-editor-idle-metrics-2026-10-03.json)
+at published head `ffdb0f40c9f1b10943676e53f5a155a6cc47b549` passes all 127
+assertions with no concurrent local builds or analysis. Ten warm no-change
+requests measure total p50/p95 1.905/2.100 s, configure 0.316/0.335 s,
+build 0.2395/0.265 s and publication 0.0805/0.082 s. Copied-property round
+trips measure 84/85 ms with the same 20 ms observation interval. Project B's
+first play-generation request after explicit setup repair takes 1.826 s;
+this is not a clean-cache cold configure/build measurement. These results
+clarify the distinction between the subsecond publication phase and complete
+iteration cost; correctness/SDK identity validation remains enabled.
+
 [Raw sanitizer records](project-live-reload-evidence/asan-reload-metrics-2026-10-03.jsonl)
 retain the 100 accepted/50 rejected reload observations described above.
 
 Still incomplete: editor-integrated debugger launch/attach, native pixel/visible
-latency evidence, idle iteration measurements, and final published-head
+latency and running-frame property-ack evidence, and final published-head
 CI/mergeability. Windows DLL and macOS
 loader backends and unsupported resource importers are outside the first host
 matrix. The PR stays draft; unchecked acceptance work is not counted as passed.
