@@ -1,0 +1,7 @@
+#pragma once
+#include <string_view>
+namespace ludus::world_demo::content
+{
+inline constexpr std::string_view FirstRoom = R"level(@LUDUS_FIRST_ROOM@)level";
+inline constexpr std::string_view SecondRoom = R"level(@LUDUS_SECOND_ROOM@)level";
+}
