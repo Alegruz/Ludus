@@ -29,9 +29,23 @@ target_link_libraries(ludus_graphics_rhi
         Ludus::FoundationLogging
 )
 if(EMSCRIPTEN)
-    target_sources(ludus_graphics_rhi PRIVATE src/rhi_webgpu.cpp)
+    # Browser Auto build: both web sub-backends plus the dispatcher are linked
+    # into one artifact, each sub-backend in its own leaf namespace, and the
+    # dispatcher provides backend:: with the WebGPU->WebGL 2 fallback policy.
+    target_sources(ludus_graphics_rhi PRIVATE src/rhi_web.cpp src/rhi_webgpu.cpp src/rhi_webgl.cpp)
+    set_source_files_properties(src/rhi_webgpu.cpp PROPERTIES
+        COMPILE_DEFINITIONS "LUDUS_RHI_WEBGPU_NAMESPACE=webgpu")
+    set_source_files_properties(src/rhi_webgl.cpp PROPERTIES
+        COMPILE_DEFINITIONS "LUDUS_RHI_WEBGL_NAMESPACE=webgl")
     target_compile_options(ludus_graphics_rhi PRIVATE "--use-port=emdawnwebgpu:cpp_bindings=false")
-    target_link_options(ludus_graphics_rhi INTERFACE "--use-port=emdawnwebgpu:cpp_bindings=false")
+    # Propagate both browser backends' link requirements to installed consumers:
+    # the emdawnwebgpu port (WebGPU) and the WebGL 2 / full GLES3 settings. An
+    # Auto build therefore carries both browser paths.
+    target_link_options(ludus_graphics_rhi INTERFACE
+        "--use-port=emdawnwebgpu:cpp_bindings=false"
+        "-sMAX_WEBGL_VERSION=2"
+        "-sMIN_WEBGL_VERSION=2"
+        "-sFULL_ES3=1")
 else()
     target_sources(ludus_graphics_rhi PRIVATE src/rhi_vulkan.cpp src/volk_impl.cpp)
     target_link_libraries(ludus_graphics_rhi PRIVATE volk::volk_headers)

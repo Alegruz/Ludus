@@ -1559,6 +1559,7 @@ def verify_sdk_install(root: Path, prefix: Path, build_dir: Path) -> None:
         prefix / "lib" / "cmake" / "Ludus" / "LudusShaders.cmake",
         prefix / "lib" / "cmake" / "Ludus" / "shaders" / "compile_shader.py",
         prefix / "lib" / "cmake" / "Ludus" / "shaders" / "shader_toolchain.json",
+        prefix / "lib" / "cmake" / "Ludus" / "shaders" / "spirv_cross_toolchain.json",
         prefix / "share" / "Ludus" / "licenses" / "LICENSE",
         prefix / "share" / "Ludus" / "licenses" / "THIRD_PARTY_NOTICES.md",
         prefix / "share" / "Ludus" / "LudusSdkManifest.json",

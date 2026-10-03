@@ -10,21 +10,30 @@ body { height: 100%; margin: 0; padding: 12px; display: flex; flex-direction: co
   gap: 6px; font: 14px system-ui; background: #151923; color: #eee; }
 h1 { margin: 0; font-size: clamp(16px, 3vw, 24px); }
 p { margin: 0; overflow-wrap: anywhere; }
-canvas { display: block; width: 100%; height: 0; flex: 1; min-height: 0; background: #1b2332; }
+/* Reserved, always-visible status region: it holds the loading/fallback/final
+   message and can never be covered by the canvas or controls. It wraps on
+   narrow/portrait embeds (min-height for at least two lines of text). */
+.status { flex: 0 0 auto; min-height: 2.8em; display: flex; flex-direction: column; gap: 2px; }
+#status { font-weight: 600; }
+#status[data-state="failed"], #status[data-state="device lost"] { color: #ff9b8a; }
+canvas { display: block; width: 100%; height: 0; flex: 1 1 0; min-height: 0; background: #1b2332; }
 canvas:focus-visible { outline: 2px solid #ffc76d; outline-offset: -2px; }
-.controls { display: flex; gap: 8px; flex-wrap: wrap; }
+.controls { flex: 0 0 auto; display: flex; gap: 8px; flex-wrap: wrap; }
 button { font: inherit; padding: 4px 10px; }
+button[disabled] { opacity: 0.5; cursor: default; }
 body:fullscreen { width: 100vw; height: 100vh; }
 </style>
 <h1>Ludus demo</h1>
-<p id="status" role="status" aria-live="polite">Loading…</p>
+<div class="status">
+<p id="status" role="status" aria-live="polite" data-state="loading">Loading…</p>
 <p id="notice" role="status" aria-live="polite" hidden></p>
 <p id="instructions" hidden>Click the canvas, then use WASD or arrow keys to move. Click or drag to reposition.</p>
+</div>
 <canvas id="canvas" aria-label="Game canvas"></canvas>
 <div class="controls">
 <button id="restart" type="button">Restart</button>
-<button id="stop" type="button">Stop</button>
-<button id="fullscreen" type="button">Fullscreen</button>
+<button id="stop" type="button" disabled>Stop</button>
+<button id="fullscreen" type="button" disabled>Fullscreen</button>
 </div>
 <script>
 var Module = {
@@ -35,9 +44,22 @@ var Module = {
 };
 const notice = document.getElementById('notice');
 function fullscreenNotice(message) { notice.textContent = message; notice.hidden = !message; }
+const statusEl = document.getElementById('status');
+const stopButton = document.getElementById('stop');
+const restartButton = document.getElementById('restart');
 document.getElementById('restart').addEventListener('click', () => Module._Restart?.());
-document.getElementById('stop').addEventListener('click', () => Module._Stop?.());
+stopButton.addEventListener('click', () => Module._Stop?.());
 const fullscreen = document.getElementById('fullscreen');
+// Keep play controls (Stop, Fullscreen) inactive until the demo is playing;
+// Restart stays available so a stopped/failed demo can be retried.
+function syncControls() {
+  const playing = statusEl.dataset.state === 'playing';
+  stopButton.disabled = !playing;
+  fullscreen.disabled = !playing && !document.fullscreenElement;
+  restartButton.disabled = statusEl.dataset.state === 'loading';
+}
+new MutationObserver(syncControls).observe(statusEl, {attributes: true, attributeFilter: ['data-state']});
+syncControls();
 fullscreen.addEventListener('click', async () => {
   try {
     if (document.fullscreenElement) await document.exitFullscreen();

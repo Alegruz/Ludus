@@ -26,15 +26,36 @@ function(ludus_compile_shader)
     if(EXISTS "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/shader_toolchain.json")
         set(lock "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/shader_toolchain.json")
     endif()
+    # Optional GLSL ES 3.00 (WebGL 2) backend artifact. Enabled only when the
+    # pinned SPIR-V -> GLSL ES translator is provided; SPIR-V/WGSL builds are
+    # unchanged otherwise. The browser build carries both WGSL and GLSL ES.
+    if(EMSCRIPTEN AND NOT LUDUS_SPIRV_CROSS)
+        message(FATAL_ERROR "Browser Auto shaders require LUDUS_SPIRV_CROSS; run scripts/bootstrap-spirv-cross")
+    endif()
+    set(cross_args)
+    set(cross_depends)
+    set(cross_byproducts)
+    if(LUDUS_SPIRV_CROSS)
+        set(cross_lock "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/shaders/spirv_cross_toolchain.json")
+        if(EXISTS "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/spirv_cross_toolchain.json")
+            set(cross_lock "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/spirv_cross_toolchain.json")
+        endif()
+        list(APPEND cross_args --spirv-cross "${LUDUS_SPIRV_CROSS}" --spirv-cross-lock "${cross_lock}")
+        list(APPEND cross_depends "${LUDUS_SPIRV_CROSS}" "${LUDUS_SPIRV_CROSS}.build.json" "${cross_lock}")
+        list(APPEND cross_byproducts "${output}/${SH_NAME}.vertex.essl" "${output}/${SH_NAME}.fragment.essl"
+            "${output}/${SH_NAME}.vertex.glsl-es.spv" "${output}/${SH_NAME}.fragment.glsl-es.spv"
+            "${output}/vertex.glsl-es.reflection.json" "${output}/fragment.glsl-es.reflection.json")
+    endif()
     add_custom_command(
         OUTPUT "${output}/${SH_NAME}.h"
         BYPRODUCTS "${output}/${SH_NAME}.vertex.spv" "${output}/${SH_NAME}.fragment.spv"
                    "${output}/${SH_NAME}.wgsl" "${output}/vertex.reflection.json"
                    "${output}/fragment.reflection.json" "${output}/wgsl.reflection.json" "${output}/manifest.json"
+                   ${cross_byproducts}
         COMMAND "${Python3_EXECUTABLE}" "${driver}" --source "${source}" --output "${output}"
                 --name "${SH_NAME}" --vertex "${SH_VERTEX}" --fragment "${SH_FRAGMENT}"
-                --lock "${lock}" --compiler "${LUDUS_SLANG_COMPILER}" --validator "${LUDUS_SPIRV_VALIDATOR}" ${args}
-        DEPENDS "${source}" "${driver}" "${lock}" "${LUDUS_SLANG_COMPILER}" "${LUDUS_SPIRV_VALIDATOR}" ${SH_DEPENDS}
+                --lock "${lock}" --compiler "${LUDUS_SLANG_COMPILER}" --validator "${LUDUS_SPIRV_VALIDATOR}" ${cross_args} ${args}
+        DEPENDS "${source}" "${driver}" "${lock}" "${LUDUS_SLANG_COMPILER}" "${LUDUS_SPIRV_VALIDATOR}" ${cross_depends} ${SH_DEPENDS}
         DEPFILE "${output}/shader.d"
         VERBATIM
     )

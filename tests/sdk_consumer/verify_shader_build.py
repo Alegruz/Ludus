@@ -21,6 +21,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('sdk', 'cmake', 'ninja', 'cxx', 'slang', 'validator', 'conan'):
         parser.add_argument('--' + name, required=True)
+    # Optional: when provided, also verify the GLSL ES 3.00 (WebGL 2) backend
+    # artifact. Absent, the SPIR-V/WGSL contract is exercised exactly as before.
+    parser.add_argument('--spirv-cross')
     args = parser.parse_args()
     sdk = Path(args.sdk).resolve()
     with tempfile.TemporaryDirectory(prefix='ludus shader build-') as temporary:
@@ -43,6 +46,8 @@ ludus_compile_shader(TARGET sample NAME sample SOURCE diagnostic.slang VERTEX ve
             '-DCMAKE_BUILD_TYPE=RelWithDebInfo', '-DCMAKE_MAKE_PROGRAM=' + args.ninja, '-DCMAKE_CXX_COMPILER=' + args.cxx,
             '-DCMAKE_PREFIX_PATH=' + str(sdk) + ';' + args.conan,
             '-DLUDUS_SLANG_COMPILER=' + args.slang, '-DLUDUS_SPIRV_VALIDATOR=' + args.validator]
+        if args.spirv_cross:
+            command += ['-DLUDUS_SPIRV_CROSS=' + args.spirv_cross]
         run(command); run([args.cmake, '--build', build]); run([build / 'sample'])
         header = build / 'ludus-shaders/sample/sample/sample.h'
         shader = header.with_name('sample.fragment.spv')
@@ -56,7 +61,7 @@ ludus_compile_shader(TARGET sample NAME sample SOURCE diagnostic.slang VERTEX ve
         run(command + ['-DSHADER_DEFINES=DIAGNOSTIC_SCALE=0.5']); run([args.cmake, '--build', build])
         assert hashlib.sha256(shader.read_bytes()).hexdigest() != before, 'option did not alter compiled artifact'
         manifest = json.loads(header.with_name('manifest.json').read_text())
-        assert manifest['uniform_sizes'] == {'vertex':48,'fragment':48,'wgsl':48}
+        assert {key: manifest['uniform_sizes'][key] for key in ('vertex', 'fragment', 'wgsl')} == {'vertex':48,'fragment':48,'wgsl':48}
         assert manifest['spirv_entries'] == {'vertex':'main','fragment':'main'}
         assert manifest['wgsl_entries'] == {'vertex':'vertexMain','fragment':'fragmentMain'}
         contract = [('resolution', 0, 8), ('elapsedTime', 8, 4), ('direction', 16, 12), ('tint', 32, 16)]
@@ -77,11 +82,45 @@ ludus_compile_shader(TARGET sample NAME sample SOURCE diagnostic.slang VERTEX ve
             offsets.append((re.sub(r'_\d+$', '', name), occupied, size)); occupied += size
         assert offsets == contract
         assert alignment == 16 and (occupied + alignment - 1) // alignment * alignment == 48
+        if args.spirv_cross:
+            # GLSL ES 3.00 backend artifact: entries link through main; the block
+            # size is reflected; the layout is derived independently from the
+            # emitted ESSL std140 block (not borrowed from SPIR-V/WGSL offsets).
+            assert manifest['uniform_sizes'] == {'vertex':48,'fragment':48,'wgsl':48,'glsl_es':48}
+            assert manifest['glsl_es_entries'] == {'vertex':'main','fragment':'main'}
+            assert manifest['profiles']['glsl_es'] == '300 es'
+            assert manifest['glsl_es_layout'] == {'block':'DiagnosticUniforms_std140',
+                'offsets':{'resolution':0,'elapsedTime':8,'direction':16,'tint':32},
+                'size':48,'alignment':16,'binding':0}
+            assert manifest['glsl_es_translator']['tag'] and manifest['glsl_es_translator']['source_sha256']
+            essl = header.with_name('sample.fragment.essl').read_text()
+            assert essl.lstrip().startswith('#version 300 es'), 'ESSL is not GLSL ES 3.00'
+            assert 'GL_ARB_shader_draw_parameters' not in essl and 'gl_BaseVertex' not in essl
+            vert_essl = header.with_name('sample.vertex.essl').read_text()
+            assert 'gl_VertexID' in vert_essl and 'gl_BaseVertex' not in vert_essl, 'ESSL vertex id is not WebGL 2 safe'
+            es_block = re.search(r'layout\(std140\)\s+uniform\s+\w+\s*\{([^}]+)\}', essl).group(1)
+            es_members = re.findall(r'(?:highp\s+|mediump\s+|lowp\s+)?(vec[234]|float)\s+(\w+)\s*;', es_block)
+            es_occupied = 0; es_align = 1; es_offsets = []
+            for kind, name in es_members:
+                size, natural = {'float':(4,4), 'vec2':(8,8), 'vec3':(12,16), 'vec4':(16,16)}[kind]
+                es_align = max(es_align, natural)
+                es_occupied = (es_occupied + natural - 1) // natural * natural
+                es_offsets.append((name, es_occupied, size)); es_occupied += size
+            assert es_offsets == contract, es_offsets
+            assert es_align == 16 and (es_occupied + es_align - 1) // es_align * es_align == 48
         original = (source / 'diagnostic.slang').read_text()
         (source / 'diagnostic.slang').write_text(original.replace('vk::binding(0, 0)', 'vk::binding(0, 1)'))
         failure = run([args.cmake, '--build', build], success=False)
         assert 'binding contract' in failure or 'group 0 binding 0' in failure, failure
         (source / 'diagnostic.slang').write_text(original)
+        if args.spirv_cross:
+            bad_cross = root / 'bad-cross'
+            shutil.copy2(args.spirv_cross, bad_cross)
+            shutil.copy2(str(Path(args.spirv_cross).resolve()) + '.build.json', str(bad_cross) + '.build.json')
+            with bad_cross.open('ab') as file: file.write(b'changed')
+            run(command + ['-DLUDUS_SPIRV_CROSS=' + str(bad_cross)])
+            failure = run([args.cmake, '--build', build], success=False)
+            assert 'SPIRV-Cross binary differs from verified build' in failure, failure
         bad_validator = root / 'bad-validator'; shutil.copy2(args.validator, bad_validator)
         with bad_validator.open('ab') as file: file.write(b'changed')
         run(command + ['-DLUDUS_SPIRV_VALIDATOR=' + str(bad_validator)])

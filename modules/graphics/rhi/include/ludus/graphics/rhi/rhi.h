@@ -21,7 +21,18 @@ using WindowInfo = ludus::platform::NativeWindowInfo;
 enum class Backend : ludus::foundation::uint8
 {
     Vulkan,
-    WebGPU
+    WebGPU,
+    WebGL2
+};
+// Browser backend policy. Native always selects Vulkan and ignores this.
+// Auto attempts WebGPU (including its compatibility retry) and, only on a
+// capability/startup failure, makes exactly one WebGL 2 attempt. A forced
+// selection fails explicitly rather than silently switching backends.
+enum class BackendSelection : ludus::foundation::uint8
+{
+    Auto,
+    WebGPU,
+    WebGL2
 };
 enum class StartupState : ludus::foundation::uint8
 {
@@ -60,15 +71,31 @@ enum class FrameStatus : ludus::foundation::uint8
     Failed,
     Skipped
 };
+// Bounded per-backend attempt diagnostics for an Auto session. Each attempt
+// records whether it ran and its final error; the engine never asserts the GPU
+// itself is unsupported. QA reads these; ordinary player text does not.
+struct AttemptInfo final
+{
+    bool Attempted = false;
+    StartupError Error = StartupError::None;
+};
 struct StartupInfo final
 {
+    // The backend actually selected for this session (not merely requested).
     Backend SelectedBackend = Backend::Vulkan;
     StartupState State = StartupState::Idle;
     StartupError Error = StartupError::None;
     ludus::foundation::uint32 MaxTextureDimension2D = 0;
+    BackendSelection Requested = BackendSelection::Auto;
+    AttemptInfo WebGpu;
+    AttemptInfo WebGL2;
 };
 // Duplicate Start is Busy until Shutdown, including failed/lost sessions.
+// The two-argument form selects Auto on the browser and Vulkan natively.
 [[nodiscard]] StartStatus Start(const ApplicationInfo& appInfo, const WindowInfo& windowInfo) noexcept;
+// Explicit browser backend selection. Native ignores the selection (Vulkan).
+[[nodiscard]] StartStatus
+Start(const ApplicationInfo& appInfo, const WindowInfo& windowInfo, BackendSelection selection) noexcept;
 [[nodiscard]] StartupInfo GetStartup() noexcept;
 // Surface settings for the next frame. Zero dimensions skip acquisition.
 // Call only between frames after Ready; dimensions must fit negotiated limits.

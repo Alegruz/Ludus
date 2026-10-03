@@ -29,6 +29,9 @@ Ludus: MIT, see licenses/Ludus.txt.
 Emscripten JS glue and Emdawnwebgpu C bridge: MIT/NCSA, see their licenses.
 WebGPU native API definitions: BSD-3-Clause, see licenses/webgpu-native.txt.
 Linked C/C++ runtime: see musl, libcxx, libcxxabi and compiler-rt notices.
+Shaders are authored in Slang and compiled at build time to SPIR-V, WGSL and
+GLSL ES 3.00; the SPIR-V -> GLSL ES translator (SPIRV-Cross) is a build-time host
+tool and is not shipped. Its Apache-2.0 notice is licenses/SPIRV-Cross.txt.
 The Emdawnwebgpu C++ wrapper, native Vulkan/Wayland and Catch2 do not ship.
 Toolchain versions, payload hashes and memory policy are in build-info.json.
 """
@@ -135,10 +138,16 @@ def collect(root: Path) -> dict[str, bytes]:
     if not separator or b"BSD 3-Clause License" not in notice:
         raise ValueError("Pinned WebGPU native notice is missing")
     files["licenses/webgpu-native.txt"] = notice
+    # The build-time SPIR-V -> GLSL ES translator ships no runtime code, but its
+    # Apache-2.0 notice travels with the developer tools per ADR 0013.
+    spirv_cross_license = root / "out/shader-tools/spirv-cross/LICENSE"
+    files["licenses/SPIRV-Cross.txt"] = spirv_cross_license.read_bytes()
     files["NOTICE.txt"] = NOTICE.encode()
     info = {
         "preset": PRESET,
         "toolchain": json.loads((root / "config/web_toolchain.json").read_text()),
+        "shader_toolchain": json.loads((root / "config/shader_toolchain.json").read_text()),
+        "spirv_cross_toolchain": json.loads((root / "config/spirv_cross_toolchain.json").read_text()),
         "memory": {"initial_bytes": 33554432, "maximum_bytes": 268435456,
                    "stack_bytes": 65536, "growth": True, "threads": False},
         "debug_symbols": False,

@@ -23,7 +23,9 @@ enum class State : foundation::uint8
 class Application final
 {
 public:
-    bool Start() noexcept;
+    // Browser backend policy. Native ignores it (Vulkan). Default Auto attempts
+    // WebGPU, then one WebGL 2 fallback; forced values diagnose a single path.
+    bool Start(graphics::rhi::BackendSelection selection = graphics::rhi::BackendSelection::Auto) noexcept;
     State Tick() noexcept;
     void Shutdown() noexcept;
     [[nodiscard]] State GetState() const noexcept
@@ -42,6 +44,16 @@ public:
     {
         return mFrames;
     }
+    // Bounded per-attempt diagnostics for QA, captured before the RHI session is
+    // torn down on failure so they survive into the status report.
+    [[nodiscard]] graphics::rhi::StartupError GetWebGpuError() const noexcept
+    {
+        return mWebGpuError;
+    }
+    [[nodiscard]] graphics::rhi::StartupError GetWebGl2Error() const noexcept
+    {
+        return mWebGl2Error;
+    }
 
 private:
     void Fail(State, graphics::rhi::StartupError) noexcept;
@@ -49,6 +61,8 @@ private:
     Simulation mSimulation;
     State mState = State::Stopped;
     graphics::rhi::StartupError mError = graphics::rhi::StartupError::None;
+    graphics::rhi::StartupError mWebGpuError = graphics::rhi::StartupError::None;
+    graphics::rhi::StartupError mWebGl2Error = graphics::rhi::StartupError::None;
     foundation::uint64 mLastTick = 0;
     foundation::uint32 mFrames = 0;
 };
