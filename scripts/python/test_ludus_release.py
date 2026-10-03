@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 from ludus_tools import cli, create, release, release_model as model
 from ludus_tools.errors import ToolingError
-from ludus_tools.package_native import validate_native, POLICY
+from ludus_tools.package_native import executable_identity, validate_native, POLICY
 from ludus_tools.package_verify import extract_archive, file_digest, inventory, verify_package
 from ludus_tools.release_template import release_files
 from ludus_tools.sdkstore import SdkStore
@@ -333,6 +333,26 @@ class ProjectRoundtripTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(cli.main(["--json", "project", "package", "verify", str(package)]), 0)
             self.assertEqual(json.loads(output.getvalue())["verified"]["archiveSha256"], package.name)
+
+    def test_cmake_install_loader_rewrite_preserves_program_identity(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": "clang++-18"}):
+            root = Path(temp)
+            project, _ = self.setup_project(root)
+            cmake = project / "CMakeLists.txt"
+            cmake.write_text(cmake.read_text() + '\nset_target_properties(MyGame PROPERTIES '
+                             'BUILD_RPATH "${CMAKE_CURRENT_SOURCE_DIR}/runtime" INSTALL_RPATH "$ORIGIN/../lib")\n')
+            package = release.package_project(project, profile="linux-release", version="0.1.0", store=SdkStore(root / "store"))
+            extracted = root / "extracted"
+            extracted.mkdir()
+            extract_archive(package / "game.zip", extracted)
+            artifact = project / "out/build/linux-clang-release/MyGame"
+            self.assertNotEqual(file_digest(artifact), file_digest(extracted / "bin/MyGame"))
+            self.assertEqual(executable_identity(artifact), executable_identity(extracted / "bin/MyGame"))
+            self.assertEqual(subprocess.run([str(extracted / "bin/MyGame")], check=False).returncode, 0)
+            cpp = root / "different.cpp"
+            cpp.write_text("int main() { return 7; }")
+            subprocess.run(["clang++-18", "-fno-exceptions", str(cpp), "-o", str(root / "different")], check=True)
+            self.assertNotEqual(executable_identity(artifact), executable_identity(root / "different"))
 
     def test_failed_build_cannot_package_old_executable(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CXX": "clang++-18"}):

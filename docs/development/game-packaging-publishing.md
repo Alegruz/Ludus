@@ -47,7 +47,8 @@ ludus project package verify /path/to/package-directory
 
 The command holds the shared Editor/CLI build-tree lock throughout configure,
 build and installation. It requires a successful current build, checks the CMake
-File API artifact against the installed entry point, and validates SDK stamps
+File API artifact's program sections against the installed entry point while
+allowing CMake's loader-path rewrite, and validates SDK stamps
 and project descriptor/lock/release configuration. Temporary staging is private
 and cleaned on failure. Packages publish as complete directories through an
 atomic no-replace rename. Identical verified packages are reused.

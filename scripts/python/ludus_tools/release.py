@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 from . import __version__, descriptor, operations
 from .buildlock import BuildTreeLock
-from .package_native import POLICY, validate_native
+from .package_native import POLICY, executable_identity, validate_native
 from .package_verify import MAX_MANIFEST, file_digest, inventory, verify_package
 from .release_model import canonical, fail, load_release, sha256, string
 from .resolve import assert_stamp_unchanged, write_stamp
@@ -126,8 +126,8 @@ def package_project(project: Path, *, profile: str, version: str,
             fail("release installation failed", "BuildFailed")
         records = inventory(payload)
         external = validate_native(payload, selected.entry_point)
-        if file_digest(payload / selected.entry_point) != file_digest(artifact):
-            fail("installed entry point differs from the selected CMake artifact", "InvalidPackage")
+        if executable_identity(payload / selected.entry_point) != executable_identity(artifact):
+            fail("installed program sections differ from the selected CMake artifact", "InvalidPackage")
         # Policy prohibits source/build/SDK machine paths in the actual payload.
         needles = [str(p.resolve()).encode("utf-8") for p in (root, resolved.paths.source_dir,
                     resolved.paths.build_dir, resolved.resolution.prefix)]

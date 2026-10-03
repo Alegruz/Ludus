@@ -32,8 +32,8 @@ itch.io destination unless the project creator supplies one explicitly.
 ## Local validation
 
 Baseline before edits: the four existing host-tooling suites ran 96 tests and
-passed. After implementation, this command ran 116 tests and passed, including
-20 release tests and their parameterized rejection cases:
+passed. After implementation, this command ran 117 tests and passed, including
+21 release tests and their parameterized rejection cases:
 
 ```bash
 PATH=/home/alegruz/workspace/Ludus/out/host-tools/venv/bin:$PATH \
@@ -47,7 +47,9 @@ install its release component, validate/extract/run the executable, and inspect
 an offline plan after removing the fixture SDK. Separate tests verify a failed
 rebuild cannot package an older binary, cancellation/lock contention expose no
 partial package, SDK mutation fails, executable mode survives ZIP extraction,
-corrupt payloads/metadata fail and explicitly bundled relative dependencies work.
+corrupt payloads/metadata fail and explicitly bundled relative dependencies work. A CMake install-time loader
+path rewrite changes the executable bytes but preserves its program-section
+identity; the package validator accepts this while rejecting a different program.
 No test writes to itch.io.
 
 Archive/configuration cases include traversal, absolute and malformed paths,
@@ -60,7 +62,7 @@ Only the explicit clean-extraction acceptance test runs the known fixture binary
 A real host-tool wheel was built and installed under a new temporary directory.
 From `/tmp`, the installed package and its File API resolver imported without
 `engine`, Qt or a producer checkout on their module paths. The release suite also
-ran all 20 release tests against that installed backend. The existing Editor
+ran all 21 release tests against that installed backend. The existing Editor
 adapter suite also passed all 35 tests. CI repeats this with a fresh venv and the
 pinned CMake/Ninja versions, Clang 18 and binutils.
 
@@ -99,3 +101,14 @@ upload locks and remote outcome receipts are not implemented. R3 generated CI,
 R4 Editor controls and R5 browser project packaging are also pending. No changes
 were made to an external game repository. This PR provides the package and
 inspection boundary those phases consume.
+
+## Initial CI result
+
+The host-tooling job in [project-sdk run 37091095268](https://github.com/Alegruz/Ludus/actions/runs/37091095268)
+passed for the first PR commit, including the installed release backend. The SDK
+candidate relocation job was skipped by the pre-existing feature-branch policy.
+This result predates the additional loader-rewrite regression; CI must validate
+the updated PR head independently. The initial [ci run 37091095312](https://github.com/Alegruz/Ludus/actions/runs/37091095312)
+also passed source formatting, Development/SDK validation, Clang static analysis,
+ASan/UBSan, Optional Editor, build budget, PCH and assertion-policy variants.
+These are results for the initial commit, not the later loader-rewrite fix.
