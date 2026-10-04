@@ -87,6 +87,42 @@ Vector3 local{};
 (void)TryMakeRelative(playerWorldPosition, cameraOrigin, /*maxAbsComponent=*/4096.0, local);
 ```
 
+### Random samples independent of job order
+
+```cpp
+#include <ludus/foundation/math/addressed_random.hpp>
+
+RandomKey lootKey;
+// These values belong to the world/content protocol. Never derive them from
+// a worker index, pointer, iteration position or rendering frame.
+if (TryMakeRandomKey(/*worldSeed=*/42, /*persistentLootDomain=*/7, lootKey) == MathStatus::Success)
+{
+    const RandomAddress drop{ /*entityId=*/123, /*dropOccurrence=*/5, /*itemSlot=*/0 };
+    uint32 ticket = 0;
+    if (TrySampleBounded(lootKey, drop, 1000, ticket) == MathStatus::Success)
+    {
+        // ticket repeats for this logical drop regardless of worker scheduling.
+    }
+}
+```
+
+Persist the root seed, stable domain/address assignments, generator identity
+`Philox4x32-10`, and all three v1 contract IDs with the owner's replay/content
+version. Use `TryMakeRandomAddress` before narrowing external counters. Reusing
+an address repeats a sample; changing a bound changes its mapping. Checked
+functions preserve outputs on failure. Rejection attempts stay inside the
+address, have a 65536-attempt cap, and report `OutOfRange` on exhaustion. This is
+non-cryptographic randomness. `PreparedBound32` amortizes threshold division;
+`TrySampleBlock` shares one evaluation across four aligned dimensions.
+
+References: Salmon et al., [Random123 (SC11)](https://www.thesalmons.org/john/random123/papers/random123sc11.pdf),
+Lemire, [Fast Random Integer Generation in an Interval](https://arxiv.org/abs/1805.10941),
+Vigna's [SplitMix64 finalizer](https://prng.di.unimi.it/splitmix64.c), and
+Game Programming Gems 1 §2.0, 2 §1.16, and 3 §2.1. The
+[architecture](../../../docs/architecture/randomness.md) and
+[chapter review](../../../docs/architecture/randomness-gems-review.md) explain
+the selected ideas and limitations. Random123's BSD notice ships in the SDK.
+
 ### Repeatable random stream
 
 ```cpp

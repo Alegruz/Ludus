@@ -27,6 +27,8 @@ on:
       - 'modules/platform/**'
       - 'tools/web-platform-probe/**'
       - 'modules/foundation/base/**'
+      - 'modules/foundation/math/**'
+      - 'tools/web-math-probe/**'
       - 'modules/foundation/containers/**'
       - 'modules/foundation/logging/**'
       - 'modules/foundation/profiling/**'

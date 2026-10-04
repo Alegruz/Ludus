@@ -20,6 +20,7 @@ target_sources(
         src/queries.cpp
         src/precision.cpp
         src/random.cpp
+        src/addressed_random.cpp
         src/batch.cpp
         src/dynamics.cpp
     PUBLIC
@@ -39,6 +40,7 @@ target_sources(
             include/ludus/foundation/math/queries.hpp
             include/ludus/foundation/math/precision.hpp
             include/ludus/foundation/math/random.hpp
+            include/ludus/foundation/math/addressed_random.hpp
             include/ludus/foundation/math/batch.hpp
             include/ludus/foundation/math/dynamics.hpp
 )
@@ -88,11 +90,12 @@ if(LUDUS_BUILD_TESTS)
             tests/queries_tests.cpp
             tests/precision_tests.cpp
             tests/random_tests.cpp
+            tests/addressed_random_tests.cpp
             tests/batch_tests.cpp
             tests/layout_tests.cpp
             tests/dynamics_tests.cpp
     )
-    target_include_directories(ludus_foundation_math_tests PRIVATE tests)
+    target_include_directories(ludus_foundation_math_tests PRIVATE tests src)
     target_link_libraries(
         ludus_foundation_math_tests
         PRIVATE

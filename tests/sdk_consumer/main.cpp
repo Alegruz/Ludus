@@ -5,6 +5,7 @@
 #include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/base/target.hpp>
 #include <ludus/foundation/base/version.hpp>
+#include <ludus/foundation/math/addressed_random.hpp>
 #include <ludus/foundation/math/dynamics.hpp>
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/quaternion.hpp>
@@ -148,6 +149,19 @@ static int ExerciseInstalledMath()
     // PCG known-answer (bit-exact contract).
     m::RandomStream rng;
     if (!rng.TryReseed(42, 54) || rng.NextUInt32() != 0xa15c02b7U)
+    {
+        return 7;
+    }
+    m::RandomKey key;
+    m::PreparedBound32 bound;
+    m::RandomBlock block;
+    ludus::foundation::uint32 ticket = 0;
+    const m::RandomAddress address{0x0123456789abcdefULL, 99, 1234};
+    if (!m::IsSuccess(m::TryMakeRandomKey(42, 7, key)) || key.Value != 0xccf635ee9e9e2fa4ULL ||
+        m::SampleUInt32(key, address) != 0x942d2d40u || !m::IsSuccess(m::TryPrepareBound32(1000, bound)) ||
+        !m::IsSuccess(m::TrySampleBounded(key, address, bound, ticket)) || ticket != 578 ||
+        !m::IsSuccess(m::TrySampleBlock(key, {address.Scope, address.Event, 1232}, block)) ||
+        block.Values[2] != 0x942d2d40u)
     {
         return 7;
     }
