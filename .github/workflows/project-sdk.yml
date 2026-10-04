@@ -1,21 +1,23 @@
 name: project-sdk
 
-# Candidate-package CI for the independent-project / shared-SDK workflow
-# (requirements P05/P07/P13). Runs on every push and PR. It:
-#   * tests the host-tooling package (ludus_tools) on a pinned Python,
-#   * builds a Development SDK candidate, installs it to a prefix, and RELOCATES
-#     it to a fresh directory with no producer checkout/Conan cache on the
-#     search path, then links an external consumer against the relocated SDK,
-#   * NEVER publishes a release. Publication happens only on a version tag via
-#     release.yml.
+# Installed host-tooling package checks. The Development job in ci.yml builds,
+# installs and relocates the SDK once, and enforces the external consumer check.
+# Release publication remains in release.yml.
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# Thanks to GitHub's "Concurrency" guidance: superseded PR checks can cancel.
+# https://docs.github.com/en/actions/concepts/workflows-and-actions/concurrency
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   host-tooling:
@@ -48,71 +50,3 @@ jobs:
         working-directory: /tmp
         run: |
           PATH=/tmp/ludus-venv/bin:$PATH PYTHONPATH=/tmp/ludus-venv/lib/python3.11/site-packages:${{ github.workspace }}/scripts/python /tmp/ludus-venv/bin/python -m unittest test_ludus_release test_ludus_itch_release -v
-
-  sdk-candidate-relocation:
-    name: SDK candidate build + relocation + external link
-    needs: host-tooling
-    # This exercises the full relocation closure (bundle the dependency CMake
-    # metadata + static libs into the prefix, strip producer paths, then link an
-    # external consumer in an EMPTY environment). The bundling path
-    # (engine.bundle_sdk_dependencies + ludus_tools.bundle_deps) is unit-tested
-    # and the install-time leak audit is strict, but a full green requires
-    # iterating against the pinned toolchain + the exact Conan package layout on
-    # the reference machine. Until that iteration lands it runs ONLY on:
-    #   * push to the default branch (post-merge, where it is developed), and
-    #   * explicit workflow_dispatch,
-    # so this known-in-progress gate never surfaces as a failing check on the
-    # feature-branch PR. It stays continue-on-error as a second safety.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    continue-on-error: true
-    runs-on: ubuntu-24.04
-    env:
-      CI: "true"
-      LUDUS_DIAGNOSTIC_INTERACTIVE: "0"
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Wayland development packages
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libwayland-dev wayland-protocols
-      - name: Cache pip downloads
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('config/tool_versions.json') }}
-      - name: Cache Conan package cache
-        uses: actions/cache@v4
-        with:
-          path: out/conan/home
-          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', 'config/conan/profiles/linux-clang-x86_64', 'conan.lock') }}
-      - name: Prepare toolchain and dependencies
-        run: ./init.sh --preset-only linux-clang-development
-      - name: Build and install the Development SDK candidate
-        run: ./scripts/install-sdk linux-clang-development
-      - name: Relocate the installed SDK and link an external consumer with NO producer paths
-        run: |
-          set -euo pipefail
-          # Copy the installed prefix to a brand-new location, then configure the
-          # external consumer with ONLY the relocated prefix on CMAKE_PREFIX_PATH
-          # (no out/conan, no checkout). This is the relocation gate (P02): a
-          # fresh clone/extraction with no Conan cache must still link.
-          src_prefix="out/install/linux-clang-development"
-          reloc="$RUNNER_TEMP/relocated-sdk"
-          cp -a "$src_prefix" "$reloc"
-          build_dir="$RUNNER_TEMP/consumer-build"
-          env -i PATH="/usr/bin:/bin:$PWD/out/host-tools/venv/bin" \
-            cmake -S tests/sdk_consumer -B "$build_dir" -G Ninja \
-              -DCMAKE_PREFIX_PATH="$reloc" \
-              -DCMAKE_BUILD_TYPE=RelWithDebInfo
-          env -i PATH="/usr/bin:/bin:$PWD/out/host-tools/venv/bin" \
-            cmake --build "$build_dir"
-          "$build_dir/ludus_sdk_consumer"
-      - name: Inspect the compile database for engine source compilation
-        run: |
-          # The external consumer must compile NO engine source (P01). Fail if any
-          # compile command references the engine modules/ source tree.
-          db="$RUNNER_TEMP/consumer-build/compile_commands.json"
-          if [ -f "$db" ] && grep -q "/modules/" "$db"; then
-            echo "engine source compiled by the consumer:"; grep "/modules/" "$db"; exit 1
-          fi
-          echo "no engine source compiled by the external consumer"
