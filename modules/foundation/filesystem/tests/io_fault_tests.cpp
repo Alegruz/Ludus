@@ -14,7 +14,7 @@ using namespace ludus::foundation;
 using namespace ludus::foundation::filesystem;
 namespace
 {
-enum class Fault
+enum class Fault : uint8
 {
     None,
     Interrupt,
@@ -26,6 +26,9 @@ Fault gFault = Fault::None;
 usize gCalls = 0;
 int gWriter = -1;
 } // namespace
+// GNU --wrap requires these exact reserved symbol names. This test-only
+// interposer follows the existing FoundationBase allocation-test convention.
+// NOLINTBEGIN(bugprone-reserved-identifier)
 extern "C" isize __real_pread64(int descriptor, void* buffer, usize count, off_t offset);
 extern "C" isize __wrap_pread64(int descriptor, void* buffer, usize count, off_t offset)
 {
@@ -52,6 +55,7 @@ extern "C" isize __wrap_pread64(int descriptor, void* buffer, usize count, off_t
     }
     return received;
 }
+// NOLINTEND(bugprone-reserved-identifier)
 TEST_CASE("Offset reads retry interrupts fill short transfers and preserve failure progress")
 {
     char path[] = "/tmp/ludus-fs-fault-XXXXXX";
@@ -117,6 +121,8 @@ bool gTrackAllocation = false;
 bool gFailAllocation = false;
 usize gAllocations = 0;
 } // namespace
+// GNU --wrap and the Itanium ABI require these exact names for nothrow new.
+// NOLINTBEGIN(bugprone-reserved-identifier)
 extern "C" void* __real__ZnwmRKSt9nothrow_t(usize size, const std::nothrow_t& tag) noexcept;
 extern "C" void* __wrap__ZnwmRKSt9nothrow_t(usize size, const std::nothrow_t& tag) noexcept
 {
@@ -126,6 +132,7 @@ extern "C" void* __wrap__ZnwmRKSt9nothrow_t(usize size, const std::nothrow_t& ta
     }
     return gFailAllocation ? nullptr : __real__ZnwmRKSt9nothrow_t(size, tag);
 }
+// NOLINTEND(bugprone-reserved-identifier)
 TEST_CASE("Open and clone allocation failures preserve owners and release staged descriptors")
 {
     Directory root;

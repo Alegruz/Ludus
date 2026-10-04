@@ -31,7 +31,7 @@ struct Fixture final
         std::error_code ignored;
         std::filesystem::remove_all(Path, ignored);
     }
-    void Write(std::string_view name, std::string_view data)
+    void Write(const char* name, std::string_view data)
     {
         std::ofstream file(std::filesystem::path(Path) / name, std::ios::binary);
         file.write(data.data(), static_cast<std::streamsize>(data.size()));
