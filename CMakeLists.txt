@@ -116,6 +116,7 @@ add_subdirectory(modules/foundation/memory)
 add_subdirectory(modules/foundation/hash)
 add_subdirectory(modules/foundation/strings)
 add_subdirectory(modules/foundation/containers)
+add_subdirectory(modules/foundation/filesystem)
 add_subdirectory(modules/gameplay/world)
 # FoundationMath depends only on FoundationBase. It is added before any consumer
 # and outside the native-only branch so native and browser targets share it.
@@ -233,7 +234,7 @@ write_basic_package_version_file(
 # --- Redistributable dependency inventory (P02/P03/P11) ----------------------
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
-    FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationMath FoundationTime FoundationLogging
+    FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationFilesystem FoundationMath FoundationTime FoundationLogging
     FoundationProfiling Input Audio Content AudioContent GameplayWorld GameApi PhysicsFluid)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})

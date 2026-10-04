@@ -1,5 +1,5 @@
 add_executable(ludus_web_foundation_probe main.cpp "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/strings.cpp")
-target_link_libraries(ludus_web_foundation_probe PRIVATE Ludus::FoundationBase Ludus::FoundationStrings)
+target_link_libraries(ludus_web_foundation_probe PRIVATE Ludus::FoundationBase Ludus::FoundationStrings Ludus::FoundationFilesystem)
 ludus_apply_project_defaults(ludus_web_foundation_probe)
 target_link_options(ludus_web_foundation_probe PRIVATE
     -fno-exceptions -g0 -g2 -sENVIRONMENT=web,node -sEXIT_RUNTIME=1
@@ -24,8 +24,12 @@ add_test(NAME ludus_web_foundational_includes
 add_test(NAME ludus_web_header_self_sufficiency
     COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/build_contract/verify_header_self_sufficiency.py"
         "${PROJECT_BINARY_DIR}" "foundation/base")
+add_test(NAME ludus_web_filesystem_header_self_sufficiency
+    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/build_contract/verify_header_self_sufficiency.py"
+        "${PROJECT_BINARY_DIR}" "foundation/filesystem")
 set_tests_properties(ludus_web_foundation_semantics ludus_web_compile_policy
     ludus_web_foundational_includes ludus_web_header_self_sufficiency
+    ludus_web_filesystem_header_self_sufficiency
     PROPERTIES LABELS "web;foundation;build-contract" TIMEOUT 120)
 
 foreach(module memory hash strings)

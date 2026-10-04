@@ -33,6 +33,7 @@ on:
       - 'tools/web-fluid-probe/**'
       - 'modules/foundation/containers/**'
       - 'modules/foundation/time/**'
+      - 'modules/foundation/filesystem/**'
       - 'modules/foundation/logging/**'
       - 'modules/foundation/profiling/**'
       - 'cmake/**'

@@ -3,7 +3,7 @@ add_library(Ludus::Content ALIAS ludus_content)
 set_target_properties(ludus_content PROPERTIES EXPORT_NAME Content)
 target_sources(ludus_content PUBLIC FILE_SET public_headers TYPE HEADERS BASE_DIRS include
     FILES include/ludus/content/content.h include/ludus/content/json.h)
-target_link_libraries(ludus_content PUBLIC Ludus::FoundationBase PRIVATE ludus_yyjson)
+target_link_libraries(ludus_content PUBLIC Ludus::FoundationBase PRIVATE Ludus::FoundationFilesystem ludus_yyjson)
 ludus_apply_project_defaults(ludus_content)
 install(TARGETS ludus_content EXPORT LudusTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")

@@ -1,5 +1,6 @@
 #include <ludus/content/content.h>
 #include <ludus/content/json.h>
+#include <ludus/foundation/filesystem/filesystem.hpp>
 
 #include <new>
 
@@ -59,69 +60,9 @@ bool ValidId(std::string_view value) noexcept
     }
     return true;
 }
-namespace
-{
-bool Utf8(std::string_view text) noexcept
-{
-    usize i = 0;
-    while (i < text.size())
-    {
-        const auto lead = static_cast<uint8>(text[i++]);
-        if (lead < 128)
-        {
-            continue;
-        }
-        const uint32 count = lead >= 0xc2 && lead <= 0xdf   ? 1
-                             : lead >= 0xe0 && lead <= 0xef ? 2
-                             : lead >= 0xf0 && lead <= 0xf4 ? 3
-                                                            : 0;
-        if (count == 0 || text.size() - i < count)
-        {
-            return false;
-        }
-        uint32 code = lead & ((1U << (6 - count)) - 1U);
-        for (uint32 j = 0; j < count; ++j)
-        {
-            const auto next = static_cast<uint8>(text[i++]);
-            if ((next & 0xc0U) != 0x80U)
-            {
-                return false;
-            }
-            code = (code << 6) | (next & 0x3fU);
-        }
-        if ((count == 1 && code < 128) || (count == 2 && code < 2048) || (count == 3 && code < 65536) ||
-            code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-} // namespace
 bool ValidPath(std::string_view value) noexcept
 {
-    if (!Utf8(value) || value.empty() || value.size() > 1024 || value.front() == '/' || value.back() == '/')
-    {
-        return false;
-    }
-    usize begin = 0;
-    for (usize i = 0; i <= value.size(); ++i)
-    {
-        if (i < value.size() && (value[i] == '\\' || value[i] == ':' || static_cast<uint8>(value[i]) < 32))
-        {
-            return false;
-        }
-        if (i == value.size() || value[i] == '/')
-        {
-            const auto segment = value.substr(begin, i - begin);
-            if (segment.empty() || segment == "." || segment == "..")
-            {
-                return false;
-            }
-            begin = i + 1;
-        }
-    }
-    return true;
+    return foundation::filesystem::ValidPath(value);
 }
 Catalog::Catalog(Catalog&& other) noexcept : mEntries(other.mEntries), mCount(other.mCount)
 {

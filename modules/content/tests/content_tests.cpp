@@ -115,3 +115,31 @@ TEST_CASE("file-size admission respects the cap and preserves prior output", "[p
     REQUIRE(output.Data()[2] == 3);
     std::filesystem::remove_all(directory);
 }
+
+TEST_CASE("Filesystem-backed content reads preserve capped failures and empty data")
+{
+    char directory[] = "/tmp/ludus-content-capped-XXXXXX";
+    REQUIRE(mkdtemp(directory) != nullptr);
+    const uint8 initial[] = {'a', 'b', 'c'};
+    REQUIRE(SaveFile(directory, "data", initial, nullptr) == Status::Ok);
+    Bytes output;
+    REQUIRE(output.Resize(1));
+    output.Data()[0] = 'z';
+    REQUIRE(ReadFile(directory, "data", 2, output) == Status::Limit);
+    REQUIRE(output.Data().size() == 1);
+    REQUIRE(output.Data()[0] == 'z');
+    REQUIRE(ReadFile(directory, "absent/data", 3, output) == Status::NotFound);
+    REQUIRE(output.Data()[0] == 'z');
+    REQUIRE(SaveFile(directory, "empty", {}, nullptr) == Status::Ok);
+    REQUIRE(ReadFile(directory, "empty", 0, output) == Status::Ok);
+    REQUIRE(output.Data().empty());
+    FileReader reader;
+    REQUIRE(reader.Open(directory, "empty") == Status::Ok);
+    usize count = 99;
+    uint8 bytes[1]{};
+    REQUIRE(reader.Read(bytes, count) == Status::Ok);
+    REQUIRE(count == 0);
+    REQUIRE(reader.Seek(-1, true) == Status::Invalid);
+    REQUIRE(reader.Seek(-9223372036854775807LL - 1, true) == Status::Invalid);
+    std::filesystem::remove_all(directory);
+}

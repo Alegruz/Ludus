@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 int ExerciseInstalledWorld() noexcept;
+int ExerciseInstalledFilesystem() noexcept;
 bool ExerciseInstalledStrings() noexcept;
 int ExerciseInstalledTime() noexcept;
 bool ExerciseInstalledFluid() noexcept;
@@ -213,6 +214,11 @@ int main()
     {
         return 8;
     }
+    if (const int result = ExerciseInstalledFilesystem(); result != 0)
+    {
+        return result;
+    }
+
     // Verify the lifecycle API and static link without requiring Vulkan on CI.
     static_assert(noexcept(ludus::graphics::rhi::Initialize({})));
     static_assert(noexcept(ludus::graphics::rhi::SetFrameTarget({})));

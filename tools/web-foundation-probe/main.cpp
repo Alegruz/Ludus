@@ -6,6 +6,7 @@
 #include <ludus/foundation/base/diagnostic_output.hpp>
 #include <ludus/foundation/base/target.hpp>
 #include <ludus/foundation/base/version.hpp>
+#include <ludus/foundation/filesystem/filesystem.hpp>
 
 #include <span>
 #include <string_view>
@@ -94,6 +95,16 @@ int main(int argc, char** argv)
         return 8;
     }
     const std::string_view mode = argc > 1 ? argv[1] : "normal";
+    filesystem::Directory directory;
+    filesystem::File file;
+    if (!filesystem::ValidPath("audio/音.wav") || filesystem::ValidPath("../escape") ||
+        directory.Open("assets").Code != filesystem::Status::Unsupported ||
+        directory.OpenRead("asset", file).Code != filesystem::Status::Unsupported ||
+        file.ReadAt(0, {}).Outcome.Code != filesystem::Status::Unsupported ||
+        file.Clone(file).Code != filesystem::Status::Unsupported || file.IsOpen() || directory.IsOpen())
+    {
+        return 8;
+    }
     if (version_string().empty() || !transportContract())
     {
         return 2;

@@ -10,8 +10,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(Ludus CONFIG REQUIRED)
 
 if(NOT EMSCRIPTEN)
-    add_executable(ludus_sdk_consumer main.cpp policy.cpp world.cpp strings.cpp time.cpp fluid.cpp)
-    target_link_libraries(ludus_sdk_consumer PRIVATE Ludus::FoundationStrings Ludus::FoundationBase Ludus::FoundationMath Ludus::FoundationTime Ludus::GraphicsRhi Ludus::Input Ludus::GameplayWorld Ludus::PhysicsFluid)
+    add_executable(ludus_sdk_consumer main.cpp policy.cpp world.cpp strings.cpp time.cpp fluid.cpp filesystem.cpp)
+    target_link_libraries(ludus_sdk_consumer PRIVATE Ludus::FoundationFilesystem Ludus::FoundationStrings Ludus::FoundationBase Ludus::FoundationMath Ludus::FoundationTime Ludus::GraphicsRhi Ludus::Input Ludus::GameplayWorld Ludus::PhysicsFluid)
     target_compile_definitions(ludus_sdk_consumer PRIVATE
         EXPECTED_FLAVOR=${Ludus_BUILD_FLAVOR_ID}
         EXPECTED_ASSERTS=${Ludus_ENABLE_ASSERTS}
