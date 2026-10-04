@@ -1,0 +1,423 @@
+#include <ludus/foundation/strings/string_table.hpp>
+
+#include <ludus/foundation/base/checked_integer.hpp>
+#include <ludus/foundation/strings/utf8.hpp>
+
+#include "internal/string_table_state.hpp"
+
+#include <atomic>
+#include <cstring>
+#include <new>
+#include <span>
+#include <utility>
+
+namespace ludus::foundation
+{
+// Thanks to Jason Gregory, Game Engine Architecture, 3rd ed., section 6.4,
+// pp.456-469, and James Boer, "A Flexible Text Parsing System", Game Programming
+// Gems 2, section 1.17, pp.112-117. Adapt pooled names and indexed spellings;
+// retain full bytes in release and use table-qualified indices rather than
+// hash-only identity. See docs/architecture/strings-gems-review.md.
+namespace
+{
+constexpr uint32 kInvalidIndex = 0xffffffffU;
+constexpr usize kPageCapacity = usize{32} * 1024;
+std::atomic<uint32> gNextTableToken{1};
+StringStatus IssueToken(uint32& output) noexcept
+{
+    uint32 token = gNextTableToken.load(std::memory_order_relaxed);
+    while (token != 0)
+    {
+        if (gNextTableToken.compare_exchange_weak(token, token + 1, std::memory_order_relaxed))
+        {
+            output = token;
+            return StringStatus::Ok;
+        }
+    }
+    return StringStatus::TokenExhausted;
+}
+} // namespace
+
+void* StringTable::State::Allocate(usize bytes, usize alignment) noexcept
+{
+    if (bytes > Config.MaxAllocatedBytes - Allocated)
+    {
+        return nullptr;
+    }
+    void* pointer = Domain->TryAllocate(bytes, alignment);
+    if (pointer != nullptr)
+    {
+        Allocated += bytes;
+    }
+    return pointer;
+}
+void StringTable::State::Free(void* pointer, usize bytes, usize alignment) noexcept
+{
+    if (pointer != nullptr)
+    {
+        Domain->Free(pointer, bytes, alignment);
+        Allocated -= bytes;
+    }
+}
+StringTable::State::~State() noexcept
+{
+    Free(Entries, EntryCapacity * sizeof(Entry), alignof(Entry));
+    Free(Slots, SlotCapacity * sizeof(uint32), alignof(uint32));
+    while (Pages != nullptr)
+    {
+        Page* page = Pages;
+        Pages = page->Next;
+        Free(page, sizeof(Page) + page->Capacity, alignof(Page));
+    }
+}
+void StringTable::State::Destroy(State* state) noexcept
+{
+    if (state != nullptr)
+    {
+        const AllocationDomain* domain = state->Domain;
+        state->~State();
+        domain->Free(state, sizeof(State), alignof(State));
+    }
+}
+StringStatus StringTable::State::Validate(std::string_view value) const noexcept
+{
+    if (value.size() > Config.MaxSpellingBytes)
+    {
+        return StringStatus::TooLarge;
+    }
+    if (Config.RejectEmbeddedZero && ValidateCString(value) != StringStatus::Ok)
+    {
+        return StringStatus::EmbeddedZero;
+    }
+    if (Config.RequireUtf8)
+    {
+        Utf8View validated;
+        usize error = 0;
+        return ValidateUtf8(value, validated, error);
+    }
+    return StringStatus::Ok;
+}
+uint64 StringTable::State::Hash(std::string_view value) const noexcept
+{
+    if (HashOverride != nullptr)
+    {
+        return HashOverride(value);
+    }
+    const std::span<const uint8> bytes{reinterpret_cast<const uint8*>(value.data()), value.size()};
+    return Config.HashPolicy == StringHashPolicy::Trusted ? TableHash64(bytes) : KeyedTableHash64(bytes, Config.Key);
+}
+usize StringTable::State::FindSlot(std::string_view value, uint64 hash) const noexcept
+{
+    usize slot = static_cast<usize>(hash) & (SlotCapacity - 1);
+    while (Slots[slot] != kInvalidIndex)
+    {
+        const Entry& entry = Entries[Slots[slot]];
+        if (entry.Hash == hash && entry.Spelling == value)
+        {
+            break;
+        }
+        slot = (slot + 1) & (SlotCapacity - 1);
+    }
+    return slot;
+}
+StringStatus StringTable::State::Find(std::string_view value, NameId& output) const noexcept
+{
+    const StringStatus valid = Validate(value);
+    if (valid != StringStatus::Ok)
+    {
+        return valid;
+    }
+    const usize slot = FindSlot(value, Hash(value));
+    if (Slots[slot] == kInvalidIndex)
+    {
+        return StringStatus::NotFound;
+    }
+    output = {Token, StringIndex{Slots[slot]}};
+    return StringStatus::Ok;
+}
+StringStatus StringTable::State::Resolve(NameId id, std::string_view& output) const noexcept
+{
+    if (!id.IsValid())
+    {
+        return StringStatus::InvalidHandle;
+    }
+    if (id.TableToken != Token)
+    {
+        return StringStatus::WrongTable;
+    }
+    if (id.Index.Value >= Count)
+    {
+        return StringStatus::InvalidHandle;
+    }
+    output = Entries[id.Index.Value].Spelling;
+    return StringStatus::Ok;
+}
+StringStatus StringTable::State::EnsureEntries() noexcept
+{
+    if (Count < EntryCapacity)
+    {
+        return StringStatus::Ok;
+    }
+    usize capacity =
+        EntryCapacity == 0 ? 8 : (EntryCapacity <= Config.MaxEntries / 2 ? EntryCapacity * 2 : Config.MaxEntries);
+    if (capacity > Config.MaxEntries)
+    {
+        capacity = Config.MaxEntries;
+    }
+    usize bytes = 0;
+    if (!TryMultiply(capacity, sizeof(Entry), bytes))
+    {
+        return StringStatus::TooLarge;
+    }
+    if (bytes > Config.MaxAllocatedBytes - Allocated)
+    {
+        return StringStatus::CapacityExceeded;
+    }
+    auto* entries = static_cast<Entry*>(Allocate(bytes, alignof(Entry)));
+    if (entries == nullptr)
+    {
+        return StringStatus::OutOfMemory;
+    }
+    for (usize i = 0; i < capacity; ++i)
+    {
+        new (entries + i) Entry{};
+        if (i < Count)
+        {
+            entries[i] = Entries[i];
+        }
+    }
+    Free(Entries, EntryCapacity * sizeof(Entry), alignof(Entry));
+    Entries = entries;
+    EntryCapacity = capacity;
+    return StringStatus::Ok;
+}
+StringStatus StringTable::State::EnsureSlots() noexcept
+{
+    if (SlotCapacity != 0 && Count + static_cast<usize>(1) <= SlotCapacity - SlotCapacity / 4)
+    {
+        return StringStatus::Ok;
+    }
+    usize capacity = SlotCapacity == 0 ? 16 : SlotCapacity * 2;
+    usize bytes = 0;
+    if (capacity < SlotCapacity || !TryMultiply(capacity, sizeof(uint32), bytes))
+    {
+        return StringStatus::TooLarge;
+    }
+    if (bytes > Config.MaxAllocatedBytes - Allocated)
+    {
+        return StringStatus::CapacityExceeded;
+    }
+    auto* slots = static_cast<uint32*>(Allocate(bytes, alignof(uint32)));
+    if (slots == nullptr)
+    {
+        return StringStatus::OutOfMemory;
+    }
+    for (usize i = 0; i < capacity; ++i)
+    {
+        new (slots + i) uint32{kInvalidIndex};
+    }
+    for (uint32 i = 0; i < Count; ++i)
+    {
+        usize slot = static_cast<usize>(Entries[i].Hash) & (capacity - 1);
+        while (slots[slot] != kInvalidIndex)
+        {
+            slot = (slot + 1) & (capacity - 1);
+        }
+        slots[slot] = i;
+    }
+    Free(Slots, SlotCapacity * sizeof(uint32), alignof(uint32));
+    Slots = slots;
+    SlotCapacity = capacity;
+    return StringStatus::Ok;
+}
+StringStatus StringTable::State::EnsurePage(usize bytes) noexcept
+{
+    if (Pages != nullptr && bytes <= Pages->Capacity - Pages->Used)
+    {
+        return StringStatus::Ok;
+    }
+    const usize available = Config.MaxAllocatedBytes - Allocated;
+    if (available < sizeof(Page) || bytes > available - sizeof(Page))
+    {
+        return StringStatus::CapacityExceeded;
+    }
+    usize capacity = bytes > kPageCapacity ? bytes : kPageCapacity;
+    if (capacity > available - sizeof(Page))
+    {
+        capacity = available - sizeof(Page);
+    }
+    usize allocation = 0;
+    if (!TryAdd(capacity, sizeof(Page), allocation))
+    {
+        return StringStatus::TooLarge;
+    }
+    void* storage = Allocate(allocation, alignof(Page));
+    if (storage == nullptr)
+    {
+        return StringStatus::OutOfMemory;
+    }
+    Pages = new (storage) Page{ .Next = Pages, .Capacity = capacity };
+    return StringStatus::Ok;
+}
+StringStatus StringTable::State::Intern(std::string_view value, NameId& output) noexcept
+{
+    const StringStatus valid = Validate(value);
+    if (valid != StringStatus::Ok)
+    {
+        return valid;
+    }
+    const uint64 hash = Hash(value);
+    if (SlotCapacity != 0)
+    {
+        const usize slot = FindSlot(value, hash);
+        if (Slots[slot] != kInvalidIndex)
+        {
+            output = {Token, StringIndex{Slots[slot]}};
+            return StringStatus::Ok;
+        }
+    }
+    if (Count == Config.MaxEntries)
+    {
+        return StringStatus::CapacityExceeded;
+    }
+    StringStatus status = EnsureEntries();
+    if (status != StringStatus::Ok)
+    {
+        return status;
+    }
+    status = EnsureSlots();
+    if (status != StringStatus::Ok)
+    {
+        return status;
+    }
+    status = EnsurePage(value.size() + 1);
+    if (status != StringStatus::Ok)
+    {
+        return status;
+    }
+    // All fallible work precedes this commit. Source may borrow an old page;
+    // append-only storage keeps it valid across metadata growth and rehashing.
+    char* spelling = Pages->Bytes() + Pages->Used;
+    if (!value.empty())
+    {
+        std::memcpy(spelling, value.data(), value.size());
+    }
+    spelling[value.size()] = '\0';
+    const usize slot = FindSlot(value, hash);
+    Entries[Count] = {hash, std::string_view{spelling, value.size()}};
+    Slots[slot] = Count;
+    output = {Token, StringIndex{Count}};
+    Pages->Used += value.size() + 1;
+    ++Count;
+    return StringStatus::Ok;
+}
+
+StringStatus CreateTable(const StringTableConfig& config, const AllocationDomain& domain, StringTable& output) noexcept
+{
+    if (output.IsValid() || config.MaxEntries == 0 || config.MaxEntries == kInvalidIndex ||
+        config.MaxAllocatedBytes < sizeof(StringTable::State) ||
+        config.MaxSpellingBytes >= (static_cast<usize>(-1) >> 1) ||
+        (config.HashPolicy != StringHashPolicy::Trusted && config.HashPolicy != StringHashPolicy::Untrusted) ||
+        (config.HashPolicy == StringHashPolicy::Untrusted && !config.HasSecretKey))
+    {
+        return StringStatus::InvalidArgument;
+    }
+    void* storage = domain.TryAllocate(sizeof(StringTable::State), alignof(StringTable::State));
+    if (storage == nullptr)
+    {
+        return StringStatus::OutOfMemory;
+    }
+    auto* state = new (storage) StringTable::State{domain, config};
+    NameId empty;
+    StringStatus status = state->Intern({}, empty);
+    if (status == StringStatus::Ok)
+    {
+        status = IssueToken(state->Token);
+    }
+    if (status != StringStatus::Ok)
+    {
+        StringTable::State::Destroy(state);
+        return status;
+    }
+    output.mState = state;
+    return StringStatus::Ok;
+}
+StringTable::~StringTable() noexcept
+{
+    State::Destroy(mState);
+}
+StringTable::StringTable(StringTable&& other) noexcept : mState(std::exchange(other.mState, nullptr)) {}
+StringTable& StringTable::operator=(StringTable&& other) noexcept
+{
+    if (this != &other)
+    {
+        State::Destroy(mState);
+        mState = std::exchange(other.mState, nullptr);
+    }
+    return *this;
+}
+StringStatus StringTable::TryIntern(std::string_view value, NameId& output) noexcept
+{
+    if (mState == nullptr)
+    {
+        return StringStatus::InvalidHandle;
+    }
+    const std::lock_guard lock(mState->Mutex);
+    return mState->Intern(value, output);
+}
+StringStatus StringTable::TryFind(std::string_view value, NameId& output) const noexcept
+{
+    if (mState == nullptr)
+    {
+        return StringStatus::InvalidHandle;
+    }
+    const std::lock_guard lock(mState->Mutex);
+    return mState->Find(value, output);
+}
+StringStatus StringTable::TryResolve(NameId id, std::string_view& output) const& noexcept
+{
+    if (mState == nullptr)
+    {
+        return StringStatus::InvalidHandle;
+    }
+    const std::lock_guard lock(mState->Mutex);
+    return mState->Resolve(id, output);
+}
+StringStatus StringTable::TryFreeze(FrozenStringTable& output) noexcept
+{
+    if (mState == nullptr)
+    {
+        return StringStatus::InvalidHandle;
+    }
+    if (output.IsValid())
+    {
+        return StringStatus::InvalidArgument;
+    }
+    output.mState = std::exchange(mState, nullptr);
+    return StringStatus::Ok;
+}
+FrozenStringTable::~FrozenStringTable() noexcept
+{
+    StringTable::State::Destroy(mState);
+}
+FrozenStringTable::FrozenStringTable(FrozenStringTable&& other) noexcept : mState(std::exchange(other.mState, nullptr))
+{
+}
+FrozenStringTable& FrozenStringTable::operator=(FrozenStringTable&& other) noexcept
+{
+    if (this != &other)
+    {
+        StringTable::State::Destroy(mState);
+        mState = std::exchange(other.mState, nullptr);
+    }
+    return *this;
+}
+StringStatus FrozenStringTable::TryFind(std::string_view value, NameId& output) const noexcept
+{
+    return mState == nullptr ? StringStatus::InvalidHandle : mState->Find(value, output);
+}
+StringStatus FrozenStringTable::TryResolve(NameId id, std::string_view& output) const& noexcept
+{
+    return mState == nullptr ? StringStatus::InvalidHandle : mState->Resolve(id, output);
+}
+} // namespace ludus::foundation

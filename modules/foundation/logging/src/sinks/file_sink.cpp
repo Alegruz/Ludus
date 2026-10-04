@@ -12,8 +12,10 @@
 #include <ctime>
 #include <filesystem>
 #include <format>
+#include <new>
 #include <string>
 #include <system_error>
+#include <utility>
 
 #if LUDUS_TARGET_OS == LUDUS_OS_WINDOWS
 #    include <io.h>
@@ -321,7 +323,7 @@ std::FILE* exclusiveCreate(const std::filesystem::path& path) noexcept
 
 FileSink* FileSink::Create(const FileSinkConfig& config)
 {
-    if (config.Directory.empty())
+    if (config.Directory.empty() || config.Directory.find('\0') != std::string_view::npos)
     {
         return nullptr;
     }
@@ -358,12 +360,23 @@ FileSink* FileSink::Create(const FileSinkConfig& config)
     pruneSessions(directory, active_key, limits);
 
     // Store the paths as UTF-8 strings; the header carries no <filesystem>.
-    return new FileSink(file, directory.string(), base_path.string(), config);
+    SharedString base;
+    if (CreateShared(base_path.string(), GetSystemAllocationDomain(), base) != StringStatus::Ok)
+    {
+        std::fclose(file);
+        return nullptr;
+    }
+    auto* sink = new (std::nothrow) FileSink(file, std::move(base), config);
+    if (sink == nullptr)
+    {
+        std::fclose(file);
+    }
+    return sink;
 }
 
-FileSink::FileSink(std::FILE* file, std::string directoryUtf8, std::string basePathUtf8, const FileSinkConfig& config)
-    : mFile(file), mDirectoryUtf8(std::move(directoryUtf8)), mBasePathUtf8(std::move(basePathUtf8)),
-      mActivePathUtf8(mBasePathUtf8), mMaxFileSizeBytes(config.MaxFileSizeBytes)
+FileSink::FileSink(std::FILE* file, SharedString basePathUtf8, const FileSinkConfig& config)
+    : mFile(file), mBasePathUtf8(std::move(basePathUtf8)), mActivePathUtf8(mBasePathUtf8),
+      mMaxFileSizeBytes(config.MaxFileSizeBytes)
 {
     mScratch.reserve(256);
 }
@@ -392,12 +405,18 @@ void FileSink::RotateIfNeeded(usize incomingBytes) noexcept
     ++mRotationIndex;
     // Reconstruct the base path locally to compute the next numbered segment.
     // mBasePathUtf8 ends in ".log"; insert ".<n>" before the extension.
-    std::filesystem::path rotated{mBasePathUtf8};
+    std::filesystem::path rotated{mBasePathUtf8.GetView()};
     rotated.replace_extension(); // drop ".log"
     const std::filesystem::path next = std::format("{}.{}.log", rotated.string(), mRotationIndex);
 
     // Open the replacement BEFORE relinquishing the old handle so a failed
     // rotation leaves the current segment usable (requirements R44).
+    SharedString nextPath;
+    if (CreateShared(next.string(), GetSystemAllocationDomain(), nextPath) != StringStatus::Ok)
+    {
+        mHealthy = false;
+        return;
+    }
     std::FILE* newFile = exclusiveCreate(next);
     if (newFile == nullptr)
     {
@@ -408,7 +427,7 @@ void FileSink::RotateIfNeeded(usize incomingBytes) noexcept
     std::fflush(mFile);
     std::fclose(mFile);
     mFile = newFile;
-    mActivePathUtf8 = next.string();
+    mActivePathUtf8 = std::move(nextPath);
     mBytesWritten = 0;
 }
 

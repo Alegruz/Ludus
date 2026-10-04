@@ -2,19 +2,17 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/foundation/strings/shared_string.hpp>
+
 #include "internal/sink.hpp"
 
 #include <cstdio>
 #include <string>
 #include <string_view>
 
-// This private header stores its path state as std::string (UTF-8) rather than
-// std::filesystem::path, so it needs neither <filesystem> nor <memory> (the
-// latter drags in <format> on libstdc++). The actual filesystem operations use
-// std::filesystem inside file_sink.cpp, below this boundary. This keeps the
-// header a plain, readable class (no PIMPL) that stays within the build-time
-// budget (ADR 0004/0005; requirements R21). Paths are already round-tripped to
-// UTF-8 for fopen, so std::string members change no behavior.
+// Path owners share immutable bytes; filesystem operations stay in the .cpp.
+// Base/active paths initially share one fallible allocation, then rotation
+// replaces only the active owner. Formatting scratch remains an STL adapter.
 
 namespace ludus::foundation::logging::internal
 {
@@ -63,7 +61,7 @@ public:
     // UTF-8 string (avoids exposing std::filesystem::path in the header).
     [[nodiscard]] std::string_view CurrentPathUtf8() const noexcept
     {
-        return mActivePathUtf8;
+        return mActivePathUtf8.GetView();
     }
 
     [[nodiscard]] bool Healthy() const noexcept
@@ -74,7 +72,7 @@ public:
 private:
     // Constructed by Create() with an already-open file handle and the UTF-8
     // paths of the session's first segment.
-    FileSink(std::FILE* file, std::string directoryUtf8, std::string basePathUtf8, const FileSinkConfig& config);
+    FileSink(std::FILE* file, SharedString basePathUtf8, const FileSinkConfig& config);
 
     // Rotate to the next numbered segment when the incoming write would exceed
     // the per-segment cap. On failure marks the sink unhealthy and stops file
@@ -82,9 +80,8 @@ private:
     void RotateIfNeeded(usize incomingBytes) noexcept;
 
     std::FILE* mFile = nullptr;
-    std::string mDirectoryUtf8;
-    std::string mBasePathUtf8; // first segment of the session (no rotation suffix)
-    std::string mActivePathUtf8;
+    SharedString mBasePathUtf8; // first segment of the session (no rotation suffix)
+    SharedString mActivePathUtf8;
     uint64 mMaxFileSizeBytes = 0;
     uint64 mBytesWritten = 0;        // bytes in the current segment
     uint64 mSessionBytesWritten = 0; // bytes across all segments this session

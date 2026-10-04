@@ -112,6 +112,9 @@ configure_file(cmake/CheckSdkVariant.cmake.in "${PROJECT_BINARY_DIR}/cmake/Check
 install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENTS)
 
 add_subdirectory(modules/foundation/base)
+add_subdirectory(modules/foundation/memory)
+add_subdirectory(modules/foundation/hash)
+add_subdirectory(modules/foundation/strings)
 add_subdirectory(modules/foundation/containers)
 add_subdirectory(modules/gameplay/world)
 # FoundationMath depends only on FoundationBase. It is added before any consumer
@@ -228,7 +231,7 @@ write_basic_package_version_file(
 # --- Redistributable dependency inventory (P02/P03/P11) ----------------------
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
-    FoundationBase FoundationContainers FoundationMath FoundationTime FoundationLogging
+    FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationMath FoundationTime FoundationLogging
     FoundationProfiling Input Audio Content AudioContent GameplayWorld GameApi)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
@@ -257,6 +260,7 @@ if(NOT EMSCRIPTEN)
 endif()
 ludus_sdk_register_dependency(yyjson "0.10.0" "MIT" bundled)
 ludus_sdk_register_dependency(miniaudio "0.11.23" "MIT-0" bundled)
+ludus_sdk_register_dependency(xxHash "0.8.3" "BSD-2-Clause" bundled)
 ludus_sdk_register_dependency(Threads     "system"    "system"             system)
 
 # System prerequisites that cannot reasonably be bundled.
@@ -329,3 +333,5 @@ if(NOT EMSCRIPTEN)
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus" RENAME LudusGameHostMain.cpp)
 endif()
 install(FILES cmake/shaders/compile_shader.py config/shader_toolchain.json config/spirv_cross_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
+
+install(FILES third_party/xxhash/LICENSE DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}/licenses" RENAME xxhash-LICENSE)

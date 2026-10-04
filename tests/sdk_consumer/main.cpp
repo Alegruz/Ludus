@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 int ExerciseInstalledWorld() noexcept;
+bool ExerciseInstalledStrings() noexcept;
 int ExerciseInstalledTime() noexcept;
 
 static_assert(ludus::foundation::kTarget.PointerBits == sizeof(void*) * 8);
@@ -199,6 +200,10 @@ static_assert(PrimitiveContract());
 
 int main()
 {
+    if (!ExerciseInstalledStrings())
+    {
+        return 9;
+    }
     if (!PrimitiveContract())
     {
         return 8;

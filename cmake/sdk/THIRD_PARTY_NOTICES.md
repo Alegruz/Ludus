@@ -74,3 +74,8 @@ Each bundled component's full upstream license text is placed next to this file
 in `share/Ludus/licenses/` by the release-packaging step. Where a build has not
 yet produced those files (e.g. a developer `cmake --install` without the release
 packager), this notices file plus the manifest inventory record the obligation.
+
+## xxHash 0.8.3
+
+Yann Collet and contributors, BSD-2-Clause. https://github.com/Cyan4973/xxHash/tree/v0.8.3
+The complete license is bundled as `xxhash-LICENSE`. Used privately by FoundationHash.

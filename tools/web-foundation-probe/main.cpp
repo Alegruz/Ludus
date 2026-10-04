@@ -12,6 +12,8 @@
 
 #include <emscripten.h>
 
+bool ExerciseInstalledStrings() noexcept;
+
 using namespace ludus::foundation;
 
 static_assert(LUDUS_PLATFORM_WEB == 1);
@@ -83,6 +85,10 @@ static_assert(PrimitiveContract());
 
 int main(int argc, char** argv)
 {
+    if (!ExerciseInstalledStrings())
+    {
+        return 9;
+    }
     if (!PrimitiveContract(static_cast<usize>(argc)))
     {
         return 8;
