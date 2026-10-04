@@ -1,9 +1,12 @@
 #include <ludus/foundation/base/core.h>
 
 #include <ludus/foundation/base/assert_format.hpp>
+#include <ludus/foundation/base/byte_order.hpp>
+#include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/base/diagnostic_output.hpp>
 #include <ludus/foundation/base/version.hpp>
 
+#include <span>
 #include <string_view>
 
 #include <emscripten.h>
@@ -50,8 +53,35 @@ void reportPassed() noexcept
 }
 } // namespace
 
+constexpr bool PrimitiveContract(ludus::foundation::usize increment = 1) noexcept
+{
+    using namespace ludus::foundation;
+    static_assert(sizeof(usize) == sizeof(void*));
+    if (increment == 0 || increment > 255)
+    {
+        return false;
+    }
+    const uint32 word = 0x12345600 | static_cast<uint32>(increment);
+    usize size = 42;
+    uint32 length = 42;
+    int64 signedProduct = 42;
+    uint8 bytes[4]{};
+    return !TryAdd(~usize{0}, increment, size) && size == 42 && !TryMultiply(~usize{0}, increment + 1, size) &&
+           size == 42 &&
+           !TryMultiply(-int64{9223372036854775807} - 1, static_cast<int64>(increment) + 1, signedProduct) &&
+           signedProduct == 42 && !TryIntegerCast(int32{-1}, length) && length == 42 &&
+           TryWriteLittleEndian(word, bytes) && bytes[0] == increment && bytes[3] == 0x12 &&
+           TryReadLittleEndian(bytes, length) && length == word &&
+           !TryReadBigEndian(std::span<const uint8>{bytes, 3}, length) && length == word;
+}
+static_assert(PrimitiveContract());
+
 int main(int argc, char** argv)
 {
+    if (!PrimitiveContract(static_cast<usize>(argc)))
+    {
+        return 8;
+    }
     const std::string_view mode = argc > 1 ? argv[1] : "normal";
     if (version_string().empty() || !transportContract())
     {

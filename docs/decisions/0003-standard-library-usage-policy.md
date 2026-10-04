@@ -70,6 +70,10 @@ closed argument set and an implementation-only parser.
   authorise `<random>` distributions (FoundationMath ships its own PCG32), and
   the checked numerical path still forbids fast math and FMA contraction (it is
   compiled with `-ffp-contract=off`).
+- `<climits>` and `<limits>` are also allowed **only** in FoundationBase's
+  private `src/types.cpp` representation-contract translation unit (ADR 0015).
+  Compile-time byte width, integer range, and IEEE binary32/64 verification
+  must not add these includes to `types.h` or `core.h`.
 - `<span>` when needed — non-owning view over contiguous data.
 - `<atomic>`, `<mutex>`, `<shared_mutex>` — concurrency primitives; correctness
   first. Revisit only when a custom job/threading system exists.
