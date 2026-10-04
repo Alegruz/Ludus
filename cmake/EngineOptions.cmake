@@ -1,6 +1,8 @@
 function(ludus_configure_target_identity target_name visibility)
     # Validate compiler detection against the configured target, not the host.
     # FoundationBase exports this guard without exporting private build options.
+    # Reference: Kitware, "CMAKE_SYSTEM_NAME" (target system versus host system):
+    # https://cmake.org/cmake/help/latest/variable/CMAKE_SYSTEM_NAME.html
     if(EMSCRIPTEN)
         set(ludus_target_os WEB)
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")

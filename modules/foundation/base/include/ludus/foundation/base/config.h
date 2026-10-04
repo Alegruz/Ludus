@@ -13,6 +13,12 @@
 //
 // See docs/architecture/foundational-headers.md (§7, §8) and ADR 0007.
 //
+// Reference: David Etherton, "Designing and Maintaining Large Cross-Platform
+// Libraries", Game Programming Gems 4, ch. 1.4, pp. 35-41. We adapt his guidance
+// on sparse platform conditionals, numeric #if checks, and explicit size/byte-order
+// facts while preserving Ludus's active-only legacy flags. Full source review:
+// docs/architecture/platform-detection.md, "Reference review and revisions".
+//
 // NOTE: OS *family* detection lives here. Selecting a concrete windowing
 // backend (Wayland/X11/headless/...) is the platform module's job and stays in
 // <ludus/platform/config.h>; do not add backend selection here.
@@ -38,6 +44,8 @@
 
 // More-specific environments precede their compatibility families. Emscripten
 // denotes the toolchain environment, not the user's browser or host OS.
+// Reference: Emscripten contributors, "Building Projects" (compiler predefines):
+// https://emscripten.org/docs/compiling/Building-Projects.html
 #if defined(__EMSCRIPTEN__)
 #    define LUDUS_TARGET_OS LUDUS_OS_WEB
 #    define LUDUS_PLATFORM_WEB 1
@@ -50,6 +58,8 @@
 #elif defined(__APPLE__)
 // This target-SDK header contains macros only; TARGET_OS_MAC includes iOS and
 // must not be used to select macOS. Catalyst is classified as an iOS API target.
+// Reference: Apple, "Running code on a specific platform or OS version":
+// https://developer.apple.com/documentation/xcode/running-code-on-a-specific-version/
 #    include <TargetConditionals.h>
 #    if TARGET_OS_OSX
 #        define LUDUS_TARGET_OS LUDUS_OS_MACOS
@@ -86,6 +96,8 @@
 
 // ARM64EC also advertises x64 compatibility macros; it needs its own reviewed
 // ABI/intrinsics policy and must never silently select the x86 implementation.
+// Reference: Microsoft, "Predefined macros" (_M_ARM64EC and target/data-model flags):
+// https://learn.microsoft.com/en-us/cpp/preprocessor/predefined-macros
 #if defined(_M_ARM64EC) || defined(__arm64ec__)
 #    error "Ludus target detection: ARM64EC is not supported"
 #elif defined(__wasm64__)

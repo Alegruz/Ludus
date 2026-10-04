@@ -46,6 +46,10 @@
 #endif
 
 // Query extensions without defining or overriding the compiler's own macros.
+// Reference: LLVM Project, "Clang Language Extensions", feature-checking macros.
+// These wrappers follow its __has_builtin/__has_attribute/__has_cpp_attribute
+// contracts instead of inferring extension availability from frontend identity:
+// https://clang.llvm.org/docs/LanguageExtensions.html
 #if defined(__has_builtin)
 #    define LUDUS_HAS_BUILTIN(name) __has_builtin(name)
 #else

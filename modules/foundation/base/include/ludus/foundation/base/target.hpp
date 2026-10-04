@@ -8,6 +8,11 @@ namespace ludus::foundation
 
 // Compiled target facts, independent of the host machine and runtime devices.
 // This descriptor is opt-in; core.h remains the small foundational vocabulary.
+// Reference: Jason Hughes, "What to Look for When Evaluating Middleware for
+// Integration", Game Engine Gems 1, ch. 1, secs. 1.10-1.13, pp. 10-12. The scoped,
+// opt-in API adapts his guidance on small integration boundaries and visible
+// portability assumptions; target identity does not establish runtime capability.
+// Full source review: docs/architecture/platform-detection.md.
 enum class TargetOs : uint8
 {
     Web = LUDUS_OS_WEB,
