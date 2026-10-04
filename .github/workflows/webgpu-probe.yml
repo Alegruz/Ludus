@@ -30,6 +30,7 @@ on:
       - 'modules/foundation/math/**'
       - 'tools/web-math-probe/**'
       - 'modules/foundation/containers/**'
+      - 'modules/foundation/time/**'
       - 'modules/foundation/logging/**'
       - 'modules/foundation/profiling/**'
       - 'cmake/**'

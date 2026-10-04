@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 int ExerciseInstalledWorld() noexcept;
+int ExerciseInstalledTime() noexcept;
 
 static_assert(ludus::foundation::kTarget.PointerBits == sizeof(void*) * 8);
 static_assert(ludus::foundation::kTarget.Os == ludus::foundation::TargetOs::Linux);
@@ -247,6 +248,10 @@ int main()
         return 1;
     }
 
+    if (const int timeResult = ExerciseInstalledTime(); timeResult != 0)
+    {
+        return timeResult;
+    }
     if (const int worldResult = ExerciseInstalledWorld(); worldResult != 0)
     {
         return worldResult;

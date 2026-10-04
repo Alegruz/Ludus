@@ -32,11 +32,7 @@ configure_file(
     NEWLINE_STYLE UNIX
 )
 
-if(EMSCRIPTEN)
-    target_sources(ludus_foundation_profiling PRIVATE src/clock_web.cpp)
-else()
-    target_sources(ludus_foundation_profiling PRIVATE src/clock.cpp)
-endif()
+target_sources(ludus_foundation_profiling PRIVATE src/clock.cpp)
 
 if(EMSCRIPTEN AND NOT LUDUS_PROFILING_ENABLED)
     target_sources(ludus_foundation_profiling PRIVATE src/profiling_disabled.cpp)
@@ -73,7 +69,7 @@ target_include_directories(
         src
 )
 
-# Dependency direction (AGENTS.md): FoundationProfiling may use FoundationBase
+# Dependency direction (AGENTS.md): FoundationProfiling may use FoundationTime/Base
 # (types, defines), never a higher-level module. It deliberately does NOT depend
 # on FoundationLogging — it keeps its own thread identity so the ubiquitous
 # instrumentation header stays minimal and the layering clean.
@@ -82,6 +78,8 @@ target_link_libraries(
     PUBLIC
         Ludus::FoundationBase
         Ludus::FoundationContainers
+    PRIVATE
+        Ludus::FoundationTime
 )
 
 if(NOT EMSCRIPTEN)
@@ -114,6 +112,7 @@ if(LUDUS_BUILD_TESTS)
         ludus_foundation_profiling_tests
         PRIVATE
             Ludus::FoundationProfiling
+            Ludus::FoundationTime
             Catch2::Catch2WithMain
     )
     # Tests reach internal headers to verify implementation-level contracts;

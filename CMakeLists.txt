@@ -117,6 +117,7 @@ add_subdirectory(modules/gameplay/world)
 # FoundationMath depends only on FoundationBase. It is added before any consumer
 # and outside the native-only branch so native and browser targets share it.
 add_subdirectory(modules/foundation/math)
+add_subdirectory(modules/foundation/time)
 add_subdirectory(modules/foundation/logging)
 add_subdirectory(modules/foundation/profiling)
 # Input is configured before Platform: Platform depends on Input for the
@@ -227,7 +228,7 @@ write_basic_package_version_file(
 # --- Redistributable dependency inventory (P02/P03/P11) ----------------------
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
-    FoundationBase FoundationContainers FoundationMath FoundationLogging
+    FoundationBase FoundationContainers FoundationMath FoundationTime FoundationLogging
     FoundationProfiling Input Audio Content AudioContent GameplayWorld GameApi)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})

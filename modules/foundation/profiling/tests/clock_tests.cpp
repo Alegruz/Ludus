@@ -1,6 +1,7 @@
 #include <ludus/foundation/profiling/clock.hpp>
 
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/time/time.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -66,4 +67,13 @@ TEST_CASE("clock is non-decreasing across threads reading concurrently", "[profi
     {
         thread.join();
     }
+}
+
+TEST_CASE("profiling shares FoundationTime epoch and units", "[profiling][clock]")
+{
+    const auto before = ludus::foundation::time::Now();
+    const auto profile = NowTicks();
+    const auto after = ludus::foundation::time::Now();
+    CHECK(profile >= before.Nanoseconds);
+    CHECK(profile <= after.Nanoseconds);
 }
