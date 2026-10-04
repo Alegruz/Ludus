@@ -200,6 +200,20 @@ cast and two widened test-oracle minimum values. Converting through unsigned
 char would change negative integers. The repository's checker configuration
 and its general character diagnostics are unchanged.
 
+## Boundary adoption validation
+
+Pinned Clang 18.1.3 warnings-as-errors builds and complete Debug (52 CTest
+entries), Development (49 entries), and ASan/UBSan (43 entries) suites passed.
+Two live Wayland entries in each native suite skipped without a compositor.
+All 16 pinned Emscripten Development tests passed, and the installed native
+SDK consumer built and ran. An additional isolated wasm32 executable checked
+32-bit raster extent rejection, checkpoint failure preservation and Audio's
+final rounded-sum overflow; it does not claim a browser Text/Audio backend.
+Source formatting and foundational include gates passed. All translation
+units passed pinned clang-tidy; the final named-field raster interface and
+its two callers were rechecked, and Text tests reran in all three native
+profiles plus the wasm32 probe after that interface change.
+
 ## Original primitive implementation validation
 
 Pinned Clang 18.1.3 local validation passed the Debug (50 CTest entries),

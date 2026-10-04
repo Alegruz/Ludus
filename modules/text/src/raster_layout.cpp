@@ -11,19 +11,16 @@ namespace ludus::text::internal
 // section 24.1, for the signed-minimum counterexample. We widen before negating
 // and check byte products/extents; no bit-hack listing is copied.
 // Review: docs/architecture/primitive-types.md, "Boundary adoption audit".
-Status TryRasterLayout(ludus::foundation::uint32 width,
-                       ludus::foundation::uint32 height,
-                       ludus::foundation::int32 pitch,
-                       RasterLayout& out) noexcept
+Status TryRasterLayout(RasterInput input, RasterLayout& out) noexcept
 {
     using namespace ludus::foundation;
     RasterLayout next;
-    if (width == 0 || height == 0)
+    if (input.Width == 0 || input.Height == 0)
     {
         out = next;
         return Status::Ok;
     }
-    const int64 widePitch = pitch;
+    const int64 widePitch = input.Pitch;
     const int64 magnitude = widePitch < 0 ? -widePitch : widePitch;
     usize lastRow{};
     usize sourceExtent{};
@@ -31,13 +28,13 @@ Status TryRasterLayout(ludus::foundation::uint32 width,
     {
         return Status::ResourceLimit;
     }
-    if (next.Pitch < width)
+    if (next.Pitch < input.Width)
     {
         return Status::BackendFailure;
     }
-    if (!TryMultiply(static_cast<usize>(width), static_cast<usize>(height), next.CoverageBytes) ||
-        !TryMultiply(static_cast<usize>(height - 1), next.Pitch, lastRow) ||
-        !TryAdd(lastRow, static_cast<usize>(width), sourceExtent) || next.CoverageBytes > (~usize{0} >> 1) ||
+    if (!TryMultiply(static_cast<usize>(input.Width), static_cast<usize>(input.Height), next.CoverageBytes) ||
+        !TryMultiply(static_cast<usize>(input.Height - 1), next.Pitch, lastRow) ||
+        !TryAdd(lastRow, static_cast<usize>(input.Width), sourceExtent) || next.CoverageBytes > (~usize{0} >> 1) ||
         sourceExtent > (~usize{0} >> 1))
     {
         return Status::ResourceLimit;

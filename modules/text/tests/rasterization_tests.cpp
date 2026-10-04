@@ -126,20 +126,26 @@ TEST_CASE("raster layout checks signed pitch and byte extents before allocation"
 {
     using namespace ludus::foundation;
     internal::RasterLayout layout{99, 98};
-    REQUIRE(internal::TryRasterLayout(3, 2, 4, layout) == Status::Ok);
+    REQUIRE(internal::TryRasterLayout({ .Width = 3, .Height = 2, .Pitch = 4 }, layout) == Status::Ok);
     REQUIRE(layout.Pitch == 4);
     REQUIRE(layout.CoverageBytes == 6);
-    REQUIRE(internal::TryRasterLayout(3, 2, -4, layout) == Status::Ok);
+    REQUIRE(internal::TryRasterLayout({ .Width = 3, .Height = 2, .Pitch = -4 }, layout) == Status::Ok);
     REQUIRE(layout.Pitch == 4);
     REQUIRE(layout.CoverageBytes == 6);
-    REQUIRE(internal::TryRasterLayout(3, 2, 2, layout) == Status::BackendFailure);
+    REQUIRE(internal::TryRasterLayout({ .Width = 3, .Height = 2, .Pitch = 2 }, layout) == Status::BackendFailure);
     REQUIRE(layout.Pitch == 4);
     REQUIRE(layout.CoverageBytes == 6);
     constexpr int32 minPitch = -int32{2147483647} - 1;
-    REQUIRE(internal::TryRasterLayout(1, 1, minPitch, layout) == Status::Ok);
+    REQUIRE(internal::TryRasterLayout({ .Width = 1, .Height = 1, .Pitch = minPitch }, layout) == Status::Ok);
     REQUIRE(layout.Pitch == uint64{2147483648});
     REQUIRE(layout.CoverageBytes == 1);
-    const auto extremeStatus = internal::TryRasterLayout(1, ~uint32{0}, minPitch, layout);
+    const auto extremeStatus = internal::TryRasterLayout(
+        {
+            .Width = 1,
+            .Height = ~uint32{0},
+            .Pitch = minPitch,
+        },
+        layout);
     if constexpr (sizeof(usize) == 4)
     {
         REQUIRE(extremeStatus == Status::ResourceLimit);
@@ -150,7 +156,7 @@ TEST_CASE("raster layout checks signed pitch and byte extents before allocation"
         REQUIRE(extremeStatus == Status::Ok);
         REQUIRE(layout.CoverageBytes == ~uint32{0});
     }
-    REQUIRE(internal::TryRasterLayout(0, ~uint32{0}, minPitch, layout) == Status::Ok);
+    REQUIRE(internal::TryRasterLayout({ .Width = 0, .Height = ~uint32{0}, .Pitch = minPitch }, layout) == Status::Ok);
     REQUIRE(layout.Pitch == 0);
     REQUIRE(layout.CoverageBytes == 0);
 }

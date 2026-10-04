@@ -834,7 +834,13 @@ Status RasterizeGlyph(FontSystem* system,
     const uint32 width = bmp.width;
     const uint32 height = bmp.rows;
     internal::RasterLayout layout;
-    const auto layoutStatus = internal::TryRasterLayout(width, height, bmp.pitch, layout);
+    const auto layoutStatus = internal::TryRasterLayout(
+        {
+            .Width = width,
+            .Height = height,
+            .Pitch = bmp.pitch,
+        },
+        layout);
     if (layoutStatus != Status::Ok)
     {
         return layoutStatus;
