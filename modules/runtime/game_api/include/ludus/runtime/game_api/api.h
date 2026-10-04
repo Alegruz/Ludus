@@ -9,6 +9,8 @@
 // editing adds DescribeProperties/ReadProperties/PrepareEdits/CommitEdits/
 // DiscardEdits. Size negotiation is separate from writing bounded caller buffers.
 
+#include <ludus/foundation/base/compiler.h>
+
 #include <ludus/runtime/game_api/abi.h>
 #include <ludus/runtime/game_api/services.h>
 
@@ -162,9 +164,9 @@ using GetGameApiFn = Status (*)(uint32 hostAbiMajor, uint32 hostAbiMinor, GameAp
 
 // Visibility of the single public entry. A gameplay module builds with hidden
 // default visibility and marks EXACTLY this symbol visible, so dlsym resolves
-// the one entry and nothing else (design 5/6). On non-GCC/Clang toolchains this
+// the one entry and nothing else (design 5/6). Without visibility attributes this
 // expands to nothing and the explicit linker export policy applies instead.
-#if defined(__GNUC__) || defined(__clang__)
+#if LUDUS_HAS_ATTRIBUTE(visibility)
 #    define LUDUS_GAME_API_EXPORT __attribute__((visibility("default")))
 #else
 #    define LUDUS_GAME_API_EXPORT

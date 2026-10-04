@@ -3,6 +3,7 @@
 #include <ludus/foundation/base/build_metadata.hpp>
 #include <ludus/foundation/base/byte_order.hpp>
 #include <ludus/foundation/base/checked_integer.hpp>
+#include <ludus/foundation/base/target.hpp>
 #include <ludus/foundation/base/version.hpp>
 #include <ludus/foundation/math/dynamics.hpp>
 #include <ludus/foundation/math/matrix.hpp>
@@ -21,6 +22,10 @@
 #include <unistd.h>
 
 int ExerciseInstalledWorld() noexcept;
+
+static_assert(ludus::foundation::kTarget.PointerBits == sizeof(void*) * 8);
+static_assert(ludus::foundation::kTarget.Os == ludus::foundation::TargetOs::Linux);
+static_assert(LUDUS_EXPECTED_TARGET_OS == LUDUS_OS_LINUX);
 
 // Exercise the installed Ludus::Input SDK through public headers only: define a
 // button map, focus, ingest a short tap, consume one step, and check held/edge

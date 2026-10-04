@@ -1,8 +1,9 @@
 #include "internal/impl.hpp"
+#include <ludus/foundation/base/config.h>
 
 #include <new>
 
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
 #    include <pthread.h>
 #    include <time.h>
 
@@ -11,7 +12,7 @@
 
 namespace ludus::audio
 {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
 namespace
 {
 struct NativeDevice final
@@ -43,7 +44,7 @@ AudioSystem::Impl::~Impl() noexcept
 }
 Status AudioSystem::Impl::StartDevice() noexcept
 {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     auto* native = new (std::nothrow) NativeDevice();
     auto* renderer = new (std::nothrow) Impl();
     if (native == nullptr || renderer == nullptr)
@@ -130,7 +131,7 @@ Status AudioSystem::Impl::StartDevice() noexcept
 }
 void AudioSystem::Impl::CloseDevice() noexcept
 {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     auto* native = static_cast<NativeDevice*>(Device);
     if (native != nullptr)
     {
@@ -156,7 +157,7 @@ Status AudioSystem::Impl::StartWorker() noexcept
     {
         return Status::Ok;
     }
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     auto* worker = new (std::nothrow) NativeWorker();
     if (worker == nullptr)
     {
@@ -236,7 +237,7 @@ Status AudioSystem::Impl::StartWorker() noexcept
 }
 void AudioSystem::Impl::CloseWorker() noexcept
 {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     auto* worker = static_cast<NativeWorker*>(Worker);
     if (worker != nullptr)
     {

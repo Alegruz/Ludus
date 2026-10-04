@@ -1,4 +1,5 @@
 #include "internal/formatter.hpp"
+#include <ludus/foundation/base/config.h>
 
 #include <atomic>
 #include <chrono>
@@ -112,7 +113,7 @@ usize FormatTimestampFromTicks(uint64 monotonic_ticks_ns, char* out, usize capac
 
     const std::time_t seconds = static_cast<std::time_t>(total_seconds);
     std::tm broken{};
-#if defined(_WIN32)
+#if LUDUS_TARGET_OS == LUDUS_OS_WINDOWS
     localtime_s(&broken, &seconds);
 #else
     localtime_r(&seconds, &broken);

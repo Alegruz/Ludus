@@ -1,7 +1,8 @@
 #include <ludus/content/content.h>
+#include <ludus/foundation/base/config.h>
 #include <new>
 
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
 #    include <cerrno>
 #    include <fcntl.h>
 #    include <sys/file.h>
@@ -12,7 +13,7 @@
 
 namespace ludus::content
 {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
 namespace
 {
 struct Fd final
@@ -115,7 +116,7 @@ Status ReadFile(std::string_view root, std::string_view path, usize cap, Bytes& 
     {
         return Status::Invalid;
     }
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     Fd directory;
     Text<1024> leaf;
     const auto status = Parent(root, path, directory, leaf);
@@ -135,7 +136,7 @@ SaveFile(std::string_view root, std::string_view path, std::span<const uint8> da
     {
         return Status::Invalid;
     }
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     if (data.size() > usize{32} * 1024 * 1024)
     {
         return Status::Limit;
@@ -229,7 +230,7 @@ SaveFile(std::string_view root, std::string_view path, std::span<const uint8> da
 }
 struct FileReader::Impl final
 {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     Fd File;
     struct stat Original
     {
@@ -247,7 +248,7 @@ Status FileReader::Open(std::string_view root, std::string_view path) noexcept
     {
         return Status::Invalid;
     }
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     Fd parent;
     Text<1024> leaf;
     auto status = Parent(root, path, parent, leaf);
@@ -278,7 +279,7 @@ Status FileReader::Open(std::string_view root, std::string_view path) noexcept
 }
 Status FileReader::Clone(FileReader& output) const noexcept
 {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     if (mImpl == nullptr)
     {
         return Status::Invalid;
@@ -306,7 +307,7 @@ Status FileReader::Clone(FileReader& output) const noexcept
 Status FileReader::Read(std::span<uint8> bytes, usize& count) noexcept
 {
     count = 0;
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     if (mImpl == nullptr)
     {
         return Status::Invalid;
@@ -349,7 +350,7 @@ Status FileReader::Read(std::span<uint8> bytes, usize& count) noexcept
 }
 Status FileReader::Seek(int64 offset, bool relative) noexcept
 {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     if (mImpl == nullptr)
     {
         return Status::Invalid;
@@ -382,7 +383,7 @@ Status FileReader::Seek(int64 offset, bool relative) noexcept
 }
 uint64 FileReader::Size() const noexcept
 {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     return mImpl != nullptr ? static_cast<uint64>(mImpl->Original.st_size) : 0;
 #else
     return 0;

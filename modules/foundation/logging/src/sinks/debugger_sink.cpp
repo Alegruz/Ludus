@@ -1,8 +1,9 @@
 #include "sinks/debugger_sink.hpp"
+#include <ludus/foundation/base/config.h>
 
 #include "internal/formatter.hpp"
 
-#if defined(_WIN32)
+#if LUDUS_TARGET_OS == LUDUS_OS_WINDOWS
 extern "C" __declspec(dllimport) void __stdcall OutputDebugStringA(const char*);
 extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent(void);
 #endif
@@ -12,7 +13,7 @@ namespace ludus::foundation::logging::internal
 
 DebuggerSink::DebuggerSink()
 {
-#if defined(_WIN32)
+#if LUDUS_TARGET_OS == LUDUS_OS_WINDOWS
     mActive = IsDebuggerPresent() != 0;
 #endif
     mScratch.reserve(256);
@@ -20,7 +21,7 @@ DebuggerSink::DebuggerSink()
 
 SinkStatus DebuggerSink::Write([[maybe_unused]] const LogRecordView& record) noexcept
 {
-#if defined(_WIN32)
+#if LUDUS_TARGET_OS == LUDUS_OS_WINDOWS
     // Re-check attachment rather than trusting a stale ctor-time snapshot
     // (fixes F10): a debugger may attach after Initialize().
     mActive = IsDebuggerPresent() != 0;

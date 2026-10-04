@@ -1,4 +1,5 @@
 #include "sinks/file_sink.hpp"
+#include <ludus/foundation/base/config.h>
 
 #include "internal/formatter.hpp"
 
@@ -14,7 +15,7 @@
 #include <string>
 #include <system_error>
 
-#if defined(_WIN32)
+#if LUDUS_TARGET_OS == LUDUS_OS_WINDOWS
 #    include <io.h>
 #    include <process.h>
 #    define LUDUS_GETPID _getpid
@@ -40,7 +41,7 @@ std::string sessionFileName(uint32 nonce)
 {
     const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     std::tm broken{};
-#if defined(_WIN32)
+#if LUDUS_TARGET_OS == LUDUS_OS_WINDOWS
     gmtime_s(&broken, &now);
 #else
     gmtime_r(&now, &broken);
@@ -303,7 +304,7 @@ void pruneSessions(const std::filesystem::path& directory,
 // truncate someone else's or a prior same-name session (requirements R42; F7).
 std::FILE* exclusiveCreate(const std::filesystem::path& path) noexcept
 {
-#if defined(_WIN32)
+#if LUDUS_TARGET_OS == LUDUS_OS_WINDOWS
     std::FILE* file = nullptr;
     // "wbx" is honored by the UCRT; fall back if unavailable.
     if (::fopen_s(&file, path.string().c_str(), "wbx") != 0)
@@ -460,7 +461,7 @@ SinkStatus FileSink::FlushDurable() noexcept
     // fflush drains C-library buffering only; a durable flush needs an OS sync of
     // the file's storage (requirements R46). This can stall and is only issued on
     // an explicit Durable flush request.
-#if defined(_WIN32)
+#if LUDUS_TARGET_OS == LUDUS_OS_WINDOWS
     return SinkStatus::Ok; // FlushFileBuffers wiring is a platform-adapter task
 #else
     const int fd = ::fileno(mFile);

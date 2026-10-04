@@ -1,5 +1,6 @@
 #include "internal/application.h"
 #include <ludus/diagnostics/session.hpp>
+#include <ludus/foundation/base/target.hpp>
 #include <ludus/foundation/base/version.hpp>
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
@@ -49,6 +50,12 @@ int main()
     LUDUS_LOG_INFO(LOG_CORE, "Ludus {} starting", ludus::foundation::version_string());
     LUDUS_LOG_INFO(LOG_CORE, "Revision: {}", ludus::foundation::git_revision());
     LUDUS_LOG_INFO(LOG_CORE, "Compiler: {}", ludus::foundation::compiler_identity());
+    LUDUS_LOG_INFO(LOG_CORE,
+                   "Target: {} {} ({}-bit pointers, {} endian)",
+                   ludus::foundation::TargetOsName(ludus::foundation::kTarget.Os),
+                   ludus::foundation::TargetArchName(ludus::foundation::kTarget.Arch),
+                   ludus::foundation::kTarget.PointerBits,
+                   ludus::foundation::kTarget.Endian == ludus::foundation::TargetEndian::Little ? "little" : "big");
 
     ludus::smoke::Application application;
     const bool started = application.Start();
