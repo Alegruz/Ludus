@@ -1,6 +1,8 @@
 #include "internal/formatter.hpp"
 #include <ludus/foundation/base/config.h>
 
+#include <ludus/foundation/time/time.hpp>
+
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -73,13 +75,10 @@ ThreadLocalIdentity& GetThreadLocalIdentity() noexcept
 // human-readable output (requirements R23; F11).
 struct SessionClockAnchor
 {
-    std::chrono::steady_clock::time_point SteadyEpoch;
+    uint64 SteadyEpoch;
     std::chrono::system_clock::time_point SystemEpoch;
 
-    SessionClockAnchor() noexcept
-        : SteadyEpoch(std::chrono::steady_clock::now()), SystemEpoch(std::chrono::system_clock::now())
-    {
-    }
+    SessionClockAnchor() noexcept : SteadyEpoch(time::NowTicks()), SystemEpoch(std::chrono::system_clock::now()) {}
 };
 
 const SessionClockAnchor& GetSessionClockAnchor() noexcept
@@ -102,8 +101,7 @@ usize FormatTimestampFromTicks(uint64 monotonic_ticks_ns, char* out, usize capac
     }
 
     const SessionClockAnchor& anchor = GetSessionClockAnchor();
-    const auto steady_epoch_ns =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(anchor.SteadyEpoch.time_since_epoch()).count();
+    const auto steady_epoch_ns = anchor.SteadyEpoch;
     const int64 delta_ns = static_cast<int64>(monotonic_ticks_ns) - static_cast<int64>(steady_epoch_ns);
     const auto wall = anchor.SystemEpoch + std::chrono::nanoseconds(delta_ns);
     const auto wall_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(wall.time_since_epoch()).count();
@@ -191,8 +189,7 @@ uint64 GetNativeThreadId() noexcept
 
 uint64 GetMonotonicTicks() noexcept
 {
-    const auto now = std::chrono::steady_clock::now().time_since_epoch();
-    return static_cast<uint64>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+    return time::NowTicks();
 }
 
 } // namespace ludus::foundation::logging::internal

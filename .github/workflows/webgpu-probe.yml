@@ -28,6 +28,7 @@ on:
       - 'tools/web-platform-probe/**'
       - 'modules/foundation/base/**'
       - 'modules/foundation/containers/**'
+      - 'modules/foundation/time/**'
       - 'modules/foundation/logging/**'
       - 'modules/foundation/profiling/**'
       - 'cmake/**'

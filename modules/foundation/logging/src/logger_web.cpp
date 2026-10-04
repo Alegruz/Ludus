@@ -5,6 +5,7 @@
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
+#include <ludus/foundation/time/time.hpp>
 
 #include "internal/breadcrumb.hpp"
 #include "internal/category_registry.hpp"
@@ -95,7 +96,7 @@ int32 BoundedBytes(std::string_view text, usize limit) noexcept
 
 uint64 NowTicks() noexcept
 {
-    return static_cast<uint64>(emscripten_get_now() * 1'000'000.0);
+    return time::NowTicks();
 }
 
 void Dispatch(LogLevel level,

@@ -8,6 +8,8 @@
 #include <ludus/foundation/profiling/clock.hpp>
 #include <ludus/foundation/profiling/profiling.hpp>
 #include <ludus/foundation/profiling/trace_system.hpp>
+#include <ludus/foundation/time/time.hpp>
+#include <ludus/foundation/time/timers.hpp>
 
 #include "internal/breadcrumb.hpp"
 
@@ -68,6 +70,27 @@ EM_JS(void, PrintTrace, (), { console.info('[W2:trace]' + FS.readFile('/trace.js
 
 bool Run() noexcept
 {
+    const auto clockBefore = time::Now();
+    const auto profile = profiling::NowTicks();
+    const auto clockAfter = time::Now();
+    time::Duration elapsed;
+    time::FrameClock frame{time::Duration{10}};
+    time::Stopwatch stopwatch;
+    time::Deadline deadline;
+    stopwatch.Start(time::Timestamp{0});
+    if (!Verify(profile >= clockBefore.Nanoseconds && profile <= clockAfter.Nanoseconds &&
+                    time::TryElapsed(clockBefore, clockAfter, elapsed) == time::TimeStatus::Ok &&
+                    frame.Sample(time::Timestamp{100}).IsBaseline &&
+                    frame.Sample(time::Timestamp{120}).Discarded.Nanoseconds == 10 &&
+                    stopwatch.Pause(time::Timestamp{5}) == time::TimeStatus::Ok &&
+                    stopwatch.Read(time::Timestamp{100}, elapsed) == time::TimeStatus::Ok &&
+                    elapsed.Nanoseconds == 5 && deadline.Arm(clockAfter, {}) == time::TimeStatus::Ok &&
+                    deadline.IsExpired(clockAfter),
+                "FoundationTime clock and helpers"))
+    {
+        return false;
+    }
+
     LogConfig config;
     config.EnableFile = false;
     config.EnableDebugger = false;

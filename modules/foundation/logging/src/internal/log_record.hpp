@@ -17,7 +17,7 @@ namespace ludus::foundation::logging::internal
 struct LogRecordHeader
 {
     uint64 Sequence;       // successful reservation position (NOT event time)
-    uint64 MonotonicTicks; // steady_clock ticks captured on the producer
+    uint64 MonotonicTicks; // FoundationTime nanoseconds captured on the producer
     uint32 NativeThreadId; // OS thread id (requirements R23)
     uint32 CategoryId;     // LogCategory::Id
     uint32 SourceId;       // interned source-file/line descriptor id (0 = none)
