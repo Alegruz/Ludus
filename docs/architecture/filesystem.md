@@ -1,6 +1,7 @@
 # Filesystem architecture
 
-Status: F0 design and reference review complete; F1 implementation in validation.
+Status: F0 design and reference review complete; F1 implemented. Validation is
+recorded in the implementation PR.
 Reference review follows the baseline and records revisions below. This is a storage architecture for
 Ludus; it does not implement an operating-system filesystem.
 
@@ -120,6 +121,8 @@ Logical path equality is byte-exact and case-sensitive. Unicode is validated,
 not case-folded or normalized by runtime I/O. F2/F3 tooling must detect host case
 and Unicode-normalization collisions before publishing a cross-platform pack;
 native filenames accepted by Linux are not automatically portable to Windows.
+The cooking/pack pipeline must also reject reserved names and trailing dots or
+spaces when publishing portable assets.
 F1's limit matches existing Content (1,024 path bytes); native roots have a
 separate 4,096-byte limit and embedded NUL is always rejected. Roots are trusted
 host input, so their own symlink ancestry is permitted. Child symlinks are not.

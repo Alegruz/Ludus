@@ -2,7 +2,10 @@
 
 namespace ludus::foundation::filesystem
 {
-File::~File() noexcept = default;
+File::~File() noexcept
+{
+    (void)Close();
+}
 File::File(File&& other) noexcept : mImpl(other.mImpl)
 {
     other.mImpl = nullptr;
@@ -36,7 +39,10 @@ Result File::Close() noexcept
 {
     return {};
 }
-Directory::~Directory() noexcept = default;
+Directory::~Directory() noexcept
+{
+    (void)Close();
+}
 Directory::Directory(Directory&& other) noexcept : mImpl(other.mImpl)
 {
     other.mImpl = nullptr;
