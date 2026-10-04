@@ -17,7 +17,6 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
-#include <QHeaderView>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeySequence>
@@ -30,11 +29,9 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalBlocker>
-#include <QSplitter>
 #include <QTableWidget>
 #include <QTimer>
 #include <QToolBar>
-#include <QVBoxLayout>
 #include <QWidget>
 
 #include <ludus/foundation/base/types.h>
@@ -44,151 +41,15 @@
 namespace ludus::editor
 {
 
-MainWindow::MainWindow(EditorController* controller, QWidget* parent) : QMainWindow(parent), Controller_(controller)
+MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QString& workspaceSettingsFile)
+    : QMainWindow(parent), Controller_(controller), WorkspaceSettingsFile_(workspaceSettingsFile)
 {
     setWindowTitle(QStringLiteral("Ludus Editor"));
     BuildUi();
     BuildMenus();
+    InitializeWorkspace();
     connect(Controller_, &EditorController::StateChanged, this, &MainWindow::OnStateChanged);
     OnStateChanged();
-}
-
-void MainWindow::BuildUi()
-{
-    auto* central = new QWidget(this);
-    auto* layout = new QVBoxLayout(central);
-
-    auto* splitter = new QSplitter(Qt::Vertical, central);
-
-    // --- Project settings form ---
-    auto* form = new QWidget(splitter);
-    auto* formLayout = new QFormLayout(form);
-    NameEdit_ = new QLineEdit(form);
-    NameEdit_->setAccessibleName(QStringLiteral("Project name"));
-    ProviderBox_ = new QComboBox(form);
-    ProviderBox_->addItem(QStringLiteral("ludus"));
-    ProviderBox_->addItem(QStringLiteral("cmake"));
-    SourceDirEdit_ = new QLineEdit(form);
-    PresetBox_ = new QComboBox(form);
-    PresetBox_->addItem(QStringLiteral("linux-clang-debug"));
-    PresetBox_->addItem(QStringLiteral("linux-clang-development"));
-    TargetBox_ = new QComboBox(form);
-    TargetBox_->setEditable(true); // target can be entered before configuration
-    CwdEdit_ = new QLineEdit(form);
-
-    formLayout->addRow(QStringLiteral("Name"), NameEdit_);
-    formLayout->addRow(QStringLiteral("Provider"), ProviderBox_);
-    formLayout->addRow(QStringLiteral("Source directory"), SourceDirEdit_);
-    formLayout->addRow(QStringLiteral("Preset"), PresetBox_);
-    formLayout->addRow(QStringLiteral("Executable target"), TargetBox_);
-    formLayout->addRow(QStringLiteral("Run working directory"), CwdEdit_);
-
-    // Argument list editor: one string per item, Add/Remove; never a shell line.
-    ArgsList_ = new QListWidget(form);
-    auto* argsButtons = new QWidget(form);
-    auto* argsButtonsLayout = new QHBoxLayout(argsButtons);
-    AddArgButton_ = new QPushButton(QStringLiteral("Add argument"), argsButtons);
-    RemoveArgButton_ = new QPushButton(QStringLiteral("Remove argument"), argsButtons);
-    argsButtonsLayout->addWidget(AddArgButton_);
-    argsButtonsLayout->addWidget(RemoveArgButton_);
-    argsButtonsLayout->addStretch();
-    formLayout->addRow(QStringLiteral("Run arguments"), ArgsList_);
-    formLayout->addRow(QString(), argsButtons);
-
-    // --- Runtime status area (describes the running app; not a framebuffer) ---
-    RuntimeLabel_ = new QLabel(splitter);
-    RuntimeLabel_->setText(QStringLiteral("No runtime."));
-    RuntimeLabel_->setWordWrap(true);
-    Properties_ = new QTableWidget(splitter);
-    Properties_->setColumnCount(3);
-    Properties_->setHorizontalHeaderLabels(
-        {QStringLiteral("Property"), QStringLiteral("Value"), QStringLiteral("Scope")});
-    Properties_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    Properties_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    Properties_->setSelectionMode(QAbstractItemView::SingleSelection);
-    ApplySessionButton_ = new QPushButton(QStringLiteral("Apply selected value to session"), splitter);
-    connect(ApplySessionButton_, &QPushButton::clicked, this, [this]() {
-        const int row = Properties_->currentRow();
-        if (row >= 0 && Properties_->item(row, 1) != nullptr)
-        {
-            Controller_->EditProperty(row, Properties_->item(row, 1)->text());
-        }
-    });
-    ApplyDocumentButton_ = new QPushButton(QStringLiteral("Copy live value to tuning draft"), splitter);
-    connect(ApplyDocumentButton_, &QPushButton::clicked, this, [this]() {
-        Controller_->ApplyLivePropertyToTuningDocument(Properties_->currentRow());
-    });
-    connect(Properties_, &QTableWidget::currentCellChanged, this, [this]() {
-        ApplyDocumentButton_->setEnabled(Controller_->CanApplyToTuningDocument(Properties_->currentRow()));
-    });
-
-    // --- Output panel (read-only) ---
-    Output_ = new QPlainTextEdit(splitter);
-    Output_->setReadOnly(true);
-    Output_->setMaximumBlockCount(5000);
-
-    splitter->addWidget(form);
-    splitter->addWidget(RuntimeLabel_);
-    splitter->addWidget(Properties_);
-    splitter->addWidget(ApplySessionButton_);
-    splitter->addWidget(ApplyDocumentButton_);
-    splitter->addWidget(Output_);
-    splitter->setStretchFactor(2, 1);
-
-    StatusLabel_ = new QLabel(central);
-    StatusLabel_->setObjectName(QStringLiteral("workspaceStatus"));
-    layout->addWidget(splitter);
-    layout->addWidget(StatusLabel_);
-    setCentralWidget(central);
-    auto* audioDock = new QDockWidget(QStringLiteral("Audio content"), this);
-    Audio_ = new AudioWorkspace(audioDock);
-    audioDock->setWidget(Audio_);
-    addDockWidget(Qt::RightDockWidgetArea, audioDock);
-
-    RecentDock_ = new QDockWidget(QStringLiteral("Recent Projects"), this);
-    RecentDock_->setObjectName(QStringLiteral("recentProjectsDock"));
-    auto* recentPanel = new QWidget(RecentDock_);
-    auto* recentLayout = new QVBoxLayout(recentPanel);
-    RecentEmptyLabel_ =
-        new QLabel(QStringLiteral("No recent projects yet. Open a project to add it here."), recentPanel);
-    RecentEmptyLabel_->setWordWrap(true);
-    RecentList_ = new QListWidget(recentPanel);
-    RecentList_->setObjectName(QStringLiteral("recentProjectsList"));
-    RecentList_->setAccessibleName(QStringLiteral("Recent projects"));
-    RecentList_->setWordWrap(true);
-    RecentOpenButton_ = new QPushButton(QStringLiteral("Open Selected"), recentPanel);
-    RecentOpenButton_->setObjectName(QStringLiteral("openRecentProjectButton"));
-    BrowseProjectButton_ = new QPushButton(QStringLiteral("Open Project..."), recentPanel);
-    recentLayout->addWidget(RecentEmptyLabel_);
-    recentLayout->addWidget(RecentList_);
-    recentLayout->addWidget(RecentOpenButton_);
-    recentLayout->addWidget(BrowseProjectButton_);
-    RecentDock_->setWidget(recentPanel);
-    addDockWidget(Qt::LeftDockWidgetArea, RecentDock_);
-    connect(RecentList_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
-        const QString path = item->data(Qt::UserRole).toString();
-        QTimer::singleShot(0, this, [this, path]() { OpenProjectPath(path); });
-    });
-    connect(RecentList_, &QListWidget::currentItemChanged, this, [this]() {
-        RecentOpenButton_->setEnabled(Controller_->Caps().CanOpen && RecentList_->currentItem() != nullptr);
-    });
-    connect(RecentOpenButton_, &QPushButton::clicked, this, [this]() {
-        if (const auto* item = RecentList_->currentItem())
-        {
-            OpenProjectPath(item->data(Qt::UserRole).toString());
-        }
-    });
-    connect(BrowseProjectButton_, &QPushButton::clicked, this, &MainWindow::OnOpenRequested);
-
-    // Typed signal connections (pointer-to-member); no string-based SIGNAL/SLOT.
-    connect(NameEdit_, &QLineEdit::textEdited, this, &MainWindow::OnFieldEdited);
-    connect(SourceDirEdit_, &QLineEdit::textEdited, this, &MainWindow::OnFieldEdited);
-    connect(CwdEdit_, &QLineEdit::textEdited, this, &MainWindow::OnFieldEdited);
-    connect(ProviderBox_, &QComboBox::currentTextChanged, this, &MainWindow::OnFieldEdited);
-    connect(PresetBox_, &QComboBox::currentTextChanged, this, &MainWindow::OnFieldEdited);
-    connect(TargetBox_, &QComboBox::currentTextChanged, this, &MainWindow::OnFieldEdited);
-    connect(AddArgButton_, &QPushButton::clicked, this, &MainWindow::OnAddArgument);
-    connect(RemoveArgButton_, &QPushButton::clicked, this, &MainWindow::OnRemoveArgument);
 }
 
 void MainWindow::BuildMenus()
@@ -228,13 +89,12 @@ void MainWindow::BuildMenus()
     connect(BuildDebugAction_, &QAction::triggered, this, [this]() { LaunchAfterPreview(LaunchAction::Debug); });
     connect(Controller_, &EditorController::DebuggerSetupRequested, this, &MainWindow::OnDebuggerSetupRequested);
     StopAction_ = buildMenu->addAction(QStringLiteral("&Stop"));
-    auto* gameToolbar = addToolBar(QStringLiteral("Game"));
-    gameToolbar->setObjectName(QStringLiteral("gameToolbar"));
-    gameToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    gameToolbar->addAction(BuildAction_);
-    gameToolbar->addAction(BuildRunAction_);
-    gameToolbar->addAction(BuildDebugAction_);
-    gameToolbar->addAction(StopAction_);
+    GameToolbar_ = addToolBar(QStringLiteral("Game"));
+    GameToolbar_->setObjectName(QStringLiteral("gameToolbar"));
+    GameToolbar_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    GameToolbar_->addAction(BuildAction_);
+    GameToolbar_->addAction(BuildRunAction_);
+    GameToolbar_->addAction(BuildDebugAction_);
 
     QMenu* releaseMenu = menuBar()->addMenu(QStringLiteral("&Release"));
     SetupReleaseAction_ = releaseMenu->addAction(QStringLiteral("Set Up &Releases..."));
@@ -287,12 +147,27 @@ void MainWindow::BuildMenus()
     connect(ResumeAction_, &QAction::triggered, this, [this]() { Controller_->PlayCommand(QStringLiteral("Resume")); });
     connect(RefreshPropertiesAction_, &QAction::triggered, Controller_, &EditorController::RefreshProperties);
 
+    GameToolbar_->addSeparator();
+    GameToolbar_->addAction(PlayAction_);
+    GameToolbar_->addAction(PauseAction_);
+    GameToolbar_->addAction(StepAction_);
+    GameToolbar_->addAction(ResumeAction_);
+    GameToolbar_->addAction(BuildReloadAction_);
+    GameToolbar_->addAction(StopAction_);
+
     QMenu* outputMenu = menuBar()->addMenu(QStringLiteral("&Output"));
     ClearAction_ = outputMenu->addAction(QStringLiteral("&Clear Output"));
     CopyAction_ = outputMenu->addAction(QStringLiteral("Copy &Job Details"));
 
     QMenu* viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
     viewMenu->addAction(RecentDock_->toggleViewAction());
+    viewMenu->addAction(InspectorDock_->toggleViewAction());
+    viewMenu->addAction(OutputDock_->toggleViewAction());
+    viewMenu->addAction(GameToolbar_->toggleViewAction());
+    viewMenu->addSeparator();
+    auto* resetLayout = viewMenu->addAction(QStringLiteral("Reset Layout"));
+    resetLayout->setObjectName(QStringLiteral("resetWorkspaceLayout"));
+    connect(resetLayout, &QAction::triggered, this, &MainWindow::ResetWorkspaceLayout);
 
     connect(OpenAction_, &QAction::triggered, this, &MainWindow::OnOpenRequested);
     connect(SaveAction_, &QAction::triggered, this, &MainWindow::OnSaveRequested);
@@ -721,6 +596,7 @@ void MainWindow::RenderStatus()
         status += QStringLiteral("\n") + state.SetupStatus;
     }
     StatusLabel_->setText(status);
+    StatusLabel_->setToolTip(status);
 
     if (state.OperationPhase == Phase::Debugging)
     {
@@ -996,6 +872,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
     }
     if (Controller_->Caps().CanCloseImmediately)
     {
+        SaveWorkspaceLayout();
         event->accept();
         return;
     }

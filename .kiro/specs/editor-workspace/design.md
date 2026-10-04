@@ -26,6 +26,9 @@ engine targets must still build without Editor dependencies.
 Deferred: scene graph/ECS, reflection, gizmos, undo/redo, importing, asset database,
 embedded rendering, scripting, plugins, docking customization, hot reload,
 remote control, live game-state IPC, embedded debugger UI and distribution bundles.
+These are the historical E0 exclusions. Subsequent live reload/audio milestones
+and [S1 workspace design](../../../docs/architecture/editor-architecture.md)
+extend this baseline; S1 adds standard docking and local layout persistence.
 RAD remains optional; Build/Run never depend on it. This milestone implements a
 subset of developer-tools D3/D4, not their complete debugger/tool-management scope.
 
@@ -82,6 +85,7 @@ apps/editor/
   CMakeLists.txt
   main.cpp
   src/main_window.cpp
+  src/main_window_layout.cpp
   src/controller.cpp
   src/workspace.cpp
   src/project_store.cpp
@@ -188,11 +192,15 @@ asynchronous. Network filesystems are outside this first acceptance baseline.
 
 ## 5. UI and actions
 
-Use a QMainWindow with standard menus/actions, a QFormLayout for project settings,
-a runtime status area and a read-only QPlainTextEdit output panel in a vertical
-splitter. Let layouts size controls; no manually positioned widgets, custom
-painting, themes or dock-layout serialization. Use Unicode text, normal keyboard
-focus, standard shortcuts and accessible control labels.
+S1 supersedes E0's vertical splitter: use a QMainWindow with standard menus and
+shared menu/toolbar actions, scrollable Project settings and Audio tabs, Recent
+Projects and Live Inspector side panels, and a bottom read-only Output panel.
+View recovers panels/toolbar and resets layout. Versioned, bounded layout
+preferences are local user data, separate from the project/controller model;
+only compatible locally generated Qt state is restored. See the
+[S1 interaction contract](../../../docs/architecture/editor-interaction-design.md).
+Let layouts size controls; no manually positioned widgets or custom themes. Use
+Unicode text, normal keyboard focus, standard shortcuts and accessible labels.
 
 Actions: Open Project (file chooser), Save (Ctrl+S), Reload, Configure/Refresh
 Targets, Build, Build and Run, Stop, Clear Output and Copy Job Details. Arguments
