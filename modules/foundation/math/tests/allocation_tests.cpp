@@ -4,6 +4,7 @@
 // when sanitizers are OFF (the sanitizer runtime provides its own new/delete).
 // Mirrors modules/foundation/containers/tests/allocation_tests.cpp.
 
+#include <ludus/foundation/math/addressed_random.hpp>
 #include <ludus/foundation/math/batch.hpp>
 #include <ludus/foundation/math/dynamics.hpp>
 #include <ludus/foundation/math/matrix.hpp>
@@ -173,6 +174,18 @@ TEST_CASE("Checked math operations never allocate", "[math][alloc]")
     RandomStream rng;
     (void)rng.NextUInt32();
     (void)rng.NextFloat01();
+    RandomKey key;
+    REQUIRE(TryMakeRandomKey(42, 7, key) == MathStatus::Success);
+    const RandomAddress address{0x0123456789abcdefULL, 99, 1234};
+    REQUIRE(SampleUInt32(key, address) == 0x942d2d40u);
+    REQUIRE(SampleFloat01(key, address) < 1.0f);
+    RandomBlock block;
+    REQUIRE(TrySampleBlock(key, {}, block) == MathStatus::Success);
+    uint32 ticket = 0;
+    REQUIRE(TrySampleBounded(key, address, 1000, ticket) == MathStatus::Success);
+    PreparedBound32 bound;
+    REQUIRE(TryPrepareBound32(1000, bound) == MathStatus::Success);
+    REQUIRE(TrySampleBounded(key, address, bound, ticket) == MathStatus::Success);
 
     // Batch (caller-owned stack buffers; no heap scratch inside).
     std::array<Vector3, 8> input{};

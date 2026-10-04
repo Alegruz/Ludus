@@ -8,6 +8,7 @@
 // on the web toolchain. GPU transfer convention is verified separately by the
 // WebGPU shader fixture (M5).
 
+#include <ludus/foundation/math/addressed_random.hpp>
 #include <ludus/foundation/math/batch.hpp>
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/precision.hpp>
@@ -84,7 +85,26 @@ int main()
           "relative");
     Check(CloseF(rel.X, 0.5f, 1e-4f), "relative preserves 0.5");
 
-    // PCG known answers (bit-exact contract across targets).
+    // Addressed and PCG known answers (bit-exact contract across targets).
+    {
+        RandomKey key;
+        Check(TryMakeRandomKey(42, 7, key) == MathStatus::Success, "random key");
+        Check(key.Value == 0xccf635ee9e9e2fa4ULL, "random key v1");
+        const RandomAddress address{0x0123456789abcdefULL, 99, 1234};
+        Check(SampleUInt32(key, address) == 0x942d2d40u, "Philox addressed v1");
+        Check(SampleFloat01(key, address) == 0.5788143277168274f, "Philox float v1");
+        uint32 ticket = 0;
+        Check(TrySampleBounded(key, address, 1000, ticket) == MathStatus::Success && ticket == 578, "Philox bound v1");
+        Check(TrySampleBounded(key, {}, 0x80000001u, ticket) == MathStatus::Success && ticket == 0x3c0cb600u,
+              "Philox rejection v1");
+        RandomBlock block;
+        Check(TrySampleBlock({}, {}, block) == MathStatus::Success, "Philox block");
+        const uint32 expected[] = {0x6627e8d5u, 0xe169c58du, 0xbc57ac4cu, 0x9b00dbd8u};
+        for (ludus::foundation::usize lane = 0; lane < 4; ++lane)
+        {
+            Check(block.Values[lane] == expected[lane], "Philox zero KAT");
+        }
+    }
     {
         RandomStream rng;
         (void)rng.TryReseed(42, 54);
