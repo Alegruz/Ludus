@@ -47,7 +47,7 @@ def uniform_size(path):
             binding.get("space", 0) != 0 or resource["type"]["kind"] != "constantBuffer"):
         raise RuntimeError("Fullscreen API requires a constant buffer at set/group 0 binding 0")
     size = resource["type"]["elementVarLayout"]["binding"]["size"]
-    if size < 1 or size > 4096:
+    if size < 1 or size > 16384:
         raise RuntimeError("Uniform exceeds fullscreen API bounds")
     return size
 
@@ -94,7 +94,7 @@ def glsl_es_layout(code):
         size, align = GLSL_ES_KINDS[kind]
         if count:
             length = int(count)
-            if length < 1 or length > 256:
+            if length < 1 or length > 1024:
                 raise RuntimeError("GLSL ES uniform array exceeds bounded layout support")
             align = 16
             size = (size + 15) // 16 * 16 * length
@@ -103,7 +103,7 @@ def glsl_es_layout(code):
         offsets[name] = offset
         offset += size
     size = (offset + alignment - 1) // alignment * alignment
-    if size > 4096:
+    if size > 16384:
         raise RuntimeError('GLSL ES uniform exceeds fullscreen bounds')
     return {'block': match.group(1), 'offsets': offsets, 'size': size, 'alignment': alignment, 'binding': 0}
 

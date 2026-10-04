@@ -7,7 +7,7 @@
 namespace ludus::graphics::rhi::internal
 {
 inline constexpr ludus::foundation::usize RESOURCE_CAPACITY = 8;
-inline constexpr ludus::foundation::usize UNIFORM_CAPACITY = 4096;
+inline constexpr ludus::foundation::usize UNIFORM_CAPACITY = 16384;
 // Stable process storage and monotonically assigned IDs; no application pointers.
 void ResourceComplete(ludus::foundation::uint32 id, ResourceStatus status) noexcept;
 void ReleaseResources() noexcept;

@@ -108,6 +108,20 @@ ludus_compile_shader(TARGET sample NAME sample SOURCE diagnostic.slang VERTEX ve
                 es_offsets.append((name, es_occupied, size)); es_occupied += size
             assert es_offsets == contract, es_offsets
             assert es_align == 16 and (es_occupied + es_align - 1) // es_align * es_align == 48
+        # Compile the full portable 16 KiB block, including a large std140 array,
+        # then verify aggregate overflow is rejected by the installed helper.
+        original_uniforms = (source / 'uniforms.slang').read_text()
+        large_uniforms = original_uniforms.replace('float4 tint;', 'float4 tint;\n    float4 surface[1021];')
+        (source / 'uniforms.slang').write_text(large_uniforms)
+        (source / 'main.cpp').write_text('#include "sample.h"\nint main() { return ludus::shaders::sample::Fragment().UniformSize == 16384 ? 0 : 1; }\n')
+        run([args.cmake, '--build', build]); run([build / 'sample'])
+        large_manifest = json.loads(header.with_name('manifest.json').read_text())
+        assert all(size == 16384 for size in large_manifest['uniform_sizes'].values())
+        (source / 'uniforms.slang').write_text(large_uniforms.replace('float4 surface[1021];', 'float4 surface[1022];'))
+        failure = run([args.cmake, '--build', build], success=False)
+        assert 'Uniform exceeds fullscreen API bounds' in failure, failure
+        (source / 'uniforms.slang').write_text(original_uniforms)
+        (source / 'main.cpp').write_text('#include "sample.h"\nint main() { return ludus::shaders::sample::Fragment().UniformSize == 48 ? 0 : 1; }\n')
         original = (source / 'diagnostic.slang').read_text()
         (source / 'diagnostic.slang').write_text(original.replace('vk::binding(0, 0)', 'vk::binding(0, 1)'))
         failure = run([args.cmake, '--build', build], success=False)

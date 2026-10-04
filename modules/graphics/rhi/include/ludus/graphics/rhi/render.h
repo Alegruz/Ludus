@@ -73,7 +73,7 @@ struct PipelineDescription final
     ShaderHandle Fragment;
     UniformHandle Uniform;
 };
-// Bounded slice: eight resources of each kind; uniform size 16..4096, multiple
+// Bounded slice: eight resources of each kind; uniform size 16..16384, multiple
 // of 16. Upload bytes follow the application's independently verified layouts.
 [[nodiscard]] ResourceStatus CreateShader(const ShaderDescription&, ShaderHandle&) noexcept;
 [[nodiscard]] ResourceStatus CreateUniform(ludus::foundation::usize size, UniformHandle&) noexcept;

@@ -18,7 +18,7 @@ Use [public fullscreen rendering](../development/fullscreen-rendering.md),
 [ADR 0011](../decisions/0011-public-fullscreen-rendering.md), and the
 [SDK handoff](../development/fullscreen-rendering-handoff.md). The current public
 API exposes opaque shaders/uniform/pipeline handles, one uniform binding, and
-one fullscreen triangle draw per frame. Uniform data is bounded to 4096 bytes;
+one fullscreen triangle draw per frame. Uniform data is bounded to 16384 bytes;
 resource readiness, resize, synchronization, and shutdown remain engine-owned.
 
 Sandbox can draw water, rings, boat, circular rocks, and dock analytically in one

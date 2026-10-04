@@ -50,7 +50,7 @@ and rebinds the managed canvas for API changes or restart. A failed replacement
 finalizes the WebGL attempt without recursively retrying.
 
 The fullscreen slice supports generated GLSL ES 3.00 and one std140 uniform
-block at binding 0, 16..4096 bytes, multiple of 16. GLSL member offsets are
+block at binding 0, 16..16384 bytes, multiple of 16. GLSL member offsets are
 independently derived and compared with Slang's SPIR-V/WGSL reflection. Arrays,
 matrices and other unsupported block fields fail explicitly. WebGL validates
 the real linked block size. Resources and uploads are bounded and reused.
