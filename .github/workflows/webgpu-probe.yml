@@ -29,6 +29,8 @@ on:
       - 'modules/foundation/base/**'
       - 'modules/foundation/math/**'
       - 'tools/web-math-probe/**'
+      - 'modules/physics/fluid/**'
+      - 'tools/web-fluid-probe/**'
       - 'modules/foundation/containers/**'
       - 'modules/foundation/time/**'
       - 'modules/foundation/logging/**'
