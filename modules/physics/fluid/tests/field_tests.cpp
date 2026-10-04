@@ -31,7 +31,7 @@ TEST_CASE("Fluid initialization and invalid mutations preserve live state", "[fl
     CHECK(field.GetDiagnostics().Energy == before.Energy);
     std::array<CellState, 1> shortState{};
     CHECK(field.TryReset({}, shortState) == Status::InvalidArgument);
-    std::vector<float64> pressure(48 * 64);
+    std::vector<float64> pressure(usize{48} * 64);
     pressure.back() = std::numeric_limits<float64>::infinity();
     CHECK(field.TrySetPressure(pressure) == Status::InvalidArgument);
     CHECK(field.TryAddStroke({{0, 0}, {0, 0}}) == Status::InvalidArgument);
@@ -44,6 +44,8 @@ TEST_CASE("Fluid initialization and invalid mutations preserve live state", "[fl
     CHECK(field.TrySample({30.0, 0.0}, sample) == Status::OutsideDomain);
     CHECK(sample.Height == 123.0);
     Field moved(std::move(field));
+    // The public moved-from contract explicitly permits readiness queries.
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     CHECK_FALSE(field.IsReady());
     CHECK(moved.GetDiagnostics().Energy == before.Energy);
     CHECK(moved.TryInitialize({}) == Status::Success);
