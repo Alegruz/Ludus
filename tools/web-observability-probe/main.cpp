@@ -83,9 +83,8 @@ bool Run() noexcept
                     frame.Sample(time::Timestamp{100}).IsBaseline &&
                     frame.Sample(time::Timestamp{120}).Discarded.Nanoseconds == 10 &&
                     stopwatch.Pause(time::Timestamp{5}) == time::TimeStatus::Ok &&
-                    stopwatch.Read(time::Timestamp{100}, elapsed) == time::TimeStatus::Ok &&
-                    elapsed.Nanoseconds == 5 && deadline.Arm(clockAfter, {}) == time::TimeStatus::Ok &&
-                    deadline.IsExpired(clockAfter),
+                    stopwatch.Read(time::Timestamp{100}, elapsed) == time::TimeStatus::Ok && elapsed.Nanoseconds == 5 &&
+                    deadline.Arm(clockAfter, {}) == time::TimeStatus::Ok && deadline.IsExpired(clockAfter),
                 "FoundationTime clock and helpers"))
     {
         return false;

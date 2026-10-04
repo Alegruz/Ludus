@@ -52,12 +52,18 @@ actual configure/build/test preset listings were checked.
 | ASan/UBSan full build and `ctest --preset linux-clang-asan-ubsan --no-tests=error` | Passed: 42 registered tests, two display-dependent skips; no sanitizer findings. |
 | `./scripts/install-sdk linux-clang-development` | Passed: installed artifact/dependency audit, standalone consumer build and execution, runtime policy match. |
 | `./scripts/check --format` | Passed, including the foundational include boundary. |
+| `./scripts/check linux-clang-development --all` | Passed: format/include boundary and all 178 compiled native project sources under Clang 18 static analysis. |
 | Browser Development full build | Passed with warnings as errors. |
-| Browser observability semantics and four standalone-header checks | All five passed, including FoundationTime and the shared profiling epoch. |
+| Browser Development full CTest suite | All 16 passed, including FoundationTime headers and shared-clock/helper semantics. |
 
-The full `./scripts/check linux-clang-development --all` and browser profile
-checks are required alongside these results; their final status is recorded on
-the PR. Native process/socket tests and LeakSanitizer require ordinary OS access.
+After integrating the platform/editor base `2f602ea`, the warning-clean native
+Development build and all 49 registered tests also passed (two display-dependent
+skips). The full browser Development format/static-analysis check passed after
+correcting the probe formatting and expressing the checked conversion as a
+positive range test. Required CI validates the final PR commit across the other
+profiles and the build-time budget; no budget was raised for this module.
+
+Native process/socket tests and LeakSanitizer require ordinary OS access.
 The restricted sandbox denied socket operations and LeakSanitizer process
 inspection; rerunning the full native suites and SDK workflow with that access
 passed. Display-dependent Wayland tests remain skipped on this headless host.

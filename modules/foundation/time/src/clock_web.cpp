@@ -17,10 +17,10 @@ uint64 NowTicks() noexcept
     const float64 nanoseconds = emscripten_get_now() * 1'000'000.0;
     // Float-to-integer conversion is only defined inside the destination range.
     // Guards also avoid undefined behavior if the host supplies NaN/infinity.
-    if (!(nanoseconds >= 0.0 && nanoseconds < 18'446'744'073'709'551'616.0))
+    if (nanoseconds >= 0.0 && nanoseconds < 18'446'744'073'709'551'616.0)
     {
-        return 0;
+        return static_cast<uint64>(nanoseconds);
     }
-    return static_cast<uint64>(nanoseconds);
+    return 0;
 }
 } // namespace ludus::foundation::time
