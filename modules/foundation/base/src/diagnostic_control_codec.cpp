@@ -1,39 +1,16 @@
 #include <ludus/foundation/base/diagnostic_output.hpp>
 
+#include <ludus/foundation/base/byte_order.hpp>
+
+#include <span>
+
 namespace ludus::foundation::diagnostics
 {
-namespace
-{
-void PutU16(char* buffer, usize offset, uint16 value) noexcept
-{
-    buffer[offset + 0] = static_cast<char>(value & 0xFFu);
-    buffer[offset + 1] = static_cast<char>((value >> 8) & 0xFFu);
-}
-
-void PutU32(char* buffer, usize offset, uint32 value) noexcept
-{
-    buffer[offset + 0] = static_cast<char>(value & 0xFFu);
-    buffer[offset + 1] = static_cast<char>((value >> 8) & 0xFFu);
-    buffer[offset + 2] = static_cast<char>((value >> 16) & 0xFFu);
-    buffer[offset + 3] = static_cast<char>((value >> 24) & 0xFFu);
-}
-
-uint16 GetU16(const char* buffer, usize offset) noexcept
-{
-    return static_cast<uint16>(static_cast<uint8>(buffer[offset + 0])) |
-           static_cast<uint16>(static_cast<uint16>(static_cast<uint8>(buffer[offset + 1])) << 8);
-}
-
-uint32 GetU32(const char* buffer, usize offset) noexcept
-{
-    return static_cast<uint32>(static_cast<uint8>(buffer[offset + 0])) |
-           (static_cast<uint32>(static_cast<uint8>(buffer[offset + 1])) << 8) |
-           (static_cast<uint32>(static_cast<uint8>(buffer[offset + 2])) << 16) |
-           (static_cast<uint32>(static_cast<uint8>(buffer[offset + 3])) << 24);
-}
-
-} // namespace
-
+// Thanks to Jason Hughes, "What to Look for When Evaluating Middleware for
+// Integration", Game Engine Gems, section 1.13 "Platform Portability", p. 12:
+// the endian audit motivates shared bounded codecs. Original implementation;
+// retain the existing 16-byte wire format and independent emergency path.
+// Review: docs/architecture/primitive-types.md, "Boundary adoption audit".
 usize EncodeControlHeader(char* buffer,
                           usize capacity,
                           ControlMessageType kind,
@@ -44,11 +21,14 @@ usize EncodeControlHeader(char* buffer,
     {
         return 0;
     }
-    PutU32(buffer, 0, CONTROL_PROTOCOL_MAGIC);
-    PutU16(buffer, 4, CONTROL_PROTOCOL_VERSION);
-    PutU16(buffer, 6, static_cast<uint16>(kind));
-    PutU32(buffer, 8, incidentId);
-    PutU32(buffer, 12, length);
+    const std::span<uint8> bytes{reinterpret_cast<uint8*>(buffer), CONTROL_HEADER_SIZE};
+    if (!TryWriteLittleEndian(CONTROL_PROTOCOL_MAGIC, bytes) ||
+        !TryWriteLittleEndian(CONTROL_PROTOCOL_VERSION, bytes.subspan(4)) ||
+        !TryWriteLittleEndian(static_cast<uint16>(kind), bytes.subspan(6)) ||
+        !TryWriteLittleEndian(incidentId, bytes.subspan(8)) || !TryWriteLittleEndian(length, bytes.subspan(12)))
+    {
+        return 0;
+    }
     return CONTROL_HEADER_SIZE;
 }
 
@@ -58,25 +38,20 @@ bool DecodeControlHeader(const char* buffer, usize size, ControlHeader& header) 
     {
         return false;
     }
-    if (GetU32(buffer, 0) != CONTROL_PROTOCOL_MAGIC || GetU16(buffer, 4) != CONTROL_PROTOCOL_VERSION)
+    const std::span<const uint8> bytes{reinterpret_cast<const uint8*>(buffer), CONTROL_HEADER_SIZE};
+    uint32 magic{};
+    uint16 version{};
+    ControlHeader next;
+    if (!TryReadLittleEndian(bytes, magic) || !TryReadLittleEndian(bytes.subspan(4), version) ||
+        !TryReadLittleEndian(bytes.subspan(6), next.Kind) || !TryReadLittleEndian(bytes.subspan(8), next.IncidentId) ||
+        !TryReadLittleEndian(bytes.subspan(12), next.Length) || magic != CONTROL_PROTOCOL_MAGIC ||
+        version != CONTROL_PROTOCOL_VERSION || next.Kind < static_cast<uint16>(ControlMessageType::Hello) ||
+        next.Kind > static_cast<uint16>(ControlMessageType::DecisionReply) || next.Length > CONTROL_MAX_PAYLOAD ||
+        next.Length > size - CONTROL_HEADER_SIZE)
     {
         return false;
     }
-    const uint16 kind = GetU16(buffer, 6);
-    if (kind < static_cast<uint16>(ControlMessageType::Hello) ||
-        kind > static_cast<uint16>(ControlMessageType::DecisionReply))
-    {
-        return false;
-    }
-    const uint32 length = GetU32(buffer, 12);
-    if (length > CONTROL_MAX_PAYLOAD || CONTROL_HEADER_SIZE + length > size)
-    {
-        return false;
-    }
-    header.Kind = kind;
-    header.IncidentId = GetU32(buffer, 8);
-    header.Length = length;
+    header = next;
     return true;
 }
-
 } // namespace ludus::foundation::diagnostics

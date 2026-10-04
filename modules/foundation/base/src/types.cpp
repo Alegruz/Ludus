@@ -1,5 +1,12 @@
 // Representation checks compile once for every supported engine build; they do
 // not add <limits> or templates to the universal types.h include path.
+// Thanks to Yossarian King, "Floating-Point Tricks: Improving Performance with
+// IEEE Floating Point", Game Programming Gems 2, section 2.1, for distinguishing
+// representation and conversion domains. We verify binary32/64; we do not adopt
+// union-punning, magic-bias conversions, or historical timing assumptions.
+// Thanks to Søren Hannibal, "Floating-Point Exception Handling", Game Programming
+// Gems 3, section 1.9, for the FP-state boundary lesson. These checks never change
+// rounding, traps, or FTZ state. Review: docs/architecture/primitive-types.md.
 #include <ludus/foundation/base/types.h>
 
 #include <climits>

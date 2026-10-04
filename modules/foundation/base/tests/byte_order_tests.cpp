@@ -1,3 +1,7 @@
+// Thanks to Chris Lomont, "Floating-Point Tricks", Game Programming Gems 6,
+// section 2.1, pp. 121-124: the representation discussion motivates the signed
+// zero/subnormal bit-pattern checks below. These original tests do not set FP
+// execution policy. Review: docs/architecture/primitive-types.md.
 #include <ludus/foundation/base/byte_order.hpp>
 
 #include <bit>

@@ -1,4 +1,5 @@
 #include "internal/prepared.hpp"
+#include "internal/frame_conversion.hpp"
 #include <new>
 namespace ludus::audio
 {
@@ -38,18 +39,10 @@ Status PreparedClip::Decode(std::span<const uint8> encoded, const ClipDescriptor
     }
     if (descriptor.SourceLoopEnd != 0)
     {
-        const auto convert = [&](uint64 frame, uint64& result) noexcept {
-            const uint64 whole = frame / decoded.SourceRate, remainder = frame % decoded.SourceRate;
-            if (whole > (static_cast<uint64>(-1) - rate) / rate)
-            {
-                return false;
-            }
-            result = whole * rate + (remainder * rate + decoded.SourceRate / 2) / decoded.SourceRate;
-            return true;
-        };
-        if (descriptor.SourceLoopEnd > decoded.SourceFrames || !convert(descriptor.SourceLoopBegin, next->LoopBegin) ||
-            !convert(descriptor.SourceLoopEnd, next->LoopEnd) || next->LoopBegin >= next->LoopEnd ||
-            next->LoopEnd > decoded.Frames)
+        if (descriptor.SourceLoopEnd > decoded.SourceFrames ||
+            !internal::TryResampleFrame(descriptor.SourceLoopBegin, decoded.SourceRate, rate, next->LoopBegin) ||
+            !internal::TryResampleFrame(descriptor.SourceLoopEnd, decoded.SourceRate, rate, next->LoopEnd) ||
+            next->LoopBegin >= next->LoopEnd || next->LoopEnd > decoded.Frames)
         {
             delete next;
             return Status::InvalidArgument;

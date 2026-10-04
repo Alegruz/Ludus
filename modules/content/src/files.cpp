@@ -1,4 +1,5 @@
 #include <ludus/content/content.h>
+#include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/base/config.h>
 #include <new>
 
@@ -76,8 +77,8 @@ Status ReadAt(int directory, const char* path, usize cap, Bytes& output) noexcep
     {
         return Status::IoError;
     }
-    const auto size = static_cast<usize>(info.st_size);
-    if (size > cap)
+    usize size{};
+    if (!ludus::foundation::TryIntegerCast(info.st_size, size) || size > cap)
     {
         return Status::Limit;
     }

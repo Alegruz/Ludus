@@ -3,6 +3,11 @@
 // Bounded unsigned integer codecs. Only the first sizeof(T) bytes are consumed
 // or written; trailing bytes are untouched. Truncation preserves output/buffer.
 // Byte accesses support unaligned buffers without assuming native byte order.
+// Thanks to Jason Hughes, "What to Look for When Evaluating Middleware for
+// Integration", Game Engine Gems, section 1.13 "Platform Portability", p. 12,
+// for the file/network endian audit lesson. These original codecs use bounded
+// byte operations; no native object layout or chapter implementation is copied.
+// Review: docs/architecture/primitive-types.md.
 #include <ludus/foundation/base/types.h>
 
 #include <ludus/foundation/base/checked_integer.hpp>
