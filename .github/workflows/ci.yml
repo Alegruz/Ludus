@@ -92,6 +92,24 @@ jobs:
         run: out/host-tools/venv/bin/ctest --preset linux-clang-development --no-tests=error
       - name: Validate installed SDK and consumer
         run: ./scripts/install-sdk linux-clang-development
+      - name: Relocate the SDK and link a consumer without producer dependencies
+        run: |
+          set -euo pipefail
+          reloc="$RUNNER_TEMP/relocated-sdk"
+          cp -a out/install/linux-clang-development "$reloc"
+          consumer="$RUNNER_TEMP/relocated-consumer"
+          tools="$PWD/out/host-tools/venv/bin"
+          env -i PATH="$tools:/usr/bin:/bin" "$tools/cmake" \
+            -S tests/sdk_consumer -B "$consumer" -G Ninja \
+            -DCMAKE_MAKE_PROGRAM="$tools/ninja" \
+            -DCMAKE_CXX_COMPILER=/usr/bin/clang++-18 \
+            -DCMAKE_PREFIX_PATH="$reloc" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          env -i PATH="$tools:/usr/bin:/bin" "$tools/cmake" --build "$consumer" --parallel 2
+          "$consumer/ludus_sdk_consumer"
+          if grep -q '/modules/' "$consumer/compile_commands.json"; then
+            echo 'Relocated consumer compiled engine sources'; exit 1
+          fi
       - name: Verify installed shader toolchain and generated backend contracts
         run: |
           ./scripts/shader-probe bootstrap
@@ -137,15 +155,23 @@ jobs:
 
   analysis:
     needs: formatting
-    name: Clang static analysis
+    name: Clang static analysis (${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     runs-on: ubuntu-24.04
     env:
       LUDUS_TIDY_JOBS: "2"
+      LUDUS_TIDY_SHARD_COUNT: "2"
+      LUDUS_TIDY_SHARD_INDEX: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-development
+          conan-cache-writer: 'false'
+          compiler-cache-writer: 'false'
       # Generated headers/sources must exist before analyzing the compile database.
       - name: Build analysis inputs
         run: ./scripts/build linux-clang-development
@@ -166,6 +192,7 @@ jobs:
           preset: linux-clang-development
           editor: 'true'
           cache-variant: editor
+          conan-cache-writer: 'false'
       - name: Build editor tests without rebuilding every engine test target
         run: out/host-tools/venv/bin/cmake --build --preset linux-clang-development --target ludus_editor_tests
       - name: Verify editor initialization and offscreen tests
@@ -174,6 +201,7 @@ jobs:
         if: always()
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
 
+  # Debug runtime already runs the complete Debug assertion/build contracts.
   assertion-policy:
     needs: formatting
     name: Assertion policy (${{ matrix.preset }})
@@ -181,7 +209,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: [linux-clang-debug, linux-clang-profile, linux-clang-release]
+        preset: [linux-clang-profile, linux-clang-release]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/native-setup
@@ -206,6 +234,7 @@ jobs:
         with:
           preset: linux-clang-development
           cache-variant: pch
+          conan-cache-writer: 'false'
       - name: Configure, build, and test with the foundational PCH enabled
         run: |
           out/host-tools/venv/bin/cmake --preset linux-clang-development -B out/build/pch \
@@ -228,6 +257,7 @@ jobs:
         with:
           preset: linux-clang-development
           compiler-cache: 'false'
+          conan-cache-writer: 'false'
       # Setup only: --ci would repeat all native validation before profiling.
       # Keep the clean profile uncached and concurrency stable for timing budgets.
       - name: Enforce build-time budget

@@ -60,12 +60,27 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  LUDUS_TIDY_JOBS: "2"
+
 jobs:
   compile-and-package:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      - name: Cache pinned browser and shader tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            out/host-tools/emsdk
+            out/shader-tools/slang
+            out/shader-tools/slang.tar.gz
+            out/shader-tools/spirv-tools
+            out/shader-tools/spirv-tools.deb
+            out/shader-tools/spirv-cross
+            out/shader-tools/spirv-cross-src/spirv-cross.tar.gz
+          key: web-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('config/web_toolchain.json', 'config/shader_toolchain.json', 'config/spirv_cross_toolchain.json') }}
       - name: Prepare host tools and pinned SDK
         run: |
           sudo apt-get update -qq
@@ -83,12 +98,13 @@ jobs:
           subprocess.run(['python3', '-m', 'venv', str(venv)], check=True)
           subprocess.run([str(venv / 'bin/pip'), 'install',
                           f"cmake=={native['cmake']}", f"ninja=={native['ninja']}"], check=True)
-          archive = Path('out/host-tools/emsdk.tar.gz')
-          urllib.request.urlretrieve(web['emsdk_archive'], archive)
-          assert hashlib.sha256(archive.read_bytes()).hexdigest() == web['emsdk_archive_sha256']
           sdk = Path('out/host-tools/emsdk')
-          sdk.mkdir()
-          subprocess.run(['tar', '-xzf', str(archive), '--strip-components=1', '-C', str(sdk)], check=True)
+          if not (sdk / 'emsdk').is_file():
+              archive = Path('out/host-tools/emsdk.tar.gz')
+              urllib.request.urlretrieve(web['emsdk_archive'], archive)
+              assert hashlib.sha256(archive.read_bytes()).hexdigest() == web['emsdk_archive_sha256']
+              sdk.mkdir(parents=True, exist_ok=True)
+              subprocess.run(['tar', '-xzf', str(archive), '--strip-components=1', '-C', str(sdk)], check=True)
           subprocess.run([str(sdk / 'emsdk'), 'install', web['emscripten']], check=True)
           subprocess.run([str(sdk / 'emsdk'), 'activate', web['emscripten']], check=True)
           PY

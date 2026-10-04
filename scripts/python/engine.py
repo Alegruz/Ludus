@@ -1416,7 +1416,6 @@ def run_tidy(root: Path, preset: str) -> None:
 
     if not tidy_files:
         print("No project source files from modules/apps were found in the compilation database.")
-        return
 
     header_filter = f"^{re.escape(str(root))}/(modules|apps)/.*"
     commands = [
@@ -1427,7 +1426,8 @@ def run_tidy(root: Path, preset: str) -> None:
     run_analysis_commands(root, commands)
 
 
-def run_analysis_commands(root: Path, commands: Sequence[Sequence[object]]) -> None:
+def run_analysis_commands(root: Path, commands: Sequence[Sequence[object]], *,
+                          env: dict[str, str] | None = None) -> None:
     """Bound analysis concurrency and report complete, ordered diagnostics."""
     try:
         jobs = int(os.environ.get("LUDUS_TIDY_JOBS", "1"))
@@ -1435,6 +1435,19 @@ def run_analysis_commands(root: Path, commands: Sequence[Sequence[object]]) -> N
         raise EngineError("LUDUS_TIDY_JOBS must be a positive integer") from exc
     if jobs < 1:
         raise EngineError("LUDUS_TIDY_JOBS must be a positive integer")
+    try:
+        shard_count = int(os.environ.get("LUDUS_TIDY_SHARD_COUNT", "1"))
+        shard_index = int(os.environ.get("LUDUS_TIDY_SHARD_INDEX", "0"))
+    except ValueError as exc:
+        raise EngineError("Analysis shard count/index must be integers") from exc
+    if shard_count < 1 or not 0 <= shard_index < shard_count:
+        raise EngineError("Analysis requires a positive shard count and 0 <= index < count")
+    total = len(commands)
+    commands = commands[shard_index::shard_count]
+    if shard_count > 1 and not commands:
+        raise EngineError("Analysis shard has no translation units; reduce the shard count")
+    if shard_count > 1:
+        print(f"Analysis shard {shard_index + 1}/{shard_count}: {len(commands)} of {total} translation units")
     if not commands:
         return
 
@@ -1442,7 +1455,7 @@ def run_analysis_commands(root: Path, commands: Sequence[Sequence[object]]) -> N
         try:
             return subprocess.run(
                 [str(arg) for arg in command], cwd=root, check=False, text=True,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
             )
         except OSError as exc:
             raise EngineError(f"Cannot launch analysis: {command_line(command)}: {exc}") from exc
