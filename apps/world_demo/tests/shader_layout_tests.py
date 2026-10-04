@@ -24,8 +24,10 @@ class LayoutTests(unittest.TestCase):
         result = self.layout("float a[2]; vec3 b[2]; float c;")
         self.assertEqual(result['offsets'], dict(a=0, b=32, c=64))
         self.assertEqual(result['size'], 80)
+    def test_portable_uniform_limit(self):
+        self.assertEqual(self.layout('vec4 surface[1024];')['size'], 16384)
     def test_unsupported_or_overlarge_layouts_fail(self):
-        for fields in ("vec4 a[0];", "vec4 a[257];", "vec4 a[256]; float b;", "mat4 a;", "dvec4 a;", "vec4 a[N];", "vec4 a; vec4 a;"):
+        for fields in ("vec4 a[0];", "vec4 a[1025];", "vec4 a[1024]; float b;", "mat4 a;", "dvec4 a;", "vec4 a[N];", "vec4 a; vec4 a;"):
             with self.subTest(fields=fields), self.assertRaises(RuntimeError):
                 self.layout(fields)
 if __name__ == '__main__': unittest.main()

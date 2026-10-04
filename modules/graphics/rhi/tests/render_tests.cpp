@@ -6,6 +6,7 @@
 #include "diagnostic.h"
 #include "internal/vulkan_readback.h"
 
+#include <algorithm>
 #include <cmath>
 #include <span>
 
@@ -43,7 +44,7 @@ TEST_CASE("Public Vulkan resources render changing uniforms across resize and re
         REQUIRE(rhi::Destroy(failed) == rhi::ResourceStatus::Ready);
         REQUIRE(rhi::CreateShader(ludus::shaders::diagnostic::Vertex(), vertex) == rhi::ResourceStatus::Ready);
         REQUIRE(rhi::CreateShader(ludus::shaders::diagnostic::Fragment(), fragment) == rhi::ResourceStatus::Ready);
-        REQUIRE(rhi::CreateUniform(48, uniform) == rhi::ResourceStatus::Ready);
+        REQUIRE(rhi::CreateUniform(session == 0 ? 48 : 16384, uniform) == rhi::ResourceStatus::Ready);
         REQUIRE(rhi::CreatePipeline({vertex, fragment, uniform}, pipeline) == rhi::ResourceStatus::Ready);
         uint8 pixels[96 * 64 * 4]{};
         for (usize frame = 0; frame < 40; ++frame)
@@ -63,8 +64,10 @@ TEST_CASE("Public Vulkan resources render changing uniforms across resize and re
                                         0.4F,
                                         0.2F,
                                         1};
-            REQUIRE(rhi::UpdateUniform(uniform, {reinterpret_cast<const uint8*>(values), sizeof(values)}) ==
-                    rhi::ResourceStatus::Ready);
+            uint8 payload[16384]{};
+            std::copy_n(reinterpret_cast<const uint8*>(values), sizeof(values), payload);
+            const usize uploadSize = session == 0 ? sizeof(values) : sizeof(payload);
+            REQUIRE(rhi::UpdateUniform(uniform, {payload, uploadSize}) == rhi::ResourceStatus::Ready);
             REQUIRE(rhi::SetFrameTarget({ .Width = width, .Height = height }) == rhi::FrameStatus::Ready);
             REQUIRE(rhi::BeginFrameStatus() == rhi::FrameStatus::Ready);
             REQUIRE(rhi::DrawFullscreen(pipeline) == rhi::ResourceStatus::Ready);

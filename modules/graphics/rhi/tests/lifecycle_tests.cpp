@@ -429,3 +429,21 @@ TEST_CASE("Two failed attempts finalize without recursive fallback", "[rhi][life
     CHECK(GetStartup().State == StartupState::DeviceLost);
     Shutdown();
 }
+
+TEST_CASE("Public uniforms admit the portable 16 KiB limit and reject larger payloads", "[rhi][resources]")
+{
+    Shutdown();
+    backend::ImmediateError = StartupError::None;
+    backend::NextResource = ResourceStatus::Ready;
+    REQUIRE(Start({}, {}) == StartStatus::Pending);
+    internal::Complete(backend::PendingToken, StartupError::None, 4096);
+    UniformHandle uniform;
+    CHECK(CreateUniform(16385, uniform) == ResourceStatus::InvalidDescription);
+    CHECK(CreateUniform(16400, uniform) == ResourceStatus::InvalidDescription);
+    REQUIRE(CreateUniform(16384, uniform) == ResourceStatus::Ready);
+    const ludus::foundation::uint8 bytes[16384]{};
+    CHECK(UpdateUniform(uniform, std::span(bytes).first(16368)) == ResourceStatus::InvalidDescription);
+    CHECK(UpdateUniform(uniform, bytes) == ResourceStatus::Ready);
+    CHECK(Destroy(uniform) == ResourceStatus::Ready);
+    Shutdown();
+}

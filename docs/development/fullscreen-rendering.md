@@ -56,7 +56,11 @@ The shader has set/group **0**, binding **0**, one uniform block visible to both
 stages, vertex-index-generated positions, and location 0 RGBA fragment output.
 No vertex attributes, textures, samplers, storage, compute, blending, depth,
 culling, multiple draws, dynamic offsets or push constants are provided.
-Uniforms are 16..4096 bytes in multiples of 16. Eight resources of each kind are
+Uniforms are 16..16384 bytes in multiples of 16. The 16 KiB ceiling permits
+full-resolution simulation snapshots while staying within OpenGL ES 3.0's
+minimum uniform-block limit. Shader reflection and runtime admission share this
+ceiling. CPU staging remains fixed (128 KiB per active backend for eight slots);
+updates allocate nothing. Eight resources of each kind are
 available; exceeding the pool or exhausting never-reused IDs fails explicitly.
 
 CPU layouts are application contracts. Read separate SPIR-V and WGSL reflection
