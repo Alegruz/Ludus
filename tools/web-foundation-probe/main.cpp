@@ -12,6 +12,8 @@
 
 #include <emscripten.h>
 
+bool ExerciseInstalledStrings() noexcept;
+
 using namespace ludus::foundation;
 
 static_assert(LUDUS_PLATFORM_WEB == 1);
@@ -60,7 +62,9 @@ void reportPassed() noexcept
 
 constexpr bool PrimitiveContract(ludus::foundation::usize increment = 1) noexcept
 {
-    using namespace ludus::foundation;
+    bool ExerciseInstalledStrings() noexcept;
+
+using namespace ludus::foundation;
     static_assert(sizeof(usize) == sizeof(void*));
     if (increment == 0 || increment > 255)
     {
@@ -83,6 +87,7 @@ static_assert(PrimitiveContract());
 
 int main(int argc, char** argv)
 {
+    if (!ExerciseInstalledStrings()) { return 9; }
     if (!PrimitiveContract(static_cast<usize>(argc)))
     {
         return 8;
