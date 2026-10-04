@@ -72,10 +72,11 @@ MathStatus TryMakeRandomKey(uint64 rootSeed, uint32 domainId, RandomKey& out) no
     return MathStatus::Success;
 }
 
-MathStatus TryMakeRandomAddress(uint64 scope, uint64 event, uint64 dimension, RandomAddress& out) noexcept
+MathStatus TryMakeRandomAddress(RandomAddressInput input, RandomAddress& out) noexcept
 {
-    RandomAddress candidate{scope, 0, 0};
-    if (!core::TryIntegerCast(event, candidate.Event) || !core::TryIntegerCast(dimension, candidate.Dimension))
+    RandomAddress candidate{input.Scope, 0, 0};
+    if (!core::TryIntegerCast(input.Event, candidate.Event) ||
+        !core::TryIntegerCast(input.Dimension, candidate.Dimension))
     {
         return MathStatus::OutOfRange;
     }
@@ -85,7 +86,8 @@ MathStatus TryMakeRandomAddress(uint64 scope, uint64 event, uint64 dimension, Ra
 
 uint32 SampleUInt32(RandomKey key, RandomAddress address) noexcept
 {
-    return internal::Philox4x32(internal::PackRandomCounter(address, 0), key).Values[address.Dimension & 3u];
+    const core::usize lane = address.Dimension & 3u;
+    return internal::Philox4x32(internal::PackRandomCounter(address, 0), key).Values[lane];
 }
 
 float32 SampleFloat01(RandomKey key, RandomAddress address) noexcept
@@ -130,7 +132,8 @@ MathStatus TrySampleBounded(RandomKey key, RandomAddress address, PreparedBound3
     // A private, inlined seam permits forcing rejection and exhaustion in tests;
     // production has no indirect call or runtime test callback.
     return internal::SampleBounded(bound, out, [key, address](uint16 attempt) noexcept {
-        return internal::Philox4x32(internal::PackRandomCounter(address, attempt), key).Values[address.Dimension & 3u];
+        const core::usize lane = address.Dimension & 3u;
+        return internal::Philox4x32(internal::PackRandomCounter(address, attempt), key).Values[lane];
     });
 }
 } // namespace ludus::foundation::math

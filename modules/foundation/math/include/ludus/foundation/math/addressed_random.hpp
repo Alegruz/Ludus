@@ -45,6 +45,15 @@ struct RandomAddress
     uint16 Dimension = 0;
 };
 
+// Wide external fields for checked construction. Named fields avoid exchanging
+// positional scope/event/dimension arguments before they are narrowed.
+struct RandomAddressInput
+{
+    uint64 Scope = 0;
+    uint64 Event = 0;
+    uint64 Dimension = 0;
+};
+
 struct RandomBlock
 {
     uint32 Values[4] = {};
@@ -60,9 +69,7 @@ struct RandomBlock
 // Scope is a stable entity/chunk ID; Event is an explicit occurrence counter;
 // Dimension is a stable semantic slot. Do not use pointers, thread IDs, job
 // indices or a shared incrementing draw count. Outputs are unchanged on failure.
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): documented scope / event / dimension address order.
-[[nodiscard]] MathStatus
-TryMakeRandomAddress(uint64 scope, uint64 event, uint64 dimension, RandomAddress& out) noexcept;
+[[nodiscard]] MathStatus TryMakeRandomAddress(RandomAddressInput input, RandomAddress& out) noexcept;
 
 // Pure Philox4x32-10, attempt zero, selected lane. Repeating an address repeats
 // the result. There is no mutable state, initialization, cache or allocation.

@@ -58,7 +58,7 @@ TEST_CASE("Addressed random v1 freezes derivation, packing and public mappings",
     RandomBlock block;
     REQUIRE(TrySampleBlock(key, {address.Scope, address.Event, 1232}, block) == MathStatus::Success);
     const uint32 expected[] = {0x991146b3u, 0x1aa17390u, 0x942d2d40u, 0x487e565du};
-    for (uint16 lane = 0; lane < 4; ++lane)
+    for (usize lane = 0; lane < 4; ++lane)
     {
         REQUIRE(block.Values[lane] == expected[lane]);
         REQUIRE(SampleUInt32(key, {address.Scope, address.Event, static_cast<uint16>(1232u + lane)}) == expected[lane]);
@@ -76,12 +76,18 @@ TEST_CASE("Checked randomness boundaries preserve outputs", "[math][random]")
     REQUIRE(TryMakeRandomKey(0xffffffffffffffffULL, 0xffffffffu, key) == MathStatus::Success);
 
     RandomAddress address{7, 8, 9};
-    REQUIRE(TryMakeRandomAddress(1, 0x100000000ULL, 0, address) == MathStatus::OutOfRange);
-    REQUIRE(TryMakeRandomAddress(1, 0, 65536, address) == MathStatus::OutOfRange);
+    REQUIRE(TryMakeRandomAddress({ .Scope = 1, .Event = 0x100000000ULL }, address) == MathStatus::OutOfRange);
+    REQUIRE(TryMakeRandomAddress({ .Scope = 1, .Dimension = 65536 }, address) == MathStatus::OutOfRange);
     REQUIRE(address.Scope == 7);
     REQUIRE(address.Event == 8);
     REQUIRE(address.Dimension == 9);
-    REQUIRE(TryMakeRandomAddress(0xffffffffffffffffULL, 0xffffffffu, 65535, address) == MathStatus::Success);
+    REQUIRE(TryMakeRandomAddress(
+                {
+                    .Scope = 0xffffffffffffffffULL,
+                    .Event = 0xffffffffu,
+                    .Dimension = 65535,
+                },
+                address) == MathStatus::Success);
     const RandomBlock packed = internal::PackRandomCounter(address, 65535);
     REQUIRE(packed.Values[0] == 0xffffffffu);
     REQUIRE(packed.Values[1] == 0xffffffffu);
@@ -96,7 +102,7 @@ TEST_CASE("Checked randomness boundaries preserve outputs", "[math][random]")
     REQUIRE(block.Values[3] == 4);
     address.Dimension = 65532;
     REQUIRE(TrySampleBlock(key, address, block) == MathStatus::Success);
-    for (uint16 lane = 0; lane < 4; ++lane)
+    for (usize lane = 0; lane < 4; ++lane)
     {
         address.Dimension = static_cast<uint16>(65532u + lane);
         REQUIRE(SampleUInt32(key, address) == block.Values[lane]);
@@ -145,25 +151,28 @@ TEST_CASE("Multiply-high rejection handles retries, last attempt and exhaustion"
     REQUIRE(TryPrepareBound32(0x80000001u, bound) == MathStatus::Success);
     uint32 calls = 0;
     uint32 out = 123;
-    REQUIRE(internal::SampleBounded(bound, out, [&calls](uint16 attempt) noexcept {
-                ++calls;
-                return attempt == 65535 ? 1u : 0u;
-            }) == MathStatus::Success);
+    const MathStatus lastAttemptStatus = internal::SampleBounded(bound, out, [&calls](uint16 attempt) noexcept {
+        ++calls;
+        return attempt == 65535 ? 1u : 0u;
+    });
+    REQUIRE(lastAttemptStatus == MathStatus::Success);
     REQUIRE(calls == 65536);
     REQUIRE(out == 0);
     calls = 0;
     out = 123;
-    REQUIRE(internal::SampleBounded(bound, out, [&calls](uint16) noexcept {
-                ++calls;
-                return 0u;
-            }) == MathStatus::OutOfRange);
+    const MathStatus exhaustedStatus = internal::SampleBounded(bound, out, [&calls](uint16) noexcept {
+        ++calls;
+        return 0u;
+    });
+    REQUIRE(exhaustedStatus == MathStatus::OutOfRange);
     REQUIRE(calls == 65536);
     REQUIRE(out == 123);
     calls = 0;
-    REQUIRE(internal::SampleBounded(PreparedBound32{}, out, [&calls](uint16) noexcept {
-                ++calls;
-                return 0xffffffffu;
-            }) == MathStatus::Success);
+    const MathStatus unitBoundStatus = internal::SampleBounded(PreparedBound32{}, out, [&calls](uint16) noexcept {
+        ++calls;
+        return 0xffffffffu;
+    });
+    REQUIRE(unitBoundStatus == MathStatus::Success);
     REQUIRE(calls == 1);
     REQUIRE(out == 0);
 }
@@ -192,10 +201,10 @@ TEST_CASE("Every bound in a reduced eight-bit mapper has exact equal accepted ma
                     }) == MathStatus::Success);
             if (!retried)
             {
-                ++counts[out];
+                ++counts[static_cast<usize>(out)];
             }
         }
-        for (uint32 bucket = 0; bucket < smallBound; ++bucket)
+        for (usize bucket = 0; bucket < smallBound; ++bucket)
         {
             REQUIRE(counts[bucket] == 256u / smallBound);
         }
