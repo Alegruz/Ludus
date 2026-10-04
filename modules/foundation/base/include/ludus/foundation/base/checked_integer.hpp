@@ -3,6 +3,14 @@
 // Opt-in checked arithmetic for the native Ludus integer aliases. Operands are
 // copied; output may alias an operand and is unchanged on failure. No logging,
 // assertions, allocation, saturation, or exceptions, including on overflow.
+// Thanks to Eric Lengyel, "Bit Hacks for Games", Game Engine Gems 2, chapter 24,
+// pp. 391-401, for the width/signed-minimum edge cases. Our independently written
+// helpers use defined LLVM overflow operations instead of the chapter's bit hacks.
+// Thanks to the LLVM Project, Clang Language Extensions, "Checked Arithmetic
+// Builtins": https://clang.llvm.org/docs/LanguageExtensions.html#checked-arithmetic-builtins
+// Thanks to ISO/IEC JTC1/SC22/WG21, C++ Working Draft [utility.intcmp], for the
+// signedness-aware in_range contract: https://eel.is/c++draft/utility.intcmp
+// Review and departures: docs/architecture/primitive-types.md.
 #include <ludus/foundation/base/types.h>
 
 #include <type_traits>

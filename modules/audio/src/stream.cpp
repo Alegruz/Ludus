@@ -1,4 +1,5 @@
 #include "internal/stream.hpp"
+#include "internal/frame_conversion.hpp"
 #include <ludus/foundation/base/core.h>
 
 #include <ludus/foundation/math/scalar.hpp>
@@ -107,16 +108,8 @@ Status StreamData::Configure(const StreamDescriptor& descriptor, uint32 rate) no
         {
             return Status::InvalidArgument;
         }
-        const auto convert = [&](uint64 frame) noexcept {
-            return (frame / sourceRate) * rate + ((frame % sourceRate) * rate + sourceRate / 2) / sourceRate;
-        };
-        if (sourceLength / sourceRate > static_cast<uint64>(-1) / rate)
-        {
-            return Status::InvalidArgument;
-        }
-        Begin = convert(descriptor.SourceLoopBegin);
-        End = convert(descriptor.SourceLoopEnd);
-        if (Begin >= End || End > length)
+        if (!TryResampleFrame(descriptor.SourceLoopBegin, sourceRate, rate, Begin) ||
+            !TryResampleFrame(descriptor.SourceLoopEnd, sourceRate, rate, End) || Begin >= End || End > length)
         {
             return Status::InvalidArgument;
         }

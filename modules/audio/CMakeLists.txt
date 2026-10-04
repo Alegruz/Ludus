@@ -84,6 +84,7 @@ if(LUDUS_BUILD_TESTS)
         ludus_audio_tests
         PRIVATE
             tests/stream_tests.cpp
+            tests/frame_conversion_tests.cpp
             tests/spsc_ring_tests.cpp
             tests/handle_tests.cpp
             tests/admission_tests.cpp

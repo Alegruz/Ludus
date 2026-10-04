@@ -57,7 +57,7 @@ not imported source code. The draft above preceded the review.
 | Game Programming Gems 2, 2.1, Yossarian King, Floating-Point Tricks: Improving Performance with IEEE Floating Point (PDF pp. 160-172 inspected) | Binary representation, finite conversion domains, and target-dependent timings are central to the proposed tricks. | Verify IEEE binary32/64 exponent and significand properties in a private contract TU. Do not add union-punning or magic-bias float conversions. Do not infer today's costs from Pentium II measurements. |
 | Game Programming Gems 3, 1.9, Søren Hannibal, Floating-Point Exception Handling (PDF pp. 71-74, rendered and OCR checked) | Non-finite values can conceal bugs or make loops fail to terminate; libraries can alter FP control state. | Preserve ADR 0010's explicit finite-input checks and module-owned FP policy. FoundationBase must not alter thread FP trap/rounding/FTZ state. Hardware FP exceptions and C++ exceptions are different mechanisms; neither is added here. |
 | Game Programming Gems 6, 2.1, Chris Lomont, Floating-Point Tricks (representation sections, PDF pp. 120-123 / printed pp. 121-124, rendered) | Storage representation and execution policy differ; signed zero and subnormals are exceptional values with explicit encodings. | Add compile-time bit-pattern tests for one, negative zero and the smallest subnormal at both float widths; keep FP execution policy outside primitive aliases. |
-| Game Engine Gems 1, 1.13, Platform Portability (printed p. 12, text inspected) | File/network streams can hide byte-order assumptions even in otherwise portable middleware. | Keep explicit bounded endian codecs and byte-vector tests at format boundaries. |
+| Game Engine Gems, Jason Hughes, chapter 1, What to Look for When Evaluating Middleware for Integration, section 1.13 Platform Portability (printed p. 12, text inspected) | File/network streams can hide byte-order assumptions even in otherwise portable middleware. | Keep explicit bounded endian codecs and byte-vector tests at format boundaries. |
 | Game Engine Gems 2, 24, Eric Lengyel, Bit Hacks for Games (printed pp. 391-401) | Assumed widths and edge values determine whether branchless formulas are valid; signed-minimum absolute value is a counterexample. | Test every integer width at its limits, including signed minimum times -1, and exhaust the 8-bit input space. Use defined overflow builtins instead of calculating an overflowing signed result and checking afterward. |
 
 Modern primary references: [Clang checked arithmetic builtins](https://clang.llvm.org/docs/LanguageExtensions.html#checked-arithmetic-builtins),
@@ -151,6 +151,35 @@ matrix deliberately; the closed concepts will not silently admit extended
 integers or new float representations. Domain wrappers remain separate work
 when actual IDs, units or format contracts justify them.
 
+## Boundary adoption audit
+
+The follow-up inspects allocation sizes, narrowing casts and binary ingress
+across Foundation, Runtime/GameApi and GameHost, Content, Audio/AudioContent,
+Text, graphics backends and application I/O. Changes target concrete failures
+or external numeric admission; already proven bounded casts and intentional
+unsigned hash/PRNG/ring arithmetic keep their existing policy.
+
+| Boundary | Finding and implementation |
+| --- | --- |
+| GameApi checkpoint integer writes | Values too wide for the requested 1..8-byte width previously changed the buffer before returning false. Check fit first, preserving every byte on failure, including nonstandard widths. Keep the small ABI-only byte loop; these widths are format policy beyond the fixed-width Foundation codecs. |
+| Checkpoint and authored record readers | Previously published fields before checking record length/IDs/kind. Validate locals first; failure preserves caller output and reader position so retry/diagnostics see the previous complete record. |
+| Audio source/session loop conversion | The streaming quotient multiply guard did not protect the final rounded-fraction addition. A shared private checked helper preserves nearest/ties-up rounding for both resident and streaming loops and rejects overflow without changing output. |
+| Text rasterization | Negating a signed minimum pitch is undefined; native-width bitmap products also need admission before allocation/pointer offsets. A private allocation-free layout validator widens pitch before negating and checks coverage/source extents against the native pointer-difference range. Keep existing row orientation and rendering policy. |
+| Content file ingress | Validate external signed file length with TryIntegerCast before native allocation/cap comparison. File output remains unchanged when admission fails. |
+| Foundation diagnostic control protocol | Existing 16-byte header bounds and payload cap already prove safety. Reuse bounded endian codecs to eliminate duplicate fixed-width encodings while keeping the exact wire bytes and emergency-path independence. |
+| Existing guarded boundaries | Array capacity/product ceilings, Content document/catalog caps, hash length guards, Audio resident PCM caps and fixed mixer/ring capacities, GameHost schema/queue/allocation caps, UTF-8 decoder caller bounds, graphics device extents and bounded editor queues already establish relevant ranges. Avoid replacing deliberate wrap or adding checks inside trusted sample/render loops. |
+
+The new comments acknowledge sources at the affected file/section boundaries.
+The five Gems chapters inform design/edge tests, not copied implementations.
+Jason Hughes's author and parent chapter are verified from Game Engine Gems;
+the original review's shortened section label is expanded above. Checked
+arithmetic and range comparison comments link the consulted LLVM/WG21
+documentation. Text's new layout validator additionally follows the FreeType
+Project's API Reference, FT_Bitmap fields pitch/width/rows:
+[FT_Bitmap](https://freetype.org/freetype2/docs/reference/ft2-basic_types.html#ft_bitmap).
+The validator keeps FreeType types private and adds explicit integer admission;
+it does not change the library's raster algorithm or import reference code.
+
 ## Performance evidence
 
 An optimized Clang 18.1.3 x86-64 assembly probe (`-std=c++23 -O2
@@ -171,7 +200,21 @@ cast and two widened test-oracle minimum values. Converting through unsigned
 char would change negative integers. The repository's checker configuration
 and its general character diagnostics are unchanged.
 
-## Validation evidence
+## Boundary adoption validation
+
+Pinned Clang 18.1.3 warnings-as-errors builds and complete Debug (52 CTest
+entries), Development (49 entries), and ASan/UBSan (43 entries) suites passed.
+Two live Wayland entries in each native suite skipped without a compositor.
+All 16 pinned Emscripten Development tests passed, and the installed native
+SDK consumer built and ran. An additional isolated wasm32 executable checked
+32-bit raster extent rejection, checkpoint failure preservation and Audio's
+final rounded-sum overflow; it does not claim a browser Text/Audio backend.
+Source formatting and foundational include gates passed. All translation
+units passed pinned clang-tidy; the final named-field raster interface and
+its two callers were rechecked, and Text tests reran in all three native
+profiles plus the wasm32 probe after that interface change.
+
+## Original primitive implementation validation
 
 Pinned Clang 18.1.3 local validation passed the Debug (50 CTest entries),
 Development (47 entries), and ASan/UBSan (41 entries) suites. Two live Wayland

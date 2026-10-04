@@ -114,7 +114,7 @@ if(LUDUS_BUILD_TESTS)
     add_executable(ludus_foundation_base_tests)
     target_sources(ludus_foundation_base_tests PRIVATE
         tests/version_tests.cpp tests/assert_tests.cpp tests/assert_format_tests.cpp
-        tests/checked_integer_tests.cpp tests/byte_order_tests.cpp)
+        tests/checked_integer_tests.cpp tests/byte_order_tests.cpp tests/control_codec_tests.cpp)
     target_include_directories(ludus_foundation_base_tests PRIVATE src)
     target_link_libraries(
         ludus_foundation_base_tests

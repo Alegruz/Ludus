@@ -61,7 +61,7 @@ if(LUDUS_BUILD_TESTS)
     ludus_apply_project_defaults(ludus_runtime_game_api_header_check)
 
     find_package(Catch2 3 REQUIRED CONFIG)
-    add_executable(ludus_runtime_game_api_tests tests/abi_layout_tests.cpp)
+    add_executable(ludus_runtime_game_api_tests tests/abi_layout_tests.cpp tests/checkpoint_tests.cpp)
     target_link_libraries(ludus_runtime_game_api_tests PRIVATE Ludus::GameApi Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_runtime_game_api_tests)
     ludus_enable_test_exceptions(ludus_runtime_game_api_tests)

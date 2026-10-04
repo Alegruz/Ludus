@@ -8,9 +8,19 @@ namespace ludus::runtime::game_api
 // Flat tagged records: uint16 field ID, uint16 payload size, payload bytes.
 // Integer/IEEE float bits use little endian, independently of native padding.
 // Readers own schema, duplicate, required-field, type and semantic validation.
+// Thanks to Jason Hughes, "What to Look for When Evaluating Middleware for
+// Integration", Game Engine Gems, section 1.13 "Platform Portability", p. 12,
+// for the endian audit lesson. This original format supports all widths 1..8;
+// retain the small byte loop for nonstandard widths without widening ABI headers.
+// Review: docs/architecture/primitive-types.md, "Boundary adoption audit".
 [[nodiscard]] inline bool WriteCheckpointUint(ByteSpan bytes, uint64 value) noexcept
 {
     if (bytes.Data == nullptr || bytes.Capacity == 0 || bytes.Capacity > 8)
+    {
+        return false;
+    }
+    // Preflight fit before any write; width 8 must not shift by 64.
+    if (bytes.Capacity < sizeof(value) && (value >> (bytes.Capacity * 8)) != 0)
     {
         return false;
     }
@@ -19,7 +29,7 @@ namespace ludus::runtime::game_api
         bytes.Data[i] = static_cast<uint8>(value & 0xFFU);
         value >>= 8;
     }
-    return value == 0;
+    return true;
 }
 
 [[nodiscard]] inline uint64 ReadCheckpointUint(const uint8* bytes, usize width) noexcept
@@ -73,12 +83,13 @@ struct CheckpointReader final
         {
             return false;
         }
-        id = static_cast<uint32>(ReadCheckpointUint(Buffer.Data + Offset, 2));
+        const auto nextId = static_cast<uint32>(ReadCheckpointUint(Buffer.Data + Offset, 2));
         const usize length = static_cast<usize>(ReadCheckpointUint(Buffer.Data + Offset + 2, 2));
-        if (id == 0 || length > Buffer.Size - Offset - 4)
+        if (nextId == 0 || length > Buffer.Size - Offset - 4)
         {
             return false;
         }
+        id = nextId;
         payload = {Buffer.Data + Offset + 4, length};
         Offset += 4 + length;
         return true;

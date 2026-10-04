@@ -1,5 +1,10 @@
 #pragma once
 
+// Thanks to ISO/IEC JTC1/SC22/WG21, C++ Working Draft [basic.fundamental], for
+// the native scalar representation contract: https://eel.is/c++draft/basic.fundamental
+// We retain native aliases and verify Ludus's narrower supported representations.
+// See docs/architecture/primitive-types.md; no reference implementation was copied.
+
 #include <cstddef>
 #include <cstdint>
 

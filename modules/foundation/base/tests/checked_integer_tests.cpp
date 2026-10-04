@@ -1,3 +1,7 @@
+// Thanks to Eric Lengyel, "Bit Hacks for Games", Game Engine Gems 2, chapter 24,
+// pp. 391-401: width and signed-minimum counterexamples motivate these independent
+// widened oracles and exhaustive 8-bit cases. No chapter listing is copied.
+// Review: docs/architecture/primitive-types.md.
 #include <ludus/foundation/base/checked_integer.hpp>
 
 #include <initializer_list>

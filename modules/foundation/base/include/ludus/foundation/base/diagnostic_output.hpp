@@ -107,7 +107,7 @@ EncodeControlHeader(char* buffer, usize capacity, ControlMessageType kind, uint3
 
 // Parse and validate a received frame's header from `buffer`/`size`. Rejects a
 // short buffer, wrong magic/version, an unknown kind, or a payload length that
-// would exceed the frame; returns false and leaves `header` unspecified.
+// would exceed the frame; returns false and leaves `header` unchanged.
 [[nodiscard]] bool DecodeControlHeader(const char* buffer, usize size, ControlHeader& header) noexcept;
 
 enum class ControlState : uint8

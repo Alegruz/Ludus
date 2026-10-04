@@ -753,6 +753,10 @@ bool Message::Parse(std::string_view json, Message& out)
     return s.AtEnd();
 }
 
+// Thanks to Jason Hughes, "What to Look for When Evaluating Middleware for
+// Integration", Game Engine Gems, section 1.13 "Platform Portability", p. 12:
+// the stream endian audit informs this explicit, unchanged little-endian format.
+// Original implementation; review: docs/architecture/primitive-types.md.
 bool EncodeFrame(std::string_view payload, std::vector<uint8>& outFrame)
 {
     if (payload.size() > kMaxControlFrameBytes)

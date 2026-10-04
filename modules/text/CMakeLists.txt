@@ -50,6 +50,7 @@ target_sources(ludus_text
         src/status.cpp
         src/utf8.cpp
         src/font_system.cpp
+        src/raster_layout.cpp
     PUBLIC
         FILE_SET public_headers
         TYPE HEADERS
