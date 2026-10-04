@@ -9,7 +9,10 @@ window and the editor's status area only describes it.
 
 See the specification package for the authoritative contract:
 `.kiro/specs/editor-workspace/{requirements,design,tasks}.md` and
-`docs/architecture/editor-workspace-research.md`.
+`docs/architecture/editor-workspace-research.md`. The
+[editor architecture](../architecture/editor-architecture.md) and
+[interaction design](../architecture/editor-interaction-design.md) define S1
+and subsequent authoring stages.
 
 ## Prerequisites (optional editor setup)
 
@@ -284,3 +287,31 @@ Stop closes the owned session and game. Local debugger preferences and existing
 breakpoints survive repeated launches. The pinned Linux argument limitations apply
 only to this debugging action. See [Native debugging](debugging.md#from-the-ludus-editor)
 for setup, session files and compatibility acceptance.
+
+
+## Workspace layout (S1)
+
+![Default workspace captured from Qt at 1100×760](images/editor-workspace-default.png)
+
+This offscreen capture shows the default empty-project layout; it is presentation
+evidence, not native interaction or game-frame acceptance.
+
+Project settings and Audio occupy central tabs. Recent Projects, Live Inspector,
+and Output are movable panels; the status bar reports current workspace state.
+The Game toolbar exposes the existing build/debug and Play controls. Toolbar
+and menu actions share controller capability gating. Project settings and Audio
+scroll when available space is small. Ctrl+S continues to save the project
+descriptor; Audio and tuning documents have separate explicit save actions.
+
+Use **View** to recover a hidden panel or Game toolbar. **View → Reset Layout**
+restores the default panel arrangement without changing project drafts or Play.
+A normally accepted close writes local layout preferences to
+`$XDG_CONFIG_HOME/Ludus/Editor/workspace.json` (Qt platform config location when
+that environment variable is absent). Preferences are independent of projects
+and recent-project history. Missing, invalid, oversized, or incompatible app/Qt
+versions fall back to defaults. Only this editor's locally generated layout is
+supported; do not distribute layout blobs with projects.
+
+See [architecture](../architecture/editor-architecture.md),
+[interaction design](../architecture/editor-interaction-design.md), and
+[post-design reference review](../architecture/editor-design-review.md).
