@@ -1,6 +1,7 @@
 #include <ludus/content/content.h>
 #include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/base/config.h>
+#include <ludus/foundation/filesystem/filesystem.hpp>
 #include <new>
 
 #if LUDUS_TARGET_OS == LUDUS_OS_LINUX
@@ -111,24 +112,72 @@ Status ReadAt(int directory, const char* path, usize cap, Bytes& output) noexcep
 }
 } // namespace
 #endif
+namespace
+{
+Status ContentStatus(foundation::filesystem::Status status) noexcept
+{
+    using FileStatus = foundation::filesystem::Status;
+    switch (status)
+    {
+        case FileStatus::Ok:
+            return Status::Ok;
+        case FileStatus::InvalidArgument:
+            return Status::Invalid;
+        case FileStatus::NotFound:
+            return Status::NotFound;
+        case FileStatus::OutOfMemory:
+            return Status::OutOfMemory;
+        case FileStatus::Changed:
+            return Status::Conflict;
+        case FileStatus::Unsupported:
+            return Status::Unsupported;
+        case FileStatus::AccessDenied:
+        case FileStatus::NotRegularFile:
+        case FileStatus::IoError:
+            return Status::IoError;
+    }
+    return Status::IoError;
+}
+} // namespace
 Status ReadFile(std::string_view root, std::string_view path, usize cap, Bytes& output) noexcept
 {
     if (root.empty() || !ValidPath(path))
     {
         return Status::Invalid;
     }
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
-    Fd directory;
-    Text<1024> leaf;
-    const auto status = Parent(root, path, directory, leaf);
-    return status == Status::Ok ? ReadAt(directory.Value, leaf.Data, cap, output) : status;
-#else
-    (void)root;
-    (void)path;
-    (void)cap;
-    (void)output;
-    return Status::Unsupported;
-#endif
+    foundation::filesystem::Directory directory;
+    auto result = directory.Open(root);
+    if (!result.Succeeded())
+    {
+        return ContentStatus(result.Code);
+    }
+    foundation::filesystem::File file;
+    result = directory.OpenRead(path, file);
+    if (!result.Succeeded())
+    {
+        return ContentStatus(result.Code);
+    }
+    if (file.Size() > cap)
+    {
+        return Status::Limit;
+    }
+    Bytes next;
+    usize size = 0;
+    if (!foundation::TryIntegerCast(file.Size(), size))
+    {
+        return Status::Limit;
+    }
+    if (!next.Resize(size))
+    {
+        return Status::OutOfMemory;
+    }
+    const auto read = file.ReadAt(0, next.Data());
+    if (!read.Outcome.Succeeded())
+    {
+        return ContentStatus(read.Outcome.Code);
+    }
+    output = Move(next);
+    return Status::Ok;
 }
 Status
 SaveFile(std::string_view root, std::string_view path, std::span<const uint8> data, const Digest* expected) noexcept
@@ -231,13 +280,8 @@ SaveFile(std::string_view root, std::string_view path, std::span<const uint8> da
 }
 struct FileReader::Impl final
 {
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
-    Fd File;
-    struct stat Original
-    {
-    };
+    foundation::filesystem::File File;
     uint64 Position = 0;
-#endif
 };
 FileReader::~FileReader() noexcept
 {
@@ -249,38 +293,29 @@ Status FileReader::Open(std::string_view root, std::string_view path) noexcept
     {
         return Status::Invalid;
     }
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
-    Fd parent;
-    Text<1024> leaf;
-    auto status = Parent(root, path, parent, leaf);
-    if (status != Status::Ok)
+    foundation::filesystem::Directory directory;
+    auto result = directory.Open(root);
+    if (!result.Succeeded())
     {
-        return status;
+        return ContentStatus(result.Code);
     }
     auto* next = new (std::nothrow) Impl();
     if (next == nullptr)
     {
         return Status::OutOfMemory;
     }
-    next->File.Value = openat(parent.Value, leaf.Data, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
-    if (next->File.Value < 0 || fstat(next->File.Value, &next->Original) != 0 || !S_ISREG(next->Original.st_mode) ||
-        next->Original.st_size <= 0)
+    result = directory.OpenRead(path, next->File);
+    if (!result.Succeeded())
     {
         delete next;
-        return Status::IoError;
+        return ContentStatus(result.Code);
     }
     delete mImpl;
     mImpl = next;
     return Status::Ok;
-#else
-    (void)root;
-    (void)path;
-    return Status::Unsupported;
-#endif
 }
 Status FileReader::Clone(FileReader& output) const noexcept
 {
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     if (mImpl == nullptr)
     {
         return Status::Invalid;
@@ -290,68 +325,34 @@ Status FileReader::Clone(FileReader& output) const noexcept
     {
         return Status::OutOfMemory;
     }
-    next->File.Value = fcntl(mImpl->File.Value, F_DUPFD_CLOEXEC, 0);
-    if (next->File.Value < 0)
+    const auto result = mImpl->File.Clone(next->File);
+    if (!result.Succeeded())
     {
         delete next;
-        return Status::IoError;
+        return ContentStatus(result.Code);
     }
-    next->Original = mImpl->Original;
     delete output.mImpl;
     output.mImpl = next;
     return Status::Ok;
-#else
-    (void)output;
-    return Status::Unsupported;
-#endif
 }
 Status FileReader::Read(std::span<uint8> bytes, usize& count) noexcept
 {
     count = 0;
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     if (mImpl == nullptr)
     {
         return Status::Invalid;
     }
-    struct stat current
+    const auto read = mImpl->File.ReadAt(mImpl->Position, bytes);
+    if (!read.Outcome.Succeeded())
     {
-    };
-    if (fstat(mImpl->File.Value, &current) != 0)
-    {
-        return Status::IoError;
+        return ContentStatus(read.Outcome.Code);
     }
-    const auto& old = mImpl->Original;
-    if (current.st_size != old.st_size || current.st_mtim.tv_sec != old.st_mtim.tv_sec ||
-        current.st_mtim.tv_nsec != old.st_mtim.tv_nsec)
-    {
-        return Status::Conflict;
-    }
-    const auto left = Size() - mImpl->Position;
-    const auto need = bytes.size() < left ? bytes.size() : static_cast<usize>(left);
-    if (need == 0)
-    {
-        return Status::Ok;
-    }
-    isize result;
-    do
-    {
-        result = pread(mImpl->File.Value, bytes.data(), need, static_cast<off_t>(mImpl->Position));
-    } while (result < 0 && errno == EINTR);
-    if (result <= 0)
-    {
-        return Status::IoError;
-    }
-    count = static_cast<usize>(result);
+    count = read.BytesRead;
     mImpl->Position += count;
     return Status::Ok;
-#else
-    (void)bytes;
-    return Status::Unsupported;
-#endif
 }
 Status FileReader::Seek(int64 offset, bool relative) noexcept
 {
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     if (mImpl == nullptr)
     {
         return Status::Invalid;
@@ -376,19 +377,10 @@ Status FileReader::Seek(int64 offset, bool relative) noexcept
         mImpl->Position = base + forward;
     }
     return Status::Ok;
-#else
-    (void)offset;
-    (void)relative;
-    return Status::Unsupported;
-#endif
 }
 uint64 FileReader::Size() const noexcept
 {
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
-    return mImpl != nullptr ? static_cast<uint64>(mImpl->Original.st_size) : 0;
-#else
-    return 0;
-#endif
+    return mImpl != nullptr ? mImpl->File.Size() : 0;
 }
 
 } // namespace ludus::content
