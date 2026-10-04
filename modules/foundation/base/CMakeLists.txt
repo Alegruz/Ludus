@@ -69,6 +69,7 @@ target_sources(
             include/ludus/foundation/base/core.h
             include/ludus/foundation/base/config.h
             include/ludus/foundation/base/compiler.h
+            include/ludus/foundation/base/target.hpp
             include/ludus/foundation/base/assert.hpp
             include/ludus/foundation/base/assert_format.hpp
             include/ludus/foundation/base/diagnostic_output.hpp
@@ -96,6 +97,7 @@ else()
 endif()
 
 ludus_apply_project_defaults(ludus_foundation_base)
+ludus_configure_target_identity(ludus_foundation_base PUBLIC)
 set_source_files_properties(src/assert.cpp
     PROPERTIES COMPILE_OPTIONS "-fno-optimize-sibling-calls")
 

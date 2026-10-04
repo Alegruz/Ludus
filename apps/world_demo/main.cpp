@@ -1,11 +1,12 @@
 #include "internal/application.h"
 #include <charconv>
+#include <ludus/foundation/base/config.h>
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
 #include <ludus/graphics/rhi/rhi.h>
 #include <string_view>
-#if defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_WEB
 #    include <emscripten.h>
 namespace
 {
@@ -74,7 +75,7 @@ int main(int argc, char** argv)
         ludus::foundation::logging::LogSystem::Shutdown();
         return 0;
     }
-#if defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_WEB
     (void)gApplication.Start();
     emscripten_set_main_loop(Frame, 0, true);
 #else

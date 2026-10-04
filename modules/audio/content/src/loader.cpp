@@ -1,10 +1,11 @@
 #include "internal/file_input.hpp"
 #include <ludus/audio/audio_source.h>
 #include <ludus/audio/content/loader.h>
+#include <ludus/foundation/base/config.h>
 
 #include <atomic>
 #include <new>
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
 #    include <pthread.h>
 #endif
 
@@ -42,7 +43,7 @@ struct Acquisition final
     std::atomic<bool> Cancelled{false};
     std::atomic<bool> Done{false};
     ContentStatus Result = ContentStatus::Pending;
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     pthread_t Thread{};
 #endif
     void Run() noexcept
@@ -331,7 +332,7 @@ Loader::Begin(std::string_view root, std::string_view id, const Sound* draft, co
         }
         job->MusicDraft = true;
     }
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     if (pthread_create(
             &job->Thread,
             nullptr,
@@ -361,7 +362,7 @@ void Loader::Cancel() noexcept
     }
     auto* job = mImpl->Pending;
     job->Cancelled.store(true, std::memory_order_release);
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
     pthread_join(job->Thread, nullptr);
 #endif
     delete job;

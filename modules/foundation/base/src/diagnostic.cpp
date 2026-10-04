@@ -1,3 +1,4 @@
+#include <ludus/foundation/base/config.h>
 #include <ludus/foundation/base/diagnostic.hpp>
 #include <ludus/foundation/base/diagnostic_output.hpp>
 
@@ -6,7 +7,7 @@
 #include <cstdio>
 #include <cstring>
 
-#if defined(_WIN32)
+#if LUDUS_TARGET_OS == LUDUS_OS_WINDOWS
 extern "C" __declspec(dllimport) void __stdcall OutputDebugStringA(const char*);
 extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent(void);
 #endif
@@ -122,7 +123,7 @@ void EmergencyReport(DiagnosticSeverity severity,
     // fallback can block; assertions use only TryWriteEmergencyBytes instead.
     (void)diagnostics::WriteEmergencyBytes(buffer.data(), length);
 
-#if defined(_WIN32)
+#if LUDUS_TARGET_OS == LUDUS_OS_WINDOWS
     if (IsDebuggerPresent())
     {
         OutputDebugStringA(buffer.data());

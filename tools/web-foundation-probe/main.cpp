@@ -4,6 +4,7 @@
 #include <ludus/foundation/base/byte_order.hpp>
 #include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/base/diagnostic_output.hpp>
+#include <ludus/foundation/base/target.hpp>
 #include <ludus/foundation/base/version.hpp>
 
 #include <span>
@@ -15,6 +16,10 @@ using namespace ludus::foundation;
 
 static_assert(LUDUS_PLATFORM_WEB == 1);
 static_assert(LUDUS_ARCH_WASM32 == 1);
+static_assert(kTarget.Os == TargetOs::Web);
+static_assert(kTarget.Arch == TargetArch::Wasm32);
+static_assert(kTarget.PointerBits == 32);
+static_assert(kTarget.Endian == TargetEndian::Little);
 static_assert(LUDUS_ASSERT_DIALOGS_AVAILABLE == 0);
 #if defined(LUDUS_PLATFORM_LINUX) || defined(LUDUS_PLATFORM_DESKTOP) || defined(__cpp_exceptions)
 #    error "Browser Base must not inherit native platform or exception policy"

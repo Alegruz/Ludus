@@ -1,3 +1,24 @@
+function(ludus_configure_target_identity target_name visibility)
+    # Validate compiler detection against the configured target, not the host.
+    # FoundationBase exports this guard without exporting private build options.
+    if(EMSCRIPTEN)
+        set(ludus_target_os WEB)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        set(ludus_target_os WINDOWS)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        set(ludus_target_os MACOS)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
+        set(ludus_target_os ANDROID)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(ludus_target_os IOS)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(ludus_target_os LINUX)
+    else()
+        message(FATAL_ERROR "Ludus target detection does not recognize CMAKE_SYSTEM_NAME='${CMAKE_SYSTEM_NAME}'")
+    endif()
+    target_compile_definitions(${target_name} ${visibility} LUDUS_EXPECTED_TARGET_OS=LUDUS_OS_${ludus_target_os})
+endfunction()
+
 function(ludus_configure_project_options target_name)
     add_library(${target_name} INTERFACE)
 
@@ -6,6 +27,7 @@ function(ludus_configure_project_options target_name)
     target_compile_definitions(${target_name} INTERFACE
         LUDUS_BUILD_${LUDUS_BUILD_FLAVOR_DEFINE}=1
     )
+    ludus_configure_target_identity(${target_name} INTERFACE)
 
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_link_options(${target_name} INTERFACE -fuse-ld=lld)
