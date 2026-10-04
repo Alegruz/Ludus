@@ -1,6 +1,8 @@
 #include <ludus/foundation/base/assert_config.hpp>
 #include <ludus/foundation/base/assert_format.hpp>
 #include <ludus/foundation/base/build_metadata.hpp>
+#include <ludus/foundation/base/byte_order.hpp>
+#include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/base/version.hpp>
 #include <ludus/foundation/math/dynamics.hpp>
 #include <ludus/foundation/math/matrix.hpp>
@@ -14,6 +16,7 @@
 
 #include <iostream>
 #include <ludus/foundation/base/diagnostic_output.hpp>
+#include <span>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -151,8 +154,35 @@ static_assert(LUDUS_ENABLE_ASSERTS == EXPECTED_ASSERTS);
 static_assert(LUDUS_BREAK_ON_CHECK == EXPECTED_CHECK_BREAK);
 int PolicyWithoutNdebug();
 
+constexpr bool PrimitiveContract(ludus::foundation::usize increment = 1) noexcept
+{
+    using namespace ludus::foundation;
+    static_assert(sizeof(usize) == sizeof(void*));
+    if (increment == 0 || increment > 255)
+    {
+        return false;
+    }
+    const uint32 word = 0x12345600 | static_cast<uint32>(increment);
+    usize size = 42;
+    uint32 length = 42;
+    int64 signedProduct = 42;
+    uint8 bytes[4]{};
+    return !TryAdd(~usize{0}, increment, size) && size == 42 && !TryMultiply(~usize{0}, increment + 1, size) &&
+           size == 42 &&
+           !TryMultiply(-int64{9223372036854775807} - 1, static_cast<int64>(increment) + 1, signedProduct) &&
+           signedProduct == 42 && !TryIntegerCast(int32{-1}, length) && length == 42 &&
+           TryWriteLittleEndian(word, bytes) && bytes[0] == increment && bytes[3] == 0x12 &&
+           TryReadLittleEndian(bytes, length) && length == word &&
+           !TryReadBigEndian(std::span<const uint8>{bytes, 3}, length) && length == word;
+}
+static_assert(PrimitiveContract());
+
 int main()
 {
+    if (!PrimitiveContract())
+    {
+        return 8;
+    }
     // Verify the lifecycle API and static link without requiring Vulkan on CI.
     static_assert(noexcept(ludus::graphics::rhi::Initialize({})));
     static_assert(noexcept(ludus::graphics::rhi::SetFrameTarget({})));

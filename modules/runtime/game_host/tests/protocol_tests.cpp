@@ -204,3 +204,32 @@ TEST_CASE("field update and control escaping round trip", "[protocol]")
     REQUIRE(parsed.GetString("text", text));
     REQUIRE(text == std::string("a\0b", 3));
 }
+
+TEST_CASE("frame prefixes retain their explicit little endian byte format", "[protocol][primitive]")
+{
+    std::vector<ludus::foundation::uint8> frame;
+    REQUIRE(EncodeFrame("A", frame));
+    REQUIRE(frame == std::vector<ludus::foundation::uint8>{1, 0, 0, 0, 'A'});
+}
+
+TEST_CASE("queue size overflow is rejected before accessing incoming bytes", "[protocol][primitive]")
+{
+    FrameReader reader;
+    const ludus::foundation::uint8 byte = 0;
+    reader.Append(&byte, 1);
+    reader.Append(&byte, ~usize{0});
+    REQUIRE(reader.Failed());
+    std::string out = "unchanged";
+    REQUIRE_FALSE(reader.Next(out));
+    REQUIRE(out == "unchanged");
+}
+
+TEST_CASE("queue size admits its exact limit and rejects one extra byte", "[protocol][primitive]")
+{
+    FrameReader reader;
+    const std::vector<ludus::foundation::uint8> bytes(kMaxCommandQueueBytes, 0);
+    reader.Append(bytes.data(), bytes.size());
+    REQUIRE_FALSE(reader.Failed());
+    reader.Append(bytes.data(), 1);
+    REQUIRE(reader.Failed());
+}
