@@ -130,6 +130,11 @@ template <typename ScalarType>
 [[nodiscard]] float32 Atan2(float32 y, float32 x) noexcept;
 [[nodiscard]] float64 Atan2(float64 y, float64 x) noexcept;
 
+// Trusted libm wrappers. Callers validate their domain/range at ingress.
+[[nodiscard]] float64 Exp(float64 value) noexcept;
+[[nodiscard]] float64 Floor(float64 value) noexcept;
+[[nodiscard]] float64 Ceil(float64 value) noexcept;
+
 // --- Interpolation ----------------------------------------------------------
 // Lerp is UNCLAMPED and preserves exactly a at t=0 and b at t=1 for finite
 // inputs (it is not the naive a + t*(b-a), which loses the b endpoint). t

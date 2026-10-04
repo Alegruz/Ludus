@@ -120,6 +120,7 @@ add_subdirectory(modules/gameplay/world)
 # FoundationMath depends only on FoundationBase. It is added before any consumer
 # and outside the native-only branch so native and browser targets share it.
 add_subdirectory(modules/foundation/math)
+add_subdirectory(modules/physics/fluid)
 add_subdirectory(modules/foundation/time)
 add_subdirectory(modules/foundation/logging)
 add_subdirectory(modules/foundation/profiling)
@@ -161,6 +162,7 @@ if(EMSCRIPTEN)
         add_subdirectory(tools/web-platform-probe)
         add_subdirectory(tools/web-foundation-probe)
         add_subdirectory(tools/web-math-probe)
+        add_subdirectory(tools/web-fluid-probe)
         add_subdirectory(tools/web-observability-probe)
     endif()
     if(LUDUS_BUILD_SMOKE_APP)
@@ -232,7 +234,7 @@ write_basic_package_version_file(
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationMath FoundationTime FoundationLogging
-    FoundationProfiling Input Audio Content AudioContent GameplayWorld GameApi)
+    FoundationProfiling Input Audio Content AudioContent GameplayWorld GameApi PhysicsFluid)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()

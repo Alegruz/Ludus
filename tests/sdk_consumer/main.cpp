@@ -25,6 +25,7 @@
 int ExerciseInstalledWorld() noexcept;
 bool ExerciseInstalledStrings() noexcept;
 int ExerciseInstalledTime() noexcept;
+bool ExerciseInstalledFluid() noexcept;
 
 static_assert(ludus::foundation::kTarget.PointerBits == sizeof(void*) * 8);
 static_assert(ludus::foundation::kTarget.Os == ludus::foundation::TargetOs::Linux);
@@ -200,6 +201,10 @@ static_assert(PrimitiveContract());
 
 int main()
 {
+    if (!ExerciseInstalledFluid())
+    {
+        return 10;
+    }
     if (!ExerciseInstalledStrings())
     {
         return 9;

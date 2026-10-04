@@ -164,3 +164,8 @@ The [game world architecture](docs/architecture/game-world.md) covers level data
 entity storage and updates. `Ludus::GameplayWorld` implements its identity/storage
 baseline; the optional [reference game](apps/world_demo/README.md) demonstrates
 editable levels, fixed ticks, transactional loading and native/browser rendering.
+
+The [CPU fluid field](docs/architecture/fluid-field.md) is exported as
+`Ludus::PhysicsFluid` for native and browser SDK consumers. It supplies bounded
+shallow-water stepping, solid masks, momentum strokes, pressure forcing and
+surface/velocity samples; Sandbox owns the sea sources and gameplay adapter.

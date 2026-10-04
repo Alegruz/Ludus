@@ -51,7 +51,11 @@ packing guarantee.
 | Installed SDK dependency closure and consumer build failures | Ludus packaging when independently reproduced |
 | Optional native module reload and editor services | Existing GameHost work, with a separate Sandbox adapter |
 
-Do not add an engine Water, Boat, Ripple, Dock, or game-specific current API.
+The subsequent [CPU fluid field](fluid-field.md) supplies reusable grid
+simulation through `Ludus::PhysicsFluid`. Sandbox retains authored wind modes,
+splash lifetimes, rock-to-mask conversion, boat response and shader extraction.
+This extends the original boundary with a generic numerical module; do not add
+engine Boat, Ripple, Dock, or game-specific current APIs.
 Use bounded game records for one boat and small rock/ripple pools. The
 [game world proposal](game-world.md) supplies ownership/update guidance; the jam
 slice need not wait for generic entity storage, jobs, or a complete ECS.
