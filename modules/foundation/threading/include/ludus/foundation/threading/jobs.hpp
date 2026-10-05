@@ -103,7 +103,7 @@ private:
 // and Cancel may be called concurrently, while the system remains initialized.
 // One graph may be in flight per system; unrelated systems have independent pools.
 // Callbacks must run to completion, never block on jobs/I/O, and never call a
-// system lifecycle method. Wait helps only when explicitly requested.
+// system lifecycle method. Wait helps by default; pass false to only wait.
 class JobSystem final
 {
 public:

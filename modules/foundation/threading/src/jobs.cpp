@@ -5,6 +5,16 @@
 #include <atomic>
 #include <new>
 
+// Thanks to Julien Hamaide, "Multithread Job and Dependency System," Game
+// Programming Gems 7, ch. 1.9, pp. 87-96, for dependency counters and versioned
+// identity; Brad Werth, "Holistic Task Parallelism for Common Game Architecture
+// Patterns," Game Engine Gems 1, ch. 22, pp. 381-390, for continuations/helping;
+// and Jean-François Dubé, "Efficient and Scalable Multi-Core Programming," Game
+// Programming Gems 8, ch. 4.3, pp. 373-384, for sleeping workers and allocation
+// discipline. This implementation uses a bounded gate-protected queue and C++23
+// publication, with distinct failure/cancellation outcomes, rather than their
+// historical volatile/spinning examples. Independently written code; full source
+// review and departures: docs/architecture/threading.md.
 namespace ludus::foundation::threading
 {
 namespace detail

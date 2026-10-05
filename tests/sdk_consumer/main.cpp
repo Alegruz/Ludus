@@ -24,6 +24,7 @@
 
 int ExerciseInstalledWorld() noexcept;
 int ExerciseInstalledUi() noexcept;
+int ExerciseInstalledContainers() noexcept;
 int ExerciseInstalledFilesystem() noexcept;
 bool ExerciseInstalledStrings() noexcept;
 int ExerciseInstalledTime() noexcept;
@@ -217,6 +218,10 @@ int main()
         return 8;
     }
     if (const int result = ExerciseInstalledFilesystem(); result != 0)
+    {
+        return result;
+    }
+    if (const int result = ExerciseInstalledContainers(); result != 0)
     {
         return result;
     }

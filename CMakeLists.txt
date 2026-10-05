@@ -118,6 +118,7 @@ add_subdirectory(modules/foundation/strings)
 add_subdirectory(modules/foundation/containers)
 add_subdirectory(modules/foundation/filesystem)
 add_subdirectory(modules/foundation/threading)
+add_subdirectory(tools/container-bench)
 add_subdirectory(modules/gameplay/world)
 # FoundationMath depends only on FoundationBase. It is added before any consumer
 # and outside the native-only branch so native and browser targets share it.

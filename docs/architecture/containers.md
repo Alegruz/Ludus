@@ -1,5 +1,9 @@
 # Ludus Core Containers — Static and Dynamic Array Design
 
+> For the broader family, lookup contracts and staged implementation, see
+> [Container systems](container-systems.md). That design supersedes the
+> historical future taxonomy in §26; §34 remains authoritative for the arrays.
+>
 > Status: **Implemented and fully migrated.** This document began as the design/
 > architecture deliverable; the containers have since been implemented, tested,
 > benchmarked, and the entire first-party codebase migrated onto them. As of the

@@ -85,6 +85,31 @@ TEST_CASE("generation service storage survives ownership moves", "[reload][servi
     REQUIRE(active.OutstandingAllocations() == 0);
 }
 
+TEST_CASE("resource bindings survive staging and revoke on retirement", "[reload][services]")
+{
+    HostServiceProvider active;
+    REQUIRE(active.IsValid());
+    REQUIRE(active.PrepareResource(30));
+    REQUIRE(active.SetResource(30, 300));
+    REQUIRE(active.SetResource(10, 100));
+    const auto& services = active.Services();
+    REQUIRE(services.ResolveResource(services.Context, 30) == 300);
+    REQUIRE(services.ResolveResource(services.Context, 20) == 0);
+    REQUIRE(active.SetResource(30, 301));
+    HostServiceProvider staging;
+    REQUIRE(staging.CopyResourcesFrom(active));
+    REQUIRE(staging.SetResource(30, 900));
+    REQUIRE(services.ResolveResource(services.Context, 30) == 301);
+    const auto& candidate = staging.Services();
+    REQUIRE(candidate.ResolveResource(candidate.Context, 10) == 100);
+    REQUIRE(candidate.ResolveResource(candidate.Context, 30) == 900);
+    active.Retire();
+    REQUIRE(services.ResolveResource(services.Context, 30) == 0);
+    REQUIRE_FALSE(active.SetResource(30, 302));
+    REQUIRE_FALSE(active.PrepareResource(30));
+    REQUIRE_FALSE(active.CopyResourcesFrom(staging));
+}
+
 TEST_CASE("work leases are gated and survive service ownership moves", "[reload][services]")
 {
     HostServiceProvider services;

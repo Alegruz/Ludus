@@ -409,20 +409,13 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] ElementType* TryAddInPlace(Args&&... args)
+    [[nodiscard]] ElementType*
+    TryAddInPlace(Args&&... args) noexcept(std::is_nothrow_constructible_v<ElementType, Args...> &&
+                                           std::is_nothrow_move_constructible_v<ElementType>)
     {
         if (mSize == mCapacity)
         {
-            // Materialize from `args` before growth (self-reference safety, see
-            // AddInPlace); the local lives only in this cold branch.
-            ElementType value(static_cast<Args&&>(args)...);
-            if (!TryGrowForOne())
-            {
-                return nullptr;
-            }
-            ElementType* slot = internal::ConstructAt(mData + mSize, static_cast<ElementType&&>(value));
-            ++mSize;
-            return slot;
+            return TryInsertWithGrowth(mSize, static_cast<Args&&>(args)...);
         }
         ElementType* slot = internal::ConstructAt(mData + mSize, static_cast<Args&&>(args)...);
         ++mSize;
@@ -551,6 +544,45 @@ public:
         ++mSize;
         mData[index] = static_cast<ElementType&&>(value);
         return mData[index];
+    }
+
+    // Fallible ordered insertion. Allocate before touching arguments so OOM
+    // also preserves aliased rvalues and caller-owned move-only values.
+    [[nodiscard]] ElementType*
+    TryInsertAt(usize index, const ElementType& value) noexcept(noexcept(TryInsertAtInPlace(index, value)))
+    {
+        return TryInsertAtInPlace(index, value);
+    }
+    [[nodiscard]] ElementType*
+    TryInsertAt(usize index,
+                ElementType&& value) noexcept(noexcept(TryInsertAtInPlace(index, static_cast<ElementType&&>(value))))
+    {
+        return TryInsertAtInPlace(index, static_cast<ElementType&&>(value));
+    }
+
+    template <typename... Args>
+    [[nodiscard]] ElementType*
+    TryInsertAtInPlace(usize index, Args&&... args) noexcept(std::is_nothrow_constructible_v<ElementType, Args...> &&
+                                                             std::is_nothrow_move_constructible_v<ElementType> &&
+                                                             std::is_nothrow_move_assignable_v<ElementType>)
+    {
+        LUDUS_ASSERT(index <= mSize);
+        if (mSize == mCapacity)
+        {
+            return TryInsertWithGrowth(index, static_cast<Args&&>(args)...);
+        }
+        else if (index == mSize)
+        {
+            internal::ConstructAt(mData + index, static_cast<Args&&>(args)...);
+        }
+        else
+        {
+            ElementType value(static_cast<Args&&>(args)...);
+            internal::ShiftRightByOne(mData + index, mData + mSize);
+            mData[index] = static_cast<ElementType&&>(value);
+        }
+        ++mSize;
+        return mData + index;
     }
 
     // --- Misc ---------------------------------------------------------------
@@ -720,15 +752,42 @@ private:
         }
     }
 
-    // Fallible growth for one more element.
-    [[nodiscard]] bool TryGrowForOne()
+    // Caller requires growth. Keep this separate from the in-buffer shift:
+    // append supports move-constructible elements without move assignment.
+    template <typename... Args>
+    [[nodiscard]] ElementType*
+    TryInsertWithGrowth(usize index, Args&&... args) noexcept(std::is_nothrow_constructible_v<ElementType, Args...> &&
+                                                              std::is_nothrow_move_constructible_v<ElementType>)
     {
-        const usize newCap = detail::ComputeGrowthCapacity(mCapacity, mCapacity + 1, kElementSize);
-        if (newCap == 0)
+        const usize newCapacity = detail::ComputeGrowthCapacity(mCapacity, mSize + 1, kElementSize);
+        if (newCapacity == 0)
         {
-            return false;
+            return nullptr;
         }
-        return ReallocateTo(newCap);
+        ElementType* newData = AllocateStorage(newCapacity);
+        if (newData == nullptr)
+        {
+            return nullptr;
+        }
+        // Arguments can borrow from the old block. Construct before any
+        // relocation consumes them, including insertion at either end.
+        internal::ConstructAt(newData + index, static_cast<Args&&>(args)...);
+        if (index != 0)
+        {
+            internal::UninitializedRelocate(newData, mData, index);
+        }
+        if (index != mSize)
+        {
+            internal::UninitializedRelocate(newData + index + 1, mData + index, mSize - index);
+        }
+        if (mData != nullptr)
+        {
+            FreeStorageBytes(mData, mCapacity);
+        }
+        mData = newData;
+        mCapacity = newCapacity;
+        ++mSize;
+        return mData + index;
     }
 
     // Resize implementation shared by Resize/TryResize. `fill` is nullptr for
