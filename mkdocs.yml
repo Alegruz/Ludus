@@ -66,6 +66,7 @@ nav:
       - Editor workspace: guides/editor.md
       - Build, run and debug: guides/build-and-debug.md
       - Repair project setup: guides/project-setup.md
+      - Platform targets and compatibility: guides/platform-targets.md
       - Engine configuration: guides/configuration.md
       - Deterministic randomness: guides/randomness.md
       - Audio workflow: guides/audio.md
