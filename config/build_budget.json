@@ -95,7 +95,7 @@
   ],
   "preset": "linux-clang-development",
   "default_header_avg_ms": 2000,
-  "total_frontend_seconds": 210,
+  "total_frontend_seconds": 260,
   "header_overrides_avg_ms": {
     "modules/foundation/logging/src/internal/backend.hpp": 4000
   },
@@ -116,5 +116,22 @@
     "source, test, or profile input is excluded. Evidence and CI links are in",
     "docs/development/build-profiling.md, Audio content CI calibration.",
     "Re-measure the next CI profile and tighten this aggregate when justified."
+  ],
+  "$network_core_note": [
+    "The combined graph at PR #82 includes the modules merged since the audio",
+    "content calibration plus four NetworkCore implementation translation units",
+    "and one Catch2 test translation unit. The ubuntu-24.04 CI profile with",
+    "pinned Clang 18 and two uncached jobs measured 214.6 s summed frontend",
+    "parsing over 419 compilation events (run 37256537947, job 111594875472).",
+    "The prior calibration measured 174.3 s over 336 events. Separate runs do",
+    "not isolate the networking cost or establish a performance regression.",
+    "Every reported project header passed its existing limit: audio_types.h",
+    "165 ms, core.h 43 ms, audio_system.h 148 ms. New networking public headers",
+    "include fixed-width types and span only, with no heavy STL includes.",
+    "Recalibrate only the aggregate from 210 to 260 s, approximately 21%",
+    "headroom over the measured complete graph, matching the previous ~20%.",
+    "Keep per-header limits, overrides, profile inputs and tests unchanged.",
+    "Evidence: docs/development/build-profiling.md, Network core CI calibration.",
+    "Re-measure in CI and tighten when repeated comparable profiles justify it."
   ]
 }
