@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Check the built wiki's links/assets and search destinations before publishing.
+
+MkDocs checks Markdown inputs; this complementary pass checks rendered output
+at the configured project-site base path. Third-party sites are not crawled.
+"""
+from __future__ import annotations
+
+import argparse
+from html.parser import HTMLParser
+import json
+from pathlib import Path
+import sys
+from urllib.parse import unquote, urljoin, urlsplit
+
+import yaml
+
+
+class Page(HTMLParser):
+    def __init__(self, text):
+        super().__init__(convert_charrefs=True)
+        self.anchors = set()
+        self.links = []
+        self.feed(text)
+
+    def handle_starttag(self, tag, attrs):
+        for key, value in attrs:
+            if value is None:
+                continue
+            if key == "id" or (tag == "a" and key == "name"):
+                self.anchors.add(value)
+            if key == "href" or (key == "src" and tag in {"img", "script", "iframe", "source"}):
+                self.links.append(value)
+
+
+def check(root, site, config):
+    base = config["site_url"].rstrip("/") + "/"
+    base_parts = urlsplit(base)
+    repo_parts = urlsplit(config["repo_url"].rstrip("/"))
+    failures = []
+    if not (site / "index.html").is_file():
+        return ["Missing built index.html; run mkdocs build --strict first"]
+    for path in site.rglob("*"):
+        if path.is_symlink():
+            failures.append(f"Symlink in site artifact: {path.relative_to(site)}")
+    pages = {
+        path.relative_to(site).as_posix(): Page(path.read_text(encoding="utf-8"))
+        for path in site.rglob("*.html") if not path.is_symlink()
+    }
+
+    def destination(value, origin):
+        if not value or value.startswith(("mailto:", "tel:", "data:")):
+            return
+        parts = urlsplit(urljoin(base + origin, value))
+        if parts.netloc == repo_parts.netloc and parts.path.startswith(repo_parts.path + "/"):
+            remainder = parts.path[len(repo_parts.path) + 1:].split("/", 2)
+            if len(remainder) == 3 and remainder[0] in {"blob", "tree", "edit"} and remainder[1] == "main":
+                source = root / unquote(remainder[2])
+                if not source.resolve().is_relative_to(root) or not source.exists():
+                    failures.append(f"{origin}: missing repository source {value}")
+            return
+        if parts.netloc != base_parts.netloc:
+            return
+        decoded = unquote(parts.path)
+        if not decoded.startswith(base_parts.path):
+            failures.append(f"{origin}: link escapes project-site base path: {value}")
+            return
+        relative = decoded[len(base_parts.path):]
+        target = site / relative
+        if not target.resolve().is_relative_to(site):
+            failures.append(f"{origin}: link escapes site artifact: {value}")
+            return
+        if target.is_dir():
+            target = target / "index.html"
+        if not target.is_file():
+            failures.append(f"{origin}: missing local destination {value}")
+            return
+        fragment = unquote(parts.fragment)
+        target_page = pages.get(target.relative_to(site).as_posix())
+        if fragment and target_page is not None and fragment not in target_page.anchors:
+            failures.append(f"{origin}: missing anchor {value}")
+        return target.relative_to(site).as_posix()
+
+    for path, page in pages.items():
+        for value in page.links:
+            destination(value, path)
+    try:
+        search = json.loads((site / "search/search_index.json").read_text(encoding="utf-8"))
+        documents = search["docs"]
+        if not isinstance(documents, list) or not documents:
+            failures.append("Empty or invalid search index")
+        else:
+            indexed = set()
+            for document in documents:
+                location = document["location"]
+                if not isinstance(location, str):
+                    failures.append("Invalid search destination")
+                    continue
+                # MkDocs represents the site's home page with an empty URL.
+                target = destination(location or ".", "index.html")
+                if target is not None:
+                    indexed.add(target)
+            for missing in sorted(pages.keys() - {"404.html"} - indexed):
+                failures.append(f"Page missing from search index: {missing}")
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        failures.append(f"Invalid search index: {error}")
+    return failures
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
+    args = parser.parse_args()
+    root = args.root.resolve()
+    try:
+        config = yaml.safe_load((root / "mkdocs.yml").read_text(encoding="utf-8"))
+        failures = check(root, (root / config["site_dir"]).resolve(), config)
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as error:
+        failures = [str(error)]
+    if failures:
+        for failure in failures:
+            print(f"Wiki check: {failure}", file=sys.stderr)
+        return 1
+    print("Wiki artifact, local links/assets, source references and search destinations passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
