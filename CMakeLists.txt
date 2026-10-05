@@ -143,6 +143,7 @@ add_subdirectory(third_party/miniaudio)
 # for both native and web targets (same production renderer; design section 1).
 add_subdirectory(modules/audio)
 add_subdirectory(third_party/yyjson)
+add_subdirectory(modules/foundation/parsing)
 add_subdirectory(modules/content)
 add_subdirectory(modules/audio/content)
 
@@ -238,7 +239,7 @@ write_basic_package_version_file(
 # --- Redistributable dependency inventory (P02/P03/P11) ----------------------
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
-    FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationMath FoundationTime FoundationLogging
+    FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationTime FoundationLogging
     FoundationProfiling Input Audio Content AudioContent GameplayWorld GameApi PhysicsFluid Ui)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})

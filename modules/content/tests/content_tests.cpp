@@ -143,3 +143,76 @@ TEST_CASE("Filesystem-backed content reads preserve capped failures and empty da
     REQUIRE(reader.Seek(-9223372036854775807LL - 1, true) == Status::Invalid);
     std::filesystem::remove_all(directory);
 }
+
+TEST_CASE("Content JSON adapter preserves document limits and numeric behavior", "[content][parsing]")
+{
+    Diagnostic diagnostic;
+    JsonDocument document;
+    REQUIRE(document.Read({}, diagnostic) == Status::Limit);
+    REQUIRE(document.Read(R"({"a":1,"\u0061":2})", diagnostic) == Status::Invalid);
+    REQUIRE(document.Root().Value == nullptr);
+    REQUIRE(document.Read("{", diagnostic) == Status::Invalid);
+    REQUIRE(document.Root().Value == nullptr);
+    const std::string exact = std::string(32, '[') + "0" + std::string(32, ']');
+    REQUIRE(document.Read("[" + exact + "]", diagnostic) == Status::Invalid);
+    REQUIRE(document.Root().Value == nullptr);
+    REQUIRE(document.Read(exact, diagnostic) == Status::Ok);
+    const auto root = document.Root();
+    REQUIRE(document.Read("0", diagnostic) == Status::Limit);
+    REQUIRE(document.Root().Value == root.Value);
+
+    JsonDocument members;
+    std::string object = "{";
+    for (usize i = 0; i < 33; ++i)
+    {
+        if (i != 0)
+        {
+            object += ',';
+        }
+        object += '"';
+        object += std::to_string(i);
+        object += "\":0";
+    }
+    object += '}';
+    REQUIRE(members.Read(object, diagnostic) == Status::Invalid);
+    REQUIRE(members.Root().Value == nullptr);
+    object = object.substr(0, object.rfind(',')) + '}';
+    REQUIRE(members.Read(object, diagnostic) == Status::Ok);
+
+    JsonDocument numbers;
+    REQUIRE(numbers.Read("[18446744073709551615,18446744073709551616,-1,1.0]", diagnostic) == Status::Ok);
+    uint64 number = 7;
+    REQUIRE(numbers.Root().At(0).Integer(number));
+    REQUIRE(number == ~uint64{0});
+    REQUIRE_FALSE(numbers.Root().At(1).Integer(number));
+    REQUIRE_FALSE(numbers.Root().At(2).Integer(number));
+    REQUIRE_FALSE(numbers.Root().At(3).Integer(number));
+    float64 real = 0;
+    REQUIRE(numbers.Root().At(1).Number(real));
+}
+
+TEST_CASE("Content JSON canonical output and failed writes preserve the caller", "[content][parsing]")
+{
+    uint8 storage[128]{};
+    JsonWriter writer(storage);
+    writer.Raw("{\"s\":");
+    writer.String("a\n\"\\");
+    writer.Raw(",\"n\":");
+    writer.Number(1.25);
+    writer.Raw(",\"b\":");
+    writer.Boolean(false);
+    writer.Raw("}");
+    Bytes output;
+    REQUIRE(writer.Finish(output) == Status::Ok);
+    REQUIRE(output.String() == "{\"s\":\"a\\u000a\\\"\\\\\",\"n\":1.25,\"b\":false}\n");
+    REQUIRE(writer.Finish(output) == Status::Ok);
+    REQUIRE(output.String().back() == '\n');
+    JsonWriter tooSmall(std::span<uint8>{storage, 1});
+    tooSmall.Integer(1);
+    REQUIRE(tooSmall.Finish(output) == Status::Limit);
+    REQUIRE(output.String().starts_with("{\"s\":"));
+    JsonWriter invalid(storage);
+    invalid.String("\xff");
+    REQUIRE(invalid.Finish(output) == Status::Limit);
+    REQUIRE(output.String().starts_with("{\"s\":"));
+}
