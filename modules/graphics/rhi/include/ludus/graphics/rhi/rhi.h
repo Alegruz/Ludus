@@ -24,7 +24,7 @@ enum class Backend : ludus::foundation::uint8
     WebGPU,
     WebGL2
 };
-// Browser backend policy. Native always selects Vulkan and ignores this.
+// Browser backend policy. Native accepts only Auto (Vulkan).
 // Auto attempts WebGPU (including its compatibility retry) and, only on a
 // capability/startup failure, makes exactly one WebGL 2 attempt. A forced
 // selection fails explicitly rather than silently switching backends.
@@ -54,6 +54,8 @@ enum class StartupError : ludus::foundation::uint8
     Validation,
     DeviceLost,
     GenerationExhausted,
+    BackendUnavailable,
+    RequirementsUnsatisfied,
 };
 enum class StartStatus : ludus::foundation::uint8
 {
@@ -79,6 +81,33 @@ struct AttemptInfo final
     bool Attempted = false;
     StartupError Error = StartupError::None;
 };
+// Effective limits of the implemented fullscreen API, not raw adapter limits.
+// Available only while Ready; zero in all other states. Sizes are bytes.
+// A dimension limit is an upper bound, not a reservation or surface guarantee.
+struct DeviceCapabilities final
+{
+    ludus::foundation::uint32 MaxFrameDimension2D = 0;
+    ludus::foundation::uint32 MaxUniformBufferSize = 0;
+    ludus::foundation::uint32 UniformBufferSizeAlignment = 0;
+    ludus::foundation::uint32 MaxShaders = 0;
+    ludus::foundation::uint32 MaxUniformBuffers = 0;
+    ludus::foundation::uint32 MaxPipelines = 0;
+    ludus::foundation::uint32 MaxDrawsPerFrame = 0;
+};
+// Copied at Start; zero imposes no additional requirement. Negotiation completes
+// before Ready and before callers can create resources. Auto checks every attempt.
+// Validates enabled limits; this slice retains WebGPU's default device policy.
+struct DeviceRequirements final
+{
+    ludus::foundation::uint32 MinFrameDimension2D = 0;
+    ludus::foundation::uint32 MinUniformBufferSize = 0;
+};
+enum class RequirementFailure : ludus::foundation::uint8
+{
+    None,
+    FrameDimension2D,
+    UniformBufferSize,
+};
 struct StartupInfo final
 {
     // The backend actually selected for this session (not merely requested).
@@ -89,13 +118,21 @@ struct StartupInfo final
     BackendSelection Requested = BackendSelection::Auto;
     AttemptInfo WebGpu;
     AttemptInfo WebGL2;
+    DeviceCapabilities Capabilities;
+    DeviceRequirements Requirements;
+    // First unmet requirement of the final attempt; None for other failures.
+    RequirementFailure UnmetRequirement = RequirementFailure::None;
 };
 // Duplicate Start is Busy until Shutdown, including failed/lost sessions.
 // The two-argument form selects Auto on the browser and Vulkan natively.
 [[nodiscard]] StartStatus Start(const ApplicationInfo& appInfo, const WindowInfo& windowInfo) noexcept;
-// Explicit browser backend selection. Native ignores the selection (Vulkan).
+// Explicit browser backend selection. Native rejects forced browser backends.
 [[nodiscard]] StartStatus
 Start(const ApplicationInfo& appInfo, const WindowInfo& windowInfo, BackendSelection selection) noexcept;
+[[nodiscard]] StartStatus Start(const ApplicationInfo& appInfo,
+                                const WindowInfo& windowInfo,
+                                BackendSelection selection,
+                                const DeviceRequirements& requirements) noexcept;
 [[nodiscard]] StartupInfo GetStartup() noexcept;
 // Surface settings for the next frame. Zero dimensions skip acquisition.
 // Call only between frames after Ready; dimensions must fit negotiated limits.

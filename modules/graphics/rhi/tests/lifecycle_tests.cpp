@@ -4,6 +4,7 @@
 #include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>
 
+#include <initializer_list>
 #include <span>
 
 #include <catch2/catch_test_macros.hpp>
@@ -15,13 +16,14 @@ uint32 ShutdownCount = 0;
 StartupError ImmediateError = StartupError::None;
 FrameStatus NextFrame = FrameStatus::Ready;
 Backend ActiveKind = Backend::WebGPU;
+bool SelectionSupported = true;
 Backend Kind() noexcept
 {
     return ActiveKind;
 }
 bool Supports(BackendSelection) noexcept
 {
-    return true;
+    return SelectionSupported;
 }
 StartupError Start(const ApplicationInfo&, const WindowInfo&, uint32 token, BackendSelection) noexcept
 {
@@ -82,10 +84,10 @@ TEST_CASE("RHI pending requests are nonblocking and invalidated across restart",
     REQUIRE(Start({}, {}) == StartStatus::Pending);
     const auto current = backend::PendingToken;
     CHECK(current != old);
-    internal::Complete(old, StartupError::None, 999);
+    internal::Complete(old, StartupError::None, { .MaxFrameDimension2D = 999, .MaxUniformBufferSize = 16384 });
     internal::Fail(old, StartupError::DeviceLost);
     CHECK(GetStartup().State == StartupState::Pending);
-    internal::Complete(current, StartupError::None, 4096);
+    internal::Complete(current, StartupError::None, { .MaxFrameDimension2D = 4096, .MaxUniformBufferSize = 16384 });
     CHECK(GetStartup().State == StartupState::Ready);
     CHECK(GetStartup().MaxTextureDimension2D == 4096);
     CHECK(Start({}, {}) == StartStatus::Busy);
@@ -96,7 +98,7 @@ TEST_CASE("RHI pending requests are nonblocking and invalidated across restart",
     internal::Fail(current, StartupError::DeviceLost);
     CHECK(GetStartup().State == StartupState::DeviceLost);
     CHECK(BeginFrameStatus() == FrameStatus::NotReady);
-    internal::Complete(current, StartupError::None, 8192);
+    internal::Complete(current, StartupError::None, { .MaxFrameDimension2D = 8192, .MaxUniformBufferSize = 16384 });
     CHECK(GetStartup().State == StartupState::DeviceLost);
     Shutdown();
 }
@@ -114,7 +116,7 @@ TEST_CASE("RHI request failures remain explicit and require shutdown before retr
         backend::ImmediateError = StartupError::None;
         REQUIRE(Start({}, {}) == StartStatus::Pending);
         const auto token = backend::PendingToken;
-        internal::Complete(token, error, 0);
+        internal::Complete(token, error, { .MaxFrameDimension2D = 0, .MaxUniformBufferSize = 16384 });
         CHECK(GetStartup().State == StartupState::Failed);
         CHECK(GetStartup().Error == error);
         CHECK_FALSE(internal::Current(token));
@@ -135,7 +137,9 @@ TEST_CASE("Skipped RHI frames never open a frame and targets cannot change durin
     backend::ImmediateError = StartupError::None;
     CHECK(SetFrameTarget({}) == FrameStatus::NotReady);
     REQUIRE(Start({}, {}) == StartStatus::Pending);
-    internal::Complete(backend::PendingToken, StartupError::None, 4096);
+    internal::Complete(backend::PendingToken,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = 4096, .MaxUniformBufferSize = 16384 });
     backend::NextFrame = FrameStatus::Skipped;
     CHECK(SetFrameTarget({}) == FrameStatus::Ready);
     CHECK(BeginFrameStatus() == FrameStatus::Skipped);
@@ -207,7 +211,9 @@ TEST_CASE("Public resources reject pending, stale and incomplete draws across se
     backend::ImmediateError = StartupError::None;
     backend::NextFrame = FrameStatus::Ready;
     REQUIRE(Start({}, {}) == StartStatus::Pending);
-    internal::Complete(backend::PendingToken, StartupError::None, 4096);
+    internal::Complete(backend::PendingToken,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = 4096, .MaxUniformBufferSize = 16384 });
     ShaderHandle vertex, fragment;
     UniformHandle uniform;
     PipelineHandle pipeline;
@@ -304,7 +310,9 @@ TEST_CASE("Public resource failure releases partial backend allocations and capa
     Shutdown();
     backend::ImmediateError = StartupError::None;
     REQUIRE(Start({}, {}) == StartStatus::Pending);
-    internal::Complete(backend::PendingToken, StartupError::None, 4096);
+    internal::Complete(backend::PendingToken,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = 4096, .MaxUniformBufferSize = 16384 });
     UniformHandle handles[internal::RESOURCE_CAPACITY];
     backend::NextResource = ResourceStatus::Failed;
     const auto released = backend::Released;
@@ -329,7 +337,9 @@ TEST_CASE("Public resource failure releases partial backend allocations and capa
     }
     Shutdown();
     REQUIRE(Start({}, {}) == StartStatus::Pending);
-    internal::Complete(backend::PendingToken, StartupError::None, 4096);
+    internal::Complete(backend::PendingToken,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = 4096, .MaxUniformBufferSize = 16384 });
     REQUIRE(CreateUniform(16, overflow) == ResourceStatus::Ready);
     CHECK(GetStatus(handles[0]) == ResourceStatus::InvalidHandle);
     backend::NextResource = ResourceStatus::Pending;
@@ -360,7 +370,7 @@ TEST_CASE("Fallback generations isolate stale callbacks and retain both attempt 
             return false;
         }
         internal::SelectBackend(next, Backend::WebGL2);
-        internal::Complete(next, StartupError::None, 2048);
+        internal::Complete(next, StartupError::None, { .MaxFrameDimension2D = 2048, .MaxUniformBufferSize = 16384 });
         return true;
     });
     internal::Fail(old, StartupError::AdapterUnavailable);
@@ -372,7 +382,7 @@ TEST_CASE("Fallback generations isolate stale callbacks and retain both attempt 
     CHECK(GetStartup().WebGL2.Error == StartupError::None);
     CHECK_FALSE(internal::Current(old));
     internal::Fail(old, StartupError::DeviceLost);
-    internal::Complete(old, StartupError::None, 9999);
+    internal::Complete(old, StartupError::None, { .MaxFrameDimension2D = 9999, .MaxUniformBufferSize = 16384 });
     CHECK(GetStartup().State == StartupState::Ready);
     CHECK(GetStartup().MaxTextureDimension2D == 2048);
     backend::ActiveKind = Backend::WebGL2;
@@ -421,7 +431,9 @@ TEST_CASE("Two failed attempts finalize without recursive fallback", "[rhi][life
     Shutdown();
     REQUIRE(Start({}, {}, BackendSelection::WebGPU) == StartStatus::Pending);
     CHECK(GetStartup().Requested == BackendSelection::WebGPU);
-    internal::Complete(backend::PendingToken, StartupError::None, 4096);
+    internal::Complete(backend::PendingToken,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = 4096, .MaxUniformBufferSize = 16384 });
     internal::SetFallback([](ludus::foundation::uint32, StartupError) noexcept { return true; });
     // A ready session never hides loss behind a startup fallback, even when a
     // handler is installed. Shutdown clears it before the next session.
@@ -436,7 +448,9 @@ TEST_CASE("Public uniforms admit the portable 16 KiB limit and reject larger pay
     backend::ImmediateError = StartupError::None;
     backend::NextResource = ResourceStatus::Ready;
     REQUIRE(Start({}, {}) == StartStatus::Pending);
-    internal::Complete(backend::PendingToken, StartupError::None, 4096);
+    internal::Complete(backend::PendingToken,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = 4096, .MaxUniformBufferSize = 16384 });
     UniformHandle uniform;
     CHECK(CreateUniform(16385, uniform) == ResourceStatus::InvalidDescription);
     CHECK(CreateUniform(16400, uniform) == ResourceStatus::InvalidDescription);
@@ -445,5 +459,164 @@ TEST_CASE("Public uniforms admit the portable 16 KiB limit and reject larger pay
     CHECK(UpdateUniform(uniform, std::span(bytes).first(16368)) == ResourceStatus::InvalidDescription);
     CHECK(UpdateUniform(uniform, bytes) == ResourceStatus::Ready);
     CHECK(Destroy(uniform) == ResourceStatus::Ready);
+    Shutdown();
+}
+
+TEST_CASE("Negotiated capabilities bound resources and expire with the session", "[rhi][capabilities]")
+{
+    Shutdown();
+    backend::ImmediateError = StartupError::None;
+    backend::NextResource = ResourceStatus::Ready;
+    CHECK(GetStartup().Capabilities.MaxShaders == 0);
+    REQUIRE(Start({}, {}) == StartStatus::Pending);
+    CHECK(GetStartup().Capabilities.MaxUniformBufferSize == 0);
+    internal::Complete(backend::PendingToken,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = 2048, .MaxUniformBufferSize = 79 });
+    const auto caps = GetStartup().Capabilities;
+    REQUIRE(GetStartup().State == StartupState::Ready);
+    CHECK(caps.MaxFrameDimension2D == 2048);
+    CHECK(caps.MaxUniformBufferSize == 64);
+    CHECK(caps.UniformBufferSizeAlignment == 16);
+    CHECK(caps.MaxShaders == 8);
+    CHECK(caps.MaxUniformBuffers == 8);
+    CHECK(caps.MaxPipelines == 8);
+    CHECK(caps.MaxDrawsPerFrame == 1);
+    CHECK(SetFrameTarget({ .Width = 2049, .Height = 1 }) == FrameStatus::Failed);
+    CHECK(SetFrameTarget({ .Width = 1, .Height = 2049 }) == FrameStatus::Failed);
+    CHECK(SetFrameTarget({ .Width = 2048, .Height = 2048 }) == FrameStatus::Ready);
+    UniformHandle uniform;
+    CHECK(CreateUniform(80, uniform) == ResourceStatus::InvalidDescription);
+    CHECK(GetStatus(uniform) == ResourceStatus::InvalidHandle);
+    ShaderDescription description;
+    description.Wgsl = "shader";
+    description.WgslEntry = "main";
+    description.UniformSize = 65;
+    ShaderHandle shader;
+    CHECK(CreateShader(description, shader) == ResourceStatus::InvalidDescription);
+    description.UniformSize = 64;
+    REQUIRE(CreateShader(description, shader) == ResourceStatus::Ready);
+    REQUIRE(CreateUniform(64, uniform) == ResourceStatus::Ready);
+    internal::Fail(backend::PendingToken, StartupError::DeviceLost);
+    CHECK(GetStartup().Capabilities.MaxUniformBufferSize == 0);
+    CHECK(GetStartup().Capabilities.MaxFrameDimension2D == 0);
+    CHECK(GetStatus(uniform) == ResourceStatus::InvalidHandle);
+    Shutdown();
+    CHECK(GetStartup().Capabilities.MaxDrawsPerFrame == 0);
+    REQUIRE(Start({}, {}) == StartStatus::Pending);
+    internal::Complete(backend::PendingToken,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = 4096, .MaxUniformBufferSize = 65536 });
+    CHECK(GetStartup().Capabilities.MaxUniformBufferSize == 16384);
+    Shutdown();
+}
+
+TEST_CASE("Startup copies requirements and reports the first unmet limit", "[rhi][capabilities]")
+{
+    Shutdown();
+    backend::ImmediateError = StartupError::None;
+    DeviceRequirements requirements{ .MinFrameDimension2D = 2048, .MinUniformBufferSize = 64 };
+    REQUIRE(Start({}, {}, BackendSelection::WebGPU, requirements) == StartStatus::Pending);
+    requirements = {};
+    CHECK(GetStartup().Requirements.MinFrameDimension2D == 2048);
+    // A Busy request must not mutate the in-flight negotiation.
+    CHECK(Start({}, {}, BackendSelection::Auto, {}) == StartStatus::Busy);
+    CHECK(GetStartup().Requested == BackendSelection::WebGPU);
+    internal::Complete(backend::PendingToken,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = 1024, .MaxUniformBufferSize = 32 });
+    CHECK(GetStartup().State == StartupState::Failed);
+    CHECK(GetStartup().Error == StartupError::RequirementsUnsatisfied);
+    CHECK(GetStartup().UnmetRequirement == RequirementFailure::FrameDimension2D);
+    CHECK(GetStartup().WebGpu.Error == StartupError::RequirementsUnsatisfied);
+    CHECK(GetStartup().Capabilities.MaxShaders == 0);
+    UniformHandle uniform;
+    CHECK(CreateUniform(16, uniform) == ResourceStatus::NotReady);
+    CHECK(Start({}, {}) == StartStatus::Busy);
+    Shutdown();
+    REQUIRE(Start({}, {}, BackendSelection::Auto, { .MinUniformBufferSize = 65 }) == StartStatus::Pending);
+    internal::Complete(backend::PendingToken,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = 4096, .MaxUniformBufferSize = 79 });
+    CHECK(GetStartup().UnmetRequirement == RequirementFailure::UniformBufferSize);
+    Shutdown();
+    REQUIRE(Start({}, {}, BackendSelection::Auto, { .MinFrameDimension2D = 2048, .MinUniformBufferSize = 64 }) ==
+            StartStatus::Pending);
+    internal::Complete(backend::PendingToken,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = 2048, .MaxUniformBufferSize = 64 });
+    CHECK(GetStartup().State == StartupState::Ready);
+    CHECK(GetStartup().UnmetRequirement == RequirementFailure::None);
+    Shutdown();
+}
+
+TEST_CASE("Fallback rechecks requirements and never publishes a rejected attempt", "[rhi][capabilities]")
+{
+    for (const bool meetsRequirement : {false, true})
+    {
+        Shutdown();
+        backend::ImmediateError = StartupError::None;
+        REQUIRE(Start({}, {}, BackendSelection::Auto, { .MinUniformBufferSize = 64 }) == StartStatus::Pending);
+        const auto old = backend::PendingToken;
+        internal::SetFallback([](ludus::foundation::uint32 token, StartupError error) noexcept {
+            if (GetStartup().SelectedBackend != Backend::WebGPU || error != StartupError::RequirementsUnsatisfied)
+            {
+                return false;
+            }
+            internal::RecordAttempt(token, Backend::WebGPU, error);
+            const auto next = internal::Reissue(token);
+            internal::SelectBackend(next, Backend::WebGL2);
+            backend::PendingToken = next;
+            return true;
+        });
+        internal::Complete(old, StartupError::None, { .MaxFrameDimension2D = 4096, .MaxUniformBufferSize = 32 });
+        REQUIRE(GetStartup().State == StartupState::Pending);
+        CHECK(GetStartup().Capabilities.MaxUniformBufferSize == 0);
+        CHECK(GetStartup().UnmetRequirement == RequirementFailure::None);
+        internal::Complete(old, StartupError::None, { .MaxFrameDimension2D = 8192, .MaxUniformBufferSize = 16384 });
+        CHECK(GetStartup().State == StartupState::Pending);
+        internal::Complete(backend::PendingToken,
+                           StartupError::None,
+                           { .MaxFrameDimension2D = 2048, .MaxUniformBufferSize = meetsRequirement ? 64U : 32U });
+        CHECK(GetStartup().WebGpu.Error == StartupError::RequirementsUnsatisfied);
+        CHECK(GetStartup().SelectedBackend == Backend::WebGL2);
+        CHECK(GetStartup().Requirements.MinUniformBufferSize == 64);
+        if (meetsRequirement)
+        {
+            CHECK(GetStartup().State == StartupState::Ready);
+            CHECK(GetStartup().Capabilities.MaxUniformBufferSize == 64);
+            CHECK(GetStartup().WebGL2.Error == StartupError::None);
+        }
+        else
+        {
+            CHECK(GetStartup().State == StartupState::Failed);
+            CHECK(GetStartup().WebGL2.Error == StartupError::RequirementsUnsatisfied);
+            CHECK(GetStartup().UnmetRequirement == RequirementFailure::UniformBufferSize);
+        }
+    }
+    Shutdown();
+}
+
+TEST_CASE("Invalid device limits and unavailable backends fail explicitly", "[rhi][capabilities]")
+{
+    const ludus::foundation::uint32 dimensions[] = {0, 1024};
+    const ludus::foundation::uint32 uniformSizes[] = {16384, 15};
+    for (ludus::foundation::usize i = 0; i < 2; ++i)
+    {
+        Shutdown();
+        backend::ImmediateError = StartupError::None;
+        REQUIRE(Start({}, {}) == StartStatus::Pending);
+        internal::Complete(backend::PendingToken,
+                           StartupError::None,
+                           { .MaxFrameDimension2D = dimensions[i], .MaxUniformBufferSize = uniformSizes[i] });
+        CHECK(GetStartup().State == StartupState::Failed);
+        CHECK(GetStartup().Error == StartupError::DeviceUnavailable);
+        CHECK(GetStartup().UnmetRequirement == RequirementFailure::None);
+    }
+    Shutdown();
+    backend::SelectionSupported = false;
+    CHECK(Start({}, {}, BackendSelection::WebGL2) == StartStatus::Failed);
+    CHECK(GetStartup().Error == StartupError::BackendUnavailable);
+    backend::SelectionSupported = true;
     Shutdown();
 }

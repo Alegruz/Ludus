@@ -14,6 +14,34 @@
 
 using namespace ludus::foundation;
 namespace rhi = ludus::graphics::rhi;
+TEST_CASE("Vulkan rejects requirements beyond the engine limit before exposing resources", "[rhi][gpu]")
+{
+    struct Guard final
+    {
+        ~Guard() noexcept
+        {
+            rhi::Shutdown();
+        }
+    } guard;
+    rhi::Shutdown();
+    REQUIRE(rhi::Start({},
+                       {
+                           .Width = 96,
+                           .Height = 64,
+                       },
+                       rhi::BackendSelection::Auto,
+                       {
+                           .MinUniformBufferSize = 16385,
+                       }) == rhi::StartStatus::Failed);
+    CHECK(rhi::GetStartup().Error == rhi::StartupError::RequirementsUnsatisfied);
+    CHECK(rhi::GetStartup().UnmetRequirement == rhi::RequirementFailure::UniformBufferSize);
+    CHECK(rhi::GetStartup().Capabilities.MaxUniformBufferSize == 0);
+    rhi::UniformHandle uniform;
+    CHECK(rhi::CreateUniform(16, uniform) == rhi::ResourceStatus::NotReady);
+    rhi::Shutdown();
+    REQUIRE(rhi::Start({}, { .Width = 96, .Height = 64 }) == rhi::StartStatus::Ready);
+    CHECK(rhi::GetStartup().Capabilities.MaxUniformBufferSize == 16384);
+}
 TEST_CASE("Public Vulkan resources render changing uniforms across resize and restart", "[rhi][gpu]")
 {
     struct Guard final
@@ -33,7 +61,10 @@ TEST_CASE("Public Vulkan resources render changing uniforms across resize and re
     for (usize session = 0; session < 2; ++session)
     {
         rhi::Shutdown();
-        REQUIRE(rhi::Start({}, { .Width = 96, .Height = 64 }) == rhi::StartStatus::Ready);
+        REQUIRE(rhi::Start({},
+                           { .Width = 96, .Height = 64 },
+                           rhi::BackendSelection::Auto,
+                           { .MinFrameDimension2D = 96, .MinUniformBufferSize = 48 }) == rhi::StartStatus::Ready);
         rhi::ShaderHandle vertex, fragment;
         rhi::UniformHandle uniform;
         rhi::PipelineHandle pipeline;

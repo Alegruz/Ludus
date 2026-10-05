@@ -6,6 +6,7 @@
 #include <ludus/platform/native_window.h>
 
 #include <cstdlib>
+#include <initializer_list>
 #include <type_traits>
 
 #include <catch2/catch_test_macros.hpp>
@@ -98,5 +99,17 @@ TEST_CASE("Native startup rejects invalid windows without loading a GPU", "[rhi]
     CHECK(graphics::rhi::GetStartup().State == graphics::rhi::StartupState::Failed);
     CHECK(graphics::rhi::GetStartup().Error == graphics::rhi::StartupError::InvalidWindow);
     CHECK(graphics::rhi::BeginFrameStatus() == graphics::rhi::FrameStatus::NotReady);
+    graphics::rhi::Shutdown();
+}
+
+TEST_CASE("Native startup rejects forced browser policies explicitly", "[rhi][capabilities]")
+{
+    for (const auto selection : {graphics::rhi::BackendSelection::WebGPU, graphics::rhi::BackendSelection::WebGL2})
+    {
+        graphics::rhi::Shutdown();
+        CHECK(graphics::rhi::Start({}, {}, selection) == graphics::rhi::StartStatus::Failed);
+        CHECK(graphics::rhi::GetStartup().Error == graphics::rhi::StartupError::BackendUnavailable);
+        CHECK(graphics::rhi::GetStartup().Capabilities.MaxFrameDimension2D == 0);
+    }
     graphics::rhi::Shutdown();
 }

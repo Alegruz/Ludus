@@ -157,11 +157,22 @@ StartupError Start(const ApplicationInfo&, const WindowInfo& window, uint32 toke
         gContext = 0;
         return StartupError::DeviceUnavailable;
     }
+    GLint maxUniformSize = 0;
+    glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, &maxUniformSize);
+    if (maxUniformSize < 16)
+    {
+        emscripten_webgl_destroy_context(gContext);
+        gContext = 0;
+        return StartupError::DeviceUnavailable;
+    }
     gMaxDimension = static_cast<uint32>(maxDimension);
     gSession = token;
     emscripten_set_webglcontextlost_callback(gSelector, Userdata(token), EM_FALSE, ContextLost);
     // WebGL creation is synchronous; the session is immediately usable.
-    internal::Complete(token, StartupError::None, gMaxDimension);
+    internal::Complete(
+        token,
+        StartupError::None,
+        { .MaxFrameDimension2D = gMaxDimension, .MaxUniformBufferSize = static_cast<uint32>(maxUniformSize) });
     return StartupError::None;
 }
 

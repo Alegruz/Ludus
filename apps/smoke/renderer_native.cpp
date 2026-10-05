@@ -4,6 +4,10 @@
 
 namespace ludus::smoke::renderer
 {
+graphics::rhi::DeviceRequirements Requirements() noexcept
+{
+    return { .MinFrameDimension2D = 1 };
+}
 State Prepare() noexcept
 {
     // Example: exercise the Ludus::Text CPU font API (shape + measure +

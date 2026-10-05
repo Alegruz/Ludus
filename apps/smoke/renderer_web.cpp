@@ -53,6 +53,10 @@ bool Ready(rhi::ResourceStatus status) noexcept
 }
 } // namespace
 
+graphics::rhi::DeviceRequirements Requirements() noexcept
+{
+    return { .MinFrameDimension2D = 1, .MinUniformBufferSize = sizeof(SmokeUniforms) };
+}
 State Prepare() noexcept
 {
     if (gFailed)

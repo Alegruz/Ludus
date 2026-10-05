@@ -16,6 +16,7 @@ enum class State : foundation::uint8
     Ready,
     Failed
 };
+graphics::rhi::DeviceRequirements Requirements() noexcept;
 State Prepare() noexcept;
 graphics::rhi::FrameStatus Render(const platform::browser::WindowState&, const Simulation&) noexcept;
 void Shutdown() noexcept;

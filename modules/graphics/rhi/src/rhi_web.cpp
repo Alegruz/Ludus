@@ -41,7 +41,8 @@ bool IsCapabilityFailure(StartupError error) noexcept
     // Shader/validation and invalid-call defects are never concealed by it.
     return error == StartupError::InstanceUnavailable || error == StartupError::AdapterUnavailable ||
            error == StartupError::DeviceUnavailable || error == StartupError::SurfaceUnavailable ||
-           error == StartupError::RenderingUnavailable || error == StartupError::DeviceLost;
+           error == StartupError::RenderingUnavailable || error == StartupError::DeviceLost ||
+           error == StartupError::RequirementsUnsatisfied;
 }
 
 StartupError StartWebGl(uint32 token, bool afterWebGpu) noexcept

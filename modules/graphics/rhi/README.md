@@ -2,8 +2,9 @@
 
 Link `Ludus::GraphicsRhi`. Include `<ludus/graphics/rhi/rhi.h>` for lifecycle and
 frames and `<ludus/graphics/rhi/render.h>` for the bounded fullscreen rendering
-slice. The selected private backend is Vulkan on native Linux and WebGPU through
-the pinned Emdawnwebgpu port on Emscripten. Public descriptions use engine types
+slice. The selected private backend is Vulkan on native Linux, and WebGPU or
+WebGL 2 on Emscripten. Auto uses the pinned Emdawnwebgpu port before one eligible
+WebGL 2 fallback. Public descriptions use engine types
 and opaque handles; installed consumers need no backend or private headers.
 
 The [public rendering guide](../../../docs/development/fullscreen-rendering.md)
@@ -19,7 +20,7 @@ backend state. Delayed callbacks never retain application memory or affect a new
 session. Legacy synchronous native entry points remain for compatibility; do not
 mix the two lifecycles. The resource API requires the Start lifecycle.
 
-Both backends accept `SetFrameTarget` between frames. Zero dimensions skip frame
+All backends accept `SetFrameTarget` between frames. Zero dimensions skip frame
 acquisition. `GetFrameInfo` gives the actual acquired extent and attachment
 encoding after a successful begin. Resize retains resources unless the native
 surface format changes, in which case the session fails and requires restart.
@@ -43,3 +44,27 @@ Neither compiler tools nor probe headers are installed as engine dependencies.
 Implementation files formatting VkResult use the private
 `internal/vulkan_diagnostics.h` adapter. Ordinary diagnostics use `LUDUS_LOG_*`;
 Foundation and public headers gain no Vulkan dependency from formatting.
+
+## Capability negotiation
+
+`GetStartup().Capabilities` reports effective limits of the current fullscreen
+API only while Ready. Adapter limits are clamped to the engine resource bounds;
+no general graphics/compute features are implied. The snapshot becomes zero on
+failure/loss/shutdown. `MaxFrameDimension2D` bounds requested frame dimensions;
+surface negotiation and memory availability still determine actual acquisition.
+`MaxUniformBufferSize` respects device limits and the engine's 16 KiB capacity.
+`UniformBufferSizeAlignment` is the application's size granularity, not a native
+offset alignment. Resource counts are per-kind capacities, not free-slot counts.
+
+Use `Start(app, window, selection, DeviceRequirements{...})` to require minimum
+frame dimensions or uniform bytes. Requirements are copied and checked before
+Ready and application resource creation. Existing overloads require no extra
+minima. Auto checks both backend attempts; forced selection never falls back.
+WebGPU retains its default feature/limit request policy. A minimum checks the
+enabled device, without elevating its limits to the adapter's maximum support.
+`RequirementsUnsatisfied` identifies the first unmet requirement through
+`UnmetRequirement`. Native builds accept only Auto and report
+`BackendUnavailable` for forced browser policies. Busy does not alter a session.
+
+The [architecture proposal](../../../docs/architecture/rhi-gdi.md) records the
+remaining RHI/GDI migration and the completed capability slice.

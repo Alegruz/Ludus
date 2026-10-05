@@ -8,9 +8,13 @@ namespace ludus::graphics::rhi::internal
 {
 // Numeric callback tokens never borrow application memory and never wrap.
 bool Current(ludus::foundation::uint32 token) noexcept;
-void Complete(ludus::foundation::uint32 token,
-              StartupError error,
-              ludus::foundation::uint32 maxTextureDimension) noexcept;
+// Queried backend limits; the facade applies engine capacity/size granularity.
+struct BackendLimits final
+{
+    ludus::foundation::uint32 MaxFrameDimension2D = 0;
+    ludus::foundation::uint64 MaxUniformBufferSize = 0;
+};
+void Complete(ludus::foundation::uint32 token, StartupError error, const BackendLimits& limits) noexcept;
 void Fail(ludus::foundation::uint32 token, StartupError error) noexcept;
 // Records which browser backend the dispatcher has committed to for this token
 // so GetStartup reports the actually selected backend, not merely the request.
