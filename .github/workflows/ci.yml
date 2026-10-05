@@ -153,6 +153,33 @@ jobs:
         if: always()
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
 
+  threading-races:
+    needs: formatting
+    name: Threading race detection
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/native-setup
+        with:
+          preset: linux-clang-development
+          cache-variant: threading-tsan
+          conan-cache-writer: 'false'
+      - name: Configure and build the threading kernel with TSan
+        run: |
+          out/host-tools/venv/bin/cmake --preset linux-clang-development -B out/build/threading-tsan \
+            -DLUDUS_ENABLE_TSAN=ON -DLUDUS_WARNINGS_AS_ERRORS=ON
+          out/host-tools/venv/bin/cmake --build out/build/threading-tsan --parallel 2 \
+            --target ludus_foundation_threading_tests ludus_threading_startup_tests
+      - name: Test dependencies, publication, cancellation and startup with TSan
+        run: out/host-tools/venv/bin/ctest --test-dir out/build/threading-tsan --label-regex threading --output-on-failure --no-tests=error
+      - name: Preserve race-detection diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: threading-tsan
+          path: out/build/threading-tsan/Testing/Temporary/
+          if-no-files-found: error
+
   analysis:
     needs: formatting
     name: Clang static analysis (${{ matrix.shard }})
