@@ -67,7 +67,41 @@ explains which ideas were adopted or deferred and corrects claims that would
 otherwise mislead implementation. The guide identifies shipped APIs separately
 from future policies, persistence, GPU and editor work.
 
-## 6. Measure time and retain stalls
+## 6. Understand platform boundaries
+
+Start with [platform targets and compatibility](../guides/platform-targets.md)
+when writing a portability boundary or diagnosing a cross build.
+
+**David Etherton, “Designing and Maintaining Large Cross-Platform Libraries,”
+_Game Programming Gems 4_, chapter 1.4, pp. 35–41** — thanks for the guidance on
+sparse conditionals, centralized build rules and explicit size/byte-order facts.
+Ludus adapts these ideas with numeric selectors and negative compile tests,
+retains active-only legacy flags, and does not require a universal include.
+
+**Jason Hughes, “What to Look for When Evaluating Middleware for Integration,”
+_Game Engine Gems 1_, chapter 1, sections 1.10–1.13, pp. 10–12** — thanks for the
+guidance on small integration boundaries, scoped symbols and visible portability
+assumptions. Ludus's immutable descriptor is opt-in; its byte-order fact does not
+replace serialization codecs or runtime capability queries.
+
+The [consulted chapter review and adaptations](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/platform-detection.md#reference-review-and-revisions)
+records the implementation's departures. The chapters belong to the separately
+supplied reference library, not public wiki downloads.
+
+Read the primary contracts alongside the design:
+
+- [Clang language extensions](https://clang.llvm.org/docs/LanguageExtensions.html):
+  builtin and attribute feature queries.
+- [Emscripten Building Projects](https://emscripten.org/docs/compiling/Building-Projects.html):
+  toolchain identification and cross builds.
+- [Apple platform conditionals](https://developer.apple.com/documentation/xcode/running-code-on-a-specific-version/):
+  target SDK/platform distinctions.
+- [Microsoft predefined macros](https://learn.microsoft.com/en-us/cpp/preprocessor/predefined-macros):
+  frontend/ABI and target data-model facts.
+- [CMake target system](https://cmake.org/cmake/help/latest/variable/CMAKE_SYSTEM_NAME.html):
+  the configured target is separate from the build host.
+
+## 7. Measure time and retain stalls
 
 Start with the [high-resolution time guide](../guides/time.md) for interval
 measurements, pause/resume, real-time deadlines and frame sampling. Its examples
