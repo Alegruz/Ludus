@@ -74,6 +74,8 @@ target_link_libraries(ludus_runtime_game_host
         Ludus::GameApi
     PRIVATE
         Ludus::FoundationLogging
+        Ludus::FoundationConfigJson
+        Ludus::RuntimeConfiguration
         Ludus::FoundationContainers
         Ludus::Input
         Ludus::Platform
@@ -192,6 +194,11 @@ if(LUDUS_BUILD_TESTS)
     if(NOT Python3_Interpreter_FOUND)
         message(FATAL_ERROR "Native play-supervisor acceptance requires Python 3.10+")
     endif()
+    add_test(NAME ludus_game_host_configuration_acceptance
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/configuration_acceptance.py"
+            "$<TARGET_FILE:ludus_game_host_app>" "$<TARGET_FILE:ludus_game_fixture_A>")
+    set_tests_properties(ludus_game_host_configuration_acceptance PROPERTIES
+        TIMEOUT 60 LABELS "runtime;configuration;acceptance")
     add_test(NAME ludus_game_host_supervisor_acceptance
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/python/test_play_host_acceptance.py"
             --root "${PROJECT_SOURCE_DIR}"

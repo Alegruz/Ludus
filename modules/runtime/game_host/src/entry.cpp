@@ -16,7 +16,10 @@
 #include <ludus/runtime/game_host/host.h>
 
 #include <ludus/foundation/base/types.h>
+#include <ludus/foundation/config/json.hpp>
+#include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
+#include <ludus/runtime/configuration/host_options.hpp>
 
 #include <cerrno>
 #include <cstdlib>
@@ -35,6 +38,7 @@ using ludus::foundation::int32;
 using ludus::foundation::uint64;
 using ludus::foundation::uint8;
 using ludus::foundation::usize;
+constexpr ludus::foundation::logging::LogCategory kConfigurationLog{"Configuration"};
 
 struct AuthoredBytes final
 {
@@ -168,6 +172,20 @@ ludus::runtime::game_host::RunMain(ludus::foundation::int32 argc, const char* co
     std::string modulePath;
     std::string authoredPath;
     AuthoredBytes authored;
+    // Parse selected files once, then apply explicit CLI values at Launch rank.
+    // Context is cold startup state; Run receives ordinary HostConfig options.
+    namespace cfg = ludus::foundation::config;
+    cfg::Context settings;
+    cfg::Diagnostic diagnostic;
+    const auto& domain = ludus::foundation::GetSystemAllocationDomain();
+    if (settings.Initialize(ludus::runtime::configuration::HostSchema(), domain, diagnostic) != cfg::Status::Ok)
+    {
+        return static_cast<int>(RunResult::Internal);
+    }
+    const char* configurationPath = nullptr;
+    const char* preferencePath = nullptr;
+    bool explicitFrames = false;
+    bool explicitHeadless = false;
     bool inspect = false;
     for (int i = 1; i < argc; ++i)
     {
@@ -210,6 +228,7 @@ ludus::runtime::game_host::RunMain(ludus::foundation::int32 argc, const char* co
                 return static_cast<int>(ludus::runtime::game_host::RunResult::BadArguments);
             }
             config.MaxFrames = frames;
+            explicitFrames = true;
         }
         else if (arg == "--project-id")
         {
@@ -256,9 +275,20 @@ ludus::runtime::game_host::RunMain(ludus::foundation::int32 argc, const char* co
         {
             config.AwaitLoad = true;
         }
+        else if (arg == "--config" || arg == "--preferences")
+        {
+            const char*& path = arg == "--config" ? configurationPath : preferencePath;
+            std::string_view value;
+            if (path != nullptr || !nextValue(value) || value.empty())
+            {
+                return static_cast<int>(RunResult::BadArguments);
+            }
+            path = argv[i];
+        }
         else if (arg == "--headless")
         {
             config.Mode = ludus::runtime::game_host::Presentation::Headless;
+            explicitHeadless = true;
         }
         else if (arg == "--identity")
         {
@@ -305,6 +335,68 @@ ludus::runtime::game_host::RunMain(ludus::foundation::int32 argc, const char* co
         }
         return static_cast<int>(result);
     }
+
+    const auto loadSettings = [&](const char* path, cfg::Layer layer) noexcept -> bool {
+        if (path == nullptr)
+        {
+            return true;
+        }
+        AuthoredBytes bytes;
+        if (!bytes.Read(path))
+        {
+            LUDUS_LOG_ERROR(kConfigurationLog, "Cannot read bounded configuration file '{}'", path);
+            return false;
+        }
+        auto status = cfg::PrepareJson(settings,
+                                       {reinterpret_cast<const char*>(bytes.Data), bytes.Size},
+                                       layer,
+                                       ludus::runtime::configuration::HOST_SCHEMA,
+                                       settings.Revision(),
+                                       domain,
+                                       diagnostic);
+        if (status == cfg::Status::Ok)
+        {
+            status = settings.Commit(settings.Revision(), diagnostic);
+        }
+        if (status != cfg::Status::Ok)
+        {
+            LUDUS_LOG_ERROR(kConfigurationLog,
+                            "Configuration {} in '{}' at key '{}' record {}",
+                            cfg::StatusName(status),
+                            path,
+                            diagnostic.Key.GetView(),
+                            diagnostic.Record);
+        }
+        return status == cfg::Status::Ok;
+    };
+    if (!loadSettings(configurationPath, cfg::Layer::Project) || !loadSettings(preferencePath, cfg::Layer::Preference))
+    {
+        return static_cast<int>(RunResult::BadArguments);
+    }
+    cfg::Assignment launch[2]{};
+    usize launchCount = 0;
+    if (explicitFrames)
+    {
+        launch[launchCount++] = { .Name = "host.max_frames", .Data = cfg::Value::FromUint64(config.MaxFrames) };
+    }
+    if (explicitHeadless)
+    {
+        launch[launchCount++] = { .Name = "host.headless", .Data = cfg::Value::FromBool(true) };
+    }
+    if (settings.Prepare(cfg::Layer::Launch, {launch, launchCount}, true, settings.Revision(), diagnostic) !=
+            cfg::Status::Ok ||
+        settings.Commit(settings.Revision(), diagnostic) != cfg::Status::Ok)
+    {
+        return static_cast<int>(RunResult::BadArguments);
+    }
+    ludus::runtime::configuration::HostOptions options;
+    if (ludus::runtime::configuration::ReadHostOptions(settings, options) != cfg::Status::Ok ||
+        settings.SealStartup() != cfg::Status::Ok)
+    {
+        return static_cast<int>(RunResult::Internal);
+    }
+    config.MaxFrames = options.MaxFrames;
+    config.Mode = options.Headless ? Presentation::Headless : Presentation::Windowed;
 
     if (!authoredPath.empty())
     {

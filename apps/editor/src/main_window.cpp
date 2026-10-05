@@ -1,5 +1,6 @@
 #include "internal/main_window.h"
 #include "internal/audio_workspace.h"
+#include "internal/configuration_workspace.h"
 #include "internal/project_setup_dialog.h"
 
 #include <QAbstractItemModel>
@@ -837,7 +838,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
 {
     if (!AudioClosing_)
     {
-        if (!Audio_->ConfirmDiscard())
+        if (!Audio_->ConfirmDiscard() || !Configuration_->ConfirmDiscard())
         {
             event->ignore();
             return;
