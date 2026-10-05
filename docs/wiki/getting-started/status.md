@@ -10,6 +10,7 @@ not a claim of production readiness on every platform.
 | Independent games | Installed CLI, SDK selection, local presets, setup checks and staged creation | Initial native reference toolchain; release identity and SDK compatibility are validated |
 | Audio | Native content definitions, catalog, editing and runtime-backed preview | Check the audio evidence for device and hosted acceptance limits |
 | Configuration | Typed runtime schema, cooked layers, sparse preferences and offline editor preview | Preference edits apply to a future launch, not the running host |
+| Strings and hashing | [Owned/shared bytes, scoped names and lookup hashes](../guides/strings.md) | Explicit lifetimes and failures; cooked dictionaries and editor strings inspection remain future work |
 | Randomness | [Caller-owned PCG32 streams and addressed Philox samples](../guides/randomness.md) | Deterministic primitives; game-owned identities/state, no automatic replay or editor RNG inspector |
 | Time | [Shared monotonic clock and owner-local stopwatch/deadline/frame helpers](../guides/time.md) | Nanosecond storage; simulation integration, scheduling, pacing and editor timing telemetry remain separate work |
 | Browser runtime | Pinned Emscripten/WebGPU Foundation, Platform, RHI paths and smoke samples | Runtime work has separate browser/device acceptance; this website contains documentation |

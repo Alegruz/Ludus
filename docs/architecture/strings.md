@@ -61,13 +61,15 @@ changes without treating a table of contents as evidence of chapter contents.
 8. Start with ordinary synchronization for mutable tables and immutable frozen
    tables for parallel reads. Add more concurrency only after measurements.
 
-## Current Ludus baseline
+## Baseline before implementation
 
-The maintained Foundation tree has Base, Containers, Logging, Profiling, and
-Math. It has no FoundationStrings or FoundationHash module, general intern
-service, or implemented FoundationMemory module. The memory design remains
-proposed. Implementing that design's allocation boundary is a prerequisite for
-the allocating string types in this proposal.
+At the initial design pass, the Foundation tree had Base, Containers, Logging,
+Profiling and Math, without Strings, Hash or a Memory implementation. The
+allocation boundary was a prerequisite for allocating owners. The
+[implementation status](#implementation-status) below now records the shipped
+Memory seam, Hash and Strings modules. Use the [wiki strings guide](https://github.com/Alegruz/Ludus/blob/main/docs/wiki/guides/strings.md)
+and actual public headers for current API usage; the layout and declarations
+below remain design sketches.
 
 [`content.h`](../../modules/content/include/ludus/content/content.h) already has
 bounded `Text<N>`, `ResourceId`, `ResourcePath`, a byte owner, and a 32-byte

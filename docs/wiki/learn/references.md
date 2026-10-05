@@ -113,6 +113,26 @@ Harvey/Marshall's *Scheduling Game Events* and John Bolton's *A Basic Scheduler*
 The review explains the adopted value/sample ownership and the separate future
 scheduling contract; it makes no clock-resolution or performance-gain promise.
 
+## 8. Own text and identify names
+
+Start with [strings and names](../guides/strings.md) and [hashing](../guides/hashing.md)
+for the shipped contracts. The
+[strings chapter review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/strings-gems-review.md)
+records consulted sources, exact locators and adaptations.
+
+Thanks to **Stefan Reinalter**, *Compile-Time String Hashing in C++*, Game Engine
+Gems 3, chapter 14, pp. 197–205, for precomputing literal metadata; Ludus keeps
+exact spellings and binds table-qualified IDs explicitly. Thanks to **James
+Boer**, *A Flexible Text Parsing System*, Game Programming Gems 2, §1.17,
+pp. 112–117, for compiled token dictionaries, and **Jason Hughes**, *Pointer
+Patching Assets*, Game Engine Gems 2, chapter 20, pp. 345–357, for packed
+storage inspiration. The cooker/dictionary ideas remain planned; runtime
+interning and freezing do not implement deterministic persistence.
+
+The review distinguishes adopted ideas from deferred suggestions and Bloom
+filters. Its local PDF links are source locators in an ignored reference library,
+not downloadable wiki material. No chapter code is copied into the guide examples.
+
 ## Explore the larger local catalog
 
 The [ranked editor reading guide](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-reference-reading-guide.md)
