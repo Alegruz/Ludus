@@ -74,6 +74,7 @@ target_link_libraries(ludus_runtime_game_host
         Ludus::GameApi
     PRIVATE
         Ludus::FoundationLogging
+        Ludus::FoundationContainers
         Ludus::Input
         Ludus::Platform
         Ludus::GraphicsRhi

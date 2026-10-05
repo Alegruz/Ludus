@@ -1,6 +1,7 @@
 #include "internal/host_services.h"
 
 #include <ludus/foundation/base/core.h>
+#include <ludus/foundation/containers/sorted_map.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
 
@@ -9,7 +10,6 @@
 #include <memory>
 #include <new>
 #include <string_view>
-#include <unordered_map>
 
 namespace ludus::runtime::game_host
 {
@@ -48,7 +48,7 @@ struct HostServiceProvider::Context
     std::atomic<uint64> Outstanding{0};
     std::atomic<usize> BytesLive{0};
     std::atomic<uint64> Work{kWorkClosed};
-    std::unordered_map<uint64, uint64> Resources;
+    ludus::foundation::SortedMap<uint64, uint64> Resources;
 };
 
 namespace
@@ -187,8 +187,8 @@ uint64 ResolveResourceCallback(HostContext* ctx, uint64 logicalAssetId) noexcept
     {
         return 0;
     }
-    const auto it = context->Resources.find(logicalAssetId);
-    return it == context->Resources.end() ? 0 : it->second;
+    const uint64* resource = context->Resources.Find(logicalAssetId);
+    return resource == nullptr ? 0 : *resource;
 }
 
 bool AcquireWorkCallback(HostContext* ctx) noexcept
@@ -332,12 +332,34 @@ uint64 HostServiceProvider::OutstandingWork() const noexcept
     return Context_ == nullptr ? 0 : Context_->Work.load(std::memory_order_acquire) & ~kWorkClosed;
 }
 
-void HostServiceProvider::CopyResourcesFrom(const HostServiceProvider& source) noexcept
+bool HostServiceProvider::CopyResourcesFrom(const HostServiceProvider& source) noexcept
 {
-    if (Context_ != nullptr && source.Context_ != nullptr)
+    if (Context_ == nullptr || source.Context_ == nullptr || Context_->Retired)
     {
-        Context_->Resources = source.Context_->Resources;
+        return false;
     }
+    // Stage independently. Failure leaves the destination registry untouched.
+    ludus::foundation::SortedMap<uint64, uint64> copy;
+    if (!copy.TryEnsureCapacity(source.Context_->Resources.GetSize()))
+    {
+        return false;
+    }
+    for (const auto& entry : source.Context_->Resources)
+    {
+        copy.AddInPlace(entry.Key, entry.Value);
+    }
+    Context_->Resources.Swap(copy);
+    return true;
+}
+
+bool HostServiceProvider::PrepareResource(uint64 logicalAssetId) noexcept
+{
+    if (Context_ == nullptr || Context_->Retired)
+    {
+        return false;
+    }
+    auto& resources = Context_->Resources;
+    return resources.Contains(logicalAssetId) || resources.TryEnsureCapacity(resources.GetSize() + 1);
 }
 
 uint64 HostServiceProvider::OutstandingAllocations() const noexcept
@@ -345,11 +367,19 @@ uint64 HostServiceProvider::OutstandingAllocations() const noexcept
     return Context_ == nullptr ? 0 : Context_->Outstanding.load(std::memory_order_relaxed);
 }
 
-void HostServiceProvider::SetResource(uint64 logicalAssetId, uint64 resourceHandle) noexcept
+bool HostServiceProvider::SetResource(uint64 logicalAssetId, uint64 resourceHandle) noexcept
 {
-    if (Context_ != nullptr)
+    if (Context_ == nullptr || Context_->Retired)
     {
-        Context_->Resources[logicalAssetId] = resourceHandle;
+        return false;
     }
+    const auto result = Context_->Resources.TryAddInPlace(logicalAssetId, resourceHandle);
+    if (result.Value == nullptr)
+    {
+        return false;
+    }
+    *result.Value = resourceHandle;
+    return true;
 }
+
 } // namespace ludus::runtime::game_host

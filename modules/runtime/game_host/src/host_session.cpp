@@ -716,14 +716,17 @@ void HostSession::Dispatch(const Message& command) noexcept
             const auto nibble = static_cast<ludus::foundation::uint8>(digit <= '9' ? digit - '0' : digit - 'a' + 10);
             bytes[i / 2] = static_cast<ludus::foundation::uint8>((bytes[i / 2] << 4U) | nibble);
         }
-        if (!Presenter_->ReplaceClearConfiguration({bytes.data(), bytes.size()}, digest))
+        if (!Services_.PrepareResource(assetId) ||
+            !Presenter_->ReplaceClearConfiguration({bytes.data(), bytes.size()}, digest))
         {
             EmitCommandResult(requestId,
                               CommandStatus::ReloadRejected,
                               "configuration validation failed; previous asset retained");
             return;
         }
-        Services_.SetResource(assetId, digest);
+        // PrepareResource completed all fallible storage work before commit.
+        const bool resourceSet = Services_.SetResource(assetId, digest);
+        LUDUS_REQUIRE(resourceSet);
         EmitCommandResult(requestId, CommandStatus::Ok, "frame-clear configuration replaced");
         return;
     }
@@ -979,7 +982,10 @@ CommandStatus HostSession::ReloadTo(std::string_view newModulePath, uint64 newGe
     {
         return reject(CommandStatus::ReloadRejected);
     }
-    stagingServices.CopyResourcesFrom(Services_);
+    if (!stagingServices.CopyResourcesFrom(Services_))
+    {
+        return reject(CommandStatus::ReloadRejected);
+    }
     CreateInfo info = {};
     info.StructSize = static_cast<uint32>(sizeof(CreateInfo));
     info.Services = &stagingServices.Services();
