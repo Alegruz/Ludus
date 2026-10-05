@@ -67,6 +67,7 @@ nav:
       - Build, run and debug: guides/build-and-debug.md
       - Repair project setup: guides/project-setup.md
       - Engine configuration: guides/configuration.md
+      - Deterministic randomness: guides/randomness.md
       - Audio workflow: guides/audio.md
       - Package a game: guides/releases.md
       - Troubleshooting: guides/troubleshooting.md

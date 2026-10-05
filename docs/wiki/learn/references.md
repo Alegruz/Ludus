@@ -55,6 +55,18 @@ save routing; this recommendation does not claim those features already ship.
 - [GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages):
   the static artifact/deployment contract used by this documentation site.
 
+## 5. Reproduce random choices
+
+Start with the [deterministic randomness guide](../guides/randomness.md) to
+choose ordered PCG streams or addressed Philox samples. Its source list credits
+Salmon et al., O'Neill, Lemire and Vigna, plus the consulted Gems chapters on
+independent regeneration, playback isolation and rejection sampling.
+
+The [RNG chapter review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/randomness-gems-review.md)
+explains which ideas were adopted or deferred and corrects claims that would
+otherwise mislead implementation. The guide identifies shipped APIs separately
+from future policies, persistence, GPU and editor work.
+
 ## Explore the larger local catalog
 
 The [ranked editor reading guide](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-reference-reading-guide.md)

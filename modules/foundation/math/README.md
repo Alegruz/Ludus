@@ -89,6 +89,9 @@ Vector3 local{};
 
 ### Random samples independent of job order
 
+For checked examples, address ownership and reproduction requirements, see the
+[wiki randomness guide](../../../docs/wiki/guides/randomness.md).
+
 ```cpp
 #include <ludus/foundation/math/addressed_random.hpp>
 
