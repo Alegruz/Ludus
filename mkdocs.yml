@@ -68,6 +68,7 @@ nav:
       - Repair project setup: guides/project-setup.md
       - Engine configuration: guides/configuration.md
       - Deterministic randomness: guides/randomness.md
+      - High-resolution time: guides/time.md
       - Audio workflow: guides/audio.md
       - Package a game: guides/releases.md
       - Troubleshooting: guides/troubleshooting.md

@@ -67,6 +67,18 @@ explains which ideas were adopted or deferred and corrects claims that would
 otherwise mislead implementation. The guide identifies shipped APIs separately
 from future policies, persistence, GPU and editor work.
 
+## 6. Measure time and retain stalls
+
+Start with the [high-resolution time guide](../guides/time.md) for interval
+measurements, pause/resume, real-time deadlines and frame sampling. Its examples
+distinguish CPU time from simulation ticks and report discarded stall time.
+
+The [time architecture and consulted Gems review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/high-resolution-time.md)
+credit Noel Llopis's *The Clock: Keeping Your Finger on the Pulse of the Game*,
+Harvey/Marshall's *Scheduling Game Events* and John Bolton's *A Basic Scheduler*.
+The review explains the adopted value/sample ownership and the separate future
+scheduling contract; it makes no clock-resolution or performance-gain promise.
+
 ## Explore the larger local catalog
 
 The [ranked editor reading guide](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-reference-reading-guide.md)
