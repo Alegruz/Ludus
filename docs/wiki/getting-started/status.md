@@ -13,6 +13,7 @@ not a claim of production readiness on every platform.
 | Strings and hashing | [Owned/shared bytes, scoped names and lookup hashes](../guides/strings.md) | Explicit lifetimes and failures; cooked dictionaries and editor strings inspection remain future work |
 | Randomness | [Caller-owned PCG32 streams and addressed Philox samples](../guides/randomness.md) | Deterministic primitives; game-owned identities/state, no automatic replay or editor RNG inspector |
 | Browser runtime | Pinned Emscripten/WebGPU Foundation, Platform, RHI paths and smoke samples | Runtime work has separate browser/device acceptance; this website contains documentation |
+| Platform detection | [Compiler-owned target facts and constexpr descriptor](../guides/platform-targets.md) | Recognition does not establish an engine port or runtime capabilities |
 | Engine systems | Foundation, math, graphics, content, gameplay/world and physics modules | Consult each module's implementation/evidence before relying on a feature |
 
 ## Next editor stages

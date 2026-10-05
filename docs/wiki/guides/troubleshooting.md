@@ -12,6 +12,7 @@ avoid repeatedly rebuilding an incompatible or stale setup.
 | Automatic engine selection fails | Check an explicit Advanced override or `LUDUS_SDK_PREFIX`; invalid overrides do not silently fall back |
 | Missing or stale local CMake presets | Run Check Setup, then explicit Repair Project Setup with the intended compatible engine |
 | SDK incompatible or lock unresolved | Inspect flavor, compiler/ABI/components and locked release; install the required release or choose a compatible local override |
+| Compiler target/SDK disagreement or detection override error | Follow [target and SDK recovery](platform-targets.md#recover-from-target-and-sdk-errors); correct the toolchain/SDK rather than redefining detected facts |
 | Operation reports Busy | Another managed operation owns that build tree; let it complete or stop it before retrying |
 | Close Project disabled | Stop owned build/run/Play work and wait for confirmed cleanup |
 | Save failed or external file conflict | Keep the draft; inspect permissions and reconcile the external file before saving again |
@@ -21,7 +22,8 @@ avoid repeatedly rebuilding an incompatible or stale setup.
 ## Gather a useful report
 
 Record the Ludus commit/SDK identity, host OS, tool versions, build profile,
-project action, relevant Output and the smallest reproducible steps. State the
+intended game OS/architecture, project action, relevant Output and the smallest
+reproducible steps. Keep the build host and game target distinct. State the
 expected result and what actually happened. Remove credentials and unrelated
 personal information from attached logs.
 

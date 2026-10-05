@@ -3,6 +3,9 @@
 | Term | Meaning in Ludus |
 | --- | --- |
 | Engine checkout | The source repository used to develop Ludus and run its trusted tools |
+| Build host | Machine running the Editor/compiler/build tools; it can differ from the game target |
+| Compiled target | OS, CPU and data model selected by the compiler for a translation unit; see [platform targets](../guides/platform-targets.md) |
+| Runtime capability | Confirmed feature/limit of a live subsystem session, not a conclusion from its compiled target |
 | SDK | Installed engine headers, libraries and build metadata for a compatible target/flavor/toolchain |
 | Project descriptor | `ludus.project.json`, the game's saved engine/build/launch intent |
 | Release lock | Exact release-oriented selection; local development may use a separate ignored override |

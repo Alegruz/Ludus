@@ -21,6 +21,9 @@ IDE settings, refreshes stale CMake inputs, and verifies selectable configure/
 build/test presets plus real configure/build/native tests before reporting ready.
 Browser setup additionally needs an installed matching browser SDK.
 
+See [platform targets and compatibility](platform-targets.md) to distinguish the
+build host, intended game target and runtime capability checks.
+
 ## Shared SDKs and local overrides
 
 An SDK is the engine's installed headers, libraries and build metadata. Games
