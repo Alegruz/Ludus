@@ -10,7 +10,9 @@
 
 #include <ludus/foundation/math/addressed_random.hpp>
 #include <ludus/foundation/math/batch.hpp>
+#include <ludus/foundation/math/cubic.hpp>
 #include <ludus/foundation/math/matrix.hpp>
+#include <ludus/foundation/math/patch.hpp>
 #include <ludus/foundation/math/precision.hpp>
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/quaternion.hpp>
@@ -116,6 +118,41 @@ int main()
         }
         Check(ok, "PCG known answers");
     }
+
+    // Cubic/patch kernels through the same exported API as native and SDK users.
+    CubicSample1 cubic;
+    Check(TryEvaluateCubic(CubicBezier1{{0, 0, 0, 1}}, 0.5, cubic) == MathStatus::Success && cubic.Position == 0.125f &&
+              cubic.FirstDerivative == 0.75f && cubic.SecondDerivative == 3,
+          "cubic analytic derivatives");
+    CubicBezier1 left, right;
+    Check(TrySplitCubic(CubicBezier1{{0, 0, 0, 1}}, 0.5, left, right) == MathStatus::Success &&
+              left.Control[3] == 0.125f && right.Control[0] == left.Control[3],
+          "cubic subdivision");
+    Check(TryFromHermite(CubicHermite1{2, 5, 3, -6}, 2, left) == MathStatus::Success && left.Control[1] == 4 &&
+              left.Control[2] == 9,
+          "Hermite domain scaling");
+    BicubicBezierPatch patch;
+    for (ludus::foundation::usize i = 0; i < 4; ++i)
+    {
+        for (ludus::foundation::usize j = 0; j < 4; ++j)
+        {
+            patch.Control[i][j] = {static_cast<float32>(i), static_cast<float32>(j), 0};
+        }
+    }
+    PatchSample patchSample;
+    Check(TryEvaluatePatch(patch, {0.25, 0.75}, patchSample) == MathStatus::Success &&
+              patchSample.Position == Vector3{0.75f, 2.25f, 0} && patchSample.DU == Vector3{3, 0, 0} &&
+              patchSample.DV == Vector3{0, 3, 0},
+          "patch axis convention");
+    Vector3 normal;
+    Check(TryPatchNormal(patchSample, {}, normal) == MathStatus::Success && normal == Vector3{0, 0, 1}, "patch normal");
+    PatchSubdivision children;
+    Check(TrySplitPatch(patch, {0.25, 0.75}, children) == MathStatus::Success &&
+              children.U0V0.Control[3][3] == patchSample.Position,
+          "patch subdivision");
+    cubic = {7, 8, 9};
+    Check(TryEvaluateCubic(CubicBezier1{}, -1, cubic) == MathStatus::InvalidArgument && cubic.Position == 7,
+          "cubic failure preserves output");
 
     std::printf("LUDUS_WEB_MATH_RESULT failures=%d\n", gFail);
     return gFail == 0 ? 0 : 1;

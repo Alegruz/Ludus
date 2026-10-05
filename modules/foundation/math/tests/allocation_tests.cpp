@@ -6,8 +6,10 @@
 
 #include <ludus/foundation/math/addressed_random.hpp>
 #include <ludus/foundation/math/batch.hpp>
+#include <ludus/foundation/math/cubic.hpp>
 #include <ludus/foundation/math/dynamics.hpp>
 #include <ludus/foundation/math/matrix.hpp>
+#include <ludus/foundation/math/patch.hpp>
 #include <ludus/foundation/math/projection.hpp>
 #include <ludus/foundation/math/quaternion.hpp>
 #include <ludus/foundation/math/queries.hpp>
@@ -169,6 +171,28 @@ TEST_CASE("Checked math operations never allocate", "[math][alloc]")
     RadialSweepContact radial;
     REQUIRE(TrySweepRadialBand({10, 0, 0}, {10, 0, 0}, {}, 0, 20, 2, radial) == MathStatus::Success);
     REQUIRE(radial.Hit);
+
+    // Cubic and patch kernels.
+    CubicBezier3 curve;
+    REQUIRE(TryFromHermite(CubicHermite3{{}, {3, 6, 9}, {1, 2, 3}, {1, 2, 3}}, 3, curve) == MathStatus::Success);
+    CubicSample3 cubic;
+    REQUIRE(TryEvaluateCubic(curve, 0.5, cubic) == MathStatus::Success);
+    CubicBezier3 left, right;
+    REQUIRE(TrySplitCubic(curve, 0.5, left, right) == MathStatus::Success);
+    BicubicBezierPatch patch;
+    for (ludus::foundation::usize i = 0; i < 4; ++i)
+    {
+        for (ludus::foundation::usize j = 0; j < 4; ++j)
+        {
+            patch.Control[i][j] = {static_cast<float32>(i), static_cast<float32>(j), 0};
+        }
+    }
+    PatchSample patchSample;
+    REQUIRE(TryEvaluatePatch(patch, {0.2, 0.8}, patchSample) == MathStatus::Success);
+    Vector3 normal;
+    REQUIRE(TryPatchNormal(patchSample, {}, normal) == MathStatus::Success);
+    PatchSubdivision children;
+    REQUIRE(TrySplitPatch(patch, {0.2, 0.8}, children) == MathStatus::Success);
 
     // Random stream.
     RandomStream rng;
