@@ -63,8 +63,8 @@ A `JobGraph` is initialized with job/edge capacities. Build on one owner thread,
 add callbacks/context pointers, declare `DependsOn(dependent, prerequisite)`, and
 `Seal`. Seal performs O(V+E) Kahn validation using preallocated scratch space.
 Self edges, duplicate edges, foreign/stale handles, exhaustion and cycles have
-explicit statuses. A handle includes a process-unique graph ID, a reset generation
-and an index. Identity exhaustion returns an error rather than wrapping.
+explicit statuses. A handle includes a graph ID unique within its FoundationThreading runtime, a
+reset generation and an index. Identity exhaustion returns an error rather than wrapping.
 
 A `JobSystem` is explicitly initialized with 0-64 workers. Worker count is a
 caller budget excluding any helping caller. The engine owner must reserve CPU
@@ -107,6 +107,10 @@ to another pool. Dependencies must be declared before publication.
 
 Callback code itself must remain loaded through Wait, including gameplay DLL
 unload/live reload; completion cannot validate a pointer into unloaded code.
+The host owns the runtime, systems, graphs and handles across reloads. IDs and
+handles belong to that runtime instance; separately linked copies of the static
+SDK in gameplay DLLs do not share its identity counter. Do not exchange or retain
+handles between independent runtime copies or across their unload/reload.
 
 Shutdown drains accepted work, sets stop under the gate, wakes sleepers, joins
 all started threads and frees state. System destruction does the same. Destroying
@@ -166,6 +170,8 @@ Build the optional `ludus_threading_benchmark` with
 `-DLUDUS_BUILD_THREADING_BENCHMARK=ON`. It compares complete submit-to-Wait batches
 with identical outputs in serial and parallel. Report hardware, worker counts,
 task count/grain, median timings, checksum, idle/background load and build flavor.
+Recorded [validation and timing evidence](../development/threading-evidence.md)
+includes the hardware, shared-machine load and output checks.
 Tiny callbacks measure dispatch overhead; useful arithmetic measures a possible
 break-even. Synthetic speedup does not establish game-frame improvement.
 

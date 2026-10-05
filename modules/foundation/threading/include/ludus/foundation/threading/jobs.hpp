@@ -74,6 +74,12 @@ struct SystemState;
 
 class JobSystem;
 
+// Thanks to Jon Parise, "Multithreaded Object Models," Game Engine Gems 1,
+// ch. 21, pp. 371-379, for explicit ownership/buffer lifetimes, and Julien
+// Hamaide, "Thread Communication Techniques," Game Engine Gems 2, ch. 29,
+// pp. 459-467, for bounded communication. The host owns graph/context lifetimes;
+// a mutex/atomic publication proof replaces historical volatile examples.
+// See docs/architecture/threading.md for the reviewed sources and departures.
 // Build/reset on one owner thread. All contexts and their inputs/outputs must
 // outlive Wait. Graph storage is fixed at Initialize and never grows at run time.
 class JobGraph final
