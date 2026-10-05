@@ -48,16 +48,18 @@ public:
             return false;
         }
         const uint8* data = Bytes_.Data + Offset_;
-        record.Object = ReadCheckpointUint(data, 8);
-        record.Property = ReadCheckpointUint(data + 8, 8);
-        record.Kind = static_cast<uint32>(ReadCheckpointUint(data + 16, 4));
+        AuthoredRecord next;
+        next.Object = ReadCheckpointUint(data, 8);
+        next.Property = ReadCheckpointUint(data + 8, 8);
+        next.Kind = static_cast<uint32>(ReadCheckpointUint(data + 16, 4));
         const usize length = static_cast<usize>(ReadCheckpointUint(data + 20, 4));
-        if (record.Object == 0 || record.Property == 0 || record.Kind > 4 || length > 256 ||
+        if (next.Object == 0 || next.Property == 0 || next.Kind > 4 || length > 256 ||
             length > Bytes_.Size - Offset_ - 24)
         {
             return false;
         }
-        record.Value = {data + 24, length};
+        next.Value = {data + 24, length};
+        record = next;
         Offset_ += 24 + length;
         --Remaining_;
         return true;

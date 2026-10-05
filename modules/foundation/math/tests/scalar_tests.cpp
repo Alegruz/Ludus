@@ -70,3 +70,13 @@ TEST_CASE("TryApproachExponential decay behaviour", "[math][scalar]")
     REQUIRE(TryApproachExponential(1.0f, 5.0f, -1.0f, 0.1f, v) == MathStatus::InvalidArgument);
     REQUIRE(v == keep);
 }
+
+TEST_CASE("Double scalar exponential and rounding preserve mathematical direction", "[math][scalar]")
+{
+    CHECK(Exp(0.0) == 1.0);
+    CHECK(std::abs(Exp(-1.0) - 0.36787944117144233) < 1e-15);
+    CHECK(Floor(-1.25) == -2.0);
+    CHECK(Ceil(-1.25) == -1.0);
+    CHECK(Floor(1.25) == 1.0);
+    CHECK(Ceil(1.25) == 2.0);
+}

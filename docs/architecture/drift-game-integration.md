@@ -18,7 +18,7 @@ Use [public fullscreen rendering](../development/fullscreen-rendering.md),
 [ADR 0011](../decisions/0011-public-fullscreen-rendering.md), and the
 [SDK handoff](../development/fullscreen-rendering-handoff.md). The current public
 API exposes opaque shaders/uniform/pipeline handles, one uniform binding, and
-one fullscreen triangle draw per frame. Uniform data is bounded to 4096 bytes;
+one fullscreen triangle draw per frame. Uniform data is bounded to 16384 bytes;
 resource readiness, resize, synchronization, and shutdown remain engine-owned.
 
 Sandbox can draw water, rings, boat, circular rocks, and dock analytically in one
@@ -51,7 +51,11 @@ packing guarantee.
 | Installed SDK dependency closure and consumer build failures | Ludus packaging when independently reproduced |
 | Optional native module reload and editor services | Existing GameHost work, with a separate Sandbox adapter |
 
-Do not add an engine Water, Boat, Ripple, Dock, or game-specific current API.
+The subsequent [CPU fluid field](fluid-field.md) supplies reusable grid
+simulation through `Ludus::PhysicsFluid`. Sandbox retains authored wind modes,
+splash lifetimes, rock-to-mask conversion, boat response and shader extraction.
+This extends the original boundary with a generic numerical module; do not add
+engine Boat, Ripple, Dock, or game-specific current APIs.
 Use bounded game records for one boat and small rock/ripple pools. The
 [game world proposal](game-world.md) supplies ownership/update guidance; the jam
 slice need not wait for generic entity storage, jobs, or a complete ECS.

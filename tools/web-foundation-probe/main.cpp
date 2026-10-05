@@ -1,17 +1,28 @@
 #include <ludus/foundation/base/core.h>
 
 #include <ludus/foundation/base/assert_format.hpp>
+#include <ludus/foundation/base/byte_order.hpp>
+#include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/base/diagnostic_output.hpp>
+#include <ludus/foundation/base/target.hpp>
 #include <ludus/foundation/base/version.hpp>
+#include <ludus/foundation/filesystem/filesystem.hpp>
 
+#include <span>
 #include <string_view>
 
 #include <emscripten.h>
+
+bool ExerciseInstalledStrings() noexcept;
 
 using namespace ludus::foundation;
 
 static_assert(LUDUS_PLATFORM_WEB == 1);
 static_assert(LUDUS_ARCH_WASM32 == 1);
+static_assert(kTarget.Os == TargetOs::Web);
+static_assert(kTarget.Arch == TargetArch::Wasm32);
+static_assert(kTarget.PointerBits == 32);
+static_assert(kTarget.Endian == TargetEndian::Little);
 static_assert(LUDUS_ASSERT_DIALOGS_AVAILABLE == 0);
 #if defined(LUDUS_PLATFORM_LINUX) || defined(LUDUS_PLATFORM_DESKTOP) || defined(__cpp_exceptions)
 #    error "Browser Base must not inherit native platform or exception policy"
@@ -50,9 +61,50 @@ void reportPassed() noexcept
 }
 } // namespace
 
+constexpr bool PrimitiveContract(ludus::foundation::usize increment = 1) noexcept
+{
+    using namespace ludus::foundation;
+    static_assert(sizeof(usize) == sizeof(void*));
+    if (increment == 0 || increment > 255)
+    {
+        return false;
+    }
+    const uint32 word = 0x12345600 | static_cast<uint32>(increment);
+    usize size = 42;
+    uint32 length = 42;
+    int64 signedProduct = 42;
+    uint8 bytes[4]{};
+    return !TryAdd(~usize{0}, increment, size) && size == 42 && !TryMultiply(~usize{0}, increment + 1, size) &&
+           size == 42 &&
+           !TryMultiply(-int64{9223372036854775807} - 1, static_cast<int64>(increment) + 1, signedProduct) &&
+           signedProduct == 42 && !TryIntegerCast(int32{-1}, length) && length == 42 &&
+           TryWriteLittleEndian(word, bytes) && bytes[0] == increment && bytes[3] == 0x12 &&
+           TryReadLittleEndian(bytes, length) && length == word &&
+           !TryReadBigEndian(std::span<const uint8>{bytes, 3}, length) && length == word;
+}
+static_assert(PrimitiveContract());
+
 int main(int argc, char** argv)
 {
+    if (!ExerciseInstalledStrings())
+    {
+        return 9;
+    }
+    if (!PrimitiveContract(static_cast<usize>(argc)))
+    {
+        return 8;
+    }
     const std::string_view mode = argc > 1 ? argv[1] : "normal";
+    filesystem::Directory directory;
+    filesystem::File file;
+    if (!filesystem::ValidPath("audio/音.wav") || filesystem::ValidPath("../escape") ||
+        directory.Open("assets").Code != filesystem::Status::Unsupported ||
+        directory.OpenRead("asset", file).Code != filesystem::Status::Unsupported ||
+        file.ReadAt(0, {}).Outcome.Code != filesystem::Status::Unsupported ||
+        file.Clone(file).Code != filesystem::Status::Unsupported || file.IsOpen() || directory.IsOpen())
+    {
+        return 8;
+    }
     if (version_string().empty() || !transportContract())
     {
         return 2;

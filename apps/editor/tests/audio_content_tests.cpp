@@ -1,13 +1,19 @@
 #include "internal/audio_preview.h"
 #include "internal/audio_workspace.h"
+#include "internal/main_window.h"
 #include "wav_fixture.h"
 #include <QApplication>
+#include <QDir>
 #include <QDoubleSpinBox>
+#include <QFile>
+#include <QFileInfo>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QThread>
+#include <QTimer>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <ludus/audio/content/definitions.h>
@@ -163,4 +169,52 @@ TEST_CASE("Audio import runs away from GUI, preserves ID on reimport and quiesce
         QTest::qWait(10);
     }
     REQUIRE(preview.Finished());
+}
+
+TEST_CASE("Cancelling close preserves the audio draft and does not save workspace preferences",
+          "[editor][audio][layout]")
+{
+    QTemporaryDir directory;
+    const auto contentRoot = directory.filePath(QStringLiteral("content"));
+    REQUIRE(QDir().mkpath(contentRoot));
+    Fixture(contentRoot);
+    QFile descriptor(directory.filePath(QStringLiteral("ludus.project.json")));
+    REQUIRE(descriptor.open(QIODevice::WriteOnly));
+    descriptor.write(QByteArrayLiteral(R"json({"version":1,"name":"demo","provider":"cmake",
+"source_dir":".","preset":"linux-clang-debug","target":"app","run":{"cwd":".","args":[]}})json"));
+    descriptor.close();
+    ludus::editor::EditorController controller(ludus::editor::ToolingPaths{});
+    const auto preferences = directory.filePath(QStringLiteral("workspace.json"));
+    ludus::editor::MainWindow window(&controller, nullptr, preferences);
+    controller.OpenProject(descriptor.fileName());
+    window.show();
+    auto* audio = window.findChild<ludus::editor::AudioWorkspace*>();
+    REQUIRE(audio != nullptr);
+    Activate(*audio);
+    auto* gain = audio->findChild<QDoubleSpinBox*>(QStringLiteral("audio-gain"));
+    REQUIRE(gain != nullptr);
+    gain->setValue(0.25);
+    bool prompted = false;
+    QTimer::singleShot(0, &window, [&window, &prompted]() {
+        if (auto* dialog = window.findChild<QMessageBox*>())
+        {
+            prompted = true;
+            dialog->done(QMessageBox::Cancel);
+        }
+    });
+    CHECK_FALSE(window.close());
+    CHECK(prompted);
+    CHECK(window.isVisible());
+    CHECK(gain->value() == 0.25);
+    CHECK_FALSE(QFileInfo::exists(preferences));
+    // A later accepted close can publish the layout after the draft decision.
+    QTimer::singleShot(0, &window, [&window]() {
+        if (auto* dialog = window.findChild<QMessageBox*>())
+        {
+            dialog->done(QMessageBox::Discard);
+        }
+    });
+    (void)window.close();
+    QTRY_VERIFY_WITH_TIMEOUT(!window.isVisible(), 3000);
+    CHECK(QFileInfo::exists(preferences));
 }

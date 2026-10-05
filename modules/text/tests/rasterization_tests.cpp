@@ -5,6 +5,7 @@
 #include <ludus/text/font_system.h>
 
 #include "fixture_support.h"
+#include "internal/raster_layout.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -119,4 +120,43 @@ TEST_CASE("Scratch is only valid until the next raster call", "[text][raster]")
     REQUIRE(IsOk(RasterizeGlyph(guard.System, font, 48, b, &second)));
     // The copy is still intact and independent of the second raster.
     CHECK(copy.size() == static_cast<std::size_t>(first.Width) * first.Height);
+}
+
+TEST_CASE("raster layout checks signed pitch and byte extents before allocation", "[primitive][text][raster]")
+{
+    using namespace ludus::foundation;
+    internal::RasterLayout layout{99, 98};
+    REQUIRE(internal::TryRasterLayout({ .Width = 3, .Height = 2, .Pitch = 4 }, layout) == Status::Ok);
+    REQUIRE(layout.Pitch == 4);
+    REQUIRE(layout.CoverageBytes == 6);
+    REQUIRE(internal::TryRasterLayout({ .Width = 3, .Height = 2, .Pitch = -4 }, layout) == Status::Ok);
+    REQUIRE(layout.Pitch == 4);
+    REQUIRE(layout.CoverageBytes == 6);
+    REQUIRE(internal::TryRasterLayout({ .Width = 3, .Height = 2, .Pitch = 2 }, layout) == Status::BackendFailure);
+    REQUIRE(layout.Pitch == 4);
+    REQUIRE(layout.CoverageBytes == 6);
+    constexpr int32 minPitch = -int32{2147483647} - 1;
+    REQUIRE(internal::TryRasterLayout({ .Width = 1, .Height = 1, .Pitch = minPitch }, layout) == Status::Ok);
+    REQUIRE(layout.Pitch == uint64{2147483648});
+    REQUIRE(layout.CoverageBytes == 1);
+    const auto extremeStatus = internal::TryRasterLayout(
+        {
+            .Width = 1,
+            .Height = ~uint32{0},
+            .Pitch = minPitch,
+        },
+        layout);
+    if constexpr (sizeof(usize) == 4)
+    {
+        REQUIRE(extremeStatus == Status::ResourceLimit);
+        REQUIRE(layout.CoverageBytes == 1);
+    }
+    else
+    {
+        REQUIRE(extremeStatus == Status::Ok);
+        REQUIRE(layout.CoverageBytes == ~uint32{0});
+    }
+    REQUIRE(internal::TryRasterLayout({ .Width = 0, .Height = ~uint32{0}, .Pitch = minPitch }, layout) == Status::Ok);
+    REQUIRE(layout.Pitch == 0);
+    REQUIRE(layout.CoverageBytes == 0);
 }

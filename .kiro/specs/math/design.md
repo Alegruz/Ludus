@@ -615,6 +615,16 @@ with no mutable global or automatic thread-local stream. Security randomness
 and hardware entropy are separate services. Adapted PCG code retains source
 attribution and required license; M0 records provenance, never fabricates a hash.
 
+### Addressed randomness extension
+
+`addressed_random.hpp` adds a pure Philox4x32-10 path for stable logical events,
+without changing any PCG32 v1 contract. Key derivation, address layout and bounded
+mapping are frozen at version 1. The
+[architecture](../../../docs/architecture/randomness.md) specifies packing,
+ownership and replay responsibilities; the
+[Gems review](../../../docs/architecture/randomness-gems-review.md) records
+article evidence and corrections. Broader integrations remain proposed there.
+
 ## 12 Batches and optimization policy
 
 Implement non-template `TryTransformPoints(Affine3, span<const Vector3>,

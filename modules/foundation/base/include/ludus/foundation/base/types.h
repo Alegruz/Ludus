@@ -1,5 +1,10 @@
 #pragma once
 
+// Thanks to ISO/IEC JTC1/SC22/WG21, C++ Working Draft [basic.fundamental], for
+// the native scalar representation contract: https://eel.is/c++draft/basic.fundamental
+// We retain native aliases and verify Ludus's narrower supported representations.
+// See docs/architecture/primitive-types.md; no reference implementation was copied.
+
 #include <cstddef>
 #include <cstdint>
 
@@ -32,9 +37,18 @@ using int64 = std::int64_t;
 using usize = std::size_t;
 using isize = std::ptrdiff_t;
 
-// Floating point. float32/float64 make the width explicit at call sites.
+// Floating point. IEEE binary32/binary64 representation is verified once in
+// src/types.cpp; aliases do not set rounding, trap, or denormal handling policy.
 using float32 = float;
 using float64 = double;
+
+// Cheap storage checks belong here; numeric representation checks compile once
+// in src/types.cpp. Neither check changes the native aliases or their ABI.
+static_assert(sizeof(uint8) == 1 && sizeof(int8) == 1);
+static_assert(sizeof(uint16) == 2 && sizeof(int16) == 2);
+static_assert(sizeof(uint32) == 4 && sizeof(int32) == 4);
+static_assert(sizeof(uint64) == 8 && sizeof(int64) == 8);
+static_assert(sizeof(float32) == 4 && sizeof(float64) == 8);
 } // namespace ludus::foundation::core
 
 // Re-export into ludus::foundation so most engine code can use the short-scoped

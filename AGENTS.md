@@ -97,6 +97,21 @@ engine code. Discuss such cases in the PR before adding them.
   in `.clang-tidy` (types, functions, and members as used by existing modules).
   Match the surrounding code rather than introducing a new style.
 
+### Reference comments and attribution
+
+- Whenever a paper, article, book chapter, or technical document materially
+  informs a design, algorithm, or implementation, acknowledge and thank its
+  authors with a concise reference comment near the affected code. For a design
+  spanning a file or subsystem, place the comment at the relevant file or section
+  boundary and link to the detailed design review when available.
+- Identify the author or organization, exact title, and publication/book with
+  chapter, section, or page numbers as applicable. Include a stable URL or DOI
+  when available. Explain which idea was adopted or adapted and any significant
+  departure; a bibliography in a design document supplements these code comments.
+- Credit sources actually consulted and relevant to the implementation. Verify
+  citation details and distinguish design inspiration from copied/adapted code.
+  Preserve existing attribution and license notices when editing or refactoring.
+
 ### Primitive types
 
 - Use the Ludus fixed-width aliases from `ludus/foundation/base/types.h` (also
@@ -107,6 +122,13 @@ engine code. Discuss such cases in the PR before adding them.
 - Do not write `std::uint32_t`, `std::size_t`, raw `float`/`double`, etc. in new
   code. The aliases are exact aliases of the `<cstdint>` / `<cstddef>` types, so
   they interoperate with the standard library while keeping widths explicit.
+- Byte widths and IEEE binary32/binary64 representation are checked by
+  FoundationBase (ADR 0015). `usize`/`isize` remain native sizes/differences;
+  serialized fields must specify a fixed width and byte order.
+- Opt in to `checked_integer.hpp` for `TryIntegerCast` and checked
+  add/subtract/multiply at numeric boundaries; `byte_order.hpp` provides bounded
+  unsigned little/big endian codecs. These preserve outputs on failure and are
+  never included by `types.h`/`core.h`. See `docs/architecture/primitive-types.md`.
 - `usize` is the size/index type (aliases `std::size_t`) — use it for `sizeof`
   results, container sizes, and array indices; do not substitute `uint64`.
 

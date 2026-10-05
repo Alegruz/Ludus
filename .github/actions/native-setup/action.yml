@@ -10,6 +10,12 @@ inputs:
   cache-variant:
     description: Distinguish compiler configurations such as PCH
     default: native
+  conan-cache-writer:
+    description: Save Conan packages (one writer per preset)
+    default: 'true'
+  compiler-cache-writer:
+    description: Save compiler outputs (one writer per variant)
+    default: 'true'
   editor:
     description: Install and build the optional editor
     default: 'false'
@@ -32,17 +38,32 @@ runs:
       with:
         path: ~/.cache/pip
         key: pip-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('config/tool_versions.json') }}
+    # Thanks to GitHub's "Dependency caching reference": immutable dependency
+    # snapshots use input identities; compiler snapshots roll forward per commit.
+    # https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching
     - name: Cache selected Conan packages
+      if: inputs.conan-cache-writer == 'true'
       uses: actions/cache@v4
       with:
         path: out/conan/home
-        # Save a refreshed snapshot after a fallback restore; caches are immutable.
-        key: conan-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ hashFiles('conanfile.py', 'conan.lock', 'third_party/**', 'config/conan/**', 'config/tool_versions.json', 'CMakePresets.json') }}-${{ github.sha }}
-        restore-keys: |
-          conan-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ hashFiles('conanfile.py', 'conan.lock', 'third_party/**', 'config/conan/**', 'config/tool_versions.json', 'CMakePresets.json') }}-
+        key: conan-v3-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ hashFiles('conanfile.py', 'conan.lock', 'third_party/**', 'config/conan/**', 'config/tool_versions.json', 'CMakePresets.json') }}
+    - name: Restore selected Conan packages without saving
+      if: inputs.conan-cache-writer != 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: out/conan/home
+        key: conan-v3-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ hashFiles('conanfile.py', 'conan.lock', 'third_party/**', 'config/conan/**', 'config/tool_versions.json', 'CMakePresets.json') }}
     - name: Cache compiler outputs
-      if: inputs.compiler-cache == 'true'
+      if: inputs.compiler-cache == 'true' && inputs.compiler-cache-writer == 'true'
       uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**') }}-${{ github.sha }}
+        restore-keys: |
+          ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**') }}-
+    - name: Restore compiler outputs without saving
+      if: inputs.compiler-cache == 'true' && inputs.compiler-cache-writer != 'true'
+      uses: actions/cache/restore@v4
       with:
         path: ~/.cache/ccache
         key: ccache-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**') }}-${{ github.sha }}

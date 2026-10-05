@@ -17,6 +17,44 @@
 
 #include <ludus/foundation/base/config.h>
 
+#if defined(LUDUS_PLATFORM_BROWSER)
+#    if LUDUS_PLATFORM_BROWSER != 1
+#        error "Ludus platform configuration: selected backend must equal 1"
+#    endif
+#endif
+#if defined(LUDUS_PLATFORM_WAYLAND)
+#    if LUDUS_PLATFORM_WAYLAND != 1
+#        error "Ludus platform configuration: selected backend must equal 1"
+#    endif
+#endif
+#if defined(LUDUS_PLATFORM_X11)
+#    if LUDUS_PLATFORM_X11 != 1
+#        error "Ludus platform configuration: selected backend must equal 1"
+#    endif
+#endif
+#if defined(LUDUS_PLATFORM_HEADLESS)
+#    if LUDUS_PLATFORM_HEADLESS != 1
+#        error "Ludus platform configuration: selected backend must equal 1"
+#    endif
+#endif
+
+#if (defined(LUDUS_PLATFORM_BROWSER) + defined(LUDUS_PLATFORM_WAYLAND) + defined(LUDUS_PLATFORM_X11) +                 \
+     defined(LUDUS_PLATFORM_HEADLESS)) > 1
+#    error "Ludus platform configuration: select at most one windowing backend"
+#endif
+
+#if defined(LUDUS_PLATFORM_BROWSER) && LUDUS_TARGET_OS != LUDUS_OS_WEB
+#    error "Ludus platform configuration: browser backend requires Emscripten"
+#endif
+
+#if (defined(LUDUS_PLATFORM_WAYLAND) || defined(LUDUS_PLATFORM_X11)) && LUDUS_TARGET_OS != LUDUS_OS_LINUX
+#    error "Ludus platform configuration: Wayland/X11 backend requires desktop Linux"
+#endif
+
+#if defined(LUDUS_PLATFORM_HEADLESS) && LUDUS_TARGET_OS == LUDUS_OS_WEB
+#    error "Ludus platform configuration: native headless backend cannot target Emscripten"
+#endif
+
 #if defined(LUDUS_PLATFORM_WAYLAND)
 #    define LUDUS_PLATFORM_HAS_WAYLAND 1
 #endif

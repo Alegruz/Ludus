@@ -6,7 +6,7 @@ clock)** and **Phase 1 (CPU Trace MVP + Perfetto export)** of the finalized
 
 ## What this module provides now
 
-- A shared monotonic clock (`NowTicks()`, `steady_clock` nanoseconds).
+- A shared FoundationTime monotonic clock (`NowTicks()`, integer nanoseconds).
 - Ubiquitous, cheap-to-include instrumentation macros:
   - `LUDUS_PROFILE_SCOPE(Name)` / `LUDUS_PROFILE_SCOPE(Name, Category)` — RAII CPU scope.
   - `LUDUS_PROFILE_FUNCTION()` — scope named from `__func__`.

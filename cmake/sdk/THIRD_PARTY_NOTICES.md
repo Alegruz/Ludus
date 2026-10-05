@@ -23,6 +23,38 @@ authoritative, machine-readable inventory (names, versions, kinds) is the
 > the *final consumer's* static link line, so their object code and license
 > obligations are part of any application that links `Ludus::Text`.
 
+## Reimplemented algorithms
+
+FoundationMath's scalar Philox4x32-10 implementation and known-answer fixtures
+refer to Random123 at revision `9545ff6413f258be2f04c1d319d99aaef7521150`
+(`include/Random123/philox.h`, `tests/kat_vectors`). No Random123 library is linked.
+Its BSD-3-Clause notice is retained here for source and SDK redistribution:
+
+Copyright 2010-2011, D. E. Shaw Research. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions, and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions, and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+* Neither the name of D. E. Shaw Research nor the names of its contributors may
+  be used to endorse or promote products derived from this software without
+  specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 ## System dependencies (NOT bundled — must exist on the target)
 
 | Component | Obligation |
@@ -42,3 +74,8 @@ Each bundled component's full upstream license text is placed next to this file
 in `share/Ludus/licenses/` by the release-packaging step. Where a build has not
 yet produced those files (e.g. a developer `cmake --install` without the release
 packager), this notices file plus the manifest inventory record the obligation.
+
+## xxHash 0.8.3
+
+Yann Collet and contributors, BSD-2-Clause. https://github.com/Cyan4973/xxHash/tree/v0.8.3
+The complete license is bundled as `xxhash-LICENSE`. Used privately by FoundationHash.

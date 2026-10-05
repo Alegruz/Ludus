@@ -1,7 +1,7 @@
 #pragma once
 
 // MainWindow: renders controller state and emits actions. It owns no second
-// settings model and starts no processes (design.md sections 3, 5).
+// project settings model and starts no processes (design.md sections 3, 5).
 //
 // Private editor header (not installed). Uses standard Qt layouts/controls only.
 // While synchronizing fields from state it blocks edit signals (QSignalBlocker)
@@ -10,7 +10,9 @@
 
 #include "internal/controller.h"
 
+#include <QByteArray>
 #include <QMainWindow>
+#include <QString>
 #include <QStringList>
 
 QT_BEGIN_NAMESPACE
@@ -24,6 +26,8 @@ class QPlainTextEdit;
 class QPushButton;
 class QAction;
 class QTableWidget;
+class QTabWidget;
+class QToolBar;
 QT_END_NAMESPACE
 
 namespace ludus::editor
@@ -34,7 +38,9 @@ class MainWindow : public QMainWindow
 {
     Q_OBJECT
 public:
-    explicit MainWindow(EditorController* controller, QWidget* parent = nullptr);
+    explicit MainWindow(EditorController* controller,
+                        QWidget* parent = nullptr,
+                        const QString& workspaceSettingsFile = {});
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -64,6 +70,9 @@ private:
     void LaunchAfterPreview(LaunchAction action, const QString& debugger = {}, bool setup = false);
     void BuildUi();
     void BuildMenus();
+    void InitializeWorkspace();
+    void ResetWorkspaceLayout();
+    void SaveWorkspaceLayout() const;
     void OpenProjectPath(const QString& path);
     [[nodiscard]] ProjectDescriptor DraftFromFields() const;
     void RenderFields();
@@ -78,6 +87,14 @@ private:
     EditorController* Controller_ = nullptr;
     bool Rendering_ = false;
     bool CloseConfirmed_ = false;
+
+    // Local presentation preferences; never part of project/controller state.
+    QString WorkspaceSettingsFile_;
+    QByteArray DefaultLayout_;
+    QTabWidget* WorkTabs_ = nullptr;
+    QDockWidget* InspectorDock_ = nullptr;
+    QDockWidget* OutputDock_ = nullptr;
+    QToolBar* GameToolbar_ = nullptr;
 
     // Settings form controls.
     QLineEdit* NameEdit_ = nullptr;

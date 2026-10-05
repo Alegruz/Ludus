@@ -1,4 +1,4 @@
-# ADR 0016: Bounded renderer-independent runtime UI core
+# ADR 0019: Bounded renderer-independent runtime UI core
 
 Status: Accepted for U0.
 

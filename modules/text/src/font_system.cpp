@@ -17,6 +17,7 @@
 #include <hb-ft.h>
 #include <hb.h>
 
+#include "internal/raster_layout.h"
 #include "internal/utf8.h"
 
 #include <new>
@@ -832,15 +833,30 @@ Status RasterizeGlyph(FontSystem* system,
 
     const uint32 width = bmp.width;
     const uint32 height = bmp.rows;
-    const int pitch = bmp.pitch; // signed; sign gives row orientation.
-    const usize absPitch = static_cast<usize>(pitch < 0 ? -pitch : pitch);
-    if (absPitch < width)
+    internal::RasterLayout layout;
+    const auto layoutStatus = internal::TryRasterLayout(
+        {
+            .Width = width,
+            .Height = height,
+            .Pitch = bmp.pitch,
+        },
+        layout);
+    if (layoutStatus != Status::Ok)
     {
-        return Status::BackendFailure; // malformed stride
+        return layoutStatus;
     }
+    if (bmp.buffer == nullptr)
+    {
+        return Status::BackendFailure;
+    }
+    if (layout.CoverageBytes > system->RasterScratch.max_size())
+    {
+        return Status::ResourceLimit;
+    }
+    const usize absPitch = layout.Pitch;
 
     // Normalize into top-down, tightly packed coverage (Width is not a stride).
-    const usize total = static_cast<usize>(width) * static_cast<usize>(height);
+    const usize total = layout.CoverageBytes;
     system->RasterScratch.resize(total);
     if (system->RasterScratch.size() != total)
     {
@@ -849,8 +865,8 @@ Status RasterizeGlyph(FontSystem* system,
     for (uint32 row = 0; row < height; ++row)
     {
         // When pitch < 0 the buffer is bottom-up; read rows in reverse.
-        const uint8* srcRow = (pitch >= 0) ? (bmp.buffer + static_cast<usize>(row) * absPitch)
-                                           : (bmp.buffer + static_cast<usize>(height - 1U - row) * absPitch);
+        const uint8* srcRow = (bmp.pitch >= 0) ? (bmp.buffer + static_cast<usize>(row) * absPitch)
+                                               : (bmp.buffer + static_cast<usize>(height - 1U - row) * absPitch);
         uint8* dstRow = system->RasterScratch.data() + static_cast<usize>(row) * width;
         for (uint32 col = 0; col < width; ++col)
         {

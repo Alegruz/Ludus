@@ -1,10 +1,11 @@
 #include "sinks/console_sink.hpp"
+#include <ludus/foundation/base/config.h>
 
 #include "internal/formatter.hpp"
 
 #include <cstdio>
 
-#if defined(_WIN32)
+#if LUDUS_TARGET_OS == LUDUS_OS_WINDOWS
 #    include <io.h>
 #    define LUDUS_ISATTY _isatty
 #    define LUDUS_FILENO _fileno

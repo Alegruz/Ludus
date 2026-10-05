@@ -2,6 +2,9 @@
 
 #include <ludus/foundation/base/core.h>
 
+#include <ludus/foundation/base/byte_order.hpp>
+#include <ludus/foundation/base/checked_integer.hpp>
+
 #include <cstring>
 
 namespace ludus::runtime::game_host::protocol
@@ -750,19 +753,29 @@ bool Message::Parse(std::string_view json, Message& out)
     return s.AtEnd();
 }
 
+// Thanks to Jason Hughes, "What to Look for When Evaluating Middleware for
+// Integration", Game Engine Gems, section 1.13 "Platform Portability", p. 12:
+// the stream endian audit informs this explicit, unchanged little-endian format.
+// Original implementation; review: docs/architecture/primitive-types.md.
 bool EncodeFrame(std::string_view payload, std::vector<uint8>& outFrame)
 {
     if (payload.size() > kMaxControlFrameBytes)
     {
         return false;
     }
-    const auto length = static_cast<uint32>(payload.size());
+    uint32 length{};
+    usize frameSize{};
+    if (!ludus::foundation::TryIntegerCast(payload.size(), length) ||
+        !ludus::foundation::TryAdd(payload.size(), sizeof(length), frameSize))
+    {
+        return false;
+    }
     outFrame.clear();
-    outFrame.reserve(payload.size() + 4);
-    outFrame.push_back(static_cast<uint8>(length & 0xFF));
-    outFrame.push_back(static_cast<uint8>((length >> 8) & 0xFF));
-    outFrame.push_back(static_cast<uint8>((length >> 16) & 0xFF));
-    outFrame.push_back(static_cast<uint8>((length >> 24) & 0xFF));
+    outFrame.reserve(frameSize);
+    outFrame.resize(sizeof(length));
+    const bool written = ludus::foundation::TryWriteLittleEndian(length, outFrame);
+    LUDUS_ASSERT(written);
+    (void)written;
     const auto* bytes = reinterpret_cast<const uint8*>(payload.data());
     outFrame.insert(outFrame.end(), bytes, bytes + payload.size());
     return true;
@@ -774,7 +787,8 @@ void FrameReader::Append(const uint8* data, usize size)
     {
         return;
     }
-    if (Buffer_.size() + size > kMaxCommandQueueBytes)
+    usize queuedSize{};
+    if (!ludus::foundation::TryAdd(Buffer_.size(), size, queuedSize) || queuedSize > kMaxCommandQueueBytes)
     {
         Failed_ = true;
         return;
@@ -788,8 +802,10 @@ bool FrameReader::Next(std::string& outPayload)
     {
         return false;
     }
-    const uint32 length = static_cast<uint32>(Buffer_[0]) | (static_cast<uint32>(Buffer_[1]) << 8) |
-                          (static_cast<uint32>(Buffer_[2]) << 16) | (static_cast<uint32>(Buffer_[3]) << 24);
+    uint32 length{};
+    const bool read = ludus::foundation::TryReadLittleEndian(Buffer_, length);
+    LUDUS_ASSERT(read);
+    (void)read;
     if (length > kMaxControlFrameBytes)
     {
         Failed_ = true;
@@ -800,7 +816,7 @@ bool FrameReader::Next(std::string& outPayload)
         return false; // incomplete; wait for more bytes
     }
     outPayload.assign(reinterpret_cast<const char*>(Buffer_.data() + 4), length);
-    Buffer_.erase(Buffer_.begin(), Buffer_.begin() + 4 + static_cast<std::ptrdiff_t>(length));
+    Buffer_.erase(Buffer_.begin(), Buffer_.begin() + 4 + static_cast<ludus::foundation::isize>(length));
     return true;
 }
 } // namespace ludus::runtime::game_host::protocol

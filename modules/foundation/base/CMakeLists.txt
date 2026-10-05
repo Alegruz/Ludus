@@ -48,6 +48,7 @@ target_sources(
     ludus_foundation_base
     PRIVATE
         src/version.cpp
+        src/types.cpp
         src/assert.cpp
         src/diagnostic_format.cpp
         src/internal/diagnostic_finish.hpp
@@ -68,10 +69,13 @@ target_sources(
             include/ludus/foundation/base/core.h
             include/ludus/foundation/base/config.h
             include/ludus/foundation/base/compiler.h
+            include/ludus/foundation/base/target.hpp
             include/ludus/foundation/base/assert.hpp
             include/ludus/foundation/base/assert_format.hpp
             include/ludus/foundation/base/diagnostic_output.hpp
             include/ludus/foundation/base/types.h
+            include/ludus/foundation/base/checked_integer.hpp
+            include/ludus/foundation/base/byte_order.hpp
             include/ludus/foundation/base/version.hpp
             "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}/ludus/foundation/base/build_metadata.hpp"
             "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}/ludus/foundation/base/assert_config.hpp"
@@ -93,6 +97,7 @@ else()
 endif()
 
 ludus_apply_project_defaults(ludus_foundation_base)
+ludus_configure_target_identity(ludus_foundation_base PUBLIC)
 set_source_files_properties(src/assert.cpp
     PROPERTIES COMPILE_OPTIONS "-fno-optimize-sibling-calls")
 
@@ -107,7 +112,9 @@ if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
 
     add_executable(ludus_foundation_base_tests)
-    target_sources(ludus_foundation_base_tests PRIVATE tests/version_tests.cpp tests/assert_tests.cpp tests/assert_format_tests.cpp)
+    target_sources(ludus_foundation_base_tests PRIVATE
+        tests/version_tests.cpp tests/assert_tests.cpp tests/assert_format_tests.cpp
+        tests/checked_integer_tests.cpp tests/byte_order_tests.cpp tests/control_codec_tests.cpp)
     target_include_directories(ludus_foundation_base_tests PRIVATE src)
     target_link_libraries(
         ludus_foundation_base_tests

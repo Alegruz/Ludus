@@ -12,7 +12,7 @@ actions; consume paint and semantic geometry. There are no widget inheritance
 hierarchies, callbacks into game code, pointers as identities, ECS dependency,
 implicit global context, script VM, or platform objects in the core.
 
-The current RHI admits one fullscreen draw, no sampled textures, vertex/index
+The current RHI admits one fullscreen draw with up to 16 KiB of uniforms, no sampled textures, vertex/index
 buffers or scissor API. Native `Ludus::Text` owns shaping/rasterization; its web
 bootstrap and GPU atlas are pending. The Editor uses Qt. Browser game controls
 already use accessible DOM. Those boundaries determine the first delivery:

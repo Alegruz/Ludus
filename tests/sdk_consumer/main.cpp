@@ -1,7 +1,11 @@
 #include <ludus/foundation/base/assert_config.hpp>
 #include <ludus/foundation/base/assert_format.hpp>
 #include <ludus/foundation/base/build_metadata.hpp>
+#include <ludus/foundation/base/byte_order.hpp>
+#include <ludus/foundation/base/checked_integer.hpp>
+#include <ludus/foundation/base/target.hpp>
 #include <ludus/foundation/base/version.hpp>
+#include <ludus/foundation/math/addressed_random.hpp>
 #include <ludus/foundation/math/dynamics.hpp>
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/quaternion.hpp>
@@ -14,11 +18,20 @@
 
 #include <iostream>
 #include <ludus/foundation/base/diagnostic_output.hpp>
+#include <span>
 #include <sys/socket.h>
 #include <unistd.h>
 
 int ExerciseInstalledWorld() noexcept;
 int ExerciseInstalledUi() noexcept;
+int ExerciseInstalledFilesystem() noexcept;
+bool ExerciseInstalledStrings() noexcept;
+int ExerciseInstalledTime() noexcept;
+bool ExerciseInstalledFluid() noexcept;
+
+static_assert(ludus::foundation::kTarget.PointerBits == sizeof(void*) * 8);
+static_assert(ludus::foundation::kTarget.Os == ludus::foundation::TargetOs::Linux);
+static_assert(LUDUS_EXPECTED_TARGET_OS == LUDUS_OS_LINUX);
 
 // Exercise the installed Ludus::Input SDK through public headers only: define a
 // button map, focus, ingest a short tap, consume one step, and check held/edge
@@ -144,6 +157,19 @@ static int ExerciseInstalledMath()
     {
         return 7;
     }
+    m::RandomKey key;
+    m::PreparedBound32 bound;
+    m::RandomBlock block;
+    ludus::foundation::uint32 ticket = 0;
+    const m::RandomAddress address{0x0123456789abcdefULL, 99, 1234};
+    if (!m::IsSuccess(m::TryMakeRandomKey(42, 7, key)) || key.Value != 0xccf635ee9e9e2fa4ULL ||
+        m::SampleUInt32(key, address) != 0x942d2d40u || !m::IsSuccess(m::TryPrepareBound32(1000, bound)) ||
+        !m::IsSuccess(m::TrySampleBounded(key, address, bound, ticket)) || ticket != 578 ||
+        !m::IsSuccess(m::TrySampleBlock(key, {address.Scope, address.Event, 1232}, block)) ||
+        block.Values[2] != 0x942d2d40u)
+    {
+        return 7;
+    }
     return 0;
 }
 
@@ -152,8 +178,48 @@ static_assert(LUDUS_ENABLE_ASSERTS == EXPECTED_ASSERTS);
 static_assert(LUDUS_BREAK_ON_CHECK == EXPECTED_CHECK_BREAK);
 int PolicyWithoutNdebug();
 
+constexpr bool PrimitiveContract(ludus::foundation::usize increment = 1) noexcept
+{
+    using namespace ludus::foundation;
+    static_assert(sizeof(usize) == sizeof(void*));
+    if (increment == 0 || increment > 255)
+    {
+        return false;
+    }
+    const uint32 word = 0x12345600 | static_cast<uint32>(increment);
+    usize size = 42;
+    uint32 length = 42;
+    int64 signedProduct = 42;
+    uint8 bytes[4]{};
+    return !TryAdd(~usize{0}, increment, size) && size == 42 && !TryMultiply(~usize{0}, increment + 1, size) &&
+           size == 42 &&
+           !TryMultiply(-int64{9223372036854775807} - 1, static_cast<int64>(increment) + 1, signedProduct) &&
+           signedProduct == 42 && !TryIntegerCast(int32{-1}, length) && length == 42 &&
+           TryWriteLittleEndian(word, bytes) && bytes[0] == increment && bytes[3] == 0x12 &&
+           TryReadLittleEndian(bytes, length) && length == word &&
+           !TryReadBigEndian(std::span<const uint8>{bytes, 3}, length) && length == word;
+}
+static_assert(PrimitiveContract());
+
 int main()
 {
+    if (!ExerciseInstalledFluid())
+    {
+        return 10;
+    }
+    if (!ExerciseInstalledStrings())
+    {
+        return 9;
+    }
+    if (!PrimitiveContract())
+    {
+        return 8;
+    }
+    if (const int result = ExerciseInstalledFilesystem(); result != 0)
+    {
+        return result;
+    }
+
     // Verify the lifecycle API and static link without requiring Vulkan on CI.
     static_assert(noexcept(ludus::graphics::rhi::Initialize({})));
     static_assert(noexcept(ludus::graphics::rhi::SetFrameTarget({})));
@@ -199,6 +265,10 @@ int main()
         return 1;
     }
 
+    if (const int timeResult = ExerciseInstalledTime(); timeResult != 0)
+    {
+        return timeResult;
+    }
     if (const int worldResult = ExerciseInstalledWorld(); worldResult != 0)
     {
         return worldResult;

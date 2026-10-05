@@ -1,8 +1,10 @@
 #include <ludus/foundation/base/compiler.h>
+#include <ludus/foundation/base/target.hpp>
 #include <ludus/foundation/base/version.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <bit>
 #include <string_view>
 #include <type_traits>
 
@@ -12,6 +14,17 @@ LUDUS_INLINE constexpr int ludus_inline_test() noexcept
 }
 
 static_assert(ludus_inline_test() == 7);
+
+TEST_CASE("target descriptor matches the actual data model", "[foundation][target]")
+{
+    namespace f = ludus::foundation;
+    static_assert(f::kTarget.PointerBits == sizeof(void*) * 8);
+    static_assert((f::kTarget.Endian == f::TargetEndian::Little) == (std::endian::native == std::endian::little));
+    static_assert(noexcept(f::TargetOsName(f::kTarget.Os)));
+    static_assert(noexcept(f::TargetArchName(f::kTarget.Arch)));
+    CHECK(std::string_view{f::TargetOsName(f::kTarget.Os)} != "Unknown");
+    CHECK(std::string_view{f::TargetArchName(f::kTarget.Arch)} != "Unknown");
+}
 
 TEST_CASE("semantic version values are exposed", "[foundation][version]")
 {

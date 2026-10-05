@@ -178,4 +178,16 @@ MathStatus TryApproachExponential(float64 current, float64 target, float64 rate,
 {
     return TryApproachExponentialImpl(current, target, rate, dt, out);
 }
+float64 Exp(float64 value) noexcept
+{
+    return std::exp(value);
+}
+float64 Floor(float64 value) noexcept
+{
+    return std::floor(value);
+}
+float64 Ceil(float64 value) noexcept
+{
+    return std::ceil(value);
+}
 } // namespace ludus::foundation::math

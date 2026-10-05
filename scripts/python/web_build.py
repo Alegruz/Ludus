@@ -16,6 +16,36 @@ from formatting import format_source
 PRESETS = ("web-emscripten-development", "web-emscripten-release")
 
 
+def analysis_commands(root: Path, entries: list[dict], tidy: str, sysroot: Path) -> list[list[str]]:
+    """Analyze owned sources and probes, leaving pinned vendor implementations alone."""
+    owned_roots = tuple(root / directory for directory in ("modules", "apps", "tools", "tests"))
+    commands = []
+    for entry in entries:
+        source = Path(entry["file"])
+        if not source.is_absolute():
+            source = Path(entry.get("directory", root)) / source
+        source = source.resolve()
+        if not any(source.is_relative_to(directory) for directory in owned_roots):
+            continue
+        command_line = entry.get("arguments") or shlex.split(entry["command"])
+        flags = []
+        index = 1
+        while index < len(command_line):
+            flag = command_line[index]
+            if flag == "-o":
+                index += 2
+                continue
+            if flag not in ("-c", entry["file"]) and not flag.startswith("--use-port="):
+                flags.append(flag)
+            index += 1
+        flags += ["-I" + str(sysroot.parent / "ports/emdawnwebgpu/emdawnwebgpu_pkg/webgpu/include"),
+                  "--target=wasm32-unknown-emscripten", f"--sysroot={sysroot}", "-DEMSCRIPTEN",
+                  "-isystem", str(sysroot / "include/c++/v1"),
+                  "-isystem", str(sysroot / "include/compat")]
+        commands.append([tidy, "--warnings-as-errors=*", str(source), "--", *flags])
+    return commands
+
+
 def command(args, engine) -> int:
     # Native workflows never invoke this handler. Reuse the calling engine module
     # so errors retain its identity when the CLI runs as __main__.
@@ -128,22 +158,10 @@ def command(args, engine) -> int:
                 raise EngineError("clang-tidy 18 is required")
             entries = json.loads((build / "compile_commands.json").read_text())
             sysroot = emscripten / "cache/sysroot"
-            for entry in entries:
-                command_line = shlex.split(entry["command"])
-                flags = []
-                index = 1
-                while index < len(command_line):
-                    flag = command_line[index]
-                    if flag == "-o":
-                        index += 2
-                        continue
-                    if flag not in ("-c", entry["file"]) and not flag.startswith("--use-port="):
-                        flags.append(flag)
-                    index += 1
-                flags += ["-I" + str(sysroot.parent / "ports/emdawnwebgpu/emdawnwebgpu_pkg/webgpu/include"), "--target=wasm32-unknown-emscripten", f"--sysroot={sysroot}", "-DEMSCRIPTEN",
-                          "-isystem", str(sysroot / "include/c++/v1"),
-                          "-isystem", str(sysroot / "include/compat")]
-                run([tidy, "--warnings-as-errors=*", entry["file"], "--", *flags], cwd=root, env=env)
+            commands = analysis_commands(root, entries, tidy, sysroot)
+            if not commands:
+                raise EngineError("No owned browser translation units found for analysis")
+            engine.run_analysis_commands(root, commands, env=env)
         return 0
     except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
         raise EngineError(str(error)) from error

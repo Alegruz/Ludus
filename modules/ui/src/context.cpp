@@ -5,6 +5,23 @@
 
 #include <new>
 
+// Thanks to Gero Gerber, "A Flexible User Interface Layout System for Divergent
+// Environments", Game Programming Gems 8, 4.10, pp. 442-452: safe regions and
+// logical dimensions inform this explicit viewport/anchor contract; no XML
+// condition hierarchy or stretched virtual screen is adopted.
+// Thanks to Greg Seegert, "Real-Time Input and UI in 3D Games", Game Programming
+// Gems 3, 1.13, pp. 109-116: ordered events and identity independent of labels
+// inform routing; platform-specific character synthesis is not adopted.
+// Thanks to Hyunwoo Ki, "Optimizing a 3D UI Engine for Mobile Devices", GPU Pro 1,
+// VI.4, pp. 397-411: clipping informs paint emission; translucent order is kept
+// rather than globally sorting by texture. These are original implementations.
+// Details and source review: docs/architecture/ui.md.
+// Thanks also to Omar Cornut's "About the IMGUI paradigm" (Dear ImGui wiki),
+// https://github.com/ocornut/imgui/wiki/About-the-IMGUI-paradigm, and the RmlUi
+// team's "Render Interface", https://mikke89.github.io/RmlUiDoc/pages/cpp_manual/
+// interfaces/render.html: value submission with retained state and a separate
+// renderer boundary inform the subsystem split, not feature or speed parity.
+
 namespace ludus::ui
 {
 namespace

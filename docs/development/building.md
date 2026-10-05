@@ -227,6 +227,26 @@ Run only clang-tidy:
 
 clang-tidy uses the selected preset's `compile_commands.json` and analyzes project sources under `modules/` and `apps/`, not generated, installed, or third-party code.
 
+`LUDUS_TIDY_JOBS` bounds concurrent analyzer processes (default 1). CI uses
+two workers per job and two native shards. To reproduce one shard:
+
+```bash
+LUDUS_TIDY_JOBS=2 LUDUS_TIDY_SHARD_COUNT=2 LUDUS_TIDY_SHARD_INDEX=0 \
+  ./scripts/check linux-clang-development --tidy
+```
+
+Shard indices start at zero; every shard must pass. The default count of one
+analyzes the full database. Invalid indices and empty shards fail explicitly.
+Browser analysis uses the same worker limit and includes owned engine,
+application, probe and consumer-fixture sources while excluding pinned vendor implementations.
+Both browser build configurations remain checked.
+
+The native Development CI job also installs and relocates the SDK and links an
+external consumer with Clang 18, without producer dependency paths. This reuses
+the existing SDK build and makes relocation a required gate. Debug runtime
+validation covers Debug assertion policies; the separate assertion matrix
+continues to exercise Profile and Release.
+
 `--all` (and `--format`) also runs the foundational include-boundary check
 (`tools/check_foundational_includes.py`): a fast, text-only gate that fails if a
 foundational header (`core.h`/`config.h`/`compiler.h`/`types.h`) pulls a
