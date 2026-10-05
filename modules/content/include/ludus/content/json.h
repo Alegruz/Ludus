@@ -2,15 +2,18 @@
 
 #include <ludus/foundation/base/core.h>
 
+#include <ludus/foundation/parsing/json.hpp>
+
 #include <ludus/content/content.h>
 
 #include <initializer_list>
+#include <span>
 #include <string_view>
 
 namespace ludus::content
 {
-// Borrowed views valid only during their Document lifetime. Runtime definitions
-// copy validated fields; neither yyjson objects nor allocations escape the codec.
+// Compatibility facade. Typed Content and Audio validation stays in its domain.
+// Borrowed nodes and strings remain valid until their document is destroyed.
 struct JsonValue final
 {
     const void* Value = nullptr;
@@ -35,15 +38,14 @@ public:
     [[nodiscard]] JsonValue Root() const noexcept;
 
 private:
-    void* mDocument = nullptr;
-    uint8* mPool = nullptr;
+    foundation::parsing::JsonDocument mDocument;
 };
 // Fixed-capacity canonical writer. Numeric spelling/escaping use the same pinned
 // C codec. Overflow reports failure and never returns a truncated document.
 class JsonWriter final
 {
 public:
-    explicit JsonWriter(std::span<uint8> output) noexcept : mOutput(output) {}
+    explicit JsonWriter(std::span<uint8> output) noexcept : mWriter(output) {}
     void Raw(std::string_view value) noexcept;
     void String(std::string_view value) noexcept;
     void Integer(uint64 value) noexcept;
@@ -52,8 +54,6 @@ public:
     [[nodiscard]] Status Finish(Bytes& output) noexcept;
 
 private:
-    std::span<uint8> mOutput;
-    usize mSize = 0;
-    bool mFailed = false;
+    foundation::parsing::JsonWriter mWriter;
 };
 } // namespace ludus::content
