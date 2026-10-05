@@ -85,9 +85,10 @@ retain schema/revision checks from the current live-reload implementation.
 ## Workspace and future viewport
 
 The default shell gives the central work area to the current authoring task.
-Project settings and Audio are separate tabs. Recent Projects is a left panel,
+Project settings and Audio are separate tabs. Welcome contains recent projects
+only while no project is open; File keeps its recent-project menu while authoring.
 Live Inspector is a right panel, and Output is a bottom panel. Menus expose every
-panel and a Reset Layout action. A toolbar reuses the menu's action objects so
+dock and a Reset Layout action. A toolbar reuses the menu's action objects so
 capability gating cannot disagree. A permanent status bar exposes workflow
 state. User layout is versioned, size-bounded, and saved on accepted close;
 missing, oversized, or incompatible settings fall back to a useful default.
@@ -121,6 +122,7 @@ system rather than adding a second telemetry stack.
 | Stage | User result | Acceptance |
 | --- | --- | --- |
 | S1: shell | Work areas and panels fit a normal desktop; layout can be recovered | Existing workflows pass; hide/show/reset/restart/corrupt-settings regressions; offscreen screenshot; native interaction remains a separate check |
+| S1 follow-up: project UX | Automatic verified creation, folder picker, Welcome recents, Close Project and discoverable shortcuts | Draft/cancel/failure protection; shared SDK selection; dark/light border review; direction concepts |
 | S2: document interactions | Predictable edit/save/undo and stable focused fields | Unsaved switching/close policy; no heartbeat resets; scoped shortcuts; failure preserves drafts |
 | S3: content browser | Find/import/reimport an asset and understand failure | Stable IDs; cancelled/stale jobs; staged publication; large-list measurements |
 | S4: scene authoring | Select, transform, undo, save, then Play | Typed scene document; failed load rollback; revision-safe picking; actual rendered-frame and native input acceptance |

@@ -1,17 +1,66 @@
+#include "internal/project_creation_dialog.h"
 #include "internal/project_setup_dialog.h"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
+#include <QFileDialog>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QTemporaryDir>
 
 using namespace ludus::editor;
+
+TEST_CASE("New Project uses a parent picker and protects existing destinations", "[editor][setup]")
+{
+    QTemporaryDir directory;
+    ProjectCreationDialog dialog;
+    dialog.show();
+    auto* name = dialog.findChild<QLineEdit*>(QStringLiteral("newProjectName"));
+    auto* location = dialog.findChild<QLineEdit*>(QStringLiteral("newProjectLocation"));
+    auto* sdk = dialog.findChild<QLineEdit*>(QStringLiteral("newProjectSdk"));
+    auto* browse = dialog.findChild<QPushButton*>(QStringLiteral("browseProjectLocation"));
+    auto* buttons = dialog.findChild<QDialogButtonBox*>();
+    REQUIRE(name != nullptr);
+    REQUIRE(location != nullptr);
+    REQUIRE(sdk != nullptr);
+    REQUIRE(browse != nullptr);
+    REQUIRE(buttons != nullptr);
+    CHECK_FALSE(sdk->isVisible());
+    location->setText(directory.path());
+    name->setText(QStringLiteral("My Game"));
+    CHECK(buttons->button(QDialogButtonBox::Ok)->isEnabled());
+    CHECK(dialog.Options().Destination == directory.filePath(QStringLiteral("My Game")));
+    CHECK(dialog.Options().Sdk.isEmpty());
+    CHECK_FALSE(dialog.Options().PrepareEngine);
+    REQUIRE(QDir(directory.path()).mkdir(QStringLiteral("My Game")));
+    name->setText(QStringLiteral("Other"));
+    name->setText(QStringLiteral("My Game"));
+    CHECK_FALSE(buttons->button(QDialogButtonBox::Ok)->isEnabled());
+    for (const auto& invalid : {QString(), QStringLiteral("../escape"), QStringLiteral("."), QStringLiteral("..")})
+    {
+        name->setText(invalid);
+        CHECK_FALSE(buttons->button(QDialogButtonBox::Ok)->isEnabled());
+    }
+    name->setText(QStringLiteral("New"));
+    location->setText(QStringLiteral("relative"));
+    CHECK_FALSE(buttons->button(QDialogButtonBox::Ok)->isEnabled());
+    browse->click();
+    QApplication::processEvents();
+    auto* picker = dialog.findChild<QFileDialog*>();
+    REQUIRE(picker != nullptr);
+    CHECK(picker->fileMode() == QFileDialog::Directory);
+    picker->reject();
+    CHECK(location->text() == QStringLiteral("relative"));
+    dialog.reject();
+    CHECK(QDir(directory.path()).entryList(QDir::Dirs | QDir::NoDotAndDotDot) ==
+          QStringList{QStringLiteral("My Game")});
+}
 
 TEST_CASE("Project repair reuses the selected engine without asking for paths", "[editor][setup]")
 {

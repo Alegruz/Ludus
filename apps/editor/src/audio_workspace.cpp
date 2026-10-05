@@ -252,6 +252,11 @@ void AudioWorkspace::SetRoot(const QString& root)
 void AudioWorkspace::Reload()
 {
     List_->clear();
+    if (Root_.isEmpty())
+    {
+        Message_->setText(QStringLiteral("Open a project to browse audio content."));
+        return;
+    }
     ludus::content::Bytes bytes;
     ludus::content::Diagnostic diagnostic;
     const auto root = Root_.toUtf8();

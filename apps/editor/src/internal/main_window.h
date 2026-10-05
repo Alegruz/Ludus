@@ -57,6 +57,8 @@ private Q_SLOTS:
     void OnSetupProject();
     void OnDebuggerSetupRequested();
     void OnNewProject();
+    void OnCloseProject();
+    void ShowShortcuts();
     void OnSetupRelease();
     void OnPackageRelease();
 
@@ -73,6 +75,7 @@ private:
     void InitializeWorkspace();
     void ResetWorkspaceLayout();
     void SaveWorkspaceLayout() const;
+    [[nodiscard]] bool ConfirmProjectChange(const QString& action);
     void OpenProjectPath(const QString& path);
     [[nodiscard]] ProjectDescriptor DraftFromFields() const;
     void RenderFields();
@@ -106,7 +109,9 @@ private:
     QListWidget* ArgsList_ = nullptr;
 
     // Actions / status.
-    QDockWidget* RecentDock_ = nullptr;
+    QWidget* Welcome_ = nullptr;
+    QPushButton* WelcomeNewButton_ = nullptr;
+    QAction* CloseProjectAction_ = nullptr;
     QListWidget* RecentList_ = nullptr;
     QLabel* RecentEmptyLabel_ = nullptr;
     QPushButton* RecentOpenButton_ = nullptr;

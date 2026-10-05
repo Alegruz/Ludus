@@ -81,3 +81,33 @@ version, build profile, task time, mistakes, and assistance required.
 Native input, screen-reader operation, actual host rendering, and measured task
 latencies remain acceptance work; unit tests and offscreen images do not certify
 them. No external user study was performed in this change.
+
+## Pre-S2 feedback review (2026-10-05)
+
+The supplied screenshot showed ambiguous dialog/panel edges, manual SDK selection,
+a destination without Browse, and a persistent recent-project column. The user's
+mental model is “this editor creates a game with its engine.” Updated design:
+Name/Location/Create with automatic backend discovery, native parent-folder picker,
+explicit resulting folder, and Advanced override. Recents move to Welcome/File;
+Close Project retires project identity after Save/Discard/Cancel and quiescence.
+Shortcuts share QAction/capability policy and have a generated help view.
+
+Consulted the TOC again, then read David Lightbown's 2015 ch. 5 pp. 112–115
+(additional local PDF excerpts, pp. 122–127 consulted) on progressive disclosure, alongside previously reviewed mental
+models/hierarchy/evaluation excerpts. Thanks to Lightbown for these task-centred
+ideas, and Graham Wihlidal for ch. 37's responsive/cancellable processing guidance.
+Code comments credit the actual consulted sources; no copied book code is used.
+Native folder selection and shortcut APIs were checked against Qt Group's
+[QFileDialog](https://doc.qt.io/qt-6/qfiledialog.html) and
+[QKeySequence](https://doc.qt.io/qt-6/qkeysequence.html) documentation; implementation
+uses APIs available in installed Qt 6.4.2.
+
+[Three professional concepts](editor-art-direction.md) compare philosophy, task
+flow and appearance before a final direction is selected. The current native
+change preserves platform fonts/palette/controls and adds explicit outlines.
+[Browser strategy](editor-browser-strategy.md) ranks demo/content editing/cloud
+builds separately, with source-backed constraints and explicit experiment gates.
+
+Automated evidence and captures are recorded in the PR. Offscreen interaction
+checks and screenshots do not establish native compositor/window-decoration,
+high-DPI or system-picker acceptance; use the task script above on the desktop.

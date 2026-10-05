@@ -41,7 +41,7 @@ namespace ludus::editor
 {
 namespace
 {
-constexpr foundation::int32 LAYOUT_VERSION = 1;
+constexpr foundation::int32 LAYOUT_VERSION = 2;
 constexpr foundation::int64 MAX_SETTINGS_BYTES = foundation::int64{64} * 1024;
 constexpr foundation::int32 MAX_STATE_BYTES = 32 * 1024;
 LUDUS_DEFINE_LOG_CATEGORY(LOG_EDITOR_LAYOUT, "Editor.Layout");
@@ -161,9 +161,13 @@ void MainWindow::BuildUi()
     StatusLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     statusBar()->addWidget(StatusLabel_, 1);
 
-    RecentDock_ = new QDockWidget(QStringLiteral("Recent Projects"), this);
-    RecentDock_->setObjectName(QStringLiteral("recentProjectsDock"));
-    auto* recentPanel = new QWidget(RecentDock_);
+    // Thanks to David Lightbown, Designing the User Experience of Game
+    // Development Tools (2015), ch. 5, pp. 80-86, 112-115: show task-relevant choices
+    // progressively. Recents belong to Welcome and File, freeing authoring space.
+    // https://www.uxofgametools.com/; docs/architecture/editor-design-review.md.
+    Welcome_ = new QWidget(WorkTabs_);
+    Welcome_->setObjectName(QStringLiteral("projectWelcome"));
+    auto* recentPanel = Welcome_;
     auto* recentLayout = new QVBoxLayout(recentPanel);
     RecentEmptyLabel_ =
         new QLabel(QStringLiteral("No recent projects yet. Open a project to add it here."), recentPanel);
@@ -175,12 +179,25 @@ void MainWindow::BuildUi()
     RecentOpenButton_ = new QPushButton(QStringLiteral("Open Selected"), recentPanel);
     RecentOpenButton_->setObjectName(QStringLiteral("openRecentProjectButton"));
     BrowseProjectButton_ = new QPushButton(QStringLiteral("Open Project..."), recentPanel);
+    recentLayout->setContentsMargins(24, 24, 24, 24);
+    recentLayout->setSpacing(12);
+    auto* title = new QLabel(QStringLiteral("Welcome to Ludus"), recentPanel);
+    auto font = title->font();
+    font.setBold(true);
+    title->setFont(font);
+    auto* intro = new QLabel(QStringLiteral("Create a project or continue where you left off."), recentPanel);
+    intro->setWordWrap(true);
+    WelcomeNewButton_ = new QPushButton(QStringLiteral("New Project..."), recentPanel);
+    WelcomeNewButton_->setObjectName(QStringLiteral("welcomeNewProject"));
+    recentLayout->addWidget(title);
+    recentLayout->addWidget(intro);
+    recentLayout->addWidget(WelcomeNewButton_);
+    recentLayout->addWidget(new QLabel(QStringLiteral("Recent projects"), recentPanel));
     recentLayout->addWidget(RecentEmptyLabel_);
     recentLayout->addWidget(RecentList_);
     recentLayout->addWidget(RecentOpenButton_);
     recentLayout->addWidget(BrowseProjectButton_);
-    RecentDock_->setWidget(recentPanel);
-    addDockWidget(Qt::LeftDockWidgetArea, RecentDock_);
+    WorkTabs_->insertTab(0, Welcome_, QStringLiteral("Welcome"));
     connect(RecentList_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
         const QString path = item->data(Qt::UserRole).toString();
         QTimer::singleShot(0, this, [this, path]() { OpenProjectPath(path); });
@@ -210,7 +227,7 @@ void MainWindow::BuildUi()
 void MainWindow::InitializeWorkspace()
 {
     resize(1100, 760);
-    resizeDocks({RecentDock_, InspectorDock_}, {220, 300}, Qt::Horizontal);
+    resizeDocks({InspectorDock_}, {300}, Qt::Horizontal);
     resizeDocks({OutputDock_}, {180}, Qt::Vertical);
     DefaultLayout_ = saveState(LAYOUT_VERSION);
     if (WorkspaceSettingsFile_.isEmpty())
@@ -262,13 +279,13 @@ void MainWindow::ResetWorkspaceLayout()
 {
     (void)restoreState(DefaultLayout_, LAYOUT_VERSION);
     // Also recover a pane that was floating when the user requested reset.
-    for (auto* dock : {RecentDock_, InspectorDock_, OutputDock_})
+    for (auto* dock : {InspectorDock_, OutputDock_})
     {
         dock->setFloating(false);
         dock->show();
     }
     GameToolbar_->show();
-    resizeDocks({RecentDock_, InspectorDock_}, {220, 300}, Qt::Horizontal);
+    resizeDocks({InspectorDock_}, {300}, Qt::Horizontal);
     resizeDocks({OutputDock_}, {180}, Qt::Vertical);
 }
 

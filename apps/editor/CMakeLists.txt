@@ -74,6 +74,8 @@ add_executable(ludus_editor
     src/main_window.cpp
     src/main_window_layout.cpp
     src/project_setup_dialog.cpp
+    src/project_creation_dialog.cpp
+    src/workspace_style.cpp
     src/controller.cpp
     src/controller_play.cpp
 )
@@ -117,6 +119,7 @@ if(LUDUS_BUILD_TESTS)
         tests/log_buffer_tests.cpp
         tests/controller_tests.cpp
         tests/project_setup_dialog_tests.cpp
+        tests/project_lifecycle_tests.cpp
         tests/workspace_layout_tests.cpp
         tests/recent_projects_tests.cpp
         tests/source_watch_tests.cpp
@@ -134,7 +137,9 @@ if(LUDUS_BUILD_TESTS)
         src/controller_play.cpp
         src/main_window.cpp
         src/main_window_layout.cpp
-        src/project_setup_dialog.cpp)
+        src/project_setup_dialog.cpp
+        src/project_creation_dialog.cpp
+        src/workspace_style.cpp)
     target_link_libraries(ludus_editor_tests
         PRIVATE
             ludus_editor_core

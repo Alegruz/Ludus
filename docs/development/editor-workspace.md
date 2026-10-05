@@ -76,18 +76,12 @@ and Stop remain explicit actions.
 
 ## Recent projects
 
-The **Recent Projects** panel and **File → Recent Projects** menu reopen saved
-descriptors directly. Double-click a panel entry or select it and choose
-**Open Selected**. The editor remembers the ten most recently opened projects
-across restarts, with their names and absolute descriptor paths. Opening a project
-from the command line or completing New Project adds it too. Failed opens do not
-change the list; opening an entry again moves it to the top.
-
-Reopening uses the same unsaved-change prompts and read-only setup checks as
-**Open Project**. Missing descriptors stay marked **(missing)**; trying to open
-one reports the error and retains the current workspace. **File → Clear Recent
-Projects** clears history without deleting or changing any project. **View →
-Recent Projects** restores a closed panel.
+The **Welcome** work area shows recent projects only when no project is open.
+The **File → Recent Projects** menu remains available while authoring. Double-click
+an entry or choose **Open Selected**. The editor remembers ten successful opens
+across restarts, including command-line and newly created projects. Missing paths
+are labelled; a failed open preserves the current project. **Clear Recent Projects**
+clears history without deleting projects. Recents no longer reserve a dock column.
 
 History is local to the user, in `$XDG_CONFIG_HOME/Ludus/Editor/recent-projects.json`
 (normally `~/.config/Ludus/Editor/recent-projects.json`). It is saved atomically,
@@ -132,8 +126,10 @@ initializes and builds the trusted tooling checkout, then installs the desktop
 SDK before repairing the game project. This can download dependencies; it
 does not install system packages or execute the game project’s bootstrap hooks.
 Web SDK acquisition remains an explicit engine-tooling step; select an installed
-browser engine in this dialog. The separate New Project dialog still offers
-the engine preparation checkbox. All child commands use the existing streaming output,
+browser engine in this dialog. New Project asks only for Name and Location, with a Browse button and a
+resulting-folder preview. Choose **Create Project** to select the engine and verify
+the project. **Advanced engine selection** allows a custom Development SDK;
+normal creation requires no SDK path or preparation checkbox. All child commands use the existing streaming output,
 Stop, process-group cleanup and single-operation ownership.
 
 New Project creates the bundled minimal v3 native template in a sibling staging
@@ -154,7 +150,43 @@ ludus project create /path/to/new-game --name MyGame --sdk /path/to/sdk --tools 
 ```
 
 `create --engine` without `--tools` can still generate metadata without an SDK.
-Use `--tools` with an installed SDK for the verified creation journey.
+Use `--tools` for verified creation. Without `--engine` or `--sdk`, CLI and
+editor share automatic selection: explicit Advanced/CLI SDK, then an absolute
+`LUDUS_SDK_PREFIX`, then the editor tooling checkout's current native Development
+install, then automatic preparation of that engine. Invalid explicit/environment
+selections fail visibly; they never fall back silently. A missing or stale
+editor-owned install is prepared only after Create. ABI/compiler validation and
+real preset discovery/configure/build/tests still gate publication. Paths remain
+in ignored machine-local settings. Reuse requires matching checkout revision;
+source-checkout builds are the supported editor distribution today.
+
+```bash
+ludus project create /path/to/new-game --name MyGame --tools /path/to/Ludus
+```
+
+## Closing and shortcuts
+
+**File → Close Project** returns to Welcome without quitting. Save/Discard/Cancel
+protect project settings and audio changes; Cancel or failed Save preserves the
+project. Stop active jobs/Play before closing. Close clears the project identity,
+setup result, discovery cache and audio binding, preserving history and monotonically
+increasing job IDs/epochs so callbacks cannot target a later project.
+
+| Shortcut (Linux) | Action |
+| --- | --- |
+| Ctrl+N / Ctrl+O | New / Open Project |
+| Ctrl+S | Save Project Settings (focused document routing is S2) |
+| Ctrl+Shift+W | Close Project |
+| Ctrl+Shift+B | Build |
+| Ctrl+F5 / F5 | Build and Run / Build and Debug in RAD |
+| F6 / Shift+F6 | Build and Play / Stop |
+| F1 | Keyboard Shortcuts help |
+
+The help dialog reads the same QAction bindings used by menus/toolbars. Qt's
+standard New/Open/Save bindings follow the platform; actions remain window-scoped
+and use controller capability gates. Document undo/redo and configurable mappings
+remain S2 work. See [art direction](../architecture/editor-art-direction.md) and
+[browser strategy](../architecture/editor-browser-strategy.md).
 
 ## The project descriptor (version 1)
 

@@ -53,13 +53,12 @@ void Reset(MainWindow& window)
 
 void CheckDefaultPanels(MainWindow& window)
 {
-    auto* recent = Dock(window, QStringLiteral("recentProjectsDock"));
+    CHECK(window.findChild<QDockWidget*>(QStringLiteral("recentProjectsDock")) == nullptr);
     auto* inspector = Dock(window, QStringLiteral("liveInspectorDock"));
     auto* output = Dock(window, QStringLiteral("outputDock"));
-    CHECK(window.dockWidgetArea(recent) == Qt::LeftDockWidgetArea);
     CHECK(window.dockWidgetArea(inspector) == Qt::RightDockWidgetArea);
     CHECK(window.dockWidgetArea(output) == Qt::BottomDockWidgetArea);
-    for (auto* dock : {recent, inspector, output})
+    for (auto* dock : {inspector, output})
     {
         CHECK_FALSE(dock->isHidden());
         CHECK_FALSE(dock->isFloating());
@@ -234,6 +233,12 @@ TEST_CASE("Authoring areas remain reachable at smaller workspace sizes", "[edito
     REQUIRE(audio != nullptr);
     CHECK(tabs->indexOf(project) >= 0);
     CHECK(tabs->indexOf(audio) >= 0);
+    QFile descriptor(directory.filePath(QStringLiteral("ludus.project.json")));
+    REQUIRE(descriptor.open(QIODevice::WriteOnly));
+    descriptor.write(QByteArrayLiteral(R"json({"version":1,"name":"demo","provider":"cmake",
+"source_dir":".","preset":"linux-clang-debug","target":"app","run":{"cwd":".","args":[]}})json"));
+    descriptor.close();
+    controller.OpenProject(descriptor.fileName());
     // Optional captures are for human review, never a golden-image assertion.
     const auto captures = qEnvironmentVariable("LUDUS_EDITOR_LAYOUT_CAPTURE");
     for (const auto& size : {QSize(1100, 760), QSize(900, 640)})
