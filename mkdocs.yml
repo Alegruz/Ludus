@@ -77,6 +77,14 @@ nav:
       - How Ludus fits together: learn/architecture.md
       - Reference reading paths: learn/references.md
       - Glossary: learn/glossary.md
+  - Engine architecture:
+      - Architecture map: architecture/index.md
+      - Foundation and jobs: architecture/foundation.md
+      - Startup and shutdown: architecture/lifecycle.md
+      - Platform and rendering: architecture/rendering.md
+      - Worlds and frame updates: architecture/world.md
+      - Content and audio: architecture/content.md
+      - Runtime and editor: architecture/runtime.md
   - Contribute:
       - Contribute to Ludus: contribute/index.md
       - Improve this wiki: contribute/wiki.md

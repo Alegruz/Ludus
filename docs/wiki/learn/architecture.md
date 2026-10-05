@@ -46,6 +46,11 @@ and [module lifecycle contract](https://github.com/Alegruz/Ludus/blob/main/docs/
 
 ## Where to learn next
 
+The [engine architecture map](../architecture/index.md) provides subsystem
+guides for foundations, jobs, lifecycle, rendering, worlds, content and the
+GameHost/editor boundary. Each guide separates implemented behavior from future
+design and links to its source, contracts and evidence.
+
 Choose one concrete task, inspect its source and tests, then use a
 [reference reading path](references.md) to compare design options. Design and
 evidence documents describe their own baseline and acceptance scope; check both

@@ -35,6 +35,12 @@ a project, work in the editor, and understand the systems behind each workflow.
 
     [How Ludus fits together →](learn/architecture.md)
 
+- **Explore engine architecture**
+
+    Follow module ownership, startup, rendering, simulation and runtime boundaries.
+
+    [Engine architecture map →](architecture/index.md)
+
 </div>
 
 ## What to expect
