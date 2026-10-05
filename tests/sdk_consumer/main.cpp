@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 int ExerciseInstalledWorld() noexcept;
+int ExerciseInstalledUi() noexcept;
 int ExerciseInstalledFilesystem() noexcept;
 bool ExerciseInstalledStrings() noexcept;
 int ExerciseInstalledTime() noexcept;
@@ -271,6 +272,10 @@ int main()
     if (const int worldResult = ExerciseInstalledWorld(); worldResult != 0)
     {
         return worldResult;
+    }
+    if (const int uiResult = ExerciseInstalledUi(); uiResult != 0)
+    {
+        return uiResult;
     }
     if (const int inputResult = ExerciseInstalledInput(); inputResult != 0)
     {
