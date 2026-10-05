@@ -36,6 +36,7 @@ static_assert(ludus::foundation::kTarget.PointerBits == sizeof(void*) * 8);
 static_assert(ludus::foundation::kTarget.Os == ludus::foundation::TargetOs::Linux);
 static_assert(LUDUS_EXPECTED_TARGET_OS == LUDUS_OS_LINUX);
 int ExerciseInstalledThreading() noexcept;
+bool ExerciseInstalledLocalization() noexcept;
 
 // Exercise the installed Ludus::Input SDK through public headers only: define a
 // button map, focus, ingest a short tap, consume one step, and check held/edge
@@ -210,6 +211,10 @@ int main()
     if (!ExerciseInstalledParsing())
     {
         return 11;
+    }
+    if (!ExerciseInstalledLocalization())
+    {
+        return 12;
     }
     if (!ExerciseInstalledFluid())
     {
