@@ -1,0 +1,31 @@
+# Troubleshooting
+
+Read the operation's first useful diagnostic in **Output**, then check the
+selected project, profile and engine identity. Retry after correcting the input;
+avoid repeatedly rebuilding an incompatible or stale setup.
+
+| Symptom | Check and next step |
+| --- | --- |
+| Editor executable missing | Prepare it with `./init.sh --cli --with-editor`; the editor launcher only launches existing builds |
+| Qt/platform plugin error | Verify Qt 6.4+ Core/Gui/Widgets and the appropriate native display plugin; use the supported Linux x64 host |
+| New Project cannot create a folder | Use an absolute Location, a valid name and an absent destination; check parent-folder permissions |
+| Automatic engine selection fails | Check an explicit Advanced override or `LUDUS_SDK_PREFIX`; invalid overrides do not silently fall back |
+| Missing or stale local CMake presets | Run Check Setup, then explicit Repair Project Setup with the intended compatible engine |
+| SDK incompatible or lock unresolved | Inspect flavor, compiler/ABI/components and locked release; install the required release or choose a compatible local override |
+| Operation reports Busy | Another managed operation owns that build tree; let it complete or stop it before retrying |
+| Close Project disabled | Stop owned build/run/Play work and wait for confirmed cleanup |
+| Save failed or external file conflict | Keep the draft; inspect permissions and reconcile the external file before saving again |
+| Panel missing | Use View to show it, or Reset Layout to restore panel placement |
+| Browser runtime cannot start | Follow the browser/device acceptance guide; documentation hosting does not establish WebGPU support |
+
+## Gather a useful report
+
+Record the Ludus commit/SDK identity, host OS, tool versions, build profile,
+project action, relevant Output and the smallest reproducible steps. State the
+expected result and what actually happened. Remove credentials and unrelated
+personal information from attached logs.
+
+Use [GitHub issues](https://github.com/Alegruz/Ludus/issues) for actionable reports.
+For build-tool checks in an engine checkout, `./scripts/doctor` reports the tool
+environment. See [project setup](project-setup.md) and
+[build/debug guidance](build-and-debug.md) for targeted recovery.

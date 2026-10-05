@@ -1,0 +1,79 @@
+# Thanks to Martin Donath, Material for MkDocs, "Getting started", "Setting up
+# site search" and "Changing the fonts": use the maintained Markdown theme,
+# local search and system fonts rather than maintaining a custom wiki renderer.
+# https://squidfunk.github.io/mkdocs-material/; docs/development/wiki.md.
+site_name: Ludus Wiki
+site_description: Practical guides, explanations and references for using and contributing to Ludus.
+site_url: https://alegruz.github.io/Ludus/
+repo_url: https://github.com/Alegruz/Ludus
+repo_name: Alegruz/Ludus
+edit_uri: edit/main/docs/wiki/
+docs_dir: docs/wiki
+site_dir: out/wiki
+theme:
+  name: material
+  language: en
+  font: false
+  logo: assets/ludus.svg
+  favicon: assets/ludus.svg
+  palette:
+    - scheme: default
+      primary: custom
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: custom
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.action.edit
+    - content.code.copy
+plugins:
+  - search
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+extra_css:
+  - assets/wiki.css
+validation:
+  nav:
+    omitted_files: warn
+  links:
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
+nav:
+  - Start here: index.md
+  - Getting started:
+      - Install and launch: getting-started/install.md
+      - Create your first project: getting-started/first-project.md
+      - Current capabilities: getting-started/status.md
+  - Guides:
+      - Editor workspace: guides/editor.md
+      - Build, run and debug: guides/build-and-debug.md
+      - Repair project setup: guides/project-setup.md
+      - Engine configuration: guides/configuration.md
+      - Audio workflow: guides/audio.md
+      - Package a game: guides/releases.md
+      - Troubleshooting: guides/troubleshooting.md
+  - Learn:
+      - How Ludus fits together: learn/architecture.md
+      - Reference reading paths: learn/references.md
+      - Glossary: learn/glossary.md
+  - Contribute:
+      - Contribute to Ludus: contribute/index.md
+      - Improve this wiki: contribute/wiki.md

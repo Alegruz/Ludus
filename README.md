@@ -1,6 +1,11 @@
 # Ludus
 
-Ludus is currently a minimal C++23 engine skeleton for rendering research and engine architecture experiments. Milestone 0 intentionally contains infrastructure only: one small foundation library, unit tests, a smoke executable, SDK installation, and an external `find_package()` consumer.
+Ludus is a C++23 engine and toolset in active development, with modular runtime
+systems, installed SDK/CLI workflows and an optional native editor.
+
+Start with [Ludus Wiki](https://alegruz.github.io/Ludus/) for task guides,
+explanations and reference reading paths. Its
+[Markdown sources](docs/wiki/index.md) are also available in this checkout.
 
 ## Supported Host
 
@@ -154,7 +159,13 @@ when using your own hook setup. CI verifies formatting using the same formatter.
 
 ## Current Limitations
 
-Milestone 0 does not include rendering, Vulkan, windowing, input, assets, jobs, ECS, reflection, serialization, plugins, an editor, or game code. Windows launchers exist only as thin future-facing wrappers around the shared Python entry point; the supported automatic onboarding host is Ubuntu Linux.
+The native reference environment is Ubuntu 24.04 on Linux x64. The editor is
+optional; focused document editing/undo, general scene authoring and embedded
+play remain later milestones. Browser runtime work has its own pinned toolchain
+and device acceptance. Windows launchers remain future-facing wrappers; they do
+not establish Windows native onboarding support. See the wiki's
+[capability guide](docs/wiki/getting-started/status.md) and subsystem evidence
+for implemented paths and their limits.
 
 ## More Detail
 

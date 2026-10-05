@@ -1,0 +1,32 @@
+# Current capabilities
+
+These guides describe the implemented paths in the repository, with a supported
+environment stated for each task. A module's API or a design document alone is
+not a claim of production readiness on every platform.
+
+| Area | Available starting point | Boundary |
+| --- | --- | --- |
+| Desktop editor | Project creation/open/close, build/run/debug, recent history, panel layout and shortcuts | Linux x64 native Qt; the game has its own window |
+| Independent games | Installed CLI, SDK selection, local presets, setup checks and staged creation | Initial native reference toolchain; release identity and SDK compatibility are validated |
+| Audio | Native content definitions, catalog, editing and runtime-backed preview | Check the audio evidence for device and hosted acceptance limits |
+| Configuration | Typed runtime schema, cooked layers, sparse preferences and offline editor preview | Preference edits apply to a future launch, not the running host |
+| Browser runtime | Pinned Emscripten/WebGPU Foundation, Platform, RHI paths and smoke samples | Runtime work has separate browser/device acceptance; this website contains documentation |
+| Engine systems | Foundation, math, graphics, content, gameplay/world and physics modules | Consult each module's implementation/evidence before relying on a feature |
+
+## Next editor stages
+
+S1 established the workspace and panel structure. The pre-S2 usability increment
+added automatic project creation, a location picker, Close Project and shortcuts.
+This wiki is the documentation increment before S2.
+
+**S2** will establish focused document editing, save routing, undo/redo and
+interaction preservation during background updates. General scene authoring,
+embedded play and a full online editor are separate later work.
+
+## Evidence and design
+
+- [Editor architecture and milestones](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-architecture.md)
+- [Audio implementation and remaining acceptance](https://github.com/Alegruz/Ludus/blob/main/docs/development/audio-content-evidence.md)
+- [Integrated browser smoke evidence](https://github.com/Alegruz/Ludus/blob/main/docs/development/webgpu-w6-evidence.md)
+- [Browser product strategy](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-browser-strategy.md)
+- [Editor art-direction studies](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-art-direction.md)
