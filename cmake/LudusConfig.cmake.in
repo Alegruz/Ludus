@@ -136,4 +136,18 @@ set(CMAKE_PREFIX_PATH "${_ludus_saved_prefix_path}")
 unset(_ludus_saved_prefix_path)
 unset(_ludus_dep_search)
 
+# Resolve requested components from actual exported targets, including modules
+# available only in a native or browser SDK. Optional missing components must
+# not make an otherwise usable SDK fail.
+foreach(_ludus_component IN LISTS Ludus_FIND_COMPONENTS)
+    if(TARGET "Ludus::${_ludus_component}")
+        set("Ludus_${_ludus_component}_FOUND" TRUE)
+    else()
+        set("Ludus_${_ludus_component}_FOUND" FALSE)
+        if(Ludus_FIND_REQUIRED_${_ludus_component})
+            set(Ludus_NOT_FOUND_MESSAGE "Requested Ludus SDK component '${_ludus_component}' is unavailable")
+        endif()
+    endif()
+endforeach()
+unset(_ludus_component)
 check_required_components(Ludus)

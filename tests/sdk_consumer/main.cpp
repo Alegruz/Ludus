@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 int ExerciseInstalledWorld() noexcept;
+int ExerciseInstalledUi() noexcept;
 
 // Exercise the installed Ludus::Input SDK through public headers only: define a
 // button map, focus, ingest a short tap, consume one step, and check held/edge
@@ -201,6 +202,10 @@ int main()
     if (const int worldResult = ExerciseInstalledWorld(); worldResult != 0)
     {
         return worldResult;
+    }
+    if (const int uiResult = ExerciseInstalledUi(); uiResult != 0)
+    {
+        return uiResult;
     }
     if (const int inputResult = ExerciseInstalledInput(); inputResult != 0)
     {

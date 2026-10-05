@@ -119,6 +119,8 @@ add_subdirectory(modules/gameplay/world)
 add_subdirectory(modules/foundation/math)
 add_subdirectory(modules/foundation/logging)
 add_subdirectory(modules/foundation/profiling)
+# Runtime Ui has no Platform/RHI/Text dependency and builds on both toolchains.
+add_subdirectory(modules/ui)
 # Input is configured before Platform: Platform depends on Input for the
 # normalized keyboard record/sink vocabulary (one-way dependency).
 add_subdirectory(modules/input)
@@ -228,7 +230,7 @@ write_basic_package_version_file(
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationContainers FoundationMath FoundationLogging
-    FoundationProfiling Input Audio Content AudioContent GameplayWorld GameApi)
+    FoundationProfiling Input Audio Content AudioContent GameplayWorld GameApi Ui)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()
