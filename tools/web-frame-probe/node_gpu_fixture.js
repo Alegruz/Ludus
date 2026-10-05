@@ -41,7 +41,7 @@ if (typeof window === 'undefined' && typeof process === 'object') {
     let lose;
     let scopes = 0;
     const result = {
-      features: new Set(), limits: new Proxy({maxTextureDimension2D: 4096}, {get: (o, k) => o[k] ?? 0}),
+      features: new Set(), limits: new Proxy({maxTextureDimension2D: 4096, maxUniformBufferBindingSize: 65536, maxBufferSize: 268435456}, {get: (o, k) => o[k] ?? 0}),
       queue: {submit(commands) {assert(commands.length === 1 && commands[0].ended, 'submit unfinished pass'); ++stats.submitted;}},
       lost: new Promise(resolve => {lose = resolve;}),
       pushErrorScope() {},
@@ -73,7 +73,7 @@ if (typeof window === 'undefined' && typeof process === 'object') {
     };
     ++stats.devices; currentDevice = result; return result;
   }
-  const adapter = {features: new Set(), limits: {maxTextureDimension2D: 4096}, requestDevice(desc) {
+  const adapter = {features: new Set(), limits: {maxTextureDimension2D: 4096, maxUniformBufferBindingSize: 65536, maxBufferSize: 268435456}, requestDevice(desc) {
     assert(!desc.requiredFeatures?.length && !Object.keys(desc.requiredLimits || {}).length, 'elevated requirements');
     return Promise.resolve(device());
   }};

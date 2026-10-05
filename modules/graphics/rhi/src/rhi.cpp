@@ -49,11 +49,16 @@ void Fail(uint32 token, StartupError error) noexcept
     gToken = 0;
     gStartup.State = error == StartupError::DeviceLost ? StartupState::DeviceLost : StartupState::Failed;
     gStartup.Error = error;
+    gStartup.Capabilities = {};
+    if (error != StartupError::RequirementsUnsatisfied)
+    {
+        gStartup.UnmetRequirement = RequirementFailure::None;
+    }
     gFrame = false;
     internal::ReleaseResources();
     backend::Shutdown();
 }
-void Complete(uint32 token, StartupError error, uint32 maxTextureDimension) noexcept
+void Complete(uint32 token, StartupError error, const BackendLimits& limits) noexcept
 {
     if (!Current(token) || gStartup.State != StartupState::Pending)
     {
@@ -64,8 +69,39 @@ void Complete(uint32 token, StartupError error, uint32 maxTextureDimension) noex
         Fail(token, error);
         return;
     }
+    // Clamp the negotiated device limit to the bounded engine API and round
+    // down to an accepted uniform size. Adapter support alone is insufficient.
+    const auto maxTextureDimension = limits.MaxFrameDimension2D;
+    const auto maxUniformBufferSize = limits.MaxUniformBufferSize;
+    const auto uniformLimit =
+        static_cast<uint32>(maxUniformBufferSize < UNIFORM_CAPACITY ? maxUniformBufferSize : UNIFORM_CAPACITY);
+    const auto uniformSize = uniformLimit - uniformLimit % 16;
+    if (maxTextureDimension == 0 || uniformSize < 16)
+    {
+        Fail(token, StartupError::DeviceUnavailable);
+        return;
+    }
+    gStartup.UnmetRequirement =
+        gStartup.Requirements.MinFrameDimension2D > maxTextureDimension ? RequirementFailure::FrameDimension2D
+        : gStartup.Requirements.MinUniformBufferSize > uniformSize      ? RequirementFailure::UniformBufferSize
+                                                                        : RequirementFailure::None;
+    if (gStartup.UnmetRequirement != RequirementFailure::None)
+    {
+        Fail(token, StartupError::RequirementsUnsatisfied);
+        return;
+    }
     RecordAttempt(token, gStartup.SelectedBackend, StartupError::None);
     gStartup.MaxTextureDimension2D = maxTextureDimension;
+    gStartup.Capabilities =
+    {
+        .MaxFrameDimension2D = maxTextureDimension,
+        .MaxUniformBufferSize = uniformSize,
+        .UniformBufferSizeAlignment = 16,
+        .MaxShaders = static_cast<uint32>(RESOURCE_CAPACITY),
+        .MaxUniformBuffers = static_cast<uint32>(RESOURCE_CAPACITY),
+        .MaxPipelines = static_cast<uint32>(RESOURCE_CAPACITY),
+        .MaxDrawsPerFrame = 1,
+    };
     gStartup.State = StartupState::Ready;
 }
 void SelectBackend(uint32 token, Backend backend) noexcept
@@ -75,6 +111,7 @@ void SelectBackend(uint32 token, Backend backend) noexcept
         return;
     }
     gStartup.SelectedBackend = backend;
+    gStartup.UnmetRequirement = RequirementFailure::None;
 }
 uint32 Reissue(uint32 token) noexcept
 {
@@ -107,19 +144,23 @@ void RecordAttempt(uint32 token, Backend backend, StartupError error) noexcept
 } // namespace internal
 namespace
 {
-StartStatus StartSelected(const ApplicationInfo& app, const WindowInfo& window, BackendSelection selection) noexcept
+StartStatus StartSelected(const ApplicationInfo& app,
+                          const WindowInfo& window,
+                          BackendSelection selection,
+                          const DeviceRequirements& requirements) noexcept
 {
     if (gLegacy || gStartup.State != StartupState::Idle)
     {
         return StartStatus::Busy;
     }
+    gStartup.Requested = selection;
+    gStartup.Requirements = requirements;
     // A forced selection the build cannot provide fails explicitly; it never
     // silently switches to another backend.
     if (!backend::Supports(selection))
     {
         gStartup.State = StartupState::Failed;
-        gStartup.Error = StartupError::InvalidWindow;
-        gStartup.Requested = selection;
+        gStartup.Error = StartupError::BackendUnavailable;
         return StartStatus::Failed;
     }
     if (gNextToken == 0)
@@ -146,11 +187,18 @@ StartStatus StartSelected(const ApplicationInfo& app, const WindowInfo& window, 
 } // namespace
 StartStatus Start(const ApplicationInfo& app, const WindowInfo& window) noexcept
 {
-    return StartSelected(app, window, BackendSelection::Auto);
+    return StartSelected(app, window, BackendSelection::Auto, {});
 }
 StartStatus Start(const ApplicationInfo& app, const WindowInfo& window, BackendSelection selection) noexcept
 {
-    return StartSelected(app, window, selection);
+    return StartSelected(app, window, selection, {});
+}
+StartStatus Start(const ApplicationInfo& app,
+                  const WindowInfo& window,
+                  BackendSelection selection,
+                  const DeviceRequirements& requirements) noexcept
+{
+    return StartSelected(app, window, selection, requirements);
 }
 StartupInfo GetStartup() noexcept
 {
@@ -165,6 +213,11 @@ FrameStatus SetFrameTarget(const FrameTarget& target) noexcept
     if (gFrame)
     {
         return FrameStatus::InvalidState;
+    }
+    if (target.Width > gStartup.Capabilities.MaxFrameDimension2D ||
+        target.Height > gStartup.Capabilities.MaxFrameDimension2D)
+    {
+        return FrameStatus::Failed;
     }
     return backend::SetTarget(target);
 }
@@ -439,6 +492,10 @@ ResourceStatus CreateShader(const ShaderDescription& description, ShaderHandle& 
     {
         return ResourceStatus::InvalidDescription;
     }
+    if (gStartup.State == StartupState::Ready && description.UniformSize > gStartup.Capabilities.MaxUniformBufferSize)
+    {
+        return ResourceStatus::InvalidDescription;
+    }
     const auto kind = backend::Kind();
     const bool validArtifact =
         kind == Backend::Vulkan   ? (description.Spirv.size() >= 5 && description.Spirv[0] == 0x07230203U &&
@@ -468,6 +525,10 @@ ResourceStatus CreateUniform(usize size, UniformHandle& handle) noexcept
         return ResourceStatus::InvalidState;
     }
     if (size < 16 || size > internal::UNIFORM_CAPACITY || size % 16 != 0)
+    {
+        return ResourceStatus::InvalidDescription;
+    }
+    if (gStartup.State == StartupState::Ready && size > gStartup.Capabilities.MaxUniformBufferSize)
     {
         return ResourceStatus::InvalidDescription;
     }

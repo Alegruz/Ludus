@@ -29,13 +29,13 @@ if (typeof window === 'undefined' && typeof process === 'object') {
   const devices=[];
   function device() {
     let lose;
-    const result={features:new Set(),limits:new Proxy({maxTextureDimension2D:4096},{get:(o,k)=>o[k]??0}),queue:{},
+    const result={features:new Set(),limits:new Proxy({maxTextureDimension2D:4096,maxUniformBufferBindingSize:65536,maxBufferSize:268435456},{get:(o,k)=>o[k]??0}),queue:{},
       lost:new Promise(resolve=>{lose=resolve;}),pushErrorScope(){},popErrorScope(){return Promise.resolve(scenario==='surface-failure'?new GPUValidationError('configuration rejected'):null);},
       destroy(){if (!result.destroyed) {result.destroyed=true;++stats.destroyed;lose({reason:'destroyed',message:'test destroy'});}},
       testLose(){lose({reason:'unknown',message:'test loss'});}};
     ++stats.devices;devices.push(result);return result;
   }
-  const adapter={features:new Set(),limits:{maxTextureDimension2D:4096},requestDevice(desc){
+  const adapter={features:new Set(),limits:{maxTextureDimension2D:4096,maxUniformBufferBindingSize:65536,maxBufferSize:268435456},requestDevice(desc){
     if (desc.requiredFeatures?.length || Object.keys(desc.requiredLimits||{}).length) throw new Error('optional requirements requested');
     if (scenario==='device-failure') return Promise.reject(new Error('device rejected'));
     return new Promise(resolve=>setTimeout(()=>resolve(device()),scenario==='cancel-device'?80:0));

@@ -74,7 +74,8 @@ struct PipelineDescription final
     UniformHandle Uniform;
 };
 // Bounded slice: eight resources of each kind; uniform size 16..16384, multiple
-// of 16. Upload bytes follow the application's independently verified layouts.
+// of 16, further bounded by StartupInfo.Capabilities.MaxUniformBufferSize.
+// Upload bytes follow the application's independently verified layouts.
 [[nodiscard]] ResourceStatus CreateShader(const ShaderDescription&, ShaderHandle&) noexcept;
 [[nodiscard]] ResourceStatus CreateUniform(ludus::foundation::usize size, UniformHandle&) noexcept;
 // Pending means the output owns a resource. Pending dependencies instead return

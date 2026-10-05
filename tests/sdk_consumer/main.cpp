@@ -246,6 +246,7 @@ int main()
     static_assert(noexcept(ludus::graphics::rhi::SetFrameTarget({})));
     static_assert(noexcept(ludus::graphics::rhi::GetStartup()));
     static_assert(noexcept(ludus::graphics::rhi::Start({}, {})));
+    static_assert(noexcept(ludus::graphics::rhi::Start({}, {}, ludus::graphics::rhi::BackendSelection::Auto, {})));
     ludus::graphics::rhi::Shutdown();
     if (ludus::graphics::rhi::GetStartup().State != ludus::graphics::rhi::StartupState::Idle)
     {
@@ -255,6 +256,16 @@ int main()
     {
         return 5;
     }
+    const ludus::graphics::rhi::DeviceRequirements requirements{ .MinUniformBufferSize = 48 };
+    if (ludus::graphics::rhi::GetStartup().Capabilities.MaxUniformBufferSize != 0 ||
+        ludus::graphics::rhi::Start({}, {}, ludus::graphics::rhi::BackendSelection::WebGPU, requirements) !=
+            ludus::graphics::rhi::StartStatus::Failed ||
+        ludus::graphics::rhi::GetStartup().Error != ludus::graphics::rhi::StartupError::BackendUnavailable ||
+        ludus::graphics::rhi::GetStartup().Requirements.MinUniformBufferSize != 48)
+    {
+        return 2;
+    }
+    ludus::graphics::rhi::Shutdown();
     int endpoints[2];
     if (socketpair(AF_UNIX, SOCK_DGRAM, 0, endpoints) != 0 ||
         !ludus::foundation::diagnostics::ConfigureEmergencySocket(endpoints[0]))

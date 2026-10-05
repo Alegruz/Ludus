@@ -82,6 +82,7 @@ VkExtent2D gRequestedExtent{};
 FrameTarget gTarget;
 uint32 gSession = 0;
 uint32 gMaxDimension = 0;
+uint32 gMaxUniformSize = 0;
 WindowInfo gWindow;
 bool gHeadless = false;
 bool gEncoding = false;
@@ -554,6 +555,18 @@ bool ConnectWindow(const WindowInfo& window) noexcept
             return false;
         }
         gMaxDimension = properties.limits.maxImageDimension2D;
+        const uint32 dimensionLimits[] = {properties.limits.maxFramebufferWidth,
+                                          properties.limits.maxFramebufferHeight,
+                                          properties.limits.maxViewportDimensions[0],
+                                          properties.limits.maxViewportDimensions[1]};
+        for (const auto limit : dimensionLimits)
+        {
+            if (limit < gMaxDimension)
+            {
+                gMaxDimension = limit;
+            }
+        }
+        gMaxUniformSize = properties.limits.maxUniformBufferRange;
         const float32 priority = 1;
         VkDeviceQueueCreateInfo queue{};
         queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -740,7 +753,9 @@ StartupError Start(const ApplicationInfo& app, const WindowInfo& window, uint32 
     {
         return StartupError::RenderingUnavailable;
     }
-    internal::Complete(token, StartupError::None, gMaxDimension);
+    internal::Complete(token,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = gMaxDimension, .MaxUniformBufferSize = gMaxUniformSize });
     return StartupError::None;
 }
 void ShutdownRendering() noexcept
@@ -789,6 +804,7 @@ void Shutdown() noexcept
     gFrame = 0;
     gSession = 0;
     gMaxDimension = 0;
+    gMaxUniformSize = 0;
     gAcquiredWait = false;
     gOwnedImage = false;
     gInstanceMaintenance = false;

@@ -34,6 +34,7 @@ WGPUSurface gSurface = nullptr;
 bool gConfigured = false;
 bool gCompatibility = false;
 uint32 gMaxDimension = 0;
+uint64 gMaxUniformSize = 0;
 uint32 gSession = 0;
 FrameTarget gTarget;
 WGPUSurfaceConfiguration gConfiguration = WGPU_SURFACE_CONFIGURATION_INIT;
@@ -131,7 +132,9 @@ void Configured(WGPUPopErrorScopeStatus status,
         internal::Fail(token, StartupError::SurfaceUnavailable);
         return;
     }
-    internal::Complete(token, StartupError::None, gMaxDimension);
+    internal::Complete(token,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = gMaxDimension, .MaxUniformBufferSize = gMaxUniformSize });
 }
 void DeviceReady(WGPURequestDeviceStatus status,
                  WGPUDevice device,
@@ -179,6 +182,8 @@ void DeviceReady(WGPURequestDeviceStatus status,
         return;
     }
     gMaxDimension = limits.maxTextureDimension2D;
+    gMaxUniformSize = limits.maxUniformBufferBindingSize < limits.maxBufferSize ? limits.maxUniformBufferBindingSize
+                                                                                : limits.maxBufferSize;
     WGPUSurfaceConfiguration configuration = WGPU_SURFACE_CONFIGURATION_INIT;
     configuration.device = device;
     configuration.format = capabilities.formats[0];
@@ -355,6 +360,7 @@ void Shutdown() noexcept
     gSurface = nullptr;
     gInstance = nullptr;
     gMaxDimension = 0;
+    gMaxUniformSize = 0;
     gSession = 0;
     gTarget = {};
     gConfiguration = WGPU_SURFACE_CONFIGURATION_INIT;

@@ -77,8 +77,10 @@ lifecycle::StartResult Application::StartWindow(void* context) noexcept
 lifecycle::StartResult Application::StartRhi(void* context) noexcept
 {
     auto& app = *static_cast<Application*>(context);
-    const auto result =
-        rhi::Start({ .Name = "Smoke App", .Version = 1 }, app.mWindow->GetNativeWindowInfo(), app.mSelection);
+    const auto result = rhi::Start({ .Name = "Smoke App", .Version = 1 },
+                                   app.mWindow->GetNativeWindowInfo(),
+                                   app.mSelection,
+                                   renderer::Requirements());
     if (result == rhi::StartStatus::Ready || result == rhi::StartStatus::Pending)
     {
         return PollRhi(context);

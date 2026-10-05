@@ -130,6 +130,12 @@ async function context(scenario = 'success', options = {}) {
     if (scenario === 'missing-webgpu' || scenario === 'both-unavailable') {
       Object.defineProperty(navigator, 'gpu', {value: undefined}); return;
     }
+    if (scenario === 'both-uniform-limits') {
+      const getParameter = WebGL2RenderingContext.prototype.getParameter;
+      WebGL2RenderingContext.prototype.getParameter = function (key) {
+        return key === this.MAX_UNIFORM_BLOCK_SIZE ? 32 : getParameter.call(this, key);
+      };
+    }
     const gpu = navigator.gpu;
     if (!gpu) return;
     const requestAdapter = gpu.requestAdapter.bind(gpu);
@@ -144,6 +150,16 @@ async function context(scenario = 'success', options = {}) {
         if (scenario === 'device-failure') throw new Error('test device denied');
         const device = await requestDevice(descriptor);
         window.__qaDevice = device;
+        if (scenario === 'uniform-limit' || scenario === 'both-uniform-limits') {
+          // Override only the engine's queried device limit. The real device
+          // still compiles shaders/renders on accepted paths.
+          const limits = device.limits;
+          Object.defineProperty(device, 'limits', {value: new Proxy(limits, {
+            get(target, key) {
+              return key === 'maxUniformBufferBindingSize' ? 32 : Reflect.get(target, key, target);
+            }
+          })});
+        }
         window.__qaValidation = [];
         device.addEventListener('uncapturederror', e => window.__qaValidation.push(e.error.message));
         return device;
@@ -232,7 +248,7 @@ try {
 
   // 2-4. Auto fallback: missing WebGPU API, adapter rejection, device rejection
   //      each fall back to WebGL 2 and keep playing with real GLSL ES pixels.
-  for (const scenario of ['missing-webgpu', 'adapter-failure', 'device-failure', 'surface-failure']) {
+  for (const scenario of ['missing-webgpu', 'adapter-failure', 'device-failure', 'surface-failure', 'uniform-limit']) {
     await run('auto fallback to WebGL 2 on ' + scenario, async entry => {
       const c = await context(scenario);
       const page = await c.newPage();
@@ -261,6 +277,30 @@ try {
       await c.close();
     });
   }
+
+  await run('forced WebGPU rejects unmet uniform requirement', async entry => {
+    const c = await context('uniform-limit');
+    const page = await c.newPage();
+    await page.goto(base + '/index.html?backend=webgpu');
+    await until(() => state(page), s => s === 'failed', 'forced requirement failure');
+    entry.webgpuError = await data(page, 'webgpu-error');
+    assert.equal(Number(entry.webgpuError), 11); // RequirementsUnsatisfied
+    assert.equal(Number(await data(page, 'webgl-error')), 0);
+    assert.equal(await frames(page), 0);
+    await c.close();
+  });
+  await run('Auto rejects both backends with unmet uniform requirements', async entry => {
+    const c = await context('both-uniform-limits');
+    const page = await c.newPage();
+    await page.goto(base + '/index.html');
+    await until(() => state(page), s => s === 'failed', 'both requirement failures');
+    entry.webgpuError = await data(page, 'webgpu-error');
+    entry.webglError = await data(page, 'webgl-error');
+    assert.equal(Number(entry.webgpuError), 11);
+    assert.equal(Number(entry.webglError), 11);
+    assert.equal(await frames(page), 0);
+    await c.close();
+  });
 
   // 5. Both unavailable: final readable error, no frames, no busy loop, status
   //    not covered by controls (narrow viewport).
