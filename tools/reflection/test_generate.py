@@ -88,6 +88,29 @@ class GeneratorTests(unittest.TestCase):
         generate.write_changed(destination, source)
         self.assertEqual(destination.stat().st_mtime_ns, stamp)
 
+    def test_released_float_contract_preserves_signed_zero(self):
+        for kind in ('float32', 'float64'):
+            data = copy.deepcopy(self.data)
+            field = data['fields'][0]
+            field['type'] = kind
+            for key in ('default', 'min', 'max'):
+                field[key] = -0.0
+            baseline = self.load(data)
+            for key in ('default', 'min', 'max'):
+                with self.subTest(kind=kind, key=key):
+                    changed = copy.deepcopy(data)
+                    changed['fields'][0][key] = 0.0
+                    with self.assertRaises(ValueError):
+                        generate.check_baseline(self.load(changed), baseline)
+            # Integer zero and positive real zero describe the same float bits.
+            positive = copy.deepcopy(data)
+            for key in ('default', 'min', 'max'):
+                positive['fields'][0][key] = 0
+            baseline = self.load(positive)
+            for key in ('default', 'min', 'max'):
+                positive['fields'][0][key] = 0.0
+            generate.check_baseline(self.load(positive), baseline)
+
     @unittest.skipUnless(shutil.which('clang++-18'), 'pinned Clang 18 not available')
     def test_target_compiler_rejects_a_native_type_mismatch(self):
         data = self.load(self.data)

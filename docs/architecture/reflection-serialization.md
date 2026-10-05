@@ -121,8 +121,9 @@ without changing the ABI. The sample retains property IDs `0xB001`/`0xB002`.
 
 The sample supplies an immutable checked-in baseline. Generation verifies its
 schema identity/version, persistent field order, IDs, keys, kinds, wire defaults,
-and bounds. A changed persistent contract fails generation. Display labels may
-change without changing the wire contract. Removed nonpersistent field IDs must
+and bounds. Floating contracts compare normalized bits at the declared width,
+including signed zero. A changed persistent contract fails generation. Display
+labels may change without changing the wire contract. Removed nonpersistent field IDs must
 be reserved; prior reserved IDs cannot be reclaimed. This first checker admits
 one wire version and rejects a version change instead of inventing a migration.
 Baseline checking is optional for unreleased/test schemas; released schemas must

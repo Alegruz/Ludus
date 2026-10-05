@@ -115,8 +115,18 @@ def check_baseline(data, baseline):
     require(data['schema'] == baseline['schema'] and data['version'] == baseline['version'],
             'baseline identity/version mismatch; a new version requires an explicit migration')
     def wire(document):
-        return [{key: field[key] for key in ('id', 'key', 'type', 'default', 'min', 'max')}
-                for field in document['fields'] if field['persist']]
+        result = []
+        for field in document['fields']:
+            if not field['persist']:
+                continue
+            contract = {key: field[key] for key in ('id', 'key', 'type', 'default', 'min', 'max')}
+            if field['type'].startswith('float'):
+                encoding = '!f' if field['type'] == 'float32' else '!d'
+                for key in ('default', 'min', 'max'):
+                    # Compare the declared width's bits, including signed zero.
+                    contract[key] = struct.pack(encoding, field[key])
+            result.append(contract)
+        return result
     require(wire(data) == wire(baseline), 'released persistent schema changed')
     current = {field['id']: field for field in data['fields']}
     for field in baseline['fields']:
