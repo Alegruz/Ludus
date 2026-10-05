@@ -235,3 +235,28 @@ No header is ignored. This replaces the earlier heavily contended local 792.6 s
 measurement as the CI calibration input; it does not claim that local measurement
 passes. The next CI profile must verify the updated limit; tighten it when repeated
 measurements justify doing so.
+
+## Network core CI calibration
+
+The full PR #82 graph at `79ab51b` measured **214.6 s summed frontend parsing**
+over **419 compilation events**, with **59.4 s backend time** and **162.21 s build
+wall time** on ubuntu-24.04, pinned Clang 18, and two uncached jobs. The evidence
+is [CI run 37256537947, Build-time budget job](https://github.com/Alegruz/Ludus/actions/runs/37256537947/job/111594875472);
+its `native-build-profile` artifact retains the raw traces and report. Only the
+aggregate 210 s limit failed. The preceding audio-content calibration measured
+174.3 s over 336 events. These are separate runners and different complete build
+graphs: the difference is not an isolated measurement of NetworkCore overhead.
+
+The reported project headers pass unchanged 2000 ms limits: `audio_types.h`
+averaged 165 ms, `core.h` 43 ms, and `audio_system.h` 148 ms. NetworkCore adds four
+implementation translation units and one Catch2 test translation unit; its
+public headers include fixed-width types and `<span>` only. No heavy standard
+header was added to them. Other modules merged on main since the previous
+calibration also contribute to the measured aggregate.
+
+Recalibrate only `total_frontend_seconds` from **210 to 260 s**, approximately
+21% headroom over this measured complete graph, consistent with the previous
+~20% calibration. All per-header limits, overrides, profile inputs and tests
+remain unchanged. This accepts the measured graph growth; it makes no runtime
+optimization or isolated networking compile-time claim. Verify the new limit
+in CI and tighten it when repeated comparable profiles support doing so.

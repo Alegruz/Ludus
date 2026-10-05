@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 int ExerciseInstalledWorld() noexcept;
+int ExerciseInstalledNetwork() noexcept;
 int ExerciseInstalledUi() noexcept;
 int ExerciseInstalledContainers() noexcept;
 int ExerciseInstalledFilesystem() noexcept;
@@ -300,6 +301,11 @@ int main()
     if (const int mathResult = ExerciseInstalledMath(); mathResult != 0)
     {
         return mathResult;
+    }
+
+    if (const int networkResult = ExerciseInstalledNetwork(); networkResult != 0)
+    {
+        return networkResult;
     }
 
     std::cout << "SDK consumer linked Ludus " << ludus::foundation::version_string()

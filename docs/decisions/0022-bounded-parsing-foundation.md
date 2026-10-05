@@ -1,4 +1,4 @@
-# ADR 0021: Bounded parsing foundation and JSON extraction
+# ADR 0022: Bounded parsing foundation and JSON extraction
 
 Status: Accepted for the P1 implementation.
 
