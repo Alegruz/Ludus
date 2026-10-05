@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "domain": "game/ui",
+  "source_locale": "en-US",
+  "profile": "ludus-static-utf8-v1",
+  "messages": [
+    {"key": "menu/play", "source_revision": 1, "text": "Play", "context": "Start game button"},
+    {"key": "empty", "source_revision": 1, "text": "", "context": "Intentionally blank caption"},
+    {"key": "literal", "source_revision": 1, "text": "Apostrophe ' and {player} are literal.\n", "context": "Literal syntax fixture"},
+    {"key": "unicode", "source_revision": 1, "text": "العربية 日本語 😀 é", "context": "UTF-8 preservation fixture; no shaping claim"}
+  ]
+}
