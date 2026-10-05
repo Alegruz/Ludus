@@ -112,6 +112,8 @@ configure_file(cmake/CheckSdkVariant.cmake.in "${PROJECT_BINARY_DIR}/cmake/Check
 install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENTS)
 
 add_subdirectory(modules/foundation/base)
+# Portable bounded networking primitives are shared by native and web targets.
+add_subdirectory(modules/network/core)
 add_subdirectory(modules/foundation/memory)
 add_subdirectory(modules/foundation/hash)
 add_subdirectory(modules/foundation/strings)
@@ -239,7 +241,7 @@ write_basic_package_version_file(
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationMath FoundationTime FoundationLogging
-    FoundationProfiling Input Audio Content AudioContent GameplayWorld GameApi PhysicsFluid Ui)
+    FoundationProfiling NetworkCore Input Audio Content AudioContent GameplayWorld GameApi PhysicsFluid Ui)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()
