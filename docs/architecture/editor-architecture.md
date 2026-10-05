@@ -87,6 +87,8 @@ retain schema/revision checks from the current live-reload implementation.
 The default shell gives the central work area to the current authoring task.
 Project settings and Audio are separate tabs. Welcome contains recent projects
 only while no project is open; File keeps its recent-project menu while authoring.
+The standalone offline Configuration tab stays accessible across project changes;
+its explicitly loaded preview and preference draft have independent ownership.
 Live Inspector is a right panel, and Output is a bottom panel. Menus expose every
 dock and a Reset Layout action. A toolbar reuses the menu's action objects so
 capability gating cannot disagree. A permanent status bar exposes workflow

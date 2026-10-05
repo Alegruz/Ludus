@@ -1,3 +1,4 @@
+#include "internal/configuration_workspace.h"
 #include "internal/controller.h"
 #include "internal/main_window.h"
 #include "internal/project_creation_dialog.h"
@@ -43,9 +44,12 @@ TEST_CASE("Close Project retires identity and returns to Welcome with recent his
     auto* tabs = window.findChild<QTabWidget*>();
     auto* welcome = window.findChild<QWidget*>(QStringLiteral("projectWelcome"));
     auto* close = window.findChild<QAction*>(QStringLiteral("closeProjectAction"));
+    auto* configuration = window.findChild<ConfigurationWorkspace*>(QStringLiteral("configurationWorkspace"));
     REQUIRE(tabs != nullptr);
     REQUIRE(welcome != nullptr);
     REQUIRE(close != nullptr);
+    REQUIRE(configuration != nullptr);
+    CHECK(tabs->isTabVisible(tabs->indexOf(configuration)));
     CHECK(tabs->currentWidget() == welcome);
     CHECK_FALSE(close->isEnabled());
     const auto path = Project(directory);
@@ -53,6 +57,8 @@ TEST_CASE("Close Project retires identity and returns to Welcome with recent his
     QApplication::processEvents();
     CHECK_FALSE(welcome->isVisible());
     CHECK(close->isEnabled());
+    REQUIRE(configuration->Edit("host.headless", QStringLiteral("true")));
+    tabs->setCurrentWidget(configuration);
     const auto epoch = controller.State().ProjectEpoch;
     const auto nextJob = controller.State().NextJob;
     QTest::keyClick(&window, Qt::Key_W, Qt::ControlModifier | Qt::ShiftModifier);
@@ -65,6 +71,8 @@ TEST_CASE("Close Project retires identity and returns to Welcome with recent his
     CHECK(controller.RecentProjects().first().DescriptorPath == path);
     CHECK(welcome->isVisible());
     CHECK(tabs->currentWidget() == welcome);
+    CHECK(tabs->isTabVisible(tabs->indexOf(configuration)));
+    CHECK(configuration->Dirty()); // The separately loaded preview remains accessible.
     controller.OpenProject(path);
     CHECK(controller.State().Saved.Name == QStringLiteral("Demo"));
 }

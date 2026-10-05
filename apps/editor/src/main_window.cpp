@@ -1,5 +1,6 @@
 #include "internal/main_window.h"
 #include "internal/audio_workspace.h"
+#include "internal/configuration_workspace.h"
 #include "internal/project_creation_dialog.h"
 #include "internal/project_setup_dialog.h"
 #include "internal/workspace_style.h"
@@ -380,13 +381,24 @@ void MainWindow::OnStateChanged()
     RenderStatus();
     const auto& state = Controller_->State();
     const bool loaded = state.Document == DocumentState::ProjectLoaded;
+    const bool enteringWelcome = !loaded && !WorkTabs_->isTabVisible(WorkTabs_->indexOf(Welcome_));
+    const bool enteringProject = loaded && WorkTabs_->isTabVisible(WorkTabs_->indexOf(Welcome_));
     WorkTabs_->setTabVisible(WorkTabs_->indexOf(Welcome_), !loaded);
     for (int index = 0; index < WorkTabs_->count(); ++index)
     {
         if (WorkTabs_->widget(index) != Welcome_)
         {
-            WorkTabs_->setTabVisible(index, loaded);
+            // Configuration is an independent offline document workspace.
+            WorkTabs_->setTabVisible(index, loaded || WorkTabs_->widget(index) == Configuration_);
         }
+    }
+    if (enteringWelcome)
+    {
+        WorkTabs_->setCurrentWidget(Welcome_);
+    }
+    else if (enteringProject)
+    {
+        WorkTabs_->setCurrentWidget(ProjectSettings_);
     }
     Audio_->setEnabled(state.Document == DocumentState::ProjectLoaded && !AudioClosing_ && !AudioLaunchPending_);
     if (state.Document == DocumentState::ProjectLoaded)
@@ -865,7 +877,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
 {
     if (!AudioClosing_)
     {
-        if (!Audio_->ConfirmDiscard())
+        if (!Audio_->ConfirmDiscard() || !Configuration_->ConfirmDiscard())
         {
             event->ignore();
             return;

@@ -36,6 +36,9 @@ editor-associated engine and verifies staged configure/build/tests. An explicit
 Advanced override or environment selection never falls back silently on failure.
 Close Project returns to Welcome after settings/audio Save/Discard/Cancel and
 quiescence; Stop owned work first. F1 lists shortcuts from the same action objects.
+The independent Configuration preview remains available across project changes;
+closing a project preserves that explicitly loaded offline draft. Quitting the
+editor still prompts for its unsaved preferences.
 See [product/art direction](editor-art-direction.md) for three philosophy/UX/visual
 concepts and [browser strategy](editor-browser-strategy.md) for staged feasibility.
 

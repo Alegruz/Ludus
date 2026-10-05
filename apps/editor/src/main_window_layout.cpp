@@ -1,4 +1,5 @@
 #include "internal/audio_workspace.h"
+#include "internal/configuration_workspace.h"
 #include "internal/main_window.h"
 
 #include <ludus/foundation/base/types.h>
@@ -54,6 +55,7 @@ void MainWindow::BuildUi()
     WorkTabs_->setAccessibleName(QStringLiteral("Authoring work areas"));
     setCentralWidget(WorkTabs_);
     auto* projectScroll = new QScrollArea(WorkTabs_);
+    ProjectSettings_ = projectScroll;
     projectScroll->setObjectName(QStringLiteral("projectSettingsScroll"));
     projectScroll->setWidgetResizable(true);
     projectScroll->setFrameShape(QFrame::NoFrame);
@@ -102,6 +104,8 @@ void MainWindow::BuildUi()
     Audio_ = new AudioWorkspace(audioScroll);
     audioScroll->setWidget(Audio_);
     WorkTabs_->addTab(audioScroll, QStringLiteral("&Audio"));
+    Configuration_ = new ConfigurationWorkspace(WorkTabs_);
+    WorkTabs_->addTab(Configuration_, QStringLiteral("&Configuration"));
 
     InspectorDock_ = new QDockWidget(QStringLiteral("Live Inspector"), this);
     InspectorDock_->setObjectName(QStringLiteral("liveInspectorDock"));
@@ -198,6 +202,7 @@ void MainWindow::BuildUi()
     recentLayout->addWidget(RecentOpenButton_);
     recentLayout->addWidget(BrowseProjectButton_);
     WorkTabs_->insertTab(0, Welcome_, QStringLiteral("Welcome"));
+    WorkTabs_->setCurrentWidget(Welcome_);
     connect(RecentList_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
         const QString path = item->data(Qt::UserRole).toString();
         QTimer::singleShot(0, this, [this, path]() { OpenProjectPath(path); });
