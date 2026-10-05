@@ -30,8 +30,8 @@ if(_missing_result EQUAL 0 OR NOT "${_missing_output}${_missing_error}" MATCHES
 endif()
 
 if(NOT EMSCRIPTEN)
-    add_executable(ludus_sdk_consumer main.cpp policy.cpp world.cpp strings.cpp time.cpp fluid.cpp filesystem.cpp ui.cpp containers.cpp)
-    target_link_libraries(ludus_sdk_consumer PRIVATE Ludus::FoundationContainers Ludus::FoundationFilesystem Ludus::FoundationStrings Ludus::FoundationBase Ludus::FoundationMath Ludus::FoundationTime Ludus::GraphicsRhi Ludus::Input Ludus::GameplayWorld Ludus::PhysicsFluid Ludus::Ui)
+    add_executable(ludus_sdk_consumer main.cpp policy.cpp world.cpp strings.cpp time.cpp fluid.cpp filesystem.cpp ui.cpp containers.cpp threading.cpp)
+    target_link_libraries(ludus_sdk_consumer PRIVATE Ludus::FoundationContainers Ludus::FoundationFilesystem Ludus::FoundationStrings Ludus::FoundationBase Ludus::FoundationMath Ludus::FoundationThreading Ludus::FoundationTime Ludus::GraphicsRhi Ludus::Input Ludus::GameplayWorld Ludus::PhysicsFluid Ludus::Ui)
     target_compile_definitions(ludus_sdk_consumer PRIVATE
         EXPECTED_FLAVOR=${Ludus_BUILD_FLAVOR_ID}
         EXPECTED_ASSERTS=${Ludus_ENABLE_ASSERTS}

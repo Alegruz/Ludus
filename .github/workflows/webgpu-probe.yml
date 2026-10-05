@@ -34,6 +34,7 @@ on:
       - 'modules/foundation/containers/**'
       - 'modules/foundation/time/**'
       - 'modules/foundation/filesystem/**'
+      - 'modules/foundation/threading/**'
       - 'modules/foundation/logging/**'
       - 'modules/foundation/profiling/**'
       - 'cmake/**'
