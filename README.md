@@ -169,3 +169,8 @@ The [CPU fluid field](docs/architecture/fluid-field.md) is exported as
 `Ludus::PhysicsFluid` for native and browser SDK consumers. It supplies bounded
 shallow-water stepping, solid masks, momentum strokes, pressure forcing and
 surface/velocity samples; Sandbox owns the sea sources and gameplay adapter.
+
+The [engine configuration system](docs/architecture/engine-configuration.md)
+provides portable typed layers, prepared transactions, source explanations and
+sparse preferences. GameHost loads explicit cooked bundles, and the optional
+Editor shares its schema in the Configuration workspace.

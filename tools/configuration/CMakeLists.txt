@@ -1,0 +1,11 @@
+add_executable(ludus_config main.cpp)
+set_target_properties(ludus_config PROPERTIES OUTPUT_NAME ludus-config)
+target_link_libraries(ludus_config PRIVATE Ludus::RuntimeConfiguration Ludus::FoundationConfigJson Ludus::FoundationLogging)
+ludus_apply_project_defaults(ludus_config)
+install(TARGETS ludus_config RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+if(LUDUS_BUILD_TESTS)
+    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME ludus_configuration_cooker_tests COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_cook.py" "$<TARGET_FILE:ludus_config>")
+    set_tests_properties(ludus_configuration_cooker_tests PROPERTIES LABELS "unit;tools;configuration" TIMEOUT 60)
+endif()

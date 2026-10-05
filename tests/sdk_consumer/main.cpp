@@ -29,6 +29,7 @@ int ExerciseInstalledContainers() noexcept;
 int ExerciseInstalledFilesystem() noexcept;
 bool ExerciseInstalledStrings() noexcept;
 bool ExerciseInstalledParsing() noexcept;
+bool ExerciseInstalledConfiguration() noexcept;
 int ExerciseInstalledTime() noexcept;
 bool ExerciseInstalledFluid() noexcept;
 
@@ -208,6 +209,11 @@ static_assert(PrimitiveContract());
 
 int main()
 {
+    if (!ExerciseInstalledConfiguration())
+    {
+        return 90;
+    }
+
     if (!ExerciseInstalledParsing())
     {
         return 11;

@@ -68,6 +68,7 @@ add_executable(ludus_editor
     src/internal/main_window.h
     src/internal/audio_workspace.h
     src/internal/audio_preview.h
+    src/configuration_workspace.cpp
     src/audio_workspace.cpp
     src/audio_preview.cpp
     main.cpp
@@ -89,6 +90,8 @@ target_link_libraries(ludus_editor
         Ludus::FoundationBase
         Ludus::FoundationLogging
         Ludus::AudioContent
+        Ludus::FoundationConfigJson
+        Ludus::RuntimeConfiguration
 )
 ludus_apply_project_defaults(ludus_editor)
 
@@ -106,9 +109,11 @@ if(LUDUS_BUILD_TESTS)
         src/internal/main_window.h
         src/internal/audio_workspace.h
         src/internal/audio_preview.h
+        src/configuration_workspace.cpp
         src/audio_workspace.cpp
         src/audio_preview.cpp
         tests/main.cpp
+        tests/configuration_workspace_tests.cpp
         tests/audio_content_tests.cpp
         tests/workspace_tests.cpp
         tests/project_store_tests.cpp
@@ -145,6 +150,8 @@ if(LUDUS_BUILD_TESTS)
             Ludus::FoundationBase
             Ludus::FoundationLogging
             Ludus::AudioContent
+            Ludus::FoundationConfigJson
+            Ludus::RuntimeConfiguration
             Catch2::Catch2)
     ludus_apply_project_defaults(ludus_editor_tests)
     # Catch2 reports assertion failures by throwing; test targets (only) re-enable
