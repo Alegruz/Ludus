@@ -214,12 +214,12 @@ Status PrepareJson(Context& context,
     const auto parsed = document.Read(input, parseError, limits);
     if (parsed != parsing::ParseStatus::Ok)
     {
-        return Fail(error,
-                    parsed == parsing::ParseStatus::OutOfMemory     ? Status::OutOfMemory
-                    : parsed == parsing::ParseStatus::LimitExceeded ? Status::LimitExceeded
-                                                                    : Status::InvalidBundle,
-                    {},
-                    parseError.Offset);
+        const auto status = parsed == parsing::ParseStatus::OutOfMemory     ? Status::OutOfMemory
+                            : parsed == parsing::ParseStatus::LimitExceeded ? Status::LimitExceeded
+                                                                            : Status::InvalidBundle;
+        (void)Fail(error, status);
+        error.ByteOffset = parseError.Offset;
+        return status;
     }
     const auto root = document.Root();
     uint64 version{};
@@ -310,7 +310,8 @@ Status WriteLayer(const Context& context,
     {
         return Status::InvalidState;
     }
-    parsing::JsonWriter writer(buffer);
+    const usize capacity = buffer.size() < MAX_BUNDLE_BYTES ? buffer.size() : MAX_BUNDLE_BYTES;
+    parsing::JsonWriter writer(buffer.first(capacity));
     Header(writer, schemaIdentity);
     writer.Raw(",\"layer\":");
     writer.String(LayerName(layer));

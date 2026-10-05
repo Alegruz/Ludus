@@ -84,9 +84,62 @@ TEST_CASE("Config JSON adapter rejects wrong shapes, unknown keys, source positi
         CHECK(context.Revision() == revision);
         CHECK(context.Commit(revision, error) == Status::InvalidState);
     }
+    CHECK(PrepareJson(context, "{", Layer::Project, "s", revision, domain, error) == Status::InvalidBundle);
+    CHECK(error.ByteOffset != UNKNOWN_BYTE_OFFSET);
+    CHECK(error.Record == 0);
     const AllocationDomain failure(
         nullptr,
         [](void*, usize, usize) noexcept -> void* { return nullptr; },
         [](void*, void*, usize, usize) noexcept {});
     CHECK(PrepareJson(context, "{}", Layer::Project, "s", revision, failure, error) == Status::OutOfMemory);
+}
+
+TEST_CASE("Config writer rejects layers exceeding the loader budget even with a larger destination")
+{
+    constexpr usize kCount = 800;
+    StaticString<16> names[kCount];
+    Descriptor schema[kCount];
+    Assignment edits[kCount];
+    char textBytes[256];
+    char sourceBytes[128];
+    for (auto& byte : textBytes)
+    {
+        byte = 'x';
+    }
+    for (auto& byte : sourceBytes)
+    {
+        byte = 's';
+    }
+    Value value;
+    REQUIRE(Value::FromText(Type::String, {textBytes, sizeof(textBytes)}, value) == Status::Ok);
+    for (usize i = 0; i < kCount; ++i)
+    {
+        uint8 digits[32]{};
+        parsing::JsonWriter writer(digits);
+        std::span<const uint8> output;
+        writer.Integer(i);
+        REQUIRE(writer.Finish(output) == parsing::ParseStatus::Ok);
+        REQUIRE(names[i].TryAssign("k") == StringStatus::Ok);
+        REQUIRE(names[i].TryAppend({reinterpret_cast<const char*>(output.data()), output.size() - 1}) ==
+                StringStatus::Ok);
+        schema[i].Name = names[i].GetView();
+        schema[i].Default = value;
+        schema[i].Persistent = true;
+        edits[i].Name = names[i].GetView();
+        edits[i].Data = value;
+        REQUIRE(edits[i].From.Source.TryAssign({sourceBytes, sizeof(sourceBytes)}) == StringStatus::Ok);
+    }
+    Context context;
+    Diagnostic error;
+    Limits limits;
+    limits.MaxSettings = kCount;
+    limits.MaxEdits = kCount;
+    REQUIRE(context.Initialize(schema, GetSystemAllocationDomain(), error, limits) == Status::Ok);
+    REQUIRE(context.Prepare(Layer::Preference, edits, true, context.Revision(), error) == Status::Ok);
+    REQUIRE(context.Commit(context.Revision(), error) == Status::Ok);
+    uint8 large[MAX_BUNDLE_BYTES * 2]{};
+    uint8 marker[1]{};
+    std::span<const uint8> output = marker;
+    CHECK(WriteLayer(context, Layer::Preference, "big.v1", large, output) == Status::LimitExceeded);
+    CHECK(output.data() == marker);
 }

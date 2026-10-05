@@ -121,11 +121,18 @@ int main(int argc, char** argv)
     }
     if (status != Status::Ok)
     {
-        LUDUS_LOG_ERROR(kConfigurationLog,
-                        "Configuration {} at key '{}' record {}",
-                        StatusName(status),
-                        error.Key.GetView(),
-                        error.Record);
+        if (error.ByteOffset != UNKNOWN_BYTE_OFFSET)
+        {
+            LUDUS_LOG_ERROR(kConfigurationLog, "Configuration {} at byte {}", StatusName(status), error.ByteOffset);
+        }
+        else
+        {
+            LUDUS_LOG_ERROR(kConfigurationLog,
+                            "Configuration {} at key '{}' record {}",
+                            StatusName(status),
+                            error.Key.GetView(),
+                            error.Record);
+        }
         return 1;
     }
     return Write(output) ? 0 : 1;

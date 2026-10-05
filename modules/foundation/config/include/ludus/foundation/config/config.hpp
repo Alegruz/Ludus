@@ -116,11 +116,13 @@ struct Descriptor final
     bool Persistent = false;
     bool Simulation = false;
 };
+inline constexpr usize UNKNOWN_BYTE_OFFSET = ~usize{0};
 struct Diagnostic final
 {
     Status Result = Status::Ok;
     StaticString<128> Key{};
-    usize Record = 0;
+    usize Record = 0; // Semantic record index, never a parser byte offset.
+    usize ByteOffset = UNKNOWN_BYTE_OFFSET;
 };
 struct Origin final
 {

@@ -360,12 +360,23 @@ ludus::runtime::game_host::RunMain(ludus::foundation::int32 argc, const char* co
         }
         if (status != cfg::Status::Ok)
         {
-            LUDUS_LOG_ERROR(kConfigurationLog,
-                            "Configuration {} in '{}' at key '{}' record {}",
-                            cfg::StatusName(status),
-                            path,
-                            diagnostic.Key.GetView(),
-                            diagnostic.Record);
+            if (diagnostic.ByteOffset != cfg::UNKNOWN_BYTE_OFFSET)
+            {
+                LUDUS_LOG_ERROR(kConfigurationLog,
+                                "Configuration {} in '{}' at byte {}",
+                                cfg::StatusName(status),
+                                path,
+                                diagnostic.ByteOffset);
+            }
+            else
+            {
+                LUDUS_LOG_ERROR(kConfigurationLog,
+                                "Configuration {} in '{}' at key '{}' record {}",
+                                cfg::StatusName(status),
+                                path,
+                                diagnostic.Key.GetView(),
+                                diagnostic.Record);
+            }
         }
         return status == cfg::Status::Ok;
     };

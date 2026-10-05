@@ -187,7 +187,9 @@ values favor explicit fields and bounded owned text over tagged allocator-heavy
 objects. Names bind with a sorted index and binary search. Validation and edits are
 cold bounded work; duplicate checks are quadratic under explicit ceilings.
 
-Errors are status codes plus key/record diagnostics, never exceptions. Failed
+Errors are status codes plus key/record diagnostics and a separate optional
+parser byte offset, never exceptions. Writers enforce the same 256 KiB layer
+ceiling as readers, even when their caller supplies a larger buffer. Failed
 initialization releases all allocations; failed prepare exposes no partial change;
 failed writes preserve the caller's output view. Writers can touch a partial prefix
 of their caller buffer on failure; only successful views may be published. File

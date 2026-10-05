@@ -186,6 +186,12 @@ ConfigurationWorkspace::~ConfigurationWorkspace()
 bool ConfigurationWorkspace::Report(Status status, const Diagnostic& error)
 {
     const bool success = status == Status::Ok || status == Status::PendingRestart;
+    if (!success && error.ByteOffset != UNKNOWN_BYTE_OFFSET)
+    {
+        Status_->setText(
+            QStringLiteral("Configuration %1 at byte %2").arg(Text(StatusName(status))).arg(error.ByteOffset));
+        return false;
+    }
     Status_->setText(
         success ? QStringLiteral("Preview updated. Save preferences explicitly; launch GameHost to apply them.")
                 : QStringLiteral("Configuration %1: %2 (record %3)")
