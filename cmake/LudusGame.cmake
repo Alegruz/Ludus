@@ -76,6 +76,11 @@ function(ludus_add_game)
         C_VISIBILITY_PRESET hidden
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN ON)
+    # Optional stateless helpers linked from static SDK archives must stay
+    # private too; source visibility flags alone do not hide archive symbols.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(${GAME_NAME}_module PRIVATE "LINKER:--exclude-libs,ALL")
+    endif()
     _ludus_apply_game_policy(${GAME_NAME}_module)
 
     # --- Project-owned host executable ---

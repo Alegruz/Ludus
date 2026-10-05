@@ -45,6 +45,9 @@ struct JsonValue final
     [[nodiscard]] usize Count() const noexcept; // Array count, for Content compatibility.
     [[nodiscard]] bool Array() const noexcept;
     [[nodiscard]] bool Object() const noexcept;
+    [[nodiscard]] usize MemberCount() const noexcept;
+    // Borrowed, declaration-order object entry; outputs unchanged on failure.
+    [[nodiscard]] bool MemberAt(usize index, std::string_view& key, JsonValue& value) const noexcept;
     [[nodiscard]] bool Null() const noexcept;
     // Type mismatches leave output unchanged. Integer conversions are exact;
     // Number follows the pinned codec's integer-to-float64 conversion behavior.

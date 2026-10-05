@@ -26,6 +26,7 @@ include(EngineSanitizers)
 include(EngineTargets)
 include(EnginePch)
 include(LudusShaders)
+include(LudusReflection)
 include(EngineSdkIdentity)
 
 option(LUDUS_BUILD_TESTS "Build Ludus tests" ON)
@@ -147,6 +148,8 @@ add_subdirectory(third_party/miniaudio)
 add_subdirectory(modules/audio)
 add_subdirectory(third_party/yyjson)
 add_subdirectory(modules/foundation/parsing)
+add_subdirectory(modules/foundation/reflection)
+add_subdirectory(modules/foundation/serialization)
 add_subdirectory(modules/foundation/config)
 add_subdirectory(modules/runtime/configuration)
 if(NOT EMSCRIPTEN)
@@ -160,6 +163,7 @@ add_subdirectory(modules/audio/content)
 # so it is available to both native and browser configures; the native GameHost
 # runtime library and the loader live under the native branch below.
 add_subdirectory(modules/runtime/game_api)
+add_subdirectory(modules/runtime/property_binding)
 
 if(EMSCRIPTEN)
     add_subdirectory(modules/platform)
@@ -249,7 +253,7 @@ write_basic_package_version_file(
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationTime FoundationLogging
-    FoundationProfiling NetworkCore Input Audio Content AudioContent GameplayWorld GameApi PhysicsFluid Ui Localization)
+    FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content AudioContent GameplayWorld GameApi PhysicsFluid Ui Localization)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()
@@ -352,3 +356,6 @@ endif()
 install(FILES cmake/shaders/compile_shader.py config/shader_toolchain.json config/spirv_cross_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
 
 install(FILES third_party/xxhash/LICENSE DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}/licenses" RENAME xxhash-LICENSE)
+
+install(FILES cmake/LudusReflection.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
+install(FILES tools/reflection/generate.py DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/reflection")

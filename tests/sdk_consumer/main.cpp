@@ -30,6 +30,7 @@ int ExerciseInstalledFilesystem() noexcept;
 bool ExerciseInstalledStrings() noexcept;
 bool ExerciseInstalledParsing() noexcept;
 bool ExerciseInstalledConfiguration() noexcept;
+bool ExerciseInstalledReflection() noexcept;
 int ExerciseInstalledTime() noexcept;
 bool ExerciseInstalledFluid() noexcept;
 bool ExerciseInstalledCurves() noexcept;
@@ -210,6 +211,10 @@ static_assert(PrimitiveContract());
 
 int main()
 {
+    if (!ExerciseInstalledReflection())
+    {
+        return 91;
+    }
     if (!ExerciseInstalledCurves())
     {
         return 31;

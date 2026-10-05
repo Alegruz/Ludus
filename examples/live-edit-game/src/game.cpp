@@ -1,16 +1,21 @@
 // Example gameplay module for live editing during play (project-live-reload
 // design 2/9/12). ONE implementation: ludus_add_game builds it as a reloadable
-// module, a project host, and a static shipping executable. It links ONLY
-// Ludus::GameApi — no engine singleton runtime. It exposes a tunable "Speed"
+// module, a project host, and a static shipping executable. The module uses
+// Ludus::GameApi and stateless reflection helpers. It exposes a tunable "Speed"
 // property, a read-only "Bounces" output, and a tint-colored fullscreen clear
 // so a live edit or a code reload produces an observable rendered change.
 
 #include <ludus/foundation/base/types.h>
+#include <ludus/foundation/reflection/schema.hpp>
 #include <ludus/runtime/game_api/api.h>
 #include <ludus/runtime/game_api/authored.h>
 #include <ludus/runtime/game_api/checkpoint.h>
 #include <ludus/runtime/game_api/properties.h>
 #include <ludus/runtime/game_api/services.h>
+#include <ludus/runtime/property_binding/scalars.hpp>
+
+#include "body.h"
+#include "sample_game_reflection_schema.hpp"
 
 #include <cstring>
 #include <new>
@@ -27,28 +32,22 @@ using ludus::foundation::uint8;
 using ludus::foundation::usize;
 
 constexpr uint32 kCheckpointSchema = 1;
-constexpr uint32 kPropertySchema = 1;
+constexpr uint32 kPropertySchema = ludus::sample::kBodySchemaVersion;
+using ludus::sample::kBodyFieldCount;
 constexpr uint32 kCapabilities = static_cast<uint32>(Capability::Reload) |
                                  static_cast<uint32>(Capability::Properties);
 
 constexpr uint64 kObjectId = 0xA001;
 constexpr uint64 kPropSpeed = 0xB001;
-constexpr uint64 kPropBounces = 0xB002;
 
 #ifndef LUDUS_EXAMPLE_IDENTITY
 #define LUDUS_EXAMPLE_IDENTITY "example-identity-unset"
 #endif
 constexpr const char* kIdentity = LUDUS_EXAMPLE_IDENTITY;
 
-struct Body
-{
-    float32 PositionX = 0.0F;
-    float32 Velocity = 0.5F;
-    float32 Speed = 1.0F;
-    int32 Bounces = 0;
-    uint64 Rng = 0x243F6A8885A308D3ULL;
-    float64 SimTime = 0.0;
-};
+using ludus::sample::Body;
+namespace reflection = ludus::foundation::reflection;
+namespace property_binding = ludus::runtime::property_binding;
 
 struct State
 {
@@ -129,7 +128,9 @@ Status GameCreate(const CreateInfo* info, GameInstance** outInstance) noexcept
             }
             const uint32 bits = static_cast<uint32>(ReadCheckpointUint(record.Value.Data, 4));
             std::memcpy(&state->Sim.Speed, &bits, sizeof(bits));
-            if ((bits & 0x7f800000U) == 0x7f800000U || state->Sim.Speed < 0 || state->Sim.Speed > 8)
+            reflection::Value snapshot[kBodyFieldCount]{};
+            reflection::Diagnostic error;
+            if (ludus::sample::ReadBody(state->Sim, snapshot, error) != reflection::Status::Ok)
             {
                 delete state;
                 return Status::OutOfRange;
@@ -341,17 +342,12 @@ Status GameCreateCandidate(const CreateInfo* info, const CheckpointHeader* heade
         }
     }
     const uint32 required = 254U;
+    reflection::Value snapshot[kBodyFieldCount]{};
+    reflection::Diagnostic error;
     if (!ok || reader.Offset != body.Size || seen != required ||
-        !(IsFinite(state->Sim.PositionX) &&
-          IsFinite(state->Sim.Velocity) &&
-          IsFinite(state->Sim.Speed) &&
-          IsFinite(state->Sim.SimTime) &&
-          state->Sim.Speed >= 0.0F &&
-          state->Sim.Speed <= 8.0F &&
-          state->Sim.Bounces >= 0 &&
-          state->Sim.PositionX >= 0.0F &&
-          state->Sim.PositionX <= 1.0F &&
-          state->Revision != 0))
+        ludus::sample::ReadBody(state->Sim, snapshot, error) != reflection::Status::Ok ||
+        !IsFinite(state->Sim.PositionX) || !IsFinite(state->Sim.Velocity) || !IsFinite(state->Sim.SimTime) ||
+        state->Sim.PositionX < 0.0F || state->Sim.PositionX > 1.0F || state->Revision == 0)
     {
         delete state;
         return Status::InvalidArgument;
@@ -364,7 +360,10 @@ Status GameCreateCandidate(const CreateInfo* info, const CheckpointHeader* heade
 Status GameValidateCandidate(GameCandidate* candidate) noexcept
 {
     auto* s = reinterpret_cast<State*>(candidate);
-    return (s != nullptr && s->Sim.Speed >= 0.0F) ? Status::Ok : Status::OutOfRange;
+    reflection::Value snapshot[kBodyFieldCount]{};
+    reflection::Diagnostic error;
+    return s != nullptr && ludus::sample::ReadBody(s->Sim, snapshot, error) == reflection::Status::Ok
+        ? Status::Ok : Status::OutOfRange;
 }
 
 Status GameCommitCandidate(GameCandidate* candidate, GameInstance** outInstance) noexcept
@@ -388,7 +387,7 @@ Status GameDescribePropertiesSize(GameInstance* instance, usize* outByteSize) no
     {
         return Status::InvalidArgument;
     }
-    *outByteSize = sizeof(PropertyDescriptor) * 2;
+    *outByteSize = sizeof(PropertyDescriptor) * kBodyFieldCount;
     return Status::Ok;
 }
 
@@ -398,29 +397,17 @@ Status GameDescribeProperties(GameInstance* instance, ByteSpan out, usize* outBy
     {
         return Status::InvalidArgument;
     }
-    const usize needed = sizeof(PropertyDescriptor) * 2;
+    const usize needed = sizeof(PropertyDescriptor) * kBodyFieldCount;
     if (out.Data == nullptr || out.Capacity < needed)
     {
         return Status::BufferTooSmall;
     }
-    PropertyDescriptor descs[2] = {};
-    descs[0].ObjectId = kObjectId;
-    descs[0].PropertyId = kPropSpeed;
-    descs[0].Kind = static_cast<uint32>(PropertyKind::Float32);
-    descs[0].Scope = static_cast<uint32>(PropertyScope::Persistable);
-    descs[0].Writable = 1;
-    descs[0].MinFloat = 0.0F;
-    descs[0].MaxFloat = 8.0F;
-    std::memcpy(descs[0].Label, "Speed", 5);
-    descs[0].LabelLength = 5;
-
-    descs[1].ObjectId = kObjectId;
-    descs[1].PropertyId = kPropBounces;
-    descs[1].Kind = static_cast<uint32>(PropertyKind::Int32);
-    descs[1].Scope = static_cast<uint32>(PropertyScope::ReadOnly);
-    descs[1].Writable = 0;
-    std::memcpy(descs[1].Label, "Bounces", 7);
-    descs[1].LabelLength = 7;
+    PropertyDescriptor descs[kBodyFieldCount]{};
+    reflection::Diagnostic error;
+    if (property_binding::Describe(ludus::sample::BodySchema(), kObjectId, descs, error) != reflection::Status::Ok)
+    {
+        return Status::Internal;
+    }
 
     std::memcpy(out.Data, descs, needed);
     *outBytesWritten = needed;
@@ -434,31 +421,35 @@ Status GameReadProperties(GameInstance* instance, ByteSpan out, usize* outBytesW
     {
         return Status::InvalidArgument;
     }
-    const usize needed = sizeof(PropertyValue) * 2;
+    const usize needed = sizeof(PropertyValue) * kBodyFieldCount;
     if (out.Data == nullptr || out.Capacity < needed)
     {
         return Status::BufferTooSmall;
     }
-    PropertyValue values[2] = {};
-    values[0].ObjectId = kObjectId;
-    values[0].PropertyId = kPropSpeed;
-    values[0].ObjectRevision = s->Revision;
-    values[0].Kind = static_cast<uint32>(PropertyKind::Float32);
-    values[0].Float = s->Sim.Speed;
-    values[1].ObjectId = kObjectId;
-    values[1].PropertyId = kPropBounces;
-    values[1].ObjectRevision = s->Revision;
-    values[1].Kind = static_cast<uint32>(PropertyKind::Int32);
-    std::memcpy(&values[1].IntOrEnum, &s->Sim.Bounces, sizeof(int32));
+    reflection::Value snapshot[kBodyFieldCount]{};
+    reflection::Diagnostic error;
+    PropertyValue values[kBodyFieldCount]{};
+    if (ludus::sample::ReadBody(s->Sim, snapshot, error) != reflection::Status::Ok ||
+        property_binding::Snapshot(ludus::sample::BodySchema(), snapshot, kObjectId, s->Revision, values, error) !=
+            reflection::Status::Ok)
+    {
+        return Status::OutOfRange;
+    }
     std::memcpy(out.Data, values, needed);
     *outBytesWritten = needed;
     return Status::Ok;
 }
 
+// Thanks to Frederic My, "Using Custom RTTI Properties to Stream and Edit
+// Objects", Game Programming Gems 4, section 1.12, pp. 111-124: shared schema
+// constraints drive the inspector. This owner stages a candidate and checks the
+// revision again at commit; it never retains an editor pointer into native state.
+// Review: docs/architecture/reflection-serialization-gems-review.md.
 struct Plan
 {
+    State* Owner = nullptr;
+    uint64 ExpectedRevision = 0;
     float32 Speed = 0.0F;
-    bool HasSpeed = false;
 };
 
 Status GamePrepareEdits(GameInstance* instance, ByteView edits, GameEditPlan** outPlan) noexcept
@@ -470,47 +461,45 @@ Status GamePrepareEdits(GameInstance* instance, ByteView edits, GameEditPlan** o
     }
     EditBatchHeader header;
     std::memcpy(&header, edits.Data, sizeof(header));
-    if (header.Count == 0 || header.Count > kMaxEditBatch)
+    if (header.StructSize != sizeof(EditBatchHeader) || header.Count == 0 || header.Count > kMaxEditBatch)
     {
-        return Status::OutOfRange;
+        return Status::InvalidArgument;
     }
     if (header.SchemaVersion != kPropertySchema)
     {
         return Status::SchemaChanged;
     }
-    if (edits.Size < sizeof(EditBatchHeader) + sizeof(PropertyEdit) * header.Count)
+    if (edits.Size != sizeof(EditBatchHeader) + sizeof(PropertyEdit) * header.Count)
     {
         return Status::InvalidArgument;
     }
-    auto* plan = new (std::nothrow) Plan();
+    // IPC bytes need not be aligned for a native PropertyEdit.
+    PropertyEdit input[kMaxEditBatch]{};
+    std::memcpy(input, edits.Data + sizeof(EditBatchHeader), sizeof(PropertyEdit) * header.Count);
+    for (uint32 index = 0; index < header.Count; ++index)
+    {
+        if (input[index].ObjectId != kObjectId || input[index].ExpectedRevision != s->Revision)
+        {
+            return Status::StaleRevision;
+        }
+    }
+    reflection::Edit decoded[kMaxEditBatch]{};
+    reflection::Diagnostic error;
+    const auto status = property_binding::DecodeEdits(ludus::sample::BodySchema(), {input, header.Count},
+        kObjectId, s->Revision, decoded, error);
+    if (status != reflection::Status::Ok)
+    {
+        return status == reflection::Status::InvalidValue ? Status::OutOfRange : Status::InvalidArgument;
+    }
+    Body candidate;
+    if (ludus::sample::PrepareBody(s->Sim, {decoded, header.Count}, candidate, error) != reflection::Status::Ok)
+    {
+        return Status::OutOfRange;
+    }
+    auto* plan = new (std::nothrow) Plan{ .Owner = s, .ExpectedRevision = s->Revision, .Speed = candidate.Speed };
     if (plan == nullptr)
     {
         return Status::Internal;
-    }
-    const auto* array = reinterpret_cast<const PropertyEdit*>(edits.Data + sizeof(EditBatchHeader));
-    for (uint32 i = 0; i < header.Count; ++i)
-    {
-        const PropertyEdit& e = array[i];
-        if (e.ObjectId != kObjectId || e.ExpectedRevision != s->Revision)
-        {
-            delete plan;
-            return Status::StaleRevision;
-        }
-        if (e.PropertyId == kPropSpeed && e.Kind == static_cast<uint32>(PropertyKind::Float32))
-        {
-            if (e.Float < 0.0F || e.Float > 8.0F)
-            {
-                delete plan;
-                return Status::OutOfRange;
-            }
-            plan->HasSpeed = true;
-            plan->Speed = e.Float;
-        }
-        else
-        {
-            delete plan;
-            return Status::InvalidArgument;
-        }
     }
     *outPlan = reinterpret_cast<GameEditPlan*>(plan);
     return Status::Ok;
@@ -520,14 +509,15 @@ Status GameCommitEdits(GameInstance* instance, GameEditPlan* planHandle) noexcep
 {
     State* s = AsState(instance);
     auto* plan = reinterpret_cast<Plan*>(planHandle);
-    if (s == nullptr || plan == nullptr)
+    if (s == nullptr || plan == nullptr || plan->Owner != s)
     {
         return Status::InvalidArgument;
     }
-    if (plan->HasSpeed)
+    if (s->Revision != plan->ExpectedRevision || s->Revision == ~uint64{0})
     {
-        s->Sim.Speed = plan->Speed;
+        return Status::StaleRevision; // Failed plans remain owned until DiscardEdits.
     }
+    s->Sim.Speed = plan->Speed;
     s->Revision += 1;
     delete plan;
     return Status::Ok;

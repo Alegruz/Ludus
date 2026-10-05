@@ -186,6 +186,26 @@ bool JsonValue::Object() const noexcept
 {
     return yyjson_is_obj(Val(*this));
 }
+usize JsonValue::MemberCount() const noexcept
+{
+    return yyjson_obj_size(Val(*this));
+}
+bool JsonValue::MemberAt(usize index, std::string_view& key, JsonValue& value) const noexcept
+{
+    if (!Object() || index >= MemberCount())
+    {
+        return false;
+    }
+    auto iterator = yyjson_obj_iter_with(Val(*this));
+    yyjson_val* entry = nullptr;
+    for (usize current = 0; current <= index; ++current)
+    {
+        entry = yyjson_obj_iter_next(&iterator);
+    }
+    key = {yyjson_get_str(entry), yyjson_get_len(entry)};
+    value = { .Value = yyjson_obj_iter_get_val(entry) };
+    return true;
+}
 bool JsonValue::Null() const noexcept
 {
     return yyjson_is_null(Val(*this));

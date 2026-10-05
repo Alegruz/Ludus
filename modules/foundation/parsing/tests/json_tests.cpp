@@ -350,3 +350,25 @@ TEST_CASE("JSON allocation failure during growth leaves no stale document", "[pa
     CHECK(pool.Frees == 2);
     CHECK(pool.Attempts == 3);
 }
+
+TEST_CASE("Object iteration is bounded and preserves outputs on failure", "[parsing][json]")
+{
+    JsonDocument document;
+    ParseError error;
+    REQUIRE(document.Read(R"({"a":true,"b":7})", error) == ParseStatus::Ok);
+    const auto root = document.Root();
+    CHECK(root.MemberCount() == 2);
+    std::string_view key = "sentinel";
+    JsonValue value = root;
+    CHECK_FALSE(root.MemberAt(2, key, value));
+    CHECK(key == "sentinel");
+    CHECK(value.Value == root.Value);
+    REQUIRE(root.MemberAt(1, key, value));
+    CHECK(key == "b");
+    uint64 integer = 0;
+    REQUIRE(value.Integer(integer));
+    CHECK(integer == 7);
+    CHECK(value.MemberCount() == 0);
+    CHECK_FALSE(value.MemberAt(0, key, value));
+    CHECK(key == "b");
+}

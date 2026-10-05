@@ -16,10 +16,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Ludus CONFIG REQUIRED)
 
+ludus_generate_reflection(TARGET sample_game_reflection SCHEMA body.schema.json BASELINE body.schema.baseline.json)
+
 ludus_add_game(
     NAME sample_game
     SOURCES src/game.cpp
 )
+
+foreach(target sample_game_module sample_game_shipping)
+    if(TARGET ${target})
+        target_link_libraries(${target} PRIVATE sample_game_reflection Ludus::GamePropertyBinding)
+    endif()
+endforeach()
 
 if(BUILD_TESTING)
     add_test(NAME sample_game_headless_smoke

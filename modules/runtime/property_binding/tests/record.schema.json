@@ -1,0 +1,92 @@
+{
+  "schema": "fc79a65b-2783-4412-9303-64c7bc5e18f9",
+  "version": 1,
+  "namespace": "ludus::reflection_test",
+  "name": "Record",
+  "header": "record.h",
+  "reserved": [
+    9
+  ],
+  "fields": [
+    {
+      "id": 1,
+      "member": "Enabled",
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "bool",
+      "default": true,
+      "persist": true,
+      "editable": true
+    },
+    {
+      "id": 2,
+      "member": "SmallSigned",
+      "key": "smallsigned",
+      "label": "SmallSigned",
+      "type": "int32",
+      "default": -7,
+      "persist": true,
+      "editable": true
+    },
+    {
+      "id": 3,
+      "member": "SmallUnsigned",
+      "key": "smallunsigned",
+      "label": "SmallUnsigned",
+      "type": "uint32",
+      "default": 9,
+      "persist": true,
+      "editable": true
+    },
+    {
+      "id": 4,
+      "member": "Signed",
+      "key": "signed",
+      "label": "Signed",
+      "type": "int64",
+      "default": -9223372036854775808,
+      "persist": true,
+      "editable": true
+    },
+    {
+      "id": 5,
+      "member": "Unsigned",
+      "key": "unsigned",
+      "label": "Unsigned",
+      "type": "uint64",
+      "default": 18446744073709551615,
+      "persist": true,
+      "editable": true
+    },
+    {
+      "id": 6,
+      "member": "Rate",
+      "key": "rate",
+      "label": "Rate",
+      "type": "float32",
+      "default": 1.25,
+      "persist": true,
+      "editable": true
+    },
+    {
+      "id": 7,
+      "member": "Time",
+      "key": "time",
+      "label": "Time",
+      "type": "float64",
+      "default": 0.125,
+      "persist": true,
+      "editable": true
+    },
+    {
+      "id": 8,
+      "member": "Runtime",
+      "key": "runtime",
+      "label": "Runtime",
+      "type": "int32",
+      "default": 11,
+      "persist": false,
+      "editable": false
+    }
+  ]
+}

@@ -223,7 +223,7 @@ jobs:
       - name: Build editor tests without rebuilding every engine test target
         run: out/host-tools/venv/bin/cmake --build --preset linux-clang-development --target ludus_editor_tests
       - name: Verify editor initialization and offscreen tests
-        run: out/host-tools/venv/bin/ctest --preset linux-clang-development --label-regex editor --no-tests=error
+        run: out/host-tools/venv/bin/ctest --preset linux-clang-development --label-regex '^editor$' --no-tests=error
       - name: Report compiler cache
         if: always()
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"

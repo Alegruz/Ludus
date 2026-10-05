@@ -1,0 +1,12 @@
+{
+  "schema": "a7909514-ce6f-4a15-8289-34c702e8c7f6",
+  "version": 1,
+  "namespace": "consumer",
+  "name": "Settings",
+  "header": "reflection_record.h",
+  "reserved": [],
+  "fields": [
+    {"id": 1, "member": "Seed", "key": "seed", "label": "Seed", "type": "uint64", "default": 18446744073709551615, "persist": true, "editable": true},
+    {"id": 2, "member": "Speed", "key": "speed", "label": "Speed", "type": "float32", "default": 1, "min": 0, "max": 8, "persist": true, "editable": true}
+  ]
+}
