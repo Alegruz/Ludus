@@ -40,6 +40,8 @@ on:
       - 'modules/foundation/time/**'
       - 'modules/foundation/filesystem/**'
       - 'modules/foundation/threading/**'
+      - 'modules/foundation/parsing/**'
+      - 'third_party/yyjson/**'
       - 'modules/foundation/logging/**'
       - 'modules/foundation/profiling/**'
       - 'cmake/**'
