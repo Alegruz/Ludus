@@ -14,9 +14,17 @@
 | Source document | Persistent authored data such as an audio definition or preferences layer |
 | Runtime snapshot | Copied state from a running host/session, independent of a source-document save |
 | Logical resource ID | Stable content identity resolved through a catalog, rather than a transient runtime handle |
+| Borrowed string view | Counted bytes without retained ownership; the source must remain alive and its storage valid |
+| Shared string | Immutable bytes whose allocation is retained by copied `SharedString` handles |
+| Interned name | Exact spelling deduplicated within one table; `NameId` includes its process-local table token and index |
+| String index | An index meaningful only with its enclosing table or dictionary owner |
+| Fingerprint | A hash of specified bytes; equality does not establish unique identity or authenticate content |
 | RHI | Rendering Hardware Interface, the engine's graphics backend boundary |
 | GameHost | Runtime host for supported game-module and Play workflows |
 | S1 / S2 | Editor milestone names: workspace shell, then document interactions/undo |
 
 Continue with [architecture](architecture.md), [project setup](../guides/project-setup.md)
 or [the editor workspace](../guides/editor.md).
+
+For ownership, byte/text boundaries and hash policies, see [strings](../guides/strings.md)
+and [hashing](../guides/hashing.md).
