@@ -15,10 +15,10 @@ stability; benchmark the actual consumer before selecting a more complex
 algorithm. C++23, Clang 18, no exceptions, fixed-width Ludus types, standalone
 light public headers, and the existing native/browser SDK boundary are gates.
 
-The initial audit at `52e29ce`, refreshed against `27c7326`, finds an established
+The initial audit at `52e29ce`, refreshed through `595042b`, finds an established
 `Array`/`StaticArray` implementation,
 `std::span` views, specialized concurrent logging/profiling queues, world-owned
-entity/component storage, audio-owned bounded slots, and one production
+entity/component storage, audio/UI-owned bounded slots, and one production
 `std::unordered_map<uint64, uint64>` in GameHost's resource bindings. The
 remaining unordered set is a reload-test observation set. Current main also
 provides FoundationMemory allocation domains, FoundationHash, and Strings with
@@ -237,7 +237,9 @@ Performance reports must give compiler/build flavor, hardware, dataset/cardinali
 operation mix, sample method, allocation count and memory, and include a baseline.
 Record wins and losses. Benchmarks are evidence, not noisy timing assertions in
 CI. Measure lookup and mutation separately; optimizing one does not prove the
-other improved. Build-budget checks remain unchanged.
+other improved. Build-budget checks remain unchanged. The
+[first increment's evidence](../development/container-systems-evidence.md)
+records measured lookup losses, small-table rebuild wins, and allocation tests.
 
 ## Gems review and resulting revisions
 
