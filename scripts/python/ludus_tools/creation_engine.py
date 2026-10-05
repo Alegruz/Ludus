@@ -5,15 +5,26 @@ An explicit SDK/environment override is never silently replaced on failure.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import subprocess
 from pathlib import Path
 
 from .errors import INVALID_PROJECT, ToolingError
-from .identity import load_prefix_manifest
+from .identity import load_manifest_file, load_prefix_manifest
 
 PROFILE = "linux-clang-development"
+
+
+def prepared_sdk_prefix(root: Path) -> Path:
+    # Separate ABI variants without removing SDKs used by existing projects.
+    # Hash the build's actual identity, never a guessed assertion/toolchain key.
+    identity = load_manifest_file(root / "out/build" / PROFILE / "cmake/LudusSdkManifest.json")
+    key = json.dumps(identity.abi_key(), sort_keys=True).encode("utf-8")
+    suffix = hashlib.sha256(key).hexdigest()[:16]
+    return root / "out/install" / f"{PROFILE}-{suffix}"
 
 
 def validate_creation_sdk(prefix: Path):
@@ -60,16 +71,20 @@ def select_creation_sdk(root: Path, *, explicit: Path | None = None,
     if not version:
         raise ToolingError("MissingTools", "Cannot identify the editor engine version")
     revision = source_revision(root)
-    try:
-        identity = validate_creation_sdk(prefix)
-        if (identity.engine_version == version.group(1)
-                and revision and identity.source_revision == revision):
-            return prefix
-    except ToolingError:
-        pass  # A missing/stale editor-owned install is prepared automatically.
+    candidates = [prefix]
+    if (root / "out/build" / PROFILE / "cmake/LudusSdkManifest.json").is_file():
+        candidates.insert(0, prepared_sdk_prefix(root))
+    for candidate in candidates:
+        try:
+            identity = validate_creation_sdk(candidate)
+            if (identity.engine_version == version.group(1)
+                    and revision and identity.source_revision == revision):
+                return candidate
+        except ToolingError:
+            pass  # A missing/stale editor-owned install is prepared automatically.
     if prepare is None:
         raise ToolingError("MissingTools", "The editor engine needs preparation; use Create with prepared tooling")
-    prepare(prefix)
+    prefix = prepare(prefix) or prefix
     identity = validate_creation_sdk(prefix)
     if (identity.engine_version != version.group(1)
             or (revision and identity.source_revision != revision)):
@@ -83,12 +98,18 @@ def prepare_creation_sdk(root: Path, prefix: Path, *, runner, cancel_check=None)
     env = environment(root)
     env["CI"] = "true"
     commands = ([str(root / "scripts/init"), PROFILE, "--preset-only", "--cli", "--no-system-install"],
-                [str(root / "scripts/build"), PROFILE],
-                [str(root / "out/host-tools/venv/bin/cmake"), "--install",
-                 str(root / "out/build" / PROFILE), "--prefix", str(prefix)])
+                [str(root / "scripts/build"), PROFILE])
     for argv in commands:
         if cancel_check:
             cancel_check()
         runner(argv, cwd=root, env=env)
     if cancel_check:
         cancel_check()
+    # Configuration can change the variant, so choose the installation only
+    # after building. Keep the old profile prefix intact, including legacy SDKs.
+    prefix = prepared_sdk_prefix(root)
+    runner([str(root / "out/host-tools/venv/bin/cmake"), "--install",
+            str(root / "out/build" / PROFILE), "--prefix", str(prefix)], cwd=root, env=env)
+    if cancel_check:
+        cancel_check()
+    return prefix

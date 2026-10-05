@@ -1,4 +1,5 @@
 """Creation engine precedence, freshness and cancellation boundaries."""
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -71,6 +72,43 @@ class CreationEngineTests(unittest.TestCase):
         with self.assertRaises(ToolingError):
             self.select()
         self.assertEqual(list(self.root.iterdir()), [self.root / "CMakeLists.txt"])
+
+    def test_preparation_preserves_legacy_sdk_and_reuses_separate_install(self):
+        legacy = _manifest_json(sdk_variant="assert-v1", source_revision="old")
+        _write_sdk_prefix(self.prefix, legacy)
+        manifest = self.prefix / "share/Ludus/LudusSdkManifest.json"
+        original = manifest.read_bytes()
+        current = _manifest_json(source_revision="current")
+
+        def runner(argv, **kwargs):
+            self.calls.append(argv)
+            if Path(argv[0]).name == "build":
+                generated = self.root / "out/build" / engines.PROFILE / "cmake/LudusSdkManifest.json"
+                generated.parent.mkdir(parents=True)
+                generated.write_text(json.dumps(current))
+            if "--install" in argv:
+                destination = Path(argv[argv.index("--prefix") + 1])
+                self.assertNotEqual(destination, self.prefix)
+                _write_sdk_prefix(destination, current)
+
+        selected = self.select(prepare=lambda prefix: prepare_creation_sdk(self.root, prefix, runner=runner))
+        self.assertEqual(selected, engines.prepared_sdk_prefix(self.root))
+        self.assertEqual(manifest.read_bytes(), original)
+        self.assertEqual(len(self.calls), 3)
+        self.calls.clear()
+        self.assertEqual(self.select(prepare=self.prepare), selected)
+        self.assertEqual(self.calls, [])
+
+    def test_cancel_after_build_prevents_install(self):
+        def runner(argv, **kwargs):
+            self.calls.append(argv)
+        def cancel():
+            if len(self.calls) == 2:
+                raise ToolingError("Cancelled", "cancelled")
+        with self.assertRaisesRegex(ToolingError, "cancelled"):
+            prepare_creation_sdk(self.root, self.prefix, runner=runner, cancel_check=cancel)
+        self.assertEqual(len(self.calls), 2)
+        self.assertFalse(self.prefix.exists())
 
     def test_cancelled_preparation_stops_before_next_command(self):
         def runner(argv, **kwargs):

@@ -59,6 +59,8 @@ without `--tools` is a different operation and does not prove build readiness.
 Creation checks, in order: an explicit SDK override, absolute `LUDUS_SDK_PREFIX`,
 the tooling checkout's current Development install, then automatic preparation
 of that checkout. An invalid explicit/environment override fails clearly.
+Automatic preparation installs different SDK variants in separate folders and
+preserves older installations used by existing projects.
 Game projects keep machine-specific paths in ignored local settings.
 
 Read [project setup](../guides/project-setup.md) for release locks, custom SDKs,
