@@ -23,6 +23,8 @@ target_sources(
         src/addressed_random.cpp
         src/batch.cpp
         src/dynamics.cpp
+        src/cubic.cpp
+        src/patch.cpp
     PUBLIC
         FILE_SET public_headers
         TYPE HEADERS
@@ -43,6 +45,8 @@ target_sources(
             include/ludus/foundation/math/addressed_random.hpp
             include/ludus/foundation/math/batch.hpp
             include/ludus/foundation/math/dynamics.hpp
+            include/ludus/foundation/math/cubic.hpp
+            include/ludus/foundation/math/patch.hpp
 )
 
 # Dependency direction: FoundationMath may use FoundationBase (types,
@@ -94,6 +98,7 @@ if(LUDUS_BUILD_TESTS)
             tests/batch_tests.cpp
             tests/layout_tests.cpp
             tests/dynamics_tests.cpp
+            tests/bezier_tests.cpp
     )
     target_include_directories(ludus_foundation_math_tests PRIVATE tests src)
     target_link_libraries(

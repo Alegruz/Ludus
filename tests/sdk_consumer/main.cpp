@@ -32,6 +32,7 @@ bool ExerciseInstalledParsing() noexcept;
 bool ExerciseInstalledConfiguration() noexcept;
 int ExerciseInstalledTime() noexcept;
 bool ExerciseInstalledFluid() noexcept;
+bool ExerciseInstalledCurves() noexcept;
 
 static_assert(ludus::foundation::kTarget.PointerBits == sizeof(void*) * 8);
 static_assert(ludus::foundation::kTarget.Os == ludus::foundation::TargetOs::Linux);
@@ -209,6 +210,10 @@ static_assert(PrimitiveContract());
 
 int main()
 {
+    if (!ExerciseInstalledCurves())
+    {
+        return 31;
+    }
     if (!ExerciseInstalledConfiguration())
     {
         return 90;

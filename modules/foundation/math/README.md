@@ -140,6 +140,42 @@ The caller owns the stream and its logical call order; save/restore
 hard worst-case iteration bound — do not call it from a deadline-bounded
 infrastructure callback. This is not a cryptographic generator.
 
+## Cubic curves and bicubic patches
+
+Include `cubic.hpp` or `patch.hpp` explicitly. `CubicBezier1/2/3` have four
+scalar/2D/3D controls; `BicubicBezierPatch` has `Control[u][v]`. Evaluation,
+Hermite conversion and subdivision allocate nothing and preserve outputs on
+failure. Inputs use normalized finite parameters in `[0,1]`; there is no implicit
+clamping or extrapolation. Results are rounded float32 values computed using
+float64 intermediates, without a certified error bound.
+
+```cpp
+#include <ludus/foundation/math/cubic.hpp>
+using namespace ludus::foundation::math;
+
+CubicBezier3 curve;
+const CubicHermite3 source{{0, 0, 0}, {3, 6, 9}, {1, 2, 3}, {1, 2, 3}};
+if (IsSuccess(TryFromHermite(source, 3.0, curve)))
+{
+    CubicSample3 sample;
+    if (IsSuccess(TryEvaluateCubic(curve, 0.5, sample)))
+    {
+        // Position = (1.5,3,4.5). FirstDerivative is per normalized u.
+        // Divide it by the source width 3 to recover the source-domain velocity.
+    }
+}
+```
+
+The position-only overload remains usable when derivatives overflow float32.
+Patch samples include `DU`, `DV`, `DUU`, `DUV`, `DVV`. `TryPatchNormal` checks
+analytic `Cross(DU,DV)` and an explicit `PatchNormalPolicy`; zero/parallel
+partials are singular, and a caller can reject short or nearly parallel partials.
+Subdivision produces two/four rounded children in their own normalized domains,
+with matching stored split controls. Prepared paths, distance lookup, transported
+frames, adjacency, meshes and editor documents remain future work. See the
+[architecture](../../../docs/architecture/curves-surfaces.md) and
+[kernel evidence](../../../docs/architecture/math-evidence/curves-surfaces.md).
+
 ## GPU transfer
 
 CPU value layout is **not** a shader ABI. Use explicit flat-column export helpers
