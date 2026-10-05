@@ -70,6 +70,7 @@ Capabilities ComputeCapabilities(const WorkspaceState& state)
     // Open is disabled during a job and while cleanup is unknown: a destructive
     // document switch cannot happen while an operation owns the workspace.
     caps.CanOpen = !busy && !stopping && !cleanupUnknown;
+    caps.CanCloseProject = loaded && caps.CanOpen;
     caps.CanEdit = loaded && !busy && !stopping && !cleanupUnknown;
     caps.CanSave = loaded && state.Dirty() && !busy && !stopping && !cleanupUnknown;
     caps.CanReload = loaded && !busy && !stopping && !cleanupUnknown;

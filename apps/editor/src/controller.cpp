@@ -187,6 +187,27 @@ void EditorController::OpenProject(const QString& descriptorPath)
     Publish();
 }
 
+bool EditorController::CloseProject()
+{
+    if (!Caps().CanCloseProject || State_.Dirty() || TuningDocumentDirty_)
+    {
+        return false;
+    }
+    // Retire project callbacks without recycling job ids or retaining drafts.
+    const auto epoch = State_.ProjectEpoch + 1;
+    const auto nextJob = State_.NextJob;
+    State_ = WorkspaceState{};
+    State_.ProjectEpoch = epoch;
+    State_.NextJob = nextJob;
+    SetupCheckPending_ = false;
+    SetupCheckJob_ = 0;
+    PendingCreatedProject_.clear();
+    PlayState_ = PlaySnapshot{};
+    Watch_.Stop();
+    Publish();
+    return true;
+}
+
 void EditorController::RememberProject()
 {
     if (!RecentProjects_.Remember({ .DescriptorPath = State_.DescriptorPath, .Name = State_.Saved.Name }))

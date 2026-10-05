@@ -1075,8 +1075,9 @@ class Operation:
             self._supervisor.captured_stdout = ""
             try:
                 self._check_release_cancel()
-                self._run_stage("building" if "--build" in argv or "ctest" in Path(argv[0]).name else "configuring",
-                                list(argv), cwd, env, "BuildFailed" if "--build" in argv else "ConfigureFailed")
+                building = "--build" in argv or "--install" in argv or Path(argv[0]).name == "build" or "ctest" in Path(argv[0]).name
+                self._run_stage("building" if building else "configuring", list(argv), cwd, env,
+                                "BuildFailed" if building else "ConfigureFailed")
                 return self._supervisor.captured_stdout
             finally:
                 self._supervisor.capture_stdout = False
@@ -1099,8 +1100,12 @@ class Operation:
                 sdk = sdk or root / "out/install" / profile
                 self._run_stage("building", [str(self._context.engine.cmake(root)), "--install", str(root / "out/build" / profile), "--prefix", str(sdk)], root, env, "BuildFailed")
             if self._operation == "project_create":
-                if sdk is None:
-                    raise ToolingError("InvalidProject", "New Project needs an installed SDK or explicit engine preparation")
+                from ludus_tools.creation_engine import select_creation_sdk, prepare_creation_sdk
+                root = self._context.tooling_root
+                sdk = select_creation_sdk(root, explicit=sdk,
+                    prepare=lambda prefix: prepare_creation_sdk(root, prefix, runner=runner,
+                                                               cancel_check=self._check_release_cancel))
+                self._writer.output(self._stage, "stdout", f"Selected Development engine: {sdk}\n")
                 create_project(self._project_path, name=self._options["name"], template_id="minimal",
                                engine_version="", local_sdk_prefix=sdk, cancel_check=self._check_release_cancel,
                                verify_staged=lambda staged: repair_project(staged, sdk=sdk, web_sdk=web, **options))

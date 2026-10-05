@@ -120,6 +120,7 @@ public:
 
     // Actions (validated centrally). Each applies at most one transition and
     // emits StateChanged exactly once when it changes state.
+    [[nodiscard]] bool CloseProject();
     void OpenProject(const QString& descriptorPath);
     void ClearRecentProjects();
     void EditDraft(const ProjectDescriptor& draft);

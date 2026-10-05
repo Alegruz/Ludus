@@ -1,19 +1,19 @@
 # Ludus editor interaction design
 
-Status: S1 shell contract plus proposed interactions for subsequent stages.
+Status: S1 shell and pre-S2 project UX; document interactions remain proposed.
 
 ## Default workspace
 
 ```text
-File  Project  Build  Release  Play  Output  View
+File  Project  Build  Release  Play  Output  View  Help
 Build | Run | Debug | Build and Play | Pause | Step | Resume | Reload | Stop
-+------------------+-------------------------------+--------------------+
-| Recent Projects  | Project settings | Audio      | Live Inspector     |
-| Open / browse    |                               | Session / revision |
-|                  | Current authoring work        | Property/value     |
-|                  |                               | Apply to session   |
-|                  |                               | Copy to draft      |
-+------------------+-------------------------------+--------------------+
++-------------------------------------------------+--------------------+
+| Project settings | Audio (when a project is open)| Live Inspector     |
+|                                                 | Session / revision |
+| Current authoring work                          | Property/value     |
+| Welcome + New/Open/Recents when no project       | Apply to session   |
+|                                                 | Copy to draft      |
++-------------------------------------------------+--------------------+
 | Output: bounded build, tool, and runtime diagnostics                  |
 +----------------------------------------------------------------------+
 | Project / draft / job status                                         |
@@ -27,6 +27,20 @@ areas without discarding drafts, stopping Play, or changing project settings.
 Use stable panel names and a versioned local preferences file. A preferences
 write failure is logged and leaves document saves independent; invalid saved
 layouts show a recovery message on startup.
+
+## Project workflow before S2
+
+Creation asks for Name and a parent Location with Browse, previews the new folder,
+and uses a single Create Project action. The shared backend selects/prepares the
+editor-associated engine and verifies staged configure/build/tests. An explicit
+Advanced override or environment selection never falls back silently on failure.
+Close Project returns to Welcome after settings/audio Save/Discard/Cancel and
+quiescence; Stop owned work first. F1 lists shortcuts from the same action objects.
+The independent Configuration preview remains available across project changes;
+closing a project preserves that explicitly loaded offline draft. Quitting the
+editor still prompts for its unsaved preferences.
+See [product/art direction](editor-art-direction.md) for three philosophy/UX/visual
+concepts and [browser strategy](editor-browser-strategy.md) for staged feasibility.
 
 ## Consistency rules
 

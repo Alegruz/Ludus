@@ -146,6 +146,14 @@ def cmd_project_setup(args) -> int:
 def cmd_project_create(args) -> int:
     components = [c for c in (args.components or "FoundationBase").split(",") if c]
     local_prefix: Optional[Path] = Path(args.sdk) if args.sdk else None
+    if Path(args.destination).exists():
+        raise ToolingError("DestinationExists", "New Project destination already exists")
+    if args.tools and not args.engine:
+        from .creation_engine import select_creation_sdk, prepare_creation_sdk
+        from .project_setup import run_command
+        root = Path(args.tools).resolve()
+        local_prefix = select_creation_sdk(root, explicit=local_prefix,
+            prepare=lambda prefix: prepare_creation_sdk(root, prefix, runner=run_command))
     if not args.engine and not local_prefix:
         raise ToolingError("InvalidProject", "create requires --engine <release> or --sdk <prefix>")
     verifier = None
@@ -168,7 +176,10 @@ def cmd_project_create(args) -> int:
     if not getattr(args, "json", False):
         print(f"Created project at {result.destination}")
         if not result.lock.resolved:
-            print("Lock is unresolved (no published release yet); build requires a local SDK override.")
+            if local_prefix:
+                print("Using the selected local engine; the release lock remains unresolved until a release is published.")
+            else:
+                print("Lock is unresolved (no published release yet); select a local engine before building.")
     return EXIT_OK
 
 

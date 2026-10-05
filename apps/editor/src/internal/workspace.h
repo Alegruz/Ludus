@@ -146,6 +146,7 @@ struct WorkspaceState
 struct Capabilities
 {
     bool CanOpen = false;
+    bool CanCloseProject = false;
     bool CanEdit = false;
     bool CanSave = false;
     bool CanReload = false;

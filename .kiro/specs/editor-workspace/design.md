@@ -193,14 +193,26 @@ asynchronous. Network filesystems are outside this first acceptance baseline.
 ## 5. UI and actions
 
 S1 supersedes E0's vertical splitter: use a QMainWindow with standard menus and
-shared menu/toolbar actions, scrollable Project settings and Audio tabs, Recent
-Projects and Live Inspector side panels, and a bottom read-only Output panel.
+shared menu/toolbar actions, scrollable Project settings and Audio tabs, a Welcome
+work area for recents when no project is open, a Live Inspector side panel, and a
+bottom read-only Output panel. File keeps the recent-project menu while authoring.
 View recovers panels/toolbar and resets layout. Versioned, bounded layout
 preferences are local user data, separate from the project/controller model;
 only compatible locally generated Qt state is restored. See the
 [S1 interaction contract](../../../docs/architecture/editor-interaction-design.md).
-Let layouts size controls; no manually positioned widgets or custom themes. Use
-Unicode text, normal keyboard focus, standard shortcuts and accessible labels.
+Let layouts size controls; no manually positioned widgets. Preserve platform
+fonts, palettes and native controls; selective outlines distinguish dialogs,
+panel titles and splitters. Final product/visual direction remains a choice among
+[three evaluated concepts](../../../docs/architecture/editor-art-direction.md).
+Use Unicode text, normal keyboard focus, standard shortcuts and accessible labels.
+
+Before S2, New Project uses Name/Location/Browse/Create with a folder preview.
+The shared CLI/Editor backend discovers the engine (explicit override, environment,
+current editor-associated install, or preparation) only behind explicit Create.
+Staged configure/build/tests still gate publication; opening remains read-only.
+Close Project confirms settings/audio drafts and waits for owned work to stop,
+then returns to Welcome. F1 lists shortcuts from QAction bindings; scoped document
+save/undo remains S2. See the updated interaction contract for bindings.
 
 Actions: Open Project (file chooser), Save (Ctrl+S), Reload, Configure/Refresh
 Targets, Build, Build and Run, Stop, Clear Output and Copy Job Details. Arguments

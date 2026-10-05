@@ -1,12 +1,16 @@
 #include "internal/main_window.h"
 #include "internal/audio_workspace.h"
 #include "internal/configuration_workspace.h"
+#include "internal/project_creation_dialog.h"
 #include "internal/project_setup_dialog.h"
+#include "internal/workspace_style.h"
+
+#include <QTabWidget>
+#include <QVBoxLayout>
 
 #include <QAbstractItemModel>
 #include <QAction>
 #include <QApplication>
-#include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -46,6 +50,7 @@ MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QStr
     : QMainWindow(parent), Controller_(controller), WorkspaceSettingsFile_(workspaceSettingsFile)
 {
     setWindowTitle(QStringLiteral("Ludus Editor"));
+    ApplyWorkspaceBoundaries(this);
     BuildUi();
     BuildMenus();
     InitializeWorkspace();
@@ -64,12 +69,20 @@ void MainWindow::BuildMenus()
     ClearRecentAction_ = fileMenu->addAction(QStringLiteral("Clear Recent Projects"));
     ClearRecentAction_->setObjectName(QStringLiteral("clearRecentProjectsAction"));
     connect(ClearRecentAction_, &QAction::triggered, Controller_, &EditorController::ClearRecentProjects);
-    SaveAction_ = fileMenu->addAction(QStringLiteral("&Save"));
+    CloseProjectAction_ = fileMenu->addAction(QStringLiteral("Close Project"));
+    CloseProjectAction_->setObjectName(QStringLiteral("closeProjectAction"));
+    CloseProjectAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+W")));
+    connect(CloseProjectAction_, &QAction::triggered, this, &MainWindow::OnCloseProject);
+    SaveAction_ = fileMenu->addAction(QStringLiteral("&Save Project Settings"));
     SaveAction_->setShortcut(QKeySequence::Save);
     ReloadAction_ = fileMenu->addAction(QStringLiteral("&Reload"));
 
     QMenu* projectMenu = menuBar()->addMenu(QStringLiteral("&Project"));
-    NewProjectAction_ = projectMenu->addAction(QStringLiteral("&New Project..."));
+    NewProjectAction_ = new QAction(QStringLiteral("&New Project..."), this);
+    fileMenu->insertAction(OpenAction_, NewProjectAction_);
+    NewProjectAction_->setShortcut(QKeySequence::New);
+    // The Project menu shares the same action and capability gate.
+    projectMenu->addAction(NewProjectAction_);
     NewProjectAction_->setObjectName(QStringLiteral("newProjectAction"));
     CheckSetupAction_ = projectMenu->addAction(QStringLiteral("&Check Setup"));
     CheckSetupAction_->setObjectName(QStringLiteral("checkSetupAction"));
@@ -161,7 +174,6 @@ void MainWindow::BuildMenus()
     CopyAction_ = outputMenu->addAction(QStringLiteral("Copy &Job Details"));
 
     QMenu* viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
-    viewMenu->addAction(RecentDock_->toggleViewAction());
     viewMenu->addAction(InspectorDock_->toggleViewAction());
     viewMenu->addAction(OutputDock_->toggleViewAction());
     viewMenu->addAction(GameToolbar_->toggleViewAction());
@@ -169,6 +181,20 @@ void MainWindow::BuildMenus()
     auto* resetLayout = viewMenu->addAction(QStringLiteral("Reset Layout"));
     resetLayout->setObjectName(QStringLiteral("resetWorkspaceLayout"));
     connect(resetLayout, &QAction::triggered, this, &MainWindow::ResetWorkspaceLayout);
+
+    auto* helpMenu = menuBar()->addMenu(QStringLiteral("&Help"));
+    auto* shortcuts = helpMenu->addAction(QStringLiteral("Keyboard Shortcuts..."));
+    shortcuts->setObjectName(QStringLiteral("keyboardShortcutsAction"));
+    shortcuts->setShortcut(QKeySequence(Qt::Key_F1));
+    connect(shortcuts, &QAction::triggered, this, &MainWindow::ShowShortcuts);
+    // Thanks to the Qt Group, QKeySequence documentation, StandardKey:
+    // https://doc.qt.io/qt-6/qkeysequence.html. Platform bindings and QAction
+    // capability gates apply equally to menus, buttons and shortcuts.
+    BuildAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+B")));
+    BuildRunAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+F5")));
+    PlayAction_->setShortcut(QKeySequence(Qt::Key_F6));
+    StopAction_->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F6));
+    connect(WelcomeNewButton_, &QPushButton::clicked, NewProjectAction_, &QAction::trigger);
 
     connect(OpenAction_, &QAction::triggered, this, &MainWindow::OnOpenRequested);
     connect(SaveAction_, &QAction::triggered, this, &MainWindow::OnSaveRequested);
@@ -304,25 +330,9 @@ void MainWindow::OpenProjectPath(const QString& path)
         return;
     }
     Audio_->StopPreview();
-    // Dirty-document confirmation is offered asynchronously via a message box.
-    if (Controller_->State().Dirty() && Controller_->State().Document == DocumentState::ProjectLoaded)
+    if (!ConfirmProjectChange(QStringLiteral("opening another project")))
     {
-        const auto choice = QMessageBox::question(this,
-                                                  QStringLiteral("Unsaved changes"),
-                                                  QStringLiteral("Save changes before opening another project?"),
-                                                  QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
-        if (choice == QMessageBox::Cancel)
-        {
-            return;
-        }
-        if (choice == QMessageBox::Save)
-        {
-            Controller_->Save();
-            if (Controller_->State().Dirty())
-            {
-                return; // failed Save aborts the Open
-            }
-        }
+        return;
     }
     Controller_->OpenProject(path);
 }
@@ -370,11 +380,36 @@ void MainWindow::OnStateChanged()
     RenderCapabilities();
     RenderStatus();
     const auto& state = Controller_->State();
+    const bool loaded = state.Document == DocumentState::ProjectLoaded;
+    const bool enteringWelcome = !loaded && !WorkTabs_->isTabVisible(WorkTabs_->indexOf(Welcome_));
+    const bool enteringProject = loaded && WorkTabs_->isTabVisible(WorkTabs_->indexOf(Welcome_));
+    WorkTabs_->setTabVisible(WorkTabs_->indexOf(Welcome_), !loaded);
+    for (int index = 0; index < WorkTabs_->count(); ++index)
+    {
+        if (WorkTabs_->widget(index) != Welcome_)
+        {
+            // Configuration is an independent offline document workspace.
+            WorkTabs_->setTabVisible(index, loaded || WorkTabs_->widget(index) == Configuration_);
+        }
+    }
+    if (enteringWelcome)
+    {
+        WorkTabs_->setCurrentWidget(Welcome_);
+    }
+    else if (enteringProject)
+    {
+        WorkTabs_->setCurrentWidget(ProjectSettings_);
+    }
     Audio_->setEnabled(state.Document == DocumentState::ProjectLoaded && !AudioClosing_ && !AudioLaunchPending_);
     if (state.Document == DocumentState::ProjectLoaded)
     {
         const auto root = QDir(QFileInfo(state.DescriptorPath).absolutePath()).absoluteFilePath(state.Saved.SourceDir);
         Audio_->SetRoot(QDir(root).absoluteFilePath(QStringLiteral("content")));
+    }
+
+    else
+    {
+        Audio_->SetRoot(QString());
     }
 
     // If a close was requested and the workspace is now closeable, finish.
@@ -509,6 +544,9 @@ void MainWindow::RenderCapabilities()
     SaveTuningAction_->setEnabled(Controller_->CanSaveTuningDocument());
     DiscardTuningAction_->setEnabled(playState.TuningDocumentAvailable && playState.TuningDocumentDirty);
     NewProjectAction_->setEnabled(caps.CanProjectCreate);
+    WelcomeNewButton_->setEnabled(caps.CanProjectCreate);
+    CloseProjectAction_->setEnabled(caps.CanCloseProject && !AudioLaunchPending_ && !AudioClosing_);
+    CloseProjectAction_->setToolTip(QStringLiteral("Close the project and return to Welcome. Stop active work first."));
     CheckSetupAction_->setEnabled(caps.CanProjectCheck);
     SetupProjectAction_->setEnabled(caps.CanProjectSetup);
     OpenAction_->setEnabled(caps.CanOpen);
@@ -624,37 +662,6 @@ void MainWindow::RenderStatus()
     }
 }
 
-namespace
-{
-struct DirectoryFieldOptions
-{
-    QString Label;
-    QString Hint;
-};
-
-QLineEdit* AddDirectoryField(QFormLayout* form, QDialog* dialog, const DirectoryFieldOptions& field)
-{
-    auto* row = new QWidget(dialog);
-    auto* layout = new QHBoxLayout(row);
-    layout->setContentsMargins(0, 0, 0, 0);
-    auto* edit = new QLineEdit(row);
-    edit->setPlaceholderText(field.Hint);
-    auto* browse = new QPushButton(QStringLiteral("Browse..."), row);
-    layout->addWidget(edit);
-    layout->addWidget(browse);
-    QObject::connect(browse, &QPushButton::clicked, dialog, [dialog, edit]() {
-        const QString selected =
-            QFileDialog::getExistingDirectory(dialog, QStringLiteral("Select directory"), edit->text());
-        if (!selected.isEmpty())
-        {
-            edit->setText(selected);
-        }
-    });
-    form->addRow(field.Label, row);
-    return edit;
-}
-} // namespace
-
 void MainWindow::OnDebuggerSetupRequested()
 {
     if (!Controller_->Caps().CanBuildDebug)
@@ -723,51 +730,83 @@ void MainWindow::OnSetupProject()
     dialog->open();
 }
 
+bool MainWindow::ConfirmProjectChange(const QString& action)
+{
+    if (Controller_->State().Document != DocumentState::ProjectLoaded || !Controller_->State().Dirty())
+    {
+        return true;
+    }
+    const auto choice = QMessageBox::question(this,
+                                              QStringLiteral("Unsaved project settings"),
+                                              QStringLiteral("Save project settings before %1?").arg(action),
+                                              QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+    if (choice == QMessageBox::Save)
+    {
+        Controller_->Save();
+        return !Controller_->State().Dirty();
+    }
+    return choice == QMessageBox::Discard;
+}
+
 void MainWindow::OnNewProject()
 {
-    if (!Audio_->ConfirmDiscard())
+    if (!Controller_->Caps().CanProjectCreate || !Audio_->ConfirmDiscard() ||
+        !ConfirmProjectChange(QStringLiteral("creating another project")))
     {
         return;
     }
     Audio_->StopPreview();
+    auto* dialog = new ProjectCreationDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dialog, &QDialog::accepted, this, [this, dialog]() { Controller_->CreateProject(dialog->Options()); });
+    dialog->open();
+}
+
+void MainWindow::OnCloseProject()
+{
+    if (!Controller_->Caps().CanCloseProject || AudioLaunchPending_ || AudioClosing_ || !Audio_->ConfirmDiscard() ||
+        !ConfirmProjectChange(QStringLiteral("closing the project")))
+    {
+        return;
+    }
+    Audio_->StopPreview();
+    // Confirmation authorizes this discard; reset through the model's edit gate.
+    if (Controller_->State().Dirty())
+    {
+        Controller_->EditDraft(Controller_->State().Saved);
+    }
+    (void)Controller_->CloseProject();
+}
+
+void MainWindow::ShowShortcuts()
+{
     auto* dialog = new QDialog(this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setObjectName(QStringLiteral("newProjectDialog"));
-    dialog->setWindowTitle(QStringLiteral("New Ludus Project"));
-    auto* form = new QFormLayout(dialog);
-    auto* name = new QLineEdit(dialog);
-    name->setObjectName(QStringLiteral("newProjectName"));
-    form->addRow(QStringLiteral("Name"), name);
-    auto* destination = new QLineEdit(dialog);
-    destination->setPlaceholderText(QStringLiteral("Full path to a new directory"));
-    destination->setObjectName(QStringLiteral("newProjectDestination"));
-    form->addRow(QStringLiteral("Destination"), destination);
-    auto* sdk = AddDirectoryField(form,
-                                  dialog,
-                                  {
-                                      .Label = QStringLiteral("Development SDK"),
-                                      .Hint = QStringLiteral("Installed native Development SDK prefix"),
-                                  });
-    auto* prepare = new QCheckBox(QStringLiteral("Prepare tools and build/install the native engine SDK"), dialog);
-    form->addRow(prepare);
-    auto* note = new QLabel(
-        QStringLiteral("Create the minimal native template and verify configure, build and tests before opening it. "
-                       "The destination must be new. Engine preparation may download dependencies."),
-        dialog);
+    dialog->setWindowTitle(QStringLiteral("Keyboard Shortcuts"));
+    auto* layout = new QFormLayout(dialog);
+    for (auto* action : {NewProjectAction_,
+                         OpenAction_,
+                         SaveAction_,
+                         CloseProjectAction_,
+                         BuildAction_,
+                         BuildRunAction_,
+                         BuildDebugAction_,
+                         PlayAction_,
+                         StopAction_})
+    {
+        auto label = action->text();
+        label.remove(QLatin1Char('&'));
+        layout->addRow(label, new QLabel(action->shortcut().toString(QKeySequence::NativeText), dialog));
+    }
+    auto* note = new QLabel(QStringLiteral("Shortcuts follow the same availability rules as menu actions. "
+                                           "Stop active work before closing a project. Document-scoped save and undo "
+                                           "are planned for S2."),
+                            dialog);
     note->setWordWrap(true);
-    form->addRow(note);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
-    form->addRow(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    layout->addRow(note);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
     connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
-    connect(dialog, &QDialog::accepted, this, [this, name, destination, sdk, prepare]() {
-        ProjectCreationOptions creation;
-        creation.Destination = destination->text().trimmed();
-        creation.Name = name->text().trimmed();
-        creation.Sdk = sdk->text().trimmed();
-        creation.PrepareEngine = prepare->isChecked();
-        Controller_->CreateProject(creation);
-    });
+    layout->addRow(buttons);
     dialog->open();
 }
 
