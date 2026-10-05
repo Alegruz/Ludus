@@ -11,6 +11,7 @@ not a claim of production readiness on every platform.
 | Audio | Native content definitions, catalog, editing and runtime-backed preview | Check the audio evidence for device and hosted acceptance limits |
 | Configuration | Typed runtime schema, cooked layers, sparse preferences and offline editor preview | Preference edits apply to a future launch, not the running host |
 | Randomness | [Caller-owned PCG32 streams and addressed Philox samples](../guides/randomness.md) | Deterministic primitives; game-owned identities/state, no automatic replay or editor RNG inspector |
+| Time | [Shared monotonic clock and owner-local stopwatch/deadline/frame helpers](../guides/time.md) | Nanosecond storage; simulation integration, scheduling, pacing and editor timing telemetry remain separate work |
 | Browser runtime | Pinned Emscripten/WebGPU Foundation, Platform, RHI paths and smoke samples | Runtime work has separate browser/device acceptance; this website contains documentation |
 | Platform detection | [Compiler-owned target facts and constexpr descriptor](../guides/platform-targets.md) | Recognition does not establish an engine port or runtime capabilities |
 | Engine systems | Foundation, math, graphics, content, gameplay/world and physics modules | Consult each module's implementation/evidence before relying on a feature |
