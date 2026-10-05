@@ -203,7 +203,7 @@ Editor snapshots outlive worker scratch and own their persistent storage.
 Parsed documents should be move-only with opaque internal state. Avoid the
 legacy public opaque node field in future incompatible APIs; use a private
 lightweight handle and checked accessors. P1 retains the field through the
-Content compatibility alias; backend types remain private. This discourages misuse but does not make C++
+Content compatibility facade; backend types remain private. This discourages misuse but does not make C++
 borrowed views lifetime-safe: callers must still retain their owner.
 
 ## JSON policy and typed decoding

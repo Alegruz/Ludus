@@ -1,11 +1,17 @@
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <ludus/content/content.h>
+namespace ludus::content
+{
+struct JsonValue;
+}
 #include <ludus/content/json.h>
 #include <string>
+#include <type_traits>
 #include <unistd.h>
 
 using namespace ludus::content;
+static_assert(std::is_same_v<decltype(&JsonValue::Get), JsonValue (JsonValue::*)(const char*) const noexcept>);
 TEST_CASE("Catalog preserves identity and rejects malformed replacements")
 {
     Catalog catalog;

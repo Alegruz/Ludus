@@ -30,8 +30,9 @@ SDK, and browser contract coverage using the repository's pinned toolchains.
 
 Content/Audio schemas and canonical valid output do not change. Failed reads
 can be retried safely. Writer strings now reject invalid UTF-8; Finish appends
-one newline once, and writes after Finish fail. The legacy opaque node member
-is retained for source compatibility. This is not a stable binary ABI promise.
+one newline once, and writes after Finish fail. The original Content node type and opaque
+member are retained for source compatibility, including forward declarations
+and unambiguous member pointers. This is not a stable binary ABI promise.
 
 A whole document still requires the codec's conservative pool estimate. Value,
 array, member, and string limits do not prevent construction of an otherwise

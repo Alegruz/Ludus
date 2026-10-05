@@ -1,6 +1,7 @@
 #include <ludus/content/json.h>
 
 #include <cstring>
+#include <initializer_list>
 #include <span>
 #include <string_view>
 
@@ -8,6 +9,10 @@ namespace ludus::content
 {
 namespace
 {
+foundation::parsing::JsonValue Parsed(JsonValue value) noexcept
+{
+    return {value.Value};
+}
 Status Convert(foundation::parsing::ParseStatus result, foundation::parsing::ParseLimit limit) noexcept
 {
     using foundation::parsing::ParseLimit;
@@ -28,6 +33,42 @@ Status Convert(foundation::parsing::ParseStatus result, foundation::parsing::Par
 }
 } // namespace
 
+JsonValue JsonValue::Get(const char* key) const noexcept
+{
+    return {Parsed(*this).Get(key).Value};
+}
+JsonValue JsonValue::At(usize index) const noexcept
+{
+    return {Parsed(*this).At(index).Value};
+}
+usize JsonValue::Count() const noexcept
+{
+    return Parsed(*this).Count();
+}
+bool JsonValue::Array() const noexcept
+{
+    return Parsed(*this).Array();
+}
+bool JsonValue::String(std::string_view& output) const noexcept
+{
+    return Parsed(*this).String(output);
+}
+bool JsonValue::Integer(uint64& output) const noexcept
+{
+    return Parsed(*this).Integer(output);
+}
+bool JsonValue::Number(float64& output) const noexcept
+{
+    return Parsed(*this).Number(output);
+}
+bool JsonValue::Boolean(bool& output) const noexcept
+{
+    return Parsed(*this).Boolean(output);
+}
+bool JsonValue::Fields(std::initializer_list<const char*> required) const noexcept
+{
+    return Parsed(*this).Fields(required);
+}
 JsonDocument::~JsonDocument() noexcept = default;
 Status JsonDocument::Read(std::string_view input, Diagnostic& diagnostic) noexcept
 {
@@ -44,7 +85,7 @@ Status JsonDocument::Read(std::string_view input, Diagnostic& diagnostic) noexce
 }
 JsonValue JsonDocument::Root() const noexcept
 {
-    return mDocument.Root();
+    return {mDocument.Root().Value};
 }
 void JsonWriter::Raw(std::string_view value) noexcept
 {
