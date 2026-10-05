@@ -1,5 +1,5 @@
-add_executable(ludus_web_foundation_probe main.cpp "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/strings.cpp")
-target_link_libraries(ludus_web_foundation_probe PRIVATE Ludus::FoundationBase Ludus::FoundationStrings Ludus::FoundationFilesystem)
+add_executable(ludus_web_foundation_probe main.cpp "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/strings.cpp" "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/containers.cpp")
+target_link_libraries(ludus_web_foundation_probe PRIVATE Ludus::FoundationContainers Ludus::FoundationBase Ludus::FoundationStrings Ludus::FoundationFilesystem)
 ludus_apply_project_defaults(ludus_web_foundation_probe)
 target_link_options(ludus_web_foundation_probe PRIVATE
     -fno-exceptions -g0 -g2 -sENVIRONMENT=web,node -sEXIT_RUNTIME=1

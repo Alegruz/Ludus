@@ -39,7 +39,7 @@ public:
     void GateWork() noexcept;
     void Activate() noexcept;
     void PinUntilProcessExit() noexcept;
-    void CopyResourcesFrom(const HostServiceProvider& source) noexcept;
+    [[nodiscard]] bool CopyResourcesFrom(const HostServiceProvider& source) noexcept;
 
     // Count of outstanding host allocations handed to the module. Retire must
     // see this at zero (the module frees everything it took) before the host
@@ -47,9 +47,13 @@ public:
     [[nodiscard]] uint64 OutstandingAllocations() const noexcept;
     [[nodiscard]] uint64 OutstandingWork() const noexcept;
 
+    // Reserve before committing a resource change. With exclusive ownership,
+    // SetResource for this ID cannot allocate after successful preparation.
+    [[nodiscard]] bool PrepareResource(uint64 logicalAssetId) noexcept;
+
     // Register a logical asset ID -> current resource generation handle mapping
     // the module can resolve. Bounded; used by the supported asset fixture.
-    void SetResource(uint64 logicalAssetId, uint64 resourceHandle) noexcept;
+    [[nodiscard]] bool SetResource(uint64 logicalAssetId, uint64 resourceHandle) noexcept;
 
     // Opaque per-session context passed over the ABI as game_api::HostContext*.
     // Defined in the implementation; public only so the service callbacks in

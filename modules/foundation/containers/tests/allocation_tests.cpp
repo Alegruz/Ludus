@@ -4,6 +4,7 @@
 // sanitizer runtimes provide their own operator new/delete).
 
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/sorted_map.hpp>
 #include <ludus/foundation/containers/static_array.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -23,6 +24,7 @@ struct AllocCounters
 };
 AllocCounters gCounters;
 bool gTracking = false;
+bool gRejectNothrowAllocation = false;
 
 void Reset() noexcept
 {
@@ -89,12 +91,12 @@ void* operator new(std::size_t n, std::align_val_t al)
 void* operator new(std::size_t n, const std::nothrow_t&) noexcept
 {
     CountNew(n);
-    return AlignedAlloc(n, alignof(std::max_align_t));
+    return gRejectNothrowAllocation ? nullptr : AlignedAlloc(n, alignof(std::max_align_t));
 }
 void* operator new(std::size_t n, std::align_val_t al, const std::nothrow_t&) noexcept
 {
     CountNew(n);
-    return AlignedAlloc(n, static_cast<std::size_t>(al));
+    return gRejectNothrowAllocation ? nullptr : AlignedAlloc(n, static_cast<std::size_t>(al));
 }
 void operator delete(void* p) noexcept
 {
@@ -245,4 +247,123 @@ TEST_CASE("Allocation/deallocation symmetry after churn", "[alloc]")
         moved.TrimCapacity();
     }
     REQUIRE(gCounters.news == gCounters.deletes);
+}
+
+namespace
+{
+struct RejectNothrowAllocation
+{
+    RejectNothrowAllocation() noexcept
+    {
+        gRejectNothrowAllocation = true;
+    }
+    ~RejectNothrowAllocation()
+    {
+        gRejectNothrowAllocation = false;
+    }
+};
+struct MoveMarker
+{
+    ludus::foundation::int32 Value;
+    explicit MoveMarker(ludus::foundation::int32 value) noexcept : Value(value) {}
+    MoveMarker(const MoveMarker&) = delete;
+    MoveMarker& operator=(const MoveMarker&) = delete;
+    MoveMarker(MoveMarker&& other) noexcept : Value(other.Value)
+    {
+        other.Value = -1;
+    }
+    MoveMarker& operator=(MoveMarker&& other) noexcept
+    {
+        if (this != &other)
+        {
+            Value = other.Value;
+            other.Value = -1;
+        }
+        return *this;
+    }
+};
+} // namespace
+
+TEST_CASE("Fallible ordered insertion allocates before consuming aliased rvalues", "[alloc][insert][oom]")
+{
+    Array<MoveMarker> values;
+    values.EnsureCapacity(1);
+    values.AddInPlace(17);
+    auto* original = values.GetData();
+    MoveMarker* result = nullptr;
+    {
+        RejectNothrowAllocation reject;
+        result = values.TryInsertAt(0, static_cast<MoveMarker&&>(values[0]));
+    }
+    REQUIRE(result == nullptr);
+    REQUIRE(values.GetData() == original);
+    REQUIRE(values.GetCapacity() == 1);
+    REQUIRE(values.GetSize() == 1);
+    REQUIRE(values[0].Value == 17);
+    {
+        RejectNothrowAllocation reject;
+        result = values.TryAddInPlace(static_cast<MoveMarker&&>(values[0]));
+    }
+    REQUIRE(result == nullptr);
+    REQUIRE(values.GetData() == original);
+    REQUIRE(values.GetSize() == 1);
+    REQUIRE(values[0].Value == 17);
+}
+
+TEST_CASE("SortedMap allocation failure and duplicates preserve move-only arguments", "[alloc][sorted-map][oom]")
+{
+    ludus::foundation::SortedMap<ludus::foundation::uint32, MoveMarker> map;
+    map.EnsureCapacity(1);
+    map.AddInPlace(10, 17);
+    MoveMarker supplied(99);
+    decltype(map)::InsertResult result;
+    MoveMarker* original = map.Find(10);
+    {
+        RejectNothrowAllocation reject;
+        result = map.TryAddInPlace(5, static_cast<MoveMarker&&>(*original));
+    }
+    REQUIRE(result.Value == nullptr);
+    REQUIRE_FALSE(result.Inserted);
+    REQUIRE(map.GetCapacity() == 1);
+    REQUIRE(map.GetSize() == 1);
+    REQUIRE(map.Find(10) == original);
+    REQUIRE(original->Value == 17);
+    {
+        RejectNothrowAllocation reject;
+        result = map.TryAddInPlace(5, static_cast<MoveMarker&&>(supplied));
+    }
+    REQUIRE(result.Value == nullptr);
+    REQUIRE(supplied.Value == 99);
+    {
+        RejectNothrowAllocation reject;
+        result = map.TryAddInPlace(10, static_cast<MoveMarker&&>(supplied));
+    }
+    REQUIRE(result.Value == original);
+    REQUIRE_FALSE(result.Inserted);
+    REQUIRE(supplied.Value == 99);
+    REQUIRE_FALSE(map.TryEnsureCapacity(static_cast<ludus::foundation::usize>(-1)));
+    REQUIRE(map.Find(10) == original);
+}
+
+TEST_CASE("SortedMap reserve, lookup and reuse avoid per-entry allocation", "[alloc][sorted-map]")
+{
+    ludus::foundation::SortedMap<ludus::foundation::uint32, ludus::foundation::uint32> map;
+    Reset();
+    gTracking = true;
+    map.EnsureCapacity(16);
+    const long allocationsAfterReserve = gCounters.news;
+    for (ludus::foundation::uint32 key = 16; key != 0; --key)
+    {
+        map.AddInPlace(key, key);
+        (void)map.Find(key);
+    }
+    map.Clear();
+    map.AddInPlace(7, 7U);
+    const long allocationsAfterReuse = gCounters.news;
+    map.Reset();
+    const long frees = gCounters.deletes;
+    gTracking = false;
+    REQUIRE(allocationsAfterReserve == 1);
+    REQUIRE(allocationsAfterReuse == 1);
+    REQUIRE(frees == 1);
 }
