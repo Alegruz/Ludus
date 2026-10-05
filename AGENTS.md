@@ -97,6 +97,30 @@ engine code. Discuss such cases in the PR before adding them.
   in `.clang-tidy` (types, functions, and members as used by existing modules).
   Match the surrounding code rather than introducing a new style.
 
+### Public SDK documentation
+
+- Document new or changed public classes, structs, functions, methods, aliases,
+  enum values, constants and macros beside their declarations using Doxygen
+  `///` comments (or `/** ... */`). Plain `//` comments are not API descriptions.
+- State purpose and the meaningful contract: parameters and units, return/status
+  meanings, failure/output preservation, ownership/lifetime, thread affinity,
+  and platform/build limitations where applicable. Use `@param`, `@return`,
+  `@pre`, `@note`, and `@warning` when useful. Do not invent guarantees or repeat
+  the signature as a substitute for behavior. No `@throws`: engine errors are
+  explicit and exception-free.
+- Preserve reference attribution. Detailed architecture prose belongs in its
+  existing owner; link to it rather than duplicating it in every declaration.
+- Public header inventory is checked against literal CMake public file sets.
+  Private code, third-party headers and `detail`/`internal` helpers must not enter
+  the public reference. Generated SDK policy headers are documented from templates.
+- Build MkDocs, then run `python scripts/build-api --bootstrap` (or provide the
+  pinned executable with `--doxygen`) and `python scripts/check-wiki` when changing
+  public API documentation or its tooling. See `docs/development/api-reference.md`.
+- CI rejects undocumented symbols outside `docs/api-undocumented.json`, including
+  removal of existing descriptions. This baseline records legacy debt; do not add
+  new gaps or regenerate it to bypass checks. Remove resolved entries in the change that documents them.
+  Generated HTML/XML/report files stay in ignored `out/`, never source control.
+
 ### Reference comments and attribution
 
 - Whenever a paper, article, book chapter, or technical document materially

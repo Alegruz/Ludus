@@ -25,6 +25,7 @@ editor art direction.
 python3 -m venv out/wiki-venv
 out/wiki-venv/bin/python -m pip install -r docs/wiki-requirements.txt
 out/wiki-venv/bin/python -m mkdocs build --strict
+out/wiki-venv/bin/python scripts/build-api --bootstrap
 out/wiki-venv/bin/python scripts/check-wiki
 out/wiki-venv/bin/python -m mkdocs serve
 ```
@@ -62,6 +63,11 @@ If a custom domain is added later, update `site_url`, configure/verify its DNS i
 Pages and rerun the workflow so canonical metadata matches.
 
 ## Checks and maintenance
+
+The [public SDK reference](api-reference.md) is generated with pinned Doxygen
+after MkDocs and copied into `out/wiki/api/` before combined validation/upload.
+It uses its own symbol search; wiki search continues indexing MkDocs content.
+The API coverage gate tracks legacy gaps and rejects new undocumented symbols.
 
 The HTML checker understands the `/Ludus/` project path and rejects missing local
 assets/anchors, escapes outside the site, unexpected symlinks and a missing/empty

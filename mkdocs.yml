@@ -90,3 +90,5 @@ nav:
   - Contribute:
       - Contribute to Ludus: contribute/index.md
       - Improve this wiki: contribute/wiki.md
+      - Document public APIs: contribute/api-reference.md
+  - API reference: reference/index.md

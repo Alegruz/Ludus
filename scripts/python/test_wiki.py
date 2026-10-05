@@ -53,6 +53,15 @@ class WikiArtifactTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing anchor", result.stderr)
 
+    def test_api_has_separate_search_but_its_links_are_checked(self):
+        api = self.site / "api"
+        api.mkdir()
+        (api / "index.html").write_text('<a href="symbol.html#method">Method</a>')
+        (api / "symbol.html").write_text('<h1 id="method">Method</h1>')
+        self.assertEqual(self.run_check().returncode, 0)
+        (api / "symbol.html").write_text('<h1 id="other">Other</h1>')
+        self.assertIn("missing anchor", self.run_check().stderr)
+
     def test_unindexed_page_and_invalid_destination_are_rejected(self):
         self.search(".")
         result = self.run_check()
