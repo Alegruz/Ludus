@@ -3,6 +3,9 @@
 Allocation-free monotonic CPU time and owner-local elapsed-time helpers.
 Link `Ludus::FoundationTime`; explicitly include `time.hpp` or `timers.hpp`.
 
+See the [wiki usage guide](../../../docs/wiki/guides/time.md) for complete
+examples, lifecycle/error handling and implemented versus planned integrations.
+
 ```cpp
 #include <ludus/foundation/time/time.hpp>
 #include <ludus/foundation/time/timers.hpp>

@@ -71,6 +71,7 @@ nav:
       - Strings and names: guides/strings.md
       - Hashing: guides/hashing.md
       - Deterministic randomness: guides/randomness.md
+      - High-resolution time: guides/time.md
       - Audio workflow: guides/audio.md
       - Package a game: guides/releases.md
       - Troubleshooting: guides/troubleshooting.md

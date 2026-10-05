@@ -101,7 +101,19 @@ Read the primary contracts alongside the design:
 - [CMake target system](https://cmake.org/cmake/help/latest/variable/CMAKE_SYSTEM_NAME.html):
   the configured target is separate from the build host.
 
-## 7. Own text and identify names
+## 7. Measure time and retain stalls
+
+Start with the [high-resolution time guide](../guides/time.md) for interval
+measurements, pause/resume, real-time deadlines and frame sampling. Its examples
+distinguish CPU time from simulation ticks and report discarded stall time.
+
+The [time architecture and consulted Gems review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/high-resolution-time.md)
+credit Noel Llopis's *The Clock: Keeping Your Finger on the Pulse of the Game*,
+Harvey/Marshall's *Scheduling Game Events* and John Bolton's *A Basic Scheduler*.
+The review explains the adopted value/sample ownership and the separate future
+scheduling contract; it makes no clock-resolution or performance-gain promise.
+
+## 8. Own text and identify names
 
 Start with [strings and names](../guides/strings.md) and [hashing](../guides/hashing.md)
 for the shipped contracts. The

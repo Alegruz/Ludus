@@ -203,7 +203,7 @@ and an editor strings inspector remain follow-on work.
 
 See the [implementation status](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/strings.md#implementation-status),
 [public headers](https://github.com/Alegruz/Ludus/tree/main/modules/foundation/strings/include/ludus/foundation/strings),
-[hashing guide](hashing.md) and [reference reading path](../learn/references.md#7-own-text-and-identify-names).
+[hashing guide](hashing.md) and [reference reading path](../learn/references.md#8-own-text-and-identify-names).
 Thanks to The Qt Company, *Implicit Sharing*, Qt 6 documentation, for cheap
 shared-copy inspiration; Ludus uses immutable storage rather than detachment.
 The architecture records that adaptation and the consulted Gems chapters.
