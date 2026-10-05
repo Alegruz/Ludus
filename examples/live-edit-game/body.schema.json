@@ -1,0 +1,12 @@
+{
+  "schema": "f2e2dbbb-709c-48ad-b87b-61d0d86ea35d",
+  "version": 1,
+  "namespace": "ludus::sample",
+  "name": "Body",
+  "header": "src/body.h",
+  "reserved": [],
+  "fields": [
+    { "id": 45057, "member": "Speed", "key": "speed", "label": "Speed", "type": "float32", "default": 1.0, "min": 0.0, "max": 8.0, "persist": true, "editable": true },
+    { "id": 45058, "member": "Bounces", "key": "bounces", "label": "Bounces", "type": "int32", "default": 0, "min": 0, "persist": false, "editable": false }
+  ]
+}

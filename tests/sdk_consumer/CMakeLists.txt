@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(Ludus CONFIG REQUIRED COMPONENTS Ui FoundationParsing FoundationParsingJson FoundationConfig FoundationConfigJson RuntimeConfiguration Localization OPTIONAL_COMPONENTS MissingUiTestComponent)
+find_package(Ludus CONFIG REQUIRED COMPONENTS FoundationReflection FoundationSerialization GamePropertyBinding Ui FoundationParsing FoundationParsingJson FoundationConfig FoundationConfigJson RuntimeConfiguration Localization OPTIONAL_COMPONENTS MissingUiTestComponent)
 if(Ludus_MissingUiTestComponent_FOUND)
     message(FATAL_ERROR "Unknown optional SDK component was reported as available")
 endif()
@@ -29,9 +29,19 @@ if(_missing_result EQUAL 0 OR NOT "${_missing_output}${_missing_error}" MATCHES
     message(FATAL_ERROR "Required missing-component rejection failed: ${_missing_output}${_missing_error}")
 endif()
 
+ludus_generate_reflection(TARGET consumer_reflection SCHEMA reflection_record.schema.json)
+
 if(NOT EMSCRIPTEN)
-    add_executable(ludus_sdk_consumer main.cpp network.cpp policy.cpp world.cpp strings.cpp time.cpp fluid.cpp filesystem.cpp ui.cpp containers.cpp threading.cpp parsing.cpp localization.cpp configuration.cpp curves.cpp)
-    target_link_libraries(ludus_sdk_consumer PRIVATE Ludus::FoundationConfigJson Ludus::RuntimeConfiguration Ludus::NetworkCore Ludus::FoundationParsing Ludus::FoundationParsingJson Ludus::Localization Ludus::FoundationContainers Ludus::FoundationFilesystem Ludus::FoundationStrings Ludus::FoundationBase Ludus::FoundationMath Ludus::FoundationThreading Ludus::FoundationTime Ludus::GraphicsRhi Ludus::Input Ludus::GameplayWorld Ludus::PhysicsFluid Ludus::Ui)
+    # A relocated SDK must also support codecs inside a private gameplay module.
+    add_library(ludus_sdk_reflection_module MODULE reflection_module.cpp)
+    target_link_libraries(ludus_sdk_reflection_module PRIVATE consumer_reflection)
+    ludus_apply_app_policy(ludus_sdk_reflection_module)
+    set_target_properties(ludus_sdk_reflection_module PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(ludus_sdk_reflection_module PRIVATE "LINKER:--exclude-libs,ALL")
+    endif()
+    add_executable(ludus_sdk_consumer main.cpp reflection.cpp network.cpp policy.cpp world.cpp strings.cpp time.cpp fluid.cpp filesystem.cpp ui.cpp containers.cpp threading.cpp parsing.cpp localization.cpp configuration.cpp curves.cpp)
+    target_link_libraries(ludus_sdk_consumer PRIVATE consumer_reflection Ludus::FoundationConfigJson Ludus::RuntimeConfiguration Ludus::NetworkCore Ludus::FoundationParsing Ludus::FoundationParsingJson Ludus::Localization Ludus::FoundationContainers Ludus::FoundationFilesystem Ludus::FoundationStrings Ludus::FoundationBase Ludus::FoundationMath Ludus::FoundationThreading Ludus::FoundationTime Ludus::GraphicsRhi Ludus::Input Ludus::GameplayWorld Ludus::PhysicsFluid Ludus::Ui)
     target_compile_definitions(ludus_sdk_consumer PRIVATE
         EXPECTED_FLAVOR=${Ludus_BUILD_FLAVOR_ID}
         EXPECTED_ASSERTS=${Ludus_ENABLE_ASSERTS}
