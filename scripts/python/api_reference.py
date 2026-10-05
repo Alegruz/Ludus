@@ -124,7 +124,8 @@ def bootstrap(root, pin):
     directory.mkdir(parents=True, exist_ok=True)
     archive = directory / "doxygen.tar.gz"
     if not archive.exists() or hashlib.sha256(archive.read_bytes()).hexdigest() != pin["sha256"]:
-        with urllib.request.urlopen(pin["linux_x64_url"], timeout=120) as response, archive.open("wb") as output:
+        request = urllib.request.Request(pin["linux_x64_url"], headers={"User-Agent": "Ludus-docs/1.0"})
+        with urllib.request.urlopen(request, timeout=120) as response, archive.open("wb") as output:
             shutil.copyfileobj(response, output)
     if hashlib.sha256(archive.read_bytes()).hexdigest() != pin["sha256"]:
         raise ValueError("Doxygen archive SHA-256 mismatch")

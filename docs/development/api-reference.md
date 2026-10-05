@@ -3,7 +3,9 @@
 Doxygen generates HTML and XML from Ludus's public headers. It is documentation
 tooling only: no engine link dependency or native SDK/toolchain configuration is
 required. `config/doxygen_toolchain.json` pins the official executable version,
-Linux x64 archive and SHA-256 published by Doxygen.
+Linux x64 archive from the official GitHub release and SHA-256 published by Doxygen.
+Downloads identify the documentation client with an explicit User-Agent; the
+checksum is verified before extracting or executing the binary.
 
 ## Inputs and boundaries
 

@@ -1,9 +1,13 @@
 """Regressions for accidental publication and documentation coverage loss."""
+import hashlib
+import io
 from pathlib import Path
+import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from api_reference import check_coverage, check_extracted_files, coverage, public_inputs
+from api_reference import bootstrap, check_coverage, check_extracted_files, coverage, public_inputs
 
 
 class ApiReferenceTests(unittest.TestCase):
@@ -84,6 +88,43 @@ class ApiReferenceTests(unittest.TestCase):
         self.assertIn("struct ns::Sample", symbols)
         self.assertEqual(missing, {"enumvalue ns::Sample::Mode::Pending"})
         self.assertFalse(any("Secret" in key for key in symbols))
+
+    def bootstrap_archive(self):
+        data = io.BytesIO()
+        with tarfile.open(fileobj=data, mode="w:gz") as archive:
+            entry = tarfile.TarInfo("doxygen/bin/doxygen")
+            binary = b"pinned binary"
+            entry.size = len(binary)
+            archive.addfile(entry, io.BytesIO(binary))
+        content = data.getvalue()
+        pin = {"linux_x64_url": "https://example.test/doxygen.tar.gz",
+               "sha256": hashlib.sha256(content).hexdigest(),
+               "archive_binary": "doxygen/bin/doxygen"}
+        return content, pin
+
+    @patch("api_reference.platform.machine", return_value="x86_64")
+    @patch("api_reference.platform.system", return_value="Linux")
+    def test_bootstrap_identifies_client_and_verifies_download(self, _system, _machine):
+        content, pin = self.bootstrap_archive()
+        with patch("api_reference.urllib.request.urlopen", return_value=io.BytesIO(content)) as download:
+            binary = Path(bootstrap(self.root, pin))
+        request = download.call_args.args[0]
+        self.assertEqual(request.full_url, pin["linux_x64_url"])
+        self.assertEqual(request.get_header("User-agent"), "Ludus-docs/1.0")
+        self.assertEqual(binary.read_bytes(), b"pinned binary")
+        self.assertTrue(binary.stat().st_mode & 0o111)
+        with patch("api_reference.urllib.request.urlopen") as download:
+            bootstrap(self.root, pin)
+            download.assert_not_called()
+
+    @patch("api_reference.platform.machine", return_value="x86_64")
+    @patch("api_reference.platform.system", return_value="Linux")
+    def test_bootstrap_rejects_corrupt_download_before_extraction(self, _system, _machine):
+        _, pin = self.bootstrap_archive()
+        with patch("api_reference.urllib.request.urlopen", return_value=io.BytesIO(b"corrupt")):
+            with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+                bootstrap(self.root, pin)
+        self.assertFalse((self.root / "out/doxygen-tools/bin/doxygen").exists())
 
     def test_concepts_are_subject_to_the_coverage_gate(self):
         self.root.joinpath("index.xml").write_text(
