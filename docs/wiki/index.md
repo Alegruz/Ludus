@@ -41,6 +41,12 @@ a project, work in the editor, and understand the systems behind each workflow.
 
     [Engine architecture map →](architecture/index.md)
 
+- **Look up a C++ API**
+
+    Browse public declarations, signatures and caller contracts generated from headers.
+
+    [Public SDK API reference →](reference/index.md)
+
 </div>
 
 ## What to expect

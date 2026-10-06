@@ -32,6 +32,22 @@ class WikiArtifactTests(unittest.TestCase):
         (self.site / "search/search_index.json").write_text(json.dumps({"docs": [
             {"location": ""}, {"location": location}]}))
 
+    def api(self):
+        api = self.site / "api"
+        api.mkdir()
+        reference = self.site / "reference"
+        reference.mkdir()
+        (reference / "index.html").write_text('<a href="../api/index.html">C++ API</a>')
+        search = self.site / "search/search_index.json"
+        data = json.loads(search.read_text())
+        data["docs"].extend({"location": uri} for uri in ("reference/", "api/index.html", "api/symbol.html#method"))
+        search.write_text(json.dumps(data))
+        navigation = ('<a href="../index.html">Ludus Wiki</a>'
+                      '<a href="../reference/index.html">API overview</a>')
+        (api / "index.html").write_text(navigation + '<a href="symbol.html#method">Method</a>')
+        (api / "symbol.html").write_text(navigation + '<h1 id="method">Method</h1>')
+        return api, reference, navigation
+
     def run_check(self):
         return subprocess.run([sys.executable, str(CHECK), "--root", str(self.root)],
                               capture_output=True, text=True, check=False)
@@ -53,14 +69,34 @@ class WikiArtifactTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing anchor", result.stderr)
 
-    def test_api_has_separate_search_but_its_links_are_checked(self):
-        api = self.site / "api"
-        api.mkdir()
-        (api / "index.html").write_text('<a href="symbol.html#method">Method</a>')
-        (api / "symbol.html").write_text('<h1 id="method">Method</h1>')
+    def test_api_links_and_shared_search_are_checked(self):
+        api, _, navigation = self.api()
         self.assertEqual(self.run_check().returncode, 0)
-        (api / "symbol.html").write_text('<h1 id="other">Other</h1>')
+        (api / "symbol.html").write_text(navigation + '<h1 id="other">Other</h1>')
         self.assertIn("missing anchor", self.run_check().stderr)
+
+    def test_api_pages_must_appear_in_shared_search(self):
+        self.api()
+        search = self.site / "search/search_index.json"
+        data = json.loads(search.read_text())
+        data["docs"] = [item for item in data["docs"] if item["location"] != "api/symbol.html#method"]
+        search.write_text(json.dumps(data))
+        self.assertIn("Page missing from search index: api/symbol.html", self.run_check().stderr)
+
+    def test_every_api_page_requires_wiki_and_overview_return_links(self):
+        api, _, _ = self.api()
+        (api / "symbol.html").write_text('<h1 id="method">Method</h1>')
+        result = self.run_check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("api/symbol.html: missing API return link to index.html", result.stderr)
+        self.assertIn("api/symbol.html: missing API return link to reference/index.html", result.stderr)
+
+    def test_overview_requires_generated_api_and_api_output_cannot_be_omitted(self):
+        api, reference, _ = self.api()
+        (api / "index.html").unlink()
+        self.assertIn("missing local destination ../api/index.html", self.run_check().stderr)
+        (reference / "index.html").write_text('<h1>API overview</h1>')
+        self.assertIn("missing link to generated API reference", self.run_check().stderr)
 
     def test_unindexed_page_and_invalid_destination_are_rejected(self):
         self.search(".")

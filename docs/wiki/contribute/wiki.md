@@ -31,7 +31,9 @@ check validates generated local links/assets, search destinations and repository
 source paths. It does not crawl third-party websites or prove remote pages will
 remain available.
 
-Build the API after MkDocs, which cleans the artifact directory. The explicit
+Build the API after MkDocs; it extracts XML and rebuilds the combined site with
+generated API pages in the same theme and search. Later MkDocs builds/previews
+reuse those pages until the API generator runs again. The explicit
 bootstrap downloads a hash-pinned official Linux x64 Doxygen binary into `out/`;
 use `--doxygen /path/to/doxygen` on other hosts. See
 [Document public APIs](api-reference.md) for structured comments and coverage.

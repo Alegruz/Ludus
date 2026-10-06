@@ -9,9 +9,12 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import urllib.request
 import xml.etree.ElementTree as ET
+
+from api_markdown import render_reference
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = {
@@ -181,10 +184,8 @@ def main():
     site = ROOT / "out/wiki"
     if not (site / "index.html").is_file():
         raise ValueError("Build MkDocs before build-api; it cleans the shared output")
-    destination = site / "api"
-    if destination.exists():
-        shutil.rmtree(destination)
-    shutil.copytree(output / "html", destination)
+    render_reference(ROOT, output / "xml", output / "markdown", paths)
+    subprocess.run([sys.executable, "-m", "mkdocs", "build", "--strict"], cwd=ROOT, check=True)
     print(f"API reference: {len(inputs)} headers, {len(symbols)} symbols, "
           f"{len(missing)} legacy documentation gaps; no new gaps.")
     return 0

@@ -3,10 +3,15 @@
 The API reference is generated automatically from the public header file sets,
 with signatures, types, enum values, constants, aliases and structured comments.
 
-**[Open the generated C++ API reference](https://alegruz.github.io/Ludus/api/index.html)**
+<!-- Raw HTML keeps this generated destination relative to the rendered page;
+     it is checked after Doxygen runs, rather than as a MkDocs source file. -->
+<p><strong><a href="../api/index.html">Open the generated C++ API reference</a></strong></p>
 
-It has its own symbol search. Wiki search finds guides and architecture pages;
-it does not index the separate Doxygen HTML tree. Use
+API pages use the same layout, navigation, light/dark mode and search as this
+wiki. Browse namespaces, classes, concepts and headers from the **API reference**
+sidebar section, or search for a symbol directly.
+
+The shared search finds API symbols, guides and architecture pages. Use
 [engine architecture](../architecture/index.md) to understand system ownership
 and [platform compatibility](../guides/platform-targets.md) to choose a supported
 target. The reference inventories native/browser declarations without selecting

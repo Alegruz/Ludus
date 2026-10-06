@@ -32,10 +32,20 @@ binary into ignored `out/doxygen-tools/`. On another host, install the pinned
 version and pass `--doxygen /path/to/doxygen` instead. There is no native engine
 build, compiler dependency or global installation for documentation generation.
 
-MkDocs cleans `out/wiki/`, so always generate the API **after** MkDocs. Publish
-the combined artifact through the existing Pages workflow; both parts use relative
-links compatible with `/Ludus/`. A plain MkDocs preview does not rebuild Doxygen.
-Serve the complete artifact to inspect API navigation/search.
+Run the API generator after the initial MkDocs build. Doxygen extracts XML,
+the generator creates ignored Markdown pages, and MkDocs rebuilds the combined
+artifact with its normal theme and shared search. Publish through the existing
+Pages workflow; relative links are compatible with `/Ludus/`.
+Plain MkDocs builds/previews reuse the last generated API pages without rebuilding
+Doxygen. Regenerate after changing headers or comments.
+
+```bash
+out/wiki-venv/bin/python -m http.server 8000 --directory out/wiki
+```
+
+Open `http://localhost:8000/reference/` and follow the generated API link. Check
+sidebar navigation, symbol search, light/dark modes and a narrow viewport on a
+symbol page as well as the API landing page.
 
 ## Keep the backlog shrinking
 

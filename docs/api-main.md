@@ -4,9 +4,10 @@ This reference is generated from the SDK public header file sets. It includes
 declarations without descriptions while the documentation backlog is reduced.
 Private members and implementation namespaces are excluded.
 
-Browse **Classes**, **Namespaces** or **Files**, or use the API search field.
-Return to the [Ludus Wiki](../index.html) for workflows and
-[engine architecture](../architecture/index.html) for ownership explanations.
+Browse **Classes and structs**, **Namespaces** or **Header files**, or use the
+wiki's **Search** to find a symbol alongside guides and architecture pages.
+Return to the <a href="../index.html">Ludus Wiki</a> for workflows and
+<a href="../architecture/index.html">engine architecture</a> for ownership explanations.
 
 The inventory includes native and browser public declarations without selecting
 a preprocessor profile. Availability must be checked against the selected SDK
