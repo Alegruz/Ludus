@@ -58,7 +58,7 @@ PRESET_BUILD_TYPES.update({
 })
 HOST_PRESETS = tuple(name for name in PRESET_BUILD_TYPES if name.startswith(NATIVE_PRESET_PREFIX))
 
-FORMAT_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
+FORMAT_SUFFIXES = {".m", ".mm", ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
 TIDY_ROOTS = ("modules", "apps")
 
 BOOTSTRAP_INPUTS = (
@@ -1477,7 +1477,7 @@ def run_tidy(root: Path, preset: str) -> None:
         cmake_configure(root, preset)
 
     compiled_files = compile_database_files(build_dir)
-    requested_files = [path.resolve() for path in source_files(root, {".cpp", ".cc", ".cxx"}, TIDY_ROOTS)]
+    requested_files = [path.resolve() for path in source_files(root, {".cpp", ".cc", ".cxx", ".mm"}, TIDY_ROOTS)]
     tidy_files = [path for path in requested_files if path in compiled_files]
 
     if not tidy_files:
@@ -1554,7 +1554,7 @@ def run_include_cleaner(root: Path, preset: str) -> None:
         cmake_configure(root, preset)
 
     compiled_files = compile_database_files(build_dir)
-    requested_files = [path.resolve() for path in source_files(root, {".cpp", ".cc", ".cxx"}, TIDY_ROOTS)]
+    requested_files = [path.resolve() for path in source_files(root, {".cpp", ".cc", ".cxx", ".mm"}, TIDY_ROOTS)]
     targets = [path for path in requested_files if path in compiled_files]
     header_filter = f"^{re.escape(str(root))}/(modules|apps)/.*"
     print("Advisory include-cleaner report (not a gate; see check-build-budget for enforcement):")

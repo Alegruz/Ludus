@@ -93,6 +93,23 @@ class LockedSetupTests(unittest.TestCase):
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_objective_cpp_is_formatted_and_analyzed_from_its_compile_database(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "modules/platform/src/window_cocoa.mm"
+            source.parent.mkdir(parents=True)
+            source.touch()
+            database = root / "out/build" / engine.DEFAULT_PRESET / "compile_commands.json"
+            database.parent.mkdir(parents=True)
+            database.write_text("[]")
+            self.assertIn(".mm", engine.FORMAT_SUFFIXES)
+            with patch.object(engine, "load_tool_versions", return_value={}), \
+                    patch.object(engine, "find_system_tool", return_value="clang-tidy-18"), \
+                    patch.object(engine, "compile_database_files", return_value={source.resolve()}), \
+                    patch.object(engine, "run_analysis_commands") as analyze:
+                engine.run_tidy(root, engine.DEFAULT_PRESET)
+            self.assertEqual(analyze.call_args.args[1][0][-1], source.resolve())
+
     def test_shards_execute_every_translation_unit_once(self):
         commands = [["tidy", str(i)] for i in range(11)]
         visited = []

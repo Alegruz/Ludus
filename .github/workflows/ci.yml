@@ -20,18 +20,34 @@ env:
 
 jobs:
   macos-compile:
-    name: macOS compile-only (Metal deferred)
+    name: macOS platform (Metal deferred)
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - name: Install upstream Clang 18
         run: brew install llvm@18
       - name: Prepare pinned native dependencies
-        run: ./init.sh --cli --preset macos-clang-development --preset-only --locked --no-system-install
+        run: ./init.sh --cli --preset macos-clang-development --preset-only --locked --with-tests --no-system-install
       - name: Build all enabled engine and application targets
         run: ./scripts/build macos-clang-development
       - name: Test macOS setup contracts
         run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui -v
+      - name: Test native Cocoa lifecycle and keyboard routing
+        env:
+          LUDUS_TEST_COCOA: "1"
+        run: out/host-tools/venv/bin/ctest --preset macos-clang-development --label-regex 'platform|macos|build-contract' --no-tests=error
+      - name: Analyze Cocoa Objective-C++ production and test sources
+        run: |
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/platform/src/window_cocoa.mm
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/platform/tests/cocoa_tests.mm
+      - name: Validate Cocoa with ASan and UBSan
+        env:
+          LUDUS_TEST_COCOA: "1"
+        run: |
+          ./init.sh --cli --preset macos-clang-asan-ubsan --preset-only --locked --with-tests --no-system-install
+          out/host-tools/venv/bin/cmake --preset macos-clang-asan-ubsan
+          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests
+          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_platform_cocoa(_keymap)?_tests$' --no-tests=error
 
   formatting:
     name: Source formatting

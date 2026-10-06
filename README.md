@@ -7,7 +7,7 @@ Start with [Ludus Wiki](https://alegruz.github.io/Ludus/) for task guides,
 explanations and reference reading paths. Its
 [Markdown sources](docs/wiki/index.md) are also available in this checkout.
 
-## macOS compile-only support
+## macOS support
 
 The first macOS slice uses upstream Clang 18 and libc++ with Apple silicon
 and Intel profiles, targeting macOS 14 or later. Install Xcode Command Line Tools and
@@ -42,16 +42,18 @@ Omit `--preset-only` to prepare all native profiles in one setup run.
 If the selected preset's generated toolchain is missing, CMake stops before
 compiler detection and prints the init command needed to prepare that profile.
 
-Debug, Development, and ASan/UBSan builds were validated on Apple silicon, with all
-49 registered tests passing in both Debug and Development (deferred feature cases explicitly
-skip). Format, static analysis, and setup regressions pass. On the validation
+Debug, Development, and ASan/UBSan builds are validated on Apple silicon.
+Native Cocoa integration tests require a WindowServer session and opt in with
+`LUDUS_TEST_COCOA=1`; deferred feature cases explicitly skip. On the validation
 host running macOS 26.6, Clang 18's ASan runtime deadlocks during initialization,
 before `main`, including in an independent probe. Sanitizer execution remains
-unverified; this slice does not yet satisfy the full sanitizer review gate.
+unverified on that host. The macOS 14 CI job runs the Cocoa lifecycle and keyboard
+tests with ASan/UBSan as well as the regular Development build.
 
-This is a compilation milestone. Platform uses the existing headless backend;
+Platform now provides [native Cocoa windows and keyboard input](docs/architecture/macos-platform.md).
+It publishes borrowed native handles and backing-pixel dimensions for the future Metal backend.
 RHI startup returns `BackendUnavailable` from a guarded placeholder reserved for
-Metal. Vulkan/Volk is excluded on macOS. Cocoa windows, Metal rendering, native
+Metal. Vulkan/Volk is excluded on macOS. Metal rendering, native
 file I/O, audio device output, interactive diagnostic helpers, the Qt editor,
 Linux debugger journeys, the world demo (libc++ 18 lacks floating-point
 `from_chars`), and release packaging are deferred. Portable modules

@@ -22,8 +22,11 @@ class WindowBase
 public:
     struct CreateInfo final
     {
+        /// Window title; Cocoa accepts valid UTF-8 of at most 4096 bytes and copies it at creation.
         std::string Name;
+        /// Requested content width; Cocoa interprets this in logical points (1..16384).
         ludus::foundation::uint32 Width = 800;
+        /// Requested content height; Cocoa interprets this in logical points (1..16384).
         ludus::foundation::uint32 Height = 600;
         // Browser only. Selector is copied at creation; the matching canvas is
         // borrowed and must remain in the DOM until this window is destroyed.
@@ -38,6 +41,9 @@ public:
 
 public:
     virtual ~WindowBase() = default;
+    /// Pumps native events; false means the window closed or the call cannot proceed.
+    /// Cocoa pumps the shared application queue and may deliver input to other windows.
+    /// Create, pump, query and destroy Cocoa windows on the main thread; sinks must not destroy them during dispatch.
     virtual bool HandleEvent(const Event& event) noexcept = 0;
 
     // Browser snapshots/events are copied into caller-owned storage. Native
@@ -57,6 +63,8 @@ public:
         return false;
     }
 
+    /// Returns borrowed backend handles and current dimensions; Cocoa dimensions are backing pixels.
+    /// Cocoa snapshots must be queried on the main thread and refreshed after pumping events.
     [[nodiscard]] LUDUS_INLINE NativeWindowInfo GetNativeWindowInfo() const noexcept
     {
         return mNativeWindowInfo;
@@ -83,7 +91,7 @@ public:
 
 protected:
     WindowBase() = delete;
-    /// Copies the window name and initializes native dimensions in pixels.
+    /// Copies the window name and requested dimensions; the backend publishes its native extent.
     /// The caller's CreateInfo may be released after construction.
     explicit WindowBase(const CreateInfo& info) noexcept;
 
@@ -106,7 +114,12 @@ public:
     WindowManager() = default;
     ~WindowManager() = default;
 
+    /// Initializes the selected backend; Cocoa requires the main thread and a WindowServer session.
+    /// Repeated Cocoa initialization is safe; an existing host application's delegate and menu are preserved.
     bool Initialize(const InitializeInfo& info) noexcept;
+    /// Creates a window, replacing outWindow; failure leaves it empty.
+    /// Cocoa requires successful initialization and main-thread ownership through destruction.
+    /// Off-main-thread Cocoa calls fail without changing outWindow; at most 16 Cocoa windows may be alive.
     bool CreateWindow(const WindowBase::CreateInfo& info,
                       ludus::foundation::core::UniquePtr<Window>& outWindow) noexcept;
 };
