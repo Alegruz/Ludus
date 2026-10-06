@@ -1,0 +1,81 @@
+"""Startup selection must bypass Apple's old Python before opening the GUI."""
+import json
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+from unittest.mock import patch
+
+import init_launcher
+
+
+class LauncherTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        (self.root / "config").mkdir()
+        (self.root / "config/tool_versions.json").write_text(json.dumps({"minimum": {"python": "3.10.0"}}))
+
+    def test_macos_prefers_prepared_interpreter(self):
+        with patch.object(init_launcher.platform, "system", return_value="Darwin"), \
+                patch.object(init_launcher.os, "get_exec_path", return_value=[]):
+            candidates = init_launcher.interpreter_candidates(self.root)
+        self.assertEqual(candidates[0], str(self.root / "out/host-tools/venv/bin/python"))
+
+    def test_old_default_falls_back_to_supported_versioned_python(self):
+        old = self.root / "python3"
+        modern = self.root / "python3.12"
+        old.touch()
+        modern.touch()
+        with patch.object(init_launcher, "interpreter_candidates", return_value=[str(old), str(modern)]), \
+                patch.object(init_launcher.subprocess, "run", side_effect=[
+                    subprocess.CompletedProcess([], 0, stdout="[3, 9, 6]"),
+                    subprocess.CompletedProcess([], 0, stdout="[3, 12, 15]")]):
+            self.assertEqual(init_launcher.select_interpreter(self.root), str(modern))
+
+    def test_fresh_checkout_discovers_versioned_python_on_path(self):
+        binaries = self.root / "bin"
+        binaries.mkdir()
+        old = binaries / "python3"
+        modern = binaries / "python3.12"
+        config = binaries / "python3.12-config"
+        for path in (old, modern, config):
+            path.touch()
+            path.chmod(0o755)
+        with patch.object(init_launcher.platform, "system", return_value="Darwin"), \
+                patch.object(init_launcher.sys, "executable", str(old)), \
+                patch.object(init_launcher.os, "get_exec_path", return_value=[str(binaries)]), \
+                patch.object(init_launcher.subprocess, "run", side_effect=[
+                    subprocess.CompletedProcess([], 0, stdout="[3, 9, 6]"),
+                    subprocess.CompletedProcess([], 0, stdout="[3, 12, 15]")]) as run:
+            self.assertEqual(init_launcher.select_interpreter(self.root), str(modern))
+        self.assertEqual(run.call_count, 2)
+
+    def test_broken_or_unsupported_interpreters_fail_with_setup_instruction(self):
+        broken = self.root / "broken-python"
+        broken.touch()
+        for result in (subprocess.TimeoutExpired([], 5), OSError("missing library"),
+                       subprocess.CompletedProcess([], 0, stdout="[3, 9, 6]")):
+            with self.subTest(result=result), \
+                    patch.object(init_launcher, "interpreter_candidates", return_value=[str(broken)]), \
+                    patch.object(init_launcher.subprocess, "run") as run:
+                if isinstance(result, Exception):
+                    run.side_effect = result
+                else:
+                    run.return_value = result
+                with self.assertRaisesRegex(RuntimeError, "Python 3.10.0 or later.*rerun ./init.sh"):
+                    init_launcher.select_interpreter(self.root)
+
+    def test_launcher_forwards_flags_and_arguments_without_starting_setup_itself(self):
+        with patch.object(init_launcher, "select_interpreter", return_value="/prepared/python"), \
+                patch.object(init_launcher.sys, "argv", ["init_launcher.py", "--gui", "--preset", "macos-clang-debug"]), \
+                patch.object(init_launcher.os, "execv") as execute:
+            init_launcher.main()
+        executable, arguments = execute.call_args.args
+        self.assertEqual(executable, "/prepared/python")
+        self.assertEqual(arguments[2:], ["init", "--gui", "--preset", "macos-clang-debug"])
+
+
+if __name__ == "__main__":
+    unittest.main()

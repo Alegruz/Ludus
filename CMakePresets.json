@@ -128,6 +128,101 @@
         "CMAKE_BUILD_TYPE": "Release",
         "LUDUS_BUILD_FLAVOR": "Release"
       }
+    },
+    {
+      "name": "macos-clang-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "environment": {
+        "CONAN_HOME": "${sourceDir}/out/conan/home",
+        "CONAN_NON_INTERACTIVE": "1",
+        "PATH": "${sourceDir}/out/host-tools/bin:${sourceDir}/out/host-tools/venv/bin:$penv{PATH}"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "${sourceDir}/out/host-tools/bin/clang++",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_MAKE_PROGRAM": "${sourceDir}/out/host-tools/venv/bin/ninja",
+        "LUDUS_BUILD_SMOKE_APP": "ON",
+        "LUDUS_ENABLE_COVERAGE": "OFF",
+        "LUDUS_ENABLE_TSAN": "OFF",
+        "CMAKE_C_COMPILER": "${sourceDir}/out/host-tools/bin/clang",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "14.0",
+        "CMAKE_OSX_SYSROOT": "${sourceDir}/out/host-tools/macos-sdk",
+        "CMAKE_CXX_FLAGS": "-stdlib=libc++ -nostdinc++ -isystem \"${sourceDir}/out/host-tools/libcxx-include\""
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    },
+    {
+      "name": "macos-clang-debug",
+      "displayName": "macOS Clang Debug",
+      "inherits": "macos-clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/macos-clang-debug/conan_toolchain.cmake",
+        "LUDUS_BUILD_TESTS": "ON",
+        "LUDUS_ENABLE_ASAN": "OFF",
+        "LUDUS_ENABLE_UBSAN": "OFF",
+        "LUDUS_BUILD_FLAVOR": "Debug"
+      }
+    },
+    {
+      "name": "macos-clang-development",
+      "displayName": "macOS Clang Development",
+      "inherits": "macos-clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/macos-clang-development/conan_toolchain.cmake",
+        "LUDUS_BUILD_TESTS": "ON",
+        "LUDUS_ENABLE_ASAN": "OFF",
+        "LUDUS_ENABLE_UBSAN": "OFF",
+        "LUDUS_BUILD_FLAVOR": "Development"
+      }
+    },
+    {
+      "name": "macos-clang-asan-ubsan",
+      "displayName": "macOS Clang ASan UBSan",
+      "inherits": "macos-clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/macos-clang-asan-ubsan/conan_toolchain.cmake",
+        "LUDUS_BUILD_TESTS": "ON",
+        "LUDUS_ENABLE_ASAN": "ON",
+        "LUDUS_ENABLE_UBSAN": "ON",
+        "LUDUS_BUILD_FLAVOR": "Development"
+      }
+    },
+    {
+      "name": "macos-clang-profile",
+      "displayName": "macOS Clang Profile",
+      "inherits": "macos-clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/macos-clang-profile/conan_toolchain.cmake",
+        "LUDUS_BUILD_TESTS": "ON",
+        "LUDUS_ENABLE_ASAN": "OFF",
+        "LUDUS_ENABLE_UBSAN": "OFF",
+        "LUDUS_COMPILED_LOG_LEVEL": "2",
+        "LUDUS_BUILD_FLAVOR": "Profile"
+      }
+    },
+    {
+      "name": "macos-clang-release",
+      "displayName": "macOS Clang Release",
+      "inherits": "macos-clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/macos-clang-release/conan_toolchain.cmake",
+        "LUDUS_BUILD_TESTS": "OFF",
+        "LUDUS_ENABLE_ASAN": "OFF",
+        "LUDUS_ENABLE_UBSAN": "OFF",
+        "LUDUS_BUILD_FLAVOR": "Release"
+      }
     }
   ],
   "buildPresets": [
@@ -158,6 +253,26 @@
     {
       "name": "web-emscripten-release",
       "configurePreset": "web-emscripten-release"
+    },
+    {
+      "name": "macos-clang-debug",
+      "configurePreset": "macos-clang-debug"
+    },
+    {
+      "name": "macos-clang-development",
+      "configurePreset": "macos-clang-development"
+    },
+    {
+      "name": "macos-clang-asan-ubsan",
+      "configurePreset": "macos-clang-asan-ubsan"
+    },
+    {
+      "name": "macos-clang-profile",
+      "configurePreset": "macos-clang-profile"
+    },
+    {
+      "name": "macos-clang-release",
+      "configurePreset": "macos-clang-release"
     }
   ],
   "testPresets": [
@@ -206,6 +321,41 @@
     {
       "name": "web-emscripten-release",
       "configurePreset": "web-emscripten-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-clang-debug",
+      "configurePreset": "macos-clang-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-clang-development",
+      "configurePreset": "macos-clang-development",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-clang-asan-ubsan",
+      "configurePreset": "macos-clang-asan-ubsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-clang-profile",
+      "configurePreset": "macos-clang-profile",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-clang-release",
+      "configurePreset": "macos-clang-release",
       "output": {
         "outputOnFailure": true
       }

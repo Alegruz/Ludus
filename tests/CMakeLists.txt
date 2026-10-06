@@ -12,6 +12,9 @@ if(LUDUS_BUILD_TESTS)
     add_test(NAME ludus_compile_policy
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/build_contract/verify_compile_policy.py"
             "${PROJECT_BINARY_DIR}/compile_commands.json")
+    add_test(NAME ludus_setup_preflight
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/build_contract/verify_setup_preflight.py"
+            "${PROJECT_SOURCE_DIR}" "${CMAKE_COMMAND}" "${CMAKE_MAKE_PROGRAM}")
     add_test(NAME ludus_assert_policy
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/build_contract/verify_assert_policy.py"
             "${PROJECT_BINARY_DIR}" "${PROJECT_SOURCE_DIR}" "${CMAKE_COMMAND}"
@@ -31,7 +34,7 @@ if(LUDUS_BUILD_TESTS)
     add_test(NAME ludus_target_detection
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/build_contract/verify_target_detection.py"
             "${CMAKE_CXX_COMPILER}" "${PROJECT_SOURCE_DIR}")
-    set_tests_properties(ludus_build_contract_tests ludus_compile_policy ludus_assert_policy ludus_assert_headers
+    set_tests_properties(ludus_build_contract_tests ludus_compile_policy ludus_setup_preflight ludus_assert_policy ludus_assert_headers
         ludus_header_self_sufficiency ludus_foundational_includes ludus_target_detection
         PROPERTIES LABELS "build-contract" TIMEOUT 120)
 endif()

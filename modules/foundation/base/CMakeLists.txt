@@ -1,8 +1,8 @@
 add_library(ludus_foundation_base STATIC)
 add_library(Ludus::FoundationBase ALIAS ludus_foundation_base)
 
-if((NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT EMSCRIPTEN) OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    message(FATAL_ERROR "Ludus assertions currently require the validated Linux/Clang or pinned Emscripten backend")
+if((NOT CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$" AND NOT EMSCRIPTEN) OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR "Ludus assertions currently require the Linux/macOS Clang or pinned Emscripten backend")
 endif()
 
 set_target_properties(
@@ -91,6 +91,9 @@ target_include_directories(
 
 if(EMSCRIPTEN)
     target_sources(ludus_foundation_base PRIVATE src/diagnostics_web.cpp src/diagnostic_output_web.cpp)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_sources(ludus_foundation_base PRIVATE src/diagnostic_output.cpp src/diagnostics_macos.cpp)
+    set_source_files_properties(src/diagnostics_macos.cpp PROPERTIES COMPILE_OPTIONS "-fno-optimize-sibling-calls")
 else()
     target_sources(ludus_foundation_base PRIVATE src/diagnostic_output.cpp src/diagnostics_linux.cpp)
     set_source_files_properties(src/diagnostics_linux.cpp PROPERTIES COMPILE_OPTIONS "-fno-optimize-sibling-calls")
@@ -142,51 +145,53 @@ if(LUDUS_BUILD_TESTS)
     target_link_libraries(ludus_assert_child PRIVATE Ludus::FoundationBase Threads::Threads)
     ludus_apply_project_defaults(ludus_assert_child)
 
-    add_executable(ludus_assert_allocation_child tests/assert_allocation_child.cpp)
-    target_include_directories(ludus_assert_allocation_child PRIVATE src)
-    target_link_libraries(ludus_assert_allocation_child PRIVATE Ludus::FoundationBase)
-    target_link_options(ludus_assert_allocation_child PRIVATE
-        -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--export-dynamic-symbol=ludus_assert_test_watching)
-    ludus_apply_project_defaults(ludus_assert_allocation_child)
-    add_test(NAME ludus_assert_allocation
-        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/assertions/allocation_tests.py"
-            "$<TARGET_FILE:ludus_assert_allocation_child>")
-    set_tests_properties(ludus_assert_allocation PROPERTIES LABELS "foundation;assert-death" TIMEOUT 30)
-
-    if(NOT LUDUS_ENABLE_ASAN AND NOT LUDUS_ENABLE_UBSAN AND NOT LUDUS_ENABLE_TSAN)
-        add_library(ludus_assert_allocation_interposer SHARED tests/assert_allocation_interposer.cpp)
-        target_include_directories(ludus_assert_allocation_interposer PRIVATE include)
-        ludus_apply_project_defaults(ludus_assert_allocation_interposer)
-        add_test(NAME ludus_assert_shared_allocation
-            COMMAND "${CMAKE_COMMAND}" -E env "LD_PRELOAD=$<TARGET_FILE:ludus_assert_allocation_interposer>"
-                "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/assertions/allocation_tests.py"
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_executable(ludus_assert_allocation_child tests/assert_allocation_child.cpp)
+        target_include_directories(ludus_assert_allocation_child PRIVATE src)
+        target_link_libraries(ludus_assert_allocation_child PRIVATE Ludus::FoundationBase)
+        target_link_options(ludus_assert_allocation_child PRIVATE
+            -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--export-dynamic-symbol=ludus_assert_test_watching)
+        ludus_apply_project_defaults(ludus_assert_allocation_child)
+        add_test(NAME ludus_assert_allocation
+            COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/assertions/allocation_tests.py"
                 "$<TARGET_FILE:ludus_assert_allocation_child>")
-        set_tests_properties(ludus_assert_shared_allocation PROPERTIES LABELS "foundation;assert-death" TIMEOUT 30)
-    endif()
+        set_tests_properties(ludus_assert_allocation PROPERTIES LABELS "foundation;assert-death" TIMEOUT 30)
 
-    add_test(NAME ludus_assert_blocked_output
-        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/assertions/blocked_output_tests.py"
-            "$<TARGET_FILE:ludus_assert_allocation_child>")
-    set_tests_properties(ludus_assert_blocked_output PROPERTIES LABELS "foundation;assert-death" TIMEOUT 30)
-
-    add_executable(ludus_assert_fake_child $<TARGET_OBJECTS:ludus_assert_test_driver> tests/assert_platform_fake.cpp
-        src/assert.cpp src/diagnostic_output.cpp src/diagnostic_control_codec.cpp src/diagnostic_format.cpp)
-    target_include_directories(ludus_assert_fake_child PRIVATE src include "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}")
-    target_link_libraries(ludus_assert_fake_child PRIVATE Threads::Threads)
-    target_link_options(ludus_assert_fake_child PRIVATE -Wl,--wrap=sigtimedwait,--wrap=send)
-    ludus_apply_project_defaults(ludus_assert_fake_child)
-
-    foreach(backend native fake)
-        if(backend STREQUAL "native")
-            set(child ludus_assert_child)
-        else()
-            set(child ludus_assert_fake_child)
+        if(NOT LUDUS_ENABLE_ASAN AND NOT LUDUS_ENABLE_UBSAN AND NOT LUDUS_ENABLE_TSAN)
+            add_library(ludus_assert_allocation_interposer SHARED tests/assert_allocation_interposer.cpp)
+            target_include_directories(ludus_assert_allocation_interposer PRIVATE include)
+            ludus_apply_project_defaults(ludus_assert_allocation_interposer)
+            add_test(NAME ludus_assert_shared_allocation
+                COMMAND "${CMAKE_COMMAND}" -E env "LD_PRELOAD=$<TARGET_FILE:ludus_assert_allocation_interposer>"
+                    "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/assertions/allocation_tests.py"
+                    "$<TARGET_FILE:ludus_assert_allocation_child>")
+            set_tests_properties(ludus_assert_shared_allocation PROPERTIES LABELS "foundation;assert-death" TIMEOUT 30)
         endif()
-        add_test(NAME ludus_assert_${backend}_death
-            COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/assertions/death_tests.py"
-                "$<TARGET_FILE:${child}>" "${LUDUS_ENABLE_ASSERTS}" "${LUDUS_BREAK_ON_CHECK}" "${backend}"
-                "${LUDUS_ASSERT_DIALOGS_AVAILABLE}")
-        set_tests_properties(ludus_assert_${backend}_death
-            PROPERTIES LABELS "foundation;assert-death;assert-concurrency" TIMEOUT 120)
-    endforeach()
+
+        add_test(NAME ludus_assert_blocked_output
+            COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/assertions/blocked_output_tests.py"
+                "$<TARGET_FILE:ludus_assert_allocation_child>")
+        set_tests_properties(ludus_assert_blocked_output PROPERTIES LABELS "foundation;assert-death" TIMEOUT 30)
+
+        add_executable(ludus_assert_fake_child $<TARGET_OBJECTS:ludus_assert_test_driver> tests/assert_platform_fake.cpp
+            src/assert.cpp src/diagnostic_output.cpp src/diagnostic_control_codec.cpp src/diagnostic_format.cpp)
+        target_include_directories(ludus_assert_fake_child PRIVATE src include "${LUDUS_FOUNDATION_BASE_GENERATED_INCLUDE_DIR}")
+        target_link_libraries(ludus_assert_fake_child PRIVATE Threads::Threads)
+        target_link_options(ludus_assert_fake_child PRIVATE -Wl,--wrap=sigtimedwait,--wrap=send)
+        ludus_apply_project_defaults(ludus_assert_fake_child)
+
+        foreach(backend native fake)
+            if(backend STREQUAL "native")
+                set(child ludus_assert_child)
+            else()
+                set(child ludus_assert_fake_child)
+            endif()
+            add_test(NAME ludus_assert_${backend}_death
+                COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/assertions/death_tests.py"
+                    "$<TARGET_FILE:${child}>" "${LUDUS_ENABLE_ASSERTS}" "${LUDUS_BREAK_ON_CHECK}" "${backend}"
+                    "${LUDUS_ASSERT_DIALOGS_AVAILABLE}")
+            set_tests_properties(ludus_assert_${backend}_death
+                PROPERTIES LABELS "foundation;assert-death;assert-concurrency" TIMEOUT 120)
+        endforeach()
+    endif() # Linux linker interposition/death harness
 endif()

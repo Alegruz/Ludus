@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.29)
 
+include(cmake/EngineSetupPreflight.cmake)
+
 set(LUDUS_ENGINE_PROJECT_NAME "Ludus")
 set(LUDUS_ENGINE_EXPORT_NAMESPACE "Ludus::")
 set(LUDUS_ENGINE_PACKAGE_NAME "Ludus")
@@ -274,7 +276,9 @@ endif()
 # deps of a static library are still part of the consumer's link line). Audited
 # from conanfile.py + the module CMakeLists (GraphicsRhi->volk, Text->
 # FreeType/HarfBuzz, assertion/concurrency paths->Threads).
-ludus_sdk_register_dependency(volk        "1.4.357.0" "MIT"                 bundled)
+if(NOT APPLE)
+    ludus_sdk_register_dependency(volk "1.4.357.0" "MIT" bundled)
+endif()
 if(NOT EMSCRIPTEN)
     ludus_sdk_register_dependency(freetype "2.14.3"   "FTL-or-GPLv2"        bundled)
     ludus_sdk_register_dependency(harfbuzz "14.5.1"   "MIT-modern"          bundled)
@@ -285,9 +289,15 @@ ludus_sdk_register_dependency(xxHash "0.8.3" "BSD-2-Clause" bundled)
 ludus_sdk_register_dependency(Threads     "system"    "system"             system)
 
 # System prerequisites that cannot reasonably be bundled.
-ludus_sdk_register_system_prerequisite("libc / libstdc++ runtime matching the recorded cxx_runtime_abi")
+if(APPLE)
+    ludus_sdk_register_system_prerequisite("macOS libc / libc++ runtime matching the recorded cxx_runtime_abi")
+else()
+    ludus_sdk_register_system_prerequisite("libc / libstdc++ runtime matching the recorded cxx_runtime_abi")
+endif()
 if(NOT EMSCRIPTEN)
-    ludus_sdk_register_system_prerequisite("Vulkan loader (libvulkan.so.1) and a Vulkan-capable GPU/driver for RHI runtime")
+    if(NOT APPLE)
+        ludus_sdk_register_system_prerequisite("Vulkan loader (libvulkan.so.1) and a Vulkan-capable GPU/driver for RHI runtime")
+    endif()
     ludus_sdk_register_system_prerequisite("POSIX threads (pthread)")
     if(LUDUS_PLATFORM_ENABLE_WAYLAND)
         ludus_sdk_register_system_prerequisite("Wayland client development package (wayland-client) for the Wayland Platform backend")

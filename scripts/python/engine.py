@@ -22,7 +22,19 @@ from typing import Iterable, Sequence
 from formatting import format_source
 
 
-DEFAULT_PRESET = "linux-clang-development"
+NATIVE_PRESET_PREFIX = "macos-clang" if platform.system() == "Darwin" else "linux-clang"
+DEFAULT_PRESET = NATIVE_PRESET_PREFIX + "-development"
+
+
+def native_profile_name() -> str:
+    if platform.system() == "Darwin":
+        arch = platform.machine().lower()
+        if arch not in ("arm64", "x86_64"):
+            raise EngineError(f"Unsupported macOS architecture: {arch}")
+        return f"macos-clang-{arch}"
+    return "linux-clang-x86_64"
+
+
 PROJECT_CXX_STANDARD = "23"
 BOOTSTRAP_STATE_VERSION = 1
 
@@ -40,12 +52,20 @@ PRESET_BUILD_TYPES: dict[str, str] = {
     "linux-clang-release": "Release",
 }
 
+PRESET_BUILD_TYPES.update({
+    name.replace("linux-clang", "macos-clang"): value
+    for name, value in list(PRESET_BUILD_TYPES.items())
+})
+HOST_PRESETS = tuple(name for name in PRESET_BUILD_TYPES if name.startswith(NATIVE_PRESET_PREFIX))
+
 FORMAT_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
 TIDY_ROOTS = ("modules", "apps")
 
 BOOTSTRAP_INPUTS = (
     "config/tool_versions.json",
     "config/conan/profiles/linux-clang-x86_64",
+    "config/conan/profiles/macos-clang-arm64",
+    "config/conan/profiles/macos-clang-x86_64",
     "conanfile.py",
     "conan.lock",
     "CMakePresets.json",
@@ -427,6 +447,12 @@ def configure_system_tool_shims(root: Path, versions: dict[str, dict[str, str]])
 
     minimum = versions["minimum"]
     clang_major = version_tuple(minimum["clang"])[0] if version_tuple(minimum["clang"]) else 18
+    if platform.system() == "Darwin":
+        brew = shutil.which("brew")
+        if brew:
+            code, prefix = capture_command_quiet([brew, "--prefix", f"llvm@{clang_major}"], cwd=root)
+            if code == 0:
+                os.environ["PATH"] = str(Path(prefix.strip()) / "bin") + os.pathsep + os.environ.get("PATH", "")
     specs: list[tuple[str, Sequence[str], str]] = [
         ("clang", (f"clang-{clang_major}", "clang"), minimum["clang"]),
         ("clang++", (f"clang++-{clang_major}", "clang++"), minimum["clang"]),
@@ -439,6 +465,36 @@ def configure_system_tool_shims(root: Path, versions: dict[str, dict[str, str]])
         target = find_satisfying_executable(root, candidates, ("--version",), minimum_version)
         if target:
             link_or_replace_symlink(host_tools_bin_dir(root) / shim_name, Path(target))
+
+    if platform.system() == "Darwin" and clang_cxx(root).is_file():
+        configure_macos_sdk(root)
+
+
+def configure_macos_sdk(root: Path) -> None:
+    # Use the SDK selected by upstream Clang, which can differ from xcrun's
+    # latest SDK. Keep the machine path in an ignored, checkout-local symlink.
+    sdk = os.environ.get("SDKROOT", "")
+    if not sdk:
+        code, output = capture_command_quiet(
+            [clang_cxx(root), "-###", "-x", "c++", "-c", os.devnull], cwd=root)
+        match = re.search(r'"-isysroot" "([^"\n]+)"', output)
+        if code != 0 or not match:
+            raise EngineError("Clang 18 could not select a macOS SDK; install Xcode Command Line Tools or set SDKROOT")
+        sdk = match.group(1)
+    if not Path(sdk).is_dir():
+        raise EngineError(f"macOS SDK is missing: {sdk}")
+    link_or_replace_symlink(root / "out/host-tools/macos-sdk", Path(sdk))
+    libcxx = clang_cxx(root).resolve().parent.parent / "include/c++/v1"
+    if not libcxx.is_dir():
+        raise EngineError(f"Clang 18 libc++ headers are missing: {libcxx}")
+    link_or_replace_symlink(root / "out/host-tools/libcxx-include", libcxx)
+
+def native_profile_contents(root: Path) -> str:
+    source = root / "config/conan/profiles" / native_profile_name()
+    text = source.read_text(encoding="utf-8")
+    if platform.system() == "Darwin":
+        text += f"tools.apple:sdk_path={root / 'out/host-tools/macos-sdk'}\n"
+    return text
 
 
 def executable_version(path: str, args: Sequence[str], root: Path) -> str:
@@ -525,8 +581,8 @@ def managed_tool_statuses(root: Path, versions: dict[str, dict[str, str]]) -> li
 
 
 def project_state_statuses(root: Path) -> list[ToolStatus]:
-    installed_profile = root / "out" / "conan" / "home" / "profiles" / "linux-clang-x86_64"
-    source_profile = root / "config" / "conan" / "profiles" / "linux-clang-x86_64"
+    installed_profile = root / "out" / "conan" / "home" / "profiles" / native_profile_name()
+    source_profile = root / "config" / "conan" / "profiles" / native_profile_name()
     lockfile = root / "conan.lock"
     environment = venv_dir(root)
     environment_ok = environment.is_dir() and venv_python(root).exists() and venv_has_pip(root)
@@ -534,7 +590,7 @@ def project_state_statuses(root: Path) -> list[ToolStatus]:
     profile_current = (
         profile_installed
         and source_profile.is_file()
-        and file_sha256(installed_profile) == file_sha256(source_profile)
+        and installed_profile.read_text(encoding="utf-8") == native_profile_contents(root)
     )
     return [
         ToolStatus(
@@ -899,10 +955,9 @@ def validate_managed_tools(root: Path, versions: dict[str, dict[str, str]]) -> N
 
 
 def install_conan_profile(root: Path) -> Path:
-    source = root / "config" / "conan" / "profiles" / "linux-clang-x86_64"
-    destination = root / "out" / "conan" / "home" / "profiles" / "linux-clang-x86_64"
+    destination = root / "out" / "conan" / "home" / "profiles" / native_profile_name()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, destination)
+    destination.write_text(native_profile_contents(root), encoding="utf-8")
     print(f"Installed Conan profile: {destination}")
     return destination
 
@@ -1024,38 +1079,40 @@ def create_conan_lock(root: Path, profile_path: Path) -> None:
     lock_work_dir = root / "out" / "conan" / "lock-work"
     lock_work_dir.mkdir(parents=True, exist_ok=True)
     lockfile = root / "conan.lock"
-    backup = lock_work_dir / "conan.lock.previous"
-    had_lockfile = lockfile.exists()
-    if had_lockfile:
-        shutil.copy2(lockfile, backup)
-        lockfile.unlink()
-
-    try:
-        run(
-            [
-                conan(root),
-                "lock",
-                "create",
-                str(root),
-                "--profile:host",
-                str(profile_path),
-                "--profile:build",
-                str(profile_path),
-                "--settings:host",
-                "build_type=Release",
-                "--settings:build",
-                "build_type=Release",
-                "--lockfile-out",
-                str(lockfile),
-            ],
-            cwd=lock_work_dir,
-            env=env,
-            capture=True,
-        )
-    except Exception:
-        if had_lockfile and backup.exists() and not lockfile.exists():
-            shutil.copy2(backup, lockfile)
-        raise
+    generated = lock_work_dir / "conan.lock.generated"
+    merged = lock_work_dir / "conan.lock.merged"
+    run(
+        [
+            conan(root),
+            "lock",
+            "create",
+            str(root),
+            "--profile:host",
+            str(profile_path),
+            "--profile:build",
+            str(profile_path),
+            "--settings:host",
+            "build_type=Release",
+            "--settings:build",
+            "build_type=Release",
+            "--lockfile=",
+            "--lockfile-out",
+            str(generated),
+        ],
+        cwd=lock_work_dir,
+        env=env,
+        capture=True,
+    )
+    if lockfile.exists():
+        # Conditional requirements differ by host (Linux Vulkan vs. macOS).
+        # Keep pins for other supported hosts, and publish only after both
+        # graph resolution and merging succeed. Failures preserve the old lock.
+        run([conan(root), "lock", "merge", "--lockfile", str(lockfile),
+             "--lockfile", str(generated), "--lockfile-out", str(merged)],
+            cwd=lock_work_dir, env=env, capture=True)
+        merged.replace(lockfile)
+    else:
+        generated.replace(lockfile)
 
 
 def conan_install_for_preset(root: Path, profile_path: Path, preset: str, *, locked: bool = False) -> None:
@@ -1161,9 +1218,9 @@ def ensure_bootstrap_for_preset(root: Path, preset: str) -> None:
 def command_bootstrap(args: argparse.Namespace) -> int:
     root = repo_root()
     versions = load_tool_versions(root)
-    prepare_conan_artifacts(root, versions, tuple(PRESET_BUILD_TYPES))
-    repair_existing_cmake_caches(root, tuple(PRESET_BUILD_TYPES))
-    print("Running minimal CMake configuration smoke test for linux-clang-development.")
+    prepare_conan_artifacts(root, versions, HOST_PRESETS)
+    repair_existing_cmake_caches(root, HOST_PRESETS)
+    print(f"Running minimal CMake configuration smoke test for {DEFAULT_PRESET}.")
     cmake_configure(root, DEFAULT_PRESET)
     if getattr(args, "show_next_commands", True):
         print("")
@@ -1195,12 +1252,21 @@ def command_init(args: argparse.Namespace) -> int:
         print("Skipping automatic system package installation because --no-system-install was supplied.")
         configure_system_tool_shims(root, versions)
     else:
-        install_ubuntu_system_prerequisites(root, versions)
+        if platform.system() == "Darwin":
+            configure_system_tool_shims(root, versions)
+            if system_prerequisites_need_install(root, versions):
+                brew = shutil.which("brew")
+                if not brew:
+                    raise EngineError("macOS setup requires Homebrew and Xcode Command Line Tools; install llvm@18 first")
+                run([brew, "install", "llvm@18"], cwd=root)
+                configure_system_tool_shims(root, versions)
+        else:
+            install_ubuntu_system_prerequisites(root, versions)
 
     if args.preset_only and not run_validation:
         presets = (preset,)
     else:
-        presets = tuple(PRESET_BUILD_TYPES)
+        presets = HOST_PRESETS
     from init_options import save_options
     save_options(root, presets, args)
     prepare_conan_artifacts(root, versions, presets, locked=args.locked)
@@ -1232,8 +1298,8 @@ def command_init(args: argparse.Namespace) -> int:
             )
 
         if not args.skip_sanitizers:
-            command_build(argparse.Namespace(preset="linux-clang-asan-ubsan", extra=[]))
-            command_test(argparse.Namespace(preset="linux-clang-asan-ubsan", label=None))
+            command_build(argparse.Namespace(preset=NATIVE_PRESET_PREFIX + "-asan-ubsan", extra=[]))
+            command_test(argparse.Namespace(preset=NATIVE_PRESET_PREFIX + "-asan-ubsan", label=None))
 
         if not args.skip_sdk:
             command_install_sdk(argparse.Namespace(preset=preset))

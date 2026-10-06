@@ -1,3 +1,4 @@
+#include <ludus/foundation/base/config.h>
 // Reload transaction acceptance (tasks.md L3 + L6 reload-stress, design 7/8).
 //
 // Drives HostSession reloads directly (no socketpair) to assert:
@@ -173,6 +174,9 @@ TEST_CASE("reload rejects a live module worker until its thread is joined", "[re
 
 TEST_CASE("Stop retains code and instance when a module worker cannot drain", "[reload][services]")
 {
+#if defined(LUDUS_PLATFORM_MACOS)
+    SKIP("This acceptance test inspects Linux /proc mappings and RSS");
+#endif
     const auto child = ::fork();
     REQUIRE(child >= 0);
     if (child == 0)
@@ -406,6 +410,9 @@ TEST_CASE("rejected reload preserves A pause state and continued simulation", "[
 
 TEST_CASE("100 distinct successful generations bound allocations mappings and RSS", "[reload][stress]")
 {
+#if defined(LUDUS_PLATFORM_MACOS)
+    SKIP("This acceptance test inspects Linux /proc mappings and RSS");
+#endif
     char pattern[] = "/tmp/ludus-reload-stress-XXXXXX";
     const char* created = ::mkdtemp(pattern);
     REQUIRE(created != nullptr);

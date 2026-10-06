@@ -83,10 +83,9 @@ public:
 
 protected:
     WindowBase() = delete;
-    LUDUS_INLINE explicit WindowBase(const CreateInfo& info) noexcept
-        : mName(info.Name), mNativeWindowInfo{ .Width = info.Width, .Height = info.Height }
-    {
-    }
+    /// Copies the window name and initializes native dimensions in pixels.
+    /// The caller's CreateInfo may be released after construction.
+    explicit WindowBase(const CreateInfo& info) noexcept;
 
 protected:
     std::string mName;

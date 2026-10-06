@@ -33,7 +33,7 @@ install(
     RENAME ludus_diagnostic_helper
 )
 
-if(LUDUS_BUILD_TESTS)
+if(LUDUS_BUILD_TESTS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
 
     # Startup/report-delivery test child. Links the integration layer (and thus

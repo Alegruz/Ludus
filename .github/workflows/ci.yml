@@ -19,6 +19,20 @@ env:
   CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
 jobs:
+  macos-compile:
+    name: macOS compile-only (Metal deferred)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install upstream Clang 18
+        run: brew install llvm@18
+      - name: Prepare pinned native dependencies
+        run: ./init.sh --cli --preset macos-clang-development --preset-only --locked --no-system-install
+      - name: Build all enabled engine and application targets
+        run: ./scripts/build macos-clang-development
+      - name: Test macOS setup contracts
+        run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui -v
+
   formatting:
     name: Source formatting
     runs-on: ubuntu-24.04

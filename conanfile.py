@@ -16,7 +16,8 @@ class LudusRecipe(ConanFile):
     # FreeType integration and no GLib/ICU/Graphite/Cairo/subset/utils/tests or
     # experimental raster/vector/GPU/wasm backends.
     def requirements(self) -> None:
-        self.requires("volk/1.4.357.0")
+        if self.settings.os != "Macos":
+            self.requires("volk/1.4.357.0")
         self.requires("harfbuzz/14.5.1")
 
     def configure(self) -> None:

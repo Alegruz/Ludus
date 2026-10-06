@@ -24,10 +24,14 @@ else()
     if(_ludus_arch STREQUAL "" OR _ludus_arch STREQUAL "AMD64")
         set(_ludus_arch "x86_64")
     endif()
-    string(TOLOWER "${CMAKE_SYSTEM_NAME}" _ludus_os)
-    # The GNU/libstdc++ ABI tag participates in the triple so a libc++ build is
-    # never treated as compatible with a libstdc++ build of the same compiler.
-    set(LUDUS_TARGET_TRIPLE "${_ludus_arch}-${_ludus_os}-gnu")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        set(LUDUS_TARGET_TRIPLE "${_ludus_arch}-apple-darwin")
+    else()
+        string(TOLOWER "${CMAKE_SYSTEM_NAME}" _ludus_os)
+        # The GNU/libstdc++ ABI tag participates in the triple so a libc++ build is
+        # never treated as compatible with a libstdc++ build of the same compiler.
+        set(LUDUS_TARGET_TRIPLE "${_ludus_arch}-${_ludus_os}-gnu")
+    endif()
 endif()
 
 # --- C++ runtime / ABI tag ---------------------------------------------------
@@ -40,7 +44,7 @@ if(EMSCRIPTEN)
 else()
     # Clang on Linux defaults to libstdc++ unless -stdlib=libc++ is in the flags.
     set(_ludus_cxx_flags "${CMAKE_CXX_FLAGS}")
-    if(_ludus_cxx_flags MATCHES "libc\\+\\+")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR _ludus_cxx_flags MATCHES "libc\\+\\+")
         set(LUDUS_CXX_RUNTIME_ABI "libc++")
     else()
         set(LUDUS_CXX_RUNTIME_ABI "libstdc++-cxx11")
@@ -51,6 +55,8 @@ endif()
 set(LUDUS_DISTRO_BASELINE "unknown")
 if(EMSCRIPTEN)
     set(LUDUS_DISTRO_BASELINE "emscripten")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(LUDUS_DISTRO_BASELINE "macos-${CMAKE_OSX_DEPLOYMENT_TARGET}")
 elseif(EXISTS "/etc/os-release")
     file(STRINGS "/etc/os-release" _ludus_os_release)
     set(_ludus_distro_id "")

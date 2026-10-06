@@ -41,6 +41,7 @@ target_sources(
     ludus_platform
     PRIVATE
         src/window.cpp
+        src/window_base.cpp
     PUBLIC
         FILE_SET public_headers
         TYPE HEADERS
@@ -113,7 +114,7 @@ elseif(LUDUS_PLATFORM_ENABLE_WAYLAND)
     target_link_libraries(ludus_platform PRIVATE PkgConfig::WAYLAND_CLIENT)
     target_compile_definitions(ludus_platform PRIVATE LUDUS_PLATFORM_WAYLAND=1)
 else()
-    message(STATUS "Ludus platform: Wayland not available, building headless window backend")
+    message(STATUS "Ludus platform: native window backend unavailable, building headless window backend")
     target_sources(ludus_platform PRIVATE src/window_headless.cpp)
     target_compile_definitions(ludus_platform PRIVATE LUDUS_PLATFORM_HEADLESS=1)
 endif()
@@ -124,8 +125,9 @@ if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
     add_executable(ludus_platform_headless_tests tests/headless_tests.cpp src/window_headless.cpp)
     target_include_directories(ludus_platform_headless_tests PRIVATE include)
-    # base/window.h now includes keyboard_sink.h, which uses the Input vocabulary.
-    target_link_libraries(ludus_platform_headless_tests PRIVATE Ludus::FoundationBase Ludus::Input Catch2::Catch2WithMain)
+    # Compile the headless backend independently while reusing WindowBase's
+    # exception-free implementation from the production platform library.
+    target_link_libraries(ludus_platform_headless_tests PRIVATE Ludus::Platform Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_platform_headless_tests)
     ludus_enable_test_exceptions(ludus_platform_headless_tests)
     add_test(NAME ludus_platform_headless_tests COMMAND ludus_platform_headless_tests)

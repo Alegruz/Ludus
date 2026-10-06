@@ -14,6 +14,7 @@
 #include <format>
 #include <new>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -22,6 +23,7 @@
 #    include <process.h>
 #    define LUDUS_GETPID _getpid
 #else
+#    include <fcntl.h>
 #    include <unistd.h>
 #    define LUDUS_GETPID ::getpid
 #endif
@@ -53,7 +55,7 @@ std::string sessionFileName(uint32 nonce)
     std::strftime(stamp, sizeof(stamp), "%Y-%m-%d_%H-%M-%S", &broken);
 
     const auto pid = static_cast<long>(LUDUS_GETPID());
-    return std::format("{}_pid-{}_n{}.log", stamp, pid, nonce);
+    return std::format("{}_pid-{}_n{}.log", std::string_view(stamp), pid, nonce);
 }
 
 // The base name of a session file WITHOUT the rotation suffix, used to group all
@@ -315,7 +317,23 @@ std::FILE* exclusiveCreate(const std::filesystem::path& path) noexcept
     }
     return file;
 #else
+#    if LUDUS_TARGET_OS == LUDUS_OS_MACOS
+    // Darwin stdio does not implement C11's exclusive-create mode. Preserve
+    // the no-overwrite contract at the descriptor boundary instead.
+    const int descriptor = ::open(path.string().c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+    if (descriptor < 0)
+    {
+        return nullptr;
+    }
+    std::FILE* file = ::fdopen(descriptor, "wb");
+    if (file == nullptr)
+    {
+        (void)::close(descriptor);
+    }
+    return file;
+#    else
     return std::fopen(path.string().c_str(), "wbx");
+#    endif
 #endif
 }
 
@@ -488,7 +506,11 @@ SinkStatus FileSink::FlushDurable() noexcept
     {
         return SinkStatus::Failed;
     }
+#    if LUDUS_TARGET_OS == LUDUS_OS_MACOS
+    return ::fsync(fd) == 0 ? SinkStatus::Ok : SinkStatus::Failed;
+#    else
     return ::fdatasync(fd) == 0 ? SinkStatus::Ok : SinkStatus::Failed;
+#    endif
 #endif
 }
 

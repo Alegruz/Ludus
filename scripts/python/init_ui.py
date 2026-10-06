@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import copy
 import os
+import platform
 import sys
 from dataclasses import dataclass
 
@@ -23,19 +24,21 @@ class Persona:
     smoke_app: bool = True
 
 
+NATIVE_PRESET = "macos-clang-development" if platform.system() == "Darwin" else "linux-clang-development"
+
 PERSONAS = (
     Persona("contributor", "Engine contributor",
             "Prepare all native presets for engine work. Build and test later.",
-            "linux-clang-development"),
+            NATIVE_PRESET),
     Persona("application", "Application developer",
             "Prepare one native preset for building applications with Ludus.",
-            "linux-clang-development", preset_only=True, smoke_app=False),
+            NATIVE_PRESET, preset_only=True, smoke_app=False),
     Persona("browser", "Browser developer",
             "Install the pinned Emscripten tools and configure one browser preset.",
             "web-emscripten-development", preset_only=True),
     Persona("validation", "Full validation",
             "Prepare native tools, then build, test, check, run sanitizers and test the SDK.",
-            "linux-clang-development", validate=True),
+            NATIVE_PRESET, validate=True),
 )
 
 
@@ -114,8 +117,18 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
         from tkinter import messagebox, ttk
     except ImportError as error:
         raise GuiUnavailable(
-            "Tkinter is missing. On Ubuntu install python3-tk, or use --cli."
+            "Tkinter is missing for this Python. Install python3-tk on Ubuntu, or "
+            f"python-tk@{sys.version_info.major}.{sys.version_info.minor} with Homebrew on macOS; "
+            "alternatively use --cli."
         ) from error
+    # Thanks to the Python Software Foundation, "IDLE and tkinter with Tcl/Tk
+    # on macOS", for documenting Apple's Tk 8.5 rendering/crash problems:
+    # https://www.python.org/download/mac/tcltk/
+    # Check before Tk() so an unsupported runtime cannot open a blank window.
+    if sys.platform == "darwin" and tk.TkVersion < 8.6:
+        raise GuiUnavailable(
+            "macOS graphical setup requires Tk 8.6 or later. Apple's system Tk is unsupported. "
+            "Use a modern Python with Tk from Homebrew or python.org, or use --cli.")
     try:
         window = tk.Tk()
     except tk.TclError as error:
@@ -154,12 +167,12 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
         from web_build import PRESETS
         ttk.Label(panel, text="Build preset").grid(row=4, column=0, sticky="w")
         presets = ttk.Combobox(panel, textvariable=preset, state="readonly",
-                              values=[*engine.PRESET_BUILD_TYPES, *PRESETS])
+                              values=[*engine.HOST_PRESETS, *PRESETS])
         presets.grid(row=4, column=1, sticky="ew")
         controls = {}
         labels = (
             ("preset_only", "Prepare only the selected preset"),
-            ("no_system_install", "Use existing system packages (skip automatic apt installation)"),
+            ("no_system_install", "Use existing system packages (skip automatic package installation)"),
             ("with_rad_debugger", "Build optional RAD Debugger (Linux x64)"),
             ("with_editor", "Build Ludus editor (Linux x64; installs optional Qt 6 packages)"),
             ("with_tests", "Include native test targets and their dependencies"),
@@ -190,7 +203,8 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
                 for name in ("with_rad_debugger", "with_editor", "with_tests", "run_tests", "with_shader_probe", "validate", "ci"):
                     flags[name].set(False)
             from init_editor import SUPPORTED_PRESETS
-            editor_supported = preset.get() in SUPPORTED_PRESETS
+            linux_host = platform.system() == "Linux" and platform.machine().lower() in ("x86_64", "amd64")
+            editor_supported = linux_host and preset.get() in SUPPORTED_PRESETS
             if not editor_supported:
                 flags["with_editor"].set(False)
             controls["with_editor"].configure(state="normal" if editor_supported else "disabled")
@@ -205,6 +219,9 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
             controls["run_tests"].configure(state="disabled" if browser or validating else "normal")
             for name in ("preset_only", "with_rad_debugger", "validate", "ci"):
                 controls[name].configure(state="disabled" if browser else "normal")
+            if not linux_host:
+                flags["with_rad_debugger"].set(False)
+                controls["with_rad_debugger"].configure(state="disabled")
             for name in ("skip_checks", "skip_sanitizers", "skip_sdk"):
                 controls[name].configure(state="normal" if validating else "disabled")
             # Native validation prepares every preset regardless of --preset-only.

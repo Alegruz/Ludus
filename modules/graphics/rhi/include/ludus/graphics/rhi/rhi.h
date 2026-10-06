@@ -22,12 +22,14 @@ enum class Backend : ludus::foundation::uint8
 {
     Vulkan,
     WebGPU,
-    WebGL2
+    WebGL2,
+    /// Reserved macOS renderer; startup currently reports BackendUnavailable.
+    Metal
 };
-// Browser backend policy. Native accepts only Auto (Vulkan).
-// Auto attempts WebGPU (including its compatibility retry) and, only on a
-// capability/startup failure, makes exactly one WebGL 2 attempt. A forced
-// selection fails explicitly rather than silently switching backends.
+/// Browser backend policy. Native accepts only Auto; macOS reserves Metal (currently unavailable).
+/// Auto attempts WebGPU (including its compatibility retry) and, only on a
+/// capability/startup failure, makes exactly one WebGL 2 attempt. A forced
+/// selection fails explicitly rather than silently switching backends.
 enum class BackendSelection : ludus::foundation::uint8
 {
     Auto,

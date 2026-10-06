@@ -1,18 +1,22 @@
+#include <ludus/foundation/base/config.h>
 #include <ludus/diagnostics/session.hpp>
 
 #include <ludus/foundation/base/assert_config.hpp>
 #include <ludus/foundation/base/diagnostic_output.hpp>
 
-#include <cerrno>
-#include <cstdlib>
-#include <cstring>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
+#if !defined(LUDUS_PLATFORM_MACOS)
+#    include <cerrno>
+#    include <cstdlib>
+#    include <cstring>
+#    include <sys/socket.h>
+#    include <sys/un.h>
+#    include <unistd.h>
+#endif
 
 namespace fb = ludus::foundation;
 namespace fbd = ludus::foundation::diagnostics;
 
+#if !defined(LUDUS_PLATFORM_MACOS)
 namespace ludus::diagnostics
 {
 namespace
@@ -212,3 +216,16 @@ SessionResult InitializeDiagnosticSession(Interactivity requested) noexcept
     return result;
 }
 } // namespace ludus::diagnostics
+#else
+namespace ludus::diagnostics
+{
+SessionResult InitializeDiagnosticSession(Interactivity) noexcept
+{
+    // Native helper transport/presentation is deferred on macOS. Assertions
+    // still use FoundationBase's emergency output and terminal failure path.
+    SessionResult result{};
+    result.DetectedCi = fbd::IsContinuousIntegration();
+    return result;
+}
+} // namespace ludus::diagnostics
+#endif
