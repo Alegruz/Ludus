@@ -1,4 +1,4 @@
-# Optional native Qt Widgets editor workspace (milestone E0).
+# Optional Qt Widgets editor workspace (native E0 and browser preview).
 #
 # This file is only entered when LUDUS_BUILD_EDITOR=ON (see the top-level
 # CMakeLists.txt). All Qt discovery is local to this directory so a default
@@ -10,21 +10,23 @@
 # E0 implements the Linux x64 reference host only. An enabled Editor on an
 # unsupported host fails configuration with a specific explanation rather than
 # silently producing a broken build.
-if(EMSCRIPTEN)
-    message(FATAL_ERROR
-        "LUDUS_BUILD_EDITOR is not supported for the browser/Emscripten toolchain. "
-        "The editor is a native desktop tool; build it with a native linux-clang preset.")
+if(NOT EMSCRIPTEN AND (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
+    NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$"))
+    message(FATAL_ERROR "The native Editor currently supports Linux x64; browser builds require the pinned Qt WebAssembly toolchain.")
 endif()
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
-    message(FATAL_ERROR
-        "LUDUS_BUILD_EDITOR currently supports Linux x64 only (detected "
-        "${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}). Disable the editor on this host, "
-        "or build it on the reference Ubuntu/Clang Linux x64 toolchain.")
+
+if(EMSCRIPTEN)
+    set(editor_process_sources src/browser_processes.cpp)
+    set(editor_audio_source src/audio_preview_browser.cpp)
+else()
+    set(editor_process_sources src/tool_process.cpp src/play_process.cpp src/source_watch.cpp)
+    set(editor_audio_source src/audio_preview.cpp)
 endif()
 
 # --- Qt discovery (local to the enabled editor only) -------------------------
 # Use APIs available in Qt 6.4; require at least 6.4. Core/Gui/Widgets only, as
-# dynamic system libraries. Qt is installed only by opted-in editor setup;
+# native system libraries or the pinned source-built WebAssembly Qt.
+# Qt is installed only by opted-in editor setup;
 # it is never added to the engine Conan recipe or SDK.
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets)
 
@@ -44,9 +46,8 @@ add_library(ludus_editor_core STATIC
     src/workspace.cpp
     src/project_store.cpp
     src/recent_projects.cpp
-    src/tool_process.cpp
-    src/play_process.cpp
-    src/source_watch.cpp
+    src/tool_operation.cpp
+    ${editor_process_sources}
     src/log_buffer.cpp
 )
 set_target_properties(ludus_editor_core PROPERTIES AUTOMOC ON)
@@ -63,14 +64,15 @@ target_link_libraries(ludus_editor_core
 ludus_apply_project_defaults(ludus_editor_core)
 
 # --- Editor application ------------------------------------------------------
-add_executable(ludus_editor
+qt_add_executable(ludus_editor
     src/internal/controller.h
     src/internal/main_window.h
     src/internal/audio_workspace.h
     src/internal/audio_preview.h
     src/configuration_workspace.cpp
+    src/editor_files.cpp
     src/audio_workspace.cpp
-    src/audio_preview.cpp
+    ${editor_audio_source}
     main.cpp
     src/main_window.cpp
     src/main_window_layout.cpp
@@ -103,7 +105,7 @@ ludus_apply_project_defaults(ludus_editor)
 # --- Offscreen logic/widget tests --------------------------------------------
 # Offscreen Qt tests verify logic and widget wiring without a GPU/compositor.
 # They do NOT prove native Wayland interaction or that a game rendered a frame.
-if(LUDUS_BUILD_TESTS)
+if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
     find_package(Catch2 3 REQUIRED)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Test)
     add_executable(ludus_editor_tests
@@ -112,8 +114,9 @@ if(LUDUS_BUILD_TESTS)
         src/internal/audio_workspace.h
         src/internal/audio_preview.h
         src/configuration_workspace.cpp
+        src/editor_files.cpp
         src/audio_workspace.cpp
-        src/audio_preview.cpp
+        ${editor_audio_source}
         tests/main.cpp
         tests/configuration_workspace_tests.cpp
         tests/audio_content_tests.cpp
@@ -169,4 +172,14 @@ if(LUDUS_BUILD_TESTS)
         LABELS "unit;editor"
         TIMEOUT 120
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
+if(EMSCRIPTEN)
+    find_package(Qt6 6.10.3 EXACT REQUIRED COMPONENTS GuiPrivate)
+    target_link_libraries(ludus_editor PRIVATE Qt6::GuiPrivate)
+    set_property(TARGET ludus_editor APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/browser/files.js" "${CMAKE_CURRENT_SOURCE_DIR}/browser/example.project.json")
+    set_target_properties(ludus_editor PROPERTIES QT_WASM_INITIAL_MEMORY 33554432 QT_WASM_MAXIMUM_MEMORY 268435456)
+    target_link_options(ludus_editor PRIVATE "-sASYNCIFY_STACK_SIZE=131072"
+        "--js-library=${CMAKE_CURRENT_SOURCE_DIR}/browser/files.js"
+        "--embed-file=${CMAKE_CURRENT_SOURCE_DIR}/browser/example.project.json@/browser-example/ludus.project.json")
 endif()

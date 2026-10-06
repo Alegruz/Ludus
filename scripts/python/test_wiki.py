@@ -108,6 +108,17 @@ class WikiArtifactTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid search destination", result.stderr)
 
+    def test_editor_application_assets_are_checked_without_search_indexing(self):
+        editor = self.site / "editor"
+        editor.mkdir()
+        (editor / "index.html").write_text('<script src="editor.js"></script>')
+        (editor / "editor.js").write_text("app")
+        self.assertEqual(self.run_check().returncode, 0)
+        (editor / "editor.js").unlink()
+        self.assertIn("missing local destination", self.run_check().stderr)
+        (editor / "other.html").write_text("other")
+        self.assertIn("Page missing from search index: editor/other.html", self.run_check().stderr)
+
     def test_site_root_escape_is_rejected(self):
         (self.site / "guide/index.html").write_text('<a href="../../">Wrong root</a>')
         self.assertNotEqual(self.run_check().returncode, 0)

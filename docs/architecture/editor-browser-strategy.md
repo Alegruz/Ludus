@@ -1,9 +1,16 @@
 # Browser access to Ludus
 
-Decision for this increment: a browser experience is feasible, but full desktop
-editor parity is a separate product investment. Prioritize a public runtime/demo
-and later a bounded content-editing experiment; keep S2 desktop interactions on
-track. This is a feasibility/ROI assessment, not a hosted service or deployment.
+The current increment ports the existing Qt Widgets editor to WebAssembly and
+includes it in GitHub Pages. This is a bounded workspace preview: project and
+configuration documents can be edited, imported and downloaded. Native tools,
+game execution/debugging and audio authoring remain desktop workflows. See the
+[browser editor guide](../wiki/guides/browser-editor.md) and
+[reproducible build instructions](../development/browser-editor.md).
+
+Keep Qt as the shared editor shell. The browser uses file and process adapters;
+future macOS support should use the same shell with native adapters. The engine
+renderer belongs in the game viewport, with a working backend for each platform.
+Separate UI implementations are not justified by this first port.
 
 ## Existing footing and missing pieces
 
@@ -13,10 +20,10 @@ and the integrated W6 smoke app. These are runtime foundations, not a browser
 scene editor. See [ADR 0009](../decisions/0009-browser-webgpu-toolchain.md),
 `config/web_toolchain.json`, and `apps/smoke`.
 
-The current editor is explicitly Linux x64 native Qt Widgets. Its controller owns
+The native editor currently targets Linux x64. Its controller owns
 QProcess-based Python/build/debugger/Play adapters. A browser cannot simply start
-the user's local CMake/compiler/RAD process. Qt has a WebAssembly port, but its
-browser event-loop and filesystem boundaries require deliberate adaptation.
+the user's local CMake/compiler/RAD process. The WebAssembly target uses single-threaded static Qt, Asyncify modal dialogs
+and explicit file import/download.
 [Qt's WebAssembly documentation](https://doc.qt.io/qt-6/wasm.html) describes
 asynchronous constraints and matching Qt/Emscripten builds. Do not infer that our
 pinned engine WebGPU SDK is ABI-compatible with Qt's current Wasm requirements.
@@ -45,18 +52,14 @@ compiler/toolchain investment, or isolated remote build workers. Remote builds
 trade local setup for service cost and infrastructure ownership. A downloaded
 browser application is not automatically a complete development environment.
 
-## Proposed architecture for a later experiment
+## Shared contracts and later expansion
 
-Reuse document schemas, stable IDs, validation, command semantics, revision checks
-and asset formats. Keep browser storage/render/job transports as adapters around
-those contracts. S2 should extract reusable document policy before introducing a
-second UI; existing private Qt models are not yet a portable editor SDK.
-
-For the first experiment, use one supported sample with local browser editing,
-Worker-based heavy processing, explicit Save/Export, and desktop round-trip import.
-Do not promise native debugger/hot-reload parity or embed the desktop UI wholesale.
-Evaluate a web-native shell versus a small Qt Wasm proof using the same task and
-payload; choose on download size, input quality, maintenance and debugging evidence.
+The preview reuses existing private Qt models, validation and serializers. It
+does not turn them into a portable editor SDK. Native process, source-watch and
+audio adapters are replaced explicitly; the browser does not simulate successful
+builds. Files use volatile session memory and explicit downloads. Persistent
+project storage and a scene/game viewport are later increments requiring their
+own round-trip and performance evidence.
 
 For cloud compilation, keep the operation protocol and cleanup/revision contract,
 but execute jobs in isolated workers with resource limits and explicit ownership.
@@ -75,5 +78,5 @@ export/import correctness. Include keyboard focus and narrow-window tasks.
 Advance to curated editing only when the sample round-trips with the desktop
 format and users complete the intended task reliably. Advance to remote builds
 only with observed demand for C++ online authoring and an explicit cost envelope.
-The art-direction study in this PR is an interactive UX prototype, not evidence
-that the runtime or editor is deployed online.
+The Qt workspace preview is narrower than a scene editor or online C++ IDE.
+Its package and browser document checks do not establish those later capabilities.

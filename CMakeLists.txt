@@ -40,7 +40,7 @@ option(LUDUS_BUILD_SHADER_PROBE "Build the isolated offline shader feasibility p
 # for, link, or export Qt. Qt discovery happens only inside the enabled app
 # subdirectory (see apps/editor/CMakeLists.txt), never globally. See
 # .kiro/specs/editor-workspace/{requirements,design}.md (E01/E02).
-option(LUDUS_BUILD_EDITOR "Build the optional native Qt editor workspace (apps/editor)" OFF)
+option(LUDUS_BUILD_EDITOR "Build the optional Qt editor workspace (apps/editor)" OFF)
 option(LUDUS_BUILD_WEB_PROBES "Build browser feasibility probes" ON)
 include(EngineInitOptions)
 if(EMSCRIPTEN)
@@ -214,18 +214,16 @@ else()
     # smoke apps; it links Ludus::GameHost and no Qt.
     add_subdirectory(apps/game_host)
 
-    # Optional native editor workspace. Guarded so a default (OFF) native
-    # configure never calls find_package(Qt6); the subdirectory owns all Qt
-    # discovery and the unsupported-host diagnostic.
-    if(LUDUS_BUILD_EDITOR)
-        add_subdirectory(apps/editor)
-    endif()
-
     if(LUDUS_BUILD_TESTS)
         enable_testing()
     endif()
 
     add_subdirectory(tests)
+endif()
+
+# Editor-OFF builds never discover Qt; browser and native shells share widgets.
+if(LUDUS_BUILD_EDITOR)
+    add_subdirectory(apps/editor)
 endif()
 
 if(LUDUS_BUILD_SHADER_PROBE)

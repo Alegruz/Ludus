@@ -1,0 +1,6 @@
+{
+  "qt": "6.10.3",
+  "qtbase_archive": "https://download.qt.io/official_releases/qt/6.10/6.10.3/submodules/qtbase-everywhere-src-6.10.3.tar.xz",
+  "qtbase_sha256": "383dc907816338f0cba72088a524c07458dfc69ce684ca9132fcc4fe91c24b0b",
+  "aqtinstall": "3.3.0"
+}

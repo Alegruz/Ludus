@@ -5,7 +5,9 @@
 #include <QByteArray>
 #include <QJsonObject>
 #include <QObject>
-#include <QProcess>
+#if !defined(Q_OS_WASM)
+#    include <QProcess>
+#endif
 #include <QString>
 #include <QTimer>
 
@@ -49,7 +51,9 @@ private:
     void Read();
     void Consume();
     void Fail(const QString& message);
+#if !defined(Q_OS_WASM)
     QProcess Process_;
+#endif
     QTimer ReadyTimer_;
     QJsonObject StartRequest_;
     QByteArray Backlog_;

@@ -17,6 +17,12 @@ a project, work in the editor, and understand the systems behind each workflow.
 
     [Install and launch →](getting-started/install.md)
 
+- **Try the editor in your browser**
+
+    Open the existing workspace, edit project settings and configuration, and download changes.
+
+    [Browser editor →](guides/browser-editor.md)
+
 - **Make your first project**
 
     Choose a name and location. Let Ludus prepare and verify the engine setup.

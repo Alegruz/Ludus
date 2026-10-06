@@ -1,6 +1,9 @@
 #pragma once
 
-#include <QFileSystemWatcher>
+#include <QtGlobal>
+#if !defined(Q_OS_WASM)
+#    include <QFileSystemWatcher>
+#endif
 #include <QObject>
 #include <QString>
 #include <QTimer>
@@ -29,7 +32,9 @@ Q_SIGNALS:
 private:
     [[nodiscard]] bool Rearm();
     void Changed();
+#if !defined(Q_OS_WASM)
     QFileSystemWatcher Watcher_;
+#endif
     QTimer Debounce_;
     QString Project_;
     bool Busy_ = true;

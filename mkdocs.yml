@@ -66,6 +66,7 @@ nav:
       - Current capabilities: getting-started/status.md
   - Guides:
       - Editor workspace: guides/editor.md
+      - Browser editor: guides/browser-editor.md
       - Build, run and debug: guides/build-and-debug.md
       - Repair project setup: guides/project-setup.md
       - Platform targets and compatibility: guides/platform-targets.md
