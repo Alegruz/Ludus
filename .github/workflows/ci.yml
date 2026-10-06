@@ -19,7 +19,22 @@ env:
   CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
 jobs:
+  changes:
+    name: Classify changes
+    runs-on: ubuntu-24.04
+    outputs:
+      native_required: ${{ steps.scope.outputs.native_required }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/change-scope
+        id: scope
+
   macos-compile:
+    needs: changes
+    if: needs.changes.outputs.native_required == 'true'
     name: macOS platform (Metal deferred)
     runs-on: macos-14
     steps:
@@ -50,6 +65,8 @@ jobs:
           out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_platform_cocoa(_keymap)?_tests$' --no-tests=error
 
   formatting:
+    needs: changes
+    if: needs.changes.outputs.native_required == 'true'
     name: Source formatting
     runs-on: ubuntu-24.04
     steps:
@@ -84,7 +101,8 @@ jobs:
         run: ./scripts/check --format
 
   debug-runtime:
-    needs: formatting
+    needs: [changes, formatting]
+    if: needs.changes.outputs.native_required == 'true'
     name: Debug runtime and source debugger
     runs-on: ubuntu-24.04
     steps:
@@ -108,7 +126,8 @@ jobs:
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
 
   development:
-    needs: formatting
+    needs: [changes, formatting]
+    if: needs.changes.outputs.native_required == 'true'
     name: Development and SDK
     runs-on: ubuntu-24.04
     steps:
@@ -158,7 +177,8 @@ jobs:
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
 
   sanitizers:
-    needs: formatting
+    needs: [changes, formatting]
+    if: needs.changes.outputs.native_required == 'true'
     name: ASan and UBSan
     runs-on: ubuntu-24.04
     steps:
@@ -184,7 +204,8 @@ jobs:
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
 
   threading-races:
-    needs: formatting
+    needs: [changes, formatting]
+    if: needs.changes.outputs.native_required == 'true'
     name: Threading race detection
     runs-on: ubuntu-24.04
     steps:
@@ -211,7 +232,8 @@ jobs:
           if-no-files-found: error
 
   analysis:
-    needs: formatting
+    needs: [changes, formatting]
+    if: needs.changes.outputs.native_required == 'true'
     name: Clang static analysis (${{ matrix.shard }})
     strategy:
       fail-fast: false
@@ -239,7 +261,8 @@ jobs:
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
 
   editor:
-    needs: formatting
+    needs: [changes, formatting]
+    if: needs.changes.outputs.native_required == 'true'
     name: Optional editor
     runs-on: ubuntu-24.04
     steps:
@@ -260,7 +283,8 @@ jobs:
 
   # Debug runtime already runs the complete Debug assertion/build contracts.
   assertion-policy:
-    needs: formatting
+    needs: [changes, formatting]
+    if: needs.changes.outputs.native_required == 'true'
     name: Assertion policy (${{ matrix.preset }})
     runs-on: ubuntu-24.04
     strategy:
@@ -282,7 +306,8 @@ jobs:
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
 
   pch:
-    needs: formatting
+    needs: [changes, formatting]
+    if: needs.changes.outputs.native_required == 'true'
     name: PCH build (LUDUS_ENABLE_PCH=ON)
     runs-on: ubuntu-24.04
     steps:
@@ -305,7 +330,8 @@ jobs:
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
 
   build-budget:
-    needs: formatting
+    needs: [changes, formatting]
+    if: needs.changes.outputs.native_required == 'true'
     name: Build-time budget
     runs-on: ubuntu-24.04
     steps:
@@ -335,23 +361,19 @@ jobs:
           if-no-files-found: warn
 
   linux:
-    # Preserve the existing required check name after splitting its validation.
-    # A failed/skipped dependency must fail this gate rather than skip it.
+    # Thanks to GitHub, "Using conditions to control job execution": keep the
+    # required check present, and allow skipped native jobs only for docs-only
+    # changes whose classification and routing regressions succeeded.
+    # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions
     name: Ubuntu Clang
-    needs: [formatting, debug-runtime, development, sanitizers, analysis, editor, assertion-policy, pch, build-budget]
+    needs: [changes, macos-compile, formatting, debug-runtime, development, sanitizers, threading-races, analysis, editor, assertion-policy, pch, build-budget]
     if: always()
     runs-on: ubuntu-24.04
     steps:
-      - name: Require every native validation job to succeed
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Enforce validation for the classified change scope
         env:
           RESULTS: ${{ toJSON(needs) }}
-        run: |
-          python3 - <<'PYTHON'
-          import json
-          import os
-          results = json.loads(os.environ['RESULTS'])
-          failed = {name: job['result'] for name, job in results.items() if job['result'] != 'success'}
-          if failed:
-              raise SystemExit(f"Native validation did not succeed: {failed}")
-          print('All native CI gates passed.')
-          PYTHON
+        run: python3 scripts/python/ci_scope.py gate

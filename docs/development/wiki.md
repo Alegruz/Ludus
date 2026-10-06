@@ -64,9 +64,10 @@ Pages and rerun the workflow so canonical metadata matches.
 
 ## Checks and maintenance
 
-The [public SDK reference](api-reference.md) is generated with pinned Doxygen
-after MkDocs and copied into `out/wiki/api/` before combined validation/upload.
-It uses its own symbol search; wiki search continues indexing MkDocs content.
+The [public SDK reference](api-reference.md) is extracted with pinned Doxygen
+after the first MkDocs build, then rendered from XML through the same MkDocs
+theme into `out/wiki/api/` before combined validation/upload. Guides and API
+symbols share the navigation, light/dark mode and local search index.
 The API coverage gate tracks legacy gaps and rejects new undocumented symbols.
 
 The HTML checker understands the `/Ludus/` project path and rejects missing local

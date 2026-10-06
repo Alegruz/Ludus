@@ -1,0 +1,25 @@
+name: Change scope
+description: Conservatively identify documentation-only changes without installing native tools.
+outputs:
+  native_required:
+    description: Whether native engine and host-tooling validation must run.
+    value: ${{ steps.classify.outputs.native_required }}
+runs:
+  using: composite
+  steps:
+    - name: Test CI change routing and required gate
+      shell: bash
+      run: python3 -m unittest discover -s scripts/python -p test_ci_scope.py -v
+    - name: Classify the complete change
+      id: classify
+      shell: bash
+      run: python3 scripts/python/ci_scope.py classify
+    - name: Require an explicit routing output
+      shell: bash
+      env:
+        NATIVE_REQUIRED: ${{ steps.classify.outputs.native_required }}
+      run: |
+        case "$NATIVE_REQUIRED" in
+          true|false) ;;
+          *) echo 'Missing or invalid CI routing output.' >&2; exit 1 ;;
+        esac

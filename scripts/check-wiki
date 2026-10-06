@@ -82,8 +82,13 @@ def check(root, site, config):
         return target.relative_to(site).as_posix()
 
     for path, page in pages.items():
-        for value in page.links:
-            destination(value, path)
+        destinations = {destination(value, path) for value in page.links}
+        if path.startswith("api/"):
+            for target in ("index.html", "reference/index.html"):
+                if target not in destinations:
+                    failures.append(f"{path}: missing API return link to {target}")
+        elif path == "reference/index.html" and "api/index.html" not in destinations:
+            failures.append(f"{path}: missing link to generated API reference")
     try:
         search = json.loads((site / "search/search_index.json").read_text(encoding="utf-8"))
         documents = search["docs"]
@@ -100,10 +105,7 @@ def check(root, site, config):
                 target = destination(location or ".", "index.html")
                 if target is not None:
                     indexed.add(target)
-            # Doxygen has a separate symbol search; still validate every API
-            # page's local destinations and anchors above.
-            wiki_pages = {path for path in pages if not path.startswith("api/")}
-            for missing in sorted(wiki_pages - {"404.html"} - indexed):
+            for missing in sorted(set(pages) - {"404.html"} - indexed):
                 failures.append(f"Page missing from search index: {missing}")
     except (OSError, ValueError, KeyError, TypeError) as error:
         failures.append(f"Invalid search index: {error}")

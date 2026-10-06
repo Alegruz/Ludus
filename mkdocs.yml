@@ -39,6 +39,8 @@ theme:
     - content.code.copy
 plugins:
   - search
+hooks:
+  - scripts/python/wiki_api_hook.py
 markdown_extensions:
   - admonition
   - attr_list

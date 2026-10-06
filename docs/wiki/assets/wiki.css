@@ -34,6 +34,21 @@
   border-radius: 0.35rem;
 }
 
+/* API declarations use the same reading surface as guides; long qualified
+   signatures wrap so the page remains readable on narrow screens. */
+.md-typeset .api-paragraph {
+  margin-block: 0.65em;
+}
+
+.md-typeset .highlight pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.md-typeset h1 {
+  overflow-wrap: anywhere;
+}
+
 .md-typeset :focus-visible,
 .md-header :focus-visible,
 .md-sidebar :focus-visible {
