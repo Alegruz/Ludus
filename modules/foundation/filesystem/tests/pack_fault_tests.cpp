@@ -197,3 +197,22 @@ TEST_CASE("Read and EOF revision faults preserve only verified bytes and Changed
         delete file;
     }
 }
+
+TEST_CASE("Directly opened pack files own their archive and index after all provider handles are released")
+{
+    FaultState state;
+    ProviderHandle source(new ArchiveProvider(state));
+    ProviderFile* file = nullptr;
+    {
+        const auto pack = Create(source);
+        REQUIRE(pack.Get()->OpenRead("compressed", file).Succeeded());
+    }
+    source = {};
+    REQUIRE(state.FilesDestroyed == 0);
+    uint8 bytes[8]{};
+    REQUIRE(file->ReadAt(70000, bytes).Outcome.Succeeded());
+    REQUIRE(bytes[0] == 't');
+    REQUIRE(file->Size() == 70013);
+    delete file;
+    REQUIRE(state.FilesDestroyed == 1);
+}
