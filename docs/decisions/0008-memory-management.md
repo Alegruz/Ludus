@@ -10,6 +10,12 @@ The original audit at `07cf666` and independent review at `d4a84ca` find custom 
 
 The [memory-management design](../architecture/memory-management.md) audits the current code and literature, specifies ownership/failure/lifetime contracts, and defines performance gates and independently reviewable implementation phases. Its M1–M12 records contain selected/rejected alternatives, evidence, trade-offs and revisit conditions.
 
+The later [memory profiling design](../architecture/memory-profiling.md) and
+[reference review](../architecture/memory-profiling-gems-review.md) develop
+observation and analysis against the 2026-10-04 working tree. They distinguish
+current source from this ADR's historical audit and do not change its proposed
+status or implement an allocator/profiler.
+
 ## Decision
 
 Introduce a small `FoundationMemory` module above Base and below Containers. Start with the system allocator. Evaluate a pinned mimalloc backend through explicit APIs and representative benchmarks before changing a platform default. Do not implement a Ludus malloc replacement or override global allocation functions in the engine/SDK.

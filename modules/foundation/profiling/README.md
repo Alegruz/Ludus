@@ -57,6 +57,12 @@ code (gate G1).
   (Phase 4), GPU trace (Phase 5, needs an RHI) and memory profiling (Phase 6,
   needs the allocator) are **not** in this module yet, by design.
 
+The proposed [memory profiling architecture](../../../docs/architecture/memory-profiling.md)
+defines a distinct bounded memory recorder, domain-baseline and loss contracts,
+and staged integration. Its [reference review](../../../docs/architecture/memory-profiling-gems-review.md)
+documents the supporting reading. These are future contracts; the CPU stream
+does not currently record allocation lifetimes.
+
 ## Implementation notes / deliberate MVP adjustments
 
 These are the smallest defensible deviations from the architecture document,
