@@ -21,4 +21,4 @@ if ! command -v python3 >/dev/null 2>&1; then
     fi
 fi
 
-exec python3 "${repo_dir}/scripts/python/engine.py" init "$@"
+exec python3 "${repo_dir}/scripts/python/init_launcher.py" "$@"

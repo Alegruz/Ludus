@@ -20,6 +20,40 @@ import web_build
 
 
 class LockedSetupTests(unittest.TestCase):
+    def test_unlocked_setup_preserves_other_hosts_and_failed_refresh_preserves_lock(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock = root / "conan.lock"
+            original = b'{"version":"0.5","requires":["volk/linux-pin"]}\n'
+            lock.write_bytes(original)
+            merged = b'{"version":"0.5","requires":["volk/linux-pin","freetype/mac-pin"]}\n'
+
+            def execute(command, **kwargs):
+                self.assertEqual(lock.read_bytes(), original)
+                if command[2] == "create":
+                    self.assertIn("--lockfile=", command)
+                    Path(command[command.index("--lockfile-out") + 1]).write_text("new graph")
+                else:
+                    self.assertEqual(command[2], "merge")
+                    Path(command[command.index("--lockfile-out") + 1]).write_bytes(merged)
+
+            with patch.object(engine, "tool_env", return_value={}), patch.object(engine, "run", side_effect=execute):
+                engine.create_conan_lock(root, root / "profile")
+            self.assertEqual(lock.read_bytes(), merged)
+            for fail_on in ("create", "merge"):
+                lock.write_bytes(original)
+
+                def fail(command, **kwargs):
+                    if command[2] == fail_on:
+                        raise engine.EngineError("refresh failed")
+                    execute(command, **kwargs)
+
+                with self.subTest(command=fail_on), patch.object(engine, "tool_env", return_value={}), \
+                        patch.object(engine, "run", side_effect=fail):
+                    with self.assertRaisesRegex(engine.EngineError, "refresh failed"):
+                        engine.create_conan_lock(root, root / "profile")
+                self.assertEqual(lock.read_bytes(), original)
+
     def test_locked_setup_preserves_lock_and_prepares_only_selected_preset(self):
         with tempfile.TemporaryDirectory() as temporary, contextlib.ExitStack() as stack:
             root = Path(temporary)

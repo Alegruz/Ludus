@@ -194,24 +194,26 @@ if(LUDUS_BUILD_TESTS)
     if(NOT Python3_Interpreter_FOUND)
         message(FATAL_ERROR "Native play-supervisor acceptance requires Python 3.10+")
     endif()
-    add_test(NAME ludus_game_host_configuration_acceptance
-        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/configuration_acceptance.py"
-            "$<TARGET_FILE:ludus_game_host_app>" "$<TARGET_FILE:ludus_game_fixture_A>")
-    set_tests_properties(ludus_game_host_configuration_acceptance PROPERTIES
-        TIMEOUT 60 LABELS "runtime;configuration;acceptance")
-    add_test(NAME ludus_game_host_supervisor_acceptance
-        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/python/test_play_host_acceptance.py"
-            --root "${PROJECT_SOURCE_DIR}"
-            --host "$<TARGET_FILE:ludus_game_host_app>"
-            --a "$<TARGET_FILE:ludus_game_fixture_A>"
-            --b "$<TARGET_FILE:ludus_game_fixture_B>"
-            --crash "$<TARGET_FILE:ludus_game_fixture_C>"
-            --hang "$<TARGET_FILE:ludus_game_fixture_H>"
-            --destructor-crash "$<TARGET_FILE:ludus_game_fixture_D>")
-    set_tests_properties(ludus_game_host_supervisor_acceptance PROPERTIES
-        TIMEOUT 120 LABELS "runtime;session;supervisor;reload")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_test(NAME ludus_game_host_configuration_acceptance
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/configuration_acceptance.py"
+                "$<TARGET_FILE:ludus_game_host_app>" "$<TARGET_FILE:ludus_game_fixture_A>")
+        set_tests_properties(ludus_game_host_configuration_acceptance PROPERTIES
+            TIMEOUT 60 LABELS "runtime;configuration;acceptance")
+        add_test(NAME ludus_game_host_supervisor_acceptance
+            COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/python/test_play_host_acceptance.py"
+                --root "${PROJECT_SOURCE_DIR}"
+                --host "$<TARGET_FILE:ludus_game_host_app>"
+                --a "$<TARGET_FILE:ludus_game_fixture_A>"
+                --b "$<TARGET_FILE:ludus_game_fixture_B>"
+                --crash "$<TARGET_FILE:ludus_game_fixture_C>"
+                --hang "$<TARGET_FILE:ludus_game_fixture_H>"
+                --destructor-crash "$<TARGET_FILE:ludus_game_fixture_D>")
+        set_tests_properties(ludus_game_host_supervisor_acceptance PROPERTIES
+            TIMEOUT 120 LABELS "runtime;session;supervisor;reload")
+    endif() # Linux process supervisor/configuration journeys
     set(_ludus_debugger_eligible OFF)
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug"
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_BUILD_TYPE STREQUAL "Debug"
        AND NOT LUDUS_ENABLE_ASAN AND NOT LUDUS_ENABLE_UBSAN AND NOT LUDUS_ENABLE_TSAN)
         set(_ludus_debugger_eligible ON)
     endif()

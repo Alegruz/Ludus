@@ -9,6 +9,7 @@
 #include "internal/host_session.h"
 #include "internal/protocol_codec.h"
 
+#include <ludus/foundation/base/config.h>
 #include <ludus/runtime/game_host/host.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -619,6 +620,9 @@ TEST_CASE("duplicate Step is applied once and acknowledged IDs are never replaye
 
 TEST_CASE("Stop is bounded under output backpressure without corrupting frames", "[session][backpressure]")
 {
+#if defined(LUDUS_PLATFORM_MACOS)
+    SKIP("The Linux socket-buffer saturation fixture has not been ported to macOS");
+#endif
     int sv[2] = {-1, -1};
     REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
     int smallBuffer = 1024;

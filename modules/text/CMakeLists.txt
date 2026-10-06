@@ -73,6 +73,13 @@ target_link_libraries(ludus_text
         harfbuzz::harfbuzz
 )
 
+if(APPLE)
+    # The pinned HarfBuzz archive enables CoreText on Apple; its local Conan
+    # metadata does not yet export the static archive's system framework closure.
+    target_link_libraries(ludus_text PRIVATE
+        "-framework CoreText" "-framework CoreGraphics" "-framework CoreFoundation")
+endif()
+
 ludus_apply_project_defaults(ludus_text)
 
 install(TARGETS ludus_text

@@ -1,4 +1,4 @@
-if(NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN AND NOT APPLE)
     find_package(volk CONFIG REQUIRED)
 endif()
 
@@ -46,6 +46,10 @@ if(EMSCRIPTEN)
         "-sMAX_WEBGL_VERSION=2"
         "-sMIN_WEBGL_VERSION=2"
         "-sFULL_ES3=1")
+elseif(APPLE)
+    # Compile-only macOS slice: Metal will replace this unavailable backend.
+    # No Vulkan/Volk or Cocoa dependencies until that implementation exists.
+    target_sources(ludus_graphics_rhi PRIVATE src/rhi_unavailable.cpp)
 else()
     target_sources(ludus_graphics_rhi PRIVATE src/rhi_vulkan.cpp src/volk_impl.cpp)
     target_link_libraries(ludus_graphics_rhi PRIVATE volk::volk_headers)
@@ -66,7 +70,7 @@ install(TARGETS ludus_graphics_rhi
     FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
 
-if(LUDUS_BUILD_TESTS)
+if(LUDUS_BUILD_TESTS AND NOT APPLE)
     find_package(Catch2 3 REQUIRED CONFIG)
     add_executable(ludus_graphics_rhi_tests tests/rhi_tests.cpp)
     target_include_directories(ludus_graphics_rhi_tests PRIVATE src)
@@ -82,6 +86,7 @@ if(LUDUS_BUILD_TESTS)
 endif()
 
 if(LUDUS_BUILD_TESTS)
+    find_package(Catch2 3 REQUIRED CONFIG)
     add_executable(ludus_rhi_lifecycle_tests tests/lifecycle_tests.cpp src/rhi.cpp)
     target_include_directories(ludus_rhi_lifecycle_tests PRIVATE include src)
     target_link_libraries(ludus_rhi_lifecycle_tests PRIVATE Ludus::Platform Catch2::Catch2WithMain)
@@ -90,7 +95,7 @@ if(LUDUS_BUILD_TESTS)
     add_test(NAME ludus_rhi_lifecycle_tests COMMAND ludus_rhi_lifecycle_tests)
 endif()
 
-if(LUDUS_BUILD_TESTS AND LUDUS_SLANG_COMPILER AND LUDUS_SPIRV_VALIDATOR)
+if(LUDUS_BUILD_TESTS AND NOT APPLE AND LUDUS_SLANG_COMPILER AND LUDUS_SPIRV_VALIDATOR)
     target_compile_definitions(ludus_graphics_rhi PRIVATE LUDUS_RHI_TEST_READBACK=1)
     add_executable(ludus_rhi_render_tests tests/render_tests.cpp)
     target_include_directories(ludus_rhi_render_tests PRIVATE src)
@@ -102,4 +107,13 @@ if(LUDUS_BUILD_TESTS AND LUDUS_SLANG_COMPILER AND LUDUS_SPIRV_VALIDATOR)
         VERTEX vertexMain FRAGMENT fragmentMain)
     add_test(NAME ludus_rhi_render_pixels COMMAND ludus_rhi_render_tests)
     set_tests_properties(ludus_rhi_render_pixels PROPERTIES LABELS "rhi;gpu" TIMEOUT 60)
+endif()
+
+if(LUDUS_BUILD_TESTS AND APPLE)
+    add_executable(ludus_rhi_unavailable_tests tests/unavailable_tests.cpp)
+    target_link_libraries(ludus_rhi_unavailable_tests PRIVATE Ludus::GraphicsRhi Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_rhi_unavailable_tests)
+    ludus_enable_test_exceptions(ludus_rhi_unavailable_tests)
+    add_test(NAME ludus_rhi_unavailable_tests COMMAND ludus_rhi_unavailable_tests)
+    set_tests_properties(ludus_rhi_unavailable_tests PROPERTIES LABELS "unit;rhi;macos")
 endif()

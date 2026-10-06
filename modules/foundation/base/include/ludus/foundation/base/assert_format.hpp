@@ -2,6 +2,8 @@
 
 #include <ludus/foundation/base/assert.hpp>
 
+#include <type_traits>
+
 namespace ludus::foundation::diagnostics
 {
 struct DiagnosticAddressValue
@@ -108,15 +110,28 @@ DiagnosticArg MakeDiagnosticArg(const char (&value)[N]) noexcept
 {
     return MakeCStringArg(value, N);
 }
+/// Packs native size aliases into bounded diagnostic numbers without allocation.
+/// Unsupported types fail compilation; fixed-width overloads remain preferred.
 template <typename T>
-DiagnosticArg MakeDiagnosticArg(const T&) noexcept
+DiagnosticArg MakeDiagnosticArg(const T& value) noexcept
 {
-    static_assert(false,
-                  "Unsupported Ludus assertion argument. Wrap char* or const char* with "
-                  "ludus::foundation::diagnostics::DiagnosticCString(ptr), or use DiagnosticText{data, size}. "
-                  "For object addresses use DiagnosticAddress(ptr). Convert other unsupported types explicitly "
-                  "to a Ludus fixed-width number, bool, or diagnostic text.");
-    return {};
+    if constexpr (std::is_same_v<T, usize>)
+    {
+        return {DiagnosticArgKind::Unsigned, { .Unsigned = static_cast<uint64>(value) }};
+    }
+    else if constexpr (std::is_same_v<T, isize>)
+    {
+        return {DiagnosticArgKind::Signed, { .Signed = static_cast<int64>(value) }};
+    }
+    else
+    {
+        static_assert(false,
+                      "Unsupported Ludus assertion argument. Wrap char* or const char* with "
+                      "ludus::foundation::diagnostics::DiagnosticCString(ptr), or use DiagnosticText{data, size}. "
+                      "For object addresses use DiagnosticAddress(ptr). Convert other unsupported types explicitly "
+                      "to a Ludus fixed-width number, bool, or diagnostic text.");
+        return {};
+    }
 }
 
 [[noreturn]] LUDUS_COLD void FinishFatalArgs(DiagnosticText format, const DiagnosticArg* args, usize count) noexcept;

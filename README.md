@@ -7,6 +7,57 @@ Start with [Ludus Wiki](https://alegruz.github.io/Ludus/) for task guides,
 explanations and reference reading paths. Its
 [Markdown sources](docs/wiki/index.md) are also available in this checkout.
 
+## macOS compile-only support
+
+The first macOS slice uses upstream Clang 18 and libc++ with Apple silicon
+and Intel profiles, targeting macOS 14 or later. Install Xcode Command Line Tools and
+Homebrew's `llvm@18`, then run:
+
+```bash
+./init.sh --cli --preset macos-clang-development --preset-only --locked --no-system-install
+./scripts/build macos-clang-development
+```
+
+The init launcher selects a Python meeting the recorded minimum before opening
+the setup selector; it reuses the prepared interpreter on macOS when available.
+For graphical setup with Homebrew Python 3.12, install `python-tk@3.12`.
+Apple's system Tk 8.5 is unsupported. Missing or old Tk falls back to terminal
+setup; use `--cli` to select terminal setup explicitly. `--gui` instead reports
+the missing GUI prerequisite without starting installation.
+
+Debug, Development, Profile, Release, and ASan/UBSan configure/build/test presets
+are available under `macos-clang-*`. Setup selects the matching architecture's
+Conan profile and keeps managed tools/dependencies under ignored `out/` paths.
+Use `--with-tests` during setup to prepare native test dependencies.
+Refreshing the Conan lock preserves pins needed by other supported hosts.
+
+`--preset-only` prepares dependencies for just the selected preset. Before
+selecting another profile in VS Code, prepare it too. For Debug with tests:
+
+```bash
+./init.sh --cli --preset macos-clang-debug --preset-only --locked --with-tests --no-system-install
+```
+
+Omit `--preset-only` to prepare all native profiles in one setup run.
+If the selected preset's generated toolchain is missing, CMake stops before
+compiler detection and prints the init command needed to prepare that profile.
+
+Debug, Development, and ASan/UBSan builds were validated on Apple silicon, with all
+49 registered tests passing in both Debug and Development (deferred feature cases explicitly
+skip). Format, static analysis, and setup regressions pass. On the validation
+host running macOS 26.6, Clang 18's ASan runtime deadlocks during initialization,
+before `main`, including in an independent probe. Sanitizer execution remains
+unverified; this slice does not yet satisfy the full sanitizer review gate.
+
+This is a compilation milestone. Platform uses the existing headless backend;
+RHI startup returns `BackendUnavailable` from a guarded placeholder reserved for
+Metal. Vulkan/Volk is excluded on macOS. Cocoa windows, Metal rendering, native
+file I/O, audio device output, interactive diagnostic helpers, the Qt editor,
+Linux debugger journeys, the world demo (libc++ 18 lacks floating-point
+`from_chars`), and release packaging are deferred. Portable modules
+still compile; graphical applications cannot render yet. Linux and browser
+backends retain their existing implementations.
+
 ## Supported Host
 
 Milestone 0 is Linux-first and validated for Ubuntu 24.04 with Clang/LLVM 18, LLD, Ninja, CMake, Conan 2, Python 3, clang-format, and clang-tidy.

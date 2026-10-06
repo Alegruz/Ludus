@@ -30,6 +30,7 @@
 #include <source_location>
 #include <span>
 #include <string_view>
+#include <type_traits>
 
 namespace ludus::foundation::logging
 {
@@ -75,6 +76,21 @@ struct FormatArg
     FormatArg(uint16 v) noexcept : Tag(ArgTag::U64), U(v) {}
     FormatArg(uint32 v) noexcept : Tag(ArgTag::U64), U(v) {}
     FormatArg(uint64 v) noexcept : Tag(ArgTag::U64), U(v) {}
+    /// Packs a native unsigned size without allocation as an unsigned 64-bit value.
+    /// Native sizes need not share the fixed-width aliases' underlying type
+    /// (Darwin uses unsigned long for usize and unsigned long long for uint64).
+    /// Existing non-template overloads remain preferred when aliases coincide.
+    template <typename T>
+        requires std::is_same_v<T, usize>
+    FormatArg(T v) noexcept : Tag(ArgTag::U64), U(static_cast<uint64>(v))
+    {
+    }
+    /// Packs a native signed size without allocation as a signed 64-bit value.
+    template <typename T>
+        requires std::is_same_v<T, isize>
+    FormatArg(T v) noexcept : Tag(ArgTag::I64), I(static_cast<int64>(v))
+    {
+    }
     FormatArg(const void* p) noexcept : Tag(ArgTag::Ptr), P(p) {}
     FormatArg(float32 v) noexcept : Tag(ArgTag::F64), D(static_cast<float64>(v)) {}
     FormatArg(float64 v) noexcept : Tag(ArgTag::F64), D(v) {}

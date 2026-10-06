@@ -4,8 +4,10 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import platform
+import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import engine
 import init_editor
@@ -16,6 +18,17 @@ import init_options
 class InitTests(unittest.TestCase):
     def args(self, *options):
         return engine.make_parser().parse_args(["init", *options])
+
+    def test_old_macos_tk_is_rejected_before_creating_window(self):
+        tk = types.ModuleType("tkinter")
+        tk.TkVersion = 8.5
+        tk.Tk = Mock()
+        tk.messagebox = Mock()
+        tk.ttk = Mock()
+        with patch.dict("sys.modules", {"tkinter": tk}), patch("sys.platform", "darwin"):
+            with self.assertRaisesRegex(init_ui.GuiUnavailable, "Tk 8.6 or later"):
+                init_ui.select_options(init_ui.apply_defaults(self.args()), engine)
+        tk.Tk.assert_not_called()
 
     def test_persona_defaults_and_explicit_overrides(self):
         for persona, preset, single, validation in (
@@ -110,8 +123,14 @@ class InitTests(unittest.TestCase):
 
 
 class EditorSetupTests(unittest.TestCase):
+    def setUp(self):
+        for name, value in (("system", "Linux"), ("machine", "x86_64")):
+            host = patch.object(init_editor.platform, name, return_value=value)
+            host.start()
+            self.addCleanup(host.stop)
+
     def args(self, *options):
-        return init_ui.apply_defaults(engine.make_parser().parse_args(["init", "--cli", "--with-editor", *options]))
+        return init_ui.apply_defaults(engine.make_parser().parse_args(["init", "--cli", "--with-editor", "linux-clang-development", *options]))
 
     def test_existing_packages_are_not_installed_again(self):
         with patch.object(engine, "host_supports_apt_install", return_value=True), \
@@ -203,12 +222,17 @@ class WindowTests(unittest.TestCase):
                                  window.winfo_rooty() + window.winfo_height())
             button.invoke()
 
-        result = self.select(accept, "linux-clang-debug", "--preset-only", "--no-system-install",
-                             "--with-rad-debugger", "--with-editor", "--validate", "--skip-sdk")
-        self.assertEqual(result.preset, "linux-clang-debug")
-        self.assertTrue(result.preset_only and result.no_system_install and result.with_rad_debugger)
+        linux = platform.system() == "Linux"
+        preset = engine.NATIVE_PRESET_PREFIX + "-debug"
+        options = [preset, "--preset-only", "--no-system-install", "--validate", "--skip-sdk"]
+        if linux:
+            options.extend(["--with-rad-debugger", "--with-editor"])
+        result = self.select(accept, *options)
+        self.assertEqual(result.preset, preset)
+        self.assertTrue(result.preset_only and result.no_system_install)
         self.assertTrue(result.validate and result.skip_sdk)
-        self.assertTrue(result.with_editor)
+        self.assertEqual(result.with_rad_debugger, linux)
+        self.assertEqual(result.with_editor, linux)
 
     def test_browser_workflow_disables_native_options(self):
         def accept(window, widgets):

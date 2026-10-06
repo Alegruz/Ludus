@@ -241,10 +241,10 @@ TEST_CASE("Event samples survive worker count, task order and unrelated draws", 
     {
         std::array<Result, count> actual{};
         {
-            std::array<std::jthread, 4> threads;
+            std::array<std::thread, 4> threads;
             for (usize worker = 0; worker < workers; ++worker)
             {
-                threads[worker] = std::jthread([&, worker] {
+                threads[worker] = std::thread([&, worker] {
                     for (usize task = worker; task < count; task += workers)
                     {
                         const usize entity = (task * 37u) % count;
@@ -253,6 +253,10 @@ TEST_CASE("Event samples survive worker count, task order and unrelated draws", 
                         actual[entity] = evaluate(entity);
                     }
                 });
+            }
+            for (usize worker = 0; worker < workers; ++worker)
+            {
+                threads[worker].join();
             }
         } // Join before examining disjoint writes.
         for (usize entity = 0; entity < count; ++entity)

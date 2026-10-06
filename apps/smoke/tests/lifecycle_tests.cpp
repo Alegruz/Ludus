@@ -418,7 +418,7 @@ TEST_CASE("Runtime failure and cross-thread stop requests retire on the owner th
     }
     SECTION("worker requests stop")
     {
-        std::jthread worker([&fixture] { fixture.Lifecycle.RequestStop(); });
+        std::thread worker([&fixture] { fixture.Lifecycle.RequestStop(); });
         worker.join();
         CHECK(fixture.EventCount == 3);
     }

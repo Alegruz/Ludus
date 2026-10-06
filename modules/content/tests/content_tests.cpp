@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <ludus/content/content.h>
+#include <ludus/foundation/base/config.h>
 namespace ludus::content
 {
 struct JsonValue;
@@ -53,6 +54,9 @@ TEST_CASE("SHA256 matches published empty and abc vectors")
 }
 TEST_CASE("Root bounded saves preserve conflicts and reject symlink traversal")
 {
+#if defined(LUDUS_PLATFORM_MACOS)
+    SKIP("The native filesystem backend is deferred on macOS");
+#endif
     const auto root = std::filesystem::temp_directory_path() / std::string("ludus-content-" + std::to_string(getpid()));
     std::filesystem::create_directories(root);
     const auto path = root.string();
@@ -70,6 +74,9 @@ TEST_CASE("Root bounded saves preserve conflicts and reject symlink traversal")
 }
 TEST_CASE("Descriptor-bound revisions survive atomic replacement and detect in-place changes")
 {
+#if defined(LUDUS_PLATFORM_MACOS)
+    SKIP("The native filesystem backend is deferred on macOS");
+#endif
     char directory[] = "/tmp/ludus-file-reader-XXXXXX";
     REQUIRE(mkdtemp(directory) != nullptr);
     const uint8 first[] = {'a', 'b', 'c'}, second[] = {'d', 'e'};
@@ -104,6 +111,9 @@ TEST_CASE("Descriptor-bound revisions survive atomic replacement and detect in-p
 
 TEST_CASE("file-size admission respects the cap and preserves prior output", "[primitive][content]")
 {
+#if defined(LUDUS_PLATFORM_MACOS)
+    SKIP("The native filesystem backend is deferred on macOS");
+#endif
     char directory[] = "/tmp/ludus-file-size-XXXXXX";
     REQUIRE(mkdtemp(directory) != nullptr);
     const uint8 content[] = {1, 2, 3};
@@ -124,6 +134,9 @@ TEST_CASE("file-size admission respects the cap and preserves prior output", "[p
 
 TEST_CASE("Filesystem-backed content reads preserve capped failures and empty data")
 {
+#if defined(LUDUS_PLATFORM_MACOS)
+    SKIP("The native filesystem backend is deferred on macOS");
+#endif
     char directory[] = "/tmp/ludus-content-capped-XXXXXX";
     REQUIRE(mkdtemp(directory) != nullptr);
     const uint8 initial[] = {'a', 'b', 'c'};

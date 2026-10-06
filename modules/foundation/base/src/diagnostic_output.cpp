@@ -1,3 +1,4 @@
+#include <ludus/foundation/base/config.h>
 #include <ludus/foundation/base/diagnostic_output.hpp>
 
 #include <cerrno>
@@ -125,6 +126,16 @@ bool WriteEmergencyBytes(const char* data, usize size) noexcept
             {
                 if (written < 0 && errno == EPIPE && !already_pending)
                 {
+#if defined(LUDUS_PLATFORM_MACOS)
+                    // Darwin has no sigtimedwait. Drain only a signal confirmed
+                    // pending while blocked, preserving an earlier caller signal.
+                    sigset_t generated{};
+                    if (sigpending(&generated) == 0 && sigismember(&generated, SIGPIPE) == 1)
+                    {
+                        int signal = 0;
+                        (void)sigwait(&blocked, &signal);
+                    }
+#else
                     const timespec no_wait{};
                     // Drain our SIGPIPE before restoring the caller's mask. An
                     // EINTR retry cap here could deliver that signal and kill a
@@ -133,6 +144,7 @@ bool WriteEmergencyBytes(const char* data, usize size) noexcept
                     while (sigtimedwait(&blocked, nullptr, &no_wait) < 0 && errno == EINTR)
                     {
                     }
+#endif
                 }
                 break;
             }

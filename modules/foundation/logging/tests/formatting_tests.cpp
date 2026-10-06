@@ -130,3 +130,17 @@ TEST_CASE("levels render with fixed-width labels", "[logging][formatting]")
     CHECK(ToPaddedString(LogLevel::Trace) == "TRACE");
     CHECK(ToPaddedString(LogLevel::Fatal) == "FATAL");
 }
+
+TEST_CASE("Typed log arguments preserve native size widths and signed differences", "[logging][format]")
+{
+    using ludus::foundation::isize;
+    using ludus::foundation::usize;
+    const FormatArg size(usize{123});
+    CHECK(size.Tag == ArgTag::U64);
+    CHECK(size.U == 123);
+    const FormatArg difference(isize{-123});
+    CHECK(difference.Tag == ArgTag::I64);
+    CHECK(difference.I == -123);
+    const FormatArg maximum(~usize{0});
+    CHECK(maximum.U == static_cast<ludus::foundation::uint64>(~usize{0}));
+}

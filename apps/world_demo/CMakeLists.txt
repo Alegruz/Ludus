@@ -1,3 +1,13 @@
+# libc++ 18 has no floating-point from_chars used by the level parser.
+# Keep this demo outside the initial macOS compilation slice.
+if(APPLE)
+    if(LUDUS_BUILD_WORLD_DEMO)
+        message(FATAL_ERROR "The world demo is deferred on macOS: libc++ 18 lacks floating-point from_chars")
+    endif()
+    message(STATUS "Ludus world demo: deferred on macOS (floating-point from_chars unavailable)")
+    return()
+endif()
+
 file(READ levels/first-room.json LUDUS_FIRST_ROOM)
 file(READ levels/second-room.json LUDUS_SECOND_ROOM)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS levels/first-room.json levels/second-room.json)

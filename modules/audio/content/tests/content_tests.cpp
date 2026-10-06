@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <ludus/audio/content/loader.h>
+#include <ludus/foundation/base/config.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -76,6 +77,9 @@ TEST_CASE("Audio definition codecs preserve old outputs on malformed input", "[c
 TEST_CASE("Asynchronous leases share clips, retain old playback and cancel acquisition",
           "[content][audio][concurrency]")
 {
+#if defined(LUDUS_PLATFORM_MACOS)
+    SKIP("The native filesystem/stream worker backend is deferred on macOS");
+#endif
     Directory directory;
     content::Catalog catalog;
     content::Resource source, soundResource;
