@@ -6,6 +6,12 @@
 
 **Decision record:** [ADR 0008](../decisions/0008-memory-management.md).
 
+**Profiling companion:** [Memory profiling architecture](memory-profiling.md)
+and its [subsequent article review](memory-profiling-gems-review.md) specify
+capture, completeness, checkpoint, provider, and analysis contracts against the
+2026-10-04 working tree. They preserve this document's ownership decisions;
+the audit below remains pinned to its original commits.
+
 **Review:** [Independent adversarial review](memory-management-review.md). Corrections below define the revised contract; review findings are not claims that production code has been repaired.
 
 **Scope:** CPU memory ownership, allocation, observation, and lifetime management. GPU memory allocation remains an RHI concern.

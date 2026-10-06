@@ -234,6 +234,12 @@ Representation decisions:
 
 ## 7. Step 6 — Memory profiling ownership (C4)
 
+The proposed [memory profiling architecture](memory-profiling.md) develops this
+boundary under [ADR 0008](../decisions/0008-memory-management.md), including
+optional side metadata, proven domain baselines, quiescent controls, and
+explicit loss. Its [article review](memory-profiling-gems-review.md) records the
+later reference reading. These links describe a design, not implemented features.
+
 **The allocator owns allocation correctness and provenance; a separate memory-profiler
 module owns rich capture/analysis; neither is the CPU Trace. [R→adopt]** This corrects the
 baseline §10 wording ("feeds the *same* capture infrastructure").
