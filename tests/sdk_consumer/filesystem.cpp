@@ -1,4 +1,5 @@
 #include <ludus/foundation/filesystem/filesystem.hpp>
+#include <ludus/foundation/filesystem/namespace.hpp>
 
 #include <cstdlib>
 #include <filesystem>
@@ -42,5 +43,30 @@ int ExerciseInstalledFilesystem() noexcept
         return 10;
     }
     const auto read = clone.ReadAt(1, bytes);
-    return read.Outcome.Succeeded() && read.BytesRead == 4 && bytes[0] == 's' ? 0 : 10;
+    if (!read.Outcome.Succeeded() || read.BytesRead != 4 || bytes[0] != 's')
+    {
+        return 10;
+    }
+    ProviderHandle memory, native;
+    const uint8 memoryBytes[]{1, 2, 3};
+    const MemoryEntry entry{"data", memoryBytes};
+    if (!CreateMemoryProvider({&entry, 1}, memory).Succeeded() || !CreateDirectoryProvider(path, native).Succeeded())
+    {
+        return 10;
+    }
+    const Mount mounts[]{{Root::Assets, {}, 10, 1, memory}, {Root::Assets, {}, 0, 2, native}};
+    MountSnapshot snapshot;
+    VirtualPath logical;
+    VirtualFile opened, retained;
+    if (!MountSnapshot::Create(mounts, 1, snapshot).Succeeded() || !logical.Set(Root::Assets, "asset").Succeeded() ||
+        !snapshot.OpenRead(logical, opened).Outcome.Succeeded() || opened.MountId() != 2 ||
+        !opened.Clone(retained).Succeeded() || !MountSnapshot::Create({}, 2, snapshot).Succeeded())
+    {
+        return 10;
+    }
+    const auto retainedRead = retained.ReadAt(0, bytes);
+    return retainedRead.Outcome.Succeeded() && retainedRead.BytesRead == 5 && bytes[0] == 'a' &&
+                   retained.Generation() == 1
+               ? 0
+               : 10;
 }

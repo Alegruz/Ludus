@@ -60,6 +60,9 @@ jobs:
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/src/posix.cpp
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/file_tests.cpp
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/posix_fault_tests.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/src/namespace.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/namespace_tests.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/namespace_fault_tests.cpp
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/content/tests/native_reads_tests.cpp
       - name: Validate Cocoa, filesystem and Content reads with ASan and UBSan
         env:
@@ -67,8 +70,8 @@ jobs:
         run: |
           ./init.sh --cli --preset macos-clang-asan-ubsan --preset-only --locked --with-tests --no-system-install
           out/host-tools/venv/bin/cmake --preset macos-clang-asan-ubsan
-          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_content_tests
-          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_(platform_cocoa(_keymap)?|filesystem(_fault)?|content)_tests$' --no-tests=error
+          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_filesystem_namespace_fault_tests ludus_content_tests
+          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_(platform_cocoa(_keymap)?|filesystem(_fault|_namespace_fault)?|content)_tests$' --no-tests=error
 
   formatting:
     needs: changes
