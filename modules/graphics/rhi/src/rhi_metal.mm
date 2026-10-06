@@ -21,6 +21,7 @@
 #endif
 
 #import <AppKit/AppKit.h>
+#import <Availability.h>
 #import <Metal/MTLBlitCommandEncoder.h>
 #import <Metal/MTLBuffer.h>
 #import <Metal/MTLCommandBuffer.h>
@@ -51,6 +52,14 @@ using namespace foundation;
 constexpr logging::LogCategory LOG_RHI{"RHI"};
 constexpr usize FRAMES = 2;
 constexpr uint32 MAX_DIMENSION = 16384;
+// Thanks to Apple, "MTLPipelineOption", Metal documentation, for the reflection
+// flags: https://developer.apple.com/documentation/metal/mtlpipelineoption
+// SDK 26 renamed this same bit; older SDKs expose only ArgumentInfo.
+#if defined(__MAC_26_0)
+constexpr MTLPipelineOption BINDING_INFO = MTLPipelineOptionBindingInfo;
+#else
+constexpr MTLPipelineOption BINDING_INFO = MTLPipelineOptionArgumentInfo;
+#endif
 struct Shader final
 {
     id<MTLFunction> Function = nil;
@@ -493,7 +502,7 @@ ResourceStatus CreatePipeline(usize slot, const PipelineResources& resources, ui
         MTLRenderPipelineReflection* reflection = nil;
         id<MTLRenderPipelineState> pipeline =
             [gDevice newRenderPipelineStateWithDescriptor:description
-                                                  options:MTLPipelineOptionBindingInfo | MTLPipelineOptionBufferTypeInfo
+                                                  options:BINDING_INFO | MTLPipelineOptionBufferTypeInfo
                                                reflection:&reflection
                                                     error:&error];
         if (pipeline == nil)
