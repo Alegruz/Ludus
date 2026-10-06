@@ -42,11 +42,12 @@ def require(condition: bool, message: str) -> None:
 
 
 def bootstrap() -> None:
-    require(platform.system() == "Linux" and platform.machine() == "x86_64",
-            "This bounded bootstrap supports Linux x86_64 only")
+    macos = platform.system() == "Darwin" and platform.machine() in LOCK["slang"]["macos"]
+    require(macos or (platform.system() == "Linux" and platform.machine() == "x86_64"),
+            "Bootstrap supports Linux x86_64 and macOS arm64/x86_64")
     TOOLS.mkdir(parents=True, exist_ok=True)
-    for name in ("slang", "spirv_tools"):
-        pin = LOCK[name]
+    for name in (("slang",) if macos else ("slang", "spirv_tools")):
+        pin = LOCK["slang"]["macos"][platform.machine()] if macos else LOCK[name]
         archive = TOOLS / ("slang.tar.gz" if name == "slang" else "spirv-tools.deb")
         if not archive.exists() or digest(archive) != pin["sha256"]:
             temporary = archive.with_suffix(".download")
@@ -71,10 +72,16 @@ def bootstrap() -> None:
                 contents.extractall(destination)
         else:
             run(["dpkg-deb", "-x", str(archive), str(destination)])
-    verify_tools()
+    if macos:
+        require(run([str(TOOLS / "slang/bin/slangc"), "-version"]).strip() == LOCK["slang"]["version"],
+                "Slang version differs from pin")
+    else:
+        verify_tools()
 
 
 def verify_tools() -> tuple[Path, Path, Path]:
+    require(platform.system() == "Linux" and platform.machine() == "x86_64",
+            "The SPIR-V/WGSL feasibility probe requires Linux x86_64; macOS bootstrap provides Metal's Slang compiler")
     slang = TOOLS / "slang/bin/slangc"
     val = TOOLS / "spirv-tools/usr/bin/spirv-val"
     dis = TOOLS / "spirv-tools/usr/bin/spirv-dis"

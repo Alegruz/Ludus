@@ -7,6 +7,10 @@ set(LUDUS_ENGINE_EXPORT_NAMESPACE "Ludus::")
 set(LUDUS_ENGINE_PACKAGE_NAME "Ludus")
 
 project(${LUDUS_ENGINE_PROJECT_NAME} VERSION 0.1.0 LANGUAGES CXX)
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    # Enable in the common parent scope for both Platform and GraphicsRhi.
+    enable_language(OBJCXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

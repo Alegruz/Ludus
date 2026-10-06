@@ -48,23 +48,31 @@ enum class ShaderStage : ludus::foundation::uint8
     Vertex,
     Fragment
 };
-// Artifact storage is borrowed only during CreateShader. Entries are explicit
-// per target (Slang's SPIR-V and WGSL entry names can differ, and the generated
-// GLSL ES stage always links through main). GlslEs is an additional browser
-// backend artifact (WebGL 2); it is only populated for web builds and never
-// exposes a backend object. A browser build may carry both Wgsl and GlslEs so
-// the engine selects WebGPU or WebGL 2 at startup.
+/// Per-target shader artifacts, borrowed only during CreateShader.
+/// Each backend consumes its own source/binary and explicit entry name.
+/// A browser build carries both WGSL and GLSL ES for startup selection.
 struct ShaderDescription final
 {
+    /// Shader stage; the selected entry must have this stage.
     ShaderStage Stage = ShaderStage::Vertex;
-    // Minimum occupied bytes from the selected artifact's reflection.
+    /// Minimum occupied uniform bytes from the selected artifact's reflection.
     ludus::foundation::usize UniformSize = 0;
+    /// Vulkan SPIR-V words.
     std::span<const ludus::foundation::uint32> Spirv;
+    /// WebGPU WGSL source.
     std::string_view Wgsl;
+    /// WebGL 2 GLSL ES 3.00 source.
     std::string_view GlslEs = "";
+    /// Entry in Spirv.
     std::string_view SpirvEntry;
+    /// Entry in Wgsl.
     std::string_view WgslEntry;
+    /// Entry in GlslEs (main).
     std::string_view GlslEsEntry = "";
+    /// Metal Shading Language 2.3 source, compiled at resource creation.
+    std::string_view Msl = "";
+    /// Entry in Msl, independently verified against the compiled stage.
+    std::string_view MslEntry = "";
 };
 // One binding: set/group 0, binding 0, visible to vertex and fragment.
 struct PipelineDescription final

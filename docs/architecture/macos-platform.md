@@ -25,7 +25,7 @@ content width and height are logical points, each from 1 through 16384. The
 borrowed `CocoaWindow` and `CocoaView` handles identify an NSWindow and NSView.
 They must not be released by consumers. Closing clears both handles and the
 published dimensions. The content view is layer-backed, ready for RHI to attach
-a Metal layer later; Platform does not create a GPU object.
+the RHI Metal layer; Platform does not create a GPU object.
 
 ## Events and dimensions
 

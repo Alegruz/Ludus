@@ -4,17 +4,16 @@
 #include <ludus/graphics/rhi/rhi.h>
 
 #include "diagnostic.h"
-#include "internal/vulkan_readback.h"
+#include "internal/readback.h"
 
 #include <algorithm>
-#include <cmath>
 #include <span>
 
 #include <catch2/catch_test_macros.hpp>
 
 using namespace ludus::foundation;
 namespace rhi = ludus::graphics::rhi;
-TEST_CASE("Vulkan rejects requirements beyond the engine limit before exposing resources", "[rhi][gpu]")
+TEST_CASE("RHI rejects requirements beyond the engine limit before exposing resources", "[rhi][gpu]")
 {
     struct Guard final
     {
@@ -24,6 +23,14 @@ TEST_CASE("Vulkan rejects requirements beyond the engine limit before exposing r
         }
     } guard;
     rhi::Shutdown();
+#if defined(LUDUS_TEST_METAL)
+    if (rhi::Start({}, {}) != rhi::StartStatus::Ready)
+    {
+        REQUIRE(rhi::GetStartup().Error == rhi::StartupError::AdapterUnavailable);
+        SKIP("No Metal adapter on this host");
+    }
+    rhi::Shutdown();
+#endif
     REQUIRE(rhi::Start({},
                        {
                            .Width = 96,
@@ -39,10 +46,18 @@ TEST_CASE("Vulkan rejects requirements beyond the engine limit before exposing r
     rhi::UniformHandle uniform;
     CHECK(rhi::CreateUniform(16, uniform) == rhi::ResourceStatus::NotReady);
     rhi::Shutdown();
+#if defined(LUDUS_TEST_METAL)
+    if (rhi::Start({}, {}) != rhi::StartStatus::Ready)
+    {
+        REQUIRE(rhi::GetStartup().Error == rhi::StartupError::AdapterUnavailable);
+        SKIP("No Metal adapter on this host");
+    }
+    rhi::Shutdown();
+#endif
     REQUIRE(rhi::Start({}, { .Width = 96, .Height = 64 }) == rhi::StartStatus::Ready);
     CHECK(rhi::GetStartup().Capabilities.MaxUniformBufferSize == 16384);
 }
-TEST_CASE("Public Vulkan resources render changing uniforms across resize and restart", "[rhi][gpu]")
+TEST_CASE("Public RHI resources render changing uniforms across resize and restart", "[rhi][gpu]")
 {
     struct Guard final
     {
@@ -61,6 +76,14 @@ TEST_CASE("Public Vulkan resources render changing uniforms across resize and re
     for (usize session = 0; session < 2; ++session)
     {
         rhi::Shutdown();
+#if defined(LUDUS_TEST_METAL)
+        if (rhi::Start({}, {}) != rhi::StartStatus::Ready)
+        {
+            REQUIRE(rhi::GetStartup().Error == rhi::StartupError::AdapterUnavailable);
+            SKIP("No Metal adapter on this host");
+        }
+        rhi::Shutdown();
+#endif
         REQUIRE(rhi::Start({},
                            { .Width = 96, .Height = 64 },
                            rhi::BackendSelection::Auto,
@@ -69,7 +92,11 @@ TEST_CASE("Public Vulkan resources render changing uniforms across resize and re
         rhi::UniformHandle uniform;
         rhi::PipelineHandle pipeline;
         auto invalid = ludus::shaders::diagnostic::Vertex();
+#if defined(LUDUS_TEST_METAL)
+        invalid.MslEntry = "missing";
+#else
         invalid.SpirvEntry = "missing";
+#endif
         rhi::ShaderHandle failed;
         REQUIRE(rhi::CreateShader(invalid, failed) == rhi::ResourceStatus::Failed);
         REQUIRE(rhi::Destroy(failed) == rhi::ResourceStatus::Ready);
@@ -125,7 +152,8 @@ TEST_CASE("Public Vulkan resources render changing uniforms across resize and re
                     for (usize channel = 0; channel < 4; ++channel)
                     {
                         const int32 actual = pixels[(y * width + x) * 4 + channel];
-                        if (std::abs(actual - static_cast<int32>(std::round(expected[channel] * 255))) > 2)
+                        const float64 error = static_cast<float64>(actual) - expected[channel] * 255;
+                        if (error > 2.5 || error < -2.5)
                         {
                             ++errors;
                         }

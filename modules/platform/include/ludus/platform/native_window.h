@@ -31,7 +31,7 @@ struct NativeWindowInfo final
     /// Borrowed NSWindow on macOS; nullptr for other backends or a closed window.
     /// Access only on the main thread while the owning Ludus window remains alive.
     void* CocoaWindow = nullptr;
-    /// Borrowed NSView for attaching a future Metal presentation layer; no GPU object is created here.
+    /// Borrowed NSView for attaching the Metal presentation layer; no GPU object is created here.
     /// Main-thread access only; lifetime matches CocoaWindow. Cocoa Width/Height are backing pixels.
     void* CocoaView = nullptr;
 };
