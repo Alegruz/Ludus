@@ -628,6 +628,10 @@ GPU duration. Do not compare unrelated queue clocks without calibration.
 
 ## D3D12 Metal and compute expansion
 
+The current macOS Metal backend implements the bounded fullscreen API described
+in the [public rendering guide](../development/fullscreen-rendering.md#macos-metal).
+The broader resource/pass/compute model proposed here remains a future expansion.
+
 D3D12 and Metal implement the established device/resource/layout/pass/token
 contracts. Their binding systems, residency, heaps, native barrier choices,
 command allocator reuse and completion mechanisms stay private. Future backend

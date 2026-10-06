@@ -7,12 +7,27 @@ function(ludus_compile_shader)
        NOT SH_NAME MATCHES "^[A-Za-z_][A-Za-z_0-9]*$" OR NOT SH_SOURCE OR NOT SH_VERTEX OR NOT SH_FRAGMENT)
         message(FATAL_ERROR "ludus_compile_shader requires TARGET NAME SOURCE VERTEX FRAGMENT; optional INCLUDES DEFINES DEPENDS")
     endif()
-    if(NOT LUDUS_SLANG_COMPILER OR NOT LUDUS_SPIRV_VALIDATOR)
-        message(FATAL_ERROR "Set LUDUS_SLANG_COMPILER and LUDUS_SPIRV_VALIDATOR to pinned host tools (shader_toolchain.json)")
+    if(NOT LUDUS_SLANG_COMPILER)
+        message(FATAL_ERROR "Set LUDUS_SLANG_COMPILER to the pinned host tool; run scripts/shader-probe bootstrap")
+    endif()
+    set(backend_args)
+    set(backend_depends)
+    set(backend_byproducts)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        list(APPEND backend_args --metal)
+        list(APPEND backend_byproducts "${SH_NAME}.vertex.metal" "${SH_NAME}.fragment.metal")
+    else()
+        if(NOT LUDUS_SPIRV_VALIDATOR)
+            message(FATAL_ERROR "Set LUDUS_SPIRV_VALIDATOR to the pinned host tool (shader_toolchain.json)")
+        endif()
+        list(APPEND backend_args --validator "${LUDUS_SPIRV_VALIDATOR}")
+        list(APPEND backend_depends "${LUDUS_SPIRV_VALIDATOR}")
+        list(APPEND backend_byproducts "${SH_NAME}.vertex.spv" "${SH_NAME}.fragment.spv" "${SH_NAME}.wgsl" "wgsl.reflection.json")
     endif()
     find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
     get_filename_component(source "${SH_SOURCE}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
     set(output "${CMAKE_CURRENT_BINARY_DIR}/ludus-shaders/${SH_TARGET}/${SH_NAME}")
+    list(TRANSFORM backend_byproducts PREPEND "${output}/")
     set(args)
     foreach(path IN LISTS SH_INCLUDES)
         get_filename_component(path "${path}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -35,7 +50,7 @@ function(ludus_compile_shader)
     set(cross_args)
     set(cross_depends)
     set(cross_byproducts)
-    if(LUDUS_SPIRV_CROSS)
+    if(LUDUS_SPIRV_CROSS AND NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         set(cross_lock "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/shaders/spirv_cross_toolchain.json")
         if(EXISTS "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/spirv_cross_toolchain.json")
             set(cross_lock "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/spirv_cross_toolchain.json")
@@ -48,14 +63,13 @@ function(ludus_compile_shader)
     endif()
     add_custom_command(
         OUTPUT "${output}/${SH_NAME}.h"
-        BYPRODUCTS "${output}/${SH_NAME}.vertex.spv" "${output}/${SH_NAME}.fragment.spv"
-                   "${output}/${SH_NAME}.wgsl" "${output}/vertex.reflection.json"
-                   "${output}/fragment.reflection.json" "${output}/wgsl.reflection.json" "${output}/manifest.json"
+        BYPRODUCTS ${backend_byproducts} "${output}/vertex.reflection.json"
+                   "${output}/fragment.reflection.json" "${output}/manifest.json"
                    ${cross_byproducts}
         COMMAND "${Python3_EXECUTABLE}" "${driver}" --source "${source}" --output "${output}"
                 --name "${SH_NAME}" --vertex "${SH_VERTEX}" --fragment "${SH_FRAGMENT}"
-                --lock "${lock}" --compiler "${LUDUS_SLANG_COMPILER}" --validator "${LUDUS_SPIRV_VALIDATOR}" ${cross_args} ${args}
-        DEPENDS "${source}" "${driver}" "${lock}" "${LUDUS_SLANG_COMPILER}" "${LUDUS_SPIRV_VALIDATOR}" ${cross_depends} ${SH_DEPENDS}
+                --lock "${lock}" --compiler "${LUDUS_SLANG_COMPILER}" ${backend_args} ${cross_args} ${args}
+        DEPENDS "${source}" "${driver}" "${lock}" "${LUDUS_SLANG_COMPILER}" ${backend_depends} ${cross_depends} ${SH_DEPENDS}
         DEPFILE "${output}/shader.d"
         VERBATIM
     )
