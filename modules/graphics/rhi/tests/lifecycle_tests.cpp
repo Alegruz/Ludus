@@ -6,6 +6,7 @@
 
 #include <initializer_list>
 #include <span>
+#include <string_view>
 
 #include <catch2/catch_test_macros.hpp>
 namespace ludus::graphics::rhi::backend
@@ -619,4 +620,38 @@ TEST_CASE("Invalid device limits and unavailable backends fail explicitly", "[rh
     CHECK(GetStartup().Error == StartupError::BackendUnavailable);
     backend::SelectionSupported = true;
     Shutdown();
+}
+
+TEST_CASE("Metal facade consumes only the MSL artifact and a bounded explicit entry", "[rhi][resources][metal]")
+{
+    struct Guard final
+    {
+        ~Guard() noexcept
+        {
+            Shutdown();
+            backend::ActiveKind = Backend::WebGPU;
+        }
+    } guard;
+    Shutdown();
+    backend::ActiveKind = Backend::Metal;
+    backend::ImmediateError = StartupError::None;
+    backend::NextResource = ResourceStatus::Ready;
+    REQUIRE(Start({}, {}) == StartStatus::Pending);
+    internal::Complete(backend::PendingToken,
+                       StartupError::None,
+                       { .MaxFrameDimension2D = 16384, .MaxUniformBufferSize = 16384 });
+    ShaderDescription description;
+    description.Wgsl = "browser artifact";
+    description.WgslEntry = "vertexMain";
+    ShaderHandle invalid;
+    CHECK(CreateShader(description, invalid) == ResourceStatus::InvalidDescription);
+    description.Msl = "Metal artifact";
+    CHECK(CreateShader(description, invalid) == ResourceStatus::InvalidDescription);
+    description.MslEntry = "vertexMain";
+    ShaderHandle valid;
+    REQUIRE(CreateShader(description, valid) == ResourceStatus::Ready);
+    description.MslEntry = std::string_view("entry\0suffix", 12);
+    CHECK(CreateShader(description, invalid) == ResourceStatus::InvalidDescription);
+    description.MslEntry = "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl";
+    CHECK(CreateShader(description, invalid) == ResourceStatus::InvalidDescription);
 }

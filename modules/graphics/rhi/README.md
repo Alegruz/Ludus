@@ -2,7 +2,7 @@
 
 Link `Ludus::GraphicsRhi`. Include `<ludus/graphics/rhi/rhi.h>` for lifecycle and
 frames and `<ludus/graphics/rhi/render.h>` for the bounded fullscreen rendering
-slice. The selected private backend is Vulkan on native Linux, and WebGPU or
+slice. The selected private backend is Vulkan on Linux, Metal on macOS, and WebGPU or
 WebGL 2 on Emscripten. Auto uses the pinned Emdawnwebgpu port before one eligible
 WebGL 2 fallback. Public descriptions use engine types
 and opaque handles; installed consumers need no backend or private headers.
@@ -34,6 +34,14 @@ support fails explicitly. Headless windows use an owned offscreen image for
 native rendering tests. Building requires only the existing Conan Volk/headers;
 running requires a Vulkan loader and usable device. Browser packaging propagates
 the existing pinned `--use-port` through the SDK target.
+
+Native Metal uses two command-buffer-fenced shared uniform slots, BGRA8Unorm
+Cocoa drawables and private headless textures. Submitted command buffers retain
+their resources when public handles are destroyed. Shutdown waits for submitted
+work and restores the borrowed view's previous layer. GPU errors are observed at
+frame boundaries on the main thread. Nil/hidden/zero-size drawables skip frames.
+Runtime shader creation compiles MSL 2.3 and pipeline reflection enforces the
+single read-only buffer-0 contract. No Metal types leak into public headers.
 
 The existing smoke/probe private WGSL interop remains a test boundary. External
 applications use the public rendering API and exported `ludus_compile_shader`.

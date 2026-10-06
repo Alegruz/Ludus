@@ -123,10 +123,87 @@ def glsl_es_contract(code):
         raise RuntimeError('Emitted GLSL ES exceeds the single-block fullscreen contract')
 
 
+def metal_uniform_size(path):
+    parameters = json.loads(path.read_text())["parameters"]
+    if not parameters:
+        return 0
+    if len(parameters) != 1:
+        raise RuntimeError("Metal fullscreen API supports only one uniform resource")
+    resource = parameters[0]
+    binding = resource["binding"]
+    if (binding["kind"] != "constantBuffer" or binding["index"] != 0 or
+            binding.get("space", 0) != 0 or resource["type"]["kind"] != "constantBuffer"):
+        raise RuntimeError("Metal fullscreen API requires a constant buffer at buffer 0")
+    size = resource["type"]["elementVarLayout"]["binding"]["size"]
+    if not 1 <= size <= 16384:
+        raise RuntimeError("Metal uniform exceeds fullscreen API bounds")
+    return size
+
+
+def compile_metal(args, lock):
+    # Thanks to the Slang team, "Metal-Specific Functionalities", User Guide:
+    # https://docs.shader-slang.org/en/latest/external/slang/docs/user-guide/a2-02-metal-target-specific.html
+    # ConstantBuffer maps to constant pointers / buffer indices, and vertex ID
+    # and position semantics map to Metal attributes. Reflect this target's
+    # layout independently; float3 occupies 16 bytes in the Metal fixture.
+    output = Path(args.output)
+    output.mkdir(parents=True, exist_ok=True)
+    extra = [part for path in args.include for part in ('-I', path)] + ['-D' + value for value in args.define]
+    commands, dependencies, entries, sizes, sources = [], [], {}, {}, {}
+    for stage, source_entry in (('vertex', args.vertex), ('fragment', args.fragment)):
+        artifact = output / f'{args.name}.{stage}.metal'
+        reflection = output / f'{stage}.reflection.json'
+        depfile = output / f'{stage}.d'
+        command = [args.compiler, args.source, '-target', 'metal', '-profile', 'sm_6_0',
+                   '-entry', source_entry, '-stage', stage, '-o', str(artifact),
+                   '-reflection-json', str(reflection), '-depfile', str(depfile), *extra]
+        commands.append(command)
+        run(command)
+        dependencies.append(depfile.read_text().split(':', 1)[1].strip())
+        reflected = json.loads(reflection.read_text())['entryPoints']
+        code = artifact.read_text()
+        emitted = re.findall(r'\[\[' + stage + r'\]\]\s+\w+\s+(\w+)\s*\(', code)
+        if len(reflected) != 1 or reflected[0]['stage'] != stage or len(emitted) != 1:
+            raise RuntimeError('Expected one Metal entry with the requested stage')
+        name = emitted[0]
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]{0,62}', name):
+            raise RuntimeError('Metal entry exceeds the fullscreen entry contract')
+        if any(index != '0' for index in re.findall(r'\[\[buffer\((\d+)\)\]\]', code)):
+            raise RuntimeError('Metal resource outside buffer 0')
+        sizes[stage] = metal_uniform_size(reflection)
+        entries[stage] = name
+        sources[stage] = code
+    header = '#pragma once\n#include <ludus/graphics/rhi/render.h>\n'
+    header += f'namespace ludus::shaders::{args.name} {{\n'
+    for stage in ('vertex', 'fragment'):
+        delimiter = 'LUDUS_MSLV' if stage == 'vertex' else 'LUDUS_MSLF'
+        code = sources[stage]
+        if f'){delimiter}"' in code:
+            raise RuntimeError('Metal source conflicts with header delimiter')
+        header += f'inline constexpr char {stage.upper()}_MSL[] = R"{delimiter}(' + code + f'){delimiter}";\n'
+        header += f'inline graphics::rhi::ShaderDescription {stage.title()}() noexcept {{\n'
+        header += f' graphics::rhi::ShaderDescription result; result.Stage = graphics::rhi::ShaderStage::{stage.title()};\n'
+        header += f' result.UniformSize = {sizes[stage]}; result.Msl = {stage.upper()}_MSL; result.MslEntry = "{entries[stage]}";\n return result;\n}}\n'
+    header += '}\n'
+    manifest = {'compiler': lock['slang'], 'commands': commands, 'uniform_sizes': sizes,
+                'metal_entries': entries, 'profiles': {'metal': 'sm_6_0'},
+                'sha256': {f'{args.name}.{stage}.metal': hashlib.sha256(sources[stage].encode()).hexdigest()
+                           for stage in ('vertex', 'fragment')},
+                'layout': 'See separate Metal reflection JSON; never assume packing equality.'}
+    (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    target = output / f'{args.name}.h'
+    escaped_target = str(target).replace(' ', '\\ ').replace('#', '\\#')
+    (output / 'shader.d').write_text(escaped_target + ': ' + ' '.join(dependencies) + '\n')
+    # Header last: compilation/reflection failures cannot complete the command.
+    target.write_text(header)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for key in ('source', 'output', 'name', 'vertex', 'fragment', 'compiler', 'validator', 'lock'):
+    for key in ('source', 'output', 'name', 'vertex', 'fragment', 'compiler', 'lock'):
         parser.add_argument('--' + key, required=True)
+    parser.add_argument('--validator')
+    parser.add_argument('--metal', action='store_true')
     parser.add_argument('--include', action='append', default=[])
     parser.add_argument('--define', action='append', default=[])
     # Optional build-time SPIR-V -> GLSL ES 3.00 translator for the WebGL 2
@@ -137,6 +214,13 @@ def main():
     lock = json.loads(Path(args.lock).read_text())
     if run([args.compiler, '-version']).strip() != lock['slang']['version']:
         raise RuntimeError('Slang version differs from SDK pin')
+    if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', args.name):
+        raise RuntimeError('Invalid shader name')
+    if args.metal:
+        compile_metal(args, lock)
+        return
+    if not args.validator:
+        raise RuntimeError('SPIR-V/WGSL builds require --validator')
     if hashlib.sha256(Path(args.validator).read_bytes()).hexdigest() != lock['spirv_tools']['val_sha256']:
         raise RuntimeError('SPIR-V validator differs from SDK pin')
     if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', args.name):

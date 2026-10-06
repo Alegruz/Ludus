@@ -4,7 +4,17 @@
     "version": "2026.1.2",
     "url": "https://github.com/shader-slang/slang/releases/download/v2026.1.2/slang-2026.1.2-linux-x86_64-glibc-2.27.tar.gz",
     "sha256": "bcffdccca2c16057d39f290a07f6f237b9a765238afc1974b68d09762e874b09",
-    "license": "Apache-2.0 WITH LLVM-exception"
+    "license": "Apache-2.0 WITH LLVM-exception",
+    "macos": {
+      "arm64": {
+        "url": "https://github.com/shader-slang/slang/releases/download/v2026.1.2/slang-2026.1.2-macos-aarch64.tar.gz",
+        "sha256": "442d0053f17013929d38017405fe69966945ad334df0e006556a44ec17eb1225"
+      },
+      "x86_64": {
+        "url": "https://github.com/shader-slang/slang/releases/download/v2026.1.2/slang-2026.1.2-macos-x86_64.tar.gz",
+        "sha256": "fbc22cb51d5f7d83dd9dcdfb13f801fe370bb9e94ff013cfeae8c4cf150d6806"
+      }
+    }
   },
   "spirv_tools": {
     "version": "2025.1~rc1-1~ubuntu0.24.04.2",

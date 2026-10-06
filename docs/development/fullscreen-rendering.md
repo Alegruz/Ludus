@@ -18,12 +18,47 @@ ludus_compile_shader(TARGET fullscreen NAME display SOURCE shaders/display.slang
     INCLUDES shaders DEFINES DISPLAY_SCALE=1 DEPENDS generated_settings.slang)
 ```
 
-Set `LUDUS_SLANG_COMPILER` and `LUDUS_SPIRV_VALIDATOR` to the pinned host tools.
+Set `LUDUS_SLANG_COMPILER` to the pinned host tool. Linux/browser builds also
+require `LUDUS_SPIRV_VALIDATOR`; macOS builds emit MSL directly.
 Python 3.10+ is required. Configure/build never downloads tools. Slang 2026.1.2
 compiles both targets; SPIRV-Tools validates Vulkan 1.1 SPIR-V at build time. The
 manifest records exact expanded commands, emitted entries, profiles, sizes and
 artifact hashes. WGSL receives actual browser shader/pipeline validation through
 resource creation; successful compilation alone does not establish runtime proof.
+
+### macOS Metal
+
+Run `./scripts/shader-probe bootstrap` on macOS to acquire the SHA-256-verified
+Slang 2026.1.2 release for arm64 or x86_64. Configure with
+`-DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"`.
+`ludus_compile_shader` emits separate `<name>.vertex.metal` and
+`<name>.fragment.metal`, reflection JSON, a manifest, a depfile and the same
+generated `Vertex()` / `Fragment()` descriptions used by other backends.
+Source, include and define changes rebuild the artifacts; no-op builds do not.
+The macOS header supplies `Msl` and `MslEntry`. Source is compiled as MSL 2.3
+during `CreateShader`; entries and stages are checked against the actual library.
+Pipeline reflection rejects used textures/samplers/storage or buffers outside
+read-only buffer 0, and checks occupied bytes against the declared uniform size.
+
+`Start` is synchronous and selects Metal under native Auto. It accepts a borrowed
+Cocoa window/content view or Headless, exposes a conservative 16384 texture limit
+on Mac2 / Apple4 devices and later, and caps uniforms at 16 KiB. Cocoa uses a
+`CAMetalLayer` with BGRA8Unorm, two drawables and bounded acquisition; hidden,
+minimized, zero-size or unavailable drawables skip. Keep the Platform window alive
+through shutdown. RHI restores its previous layer when disconnected.
+Headless uses a private BGRA8Unorm render target. Both report Unorm attachments.
+Two command-buffer-fenced uniform slots protect CPU/GPU reuse; submitted buffers
+retain resources after handle destruction. Shutdown drains submitted work and
+aborts open frames. Command-buffer errors fail the session at a subsequent frame
+boundary, requiring shutdown/restart; there are no facade mutations on GPU threads.
+
+Tests verify clear/readback, live Cocoa presentation, shader and binding errors,
+changing uniforms, 40-frame bursts, resize, maximum-sized uploads and restart.
+GPU cases explicitly skip when no Metal adapter is present; policy/window checks
+still execute. `LUDUS_TEST_COCOA=1` enables the WindowServer presentation case.
+Clang 18 ASan cannot start on the local macOS 26.6 host; macOS 14 CI executes
+the sanitizer suite. This slice provides the existing fullscreen API; general
+meshes, compute, textures, depth and blending remain future work.
 
 ### Optional GLSL ES 3.00 (WebGL 2) backend artifact
 
@@ -63,7 +98,7 @@ ceiling. CPU staging remains fixed (128 KiB per active backend for eight slots);
 updates allocate nothing. Eight resources of each kind are
 available; exceeding the pool or exhausting never-reused IDs fails explicitly.
 
-CPU layouts are application contracts. Read separate SPIR-V and WGSL reflection
+CPU layouts are application contracts. Read separate SPIR-V, WGSL and Metal reflection
 and emitted layout; use explicit padding and C++ standard-layout/offsetof/size/
 alignment assertions. Different targets may need different upload structs. The
 helper carries occupied size to prevent undersized bindings; it does not infer
@@ -78,7 +113,7 @@ On the browser, `Start(app, window)` selects `BackendSelection::Auto`: it attemp
 WebGPU (including its compatibility retry) and, only on a capability/startup
 failure, makes exactly one WebGL 2 attempt. `Start(app, window, selection)` forces
 `WebGPU` or `WebGL2` for diagnosis; a forced backend that is unavailable fails
-explicitly rather than switching. Native ignores the selection (Vulkan).
+explicitly rather than switching. Native accepts only Auto, selecting Vulkan on Linux and Metal on macOS.
 `StartupInfo::SelectedBackend` reports the committed backend, and `WebGpu`/`WebGL2`
 carry bounded per-attempt errors for QA. The GLSL ES artifact requires
 `LUDUS_SPIRV_CROSS` at build time (ADR 0013/0013); otherwise the browser build is
@@ -136,7 +171,7 @@ Native attachment format changes fail rather than reuse an incompatible pipeline
 GetFrameInfo outside an open frame returns zero dimensions.
 
 Fragment coordinates have a top-left origin; positive viewport heights/no
-culling match the diagnostic on both targets. Shader output is numeric RGBA;
+culling match the diagnostic on all targets. Shader output is numeric RGBA;
 Unorm attachments quantize it, while Srgb attachments apply linear-to-sRGB RGB
 conversion. GetFrameInfo reports the attachment conversion, so applications can
 choose their output convention explicitly. Palette and display choices belong to
