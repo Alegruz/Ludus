@@ -8,6 +8,13 @@ in the linked evidence; general level loading remains a separate proposal.
 Read [audio authoring](audio-authoring.md), [milestones](audio-content-milestones.md),
 and [implementation handoff](audio-content-codex-handoff.md).
 
+The proposed [resource manager architecture](resource-management.md) extends these
+contracts to shared asynchronous acquisition, typed resident versions, explicit
+budgets and later cooking/streaming. Its [reference review](resource-management-reference-review.md)
+records the relevant Gems readings and design refinements. That broader proposal
+preserves the current version-1 formats and does not claim its future coordinator
+or nonblocking integration is already implemented.
+
 ## Outcome and boundaries
 
 A composer exports audio, registers it under a stable resource ID, authors sound
