@@ -27,14 +27,26 @@ relative operations that refuse symlinks at every component. A trusted root is
 selected by the host; this boundary is not a sandbox against hostile mutation
 of already-open directories, bind mounts, hard links or privileged processes.
 
-Start with Linux synchronous regular-file reads, matching current support.
-Other backends explicitly return Unsupported. Empty files are valid. Bound
+Linux and macOS provide synchronous regular-file reads through a shared POSIX
+backend. Other targets explicitly return Unsupported. Empty files are valid. Bound
 sizes and offsets before narrowing. ReadAt returns the actual progress, retries
 interrupted syscalls and handles short reads. EOF is successful zero progress.
 Atomic pathname replacement preserves an open file's old revision. Detect
 ordinary in-place size/mtime changes before and after reads; metadata is not a
 cryptographic snapshot guarantee. Assets need immutable publication plus digest
 validation when strong revision integrity is required.
+
+Native validation covers UTF-8 names, trusted symlink roots, child symlink and
+FIFO rejection, sparse offsets above 4 GiB, nanosecond modification times,
+replacement/unlink lifetime, clone/move ownership and concurrent reads. Linux
+uses GNU symbol wrapping for fault injection. A separate macOS test library
+compiles the same exception-free POSIX implementation with a private compile-time
+syscall/allocation seam; production has no hooks or mutable fault state. Darwin
+tests exercise interrupted operations, short/partial reads, mutation during a
+read, allocation/metadata failure cleanup, close-on-exec and descriptor reuse
+after a failed close. macOS CI runs these tests and Content read adapters in
+Development and with ASan/UBSan. Content saves, watchers and asynchronous workers
+remain separate implementation work.
 
 ## Virtual namespace and shipping storage
 
@@ -104,8 +116,13 @@ previous output. They release descriptors through RAII. Destruction, moving,
 reopening and closing require exclusive ownership; concurrent const OpenRead,
 Clone and ReadAt calls are supported while their owners remain alive. Destination
 buffers must not overlap during concurrent reads. Explicit Close reports errors;
-destructors release best-effort and never log. Linux close is never retried after
-EINTR because the descriptor may already have been released and reused.
+destructors release best-effort and never log. Linux and Darwin close are never retried after
+EINTR because the descriptor may already have been released and reused. Thanks
+to Apple, XNU `kern_descrip.c`, `fp_close_and_unlock` in the
+[macOS 14 source](https://github.com/apple-oss-distributions/xnu/blob/xnu-10002.1.13/bsd/kern/kern_descrip.c):
+its descriptor-release-before-final-close order confirms the Darwin ownership
+contract. No XNU code was copied. Darwin revision checks use `st_mtimespec`;
+Linux uses `st_mtim`, preserving seconds and nanoseconds on both hosts.
 
 ReadAt fills the requested range up to the captured EOF, looping on short reads.
 Offsets above the captured size fail; offset equal to size succeeds with zero
@@ -120,7 +137,9 @@ own position and clones to position zero, preserving its existing decoder API.
 Logical path equality is byte-exact and case-sensitive. Unicode is validated,
 not case-folded or normalized by runtime I/O. F2/F3 tooling must detect host case
 and Unicode-normalization collisions before publishing a cross-platform pack;
-native filenames accepted by Linux are not automatically portable to Windows.
+native lookup follows each filesystem's case and Unicode equivalence rules,
+including case-insensitive macOS volumes. Linux filenames are not automatically
+portable to macOS or Windows.
 The cooking/pack pipeline must also reject reserved names and trailing dots or
 spaces when publishing portable assets.
 F1's limit matches existing Content (1,024 path bytes); native roots have a

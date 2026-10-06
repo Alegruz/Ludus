@@ -35,7 +35,7 @@ jobs:
   macos-compile:
     needs: changes
     if: needs.changes.outputs.native_required == 'true'
-    name: macOS platform (Metal deferred)
+    name: macOS platform and filesystem (Metal deferred)
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -47,22 +47,28 @@ jobs:
         run: ./scripts/build macos-clang-development
       - name: Test macOS setup contracts
         run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui -v
-      - name: Test native Cocoa lifecycle and keyboard routing
+      - name: Test native Cocoa, filesystem and Content read adapters
         env:
           LUDUS_TEST_COCOA: "1"
-        run: out/host-tools/venv/bin/ctest --preset macos-clang-development --label-regex 'platform|macos|build-contract' --no-tests=error
+        run: out/host-tools/venv/bin/ctest --preset macos-clang-development --label-regex 'platform|macos|filesystem|content|build-contract' --no-tests=error
       - name: Analyze Cocoa Objective-C++ production and test sources
         run: |
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/platform/src/window_cocoa.mm
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/platform/tests/cocoa_tests.mm
-      - name: Validate Cocoa with ASan and UBSan
+      - name: Analyze native filesystem production and test sources
+        run: |
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/src/posix.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/file_tests.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/posix_fault_tests.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/content/tests/native_reads_tests.cpp
+      - name: Validate Cocoa, filesystem and Content reads with ASan and UBSan
         env:
           LUDUS_TEST_COCOA: "1"
         run: |
           ./init.sh --cli --preset macos-clang-asan-ubsan --preset-only --locked --with-tests --no-system-install
           out/host-tools/venv/bin/cmake --preset macos-clang-asan-ubsan
-          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests
-          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_platform_cocoa(_keymap)?_tests$' --no-tests=error
+          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_content_tests
+          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_(platform_cocoa(_keymap)?|filesystem(_fault)?|content)_tests$' --no-tests=error
 
   formatting:
     needs: changes

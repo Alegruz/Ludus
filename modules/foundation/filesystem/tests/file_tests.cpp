@@ -195,3 +195,61 @@ TEST_CASE("Concurrent offset reads share one revision without a shared cursor")
     second.join();
     REQUIRE(valid.load());
 }
+
+TEST_CASE("Native reads accept UTF-8 names and host-selected symlink roots")
+{
+    Fixture fixture;
+    fixture.Write("音.wav", "sound");
+    const auto link = std::filesystem::path(fixture.Path) / "trusted-root";
+    std::filesystem::create_directory_symlink(fixture.Path, link);
+    Directory root;
+    File file;
+    REQUIRE(root.Open(link.string()).Succeeded());
+    REQUIRE(root.OpenRead("音.wav", file).Succeeded());
+    uint8 bytes[5]{};
+    REQUIRE(file.ReadAt(0, bytes).Outcome.Succeeded());
+    REQUIRE(bytes[0] == 's');
+    REQUIRE(bytes[4] == 'd');
+}
+TEST_CASE("Native offset reads preserve sparse file offsets above four GiB")
+{
+    Fixture fixture;
+    const auto path = std::filesystem::path(fixture.Path) / "sparse";
+    const int writer = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    REQUIRE(writer >= 0);
+    constexpr uint64 OFFSET = (uint64{1} << 32) + 17;
+    const auto written = ::pwrite(writer, "end", 3, static_cast<off_t>(OFFSET));
+    const auto closed = ::close(writer);
+    REQUIRE(written == 3);
+    REQUIRE(closed == 0);
+    Directory root;
+    File file, clone;
+    REQUIRE(root.Open(fixture.Path).Succeeded());
+    REQUIRE(root.OpenRead("sparse", file).Succeeded());
+    REQUIRE(file.Size() == OFFSET + 3);
+    REQUIRE(file.Clone(clone).Succeeded());
+    uint8 bytes[4]{};
+    const auto read = clone.ReadAt(OFFSET, bytes);
+    REQUIRE(read.Outcome.Succeeded());
+    REQUIRE(read.BytesRead == 3);
+    REQUIRE(bytes[0] == 'e');
+    REQUIRE(bytes[2] == 'd');
+}
+TEST_CASE("Revision checks detect nanosecond-only modification time changes")
+{
+    Fixture fixture;
+    const auto path = std::filesystem::path(fixture.Path) / "nested/data";
+    const timespec original[] = {{100, 0}, {100, 1}};
+    const timespec changed[] = {{100, 0}, {100, 999999999}};
+    REQUIRE(::utimensat(AT_FDCWD, path.c_str(), original, 0) == 0);
+    Directory root;
+    File file;
+    REQUIRE(root.Open(fixture.Path).Succeeded());
+    REQUIRE(root.OpenRead("nested/data", file).Succeeded());
+    REQUIRE(::utimensat(AT_FDCWD, path.c_str(), changed, 0) == 0);
+    uint8 bytes[6]{};
+    const auto read = file.ReadAt(0, bytes);
+    REQUIRE(read.Outcome.Code == Status::Changed);
+    REQUIRE(read.BytesRead == 0);
+    REQUIRE(file.Size() == 6);
+}

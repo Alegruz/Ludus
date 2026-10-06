@@ -4,6 +4,8 @@
 #include <filesystem>
 #include <fstream>
 
+#include <unistd.h>
+
 int ExerciseInstalledFilesystem() noexcept
 {
     using namespace ludus::foundation;
