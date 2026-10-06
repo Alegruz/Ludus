@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <span>
 
 #include <fcntl.h>
 #include <unistd.h>

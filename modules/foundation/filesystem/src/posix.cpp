@@ -18,6 +18,8 @@
 #endif
 
 #include <new>
+#include <span>
+#include <string_view>
 
 #include <cerrno>
 #include <fcntl.h>
