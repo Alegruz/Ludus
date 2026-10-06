@@ -7,6 +7,8 @@
 
 #if defined(LUDUS_PLATFORM_BROWSER)
 #    include "internal/window_web.hpp"
+#elif defined(LUDUS_PLATFORM_COCOA)
+#    include "internal/window_cocoa.hpp"
 #elif defined(LUDUS_PLATFORM_WAYLAND)
 #    include <ludus/platform/wayland/window.h>
 #elif defined(LUDUS_PLATFORM_HEADLESS)
@@ -21,6 +23,8 @@ bool WindowManager::Initialize(const InitializeInfo& info) noexcept
 {
 #if defined(LUDUS_PLATFORM_BROWSER)
     return browser::InitializeBrowser(info);
+#elif defined(LUDUS_PLATFORM_COCOA)
+    return cocoa::Initialize(info);
 #elif defined(LUDUS_PLATFORM_WAYLAND)
     return wayland::InitializeWayland(info);
 #elif defined(LUDUS_PLATFORM_HEADLESS)
@@ -31,10 +35,20 @@ bool WindowManager::Initialize(const InitializeInfo& info) noexcept
 bool WindowManager::CreateWindow(const WindowBase::CreateInfo& info,
                                  ludus::foundation::core::UniquePtr<Window>& outWindow) noexcept
 {
+#if defined(LUDUS_PLATFORM_COCOA)
+    // Reject before Reset(): destroying an existing Cocoa window off the main
+    // thread would violate AppKit ownership even if creation itself is rejected.
+    if (!cocoa::OnMainThread())
+    {
+        return false;
+    }
+#endif
     // Replacing an output window must destroy its callbacks before creation.
     outWindow.Reset();
 #if defined(LUDUS_PLATFORM_BROWSER)
     auto window = browser::CreateWindow(info);
+#elif defined(LUDUS_PLATFORM_COCOA)
+    auto window = cocoa::CreateWindow(info);
 #elif defined(LUDUS_PLATFORM_WAYLAND)
     auto window = wayland::CreateWindow(info);
 #elif defined(LUDUS_PLATFORM_HEADLESS)

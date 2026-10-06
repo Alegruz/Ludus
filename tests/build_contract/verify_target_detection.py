@@ -128,6 +128,10 @@ def main() -> int:
         check("backend-conflict", linux, header,
               ["-DLUDUS_PLATFORM_WAYLAND=1", "-DLUDUS_PLATFORM_HEADLESS=1"], "select at most one windowing backend")
         check("wrong-browser", linux, header, ["-DLUDUS_PLATFORM_BROWSER=1"], "browser backend requires Emscripten")
+        check("wrong-cocoa", linux, header, ["-DLUDUS_PLATFORM_COCOA=1"], "Cocoa backend requires macOS")
+        check("cocoa-conflict", "arm64-apple-macosx14.0", header,
+              ["-DLUDUS_PLATFORM_COCOA=1", "-DLUDUS_PLATFORM_HEADLESS=1"], "select at most one windowing backend")
+        check("backend-cocoa", "arm64-apple-macosx14.0", header, ["-DLUDUS_PLATFORM_COCOA=1"])
         check("wrong-wayland", "aarch64-linux-android", header, ["-DLUDUS_PLATFORM_WAYLAND=1"],
               "Wayland/X11 backend requires desktop Linux")
         check("wrong-headless", "wasm32-unknown-emscripten", header, ["-DLUDUS_PLATFORM_HEADLESS=1"],
@@ -135,7 +139,7 @@ def main() -> int:
         for backend in ("WAYLAND", "X11", "HEADLESS"):
             check(f"backend-{backend}", linux, header, [f"-DLUDUS_PLATFORM_{backend}=1"])
         check("backend-browser", "wasm32-unknown-emscripten", header, ["-DLUDUS_PLATFORM_BROWSER=1"])
-        for backend in ("WAYLAND", "X11", "HEADLESS", "BROWSER"):
+        for backend in ("WAYLAND", "X11", "HEADLESS", "BROWSER", "COCOA"):
             check(f"zero-backend-{backend}", linux, header, [f"-DLUDUS_PLATFORM_{backend}=0"],
                   "selected backend must equal 1")
         check("sdk-target", linux, header, ["-DLUDUS_EXPECTED_TARGET_OS=LUDUS_OS_LINUX"])

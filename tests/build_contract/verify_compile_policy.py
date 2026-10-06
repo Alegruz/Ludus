@@ -103,7 +103,7 @@ def main():
             continue
         expected = "_tests.dir/" in command
         result = subprocess.run(
-            compiler_options(entry) + ["-x", "c++", "-dM", "-E", "-"],
+            compiler_options(entry) + ["-x", "objective-c++" if entry["file"].endswith(".mm") else "c++", "-dM", "-E", "-"],
             input="", text=True, capture_output=True, cwd=entry["directory"], check=True,
         )
         actual = "#define __cpp_exceptions " in result.stdout
