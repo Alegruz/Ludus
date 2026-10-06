@@ -35,6 +35,10 @@ jobs:
         run: python -m pip install -r docs/wiki-requirements.txt
       - name: Build with strict Markdown and anchor checks
         run: python -m mkdocs build --strict
+      - name: Build public SDK reference with pinned Doxygen and check coverage
+        run: python scripts/build-api --bootstrap
+      - name: Test public API inventory and documentation coverage
+        run: python -m unittest discover -s scripts/python -p test_api_reference.py -v
       - name: Test artifact validation failures
         run: python -m unittest discover -s scripts/python -p test_wiki.py -v
       - name: Verify generated links, assets, source references and search index

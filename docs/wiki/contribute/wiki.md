@@ -22,6 +22,7 @@ wiki's dependencies stay separate from engine build tools and system Python.
 
 ```bash
 out/wiki-venv/bin/python -m mkdocs build --strict
+out/wiki-venv/bin/python scripts/build-api --bootstrap
 out/wiki-venv/bin/python scripts/check-wiki
 ```
 
@@ -29,6 +30,11 @@ Strict builds reject missing Markdown destinations and anchors. The artifact
 check validates generated local links/assets, search destinations and repository
 source paths. It does not crawl third-party websites or prove remote pages will
 remain available.
+
+Build the API after MkDocs, which cleans the artifact directory. The explicit
+bootstrap downloads a hash-pinned official Linux x64 Doxygen binary into `out/`;
+use `--doxygen /path/to/doxygen` on other hosts. See
+[Document public APIs](api-reference.md) for structured comments and coverage.
 
 ## Write around a task
 
