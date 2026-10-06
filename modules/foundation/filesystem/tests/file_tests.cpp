@@ -1,4 +1,5 @@
 #include <ludus/foundation/filesystem/filesystem.hpp>
+#include <ludus/foundation/filesystem/namespace.hpp>
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
@@ -252,4 +253,87 @@ TEST_CASE("Revision checks detect nanosecond-only modification time changes")
     REQUIRE(read.Outcome.Code == Status::Changed);
     REQUIRE(read.BytesRead == 0);
     REQUIRE(file.Size() == 6);
+}
+
+TEST_CASE("Native mounts retain opened revisions after publication and reject unsafe overlay fallback")
+{
+    Fixture fixture;
+    ProviderHandle source;
+    REQUIRE(CreateDirectoryProvider(fixture.Path, source).Succeeded());
+    const auto* previous = source.Get();
+    REQUIRE(CreateDirectoryProvider("/ludus-missing-root-for-f2", source).Code == Status::NotFound);
+    REQUIRE(source.Get() == previous);
+    const uint8 fallbackBytes[]{42};
+    const MemoryEntry entry{"link", fallbackBytes};
+    ProviderHandle fallback;
+    REQUIRE(CreateMemoryProvider({&entry, 1}, fallback).Succeeded());
+    Mount mounts[]{{Root::Assets, "files", 1, 1, source}, {Root::Assets, "files", 0, 2, fallback}};
+    MountSnapshot snapshot;
+    REQUIRE(MountSnapshot::Create(mounts, 1, snapshot).Succeeded());
+    VirtualPath key;
+    REQUIRE(key.Set(Root::Assets, "files/nested/data").Succeeded());
+    VirtualFile file;
+    REQUIRE(snapshot.OpenRead(key, file).Outcome.Succeeded());
+    fixture.Write("replacement", "uvwxyz");
+    REQUIRE(::rename((std::filesystem::path(fixture.Path) / "replacement").c_str(),
+                     (std::filesystem::path(fixture.Path) / "nested/data").c_str()) == 0);
+    REQUIRE(MountSnapshot::Create({}, 2, snapshot).Succeeded());
+    mounts[0].Source = {};
+    source = {};
+    uint8 read[6]{};
+    REQUIRE(file.ReadAt(0, read).BytesRead == 6);
+    REQUIRE(read[0] == 'a');
+    REQUIRE(read[5] == 'f');
+    REQUIRE(file.Generation() == 1);
+
+    REQUIRE(CreateDirectoryProvider(fixture.Path, mounts[0].Source).Succeeded());
+    REQUIRE(MountSnapshot::Create(mounts, 3, snapshot).Succeeded());
+    REQUIRE(snapshot.OpenRead(key, file).Outcome.Succeeded());
+    REQUIRE(file.ReadAt(0, read).BytesRead == 6);
+    REQUIRE(read[0] == 'u');
+    REQUIRE(::symlink("nested/data", (std::filesystem::path(fixture.Path) / "link").c_str()) == 0);
+    REQUIRE(key.Set(Root::Assets, "files/link").Succeeded());
+    MountAttempt attempts[2];
+    const auto refused = snapshot.OpenRead(key, file, attempts);
+    REQUIRE(refused.Outcome.Code == Status::AccessDenied);
+    REQUIRE(refused.Attempts == 1);
+    REQUIRE(attempts[0].Id == 1);
+    REQUIRE(file.Generation() == 3);
+    fixture.Write("nested/data", "changed-size");
+    const auto changed = file.ReadAt(0, read);
+    REQUIRE(changed.Outcome.Code == Status::Changed);
+    REQUIRE(changed.BytesRead == 0);
+}
+TEST_CASE("Separate snapshot handles support concurrent memory opens and shared offset reads")
+{
+    const uint8 bytes[]{1, 2, 3, 4};
+    const MemoryEntry entry{"data", bytes};
+    ProviderHandle source;
+    REQUIRE(CreateMemoryProvider({&entry, 1}, source).Succeeded());
+    const Mount mount{Root::Assets, {}, 0, 1, source};
+    MountSnapshot snapshot;
+    REQUIRE(MountSnapshot::Create({&mount, 1}, 1, snapshot).Succeeded());
+    VirtualPath path;
+    REQUIRE(path.Set(Root::Assets, "data").Succeeded());
+    VirtualFile shared;
+    REQUIRE(snapshot.OpenRead(path, shared).Outcome.Succeeded());
+    std::atomic<bool> valid{true};
+    auto worker = [&](const MountSnapshot& retained) {
+        for (usize i = 0; i < 100; ++i)
+        {
+            VirtualFile opened, clone;
+            uint8 read[2]{};
+            if (!retained.OpenRead(path, opened).Outcome.Succeeded() || !shared.Clone(clone).Succeeded() ||
+                clone.ReadAt(2, read).BytesRead != 2 || read[0] != 3 || read[1] != 4 ||
+                opened.ReadAt(0, read).BytesRead != 2 || read[0] != 1 || read[1] != 2)
+            {
+                valid.store(false);
+            }
+        }
+    };
+    std::thread a(worker, snapshot), b(worker, snapshot), c(worker, snapshot);
+    a.join();
+    b.join();
+    c.join();
+    REQUIRE(valid.load());
 }

@@ -1,6 +1,6 @@
 # Filesystem architecture
 
-Status: F0 design and reference review complete; F1 implemented. Validation is
+Status: F0 design and reference review complete; F1 and F2 implemented. Validation is
 recorded in the implementation PR.
 Reference review follows the baseline and records revisions below. This is a storage architecture for
 Ludus; it does not implement an operating-system filesystem.
@@ -145,6 +145,52 @@ spaces when publishing portable assets.
 F1's limit matches existing Content (1,024 path bytes); native roots have a
 separate 4,096-byte limit and embedded NUL is always rejected. Roots are trusted
 host input, so their own symlink ancestry is permitted. Child symlinks are not.
+
+## Contracts for F2
+
+`namespace.hpp` adds owned, allocation-free `VirtualPath` keys with explicit
+assets/project/cache/user roots and F1's relative-path validation. Logical
+keys remain byte-exact and case-sensitive, without Unicode normalization.
+`CreateMemoryProvider` copies input paths and bytes, rejects duplicate full
+keys, and uses a sorted index with binary lookup. Empty files and empty
+providers are valid on every platform, including the browser. The directory
+provider delegates to F1, retaining its native filename-equivalence and revision
+checks rather than claiming portable host spelling or a stronger snapshot.
+
+The host creates a complete `MountSnapshot` with a nonzero generation, then
+publishes a handle under its own synchronization. Mount IDs are nonzero and
+unique; priority descends, and the lowest stable ID wins equal priorities,
+independent of input order. Prefixes match whole components and are removed
+before provider lookup. An exact prefix has no relative file key and does not
+match. Providers are retained and prefixes copied, so editing inputs cannot
+mutate published lookup. An empty snapshot represents unmounting everything.
+No write policy or process-global mutable namespace is introduced.
+
+Only `NotFound` falls back. Every other status/native diagnostic remains
+visible and preserves the caller's prior opened file. `Describe` enumerates
+mounts in resolution order, and an optional caller-owned bounded attempt trace
+reports actual provider outcomes and IDs; its total count remains available
+when the trace is truncated. A provider returning success without a file is
+reported as `IoError`. Custom providers must implement the documented explicit-
+error, independent revision lifetime and concurrent offset-read contracts.
+
+`VirtualFile` retains the entire originating snapshot and provider file through
+unmount/reload; clones share that opened revision without pathname lookup or
+allocation. Open/create failures are transactional, and all ownership changes
+require exclusive access to the affected handle. Separate stable handles and
+const lookups/reads support concurrent use. Reads and path validation allocate
+nothing; provider/snapshot creation and opening use checked admission and
+nothrow allocations with explicit `OutOfMemory`. Indexes are bounded to 65,536
+memory entries and 256 mounts; this synchronous slice adds no async scheduler.
+Portable case/normalization/reserved-name collision detection remains required
+at F3's pack publishing boundary, not inferred from a Linux/macOS filename.
+
+Regression coverage includes deterministic shuffled overlays, root/prefix
+boundaries, duplicate/invalid publication, bounded traces, fallback for every
+status, partial provider read faults, retained unmount/reload lifetimes,
+independent native revision reads, and an isolated allocation seam exercising
+every construction/open allocation plus allocation-free warm reads/clones.
+The seam is compiled only into an unexported test archive.
 
 ## Reference review and design revision
 
