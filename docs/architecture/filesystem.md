@@ -1,6 +1,6 @@
 # Filesystem architecture
 
-Status: F0 design and reference review complete; F1 and F2 implemented. Validation is
+Status: F0 design and reference review complete; F1, F2 and F3 implemented. Validation is
 recorded in the implementation PR.
 Reference review follows the baseline and records revisions below. This is a storage architecture for
 Ludus; it does not implement an operating-system filesystem.
@@ -192,6 +192,124 @@ independent native revision reads, and an isolated allocation seam exercising
 every construction/open allocation plus allocation-free warm reads/clones.
 The seam is compiled only into an unexported test archive.
 
+## Contracts for F3
+
+`pack.hpp` adds `CreatePackProvider(storage, relativePath, limits, output)`.
+The storage provider may be a native directory or an immutable memory provider;
+pack lookup and decoding work on every target, including the browser. The factory
+pins one opened archive revision and validates its complete metadata before
+publishing a provider. Failure preserves the previous output. Packs mount through
+F2 without a separate namespace, Content identity scheme or runtime global.
+
+Version 1 uses little-endian unsigned integers, an 80-byte header and byte-exact
+UTF-8 paths in strictly increasing lookup order. All reserved fields must be zero.
+The following offsets are bytes from the start of the archive:
+
+| Header offset | Field |
+| --- | --- |
+| 0 | Eight bytes `LUDPACK` followed by NUL |
+| 8, 12, 16 | u32 version (1), header size (80), feature flags (0) |
+| 20, 24, 28 | u32 decoded block size, file count, block count |
+| 32, 40, 48, 56 | u64 index offset (80), index size, payload offset, exact archive size |
+| 64, 68 | u32 index CRC32, header CRC32 (with bytes 68-71 zeroed) |
+| 72 | u64 reserved (0) |
+
+The index begins with variable-length entries: u32 path length, first block,
+block count, reserved; u64 decoded length, stored length; then exactly that many
+UTF-8 path bytes. It ends with block records: u64 absolute payload offset; u32
+stored length, decoded length, codec and decoded CRC32. Codec 0 stores raw bytes;
+codec 1 stores an independent LZ4 block without dictionaries or frame headers.
+Compressed blocks must be smaller than their decoded bytes. The decoded block
+size is a power of two from 256 through 65,536 bytes. Each file owns a consecutive
+run of block records; interior decoded blocks are full, and the last has the
+remaining bytes. Empty files own no blocks. There is no padding or implicit
+alignment policy in version 1: payload ranges must cover the payload exactly,
+without overlaps, gaps, escapes or trailing bytes, independently of index order.
+
+Before publication, the reader checks header/index CRC32, UTF-8/F1 path validity,
+full-key sorted uniqueness, integer admission, table ownership, exact length
+sums, codecs and every storage range. Defaults admit at most 8 GiB storage,
+32 MiB serialized index, 65,536 files, 262,144 blocks, 1 GiB decoded per file and
+16 GiB total decoded. `PackLimits` can lower or raise these budgets, with a hard
+64 KiB decoded-block ceiling and native allocation-size checks. Malformed data
+returns `CorruptData`, unsupported versions/features/codecs return `Unsupported`,
+and configured admission failures return `LimitExceeded`. Storage failures retain
+their original status/native diagnostic. Only F2's `NotFound` permits fallback.
+
+Opening a nonempty pack file allocates at most twice the advertised block size
+as scratch. Warm reads and clones allocate nothing. Reads of one opened revision
+serialize its scratch use; separate opens own separate scratch. Each touched
+block is read and fully checked before any of its bytes reach the caller. A
+fault reports only previously verified progress; `Changed` reports zero valid
+bytes. Native revision checks bracket reads, including empty/EOF reads, and run
+at lookup even for missing keys. Replacement/unlink retains an opened archive;
+ordinary in-place size/mtime changes fail. CRC32 detects corruption, not hostile
+forgery or authenticity, and metadata-preserving mutation needs a separate
+immutable-publication/digest/signature policy. Metadata is captured at mount;
+payload verification is lazy, so successful mounting does not certify every
+payload byte.
+
+Build packs offline with Python 3.10 or later, without third-party Python packages:
+
+```sh
+./scripts/pack cooked-assets out/assets.lpk
+./scripts/pack cooked-assets out/assets.lpk --layout out/layout.json
+./scripts/pack cooked-assets out/assets.lpk --raw --block-bytes 4096
+```
+
+The output must be outside the trusted source tree. The builder rejects child
+symlinks, nonregular files, invalid/bounded paths, Windows reserved components,
+trailing dots/spaces and file/directory collisions. It checks case-folded NFD
+Unicode equivalence at every directory prefix without rewriting logical keys;
+this conservative publishing policy is distinct from each host's native lookup.
+It checks ordinary source size/mtime mutation while streaming at most one input
+block at a time into a temporary payload spool. Publishing uses an exclusive
+same-directory temporary output and replacement; failure preserves an existing
+output. This offline publication is not F5's durable-save guarantee or a sandbox
+against hostile changes to the trusted source tree.
+
+An optional layout manifest is exactly `{"version":1,"paths":["startup/a", ...]}`.
+Listed files come first in that order; unlisted files follow canonical UTF-8
+order. Unknown/repeated paths or unsupported manifest fields are rejected. The
+lookup index stays sorted regardless of physical layout. Pack bytes contain no
+timestamps, machine paths or random identifiers. Identical source bytes, paths,
+block/codec policy and manifest produce identical bytes independent of source
+enumeration. The printed JSON report records format/builder/Unicode database
+versions, counts, budgets used and the canonical manifest SHA-256. Keep that
+report and the input manifest with trace provenance; the builder does not infer
+an access trace or claim loading speedups. Reproduce publishing admission with
+the same Unicode database version when exchanging toolchain environments.
+
+Tests cover corrupt metadata and payloads, resource limits, raw/compressed/empty
+files, cross-block and concurrent offset reads, native replacement/unlink/change,
+unmount lifetimes, every pack allocation failure and allocation-free warm reads.
+Builder tests check reproducibility, reordered payloads, portable collisions,
+bounded source reads, failed publication and compatibility with an independent
+system LZ4 decoder. SDK and browser consumers exercise a fixed golden pack.
+`LUDUS_BUILD_FILESYSTEM_FUZZERS=ON` builds an isolated native Clang/libFuzzer
+executable with the entire reader/decoder instrumented by ASan/UBSan. Its bounded
+harness fuzzes raw codec inputs and repairs metadata checksums to reach deep
+index/range validation. CI runs a seeded 60-second campaign; this is regression
+coverage, not a proof that every malformed input is safe. Reproduce on the
+reference Linux toolchain:
+
+```sh
+cmake --preset linux-clang-development -B out/build/filesystem-fuzz -DLUDUS_BUILD_FILESYSTEM_FUZZERS=ON
+cmake --build out/build/filesystem-fuzz --target ludus_filesystem_pack_fuzzer
+python3 tests/filesystem/generate_pack_fixtures.py out/fuzz/fixture.hpp --corpus out/fuzz/corpus
+out/build/filesystem-fuzz/modules/foundation/filesystem/ludus_filesystem_pack_fuzzer out/fuzz/corpus -max_total_time=60 -max_len=65536 -timeout=2 -rss_limit_mb=512
+```
+
+Thanks to Yann Collet, [*LZ4 Block Format Description*, revision 2022-07-31](https://github.com/lz4/lz4/blob/v1.10.0/doc/lz4_Block_format.md),
+for token/length/offset and final-literal constraints; the bounded encoder/decoder
+are original implementations. Thanks to L. Peter Deutsch,
+[RFC 1952, section 2.3.1](https://www.rfc-editor.org/rfc/rfc1952), for reflected
+IEEE CRC32 semantics; this format does not use GZIP framing. Thanks to Microsoft,
+[*Naming Files, Paths, and Namespaces*](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file),
+and the Python Software Foundation, [*unicodedata*](https://docs.python.org/3/library/unicodedata.html),
+for the publishing checks. Preserve the GPG container/layout attribution below;
+no cited implementation code was copied.
+
 ## Reference review and design revision
 
 Reviewed after the baseline above, using the repository's
@@ -237,11 +355,11 @@ also requires waiting for terminal completion before buffer reuse.
 
 ```mermaid
 flowchart TD
-    Host[Host owns roots and future mount snapshots] --> FS[FoundationFilesystem: directories and opened file revisions]
+    Host[Host owns roots and mount snapshots] --> FS[FoundationFilesystem: directories, mounts, packs and file revisions]
     Content[Content: IDs, schemas, hashes, decode and residency] --> FS
     FS --> Base[FoundationBase: types and compiler vocabulary]
     Stream[Audio stream adapter: independent cursor] --> Content
-    Future[Future namespace and bounded async scheduler] --> FS
+    Future[Future bounded async scheduler] --> FS
 ```
 
 F1 does not change catalogs, hashes, save APIs or logging sink dependencies.

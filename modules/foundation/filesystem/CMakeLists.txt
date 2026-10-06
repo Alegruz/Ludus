@@ -1,4 +1,4 @@
-add_library(ludus_foundation_filesystem STATIC src/path.cpp src/namespace.cpp)
+add_library(ludus_foundation_filesystem STATIC src/path.cpp src/namespace.cpp src/pack.cpp src/pack_codec.cpp)
 add_library(Ludus::FoundationFilesystem ALIAS ludus_foundation_filesystem)
 set_target_properties(ludus_foundation_filesystem PROPERTIES EXPORT_NAME FoundationFilesystem)
 if(CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$" AND NOT EMSCRIPTEN)
@@ -10,7 +10,8 @@ endif()
 target_sources(ludus_foundation_filesystem PUBLIC FILE_SET public_headers TYPE HEADERS
     BASE_DIRS include FILES
     include/ludus/foundation/filesystem/filesystem.hpp
-    include/ludus/foundation/filesystem/namespace.hpp)
+    include/ludus/foundation/filesystem/namespace.hpp
+    include/ludus/foundation/filesystem/pack.hpp)
 target_link_libraries(ludus_foundation_filesystem PUBLIC Ludus::FoundationBase)
 ludus_apply_project_defaults(ludus_foundation_filesystem)
 install(TARGETS ludus_foundation_filesystem EXPORT LudusTargets
@@ -18,7 +19,14 @@ install(TARGETS ludus_foundation_filesystem EXPORT LudusTargets
     FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
-    add_executable(ludus_filesystem_tests tests/path_tests.cpp tests/namespace_tests.cpp)
+    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+    set(pack_fixture "${CMAKE_CURRENT_BINARY_DIR}/generated/pack_fixture.hpp")
+    add_custom_command(OUTPUT "${pack_fixture}"
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/filesystem/generate_pack_fixtures.py" "${pack_fixture}"
+        DEPENDS "${PROJECT_SOURCE_DIR}/tests/filesystem/generate_pack_fixtures.py" "${PROJECT_SOURCE_DIR}/scripts/python/pack_builder.py"
+        VERBATIM)
+    add_executable(ludus_filesystem_tests tests/path_tests.cpp tests/namespace_tests.cpp tests/pack_tests.cpp "${pack_fixture}")
+    target_include_directories(ludus_filesystem_tests PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
     if(CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$" AND NOT EMSCRIPTEN)
         target_sources(ludus_filesystem_tests PRIVATE tests/file_tests.cpp)
         find_package(Threads REQUIRED)
@@ -67,4 +75,40 @@ if(LUDUS_BUILD_TESTS)
     ludus_enable_test_exceptions(ludus_filesystem_namespace_fault_tests)
     add_test(NAME ludus_filesystem_namespace_fault_tests COMMAND ludus_filesystem_namespace_fault_tests)
     set_tests_properties(ludus_filesystem_namespace_fault_tests PROPERTIES LABELS "unit;foundation;filesystem" TIMEOUT 30)
+endif()
+
+if(LUDUS_BUILD_TESTS)
+    add_test(NAME ludus_pack_builder_tests COMMAND "${CMAKE_COMMAND}" -E env
+        "PYTHONPATH=${PROJECT_SOURCE_DIR}/scripts/python" "${Python3_EXECUTABLE}" -m unittest test_pack_builder -v)
+    set_tests_properties(ludus_pack_builder_tests PROPERTIES LABELS "unit;foundation;filesystem;tooling" TIMEOUT 30)
+endif()
+
+if(LUDUS_BUILD_TESTS)
+    add_library(ludus_filesystem_pack_fault_backend STATIC src/pack.cpp)
+    target_compile_definitions(ludus_filesystem_pack_fault_backend PRIVATE LUDUS_FILESYSTEM_PACK_FAULT_TESTING=1)
+    target_link_libraries(ludus_filesystem_pack_fault_backend PUBLIC Ludus::FoundationFilesystem)
+    ludus_apply_project_defaults(ludus_filesystem_pack_fault_backend)
+    add_executable(ludus_filesystem_pack_fault_tests tests/pack_fault_tests.cpp "${pack_fixture}")
+    target_include_directories(ludus_filesystem_pack_fault_tests PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_link_libraries(ludus_filesystem_pack_fault_tests PRIVATE ludus_filesystem_pack_fault_backend Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_filesystem_pack_fault_tests)
+    ludus_enable_test_exceptions(ludus_filesystem_pack_fault_tests)
+    add_test(NAME ludus_filesystem_pack_fault_tests COMMAND ludus_filesystem_pack_fault_tests)
+    set_tests_properties(ludus_filesystem_pack_fault_tests PROPERTIES LABELS "unit;foundation;filesystem" TIMEOUT 30)
+endif()
+
+option(LUDUS_BUILD_FILESYSTEM_FUZZERS "Build isolated instrumented pack/index/codec fuzz target" OFF)
+if(LUDUS_BUILD_FILESYSTEM_FUZZERS)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR EMSCRIPTEN)
+        message(FATAL_ERROR "Filesystem fuzzing requires native Clang/libFuzzer")
+    endif()
+    # Compile all byte-provider and pack code with coverage and sanitizers;
+    # never rely on uninstrumented production reader objects for fuzz evidence.
+    add_executable(ludus_filesystem_pack_fuzzer tests/pack_fuzzer.cpp src/pack.cpp src/pack_codec.cpp
+        src/path.cpp src/namespace.cpp src/unsupported.cpp)
+    target_include_directories(ludus_filesystem_pack_fuzzer PRIVATE include src)
+    target_link_libraries(ludus_filesystem_pack_fuzzer PRIVATE Ludus::FoundationBase)
+    ludus_apply_project_defaults(ludus_filesystem_pack_fuzzer)
+    target_compile_options(ludus_filesystem_pack_fuzzer PRIVATE -fsanitize=fuzzer,address,undefined)
+    target_link_options(ludus_filesystem_pack_fuzzer PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()

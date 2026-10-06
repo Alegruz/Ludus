@@ -63,6 +63,10 @@ jobs:
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/src/namespace.cpp
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/namespace_tests.cpp
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/namespace_fault_tests.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/src/pack.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/src/pack_codec.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/pack_tests.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/pack_fault_tests.cpp
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/content/tests/native_reads_tests.cpp
       - name: Validate Cocoa, filesystem and Content reads with ASan and UBSan
         env:
@@ -70,8 +74,8 @@ jobs:
         run: |
           ./init.sh --cli --preset macos-clang-asan-ubsan --preset-only --locked --with-tests --no-system-install
           out/host-tools/venv/bin/cmake --preset macos-clang-asan-ubsan
-          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_filesystem_namespace_fault_tests ludus_content_tests
-          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_(platform_cocoa(_keymap)?|filesystem(_fault|_namespace_fault)?|content)_tests$' --no-tests=error
+          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_filesystem_namespace_fault_tests ludus_filesystem_pack_fault_tests ludus_content_tests
+          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_(platform_cocoa(_keymap)?|filesystem(_fault|_namespace_fault|_pack_fault)?|content)_tests$' --no-tests=error
 
   formatting:
     needs: changes
@@ -81,7 +85,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install pinned formatter and GUI test dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18 python3-venv python3-tk xvfb xauth
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18 python3-venv python3-tk xvfb xauth liblz4-1
       - name: Install pinned CMake and Ninja for live project setup tests
         run: |
           python3 - <<'PY'
@@ -96,6 +100,8 @@ jobs:
           echo "$PWD/out/host-tools/venv/bin" >> "$GITHUB_PATH"
       - name: Test formatting and staged-file preservation
         run: python3 -m unittest discover -s scripts/python -p 'test_formatting.py' -v
+      - name: Test reproducible packs with the independent LZ4 decoder
+        run: python3 -m unittest discover -s scripts/python -p test_pack_builder.py -v
       - name: Test optional RAD tooling contracts
         run: python3 -m unittest discover -s scripts/python -p 'test_rad_debugger.py' -v
       - name: Test graphical and CLI initialization routing
@@ -211,6 +217,36 @@ jobs:
       - name: Report compiler cache
         if: always()
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
+
+  filesystem-fuzz:
+    needs: [changes, formatting]
+    if: needs.changes.outputs.native_required == 'true'
+    name: Filesystem pack fuzzing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/native-setup
+        with:
+          preset: linux-clang-development
+          conan-cache-writer: 'false'
+          compiler-cache-writer: 'false'
+      - name: Build fully instrumented reader and decoder
+        run: |
+          out/host-tools/venv/bin/cmake --preset linux-clang-development -B out/build/filesystem-fuzz -DLUDUS_BUILD_FILESYSTEM_FUZZERS=ON
+          out/host-tools/venv/bin/cmake --build out/build/filesystem-fuzz --target ludus_filesystem_pack_fuzzer --parallel 2
+          out/host-tools/bin/clang-tidy -p out/build/filesystem-fuzz --warnings-as-errors='*' modules/foundation/filesystem/tests/pack_fuzzer.cpp
+      - name: Fuzz seeded indexes and independent decode under ASan and UBSan
+        run: |
+          python3 tests/filesystem/generate_pack_fixtures.py out/fuzz/fixture.hpp --corpus out/fuzz/corpus
+          out/build/filesystem-fuzz/modules/foundation/filesystem/ludus_filesystem_pack_fuzzer out/fuzz/corpus -max_total_time=60 -max_len=65536 -timeout=2 -rss_limit_mb=512 -artifact_prefix=out/fuzz/
+      - name: Preserve reproducible corpus and crash artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: filesystem-pack-fuzz
+          path: out/fuzz/
+          if-no-files-found: warn
 
   threading-races:
     needs: [changes, formatting]
@@ -375,7 +411,7 @@ jobs:
     # changes whose classification and routing regressions succeeded.
     # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions
     name: Ubuntu Clang
-    needs: [changes, macos-compile, formatting, debug-runtime, development, sanitizers, threading-races, analysis, editor, assertion-policy, pch, build-budget]
+    needs: [changes, macos-compile, formatting, debug-runtime, development, sanitizers, filesystem-fuzz, threading-races, analysis, editor, assertion-policy, pch, build-budget]
     if: always()
     runs-on: ubuntu-24.04
     steps:
