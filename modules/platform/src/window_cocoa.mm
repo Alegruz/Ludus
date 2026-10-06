@@ -318,13 +318,14 @@ bool CocoaWindow::Open() noexcept
                                                         NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
                                                 backing:NSBackingStoreBuffered
                                                   defer:NO];
+        // ARC owns the window even if a later delegate/view allocation fails.
+        mWindow.releasedWhenClosed = NO;
         mDelegate = [[LudusCocoaWindowDelegate alloc] init];
         LudusCocoaView* view = [[LudusCocoaView alloc] initWithFrame:rectangle];
         if (mWindow == nil || mDelegate == nil || view == nil)
         {
             return false;
         }
-        mWindow.releasedWhenClosed = NO;
         mDelegate.owner = this;
         mWindow.delegate = mDelegate;
         mWindow.title = title;
