@@ -7,39 +7,46 @@
 
 namespace ludus::foundation::filesystem
 {
+/// Maximum encoded length of a validated relative path, excluding its terminator.
 inline constexpr usize MAX_PATH_BYTES = 1024;
+/// Maximum encoded length of a trusted native root, excluding its terminator.
 inline constexpr usize MAX_ROOT_BYTES = 4096;
 
+/// Explicit outcome of a filesystem operation; native failures retain their error number.
 enum class Status : uint8
 {
-    Ok,
-    InvalidArgument,
-    NotFound,
-    AccessDenied,
-    NotRegularFile,
-    OutOfMemory,
-    IoError,
-    Changed,
-    Unsupported,
+    Ok,              ///< Operation completed successfully, including reads at EOF.
+    InvalidArgument, ///< Invalid path, closed owner, invalid offset or native path component.
+    NotFound,        ///< A requested native path component does not exist.
+    AccessDenied,    ///< Native access was denied or a child symlink was refused.
+    NotRegularFile,  ///< The opened object is not a readable regular file.
+    OutOfMemory,     ///< Opening or cloning could not allocate its private owner.
+    IoError,         ///< A native operation failed for another reason.
+    Changed,         ///< Size or modification time no longer matches the captured revision.
+    Unsupported,     ///< Native I/O is unavailable on this target.
 };
 
+/// Status and optional native error number; success has no native error.
 struct Result final
 {
-    Status Code = Status::Ok;
-    int32 NativeCode = 0;
+    Status Code = Status::Ok; ///< Portable outcome.
+    int32 NativeCode = 0;     ///< Native errno on syscall failure; zero otherwise.
+    /// Returns whether the operation succeeded.
     [[nodiscard]] bool Succeeded() const noexcept
     {
         return Code == Status::Ok;
     }
 };
 
+/// Read outcome and valid progress. On Changed, discard the potentially touched buffer.
 struct ReadResult final
 {
-    Result Outcome;
-    usize BytesRead = 0;
+    Result Outcome;      ///< Status of the read or revision check.
+    usize BytesRead = 0; ///< Valid bytes transferred; zero on Changed, partial on other errors.
 };
 
-// Byte-exact UTF-8 relative path; no normalization or host case folding.
+/// Validates a bounded UTF-8 relative path without normalization or case folding.
+/// Rejects absolute paths, empty/dot components, NUL, backslash, colon and control bytes.
 [[nodiscard]] bool ValidPath(std::string_view path) noexcept;
 
 // Thanks to Noel Llopis and Charles Nicholson, "Stay in the Game: Asset
@@ -47,26 +54,37 @@ struct ReadResult final
 // pp. 109-114: their prepare/rebind boundary informs revision ownership here.
 // Active file readers retain old bytes; Content owns asset rebinding. Design
 // inspiration only, no article code copied. See docs/architecture/filesystem.md.
-// Owns an opened regular-file revision. Concurrent const operations are safe
-// with disjoint destination buffers. Lifetime changes require exclusive access.
+/// Owns an opened regular-file revision on Linux and macOS; other targets return Unsupported.
+/// Concurrent const operations require disjoint destinations and stable owner lifetime.
+/// Closing, moving and replacing an owner require exclusive access.
 class File final
 {
 public:
+    /// Creates an empty owner.
     File() noexcept = default;
+    /// Closes best-effort without logging or propagating errors.
     ~File() noexcept;
+    /// Ownership is move-only; use Clone to duplicate an opened revision.
     File(const File&) = delete;
+    /// Ownership is move-only; use Clone to duplicate an opened revision.
     File& operator=(const File&) = delete;
+    /// Transfers ownership, leaving other empty.
     File(File&& other) noexcept;
+    /// Closes the previous revision and transfers ownership; self-move preserves it.
     File& operator=(File&& other) noexcept;
+    /// Returns whether this owner contains an opened revision.
     [[nodiscard]] bool IsOpen() const noexcept;
+    /// Returns the captured byte length, or zero for an empty owner.
     [[nodiscard]] uint64 Size() const noexcept;
-    // Transactional, duplicates the opened revision without pathname lookup.
+    /// Duplicates the opened revision without pathname lookup; failure preserves output.
+    /// A closed source returns InvalidArgument. Output may alias this owner.
     [[nodiscard]] Result Clone(File& output) const noexcept;
-    // Fills to captured EOF; offsets > Size() fail. EINTR and short reads handled.
-    // On Changed, BytesRead=0 and the touched buffer must be discarded. Other
-    // failures report partial progress. Metadata detection is best-effort only.
+    /// Fills destination up to captured EOF; offsets above Size() return InvalidArgument.
+    /// Handles interrupted/short reads. Size/mtime checks run before and after even empty reads.
+    /// Changed means BytesRead is zero and the touched buffer must be discarded; other
+    /// failures report partial progress. Metadata detection provides no snapshot guarantee.
     [[nodiscard]] ReadResult ReadAt(uint64 offset, std::span<uint8> destination) const noexcept;
-    // Releases ownership even on error. Destruction closes best-effort.
+    /// Releases ownership even on native error; repeated calls succeed. Never retries close.
     [[nodiscard]] Result Close() noexcept;
 
 private:
@@ -75,21 +93,33 @@ private:
     Impl* mImpl = nullptr;
 };
 
-// Host-selected trusted root, pinned once. Child symlinks are rejected at every
-// component. Not a sandbox against hostile renames, hard links or mount changes.
+/// Pins a host-selected trusted root on Linux and macOS; other targets return Unsupported.
+/// Child symlinks are rejected at every component. This is not a sandbox against
+/// hostile renames, hard links or mount changes. Const operations require a stable lifetime.
 class Directory final
 {
 public:
+    /// Creates an empty root owner.
     Directory() noexcept = default;
+    /// Releases the root best-effort without logging.
     ~Directory() noexcept;
+    /// Root ownership is move-only.
     Directory(const Directory&) = delete;
+    /// Root ownership is move-only.
     Directory& operator=(const Directory&) = delete;
+    /// Transfers the pinned root, leaving other empty.
     Directory(Directory&& other) noexcept;
+    /// Releases the previous root and transfers ownership; self-move preserves it.
     Directory& operator=(Directory&& other) noexcept;
+    /// Returns whether a native root is pinned.
     [[nodiscard]] bool IsOpen() const noexcept;
-    // Failure preserves the existing root/output. Roots may have symlink ancestry.
+    /// Opens a nonempty native root of at most MAX_ROOT_BYTES with no embedded NUL.
+    /// Failure preserves the existing root. Trusted roots may have symlink ancestry.
     [[nodiscard]] Result Open(std::string_view nativeRoot) noexcept;
+    /// Opens a validated relative path as a regular-file revision; failure preserves output.
+    /// Native filename equivalence follows the host filesystem, including macOS case/Unicode rules.
     [[nodiscard]] Result OpenRead(std::string_view relativePath, File& output) const noexcept;
+    /// Releases the root even on error; open files retain their independent lifetimes.
     [[nodiscard]] Result Close() noexcept;
 
 private:

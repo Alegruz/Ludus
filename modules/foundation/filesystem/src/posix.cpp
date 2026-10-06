@@ -8,6 +8,15 @@
 // does not claim openat2 sandbox guarantees. Independently implemented; see
 // docs/architecture/filesystem.md, "Reference review and design revision".
 
+// Thanks to Apple, XNU kern_descrip.c, fp_close_and_unlock (macOS 14):
+// fdrelse precedes the fallible fg_drop/fo_close path, confirming Darwin's
+// descriptor ownership rule. Independently implemented, no XNU code copied.
+// https://github.com/apple-oss-distributions/xnu/blob/xnu-10002.1.13/bsd/kern/kern_descrip.c
+
+#if defined(LUDUS_FILESYSTEM_FAULT_TESTING)
+#    include "internal/posix_test_hooks.hpp"
+#endif
+
 #include <new>
 
 #include <cerrno>
@@ -19,6 +28,52 @@ namespace ludus::foundation::filesystem
 {
 namespace
 {
+#if defined(LUDUS_FILESYSTEM_FAULT_TESTING)
+namespace native = test;
+#else
+namespace native
+{
+int OpenAt(int parent, const char* name, int flags) noexcept
+{
+    return ::openat(parent, name, flags);
+}
+int Duplicate(int descriptor) noexcept
+{
+    return ::fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
+}
+int Metadata(int descriptor, struct stat* info) noexcept
+{
+    return ::fstat(descriptor, info);
+}
+isize Read(int descriptor, std::span<uint8> buffer, off_t offset) noexcept
+{
+    return ::pread(descriptor, buffer.data(), buffer.size(), offset);
+}
+int Close(int descriptor) noexcept
+{
+    return ::close(descriptor);
+}
+} // namespace native
+#endif
+template <typename T>
+T* Allocate() noexcept
+{
+#if defined(LUDUS_FILESYSTEM_FAULT_TESTING)
+    if (!test::AllocationAllowed())
+    {
+        return nullptr;
+    }
+#endif
+    return new (std::nothrow) T();
+}
+const timespec& ModificationTime(const struct stat& info) noexcept
+{
+#if defined(LUDUS_PLATFORM_MACOS)
+    return info.st_mtimespec;
+#else
+    return info.st_mtim;
+#endif
+}
 static_assert(sizeof(off_t) >= sizeof(int64));
 
 Result NativeFailure(int error) noexcept
@@ -52,8 +107,9 @@ struct Descriptor final
     {
         const int value = Value;
         Value = -1;
-        // Linux releases ownership even on EINTR; retry could close a reused fd.
-        return value >= 0 && ::close(value) != 0 ? NativeFailure(errno) : Result{};
+        // Linux and Darwin release ownership before reporting close errors.
+        // Never retry: the descriptor number may already have been reused.
+        return value >= 0 && native::Close(value) != 0 ? NativeFailure(errno) : Result{};
     }
 };
 int OpenAt(int parent, const char* name, int flags) noexcept
@@ -61,7 +117,7 @@ int OpenAt(int parent, const char* name, int flags) noexcept
     int value;
     do
     {
-        value = ::openat(parent, name, flags);
+        value = native::OpenAt(parent, name, flags);
     } while (value < 0 && errno == EINTR);
     return value;
 }
@@ -70,7 +126,7 @@ int Duplicate(int descriptor) noexcept
     int value;
     do
     {
-        value = ::fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
+        value = native::Duplicate(descriptor);
     } while (value < 0 && errno == EINTR);
     return value;
 }
@@ -79,7 +135,7 @@ Result Metadata(int descriptor, struct stat& info) noexcept
     int value;
     do
     {
-        value = ::fstat(descriptor, &info);
+        value = native::Metadata(descriptor, &info);
     } while (value < 0 && errno == EINTR);
     return value == 0 ? Result{} : NativeFailure(errno);
 }
@@ -95,8 +151,8 @@ Result CheckRevision(int descriptor, const struct stat& original) noexcept
     }
     // ctime changes when a path is unlinked/replaced; that must not invalidate
     // an otherwise unchanged opened revision. Size/mtime detection is best-effort.
-    if (current.st_size != original.st_size || current.st_mtim.tv_sec != original.st_mtim.tv_sec ||
-        current.st_mtim.tv_nsec != original.st_mtim.tv_nsec)
+    if (current.st_size != original.st_size || ModificationTime(current).tv_sec != ModificationTime(original).tv_sec ||
+        ModificationTime(current).tv_nsec != ModificationTime(original).tv_nsec)
     {
         return {Status::Changed};
     }
@@ -167,7 +223,7 @@ Result File::Clone(File& output) const noexcept
     {
         return {Status::InvalidArgument};
     }
-    auto* next = new (std::nothrow) Impl();
+    auto* next = Allocate<Impl>();
     if (next == nullptr)
     {
         return {Status::OutOfMemory};
@@ -205,7 +261,7 @@ ReadResult File::ReadAt(uint64 offset, std::span<uint8> destination) const noexc
     usize total = 0;
     while (total < wanted)
     {
-        // Linux limits each read to 0x7ffff000 bytes, independent of bitness.
+        // Respect Linux's transfer cap; use the same conservative chunk on Darwin.
         constexpr usize MAX_TRANSFER = 0x7ffff000;
         const usize remaining = wanted - total;
         const usize count = remaining < MAX_TRANSFER ? remaining : MAX_TRANSFER;
@@ -218,7 +274,7 @@ ReadResult File::ReadAt(uint64 offset, std::span<uint8> destination) const noexc
         isize received;
         do
         {
-            received = ::pread(mImpl->Handle.Value, destination.data() + total, count, nativeOffset);
+            received = native::Read(mImpl->Handle.Value, {destination.data() + total, count}, nativeOffset);
         } while (received < 0 && errno == EINTR);
         if (received < 0)
         {
@@ -275,7 +331,7 @@ Result Directory::Open(std::string_view nativeRoot) noexcept
     }
     char name[MAX_ROOT_BYTES + 1];
     CopyName(nativeRoot, name);
-    auto* next = new (std::nothrow) Impl();
+    auto* next = Allocate<Impl>();
     if (next == nullptr)
     {
         return {Status::OutOfMemory};
@@ -339,7 +395,7 @@ Result Directory::OpenRead(std::string_view relativePath, File& output) const no
     {
         return {Status::NotRegularFile};
     }
-    auto* next = new (std::nothrow) File::Impl();
+    auto* next = Allocate<File::Impl>();
     if (next == nullptr)
     {
         return {Status::OutOfMemory};
