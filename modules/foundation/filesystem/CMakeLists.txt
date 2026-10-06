@@ -1,4 +1,4 @@
-add_library(ludus_foundation_filesystem STATIC src/path.cpp)
+add_library(ludus_foundation_filesystem STATIC src/path.cpp src/namespace.cpp)
 add_library(Ludus::FoundationFilesystem ALIAS ludus_foundation_filesystem)
 set_target_properties(ludus_foundation_filesystem PROPERTIES EXPORT_NAME FoundationFilesystem)
 if(CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$" AND NOT EMSCRIPTEN)
@@ -8,7 +8,9 @@ else()
     target_sources(ludus_foundation_filesystem PRIVATE src/unsupported.cpp)
 endif()
 target_sources(ludus_foundation_filesystem PUBLIC FILE_SET public_headers TYPE HEADERS
-    BASE_DIRS include FILES include/ludus/foundation/filesystem/filesystem.hpp)
+    BASE_DIRS include FILES
+    include/ludus/foundation/filesystem/filesystem.hpp
+    include/ludus/foundation/filesystem/namespace.hpp)
 target_link_libraries(ludus_foundation_filesystem PUBLIC Ludus::FoundationBase)
 ludus_apply_project_defaults(ludus_foundation_filesystem)
 install(TARGETS ludus_foundation_filesystem EXPORT LudusTargets
@@ -16,7 +18,7 @@ install(TARGETS ludus_foundation_filesystem EXPORT LudusTargets
     FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
-    add_executable(ludus_filesystem_tests tests/path_tests.cpp)
+    add_executable(ludus_filesystem_tests tests/path_tests.cpp tests/namespace_tests.cpp)
     if(CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$" AND NOT EMSCRIPTEN)
         target_sources(ludus_filesystem_tests PRIVATE tests/file_tests.cpp)
         find_package(Threads REQUIRED)
@@ -49,4 +51,20 @@ if(LUDUS_BUILD_TESTS AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     ludus_enable_test_exceptions(ludus_filesystem_fault_tests)
     add_test(NAME ludus_filesystem_fault_tests COMMAND ludus_filesystem_fault_tests)
     set_tests_properties(ludus_filesystem_fault_tests PROPERTIES LABELS "unit;foundation;filesystem;macos" TIMEOUT 30)
+endif()
+
+if(LUDUS_BUILD_TESTS)
+    # Compile only the namespace with a private allocation seam. Native I/O and
+    # path validation come from the production archive; nothing is installed.
+    add_library(ludus_filesystem_namespace_fault_backend STATIC src/namespace.cpp)
+    target_compile_definitions(ludus_filesystem_namespace_fault_backend PRIVATE LUDUS_FILESYSTEM_NAMESPACE_FAULT_TESTING=1)
+    target_link_libraries(ludus_filesystem_namespace_fault_backend PUBLIC Ludus::FoundationFilesystem)
+    ludus_apply_project_defaults(ludus_filesystem_namespace_fault_backend)
+    add_executable(ludus_filesystem_namespace_fault_tests tests/namespace_fault_tests.cpp)
+    target_include_directories(ludus_filesystem_namespace_fault_tests PRIVATE src)
+    target_link_libraries(ludus_filesystem_namespace_fault_tests PRIVATE ludus_filesystem_namespace_fault_backend Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_filesystem_namespace_fault_tests)
+    ludus_enable_test_exceptions(ludus_filesystem_namespace_fault_tests)
+    add_test(NAME ludus_filesystem_namespace_fault_tests COMMAND ludus_filesystem_namespace_fault_tests)
+    set_tests_properties(ludus_filesystem_namespace_fault_tests PROPERTIES LABELS "unit;foundation;filesystem" TIMEOUT 30)
 endif()
