@@ -7,8 +7,8 @@ The paired cooker generates readable C++ wrappers, strict Luau declarations,
 and an immutable package. Native callbacks and Luau handlers share the same
 state validation and command admission path.
 
-The default SDK remains C++/data only. S4 does not complete the Editor/GameHost
-integration (S5), six-platform and remaining safety qualification (S6), or
+The default SDK remains C++/data only. The [S5 Editor/GameHost integration](behavior-s5.md) builds on this provider.
+S4 alone does not complete six-platform and remaining safety qualification (S6), or
 representative performance and release acceptance (S7). The existing private
 [S2 debugger](luau-s2.md) and [S3 graph workflow](visual-s3.md) remain useful
 acceptance fixtures; their tools are not automatically part of this provider.

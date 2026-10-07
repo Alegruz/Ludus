@@ -89,5 +89,29 @@ int main()
     {
         return 10;
     }
+    if (provider.Load(ludus::sample::SCHEMA, ludus::sample::PACKAGE) != Status::Completed)
+    {
+        return 12;
+    }
+    input.Asset = 0x100;
+    input.State = ludus::sample::MakeState({});
+    const auto line = provider.Breakpoint(input.Asset, 1);
+    if (line <= 0 || provider.BeginDebug(input, {nullptr, Alive}, output, diagnostic) != Status::Paused ||
+        output.Count != 9)
+    {
+        return 13;
+    }
+    DebugSnapshot stop;
+    if (!provider.Inspect(stop) || !stop.Paused || stop.Stop == 0 || stop.FrameCount == 0 ||
+        provider.ResumeDebug(stop.Stop + 1, DebugMode::Continue, output, diagnostic) != Status::InvalidInput)
+    {
+        return 14;
+    }
+    if (provider.Breakpoint(input.Asset, line, false) <= 0 ||
+        provider.ResumeDebug(stop.Stop, DebugMode::Continue, output, diagnostic) != Status::Completed ||
+        output.State.Items[0].Data.Scalar != 1)
+    {
+        return 15;
+    }
     return provider.Close() == Status::Completed && provider.LiveBytes() == 0 ? 0 : 11;
 }

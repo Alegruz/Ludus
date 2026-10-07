@@ -19,7 +19,9 @@ struct EditorDocumentDialog
 
 // Native dialogs retain the existing filesystem behavior. Browser imports copy
 // bounded JSON into the session filesystem; completion is lifetime-guarded.
-void OpenEditorDocument(QWidget* owner, const EditorDocumentDialog& dialog, std::function<void(const QString&)> loaded);
+void OpenEditorDocument(QWidget* owner,
+                        const EditorDocumentDialog& dialog,
+                        const std::function<void(const QString&)>& loaded);
 #if defined(Q_OS_WASM)
 // Starts a browser download, which cannot confirm the user's destination/save.
 [[nodiscard]] bool DownloadEditorDocument(QWidget* owner, const QString& path);

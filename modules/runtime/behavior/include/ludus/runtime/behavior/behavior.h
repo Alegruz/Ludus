@@ -138,6 +138,7 @@ enum class Status : uint8
     AllocationFailure, ///< Bounded provider/VM allocation failed.
     ScriptFault,       ///< Runtime error or invalid declared state; VM retired.
     Interrupted,       ///< Cooperative safepoint limit exceeded; VM retired.
+    Paused,            ///< Debugger owns a partial invocation; no state/effects have published.
 };
 /// Copied bounded diagnostic. No VM object, traceback pointer or language value escapes.
 struct Diagnostic
@@ -196,7 +197,43 @@ EncodeState(const Contract& contract, const Record& state, std::span<uint8> outp
 /// @note Validates the source record's scalar representation and preserves output on failure; this is an explicit owner
 /// policy.
 [[nodiscard]] bool MigrateState(const Record& source, const Contract& target, Record& output) noexcept;
-/// Synchronous interpreter provider with an implementation-only VM and fallible allocation.
+/// Explicit debugger resume policy; no gameplay coroutine or continuation is exposed.
+enum class DebugMode : uint8
+{
+    Continue, ///< Run until the next breakpoint or completion.
+    Into,     ///< Stop at the next executable source line.
+    Over,     ///< Stop at the next line at the same or shallower call depth.
+    Out,      ///< Stop after returning to the caller.
+};
+/// Bounded copied stack frame; source identifies a cooked asset, never a VM pointer.
+struct DebugFrame
+{
+    char Source[96] = {};   ///< Truncated compiler source name.
+    char Function[48] = {}; ///< Truncated function name.
+    int32 Line = 0;         ///< Compiled source line, mapped through cook evidence.
+};
+/// Safe local inspection. Objects remain opaque; strings contain at most 64 bytes in hex.
+struct DebugLocal
+{
+    char Name[48] = {};     ///< Truncated local name.
+    uint8 Kind = 0;         ///< Nil, boolean, number, string bytes, opaque, nonfinite (0..5).
+    float64 Number = 0;     ///< Finite numeric value when Kind is 2.
+    bool Boolean = false;   ///< Boolean value when Kind is 1.
+    char Bytes[129] = {};   ///< Hex string bytes when Kind is 3; no getters are invoked.
+    bool Truncated = false; ///< Value exceeded its copied budget.
+};
+/// Owner-thread debugger snapshot. No evaluation, object traversal or VM references.
+struct DebugSnapshot
+{
+    DebugFrame Frames[8] = {};  ///< Top eight stack frames.
+    DebugLocal Locals[16] = {}; ///< First sixteen locals.
+    uint32 FrameCount = 0;      ///< Number of copied frames.
+    uint32 LocalCount = 0;      ///< Number of copied locals.
+    uint64 Stop = 0;            ///< Exact pause identity across loads of this owner, required by ResumeDebug.
+    bool Paused = false;        ///< An invocation remains unpublished.
+    bool Truncated = false;     ///< Stack or locals exceeded the copy budget.
+};
+/// Owner-thread interpreter provider with an implementation-only VM and fallible allocation.
 /// @note Owner-thread only, no concurrent access. Does not cross the GameApi ABI or own world state.
 class LuauProvider final
 {
@@ -216,6 +253,7 @@ public:
     /// @note Reload can hold old/new VMs simultaneously; fixed provider metadata is outside this limit.
     /// @param safepoints Cooperative invocation/initialization bound; nonzero, not an instruction count.
     /// @note Contract and immutable package storage must outlive the active VM. No acquisition/download occurs.
+    /// A partial invocation returns Paused; complete or Close it before replacing this package.
     [[nodiscard]] Status Load(const Contract& contract,
                               std::span<const uint8> trusted_package,
                               usize heap_limit = usize{8} * 1024 * 1024,
@@ -225,13 +263,28 @@ public:
     /// the call.
     [[nodiscard]] Status
     Invoke(const Invocation& input, Services services, Outcome& output, Diagnostic& diagnostic) noexcept;
-    /// Retires the VM and borrowed package. A nested call returns Reentrant and leaves ownership intact.
+    /// Begins an explicitly debug-enabled invocation, retaining copied inputs and staged state until completion.
+    /// @note Services::User must outlive any pause. The owning game must stop simulation until completion or Close.
+    /// Output is preserved while paused or on failure; debugger storage is fallibly allocated outside hot paths.
+    [[nodiscard]] Status
+    BeginDebug(const Invocation& input, Services services, Outcome& output, Diagnostic& diagnostic) noexcept;
+    /// Resumes exactly the inspected pause. Stale/zero stops fail without entering the VM or changing output.
+    [[nodiscard]] Status
+    ResumeDebug(uint64 expected_stop, DebugMode mode, Outcome& output, Diagnostic& diagnostic) noexcept;
+    /// Configures an asset breakpoint at a compiled line; returns the actual executable line, or -1 on rejection.
+    [[nodiscard]] int32 Breakpoint(uint64 asset, int32 compiled_line, bool enabled = true) noexcept;
+    /// Copies safe stack/local values; preserves output on reentrancy or when no package is loaded.
+    [[nodiscard]] bool Inspect(DebugSnapshot& output) const noexcept;
+    /// Retires the VM and any partial debugger transaction. A nested call returns Reentrant and leaves ownership
+    /// intact.
     [[nodiscard]] Status Close() noexcept;
     /// Returns live VM bytes (zero when unloaded); excludes fixed owner metadata.
     [[nodiscard]] usize LiveBytes() const noexcept;
 
 private:
+    [[nodiscard]] Status FinishDebug(Diagnostic& diagnostic, Outcome& output) noexcept;
     struct Impl;
     Impl* mImpl = nullptr;
+    uint64 mNextStop = 0;
 };
 } // namespace ludus::runtime::behavior
