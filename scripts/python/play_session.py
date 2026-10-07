@@ -310,11 +310,11 @@ def _validate_manifest(generation_dir: Path, data: Any, generation_id: str) -> N
     for key in ("abi_major", "abi_minor", "property_schema", "checkpoint_schema", "capabilities", "created_unix"):
         if type(data[key]) is not int or not 0 <= data[key] < 2**64:
             raise PublishError(f"invalid {key}")
-    if data["abi_major"] != 1 or data["abi_minor"] != 0:
-        raise PublishError(f"unsupported gameplay ABI: {data['abi_major']}.{data['abi_minor']}; expected 1.0")
+    if data["abi_major"] != 1 or data["abi_minor"] > 1:
+        raise PublishError(f"unsupported gameplay ABI: {data['abi_major']}.{data['abi_minor']}; expected 1.0 or 1.1")
     if len(data["sdk_identity"].encode("utf-8")) > 256:
         raise PublishError("SDK identity exceeds gameplay ABI bound")
-    if data["capabilities"] & ~7 or (data["capabilities"] & 1 and not data["checkpoint_schema"]) or \
+    if data["capabilities"] & ~15 or (data["capabilities"] & 8 and data["abi_minor"] < 1) or (data["capabilities"] & 1 and not data["checkpoint_schema"]) or \
             (data["capabilities"] & 2 and not data["property_schema"]):
         raise PublishError("invalid capabilities/schema")
     for key in ("module_build_id", "host_build_id"):

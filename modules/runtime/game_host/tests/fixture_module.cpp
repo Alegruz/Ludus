@@ -177,6 +177,14 @@ Status FixtureQuery(GameMetadata* out) noexcept
     out->AbiMajor = kAbiMajor;
     out->AbiMinor = kAbiMinor;
     out->Capabilities = kCapabilities;
+    if (ShouldFail("script-debug-null") || ShouldFail("script-debug-truncated") || ShouldFail("script-debug-minor"))
+    {
+        out->Capabilities |= static_cast<uint32>(Capability::ScriptDebug);
+    }
+    if (ShouldFail("script-debug-minor") || ShouldFail("script-debug-legacy"))
+    {
+        out->AbiMinor = 0;
+    }
     out->PropertySchemaVersion = kPropertySchema;
     out->CheckpointSchemaVersion = kCheckpointSchema;
     const usize len = std::strlen(kIdentity);
@@ -930,10 +938,28 @@ LudusGetGameApi(ludus::foundation::uint32 hostAbiMajor,
     }
     // Negotiate the common table size: copy only up to the host-provided size.
     const uint32 hostSize = outTable->StructSize;
-    const GameApiTable& full = FixtureTable();
+    GameApiTable full = FixtureTable();
+    if (ShouldFail("script-debug-truncated"))
+    {
+        full.StructSize = offsetof(GameApiTable, ProcessScriptDebug);
+    }
+    if (ShouldFail("script-debug-minor") || ShouldFail("script-debug-legacy"))
+    {
+        full.AbiMinor = 0;
+    }
+    if (ShouldFail("script-debug-minor"))
+    {
+        full.ProcessScriptDebug = [](GameInstance*, ByteView, ByteSpan, usize*, uint32*) noexcept {
+            return Status::Unsupported;
+        };
+    }
+    if (ShouldFail("script-debug-legacy"))
+    {
+        full.StructSize = offsetof(GameApiTable, ProcessScriptDebug);
+    }
     const uint32 common =
         hostSize < static_cast<uint32>(sizeof(GameApiTable)) ? hostSize : static_cast<uint32>(sizeof(GameApiTable));
     std::memcpy(outTable, &full, common);
-    outTable->StructSize = common;
+    outTable->StructSize = full.StructSize < common ? full.StructSize : common;
     return Status::Ok;
 }

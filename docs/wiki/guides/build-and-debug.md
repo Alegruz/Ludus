@@ -94,6 +94,28 @@ covers Web/Chromium commands, evidence locations and limitations. This remains
 an experimental integration with the reviewed S0 profile; it adds no installed
 scripting SDK, production asset/reload workflow, visual editor or C# runtime.
 
+## S2 debug and program replacement
+
+```bash
+./scripts/script-session bootstrap
+./scripts/script-session cook
+./scripts/script-session run --preset linux-clang-development
+./scripts/script-session check --preset linux-clang-development
+./scripts/script-session run --preset linux-clang-asan-ubsan
+```
+
+This private slice tests actual Luau breakpoints, copied locals, stepping, immutable
+imports and whole-VM replacement with declared-state migration. A partial script
+tick cannot advance, checkpoint or reload. Native GameHost uses the optional
+GameApi 1.1 `ScriptDebug` capability over its existing control connection; Status
+reports `script_paused`, and script resume or Stop releases the pause. The ABI tail
+is provider-neutral and does not install or require a scripting runtime.
+
+The [S2 contract and acceptance guide](../../architecture/luau-s2.md)
+explains request/revision/stop tokens, safe inspection limits, source maps, native
+module retirement, Web/Chromium checks and production gates. The default build
+keeps `LUDUS_BUILD_SCRIPT_SESSION=OFF`.
+
 ## Prepare native debugging
 
 ```bash

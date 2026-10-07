@@ -6,6 +6,7 @@
 // library allowlist. The reviewed loader ownership adjustment is documented in
 // docs/architecture/luau-s0.md; this is not a general untrusted-mod sandbox.
 #include <ludus/foundation/base/core.h>
+#include <ludus/foundation/math/scalar.hpp>
 #include <ludus/foundation/memory/allocation_domain.hpp>
 
 #include <cstring>
@@ -132,21 +133,43 @@ int32 Runtime::Initialize(lua_State* state) noexcept
     {
         runtime->mExecution.Installer(state);
     }
+    if (runtime->mPrograms[0].Asset != 0)
+    {
+        lua_pushcfunction(state, Import, "require");
+        lua_setglobal(state, "require");
+    }
     luaL_sandbox(state);
-    if (luau_load(state,
-                  runtime->mExecution.Source,
-                  reinterpret_cast<const char*>(runtime->mExecution.Bytecode),
-                  runtime->mExecution.Bytes,
-                  0) != 0)
+    for (usize i = 0; i < runtime->mProgramCount; ++i)
     {
-        lua_error(state);
+        runtime->mLoading = i;
+        const Program& program = runtime->mPrograms[i];
+        if (luau_load(state, program.Source, reinterpret_cast<const char*>(program.Code), program.Bytes, 0) != 0)
+        {
+            lua_error(state);
+        }
+        lua_call(state, 0, 1);
+        if (lua_type(state, -1) != (program.Entrypoint ? LUA_TFUNCTION : LUA_TTABLE))
+        {
+            luaL_error(state, "invalid program export");
+        }
+        if (!program.Entrypoint)
+        {
+            // S2 admits flat immutable constants; reject nested mutable exports.
+            lua_pushnil(state);
+            while (lua_next(state, -2) != 0)
+            {
+                const int32 kind = lua_type(state, -1);
+                if (kind != LUA_TBOOLEAN && kind != LUA_TNUMBER && kind != LUA_TSTRING)
+                {
+                    luaL_error(state, "module exports must be primitive immutable constants");
+                }
+                lua_pop(state, 1);
+            }
+            lua_setreadonly(state, -1, 1);
+        }
+        runtime->mReferences[i] = lua_ref(state, -1);
+        lua_pop(state, 1);
     }
-    lua_call(state, 0, 1);
-    if (lua_type(state, -1) != LUA_TFUNCTION)
-    {
-        luaL_error(state, "program must return a handler function");
-    }
-    runtime->mExecution.Handler = lua_ref(state, -1);
     return 0;
 }
 
@@ -154,10 +177,259 @@ int32 Runtime::Execute(lua_State* state) noexcept
 {
     auto* runtime = static_cast<Runtime*>(lua_touserdata(state, 1));
     lua_settop(state, 0);
-    lua_getref(state, runtime->mExecution.Handler);
+    lua_getref(state, runtime->mReferences[runtime->mSelected]);
     const int32 arguments = runtime->mExecution.Arguments(state);
     lua_call(state, arguments, 0);
     return 0;
+}
+
+int32 Runtime::Import(lua_State* state) noexcept
+{
+    auto* runtime = static_cast<Runtime*>(GetCallContext(state).DebugOwner);
+    if (GetCallContext(state).Active || lua_gettop(state) != 1 || lua_type(state, 1) != LUA_TSTRING)
+    {
+        Reject(state, 7, "imports are literal catalog identities during initialization only");
+    }
+    usize length = 0;
+    const char* text = lua_tolstring(state, 1, &length);
+    if (length != 16)
+    {
+        Reject(state, 7, "invalid import identity");
+    }
+    uint64 asset = 0;
+    for (usize i = 0; i < length; ++i)
+    {
+        const char digit = text[i];
+        if ((digit < '0' || digit > '9') && (digit < 'a' || digit > 'f'))
+        {
+            Reject(state, 7, "invalid import identity");
+        }
+        asset = (asset << 4U) | static_cast<uint64>(digit <= '9' ? digit - '0' : digit - 'a' + 10);
+    }
+    const Program& current = runtime->mPrograms[runtime->mLoading];
+    bool allowed = false;
+    for (uint8 i = 0; i < current.DependencyCount; ++i)
+    {
+        allowed |= current.Dependencies[i] == asset;
+    }
+    if (allowed)
+    {
+        for (usize i = 0; i < runtime->mLoading; ++i)
+        {
+            if (runtime->mPrograms[i].Asset == asset)
+            {
+                lua_getref(state, runtime->mReferences[i]);
+                return 1;
+            }
+        }
+    }
+    Reject(state, 7, "undeclared or unavailable import");
+    return 0;
+}
+
+int32 Runtime::PrepareThread(lua_State* state) noexcept
+{
+    auto* runtime = static_cast<Runtime*>(lua_touserdata(state, 1));
+    runtime->mThread = lua_newthread(state);
+    runtime->mThreadRef = lua_ref(state, -1);
+    lua_getref(runtime->mThread, runtime->mReferences[runtime->mSelected]);
+    if (runtime->mExecution.Arguments(runtime->mThread) != 4)
+    {
+        luaL_error(state, "handler requires four arguments");
+    }
+    return 0;
+}
+
+namespace
+{
+template <usize N>
+void Copy(char (&output)[N], const char* input) noexcept
+{
+    usize i = 0;
+    if (input != nullptr)
+    {
+        for (; i + 1 < N && input[i] != '\0'; ++i)
+        {
+            output[i] = input[i];
+        }
+    }
+    output[i] = '\0';
+}
+} // namespace
+
+// Thanks to Roblox Corporation, pinned lua.h/ldebug.cpp and Luau C API
+// "Debugging", https://luau.org/api/: source stops use actual VM break/step
+// hooks. Snapshots copy bounded primitives, never evaluate user metamethods.
+void Runtime::Capture(lua_State* state) noexcept
+{
+    const uint64 stop = mSnapshot.Stop;
+    mSnapshot = {};
+    mSnapshot.Stop = stop == ~uint64{0} ? stop : stop + 1;
+    mSnapshot.Depth = lua_stackdepth(state);
+    for (int32 level = 0; level < 8; ++level)
+    {
+        lua_Debug info = {};
+        if (lua_getinfo(state, level, "sln", &info) == 0)
+        {
+            break;
+        }
+        DebugFrame& frame = mSnapshot.Frames[mSnapshot.FrameCount++];
+        Copy(frame.Source, info.source);
+        Copy(frame.Function, info.name);
+        frame.Line = info.currentline;
+    }
+    mSnapshot.Truncated = mSnapshot.Depth > 8;
+    for (int32 i = 1; i <= 17; ++i)
+    {
+        const char* name = lua_getlocal(state, 0, i);
+        if (name == nullptr)
+        {
+            break;
+        }
+        if (i == 17)
+        {
+            mSnapshot.Truncated = true;
+            lua_pop(state, 1);
+            break;
+        }
+        DebugValue& value = mSnapshot.Locals[mSnapshot.LocalCount++];
+        Copy(value.Name, name);
+        switch (lua_type(state, -1))
+        {
+            case LUA_TNIL:
+                value.Kind = DebugKind::Nil;
+                break;
+            case LUA_TBOOLEAN:
+                value.Kind = DebugKind::Boolean;
+                value.Boolean = lua_toboolean(state, -1) != 0;
+                break;
+            case LUA_TNUMBER:
+                value.Number = lua_tonumber(state, -1);
+                value.Kind = foundation::math::IsFinite(value.Number) ? DebugKind::Number : DebugKind::Nonfinite;
+                break;
+            case LUA_TSTRING: {
+                usize bytes = 0;
+                const char* text = lua_tolstring(state, -1, &bytes);
+                value.Kind = DebugKind::StringBytes;
+                value.Truncated = bytes > 64;
+                if (bytes > 64)
+                {
+                    bytes = 64;
+                }
+                constexpr char HEX[] = "0123456789abcdef";
+                for (usize j = 0; j < bytes; ++j)
+                {
+                    const auto byte = static_cast<uint8>(text[j]);
+                    value.Bytes[j * 2] = HEX[byte >> 4U];
+                    value.Bytes[j * 2 + 1] = HEX[byte & 15U];
+                }
+                break;
+            }
+            default:
+                value.Kind = DebugKind::Opaque;
+                break;
+        }
+        lua_pop(state, 1);
+    }
+}
+
+void Runtime::OnBreak(lua_State* state, lua_Debug* debug) noexcept
+{
+    auto* runtime = static_cast<Runtime*>(GetCallContext(state).DebugOwner);
+    if (runtime->mDebugEnabled && GetCallContext(state).Active)
+    {
+        lua_Debug info = {};
+        (void)lua_getinfo(state, 0, "s", &info);
+        const bool skip = runtime->mSkipBreak && debug->currentline == runtime->mStepLine &&
+                          lua_stackdepth(state) == runtime->mStepDepth &&
+                          std::strcmp(info.source == nullptr ? "" : info.source, runtime->mStepSource) == 0;
+        runtime->mSkipBreak = false;
+        if (skip)
+        {
+            return;
+        } // Resume executes the stopped instruction once.
+
+        runtime->Capture(state);
+        lua_break(state);
+    }
+}
+
+void Runtime::OnStep(lua_State* state, lua_Debug* debug) noexcept
+{
+    auto* runtime = static_cast<Runtime*>(GetCallContext(state).DebugOwner);
+    if (!runtime->mDebugEnabled || runtime->mMode == ResumeMode::Continue)
+    {
+        return;
+    }
+    const int32 depth = lua_stackdepth(state);
+    lua_Debug info = {};
+    (void)lua_getinfo(state, 0, "s", &info);
+    const bool different = debug->currentline != runtime->mStepLine || depth != runtime->mStepDepth ||
+                           std::strcmp(info.source == nullptr ? "" : info.source, runtime->mStepSource) != 0;
+    if (different &&
+        (runtime->mMode == ResumeMode::Into || (runtime->mMode == ResumeMode::Over && depth <= runtime->mStepDepth) ||
+         (runtime->mMode == ResumeMode::Out && depth < runtime->mStepDepth)))
+    {
+        runtime->Capture(state);
+        lua_break(state);
+    }
+}
+
+Status Runtime::Resume(ResumeMode mode, Diagnostic& diagnostic) noexcept
+{
+    if (mEntered)
+    {
+        return Status::Reentrant;
+    }
+    if (!mPaused || mThread == nullptr)
+    {
+        return Status::NotReady;
+    }
+    mMode = mode;
+    mSkipBreak = true;
+    mStepDepth = mSnapshot.Depth;
+    mStepLine = mSnapshot.Frames[0].Line;
+    Copy(mStepSource, mSnapshot.Frames[0].Source);
+    lua_singlestep(mThread, mode == ResumeMode::Continue ? 0 : 1);
+    mEntered = true;
+    const int32 status = lua_resume(mThread, nullptr, 0);
+    mEntered = false;
+    return Finish(status, mThread, diagnostic);
+}
+
+int32 Runtime::SetBreakpoint(lua_State* state) noexcept
+{
+    auto* runtime = static_cast<Runtime*>(lua_touserdata(state, 1));
+    lua_getref(state, runtime->mReferences[runtime->mSelected]);
+    runtime->mBreakpointLine = lua_breakpoint(state, -1, runtime->mBreakpointLine, runtime->mBreakpointEnabled ? 1 : 0);
+    return 0;
+}
+
+int32 Runtime::Breakpoint(BreakpointSpec point) noexcept
+{
+    if (mEntered || mState == nullptr || !mDebugEnabled || point.Line < 1)
+    {
+        return -1;
+    }
+    for (usize i = 0; i < mProgramCount; ++i)
+    {
+        if (mPrograms[i].Asset == point.Asset && mPrograms[i].Entrypoint)
+        {
+            mSelected = i;
+            mBreakpointLine = point.Line;
+            mBreakpointEnabled = point.Enabled;
+            mEntered = true;
+            const int32 status = lua_cpcall(mState, SetBreakpoint, this);
+            mEntered = false;
+            if (status != LUA_OK)
+            {
+                Close();
+                return -1;
+            }
+            return mBreakpointLine;
+        }
+    }
+    return -1;
 }
 
 Runtime::~Runtime() noexcept
@@ -176,22 +448,63 @@ void Runtime::Close() noexcept
         lua_close(mState);
     }
     mState = nullptr;
+    mThread = nullptr;
+    mThreadRef = -1;
+    mPaused = false;
+    mSkipBreak = false;
     mContext.User = nullptr;
     mContext.Active = false;
 }
 
 Status Runtime::Load(const uint8* bytecode, usize bytes, const char* source, Setup installer) noexcept
 {
-    if (mEntered)
+    const Program program{ .Code = bytecode, .Bytes = bytes, .Source = source };
+    return LoadPrograms(&program, 1, installer);
+}
+
+Status Runtime::LoadPrograms(const Program* programs, usize count, Setup installer) noexcept
+{
+    if (mEntered || mPaused)
     {
         return Status::Reentrant;
     }
     Close();
-    if (bytecode == nullptr || bytes == 0 || source == nullptr)
+    if (programs == nullptr || count == 0 || count > 8)
     {
         return Status::InvalidArtifact;
     }
-    mExecution = { .Bytecode = bytecode, .Bytes = bytes, .Source = source, .Installer = installer };
+    for (usize i = 0; i < count; ++i)
+    {
+        const Program& program = programs[i];
+        if (program.Code == nullptr || program.Bytes == 0 || program.Source == nullptr || program.DependencyCount > 8)
+        {
+            return Status::InvalidArtifact;
+        }
+        for (usize j = 0; j < i; ++j)
+        {
+            if (program.Asset == programs[j].Asset)
+            {
+                return Status::InvalidArtifact;
+            }
+        }
+        for (uint8 j = 0; j < program.DependencyCount; ++j)
+        {
+            bool found = false;
+            for (usize k = 0; k < i; ++k)
+            {
+                found |= !programs[k].Entrypoint && programs[k].Asset == program.Dependencies[j];
+            }
+            if (!found)
+            {
+                return Status::InvalidArtifact;
+            }
+        }
+        mPrograms[i] = program;
+    }
+    mProgramCount = count;
+    mExecution = { .Installer = installer };
+    mContext.DebugOwner = this;
+    mSnapshot = {};
     mContext.Safepoints = 0;
     mContext.Interrupted = false;
     mContext.NativeStatus = 0;
@@ -202,6 +515,8 @@ Status Runtime::Load(const uint8* bytecode, usize bytes, const char* source, Set
     }
     lua_callbacks(mState)->userdata = &mContext;
     lua_callbacks(mState)->interrupt = Interrupt;
+    lua_callbacks(mState)->debugbreak = OnBreak;
+    lua_callbacks(mState)->debugstep = OnStep;
     mEntered = true;
     const int32 status = lua_cpcall(mState, Initialize, this);
     mEntered = false;
@@ -217,7 +532,7 @@ Status Runtime::Load(const uint8* bytecode, usize bytes, const char* source, Set
 
 Status Runtime::Invoke(Identity identity, void* user, Setup arguments, Diagnostic& diagnostic) noexcept
 {
-    if (mEntered)
+    if (mEntered || mPaused)
     {
         return Status::Reentrant;
     }
@@ -228,6 +543,24 @@ Status Runtime::Invoke(Identity identity, void* user, Setup arguments, Diagnosti
         diagnostic.Code = Status::NotReady;
         return diagnostic.Code;
     }
+    bool found = false;
+    for (usize i = 0; i < mProgramCount; ++i)
+    {
+        if (mPrograms[i].Entrypoint && (mPrograms[i].Asset == identity.Asset || mPrograms[i].Asset == 0))
+        {
+            mSelected = i;
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+    {
+        diagnostic.Code = Status::InvalidArtifact;
+        return diagnostic.Code;
+    }
+    mIdentity = identity;
+    mSkipBreak = false;
+    mMode = ResumeMode::Continue;
     ++mContext.Epoch;
     mContext.User = user;
     mContext.Active = true;
@@ -237,8 +570,30 @@ Status Runtime::Invoke(Identity identity, void* user, Setup arguments, Diagnosti
     mContext.NativeStatus = 0;
     mExecution.Arguments = arguments;
     mEntered = true;
-    const int32 status = lua_cpcall(mState, Execute, this);
+    int32 status = lua_cpcall(mState, mDebugEnabled ? PrepareThread : Execute, this);
+    lua_State* errors = mState;
+    if (status == LUA_OK && mDebugEnabled)
+    {
+        errors = mThread;
+        status = lua_resume(mThread, nullptr, 4);
+    }
     mEntered = false;
+    return Finish(status, errors, diagnostic);
+}
+
+Status Runtime::Finish(int32 status, lua_State* state, Diagnostic& diagnostic) noexcept
+{
+    diagnostic = {};
+    diagnostic.Source = mIdentity;
+    diagnostic.Operation = mContext.Operation;
+    diagnostic.NativeStatus = mContext.NativeStatus;
+    if (status == LUA_BREAK)
+    {
+        mPaused = true;
+        diagnostic.Code = Status::Paused;
+        return diagnostic.Code;
+    }
+    mPaused = false;
     mContext.Active = false;
     mContext.User = nullptr;
     diagnostic.Operation = mContext.Operation;
@@ -250,8 +605,14 @@ Status Runtime::Invoke(Identity identity, void* user, Setup arguments, Diagnosti
                 ? Status::AllocationFailure
                 : (mContext.Interrupted ? Status::Interrupted
                                         : (mContext.NativeStatus != 0 ? Status::NativeRejected : Status::ScriptFault));
-        CopyError(mState, diagnostic);
+        CopyError(state, diagnostic);
         Close();
+    }
+    else if (mThreadRef != -1)
+    {
+        lua_unref(mState, mThreadRef);
+        mThreadRef = -1;
+        mThread = nullptr;
     }
     return diagnostic.Code;
 }

@@ -63,7 +63,7 @@ class GenerationPublishTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             module, host, _ = self._artifacts(root)
-            for key, value in (("abi_major", True), ("abi_minor", "0"),
+            for key, value in (("abi_major", True), ("abi_minor", "0"), ("abi_minor", 2), ("capabilities", 8), ("capabilities", 16),
                                ("sdk_identity", 123), ("project_id", 1)):
                 fields = self._fields()
                 fields[key] = value

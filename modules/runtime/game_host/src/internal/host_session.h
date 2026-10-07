@@ -162,6 +162,7 @@ private:
     bool InstanceReady_ = false;
     bool Quiesced_ = false;
     bool StepRequested_ = false;
+    bool ScriptPaused_ = false;
     bool ReadyEmitted_ = false;
     bool HelloReceived_ = false;
     bool AwaitingLoad_ = false;

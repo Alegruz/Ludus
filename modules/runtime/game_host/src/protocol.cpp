@@ -28,6 +28,8 @@ std::string_view CommandKindName(CommandKind kind) noexcept
             return "ReloadAsset";
         case CommandKind::Stop:
             return "Stop";
+        case CommandKind::ScriptDebug:
+            return "ScriptDebug";
     }
     return "Unknown";
 }

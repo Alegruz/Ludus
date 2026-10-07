@@ -623,7 +623,7 @@ def build_plan(context: ToolContext, descriptor: editor_project.Descriptor, proj
     runtime_identity = None
     if sdk_identity is not None:
         runtime_identity = (f"{sdk_identity.source_revision}|{sdk_identity.sdk_variant}|{sdk_identity.cxx_runtime_abi}|"
-                            f"{sdk_identity.compiler_id} {sdk_identity.compiler_version}|{sdk_identity.target_triple}|abi-1.0")
+                            f"{sdk_identity.compiler_id} {sdk_identity.compiler_version}|{sdk_identity.target_triple}|abi-1.1")
 
     return Plan(
         descriptor=descriptor,

@@ -53,6 +53,9 @@ template <typename FieldPtr>
                    t.CommitEdits != nullptr && t.DiscardEdits != nullptr;
         case game_api::Capability::AssetReload:
             return FieldWithin(t.StructSize, &GameApiTable::ReloadAsset) && t.ReloadAsset != nullptr;
+        case game_api::Capability::ScriptDebug:
+            return t.AbiMinor >= 1 && FieldWithin(t.StructSize, &GameApiTable::ProcessScriptDebug) &&
+                   t.ProcessScriptDebug != nullptr;
         case game_api::Capability::None:
             return true;
     }
@@ -244,7 +247,7 @@ LoadStatus LoadModule(std::string_view path,
     // and a bounded identity. Published and query metadata must agree (L04).
     if (metadata.StructSize != sizeof(GameMetadata) || metadata.AbiMajor != hostAbiMajor ||
         metadata.AbiMinor != table.AbiMinor || metadata.IdentityLength > game_api::kIdentityMax ||
-        metadata.Reserved != 0 || table.Reserved != 0 || (metadata.Capabilities & ~uint32{7}) != 0)
+        metadata.Reserved != 0 || table.Reserved != 0 || (metadata.Capabilities & ~uint32{15}) != 0)
     {
         ::dlclose(handle);
         return LoadStatus::MetadataInconsistent;
@@ -253,8 +256,10 @@ LoadStatus LoadModule(std::string_view path,
     // non-null within the negotiated table (review finding 2): a module that
     // advertises Reload/Properties/AssetReload with a null or truncated callback
     // is rejected before any use.
-    for (const auto cap :
-         {game_api::Capability::Reload, game_api::Capability::Properties, game_api::Capability::AssetReload})
+    for (const auto cap : {game_api::Capability::Reload,
+                           game_api::Capability::Properties,
+                           game_api::Capability::AssetReload,
+                           game_api::Capability::ScriptDebug})
     {
         if (game_api::HasCapability(metadata.Capabilities, cap) && !CapabilityComplete(table, cap))
         {

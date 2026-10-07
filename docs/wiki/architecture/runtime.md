@@ -39,6 +39,22 @@ cannot be rolled back by the transaction; uncertain retirement requires recovery
 or process restart. See [reload design](../../architecture/project-live-reload.md)
 alongside the implemented guide rather than treating every design phase as shipped.
 
+## Script debugging and replacement
+
+The private [S2 scripting slice](../../architecture/luau-s2.md) adds source stops,
+copied locals and whole-VM replacement with declared-state migration. GameApi
+1.1 appends `ProcessScriptDebug`, gated by the optional `ScriptDebug` capability
+and negotiated table size. Providers receive bounded JSON over the same GameHost
+connection; no VM pointer crosses the ABI. Update may return `ScriptPaused`:
+control/platform pumping continues while host simulation ticks remain frozen.
+Checkpointing and reload wait for a completed tick. Instance destruction retires
+all stopped/running VM roots before native module release.
+
+The fixture verifies two separately loaded native module images and browser
+Wasm event-loop responsiveness. It remains default-off and outside the installed
+scripting SDK; DAP/editor UI, waits, other providers and device/performance
+qualification are later work. See [commands and limits](../guides/build-and-debug.md#s2-debug-and-program-replacement).
+
 ## Configuration is a control operation
 
 `FoundationConfig` owns typed schema/layer evaluation and prepared candidates.

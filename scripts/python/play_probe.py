@@ -110,7 +110,7 @@ def validate_metadata(value: Any, expected: dict | None = None) -> dict:
     for key in fields - {"sdk_identity"}:
         if type(value[key]) is not int or not 0 <= value[key] < 2**32:
             raise ProbeError(f"invalid module {key}")
-    if value["abi_major"] != 1 or value["abi_minor"] != 0 or value["capabilities"] & ~7:
+    if value["abi_major"] != 1 or value["abi_minor"] > 1 or value["capabilities"] & ~15 or (value["capabilities"] & 8 and value["abi_minor"] < 1):
         raise ProbeError("unsupported module ABI/capabilities")
     if (value["capabilities"] & 1 and value["checkpoint_schema"] == 0) or \
             (value["capabilities"] & 2 and value["property_schema"] == 0):

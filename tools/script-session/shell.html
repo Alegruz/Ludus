@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Ludus S2 debug/reload acceptance</title>
+<body><pre id="output"></pre>
+<script>
+var Module = {
+  noExitRuntime: true,
+  print(text) { console.log(text); document.getElementById('output').textContent += text + '\n'; },
+  printErr(text) { console.error(text); },
+  onAbort(reason) { document.body.dataset.abort = String(reason); },
+  onRuntimeInitialized() { document.body.dataset.ready = 'true'; }
+};
+</script>
+<script src="ludus_script_session.js"></script>
+</body></html>

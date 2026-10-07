@@ -355,6 +355,10 @@ bool HostSession::LoadInitial(std::string_view modulePath, uint64 generation, ga
 
 void HostSession::StepFrame() noexcept
 {
+    if (ScriptPaused_)
+    {
+        return;
+    }
     if (Instance_ == nullptr || !Active_.IsLoaded() || (State_ != PlayState::Running && State_ != PlayState::Paused))
     {
         return;
@@ -381,6 +385,12 @@ void HostSession::StepFrame() noexcept
 
     RenderParams render = {};
     const game_api::Status status = Active_.Table().Update(Instance_, &input, &render);
+    if (status == game_api::Status::ScriptPaused &&
+        game_api::HasCapability(Active_.Metadata().Capabilities, game_api::Capability::ScriptDebug))
+    {
+        ScriptPaused_ = true;
+        return; // Partial invocation: no simulation tick/frame/checkpoint advances.
+    }
     if (status != game_api::Status::Ok)
     {
         // A module Update error is a host failure for this session, not a
@@ -506,6 +516,11 @@ void HostSession::Dispatch(const Message& command) noexcept
                                        "asset_id",
                                        "artifact",
                                        "digest"});
+    }
+    else if (type == "ScriptDebug")
+    {
+        knownFields = command.HasOnly(
+            {"command", "protocol", "request", "session", "epoch", "expected_generation", "extension", "payload"});
     }
     else if (type == "ApplyEdits")
     {
@@ -649,6 +664,7 @@ void HostSession::Dispatch(const Message& command) noexcept
         m.SetUint("schema_epoch", SchemaEpoch_);
         m.SetString("state", PlayStateName(State_));
         m.SetUint("sim_ticks", SimTicks_);
+        m.SetBool("script_paused", ScriptPaused_);
         m.SetUint("frame_index", FrameIndex_);
         m.SetUint("presented_frames", Presenter_ == nullptr ? 0 : Presenter_->PresentedFrames());
         m.SetBool("windowed", Presenter_ != nullptr && Presenter_->Windowed());
@@ -688,6 +704,44 @@ void HostSession::Dispatch(const Message& command) noexcept
             m.SetString("last_status", status);
         }
         Emit(m);
+        return;
+    }
+    if (type == "ScriptDebug")
+    {
+        uint64 extension = 0;
+        std::string payload;
+        if (State_ != PlayState::Running || !command.GetUint("extension", extension) || extension != 1 ||
+            !command.GetString("payload", payload) || payload.empty() || payload.size() > 4096 ||
+            !protocol::ValidUtf8(payload) ||
+            !game_api::HasCapability(Active_.Metadata().Capabilities, game_api::Capability::ScriptDebug))
+        {
+            EmitCommandResult(requestId,
+                              CommandStatus::InvalidRequest,
+                              "script-debug capability/extension/payload unavailable");
+            return;
+        }
+        ludus::foundation::uint8 output[4096] = {};
+        usize written = 0;
+        uint32 paused = ScriptPaused_ ? 1 : 0;
+        const auto status = Active_.Table().ProcessScriptDebug(
+            Instance_,
+            {reinterpret_cast<const ludus::foundation::uint8*>(payload.data()), payload.size()},
+            {output, sizeof(output)},
+            &written,
+            &paused);
+        if (status != Status::Ok || written > sizeof(output) || paused > 1 ||
+            !protocol::ValidUtf8({reinterpret_cast<const char*>(output), written}))
+        {
+            EmitCommandResult(requestId, CommandStatus::InvalidRequest, "script-debug request rejected");
+            return;
+        }
+        ScriptPaused_ = paused != 0;
+        EmitCommandResult(requestId, CommandStatus::Ok, {reinterpret_cast<const char*>(output), written});
+        return;
+    }
+    if (ScriptPaused_)
+    {
+        EmitCommandResult(requestId, CommandStatus::Busy, "partial script tick; use script-debug resume or Stop");
         return;
     }
     if (type == protocol::CommandKindName(CommandKind::ReloadAsset))
@@ -851,6 +905,10 @@ void HostSession::Dispatch(const Message& command) noexcept
 
 CommandStatus HostSession::ReloadTo(std::string_view newModulePath, uint64 newGeneration) noexcept
 {
+    if (ScriptPaused_)
+    {
+        return CommandStatus::Busy;
+    }
     if (Instance_ == nullptr || !Active_.IsLoaded() || (State_ != PlayState::Running && State_ != PlayState::Paused) ||
         newGeneration <= ActiveGeneration_)
     {
@@ -1180,6 +1238,10 @@ RunResult RunStaticEntry(const HostConfig& config, StaticEntryFn entry) noexcept
 
 usize HostSession::CaptureCheckpoint(ludus::foundation::uint8* buffer, usize capacity) noexcept
 {
+    if (ScriptPaused_)
+    {
+        return 0;
+    }
     if (Instance_ == nullptr || !Active_.IsLoaded() || Active_.Table().CheckpointSize == nullptr ||
         Active_.Table().WriteCheckpoint == nullptr || buffer == nullptr)
     {

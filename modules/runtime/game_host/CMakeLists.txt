@@ -17,7 +17,7 @@ set_target_properties(ludus_runtime_game_host PROPERTIES
 # Generate the host/module ABI identity header from ACTUAL build inputs. The
 # string both host and module stamp and the host compares exactly before Create.
 set(LUDUS_GAME_ABI_MAJOR 1)
-set(LUDUS_GAME_ABI_MINOR 0)
+set(LUDUS_GAME_ABI_MINOR 1)
 if(NOT DEFINED LUDUS_TARGET_TRIPLE OR LUDUS_TARGET_TRIPLE STREQUAL "")
     set(LUDUS_TARGET_TRIPLE "${CMAKE_CXX_COMPILER_TARGET}")
 endif()

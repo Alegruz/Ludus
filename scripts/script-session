@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Cook and validate the opt-in S2 dependency/debug/replacement session."""
+import argparse
+import json
+from pathlib import Path
+import runpy
+import shlex
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parent.parent
+WORK = ROOT / "out/script-session"
+S1 = runpy.run_path(str(ROOT / "scripts/script-interaction"), run_name="s1_tool")
+require, sha, run, host_tool = (S1[key] for key in ("require", "sha", "run", "host_tool"))
+
+
+def inputs():
+    files = [ROOT / "scripts/script-session", ROOT / "tools/script-cook/session.py",
+             ROOT / "config/luau_toolchain.json"]
+    files += sorted((ROOT / "tools/script-session/fixtures").iterdir())
+    return {str(p.relative_to(ROOT)): sha(p.read_bytes()) for p in files if p.is_file()}
+
+
+def cook():
+    S1["verify"]()
+    sys.path.insert(0, str(ROOT / "scripts/python"))
+    from formatting import format_source
+    generator = runpy.run_path(str(ROOT / "tools/script-cook/session.py"), run_name="s2_cooker")
+    WORK.mkdir(parents=True, exist_ok=True)
+    cache = None
+    previous_output = WORK / "cooked"
+    if (previous_output / "evidence.json").is_file():
+        record = json.loads((previous_output / "evidence.json").read_text())
+        actual = {str(p.relative_to(previous_output)): sha(p.read_bytes()) for p in previous_output.rglob("*")
+                  if p.is_file() and p.name != "evidence.json"}
+        require(record["outputs"] == actual, "Modified S2 cache; remove cooked output before cooking")
+        cache = previous_output
+    with tempfile.TemporaryDirectory(dir=WORK) as temporary:
+        output = Path(temporary)
+        generator["cook"](ROOT / "tools/script-session/fixtures/catalog.json", output,
+            S1["COMPILER"], S1["ANALYZER"], sha((ROOT / "config/luau_toolchain.json").read_bytes()),
+            (S1["WORK"] / "cooked/contract.d.luau").read_text(),
+            sha((S1["MANIFEST"]).read_bytes()), json.loads((S1["WORK"] / "host.json").read_text()), cache)
+        header = output / "packages.h"
+        header.write_text(format_source(header.read_text(), header, "clang-format-18"))
+        record = {"inputs": inputs(), "host": json.loads((S1["WORK"] / "host.json").read_text()),
+                  "outputs": {str(p.relative_to(output)): sha(p.read_bytes()) for p in output.rglob("*") if p.is_file()}}
+        (output / "evidence.json").write_text(json.dumps(record, indent=2) + "\n")
+        import shutil
+        previous = WORK / "previous"
+        if previous.exists(): shutil.rmtree(previous)
+        if (WORK / "cooked").exists(): (WORK / "cooked").rename(previous)
+        output.rename(WORK / "cooked")
+        if previous.exists(): shutil.rmtree(previous)
+
+
+def verify():
+    S1["verify"]()
+    output = WORK / "cooked"
+    record = json.loads((output / "evidence.json").read_text())
+    require(record["inputs"] == inputs(), "Stale S2 catalog/cooker; cook again")
+    require(record["host"] == json.loads((S1["WORK"] / "host.json").read_text()), "Stale S2 paired tools")
+    require(record["outputs"] == {str(p.relative_to(output)): sha(p.read_bytes()) for p in output.rglob("*")
+            if p.is_file() and p.name != "evidence.json"}, "Modified S2 package/maps/bytecode")
+
+
+def check(preset, fix):
+    S1["check"](preset, fix)
+    sys.path.insert(0, str(ROOT / "scripts/python"))
+    from formatting import format_source
+    for source in sorted((ROOT / "tools/script-session").glob("*")):
+        if source.suffix not in (".cpp", ".h"): continue
+        text = source.read_text()
+        formatted = format_source(text, source, "clang-format-18")
+        if fix: source.write_text(formatted)
+        else: require(text == formatted, f"Format {source} using script-session check --fix")
+    if fix: return
+    entries = json.loads((ROOT / "out/build" / preset / "compile_commands.json").read_text())
+    for entry in entries:
+        if "/tools/script-session/" not in entry["file"]: continue
+        if preset.startswith("web-"):
+            from web_build import analysis_commands
+            command = analysis_commands(ROOT, [entry], "clang-tidy-18",
+                ROOT / "out/host-tools/emsdk/upstream/emscripten/cache/sysroot")[0]
+            run([flag for flag in command if flag != "-sSUPPORT_LONGJMP=wasm"])
+        else:
+            flags = shlex.split(entry["command"])[1:]
+            clean, index = [], 0
+            while index < len(flags):
+                flag = flags[index]
+                if flag == "-o": index += 2; continue
+                if flag not in ("-c", entry["file"]) and not flag.startswith("@"): clean.append(flag)
+                index += 1
+            run(["clang-tidy-18", entry["file"], "--quiet", "--warnings-as-errors=*", "--", *clean])
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("bootstrap", "cook", "verify", "run", "check"))
+    parser.add_argument("--preset", default="linux-clang-development")
+    parser.add_argument("--fix", action="store_true")
+    args = parser.parse_args()
+    if args.action == "bootstrap": S1["bootstrap"](); S1["cook"]()
+    elif args.action == "cook": cook()
+    elif args.action == "verify": verify()
+    elif args.action == "check": check(args.preset, args.fix)
+    else:
+        verify()
+        options = ["-DLUDUS_BUILD_SCRIPT_SESSION=ON", "-DLUDUS_WARNINGS_AS_ERRORS=ON", "-DLUDUS_COMPILED_LOG_LEVEL=2"]
+        if args.preset.startswith("web-"): options += ["-DLUDUS_BUILD_SMOKE_APP=OFF", "-DLUDUS_BUILD_WEB_PROBES=OFF"]
+        run([host_tool("cmake"), "--preset", args.preset, *options])
+        run([host_tool("cmake"), "--build", "--preset", args.preset, "--target", "ludus_script_session", "-j", "2"])
+        run([host_tool("ctest"), "--preset", args.preset, "-R", "^ludus_script_session", "--no-tests=error", "--output-on-failure"])
+
+
+if __name__ == "__main__":
+    try: main()
+    except (OSError, ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as error:
+        print(f"S2 session failed: {error}", file=sys.stderr)
+        sys.exit(1)

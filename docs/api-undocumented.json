@@ -3451,7 +3451,6 @@
   "variable ludus::runtime::game_api::RenderParams::Uniform2",
   "variable ludus::runtime::game_api::RenderParams::Uniform3",
   "variable ludus::runtime::game_api::kAbiMajor",
-  "variable ludus::runtime::game_api::kAbiMinor",
   "variable ludus::runtime::game_api::kFrameClearArtifactBytes",
   "variable ludus::runtime::game_api::kFrameClearAssetId",
   "variable ludus::runtime::game_api::kIdentityMax",

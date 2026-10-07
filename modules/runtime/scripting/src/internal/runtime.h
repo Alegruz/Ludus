@@ -1,7 +1,10 @@
 #pragma once
 #include <ludus/foundation/base/core.h>
 
+#include "internal/debug.h"
+
 struct lua_State;
+struct lua_Debug;
 
 namespace ludus::runtime::scripting
 {
@@ -18,7 +21,8 @@ enum class Status : uint8
     ScriptFault,
     NativeRejected,
     AllocationFailure,
-    Interrupted
+    Interrupted,
+    Paused
 };
 struct Identity
 {
@@ -63,6 +67,7 @@ struct CallContext
     uint32 SafepointLimit = 100000;
     uint32 Operation = 0;
     uint32 NativeStatus = 0;
+    void* DebugOwner = nullptr;
 };
 using Setup = int32 (*)(lua_State*) noexcept;
 [[nodiscard]] CallContext& GetCallContext(lua_State* state) noexcept;
@@ -80,9 +85,31 @@ public:
     // program; immutable package replacement belongs to S2. Installer pushes no
     // return values. Program must return one non-yielding handler function.
     [[nodiscard]] Status Load(const uint8* bytecode, usize bytes, const char* source, Setup installer) noexcept;
+    // Dependency-first catalog, at most eight entries. Input/code/source storage
+    // is immutable and borrowed until Close. Initializers have no active services.
+    [[nodiscard]] Status LoadPrograms(const Program* programs, usize count, Setup installer) noexcept;
     // Arguments pushes config/state/event/API. All effects live in User's POD
     // candidate. Fault destroys this VM and requires an explicit new Load.
     [[nodiscard]] Status Invoke(Identity identity, void* user, Setup arguments, Diagnostic& diagnostic) noexcept;
+    // A paused invocation retains its borrowed POD candidate until completion or
+    // Close. No other invocation/load may enter; the owner pumps its event loop.
+    [[nodiscard]] Status Resume(ResumeMode mode, Diagnostic& diagnostic) noexcept;
+    [[nodiscard]] int32 Breakpoint(BreakpointSpec point) noexcept;
+    [[nodiscard]] bool IsPaused() const noexcept
+    {
+        return mPaused;
+    }
+    [[nodiscard]] const DebugSnapshot& Inspect() const noexcept
+    {
+        return mSnapshot;
+    }
+    void EnableDebugger(bool enabled) noexcept
+    {
+        if (!mEntered && !mPaused)
+        {
+            mDebugEnabled = enabled;
+        }
+    }
     void Close() noexcept;
     [[nodiscard]] const Memory& GetMemory() const noexcept
     {
@@ -105,19 +132,40 @@ public:
 private:
     struct Execution
     {
-        const uint8* Bytecode = nullptr;
-        usize Bytes = 0;
-        const char* Source = nullptr;
         Setup Installer = nullptr;
         Setup Arguments = nullptr;
-        int32 Handler = -1;
     };
     static int32 Initialize(lua_State* state) noexcept;
     static int32 Execute(lua_State* state) noexcept;
+    static int32 PrepareThread(lua_State* state) noexcept;
+    static int32 SetBreakpoint(lua_State* state) noexcept;
+    static int32 Import(lua_State* state) noexcept;
+    static void OnBreak(lua_State* state, lua_Debug* debug) noexcept;
+    static void OnStep(lua_State* state, lua_Debug* debug) noexcept;
+    void Capture(lua_State* state) noexcept;
+    [[nodiscard]] Status Finish(int32 status, lua_State* state, Diagnostic& diagnostic) noexcept;
     lua_State* mState = nullptr;
     Memory mMemory;
     CallContext mContext;
     Execution mExecution;
     bool mEntered = false;
+    Program mPrograms[8];
+    int32 mReferences[8] = {};
+    usize mProgramCount = 0;
+    usize mLoading = 0;
+    usize mSelected = 0;
+    lua_State* mThread = nullptr;
+    int32 mThreadRef = -1;
+    bool mDebugEnabled = false;
+    bool mPaused = false;
+    bool mSkipBreak = false;
+    Identity mIdentity;
+    DebugSnapshot mSnapshot;
+    ResumeMode mMode = ResumeMode::Continue;
+    int32 mStepDepth = 0;
+    int32 mStepLine = 0;
+    char mStepSource[96] = {};
+    int32 mBreakpointLine = 0;
+    bool mBreakpointEnabled = false;
 };
 } // namespace ludus::runtime::scripting

@@ -226,6 +226,11 @@ jobs:
           ./scripts/script-interaction cook
           ./scripts/script-interaction run --preset linux-clang-development
           ./scripts/script-interaction check --preset linux-clang-development
+      - name: Validate S2 debug, dependency cook and native VM replacement
+        run: |
+          ./scripts/script-session cook
+          ./scripts/script-session run --preset linux-clang-development
+          ./scripts/script-session check --preset linux-clang-development
       - name: Test Development
         run: out/host-tools/venv/bin/ctest --preset linux-clang-development --no-tests=error
       - name: Measure bounded filesystem reads and native syscall overhead
@@ -323,6 +328,10 @@ jobs:
           ./scripts/script-interaction bootstrap
           ./scripts/script-interaction cook
           ./scripts/script-interaction run --preset linux-clang-asan-ubsan
+      - name: Validate S2 staging, paused invocation and module retirement with sanitizers
+        run: |
+          ./scripts/script-session cook
+          ./scripts/script-session run --preset linux-clang-asan-ubsan
       - name: Test with sanitizers
         env:
           LUDUS_RELOAD_METRICS: ${{ runner.temp }}/live-reload-asan-ubsan.jsonl
