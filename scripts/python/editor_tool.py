@@ -1175,6 +1175,19 @@ class Operation:
 
     def _execute_locked(self, descriptor: editor_project.Descriptor, plan: Plan) -> OperationResult:
         """Run the operation while holding the per-build-tree lock."""
+        if self._operation == "cook_scripts":
+            from ludus_tools.behavior_workspace import arguments
+            try:
+                sdk = plan.resolution.prefix if plan.resolution is not None else self._context.tooling_root/"out/install"/descriptor.preset
+                argv = arguments(self._project_path.parent, plan.build_dir, sdk)
+            except (ValueError, OSError) as error:
+                raise _StageFailed("building", "InvalidProject", None, str(error)) from error
+            self._run_stage("building", [sys.executable, str(sdk/"share/Ludus/behavior/behavior_cook.py"), *argv],
+                            plan.source_dir, plan.env, "BuildFailed", timeout=60)
+            if plan.resolution is not None:
+                from ludus_tools.resolve import assert_stamp_unchanged
+                assert_stamp_unchanged(plan.build_dir, plan.resolution)
+            return OperationResult("success", "building", "Ok", "Scripts cooked; build/reload to activate this candidate")
         # Named codemodel query before configure; the reply is read after a
         # successful configure.
         self._context.cmake_targets.query_codemodel(plan.build_dir, FILE_API_CLIENT)
@@ -1335,7 +1348,7 @@ def _validate_request(message: dict) -> tuple[str, str, Path, str]:
     except ValueError as exc:
         raise ProtocolError("request job is not hex") from exc
     operation = message.get("operation")
-    if operation not in ("configure", "build", "build_run", "build_debug", "build_generation", "inspect_setup", "release_init", "package", "project_check", "project_setup", "project_create"):
+    if operation not in ("configure", "build", "build_run", "build_debug", "build_generation", "cook_scripts", "inspect_setup", "release_init", "package", "project_check", "project_setup", "project_create"):
         raise ProtocolError("unknown operation")
     project = message.get("project")
     if not isinstance(project, str) or not os.path.isabs(project):

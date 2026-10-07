@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "host_target": "scripted_game_host",
+  "module_target": "scripted_game_module",
+  "watch_roots": [
+    "src",
+    "behaviors"
+  ]
+}

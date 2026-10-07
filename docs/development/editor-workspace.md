@@ -472,3 +472,12 @@ stays unreaped until descendant cleanup is confirmed, preserving the existing
 ownership/Stop contract; missing or truncated process information yields
 **CleanupUnknown**, never successful cleanup. Settings in tests are isolated
 using the same absolute `XDG_CONFIG_HOME` override as local development.
+
+## Script assets and behavior debugging
+
+The Scripts tab reads project-owned text and bounded structured-sequence assets
+from `ludus.scripts.json`. Save, Cook and Build/Reload are explicit operations.
+Inspect, source/node breakpoints and step controls use the existing out-of-process
+GameHost channel; partial script ticks block native reload. See the
+[S5 workflow and acceptance](../architecture/behavior-s5.md) for the SDK-only sample,
+draft conflict handling, source-map identity checks and supported limits.

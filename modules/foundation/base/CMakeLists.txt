@@ -49,6 +49,7 @@ target_sources(
     PRIVATE
         src/version.cpp
         src/types.cpp
+        src/parse_number.cpp
         src/assert.cpp
         src/diagnostic_format.cpp
         src/internal/diagnostic_finish.hpp
@@ -74,6 +75,7 @@ target_sources(
             include/ludus/foundation/base/assert_format.hpp
             include/ludus/foundation/base/diagnostic_output.hpp
             include/ludus/foundation/base/types.h
+            include/ludus/foundation/base/parse_number.hpp
             include/ludus/foundation/base/checked_integer.hpp
             include/ludus/foundation/base/byte_order.hpp
             include/ludus/foundation/base/version.hpp
@@ -117,7 +119,7 @@ if(LUDUS_BUILD_TESTS)
     add_executable(ludus_foundation_base_tests)
     target_sources(ludus_foundation_base_tests PRIVATE
         tests/version_tests.cpp tests/assert_tests.cpp tests/assert_format_tests.cpp
-        tests/checked_integer_tests.cpp tests/byte_order_tests.cpp tests/control_codec_tests.cpp)
+        tests/parse_number_tests.cpp tests/checked_integer_tests.cpp tests/byte_order_tests.cpp tests/control_codec_tests.cpp)
     target_include_directories(ludus_foundation_base_tests PRIVATE src)
     target_link_libraries(
         ludus_foundation_base_tests

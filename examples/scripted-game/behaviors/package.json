@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "programs": [
+    {
+      "asset": "0000000000000100",
+      "revision": 1,
+      "graph": "encounter.json",
+      "entrypoint": true,
+      "imports": []
+    },
+    {
+      "asset": "0000000000000101",
+      "revision": 1,
+      "source": "encounter.luau",
+      "entrypoint": true,
+      "imports": []
+    }
+  ]
+}

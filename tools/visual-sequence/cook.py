@@ -32,7 +32,7 @@ def compile_source(source, maps, graph, semantic, revision, cache):
     definitions = (S1['WORK'] / 'cooked/contract.d.luau').read_text()
     pin = sha((ROOT / 'config/luau_toolchain.json').read_bytes())
     contract = sha(S1['MANIFEST'].read_bytes())
-    key = sha(json.dumps({'semantic': semantic, 'generator': sha(Path(__file__).with_name('model.py').read_bytes()),
+    key = sha(json.dumps({'semantic': semantic, 'generator': sha((ROOT/'scripts/python/ludus_tools/behavior_graph.py').read_bytes()),
                          'cook': sha(Path(__file__).read_bytes()), 'tools': json.loads((S1['WORK'] / 'host.json').read_text()),
                          'contract': contract, 'definitions': sha(definitions.encode()), 'pin': pin, 'profile': 'interpreter-o1-g2'},
                         sort_keys=True, separators=(',', ':')).encode())

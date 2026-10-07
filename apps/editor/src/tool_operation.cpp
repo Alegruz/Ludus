@@ -26,6 +26,8 @@ const char* ToolOperationName(ToolOperation op) noexcept
             return "package";
         case ToolOperation::BuildGeneration:
             return "build_generation";
+        case ToolOperation::CookScripts:
+            return "cook_scripts";
         case ToolOperation::InspectSetup:
             return "inspect_setup";
     }

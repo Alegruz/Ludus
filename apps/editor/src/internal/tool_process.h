@@ -41,6 +41,7 @@ enum class ToolOperation : foundation::uint8
     ReleaseInit,
     Package,
     BuildGeneration,
+    CookScripts,
     InspectSetup,
 };
 

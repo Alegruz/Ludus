@@ -256,6 +256,8 @@ Status Convert(scripting::Status code) noexcept
             return Status::AllocationFailure;
         case scripting::Status::Interrupted:
             return Status::Interrupted;
+        case scripting::Status::Paused:
+            return Status::Paused;
         default:
             return Status::ScriptFault;
     }
@@ -466,6 +468,15 @@ struct LuauProvider::Impl
     scripting::Program Programs[8];
     char Names[8][32]{};
     bool Busy = false;
+    Invocation DebugInput;
+    Transaction* Pending = nullptr;
+    Context DebugContext;
+    uint64 DebugStop = 0;
+    ~Impl() noexcept
+    {
+        Vm.Close(); // Retire all callbacks before releasing their candidate/input storage.
+        delete Pending;
+    }
     static constexpr int32 ENTITY_TAG = 1;
     static constexpr int32 STATE_TAG = 2;
 
@@ -753,6 +764,10 @@ Status LuauProvider::Load(const Contract& contract,
     {
         return Status::Reentrant;
     }
+    if (mImpl != nullptr && mImpl->Pending != nullptr)
+    {
+        return Status::Paused;
+    }
     if (!ValidContract(contract))
     {
         return Status::InvalidContract;
@@ -797,6 +812,12 @@ LuauProvider::Invoke(const Invocation& input, Services services, Outcome& output
         diagnostic = { .Code = Status::Reentrant };
         return Status::Reentrant;
     }
+    if (mImpl->Pending != nullptr)
+    {
+        diagnostic = { .Code = Status::Paused };
+        return Status::Paused;
+    }
+    mImpl->Vm.EnableDebugger(false);
     mImpl->Busy = true;
     if (!ValidInput(mImpl->Schema, input, services))
     {
@@ -841,6 +862,157 @@ LuauProvider::Invoke(const Invocation& input, Services services, Outcome& output
         output = candidate.mCandidate;
     }
     return diagnostic.Code;
+}
+Status LuauProvider::FinishDebug(Diagnostic& diagnostic, Outcome& output) noexcept
+{
+    mImpl->Busy = false;
+    if (diagnostic.Code == Status::Paused)
+    {
+        if (mNextStop == ~uint64{0})
+        {
+            mImpl->Vm.Close();
+            diagnostic.Code = Status::Interrupted;
+        }
+        else
+        {
+            mImpl->DebugStop = ++mNextStop;
+        }
+    }
+    if (diagnostic.Code == Status::Completed)
+    {
+        output = mImpl->Pending->mCandidate;
+    }
+    if (diagnostic.Code != Status::Paused)
+    {
+        delete mImpl->Pending;
+        mImpl->Pending = nullptr;
+        mImpl->DebugContext = {};
+    }
+    return diagnostic.Code;
+}
+Status
+LuauProvider::BeginDebug(const Invocation& input, Services services, Outcome& output, Diagnostic& diagnostic) noexcept
+{
+    if (mImpl == nullptr || mImpl->Busy || mImpl->Pending != nullptr)
+    {
+        diagnostic =
+        {
+            .Code = mImpl == nullptr ? Status::NotReady : (mImpl->Busy ? Status::Reentrant : Status::Paused),
+        };
+        return diagnostic.Code;
+    }
+    mImpl->Busy = true;
+    bool found = false;
+    for (const auto& program : mImpl->Programs)
+    {
+        found |= program.Entrypoint && program.Asset == input.Asset && program.Revision == input.Revision;
+    }
+    if (!found || !ValidInput(mImpl->Schema, input, services))
+    {
+        mImpl->Busy = false;
+        diagnostic = { .Code = Status::InvalidInput };
+        return diagnostic.Code;
+    }
+    mImpl->DebugInput = input;
+    mImpl->Pending = new (std::nothrow) Transaction(mImpl->Schema, mImpl->DebugInput, services);
+    if (mImpl->Pending == nullptr)
+    {
+        mImpl->Busy = false;
+        diagnostic = { .Code = Status::AllocationFailure };
+        return diagnostic.Code;
+    }
+    mImpl->DebugContext = { .Owner = mImpl, .Candidate = mImpl->Pending };
+    mImpl->Vm.EnableDebugger(true);
+    scripting::Diagnostic detail;
+    const auto status = mImpl->Vm.Invoke(
+        {
+            .Asset = input.Asset,
+            .Revision = input.Revision,
+            .Execution = input.Execution,
+            .Instance = input.Instance,
+            .World = input.World,
+            .Session = input.Session,
+            .Tick = input.Tick,
+            .Phase = static_cast<uint8>(input.Phase),
+        },
+        &mImpl->DebugContext,
+        Impl::Arguments,
+        detail);
+    diagnostic = { .Code = Convert(status), .Operation = detail.Operation, .NativeStatus = detail.NativeStatus };
+    std::memcpy(diagnostic.Message, detail.Message, sizeof(diagnostic.Message));
+    return FinishDebug(diagnostic, output);
+}
+Status LuauProvider::ResumeDebug(uint64 expected_stop, DebugMode mode, Outcome& output, Diagnostic& diagnostic) noexcept
+{
+    if (mImpl == nullptr || mImpl->Busy)
+    {
+        diagnostic = { .Code = mImpl == nullptr ? Status::NotReady : Status::Reentrant };
+        return diagnostic.Code;
+    }
+    if (mImpl->Pending == nullptr || !mImpl->Vm.IsPaused() || expected_stop == 0 || expected_stop != mImpl->DebugStop ||
+        static_cast<uint8>(mode) > static_cast<uint8>(DebugMode::Out))
+    {
+        diagnostic = { .Code = Status::InvalidInput };
+        return diagnostic.Code;
+    }
+    mImpl->Busy = true;
+    scripting::Diagnostic detail;
+    const auto status = mImpl->Vm.Resume(static_cast<scripting::ResumeMode>(mode), detail);
+    diagnostic = { .Code = Convert(status), .Operation = detail.Operation, .NativeStatus = detail.NativeStatus };
+    std::memcpy(diagnostic.Message, detail.Message, sizeof(diagnostic.Message));
+    return FinishDebug(diagnostic, output);
+}
+int32 LuauProvider::Breakpoint(uint64 asset, int32 compiled_line, bool enabled) noexcept
+{
+    if (mImpl == nullptr || mImpl->Busy || compiled_line <= 0 || compiled_line > 65536)
+    {
+        return -1;
+    }
+    mImpl->Busy = true;
+    mImpl->Vm.EnableDebugger(true);
+    const auto result = mImpl->Vm.Breakpoint({ .Asset = asset, .Line = compiled_line, .Enabled = enabled });
+    if (result < 0 && mImpl->Vm.GetMemory().Live == 0)
+    {
+        delete mImpl->Pending;
+        mImpl->Pending = nullptr;
+        mImpl->DebugStop = 0;
+    }
+    mImpl->Busy = false;
+    return result;
+}
+bool LuauProvider::Inspect(DebugSnapshot& output) const noexcept
+{
+    if (mImpl == nullptr || mImpl->Busy)
+    {
+        return false;
+    }
+    const auto& source = mImpl->Vm.Inspect();
+    DebugSnapshot candidate;
+    candidate.Paused = mImpl->Vm.IsPaused();
+    if (candidate.Paused)
+    {
+        candidate.Stop = mImpl->DebugStop;
+        candidate.FrameCount = source.FrameCount;
+        candidate.LocalCount = source.LocalCount;
+        candidate.Truncated = source.Truncated;
+        for (uint32 i = 0; i < source.FrameCount; ++i)
+        {
+            std::memcpy(candidate.Frames[i].Source, source.Frames[i].Source, sizeof(candidate.Frames[i].Source));
+            std::memcpy(candidate.Frames[i].Function, source.Frames[i].Function, sizeof(candidate.Frames[i].Function));
+            candidate.Frames[i].Line = source.Frames[i].Line;
+        }
+        for (uint32 i = 0; i < source.LocalCount; ++i)
+        {
+            std::memcpy(candidate.Locals[i].Name, source.Locals[i].Name, sizeof(candidate.Locals[i].Name));
+            candidate.Locals[i].Kind = static_cast<uint8>(source.Locals[i].Kind);
+            candidate.Locals[i].Number = source.Locals[i].Number;
+            candidate.Locals[i].Boolean = source.Locals[i].Boolean;
+            std::memcpy(candidate.Locals[i].Bytes, source.Locals[i].Bytes, sizeof(candidate.Locals[i].Bytes));
+            candidate.Locals[i].Truncated = source.Locals[i].Truncated;
+        }
+    }
+    output = candidate;
+    return true;
 }
 Status LuauProvider::Close() noexcept
 {

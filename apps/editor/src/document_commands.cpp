@@ -2,6 +2,7 @@
 
 #include "internal/audio_workspace.h"
 #include "internal/configuration_workspace.h"
+#include "internal/script_workspace.h"
 
 #include <QAbstractItemDelegate>
 #include <QAction>
@@ -41,14 +42,17 @@ void MainWindow::RenderDocumentActions()
     const bool project = area == ProjectSettings_;
     const bool audio = area != nullptr && area->isAncestorOf(Audio_);
     const bool configuration = area == Configuration_;
-    SaveAction_->setText(project ? QStringLiteral("&Save Project Settings")
-                         : audio ? QStringLiteral("&Save Audio")
-                                 : QStringLiteral("&Save Preferences"));
+    const bool scripts = area == Scripts_;
+    SaveAction_->setText(project   ? QStringLiteral("&Save Project Settings")
+                         : audio   ? QStringLiteral("&Save Audio")
+                         : scripts ? QStringLiteral("&Save Script Asset")
+                                   : QStringLiteral("&Save Preferences"));
     // Clean project saves are available too: the focused argument delegate may
     // contain pending text that has not yet made the document dirty.
-    SaveAction_->setEnabled(project ? Controller_->Caps().CanEdit
-                            : audio ? Audio_->CanSave()
-                                    : configuration && Configuration_->Preview() != nullptr);
+    SaveAction_->setEnabled(project   ? Controller_->Caps().CanEdit
+                            : audio   ? Audio_->CanSave()
+                            : scripts ? Scripts_->CanSave()
+                                      : configuration && Configuration_->Preview() != nullptr);
 #if defined(Q_OS_WASM)
     if (project || configuration)
     {
@@ -72,8 +76,8 @@ void MainWindow::RenderDocumentActions()
     else
     {
         const bool inProject = project && (focus == nullptr || ProjectSettings_->isAncestorOf(focus));
-        UndoAction_->setEnabled(inProject && Controller_->CanUndoProject());
-        RedoAction_->setEnabled(inProject && Controller_->CanRedoProject());
+        UndoAction_->setEnabled(scripts ? Scripts_->CanUndo() : inProject && Controller_->CanUndoProject());
+        RedoAction_->setEnabled(scripts ? Scripts_->CanRedo() : inProject && Controller_->CanRedoProject());
     }
 }
 
@@ -91,6 +95,10 @@ void MainWindow::OnUndoRequested()
     else if (auto* plain = qobject_cast<QPlainTextEdit*>(QApplication::focusWidget()))
     {
         plain->undo();
+    }
+    else if (WorkTabs_->currentWidget() == Scripts_)
+    {
+        Scripts_->Undo();
     }
     else if (WorkTabs_->currentWidget() == ProjectSettings_ && UndoAction_->isEnabled())
     {
@@ -113,6 +121,10 @@ void MainWindow::OnRedoRequested()
     else if (auto* plain = qobject_cast<QPlainTextEdit*>(QApplication::focusWidget()))
     {
         plain->redo();
+    }
+    else if (WorkTabs_->currentWidget() == Scripts_)
+    {
+        Scripts_->Redo();
     }
     else if (WorkTabs_->currentWidget() == ProjectSettings_ && RedoAction_->isEnabled())
     {

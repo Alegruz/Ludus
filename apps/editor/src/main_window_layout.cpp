@@ -1,6 +1,7 @@
 #include "internal/audio_workspace.h"
 #include "internal/configuration_workspace.h"
 #include "internal/main_window.h"
+#include "internal/script_workspace.h"
 
 #include <ludus/foundation/base/types.h>
 #include <ludus/foundation/logging/category.hpp>
@@ -113,6 +114,8 @@ void MainWindow::BuildUi()
     Audio_ = new AudioWorkspace(audioScroll);
     audioScroll->setWidget(Audio_);
     WorkTabs_->addTab(audioScroll, QStringLiteral("&Audio"));
+    Scripts_ = new ScriptWorkspace(Controller_, WorkTabs_);
+    WorkTabs_->addTab(Scripts_, QStringLiteral("&Scripts"));
     Configuration_ = new ConfigurationWorkspace(WorkTabs_);
     WorkTabs_->addTab(Configuration_, QStringLiteral("&Configuration"));
 
