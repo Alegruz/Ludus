@@ -62,7 +62,8 @@ TEST_CASE("Cocoa editor creates checks repairs builds runs stops and reopens a m
     creation.Sdk = sdk;
     controller.CreateProject(creation);
     REQUIRE(WaitMac([&]() {
-        return controller.State().Document == DocumentState::ProjectLoaded && controller.Caps().CanCloseImmediately;
+        return controller.State().Document == DocumentState::ProjectLoaded &&
+               controller.State().Result.Kind != Outcome::None && controller.Caps().CanCloseImmediately;
     }));
     INFO(controller.JobDetails().toStdString());
     REQUIRE(controller.State().Result.Kind == Outcome::Success);
