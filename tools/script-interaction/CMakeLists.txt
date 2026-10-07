@@ -1,0 +1,43 @@
+find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/script-interaction" verify
+    RESULT_VARIABLE verified)
+if(NOT verified EQUAL 0)
+    message(FATAL_ERROR "Prepare S1 using scripts/script-interaction bootstrap, then cook")
+endif()
+add_custom_target(ludus_script_cook_verify
+    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/script-interaction" verify)
+set(cooked "${PROJECT_SOURCE_DIR}/out/script-interaction/cooked")
+add_library(ludus_script_fixture STATIC shared.cpp acceptance.cpp)
+target_include_directories(ludus_script_fixture PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "${cooked}")
+target_link_libraries(ludus_script_fixture PUBLIC Ludus::GameplayWorld PRIVATE Ludus::FoundationLogging)
+ludus_apply_project_defaults(ludus_script_fixture)
+add_dependencies(ludus_script_fixture ludus_script_cook_verify)
+add_executable(ludus_script_native native_main.cpp)
+target_link_libraries(ludus_script_native PRIVATE ludus_script_fixture Ludus::FoundationLogging)
+ludus_apply_project_defaults(ludus_script_native)
+add_executable(ludus_script_luau luau_main.cpp "${cooked}/bindings.cpp")
+target_include_directories(ludus_script_luau PRIVATE "${PROJECT_SOURCE_DIR}/modules/runtime/scripting/src")
+target_link_libraries(ludus_script_luau PRIVATE ludus_script_fixture ludus_runtime_scripting Luau.VM
+    Ludus::FoundationLogging Ludus::FoundationMath)
+ludus_apply_project_defaults(ludus_script_luau)
+add_dependencies(ludus_script_luau ludus_script_cook_verify)
+foreach(license LICENSE.txt lua_LICENSE.txt)
+    configure_file("${PROJECT_SOURCE_DIR}/out/luau-probe/source/${license}" "${license}" COPYONLY)
+endforeach()
+if(EMSCRIPTEN)
+    foreach(target ludus_script_native ludus_script_luau)
+        target_compile_options(${target} PRIVATE -g0)
+        target_link_options(${target} PRIVATE -g0 -sEXIT_RUNTIME=1 -sENVIRONMENT=web,node
+            -sALLOW_MEMORY_GROWTH=1 -sASSERTIONS=1)
+    endforeach()
+    target_compile_options(ludus_script_luau PRIVATE -sSUPPORT_LONGJMP=wasm)
+    configure_file(shell.html index.html COPYONLY)
+endif()
+enable_testing()
+foreach(provider native luau)
+    add_test(NAME ludus_script_${provider}
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/verify.py"
+            "${CMAKE_CROSSCOMPILING_EMULATOR}" "$<TARGET_FILE:ludus_script_${provider}>"
+            "${PROJECT_BINARY_DIR}/compile_commands.json" "${provider}")
+    set_tests_properties(ludus_script_${provider} PROPERTIES TIMEOUT 120 LABELS "scripting;build-contract")
+endforeach()

@@ -194,7 +194,7 @@ def check(preset: str, fix: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("bootstrap", "cook", "verify", "run", "check"))
+    parser.add_argument("action", choices=("bootstrap", "cook", "verify", "verify-sources", "run", "check"))
     parser.add_argument("--preset", default="linux-clang-development")
     parser.add_argument("--fix", action="store_true")
     args = parser.parse_args()
@@ -204,6 +204,8 @@ def main() -> None:
         cook()
     elif args.action == "verify":
         verify()
+    elif args.action == "verify-sources":
+        verify_sources()
     elif args.action == "check":
         check(args.preset, args.fix)
     else:
