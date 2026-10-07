@@ -51,7 +51,7 @@ Installed consumers must not include private backend headers.
 logging, math and other services require their own includes. Heavy facilities
 such as formatting and filesystem implementation belong behind `.cpp`
 boundaries. These rules keep dependency direction and header parse cost testable.
-Read the [foundational header contract](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/foundational-headers.md).
+Read the [foundational header contract](../../architecture/foundational-headers.md).
 
 ## Read implementation status carefully
 
@@ -63,5 +63,5 @@ sessions, replication and prediction remain planned.
 
 When a design document describes future phases, check the corresponding module
 headers, tests and evidence before relying on the API. The
-[decision records](https://github.com/Alegruz/Ludus/tree/main/docs/decisions)
+[decision records](../../README.md#decisions)
 explain why boundaries were chosen; they are not a feature-completeness list.

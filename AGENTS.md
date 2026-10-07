@@ -103,8 +103,9 @@ engine code. Discuss such cases in the PR before adding them.
   comments for its new or changed public API in the same change, following the
   requirements below.
 - When a new feature needs setup instructions, usage examples, or an explanation
-  of its workflow or limitations, add or update the appropriate Ludus wiki or
-  guide page in the same change.
+  of its workflow or limitations, update its canonical Markdown page under
+  `docs/` in the same change. The wiki renders that file; do not write a second
+  version for publication.
 - Document new or changed public classes, structs, functions, methods, aliases,
   enum values, constants and macros beside their declarations using Doxygen
   `///` comments (or `/** ... */`). Plain `//` comments are not API descriptions.
@@ -126,6 +127,34 @@ engine code. Discuss such cases in the PR before adding them.
   removal of existing descriptions. This baseline records legacy debt; do not add
   new gaps or regenerate it to bypass checks. Remove resolved entries in the change that documents them.
   Generated HTML/XML/report files stay in ignored `out/`, never source control.
+
+### One documentation source, online and offline
+
+- `docs/` is the canonical source of authored documentation. `docs/wiki/`
+  contains task guides and navigation, not separately maintained copies of
+  engineering documents. Publish the same Markdown content and local assets
+  through MkDocs. Presentation and navigation may differ; contracts, examples,
+  status and attribution must not.
+- Edit the existing owner before adding a page. A guide and a design review may
+  serve different reader needs, but link to the owner of detailed contracts
+  instead of restating them. Never require contributors to synchronize prose
+  between a local document and a wiki page.
+- Use relative Markdown links for destinations inside `docs/` and local files
+  for essential images. Keep examples and essential instructions readable in a
+  plain text/Markdown reader without a website, plugin, network request or
+  include directive. External reference citations may remain online.
+- API comments beside public declarations are the canonical API contract;
+  Doxygen/MkDocs output is generated from them, never edited independently.
+- Keep the local index current with `python scripts/check-docs --fix-index`.
+  Run `python scripts/check-docs`, a strict MkDocs build and
+  `python scripts/check-wiki --documentation-only` for documentation changes.
+  Publication additionally checks the combined browser editor payload without
+  that flag. The checks require every
+  authored page to appear in the site and reject stale source/output manifests.
+  See `docs/development/wiki.md` for API generation and offline packaging.
+- Ship Markdown sources and the checked HTML site together for offline use.
+  Package an existing build with `python scripts/package-docs`; reading the
+  bundle must not download dependencies or regenerate documentation.
 
 ### Reference comments and attribution
 

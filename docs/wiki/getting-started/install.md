@@ -70,5 +70,5 @@ See [contributing](../contribute/index.md) for the complete review gates.
 ## Detailed references
 
 - [Onboarding flags and supported tools](https://github.com/Alegruz/Ludus/blob/main/README.md#quick-start)
-- [Build trees, presets and IDE setup](https://github.com/Alegruz/Ludus/blob/main/docs/development/building.md)
-- [Editor prerequisites and manual build](https://github.com/Alegruz/Ludus/blob/main/docs/development/editor-workspace.md)
+- [Build trees, presets and IDE setup](../../development/building.md)
+- [Editor prerequisites and manual build](../../development/editor-workspace.md)

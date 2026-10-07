@@ -57,6 +57,6 @@ A rejected candidate does not require stopping an otherwise healthy outer
 session. Do not substitute whole-scope rollback for reload validation and
 old-generation retirement.
 
-Read the [lifecycle contract and migration plan](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/module-lifecycle.md),
+Read the [lifecycle contract and migration plan](../../architecture/module-lifecycle.md),
 [private runner](https://github.com/Alegruz/Ludus/blob/main/apps/smoke/internal/lifecycle.h)
 and [composition root](https://github.com/Alegruz/Ludus/blob/main/apps/smoke/application.cpp).

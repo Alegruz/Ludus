@@ -60,4 +60,4 @@ it. A runtime heartbeat is not an instruction to save a document.
 
 See [build and debug](build-and-debug.md), [configuration](configuration.md),
 [audio](audio.md), and the
-[full editor usage guide](https://github.com/Alegruz/Ludus/blob/main/docs/development/editor-workspace.md).
+[full editor usage guide](../../development/editor-workspace.md).

@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Check the portable documentation index; optionally refresh its navigation."""
+import argparse
+from pathlib import Path
+import re
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "python"))
+from documentation import index_text, sources
+
+
+def check(root, fix=False):
+    failures = []
+    index = root / "docs/README.md"
+    expected = index_text(root)
+    if fix:
+        index.write_text(expected, encoding="utf-8")
+    elif not index.is_file() or index.read_text(encoding="utf-8") != expected:
+        failures.append("Stale docs/README.md; run python scripts/check-docs --fix-index")
+    for path in sources(root):
+        if re.search(r"\]\(https://github\.com/Alegruz/Ludus/(?:blob|tree)/main/docs/",
+                     path.read_text(encoding="utf-8")):
+            failures.append(f"{path.relative_to(root)}: use relative links to local documentation")
+    return failures
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
+    parser.add_argument("--fix-index", action="store_true")
+    args = parser.parse_args()
+    failures = check(args.root.resolve(), args.fix_index)
+    for failure in failures:
+        print(failure, file=sys.stderr)
+    if not failures:
+        print("Canonical documentation index and local documentation links passed.")
+    return bool(failures)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

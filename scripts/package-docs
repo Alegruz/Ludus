@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Package checked canonical Markdown and the existing wiki for offline reading.
+
+No build, dependency installation or network access is performed here.
+"""
+import argparse
+from html import escape
+from pathlib import Path
+import subprocess
+import sys
+import zipfile
+
+import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "python"))
+from documentation import EXCLUDED_MARKDOWN
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
+    root = args.root.resolve()
+    output = args.output or root / "out/ludus-docs-offline.zip"
+    for script in ("check-docs", "check-wiki"):
+        command = [sys.executable, str(root / "scripts" / script), "--root", str(root)]
+        if script == "check-wiki":
+            command.append("--documentation-only")
+        result = subprocess.run(command, check=False)
+        if result.returncode:
+            return result.returncode
+    output.parent.mkdir(parents=True, exist_ok=True)
+    # Use a temporary sibling so failure cannot replace a previously good bundle.
+    temporary = output.with_suffix(".zip.tmp")
+    try:
+        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("README.txt", (
+                "Ludus offline documentation\n\n"
+                "Markdown: open docs/README.md in a text editor or Markdown reader.\n"
+                "VS Code: open docs/; preview README.md. Obsidian: open docs/ as a vault.\n\n"
+                "Browser with navigation and search (no internet needed):\n"
+                "  python3 -m http.server 8000 --bind 127.0.0.1 --directory site\n"
+                "  Open http://localhost:8000/\n"
+                "Windows: use py -m http.server 8000 --bind 127.0.0.1 --directory site.\n"
+                "Run from this extracted directory. Python uses only its standard library.\n"
+                "A local server is needed for browser search; file:// is not supported.\n"
+                "External citations, repository code links and the browser editor launcher\n"
+                "may require internet. Essential authored content and images are local.\n"
+                "documentation-sources.json records source/output SHA-256 for this build.\n"))
+            for directory, destination in ((root / "docs", "docs"), (root / "out/wiki", "site")):
+                for path in sorted(directory.rglob("*")):
+                    if path.is_symlink():
+                        raise ValueError(f"Symlink cannot enter documentation bundle: {path}")
+                    if not path.is_file():
+                        continue
+                    relative = path.relative_to(directory)
+                    if any(part.startswith(".") for part in relative.parts):
+                        continue
+                    if directory.name == "docs" and (relative.as_posix() in EXCLUDED_MARKDOWN
+                            or path.name in {"Doxyfile", "api-undocumented.json", "wiki-requirements.txt"}
+                            or relative.parts[:2] == ("wiki", "editor")):
+                        continue
+                    if directory.name == "wiki" and relative.parts[0] == "editor":
+                        continue
+                    archive.write(path, f"{destination}/{relative.as_posix()}")
+            config = yaml.safe_load((root / "mkdocs.yml").read_text(encoding="utf-8"))
+            launcher = escape(config["site_url"].rstrip("/") + "/editor/index.html", quote=True)
+            archive.writestr("site/editor/index.html", (
+                '<!doctype html><html lang="en"><meta charset="utf-8">'
+                '<title>Ludus browser editor</title><h1>Ludus browser editor</h1>'
+                '<p>This bundle includes offline documentation. The browser editor is a separate application.</p>'
+                f'<p><a href="{launcher}">Open the hosted editor (internet required)</a></p>'
+                '<p><a href="../guides/browser-editor/">Read the browser editor guide offline</a></p></html>'))
+        temporary.replace(output)
+    except (OSError, ValueError, zipfile.BadZipFile) as error:
+        temporary.unlink(missing_ok=True)
+        print(f"Documentation packaging failed: {error}", file=sys.stderr)
+        return 1
+    print(f"Offline Markdown and HTML documentation: {output}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

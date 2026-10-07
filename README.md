@@ -5,7 +5,9 @@ systems, installed SDK/CLI workflows and an optional native editor.
 
 Start with [Ludus Wiki](https://alegruz.github.io/Ludus/) for task guides,
 explanations and reference reading paths. Its
-[Markdown sources](docs/wiki/index.md) are also available in this checkout.
+[Markdown sources and complete documentation index](docs/README.md) are also
+available in this checkout for offline reading in any text/Markdown editor.
+The wiki renders these same files; see [offline browser reading and packaging](docs/development/wiki.md#offline-reading).
 
 ## Headless contributor quick start
 

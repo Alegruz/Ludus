@@ -22,8 +22,8 @@ live editing replaces the native gameplay module, not arbitrary engine libraries
 
 The implemented native loader is Linux x64 with a compatible Debug or Development
 SDK. Windows loading and dynamic browser Wasm replacement are separate work.
-See the [live-editing guide](https://github.com/Alegruz/Ludus/blob/main/docs/development/project-live-reload.md)
-and [ABI decision](https://github.com/Alegruz/Ludus/blob/main/docs/decisions/0012-game-host-and-live-reload.md).
+See the [live-editing guide](../../development/project-live-reload.md)
+and [ABI decision](../../decisions/0012-game-host-and-live-reload.md).
 
 ## Gameplay replacement
 
@@ -36,7 +36,7 @@ A successful prepared swap retires old instances/callbacks before unloading code
 Changing state layout needs declared migration or restart. Raw object memory is
 not preserved across code changes. Crashes and arbitrary external side effects
 cannot be rolled back by the transaction; uncertain retirement requires recovery
-or process restart. See [reload design](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/project-live-reload.md)
+or process restart. See [reload design](../../architecture/project-live-reload.md)
 alongside the implemented guide rather than treating every design phase as shipped.
 
 ## Configuration is a control operation
@@ -53,7 +53,7 @@ document, and saving preferences are separate operations.
 
 Use [configuration workflow](../guides/configuration.md) for layer precedence,
 inspection and persistence, and the
-[configuration contract](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/engine-configuration.md)
+[configuration contract](../../architecture/engine-configuration.md)
 for descriptor/context lifetime and prepared transactions.
 
 ## The editor is a client of shared policy
@@ -68,8 +68,8 @@ and current controllers exist; later scene/document editing stages in the editor
 design remain acceptance contracts. Use [current capabilities](../getting-started/status.md)
 and [editor workflow](../guides/editor.md) to determine available operations.
 
-Read the [editor ownership design](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-architecture.md)
-and [project/SDK contract](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/project-sdk-workflow.md).
+Read the [editor ownership design](../../architecture/editor-architecture.md)
+and [project/SDK contract](../../architecture/project-sdk-workflow.md).
 
 
 ## Multiplatform GUI direction
@@ -81,7 +81,7 @@ native macOS/Windows tools, the core extraction and scene integration are
 future work. Browser scene authoring must qualify text, accessibility, large
 models and canvas composition before its frontend is fixed.
 
-Read the [GUI systems design](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-gui-systems.md),
-[decision](https://github.com/Alegruz/Ludus/blob/main/docs/decisions/0023-editor-presentation-and-document-core.md)
-and [actual reference review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-gui-reference-review.md)
+Read the [GUI systems design](../../architecture/editor-gui-systems.md),
+[decision](../../decisions/0023-editor-presentation-and-document-core.md)
+and [actual reference review](../../architecture/editor-gui-reference-review.md)
 for ownership, transactions, platform gates and the book-informed refinements.
