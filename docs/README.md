@@ -50,6 +50,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 ## Guides and workflows
 
 - [Audio workflow](wiki/guides/audio.md)
+- [Benchmark scenes and system test suites](development/benchmark-scenes.md)
 - [Browser editor](wiki/guides/browser-editor.md)
 - [Browser smoke packaging and itch.io upload](development/web-packaging.md)
 - [Build Profiling](development/build-profiling.md)
