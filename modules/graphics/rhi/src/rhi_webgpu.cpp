@@ -629,6 +629,11 @@ ResourceStatus CreatePipeline(usize slot, const backend::PipelineResources& reso
     descriptor.vertex.entryPoint = { .data = gShaders[vertex].Entry, .length = WGPU_STRLEN };
     descriptor.fragment = &fragmentState;
     descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    WGPUDepthStencilState depth = WGPU_DEPTH_STENCIL_STATE_INIT;
+    depth.format = WGPUTextureFormat_Depth24Plus;
+    depth.depthWriteEnabled = WGPUOptionalBool_False;
+    depth.depthCompare = WGPUCompareFunction_Always;
+    descriptor.depthStencil = &depth;
     pipeline.Object = wgpuDeviceCreateRenderPipeline(gDevice, &descriptor);
     CheckResource(id);
     return pipeline.Object != nullptr && pipeline.Group != nullptr && pipeline.Layout != nullptr &&

@@ -50,7 +50,12 @@ if (typeof window === 'undefined' && typeof process === 'object') {
         return new Promise(resolve => setTimeout(() => resolve(failure ? new GPUValidationError('injected validation') : null), scenario === 'cancel-pipeline' && scopes === 2 ? 100 : 0));
       },
       createShaderModule(desc) {assert(desc.code.includes('@vertex') && desc.code.includes('@fragment'), 'WGSL missing'); return {kind: 'shader'};},
-      createRenderPipeline(desc) {assert(desc.vertex.module && desc.fragment.targets[0].format === 'bgra8unorm', 'pipeline descriptor'); return {kind: 'pipeline'};},
+      createRenderPipeline(desc) {
+        assert(desc.vertex.module && desc.fragment.targets[0].format === 'bgra8unorm', 'pipeline descriptor');
+        assert(desc.depthStencil.format === 'depth24plus' && desc.depthStencil.depthWriteEnabled === false &&
+               desc.depthStencil.depthCompare === 'always', 'probe depth compatibility');
+        return {kind: 'pipeline'};
+      },
       createTexture(desc) {
         assert(desc.format === 'depth24plus' && desc.size.width === canvas.width && desc.size.height === canvas.height,
                'depth attachment size/format');
