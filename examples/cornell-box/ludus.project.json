@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "name": "Cornell Box",
+  "provider": "cmake",
+  "source_dir": ".",
+  "preset": "linux-clang-development",
+  "target": "cornell_box",
+  "run": {
+    "cwd": ".",
+    "args": []
+  },
+  "engine": {
+    "version": "0.1.0",
+    "components": [
+      "FoundationBase",
+      "FoundationLogging",
+      "Platform",
+      "GraphicsRhi"
+    ],
+    "features": []
+  },
+  "template": {
+    "id": "cornell-box",
+    "version": 1
+  }
+}

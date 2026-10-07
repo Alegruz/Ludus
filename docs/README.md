@@ -98,6 +98,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Game world reference](examples/world-demo.md)
 - [Ludus smoke application](examples/smoke.md)
 - [Packaged browser CI tests](development/tools/web-browser-tests.md)
+- [Render a Cornell box with the existing Ludus SDK](examples/cornell-box.md)
 - [Shader feasibility probe](development/tools/shader-probe.md)
 - [W0 WebGPU feasibility probe](development/tools/webgpu-probe.md)
 - [W1 browser FoundationBase probe](development/tools/web-foundation-probe.md)

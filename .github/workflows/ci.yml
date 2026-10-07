@@ -80,6 +80,25 @@ jobs:
           out/host-tools/venv/bin/cmake --build out/build/content-consumer --parallel 2
           out/build/content-consumer/ludus_content_consumer
           out/host-tools/bin/clang-tidy -p out/build/content-consumer --warnings-as-errors='*' tests/sdk_consumer/content.cpp
+      - name: Build and test the independent Cornell box tutorial (Metal)
+        run: |
+          export PATH="$PWD/out/host-tools/bin:$PWD/out/host-tools/venv/bin:$PATH"
+          export LUDUS_SDK_PREFIX="$PWD/out/install/macos-clang-development;$PWD/out/conan/macos-clang-development"
+          export LUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
+          export LUDUS_OSX_SYSROOT="$PWD/out/host-tools/macos-sdk"
+          export LUDUS_LIBCXX_INCLUDE="$PWD/out/host-tools/libcxx-include"
+          cd examples/cornell-box
+          cmake --list-presets=configure
+          cmake --list-presets=build
+          cmake --list-presets=test
+          cmake --preset macos-clang-development
+          cmake --build --preset macos-clang-development
+          ctest --preset macos-clang-development
+          clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' src/main.cpp
+          cmake --preset macos-clang-development -B out/sanitized -DCORNELL_ENABLE_SANITIZERS=ON
+          cmake --build out/sanitized
+          ctest --test-dir out/sanitized --output-on-failure --no-tests=error
+          out/build/macos-clang-development/cornell_box.app/Contents/MacOS/cornell_box --frames=3
       - name: Analyze native filesystem production and test sources
         run: |
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/src/posix.cpp
@@ -323,6 +342,30 @@ jobs:
             --validator "$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             --spirv-cross "$PWD/out/shader-tools/spirv-cross/bin/spirv-cross" \
             --conan "$PWD/out/conan/linux-clang-development"
+      - name: Build and test the independent Cornell box tutorial (Vulkan)
+        run: |
+          sudo apt-get install -y -qq libvulkan1 mesa-vulkan-drivers
+          export PATH="$PWD/out/host-tools/bin:$PWD/out/host-tools/venv/bin:$PATH"
+          export LUDUS_SDK_PREFIX="$PWD/out/install/linux-clang-development"
+          export LUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
+          export LUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val"
+          cd examples/cornell-box
+          cmake --list-presets=configure
+          cmake --list-presets=build
+          cmake --list-presets=test
+          cmake --preset linux-clang-development
+          cmake --build --preset linux-clang-development
+          ctest --preset linux-clang-development
+          clang-tidy -p out/build/linux-clang-development --warnings-as-errors='*' src/main.cpp
+          PYTHONPATH=../../scripts/python python3 - <<'PYFORMAT'
+          from pathlib import Path
+          from formatting import format_source
+          source = Path('src/main.cpp').resolve()
+          assert source.read_text() == format_source(source.read_text(), source, 'clang-format-18'), 'Run the project formatter on the sample'
+          PYFORMAT
+          cmake --preset linux-clang-development -B out/sanitized -DCORNELL_ENABLE_SANITIZERS=ON
+          cmake --build out/sanitized
+          ctest --test-dir out/sanitized --output-on-failure --no-tests=error
       - name: Report compiler cache
         if: always()
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
