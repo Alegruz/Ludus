@@ -12,6 +12,9 @@ namespace
 {
 ludus::world_demo::Application gApplication;
 // clang-format off
+EM_JS(bool, FollowCameraRequested, (), {
+    return new URLSearchParams(location.search).get('camera') === 'follow';
+});
 EM_JS(void, Present, (ludus::foundation::uint32 state, ludus::foundation::uint32 mode, ludus::foundation::uint32 backend, ludus::foundation::uint32 tick, ludus::foundation::float32 x, ludus::foundation::float32 y), {
     const status = document.getElementById('status');
     status.dataset.state = ['stopped','loading','playing','failed'][state];
@@ -76,6 +79,7 @@ int main(int argc, char** argv)
         return 0;
     }
 #if LUDUS_TARGET_OS == LUDUS_OS_WEB
+    gApplication.SetCameraFollow(FollowCameraRequested());
     (void)gApplication.Start();
     emscripten_set_main_loop(Frame, 0, true);
 #else
@@ -90,6 +94,7 @@ int main(int argc, char** argv)
         }
     }
     Application application;
+    application.SetCameraFollow(argc == 2 && std::string_view(argv[1]) == "--follow-camera");
     if (!application.Start())
     {
         return 1;

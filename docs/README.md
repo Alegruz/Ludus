@@ -102,6 +102,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Shader feasibility probe](development/tools/shader-probe.md)
 - [W0 WebGPU feasibility probe](development/tools/webgpu-probe.md)
 - [W1 browser FoundationBase probe](development/tools/web-foundation-probe.md)
+- [Your first rendered scene: Cornell box](examples/cornell-box.md)
 
 ## Architecture and design
 
@@ -145,6 +146,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Networking architecture](architecture/networking.md)
 - [Object handles and persistent UUID architecture](architecture/object-handles-uuid.md)
 - [Physics and fluid simulation for Drift](architecture/physics-fluid-simulation.md)
+- [Physics systems architecture](architecture/physics-systems.md)
 - [Platform detection](architecture/platform-detection.md)
 - [Primitive types and numeric boundaries](architecture/primitive-types.md)
 - [Profiling Subsystem — Final Architecture (Reconciled)](architecture/profiling-final.md)
@@ -215,6 +217,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Networking reference review](architecture/networking-reference-review.md)
 - [Object handle and UUID reference review](architecture/object-handles-uuid-reference-review.md)
 - [Physics and fluid simulation reference review](architecture/physics-fluid-reference-review.md)
+- [Physics systems Gems and research review](architecture/physics-systems-gems-review.md)
 - [Project live editing research and design revision](architecture/project-live-reload-research.md)
 - [Reflection and serialization: Game Development Gems review](architecture/reflection-serialization-gems-review.md)
 - [Resource manager reference review](architecture/resource-management-reference-review.md)

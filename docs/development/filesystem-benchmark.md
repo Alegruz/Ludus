@@ -115,3 +115,8 @@ explicitly. For streaming work distinguish provider service, scheduler delay,
 host delivery and integrated frame impact; storage-only timing does not measure
 resource decode or GPU residency. Essential commands and conclusions belong in
 this Markdown owner; bulky traces and images can be linked artifacts with hashes.
+
+The [asynchronous I/O evolution decision](../architecture/filesystem.md#asynchronous-io-evolution-decision)
+specifies proposed stage attribution and backend comparisons within FS-R2/FS-R3/FS-R4.
+Its priority is to distinguish native transfer time from pack scratch/CRC/decode
+and host backlog before changing the backend. It adds no new measured result.

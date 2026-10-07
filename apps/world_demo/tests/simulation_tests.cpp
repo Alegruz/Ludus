@@ -151,6 +151,75 @@ TEST_CASE("Deferred spawn and destruction publish complete bundles and stale han
     world.ConsumeOutbox();
     REQUIRE(world.GetOutbox().empty());
 }
+TEST_CASE("Camera extraction uses draw interpolation and never changes authoritative state", "[world-demo][camera]")
+{
+    auto world = Build();
+    const auto player = world.FindAuthored("player-start");
+    REQUIRE(world.RunTick({ .Axis = {1, 0} }) == Status::Success);
+    const auto hash = world.GetReplayHash();
+    const auto* transform = world.Transforms().Find(player);
+    for (const auto alpha : {0.0F, 0.25F, 1.0F})
+    {
+        RenderFrame fixed;
+        RenderFrame follow;
+        REQUIRE(world.Extract(alpha, fixed));
+        REQUIRE(world.Extract(alpha, follow, true, 123));
+        REQUIRE(fixed.Camera.Pose.Position.X == 0);
+        REQUIRE(fixed.Camera.Lens.VerticalSpan == 14);
+        REQUIRE(fixed.Camera.Lens.MinimumVisibleWidth == 24);
+        const auto expected = transform->Previous.X + (transform->Current.X - transform->Previous.X) * alpha;
+        REQUIRE(follow.Camera.Pose.Position.X == static_cast<float64>(expected));
+        REQUIRE(follow.Camera.PresentationSequence == 123);
+        REQUIRE(follow.Camera.CurrentTick == world.GetTick());
+        REQUIRE(follow.Camera.DiscontinuityRevision == world.Registry().GetWorld());
+        REQUIRE(follow.CameraTrace.Published.Pose.Position == follow.Camera.Pose.Position);
+        REQUIRE(world.GetReplayHash() == hash);
+    }
+    // Pause/single-step extraction uses exact completed tick alpha, with no camera time debt.
+    TickDriver driver;
+    driver.SetMode(Mode::Paused);
+    REQUIRE(driver.Step(world) == Status::Success);
+    RenderFrame frame;
+    REQUIRE(world.Extract(driver.GetAlpha(), frame, true));
+    REQUIRE(frame.Camera.Pose.Position.X == static_cast<float64>(world.Transforms().Find(player)->Current.X));
+    REQUIRE(world.QueueDestroy(player) == Status::Success);
+    REQUIRE(world.RunTick({}) == Status::Success);
+    const auto accepted = frame.Camera.Pose.Position;
+    REQUIRE_FALSE(world.Extract(1, frame, true));
+    REQUIRE(frame.Camera.Pose.Position == accepted);
+    REQUIRE(world.Extract(1, frame)); // Explicit game fallback to authored fixed.
+}
+
+TEST_CASE("Camera follow shares fixed tick presentation cadence across rates and resume", "[world-demo][camera]")
+{
+    for (const uint64 rate : {30U, 60U, 120U, 240U})
+    {
+        auto world = Build();
+        TickDriver driver;
+        const auto player = world.FindAuthored("player-start");
+        RenderFrame frame;
+        for (uint64 sequence = 0; sequence < rate; ++sequence)
+        {
+            REQUIRE(driver.Advance(world, 1.0 / static_cast<float64>(rate), { .Axis = {1, 0} }) == Status::Success);
+            const auto hash = world.GetReplayHash();
+            const auto alpha = driver.GetAlpha();
+            const auto* transform = world.Transforms().Find(player);
+            REQUIRE(world.Extract(alpha, frame, true, sequence));
+            const auto expected = transform->Previous.X + (transform->Current.X - transform->Previous.X) * alpha;
+            REQUIRE(frame.Camera.Pose.Position.X == static_cast<float64>(expected));
+            REQUIRE(world.GetReplayHash() == hash);
+        }
+        // Suspension clears clock debt; extraction has no independent camera debt.
+        REQUIRE(driver.Advance(world, 20, {}, false) == Status::Success);
+        REQUIRE(driver.Advance(world, 0, {}) == Status::Success);
+        REQUIRE(world.Extract(driver.GetAlpha(), frame, true));
+        const auto* transform = world.Transforms().Find(player);
+        const auto expected =
+            transform->Previous.X + (transform->Current.X - transform->Previous.X) * driver.GetAlpha();
+        REQUIRE(frame.Camera.Pose.Position.X == static_cast<float64>(expected));
+    }
+}
+
 TEST_CASE("Commit preflight faults without publishing spawns or presentation", "[world-demo]")
 {
     auto world = Build(3);
