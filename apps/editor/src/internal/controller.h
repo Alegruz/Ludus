@@ -81,6 +81,10 @@ struct PlaySnapshot
     uint64 SchemaVersion = 0;
     QJsonArray Properties;
     QJsonObject HostStatus;
+    QJsonObject ScriptStatus;
+    bool ScriptPaused = false;
+    bool ScriptBusy = false;
+    QString ScriptMessage;
     bool TuningDocumentAvailable = false;
     bool TuningDocumentDirty = false;
     bool TuningCanUndo = false;
@@ -153,6 +157,8 @@ public:
         return Watch_.Active();
     }
     void PlayCommand(const QString& command);
+    void CookScripts();
+    void ScriptCommand(const QJsonObject& command);
     void RefreshProperties();
     void RefreshSessionDetails();
     [[nodiscard]] bool CanEditProperties() const;
@@ -218,6 +224,7 @@ private:
     uint64 NextPlayRequest_ = 1;
     bool GenerationJob_ = false;
     QString PublishedGeneration_;
+    QString ScriptRequest_;
     QString PropertyRequest_;
     QJsonArray PropertyChunks_;
     uint64 PropertyCount_ = 0;

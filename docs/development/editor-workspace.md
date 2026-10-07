@@ -483,3 +483,12 @@ supported; do not distribute layout blobs with projects.
 See [architecture](../architecture/editor-architecture.md),
 [interaction design](../architecture/editor-interaction-design.md), and
 [post-design reference review](../architecture/editor-design-review.md).
+
+## Script assets and behavior debugging
+
+The Scripts tab reads project-owned text and bounded structured-sequence assets
+from `ludus.scripts.json`. Save, Cook and Build/Reload are explicit operations.
+Inspect, source/node breakpoints and step controls use the existing out-of-process
+GameHost channel; partial script ticks block native reload. See the
+[S5 workflow and acceptance](../architecture/behavior-s5.md) for the SDK-only sample,
+draft conflict handling, source-map identity checks and supported limits.

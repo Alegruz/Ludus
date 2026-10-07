@@ -4,6 +4,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 
@@ -11,6 +12,34 @@
 
 namespace ludus::editor
 {
+namespace
+{
+bool DebugId(const QJsonValue& value)
+{
+    const auto text = value.toString();
+    if (text.size() != 16)
+    {
+        return false;
+    }
+    for (const auto c : text)
+    {
+        if ((c < QLatin1Char('0') || c > QLatin1Char('9')) && (c < QLatin1Char('a') || c > QLatin1Char('f')))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+bool DebugReply(const QJsonObject& reply)
+{
+    return reply.value(QStringLiteral("version")).toInt() == 1 && reply.value(QStringLiteral("partial")).isBool() &&
+           DebugId(reply.value(QStringLiteral("session"))) && DebugId(reply.value(QStringLiteral("execution"))) &&
+           DebugId(reply.value(QStringLiteral("stop"))) && reply.value(QStringLiteral("frames")).isArray() &&
+           reply.value(QStringLiteral("frames")).toArray().size() <= 8 &&
+           reply.value(QStringLiteral("locals")).isArray() &&
+           reply.value(QStringLiteral("locals")).toArray().size() <= 16;
+}
+} // namespace
 Capabilities EditorController::Caps() const
 {
     auto caps = ComputeCapabilities(State_);
@@ -61,7 +90,8 @@ bool EditorController::CanPlay() const
 
 bool EditorController::CanBuildReload() const
 {
-    return !State_.Dirty() && !State_.Busy() && !Tool_.Active() && !GenerationJob_ && !PlayState_.DebuggerStopped &&
+    return !PlayState_.ScriptPaused && !State_.Dirty() && !State_.Busy() && !Tool_.Active() && !GenerationJob_ &&
+           !PlayState_.DebuggerStopped &&
            (PlayState_.Phase == PlayPhase::Running || PlayState_.Phase == PlayPhase::Paused);
 }
 
@@ -85,6 +115,7 @@ void EditorController::Play()
         return;
     }
     PlayState_ = {};
+    ScriptRequest_.clear();
     SessionUndo_.clear();
     SessionRedo_.clear();
     EditRequest_.clear();
@@ -176,6 +207,44 @@ void EditorController::ActivateGeneration(const QString& path)
             PlayState_.Message = QStringLiteral("Play supervisor could not start the session");
         }
     }
+}
+
+void EditorController::CookScripts()
+{
+    if (State_.HasSaved && !State_.Dirty() && !State_.Busy() && !Tool_.Active() && !GenerationJob_ &&
+        PlayState_.Phase != PlayPhase::Starting && PlayState_.Phase != PlayPhase::Stopping &&
+        PlayState_.Phase != PlayPhase::CleanupUnknown)
+    {
+        StartJob(ActionKind::Build, ToolOperation::CookScripts);
+    }
+}
+void EditorController::ScriptCommand(const QJsonObject& command)
+{
+    if (!ScriptRequest_.isEmpty() || PlayState_.DebuggerStopped || PlayState_.Phase != PlayPhase::Running ||
+        command.value(QStringLiteral("version")).toInt() != 1)
+    {
+        return;
+    }
+    const auto payload = QJsonDocument(command).toJson(QJsonDocument::Compact);
+    if (payload.isEmpty() || payload.size() > 4096)
+    {
+        return;
+    }
+    ScriptRequest_ = NextPlayRequest();
+    PlayState_.ScriptBusy = true;
+    if (!Play_.Send({{QStringLiteral("type"), QStringLiteral("command")},
+                     {QStringLiteral("request"), ScriptRequest_},
+                     {QStringLiteral("command"),
+                      QJsonObject{{QStringLiteral("command"), QStringLiteral("ScriptDebug")},
+                                  {QStringLiteral("expected_generation"), PlayState_.Generation},
+                                  {QStringLiteral("extension"), 1},
+                                  {QStringLiteral("payload"), QString::fromUtf8(payload)}}}}))
+    {
+        ScriptRequest_.clear();
+        PlayState_.ScriptBusy = false;
+        PlayState_.ScriptMessage = QStringLiteral("Debugger command could not be queued");
+    }
+    Publish();
 }
 
 void EditorController::PlayCommand(const QString& command)
@@ -274,6 +343,11 @@ void EditorController::OnPlayEvent(const QJsonObject& event)
     else if (type == QStringLiteral("ended"))
     {
         PlayState_.DebuggerStopped = false;
+        PlayState_.ScriptStatus = {};
+        PlayState_.ScriptPaused = false;
+        PlayState_.ScriptBusy = false;
+        PlayState_.ScriptMessage.clear();
+        ScriptRequest_.clear();
         PlayState_.Phase =
             event.value(QStringLiteral("cleanup_confirmed")).toBool() ? PlayPhase::Stopped : PlayPhase::CleanupUnknown;
         PlayState_.Message = event.value(QStringLiteral("reason")).toString();
@@ -340,9 +414,38 @@ void EditorController::OnPlayEvent(const QJsonObject& event)
         }
         PlayState_.Message = status + QStringLiteral(": ") + event.value(QStringLiteral("message")).toString();
         const auto host = event.value(QStringLiteral("host")).toObject();
+        if (!ScriptRequest_.isEmpty() && request == ScriptRequest_)
+        {
+            ScriptRequest_.clear();
+            PlayState_.ScriptBusy = false;
+            PlayState_.ScriptMessage =
+                status == QStringLiteral("Ok")
+                    ? QString()
+                    : status + QStringLiteral(": ") + event.value(QStringLiteral("message")).toString();
+            if (status == QStringLiteral("Ok"))
+            {
+                QJsonParseError error{};
+                const auto reply =
+                    QJsonDocument::fromJson(host.value(QStringLiteral("message")).toString().toUtf8(), &error);
+                if (error.error == QJsonParseError::NoError && reply.isObject() && DebugReply(reply.object()))
+                {
+                    PlayState_.ScriptStatus = reply.object();
+                    PlayState_.ScriptPaused = reply.object().value(QStringLiteral("partial")).toBool();
+                }
+                else
+                {
+                    PlayState_.ScriptStatus = {};
+                    PlayState_.ScriptMessage = QStringLiteral("Invalid debugger reply; inspect again");
+                }
+            }
+        }
         if (host.contains(QStringLiteral("presented_frames")))
         {
             PlayState_.HostStatus = host;
+            if (host.contains(QStringLiteral("script_paused")))
+            {
+                PlayState_.ScriptPaused = host.value(QStringLiteral("script_paused")).toBool();
+            }
         }
         if (PlayState_.Phase != PlayPhase::Stopping && PlayState_.Phase != PlayPhase::CleanupUnknown && !host.isEmpty())
         {
@@ -363,6 +466,11 @@ void EditorController::OnPlayEvent(const QJsonObject& event)
             if (!generation.isEmpty() && generation != PlayState_.Generation)
             {
                 PlayState_.Generation = generation;
+                PlayState_.ScriptStatus = {};
+                PlayState_.ScriptPaused = false;
+                PlayState_.ScriptBusy = false;
+                PlayState_.ScriptMessage.clear();
+                ScriptRequest_.clear();
                 PlayState_.Properties = {};
                 PropertyRequest_.clear();
                 RefreshProperties();

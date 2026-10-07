@@ -325,3 +325,61 @@ TEST_CASE("S4 native invalid state discards earlier staged effects")
     CHECK(output.Count == 9);
     CHECK(input.State.Items[0].Data.Scalar == 0);
 }
+
+TEST_CASE("installed provider debug pauses retain copied inputs and unpublished effects", "[behavior][debug]")
+{
+    LuauProvider provider;
+    auto bytes = Package();
+    REQUIRE(provider.Load(ludus::sample::SCHEMA, bytes) == Status::Completed);
+    // The source's first executable line follows the injected declarations.
+    const auto line = provider.Breakpoint(0x100, 1);
+    REQUIRE(line > 0);
+    auto input = Input();
+    Outcome output;
+    output.Count = 9;
+    Diagnostic diagnostic;
+    REQUIRE(provider.BeginDebug(input, {nullptr, Alive}, output, diagnostic) == Status::Paused);
+    REQUIRE(output.Count == 9);
+    DebugSnapshot paused;
+    REQUIRE(provider.Inspect(paused));
+    REQUIRE(paused.Paused);
+    REQUIRE(paused.FrameCount > 0);
+    REQUIRE(paused.Stop != 0);
+    input.State.Items[0].Data.Scalar = 99; // Paused provider owns an independent copied invocation.
+    REQUIRE(provider.Load(ludus::sample::SCHEMA, bytes) == Status::Paused);
+    REQUIRE(provider.ResumeDebug(paused.Stop + 1, DebugMode::Continue, output, diagnostic) == Status::InvalidInput);
+    REQUIRE(output.Count == 9);
+    REQUIRE(provider.Breakpoint(0x100, line, false) > 0);
+    REQUIRE(provider.ResumeDebug(paused.Stop, DebugMode::Continue, output, diagnostic) == Status::Completed);
+    REQUIRE(output.State.Items[0].Data.Scalar == 1);
+    REQUIRE(provider.ResumeDebug(paused.Stop, DebugMode::Continue, output, diagnostic) == Status::InvalidInput);
+    REQUIRE(provider.Load(ludus::sample::SCHEMA, bytes) == Status::Completed);
+    REQUIRE(provider.Breakpoint(0x100, line) > 0);
+    input = Input();
+    REQUIRE(provider.BeginDebug(input, {nullptr, Alive}, output, diagnostic) == Status::Paused);
+    DebugSnapshot replacement;
+    REQUIRE(provider.Inspect(replacement));
+    REQUIRE(replacement.Stop > paused.Stop); // Stops cannot alias after a VM replacement.
+    REQUIRE(provider.ResumeDebug(paused.Stop, DebugMode::Continue, output, diagnostic) == Status::InvalidInput);
+    REQUIRE(provider.Close() == Status::Completed); // Cancels the partial tick before releasing candidate storage.
+    REQUIRE(provider.LiveBytes() == 0);
+}
+TEST_CASE("debug faults and interrupts discard candidates and require explicit restart")
+{
+    const auto bytes = Package();
+    LuauProvider provider;
+    Outcome output;
+    output.Count = 13;
+    Diagnostic diagnostic;
+    REQUIRE(provider.Load(ludus::sample::SCHEMA, bytes) == Status::Completed);
+    auto input = Input(0x300);
+    CHECK(provider.BeginDebug(input, {nullptr, Alive}, output, diagnostic) == Status::ScriptFault);
+    CHECK(output.Count == 13);
+    CHECK(provider.LiveBytes() == 0);
+    REQUIRE(provider.Load(ludus::sample::SCHEMA, bytes, usize{8} * 1024 * 1024, 20) == Status::Completed);
+    input = Input(0x500);
+    CHECK(provider.BeginDebug(input, {nullptr, Alive}, output, diagnostic) == Status::Interrupted);
+    CHECK(output.Count == 13);
+    CHECK(provider.LiveBytes() == 0);
+    REQUIRE(provider.Close() == Status::Completed);
+}

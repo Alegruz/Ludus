@@ -31,8 +31,10 @@ runs:
         if [[ "$WITH_EDITOR" == true ]]; then
           packages+=(qt6-base-dev qt6-wayland)
         fi
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq "${packages[@]}"
+        # Stalled package mirrors must fail promptly so the job can be retried.
+        apt_options=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3)
+        sudo apt-get "${apt_options[@]}" update -qq
+        sudo apt-get "${apt_options[@]}" install -y -qq "${packages[@]}"
     - name: Cache pip downloads
       uses: actions/cache@v4
       with:

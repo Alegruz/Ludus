@@ -262,6 +262,27 @@ def imports(text):
     return result
 
 
+def graph_module():
+    if __package__:
+        from . import behavior_graph
+    else:
+        import behavior_graph
+    return behavior_graph
+
+
+def check_graph_contract(schema):
+    # The first useful visual vocabulary stays deliberately bounded. Generated
+    # bindings still resolve declared state by the project's stable field IDs.
+    state = {f['name']: f['type'] for f in schema['state']}
+    event = {f['name']: f['type'] for f in schema['event']}
+    operation = next((op for op in schema['operations'] if op['id'] == 200), None)
+    require(state.get('Interactions') == 'uint32' and state.get('OpenRequested') == 'bool' and
+            event.get('Amount') == 'uint32' and event.get('Target') == 'EntityRef' and
+            operation is not None and operation['name'] == 'RequestDoorOpen' and
+            [f['type'] for f in operation['arguments']] == ['EntityRef', 'uint32'],
+            'sequence vocabulary requires Interactions/OpenRequested, Target/Amount and operation 200 RequestDoorOpen')
+
+
 def package(path):
     value = read_json(path)
     closed(value, ('version', 'programs')); integer(value['version'], 1, 1)
@@ -269,21 +290,30 @@ def package(path):
     by_id = {}
     root = path.parent.resolve()
     for program in value['programs']:
-        closed(program, ('asset', 'revision', 'source', 'entrypoint', 'imports'))
+        graph = 'graph' in program
+        closed(program, ('asset', 'revision', 'graph' if graph else 'source', 'entrypoint', 'imports'))
         require(type(program['asset']) is str and ASSET.fullmatch(program['asset']) and int(program['asset'],16), 'asset identity')
         require(program['asset'] not in by_id, 'duplicate asset')
         integer(program['revision'], 1, (1 << 64) - 1)
         require(type(program['entrypoint']) is bool, 'entrypoint flag')
         require(type(program['imports']) is list and len(program['imports']) <= 8 and all(type(i) is str and ASSET.fullmatch(i) for i in program['imports']) and len(set(program['imports'])) == len(program['imports']), 'import capacity/identity')
-        require(type(program['source']) is str and not Path(program['source']).is_absolute(), 'project-relative source path required')
-        source = (root / program['source']).resolve()
-        require(source.is_relative_to(root) and source.suffix == '.luau' and source.is_file(), 'source escapes project or is missing')
+        authored = program['graph' if graph else 'source']
+        require(type(authored) is str and not Path(authored).is_absolute(), 'project-relative source path required')
+        source = (root / authored).resolve()
+        require(source.is_relative_to(root) and source.suffix == ('.json' if graph else '.luau') and source.is_file(), 'source escapes project or is missing')
         require(source.stat().st_size <= 131072, 'source capacity')
         text = source.read_text()
+        maps = []
+        authored_hash = sha(text.encode())
+        if graph:
+            require(program['entrypoint'] and not program['imports'], 'sequence must be an import-free entrypoint')
+            document = graph_module().parse(text)
+            authored_hash = graph_module().executable(document)
+            text, maps = graph_module().lower(document, 'Event')
         require(text.startswith('--!strict\n'), 'strict source required')
         actual = [asset for asset, _, _ in imports(text)]
         require(set(actual) == set(program['imports']), 'declared import closure differs from literal source imports')
-        program = dict(program, text=text)
+        program = dict(program, text=text, maps=maps, authored=authored_hash)
         by_id[program['asset']] = program
     require(any(p['entrypoint'] for p in by_id.values()), 'entrypoint required')
     result, visiting, visited = [], set(), set()
@@ -302,12 +332,13 @@ def package(path):
 
 def cook_key(schema, programs, profile):
     return sha(canonical({'schema': schema, 'programs': programs, 'profile': profile,
-                         'generator': sha(Path(__file__).read_bytes()), 'options': 'interpreter-o1-g2'}))
+                         'generator': sha(Path(__file__).read_bytes()), 'graph_generator': sha(Path(graph_module().__file__).read_bytes()), 'options': 'interpreter-o1-g2'}))
 
 
 def cook(contract_path, package_path, output, profile_path, compiler, analyzer):
     schema = contract(contract_path)
     programs = package(package_path)
+    if any('graph' in p for p in programs): check_graph_contract(schema)
     profile = read_json(profile_path)
     closed(profile, ('version', 'profile', 'compiler', 'analyzer')); integer(profile['version'], 1, 1)
     for key in ('profile', 'compiler', 'analyzer'):
@@ -341,7 +372,7 @@ def cook(contract_path, package_path, output, profile_path, compiler, analyzer):
                 dependency_ids = [int(i,16) for i in program['imports']]
                 body.extend(struct.pack('<QQII8Q',int(program['asset'],16),program['revision'],len(code),len(dependency_ids)|(0x100 if program['entrypoint'] else 0),*(dependency_ids+[0]*(8-len(dependency_ids)))))
                 body.extend(code)
-                results.append({'asset':program['asset'],'source':sha(program['text'].encode()),'bytecode':sha(code),'bytes':len(code),'first_line':definitions.count('\n')+1})
+                results.append({'asset':program['asset'],'source':sha(program['text'].encode()),'authored':program['authored'],'bytecode':sha(code),'bytes':len(code),'first_line':definitions.count('\n')+1,'path':program.get('graph',program.get('source')),'maps':[dict(span,compiled_line=span['line']+definitions.count('\n')-1) for span in program['maps']]})
             data = b'LUDS4PK\0'+struct.pack('<II',1,120+len(body))+bytes.fromhex(profile['profile']+digest+key)+struct.pack('<II',len(programs),0)+body
             require(len(data)<=2*1024*1024,'package capacity')
             # Intermediate compiler paths are deliberately excluded from publication.
@@ -352,14 +383,20 @@ def cook(contract_path, package_path, output, profile_path, compiler, analyzer):
             (directory/'contract.d.luau').write_text(definitions)
             (directory/'behavior.lupack').write_bytes(data)
             embedded='#pragma once\n#include <ludus/foundation/base/types.h>\nnamespace '+schema['namespace']+' {\ninline constexpr ludus::foundation::uint8 PACKAGE[] = {\n'
-            embedded+='\n'.join('    '+','.join(str(b) for b in data[i:i+16])+',' for i in range(0,len(data),16))+'\n};\n}\n'
+            embedded+='\n'.join('    '+','.join(str(b) for b in data[i:i+16])+',' for i in range(0,len(data),16))+'\n};\ninline constexpr char PACKAGE_KEY[] = \"'+key+'\";\n}\n'
             (directory/'package.h').write_text(embedded)
+            maps_header='#pragma once\n#include <ludus/foundation/base/types.h>\nnamespace '+schema['namespace']+' {\nstruct SourceSpan { ludus::foundation::uint64 Asset; ludus::foundation::int32 Line; const char* Node; };\ninline constexpr SourceSpan SOURCE_SPANS[] = {\n'
+            for program in results:
+                for span in program['maps']:
+                    maps_header+='    {0x'+program['asset']+'ULL,'+str(span['compiled_line'])+',"'+span['node']+'"},\n'
+            maps_header+='    {0,0,""},\n};\n}\n'
+            (directory/'debug_maps.h').write_text(maps_header)
             evidence={'version':1,'key':key,'contract':digest,'profile':profile,'programs':results,
                       'outputs':{p.name:sha(p.read_bytes()) for p in directory.iterdir()}}
             (directory/'evidence.json').write_text(json.dumps(evidence,sort_keys=True)+'\n')
             directory.rename(destination)
     # Build consumers include forwarding headers only after the cook target completes.
-    for filename in ('contract.h','package.h'):
+    for filename in ('contract.h','package.h','debug_maps.h'):
         with tempfile.NamedTemporaryFile(mode='w', dir=output, delete=False) as file:
             forward=Path(file.name)
             try:

@@ -303,6 +303,12 @@ int main()
     ludus::graphics::rhi::Shutdown();
     // Link and exercise explicit device admission entirely through installed
     // headers, without asking this policy test host for a GPU adapter.
+    const auto compiledBackends = ludus::graphics::rhi::GetCompiledBackends();
+#if defined(LUDUS_PLATFORM_MACOS)
+    const bool nativeBackendAvailable = compiledBackends.Metal;
+#else
+    const bool nativeBackendAvailable = compiledBackends.Vulkan;
+#endif
     ludus::graphics::rhi::DeviceHandle explicitDevice;
     ludus::graphics::rhi::SurfaceHandle explicitSurface;
     ludus::graphics::rhi::DeviceDescription explicitRequest;

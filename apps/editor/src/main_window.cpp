@@ -5,6 +5,7 @@
 #include "internal/editor_files.h"
 #include "internal/project_creation_dialog.h"
 #include "internal/project_setup_dialog.h"
+#include "internal/script_workspace.h"
 #include "internal/workspace_style.h"
 
 #include <QTabWidget>
@@ -77,6 +78,7 @@ MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QStr
             }
         }
     });
+    connect(Scripts_, &ScriptWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
     connect(qApp, &QApplication::focusChanged, this, [this](QWidget* before, QWidget* after) {
         LastEditedField_ = nullptr;
         disconnect(FocusUndoConnection_);
@@ -237,7 +239,12 @@ void MainWindow::BuildMenus()
     connect(SaveTuningAction_, &QAction::triggered, Controller_, &EditorController::SaveTuningDocument);
     connect(DiscardTuningAction_, &QAction::triggered, Controller_, &EditorController::DiscardTuningDocumentDraft);
     connect(PlayAction_, &QAction::triggered, this, [this]() { LaunchAfterPreview(LaunchAction::Play); });
-    connect(BuildReloadAction_, &QAction::triggered, Controller_, &EditorController::BuildReload);
+    connect(BuildReloadAction_, &QAction::triggered, this, [this]() {
+        if (Scripts_->ConfirmDiscard())
+        {
+            Controller_->BuildReload();
+        }
+    });
     connect(PauseAction_, &QAction::triggered, this, [this]() { Controller_->PlayCommand(QStringLiteral("Pause")); });
     connect(StepAction_, &QAction::triggered, this, [this]() { Controller_->PlayCommand(QStringLiteral("Step")); });
     connect(ResumeAction_, &QAction::triggered, this, [this]() { Controller_->PlayCommand(QStringLiteral("Resume")); });
@@ -282,7 +289,12 @@ void MainWindow::BuildMenus()
     connect(SaveAction_, &QAction::triggered, this, &MainWindow::OnSaveRequested);
     connect(ReloadAction_, &QAction::triggered, this, &MainWindow::OnReloadRequested);
     connect(ConfigureAction_, &QAction::triggered, Controller_, &EditorController::Configure);
-    connect(BuildAction_, &QAction::triggered, Controller_, &EditorController::Build);
+    connect(BuildAction_, &QAction::triggered, this, [this]() {
+        if (Scripts_->ConfirmDiscard())
+        {
+            Controller_->Build();
+        }
+    });
     connect(BuildRunAction_, &QAction::triggered, this, [this]() { LaunchAfterPreview(LaunchAction::Run); });
     connect(StopAction_, &QAction::triggered, Controller_, &EditorController::Stop);
     connect(ClearAction_, &QAction::triggered, Controller_, &EditorController::ClearOutput);
@@ -291,7 +303,7 @@ void MainWindow::BuildMenus()
 
 void MainWindow::LaunchAfterPreview(LaunchAction action, const QString& debugger, bool setup)
 {
-    if (AudioLaunchPending_ || AudioClosing_)
+    if (AudioLaunchPending_ || AudioClosing_ || !Scripts_->ConfirmDiscard())
     {
         return;
     }
@@ -418,7 +430,7 @@ void MainWindow::OnOpenRequested()
 void MainWindow::OpenProjectPath(const QString& path)
 {
     if (path.isEmpty() || !Controller_->Caps().CanOpen || Content_->Importing() || AudioClosing_ ||
-        !Audio_->ConfirmDiscard())
+        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()))
     {
         return;
     }
@@ -433,6 +445,11 @@ void MainWindow::OpenProjectPath(const QString& path)
 void MainWindow::OnSaveRequested()
 {
     auto* area = WorkTabs_->currentWidget();
+    if (area == Scripts_)
+    {
+        (void)Scripts_->Save();
+        return;
+    }
     if (area == Configuration_)
     {
         Configuration_->Save();
@@ -461,7 +478,7 @@ bool MainWindow::SaveProjectSettings()
         StatusLabel_->setText(QStringLiteral("Finish or cancel content work before saving a changed source root."));
         return false;
     }
-    if (state.Draft.SourceDir != state.Saved.SourceDir && !Audio_->ConfirmDiscard())
+    if (state.Draft.SourceDir != state.Saved.SourceDir && (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()))
     {
         return false;
     }
@@ -482,7 +499,7 @@ void MainWindow::OnReloadRequested()
         return;
     }
     CommitProjectFields();
-    if (!Audio_->ConfirmDiscard())
+    if (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard())
     {
         return;
     }
@@ -542,12 +559,14 @@ void MainWindow::OnStateChanged()
     if (state.Document == DocumentState::ProjectLoaded)
     {
         const auto root = QDir(QFileInfo(state.DescriptorPath).absolutePath()).absoluteFilePath(state.Saved.SourceDir);
+        Scripts_->SetProject(QFileInfo(state.DescriptorPath).absolutePath(), root, state.Saved.Preset);
         Audio_->SetRoot(QDir(root).absoluteFilePath(QStringLiteral("content")));
         Content_->SetProject(QDir(root).absoluteFilePath(QStringLiteral("content")), state.ProjectEpoch);
     }
 
     else
     {
+        Scripts_->SetProject({}, {}, {});
         Audio_->SetRoot(QString());
         Content_->SetProject(QString(), state.ProjectEpoch);
     }
@@ -946,7 +965,8 @@ bool MainWindow::ConfirmProjectChange(const QString& action)
 
 void MainWindow::OnNewProject()
 {
-    if (!Controller_->Caps().CanProjectCreate || Content_->Importing() || !Audio_->ConfirmDiscard() ||
+    if (!Controller_->Caps().CanProjectCreate || Content_->Importing() ||
+        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()) ||
         !ConfirmProjectChange(QStringLiteral("creating another project")))
     {
         return;
@@ -961,7 +981,8 @@ void MainWindow::OnNewProject()
 void MainWindow::OnCloseProject()
 {
     if (!Controller_->Caps().CanCloseProject || Content_->Importing() || AudioLaunchPending_ || AudioClosing_ ||
-        !Audio_->ConfirmDiscard() || !ConfirmProjectChange(QStringLiteral("closing the project")))
+        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()) ||
+        !ConfirmProjectChange(QStringLiteral("closing the project")))
     {
         return;
     }
@@ -1081,7 +1102,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
             event->ignore();
             return;
         }
-        if (!Audio_->ConfirmDiscard() || !Configuration_->ConfirmDiscard())
+        if ((!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()) || !Configuration_->ConfirmDiscard())
         {
             event->ignore();
             return;
