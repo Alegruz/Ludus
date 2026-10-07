@@ -259,6 +259,8 @@ def detect_host_toolchain(
         raise ToolingError(SDK_INCOMPATIBLE, "cannot identify the selected C++ compiler; prepare the pinned toolchain")
 
     runtime_abi = os.environ.get("LUDUS_CXX_RUNTIME_ABI", "")
+    if reference.target_triple.endswith("-apple-darwin"):
+        runtime_abi = runtime_abi or "libc++"
 
     # Clone the reference and overlay only the detected ABI-relevant fields.
     host = SdkIdentity.from_json(

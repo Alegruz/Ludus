@@ -1749,6 +1749,11 @@ def bundle_sdk_dependencies(root: Path, preset: str, prefix: Path) -> None:
         raise EngineError("bundled dependency metadata leaks a producer path")
 
 
+def command_bundle_sdk_dependencies(args: argparse.Namespace) -> int:
+    bundle_sdk_dependencies(repo_root(), args.preset, Path(args.prefix).resolve())
+    return 0
+
+
 def command_install_sdk(args: argparse.Namespace) -> int:
     root = repo_root()
     preset = args.preset
@@ -1769,6 +1774,12 @@ def command_install_sdk(args: argparse.Namespace) -> int:
 
     consumer_source = root / "tests" / "sdk_consumer"
     consumer_build = root / "out" / "build" / "sdk-consumer" / preset
+    native_flags = []
+    if preset.startswith("macos-"):
+        from ludus_tools.project_setup import _inputs
+        _, records, _ = _inputs(root, consumer_source, prefix, preset, None)
+        native_flags = [f"-D{key}={value}" for key, value in records[preset]["cacheVariables"].items()
+                        if key.startswith("CMAKE_OSX_") or key == "CMAKE_CXX_FLAGS"]
     run(
         [
             cmake(root),
@@ -1781,7 +1792,8 @@ def command_install_sdk(args: argparse.Namespace) -> int:
             f"-DCMAKE_MAKE_PROGRAM={ninja(root)}",
             f"-DCMAKE_CXX_COMPILER={clang_cxx(root)}",
             f"-DCMAKE_BUILD_TYPE={PRESET_BUILD_TYPES[preset]}",
-            f"-DCMAKE_PREFIX_PATH={prefix};{root / 'out' / 'conan' / preset}",
+            f"-DCMAKE_PREFIX_PATH={prefix}",
+            *native_flags,
         ],
         cwd=root,
         env=tool_env(root),
@@ -2185,6 +2197,11 @@ def make_parser() -> argparse.ArgumentParser:
     install_parser = subparsers.add_parser("install-sdk", help="install the SDK and run the external consumer")
     install_parser.add_argument("preset", nargs="?", default=DEFAULT_PRESET)
     install_parser.set_defaults(func=command_install_sdk)
+
+    bundle_parser = subparsers.add_parser("bundle-sdk-dependencies", help="bundle prepared SDK dependencies without rebuilding")
+    bundle_parser.add_argument("preset")
+    bundle_parser.add_argument("--prefix", required=True)
+    bundle_parser.set_defaults(func=command_bundle_sdk_dependencies)
 
     profile_parser = subparsers.add_parser(
         "profile-build", help="profile a clean build (configure/build timing, Ninja + Clang -ftime-trace)"

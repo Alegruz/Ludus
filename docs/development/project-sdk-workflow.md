@@ -5,10 +5,12 @@ SDKs, project creation and migration, building with the CLI (and the Editor),
 direct CMake use, recovery and the current compatibility limits. It documents the
 workflow implemented by `.kiro/specs/project-sdk-workflow`.
 
-> Scope. The initial supported matrix is **Linux x64**, the reference Ubuntu
-> 24.04 + Clang 18 toolchain, single-config Ninja, native Debug/Development/
-> Release SDKs and a minimal native template. Windows/macOS project tooling and general scene authoring require separate
-> acceptance. [Browser releases](editor-game-releases.md) and
+> Scope. Native project tooling supports **Linux x64** (Ubuntu 24.04) and
+> **macOS** with pinned upstream Clang 18, single-config Ninja, and
+> Debug/Development/Release SDK identities. The installed macOS CLI has native
+> Apple silicon acceptance; Intel identity/architecture selection is covered by
+> unit tests and still needs native Intel acceptance. Windows tooling and general
+> scene authoring require separate acceptance. [Browser releases](editor-game-releases.md) and
 > [native live editing](project-live-reload.md) have their own implemented scope;
 > an embedded viewport remains future work.
 > Do not assume unsupported combinations work.
@@ -18,10 +20,13 @@ workflow implemented by `.kiro/specs/project-sdk-workflow`.
 **Host tools** (the `ludus` CLI): Python ≥ 3.10. No Qt, no engine checkout.
 
 **Building a generated game** additionally needs the documented toolchain for a
-Ludus SDK: CMake ≥ 3.29, Ninja, Clang 18 + LLD 18, and — for shader compilation —
-the pinned Slang compiler and `spirv-val` (`config/shader_toolchain.json`). A
-windowed game also needs its runtime display/GPU environment (a Vulkan loader +
-driver); headless *tooling* does not imply a windowed game runs without a
+Ludus SDK: CMake 3.29.6, Ninja 1.11.1, and upstream Clang 18. Linux uses LLD 18;
+macOS uses the prepared Apple SDK and Clang 18 libc++ headers with the deployment
+baseline recorded in the SDK manifest (currently macOS 14.0). For shaders, use
+the pinned Slang compiler (`config/shader_toolchain.json`): macOS emits Metal
+source; Linux and browser SPIR-V paths also require `spirv-val`. A
+windowed game also needs its runtime display/GPU environment (Metal on macOS,
+a Vulkan loader and driver on Linux); headless *tooling* does not imply a windowed game runs without a
 compositor/GPU.
 
 ## Install the host tools
@@ -49,8 +54,9 @@ ludus sdk install --version 0.1.0 --target linux-x64 --flavor development \
 ludus sdk list
 ```
 
-SDKs install into a shared user store (default `~/.local/share/ludus`,
-overridable with `--store` or `LUDUS_SDK_STORE`). Each SDK directory is immutable
+SDKs install into a shared user store (Linux default `~/.local/share/ludus`;
+macOS default `~/Library/Application Support/Ludus`). `--store`,
+`LUDUS_SDK_STORE`, and `XDG_DATA_HOME` retain explicit location precedence. Each SDK directory is immutable
 and content-addressed, so several projects share one copy. Installation validates
 archive bounds/containment, the payload digest and the manifest identity, stages
 to a sibling directory and atomically publishes — a concurrent or cancelled
@@ -78,12 +84,73 @@ files are yours after creation; later template versions never overwrite your gam
 code. The generated `CMakeLists.txt`/`CMakePresets.json` are ordinary, editable
 CMake — project metadata is not a second build language.
 
+## macOS creation and setup
+
+Prepare the trusted tooling checkout and install a complete SDK first:
+
+```bash
+./scripts/init macos-clang-development --preset-only --cli --no-system-install
+./scripts/shader-probe bootstrap
+./scripts/install-sdk macos-clang-development
+out/host-tools/venv/bin/python -m pip install ./scripts/python
+```
+
+Create and verify a project against that SDK:
+
+```bash
+out/host-tools/venv/bin/ludus project create /path/to/MyGame --name "My Game" \
+    --sdk "$PWD/out/install/macos-clang-development" --tools "$PWD"
+out/host-tools/venv/bin/ludus project run /path/to/MyGame
+```
+
+`--tools` explicitly authorizes preparation/verification using that trusted
+checkout. Without `--sdk`, creation selects the host's Development profile,
+reuses only a current matching SDK, or explicitly prepares a separate ABI-keyed
+install. Preparation bundles the dependency closure before staged game validation.
+With `--sdk`, the project profile follows that SDK's native flavor; when combining
+`--tools` with another flavor, also pass its full `--profile` name.
+
+Minimal template version 4 includes macOS configure/build/test presets for
+`macos-clang-debug`, `macos-clang-development`, and `macos-clang-release`.
+macOS presets are selectable on Darwin. Each flavor requires its matching SDK;
+a Development SDK is never used silently for Debug or Release. Repair verifies
+the selected native flavor with real configure/build/test commands and writes
+its selectable `ludus-local-<profile>` presets. Switching flavor requires its matching SDK and explicit repair:
+
+```bash
+ludus project repair /path/to/MyGame --tools /path/to/Ludus \
+    --profile macos-clang-debug --sdk /path/to/debug-sdk
+ludus project check /path/to/MyGame --tools /path/to/Ludus --profile macos-clang-debug
+ludus project run /path/to/MyGame --profile macos-clang-debug
+```
+
+Each verified native profile retains its own ignored setup record and owned
+presets. Repairing another flavor preserves those entries and the descriptor
+keeps its original default profile.
+
+Mac setup uses the matching architecture (`arm64` or `x86_64`), manifest deployment
+baseline, prepared SDK sysroot, and Clang 18 libc++ headers. Machine paths live in
+ignored user presets. Retargeted tool/SDK symlinks and stale macOS cache flags
+require explicit repair. Native flags are excluded from browser presets. The
+selected compiler's identity is checked before repair writes local settings and
+before ordinary CLI operations; Apple Clang is not the reference compiler.
+
+Existing version-2 projects keep their source, descriptors, and tracked presets.
+To port a Linux project deliberately, select its macOS descriptor preset and
+add the matching project-owned CMake preset (or hidden base), then run repair
+with the macOS SDK. Repair does not rewrite tracked project intent. Legacy
+version-1 projects still use the original Linux schema until explicit migration.
+
+The native Qt Editor, macOS game release packaging/signing, universal binaries,
+and native Intel acceptance are separate follow-ups. The shared descriptor
+readers accept the macOS v2 profiles; that does not enable the native Editor.
+
 ## Configure, build, run
 
 ```bash
-ludus project configure ./MyGame --profile development
-ludus project build     ./MyGame --profile development
-ludus project run       ./MyGame --profile development   # ensures a fresh build first
+ludus project configure ./MyGame --profile linux-clang-development
+ludus project build     ./MyGame --profile linux-clang-development
+ludus project run       ./MyGame --profile linux-clang-development   # ensures a fresh build first
 ```
 
 Configure/build/run never download an SDK, refresh the lock or compile engine
@@ -125,15 +192,15 @@ and [Editor operations](editor-workspace.md#create-initialize-repair-and-update-
 
 ```bash
 # Point a project's build at a locally built SDK, without touching the lock:
-ludus project engine ./MyGame --sdk /path/to/local/sdk --profile development
+ludus project engine ./MyGame --sdk /path/to/local/sdk --profile linux-clang-development
 
 # After rebuilding/reinstalling that local SDK, just rebuild the game — the
 # tooling detects the changed SDK inputs (not just the path) and reconfigures/
 # relinks. Local engine install and game build must not run at the same time.
-ludus project build ./MyGame --profile development
+ludus project build ./MyGame --profile linux-clang-development
 
 # Return to the locked release without editing committed files:
-ludus project engine ./MyGame --clear-override --profile development
+ludus project engine ./MyGame --clear-override --profile linux-clang-development
 ```
 
 The override is visible in build output and never rewrites the committed
@@ -158,6 +225,11 @@ incomplete commit; rerun migration or discard them to recover.
 export LUDUS_SDK_PREFIX=/path/to/installed/sdk-prefix
 cmake --preset linux-clang-development
 cmake --build out/build/linux-clang-development --target my_game
+
+# macOS, after explicit project repair, select its owned toolchain preset:
+/path/to/Ludus/out/host-tools/venv/bin/cmake --preset ludus-local-macos-clang-development
+/path/to/Ludus/out/host-tools/venv/bin/cmake --build --preset ludus-local-macos-clang-development
+/path/to/Ludus/out/host-tools/venv/bin/ctest --preset ludus-local-macos-clang-development
 ```
 
 The generated presets read `$env{LUDUS_SDK_PREFIX}`. `find_package(Ludus CONFIG

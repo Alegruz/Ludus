@@ -15,10 +15,16 @@ from test_ludus_tools import _manifest_json, _write_sdk_prefix
 
 
 class ProjectSetupTests(unittest.TestCase):
+    profile = "linux-clang-development"
+
+    def manifest(self):
+        from ludus_tools.identity import _detect_compiler
+        return _manifest_json(compiler_version=_detect_compiler(str(self.tools / "out/host-tools/bin/clang++"))[1])
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
         self.tools = self.root / "tools"
         cmake = os.environ.get("LUDUS_TEST_CMAKE", shutil.which("cmake"))
         for name in ("cmake", "ctest", "ninja"):
@@ -28,9 +34,9 @@ class ProjectSetupTests(unittest.TestCase):
         path = self.tools / "out/host-tools/bin/clang++"
         path.parent.mkdir(parents=True)
         path.symlink_to(shutil.which("clang++-18") or shutil.which("clang++"))
-        self.sdk = _write_sdk_prefix(self.root / "sdk", _manifest_json())
+        self.sdk = _write_sdk_prefix(self.root / "sdk", self.manifest())
         self.project = self.root / "Game"
-        create_project(self.project, name="Game", template_id="minimal", engine_version="", local_sdk_prefix=self.sdk)
+        create_project(self.project, name="Game", template_id="minimal", engine_version="", local_sdk_prefix=self.sdk, preset=self.profile)
         self.calls = []
 
     def runner(self, argv, *, cwd, env):
@@ -63,7 +69,7 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertTrue(all("--list-presets=" in a[-1] or a[-1] == "--version" for a in self.calls))
 
     def test_repeated_repair_preserves_custom_presets_and_editor_settings(self):
-        custom = {"name": "my-build", "configurePreset": "linux-clang-development"}
+        custom = {"name": "my-build", "configurePreset": self.profile}
         setup.write_object(self.project / "CMakeUserPresets.json", {"version": 6, "buildPresets": [custom]})
         setup.write_object(self.project / ".vscode/settings.json", {"editor.tabSize": 8})
         self.repair()
@@ -91,7 +97,7 @@ class ProjectSetupTests(unittest.TestCase):
         with self.assertRaisesRegex(ToolingError, "inputs changed"):
             setup.check_project(self.project, tooling_root=self.tools, runner=self.runner)
         self.repair()
-        cache = self.project / "out/build/linux-clang-development/CMakeCache.txt"
+        cache = self.project / "out/build" / self.profile / "CMakeCache.txt"
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text("CMAKE_PREFIX_PATH:STRING=/gone/sdk\n")
         with self.assertRaisesRegex(ToolingError, "Stale CMake cache"):
@@ -115,14 +121,14 @@ class ProjectSetupTests(unittest.TestCase):
     def test_play_builds_select_the_repaired_owned_presets_and_cmake(self):
         from ludus_tools.cmake_setup import validate_project_presets
         self.repair()
-        chosen = setup.cmake_for(self.project, "linux-clang-development", "/missing/system-cmake")
+        chosen = setup.cmake_for(self.project, self.profile, "/missing/system-cmake")
         self.assertEqual(str(self.tools / "out/host-tools/venv/bin/cmake"), chosen)
-        validate_project_presets(chosen, self.project, setup.environment(self.tools), "linux-clang-development")
+        validate_project_presets(chosen, self.project, setup.environment(self.tools), self.profile)
         local = setup.read_object(self.project / "CMakeUserPresets.json")
         local["buildPresets"] = []
         setup.write_object(self.project / "CMakeUserPresets.json", local)
         with self.assertRaisesRegex(ValueError, "selectable build preset.*ludus-local-"):
-            validate_project_presets(chosen, self.project, setup.environment(self.tools), "linux-clang-development")
+            validate_project_presets(chosen, self.project, setup.environment(self.tools), self.profile)
 
     def test_web_profiles_use_the_sdk_target_and_real_selectable_presets(self):
         web = _write_sdk_prefix(self.root / "web-sdk", _manifest_json(target_triple="wasm32-unknown-emscripten"))
@@ -163,7 +169,7 @@ class ProjectSetupTests(unittest.TestCase):
         web_profile = "web-emscripten-development"
         for key in ("configurePresets", "buildPresets"):
             local[key].append({"name": "ludus-local-" + web_profile, "vendor": {setup.OWNER: web_profile}})
-        custom = {"name": "custom", "configurePreset": "linux-clang-development"}
+        custom = {"name": "custom", "configurePreset": self.profile}
         local["buildPresets"].append(custom)
         setup.write_object(path, local)
         with self.assertRaises(ToolingError):
@@ -198,7 +204,7 @@ class ProjectSetupTests(unittest.TestCase):
             self.repair()
         self.assertEqual(before, self.snapshot())
         path.unlink()
-        setup.write_object(self.project / "CMakeUserPresets.json", {"configurePresets": [{"name": "ludus-local-linux-clang-development"}]})
+        setup.write_object(self.project / "CMakeUserPresets.json", {"configurePresets": [{"name": "ludus-local-" + self.profile}]})
         before = self.snapshot()
         with self.assertRaisesRegex(ToolingError, "Custom preset"):
             self.repair()

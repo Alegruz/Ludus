@@ -71,7 +71,7 @@ def create_project(
     template_id: str,
     engine_version: str,
     components: Optional[list[str]] = None,
-    preset: str = "linux-clang-development",
+    preset: Optional[str] = None,
     local_sdk_prefix: Optional[Path] = None,
     cancel_check: Optional[Callable[[], None]] = None,
     verify_staged: Optional[Callable[[Path], None]] = None,
@@ -92,6 +92,9 @@ def create_project(
         # manifest").
         engine_version = engine_version or local_identity.engine_version
 
+    from .native import default_profile, profile_for_identity
+
+    preset = preset or (profile_for_identity(local_identity) if local_identity else default_profile())
     target = _derive_target(name)
 
     engine_req = desc.EngineRequirement(version=engine_version, components=list(components), features=[])
@@ -119,6 +122,8 @@ def create_project(
     if itch_target is not None and not release:
         raise ToolingError(INVALID_PROJECT, "--itch-target requires --release")
     if release:
+        if preset.startswith("macos-"):
+            raise ToolingError(INVALID_PROJECT, "macOS release packaging is not implemented; create without --release")
         from .release_template import release_files
 
         rendered.extend(release_files(target, itch_target))

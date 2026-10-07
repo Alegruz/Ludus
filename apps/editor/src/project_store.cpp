@@ -334,14 +334,17 @@ ParseOutcome ParseDescriptor(const QByteArray& bytes)
     {
         const bool v1Preset = descriptor.Preset == QStringLiteral("linux-clang-debug") ||
                               descriptor.Preset == QStringLiteral("linux-clang-development");
-        // Version 2 additionally permits the Release preset (design: extend the
-        // E0 two-preset contract to Release). Version 1 keeps the original two.
-        const bool v2Release = schemaVersion == 2 && descriptor.Preset == QStringLiteral("linux-clang-release");
-        if (!v1Preset && !v2Release)
+        // Version 2 permits all native game profiles, including macOS.
+        // Version 1 keeps the original Linux two-preset contract.
+        const bool v2Native = schemaVersion == 2 && (descriptor.Preset == QStringLiteral("linux-clang-release") ||
+                                                     descriptor.Preset == QStringLiteral("macos-clang-debug") ||
+                                                     descriptor.Preset == QStringLiteral("macos-clang-development") ||
+                                                     descriptor.Preset == QStringLiteral("macos-clang-release"));
+        if (!v1Preset && !v2Native)
         {
             return Fail(ResultCode::InvalidProject,
                         schemaVersion == 2
-                            ? QStringLiteral("'preset' must be linux-clang-{debug,development,release}")
+                            ? QStringLiteral("'preset' must be {linux,macos}-clang-{debug,development,release}")
                             : QStringLiteral("'preset' must be linux-clang-debug or linux-clang-development"));
         }
     }

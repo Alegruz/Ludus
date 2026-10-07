@@ -41,8 +41,13 @@ bool ExerciseInstalledFluid() noexcept;
 bool ExerciseInstalledCurves() noexcept;
 
 static_assert(ludus::foundation::kTarget.PointerBits == sizeof(void*) * 8);
+#if defined(LUDUS_PLATFORM_MACOS)
+static_assert(ludus::foundation::kTarget.Os == ludus::foundation::TargetOs::MacOS);
+static_assert(LUDUS_EXPECTED_TARGET_OS == LUDUS_OS_MACOS);
+#else
 static_assert(ludus::foundation::kTarget.Os == ludus::foundation::TargetOs::Linux);
 static_assert(LUDUS_EXPECTED_TARGET_OS == LUDUS_OS_LINUX);
+#endif
 int ExerciseInstalledThreading() noexcept;
 bool ExerciseInstalledLocalization() noexcept;
 

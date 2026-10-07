@@ -61,6 +61,9 @@ def default_store_root() -> Path:
     if env:
         return Path(env)
     xdg = os.environ.get("XDG_DATA_HOME")
+    import platform
+    if not xdg and platform.system() == "Darwin":
+        return Path.home() / "Library/Application Support/Ludus"
     base = Path(xdg) if xdg else Path.home() / ".local" / "share"
     return base / "ludus"
 

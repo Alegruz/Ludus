@@ -672,3 +672,44 @@ full game-window create/open/build/run/stop acceptance journey remain separate
 P4 follow-ups. Web SDK acquisition is still an explicit engine-tooling step;
 the Project dialog accepts installed web prefixes. Engine preparation in the
 dialog is explicitly opted in and limited to the trusted native tooling root.
+
+## macOS project-tooling acceptance
+
+The macOS extension uses branch `codex/macos-project-tooling`, upstream Clang
+18.1.8, managed CMake 3.29.6/Ninja 1.11.1, and the prepared macOS SDK/libc++
+headers. Shared Python/C++ version-2 fixtures include all three macOS profiles;
+version 1 remains unchanged. Native CI executes the installed CLI acceptance:
+
+```bash
+out/host-tools/venv/bin/python tests/sdk_consumer/verify_macos_project_tooling.py \
+    --sdk "$PWD/out/install/macos-clang-development" --tools "$PWD" \
+    --cli "$PWD/out/project-tooling-venv/bin/ludus"
+```
+
+This journey runs from outside the checkout with a fresh installed CLI and a
+relocated SDK. Two projects share that SDK and link FoundationBase, filesystem,
+Platform, GraphicsRhi, Content, Audio, AudioContent and Text without producer
+Conan paths. It verifies selectable configure/build/test presets, real staged
+creation and final build/run, Metal shader generation, a fresh clone with missing
+local settings, read-only failed checks, moved SDK/tools, preserved custom
+presets/editor preferences, and repeated repair. Compile databases contain game
+source only. SDK preparation bundles the static dependency closure; the native
+SDK consumer also receives the prepared macOS compiler/sysroot/libc++ flags.
+
+`test_macos_project_tooling` reuses the complete setup regression suite and adds
+architecture/runtime identity, macOS deployment cache, retargeted sysroot links,
+missing toolchain inputs, Metal versus SPIR-V tool requirements, browser flag
+isolation, selected compiler probing and explicit profile/preparation tests.
+Linux CI runs these fixture contracts; native macOS CI additionally runs the
+installed journey above. Native Intel execution, universal binaries, Qt Editor
+acceptance, macOS release packaging/signing, and shipping-game acceptance remain
+unverified follow-ups.
+
+Local Apple silicon validation on macOS 26.6: 139 relevant Python CLI/setup
+regressions passed, the installed CLI journey above passed, all 62 native
+Development CTest cases passed, and `scripts/install-sdk macos-clang-development`
+built/linked/ran the full SDK consumer with no Conan prefix. Pinned formatting,
+consumer clang-tidy, canonical documentation checks, strict MkDocs, wiki parity
+and offline packaging were run. Linux-only Editor process tests use `waitid`
+and cannot run on macOS; they remain in Linux CI and are outside this native
+CLI port. Native sanitizer validation remains in the macOS CI matrix.

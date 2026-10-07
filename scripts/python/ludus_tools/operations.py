@@ -18,7 +18,7 @@ import os
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -35,11 +35,7 @@ from .resolve import Resolution, assert_stamp_unchanged, needs_reconfigure, reso
 from .sdkstore import SdkStore
 
 # Map a descriptor preset to the native flavor and CMake build type.
-PRESET_FLAVOR = {
-    "linux-clang-debug": "Debug",
-    "linux-clang-development": "Development",
-    "linux-clang-release": "Release",
-}
+from .native import PRESET_FLAVOR, target_for_profile, validate_target
 
 DESCRIPTOR_NAME = "ludus.project.json"
 LOCK_NAME = "ludus.lock.json"
@@ -129,6 +125,7 @@ def resolve_project(
     if preset not in PRESET_FLAVOR:
         raise ToolingError(INVALID_PROJECT, f"unknown profile/preset {preset!r}")
     flavor = PRESET_FLAVOR[preset]
+    descriptor = replace(descriptor, preset=preset)
 
     source_dir = (paths.project_dir / descriptor.source_dir).resolve()
     build_dir = _build_dir_for(paths.project_dir, source_dir, preset)
@@ -140,15 +137,8 @@ def resolve_project(
     validate_descriptor_lock_agreement(descriptor.engine.version, lock)
     local_settings = parse_local_settings_file(paths.local_settings_path)
 
-    target_triple = _target_triple_for_lock(lock, flavor)
-    if target_triple is None:
-        # An unresolved project created with --sdk records the SDK's actual
-        # triple in local settings (e.g. x86_64-linux-gnu). Respect that saved
-        # namespace instead of looking only for the release label linux-x64.
-        local_targets = {entry.target for entry in local_settings.overrides if entry.flavor == flavor}
-        if len(local_targets) > 1 and cli_sdk_prefix is None:
-            raise ToolingError(INVALID_PROJECT, "multiple local SDK targets for this flavor; select an explicit SDK")
-        target_triple = next(iter(local_targets), "x86_64-linux-gnu")
+    requested_target = target_for_profile(preset)
+    target_triple = _target_triple_for_lock(lock, flavor, requested_target) or requested_target
     # Resolve once without the host gate to learn the SDK identity, then (when
     # enforcing) re-resolve with a host-toolchain reference so an incompatible
     # compiler/runtime ABI is rejected before configure. Resolving twice is cheap
@@ -162,10 +152,22 @@ def resolve_project(
         cli_prefix=cli_sdk_prefix,
         required_features=descriptor.engine.features or None,
     )
+    validate_target(resolution.identity, preset)
+    if resolution.identity.engine_version != descriptor.engine.version:
+        raise ToolingError(INVALID_PROJECT, "SDK engine version does not match the project requirement")
+    missing = set(descriptor.engine.components) - set(resolution.identity.components)
+    if missing:
+        raise ToolingError(INVALID_PROJECT, f"SDK lacks required components: {sorted(missing)}")
     if enforce_host_toolchain:
         from .identity import detect_host_toolchain
 
-        host = detect_host_toolchain(resolution.identity)
+        from .project_setup import read_object, preset_for
+
+        selected = preset_for(source_dir, preset)
+        entries = read_object(source_dir / "CMakeUserPresets.json").get("configurePresets", [])
+        compiler = next((p.get("cacheVariables", {}).get("CMAKE_CXX_COMPILER")
+                         for p in entries if p.get("name") == selected), None)
+        host = detect_host_toolchain(resolution.identity, cxx=compiler, strict=True)
         resolution = resolve_sdk(
             target=target_triple,
             flavor=flavor,
@@ -185,9 +187,11 @@ def resolve_project(
     )
 
 
-def _target_triple_for_lock(lock, flavor) -> Optional[str]:
+def _target_triple_for_lock(lock, flavor, target: Optional[str] = None) -> Optional[str]:
+    aliases = {"x86_64-linux-gnu": "linux-x64", "arm64-apple-darwin": "macos-arm64",
+               "x86_64-apple-darwin": "macos-x64"}
     for p in lock.packages:
-        if p.flavor == flavor:
+        if p.flavor == flavor and (target is None or p.target in (target, aliases.get(target))):
             return p.target
     return None
 

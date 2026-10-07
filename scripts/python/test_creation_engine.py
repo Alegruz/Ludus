@@ -15,10 +15,13 @@ class CreationEngineTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         (self.root / "CMakeLists.txt").write_text("project(Ludus VERSION 0.1.0 LANGUAGES CXX)\n")
         self.prefix = self.root / "out/install/linux-clang-development"
         self.calls = []
+        profile = patch("ludus_tools.creation_engine.PROFILE", "linux-clang-development")
+        profile.start()
+        self.addCleanup(profile.stop)
         revision = patch("ludus_tools.creation_engine.source_revision", return_value="current")
         revision.start()
         self.addCleanup(revision.stop)
@@ -94,7 +97,7 @@ class CreationEngineTests(unittest.TestCase):
         selected = self.select(prepare=lambda prefix: prepare_creation_sdk(self.root, prefix, runner=runner))
         self.assertEqual(selected, engines.prepared_sdk_prefix(self.root))
         self.assertEqual(manifest.read_bytes(), original)
-        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(len(self.calls), 4)
         self.calls.clear()
         self.assertEqual(self.select(prepare=self.prepare), selected)
         self.assertEqual(self.calls, [])

@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "name": "My Game",
+  "provider": "cmake",
+  "source_dir": ".",
+  "preset": "macos-clang-release",
+  "target": "my_game",
+  "run": {
+    "cwd": ".",
+    "args": [
+      "--level=1"
+    ]
+  },
+  "engine": {
+    "version": "0.1.0",
+    "components": [
+      "FoundationBase",
+      "GraphicsRhi"
+    ],
+    "features": [
+      "rhi"
+    ]
+  },
+  "template": {
+    "id": "minimal",
+    "version": 1
+  }
+}
