@@ -233,3 +233,35 @@ wall-clock trace durations include scheduling noise and are not a throughput
 benchmark or CI calibration. Universal types gain no STL dependency, and the
 span/range cost is explicitly opt-in. No build budget is raised; the separate
 CI build-budget job remains the authoritative full-graph gate.
+
+## Owned decimal number parsing
+
+Opt in to `ludus/foundation/base/parse_number.hpp`; it is not included by
+`types.h` or `core.h`. `ParseUint64` consumes unsigned ASCII decimal digits.
+`ParseFloat32` consumes the complete JSON decimal-number grammar, including
+fraction and exponent, with no locale, allocation, exceptions or STL numeric
+conversion. Both accept at most 1024 bytes and preserve the output on failure.
+The API comments define the status and ownership contracts.
+
+Binary32 conversion rounds to nearest, ties to even, including subnormals and
+signed zero. Overflow, or a nonzero input that rounds to zero, reports
+`OutOfRange`; an exactly zero significand remains zero even with a huge exponent.
+A 1024-byte limit makes work and stack storage bounded; callers needing longer
+numbers must handle `TooLong` explicitly.
+
+The private implementation builds the exact decimal rational with fixed arrays
+of 192 32-bit words. It first rejects nonzero magnitudes outside decimal decades
+-46 through 38, then compares that rational against ordered positive binary32
+encodings using integer scaling. After locating adjacent encodings, it compares
+the exact midpoint and selects the even encoding on a tie. The upper endpoint
+models 2^128 solely to detect overflow; it never emits infinity. The maximum
+1024-digit significand and denominator scaling, including the binary midpoint
+shift, need fewer than 4096 bits, below the 6144-bit storage bound. Conversion
+uses no floating arithmetic and does not depend on the active rounding mode.
+This favors simple, exact loading-time behavior over a high-throughput parser;
+it is not intended for a per-frame text conversion hot path.
+
+Tests cover syntax, complete consumption, uint64 overflow, output preservation,
+negative zero, subnormals, normal boundaries, long midpoint-breaking tails,
+exact ties and overflow thresholds. A deterministic test-only CRT oracle
+provides independent binary32 comparisons. Production does not depend on it.

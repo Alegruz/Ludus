@@ -294,7 +294,7 @@ int main()
     {
         return threadingResult;
     }
-    // Verify the lifecycle API and static link without requiring Vulkan on CI.
+    // Verify the lifecycle API and static link without requiring a GPU adapter on CI.
     static_assert(noexcept(ludus::graphics::rhi::Initialize({})));
     static_assert(noexcept(ludus::graphics::rhi::SetFrameTarget({})));
     static_assert(noexcept(ludus::graphics::rhi::GetStartup()));

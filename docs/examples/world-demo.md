@@ -45,6 +45,27 @@ enable `LUDUS_BUILD_WORLD_DEMO=ON` in that preset's local CMake cache, and run
 application is opt-in so normal native onboarding does not require shader tools.
 Browser builds use the existing pinned Slang, SPIRV-Tools and SPIRV-Cross helpers.
 
+### macOS Metal
+
+The graphical demo is supported on macOS. Its level parser uses Ludus-owned
+binary32 decimal conversion, so floating-point `std::from_chars` availability
+is no longer a requirement. Prepare the native SDK/dependencies with `init.sh`
+and bootstrap shader tools as above, then configure the engine workspace:
+
+```bash
+out/host-tools/venv/bin/cmake --preset macos-clang-development -DLUDUS_BUILD_WORLD_DEMO=ON -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
+out/host-tools/venv/bin/cmake --build --preset macos-clang-development --target ludus_world_demo
+out/build/macos-clang-development/apps/world_demo/ludus_world_demo
+```
+
+For Debug, substitute `macos-clang-debug` in both commands and the executable
+path. In VS Code, configure that engine preset with `LUDUS_BUILD_WORLD_DEMO=ON`
+and the prepared Slang compiler path, then select `ludus_world_demo` as the
+launch target. Tests with `world` in their names are separate executables.
+`--headless` runs the simulation without a window; `--frames 3` renders three
+frames through Cocoa/Metal and exits. No installed SDK consumer project is
+needed for this engine application.
+
 ## Edit levels and gameplay
 
 Edit [first-room.json](../../apps/world_demo/levels/first-room.json) or
