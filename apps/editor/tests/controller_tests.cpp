@@ -109,9 +109,13 @@ TEST_CASE("Open reports a valid CMake setup using read-only preset inspection", 
     WriteCMakeProject(dir.path(), true);
     EditorController controller(AvailableTooling());
     controller.OpenProject(descriptor);
-    QTRY_VERIFY_WITH_TIMEOUT(controller.State().SetupStatus.contains(QStringLiteral("CMake setup ready")), 10000);
+    const bool ready = QTest::qWaitFor(
+        [&controller] { return controller.State().SetupStatus.contains(QStringLiteral("CMake setup ready")); },
+        10000);
+    INFO(controller.State().SetupStatus.toStdString());
+    REQUIRE(ready);
     // A terminal result is provisional until the one-shot adapter exits.
-    QTRY_VERIFY_WITH_TIMEOUT(controller.Caps().CanOpen, 10000);
+    REQUIRE(QTest::qWaitFor([&controller] { return controller.Caps().CanOpen; }, 10000));
     CHECK_FALSE(QFileInfo(QDir(dir.path()).filePath(QStringLiteral("out"))).exists());
 }
 
@@ -134,8 +138,12 @@ TEST_CASE("Open reports a stale CMake cache without rewriting it", "[editor][con
 
     EditorController controller(AvailableTooling());
     controller.OpenProject(descriptor);
-    QTRY_VERIFY_WITH_TIMEOUT(controller.State().SetupStatus.contains(QStringLiteral("stale CMake cache")), 10000);
-    QTRY_VERIFY_WITH_TIMEOUT(controller.Caps().CanOpen, 10000);
+    const bool stale = QTest::qWaitFor(
+        [&controller] { return controller.State().SetupStatus.contains(QStringLiteral("stale CMake cache")); },
+        10000);
+    INFO(controller.State().SetupStatus.toStdString());
+    REQUIRE(stale);
+    REQUIRE(QTest::qWaitFor([&controller] { return controller.Caps().CanOpen; }, 10000));
     QFile after(cachePath);
     REQUIRE(after.open(QIODevice::ReadOnly));
     CHECK(after.readAll() == before);

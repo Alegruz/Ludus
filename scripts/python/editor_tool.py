@@ -31,6 +31,7 @@ import json
 import os
 import platform
 import selectors
+import shutil
 import signal
 import subprocess
 import sys
@@ -951,12 +952,15 @@ class Operation:
                 if compiler is None:
                     compiler = shutil.which("clang++-18", path=plan.env.get("PATH"))
                 sdk_prefix = str(plan.resolution.prefix) if plan.resolution is not None else None
-                inspect_project_setup(
-                    plan.cmake[0], str(self._context.engine.ninja(self._context.tooling_root)),
-                    plan.source_dir, plan.build_dir, plan.env, descriptor.preset,
-                    compiler=str(compiler) if compiler is not None else None,
-                    sdk_prefix=sdk_prefix,
-                )
+                try:
+                    inspect_project_setup(
+                        plan.cmake[0], str(self._context.engine.ninja(self._context.tooling_root)),
+                        plan.source_dir, plan.build_dir, plan.env, descriptor.preset,
+                        compiler=str(compiler) if compiler is not None else None,
+                        sdk_prefix=sdk_prefix,
+                    )
+                except ValueError as exc:
+                    raise editor_project.ProjectError("InvalidProject", str(exc)) from exc
                 return OperationResult("success", "configuring", "Ok", "CMake project setup is ready")
 
             # Acquire the cooperative per-build-tree lock for the WHOLE operation,
