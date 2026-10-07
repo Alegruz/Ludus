@@ -232,6 +232,17 @@ class ArchiveTests(unittest.TestCase):
                 with self.assertRaises(ToolingError):
                     validate_native(payload, "bin/game")
 
+    def test_explicit_glibc_loader_dependency_is_a_system_prerequisite(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            _, _, payload = self.make_package(root)
+            source = root / "loader.cpp"
+            source.write_text("int main(){return 0;}\n")
+            subprocess.run(["clang++-18", str(source), "-Wl,--no-as-needed", "-Wl,-l:ld-linux-x86-64.so.2",
+                            "-o", str(payload / "bin/game")], check=True, capture_output=True)
+            external = validate_native(payload, "bin/game")
+            self.assertIn("ld-linux-x86-64.so.2", external)
+
     def test_unknown_dependency_and_absolute_loader_path(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -24,6 +24,36 @@ that violates it.
 
 ---
 
+## Agent branches and worktree isolation (hard rule)
+
+- **Never perform agent implementation or documentation work directly on
+  `main`, and never commit or push agent changes to `main`.** Use a task-specific
+  `codex/` branch. Start new work from freshly fetched `origin/main`; continue
+  an existing task on its own branch.
+- **Reserve the user's original/primary Ludus checkout for the user's own
+  development.** An agent must not use that directory as its working checkout,
+  even if it is already on a feature branch. Inspect it read-only as needed,
+  then use a separate Git worktree before editing, configuring, building or
+  running tests that write files.
+- Give every concurrently working agent/task its own worktree and branch.
+  Check `git status`, the current branch and `git worktree list` before work.
+  Reuse only a worktree belonging to this task that no other agent is using;
+  otherwise create one. Never switch or reuse another active task's checkout
+  or checked-out branch.
+- A separate branch in the same directory does **not** provide isolation:
+  agents would still share source files, the Git index and the checkout's
+  selected branch. Keep generated files, CMake caches, local presets and build
+  outputs inside the agent's own worktree. Read-only installed toolchains and
+  dependencies may be shared; writable build trees must not be shared.
+- Preserve the user's and other agents' work. Do not switch branches, stash,
+  reset, clean, stage or overwrite changes in their checkouts as part of an
+  agent task. Do not bypass Git's protection against checking out a branch
+  already used by another worktree.
+- Submit agent changes through a pull request targeting `main`; do not merge
+  agent work into `main` directly. Report the task branch and worktree path so
+  the user can locate and review the changes. This policy guides agent behavior;
+  it does not automatically move agents that are already using a shared checkout.
+
 ## Coding standards
 
 ### No C++ exceptions (hard rule)
