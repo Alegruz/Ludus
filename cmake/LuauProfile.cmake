@@ -1,4 +1,4 @@
-# Experimental reviewed interpreter profile shared by S0 and S1. No SDK export.
+# Experimental reviewed interpreter profile shared by S0-S4. Only S4 installs a private static link closure.
 include_guard(GLOBAL)
 function(ludus_prepare_luau)
     if(TARGET Luau.VM)

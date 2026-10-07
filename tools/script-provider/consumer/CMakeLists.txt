@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.28)
+project(BehaviorConsumer LANGUAGES CXX)
+find_package(Ludus REQUIRED COMPONENTS Behavior)
+ludus_cook_behaviors(NAME encounter CONTRACT "../fixtures/contract.json"
+    PACKAGE "../fixtures/package.json")
+add_executable(behavior_consumer main.cpp)
+add_dependencies(behavior_consumer encounter_cook)
+target_include_directories(behavior_consumer PRIVATE "${encounter_DIRECTORY}")
+target_link_libraries(behavior_consumer PRIVATE Ludus::Behavior)
+ludus_apply_app_policy(behavior_consumer)
+enable_testing()
+add_test(NAME installed_behavior_consumer COMMAND behavior_consumer)
+
+install(TARGETS behavior_consumer RUNTIME DESTINATION bin COMPONENT GameRelease)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE.txt" DESTINATION . COMPONENT GameRelease)
+get_filename_component(behavior_share "${Ludus_SDK_MANIFEST}" DIRECTORY)
+install(DIRECTORY "${behavior_share}/licenses/" DESTINATION licenses/Ludus COMPONENT GameRelease)

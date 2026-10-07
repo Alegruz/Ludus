@@ -10,6 +10,10 @@ on:
       - 'config/luau_toolchain.json'
       - 'cmake/LuauProfile.cmake'
       - 'modules/runtime/scripting/**'
+      - 'modules/runtime/behavior/**'
+      - 'tools/script-provider/**'
+      - 'scripts/script-provider'
+      - 'scripts/python/ludus_tools/behavior_cook.py'
       - 'tools/script-session/**'
       - 'scripts/script-session'
       - 'tools/visual-sequence/**'
@@ -224,6 +228,12 @@ jobs:
           ./scripts/script-session run --preset web-emscripten-release
           ./scripts/script-session check --preset web-emscripten-development
           ./scripts/script-session check --preset web-emscripten-release
+      - name: Validate S4 public provider and shipping package in Wasm
+        run: |
+          ./scripts/script-provider run --preset web-emscripten-development
+          ./scripts/script-provider run --preset web-emscripten-release
+          ./scripts/script-provider check --preset web-emscripten-development
+          ./scripts/script-provider check --preset web-emscripten-release
       - name: Validate S3 generated graph, text equivalence and node debugger in Wasm
         run: |
           ./scripts/visual-sequence run --preset web-emscripten-development

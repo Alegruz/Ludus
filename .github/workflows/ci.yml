@@ -275,6 +275,10 @@ jobs:
           ./scripts/script-session cook
           ./scripts/script-session run --preset linux-clang-development
           ./scripts/script-session check --preset linux-clang-development
+      - name: Validate S4 installed provider and project cooker
+        run: |
+          ./scripts/script-provider run --preset linux-clang-development
+          ./scripts/script-provider check --preset linux-clang-development
       - name: Validate S3 visual sequence and authoring ownership
         run: |
           ./scripts/visual-sequence cook
@@ -336,6 +340,10 @@ jobs:
             out/filesystem-benchmark/syscalls-*.txt
       - name: Validate installed SDK and consumer
         run: ./scripts/install-sdk linux-clang-development
+      - name: Cook and execute an independent project with the relocated Behavior SDK
+        run: |
+          python3 tools/script-provider/verify_consumer.py out/install/linux-clang-development
+          python3 tools/script-provider/verify_optional.py linux-clang-development
       - name: Relocate the SDK and link a consumer without producer dependencies
         run: |
           set -euo pipefail
@@ -399,6 +407,8 @@ jobs:
           ./scripts/script-session run --preset linux-clang-asan-ubsan
       - name: Validate S3 graph debugger, candidate failure and owner retirement with sanitizers
         run: ./scripts/visual-sequence run --preset linux-clang-asan-ubsan
+      - name: Validate S4 provider transactions and state under sanitizers
+        run: ./scripts/script-provider run --preset linux-clang-asan-ubsan
       - name: Test with sanitizers
         env:
           LUDUS_RELOAD_METRICS: ${{ runner.temp }}/live-reload-asan-ubsan.jsonl
