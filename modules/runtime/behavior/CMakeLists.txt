@@ -1,5 +1,5 @@
 # Optional installed provider. Ordinary C++/data SDKs acquire no Luau payload.
-find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+ludus_require_python("Behavior provider")
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/script-provider" verify-tools
     RESULT_VARIABLE behavior_tools_result OUTPUT_QUIET)
 if(NOT behavior_tools_result EQUAL 0)

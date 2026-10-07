@@ -4,11 +4,13 @@ function(ludus_prepare_luau)
     if(TARGET Luau.VM)
         return()
     endif()
-    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+    ludus_require_python("Luau scripting")
     execute_process(COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/luau-probe" verify-sources
-        RESULT_VARIABLE verified)
+        RESULT_VARIABLE verified OUTPUT_VARIABLE verification_output ERROR_VARIABLE verification_error TIMEOUT 30)
     if(NOT verified EQUAL 0)
-        message(FATAL_ERROR "Prepare the reviewed Luau source with scripts/luau-probe bootstrap")
+        ludus_dependency_error("Luau scripting" "the reviewed source profile"
+            "Source verification failed: ${verification_output}${verification_error}"
+            "From the Ludus source repository root: ./scripts/luau-probe bootstrap")
     endif()
     set(LUAU_BUILD_CLI OFF CACHE BOOL "" FORCE)
     set(LUAU_BUILD_TESTS OFF CACHE BOOL "" FORCE)

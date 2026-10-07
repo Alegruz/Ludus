@@ -124,6 +124,8 @@ set(LUDUS_GAME_COMPATIBILITY_IDENTITY
 configure_file(cmake/CheckSdkVariant.cmake.in "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" @ONLY)
 install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENTS)
 
+include(EngineDependencyPreflight)
+
 add_subdirectory(modules/foundation/base)
 # Portable bounded networking primitives are shared by native and web targets.
 add_subdirectory(modules/network/core)
@@ -397,7 +399,7 @@ install(
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${LUDUS_ENGINE_PACKAGE_NAME}/dependencies"
 )
 
-install(FILES cmake/LudusShaders.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
+install(FILES cmake/LudusDependencies.cmake cmake/LudusShaders.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
 # Gameplay project helper + host/shipping main templates (project-live-reload).
 if(NOT EMSCRIPTEN)
     install(FILES

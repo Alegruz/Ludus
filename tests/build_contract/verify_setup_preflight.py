@@ -20,6 +20,7 @@ class SetupPreflightTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "checkout with spaces"
         (self.root / "cmake").mkdir(parents=True)
         shutil.copy2(SOURCE / "cmake/EngineSetupPreflight.cmake", self.root / "cmake")
+        shutil.copy2(SOURCE / "cmake/LudusDependencies.cmake", self.root / "cmake")
         shutil.copy2(SOURCE / "CMakeLists.txt", self.root)
 
     def configure(self, toolchain, preset="macos-clang-debug"):

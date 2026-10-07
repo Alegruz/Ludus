@@ -4,6 +4,46 @@ Build this checkout to develop the engine or produce an installed SDK. For a
 game project, use [the independent-project workflow](project-sdk-workflow.md).
 All commands below run from the Ludus repository root.
 
+## Missing or stale dependencies
+
+CMake configuration checks the dependencies required by enabled features before
+creating build rules. A **Ludus setup problem** reports the affected feature,
+missing tool/file or package setting, and a **How to fix** action. Run that action
+explicitly, then use **CMake: Configure** in VS Code (or rerun your configure
+command) before building. Configure and build do not download or repair tools.
+
+- Missing generated native/browser toolchain: run the preset-specific `init.sh`
+  command printed by the error.
+- Removed compiler or Ninja executable: restore it or update the named CMake
+  setting; rerun `./init.sh` for project-managed tools. If changing compilers,
+  configure a fresh build directory rather than reusing an incompatible cache.
+- Missing Catch2, volk, FreeType or HarfBuzz package metadata: prepare the selected preset with
+  `init.sh`; tests need `--with-tests`. Custom builds can set the package's `_DIR`
+  setting or `CMAKE_PREFIX_PATH` to an existing compatible installation.
+- Missing shader compiler/validator: run `./scripts/shader-probe bootstrap` from
+  the Ludus source repository. Browser GLSL ES also needs
+  `./scripts/bootstrap-spirv-cross`. If tools moved, update
+  `LUDUS_SLANG_COMPILER`, `LUDUS_SPIRV_VALIDATOR`, or `LUDUS_SPIRV_CROSS`.
+  macOS Metal requires only Slang. Installed SDK consumers use the same checks;
+  bootstrap commands belong to the source repository, not the game directory.
+- Unusable Python: install Python 3.10+ and set `Python3_EXECUTABLE` if needed.
+- Missing editor Qt: use opted-in native editor setup or follow the
+  [browser editor guide](browser-editor.md); an existing installation can be
+  selected with `Qt6_DIR`.
+- Missing Luau source profile: run `./scripts/luau-probe bootstrap` explicitly.
+  Behavior cooking reports missing paired SDK host tools and inputs with their
+  declaration names; restore the matching SDK or correct those arguments.
+- Missing shader/reflection inputs: restore the named project file or fix the
+  source/schema/baseline declaration. Missing installed generator files require
+  restoring or reinstalling the SDK.
+
+Optional features do not require their tools when disabled. Existing but
+unrunnable Slang/validator executables report their probe failure, including
+shared-library or permission problems. These checks catch common setup failures;
+package-internal errors and dependencies removed after configuration can still
+produce underlying CMake/build-tool diagnostics. They are not a full integrity
+or tool-version audit; build-time shader checks retain that responsibility.
+
 ## One-command onboarding
 
 

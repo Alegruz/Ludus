@@ -1,3 +1,4 @@
+include("${CMAKE_CURRENT_LIST_DIR}/LudusDependencies.cmake")
 # Run before project(): otherwise CMake's compiler setup reports only a missing
 # toolchain path, without explaining how to prepare this checkout/preset.
 function(ludus_check_setup)
@@ -50,3 +51,12 @@ function(ludus_check_setup)
 endfunction()
 
 ludus_check_setup()
+
+# A cached compiler/Ninja path can survive after tools move or are removed.
+# Check explicit selections before project() obscures the setup problem.
+foreach(variable CMAKE_MAKE_PROGRAM CMAKE_C_COMPILER CMAKE_CXX_COMPILER)
+    if(DEFINED ${variable} AND NOT "${${variable}}" STREQUAL "")
+        ludus_require_tool(${variable} "Build configuration"
+            "Restore the selected tool or set ${variable} to its executable. For project-managed tools run ./init.sh from the repository root.")
+    endif()
+endforeach()
