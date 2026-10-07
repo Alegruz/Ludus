@@ -99,6 +99,12 @@ engine code. Discuss such cases in the PR before adding them.
 
 ### Public SDK documentation
 
+- Treat documentation as part of every new feature. Include appropriate Doxygen
+  comments for its new or changed public API in the same change, following the
+  requirements below.
+- When a new feature needs setup instructions, usage examples, or an explanation
+  of its workflow or limitations, add or update the appropriate Ludus wiki or
+  guide page in the same change.
 - Document new or changed public classes, structs, functions, methods, aliases,
   enum values, constants and macros beside their declarations using Doxygen
   `///` comments (or `/** ... */`). Plain `//` comments are not API descriptions.
