@@ -71,11 +71,17 @@ if (typeof window === 'undefined' && typeof process === 'object') {
       },
       createShaderModule(desc) {assert(desc.code.includes('@vertex') && desc.code.includes('@fragment'), 'WGSL missing'); return {kind: 'shader'};},
       createRenderPipeline(desc) {assert(desc.vertex.module && desc.fragment.targets[0].format === 'bgra8unorm', 'pipeline descriptor'); ++stats.pipelines; return {kind: 'pipeline'};},
+      createTexture(desc) {
+        assert(desc.format === 'depth24plus' && desc.size.width === canvas.width && desc.size.height === canvas.height,
+               'depth attachment size/format');
+        return {kind:'frame depth texture', createView(){return {kind:'frame depth view'};}, destroy(){}};
+      },
       createCommandEncoder() {
         let ended = false;
         return {kind: 'frame encoder',
           beginRenderPass(desc) {
             assert(desc.colorAttachments.length === 1 && desc.colorAttachments[0].loadOp === 'clear', 'clear pass');
+            assert(desc.depthStencilAttachment.view.kind === 'frame depth view' && desc.depthStencilAttachment.depthClearValue === 1 && desc.depthStencilAttachment.depthLoadOp === 'clear', 'depth clear pass');
             assert(desc.colorAttachments[0].clearValue.r === 0, 'clear remains independent of animation uniforms');
             let bound = false;
             return {kind: 'frame pass',

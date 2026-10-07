@@ -231,6 +231,34 @@ TEST_CASE("Portable identities exhaust without wrapping or becoming live again",
     CHECK(internal::RasterNextGeneration(~uint64{0}) == 0);
     CHECK(internal::RasterNextGeneration(0) == 0);
 }
+TEST_CASE("Failed asynchronous pipeline dependencies preserve their failure result", "[rhi][raster]")
+{
+    Session session;
+    Scene scene(session.Device);
+    reference::Next = RasterStatus::Pending;
+    const RasterVertexStream stream{12, false};
+    const RasterVertexAttribute attribute{0, 0, 0, RasterVertexFormat::Float3};
+    RasterPipelineHandle pipeline;
+    REQUIRE(CreateRasterPipeline(session.Device,
+                                 {scene.Vertex, scene.Fragment, scene.Layout, {&stream, 1}, {&attribute, 1}, true},
+                                 pipeline) == RasterStatus::Pending);
+    const auto request = reference::LastRequest;
+    internal::RasterExpect(request, internal::RasterCallbacks::Two);
+    internal::RasterFail(request, RasterStatus::OutOfMemory);
+    REQUIRE(GetStatus(session.Device, pipeline) == RasterStatus::OutOfMemory);
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    auto draw = scene.Draw();
+    draw.Pipeline = pipeline;
+    CHECK(DrawIndexed(session.Device, draw) == RasterStatus::OutOfMemory);
+    CHECK(reference::Draws == 0);
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+    REQUIRE(Destroy(session.Device, pipeline) == RasterStatus::Ready);
+    CHECK(reference::Destroys[7] == 0);
+    internal::RasterComplete(request, RasterStatus::Ready);
+    internal::RasterComplete(request, RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, scene.Pipeline) == RasterStatus::Ready);
+    CHECK(reference::Destroys[7] == 2);
+}
 TEST_CASE("Portable admission verifies negotiated profile before readiness", "[rhi][raster]")
 {
     Session session;

@@ -120,7 +120,7 @@ RasterCreateBuffer(usize slot, const BufferDescription& info, std::span<const ui
                                                          : WGPUBufferUsage_Index;
     auto object = wgpuDeviceCreateBuffer(gDevice, &descriptor);
     gRasterBuffers[slot] = object;
-    if (object != nullptr)
+    if (object != nullptr && wgpuBufferGetMapState(object) == WGPUBufferMapState_Mapped)
     {
         void* mapped = wgpuBufferGetMappedRange(object, 0, descriptor.size);
         if (mapped != nullptr)

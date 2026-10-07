@@ -657,10 +657,13 @@ RasterStatus CreateRasterPipeline(DeviceHandle device,
     {
         return RasterStatus::InvalidHandle;
     }
-    if (vertex->Status != RasterStatus::Ready || fragment->Status != RasterStatus::Ready ||
-        layout->Status != RasterStatus::Ready)
+    const Record* dependencies[]{vertex, fragment, layout};
+    for (const auto* dependency : dependencies)
     {
-        return RasterStatus::NotReady;
+        if (dependency->Status != RasterStatus::Ready)
+        {
+            return dependency->Status == RasterStatus::Pending ? RasterStatus::NotReady : dependency->Status;
+        }
     }
     if (vertex->Shader.Stage != ShaderStage::Vertex || fragment->Shader.Stage != ShaderStage::Fragment ||
         !ShaderFits(vertex->Shader, layout->Layout) || !ShaderFits(fragment->Shader, layout->Layout) ||
@@ -741,10 +744,13 @@ RasterStatus DrawIndexed(DeviceHandle device, const RasterDraw& draw) noexcept
     {
         return RasterStatus::InvalidHandle;
     }
-    if (pipeline->Status != RasterStatus::Ready || set->Status != RasterStatus::Ready ||
-        indices->Status != RasterStatus::Ready)
+    const Record* dependencies[]{pipeline, set, indices};
+    for (const auto* dependency : dependencies)
     {
-        return RasterStatus::NotReady;
+        if (dependency->Status != RasterStatus::Ready)
+        {
+            return dependency->Status == RasterStatus::Pending ? RasterStatus::NotReady : dependency->Status;
+        }
     }
     const auto& info = pipeline->Pipeline;
     if (set->Set.Layout != info.Layout || draw.Vertices.size() != info.StreamCount || draw.IndexCount == 0 ||
@@ -798,7 +804,7 @@ RasterStatus DrawIndexed(DeviceHandle device, const RasterDraw& draw) noexcept
         }
         if (buffer->Status != RasterStatus::Ready)
         {
-            return RasterStatus::NotReady;
+            return buffer->Status == RasterStatus::Pending ? RasterStatus::NotReady : buffer->Status;
         }
         const usize count = info.Streams[i].PerInstance ? draw.InstanceCount : draw.VertexCount;
         if (buffer->Buffer.Role != BufferRole::Vertex || slice.Offset % 4 != 0 ||
