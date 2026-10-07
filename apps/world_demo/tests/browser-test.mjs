@@ -8,7 +8,8 @@ const root = resolve(process.argv[2]);
 const output = resolve(process.argv[3] || 'out/world-browser');
 await mkdir(output, {recursive:true});
 const server = createServer(async (request, response) => {
-  const path = resolve(root, '.' + (request.url === '/' ? '/index.html' : new URL(request.url, 'http://localhost').pathname));
+  const pathname = new URL(request.url, 'http://localhost').pathname;
+  const path = resolve(root, '.' + (pathname === '/' ? '/index.html' : pathname));
   if (!path.startsWith(root + sep)) {response.writeHead(403).end(); return;}
   try {const data = await readFile(path); response.writeHead(200, {'Content-Type': path.endsWith('.wasm') ? 'application/wasm' : path.endsWith('.js') ? 'text/javascript' : 'text/html'}).end(data);}
   catch {response.writeHead(404).end();}
