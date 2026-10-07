@@ -7,9 +7,11 @@ generated native/Luau contract and experimental runtime. [S2](luau-s2.md) adds
 private dependency cook, source debugging, declared-state migration and whole-VM
 replacement with a GameHost debug capability. [S3](visual-s3.md) adds a private
 visual encounter workbench with structured sequences, semantic review and real
-node debugging/replacement. These milestones do not add an
-installed scripting SDK, production gameplay provider, or graph
-editor. The [Gems review](scripting-gems-review.md) records the literature review
+node debugging/replacement. [S4](behavior-s4.md) adds the optional installed
+native/Luau provider, project contracts, paired cooking and static player-package
+acceptance. Editor integration, six-platform/safety qualification and representative
+release acceptance remain S5–S7; the production design below still includes future
+capabilities. The [Gems review](scripting-gems-review.md) records the literature review
 and resulting refinements.
 
 ## Recommendation
@@ -865,12 +867,15 @@ or creating a worker VM pool.
 | S1 | One Luau interaction, shared manifest, and headless fixture | Generated operation/value/event/state definitions; checked references and numeric boundaries; explicit state; phase ordering; diagnostic context; fault preserves unpublished effects. Equivalent native fixture checks the contract without forcing native systems into a VM. |
 | S2 | Real debugger, cook, and program reload | Actual breakpoint/local inspection, immutable packages, dependency invalidation, failed candidate retention, durable state migration, native module VM retirement, and browser event-loop behavior. |
 | S3 | One useful visual sequence/state machine workflow | Designer authors, reviews, debugs, reloads, and tests an encounter; stable IDs, undo, semantic merge/diff, node source maps, and text/graph effect equivalence. |
-| S4 | Scale or specialist extensions justified by the game | Representative profiles and usability evidence before adding coroutines, collections, behavior trees, native compilation, parallel evaluation, or mods. |
+| S4 | Installed native/Luau provider, generated project bindings, cook and static shipping | Optional `Ludus::Behavior`; closed project contracts; state codecs/migration; staged effects and fault retirement; paired offline cooker; relocated SDK-only project with real configure/build/test and failed-candidate retention. See [implemented scope](behavior-s4.md). |
+| S5 | Editor/GameHost authoring and debugging integration | Project-owned text/graph assets, shared cook controls, diagnostics and source/node stops in the actual editor; explicit reload/restart and native module lease retirement. |
+| S6 | Six-platform and safety acceptance | Windows, macOS, Linux, Web, Android and iOS builds/runs in declared profiles; physical device/browser acceptance; remaining trampoline/resource/security audits and unsupported-profile rejection. |
+| S7 | Representative scale, usability and release qualification | Game-derived budgets, iteration/performance/size evidence, representative designer workflow and release packaging. Specialist extensions need measured game requirements. |
 | C0 optional | C# feasibility for a named project and target profile | Pinned runtime/compiler/deployment choice; native interop layout and explicit errors; process/assembly ownership; debugger and package/startup cost; declared reload/restart, trust, and resource-control capabilities. No all-platform claim from a desktop host test. |
 | C1 optional | Useful C# behavior and mixed-provider acceptance | Generated bindings/codecs; equivalent effects/state; ordered Luau/native/C# events; failed candidate preservation; delegate/GC-root retirement; native module lease retirement; repeated reload or declared restart; managed exceptions stay inside the provider. |
 | C2 optional | Additional C# target profiles | Real builds, physical device/browser runs, approved dependencies, deployment/policy compatibility, diagnostics/debug capabilities, memory/performance and reload/restart acceptance for each selected profile. |
 
-C stages begin only for a concrete project requirement and do not block S0-S3.
+C stages begin only for a concrete project requirement and do not block S0-S7.
 Generate a C facade only for a real consumer and gate it on calling convention,
 layout, bounded-buffer, and lifecycle conformance. Do not infer native C source
 support or managed deployment success from generated declarations alone.

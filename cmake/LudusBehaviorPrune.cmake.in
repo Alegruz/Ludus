@@ -1,0 +1,10 @@
+# These paths belong exclusively to the opt-in component. Reinstallation with
+# it disabled must remove stale headers/tools/archives from a previous SDK.
+file(REMOVE_RECURSE
+    "${CMAKE_INSTALL_PREFIX}/@CMAKE_INSTALL_INCLUDEDIR@/ludus/runtime/behavior"
+    "${CMAKE_INSTALL_PREFIX}/@CMAKE_INSTALL_LIBDIR@/Ludus/behavior"
+    "${CMAKE_INSTALL_PREFIX}/@CMAKE_INSTALL_DATADIR@/Ludus/behavior"
+    "${CMAKE_INSTALL_PREFIX}/@CMAKE_INSTALL_DATADIR@/Ludus/licenses/Luau")
+file(REMOVE
+    "${CMAKE_INSTALL_PREFIX}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@ludus_runtime_behavior@CMAKE_STATIC_LIBRARY_SUFFIX@"
+    "${CMAKE_INSTALL_PREFIX}/@CMAKE_INSTALL_LIBDIR@/cmake/Ludus/LudusBehavior.cmake")

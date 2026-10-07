@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "programs": [
+    {
+      "asset": "0000000000000100",
+      "revision": 1,
+      "source": "door.luau",
+      "entrypoint": true,
+      "imports": [
+        "0000000000000600"
+      ]
+    },
+    {
+      "asset": "0000000000000200",
+      "revision": 1,
+      "source": "signal.luau",
+      "entrypoint": true,
+      "imports": []
+    },
+    {
+      "asset": "0000000000000300",
+      "revision": 1,
+      "source": "fault.luau",
+      "entrypoint": true,
+      "imports": []
+    },
+    {
+      "asset": "0000000000000400",
+      "revision": 1,
+      "source": "stale.luau",
+      "entrypoint": true,
+      "imports": []
+    },
+    {
+      "asset": "0000000000000500",
+      "revision": 1,
+      "source": "loop.luau",
+      "entrypoint": true,
+      "imports": []
+    },
+    {
+      "asset": "0000000000000600",
+      "revision": 1,
+      "source": "helper.luau",
+      "entrypoint": false,
+      "imports": []
+    },
+    {
+      "asset": "0000000000000700",
+      "revision": 1,
+      "source": "bindingfault.luau",
+      "entrypoint": true,
+      "imports": []
+    },
+    {
+      "asset": "0000000000000800",
+      "revision": 1,
+      "source": "capacity.luau",
+      "entrypoint": true,
+      "imports": []
+    }
+  ]
+}

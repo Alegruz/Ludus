@@ -12,9 +12,13 @@ from .release_model import fail
 
 # Declared external ABI baseline, not a sweep of the producer machine. GPU and
 # window-system libraries must be bundled or gain a separately reviewed policy.
+# Thanks to the Linux man-pages project, ld.so(8), Synopsis/Description:
+# https://man7.org/linux/man-pages/man8/ld.so.8.html . The declared glibc x64
+# interpreter is also a system prerequisite when emitted as a direct DT_NEEDED
+# dependency (e.g. the provider's PIC static link closure). Keep other names closed.
 SYSTEM_LIBRARIES = frozenset({
     "libc.so.6", "libm.so.6", "libdl.so.2", "libpthread.so.0", "librt.so.1",
-    "libstdc++.so.6", "libgcc_s.so.1", "libc++.so.1", "libc++abi.so.1", "libunwind.so.1",
+    "ld-linux-x86-64.so.2", "libstdc++.so.6", "libgcc_s.so.1", "libc++.so.1", "libc++abi.so.1", "libunwind.so.1",
 })
 POLICY = "linux-x64-release-1"
 

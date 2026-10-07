@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "namespace": "ludus::sample",
+  "config": [
+    {
+      "id": 1,
+      "name": "Threshold",
+      "type": "uint32",
+      "min": 1,
+      "max": 10,
+      "default": 2
+    }
+  ],
+  "state": [
+    {
+      "id": 10,
+      "name": "Interactions",
+      "type": "uint32",
+      "min": 0,
+      "max": 100,
+      "default": 0
+    },
+    {
+      "id": 11,
+      "name": "OpenRequested",
+      "type": "bool",
+      "default": false
+    }
+  ],
+  "event": [
+    {
+      "id": 20,
+      "name": "Target",
+      "type": "EntityRef"
+    },
+    {
+      "id": 21,
+      "name": "Amount",
+      "type": "uint32",
+      "min": 1,
+      "max": 10,
+      "default": 1
+    }
+  ],
+  "operations": [
+    {
+      "id": 200,
+      "name": "RequestDoorOpen",
+      "phase": 3,
+      "capability": 1,
+      "arguments": [
+        {
+          "id": 1,
+          "name": "Target",
+          "type": "EntityRef"
+        },
+        {
+          "id": 2,
+          "name": "Power",
+          "type": "uint32",
+          "min": 1,
+          "max": 10,
+          "default": 1
+        }
+      ]
+    },
+    {
+      "id": 201,
+      "name": "RequestSignal",
+      "phase": 3,
+      "capability": 2,
+      "arguments": [
+        {
+          "id": 1,
+          "name": "Enabled",
+          "type": "bool",
+          "default": false
+        }
+      ]
+    }
+  ]
+}
