@@ -206,6 +206,7 @@ Status ContentStatus(foundation::filesystem::Status status) noexcept
             return Status::Limit;
         case FileStatus::OutOfMemory:
             return Status::OutOfMemory;
+        case FileStatus::Conflict:
         case FileStatus::Changed:
             return Status::Conflict;
         case FileStatus::Unsupported:

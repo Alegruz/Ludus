@@ -31,6 +31,7 @@ int ExerciseInstalledContent() noexcept;
 int ExerciseInstalledAudio() noexcept;
 int ExerciseInstalledPack() noexcept;
 int ExerciseInstalledAsync() noexcept;
+int ExerciseInstalledPersistence() noexcept;
 bool ExerciseInstalledStrings() noexcept;
 bool ExerciseInstalledParsing() noexcept;
 bool ExerciseInstalledConfiguration() noexcept;
@@ -215,6 +216,10 @@ static_assert(PrimitiveContract());
 
 int main()
 {
+    if (const int result = ExerciseInstalledPersistence(); result != 0)
+    {
+        return result;
+    }
     if (const int result = ExerciseInstalledAsync(); result != 0)
     {
         return result;

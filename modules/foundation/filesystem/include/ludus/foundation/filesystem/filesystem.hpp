@@ -26,6 +26,7 @@ enum class Status : uint8
     Unsupported,     ///< Native I/O or a requested pack format/feature is unavailable.
     CorruptData,     ///< A pack index, payload or integrity check is malformed.
     LimitExceeded,   ///< Configured storage/index/decoded resource admission was exceeded.
+    Conflict,        ///< A publication precondition or cooperative writer lock was refused.
 };
 
 /// Status and optional native error number; success has no native error.
@@ -38,6 +39,21 @@ struct Result final
     {
         return Code == Status::Ok;
     }
+};
+
+/// Native metadata observation, not a content digest or a globally unique revision.
+/// Equality can miss edits that preserve metadata; never substitutes for content validation.
+struct FileStamp final
+{
+    uint64 Device = 0;             ///< Native filesystem device identifier.
+    uint64 Inode = 0;              ///< Native file identifier, which may eventually be reused.
+    uint64 Size = 0;               ///< Observed byte length.
+    int64 ModifiedSeconds = 0;     ///< Native modification timestamp seconds.
+    int64 ModifiedNanoseconds = 0; ///< Modification timestamp fractional nanoseconds.
+    int64 ChangedSeconds = 0;      ///< Native metadata change timestamp seconds.
+    int64 ChangedNanoseconds = 0;  ///< Metadata change timestamp fractional nanoseconds.
+    /// Compares all observed fields; equality does not prove identical bytes.
+    [[nodiscard]] bool operator==(const FileStamp&) const noexcept = default;
 };
 
 /// Read outcome and valid progress. On Changed, discard the potentially touched buffer.
@@ -121,6 +137,10 @@ public:
     /// Opens a validated relative path as a regular-file revision; failure preserves output.
     /// Native filename equivalence follows the host filesystem, including macOS case/Unicode rules.
     [[nodiscard]] Result OpenRead(std::string_view relativePath, File& output) const noexcept;
+    /// Observes a validated path without allocating or opening the leaf for reading.
+    /// Rejects child symlinks and non-regular leaves; failure preserves output.
+    /// NotFound means an ancestor or leaf was absent at observation time.
+    [[nodiscard]] Result Observe(std::string_view relativePath, FileStamp& output) const noexcept;
     /// Releases the root even on error; open files retain their independent lifetimes.
     [[nodiscard]] Result Close() noexcept;
 

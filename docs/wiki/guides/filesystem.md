@@ -1,8 +1,9 @@
-# Read assets through the filesystem
+# Read and publish files through the filesystem
 
 Link `Ludus::FoundationFilesystem` and include the API you use: `filesystem.hpp`
 for native directories/files, `namespace.hpp` for logical roots and mounts,
-`pack.hpp` for shipping packs, and `async.hpp` for bounded background reads.
+`pack.hpp` for shipping packs, `async.hpp` for bounded background reads,
+`persistence.hpp` for atomic publication, and `watch.hpp` for cooked-file hints.
 Native directory reads work on Linux and macOS. Memory and pack providers work
 on every target. AsyncReader has a dedicated blocking pool on Linux, macOS and
 Windows; browser initialization returns Unsupported. Browser hosts currently use
@@ -110,5 +111,54 @@ errors. Overflow discards oldest records and increments DroppedTraces. No loggin
 or callbacks run inside the scheduler.
 
 These budgets cover destinations and scheduler records. Set resource residency,
-pack decode scratch and GPU upload budgets separately. Persistence and watchers
-are planned in F5; this API grants no write permission or durable-save guarantee.
+pack decode scratch and GPU upload budgets separately. Select a write capability
+explicitly when publication is required.
+
+## Publish through an explicit write root
+
+Open a `WriteDirectory` with the native root selected by your host. Supply a
+validated relative path, a complete byte buffer and `WriteOptions`; parent
+directories must already exist. For optimistic admission, select Missing or
+MatchingStamp (obtain metadata with `Directory::Observe`). These are cooperative
+checks, so retain Content digest validation when stronger integrity is required.
+
+```cpp
+#include <ludus/foundation/filesystem/persistence.hpp>
+
+using namespace ludus::foundation;
+using namespace ludus::foundation::filesystem;
+
+PublicationResult SaveCooked(const WriteDirectory& root,
+                             std::span<const uint8> bytes) noexcept
+{
+    WriteOptions options;
+    options.MaxBytes = 8 * 1024 * 1024;
+    options.Sync = SyncPolicy::FileAndDirectory;
+    return root.Publish("cooked/model.bin", bytes, options);
+}
+```
+
+Inspect Published independently from Outcome: a directory-sync failure can occur
+after the new file is visible. FileSynced/DirectorySynced report native sync
+acknowledgments; Cleanup reports temporary or close failures. Handle those
+results at the host, including recovery when cleanup leaves a temporary. The
+[architecture contract](../../architecture/filesystem.md#f5-persistence-and-cooked-file-hints)
+defines cooperative locking, platform support and sync limitations.
+
+## Observe cooked-path hints and recover overflow
+
+Initialize a `Watcher` with fixed MaxPaths, HintCapacity and debounce nanoseconds.
+Register final cooked paths from your catalog with Add, keeping the returned
+handles. On its owner thread, call Advance with your monotonic timestamp and a
+bounded slot budget, then Poll hints. Treat Changed as a prompt to reopen and
+validate bytes; it never selects a new reader revision. Require atomic publication
+from producers and perform Content rebinding at your host boundary.
+
+When NeedsRescan becomes true (or Poll returns RescanRequired), call BeginRescan.
+Across host updates, call NextRescan with a bounded number of calls. Revalidate
+each RescanEntry, including unchanged paths. A successful empty poll completes the
+pass. If NeedsRescan remains true, inspect per-entry errors and retry after
+recovery. While rescanning, registration mutation and incremental polling are
+refused. Update registrations explicitly when the catalog gains or loses paths.
+Polling misses transient/metadata-preserving edits and is not a completion or
+integrity guarantee. See the architecture link above for the full contract.
