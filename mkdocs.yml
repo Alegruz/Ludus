@@ -77,6 +77,7 @@ nav:
       - Projects and setup repair: development/project-sdk-workflow.md
       - Platform targets and compatibility: wiki/guides/platform-targets.md
       - Engine configuration: wiki/guides/configuration.md
+      - Filesystem and background reads: wiki/guides/filesystem.md
       - Strings and names: wiki/guides/strings.md
       - Hashing: wiki/guides/hashing.md
       - Deterministic randomness: wiki/guides/randomness.md

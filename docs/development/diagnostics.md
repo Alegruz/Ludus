@@ -83,4 +83,3 @@ out/host-tools/venv/bin/cmake --preset linux-clang-release -B out/build/linux-cl
 out/host-tools/venv/bin/cmake --build out/build/linux-clang-release-assert-tests
 out/host-tools/venv/bin/ctest --test-dir out/build/linux-clang-release-assert-tests --output-on-failure
 ```
-
