@@ -44,7 +44,7 @@ public:
         foundation::core::Array<foundation::uint32> sparse;
         foundation::core::Array<EntityId> owners;
         foundation::core::Array<T> values;
-        if (!sparse.TryResize(count, Missing) || !owners.TryEnsureCapacity(count) || !values.TryEnsureCapacity(count))
+        if (!sparse.TryResize(count, MissingIndex()) || !owners.TryEnsureCapacity(count) || !values.TryEnsureCapacity(count))
         {
             return Status::AllocationFailure;
         }
@@ -81,7 +81,7 @@ public:
         {
             return Status::DuplicateComponent;
         }
-        if (mSparse[entity.Slot] != Missing || mValues.GetSize() >= mSparse.GetSize())
+        if (mSparse[entity.Slot] != MissingIndex() || mValues.GetSize() >= mSparse.GetSize())
         {
             return Status::CapacityExceeded;
         }
@@ -117,7 +117,7 @@ public:
         mValues.RemoveAtSwap(index);
         mOwners.RemoveAtSwap(index);
         mSparse[moved.Slot] = index;
-        mSparse[entity.Slot] = Missing;
+        mSparse[entity.Slot] = MissingIndex();
         return Status::Success;
     }
     [[nodiscard]] std::span<const EntityId> GetOwners() const noexcept
@@ -135,10 +135,10 @@ public:
 
 private:
     // A slot sentinel needs no storage or per-specialization initialization.
-    enum : foundation::uint32
+    static constexpr foundation::uint32 MissingIndex() noexcept
     {
-        Missing = 0xffffffffU,
-    };
+        return 0xffffffffU;
+    }
     foundation::core::Array<foundation::uint32> mSparse;
     foundation::core::Array<EntityId> mOwners;
     foundation::core::Array<T> mValues;
