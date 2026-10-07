@@ -8,6 +8,13 @@
 
 namespace ludus::editor
 {
+struct ContentImportSource final
+{
+    QString Root;
+    QString File;
+    QString Id;
+};
+
 struct ContentImportResult final
 {
     content::Status Status = content::Status::Invalid;
@@ -24,9 +31,7 @@ struct ContentImportHooks final
     bool (*Cancelled)(void*) noexcept = nullptr;
     void (*BeforePublish)(void*) noexcept = nullptr;
 };
-[[nodiscard]] ContentImportResult ImportAudioSource(const QString& root,
-                                                    const QString& file,
-                                                    const QString& id,
+[[nodiscard]] ContentImportResult ImportAudioSource(const ContentImportSource& source,
                                                     ContentImportGate& gate,
                                                     const content::Digest* expectedCatalog = nullptr,
                                                     ContentImportHooks hooks = {});

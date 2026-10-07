@@ -31,13 +31,14 @@ QString Text(std::string_view text)
 // Reuses Content's bounded codecs, dependency validation and compare-and-swap
 // saves. Immutable candidates adapt the publication contract in
 // docs/architecture/content-resources.md, "Saving and replacing content".
-ContentImportResult ImportAudioSource(const QString& root,
-                                      const QString& file,
-                                      const QString& id,
+ContentImportResult ImportAudioSource(const ContentImportSource& source,
                                       ContentImportGate& gate,
                                       const content::Digest* expectedCatalog,
                                       ContentImportHooks hooks)
 {
+    const auto& root = source.Root;
+    const auto& file = source.File;
+    const auto& id = source.Id;
     const auto rootBytes = root.toUtf8(), idBytes = id.toUtf8();
     const auto rootView = View(rootBytes), idView = View(idBytes);
     const auto cancelled = [&]() {

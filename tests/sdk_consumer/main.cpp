@@ -302,10 +302,16 @@ int main()
     ludus::graphics::rhi::SurfaceHandle explicitSurface;
     ludus::graphics::rhi::DeviceDescription explicitRequest;
     explicitRequest.Required.Compute = true;
+    const auto compiled = ludus::graphics::rhi::GetCompiledBackends();
+#if defined(LUDUS_PLATFORM_MACOS)
+    const bool nativeCompiled = compiled.Metal;
+#else
+    const bool nativeCompiled = compiled.Vulkan;
+#endif
     if (ludus::graphics::rhi::CreateDevice({}, {}, explicitRequest, explicitDevice, explicitSurface) !=
             ludus::graphics::rhi::DeviceStatus::Unsupported ||
         ludus::graphics::rhi::DestroyDevice(explicitDevice) != ludus::graphics::rhi::DeviceStatus::InvalidHandle ||
-        !ludus::graphics::rhi::GetCompiledBackends().Vulkan)
+        !nativeCompiled)
     {
         return 2;
     }

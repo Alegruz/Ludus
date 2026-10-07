@@ -34,7 +34,7 @@ struct AudioPreview::Impl final
     QString Root;
     audio::content::Sound Sound;
     audio::content::Music Music;
-    void ImportSource(const QString& root, const QString& file, const QString& id, uint64 epoch)
+    void ImportSource(const ContentImportSource& source, uint64 epoch)
     {
         struct Context final
         {
@@ -49,11 +49,11 @@ struct AudioPreview::Impl final
             return input->Owner->Closing.load(std::memory_order_acquire) ||
                    input->Owner->Epoch.load(std::memory_order_acquire) != input->Epoch;
         };
-        const auto result = ImportAudioSource(root, file, id, gate, nullptr, hooks);
+        const auto result = ImportAudioSource(source, gate, nullptr, hooks);
         Q_EMIT Preview->Message(result.Message);
         if (result.Status == ludus::content::Status::Ok)
         {
-            Q_EMIT Preview->Imported(root);
+            Q_EMIT Preview->Imported(source.Root);
         }
     }
     void Run()
@@ -115,7 +115,7 @@ struct AudioPreview::Impl final
                 }
                 else if (import)
                 {
-                    ImportSource(root, file, importId, epoch);
+                    ImportSource({ .Root = root, .File = file, .Id = importId }, epoch);
                 }
                 else
                 {

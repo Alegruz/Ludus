@@ -28,9 +28,7 @@ void Run(JobState& state)
     const auto& request = result.Request;
     if (!request.Id.isEmpty())
     {
-        const auto imported = ImportAudioSource(request.Root,
-                                                request.File,
-                                                request.Id,
+        const auto imported = ImportAudioSource({ .Root = request.Root, .File = request.File, .Id = request.Id },
                                                 state.Gate,
                                                 request.CheckCatalog ? &request.CatalogDigest : nullptr);
         result.Status = imported.Status;

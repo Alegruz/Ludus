@@ -5,6 +5,7 @@
 #include <ludus/audio/content/definitions.h>
 
 #include <QApplication>
+#include <QByteArray>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -23,6 +24,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <string_view>
 #include <utility>
 
 namespace
@@ -87,7 +89,14 @@ TEST_CASE("Content import switches immutable versions and preserves IDs and old 
     QTemporaryDir root, exported;
     const auto file = Wav(exported, 500);
     ContentImportGate first;
-    REQUIRE(ImportAudioSource(root.path(), file, QStringLiteral("source/hit"), first).Status == content::Status::Ok);
+    REQUIRE(ImportAudioSource(
+                {
+                    .Root = root.path(),
+                    .File = file,
+                    .Id = QStringLiteral("source/hit"),
+                },
+                first)
+                .Status == content::Status::Ok);
     auto catalog = ReadCatalog(root.path());
     REQUIRE(catalog.Find("source/hit") != nullptr);
     const auto oldPath = QString::fromUtf8(catalog.Find("source/hit")->Path.Data);
@@ -96,7 +105,8 @@ TEST_CASE("Content import switches immutable versions and preserves IDs and old 
     const auto oldBytes = oldFile.readAll();
     (void)Wav(exported, 700);
     ContentImportGate second;
-    const auto result = ImportAudioSource(root.path(), file, QStringLiteral("source/hit"), second);
+    const auto result =
+        ImportAudioSource({ .Root = root.path(), .File = file, .Id = QStringLiteral("source/hit") }, second);
     REQUIRE(result.Status == content::Status::Ok);
     catalog = ReadCatalog(root.path());
     REQUIRE(catalog.Entries().size() == 1);
@@ -108,7 +118,8 @@ TEST_CASE("Content import switches immutable versions and preserves IDs and old 
     CHECK(reopened.readAll() == oldBytes);
     Write(file, QByteArrayLiteral("invalid audio"));
     ContentImportGate bad;
-    CHECK(ImportAudioSource(root.path(), file, QStringLiteral("source/hit"), bad).Status == content::Status::Invalid);
+    CHECK(ImportAudioSource({ .Root = root.path(), .File = file, .Id = QStringLiteral("source/hit") }, bad).Status ==
+          content::Status::Invalid);
     CHECK(QString::fromUtf8(ReadCatalog(root.path()).Find("source/hit")->Path.Data) == result.CandidatePath);
 }
 
@@ -122,9 +133,11 @@ TEST_CASE("Cancellation and catalog conflicts never publish a broken active cata
     ContentImportHooks cancelHooks;
     cancelHooks.Context = &cancelContext;
     cancelHooks.BeforePublish = [](void* input) noexcept { (void)static_cast<HookContext*>(input)->Gate->Cancel(); };
-    REQUIRE(
-        ImportAudioSource(root.path(), file, QStringLiteral("source/hit"), cancelled, nullptr, cancelHooks).Status ==
-        content::Status::Cancelled);
+    REQUIRE(ImportAudioSource({ .Root = root.path(), .File = file, .Id = QStringLiteral("source/hit") },
+                              cancelled,
+                              nullptr,
+                              cancelHooks)
+                .Status == content::Status::Cancelled);
     CHECK_FALSE(QFile::exists(root.filePath(QStringLiteral("catalog.json"))));
     CHECK_FALSE(QDir(root.filePath(QStringLiteral("sources"))).exists());
 
@@ -136,7 +149,10 @@ TEST_CASE("Cancellation and catalog conflicts never publish a broken active cata
     hooks.Context = &conflict;
     hooks.BeforePublish = &Mutate;
     ContentImportGate gate;
-    const auto result = ImportAudioSource(root.path(), file, QStringLiteral("source/hit"), gate, nullptr, hooks);
+    const auto result = ImportAudioSource({ .Root = root.path(), .File = file, .Id = QStringLiteral("source/hit") },
+                                          gate,
+                                          nullptr,
+                                          hooks);
     REQUIRE(conflict.Written);
     CHECK(result.Status == content::Status::Conflict);
     CHECK_FALSE(result.CandidatePath.isEmpty());
@@ -149,7 +165,14 @@ TEST_CASE("Reimport checks saved loop constraints and changing dependencies", "[
     QTemporaryDir root, exported;
     const auto file = Wav(exported, 500);
     ContentImportGate first;
-    REQUIRE(ImportAudioSource(root.path(), file, QStringLiteral("source/hit"), first).Status == content::Status::Ok);
+    REQUIRE(ImportAudioSource(
+                {
+                    .Root = root.path(),
+                    .File = file,
+                    .Id = QStringLiteral("source/hit"),
+                },
+                first)
+                .Status == content::Status::Ok);
     auto catalog = ReadCatalog(root.path());
     const auto oldPath = QString::fromUtf8(catalog.Find("source/hit")->Path.Data);
     audio::content::Music music;
@@ -171,7 +194,8 @@ TEST_CASE("Reimport checks saved loop constraints and changing dependencies", "[
           QByteArray(bytes.String().data(), static_cast<qsizetype>(bytes.String().size())));
     (void)Wav(exported, 100);
     ContentImportGate shortSource;
-    const auto shortResult = ImportAudioSource(root.path(), file, QStringLiteral("source/hit"), shortSource);
+    const auto shortResult =
+        ImportAudioSource({ .Root = root.path(), .File = file, .Id = QStringLiteral("source/hit") }, shortSource);
     CHECK(shortResult.Status == content::Status::Invalid);
     CHECK(shortResult.Message.contains(QStringLiteral("saved loop")));
     CHECK(QString::fromUtf8(ReadCatalog(root.path()).Find("source/hit")->Path.Data) == oldPath);
@@ -185,8 +209,11 @@ TEST_CASE("Reimport checks saved loop constraints and changing dependencies", "[
     hooks.Context = &changed;
     hooks.BeforePublish = &Mutate;
     ContentImportGate dependency;
-    CHECK(ImportAudioSource(root.path(), file, QStringLiteral("source/hit"), dependency, nullptr, hooks).Status ==
-          content::Status::Conflict);
+    CHECK(ImportAudioSource({ .Root = root.path(), .File = file, .Id = QStringLiteral("source/hit") },
+                            dependency,
+                            nullptr,
+                            hooks)
+              .Status == content::Status::Conflict);
     CHECK(changed.Written);
     CHECK(QString::fromUtf8(ReadCatalog(root.path()).Find("source/hit")->Path.Data) == oldPath);
 }
@@ -220,7 +247,8 @@ TEST_CASE("Content workspace preserves focused search and selection and rejects 
     QTemporaryDir root, exported;
     const auto file = Wav(exported, 500);
     ContentImportGate gate;
-    REQUIRE(ImportAudioSource(root.path(), file, QStringLiteral("source/hit"), gate).Status == content::Status::Ok);
+    REQUIRE(ImportAudioSource({ .Root = root.path(), .File = file, .Id = QStringLiteral("source/hit") }, gate).Status ==
+            content::Status::Ok);
     ContentWorkspace workspace;
     auto* jobs = workspace.findChild<ContentJobs*>();
     REQUIRE(jobs != nullptr);

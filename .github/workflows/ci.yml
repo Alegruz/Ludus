@@ -541,7 +541,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           out/build/linux-clang-development/apps/editor/ludus_editor_tests '[content][scale]' --success > out/editor-content-scale.txt
-          cat out/editor-content-scale.txt >> "$GITHUB_STEP_SUMMARY"
+          tee -a "$GITHUB_STEP_SUMMARY" < out/editor-content-scale.txt
       - uses: actions/upload-artifact@v4
         with:
           name: editor-content-scale
@@ -552,6 +552,7 @@ jobs:
             apps/editor/src/controller.cpp apps/editor/src/main_window.cpp \
             apps/editor/src/main_window_layout.cpp apps/editor/src/document_commands.cpp \
             apps/editor/src/configuration_workspace.cpp apps/editor/src/audio_workspace.cpp \
+            apps/editor/src/audio_preview.cpp \
             apps/editor/tests/document_history_tests.cpp apps/editor/tests/document_interaction_tests.cpp \
             apps/editor/src/content_catalog_model.cpp apps/editor/src/content_import.cpp \
             apps/editor/src/content_jobs.cpp apps/editor/src/content_workspace.cpp \
