@@ -302,8 +302,9 @@ acknowledged. Cancellation wins before publication begins; a late request cannot
 undo a catalog commit. The UI then waits for the actual success or failure.
 Quit cancels and asynchronously drains owned work without blocking the GUI.
 Polling exists only during an active job. Workers never call model/widget APIs
-or capture a window pointer. Browser controls explain their desktop requirement;
-this is native Linux content browsing, not browser import/persistence acceptance.
+or capture a window pointer. Browser controls explain their desktop requirement.
+Native support follows the [host prerequisites](#prerequisites-optional-editor-setup).
+Browser import and persistence still need acceptance.
 
 The table uses a Qt model/view projection with no widget per asset row. Actual
 catalog admission remains **4096 resources / 1 MiB JSON**, as required by Content.
