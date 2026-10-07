@@ -41,6 +41,10 @@ EM_JS(void, Report, (uint32 step, uint32 frames, int32 failed, int32 backend), {
     node.textContent = node.dataset.state + ' frames=' + frames;
 });
 EM_JS(int32, Paused, (), { return globalThis.__qaPause ? 1 : 0; });
+EM_JS(int32, Variant, (), {
+    const value = new URL(location.href).searchParams.get('variant');
+    return value === 'srgb' ? 1 : value === 'blend' ? 2 : 0;
+});
 EM_JS(int32, Selection, (), {
     const value = new URL(location.href).searchParams.get('backend');
     return value === 'webgpu' ? 1 : value === 'webgl2' ? 2 : 0;
@@ -48,6 +52,10 @@ EM_JS(int32, Selection, (), {
 // clang-format on
 #else
 void Report(uint32, uint32, int32, int32) noexcept {}
+int32 Variant() noexcept
+{
+    return 0;
+}
 int32 Paused() noexcept
 {
     return 0;
@@ -96,7 +104,22 @@ bool Create() noexcept
     const auto fragment = ludus::shaders::raster::Fragment();
     const float32 tint[4]{1, 1, 1, 1};
     const float32 dim[4]{.5F, .5F, .5F, 1};
-    const uint8 image[16]{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255};
+    uint8 image[16]{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255};
+    const auto mode = Variant();
+    if (mode != 0)
+    {
+        for (usize i = 0; i < sizeof(image); ++i)
+        {
+            if (i % 4 == 3)
+            {
+                image[i] = mode == 2 ? 128 : 255;
+            }
+            else if (image[i] != 0)
+            {
+                image[i] = 128;
+            }
+        }
+    }
     const float32 points[20]{-.4F, -.75F, .25F, 0, 1, -.4F, .75F,  .25F, 0, 0,
                              .4F,  .75F,  .25F, 1, 0, .4F,  -.75F, .25F, 1, 1};
     const float32 background[20]{-.95F, -.95F, .75F, 0, 1, -.95F, .95F,  .75F, 0, 0,
@@ -109,7 +132,10 @@ bool Create() noexcept
            Accepted(rhi::CreateBindingLayout(gDevice, fragment.Bindings, gLayout)) &&
            Accepted(rhi::CreateBuffer(gDevice, {rhi::BufferRole::Uniform, sizeof(tint)}, Bytes(tint), gTint)) &&
            Accepted(rhi::CreateBuffer(gDevice, {rhi::BufferRole::Uniform, sizeof(dim)}, Bytes(dim), gDim)) &&
-           Accepted(rhi::CreateTexture(gDevice, {2, 2}, {image, 8}, gTexture)) &&
+           Accepted(rhi::CreateTexture(gDevice,
+                                       {2, 2, mode == 1 ? rhi::RasterFormat::Rgba8Srgb : rhi::RasterFormat::Rgba8Unorm},
+                                       {image, 8},
+                                       gTexture)) &&
            Accepted(rhi::CreateSampler(gDevice, {}, gSampler)) &&
            Accepted(rhi::CreateBuffer(gDevice, {rhi::BufferRole::Vertex, sizeof(points)}, Bytes(points), gVertices)) &&
            Accepted(rhi::CreateBuffer(gDevice,
@@ -200,9 +226,10 @@ void Tick() noexcept
         const rhi::RasterVertexAttribute attributes[3]{{0, 0, 0, rhi::RasterVertexFormat::Float3},
                                                        {1, 0, 12, rhi::RasterVertexFormat::Float2},
                                                        {2, 1, 0, rhi::RasterVertexFormat::Float2}};
-        if (!Accepted(rhi::CreateRasterPipeline(gDevice,
-                                                {gVertex, gFragment, gLayout, streams, attributes, true},
-                                                gPipeline)))
+        if (!Accepted(
+                rhi::CreateRasterPipeline(gDevice,
+                                          {gVertex, gFragment, gLayout, streams, attributes, true, Variant() == 2},
+                                          gPipeline)))
         {
             Stop(true);
             return;
@@ -235,7 +262,8 @@ void Tick() noexcept
         }
         gStep = 4;
     }
-    if (rhi::SetFrameTarget(gDevice, gSurface, {96, 64, 0, 0, 0, 1}) != rhi::DeviceStatus::Ready)
+    const float64 clear = Variant() == 2 ? .25 : 0;
+    if (rhi::SetFrameTarget(gDevice, gSurface, {96, 64, clear, clear, clear, 1}) != rhi::DeviceStatus::Ready)
     {
         Stop(true);
         return;

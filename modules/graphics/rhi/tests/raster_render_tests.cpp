@@ -20,6 +20,16 @@ std::span<const uint8> RasterBytes(const T (&data)[N]) noexcept
 TEST_CASE("Portable indexed instances preserve texture origin, depth and detached binding snapshots",
           "[rhi][gpu][raster]")
 {
+    int32 mode = 0;
+    SECTION("Linear RGBA8 sampling and depth") {}
+    SECTION("sRGB sampling decodes to linear output")
+    {
+        mode = 1;
+    }
+    SECTION("Premultiplied alpha blends over the frame clear")
+    {
+        mode = 2;
+    }
     struct Guard final
     {
         ~Guard() noexcept
@@ -56,11 +66,28 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
             rhi::RasterStatus::Ready);
     REQUIRE(rhi::CreateBuffer(device, {rhi::BufferRole::Uniform, sizeof(dim)}, RasterBytes(dim), backgroundUniform) ==
             rhi::RasterStatus::Ready);
-    const uint8 image[16]{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255};
+    uint8 image[16]{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255};
+    if (mode != 0)
+    {
+        for (usize i = 0; i < sizeof(image); ++i)
+        {
+            if (i % 4 == 3)
+            {
+                image[i] = mode == 2 ? 128 : 255;
+            }
+            else if (image[i] != 0)
+            {
+                image[i] = 128;
+            }
+        }
+    }
     rhi::TextureHandle texture;
     rhi::TextureViewHandle view;
     rhi::SamplerHandle sampler;
-    REQUIRE(rhi::CreateTexture(device, {2, 2}, {image, 8}, texture) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::CreateTexture(device,
+                               {2, 2, mode == 1 ? rhi::RasterFormat::Rgba8Srgb : rhi::RasterFormat::Rgba8Unorm},
+                               {image, 8},
+                               texture) == rhi::RasterStatus::Ready);
     REQUIRE(rhi::CreateTextureView(device, texture, view) == rhi::RasterStatus::Ready);
     REQUIRE(rhi::CreateSampler(device, {}, sampler) == rhi::RasterStatus::Ready);
     rhi::RasterBindingResource resources[3];
@@ -86,7 +113,7 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
                                                    {1, 0, 12, rhi::RasterVertexFormat::Float2},
                                                    {2, 1, 0, rhi::RasterVertexFormat::Float2}};
     rhi::RasterPipelineHandle pipeline;
-    REQUIRE(rhi::CreateRasterPipeline(device, {vs, fs, layout, streams, attributes, true}, pipeline) ==
+    REQUIRE(rhi::CreateRasterPipeline(device, {vs, fs, layout, streams, attributes, true, mode == 2}, pipeline) ==
             rhi::RasterStatus::Ready);
     const float32 points[20]{-.4F, -.75F, .25F, 0, 1, -.4F, .75F,  .25F, 0, 0,
                              .4F,  .75F,  .25F, 1, 0, .4F,  -.75F, .25F, 1, 1};
@@ -108,6 +135,8 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
             rhi::RasterStatus::Ready);
     rhi::RasterVertexSlice slices[2]{{vertices, 0, sizeof(points)}, {instances, 0, sizeof(offsets)}};
     const rhi::RasterDraw draw{pipeline, set, slices, index, 0, 6, 4, 2};
+    const float64 clear = mode == 2 ? .25 : 0;
+    REQUIRE(rhi::SetFrameTarget(device, surface, {96, 64, clear, clear, clear, 1}) == rhi::DeviceStatus::Ready);
     REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Ready);
     REQUIRE(rhi::DrawIndexed(device, draw) == rhi::RasterStatus::Ready);
     const rhi::RasterVertexSlice backgroundSlices[2]{{background, 0, sizeof(back)},
@@ -123,19 +152,21 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     REQUIRE(rhi::Destroy(device, index) == rhi::RasterStatus::Ready);
     uint8 pixels[96 * 64 * 4]{};
     REQUIRE(rhi::backend::ReadHeadlessPixels(pixels));
+    const uint8 high = mode == 1 ? 55 : mode == 2 ? 160 : 255;
+    const uint8 low = mode == 2 ? 32 : 0;
     const uint32 xs[4]{12, 36, 60, 84};
     for (usize i = 0; i < 4; ++i)
     {
         const usize top = (usize{16} * 96 + xs[i]) * 4;
         const usize bottom = (usize{48} * 96 + xs[i]) * 4;
         const bool left = i % 2 == 0;
-        CHECK(pixels[top] == (left ? 255 : 0));
-        CHECK(pixels[top + 1] == (left ? 0 : 255));
-        CHECK(pixels[top + 2] == 0);
+        CHECK(pixels[top] == (left ? high : low));
+        CHECK(pixels[top + 1] == (left ? low : high));
+        CHECK(pixels[top + 2] == low);
         CHECK(pixels[top + 3] == 255);
-        CHECK(pixels[bottom] == (left ? 0 : 255));
-        CHECK(pixels[bottom + 1] == (left ? 0 : 255));
-        CHECK(pixels[bottom + 2] == 255);
+        CHECK(pixels[bottom] == (left ? low : high));
+        CHECK(pixels[bottom + 1] == (left ? low : high));
+        CHECK(pixels[bottom + 2] == high);
         CHECK(pixels[bottom + 3] == 255);
     }
 }

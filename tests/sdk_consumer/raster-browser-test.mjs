@@ -27,7 +27,7 @@ try {
   const pin = JSON.parse(await readFile(new URL('../../config/shader_toolchain.json',import.meta.url))).wgsl_validator;
   assert.equal(browser.version(),pin.chromium_version);
   report.version = browser.version();
-  for (const scenario of ['webgpu','webgl2','auto','auto-fallback','invalid-shader','invalid-pipeline','device-loss']) {
+  for (const scenario of ['webgpu','webgl2','auto','auto-fallback','webgpu-srgb','webgl2-srgb','webgpu-blend','webgl2-blend','invalid-shader','invalid-pipeline','device-loss']) {
     const context = await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
     await context.addInitScript(scenario => {
       window.__qaPause = false;
@@ -58,8 +58,9 @@ try {
     const errors = [];
     page.on('pageerror',error => errors.push(String(error)));
     page.on('console',message => report.console.push({scenario,type:message.type(),text:message.text()}));
-    const selection = ['webgpu','webgl2'].includes(scenario) ? scenario : scenario.startsWith('invalid') || scenario === 'device-loss' ? 'webgpu' : 'auto';
-    await page.goto(`http://127.0.0.1:${server.address().port}/raster.html?backend=${selection}`);
+    const variant = scenario.endsWith('-srgb') ? 'srgb' : scenario.endsWith('-blend') ? 'blend' : '';
+    const selection = scenario.startsWith('webgpu') ? 'webgpu' : scenario.startsWith('webgl2') ? 'webgl2' : scenario.startsWith('invalid') || scenario === 'device-loss' ? 'webgpu' : 'auto';
+    await page.goto(`http://127.0.0.1:${server.address().port}/raster.html?backend=${selection}&variant=${variant}`);
     const result = {scenario};
     if (scenario.startsWith('invalid')) {
       await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'failed',null,{timeout:20000});
@@ -67,7 +68,7 @@ try {
     } else {
       await page.waitForFunction(() => document.querySelector('#status').dataset.frames === '5',null,{timeout:20000});
       result.backend = await page.locator('#status').getAttribute('data-backend');
-      if (scenario === 'auto-fallback' || scenario === 'webgl2') assert.equal(result.backend,'webgl2');
+      if (scenario === 'auto-fallback' || scenario.startsWith('webgl2')) assert.equal(result.backend,'webgl2');
       else assert.equal(result.backend,'webgpu');
       if (scenario === 'device-loss') {
         await page.evaluate(() => {window.__qaDevice.destroy(); window.__qaPause=false;});
@@ -77,9 +78,11 @@ try {
         const bytes = await page.screenshot({clip:{x:box.x,y:box.y,width:box.width,height:box.height}});
         const image = PNG.sync.read(bytes);
         assert.equal(image.width,96); assert.equal(image.height,64);
+        const high = variant === 'srgb' ? 55 : variant === 'blend' ? 160 : 255;
+        const low = variant === 'blend' ? 32 : 0;
         for (const [i,x] of [12,36,60,84].entries()) {
           const left = i%2 === 0;
-          for (const [y,expected] of [[16,left?[255,0,0,255]:[0,255,0,255]],[48,left?[0,0,255,255]:[255,255,255,255]]]) {
+          for (const [y,expected] of [[16,left?[high,low,low,255]:[low,high,low,255]],[48,left?[low,low,high,255]:[high,high,high,255]]]) {
             const offset = (y*image.width+x)*4;
             assert.deepEqual([...image.data.subarray(offset,offset+4)],expected,`${scenario} pixel ${x},${y}`);
           }
