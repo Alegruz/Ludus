@@ -1173,8 +1173,6 @@
   "function ludus::content::JsonWriter::Number(float64 value) noexcept",
   "function ludus::content::JsonWriter::Raw(std::string_view value) noexcept",
   "function ludus::content::JsonWriter::String(std::string_view value) noexcept",
-  "function ludus::content::ReadFile(std::string_view root, std::string_view path, usize cap, Bytes &output) noexcept",
-  "function ludus::content::SaveFile(std::string_view root, std::string_view path, std::span< const uint8 > data, const Digest *expected) noexcept",
   "function ludus::content::Text::Set(std::string_view value) noexcept",
   "function ludus::content::Text::View() const noexcept",
   "function ludus::content::ValidId(std::string_view value) noexcept",
