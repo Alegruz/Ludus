@@ -35,7 +35,7 @@ jobs:
   macos-compile:
     needs: changes
     if: needs.changes.outputs.native_required == 'true'
-    name: macOS Cocoa, filesystem, Content, Audio and Metal
+    name: macOS native backends and diagnostics
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +54,21 @@ jobs:
       - name: Test native Cocoa, Metal, filesystem, Content and Audio
         env:
           LUDUS_TEST_COCOA: "1"
-        run: out/host-tools/venv/bin/ctest --preset macos-clang-development --label-regex 'platform|macos|filesystem|content|audio|build-contract' --no-tests=error
+        run: out/host-tools/venv/bin/ctest --preset macos-clang-development --label-regex 'platform|macos|filesystem|content|audio|build-contract|diagnostic-startup' --no-tests=error
+      - name: Test native Debug helper and explicit assertion decisions
+        run: |
+          ./init.sh --cli --preset macos-clang-debug --preset-only --locked --with-tests --no-system-install
+          # Only these controlled test children enable dialog capability. Their
+          # drivers clear CI and own a PTY; production builds remain noninteractive.
+          out/host-tools/venv/bin/cmake --preset macos-clang-debug -DLUDUS_CI_BUILD=OFF -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
+          out/host-tools/venv/bin/cmake --build --preset macos-clang-debug --target ludus_diagnostic_startup_child ludus_assert_decision_child
+          out/host-tools/venv/bin/ctest --preset macos-clang-debug --label-regex diagnostic-startup --no-tests=error
+      - name: Analyze native diagnostic transport and startup sources
+        run: |
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/base/src/diagnostic_output.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' tools/diagnostics/src/session.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-debug --warnings-as-errors='*' tools/diagnostics/tests/diagnostic_startup_child.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-debug --warnings-as-errors='*' tools/diagnostics/tests/assert_decision_child.cpp
       - name: Analyze Cocoa Objective-C++ production and test sources
         run: |
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/platform/src/window_cocoa.mm
@@ -68,6 +82,9 @@ jobs:
         run: |
           out/host-tools/venv/bin/cmake --install out/build/macos-clang-development
           out/host-tools/venv/bin/python tests/sdk_consumer/verify_metal_shader_build.py --sdk "$PWD/out/install/macos-clang-development" --cmake "$PWD/out/host-tools/venv/bin/cmake" --ninja "$PWD/out/host-tools/venv/bin/ninja" --cxx "$PWD/out/host-tools/bin/clang++" --slang "$PWD/out/shader-tools/slang/bin/slangc" --conan "$PWD/out/conan/macos-clang-development" --sysroot "$PWD/out/host-tools/macos-sdk" --libcxx "$PWD/out/host-tools/libcxx-include"
+      - name: Verify installed macOS diagnostic helper
+        run: |
+          out/host-tools/venv/bin/python tools/diagnostics/tests/startup_tests.py "$PWD/out/install/macos-clang-development/bin/ludus_diagnostic_helper" "$PWD/out/build/macos-clang-development/tools/diagnostics/ludus_diagnostic_startup_child" 0
       - name: Verify installed Content persistence
         run: |
           out/host-tools/venv/bin/cmake -S tests/sdk_consumer/content -B out/build/content-consumer -G Ninja \
@@ -153,6 +170,12 @@ jobs:
           out/host-tools/venv/bin/cmake --preset macos-clang-asan-ubsan -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
           out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_audio_tests ludus_audio_content_tests ludus_rhi_lifecycle_tests ludus_rhi_metal_tests ludus_rhi_render_tests ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_filesystem_namespace_fault_tests ludus_filesystem_pack_fault_tests ludus_filesystem_async_fault_tests ludus_filesystem_persistence_fault_tests ludus_filesystem_watch_fault_tests ludus_content_tests ludus_content_save_fault_tests
           out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_((platform_cocoa(_keymap)?|filesystem(_fault|_namespace_fault|_pack_fault|_async_fault|_persistence_fault|_watch_fault)?|content(_save_fault)?|audio(_device|_content)?|rhi_(metal|lifecycle))_tests|rhi_render_pixels)$' --no-tests=error
+
+      - name: Validate diagnostic stream and explicit decisions with ASan and UBSan
+        run: |
+          out/host-tools/venv/bin/cmake --preset macos-clang-debug -B out/build/macos-diagnostics-sanitized -DLUDUS_CI_BUILD=OFF -DLUDUS_ENABLE_ASAN=ON -DLUDUS_ENABLE_UBSAN=ON -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
+          out/host-tools/venv/bin/cmake --build out/build/macos-diagnostics-sanitized --target ludus_diagnostic_startup_child ludus_assert_decision_child
+          out/host-tools/venv/bin/ctest --test-dir out/build/macos-diagnostics-sanitized --label-regex diagnostic-startup --output-on-failure --no-tests=error
 
   formatting:
     needs: changes
