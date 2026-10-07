@@ -1,5 +1,9 @@
 # Physics and fluid simulation for Drift
 
+For general colliders, rigid bodies, sensors, joints and scene queries, see the
+proposed [physics systems architecture](physics-systems.md). This document owns
+Drift's small analytic simulation, not the general rigid-body subsystem.
+
 This design defines reusable numerical kernels in Ludus and the small simulation
 that powers Drift in Ludus-Sandbox. The decision is a CPU authoritative, fixed
 60 Hz simulation with analytic expanding rings and exact linear water drag.

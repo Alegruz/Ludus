@@ -20,6 +20,7 @@ retain detailed contracts, reference attribution and acceptance evidence.
 | [Startup and shutdown](lifecycle.md) | When is a provider usable? How does partial startup unwind? | Private runner in the smoke app; engine-wide adoption is a migration plan |
 | [Platform and rendering](rendering.md) | Who owns a window, frame and GPU resource? | Native Vulkan and browser WebGPU/WebGL 2 with a bounded public rendering slice |
 | [Terrain and generation](terrain.md) | How should ground, generation, editing and streaming connect? | Proposed heightfield system; mesh rendering and rigid-body terrain collision remain prerequisites |
+| [Physics systems](../../architecture/physics-systems.md) | Who owns shapes, bodies, sensors, constraints and queries? | Proposed rigid-body world and backend qualification; existing PhysicsFluid remains separate |
 | [Worlds and frame updates](world.md) | What makes an entity valid? When do edits and simulation take effect? | SDK identity/storage baseline and a game-owned reference application |
 | [Content and audio](content.md) | Who owns source documents, resource revisions and playback? | Portable module targets; implemented authoring/acquisition workflow is native |
 | [Runtime and editor](runtime.md) | How do SDKs, game code, configuration and desktop tools connect? | Native GameHost/live editing and optional Qt workspace; later editor stages remain planned |
