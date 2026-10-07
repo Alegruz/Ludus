@@ -1,7 +1,8 @@
 # Ludus RHI and Graphics Device Interface Architecture
 
-**Status:** Proposed architecture, 2026-10-04. Intended for engine implementation
-review. This document was drafted before opening the article map, then refined
+**Status:** Proposed architecture, 2026-10-04; implementation status and deferred
+research plan updated 2026-10-06. Intended for engine implementation review.
+This document was drafted before opening the article map, then refined
 through [five complete reference chapters](rhi-gdi-gems-review.md) and current
 primary documentation. The first implementation slice now adds effective
 fullscreen capabilities, copied startup requirements, explicit requirement and
@@ -23,15 +24,17 @@ are proposed roles, not two duplicate wrappers around every graphics call.
 
 ## Current implementation and compatibility
 
-The audited source has three backends, with a deliberately bounded common API:
+The current fullscreen API has four backends: Vulkan on Linux, Metal on macOS,
+and WebGPU or WebGL 2 in the browser. Its common API remains deliberately bounded:
 
 | Existing boundary | Observed implementation | Consequence for this design |
 | --- | --- | --- |
 | [Public lifecycle](../../modules/graphics/rhi/include/ludus/graphics/rhi/rhi.h) and [facade](../../modules/graphics/rhi/src/rhi.cpp) | One main-thread session, asynchronous browser startup, statuses, generation tokens, frame begin/end | Preserve behavior; add an explicit device API alongside it |
 | [Public fullscreen resources](../../modules/graphics/rhi/include/ludus/graphics/rhi/render.h) | Eight resources per kind, shaders, one uniform binding, pipelines tied to a uniform, one fullscreen triangle | This is a compatibility slice, not a general buffer/texture/pass API |
 | [Vulkan](../../modules/graphics/rhi/src/rhi_vulkan.cpp) | Vulkan 1.1 render passes, two fenced command/uniform slots, owned headless image, maintenance1 presentation retirement on Wayland, individual device-memory allocations | General resources need allocation and retirement services; do not require Vulkan 1.3 merely to refactor |
+| [Metal](../../modules/graphics/rhi/src/rhi_metal.mm) | Two command-buffer-fenced shared uniform slots, Cocoa drawables and private headless textures; submitted commands retain their resources | Preserve the shipped fullscreen path; general resources, layouts, encoders and completion services remain part of this migration |
 | [Browser dispatcher](../../modules/graphics/rhi/src/rhi_web.cpp) | WebGPU startup with one permitted WebGL 2 fallback and Platform-managed canvas replacement | Preserve ADR 0014 and callback isolation |
-| [Shader build helper](../../cmake/shaders/compile_shader.py) | Pinned Slang emits SPIR-V/WGSL; pinned SPIRV-Cross emits GLSL ES 3.00, with bounded layout validation | Retain proven targets; general reflection/layout support is future work |
+| [Shader build helper](../../cmake/shaders/compile_shader.py) | Pinned Slang emits SPIR-V/WGSL and macOS MSL 2.3; pinned SPIRV-Cross emits GLSL ES 3.00, with bounded per-target layout validation | Retain proven targets; general reflection/layout support is future work |
 
 Retain `Start`, `GetStartup`, frame statuses, and `DrawFullscreen` as a facade
 through the migration. Keep existing resource ownership and `InUse` rejection
@@ -55,6 +58,7 @@ flowchart TD
     Renderer --> Device[GraphicsDevice services and pass planning]
     Device --> RHI[GraphicsRhi device API]
     RHI --> Vulkan[Private Vulkan backend]
+    RHI --> Metal[Private Metal backend]
     RHI --> WebGPU[Private WebGPU backend]
     RHI --> WebGL[Private WebGL 2 backend]
     RHI --> Platform[Platform window and canvas services]
@@ -378,10 +382,10 @@ explicit foreign integration is ever allowed. Do not query GL to reconstruct
 state per draw. **Large uploads still schedule before drawing**; state deferral
 must not delay the bulk transfer work that should overlap GPU execution.
 
-Keep the pinned offline shader chain: Slang to SPIR-V/WGSL, plus SPIR-V through
-SPIRV-Cross to GLSL ES 3.00. General packages add versioned schema, source/tool
-hashes, target/profile/features, explicit entry names, resource bindings/access,
-vertex/fragment interface, and layout identity. Native consumers do not need
+Keep the pinned offline shader chain: Slang to SPIR-V/WGSL and macOS MSL 2.3,
+plus SPIR-V through SPIRV-Cross to GLSL ES 3.00. General packages add versioned
+schema, source/tool hashes, target/profile/features, explicit entry names,
+resource bindings/access, vertex/fragment interface, and layout identity. Native consumers do not need
 host compiler tools at runtime. Expanding the current one-uniform helper is a
 separate implemented step, with rejection of every unverified layout form.
 
@@ -630,11 +634,10 @@ GPU duration. Do not compare unrelated queue clocks without calibration.
 
 The current macOS Metal backend implements the bounded fullscreen API described
 in the [public rendering guide](../development/fullscreen-rendering.md#macos-metal).
-The broader resource/pass/compute model proposed here remains a future expansion.
-
-D3D12 and Metal implement the established device/resource/layout/pass/token
-contracts. Their binding systems, residency, heaps, native barrier choices,
-command allocator reuse and completion mechanisms stay private. Future backend
+Its general device/resource/layout/pass/token API remains proposed; D3D12 is a
+future backend for those same contracts. Their binding systems, residency, heaps,
+native barrier choices, command allocator reuse and completion mechanisms stay
+private. Future backend
 conformance must prove all common semantics before the renderer uses it.
 D3D12 allocator reset requires completed GPU uses, and Metal resource
 synchronization depends on its selected API and hazard mode; portable dependencies
@@ -664,20 +667,28 @@ external memory/semaphore interoperability.
 
 ## Implementation phases and acceptance
 
-| Phase | Deliverable | Required evidence |
-| --- | --- | --- |
-| R0 Contracts | Device capabilities/results/ownership, compatibility facade, reference validator and loss protocol | Existing fullscreen/SDK behavior preserved; stale/cross-owner handles, pending cancellation, late callbacks and requirement failure covered |
-| R1 Portable resources | Buffer/texture/view/sampler, general reflection/layout, immutable bindings/pipelines, indexed and instanced draws | Identical textured/depth diagnostic scenes on Vulkan, forced WebGPU, forced WebGL 2 and Auto; packing/limits/copy/view mismatch rejection |
-| R2 Lifetime services | Completion tokens, retained records, upload/readback rings, Vulkan allocator adapter, pipeline requests | Destroy before/after finish/submit, discard, resource dependency retention, slow GPU/ring exhaustion, memory failure, cancellation, loss, resize/shutdown |
-| R3 Ordered graph | Explicit pass list, version/hazard compiler, pooling, narrow synchronization, reports | Offscreen scene to composite/UI, graph roots/history/import contracts, undeclared-use detection, reference versus optimized image agreement |
-| R4 Compute renderer | Capability-specific storage/compute/indirect effects and authored raster/CPU variants | Compute correctness plus supported limits; WebGL chooses a declared variant or fails before executing |
-| R5 Measured optimization | Select only justified aliasing, parallel recording, pass merging, async queues or bindless services | Representative CPU/GPU/latency/memory evidence, adversarial synchronization tests, debug controls, consumer/SDK maintenance cost |
+| Phase | Current status | Deliverable | Required evidence |
+| --- | --- | --- | --- |
+| R0 Contracts | Partial: fullscreen capabilities and copied startup requirements are implemented; explicit ownership/identity, general feature negotiation and reference validation remain | Device capabilities/results/ownership, compatibility facade, reference validator and loss protocol | Existing fullscreen/SDK behavior preserved; stale/cross-owner handles, pending cancellation, late callbacks and requirement failure covered |
+| R1 Portable resources | Proposed | Buffer/texture/view/sampler, general reflection/layout, immutable bindings/pipelines, indexed and instanced draws | Identical textured/depth diagnostic scenes on Vulkan, Metal, forced WebGPU, forced WebGL 2 and Auto; packing/limits/copy/view mismatch rejection |
+| R2 Lifetime services | Proposed | Completion tokens, retained records, upload/readback rings, Vulkan allocator adapter, pipeline requests | Destroy before/after finish/submit, discard, resource dependency retention, slow GPU/ring exhaustion, memory failure, cancellation, loss, resize/shutdown |
+| R3 Ordered graph | Proposed | Explicit pass list, version/hazard compiler, pooling, narrow synchronization, reports | Offscreen scene to composite/UI, graph roots/history/import contracts, undeclared-use detection, reference versus optimized image agreement |
+| R4 Compute renderer | Proposed | Capability-specific storage/compute/indirect effects and authored raster/CPU variants | Compute correctness plus supported limits; WebGL chooses a declared variant or fails before executing |
+| R5 Measured optimization | Proposed | Select only justified aliasing, parallel recording, pass merging, async queues or bindless services | Representative CPU/GPU/latency/memory evidence, adversarial synchronization tests, debug controls, consumer/SDK maintenance cost |
 
 R2 resource retention and safe completion are prerequisites for scalable R1
 uploads, not permission to ship unsafe intermediate resources. Implement R1/R2
 as small vertical slices: introduce the minimum retirement service with the
 first general buffer, then expand it. GDI graph/pipeline services arrive with
 actual consumers; do not create all proposed files and interfaces at R0.
+
+Implement and validate this initial architecture through the phases and acceptance
+criteria above before beginning the broader conference/journal improvement pass.
+Record the accepted revision, supported profiles, workloads and measurements as
+its comparison baseline. The [deferred research queue](rhi-gdi-gems-review.md#research-after-the-initial-implementation)
+tracks that later work; its sources are screened candidates, not new prerequisites
+or adopted changes to this design. API/specification checks needed to implement
+the baseline remain part of normal implementation.
 
 The validation suite must include resource failure rollback; handle and token
 exhaustion; binding replacement while old packets remain; shader hot reload with
