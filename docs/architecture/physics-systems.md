@@ -695,3 +695,8 @@ The PhysX team's [Advanced Collision Detection](https://nvidia-omniverse.github.
 distinguishes swept and speculative CCD. This informs our capability tests;
 it does not make one implementation's CCD modes available in another.
 Recheck current upstream source at the pinned candidate revision during P0.
+
+The [conference, journal and reading plan](physics-systems-gems-review.md#conferences-journals-and-reading-plan)
+maps production and research sources to these gates, with initial Jolt,
+multiphysics and AVBD readings, experiments and adoption criteria. It extends the
+research queue without changing the single qualified CPU backend decision.

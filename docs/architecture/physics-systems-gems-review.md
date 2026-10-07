@@ -233,11 +233,93 @@ Simulation*. Their exact links, attribution and applicability limits are in the
 [architecture's evidence sections](physics-systems.md#primary-evidence).
 No historical Gems timing is used as a modern budget or proof of SOTA.
 
-After P0-P3 have produced a validated baseline, prioritize experiments by observed
-failures: substeps versus iterations at matched cost; stable contact patches
-versus mesh tessellation; existing versus envelope-informed sleep; static BVH
-cooking quality versus load time; serial versus parallel scheduling; and incoherent
-versus coherent query batches. Measure quality, tail latency, memory and debugger
-cost together. Adopt only improvements that preserve the declared contracts and
-justify their maintenance cost. Robust production behavior is the objective;
-algorithm novelty by itself is not an acceptance gate.
+### Conferences, journals and reading plan
+
+For Ludus, prioritize production integration evidence from GDC alongside numerical
+research from SCA and SIGGRAPH. The ranking below is an engineering recommendation
+for this proposed CPU rigid-body/query system, not a ranking of publication quality.
+Read proceedings and available presentations before considering conference travel.
+
+| Priority and venue | What to look for | Ludus decision it can improve |
+| --- | --- | --- |
+| First: [GDC physics talks](https://www.gdcvault.com/play/1027891/Architecting-Jolt-Physics-for-Horizon) | Production streaming, game/physics synchronization, profiling, contact and CCD failure cases | P0 backend/job qualification and P4 world integration; turn reported problems into local regression scenes |
+| First: [ACM SIGGRAPH/Eurographics Symposium on Computer Animation (SCA)](https://computeranimation.org/) | Contact, friction, constraints, integration, articulated and deformable simulation | P2-P3 quality tests; later compare solver/substep choices at equal total frame cost |
+| First: [SIGGRAPH technical papers](https://s2026.siggraph.org/program/technical-papers/) and ACM Transactions on Graphics (TOG) | New simulation algorithms, collision geometry and robust numerical methods | P5 experiments after a measured baseline; require reproduction and a compatible implementation before adoption |
+| Targeted: [Eurographics / Computer Graphics Forum (CGF)](https://www.eg.org/wp/eurographics-publications/cgf/) and State-of-the-Art Reports | Surveys that compare assumptions and limitations across methods | Choose a research direction before adding a new solver or coupling subsystem; avoid overlapping abstractions |
+| Targeted: [ACM SIGGRAPH Symposium on Interactive 3D Graphics and Games (I3D)](https://i3dsymposium.org/) | Interactive geometry, acceleration structures and parallel workloads | P1/P5 query traversal, static-mesh cooking, batch scheduling and memory experiments |
+| Targeted: [IEEE Transactions on Visualization and Computer Graphics (TVCG)](https://www.computer.org/digital-library/journals/tg/cfp-ieee-transactions-visualization-computer-graphics) | Robust geometry and simulation papers relevant to a concrete failure | Collision robustness/cooking or a later specialist subsystem; filter against the actual supported platforms |
+
+Conference and journal feeds overlap: SCA 2026 full papers appear in CGF, and
+SIGGRAPH's TOG papers belong to both reading streams. Deduplicate by title/DOI;
+do not count the same result as independent supporting evidence. Publication
+formats can change, so record the actual venue/year of each selected work.
+
+### Initial readings mapped to the architecture
+
+These are a follow-up queue. The primary listing/project description and survey
+abstract informed the relevance assessment; this change does not claim a complete
+review of the talk, survey or AVBD paper, or reproduction of their results.
+
+Thanks to **Jorrit Rouwé**, *Architecting Jolt Physics for 'Horizon Forbidden West'*,
+[GDC 2022](https://www.gdcvault.com/play/1027891/Architecting-Jolt-Physics-for-Horizon).
+Its session overview identifies streaming and interaction with multithreaded game
+object updates as architectural bottlenecks. Read this during P0, then inspect the
+exact candidate revision for locking, publication and job dependencies. At P4,
+measure terrain/collider installation while queries and game updates are active.
+The resulting decision is whether our command boundary and protected query views
+fit the backend's concurrency model. Guerrilla's reported savings are evidence
+for its workload; they are not a Ludus performance estimate or a reason to bypass
+the allocation/failure gate.
+
+Thanks to **Daniel Holz, Stefan Rhys Jeske, Fabian Löschner, Jan Bender, Yin Yang
+and Sheldon Andrews**, *Multiphysics Simulation Methods in Computer Graphics*,
+Eurographics State-of-the-Art Report, *Computer Graphics Forum* **44(2), 2025**,
+[DOI: 10.1111/cgf.70082](https://doi.org/10.1111/cgf.70082).
+Use this survey when a concrete fluid/soft-body/rigid-body coupling consumer
+exists. Its cross-method scope can help choose coupling direction and integration
+boundaries. The questions for Ludus are who owns the fixed clock, how impulses
+cross subsystem boundaries, and whether two-way feedback needs substeps. Keep
+detailed fluid decisions in the [fluid reference review](physics-fluid-reference-review.md).
+The survey motivates that investigation; it does not justify adding a universal
+multiphysics solver to the present rigid-body baseline.
+
+Thanks to **Chris Giles, Elie Diaz and Cem Yuksel**, *Augmented Vertex Block
+Descent*, *ACM Transactions on Graphics* **44(4), 2025**, SIGGRAPH,
+[DOI: 10.1145/3731195](https://doi.org/10.1145/3731195), with an
+[author project page, paper and demo source](https://graphics.cs.utah.edu/research/projects/avbd/).
+The project describes an augmented Lagrangian extension for hard constraints and
+high stiffness ratios, with rigid contact, friction and joints evaluated in a
+parallel GPU implementation. At P5, investigate it only if dense contact or joint
+scenes expose a baseline quality/cost limitation. First reproduce relevant results,
+then compare end-to-end cost including collision detection, data movement and
+events on supported hardware. GPU results do not establish an advantage for our
+CPU path, and numerical stability does not establish collision completeness or
+small constraint error. A research prototype remains separate from the qualified
+backend until it passes the same contracts and maintenance review.
+
+### Experiments and adoption criteria
+
+The [architecture's delivery gates](physics-systems.md#delivery-gates) remain the
+acceptance authority. Reading may refine a gate before implementation; replacing
+an algorithm requires measured evidence after the relevant baseline exists.
+
+| Observed problem | Experiment | Evidence to collect |
+| --- | --- | --- |
+| Stack drift, joint stretch or stiff constraints | Substeps versus iterations at matched cost; later evaluate a reproduced research solver | Penetration/joint error, drift, contact refresh cost, worst-frame time and replay behavior |
+| Terrain seams or contact jitter | Stable contact patches and adjacency-aware cooked meshes versus current settings | Snagging failures, manifold churn, memory, cook/load cost and debugger visibility |
+| Resting jitter or premature sleep | Existing backend sleep versus envelope-informed policy | Wake latency, missed interaction, angular/linear drift and active-body cost |
+| Query/cooking bottleneck | BVH quality/settings and coherent versus incoherent batches | Brute-force hit agreement, coverage, tail latency, cooked/runtime bytes and load time |
+| Streaming stalls or poor scaling | Serial versus parallel work and collider publication under load | Lock/job waits, frame tails, deterministic ordering, failure behavior and peak memory |
+
+For each experiment, save the source revision, license, compiler/build profile,
+hardware, scene/seed, settings and reproducer. Specify the failure and quality
+thresholds before tuning. Compare the qualified baseline with identical content
+and report whole-step/query costs as well as kernel costs. Include difficult
+mass ratios, thin/fast bodies, sleeping/waking islands and capacity exhaustion
+where relevant. Reject a speedup that violates query/event completeness, failure
+contracts, supported targets or the declared replay guarantee. Document a concrete
+benefit and the ongoing debugging/maintenance cost before changing the proposal;
+an unread title or impressive demonstration is a lead, not adopted evidence.
+
+Robust production behavior is the objective; algorithm novelty by itself is not
+an acceptance gate.
