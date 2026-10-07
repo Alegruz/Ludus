@@ -3,7 +3,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <ludus/audio/content/loader.h>
-#include <ludus/foundation/base/config.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -77,9 +76,6 @@ TEST_CASE("Audio definition codecs preserve old outputs on malformed input", "[c
 TEST_CASE("Asynchronous leases share clips, retain old playback and cancel acquisition",
           "[content][audio][concurrency]")
 {
-#if defined(LUDUS_PLATFORM_MACOS)
-    SKIP("The native filesystem/stream worker backend is deferred on macOS");
-#endif
     Directory directory;
     content::Catalog catalog;
     content::Resource source, soundResource;
@@ -210,4 +206,76 @@ TEST_CASE("Copied presentation requests cannot revive removed entity generations
     request.Entity.Slot = 0;
     request.Required = true;
     REQUIRE(presentation.Deliver(request, 5, sound, event) == audio::Status::Ok);
+}
+
+TEST_CASE("File-backed music survives source replacement and lease release", "[content][audio][stream][concurrency]")
+{
+    Directory directory;
+    content::Catalog catalog;
+    content::Resource source, resource;
+    REQUIRE(source.Id.Set("source/music"));
+    REQUIRE(source.Path.Set("music.wav"));
+    REQUIRE(catalog.Put(source) == content::Status::Ok);
+    REQUIRE(resource.Id.Set("music/track"));
+    REQUIRE(resource.Path.Set("music.json"));
+    resource.Type = content::Kind::Music;
+    REQUIRE(catalog.Put(resource) == content::Status::Ok);
+    audio::content::Music music;
+    music.Id = resource.Id;
+    music.Source = source.Id;
+    REQUIRE(music.Bus.Set("master"));
+    music.Region = { .Enabled = true, .Begin = 4410, .End = 22050 };
+    content::Bytes bytes;
+    REQUIRE(catalog.Write(bytes) == content::Status::Ok);
+    REQUIRE(content::SaveFile(directory.Path, "catalog.json", bytes.Data(), nullptr) == content::Status::Ok);
+    REQUIRE(audio::content::WriteMusic(music, bytes) == content::Status::Ok);
+    REQUIRE(content::SaveFile(directory.Path, "music.json", bytes.Data(), nullptr) == content::Status::Ok);
+    const auto wav = audio::test::MakeSineWav(44100, 1, 44100);
+    REQUIRE(content::SaveFile(directory.Path, "music.wav", wav, nullptr) == content::Status::Ok);
+    audio::AudioSystem system;
+    REQUIRE(system.Initialize({}) == audio::Status::Ok);
+    audio::content::Loader loader(system);
+    audio::content::Lease lease;
+    REQUIRE(loader.Begin(directory.Path, "music/track") == content::Status::Pending);
+    REQUIRE(Poll(loader, lease) == content::Status::Ok);
+    audio::VoiceHandle voice;
+    REQUIRE(loader.PlayMusic(lease, voice) == audio::Status::Ok);
+    const auto digest = content::Hash(wav);
+    const uint8 broken[] = {0, 1, 2};
+    REQUIRE(content::SaveFile(directory.Path, "music.wav", broken, &digest) == content::Status::Ok);
+    // A retained reader also starts an independent stream after atomic replacement.
+    audio::VoiceHandle second;
+    REQUIRE(loader.PlayMusic(lease, second) == audio::Status::Ok);
+    REQUIRE(loader.Release(lease) == content::Status::Ok);
+    REQUIRE(loader.PlayMusic(lease, second) == audio::Status::InvalidHandle);
+    float32 output[1024];
+    float32 peak = 0;
+    for (uint32 i = 0; i < 160; ++i)
+    {
+        REQUIRE(system.RenderOffline(output, audio::ChannelLayout::Stereo, audio::BufferLayout::Interleaved, 512) ==
+                audio::Status::Ok);
+        for (const auto sample : output)
+        {
+            const auto magnitude = sample < 0 ? -sample : sample;
+            REQUIRE(magnitude <= 1.0F);
+            if (magnitude > peak)
+            {
+                peak = magnitude;
+            }
+        }
+        loader.Service();
+        const timespec delay{0, 1000000};
+        nanosleep(&delay, nullptr);
+    }
+    REQUIRE(peak > 0.1F);
+    audio::VoiceInfo info;
+    REQUIRE(system.GetVoiceInfo(voice, info) == audio::Status::Ok);
+    REQUIRE(info.CursorFrame > 32768);
+    REQUIRE(info.State == audio::VoiceState::Mixed);
+    audio::content::Lease rejected{63, 123};
+    REQUIRE(loader.Begin(directory.Path, "music/track") == content::Status::Pending);
+    REQUIRE(Poll(loader, rejected) != content::Status::Ok);
+    REQUIRE(rejected == audio::content::Lease{63, 123});
+    REQUIRE(system.BeginShutdown() == audio::Status::Ok);
+    loader.Service();
 }

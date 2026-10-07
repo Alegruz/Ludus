@@ -4,7 +4,6 @@
 #include <cstring>
 #include <ludus/audio/audio_source.h>
 #include <ludus/audio/audio_system.h>
-#include <ludus/foundation/base/config.h>
 #include <new>
 #include <time.h>
 
@@ -12,9 +11,6 @@ using namespace ludus::audio;
 using namespace ludus::foundation;
 TEST_CASE("Streaming instances refill concurrently, replay and retire independently", "[audio][stream][concurrency]")
 {
-#if defined(LUDUS_PLATFORM_MACOS)
-    SKIP("Native stream workers are deferred on macOS");
-#endif
     AudioSystem system;
     SystemConfig config;
     config.SystemMode = Mode::Offline;

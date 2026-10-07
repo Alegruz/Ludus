@@ -83,6 +83,7 @@ if(LUDUS_BUILD_TESTS)
     target_sources(
         ludus_audio_tests
         PRIVATE
+            tests/device_tests.cpp
             tests/stream_tests.cpp
             tests/frame_conversion_tests.cpp
             tests/spsc_ring_tests.cpp
@@ -111,6 +112,12 @@ if(LUDUS_BUILD_TESTS)
     ludus_enable_test_exceptions(ludus_audio_tests)
     add_test(NAME ludus_audio_tests COMMAND ludus_audio_tests)
     set_tests_properties(ludus_audio_tests PROPERTIES LABELS "unit;audio")
+    add_test(NAME ludus_audio_device_tests COMMAND ludus_audio_tests "[.device]")
+    # Catch2 3.4 returns 4 when its only case skips for unavailable hardware.
+    # Thanks to Catch2, Session::runInternal (v3.4.0 src/catch2/catch_session.cpp),
+    # and CMake 3.29 SKIP_RETURN_CODE for preserving skip status through CTest:
+    # https://cmake.org/cmake/help/v3.29/prop_test/SKIP_RETURN_CODE.html
+    set_tests_properties(ludus_audio_device_tests PROPERTIES LABELS "audio;device" SKIP_RETURN_CODE 4)
 
     if(NOT LUDUS_ENABLE_ASAN AND NOT LUDUS_ENABLE_UBSAN AND NOT LUDUS_ENABLE_TSAN)
         add_executable(ludus_audio_alloc_tests)
@@ -127,4 +134,10 @@ if(LUDUS_BUILD_TESTS)
         add_test(NAME ludus_audio_alloc_tests COMMAND ludus_audio_alloc_tests)
         set_tests_properties(ludus_audio_alloc_tests PROPERTIES LABELS "unit;audio;alloc")
     endif()
+endif()
+
+# These native owners call pthread directly; keep the system dependency explicit.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    find_package(Threads REQUIRED)
+    target_link_libraries(ludus_audio PRIVATE Threads::Threads)
 endif()

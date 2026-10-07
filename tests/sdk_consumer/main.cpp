@@ -28,6 +28,7 @@ int ExerciseInstalledUi() noexcept;
 int ExerciseInstalledContainers() noexcept;
 int ExerciseInstalledFilesystem() noexcept;
 int ExerciseInstalledContent() noexcept;
+int ExerciseInstalledAudio() noexcept;
 int ExerciseInstalledPack() noexcept;
 bool ExerciseInstalledStrings() noexcept;
 bool ExerciseInstalledParsing() noexcept;
@@ -250,6 +251,10 @@ int main()
     if (!PrimitiveContract())
     {
         return 8;
+    }
+    if (const int result = ExerciseInstalledAudio(); result != 0)
+    {
+        return result;
     }
     if (ExerciseInstalledContent() != 0)
     {

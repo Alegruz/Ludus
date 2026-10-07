@@ -40,8 +40,8 @@ if(NOT EMSCRIPTEN)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_link_options(ludus_sdk_reflection_module PRIVATE "LINKER:--exclude-libs,ALL")
     endif()
-    add_executable(ludus_sdk_consumer main.cpp reflection.cpp network.cpp policy.cpp world.cpp strings.cpp time.cpp fluid.cpp filesystem.cpp pack.cpp ui.cpp containers.cpp threading.cpp parsing.cpp localization.cpp configuration.cpp curves.cpp content.cpp)
-    target_link_libraries(ludus_sdk_consumer PRIVATE consumer_reflection Ludus::Content Ludus::FoundationConfigJson Ludus::RuntimeConfiguration Ludus::NetworkCore Ludus::FoundationParsing Ludus::FoundationParsingJson Ludus::Localization Ludus::FoundationContainers Ludus::FoundationFilesystem Ludus::FoundationStrings Ludus::FoundationBase Ludus::FoundationMath Ludus::FoundationThreading Ludus::FoundationTime Ludus::GraphicsRhi Ludus::Input Ludus::GameplayWorld Ludus::PhysicsFluid Ludus::Ui)
+    add_executable(ludus_sdk_consumer main.cpp reflection.cpp network.cpp policy.cpp world.cpp strings.cpp time.cpp fluid.cpp filesystem.cpp pack.cpp ui.cpp containers.cpp threading.cpp parsing.cpp localization.cpp configuration.cpp curves.cpp content.cpp audio.cpp)
+    target_link_libraries(ludus_sdk_consumer PRIVATE consumer_reflection Ludus::AudioContent Ludus::Content Ludus::FoundationConfigJson Ludus::RuntimeConfiguration Ludus::NetworkCore Ludus::FoundationParsing Ludus::FoundationParsingJson Ludus::Localization Ludus::FoundationContainers Ludus::FoundationFilesystem Ludus::FoundationStrings Ludus::FoundationBase Ludus::FoundationMath Ludus::FoundationThreading Ludus::FoundationTime Ludus::GraphicsRhi Ludus::Input Ludus::GameplayWorld Ludus::PhysicsFluid Ludus::Ui)
     target_compile_definitions(ludus_sdk_consumer PRIVATE
         EXPECTED_FLAVOR=${Ludus_BUILD_FLAVOR_ID}
         EXPECTED_ASSERTS=${Ludus_ENABLE_ASSERTS}

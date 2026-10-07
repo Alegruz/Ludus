@@ -62,11 +62,15 @@ public:
     AudioSystem& operator=(AudioSystem&&) = delete;
 
     // --- Lifecycle (design section 3) -----------------------------------
-    // Allocate fixed runtime storage, validate the bus tree / groups / capacity
-    // products, and prepare the adapter for the configured mode. Fallible; a
-    // failed Device init returns a failure and does not fall back to Disabled
-    // (the caller chooses Disabled explicitly). Idempotent-safe: a second call
-    // on an initialized system returns InvalidArgument.
+    /// Allocate fixed runtime storage and validate the bus tree, groups and capacities.
+    /// @param config Session mode, sample rate and borrowed bus/group configuration.
+    /// @return Ok when ready; InvalidArgument for invalid configuration or repeated
+    /// initialization; OutOfMemory on allocation failure; DeviceError when native
+    /// context/device startup fails. Failed initialization permits an explicit retry.
+    /// @note Call on the sole control owner. Device mode uses CoreAudio on macOS
+    /// and PulseAudio/ALSA on Linux, with float32 stereo at the requested session
+    /// rate. The period is a hint; miniaudio may convert the hardware format/rate.
+    /// No null-device or Disabled fallback is selected implicitly.
     [[nodiscard]] Status Initialize(const SystemConfig& config) noexcept;
 
     [[nodiscard]] SystemState GetState() const noexcept;
@@ -80,8 +84,12 @@ public:
     [[nodiscard]] Status
     PrepareClip(std::span<const uint8> encoded, const ClipDescriptor& descriptor, ClipHandle& outClip) noexcept;
 
-    // Open/validate a seekable stream source off rendering and prefill chunks.
-    // `source` is an owned byte reader whose lifetime the worker takes over.
+    /// Copy encoded bytes, open a seekable decoder and prefill bounded PCM chunks.
+    /// @param encoded Bytes borrowed only during this cold owner-side call.
+    /// @param descriptor Codec and optional source-frame loop bounds.
+    /// @param outStream Receives a session handle on success; invalidated on failure.
+    /// @return Ok, a decode/argument/capacity/allocation status, or IoError if the
+    /// native worker cannot start. Native workers support Linux and macOS.
     [[nodiscard]] Status
     PrepareStream(std::span<const uint8> encoded, const StreamDescriptor& descriptor, StreamHandle& outStream) noexcept;
 
@@ -96,8 +104,15 @@ public:
     // variation handle without attempting playback.
     [[nodiscard]] bool IsClipReady(ClipHandle clip) const noexcept;
 
-    // Takes exclusive input ownership, including on failure. File-backed native
-    // inputs keep encoded memory independent of track duration.
+    /// Prepare a stream with exclusive input ownership, including on failure.
+    /// @param input Seekable reader used during preparation and by the native
+    /// Linux/macOS decode worker. File inputs bound encoded memory independently
+    /// of track duration; renderer callbacks never read or seek this input.
+    /// @param descriptor Codec and optional source-frame loop bounds.
+    /// @param outStream Receives a session handle on success; invalidated on failure.
+    /// @return Ok or an explicit decode/argument/capacity/allocation/worker status.
+    /// @note Call on the sole control owner. Retired input remains owned until
+    /// voice and worker references quiesce; shutdown joins before reclaiming it.
     [[nodiscard]] Status PrepareStream(foundation::core::UniquePtr<StreamInput> input,
                                        const StreamDescriptor& descriptor,
                                        StreamHandle& outStream) noexcept;
@@ -152,8 +167,10 @@ public:
     // Schedules resume; returns Pending/result.
     [[nodiscard]] Status ResumeFromUserGesture() noexcept;
 
-    // Close admission, quiesce renderer/worker, reclaim after proof. Native may
-    // finish synchronously; browser remains alive until async completion.
+    /// Close admission, quiesce native callbacks and join the decode worker before
+    /// reclaiming assets. Linux/macOS teardown is synchronous on the control owner.
+    /// @return Ok after native teardown (also on repeated completed shutdown),
+    /// or NotReady before initialization. Native completion leaves Disabled state.
     [[nodiscard]] Status BeginShutdown() noexcept;
     [[nodiscard]] ShutdownState GetShutdownState() const noexcept;
 

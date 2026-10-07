@@ -11,6 +11,55 @@ This log records decisions actually made while implementing A0-A7, with the
 evidence behind them. It never fabricates a measurement, hash or hardware
 result. "Pending" means not yet run in this environment, not "assumed passing".
 
+## macOS native Audio (2026-10-06)
+
+Device mode now selects **CoreAudio only** through the locked miniaudio 0.11.23
+low-level adapter. Linux retains PulseAudio/ALSA. Context/init/start failures
+return `DeviceError`; the adapter never certifies playback through miniaudio's
+null backend. The session requests float32 interleaved stereo at the configured
+rate and forwards `DevicePeriodFrames` as a hint. Hardware conversion and the
+actual callback size remain miniaudio's responsibility. Backend OS types remain
+private, and teardown stops/uninitializes the device before freeing its renderer.
+
+The existing bounded POSIX decode worker now runs on Linux and macOS: one worker
+refills all stream instances, with cancellation and publication through the
+existing atomics. Native shutdown joins it before releasing decoder/input storage.
+AudioContent acquisition uses the same fallible pthread creation/join mechanism
+on both platforms. `Begin` launches file acquisition/decoding, `Poll` installs a
+completed sound/music revision on the control owner, and `Cancel` joins before
+freeing pending work. File-backed music retains open content revisions and clones
+an independent reader for each play; atomic source replacement and lease release
+do not invalidate an already playing stream.
+
+Initialize an offline session with the default `SystemConfig`, or set
+`SystemMode = Mode::Device` for default-device playback. All public calls belong
+to the sole control owner. Call `Service` to collect callback/worker results and
+`BeginShutdown` on that owner to synchronously finish native teardown. Native
+stream preparation also works in Offline mode. Run the pinned macOS setup/build
+workflow from [the getting-started guide](../wiki/getting-started/install.md).
+
+Regression coverage includes concurrent memory streams, file-backed music loop
+refills beyond prefilled PCM, independent retained readers, failed replacement
+acquisition, cancellation, lease release and shutdown. The installed public SDK
+consumer exercises stream refill/EOF and AudioContent's native loading worker.
+The native device test opens three sessions (44.1/48 kHz), observes both resident
+and stream cursor progress through real callbacks, and shuts down with live work.
+It produces brief low-level output. Set `LUDUS_TEST_AUDIO_DEVICE=1` to require a
+physical output device; otherwise absence reports a skip after checking failure
+cleanup and an explicit Offline retry. Callback progress is not an acoustic
+listening or latency measurement. Device selection UI, device-loss recovery,
+notarization/entitlements, callback performance/latency and long-run stress remain
+separate validation/implementation work.
+
+Thanks to **David Reid**, [miniaudio Programming Manual](https://miniaud.io/docs/manual/index.html),
+sections 1.1 (low-level device lifecycle), 2.2 (macOS runtime framework linking)
+and 17 (backends), for the contracts used by this adapter. The vendored version's
+section 2.2 is the authoritative build contract here: default macOS framework
+linking happens at runtime; no new framework dependency or codec version is added.
+Thanks to **Apple**, [pthread_join(3)](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/pthread_join.3.html),
+DESCRIPTION, for join-before-reclamation semantics. Existing historical milestone
+evidence below retains its original scope.
+
 ## A0 — audit and feasibility
 
 ### Baseline checkout
