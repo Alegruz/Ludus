@@ -244,3 +244,82 @@ no API documentation proves native/wasm behavior or allocation guarantees for
 Ludus. Dependency integration, translator round trips, conformance, real rendered
 language coverage and workload measurements remain explicit implementation gates
 in the final architecture. No companion-CD source code was copied into the engine.
+
+## Post-implementation research backlog
+
+Recorded 2026-10-06. Implement and validate the initial localization architecture
+through L0-L5 first, then use the resources below to investigate improvements in
+L6. The [architecture](localization.md#implementation-phases-and-revisit-criteria)
+owns the feature contracts and exit gates. Capture its accepted implementation
+revision, representative corpus, toolchain/backend/data versions and workload
+measurements before comparing alternatives. Required dependency and standards
+checks remain part of implementing the initial design.
+
+This queue preserves the conference/journal recommendations for that later pass.
+Official venue programs, session descriptions and paper metadata/abstracts were
+screened; the full talks and papers below have not been reviewed for adoption.
+The questions and milestone mappings are Ludus research proposals. Keep the
+completed Gems review above intact and add adoption findings only after reading
+and validating the relevant source.
+
+### Venues to search
+
+| Venue | Priority and topics | Ludus work it could inform |
+| --- | --- | --- |
+| [Unicode Technology Workshop](https://unicode.org/events/utw/2026/) and historical Internationalization and Unicode Conference proceedings | First: ICU/CLDR data packaging, locale behavior, Unicode algorithms and multilingual text display | L0 backend/data integration; L2 formatting; L4 paragraph layout and font policy |
+| [FOSDEM localization talks](https://archive.fosdem.org/2025/schedule/event/fosdem-2025-5561-solving-the-world-s-localization-problems/) | First: MessageFormat design, UI adoption and localization tooling | L2 profile/API alternatives; L5 interchange/tooling; L6 richer-profile evaluation |
+| [GDC Vault localization sessions](https://www.gdcvault.com/play/1015787/Localization-Microtalks-Around-the-World) | Game integration: typography and language-specific production constraints | L4 rendered test scenes; L5 editor, assets and dialogue requirements |
+| [LocWorld / Game Global](https://gameglobal.events/) | Workflow: game localization and QA practices; also screen LocWorld's [technical track](https://locworld.com/conference-tracks/) | L5 translator handoffs, review workflow and release acceptance criteria |
+| [Digital Translation: International Journal of Translation and Localization](https://benjamins.com/catalog/dt) | Research: digital translation workflows and game-localization studies | L5 message context, authoring/editor workflow and linguistic QA |
+| [The Journal of Specialised Translation (JoSTrans)](https://www.jostrans.org/article/view/7269) | Research: game translation and audiovisual/linguistic constraints | L5 translator metadata, subtitle/dialogue realization and quality evaluation |
+| [TACL / WMT evaluation research](https://aclanthology.org/2021.tacl-1.87/) | Conditional: expert review, error classification and translation-quality evaluation if machine-assisted authoring is introduced | L5 linguistic QA and approval evidence; no automatic runtime translation dependency |
+
+Digital Translation continues the former *Journal of Internationalization and
+Localization*; search both archives. Conference links are reading entry points,
+not requirements to attend an event. Check current programs and access before
+planning attendance. A talk about MessageFormat 2 does not establish production
+readiness of a particular C++/wasm backend; the architecture's existing adoption
+gates still apply.
+
+### Initial reading queue
+
+| ID | Source and attribution | Full-review status | Question for a later review and trial |
+| --- | --- | --- | --- |
+| LR-01 | Markus Scherer, **Putting ICU to Work**, Unicode Technology Workshop 2026. [Tutorial](https://www.unicode.org/events/utw/2026/talks/putting-icu-to-work/) | Queued; tutorial description screened | Can ICU integration or linguistic-data packaging be simplified or reduced while preserving supported behavior? Compare initialization, code/data size, resident memory, explicit failure handling and native/wasm parity. |
+| LR-02 | Peter Constable and Ned Holbrook, **Demystifying Unicode Text Display: From Unicode Code Points to Positioned Glyphs**, Unicode Technology Workshop 2026. [Tutorial](https://www.unicode.org/events/utw/2026/talks/demistifying-unicode-text-display/) | Queued; tutorial description screened | Which font-selection, bidi and shaping interactions expose gaps in our paragraph integration? Add mixed-script/direction, missing-font and contextual-shaping cases to the rendered corpus; compare correctness and layout cost. |
+| LR-03 | Robin Leroy, **Thirty years of line breaking**, Unicode Technology Workshop 2026. [Talk](https://www.unicode.org/events/utw/2026/talks/thirty-years-of-line-breaking/) | Queued; talk description screened | Which implementation strategies and historical pitfalls matter for our wrapping path? Compare proposed changes against pinned Unicode conformance fixtures and representative paragraphs, including memory and tail latency. |
+| LR-04 | Eemeli Aro and Ujjwal Sharma, **Solving the world's (localization) problems**, FOSDEM 2025, Inclusive Web devroom. [Session, slides and recording](https://archive.fosdem.org/2025/schedule/event/fosdem-2025-5561-solving-the-world-s-localization-problems/) | Queued; session description screened | Would a versioned MF2 profile or different tooling improve authoring and interchange? Trial only after backend/profile gates pass; compare semantics, translator round trips, output preservation, preparation/formatting cost and migration effort. |
+| LR-05 | Carmen Mangiron and Minako O'Hagan, **Game Localisation: Unleashing Imagination with "Restricted" Translation**, *The Journal of Specialised Translation* 6, 2006, pp.10-21. [Article](https://www.jostrans.org/article/view/7269); [DOI](https://doi.org/10.26034/cm.jostrans.2006.735) | Queued; metadata/abstract screened | Which translator constraints should our context, preview and dialogue tools expose? Review real messages with qualified translators, then assess proposed metadata/UI changes through complete-message and voice/subtitle authoring journeys. |
+| LR-06 | Markus Freitag, George Foster, David Grangier, Viresh Ratnakar, Qijun Tan and Wolfgang Macherey, **Experts, Errors, and Context: A Large-Scale Study of Human Evaluation for Machine Translation**, *Transactions of the Association for Computational Linguistics* 9, 2021, pp.1460-1474. [Paper](https://aclanthology.org/2021.tacl-1.87/); [DOI](https://doi.org/10.1162/tacl_a_00437) | Conditional queue; metadata/abstract screened | If machine-assisted translation is added, how should contextual expert review and error/severity labels support approval? Validate an adapted QA procedure on game messages; do not assume results from the paper's translation corpus transfer unchanged to games. |
+
+### Review and experiment record
+
+After the initial implementation gates pass, screen the venue archives for
+specific limitations observed in that baseline. Retain relevant sources with
+stable IDs, exact attribution, primary URL/DOI, access information and reading
+status. Record archive search scope/date so the shortlist can be revisited.
+Use **Queued**, **Reading**, **Reviewed**, **Trial planned**, **Trial complete**,
+**Adopted**, **Deferred**, or **Rejected**. Abstract screening is not a completed
+review, and a promising hypothesis is not a measured improvement.
+
+For each completed review or experiment, record:
+
+1. Source ID, review date and exact sections/pages or talk timestamps consulted.
+2. The idea, assumptions, evidence, limitations and departures from Ludus's
+   design; distinguish inspiration from copied or adapted code.
+3. Affected module/milestone, a testable hypothesis and a bounded prototype.
+4. Baseline revision/corpus, reproduction commands, toolchain/backend/data
+   versions and the relevant tests, benchmark or PR. Generated results stay in
+   ignored `out/`.
+5. Before/after evidence appropriate to the change: linguistic/rendered
+   correctness, translator round-trip/conflict behavior, native/wasm parity,
+   failure/output preservation, CPU percentiles, allocations, package sizes,
+   startup and old-plus-new/retained-generation memory.
+6. An adopt/defer/reject decision with its reason and links to any updated
+   architecture, profile, implementation and source acknowledgement.
+
+No source in this queue has a completed adoption or improvement trial yet.
+Preserve exact identities, explicit exception-free errors, snapshot lifetimes,
+Unicode conformance and private backend boundaries in every trial. Use the
+architecture's existing gates rather than treating a favorable microbenchmark
+or an attractive conference abstract as proof of improvement.

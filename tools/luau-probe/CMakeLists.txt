@@ -12,21 +12,12 @@ if(NOT luau_verified EQUAL 0)
     message(FATAL_ERROR "Prepare the pinned S0 sources and bytecode with scripts/luau-probe bootstrap, then cook")
 endif()
 
+include("${PROJECT_SOURCE_DIR}/cmake/LuauProfile.cmake")
+ludus_prepare_luau()
 set(luau_source "${PROJECT_SOURCE_DIR}/out/luau-probe/source")
-set(LUAU_BUILD_CLI OFF CACHE BOOL "" FORCE)
-set(LUAU_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(LUAU_BUILD_WEB OFF CACHE BOOL "" FORCE)
-set(LUAU_EXTERN_C ON CACHE BOOL "" FORCE)
-set(LUAU_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-set(LUAU_WERROR ON CACHE BOOL "" FORCE)
-add_subdirectory("${luau_source}" "${CMAKE_CURRENT_BINARY_DIR}/upstream" EXCLUDE_FROM_ALL SYSTEM)
 add_custom_target(ludus_luau_verify
     COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/luau-probe" verify)
 add_dependencies(Luau.VM ludus_luau_verify)
-foreach(target Luau.VM Luau.Common)
-    # Includes the engine exception and sanitizer policy for the entire VM.
-    target_link_libraries(${target} PRIVATE ludus_project_options)
-endforeach()
 
 add_executable(ludus_luau_probe main.cpp)
 target_include_directories(ludus_luau_probe PRIVATE "${PROJECT_SOURCE_DIR}/out/luau-probe/cooked")
