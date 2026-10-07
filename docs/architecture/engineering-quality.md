@@ -223,6 +223,11 @@ Coverage measures execution, not correctness. No arbitrary global 90% target.
 
 ### Scenario coverage and reproducibility
 
+The [benchmark scene roadmap](../development/benchmark-scenes.md) records
+reference scene candidates, suite coverage, initial priorities and the workflow
+for adding reproducible Ludus cases. Its candidate status does not enable new CI
+gates or establish implementation/performance evidence.
+
 Thanks to Matthew Jack, *Code Coverage for QA*, GPG8 section 4.8, for linking
 high-level testing to named expected execution points. Add scenario evidence
 beside compiler coverage; see the

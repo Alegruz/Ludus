@@ -92,6 +92,7 @@ nav:
       - Behavior contracts and cooking: architecture/behavior-s4.md
       - Live gameplay editing: development/project-live-reload.md
       - Rendering and shaders: development/fullscreen-rendering.md
+      - Benchmark scenes and suites: development/benchmark-scenes.md
       - Release packages: development/game-packaging-publishing.md
       - Browser editor build: development/browser-editor.md
   - Learn:
