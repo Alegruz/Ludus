@@ -95,7 +95,7 @@
   ],
   "preset": "linux-clang-development",
   "default_header_avg_ms": 2000,
-  "total_frontend_seconds": 260,
+  "total_frontend_seconds": 320,
   "header_overrides_avg_ms": {
     "modules/foundation/logging/src/internal/backend.hpp": 4000
   },
@@ -133,5 +133,22 @@
     "Keep per-header limits, overrides, profile inputs and tests unchanged.",
     "Evidence: docs/development/build-profiling.md, Network core CI calibration.",
     "Re-measure in CI and tighten when repeated comparable profiles justify it."
+  ],
+  "$native_content_note": [
+    "The full native graph at PR #114 measured 267.2 s summed frontend parsing",
+    "over 502 compilation events on ubuntu-24.04, pinned Clang 18, two uncached",
+    "jobs (run 37555651368, job 112581449768). The preceding F3 profile measured",
+    "251.4 s over 493 events (run 37548495788, job 112558762024), leaving only",
+    "3.4% headroom under the old 260 s aggregate limit. Separate hosts do not",
+    "isolate Content cost or provide a controlled optimization measurement.",
+    "The prior NetworkCore calibration used 419 events and 214.6 s. Subsequent",
+    "modules and native persistence tests grew the complete graph. Ranked",
+    "project headers still pass: core.h 43 ms, audio_types.h 171 ms, both at",
+    "unchanged 2000 ms limits. Content public headers add documentation only.",
+    "Recalibrate only the aggregate from 260 to 320 s, approximately 20%",
+    "headroom over the current observed graph, matching the previous policy.",
+    "Do not change per-header limits, exclusions, profiling inputs or tests.",
+    "Evidence: docs/development/build-profiling.md, Native Content CI calibration.",
+    "Verify the next complete CI profile and tighten when comparable runs justify it."
   ]
 }
