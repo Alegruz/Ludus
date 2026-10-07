@@ -16,17 +16,19 @@ from formatting import format_source
 PRESETS = ("web-emscripten-development", "web-emscripten-release")
 
 
-def analysis_commands(root: Path, entries: list[dict], tidy: str, sysroot: Path) -> list[list[str]]:
+def analysis_commands(root: Path, entries: list[dict], tidy: str, sysroot: Path,
+                      owned_generated: tuple[Path, ...] = ()) -> list[list[str]]:
     """Analyze owned sources and probes, leaving pinned vendor implementations alone."""
     root = root.resolve()
     owned_roots = tuple(root / directory for directory in ("modules", "apps", "tools", "tests"))
+    generated = {path.resolve() for path in owned_generated}
     commands = []
     for entry in entries:
         source = Path(entry["file"])
         if not source.is_absolute():
             source = Path(entry.get("directory", root)) / source
         source = source.resolve()
-        if not any(source.is_relative_to(directory) for directory in owned_roots):
+        if source not in generated and not any(source.is_relative_to(directory) for directory in owned_roots):
             continue
         command_line = entry.get("arguments") or shlex.split(entry["command"])
         flags = []

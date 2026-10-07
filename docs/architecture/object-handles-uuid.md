@@ -607,3 +607,19 @@ and reserved capacity on each target before optimizing them.
 Each stage is independently reviewable. The reference review records the design
 before chapter reading, the adopted refinements, and historical mechanisms that
 would weaken Ludus's present guarantees.
+
+## Research after the initial implementation
+
+Implement and validate the initial architecture above before running the broader
+research and improvement pass. Retain the implementation, regression tests and
+representative measurements as the comparison baseline. Consumer-dependent
+streaming and payload leases remain conditional as described in stage 5.
+
+The [post-implementation reading queue](object-handles-uuid-reference-review.md#research-backlog-after-the-initial-implementation)
+tracks conference and journal resources, review status, improvement hypotheses
+and the evidence required for adoption. Required specification checks, including
+RFC 9562, remain part of implementing the initial design. Later trials should
+address an observed correctness, diagnostic, memory or performance problem and
+preserve this architecture's identity and lifetime contracts. Record any adopted
+change in this owner and its implementation, with source attribution and
+reproducible before/after evidence.

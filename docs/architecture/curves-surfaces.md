@@ -20,6 +20,21 @@ universal optimality or measured Ludus performance. The kernel, owners, caches,
 codecs and adapters below remain proposed; the fixed-size kernel is implemented.
 The final section preserves the baseline written before the chapter review.
 
+## Implementation and research sequence
+
+Implement and validate the initial G2-G5 design against the
+[delivery gates](#validation-and-implementation-gates) first. Preserve the
+resulting revision, fixtures, numerical limits and workload measurements as the
+baseline for later improvements. Required source review and conservative
+arithmetic remain part of implementing those contracts.
+
+After that baseline exists, use the
+[conference and journal research backlog](curves-surfaces-gems-review.md#conference-and-journal-research-backlog)
+to review alternatives and run measured trials. Optional G6 acceleration and
+conditional extensions retain their existing consumer, capability and evidence
+gates. The backlog supplies future research context; it does not expand the
+initial delivery scope or establish that a proposed technique has been adopted.
+
 ## Implemented kernel (G1)
 
 The installed `Ludus::FoundationMath` API now exports `cubic.hpp` and `patch.hpp`.
