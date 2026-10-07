@@ -5,6 +5,9 @@ on:
     paths:
       - '.github/workflows/webgpu-probe.yml'
       - 'tools/webgpu-probe/**'
+      - 'tools/luau-probe/**'
+      - 'scripts/luau-probe'
+      - 'config/luau_toolchain.json'
       - 'tools/shader-probe/**'
       - 'scripts/shader-probe'
       - 'config/shader_toolchain.json'
@@ -189,6 +192,24 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts/python -p 'test_web_package.py' -v
           ./scripts/package-web
+      - name: Validate private S0 Luau wasm interpreter profile
+        run: |
+          ./scripts/luau-probe bootstrap
+          ./scripts/luau-probe cook
+          ./scripts/luau-probe run --preset web-emscripten-development
+          ./scripts/luau-probe run --preset web-emscripten-release
+          ./scripts/luau-probe check --preset web-emscripten-development
+          ./scripts/luau-probe check --preset web-emscripten-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luau-s0-web-probes
+          path: |
+            out/build/web-emscripten-development/tools/luau-probe/index.*
+            out/build/web-emscripten-release/tools/luau-probe/index.*
+            out/build/web-emscripten-release/tools/luau-probe/*LICENSE.txt
+            out/build/web-emscripten-development/tools/luau-probe/evidence.json
+            out/build/web-emscripten-release/tools/luau-probe/evidence.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: ludus-web-smoke-release
@@ -206,6 +227,10 @@ jobs:
         with:
           name: ludus-web-smoke-release
           path: out/packages
+      - uses: actions/download-artifact@v4
+        with:
+          name: luau-s0-web-probes
+          path: out/luau-s0-wasm
       - uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
@@ -221,6 +246,8 @@ jobs:
           python3 -m zipfile -e out/packages/ludus-web-smoke-release.zip out/browser-qa/extracted
           cd tools/web-browser-tests
           xvfb-run -a npm test
+      - name: Test S0 wasm recovery and debugger in Chromium
+        run: node tools/luau-probe/browser.mjs out/luau-s0-wasm/web-emscripten-release/tools/luau-probe
       - uses: actions/upload-artifact@v4
         if: always()
         with:

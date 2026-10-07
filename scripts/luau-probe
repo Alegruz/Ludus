@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+"""Prepare and validate the private S0 Luau experiment; ordinary builds stay offline."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import shlex
+import subprocess
+import sys
+import tarfile
+import urllib.request
+
+ROOT = Path(__file__).resolve().parent.parent
+WORK = ROOT / "out/luau-probe"
+SOURCE = WORK / "source"
+FIXTURES = ROOT / "tools/luau-probe/fixtures"
+PIN_PATH = ROOT / "config/luau_toolchain.json"
+PIN = json.loads(PIN_PATH.read_text())
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise RuntimeError(message)
+
+
+def sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def run(command: list[str]) -> None:
+    print("+ " + shlex.join(map(str, command)), flush=True)
+    subprocess.run(command, check=True)
+
+
+def loader_profile(data: bytes) -> bytes:
+    """Keep all loader scratch owners outside luaD_rawrunprotected's jump region.
+
+    Thanks to Roblox/Luau, VM/src/lvmload.cpp at the recorded revision. This
+    experimental profile extends their LoadContext ownership pattern to nilKeys.
+    Preserve upstream licenses; see docs/architecture/luau-s0.md for the audit.
+    Exact substitutions fail closed when updating the upstream pin.
+    """
+    replacements = (
+        ("    ~TempBuffer() noexcept\n    {\n", "    ~TempBuffer() noexcept\n    {\n        release();\n    }\n\n    void release() noexcept\n    {\n"),
+        ("            luaM_freearray(L, data, count, T, 0);\n    }", "            luaM_freearray(L, data, count, T, 0);\n        L = nullptr;\n        data = nullptr;\n        count = 0;\n    }"),
+        ("    TempBuffer<Proto*>& protos,\n", "    TempBuffer<Proto*>& protos,\n    TempBuffer<int32_t>& nilKeys,\n"),
+        ("                TempBuffer<int32_t> nilKeys;\n", "                nilKeys.release();\n"),
+        ("        TempBuffer<Proto*> protos;\n", "        TempBuffer<Proto*> protos;\n        TempBuffer<int32_t> nilKeys;\n"),
+        ("loadsafe(L, ctx->strings, ctx->protos, ctx->chunkname", "loadsafe(L, ctx->strings, ctx->protos, ctx->nilKeys, ctx->chunkname"),
+        ("        {},\n        {},\n        chunkname,", "        {},\n        {},\n        {},\n        chunkname,"),
+    )
+    text = data.decode()
+    for old, new in replacements:
+        require(text.count(old) == 1, "Loader profile no longer matches the pinned source")
+        text = text.replace(old, new)
+    return text.encode()
+
+
+def source_entries() -> dict[str, bytes]:
+    archive = WORK / "luau.tar.gz"
+    require(archive.is_file() and sha(archive.read_bytes()) == PIN["archive_sha256"],
+            "Missing or modified Luau archive; run scripts/luau-probe bootstrap")
+    entries = {}
+    with tarfile.open(archive) as bundle:
+        for member in bundle.getmembers():
+            relative = Path(*Path(member.name).parts[1:])
+            require(not relative.is_absolute() and ".." not in relative.parts,
+                    "Unsafe archive path")
+            require(member.isfile() or member.isdir(), "Unexpected archive entry type")
+            if member.isfile():
+                stream = bundle.extractfile(member)
+                require(stream is not None, "Unreadable archive entry")
+                data = stream.read()
+                if relative.as_posix() == "VM/src/lvmload.cpp":
+                    data = loader_profile(data)
+                entries[relative.as_posix()] = data
+    return entries
+
+
+def host_tool(name: str) -> str:
+    path = ROOT / "out/host-tools/venv/bin" / name
+    require(path.is_file(), "Prepare pinned host tools with init.sh before this command")
+    return str(path)
+
+
+def bootstrap() -> None:
+    WORK.mkdir(parents=True, exist_ok=True)
+    archive = WORK / "luau.tar.gz"
+    if not archive.is_file() or sha(archive.read_bytes()) != PIN["archive_sha256"]:
+        temporary = WORK / "luau.download"
+        print("Downloading the explicitly requested, pinned Luau archive", flush=True)
+        urllib.request.urlretrieve(PIN["archive"], temporary)
+        require(sha(temporary.read_bytes()) == PIN["archive_sha256"], "Luau archive integrity failure")
+        temporary.replace(archive)
+    for name, data in source_entries().items():
+        path = SOURCE / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.is_file() or path.read_bytes() != data:
+            path.write_bytes(data)
+    build = WORK / "host-compiler"
+    # Upstream compiler/CLI exceptions stay in this separate host process. This
+    # executable includes no Ludus code and is never linked into the probe/SDK.
+    run([host_tool("cmake"), "-S", str(SOURCE), "-B", str(build), "-G", "Ninja",
+         "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_CXX_COMPILER=clang++-18",
+         "-DCMAKE_C_COMPILER=clang-18", f"-DCMAKE_MAKE_PROGRAM={host_tool('ninja')}",
+         "-DLUAU_BUILD_TESTS=OFF", "-DLUAU_BUILD_CLI=ON", "-DLUAU_BUILD_WEB=OFF"])
+    run([host_tool("cmake"), "--build", str(build), "--target", "Luau.Compile.CLI", "-j", "2"])
+    (WORK / "compiler-manifest.json").write_text(json.dumps({
+        "pin_sha256": sha(PIN_PATH.read_bytes()),
+        "compiler_sha256": sha((build / "luau-compile").read_bytes()),
+    }, indent=2) + "\n")
+
+
+def cook() -> None:
+    compiler = WORK / "host-compiler/luau-compile"
+    require(compiler.is_file(), "Run scripts/luau-probe bootstrap first")
+    compiler_evidence = json.loads((WORK / "compiler-manifest.json").read_text())
+    require(compiler_evidence["pin_sha256"] == sha(PIN_PATH.read_bytes()), "Stale host compiler pin; bootstrap again")
+    require(compiler_evidence["compiler_sha256"] == sha(compiler.read_bytes()), "Modified host compiler; bootstrap again")
+    verify_sources()
+    output = WORK / "cooked"
+    output.mkdir(parents=True, exist_ok=True)
+    header = "#pragma once\n// Generated by the pinned offline compiler; private to S0.\n"
+    header += "namespace ludus::luau_probe {\n"
+    evidence = {"pin_sha256": sha(PIN_PATH.read_bytes()), "compiler_sha256": compiler_evidence["compiler_sha256"], "fixtures": {}}
+    for fixture in sorted(FIXTURES.glob("*.luau")):
+        command = [str(compiler), "--binary", f"-O{PIN['optimization_level']}",
+                   f"-g{PIN['debug_level']}", str(fixture)]
+        result = subprocess.run(command, check=True, stdout=subprocess.PIPE)
+        require(bool(result.stdout) and result.stdout[0] != 0, f"Compilation failed: {fixture}")
+        data = result.stdout
+        header += f"inline constexpr foundation::uint8 {fixture.stem.upper()}[] = {{\n"
+        header += "\n".join("    " + ", ".join(str(b) for b in data[i:i+16]) + ","
+                            for i in range(0, len(data), 16)) + "\n};\n"
+        evidence["fixtures"][fixture.name] = {"source_sha256": sha(fixture.read_bytes()),
+                                               "bytecode_sha256": sha(data), "bytes": len(data)}
+    header += "}\n"
+    (output / "fixtures.h").write_text(header)
+    evidence["header_sha256"] = sha(header.encode())
+    (output / "manifest.json").write_text(json.dumps(evidence, indent=2) + "\n")
+
+
+def verify_sources() -> None:
+    for name, data in source_entries().items():
+        path = SOURCE / name
+        require(path.is_file() and path.read_bytes() == data, f"Modified Luau source: {name}")
+
+
+def verify() -> None:
+    verify_sources()
+    output = WORK / "cooked"
+    evidence = json.loads((output / "manifest.json").read_text())
+    require(evidence["pin_sha256"] == sha(PIN_PATH.read_bytes()), "Stale bytecode pin; recook")
+    require(evidence["header_sha256"] == sha((output / "fixtures.h").read_bytes()), "Modified bytecode header")
+    fixtures = {p.name: sha(p.read_bytes()) for p in FIXTURES.glob("*.luau")}
+    require(fixtures == {name: entry["source_sha256"] for name, entry in evidence["fixtures"].items()},
+            "Stale bytecode fixtures; recook")
+
+
+def check(preset: str, fix: bool) -> None:
+    sys.path.insert(0, str(ROOT / "scripts/python"))
+    from formatting import format_source
+    source = ROOT / "tools/luau-probe/main.cpp"
+    code = source.read_text()
+    formatted = format_source(code, source, "clang-format-18")
+    if fix:
+        source.write_text(formatted)
+        return
+    require(code == formatted, "Run scripts/luau-probe check --fix")
+    build = ROOT / "out/build" / preset
+    entries = json.loads((build / "compile_commands.json").read_text())
+    entry = next(e for e in entries if e["file"] == str(source))
+    if preset.startswith("web-"):
+        from web_build import analysis_commands
+        sysroot = ROOT / "out/host-tools/emsdk/upstream/emscripten/cache/sysroot"
+        command = analysis_commands(ROOT, [entry], "clang-tidy-18", sysroot)[0]
+        run([flag for flag in command if flag != "-sSUPPORT_LONGJMP=wasm"])
+        return
+    flags = shlex.split(entry["command"])[1:]
+    clean = []
+    index = 0
+    while index < len(flags):
+        flag = flags[index]
+        if flag == "-o":
+            index += 2
+            continue
+        if flag not in ("-c", str(source), "-sSUPPORT_LONGJMP=wasm") and not flag.startswith("@"):
+            clean.append(flag)
+        index += 1
+    run(["clang-tidy-18", str(source), "--quiet", "--warnings-as-errors=*", "--", *clean])
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("bootstrap", "cook", "verify", "run", "check"))
+    parser.add_argument("--preset", default="linux-clang-development")
+    parser.add_argument("--fix", action="store_true")
+    args = parser.parse_args()
+    if args.action == "bootstrap":
+        bootstrap()
+    elif args.action == "cook":
+        cook()
+    elif args.action == "verify":
+        verify()
+    elif args.action == "check":
+        check(args.preset, args.fix)
+    else:
+        verify()
+        options = []
+        if args.preset.startswith("web-"):
+            options = ["-DLUDUS_BUILD_SMOKE_APP=OFF", "-DLUDUS_BUILD_WEB_PROBES=OFF"]
+        if args.preset.endswith("release") or args.preset.endswith("profile"):
+            options.append("-DLUDUS_COMPILED_LOG_LEVEL=2")
+        run([host_tool("cmake"), "--preset", args.preset, "-DLUDUS_BUILD_LUAU_PROBE=ON",
+             "-DLUDUS_WARNINGS_AS_ERRORS=ON", *options])
+        run([host_tool("cmake"), "--build", "--preset", args.preset, "--target", "ludus_luau_probe", "-j", "2"])
+        run([host_tool("ctest"), "--preset", args.preset, "-R", "^ludus_luau_semantics$",
+             "--no-tests=error", "--output-on-failure"])
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, RuntimeError, subprocess.CalledProcessError, ValueError) as error:
+        print(f"S0 probe failed: {error}", file=sys.stderr)
+        sys.exit(1)

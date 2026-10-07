@@ -44,6 +44,32 @@ Use `--with-tests` during initialization to prepare test targets first. Debug,
 Development, ASan/UBSan and Release have selectable native presets. Keep each
 profile in its own build and SDK directories.
 
+## Try the private Luau feasibility probe
+
+Scripting is in its first feasibility milestone. The engine checkout has an
+opt-in interpreter probe; the installed SDK and game/editor workflows have no
+scripting provider yet. From a checkout prepared with the Development test
+preset:
+
+```bash
+./scripts/luau-probe bootstrap
+./scripts/luau-probe cook
+./scripts/luau-probe run --preset linux-clang-development
+./scripts/luau-probe check --preset linux-clang-development
+```
+
+Bootstrap explicitly downloads the pinned source and builds a separate host
+compiler. Cook creates trusted bytecode fixtures. Run enables
+`LUDUS_BUILD_LUAU_PROBE`, builds the interpreter and checks errors, allocation
+failures, interruption and debugger primitives. Ordinary engine/SDK builds keep
+the option OFF and need no Luau dependency. Evidence is written to
+`out/build/<preset>/tools/luau-probe/evidence.json`.
+
+The [S0 guide and lifetime audit](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/luau-s0.md)
+explain sanitizer/Web commands, the private loader fix, diagnostic Release
+configuration and remaining adoption gates. This slice has native Linux and
+Web probe coverage; Windows, macOS, Android and iOS require their own acceptance.
+
 ## Prepare native debugging
 
 ```bash

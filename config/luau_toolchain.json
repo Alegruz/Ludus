@@ -1,0 +1,9 @@
+{
+  "revision": "1eca9fda3e4753a1592000f6cfdf659aaa778b7d",
+  "archive": "https://codeload.github.com/luau-lang/luau/tar.gz/1eca9fda3e4753a1592000f6cfdf659aaa778b7d",
+  "archive_sha256": "5b93ecef638a485065f042be1f48436e2d835deb9cdea7ccdccbfaa467e74a48",
+  "optimization_level": 1,
+  "debug_level": 2,
+  "profile": "s0-interpreter-longjmp-loader-lifetime-v1",
+  "status": "experimental; not an installed SDK dependency"
+}
