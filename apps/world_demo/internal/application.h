@@ -22,6 +22,11 @@ public:
     Start(graphics::rhi::BackendSelection selection = graphics::rhi::BackendSelection::Auto) noexcept;
     [[nodiscard]] AppState Frame() noexcept;
     void Shutdown() noexcept;
+    /// Opt in to immediate planar player follow; default retains authored fixed camera.
+    void SetCameraFollow(bool enabled) noexcept
+    {
+        mCameraFollow = enabled;
+    }
     [[nodiscard]] const Session& GetSession() const noexcept
     {
         return mSession;
@@ -53,6 +58,7 @@ private:
     bool mCreated = false;
     bool mRendererReady = false;
     bool mHadFocus = false;
+    bool mCameraFollow = false;
     AppState mState = AppState::Stopped;
 };
 } // namespace ludus::world_demo

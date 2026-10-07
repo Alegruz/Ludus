@@ -39,6 +39,7 @@ bool ExerciseInstalledReflection() noexcept;
 int ExerciseInstalledTime() noexcept;
 bool ExerciseInstalledFluid() noexcept;
 bool ExerciseInstalledCurves() noexcept;
+bool ExerciseInstalledCamera() noexcept;
 
 static_assert(ludus::foundation::kTarget.PointerBits == sizeof(void*) * 8);
 static_assert(ludus::foundation::kTarget.Os == ludus::foundation::TargetOs::Linux);
@@ -232,6 +233,10 @@ int main()
     if (!ExerciseInstalledReflection())
     {
         return 91;
+    }
+    if (!ExerciseInstalledCamera())
+    {
+        return 41;
     }
     if (!ExerciseInstalledCurves())
     {

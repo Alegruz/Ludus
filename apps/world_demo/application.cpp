@@ -1,4 +1,5 @@
 #include "internal/application.h"
+#include "internal/camera_view.h"
 #include "world_scene.h"
 #include <algorithm>
 #include <ludus/foundation/logging/log_format.hpp>
@@ -262,14 +263,26 @@ bool Application::Render(const platform::browser::WindowState& window) noexcept
         return false;
     }
     const auto info = rhi::GetFrameInfo();
+    PlanarCameraView cameraView;
+    if (TryBuildPlanarCameraView(mFrame.Camera,
+                                 {
+                                     .Width = info.Width,
+                                     .Height = info.Height,
+                                 },
+                                 {},
+                                 1.0e6,
+                                 cameraView) != gameplay::camera::CameraStatus::Success)
+    {
+        // This is a presentation failure, never an authoritative simulation fault.
+        (void)rhi::EndFrame();
+        return false;
+    }
     Uniforms uniforms;
     uniforms.View[0] = static_cast<float32>(info.Width);
     uniforms.View[1] = static_cast<float32>(info.Height);
-    uniforms.View[2] = mFrame.Camera.X;
-    uniforms.View[3] = mFrame.Camera.Y;
-    uniforms.Settings[0] =
-        std::max(mFrame.VerticalExtent,
-                 mFrame.MinimumWidth * static_cast<float32>(info.Height) / static_cast<float32>(info.Width));
+    uniforms.View[2] = cameraView.Center.X;
+    uniforms.View[3] = cameraView.Center.Y;
+    uniforms.Settings[0] = cameraView.VerticalSpan;
     uniforms.Settings[1] = static_cast<float32>(mFrame.Count);
     for (usize index = 0; index < mFrame.Count; ++index)
     {
@@ -396,9 +409,9 @@ AppState Application::Frame() noexcept
     }
     if (mSession.Driver.GetMode() != Mode::Faulted)
     {
-        if (!mSession.World().Extract(mSession.Driver.GetAlpha(), mFrame))
+        if (!mSession.World().Extract(mSession.Driver.GetAlpha(), mFrame, mCameraFollow, mInputFrame))
         {
-            mSession.Driver.SetMode(Mode::Faulted);
+            LUDUS_LOG_WARN(logging::LOG_CORE, "Camera extraction failed; retaining previous frame");
         }
     }
     // Presentation delivery is independent of image acquisition. This adapter
