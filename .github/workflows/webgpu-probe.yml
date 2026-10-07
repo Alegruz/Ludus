@@ -12,6 +12,8 @@ on:
       - 'modules/runtime/scripting/**'
       - 'tools/script-session/**'
       - 'scripts/script-session'
+      - 'tools/visual-sequence/**'
+      - 'scripts/visual-sequence'
       - 'tools/script-interaction/**'
       - 'tools/script-cook/**'
       - 'scripts/script-interaction'
@@ -222,6 +224,17 @@ jobs:
           ./scripts/script-session run --preset web-emscripten-release
           ./scripts/script-session check --preset web-emscripten-development
           ./scripts/script-session check --preset web-emscripten-release
+      - name: Validate S3 generated graph, text equivalence and node debugger in Wasm
+        run: |
+          ./scripts/visual-sequence run --preset web-emscripten-development
+          ./scripts/visual-sequence run --preset web-emscripten-release
+          ./scripts/visual-sequence check --preset web-emscripten-development
+          ./scripts/visual-sequence check --preset web-emscripten-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: visual-s3-wasm-owner
+          path: out/build/web-emscripten-release/tools/visual-sequence/ludus_visual_sequence.*
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: luau-s2-web-session

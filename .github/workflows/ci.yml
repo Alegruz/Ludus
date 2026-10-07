@@ -231,6 +231,27 @@ jobs:
           ./scripts/script-session cook
           ./scripts/script-session run --preset linux-clang-development
           ./scripts/script-session check --preset linux-clang-development
+      - name: Validate S3 visual sequence and authoring ownership
+        run: |
+          ./scripts/visual-sequence cook
+          ./scripts/visual-sequence run --preset linux-clang-development
+          ./scripts/visual-sequence check --preset linux-clang-development
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Install pinned S3 authoring test browser
+        working-directory: tools/web-browser-tests
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Exercise S3 designer author, review, debug and replacement journey
+        run: node tools/visual-sequence/browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-s3-authoring-evidence
+          path: out/browser-qa/results/visual-s3*
+          if-no-files-found: warn
       - name: Test Development
         run: out/host-tools/venv/bin/ctest --preset linux-clang-development --no-tests=error
       - name: Measure bounded filesystem reads and native syscall overhead
@@ -332,6 +353,8 @@ jobs:
         run: |
           ./scripts/script-session cook
           ./scripts/script-session run --preset linux-clang-asan-ubsan
+      - name: Validate S3 graph debugger, candidate failure and owner retirement with sanitizers
+        run: ./scripts/visual-sequence run --preset linux-clang-asan-ubsan
       - name: Test with sanitizers
         env:
           LUDUS_RELOAD_METRICS: ${{ runner.temp }}/live-reload-asan-ubsan.jsonl

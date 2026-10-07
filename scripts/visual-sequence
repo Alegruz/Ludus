@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Cook, test, check or serve the private S3 visual encounter workbench."""
+import argparse
+import json
+from pathlib import Path
+import runpy
+import shlex
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / 'tools/visual-sequence'))
+import cook
+import model
+S2 = runpy.run_path(str(ROOT / 'scripts/script-session'), run_name='s2_tool')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action', choices=('bootstrap', 'cook', 'run', 'check', 'serve'))
+    parser.add_argument('--preset', default='linux-clang-development')
+    parser.add_argument('--document', type=Path)
+    parser.add_argument('--port', type=int, default=0)
+    parser.add_argument('--fix', action='store_true')
+    args = parser.parse_args()
+    if args.action == 'bootstrap':
+        S2['S1']['bootstrap']()
+        S2['S1']['cook']()
+        S2['cook']()
+        return
+    if args.action == 'cook':
+        document = model.parse((args.document or ROOT / 'tools/visual-sequence/fixtures/encounter.json').read_text())
+        artifact, maps = cook.compile_document(document, 1, ROOT / 'out/visual-sequence/cache')
+        output = ROOT / 'out/visual-sequence/cooked'
+        output.mkdir(parents=True, exist_ok=True)
+        (output / 'artifact.json').write_text(json.dumps(artifact, sort_keys=True) + '\n')
+        (output / 'maps.json').write_text(json.dumps(maps, sort_keys=True, indent=2) + '\n')
+        print('S3 strict sequence cooked: ' + artifact['key'])
+    elif args.action == 'run':
+        S2['verify']()
+        tool = S2['host_tool']
+        options = ['-DLUDUS_BUILD_VISUAL_SEQUENCE=ON', '-DLUDUS_WARNINGS_AS_ERRORS=ON']
+        if args.preset.startswith('web-'): options += ['-DLUDUS_BUILD_SMOKE_APP=OFF', '-DLUDUS_BUILD_WEB_PROBES=OFF']
+        S2['run']([tool('cmake'), '--preset', args.preset, *options])
+        S2['run']([tool('cmake'), '--build', '--preset', args.preset, '--target', 'ludus_visual_sequence', '-j', '2'])
+        S2['run']([tool('ctest'), '--preset', args.preset, '-R', '^ludus_visual_sequence', '--output-on-failure', '--no-tests=error'])
+    elif args.action == 'check':
+        S2['check'](args.preset, args.fix)
+        sys.path.insert(0, str(ROOT / 'scripts/python'))
+        from formatting import format_source
+        source = ROOT / 'tools/visual-sequence/bridge.cpp'
+        text = source.read_text()
+        formatted = format_source(text, source, 'clang-format-18')
+        if args.fix:
+            source.write_text(formatted)
+            return
+        model.require(text == formatted, 'Run visual-sequence check --fix')
+        entries = json.loads((ROOT / 'out/build' / args.preset / 'compile_commands.json').read_text())
+        entry = next(e for e in entries if e['file'] == str(source))
+        if args.preset.startswith('web-'):
+            from web_build import analysis_commands
+            command = analysis_commands(ROOT, [entry], 'clang-tidy-18',
+                ROOT / 'out/host-tools/emsdk/upstream/emscripten/cache/sysroot')[0]
+            S2['run']([flag for flag in command if flag != '-sSUPPORT_LONGJMP=wasm'])
+        else:
+            S2['run'](['clang-tidy-18', '-p', str(ROOT / 'out/build' / args.preset), '--quiet', '--warnings-as-errors=*', str(source)])
+    else:
+        model.require(not args.preset.startswith('web-'), 'serve uses a native POSIX owner; use run for Wasm conformance')
+        import server
+        executable = ROOT / 'out/build' / args.preset / 'tools/visual-sequence/ludus_visual_sequence'
+        model.require(executable.is_file(), 'Run visual-sequence run first')
+        document = args.document or ROOT / 'out/visual-sequence/encounter.json'
+        if args.document is None and not document.exists():
+            document.parent.mkdir(parents=True, exist_ok=True)
+            document.write_bytes((ROOT / 'tools/visual-sequence/fixtures/encounter.json').read_bytes())
+        server.serve(document, executable, ROOT / 'out/visual-sequence/cache', args.port)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
+        print('S3: ' + str(error), file=sys.stderr)
+        sys.exit(1)

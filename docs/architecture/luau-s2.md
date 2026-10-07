@@ -47,7 +47,8 @@ hashes. `maps.json` is a separate debug artifact mapping compiled lines to the
 original authored file, source hash, line count and program key. This debug-only
 profile retains g2 data; it is not a shipping stripping/transport profile.
 
-The runtime accepts only the compiled trusted catalog through the Session owner;
+The default S2 owner accepts its compiled trusted catalog. [S3](visual-s3.md) also
+uses the private Session with an explicitly owner-admitted paired-cooker catalog;
 a checksum is not authorization to load arbitrary bytes. Runtime loading checks
 unique assets and dependency-first ordering again. Initializers receive no world
 or service facade. `require` exists only during initialization and resolves only

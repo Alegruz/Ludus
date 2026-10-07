@@ -50,6 +50,11 @@ class Session final
 {
 public:
     [[nodiscard]] bool Initialize(const Package& package) noexcept;
+    // Private authoring owner boundary: every entry must come from the paired
+    // trusted cooker. Catalog, package and code storage are borrowed until Close;
+    // the active/staged entries must stay immutable. Never admit browser bytes
+    // or authenticate a package by its checksum alone.
+    [[nodiscard]] bool Initialize(const Package& package, std::span<const Package* const> admitted) noexcept;
     [[nodiscard]] Status Begin(InvokeRequest request = {}) noexcept;
     [[nodiscard]] Status Resume(ResumeMode mode) noexcept;
     [[nodiscard]] Replacement Prepare(const Package& package, std::string_view expected) noexcept;
@@ -104,6 +109,7 @@ private:
     Diagnostic mLast;
     const Package* mActive = nullptr;
     const Package* mStaged = nullptr;
+    std::span<const Package* const> mCatalog;
     uint32 mBank = 0;
     bool mPending = false;
     uint64 mPreparedTick = 0;
