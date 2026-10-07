@@ -41,7 +41,9 @@ enum class ResourceStatus : ludus::foundation::uint8
     InvalidState,
     InvalidDescription,
     CapacityExceeded,
-    InUse
+    InUse,
+    /// An explicit device-owner operation was stopped by device loss; recreate the session.
+    DeviceLost,
 };
 enum class ShaderStage : ludus::foundation::uint8
 {

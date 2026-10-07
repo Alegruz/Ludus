@@ -12,6 +12,7 @@
 #include <ludus/foundation/math/random.hpp>
 #include <ludus/foundation/math/transform.hpp>
 #include <ludus/foundation/math/vector.hpp>
+#include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/rhi.h>
 #include <ludus/input/actions.h>
 #include <ludus/input/keyboard.h>
@@ -290,6 +291,19 @@ int main()
     static_assert(noexcept(ludus::graphics::rhi::Start({}, {})));
     static_assert(noexcept(ludus::graphics::rhi::Start({}, {}, ludus::graphics::rhi::BackendSelection::Auto, {})));
     ludus::graphics::rhi::Shutdown();
+    // Link and exercise explicit device admission entirely through installed
+    // headers, without asking this policy test host for a GPU adapter.
+    ludus::graphics::rhi::DeviceHandle explicitDevice;
+    ludus::graphics::rhi::SurfaceHandle explicitSurface;
+    ludus::graphics::rhi::DeviceDescription explicitRequest;
+    explicitRequest.Required.Compute = true;
+    if (ludus::graphics::rhi::CreateDevice({}, {}, explicitRequest, explicitDevice, explicitSurface) !=
+            ludus::graphics::rhi::DeviceStatus::Unsupported ||
+        ludus::graphics::rhi::DestroyDevice(explicitDevice) != ludus::graphics::rhi::DeviceStatus::InvalidHandle ||
+        !ludus::graphics::rhi::GetCompiledBackends().Vulkan)
+    {
+        return 2;
+    }
     if (ludus::graphics::rhi::GetStartup().State != ludus::graphics::rhi::StartupState::Idle)
     {
         return 2;

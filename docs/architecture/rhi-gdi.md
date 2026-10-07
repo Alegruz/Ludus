@@ -7,7 +7,11 @@ through [five complete reference chapters](rhi-gdi-gems-review.md) and current
 primary documentation. The first implementation slice now adds effective
 fullscreen capabilities, copied startup requirements, explicit requirement and
 backend-selection failures, and requirement-aware browser fallback. Remaining
-R0 work and R1-R5 are proposals. No performance gain has been measured; accepted
+R0 work and R1-R5 are proposals. The first explicit R0 device slice now shares
+the facade session/registry, validates device and target owners, and rejects
+unimplemented required workloads before startup; see the
+[public usage contract](../development/fullscreen-rendering.md#explicit-r0-device-ownership).
+No performance gain has been measured; accepted
 ADRs and the public API define shipped behavior.
 
 Ludus should use a **small explicit RHI, a Graphics Device Interface that plans
@@ -669,7 +673,7 @@ external memory/semaphore interoperability.
 
 | Phase | Current status | Deliverable | Required evidence |
 | --- | --- | --- | --- |
-| R0 Contracts | Partial: fullscreen capabilities and copied startup requirements are implemented; explicit ownership/identity, general feature negotiation and reference validation remain | Device capabilities/results/ownership, compatibility facade, reference validator and loss protocol | Existing fullscreen/SDK behavior preserved; stale/cross-owner handles, pending cancellation, late callbacks and requirement failure covered |
+| R0 Contracts | Partial: fullscreen capabilities, copied requirements, explicit device/target owners, required/preferred workload admission and reference-backend lifecycle tests are implemented; general resource slot/generation identities and broader feature/format/limit negotiation remain | Device capabilities/results/ownership, compatibility facade, reference validator and loss protocol | Existing fullscreen/SDK behavior preserved; stale/cross-owner handles, pending cancellation, late callbacks and requirement failure covered |
 | R1 Portable resources | Proposed | Buffer/texture/view/sampler, general reflection/layout, immutable bindings/pipelines, indexed and instanced draws | Identical textured/depth diagnostic scenes on Vulkan, Metal, forced WebGPU, forced WebGL 2 and Auto; packing/limits/copy/view mismatch rejection |
 | R2 Lifetime services | Proposed | Completion tokens, retained records, upload/readback rings, Vulkan allocator adapter, pipeline requests | Destroy before/after finish/submit, discard, resource dependency retention, slow GPU/ring exhaustion, memory failure, cancellation, loss, resize/shutdown |
 | R3 Ordered graph | Proposed | Explicit pass list, version/hazard compiler, pooling, narrow synchronization, reports | Offscreen scene to composite/UI, graph roots/history/import contracts, undeclared-use detection, reference versus optimized image agreement |
