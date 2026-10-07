@@ -416,7 +416,7 @@ AppState Application::Frame() noexcept
     }
     // Presentation delivery is independent of image acquisition. This adapter
     // logs copied facts once; audio and particle assets are a later game feature.
-    for (const auto& event : mSession.World().GetOutbox())
+    for ([[maybe_unused]] const auto& event : mSession.World().GetOutbox())
     {
         LUDUS_LOG_INFO(logging::LOG_CORE,
                        "World {} tick {} event {}",
