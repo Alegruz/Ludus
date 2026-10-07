@@ -2,7 +2,9 @@
 
 Status: proposed production architecture, researched on October 6, 2026 against
 Ludus `ab49fe8`. The first [private S0 feasibility implementation](luau-s0.md)
-starts from `d13b4f8`; it does not add a scripting SDK, gameplay provider, or graph
+starts from `d13b4f8`. The [S1 headless interaction](luau-s1.md) adds an opt-in
+generated native/Luau contract and experimental runtime. Neither adds an
+installed scripting SDK, production gameplay provider, or graph
 editor. The [Gems review](scripting-gems-review.md) records the literature review
 and resulting refinements.
 
