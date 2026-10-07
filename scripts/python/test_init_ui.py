@@ -117,7 +117,7 @@ class InitTests(unittest.TestCase):
         self.assertFalse(self.args().with_editor)
         self.assertFalse(self.args("--no-editor").with_editor)
         self.assertTrue(self.args("--with-editor").with_editor)
-        with patch.object(init_editor.platform, "system", return_value="Darwin"):
+        with patch.object(init_editor.platform, "system", return_value="Windows"):
             with self.assertRaisesRegex(engine.EngineError, "Linux x64"):
                 init_ui.prepare_init(self.args("--cli", "--with-editor"), engine)
 
@@ -247,6 +247,17 @@ class WindowTests(unittest.TestCase):
         self.assertTrue(result.validate and result.skip_sdk)
         self.assertEqual(result.with_rad_debugger, linux)
         self.assertEqual(result.with_editor, linux)
+
+    def test_native_editor_checkbox_remains_selectable(self):
+        def accept(window, widgets):
+            editor = next(widget for widget in widgets if widget.winfo_class() == "TCheckbutton"
+                          and widget.cget("text").startswith("Build Ludus editor"))
+            self.assertFalse(editor.instate(["disabled"]))
+            editor.invoke()
+            next(widget for widget in widgets if widget.winfo_class() == "TButton"
+                 and widget.cget("text") == "Initialize").invoke()
+        result = self.select(accept, engine.NATIVE_PRESET_PREFIX + "-development")
+        self.assertTrue(result.with_editor)
 
     def test_browser_workflow_disables_native_options(self):
         def accept(window, widgets):

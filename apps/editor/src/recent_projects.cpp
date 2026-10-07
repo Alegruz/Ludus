@@ -31,7 +31,9 @@ RecentProjectStore::RecentProjectStore(const QString& path) : Path_(path)
 {
     if (Path_.isEmpty())
     {
-        const QString config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+        const QString config = (QDir::isAbsolutePath(qEnvironmentVariable("XDG_CONFIG_HOME"))
+                                    ? qEnvironmentVariable("XDG_CONFIG_HOME")
+                                    : QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation));
         if (!config.isEmpty())
         {
             Path_ = QDir(config).filePath(QStringLiteral("Ludus/Editor/recent-projects.json"));

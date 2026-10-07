@@ -241,3 +241,21 @@ implemented and awaiting a reference-toolchain host to execute their gates.
    complete the ten demonstration steps in `requirements.md`; record the
    session, versions and observed results, and the noisy-output RSS / UI latency
    measurements.
+
+## Native macOS port
+
+The macOS source-checkout Editor enables Qt Cocoa on arm64/x64, host-native
+setup/launch presets, and shared version-2 SDK project operations. The explicit
+`[.macos-journey]` fixture records real Cocoa creation, build/run/Stop, read-only
+missing-setup diagnosis and repeated repair; ordinary offscreen tests remain a
+separate check. Darwin process regressions exercise non-reaping exit observation,
+descendant cleanup, cancellation, bounded output and uncertain ownership.
+See [current usage and limitations](editor-workspace.md#macos-validation).
+Live generation publication, RAD debugging and release packaging/signing remain
+guarded on macOS. Native acceptance targets Apple silicon; Intel is not claimed.
+
+Local Apple silicon acceptance: Qt 6.11.2 Cocoa, pinned Clang 18.1.8,
+macOS 26.6 and deployment baseline 14.0. The Cocoa journey passed all 37
+assertions, including real game launch/Stop and repeated project setup repair.
+The complete offscreen Editor CTest passed; 68 Python setup/adapter/ownership
+checks passed (four opt-in GUI cases skipped in that noninteractive invocation).

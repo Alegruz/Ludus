@@ -197,11 +197,19 @@ void MainWindow::BuildMenus()
     QMenu* releaseMenu = menuBar()->addMenu(QStringLiteral("&Release"));
     SetupReleaseAction_ = releaseMenu->addAction(QStringLiteral("Set Up &Releases..."));
     PackageReleaseAction_ = releaseMenu->addAction(QStringLiteral("&Package Release..."));
+#if defined(Q_OS_MACOS)
+    SetupReleaseAction_->setToolTip(QStringLiteral("macOS release packaging/signing is not available yet."));
+    PackageReleaseAction_->setToolTip(SetupReleaseAction_->toolTip());
+#endif
     connect(SetupReleaseAction_, &QAction::triggered, this, &MainWindow::OnSetupRelease);
     connect(PackageReleaseAction_, &QAction::triggered, this, &MainWindow::OnPackageRelease);
     QMenu* playMenu = menuBar()->addMenu(QStringLiteral("&Play"));
     PlayAction_ = playMenu->addAction(QStringLiteral("Build and Play"));
     PlayAction_->setObjectName(QStringLiteral("play.start"));
+#if defined(Q_OS_MACOS)
+    PlayAction_->setToolTip(QStringLiteral("Live Play is not available on macOS yet; use Build and Run."));
+    BuildDebugAction_->setToolTip(QStringLiteral("RAD debugging is available on Linux x64 only."));
+#endif
     BuildReloadAction_ = playMenu->addAction(QStringLiteral("Build and Reload Code"));
     BuildReloadAction_->setObjectName(QStringLiteral("play.reload"));
     AutoReloadAction_ = playMenu->addAction(QStringLiteral("Automatically Reload Source Changes"));

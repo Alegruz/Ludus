@@ -7,12 +7,15 @@
 # to the installed Ludus SDK export set.
 
 # --- Native-host gating ------------------------------------------------------
-# E0 implements the Linux x64 reference host only. An enabled Editor on an
-# unsupported host fails configuration with a specific explanation rather than
-# silently producing a broken build.
-if(NOT EMSCRIPTEN AND (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
-    NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$"))
-    message(FATAL_ERROR "The native Editor currently supports Linux x64; browser builds require the pinned Qt WebAssembly toolchain.")
+# Native hosts share Qt Widgets and the owned POSIX process adapter.
+if(NOT EMSCRIPTEN)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+        # Linux reference host.
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64|x86_64|amd64|AMD64)$")
+        # Cocoa Qt plugin; Metal belongs to the separately launched game.
+    else()
+        message(FATAL_ERROR "The native Editor supports Linux x64 and macOS arm64/x64; browser builds require the pinned Qt WebAssembly toolchain.")
+    endif()
 endif()
 
 if(EMSCRIPTEN)
@@ -66,6 +69,7 @@ ludus_apply_project_defaults(ludus_editor_core)
 # --- Editor application ------------------------------------------------------
 qt_add_executable(ludus_editor
     src/internal/controller.h
+    src/internal/configuration_workspace.h
     src/internal/main_window.h
     src/internal/audio_workspace.h
     src/internal/audio_preview.h
@@ -91,6 +95,12 @@ qt_add_executable(ludus_editor
     src/controller_play.cpp
 )
 set_target_properties(ludus_editor PROPERTIES AUTOMOC ON)
+if(APPLE)
+    set_target_properties(ludus_editor PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_GUI_IDENTIFIER "org.ludus.editor"
+        MACOSX_BUNDLE_BUNDLE_NAME "Ludus Editor")
+endif()
 target_include_directories(ludus_editor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_definitions(ludus_editor PRIVATE QT_NO_KEYWORDS QT_NO_CAST_FROM_ASCII)
 target_link_libraries(ludus_editor
@@ -118,6 +128,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Test)
     add_executable(ludus_editor_tests
         src/internal/controller.h
+        src/internal/configuration_workspace.h
         src/internal/main_window.h
         src/internal/audio_workspace.h
         src/internal/audio_preview.h
@@ -152,6 +163,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         tests/source_watch_tests.cpp
         tests/script_workspace_tests.cpp
         tests/live_journey_tests.cpp
+        tests/macos_journey_tests.cpp
     )
     set_target_properties(ludus_editor_tests PROPERTIES AUTOMOC ON)
     target_include_directories(ludus_editor_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/modules/audio/tests")
@@ -186,7 +198,8 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
     # Catch2 reports assertion failures by throwing; test targets (only) re-enable
     # exceptions. Engine/app targets above stay exception-free (-fno-exceptions).
     ludus_enable_test_exceptions(ludus_editor_tests)
-    add_test(NAME ludus_editor_tests COMMAND ludus_editor_tests)
+    # Print each completed case's duration to diagnose a stopped aggregate suite.
+    add_test(NAME ludus_editor_tests COMMAND ludus_editor_tests --durations yes)
     # Run the offscreen Qt platform plugin so these logic/widget tests need no
     # display. This is for display-free tests only, never native acceptance.
     set_tests_properties(ludus_editor_tests PROPERTIES
