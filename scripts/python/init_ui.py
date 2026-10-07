@@ -174,7 +174,7 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
             ("preset_only", "Prepare only the selected preset"),
             ("no_system_install", "Use existing system packages (skip automatic package installation)"),
             ("with_rad_debugger", "Build optional RAD Debugger (Linux x64)"),
-            ("with_editor", "Build Ludus editor (Linux x64; installs optional Qt 6 packages)"),
+            ("with_editor", "Build Ludus editor (native host; installs optional Qt 6 packages)"),
             ("with_tests", "Include native test targets and their dependencies"),
             ("run_tests", "Build and run native tests after setup"),
             ("with_smoke_app", "Include sample applications (smoke and native input demo)"),
@@ -202,9 +202,9 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
                 flags["preset_only"].set(True)
                 for name in ("with_rad_debugger", "with_editor", "with_tests", "run_tests", "with_shader_probe", "validate", "ci"):
                     flags[name].set(False)
-            from init_editor import SUPPORTED_PRESETS
-            linux_host = platform.system() == "Linux" and platform.machine().lower() in ("x86_64", "amd64")
-            editor_supported = linux_host and preset.get() in SUPPORTED_PRESETS
+            from init_editor import SUPPORTED_PRESETS, supported_host
+            family = "macos-" if platform.system() == "Darwin" else "linux-"
+            editor_supported = supported_host() and preset.get() in SUPPORTED_PRESETS and preset.get().startswith(family)
             if not editor_supported:
                 flags["with_editor"].set(False)
             controls["with_editor"].configure(state="normal" if editor_supported else "disabled")
@@ -219,6 +219,7 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
             controls["run_tests"].configure(state="disabled" if browser or validating else "normal")
             for name in ("preset_only", "with_rad_debugger", "validate", "ci"):
                 controls[name].configure(state="disabled" if browser else "normal")
+            linux_host = platform.system() == "Linux" and platform.machine().lower() in ("x86_64", "amd64")
             if not linux_host:
                 flags["with_rad_debugger"].set(False)
                 controls["with_rad_debugger"].configure(state="disabled")

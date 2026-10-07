@@ -286,6 +286,31 @@ void AudioWorkspace::Reload()
         }
     }
 }
+void AudioWorkspace::RefreshCatalog()
+{
+    if (!Dirty_)
+    {
+        Reload();
+    }
+}
+bool AudioWorkspace::OpenResource(const QString& id)
+{
+    if (!ConfirmDiscard())
+    {
+        return false;
+    }
+    Reload();
+    for (int row = 0; row < List_->count(); ++row)
+    {
+        if (List_->item(row)->text() == id)
+        {
+            List_->setCurrentRow(row);
+            Open();
+            return HasDocument_ && Id_->text() == id;
+        }
+    }
+    return false;
+}
 bool AudioWorkspace::ConfirmDiscard()
 {
     if (!Dirty_)
@@ -559,29 +584,9 @@ bool AudioWorkspace::PreviewFinished() const noexcept
 
 void ludus::editor::AudioWorkspace::Import()
 {
-    if (Root_.isEmpty())
+    if (!Root_.isEmpty())
     {
-        return;
-    }
-    const auto file = QFileDialog::getOpenFileName(this,
-                                                   QStringLiteral("Import WAV or FLAC"),
-                                                   QString(),
-                                                   QStringLiteral("Audio (*.wav *.flac)"));
-    if (file.isEmpty())
-    {
-        return;
-    }
-    bool ok = false;
-    const auto id = QInputDialog::getText(this,
-                                          QStringLiteral("Source ID"),
-                                          QStringLiteral("Logical ID (reuse to reimport)"),
-                                          QLineEdit::Normal,
-                                          QStringLiteral("source/") + QFileInfo(file).completeBaseName().toLower(),
-                                          &ok);
-    if (ok)
-    {
-        Preview_->Import(Root_, file, id);
-        Message_->setText(QStringLiteral("Importing source..."));
+        Q_EMIT ImportRequested();
     }
 }
 void ludus::editor::AudioWorkspace::Create(bool music)

@@ -2,6 +2,7 @@
 #include "levels.h"
 #include <charconv>
 #include <cmath>
+#include <ludus/foundation/base/parse_number.hpp>
 #include <span>
 namespace ludus::world_demo
 {
@@ -186,8 +187,8 @@ public:
                 return Fail(LevelError::Syntax);
             }
         }
-        const auto parsed = std::from_chars(mSource.data() + start, mSource.data() + mPosition, value);
-        return (parsed.ec == std::errc{} && std::isfinite(value) && std::abs(value) <= 100000.0F) ||
+        const auto parsed = ParseFloat32(mSource.data() + start, mPosition - start, value);
+        return (parsed == NumberParseStatus::Success && std::isfinite(value) && std::abs(value) <= 100000.0F) ||
                Fail(LevelError::InvalidValue);
     }
     bool Integer(uint64& value) noexcept
@@ -198,8 +199,8 @@ public:
         {
             return Fail(LevelError::Syntax);
         }
-        const auto parsed = std::from_chars(mSource.data() + start, mSource.data() + mPosition, value);
-        return parsed.ec == std::errc{} || Fail(LevelError::InvalidValue);
+        const auto parsed = ParseUint64(mSource.data() + start, mPosition - start, value);
+        return parsed == NumberParseStatus::Success || Fail(LevelError::InvalidValue);
     }
     bool Pair(Vec2& value) noexcept
     {

@@ -6,21 +6,25 @@ Accepted.
 
 ## Context
 
-Ludus is a game engine. Over time it will want tight control over allocation,
-layout, and error handling, which is at odds with parts of the C++ standard
-library and the C runtime. At the same time, Milestone 0/1 code should stay
-small and reliable, so we should not hand-roll replacements before there is a
-concrete need.
+Ludus needs control over allocation, layout, error handling and portability.
+The world demo's dependency on floating-point `std::from_chars` exposed a
+library-availability problem on the pinned macOS toolchain: selecting C++23
+language mode did not make that operation available. New runtime facilities
+must therefore use Ludus-owned implementations unless this policy explicitly
+permits a narrowly scoped standard-library or C-runtime operation.
 
-This ADR records which standard-library and C-runtime facilities are banned
-outright, which are allowed for now, and which are expected to be replaced by
-Ludus-owned systems in later milestones. It complements two existing hard
-rules: no C++ exceptions (see `AGENTS.md`), and use the fixed-width type aliases
-in `ludus/foundation/base/types.h` instead of `std::` primitive spellings.
+This decision supersedes the earlier permission to introduce STL containers
+while waiting for custom allocation. Existing uses remain migration debt;
+changing this policy does not require an unrelated repository-wide rewrite.
 
-"Engine code" means the libraries and applications under `modules/` and
-`apps/`. Tests (`*/tests/`) and third-party generated code (e.g. the
-wayland-scanner output) are exempt where noted.
+Production code includes `modules/`, `apps/`, and `examples/`. Test-only code
+may use standard-library facilities for fixtures and independent reference
+checks, but must exercise the production implementation. Benchmark-only harnesses
+may use standard-library/CRT facilities to collect, analyze and report measurements;
+this exemption does not apply to the production code being measured or permit
+substitute STL implementations of the measured operation. Third-party and
+generated code are exempt; their dependencies must remain private and do not
+establish permission for production call sites.
 
 ## Decision
 
@@ -29,9 +33,9 @@ wayland-scanner output) are exempt where noted.
 | Facility | Why | Use instead |
 | --- | --- | --- |
 | `<iostream>`, `std::cout`, `std::cerr`, `std::endl` | Heavy global stream objects with static-init cost; encourages ad-hoc logging | `LUDUS_LOG_*` from `FoundationLogging`; the emergency path for pre-init/fatal |
-| C++ exceptions (`throw` / `try` / `catch`) | Engine builds with `-fno-exceptions` | Status codes, `bool`, `std::optional`, out-parameters (see `AGENTS.md`) |
+| C++ exceptions (`throw` / `try` / `catch`) | Engine builds with `-fno-exceptions` | Status codes, `bool`, Ludus-owned results, out-parameters (see `AGENTS.md`) |
 | `std::uint32_t`, `std::size_t`, raw `float`/`double`, etc. as spellings | Widths should be explicit and consistent | `uint32`, `usize`, `float32`, ... from `types.h` |
-| `<sstream>` in engine code | Allocating, stream-formatting machinery | Format into a caller-owned buffer; `std::format`/`std::format_to` |
+| `<sstream>` in engine code | Allocating, stream-formatting machinery | Format into a caller-owned buffer or use the owning Ludus formatter |
 | `printf`-family for diagnostics (`std::printf`, `fprintf` to stdout/stderr) | Same reason as iostream; unstructured | `LUDUS_LOG_*` |
 
 `<cstdio>` (`std::fwrite`/`std::fopen`/`std::snprintf`) remains allowed inside
@@ -48,9 +52,27 @@ header. Ordinary diagnostics still use `LUDUS_LOG_*`. Logging shares Base's fina
 emergency byte writer; assertion formatting is a separate opt-in layer with a
 closed argument set and an implementation-only parser.
 
-### Allowed for now (keep; no reason to replace yet)
+### Explicitly permitted operations
 
-- `<string_view>` — non-owning, zero-allocation; preferred for read-only text.
+- `<string_view>` and `<span>` are existing compatibility interfaces. Maintain
+  them where required by an existing API; new view APIs should be Ludus-owned.
+- The first bounded R1 raster profile has a narrow compatibility exception:
+  `std::span<const T>` describes caller-owned buffer bytes, binding entries,
+  shader inputs and vertex streams/slices; `std::string_view` describes shader
+  resource names. This is limited to `GraphicsRhi`'s `raster.h`, its private
+  implementation and backend forwarding signatures. It extends the existing
+  fullscreen `ShaderArtifact`/uniform input vocabulary and interoperates with
+  FoundationContainers' existing `AsSpan` interfaces without adding an owning
+  container, allocation or a second shader-artifact representation. Operations
+  are construction, pointer/count access, indexing and iteration; these views
+  do not own resources or extend caller lifetimes. Creation copies the metadata
+  and consumes/copies upload bytes before returning, as specified by the
+  [portable raster contract](../development/fullscreen-rendering.md#portable-raster-r1).
+  Pinned Clang 18 and Emscripten 4.0.23 builds, reference ownership/failure tests,
+  Metal pixels and installed-SDK Chromium WebGPU/WebGL tests cover this boundary.
+  This exception does not approve new views elsewhere, STL owning facilities or
+  collection algorithms; replacing the compatibility vocabulary remains a
+  focused FoundationContainers/API migration.
 - `<charconv>` / `std::to_chars` — only in the assertion formatter `.cpp`.
   Fixed-buffer integer/float conversion avoids a custom numerical algorithm;
   no public-header cost, no locale or exceptions. Allocation probes and binary
@@ -74,48 +96,68 @@ closed argument set and an implementation-only parser.
   private `src/types.cpp` representation-contract translation unit (ADR 0015).
   Compile-time byte width, integer range, and IEEE binary32/64 verification
   must not add these includes to `types.h` or `core.h`.
-- `<span>` when needed — non-owning view over contiguous data.
 - `<atomic>`, `<mutex>`, `<shared_mutex>` — concurrency primitives; correctness
   first. Revisit only when a custom job/threading system exists.
 - `<source_location>` — used by logging to capture call sites.
-- `<chrono>`, `<ctime>` — timestamps in logging.
+- `<chrono>`, `<ctime>` — only within existing logging/time implementations;
+  new engine callers use the owning Ludus API.
 - `<type_traits>`, `<utility>`, `<concepts>` — compile-time utilities, zero
   runtime cost.
 - `<cstdint>`, `<cstddef>` — allowed **only** inside `types.h`, which aliases
   them into the Ludus names. Do not include them elsewhere.
 - `<new>` (`std::nothrow`), `<cstring>` — low-level, exception-free helpers.
 
-### Slated for future replacement (allowed now, expected to become Ludus-owned)
+### Ludus-owned runtime facilities
 
-These are fine to use today because replacing them prematurely would add churn
-and risk without a concrete requirement. Each should be replaced only when a
-real need (allocator control, performance data, editor/tooling integration)
-justifies it, and behind an API that keeps call sites stable.
+New containers, owning strings, smart pointers and algorithms must use Ludus
+implementations. This includes `std::vector`, `std::array`, maps/sets, queues,
+`std::string`, `std::unique_ptr`/`std::shared_ptr`, standard sorting/searching
+algorithms, `<algorithm>`, `<ranges>` and `<numeric>`. Existing Ludus container
+and pointer APIs take precedence; implement a missing operation in its owning
+module rather than adding an STL-backed alias or wrapper. Specify allocation,
+capacity, ownership, failure and iterator/view invalidation where applicable.
+Use concepts and type traits to express constraints without adopting runtime
+STL machinery.
 
-| Facility | Current use | Future direction |
-| --- | --- | --- |
-| `std::string` | logging, platform window names | Ludus `String`/`StringView` backed by a custom allocator |
-| `std::vector` | logging (session pruning) | Ludus `Array`/`Span` with allocator support |
-| `std::unordered_map` | logging category overrides | flat/open-addressed hash map |
-| `std::format` | logging message formatting | keep the public logging API; may swap to `{fmt}` or a custom formatter internally |
-| `<filesystem>` | logging file sink | platform virtual filesystem layer |
-| `std::unique_ptr` | (already replaced) | use `ludus::foundation::core::UniquePtr` |
-| `std::memcpy` and other `<cstring>` | small copies | custom memory utilities alongside the allocator |
+New numeric text parsing must also be Ludus-owned. Do not substitute
+`std::from_chars`, `std::sto*`, locale-sensitive CRT conversion, or a third-party
+number-conversion library. Decimal conversion needs a documented grammar,
+bounded input, complete-consumption rules, rounding and overflow/underflow
+behavior, and output preservation on failure. Tests must cover malformed input,
+numeric boundaries and rounding cases on supported native and browser
+toolchains. The existing assertion formatter's `std::to_chars` exception above
+remains restricted to that implementation; it does not authorize new parsers.
+
+Necessary existing standard-library and CRT uses may be maintained within
+their current implementation boundaries, including facilities absent from the
+new-code allowlist. Examples include Logging's `std::thread`,
+`std::condition_variable` and `std::hash`, Editor's `std::function`, and existing
+containers, conversion, formatting and filesystem calls. This compatibility
+permission does not authorize adding those facilities to new APIs or subsystems.
+Their replacement belongs in focused, validated changes that preserve existing
+contracts; existing use is not precedent for new code.
 
 ### Process
 
-- New engine code must not introduce anything from the "Banned" list.
-- Using anything from "Slated for future replacement" is allowed but should not
-  spread gratuitously; prefer the narrowest surface.
-- Replacing a slated facility is its own change with its own rationale
-  (ideally a follow-up ADR), not a drive-by edit.
+- Before adding an include or standard-library call, check the exact operation
+  against this allowlist and inspect the equivalent Ludus module.
+- Allowed headers do not grant blanket permission for everything they expose.
+  For example, `<utility>` does not authorize a runtime collection abstraction,
+  and `<cstring>` does not authorize locale-sensitive number parsing.
+- A missing Ludus facility is implementation work, not an automatic exception.
+  Keep replacements focused and cover their meaningful failure/boundary cases.
+- A new exception requires an explicit change to this ADR for review: name the
+  exact facility and private boundary, explain why it is needed, and supply
+  availability and behavior evidence for supported native and browser tools.
+- Re-check new includes, `std::` calls and dependency additions before committing.
+  Existing uses and successful compilation on one host are not portability proof.
 
 ## Consequences
 
-The immediate wins (no exceptions, no iostream, explicit fixed-width types) are
-enforced now by the compiler, `.clang-tidy`, and this policy. The larger
-replacements (`String`, `Array`, allocator, hash map, VFS) are deferred until
-Ludus has the requirements — most naturally a custom allocator — to do them
-once rather than churn twice. Until then, engine code leans on a small,
-well-understood subset of the standard library and routes all diagnostics
-through `FoundationLogging`, except the independent Base assertion failure path.
+New engine and sample code grows the Ludus runtime instead of extending its STL
+dependency. Concepts, traits and explicitly approved low-level primitives remain
+available. Existing runtime-library usage is retired through focused migrations.
+
+These restrictions are contributor policy; no new automatic STL gate is added
+by this documentation change. Compiler exception enforcement and existing
+static-analysis checks remain in place.

@@ -352,7 +352,8 @@ AppState Application::Frame() noexcept
         return mState;
     }
     platform::browser::WindowState window;
-    const bool browser = startup.SelectedBackend != rhi::Backend::Vulkan;
+    const bool browser =
+        startup.SelectedBackend == rhi::Backend::WebGPU || startup.SelectedBackend == rhi::Backend::WebGL2;
     if (browser)
     {
         (void)mWindow->SetBrowserFramebufferLimit(startup.MaxTextureDimension2D);

@@ -97,7 +97,7 @@ struct ProjectDescriptor
     QString Name;                   // nonempty, <= 128 UTF-8 bytes
     Provider ProviderKind = Provider::Ludus;
     QString SourceDir;   // relative, <= 4096 UTF-8 bytes
-    QString Preset;      // v1: linux-clang-{debug,development}; v2 adds -release
+    QString Preset;      // v1: Linux Debug/Development; v2: Linux/macOS Debug/Development/Release
     QString Target;      // ASCII [A-Za-z0-9_][A-Za-z0-9_.+-]*, <= 256 bytes
     QString RunCwd;      // relative, <= 4096 UTF-8 bytes
     QStringList RunArgs; // <= 64 items, each <= 4096 bytes, total <= 32 KiB; empties valid

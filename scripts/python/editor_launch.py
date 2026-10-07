@@ -20,11 +20,13 @@ from pathlib import Path
 
 import cmake_targets
 import engine
+from ludus_tools.native import default_profile
 
 
 EDITOR_FILE_API_CLIENT = "ludus-editor"
 EDITOR_TARGET = "ludus_editor"
-SUPPORTED_PRESETS = ("linux-clang-debug", "linux-clang-development")
+SUPPORTED_PRESETS = tuple(f"{family}-clang-{flavor}" for family in ("linux", "macos")
+                          for flavor in ("debug", "development", "asan-ubsan"))
 
 
 def _preparation_help(root: Path, preset: str) -> str:
@@ -39,7 +41,7 @@ def _preparation_help(root: Path, preset: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Launch the already-built Ludus editor")
-    parser.add_argument("--preset", default="linux-clang-development", choices=SUPPORTED_PRESETS)
+    parser.add_argument("--preset", default=default_profile(), choices=SUPPORTED_PRESETS)
     parser.add_argument("--project", default=None, help="absolute or relative descriptor to open")
     parser.add_argument("editor_args", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)

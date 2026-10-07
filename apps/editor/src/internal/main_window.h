@@ -36,6 +36,7 @@ namespace ludus::editor
 
 class AudioWorkspace;
 class ConfigurationWorkspace;
+class ContentWorkspace;
 class ScriptWorkspace;
 class MainWindow : public QMainWindow
 {
@@ -97,6 +98,7 @@ private:
     ConfigurationWorkspace* Configuration_ = nullptr;
     QWidget* ProjectSettings_ = nullptr;
     AudioWorkspace* Audio_ = nullptr;
+    ContentWorkspace* Content_ = nullptr;
     bool AudioClosing_ = false;
     bool AudioLaunchPending_ = false;
     EditorController* Controller_ = nullptr;

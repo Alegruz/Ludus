@@ -1,5 +1,6 @@
 #include "internal/audio_preview.h"
 #include "internal/audio_workspace.h"
+#include "internal/content_import.h"
 #include "internal/main_window.h"
 #include "wav_fixture.h"
 #include <QApplication>
@@ -139,14 +140,20 @@ TEST_CASE("Audio import runs away from GUI, preserves ID on reimport and quiesce
             imported.fetch_add(1, std::memory_order_release);
         },
         Qt::DirectConnection);
-    preview.Import(directory.path(), exported.path() + QStringLiteral("/export.wav"), QStringLiteral("source/hit"));
+    const ludus::editor::ContentImportSource source
+    {
+        .Root = directory.path(),
+        .File = exported.path() + QStringLiteral("/export.wav"),
+        .Id = QStringLiteral("source/hit"),
+    };
+    preview.Import(source);
     for (int i = 0; i < 500 && imported.load(std::memory_order_acquire) == 0; ++i)
     {
         QTest::qWait(10);
     }
     REQUIRE(imported.load(std::memory_order_acquire) == 1);
     REQUIRE_FALSE(importedOnGui.load(std::memory_order_relaxed));
-    preview.Import(directory.path(), exported.path() + QStringLiteral("/export.wav"), QStringLiteral("source/hit"));
+    preview.Import(source);
     for (int i = 0; i < 500 && imported.load(std::memory_order_acquire) < 2; ++i)
     {
         QTest::qWait(10);
