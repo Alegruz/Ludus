@@ -1,9 +1,16 @@
 #pragma once
 
+#include <ludus/foundation/base/config.h>
 #include <ludus/foundation/base/types.h>
 
 #include <span>
 #include <string_view>
+
+// The exported target fences the compiler's actual architecture as well as
+// CMake admission. A consumer cannot silently mislabel a cross-compiled SDK.
+#if defined(LUDUS_BEHAVIOR_EXPECTED_ARCH)
+static_assert(LUDUS_TARGET_ARCH == LUDUS_BEHAVIOR_EXPECTED_ARCH, "Behavior SDK architecture mismatch");
+#endif
 
 namespace ludus::runtime::behavior
 {
@@ -278,7 +285,8 @@ public:
     /// Retires the VM and any partial debugger transaction. A nested call returns Reentrant and leaves ownership
     /// intact.
     [[nodiscard]] Status Close() noexcept;
-    /// Returns live VM bytes (zero when unloaded); excludes fixed owner metadata.
+    /// Returns physical VM allocation bytes, including headers/retained capacity
+    /// (zero when unloaded); excludes fixed owner metadata.
     [[nodiscard]] usize LiveBytes() const noexcept;
 
 private:

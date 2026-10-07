@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Ludus S6 production provider safety acceptance</title>
+<body>
+<pre id="output"></pre>
+<script>
+var Module = {
+  print(text) { console.log(text); document.getElementById('output').textContent += text + '\n'; },
+  printErr(text) { console.error(text); },
+  onExit(code) { document.body.dataset.exitCode = String(code); },
+  onAbort(reason) { document.body.dataset.abort = String(reason); }
+};
+</script>
+<script src="ludus_behavior_safety.js"></script>
+</body>
+</html>

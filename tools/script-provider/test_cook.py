@@ -14,7 +14,7 @@ FIXTURE=Path(__file__).with_name('fixtures')
 class CookTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
-        self.root=Path(self.temp.name)
+        self.root=Path(self.temp.name).resolve()
         for path in FIXTURE.iterdir():shutil.copy(path,self.root/path.name)
     def tearDown(self):self.temp.cleanup()
     def test_closed_schema_and_numeric_boundaries(self):
@@ -130,6 +130,12 @@ class CookTests(unittest.TestCase):
         before={p.name:p.read_bytes() for p in self.root.iterdir() if p.is_file()}
         value=behavior_workspace.load(self.root)
         self.assertEqual(value['contract'],self.root/'contract.json')
+        # macOS temporary roots commonly enter through /var -> /private/var.
+        # A project-root alias must preserve canonical planning and root bounds.
+        with tempfile.TemporaryDirectory() as directory:
+            alias=Path(directory)/'workspace'
+            alias.symlink_to(self.root,target_is_directory=True)
+            self.assertEqual(behavior_workspace.load(alias)['contract'],self.root/'contract.json')
         self.assertEqual(before,{p.name:p.read_bytes() for p in self.root.iterdir() if p.is_file()})
         for change in ({'contract':'../contract.json'},{'name':'../../escaped'},{'extra':1}):
             data={'version':1,'name':'encounter','contract':'contract.json','package':'package.json'};data.update(change)

@@ -8,6 +8,8 @@ on:
       - 'tools/luau-probe/**'
       - 'scripts/luau-probe'
       - 'config/luau_toolchain.json'
+      - 'config/behavior_profiles.json'
+      - 'cmake/LudusBehaviorProfile.cmake'
       - 'cmake/LuauProfile.cmake'
       - 'modules/runtime/scripting/**'
       - 'modules/runtime/behavior/**'
@@ -116,9 +118,15 @@ jobs:
           import json
           from pathlib import Path
           import subprocess
+          import sys
           import urllib.request
 
-          native = json.loads(Path('config/tool_versions.json').read_text())['managed']
+          sys.path.insert(0, str(Path('scripts/python').resolve()))
+          from engine import configure_system_tool_shims
+
+          versions = json.loads(Path('config/tool_versions.json').read_text())
+          configure_system_tool_shims(Path.cwd(), versions)
+          native = versions['managed']
           web = json.loads(Path('config/web_toolchain.json').read_text())
           venv = Path('out/host-tools/venv')
           subprocess.run(['python3', '-m', 'venv', str(venv)], check=True)
@@ -257,6 +265,14 @@ jobs:
           ./scripts/visual-sequence check --preset web-emscripten-release
       - uses: actions/upload-artifact@v4
         with:
+          name: behavior-s6-wasm
+          path: |
+            out/build/web-emscripten-release/tools/script-provider/ludus_behavior_safety.*
+            out/build/web-emscripten-release/tools/script-provider/index.html
+            out/build/web-emscripten-release/tools/script-provider/safety-evidence.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
           name: visual-s3-wasm-owner
           path: out/build/web-emscripten-release/tools/visual-sequence/ludus_visual_sequence.*
           if-no-files-found: error
@@ -318,6 +334,10 @@ jobs:
           path: out/luau-s2-wasm
       - uses: actions/download-artifact@v4
         with:
+          name: behavior-s6-wasm
+          path: out/behavior-s6-wasm
+      - uses: actions/download-artifact@v4
+        with:
           name: luau-s1-web-interaction
           path: out/luau-s1-wasm
       - uses: actions/download-artifact@v4
@@ -347,6 +367,8 @@ jobs:
         run: node tools/luau-probe/browser.mjs out/luau-s0-wasm/web-emscripten-release/tools/luau-probe
       - name: Test S2 debugger heartbeat and replacement in Chromium
         run: node tools/script-session/browser.mjs out/luau-s2-wasm
+      - name: Qualify production Behavior safety and allocation recovery in Chromium
+        run: node tools/script-provider/browser.mjs out/behavior-s6-wasm
       - name: Test S1 state and effect publication in Chromium
         run: node tools/script-interaction/browser.mjs out/luau-s1-wasm
       - uses: actions/upload-artifact@v4

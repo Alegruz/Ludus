@@ -45,6 +45,15 @@ jobs:
         run: ./init.sh --cli --preset macos-clang-development --preset-only --locked --with-tests --with-editor --no-system-install
       - name: Prepare pinned Metal shader compiler
         run: ./scripts/shader-probe bootstrap
+      - name: Qualify production Behavior provider on macOS
+        run: |
+          ./scripts/script-provider bootstrap
+          ./scripts/script-provider run --preset macos-clang-development
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/runtime/scripting/src/runtime.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/runtime/behavior/src/behavior.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' tools/script-provider/safety.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' tools/script-provider/fault_allocator.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' tools/script-provider/allocator_contract.cpp
       - name: Build all enabled engine and application targets
         run: |
           out/host-tools/venv/bin/cmake --preset macos-clang-development -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
@@ -89,6 +98,8 @@ jobs:
           out/project-tooling-venv/bin/python -m pip install --no-deps ./scripts/python
           PATH="$PWD/out/host-tools/venv/bin:$PWD/out/host-tools/bin:$PATH" PYTHONPATH=scripts/python out/host-tools/venv/bin/python -m unittest test_project_setup test_macos_project_tooling test_creation_engine test_ludus_tools test_ludus_project_ops test_ludus_cli -v
           out/host-tools/venv/bin/python tests/sdk_consumer/verify_macos_project_tooling.py --sdk "$PWD/out/install/macos-clang-development" --tools "$PWD" --cli "$PWD/out/project-tooling-venv/bin/ludus"
+      - name: Qualify relocated Behavior SDK and extracted macOS player
+        run: out/host-tools/venv/bin/python tools/script-provider/verify_consumer.py out/install/macos-clang-development
       - name: Verify native Cocoa Editor project lifecycle
         env:
           QT_QPA_PLATFORM: cocoa
@@ -222,6 +233,14 @@ jobs:
           out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_((platform_cocoa(_keymap)?|filesystem(_fault|_namespace_fault|_pack_fault|_async_fault|_persistence_fault|_watch_fault)?|content(_save_fault)?|audio(_device|_content)?|rhi_(metal|lifecycle))_tests|rhi_render_pixels)$' --no-tests=error
           out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --label-regex '^editor$' --no-tests=error
 
+      - name: Qualify production Behavior provider with macOS sanitizers
+        run: ./scripts/script-provider run --preset macos-clang-asan-ubsan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: behavior-s6-macos-evidence
+          path: out/build/macos-clang-*/tools/script-provider/safety-evidence.json
+          if-no-files-found: error
+
       - name: Validate diagnostic stream and explicit decisions with ASan and UBSan
         run: |
           out/host-tools/venv/bin/cmake --preset macos-clang-debug -B out/build/macos-diagnostics-sanitized -DLUDUS_CI_BUILD=OFF -DLUDUS_ENABLE_ASAN=ON -DLUDUS_ENABLE_UBSAN=ON -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
@@ -351,6 +370,11 @@ jobs:
           name: visual-s3-authoring-evidence
           path: out/browser-qa/results/visual-s3*
           if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: behavior-s6-linux-evidence
+          path: out/build/linux-clang-development/tools/script-provider/safety-evidence.json
+          if-no-files-found: error
       - name: Test Development
         run: out/host-tools/venv/bin/ctest --preset linux-clang-development --no-tests=error
       - name: Measure bounded filesystem reads and native syscall overhead
@@ -496,6 +520,11 @@ jobs:
         run: ./scripts/visual-sequence run --preset linux-clang-asan-ubsan
       - name: Validate S4 provider transactions and state under sanitizers
         run: ./scripts/script-provider run --preset linux-clang-asan-ubsan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: behavior-s6-linux-sanitized-evidence
+          path: out/build/linux-clang-asan-ubsan/tools/script-provider/safety-evidence.json
+          if-no-files-found: error
       - name: Test with sanitizers
         env:
           LUDUS_RELOAD_METRICS: ${{ runner.temp }}/live-reload-asan-ubsan.jsonl

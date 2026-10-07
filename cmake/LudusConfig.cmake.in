@@ -1,5 +1,14 @@
 @PACKAGE_INIT@
 
+if(@LUDUS_BUILD_BEHAVIOR@)
+    include("${CMAKE_CURRENT_LIST_DIR}/LudusBehaviorProfile.cmake")
+    ludus_behavior_admit_profile("${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/Ludus/behavior/profiles.json" _ludus_behavior_target)
+    if(NOT _ludus_behavior_target STREQUAL "@LUDUS_BEHAVIOR_TARGET_PROFILE@")
+        message(FATAL_ERROR "Behavior SDK target mismatch: expected @LUDUS_BEHAVIOR_TARGET_PROFILE@, got ${_ludus_behavior_target}")
+    endif()
+    unset(_ludus_behavior_target)
+endif()
+
 # Ludus installed-SDK package config.
 #
 # Relocatability (requirement P02): the SDK must configure, build and link from
