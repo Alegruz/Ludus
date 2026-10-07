@@ -1,6 +1,6 @@
 # ADR 0018: FoundationFilesystem and revision-bound reads
 
-Status: Accepted for the F1 slice.
+Status: Accepted for F1-F3.
 
 Content currently owns path validation and Linux file-reader code. General
 storage cannot depend on Content schemas or Platform windowing, and decoders
@@ -23,5 +23,9 @@ The design and reference-review decisions are in
 [Filesystem architecture](../architecture/filesystem.md). It distinguishes
 ordinary mutation detection from immutable/cryptographically verified data,
 symlink rejection from hostile-process sandboxing, and publication from durable
-persistence. Mount resolution, packs and async I/O remain later slices with
-separate acceptance criteria; this ADR promises no unmeasured speedup.
+persistence. F2 adds immutable mount snapshots and memory providers. F3 adds a
+validated versioned pack provider and reproducible offline builder, with bounded
+independent compression and payload layout separate from sorted lookup. These
+providers retain the same explicit-error revision contracts on native and browser
+targets. Async I/O and persistence remain later slices with separate acceptance
+criteria; this ADR promises no unmeasured speedup.

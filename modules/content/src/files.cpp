@@ -121,10 +121,13 @@ Status ContentStatus(foundation::filesystem::Status status) noexcept
     {
         case FileStatus::Ok:
             return Status::Ok;
+        case FileStatus::CorruptData:
         case FileStatus::InvalidArgument:
             return Status::Invalid;
         case FileStatus::NotFound:
             return Status::NotFound;
+        case FileStatus::LimitExceeded:
+            return Status::Limit;
         case FileStatus::OutOfMemory:
             return Status::OutOfMemory;
         case FileStatus::Changed:

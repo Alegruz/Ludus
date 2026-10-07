@@ -28,7 +28,7 @@ DOCUMENTATION_FILES = frozenset({
 })
 NATIVE_JOBS = (
     "macos-compile", "formatting", "debug-runtime", "development",
-    "sanitizers", "threading-races", "analysis", "editor",
+    "sanitizers", "filesystem-fuzz", "threading-races", "analysis", "editor",
     "assertion-policy", "pch", "build-budget",
 )
 

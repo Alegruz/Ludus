@@ -27,6 +27,7 @@ int ExerciseInstalledNetwork() noexcept;
 int ExerciseInstalledUi() noexcept;
 int ExerciseInstalledContainers() noexcept;
 int ExerciseInstalledFilesystem() noexcept;
+int ExerciseInstalledPack() noexcept;
 bool ExerciseInstalledStrings() noexcept;
 bool ExerciseInstalledParsing() noexcept;
 bool ExerciseInstalledConfiguration() noexcept;
@@ -211,6 +212,11 @@ static_assert(PrimitiveContract());
 
 int main()
 {
+    if (const int result = ExerciseInstalledPack(); result != 0)
+    {
+        return result;
+    }
+
     if (!ExerciseInstalledReflection())
     {
         return 91;

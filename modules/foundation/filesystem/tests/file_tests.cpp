@@ -1,5 +1,8 @@
 #include <ludus/foundation/filesystem/filesystem.hpp>
 #include <ludus/foundation/filesystem/namespace.hpp>
+#include <ludus/foundation/filesystem/pack.hpp>
+
+#include "pack_fixture.hpp"
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
@@ -335,5 +338,83 @@ TEST_CASE("Separate snapshot handles support concurrent memory opens and shared 
     a.join();
     b.join();
     c.join();
+    REQUIRE(valid.load());
+}
+
+TEST_CASE("Native packs retain replaced and unlinked revisions and detect in-place mutation")
+{
+    Fixture fixture;
+    const auto bytes =
+        std::string_view(reinterpret_cast<const char*>(pack_fixture::kPack), sizeof(pack_fixture::kPack));
+    fixture.Write("archive", bytes);
+    ProviderHandle storage, pack;
+    REQUIRE(CreateDirectoryProvider(fixture.Path, storage).Succeeded());
+    REQUIRE(CreatePackProvider(storage, "archive", {}, pack).Succeeded());
+    const Mount mount{Root::Assets, {}, 0, 1, pack};
+    MountSnapshot snapshot;
+    REQUIRE(MountSnapshot::Create({&mount, 1}, 1, snapshot).Succeeded());
+    VirtualPath key;
+    REQUIRE(key.Set(Root::Assets, "compressed").Succeeded());
+    VirtualFile file, clone;
+    REQUIRE(snapshot.OpenRead(key, file).Outcome.Succeeded());
+    REQUIRE(file.Clone(clone).Succeeded());
+    fixture.Write("replacement", bytes);
+    REQUIRE(::rename((std::filesystem::path(fixture.Path) / "replacement").c_str(),
+                     (std::filesystem::path(fixture.Path) / "archive").c_str()) == 0);
+    REQUIRE(MountSnapshot::Create({}, 2, snapshot).Succeeded());
+    pack = {};
+    uint8 read[8]{};
+    REQUIRE(clone.ReadAt(65532, read).Outcome.Succeeded());
+    REQUIRE(read[0] == 'A');
+    REQUIRE(::unlink((std::filesystem::path(fixture.Path) / "archive").c_str()) == 0);
+    REQUIRE(file.ReadAt(70000, read).BytesRead == 8);
+    REQUIRE(read[0] == 't');
+    fixture.Write("archive", bytes);
+    REQUIRE(CreatePackProvider(storage, "archive", {}, pack).Succeeded());
+    const Mount current{Root::Assets, {}, 0, 2, pack};
+    REQUIRE(MountSnapshot::Create({&current, 1}, 3, snapshot).Succeeded());
+    REQUIRE(snapshot.OpenRead(key, file).Outcome.Succeeded());
+    fixture.Write("archive", "changed");
+    const auto changed = file.ReadAt(0, read);
+    REQUIRE(changed.Outcome.Code == Status::Changed);
+    REQUIRE(changed.BytesRead == 0);
+    REQUIRE(file.ReadAt(file.Size(), {}).Outcome.Code == Status::Changed);
+    REQUIRE(snapshot.OpenRead(key, clone).Outcome.Code == Status::Changed);
+    REQUIRE(clone.Generation() == 1);
+}
+TEST_CASE("Concurrent pack clones serialize scratch while preserving independent offsets")
+{
+    const MemoryEntry entry{"archive", pack_fixture::kPack};
+    ProviderHandle storage, pack;
+    REQUIRE(CreateMemoryProvider({&entry, 1}, storage).Succeeded());
+    REQUIRE(CreatePackProvider(storage, "archive", {}, pack).Succeeded());
+    const Mount mount{Root::Assets, {}, 0, 1, pack};
+    MountSnapshot snapshot;
+    REQUIRE(MountSnapshot::Create({&mount, 1}, 1, snapshot).Succeeded());
+    VirtualPath path;
+    REQUIRE(path.Set(Root::Assets, "compressed").Succeeded());
+    VirtualFile shared;
+    REQUIRE(snapshot.OpenRead(path, shared).Outcome.Succeeded());
+    std::atomic<bool> valid{true};
+    auto worker = [&](uint64 offset, uint8 expected) {
+        VirtualFile clone;
+        if (!shared.Clone(clone).Succeeded())
+        {
+            valid.store(false);
+            return;
+        }
+        for (usize i = 0; i < 50; ++i)
+        {
+            uint8 read[8]{};
+            const auto result = clone.ReadAt(offset, read);
+            if (!result.Outcome.Succeeded() || result.BytesRead != 8 || read[0] != expected)
+            {
+                valid.store(false);
+            }
+        }
+    };
+    std::thread first(worker, 65532, 'A'), second(worker, 70000, 't');
+    first.join();
+    second.join();
     REQUIRE(valid.load());
 }

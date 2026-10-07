@@ -15,6 +15,7 @@
 
 bool ExerciseInstalledStrings() noexcept;
 int ExerciseInstalledContainers() noexcept;
+int ExerciseInstalledPack() noexcept;
 
 using namespace ludus::foundation;
 
@@ -87,6 +88,10 @@ static_assert(PrimitiveContract());
 
 int main(int argc, char** argv)
 {
+    if (const int result = ExerciseInstalledPack(); result != 0)
+    {
+        return result;
+    }
     if (const int result = ExerciseInstalledContainers(); result != 0)
     {
         return result;

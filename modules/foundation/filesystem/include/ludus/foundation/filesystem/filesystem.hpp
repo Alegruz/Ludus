@@ -23,7 +23,9 @@ enum class Status : uint8
     OutOfMemory,     ///< Opening or cloning could not allocate its private owner.
     IoError,         ///< A native operation failed for another reason.
     Changed,         ///< Size or modification time no longer matches the captured revision.
-    Unsupported,     ///< Native I/O is unavailable on this target.
+    Unsupported,     ///< Native I/O or a requested pack format/feature is unavailable.
+    CorruptData,     ///< A pack index, payload or integrity check is malformed.
+    LimitExceeded,   ///< Configured storage/index/decoded resource admission was exceeded.
 };
 
 /// Status and optional native error number; success has no native error.

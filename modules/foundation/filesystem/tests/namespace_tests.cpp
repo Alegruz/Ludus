@@ -269,7 +269,9 @@ TEST_CASE("Only NotFound permits fallback and bounded traces preserve provider d
                             Status::OutOfMemory,
                             Status::IoError,
                             Status::Changed,
-                            Status::Unsupported})
+                            Status::Unsupported,
+                            Status::CorruptData,
+                            Status::LimitExceeded})
     {
         FaultState state;
         const ProviderHandle fault(new FaultProvider(state, {code, 123}));
