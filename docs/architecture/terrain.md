@@ -532,6 +532,13 @@ ownership change. Sparse virtual textures, compute erosion, GPU culling/indirect
 draws, CDLOD/clipmaps, ray tracing and mesh compilation are independent T6 gates,
 not mandatory features in one large terrain milestone.
 
+Implement and validate the selected T0–T5 baseline before pursuing the
+[post-baseline research queue](terrain-gems-review.md#post-baseline-research-queue).
+Capture its correctness, quality, memory and timing evidence as the comparison
+point. The conference/journal reading queue and research-driven experiments
+are subsequent improvement work, not prerequisites or additions to the initial
+milestones. T6 remains optional and admits changes through measured comparisons.
+
 Tests must cover all edge masks and four-way corners; neighbor load/eviction
 orders; flat/ramp/spike/saddle grids; near-plane, orthographic and grazing views;
 negative and maximum coordinates; shared decode rounding; hole/cave joins;
