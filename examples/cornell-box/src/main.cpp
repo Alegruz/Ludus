@@ -5,6 +5,7 @@
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
+#include <ludus/gameplay/camera/evaluation.hpp>
 #include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>
 #include <ludus/platform/base/window.h>
@@ -13,6 +14,7 @@
 #include <string_view>
 #include <type_traits>
 
+#include "camera.hpp"
 #include "cornell.h"
 
 namespace
@@ -21,14 +23,18 @@ using namespace ludus::foundation;
 namespace rhi = ludus::graphics::rhi;
 LUDUS_DEFINE_LOG_CATEGORY(LOG_SAMPLE, "CornellBox");
 
-// One float4 at offset 0 in each emitted target's reflection; no vec3 padding.
+// Five float4 rows match each emitted target; camera rays are renderer-owned.
 struct alignas(16) Uniforms final
 {
     float32 Viewport[4];
+    cornell::CameraRays Camera;
 };
 static_assert(std::is_standard_layout_v<Uniforms>);
 static_assert(offsetof(Uniforms, Viewport) == 0);
-static_assert(sizeof(Uniforms) == 16 && alignof(Uniforms) == 16);
+static_assert(offsetof(Uniforms, Camera) == 16);
+static_assert(offsetof(cornell::CameraRays, Right) == 16 && offsetof(cornell::CameraRays, Up) == 32 &&
+              offsetof(cornell::CameraRays, Forward) == 48);
+static_assert(sizeof(Uniforms) == 80 && alignof(Uniforms) == 16);
 
 struct Options final
 {
@@ -101,7 +107,7 @@ public:
         if (ludus::shaders::cornell::Vertex().UniformSize > sizeof(Uniforms) ||
             ludus::shaders::cornell::Fragment().UniformSize != sizeof(Uniforms))
         {
-            LUDUS_LOG_ERROR(LOG_SAMPLE, "Shader uniform reflection differs from the 16-byte CPU layout.");
+            LUDUS_LOG_ERROR(LOG_SAMPLE, "Shader uniform reflection differs from the 80-byte CPU layout.");
             return false;
         }
         if (rhi::CreateShader(ludus::shaders::cornell::Vertex(), mVertex) != rhi::ResourceStatus::Ready ||
@@ -128,10 +134,28 @@ public:
             return begun;
         }
         const auto frame = rhi::GetFrameInfo();
-        const Uniforms uniforms{{static_cast<float32>(frame.Width),
-                                 static_cast<float32>(frame.Height),
-                                 frame.Encoding == rhi::SurfaceEncoding::Unorm ? 1.0F : 0.0F,
-                                 flat ? 1.0F : 0.0F}};
+        using namespace ludus::gameplay::camera;
+        CameraSample sample;
+        cornell::CameraRays rays;
+        if (TryEvaluateCamera(cornell::DefaultCamera(),
+                              { .PresentationSequence = mPresentationSequence },
+                              nullptr,
+                              sample,
+                              &mCameraTrace) != CameraStatus::Success ||
+            cornell::TryBuildCameraRays(sample, frame.Width, frame.Height, rays) != CameraStatus::Success)
+        {
+            LUDUS_LOG_ERROR(LOG_SAMPLE, "Could not extract the Cornell camera for the acquired framebuffer.");
+            rhi::Shutdown();
+            return rhi::FrameStatus::Failed;
+        }
+        const Uniforms uniforms
+        {
+            .Viewport = {static_cast<float32>(frame.Width),
+                         static_cast<float32>(frame.Height),
+                         frame.Encoding == rhi::SurfaceEncoding::Unorm ? 1.0F : 0.0F,
+                         flat ? 1.0F : 0.0F},
+            .Camera = rays,
+        };
         const auto bytes = std::as_bytes(std::span(&uniforms, 1));
         if (rhi::UpdateUniform(mUniform, {reinterpret_cast<const uint8*>(bytes.data()), bytes.size()}) !=
                 rhi::ResourceStatus::Ready ||
@@ -141,10 +165,17 @@ public:
             rhi::Shutdown();
             return rhi::FrameStatus::Failed;
         }
-        return rhi::EndFrameStatus();
+        const auto ended = rhi::EndFrameStatus();
+        if (ended == rhi::FrameStatus::Ready)
+        {
+            ++mPresentationSequence;
+        }
+        return ended;
     }
 
 private:
+    ludus::gameplay::camera::CameraTrace mCameraTrace;
+    uint64 mPresentationSequence = 0;
     rhi::ShaderHandle mVertex;
     rhi::ShaderHandle mFragment;
     rhi::UniformHandle mUniform;

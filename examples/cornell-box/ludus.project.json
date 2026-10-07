@@ -15,7 +15,9 @@
       "FoundationBase",
       "FoundationLogging",
       "Platform",
-      "GraphicsRhi"
+      "GraphicsRhi",
+      "FoundationMath",
+      "GameplayCamera"
     ],
     "features": []
   },

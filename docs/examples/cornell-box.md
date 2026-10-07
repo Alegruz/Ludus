@@ -57,7 +57,7 @@ not compile engine sources into the application.
    project settings, then configures, builds and tests the sample. First-time
    preparation may download dependencies and take several minutes.
 
-**Checkpoint:** setup finishes successfully and all four sample tests pass.
+**Checkpoint:** setup finishes successfully and all five sample tests pass.
 Opening a project alone does not perform setup. If it reports missing setup,
 continue with Repair; if Repair fails, use the first error in Output and the
 [recovery notes](#validation-and-recovery) rather than treating the project as ready.
@@ -111,8 +111,9 @@ Open the sample folder in your code editor. Start with these files:
 | --- | --- |
 | `ludus.project.json` | The editor's build target, preset and run arguments |
 | `CMakeLists.txt` | SDK components, executable and shader compilation |
-| `src/main.cpp` | Logging, window creation, RHI startup, frames and shutdown |
-| `shaders/cornell.slang` | Room, blocks, camera rays, materials and lighting |
+| `src/main.cpp` | Logging, window creation, camera publication, RHI startup, frames and shutdown |
+| `src/camera.cpp` | Authored C0 eye/lens and checked framebuffer ray extraction |
+| `shaders/cornell.slang` | Room, blocks, supplied camera rays, materials and lighting |
 | `CMakePresets.json` | Shared Debug, Development and Release profiles |
 | `CMakeUserPresets.json` | Ignored settings generated for this machine |
 
@@ -218,15 +219,32 @@ Open `src/main.cpp` and follow these functions in order:
 
 1. `Run` creates the Platform window and owns the event/frame loop.
 2. `Renderer::Start` starts RHI and creates the shaders, uniform and pipeline.
-3. `Renderer::Draw` begins a frame, uploads the current framebuffer dimensions,
+3. `Renderer::Draw` begins a frame, evaluates the fixed C0 camera, extracts rays
+   for the acquired physical framebuffer, uploads its dimensions and ray basis,
    draws a fullscreen triangle and ends the frame.
 4. Renderer shutdown releases GPU resources before the window is destroyed.
 
-The host uploads one aligned `float32[4]`: framebuffer width, height, manual sRGB
-encoding enable and flat-mode enable. Slang receives one `float4` at binding 0;
-generated reflection and C++ assertions check its size. If the attachment encodes
+The host uploads five aligned `float32[4]` rows: framebuffer dimensions and
+display flags, then eye, right, up and forward ray vectors. Slang receives the
+same 80-byte layout at binding 0; generated reflection and C++ assertions check
+its size and offsets. If the attachment encodes
 sRGB, the shader leaves its output linear. Otherwise the shader encodes it after
 tone mapping. Errors return explicit statuses and use Ludus logging.
+
+`src/camera.cpp` owns the authored fixed shot: eye `(0, 1, 3.6)`, identity
+orientation and vertical FOV `0.76101275` radians (about 43.6 degrees). It uses
+[GameplayCamera C0](../architecture/camera-systems.md#c0-runtime-and-usage) to
+publish an owning pose/lens sample and copied trace. The private adapter derives
+ray scales from FoundationMath's canonical perspective projection using the
+actual framebuffer aspect. Camera or extraction failures stop the frame before
+uploading an invalid basis. The ray renderer owns intersection distances; this
+integration adds no depth attachment or general mesh pipeline.
+
+To change the view, edit `DefaultCamera()` in `src/camera.cpp`, then build and run.
+Increasing eye Z from `3.6` to `4.2` moves back; increasing vertical FOV from
+`0.76101275F` to `0.9F` widens the view. Resize again to check the composition.
+Restore the defaults to reproduce the opening screenshot. Camera values now
+live in C++ rather than as separate constants in the shader.
 
 The fragment shader constructs a camera ray for each pixel, finds the closest
 room plane or rotated box, then samples sixteen points on the ceiling light.
@@ -329,15 +347,15 @@ with the same build flavor as the sample. To select Debug or Release, prepare
 that engine preset first and update the environment; changing only the sample
 preset does not change the selected SDK.
 
-The build compiles `src/main.cpp` and generates the application-owned
-`cornell.h` from `shaders/cornell.slang` using the installed
+The build compiles `src/main.cpp` and `src/camera.cpp` and generates the
+application-owned `cornell.h` from `shaders/cornell.slang` using the installed
 `ludus_compile_shader` helper. Linux emits validated SPIR-V (and WGSL as part of
 the existing helper); macOS emits MSL. Only native execution is covered here.
 The sample neither adds the engine as a subdirectory nor includes private RHI
 or backend headers.
 
-CTest runs four checks: command-line help, rejection of an unbounded headless
-run, three frames of direct lighting, and three frames of flat materials. The
+CTest runs five checks: camera/projection agreement and invalid-input
+preservation, command-line help, rejection of an unbounded headless run, three frames of direct lighting, and three frames of flat materials. The
 render tests create real shaders, uniforms and a pipeline, upload the layout,
 submit frames and shut down. A missing/unusable GPU fails the tests; it does not
 silently pass. These checks establish rendering execution, not pixel accuracy.

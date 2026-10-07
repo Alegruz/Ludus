@@ -309,14 +309,14 @@ int main()
     explicitRequest.Required.Compute = true;
     const auto compiledBackends = ludus::graphics::rhi::GetCompiledBackends();
 #if defined(LUDUS_PLATFORM_MACOS)
-    const bool nativeBackendCompiled = compiledBackends.Metal;
+    const bool nativeBackendAvailable = compiledBackends.Metal;
 #else
-    const bool nativeBackendCompiled = compiledBackends.Vulkan;
+    const bool nativeBackendAvailable = compiledBackends.Vulkan;
 #endif
     if (ludus::graphics::rhi::CreateDevice({}, {}, explicitRequest, explicitDevice, explicitSurface) !=
             ludus::graphics::rhi::DeviceStatus::Unsupported ||
         ludus::graphics::rhi::DestroyDevice(explicitDevice) != ludus::graphics::rhi::DeviceStatus::InvalidHandle ||
-        !nativeBackendCompiled)
+        !nativeBackendAvailable)
     {
         return 2;
     }

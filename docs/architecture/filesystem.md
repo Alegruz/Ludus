@@ -5,7 +5,9 @@ The delivery plan below records the completed baseline; F5 validation is recorde
 in [PR #146](https://github.com/Alegruz/Ludus/pull/146), and F4 measurements in the
 [benchmark evidence](../development/filesystem-benchmark.md).
 The [post-baseline improvement plan](#post-baseline-research-and-improvement-plan)
-tracks proposed experiments separately from implemented contracts. This is a
+tracks proposed experiments separately from implemented contracts. The
+[asynchronous I/O evolution decision](#asynchronous-io-evolution-decision) records
+the proposed pipeline, backend contracts and subsequent Gems revisions. This is a
 storage architecture for Ludus; it does not implement an operating-system filesystem.
 
 ## Baseline decision
@@ -504,6 +506,365 @@ See the [filesystem guide](../wiki/guides/filesystem.md) for host integration an
 mixed loose/raw/LZ4 workloads and the measured synchronous baseline. These are
 storage delivery measurements, not resource decode or GPU residency claims.
 
+## Asynchronous I/O evolution decision
+
+Design review: 2026-10-07, repository baseline `1e2227c`. This section specifies
+**proposed** evolution of F4, not additional implemented features. The F4
+contracts above remain authoritative for today's SDK. The target is predictable
+asset delivery within CPU, memory and frame budgets, with a small auditable
+implementation. There is no backend that is fastest for every device, cache
+state, asset mix and host completion cadence.
+
+### Initial design and repository findings
+
+Before this pass's chapter review, the initial choice was to preserve F4's
+request state machine and portable worker pool, then separate physical transfer
+from logical read completion behind a private adapter. Add native backends only
+after measuring the full pipeline. Keep CPU work, asset publication and GPU
+retirement under their existing owners. The chapter review below records the
+subsequent refinements explicitly.
+
+The current code and measurements constrain that choice:
+
+- [`async.hpp`](../../modules/foundation/filesystem/include/ludus/foundation/filesystem/async.hpp)
+  already defines fallible bounded admission, retained revisions, latest-start
+  deadlines, cancel intent, exactly-once collection, metrics and optional traces.
+  Preserve these semantics rather than introducing a competing future/callback API.
+- [`async.cpp`](../../modules/foundation/filesystem/src/async.cpp) scans its fixed
+  slot array under one gate for admission, selection, handle lookup and Poll.
+  ReadAt and final provider release occur outside that gate. This is a readable
+  starting point; measure gate hold/wait time before replacing it with indexes.
+- [`pack.cpp`](../../modules/foundation/filesystem/src/pack.cpp) serializes reads
+  on each opened PackFile's scratch mutex, reads full touched blocks and validates
+  decoded CRC before copying. VirtualFile clones share the opened provider file;
+  cloning does not create independent pack scratch. Independent opens can.
+- The [F4 results](../development/filesystem-benchmark.md#local-baseline-and-result)
+  show cached loose reads favoring synchronous latency and pack CRC/decode
+  dominating this corpus. Four workers improved throughput in that one run while
+  queueing increased delivery latency. These are hypotheses for profiling, not
+  sufficient evidence for a new backend or automatic runtime crossover.
+- FoundationThreading admits one frozen CPU graph per system. It has no general
+  external-I/O continuation admission. Polling storage must not block its workers;
+  integration initially schedules the next bounded graph from host-owned results.
+
+### Ownership and the smallest useful architecture
+
+Keep FoundationFilesystem dependent only on FoundationBase. Its private code
+owns the scheduler, physical transfer adapters, provider validation and bounded
+pack decoding. Content owns prediction, dependency manifests, requests for
+resource chunks, decoded residency and publication. The host consumes byte-read
+completions and admits CPU jobs; the RHI owns upload submissions and GPU fences.
+Filesystem never calls gameplay code or decides whether an asset is resident.
+
+```mermaid
+flowchart LR
+    C[Content demand and staging owner] --> S[Bounded logical read scheduler]
+    S --> P[Private provider read plan]
+    P --> B[Blocking pool or native transfer backend]
+    B --> V[Revision validation and bounded pack decode]
+    V --> Q[Retained terminal completion]
+    Q --> H[Host collection]
+    H --> J[Content CPU decode jobs]
+    J --> U[RHI upload and owner-thread publication]
+```
+
+For memory and custom providers, keep the current ReadAt worker route. A native
+backend requires a private provider capability which supplies a retained opened
+revision, validated physical ranges and completion/validation steps. It cannot
+extract a pathname and reopen it or bypass pack bounds/CRC. Unsupported provider
+capabilities use the worker route, selected before any physical submission.
+Define this internal interface only for an experiment that needs it; keep native
+handles, liburing, Windows types and codec internals out of exported headers.
+
+Retain a fixed array, one short scheduler gate and predicate-based worker sleep.
+The native adapter has one private submission/completion owner initially;
+producer threads only admit descriptors. Slow OS submission, reads, decoding,
+provider destructors and arbitrary callbacks stay outside the scheduler gate.
+Backend progress and shutdown cannot depend on the main thread continuing to
+Poll. No one-thread-per-file design, fibers, mandatory coroutines, lock-free
+queue rewrite or general-purpose I/O reactor is required.
+
+### Logical completion, cancellation and buffer safety
+
+The public progression stays Queued -> Submitted -> Completing -> Completed.
+Internal physical operations can complete out of order; every operation carries
+a checked scheduler/request identity plus a child identity. Multiple child reads,
+short-read retries, metadata checks, decode and cancellation acknowledgments
+converge into **one** logical terminal publication. A physical CQE or IOCP packet
+is neither the logical terminal result nor host permission to reuse memory.
+
+Maintain these invariants across every backend:
+
+1. Successful admission reserves a logical slot, the full destination length and
+   the record needed to retain its terminal completion. Rejection leaves outputs
+   and destination untouched. Accepted identity is never silently recycled.
+2. The exact opened revision and every destination, staging buffer and native
+   control record remain alive until all operations referencing them finish.
+   Native children retire before terminal publication; caller destinations stay
+   charged until host collection or drained reader destruction.
+3. Cancel linearizes under the same state gate as terminal publication. Queued
+   work skips I/O. If cancellation wins while Submitted, drain active children
+   and decoder users, then publish Cancelled with zero valid bytes. A later cancel
+   cannot rewrite an already published Read result. Cancel success alone never
+   releases storage. Coalesced siblings retain independent logical dispositions.
+4. Match ReadAt's captured-EOF, short-read, partial-error and pre/post mutation
+   rules, including empty reads. Changed and Cancelled expose zero valid bytes
+   even if storage was touched. Other partial failures retain the established
+   ReadResult progress semantics; Content must validate completeness before use.
+5. A latest-start deadline controls the first logical I/O start only. Reserving a
+   slot or preparing a batch does not satisfy it. Recheck immediately before
+   handing the first transfer to the backend; expiry before start leaves the
+   destination untouched. Continuation reads of a started request are not newly
+   expired. This clock is monotonic, not a resource-readiness guarantee.
+6. Native cancellation is best effort. Keep the original operation's terminal
+   evidence, not just the cancel-command acknowledgment. Stop admission, drain
+   native operations and CPU users, join owners, collect, then destroy. A timeout
+   may diagnose incomplete shutdown; it cannot free buffers still in use.
+
+A reader cannot destroy itself from an executing provider. Maintain the existing
+InsideRead guard and owner-thread lifecycle restriction. Initialization failure
+unwinds started workers and storage transactionally. Backend failure never
+fabricates quiescence: retain ownership until a documented native teardown or
+operation completion proves that the OS cannot access it. An unresponsive driver
+or custom provider can therefore still prevent bounded shutdown.
+
+### Budgets, scheduling and integration
+
+Destination bytes are only one part of streaming memory. Declare separate bounds
+for logical slots, physical operations, stored-byte staging, decoded pack scratch,
+native/control completions and retained host completions. Content additionally
+bounds resource decode outputs, upload staging and old/new overlapping residency.
+Charge unique shared buffers once to their owning pool; charge every logical
+request's caller destination independently. Bound fixed scheduler metadata and
+optional trace storage as well. All additions below are proposed configuration
+concepts, not fields present in AsyncConfig today.
+
+| Credit | Reserve/release rule |
+| --- | --- |
+| Logical slots and destination bytes | Admission through host collection; keep F4 accounting |
+| Physical descriptors and control records | Before OS handoff through last associated completion; reserve cancellation/control headroom separately |
+| Stored-byte staging and pack scratch | Before a block is dispatched through the last validation/decode/copy consumer |
+| Decode-ready records | Reserve before initiating transfer so completed storage never needs an unbounded spill queue |
+| Content candidate and upload bytes | Content/RHI acquire before the relevant stage; release by CPU completion or GPU fence, never frame count |
+
+Acquire a complete bounded set of credits for one dispatchable chunk under the
+coordinator, or leave it queued without holding a partial set that blocks others.
+Reserve only a limited window of chunks per large read. No decoder waits for I/O
+inside a CPU callback; no I/O completion thread waits for a CPU graph to finish.
+When decode credit is exhausted, stop issuing physical work. Keep terminal and
+control processing available even while ordinary data admission is saturated.
+
+Retain deadline -> priority -> FIFO with oldest-first age override as the default
+logical policy. Worker count and physical queue depth are independent budgets;
+more outstanding work can raise latency and cancel-drain time. Bound large
+request chunks to provide scheduling points; already submitted device work is
+not generally preemptible. Chunking arbitrary custom providers requires their
+read/revision contract to support it; their fallback remains a whole ReadAt.
+Per-class reserved capacity for audio preparation versus background prefetch is
+an optional measured policy, including a stated fairness rule. The audio callback
+itself consumes prepared buffers only and never submits, polls, allocates or waits.
+
+A host-side pump collects at a measured frame cadence with a maximum record/work
+budget, routes results by tag and resource generation, and schedules CPU decode
+or discards obsolete candidates. Slow polling still consumes F4 capacity; it
+must appear as completion backlog rather than being hidden by another queue.
+Poll may release a final provider and close a descriptor, so it is outside render
+and audio critical sections. Do not implement a blocking Wait by spinning Poll.
+An eventual tool-only wait API needs a protected predicate and an explicit timeout
+which preserves pending ownership, with no dependency on host callbacks.
+
+Keep byte buffers in an explicit Content request owner whose teardown cancels,
+drains and collects before returning memory to a pool. Resource cancellation and
+revision replacement carry generation checks through CPU decode and upload.
+I/O completion means bytes are available; CPU completion means a candidate is
+prepared; a GPU fence permits upload-buffer retirement; the owner boundary
+publishes the resource. These four events must remain separately visible.
+
+### Native backend choices and fallback
+
+| Target | Maintained baseline | Conditional experiment and required proof |
+| --- | --- | --- |
+| Linux | Buffered pread workers | Buffered io_uring, normal sleeping completion waits, batched offset reads. Probe actual setup/opcode support and policy restrictions; initially disable SQPOLL, IOPOLL, registered-buffer specialization and multishot operations. Preserve metadata/revision semantics. |
+| macOS | Buffered pread workers | Keep this simple path unless traces justify another adapter. Dispatch I/O is a separate ownership/fragment-delivery experiment, not an assumed zero-allocation replacement. |
+| Windows | Worker pool for memory/pack providers; native directory unsupported | First implement/test a native root and revision provider. Then compare OVERLAPPED offset ReadFile plus IOCP, with stable per-operation records, captured EOF and explicit handle sharing/replacement semantics. |
+| Browser | AsyncReader initialization Unsupported | A separate host acquisition adapter may use async fetch into bounded owned staging, verify revision/bytes, then publish a memory/pack provider. Enforce response limits during acquisition; HTTP range/version behavior and abort quiescence need their own tests. No blocking main-thread I/O or claim that native AsyncReader already supports fetch. |
+| GPU-oriented cooked data | CPU destination API | DirectStorage is a separate Content/RHI experiment with target-specific cooked codec/layout, staging, status and GPU-fence retirement. It does not transparently replace VirtualFile CPU reads. |
+| Consoles | No support claim | Add adapters using the licensed platform SDK and the same lifetime tests; public desktop documentation cannot establish console behavior. |
+
+The Linux/liburing [io_uring interface](https://man7.org/linux/man-pages/man7/io_uring.7.html)
+provides shared submission/completion rings and unordered completion. Our initial
+adapter uses one-shot reads with explicit offsets and maps every physical result
+into a retained logical request. A short successful read advances the range and
+issues a bounded continuation. Never use success-CQE suppression for operations
+whose completion is required for retirement. Size completion/control storage for
+all issued reads plus cancellations and any supported auxiliary operations.
+
+The liburing [cancellation contract](https://man7.org/linux/man-pages/man3/io_uring_prep_cancel.3.html)
+and Microsoft's [cancellation guidance](https://learn.microsoft.com/en-us/windows/win32/fileio/canceling-pending-i-o-operations)
+require handling races with completion. Drain the target operation even when
+cancel reports absent/already running. Microsoft also specifies buffer and
+OVERLAPPED lifetimes in [ReadFile](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-readfile),
+and packet/concurrency behavior in [IOCP](https://learn.microsoft.com/en-us/windows/win32/fileio/i-o-completion-ports).
+Choose one documented immediate-success notification mode and test it: processing
+success both inline and as a queued packet must not complete a child twice.
+
+Apple's [dispatch I/O header](https://github.com/swiftlang/swift-corelibs-libdispatch/blob/main/dispatch/io.h)
+assigns descriptor control to the channel until cleanup and supports incremental
+read delivery. Any adapter must aggregate fragments and prove descriptor/channel
+quiescence before release. The [Emscripten fetch interface](https://emscripten.org/docs/api_reference/fetch.html)
+is an asynchronous acquisition mechanism; validate its behavior against Ludus's
+pinned SDK before promising browser support.
+
+Microsoft's [DirectStorage guidance](https://github.com/microsoft/DirectStorage/blob/main/Docs/DeveloperGuidance.md)
+favors batching, adequate staging and avoiding serial dependency discovery. It
+also warns that enqueue into a full queue can block. Our adaptation reserves
+queue/notification capacity before calling it from an adapter owner, bounds
+staging within the rendering budget and preloads small cooked dependency tables.
+Batch status does not prove which individual request succeeded; define error
+localization and publication checks before integrating. Its block-size guidance
+is a candidate benchmark point, not Ludus's universal chunk size.
+
+Report requested/effective backend and fallback reason. Fallback is safe when
+setup or capability selection fails **before** submission. A runtime backend
+error with ambiguous submission state cannot replay the same range on workers
+while the original operation may write it. Stop affected dispatch, drain proven
+in-flight operations, preserve diagnostic errors and route only known unsubmitted
+work through fallback. Ordinary per-file failures do not disable the backend.
+Keep a force-worker option for reproducibility; do not switch backends mid-request.
+
+### Optimization order and rules
+
+First profile storage time, metadata checks, pack scratch waiting, CRC/decode,
+scheduler gate waiting and host backlog separately. Optimize the dominant stage.
+Keep buffered I/O and OS caching as default. Direct I/O, mmap, a second byte cache,
+lock-free scheduling and registered memory all need a measured target workload
+and separate failure/resource contracts. Larger thread counts are not a substitute
+for CRC profiling or a bounded decode pipeline.
+
+Submission batching is the first native optimization: many independent offset
+operations share a submit call without sharing buffers or results. Flush a batch
+at a size limit **or** a bounded oldest-wait limit, whichever comes first; urgent
+requests bypass artificial batch delay. Measure the delay rather than filling
+maximum queue depth by default. Public Submit remains bounded and allocation-free
+in scheduler storage, but its gate can contend; it is not a hard-real-time API.
+
+Physical coalescing is a later experiment. Merge only compatible ranges from the
+same opened backing revision and codec/block plan, with compatible urgency and
+explicit maximum merged bytes, padding over-read and delay. Use bounded staging
+and checked scatter ranges; unrelated caller buffers are not one contiguous
+read target. Charge over-read, keep each logical completion/cancel independent,
+and retain shared staging until all consumers drain. A sibling cancellation
+cannot abort bytes another live sibling still needs. Compare bytes saved against
+bytes wasted and cancel tails. Preserve full-block validation for pack data.
+
+For pack bottlenecks, compare CRC implementation cost and copy count before
+splitting storage/CRC/decode. A pipelined provider then uses an internal fixed
+scratch pool and bounded block tasks rather than adding descriptors or reopening
+paths per read. Keep synchronous ReadAt as a reference path with identical bytes,
+corruption/Changed semantics and format. Any validated-block cache must be keyed
+by opened revision and physical block/codec identity, bounded and justified by
+reuse traces. Do not mark mutable data verified forever from metadata alone.
+
+If slot scanning dominates, add a free-slot list and a bounded terminal FIFO
+under the same gate before considering a ready-queue heap. Request identity and
+terminal publication order remain unchanged. These small substitutions can be
+measured independently; no global scheduler rewrite is required.
+
+### Debugging, validation and adoption gates
+
+Keep the current bounded opt-in trace and saturating counters. Proposed additions
+include backend/fallback reason, physical operation/byte counts, stage credit
+high-water marks, queue/gate/scratch/decode/host delays, cancellation drain and
+batch over-read. Tag CPU decode and GPU upload with the same correlation identity.
+Record failures with their stage, native code and revision; export on a host
+thread, avoiding logging recursion from storage infrastructure. Aggregate metrics
+must remain useful when trace records are dropped. Measure tracing overhead.
+
+Add a development request snapshot and a fake backend whose clock and completions
+are host-controlled. Tests can force a short transfer, out-of-order children,
+cancel-before/after terminal publication, immediate native success, submit failure,
+completion saturation, delayed decode and a provider stalled during shutdown.
+Assert accounting conservation, single terminal publication and no storage reuse
+before the last accessor. Snapshot extraction must have a bounded count and
+must not run user callbacks while holding the scheduler gate.
+
+| Order / existing research owner | Concrete proposed slice | Acceptance before enabling |
+| --- | --- | --- |
+| 1 / FS-R2 | Replay startup, transition and background traces; stage attribution, periodic host collection and decode contention | Byte equality and complete-result validation; repeated p50/p95/p99, CPU, allocations, queue/backlog, retained memory and frame impact; include same-opened-PackFile contention and independent opens |
+| 2 / FS-R4 | Optimize measured pack CRC/copy/scratch bottleneck; pipeline only if useful | Same format/integrity/revision outcomes, corrupt/fuzz coverage, bounded scratch and decode credit, cancel/drain tests, synchronous comparison |
+| 3 / FS-R3 | Private transfer interface and fake backend, then one Linux io_uring experiment | Fault/cancel/reorder/short-read proofs, unsupported/setup fallback, native drained teardown, warning-clean pinned builds, sanitizer/race checks, no new public heavy headers |
+| 4 / FS-R3 | Batching; then separately coalescing or slot indexes if still needed | One change per comparison, deadline/fairness and byte accounting preserved, no unacceptable p99/frame/cancel-tail regression |
+| 5 / FS-R3 | Windows native revision provider and IOCP; platform experiments independently | Actual supported-host tests including replacement, sharing, >4 GiB offsets and immediate/error completion; no Windows disk claims from memory-provider tests |
+| 6 / FS-R1 and F5 owner | Bounded asynchronous publication if a real save/cook consumer needs it | Existing publication/cleanup/sync failure oracle plus cancellation and old-reader lifetime; reads and writes compete in a controlled workload |
+
+Use a measured matrix of SSD/HDD where supported, warm and controlled cold cache,
+small/random and large/sequential ranges, compressible/incompressible packs,
+decode contention, background writes and realistic polling cadence. Record
+host/kernel/filesystem/device, compiler, seeds/workload hashes, budgets and
+repeated-run variability. Include hot/cold path opening separately; the current
+F4 benchmark opens files before read timing. Deadline misses and p99 resource
+readiness matter alongside bandwidth. Establish acceptable CPU/memory/frame
+regressions before trials; retain negative results. Correctness, fault injection,
+ASan/UBSan, race tooling where supported, allocation, format/tidy, exported SDK
+and documentation checks precede backend adoption. This design review has not
+run those implementation gates or established a throughput gain.
+
+### Asynchronous writes and metadata scope
+
+Keep write operations separate from byte reads. The smallest useful async write
+is a bounded dedicated-worker wrapper around F5 WriteDirectory::Publish, with an
+owned path/root capability and a source buffer immutable until collection. Reserve
+full source bytes, completion storage and publication workers; retain a root
+lease internally rather than borrowing a movable capability without a lifetime
+rule. Define a separate disk-space/quota limit for outstanding temporary files;
+RAM credits cannot promise free disk space. Serialize same-destination submissions
+or reject them, and expose Busy from cooperative publication instead of spinning.
+
+Queued cancellation skips publication. With the initial whole-Publish wrapper,
+running cancellation is advisory and drains Publish; it must return the real
+PublicationResult, including Published, file/directory sync and cleanup errors.
+It cannot report that a visible save was cancelled. An eventual cancellable
+preparation path needs an explicit commit point and the existing recovery oracle;
+after rename, report publication truth even when a subsequent sync fails.
+No multi-file transaction or universal power-loss guarantee follows from async
+execution. Keep saves, scans and path opens out of latency-critical read workers;
+use a separately bounded cold-operation pool if needed. Path-based convenience
+requests must pin the mount snapshot at admission and report which opened
+revision was selected; an unresolved name is not already a pinned file revision.
+
+### Gems review and resulting revisions
+
+The initial design above was followed by a focused search of
+[game-dev-gems-toc.md](../../references/game-dev-gems-toc.md) for asynchronous I/O,
+file loading/reordering, hotloading and resource streaming. The index is a chapter
+locator, not evidence of implementation details. This pass read GPG8 5.3 in full,
+GPG6 1.9 in full and the hotloading architecture portions of 1.10, plus the
+publisher-hosted GPU Gems 2 chapter below. GPG6 scanned pages were rendered/OCRed,
+with chapter identity and key diagrams checked visually. PDF locators are physical
+one-based pages, distinct from printed pagination. No companion code was copied.
+
+Thanks to these authors for the ideas used below. The F4 lifetime/layout/hotload
+ideas were already represented by the earlier filesystem review; this pass
+extends them into explicit native-backend and whole-pipeline acceptance criteria.
+These readings do not establish modern disk performance or console support.
+
+| Consulted article and locator | What it actually contributes | Revision to the initial proposal |
+| --- | --- | --- |
+| Neil Gower, **Asynchronous I/O for Scalable Game Servers**, Game Programming Gems 8, section 5.3, printed pp. 506-513; [PDF pp. 521-528](../../references/Game%20Programming%20Gems%208.pdf#page=521) | Control records and payloads outlive async work; cancel is not synchronous retirement; queue boundaries and explicit protocol state aid understanding; small requests can lose to synchronous work | Require a child/control completion ledger, saturation-safe cancellation headroom, explicit short-read aggregation and cancel race tests. Keep host collection instead of exposing OS callbacks. Network-server measurements are not disk benchmarks; native APIs may still use internal workers. |
+| David L. Koenig, **Faster File Loading with Access-Based File Reordering**, Game Programming Gems 6, section 1.9, printed pp. 103-108; [PDF pp. 106-111](../../references/Game%20Programming%20Gems%206.pdf#page=106) | Record actual accesses, optimize payload order and rerun representative loading; cache state and divergent paths affect results | Compare the existing deterministic layout manifest against held-out gameplay traces before adding runtime coalescing. Record physical ranges and read amplification separately from logical requests, keep lookup order stable and include cold/open costs. Historical seek/optical gains do not set NVMe policy. |
+| Noel Llopis and Charles Nicholson, **Stay in the Game: Asset Hotloading for Fast Iteration**, Game Programming Gems 6, section 1.10, relevant printed pp. 109-114; [PDF pp. 112-117](../../references/Game%20Programming%20Gems%206.pdf#page=112) | Conversion, observation, resource indirection and rebinding are distinct stages; reloading affects more than byte acquisition | Carry request/resource generations through decode and upload, retain old content on failed candidate preparation and budget overlapping residency. Cancellation drains storage without publishing obsolete resources. Rebinding remains with Content/RHI owners; watcher hints do not mutate opened revisions. |
+| Oliver Hoeller and Kurt Pelzer, **Optimizing Resource Management with Multistreaming**, GPU Gems 2, chapter 5, sections 5.1-5.2; [publisher chapter](https://developer.nvidia.com/gpugems/gpugems2/part-i-geometric-complexity/chapter-5-optimizing-resource-management-multistreaming) | Multistreaming here means vertex-component streams and renderer-oriented resource preparation, not an asynchronous disk backend | Reject it as evidence for I/O scheduling or queue depth. Retain the boundary between generic resource bytes and renderer preparation; component-selective cooking is a separate Content/RHI study. Do not import its Direct3D 9 API or synchronous availability assumptions. |
+
+Other index hits about GPU stream architectures and asynchronous input polling
+are not file-I/O algorithms. GPG8 5.4's MMO world-streaming scope may inform a
+future Content prediction study; it was not used to justify this byte-I/O design.
+The earlier container and cost-aware cache reviews remain linked above; neither
+requires a new global resource manager or a second mandatory byte cache here.
+
+The maintained choice is therefore a bounded completion-based core, a portable
+blocking fallback and optional measured native transfers, with revision and
+ownership truth intact across storage, CPU preparation and GPU publication.
+
 ## Post-baseline research and improvement plan
 
 Completing F1-F5 establishes the byte-I/O, namespace, pack, scheduling and
@@ -516,23 +877,28 @@ identifiers, not additional acceptance requirements for the completed F1-F5 work
 ### Venues and reading priorities
 
 Follow these venues for specific questions in the existing architecture. Start
-with FAST and OSDI/SOSP; use TOS for deeper storage studies and SYSTOR for practical
-experiments. These priorities are our assessment of applicability to Ludus.
+with FAST and TOS for storage questions, then SYSTOR for backend comparisons.
+Use OSDI/SOSP for correctness and system evaluation; consult EuroSys and TOCS
+when CPU sharing, scheduling or concurrency becomes the observed problem. These
+priorities are our assessment of applicability to Ludus.
 Conference programs are reading sources, not an instruction to attend, submit a
 paper or adopt every featured storage mechanism.
 
 | Venue | What to look for | Ludus boundary and relevance |
 | --- | --- | --- |
 | [USENIX FAST, Conference on File and Storage Technologies](https://www.usenix.org/conference/fast26/technical-sessions) | Crash consistency, workload characterization, caching, compression and storage performance | First choice across F3 packs, F4 streaming and F5 publication; separate kernel/device mechanisms from changes feasible inside our user-space SDK. |
-| [USENIX OSDI, Operating Systems Design and Implementation](https://www.usenix.org/conference/osdi25/technical-sessions), and [ACM SOSP, Symposium on Operating Systems Principles](https://sigops.org/s/conferences/sosp/2025/) | Recovery protocols, concurrency, ownership and system evaluation | Review persistence assumptions and revision/cancellation lifetime proofs before widening a contract. Distributed consistency protocols need a separate product need. |
+| [USENIX OSDI, Operating Systems Design and Implementation](https://www.usenix.org/conference/osdi26/technical-sessions), and [ACM SOSP, Symposium on Operating Systems Principles](https://sigops.org/s/conferences/sosp/2025/) | Recovery protocols, concurrency, ownership and system evaluation | Review persistence assumptions and revision/cancellation lifetime proofs before widening a contract. Distributed consistency protocols need a separate product need. |
 | [ACM SYSTOR, International Systems and Storage Conference](https://www.systor.org/2026/cfp/) | Experimental prototypes, deployment experience and workload comparisons | Useful for reproducible backend, cache and latency comparisons; select workloads that resemble asset delivery. |
 | [ACM Transactions on Storage (TOS)](https://dl.acm.org/journal/tos) | Detailed storage designs and their evaluations | First journal reading target for publication, packs and storage policy; verify assumptions against supported hosts. |
+| [ACM EuroSys, European Conference on Computer Systems](https://2026.eurosys.org/papers.html) | CPU sharing, scheduling, concurrency and storage integration | Read selectively for FS-R2/FS-R3 when render, decode and I/O completion compete for cores; evaluate frame impact as well as throughput. |
 | [ACM Transactions on Computer Systems (TOCS)](https://dl.acm.org/journal/tocs) | Broader system designs, concurrency and scheduling | Supplement storage reading when queueing, completion delivery or CPU sharing is the bottleneck. |
 
 ### Research inputs and adaptations to investigate
 
 Thanks to the authors below for the methods and analysis informing this plan.
-Publication metadata, abstracts and the named sections were consulted. The
+Publication metadata, abstracts and the explicitly named sections were consulted.
+The SYSTOR API comparison below has been reviewed at abstract level only; it is
+an immediate full-paper reading task, not a validated backend recommendation. The
 proposed experiments are Ludus-specific interpretations; no cited implementation
 has been imported, and a full algorithm/artifact compatibility review remains
 required before adoption. Historical filesystem results and hardware speedups do
@@ -542,7 +908,40 @@ not establish behavior or gains on our current Linux/macOS targets.
 | --- | --- | --- |
 | Thanumalayan Sankaranarayana Pillai, Vijay Chidambaram, Ramnatthan Alagappan, Samer Al-Kiswany, Andrea C. Arpaci-Dusseau and Remzi H. Arpaci-Dusseau, **All File Systems Are Not Created Equal: On the Complexity of Crafting Crash-Consistent Applications**, OSDI 2014, pp. 433-448; sections 2-3 ([paper and media](https://www.usenix.org/conference/osdi14/technical-sessions/presentation/pillai)) | Application correctness depends on storage ordering and atomicity assumptions; ALICE explores update protocols against persistence models. | FS-R1 specifies recovery expectations for each F5 sync policy and tests the host stack. Its historical Linux configurations do not certify APFS or modern kernels. |
 | Jayashree Mohan, Ashlie Martinez, Soujanya Ponnapalli, Pandian Raju and Vijay Chidambaram, **Finding Crash-Consistency Bugs with Bounded Black-Box Crash Testing**, OSDI 2018, pp. 33-50; sections 4-5 ([paper and media](https://www.usenix.org/conference/osdi18/presentation/mohan)) | Bounded workload exploration, block-I/O replay and explicit data/metadata recovery oracles; CrashMonkey and Ace demonstrate the approach. | FS-R1 adapts the testing method to our publication protocol. Bounds limit coverage; process termination alone does not simulate power loss. Verify artifact/kernel compatibility before reuse. |
-| Dongjoo Seo, Jihyeon Jung, Yeohwan Yoon, Ping-Xiang Chen, Yongsoo Joo, Sung-Soo Lim and Nikil Dutt, **DPAS: A Prompt, Accurate and Safe I/O Completion Method for SSDs**, FAST 2026, pp. 381-397; sections 4-5 ([paper and media](https://www.usenix.org/conference/fast26/presentation/seo)) | Completion strategies trade latency against CPU consumption, especially under contention and changing device latency. | FS-R2 adopts the comparison questions; FS-R3 considers backend experiments only after measurement. DPAS changes the Linux block layer; it is not a drop-in AsyncReader policy or a cooked-path watcher algorithm. |
+| Diego Didona, Jonas Pfefferle, Nikolas Ioannou, Bernard Metzler and Animesh Trivedi, **Understanding Modern Storage APIs: A systematic study of libaio, SPDK, and io-uring**, SYSTOR 2022; abstract ([author organization publication](https://research.ibm.com/publications/understanding-modern-storage-apis-a-systematic-study-of-libaio-spdk-and-io-uring)) | Polling design and available CPU cores affect performance; scaling across cores/devices requires care. | FS-R2 records CPU cost and contention alongside latency; FS-R3 compares the worker pool with buffered io_uring only if submission/completion costs justify it. Treat the paper as an evaluation guide: its hardware/kernel results do not select current queue depths, polling modes or a default backend. SPDK would require a separate device-access/deployment decision outside the present file-provider contract. |
+| Dongjoo Seo, Jihyeon Jung, Yeohwan Yoon, Ping-Xiang Chen, Yongsoo Joo, Sung-Soo Lim and Nikil Dutt, **DPAS: A Prompt, Accurate and Safe I/O Completion Method for SSDs**, FAST 2026, pp. 381-397; sections 4-5 ([paper and media](https://www.usenix.org/conference/fast26/presentation/seo)) | Completion strategies trade latency against CPU consumption, especially under contention and changing device latency. | FS-R2 compares completion latency and CPU under render/decode contention and changing read sizes; FS-R3 considers supported wait/wakeup modes only after measurement. DPAS changes the Linux block layer; its adaptive polling algorithm is not a drop-in AsyncReader policy or a cooked-path watcher algorithm. Retain blocking waits as the baseline; do not enable busy polling by default. |
+
+### Immediate reading sequence and translation into experiments
+
+Read the full SYSTOR API comparison first to build FS-R2's experimental matrix:
+worker count, admitted queue depth, request size/locality, completion collection
+cadence, cold/warm cache and spare versus contended CPU. Compare the existing
+worker implementation on identical inputs before adding a buffered io_uring
+variant. Separate submission, storage service, completion delivery and
+CRC/decode timings so a faster kernel path cannot hide a slower pack pipeline.
+
+Read DPAS next for the completion-versus-CPU tradeoff, then use FAST/TOS to
+investigate the bottleneck found in those traces: pack layout/cache/decompression
+for FS-R4, or completion and queueing for FS-R3. OSDI/SOSP's crash-testing sources
+already listed above guide FS-R1 independently. EuroSys/TOCS become useful when
+contention traces show completion, decode and frame work competing for CPU.
+This reading order is a proposed Ludus workflow, not a ranking of publication
+quality or a claim that every venue's current papers fit this engine.
+
+For every candidate, ask whether it improves p99 **resource-ready latency**
+inside declared CPU, memory and frame budgets while preserving revision identity,
+buffer lifetime, cancellation/drain and exactly-once completion. Filesystem-only
+benchmarks report byte completion; an integrated Content experiment also measures
+validation/decode, owner-thread publication and required upload before calling a
+resource ready. Record both endpoints rather than assigning Content/RHI work to
+FoundationFilesystem. Include burst loading, background streaming, cancellation
+storms and CPU contention; report regressions and variability, not just peak IOPS.
+
+Keep tuning local to the private backend. Linux SSD studies do not establish
+macOS, Windows, console or browser behavior; a new platform needs its own support
+and measurement evidence. Browser acquisition remains a separate fetch path.
+A sophisticated policy earns its maintenance cost only if the simple bounded
+baseline loses on representative traces and the gain survives correctness tests.
 
 ### Prioritized experiments and acceptance
 

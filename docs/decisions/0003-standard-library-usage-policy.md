@@ -19,7 +19,10 @@ changing this policy does not require an unrelated repository-wide rewrite.
 
 Production code includes `modules/`, `apps/`, and `examples/`. Test-only code
 may use standard-library facilities for fixtures and independent reference
-checks, but must exercise the production implementation. Third-party and
+checks, but must exercise the production implementation. Benchmark-only harnesses
+may use standard-library/CRT facilities to collect, analyze and report measurements;
+this exemption does not apply to the production code being measured or permit
+substitute STL implementations of the measured operation. Third-party and
 generated code are exempt; their dependencies must remain private and do not
 establish permission for production call sites.
 
@@ -108,12 +111,14 @@ numeric boundaries and rounding cases on supported native and browser
 toolchains. The existing assertion formatter's `std::to_chars` exception above
 remains restricted to that implementation; it does not authorize new parsers.
 
-Existing `std::string`, STL containers/algorithms, `std::optional`, standard
-conversion, `std::format`, and `<filesystem>` uses may be maintained within
-their current boundaries. Do not add them to new APIs or subsystems. Their
-replacement belongs in focused, validated changes that preserve existing
-contracts. Remaining runtime facilities absent from the explicit allowlist are
-not implicitly approved by this compatibility provision.
+Necessary existing standard-library and CRT uses may be maintained within
+their current implementation boundaries, including facilities absent from the
+new-code allowlist. Examples include Logging's `std::thread`,
+`std::condition_variable` and `std::hash`, Editor's `std::function`, and existing
+containers, conversion, formatting and filesystem calls. This compatibility
+permission does not authorize adding those facilities to new APIs or subsystems.
+Their replacement belongs in focused, validated changes that preserve existing
+contracts; existing use is not precedent for new code.
 
 ### Process
 
