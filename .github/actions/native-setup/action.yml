@@ -33,8 +33,10 @@ runs:
         fi
         # Stalled package mirrors must fail promptly so the job can be retried.
         apt_options=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3)
-        sudo apt-get "${apt_options[@]}" update -qq
-        sudo apt-get "${apt_options[@]}" install -y -qq "${packages[@]}"
+        # Network inactivity timeouts do not bound the whole operation. One
+        # runner remained in update for 47 minutes without producing output.
+        timeout --signal=TERM --kill-after=30s 5m sudo apt-get "${apt_options[@]}" update -qq
+        timeout --signal=TERM --kill-after=30s 10m sudo apt-get "${apt_options[@]}" install -y -qq "${packages[@]}"
     - name: Cache pip downloads
       uses: actions/cache@v4
       with:

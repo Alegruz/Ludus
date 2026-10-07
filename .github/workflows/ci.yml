@@ -295,7 +295,7 @@ jobs:
           if-no-files-found: error
       - name: Report compiler cache
         if: always()
-        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
+        run: if command -v ccache >/dev/null; then ccache --show-stats >> "$GITHUB_STEP_SUMMARY"; fi
 
   development:
     needs: [changes, formatting]
@@ -473,7 +473,7 @@ jobs:
           ctest --test-dir out/sanitized --output-on-failure --no-tests=error
       - name: Report compiler cache
         if: always()
-        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
+        run: if command -v ccache >/dev/null; then ccache --show-stats >> "$GITHUB_STEP_SUMMARY"; fi
 
   sanitizers:
     needs: [changes, formatting]
@@ -519,7 +519,7 @@ jobs:
           if-no-files-found: error
       - name: Report compiler cache
         if: always()
-        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
+        run: if command -v ccache >/dev/null; then ccache --show-stats >> "$GITHUB_STEP_SUMMARY"; fi
 
   filesystem-fuzz:
     needs: [changes, formatting]
@@ -606,7 +606,7 @@ jobs:
         run: ./scripts/check linux-clang-development --tidy
       - name: Report compiler cache
         if: always()
-        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
+        run: if command -v ccache >/dev/null; then ccache --show-stats >> "$GITHUB_STEP_SUMMARY"; fi
 
   editor:
     needs: [changes, formatting]
@@ -661,7 +661,7 @@ jobs:
             out/build/linux-clang-development/apps/editor/ludus_editor_tests '[.script-journey]'
       - name: Report compiler cache
         if: always()
-        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
+        run: if command -v ccache >/dev/null; then ccache --show-stats >> "$GITHUB_STEP_SUMMARY"; fi
 
   # Debug runtime already runs the complete Debug assertion/build contracts.
   assertion-policy:
@@ -685,7 +685,7 @@ jobs:
           out/host-tools/venv/bin/ctest --test-dir out/build/assertion-policy --output-on-failure
       - name: Report compiler cache
         if: always()
-        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
+        run: if command -v ccache >/dev/null; then ccache --show-stats >> "$GITHUB_STEP_SUMMARY"; fi
 
   pch:
     needs: [changes, formatting]
@@ -709,7 +709,7 @@ jobs:
           out/host-tools/venv/bin/ctest --test-dir out/build/pch --output-on-failure --label-exclude build-contract
       - name: Report compiler cache
         if: always()
-        run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
+        run: if command -v ccache >/dev/null; then ccache --show-stats >> "$GITHUB_STEP_SUMMARY"; fi
 
   build-budget:
     needs: [changes, formatting]

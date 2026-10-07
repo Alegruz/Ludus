@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,47 @@ from unittest.mock import patch
 
 import engine
 import web_build
+
+
+class NativePrerequisiteTests(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parents[2]
+
+    @unittest.skipUnless(shutil.which("timeout"), "GNU timeout is provided by the Linux CI runner")
+    def test_silent_package_update_has_a_wall_clock_deadline(self):
+        action = (self.ROOT / ".github/actions/native-setup/action.yml").read_text()
+        command = next(line.strip() for line in action.splitlines()
+                       if "timeout --signal=TERM" in line and "update -qq" in line)
+        command = command.replace("5m", "0.1s").replace("--kill-after=30s", "--kill-after=0.1s")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name, body in (("sudo", 'exec "$@"'), ("apt-get", "exec /bin/sleep 30")):
+                tool = root / name
+                tool.write_text("#!/bin/sh\n" + body + "\n")
+                tool.chmod(0o755)
+            environment = {**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"]}
+            result = subprocess.run(["/bin/bash", "-c", "apt_options=();\n" + command],
+                                    env=environment, capture_output=True, text=True, timeout=3)
+            self.assertEqual(result.returncode, 124, result.stdout + result.stderr)
+
+    def test_cache_report_survives_missing_prerequisite_and_reports_when_available(self):
+        workflow = (self.ROOT / ".github/workflows/ci.yml").read_text()
+        commands = [line.strip().removeprefix("run: ") for line in workflow.splitlines()
+                    if "ccache --show-stats" in line]
+        self.assertTrue(commands)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            summary = root / "summary"
+            environment = {**os.environ, "PATH": str(root), "GITHUB_STEP_SUMMARY": str(summary)}
+            for command in commands:
+                result = subprocess.run(["/bin/bash", "-c", command], env=environment, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(summary.exists())
+            tool = root / "ccache"
+            tool.write_text('#!/bin/sh\n[ "$1" = --show-stats ] || exit 1\necho cache-statistics\n')
+            tool.chmod(0o755)
+            result = subprocess.run(["/bin/bash", "-c", commands[0]], env=environment, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(summary.read_text(), "cache-statistics\n")
 
 
 class LockedSetupTests(unittest.TestCase):
