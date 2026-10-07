@@ -226,3 +226,86 @@ clock-read cost against the prior direct steady-clock implementation and inspect
 symbols for allocator/lock dependencies. These measurements describe this host;
 they are not nanosecond-resolution or portable latency guarantees. See
 [validation evidence](../development/high-resolution-time-evidence.md).
+
+## Implementation before research
+
+Recorded October 6, 2026. Implement and validate the initial architecture before
+starting the conference/journal improvement pass below. The shared clock and
+owner-local helpers already exist; the next work integrates those values into
+application, simulation and presentation owners. Preserve the contracts above
+and [ADR 0017](../decisions/0017-foundation-time.md) as the implementation baseline.
+
+| Stage | Work before the improvement pass | Completion evidence |
+| --- | --- | --- |
+| FoundationTime slice | Retain the shared source, checked arithmetic, stopwatch, deadline and frame helpers; document changed public APIs beside their declarations. | Existing native/browser semantic tests and installed-SDK coverage; updated Doxygen coverage for any changed API. |
+| Frame integration | Migrate application loops to one explicit frame sample and wire lifecycle resets using the existing frame/simulation contract. | Integration tests for startup, pause/resume, visibility and session replacement, clock regression and accepted/discarded time; no duplicate clamp. |
+| Integer simulation driver | Implement the rational phase accumulator described above, including checked configuration, catch-up bounds, interpolation and exhaustion. | Partition-independent tick/remainder accounting when no time is intentionally discarded, exact 60 Hz accounting over one second, explicit clamp/catch-up loss and failure tests. |
+| Pacing and inspection | Implement the agreed native pacing policy under Platform/RHI/application ownership; define runtime timing telemetry and the proposed editor Timing view under their existing owners. | Reproducible target/wake/presentation measurements, interruption/lateness and lifecycle tests; runtime-reported intervals/status across the editor process boundary. |
+
+The bounded gameplay queue, time scaling and additional clock domains remain
+conditional extensions. Establish their requirements and ownership before
+including them in a delivery milestone. Reading a timer-queue paper does not
+make a wheel necessary, and a PREEMPT_RT result does not establish a desktop
+wake-up guarantee. Platform/API checks needed for the initial implementation
+remain part of that work; this sequence defers the broader improvement study.
+
+At the implementation gate, record the revision, supported backends, toolchain,
+workloads, reproduction commands and measurements in the
+[validation evidence](../development/high-resolution-time-evidence.md). Complete
+the relevant warning-clean builds, unit/integration tests, sanitizers,
+format/static analysis, browser semantics, SDK and documentation checks. These
+results become the comparison baseline for research trials.
+
+## Conference and journal research backlog
+
+The following sources were screened through venue/session metadata, abstracts
+and available introductory material when recommended. Full readings and talks
+are **Queued**; none has a completed Ludus experiment or adoption record. This
+list is continuing research context, not a claim that their designs have already
+informed the implementation. Preserve the completed Gems review above separately.
+
+### Initial readings
+
+| ID / priority | Source | Ludus question and proposed experiment |
+| --- | --- | --- |
+| HR-01 / First | Alen Ladavac, **Advanced Graphics Techniques Tutorial: The Elusive Frame Timing: A Case Study for Smoothness Over Speed**, GDC 2018. [Session](https://www.gdcvault.com/play/1025407/Advanced-Graphics-Techniques-Tutorial-The). | Which presentation effects create uneven visible frame intervals? Compare the implemented pacing baseline with bounded alternatives using CPU timing, presentation intervals, queue depth where available and latency measurements. |
+| HR-02 / First | Tomas Kalibera and Richard Jones, **Rigorous Benchmarking in Reasonable Time**, ACM ISMM 2013, pp. 63-74, DOI [10.1145/2464157.2464160](https://doi.org/10.1145/2464157.2464160). [Corrected author manuscript](https://kar.kent.ac.uk/33611/). | How much repetition is needed for a reliable clock-read or pacing comparison? Identify variation between builds, executions and iterations; report effect-size confidence intervals rather than a favorable median alone. |
+| HR-03 / First | Daniel Bristot de Oliveira, Daniel Casini, Rômulo Silva de Oliveira and Tommaso Cucinotta, **Demystifying the Real-Time Linux Scheduling Latency**, ECRTS 2020, pp. 9:1-9:23, DOI [10.4230/LIPIcs.ECRTS.2020.9](https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.ECRTS.2020.9). | What causes wake-up lateness under load? Trace relevant delays and compare requested targets with actual execution. Separate measured desktop behavior from the paper's PREEMPT_RT assumptions and formal bounds. |
+| HR-04 / Queue requirement | George Varghese and Anthony Lauck, **Hashed and Hierarchical Timing Wheels: Efficient Data Structures for Implementing a Timer Facility**, IEEE/ACM Transactions on Networking 5(6), 1997, pp. 824-834, DOI [10.1109/90.650142](https://doi.org/10.1109/90.650142). [Paper](https://www.cs.columbia.edu/~nahum/w6998/papers/ton97-timing-wheels.pdf). An earlier version appeared at ACM SOSP 1987. | At which queue sizes, due densities and cancellation rates would an ordered structure improve our bounded scan? Compare scan, indexed heap and, only with explicit granularity/horizon, a wheel while preserving deterministic delivery and capacity policies. |
+| HR-05 / Virtualized workload | Timothy Broomhead, Laurence Cremean, Julien Ridoux and Darryl Veitch, **Virtualize Everything but Time**, USENIX OSDI 2010, pp. 451-464. [Paper and session](https://www.usenix.org/conference/osdi10/virtualize-everything-time). | How do virtualized environments affect clock access and interval measurements? Test supported VM workloads and distinguish timestamp access latency, monotonicity and timeout behavior from synchronized wall-clock or migration guarantees. |
+| HR-06 / Benchmark companion | Todd Mytkowicz, Amer Diwan, Matthias Hauswirth and Peter F. Sweeney, **Producing Wrong Data Without Doing Anything Obviously Wrong!**, ACM ASPLOS 2009, pp. 265-276. [Publication](https://research.ibm.com/publications/producing-wrong-data-without-doing-anything-obviously-wrong). | Could setup or execution order bias a claimed improvement? Design controlled comparisons and evaluate setup randomization and repeated independent executions alongside HR-02. |
+
+Search GDC for frame timing and presentation experience, ECRTS for scheduling
+latency, ISMM/ASPLOS for measurement methodology, Transactions on Networking for
+timer-queue structures, and OSDI for clock behavior in systems environments.
+[Real-Time Systems](https://link.springer.com/journal/11241/aims-and-scope) is an
+additional journal to screen for scheduling and timing analysis; no specific
+article from it has been selected yet. Record the scope/date of each archive
+search and add only papers relevant to a concrete Ludus question.
+
+### Review and trial records
+
+Use **Queued**, **Reading**, **Reviewed**, **Trial planned**, **Trial complete**,
+**Adopted**, **Deferred** or **Rejected**. Update each source's status as work
+advances. A metadata or abstract screen is not a full review; a proposed
+experiment is not a measured gain.
+
+For each completed review or trial, record:
+
+1. Source ID, review date and exact sections/pages or talk timestamps consulted.
+2. The relevant idea, assumptions, evidence and limitations, and the difference
+   from the current Ludus contract; distinguish inspiration from adapted code.
+3. A testable hypothesis, affected owner/module and bounded prototype.
+4. Baseline revision, supported backend/toolchain, workload, seeds where relevant
+   and reproduction commands; keep generated captures in ignored `out/`.
+5. Before/after results: clock-read cost and uncertainty, wake-up lateness and
+   frame interval distributions, CPU/power cost where measurable, allocations
+   and queue bounds as relevant. Include overload, interruption, lifecycle,
+   overflow/regression and determinism checks for the affected behavior.
+6. Adopt/defer/reject decision and rationale, with links to evidence, the PR and
+   any architecture/ADR changes. Credit consulted sources near affected code.
+
+Retain exception-free APIs, allocation-free timer values, explicit failure and
+separate CPU/simulation/presentation domains in every trial. Backend replacement,
+raw TSC, smoothing, spinning or a more complex queue requires relevant
+measurements and an explicit contract review before adoption.

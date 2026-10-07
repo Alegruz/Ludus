@@ -662,6 +662,13 @@ partial failures, reload overlap, dependency lifetime, queue exhaustion, and
 retirement. Benchmark cold and warm loads, frame impact, memory peaks, and cache
 churn before claiming optimization.
 
+Implement and validate this initial architecture before evaluating the additional
+conference and journal sources in the
+[follow-up research plan](resource-management-reference-review.md#research-after-the-initial-implementation).
+Capture a reproducible baseline first, then review and test focused improvements
+against it. The shortlist adds no prerequisites to the initial implementation;
+its hypotheses do not change the identity, lifetime, or publication contracts.
+
 Implementation files must carry nearby reference comments thanking consulted
 authors, identifying the exact work and relevant chapter/pages, and explaining
 the adopted idea and significant departures. Include stable URLs when available

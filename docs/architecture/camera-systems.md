@@ -57,19 +57,19 @@ as a modern engine API.
   implementation files, identifying the author, exact work, section/pages, adopted
   idea and significant departures. The [reference review](camera-systems-gems-review.md)
   supplies the consulted sources; it supplements those comments.
-- [FoundationMath](../../modules/foundation/math/README.md) fixes right-handed
+- [FoundationMath](../modules/foundation/math.md) fixes right-handed
   coordinates, +Y up, camera forward -Z, column vectors, radians, reverse-Z
   `[0, 1]` depth and top-left physical framebuffer pixels.
 - [Frame updates](frame-update.md) already separate fixed gameplay ticks from
   interpolated presentation. Camera code must not write presentation values back
   into the world.
-- [world_demo](../../apps/world_demo/README.md) already extracts an authored 2D
+- [world_demo](../examples/world-demo.md) already extracts an authored 2D
   camera center, full vertical extent and minimum visible width into a value
   frame. Preserve that behavior as the first integration consumer.
-- [GameplayWorld](../../modules/gameplay/world/README.md) supplies checked entity
+- [GameplayWorld](../modules/gameplay/world.md) supplies checked entity
   identity and typed pools. Target lookup and shot requests stay in the game;
   camera evaluators receive borrowed values for the duration of one call.
-- The [current RHI](../../modules/graphics/rhi/README.md) provides a bounded
+- The [current RHI](../modules/graphics/rhi.md) provides a bounded
   rendering slice. General scene rendering, depth attachments, temporal history
   and the broader [RHI and GDI proposal](rhi-gdi.md) are separate work.
 - [Curves and surfaces](curves-surfaces.md) has implemented Math kernels but
@@ -791,6 +791,13 @@ of unimplemented extension interfaces at phase zero.
 | C3 | Impulses/comfort, group framing and transactional live parameters | Effects independent of gameplay, no accumulated drift, capacities, final effect safety and editor error feedback |
 | C4 | Prepared rail and cinematic track adapter | Constant-distance travel, quaternion continuity limits, cuts/seeks/loops and immutable revision lifetime |
 | C5 | Optional shot-quality search and renderer temporal integration | Stable automatic selection, query accounting, split-screen/history isolation and actual temporal image tests |
+
+Implement and validate this initial architecture first, preserving the scope and
+conditional features of these phases. Record its delivered revision, fixtures,
+tuning and measurements as the baseline. Then use the
+[conference and journal research backlog](camera-systems-gems-review.md#conference-and-journal-research-backlog)
+for a separate improvement pass with reviewed sources and measured comparisons.
+The reference review owns that queue and its experiment/decision records.
 
 Basic reverse-Z rendering belongs in the appropriate graphics slice; camera unit
 tests can validate matrices before that slice exists. General scene rendering

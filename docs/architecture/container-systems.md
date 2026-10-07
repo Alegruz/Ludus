@@ -235,6 +235,7 @@ below determine which increments can proceed independently.
 | M8 | `HashMap` and consumer-required `HashSet` | Gated | Compare a scalar flat table with grouped-control alternatives on a named mutable-lookup workload. Select and implement one algorithm, reuse FoundationHash, and migrate the consumer. Collision/deletion/rehash models, bounded probing and allocation-failure rollback pass; record native/Wasm results. |
 | M9 | Typed handles and `SlotMap<T>` | Gated | Establish owner/cross-instance identity, generation exhaustion and subsystem ABI semantics first. Extract a reusable dense-value primitive with reverse indices; verify stale/foreign handles, removal, clear, move and multi-allocation rollback against a model. |
 | M10 | `SparseSet<T>` extraction | Gated | Demonstrate reusable storage logic in World or another bounded-ID consumer. Extract membership/dense storage while retaining ECS policy in World; verify ID bounds, back-links, swap removal, failure preservation and sparse-address-space memory costs. |
+| M11 | Research and measured improvements after the initial implementation | Planned; initial baseline required | Review the queued conference/journal sources below, record testable hypotheses, and trial promising alternatives against the validated initial implementation. Record adopt/defer/reject decisions with correctness, allocation, memory, performance and portability evidence. |
 
 M1 should land in reviewable consumer increments: Text and its OOM paths first,
 then GameHost protocol/session storage and Audio Gym, followed by remaining
@@ -273,6 +274,73 @@ consumer-driven contract extensions; none is required to declare M0 implemented.
 and virtual-memory storage remain a conditional backlog. Each needs a named
 consumer and its own lifetime/ownership contract plus measured benefit before
 receiving an implementation milestone.
+
+### Research after the initial implementation
+
+Recorded **2026-10-06**. Implement and validate the initial architecture through
+the applicable M1-M10 delivery gates first, then begin M11's broader reading and
+improvement pass. Consumer-gated milestones require either a selected consumer
+and completed deliverable or an explicit deferral with its reason; the
+conditional backlog does not need implementation to establish the baseline.
+Record the baseline revision, completed/deferred scope, consumer workloads and
+measurements before comparing research prototypes with it.
+
+The algorithm-selection measurements and source checks already required by the
+initial milestones remain part of their implementation. In particular, M8 still
+compares scalar and grouped-control candidates before selecting its initial
+hash table. M11 schedules later optimization and reconsideration of those
+choices; it does not postpone existing correctness, ownership or measurement
+gates.
+
+Prioritize **CppCon** for practical C++ implementation and benchmarking talks,
+**ACM Journal of Experimental Algorithmics** for measured data-structure
+comparisons, and **Software: Practice and Experience** for implementation
+studies. Screen **FOCS** selectively for hashing research that addresses a
+measured problem. The older sparse-set paper below is a specific foundational
+reading from *ACM Letters on Programming Languages and Systems*, rather than a
+recommendation about an upcoming event or current journal schedule.
+
+These venue priorities and experiments are Ludus's research plan. Source
+metadata, talk descriptions and available abstracts were screened when making
+the shortlist; the full talks/papers remain queued. This list does not claim
+that their algorithms have been adopted or that their reported gains transfer
+to Ludus.
+
+Read CR-01, CR-02 and CR-03 first, then select the remaining readings by the
+consumer's measured bottleneck. Milestone labels identify the affected initial
+design; they do not move these trials ahead of the baseline.
+
+| ID | Source and attribution | Full-review status | Question and possible experiment after review |
+| --- | --- | --- | --- |
+| CR-01 | Chandler Carruth, **Tuning C++: Benchmarks, and CPUs, and Compilers! Oh My!**, CppCon 2015. [Official recording](https://www.youtube.com/watch?v=nXaxk27zwlk) | Queued; talk description screened | Across milestones: are compiler transformations or the harness obscuring the consumer's costs? Review benchmark setup, distinguish dependent lookup latency from independent throughput, and compare warm/cold access and retained/rebuilt storage with reproducible inputs. |
+| CR-02 | Pablo Halpern, **Allocators: The Good Parts**, CppCon 2017. [Official recording](https://www.youtube.com/watch?v=v3dz-AKOVL8) | Queued; talk description screened | M6: which allocator ownership and propagation ideas improve our domain integration? Compare domain retention and explicit fallible cross-domain copies, exercise copy/move/swap and nested owners, and measure allocation count, backing bytes and owner size. Retain Ludus's explicit failure protocol. |
+| CR-03 | Matt Kulukundis, **Designing a Fast, Efficient, Cache-friendly Hash Table, Step by Step**, CppCon 2017. [Official recording](https://www.youtube.com/watch?v=ncHmEUmJZf4) | Queued; talk description screened | M8: would a different probing/control layout improve the selected baseline? Compare scalar and grouped-control candidates using mixed hits/misses, deletion churn, collisions, different key/value sizes and native/Wasm targets; include memory and rehash costs. |
+| CR-04 | Paul-Virak Khuong and Pat Morin, **Array Layouts for Comparison-Based Searching**, *ACM Journal of Experimental Algorithmics* 22(1), article 1.3, 2017. [Author version](https://arxiv.org/abs/1509.05053); [DOI](https://doi.org/10.1145/3053370) | Queued; metadata/abstract screened | SortedMap/M7: does a different search layout help an immutable, read-heavy consumer? Compare binary search with Eytzinger or other reviewed layouts, including construction and cache behavior. Account for sorted contiguous iteration and mutation contracts before proposing a separate index or a representation change. |
+| CR-05 | Preston Briggs and Linda Torczon, **An Efficient Representation for Sparse Sets**, *ACM Letters on Programming Languages and Systems* 2(1-4), pp.59-69, 1993. [DOI](https://doi.org/10.1145/176454.176484) | Queued; bibliographic metadata verified | M10: how do ID range, occupancy and clear/iteration frequency affect the initial dense/sparse representation? Compare membership, insertion, swap removal and reset costs across bounded dense and sparse ID distributions; measure sparse metadata bytes and preserve World ownership policy. |
+| CR-06 | Samy Chambi, Daniel Lemire, Owen Kaser and Robert Godin, **Better Bitmap Performance with Roaring Bitmaps**, *Software: Practice and Experience* 46(5), pp.709-719, 2016. [Author version](https://arxiv.org/abs/1402.6407); [DOI](https://doi.org/10.1002/spe.2325) | Queued; metadata/abstract screened | M5/M10: does a large sparse membership consumer justify a compressed representation? Compare dense BitSet storage with reviewed sparse/compressed alternatives across occupancy, clustering, intersection and mutation workloads. Small bounded flags retain their existing consumer contract. |
+| CR-07 | Michael A. Bender, Bradley C. Kuszmaul and William Kuszmaul, **Linear Probing Revisited: Tombstones Mark the Demise of Primary Clustering**, FOCS 2021, pp.1171-1182. [DOI](https://doi.org/10.1109/FOCS52979.2021.00115); [Author preprint](https://arxiv.org/abs/2107.01250), titled **Linear Probing Revisited: Tombstones Mark the Death of Primary Clustering** | Queued; metadata/abstract screened | M8: can a reviewed deletion/tombstone policy reduce churn costs without unacceptable memory or rebuild work? Trial load-factor and deletion sequences against the initial policy; measure probe lengths, insertion/lookup costs and rebuild frequency. Record the paper's hashing/model assumptions before applying any theoretical bound. |
+
+For each completed review, record the source ID, date, exact pages/sections or
+talk timestamps, relevant idea and assumptions, and a testable consumer-specific
+hypothesis. Distinguish design inspiration from adapted code. A review may
+justify deferring or rejecting an idea without a prototype.
+
+For each trial, use the existing verification gates and append a dated result
+to the [container evidence](../development/container-systems-evidence.md) with
+the baseline/prototype revisions, commands, seeds, toolchain, hardware/backend,
+operation mix and source ID. Record lookup/mutation timings, allocations,
+backing/metadata bytes and relevant consumer effects, including regressions and
+negative results. Retain the first increment's historical evidence unchanged;
+keep generated captures in ignored `out/`.
+
+Advance entries through **Queued**, **Reading**, **Reviewed**, **Trial planned**,
+**Trial complete**, and **Adopted**, **Deferred** or **Rejected**. An adoption
+needs a measured consumer benefit and unchanged or explicitly revised failure,
+lifetime, ordering, portability and SDK contracts. Update this architecture and
+the owning API documentation with any accepted change, and acknowledge the
+consulted source near affected code. Native/Wasm validation, exception-free
+errors and public-header build budgets remain requirements. No source in this
+new queue has a completed trial or adoption record yet.
 
 ### Completion and evidence
 

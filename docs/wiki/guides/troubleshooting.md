@@ -29,5 +29,5 @@ personal information from attached logs.
 
 Use [GitHub issues](https://github.com/Alegruz/Ludus/issues) for actionable reports.
 For build-tool checks in an engine checkout, `./scripts/doctor` reports the tool
-environment. See [project setup](project-setup.md) and
+environment. See [project setup](../../development/project-sdk-workflow.md) and
 [build/debug guidance](build-and-debug.md) for targeted recovery.

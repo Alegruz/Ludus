@@ -99,7 +99,7 @@ Packaging validates dependency closure and source decode, stages immutable
 revisions, rechecks inputs and atomically publishes the current manifest. It
 does not silently save a dirty editor draft or substitute a running preview.
 For a task-oriented walkthrough, use [audio workflow](../guides/audio.md) and
-[game packaging](../guides/releases.md).
+[game packaging](../../development/editor-game-releases.md).
 
 The [implementation evidence](../../development/audio-content-evidence.md)
 records delivered C0–C5 slices, bounds and remaining acceptance gates. The

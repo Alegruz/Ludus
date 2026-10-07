@@ -66,7 +66,7 @@ in ignored local settings. Editor and CLI use the same project policy.
 Qt remains optional and outside the installed engine SDK. The workspace shell
 and current controllers exist; later scene/document editing stages in the editor
 design remain acceptance contracts. Use [current capabilities](../getting-started/status.md)
-and [editor workflow](../guides/editor.md) to determine available operations.
+and [editor workflow](../../development/editor-workspace.md) to determine available operations.
 
 Read the [editor ownership design](../../architecture/editor-architecture.md)
 and [project/SDK contract](../../architecture/project-sdk-workflow.md).

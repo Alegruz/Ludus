@@ -1,6 +1,8 @@
 # Profiling Subsystem — Final Architecture (Reconciled)
 
-> Status: **Final architecture decision.** This document supersedes the independent
+> Status: **Reconciled design and staged implementation contract.**
+> [Current module usage](../modules/foundation/profiling.md) records the delivered
+> CPU tracing scope; later phases below are proposals. This document supersedes the independent
 > [baseline](profiling.md) after deliberate reconciliation against the
 > [historical literature review](profiling-literature-review.md) (Rabin, Evertt,
 > Hjelstrom & Garrabrant, Lung). The baseline was treated as a proposal to be
@@ -80,7 +82,7 @@ capture, narrowing the reason to build engine code to *semantic context tools ca
 | D11 | Statistics as off-line derivation (§1, §11, §16) | **Refine (C6)** **[R→adopt]** | Add hard rule: every statistic names its window + denominator; smoothed UI is separate from exact hitch evidence; no decaying extrema masquerading as min/max. |
 | D12 | Clock = `steady_clock` ns now; `rdtscp` later behind an abstraction (§5) | **Keep, elevate to gate (C7)** **[FP+R]** | Review §3.4/§4.2 dismantles raw-tick+MHz calibration. Correctness (ordering, frequency contract, migration) is a *precondition* for any TSC backend, not an optimization detail. |
 | D13 | Same-thread scope pairing "enforced by RAII lexical scope" (§4) | **Replace (C5)** **[R→adopt]** | Factually wrong for coroutines/migration (review §7.2). Replace with an explicit contract + flow events for cross-context work. |
-| D14 | GPU trace design, build later (§9) | **Keep / Postpone** **[FP+R]** | No RHI exists. Review §4.4 adds: a CPU scope around a graphics call measures CPU elapsed incl. waits, *not* GPU execution — reinforces that GPU needs its own timestamp path. Keep design; still postponed. |
+| D14 | GPU trace design, build later (§9) | **Keep / Postpone** **[FP+R]** | GPU timestamp integration is not delivered by the CPU trace module. Review §4.4 adds: a CPU scope around a graphics call measures CPU elapsed incl. waits, *not* GPU execution — reinforces that GPU needs its own timestamp path. Keep design; still postponed. |
 | D15 | Memory profiling deferred, tiered, allocator-owned (§10) | **Refine (C4)** **[R→adopt]** | Keep deferral and tiers; **correct** the "feeds the same capture infrastructure" wording — memory needs provenance-at-free and its own loss/snapshot contract, not Trace's drop policy. |
 | D16 | `JobId` field reserved now, correlation logic later (§7) | **Keep** **[FP+R]** | Review §7.2 confirms cross-thread/task correlation "must be modeled separately"; a reserved field + flow events is the right seam. |
 | D17 | Dynamic-name runtime interner, opt-in, bounded (§14) | **Keep** **[FP]** | Uncontroversial; the references' dynamic naming needs are covered. |

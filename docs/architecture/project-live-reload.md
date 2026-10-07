@@ -1,7 +1,9 @@
 # Loading projects and editing games during play
 
 Design baseline: 2026-10-02, main `3fadacecd4c3856e0456341ea05507459d479a38`.
-This package defines implementation work; it introduces no runtime code.
+This records the design and original implementation sequence. Current usage and
+delivered limits are in [the live-editing guide](../development/project-live-reload.md)
+and [validation evidence](../development/project-live-reload-evidence.md).
 The normative contracts are [requirements](../../.kiro/specs/project-live-reload/requirements.md),
 [design](../../.kiro/specs/project-live-reload/design.md) and
 [tasks](../../.kiro/specs/project-live-reload/tasks.md). Read the

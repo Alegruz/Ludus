@@ -174,3 +174,74 @@ normal/investigative overhead. Table capacity, capture duration, stack capabilit
 provider cadence and backend choice remain measurements to make during delivery.
 The proposal is suitable for implementation review; it is not a claim of shipped
 features, complete process coverage, or verified performance.
+
+## Research follow-up after the initial implementation
+
+**Status:** Deferred research shortlist, recorded 2026-10-06. Implement and
+validate the initial [delivery phases](memory-profiling.md#validation-and-delivery)
+first, including the provider integrations needed by demonstrated consumers.
+Retain the initial correctness and performance gates during that implementation.
+Then use its artifacts and workload measurements to identify improvements worth
+investigating through the sources below.
+
+Primary publication pages, abstracts, selected paper excerpts and the LLVM talk
+abstract were inspected to verify this shortlist. Full-paper reviews, recordings,
+implementation audits and reproductions remain future work. These candidates
+are separate from the completed chapter reading above; their techniques have
+not been adopted into the initial architecture or measured in Ludus.
+
+### Conferences and journals to revisit
+
+Prioritize [ISMM](https://www.sigplan.org/Conferences/ISMM/) for allocation and
+access behavior, PLDI/OOPSLA for dynamic analysis and profiling implementation,
+and ASPLOS for architecture effects and performance evaluation. USENIX OSDI/ATC
+and the LLVM Developers' Meeting supply complementary systems and tooling
+experience. The papers and talk below anchor those recommendations.
+
+For journals, prioritize **Proceedings of the ACM on Programming Languages
+(PACMPL)**, especially its OOPSLA issues, starting with PROMPT below. Also revisit
+**ACM Transactions on Architecture and Code Optimization (TACO)** for profiling,
+locality and hardware/software measurement work. David Kaeli's
+[description of TACO's scope](https://www.sigarch.org/acm-taco-a-high-quality-venue-targeting-computer-architecture-and-compiler-research/)
+is a venue-selection reference; individual papers still need review before any
+design change.
+
+### Candidate reading and investigation questions
+
+Thanks to the authors below for making these research directions available.
+The questions are proposed Ludus investigations, not conclusions established
+by the preliminary source inspection.
+
+| Candidate and primary source | Venue | Question for the implemented Ludus system |
+| --- | --- | --- |
+| Stuart Byma and James R. Larus, [Detailed Heap Profiling](https://doi.org/10.1145/3210563.3210564), 2018 ([author PDF](https://infoscience.epfl.ch/server/api/core/bitstreams/58115553-3df7-4ffd-b879-5ef3407df66a/content)) | ISMM | Which Memoro diagnostics for repeated growth, allocation churn and retained storage can our sealed allocation history support? Which require separate read/write instrumentation? |
+| Thierry Treyer, [Memoro: Scaling an LLVM-based Heap Profiler](https://llvm.org/devmtg/2019-10/talk-abstracts.html), 2019 | LLVM Developers' Meeting | Where do recorder metadata, contention and data collection become impractical on large workloads, and how should we measure and bound those costs? |
+| Charlie Curtsinger and Emery D. Berger, [Stabilizer: Statistically Sound Performance Evaluation](https://doi.org/10.1145/2451116.2451141), 2013 ([author PDF](https://people.cs.umass.edu/~emery/pubs/stabilizer-asplos13-draft.pdf)) | ASPLOS | How can layout effects and experimental noise confound our overhead gate, and what evidence is needed to distinguish a small regression from noise? |
+| Ziyang Xu, Yebin Chon, Yian Su, Zujun Tan, Sotiris Apostolakis, Simone Campanoni and David I. August, [PROMPT: A Fast and Extensible Memory Profiling Framework](https://research.google/pubs/prompt-a-fast-and-extensible-memory-profiling-framework/), 2024 ([DOI](https://doi.org/10.1145/3649827)) | PACMPL 8, OOPSLA1, article 110 | Can we reduce profiling work to the evidence a report needs while preserving our coverage, ordering, baseline and loss contracts? |
+| Gene Novark, Emery D. Berger and Benjamin G. Zorn, [Efficiently and Precisely Locating Memory Leaks and Bloat](https://www.microsoft.com/en-us/research/publication/efficiently-precisely-locating-memory-leaks-bloat/), 2009 | PLDI | What additional evidence would improve survivor diagnostics, and which assumptions separate sampled staleness from our explicit owner-lifetime expectations? |
+| Emery D. Berger, Sam Stern and Juan Altmayer Pizzorno, [Triangulating Python Performance Issues with Scalene](https://www.usenix.org/conference/osdi23/presentation/berger), 2023 | USENIX OSDI | Can sampling and copy-volume attribution help explain costly buffer growth or CPU/GPU transfers without weakening exact covered allocation accounting? |
+| Renaud Lachaize, Baptiste Lepers and Vivien Quéma, [MemProf: A Memory Profiler for NUMA Multicore Systems](https://www.usenix.org/conference/atc12/technical-sessions/presentation/lachaize), 2012 | USENIX ATC | When measurements identify a locality problem, would correlating threads, objects and memory accesses explain performance beyond allocation counts? |
+
+Start with Detailed Heap Profiling, the Memoro scaling talk, Stabilizer and
+PROMPT, then select the other sources according to observed problems. Memoro's
+access measurements require additional instrumentation; Scalene depends on
+Python/runtime integration; Hound uses specialized heap organization; MemProf
+targets NUMA access behavior. Evaluate those assumptions against Ludus before
+transferring an algorithm or an overhead claim.
+
+### Evidence required for a follow-up change
+
+1. Identify a concrete report limitation or measured workload problem in the
+   initial implementation, with a retained capture or reproducible benchmark.
+2. Read the relevant full paper or watch the talk; record the sections consulted,
+   assumptions, adopted ideas and departures in this review.
+3. Compare a bounded experiment against the initial implementation using the same
+   representative workloads. Report accuracy, loss, coverage, tooling bytes,
+   median/tail latency and frame time as applicable.
+4. Update the architecture only when the experiment justifies a change, preserve
+   the explicit ownership and failure contracts, and credit adopted sources near
+   the affected implementation.
+
+Keep this follow-up evidence in the canonical documents. Research frameworks,
+custom heap organization, access instrumentation, sampled stacks and new viewers
+remain separate decisions requiring a demonstrated consumer and measurements.

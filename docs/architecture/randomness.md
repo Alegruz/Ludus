@@ -90,11 +90,11 @@ flowchart TD
 
 Extend `Ludus::FoundationMath`; do not create a separate FoundationRandom module
 or lifecycle-managed `RandomSystem`. The existing opt-in `random.hpp` remains
-small. Add `random_address.hpp` for key/address value types and non-template
-Philox functions, and `random_sampling.hpp` only when the first additional
-sampler ships. Implement algorithms in corresponding `.cpp` files. Private
-helpers live under `src/internal/`; no third-party type leaks into installed
-headers. Base never includes any of these headers.
+small. The shipped `addressed_random.hpp` provides key/address value types and
+non-template Philox functions. Add `random_sampling.hpp` only when the first
+additional sampler ships. Implement algorithms in corresponding `.cpp` files.
+Private helpers live under `src/internal/`; no third-party type leaks into
+installed headers. Base never includes any of these headers.
 
 All hot operations are allocation-free and `noexcept`. Invalid arguments return
 `MathStatus` and leave outputs unchanged. Validate before advancing a stream.
@@ -563,20 +563,78 @@ the compatibility path. See
 
 ## Delivery plan and alternatives
 
-1. **Freeze the integration contract.** Inventory current consumers and authored
-   policies; pin existing PCG behavior and provenance, define stable domains and
-   replay manifest, and add consumer-level isolation/checkpoint regressions. Keep
-   the current API and module dependency graph.
-2. **Add one addressed consumer.** Implement/reference-check scalar Philox,
-   derivation and address packing, then integrate a procedural or parallel event
-   consumer. Prove job-order independence and overflow/failure semantics on native
-   and web before advertising portable results.
-3. **Add demonstrated sampling needs.** Implement multiply-high addressed bounds,
-   small integer weighted selection, and whichever probability/shuffle/profile
-   the consumer requires. Add policy state/debug tools with the game owner. Do
-   not ship every optional sampler in this document preemptively.
-4. **Measure and specialize.** Add cooked alias, SIMD blocks, GPU code, or an
-   alternate generator only after workload evidence and compatibility review.
+Implement the initial architecture before evaluating the later research below.
+The PCG32 v1 and addressed Philox primitives are the starting point; their
+reference, boundary, rejection-budget, allocation and worker-order fixtures,
+installed-SDK checks and representative WebAssembly corpus are already in the
+repository. A real game/world consumer and its persistence protocol remain to
+be delivered.
+
+### Remaining initial implementation
+
+| Work | Owner | Required result |
+| --- | --- | --- |
+| Stable integration contract and one addressed consumer | Game/world and content | Inventory existing consumers; assign persistent domain/dimension meanings and scope identities; define event commit/exhaustion rules; integrate a procedural or parallel gameplay consumer with scheduling and presentation isolation regressions. |
+| Named sequential setup helper | FoundationMath | Implement the domain-key/scope PCG seeding convention from [stable keys](#stable-keys-domains-and-identities) with golden answers; preserve existing explicit seed schemes and PCG v1 behavior. |
+| State codec and replay compatibility | Serialization and game/world | Encode the explicit 20-byte little-endian PCG payload; validate owner identity, lengths and RNG/content manifests before atomic restore; checkpoint streams, policy state, event counters and identity allocators; include them in canonical hashes and test rollback/reload incompatibility. |
+| Procedural persistence | Game/world and content | Persist generation recipes/revisions and stable nested identities; save mutations as overrides; retain, migrate or clearly reject unsupported recipes. |
+| Required samplers | FoundationMath and content cooker | Begin with small integer cumulative weighted selection; add probability, shuffle or spread functions only when the selected consumer needs them, with versioned consumption, checked arithmetic and failure-preservation tests. |
+| Authored policies and planning models | Game/domain and tools | Persist the required bag/no-repeat/pity/cooldown or decision state; let planners read the same immutable outcome model without advancing live RNG; isolate rollout domains. |
+| Optional automatic seed acquisition | Platform and application setup | Add checked OS/browser secure bytes when automatic seeds are required; acquire and record one root seed; report failure without an implicit fallback. Explicit deterministic seeds remain valid. |
+| Observation and qualification | Runtime/tools and validation tooling | Add bounded logical-context tracing and per-owner raw-draw counts where needed; complete consumer save/isolation regressions, native/web acceptance and offline statistical qualification; record representative performance baselines before optimization. |
+
+Deliver this work in the following order:
+
+1. **Freeze the integration contract and integrate one addressed consumer.**
+   Define stable domains, identities and replay compatibility metadata with its
+   owner. Exercise job reordering, different worker/chunk counts, cosmetic draws,
+   rendering/audio changes, counter exhaustion and output preservation.
+2. **Complete setup and persistence.** Add the sequential setup convention and
+   explicit state codec, then verify checkpoints, procedural recipes, atomic
+   restore and compatible reload for that consumer.
+3. **Add demonstrated sampling and policy needs.** Start with the smallest
+   adequate integer weighted selector, then implement the consumer's required
+   probability/shuffle/profile and saved policy state. Add seed acquisition and
+   observation adapters when that workflow requires them.
+4. **Qualify the initial implementation.** Apply the
+   [validation gates](#validation-and-performance-gates) to the delivered scope,
+   including offline statistical tests and a reproducible workload baseline.
+   Include Doxygen contracts, canonical usage documentation and native/web
+   evidence in each feature change. Record deliberate deferrals explicitly;
+   unused optional samplers are not prerequisites for the first consumer.
+
+### Research after the initial implementation
+
+Use the initial implementation and its recorded workload/quality baseline to
+evaluate improvements. This is a reading backlog: bibliographic details and
+abstracts were checked, but a detailed algorithm review and Ludus experiments
+remain future work. It supplements the completed [Gems review](randomness-gems-review.md)
+without changing the existing generator or replay contracts.
+
+| Venue | Recommended source | Question for Ludus |
+| --- | --- | --- |
+| Winter Simulation Conference (WSC) | Pierre L'Ecuyer, Olivier Nadeau-Chamard, Yi-Fan Chen and Justin Lebar, [Multiple Streams with Recurrence-Based, Counter-Based, and Splittable Random Number Generators](https://informs-sim.org/wsc21papers/110.pdf), WSC 2021, especially sections 3, 5 and 6 | Do our key/seed conventions and interleaved domain/scope/lane qualification patterns cover the risks of multiple streams and counter-based sampling? |
+| ACM Transactions on Mathematical Software (TOMS) | Pierre L'Ecuyer and Richard Simard, [TestU01: A C Library for Empirical Testing of Random Number Generators](https://doi.org/10.1145/1268776.1268777), 33(4), article 22, 2007 | How should we expand qualification of actual Ludus output patterns and report data volume, individual test results and reproducible failures? |
+| ACM TOMS | Lorenz Hübschle-Schneider and Peter Sanders, [Parallel Weighted Random Sampling](https://doi.org/10.1145/3549934), 48(3), article 29, 2022; [author preprint](https://arxiv.org/abs/1903.00227) | When do cooked alias construction, replacement semantics or parallel reservoir algorithms improve a demonstrated weighted workload? |
+| ACM Transactions on Modeling and Computer Simulation (TOMACS) | Daniel Lemire, [Fast Random Integer Generation in an Interval](https://doi.org/10.1145/3230636), 29(1), article 3, 2019 | The addressed mapper already adopts this work. Use it as a correctness and benchmark reference when extending bounded mapping and shuffling. |
+| Software: Practice and Experience | Nevin Brackett-Rozinsky and Daniel Lemire, [Batched Ranged Random Integer Generation](https://doi.org/10.1002/spe.3369), 55(1), 2025; [author preprint](https://arxiv.org/abs/2408.06213) | Can a separately versioned batch/shuffle API reduce draw and mapping cost enough to justify its different consumption contract? |
+| SC (high-performance computing conference) | John K. Salmon, Mark A. Moraes, Ron O. Dror and David E. Shaw, [Parallel Random Numbers: As Easy as 1, 2, 3](https://www.thesalmons.org/john/random123/papers/random123sc11.pdf), SC11, 2011 | The current Philox design already adopts this work. Revisit its parallel generation and state-cost analysis for a real SIMD/GPU consumer. |
+| ACM-SIAM Symposium on Discrete Algorithms (SODA) | Thomas L. Draper and Feras A. Saad, [Efficient Online Random Sampling via Randomness Recycling](https://doi.org/10.1137/1.9781611978971.89), SODA 2026, pp. 2473-2511; [author paper](https://www.cs.cmu.edu/~fsaad/assets/papers/2026-DraperEtAl-SODA.pdf) | Does randomness recycling benefit our discrete-sampling workload after accounting for its retained state, checkpoint requirements and consumption changes? |
+
+Start the detailed review with the WSC survey, TestU01 and parallel weighted
+sampling. Treat batching, randomness recycling, cooked alias tables, reservoir
+selection, SIMD blocks, GPU sampling and alternate generators as subsequent
+experiments driven by a real consumer.
+
+For each experiment, pin the source revision, preserve attribution/licensing,
+state the adopted idea and its departures, and compare correctness, allocations,
+state/code size and end-to-end cost with the recorded baseline. Add any new
+cross-domain or nearby-scope statistical tests suggested by the review. Preserve
+PCG v1 and the existing addressed v1 contracts; consumption/state/mapping changes
+need a named, versioned API and compatibility review. Published speedups and
+test results are evidence about the authors' implementations, not Ludus results.
+
+### Alternatives
 
 | Alternative | Assessment |
 | --- | --- |
@@ -588,6 +646,8 @@ the compatibility path. See
 | OS CSPRNG everywhere | Correct source for security and root entropy. Simulation still needs explicit deterministic ownership and stable replay sampling. |
 | Global or automatic thread-local stream | Hidden coupling and schedule-dependent simulation results; excluded. |
 
-The architecture is ready to guide implementation, but runtime additions remain
-proposals. Performance, web parity, GPU parity, and statistical qualification
-remain acceptance work; none is asserted as completed by this design review.
+Core primitives and representative native/WebAssembly fixtures are implemented.
+Game/world integration, broader acceptance evidence, performance baselines, GPU
+parity and statistical qualification remain work for the milestones above.
+Complete the initial implementation before using the research backlog to propose
+measured improvements.

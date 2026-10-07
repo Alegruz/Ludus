@@ -26,15 +26,38 @@ light/dark reading, code-copy controls and source-edit links. Small stylesheet
 overrides establish a professional reading surface without choosing the final
 editor art direction.
 
+## Preview locally
+
+No native build or Qt installation is needed. From the repository root, install
+the pinned documentation tools in a dedicated venv once:
+
 ```bash
 python3 -m venv out/wiki-venv
 out/wiki-venv/bin/python -m pip install -r docs/wiki-requirements.txt
-out/wiki-venv/bin/python scripts/check-docs --fix-index
-out/wiki-venv/bin/python -m mkdocs build --strict
-out/wiki-venv/bin/python scripts/build-api --bootstrap
-out/wiki-venv/bin/python scripts/check-wiki
 out/wiki-venv/bin/python -m mkdocs serve
 ```
+
+Open the local URL printed by MkDocs. The preview reuses generated API pages
+when they exist; regenerate them after changing headers/comments.
+
+## Build and check
+
+```bash
+out/wiki-venv/bin/python scripts/check-docs --fix-index
+out/wiki-venv/bin/python scripts/check-docs
+out/wiki-venv/bin/python -m mkdocs build --strict
+out/wiki-venv/bin/python scripts/build-api --bootstrap
+out/wiki-venv/bin/python scripts/check-wiki --documentation-only
+out/wiki-venv/bin/python scripts/package-docs
+```
+
+Run Doxygen after the initial MkDocs build. `--bootstrap` explicitly downloads
+its pinned Linux x64 executable. On another host supply the pinned version with
+`--doxygen /path/to/doxygen`; see [API documentation](api-reference.md).
+The documentation check validates the site without the separate editor application.
+For the complete application/site artifact, follow [the browser editor build](browser-editor.md)
+and run `scripts/check-wiki` after adding its validated payload. Publication does
+that full check in CI.
 
 ## Deployment contract
 
@@ -109,6 +132,16 @@ their stated scope.
 
 ## Author once
 
+Lead with the reader's goal and supported environment. Give working steps, the
+expected result, a recovery path and links to the owner of deeper contracts.
+Module, sample and tool READMEs are short links to their documentation owners
+under `docs/`; their instructions are published and bundled from those files.
+`check-docs` rejects separate README guides, broken local links/anchors and setup
+examples that the actual launcher grammar rejects, without running setup.
+The document index groups usage guides, designs, decisions, reviews, plans and
+validation records so readers can distinguish instructions from historical scope.
+
+
 Find and update the existing document that owns a topic. Guides may lead readers
 to detailed design contracts; link to those contracts instead of repeating them.
 Do not create a separate wiki version of a document already in `docs/`. The
@@ -125,7 +158,7 @@ reading requires the engine checkout. External papers remain citations.
 After adding, deleting or renaming a page, run:
 
 ```bash
-python3 scripts/check-docs --fix-index
+out/wiki-venv/bin/python scripts/check-docs --fix-index
 ```
 
 Commit the updated navigation index alongside the source. CI checks the index,
@@ -168,6 +201,17 @@ tool installation and `build-api --bootstrap` need internet unless tools and
 dependencies have already been supplied. A transferred prebuilt bundle needs
 neither. API contracts are extracted from header comments into the same site;
 the Markdown sources remain the authored prose, not a second API inventory.
+
+## Site credits
+
+
+The documentation layout uses [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/)
+by Martin Donath. The distributed theme retains its
+[MIT license](../wiki/assets/material-license.txt), the
+[Material Design icon notice](../wiki/assets/material-icons-license.txt), and the
+[Font Awesome notices](../wiki/assets/fontawesome-license.txt). Generated JavaScript
+and source maps retain their upstream notices. The Ludus mark and small theme
+overrides are authored in this repository.
 
 ## Consulted implementation references
 

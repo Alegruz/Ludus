@@ -1,11 +1,174 @@
 # Building Ludus
 
+Build this checkout to develop the engine or produce an installed SDK. For a
+game project, use [the independent-project workflow](project-sdk-workflow.md).
+All commands below run from the Ludus repository root.
+
+## One-command onboarding
+
+
+```bash
+git clone https://github.com/Alegruz/Ludus.git
+cd Ludus
+./init.sh
+```
+
+On an interactive desktop, that command opens a graphical setup window. Choose
+Engine contributor (all native presets), Application developer (one native
+preset), Browser developer (one Emscripten preset), or Full validation, then
+review the preset and optional tools before pressing **Initialize**. Closing or
+cancelling the window runs no setup actions. Setup progress and any sudo password
+prompt appear in the launching terminal after the window closes.
+
+The default Engine contributor workflow prepares system prerequisites,
+project-managed CMake/Ninja/Conan, and Conan dependency files for all native
+presets. It does not configure or build Ludus engine targets by default. Use the
+VS Code CMake extension or the command-line scripts when you want to
+configure/build. Browser setup installs its separate pinned toolchain and
+configures the selected browser preset.
+
+Use `--cli` for terminal setup. CI, redirected input/output, and headless Linux
+sessions automatically use the CLI. The GUI uses Python's optional Tkinter
+module (`sudo apt-get install python3-tk` on Ubuntu); if Tk or a desktop display
+is unavailable, default setup falls back to the CLI. `--gui` requires a window
+and reports an error before setup if it cannot open one. Both interfaces share
+the same setup code and flags; these options also work through `scripts/init`
+and the PowerShell wrappers. Those wrappers do not establish a native Windows
+port; supported native hosts and limits are described below.
+
+```bash
+./init.sh --cli                                      # existing terminal workflow
+./init.sh --cli --persona application                # one native development preset
+./init.sh --cli --persona browser                    # browser development tools
+./init.sh --cli --persona validation                 # complete native validation
+./init.sh --gui --with-rad-debugger                   # review optional debugger setup
+./init.sh --cli --with-editor                        # Qt prerequisites + native editor build
+./init.sh --cli --no-editor                          # omit optional editor setup (default)
+```
+
+`--persona` supplies defaults; an explicit preset and scope flags override those
+defaults. Full validation prepares all native presets even when `--preset-only`
+is supplied. Tests are excluded by default: `--with-tests` enables native test
+targets and Catch2 dependencies for later builds, while `--run-tests` also builds
+and executes them during setup. `--validate`, the Full validation workflow, and
+`--ci` explicitly opt into tests as part of validation. They reject `--no-tests`.
+
+| Workflow | Tests | Sample applications | Browser probes | Editor / RAD |
+| --- | --- | --- | --- | --- |
+| Engine contributor | Off | On | Off | Off |
+| Application developer | Off | Off | Off | Off |
+| Browser developer | Off | On | Off | Off |
+| Full validation | On, executed | On | Off | Off |
+
+Use `--with-smoke-app` / `--no-smoke-app` to select the smoke app and native input
+demo, and `--with-web-probes` / `--no-web-probes` for browser feasibility probes.
+`--with-shader-probe` / `--no-shader-probe` controls the isolated native shader
+probe (off by default); it requires its separate pinned shader tools. Required engine
+modules and the native diagnostics helper remain available for applications and
+the editor. Browser presets reject native tests, RAD, editor setup,
+`--all-presets`, `--validate`, and `--ci`.
+
+```bash
+./init.sh --cli --persona application                # engine libraries, no samples/tests/editor
+./init.sh --cli --with-tests --preset-only            # include tests in future builds; do not execute
+./init.sh --cli --run-tests --preset-only             # build and run tests now
+./init.sh --cli --persona browser --with-web-probes   # opt into browser probes
+```
+
+Selections are saved locally under `out/init/options.json` for the prepared
+presets and apply to subsequent CLI, direct CMake preset, and VS Code builds.
+Reinitialize to change them. `--no-editor` also disables the editor for those
+presets. Custom CMake users can bypass saved choices with
+`-DLUDUS_USE_INIT_OPTIONS=OFF` and set their own target options. Existing checkouts
+without saved choices retain the committed developer preset settings.
+
+The optional **Build Ludus editor** checkbox is off by default. Selecting it
+installs `qt6-base-dev` and `qt6-wayland` on Ubuntu/Debian when missing, enables
+`LUDUS_BUILD_EDITOR`, and builds `ludus_editor` for the selected Debug or
+Development preset. `--no-system-install` uses your existing Qt 6.4+ installation
+instead. Launch it afterwards with `./scripts/editor --preset <preset>`.
+Qt remains an optional editor dependency outside Conan and the installed SDK.
+See [the editor guide](editor-workspace.md).
+
+Conan may still build missing third-party packages while preparing the dependency cache; Catch2 is included only when tests are enabled. That is dependency setup, not a Ludus engine target build. If an existing CMake cache points at stale tool paths, init may fresh-configure that generated build tree to repair it, but it still does not compile or link Ludus targets.
+
+VS Code is configured to use the project-managed CMake at `out/host-tools/venv/bin/cmake`. If VS Code was already open while `./init.sh` ran, reload the window before pressing the CMake Tools Build button.
+
+Run `./init.sh --validate` when you want the full build/test/check/sanitizer/SDK-consumer validation pass.
+
+RAD Debugger is available as optional Linux x64 tooling. Use
+`./init.sh --with-rad-debugger` or `./scripts/setup-rad-debugger` to build the
+pinned debugger locally, then `./scripts/debug linux-clang-debug ludus_smoke`.
+VS Code provides **Ludus: Debug target with RAD** through Tasks: Run Task;
+onboarding preserves F5 and existing debugger preferences. See
+[the debugging guide](debugging.md) for usage and Linux alpha
+limitations, and [the tooling design](../architecture/developer-tools.md) for
+future editor and scripting milestones.
+
+## macOS support
+
+
+The first macOS slice uses upstream Clang 18 and libc++ with Apple silicon
+and Intel profiles, targeting macOS 14 or later. Install Xcode Command Line Tools and
+Homebrew's `llvm@18`, then run:
+
+```bash
+./init.sh --cli macos-clang-development --preset-only --locked --no-system-install
+./scripts/build macos-clang-development
+```
+
+The init launcher selects a Python meeting the recorded minimum before opening
+the setup selector; it reuses the prepared interpreter on macOS when available.
+For graphical setup with Homebrew Python 3.12, install `python-tk@3.12`.
+Apple's system Tk 8.5 is unsupported. Missing or old Tk falls back to terminal
+setup; use `--cli` to select terminal setup explicitly. `--gui` instead reports
+the missing GUI prerequisite without starting installation.
+
+Debug, Development, Profile, Release, and ASan/UBSan configure/build/test presets
+are available under `macos-clang-*`. Setup selects the matching architecture's
+Conan profile and keeps managed tools/dependencies under ignored `out/` paths.
+Use `--with-tests` during setup to prepare native test dependencies.
+Refreshing the Conan lock preserves pins needed by other supported hosts.
+
+`--preset-only` prepares dependencies for just the selected preset. Before
+selecting another profile in VS Code, prepare it too. For Debug with tests:
+
+```bash
+./init.sh --cli macos-clang-debug --preset-only --locked --with-tests --no-system-install
+```
+
+Omit `--preset-only` to prepare all native profiles in one setup run.
+If the selected preset's generated toolchain is missing, CMake stops before
+compiler detection and prints the init command needed to prepare that profile.
+
+Debug, Development, and ASan/UBSan builds are validated on Apple silicon.
+Native Cocoa integration tests require a WindowServer session and opt in with
+`LUDUS_TEST_COCOA=1`; deferred feature cases explicitly skip. On the validation
+host running macOS 26.6, Clang 18's ASan runtime deadlocks during initialization,
+before `main`, including in an independent probe. Sanitizer execution remains
+unverified on that host. The macOS 14 CI job runs the Cocoa lifecycle and keyboard
+tests, Metal lifecycle/rendering tests, native filesystem tests and Content read adapters with ASan/UBSan
+as well as the regular Development build.
+
+Platform now provides [native Cocoa windows and keyboard input](../architecture/macos-platform.md).
+It publishes borrowed native handles and backing-pixel dimensions for the Metal backend. RHI supports Cocoa presentation and headless rendering,
+including frame clearing, fullscreen pipelines, MSL shaders and uniform uploads.
+See the [Metal rendering guide](fullscreen-rendering.md#macos-metal). FoundationFilesystem provides [native regular-file reads](../architecture/filesystem.md),
+including pinned roots, revision clones and independent offset reads. Content
+read adapters use this backend. Vulkan/Volk is excluded on macOS. Content supports [atomic native saves](../architecture/content-resources.md#native-saves).
+Audio stream workers, audio device output, interactive diagnostic helpers, the Qt editor,
+Linux debugger journeys, the world demo (libc++ 18 lacks floating-point
+`from_chars`), and release packaging are deferred. Portable modules
+still compile; the smoke app can present through Metal. Linux and browser
+backends retain their existing implementations.
+
+
 ## Headless and sandboxed builds
 
 Prepare only the preset you need, with tests explicitly enabled:
 
 ```bash
-./init.sh --cli --preset linux-clang-development --preset-only --locked --with-tests
+./init.sh --cli linux-clang-development --preset-only --locked --with-tests
 ./scripts/build linux-clang-development
 ./scripts/test linux-clang-development
 ```
@@ -96,125 +259,11 @@ The install tree is treated as the SDK boundary. The external consumer test uses
 
 ## Build flavor and assertion policy
 
-Every preset now supplies an explicit `LUDUS_BUILD_FLAVOR`. Debug uses CMake
-Debug; Development and Profile both use RelWithDebInfo; Release uses Release
-(or MinSizeRel for a manual build). Direct CMake invocations must supply the
-matching flavor. Profile is its own engine flavor even though its optimization
-configuration matches Development. Assertion policy never follows `NDEBUG`.
-
-Debug/Development enable `LUDUS_ASSERT` and Check inspection breaks. Profile and
-Release compile Assert away and disable Check breaks. Require/Check/Fatal stay
-active everywhere. `REQUIRE`/`FATAL` always terminate, including after a debugger
-continuation; `CHECK` returns its boolean. Enabled `ASSERT`/`ASSERT_F` is now
-**resumable through explicit developer action** in non-CI runs — a debugger
-Continue (Debug or Development) or, with no debugger in a non-CI Debug build, the
-external helper's Continue-once dialog — otherwise it terminates. This is gated
-by the generated `LUDUS_ASSERT_DIALOGS_AVAILABLE` (1 only for non-CI Debug) plus
-a runtime CI veto; the assertion-policy version is 2. See
-[assertions.md §5.1](../architecture/assertions.md) and
-[ADR 0006](../decisions/0006-resumable-development-assertions.md).
-
-The installed `assert_config.hpp` and SDK manifest carry the built variant's
-policy. A Release consumer of a Development SDK uses Development's assertion
-policy. Do not override the generated macros or mix headers/libraries from
-different variants. Use separate prefixes. Installation refuses an incompatible
-or legacy unversioned Ludus prefix before overwriting files; move an old generated
-`out/install/<preset>` aside, then rerun `scripts/install-sdk`. Multi-config SDK
-generation is explicitly unsupported until per-configuration packages exist.
-
-### Diagnostic helper and report delivery
-
-The external diagnostic helper is a Python development tool,
-`tools/diagnostics/ludus_diagnostic_helper.py` (installed to the SDK `bin`
-directory as `ludus_diagnostic_helper`). It launches an engine binary with the
-diagnostic channels wired up so assertion/`FATAL`/`CHECK` reports are captured
-independently of normal Logging. Run an engine binary under it with:
-
-```bash
-# Convenience launcher (resolves the installed or source-tree helper):
-scripts/run out/build/linux-clang-debug/apps/smoke/ludus_smoke
-# Or invoke the helper directly:
-python3 tools/diagnostics/ludus_diagnostic_helper.py -- <engine-binary> [args...]
-# or, from an installed SDK:
-ludus_diagnostic_helper -- <engine-binary> [args...]
-```
-
-A binary launched **directly** (without the helper) also works: it configures
-diagnostics at startup and runs report-only when no helper/channel is present.
-In a local, non-CI **Debug** build with a usable terminal or live display, a
-failed `ASSERT` presents a **Continue once / Terminate** prompt; *Continue once*
-resumes past that assertion (the invariant is now known-broken), a second failure
-is reported again, and *Terminate* exits. CI and headless runs stay report-only
-and never wait for input.
-
-The engine calls `ludus::diagnostics::InitializeDiagnosticSession()` (from
-`ludus/diagnostics/session.hpp`, in the `Ludus::DiagnosticsIntegration` target,
-which depends on FoundationBase but is not part of it) once at the top of `main`,
-before workers or the logger. It reads these descriptors/policy from the
-environment:
-
-- `LUDUS_DIAGNOSTIC_REPORT_FD` — connected `AF_UNIX`/`SOCK_DGRAM` report socket.
-- `LUDUS_DIAGNOSTIC_CONTROL_FD` — connected `AF_UNIX`/`SOCK_SEQPACKET` control
-  socket (versioned Hello/HelloAck handshake).
-- `LUDUS_DIAGNOSTIC_INTERACTIVE=0` — force report-only (local headless Debug).
-
-The helper sets the first two for its child; a directly launched binary with no
-helper simply runs report-only with no transport. Interactive presentation is
-eligible only in a local, non-CI Debug build with a live terminal/display; CI is
-auto-detected and forced report-only, and CI workflows additionally set
-`LUDUS_DIAGNOSTIC_INTERACTIVE=0` explicitly. This layer changes no assertion's
-fatal action.
-
-To run Release policy tests without changing the production preset:
-
-```bash
-out/host-tools/venv/bin/cmake --preset linux-clang-release -B out/build/linux-clang-release-assert-tests -DLUDUS_BUILD_TESTS=ON -DLUDUS_WARNINGS_AS_ERRORS=ON
-out/host-tools/venv/bin/cmake --build out/build/linux-clang-release-assert-tests
-out/host-tools/venv/bin/ctest --test-dir out/build/linux-clang-release-assert-tests --output-on-failure
-```
-
-## One-Command Onboarding
-
-Run:
-
-```bash
-./init.sh
-```
-
-`init.sh` is safe to rerun. On Ubuntu/Debian hosts it installs missing system prerequisites with `apt-get`, creates or updates the project-managed virtual environment, resolves Conan dependencies, and writes Conan generator files for every committed preset. It does not configure or build Ludus engine targets by default, so engine developers can initialize once and then configure/build from VS Code CMake Tools or the command line when they choose.
-
-The default preset for command-line build, test, check, and install scripts is `linux-clang-development`. If you want a lighter initialization that prepares only one preset, use:
-
-```bash
-./init.sh --preset-only linux-clang-debug
-```
-
-`--all-presets` is accepted for clarity, but it is already the default initialization scope.
-
-`--with-rad-debugger` also builds the optional pinned Linux debugger;
-`--no-system-install` applies to its prerequisites too. Existing checkouts can
-use `./scripts/setup-rad-debugger` separately. See [debugging.md](debugging.md)
-for the CLI and VS Code task workflow; installation never modifies keybindings.
-
-Run the full validation path explicitly when you want it:
-
-```bash
-./init.sh --validate
-```
-
-Validation builds the development preset, runs tests, runs checks, builds/runs the ASan/UBSan preset, installs the SDK, and runs the external SDK consumer.
-
-During initialization, Conan may build missing third-party packages such as Catch2 while populating `out/conan/home/`. That is dependency-cache preparation, not a Ludus engine target build. If an existing CMake cache was created with older tool paths or a broken generator path, init fresh-configures that generated build tree with the current preset to repair it. This still does not compile or link Ludus targets.
-
-Automatic system installation may ask for your sudo password once. It does not run destructive Git commands and it keeps generated project state under `out/`.
-
-On minimal Ubuntu installations, the standard `universe` package component may be disabled. Ludus enables it automatically when apt cannot find packages such as `clang-18`, `lld-18`, `clang-format-18`, `clang-tidy-18`, or Python venv support. If Ubuntu's helper reports success without updating `/etc/apt/sources.list.d/ubuntu.sources`, Ludus patches that deb822 source file directly and keeps a one-time `.ludus-backup` copy beside it.
-
-The project-managed venv is deliberately scoped to build tools. The bootstrap process still starts from the system Python you already have, but CMake, Ninja, and Conan are Python-distributed tools with project-pinned versions. Keeping them in `out/host-tools/venv/` avoids `sudo pip`, avoids modifying the user's global Python environment, and makes every developer and CI job use the same tool versions. When `config/tool_versions.json` changes, rerunning `./init.sh` updates those pinned tools in place while the executable paths remain stable. The venv mostly stores those tool packages; it is generated state and can be removed safely.
-
-LLVM 18 is the Milestone 0 floor because the project builds as C++23 and the supported Ubuntu 24.04 standard library needs a recent Clang frontend. Older Clang binaries can appear present while still failing on ordinary C++23 library headers.
-
-`init.sh --no-system-install` keeps package-manager changes disabled and only uses already-installed tools. With `--validate`, `--skip-checks`, `--skip-sanitizers`, and `--skip-sdk` are available when a developer wants a faster partial validation pass.
+Presets set `LUDUS_BUILD_FLAVOR` explicitly. SDK variants keep their generated
+assertion/profiling policy with their headers and libraries; use separate install
+prefixes for each variant. See [diagnostic helpers and assertion policies](diagnostics.md)
+for launch/report commands and [the assertion contract](../architecture/assertions.md)
+for caller behavior.
 
 ## Bootstrap
 
@@ -230,27 +279,40 @@ After tool validation, bootstrap installs the committed Conan profile into the p
 
 ## Conan
 
-Conan 2 is used only before CMake configure. CMake does not invoke Conan, `FetchContent`, or any network fetch. Catch2 v3 is the only third-party C++ dependency in Milestone 0 and is declared in `conanfile.py` with an exact version.
+Conan 2 is used only before CMake configure. CMake does not invoke Conan, `FetchContent`, or any network fetch. The current native dependency set is declared in `conanfile.py` and pinned by
+`conan.lock`; Catch2 is included only when tests are enabled. Some engine backends
+use separately pinned sources under `third_party/`. Browser builds use the
+separate pins in `config/web_toolchain.json`. The early Milestone 0 dependency
+inventory is historical.
 
 Normal configure, build, test, check, and SDK install commands use the Conan files already generated by bootstrap. They should not require network access unless generated state is removed.
 
 ## Presets
 
-The default preset is:
+Development is the default local flavor. Prepare each preset before selecting
+it; `--preset-only` does not prepare another profile's dependencies.
+
+| Flavor | Linux | macOS | Purpose |
+| --- | --- | --- | --- |
+| Debug | `linux-clang-debug` | `macos-clang-debug` | Debug assertions and source inspection |
+| Development | `linux-clang-development` | `macos-clang-development` | Optimized local development |
+| Profile | `linux-clang-profile` | `macos-clang-profile` | Profiling flavor with Profile assertion policy |
+| Release | `linux-clang-release` | `macos-clang-release` | Release policy; tests off by default |
+| ASan/UBSan | `linux-clang-asan-ubsan` | `macos-clang-asan-ubsan` | Sanitizer validation |
+
+Browser presets are `web-emscripten-development` and `web-emscripten-release`.
+See [browser packaging](web-packaging.md) for that separate toolchain.
+To inspect selectable presets with the project's prepared CMake:
 
 ```bash
-./scripts/build linux-clang-development
+out/host-tools/venv/bin/cmake --list-presets=configure
+out/host-tools/venv/bin/cmake --list-presets=build
+out/host-tools/venv/bin/cmake --list-presets=test
 ```
 
-Other presets:
-
-```bash
-./scripts/build linux-clang-debug
-./scripts/build linux-clang-asan-ubsan
-./scripts/build linux-clang-release
-```
-
-Development and sanitizer presets use `RelWithDebInfo` with project target options that keep assertions enabled. Release disables tests by default and keeps normal symbols.
+Development/Profile and sanitizer presets use `RelWithDebInfo`; the explicit
+engine flavor determines assertion policy. Saved init selections can disable
+sample/test/editor targets within a preset. See [diagnostics](diagnostics.md).
 
 ## VS Code
 

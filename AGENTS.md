@@ -139,6 +139,9 @@ engine code. Discuss such cases in the PR before adding them.
   serve different reader needs, but link to the owner of detailed contracts
   instead of restating them. Never require contributors to synchronize prose
   between a local document and a wiki page.
+- Keep module, sample and tool READMEs as short links to their guide under `docs/`,
+  so those instructions enter the wiki and offline bundle. Label historical
+  milestone scope and link current usage/evidence before retaining older plans.
 - Use relative Markdown links for destinations inside `docs/` and local files
   for essential images. Keep examples and essential instructions readable in a
   plain text/Markdown reader without a website, plugin, network request or
