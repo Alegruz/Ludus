@@ -26,9 +26,15 @@ public:
         {
             return false;
         }
-        if (merge && MergeAllowed_ && Cursor_ == Count_ && Cursor_ != 0 && Entries_[Cursor_ - 1]->After == before)
+        auto* previous = Cursor_ != 0 ? &Entries_[Cursor_ - 1] : nullptr;
+        if (merge && MergeAllowed_ && Cursor_ == Count_ && previous != nullptr && previous->has_value() &&
+            (*previous)->After == before)
         {
-            auto& entry = Entries_[Cursor_ - 1];
+            auto& entry = *previous;
+            if (!entry.has_value())
+            {
+                return false;
+            }
             entry->After = after;
             if (entry->Before == after)
             {
@@ -72,22 +78,34 @@ public:
     // Reject a mismatched current head without changing content or history.
     [[nodiscard]] bool Undo(T& current) noexcept
     {
-        if (!CanUndo() || !(current == Entries_[Cursor_ - 1]->After))
+        if (!CanUndo())
         {
             return false;
         }
-        current = Entries_[--Cursor_]->Before;
+        const auto& entry = Entries_[Cursor_ - 1];
+        if (!entry.has_value() || !(current == entry->After))
+        {
+            return false;
+        }
+        current = entry->Before;
+        --Cursor_;
         ++Revision_;
         BreakGroup();
         return true;
     }
     [[nodiscard]] bool Redo(T& current) noexcept
     {
-        if (!CanRedo() || !(current == Entries_[Cursor_]->Before))
+        if (!CanRedo())
         {
             return false;
         }
-        current = Entries_[Cursor_++]->After;
+        const auto& entry = Entries_[Cursor_];
+        if (!entry.has_value() || !(current == entry->Before))
+        {
+            return false;
+        }
+        current = entry->After;
+        ++Cursor_;
         ++Revision_;
         BreakGroup();
         return true;
