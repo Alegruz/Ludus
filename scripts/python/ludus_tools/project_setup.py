@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from dataclasses import replace
 
 from .buildlock import BuildTreeLock
 from .errors import INVALID_PROJECT, ToolingError
@@ -20,6 +21,7 @@ from .operations import PRESET_FLAVOR, locate_project, resolve_project
 from .resolve import compute_stamp, write_stamp
 from .sdkstore import SdkStore
 from .descriptor import parse_descriptor_file
+from .native import validate_target
 
 OWNER = "ludus.dev/project-setup/1"
 
@@ -106,9 +108,11 @@ def environment(root: Path) -> dict:
     return env
 
 
-def supported_project(path: Path):
+def supported_project(path: Path, profile: str | None = None):
     paths = locate_project(path)
     descriptor = parse_descriptor_file(paths.descriptor_path)
+    if profile is not None:
+        descriptor = replace(descriptor, preset=profile)
     if descriptor.version != 2 or descriptor.provider != "cmake" or descriptor.preset not in PRESET_FLAVOR:
         raise ToolingError(INVALID_PROJECT, "Setup requires a saved version-2 native CMake project")
     source = (paths.project_dir / descriptor.source_dir).resolve()
@@ -118,7 +122,8 @@ def supported_project(path: Path):
 
 
 def validate_native_identity(identity, descriptor):
-    if identity.engine_version != descriptor.engine.version or identity.target_triple != "x86_64-linux-gnu":
+    validate_target(identity, descriptor.preset)
+    if identity.engine_version != descriptor.engine.version:
         raise ToolingError(INVALID_PROJECT, "Selected native SDK must match the project's engine version and native target")
     missing = set(descriptor.engine.components) - set(identity.components)
     if missing:
@@ -135,17 +140,36 @@ def _inputs(root: Path, source: Path, sdk: Path, profile: str, web_sdk: Path | N
     # Package discovery remains in CMake; include prepared dependencies needed by
     # exported native libraries, without baking machine paths into tracked files.
     dependencies = root / "out/conan" / profile
-    if dependencies.is_dir():
+    if profile.startswith("linux-") and dependencies.is_dir():
         cache["CMAKE_PREFIX_PATH"] += ";" + str(dependencies)
+    if profile.startswith("macos-"):
+        sysroot = root / "out/host-tools/macos-sdk"
+        libcxx = root / "out/host-tools/libcxx-include"
+        for directory in (sysroot, libcxx):
+            if not directory.is_dir():
+                raise ToolingError("MissingTools", f"Missing macOS toolchain input: {directory}; run ./init.sh")
+        # Record real symlink destinations and policy headers, so retargeting a
+        # managed SDK/header link invalidates an existing setup at the same path.
+        configured.update(sysroot=sysroot, libcxx=libcxx)
+        for key, file in (("sdk_settings", sysroot / "SDKSettings.json"),
+                          ("libcxx_config", libcxx / "__config")):
+            if not file.is_file():
+                raise ToolingError("MissingTools", f"Incomplete macOS toolchain input: {file}; run ./init.sh")
+            configured[key] = file
+        baseline = re.fullmatch(r"macos-(\d+(?:\.\d+)*)", native.distro_baseline)
+        if not baseline:
+            raise ToolingError(INVALID_PROJECT, "macOS SDK must record its deployment baseline")
+        architecture = native.target_triple.split("-", 1)[0]
+        cache.update(CMAKE_OSX_SYSROOT=str(sysroot), CMAKE_OSX_ARCHITECTURES=architecture,
+                     CMAKE_OSX_DEPLOYMENT_TARGET=baseline.group(1),
+                     CMAKE_CXX_FLAGS=f'-stdlib=libc++ -nostdinc++ -isystem "{libcxx}"')
     shaders = "ludus_compile_shader" in (source / "CMakeLists.txt").read_text()
     # Shader includes are also common (Sandbox owns cmake/Shaders.cmake).
     shaders |= any("ludus_compile_shader" in p.read_text() for p in (source / "cmake").glob("*.cmake"))
     if shaders:
         cache["LUDUS_SLANG_COMPILER"] = str(executable(root / "out/shader-tools/slang/bin/slangc"))
-        candidates = sorted((root / "out/shader-tools/spirv-tools").glob("**/spirv-val"))
-        if not candidates:
-            raise ToolingError("MissingTools", "Missing pinned spirv-val; prepare shader tools")
-        cache["LUDUS_SPIRV_VALIDATOR"] = str(executable(candidates[0]))
+        if not profile.startswith("macos-"):
+            cache["LUDUS_SPIRV_VALIDATOR"] = str(spirv_validator(root))
     records = {profile: {"cacheVariables": cache}}
     stamps = {str(sdk): compute_stamp(sdk)}
     if web_sdk:
@@ -156,7 +180,10 @@ def _inputs(root: Path, source: Path, sdk: Path, profile: str, web_sdk: Path | N
         if not toolchain.is_file():
             raise ToolingError("MissingTools", "Web toolchain is missing; prepare Emscripten")
         cross = executable(root / "out/shader-tools/spirv-cross/bin/spirv-cross")
-        webcache = {k: v for k, v in cache.items() if k != "CMAKE_CXX_COMPILER"}
+        webcache = {k: v for k, v in cache.items()
+                    if k not in ("CMAKE_CXX_COMPILER", "CMAKE_CXX_FLAGS") and not k.startswith("CMAKE_OSX_")}
+        if shaders:
+            webcache["LUDUS_SPIRV_VALIDATOR"] = str(spirv_validator(root))
         webcache.update(CMAKE_PREFIX_PATH=str(web_sdk), CMAKE_FIND_ROOT_PATH=str(web_sdk), LUDUS_SPIRV_CROSS=str(cross))
         for webprofile, buildtype in (("web-emscripten-development", "RelWithDebInfo"), ("web-emscripten-release", "Release")):
             records[webprofile] = {"toolchainFile": str(toolchain),
@@ -165,7 +192,14 @@ def _inputs(root: Path, source: Path, sdk: Path, profile: str, web_sdk: Path | N
     return configured, records, stamps
 
 
-def verify_tool_versions(configured, root: Path, runner, env):
+def spirv_validator(root: Path) -> Path:
+    candidates = sorted((root / "out/shader-tools/spirv-tools").glob("**/spirv-val"))
+    if not candidates:
+        raise ToolingError("MissingTools", "Missing pinned spirv-val; prepare shader tools")
+    return executable(candidates[0])
+
+
+def verify_tool_versions(configured, root: Path, runner, env, identity=None):
     pins = read_object(root / "config/tool_versions.json").get("managed", {})
     expected = {"cmake": pins.get("cmake", "3.29.6"), "ninja": pins.get("ninja", "1.11.1.3").rsplit(".", 1)[0]}
     for key, pattern in (("cmake", r"cmake version (\d+\.\d+\.\d+)"),
@@ -176,6 +210,10 @@ def verify_tool_versions(configured, root: Path, runner, env):
         wanted = "18" if key == "compiler" else expected[key]
         if not match or match.group(1) != wanted:
             raise ToolingError("MissingTools", f"{key} must use pinned version {wanted}; prepare the tooling checkout")
+        if key == "compiler" and identity is not None:
+            version = re.search(r"clang version (\d+\.\d+\.\d+)", output)
+            if identity.compiler_id != "Clang" or not version or version.group(1) != identity.compiler_version:
+                raise ToolingError("SdkIncompatible", f"SDK compiler: expected {identity.compiler_id} {identity.compiler_version}; got {output.strip()}")
 
 
 def cache_value(path: Path, key: str):
@@ -186,7 +224,7 @@ def cache_value(path: Path, key: str):
 
 
 def _signature(configured, records, stamps):
-    payload = {"tools": {k: (str(v), v.stat().st_size, v.stat().st_mtime_ns) for k, v in configured.items()}, "presets": records, "sdks": stamps}
+    payload = {"tools": {k: (str(v), str(v.resolve()), v.stat().st_size, v.stat().st_mtime_ns) for k, v in configured.items()}, "presets": records, "sdks": stamps}
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
@@ -199,13 +237,20 @@ def _list(source: Path, configured, profiles, runner, env):
             raise ToolingError(INVALID_PROJECT, f"Missing selectable {kind} presets: {sorted(required - visible)}; run repair")
 
 
-def check_project(path: Path, *, tooling_root: Path, runner=run_command, cancel_check=lambda: None):
+def setup_for_profile(settings: dict, profile: str) -> dict:
+    if settings.get("profile", profile) == profile:
+        return settings
+    return settings.get("profiles", {}).get(profile, {})
+
+
+def check_project(path: Path, *, tooling_root: Path, profile: str | None = None,
+                  runner=run_command, cancel_check=lambda: None):
     """Read metadata and ask CMake to list presets; never configure or write."""
-    paths, descriptor, source = supported_project(path)
-    settings = read_object(paths.project_dir / ".ludus/setup.json")
+    paths, descriptor, source = supported_project(path, profile)
+    settings = setup_for_profile(read_object(paths.project_dir / ".ludus/setup.json"), descriptor.preset)
     if not settings:
         raise ToolingError(INVALID_PROJECT, "Project setup is missing; use Project > Repair Project Setup")
-    resolved = resolve_project(path, store=SdkStore(), enforce_host_toolchain=False)
+    resolved = resolve_project(path, store=SdkStore(), profile=descriptor.preset, enforce_host_toolchain=False)
     sdk = resolved.resolution.prefix.resolve()
     validate_native_identity(resolved.resolution.identity, descriptor)
     web = Path(settings["web_sdk"]) if settings.get("web_sdk") else None
@@ -219,7 +264,9 @@ def check_project(path: Path, *, tooling_root: Path, runner=run_command, cancel_
             raise ToolingError(INVALID_PROJECT, f"Stale local preset for {profile}; run repair")
         cache_path = source / "out/build" / profile / "CMakeCache.txt"
         if cache_path.is_file():
-            for key in ("CMAKE_PREFIX_PATH", "CMAKE_MAKE_PROGRAM", "CMAKE_CXX_COMPILER"):
+            for key in ("CMAKE_PREFIX_PATH", "CMAKE_MAKE_PROGRAM", "CMAKE_CXX_COMPILER",
+                        "CMAKE_CXX_FLAGS", "CMAKE_OSX_SYSROOT", "CMAKE_OSX_ARCHITECTURES",
+                        "CMAKE_OSX_DEPLOYMENT_TARGET"):
                 expected = fields["cacheVariables"].get(key)
                 if expected and cache_value(cache_path, key) != expected:
                     raise ToolingError(INVALID_PROJECT, f"Stale CMake cache for {profile}: {key}; run repair")
@@ -228,24 +275,25 @@ def check_project(path: Path, *, tooling_root: Path, runner=run_command, cancel_
         raise ToolingError(INVALID_PROJECT, "IDE CMake path or preset mode is stale; run repair")
     cancel_check()
     env = environment(tooling_root)
-    verify_tool_versions(configured, tooling_root, runner, env)
+    verify_tool_versions(configured, tooling_root, runner, env, resolved.resolution.identity)
     _list(source, configured, records, runner, env)
     return "Setup checked: selectable presets, SDKs, tools and IDE settings"
 
 
 def repair_project(path: Path, *, tooling_root: Path, sdk: Path | None = None,
-                   web_sdk: Path | None = None, disable_web: bool = False,
+                   web_sdk: Path | None = None, disable_web: bool = False, profile: str | None = None,
                    runner=run_command, cancel_check=lambda: None):
     if disable_web and web_sdk is not None:
         raise ToolingError(INVALID_PROJECT, "Choose browser setup or desktop-only repair, not both")
-    paths, descriptor, source = supported_project(path)
+    paths, descriptor, source = supported_project(path, profile)
     if sdk is None:
-        sdk = resolve_project(path, store=SdkStore(), enforce_host_toolchain=False).resolution.prefix
+        sdk = resolve_project(path, store=SdkStore(), profile=descriptor.preset, enforce_host_toolchain=False).resolution.prefix
     sdk = sdk.resolve()
-    resolved = resolve_project(path, store=SdkStore(), cli_sdk_prefix=sdk, enforce_host_toolchain=False)
+    resolved = resolve_project(path, store=SdkStore(), cli_sdk_prefix=sdk, profile=descriptor.preset, enforce_host_toolchain=False)
     identity = resolved.resolution.identity
     validate_native_identity(identity, descriptor)
-    previous = read_object(paths.project_dir / ".ludus/setup.json")
+    all_settings = read_object(paths.project_dir / ".ludus/setup.json")
+    previous = setup_for_profile(all_settings, descriptor.preset)
     if not disable_web and web_sdk is None and previous.get("web_sdk"):
         web_sdk = Path(previous["web_sdk"])
     if web_sdk:
@@ -259,7 +307,9 @@ def repair_project(path: Path, *, tooling_root: Path, sdk: Path | None = None,
         items = local.get(key, [])
         if not isinstance(items, list) or any(not isinstance(p, dict) for p in items):
             raise ToolingError(INVALID_PROJECT, f"Invalid {key}; fix JSON before repair")
-        local[key] = [p for p in items if OWNER not in p.get("vendor", {})]
+        local[key] = [p for p in items
+                      if p.get("vendor", {}).get(OWNER) not in records
+                      and not str(p.get("vendor", {}).get(OWNER, "")).startswith("web-")]
         if any(p.get("name") == "ludus-local-" + profile for p in local[key] for profile in records):
             raise ToolingError(INVALID_PROJECT, "Custom preset occupies a managed name; rename it before repair")
     local["version"] = max(local.get("version", 6), 6)
@@ -282,7 +332,7 @@ def repair_project(path: Path, *, tooling_root: Path, sdk: Path | None = None,
     env = environment(tooling_root)
     env["LUDUS_SDK_PREFIX"] = str(sdk)
     cancel_check()
-    verify_tool_versions(configured, tooling_root, runner, env)
+    verify_tool_versions(configured, tooling_root, runner, env, resolved.resolution.identity)
     # Own the selected native tree for the complete configure/build/test sequence.
     with BuildTreeLock(resolved.paths.build_dir):
         # A failed repair must not leave a previous verification stamp valid.
@@ -323,6 +373,12 @@ def repair_project(path: Path, *, tooling_root: Path, sdk: Path | None = None,
         # A verified repair replaces the old mutable-SDK stamp, allowing the
         # ordinary Editor/CLI configure path to use the updated SDK afterward.
         write_stamp(resolved.paths.build_dir, resolved.resolution)
-        write_object(paths.project_dir / ".ludus/setup.json", {"signature": _signature(configured, records, stamps),
-                     "web_sdk": str(web_sdk) if web_sdk else ""})
-    return check_project(path, tooling_root=tooling_root, runner=runner, cancel_check=cancel_check)
+        state = {"signature": _signature(configured, records, stamps), "web_sdk": str(web_sdk) if web_sdk else ""}
+        profiles = dict(all_settings.get("profiles", {}))
+        old_profile = all_settings.get("profile", descriptor.preset)
+        if all_settings.get("signature"):
+            profiles[old_profile] = {key: all_settings.get(key, "") for key in ("signature", "web_sdk")}
+        profiles[descriptor.preset] = state
+        write_object(paths.project_dir / ".ludus/setup.json",
+                     dict(state, profile=descriptor.preset, profiles=profiles))
+    return check_project(path, tooling_root=tooling_root, profile=descriptor.preset, runner=runner, cancel_check=cancel_check)

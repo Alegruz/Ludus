@@ -26,6 +26,10 @@ from test_ludus_tools import _make_sdk_tar, _manifest_json
 
 class CliFlow(unittest.TestCase):
     def setUp(self) -> None:
+        from unittest.mock import patch
+        native = patch("ludus_tools.native.default_profile", return_value="linux-clang-development")
+        native.start()
+        self.addCleanup(native.stop)
         self.td = tempfile.TemporaryDirectory()
         self.root = Path(self.td.name)
         self.store = self.root / "store"

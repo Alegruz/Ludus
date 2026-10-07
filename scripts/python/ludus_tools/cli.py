@@ -130,7 +130,7 @@ def cmd_sdk_remove(args) -> int:
 
 def cmd_project_setup(args) -> int:
     from .project_setup import check_project, repair_project
-    options = dict(tooling_root=Path(args.tools).resolve())
+    options = dict(tooling_root=Path(args.tools).resolve(), profile=args.profile)
     if args.cmd == "check":
         message = check_project(Path(args.project), **options)
     else:
@@ -153,7 +153,8 @@ def cmd_project_create(args) -> int:
         from .project_setup import run_command
         root = Path(args.tools).resolve()
         local_prefix = select_creation_sdk(root, explicit=local_prefix,
-            prepare=lambda prefix: prepare_creation_sdk(root, prefix, runner=run_command))
+            profile=args.profile,
+            prepare=lambda prefix: prepare_creation_sdk(root, prefix, runner=run_command, profile=args.profile))
     if not args.engine and not local_prefix:
         raise ToolingError("InvalidProject", "create requires --engine <release> or --sdk <prefix>")
     verifier = None
@@ -166,7 +167,7 @@ def cmd_project_create(args) -> int:
         template_id=args.template,
         engine_version=args.engine or "",
         components=components,
-        preset=args.profile or "linux-clang-development",
+        preset=args.profile,
         local_sdk_prefix=local_prefix,
         verify_staged=verifier,
         release=args.release,
@@ -223,7 +224,9 @@ def cmd_project_engine(args) -> int:
 
     paths = operations.locate_project(Path(args.project))
     settings = parse_local_settings_file(paths.local_settings_path)
-    profile = args.profile or "linux-clang-development"
+    from .descriptor import parse_descriptor_file
+    from .native import target_for_profile, validate_target
+    profile = args.profile or parse_descriptor_file(paths.descriptor_path).preset
     flavor = operations.PRESET_FLAVOR.get(profile)
     if flavor is None:
         raise ToolingError("InvalidProject", f"unknown profile {profile!r}")
@@ -231,7 +234,7 @@ def cmd_project_engine(args) -> int:
     from .lockfile import parse_lock_file
 
     lock = parse_lock_file(paths.lock_path)
-    target = operations._target_triple_for_lock(lock, flavor) or "x86_64-linux-gnu"
+    target = operations._target_triple_for_lock(lock, flavor, target_for_profile(profile)) or target_for_profile(profile)
     if args.clear_override:
         changed = settings.clear_override(target, flavor)
         paths.local_settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -246,6 +249,10 @@ def cmd_project_engine(args) -> int:
 
     identity = load_prefix_manifest(Path(args.sdk))
     require_compatible(identity, required_flavor=flavor)
+    validate_target(identity, profile)
+    descriptor = parse_descriptor_file(paths.descriptor_path)
+    if identity.engine_version != descriptor.engine.version:
+        raise ToolingError("SdkIncompatible", "SDK engine version does not match the project requirement")
     settings.set_override(target, flavor, str(Path(args.sdk).resolve()))
     paths.local_settings_path.parent.mkdir(parents=True, exist_ok=True)
     paths.local_settings_path.write_bytes(settings.serialize())
@@ -349,7 +356,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ludus", description="Ludus host tooling CLI")
     p.add_argument("--version", action="version", version=f"ludus {__version__}")
     p.add_argument("--json", action="store_true", help="emit a versioned JSON result")
-    p.add_argument("--store", help="SDK store root (default: $LUDUS_SDK_STORE or ~/.local/share/ludus)")
+    p.add_argument("--store", help="SDK store root (default: $LUDUS_SDK_STORE or the native user data directory)")
     sub = p.add_subparsers(dest="group", required=True)
     scripts = sub.add_parser("scripts", help="cook project-owned behavior assets").add_subparsers(dest="cmd", required=True)
     cook = scripts.add_parser("cook", help="explicit paired-tool cook; never downloads tools")
@@ -398,6 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
         setup.add_argument("project")
         setup.add_argument("--tools", required=True, help="trusted prepared Ludus tooling checkout")
         setup.add_argument("--sdk")
+        setup.add_argument("--profile", help="native profile to check/repair (defaults to the project descriptor)")
         setup.add_argument("--web-sdk")
         if action != "check":
             setup.add_argument("--no-web", action="store_true", help="repair desktop builds only; clear saved browser setup")

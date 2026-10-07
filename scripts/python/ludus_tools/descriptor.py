@@ -52,7 +52,9 @@ MAX_TEMPLATE_ID_BYTES = 128
 # native projects additionally allow the Release preset (design: extend E0 to
 # Release). Legacy v1 descriptors continue to accept only the original two.
 PRESETS_V1 = ("linux-clang-debug", "linux-clang-development")
-PRESETS_V2 = ("linux-clang-debug", "linux-clang-development", "linux-clang-release")
+from .native import PRESET_FLAVOR
+
+PRESETS_V2 = tuple(PRESET_FLAVOR)
 PROVIDERS = ("ludus", "cmake")
 
 TARGET_NAME_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.+-]*")

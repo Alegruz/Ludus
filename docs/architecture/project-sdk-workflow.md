@@ -99,3 +99,23 @@ Ludus-Sandbox should eventually become the reference independent application
 using this interface. It is not present in this checkout. The Ludus implementation
 must prove a standalone reference consumer and document the separate Sandbox
 conversion, without inventing changes or acceptance in that repository.
+
+## macOS native project tooling
+
+The installed CLI and shared setup backend accept macOS version-2 native profiles
+for Debug, Development and Release. Target selection distinguishes
+`arm64-apple-darwin` from `x86_64-apple-darwin`; incompatible architecture, flavor,
+engine version, components or libc++ runtime identity fail before configuration.
+Ordinary operations probe the compiler selected in the owned local preset, rather
+than an unrelated compiler on PATH. Explicit SDK preparation also bundles static
+FreeType/HarfBuzz dependencies, so a relocated SDK can link Text without Conan.
+
+Setup records managed sysroot/libc++ paths and their resolved destinations,
+architecture and manifest deployment baseline in ignored settings. Read-only
+inspection compares those inputs and existing caches; explicit repair refreshes
+owned presets and runs real configure/build/tests. Browser profiles exclude macOS
+architecture, sysroot, deployment and libc++ flags. The native Editor remains
+Linux-gated; accepting macOS descriptors keeps the two schema readers consistent
+without enabling its UI backend. See the [user guide](../development/project-sdk-workflow.md#macos-creation-and-setup)
+for commands and the [evidence ledger](../development/project-sdk-workflow-evidence.md#macos-project-tooling-acceptance)
+for the native acceptance boundary.
