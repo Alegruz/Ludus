@@ -3,7 +3,7 @@
 
 #include <new>
 
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
 #    include <pthread.h>
 #    include <time.h>
 
@@ -12,7 +12,7 @@
 
 namespace ludus::audio
 {
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
 namespace
 {
 struct NativeDevice final
@@ -44,7 +44,7 @@ AudioSystem::Impl::~Impl() noexcept
 }
 Status AudioSystem::Impl::StartDevice() noexcept
 {
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
     auto* native = new (std::nothrow) NativeDevice();
     auto* renderer = new (std::nothrow) Impl();
     if (native == nullptr || renderer == nullptr)
@@ -78,8 +78,17 @@ Status AudioSystem::Impl::StartDevice() noexcept
         return Status::OutOfMemory;
     }
     // Never permit miniaudio's null backend to certify real device playback.
+#    if LUDUS_TARGET_OS == LUDUS_OS_MACOS
+    // Thanks to David Reid, miniaudio Programming Manual, sections 1.1 and 17
+    // (https://miniaud.io/docs/manual/index.html), for explicit backend selection
+    // and owner-side device teardown. Ludus retains its own callback mixer.
+    const ma_backend backends[] = {ma_backend_coreaudio};
+    constexpr uint32 backendCount = 1;
+#    else
     const ma_backend backends[] = {ma_backend_pulseaudio, ma_backend_alsa};
-    if (ma_context_init(backends, 2, nullptr, &native->Context) != MA_SUCCESS)
+    constexpr uint32 backendCount = 2;
+#    endif
+    if (ma_context_init(backends, backendCount, nullptr, &native->Context) != MA_SUCCESS)
     {
         delete renderer;
         delete native;
@@ -90,6 +99,7 @@ Status AudioSystem::Impl::StartDevice() noexcept
     config.playback.format = ma_format_f32;
     config.playback.channels = 2;
     config.sampleRate = SampleRate;
+    config.periodSizeInFrames = Config.DevicePeriodFrames;
     config.pUserData = renderer;
     config.dataCallback = [](ma_device* device, void* output, const void*, ma_uint32 frames) noexcept {
         auto* state = static_cast<Impl*>(device->pUserData);
@@ -131,7 +141,7 @@ Status AudioSystem::Impl::StartDevice() noexcept
 }
 void AudioSystem::Impl::CloseDevice() noexcept
 {
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
     auto* native = static_cast<NativeDevice*>(Device);
     if (native != nullptr)
     {
@@ -157,7 +167,7 @@ Status AudioSystem::Impl::StartWorker() noexcept
     {
         return Status::Ok;
     }
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
     auto* worker = new (std::nothrow) NativeWorker();
     if (worker == nullptr)
     {
@@ -237,11 +247,14 @@ Status AudioSystem::Impl::StartWorker() noexcept
 }
 void AudioSystem::Impl::CloseWorker() noexcept
 {
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
     auto* worker = static_cast<NativeWorker*>(Worker);
     if (worker != nullptr)
     {
         WorkerStop.store(true, std::memory_order_release);
+        // Thanks to Apple, pthread_join(3), DESCRIPTION
+        // (https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/pthread_join.3.html):
+        // joining the sole worker precedes reclaiming its published inputs.
         pthread_join(worker->Thread, nullptr);
         delete worker;
         Worker = nullptr;

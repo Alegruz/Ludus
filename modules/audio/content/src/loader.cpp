@@ -5,7 +5,7 @@
 
 #include <atomic>
 #include <new>
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
 #    include <pthread.h>
 #endif
 
@@ -43,7 +43,7 @@ struct Acquisition final
     std::atomic<bool> Cancelled{false};
     std::atomic<bool> Done{false};
     ContentStatus Result = ContentStatus::Pending;
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
     pthread_t Thread{};
 #endif
     void Run() noexcept
@@ -332,7 +332,7 @@ Loader::Begin(std::string_view root, std::string_view id, const Sound* draft, co
         }
         job->MusicDraft = true;
     }
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
     if (pthread_create(
             &job->Thread,
             nullptr,
@@ -362,7 +362,7 @@ void Loader::Cancel() noexcept
     }
     auto* job = mImpl->Pending;
     job->Cancelled.store(true, std::memory_order_release);
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
     pthread_join(job->Thread, nullptr);
 #endif
     delete job;

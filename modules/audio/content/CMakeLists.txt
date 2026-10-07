@@ -15,4 +15,11 @@ if(LUDUS_BUILD_TESTS)
     ludus_apply_project_defaults(ludus_audio_content_tests)
     ludus_enable_test_exceptions(ludus_audio_content_tests)
     add_test(NAME ludus_audio_content_tests COMMAND ludus_audio_content_tests)
+    set_tests_properties(ludus_audio_content_tests PROPERTIES LABELS "unit;audio;content")
+endif()
+
+# These native owners call pthread directly; keep the system dependency explicit.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    find_package(Threads REQUIRED)
+    target_link_libraries(ludus_audio_content PRIVATE Threads::Threads)
 endif()
