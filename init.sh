@@ -21,4 +21,8 @@ if ! command -v python3 >/dev/null 2>&1; then
     fi
 fi
 
+# Apple's Python launcher can inject SDKROOT even when the shell did not set it.
+# Preserve the caller's choice before entering Python so automatic SDK selection
+# is not mistaken for an explicit override.
+export LUDUS_INIT_SHELL_SDKROOT="${SDKROOT-}"
 exec python3 "${repo_dir}/scripts/python/init_launcher.py" "$@"
