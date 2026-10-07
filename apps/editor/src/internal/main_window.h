@@ -43,6 +43,7 @@ public:
     explicit MainWindow(EditorController* controller,
                         QWidget* parent = nullptr,
                         const QString& workspaceSettingsFile = {});
+    ~MainWindow() override;
 
 protected:
     void closeEvent(QCloseEvent* event) override;

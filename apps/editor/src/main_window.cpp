@@ -82,6 +82,20 @@ MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QStr
     OnStateChanged();
 }
 
+MainWindow::~MainWindow()
+{
+    // QWidget teardown changes focus and destroys children before QObject
+    // disconnects receivers. Stop member callbacks while MainWindow is alive.
+    disconnect(qApp, nullptr, this, nullptr);
+    disconnect(Controller_, nullptr, this, nullptr);
+    disconnect(FocusUndoConnection_);
+    disconnect(FocusRedoConnection_);
+    for (auto* child : findChildren<QObject*>())
+    {
+        disconnect(child, nullptr, this, nullptr);
+    }
+}
+
 void MainWindow::BuildMenus()
 {
     QMenu* fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
