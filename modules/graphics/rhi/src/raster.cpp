@@ -193,6 +193,10 @@ void Collect() noexcept
 RasterStatus Reserve(RasterKind kind, usize& slot) noexcept
 {
     Collect();
+    if (GetStartup().State != StartupState::Ready)
+    {
+        return GetStartup().State == StartupState::DeviceLost ? RasterStatus::DeviceLost : RasterStatus::Failed;
+    }
     bool exhausted = false;
     for (slot = 0; slot < RASTER_CAPACITY; ++slot)
     {
@@ -962,6 +966,11 @@ RasterStatus GetStatus(DeviceHandle device, BufferHandle handle) noexcept
         return admission;
     }
     Collect();
+    const auto current = Admission(device, false);
+    if (current != RasterStatus::Ready)
+    {
+        return current;
+    }
     const auto* record = Resolve(handle, RasterKind::Buffer);
     return record == nullptr ? RasterStatus::InvalidHandle : record->Status;
 }
@@ -991,6 +1000,11 @@ RasterStatus GetStatus(DeviceHandle device, TextureHandle handle) noexcept
         return admission;
     }
     Collect();
+    const auto current = Admission(device, false);
+    if (current != RasterStatus::Ready)
+    {
+        return current;
+    }
     const auto* record = Resolve(handle, RasterKind::Texture);
     return record == nullptr ? RasterStatus::InvalidHandle : record->Status;
 }
@@ -1020,6 +1034,11 @@ RasterStatus GetStatus(DeviceHandle device, TextureViewHandle handle) noexcept
         return admission;
     }
     Collect();
+    const auto current = Admission(device, false);
+    if (current != RasterStatus::Ready)
+    {
+        return current;
+    }
     const auto* record = Resolve(handle, RasterKind::View);
     return record == nullptr ? RasterStatus::InvalidHandle : record->Status;
 }
@@ -1049,6 +1068,11 @@ RasterStatus GetStatus(DeviceHandle device, SamplerHandle handle) noexcept
         return admission;
     }
     Collect();
+    const auto current = Admission(device, false);
+    if (current != RasterStatus::Ready)
+    {
+        return current;
+    }
     const auto* record = Resolve(handle, RasterKind::Sampler);
     return record == nullptr ? RasterStatus::InvalidHandle : record->Status;
 }
@@ -1078,6 +1102,11 @@ RasterStatus GetStatus(DeviceHandle device, RasterShaderHandle handle) noexcept
         return admission;
     }
     Collect();
+    const auto current = Admission(device, false);
+    if (current != RasterStatus::Ready)
+    {
+        return current;
+    }
     const auto* record = Resolve(handle, RasterKind::Shader);
     return record == nullptr ? RasterStatus::InvalidHandle : record->Status;
 }
@@ -1107,6 +1136,11 @@ RasterStatus GetStatus(DeviceHandle device, BindingLayoutHandle handle) noexcept
         return admission;
     }
     Collect();
+    const auto current = Admission(device, false);
+    if (current != RasterStatus::Ready)
+    {
+        return current;
+    }
     const auto* record = Resolve(handle, RasterKind::Layout);
     return record == nullptr ? RasterStatus::InvalidHandle : record->Status;
 }
@@ -1136,6 +1170,11 @@ RasterStatus GetStatus(DeviceHandle device, BindingSetHandle handle) noexcept
         return admission;
     }
     Collect();
+    const auto current = Admission(device, false);
+    if (current != RasterStatus::Ready)
+    {
+        return current;
+    }
     const auto* record = Resolve(handle, RasterKind::Set);
     return record == nullptr ? RasterStatus::InvalidHandle : record->Status;
 }
@@ -1165,6 +1204,11 @@ RasterStatus GetStatus(DeviceHandle device, RasterPipelineHandle handle) noexcep
         return admission;
     }
     Collect();
+    const auto current = Admission(device, false);
+    if (current != RasterStatus::Ready)
+    {
+        return current;
+    }
     const auto* record = Resolve(handle, RasterKind::Pipeline);
     return record == nullptr ? RasterStatus::InvalidHandle : record->Status;
 }

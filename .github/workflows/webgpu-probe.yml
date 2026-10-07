@@ -164,6 +164,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$PWD/out/host-tools/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" \
             -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH="$PWD/out/install/raster-web-sdk" \
+            -DLudus_DIR="$PWD/out/install/raster-web-sdk/lib/cmake/Ludus" \
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"

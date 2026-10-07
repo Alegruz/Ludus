@@ -652,7 +652,12 @@ uint64 RasterCompleted() noexcept
             continue;
         }
         const auto result = vkGetFenceStatus(gDevice, texture.Fence);
-        if (result == VK_SUCCESS || result == VK_ERROR_DEVICE_LOST)
+        if (result == VK_ERROR_DEVICE_LOST)
+        {
+            internal::Fail(gSession, StartupError::DeviceLost);
+            return gRasterCompleted;
+        }
+        if (result == VK_SUCCESS)
         {
             vkFreeCommandBuffers(gDevice, gCommands, 1, &texture.Command);
             vkDestroyFence(gDevice, texture.Fence, nullptr);
@@ -660,14 +665,22 @@ uint64 RasterCompleted() noexcept
             texture.Upload = {};
             texture.Command = VK_NULL_HANDLE;
             texture.Fence = VK_NULL_HANDLE;
-            internal::RasterComplete(texture.Request,
-                                     result == VK_SUCCESS ? RasterStatus::Ready : RasterStatus::DeviceLost);
+            internal::RasterComplete(texture.Request, RasterStatus::Ready);
         }
     }
     for (usize i = 0; i < FRAMES; ++i)
     {
-        if (gFrames[i].Fence != VK_NULL_HANDLE && vkGetFenceStatus(gDevice, gFrames[i].Fence) == VK_SUCCESS &&
-            gRasterOrdinals[i] > gRasterCompleted)
+        if (gFrames[i].Fence == VK_NULL_HANDLE)
+        {
+            continue;
+        }
+        const auto result = vkGetFenceStatus(gDevice, gFrames[i].Fence);
+        if (result == VK_ERROR_DEVICE_LOST)
+        {
+            internal::Fail(gSession, StartupError::DeviceLost);
+            return gRasterCompleted;
+        }
+        if (result == VK_SUCCESS && gRasterOrdinals[i] > gRasterCompleted)
         {
             gRasterCompleted = gRasterOrdinals[i];
         }

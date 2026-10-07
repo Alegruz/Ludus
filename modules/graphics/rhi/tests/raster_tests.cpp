@@ -348,3 +348,26 @@ TEST_CASE("Fixed restart indices and forged layout substitution issue no native 
     CHECK(reference::Draws == 0);
     REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
 }
+
+TEST_CASE("Completion-observed device loss closes resource admission before native work", "[rhi][raster]")
+{
+    Session session;
+    const uint8 bytes[16]{};
+    BufferHandle buffer;
+    REQUIRE(CreateBuffer(session.Device, {BufferRole::Uniform, 16}, bytes, buffer) == RasterStatus::Ready);
+    reference::LossOnCompletion = backend::PendingToken;
+    SECTION("Polling returns the owning device loss")
+    {
+        CHECK(GetStatus(session.Device, buffer) == RasterStatus::DeviceLost);
+    }
+    SECTION("Creation cannot call the torn-down backend")
+    {
+        SamplerHandle sampler;
+        CHECK(CreateSampler(session.Device, {}, sampler) == RasterStatus::DeviceLost);
+        CHECK(reference::Creates[3] == 0);
+    }
+    DeviceInfo info;
+    CHECK(GetDeviceInfo(session.Device, info) == DeviceStatus::DeviceLost);
+    CHECK(reference::Destroys[0] == 1);
+    REQUIRE(DestroyDevice(session.Device) == DeviceStatus::Ready);
+}

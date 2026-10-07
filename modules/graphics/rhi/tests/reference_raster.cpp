@@ -1,4 +1,5 @@
 #include "reference_raster.h"
+#include "internal/lifecycle.h"
 namespace ludus::graphics::rhi::reference
 {
 void Reset() noexcept
@@ -7,6 +8,7 @@ void Reset() noexcept
     Next = RasterStatus::Ready;
     Submission = RasterStatus::Ready;
     LastRequest = 0;
+    LossOnCompletion = 0;
     Submitted = 0;
     Completed = 0;
     Draws = 0;
@@ -97,6 +99,12 @@ void RasterSubmit(uint64 ordinal) noexcept
 }
 uint64 RasterCompleted() noexcept
 {
+    const auto token = reference::LossOnCompletion;
+    reference::LossOnCompletion = 0;
+    if (token != 0)
+    {
+        internal::Fail(token, StartupError::DeviceLost);
+    }
     return reference::Completed;
 }
 void RasterShutdown() noexcept {}

@@ -6,6 +6,7 @@ inline bool ProfileAvailable = true;
 inline RasterStatus Next = RasterStatus::Ready;
 inline RasterStatus Submission = RasterStatus::Ready;
 inline foundation::uint32 LastRequest = 0;
+inline foundation::uint32 LossOnCompletion = 0;
 inline foundation::uint64 Submitted = 0;
 inline foundation::uint64 Completed = 0;
 inline foundation::usize Creates[8]{};

@@ -924,6 +924,10 @@ FrameStatus Begin() noexcept
         return Failure();
     }
     (void)RasterCompleted();
+    if (gDevice == VK_NULL_HANDLE)
+    {
+        return FrameStatus::Failed;
+    }
     gImage = 0;
     if (!gHeadless)
     {
