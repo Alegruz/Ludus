@@ -1,5 +1,10 @@
 # Ludus editor reference reading guide
 
+The [October 6 GUI reference review](editor-gui-reference-review.md) records a
+second focused pass: actual excerpts from Wihlidal, Lightbown, Hirst and Nystrom,
+initial design decisions, post-reading changes and verified primary toolkit
+constraints. Catalogue entries without a review remain candidates, not evidence.
+
 The best immediate reading is tool UX, tuning and document editing, asset pipelines, and responsive editor-to-game communication. This guide selects 246 articles, book chapters and focused sections from the 86-reference [combined table of contents](../../references/game-dev-gems-toc.md), grouped by editor responsibility and ranked for Ludus. It also includes conditional readings for a future scene editor and specialist authoring tools.
 
 Prepared October 4, 2026. This catalog is a TOC-based relevance assessment; the selection pass did not read the underlying chapters or benchmark historical implementations. Selected excerpts reviewed afterward, together with current Qt API verification, are recorded in the [post-design review](editor-design-review.md). Each “Ludus use” is a proposed application inferred from the title and indexed subsections, except where a repository review provides additional evidence.
