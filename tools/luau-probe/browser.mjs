@@ -22,16 +22,17 @@ const server = createServer(async (request, response) => {
   }
 });
 await new Promise(done => server.listen(0, '127.0.0.1', done));
-const browser = await chromium.launch({ headless: true });
+let browser;
 const logs = [];
 const errors = [];
 try {
+  browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   page.on('console', message => logs.push(message.text()));
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/index.html`);
   await page.waitForFunction(() => document.body.dataset.exitCode !== undefined ||
-    document.body.dataset.abort !== undefined, { timeout: 120000 });
+    document.body.dataset.abort !== undefined, null, { timeout: 120000 });
   const result = await page.evaluate(() => ({ ...document.body.dataset }));
   assert.equal(result.exitCode, '0', JSON.stringify({ result, logs, errors }));
   assert.equal(result.abort, undefined);
@@ -45,6 +46,6 @@ try {
   await writeFile('out/browser-qa/results/luau-s0.json', JSON.stringify({ browser: browser.version(), result, logs, errors }, null, 2));
   console.log(`S0 Chromium ${browser.version()}: all interpreter probes passed`);
 } finally {
-  await browser.close();
+  if (browser) await browser.close();
   server.close();
 }

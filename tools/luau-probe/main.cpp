@@ -81,17 +81,17 @@ struct Context
     const uint8* Bytecode = nullptr;
     usize Bytes = 0;
     const char* Name = nullptr;
-    int LoadStatus = -1;
-    int Result = -1;
+    int32 LoadStatus = -1;
+    int32 Result = -1;
     uint32 Interrupts = 0;
     uint32 InterruptLimit = 0;
     uint32 BindingCalls = 0;
     lua_State* Thread = nullptr;
-    int ThreadRef = LUA_NOREF;
-    int BreakLine = 0;
-    int StepLine = 0;
-    int BreakLocal = -1;
-    int StepLocal = -1;
+    int32 ThreadRef = LUA_NOREF;
+    int32 BreakLine = 0;
+    int32 StepLine = 0;
+    int32 BreakLocal = -1;
+    int32 StepLocal = -1;
     uint32 BreakHits = 0;
     uint32 StepHits = 0;
     uint32 Node = 0;
@@ -104,7 +104,7 @@ Context* GetContext(lua_State* state) noexcept
     return static_cast<Context*>(lua_callbacks(state)->userdata);
 }
 
-int HostAdd(lua_State* state) noexcept
+int32 HostAdd(lua_State* state) noexcept
 {
     // Check exact types rather than accepting Luau's numeric string coercion.
     if (lua_gettop(state) != 2 || lua_type(state, 1) != LUA_TNUMBER || lua_type(state, 2) != LUA_TNUMBER)
@@ -118,16 +118,16 @@ int HostAdd(lua_State* state) noexcept
     return 1;
 }
 
-void Interrupt(lua_State* state, int gc) noexcept
+void Interrupt(lua_State* state, int32 gc) noexcept
 {
     Context* context = GetContext(state);
     if (gc < 0 && context->InterruptLimit != 0 && ++context->Interrupts >= context->InterruptLimit)
     {
-        luaL_error(state, "s0 instruction budget exceeded");
+        luaL_error(state, "s0 safepoint budget exceeded");
     }
 }
 
-int Initialize(lua_State* state) noexcept
+int32 Initialize(lua_State* state) noexcept
 {
     luaopen_base(state); // Deliberately exclude os/io/debug/require and host I/O.
     lua_settop(state, 0);
@@ -139,7 +139,7 @@ int Initialize(lua_State* state) noexcept
     return 0;
 }
 
-int Execute(lua_State* state) noexcept
+int32 Execute(lua_State* state) noexcept
 {
     Context* context = GetContext(state);
     context->LoadStatus =
@@ -159,8 +159,8 @@ int Execute(lua_State* state) noexcept
 struct Outcome
 {
     bool Created = false;
-    int InitStatus = -1;
-    int CallStatus = -1;
+    int32 InitStatus = -1;
+    int32 CallStatus = -1;
     Context Execution;
     Allocator Memory;
 };
@@ -209,7 +209,7 @@ bool Check(bool condition, const char* name) noexcept
     return condition;
 }
 
-bool Sweep(const uint8* bytecode, usize bytes, const char* name, int expected) noexcept
+bool Sweep(const uint8* bytecode, usize bytes, const char* name, int32 expected) noexcept
 {
     const Outcome baseline = Run(bytecode, bytes, name);
     if (!Check(baseline.CallStatus == LUA_OK && baseline.Execution.Result == expected && baseline.Memory.Live == 0,
@@ -276,7 +276,7 @@ void Step(lua_State* state, lua_Debug* debug) noexcept
     }
 }
 
-int PrepareDebug(lua_State* state) noexcept
+int32 PrepareDebug(lua_State* state) noexcept
 {
     Context* context = GetContext(state);
     context->Thread = lua_newthread(state);
