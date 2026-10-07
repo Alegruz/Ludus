@@ -1,4 +1,5 @@
 include_guard(GLOBAL)
+include("${CMAKE_CURRENT_LIST_DIR}/LudusDependencies.cmake")
 # No downloads at configure/build time. Host tools remain separate from target
 # compilers, including when cross-compiling to wasm.
 function(ludus_compile_shader)
@@ -7,9 +8,8 @@ function(ludus_compile_shader)
        NOT SH_NAME MATCHES "^[A-Za-z_][A-Za-z_0-9]*$" OR NOT SH_SOURCE OR NOT SH_VERTEX OR NOT SH_FRAGMENT)
         message(FATAL_ERROR "ludus_compile_shader requires TARGET NAME SOURCE VERTEX FRAGMENT; optional INCLUDES DEFINES DEPENDS")
     endif()
-    if(NOT LUDUS_SLANG_COMPILER)
-        message(FATAL_ERROR "Set LUDUS_SLANG_COMPILER to the pinned host tool; run scripts/shader-probe bootstrap")
-    endif()
+    ludus_require_tool(LUDUS_SLANG_COMPILER "Shader compilation"
+        "From the Ludus source repository root: ./scripts/shader-probe bootstrap" -version)
     set(backend_args)
     if(SH_RASTER)
         list(APPEND backend_args --raster)
@@ -20,9 +20,8 @@ function(ludus_compile_shader)
         list(APPEND backend_args --metal)
         list(APPEND backend_byproducts "${SH_NAME}.vertex.metal" "${SH_NAME}.fragment.metal")
     else()
-        if(NOT LUDUS_SPIRV_VALIDATOR)
-            message(FATAL_ERROR "Set LUDUS_SPIRV_VALIDATOR to the pinned host tool (shader_toolchain.json)")
-        endif()
+        ludus_require_tool(LUDUS_SPIRV_VALIDATOR "SPIR-V shader validation"
+            "On the Linux host, from the Ludus source repository root: ./scripts/shader-probe bootstrap" --version)
         list(APPEND backend_args --validator "${LUDUS_SPIRV_VALIDATOR}")
         list(APPEND backend_depends "${LUDUS_SPIRV_VALIDATOR}")
         list(APPEND backend_byproducts "${SH_NAME}.vertex.spv" "${SH_NAME}.fragment.spv" "${SH_NAME}.wgsl" "wgsl.reflection.json")
@@ -32,8 +31,9 @@ function(ludus_compile_shader)
         list(APPEND backend_byproducts "${SH_NAME}.vertex.wgsl" "${SH_NAME}.fragment.wgsl"
              "vertex.wgsl.reflection.json" "fragment.wgsl.reflection.json")
     endif()
-    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+    ludus_require_python("Shader compilation")
     get_filename_component(source "${SH_SOURCE}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    ludus_require_file("${source}" "Shader compilation" "Restore the shader source or correct SOURCE in ludus_compile_shader.")
     set(output "${CMAKE_CURRENT_BINARY_DIR}/ludus-shaders/${SH_TARGET}/${SH_NAME}")
     list(TRANSFORM backend_byproducts PREPEND "${output}/")
     set(args)
@@ -52,8 +52,11 @@ function(ludus_compile_shader)
     # Optional GLSL ES 3.00 (WebGL 2) backend artifact. Enabled only when the
     # pinned SPIR-V -> GLSL ES translator is provided; SPIR-V/WGSL builds are
     # unchanged otherwise. The browser build carries both WGSL and GLSL ES.
-    if(EMSCRIPTEN AND NOT LUDUS_SPIRV_CROSS)
-        message(FATAL_ERROR "Browser Auto shaders require LUDUS_SPIRV_CROSS; run scripts/bootstrap-spirv-cross")
+    if(EMSCRIPTEN OR (LUDUS_SPIRV_CROSS AND NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin"))
+        ludus_require_tool(LUDUS_SPIRV_CROSS "GLSL ES shader translation"
+            "From the Ludus source repository root: ./scripts/bootstrap-spirv-cross")
+        ludus_require_file("${LUDUS_SPIRV_CROSS}.build.json" "GLSL ES shader translation"
+            "Restore the matching tool provenance: ./scripts/bootstrap-spirv-cross in the Ludus source repository.")
     endif()
     set(cross_args)
     set(cross_depends)
