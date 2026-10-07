@@ -825,20 +825,64 @@ Status GameWorld::RunTick(TickInput input) noexcept
     mPhase = Phase::Idle;
     return Status::Success;
 }
-bool GameWorld::Extract(float32 alpha, RenderFrame& frame) const noexcept
+bool GameWorld::Extract(float32 alpha,
+                        RenderFrame& frame,
+                        bool followPlayer,
+                        uint64 presentationSequence) const noexcept
 {
     LUDUS_PROFILE_SCOPE(WorldExtract);
     if (!IsBuilt() || mPhase != Phase::Idle || !std::isfinite(alpha) || alpha < 0 || alpha > 1)
     {
         return false;
     }
-    RenderFrame candidate
+    namespace camera = gameplay::camera;
+    RenderFrame candidate{ .Tick = mTick };
+    const camera::CameraRigDefinition definition
     {
-        .Camera = mLevel.Camera,
-        .VerticalExtent = mLevel.VerticalExtent,
-        .MinimumWidth = mLevel.Maximum.X - mLevel.Minimum.X,
-        .Tick = mTick,
+        .Recipe = followPlayer ? camera::CameraRecipe::OrthographicFollow : camera::CameraRecipe::Fixed,
+        .Pose = { .Position = {static_cast<float64>(mLevel.Camera.X), static_cast<float64>(mLevel.Camera.Y), 1.0} },
+        .Lens =
+        {
+            .VerticalSpan = mLevel.VerticalExtent,
+            .MinimumVisibleWidth = mLevel.Maximum.X - mLevel.Minimum.X,
+        },
     };
+    const camera::CameraUpdateContext context
+    {
+        .PreviousTick = mTick == 0 ? 0 : mTick - 1,
+        .CurrentTick = mTick,
+        .RenderAlpha = alpha,
+        .PresentationSequence = presentationSequence,
+        .DiscontinuityRevision = mRegistry.GetWorld(),
+    };
+    // Use exactly the draw's previous/current pair and alpha, without retaining
+    // a pool pointer or interpolating the camera a second time.
+    camera::CameraTargetSample target;
+    if (followPlayer)
+    {
+        if (!mRegistry.IsActive(mPlayer))
+        {
+            return false;
+        }
+        const auto* transform = mTransforms.Find(mPlayer);
+        if (transform == nullptr)
+        {
+            return false;
+        }
+        target.Position = {
+            static_cast<float64>(transform->Previous.X + (transform->Current.X - transform->Previous.X) * alpha),
+            static_cast<float64>(transform->Previous.Y + (transform->Current.Y - transform->Previous.Y) * alpha),
+            0.0};
+        target.BindingId = mRegistry.GetCreationSequence(mPlayer);
+    }
+    if (camera::TryEvaluateCamera(definition,
+                                  context,
+                                  followPlayer ? &target : nullptr,
+                                  candidate.Camera,
+                                  &candidate.CameraTrace) != camera::CameraStatus::Success)
+    {
+        return false;
+    }
     const auto add = [&](Draw draw) {
         if (candidate.Count == 64)
         {

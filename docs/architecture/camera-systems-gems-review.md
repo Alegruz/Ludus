@@ -3,7 +3,9 @@
 Review date: October 5, 2026. Repository baseline: `144a708`.
 The architecture was reconciled with `216083e` on October 6, including the
 implemented addressed-randomness service and current contributor requirements.
-The [camera architecture](camera-systems.md) is a proposal, without runtime or
+The [camera architecture](camera-systems.md) began as a proposal; its
+[C0 runtime section](camera-systems.md#c0-runtime-and-usage) records the current
+implementation scope. This review does not itself establish runtime or
 performance validation. Its initial decision table was recorded before searching
 [game-dev-gems-toc.md](../../references/game-dev-gems-toc.md). This review then
 read selected source contents and revised the final contracts.

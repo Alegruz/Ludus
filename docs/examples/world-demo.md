@@ -11,6 +11,13 @@ application owns the level schema, component roster, simulation policies, input
 bridge, session and renderer. The model builds and tests with the normal native
 presets even when the graphical application is disabled.
 
+The renderer now consumes the [C0 camera sample and checked view adapter](../architecture/camera-systems.md#c0-runtime-and-usage).
+The authored fixed shot remains the default. Use native `--follow-camera` or
+browser `?camera=follow` to opt into immediate planar player follow. Camera
+extraction uses the same interpolated target as scene draws and does not change
+authoritative gameplay. The existing level schema and minimum-width resize rule
+are preserved.
+
 ## Run the application
 
 Prepare the normal pinned native tools and dependencies with `./init.sh --cli`.

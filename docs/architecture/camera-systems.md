@@ -2,8 +2,9 @@
 
 Status: Proposed design, originally recorded on October 5, 2026 against
 repository HEAD `144a708`, and reconciled with `216083e` on October 6, 2026.
-No camera runtime, performance result, or general 3D renderer is implemented by
-this document.
+C0 now has an initial runtime implementation, described under
+[C0 runtime and usage](#c0-runtime-and-usage). C1–C5 remain proposed; no general
+3D renderer, collision system or temporal history is claimed.
 
 Build a small camera system around one owner per output view, immutable rig
 definitions, explicit mutable state, and a fixed sequence of ordinary functions.
@@ -80,9 +81,10 @@ as a modern engine API.
 
 ## Ownership and dependencies
 
-The reusable target is proposed as `Ludus::GameplayCamera` under
-`modules/gameplay/camera/`. It depends on FoundationBase, FoundationMath and
-FoundationContainers. It owns camera evaluation, rig state, bounded transitions,
+The reusable target is `Ludus::GameplayCamera` under
+`modules/gameplay/camera/`. C0 depends on FoundationBase and FoundationMath;
+FoundationContainers becomes a dependency when reserved state is required.
+The planned subsystem owns camera evaluation, rig state, bounded transitions,
 constraints and cosmetic impulses. It does not import GameplayWorld, Input,
 Platform, RHI, Audio, an editor, or a physics backend. Games adapt those services
 into input values and a small query interface.
@@ -844,8 +846,77 @@ Implementation must pass the repository's pinned warning-clean native build,
 unit tests, ASan/UBSan, format/tidy, header/include and build-budget gates plus
 installed-SDK consumers where a new module is exported. Run the pinned web builds
 and real backend image checks for affected graphics paths. Game project creation
-or repair follows the prescribed selectable CMake preset checks. This design-only
-change does not execute those runtime gates or claim implementation readiness.
+or repair follows the prescribed selectable CMake preset checks. The design
+proposal alone does not execute those runtime gates or claim implementation readiness.
+
+## C0 runtime and usage
+
+The initial C0 implementation exports `Ludus::GameplayCamera` on native and web
+targets. Its public contracts live in `camera.hpp` and `evaluation.hpp` under
+`modules/gameplay/camera/include/ludus/gameplay/camera/`. It supplies an authored
+rigid pose, explicitly tagged lens, value-only sample, fixed recipe and immediate
+orthographic XY follow. The optional trace copies desired placement and accepted
+publication, including binding, definition and presentation revisions. A game can
+store those records in its own bounded ring; C0 creates no capture service.
+
+```cpp
+#include <ludus/gameplay/camera/evaluation.hpp>
+
+using namespace ludus::gameplay::camera;
+const CameraRigDefinition definition
+{
+    .Recipe = CameraRecipe::OrthographicFollow,
+    .Pose = { .Position = {0, 0, 10} },
+    .Lens = { .VerticalSpan = 14, .MinimumVisibleWidth = 24 },
+    .FollowOffset = {2, 0},
+};
+// Supply the same already-interpolated target that will be drawn.
+const CameraTargetSample target{ .Position = {3.25, 4, 0}, .BindingId = 7 };
+CameraSample sample;
+CameraTrace trace;
+const auto status = TryEvaluateCamera(definition,
+    { .PreviousTick = 10, .CurrentTick = 11, .RenderAlpha = 0.25F,
+      .PresentationSequence = 20, .DiscontinuityRevision = 1 },
+    &target, sample, &trace);
+// Publish sample only when status == CameraStatus::Success.
+```
+
+Evaluation is stateless, allocation-free and does not advance a clock. Repeating
+a preview cannot advance follow history. Invalid input or a missing follow target
+preserves both output and optional trace; the returned status explains rejection.
+Follow requires an orthographic lens and XY identity rotation (either quaternion
+sign), adds an explicit planar offset, and retains the authored eye Z. Dead zones,
+look-ahead, bounds, damping, selection, overrides, transitions, constraints and
+effects are not part of this first runtime slice. C1 introduces state and timing;
+the later phases retain their acceptance requirements above.
+
+world_demo extracts `CameraSample` and `CameraTrace` alongside its draws with the
+same previous/current tick pair and alpha. Its existing JSON camera schema and
+default fixed shot are preserved. Follow is separately enabled with
+`Application::SetCameraFollow(true)`, native `--follow-camera`, or browser
+`?camera=follow`. Missing targets retain the last accepted frame without faulting
+authoritative simulation; a game can explicitly fall back to the fixed recipe.
+
+The private `camera_view` adapter belongs to world_demo, not GameplayCamera or
+RHI. It subtracts a renderer-owned float64 origin before checked narrowing,
+constructs the rigid inverse and canonical reverse-Z projection, and resolves
+the actual drawable aspect. Orthographic visible span remains
+`max(VerticalSpan, MinimumVisibleWidth / aspect)`. It validates physical viewport
+extents and preserves outputs on failure. The procedural adapter accepts only
+identity-rotation XY orthographic views with a fullscreen viewport; unsupported
+perspective, rotation or viewport offsets are rejected explicitly. Scene draws
+must use the same origin; the current demo uses zero and a local range of 1e6.
+No GPU matrix ABI, jitter, depth attachment, temporal history or new backend
+coordinate conversion is introduced.
+
+The module and portable renderer-adapter tests cover numeric rejection, lens
+tags, quaternion sign equivalence, transactionality, relative origins, reverse-Z
+depth, viewport offsets, resize mapping and 30/60/120/240 Hz target sampling.
+Separate allocation probes exercise production fixed/follow evaluation, copied
+traces, successful view construction and missing-target rejection. world_demo
+integration tests check interpolation, pause/step, target loss and unchanged
+authoritative state. The parser/demo remains deferred on macOS as before;
+the camera module and renderer adapter are built and tested there independently.
 
 ## Decisions changed by the article review
 

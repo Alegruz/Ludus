@@ -40,6 +40,8 @@ on:
       - 'tools/web-rhi-probe/**'
       - 'tools/web-frame-probe/**'
       - 'apps/smoke/**'
+      - 'apps/world_demo/**'
+      - 'modules/gameplay/camera/**'
       - 'modules/platform/**'
       - 'tools/web-platform-probe/**'
       - 'modules/foundation/base/**'
@@ -192,6 +194,19 @@ jobs:
             out/build/web-emscripten-release/tools/web-frame-probe/index.*
           if-no-files-found: error
 
+      - name: Build and analyze C0 camera renderer on both browser profiles
+        run: |
+          for preset in web-emscripten-development web-emscripten-release; do
+            out/host-tools/venv/bin/cmake --preset "$preset" -DLUDUS_BUILD_WORLD_DEMO=ON
+            out/host-tools/venv/bin/cmake --build --preset "$preset" --target ludus_world_demo --parallel 2
+            ./scripts/check "$preset" --tidy
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: world-camera-web-release
+          path: out/build/web-emscripten-release/apps/world_demo/index.*
+          if-no-files-found: error
+
       - name: Upload integrated browser smoke apps
         uses: actions/upload-artifact@v4
         with:
@@ -305,6 +320,10 @@ jobs:
         with:
           name: luau-s1-web-interaction
           path: out/luau-s1-wasm
+      - uses: actions/download-artifact@v4
+        with:
+          name: world-camera-web-release
+          path: out/world-camera-web-release
       - uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
@@ -320,6 +339,10 @@ jobs:
           python3 -m zipfile -e out/packages/ludus-web-smoke-release.zip out/browser-qa/extracted
           cd tools/web-browser-tests
           xvfb-run -a npm test
+      - name: Check fixed and follow camera pixels on WebGPU and WebGL
+        run: |
+          node apps/world_demo/tests/browser-test.mjs out/world-camera-web-release out/browser-qa/results/world-camera-webgpu
+          LUDUS_WORLD_WEBGL=1 node apps/world_demo/tests/browser-test.mjs out/world-camera-web-release out/browser-qa/results/world-camera-webgl
       - name: Test S0 wasm recovery and debugger in Chromium
         run: node tools/luau-probe/browser.mjs out/luau-s0-wasm/web-emscripten-release/tools/luau-probe
       - name: Test S2 debugger heartbeat and replacement in Chromium

@@ -1,6 +1,7 @@
 #pragma once
 #include "level.h"
 #include <ludus/foundation/base/core.h>
+#include <ludus/gameplay/camera/evaluation.hpp>
 #include <ludus/gameplay/world/component_pool.hpp>
 #include <ludus/gameplay/world/entity_registry.h>
 #include <span>
@@ -104,9 +105,8 @@ struct RenderFrame final
 {
     Draw Draws[64] = {};
     usize Count = 0;
-    Vec2 Camera{};
-    float32 VerticalExtent = 14;
-    float32 MinimumWidth = 24;
+    gameplay::camera::CameraSample Camera{};
+    gameplay::camera::CameraTrace CameraTrace{};
     uint64 Tick = 0;
 };
 struct SpawnOutcome final
@@ -176,7 +176,10 @@ public:
     [[nodiscard]] Status QueueDestroy(EntityId entity) noexcept;
     [[nodiscard]] Status SubmitCompletion(Completion completion) noexcept;
     [[nodiscard]] Status BeginRequest(EntityId entity, Completion& ticket) noexcept;
-    [[nodiscard]] bool Extract(float32 alpha, RenderFrame& frame) const noexcept;
+    [[nodiscard]] bool Extract(float32 alpha,
+                               RenderFrame& frame,
+                               bool followPlayer = false,
+                               uint64 presentationSequence = 0) const noexcept;
     [[nodiscard]] EntityId FindAuthored(std::string_view id) const noexcept;
     [[nodiscard]] const gameplay::world::EntityRegistry& Registry() const noexcept
     {

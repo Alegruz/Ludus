@@ -69,6 +69,7 @@ TEST_CASE("Prepared ticks, commands, completions and render extraction never all
     {
         tick = world.RunTick({ .Pressed = index % 30 == 0 });
         rendered &= world.Extract(0.5F, frame);
+        rendered &= world.Extract(0.5F, frame, true, index);
         world.ConsumeOutbox();
         if (tick != Status::Success)
         {

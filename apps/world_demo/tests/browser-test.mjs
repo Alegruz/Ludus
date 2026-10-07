@@ -8,7 +8,8 @@ const root = resolve(process.argv[2]);
 const output = resolve(process.argv[3] || 'out/world-browser');
 await mkdir(output, {recursive:true});
 const server = createServer(async (request, response) => {
-  const path = resolve(root, '.' + (request.url === '/' ? '/index.html' : new URL(request.url, 'http://localhost').pathname));
+  const pathname = new URL(request.url, 'http://localhost').pathname;
+  const path = resolve(root, '.' + (pathname === '/' ? '/index.html' : pathname));
   if (!path.startsWith(root + sep)) {response.writeHead(403).end(); return;}
   try {const data = await readFile(path); response.writeHead(200, {'Content-Type': path.endsWith('.wasm') ? 'application/wasm' : path.endsWith('.js') ? 'text/javascript' : 'text/html'}).end(data);}
   catch {response.writeHead(404).end();}
@@ -58,6 +59,26 @@ try {
   await page.keyboard.down('d'); await page.waitForTimeout(80); await page.locator('canvas').evaluate(node => node.blur()); await page.waitForTimeout(80); await page.locator('canvas').evaluate(node => node.focus());
   const refocused = await state(); await page.waitForTimeout(120); assert.equal((await state()).x, refocused.x); await page.keyboard.up('d'); check('focus cancellation prevents retained movement');
   await page.setViewportSize({width:480,height:740}); await page.waitForTimeout(150); await page.screenshot({timeout:60000,path:resolve(output,'narrow.png')}); check('narrow resize presents the scene');
+  // Explicit opt-in follows the drawn player, including pause and resize.
+  await page.goto(`http://127.0.0.1:${server.address().port}/?camera=follow`);
+  await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'playing', {}, {timeout:30000});
+  await page.locator('canvas').evaluate(node => node.focus()); await page.waitForTimeout(100);
+  await page.keyboard.press('p');
+  await page.waitForFunction(() => document.querySelector('#status').dataset.mode === 'paused');
+  for (const viewport of [{width:640,height:480}, {width:480,height:740}]) {
+    await page.setViewportSize(viewport); await page.waitForTimeout(150);
+    const clip = await page.locator('canvas').boundingBox();
+    const pixels = PNG.sync.read(await page.screenshot({timeout:60000,clip,path:resolve(output, `follow-${viewport.width}.png`)}));
+    let count = 0, sumX = 0, sumY = 0;
+    for (let y=0; y<pixels.height; ++y) for (let x=0; x<pixels.width; ++x) {
+      const index=(y*pixels.width+x)*4, [r,g,b]=pixels.data.subarray(index,index+3);
+      if (r>230 && g>120 && g<230 && b<100) {++count; sumX+=x+0.5; sumY+=y+0.5;}
+    }
+    assert.ok(count>40, 'Follow frame must contain player pixels');
+    assert.ok(Math.abs(sumX/count-pixels.width/2)<2 && Math.abs(sumY/count-pixels.height/2)<2,
+      `Follow camera must center drawn player: ${sumX/count},${sumY/count} in ${pixels.width}x${pixels.height}`);
+  }
+  check('opt-in follow centers the interpolated player on wide and narrow viewports');
   assert.equal(report.errors.length, 0); report.outcome = 'passed';
 } catch(error) {report.outcome='failed'; report.failure=String(error); process.exitCode=1;}
 finally {await writeFile(resolve(output,'report.json'), JSON.stringify(report,null,2)+'\n'); console.log(JSON.stringify(report)); await browser?.close(); server.close();}

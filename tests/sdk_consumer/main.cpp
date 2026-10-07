@@ -40,6 +40,7 @@ bool ExerciseInstalledReflection() noexcept;
 int ExerciseInstalledTime() noexcept;
 bool ExerciseInstalledFluid() noexcept;
 bool ExerciseInstalledCurves() noexcept;
+bool ExerciseInstalledCamera() noexcept;
 
 static_assert(ludus::foundation::kTarget.PointerBits == sizeof(void*) * 8);
 #if defined(LUDUS_PLATFORM_MACOS)
@@ -238,6 +239,10 @@ int main()
     if (!ExerciseInstalledReflection())
     {
         return 91;
+    }
+    if (!ExerciseInstalledCamera())
+    {
+        return 41;
     }
     if (!ExerciseInstalledCurves())
     {
