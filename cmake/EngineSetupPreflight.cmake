@@ -1,4 +1,12 @@
 include("${CMAKE_CURRENT_LIST_DIR}/LudusDependencies.cmake")
+
+# Direct CMake/IDE configuration must record the same validated inputs as the
+# Python wrapper. Otherwise a subsequent scripts/build treats that successful
+# configure as stale and --fresh discards caller selections such as Slang.
+function(ludus_record_macos_configuration)
+    get_property(identity GLOBAL PROPERTY LUDUS_CONFIGURED_MACOS_TOOLCHAIN)
+    file(WRITE "${CMAKE_BINARY_DIR}/.ludus-macos-toolchain.json" "${identity}\n")
+endfunction()
 # Run before project(): otherwise CMake's compiler setup reports only a missing
 # toolchain path, without explaining how to prepare this checkout/preset.
 function(ludus_check_setup)
@@ -86,6 +94,10 @@ function(ludus_check_setup)
                         "Initialized input changed: '${input}'." "From the repository root: ${command}")
                 endif()
             endforeach()
+            string(JSON identity GET "${state}" macos_toolchain)
+            set_property(GLOBAL PROPERTY LUDUS_CONFIGURED_MACOS_TOOLCHAIN "${identity}")
+            # Deferred work runs only after configuration completes successfully.
+            cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL ludus_record_macos_configuration)
         endif()
         return()
     endif()

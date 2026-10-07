@@ -84,6 +84,19 @@ class SetupPreflightTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout)
                 self.assertEqual(toolchain.read_bytes(), before)
                 self.assertFalse((self.root / "out/init/options.json").exists())
+                if relative.startswith("out/conan/"):
+                    stamp = self.root / "out/build/macos-clang-debug/.ludus-macos-toolchain.json"
+                    self.assertEqual(json.loads(stamp.read_text()), identity)
+                    stamp.unlink()
+                    with (self.root / "CMakeLists.txt").open("a") as source:
+                        source.write('message(FATAL_ERROR "later configure failure")\n')
+                    failed = self.configure(toolchain)
+                    self.assertNotEqual(failed.returncode, 0)
+                    self.assertIn("later configure failure", failed.stdout)
+                    self.assertFalse(stamp.exists())
+                    source = self.root / "CMakeLists.txt"
+                    source.write_text(source.read_text().replace(
+                        'message(FATAL_ERROR "later configure failure")\n', ''))
 
     def test_no_toolchain_requires_initialization(self):
         (self.root / "CMakeLists.txt").write_text(
