@@ -72,4 +72,8 @@ Result Directory::Close() noexcept
 {
     return {};
 }
+Result Directory::Observe(std::string_view /*relativePath*/, FileStamp& /*output*/) const noexcept
+{
+    return {Status::Unsupported};
+}
 } // namespace ludus::foundation::filesystem
