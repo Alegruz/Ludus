@@ -48,8 +48,8 @@ void MainWindow::RenderDocumentActions()
                                          : QStringLiteral("&Save"));
     // Clean project saves are available too: the focused argument delegate may
     // contain pending text that has not yet made the document dirty.
-    const bool rootBlocked =
-        project && Content_->Busy() && Controller_->State().Draft.SourceDir != Controller_->State().Saved.SourceDir;
+    const bool rootBlocked = project && Content_->Importing() &&
+                             Controller_->State().Draft.SourceDir != Controller_->State().Saved.SourceDir;
     SaveAction_->setToolTip(rootBlocked ? QStringLiteral("Finish or cancel content work before changing its root.")
                                         : QString());
     SaveAction_->setEnabled(project ? Controller_->Caps().CanEdit && !rootBlocked

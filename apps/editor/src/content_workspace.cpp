@@ -173,6 +173,11 @@ bool ContentWorkspace::Import(const QString& file, const QString& id)
 }
 void ContentWorkspace::ChooseImport(bool reimport)
 {
+    if (Busy() || Root_.isEmpty() || Closing_)
+    {
+        Status_->setText(QStringLiteral("Finish or cancel the active content operation, then retry Import."));
+        return;
+    }
     const auto identity = Epoch_;
     const auto selected = SelectedId();
     const auto file =
@@ -274,5 +279,9 @@ bool ContentWorkspace::Finished() const noexcept
 bool ContentWorkspace::Busy() const noexcept
 {
     return Jobs_->Busy();
+}
+bool ContentWorkspace::Importing() const noexcept
+{
+    return Jobs_->Importing();
 }
 } // namespace ludus::editor

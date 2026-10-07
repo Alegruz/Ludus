@@ -60,6 +60,10 @@ MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QStr
     connect(Audio_, &AudioWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
     connect(Content_, &ContentWorkspace::BusyChanged, this, &MainWindow::RenderCapabilities);
     connect(Content_, &ContentWorkspace::CatalogChanged, Audio_, &AudioWorkspace::RefreshCatalog);
+    connect(Audio_, &AudioWorkspace::ImportRequested, this, [this]() {
+        WorkTabs_->setCurrentWidget(Content_);
+        Content_->ChooseImport();
+    });
     connect(Content_, &ContentWorkspace::OpenAudio, this, [this](const QString& id) {
         if (Audio_->OpenResource(id))
         {
@@ -413,7 +417,7 @@ void MainWindow::OnOpenRequested()
 
 void MainWindow::OpenProjectPath(const QString& path)
 {
-    if (path.isEmpty() || !Controller_->Caps().CanOpen || Content_->Busy() || AudioClosing_ ||
+    if (path.isEmpty() || !Controller_->Caps().CanOpen || Content_->Importing() || AudioClosing_ ||
         !Audio_->ConfirmDiscard())
     {
         return;
@@ -452,7 +456,7 @@ bool MainWindow::SaveProjectSettings()
 {
     CommitProjectFields();
     const auto& state = Controller_->State();
-    if (Content_->Busy() && state.Draft.SourceDir != state.Saved.SourceDir)
+    if (Content_->Importing() && state.Draft.SourceDir != state.Saved.SourceDir)
     {
         StatusLabel_->setText(QStringLiteral("Finish or cancel content work before saving a changed source root."));
         return false;
@@ -473,7 +477,7 @@ bool MainWindow::SaveProjectSettings()
 
 void MainWindow::OnReloadRequested()
 {
-    if (Content_->Busy())
+    if (Content_->Importing())
     {
         return;
     }
@@ -710,21 +714,21 @@ void MainWindow::RenderCapabilities()
     RedoTuningAction_->setEnabled(playState.TuningDocumentAvailable && playState.TuningCanRedo);
     SaveTuningAction_->setEnabled(Controller_->CanSaveTuningDocument());
     DiscardTuningAction_->setEnabled(playState.TuningDocumentAvailable && playState.TuningDocumentDirty);
-    NewProjectAction_->setEnabled(caps.CanProjectCreate && !Content_->Busy());
-    WelcomeNewButton_->setEnabled(caps.CanProjectCreate && !Content_->Busy());
-    CloseProjectAction_->setEnabled(caps.CanCloseProject && !Content_->Busy() && !AudioLaunchPending_ &&
+    NewProjectAction_->setEnabled(caps.CanProjectCreate && !Content_->Importing());
+    WelcomeNewButton_->setEnabled(caps.CanProjectCreate && !Content_->Importing());
+    CloseProjectAction_->setEnabled(caps.CanCloseProject && !Content_->Importing() && !AudioLaunchPending_ &&
                                     !AudioClosing_);
     CloseProjectAction_->setToolTip(QStringLiteral("Close the project and return to Welcome. Stop active work first."));
     CheckSetupAction_->setEnabled(caps.CanProjectCheck);
     SetupProjectAction_->setEnabled(caps.CanProjectSetup);
-    OpenAction_->setEnabled(caps.CanOpen && !Content_->Busy());
-    RecentMenu_->setEnabled(caps.CanOpen && !Content_->Busy() && !Controller_->RecentProjects().isEmpty());
-    RecentList_->setEnabled(caps.CanOpen && !Content_->Busy());
-    RecentOpenButton_->setEnabled(caps.CanOpen && !Content_->Busy() && RecentList_->currentItem() != nullptr);
-    BrowseProjectButton_->setEnabled(caps.CanOpen && !Content_->Busy());
+    OpenAction_->setEnabled(caps.CanOpen && !Content_->Importing());
+    RecentMenu_->setEnabled(caps.CanOpen && !Content_->Importing() && !Controller_->RecentProjects().isEmpty());
+    RecentList_->setEnabled(caps.CanOpen && !Content_->Importing());
+    RecentOpenButton_->setEnabled(caps.CanOpen && !Content_->Importing() && RecentList_->currentItem() != nullptr);
+    BrowseProjectButton_->setEnabled(caps.CanOpen && !Content_->Importing());
     ClearRecentAction_->setEnabled(caps.CanOpen && !Controller_->RecentProjects().isEmpty());
     RenderDocumentActions();
-    ReloadAction_->setEnabled(caps.CanReload && !Content_->Busy());
+    ReloadAction_->setEnabled(caps.CanReload && !Content_->Importing());
     ConfigureAction_->setEnabled(caps.CanConfigure);
     BuildAction_->setEnabled(caps.CanBuild);
     BuildRunAction_->setEnabled(caps.CanBuildRun && !AudioLaunchPending_);
@@ -942,7 +946,7 @@ bool MainWindow::ConfirmProjectChange(const QString& action)
 
 void MainWindow::OnNewProject()
 {
-    if (!Controller_->Caps().CanProjectCreate || Content_->Busy() || !Audio_->ConfirmDiscard() ||
+    if (!Controller_->Caps().CanProjectCreate || Content_->Importing() || !Audio_->ConfirmDiscard() ||
         !ConfirmProjectChange(QStringLiteral("creating another project")))
     {
         return;
@@ -956,7 +960,7 @@ void MainWindow::OnNewProject()
 
 void MainWindow::OnCloseProject()
 {
-    if (!Controller_->Caps().CanCloseProject || Content_->Busy() || AudioLaunchPending_ || AudioClosing_ ||
+    if (!Controller_->Caps().CanCloseProject || Content_->Importing() || AudioLaunchPending_ || AudioClosing_ ||
         !Audio_->ConfirmDiscard() || !ConfirmProjectChange(QStringLiteral("closing the project")))
     {
         return;
@@ -1082,7 +1086,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
             event->ignore();
             return;
         }
-        const bool busy = !Controller_->Caps().CanCloseImmediately || Content_->Busy();
+        const bool busy = !Controller_->Caps().CanCloseImmediately || Content_->Importing();
         if (busy && !CloseConfirmed_)
         {
             const auto choice = QMessageBox::question(

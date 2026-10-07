@@ -82,6 +82,7 @@ public:
     [[nodiscard]] bool Cancel();
     void Shutdown();
     [[nodiscard]] bool Busy() const noexcept;
+    [[nodiscard]] bool Importing() const noexcept;
     [[nodiscard]] bool Finished() const noexcept;
 Q_SIGNALS:
     void Completed(const ContentResult& result);
@@ -104,10 +105,12 @@ public:
     void SetProject(const QString& root, foundation::uint64 epoch);
     void Refresh();
     [[nodiscard]] bool Import(const QString& file, const QString& id);
+    void ChooseImport(bool reimport = false);
     void Cancel();
     void Shutdown();
     [[nodiscard]] bool Finished() const noexcept;
     [[nodiscard]] bool Busy() const noexcept;
+    [[nodiscard]] bool Importing() const noexcept;
     [[nodiscard]] QString SelectedId() const;
 Q_SIGNALS:
     void BusyChanged();
@@ -117,7 +120,6 @@ Q_SIGNALS:
 private:
     void RenderActions();
     void RestoreSelection();
-    void ChooseImport(bool reimport);
     void Accept(const ContentResult& result);
     [[nodiscard]] ContentRequest Request() const;
     ContentJobs* Jobs_ = nullptr;

@@ -584,29 +584,9 @@ bool AudioWorkspace::PreviewFinished() const noexcept
 
 void ludus::editor::AudioWorkspace::Import()
 {
-    if (Root_.isEmpty())
+    if (!Root_.isEmpty())
     {
-        return;
-    }
-    const auto file = QFileDialog::getOpenFileName(this,
-                                                   QStringLiteral("Import WAV or FLAC"),
-                                                   QString(),
-                                                   QStringLiteral("Audio (*.wav *.flac)"));
-    if (file.isEmpty())
-    {
-        return;
-    }
-    bool ok = false;
-    const auto id = QInputDialog::getText(this,
-                                          QStringLiteral("Source ID"),
-                                          QStringLiteral("Logical ID (reuse to reimport)"),
-                                          QLineEdit::Normal,
-                                          QStringLiteral("source/") + QFileInfo(file).completeBaseName().toLower(),
-                                          &ok);
-    if (ok)
-    {
-        Preview_->Import(Root_, file, id);
-        Message_->setText(QStringLiteral("Importing source..."));
+        Q_EMIT ImportRequested();
     }
 }
 void ludus::editor::AudioWorkspace::Create(bool music)

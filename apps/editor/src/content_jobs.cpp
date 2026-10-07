@@ -172,6 +172,10 @@ bool ContentJobs::Busy() const noexcept
 {
     return Impl_ != nullptr && !Impl_->State.isNull();
 }
+bool ContentJobs::Importing() const noexcept
+{
+    return Busy() && !Impl_->State->Result.Request.Id.isEmpty();
+}
 bool ContentJobs::Finished() const noexcept
 {
     return !Busy();

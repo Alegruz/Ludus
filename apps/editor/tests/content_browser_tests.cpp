@@ -303,6 +303,32 @@ TEST_CASE("Content completion runs on the GUI owner and shutdown acknowledges ca
     CHECK_FALSE(jobs.Start(request));
 }
 
+TEST_CASE("Browser imports acknowledge publication and refresh the selected stable ID", "[editor][content][widget]")
+{
+    QTemporaryDir root, exported;
+    ContentWorkspace workspace;
+    workspace.SetProject(root.path(), 9);
+    CHECK_FALSE(workspace.Importing());
+    Wait(workspace);
+    const auto file = Wav(exported, 500);
+    REQUIRE(workspace.Import(file, QStringLiteral("source/hit")));
+    CHECK(workspace.Importing());
+    CHECK_FALSE(workspace.Import(file, QStringLiteral("source/other")));
+    Wait(workspace);
+    CHECK(workspace.SelectedId() == QStringLiteral("source/hit"));
+    auto* table = workspace.findChild<QTableView*>(QStringLiteral("contentTable"));
+    REQUIRE(table != nullptr);
+    CHECK(table->model()->rowCount() == 1);
+    const auto path = table->model()->index(0, 2).data().toString();
+    (void)Wav(exported, 700);
+    REQUIRE(workspace.Import(file, QStringLiteral("source/hit")));
+    Wait(workspace);
+    CHECK(workspace.SelectedId() == QStringLiteral("source/hit"));
+    CHECK(table->model()->index(0, 2).data().toString() != path);
+    workspace.Shutdown();
+    CHECK(workspace.Finished());
+}
+
 TEST_CASE("Content projection records a 100000 row search and selection baseline", "[editor][content][scale]")
 {
     constexpr int ROWS = 100000;

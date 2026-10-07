@@ -270,7 +270,7 @@ existing Audio workspace, which retains its unsaved-change policy.
 
 **Import WAV / FLAC** asks for a stable resource ID. **Reimport selected** retains
 the selected audio-source ID and asks for its new export. Both entry points,
-including the existing Audio import button, share the bounded decoder,
+including the existing Audio import button (which opens Content), share the bounded decoder,
 dependency checks and publication implementation. Import validates saved loops
 and matching sample rates, captures catalog/dependency digests, and rechecks
 consulted inputs before publication. It never rewrites authored Sound or Music
@@ -291,10 +291,11 @@ entire authoring project.
 Native catalog reads, decoding, validation and writes run on a worker with owned
 input/result data. The GUI applies completed snapshots. One request is admitted
 per browser; a completion must match its operation ID, project epoch and root.
-Changing identity invalidates old results and requests cancellation. While a
-request is active, finish or cancel it before using the shell's project-switch,
+Changing identity invalidates old results and requests cancellation. While an
+import is active, finish or cancel it before using the shell's project-switch,
 Reload or Close Project actions or saving a changed source root. Other project
-field editing and the search buffer remain available.
+field editing and the search buffer remain available. Read-only catalog refreshes
+do not block project changes; their cancelled/stale results are discarded.
 
 **Cancel operation** reports cancellation requested until a terminal outcome is
 acknowledged. Cancellation wins before publication begins; a late request cannot

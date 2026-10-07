@@ -35,6 +35,7 @@ public:
 
 Q_SIGNALS:
     void DocumentChanged();
+    void ImportRequested();
 
 private:
     [[nodiscard]] bool ReadDraft(audio::content::Sound& sound, audio::content::Music& music);
