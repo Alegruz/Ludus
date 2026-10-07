@@ -79,3 +79,18 @@ TEST_CASE("Portable history coalesces edits but preserves explicit save boundari
     CHECK_FALSE(history.Commit(0, 0));
     CHECK(history.Revision() == 2);
 }
+
+TEST_CASE("Cancelling an edit group preserves earlier field boundaries", "[editor][document]")
+{
+    DocumentHistory<uint32> history;
+    REQUIRE(history.Commit(0, 1)); // first field
+    history.BreakGroup();
+    REQUIRE(history.Commit(1, 2, true)); // second field
+    REQUIRE(history.Commit(2, 1, true)); // cancel the second field's group
+    REQUIRE(history.Commit(1, 3, true)); // continue editing the second field
+    uint32 current = 3;
+    REQUIRE(history.Undo(current));
+    CHECK(current == 1);
+    REQUIRE(history.Undo(current));
+    CHECK(current == 0);
+}

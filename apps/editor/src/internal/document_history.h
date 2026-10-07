@@ -36,8 +36,11 @@ public:
                 return false;
             }
             entry->After = after;
-            if (entry->Before == after)
+            MergeAllowed_ = !(entry->Before == after);
+            if (!MergeAllowed_)
             {
+                // Removing a cancelled group must not expose an older field's
+                // entry to coalescing by the next edit in this field.
                 entry.reset();
                 --Cursor_;
                 --Count_;
@@ -61,8 +64,8 @@ public:
             }
             Entries_[Count_++] = Entry{before, after};
             Cursor_ = Count_;
+            MergeAllowed_ = true;
         }
-        MergeAllowed_ = true;
         ++Revision_;
         return true;
     }
