@@ -10,8 +10,12 @@ records the proposal before reading and the resulting refinements. The
 [October 4 review](editor-design-review.md) remains historical evidence.
 The [initial S2 slice](../development/editor-workspace.md#initial-s2-document-interactions)
 adds bounded project history, scoped Save/Undo and focused-field preservation.
-S2's portable validation/save core and broader acceptance remain pending. Later
-stages are acceptance contracts, not claims about existing features.
+S2's portable validation/save core and broader acceptance remain pending.
+The [S3 content browser](../development/editor-workspace.md#s3-content-browser)
+adds a model-backed catalog view and staged native audio import/reimport with
+cancelled/stale-result handling. Its scale fixture measures a synthetic view;
+native scrolling and browser authoring still need acceptance. Later stages are
+acceptance contracts, not claims about existing features.
 
 ## Product and engineering goals
 

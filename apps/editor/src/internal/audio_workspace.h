@@ -26,6 +26,8 @@ public:
     [[nodiscard]] bool PreviewFinished() const noexcept;
     [[nodiscard]] bool ConfirmDiscard();
     void Save();
+    void RefreshCatalog();
+    [[nodiscard]] bool OpenResource(const QString& id);
     [[nodiscard]] bool CanSave() const noexcept
     {
         return HasDocument_ && isEnabled();
@@ -33,6 +35,7 @@ public:
 
 Q_SIGNALS:
     void DocumentChanged();
+    void ImportRequested();
 
 private:
     [[nodiscard]] bool ReadDraft(audio::content::Sound& sound, audio::content::Music& music);

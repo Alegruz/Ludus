@@ -170,6 +170,12 @@ catalog remains valid; report the unreferenced file and allow cleanup. Never
 publish a catalog pointing to a file that has not been successfully written.
 Deleting registered sources is refused while referenced; report the referring IDs.
 
+The [S3 editor content browser](../development/editor-workspace.md#s3-content-browser)
+implements native copy imports with immutable, content-keyed source candidates
+and a compare-and-swap catalog switch. Both Content and Audio entry points use
+the same implementation. Candidates and superseded versions are retained;
+automatic garbage collection is not implemented.
+
 Reimport keeps the resource ID and authored settings, validates changed sample
 rate/length/loops, and prepares a new revision before publishing. Old voices retain
 the old revision until completion; new triggers use the new revision. Existing
