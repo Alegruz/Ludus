@@ -18,6 +18,7 @@ namespace ludus::editor
 // never accesses a running host, and saves only explicit preference overrides.
 class ConfigurationWorkspace final : public QWidget
 {
+    Q_OBJECT
 public:
     explicit ConfigurationWorkspace(QWidget* parent = nullptr);
     ~ConfigurationWorkspace() override;

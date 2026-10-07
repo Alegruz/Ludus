@@ -74,6 +74,10 @@ void MainWindow::BuildUi()
     PresetBox_ = new QComboBox(form);
     PresetBox_->addItem(QStringLiteral("linux-clang-debug"));
     PresetBox_->addItem(QStringLiteral("linux-clang-development"));
+    PresetBox_->addItem(QStringLiteral("linux-clang-release"));
+    PresetBox_->addItem(QStringLiteral("macos-clang-debug"));
+    PresetBox_->addItem(QStringLiteral("macos-clang-development"));
+    PresetBox_->addItem(QStringLiteral("macos-clang-release"));
     TargetBox_ = new QComboBox(form);
     TargetBox_->setObjectName(QStringLiteral("projectTarget"));
     TargetBox_->setEditable(true); // target can be entered before configuration
@@ -242,7 +246,9 @@ void MainWindow::InitializeWorkspace()
     DefaultLayout_ = saveState(LAYOUT_VERSION);
     if (WorkspaceSettingsFile_.isEmpty())
     {
-        const auto config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+        const auto config = (QDir::isAbsolutePath(qEnvironmentVariable("XDG_CONFIG_HOME"))
+                                 ? qEnvironmentVariable("XDG_CONFIG_HOME")
+                                 : QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation));
         if (!config.isEmpty())
         {
             WorkspaceSettingsFile_ = QDir(config).filePath(QStringLiteral("Ludus/Editor/workspace.json"));

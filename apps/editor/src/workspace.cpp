@@ -115,9 +115,11 @@ bool CanStartJob(const WorkspaceState& state, ActionKind kind)
     {
         case ActionKind::ProjectCheck:
         case ActionKind::ProjectSetup:
+            return !state.Dirty() && state.Saved.Version == 2 && state.Saved.ProviderKind == Provider::Cmake;
         case ActionKind::ReleaseInit:
         case ActionKind::Package:
-            return !state.Dirty() && state.Saved.Version == 2 && state.Saved.ProviderKind == Provider::Cmake;
+            return !state.Dirty() && state.Saved.Version == 2 && state.Saved.ProviderKind == Provider::Cmake &&
+                   !state.Saved.Preset.startsWith(QStringLiteral("macos-"));
         case ActionKind::Configure:
             return true;
         case ActionKind::BuildDebug:

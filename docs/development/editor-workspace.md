@@ -35,11 +35,12 @@ and [native live editing](project-live-reload.md).
 ## Prerequisites (optional editor setup)
 
 The editor needs Qt 6 (6.4-compatible) with the Core/Gui/Widgets modules and a
-Wayland platform plugin, in addition to the normal reference toolchain
+native platform plugin (Wayland on Linux, Cocoa on macOS), in addition to the normal reference toolchain
 (`./init.sh` prepares pinned Clang 18 / LLD / managed CMake/Ninja/Conan and the
 managed Python venv). Qt is not added to Conan or the SDK. Default initialization
 skips editor setup; select **Build Ludus editor** in the setup window or use
-`./init.sh --cli --with-editor` to install missing Ubuntu/Debian Qt packages and
+`./init.sh --cli --with-editor` to install missing Ubuntu/Debian Qt packages or
+Homebrew `qtbase` on macOS and
 build the selected native Debug, Development or ASan/UBSan editor. `--no-editor` explicitly
 disables the editor for the prepared presets. Initialization also excludes test
 targets by default; use `--with-tests` to include editor tests or `--run-tests` to
@@ -52,6 +53,9 @@ To manage Qt yourself, install it once (names vary by distribution) and use
 
 - Debian/Ubuntu: `sudo apt-get install -y qt6-base-dev qt6-wayland`
 - Fedora/Amazon Linux: `sudo dnf install -y qt6-qtbase-devel qt6-qtwayland`
+- macOS: `brew install qtbase` (Core/Gui/Widgets/Test and Cocoa). Setup discovers
+  Homebrew Qt and records `Qt6_DIR` only in the local build cache. A manual Qt
+  installation can be selected with CMake `-DQt6_DIR=/path/to/lib/cmake/Qt6`.
 
 Only the editor configure/build uses Qt. A default configure
 (`LUDUS_BUILD_EDITOR=OFF`) and default engine browser builds never search for Qt. The separate
@@ -71,9 +75,33 @@ cmake --preset linux-clang-development -DLUDUS_USE_INIT_OPTIONS=OFF -DLUDUS_BUIL
 cmake --build --preset linux-clang-development --target ludus_editor
 ```
 
-Native `LUDUS_BUILD_EDITOR=ON` requires Linux x64. Browser editor builds use
+Native `LUDUS_BUILD_EDITOR=ON` supports Linux x64 and macOS arm64/x64.
+Apple silicon is the validated macOS host; native Intel acceptance remains pending.
+Browser editor builds use
 the separate pinned Qt WebAssembly toolchain; ordinary browser engine setup does
 not enable the editor. Unsupported native hosts fail configuration explicitly.
+
+On macOS, the launcher defaults to `macos-clang-development`:
+
+```bash
+./init.sh --cli macos-clang-development --preset-only --with-editor --with-tests --no-system-install
+./scripts/editor --preset macos-clang-development
+```
+
+The macOS port includes New/Open/Save, SDK setup/check/repair, Configure/Build,
+Build and Run, Stop, project profile selection, layout/history, audio authoring
+and preview, and Configuration. Qt supplies native Cocoa windows, text input,
+file pickers, and platform shortcuts. Games run separately using their own
+platform/RHI backend, including Metal. Version-2 descriptors expose all three
+macOS game profiles; the Editor itself uses Debug, Development or ASan/UBSan.
+Version-1 descriptors retain their original Linux preset contract.
+
+Live Play/reload generation publication still requires Linux ELF build IDs and
+embedded DWARF. Its macOS UI action is guarded and disabled; use Build and Run.
+RAD debugging and release packaging/signing are also disabled on macOS, with
+backend errors if invoked directly. These deferred features do not block ordinary
+build/run. The Editor is built from the tooling checkout; this port does not add
+an installed/signable Editor application bundle to the runtime SDK.
 
 ## Launch
 
@@ -103,7 +131,9 @@ are labelled; a failed open preserves the current project. **Clear Recent Projec
 clears history without deleting projects. Recents no longer reserve a dock column.
 
 History is local to the user, in `$XDG_CONFIG_HOME/Ludus/Editor/recent-projects.json`
-(normally `~/.config/Ludus/Editor/recent-projects.json`). It is saved atomically,
+(normally `~/.config/Ludus/Editor/recent-projects.json` on Linux). An absolute
+`XDG_CONFIG_HOME` override works on both native hosts; otherwise macOS uses
+Qt's native config location (`~/Library/Preferences/Ludus/Editor`). It is saved atomically,
 separately from project files. If preferences cannot be written, project opening
 still works and history remains available for the current session.
 
@@ -245,8 +275,8 @@ This slice does not complete S2: typed portable transactions, richer validation
 feedback, broader inspector/IME acceptance and configurable command mappings
 still need implementation and qualification. Regression fixtures cover history
 branching, save failures and conflicts, a later edit during Save, text focus,
-pending argument buffers, command scope and cancelled Quit. The Linux optional
-editor CI runs the Qt fixtures offscreen and the sanitizer profile includes the
+pending argument buffers, command scope and cancelled Quit. The Linux and macOS optional
+editor CI run the Qt fixtures offscreen and the sanitizer profile includes the
 editor; offscreen checks do not establish native input or browser acceptance.
 
 With the Qt prerequisites installed, include the editor in sanitizer validation:
@@ -418,3 +448,24 @@ supported; do not distribute layout blobs with projects.
 See [architecture](../architecture/editor-architecture.md),
 [interaction design](../architecture/editor-interaction-design.md), and
 [post-design reference review](../architecture/editor-design-review.md).
+
+## macOS validation
+
+The macOS CI job builds the Editor with pinned Clang 18 and warnings as errors,
+runs offscreen widget/document tests and real process-adapter regressions, and
+runs those widgets under ASan/UBSan. A separate explicit Cocoa test exercises a
+real native window, creation against an installed SDK, build/run, Stop of a
+long-lived runtime, read-only diagnosis of missing local presets, and repeated
+repair. Run it only after preparing the SDK and Editor tests:
+
+```bash
+QT_QPA_PLATFORM=cocoa LUDUS_SETUP_TEST_SDK="$PWD/out/install/macos-clang-development" \
+  out/build/macos-clang-development/apps/editor/ludus_editor_tests '[.macos-journey]'
+```
+
+The adapter binds Darwin `waitid(WNOWAIT)` through libc because Python does not
+expose it on macOS. Bounded libproc group snapshots replace `/proc`. The leader
+stays unreaped until descendant cleanup is confirmed, preserving the existing
+ownership/Stop contract; missing or truncated process information yields
+**CleanupUnknown**, never successful cleanup. Settings in tests are isolated
+using the same absolute `XDG_CONFIG_HOME` override as local development.

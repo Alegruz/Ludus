@@ -15,7 +15,7 @@ Design guarantees implemented here:
   * Cancellation (explicit cancel message, stdin EOF, SIGTERM/SIGINT) latches and
     cleans up: TERM the group, drain, escalate to KILL after a deadline, observe
     termination, and only then emit the terminal result.
-  * Non-reaping exit observation on Linux (os.waitid WNOWAIT) keeps the leader's
+  * Non-reaping exit observation on Linux and macOS (waitid WNOWAIT) keeps the leader's
     PID valid until descendant cleanup is complete.
   * Bounded output credit window and bounded control output; no unbounded buffers.
   * Missing result / abnormal exit is never reported as success.
@@ -29,6 +29,7 @@ from collections import deque
 import errno
 import json
 import os
+import platform
 import selectors
 import signal
 import subprocess
@@ -271,7 +272,7 @@ class ProtocolWriter:
 
 
 # --------------------------------------------------------------------------- #
-# Owned child process group and non-reaping cleanup (Linux)
+# Owned child process group and non-reaping cleanup (POSIX)
 # --------------------------------------------------------------------------- #
 @dataclass
 class CleanupReport:
@@ -328,6 +329,9 @@ class OwnedProcess:
         waitid(WNOWAIT) keeps the zombie leader present so its PID cannot be
         reused as a new, unrelated process group during cleanup.
         """
+        if sys.platform == "darwin":
+            from editor_process_macos import observe_exit
+            return observe_exit(self.pid)
         try:
             info = os.waitid(os.P_PID, self.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
         except ChildProcessError:
@@ -350,6 +354,9 @@ class OwnedProcess:
         pid. Inability to inspect is NOT treated as proof of absence; the caller
         distinguishes that from confirmed emptiness.
         """
+        if sys.platform == "darwin":
+            from editor_process_macos import group_members
+            return group_members(self.pid)
         members: list[int] = []
         proc_root = Path("/proc")
         try:
@@ -924,8 +931,12 @@ class Operation:
             if self._operation in ("project_check", "project_setup"):
                 return self._execute_setup(descriptor)
             if self._operation in ("release_init", "package"):
+                if platform.system() == "Darwin" or descriptor.preset.startswith("macos-"):
+                    raise editor_project.ProjectError("ReleaseFailed", "macOS release packaging/signing is not implemented")
                 return self._execute_release(descriptor)
             if self._operation == "build_debug":
+                if platform.system() == "Darwin" or descriptor.preset.startswith("macos-"):
+                    raise editor_project.ProjectError("MissingDebugger", "RAD debugging is available for Linux x64 only")
                 return self._execute_debug(descriptor)
             plan = build_plan(self._context, descriptor, self._project_path.parent,
                               descriptor_path=self._project_path)
@@ -1090,7 +1101,8 @@ class Operation:
             options["disable_web"] = self._options.get("disable_web", False)
             if self._options.get("prepare_engine"):
                 root = self._context.tooling_root
-                profile = descriptor.preset if descriptor else "linux-clang-development"
+                from ludus_tools.native import default_profile
+                profile = descriptor.preset if descriptor else default_profile()
                 env = self._context.engine.tool_env(root)
                 env.update(CI="true")
                 self._run_stage("configuring", [str(root / "scripts/init"), profile, "--preset-only", "--cli", "--no-system-install"], root, env, "ConfigureFailed")
@@ -1099,6 +1111,8 @@ class Operation:
                     self._run_stage("building", [str(root / "scripts/shader-probe"), "bootstrap"], root, env, "BuildFailed")
                 sdk = sdk or root / "out/install" / profile
                 self._run_stage("building", [str(self._context.engine.cmake(root)), "--install", str(root / "out/build" / profile), "--prefix", str(sdk)], root, env, "BuildFailed")
+                self._run_stage("building", [str(self._context.engine.venv_python(root)), str(root / "scripts/python/engine.py"),
+                                            "bundle-sdk-dependencies", profile, "--prefix", str(sdk)], root, env, "BuildFailed")
             if self._operation == "project_create":
                 from ludus_tools.creation_engine import select_creation_sdk, prepare_creation_sdk
                 root = self._context.tooling_root

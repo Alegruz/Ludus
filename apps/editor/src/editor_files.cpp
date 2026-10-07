@@ -57,7 +57,9 @@ void MarkBrowserEdited()
 }
 #endif
 
-void OpenEditorDocument(QWidget* owner, const EditorDocumentDialog& dialog, std::function<void(const QString&)> loaded)
+void OpenEditorDocument(QWidget* owner,
+                        const EditorDocumentDialog& dialog,
+                        const std::function<void(const QString&)>& loaded)
 {
 #if defined(Q_OS_WASM)
     (void)dialog;
@@ -68,7 +70,7 @@ void OpenEditorDocument(QWidget* owner, const EditorDocumentDialog& dialog, std:
     auto state = QSharedPointer<BrowserImport>::create();
     PendingImport = state;
     state->Owner = owner;
-    state->Completed = std::move(loaded);
+    state->Completed = loaded;
     const QWeakPointer<BrowserImport> weak(state);
     // Thanks to Qt Group, qstdweb::EventCallback/FileReader (Qt 6.10.3): these
     // callbacks participate in Qt's suspend/resume dispatcher. A raw Wasm call

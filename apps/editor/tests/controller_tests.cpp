@@ -417,6 +417,9 @@ void StopDebugSession(EditorController& controller)
 
 TEST_CASE("Debug is visible and optional setup is offered only after a Debug request", "[editor][debug]")
 {
+#if defined(Q_OS_MACOS)
+    SKIP("RAD sessions are Linux-only; macOS capability gates are tested separately");
+#endif
     QTemporaryDir dir;
     EditorController controller(DebugTooling(dir));
     MainWindow window(&controller);
@@ -445,6 +448,9 @@ TEST_CASE("Debug is visible and optional setup is offered only after a Debug req
 
 TEST_CASE("Explicit RAD setup continues the same clean project and Stop closes the session", "[editor][debug]")
 {
+#if defined(Q_OS_MACOS)
+    SKIP("RAD sessions are Linux-only; macOS capability gates are tested separately");
+#endif
     QTemporaryDir dir;
     EditorController controller(DebugTooling(dir));
     MainWindow window(&controller);
@@ -483,6 +489,9 @@ TEST_CASE("Explicit RAD setup continues the same clean project and Stop closes t
 
 TEST_CASE("A stale debugger setup dialog cannot debug a different project", "[editor][debug]")
 {
+#if defined(Q_OS_MACOS)
+    SKIP("RAD sessions are Linux-only; macOS capability gates are tested separately");
+#endif
     QTemporaryDir dir;
     EditorController controller(DebugTooling(dir));
     MainWindow window(&controller);
@@ -505,6 +514,9 @@ TEST_CASE("A stale debugger setup dialog cannot debug a different project", "[ed
 
 TEST_CASE("An existing RAD executable can open a session without installation", "[editor][debug]")
 {
+#if defined(Q_OS_MACOS)
+    SKIP("RAD sessions are Linux-only; macOS capability gates are tested separately");
+#endif
     QTemporaryDir dir;
     EditorController controller(DebugTooling(dir));
     controller.OpenProject(WriteDescriptor(dir, ValidDescriptor()));
@@ -534,7 +546,11 @@ TEST_CASE("Play menu follows saved project and tooling eligibility", "[editor][c
     auto* reload = window.findChild<QAction*>(QStringLiteral("play.reload"));
     REQUIRE(play != nullptr);
     REQUIRE(reload != nullptr);
+#if defined(Q_OS_MACOS)
+    CHECK_FALSE(play->isEnabled());
+#else
     QTRY_VERIFY_WITH_TIMEOUT(play->isEnabled(), 10000);
+#endif
     CHECK_FALSE(reload->isEnabled());
 
     auto edited = controller.State().Draft;
@@ -545,6 +561,9 @@ TEST_CASE("Play menu follows saved project and tooling eligibility", "[editor][c
 
 TEST_CASE("Live Play ownership prevents a competing RAD debug job", "[editor][debug][play]")
 {
+#if defined(Q_OS_MACOS)
+    SKIP("RAD sessions are Linux-only; macOS capability gates are tested separately");
+#endif
     QTemporaryDir dir;
     const auto tooling = DebugTooling(dir);
     REQUIRE(QDir(dir.path()).mkpath(QStringLiteral("scripts/python")));
@@ -572,3 +591,27 @@ TEST_CASE("Live Play ownership prevents a competing RAD debug job", "[editor][de
     CHECK(controller.PlayState().Phase == PlayPhase::Stopped);
     CHECK_FALSE(QFile::exists(dir.filePath(QStringLiteral("debug_request.json"))));
 }
+
+#if defined(Q_OS_MACOS)
+TEST_CASE("macOS keeps native build/run while gating deferred debugger and live tooling", "[editor][macos]")
+{
+    QTemporaryDir dir;
+    const QByteArray descriptor = QByteArrayLiteral(R"json({"version":2,"name":"Mac Game","provider":"cmake",
+"source_dir":".","preset":"macos-clang-development","target":"game","run":{"cwd":".","args":[]},
+"engine":{"version":"0.1.0","components":["FoundationBase"],"features":[]}})json");
+    EditorController controller(NoTooling());
+    MainWindow window(&controller);
+    controller.OpenProject(WriteDescriptor(dir, descriptor));
+    CHECK(controller.State().Saved.Preset == QStringLiteral("macos-clang-development"));
+    CHECK(controller.Caps().CanBuildRun);
+    CHECK_FALSE(controller.Caps().CanBuildDebug);
+    CHECK_FALSE(controller.Caps().CanReleaseInit);
+    CHECK_FALSE(controller.Caps().CanPackage);
+    CHECK_FALSE(controller.CanPlay());
+    const auto job = controller.State().ActiveJob;
+    controller.BuildDebug();
+    controller.Play();
+    controller.SetupRelease(QStringLiteral("linux-x64"), {});
+    CHECK(controller.State().ActiveJob == job);
+}
+#endif
