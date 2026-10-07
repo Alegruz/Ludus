@@ -411,6 +411,81 @@ These entries have full or partial chapter reviews recorded in the repository. T
 | Diagnostics | Science of Debugging; Informative Error Log; Tools for Debugging and Development; hierarchical profiling | Can failures be reproduced from recorded identities and commands, and can iteration latency and residency be measured? |
 | Specialist tools | Select the dialogue, AI, shader, lighting, mesh, terrain or curve entries in categories 8 and 9 | What concrete authoring task justifies a dedicated tool and what minimal document/preview contract supports it? |
 
+## Conference and journal research after the initial implementation
+
+Recorded 2026-10-06. Implement and validate the initial
+[editor architecture](editor-architecture.md#delivery-and-acceptance) and
+[GUI systems delivery sequence](editor-gui-systems.md#performance-evidence-and-delivery)
+first, then use the resources below to improve the working system. Capture the
+accepted revision, representative user tasks, datasets, supported hosts and
+measurements before trials. API checks and research needed to resolve an initial
+integration risk remain part of implementation; this later queue does not move
+speculative redesign ahead of the baseline.
+
+These sources are separate from the 246-entry book/TOC catalogue above. Venue
+descriptions and session metadata/abstracts were screened when recommending
+them; the four full readings remain queued. Topic mappings and possible
+experiments are Ludus hypotheses, not findings attributed to unread sources.
+The architecture and GUI systems pages own contracts and acceptance gates.
+
+### Venues to search
+
+| Venue | Priority after baseline | Topics to screen for | Potential Ludus use |
+| --- | --- | --- | --- |
+| [GDC / GDC Vault](https://www.gdcvault.com/) tools and programming talks | First | Production tool UX, iteration, import/reimport, content organization, debugging and small-team tooling | Document interactions, content workflows and maintainability |
+| [ACM UIST](https://uist.acm.org/) | First | Authoring systems, direct manipulation, selection, commands and edit history | Document/gesture interactions and scene tools |
+| [ACM CHI](https://chi2026.acm.org/authors/papers/selecting-a-subcommittee/) | First | Usability evaluation, expert/novice workflows, accessibility, discoverability and recovery | Task-based evaluation of the shell and authoring workflows |
+| [SIGGRAPH Talks](https://s2026.siggraph.org/program/talks/) and production work | Selective | Pipeline tools, scene/material/animation authoring and preview workflows | Content, viewport and specialist-tool improvements |
+| [ACM Transactions on Computer-Human Interaction (TOCHI)](https://dl.acm.org/journal/tochi) | First journal | Interaction architecture, techniques, design and evaluation | Document and command models; deeper workflow studies |
+| [IEEE Transactions on Visualization and Computer Graphics (TVCG)](https://www.computer.org/digital-library/journals/tg/cfp-ieee-transactions-on-visualization-computer-graphics) | Selective journal | Graphics interaction, visual programming, geometric manipulation and evaluation | Viewport, hierarchy and future graph tools |
+| [IEEE Software](https://www.computer.org/csdl/magazine/so) | Selective peer-reviewed magazine | Practical architecture, development tools, testing, maintenance and usability | Reliable editor services and maintainable host adapters |
+| [IEEE Computer Graphics and Applications](https://www.computer.org/csdl-pub-home-cga/) | Selective peer-reviewed magazine | Applied graphics, visualization and interaction | Authoring previews and diagnostic visualization |
+
+The year-specific links are archive/scope entry points, not an attendance plan
+or a claim about upcoming schedules. Search retained papers and talks for a
+concrete editor problem rather than treating every venue topic as a feature
+requirement. Access to a source does not imply full review or adoption.
+
+### Initial reading queue
+
+Begin with the following order after baseline acceptance. The questions below
+identify possible comparisons; they do not prescribe implementation before the
+sources have been read.
+
+| ID | Source and attribution | Full-review status | Question and possible experiment after review |
+| --- | --- | --- | --- |
+| ER-01 | David Lightbown, **Tools Summit: How Ubisoft Builds Tools that Are More "Intuitive"**, GDC 2021, Ubisoft. [Session](https://www.gdcvault.com/play/1027312/Tools-Summit-How-Ubisoft-Builds) | Queued; session description screened | Which consistent patterns help users predict save, preview and session actions? Compare representative editing/recovery tasks with the baseline; record completion, wrong turns and help needed. |
+| ER-02 | Isadora Rodopoulos, **Making Delightful Tools for Sustainable Small-Team Development**, GDC 2025, Coldblood Inc. [Session](https://gdcvault.com/play/1035501/Making-Delightful-Tools-for-Sustainable) | Queued; session description screened | Which workflow improvements repay their implementation and maintenance cost for our team? Trial one bounded change; measure task friction and the effort to add or debug a property/command. |
+| ER-03 | Rowan Hamilton, **Tools Summit: Managing Source Content for 'Overwatch 2'**, GDC 2023, Blizzard Entertainment. [Session](https://www.gdcvault.com/play/1028817) | Queued; session description screened | Which source-content and revision-control practices transfer to Ludus's smaller projects? Exercise find/reimport/conflict/recovery with stable IDs; compare task time, errors and retained work. |
+| ER-04 | Dan R. Olsen Jr., **Evaluating User Interface Systems Research**, UIST 2007, pp. 251–258. [Proceedings entry](https://uist.acm.org/archive/html/proceedings/2007.html); [DOI](https://doi.org/10.1145/1294211.1294256) | Queued; abstract screened | Which criteria supplement user-task tests when evaluating the document core or viewport integration? Apply the reviewed criteria to one prototype alongside correctness, portability, latency and maintenance evidence. |
+
+### Review and improvement record
+
+Screen additional sources against observed baseline problems. Add exact author,
+title, publication/year, DOI or primary-source URL, access locator, priority and
+review status. Record the scope/date of archive searches. Use **Queued**,
+**Reading**, **Reviewed**, **Trial planned**, **Trial complete**, **Adopted**,
+**Deferred** or **Rejected**; update the existing entry when work advances.
+
+For each review/trial, record:
+
+1. Source ID, review date and exact sections, pages or talk timestamps consulted.
+2. Relevant ideas, assumptions, limitations and differences from Ludus; distinguish
+   design inspiration from adapted code.
+3. A concrete authoring problem, affected subsystem and testable improvement.
+4. A bounded prototype and comparison revision, tasks, datasets and host/toolchain
+   versions; include failure, stale-result and recovery cases.
+5. Reproduction commands and evidence for task completion/errors, input-to-visible
+   response p50/p95, stalls, memory/queues and property/command maintenance effort
+   as relevant. Keep generated captures/results in ignored `out/`.
+6. Adopt/defer/reject with reasons and links to changed architecture/ADRs, tests
+   and implementation PRs. Credit consulted sources near code they inform.
+
+No source in this queue has a completed trial or adoption record yet. Preserve
+the existing chapter reviews and their stated scope. A faster prototype must
+still satisfy the architecture's work-preservation, accessibility, ownership,
+revision and failure contracts before adoption.
+
 ## Adaptation limits and catalog gaps
 
 Historical C#, .NET, COM, AppDomain, Direct3D and DLL examples can contribute design questions. They do not justify replacing Qt, changing the Linux-first process model or adopting their APIs. Any implementation must keep C++23, explicit failure results, no engine/application exceptions, Ludus primitive aliases, public-header hygiene and Qt-free installed runtime interfaces.

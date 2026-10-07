@@ -153,6 +153,15 @@ Each stage is an independently reviewable PR. Keep existing project setup,
 live-reload, audio, entity, and level-data contracts; this document organizes
 their integration. Do not claim S2–S5 are implemented by S1.
 
+Implement and validate this initial architecture and the GUI systems delivery
+sequence before beginning the broader conference/journal improvement pass.
+Retain the accepted implementation revision, representative tasks, datasets and
+measurements as its comparison baseline. Required API verification and existing
+acceptance work stay part of implementation. The
+[deferred research queue](editor-reference-reading-guide.md#conference-and-journal-research-after-the-initial-implementation)
+records later readings and experiments; candidate ideas become architecture
+changes only after review and comparison with that baseline.
+
 ## Related contracts
 
 - [Workspace implementation](../development/editor-workspace.md)
