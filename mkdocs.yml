@@ -7,8 +7,13 @@ site_description: Practical guides, explanations and references for using and co
 site_url: https://alegruz.github.io/Ludus/
 repo_url: https://github.com/Alegruz/Ludus
 repo_name: Alegruz/Ludus
-edit_uri: edit/main/docs/wiki/
-docs_dir: docs/wiki
+edit_uri: edit/main/docs/
+docs_dir: docs
+exclude_docs: |
+  /api-main.md
+  /api-undocumented.json
+  /Doxyfile
+  /wiki-requirements.txt
 site_dir: out/wiki
 theme:
   name: material
@@ -40,6 +45,7 @@ theme:
 plugins:
   - search
 hooks:
+  - scripts/python/wiki_docs_hook.py
   - scripts/python/wiki_api_hook.py
 markdown_extensions:
   - admonition

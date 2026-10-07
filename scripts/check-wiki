@@ -15,6 +15,53 @@ from urllib.parse import unquote, urljoin, urlsplit
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "python"))
+from documentation import digest, sources
+
+
+def check_sources(root, site):
+    """Require exact source coverage and reject stale or altered build outputs."""
+    root, site = root.resolve(), site.resolve()
+    failures = []
+    try:
+        manifest = json.loads((site / "documentation-sources.json").read_text(encoding="utf-8"))
+        if manifest["version"] != 1 or not isinstance(manifest["pages"], list):
+            return ["Invalid documentation source manifest"]
+        expected = {path.relative_to(root).as_posix() for path in sources(root)}
+        seen = set()
+        outputs = set()
+        assets = manifest.get("assets", [])
+        if not isinstance(assets, list):
+            return ["Invalid documentation asset manifest"]
+        asset_sources = {entry["source"] for entry in assets}
+        for entry in manifest["pages"] + assets:
+            source, output = entry["source"], entry["output"]
+            if not isinstance(source, str) or not isinstance(output, str):
+                failures.append("Invalid documentation source/output path")
+                continue
+            if source in seen or output in outputs:
+                failures.append(f"Duplicate documentation source/output: {source}")
+            seen.add(source)
+            outputs.add(output)
+            source_path, output_path = root / source, site / output
+            is_asset = source in asset_sources
+            if ((source not in expected and not is_asset)
+                    or (is_asset and source_path.suffix == ".md")
+                    or not source_path.resolve().is_relative_to(root / "docs")
+                    or not output_path.resolve().is_relative_to(site)
+                    or (not is_asset and not output.endswith(".html"))):
+                failures.append(f"Invalid documentation source/output mapping: {source}")
+                continue
+            if not source_path.is_file() or digest(source_path) != entry["source_sha256"]:
+                failures.append(f"Stale documentation source: {source}; rebuild the wiki")
+            if not output_path.is_file() or digest(output_path) != entry["output_sha256"]:
+                failures.append(f"Missing or altered documentation output: {output}")
+        for missing in sorted(expected - seen):
+            failures.append(f"Documentation absent from wiki: {missing}")
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        failures.append(f"Invalid or missing documentation source manifest: {error}")
+    return failures
+
 
 class Page(HTMLParser):
     def __init__(self, text):
@@ -33,11 +80,12 @@ class Page(HTMLParser):
                 self.links.append(value)
 
 
-def check(root, site, config):
+def check(root, site, config, documentation_only=False):
     base = config["site_url"].rstrip("/") + "/"
     base_parts = urlsplit(base)
     repo_parts = urlsplit(config["repo_url"].rstrip("/"))
-    failures = []
+    source_failures = check_sources(root, site) if config.get("docs_dir") == "docs" else []
+    failures = list(source_failures)
     if not (site / "index.html").is_file():
         return ["Missing built index.html; run mkdocs build --strict first"]
     for path in site.rglob("*"):
@@ -46,6 +94,7 @@ def check(root, site, config):
     pages = {
         path.relative_to(site).as_posix(): Page(path.read_text(encoding="utf-8"))
         for path in site.rglob("*.html") if not path.is_symlink()
+        and not (documentation_only and path.relative_to(site).as_posix() == "editor/index.html")
     }
 
     def destination(value, origin):
@@ -105,7 +154,12 @@ def check(root, site, config):
                 target = destination(location or ".", "index.html")
                 if target is not None:
                     indexed.add(target)
-            for missing in sorted(set(pages) - {"404.html", "editor/index.html"} - indexed):
+            static_pages = set()
+            if config.get("docs_dir") == "docs" and not source_failures:
+                manifest = json.loads((site / "documentation-sources.json").read_text(encoding="utf-8"))
+                static_pages = {entry["output"] for entry in manifest.get("assets", [])
+                                if entry["source"].endswith(".html")}
+            for missing in sorted(set(pages) - {"404.html", "editor/index.html"} - static_pages - indexed):
                 failures.append(f"Page missing from search index: {missing}")
     except (OSError, ValueError, KeyError, TypeError) as error:
         failures.append(f"Invalid search index: {error}")
@@ -115,18 +169,20 @@ def check(root, site, config):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
+    parser.add_argument("--documentation-only", action="store_true",
+                        help="Check documentation without the separate browser editor payload")
     args = parser.parse_args()
     root = args.root.resolve()
     try:
         config = yaml.safe_load((root / "mkdocs.yml").read_text(encoding="utf-8"))
-        failures = check(root, (root / config["site_dir"]).resolve(), config)
+        failures = check(root, (root / config["site_dir"]).resolve(), config, args.documentation_only)
     except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as error:
         failures = [str(error)]
     if failures:
         for failure in failures:
             print(f"Wiki check: {failure}", file=sys.stderr)
         return 1
-    print("Wiki artifact, local links/assets, source references and search destinations passed.")
+    print("Wiki source parity, artifact, local links/assets, source references and search destinations passed.")
     return 0
 
 

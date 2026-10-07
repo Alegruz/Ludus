@@ -20,6 +20,24 @@ import web_build
 
 
 class LockedSetupTests(unittest.TestCase):
+    def test_missing_system_tools_fail_before_venv_or_network(self):
+        with tempfile.TemporaryDirectory() as temporary, contextlib.ExitStack() as stack:
+            root = Path(temporary)
+            stack.enter_context(patch.object(engine, "check_current_python"))
+            shims = stack.enter_context(patch.object(engine, "configure_system_tool_shims"))
+            stack.enter_context(patch.object(engine, "validate_required_system_tools",
+                                            side_effect=engine.EngineError("missing Clang")))
+            setup = stack.enter_context(patch.object(engine, "create_or_update_venv"))
+            install = stack.enter_context(patch.object(engine, "install_managed_tools"))
+            run = stack.enter_context(patch.object(engine, "run"))
+            versions = {"minimum": {"python": "3.10"}}
+            with self.assertRaisesRegex(engine.EngineError, "missing Clang"):
+                engine.prepare_conan_artifacts(root, versions, (engine.DEFAULT_PRESET,))
+            shims.assert_called_once_with(root, versions)
+            setup.assert_not_called()
+            install.assert_not_called()
+            run.assert_not_called()
+
     def test_unlocked_setup_preserves_other_hosts_and_failed_refresh_preserves_lock(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -229,6 +247,15 @@ class AnalysisTests(unittest.TestCase):
 
 
 class BrowserAnalysisTests(unittest.TestCase):
+    def test_only_explicit_owned_generated_file_is_analyzed(self):
+        root = Path("/tmp/browser-analysis").resolve()
+        sources = [root / "out/script-interaction/cooked/bindings.cpp", root / "out/vendor.cpp"]
+        entries = [{"file": str(source), "command": f"em++ -c {source} -o object.o"}
+                   for source in sources]
+        commands = web_build.analysis_commands(root, entries, "clang-tidy-18", root / "sysroot",
+                                              owned_generated=(sources[0],))
+        self.assertEqual([command[2] for command in commands], [str(sources[0])])
+
     def test_owns_engine_apps_and_probes_but_not_vendor_or_generated_sources(self):
         root = Path("/tmp/browser-analysis").resolve()
         sources = ["modules/audio/src/audio.cpp", "apps/smoke/main.cpp", "tools/web-rhi-probe/main.cpp",

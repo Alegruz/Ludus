@@ -45,5 +45,5 @@ GameHost accepts explicit `--config`, `--preferences` and supported command-line
 overrides. An explicit CLI override wins over the corresponding preference and
 project value. Use the schema/validator rather than guessing a JSON payload.
 
-Read the [typed configuration design](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/engine-configuration.md)
+Read the [typed configuration design](../../architecture/engine-configuration.md)
 for layers, transactions, source explanations, diagnostics and host launch examples.

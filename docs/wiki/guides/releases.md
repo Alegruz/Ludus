@@ -46,5 +46,5 @@ extracted package and the hosted game separately.
 Ludus Wiki uses GitHub Pages for documentation. Game packaging, game uploads and
 the wiki's static deployment are independent workflows.
 
-References: [native packaging](https://github.com/Alegruz/Ludus/blob/main/docs/development/game-packaging-publishing.md)
-and [editor/native/browser release setup](https://github.com/Alegruz/Ludus/blob/main/docs/development/editor-game-releases.md).
+References: [native packaging](../../development/game-packaging-publishing.md)
+and [editor/native/browser release setup](../../development/editor-game-releases.md).
