@@ -65,8 +65,9 @@ before workers or the logger. It reads these descriptors/policy from the
 environment:
 
 - `LUDUS_DIAGNOSTIC_REPORT_FD` — connected `AF_UNIX`/`SOCK_DGRAM` report socket.
-- `LUDUS_DIAGNOSTIC_CONTROL_FD` — connected `AF_UNIX`/`SOCK_SEQPACKET` control
-  socket (versioned Hello/HelloAck handshake).
+- `LUDUS_DIAGNOSTIC_CONTROL_FD` — connected `AF_UNIX` control socket:
+  `SOCK_SEQPACKET` on Linux, framed `SOCK_STREAM` on macOS (the same versioned
+  Hello/HelloAck handshake and little-endian wire encoding).
 - `LUDUS_DIAGNOSTIC_INTERACTIVE=0` — force report-only (local headless Debug).
 
 The helper sets the first two for its child; a directly launched binary with no
@@ -75,6 +76,48 @@ eligible only in a local, non-CI Debug build with a live terminal/display; CI is
 auto-detected and forced report-only, and CI workflows additionally set
 `LUDUS_DIAGNOSTIC_INTERACTIVE=0` explicitly. This layer changes no assertion's
 fatal action.
+
+### macOS native tooling
+
+Use the same launcher with `out/build/macos-clang-debug/apps/smoke/ludus_smoke`.
+The external Python helper captures report datagrams before logger initialization
+and after shutdown. A local Debug launch in a usable terminal can ask for an
+explicit Continue once or Terminate answer through `/dev/tty`; press `c` or type
+`continue` to resume that one assertion. Blank input, unknown input, EOF and
+helper errors terminate. Cocoa assertion dialogs are deferred, so a graphical
+session alone does not make a macOS launch interactive. Development, CI,
+headless launches and `scripts/run --report-only <binary>` capture reports without
+prompting. Debugger continuation still follows the assertion policy above.
+
+Darwin does not provide Unix sequenced-packet sockets. The private transport
+reads a complete bounded header and payload across stream fragmentation; one
+monotonic two-second deadline covers the startup acknowledgement. A decision
+wait has no human-response timeout and never auto-continues. Closed/truncated
+channels, malformed frames, oversized payloads and stale incident IDs resolve
+to Terminate. Native sockets suppress SIGPIPE without replacing the process's
+signal handler. The [assertion architecture](../architecture/assertions.md#52-startup-and-report-delivery-external-diagnostic-helper)
+owns the wire and descriptor lifetime contracts.
+
+Run local native helper regressions with:
+
+```bash
+./scripts/build macos-clang-debug
+out/host-tools/venv/bin/ctest --preset macos-clang-debug --label-regex diagnostic-startup --output-on-failure
+```
+
+Startup tests run in every test-enabled native flavor. Explicit decision and
+real-helper terminal tests require a Debug build with dialogs available; their
+controlled child environments clear CI markers and use a PTY instead of user
+input. macOS CI separately builds those test children with `LUDUS_CI_BUILD=OFF`
+to exercise the capability and verifies the runtime CI veto as a regression.
+Production CI remains noninteractive. Linux-only allocator interposition and
+fake debugger/death harnesses remain guarded; macOS crash symbolication, native
+GUI presentation and crash-artifact collection are future work.
+
+References: Apple's [socket(2), DESCRIPTION](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/socket.2.html)
+explains stream/packet semantics; [XNU `bsd/sys/socket.h`, SO_NOSIGPIPE](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/socket.h)
+describes per-socket broken-peer signal suppression. Thanks to Apple for these
+OS contracts; the bounded framing adapts the existing Ludus codec.
 
 To run Release policy tests without changing the production preset:
 

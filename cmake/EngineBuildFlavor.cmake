@@ -48,7 +48,7 @@ endif()
 # the runtime veto stops it from prompting when later executed under CI.
 set(LUDUS_CI_BUILD "$ENV{CI}" CACHE STRING "Set for a CI build; forces dialogs unavailable")
 set(LUDUS_ASSERT_DIALOGS_AVAILABLE 0)
-if(LUDUS_BUILD_FLAVOR_ID EQUAL 1 AND NOT LUDUS_CI_BUILD AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(LUDUS_BUILD_FLAVOR_ID EQUAL 1 AND NOT LUDUS_CI_BUILD AND CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$")
     set(LUDUS_ASSERT_DIALOGS_AVAILABLE 1)
 endif()
 
