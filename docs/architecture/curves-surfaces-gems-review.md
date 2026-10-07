@@ -342,3 +342,89 @@ The architecture's implementation phases require warning-clean builds, unit/
 sanitizer tests, pinned format/tidy, header/build budgets, SDK and Wasm validation.
 This review supplies an implementation handoff and evidence trail, not proof
 that those future implementations already pass.
+
+## Conference and journal research backlog
+
+Recorded 2026-10-06. This section preserves venues and an initial reading queue
+for improvements after the initial curves/surfaces implementation. The
+[architecture](curves-surfaces.md) owns representation, ownership, numerical
+contracts and G2-G6 gates; the [G1 evidence ledger](math-evidence/curves-surfaces.md)
+records only the fixed-size kernel's completed validation.
+
+Implement and validate G2-G5 first, then compare promising ideas against that
+recorded baseline. Source readings needed to implement already selected
+algorithms and strict numerical guarantees still belong to the initial work.
+The broader research pass and alternative backends follow the baseline; optional
+G6 capabilities and conditional extensions keep their existing acceptance gates.
+
+Venue scopes, source metadata, abstracts and selected introductory passages were
+screened when recommending these resources. The three full papers below remain
+queued for detailed review. The questions and experiments are Ludus proposals,
+not evidence of a measured improvement or an adopted implementation. Preserve
+the dated Gems review above when adding later findings.
+
+### Venues to search
+
+| Venue | Reading priority after baseline | Topics to screen for | Ludus work it could inform |
+| --- | --- | --- | --- |
+| [Computer Aided Geometric Design](https://www.sciencedirect.com/journal/computer-aided-geometric-design) | First | Bezier/B-spline algorithms, approximation, continuity, subdivision, projection and geometric bounds | G2 distance/source preparation; G3 queries; G4 patches |
+| [Reliable Computing](https://interval.louisiana.edu/reliable-computing-journal/) | First | Interval arithmetic, guaranteed accuracy, error-free transformations and floating-point error analysis | Conservative arithmetic and precision floors across G2-G4 |
+| [SIGGRAPH technical papers](https://s2026.siggraph.org/program/technical-papers/) / [ACM Transactions on Graphics](https://dl.acm.org/journal/tog) | First | Curve authoring, transported frames, sweeps, geometric modeling and interactive techniques | G3 frames/sweeps; G5 editing; alternative curve families |
+| [Symposium on Geometry Processing](https://sgp26.org/submit/) / Computer Graphics Forum | Next | Meshing/remeshing, differential geometry, topology, parameterization and deformation | G4 patch networks and mesh quality; G5 editing |
+| [SIAM Conference on Computational Geometric Design](https://www.siam.org/get-involved/connect-with-a-community/activity-groups/geometric-design/) | Next | Spline mathematics, approximation and geometric algorithms | G2-G4 numerical and representation alternatives |
+| [Solid and Physical Modeling](https://spmconf2026.github.io/cfp.html) / Computer-Aided Design | Selective | Tolerancing, geometric validity, constraint solving, robust computation and CAD representations | G4 adjacency; conditional NURBS, trimming and intersection work |
+| [High-Performance Graphics](https://www.highperformancegraphics.org/) | When G6 has measured demand | GPU evaluation/tessellation, graphics architecture, bounded output and end-to-end performance | G6 renderer-private acceleration after RHI prerequisites |
+
+SGP publishes its proceedings in Computer Graphics Forum; SPM full papers are
+published in Computer-Aided Design. The linked 2026 conference pages are archive
+and scope entry points, not a future attendance schedule. Priorities and the
+mapping to Ludus are our selection criteria. Screen relevant sessions and
+bibliographies rather than treating every article at a venue as applicable.
+
+### Initial reading queue
+
+| ID | Source and attribution | Full-review status | Question and possible experiment after review |
+| --- | --- | --- | --- |
+| CSR-01 | Jens Gravesen, **Adaptive subdivision and the length and energy of Bézier curves**, Computational Geometry 8(1), pp. 13-31, 1997. [DOI](https://doi.org/10.1016/0925-7721(95)00054-2); [publisher abstract](https://www.sciencedirect.com/science/article/pii/0925772195000542) | Queued; metadata/abstract screened. The related Graphics Gems 5 chapter was reviewed above. | Which refinement/work allocation gives the best G2 cost at the same whole-path length and inversion residual budgets? Compare deterministic split priorities on lines, cusps, uneven spans and nearly stationary paths; retain prefix uncertainty and strict failure semantics. |
+| CSR-02 | Wenping Wang, Bert Jüttler, Dayue Zheng and Yang Liu, **Computation of rotation minimizing frames**, ACM Transactions on Graphics 27(1), article 2, 2008. [DOI](https://doi.org/10.1145/1330511.1330513); [coauthor-hosted manuscript](https://www.ag.jku.at/pubs/2007wjzl.pdf) | Queued; abstract/introduction screened; full manuscript located. | Review the double-reflection equations, regularity assumptions and error analysis before use. After G3, compare frame angular error and work against the validated baseline, including inflections, near-zero tangents, random-access sampling and closed-loop residual twist. |
+| CSR-03 | H. Jiang, H. S. Li, L. Z. Cheng, R. Barrio, C. B. Hu and X. K. Liao, **Accurate, Validated and Fast Evaluation of Bézier Tensor Product Surfaces**, Reliable Computing 18, pp. 55-72, 2013. [Journal paper](https://interval.louisiana.edu/reliable-computing-journal/volume-18/reliable-computing-18-pp-055-072.pdf) | Queued; abstract, introduction and arithmetic assumptions screened | Can compensated de Casteljau evaluation improve difficult patch samples at acceptable cost? Compare the current float64-intermediate reference, compensated evaluation and an independent high-precision oracle. Test cancellation, extreme/subnormal values, derivatives and output narrowing; establish actual enclosures separately from improved point accuracy. |
+
+CSR-02's manuscript is newly located research context. The earlier statement
+about full text being unavailable describes the institutional record checked on
+2026-10-04; it does not assert that no author copy exists. Finding a manuscript
+does not constitute a full review or validate a singular Ludus path.
+
+CSR-03 assumes double-precision round-to-nearest arithmetic with no underflow.
+Any trial must check that assumption against native/Wasm subnormal behavior,
+the exact operations used and final float32 rounding. A compensated point
+estimate alone does not certify subdivision, norms, length accumulation or
+transformed bounds.
+
+### Review and trial records
+
+After baseline validation, screen these archives for concrete G2-G6 problems
+and extend this queue with stable IDs, exact author/title/year, DOI or primary
+URL, access locator, priority and status. Record the date and scope of each
+search. Read original sources before crediting an implementation to them.
+
+Track **Queued**, **Reading**, **Reviewed**, **Trial planned**, **Trial complete**,
+**Adopted**, **Deferred** or **Rejected**. A completed record includes:
+
+1. Source ID, review date and exact sections/pages consulted; the relevant idea,
+   assumptions, limitations and departures from Ludus's current design.
+2. A testable improvement hypothesis, affected phase/module and bounded trial.
+3. The baseline revision, reproduction commands, fixtures, seed, toolchain and
+   backend; links to the test, benchmark or PR. Generated results stay in `out/`.
+4. Before/after achieved errors and failure behavior, build/query/sample time
+   distributions, allocations, resident/cache bytes and active-plus-candidate
+   peak memory. Mesh trials also record output counts and shared-edge agreement.
+5. An adopt/defer/reject decision and reason, with links to changed contracts,
+   code attribution and independent validation where adoption is justified.
+
+Use the architecture's existing workload and numerical gates. Compare on native
+and Wasm where supported, and include difficult/invalid inputs rather than only
+a favorable throughput case. Preserve transactionality, bounded work, explicit
+approximation and the no-exceptions/dependency boundaries. A performance gain
+cannot justify weakening a strict guarantee or silently widening tolerances.
+
+No source in this new queue has a completed trial or adoption record yet.

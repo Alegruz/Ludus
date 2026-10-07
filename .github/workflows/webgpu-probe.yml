@@ -8,6 +8,11 @@ on:
       - 'tools/luau-probe/**'
       - 'scripts/luau-probe'
       - 'config/luau_toolchain.json'
+      - 'cmake/LuauProfile.cmake'
+      - 'modules/runtime/scripting/**'
+      - 'tools/script-interaction/**'
+      - 'tools/script-cook/**'
+      - 'scripts/script-interaction'
       - 'tools/shader-probe/**'
       - 'scripts/shader-probe'
       - 'config/shader_toolchain.json'
@@ -200,6 +205,23 @@ jobs:
           ./scripts/luau-probe run --preset web-emscripten-release
           ./scripts/luau-probe check --preset web-emscripten-development
           ./scripts/luau-probe check --preset web-emscripten-release
+      - name: Validate S1 native/Luau interaction in wasm
+        run: |
+          ./scripts/script-interaction bootstrap
+          ./scripts/script-interaction cook
+          ./scripts/script-interaction run --preset web-emscripten-development
+          ./scripts/script-interaction run --preset web-emscripten-release
+          ./scripts/script-interaction check --preset web-emscripten-development
+          ./scripts/script-interaction check --preset web-emscripten-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luau-s1-web-interaction
+          path: |
+            out/build/web-emscripten-release/tools/script-interaction/ludus_script_luau.*
+            out/build/web-emscripten-release/tools/script-interaction/index.html
+            out/build/web-emscripten-release/tools/script-interaction/*LICENSE.txt
+            out/build/web-emscripten-release/tools/script-interaction/*evidence.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: luau-s0-web-probes
@@ -231,6 +253,10 @@ jobs:
         with:
           name: luau-s0-web-probes
           path: out/luau-s0-wasm
+      - uses: actions/download-artifact@v4
+        with:
+          name: luau-s1-web-interaction
+          path: out/luau-s1-wasm
       - uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
@@ -248,6 +274,8 @@ jobs:
           xvfb-run -a npm test
       - name: Test S0 wasm recovery and debugger in Chromium
         run: node tools/luau-probe/browser.mjs out/luau-s0-wasm/web-emscripten-release/tools/luau-probe
+      - name: Test S1 state and effect publication in Chromium
+        run: node tools/script-interaction/browser.mjs out/luau-s1-wasm
       - uses: actions/upload-artifact@v4
         if: always()
         with:
