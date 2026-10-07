@@ -55,6 +55,12 @@ report handoff without a debugger, and suppression of presentation only.
 
 ## 2. Repository findings and constraints
 
+These findings record the initial audit used to design the failure runtime.
+Later module implementations can expand those capabilities; the
+[current logging guide](../modules/foundation/logging.md) describes its delivered
+scope. Assertion reporting continues to use its independent FoundationBase path.
+
+
 | Area | Observed implementation | Design consequence |
 | --- | --- | --- |
 | Base | `modules/foundation/base` is a static library, with fixed-width aliases in `types.h`, version APIs, and `UniquePtr` | Assertions must be usable inside Base without linking upward |
@@ -375,6 +381,11 @@ re-evaluating anything, then aborts. `CHECK`'s existing report budget is
 unchanged, and `CHECK` inspection breaks are additionally suppressed under CI.
 
 ### 5.2 Startup and report delivery (external diagnostic helper)
+
+This section records the original M0/M1 startup baseline. Interactive assertion
+continuation was added later under [the current policy](#51-interactive-development-resumable-assert);
+see [the diagnostic launch guide](../development/diagnostics.md) for current commands.
+
 
 This subsection is authoritative for the *startup/report-delivery* layer that
 supports interactive development. It is implemented independently of, and ahead

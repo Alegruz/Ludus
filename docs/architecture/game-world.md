@@ -1,7 +1,7 @@
 # Game world architecture
 
 Status: Baseline implemented in `Ludus::GameplayWorld` and
-[the reference game](../../apps/world_demo/README.md). Conditional extensions below
+[the reference game](../examples/world-demo.md). Conditional extensions below
 remain proposed; the reference guide records the implemented policies and limits.
 
 This design gives Ludus's first game a readable path from level data to gameplay
@@ -40,9 +40,9 @@ Existing unrelated working-tree edits are outside this proposal.
 | --- | --- |
 | [Smoke application](../../apps/smoke/application.cpp) | Reuse its explicit startup, polling, simulation, rendering, and shutdown pattern. Its current clamped variable-delta simulation is not the proposed fixed tick driver. |
 | [Foundation containers](../../modules/foundation/containers/include/ludus/foundation/containers/array.hpp) | Use `Array<T>` and fallible growth operations; do not add `std::vector` or depend on a future allocator. |
-| [Foundation math](../../modules/foundation/math/README.md) | Preserve its coordinate, angle, and numeric guarantees. Fixed ticks do not imply bit-exact floating-point simulation. |
+| [Foundation math](../modules/foundation/math.md) | Preserve its coordinate, angle, and numeric guarantees. Fixed ticks do not imply bit-exact floating-point simulation. |
 | [Input action records](../../modules/input/include/ludus/input/actions.h) | Preserve `Pressed`, `Released`, and `Cancelled` semantics when bridging presentation frames to simulation ticks. |
-| [RHI ownership contract](../../modules/graphics/rhi/README.md) | Keep all current RHI operations serialized on the main thread. |
+| [RHI ownership contract](../modules/graphics/rhi.md) | Keep all current RHI operations serialized on the main thread. |
 | [Bounded public rendering](../decisions/0011-public-fullscreen-rendering.md) | The reference game composes bounded procedural rectangles in one fullscreen shader. Textured sprites and general meshes still require a separate graphics feature slice. |
 | [Memory proposal](../decisions/0008-memory-management.md) | Reserve and reuse current containers first. A world must not require the proposed memory module or frame arena to exist. |
 | [Contributor guide](../../AGENTS.md) | C++23, no engine exceptions, explicit errors, Ludus primitive aliases, narrow headers, and the pinned validation workflow remain mandatory. |

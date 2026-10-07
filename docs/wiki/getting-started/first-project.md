@@ -63,7 +63,7 @@ Automatic preparation installs different SDK variants in separate folders and
 preserves older installations used by existing projects.
 Game projects keep machine-specific paths in ignored local settings.
 
-Read [project setup](../guides/project-setup.md) for release locks, custom SDKs,
+Read [project setup](../../development/project-sdk-workflow.md) for release locks, custom SDKs,
 repair and compatibility checks. See the
 [shared creation backend](https://github.com/Alegruz/Ludus/blob/main/scripts/python/ludus_tools/creation_engine.py)
 and [editor guide](../../development/editor-workspace.md).

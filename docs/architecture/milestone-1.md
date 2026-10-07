@@ -1,5 +1,9 @@
 # Milestone 1 Architecture
 
+Historical milestone scope. These boundaries describe that milestone, not the
+current engine. See [current capabilities](../wiki/getting-started/status.md)
+and [the architecture map](../wiki/architecture/index.md) for current entry points.
+
 Milestone 1 is a minimal native runtime shell, not a renderer. It proves that a separately maintained application can bootstrap a pinned Ludus revision, consume the installed SDK, create a native window, run an engine-controlled frame loop, observe time and basic input, process platform events, and shut down cleanly.
 
 ## External Sandbox Repository

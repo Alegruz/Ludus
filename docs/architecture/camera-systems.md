@@ -57,19 +57,19 @@ as a modern engine API.
   implementation files, identifying the author, exact work, section/pages, adopted
   idea and significant departures. The [reference review](camera-systems-gems-review.md)
   supplies the consulted sources; it supplements those comments.
-- [FoundationMath](../../modules/foundation/math/README.md) fixes right-handed
+- [FoundationMath](../modules/foundation/math.md) fixes right-handed
   coordinates, +Y up, camera forward -Z, column vectors, radians, reverse-Z
   `[0, 1]` depth and top-left physical framebuffer pixels.
 - [Frame updates](frame-update.md) already separate fixed gameplay ticks from
   interpolated presentation. Camera code must not write presentation values back
   into the world.
-- [world_demo](../../apps/world_demo/README.md) already extracts an authored 2D
+- [world_demo](../examples/world-demo.md) already extracts an authored 2D
   camera center, full vertical extent and minimum visible width into a value
   frame. Preserve that behavior as the first integration consumer.
-- [GameplayWorld](../../modules/gameplay/world/README.md) supplies checked entity
+- [GameplayWorld](../modules/gameplay/world.md) supplies checked entity
   identity and typed pools. Target lookup and shot requests stay in the game;
   camera evaluators receive borrowed values for the duration of one call.
-- The [current RHI](../../modules/graphics/rhi/README.md) provides a bounded
+- The [current RHI](../modules/graphics/rhi.md) provides a bounded
   rendering slice. General scene rendering, depth attachments, temporal history
   and the broader [RHI and GDI proposal](rhi-gdi.md) are separate work.
 - [Curves and surfaces](curves-surfaces.md) has implemented Math kernels but

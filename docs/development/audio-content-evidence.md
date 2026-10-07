@@ -217,7 +217,7 @@ The copied package is validated again with the runtime codec and executed by the
 sample. Files, metadata and containing directories are fsynced before publication;
 physical power-loss fault injection remains untested.
 
-See [sample usage](../../examples/audio-content/README.md) for composer and package
+See [sample usage](../examples/audio-content.md) for composer and package
 steps. Saved resources contain logical IDs/relative paths and definitions, never
 device, clip, stream, voice or lease handles. Save-game restoration is a caller
 policy to reload logical IDs and restart music; exact cursor restoration is excluded.

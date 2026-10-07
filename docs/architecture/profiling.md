@@ -1,6 +1,8 @@
 # Profiling Subsystem — Baseline Architecture & Design
 
-> Status: **Draft / independent baseline.** This document is a first-principles design
+> Status: **Historical independent baseline, superseded by**
+> [the reconciled profiling architecture](profiling-final.md).
+> **Original proposal:** This document is a first-principles design
 > produced *before* consulting any historical profiling references, so that the
 > architecture is grounded in Ludus's actual code and constraints rather than in a
 > particular prior art. A later pass may reconcile it against external references.

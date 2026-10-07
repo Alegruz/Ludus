@@ -95,7 +95,7 @@ surface does not replace a fluid solver.
 
 Follow [AGENTS.md](../../AGENTS.md), [steering](../../.kiro/steering/coding-standards.md),
 [ADR 0003](../decisions/0003-standard-library-usage-policy.md), the
-[include boundary](foundational-headers.md), [FoundationMath](../../modules/foundation/math/README.md),
+[include boundary](foundational-headers.md), [FoundationMath](../modules/foundation/math.md),
 and current fallible [containers](containers.md).
 
 FoundationMath is implemented and depends only on Base. Its right-handed,

@@ -1,9 +1,11 @@
 # Interactive development assertions: implementation plan and Kiro prompts
 
-Status: proposed replacement for the development-ASSERT policy, not implemented.
+Status: historical proposal for the development-ASSERT policy. The selected
+behavior is now implemented; read [the current assertion contract](assertions.md#51-interactive-development-resumable-assert).
 Prepared against the current merged repository on 2026-09-23. This plan changes
-specific decisions in `assertions.md`; it does not claim the existing fatal
-contract already permits continuation. Use the prompts at the end in order.
+specific decisions in the original `assertions.md` baseline. The prompts retain
+the original implementation order; reconcile them with the current contract
+before using them for new work.
 
 ## Decision to make explicit
 
@@ -14,7 +16,7 @@ assertions silently log and continue.
 
 User-confirmed local Debug no-debugger experience: a separate helper displays a
 report with **Continue once** and **Terminate** actions. This is the requested
-replacement behavior; it is not implemented yet.
+replacement behavior, which was not implemented when this proposal was written.
 Continue once resumes after the macro, without re-evaluating the condition or
 message. It does not repair state, validate a recovery path, or ignore that site
 on subsequent visits. Conditions whose violation makes subsequent execution

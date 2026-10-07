@@ -19,7 +19,7 @@ one preprocessor profile; it is not a platform availability guarantee.
 
 Some legacy declarations still lack descriptions. They remain visible rather
 than disappearing from the reference. CI tracks that backlog and rejects new
-undocumented public symbols. See [documentation conventions](../contribute/api-reference.md).
+undocumented public symbols. See [documentation conventions](../../development/api-reference.md).
 
 The published reference follows `main`. Match your SDK revision when inspecting
 contracts; generated SDK configuration values come from your configured/installed

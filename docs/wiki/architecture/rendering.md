@@ -57,7 +57,7 @@ The public slice is declared in `rhi.h` and `render.h`; application shader build
 use the exported `ludus_compile_shader` helper. Private smoke/probe WGSL pipelines
 remain sample/test boundaries.
 
-Read the [RHI module guide](https://github.com/Alegruz/Ludus/blob/main/modules/graphics/rhi/README.md),
+Read the [RHI module guide](../../modules/graphics/rhi.md),
 [public rendering contract](../../development/fullscreen-rendering.md)
 and [runtime UI design](../../architecture/ui.md).
 Continue with [world-to-presentation ownership](world.md).

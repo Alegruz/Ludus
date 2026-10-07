@@ -1,7 +1,7 @@
 # Game world validation
 
 Local implementation checks, 2026-10-03. See the
-[reference guide](../../apps/world_demo/README.md) for setup, controls and limits.
+[reference guide](../examples/world-demo.md) for setup, controls and limits.
 The checks use the pinned native and browser toolchains in repository config.
 
 | Check | Result |

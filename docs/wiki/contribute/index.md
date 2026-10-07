@@ -39,7 +39,7 @@ Update a task guide when a workflow changes. Separate current behavior from
 architecture proposals, and state the environment needed by a command. Do not
 turn a catalogued title into a claim that its chapter was consulted or adopted.
 
-For documentation-only work, see [Improve this wiki](wiki.md). Include the built
+For documentation-only work, see [Improve this wiki](../../development/wiki.md). Include the built
 site/link checks and browser evidence relevant to the change.
 
 ## Propose a change

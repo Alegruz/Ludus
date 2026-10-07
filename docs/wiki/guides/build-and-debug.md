@@ -31,7 +31,7 @@ ludus project run /path/to/MyGame --profile development
 ```
 
 Configure/build/run do not acquire SDKs or change the project's release lock.
-Resolve setup problems with [project setup](project-setup.md).
+Resolve setup problems with [project setup](../../development/project-sdk-workflow.md).
 
 ## From an engine checkout
 

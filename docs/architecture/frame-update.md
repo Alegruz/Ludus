@@ -1,7 +1,7 @@
 # Frame and tick updates
 
 Status: Baseline implemented. Part of the [game world architecture](game-world.md).
-See [the reference guide](../../apps/world_demo/README.md) for the concrete API,
+See [the reference guide](../examples/world-demo.md) for the concrete API,
 bounds and policies; conditional extensions in this document remain proposed.
 
 A presentation frame services the platform and draws current state. A simulation

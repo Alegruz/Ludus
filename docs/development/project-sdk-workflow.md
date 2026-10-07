@@ -7,8 +7,10 @@ workflow implemented by `.kiro/specs/project-sdk-workflow`.
 
 > Scope. The initial supported matrix is **Linux x64**, the reference Ubuntu
 > 24.04 + Clang 18 toolchain, single-config Ninja, native Debug/Development/
-> Release SDKs and a minimal native template. Windows/macOS, new browser project
-> templates, scene authoring, embedded play and hot reload are later milestones.
+> Release SDKs and a minimal native template. Windows/macOS project tooling and general scene authoring require separate
+> acceptance. [Browser releases](editor-game-releases.md) and
+> [native live editing](project-live-reload.md) have their own implemented scope;
+> an embedded viewport remains future work.
 > Do not assume unsupported combinations work.
 
 ## Prerequisites
@@ -25,10 +27,12 @@ compositor/GPU.
 ## Install the host tools
 
 ```bash
-python3 -m pip install ./scripts/python     # from a Ludus checkout, or the published wheel
-ludus --help
+python3 -m venv out/ludus-cli-venv
+out/ludus-cli-venv/bin/python -m pip install ./scripts/python
+out/ludus-cli-venv/bin/ludus --help
 ```
 
+Activate that venv, or use its `bin/ludus` path explicitly for the commands below.
 The installed `ludus` launcher locates its own packaged modules; it does not need
 a Ludus source checkout.
 
@@ -91,6 +95,32 @@ cooperative lock, so a concurrent build of the same tree reports `Busy` rather
 than corrupting it. Raw `cmake --preset …` works too (set `LUDUS_SDK_PREFIX`
 yourself) but is outside the cooperative-lock guarantee.
 
+## Check and repair project setup
+
+In the Editor choose **Project → Check Setup**. Eligible project opening also
+performs this read-only check: missing/stale presets, tools and SDK inputs are
+reported without downloading, configuring, building or rewriting the game.
+
+Save settings, then choose **Project → Repair Project Setup** and keep
+**Use this project's selected engine** unless changing the engine deliberately.
+Repair preserves custom presets and unrelated IDE settings, refreshes stale
+owned CMake inputs, and verifies selectable configure/build/test presets plus an
+actual configure/build/native test run. Browser repair requires a matching SDK.
+
+The installed CLI exposes the same operations:
+
+```bash
+ludus project check /path/to/MyGame --tools /path/to/Ludus
+ludus project repair /path/to/MyGame --tools /path/to/Ludus --sdk /path/to/sdk
+```
+
+When tools or an SDK move, check and repair explicitly. Keep machine paths in
+ignored `CMakeUserPresets.json` and `.ludus/local.json`; the committed engine
+requirement/release lock describes portable intent. The IDE should use the
+selected project-managed CMake in preset mode. A hidden base preset alone does
+not prove a usable setup. See [platform compatibility](../wiki/guides/platform-targets.md)
+and [Editor operations](editor-workspace.md#create-initialize-repair-and-update-projects).
+
 ## Engine override and refresh (engine developers)
 
 ```bash
@@ -107,9 +137,9 @@ ludus project engine ./MyGame --clear-override --profile development
 ```
 
 The override is visible in build output and never rewrites the committed
-descriptor/lock. To test a *different* engine version, update project intent
-explicitly (`ludus project engine --version <release>` / `ludus project migrate`)
-rather than overriding past compatibility validation.
+descriptor/lock. The `engine` command changes the local SDK selection; it has no `--version`
+option. Committed engine requirements and release locks remain explicit project
+intent. The migration command below handles legacy version-1 project metadata.
 
 ## Migrate a version-1 project
 
@@ -148,9 +178,9 @@ performs the usual CMake version/variant compatibility checks.
 SDK identity is derived from the real build inputs (triple, compiler id/version,
 C++ runtime ABI, flavor, variant, policy, features) — never inferred from a
 version string. An SDK is used only when that identity is compatible with the
-request. See `docs/architecture/project-sdk-workflow.md` for the rationale and
-`docs/development/project-sdk-workflow-evidence.md` for the implementation
-evidence and the gates still pending on a reference-toolchain machine.
+request. See [the architecture](../architecture/project-sdk-workflow.md) for the rationale
+and [implementation evidence](project-sdk-workflow-evidence.md) for the recorded
+validation scope.
 
 ## Ludus-Sandbox conversion (follow-up)
 

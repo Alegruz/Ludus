@@ -1,8 +1,10 @@
 # Ludus game packaging and itch.io publishing
 
-Status: proposed implementation contract. Written 2026-10-02. Commands, schemas,
-UI controls and module names in this document are future work unless explicitly
-identified as existing. This document extends the
+Status: architecture contract, originally written 2026-10-02 before implementation.
+The current [native packaging guide](../development/game-packaging-publishing.md)
+and [editor/browser/upload guide](../development/editor-game-releases.md) own usage
+instructions and implemented limits. Proposed extensions below retain their
+original scope. This document extends the
 [project and SDK workflow](project-sdk-workflow.md) and its
 [implementation design](../../.kiro/specs/project-sdk-workflow/design.md).
 It does not change that milestone's acceptance scope or certify shipped tooling.

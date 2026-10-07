@@ -6,7 +6,7 @@ Array insertion/append. It does not establish a general lookup speedup.
 
 ## Reproducible measurement
 
-Use the optional [benchmark](../../tools/container-bench/README.md). Measurements
+Use the optional [benchmark](tools/container-bench.md). Measurements
 below used Clang 18.1.3, libstdc++ from GCC 13.3.0, C++23, x86-64 Linux, and the
 Development preset (`-O2 -g`, assertions enabled, exceptions disabled). Hardware
 was an Intel Core i5-8265U, four cores/eight logical CPUs. This task's builds and

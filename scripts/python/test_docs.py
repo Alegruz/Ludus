@@ -10,7 +10,7 @@ import tempfile
 import unittest
 import zipfile
 
-from documentation import digest, index_text
+from documentation import digest, group, index_text
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 
@@ -75,6 +75,42 @@ class SourceParityTests(unittest.TestCase):
         self.source.write_text("# Renamed page\n")
         self.assertIn("Stale docs/README.md", " ".join(CHECK_DOCS.check(self.root)))
 
+    def test_local_reference_links_and_anchors_are_checked_but_code_is_not(self):
+        self.source.write_text("# Example\n\n[Contract][local]\n\n[local]: example.md#missing\n"
+                               "\n```sh\n[Not a link](missing.md)\n```\n")
+        failures = CHECK_DOCS.check(self.root, fix=True)
+        self.assertIn("missing local Markdown anchor", " ".join(failures))
+        self.assertNotIn("missing.md", " ".join(failures))
+        self.source.write_text("# Example\n\n[Local][doc]\n\n[doc]: https://github.com/Alegruz/Ludus/blob/main/docs/example.md\n")
+        self.assertIn("use relative links", " ".join(CHECK_DOCS.check(self.root, fix=True)))
+        self.source.write_text("# Example\n\n[Guide](https://github.com/Alegruz/Ludus/blob/main/modules/demo/README.md)\n")
+        self.assertIn("use relative links", " ".join(CHECK_DOCS.check(self.root, fix=True)))
+
+    def test_setup_examples_use_the_real_parser_without_running_setup(self):
+        valid = "```sh\n./init.sh --cli linux-clang-development --preset-only --locked --with-tests\n```\n"
+        self.assertEqual(CHECK_DOCS.check_init_examples(valid, "fixture", {"linux-clang-development"}), [])
+        invalid = valid.replace("--cli linux", "--cli --preset linux")
+        self.assertIn("invalid init.sh example", " ".join(CHECK_DOCS.check_init_examples(invalid, "fixture", set())))
+        self.assertIn("unknown setup preset", " ".join(CHECK_DOCS.check_init_examples(valid, "fixture", {"another-preset"})))
+        self.assertFalse((self.root / "out/host-tools").exists())
+
+    def test_readmes_link_to_the_canonical_owner_and_roles_distinguish_baselines(self):
+        readme = self.root / "modules/demo/README.md"
+        readme.parent.mkdir(parents=True)
+        readme.write_text("# Demo\n\nSeparate setup instructions.\n")
+        self.assertIn("short link to its owner", " ".join(CHECK_DOCS.check(self.root, fix=True)))
+        readme.write_text("# Demo\n\nRead the canonical documentation.\n")
+        self.assertIn("link to a Markdown owner under docs/", " ".join(CHECK_DOCS.check(self.root)))
+        (self.root / "modules/other.md").write_text("# Separate owner\n")
+        readme.write_text("# Demo\n\nRead [the canonical documentation](../other.md).\n")
+        self.assertIn("link to a Markdown owner under docs/", " ".join(CHECK_DOCS.check(self.root)))
+        readme.write_text("# Demo\n\nRead [the canonical documentation](../../docs/example.md).\n")
+        self.assertEqual(CHECK_DOCS.check(self.root), [])
+        readme.write_text(readme.read_text().replace("example.md", "absent.md"))
+        self.assertIn("missing canonical documentation", " ".join(CHECK_DOCS.check(self.root)))
+        self.assertEqual(group(Path("architecture/profiling.md")), "Historical baselines")
+        self.assertEqual(group(Path("modules/foundation/profiling.md")), "Module usage")
+
 
 class DocumentationBuildTests(unittest.TestCase):
     @classmethod
@@ -93,6 +129,7 @@ class DocumentationBuildTests(unittest.TestCase):
             "docs/architecture/images/diagram.svg": '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
             "docs/development/building.md": "# Building Ludus\n",
             "docs/development/wiki.md": "# Documentation tooling\n\n## Offline reading\n",
+            "docs/wiki/contribute/wiki.md": "# Earlier entry\n\n[Canonical guide](../../development/building.md)\n",
             "docs/wiki/editor/index.html": '<script src="missing-editor.js"></script>',
             "modules/demo.hpp": "// Public sample\n",
             "references/Private Book.pdf": "private reference",
@@ -110,7 +147,7 @@ class DocumentationBuildTests(unittest.TestCase):
             "theme:\n  name: material\n  font: false\n  features:\n    - content.action.edit\nplugins:\n  - search\n"
             "markdown_extensions:\n  - fenced_code\n  - toc\n"
             "validation:\n  nav:\n    omitted_files: warn\n  links:\n    anchors: warn\n"
-            f"hooks:\n  - {SCRIPTS / 'python/wiki_docs_hook.py'}\nnav:\n  - Home: index.md\n")
+            f"hooks:\n  - {SCRIPTS / 'python/wiki_docs_hook.py'}\nnav:\n  - Home: index.md\n  - Build: development/building.md\n")
         result = subprocess.run([sys.executable, "-m", "mkdocs", "build", "--strict"],
                                 cwd=cls.root, capture_output=True, text=True, check=False)
         if result.returncode:
@@ -131,6 +168,8 @@ class DocumentationBuildTests(unittest.TestCase):
         self.assertIn('src="engineering/architecture/images/diagram.svg"', home)
         self.assertIn("Canonical design text.", design)
         self.assertIn("edit/main/docs/architecture/design.md", design)
+        self.assertIn('href="engineering/development/building/"', home)
+        self.assertTrue((self.root / "out/wiki/contribute/wiki/index.html").is_file())
         self.assertIn("blob/main/modules/demo.hpp", home)
         self.assertIn("Local reference copy (not distributed)", home)
         self.assertIn("../../missing-example.hpp", home)

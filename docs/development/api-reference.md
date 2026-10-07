@@ -8,6 +8,25 @@ Linux x64 archive from the official GitHub release and SHA-256 published by Doxy
 Downloads identify the documentation client with an explicit User-Agent; the
 checksum is verified before extracting or executing the binary.
 
+## Write caller contracts
+
+Write descriptions beside public declarations in `///` or `/** ... */` comments.
+Doxygen extracts the signature; explain the contract a caller needs.
+
+| Item | Useful description |
+| --- | --- |
+| Class or struct | Purpose, ownership, lifetime and thread-affinity rules |
+| Function or method | Inputs/units, return/status meanings, failure effects and preconditions |
+| Field, enum value or constant | Meaning, units, valid bounds and sentinel behavior |
+| Alias or macro | Intended use and any evaluation/build limitations |
+
+Start multiline comments with `@brief` for the summary shown in member tables.
+Use `@param`, `@return`, `@pre`, `@note` and `@warning` where appropriate.
+Engine errors are explicit; do not add exception contracts. Preserve existing
+source attribution and link lengthy explanations to their architecture owner.
+For a concrete example, read
+[`AllocationDomain`](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/memory/include/ludus/foundation/memory/allocation_domain.hpp).
+
 ## Inputs and boundaries
 
 `scripts/build-api` reads literal `PUBLIC`/`INTERFACE FILE_SET public_headers`
@@ -30,8 +49,10 @@ never rendered from the XML; public declaration initializers remain visible.
 
 ## Build and publication
 
-Build MkDocs first, run `python scripts/build-api --bootstrap`, then run
-`python scripts/check-wiki`. Or provide a pinned binary through `--doxygen`.
+Use [the documentation build commands](wiki.md#build-and-check): build MkDocs,
+run `scripts/build-api` with the pinned Doxygen, and check/package the combined
+documentation. Publication adds the separately validated editor payload before
+the full `scripts/check-wiki` gate.
 The generator writes `out/api-reference/{xml,markdown,coverage.json}`, then rebuilds
 MkDocs with those generated pages through `scripts/python/wiki_api_hook.py`.
 Only the resulting site in `out/wiki/` is published. XML, generated Markdown,
@@ -80,6 +101,11 @@ baseline maintenance also removes deleted symbols. Parameter
 documentation errors are handled by Doxygen warnings-as-errors; this description
 gate does not prove semantic completeness or automatically require every parameter.
 No blanket conversion of plain comments or invented contracts is performed.
+
+`out/api-reference/coverage.json` reports gaps and resolved/removed entries.
+Remove resolved baseline entries with the change that documents them. The
+explicit `--update-baseline` switch is for a reviewed migration; do not use it
+to make failing coverage checks pass.
 
 The combined HTML checker checks API local links/assets/anchors and requires
 MkDocs search coverage for every wiki and API page.

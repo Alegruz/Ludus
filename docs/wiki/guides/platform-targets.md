@@ -122,7 +122,7 @@ checks and a real consumer build as part of setup verification.
 
 Use **Project → Check Setup**, then explicit **Repair Project Setup** with the
 intended engine if inputs are missing or stale. The
-[project setup guide](project-setup.md) covers the corresponding CLI operations.
+[project setup guide](../../development/project-sdk-workflow.md) covers the corresponding CLI operations.
 Do not reuse a CMake cache from another target. Record host OS and intended game
 target separately in a [troubleshooting report](troubleshooting.md#gather-a-useful-report),
 including SDK identity, compiler/toolchain, profile and the first useful error.

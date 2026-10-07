@@ -16,7 +16,7 @@ from markdown.treeprocessors import Treeprocessor
 from mkdocs.structure.files import File, InclusionLevel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from documentation import digest, sources
+from documentation import digest, group, sources
 
 authored_files = []
 source_hashes = {}
@@ -74,7 +74,8 @@ def on_config(config):
                 if isinstance(value, list):
                     prefix(value)
                 elif (isinstance(value, str) and value != "README.md"
-                      and not value.startswith(("wiki/", "api/"))):
+                      and not value.startswith(("wiki/", "api/", "https://", "http://"))
+                      and not (Path(config.docs_dir) / value).is_file()):
                     item[key] = "wiki/" + value
     prefix(config.nav)
     if not any(item.get("All documents") == "README.md" for item in config.nav):
@@ -96,7 +97,8 @@ def publish(file, config):
         published = "engineering/" + uri
     mirror = File(published, config.docs_dir, config.site_dir, config.use_directory_urls)
     file.dest_uri = mirror.dest_uri
-    if (file.is_documentation_page() and not uri.startswith("wiki/") and uri != "README.md"
+    if (file.is_documentation_page() and uri != "README.md"
+            and (not uri.startswith("wiki/") or group(Path(uri)) == "Earlier entry points")
             and file.inclusion.is_included()):
         file.inclusion = InclusionLevel.NOT_IN_NAV
 
