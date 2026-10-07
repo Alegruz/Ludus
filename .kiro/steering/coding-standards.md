@@ -18,7 +18,7 @@ These rules are mandatory, not advisory.
 Ludus does not use C++ exceptions.
 
 - Never write `throw`, `try`, or `catch` in engine code (libraries and apps).
-- Handle errors explicitly with status codes, `bool`, `std::optional`, an
+- Handle errors explicitly with status codes, `bool`, a Ludus-owned result, an
   expected-style result, or out-parameters. Prefer `noexcept`.
 - This is enforced at compile time: engine code builds with `-fno-exceptions`
   (`/EHs-c-` on MSVC) from `cmake/EngineOptions.cmake`, so any exception
@@ -42,19 +42,14 @@ the standard library while keeping widths explicit.
 
 ## Standard library / C runtime usage
 
-Full policy: `docs/decisions/0003-standard-library-usage-policy.md`. In engine
-code (`modules/`, `apps/`):
-
-- Banned: `<iostream>`/`cout`/`cerr`/`endl`, C++ exceptions, `std::` primitive
-  spellings, `<sstream>`, `printf`-family diagnostics. Use `LUDUS_LOG_*` for
-  ordinary diagnostics; assertions use the independent Base path (ADR 0003).
-- Allowed: `<string_view>`, `<atomic>`/`<mutex>`/`<shared_mutex>`,
-  `<source_location>`, `<chrono>`, `<type_traits>`/`<utility>`, `<new>`;
-  `<cstdio>` only in logging sinks / emergency path; `<cstdint>`/`<cstddef>`
-  only in `types.h`.
-- Slated for future replacement (use now, don't spread): `std::string`,
-  `std::vector`, `std::unordered_map`, `std::format`, `<filesystem>`,
-  `<cstring>`.
+Follow the [standard-library and C-runtime rules in AGENTS.md](../../AGENTS.md#standard-library-and-c-runtime-usage)
+and their canonical policy,
+[ADR 0003](../../docs/decisions/0003-standard-library-usage-policy.md).
+The policy applies to production code in `modules/`, `apps/`, and `examples/`.
+New runtime facilities default to Ludus-owned implementations; existing STL
+usage is migration debt, not permission to introduce more. Read the explicit
+allowlist and boundary restrictions before choosing any standard-library or
+CRT operation. Concepts and approved compile-time utilities remain permitted.
 
 ## Other standing rules
 

@@ -63,7 +63,7 @@ Ludus does **not** use C++ exceptions.
 - Do not write `throw`, `try`, or `catch` in engine code.
 - Do not introduce dependencies or APIs that require exception handling on the
   normal path.
-- Handle errors explicitly: return status codes, `bool`, `std::optional<T>`,
+- Handle errors explicitly: return status codes, `bool`, a Ludus-owned result,
   an "expected"-style result, or an out-parameter. Make failure part of the
   function's signature.
 - Functions on hot or infrastructure paths should be marked `noexcept`.
@@ -226,22 +226,39 @@ engine code. Discuss such cases in the PR before adding them.
 
 ### Standard library and C runtime usage
 
-The full policy — what is banned, allowed, and slated for future replacement —
-is `docs/decisions/0003-standard-library-usage-policy.md`. Summary for engine
-code (`modules/` and `apps/`):
+The canonical policy is
+[`docs/decisions/0003-standard-library-usage-policy.md`](docs/decisions/0003-standard-library-usage-policy.md).
+It applies to production code in `modules/`, `apps/`, and `examples/`.
 
-- **Banned:** `<iostream>` / `std::cout` / `std::cerr` / `std::endl`, C++
-  exceptions, `std::` primitive-type spellings, `<sstream>`, and `printf`-family
-  for diagnostics. Route ordinary diagnostics through `LUDUS_LOG_*`; assertion
-  failures use the independent FoundationBase emergency path (ADR 0003).
-- **Allowed:** `<string_view>`, `<atomic>` / `<mutex>` / `<shared_mutex>`,
-  `<source_location>`, `<chrono>`, `<type_traits>` / `<utility>`, `<new>`; and
-  `<cstdio>` only inside logging sinks / the emergency path. `<cstdint>` /
-  `<cstddef>` only inside `types.h`.
-- **Slated for future replacement (fine to use now, do not spread):**
-  `std::string`, `std::vector`, `std::unordered_map`, `std::format`,
-  `<filesystem>`, `<cstring>`. These become Ludus-owned types once a custom
-  allocator exists; replacing one is its own change, not a drive-by edit.
+- **Default deny:** do not introduce a standard-library runtime facility merely
+  because it is available locally or convenient. Check the canonical allowlist
+  and its implementation-boundary restrictions first. C++23 language support
+  does not establish library availability on every supported toolchain.
+- **Use Ludus-owned containers and algorithms.** Do not add STL containers,
+  owning strings, smart pointers, `<algorithm>`, `<ranges>`, `<numeric>`, or
+  standard sorting/searching/collection algorithms. Inspect the existing Ludus
+  modules first; implement a missing operation in its owning module, with an
+  explicit allocation/error contract and appropriate tests. A namespace alias or
+  wrapper around an STL container/algorithm is not a Ludus implementation.
+- **Keep the explicit exceptions narrow.** Concepts, type traits and approved
+  compile-time utilities are permitted. Approved low-level atomics, construction
+  primitives and C runtime operations have the restrictions recorded in ADR 0003;
+  approval of one function does not approve its entire header.
+- **Own text-to-number conversion.** New parsing uses Ludus-owned conversion
+  code with bounded input, explicit errors and documented rounding/range behavior;
+  do not introduce `std::from_chars`, `std::sto*`, or a third-party conversion
+  library as a replacement. Existing conversions are migration debt.
+- **Existing usage is not precedent.** Preserve necessary calls inside an
+  existing implementation during maintenance, but do not spread them to new
+  APIs, subsystems or dependencies. Migrate existing facilities in focused
+  changes; do not rewrite unrelated code to satisfy this policy.
+- If a missing facility needs a new standard-library exception, document the
+  exact operation, boundary and native/browser evidence in ADR 0003 as an
+  explicit policy change for review. Do not silently add it or disable a
+  supported platform to accommodate it.
+- C++ exceptions, iostream/sstream, standard primitive spellings and printf-family
+  diagnostics remain banned. Use `LUDUS_LOG_*` for ordinary diagnostics and
+  FoundationBase's independent emergency path for assertions.
 
 ### Build-time hygiene (heavy headers)
 
