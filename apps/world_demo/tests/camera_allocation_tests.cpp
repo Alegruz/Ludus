@@ -1,23 +1,23 @@
 // Counts ordinary, aligned and nothrow C++ allocations on production evaluation/view paths.
 #include "internal/camera_view.h"
 #include <catch2/catch_test_macros.hpp>
-#include <cstddef>
 #include <cstdlib>
+#include <ludus/foundation/base/types.h>
 #include <ludus/gameplay/camera/evaluation.hpp>
 #include <new>
 namespace
 {
-long gNews = 0;
-long gDeletes = 0;
+ludus::foundation::uint64 gNews = 0;
+ludus::foundation::uint64 gDeletes = 0;
 bool gTracking = false;
 
-void* AlignedAlloc(std::size_t n, std::size_t al) noexcept
+void* AlignedAlloc(ludus::foundation::usize n, ludus::foundation::usize al) noexcept
 {
-    if (al < alignof(std::max_align_t))
+    if (al < __STDCPP_DEFAULT_NEW_ALIGNMENT__)
     {
-        al = alignof(std::max_align_t);
+        al = __STDCPP_DEFAULT_NEW_ALIGNMENT__;
     }
-    std::size_t rounded = (n + al - 1) & ~(al - 1);
+    ludus::foundation::usize rounded = (n + al - 1) & ~(al - 1);
     if (rounded == 0)
     {
         rounded = al;
@@ -40,37 +40,37 @@ void CountDelete(void* p) noexcept
 }
 } // namespace
 
-void* operator new(std::size_t n)
+void* operator new(ludus::foundation::usize n)
 {
     CountNew();
-    void* p = AlignedAlloc(n, alignof(std::max_align_t));
+    void* p = AlignedAlloc(n, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
     if (p == nullptr)
     {
         throw std::bad_alloc{};
     }
     return p;
 }
-void* operator new(std::size_t n, std::align_val_t al)
+void* operator new(ludus::foundation::usize n, std::align_val_t al)
 {
     CountNew();
-    void* p = AlignedAlloc(n, static_cast<std::size_t>(al));
+    void* p = AlignedAlloc(n, static_cast<ludus::foundation::usize>(al));
     if (p == nullptr)
     {
         throw std::bad_alloc{};
     }
     return p;
 }
-void* operator new(std::size_t n, const std::nothrow_t&) noexcept
+void* operator new(ludus::foundation::usize n, const std::nothrow_t&) noexcept
 {
     CountNew();
-    return AlignedAlloc(n, alignof(std::max_align_t));
+    return AlignedAlloc(n, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 }
 void operator delete(void* p) noexcept
 {
     CountDelete(p);
     std::free(p);
 }
-void operator delete(void* p, std::size_t) noexcept
+void operator delete(void* p, ludus::foundation::usize) noexcept
 {
     CountDelete(p);
     std::free(p);
@@ -80,7 +80,7 @@ void operator delete(void* p, std::align_val_t) noexcept
     CountDelete(p);
     std::free(p);
 }
-void operator delete(void* p, std::size_t, std::align_val_t) noexcept
+void operator delete(void* p, ludus::foundation::usize, std::align_val_t) noexcept
 {
     CountDelete(p);
     std::free(p);
