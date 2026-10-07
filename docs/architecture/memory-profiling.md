@@ -558,6 +558,14 @@ general hash container, or a lock-free queue. Existing CPU tracing can continue
 while memory gauges are added; do not extend its unsafe transport to satisfy a
 memory lifetime contract.
 
+## Research after the initial implementation
+
+Implement and validate the delivery phases above first. Subsequent improvements
+should start from the resulting artifacts, coverage limits and representative
+workload measurements. The reference review owns the
+[deferred conference and journal shortlist](memory-profiling-gems-review.md#research-follow-up-after-the-initial-implementation)
+and the evidence required before adopting a research-driven change.
+
 ## Alternatives and unresolved measurements
 
 Keep the system backend initially. Compare pinned mature backends under the
