@@ -405,6 +405,58 @@ facts below are separate from the resulting Ludus design judgments.
   [DirectStorage samples](https://github.com/microsoft/DirectStorage/blob/main/README.md),
   [DirectStorage guidance](https://github.com/microsoft/DirectStorage/blob/main/Docs/DeveloperGuidance.md).
 
+## Research after the initial implementation
+
+Recorded on 2026-10-06. Implement and validate the
+[initial architecture](resource-management.md#implementation-sequence-and-validation)
+before starting this follow-up evaluation. Keep the initial bounded cache and
+storage policies as a reproducible baseline. This shortlist adds no implementation
+prerequisites and does not replace the existing staged deliverables or acceptance
+gates.
+
+The venue choices and Ludus applications below are engineering recommendations.
+Publication metadata, abstracts, and selected public descriptions were checked;
+complete technical reviews and reproduction of the proposed algorithms remain
+follow-up work. These sources are separate from the completed Gems review above.
+No source implementation was copied, and no reported speedup is a Ludus result.
+
+| Venue | Starting source | Question for the follow-up evaluation |
+| --- | --- | --- |
+| GDC, production engine talks | Elan Ruskin, [Streaming in Sunset Overdrive's Open World](https://www.gdcvault.com/play/1022268/Streaming-in-Sunset-Overdrive-s), GDC 2015. | Which asset-layout, traversal, tooling, and gameplay constraints should our streaming acceptance workloads exercise? |
+| USENIX FAST, storage systems | Nimrod Megiddo and Dharmendra S. Modha, [ARC: A Self-Tuning, Low Overhead Replacement Cache](https://www.usenix.org/conference/fast-03/arc-self-tuning-low-overhead-replacement-cache), FAST 2003. | Can adaptive recency/frequency selection reduce churn when level traversal or editor browsing introduces many assets used once? The paper's uniform-page model needs adaptation to variable resource sizes and dependency closures. |
+| ACM SOSP, systems architecture | Juncheng Yang, Yazhuo Zhang, Ziyue Qiu, Yao Yue, and K. V. Rashmi, [FIFO Queues are All You Need for Cache Eviction](https://jasony.me/publication/sosp23-s3fifo.pdf), SOSP 2023, DOI [10.1145/3600006.3613147](https://doi.org/10.1145/3600006.3613147). | Does S3-FIFO's probationary queue and limited hit bookkeeping improve our idle cache over bounded LRU without increasing service latency or metadata cost? |
+| ACM Transactions on Storage, cache admission and cost | Gil Einziger, Roy Friedman, and Ben Manes, [TinyLFU: A Highly Efficient Cache Admission Policy](https://arxiv.org/abs/1512.00727), TOS 13(4), 2017, DOI [10.1145/3149371](https://doi.org/10.1145/3149371); Gil Einziger, Omri Himelbrand, and Erez Waisbard, [Boosting Cache Performance by Access Time Measurements](https://doi.org/10.1145/3572778), TOS 19(1), article 8, 2023. | Should recently used assets remain in the idle cache, and can measured read/decode/install cost improve selection beyond hit ratio alone? Cache admission here means optional retention, distinct from required acquisition and memory-budget admission. |
+| ICFP and Journal of Functional Programming, incremental builds | Andrey Mokhov, Neil Mitchell, and Simon Peyton Jones, [Build Systems à la Carte: Theory and Practice](https://www.microsoft.com/en-us/research/publication/build-systems-a-la-carte/), JFP 30, e11, 2020, DOI [10.1017/S0956796820000088](https://doi.org/10.1017/S0956796820000088), expanded from ICFP 2018. | Which dependency-discovery, scheduling, and rebuild decisions make cooker invalidation correct while reusing unchanged derived artifacts? Apply build-system ideas to cooking separately from runtime residency. |
+| SIGGRAPH Talks/Courses and High-Performance Graphics, graphics streaming | Mark Lee, Nathan Zeichner, and Yining Karl Li, [A Texture Streaming Pipeline for Real-Time GPU Ray Tracing](https://www.yiningkarlli.com/projects/gpuptex.html), SIGGRAPH 2025 Talks, article 12, DOI [10.1145/3721239.3734098](https://doi.org/10.1145/3721239.3734098). Also browse the [HPG proceedings](https://diglib.eg.org/collections/7f0a418e-0e89-4dae-abfe-13514d5360bf). | Once RHI residency and completion capabilities exist, which coverage, cache, and bounded-upload decisions let rendering progress while finer texture or geometry data arrives? The Disney Ptex workload is a specialized comparison, not our default resource format. |
+
+Thanks to the authors listed above for the candidate ideas. The suggested reading
+order after the baseline is Sunset Overdrive, Build Systems à la Carte, S3-FIFO,
+TinyLFU/ARC and access-time-aware caching, then GPU streaming when its consumers
+and RHI capabilities exist. This order reflects Ludus's implementation sequence,
+not a ranking of the publications' general importance.
+
+For each selected source, record the sections actually read, adopted or rejected
+ideas, a concrete hypothesis, and a focused experiment. Link any resulting design
+decision from this review and add nearby implementation attribution when an idea
+materially informs code, following [AGENTS.md](../../AGENTS.md).
+
+Use a bounded resource trace-replay harness to compare the baseline with one
+policy change at a time. Record asset revisions and sizes, actual use, dependency
+holds, completion ordering, and relevant memory domains. Replay the representative
+[validation workloads](resource-management.md#implementation-sequence-and-validation)
+with identical capacities and trace inputs. Compare reclaimed bytes, read/decode/
+install time, queue wait, deadline misses, CPU/frame impact, metadata cost, peak
+memory, overfetch, and churn; use target-platform acceptance to confirm effects
+that a replay cannot model.
+
+Every experiment preserves the architecture's identity, exact-version leases,
+complete publication, domain-budget accounting, and acknowledged physical
+retirement. Cache scores only rank eligible idle victims. Variable asset sizes,
+shared dependency closures, backing pages, and delayed device/audio frees must
+remain visible in the comparison. Adopt a change only when representative evidence
+shows a useful improvement with the existing correctness gates passing; record
+negative results and tradeoffs as well.
+
 ## Final assessment
 
 The useful articles refine a coherent base rather than justify a larger framework.
