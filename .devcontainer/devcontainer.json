@@ -1,0 +1,20 @@
+{
+  "name": "Ludus headless contributor",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "CMAKE_BUILD_PARALLEL_LEVEL": "2",
+    "LUDUS_DIAGNOSTIC_INTERACTIVE": "0"
+  },
+  "postCreateCommand": "./init.sh --cli --preset linux-clang-development --preset-only --locked --with-tests --no-system-install",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cmake-tools",
+        "ms-vscode.cpptools"
+      ]
+    }
+  }
+}
