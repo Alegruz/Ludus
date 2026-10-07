@@ -129,6 +129,8 @@ jobs:
           python3 -m unittest discover -s scripts/python -p 'test_process_ownership.py' -v
       - name: Verify source formatting before builds
         run: ./scripts/check --format
+      - name: Test S0 Luau source and bytecode integrity contracts
+        run: python3 -m unittest discover -s tools/luau-probe -p 'test_*.py' -v
 
   debug-runtime:
     needs: [changes, formatting]
@@ -167,6 +169,12 @@ jobs:
           preset: linux-clang-development
       - name: Build Development without PCH
         run: ./scripts/build linux-clang-development
+      - name: Validate private S0 Luau interpreter and debugger profile
+        run: |
+          ./scripts/luau-probe bootstrap
+          ./scripts/luau-probe cook
+          ./scripts/luau-probe run --preset linux-clang-development
+          ./scripts/luau-probe check --preset linux-clang-development
       - name: Test Development
         run: out/host-tools/venv/bin/ctest --preset linux-clang-development --no-tests=error
       - name: Validate installed SDK and consumer
@@ -218,6 +226,11 @@ jobs:
           preset: linux-clang-asan-ubsan
       - name: Build with sanitizers
         run: ./scripts/build linux-clang-asan-ubsan
+      - name: Validate S0 Luau allocation failure and lifetime profile with sanitizers
+        run: |
+          ./scripts/luau-probe bootstrap
+          ./scripts/luau-probe cook
+          ./scripts/luau-probe run --preset linux-clang-asan-ubsan
       - name: Test with sanitizers
         env:
           LUDUS_RELOAD_METRICS: ${{ runner.temp }}/live-reload-asan-ubsan.jsonl

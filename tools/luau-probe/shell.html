@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Ludus S0 Luau probe</title>
+<pre id="result">Running S0 interpreter probes…</pre>
+<script>
+var Module = {
+  print: line => { document.getElementById('result').textContent += '\n' + line; },
+  printErr: line => { document.getElementById('result').textContent += '\n' + line; },
+  onExit: code => { document.body.dataset.exitCode = String(code); },
+  onAbort: reason => { document.body.dataset.abort = String(reason); }
+};
+</script>
+<script src="index.js"></script>
