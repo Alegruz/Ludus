@@ -1,6 +1,6 @@
 #include "internal/application.h"
-#include <charconv>
 #include <ludus/foundation/base/config.h>
+#include <ludus/foundation/base/parse_number.hpp>
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
@@ -87,8 +87,8 @@ int main(int argc, char** argv)
     if (argc == 3 && std::string_view(argv[1]) == "--frames")
     {
         const std::string_view text(argv[2]);
-        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), frameLimit);
-        if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || frameLimit == 0)
+        const auto parsed = ParseUint64(text.data(), text.size(), frameLimit);
+        if (parsed != NumberParseStatus::Success || frameLimit == 0)
         {
             return 1;
         }
