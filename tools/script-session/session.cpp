@@ -21,9 +21,16 @@ namespace ludus::s2
 namespace
 {
 using namespace runtime::scripting;
-bool Trusted(const Package& package) noexcept
+bool Trusted(const Package& package, std::span<const Package* const> admitted) noexcept
 {
-    return &package == &BASE || &package == &REPLACEMENT || &package == &FAILED || &package == &NARROW;
+    for (const Package* entry : admitted)
+    {
+        if (entry == &package)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 StateRecord Capture(const s1::State& state, uint32 schema) noexcept
 {
@@ -65,7 +72,14 @@ bool RestoreState(const StateRecord& record, const Package& package, s1::State& 
 
 bool Session::Initialize(const Package& package) noexcept
 {
-    if (mActive != nullptr || !Trusted(package) || !s1::Initialize(mWorld))
+    static constexpr const Package* CATALOG[] = {&BASE, &REPLACEMENT, &FAILED, &NARROW};
+    return Initialize(package, CATALOG);
+}
+
+bool Session::Initialize(const Package& package, std::span<const Package* const> admitted) noexcept
+{
+    if (mActive != nullptr || admitted.empty() || admitted.size() > 8 || !Trusted(package, admitted) ||
+        !s1::Initialize(mWorld))
     {
         return false;
     }
@@ -75,6 +89,7 @@ bool Session::Initialize(const Package& package) noexcept
         return false;
     }
     mActive = &package;
+    mCatalog = admitted;
     mWorld.At = s1::Phase::EndTick;
     return true;
 }
@@ -183,7 +198,7 @@ Replacement Session::Prepare(const Package& package, std::string_view expected) 
     {
         return Replacement::Stale;
     }
-    if (!Trusted(package) || package.Revision <= mActive->Revision || package.Schema < mActive->Schema ||
+    if (!Trusted(package, mCatalog) || package.Revision <= mActive->Revision || package.Schema < mActive->Schema ||
         std::strcmp(package.Pin, mActive->Pin) != 0 || std::strcmp(package.Contract, mActive->Contract) != 0 ||
         mWorld.Execution == ~uint64{0})
     {
@@ -246,6 +261,7 @@ void Session::Close() noexcept
     mActive = nullptr;
     mStaged = nullptr;
     mPending = false;
+    mCatalog = {};
 }
 
 bool Session::Checkpoint(std::span<uint8> output, usize& written) const noexcept
@@ -289,10 +305,9 @@ bool Session::Restore(std::span<const uint8> input) noexcept
     (void)TryReadLittleEndian(input.subspan(8), session);
     (void)TryReadLittleEndian(input.subspan(16), tick);
     const Package* source = nullptr;
-    const Package* packages[] = {&BASE, &REPLACEMENT, &FAILED, &NARROW};
-    for (const Package* package : packages)
+    for (const Package* package : mCatalog)
     {
-        if (std::memcmp(input.data() + 24, package->Key, 64) == 0)
+        if (package != nullptr && package->Key != nullptr && std::memcmp(input.data() + 24, package->Key, 64) == 0)
         {
             source = package;
         }

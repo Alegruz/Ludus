@@ -41,6 +41,7 @@ option(LUDUS_BUILD_WORLD_DEMO "Build the graphical game world reference (require
 option(LUDUS_BUILD_SHADER_PROBE "Build the isolated offline shader feasibility probe" OFF)
 option(LUDUS_BUILD_LUAU_PROBE "Build the private S0 Luau feasibility probe (requires scripts/luau-probe bootstrap)" OFF)
 option(LUDUS_BUILD_SCRIPT_SESSION "Build the experimental S2 Luau debug/replacement session" OFF)
+option(LUDUS_BUILD_VISUAL_SEQUENCE "Build the private S3 visual sequence authoring bridge" OFF)
 option(LUDUS_BUILD_SCRIPT_INTERACTION "Build the experimental S1 native/Luau headless interaction" OFF)
 # The Editor workspace (apps/editor) is an OPTIONAL developer tool, OFF by
 # default. When OFF, configure/build/install and browser targets must not search
@@ -241,12 +242,15 @@ if(LUDUS_BUILD_LUAU_PROBE)
     add_subdirectory(tools/luau-probe)
 endif()
 
-if(LUDUS_BUILD_SCRIPT_INTERACTION OR LUDUS_BUILD_SCRIPT_SESSION)
+if(LUDUS_BUILD_SCRIPT_INTERACTION OR LUDUS_BUILD_SCRIPT_SESSION OR LUDUS_BUILD_VISUAL_SEQUENCE)
     add_subdirectory(modules/runtime/scripting)
     add_subdirectory(tools/script-interaction)
 endif()
-if(LUDUS_BUILD_SCRIPT_SESSION)
+if(LUDUS_BUILD_SCRIPT_SESSION OR LUDUS_BUILD_VISUAL_SEQUENCE)
     add_subdirectory(tools/script-session)
+endif()
+if(LUDUS_BUILD_VISUAL_SEQUENCE)
+    add_subdirectory(tools/visual-sequence)
 endif()
 
 install(

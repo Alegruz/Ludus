@@ -138,3 +138,10 @@ both on the same tree simultaneously.
 References: [native debugging](../../development/debugging.md),
 [build profiles](../../development/building.md),
 and [project operations](../../development/project-sdk-workflow.md).
+
+## Visual encounter sequences
+
+The private S3 workbench supports authoring, semantic review, node debugging and
+transactional replacement of the two-door encounter. See the canonical
+[S3 guide](../../architecture/visual-s3.md) for setup, the full designer journey,
+trust/ownership rules and validation commands.
