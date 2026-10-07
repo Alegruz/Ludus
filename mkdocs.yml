@@ -95,6 +95,8 @@ nav:
       - Benchmark scenes and suites: development/benchmark-scenes.md
       - Release packages: development/game-packaging-publishing.md
       - Browser editor build: development/browser-editor.md
+  - Samples:
+      - Your first rendered scene: examples/cornell-box.md
   - Learn:
       - How Ludus fits together: wiki/learn/architecture.md
       - Reference reading paths: wiki/learn/references.md

@@ -39,6 +39,15 @@ settings/audio changes, or cancel to continue editing. Stop active owned work
 before closing. Welcome shows the project in recent history; the File menu also
 keeps **Recent Projects** available while working.
 
+## 5. Learn to change a rendered scene
+
+Creating a minimal project teaches setup and the build/run workflow. Continue
+with [Your first rendered scene: Cornell box](../../examples/cornell-box.md) for
+hands-on engine use: run an existing sample, separate materials from lighting,
+change a wall color, move a block, dim the light and inspect the frame lifecycle.
+Each edit has an expected result. Open that sample as a separate project rather
+than replacing the minimal project's files.
+
 ## Equivalent CLI creation
 
 Install the CLI in a dedicated virtual environment from your engine checkout:

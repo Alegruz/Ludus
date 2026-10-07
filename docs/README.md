@@ -102,6 +102,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Shader feasibility probe](development/tools/shader-probe.md)
 - [W0 WebGPU feasibility probe](development/tools/webgpu-probe.md)
 - [W1 browser FoundationBase probe](development/tools/web-foundation-probe.md)
+- [Your first rendered scene: Cornell box](examples/cornell-box.md)
 
 ## Architecture and design
 
