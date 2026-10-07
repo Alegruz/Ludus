@@ -1,93 +1,133 @@
 # Ludus editor interaction design
 
-Status: S1 shell and pre-S2 project UX; document interactions remain proposed.
+Status: target updated 2026-10-06. The current S1 shell and Qt/Wasm preview exist;
+the compact layout, command routing and document transactions below are proposed.
+[GUI systems](editor-gui-systems.md) owns the engineering contracts; this document
+owns their user interaction. Existing functionality remains documented in the
+[workspace guide](../development/editor-workspace.md).
 
 ## Default workspace
 
 ```text
-File  Project  Build  Release  Play  Output  View  Help
-Build | Run | Debug | Build and Play | Pause | Step | Resume | Reload | Stop
-+-------------------------------------------------+--------------------+
-| Project settings | Audio (when a project is open)| Live Inspector     |
-|                                                 | Session / revision |
-| Current authoring work                          | Property/value     |
-| Welcome + New/Open/Recents when no project       | Apply to session   |
-|                                                 | Copy to draft      |
-+-------------------------------------------------+--------------------+
-| Output: bounded build, tool, and runtime diagnostics                  |
+Native: OS decoration + platform menu conventions
+Browser: app container, without simulated OS title bar
+
+Project / document / save state       Save   useful context actions   Search
++--------------------------------------------------+-------------------+
+| Active document tabs                             | Inspector         |
+|                                                  | when applicable   |
+| Project settings / Configuration / Audio / Scene  |                   |
+|                                                  | Document or       |
+| Current authoring work has first claim on space   | session scope     |
++--------------------------------------------------+-------------------+
+| Optional Output / Jobs: opened for useful details, otherwise collapsed|
 +----------------------------------------------------------------------+
-| Project / draft / job status                                         |
+| Draft / operation / capability status                                |
 ```
 
-The drawing describes roles, not pixel dimensions. Qt layouts use platform
-fonts and logical pixels. Project settings scroll on smaller windows; Audio
-uses the central width. Panels can move, float, and hide. View restores each
-panel and the Game toolbar. Reset Layout returns the panes to their default
-areas without discarding drafts, stopping Play, or changing project settings.
-Use stable panel names and a versioned local preferences file. A preferences
-write failure is logged and leaves document saves independent; invalid saved
-layouts show a recovery message on startup.
+The drawing describes roles, not fixed sizes or a promise that Scene exists.
+Menus retain common commands and View/Reset Layout. The context strip presents
+frequent actions for the current task; native-only actions do not consume a
+permanently disabled browser row. Advanced commands remain discoverable through
+stable menus and command search. Context menus and shortcuts provide faster
+access without being the only way to find an action.
 
-## Project workflow before S2
+Native windows retain OS decoration and macOS menu conventions. Browser windows
+use the website/application container without a second imitation title bar.
+Qt fonts, logical pixels and layout managers govern control sizing. A narrow
+container switches secondary panels to tabs/drawers, preserving the complete
+form through scrolling instead of clipping it. Show an Inspector only for an
+applicable selection; collapse empty diagnostics initially. A job/error indicator
+can reveal details without taking keyboard focus away from an edit.
+
+Desktop panels may move, float and hide. View restores each named panel; Reset
+Layout restores access without discarding drafts, stopping Play or changing
+project data. Local preferences are versioned and bounded; corrupt/incompatible
+layout recovers to defaults. Exact app/Qt compatibility is checked before opaque
+Qt layout restoration. Do not load layout blobs from project files. A preferences
+write failure leaves document saves independent. Browser multiwindow behavior
+requires its own acceptance; floating native docks are not assumed there.
+
+## Existing project workflow
 
 Creation asks for Name and a parent Location with Browse, previews the new folder,
-and uses a single Create Project action. The shared backend selects/prepares the
-editor-associated engine and verifies staged configure/build/tests. An explicit
-Advanced override or environment selection never falls back silently on failure.
-Close Project returns to Welcome after settings/audio Save/Discard/Cancel and
-quiescence; Stop owned work first. F1 lists shortcuts from the same action objects.
-The independent Configuration preview remains available across project changes;
-closing a project preserves that explicitly loaded offline draft. Quitting the
-editor still prompts for its unsaved preferences.
-See [product/art direction](editor-art-direction.md) for three philosophy/UX/visual
-concepts and [browser strategy](editor-browser-strategy.md) for staged feasibility.
+and uses Create Project. The native shared backend selects/prepares the associated
+engine and verifies staged configure/build/tests. An explicit Advanced override
+never falls back silently on failure. Opening checks setup without building or
+repairing it. Browser import/download is a separate capability; it does not
+create a working native project or run the compiler.
 
-## Consistency rules
+Native Close Project uses the existing settings/audio Save/Discard/Cancel and
+quiescence policy; owned work stops before close. Configuration has an independent
+offline draft that survives a project change. Quit considers its unsaved state.
+The current F1 shortcut list and shared action objects remain useful. Current
+Ctrl+S saves the project descriptor; active-document routing below needs
+implementation, rather than relabeling that action as already generic.
 
-- Name actions for their effect. “Build and Play,” “Copy live value to tuning
-  draft,” and “Save Tuning Document” describe distinct operations.
-- A menu and toolbar invocation share the same action/capability. Disabled
-  controls must not start work; explain unavailable workflows in current status
-  and existing setup diagnostics. No hidden second authority in a panel.
-- Labels name the data, tooltips explain consequences, and status reports state.
-  Use platform palettes/fonts and Qt focus indication. Never communicate errors,
-  dirty state, or session scope through color alone.
-- Keyboard focus follows visual order. Form labels have buddies/mnemonics;
-  panels have accessible names. Ctrl+O opens and Ctrl+S currently saves the
-  project descriptor. Keep document-specific save/undo actions explicit until
-  S2 implements active-document shortcut routing with regression coverage.
-- Reserve modal prompts for destructive decisions or required setup input.
-  Progress, ordinary validation, and diagnostic output stay in the workspace.
-  Preserve edit buffers, selection, and scroll position during background work.
-- Mark scope visibly: session edits affect simulation; draft edits require save;
-  imported artifacts can be replaced from source. Do not auto-save runtime state.
+## Proposed command and edit behavior
+
+- One command catalogue supplies menu, strip, shortcut, search and automation
+  intent. Validate current capability/target at dispatch. Unavailable commands
+  explain a useful reason; hiding a strip item does not invent support.
+- Focus routes text editing first, then committed document operations, then
+  workspace commands. Platform Save/Open/Undo conventions use Ctrl or Command
+  as appropriate. Viewport manipulation shortcuts never capture typing or IME.
+- A field may contain an incomplete/invalid buffer. Show validation near it and
+  preserve it while jobs or session snapshots arrive. Save validates pending
+  buffers in scope; failure keeps them available. No heartbeat rebuilds a focused
+  form or changes selection/scroll. Close counts pending edits as unsaved work.
+- Drag/scrub begins a transient edit, previews it, and commits one Undo item on
+  acceptance. Escape or lost capture cancels it. Multi-selection displays mixed
+  values; focus alone changes nothing. Failed batch preparation changes nothing.
+- Undo restores committed document content; text Undo first edits the focused
+  temporary buffer. Undo back to saved content can be clean at a newer revision.
+  Saving during another edit acknowledges only the captured snapshot.
+- Labels name data, tooltips explain consequences, and status reports state.
+  Document draft, live session and imported artifact scopes remain visible.
+  Applying live values and copying them to a draft are distinct operations.
+- Keep common actions visibly available; reduce cursor travel with contextual
+  tools and stable ordering. Allow user customization without dynamically moving
+  commands based on usage. Advanced options may be disclosed without hiding the
+  next step of the main task.
+- Ordinary validation and progress remain in the workspace. Use Save/Discard/
+  Cancel for loss of work and explicit confirmations for irreversible actions;
+  frequent reversible edits rely on Undo. Cancellation says requested until the
+  operation acknowledges or otherwise finishes.
+- Form labels, panels and custom canvases expose names/roles and keyboard paths.
+  Focus indication, errors, mixed state and dirty state use more than color.
+  Shared semantic controls support light/dark, density, scale and contrast;
+  a decorative theme cannot replace text and accessibility behavior.
 
 ## Representative tasks and failure behavior
 
 | Task | Expected interaction | Failure behavior |
 | --- | --- | --- |
-| Open recent project | Select and open, or double-click | Existing path/setup diagnostics; no automatic repair/download |
-| Edit project | Project tab, change fields, Save | Validation leaves draft available; Build uses documented saved state |
-| Tune Play | Start, pause, inspect, apply to session | Stale revisions rejected; session failure cannot overwrite source |
-| Author audio | Audio tab, select/create, edit, save, preview | Explicit discard policy; preview stops before game launch |
-| Recover workspace | View panel action or Reset Layout | Corrupt/incompatible preferences use defaults |
-| Future asset import | Select source, see progress/result, cancel if needed | Retain last valid publication; retry with actionable error |
-| Future scene transform | Select, drag preview, commit one operation, undo | Invalid target/revision cancels safely without losing other edits |
+| Open native recent project | Select/open, or double-click | Existing path/setup diagnostics; no automatic repair/download |
+| Edit project/document | Active task, edit, Save | Invalid buffer or save conflict preserves the draft; Build uses documented saved state |
+| Browser round trip | Import, edit, download, reopen | Malformed/oversized admission retains current content; volatile storage/export limits stay explicit |
+| Tune Play | Start, pause, inspect, apply to session | Stale revisions rejected; failed game process cannot overwrite source |
+| Author audio | Select/create, edit, save, preview | Existing discard policy; native preview stops before game launch |
+| Recover workspace | View panel action or Reset Layout | Corrupt/incompatible preferences use useful defaults |
+| Future asset import | Source, progress/result, optional cancellation | Last valid artifact retained; stale job cannot publish; actionable retry |
+| Future scene transform | Select, preview, accept, Undo | Cancel/invalid target safely drops preview; resized-scene picking cannot select obsolete data |
+| Future macOS authoring | Same operations with native menu/Command/text behavior | Host-specific capabilities and errors; engine Metal support alone does not qualify the editor |
 
 ## Evaluation
 
-S1 regression coverage verifies action identity, panel recovery, persisted
-layout, corrupt preferences, and independence from project state. Capture the
-real widget layout at desktop and smaller window sizes. Offscreen tests verify
-structure and presentation, not native input, screen-reader behavior, Wayland,
-or rendered game frames.
+Use sketches to assess hierarchy and discoverability. Use runnable prototypes
+for efficiency, large models, text/IME, screen readers, renderer composition and
+failure recovery. Observe role-appropriate users doing the same realistic tasks
+without coaching; record completion, wrong turns, recovery and repeated-task
+cost. Preference is useful feedback but not a performance benchmark.
 
-Before calling a stage production-ready, observe representative developers
-perform its tasks without coaching. Record completion time, mistakes, recovery,
-and subjective friction. Run keyboard-only, high-DPI, light/dark palette, and
-native window-manager checks. Revisit the task flow before adding abstractions
-or decorative UI. Measurement targets in the architecture require actual data.
+Current S1 tests cover action identity, panel recovery and preferences. They do
+not prove the new interactions. Verify keyboard-only, real text input, high DPI,
+light/dark, narrow browser container and actual native window-manager tasks.
+Offscreen images do not establish screen-reader behavior, Wayland/macOS/Windows
+input or rendered frames. Add focused-buffer, transaction, stale job and
+savepoint acceptance with the corresponding implementation slice.
 
-The [post-design review](editor-design-review.md) adds a repeatable native task
-script. Background updates must not reset focused fields or scroll/selection;
-this is an S2 acceptance requirement, not an S1 implementation claim.
+The [October 6 review](editor-gui-reference-review.md) records the actual
+Lightbown/Wihlidal/Nystrom excerpts and their effect. The historical
+[October 4 task script](editor-design-review.md) remains useful for current native
+workflows; the GUI systems delivery gates qualify the new target.

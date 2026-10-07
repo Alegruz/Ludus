@@ -1,9 +1,14 @@
 # Ludus editor architecture
 
-Status: proposed long-term architecture; S1 workspace shell implemented in this
-change. Initial design recorded on 2026-10-04 before the additional chapter
-review in [editor-design-review.md](editor-design-review.md). Later stages are
-acceptance contracts, not claims about existing features.
+Status: proposed long-term architecture, updated 2026-10-06. S1 workspace shell
+and a bounded Qt/Wasm document preview are implemented. The new
+[GUI systems target](editor-gui-systems.md) and
+[ADR 0023](../decisions/0023-editor-presentation-and-document-core.md) define
+portable authoring, native Linux/macOS/Windows presentation and browser
+qualification. The [new reference review](editor-gui-reference-review.md)
+records the proposal before reading and the resulting refinements. The
+[October 4 review](editor-design-review.md) remains historical evidence.
+Later stages are acceptance contracts, not claims about existing features.
 
 ## Product and engineering goals
 
@@ -12,8 +17,10 @@ content, test it, and diagnose failure without losing work. Optimize for a small
 team's ability to change and debug the tool. Sophistication belongs in reliable
 workflows, precise feedback, and measured responsiveness.
 
-Keep Qt Widgets as the native shell. Use its docking, focus, accessibility,
-menus, and platform styling; keep Qt out of installed engine headers. A bespoke
+Keep Qt Widgets as the native shell over a private Qt-free document/application
+core. Use its docking, focus, accessibility, menus and platform conventions;
+keep Qt out of installed engine headers. Redesign the shell around the active
+document and useful context, with fewer permanent rows and empty panels. A bespoke
 UI renderer or a plugin framework needs a measured requirement before adoption.
 The existing controller, project store, asynchronous process adapters, audio
 workspace, and out-of-process GameHost are the starting point.
@@ -25,7 +32,7 @@ flowchart TD
     Shell[Qt workspace / panels] --> Controller[Editor controllers / capabilities]
     Controller --> Documents[Typed document models / command histories]
     Controller --> Jobs[Async job and host adapters]
-    Documents --> Services[Qt-free engine content and validation services]
+    Documents --> Services[Existing parsing / config / content policy]
     Jobs --> CLI[Shared project CLI / build and import tools]
     Jobs --> Host[Separate GameHost process]
     Host --> Runtime[Engine / game module / RHI]
@@ -34,7 +41,7 @@ flowchart TD
 | Boundary | Owns | Contract |
 | --- | --- | --- |
 | Shell | Widgets, focus, panel layout, presentation | Sends user intentions; reads controller state; never launches tools directly |
-| Document | Source path, schema, draft, saved revision, dirty state, undo | Validation and explicit save; runtime responses cannot silently author content |
+| Document | Stable identity, schema, draft, saved-content identity, dirty state, undo | Validation and explicit save; runtime responses cannot silently author content |
 | Controller | Workflow phase, capabilities, selection, in-flight requests | One authority per workflow; explicit errors and state transitions |
 | Job adapter | Child process, cancellation, bounded output, request identity | Completion includes project epoch/revision; stale results cannot publish |
 | Content service | Parsing, import, validation, serialization | Shared with CLI/runtime where applicable; no Qt or editor dependency |
@@ -50,9 +57,12 @@ context through existing diagnostics. Infrastructure remains exception-free.
 
 Authored source, unsaved draft, and simulated state are distinct. A live edit
 changes the session. Copying an eligible live value to a tuning draft is another
-explicit action. Saving persists the draft through validation and atomic file
-replacement. Each document owns its history; runtime undo is a different
-history and is invalidated when its session/schema identity changes.
+explicit action. Saving persists a captured draft through validation and the
+existing atomic replacement/conflict policy. Revision is monotonic and rejects stale results;
+dirty state compares content with the saved state. Undo back to saved content
+can be clean at a newer revision. See the GUI systems transaction contract for
+pending text, save-during-edit, gestures and bounded history. Each document
+owns its history; future runtime undo is a different history and is invalidated when its session/schema identity changes.
 
 For future scene/asset tools, use typed document operations with a target ID,
 before/after values, and validation results. Coalesce a drag into one undoable
@@ -89,10 +99,13 @@ Project settings and Audio are separate tabs. Welcome contains recent projects
 only while no project is open; File keeps its recent-project menu while authoring.
 The standalone offline Configuration tab stays accessible across project changes;
 its explicitly loaded preview and preference draft have independent ownership.
-Live Inspector is a right panel, and Output is a bottom panel. Menus expose every
-dock and a Reset Layout action. A toolbar reuses the menu's action objects so
-capability gating cannot disagree. A permanent status bar exposes workflow
-state. User layout is versioned, size-bounded, and saved on accepted close;
+Live Inspector is an optional right panel, and Output is an optional bottom
+panel. In the proposed redesign, empty/inapplicable panels start collapsed and
+narrow windows use tabs/drawers to preserve the central form. Menus expose every
+dock and a Reset Layout action. The current toolbar reuses menu action objects.
+The target compact contextual strip uses the same command catalogue as menus/shortcuts so capability gating
+cannot disagree; unsupported browser actions do not occupy a permanent row.
+A status area exposes workflow state. User layout is versioned, size-bounded, and saved on accepted close;
 missing, oversized, or incompatible settings fall back to a useful default.
 Only locally generated layout blobs are eligible; project files cannot supply
 layout state. App and exact Qt versions are checked before restoring it.
@@ -100,9 +113,11 @@ layout state. App and exact Qt versions are checked before restoring it.
 A future Scene tab composes a hierarchy, viewport, and document inspector. It
 must first ship selection, transform editing, save/undo, and validation as one
 vertical slice. The viewport uses an explicit render-surface adapter to RHI;
-choose in-process authoring preview versus host-frame transport with a prototype
-and measured latency before fixing the transport. Never couple Qt widget
-lifetime to live game-module memory. GPU picking and worker results carry
+use trusted in-process authoring rendering from document snapshots, separately
+from out-of-process gameplay. Native embedding and browser canvas composition
+require prototypes; host-frame transport is optional later work. Current RHI
+does not already expose a general borrowed/multiple-surface editor contract.
+Never couple Qt widget lifetime to live game-module memory. GPU picking and worker results carry
 scene/session revision so delayed hits cannot select obsolete objects.
 
 ## Performance and observability
@@ -130,6 +145,10 @@ system rather than adding a second telemetry stack.
 | S4: scene authoring | Select, transform, undo, save, then Play | Typed scene document; failed load rollback; revision-safe picking; actual rendered-frame and native input acceptance |
 | S5: specialist tools | Animation/material/audio extensions reuse contracts | Ship each with validation, undo, preview ownership, and representative user tasks |
 
+The GUI systems delivery sequence refines S2–S5 with a Qt-free project-settings
+extraction, shell redesign, browser/native integration probes, and a complete
+asset/scene slice. It introduces no calendar deadline.
+
 Each stage is an independently reviewable PR. Keep existing project setup,
 live-reload, audio, entity, and level-data contracts; this document organizes
 their integration. Do not claim S2–S5 are implemented by S1.
@@ -143,3 +162,5 @@ their integration. Do not claim S2–S5 are implemented by S1.
 - [Entity/world](entity-world.md) and [level data](level-data.md)
 - [Interaction design](editor-interaction-design.md)
 - [Reference review and design changes](editor-design-review.md)
+- [Multiplatform GUI systems](editor-gui-systems.md)
+- [GUI reference review](editor-gui-reference-review.md)

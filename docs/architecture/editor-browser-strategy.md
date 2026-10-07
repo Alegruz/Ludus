@@ -7,10 +7,14 @@ game execution/debugging and audio authoring remain desktop workflows. See the
 [browser editor guide](../wiki/guides/browser-editor.md) and
 [reproducible build instructions](../development/browser-editor.md).
 
-Keep Qt as the shared editor shell. The browser uses file and process adapters;
-future macOS support should use the same shell with native adapters. The engine
-renderer belongs in the game viewport, with a working backend for each platform.
-Separate UI implementations are not justified by this first port.
+The [GUI systems target](editor-gui-systems.md) selects Qt Widgets for native
+Linux/macOS/Windows over a Qt-free authoring core. Keep Qt/Wasm for the current
+preview; qualify it for full browser authoring rather than promising universal
+frontend parity. If required browser tasks fail through maintainable public
+interfaces, use a DOM browser frontend over the same commands/documents and
+retire the preview frontend when replaced. The engine renderer owns scene
+viewports. [ADR 0023](../decisions/0023-editor-presentation-and-document-core.md)
+records this conditional choice; native macOS editor support remains future work.
 
 ## Existing footing and missing pieces
 
@@ -80,3 +84,32 @@ format and users complete the intended task reliably. Advance to remote builds
 only with observed demand for C++ online authoring and an explicit cost envelope.
 The Qt workspace preview is narrower than a scene editor or online C++ IDE.
 Its package and browser document checks do not establish those later capabilities.
+
+## Full-authoring frontend qualification
+
+This is a proposed acceptance gate, not a result of the current document port.
+[Qt 6.10 WebAssembly documentation](https://doc.qt.io/qt-6.10/wasm.html) describes
+WebGL presentation and basic accessibility support, with complex widgets such
+as trees/tables potentially missing support. Removing window chrome improves
+layout but does not solve that semantic limitation.
+
+Test Qt/Wasm and any DOM candidate against the same core-backed task fixtures:
+
+- IME composition, selection, clipboard, keyboard focus, non-Latin/RTL text and
+  screen-reader operation of forms, trees and tables in declared target browsers.
+- Large paged asset/hierarchy models, stable selection and focused buffers under
+  background updates; no widget per row or full model rebuild per heartbeat.
+- Qt WebGL and engine WebGPU canvas composition, clipping, popups, DPI, input,
+  picking, resize/device loss and a useful document UI without a working viewport.
+- Bounded import, save/export and reload recovery; quota/denied storage and
+  interrupted persistence preserve documents and expose actionable results.
+- Payload, ready-to-edit latency, memory and idle cost on named devices, plus
+  representative user tasks. A screenshot cannot qualify these behaviors.
+
+Use a container layout without a simulated native title bar; prefer useful
+context controls and optional panels to permanently disabled native actions.
+On narrow containers, switch panels to tabs/drawers rather than clipping fields.
+If a hard task needs fragile Qt-private changes, that is evidence for the DOM
+alternative. Do not build both browser presentations indefinitely or require a
+DOM rewrite before extracting the shared authoring core. A browser scene editor
+still needs its own viewport and host-service implementation whichever UI wins.

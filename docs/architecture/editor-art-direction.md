@@ -1,5 +1,15 @@
 # Ludus product and art direction
 
+Updated target: the [multiplatform GUI systems](editor-gui-systems.md) and
+[interaction design](editor-interaction-design.md) refine Quiet Studio around
+one compact contextual row, useful central documents and optional secondary
+panels. Native OS decoration/menu conventions stay native; the browser gets no
+simulated OS title bar. The palette studies below remain studies, not a shipped
+theme or frontend benchmark. A shared semantic component/token layer must style
+Qt controls coherently; surrounding HTML cannot theme a Qt canvas. See the
+[October 6 review](editor-gui-reference-review.md) for the actually read Excise,
+Progressive Disclosure and Evaluation excerpts.
+
 Status: three professional concepts for evaluation; final visual direction is
 open. Usability fixes before S2 do not lock a palette or replace native widgets.
 Art direction applies to the engine's tools, documentation and eventual website;

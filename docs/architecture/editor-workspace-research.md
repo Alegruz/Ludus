@@ -1,5 +1,11 @@
 # Ludus Editor workspace research and design decisions
 
+Historical E0 baseline: later implementation expanded this milestone. The
+[2026-10-06 GUI systems target](editor-gui-systems.md) and
+[reference review](editor-gui-reference-review.md) guide future authoring/core
+extraction and platform qualification; they do not retroactively change the E0
+scope or claim its later contracts are implemented.
+
 Research date: 2026-10-01. Design baseline is committed main at
 `e33320a0cec1cd9be6d47bd89042eff77c393ce4`. This package defines a first Editor
 workspace for Kiro; it implements no Editor code and makes no performance claim.

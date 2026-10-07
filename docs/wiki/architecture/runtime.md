@@ -70,3 +70,18 @@ and [editor workflow](../guides/editor.md) to determine available operations.
 
 Read the [editor ownership design](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-architecture.md)
 and [project/SDK contract](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/project-sdk-workflow.md).
+
+
+## Multiplatform GUI direction
+
+The proposed editor separates a Qt-free document/command core, Qt native
+presentation and Ludus-rendered authoring viewports. Gameplay remains isolated
+in GameHost. Linux workspace and a bounded Qt/Wasm document preview exist;
+native macOS/Windows tools, the core extraction and scene integration are
+future work. Browser scene authoring must qualify text, accessibility, large
+models and canvas composition before its frontend is fixed.
+
+Read the [GUI systems design](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-gui-systems.md),
+[decision](https://github.com/Alegruz/Ludus/blob/main/docs/decisions/0023-editor-presentation-and-document-core.md)
+and [actual reference review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-gui-reference-review.md)
+for ownership, transactions, platform gates and the book-informed refinements.
