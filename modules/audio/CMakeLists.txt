@@ -83,6 +83,7 @@ if(LUDUS_BUILD_TESTS)
     target_sources(
         ludus_audio_tests
         PRIVATE
+            tests/device_tests.cpp
             tests/stream_tests.cpp
             tests/frame_conversion_tests.cpp
             tests/spsc_ring_tests.cpp
@@ -111,6 +112,8 @@ if(LUDUS_BUILD_TESTS)
     ludus_enable_test_exceptions(ludus_audio_tests)
     add_test(NAME ludus_audio_tests COMMAND ludus_audio_tests)
     set_tests_properties(ludus_audio_tests PROPERTIES LABELS "unit;audio")
+    add_test(NAME ludus_audio_device_tests COMMAND ludus_audio_tests "[.device]")
+    set_tests_properties(ludus_audio_device_tests PROPERTIES LABELS "audio;device")
 
     if(NOT LUDUS_ENABLE_ASAN AND NOT LUDUS_ENABLE_UBSAN AND NOT LUDUS_ENABLE_TSAN)
         add_executable(ludus_audio_alloc_tests)
@@ -127,4 +130,10 @@ if(LUDUS_BUILD_TESTS)
         add_test(NAME ludus_audio_alloc_tests COMMAND ludus_audio_alloc_tests)
         set_tests_properties(ludus_audio_alloc_tests PROPERTIES LABELS "unit;audio;alloc")
     endif()
+endif()
+
+# These native owners call pthread directly; keep the system dependency explicit.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    find_package(Threads REQUIRED)
+    target_link_libraries(ludus_audio PRIVATE Threads::Threads)
 endif()
