@@ -298,8 +298,9 @@ void EditorController::Save()
     const auto snapshot = State_.Draft;
     const auto epoch = State_.ProjectEpoch;
     const auto path = State_.DescriptorPath;
+    const auto digest = State_.SavedDigest;
     Saving_ = true;
-    const SaveOutcome outcome = Store_.Save(path, snapshot, State_.SavedDigest);
+    const SaveOutcome outcome = Store_.Save(path, snapshot, digest);
     Saving_ = false;
     if (epoch != State_.ProjectEpoch || path != State_.DescriptorPath)
     {
