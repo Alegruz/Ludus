@@ -134,7 +134,11 @@ public:
     }
 
 private:
-    static constexpr foundation::uint32 Missing = static_cast<foundation::uint32>(-1);
+    // A slot sentinel needs no storage or per-specialization initialization.
+    enum : foundation::uint32
+    {
+        Missing = 0xffffffffU,
+    };
     foundation::core::Array<foundation::uint32> mSparse;
     foundation::core::Array<EntityId> mOwners;
     foundation::core::Array<T> mValues;
