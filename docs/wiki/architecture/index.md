@@ -56,6 +56,11 @@ Read the [foundational header contract](../../architecture/foundational-headers.
 
 ## Read implementation status carefully
 
+For contributor tooling and CI, read the proposed
+[engineering quality architecture](../../architecture/engineering-quality.md)
+and its [source review](../../architecture/engineering-quality-gems-review.md).
+The [CI guide](../../development/continuous-integration.md) records current checks.
+
 A configured target proves a module exists, not that every host supports every
 operation. The [platform guide](../guides/platform-targets.md) distinguishes
 compile targets from validated hosts. For example, Text is currently native-only;

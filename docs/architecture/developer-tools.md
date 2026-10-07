@@ -155,6 +155,11 @@ version controlled. Do not add a speculative configuration language in D1.
 
 ## VS Code integration
 
+The proposed [engineering quality architecture](engineering-quality.md#9-editor-and-contributor-experience)
+extends the shared-command approach to preset-aware clangd, quality tasks,
+coverage and optional editor extensions. That proposal does not change the
+implemented RAD setup/launch behavior below or overwrite user preferences.
+
 Commit explicitly named process tasks for RAD setup and debugging. They call
 the CLI so terminal and VS Code behavior stay aligned. Contributors select
 Tasks: Run Task; optional user shortcuts are documented. No extension is needed

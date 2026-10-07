@@ -1,5 +1,12 @@
 # Continuous integration
 
+This guide records the implemented workflows. The proposed
+[engineering quality architecture](../architecture/engineering-quality.md) defines
+the next tooling, evidence and platform improvements; its
+[reference review](../architecture/engineering-quality-gems-review.md) records
+the Game Programming Gems ideas incorporated after the initial design.
+New checks in that proposal are not enabled by this guide.
+
 Native CI runs on pull requests, pushes to `main`, and manual dispatches.
 Feature branches are validated through their pull requests, avoiding a duplicate
 full run for every branch push. Superseded pull-request runs are cancelled;
