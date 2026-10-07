@@ -391,6 +391,7 @@ void AudioWorkspace::Render()
         spin->setProperty("displayedValue", spin->value());
     }
     Rendering_ = false;
+    Q_EMIT DocumentChanged();
 }
 void AudioWorkspace::Edit()
 {
@@ -398,6 +399,7 @@ void AudioWorkspace::Edit()
     {
         Dirty_ = true;
         Message_->setText(QStringLiteral("Unsaved audio draft."));
+        Q_EMIT DocumentChanged();
     }
 }
 bool AudioWorkspace::ReadDraft(audio::content::Sound& sound, audio::content::Music& music)

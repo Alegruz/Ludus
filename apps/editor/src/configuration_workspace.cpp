@@ -137,24 +137,7 @@ ConfigurationWorkspace::ConfigurationWorkspace(QWidget* parent) : QWidget(parent
                                }
                            });
     });
-    button(QStringLiteral("Save sparse preferences…"), "configurationSave", [this]() {
-#if defined(Q_OS_WASM)
-        const auto path = QStringLiteral("/browser-preferences.json");
-        if (SavePreferences(path))
-        {
-            (void)DownloadEditorDocument(this, path);
-        }
-#else
-        const auto path = QFileDialog::getSaveFileName(this,
-                                                       QStringLiteral("Save preferences"),
-                                                       PreferencePath_,
-                                                       QStringLiteral("JSON (*.json)"));
-        if (!path.isEmpty())
-        {
-            (void)SavePreferences(path);
-        }
-#endif
-    });
+    button(QStringLiteral("Save sparse preferences…"), "configurationSave", [this]() { Save(true); });
     Status_ = new QLabel(this);
     Status_->setObjectName(QStringLiteral("configurationStatus"));
     Status_->setWordWrap(true);
@@ -188,6 +171,29 @@ ConfigurationWorkspace::ConfigurationWorkspace(QWidget* parent) : QWidget(parent
     (void)Context_->SealStartup();
     Render();
     (void)Report(Status::Ok);
+}
+
+void ConfigurationWorkspace::Save(bool choosePath)
+{
+#if defined(Q_OS_WASM)
+    (void)choosePath;
+    const auto path = QStringLiteral("/browser-preferences.json");
+    if (SavePreferences(path))
+    {
+        (void)DownloadEditorDocument(this, path);
+    }
+#else
+    const auto path = !choosePath && !PreferencePath_.isEmpty()
+                          ? PreferencePath_
+                          : QFileDialog::getSaveFileName(this,
+                                                         QStringLiteral("Save preferences"),
+                                                         PreferencePath_,
+                                                         QStringLiteral("JSON (*.json)"));
+    if (!path.isEmpty())
+    {
+        (void)SavePreferences(path);
+    }
+#endif
 }
 ConfigurationWorkspace::~ConfigurationWorkspace()
 {

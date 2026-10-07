@@ -64,15 +64,18 @@ void MainWindow::BuildUi()
     auto* form = new QWidget(projectScroll);
     auto* formLayout = new QFormLayout(form);
     NameEdit_ = new QLineEdit(form);
+    NameEdit_->setObjectName(QStringLiteral("projectName"));
     NameEdit_->setAccessibleName(QStringLiteral("Project name"));
     ProviderBox_ = new QComboBox(form);
     ProviderBox_->addItem(QStringLiteral("ludus"));
     ProviderBox_->addItem(QStringLiteral("cmake"));
     SourceDirEdit_ = new QLineEdit(form);
+    SourceDirEdit_->setObjectName(QStringLiteral("projectSource"));
     PresetBox_ = new QComboBox(form);
     PresetBox_->addItem(QStringLiteral("linux-clang-debug"));
     PresetBox_->addItem(QStringLiteral("linux-clang-development"));
     TargetBox_ = new QComboBox(form);
+    TargetBox_->setObjectName(QStringLiteral("projectTarget"));
     TargetBox_->setEditable(true); // target can be entered before configuration
     CwdEdit_ = new QLineEdit(form);
 
@@ -85,6 +88,8 @@ void MainWindow::BuildUi()
 
     // Argument list editor: one string per item, Add/Remove; never a shell line.
     ArgsList_ = new QListWidget(form);
+    ArgsList_->setObjectName(QStringLiteral("projectArguments"));
+    connect(ArgsList_->model(), &QAbstractItemModel::dataChanged, this, &MainWindow::OnFieldEdited);
     auto* argsButtons = new QWidget(form);
     auto* argsButtonsLayout = new QHBoxLayout(argsButtons);
     AddArgButton_ = new QPushButton(QStringLiteral("Add argument"), argsButtons);

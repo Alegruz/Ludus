@@ -23,6 +23,9 @@ public:
     ~ConfigurationWorkspace() override;
     [[nodiscard]] bool Load(const QString& path, foundation::config::Layer layer);
     [[nodiscard]] bool SavePreferences(const QString& path);
+    // Save the applied preference draft; the separate Apply command owns the
+    // value-entry buffer. Reuse the last path, or request one on the first save.
+    void Save(bool choosePath = false);
     [[nodiscard]] bool Edit(std::string_view name, const QString& text, bool reset = false);
     [[nodiscard]] bool ConfirmDiscard();
     [[nodiscard]] bool Dirty() const noexcept

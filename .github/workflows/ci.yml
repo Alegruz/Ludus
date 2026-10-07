@@ -389,6 +389,7 @@ jobs:
       - uses: ./.github/actions/native-setup
         with:
           preset: linux-clang-asan-ubsan
+          editor: 'true'
       - name: Build with sanitizers
         run: ./scripts/build linux-clang-asan-ubsan
       - name: Validate S0 Luau allocation failure and lifetime profile with sanitizers
@@ -528,6 +529,13 @@ jobs:
         run: out/host-tools/venv/bin/cmake --build --preset linux-clang-development --target ludus_editor_tests
       - name: Verify editor initialization and offscreen tests
         run: out/host-tools/venv/bin/ctest --preset linux-clang-development --label-regex '^editor$' --no-tests=error
+      - name: Analyze document interactions and regressions
+        run: |
+          out/host-tools/bin/clang-tidy -p out/build/linux-clang-development --warnings-as-errors='*' \
+            apps/editor/src/controller.cpp apps/editor/src/main_window.cpp \
+            apps/editor/src/main_window_layout.cpp apps/editor/src/document_commands.cpp \
+            apps/editor/src/configuration_workspace.cpp apps/editor/src/audio_workspace.cpp \
+            apps/editor/tests/document_history_tests.cpp apps/editor/tests/document_interaction_tests.cpp
       - name: Report compiler cache
         if: always()
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"
