@@ -181,12 +181,19 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
     # Catch2 reports assertion failures by throwing; test targets (only) re-enable
     # exceptions. Engine/app targets above stay exception-free (-fno-exceptions).
     ludus_enable_test_exceptions(ludus_editor_tests)
-    add_test(NAME ludus_editor_tests COMMAND ludus_editor_tests)
+    # Print each completed case's duration to diagnose a stopped aggregate suite.
+    add_test(NAME ludus_editor_tests COMMAND ludus_editor_tests --durations yes)
+    set(editor_test_timeout 120)
+    if(APPLE)
+        # Cocoa/Qt process fixtures are slower on the hosted macOS runner;
+        # individual waits remain bounded, including under ASan/UBSan.
+        set(editor_test_timeout 300)
+    endif()
     # Run the offscreen Qt platform plugin so these logic/widget tests need no
     # display. This is for display-free tests only, never native acceptance.
     set_tests_properties(ludus_editor_tests PROPERTIES
         LABELS "unit;editor"
-        TIMEOUT 120
+        TIMEOUT ${editor_test_timeout}
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
