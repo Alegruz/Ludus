@@ -1,7 +1,9 @@
 # Ludus editor interaction design
 
 Status: target updated 2026-10-06. The current S1 shell and Qt/Wasm preview exist;
-the compact layout, command routing and document transactions below are proposed.
+the compact layout and full portable document transactions below are proposed.
+The [initial S2 interactions](../development/editor-workspace.md#initial-s2-document-interactions)
+implement bounded project history, focus preservation and scoped Save/Undo.
 [GUI systems](editor-gui-systems.md) owns the engineering contracts; this document
 owns their user interaction. Existing functionality remains documented in the
 [workspace guide](../development/editor-workspace.md).
@@ -61,8 +63,9 @@ Native Close Project uses the existing settings/audio Save/Discard/Cancel and
 quiescence policy; owned work stops before close. Configuration has an independent
 offline draft that survives a project change. Quit considers its unsaved state.
 The current F1 shortcut list and shared action objects remain useful. Current
-Ctrl+S saves the project descriptor; active-document routing below needs
-implementation, rather than relabeling that action as already generic.
+Ctrl+S now follows the active Project Settings, Audio or Configuration work area.
+The full command catalogue and portable transaction model below remain pending;
+the workspace guide owns the implemented behavior and limits.
 
 ## Proposed command and edit behavior
 

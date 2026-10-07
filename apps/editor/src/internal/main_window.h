@@ -5,13 +5,14 @@
 //
 // Private editor header (not installed). Uses standard Qt layouts/controls only.
 // While synchronizing fields from state it blocks edit signals (QSignalBlocker)
-// so rendering never dispatches new edits; reentrant actions are deferred to the
-// next event-loop turn.
+// so rendering never dispatches new edits. Field edits are accepted before Save
+// or an identity change can overtake them.
 
 #include "internal/controller.h"
 
 #include <QByteArray>
 #include <QMainWindow>
+#include <QMetaObject>
 #include <QString>
 #include <QStringList>
 
@@ -50,6 +51,8 @@ private Q_SLOTS:
     void OnStateChanged();
     void OnOpenRequested();
     void OnSaveRequested();
+    void OnUndoRequested();
+    void OnRedoRequested();
     void OnReloadRequested();
     void OnFieldEdited();
     void OnAddArgument();
@@ -81,6 +84,9 @@ private:
     [[nodiscard]] ProjectDescriptor DraftFromFields() const;
     void RenderFields();
     void RenderCapabilities();
+    void RenderDocumentActions();
+    void CommitProjectFields();
+    [[nodiscard]] bool SaveProjectSettings();
     void RenderStatus();
     void RenderProperties();
     void RenderRecentProjects();
@@ -93,6 +99,11 @@ private:
     EditorController* Controller_ = nullptr;
     bool Rendering_ = false;
     bool CloseConfirmed_ = false;
+    QObject* LastEditedField_ = nullptr;
+    QMetaObject::Connection FocusUndoConnection_;
+    QMetaObject::Connection FocusRedoConnection_;
+    uint64 RenderedProjectEpoch_ = ~uint64{0};
+    QStringList RenderedTargets_;
 
     // Local presentation preferences; never part of project/controller state.
     QString WorkspaceSettingsFile_;
@@ -127,6 +138,8 @@ private:
     QAction* SetupProjectAction_ = nullptr;
     QAction* OpenAction_ = nullptr;
     QAction* SaveAction_ = nullptr;
+    QAction* UndoAction_ = nullptr;
+    QAction* RedoAction_ = nullptr;
 #if defined(Q_OS_WASM)
     QAction* ExportProjectAction_ = nullptr;
 #endif

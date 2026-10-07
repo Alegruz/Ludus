@@ -4,7 +4,11 @@ Status: proposed target architecture, 2026-10-06. This is a design decision,
 not a GUI rewrite or a claim of measured superiority. The current Linux Qt
 workspace and bounded Qt/Wasm document preview remain the implemented baseline.
 The native macOS/Windows editor, Qt-free document core, scene viewport and
-contracts below require implementation and acceptance.
+contracts below require implementation and acceptance. The
+[initial S2 slice](../development/editor-workspace.md#initial-s2-document-interactions)
+implements a Qt-free bounded history primitive and adapts the current Qt project
+settings form; descriptor validation and persistence have not yet moved into
+the portable core. This does not complete milestone M1.
 
 ## Decision and priorities
 

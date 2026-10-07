@@ -178,6 +178,7 @@ void EditorController::OpenProject(const QString& descriptorPath)
     State_.Draft = outcome.Parse.Descriptor;
     State_.HasSaved = true;
     State_.ProjectEpoch += 1;
+    ProjectHistory_.Reset();
     State_.DiscoveredTargets.clear();
     State_.DiscoveredPreset.clear();
     State_.Result = LastResult{};
@@ -197,6 +198,7 @@ bool EditorController::CloseProject()
     const auto epoch = State_.ProjectEpoch + 1;
     const auto nextJob = State_.NextJob;
     State_ = WorkspaceState{};
+    ProjectHistory_.Reset();
     State_.ProjectEpoch = epoch;
     State_.NextJob = nextJob;
     SetupCheckPending_ = false;
@@ -231,33 +233,78 @@ void EditorController::ClearRecentProjects()
     Publish();
 }
 
-void EditorController::EditDraft(const ProjectDescriptor& draft)
+void EditorController::EditDraft(const ProjectDescriptor& draft, bool merge)
 {
     if (!Caps().CanEdit)
     {
         return;
     }
-    if (State_.Draft == draft)
+    if (!ProjectHistory_.Commit(State_.Draft, draft, merge))
     {
         return;
     }
     State_.Draft = draft;
+    InvalidateDraftTargets();
+    Publish();
+}
+
+void EditorController::InvalidateDraftTargets()
+{
     // A preset change invalidates the target discovery cache.
-    if (State_.DiscoveredPreset != draft.Preset)
+    if (State_.DiscoveredPreset != State_.Draft.Preset)
     {
         State_.DiscoveredTargets.clear();
         State_.DiscoveredPreset.clear();
     }
-    Publish();
+}
+
+bool EditorController::CanUndoProject() const
+{
+    return Caps().CanEdit && ProjectHistory_.CanUndo();
+}
+
+bool EditorController::CanRedoProject() const
+{
+    return Caps().CanEdit && ProjectHistory_.CanRedo();
+}
+
+void EditorController::UndoProjectEdit()
+{
+    if (CanUndoProject() && ProjectHistory_.Undo(State_.Draft))
+    {
+        InvalidateDraftTargets();
+        Publish();
+    }
+}
+
+void EditorController::RedoProjectEdit()
+{
+    if (CanRedoProject() && ProjectHistory_.Redo(State_.Draft))
+    {
+        InvalidateDraftTargets();
+        Publish();
+    }
 }
 
 void EditorController::Save()
 {
-    if (!Caps().CanSave)
+    if (Saving_ || !Caps().CanSave)
     {
         return;
     }
-    const SaveOutcome outcome = Store_.Save(State_.DescriptorPath, State_.Draft, State_.SavedDigest);
+    // A save acknowledges only its captured snapshot, including when a storage
+    // callback causes another edit. Failure never clears history or the draft.
+    ProjectHistory_.BreakGroup();
+    const auto snapshot = State_.Draft;
+    const auto epoch = State_.ProjectEpoch;
+    const auto path = State_.DescriptorPath;
+    Saving_ = true;
+    const SaveOutcome outcome = Store_.Save(path, snapshot, State_.SavedDigest);
+    Saving_ = false;
+    if (epoch != State_.ProjectEpoch || path != State_.DescriptorPath)
+    {
+        return;
+    }
     if (!outcome.Ok())
     {
         LastResult result;
@@ -269,7 +316,7 @@ void EditorController::Save()
         Publish();
         return;
     }
-    State_.Saved = State_.Draft;
+    State_.Saved = snapshot;
     State_.SavedDigest = outcome.Digest;
     State_.HasSaved = true;
     State_.Result = LastResult{};
@@ -301,6 +348,7 @@ void EditorController::Reload()
     State_.Draft = outcome.Parse.Descriptor;
     State_.HasSaved = true;
     State_.ProjectEpoch += 1;
+    ProjectHistory_.Reset();
     State_.DiscoveredTargets.clear();
     State_.DiscoveredPreset.clear();
     RememberProject();

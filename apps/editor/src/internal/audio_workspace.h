@@ -25,12 +25,19 @@ public:
     void ResetPreview();
     [[nodiscard]] bool PreviewFinished() const noexcept;
     [[nodiscard]] bool ConfirmDiscard();
+    void Save();
+    [[nodiscard]] bool CanSave() const noexcept
+    {
+        return HasDocument_ && isEnabled();
+    }
+
+Q_SIGNALS:
+    void DocumentChanged();
 
 private:
     [[nodiscard]] bool ReadDraft(audio::content::Sound& sound, audio::content::Music& music);
     void Reload();
     void Open();
-    void Save();
     void Import();
     void Create(bool music);
     void Render();

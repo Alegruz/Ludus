@@ -8,7 +8,10 @@ portable authoring, native Linux/macOS/Windows presentation and browser
 qualification. The [new reference review](editor-gui-reference-review.md)
 records the proposal before reading and the resulting refinements. The
 [October 4 review](editor-design-review.md) remains historical evidence.
-Later stages are acceptance contracts, not claims about existing features.
+The [initial S2 slice](../development/editor-workspace.md#initial-s2-document-interactions)
+adds bounded project history, scoped Save/Undo and focused-field preservation.
+S2's portable validation/save core and broader acceptance remain pending. Later
+stages are acceptance contracts, not claims about existing features.
 
 ## Product and engineering goals
 

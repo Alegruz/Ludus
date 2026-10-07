@@ -8,6 +8,7 @@
 // WorkspaceState, project/history stores, ToolProcess and LogBuffer; MainWindow
 // renders controller state and emits actions. There is no global event bus or singleton.
 
+#include "internal/document_history.h"
 #include "internal/log_buffer.h"
 #include "internal/play_process.h"
 #include "internal/project_store.h"
@@ -123,7 +124,15 @@ public:
     [[nodiscard]] bool CloseProject();
     void OpenProject(const QString& descriptorPath);
     void ClearRecentProjects();
-    void EditDraft(const ProjectDescriptor& draft);
+    void EditDraft(const ProjectDescriptor& draft, bool merge = false);
+    void UndoProjectEdit();
+    void RedoProjectEdit();
+    [[nodiscard]] bool CanUndoProject() const;
+    [[nodiscard]] bool CanRedoProject() const;
+    [[nodiscard]] uint64 ProjectRevision() const noexcept
+    {
+        return ProjectHistory_.Revision();
+    }
     void Save();
     void Reload();
     void Configure();
@@ -184,6 +193,7 @@ private:
     void ScheduleSetupCheck();
     void RememberProject();
     void Publish();
+    void InvalidateDraftTargets();
     void RecordCommand(const QString& stage, const QStringList& argv, const QString& cwd);
     [[nodiscard]] QString ResolveDescriptorPath() const;
     void ActivateGeneration(const QString& path);
@@ -194,6 +204,8 @@ private:
 
     ToolingPaths Tooling_;
     WorkspaceState State_;
+    DocumentHistory<ProjectDescriptor> ProjectHistory_;
+    bool Saving_ = false;
     ProjectStore Store_;
     RecentProjectStore RecentProjects_;
     LogBuffer Log_;

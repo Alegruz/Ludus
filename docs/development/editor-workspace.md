@@ -188,13 +188,16 @@ ludus project create /path/to/new-game --name MyGame --tools /path/to/Ludus
 **File → Close Project** returns to Welcome without quitting. Save/Discard/Cancel
 protect project settings and audio changes; Cancel or failed Save preserves the
 project. Stop active jobs/Play before closing. Close clears the project identity,
-setup result, discovery cache and audio binding, preserving history and monotonically
+setup result, discovery cache, document undo history and audio binding, preserving recent-project history and monotonically
 increasing job IDs/epochs so callbacks cannot target a later project.
+Quit also checks unsaved project settings before closing; Cancel or a failed Save
+keeps the window and its draft open.
 
 | Shortcut (Linux) | Action |
 | --- | --- |
 | Ctrl+N / Ctrl+O | New / Open Project |
-| Ctrl+S | Save Project Settings (focused document routing is S2) |
+| Ctrl+S | Save the active Project Settings, Audio or Configuration document |
+| Ctrl+Z / platform Redo | Undo / Redo in focused text, or Project Settings history |
 | Ctrl+Shift+W | Close Project |
 | Ctrl+Shift+B | Build |
 | Ctrl+F5 / F5 | Build and Run / Build and Debug in RAD |
@@ -203,9 +206,48 @@ increasing job IDs/epochs so callbacks cannot target a later project.
 
 The help dialog reads the same QAction bindings used by menus/toolbars. Qt's
 standard New/Open/Save bindings follow the platform; actions remain window-scoped
-and use controller capability gates. Document undo/redo and configurable mappings
-remain S2 work. See [art direction](../architecture/editor-art-direction.md) and
+and use controller capability gates. Configurable mappings remain future work.
+See [art direction](../architecture/editor-art-direction.md) and
 [browser strategy](../architecture/editor-browser-strategy.md).
+
+## Initial S2 document interactions
+
+Project Settings retains up to 64 before/after snapshots. Consecutive edits in
+the same field coalesce until focus changes or Save establishes a boundary.
+Undo and Redo change the draft; they never write the descriptor. Dirty state
+compares the draft's content with the last successful save, so undoing to that
+content becomes clean. Save keeps history and acknowledges the captured snapshot
+rather than any later edit. A new edit after Undo clears the redo branch.
+Validation failures, external-file conflicts and failed file replacement
+preserve the draft and its history. Accepted Open, Reload and Close reset this
+document history; rejected loads preserve it.
+
+Unrelated controller updates leave unchanged fields and argument rows intact,
+preserving cursor, selection and Qt text undo. A pending argument-row edit is
+committed before Save or an unsaved-project decision. Field changes reach the
+current project synchronously, preventing queued edits from targeting a newly
+opened project. Focused editable text owns Undo/Redo first; move focus to another
+Project Settings control to use document history. Other work areas and live
+inspection do not consume project history.
+
+The shared Save action follows the active work area. Audio retains its existing
+save policy. Configuration saves committed preference edits to its selected
+file, or asks for a path on the first save; **Apply** still commits the entry
+buffer and **Save Sparse** selects an export path. Configuration and project
+dirty states remain independent. Audio/configuration document history and live
+tuning history are separate follow-up concerns. In the browser, Save downloads
+an export and retains the existing volatile-workspace durability limits.
+
+The bounded history primitive is independent of Qt. Project descriptor parsing,
+validation and persistence still use the existing Qt adapter; the complete
+[portable document core](../architecture/editor-gui-systems.md) remains pending.
+This slice does not complete S2: typed portable transactions, richer validation
+feedback, broader inspector/IME acceptance and configurable command mappings
+still need implementation and qualification. Regression fixtures cover history
+branching, save failures and conflicts, a later edit during Save, text focus,
+pending argument buffers, command scope and cancelled Quit. The Linux optional
+editor CI runs the Qt fixtures offscreen and the sanitizer profile includes the
+editor; offscreen checks do not establish native input or browser acceptance.
 
 ## The project descriptor (version 1)
 
@@ -353,8 +395,8 @@ Project settings, Audio and Configuration occupy central work areas. Recents
 appear on Welcome and in the File menu; Live Inspector and Output are movable panels; the status bar reports current workspace state.
 The Game toolbar exposes the existing build/debug and Play controls. Toolbar
 and menu actions share controller capability gating. Project settings and Audio
-scroll when available space is small. Ctrl+S continues to save the project
-descriptor; Audio and tuning documents have separate explicit save actions.
+scroll when available space is small. Ctrl+S routes to the active Project Settings,
+Audio or Configuration document; live tuning retains its explicit save action.
 
 Use **View** to recover a hidden panel or Game toolbar. **View → Reset Layout**
 restores the default panel arrangement without changing project drafts or Play.

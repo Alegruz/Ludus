@@ -75,6 +75,7 @@ qt_add_executable(ludus_editor
     ${editor_audio_source}
     main.cpp
     src/main_window.cpp
+    src/document_commands.cpp
     src/main_window_layout.cpp
     src/project_setup_dialog.cpp
     src/project_creation_dialog.cpp
@@ -126,6 +127,8 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         tests/tool_process_tests.cpp
         tests/log_buffer_tests.cpp
         tests/controller_tests.cpp
+        tests/document_history_tests.cpp
+        tests/document_interaction_tests.cpp
         tests/project_setup_dialog_tests.cpp
         tests/project_lifecycle_tests.cpp
         tests/workspace_layout_tests.cpp
@@ -144,6 +147,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         src/controller.cpp
         src/controller_play.cpp
         src/main_window.cpp
+        src/document_commands.cpp
         src/main_window_layout.cpp
         src/project_setup_dialog.cpp
         src/project_creation_dialog.cpp

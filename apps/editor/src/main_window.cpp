@@ -55,6 +55,29 @@ MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QStr
     BuildUi();
     BuildMenus();
     InitializeWorkspace();
+    connect(WorkTabs_, &QTabWidget::currentChanged, this, &MainWindow::RenderDocumentActions);
+    connect(Audio_, &AudioWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
+    connect(qApp, &QApplication::focusChanged, this, [this](QWidget* before, QWidget* after) {
+        LastEditedField_ = nullptr;
+        disconnect(FocusUndoConnection_);
+        disconnect(FocusRedoConnection_);
+        if (auto* line = qobject_cast<QLineEdit*>(after))
+        {
+            FocusUndoConnection_ = connect(line, &QLineEdit::textChanged, this, &MainWindow::RenderDocumentActions);
+        }
+        else if (auto* plain = qobject_cast<QPlainTextEdit*>(after))
+        {
+            FocusUndoConnection_ =
+                connect(plain, &QPlainTextEdit::undoAvailable, this, &MainWindow::RenderDocumentActions);
+            FocusRedoConnection_ =
+                connect(plain, &QPlainTextEdit::redoAvailable, this, &MainWindow::RenderDocumentActions);
+        }
+        if (!Rendering_ && before == TargetBox_->lineEdit())
+        {
+            RenderFields();
+        }
+        RenderDocumentActions();
+    });
     connect(Controller_, &EditorController::StateChanged, this, &MainWindow::OnStateChanged);
     OnStateChanged();
 }
@@ -75,8 +98,18 @@ void MainWindow::BuildMenus()
     CloseProjectAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+W")));
     connect(CloseProjectAction_, &QAction::triggered, this, &MainWindow::OnCloseProject);
     SaveAction_ = fileMenu->addAction(QStringLiteral("&Save Project Settings"));
+    SaveAction_->setObjectName(QStringLiteral("document.save"));
     SaveAction_->setShortcut(QKeySequence::Save);
     ReloadAction_ = fileMenu->addAction(QStringLiteral("&Reload"));
+    auto* editMenu = menuBar()->addMenu(QStringLiteral("&Edit"));
+    UndoAction_ = editMenu->addAction(QStringLiteral("&Undo"));
+    RedoAction_ = editMenu->addAction(QStringLiteral("&Redo"));
+    UndoAction_->setObjectName(QStringLiteral("document.undo"));
+    RedoAction_->setObjectName(QStringLiteral("document.redo"));
+    UndoAction_->setShortcut(QKeySequence::Undo);
+    RedoAction_->setShortcuts(QKeySequence::keyBindings(QKeySequence::Redo));
+    connect(UndoAction_, &QAction::triggered, this, &MainWindow::OnUndoRequested);
+    connect(RedoAction_, &QAction::triggered, this, &MainWindow::OnRedoRequested);
 
     QMenu* projectMenu = menuBar()->addMenu(QStringLiteral("&Project"));
     NewProjectAction_ = new QAction(QStringLiteral("&New Project..."), this);
@@ -294,10 +327,12 @@ void MainWindow::OnFieldEdited()
     {
         return; // field change came from RenderFields, not a user edit
     }
-    // Defer the action to the next event-loop turn so a render-triggered signal
-    // never dispatches a nested edit, then revalidate against current state.
+    // Rendering blocks edit signals. Accept this input synchronously so Save or
+    // a project switch cannot overtake a queued field edit.
     const ProjectDescriptor draft = DraftFromFields();
-    QTimer::singleShot(0, Controller_, [this, draft]() { Controller_->EditDraft(draft); });
+    auto* field = sender();
+    Controller_->EditDraft(draft, field != nullptr && field == LastEditedField_);
+    LastEditedField_ = field;
 }
 
 void MainWindow::OnAddArgument()
@@ -362,10 +397,33 @@ void MainWindow::OpenProjectPath(const QString& path)
 
 void MainWindow::OnSaveRequested()
 {
+    auto* area = WorkTabs_->currentWidget();
+    if (area == Configuration_)
+    {
+        Configuration_->Save();
+        return;
+    }
+    if (area != nullptr && area->isAncestorOf(Audio_))
+    {
+        if (Audio_->CanSave())
+        {
+            Audio_->Save();
+        }
+        return;
+    }
+    if (area == ProjectSettings_)
+    {
+        (void)SaveProjectSettings();
+    }
+}
+
+bool MainWindow::SaveProjectSettings()
+{
+    CommitProjectFields();
     const auto& state = Controller_->State();
     if (state.Draft.SourceDir != state.Saved.SourceDir && !Audio_->ConfirmDiscard())
     {
-        return;
+        return false;
     }
     Controller_->Save();
 #if defined(Q_OS_WASM)
@@ -374,10 +432,12 @@ void MainWindow::OnSaveRequested()
         (void)DownloadEditorDocument(this, Controller_->State().DescriptorPath);
     }
 #endif
+    return !Controller_->State().Dirty();
 }
 
 void MainWindow::OnReloadRequested()
 {
+    CommitProjectFields();
     if (!Audio_->ConfirmDiscard())
     {
         return;
@@ -516,38 +576,69 @@ void MainWindow::RenderFields()
     const QSignalBlocker b7(ArgsList_);
 
     const ProjectDescriptor& draft = Controller_->State().Draft;
-    NameEdit_->setText(draft.Name);
-    ProviderBox_->setCurrentText(draft.ProviderKind == Provider::Cmake ? QStringLiteral("cmake")
-                                                                       : QStringLiteral("ludus"));
-    SourceDirEdit_->setText(draft.SourceDir);
-    PresetBox_->setCurrentText(draft.Preset);
-    CwdEdit_->setText(draft.RunCwd);
+    const bool identityChanged = RenderedProjectEpoch_ != Controller_->State().ProjectEpoch;
+    RenderedProjectEpoch_ = Controller_->State().ProjectEpoch;
+    // Qt's setText clears selection and text Undo. Only replace content when
+    // the document changed; ordinary state notifications preserve edit buffers.
+    // Thanks to Qt Group, QLineEdit, text property/Undo documentation:
+    // https://doc.qt.io/qt-6/qlineedit.html#text-prop
+    const auto text = [identityChanged](QLineEdit* edit, const QString& value) {
+        if (identityChanged || edit->text() != value)
+        {
+            edit->setText(value);
+        }
+    };
+    text(NameEdit_, draft.Name);
+    text(SourceDirEdit_, draft.SourceDir);
+    text(CwdEdit_, draft.RunCwd);
+    const auto provider = draft.ProviderKind == Provider::Cmake ? QStringLiteral("cmake") : QStringLiteral("ludus");
+    if (ProviderBox_->currentText() != provider)
+    {
+        ProviderBox_->setCurrentText(provider);
+    }
+    if (PresetBox_->currentText() != draft.Preset)
+    {
+        PresetBox_->setCurrentText(draft.Preset);
+    }
 
     // Executable-only dropdown after Configure; the current (possibly invalid)
     // target stays visible until corrected.
     const QStringList& discovered = Controller_->State().DiscoveredTargets;
     const QString current = draft.Target;
-    TargetBox_->clear();
-    for (const QString& name : discovered)
+    if (identityChanged || (RenderedTargets_ != discovered && !TargetBox_->lineEdit()->hasFocus()))
     {
-        TargetBox_->addItem(name);
+        TargetBox_->clear();
+        TargetBox_->addItems(discovered);
+        RenderedTargets_ = discovered;
     }
-    TargetBox_->setCurrentText(current);
+    text(TargetBox_->lineEdit(), current);
 
-    ArgsList_->clear();
-    for (const QString& arg : draft.RunArgs)
+    QStringList displayedArgs;
+    for (foundation::int32 index = 0; index < ArgsList_->count(); ++index)
     {
-        auto* item = new QListWidgetItem(arg, ArgsList_);
-        item->setFlags(item->flags() | Qt::ItemIsEditable);
+        displayedArgs.append(ArgsList_->item(index)->text());
     }
-    connect(ArgsList_->model(),
-            &QAbstractItemModel::dataChanged,
-            this,
-            &MainWindow::OnFieldEdited,
-            Qt::UniqueConnection);
+    if (identityChanged || displayedArgs != draft.RunArgs)
+    {
+        const auto selected = ArgsList_->currentRow();
+        ArgsList_->clear();
+        for (const QString& arg : draft.RunArgs)
+        {
+            auto* item = new QListWidgetItem(arg, ArgsList_);
+            item->setFlags(item->flags() | Qt::ItemIsEditable);
+        }
+        if (!identityChanged && selected >= 0 && selected < ArgsList_->count())
+        {
+            ArgsList_->setCurrentRow(selected);
+        }
+    }
 
     // Render output and runtime status.
-    Output_->setPlainText(Controller_->Log().Text());
+    const auto output = Controller_->Log().Text();
+    if (Output_->toPlainText() != output)
+    {
+        Output_->setPlainText(output);
+    }
     Rendering_ = false;
 }
 
@@ -589,7 +680,7 @@ void MainWindow::RenderCapabilities()
     RecentOpenButton_->setEnabled(caps.CanOpen && RecentList_->currentItem() != nullptr);
     BrowseProjectButton_->setEnabled(caps.CanOpen);
     ClearRecentAction_->setEnabled(caps.CanOpen && !Controller_->RecentProjects().isEmpty());
-    SaveAction_->setEnabled(caps.CanSave);
+    RenderDocumentActions();
     ReloadAction_->setEnabled(caps.CanReload);
     ConfigureAction_->setEnabled(caps.CanConfigure);
     BuildAction_->setEnabled(caps.CanBuild);
@@ -790,6 +881,7 @@ void MainWindow::OnSetupProject()
 
 bool MainWindow::ConfirmProjectChange(const QString& action)
 {
+    CommitProjectFields();
     if (Controller_->State().Document != DocumentState::ProjectLoaded || !Controller_->State().Dirty())
     {
         return true;
@@ -800,8 +892,7 @@ bool MainWindow::ConfirmProjectChange(const QString& action)
                                               QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
     if (choice == QMessageBox::Save)
     {
-        Controller_->Save();
-        return !Controller_->State().Dirty();
+        return SaveProjectSettings();
     }
     return choice == QMessageBox::Discard;
 }
@@ -845,6 +936,8 @@ void MainWindow::ShowShortcuts()
     for (auto* action : {NewProjectAction_,
                          OpenAction_,
                          SaveAction_,
+                         UndoAction_,
+                         RedoAction_,
                          CloseProjectAction_,
                          BuildAction_,
                          BuildRunAction_,
@@ -857,8 +950,9 @@ void MainWindow::ShowShortcuts()
         layout->addRow(label, new QLabel(action->shortcut().toString(QKeySequence::NativeText), dialog));
     }
     auto* note = new QLabel(QStringLiteral("Shortcuts follow the same availability rules as menu actions. "
-                                           "Stop active work before closing a project. Document-scoped save and undo "
-                                           "are planned for S2."),
+                                           "Save follows the current work area. Undo edits focused text first; "
+                                           "Project Settings also has document history. Stop active work before "
+                                           "closing a project."),
                             dialog);
     note->setWordWrap(true);
     layout->addRow(note);
@@ -935,6 +1029,11 @@ void MainWindow::closeEvent(QCloseEvent* event)
 {
     if (!AudioClosing_)
     {
+        if (!ConfirmProjectChange(QStringLiteral("quitting")))
+        {
+            event->ignore();
+            return;
+        }
         if (!Audio_->ConfirmDiscard() || !Configuration_->ConfirmDiscard())
         {
             event->ignore();
