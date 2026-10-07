@@ -74,7 +74,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Own text and bind names](wiki/guides/strings.md)
 - [Platform targets and compatibility](wiki/guides/platform-targets.md)
 - [Public fullscreen rendering](development/fullscreen-rendering.md)
-- [Read assets through the filesystem](wiki/guides/filesystem.md)
+- [Read and publish files through the filesystem](wiki/guides/filesystem.md)
 - [Troubleshooting](wiki/guides/troubleshooting.md)
 - [Use deterministic randomness](wiki/guides/randomness.md)
 - [Use high-resolution time](wiki/guides/time.md)

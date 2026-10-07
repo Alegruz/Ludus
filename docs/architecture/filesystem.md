@@ -1,6 +1,6 @@
 # Filesystem architecture
 
-Status: F0 design and reference review complete; F1 through F4 implemented. Validation is
+Status: F0 design and reference review complete; F1 through F5 implemented. Validation is
 recorded in the implementation PR.
 Reference review follows the baseline and records revisions below. This is a storage architecture for
 Ludus; it does not implement an operating-system filesystem.
@@ -47,8 +47,8 @@ read, allocation/metadata failure cleanup, close-on-exec and descriptor reuse
 after a failed close. macOS CI runs these tests and Content read adapters in
 Development and with ASan/UBSan. Content also supports Linux/macOS atomic saves
 through its separately tested adapter; see [native saves](content-resources.md#native-saves).
-FoundationFilesystem F5 persistence and watchers remain separate work; F4 adds
-a dedicated bounded I/O pool above retained virtual file revisions.
+F5 adds explicit native publication results and bounded cooked-path polling; F4
+provides a dedicated bounded I/O pool above retained virtual file revisions.
 
 ## Virtual namespace and shipping storage
 
@@ -267,7 +267,7 @@ this conservative publishing policy is distinct from each host's native lookup.
 It checks ordinary source size/mtime mutation while streaming at most one input
 block at a time into a temporary payload spool. Publishing uses an exclusive
 same-directory temporary output and replacement; failure preserves an existing
-output. This offline publication is not F5's durable-save guarantee or a sandbox
+output. This offline publication is not F5's explicit sync reporting or a sandbox
 against hostile changes to the trusted source tree.
 
 An optional layout manifest is exactly `{"version":1,"paths":["startup/a", ...]}`.
@@ -323,7 +323,7 @@ not evidence that historical performance results transfer to today's hardware.
 | Bruno Sousa, GPG2 1.15, *File Management Using Resource Files*, printed pp. 100-104 (PDF 97-101) | Signature/version, per-entry metadata, separation of container and resource | Keep F3's validated index and explicit codec/version fields; require bounded independent blocks rather than whole-resource decompression or a process-wide current directory. Do not adopt historical encryption examples. |
 | Colt McAnlis, GPG7 1.1, *Efficient Cache Replacement Using the Age and Cost Metrics*, printed pp. 5-14 (PDF 38-47) | Replacement needs usage history and reconstruction cost; test oversubscribed working sets | Add trace replay comparing LRU with measured cost-aware policies. Keep this in Content residency; no mandatory second byte cache or per-frame filesystem scan. |
 | David L. Koenig, GPG6 1.9, *Faster File Loading with Access-Based File Reordering*, printed pp. 103-108 (PDF 106-111; scanned pages visually inspected) | Capture accesses, reorder the pack, then rerun; caching and alternate gameplay paths can distort gains | F3 builder accepts a deterministic trace-derived layout manifest. Compare startup, level transitions and mod workloads on target SSD/HDD/browser delivery; retain canonical sorted lookup independently of payload placement. |
-| Noel Llopis and Charles Nicholson, GPG6 1.10, *Stay in the Game: Asset Hotloading for Fast Iteration*, relevant printed pp. 109-114 (PDF 112-117; visually inspected) | Converter/monitor/listener/rebinding boundaries and resource indirection | F5 watchers observe completed cooked output, debounce duplicate hints and trigger validation. Content publishes replacement handles at a controlled frame boundary, keeps the prior revision on failure and budgets overlapping residency. Filesystem never rewrites active readers. |
+| Noel Llopis and Charles Nicholson, GPG6 1.10, *Stay in the Game: Asset Hotloading for Fast Iteration*, relevant printed pp. 109-114 (PDF 112-117; visually inspected) | Converter/monitor/listener/rebinding boundaries and resource indirection | F5 watchers poll registered cooked paths, debounce metadata hints and request validation; producers publish completed output atomically. Content publishes replacement handles at a controlled frame boundary, keeps the prior revision on failure and budgets overlapping residency. Filesystem never rewrites active readers. |
 | Neil Gower, GPG8 5.3, *Asynchronous I/O for Scalable Game Servers*, printed pp. 506-513 (PDF 521-528) | Queue boundary, buffer/control-structure lifetime, asynchronous cancellation, small-request overhead | F4 uses an explicit request state machine and drain-before-release shutdown; compatible range coalescing remains a measured follow-up. Networking examples inform ownership; they do not establish modern disk throughput. |
 
 F3 payload layout is decoupled from index order. Layout changes do not alter
@@ -352,6 +352,89 @@ can use [openat2](https://man7.org/linux/man-pages/man2/openat2.2.html) behind a
 separate stated policy; do not silently claim its guarantees for this walk.
 [Windows cancellation](https://learn.microsoft.com/en-us/windows/win32/fileio/canceling-pending-i-o-operations)
 also requires waiting for terminal completion before buffer reuse.
+
+## F5 persistence and cooked-file hints
+
+`persistence.hpp` adds an explicit host-selected `WriteDirectory` capability,
+separate from read mounts. Linux and macOS pin the trusted root; unsupported
+native targets, including browsers, return Unsupported. `Publish` admits a
+complete caller buffer against `MaxBytes` (32 MiB by default), traverses existing
+parents without following child symlinks, and refuses non-regular destinations.
+It takes a nonblocking advisory lock on the selected parent directory, checks the
+requested precondition, creates an exclusive same-directory 0600 temporary,
+handles full/short/interrupted writes, applies the requested file sync, closes
+once, rechecks the destination and atomically renames. Temporary names contain a
+process identifier and monotonic sequence with bounded collision retries. Foreign
+collisions are never removed. The host must hold the capability and source bytes
+stable through the call; publication itself allocates no C++ storage.
+
+Each transaction opens an independent directory file description before taking
+its lock. Duplicating a root descriptor would share flock ownership between calls
+and incorrectly admit concurrent writers using the same capability. Cooperating
+writers serialize per parent; contention returns Conflict without blocking.
+`WriteCondition` permits any regular/absent destination, requires absence, or
+requires an expected `FileStamp`. `Directory::Observe` captures metadata without
+allocation and preserves output on failure. Stamps contain device/inode, size,
+mtime and ctime, not content integrity. These checks can miss metadata-preserving
+edits and inode reuse. An uncooperative writer can race the last check and rename;
+this is cooperative optimistic admission, not an atomic digest compare-and-swap.
+Content still owns digest-level identity and its existing separately tested
+`SaveFile` adapter; F5 does not change that adapter's contract or temporary naming.
+
+`PublicationResult` distinguishes Outcome from Published, FileSynced,
+DirectorySynced and Cleanup. Before rename, failures preserve the destination and
+report owned temporary cleanup. After rename, a parent-sync error reports an
+error **with Published true**; the new bytes remain visible. Cleanup separately
+reports unlink/close failures and may leave an owned temporary for host recovery.
+The three sync policies request no sync, file sync, or file plus parent sync.
+Native acknowledgments are evidence of completed requests, not universal
+power-loss guarantees; macOS fsync does not promise flushing device caches.
+Opened File readers retain their old revisions after replacement.
+
+This implementation follows the Linux man-pages project's
+[rename(2)](https://man7.org/linux/man-pages/man2/rename.2.html),
+[fsync(2)](https://man7.org/linux/man-pages/man2/fsync.2.html) and
+[flock(2)](https://man7.org/linux/man-pages/man2/flock.2.html) contracts, and Apple's
+[fsync(2) cache distinction](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fsync.2.html).
+Thanks to those authors for defining the atomicity, cooperative-lock and sync
+boundaries; the backend is independently implemented, with attribution beside it.
+
+`watch.hpp` provides a host-polled `Watcher` over an explicit set of final cooked
+paths. It pins its trusted root and allocates fixed path/hint storage at Init.
+The host owns one thread, supplies monotonic nanoseconds and budgets each Advance
+by slot positions. Metadata changes, creation and disappearance must remain
+stable across observations for the configured debounce interval; reverted
+candidates are suppressed. Producers should atomically publish completed cooked
+files. Debounce cannot certify an in-place writer's completion or byte integrity.
+Polling can miss transient and metadata-preserving changes, follows native
+filename equivalence, discovers no unregistered paths and uses no OS notification
+backend. Content/catalog code must register new paths or rebuild registrations
+when its manifest changes. Advance, Add, Remove, Poll and rescan allocate no C++
+storage after initialization; native lookup can still incur filesystem latency.
+
+Hints own their path and host tag; lifetime/sequence handles reject stale or
+foreign removals and retired registrations remove queued hints. An observation
+error never becomes a deletion. Queue overflow discards incremental hints,
+counts losses and requests a sticky full rescan. Observation errors likewise
+request rescan. Incremental observation stops until recovery. BeginRescan freezes
+registration changes and clears pending hints. Each NextRescan observes at most
+one registered path and emits its current metadata/absence/error, including
+unchanged paths. A final empty result ends the pass; any unsafe observation keeps
+NeedsRescan set and requests retry. A rescan is not a globally atomic snapshot.
+The host opens and validates candidates, chooses replacement revisions and
+publishes Content handles at its own controlled boundary. Filesystem never
+rebinds readers or retires GPU/audio resources.
+
+Native tests cover publication preconditions, sync policies, limits, unsafe
+paths, pinned roots, permissions and old-reader lifetime. Isolated production
+backends inject allocation/open/lock/metadata/write/sync/close/rename/cleanup
+failures, foreign collisions, edits before rename and same-owner lock contention.
+Watcher tests cover debounce, reverted candidates, bounded stepping, overflow,
+rescan errors/retry, pinned roots, stale handles and storage allocation failures.
+Installed and relocated SDK consumers exercise both APIs; the browser Foundation
+probe verifies explicit Unsupported behavior. CI runs Linux/macOS unit,
+ASan/UBSan, static analysis, exported-header and documentation checks. No
+throughput improvement or power-loss durability claim follows from these tests.
 
 ## F4 bounded asynchronous reads
 
