@@ -242,6 +242,38 @@ undo history, watchers, device probing, locks/signatures, profile selection UI,
 replay/network identity export, secret management, and broad subsystem migration
 are separate additions with their own ownership/transport requirements.
 
+## Initial architecture completion and improvement sequence
+
+The first implementation already supplies the V1 control core, bounded JSON
+adapter, cooker, offline Editor preview and two GameHost startup settings. Finish
+the remaining integration of this architecture before starting the broader
+[conference and journal research queue](engine-configuration-gems-review.md#post-implementation-research-queue).
+The queue does not change the contracts above or require a research-led redesign
+before the initial implementation has a validated comparison baseline.
+
+The following gates track the remaining initial integration. They are planned
+work, not claims that these features are implemented or that new checks pass.
+
+| Gate | Remaining implementation | Completion evidence |
+| --- | --- | --- |
+| C1: shared metadata and SDK contracts | Export descriptor numeric bounds, allowed-source masks, groups and text limits alongside the metadata already emitted by `WriteSchema`. Document the configuration public API with Doxygen contracts and remove resolved undocumented-baseline entries. | Schema export agrees with native descriptors and validation, including exact integer limits. SDK API coverage and the documentation checks pass. |
+| C2: explicit layer selection | Define an owner-managed manifest for baseline files, named profile/device/quality selection and deterministic composition within a rank. Connect supported startup layers to the host/cooker workflow using the existing fixed precedence. | Selection and composition are independent of file load order; malformed, unknown, incompatible and oversized inputs fail explicitly. Existing Project/Preference/Launch precedence remains covered. |
+| C3: project and launcher integration | Associate explicit configuration inputs with the project store and expose the author, cook, preview, sparse-save and launch workflow in the Editor. Share validation with the native tool and preserve unrelated project/editor settings. | A project can launch with its selected cooked inputs without manually assembling configuration flags. Opening remains read-only and reports missing/stale inputs; explicit cooking or saving publishes atomically and preserves drafts on conflict/failure. |
+| C4: module owners and application | Select the first subsystem settings to migrate, define their module-owned descriptors and ordinary options adapters, and make the tool/Editor select the appropriate schema explicitly. Integrate at least one production Live apply group with fallible preparation, publication at an owner safe point, snapshot lifetime and any required device acknowledgement. | Integration tests demonstrate successful publication, preparation failure preserving existing options/resources, restart values staying pending, and safe resource retirement. Inspection only reports device application after the owner fulfills its contract. |
+| C5: validated initial baseline | Validate C1-C4 with the pinned native/web toolchains and installed SDK consumer. Record the initial implementation revision, supported schemas/targets, representative workloads and reproduction commands before research trials begin. | Relevant unit and integration tests, warning-clean builds, ASan/UBSan, format/tidy, browser smoke, SDK consumer and documentation checks pass. Record cold initialization/prepare/commit costs, allocation/storage bounds, apply latency and author-to-launch workflow evidence without inventing performance budgets. |
+
+C1-C3 can proceed while module owners define C4. C5 completes after all preceding
+gates have evidence. C2 selects explicitly named device configurations; automatic
+device probing and a richer profile selection UI retain their separate scope.
+C4 establishes the first integrated owners; broad subsystem migration, remote
+console transport and the other additions listed above remain separate work.
+
+After C5, read the queued resources in priority order, propose bounded experiments,
+and compare them with the recorded baseline. Adopt, defer or reject each idea
+from measured results and correctness evidence. Update this architecture only
+when a reviewed experiment supports a contract change, and retain attribution
+near any affected implementation.
+
 ## Verification and literature
 
 Tests cover precedence/reset, source explanations, semantic generations, stale
