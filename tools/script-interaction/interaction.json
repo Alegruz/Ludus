@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "namespace": "ludus::s1",
+  "entrypoint": "OnInteract",
+  "schemas": {
+    "Config": { "id": 100, "fields": [
+      { "id": 1, "name": "Threshold", "type": "uint32", "min": 1, "max": 10, "default": 2 }
+    ] },
+    "State": { "id": 101, "fields": [
+      { "id": 1, "name": "Interactions", "type": "uint32", "min": 0, "max": 10, "default": 0 },
+      { "id": 2, "name": "OpenRequested", "type": "bool", "default": false }
+    ] },
+    "Interact": { "id": 102, "fields": [
+      { "id": 1, "name": "Target", "type": "EntityRef" },
+      { "id": 2, "name": "Alias", "type": "EntityRef" },
+      { "id": 3, "name": "Amount", "type": "uint32", "min": 1, "max": 10, "default": 1 }
+    ] }
+  },
+  "operation": {
+    "id": 200,
+    "name": "RequestDoorOpen",
+    "phase": "Gameplay",
+    "capability": "DoorControl",
+    "effect": "Command",
+    "arguments": [
+      { "name": "Target", "type": "EntityRef" },
+      { "name": "Power", "type": "uint32", "min": 1, "max": 10 }
+    ],
+    "result": "CommandResult"
+  }
+}

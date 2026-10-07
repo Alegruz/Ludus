@@ -231,3 +231,87 @@ reader barriers were baseline choices and existing Ludus strengths. The reviewed
 chapters reinforce them but do not supply a measured improvement. The completed
 architecture's implementation and benchmark gates remain necessary before any
 claim that it is faster or ready to ship.
+
+## Research backlog after the initial implementation
+
+Implement and validate the [initial architecture](object-handles-uuid.md#implementation-sequence)
+first, then use that implementation and its measurements as the baseline for
+research trials. The architecture owns system contracts and implementation gates;
+this section owns the follow-up reading and evaluation record. Its conditional
+streaming and reclamation facilities do not become prerequisites merely because
+a paper discusses them.
+
+The sources below were shortlisted on 2026-10-06 from primary publication,
+author, conference and project pages. Metadata, abstracts, design notes and
+selected passages were screened; full reviews and trials remain queued. The
+questions and experiments are proposed applications to Ludus, not claims that
+the sources have been fully reviewed, their mechanisms adopted, or a performance
+gain established. Preserve the completed book/article review above separately
+from this queue.
+
+### Reading queue and venues
+
+Begin with OH-01 and OH-03 after the initial implementation passes its gates.
+Read OH-02 when evaluating binding-table workloads. OH-04 through OH-06 become
+implementation inputs when a concrete consumer requires concurrent access beyond
+the existing protected phases; they can also inform a review of lifetime
+contracts without introducing concurrent reclamation.
+
+| ID | Source and venue | Full-review status | Question and possible experiment after review |
+| --- | --- | --- | --- |
+| OH-01 | Santosh Nagarakatte, Jianzhou Zhao, Milo M. K. Martin and Steve Zdancewic, **CETS: Compiler-Enforced Temporal Safety for C**, *International Symposium on Memory Management (ISMM)*, 2010. [Publication](https://llvm.org/pubs/2010-06-ISMM-CETS.html); [author-hosted paper](https://people.cs.rutgers.edu/~sn349/papers/ismm10-cets.pdf) | Queued; metadata/abstract and identifier-checking passages screened | How can allocation identity and separately stored validity metadata sharpen our stale-reference safety argument? Exercise reuse, owner replacement, component removal/reinsertion and terminal counters; distinguish identity validation from the protected lifetime of a borrowed pointer. The paper's compiler instrumentation and proof assumptions require their own review before drawing conclusions about Ludus. |
+| OH-02 | Matt Kulukundis, **Designing a Fast, Efficient, Cache-friendly Hash Table, Step by Step**, *CppCon*, 2017. [Talk](https://www.youtube.com/watch?v=ncHmEUmJZf4); Abseil maintainers, **Swiss Tables Design Notes**, [primary design notes](https://abseil.io/about/design/swisstables) | Queued; talk identified and design notes screened | Would compact control metadata and candidate filtering improve durable binding lookup? Compare the initial sorted table with a private preallocated flat-table prototype at identical capacity and memory budgets. Include full-key equality, forced hash collisions, misses, load limits and deletion/reinsertion churn; retain explicit allocation failure and deterministic output ordering. |
+| OH-03 | Sheetal V. Kakkad and Paul R. Wilson, **Address Translation Strategies in the Texas Persistent Store**, *USENIX Conference on Object-Oriented Technologies and Systems (COOTS)*, 1999. [Paper and abstract](https://www.usenix.org/legacy/events/coots99/full_papers/kakkad/kakkad_html/) | Queued; metadata/abstract and introduction screened | Which granularity of durable-to-runtime resolution suits our levels and reference graphs? Compare whole-candidate two-pass fixup with explicit per-link resolution and validated handle caching under representative load/reload workloads. Preserve explicit streaming policy and phase-bounded pointer borrowing when examining the persistent store's translation techniques. |
+| OH-04 | Maged M. Michael, **Hazard Pointers: Safe Memory Reclamation for Lock-Free Objects**, *IEEE Transactions on Parallel and Distributed Systems* 15(6), pp. 491-504, 2004. [DOI](https://doi.org/10.1109/TPDS.2004.8); [IBM publication](https://research.ibm.com/publications/hazard-pointers-safe-memory-reclamation-for-lock-free-objects) | Queued; metadata/abstract screened | What protection/publication protocol would a concrete concurrent payload consumer require? Review the validate-then-free race before proposing a bounded prototype; exercise reader pauses, removal, storage reuse and retirement while comparing against the existing reader barrier or lease design. Generation equality alone cannot supply the memory protection being studied. |
+| OH-05 | Haosen Wen, Joseph Izraelevitz, Wentao Cai, H. Alan Beadle and Michael L. Scott, **Interval-Based Memory Reclamation**, *ACM Symposium on Principles and Practice of Parallel Programming (PPoPP)*, 2018. [Conference entry](https://ppopp18.sigplan.org/details/PPoPP-2018-PPoPP-2018-papers/23/Interval-Based-Memory-Reclamation); [author-hosted paper](https://www.cs.rochester.edu/u/hwen5/papers/wen-ppopp-2018.pdf) | Queued; metadata/abstract and stalled-reader passages screened | How should delayed readers affect retained payload memory and progress? If concurrent reclamation is justified, compare suitable schemes using the same consumer and deliberate reader stalls. Measure retirement backlog, retained bytes, acquisition cost and completion latency, and review robustness/progress assumptions before promising bounds. |
+| OH-06 | Roland Meyer and Sebastian Wolff, **Pointer Life Cycle Types for Lock-Free Data Structures with Memory Reclamation**, *Proceedings of the ACM on Programming Languages* 4, POPL, article 68, 36 pages, 2020. [DOI](https://doi.org/10.1145/3371136); [author project and artifact](https://wolff09.github.io/seal/) | Queued; metadata/abstract screened | Can explicit lifecycle/protection states make borrow and lease misuse easier to detect? Review applicability to our phase and lease contracts, then trial narrow debug checks or static-analysis rules for escaped borrows and access after retirement. Any proof applies only to its stated model and verified implementation. |
+
+ISMM is the first venue to screen for temporal safety and memory-management
+contracts; CppCon provides practical C++ implementation and measurement talks.
+IEEE TPDS and PPoPP are useful for concurrent reclamation, while POPL and
+*Proceedings of the ACM on Programming Languages* provide deeper verification
+and type-system work. The COOTS link is a historical proceedings entry, not an
+upcoming conference schedule. These priorities and their mapping to Ludus are
+our selection criteria, not venue endorsements of the engine.
+
+The existing [RFC 9562 reference](#current-primary-references) remains the
+authoritative UUID-format and generation source for the initial implementation.
+The follow-up research prioritizes binding transactions, lifetime protection,
+migration, diagnostics and measurement. A new UUID version or distributed
+issuance scheme still needs the separate product requirement described in the
+architecture.
+
+### Review, trial and adoption record
+
+Use these statuses: **Queued**, **Reading**, **Reviewed**, **Trial planned**,
+**Trial complete**, **Adopted**, **Deferred**, or **Rejected**. Update the source's
+row and append its detailed record here as work advances. A metadata/abstract
+screen is not a full review; a benchmark hypothesis is not a measured gain.
+
+For each completed review or trial, record:
+
+1. Source ID, review date, and exact sections, pages or talk timestamps consulted.
+2. The relevant idea, assumptions, limitations and differences from Ludus;
+   distinguish design inspiration from copied or adapted code.
+3. The affected module/contract, observed problem and testable improvement
+   hypothesis, including why the existing implementation needs a change.
+4. A bounded prototype and comparison baseline, with failure/regression cases
+   appropriate to the consumer: wrong owner, slot reuse, pending destruction,
+   malformed/duplicate UUIDs, failed publication, unload/recreation, stale work
+   while a handle remains alive, hash collisions, or delayed readers.
+5. Reproduction commands, seed, workload, toolchain/backend versions and links
+   to the tests, benchmark or PR. Generated captures/results stay in ignored
+   `out/`.
+6. Before/after results against the architecture's measurement gates: latency
+   distributions, allocation counts, memory footprint, binding resolution,
+   reload/retirement and complete consumer/frame cost as applicable.
+7. An adopt/defer/reject decision, its reason, and links to any updated
+   architecture, API contract and implementation attribution.
+
+No source in this queue has a completed trial or adoption record yet. Adopt an
+improvement only after its regression and applicable native/browser validation
+gates pass and its evidence supports the stated benefit. Preserve release-build
+validation, nonwrapping identity, explicit errors and ownership, transactional
+publication, and protected pointer lifetimes. Concurrent reclamation requires a
+separate synchronization design for its concrete consumer. Acknowledge and
+thank sources actually used beside affected code, as required by AGENTS.md.

@@ -40,6 +40,7 @@ option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
 option(LUDUS_BUILD_WORLD_DEMO "Build the graphical game world reference (requires shader tools)" OFF)
 option(LUDUS_BUILD_SHADER_PROBE "Build the isolated offline shader feasibility probe" OFF)
 option(LUDUS_BUILD_LUAU_PROBE "Build the private S0 Luau feasibility probe (requires scripts/luau-probe bootstrap)" OFF)
+option(LUDUS_BUILD_SCRIPT_INTERACTION "Build the experimental S1 native/Luau headless interaction" OFF)
 # The Editor workspace (apps/editor) is an OPTIONAL developer tool, OFF by
 # default. When OFF, configure/build/install and browser targets must not search
 # for, link, or export Qt. Qt discovery happens only inside the enabled app
@@ -237,6 +238,11 @@ endif()
 
 if(LUDUS_BUILD_LUAU_PROBE)
     add_subdirectory(tools/luau-probe)
+endif()
+
+if(LUDUS_BUILD_SCRIPT_INTERACTION)
+    add_subdirectory(modules/runtime/scripting)
+    add_subdirectory(tools/script-interaction)
 endif()
 
 install(
