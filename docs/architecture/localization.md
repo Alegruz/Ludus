@@ -689,6 +689,15 @@ product cannot advertise a locale requiring paragraph/font capabilities until
 L4 and its asset/translator gates pass. This sequence does not require finishing
 all proposed Foundation systems first.
 
+Complete and validate the initial architecture through L0-L5 before beginning the
+broader conference/journal improvement pass. The existing static slice is an L1
+subset, not completion of those phases. Retain the accepted implementation
+revision, representative corpus, native/wasm behavior and workload measurements
+as the comparison baseline. Dependency/specification checks needed to implement
+this design remain part of the initial work. The
+[post-implementation research backlog](localization-gems-review.md#post-implementation-research-backlog)
+records the later reading queue and review/trial criteria for L6.
+
 | Alternative | Revisit condition |
 | --- | --- |
 | MF2 authoring/structured parts | Maintained production backend, profile conformance, fallible native/wasm builds, translator round trips and corpus migration; persist an explicit new codec version |
