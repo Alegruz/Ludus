@@ -536,13 +536,26 @@ jobs:
         run: out/host-tools/venv/bin/cmake --build --preset linux-clang-development --target ludus_editor_tests
       - name: Verify editor initialization and offscreen tests
         run: out/host-tools/venv/bin/ctest --preset linux-clang-development --label-regex '^editor$' --no-tests=error
+      - name: Measure the content browser projection
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          out/build/linux-clang-development/apps/editor/ludus_editor_tests '[content][scale]' --success > out/editor-content-scale.txt
+          cat out/editor-content-scale.txt >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: editor-content-scale
+          path: out/editor-content-scale.txt
       - name: Analyze document interactions and regressions
         run: |
           out/host-tools/bin/clang-tidy -p out/build/linux-clang-development --warnings-as-errors='*' \
             apps/editor/src/controller.cpp apps/editor/src/main_window.cpp \
             apps/editor/src/main_window_layout.cpp apps/editor/src/document_commands.cpp \
             apps/editor/src/configuration_workspace.cpp apps/editor/src/audio_workspace.cpp \
-            apps/editor/tests/document_history_tests.cpp apps/editor/tests/document_interaction_tests.cpp
+            apps/editor/tests/document_history_tests.cpp apps/editor/tests/document_interaction_tests.cpp \
+            apps/editor/src/content_catalog_model.cpp apps/editor/src/content_import.cpp \
+            apps/editor/src/content_jobs.cpp apps/editor/src/content_workspace.cpp \
+            apps/editor/tests/content_browser_tests.cpp apps/editor/tests/content_import_gate_tests.cpp
       - name: Report compiler cache
         if: always()
         run: ccache --show-stats >> "$GITHUB_STEP_SUMMARY"

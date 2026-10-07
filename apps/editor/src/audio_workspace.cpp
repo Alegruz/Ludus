@@ -286,6 +286,31 @@ void AudioWorkspace::Reload()
         }
     }
 }
+void AudioWorkspace::RefreshCatalog()
+{
+    if (!Dirty_)
+    {
+        Reload();
+    }
+}
+bool AudioWorkspace::OpenResource(const QString& id)
+{
+    if (!ConfirmDiscard())
+    {
+        return false;
+    }
+    Reload();
+    for (int row = 0; row < List_->count(); ++row)
+    {
+        if (List_->item(row)->text() == id)
+        {
+            List_->setCurrentRow(row);
+            Open();
+            return HasDocument_ && Id_->text() == id;
+        }
+    }
+    return false;
+}
 bool AudioWorkspace::ConfirmDiscard()
 {
     if (!Dirty_)

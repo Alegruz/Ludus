@@ -257,6 +257,69 @@ With the Qt prerequisites installed, include the editor in sanitizer validation:
 ./scripts/test linux-clang-asan-ubsan
 ```
 
+## S3 content browser
+
+The **Content** work area projects the saved `content/catalog.json` into a
+searchable table of resource IDs, kinds and paths. Search is case-insensitive
+and checks all three columns. Selection is an ID, so filtering, sorting and
+refreshing cannot reinterpret a row number as another resource. Hidden selections
+are restored when their ID becomes visible again. Unchanged refreshes preserve
+the model and focused search buffer; changed paths update their roles. Structural
+changes restore selection by ID. Activate a Sound or Music row to open the
+existing Audio workspace, which retains its unsaved-change policy.
+
+**Import WAV / FLAC** asks for a stable resource ID. **Reimport selected** retains
+the selected audio-source ID and asks for its new export. Both entry points,
+including the existing Audio import button, share the bounded decoder,
+dependency checks and publication implementation. Import validates saved loops
+and matching sample rates, captures catalog/dependency digests, and rechecks
+consulted inputs before publication. It never rewrites authored Sound or Music
+settings. Errors name the failing stage or dependency and retain the last valid
+catalog/list. Refresh explicitly retries a failed catalog read.
+
+The copied source is published to an immutable `sources/<key>.wav` or `.flac`
+file. The SHA-256 key includes source bytes, format, importer version and native
+copy profile. Only a successful compare-and-swap catalog replacement makes that
+version active. Failed catalog publication retains the previous source and
+reports the unreferenced candidate path. Old versions and candidates are retained;
+this slice does not automatically delete them. There is no multi-file filesystem
+transaction. Uncooperative writers can still race native save checks; the
+[Content save contract](../architecture/content-resources.md#native-saves) owns
+those limitations. Dependency checks are snapshot validation, not locks over an
+entire authoring project.
+
+Native catalog reads, decoding, validation and writes run on a worker with owned
+input/result data. The GUI applies completed snapshots. One request is admitted
+per browser; a completion must match its operation ID, project epoch and root.
+Changing identity invalidates old results and requests cancellation. While a
+request is active, finish or cancel it before using the shell's project-switch,
+Reload or Close Project actions or saving a changed source root. Other project
+field editing and the search buffer remain available.
+
+**Cancel operation** reports cancellation requested until a terminal outcome is
+acknowledged. Cancellation wins before publication begins; a late request cannot
+undo a catalog commit. The UI then waits for the actual success or failure.
+Quit cancels and asynchronously drains owned work without blocking the GUI.
+Polling exists only during an active job. Workers never call model/widget APIs
+or capture a window pointer. Browser controls explain their desktop requirement;
+this is native Linux content browsing, not browser import/persistence acceptance.
+
+The table uses a Qt model/view projection with no widget per asset row. Actual
+catalog admission remains **4096 resources / 1 MiB JSON**, as required by Content.
+The `[content][scale]` fixture separately measures a synthetic **100,000-row**
+view: population, 20 searches (p50/p95), and stable-ID lookup. The optional-editor
+CI records host/OS/architecture, Qt version and the Development profile in its
+`editor-content-scale` artifact. This is a reproducible model baseline, not a
+claim that larger catalogs are admitted or that native scrolling/accessibility
+has been qualified. Native input/scroll measurements, thumbnail budgets and
+non-audio importers remain follow-up work.
+
+Regressions exercise immutable reimport, malformed source rejection, saved-loop
+constraints, dependency/catalog conflicts, cancellation before publication,
+late-cancel semantics, ID selection across filtering, unchanged-role updates,
+stale operation/project results, GUI-owned completion and shutdown. CI runs
+those fixtures under Clang 18 analysis and ASan/UBSan.
+
 ## The project descriptor (version 1)
 
 One UTF-8 JSON file, conventionally `ludus.project.json`
@@ -399,7 +462,7 @@ This historical S1 offscreen capture predates the Welcome/recent-project changes
 It records presentation at that stage; use the work-area table above for current
 layout roles. It does not establish native interaction or game-frame acceptance.
 
-Project settings, Audio and Configuration occupy central work areas. Recents
+Project settings, Content, Audio and Configuration occupy central work areas. Recents
 appear on Welcome and in the File menu; Live Inspector and Output are movable panels; the status bar reports current workspace state.
 The Game toolbar exposes the existing build/debug and Play controls. Toolbar
 and menu actions share controller capability gating. Project settings and Audio

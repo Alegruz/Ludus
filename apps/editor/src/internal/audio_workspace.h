@@ -26,6 +26,8 @@ public:
     [[nodiscard]] bool PreviewFinished() const noexcept;
     [[nodiscard]] bool ConfirmDiscard();
     void Save();
+    void RefreshCatalog();
+    [[nodiscard]] bool OpenResource(const QString& id);
     [[nodiscard]] bool CanSave() const noexcept
     {
         return HasDocument_ && isEnabled();

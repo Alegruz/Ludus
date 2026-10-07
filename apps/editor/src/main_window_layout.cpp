@@ -1,5 +1,6 @@
 #include "internal/audio_workspace.h"
 #include "internal/configuration_workspace.h"
+#include "internal/content_browser.h"
 #include "internal/main_window.h"
 
 #include <ludus/foundation/base/types.h>
@@ -102,6 +103,8 @@ void MainWindow::BuildUi()
 
     projectScroll->setWidget(form);
     WorkTabs_->addTab(projectScroll, QStringLiteral("&Project settings"));
+    Content_ = new ContentWorkspace(WorkTabs_);
+    WorkTabs_->addTab(Content_, QStringLiteral("&Content"));
     auto* audioScroll = new QScrollArea(WorkTabs_);
     audioScroll->setObjectName(QStringLiteral("audioWorkspaceScroll"));
     audioScroll->setWidgetResizable(true);
