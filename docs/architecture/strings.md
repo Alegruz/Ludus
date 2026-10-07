@@ -32,6 +32,9 @@ changes without treating a table of contents as evidence of chapter contents.
 
 ## Reading order
 
+- [Remaining initial implementation](#remaining-initial-implementation) and
+  [research after the initial architecture](#research-after-the-initial-architecture)
+  define the next delivery and subsequent improvement pass.
 - [String types and selection](#string-types-and-selection) defines what callers use.
 - [Ownership and failure](#ownership-and-failure), [Mutable string storage](#mutable-string-storage),
   and [Shared immutable storage](#shared-immutable-storage) define implementation contracts.
@@ -1018,6 +1021,54 @@ Implementation validation is recorded in the pull request; architecture-wide
 performance targets and persisted formats remain proposals until their separate
 measurements and consumers exist.
 
+
+### Remaining initial implementation
+
+Repository audit on 2026-10-06 at `4e9c218` confirms the foundation above, while
+these parts of the initial architecture remain open. Public declarations and
+source take precedence over the earlier API sketches. This is a source audit,
+not a new build, sanitizer run, or performance result.
+
+| Workstream | Remaining delivery | Contract owner |
+| --- | --- | --- |
+| Cooked dictionaries | Deterministic deduplication and unsigned-byte sorting, packed terminated bytes, fixed-width offset/length directories, remapped record indices, a versioned writer and validating reader, and malformed/revision-mismatch tests | [Cooked dictionaries and persistence](#cooked-dictionaries-and-persistence) |
+| Content and symbol consumers | Pair the dictionary with a real indexed-content reader/cooker and retained snapshot; define safe reload retirement and compatibility. Bind literals during setup, cache IDs in an actual repeated-name consumer, and validate any generated closed symbol schema for collisions | [Migration phases](#migration-phases) and [literal descriptors](#literal-descriptors) |
+| Mutable and bounded storage | Add explicit shrinking, checked byte-range erase, and named display truncation where required by the initial consumers; enforce their byte limits. Insert/replace and mutable write reservations still require a concrete consumer | [Mutable string storage](#mutable-string-storage) |
+| Text and formatting boundaries | Checked UTF-8 slicing, explicit display repair, counted `char8_t` adapters, strict native UTF-16 conversion at OS boundaries, and exception-free builder/bounded formatting adapters | [Bytes and Unicode](#bytes-and-unicode) and [bounded strings and construction](#bounded-strings-and-construction) |
+| Table completion | Checked resolution from table-local `StringIndex`, reservation for known content counts, explicit symbol-grammar adapters, and bounded lookup probing. Current public resolution accepts `NameId`; `FindSlot` has no explicit probe-count bound | [Interned names and indexed strings](#interned-names-and-indexed-strings) |
+| Diagnostics and validation | Counted debugger previews, opt-in footprint/probe/retention snapshots, appropriate public Doxygen contracts, reduced-width table-token exhaustion tests, and differential operation sequences; add reader/cooker and boundary tests with their implementation | [Debugging and observation](#debugging-and-observation) and [required correctness evidence](#required-correctness-evidence) |
+
+[Static localization catalogs](../../modules/localization/README.md) already
+use shared immutable storage, deterministic offset-based cooking, validation,
+and retained catalog leases. Their v1 payload packs each record's key and text
+consecutively; it is not the general deduplicated `StringIndex` dictionary
+specified here. The [localization architecture](localization.md) owns message
+identity and language-switch behavior.
+
+Shared slices, structural hash schema helpers, SIMD validation, control-byte
+probing, spelling suggestions, and Bloom filters retain their existing consumer
+or measurement gates. Memory accounting, domain registration, alternate heaps,
+and arenas belong to the [Memory architecture](memory-management.md); completing
+that separate system is not a prerequisite for the shipped string owners.
+
+### Research after the initial architecture
+
+Complete and validate the initial architecture before beginning the broader
+conference/journal review and improvement trials. Start with the cooked
+dictionary writer, validating reader, format/compatibility decision, and one
+content consumer, then finish the required boundary APIs, diagnostics, and
+correctness evidence above. Required specification checks remain part of that
+implementation; optional research is not a prerequisite for delivering it.
+
+Record the validated engine revision and representative owner, intern-table,
+and cooker/reader workloads as the baseline. Include correctness, allocations,
+retained and peak bytes, and latency on the supported native/browser profiles.
+The existing small corpus benchmark alone does not establish this baseline.
+Then follow the [conference and journal research backlog](strings-gems-review.md#conference-and-journal-research-backlog),
+review the queued sources in full, and compare one promising change at a time
+under the [performance gates](#measurements-that-choose-defaults). Adopt a change
+only for repeatable benefit while preserving explicit failure, exact identity,
+UTF-8 boundary behavior, and snapshot lifetimes.
 
 ### Running the initial benchmark
 
