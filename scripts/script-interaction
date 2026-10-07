@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""Cook and validate the opt-in S1 headless native/Luau interaction."""
+import argparse
+import json
+from pathlib import Path
+import runpy
+import shlex
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+WORK = ROOT / "out/script-interaction"
+FIXTURES = ROOT / "tools/script-interaction/fixtures"
+MANIFEST = ROOT / "tools/script-interaction/interaction.json"
+GENERATOR = ROOT / "tools/script-cook/generate.py"
+S0 = runpy.run_path(str(ROOT / "scripts/luau-probe"), run_name="s0_tool")
+require, sha, run, host_tool = (S0[key] for key in ("require", "sha", "run", "host_tool"))
+COMPILER = ROOT / "out/luau-probe/host-compiler/luau-compile"
+ANALYZER = COMPILER.with_name("luau-analyze")
+
+
+def inputs():
+    files = [MANIFEST, GENERATOR, ROOT / "scripts/script-interaction", ROOT / "config/luau_toolchain.json"]
+    files += sorted(FIXTURES.glob("*.luau"))
+    return {str(p.relative_to(ROOT)): sha(p.read_bytes()) for p in files}
+
+
+def check_host():
+    record = json.loads((WORK / "host.json").read_text())
+    require(record == {"pin": sha((ROOT / "config/luau_toolchain.json").read_bytes()),
+                       "compiler": sha(COMPILER.read_bytes()), "analyzer": sha(ANALYZER.read_bytes())},
+            "Stale or modified S1 host tools; bootstrap again")
+    S0["verify_sources"]()
+
+
+def bootstrap():
+    S0["bootstrap"]()
+    run([host_tool("cmake"), "--build", str(COMPILER.parent), "--target", "Luau.Analyze.CLI", "-j", "2"])
+    WORK.mkdir(parents=True, exist_ok=True)
+    (WORK / "host.json").write_text(json.dumps({
+        "pin": sha((ROOT / "config/luau_toolchain.json").read_bytes()),
+        "compiler": sha(COMPILER.read_bytes()), "analyzer": sha(ANALYZER.read_bytes())}, indent=2) + "\n")
+
+
+def cook():
+    check_host()
+    sys.path.insert(0, str(ROOT / "scripts/python"))
+    from formatting import format_source
+    generator = runpy.run_path(str(GENERATOR), run_name="s1_generator")
+    data = generator["load"](MANIFEST)
+    generated = generator["generate"](data, sha(MANIFEST.read_bytes()))
+    output = WORK / "cooked"
+    output.mkdir(parents=True, exist_ok=True)
+    for name, content in generated.items():
+        if name.endswith((".cpp", ".h")):
+            content = format_source(content, output / name, "clang-format-18")
+        (output / name).write_text(content)
+    definitions = generated["contract.d.luau"]
+    sources = {p.stem: p.read_text() for p in sorted(FIXTURES.glob("*.luau"))}
+    # Trusted adversarial compiler inputs test runtime validation. Only door is
+    # admitted by the initial authoring type-check gate.
+    invalid = {
+        "power_zero": "api.RequestDoorOpen(event.Target, 0)",
+        "power_negative": "api.RequestDoorOpen(event.Target, -1)",
+        "power_overflow": "api.RequestDoorOpen(event.Target, 4294967296)",
+        "power_above_bound": "api.RequestDoorOpen(event.Target, 11)",
+        "power_fraction": "api.RequestDoorOpen(event.Target, 1.5)",
+        "power_nan": "api.RequestDoorOpen(event.Target, 0/0)",
+        "power_inf": "api.RequestDoorOpen(event.Target, 1/0)",
+        "power_string": 'api.RequestDoorOpen(event.Target, "2")',
+        "forged_entity": "api.RequestDoorOpen({}, 2)",
+        "state_fraction": "state.Interactions = 1.5",
+        "state_bool": "state.OpenRequested = 1",
+        "state_unknown": 'state["Interactions\\0suffix"] = 2',
+    }
+    for name, body in invalid.items():
+        sources[name] = "return function(config, state, event, api)\n    state.Interactions = 2\n    " + body + "\nend\n"
+    header = """#pragma once
+#include <ludus/foundation/base/types.h>
+namespace ludus::s1 {
+struct CookedProgram { const foundation::uint8* Code; foundation::usize Bytes; const char* Name; };
+"""
+    programs = []
+    evidence = {}
+    for name, source in sorted(sources.items()):
+        path = output / (name + ".luau")
+        path.write_text(definitions + source.removeprefix("--!strict\n"))
+        if name == "door":
+            run([str(ANALYZER), "--mode=strict", str(path)])
+        result = subprocess.run([str(COMPILER), "--binary", "-O1", "-g2", str(path)],
+                                check=True, stdout=subprocess.PIPE)
+        require(result.stdout and result.stdout[0] != 0, "Compilation failed: " + name)
+        header += f"inline constexpr foundation::uint8 {name.upper()}[] = {{\n"
+        header += "\n".join("    " + ", ".join(str(b) for b in result.stdout[i:i+16]) + ","
+                            for i in range(0, len(result.stdout), 16)) + "\n};\n"
+        if name in invalid:
+            programs.append(f'{{ {name.upper()}, sizeof({name.upper()}), "@{name}.luau" }}')
+        evidence[name] = {"source": sha(path.read_bytes()), "bytecode": sha(result.stdout), "bytes": len(result.stdout)}
+    header += "inline constexpr CookedProgram INVALID_PROGRAMS[] = {\n" + ",\n".join(programs) + "\n};\n}\n"
+    (output / "fixtures.h").write_text(format_source(header, output / "fixtures.h", "clang-format-18"))
+    hashes = {p.name: sha(p.read_bytes()) for p in sorted(output.iterdir()) if p.is_file() and p.name != "evidence.json"}
+    (output / "evidence.json").write_text(json.dumps({"inputs": inputs(), "outputs": hashes,
+        "programs": evidence, "checked": ["door"], "host": json.loads((WORK / "host.json").read_text())}, indent=2) + "\n")
+
+
+def verify():
+    check_host()
+    output = WORK / "cooked"
+    record = json.loads((output / "evidence.json").read_text())
+    require(record["inputs"] == inputs(), "Stale S1 generated contract/bytecode; cook again")
+    require(record["host"] == json.loads((WORK / "host.json").read_text()), "Stale S1 compiler evidence")
+    require(record["outputs"] == {p.name: sha(p.read_bytes()) for p in output.iterdir()
+            if p.is_file() and p.name != "evidence.json"}, "Modified S1 generated contract/bytecode")
+
+
+def check(preset, fix):
+    sys.path.insert(0, str(ROOT / "scripts/python"))
+    from formatting import format_source
+    sources = list((ROOT / "tools/script-interaction").glob("*.cpp"))
+    sources += list((ROOT / "tools/script-interaction").glob("*.h"))
+    sources += list((ROOT / "modules/runtime/scripting").rglob("*.cpp"))
+    sources += list((ROOT / "modules/runtime/scripting").rglob("*.h"))
+    for source in sources:
+        code = source.read_text()
+        formatted = format_source(code, source, "clang-format-18")
+        if fix: source.write_text(formatted)
+        else: require(code == formatted, f"Format {source} with scripts/script-interaction check --fix")
+    if fix: return
+    entries = json.loads((ROOT / "out/build" / preset / "compile_commands.json").read_text())
+    for entry in entries:
+        if not any(part in entry["file"] for part in
+                   ("/tools/script-interaction/", "/modules/runtime/scripting/", "/out/script-interaction/cooked/bindings.cpp")):
+            continue
+        if preset.startswith("web-"):
+            from web_build import analysis_commands
+            sysroot = ROOT / "out/host-tools/emsdk/upstream/emscripten/cache/sysroot"
+            command = analysis_commands(ROOT, [entry], "clang-tidy-18", sysroot,
+                                        owned_generated=(WORK / "cooked/bindings.cpp",))[0]
+            run([flag for flag in command if flag != "-sSUPPORT_LONGJMP=wasm"])
+        else:
+            flags = shlex.split(entry["command"])[1:]
+            clean, index = [], 0
+            while index < len(flags):
+                flag = flags[index]
+                if flag == "-o":
+                    index += 2
+                    continue
+                if flag not in ("-c", entry["file"]) and not flag.startswith("@"): clean.append(flag)
+                index += 1
+            run(["clang-tidy-18", entry["file"], "--quiet", "--warnings-as-errors=*", "--", *clean])
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("bootstrap", "cook", "verify", "run", "check"))
+    parser.add_argument("--preset", default="linux-clang-development")
+    parser.add_argument("--fix", action="store_true")
+    args = parser.parse_args()
+    if args.action == "bootstrap": bootstrap()
+    elif args.action == "cook": cook()
+    elif args.action == "verify": verify()
+    elif args.action == "check": check(args.preset, args.fix)
+    else:
+        verify()
+        options = ["-DLUDUS_BUILD_SCRIPT_INTERACTION=ON", "-DLUDUS_WARNINGS_AS_ERRORS=ON", "-DLUDUS_COMPILED_LOG_LEVEL=2"]
+        if args.preset.startswith("web-"): options += ["-DLUDUS_BUILD_SMOKE_APP=OFF", "-DLUDUS_BUILD_WEB_PROBES=OFF"]
+        run([host_tool("cmake"), "--preset", args.preset, *options])
+        run([host_tool("cmake"), "--build", "--preset", args.preset, "--target",
+             "ludus_script_native", "ludus_script_luau", "-j", "2"])
+        run([host_tool("ctest"), "--preset", args.preset, "-R", "^ludus_script_(native|luau)$",
+             "--no-tests=error", "--output-on-failure"])
+
+
+if __name__ == "__main__":
+    try: main()
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
+        print(f"S1 interaction failed: {error}", file=sys.stderr)
+        sys.exit(1)
