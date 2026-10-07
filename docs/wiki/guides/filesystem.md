@@ -162,3 +162,12 @@ recovery. While rescanning, registration mutation and incremental polling are
 refused. Update registrations explicitly when the catalog gains or loses paths.
 Polling misses transient/metadata-preserving edits and is not a completion or
 integrity guarantee. See the architecture link above for the full contract.
+
+## Continue improving the completed baseline
+
+F1-F5 provide the current filesystem contracts. Use the architecture's
+[post-baseline research and improvement plan](../../architecture/filesystem.md#post-baseline-research-and-improvement-plan)
+to select a scoped follow-up: publication recovery, representative streaming,
+conditional backend/pack optimization, or Content hint recovery. That page owns
+the references, priorities and acceptance criteria. Record evaluated experiments
+in the [filesystem measurements](../../development/filesystem-benchmark.md).
