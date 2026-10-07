@@ -209,3 +209,105 @@ The books do not prove correctness of Ludus's handle retention, graph compiler,
 callback publication, external-state ledger, or cross-API bridge. The proposed
 implementation phases must establish those through adversarial tests, native and
 browser rendering, installed-SDK checks, and measurements on target devices.
+
+## Research after the initial implementation
+
+**Status:** Deferred reading and improvement queue, 2026-10-06. Implement and
+validate the initial [RHI/GDI architecture and its R0-R5 acceptance criteria](rhi-gdi.md#implementation-phases-and-acceptance)
+first, then investigate these resources for improvements. Keep the current
+architecture as the implementation baseline. The portable R0-R3 path, selected
+R4 consumers and measured R5 extensions retain their existing scope and gates.
+
+Before starting this follow-up, record the accepted implementation revision,
+supported backend/profile matrix, diagnostic scenes, reproduction commands and
+CPU/GPU/latency/memory results. Use that baseline when evaluating a proposed
+change. Required API/specification checks and the references already adopted
+above still inform initial implementation; this queue does not require an
+additional research-led redesign before it exists.
+
+The venue programs, session descriptions and available abstracts were screened
+for this shortlist. None of the new talks or papers below has a completed full
+review, implementation trial or adoption record. The milestone mappings and
+experiments are Ludus research questions, not claims of demonstrated gains.
+
+### Venues to follow
+
+| Venue | Priority after the baseline | Topics and relevant Ludus work |
+| --- | --- | --- |
+| [Rendering Engine Architecture Conference (REAC)](https://enginearchitecture.org/2025.htm) | First | Production frame graphs, shader bindings, instance data, modularity and permutation control; R1-R3 and measured renderer integration |
+| [Vulkanised](https://www.vulkan.org/events/vulkanised-2026) | First | Frames in flight, completion, synchronization, resource reuse and profiling; R2/R3 correctness and R5 measurements |
+| [SIGGRAPH Advances in Real-Time Rendering](https://advances.realtimerendering.com/s2023/) | First | Low-level API/backend design and practical rendering systems; R0-R3 contracts and portable resource integration |
+| [GDC Programming / GDC Vault](https://www.gdcvault.com/play/1024612/FrameGraph-) | First | Production pass/resource architecture and job-based rendering; R3 graph design and optional R5 recording |
+| [Shading Languages Symposium](https://www.khronos.org/events/shading-languages-symposium-2026) | First | Slang reflection, target layouts, shader compilation and WGSL constraints; R1 shader packages and R2 pipeline services |
+| [High-Performance Graphics (HPG)](https://highperformancegraphics.org/2026/schedule/) | Selective | GPU scheduling, efficient data structures and profiling; R4 compute consumers and R5 experiments |
+| [Journal of Computer Graphics Techniques (JCGT)](https://jcgt.org/about.html) | Practical techniques | Peer-reviewed implementation techniques and author-provided code; select concrete resource, renderer or validation problems |
+| [Computer Graphics Forum / Eurographics Symposium on Rendering](https://www.eg.org/wp/eurographics-publications/cgf/) | Selective | Rendering research, practical developments and reviews; evaluate future consumers and their resource/pass requirements |
+| [ACM Transactions on Graphics / SIGGRAPH technical papers](https://s2026.siggraph.org/program/technical-papers/) | Selective | Research algorithms and their assumptions; evaluate capability-specific renderer paths after the common infrastructure is validated |
+
+These links identify archives or publication entry points, not an attendance
+schedule. A venue's inclusion does not establish support in Ludus's pinned SDKs
+or prove that an advanced native technique fits its portable backend contract.
+
+### Initial reading order
+
+| ID | Source and attribution | Reading status | Question and possible trial after full review |
+| --- | --- | --- | --- |
+| RG-01 | Sebastian Aaltonen, **HypeHype Mobile Rendering Architecture**, SIGGRAPH Advances in Real-Time Rendering, 2023. [Course](https://advances.realtimerendering.com/s2023/); [slides](https://advances.realtimerendering.com/s2023/AaltonenHypeHypeAdvances2023.pdf) | Queued; session and opening slides screened | Which low-level API/backend choices improve our resource and ownership boundaries? Trial one bounded change against textured/indexed scenes, handle failures and the existing portable profiles. |
+| RG-02 | Charles Giessen, **Frames in Flight Demystified**, Vulkanised 2026, LunarG. [Program, slides and recording](https://www.vulkan.org/events/vulkanised-2026#wednesday) | Queued; program screened | Does a different frame-storage/reuse policy improve tail latency or memory? Compare the same workload with slow-GPU, resize and destruction journeys; prove reuse against actual completion. |
+| RG-03 | Yuriy O'Donnell, **FrameGraph: Extensible Rendering Architecture in Frostbite**, GDC 2017, Frostbite / Electronic Arts. [Session](https://www.gdcvault.com/play/1024612/FrameGraph-) | Queued; session description screened | Which pass/resource abstractions simplify our ordered compiler? Compare a bounded compiler change with the reference plan, including history roots, imported uploads, feedback and undefined loads. |
+| RG-04 | Nicolas Lopez and Michel Bouchard, **Anvil Rendering Architecture**, REAC 2025, Ubisoft. [Abstract, slides and recording](https://enginearchitecture.org/2025.htm) | Queued; abstract screened | Which frame-graph, shader-binding and profiling practices fit our module boundaries? Trial one binding or planning improvement and measure CPU cost, retained memory and image agreement. |
+| RG-05 | Nia Bickford, **Upgrading from GLSL to Slang in the Vulkan Nvpro-Samples**, Shading Languages Symposium 2026; Dan Sinclair, **WGSL: Past, Present and Future**, same symposium. [Program and materials](https://www.khronos.org/events/shading-languages-symposium-2026) | Queued; program and available abstracts screened | Which reflection, layout and compilation practices improve our packages? Trial a verified package/schema change against target packing, interface mismatches and pipeline readiness on all supported backends. |
+
+Continue by screening these candidates when a concrete baseline limitation
+justifies the additional reading:
+
+- Max Bukhalov and Egor Orachev, **Geometry rendering and shaders infrastructure
+  in Warhammer 40000: Space Marine 2**, REAC 2025, Saber Interactive.
+  [Abstract and materials](https://enginearchitecture.org/2025.htm). Queued;
+  abstract screened. Investigate instance-data organization and shader
+  permutation control against pipeline counts, compile stalls and memory.
+- Lucas Miguel Antunes da Silva, **Solving All Synchronisation Problems with
+  Timeline Semaphores**, Vulkanised 2026, DevSH Graphics Programming.
+  [Program and materials](https://www.vulkan.org/events/vulkanised-2026#wednesday).
+  Queued; program screened. Investigate completion/dependency simplification
+  while preserving our negotiated Vulkan paths and separate presentation retirement.
+- Natalya Tatarchuk, **Destiny's Multithreaded Rendering Architecture**, GDC 2015,
+  Bungie. [Session](https://www.gdcvault.com/play/1021926/Destiny-s-Multithreaded-Rendering).
+  Queued; session description screened. Investigate packet/job boundaries and
+  recording granularity; measure join cost, frame latency and pool ownership.
+- Karl Sassie, Johannes Hanika, Lucas Alber, Reiner Dolp and Carsten Dachsbacher,
+  **Optimizing Vulkan Dispatch Schedules for Real-Time U-Net Denoising**, HPG 2026.
+  [Program](https://highperformancegraphics.org/2026/schedule/). Queued; program
+  screened. Investigate scheduling only when a comparable compute workload exists;
+  compare execution time, synchronization, memory and correctness.
+
+### Review and trial record
+
+Use **Queued**, **Reading**, **Reviewed**, **Trial planned**, **Trial complete**,
+**Adopted**, **Deferred** or **Rejected** for each source. A title/abstract screen
+is not a full reading, and a completed reading is not a measured improvement.
+Update the existing row and append the detailed record here as work progresses.
+
+For each completed review or experiment, record:
+
+1. Source ID, exact author/title/year, primary URL or DOI, review date and the
+   pages, sections or talk timestamps actually consulted.
+2. The relevant idea, assumptions, limitations and differences from Ludus;
+   distinguish design inspiration from adapted code.
+3. The affected RHI/GDI phase/module and a testable improvement hypothesis.
+4. A bounded trial, baseline revision, workloads and adversarial failure cases.
+5. Reproduction commands, toolchain/backend/device versions and links to the
+   test, benchmark or PR; keep generated captures/results in ignored `out/`.
+6. Before/after image and synchronization correctness, CPU/GPU frame-time
+   distributions, input-to-display latency, compilation stalls, allocations,
+   memory/retirement high-water marks and relevant traffic/submit counts.
+7. An adopt/defer/reject decision, its reason, and links to the updated owning
+   architecture/ADR and implementation attribution when a change is accepted.
+
+Apply the architecture's existing backend, SDK and adversarial acceptance gates
+to every trial. Report unavailable GPU/presentation measurements as unavailable.
+Keep native advanced paths capability-specific and preserve the supported
+fullscreen facade and portable raster behavior. A successful trial must show
+correctness and an explainable benefit on its declared workload before adoption.
+Preserve the completed Gems review above; extend its adopted evidence only after
+the full source has actually informed an accepted change.
