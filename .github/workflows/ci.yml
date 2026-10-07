@@ -111,6 +111,14 @@ jobs:
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/src/async_posix.cpp
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/async_tests.cpp
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/async_fault_tests.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/src/persistence_posix.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/src/watch.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' --extra-arg=-DLUDUS_FILESYSTEM_PERSISTENCE_FAULT_TESTING=1 modules/foundation/filesystem/src/persistence_posix.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' --extra-arg=-DLUDUS_FILESYSTEM_WATCH_FAULT_TESTING=1 modules/foundation/filesystem/src/watch.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/persistence_tests.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/watch_tests.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/persistence_fault_tests.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/watch_fault_tests.cpp
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/src/pack.cpp
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/src/pack_codec.cpp
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/pack_tests.cpp
@@ -143,14 +151,27 @@ jobs:
           out/host-tools/venv/bin/cmake --build out/sdk-audio-consumer
           out/sdk-audio-consumer/ludus_audio_consumer
           out/host-tools/bin/clang-tidy -p out/sdk-audio-consumer --warnings-as-errors='*' tests/sdk_consumer/audio.cpp
+      - name: Validate installed persistence and watcher SDK
+        run: |
+          out/host-tools/venv/bin/cmake -S tests/sdk_consumer/persistence -B out/sdk-persistence-consumer -G Ninja \
+            -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" \
+            -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
+            -DCMAKE_OSX_SYSROOT="$PWD/out/host-tools/macos-sdk" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+            -DCMAKE_CXX_FLAGS="-stdlib=libc++ -nostdinc++ -isystem \"$PWD/out/host-tools/libcxx-include\"" \
+            -DCMAKE_PREFIX_PATH="$PWD/out/install/macos-clang-development;$PWD/out/conan/macos-clang-development" \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          out/host-tools/venv/bin/cmake --build out/sdk-persistence-consumer
+          out/sdk-persistence-consumer/ludus_persistence_consumer
+          out/host-tools/bin/clang-tidy -p out/sdk-persistence-consumer --warnings-as-errors='*' tests/sdk_consumer/persistence.cpp
       - name: Validate Cocoa, Metal, filesystem, Content and Audio with ASan and UBSan
         env:
           LUDUS_TEST_COCOA: "1"
         run: |
           ./init.sh --cli --preset macos-clang-asan-ubsan --preset-only --locked --with-tests --no-system-install
           out/host-tools/venv/bin/cmake --preset macos-clang-asan-ubsan -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
-          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_audio_tests ludus_audio_content_tests ludus_rhi_lifecycle_tests ludus_rhi_metal_tests ludus_rhi_render_tests ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_filesystem_namespace_fault_tests ludus_filesystem_pack_fault_tests ludus_filesystem_async_fault_tests ludus_content_tests ludus_content_save_fault_tests
-          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_((platform_cocoa(_keymap)?|filesystem(_fault|_namespace_fault|_pack_fault|_async_fault)?|content(_save_fault)?|audio(_device|_content)?|rhi_(metal|lifecycle))_tests|rhi_render_pixels)$' --no-tests=error
+          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_audio_tests ludus_audio_content_tests ludus_rhi_lifecycle_tests ludus_rhi_metal_tests ludus_rhi_render_tests ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_filesystem_namespace_fault_tests ludus_filesystem_pack_fault_tests ludus_filesystem_async_fault_tests ludus_filesystem_persistence_fault_tests ludus_filesystem_watch_fault_tests ludus_content_tests ludus_content_save_fault_tests
+          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_((platform_cocoa(_keymap)?|filesystem(_fault|_namespace_fault|_pack_fault|_async_fault|_persistence_fault|_watch_fault)?|content(_save_fault)?|audio(_device|_content)?|rhi_(metal|lifecycle))_tests|rhi_render_pixels)$' --no-tests=error
 
   formatting:
     needs: changes

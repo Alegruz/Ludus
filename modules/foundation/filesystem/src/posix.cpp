@@ -1,6 +1,8 @@
 #include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/filesystem/filesystem.hpp>
 
+#include "internal/posix_metadata.hpp"
+
 // Thanks to the Linux man-pages project, open(2), pread(2) and close(2),
 // https://man7.org/linux/man-pages/man2/open.2.html : descriptor
 // revision lifetime, independent offsets, short reads and Linux close ownership
@@ -412,6 +414,58 @@ Result Directory::OpenRead(std::string_view relativePath, File& output) const no
     file.Value = -1;
     (void)output.Close();
     output.mImpl = next;
+    return {};
+}
+Result Directory::Observe(std::string_view relativePath, FileStamp& output) const noexcept
+{
+    if (mImpl == nullptr || !ValidPath(relativePath))
+    {
+        return {Status::InvalidArgument};
+    }
+    Descriptor parent;
+    int current = mImpl->Handle.Value;
+    usize begin = 0;
+    char name[MAX_PATH_BYTES + 1];
+    while (true)
+    {
+        const auto slash = relativePath.find('/', begin);
+        const auto end = slash == std::string_view::npos ? relativePath.size() : slash;
+        CopyName(relativePath.substr(begin, end - begin), name);
+        if (slash == std::string_view::npos)
+        {
+            break;
+        }
+        const int next = OpenAt(current, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        if (next < 0)
+        {
+            return NativeFailure(errno);
+        }
+        (void)parent.Close();
+        parent.Value = next;
+        current = next;
+        begin = slash + 1;
+    }
+    struct stat info
+    {
+    };
+    int value;
+    do
+    {
+        value = ::fstatat(current, name, &info, AT_SYMLINK_NOFOLLOW);
+    } while (value < 0 && errno == EINTR);
+    if (value < 0)
+    {
+        return NativeFailure(errno);
+    }
+    if (S_ISLNK(info.st_mode))
+    {
+        return {Status::AccessDenied};
+    }
+    if (!S_ISREG(info.st_mode) || info.st_size < 0)
+    {
+        return {Status::NotRegularFile};
+    }
+    output = detail::Stamp(info);
     return {};
 }
 } // namespace ludus::foundation::filesystem
