@@ -66,6 +66,7 @@ Edit the linked documents for content changes.
 - [Evidence for the September 23, 2026 logging review](architecture/logging-review-evidence/README.md)
 - [Ludus logging: architectural review and engineering design](architecture/logging-review.md)
 - [S0: private Luau interpreter feasibility](architecture/luau-s0.md)
+- [S1: generated native/Luau interaction](architecture/luau-s1.md)
 - [macOS Platform backend](architecture/macos-platform.md)
 - [FoundationMath evidence ledger](architecture/math-evidence/README.md)
 - [Cubic and bicubic kernel evidence (G1)](architecture/math-evidence/curves-surfaces.md)

@@ -150,6 +150,8 @@ jobs:
         run: ./scripts/check --format
       - name: Test S0 Luau source and bytecode integrity contracts
         run: python3 -m unittest discover -s tools/luau-probe -p 'test_*.py' -v
+      - name: Test S1 manifest and cook admission contracts
+        run: python3 -m unittest discover -s tools/script-cook -p 'test_*.py' -v
 
   debug-runtime:
     needs: [changes, formatting]
@@ -194,6 +196,12 @@ jobs:
           ./scripts/luau-probe cook
           ./scripts/luau-probe run --preset linux-clang-development
           ./scripts/luau-probe check --preset linux-clang-development
+      - name: Validate S1 generated contract and native/Luau interaction
+        run: |
+          ./scripts/script-interaction bootstrap
+          ./scripts/script-interaction cook
+          ./scripts/script-interaction run --preset linux-clang-development
+          ./scripts/script-interaction check --preset linux-clang-development
       - name: Test Development
         run: out/host-tools/venv/bin/ctest --preset linux-clang-development --no-tests=error
       - name: Validate installed SDK and consumer
@@ -250,6 +258,11 @@ jobs:
           ./scripts/luau-probe bootstrap
           ./scripts/luau-probe cook
           ./scripts/luau-probe run --preset linux-clang-asan-ubsan
+      - name: Validate S1 unpublished effects under allocation failure
+        run: |
+          ./scripts/script-interaction bootstrap
+          ./scripts/script-interaction cook
+          ./scripts/script-interaction run --preset linux-clang-asan-ubsan
       - name: Test with sanitizers
         env:
           LUDUS_RELOAD_METRICS: ${{ runner.temp }}/live-reload-asan-ubsan.jsonl

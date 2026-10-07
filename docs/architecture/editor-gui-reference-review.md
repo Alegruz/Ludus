@@ -143,3 +143,124 @@ Tauri, Qt Quick, DOM or ImGui prototype was benchmarked in this documentation
 change. The [system design](editor-gui-systems.md) defines the experiments that
 would justify a different choice. Existing native process cleanup, project setup,
 configuration, audio and reload contracts retain their original owners.
+
+## Deferred review after the first implementation
+
+Status: **planned; revisit after the first usable implementation**. This section
+preserves the follow-up research context requested on 2026-10-06. Implement the
+accepted [GUI systems design](editor-gui-systems.md) and
+[ADR 0023](../decisions/0023-editor-presentation-and-document-core.md) first.
+The absence of a deadline allows careful implementation and evaluation; it does
+not require expanding the architecture before a working baseline exists.
+
+### Revisit trigger and baseline
+
+Start this review when **M1–M4** in the
+[delivery sequence](editor-gui-systems.md#performance-evidence-and-delivery) have
+passed their acceptance gates: portable authoring core, redesigned shell,
+qualification of the declared host/frontend capabilities, and one end-to-end
+asset/scene workflow. This is a milestone trigger, not a calendar reminder.
+Required M3 platform/frontend experiments still happen during implementation;
+research follow-up must not postpone those checks. Record unsupported hosts or
+features explicitly rather than treating a preview as full authoring support.
+
+At that handoff, record the baseline commit, supported host/frontend matrix,
+reproducible datasets, task results, performance measurements and unresolved
+issues. Link to implementation/validation evidence instead of copying the
+contracts here. Include observed editing friction and the effort to add or debug
+one property and command. That evidence gives the research review a concrete
+problem to improve. Revisit specialist resources again when M5 introduces a
+specific material, animation or audio workflow.
+
+### Resources to return to
+
+The order below is a Ludus relevance judgment. **GDC Tools Summit and ACM UIST
+are the first destinations**; the other venues serve specific questions. These
+are places to select relevant work, not a requirement to read every proceedings
+volume. The linked editions are starting points; find the relevant newer
+programs and publications when the review actually begins.
+
+| Venue / publication | What to look for | Baseline to compare |
+| --- | --- | --- |
+| [GDC Tools Summit / GDC Vault](https://gdcvault.com/) | Shared document models, Undo, tool reuse, pipelines, iteration and tools testing; start with the four talks below | M1 core, M4 workflow and the maintenance exercise |
+| [ACM UIST — User Interface Software and Technology](https://uist.acm.org/2025/) | Direct manipulation, selection, interactive programming and creative authoring systems | M2 interactions, M4 scene manipulation and M5 specialist tools |
+| [ACM CHI — Human Factors in Computing Systems](https://chi2026.acm.org/) | Task evaluation, discoverability, accessibility and expert workflows | M2 task success and M3 keyboard, text and accessibility results |
+| [SIGGRAPH Courses](https://www.siggraph.org/wp-content/uploads/2024/09/Courses.html) and [Production Sessions](https://s2026.siggraph.org/program/production-sessions/) | Artist workflows, production pipelines and specialist authoring; select editor-relevant work | M4 asset/scene loop and M5 authoring requirements |
+| [Qt World Summit](https://www.qt.io/qt-world-summit-2026/schedule) / [Qt resource library](https://www.qt.io/development/resources) | Production Qt architecture, model/view, rendering integration, UI testing and platform behavior | Actual M2/M3 implementation issues; supplement the domain design |
+| [ACM TOCHI — Transactions on Computer-Human Interaction](https://dl.acm.org/journal/tochi) | Interaction models and rigorous evaluation of creative/expert tools; first journal to search for editor UX questions | An observed usability problem with a repeatable task |
+| [ACM TOG — Transactions on Graphics](https://dl.acm.org/journal/tog) | Interactive modeling, animation and design systems that fit a named authoring feature | M4/M5 workflows and measured preview/interaction constraints |
+| [Computer Graphics Forum](https://www.eg.org/wp/eurographics-publications/cgf/) | Graphics research and review articles for comparing specialist techniques | Alternatives for a specific M5 feature before selecting an algorithm |
+
+#### First four talks
+
+Titles, speakers, years and official descriptions were checked on 2026-10-06.
+**The recordings and slides have not been reviewed in this design pass.** The
+questions below are proposed Ludus experiments, not findings attributed to the
+speakers. Access to a description does not establish access to the full source.
+
+| Read first | Verified source | Question for Ludus after implementation |
+| --- | --- | --- |
+| 1 | Niklas Gray, Our Machinery, GDC 2020: [Tools Summit: Writing Tools Faster: Design Decisions to Accelerate Tool Development](https://gdcvault.com/play/1026597/Tools-Summit-Writing-Tools-Faster) | Can common document operations and view adapters reduce the effort of adding a second tool? Compare with the M1 maintenance result; assess the costs before adopting a broader framework. |
+| 2 | Kai Zhang, NetEase Games, GDC 2022: [Tools Summit: Immutable Data for Editors for 'EVE Echoes'](https://gdcvault.com/play/1027628/Tools-Summit-Immutable-Data-for) | Would persistent immutable data simplify Undo and UI updates enough to justify its allocation, memory and migration costs? Existing immutable preview snapshots alone do not answer this; compare against the implemented command/history model. |
+| 3 | David Lightbown, Ubisoft, GDC 2021: [Tools Summit: How Ubisoft Builds Tools that Are More "Intuitive"](https://www.gdcvault.com/play/1027312/Tools-Summit-How-Ubisoft-Builds) | Can a small set of consistent interaction patterns improve discovery, repeated editing and error recovery? Evaluate actual M2 tasks with users rather than inferring success from a cleaner screenshot. |
+| 4 | David Paris, Playground Games, GDC 2020: [Tools Summit: From 0-1000: A Test Driven Approach to Tools Development](https://www.gdcvault.com/play/1026631/) | Which headless, host and end-to-end tests would catch the failures observed in M1–M4 with acceptable runtime and maintenance cost? The title's test count is not a Ludus target. |
+
+The [book/article catalogue](editor-reference-reading-guide.md) remains the
+candidate inventory for `game-dev-gems-toc.md`. The earlier sections of this
+review record excerpts actually consulted and changes already adopted. Select
+additional chapters for an observed problem, read the relevant text and verify
+its attribution before treating a catalogue title as design evidence.
+
+### Review procedure and decision record
+
+1. Pick a baseline problem from the recorded task failures, friction, performance
+   or maintenance evidence. Define what improvement would be meaningful before
+   selecting a technique.
+2. Read the full relevant talk/slides or paper sections. Record exact authors,
+   title, venue/year, stable URL/DOI and section/page/timestamp locators. Mark an
+   unavailable source as pending; an abstract supports selection, not adoption.
+3. Extract the useful idea, its assumptions and departures needed for Ludus.
+   Compare it with the existing implementation and simpler local fixes. Preserve
+   the repository's error, ownership and module-boundary contracts.
+4. Build a bounded experiment against the same baseline tasks and datasets.
+   Record the commit, machine, OS/browser, build profile and tool versions.
+   Measure the quantities relevant to the problem: task success/time/errors,
+   input/frame latency and stalls, idle CPU/wakeups, peak memory/allocation,
+   browser payload/startup, or property/command change and debugging effort.
+   Exercise affected native and browser paths, including macOS when claimed;
+   preserve text/accessibility, Undo/save and failure/recovery gates.
+5. Decide **adopt, reject or defer** using the results and implementation,
+   migration, dependency and ongoing maintenance costs. Keep negative results.
+   Do not replace a toolkit or introduce a general framework on venue reputation
+   alone. For a deferred item, name the missing evidence and revisit condition.
+6. Update the existing canonical design/interaction/workflow owner and its
+   acceptance criteria when an idea is adopted. Amend or supersede an ADR only
+   when the decision changes. Thank and credit consulted authors near affected
+   code as required by [the contributor guide](../../AGENTS.md); this review
+   supplements those comments. Deliver each improvement in a reviewable change.
+
+Append completed investigations here using this compact record; the resource
+list above is not a completed investigation:
+
+```text
+Review ID and date:
+Baseline commit, hosts, task/dataset and observed problem:
+Source: authors; exact title; venue/year; URL/DOI; consulted locators:
+Source status: description only / full relevant material reviewed / unavailable:
+Useful idea, assumptions and Ludus departures:
+Candidate change and simpler alternative:
+Experiment commit, environment, method and acceptance criteria:
+Results against baseline; correctness/accessibility/recovery checks:
+Decision: adopt / reject / defer; reasons and maintenance/migration cost:
+Design/ADR/code/PR links; owner and next action or revisit condition:
+```
+
+### Context for the next implementation/research session
+
+Read the contributor rules, the current GUI systems design, ADR 0023 and this
+section first. Check the implementation and milestone evidence before assuming
+that the portable core or a frontend is complete. Finish the first usable
+architecture while retaining its required qualification experiments. Once the
+M1–M4 baseline is accepted, use its observed problems to select the sources above
+and run the review procedure. Improve the system through measured, bounded
+changes and preserve rejected/deferred findings for later work.
