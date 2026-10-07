@@ -103,7 +103,9 @@ visual vocabulary needs a separate contract/version change.
 
 ## Ownership and evidence
 
-Each native module generation owns its provider and static cooked package/maps.
+Native provider and JSON bridge archives own their position-independent link
+closure; private feasibility probes are not prerequisites for installed game
+modules. Each native module generation owns its provider and static cooked package/maps.
 Prepared replacement builds a separate candidate, restores validated state, then
 commits through GameHost. Destroy closes the VM and asserts zero live VM bytes
 before returning; GameHost releases the native module lease only after callbacks

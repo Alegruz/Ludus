@@ -28,6 +28,15 @@ target_link_libraries(ludus_runtime_behavior PUBLIC Ludus::FoundationBase PRIVAT
     "$<BUILD_INTERFACE:ludus_runtime_scripting>" "$<BUILD_INTERFACE:Luau.VM>"
     "$<INSTALL_INTERFACE:LudusBehaviorProfile>")
 ludus_apply_project_defaults(ludus_runtime_behavior)
+# Installed native game modules link the provider and closed JSON debug bridge
+# statically. Own their PIC closure here; private S2 probes are not prerequisites.
+if(NOT EMSCRIPTEN)
+    foreach(target ludus_runtime_behavior ludus_runtime_scripting Luau.VM Luau.Common
+        ludus_foundation_base ludus_foundation_memory ludus_foundation_math
+        ludus_foundation_parsing ludus_foundation_parsing_json ludus_yyjson)
+        set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    endforeach()
+endif()
 if(EMSCRIPTEN)
     target_compile_options(ludus_runtime_behavior PRIVATE -sSUPPORT_LONGJMP=wasm)
     target_link_options(ludus_runtime_behavior INTERFACE -sSUPPORT_LONGJMP=wasm)

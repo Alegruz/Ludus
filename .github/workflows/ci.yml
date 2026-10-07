@@ -598,6 +598,9 @@ jobs:
       - name: Verify S5 Editor, installed Behavior SDK and GameHost journey
         run: |
           ./scripts/script-provider bootstrap
+          out/host-tools/venv/bin/cmake --preset linux-clang-development \
+            -DLUDUS_BUILD_SCRIPT_INTERACTION=OFF -DLUDUS_BUILD_SCRIPT_SESSION=OFF \
+            -DLUDUS_BUILD_VISUAL_SEQUENCE=OFF
           ./scripts/script-provider run --preset linux-clang-development
           out/host-tools/venv/bin/cmake --build --preset linux-clang-development
           out/host-tools/venv/bin/cmake --install out/build/linux-clang-development
