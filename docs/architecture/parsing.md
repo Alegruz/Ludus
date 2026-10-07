@@ -813,6 +813,22 @@ Each phase is independently useful. Do not wait for a universal parser,
 reflection registry, language server, job system, new string library, or
 binary asset format to improve today's bounded JSON diagnostics.
 
+### Continuing improvement after P0-P5
+
+Complete and validate the initial P0-P5 delivery plan before beginning the
+broader research and improvement pass. Optional mechanisms retain their existing
+consumer and measurement gates: record delivered evidence or an explicit
+defer/not-applicable decision instead of implementing every P5 alternative.
+Required format specifications and backend checks remain part of initial delivery.
+
+Preserve the resulting revision, compatibility policy, corpora, workloads and
+measurements as the baseline for later experiments. The
+[continuing research backlog](parsing-gems-review.md#continuing-research-after-p0-p5)
+owns the recommended venues, attributed reading queue, review status and
+experiment records. Read relevant sources, trial concrete improvements against
+that baseline, and record adopt/defer/reject decisions with regression evidence.
+Research completion does not substitute for the delivery gates above.
+
 ## Changes after the Gems review
 
 The baseline was drafted before reading the selected chapters. The

@@ -1,8 +1,10 @@
 # Ludus Parsing Literature Review
 
 **Status:** Source review informing the [parsing architecture](parsing.md).
-Completed on 2026-10-04. It implements no parser and contains no Ludus
-performance measurements.
+The initial review was completed on 2026-10-04; the
+[continuing research backlog](#continuing-research-after-p0-p5) was recorded on
+2026-10-07 and remains queued. This document implements no parser and contains
+no Ludus performance measurements.
 
 The initial architecture was drafted from Ludus's current codecs, ownership
 rules, and current primary documentation. Then
@@ -284,3 +286,100 @@ measured Ludus gains:
 No new dependency, policy exception, cooked format, or parser-generator
 installation follows automatically from the literature review. Implementation
 begins with the measured compatibility baseline and existing yyjson consumer.
+
+## Continuing research after P0-P5
+
+Recorded 2026-10-07. Preserve these recommendations as continuing context after
+the initial parsing system is delivered. Complete and validate the
+[P0-P5 delivery plan](parsing.md#delivery-sequence) first, including explicit
+defer/not-applicable decisions for optional mechanisms under its existing gates.
+Retain the resulting revision, compatibility policies, representative corpora,
+workloads and measurements as the comparison baseline. Format specifications and
+backend audits needed for that initial implementation remain part of delivery.
+
+The architecture owns parsing contracts, resource-format profiles and acceptance
+gates. This section owns the research queue and records of later experiments.
+Venue descriptions and source metadata/abstracts were screened; the full readings
+below remain queued. Topic priorities and experiments are Ludus selection criteria
+and hypotheses, not claims of adopted algorithms or measured improvements.
+
+### Venues and Ludus questions
+
+| Venue | Reading priority after baseline | Topics to screen for | Ludus work it could improve |
+| --- | --- | --- | --- |
+| [Software Language Engineering (SLE)](https://conf.researchr.org/home/sle-2026) | First: authoring | Grammar tooling, language workbenches, incremental editing and language evolution | P3 revision diagnostics/source edits; P4 consumer-specific languages; P5 generator decisions |
+| [LangSec workshop](https://langsec.org/spw26/) | First: input safety | Precise input languages, safe format subsets, parser discrepancies and recognition boundaries | P1/P2 complete validation; P4 checked binary/resource readers and explicit import profiles |
+| [ACM ISSTA](https://conf.researchr.org/track/issta-2026/issta-2026-research-papers) | First: validation | Software testing/analysis, grammar-aware fuzzing, differential testing and test reduction | Cross-phase malformed-input, allocation-failure, corruption and bounded-progress evidence |
+| ACM TOPLAS, illustrated by [modular error recovery](https://doi.org/10.1145/2400676.2400678) | Selective: diagnostics | Parsing algorithms, syntax recovery and editor representations | P3 useful diagnostics; P5 incremental/generated parsing when justified |
+| [Software: Practice and Experience](https://onlinelibrary.wiley.com/page/journal/1097024x/homepage/productinformation.html) | Selective: measured implementation | Numeric conversion, practical parsers, ownership and comparative implementation measurements | P4 decimal conversion; P5 alternatives compared against complete validation and owned output |
+| [USENIX Security](https://www.usenix.org/conference/usenixsecurity19/presentation/delignat-lavaud) | Selective: binary validation | Verified parser/serializer construction and input-recognition guarantees | P4 portable cooked-format validation and reader/writer consistency |
+| [ECOOP](https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.ECOOP.2020.6) | Selective: recovery | Practical language implementations and syntax-error recovery | P3 recovery quality/cost; P5 grammar-specific algorithm trials |
+| The VLDB Journal, illustrated by [SIMD JSON parsing](https://lemire.me/en/publication/arxiv190208318/) | Selective: ingestion | JSON ingestion, SIMD and parsing performance methodology | P5 syntax/decode/validation cost and whole-import memory/time comparisons |
+
+These links are archive and paper entry points, not an upcoming attendance
+schedule. Screen for concrete Ludus problems; do not make reading every article
+or changing parser technology a completion requirement. For PNG, OBJ, glTF and
+other resource families, the
+[consulted format specifications](parsing.md#consulted-format-specifications)
+remain the authority for accepted syntax and representation. Research informs
+validation, tooling and implementation techniques within those contracts.
+
+### Initial reading queue
+
+Stable IDs allow future work to update review and experiment status in place.
+Read in the order relevant to an observed problem; the queue does not move the
+improvement pass ahead of initial P0-P5 delivery.
+
+| ID | Source and attribution | Full-review status | Question and possible experiment after review |
+| --- | --- | --- | --- |
+| PAR-01 | Tahina Ramananandro, Antoine Delignat-Lavaud, Cédric Fournet, Nikhil Swamy, Tej Chajed, Nadim Kobeissi and Jonathan Protzenko, **EverParse: Verified Secure Zero-Copy Parsers for Authenticated Message Formats**, *USENIX Security 2019*, pp. 1465-1482. [Paper and talk](https://www.usenix.org/conference/usenixsecurity19/presentation/delignat-lavaud) | Queued; metadata/abstract screened | Which specification and parser/serializer consistency ideas transfer to one P4 cooked format? Compare a bounded prototype with the existing reader on round trips, corrupt offsets/lengths, lifetime and allocation failures. Verified syntax or zero-copy access alone does not establish domain validity or decoded-output budgets. |
+| PAR-02 | Lukas Diekmann and Laurence Tratt, **Don't Panic! Better, Fewer, Syntax Errors for LR Parsers**, *ECOOP 2020*, pp. 6:1-6:32. [DOI and open paper](https://doi.org/10.4230/LIPIcs.ECOOP.2020.6) | Queued; metadata/abstract screened | Could CPCT+ reduce cascading P3 diagnostics within our recovery budget? Its algorithm is LR-specific: assess grammar/backend applicability first, then compare repair usefulness, cascading errors, worst-case work and peak storage on edited invalid fixtures. Keep recovered drafts behind strict Apply/Cook validation. |
+| PAR-03 | Maartje de Jonge, Lennart C. L. Kats, Eelco Visser and Emma Söderberg, **Natural and Flexible Error Recovery for Generated Modular Language Environments**, *ACM TOPLAS* 34(4), article 15, 2012. [DOI](https://doi.org/10.1145/2400676.2400678); [author version](https://repository.tudelft.nl/record/uuid%3Ac46d95b0-aae6-4dd9-aa9a-759bee35d577) | Queued; metadata/abstract screened | Which grammar/layout-aware recovery ideas fit a real edited P3/P4 language? Assess its scannerless generalized-LR assumptions before a prototype; compare locations, follow-on diagnostics, source preservation and bounded recovery cost against the initial editor parser. |
+| PAR-04 | Daniel Lemire, **Number Parsing at a Gigabyte per Second**, *Software: Practice and Experience* 51(8), 2021. [DOI](https://doi.org/10.1002/spe.2984); [author page and paper](https://lemire.me/en/publication/arxiv2101.11408/) | Queued; metadata/abstract screened | Does decimal conversion materially affect P4 OBJ/custom-language import time? Trial a private conversion backend with identical token consumption, rounding/range/underflow policies and explicit errors; cover long tokens and numeric boundaries before comparing native/web full-import latency. |
+| PAR-05 | Geoff Langdale and Daniel Lemire, **Parsing Gigabytes of JSON per Second**, *The VLDB Journal* 28(6), pp. 941-960, 2019. [DOI](https://doi.org/10.1007/s00778-019-00578-5); [author page and paper](https://lemire.me/en/publication/arxiv190208318/) | Queued; metadata/abstract screened | Would a P5 SIMD JSON path improve a measured consumer workload? Compare against pinned yyjson with equivalent full syntax/schema validation, duplicate/numeric policy and owned candidates, including small files and malformed skipped fields. Account for padding, workspace, dispatch, executable size and native/web support. |
+
+### Review and experiment record
+
+Use statuses **Queued**, **Reading**, **Reviewed**, **Trial planned**,
+**Trial complete**, **Adopted**, **Deferred**, or **Rejected**. Metadata/abstract
+screening is not a full review. Update the queue row and append its detailed
+record here as work advances; keep the completed Gems findings above intact.
+
+For each archive search, record its date, venue/year range, queries/topic scope
+and retained/excluded sources so that the shortlist can be revisited. Add exact
+authors, title, publication/year, DOI or primary URL and access locator for each
+retained source. Use bibliographies to locate original papers and read those
+papers before attributing a design or implementation to them.
+
+For each completed review or trial, record:
+
+1. Source ID, review date and exact sections/pages or talk timestamps consulted.
+2. Relevant ideas, assumptions, evidence and limitations; differences from
+   Ludus's grammar, validation, ownership and platform contracts.
+3. Affected milestone/module, an observed problem and a testable hypothesis.
+4. A bounded prototype and comparison baseline: revision, compatibility policy,
+   corpus/seed, workload, hardware, toolchain/backend pins and reproduction commands.
+5. Correctness and regression evidence: malformed input, every relevant cap,
+   allocation failure, output preservation, lifetime/stale revision, full input
+   consumption, strict/recovery agreement and native/web/SDK behavior as applicable.
+6. Before/after acquisition, syntax, decode, validation and complete import/editor
+   latency (p50/p95/p99); peak workspace/candidate/retained bytes, allocations and
+   executable size. For diagnostics, also compare location accuracy, useful repairs
+   and cascading errors against a defined corpus. Follow the architecture's
+   [validation/performance gates](parsing.md#validation-and-performance-gates).
+7. An adopt/defer/reject decision and its reason, with links to tests, benchmarks,
+   implementation PRs and any changed architecture contracts. Preserve reference
+   attribution beside code when a reviewed source informs an implementation.
+
+Keep generated corpora, captures and benchmark outputs in ignored `out/`; retain
+reproduction instructions and decision evidence here. An attractive paper result
+does not establish a Ludus gain. Adoption must preserve exception-free errors,
+bounded work/memory, domain-owned validation, failure/output contracts and
+maintained native/web support. No source in this queue has a completed trial or
+adoption record yet.
+
+- [ ] Preserve the validated P0-P5 baseline and optional-mechanism decisions.
+- [ ] Screen the recommended archives for observed Ludus problems and maintain an attributed shortlist.
+- [ ] Fully review applicable PAR-01 through PAR-05 sources and record consulted sections and assumptions.
+- [ ] Trial promising ideas against the baseline; retain improvements only with correctness and regression evidence.
+- [ ] Revisit deferred ideas and refresh the source queue as formats, consumers and measured bottlenecks change.
