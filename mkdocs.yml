@@ -71,6 +71,7 @@ nav:
       - Repair project setup: guides/project-setup.md
       - Platform targets and compatibility: guides/platform-targets.md
       - Engine configuration: guides/configuration.md
+      - Filesystem and background reads: guides/filesystem.md
       - Strings and names: guides/strings.md
       - Hashing: guides/hashing.md
       - Deterministic randomness: guides/randomness.md

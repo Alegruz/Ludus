@@ -1,6 +1,6 @@
 # Filesystem architecture
 
-Status: F0 design and reference review complete; F1, F2 and F3 implemented. Validation is
+Status: F0 design and reference review complete; F1 through F4 implemented. Validation is
 recorded in the implementation PR.
 Reference review follows the baseline and records revisions below. This is a storage architecture for
 Ludus; it does not implement an operating-system filesystem.
@@ -45,8 +45,7 @@ syscall/allocation seam; production has no hooks or mutable fault state. Darwin
 tests exercise interrupted operations, short/partial reads, mutation during a
 read, allocation/metadata failure cleanup, close-on-exec and descriptor reuse
 after a failed close. macOS CI runs these tests and Content read adapters in
-Development and with ASan/UBSan. Content saves, watchers and asynchronous workers
-remain separate implementation work.
+Development and with ASan/UBSan. Content saves and watchers remain F5 work; F4 adds a separate dedicated I/O pool.
 
 ## Virtual namespace and shipping storage
 
@@ -351,6 +350,69 @@ separate stated policy; do not silently claim its guarantees for this walk.
 [Windows cancellation](https://learn.microsoft.com/en-us/windows/win32/fileio/canceling-pending-i-o-operations)
 also requires waiting for terminal completion before buffer reuse.
 
+## F4 bounded asynchronous reads
+
+`async.hpp` adds host-owned `AsyncReader` above `VirtualFile::ReadAt`. The module
+still depends only on FoundationBase among engine modules. Private fallible native
+thread/condition boundaries create a dedicated blocking pool on Linux, macOS and
+Windows. This pool deliberately does not run on FoundationThreading: that module's
+job callbacks must not block on I/O. Windows supports memory/pack providers; native
+directory I/O still reports Unsupported. Browser initialization explicitly reports
+Unsupported without starting threads or allocating scheduler storage.
+
+Initialize allocates a fixed slot array and worker array; optional tracing adds
+fixed per-slot diagnostic keys and a bounded trace ring. Admission does not grow
+storage or duplicate descriptors. Requests retain the exact opened file and its
+mount generation. Capacity and full destination-byte budgets cover queued,
+submitted **and uncollected** completions. A host that stops polling therefore
+receives overload errors instead of an unbounded completion backlog. Rejected
+requests preserve handles and buffers. Separate budgets remain necessary for pack
+scratch, provider storage, decoded resources, caches and GPU uploads.
+
+Workers transition Queued -> Submitted -> Completing; only host `Poll` publishes
+Completed and releases the slot, byte budget and revision. Poll returns exactly one
+record per accepted request while the scheduler is retained; collected identities
+cannot affect a reused slot or another scheduler. File release occurs outside the
+scheduler gate. Completion delivery invokes no callbacks. Destinations remain
+host-owned and exclusively writable until their completion is collected. Submit
+cannot detect overlapping destinations; the host must not admit them.
+
+Cancellation is an intent, not buffer-release permission. Queued cancellation
+skips I/O. Submitted cancellation drains the blocking read, then returns Cancelled
+with zero valid bytes (discard a possibly touched buffer). Cancellation after
+terminal publication leaves the completed read result intact. Shutdown permanently
+stops admission, cancels queued requests, wakes sleepers and joins submitted reads;
+completions remain available to Poll. A stuck provider can delay shutdown without
+bound. Providers must eventually return. Destruction performs the same drain and
+then discards any records the host chose not to collect; buffer storage must
+outlive destruction on this abandonment path. Preferred lifecycle is shutdown,
+collect every completion, then destroy. No asynchronous buffers belong on a short-
+lived stack frame unless that frame drains them before returning.
+
+DeadlineNanoseconds uses the monotonic `AsyncNow` clock and is a **latest-start**
+deadline: expired queued work skips I/O; an active read is never interrupted by a
+deadline. Before the starvation threshold, earlier deadlines sort first, then
+higher priority, then FIFO admission sequence. Once any request reaches the
+configured queue age, the oldest queued request overrides those preferences.
+This prevents priority starvation when providers make progress; it is not a hard
+latency guarantee for arbitrary blocking storage. No coalescing or native
+io_uring/IOCP backend is enabled without measured evidence and a compatibility
+proof for revision, destination layout, budgets and deadlines.
+
+Metrics are mutex-consistent gauges and saturating totals: queue/submitted/backlog,
+retained and peak bytes/requests, valid bytes, read/cancel/expiry counts, rejection,
+oldest queue age and trace overflow. Completions report queue, service, admission-
+to-host-delivery and cancellation-to-host-delivery nanoseconds. Optional traces copy
+a host-supplied logical key plus mount/generation, offset, requested bytes and
+terminal/native result; this diagnostic key does not select a different file.
+Trace overflow drops the oldest record and increments DroppedTraces, never logs or
+allocates. Clock samples and mutex acquisition are included in scheduler overhead.
+
+See the [filesystem guide](../wiki/guides/filesystem.md) for host integration and
+[measurement procedure](../development/filesystem-benchmark.md) for reproducible
+mixed loose/raw/LZ4 workloads and the measured synchronous baseline. These are
+storage delivery measurements, not resource decode or GPU residency claims.
+
 ## Dependency and ownership map
 
 ```mermaid
@@ -359,7 +421,7 @@ flowchart TD
     Content[Content: IDs, schemas, hashes, decode and residency] --> FS
     FS --> Base[FoundationBase: types and compiler vocabulary]
     Stream[Audio stream adapter: independent cursor] --> Content
-    Future[Future bounded async scheduler] --> FS
+    Async[Host-owned bounded async reader and dedicated I/O workers] --> FS
 ```
 
 F1 does not change catalogs, hashes, save APIs or logging sink dependencies.
