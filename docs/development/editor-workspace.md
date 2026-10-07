@@ -40,7 +40,7 @@ Wayland platform plugin, in addition to the normal reference toolchain
 managed Python venv). Qt is not added to Conan or the SDK. Default initialization
 skips editor setup; select **Build Ludus editor** in the setup window or use
 `./init.sh --cli --with-editor` to install missing Ubuntu/Debian Qt packages and
-build the selected native Debug or Development editor. `--no-editor` explicitly
+build the selected native Debug, Development or ASan/UBSan editor. `--no-editor` explicitly
 disables the editor for the prepared presets. Initialization also excludes test
 targets by default; use `--with-tests` to include editor tests or `--run-tests` to
 build and execute the enabled tests after setup.
@@ -248,6 +248,14 @@ branching, save failures and conflicts, a later edit during Save, text focus,
 pending argument buffers, command scope and cancelled Quit. The Linux optional
 editor CI runs the Qt fixtures offscreen and the sanitizer profile includes the
 editor; offscreen checks do not establish native input or browser acceptance.
+
+With the Qt prerequisites installed, include the editor in sanitizer validation:
+
+```bash
+./init.sh --cli linux-clang-asan-ubsan --preset-only --with-editor --with-tests --no-system-install
+./scripts/build linux-clang-asan-ubsan
+./scripts/test linux-clang-asan-ubsan
+```
 
 ## The project descriptor (version 1)
 

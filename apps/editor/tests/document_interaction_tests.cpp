@@ -168,7 +168,7 @@ TEST_CASE("Focused project text keeps selection and text Undo across unrelated n
     REQUIRE(name != nullptr);
     name->setFocus();
     name->setCursorPosition(2);
-    QTest::keyClicks(name, "XY");
+    QTest::keyClicks(name, QStringLiteral("XY"));
     REQUIRE(name->isUndoAvailable());
     name->setSelection(1, 3);
     const auto position = name->cursorPosition();
@@ -183,6 +183,12 @@ TEST_CASE("Focused project text keeps selection and text Undo across unrelated n
     CHECK_FALSE(controller.State().Dirty());
     Action(window, "document.redo")->trigger();
     CHECK(controller.State().Dirty());
+    const auto edited = name->text();
+    name->setReadOnly(true);
+    Action(window, "document.undo")->trigger();
+    CHECK(name->text() == edited);
+    CHECK(controller.State().Dirty());
+    CHECK_FALSE(Action(window, "document.undo")->isEnabled());
 }
 
 TEST_CASE("Pending argument text survives notifications and is included by Save", "[editor][document][widget]")
@@ -201,7 +207,7 @@ TEST_CASE("Pending argument text survives notifications and is included by Save"
     REQUIRE(edit != nullptr);
     edit->setFocus();
     edit->selectAll();
-    QTest::keyClicks(edit, "pending");
+    QTest::keyClicks(edit, QStringLiteral("pending"));
     controller.ClearOutput();
     CHECK(arguments->findChild<QLineEdit*>() == edit);
     CHECK(edit->text() == QStringLiteral("pending"));

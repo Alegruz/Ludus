@@ -6,7 +6,7 @@ import platform
 import cmake_targets
 
 
-SUPPORTED_PRESETS = ("linux-clang-debug", "linux-clang-development")
+SUPPORTED_PRESETS = ("linux-clang-debug", "linux-clang-development", "linux-clang-asan-ubsan")
 QT_PACKAGES = ("qt6-base-dev", "qt6-wayland")
 
 
@@ -16,7 +16,7 @@ def validate_editor_options(args, engine) -> None:
     if platform.system() != "Linux" or platform.machine().lower() not in ("x86_64", "amd64"):
         raise engine.EngineError("The optional Ludus editor currently supports Linux x64 only")
     if args.preset not in SUPPORTED_PRESETS:
-        raise engine.EngineError("Editor setup requires linux-clang-debug or linux-clang-development; browser editor setup is unsupported")
+        raise engine.EngineError("Editor setup requires " + ", ".join(SUPPORTED_PRESETS) + "; browser editor setup is unsupported")
 
 
 def setup_editor(args, engine) -> None:

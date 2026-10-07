@@ -48,7 +48,7 @@ def save_options(root: Path, presets, args) -> None:
     data = read_all_options(root)
     for preset in presets:
         data[preset] = {variable: bool(getattr(args, name)) for name, variable in VARIABLES.items()}
-        # Qt is only supported for the selected Debug/Development editor preset.
+        # Enable Qt only for the explicitly selected supported editor preset.
         data[preset]["LUDUS_BUILD_EDITOR"] = args.with_editor and preset == args.preset
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")

@@ -153,6 +153,20 @@ class EditorSetupTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in run.call_args_list],
                          [["sudo", "apt-get", "update"], ["sudo", "apt-get", "install", "-y", "qt6-wayland"]])
 
+    def test_sanitizer_editor_setup_keeps_the_selected_profile_and_existing_qt(self):
+        args = init_ui.prepare_init(engine.make_parser().parse_args([
+            "init", "--cli", "linux-clang-asan-ubsan", "--preset-only", "--with-editor",
+            "--with-tests", "--no-system-install"]), engine)
+        with patch.object(engine, "run") as run, \
+                patch.object(init_editor.cmake_targets, "query_codemodel"), \
+                patch.object(engine, "cmake_configure") as configure, \
+                patch.object(engine, "cmake_build") as build:
+            init_editor.setup_editor(args, engine)
+        run.assert_not_called()
+        self.assertTrue(args.with_tests)
+        configure.assert_called_once_with(engine.repo_root(), "linux-clang-asan-ubsan", ["-DLUDUS_BUILD_EDITOR=ON"])
+        build.assert_called_once_with(engine.repo_root(), "linux-clang-asan-ubsan", ["--target", "ludus_editor"])
+
     def test_no_system_install_uses_existing_qt_and_propagates_configure_failure(self):
         with patch.object(engine, "capture_command_quiet") as query, patch.object(engine, "run") as run, \
                 patch.object(init_editor.cmake_targets, "query_codemodel"), \

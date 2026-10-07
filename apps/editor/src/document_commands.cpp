@@ -61,13 +61,13 @@ void MainWindow::RenderDocumentActions()
     auto* plain = qobject_cast<QPlainTextEdit*>(focus);
     if (line != nullptr)
     {
-        UndoAction_->setEnabled(!line->isReadOnly() && line->isUndoAvailable());
-        RedoAction_->setEnabled(!line->isReadOnly() && line->isRedoAvailable());
+        UndoAction_->setEnabled(line->isEnabled() && !line->isReadOnly() && line->isUndoAvailable());
+        RedoAction_->setEnabled(line->isEnabled() && !line->isReadOnly() && line->isRedoAvailable());
     }
     else if (plain != nullptr)
     {
-        UndoAction_->setEnabled(!plain->isReadOnly() && plain->document()->isUndoAvailable());
-        RedoAction_->setEnabled(!plain->isReadOnly() && plain->document()->isRedoAvailable());
+        UndoAction_->setEnabled(plain->isEnabled() && !plain->isReadOnly() && plain->document()->isUndoAvailable());
+        RedoAction_->setEnabled(plain->isEnabled() && !plain->isReadOnly() && plain->document()->isRedoAvailable());
     }
     else
     {
@@ -79,6 +79,11 @@ void MainWindow::RenderDocumentActions()
 
 void MainWindow::OnUndoRequested()
 {
+    RenderDocumentActions();
+    if (!UndoAction_->isEnabled())
+    {
+        return;
+    }
     if (auto* line = qobject_cast<QLineEdit*>(QApplication::focusWidget()))
     {
         line->undo();
@@ -96,6 +101,11 @@ void MainWindow::OnUndoRequested()
 
 void MainWindow::OnRedoRequested()
 {
+    RenderDocumentActions();
+    if (!RedoAction_->isEnabled())
+    {
+        return;
+    }
     if (auto* line = qobject_cast<QLineEdit*>(QApplication::focusWidget()))
     {
         line->redo();
