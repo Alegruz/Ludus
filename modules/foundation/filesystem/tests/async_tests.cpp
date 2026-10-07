@@ -26,6 +26,8 @@ struct Control
     uint32 Calls = 0;
     std::atomic<uint32> Destroyed{0};
     Status Failure = Status::Ok;
+    AsyncReader* Reader = nullptr;
+    std::atomic<AsyncStatus> Reentry{AsyncStatus::Ok};
     void Release() noexcept
     {
         const std::lock_guard lock(Mutex);
@@ -61,6 +63,10 @@ public:
     [[nodiscard]] ReadResult ReadAt(uint64 offset, std::span<uint8> destination) const noexcept override
     {
         std::unique_lock lock(mControl.Mutex);
+        if (mControl.Reader != nullptr)
+        {
+            mControl.Reentry = mControl.Reader->Shutdown();
+        }
         if (mControl.Calls < 16)
         {
             mControl.Order[mControl.Calls] = offset;
@@ -437,4 +443,23 @@ TEST_CASE("Async pack reads retain unmounted compressed revision with independen
             REQUIRE(byte == 'A');
         }
     }
+}
+
+TEST_CASE("An I/O provider cannot shut down its own reader and join itself", "[filesystem][async]")
+{
+    Control state;
+    state.Released = true;
+    const ProviderHandle provider(new ControlledProvider(state));
+    const auto file = Open(provider);
+    uint8 bytes[2]{};
+    AsyncReader reader;
+    REQUIRE(reader.Initialize({1, 1, 4, 1, 0}) == AsyncStatus::Ok);
+    state.Reader = &reader;
+    RequestHandle handle;
+    REQUIRE(reader.Submit(file, 1, bytes, handle) == AsyncStatus::Ok);
+    REQUIRE(Collect(reader).Read.BytesRead == 2);
+    REQUIRE(state.Reentry == AsyncStatus::InsideRead);
+    REQUIRE(reader.Submit(file, 2, bytes, handle) == AsyncStatus::Ok);
+    REQUIRE(Collect(reader).Read.BytesRead == 2);
+    REQUIRE(reader.Shutdown() == AsyncStatus::Ok);
 }

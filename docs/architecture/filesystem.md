@@ -383,7 +383,9 @@ with zero valid bytes (discard a possibly touched buffer). Cancellation after
 terminal publication leaves the completed read result intact. Shutdown permanently
 stops admission, cancels queued requests, wakes sleepers and joins submitted reads;
 completions remain available to Poll. A stuck provider can delay shutdown without
-bound. Providers must eventually return. Destruction performs the same drain and
+bound. Providers must eventually return. A provider calling Shutdown on its own
+reader receives InsideRead without stopping admission, avoiding self-join. Reader
+destruction must remain with the host, outside any active provider ReadAt. Destruction performs the same drain and
 then discards any records the host chose not to collect; buffer storage must
 outlive destruction on this abandonment path. Preferred lifecycle is shutdown,
 collect every completion, then destroy. No asynchronous buffers belong on a short-

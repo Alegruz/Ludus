@@ -26,7 +26,10 @@ Thus latency differences include concurrency/backlog, not only thread handoff.
 
 The first and warm passes use identical accesses, followed by 128 submit/cancel/
 collect requests. Percentiles are sorted observed samples, without interpolation.
-Completion time includes host delivery backlog. CPU is process CPU time, including
+Completion time is sampled when the host collects a record under the scheduler
+gate, before releasing the final file outside the gate. It includes delivery
+backlog; final provider destruction/close cost is outside that timestamp. Service
+time includes read execution and terminal-publication gate contention. CPU is process CPU time, including
 workers and the yielding host polling loop. A real host polls during its update;
 this benchmark's yielding loop can consume a core. Open time and descriptor
 count are measured separately. C++ new/new[] calls are counted across all threads

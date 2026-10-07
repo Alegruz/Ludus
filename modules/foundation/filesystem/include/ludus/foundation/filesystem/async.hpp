@@ -20,6 +20,7 @@ enum class AsyncStatus : uint8
     IdentityExhausted,    ///< Unique scheduler or request identities cannot be represented.
     ThreadCreationFailed, ///< Native synchronization or a worker could not start; started workers are joined.
     Unsupported,          ///< Blocking workers are unavailable on this target (including browser builds).
+    InsideRead,           ///< Shutdown was called from this reader's provider/worker and would join itself.
 };
 
 /// Observable request progression; cancellation is an intent rather than a state.
@@ -74,13 +75,15 @@ struct ReadCompletion final
     RequestHandle Handle;                                ///< Accepted identity, invalid after collection.
     RequestState State = RequestState::Completed;        ///< Terminal host-delivery state.
     ReadDisposition Disposition = ReadDisposition::Read; ///< Whether ReadAt ran to a published result.
-    ReadResult Read;                    ///< Valid progress for Read; zero valid bytes for cancellation/expiry.
-    uint64 Tag = 0;                     ///< Copied host correlation value.
-    uint64 MountId = 0;                 ///< Retained file's mount identity.
-    uint64 Generation = 0;              ///< Retained file's snapshot generation.
-    uint64 QueueNanoseconds = 0;        ///< Admission to submission/terminal skip.
-    uint64 ServiceNanoseconds = 0;      ///< Blocking read duration, zero when skipped.
-    uint64 CompletionNanoseconds = 0;   ///< Admission to host collection, including delivery backlog.
+    ReadResult Read;             ///< Valid progress for Read; zero valid bytes for cancellation/expiry.
+    uint64 Tag = 0;              ///< Copied host correlation value.
+    uint64 MountId = 0;          ///< Retained file's mount identity.
+    uint64 Generation = 0;       ///< Retained file's snapshot generation.
+    uint64 QueueNanoseconds = 0; ///< Admission to submission/terminal skip.
+    uint64 ServiceNanoseconds =
+        0; ///< Submission to terminal publication, including read/gate contention; zero for skips.
+    uint64 CompletionNanoseconds =
+        0; ///< Admission to collection under the gate, including backlog; excludes final file release.
     uint64 CancellationNanoseconds = 0; ///< First cancellation intent to collection, zero if not cancelled.
 };
 
@@ -119,7 +122,7 @@ struct AsyncMetrics final
 // Thanks to Neil Gower, "Asynchronous I/O for Scalable Game Servers", Game
 // Programming Gems 8, sec. 5.3, pp. 506-513: queue/control-buffer lifetime and
 // drain-before-release cancellation inform this original implementation.
-// Networking examples are not disk-performance evidence. See filesystem.md.
+// Networking examples are not disk-performance evidence. See docs/architecture/filesystem.md.
 /// Host-owned bounded offset-read scheduler. Native blocking pool on Linux/macOS/Windows;
 /// browser initialization returns Unsupported. Dedicated workers may block; never call
 /// Submit/Poll/Shutdown from an audio callback or render critical section.
@@ -127,7 +130,7 @@ struct AsyncMetrics final
 /// Submit, Cancel, GetState, Poll, PollTrace and Metrics may run concurrently while alive.
 /// Shutdown is serialized with itself and destruction, and may overlap those other calls.
 /// The host keeps each accepted destination alive and exclusively writable until Poll
-/// returns its completion, or until destruction has drained all I/O. No worker callbacks.
+/// returns its completion, or until destruction has drained all I/O. No completion callbacks.
 /// Stop with Shutdown, collect every completion, then destroy. Destruction also drains,
 /// but deliberately abandons any completion the host chose not to collect.
 class AsyncReader final
@@ -163,8 +166,8 @@ public:
     /// Inspects a live request; failure preserves output. Collected handles are invalid.
     [[nodiscard]] AsyncStatus GetState(RequestHandle handle, RequestState& output) const noexcept;
     /// Collects one terminal request in terminal-publication order, releases its budget/file,
-    /// and returns true. False preserves output. No I/O, callbacks or allocation; file release
-    /// may close the final provider revision, so collect outside critical engine sections.
+    /// and returns true. False preserves output. No payload reads, completion callbacks or scheduler allocations; file
+    /// release may close the final provider revision, so collect outside critical engine sections.
     [[nodiscard]] bool Poll(ReadCompletion& output) noexcept;
     /// Removes the oldest trace without allocation; false preserves output.
     [[nodiscard]] bool PollTrace(ReadTrace& output) noexcept;
@@ -173,6 +176,8 @@ public:
     /// Permanently stops admission, cancels queued requests and joins all submitted reads.
     /// Does not deliver or discard completions: Poll remains usable. Repeated calls succeed.
     /// Can block for an uninterruptible provider read; providers must eventually return.
+    /// Returns InsideRead without stopping admission if invoked by this reader's provider
+    /// on its I/O worker. Never destroy a reader from a provider it is currently reading.
     [[nodiscard]] AsyncStatus Shutdown() noexcept;
 
 private:

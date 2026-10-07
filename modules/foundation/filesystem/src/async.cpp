@@ -14,6 +14,7 @@ namespace ludus::foundation::filesystem
 namespace
 {
 constexpr uint64 MAX_COUNTER = ~uint64{0};
+thread_local const void* gReadingScheduler = nullptr;
 #if !defined(LUDUS_PLATFORM_WEB)
 std::atomic<uint64> gNextScheduler{1};
 #endif
@@ -150,6 +151,7 @@ struct AsyncReader::Impl
     static void Run(void* context) noexcept
     {
         auto& state = *static_cast<Impl*>(context);
+        gReadingScheduler = &state;
         for (;;)
         {
             state.Gate.Lock();
@@ -499,6 +501,10 @@ AsyncStatus AsyncReader::Shutdown() noexcept
     if (mImpl == nullptr)
     {
         return AsyncStatus::NotInitialized;
+    }
+    if (gReadingScheduler == mImpl)
+    {
+        return AsyncStatus::InsideRead;
     }
     mImpl->Stop();
     return AsyncStatus::Ok;

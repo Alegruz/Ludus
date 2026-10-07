@@ -91,7 +91,9 @@ Deadlines do not interrupt active reads and are not a hard completion guarantee.
 
 On shutdown, stop admission with Shutdown, collect all remaining completions,
 then destroy the reader and destinations. Shutdown drains active reads and can
-block until a provider returns. It cancels queued work and preserves all terminal
+block until a provider returns. A provider calling Shutdown on its own reader
+receives InsideRead without stopping admission. Keep destruction with the host,
+outside active provider reads. Shutdown cancels queued work and preserves all terminal
 records for the host. The destructor also drains, but abandons records you did not
 collect. Initialize/destruction require exclusive owner access; other operations
 are concurrent while the reader lives. Serialize Shutdown calls with each other.
