@@ -877,23 +877,28 @@ identifiers, not additional acceptance requirements for the completed F1-F5 work
 ### Venues and reading priorities
 
 Follow these venues for specific questions in the existing architecture. Start
-with FAST and OSDI/SOSP; use TOS for deeper storage studies and SYSTOR for practical
-experiments. These priorities are our assessment of applicability to Ludus.
+with FAST and TOS for storage questions, then SYSTOR for backend comparisons.
+Use OSDI/SOSP for correctness and system evaluation; consult EuroSys and TOCS
+when CPU sharing, scheduling or concurrency becomes the observed problem. These
+priorities are our assessment of applicability to Ludus.
 Conference programs are reading sources, not an instruction to attend, submit a
 paper or adopt every featured storage mechanism.
 
 | Venue | What to look for | Ludus boundary and relevance |
 | --- | --- | --- |
 | [USENIX FAST, Conference on File and Storage Technologies](https://www.usenix.org/conference/fast26/technical-sessions) | Crash consistency, workload characterization, caching, compression and storage performance | First choice across F3 packs, F4 streaming and F5 publication; separate kernel/device mechanisms from changes feasible inside our user-space SDK. |
-| [USENIX OSDI, Operating Systems Design and Implementation](https://www.usenix.org/conference/osdi25/technical-sessions), and [ACM SOSP, Symposium on Operating Systems Principles](https://sigops.org/s/conferences/sosp/2025/) | Recovery protocols, concurrency, ownership and system evaluation | Review persistence assumptions and revision/cancellation lifetime proofs before widening a contract. Distributed consistency protocols need a separate product need. |
+| [USENIX OSDI, Operating Systems Design and Implementation](https://www.usenix.org/conference/osdi26/technical-sessions), and [ACM SOSP, Symposium on Operating Systems Principles](https://sigops.org/s/conferences/sosp/2025/) | Recovery protocols, concurrency, ownership and system evaluation | Review persistence assumptions and revision/cancellation lifetime proofs before widening a contract. Distributed consistency protocols need a separate product need. |
 | [ACM SYSTOR, International Systems and Storage Conference](https://www.systor.org/2026/cfp/) | Experimental prototypes, deployment experience and workload comparisons | Useful for reproducible backend, cache and latency comparisons; select workloads that resemble asset delivery. |
 | [ACM Transactions on Storage (TOS)](https://dl.acm.org/journal/tos) | Detailed storage designs and their evaluations | First journal reading target for publication, packs and storage policy; verify assumptions against supported hosts. |
+| [ACM EuroSys, European Conference on Computer Systems](https://2026.eurosys.org/papers.html) | CPU sharing, scheduling, concurrency and storage integration | Read selectively for FS-R2/FS-R3 when render, decode and I/O completion compete for cores; evaluate frame impact as well as throughput. |
 | [ACM Transactions on Computer Systems (TOCS)](https://dl.acm.org/journal/tocs) | Broader system designs, concurrency and scheduling | Supplement storage reading when queueing, completion delivery or CPU sharing is the bottleneck. |
 
 ### Research inputs and adaptations to investigate
 
 Thanks to the authors below for the methods and analysis informing this plan.
-Publication metadata, abstracts and the named sections were consulted. The
+Publication metadata, abstracts and the explicitly named sections were consulted.
+The SYSTOR API comparison below has been reviewed at abstract level only; it is
+an immediate full-paper reading task, not a validated backend recommendation. The
 proposed experiments are Ludus-specific interpretations; no cited implementation
 has been imported, and a full algorithm/artifact compatibility review remains
 required before adoption. Historical filesystem results and hardware speedups do
@@ -903,7 +908,40 @@ not establish behavior or gains on our current Linux/macOS targets.
 | --- | --- | --- |
 | Thanumalayan Sankaranarayana Pillai, Vijay Chidambaram, Ramnatthan Alagappan, Samer Al-Kiswany, Andrea C. Arpaci-Dusseau and Remzi H. Arpaci-Dusseau, **All File Systems Are Not Created Equal: On the Complexity of Crafting Crash-Consistent Applications**, OSDI 2014, pp. 433-448; sections 2-3 ([paper and media](https://www.usenix.org/conference/osdi14/technical-sessions/presentation/pillai)) | Application correctness depends on storage ordering and atomicity assumptions; ALICE explores update protocols against persistence models. | FS-R1 specifies recovery expectations for each F5 sync policy and tests the host stack. Its historical Linux configurations do not certify APFS or modern kernels. |
 | Jayashree Mohan, Ashlie Martinez, Soujanya Ponnapalli, Pandian Raju and Vijay Chidambaram, **Finding Crash-Consistency Bugs with Bounded Black-Box Crash Testing**, OSDI 2018, pp. 33-50; sections 4-5 ([paper and media](https://www.usenix.org/conference/osdi18/presentation/mohan)) | Bounded workload exploration, block-I/O replay and explicit data/metadata recovery oracles; CrashMonkey and Ace demonstrate the approach. | FS-R1 adapts the testing method to our publication protocol. Bounds limit coverage; process termination alone does not simulate power loss. Verify artifact/kernel compatibility before reuse. |
-| Dongjoo Seo, Jihyeon Jung, Yeohwan Yoon, Ping-Xiang Chen, Yongsoo Joo, Sung-Soo Lim and Nikil Dutt, **DPAS: A Prompt, Accurate and Safe I/O Completion Method for SSDs**, FAST 2026, pp. 381-397; sections 4-5 ([paper and media](https://www.usenix.org/conference/fast26/presentation/seo)) | Completion strategies trade latency against CPU consumption, especially under contention and changing device latency. | FS-R2 adopts the comparison questions; FS-R3 considers backend experiments only after measurement. DPAS changes the Linux block layer; it is not a drop-in AsyncReader policy or a cooked-path watcher algorithm. |
+| Diego Didona, Jonas Pfefferle, Nikolas Ioannou, Bernard Metzler and Animesh Trivedi, **Understanding Modern Storage APIs: A systematic study of libaio, SPDK, and io-uring**, SYSTOR 2022; abstract ([author organization publication](https://research.ibm.com/publications/understanding-modern-storage-apis-a-systematic-study-of-libaio-spdk-and-io-uring)) | Polling design and available CPU cores affect performance; scaling across cores/devices requires care. | FS-R2 records CPU cost and contention alongside latency; FS-R3 compares the worker pool with buffered io_uring only if submission/completion costs justify it. Treat the paper as an evaluation guide: its hardware/kernel results do not select current queue depths, polling modes or a default backend. SPDK would require a separate device-access/deployment decision outside the present file-provider contract. |
+| Dongjoo Seo, Jihyeon Jung, Yeohwan Yoon, Ping-Xiang Chen, Yongsoo Joo, Sung-Soo Lim and Nikil Dutt, **DPAS: A Prompt, Accurate and Safe I/O Completion Method for SSDs**, FAST 2026, pp. 381-397; sections 4-5 ([paper and media](https://www.usenix.org/conference/fast26/presentation/seo)) | Completion strategies trade latency against CPU consumption, especially under contention and changing device latency. | FS-R2 compares completion latency and CPU under render/decode contention and changing read sizes; FS-R3 considers supported wait/wakeup modes only after measurement. DPAS changes the Linux block layer; its adaptive polling algorithm is not a drop-in AsyncReader policy or a cooked-path watcher algorithm. Retain blocking waits as the baseline; do not enable busy polling by default. |
+
+### Immediate reading sequence and translation into experiments
+
+Read the full SYSTOR API comparison first to build FS-R2's experimental matrix:
+worker count, admitted queue depth, request size/locality, completion collection
+cadence, cold/warm cache and spare versus contended CPU. Compare the existing
+worker implementation on identical inputs before adding a buffered io_uring
+variant. Separate submission, storage service, completion delivery and
+CRC/decode timings so a faster kernel path cannot hide a slower pack pipeline.
+
+Read DPAS next for the completion-versus-CPU tradeoff, then use FAST/TOS to
+investigate the bottleneck found in those traces: pack layout/cache/decompression
+for FS-R4, or completion and queueing for FS-R3. OSDI/SOSP's crash-testing sources
+already listed above guide FS-R1 independently. EuroSys/TOCS become useful when
+contention traces show completion, decode and frame work competing for CPU.
+This reading order is a proposed Ludus workflow, not a ranking of publication
+quality or a claim that every venue's current papers fit this engine.
+
+For every candidate, ask whether it improves p99 **resource-ready latency**
+inside declared CPU, memory and frame budgets while preserving revision identity,
+buffer lifetime, cancellation/drain and exactly-once completion. Filesystem-only
+benchmarks report byte completion; an integrated Content experiment also measures
+validation/decode, owner-thread publication and required upload before calling a
+resource ready. Record both endpoints rather than assigning Content/RHI work to
+FoundationFilesystem. Include burst loading, background streaming, cancellation
+storms and CPU contention; report regressions and variability, not just peak IOPS.
+
+Keep tuning local to the private backend. Linux SSD studies do not establish
+macOS, Windows, console or browser behavior; a new platform needs its own support
+and measurement evidence. Browser acquisition remains a separate fetch path.
+A sophisticated policy earns its maintenance cost only if the simple bounded
+baseline loses on representative traces and the gain survives correctness tests.
 
 ### Prioritized experiments and acceptance
 
