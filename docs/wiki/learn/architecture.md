@@ -22,7 +22,7 @@ installed engine SDK.
 
 This keeps engine consumers independent of desktop UI details and makes include
 cost and dependency direction enforceable. See the
-[module include boundary](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/foundational-headers.md).
+[module include boundary](../../architecture/foundational-headers.md).
 
 ## Persistent data and running state
 
@@ -41,8 +41,8 @@ those failures with progress and recovery context. A cancellable operation owns
 its child processes until cleanup is confirmed; a lost reply is not sufficient
 evidence that work has stopped.
 
-See the [editor architecture](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-architecture.md)
-and [module lifecycle contract](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/module-lifecycle.md).
+See the [editor architecture](../../architecture/editor-architecture.md)
+and [module lifecycle contract](../../architecture/module-lifecycle.md).
 
 ## Where to learn next
 

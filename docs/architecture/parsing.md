@@ -53,6 +53,10 @@ changes, and rejected alternatives from the requested Gems reading.
     only where the backend or a validated source-map adapter can supply them.
 11. Cook typed domain records and deterministic dictionaries, then test the
     same representation that will ship. Do not ship a generic token replay VM.
+12. Give common resource formats explicit import profiles and domain owners.
+    Reuse audited image, audio, font, and scene codecs behind private adapters;
+    share checked reading and error contracts without adding those dependencies
+    to the parsing core.
 
 ## Current implementation and migration boundary
 
@@ -131,6 +135,149 @@ retained values must be copied or refer to owned immutable chunks. Bound
 candidate memory and queued events with backpressure. A low-memory syntax
 reader cannot by itself make an unbounded output candidate low-memory.
 Incremental input parsing is distinct from reparsing after editor edits.
+
+## Game resource formats
+
+The resource-format roadmap below was added on 2026-10-06. It proposes new
+support; the rows marked existing identify current consumers, not a promise
+that every variant of a file extension is accepted. The Gems review informed
+the pipeline and ownership rules. The format specifications cited below supply
+the separate evidence for these profiles.
+
+Resource import follows bytes -> format reader/decoder -> owned domain
+candidate -> semantic validation -> optional cooked artifact -> subsystem
+preparation. Content owns acquisition, identity, dependency resolution, and
+publication. Mesh/image import tools own source interpretation; Audio and Text
+retain their codec owners. RHI owns device upload and retirement. Parsing owns
+only the reusable reading primitives, limits, and diagnostic contracts.
+See [resource preparation](resource-management.md#architecture-and-ownership)
+and [cooking](resource-management.md#cooking-and-storage).
+
+### Initial format inventory
+
+| Format | Intended use and owner | Status and initial scope |
+| --- | --- | --- |
+| Strict JSON | Catalogs, game definitions, and domain configuration readers | Existing parsing backend; each domain supplies its own versioned schema |
+| WAV / FLAC | Sound and music sources; Audio/AudioContent | Existing private pinned miniaudio decoder; preserve accepted sample/channel profiles and preparation limits |
+| TrueType / OpenType fonts | Font faces, shaping, and rasterization; Text | Existing private FreeType/HarfBuzz integration; use the tested font profile, with collections and advanced font features separately qualified |
+| PNG | UI images, sprites, and texture source pixels; image import tools | First proposed image slice: static images decoded into owned RGBA8 pixels under an explicit color policy |
+| Wavefront OBJ | Simple static mesh interchange; mesh import tools | First proposed geometry slice: triangle faces with positions and optional UVs/normals; materials are a separate profile |
+| glTF 2.0 / GLB | Scene, mesh, and material interchange; scene import tools | Follow OBJ/image candidates with a declared static triangle-mesh profile; skins, animation, morph targets, and extensions have separate acceptance gates |
+| JPEG | Photographic texture sources; image import tools | Later image slice: declared baseline/progressive profiles and explicit orientation/color conversion; no new decoder selected here |
+| KTX2 | Mipmapped texture artifacts; texture cooker and graphics adapter | Later runtime texture slice when RHI supports the required formats; transcoders and supercompression are opt-in audited backends |
+| Ludus domain binary | Cooked meshes, textures, levels, or other typed definitions | Per-domain versioned layouts using the checked binary contract below; each requires a real consuming subsystem |
+
+Existing implementation owners are [Audio decode](../../modules/audio/src/internal/decode.cpp),
+[Text font loading](../../modules/text/src/font_system.cpp), and the
+[JSON facade](../../modules/foundation/parsing/include/ludus/foundation/parsing/json.hpp).
+Adding this inventory does not extend their APIs or the version-1 Content
+catalog's audio-only kinds. New resource kinds need their own compatibility
+decision. FBX, USD, SVG, video, and additional audio codecs remain separate
+consumer requests rather than dependencies of the first image/mesh slices.
+
+### First image and geometry profiles
+
+**PNG:** Use a proven private decoder, with allocator/error behavior audited
+before selection. The initial profile accepts static grayscale, indexed, RGB,
+and alpha images at legal sample depths up to 8 bits, including transparency
+and both PNG interlace methods. It returns counted, owned RGBA8 rows with an
+explicit row pitch. Reject 16-bit samples and APNG animation in this first
+profile; do not silently discard precision or animation. Validate signature,
+chunk order/lengths/CRCs, required chunks, and the end of the datastream.
+Unknown critical chunks fail; permitted ancillary chunks can be skipped under
+the metadata budget. Bound decompression and metadata as well as pixel output.
+Texture import declares color versus data intent, color conversion, alpha
+representation, and row orientation. Unsupported color profiles fail unless
+the caller explicitly selects a documented fallback.
+
+**OBJ:** Begin with a bounded line/token reader using a reviewed decimal
+conversion backend. Accept `v`, `vt`, `vn`, and triangle `f` records, comments,
+and declared object/group/smoothing metadata. Resolve positive one-based and
+negative relative indices against the correct position/UV/normal arrays;
+zero and out-of-range indices fail. Preserve face-corner tuples before
+deterministically producing the domain's vertex/index representation. Check
+finite values and numeric narrowing; document missing attribute and degenerate
+triangle policy. The first mesh-only profile rejects material references,
+nontriangle faces, lines, points, and free-form geometry explicitly. MTL
+dependency resolution, polygon triangulation, normal/tangent generation, and
+coordinate/unit conversion need declared later profiles or import settings.
+Do not silently ignore a record that changes the geometry's meaning.
+
+**glTF/GLB:** Reuse strict JSON recognition with limits chosen for scene import,
+then validate container version/lengths, buffer views, accessors, indices, node
+relationships, and finite transforms before exposing a scene candidate. The
+first profile covers static triangle meshes; its accepted attributes and
+material features must match a real consumer. Reject unsupported required
+extensions and unsupported core features used by the asset. Optional extension
+fallback follows the specification and the declared profile. Sparse accessors,
+compressed geometry, embedded image codecs, skins, and animation are explicit
+profile decisions. External files and decoded data URIs pass through a bounded
+Content/tool resolver; a parser does not perform network or filesystem I/O.
+Count embedded and external dependencies together and record their digests.
+
+### Admission and compatibility gates
+
+Each format profile specifies concrete default budgets and hard maxima before
+implementation. The current JSON document cap is not an image, scene, audio,
+or decoded-resource budget. Check arithmetic and admit growth before allocating.
+
+| Resource family | Additional budgets and validation |
+| --- | --- |
+| Images | Width/height, pixel count, row/output products, compressed and expanded bytes, decoder scratch, chunks and metadata; retain color/alpha policy |
+| Meshes/scenes | Line/token/numeric lengths, vertices, face corners, indices, nodes, materials, dependency count/bytes, tuple conversion and semantic work |
+| Audio | Encoded bytes, channel/sample profile, frame count, decoded PCM, resampling workspace, and per-playback stream storage; preserve current behavior |
+| Fonts | Font bytes, face/table counts, glyph and raster dimensions, shaping/output storage; qualify the existing backend's supported profile |
+| Texture artifacts | Dimensions, layers/faces/mips, section ranges, compressed/expanded sizes, formats, decoder/transcoder workspace, and upload staging |
+
+Readers distinguish malformed input, an unsupported valid feature, a configured
+limit, and allocation failure. A failure leaves the prior resource and output
+unchanged. A successful candidate owns surviving pixels, vertices, strings,
+and dependency records, or documents an immutable blob lease. Format detection
+checks content and the declared profile; an extension alone does not validate
+bytes. Codec types and headers remain private, with explicit errors across the
+adapter boundary. Decode/import stays off gameplay, GUI, and audio callback
+paths; browser work also needs a measured scheduling and latency contract.
+
+The proposed order is PNG and OBJ as independent first slices, followed by a
+static glTF/GLB consumer, then JPEG and KTX2 when their consumers need them.
+Each slice includes a written supported-subset matrix, representative exported
+fixtures, a consuming tool or app, and usage/API documentation. Test truncation,
+corrupt lengths/indices, expansion limits, allocation failure, unsupported
+features, ownership, and old-output preservation; fuzz the format and typed
+validation boundary under sanitizers. Compare image pixels or mesh semantics
+with independently verified fixtures, not just a codec's own round trip.
+Prove native/web and installed-SDK behavior for the targets that expose support.
+Runtime GPU upload, cooked acceptance, and source-import acceptance are separate
+claims. Selecting an established codec still requires a dependency pin, license,
+exception/allocation audit, and source attribution near its eventual adapter.
+
+### Consulted format specifications
+
+Thanks to the following authors and organizations for the format contracts.
+The supported subsets, proposed order, budgets, and Ludus module placement above
+are engineering choices, not requirements of these specifications:
+
+- W3C PNG Working Group, [*Portable Network Graphics (PNG) Specification (Third Edition)*](https://www.w3.org/TR/2025/REC-png-3-20250624/),
+  sections 5, 8, 11, and 13: chunk validation, image representations, and decoder
+  behavior; Ludus's first profile deliberately limits precision and animation.
+- Wavefront Technologies, *The Advanced Visualizer*, version 3.0, Appendix B1,
+  [*Object Files (.obj)*](https://www.martinreddy.net/gfx/3d/OBJ.spec)
+  (archived original specification): face tuples and index semantics; the
+  proposed triangle-only subset excludes the manual's wider geometry grammar.
+- Khronos Group, [*glTF 2.0 Specification*](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html),
+  sections on buffers/accessors, meshes/nodes, extensions, and GLB: distinguish
+  container/schema validation from the supported scene profile.
+- ITU-T / ISO/IEC, [*T.81: Digital compression and coding of continuous-tone still images — Requirements and guidelines*](https://www.itu.int/rec/T-REC-T.81/en):
+  [1992 specification, annexes F and G](https://www.w3.org/Graphics/JPEG/itu-t81.pdf)
+  (W3C-hosted copy): sequential and progressive coding processes; the eventual
+  image adapter must declare which it accepts.
+- Khronos Group, [*KTX File Format Specification, version 2*](https://registry.khronos.org/KTX/specs/2.0/ktxspec.v2.html),
+  sections 3 and 4: indexed mip data, representation metadata, and independently
+  declared supercompression; a container reader does not establish GPU support.
+- Microsoft, [*Resource Interchange File Format (RIFF)*](https://learn.microsoft.com/en-us/windows/win32/xaudio2/resource-interchange-file-format--riff-),
+  and IETF, [*RFC 9639: Free Lossless Audio Codec (FLAC)*](https://www.rfc-editor.org/rfc/rfc9639):
+  format context for the existing Audio codec; the repository's pinned backend
+  and compatibility fixtures remain authoritative for current acceptance.
 
 ## Module boundary
 
@@ -659,7 +806,7 @@ latency and runtime loading budgets with the actual consumer.
 | P1: Bounded JSON foundation (implemented) | Common errors/limits/cursors, current backend facade, compatibility adapter, better admission/error handling | Existing Content tests plus budget/OOM/encoding tests, clean native/web build and SDK consumer; unchanged schema behavior |
 | P2: Domain integration | Transactional owned decoding and richer paths in selected readers | One real catalog/audio consumer, old-output preservation, source lifetime and candidate budget evidence |
 | P3: Authoring diagnostics | Revision snapshots, exact provenance where supported, source edits; recovery/CST only if needed | Stale results discarded, accurate locations, lossless edits, strict Apply/Cook gate, measured latency |
-| P4: Measured language or cooker | One required DSL or one domain's binary output/reader | Grammar/spec fixtures or text/cooked typed equivalence, fuzzing, corruption limits, measured whole-pipeline benefit |
+| P4: Domain resource reader, measured language or cooker | One consumer's resource-format profile, required DSL, or binary output/reader | Format/grammar fixtures or text/cooked typed equivalence, fuzzing, corruption and decoded-size limits; measured whole-pipeline benefit for cooking |
 | P5: Optional optimization | SIMD, generated lexer/parser, streaming, incremental parsing, or schema codegen | Equivalent validation and ownership, repeatable material gain, maintained native/web and tooling support |
 
 Each phase is independently useful. Do not wait for a universal parser,

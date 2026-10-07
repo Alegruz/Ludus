@@ -102,7 +102,7 @@ results for actual availability. RHI capabilities describe the initialized
 session and are available only while it is Ready.
 
 See [current capabilities](../getting-started/status.md) and the
-[integrated browser acceptance evidence](https://github.com/Alegruz/Ludus/blob/main/docs/development/webgpu-w6-evidence.md)
+[integrated browser acceptance evidence](../../development/webgpu-w6-evidence.md)
 for the scope of implemented workflows.
 
 ## Recover from target and SDK errors
@@ -133,8 +133,8 @@ Change detection and its positive/negative compiler matrix together. Then add
 backend source selection, real target SDK/consumer builds and runtime acceptance
 as separately verified work. A synthetic fixture or successful header compile
 alone does not establish engine support. Follow the
-[platform design and consulted-source review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/platform-detection.md)
-and [ADR 0016](https://github.com/Alegruz/Ludus/blob/main/docs/decisions/0016-platform-detection.md).
+[platform design and consulted-source review](../../architecture/platform-detection.md)
+and [ADR 0016](../../decisions/0016-platform-detection.md).
 
 ## References and adopted ideas
 
@@ -150,7 +150,7 @@ small integration boundaries and visible portability assumptions informed the
 opt-in descriptor. Target identity remains separate from serialization and
 runtime capabilities.
 
-The [detailed source review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/platform-detection.md#reference-review-and-revisions)
+The [detailed source review](../../architecture/platform-detection.md#reference-review-and-revisions)
 records the consulted chapters and departures. See the
 [platform reading path](../learn/references.md#6-understand-platform-boundaries)
 for the primary compiler/toolchain references. These are design influences;

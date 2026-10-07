@@ -21,7 +21,7 @@ The baseline reserves bounded storage and accepts plain trivially copyable and
 trivially destructible components. The game explicitly removes destroyed entities
 from every owned pool. Adding a component type also adds its removal/invariants.
 
-See [entity storage](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/entity-world.md)
+See [entity storage](../../architecture/entity-world.md)
 for exhaustion policies, lookup checks and structural-change rules.
 
 ## Publish a level at a boundary
@@ -34,7 +34,7 @@ the broader shared content-loading design has its own future phases.
 
 This separates source edits, candidate preparation and live state. A background
 result must validate both its target world and relevant revision before the
-owner applies it. See [level data](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/level-data.md).
+owner applies it. See [level data](../../architecture/level-data.md).
 
 ## Simulation ticks and presentation frames differ
 
@@ -62,6 +62,6 @@ against immutable inputs or disjoint output ranges, but they do not authorize
 concurrent structural world mutation. Retain input/output storage through
 completion, then merge valid results in stable order at an explicit tick boundary.
 
-Read [frame/tick policy](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/frame-update.md),
+Read [frame/tick policy](../../architecture/frame-update.md),
 [the reference application](https://github.com/Alegruz/Ludus/blob/main/apps/world_demo/README.md)
-and [the game-world design](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/game-world.md).
+and [the game-world design](../../architecture/game-world.md).

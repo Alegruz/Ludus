@@ -3,30 +3,109 @@
 #include <ludus/foundation/base/config.h>
 #include <ludus/foundation/filesystem/filesystem.hpp>
 #include <new>
+#include <span>
+#include <string_view>
 
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
 #    include <cerrno>
 #    include <fcntl.h>
 #    include <sys/file.h>
 #    include <sys/stat.h>
-#    include <sys/syscall.h>
 #    include <unistd.h>
+#    if LUDUS_TARGET_OS == LUDUS_OS_MACOS
+// Darwin declares descriptor-relative rename in this native header, without
+// bringing in C stdio or diagnostic APIs.
+#        include <sys/stdio.h>
+#    else
+#        include <sys/syscall.h>
+#    endif
+#    if defined(LUDUS_CONTENT_SAVE_FAULT_TESTING)
+#        include "internal/save_test_hooks.hpp"
+#    endif
 #endif
 
 namespace ludus::content
 {
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
 namespace
 {
+// Thanks to Apple, Mac OS X Manual Pages, flock(2), rename(2) and fsync(2):
+// advisory ownership, atomic pathname replacement and the distinction between
+// fsync and drive durability inform this save adapter. Independently implemented;
+// no manual code copied. See docs/architecture/content-resources.md, "Native saves".
+// https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html
+// https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/rename.2.html
+// https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fsync.2.html
+#    if defined(LUDUS_CONTENT_SAVE_FAULT_TESTING)
+namespace native = test;
+#    else
+namespace native
+{
+isize Write(int descriptor, std::span<const uint8> data) noexcept
+{
+    return ::write(descriptor, data.data(), data.size());
+}
+int Sync(int descriptor) noexcept
+{
+    return ::fsync(descriptor);
+}
+int Replace(int directory, const char* source, const char* destination) noexcept
+{
+#        if LUDUS_TARGET_OS == LUDUS_OS_MACOS
+    return ::renameat(directory, source, directory, destination);
+#        else
+    return static_cast<int>(::syscall(SYS_renameat, directory, source, directory, destination));
+#        endif
+}
+int Close(int descriptor) noexcept
+{
+    return ::close(descriptor);
+}
+} // namespace native
+#    endif
+int OpenAt(int directory, const char* name, int flags, mode_t mode = 0) noexcept
+{
+    int result;
+    do
+    {
+        result = ::openat(directory, name, flags, mode);
+    } while (result < 0 && errno == EINTR);
+    return result;
+}
+int Sync(int descriptor) noexcept
+{
+    int result;
+    do
+    {
+        result = native::Sync(descriptor);
+    } while (result < 0 && errno == EINTR);
+    return result;
+}
+isize Read(int descriptor, std::span<uint8> bytes) noexcept
+{
+    isize result;
+    do
+    {
+        result = ::read(descriptor, bytes.data(), bytes.size());
+    } while (result < 0 && errno == EINTR);
+    return result;
+}
 struct Fd final
 {
     int Value = -1;
+    Fd() noexcept = default;
+    Fd(const Fd&) = delete;
+    Fd& operator=(const Fd&) = delete;
     ~Fd() noexcept
     {
-        if (Value >= 0)
-        {
-            close(Value);
-        }
+        (void)Close();
+    }
+    [[nodiscard]] bool Close() noexcept
+    {
+        const int descriptor = Value;
+        Value = -1;
+        // Linux and Darwin release ownership even on close errors; never retry.
+        return descriptor < 0 || native::Close(descriptor) == 0;
     }
 };
 Status Parent(std::string_view root, std::string_view path, Fd& directory, Text<1024>& leaf) noexcept
@@ -37,7 +116,7 @@ Status Parent(std::string_view root, std::string_view path, Fd& directory, Text<
     }
     Text<4096> name;
     (void)name.Set(root);
-    directory.Value = open(name.Data, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    directory.Value = OpenAt(AT_FDCWD, name.Data, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (directory.Value < 0)
     {
         return Status::IoError;
@@ -53,12 +132,12 @@ Status Parent(std::string_view root, std::string_view path, Fd& directory, Text<
         }
         Text<1024> segment;
         (void)segment.Set(path.substr(begin, slash - begin));
-        const int next = openat(directory.Value, segment.Data, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        const int next = OpenAt(directory.Value, segment.Data, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
         if (next < 0)
         {
             return Status::IoError;
         }
-        close(directory.Value);
+        (void)directory.Close();
         directory.Value = next;
         begin = slash + 1;
     }
@@ -66,7 +145,7 @@ Status Parent(std::string_view root, std::string_view path, Fd& directory, Text<
 Status ReadAt(int directory, const char* path, usize cap, Bytes& output) noexcept
 {
     Fd fd;
-    fd.Value = openat(directory, path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+    fd.Value = OpenAt(directory, path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
     if (fd.Value < 0)
     {
         return errno == ENOENT ? Status::NotFound : Status::IoError;
@@ -91,11 +170,7 @@ Status ReadAt(int directory, const char* path, usize cap, Bytes& output) noexcep
     usize offset = 0;
     while (offset < size)
     {
-        const auto count = read(fd.Value, next.Data().data() + offset, size - offset);
-        if (count < 0 && errno == EINTR)
-        {
-            continue;
-        }
+        const auto count = Read(fd.Value, next.Data().subspan(offset));
         if (count <= 0)
         {
             return Status::IoError;
@@ -103,9 +178,10 @@ Status ReadAt(int directory, const char* path, usize cap, Bytes& output) noexcep
         offset += static_cast<usize>(count);
     }
     uint8 extra = 0;
-    if (read(fd.Value, &extra, 1) != 0)
+    const auto count = Read(fd.Value, {&extra, 1});
+    if (count != 0)
     {
-        return Status::Conflict;
+        return count < 0 ? Status::IoError : Status::Conflict;
     }
     output = Move(next);
     return Status::Ok;
@@ -189,7 +265,7 @@ SaveFile(std::string_view root, std::string_view path, std::span<const uint8> da
     {
         return Status::Invalid;
     }
-#if LUDUS_TARGET_OS == LUDUS_OS_LINUX
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
     if (data.size() > usize{32} * 1024 * 1024)
     {
         return Status::Limit;
@@ -204,22 +280,33 @@ SaveFile(std::string_view root, std::string_view path, std::span<const uint8> da
     // One cooperative directory lock serializes Ludus writers. External edits
     // are checked again immediately before rename; arbitrary external writers
     // must participate in locking for a strict multi-process compare-and-swap.
-    if (flock(directory.Value, LOCK_EX | LOCK_NB) != 0)
+    int lock;
+    do
     {
-        return Status::Conflict;
+        lock = ::flock(directory.Value, LOCK_EX | LOCK_NB);
+    } while (lock < 0 && errno == EINTR);
+    if (lock != 0)
+    {
+        return errno == EWOULDBLOCK || errno == EAGAIN ? Status::Conflict : Status::IoError;
     }
     auto matches = [&]() noexcept {
         Bytes current;
         const auto readStatus = ReadAt(directory.Value, leaf.Data, usize{32} * 1024 * 1024, current);
         if (expected == nullptr)
         {
-            return readStatus == Status::NotFound;
+            return readStatus == Status::NotFound ? Status::Ok
+                   : readStatus == Status::Ok     ? Status::Conflict
+                                                  : readStatus;
         }
-        return readStatus == Status::Ok && Hash(current.Data()) == *expected;
+        return readStatus == Status::NotFound      ? Status::Conflict
+               : readStatus != Status::Ok          ? readStatus
+               : Hash(current.Data()) == *expected ? Status::Ok
+                                                   : Status::Conflict;
     };
-    if (!matches())
+    status = matches();
+    if (status != Status::Ok)
     {
-        return Status::Conflict;
+        return status;
     }
     Text<1100> temp;
     (void)temp.Set(leaf.View());
@@ -231,7 +318,7 @@ SaveFile(std::string_view root, std::string_view path, std::span<const uint8> da
     }
     temp.Data[temp.Length] = '\0';
     Fd file;
-    file.Value = openat(directory.Value, temp.Data, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+    file.Value = OpenAt(directory.Value, temp.Data, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
     if (file.Value < 0)
     {
         return Status::IoError;
@@ -240,7 +327,7 @@ SaveFile(std::string_view root, std::string_view path, std::span<const uint8> da
     status = Status::Ok;
     while (offset < data.size())
     {
-        const auto count = write(file.Value, data.data() + offset, data.size() - offset);
+        const auto count = native::Write(file.Value, data.subspan(offset));
         if (count < 0 && errno == EINTR)
         {
             continue;
@@ -252,15 +339,19 @@ SaveFile(std::string_view root, std::string_view path, std::span<const uint8> da
         }
         offset += static_cast<usize>(count);
     }
-    if (status == Status::Ok && fsync(file.Value) != 0)
+    if (status == Status::Ok && Sync(file.Value) != 0)
     {
         status = Status::IoError;
     }
-    if (status == Status::Ok && !matches())
+    if (!file.Close() && status == Status::Ok)
     {
-        status = Status::Conflict;
+        status = Status::IoError;
     }
-    if (status == Status::Ok && syscall(SYS_renameat, directory.Value, temp.Data, directory.Value, leaf.Data) != 0)
+    if (status == Status::Ok)
+    {
+        status = matches();
+    }
+    if (status == Status::Ok && native::Replace(directory.Value, temp.Data, leaf.Data) != 0)
     {
         status = Status::IoError;
     }
@@ -270,7 +361,9 @@ SaveFile(std::string_view root, std::string_view path, std::span<const uint8> da
     }
     else
     {
-        (void)fsync(directory.Value);
+        // Publication already succeeded. Directory sync is best-effort; the API
+        // reports atomic publication, not power-loss durability.
+        (void)Sync(directory.Value);
     }
     return status;
 #else

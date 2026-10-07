@@ -106,7 +106,7 @@ The implementation comments identify these sources and adaptations.
 - [Public hash API and source credits](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/hash/include/ludus/foundation/hash/hash.hpp)
 - [xxHash v0.8.3 source and license](https://github.com/Alegruz/Ludus/tree/main/third_party/xxhash)
 - [Private implementation and SipHash reference](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/hash/src/hash.cpp)
-- [Architecture and consulted chapter review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/strings-gems-review.md)
+- [Architecture and consulted chapter review](../../architecture/strings-gems-review.md)
 
 An opt-in `ludus_strings_benchmark` exists when configured with
 `LUDUS_BUILD_STRING_BENCHMARKS=ON`. Its initial results are a baseline, not proof

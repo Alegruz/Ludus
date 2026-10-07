@@ -65,7 +65,7 @@ failures, interruption and debugger primitives. Ordinary engine/SDK builds keep
 the option OFF and need no Luau dependency. Evidence is written to
 `out/build/<preset>/tools/luau-probe/evidence.json`.
 
-The [S0 guide and lifetime audit](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/luau-s0.md)
+The [S0 guide and lifetime audit](../../architecture/luau-s0.md)
 explain sanitizer/Web commands, the private loader fix, diagnostic Release
 configuration and remaining adoption gates. This slice has native Linux and
 Web probe coverage; Windows, macOS, Android and iOS require their own acceptance.
@@ -89,6 +89,6 @@ independent build implementations. Concurrent managed builds of one game build
 tree report **Busy**. Direct CMake bypasses that cooperative lock; avoid using
 both on the same tree simultaneously.
 
-References: [native debugging](https://github.com/Alegruz/Ludus/blob/main/docs/development/debugging.md),
-[build profiles](https://github.com/Alegruz/Ludus/blob/main/docs/development/building.md),
-and [project operations](https://github.com/Alegruz/Ludus/blob/main/docs/development/project-sdk-workflow.md).
+References: [native debugging](../../development/debugging.md),
+[build profiles](../../development/building.md),
+and [project operations](../../development/project-sdk-workflow.md).

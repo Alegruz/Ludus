@@ -22,7 +22,7 @@ containers or these services. New engine code uses Ludus aliases such as `uint32
 [contributor rules](https://github.com/Alegruz/Ludus/blob/main/AGENTS.md).
 
 `StaticArray`, `Array` and `SortedMap` are implemented container APIs. The
-[container milestone roadmap](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/container-systems.md#milestone-roadmap)
+[container milestone roadmap](../../architecture/container-systems.md#milestone-roadmap)
 tracks migration repair, API documentation, bounded storage, allocation-domain
 integration and later lookup/handle containers. Planned types are not available
 SDK APIs; new implementations require a consumer and their stated validation
@@ -39,7 +39,15 @@ The implemented seam is narrower than the full memory proposal. Allocation
 tracking, specialized arenas and alternative allocator evaluation must not be
 inferred from that older design document. Start with the
 [current memory API](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/memory/include/ludus/foundation/memory/allocation_domain.hpp),
-then read the [memory design and its historical scope](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/memory-management.md).
+then read the [memory design and its historical scope](../../architecture/memory-management.md).
+
+## Smart-pointer design and implementation status
+
+The [smart-pointer architecture](../../architecture/smart-pointers.md) records
+current `UniquePtr` repair work and proposed ownership APIs. Its
+[reference review](../../architecture/smart-pointers-reference-review.md) tracks
+the rationale and consulted sources. Proposed facilities become SDK APIs when
+their implementation and validation slices are complete.
 
 ## Background computation has an explicit fence
 
@@ -63,7 +71,7 @@ Select the documented helping policy deliberately. Completing CPU work does not
 prove GPU retirement or make concurrent world mutation safe.
 
 Read the [module API and example](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/threading/README.md)
-and [task graph design](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/threading.md).
+and [task graph design](../../architecture/threading.md).
 Work stealing and engine consumer migration are later measured slices.
 
 ## Find the specialized guides

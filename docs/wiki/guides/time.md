@@ -212,9 +212,9 @@ not replace that scheduling role or guarantee a precise sleep/wakeup.
 
 ## Sources and further reading
 
-The [architecture and Gems review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/high-resolution-time.md),
-[ADR 0017](https://github.com/Alegruz/Ludus/blob/main/docs/decisions/0017-foundation-time.md),
-and [validation evidence](https://github.com/Alegruz/Ludus/blob/main/docs/development/high-resolution-time-evidence.md)
+The [architecture and Gems review](../../architecture/high-resolution-time.md),
+[ADR 0017](../../decisions/0017-foundation-time.md),
+and [validation evidence](../../development/high-resolution-time-evidence.md)
 record the adopted ideas, remaining scope and measurement limits. Thanks to
 **Noel Llopis**, *The Clock: Keeping Your Finger on the Pulse of the Game*, Game
 Programming Gems 4, §1.3, pp. 27–34, for independent pause state and shared frame

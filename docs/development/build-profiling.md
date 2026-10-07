@@ -260,3 +260,32 @@ Recalibrate only `total_frontend_seconds` from **210 to 260 s**, approximately
 remain unchanged. This accepts the measured graph growth; it makes no runtime
 optimization or isolated networking compile-time claim. Verify the new limit
 in CI and tighten it when repeated comparable profiles support doing so.
+
+## Native Content CI calibration
+
+PR #114's full native profile at `cb697f2` measured **267.2 s summed frontend
+parsing over 502 compilation events**, with **76.7 s backend time**, on the
+ubuntu-24.04 runner, pinned Clang 18, Development preset, two uncached jobs.
+The [CI profile job](https://github.com/Alegruz/Ludus/actions/runs/37555651368/job/112581449768)
+failed only the aggregate 260 s limit; its `native-build-profile` artifact retains
+the complete report. The preceding
+[F3 profile](https://github.com/Alegruz/Ludus/actions/runs/37548495788/job/112558762024)
+measured **251.4 s over 493 events**, leaving just **3.4% headroom** at 260 s.
+These are separate hosts and different complete graphs; the difference does not
+isolate Content overhead or establish an optimization measurement.
+
+The 260 s calibration originated with NetworkCore's 214.6 s over 419 events.
+Subsequent modules, pack tests and native persistence coverage increased the
+graph. Content adds a private failure-injection backend and two native test
+translation units; its public header changes are documentation, with no new
+heavy includes or templates. The reported project headers pass their unchanged
+limits: `core.h` averages 43 ms and `audio_types.h` 171 ms, both below 2000 ms.
+The ranked costs remain existing Catch2/filesystem and standard formatting
+consumers. No production header overage was reported.
+
+Recalibrate only `total_frontend_seconds` from **260 to 320 s**, approximately
+20% headroom over the observed 267.2 s graph, consistent with the preceding
+aggregate policy. All per-header limits, overrides, exclusions, profile inputs
+and tests remain unchanged. No performance improvement is claimed. Verify the
+next full CI profile and tighten the aggregate when repeated comparable runs
+support doing so.

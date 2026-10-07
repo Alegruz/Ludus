@@ -17,7 +17,7 @@ boundaries and progressive disclosure. Thanks to David Lightbown for those
 ideas; the implementation retains Ludus's own Qt/controller/process boundaries.
 
 [Author's site](https://www.uxofgametools.com/) ·
-[Ludus excerpt review and adaptations](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-design-review.md)
+[Ludus excerpt review and adaptations](../../architecture/editor-design-review.md)
 
 ## 2. Understand responsive tools
 
@@ -31,7 +31,7 @@ are not Ludus code; Ludus uses its own supervised adapters and exception-free
 engine boundaries.
 
 [Author's projects](https://www.wihlidal.com/projects/) ·
-[Ludus project-operation design](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/project-sdk-workflow.md)
+[Ludus project-operation design](../../architecture/project-sdk-workflow.md)
 
 ## 3. Explore document commands
 
@@ -41,7 +41,7 @@ online chapter is available below. S2 will evaluate document undo and focused
 save routing; this recommendation does not claim those features already ship.
 
 [Read the author's Command chapter](https://gameprogrammingpatterns.com/command.html) ·
-[S2 editor architecture](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-architecture.md)
+[S2 editor architecture](../../architecture/editor-architecture.md)
 
 ## 4. Read the build tools' own contracts
 
@@ -62,7 +62,7 @@ choose ordered PCG streams or addressed Philox samples. Its source list credits
 Salmon et al., O'Neill, Lemire and Vigna, plus the consulted Gems chapters on
 independent regeneration, playback isolation and rejection sampling.
 
-The [RNG chapter review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/randomness-gems-review.md)
+The [RNG chapter review](../../architecture/randomness-gems-review.md)
 explains which ideas were adopted or deferred and corrects claims that would
 otherwise mislead implementation. The guide identifies shipped APIs separately
 from future policies, persistence, GPU and editor work.
@@ -84,7 +84,7 @@ guidance on small integration boundaries, scoped symbols and visible portability
 assumptions. Ludus's immutable descriptor is opt-in; its byte-order fact does not
 replace serialization codecs or runtime capability queries.
 
-The [consulted chapter review and adaptations](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/platform-detection.md#reference-review-and-revisions)
+The [consulted chapter review and adaptations](../../architecture/platform-detection.md#reference-review-and-revisions)
 records the implementation's departures. The chapters belong to the separately
 supplied reference library, not public wiki downloads.
 
@@ -107,7 +107,7 @@ Start with the [high-resolution time guide](../guides/time.md) for interval
 measurements, pause/resume, real-time deadlines and frame sampling. Its examples
 distinguish CPU time from simulation ticks and report discarded stall time.
 
-The [time architecture and consulted Gems review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/high-resolution-time.md)
+The [time architecture and consulted Gems review](../../architecture/high-resolution-time.md)
 credit Noel Llopis's *The Clock: Keeping Your Finger on the Pulse of the Game*,
 Harvey/Marshall's *Scheduling Game Events* and John Bolton's *A Basic Scheduler*.
 The review explains the adopted value/sample ownership and the separate future
@@ -117,7 +117,7 @@ scheduling contract; it makes no clock-resolution or performance-gain promise.
 
 Start with [strings and names](../guides/strings.md) and [hashing](../guides/hashing.md)
 for the shipped contracts. The
-[strings chapter review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/strings-gems-review.md)
+[strings chapter review](../../architecture/strings-gems-review.md)
 records consulted sources, exact locators and adaptations.
 
 Thanks to **Stefan Reinalter**, *Compile-Time String Hashing in C++*, Game Engine
@@ -135,7 +135,7 @@ not downloadable wiki material. No chapter code is copied into the guide example
 
 ## Explore the larger local catalog
 
-The [ranked editor reading guide](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-reference-reading-guide.md)
+The [ranked editor reading guide](../../architecture/editor-reference-reading-guide.md)
 groups 246 catalogued articles/chapters by task and priority. Its PDF/TOC links
 refer to a separately supplied, ignored local reference library. They are not
 public wiki downloads. Use the bibliographic titles to obtain the sources through

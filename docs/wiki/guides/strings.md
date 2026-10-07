@@ -201,7 +201,7 @@ and native/browser tests exercise the public contracts. Cooked deterministic
 dictionaries, content snapshot integration, format adapters, debugger printers
 and an editor strings inspector remain follow-on work.
 
-See the [implementation status](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/strings.md#implementation-status),
+See the [implementation status](../../architecture/strings.md#implementation-status),
 [public headers](https://github.com/Alegruz/Ludus/tree/main/modules/foundation/strings/include/ludus/foundation/strings),
 [hashing guide](hashing.md) and [reference reading path](../learn/references.md#8-own-text-and-identify-names).
 Thanks to The Qt Company, *Implicit Sharing*, Qt 6 documentation, for cheap

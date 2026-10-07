@@ -66,4 +66,4 @@ Game projects keep machine-specific paths in ignored local settings.
 Read [project setup](../guides/project-setup.md) for release locks, custom SDKs,
 repair and compatibility checks. See the
 [shared creation backend](https://github.com/Alegruz/Ludus/blob/main/scripts/python/ludus_tools/creation_engine.py)
-and [editor guide](https://github.com/Alegruz/Ludus/blob/main/docs/development/editor-workspace.md).
+and [editor guide](../../development/editor-workspace.md).

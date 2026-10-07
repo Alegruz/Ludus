@@ -486,6 +486,14 @@ benefits and explicit release acknowledgment.
 
 ## Cooking and storage
 
+The [common resource-format roadmap](parsing.md#game-resource-formats) records
+existing Audio/Text decoding and proposed PNG, OBJ, glTF/GLB, JPEG, and KTX2
+profiles. Source readers belong to domain import tools; type adapters prepare
+their validated output. Adding a format does not require the shared coordinator
+first, and successful source decoding does not establish GPU readiness or a
+shipping cooked format. Keep each profile's expanded-data and dependency budgets
+in the resource ledger alongside decoder scratch and retained old revisions.
+
 Use authoring formats in tools and immutable versioned artifacts in releases.
 Derived keys include source and build-dependency digests, canonical settings,
 importer/schema version, and target profile. Keep an ignored derived-data cache;

@@ -20,9 +20,9 @@ def on_config(config):
     if not (generated_directory(config) / "api/index.md").is_file():
         return config
     for item in config.nav:
-        if item.get("API reference") == "reference/index.md":
+        if item.get("API reference") == "wiki/reference/index.md":
             item["API reference"] = [
-                {"Overview": "reference/index.md"},
+                {"Overview": "wiki/reference/index.md"},
                 {"Browse API": "api/index.md"},
                 {"Namespaces": "api/namespaces.md"},
                 {"Classes and structs": "api/annotated.md"},
