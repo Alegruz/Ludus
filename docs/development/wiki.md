@@ -169,6 +169,76 @@ dependencies have already been supplied. A transferred prebuilt bundle needs
 neither. API contracts are extracted from header comments into the same site;
 the Markdown sources remain the authored prose, not a second API inventory.
 
+## Research follow-up after initial implementation
+
+**Status: planned.** Complete the initial Ludus design and architecture
+implementation before starting this improvement phase. Use the canonical
+Markdown, generated API reference, website and offline bundle as the baseline
+for evaluating changes. New features still ship their required API comments
+and authored documentation in the same change.
+
+### Conferences and journals to follow
+
+The order below reflects relevance to Ludus, rather than a ranking of venues.
+Start with practical documentation workflows and information design, then use
+systems and empirical research to investigate problems found in our baseline.
+
+| Resource | Type | Focus for Ludus |
+| --- | --- | --- |
+| [Write the Docs](https://www.writethedocs.org/conf/) | Practitioner conference | Documentation workflows, automated checks, contributor experience and usability. The community's [Docs as Code](https://www.writethedocs.org/guide/docs-as-code/) and [Testing your documentation](https://www.writethedocs.org/guide/tools/testing/) guides are starting points. |
+| [ACM SIGDOC](https://sigdoc.acm.org/) | Research conference | Information architecture, technical communication, accessibility and usability studies; investigate how contributors find and understand guides. |
+| [ACM Symposium on Document Engineering (DocEng)](https://www.sigweb.org/doceng/) | Research conference | Document creation, processing, management and maintenance; look for ideas applicable to preserving content across publishing outputs. |
+| [IEEE/ACM International Conference on Program Comprehension (ICPC)](https://conf.researchr.org/home/icpc-2026) | Research conference | Developer comprehension and supporting tools; investigate API discoverability and navigation between contracts and usage scenarios. |
+| [Empirical Software Engineering](https://link.springer.com/journal/10664/aims-and-scope) | Journal | Empirical evaluation of software engineering practices; use relevant studies to design measurements of documentation effectiveness. |
+| [IEEE Transactions on Professional Communication](https://procomm.ieee.org/transactions-of-professional-communication/) | Journal | Applied research on technical communication and information design; investigate clearer explanations and task instructions. |
+
+These are reading resources for the follow-up, not commitments to attend an
+event, adopt a tool or implement every recommendation. The ICPC link identifies
+the 2026 edition; consult the relevant edition when beginning the review.
+
+### Initial reading
+
+Thanks to **Gias Uddin and Martin P. Robillard**, ["How API Documentation
+Fails"](https://www.cs.mcgill.ca/~martin/papers/ieeesw2015.pdf), *IEEE Software*,
+32(4), pp. 68-75, July/August 2015,
+[DOI: 10.1109/MS.2014.80](https://doi.org/10.1109/MS.2014.80).
+Their surveys identify ambiguity, incompleteness and incorrectness as the
+most serious documentation problems. Use those categories to investigate
+whether Ludus's contracts and explained examples answer readers' questions.
+This informs the proposed review, not a claim of measured Ludus usability.
+
+Thanks to **Martin P. Robillard and Robert DeLine**, ["A Field Study of API
+Learning Obstacles"](https://link.springer.com/article/10.1007/s10664-010-9150-8),
+*Empirical Software Engineering*, 16(6), pp. 703-732, 2011,
+[DOI: 10.1007/s10664-010-9150-8](https://doi.org/10.1007/s10664-010-9150-8).
+The study identifies API intent, examples, mappings to usage scenarios, ease
+of finding relevant API information, and presentation as important factors.
+Use it to evaluate connections between the [API reference](api-reference.md)
+and task guides.
+
+### Evaluation and subsequent changes
+
+1. Record the implemented baseline's repository revision and checked site/bundle.
+   Choose a small, repeatable set of contributor tasks: locate applicable API
+   ownership, lifetime, threading and failure contracts; complete a setup guide;
+   and find the architecture document that owns a detailed contract.
+2. Read the resources above and record candidate improvements with their source,
+   the reader problem they address and the expected benefit. Distinguish a
+   source's findings from our proposed application to Ludus.
+3. Evaluate the tasks with contributors unfamiliar with the selected workflow.
+   Record task completion, time to find a correct answer and misunderstood or
+   missing information. Cover the website, raw Markdown and locally served
+   offline HTML; report differences between those reading modes and the limits
+   of a small evaluation.
+4. Prioritize observed problems and implement focused, separately reviewed
+   changes. Repeat the affected tasks and documentation checks to compare with
+   the baseline. Keep canonical prose and API comments as the owners of their
+   contracts, and preserve online/offline source parity.
+
+Record findings and decisions in this documentation owner when the follow-up
+begins. Select improvements from the evidence gathered at that point; this
+plan does not report a completed review or benchmark result.
+
 ## Consulted implementation references
 
 Thanks to **Martin Donath / Material for MkDocs**, [Getting started](https://squidfunk.github.io/mkdocs-material/getting-started/),
