@@ -89,7 +89,7 @@ unpublished effects on fault. The native executable links no VM. Bootstrap
 builds the pinned compiler/analyzer as separate host tools; cook strictly checks
 the door behavior and fingerprints generated contracts and bytecode.
 
-The [S1 contract and acceptance guide](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/luau-s1.md)
+The [S1 contract and acceptance guide](../../architecture/luau-s1.md)
 covers Web/Chromium commands, evidence locations and limitations. This remains
 an experimental integration with the reviewed S0 profile; it adds no installed
 scripting SDK, production asset/reload workflow, visual editor or C# runtime.
