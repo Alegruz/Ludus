@@ -50,7 +50,7 @@ jobs:
           out/host-tools/venv/bin/cmake --preset macos-clang-development -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
           ./scripts/build macos-clang-development
       - name: Test macOS setup contracts
-        run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui test_metal_shaders -v
+        run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui test_metal_shaders test_raster_shaders -v
       - name: Test native Cocoa, Metal, filesystem, Content and Audio
         env:
           LUDUS_TEST_COCOA: "1"
@@ -231,7 +231,7 @@ jobs:
       - name: Test reproducible packs with the independent LZ4 decoder
         run: python3 -m unittest discover -s scripts/python -p test_pack_builder.py -v
       - name: Test Metal shader reflection contracts
-        run: PYTHONPATH=scripts/python python3 -m unittest test_metal_shaders -v
+        run: PYTHONPATH=scripts/python python3 -m unittest test_metal_shaders test_raster_shaders -v
       - name: Test optional RAD tooling contracts
         run: python3 -m unittest discover -s scripts/python -p 'test_rad_debugger.py' -v
       - name: Test graphical and CLI initialization routing
@@ -392,6 +392,7 @@ jobs:
           fi
       - name: Verify installed shader toolchain and generated backend contracts
         run: |
+          sudo apt-get install -y -qq libvulkan1 mesa-vulkan-drivers vulkan-validationlayers
           ./scripts/shader-probe bootstrap
           ./scripts/bootstrap-spirv-cross
           python3 tests/sdk_consumer/verify_shader_build.py \
@@ -403,6 +404,15 @@ jobs:
             --validator "$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             --spirv-cross "$PWD/out/shader-tools/spirv-cross/bin/spirv-cross" \
             --conan "$PWD/out/conan/linux-clang-development"
+      - name: Validate portable Vulkan raster pixels with validation layers
+        run: |
+          out/host-tools/venv/bin/cmake --preset linux-clang-development \
+            -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
+            -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val"
+          out/host-tools/venv/bin/cmake --build out/build/linux-clang-development --target ludus_rhi_render_tests --parallel 2
+          set -o pipefail
+          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation out/build/linux-clang-development/modules/graphics/rhi/ludus_rhi_render_tests 2>&1 | tee out/raster-vulkan-validation.log
+          python3 -c 'from pathlib import Path; text=Path("out/raster-vulkan-validation.log").read_text(); assert "Validation Error" not in text and "VUID-" not in text, text'
       - name: Build and test the independent Cornell box tutorial (Vulkan)
         run: |
           sudo apt-get install -y -qq libvulkan1 mesa-vulkan-drivers

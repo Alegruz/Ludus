@@ -14,11 +14,12 @@ target_sources(ludus_graphics_rhi
     PRIVATE
         src/rhi.cpp
         src/device.cpp
+        src/raster.cpp
     PUBLIC
         FILE_SET public_headers
         TYPE HEADERS
         BASE_DIRS include
-        FILES include/ludus/graphics/rhi/rhi.h include/ludus/graphics/rhi/render.h include/ludus/graphics/rhi/device.h
+        FILES include/ludus/graphics/rhi/rhi.h include/ludus/graphics/rhi/render.h include/ludus/graphics/rhi/device.h include/ludus/graphics/rhi/raster.h
 )
 
 target_link_libraries(ludus_graphics_rhi
@@ -52,8 +53,22 @@ elseif(APPLE)
     target_link_libraries(ludus_graphics_rhi PRIVATE "-framework Metal" "-framework QuartzCore" "-framework AppKit")
     ludus_configure_cocoa_target(ludus_graphics_rhi)
 else()
-    target_sources(ludus_graphics_rhi PRIVATE src/rhi_vulkan.cpp src/volk_impl.cpp)
+    target_sources(ludus_graphics_rhi PRIVATE src/rhi_vulkan.cpp src/volk_impl.cpp src/vma.cpp)
     target_link_libraries(ludus_graphics_rhi PRIVATE volk::volk_headers)
+    file(READ "${PROJECT_SOURCE_DIR}/config/vulkan_memory_allocator.json" vma_pin)
+    string(JSON vma_header_sha GET "${vma_pin}" sha256 "vk_mem_alloc.h")
+    file(SHA256 "${PROJECT_SOURCE_DIR}/third_party/vma/vk_mem_alloc.h" vma_actual_sha)
+    if(NOT vma_actual_sha STREQUAL vma_header_sha)
+        message(FATAL_ERROR "Vendored Vulkan Memory Allocator differs from its reviewed pin")
+    endif()
+    string(JSON vma_license_sha GET "${vma_pin}" sha256 "LICENSE.txt")
+    file(SHA256 "${PROJECT_SOURCE_DIR}/third_party/vma/LICENSE.txt" vma_license_actual)
+    if(NOT vma_license_actual STREQUAL vma_license_sha)
+        message(FATAL_ERROR "Vendored Vulkan Memory Allocator license differs from its reviewed pin")
+    endif()
+    target_include_directories(ludus_graphics_rhi SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/third_party/vma")
+    target_compile_definitions(ludus_graphics_rhi PRIVATE
+        VMA_STATIC_VULKAN_FUNCTIONS=0 VMA_DYNAMIC_VULKAN_FUNCTIONS=1 VMA_VULKAN_VERSION=1001000)
     target_compile_definitions(ludus_graphics_rhi PRIVATE VK_NO_PROTOTYPES)
     if(LUDUS_PLATFORM_ENABLE_WAYLAND)
         target_compile_definitions(ludus_graphics_rhi PRIVATE VK_USE_PLATFORM_WAYLAND_KHR)
@@ -88,9 +103,9 @@ endif()
 
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
-    add_executable(ludus_rhi_lifecycle_tests tests/lifecycle_tests.cpp tests/device_tests.cpp src/rhi.cpp src/device.cpp)
+    add_executable(ludus_rhi_lifecycle_tests tests/lifecycle_tests.cpp tests/device_tests.cpp tests/raster_tests.cpp tests/reference_raster.cpp src/rhi.cpp src/device.cpp src/raster.cpp)
     target_include_directories(ludus_rhi_lifecycle_tests PRIVATE include src)
-    target_link_libraries(ludus_rhi_lifecycle_tests PRIVATE Ludus::Platform Catch2::Catch2WithMain)
+    target_link_libraries(ludus_rhi_lifecycle_tests PRIVATE Ludus::Platform Ludus::FoundationContainers Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_rhi_lifecycle_tests)
     ludus_enable_test_exceptions(ludus_rhi_lifecycle_tests)
     add_test(NAME ludus_rhi_lifecycle_tests COMMAND ludus_rhi_lifecycle_tests)
@@ -134,4 +149,11 @@ if(LUDUS_BUILD_TESTS AND APPLE)
         add_test(NAME ludus_rhi_render_pixels COMMAND ludus_rhi_render_tests)
         set_tests_properties(ludus_rhi_render_pixels PROPERTIES LABELS "rhi;gpu;macos" TIMEOUT 60)
     endif()
+endif()
+
+if(TARGET ludus_rhi_render_tests)
+    target_sources(ludus_rhi_render_tests PRIVATE tests/raster_render_tests.cpp)
+    ludus_compile_shader(TARGET ludus_rhi_render_tests NAME raster RASTER
+        SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/raster.slang"
+        VERTEX vertexMain FRAGMENT fragmentMain)
 endif()

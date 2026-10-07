@@ -1,5 +1,6 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/raster.h"
 #include "internal/resources.h"
 #include <ludus/foundation/base/core.h>
 #include <ludus/foundation/logging/log_format.hpp>
@@ -121,7 +122,7 @@ StartupError Start(const ApplicationInfo&, const WindowInfo& window, uint32 toke
     attributes.majorVersion = 2; // WebGL 2 / GLES3
     attributes.minorVersion = 0;
     attributes.alpha = EM_TRUE;
-    attributes.depth = EM_FALSE;
+    attributes.depth = EM_TRUE;
     attributes.stencil = EM_FALSE;
     attributes.antialias = EM_FALSE;
     attributes.preserveDrawingBuffer = EM_FALSE;
@@ -256,7 +257,11 @@ FrameStatus Begin() noexcept
                  static_cast<GLfloat>(gTarget.Green),
                  static_cast<GLfloat>(gTarget.Blue),
                  static_cast<GLfloat>(gTarget.Alpha));
-    glClear(GL_COLOR_BUFFER_BIT);
+    glDisable(GL_BLEND);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_TRUE);
+    glClearDepthf(1);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     gFrameInfo = { .Width = gTarget.Width, .Height = gTarget.Height, .Encoding = SurfaceEncoding::Unorm };
     gFrameOpen = true;
     return FrameStatus::Ready;
@@ -482,3 +487,5 @@ ResourceStatus Draw(usize slot) noexcept
     return ResourceStatus::Ready;
 }
 } // namespace ludus::graphics::rhi::LUDUS_RHI_WEBGL_NAMESPACE
+
+#include "internal/raster_webgl.h"

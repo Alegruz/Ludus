@@ -109,6 +109,8 @@ enum class RequirementFailure : ludus::foundation::uint8
     None,
     FrameDimension2D,
     UniformBufferSize,
+    /// Required portable raster profile is unavailable on the negotiated device.
+    PortableRaster,
 };
 struct StartupInfo final
 {

@@ -204,6 +204,7 @@ def main():
         parser.add_argument('--' + key, required=True)
     parser.add_argument('--validator')
     parser.add_argument('--metal', action='store_true')
+    parser.add_argument('--raster', action='store_true')
     parser.add_argument('--include', action='append', default=[])
     parser.add_argument('--define', action='append', default=[])
     # Optional build-time SPIR-V -> GLSL ES 3.00 translator for the WebGL 2
@@ -216,6 +217,10 @@ def main():
         raise RuntimeError('Slang version differs from SDK pin')
     if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', args.name):
         raise RuntimeError('Invalid shader name')
+    if args.raster:
+        from compile_raster import compile_raster
+        compile_raster(args, lock)
+        return
     if args.metal:
         compile_metal(args, lock)
         return

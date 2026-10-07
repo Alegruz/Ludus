@@ -74,7 +74,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Native gameplay live editing](development/project-live-reload.md)
 - [Own text and bind names](wiki/guides/strings.md)
 - [Platform targets and compatibility](wiki/guides/platform-targets.md)
-- [Public fullscreen rendering](development/fullscreen-rendering.md)
+- [Public rendering: fullscreen and portable raster](development/fullscreen-rendering.md)
 - [Read and publish files through the filesystem](wiki/guides/filesystem.md)
 - [Troubleshooting](wiki/guides/troubleshooting.md)
 - [Use deterministic randomness](wiki/guides/randomness.md)

@@ -11,6 +11,8 @@ namespace ludus::graphics::rhi::internal
 ludus::foundation::uint64 DeviceOwner() noexcept;
 void SetDeviceOwner(ludus::foundation::uint64 owner) noexcept;
 bool SessionBusy() noexcept;
+StartStatus
+StartOwned(const ApplicationInfo&, const WindowInfo&, BackendSelection, const DeviceRequirements&, bool) noexcept;
 // Numeric callback tokens never borrow application memory and never wrap.
 bool Current(ludus::foundation::uint32 token) noexcept;
 // Queried backend limits; the facade applies engine capacity/size granularity.

@@ -1,4 +1,4 @@
-# Public fullscreen rendering
+# Public rendering: fullscreen and portable raster
 
 Link `Ludus::GraphicsRhi` and include `rhi.h` and `render.h` under
 `ludus/graphics/rhi/`. This slice supplies one vertex/fragment pipeline, one
@@ -159,10 +159,11 @@ if (started == rhi::DeviceStatus::Ready || started == rhi::DeviceStatus::Pending
 ```
 
 Poll once per application tick while Pending; continue only after Ready. Keep
-the borrowed Platform window/canvas alive until `DestroyDevice`. Required
-`PortableRaster`, `Compute` or `IndirectRendering` returns Unsupported before
-launching startup. `GetCompiledBackends` reports compiled code, independent of
-adapter availability. Supported/Enabled report implemented fullscreen operations
+the borrowed Platform window/canvas alive until `DestroyDevice`. Required `Compute` or `IndirectRendering` returns Unsupported before
+launching startup. Required `PortableRaster` validates the negotiated bounded
+profile before Ready, including each browser Auto attempt; see the
+[portable raster contract](#portable-raster-r1). `GetCompiledBackends` reports compiled code, independent of
+adapter availability. Supported/Enabled report implemented fullscreen and portable raster operations
 only after Ready; they make no claim about raw adapter features. The copied
 request retains its preferred features, including unavailable ones. Effective
 limit requirements apply to every Auto attempt through the existing negotiation.
@@ -256,3 +257,124 @@ the application. Monitor/browser color management is outside these pixel tests.
 
 See `tests/sdk_consumer/render.cpp` for complete exception-free public usage,
 layout assertions, skipped frames, resize, dependency rejection and restart.
+
+## Portable raster (R1)
+
+Include `ludus/graphics/rhi/raster.h` and link the same `Ludus::GraphicsRhi`
+component. The first portable raster profile supplies immutable buffers,
+sampled textures, complete views, samplers, reflected stages, binding layouts,
+binding snapshots and indexed/instanced triangle pipelines on Vulkan, Metal,
+WebGPU and WebGL 2. It uses the explicit device and existing acquired frame
+surface/headless color target. It does not introduce a second device session.
+Request `DeviceDescription::Required.PortableRaster = true` when this workload
+is mandatory. Compute and indirect rendering remain unavailable.
+
+`GetRasterCapabilities` reports effective allocation, texture dimension,
+uniform offset/range, record and per-frame draw bounds. Limits are verified on
+the negotiated device/context, independently of the backend name. Creation
+requires a ready device and a null output; it is forbidden in an open frame.
+Only Ready or Pending publishes ownership. WebGPU creation returns Pending while
+both validation and out-of-memory scopes drain; poll the typed `GetStatus`
+once per tick. A dependency that is still pending returns NotReady without
+publishing an output. A published failed resource must still be destroyed.
+All operations are serialized on the device's owner thread.
+
+The initial profile is deliberately bounded:
+
+| Facility | Contract |
+| --- | --- |
+| Records | 16 of each kind, including detached records retained by dependencies, validation or submitted work |
+| Buffers | Complete immutable initial bytes, at most 64 MiB or the lower enabled limit; Vertex, Index16, Index32 or Uniform role |
+| Uniforms | Bound range at most 16 KiB, range size a multiple of 16, offsets aligned to the queried limit (at least 256); allocation may be larger than a bound range |
+| Textures | RGBA8 linear or sRGB sampling, at most 4096 in each dimension or the lower enabled limit; one mip/layer/sample |
+| Uploads | Complete top-left RGBA8 rows, explicit pitch divisible by four; caller bytes consumed/copied before return; aggregate upload at most the maximum buffer size |
+| Views | Complete original-format sampled views; no reinterpretation, partial sampled range or attachment view |
+| Bindings | One group/set, at most eight unique binding numbers below eight; uniform ranges, sampled 2D textures and non-comparison samplers |
+| Vertex input | At most two streams, per-vertex or divisor-one per-instance, stride 4..256 divisible by four; eight unique float2/3/4 attributes |
+| Draw | Triangle list, Index16/Index32, zero base vertex/first instance, 1024 draws per frame; fixed primitive-restart indices are rejected |
+| State | No culling, one color target, one sample; optional less-than depth test/write and premultiplied-alpha blend |
+
+Draws use canonical clip depth [0,1], Y-up geometry and texture UV (0,0) at
+the first uploaded row. Vulkan uses a negative-height viewport; the GLSL ES
+artifact converts clip depth. The frame's private depth attachment clears to
+one. Pipelines remain valid on resize because the session target format stays
+fixed. General render targets, explicit pass/encoder objects, updates, resource
+copy commands, mip generation, upload rings and storage/compute are later slices.
+Initial Vulkan texture uploads normally use a synchronous setup copy. A timed-out
+copy remains Pending and retains staging until its fence signals; poll GetStatus.
+This is not a
+streaming upload strategy or a performance claim.
+
+### Shader generation and binding snapshots
+
+```cmake
+ludus_compile_shader(TARGET renderer NAME mesh RASTER
+    SOURCE shaders/mesh.slang VERTEX vertexMain FRAGMENT fragmentMain)
+```
+
+The RASTER option emits `RasterShaderDescription`, separate per-stage artifacts,
+and a manifest with per-target bindings, vertex inputs, occupied uniform sizes
+and member offsets. Tool acquisition and pinning follow the shader workflow
+above. Vulkan/Metal layouts are independent: match CPU packing to the selected
+artifact and verify offsets/size/alignment. Hand-authored artifacts must supply
+independently verified target metadata. Metal pipeline reflection and the actual
+linked WebGL program independently reject incompatible used resources/inputs.
+
+Browser generation verifies emitted WGSL and GLSL ES uniform member offsets and
+sizes, rather than accepting equal total sizes alone. The first browser parser
+accepts flat float/vector uniform members and rejects unsupported shapes.
+It compiles WGSL stages separately because pinned Slang 2026.1.2's combined
+reflection omits per-stage resource-usage flags. The tool matches emitted named
+float inputs to stage reflection and explicitly normalizes their locations;
+inter-stage outputs and builtins are not rewritten. GLSL ES varyings are named
+from their independently verified SPIR-V location map so ES 3.00 can link stages
+by identifier. Mismatched interfaces reject generation. A texture paired with
+multiple samplers in one stage is outside this first GLSL profile.
+
+Create a binding layout covering both shader stages, using the union of their
+requirements and visibility. `CreateBindingSet` requires exactly one entry per
+layout binding, with correct kinds, uniform roles, offsets and accessible sizes.
+The snapshot retains its layout and referenced buffers/views/samplers; a view
+retains its texture. A pipeline retains stages and layout independently of
+binding contents. `DrawIndexed` requires the exact layout identity, not just
+structural similarity, and a declared vertex slice for each stream. It checks
+every mesh-local index against VertexCount, accessible vertex/instance records,
+index bounds and completion capacity before issuing native work.
+
+Create resources outside frames, then set a target, BeginFrame, DrawIndexed and
+EndFrame. Check every result. Portable draws and DrawFullscreen cannot share
+one frame. The complete public-only example is
+[`tests/sdk_consumer/raster.cpp`](../../tests/sdk_consumer/raster.cpp), with its
+[application-owned shader](../../tests/sdk_consumer/shaders/raster.slang).
+
+### Destruction and validation evidence
+
+Typed Destroy takes the handle by reference, invalidates public resolution and
+zeros that variable. Other copies become stale immediately. Physical release
+waits for immutable dependencies, the current frame's CPU leases, successful
+GPU completion, and pending backend validation scopes. Resource generations,
+callback request IDs and ordered submission ordinals never wrap/reappear.
+A capacity failure can therefore occur after public destruction while old work
+is still live. Shutdown/loss invalidates all records and drains/drops the native
+device; late browser callbacks cannot affect the next session.
+
+Vulkan general allocations use the private MIT-licensed
+[Vulkan Memory Allocator 3.3.0](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/releases/tag/v3.3.0),
+pinned with header/license hashes in `config/vulkan_memory_allocator.json`.
+VMA handles mapped allocation flush alignment. The existing ordered queue's
+fences establish resource retirement; Metal uses command-buffer completion,
+WebGPU queue work-done callbacks, and WebGL nonblocking sync polling.
+The minimum retirement mechanism accompanies the first general resources;
+R2's upload/descriptor rings and broader lifetime service remain future work.
+
+The native RHI pixel fixture draws two textured instances, then a farther,
+differently tinted background; it checks texture orientation, instancing and
+depth after public resource destruction. Installed shader-helper checks compile
+and run the public-only SDK consumer, verify per-target interfaces, dependency
+rebuilds and binding rejection. The browser SDK harness
+`tests/sdk_consumer/raster-browser-test.mjs` checks pixels on forced WebGPU,
+forced WebGL 2, Auto and capability fallback, plus invalid shader/pipeline and
+device-loss paths in pinned Chromium. Browser software-GPU results are separate
+from physical GPU and hosted-browser acceptance. These checks make no throughput
+or allocation-performance claim. See the architecture's
+[phase evidence](../architecture/rhi-gdi.md#implementation-phases-and-acceptance).

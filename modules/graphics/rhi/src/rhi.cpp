@@ -1,5 +1,6 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/raster.h"
 #include "internal/resources.h"
 #include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>
@@ -20,10 +21,26 @@ bool gLegacy = false;
 bool gRendering = false;
 bool gFrame = false;
 bool gDrawn = false;
+bool gRasterDrawn = false;
+bool gRequireRaster = false;
 internal::FallbackHandler gFallback = nullptr;
 } // namespace
 namespace internal
 {
+bool FrameOpen() noexcept
+{
+    return gFrame;
+}
+bool ClaimRasterFrame() noexcept
+{
+    if (!gFrame || gDrawn)
+    {
+        return false;
+    }
+    gRasterDrawn = true;
+    return true;
+}
+
 ludus::foundation::uint64 DeviceOwner() noexcept
 {
     return gDeviceOwner;
@@ -68,6 +85,7 @@ void Fail(uint32 token, StartupError error) noexcept
         gStartup.UnmetRequirement = RequirementFailure::None;
     }
     gFrame = false;
+    internal::ReleaseRasterResources();
     internal::ReleaseResources();
     backend::Shutdown();
 }
@@ -100,6 +118,12 @@ void Complete(uint32 token, StartupError error, const BackendLimits& limits) noe
                                                                         : RequirementFailure::None;
     if (gStartup.UnmetRequirement != RequirementFailure::None)
     {
+        Fail(token, StartupError::RequirementsUnsatisfied);
+        return;
+    }
+    if (gRequireRaster && backend::RasterLimits().MaxUniformRange < 16384)
+    {
+        gStartup.UnmetRequirement = RequirementFailure::PortableRaster;
         Fail(token, StartupError::RequirementsUnsatisfied);
         return;
     }
@@ -160,7 +184,8 @@ namespace
 StartStatus StartSelected(const ApplicationInfo& app,
                           const WindowInfo& window,
                           BackendSelection selection,
-                          const DeviceRequirements& requirements) noexcept
+                          const DeviceRequirements& requirements,
+                          bool requireRaster = false) noexcept
 {
     if (internal::SessionBusy())
     {
@@ -168,6 +193,7 @@ StartStatus StartSelected(const ApplicationInfo& app,
     }
     gStartup.Requested = selection;
     gStartup.Requirements = requirements;
+    gRequireRaster = requireRaster;
     // A forced selection the build cannot provide fails explicitly; it never
     // silently switches to another backend.
     if (!backend::Supports(selection))
@@ -198,6 +224,17 @@ StartStatus StartSelected(const ApplicationInfo& app,
     return gStartup.State == StartupState::Pending ? StartStatus::Pending : StartStatus::Failed;
 }
 } // namespace
+namespace internal
+{
+StartStatus StartOwned(const ApplicationInfo& app,
+                       const WindowInfo& window,
+                       BackendSelection selection,
+                       const DeviceRequirements& limits,
+                       bool requireRaster) noexcept
+{
+    return StartSelected(app, window, selection, limits, requireRaster);
+}
+} // namespace internal
 StartStatus Start(const ApplicationInfo& app, const WindowInfo& window) noexcept
 {
     return StartSelected(app, window, BackendSelection::Auto, {});
@@ -247,6 +284,8 @@ FrameStatus BeginFrameStatus() noexcept
     const auto result = backend::Begin();
     gFrame = result == FrameStatus::Ready;
     gDrawn = false;
+    gRasterDrawn = false;
+    internal::RasterBeginFrame();
     return result;
 }
 FrameStatus EndFrameStatus() noexcept
@@ -260,7 +299,9 @@ FrameStatus EndFrameStatus() noexcept
         return FrameStatus::InvalidState;
     }
     gFrame = false;
-    return backend::End();
+    const auto result = backend::End();
+    internal::RasterEndFrame(result == FrameStatus::Ready || result == FrameStatus::Skipped);
+    return result;
 }
 bool Initialize(const ApplicationInfo& app) noexcept
 {
@@ -300,6 +341,7 @@ void Shutdown() noexcept
     gDeviceOwner = 0;
     gFallback = nullptr;
     gToken = 0;
+    internal::ReleaseRasterResources();
     internal::ReleaseResources();
     backend::Shutdown();
     gStartup = {};
@@ -704,7 +746,7 @@ ResourceStatus DrawFullscreen(PipelineHandle handle) noexcept
     {
         return gPipelines[slot].Status;
     }
-    if (!gFrame || gDrawn || !gUniforms[gPipelines[slot].Uniform].Updated)
+    if (!gFrame || gDrawn || gRasterDrawn || !gUniforms[gPipelines[slot].Uniform].Updated)
     {
         return ResourceStatus::InvalidState;
     }

@@ -89,3 +89,9 @@ Luau and its Lua portions are MIT licensed. Both complete notices are installed
 under `share/Ludus/licenses/Luau/` and copied by the standard game release helper.
 The compiler/analyzer under `share/Ludus/behavior/bin/` are paired host build tools;
 they are not player runtime dependencies. https://github.com/luau-lang/luau
+
+## Vulkan Memory Allocator 3.3.0
+
+AMD GPUOpen and contributors, MIT. https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/tree/v3.3.0
+The complete license is bundled as `VMA-LICENSE`. Used privately by the Vulkan
+portable resource implementation; no allocator API is exported.

@@ -115,6 +115,8 @@ ludus_compile_shader(TARGET sample NAME sample SOURCE diagnostic.slang VERTEX ve
         (source / 'diagnostic.slang').write_text(original_shader.replace('settings;', 'settings : register(b1);'))
         failure = run([args.cmake, '--build', build], success=False)
         assert 'buffer 0' in failure, failure
+    from verify_raster_build import verify_raster
+    verify_raster(args, run, metal=True)
     print('Installed Metal shader helper: native link/runtime, per-target layout, rebuilds, capacity and binding rejection passed')
 
 
