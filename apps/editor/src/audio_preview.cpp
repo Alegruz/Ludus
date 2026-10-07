@@ -331,16 +331,16 @@ void AudioPreview::Play(const QString& root, const audio::content::Music& music)
     Impl_->Epoch.fetch_add(1, std::memory_order_release);
     Impl_->HasCommand = true;
 }
-void AudioPreview::Import(const QString& root, const QString& file, const QString& id)
+void AudioPreview::Import(const ContentImportSource& source)
 {
     if (!Start())
     {
         return;
     }
     const QMutexLocker locker(&Impl_->Mutex);
-    Impl_->Root = root;
-    Impl_->File = file;
-    Impl_->Id = id;
+    Impl_->Root = source.Root;
+    Impl_->File = source.File;
+    Impl_->Id = source.Id;
     Impl_->ImportCommand = true;
     Impl_->StopCommand = false;
     Impl_->Epoch.fetch_add(1, std::memory_order_release);
