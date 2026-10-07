@@ -33,6 +33,12 @@ first-party engine/app code from repeating raw OS detection.
 The [design and literature review](../architecture/platform-detection.md) defines
 recognition, validation limits, future runtime query contracts, and extension rules.
 
+Complete and validate its [initial implementation completion gate](../architecture/platform-detection.md#initial-implementation-completion-gate)
+before the broader [conference and journal research pass](../architecture/platform-detection.md#conference-and-journal-research-backlog).
+That backlog records queued sources and proposed trials; it does not change the
+accepted detection boundary or establish adoption of those ideas. Preserve the
+validated revision and measurements as the comparison baseline for later work.
+
 ## Consequences
 
 Existing `#ifdef` callers retain their meaning. Unknown targets now fail early and
