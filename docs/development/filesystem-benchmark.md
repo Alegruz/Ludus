@@ -1,4 +1,4 @@
-# F4 filesystem measurements
+# Filesystem measurements
 
 The opt-in native benchmark measures storage delivery through the public SDK.
 It verifies transferred lengths and deterministic first/last bytes. It does not
@@ -96,3 +96,22 @@ but queueing raises completion latency. Cached small loose reads favor synchrono
 ReadAt. No coalescing, direct I/O, mmap, io_uring/IOCP, codec change or automatic
 async crossover is justified by this limited workload. Measure the game's asset
 mix and target hardware before choosing worker count or enabling those backends.
+
+## Post-baseline evidence
+
+F1-F5 are implemented. The architecture owns the
+[research inputs, priorities and acceptance criteria](../architecture/filesystem.md#post-baseline-research-and-improvement-plan)
+for continued improvement. FS-R1 through FS-R5 are proposed experiments, not
+results claimed by this page. Retain the F4 baseline above when comparing them.
+
+Append each evaluated experiment here with its FS-R identifier and result PR,
+question/hypothesis, baseline and candidate revisions, commands, toolchain,
+hardware/storage/OS configuration, workload hashes or seeds, budgets and cache
+methodology. Include repeated-run variability, correctness checks and negative
+or inconclusive comparisons. For recovery work also record the crash model,
+permitted-state oracle, filesystem/mount settings, explored bounds and
+reproducible failing image/trace location. Track Linux and macOS coverage
+explicitly. For streaming work distinguish provider service, scheduler delay,
+host delivery and integrated frame impact; storage-only timing does not measure
+resource decode or GPU residency. Essential commands and conclusions belong in
+this Markdown owner; bulky traces and images can be linked artifacts with hashes.
