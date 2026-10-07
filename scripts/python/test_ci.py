@@ -247,6 +247,15 @@ class AnalysisTests(unittest.TestCase):
 
 
 class BrowserAnalysisTests(unittest.TestCase):
+    def test_only_explicit_owned_generated_file_is_analyzed(self):
+        root = Path("/tmp/browser-analysis").resolve()
+        sources = [root / "out/script-interaction/cooked/bindings.cpp", root / "out/vendor.cpp"]
+        entries = [{"file": str(source), "command": f"em++ -c {source} -o object.o"}
+                   for source in sources]
+        commands = web_build.analysis_commands(root, entries, "clang-tidy-18", root / "sysroot",
+                                              owned_generated=(sources[0],))
+        self.assertEqual([command[2] for command in commands], [str(sources[0])])
+
     def test_owns_engine_apps_and_probes_but_not_vendor_or_generated_sources(self):
         root = Path("/tmp/browser-analysis").resolve()
         sources = ["modules/audio/src/audio.cpp", "apps/smoke/main.cpp", "tools/web-rhi-probe/main.cpp",

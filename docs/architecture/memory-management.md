@@ -6,6 +6,11 @@
 
 **Decision record:** [ADR 0008](../decisions/0008-memory-management.md).
 
+**Ownership companion:** [Smart pointer architecture](smart-pointers.md) and its
+[chapter review](smart-pointers-reference-review.md) refine the existing
+`UniquePtr` repair, domain object factories, and shared/weak ownership boundaries.
+That review uses the 2026-10-06 source; the audit below retains its original scope.
+
 **Profiling companion:** [Memory profiling architecture](memory-profiling.md)
 and its [subsequent article review](memory-profiling-gems-review.md) specify
 capture, completeness, checkpoint, provider, and analysis contracts against the
@@ -392,6 +397,13 @@ Size/alignment are always explicit; backend identity and tag come from the domai
 ### 7.3 Construction and destruction
 
 Keep raw storage and object lifetime separate. When an object migration warrants it, prefer `TryCreateOwned<T>(domain, args...)`, returning the existing `UniquePtr` with a Memory deleter carrying the domain. It allocates `sizeof(T)` at `alignof(T)`, constructs only a nothrow-constructible and nothrow-destructible exact type, and returns an empty owner on allocation failure. Do not introduce a second smart pointer. Keep raw `TryCreate<T>`/`Destroy<T>` helpers internal until a consumer needs ownership release; this avoids a convenient raw factory feeding the wrong default `delete`. Objects whose initialization can fail expose an explicit initialization/factory result; a `noexcept` constructor that terminates on OOM is not a recoverable factory.
+
+The later [smart pointer factory contract](smart-pointers.md#fallible-construction-and-domain-lifetime)
+refines this sketch to `TryCreateOwned<T>(domain, output, args...)` with an explicit
+status, an empty owning output on entry and output preservation on failure. It
+retains this exact-type domain/deletion rule and the existing unique-owner
+implementation. The shared facility proposed there handles independent CPU
+lifetimes; handles and resource leases retain their own subsystem contracts.
 
 `Destroy<T>(domain, pointer)` requires the exact originating type, original base address and domain as preconditions, destroys T, and frees its original layout. A raw pointer helper cannot generally detect an incorrect base-type cast, even for nonpolymorphic classes. Initial owning factory adapters therefore forbid converting ownership; do not promise compiler rejection of arbitrary raw-pointer misuse. Do not use `delete` on Memory-created objects. Prefer RAII at call sites, but first repair `UniquePtr` as identified in §2.4. A deleter adapter in Memory can carry the domain without Base depending on Memory. Moving/switching owners must transfer deleter state. Conversions require a creator-supplied destruction function that retains the dynamic type, original allocation address/layout, and domain; they cannot reconstruct those from a base pointer.
 
