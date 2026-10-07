@@ -13,11 +13,12 @@ set_target_properties(ludus_graphics_rhi PROPERTIES
 target_sources(ludus_graphics_rhi
     PRIVATE
         src/rhi.cpp
+        src/device.cpp
     PUBLIC
         FILE_SET public_headers
         TYPE HEADERS
         BASE_DIRS include
-        FILES include/ludus/graphics/rhi/rhi.h include/ludus/graphics/rhi/render.h
+        FILES include/ludus/graphics/rhi/rhi.h include/ludus/graphics/rhi/render.h include/ludus/graphics/rhi/device.h
 )
 
 target_link_libraries(ludus_graphics_rhi
@@ -87,7 +88,7 @@ endif()
 
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
-    add_executable(ludus_rhi_lifecycle_tests tests/lifecycle_tests.cpp src/rhi.cpp)
+    add_executable(ludus_rhi_lifecycle_tests tests/lifecycle_tests.cpp tests/device_tests.cpp src/rhi.cpp src/device.cpp)
     target_include_directories(ludus_rhi_lifecycle_tests PRIVATE include src)
     target_link_libraries(ludus_rhi_lifecycle_tests PRIVATE Ludus::Platform Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_rhi_lifecycle_tests)

@@ -1,5 +1,6 @@
 #include <ludus/foundation/base/config.h>
 #include <ludus/foundation/base/types.h>
+#include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>
 
@@ -32,6 +33,9 @@ static_assert(offsetof(Uniforms, Elapsed) == 8);
 static_assert(offsetof(Uniforms, Direction) == 16);
 static_assert(offsetof(Uniforms, Tint) == 32);
 static_assert(sizeof(Uniforms) == 48 && alignof(Uniforms) == 16);
+rhi::DeviceHandle gDevice;
+rhi::SurfaceHandle gSurface;
+rhi::StartupInfo gCreationFailure;
 rhi::ShaderHandle gVertex, gFragment;
 rhi::UniformHandle gUniform;
 rhi::PipelineHandle gPipeline;
@@ -79,14 +83,19 @@ bool Start() noexcept
     window.System = ludus::platform::WindowSystem::WebCanvas;
     window.CanvasSelector = "#canvas";
 #endif
-    return rhi::Start({}, window) != rhi::StartStatus::Failed;
+    gSurface = {};
+    const auto result = rhi::CreateDevice({}, window, {}, gDevice, gSurface, &gCreationFailure);
+    return result == rhi::DeviceStatus::Ready || result == rhi::DeviceStatus::Pending;
 }
 void Stop(bool failed) noexcept
 {
     gFailed = failed;
     gDone = true;
-    const auto error = static_cast<int32>(rhi::GetStartup().Error);
-    rhi::Shutdown();
+    rhi::DeviceInfo info;
+    const auto state = rhi::GetDeviceInfo(gDevice, info);
+    const auto error =
+        static_cast<int32>(state == rhi::DeviceStatus::InvalidHandle ? gCreationFailure.Error : info.Startup.Error);
+    (void)rhi::DestroyDevice(gDevice);
     Report(failed ? 2 : 1, gFrames, error);
 #if defined(LUDUS_PLATFORM_WEB)
     emscripten_cancel_main_loop();
@@ -102,21 +111,22 @@ void Tick() noexcept
     {
         return;
     }
-    const auto startup = rhi::GetStartup().State;
-    if (startup == rhi::StartupState::Pending)
+    rhi::DeviceInfo info;
+    const auto startup = rhi::GetDeviceInfo(gDevice, info);
+    if (startup == rhi::DeviceStatus::Pending)
     {
         return;
     }
-    if (startup != rhi::StartupState::Ready)
+    if (startup != rhi::DeviceStatus::Ready)
     {
         Stop(true);
         return;
     }
     if (!gCreated)
     {
-        if (!Accepted(rhi::CreateShader(ludus::shaders::diagnostic::Vertex(), gVertex)) ||
-            !Accepted(rhi::CreateShader(ludus::shaders::diagnostic::Fragment(), gFragment)) ||
-            !Accepted(rhi::CreateUniform(sizeof(Uniforms), gUniform)))
+        if (!Accepted(rhi::CreateShader(gDevice, ludus::shaders::diagnostic::Vertex(), gVertex)) ||
+            !Accepted(rhi::CreateShader(gDevice, ludus::shaders::diagnostic::Fragment(), gFragment)) ||
+            !Accepted(rhi::CreateUniform(gDevice, sizeof(Uniforms), gUniform)))
         {
             Stop(true);
             return;
@@ -125,7 +135,7 @@ void Tick() noexcept
         if (gCancelPending)
         {
             const auto stale = gVertex;
-            rhi::Shutdown();
+            (void)rhi::DestroyDevice(gDevice);
             gVertex = {};
             gFragment = {};
             gUniform = {};
@@ -133,14 +143,15 @@ void Tick() noexcept
             gCreated = false;
             gPipelineCreated = false;
             gCancelPending = false;
-            if (rhi::GetStatus(stale) != rhi::ResourceStatus::InvalidHandle || !Start())
+            if (rhi::GetStatus(gDevice, stale) != rhi::ResourceStatus::InvalidHandle || !Start())
             {
                 Stop(true);
             }
             return;
         }
     }
-    for (auto status : {rhi::GetStatus(gVertex), rhi::GetStatus(gFragment), rhi::GetStatus(gUniform)})
+    for (auto status :
+         {rhi::GetStatus(gDevice, gVertex), rhi::GetStatus(gDevice, gFragment), rhi::GetStatus(gDevice, gUniform)})
     {
         if (status == rhi::ResourceStatus::Pending)
         {
@@ -154,18 +165,18 @@ void Tick() noexcept
     }
     if (!gPipelineCreated)
     {
-        if (!Accepted(rhi::CreatePipeline({gVertex, gFragment, gUniform}, gPipeline)))
+        if (!Accepted(rhi::CreatePipeline(gDevice, {gVertex, gFragment, gUniform}, gPipeline)))
         {
             Stop(true);
             return;
         }
         gPipelineCreated = true;
     }
-    if (rhi::GetStatus(gPipeline) == rhi::ResourceStatus::Pending)
+    if (rhi::GetStatus(gDevice, gPipeline) == rhi::ResourceStatus::Pending)
     {
         return;
     }
-    if (rhi::GetStatus(gPipeline) != rhi::ResourceStatus::Ready)
+    if (rhi::GetStatus(gDevice, gPipeline) != rhi::ResourceStatus::Ready)
     {
         Stop(true);
         return;
@@ -182,40 +193,46 @@ void Tick() noexcept
         .Tint = {0.6F, 0.4F, 0.2F, 1.0F},
     };
     const auto bytes = std::span<const uint8>(reinterpret_cast<const uint8*>(&uniforms), sizeof(uniforms));
-    if (rhi::UpdateUniform(gUniform, bytes) != rhi::ResourceStatus::Ready)
+    if (rhi::UpdateUniform(gDevice, gUniform, bytes) != rhi::ResourceStatus::Ready)
     {
         Stop(true);
         return;
     }
     // Exercise minimized/skipped acquisition without opening a frame.
-    if (rhi::SetFrameTarget({}) != rhi::FrameStatus::Ready || rhi::BeginFrameStatus() != rhi::FrameStatus::Skipped ||
-        rhi::EndFrameStatus() != rhi::FrameStatus::InvalidState)
+    if (rhi::SetFrameTarget(gDevice, gSurface, {}) != rhi::DeviceStatus::Ready ||
+        rhi::BeginFrame(gDevice, gSurface) != rhi::DeviceStatus::Skipped ||
+        rhi::EndFrame(gDevice) != rhi::DeviceStatus::InvalidState)
     {
         Stop(true);
         return;
     }
     ResizeCanvas(width, height);
-    if (rhi::SetFrameTarget({ .Width = width, .Height = height }) != rhi::FrameStatus::Ready)
+    if (rhi::SetFrameTarget(gDevice, gSurface, { .Width = width, .Height = height }) != rhi::DeviceStatus::Ready)
     {
         Stop(true);
         return;
     }
-    const auto begun = rhi::BeginFrameStatus();
-    if (begun == rhi::FrameStatus::Skipped)
+    const auto begun = rhi::BeginFrame(gDevice, gSurface);
+    if (begun == rhi::DeviceStatus::Skipped)
     {
         return;
     }
-    if (begun != rhi::FrameStatus::Ready)
+    if (begun != rhi::DeviceStatus::Ready)
     {
         Stop(true);
         return;
     }
-    const auto frameInfo = rhi::GetFrameInfo();
+    rhi::FrameInfo frameInfo;
+    if (rhi::GetFrameInfo(gDevice, gSurface, frameInfo) != rhi::DeviceStatus::Ready)
+    {
+        Stop(true);
+        return;
+    }
     uniforms.Resolution[0] = static_cast<float32>(frameInfo.Width);
     uniforms.Resolution[1] = static_cast<float32>(frameInfo.Height);
-    if (rhi::UpdateUniform(gUniform, bytes) != rhi::ResourceStatus::Ready ||
-        rhi::DrawFullscreen(gPipeline) != rhi::ResourceStatus::Ready ||
-        rhi::EndFrameStatus() != rhi::FrameStatus::Ready)
+    if (rhi::UpdateUniform(gDevice, gUniform, bytes) != rhi::ResourceStatus::Ready ||
+        rhi::DrawFullscreen(gDevice, gPipeline) != rhi::ResourceStatus::Ready ||
+        rhi::EndFrame(gDevice) != rhi::DeviceStatus::Ready)
     {
         Stop(true);
         return;
@@ -225,17 +242,17 @@ void Tick() noexcept
     if (gFrames == 16 && gSession == 0)
     {
         const auto stale = gPipeline;
-        if (rhi::Destroy(gUniform) != rhi::ResourceStatus::InUse ||
-            rhi::Destroy(gPipeline) != rhi::ResourceStatus::Ready ||
-            rhi::Destroy(gVertex) != rhi::ResourceStatus::Ready ||
-            rhi::Destroy(gFragment) != rhi::ResourceStatus::Ready ||
-            rhi::Destroy(gUniform) != rhi::ResourceStatus::Ready)
+        if (rhi::Destroy(gDevice, gUniform) != rhi::ResourceStatus::InUse ||
+            rhi::Destroy(gDevice, gPipeline) != rhi::ResourceStatus::Ready ||
+            rhi::Destroy(gDevice, gVertex) != rhi::ResourceStatus::Ready ||
+            rhi::Destroy(gDevice, gFragment) != rhi::ResourceStatus::Ready ||
+            rhi::Destroy(gDevice, gUniform) != rhi::ResourceStatus::Ready)
         {
             Stop(true);
             return;
         }
-        rhi::Shutdown();
-        if (rhi::GetStatus(stale) != rhi::ResourceStatus::InvalidHandle)
+        (void)rhi::DestroyDevice(gDevice);
+        if (rhi::GetStatus(gDevice, stale) != rhi::ResourceStatus::InvalidHandle)
         {
             Stop(true);
             return;

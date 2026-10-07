@@ -123,6 +123,83 @@ driving this through the public API. See ADR 0014 and
 
 ## Readiness and ownership
 
+### Explicit R0 device ownership
+
+Include `ludus/graphics/rhi/device.h` for the first explicit R0 contract slice.
+It links through the same `Ludus::GraphicsRhi` target and shares the facade's
+single session, authoritative resource registry, callback isolation and backend
+teardown. Every explicit operation validates its device owner before delegating.
+Frame operations also validate the borrowed surface owner. A headless target is
+a surface in this slice; independent device-only/offscreen resource APIs remain
+future work. Serialize all operations on the main thread.
+
+```cpp
+namespace rhi = ludus::graphics::rhi;
+rhi::DeviceHandle device;
+rhi::SurfaceHandle surface;
+rhi::DeviceDescription request;
+request.Limits.MinUniformBufferSize = 48;
+request.Preferred.Compute = true;
+rhi::StartupInfo failure;
+const auto started = rhi::CreateDevice(app, window, request, device, surface, &failure);
+// Ready or Pending owns both outputs. Otherwise inspect started and, for a
+// synchronous backend startup failure, failure. Admission preserves all outputs.
+if (started == rhi::DeviceStatus::Ready || started == rhi::DeviceStatus::Pending)
+{
+    rhi::DeviceInfo info;
+    const auto polled = rhi::GetDeviceInfo(device, info);
+    if (polled == rhi::DeviceStatus::Ready)
+    {
+        // Use device-aware CreateShader/CreateUniform/CreatePipeline, GetStatus,
+        // UpdateUniform and DrawFullscreen overloads; check every result.
+        // Compute remains false: preferences cannot enable unimplemented APIs.
+    }
+    (void)rhi::DestroyDevice(device);
+}
+```
+
+Poll once per application tick while Pending; continue only after Ready. Keep
+the borrowed Platform window/canvas alive until `DestroyDevice`. Required
+`PortableRaster`, `Compute` or `IndirectRendering` returns Unsupported before
+launching startup. `GetCompiledBackends` reports compiled code, independent of
+adapter availability. Supported/Enabled report implemented fullscreen operations
+only after Ready; they make no claim about raw adapter features. The copied
+request retains its preferred features, including unavailable ones. Effective
+limit requirements apply to every Auto attempt through the existing negotiation.
+
+Use `SetFrameTarget(device, surface, target)`, `BeginFrame(device, surface)` and
+`EndFrame(device)` for explicit frames. Skipped opens no frame. The output form
+`GetFrameInfo(device, surface, info)` preserves `info` on invalid ownership,
+pending startup or a closed frame. Resource overloads preserve the existing
+fullscreen ownership, failed-resource inspection and InUse rules; this slice
+does not introduce deferred destruction or a second resource registry.
+
+Device owners never wrap/reappear across restart; callback attempt tokens remain
+separate so fallback retries keep the same device owner. Stale/foreign devices
+and surfaces return InvalidHandle without changing another session. Device loss
+stops explicit work with DeviceLost, clears enabled capabilities and invalidates
+resources; the owned lifecycle record remains queryable until destruction.
+Published asynchronous failure likewise still requires `DestroyDevice`. A
+synchronous startup failure preserves null outputs, copies optional startup
+diagnostics, tears down and leaves the session idle. Successful `DestroyDevice`
+clears its device argument; clear stale surface/resource variables yourself before
+reusing them as creation outputs.
+
+Use either the explicit lifecycle or the facade lifecycle for a session.
+Duplicate starts are rejected. The compatibility `Shutdown` still cancels the
+shared session, making all explicit handles stale; it cannot leave an explicit
+owner pointing to a later facade session. Existing facade-only callers retain
+their behavior.
+
+The reference-backend lifecycle suite tests admission, copied requirements,
+output preservation, cancellation, late completions, fallback generations,
+cross-owner misuse, loss and non-wrapping owner exhaustion. General typed
+resource slot/generation contracts, broader feature/format/limit negotiation,
+encoders and deferred retirement are subsequent slices of the
+[RHI/GDI architecture](../architecture/rhi-gdi.md#implementation-phases-and-acceptance).
+
+### Compatibility facade
+
 1. Start RHI with the Platform window/canvas and poll GetStartup. Continue only
    when Ready. Browser startup is Pending; failures require Shutdown before Start.
 2. Create vertex/fragment shaders and one uniform into default handles. Ready or

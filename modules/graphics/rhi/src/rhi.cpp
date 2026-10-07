@@ -15,6 +15,7 @@ using ludus::foundation::uint32;
 StartupInfo gStartup;
 uint32 gToken = 0;
 uint32 gNextToken = 1;
+ludus::foundation::uint64 gDeviceOwner = 0;
 bool gLegacy = false;
 bool gRendering = false;
 bool gFrame = false;
@@ -23,6 +24,18 @@ internal::FallbackHandler gFallback = nullptr;
 } // namespace
 namespace internal
 {
+ludus::foundation::uint64 DeviceOwner() noexcept
+{
+    return gDeviceOwner;
+}
+void SetDeviceOwner(ludus::foundation::uint64 owner) noexcept
+{
+    gDeviceOwner = owner;
+}
+bool SessionBusy() noexcept
+{
+    return gLegacy || gStartup.State != StartupState::Idle;
+}
 void SetFallback(FallbackHandler handler) noexcept
 {
     gFallback = handler;
@@ -149,7 +162,7 @@ StartStatus StartSelected(const ApplicationInfo& app,
                           BackendSelection selection,
                           const DeviceRequirements& requirements) noexcept
 {
-    if (gLegacy || gStartup.State != StartupState::Idle)
+    if (internal::SessionBusy())
     {
         return StartStatus::Busy;
     }
@@ -284,6 +297,7 @@ void ShutdownRendering() noexcept
 }
 void Shutdown() noexcept
 {
+    gDeviceOwner = 0;
     gFallback = nullptr;
     gToken = 0;
     internal::ReleaseResources();
