@@ -23,3 +23,18 @@ The architecture is authoritative for contracts and exit gates.
 
 Never mark the later slices implemented based on core loopback tests. The PR
 records actual local/CI validation for N1 separately from these implementation tasks.
+
+## Research backlog
+
+The [networking reference review](../../../docs/architecture/networking-reference-review.md#conference-and-journal-research-backlog)
+owns the venue list, source queue, reading status and experiment/decision records.
+Research progress does not complete the implementation gates above.
+
+Finish and validate the initial networking architecture through N2-N5 before
+starting this broader improvement pass. Preserve its revision, workloads and
+measurements as the baseline for later experiments. Required backend and
+specification checks remain part of the initial implementation.
+
+- [ ] Screen the recommended venue archives for N2-N5 topics and extend the source queue with attributed, prioritized articles and search dates/scopes.
+- [ ] Fully review NR-01 through NR-05 and progressively read most articles retained in the relevant shortlists; record exact consulted sections and applicable assumptions.
+- [ ] Trial promising ideas against a reproducible baseline, record improvements and regressions, and retain an adopt/defer/reject decision with implementation/test links.

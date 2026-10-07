@@ -65,3 +65,109 @@ does not copy Iris or require its framework in the engine.
 
 Research checked 2026-10-04. Backend suitability and performance conclusions here
 are engineering proposals to validate, not benchmark results.
+
+## Conference and journal research backlog
+
+Recorded 2026-10-06. This section preserves the recommended venues and initial
+reading list as continuing context for networking work. The long-term aim is to
+read broadly and review most articles retained in Ludus-relevant topic shortlists,
+then try promising ideas in the engine and measure whether they help. It is not
+a requirement to read every paper published by every venue.
+
+Implement and validate the initial networking architecture through its N2-N5
+delivery gates first. Record the resulting revision, workloads and measurements
+as the comparison baseline, then begin the broader reading and improvement pass
+below. Backend/specification checks required to implement the initial design
+remain part of that implementation; this queue does not require a research-led
+redesign before the baseline exists.
+
+The [networking architecture](networking.md) owns system contracts and N2-N5 exit
+gates; [ADR 0021](../decisions/0021-networking-core-and-transport-boundary.md)
+owns the portable-core and transport-boundary decision. This backlog tracks
+research, not feature completion. Venue descriptions, session metadata and the
+survey abstract were checked when recommending these sources; the full readings
+below remain queued. Their proposed experiments are Ludus research questions,
+not claims that the sources have been fully reviewed or their ideas adopted.
+
+### Venues to search
+
+| Venue | Reading priority | Topics to screen for | Ludus work it could inform |
+| --- | --- | --- | --- |
+| [GDC / GDC Vault](https://www.gdcvault.com/) | First | Production replication, prediction, reconciliation, lag compensation, physics synchronization and network debugging | N3/N4 gameplay integration; N5 inspection and latency measurements |
+| [NetGames proceedings archive](https://2017.acmmmsys.org/netgames/) | First | Game-specific message distribution, protocol design, relevance, latency compensation and scalability | N3 replication/relevance; N4 latency policies; N5 adverse-link testing |
+| [ACM GameSys proceedings](https://gamesys22.wpi.edu/) | First | Game-system research, shared distributed state, network/system performance and player experience | N3/N4 design alternatives and evaluation |
+| [ACM Computing Surveys](https://doi.org/10.1145/3519023) | First | Surveys comparing synchronization and latency-compensation techniques, assumptions and evaluation methods | N3/N4 choice of simulation mode and bounded history policies |
+| [USENIX NSDI](https://www.usenix.org/conference/nsdi26/call-for-papers) | After baseline: N2 topics | Practical networked-system design, resource bounds, backpressure, testing, debugging and deployed-system experience | N2 session/adapter ownership and overload behavior; N5 harness design |
+| [ACM SIGCOMM](https://www.sigcomm.org/events) | Selective | Transport, congestion control, pacing, QUIC and deadline-sensitive delivery | N2/N5 backend evaluation and lane/budget measurements |
+| [ACM CoNEXT](https://www.sigcomm.org/events) | Selective | Experimental networking systems, transport tradeoffs and reproducible evaluations | N2/N5 native/browser transport experiments |
+| [ACM Internet Measurement Conference (IMC)](https://www.sigcomm.org/events) | After baseline: N5 topics | Operational latency/loss/jitter distributions, measurement validity and tail behavior | N5 realistic fault profiles and performance methodology |
+| [IEEE Transactions on Games](https://transactions.games/) | Selective | Game-system evaluation, latency fairness, player experience and gameplay consequences | N4 authoritative permission/rewind policies and correction evaluation |
+| [IEEE Transactions on Networking](https://www.comsoc.org/publications/journals/ieee-tnet) | Selective | Transport, scheduling, congestion control, security and network measurement | N2/N5 backend and scheduling research |
+
+NetGames and GameSys links identify historical proceedings/workshop entry points,
+not a verified upcoming event schedule. Search older networking journal papers
+under the former title *IEEE/ACM Transactions on Networking* as well. Priorities
+and the mapping to Ludus are our selection criteria, not venue endorsements of
+the engine design.
+
+### Initial reading queue
+
+After the initial implementation is validated, begin with the order below for
+N3/N4 improvement research and screen the other venues for session, transport
+and measurement ideas. Milestone labels identify the affected subsystem; they
+do not move these research trials ahead of the initial implementation.
+
+| ID | Source and attribution | Full-review status | Question and possible experiment after review |
+| --- | --- | --- | --- |
+| NR-01 | Shengmei Liu, Xiaokun Xu and Mark Claypool, **A Survey and Taxonomy of Latency Compensation Techniques for Network Computer Games**, *ACM Computing Surveys* 54, 11s, article 243, 2022. [DOI](https://doi.org/10.1145/3519023); [author page and paper](https://web.cs.wpi.edu/~claypool/papers/lag-taxonomy/) | Queued; metadata/abstract screened | Compare compensation assumptions before selecting N4 policies. Build a small scenario comparing local prediction/reconciliation and remote interpolation under the same seeded link profiles; measure responsiveness, correction error, fairness and retained history. |
+| NR-02 | Timothy Ford, **'Overwatch' Gameplay Architecture and Netcode**, GDC 2017, Blizzard Entertainment. [Session](https://www.gdcvault.com/play/1024001/-Overwatch-Gameplay-Architecture-and) | Queued; session description screened | What simulation/world boundaries and determinism assumptions fit Ludus? Trial a tick-boundary replication bridge and bounded command replay; test convergence and suppression of repeated gameplay effects without assuming cross-platform physics determinism. |
+| NR-03 | David Aldridge, **I Shot You First: Networking the Gameplay of HALO: REACH**, GDC 2011, Bungie. [Session](https://www.gdcvault.com/play/1014345/I-Shot-You-First-Networking) | Queued; session identified | Which gameplay consistency, fairness and diagnostic practices transfer to our authoritative design? Add loss/jitter journeys with bounded inspection records and permission tests, then compare disagreement/correction rates and debugging usefulness. |
+| NR-04 | Benjamin Goyette, **Fighting Latency on Call of Duty Black Ops III**, GDC 2016, Activision. [Session](https://gdcvault.com/play/1023220/Fighting-Latency-on-Call-of) | Queued; session description screened; local slides available | Where does input-to-feedback latency accumulate outside socket IO? Instrument input capture, command send, server processing, snapshot receive and presentation; measure the full path and examine asymmetric-latency scenarios before tuning rewind. |
+| NR-05 | Jared Cone, **It IS Rocket Science! The Physics of 'Rocket League' Detailed**, GDC 2018, Psyonix. [Session](https://www.gdcvault.com/play/1025341/It-IS-Rocket-Science-The) | Queued; session identified | Which physics synchronization and correction ideas fit our bounded histories? Prototype a small physics-heavy scenario and measure divergence, replay cost and presentation error; explicitly test the limits of determinism across supported targets. |
+
+NR-04 already has a local copy at
+`references/gdc/2016/Goyette_Benjamin_Fighting_Latency_COD.pdf`. File availability
+does not mean it has been read. The ignored reference library remains separate
+from authored documentation and publication artifacts; use the linked primary
+source when the local copy is unavailable.
+
+### Screening and review record
+
+Continue by screening each venue for concrete problems in N2-N5. Add relevant
+articles with stable IDs, exact author/title/year, DOI or primary-source URL,
+access/local locator, priority and reading status. Use survey bibliographies to
+find original papers, then read those papers before attributing an implementation
+to them. Record the scope and date of each archive search so that the shortlist
+and reading coverage can be revisited.
+
+Use these statuses: **Queued**, **Reading**, **Reviewed**, **Trial planned**,
+**Trial complete**, **Adopted**, **Deferred**, or **Rejected**. A metadata/abstract
+screen is not a full review; an attractive hypothesis is not a measured gain.
+Update the existing row and append the detailed record here when work advances.
+
+For each completed review or trial, record:
+
+1. Source ID, review date and exact sections, pages or talk timestamps consulted.
+2. The relevant idea, its assumptions, evidence, limitations and differences from
+   our architecture; distinguish design inspiration from adapted code.
+3. The affected Ludus milestone/module and a testable improvement hypothesis.
+4. A bounded prototype, comparison baseline and failure/regression scenarios.
+5. Reproduction commands, seed, workload, toolchain/backend versions and links to
+   the test, benchmark or PR. Keep generated captures/results in ignored `out/`.
+6. Before/after results: tick/poll/decode percentiles, bytes, queue age, allocations,
+   memory/history bounds, corrections and relevant gameplay consistency measures.
+7. A decision: adopt, defer or reject, with its reason and links to any changed
+   architecture/ADR and implementation attribution.
+
+N2 trials should exercise real endpoints, admission, reconnect and backend
+backpressure. N3 trials should cover object generations, baselines and relevance
+under byte budgets. N4 trials should cover loss/jitter, bounded replay and
+authoritative eligibility. N5 trials should cover browser/native interop and the
+defined workloads. Use the architecture's existing gates rather than inventing
+capacity claims from a single favorable loopback benchmark.
+
+No new source in this queue has a completed trial or adoption record yet. Keep
+the original **Read and adopted** review above intact; extend it only when a
+completed review actually informs a design or implementation. Future code
+adaptations retain Ludus's exception-free, bounded-work and private-backend
+requirements, with a concise source acknowledgement near the affected code.
