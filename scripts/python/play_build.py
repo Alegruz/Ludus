@@ -28,6 +28,7 @@ def source_inputs(project: Path, source: Path, sidecar, build: Path) -> list[Pat
     roots = sidecar.watch_roots or (source,)
     files = {project / "ludus.project.json", project / "ludus.play.json",
              source / "CMakeLists.txt", source / "CMakePresets.json"}
+    if (project/"ludus.scripts.json").exists(): files.add(project/"ludus.scripts.json")
     for extra in (source / "CMakeUserPresets.json", project / "ludus.lock.json", project / ".ludus/local.json"):
         if extra.exists():
             files.add(extra)

@@ -69,6 +69,8 @@ qt_add_executable(ludus_editor
     src/internal/main_window.h
     src/internal/audio_workspace.h
     src/internal/audio_preview.h
+    src/internal/script_workspace.h
+    src/script_workspace.cpp
     src/configuration_workspace.cpp
     src/editor_files.cpp
     src/audio_workspace.cpp
@@ -114,6 +116,8 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         src/internal/main_window.h
         src/internal/audio_workspace.h
         src/internal/audio_preview.h
+        src/internal/script_workspace.h
+    src/script_workspace.cpp
         src/configuration_workspace.cpp
         src/editor_files.cpp
         src/audio_workspace.cpp
@@ -134,6 +138,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         tests/workspace_layout_tests.cpp
         tests/recent_projects_tests.cpp
         tests/source_watch_tests.cpp
+        tests/script_workspace_tests.cpp
         tests/live_journey_tests.cpp
     )
     set_target_properties(ludus_editor_tests PROPERTIES AUTOMOC ON)

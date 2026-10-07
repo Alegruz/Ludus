@@ -28,7 +28,7 @@ function(ludus_cook_behaviors)
         COMMAND "${Python3_EXECUTABLE}" "${resource}/behavior_cook.py"
             --contract "${BEHAVIOR_CONTRACT}" --package "${BEHAVIOR_PACKAGE}" --output "${output}"
             --profile "${BEHAVIOR_PROFILE}" --compiler "${BEHAVIOR_COMPILER}" --analyzer "${BEHAVIOR_ANALYZER}"
-        BYPRODUCTS "${output}/contract.h" "${output}/package.h" "${output}/current.json"
+        BYPRODUCTS "${output}/contract.h" "${output}/package.h" "${output}/debug_maps.h" "${output}/current.json"
         VERBATIM)
     set(${BEHAVIOR_NAME}_DIRECTORY "${output}" PARENT_SCOPE)
 endfunction()

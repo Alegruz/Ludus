@@ -90,6 +90,7 @@ nav:
       - Native debugging: development/debugging.md
       - Diagnostics: development/diagnostics.md
       - Behavior contracts and cooking: architecture/behavior-s4.md
+      - Editor behavior authoring and debugging: architecture/behavior-s5.md
       - Live gameplay editing: development/project-live-reload.md
       - Rendering and shaders: development/fullscreen-rendering.md
       - Benchmark scenes and suites: development/benchmark-scenes.md

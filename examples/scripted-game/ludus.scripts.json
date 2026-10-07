@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "name": "encounter",
+  "contract": "behaviors/contract.json",
+  "package": "behaviors/package.json"
+}

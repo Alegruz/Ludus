@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "name": "scripted-game",
+  "provider": "cmake",
+  "source_dir": ".",
+  "preset": "linux-clang-development",
+  "target": "scripted_game_shipping",
+  "run": {
+    "cwd": ".",
+    "args": []
+  },
+  "engine": {
+    "version": "0.1.0",
+    "components": [
+      "GameApi",
+      "GameHost",
+      "Behavior",
+      "FoundationParsingJson"
+    ],
+    "features": []
+  },
+  "template": {
+    "id": "scripted-game",
+    "version": 1
+  }
+}

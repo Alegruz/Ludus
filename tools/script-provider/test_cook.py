@@ -92,6 +92,49 @@ class CookTests(unittest.TestCase):
                 (self.root/'door.luau').write_text(original.replace('require("'+asset+'")',expression))
                 destination=cook.cook(self.root/'contract.json',self.root/'package.json',self.root/'cooked',profile_path,compiler,analyzer)
                 self.assertTrue((destination/'behavior.lupack').is_file())
+    def test_project_sequences_share_cooker_and_ignore_layout(self):
+        compiler=ROOT/'out/luau-probe/host-compiler/luau-compile'
+        analyzer=compiler.with_name('luau-analyze')
+        if not compiler.is_file() or not analyzer.is_file():self.skipTest('explicit paired tool preparation required')
+        sample=ROOT/'examples/scripted-game/behaviors'
+        for name in ('contract.json','package.json','encounter.json','encounter.luau'):
+            shutil.copy(sample/name,self.root/name)
+        profile={'version':1,'profile':cook.sha((ROOT/'config/luau_toolchain.json').read_bytes()),'compiler':cook.sha(compiler.read_bytes()),'analyzer':cook.sha(analyzer.read_bytes())}
+        profile_path=self.root/'profile.json';profile_path.write_text(json.dumps(profile))
+        args=(self.root/'contract.json',self.root/'package.json',self.root/'cooked',profile_path,compiler,analyzer)
+        first=cook.cook(*args)
+        evidence=cook.read_json(first/'evidence.json')
+        graph=next(p for p in evidence['programs'] if p['asset']=='0000000000000100')
+        self.assertTrue(graph['maps'])
+        self.assertTrue(all(span['compiled_line']==span['line']+graph['first_line']-2 for span in graph['maps']))
+        self.assertIn('SOURCE_SPANS',(first/'debug_maps.h').read_text())
+        value=cook.read_json(self.root/'encounter.json')
+        value['layout']['positions'][0]['x']+=20
+        value['nodes'].reverse()
+        (self.root/'encounter.json').write_text(json.dumps(value))
+        with patch.object(cook.subprocess,'run',side_effect=AssertionError('layout invoked tools')):
+            self.assertEqual(cook.cook(*args),first)
+        next(n for n in value['nodes'] if n['kind']=='Increment')['amount']=2
+        (self.root/'encounter.json').write_text(json.dumps(value))
+        second=cook.cook(*args)
+        self.assertNotEqual(first,second)
+        before={name:(self.root/'cooked'/name).read_bytes() for name in ('current.json','contract.h','package.h','debug_maps.h')}
+        schema=cook.read_json(self.root/'contract.json');schema['state'][0]['name']='WrongVocabulary'
+        (self.root/'contract.json').write_text(json.dumps(schema))
+        with self.assertRaisesRegex(ValueError,'sequence vocabulary'):cook.cook(*args)
+        self.assertEqual(before,{name:(self.root/'cooked'/name).read_bytes() for name in before})
+    def test_workspace_planning_is_read_only_and_root_bounded(self):
+        from ludus_tools import behavior_workspace
+        sidecar=self.root/'ludus.scripts.json'
+        sidecar.write_text(json.dumps({'version':1,'name':'encounter','contract':'contract.json','package':'package.json'}))
+        before={p.name:p.read_bytes() for p in self.root.iterdir() if p.is_file()}
+        value=behavior_workspace.load(self.root)
+        self.assertEqual(value['contract'],self.root/'contract.json')
+        self.assertEqual(before,{p.name:p.read_bytes() for p in self.root.iterdir() if p.is_file()})
+        for change in ({'contract':'../contract.json'},{'name':'../../escaped'},{'extra':1}):
+            data={'version':1,'name':'encounter','contract':'contract.json','package':'package.json'};data.update(change)
+            sidecar.write_text(json.dumps(data))
+            with self.assertRaises(ValueError):behavior_workspace.load(self.root)
     def test_cli_reports_controlled_manifest_errors(self):
         program=ROOT/'scripts/ludus'
         result=subprocess.run([str(program),'scripts','cook','--contract',str(self.root/'contract.json'),'--package',str(self.root/'package.json'),'--output',str(self.root/'cooked'),'--profile',str(self.root/'absent.json'),'--compiler',str(self.root/'absent-compiler'),'--analyzer',str(self.root/'absent-analyzer')],capture_output=True,text=True)

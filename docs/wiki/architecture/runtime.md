@@ -60,9 +60,10 @@ qualification are later work. See [commands and limits](../guides/build-and-debu
 [S4](../../architecture/behavior-s4.md) supplies `Ludus::Behavior`, generated
 project contracts, native/Luau staged transactions, declared-state codecs and
 paired offline cooking. An independent relocated SDK consumer builds and executes
-a static shipping program. The component is default-off; Editor/GameHost wiring,
-six-platform acceptance and representative release qualification remain S5–S7.
-The private S2/S3 fixtures do not become editor features simply by enabling it.
+a static shipping program. The component is default-off. [S5](../../architecture/behavior-s5.md) adds a real
+Editor workspace and SDK-only GameHost example with text/sequence cooking, safe
+source/node stops and generation-owned VM retirement. Six-platform acceptance and
+representative release qualification remain S6–S7.
 
 ## Configuration is a control operation
 

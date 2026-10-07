@@ -39,6 +39,7 @@ install(FILES "$<TARGET_FILE:ludus_runtime_scripting>" "$<TARGET_FILE:Luau.VM>" 
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/Ludus/behavior")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/profile.json"
     "${PROJECT_SOURCE_DIR}/scripts/python/ludus_tools/behavior_cook.py"
+    "${PROJECT_SOURCE_DIR}/scripts/python/ludus_tools/behavior_graph.py"
     "${PROJECT_SOURCE_DIR}/out/luau-probe/source/LICENSE.txt"
     "${PROJECT_SOURCE_DIR}/out/luau-probe/source/lua_LICENSE.txt"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/Ludus/behavior")
