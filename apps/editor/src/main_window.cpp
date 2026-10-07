@@ -1,6 +1,7 @@
 #include "internal/main_window.h"
 #include "internal/audio_workspace.h"
 #include "internal/configuration_workspace.h"
+#include "internal/content_browser.h"
 #include "internal/editor_files.h"
 #include "internal/project_creation_dialog.h"
 #include "internal/project_setup_dialog.h"
@@ -58,6 +59,25 @@ MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QStr
     InitializeWorkspace();
     connect(WorkTabs_, &QTabWidget::currentChanged, this, &MainWindow::RenderDocumentActions);
     connect(Audio_, &AudioWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
+    connect(Content_, &ContentWorkspace::BusyChanged, this, &MainWindow::RenderCapabilities);
+    connect(Content_, &ContentWorkspace::CatalogChanged, Audio_, &AudioWorkspace::RefreshCatalog);
+    connect(Audio_, &AudioWorkspace::ImportRequested, this, [this]() {
+        WorkTabs_->setCurrentWidget(Content_);
+        Content_->ChooseImport();
+    });
+    connect(Content_, &ContentWorkspace::OpenAudio, this, [this](const QString& id) {
+        if (Audio_->OpenResource(id))
+        {
+            for (int index = 0; index < WorkTabs_->count(); ++index)
+            {
+                if (WorkTabs_->widget(index)->isAncestorOf(Audio_))
+                {
+                    WorkTabs_->setCurrentIndex(index);
+                    break;
+                }
+            }
+        }
+    });
     connect(Scripts_, &ScriptWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
     connect(qApp, &QApplication::focusChanged, this, [this](QWidget* before, QWidget* after) {
         LastEditedField_ = nullptr;
@@ -177,11 +197,19 @@ void MainWindow::BuildMenus()
     QMenu* releaseMenu = menuBar()->addMenu(QStringLiteral("&Release"));
     SetupReleaseAction_ = releaseMenu->addAction(QStringLiteral("Set Up &Releases..."));
     PackageReleaseAction_ = releaseMenu->addAction(QStringLiteral("&Package Release..."));
+#if defined(Q_OS_MACOS)
+    SetupReleaseAction_->setToolTip(QStringLiteral("macOS release packaging/signing is not available yet."));
+    PackageReleaseAction_->setToolTip(SetupReleaseAction_->toolTip());
+#endif
     connect(SetupReleaseAction_, &QAction::triggered, this, &MainWindow::OnSetupRelease);
     connect(PackageReleaseAction_, &QAction::triggered, this, &MainWindow::OnPackageRelease);
     QMenu* playMenu = menuBar()->addMenu(QStringLiteral("&Play"));
     PlayAction_ = playMenu->addAction(QStringLiteral("Build and Play"));
     PlayAction_->setObjectName(QStringLiteral("play.start"));
+#if defined(Q_OS_MACOS)
+    PlayAction_->setToolTip(QStringLiteral("Live Play is not available on macOS yet; use Build and Run."));
+    BuildDebugAction_->setToolTip(QStringLiteral("RAD debugging is available on Linux x64 only."));
+#endif
     BuildReloadAction_ = playMenu->addAction(QStringLiteral("Build and Reload Code"));
     BuildReloadAction_->setObjectName(QStringLiteral("play.reload"));
     AutoReloadAction_ = playMenu->addAction(QStringLiteral("Automatically Reload Source Changes"));
@@ -409,7 +437,7 @@ void MainWindow::OnOpenRequested()
 
 void MainWindow::OpenProjectPath(const QString& path)
 {
-    if (path.isEmpty() || !Controller_->Caps().CanOpen || AudioClosing_ ||
+    if (path.isEmpty() || !Controller_->Caps().CanOpen || Content_->Importing() || AudioClosing_ ||
         (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()))
     {
         return;
@@ -453,6 +481,11 @@ bool MainWindow::SaveProjectSettings()
 {
     CommitProjectFields();
     const auto& state = Controller_->State();
+    if (Content_->Importing() && state.Draft.SourceDir != state.Saved.SourceDir)
+    {
+        StatusLabel_->setText(QStringLiteral("Finish or cancel content work before saving a changed source root."));
+        return false;
+    }
     if (state.Draft.SourceDir != state.Saved.SourceDir && (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()))
     {
         return false;
@@ -469,6 +502,10 @@ bool MainWindow::SaveProjectSettings()
 
 void MainWindow::OnReloadRequested()
 {
+    if (Content_->Importing())
+    {
+        return;
+    }
     CommitProjectFields();
     if (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard())
     {
@@ -532,12 +569,14 @@ void MainWindow::OnStateChanged()
         const auto root = QDir(QFileInfo(state.DescriptorPath).absolutePath()).absoluteFilePath(state.Saved.SourceDir);
         Scripts_->SetProject(QFileInfo(state.DescriptorPath).absolutePath(), root, state.Saved.Preset);
         Audio_->SetRoot(QDir(root).absoluteFilePath(QStringLiteral("content")));
+        Content_->SetProject(QDir(root).absoluteFilePath(QStringLiteral("content")), state.ProjectEpoch);
     }
 
     else
     {
         Scripts_->SetProject({}, {}, {});
         Audio_->SetRoot(QString());
+        Content_->SetProject(QString(), state.ProjectEpoch);
     }
 
     // If a close was requested and the workspace is now closeable, finish.
@@ -702,20 +741,21 @@ void MainWindow::RenderCapabilities()
     RedoTuningAction_->setEnabled(playState.TuningDocumentAvailable && playState.TuningCanRedo);
     SaveTuningAction_->setEnabled(Controller_->CanSaveTuningDocument());
     DiscardTuningAction_->setEnabled(playState.TuningDocumentAvailable && playState.TuningDocumentDirty);
-    NewProjectAction_->setEnabled(caps.CanProjectCreate);
-    WelcomeNewButton_->setEnabled(caps.CanProjectCreate);
-    CloseProjectAction_->setEnabled(caps.CanCloseProject && !AudioLaunchPending_ && !AudioClosing_);
+    NewProjectAction_->setEnabled(caps.CanProjectCreate && !Content_->Importing());
+    WelcomeNewButton_->setEnabled(caps.CanProjectCreate && !Content_->Importing());
+    CloseProjectAction_->setEnabled(caps.CanCloseProject && !Content_->Importing() && !AudioLaunchPending_ &&
+                                    !AudioClosing_);
     CloseProjectAction_->setToolTip(QStringLiteral("Close the project and return to Welcome. Stop active work first."));
     CheckSetupAction_->setEnabled(caps.CanProjectCheck);
     SetupProjectAction_->setEnabled(caps.CanProjectSetup);
-    OpenAction_->setEnabled(caps.CanOpen);
-    RecentMenu_->setEnabled(caps.CanOpen && !Controller_->RecentProjects().isEmpty());
-    RecentList_->setEnabled(caps.CanOpen);
-    RecentOpenButton_->setEnabled(caps.CanOpen && RecentList_->currentItem() != nullptr);
-    BrowseProjectButton_->setEnabled(caps.CanOpen);
+    OpenAction_->setEnabled(caps.CanOpen && !Content_->Importing());
+    RecentMenu_->setEnabled(caps.CanOpen && !Content_->Importing() && !Controller_->RecentProjects().isEmpty());
+    RecentList_->setEnabled(caps.CanOpen && !Content_->Importing());
+    RecentOpenButton_->setEnabled(caps.CanOpen && !Content_->Importing() && RecentList_->currentItem() != nullptr);
+    BrowseProjectButton_->setEnabled(caps.CanOpen && !Content_->Importing());
     ClearRecentAction_->setEnabled(caps.CanOpen && !Controller_->RecentProjects().isEmpty());
     RenderDocumentActions();
-    ReloadAction_->setEnabled(caps.CanReload);
+    ReloadAction_->setEnabled(caps.CanReload && !Content_->Importing());
     ConfigureAction_->setEnabled(caps.CanConfigure);
     BuildAction_->setEnabled(caps.CanBuild);
     BuildRunAction_->setEnabled(caps.CanBuildRun && !AudioLaunchPending_);
@@ -933,7 +973,8 @@ bool MainWindow::ConfirmProjectChange(const QString& action)
 
 void MainWindow::OnNewProject()
 {
-    if (!Controller_->Caps().CanProjectCreate || (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()) ||
+    if (!Controller_->Caps().CanProjectCreate || Content_->Importing() ||
+        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()) ||
         !ConfirmProjectChange(QStringLiteral("creating another project")))
     {
         return;
@@ -947,7 +988,7 @@ void MainWindow::OnNewProject()
 
 void MainWindow::OnCloseProject()
 {
-    if (!Controller_->Caps().CanCloseProject || AudioLaunchPending_ || AudioClosing_ ||
+    if (!Controller_->Caps().CanCloseProject || Content_->Importing() || AudioLaunchPending_ || AudioClosing_ ||
         (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()) ||
         !ConfirmProjectChange(QStringLiteral("closing the project")))
     {
@@ -1074,7 +1115,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
             event->ignore();
             return;
         }
-        const bool busy = !Controller_->Caps().CanCloseImmediately;
+        const bool busy = !Controller_->Caps().CanCloseImmediately || Content_->Importing();
         if (busy && !CloseConfirmed_)
         {
             const auto choice = QMessageBox::question(
@@ -1091,12 +1132,13 @@ void MainWindow::closeEvent(QCloseEvent* event)
         }
         AudioClosing_ = true;
         Audio_->ShutdownPreview();
-        if (busy)
+        Content_->Shutdown();
+        if (!Controller_->Caps().CanCloseImmediately)
         {
             (void)Controller_->RequestClose();
         }
     }
-    if (!Audio_->PreviewFinished())
+    if (!Audio_->PreviewFinished() || !Content_->Finished())
     {
         event->ignore();
         QTimer::singleShot(20, this, [this]() { close(); });

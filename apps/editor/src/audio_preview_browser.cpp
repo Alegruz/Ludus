@@ -14,7 +14,7 @@ void AudioPreview::Play(const QString&, const audio::content::Music&)
 {
     Q_EMIT Message(QStringLiteral("Audio preview requires the desktop editor in this browser preview."));
 }
-void AudioPreview::Import(const QString&, const QString&, const QString&)
+void AudioPreview::Import(const ContentImportSource&)
 {
     QTimer::singleShot(0, this, [this]() {
         Q_EMIT Message(QStringLiteral("Audio import requires the desktop editor in this browser preview."));

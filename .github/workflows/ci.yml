@@ -40,9 +40,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install upstream Clang 18
-        run: brew install llvm@18
+        run: brew install llvm@18 qtbase
       - name: Prepare pinned native dependencies
-        run: ./init.sh --cli --preset macos-clang-development --preset-only --locked --with-tests --no-system-install
+        run: ./init.sh --cli --preset macos-clang-development --preset-only --locked --with-tests --with-editor --no-system-install
       - name: Prepare pinned Metal shader compiler
         run: ./scripts/shader-probe bootstrap
       - name: Qualify production Behavior provider on macOS
@@ -59,11 +59,11 @@ jobs:
           out/host-tools/venv/bin/cmake --preset macos-clang-development -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
           ./scripts/build macos-clang-development
       - name: Test macOS setup contracts
-        run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui test_metal_shaders -v
+        run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui test_metal_shaders test_macos_editor test_editor_tool test_process_ownership -v
       - name: Test native Cocoa, Metal, filesystem, Content and Audio
         env:
           LUDUS_TEST_COCOA: "1"
-        run: out/host-tools/venv/bin/ctest --preset macos-clang-development --label-regex 'platform|macos|filesystem|content|audio|build-contract|diagnostic-startup' --no-tests=error
+        run: out/host-tools/venv/bin/ctest --preset macos-clang-development --label-regex 'platform|macos|filesystem|content|audio|build-contract|diagnostic-startup|editor' --no-tests=error
       - name: Test native Debug helper and explicit assertion decisions
         run: |
           ./init.sh --cli --preset macos-clang-debug --preset-only --locked --with-tests --no-system-install
@@ -100,6 +100,18 @@ jobs:
           out/host-tools/venv/bin/python tests/sdk_consumer/verify_macos_project_tooling.py --sdk "$PWD/out/install/macos-clang-development" --tools "$PWD" --cli "$PWD/out/project-tooling-venv/bin/ludus"
       - name: Qualify relocated Behavior SDK and extracted macOS player
         run: out/host-tools/venv/bin/python tools/script-provider/verify_consumer.py out/install/macos-clang-development
+      - name: Verify native Cocoa Editor project lifecycle
+        env:
+          QT_QPA_PLATFORM: cocoa
+        run: |
+          LUDUS_SETUP_TEST_SDK="$PWD/out/install/macos-clang-development" out/build/macos-clang-development/apps/editor/ludus_editor_tests '[.macos-journey]'
+      - name: Analyze native Editor production and regression sources
+        run: |
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' \
+            apps/editor/src/controller_play.cpp apps/editor/src/workspace.cpp \
+            apps/editor/src/main_window.cpp apps/editor/src/main_window_layout.cpp \
+            apps/editor/src/recent_projects.cpp apps/editor/tests/controller_tests.cpp \
+            apps/editor/tests/macos_journey_tests.cpp
       - name: Verify installed macOS diagnostic helper
         run: |
           out/host-tools/venv/bin/python tools/diagnostics/tests/startup_tests.py "$PWD/out/install/macos-clang-development/bin/ludus_diagnostic_helper" "$PWD/out/build/macos-clang-development/tools/diagnostics/ludus_diagnostic_startup_child" 0
@@ -215,10 +227,11 @@ jobs:
         env:
           LUDUS_TEST_COCOA: "1"
         run: |
-          ./init.sh --cli --preset macos-clang-asan-ubsan --preset-only --locked --with-tests --no-system-install
+          ./init.sh --cli --preset macos-clang-asan-ubsan --preset-only --locked --with-tests --with-editor --no-system-install
           out/host-tools/venv/bin/cmake --preset macos-clang-asan-ubsan -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
-          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_audio_tests ludus_audio_content_tests ludus_rhi_lifecycle_tests ludus_rhi_metal_tests ludus_rhi_render_tests ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_filesystem_namespace_fault_tests ludus_filesystem_pack_fault_tests ludus_filesystem_async_fault_tests ludus_filesystem_persistence_fault_tests ludus_filesystem_watch_fault_tests ludus_content_tests ludus_content_save_fault_tests
+          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_editor_tests ludus_audio_tests ludus_audio_content_tests ludus_rhi_lifecycle_tests ludus_rhi_metal_tests ludus_rhi_render_tests ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_filesystem_namespace_fault_tests ludus_filesystem_pack_fault_tests ludus_filesystem_async_fault_tests ludus_filesystem_persistence_fault_tests ludus_filesystem_watch_fault_tests ludus_content_tests ludus_content_save_fault_tests
           out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_((platform_cocoa(_keymap)?|filesystem(_fault|_namespace_fault|_pack_fault|_async_fault|_persistence_fault|_watch_fault)?|content(_save_fault)?|audio(_device|_content)?|rhi_(metal|lifecycle))_tests|rhi_render_pixels)$' --no-tests=error
+          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --label-regex '^editor$' --no-tests=error
 
       - name: Qualify production Behavior provider with macOS sanitizers
         run: ./scripts/script-provider run --preset macos-clang-asan-ubsan
@@ -631,13 +644,27 @@ jobs:
         run: out/host-tools/venv/bin/cmake --build --preset linux-clang-development --target ludus_editor_tests
       - name: Verify editor initialization and offscreen tests
         run: out/host-tools/venv/bin/ctest --preset linux-clang-development --label-regex '^editor$' --no-tests=error
+      - name: Measure the content browser projection
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          out/build/linux-clang-development/apps/editor/ludus_editor_tests '[content][scale]' --success > out/editor-content-scale.txt
+          tee -a "$GITHUB_STEP_SUMMARY" < out/editor-content-scale.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: editor-content-scale
+          path: out/editor-content-scale.txt
       - name: Analyze document interactions and regressions
         run: |
           out/host-tools/bin/clang-tidy -p out/build/linux-clang-development --warnings-as-errors='*' \
             apps/editor/src/controller.cpp apps/editor/src/main_window.cpp \
             apps/editor/src/main_window_layout.cpp apps/editor/src/document_commands.cpp \
             apps/editor/src/configuration_workspace.cpp apps/editor/src/audio_workspace.cpp \
+            apps/editor/src/audio_preview.cpp \
             apps/editor/tests/document_history_tests.cpp apps/editor/tests/document_interaction_tests.cpp \
+            apps/editor/src/content_catalog_model.cpp apps/editor/src/content_import.cpp \
+            apps/editor/src/content_jobs.cpp apps/editor/src/content_workspace.cpp \
+            apps/editor/tests/content_browser_tests.cpp apps/editor/tests/content_import_gate_tests.cpp \
             apps/editor/src/controller_play.cpp apps/editor/src/script_workspace.cpp \
             apps/editor/tests/script_workspace_tests.cpp
       - name: Verify S5 Editor, installed Behavior SDK and GameHost journey

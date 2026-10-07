@@ -7,7 +7,7 @@
 # built it prints the preparation commands and exits nonzero.
 #
 # Usage:
-#   ./scripts/editor [--preset linux-clang-development] [--project path/to/ludus.project.json]
+#   ./scripts/editor [--preset <native-clang-development>] [--project path/to/ludus.project.json]
 set -euo pipefail
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

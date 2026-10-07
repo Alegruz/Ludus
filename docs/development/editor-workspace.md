@@ -35,11 +35,12 @@ and [native live editing](project-live-reload.md).
 ## Prerequisites (optional editor setup)
 
 The editor needs Qt 6 (6.4-compatible) with the Core/Gui/Widgets modules and a
-Wayland platform plugin, in addition to the normal reference toolchain
+native platform plugin (Wayland on Linux, Cocoa on macOS), in addition to the normal reference toolchain
 (`./init.sh` prepares pinned Clang 18 / LLD / managed CMake/Ninja/Conan and the
 managed Python venv). Qt is not added to Conan or the SDK. Default initialization
 skips editor setup; select **Build Ludus editor** in the setup window or use
-`./init.sh --cli --with-editor` to install missing Ubuntu/Debian Qt packages and
+`./init.sh --cli --with-editor` to install missing Ubuntu/Debian Qt packages or
+Homebrew `qtbase` on macOS and
 build the selected native Debug, Development or ASan/UBSan editor. `--no-editor` explicitly
 disables the editor for the prepared presets. Initialization also excludes test
 targets by default; use `--with-tests` to include editor tests or `--run-tests` to
@@ -52,6 +53,9 @@ To manage Qt yourself, install it once (names vary by distribution) and use
 
 - Debian/Ubuntu: `sudo apt-get install -y qt6-base-dev qt6-wayland`
 - Fedora/Amazon Linux: `sudo dnf install -y qt6-qtbase-devel qt6-qtwayland`
+- macOS: `brew install qtbase` (Core/Gui/Widgets/Test and Cocoa). Setup discovers
+  Homebrew Qt and records `Qt6_DIR` only in the local build cache. A manual Qt
+  installation can be selected with CMake `-DQt6_DIR=/path/to/lib/cmake/Qt6`.
 
 Only the editor configure/build uses Qt. A default configure
 (`LUDUS_BUILD_EDITOR=OFF`) and default engine browser builds never search for Qt. The separate
@@ -71,9 +75,36 @@ cmake --preset linux-clang-development -DLUDUS_USE_INIT_OPTIONS=OFF -DLUDUS_BUIL
 cmake --build --preset linux-clang-development --target ludus_editor
 ```
 
-Native `LUDUS_BUILD_EDITOR=ON` requires Linux x64. Browser editor builds use
+Native `LUDUS_BUILD_EDITOR=ON` supports Linux x64 and macOS arm64/x64.
+Apple silicon is the validated macOS host; native Intel acceptance remains pending.
+Browser editor builds use
 the separate pinned Qt WebAssembly toolchain; ordinary browser engine setup does
 not enable the editor. Unsupported native hosts fail configuration explicitly.
+
+On macOS, the launcher defaults to `macos-clang-development`:
+
+```bash
+./init.sh --cli macos-clang-development --preset-only --with-editor --with-tests --no-system-install
+./scripts/editor --preset macos-clang-development
+```
+
+The macOS port includes New/Open/Save, SDK setup/check/repair, Configure/Build,
+Build and Run, Stop, project profile selection, layout/history, audio authoring
+and preview, and Configuration. Qt supplies native Cocoa windows, text input,
+file pickers, and platform shortcuts. Games run separately using their own
+platform/RHI backend, including Metal. Version-2 descriptors expose all three
+macOS game profiles; the Editor itself uses Debug, Development or ASan/UBSan.
+Version-1 descriptors retain their original Linux preset contract.
+
+Live Play/reload generation publication still requires Linux ELF build IDs and
+embedded DWARF. Its macOS UI action is guarded and disabled; use Build and Run.
+RAD debugging and release packaging/signing are also disabled on macOS, with
+backend errors if invoked directly. These deferred features do not block ordinary
+build/run. The Editor is built from the tooling checkout; this port does not add
+an installed/signable Editor application bundle to the runtime SDK. The local
+macOS build produces `ludus_editor.app`, with the required Qt frameworks supplied
+by the opted-in development installation; the File API launcher resolves its
+executable inside the bundle.
 
 ## Launch
 
@@ -103,7 +134,9 @@ are labelled; a failed open preserves the current project. **Clear Recent Projec
 clears history without deleting projects. Recents no longer reserve a dock column.
 
 History is local to the user, in `$XDG_CONFIG_HOME/Ludus/Editor/recent-projects.json`
-(normally `~/.config/Ludus/Editor/recent-projects.json`). It is saved atomically,
+(normally `~/.config/Ludus/Editor/recent-projects.json` on Linux). An absolute
+`XDG_CONFIG_HOME` override works on both native hosts; otherwise macOS uses
+Qt's native config location (`~/Library/Preferences/Ludus/Editor`). It is saved atomically,
 separately from project files. If preferences cannot be written, project opening
 still works and history remains available for the current session.
 
@@ -245,8 +278,8 @@ This slice does not complete S2: typed portable transactions, richer validation
 feedback, broader inspector/IME acceptance and configurable command mappings
 still need implementation and qualification. Regression fixtures cover history
 branching, save failures and conflicts, a later edit during Save, text focus,
-pending argument buffers, command scope and cancelled Quit. The Linux optional
-editor CI runs the Qt fixtures offscreen and the sanitizer profile includes the
+pending argument buffers, command scope and cancelled Quit. The Linux and macOS optional
+editor CI run the Qt fixtures offscreen and the sanitizer profile includes the
 editor; offscreen checks do not establish native input or browser acceptance.
 
 With the Qt prerequisites installed, include the editor in sanitizer validation:
@@ -256,6 +289,71 @@ With the Qt prerequisites installed, include the editor in sanitizer validation:
 ./scripts/build linux-clang-asan-ubsan
 ./scripts/test linux-clang-asan-ubsan
 ```
+
+## S3 content browser
+
+The **Content** work area projects the saved `content/catalog.json` into a
+searchable table of resource IDs, kinds and paths. Search is case-insensitive
+and checks all three columns. Selection is an ID, so filtering, sorting and
+refreshing cannot reinterpret a row number as another resource. Hidden selections
+are restored when their ID becomes visible again. Unchanged refreshes preserve
+the model and focused search buffer; changed paths update their roles. Structural
+changes restore selection by ID. Activate a Sound or Music row to open the
+existing Audio workspace, which retains its unsaved-change policy.
+
+**Import WAV / FLAC** asks for a stable resource ID. **Reimport selected** retains
+the selected audio-source ID and asks for its new export. Both entry points,
+including the existing Audio import button (which opens Content), share the bounded decoder,
+dependency checks and publication implementation. Import validates saved loops
+and matching sample rates, captures catalog/dependency digests, and rechecks
+consulted inputs before publication. It never rewrites authored Sound or Music
+settings. Errors name the failing stage or dependency and retain the last valid
+catalog/list. Refresh explicitly retries a failed catalog read.
+
+The copied source is published to an immutable `sources/<key>.wav` or `.flac`
+file. The SHA-256 key includes source bytes, format, importer version and native
+copy profile. Only a successful compare-and-swap catalog replacement makes that
+version active. Failed catalog publication retains the previous source and
+reports the unreferenced candidate path. Old versions and candidates are retained;
+this slice does not automatically delete them. There is no multi-file filesystem
+transaction. Uncooperative writers can still race native save checks; the
+[Content save contract](../architecture/content-resources.md#native-saves) owns
+those limitations. Dependency checks are snapshot validation, not locks over an
+entire authoring project.
+
+Native catalog reads, decoding, validation and writes run on a worker with owned
+input/result data. The GUI applies completed snapshots. One request is admitted
+per browser; a completion must match its operation ID, project epoch and root.
+Changing identity invalidates old results and requests cancellation. While an
+import is active, finish or cancel it before using the shell's project-switch,
+Reload or Close Project actions or saving a changed source root. Other project
+field editing and the search buffer remain available. Read-only catalog refreshes
+do not block project changes; their cancelled/stale results are discarded.
+
+**Cancel operation** reports cancellation requested until a terminal outcome is
+acknowledged. Cancellation wins before publication begins; a late request cannot
+undo a catalog commit. The UI then waits for the actual success or failure.
+Quit cancels and asynchronously drains owned work without blocking the GUI.
+Polling exists only during an active job. Workers never call model/widget APIs
+or capture a window pointer. Browser controls explain their desktop requirement.
+Native support follows the [host prerequisites](#prerequisites-optional-editor-setup).
+Browser import and persistence still need acceptance.
+
+The table uses a Qt model/view projection with no widget per asset row. Actual
+catalog admission remains **4096 resources / 1 MiB JSON**, as required by Content.
+The `[content][scale]` fixture separately measures a synthetic **100,000-row**
+view: population, 20 searches (p50/p95), and stable-ID lookup. The optional-editor
+CI records host/OS/architecture, Qt version and the Development profile in its
+`editor-content-scale` artifact. This is a reproducible model baseline, not a
+claim that larger catalogs are admitted or that native scrolling/accessibility
+has been qualified. Native input/scroll measurements, thumbnail budgets and
+non-audio importers remain follow-up work.
+
+Regressions exercise immutable reimport, malformed source rejection, saved-loop
+constraints, dependency/catalog conflicts, cancellation before publication,
+late-cancel semantics, ID selection across filtering, unchanged-role updates,
+stale operation/project results, GUI-owned completion and shutdown. CI runs
+those fixtures under Clang 18 analysis and ASan/UBSan.
 
 ## The project descriptor (version 1)
 
@@ -399,7 +497,7 @@ This historical S1 offscreen capture predates the Welcome/recent-project changes
 It records presentation at that stage; use the work-area table above for current
 layout roles. It does not establish native interaction or game-frame acceptance.
 
-Project settings, Audio and Configuration occupy central work areas. Recents
+Project settings, Content, Audio and Configuration occupy central work areas. Recents
 appear on Welcome and in the File menu; Live Inspector and Output are movable panels; the status bar reports current workspace state.
 The Game toolbar exposes the existing build/debug and Play controls. Toolbar
 and menu actions share controller capability gating. Project settings and Audio
@@ -418,6 +516,27 @@ supported; do not distribute layout blobs with projects.
 See [architecture](../architecture/editor-architecture.md),
 [interaction design](../architecture/editor-interaction-design.md), and
 [post-design reference review](../architecture/editor-design-review.md).
+
+## macOS validation
+
+The macOS CI job builds the Editor with pinned Clang 18 and warnings as errors,
+runs offscreen widget/document tests and real process-adapter regressions, and
+runs those widgets under ASan/UBSan. A separate explicit Cocoa test exercises a
+real native window, creation against an installed SDK, build/run, Stop of a
+long-lived runtime, read-only diagnosis of missing local presets, and repeated
+repair. Run it only after preparing the SDK and Editor tests:
+
+```bash
+QT_QPA_PLATFORM=cocoa LUDUS_SETUP_TEST_SDK="$PWD/out/install/macos-clang-development" \
+  out/build/macos-clang-development/apps/editor/ludus_editor_tests '[.macos-journey]'
+```
+
+The adapter binds Darwin `waitid(WNOWAIT)` through libc because Python does not
+expose it on macOS. Bounded libproc group snapshots replace `/proc`. The leader
+stays unreaped until descendant cleanup is confirmed, preserving the existing
+ownership/Stop contract; missing or truncated process information yields
+**CleanupUnknown**, never successful cleanup. Settings in tests are isolated
+using the same absolute `XDG_CONFIG_HOME` override as local development.
 
 ## Script assets and behavior debugging
 

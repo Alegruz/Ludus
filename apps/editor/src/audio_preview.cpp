@@ -1,11 +1,9 @@
 #include "internal/audio_preview.h"
+#include "internal/content_import.h"
 #include <ludus/audio/audio_source.h>
 #include <ludus/audio/content/loader.h>
 
 #include <QByteArray>
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
 #include <QMutex>
 #include <QMutexLocker>
 
@@ -36,195 +34,27 @@ struct AudioPreview::Impl final
     QString Root;
     audio::content::Sound Sound;
     audio::content::Music Music;
-    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): named cold import fields.
-    void ImportSource(const QString& root, const QString& file, const QString& id, uint64 epoch)
+    void ImportSource(const ContentImportSource& source, uint64 epoch)
     {
-        using CS = ludus::content::Status;
-        const auto rootBytes = root.toUtf8(), idBytes = id.toUtf8();
-        const std::string_view rootView(rootBytes.constData(), static_cast<usize>(rootBytes.size()));
-        const std::string_view idView(idBytes.constData(), static_cast<usize>(idBytes.size()));
-        auto fail = [&]() {
-            Q_EMIT Preview->Message(QStringLiteral("Import failed; existing catalog and source retained."));
+        struct Context final
+        {
+            Impl* Owner;
+            uint64 Epoch;
+        } context{this, epoch};
+        ContentImportGate gate;
+        ContentImportHooks hooks;
+        hooks.Context = &context;
+        hooks.Cancelled = [](void* value) noexcept {
+            const auto* input = static_cast<Context*>(value);
+            return input->Owner->Closing.load(std::memory_order_acquire) ||
+                   input->Owner->Epoch.load(std::memory_order_acquire) != input->Epoch;
         };
-        if (!ludus::content::ValidId(idView))
+        const auto result = ImportAudioSource(source, gate, nullptr, hooks);
+        Q_EMIT Preview->Message(result.Message);
+        if (result.Status == ludus::content::Status::Ok)
         {
-            fail();
-            return;
+            Q_EMIT Preview->Imported(source.Root);
         }
-        QFile input(file);
-        if (!input.open(QIODevice::ReadOnly) || input.size() <= 0 ||
-            static_cast<uint64>(input.size()) > audio::BROWSER_ENCODED_CAP_BYTES)
-        {
-            fail();
-            return;
-        }
-        const auto data = input.readAll();
-        if (data.size() != input.size())
-        {
-            fail();
-            return;
-        }
-        const bool flac = QFileInfo(file).suffix().compare(QStringLiteral("flac"), Qt::CaseInsensitive) == 0;
-        const auto format = flac ? audio::SourceFormat::Flac : audio::SourceFormat::Wav;
-        audio::SourceInfo info;
-        const std::span<const uint8> encoded(reinterpret_cast<const uint8*>(data.constData()),
-                                             static_cast<usize>(data.size()));
-        if (audio::InspectSource(encoded, format, info) != audio::Status::Ok)
-        {
-            fail();
-            return;
-        }
-        if (!QDir().mkpath(root + QStringLiteral("/sources")))
-        {
-            fail();
-            return;
-        }
-        ludus::content::Bytes oldCatalog;
-        auto status =
-            ludus::content::ReadFile(rootView, "catalog.json", ludus::content::MAX_DOCUMENT_BYTES, oldCatalog);
-        const bool fresh = status == CS::NotFound;
-        ludus::content::Catalog catalog;
-        ludus::content::Diagnostic diagnostic;
-        if (!fresh && (status != CS::Ok || catalog.Read(oldCatalog.String(), diagnostic) != CS::Ok))
-        {
-            fail();
-            return;
-        }
-        ludus::content::Resource resource;
-        (void)resource.Id.Set(idView);
-        resource.Type = ludus::content::Kind::AudioSource;
-        for (const auto& dependent : catalog.Entries())
-        {
-            if (dependent.Type == ludus::content::Kind::AudioSource)
-            {
-                continue;
-            }
-            ludus::content::Bytes document;
-            if (ludus::content::ReadFile(rootView,
-                                         dependent.Path.View(),
-                                         ludus::content::MAX_DOCUMENT_BYTES,
-                                         document) != CS::Ok)
-            {
-                fail();
-                return;
-            }
-            audio::content::Loop loop;
-            bool references = false;
-            if (dependent.Type == ludus::content::Kind::Music)
-            {
-                audio::content::Music music;
-                if (audio::content::ReadMusic(document.String(), music, diagnostic) != CS::Ok)
-                {
-                    fail();
-                    return;
-                }
-                references = music.Source.View() == idView;
-                loop = music.Region;
-            }
-            else
-            {
-                audio::content::Sound sound;
-                if (audio::content::ReadSound(document.String(), sound, diagnostic) != CS::Ok)
-                {
-                    fail();
-                    return;
-                }
-                loop = sound.Region;
-                for (usize i = 0; i < sound.VariationCount; ++i)
-                {
-                    references |= sound.Variations[i].View() == idView;
-                }
-                if (references && loop.Enabled)
-                {
-                    for (usize i = 0; i < sound.VariationCount; ++i)
-                    {
-                        if (sound.Variations[i].View() == idView)
-                        {
-                            continue;
-                        }
-                        const auto* other = catalog.Find(sound.Variations[i].View());
-                        ludus::content::Bytes otherBytes;
-                        audio::SourceInfo otherInfo;
-                        if (other == nullptr ||
-                            ludus::content::ReadFile(rootView,
-                                                     other->Path.View(),
-                                                     audio::BROWSER_ENCODED_CAP_BYTES,
-                                                     otherBytes) != CS::Ok ||
-                            audio::InspectSource(otherBytes.Data(),
-                                                 other->Path.View().ends_with(".flac") ? audio::SourceFormat::Flac
-                                                                                       : audio::SourceFormat::Wav,
-                                                 otherInfo) != audio::Status::Ok ||
-                            otherInfo.SampleRate != info.SampleRate)
-                        {
-                            Q_EMIT Preview->Message(
-                                QStringLiteral("Loop variations need matching sample rates; source retained."));
-                            return;
-                        }
-                    }
-                }
-            }
-            if (references && loop.Enabled && loop.End > info.Frames)
-            {
-                Q_EMIT Preview->Message(
-                    QStringLiteral("Reimport would invalidate a saved loop; existing source retained."));
-                return;
-            }
-        }
-        if (Closing.load(std::memory_order_acquire) || Epoch.load(std::memory_order_acquire) != epoch)
-        {
-            return;
-        }
-        const auto* existing = catalog.Find(idView);
-        if (existing != nullptr)
-        {
-            if (existing->Type != ludus::content::Kind::AudioSource ||
-                !existing->Path.View().ends_with(flac ? ".flac" : ".wav"))
-            {
-                fail();
-                return;
-            }
-            resource = *existing;
-            ludus::content::Bytes oldSource;
-            if (ludus::content::ReadFile(rootView, resource.Path.View(), audio::BROWSER_ENCODED_CAP_BYTES, oldSource) !=
-                CS::Ok)
-            {
-                fail();
-                return;
-            }
-            const auto digest = ludus::content::Hash(oldSource.Data());
-            if (ludus::content::SaveFile(rootView, resource.Path.View(), encoded, &digest) != CS::Ok)
-            {
-                fail();
-                return;
-            }
-        }
-        else
-        {
-            const auto relative =
-                QStringLiteral("sources/") + id + (flac ? QStringLiteral(".flac") : QStringLiteral(".wav"));
-            const auto relativeBytes = relative.toUtf8();
-            if (!resource.Path.Set({relativeBytes.constData(), static_cast<usize>(relativeBytes.size())}) ||
-                !QDir().mkpath(QFileInfo(root + QLatin1Char('/') + relative).path()) || catalog.Put(resource) != CS::Ok)
-            {
-                fail();
-                return;
-            }
-            ludus::content::Bytes next;
-            if (catalog.Write(next) != CS::Ok ||
-                ludus::content::SaveFile(rootView, resource.Path.View(), encoded, nullptr) != CS::Ok)
-            {
-                fail();
-                return;
-            }
-            const auto digest = ludus::content::Hash(oldCatalog.Data());
-            if (ludus::content::SaveFile(rootView, "catalog.json", next.Data(), fresh ? nullptr : &digest) != CS::Ok)
-            {
-                fail();
-                return;
-            }
-        }
-        Q_EMIT Preview->Message(QStringLiteral("Imported source; logical ID preserved."));
-        Q_EMIT Preview->Imported(root);
     }
     void Run()
     {
@@ -285,7 +115,7 @@ struct AudioPreview::Impl final
                 }
                 else if (import)
                 {
-                    ImportSource(root, file, importId, epoch);
+                    ImportSource({ .Root = root, .File = file, .Id = importId }, epoch);
                 }
                 else
                 {
@@ -501,16 +331,16 @@ void AudioPreview::Play(const QString& root, const audio::content::Music& music)
     Impl_->Epoch.fetch_add(1, std::memory_order_release);
     Impl_->HasCommand = true;
 }
-void AudioPreview::Import(const QString& root, const QString& file, const QString& id)
+void AudioPreview::Import(const ContentImportSource& source)
 {
     if (!Start())
     {
         return;
     }
     const QMutexLocker locker(&Impl_->Mutex);
-    Impl_->Root = root;
-    Impl_->File = file;
-    Impl_->Id = id;
+    Impl_->Root = source.Root;
+    Impl_->File = source.File;
+    Impl_->Id = source.Id;
     Impl_->ImportCommand = true;
     Impl_->StopCommand = false;
     Impl_->Epoch.fetch_add(1, std::memory_order_release);
