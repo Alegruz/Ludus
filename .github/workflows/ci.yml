@@ -118,7 +118,9 @@ jobs:
           cmake --preset macos-clang-development
           cmake --build --preset macos-clang-development
           ctest --preset macos-clang-development
-          clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' src/main.cpp
+          for source in src/main.cpp src/camera.cpp tests/camera_tests.cpp; do
+            clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' "$source"
+          done
           cmake --preset macos-clang-development -B out/sanitized -DCORNELL_ENABLE_SANITIZERS=ON
           cmake --build out/sanitized
           ctest --test-dir out/sanitized --output-on-failure --no-tests=error
@@ -415,12 +417,16 @@ jobs:
           cmake --preset linux-clang-development
           cmake --build --preset linux-clang-development
           ctest --preset linux-clang-development
-          clang-tidy -p out/build/linux-clang-development --warnings-as-errors='*' src/main.cpp
+          for source in src/main.cpp src/camera.cpp tests/camera_tests.cpp; do
+            clang-tidy -p out/build/linux-clang-development --warnings-as-errors='*' "$source"
+          done
           PYTHONPATH=../../scripts/python python3 - <<'PYFORMAT'
           from pathlib import Path
           from formatting import format_source
-          source = Path('src/main.cpp').resolve()
-          assert source.read_text() == format_source(source.read_text(), source, 'clang-format-18'), 'Run the project formatter on the sample'
+          sources = [*Path('src').glob('*.cpp'), *Path('src').glob('*.hpp'), *Path('tests').glob('*.cpp')]
+          for source in sources:
+              source = source.resolve()
+              assert source.read_text() == format_source(source.read_text(), source, 'clang-format-18'), f'Format {source}'
           PYFORMAT
           # Exercise the same setup backend as Project > Repair Project Setup.
           # Start without local presets, then prove repeated repair stays usable.
