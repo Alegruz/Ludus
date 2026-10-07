@@ -4,14 +4,14 @@
 > [Container systems](container-systems.md). That design supersedes the
 > historical future taxonomy in §26; §34 remains authoritative for the arrays.
 >
-> Status: **Implemented and fully migrated.** This document began as the design/
-> architecture deliverable; the containers have since been implemented, tested,
-> benchmarked, and the entire first-party codebase migrated onto them. As of the
-> final migration pass, **no first-party Ludus source or test uses
-> `std::vector`** — the only permitted `std::vector`/`std::array` occurrences are
-> the container benchmark's comparison baseline (`array_bench.cpp`) and
-> third-party/vendor code. See §34.3/§34.4 for the authoritative policy and the
-> two genuine remaining exceptions. Earlier sections that described a *sequenced*
+> Status: **Implemented; migration follow-up required.** This document began as
+> the design/architecture deliverable; the containers were implemented, tested,
+> benchmarked, and the first-party codebase migrated at that point. The
+> 2026-10-06 source review found reintroduced `std::vector` uses in newer modules
+> and tests. The [container milestone roadmap](container-systems.md#milestone-roadmap)
+> tracks migration repair as M1; earlier migration-completeness statements are
+> historical snapshots. See §34.3/§34.4 for the authoritative policy and permitted
+> exceptions. Earlier sections that described a *sequenced*
 > migration with deferred/"stay STL" container uses (§3, §4, §23, §24, §32.6) are
 > historical and are superseded by §34.3/§34.4 where they conflict.
 >
@@ -1907,9 +1907,9 @@ does **not** justify keeping the *container* as `std::vector`: the owning
 container migrates to `Ludus::Array` regardless, and only the element type stays
 STL until its own replacement lands.
 
-Every first-party owning `std::vector` is now migrated, **including the
-log-retention path and the test thread pools that prior revisions of this
-document had deferred**:
+The original migration replaced every first-party owning `std::vector` then
+present, **including the log-retention path and the test thread pools that prior
+revisions of this document had deferred**:
 
 - `logging/logger.cpp`: sink list → `Array<UniquePtr<ILogSink>>`; producer
   format buffer → `StaticArray<char, N>`.
@@ -1933,12 +1933,16 @@ document had deferred**:
   → `Array<std::thread>`. `std::thread` is move-only; `Array` handles it
   correctly (verified — see §34.5).
 - `docs/architecture/logging-review-evidence/probe.cpp`: the review evidence
-  probe's `std::vector<std::thread>` → `Array<std::thread>`, so the repository
-  contains no first-party `std::vector` outside the benchmark baseline.
+  probe's `std::vector<std::thread>` → `Array<std::thread>`.
+
+The 2026-10-06 source review found later first-party `std::vector` uses in Text,
+GameHost protocol/session storage, Audio Gym and tests. They are migration debt
+under this policy. [Milestone M1](container-systems.md#milestone-roadmap) tracks
+consumer-by-consumer repair and an automated regression gate.
 
 ### 34.4 Remaining STL exceptions (verified genuine)
 
-Only two categories remain, and both are permitted by the policy above:
+The original audit retained two categories of exceptions:
 
 - `foundation/base/src/diagnostic.cpp` — `std::array<char, N>` (×3) in the
   emergency diagnostic/assertion path. This is a **hard** boundary, not
@@ -1952,8 +1956,9 @@ Only two categories remain, and both are permitted by the policy above:
   comparison baselines. Their whole purpose is to benchmark against the STL, and
   the translation unit is not in the engine build graph.
 
-No first-party `std::vector` remains outside the benchmark baseline. No
-undocumented owning-STL-container usage remains.
+The exceptions do not cover the later first-party `std::vector` uses tracked by
+M1. Restore migration completeness before claiming the current tree contains
+only these exceptions.
 
 ### 34.5 `Array` with move-only / non-trivial element types (verified)
 

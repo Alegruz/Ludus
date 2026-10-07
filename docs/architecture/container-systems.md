@@ -4,7 +4,8 @@ Status: first implementation increment. This design extends the implemented
 [contiguous containers](containers.md#34-ludus-native-taxonomy-and-api-authoritative-naming)
 and respects [memory ownership](memory-management.md). It does not replace
 those contracts. Types marked planned below are architectural decisions, not
-available SDK APIs.
+available SDK APIs. The [milestone roadmap](#milestone-roadmap) tracks the
+remaining integration and implementation work.
 
 ## Requirements and evidence
 
@@ -213,18 +214,67 @@ a concrete consumer and measurements before implementation.
 
 ## Rollout and verification
 
-1. First PR: this architecture and source review; `SortedMap`; fallible `Array`
-   insertion and append failure repair; GameHost migration; installed-SDK use;
-   allocation/lifetime/model
-   regressions and a repeatable benchmark.
-2. Next independent increment: extract one bounded sequence or bitset from a
-   consumer with evidence of duplicate logic; verify limits and zero allocation.
-3. Hash containers: benchmark and select a lookup implementation for a measured
-   consumer; migrate it in the same PR. Keep SortedMap for ordered registries.
-4. Handle/sparse containers: first establish owner, generation exhaustion, and
-   subsystem ABI semantics; then extract from World/Content only if reuse pays.
-5. Allocation domains and diagnostics: follow the memory-management phases;
-   preserve view and lookup APIs while versioning any owning-layout change.
+### Milestone roadmap
+
+Planning baseline: **2026-10-06**. M0 records implemented functionality, not a
+fresh certification of every review gate. Later milestones are unfinished.
+"Gated" means a consumer or design decision must be established before committing
+to the public primitive. Numbers express the recommended order; the dependencies
+below determine which increments can proceed independently.
+
+| ID | Milestone | Status | Deliverable and exit criterion |
+| --- | --- | --- | --- |
+| M0 | Contiguous arrays and first ordered map | Implemented | `StaticArray`, `Array`, `SortedMap`, fallible insertion/append, GameHost resource bindings, model/lifetime/allocation tests, SDK probe and benchmark exist. Retain their contracts and scoped measurement evidence. |
+| M1 | Restore migration and explicit allocation failure | Planned | Replace reintroduced first-party `std::vector` uses with `Array`, including tests and exported Audio Gym APIs. Use fallible operations at status-returning boundaries, preserve consumer lifetimes and outputs on failure, and add an automated policy check with the existing benchmark/vendor exceptions. |
+| M2 | Complete existing container API documentation | Planned | Add Doxygen contracts to the existing public container API, remove resolved entries from `api-undocumented.json`, and provide a wiki usage/selection guide distinguishing shipped APIs from plans. Strict wiki/API builds and coverage checks pass. |
+| M3 | `FixedArray<T, N>` and one Input migration | Planned | Implement a live prefix in inline raw storage, explicit full status, and construction of occupied slots only. Migrate an Input binding or step-event buffer; verify zero allocation, zero capacity, non-default/move-only values, aliasing, failure preservation and balanced lifetimes. |
+| M4 | Single-owner `RingBuffer<T>` | Gated | Establish capacity/backing-storage ownership and select a FIFO consumer; Input's pending-transition ring is a candidate. Implement wrapped front/back spans and explicit full/empty behavior; model-test wraparound and lifetimes while preserving the consumer's overflow/reset policy. |
+| M5 | `BitSet` and `StaticBitSet<N>` | Gated | Select a flags/membership consumer and define resize initialization, bounds and word operations. Verify 0/1/63/64/65-bit boundaries, tail masking, shifts and fallible dynamic growth; measure storage/operation costs and migrate the selected consumer. |
+| M6 | Array allocation-domain integration | Planned; Memory prerequisites | Reuse FoundationMemory through the Array byte seam, then introduce domain ownership as a separately measured layout change. Test original-domain frees, copy/move/swap rules, nested owners, over-alignment and OOM preservation; version the SDK owning-layout boundary. |
+| M7 | `SortedSet<K>` | Gated | Identify an ordered uniqueness consumer. Reuse the ordering/equivalence contract and contiguous lifetime helpers; verify duplicate insertion consumes nothing, keys remain immutable through public access, and ordered output matches an independent model. |
+| M8 | `HashMap` and consumer-required `HashSet` | Gated | Compare a scalar flat table with grouped-control alternatives on a named mutable-lookup workload. Select and implement one algorithm, reuse FoundationHash, and migrate the consumer. Collision/deletion/rehash models, bounded probing and allocation-failure rollback pass; record native/Wasm results. |
+| M9 | Typed handles and `SlotMap<T>` | Gated | Establish owner/cross-instance identity, generation exhaustion and subsystem ABI semantics first. Extract a reusable dense-value primitive with reverse indices; verify stale/foreign handles, removal, clear, move and multi-allocation rollback against a model. |
+| M10 | `SparseSet<T>` extraction | Gated | Demonstrate reusable storage logic in World or another bounded-ID consumer. Extract membership/dense storage while retaining ECS policy in World; verify ID bounds, back-links, swap removal, failure preservation and sparse-address-space memory costs. |
+
+M1 should land in reviewable consumer increments: Text and its OOM paths first,
+then GameHost protocol/session storage and Audio Gym, followed by remaining
+first-party tests/tools. For example,
+[`LoadFont`](../../modules/text/src/font_system.cpp) currently calls
+`std::vector::resize` before checking the resulting size for OOM; allocation
+failure does not reach that status check in the exception-free build. Migration
+must repair the failure protocol rather than only rename the container. Recheck
+the inventory at implementation time and update the historical migration claims
+only after the policy gate passes. Replacing `std::string`, filesystem facilities
+or unrelated ownership types stays in their own workstreams.
+
+M2 can proceed alongside M1. Every subsequent milestone includes Doxygen for its
+new/changed API and the relevant wiki/guide update in the same change; M2 is not
+permission to defer documentation for new features. M3 is the recommended next
+new container after M1. M4 and M5 may follow independently once their consumers
+are established; generic rings retain single-owner semantics and do not replace
+the audio/logging/profiling publication protocols.
+
+M6 follows the byte-boundary and attribution decisions in
+[Memory phases 1 and 2](memory-management.md#17-implementation-phases). Existing
+allocation domains do not by themselves establish that Array integration or
+accounting/ABI prerequisites are complete. Split backend redirection from the
+per-owner domain/layout change and retain the accepted ownership rules when
+later containers are added. M6 can proceed independently of bounded inline
+storage; a heap-owning milestone must state which allocation seam it uses.
+
+M7 and M8 do not require each other. M8's benchmark/selection step precedes its
+public implementation; `HashSet` shares the chosen policy when a consumer needs
+it. M9's identity decision precedes any extraction. M10 can reuse existing World
+identity without waiting for a generic SlotMap if a separate extraction pays.
+Owning move-only String keys, heterogeneous lookup and stateful policies remain
+consumer-driven contract extensions; none is required to declare M0 implemented.
+
+`SmallArray`, address-stable pools, dynamic trees, generic concurrent collections
+and virtual-memory storage remain a conditional backlog. Each needs a named
+consumer and its own lifetime/ownership contract plus measured benefit before
+receiving an implementation milestone.
+
+### Completion and evidence
 
 For each increment run warning-clean pinned builds, unit/model/lifetime tests,
 ASan/UBSan, format/tidy, standalone-header/include-boundary gates, SDK consumer,
@@ -240,6 +290,11 @@ CI. Measure lookup and mutation separately; optimizing one does not prove the
 other improved. Build-budget checks remain unchanged. The
 [first increment's evidence](../development/container-systems-evidence.md)
 records measured lookup losses, small-table rebuild wins, and allocation tests.
+Record later results by milestone with the tested revision, commands, consumer,
+allocation/memory measurements and any skipped or incomplete checks. Preserve
+the first increment's historical measurements. Mark a milestone complete only
+when its deliverable, consumer migration where required, documentation and
+applicable validation gates are satisfied.
 
 ## Gems review and resulting revisions
 

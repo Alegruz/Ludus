@@ -21,6 +21,13 @@ containers or these services. New engine code uses Ludus aliases such as `uint32
 `usize` and `float32`, with explicit errors and no C++ exceptions. See the
 [contributor rules](https://github.com/Alegruz/Ludus/blob/main/AGENTS.md).
 
+`StaticArray`, `Array` and `SortedMap` are implemented container APIs. The
+[container milestone roadmap](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/container-systems.md#milestone-roadmap)
+tracks migration repair, API documentation, bounded storage, allocation-domain
+integration and later lookup/handle containers. Planned types are not available
+SDK APIs; new implementations require a consumer and their stated validation
+gates.
+
 ## Allocation identity is also lifetime
 
 `AllocationDomain` holds a stable context plus allocation/free callbacks.
