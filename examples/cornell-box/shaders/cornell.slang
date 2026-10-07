@@ -6,6 +6,10 @@
 struct DisplayUniforms
 {
     float4 viewport; // width, height, manual sRGB encoding (0/1), flat materials (0/1)
+    float4 eye;
+    float4 right; // world ray displacement at NDC X = 1
+    float4 up; // world ray displacement at NDC Y = 1
+    float4 forward;
 };
 [[vk::binding(0, 0)]] ConstantBuffer<DisplayUniforms> display;
 
@@ -151,10 +155,10 @@ float4 fragmentMain(float4 position : SV_Position) : SV_Target0
 #if LUDUS_GLSL_ES
     position.y = display.viewport.y - position.y;
 #endif
-    float2 screen = (position.xy * 2.0 - display.viewport.xy) / display.viewport.y;
+    float2 screen = (position.xy * 2.0 - display.viewport.xy) / display.viewport.xy;
     screen.y = -screen.y;
-    float3 direction = normalize(float3(screen * 0.40, -1.0));
-    float3 color = shade(float3(0.0, 1.0, 3.6), direction);
+    float3 direction = normalize(display.forward.xyz + screen.x * display.right.xyz + screen.y * display.up.xyz);
+    float3 color = shade(display.eye.xyz, direction);
     color = color / (1.0 + color); // simple exposure/tone mapping
     if (display.viewport.z > 0.5) color = linearToSrgb(color);
     return float4(color, 1.0);

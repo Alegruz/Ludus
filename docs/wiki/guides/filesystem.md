@@ -171,3 +171,7 @@ to select a scoped follow-up: publication recovery, representative streaming,
 conditional backend/pack optimization, or Content hint recovery. That page owns
 the references, priorities and acceptance criteria. Record evaluated experiments
 in the [filesystem measurements](../../development/filesystem-benchmark.md).
+
+For proposed pipeline and platform backend work, see the
+[asynchronous I/O evolution decision](../../architecture/filesystem.md#asynchronous-io-evolution-decision).
+It preserves the current SDK contracts and records the Gems review and adoption gates.

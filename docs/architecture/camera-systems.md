@@ -851,6 +851,10 @@ proposal alone does not execute those runtime gates or claim implementation read
 
 ## C0 runtime and usage
 
+Consumers include [world_demo](../examples/world-demo.md) for fixed/planar follow
+and the [Cornell box sample](../examples/cornell-box.md#9-follow-the-engine-frame-lifecycle)
+for a fixed perspective shot. Each renderer owns its checked extraction adapter.
+
 The initial C0 implementation exports `Ludus::GameplayCamera` on native and web
 targets. Its public contracts live in `camera.hpp` and `evaluation.hpp` under
 `modules/gameplay/camera/include/ludus/gameplay/camera/`. It supplies an authored

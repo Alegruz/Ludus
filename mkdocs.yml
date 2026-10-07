@@ -107,6 +107,7 @@ nav:
       - Startup and shutdown: wiki/architecture/lifecycle.md
       - Platform and rendering: wiki/architecture/rendering.md
       - Terrain and generation: wiki/architecture/terrain.md
+      - Physics systems proposal: architecture/physics-systems.md
       - Worlds and frame updates: wiki/architecture/world.md
       - Content and audio: wiki/architecture/content.md
       - Runtime and editor: wiki/architecture/runtime.md
