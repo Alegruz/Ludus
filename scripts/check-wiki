@@ -105,7 +105,7 @@ def check(root, site, config):
                 target = destination(location or ".", "index.html")
                 if target is not None:
                     indexed.add(target)
-            for missing in sorted(set(pages) - {"404.html"} - indexed):
+            for missing in sorted(set(pages) - {"404.html", "editor/index.html"} - indexed):
                 failures.append(f"Page missing from search index: {missing}")
     except (OSError, ValueError, KeyError, TypeError) as error:
         failures.append(f"Invalid search index: {error}")

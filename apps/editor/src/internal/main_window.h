@@ -127,6 +127,9 @@ private:
     QAction* SetupProjectAction_ = nullptr;
     QAction* OpenAction_ = nullptr;
     QAction* SaveAction_ = nullptr;
+#if defined(Q_OS_WASM)
+    QAction* ExportProjectAction_ = nullptr;
+#endif
     QAction* ReloadAction_ = nullptr;
     QAction* ConfigureAction_ = nullptr;
     QAction* BuildAction_ = nullptr;

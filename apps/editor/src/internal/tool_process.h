@@ -14,7 +14,9 @@
 #include <ludus/foundation/base/types.h>
 
 #include <QObject>
-#include <QProcess>
+#if !defined(Q_OS_WASM)
+#    include <QProcess>
+#endif
 #include <QString>
 #include <QStringList>
 #include <QTimer>
@@ -157,6 +159,7 @@ Q_SIGNALS:
     void Event(const ProtocolEvent& event);
     void Finished();
 
+#if !defined(Q_OS_WASM)
 private Q_SLOTS:
     void OnStarted();
     void OnStdout();
@@ -179,6 +182,10 @@ private:
     QTimer ReadyTimer_;
     ToolLaunch Launch_;
     uint64 Job_ = 0;
+#else
+private:
+    uint64 Job_ = 0;
+#endif
 
     bool Active_ = false;
     bool ReadyReceived_ = false;

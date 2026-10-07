@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Use the Ludus Qt editor workspace in your browser.">
+  <title>Ludus Editor · Browser preview</title>
+  <link rel="stylesheet" href="editor.css">
+  <script src="ludus_editor.js" defer></script>
+  <script src="qtloader.js" defer></script>
+  <script src="editor.js" defer></script>
+</head>
+<body>
+  <header>
+    <a href="../index.html">Ludus Wiki</a>
+    <strong>Ludus Editor <span>Browser preview</span></strong>
+    <a href="../guides/browser-editor/">Help and supported actions</a>
+  </header>
+  <aside>Project and configuration editing · Session files: download your changes before leaving · Builds, Play and debugging require the desktop editor.</aside>
+  <main>
+    <div id="loading" role="status" aria-live="polite">
+      <h1>Open your workspace in the browser</h1>
+      <p id="status">Loading the Ludus editor…</p>
+      <button id="retry" type="button" hidden>Retry</button>
+      <p><a href="../guides/editor/">Use the desktop editor</a></p>
+    </div>
+    <div id="screen" aria-label="Ludus editor workspace"></div>
+  </main>
+  <footer><a href="NOTICE.txt">Third-party notices and source</a> · <a href="build-info.json">Build information</a></footer>
+  <noscript>The editor requires JavaScript and WebAssembly. <a href="../guides/editor/">Use the desktop editor.</a></noscript>
+</body>
+</html>

@@ -38,6 +38,11 @@ Capabilities EditorController::Caps() const
             caps.CanReleaseInit = caps.CanPackage = false;
         }
     }
+#if defined(Q_OS_WASM)
+    caps.CanConfigure = caps.CanBuild = caps.CanBuildRun = caps.CanBuildDebug = false;
+    caps.CanProjectCheck = caps.CanProjectSetup = caps.CanProjectCreate = false;
+    caps.CanReleaseInit = caps.CanPackage = false;
+#endif
     return caps;
 }
 

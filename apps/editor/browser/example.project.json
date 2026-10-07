@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "Browser workspace example",
+  "provider": "cmake",
+  "source_dir": ".",
+  "preset": "linux-clang-development",
+  "target": "ludus_smoke",
+  "run": { "cwd": ".", "args": [] }
+}

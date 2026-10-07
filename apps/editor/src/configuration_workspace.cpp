@@ -1,4 +1,5 @@
 #include "internal/configuration_workspace.h"
+#include "internal/editor_files.h"
 
 #include <ludus/foundation/config/json.hpp>
 #include <ludus/runtime/configuration/host_options.hpp>
@@ -114,28 +115,36 @@ ConfigurationWorkspace::ConfigurationWorkspace(QWidget* parent) : QWidget(parent
         (void)Edit(Context_->Schema()[static_cast<foundation::usize>(Table_->currentRow())].Name, {}, true);
     });
     button(QStringLiteral("Load project bundle…"), "configurationLoadProject", [this]() {
-        const auto path = QFileDialog::getOpenFileName(this,
-                                                       QStringLiteral("Load cooked project configuration"),
-                                                       {},
-                                                       QStringLiteral("JSON (*.json)"));
-        if (!path.isEmpty())
-        {
-            (void)Load(path, Layer::Project);
-        }
+        OpenEditorDocument(this,
+                           {
+                               .Title = QStringLiteral("Load cooked project configuration"),
+                               .Directory = {},
+                               .Filter = QStringLiteral("JSON (*.json)"),
+                           },
+                           [this](const QString& path) { (void)Load(path, Layer::Project); });
     });
     button(QStringLiteral("Load preferences…"), "configurationLoadPreferences", [this]() {
-        if (!ConfirmDiscard())
-        {
-            return;
-        }
-        const auto path =
-            QFileDialog::getOpenFileName(this, QStringLiteral("Load preferences"), {}, QStringLiteral("JSON (*.json)"));
-        if (!path.isEmpty())
-        {
-            (void)Load(path, Layer::Preference);
-        }
+        OpenEditorDocument(this,
+                           {
+                               .Title = QStringLiteral("Load preferences"),
+                               .Directory = {},
+                               .Filter = QStringLiteral("JSON (*.json)"),
+                           },
+                           [this](const QString& path) {
+                               if (ConfirmDiscard())
+                               {
+                                   (void)Load(path, Layer::Preference);
+                               }
+                           });
     });
     button(QStringLiteral("Save sparse preferences…"), "configurationSave", [this]() {
+#if defined(Q_OS_WASM)
+        const auto path = QStringLiteral("/browser-preferences.json");
+        if (SavePreferences(path))
+        {
+            (void)DownloadEditorDocument(this, path);
+        }
+#else
         const auto path = QFileDialog::getSaveFileName(this,
                                                        QStringLiteral("Save preferences"),
                                                        PreferencePath_,
@@ -144,6 +153,7 @@ ConfigurationWorkspace::ConfigurationWorkspace(QWidget* parent) : QWidget(parent
         {
             (void)SavePreferences(path);
         }
+#endif
     });
     Status_ = new QLabel(this);
     Status_->setObjectName(QStringLiteral("configurationStatus"));
@@ -302,6 +312,9 @@ bool ConfigurationWorkspace::Edit(std::string_view name, const QString& text, bo
         return false;
     }
     Dirty_ = true;
+#if defined(Q_OS_WASM)
+    MarkBrowserEdited();
+#endif
     Render();
     return true;
 }

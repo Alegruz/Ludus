@@ -354,6 +354,12 @@ void EditorController::StartJob(ActionKind kind, ToolOperation operation, const 
 
 void EditorController::ScheduleSetupCheck()
 {
+#if defined(Q_OS_WASM)
+    SetupCheckPending_ = false;
+    State_.SetupStatus =
+        QStringLiteral("Browser workspace: local builds, Play and debugger require the desktop editor.");
+    return;
+#endif
     // Open/Reload remain metadata operations. Queue the trusted read-only check
     // with an epoch guard so a later project switch cannot check the old project.
     SetupCheckPending_ = QFileInfo::exists(Tooling_.AdapterPath);

@@ -9,6 +9,8 @@
 #include "internal/controller.h"
 #include "internal/main_window.h"
 
+#include <ludus/foundation/base/types.h>
+
 #include <ludus/foundation/logging/category.hpp>
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
@@ -27,7 +29,7 @@ LUDUS_DEFINE_LOG_CATEGORY(LOG_EDITOR_MAIN, "Editor");
 void ForwardQtMessage(QtMsgType type, const QMessageLogContext& /*context*/, const QString& message)
 {
     const QByteArray utf8 = message.toUtf8();
-    const std::string_view view(utf8.constData(), static_cast<std::size_t>(utf8.size()));
+    const std::string_view view(utf8.constData(), static_cast<ludus::foundation::usize>(utf8.size()));
     switch (type)
     {
         case QtDebugMsg:
@@ -85,7 +87,12 @@ int main(int argc, char** argv)
     ludus::editor::EditorController controller(tooling);
     ludus::editor::MainWindow window(&controller);
     window.resize(900, 700);
+#if defined(Q_OS_WASM)
+    window.showMaximized();
+    controller.OpenProject(QStringLiteral("/browser-example/ludus.project.json"));
+#else
     window.show();
+#endif
 
     if (parser.isSet(projectOption))
     {

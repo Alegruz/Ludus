@@ -230,7 +230,7 @@ class AnalysisTests(unittest.TestCase):
 
 class BrowserAnalysisTests(unittest.TestCase):
     def test_owns_engine_apps_and_probes_but_not_vendor_or_generated_sources(self):
-        root = Path("/tmp/browser-analysis")
+        root = Path("/tmp/browser-analysis").resolve()
         sources = ["modules/audio/src/audio.cpp", "apps/smoke/main.cpp", "tools/web-rhi-probe/main.cpp",
                    "tests/sdk_consumer/strings.cpp", "third_party/yyjson/yyjson.c", "out/generated.cpp",
                    "modules-other/file.cpp"]
@@ -243,12 +243,13 @@ class BrowserAnalysisTests(unittest.TestCase):
             self.assertIn("--warnings-as-errors=*", command)
             self.assertIn("--target=wasm32-unknown-emscripten", command)
             self.assertIn("-DWEB=1", command)
+            self.assertIn("-frelaxed-template-template-args", command)
             self.assertNotIn("object.o", command)
             self.assertNotIn("-c", command)
             self.assertNotIn("--use-port=emdawnwebgpu", command)
 
     def test_argument_arrays_and_paths_with_spaces_are_preserved(self):
-        root = Path("/tmp/browser project")
+        root = Path("/tmp/browser project").resolve()
         source = str(root / "modules/base/src/main.cpp")
         entries = [{"file": source, "arguments": ["em++", "-I", str(root / "include"), "-c", source, "-o", "main.o"]}]
         command = web_build.analysis_commands(root, entries, "clang-tidy-18", root / "sysroot")[0]

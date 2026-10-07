@@ -1,6 +1,7 @@
 #include "internal/main_window.h"
 #include "internal/audio_workspace.h"
 #include "internal/configuration_workspace.h"
+#include "internal/editor_files.h"
 #include "internal/project_creation_dialog.h"
 #include "internal/project_setup_dialog.h"
 #include "internal/workspace_style.h"
@@ -92,6 +93,20 @@ void MainWindow::BuildMenus()
     connect(CheckSetupAction_, &QAction::triggered, Controller_, &EditorController::CheckProjectSetup);
     connect(SetupProjectAction_, &QAction::triggered, this, &MainWindow::OnSetupProject);
 
+#if defined(Q_OS_WASM)
+    SaveAction_->setText(QStringLiteral("Save and &Download Project"));
+    ExportProjectAction_ = fileMenu->addAction(QStringLiteral("Download Project Descriptor..."));
+    connect(ExportProjectAction_, &QAction::triggered, this, [this]() {
+        if (Controller_->Caps().CanSave)
+        {
+            Controller_->Save();
+        }
+        if (!Controller_->State().Dirty())
+        {
+            (void)DownloadEditorDocument(this, Controller_->State().DescriptorPath);
+        }
+    });
+#endif
     QMenu* buildMenu = menuBar()->addMenu(QStringLiteral("&Build"));
     ConfigureAction_ = buildMenu->addAction(QStringLiteral("&Configure / Refresh Targets"));
     BuildAction_ = buildMenu->addAction(QStringLiteral("&Build"));
@@ -316,11 +331,19 @@ void MainWindow::OnOpenRequested()
     const QString directory = Controller_->State().DescriptorPath.isEmpty()
                                   ? QString()
                                   : QFileInfo(Controller_->State().DescriptorPath).absolutePath();
-    const QString path = QFileDialog::getOpenFileName(this,
-                                                      QStringLiteral("Open Project Descriptor"),
-                                                      directory,
-                                                      QStringLiteral("Ludus Project (*.json)"));
-    OpenProjectPath(path);
+    const auto epoch = Controller_->State().ProjectEpoch;
+    OpenEditorDocument(this,
+                       {
+                           .Title = QStringLiteral("Open Project Descriptor"),
+                           .Directory = directory,
+                           .Filter = QStringLiteral("Ludus Project (*.json)"),
+                       },
+                       [this, epoch](const QString& path) {
+                           if (Controller_->State().ProjectEpoch == epoch)
+                           {
+                               OpenProjectPath(path);
+                           }
+                       });
 }
 
 void MainWindow::OpenProjectPath(const QString& path)
@@ -345,6 +368,12 @@ void MainWindow::OnSaveRequested()
         return;
     }
     Controller_->Save();
+#if defined(Q_OS_WASM)
+    if (!Controller_->State().Dirty())
+    {
+        (void)DownloadEditorDocument(this, Controller_->State().DescriptorPath);
+    }
+#endif
 }
 
 void MainWindow::OnReloadRequested()
@@ -400,7 +429,12 @@ void MainWindow::OnStateChanged()
     {
         WorkTabs_->setCurrentWidget(ProjectSettings_);
     }
+#if defined(Q_OS_WASM)
+    Audio_->setEnabled(false);
+    Audio_->setToolTip(QStringLiteral("Audio authoring and preview require the desktop editor."));
+#else
     Audio_->setEnabled(state.Document == DocumentState::ProjectLoaded && !AudioClosing_ && !AudioLaunchPending_);
+#endif
     if (state.Document == DocumentState::ProjectLoaded)
     {
         const auto root = QDir(QFileInfo(state.DescriptorPath).absolutePath()).absoluteFilePath(state.Saved.SourceDir);
@@ -564,6 +598,30 @@ void MainWindow::RenderCapabilities()
     StopAction_->setEnabled(caps.CanStop);
     SetupReleaseAction_->setEnabled(caps.CanReleaseInit);
     PackageReleaseAction_->setEnabled(caps.CanPackage);
+#if defined(Q_OS_WASM)
+    ExportProjectAction_->setEnabled(Controller_->State().Document == DocumentState::ProjectLoaded);
+    const auto desktop =
+        QStringLiteral("Requires the desktop editor: this browser workspace cannot run local tools or native games.");
+    for (auto* action : {NewProjectAction_,
+                         CheckSetupAction_,
+                         SetupProjectAction_,
+                         ConfigureAction_,
+                         BuildAction_,
+                         BuildRunAction_,
+                         BuildDebugAction_,
+                         SetupReleaseAction_,
+                         PackageReleaseAction_,
+                         PlayAction_,
+                         BuildReloadAction_})
+    {
+        action->setToolTip(desktop);
+    }
+    WelcomeNewButton_->setToolTip(desktop);
+    if (Controller_->State().Dirty())
+    {
+        MarkBrowserEdited();
+    }
+#endif
     ClearAction_->setEnabled(caps.CanClearOutput);
     CopyAction_->setEnabled(caps.CanCopyJobDetails);
 
