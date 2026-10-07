@@ -88,6 +88,12 @@ qt_add_executable(ludus_editor
     src/controller_play.cpp
 )
 set_target_properties(ludus_editor PROPERTIES AUTOMOC ON)
+if(APPLE)
+    set_target_properties(ludus_editor PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_GUI_IDENTIFIER "org.ludus.editor"
+        MACOSX_BUNDLE_BUNDLE_NAME "Ludus Editor")
+endif()
 target_include_directories(ludus_editor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_definitions(ludus_editor PRIVATE QT_NO_KEYWORDS QT_NO_CAST_FROM_ASCII)
 target_link_libraries(ludus_editor

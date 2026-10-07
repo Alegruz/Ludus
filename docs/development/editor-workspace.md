@@ -101,7 +101,10 @@ embedded DWARF. Its macOS UI action is guarded and disabled; use Build and Run.
 RAD debugging and release packaging/signing are also disabled on macOS, with
 backend errors if invoked directly. These deferred features do not block ordinary
 build/run. The Editor is built from the tooling checkout; this port does not add
-an installed/signable Editor application bundle to the runtime SDK.
+an installed/signable Editor application bundle to the runtime SDK. The local
+macOS build produces `ludus_editor.app`, with the required Qt frameworks supplied
+by the opted-in development installation; the File API launcher resolves its
+executable inside the bundle.
 
 ## Launch
 

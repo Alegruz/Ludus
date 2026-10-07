@@ -64,9 +64,6 @@ _UNKNOWN_PROCESS_OWNERS: list["OwnedProcess"] = []
 # File API named client for the editor.
 FILE_API_CLIENT = "ludus-editor"
 
-# Supported native presets (design section 4/7).
-PRESETS = ("linux-clang-debug", "linux-clang-development")
-
 
 class ProtocolError(Exception):
     """Fatal protocol framing/version/type failure; cleans up then exits 2."""
