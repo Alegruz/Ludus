@@ -524,7 +524,7 @@ Do not broaden the relocatability trait, change growth factor, replace strings, 
 
 ### 11.1 One authoritative ownership/accounting source
 
-Memory owns the successful allocation/free boundary. The profiler observes it. Existing [profiling §7](profiling-final.md#7-step-6--memory-profiling-ownership-c4) already separates capacity, activity, lifetime/attribution and allocator efficiency; preserve that model.
+Memory owns the successful allocation/free boundary. The profiler observes it. Existing [profiling §7](profiling-final.md#7-step-6-memory-profiling-ownership-c4) already separates capacity, activity, lifetime/attribution and allocator efficiency; preserve that model.
 
 This proposal **refines** that section's implementation assumptions: original domain/size/alignment travel with the owner, so free can charge its origin without a mandatory prefix header. Rich origin tokens and lifetime IDs belong to optional live metadata/capture. Domain totals remain available in all builds, subject to their measured cost; whole-process exactness and exact instantaneous summed high-water marks are not implied. These refinements become authoritative on acceptance of ADR 0008.
 

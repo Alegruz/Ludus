@@ -67,7 +67,7 @@ At the initial design pass, the Foundation tree had Base, Containers, Logging,
 Profiling and Math, without Strings, Hash or a Memory implementation. The
 allocation boundary was a prerequisite for allocating owners. The
 [implementation status](#implementation-status) below now records the shipped
-Memory seam, Hash and Strings modules. Use the [wiki strings guide](https://github.com/Alegruz/Ludus/blob/main/docs/wiki/guides/strings.md)
+Memory seam, Hash and Strings modules. Use the [wiki strings guide](../wiki/guides/strings.md)
 and actual public headers for current API usage; the layout and declarations
 below remain design sketches.
 

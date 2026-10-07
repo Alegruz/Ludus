@@ -61,5 +61,5 @@ removal of those descriptions also fails the gate. The explicit
 Brief/detail description coverage is not proof that every parameter, unit or
 ownership guarantee is correct; reviewers still check the contract.
 
-Read the [tooling contract](https://github.com/Alegruz/Ludus/blob/main/docs/development/api-reference.md)
+Read the [tooling contract](../../development/api-reference.md)
 for public-header inventory limits and generated configuration templates.

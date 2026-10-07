@@ -36,6 +36,6 @@ Before changing projects or launching work that owns audio preview, stop auditio
 and save or discard the audio draft explicitly. Cancellation and failed save
 leave the authored draft available for recovery.
 
-References: [authoring contracts](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/audio-authoring.md),
-[implemented content/preview evidence](https://github.com/Alegruz/Ludus/blob/main/docs/development/audio-content-evidence.md),
-and [resource formats](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/content-resources.md).
+References: [authoring contracts](../../architecture/audio-authoring.md),
+[implemented content/preview evidence](../../development/audio-content-evidence.md),
+and [resource formats](../../architecture/content-resources.md).

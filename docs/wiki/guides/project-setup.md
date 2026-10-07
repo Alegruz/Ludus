@@ -59,5 +59,5 @@ ludus project repair /path/to/MyGame --tools /path/to/Ludus --sdk /path/to/sdk
 ```
 
 For store installation, engine migration and direct CMake, see the
-[complete project/SDK guide](https://github.com/Alegruz/Ludus/blob/main/docs/development/project-sdk-workflow.md)
-and [editor repair workflow](https://github.com/Alegruz/Ludus/blob/main/docs/development/editor-workspace.md).
+[complete project/SDK guide](../../development/project-sdk-workflow.md)
+and [editor repair workflow](../../development/editor-workspace.md).

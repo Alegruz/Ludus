@@ -1,7 +1,7 @@
 # Ludus audio decision log
 
 Status: living document, started 2026-10-02 during A0 implementation of the
-[audio spec](../../.kiro/specs/audio/README.md) (see
+[audio spec](../../.kiro/specs/audio/requirements.md) (see
 [requirements](../../.kiro/specs/audio/requirements.md),
 [design](../../.kiro/specs/audio/design.md),
 [tasks](../../.kiro/specs/audio/tasks.md),

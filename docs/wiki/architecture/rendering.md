@@ -58,6 +58,6 @@ use the exported `ludus_compile_shader` helper. Private smoke/probe WGSL pipelin
 remain sample/test boundaries.
 
 Read the [RHI module guide](https://github.com/Alegruz/Ludus/blob/main/modules/graphics/rhi/README.md),
-[public rendering contract](https://github.com/Alegruz/Ludus/blob/main/docs/development/fullscreen-rendering.md)
-and [runtime UI design](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/ui.md).
+[public rendering contract](../../development/fullscreen-rendering.md)
+and [runtime UI design](../../architecture/ui.md).
 Continue with [world-to-presentation ownership](world.md).

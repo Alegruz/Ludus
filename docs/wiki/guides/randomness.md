@@ -185,8 +185,8 @@ are not currently editor features.
 ## Sources and further reading
 
 Thanks to the authors below for the ideas used in the implementation. The
-[architecture](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/randomness.md)
-and [consulted chapter review](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/randomness-gems-review.md)
+[architecture](../../architecture/randomness.md)
+and [consulted chapter review](../../architecture/randomness-gems-review.md)
 explain adaptations, compatibility decisions and remaining proposals.
 
 - **John K. Salmon, Mark A. Moraes, Ron O. Dror and David E. Shaw**, *Parallel

@@ -29,8 +29,8 @@ embedded play and a full online editor are separate later work.
 
 ## Evidence and design
 
-- [Editor architecture and milestones](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-architecture.md)
-- [Audio implementation and remaining acceptance](https://github.com/Alegruz/Ludus/blob/main/docs/development/audio-content-evidence.md)
-- [Integrated browser smoke evidence](https://github.com/Alegruz/Ludus/blob/main/docs/development/webgpu-w6-evidence.md)
-- [Browser product strategy](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-browser-strategy.md)
-- [Editor art-direction studies](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/editor-art-direction.md)
+- [Editor architecture and milestones](../../architecture/editor-architecture.md)
+- [Audio implementation and remaining acceptance](../../development/audio-content-evidence.md)
+- [Integrated browser smoke evidence](../../development/webgpu-w6-evidence.md)
+- [Browser product strategy](../../architecture/editor-browser-strategy.md)
+- [Editor art-direction studies](../../architecture/editor-art-direction.md)

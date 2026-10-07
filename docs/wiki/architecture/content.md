@@ -24,7 +24,7 @@ acceptance phases; linking a browser target does not establish that workflow.
 Content stays below audio-specific behavior; AudioContent depends on Content
 and Audio. Qt adapters live in the editor. Parser, OS and audio-device types do
 not leak into installed public headers. See the
-[catalog/loading contract](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/content-resources.md).
+[catalog/loading contract](../../architecture/content-resources.md).
 
 ## Read and save native content
 
@@ -72,7 +72,7 @@ cooperating writers only; external tools that ignore the lock can still race
 publication. A save covers one file at a time. These Content capabilities do not
 establish the full macOS composer or audio-device workflow.
 
-See the [native save contract and validation](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/content-resources.md#native-saves)
+See the [native save contract and validation](../../architecture/content-resources.md#native-saves)
 for the platform boundary, failure tests and remaining persistence work.
 
 ## Follow one sound through the system
@@ -101,8 +101,8 @@ does not silently save a dirty editor draft or substitute a running preview.
 For a task-oriented walkthrough, use [audio workflow](../guides/audio.md) and
 [game packaging](../guides/releases.md).
 
-The [implementation evidence](https://github.com/Alegruz/Ludus/blob/main/docs/development/audio-content-evidence.md)
+The [implementation evidence](../../development/audio-content-evidence.md)
 records delivered C0–C5 slices, bounds and remaining acceptance gates. The
-[authoring architecture](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/audio-authoring.md)
-and [milestone plan](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/audio-content-milestones.md)
+[authoring architecture](../../architecture/audio-authoring.md)
+and [milestone plan](../../architecture/audio-content-milestones.md)
 retain longer-term proposals and consulted references.

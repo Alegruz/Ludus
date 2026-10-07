@@ -1,8 +1,10 @@
 # Improve this wiki
 
-The wiki is Markdown in `docs/wiki/`. Navigation lives in `mkdocs.yml`; the
-generated HTML lives under ignored `out/wiki/`. The public site is built from
-reviewed `main` changes. Every page has an edit link to its source on GitHub.
+The wiki renders the canonical Markdown files under `docs/`. Its task guides
+live in `docs/wiki/`; designs, decisions and development documents are rendered
+from their existing files. Navigation lives in `mkdocs.yml` and
+[the complete document index](../../README.md). Generated HTML lives under
+ignored `out/wiki/`. Public pages come from reviewed `main` changes.
 
 ## Preview locally
 
@@ -43,10 +45,17 @@ use `--doxygen /path/to/doxygen` on other hosts. See
 Lead with the goal and supported environment. Give the smallest working steps,
 the expected result, a recovery path and links to deeper references. Prefer
 short explanations over API dumps. Update existing pages before creating a
-duplicate workflow. Register every new page in navigation.
+duplicate workflow. A document already in `docs/` needs no separate wiki copy.
+After adding or renaming a page, refresh its portable navigation:
 
-Use relative `.md` links between wiki pages. Link implementation/design files to
-their repository paths. Keep local PDFs, machine paths, build artifacts and
+```bash
+python3 scripts/check-docs --fix-index
+python3 scripts/check-docs
+```
+
+Use relative `.md` links between all documentation pages, including design
+files outside `docs/wiki/`. Keep essential images local and prose readable in
+ordinary Markdown editors. Keep local PDFs, machine paths, build artifacts and
 credentials outside the published source directory.
 
 ## Review and publication
@@ -58,8 +67,11 @@ dispatch can rebuild/deploy `main`; dispatch on another branch only checks it.
 Repository Pages settings should use **GitHub Actions**, no custom domain
 initially, and **Enforce HTTPS**. An administrator can restrict the `github-pages`
 environment to `main`. See the
-[deployment/maintenance guide](https://github.com/Alegruz/Ludus/blob/main/docs/development/wiki.md)
+[deployment/maintenance guide](../../development/wiki.md)
 for first publication and troubleshooting.
+
+For reading without internet, open [the Markdown index](../../README.md), or use
+the source/HTML bundle described in [offline reading](../../development/wiki.md#offline-reading).
 
 ## Site credits
 
