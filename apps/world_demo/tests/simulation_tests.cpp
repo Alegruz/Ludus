@@ -168,7 +168,7 @@ TEST_CASE("Camera extraction uses draw interpolation and never changes authorita
         REQUIRE(fixed.Camera.Lens.VerticalSpan == 14);
         REQUIRE(fixed.Camera.Lens.MinimumVisibleWidth == 24);
         const auto expected = transform->Previous.X + (transform->Current.X - transform->Previous.X) * alpha;
-        REQUIRE(follow.Camera.Pose.Position.X == expected);
+        REQUIRE(follow.Camera.Pose.Position.X == static_cast<float64>(expected));
         REQUIRE(follow.Camera.PresentationSequence == 123);
         REQUIRE(follow.Camera.CurrentTick == world.GetTick());
         REQUIRE(follow.Camera.DiscontinuityRevision == world.Registry().GetWorld());
@@ -181,7 +181,7 @@ TEST_CASE("Camera extraction uses draw interpolation and never changes authorita
     REQUIRE(driver.Step(world) == Status::Success);
     RenderFrame frame;
     REQUIRE(world.Extract(driver.GetAlpha(), frame, true));
-    REQUIRE(frame.Camera.Pose.Position.X == world.Transforms().Find(player)->Current.X);
+    REQUIRE(frame.Camera.Pose.Position.X == static_cast<float64>(world.Transforms().Find(player)->Current.X));
     REQUIRE(world.QueueDestroy(player) == Status::Success);
     REQUIRE(world.RunTick({}) == Status::Success);
     const auto accepted = frame.Camera.Pose.Position;
@@ -206,7 +206,7 @@ TEST_CASE("Camera follow shares fixed tick presentation cadence across rates and
             const auto* transform = world.Transforms().Find(player);
             REQUIRE(world.Extract(alpha, frame, true, sequence));
             const auto expected = transform->Previous.X + (transform->Current.X - transform->Previous.X) * alpha;
-            REQUIRE(frame.Camera.Pose.Position.X == expected);
+            REQUIRE(frame.Camera.Pose.Position.X == static_cast<float64>(expected));
             REQUIRE(world.GetReplayHash() == hash);
         }
         // Suspension clears clock debt; extraction has no independent camera debt.
@@ -216,7 +216,7 @@ TEST_CASE("Camera follow shares fixed tick presentation cadence across rates and
         const auto* transform = world.Transforms().Find(player);
         const auto expected =
             transform->Previous.X + (transform->Current.X - transform->Previous.X) * driver.GetAlpha();
-        REQUIRE(frame.Camera.Pose.Position.X == expected);
+        REQUIRE(frame.Camera.Pose.Position.X == static_cast<float64>(expected));
     }
 }
 
