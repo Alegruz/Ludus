@@ -25,6 +25,9 @@ import struct
 import subprocess
 import sys
 import threading
+import time
+
+from control_transport import pair, receive
 
 HEADER = struct.Struct("<IHHII")
 MAGIC = 0x4C554443
@@ -65,7 +68,7 @@ def run(binary, mode, responder, timeout=8, extra_env=None):
     surfaces as a TimeoutExpired failure rather than a hang. Captured report
     datagrams are appended to `result.report` so tests can assert visible text."""
     report_recv, report_send = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
-    control_helper, control_engine = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    control_helper, control_engine = pair()
     report_recv.settimeout(0.1)
     stop = threading.Event()
     packets = []
@@ -82,6 +85,11 @@ def run(binary, mode, responder, timeout=8, extra_env=None):
             responder(control_helper)
         except OSError:
             pass
+        finally:
+            try:
+                control_helper.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
 
     drainer = threading.Thread(target=drain)
     worker = threading.Thread(target=helper)
@@ -107,7 +115,7 @@ def run(binary, mode, responder, timeout=8, extra_env=None):
 
 def expect_hello(control):
     """Read the Hello and reply HelloAck. Returns True on success."""
-    frame = control.recv(HEADER_SIZE + MAX_PAYLOAD)
+    frame = receive(control)
     decoded = decode(frame)
     if decoded is None or decoded[0] != KIND_HELLO:
         return False
@@ -117,7 +125,7 @@ def expect_hello(control):
 
 def read_decision_request(control):
     """Read one DecisionRequest; return its incident id (or None)."""
-    frame = control.recv(HEADER_SIZE + MAX_PAYLOAD)
+    frame = receive(control)
     decoded = decode(frame)
     if decoded is None or decoded[0] != KIND_DECISION_REQUEST:
         return None
@@ -304,8 +312,71 @@ def test_ci_overrides_interactive_request(binary):
     print("  CI vetoes an interactive request (no DecisionRequest, terminate) OK")
 
 
+def test_closed_peer_on_next_request(binary):
+    def responder(control):
+        assert expect_hello(control)
+        incident = read_decision_request(control)
+        control.sendall(encode(KIND_DECISION_REPLY, incident, bytes([CONTINUE_ONCE])))
+        control.close()
+    result = run(binary, "repeated", responder)
+    assert result.returncode == -signal.SIGABRT, (result.returncode, result.stderr)
+    assert "FIRST-RETURNED" in result.stdout and "SECOND-RETURNED" not in result.stdout
+    print("  Broken control peer on next request => Terminate, never SIGPIPE OK")
+
+
+def test_stream_fragmentation(binary):
+    if sys.platform != "darwin":
+        return
+    def responder(control):
+        hello = receive(control)
+        assert decode(hello)[0] == KIND_HELLO
+        for byte in encode(KIND_HELLO_ACK):
+            control.sendall(bytes([byte]))
+            time.sleep(0.002)
+        incident = read_decision_request(control)
+        reply = encode(KIND_DECISION_REPLY, incident, bytes([CONTINUE_ONCE]))
+        for byte in reply:
+            control.sendall(bytes([byte]))
+            time.sleep(0.002)
+    result = run(binary, "single", responder)
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    assert "ASSERT-RETURNED" in result.stdout
+    print("  Fragmented Darwin handshake and decision resume OK")
+
+
+def test_stream_coalesced_stale_reply(binary):
+    if sys.platform != "darwin":
+        return
+    def responder(control):
+        assert expect_hello(control)
+        incident = read_decision_request(control)
+        reply = encode(KIND_DECISION_REPLY, incident, bytes([CONTINUE_ONCE]))
+        control.sendall(reply + reply)
+        read_decision_request(control)
+    result = run(binary, "repeated", responder)
+    assert result.returncode == -signal.SIGABRT, (result.returncode, result.stderr)
+    assert "FIRST-RETURNED" in result.stdout and "SECOND-RETURNED" not in result.stdout
+    print("  Coalesced stale Darwin reply never resumes another incident OK")
+
+
+def test_stream_oversized_reply(binary):
+    if sys.platform != "darwin":
+        return
+    def responder(control):
+        assert expect_hello(control)
+        incident = read_decision_request(control)
+        control.sendall(HEADER.pack(MAGIC, VERSION, KIND_DECISION_REPLY, incident, MAX_PAYLOAD + 1))
+    result = run(binary, "single", responder)
+    assert result.returncode == -signal.SIGABRT, (result.returncode, result.stderr)
+    print("  Oversized Darwin reply rejected before reading payload OK")
+
+
 def main():
     binary = sys.argv[1]
+    test_closed_peer_on_next_request(binary)
+    test_stream_fragmentation(binary)
+    test_stream_coalesced_stale_reply(binary)
+    test_stream_oversized_reply(binary)
     test_continue(binary)
     test_terminate(binary)
     test_repeated(binary)

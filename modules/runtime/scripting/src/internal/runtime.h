@@ -87,7 +87,8 @@ public:
     [[nodiscard]] Status Load(const uint8* bytecode, usize bytes, const char* source, Setup installer) noexcept;
     // Dependency-first catalog, at most eight entries. Input/code/source storage
     // is immutable and borrowed until Close. Initializers have no active services.
-    [[nodiscard]] Status LoadPrograms(const Program* programs, usize count, Setup installer) noexcept;
+    [[nodiscard]] Status
+    LoadPrograms(const Program* programs, usize count, Setup installer, void* setup_user = nullptr) noexcept;
     // Arguments pushes config/state/event/API. All effects live in User's POD
     // candidate. Fault destroys this VM and requires an explicit new Load.
     [[nodiscard]] Status Invoke(Identity identity, void* user, Setup arguments, Diagnostic& diagnostic) noexcept;

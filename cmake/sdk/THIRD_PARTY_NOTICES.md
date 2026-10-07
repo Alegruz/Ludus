@@ -79,3 +79,13 @@ packager), this notices file plus the manifest inventory record the obligation.
 
 Yann Collet and contributors, BSD-2-Clause. https://github.com/Cyan4973/xxHash/tree/v0.8.3
 The complete license is bundled as `xxhash-LICENSE`. Used privately by FoundationHash.
+
+## Optional Luau behavior provider
+
+Only SDKs with the `Behavior` component bundle Luau at reviewed commit
+`1eca9fda3e4753a1592000f6cfdf659aaa778b7d` with Ludus's loader-owner patch
+(`config/luau_toolchain.json`). Copyright Roblox Corporation and contributors;
+Luau and its Lua portions are MIT licensed. Both complete notices are installed
+under `share/Ludus/licenses/Luau/` and copied by the standard game release helper.
+The compiler/analyzer under `share/Ludus/behavior/bin/` are paired host build tools;
+they are not player runtime dependencies. https://github.com/luau-lang/luau

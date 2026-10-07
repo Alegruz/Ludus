@@ -462,7 +462,7 @@ Status Runtime::Load(const uint8* bytecode, usize bytes, const char* source, Set
     return LoadPrograms(&program, 1, installer);
 }
 
-Status Runtime::LoadPrograms(const Program* programs, usize count, Setup installer) noexcept
+Status Runtime::LoadPrograms(const Program* programs, usize count, Setup installer, void* setup_user) noexcept
 {
     if (mEntered || mPaused)
     {
@@ -504,6 +504,7 @@ Status Runtime::LoadPrograms(const Program* programs, usize count, Setup install
     mProgramCount = count;
     mExecution = { .Installer = installer };
     mContext.DebugOwner = this;
+    mContext.User = setup_user;
     mSnapshot = {};
     mContext.Safepoints = 0;
     mContext.Interrupted = false;

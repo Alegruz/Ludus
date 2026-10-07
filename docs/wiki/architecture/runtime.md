@@ -55,6 +55,15 @@ Wasm event-loop responsiveness. It remains default-off and outside the installed
 scripting SDK; DAP/editor UI, waits, other providers and device/performance
 qualification are later work. See [commands and limits](../guides/build-and-debug.md#s2-debug-and-program-replacement).
 
+## Optional installed behavior provider
+
+[S4](../../architecture/behavior-s4.md) supplies `Ludus::Behavior`, generated
+project contracts, native/Luau staged transactions, declared-state codecs and
+paired offline cooking. An independent relocated SDK consumer builds and executes
+a static shipping program. The component is default-off; Editor/GameHost wiring,
+six-platform acceptance and representative release qualification remain S5–S7.
+The private S2/S3 fixtures do not become editor features simply by enabling it.
+
 ## Configuration is a control operation
 
 `FoundationConfig` owns typed schema/layer evaluation and prepared candidates.

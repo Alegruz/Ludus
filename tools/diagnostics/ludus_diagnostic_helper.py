@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ludus external diagnostic helper (Linux, development tool).
+"""Ludus external diagnostic helper (Linux/macOS, development tool).
 
 A small standalone launcher/collector that runs OUTSIDE the engine process. It
 owns the collector ends of two channels, launches the engine binary with the
@@ -9,9 +9,9 @@ Continue-once / Terminate decision and replies with the developer's choice. It
 cleans up when the child exits.
 
 It is a development-tool dependency (Python standard library only, plus Zenity
-for the graphical dialog); it is NOT a dependency of FoundationBase or any engine
-header. The failing engine thread never runs any of this UI code — presentation
-is entirely out of process.
+for the Linux graphical dialog). macOS uses the controlling terminal. It is NOT
+a dependency of FoundationBase or any engine header. The failing engine thread
+never runs any of this UI code — presentation is entirely out of process.
 
 The control wire format is the explicit little-endian byte encoding defined in
 ludus/foundation/base/diagnostic_output.hpp (16-byte header + payload). Do NOT
@@ -73,7 +73,7 @@ def decode(frame):
 
 
 def graphical_available():
-    return bool(os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")) and shutil.which("zenity")
+    return sys.platform != "darwin" and bool(os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")) and shutil.which("zenity")
 
 
 def ask_decision(report_text):
@@ -139,9 +139,9 @@ def main(argv):
         return 2
 
     # Report channel: connected AF_UNIX datagram pair (bounded report bytes).
-    # Control channel: SOCK_SEQPACKET for framed handshake/decision messages.
+    # Darwin has no AF_UNIX SEQPACKET; the existing header frames a byte stream.
     report_recv, report_send = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
-    control_helper, control_engine = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    control_helper, control_engine = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM if sys.platform == "darwin" else socket.SOCK_SEQPACKET)
     # Do not let SIGPIPE from a dead engine kill the helper.
     signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
@@ -152,6 +152,9 @@ def main(argv):
         "LUDUS_DIAGNOSTIC_REPORT_FD": str(engine_report_fd),
         "LUDUS_DIAGNOSTIC_CONTROL_FD": str(engine_control_fd),
     }
+
+    if force_report_only:
+        env["LUDUS_DIAGNOSTIC_INTERACTIVE"] = "0"
 
     pid = os.fork()
     if pid == 0:
@@ -206,11 +209,15 @@ def main(argv):
             try:
                 control_helper.sendall(reply)
             except OSError:
-                pass
+                try:
+                    control_helper.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
             pending["thread"] = None
             pending["incident"] = None
             pending["decision"] = None
 
+    control_bytes = bytearray()
     child_status = None
     while True:
         for key, _ in sel.select(timeout=0.1):
@@ -222,18 +229,35 @@ def main(argv):
                 except (BlockingIOError, OSError):
                     frame = b""
                 if not frame:
+                    sel.unregister(control_helper)
                     continue
-                decoded = decode(frame)
-                if decoded is None:
-                    continue
-                kind, incident_id, payload = decoded
-                if kind == KIND_HELLO:
-                    try:
-                        control_helper.sendall(encode(KIND_HELLO_ACK))
-                    except OSError:
-                        pass
-                elif kind == KIND_DECISION_REQUEST and pending["thread"] is None:
-                    start_decision(incident_id, payload)
+                frames = [frame]
+                if sys.platform == "darwin":
+                    control_bytes.extend(frame)
+                    frames = []
+                    while len(control_bytes) >= HEADER_SIZE:
+                        magic, version, kind, incident, length = HEADER.unpack(control_bytes[:HEADER_SIZE])
+                        if magic != MAGIC or version != VERSION or length > MAX_PAYLOAD:
+                            sel.unregister(control_helper)
+                            control_helper.close()  # Unblock the child with a failed transport.
+                            break
+                        frame_size = HEADER_SIZE + length
+                        if len(control_bytes) < frame_size:
+                            break
+                        frames.append(bytes(control_bytes[:frame_size]))
+                        del control_bytes[:frame_size]
+                for frame in frames:
+                    decoded = decode(frame)
+                    if decoded is None:
+                        continue
+                    kind, incident_id, payload = decoded
+                    if kind == KIND_HELLO and incident_id == 0 and not payload:
+                        try:
+                            control_helper.sendall(encode(KIND_HELLO_ACK))
+                        except OSError:
+                            control_helper.shutdown(socket.SHUT_RDWR)
+                    elif kind == KIND_DECISION_REQUEST and pending["thread"] is None:
+                        start_decision(incident_id, payload)
 
         try_finish_decision()
 

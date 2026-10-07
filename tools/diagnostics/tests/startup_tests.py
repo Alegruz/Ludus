@@ -21,12 +21,16 @@ Verified properties:
     transport).
 """
 
+import errno
 import os
 import socket
 import struct
 import subprocess
 import sys
 import threading
+import time
+
+from control_transport import pair, receive
 
 # ControlHeader byte layout: uint32 magic, uint16 version, uint16 kind,
 # uint32 incidentId, uint32 length. Explicit little-endian, matching
@@ -112,7 +116,7 @@ def test_direct_no_helper(child):
 def test_malformed_handshake(child):
     # Real control socket, but answer with a malformed (bad-magic) ack. The
     # engine must mark the control endpoint Failed and keep running.
-    engine_side, driver_side = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    engine_side, driver_side = pair()
     report_recv, report_send = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
     # Bounded recv so the responder never hangs when the build is not
     # dialog-eligible and no Hello is ever sent (worker.join must not block).
@@ -121,7 +125,7 @@ def test_malformed_handshake(child):
 
     def responder():
         try:
-            data = driver_side.recv(4096)
+            data = receive(driver_side)
             if len(data) >= HEADER_SIZE:
                 magic, version, kind, incident, length = HEADER.unpack(data[:HEADER_SIZE])
                 if magic == MAGIC and version == VERSION and kind == KIND_HELLO:
@@ -185,8 +189,9 @@ def test_full_socket_no_block(child):
         try:
             while True:
                 report_send.send(b"x" * 2048, socket.MSG_DONTWAIT)
-        except BlockingIOError:
-            pass
+        except OSError as error:
+            if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.ENOBUFS):
+                raise
         result = run_direct(child, "default", report_fd=report_send.fileno(), timeout=5)
         assert result.returncode == 0, (result.returncode, result.stderr)
         assert "report=1" in result.stdout, result.stdout
@@ -223,6 +228,77 @@ def test_headless_capture_without_zenity(child):
     print("  headless capture without Zenity OK")
 
 
+def test_report_only_option(child):
+    result = subprocess.run([sys.executable, HELPER, "--report-only", "--", child],
+                            env=CLEAN_ENV, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert "report=1 control=0 mode=0" in result.stdout, result.stdout
+    assert "ifail=0" in result.stdout, result.stdout
+    print("  Explicit helper report-only disables interactive startup OK")
+
+
+def test_partial_handshake_deadline(child, eligible):
+    if sys.platform != "darwin" or not eligible:
+        return
+    engine, driver = pair()
+    driver.sendall(b"L")  # Never finish the ack; one byte cannot reset the deadline.
+    started = time.monotonic()
+    try:
+        result = run_direct(child, "default", control_fd=engine.fileno(), timeout=4)
+    finally:
+        engine.close()
+        driver.close()
+    elapsed = time.monotonic() - started
+    assert result.returncode == 0 and "control=0" in result.stdout, result.stdout
+    assert 1.5 < elapsed < 3.5, elapsed
+    print("  Partial Darwin handshake has a shared two-second deadline OK")
+
+
+def test_closed_report_socket(child):
+    collector, engine = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+    collector.close()
+    try:
+        result = run_direct(child, "default", report_fd=engine.fileno(), timeout=5)
+    finally:
+        engine.close()
+    assert result.returncode == 0, (result.returncode, result.stderr)
+    assert "DELIVERY=failed" in result.stdout or "DELIVERY=unavailable" in result.stdout, result.stdout
+    print("  Closed report peer never kills the child with SIGPIPE OK")
+
+
+def test_helper_stream_parser():
+    if sys.platform != "darwin":
+        return
+    # A tiny external engine fixture fragments/coalesces actual wire bytes. The
+    # real helper must parse both frames and return its report-only decision.
+    code = """
+import os, socket, struct, time
+header = struct.Struct('<IHHII')
+control = socket.socket(fileno=int(os.environ['LUDUS_DIAGNOSTIC_CONTROL_FD']))
+frames = header.pack(0x4C554443, 1, 1, 0, 0) + header.pack(0x4C554443, 1, 3, 17, 5) + b'probe'
+control.sendall(frames[:3])
+time.sleep(0.03)
+control.sendall(frames[3:19])
+time.sleep(0.03)
+control.sendall(frames[19:])
+def exact(size):
+    data = bytearray()
+    while len(data) < size:
+        part = control.recv(size - len(data))
+        assert part
+        data.extend(part)
+    return bytes(data)
+assert header.unpack(exact(16)) == (0x4C554443, 1, 2, 0, 0)
+assert header.unpack(exact(16)) == (0x4C554443, 1, 4, 17, 1)
+assert exact(1) == b'\\x00'
+print('STREAM-HELPER-PASSED')
+"""
+    result = subprocess.run([sys.executable, HELPER, "--report-only", "--", sys.executable, "-c", code],
+                            env=CLEAN_ENV, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0 and "STREAM-HELPER-PASSED" in result.stdout, (result.returncode, result.stderr)
+    print("  Real Darwin helper parses fragmented/coalesced control messages OK")
+
+
 def main():
     global HELPER
     HELPER = sys.argv[1]
@@ -230,6 +306,10 @@ def main():
     # argv[3] (LUDUS_ASSERT_DIALOGS_AVAILABLE) is accepted but not required: the
     # tests assert only build-independent invariants (report delivery; a
     # malformed/absent handshake never becomes Ready).
+    test_helper_stream_parser()
+    test_report_only_option(child)
+    test_partial_handshake_deadline(child, len(sys.argv) > 3 and sys.argv[3] == "1")
+    test_closed_report_socket(child)
     test_helper_end_to_end(child)
     test_helper_cleanup_on_child_exit(child)
     test_ci_forces_report_only(child)

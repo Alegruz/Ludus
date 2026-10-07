@@ -33,7 +33,7 @@ install(
     RENAME ludus_diagnostic_helper
 )
 
-if(LUDUS_BUILD_TESTS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(LUDUS_BUILD_TESTS AND CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$")
     find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
 
     # Startup/report-delivery test child. Links the integration layer (and thus
@@ -69,5 +69,12 @@ if(LUDUS_BUILD_TESTS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/decision_tests.py"
                 "$<TARGET_FILE:ludus_assert_decision_child>")
         set_tests_properties(ludus_assert_decision PROPERTIES LABELS "tools;diagnostic-startup;assert-death" TIMEOUT 60)
+
+        add_test(NAME ludus_diagnostic_helper_terminal
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/helper_terminal_tests.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/ludus_diagnostic_helper.py"
+                "$<TARGET_FILE:ludus_assert_decision_child>")
+        set_tests_properties(ludus_diagnostic_helper_terminal
+            PROPERTIES LABELS "tools;diagnostic-startup;assert-death" TIMEOUT 60)
     endif()
 endif()

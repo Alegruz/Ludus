@@ -7,8 +7,12 @@
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
+#include <span>
 #include <sys/socket.h>
 #include <unistd.h>
+#if defined(LUDUS_PLATFORM_MACOS)
+#    include <time.h>
+#endif
 
 namespace ludus::foundation::diagnostics
 {
@@ -22,6 +26,131 @@ constinit ControlState gControlState = ControlState::Unconfigured;
 // Bounded startup handshake: never block engine launch indefinitely on a
 // misbehaving helper. This is a startup wait, not a failure-path bound.
 constexpr int CONTROL_HANDSHAKE_TIMEOUT_MS = 2000;
+
+#if defined(LUDUS_PLATFORM_MACOS)
+// Thanks to Apple, socket(2), DESCRIPTION, Mac OS X BSD System Calls Manual,
+// and XNU bsd/sys/socket.h, SO_NOSIGPIPE (no SIGPIPE on EPIPE):
+// https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/socket.2.html
+// https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/socket.h
+// Darwin AF_UNIX has no SEQPACKET. Retain the wire codec over framed streams;
+// suppress broken-peer SIGPIPE on owned sockets, without process signal handlers.
+constexpr int CONTROL_SOCKET_TYPE = SOCK_STREAM;
+constexpr int SEND_FLAGS = 0;
+
+bool SuppressSocketSignal(int descriptor) noexcept
+{
+    const int enabled = 1;
+    return ::setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled)) == 0;
+}
+
+int64 MonotonicMilliseconds() noexcept
+{
+    timespec now{};
+    if (::clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+    {
+        return -1;
+    }
+    return static_cast<int64>(now.tv_sec) * 1000 + static_cast<int64>(now.tv_nsec) / 1000000;
+}
+
+// Exact reads preserve stream fragmentation/coalescing. Startup uses one shared
+// deadline for header and payload; decisions wait for explicit human input.
+bool ReadStreamBytes(int descriptor, std::span<char> bytes, int64 deadline) noexcept
+{
+    usize offset = 0;
+    while (offset < bytes.size())
+    {
+        int wait_ms = -1;
+        if (deadline >= 0)
+        {
+            const int64 now = MonotonicMilliseconds();
+            if (now < 0 || now >= deadline)
+            {
+                return false;
+            }
+            wait_ms = static_cast<int>(deadline - now);
+        }
+        pollfd waiter{};
+        waiter.fd = descriptor;
+        waiter.events = POLLIN;
+        const int ready = ::poll(&waiter, 1, wait_ms);
+        if (ready < 0 && errno == EINTR)
+        {
+            continue;
+        }
+        if (ready <= 0 || (waiter.revents & POLLIN) == 0)
+        {
+            return false;
+        }
+        const auto count = ::recv(descriptor, bytes.data() + offset, bytes.size() - offset, MSG_DONTWAIT);
+        if (count < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
+        {
+            continue;
+        }
+        if (count <= 0)
+        {
+            return false;
+        }
+        offset += static_cast<usize>(count);
+    }
+    return true;
+}
+
+bool ReadControlFrame(int descriptor, char* frame, usize& size, int timeout_ms) noexcept
+{
+    const int64 now = timeout_ms >= 0 ? MonotonicMilliseconds() : 0;
+    if (now < 0)
+    {
+        return false;
+    }
+    const int64 deadline = timeout_ms >= 0 ? now + timeout_ms : -1;
+    if (!ReadStreamBytes(descriptor, {frame, CONTROL_HEADER_SIZE}, deadline))
+    {
+        return false;
+    }
+    ControlHeader header{};
+    // The decoder reads only header bytes; capacity validates the declared
+    // payload bound before receiving any payload into the remaining storage.
+    if (!DecodeControlHeader(frame, CONTROL_HEADER_SIZE + CONTROL_MAX_PAYLOAD, header))
+    {
+        return false;
+    }
+    size = CONTROL_HEADER_SIZE + header.Length;
+    return ReadStreamBytes(descriptor, {frame + CONTROL_HEADER_SIZE, header.Length}, deadline);
+}
+#else
+constexpr int CONTROL_SOCKET_TYPE = SOCK_SEQPACKET;
+constexpr int SEND_FLAGS = MSG_NOSIGNAL;
+bool SuppressSocketSignal(int) noexcept
+{
+    return true; // Linux suppresses SIGPIPE per send instead.
+}
+#endif
+
+// Bounded nonblocking writes. A partial stream frame is completed within this
+// cap or treated as a transport failure, never as permission to continue.
+bool SendControlFrame(int descriptor, const char* bytes, usize size) noexcept
+{
+    usize offset = 0;
+    for (uint32 attempt = 0; attempt < 4 && offset < size; ++attempt)
+    {
+        const auto sent = ::send(descriptor, bytes + offset, size - offset, SEND_FLAGS | MSG_DONTWAIT);
+        if (sent > 0)
+        {
+            offset += static_cast<usize>(sent);
+        }
+        else if (sent < 0 && errno == EINTR)
+        {
+            continue;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    return offset == size;
+}
+
 } // namespace
 
 bool ConfigureEmergencySocket(int descriptor) noexcept
@@ -40,7 +169,15 @@ bool ConfigureEmergencySocket(int descriptor) noexcept
                        peer.ss_family == AF_UNIX;
     if (valid)
     {
-        gEmergencySocket = fcntl(descriptor, F_DUPFD_CLOEXEC, 3);
+        const int owned = fcntl(descriptor, F_DUPFD_CLOEXEC, 3);
+        if (owned >= 0 && SuppressSocketSignal(owned))
+        {
+            gEmergencySocket = owned;
+        }
+        else if (owned >= 0)
+        {
+            (void)::close(owned);
+        }
     }
     errno = saved_errno;
     return gEmergencySocket != -1;
@@ -60,7 +197,7 @@ DeliveryStatus TryWriteEmergencyBytes(const char* data, usize size) noexcept
     DeliveryStatus status = DeliveryStatus::Failed;
     for (uint32 attempt = 0; attempt < 4; ++attempt)
     {
-        const auto written = send(gEmergencySocket, data, size, MSG_DONTWAIT | MSG_NOSIGNAL);
+        const auto written = send(gEmergencySocket, data, size, MSG_DONTWAIT | SEND_FLAGS);
         if (written >= 0)
         {
             // Datagram writes are atomic: never split a record into new messages.
@@ -164,6 +301,14 @@ namespace
 // deadline; a slow/absent/malformed helper fails.
 bool ReceiveControlMessage(int descriptor, ControlMessageType expected, int timeout_ms) noexcept
 {
+#if defined(LUDUS_PLATFORM_MACOS)
+    char frame[CONTROL_HEADER_SIZE + CONTROL_MAX_PAYLOAD];
+    usize count = 0;
+    if (!ReadControlFrame(descriptor, frame, count, timeout_ms))
+    {
+        return false;
+    }
+#else
     pollfd waiter{};
     waiter.fd = descriptor;
     waiter.events = POLLIN;
@@ -179,6 +324,7 @@ bool ReceiveControlMessage(int descriptor, ControlMessageType expected, int time
     {
         return false;
     }
+#endif
     ControlHeader header{};
     if (!DecodeControlHeader(frame, static_cast<usize>(count), header))
     {
@@ -201,9 +347,9 @@ ControlState ConfigureControlEndpoint(int descriptor) noexcept
     socklen_t length = sizeof(type);
     sockaddr_storage peer{};
     socklen_t peer_length = sizeof(peer);
-    const bool valid = getsockopt(descriptor, SOL_SOCKET, SO_TYPE, &type, &length) == 0 && type == SOCK_SEQPACKET &&
-                       getpeername(descriptor, reinterpret_cast<sockaddr*>(&peer), &peer_length) == 0 &&
-                       peer.ss_family == AF_UNIX;
+    const bool valid =
+        getsockopt(descriptor, SOL_SOCKET, SO_TYPE, &type, &length) == 0 && type == CONTROL_SOCKET_TYPE &&
+        getpeername(descriptor, reinterpret_cast<sockaddr*>(&peer), &peer_length) == 0 && peer.ss_family == AF_UNIX;
     if (!valid)
     {
         gControlState = ControlState::Failed;
@@ -211,8 +357,12 @@ ControlState ConfigureControlEndpoint(int descriptor) noexcept
         return gControlState;
     }
     const int owned = fcntl(descriptor, F_DUPFD_CLOEXEC, 3);
-    if (owned == -1)
+    if (owned == -1 || !SuppressSocketSignal(owned))
     {
+        if (owned >= 0)
+        {
+            (void)::close(owned);
+        }
         gControlState = ControlState::Failed;
         errno = saved_errno;
         return gControlState;
@@ -221,16 +371,7 @@ ControlState ConfigureControlEndpoint(int descriptor) noexcept
 
     char hello[CONTROL_HEADER_SIZE];
     const usize hello_size = EncodeControlHeader(hello, sizeof(hello), ControlMessageType::Hello, 0, 0);
-    ssize_t sent = -1;
-    for (uint32 attempt = 0; attempt < 4; ++attempt)
-    {
-        sent = ::send(gControlSocket, hello, hello_size, MSG_NOSIGNAL);
-        if (sent >= 0 || errno != EINTR)
-        {
-            break;
-        }
-    }
-    if (sent != static_cast<ssize_t>(hello_size))
+    if (!SendControlFrame(gControlSocket, hello, hello_size))
     {
         gControlState = ControlState::Failed;
         errno = saved_errno;
@@ -304,16 +445,7 @@ ControlDecision RequestAssertDecision(uint32 incidentId, const char* report, usi
         frame_size += size;
     }
 
-    ssize_t sent = -1;
-    for (uint32 attempt = 0; attempt < 4; ++attempt)
-    {
-        sent = ::send(gControlSocket, frame, frame_size, MSG_NOSIGNAL);
-        if (sent >= 0 || errno != EINTR)
-        {
-            break;
-        }
-    }
-    if (sent != static_cast<ssize_t>(frame_size))
+    if (!SendControlFrame(gControlSocket, frame, frame_size))
     {
         errno = saved_errno;
         return ControlDecision::Terminate; // Helper gone / short send => never continue.
@@ -325,6 +457,13 @@ ControlDecision RequestAssertDecision(uint32 incidentId, const char* report, usi
     for (;;)
     {
         char reply[CONTROL_HEADER_SIZE + CONTROL_MAX_PAYLOAD];
+#if defined(LUDUS_PLATFORM_MACOS)
+        usize count = 0;
+        if (!ReadControlFrame(gControlSocket, reply, count, -1))
+        {
+            break;
+        }
+#else
         const auto count = ::recv(gControlSocket, reply, sizeof(reply), 0);
         if (count < 0)
         {
@@ -338,6 +477,7 @@ ControlDecision RequestAssertDecision(uint32 incidentId, const char* report, usi
         {
             break; // Helper closed the channel => Terminate.
         }
+#endif
         ControlHeader header{};
         if (!DecodeControlHeader(reply, static_cast<usize>(count), header))
         {

@@ -413,7 +413,8 @@ descriptors, and cleans up when the engine exits:
   reports and formatted messages are visible/captured **independently of normal
   Logging**, including before logger initialization and after shutdown, and it
   keeps draining while any future dialog is open.
-- **Control channel** — a separate connected `AF_UNIX`/`SOCK_SEQPACKET` pair so
+- **Control channel** — a separate connected `AF_UNIX` pair (`SOCK_SEQPACKET`
+  on Linux; framed `SOCK_STREAM` on macOS) so
   report traffic can never masquerade as a decision reply. Its wire format is an
   **explicit little-endian byte encoding**, not a compiler-padded C++ struct: a
   fixed 16-byte header (`magic`, `version`, `kind`, `incidentId`, `length`)
@@ -455,7 +456,8 @@ report-only (`LUDUS_DIAGNOSTIC_INTERACTIVE=0` or the API's `ReportOnly`).
 
 **Validate capability, not availability.** When interactive is eligible and
 intended, startup validates a *usable* channel — a controlling terminal, or a
-**live display connection** probed by connecting to the Wayland/X11 socket — not
+**live Linux display connection** probed through the Wayland/X11 socket
+(macOS currently uses a terminal only) — not
 merely that a dialog executable exists on `PATH`. If validation fails, startup
 degrades to report-only and **reports the failure visibly** (through the ordinary
 blocking emergency writer, not the nonblocking assertion transport). Failed
@@ -1110,8 +1112,11 @@ defines what returning means per kind. For `REQUIRE`/`FATAL`, and for `ASSERT`
 outside the eligible Debug scope, a returned break still falls through to
 termination.
 
-Only Linux/Clang is the repository's present reference platform. Windows/macOS
-rows are port contracts, not claims of tested support. Unsupported backend
+Linux/Clang remains the reference platform. macOS now has the native sysctl
+query/debugtrap/termination adapter and helper transport described in the
+[diagnostic launch guide](../development/diagnostics.md#macos-native-tooling),
+with native startup and explicit-decision regression coverage. The historical
+Windows row remains a port contract, not a claim of tested support. Unsupported backend
 selection must fail configuration; silent no-op fatal stubs are forbidden.
 
 ## 13. Crash packets, stack traces, and termination

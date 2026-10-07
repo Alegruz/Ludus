@@ -1,20 +1,253 @@
-# Render a Cornell box with the existing Ludus SDK
+# Your first rendered scene: Cornell box
 
-Build a small native graphics application using Ludus's public fullscreen shader
-API. The result is an open room with a red left wall, green right wall, two
-rotated white blocks and a rectangular ceiling light. All scene geometry and
-lighting live in the sample's Slang shader. No engine source changes are needed.
+Learn the everyday Ludus workflow by opening a working sample, running it,
+changing a material, moving an object and adjusting its lighting. Each lesson
+makes one small edit and tells you what to look for before continuing.
+You only edit the sample; the engine stays unchanged.
 
-![The sample running on macOS Metal with direct lighting and shadows](images/cornell-box-direct.png)
+![The completed Cornell box running on macOS Metal](images/cornell-box-direct.png)
 
-This is a **Cornell-box-inspired direct-lighting tutorial**, not a calibrated
-reproduction of Cornell's measured scene. There is no mesh loader, mesh draw,
-path tracer, indirect illumination, color bleeding or progressive accumulation.
-A small constant ambient term keeps unlit faces visible; it is an artistic
-approximation, not simulated bounced light. Fixed 4×4 light samples produce
-stable, visibly stepped shadow edges rather than a converged reference image.
+The starting scene is an open room with a red left wall, green right wall, two
+white blocks and a ceiling light. Geometry and direct lighting live in a Slang
+shader drawn through Ludus's public fullscreen API. Mesh loading, general mesh
+rendering and path tracing are future work. There is no indirect illumination,
+color bleeding or progressive accumulation; a small constant ambient term keeps
+unlit faces visible. Sixteen fixed light samples give stable but stepped shadows.
 
-## 1. Prepare the engine and host tools
+## Before you start
+
+The **desktop editor path below uses Ubuntu 24.04, Linux x64**, with a Wayland
+session and a Vulkan-capable driver. Follow [Install and launch](../wiki/getting-started/install.md)
+once to prepare and open the editor. Use [Building Ludus](../development/building.md) for system prerequisites. Keep a code editor available for C++ and Slang files;
+Ludus's current desktop editor manages projects and builds rather than editing
+those source documents.
+
+On macOS, use the [manual setup](#manual-setup-and-command-line-workflow) below,
+then follow the same numbered lessons using its build/run commands. The native
+editor is currently Linux-only. The screenshots here are actual macOS Metal
+runtime captures, not screenshots of the Linux editor. Window decoration and
+small GPU differences can vary.
+
+Use a Ludus checkout that contains `examples/cornell-box`. This sample is not yet
+an option in **New Project**; that dialog creates the minimal native template.
+For this lesson, open the included sample. It consumes an installed SDK and does
+not compile engine sources into the application.
+
+## 1. Open and prepare the sample
+
+1. On Welcome, select **Open Project** and choose
+   `examples/cornell-box/ludus.project.json` inside your Ludus checkout.
+2. Review **Project settings**. They should contain these values:
+
+   | Setting | Value |
+   | --- | --- |
+   | Name | `Cornell Box` |
+   | Provider | `cmake` |
+   | Source directory | `.` |
+   | Preset | `linux-clang-development` |
+   | Executable target | `cornell_box` |
+   | Run working directory | `.` |
+   | Run arguments | Empty |
+
+3. Select **Project → Repair Project Setup**. For this repository sample's first
+   setup, choose **Build and install the engine used by this editor** under
+   **Engine for desktop builds**. Leave **Also set up browser builds** unchecked.
+4. Choose **Repair Project** and follow **Output**. This explicit action prepares
+   the engine and shader tools, installs the SDK, writes this machine's local
+   project settings, then configures, builds and tests the sample. First-time
+   preparation may download dependencies and take several minutes.
+
+**Checkpoint:** setup finishes successfully and all four sample tests pass.
+Opening a project alone does not perform setup. If it reports missing setup,
+continue with Repair; if Repair fails, use the first error in Output and the
+[recovery notes](#validation-and-recovery) rather than treating the project as ready.
+
+The sample's release lock is unresolved because it is part of this source
+checkout, not a published engine package. Repair records your local SDK override
+and tool paths in ignored files. You do not need to export SDK paths, choose a
+CMake executable or bootstrap shader tools manually for this editor route.
+See [project setup](../development/project-sdk-workflow.md) for those contracts.
+
+## 2. Run your first frame
+
+1. Choose **Build → Build and Run**, or **Build and Run** on the toolbar.
+2. Wait for the application window. Compare it with the opening screenshot:
+   red left wall, green right wall, two white blocks and shadows on the floor.
+3. Resize the window. The scene keeps its proportions as the framebuffer aspect
+   ratio changes; the camera stays fixed.
+4. Close the application window before the next lesson. You can also use
+   **Build → Stop** to stop work owned by the editor.
+
+**Checkpoint:** you see the rendered room and Output includes
+`Cornell box rendered. Close the window to exit.` A process starting is not proof
+that a frame appeared. This sample runs in its own native window. Use **Build and
+Run** throughout this tutorial; its fullscreen application does not implement
+GameHost's **Build and Play** or live gameplay editing workflow.
+
+## 3. Separate materials from lighting
+
+1. In **Project settings → Run arguments**, select **Add argument**, enter
+   `--flat` as a single item, and press Enter. Do not add quotes.
+2. Use **File → Save Project Settings** (**Ctrl+S**), then **Build and Run**.
+3. Compare the result below with the lit scene.
+
+![Flat materials: colored walls, white surfaces and the ceiling patch](images/cornell-box-materials.png)
+
+**Checkpoint:** the wall colors remain, while shading and cast shadows disappear.
+The blocks and room share the same white material, so their interiors blend in
+this mode; silhouettes against the colored walls still distinguish them. The
+ceiling patch remains emissive.
+
+Close the window. Select the `--flat` item, choose **Remove argument**, save the
+settings and run again. **Checkpoint:** lighting and shadows return. Leave Run
+arguments empty for the following lessons. Run arguments are saved project
+metadata; remove experimental arguments before sharing your changes.
+
+## 4. Find the files you will edit
+
+Open the sample folder in your code editor. Start with these files:
+
+| File | What you use it for |
+| --- | --- |
+| `ludus.project.json` | The editor's build target, preset and run arguments |
+| `CMakeLists.txt` | SDK components, executable and shader compilation |
+| `src/main.cpp` | Logging, window creation, RHI startup, frames and shutdown |
+| `shaders/cornell.slang` | Room, blocks, camera rays, materials and lighting |
+| `CMakePresets.json` | Shared Debug, Development and Release profiles |
+| `CMakeUserPresets.json` | Ignored settings generated for this machine |
+
+For each exercise: **close the running sample → edit source → save → Build and
+Run → inspect the result**. CMake recompiles a changed shader and regenerates its
+application-owned header. The running application does not reload shader edits
+automatically. Do not edit generated `cornell.h` or files under `out/`.
+
+## 5. Change a wall material
+
+In `shaders/cornell.slang`, find `Hit scene(...)`. The first `rectangle` call
+creates the left wall; its last `float3` before `hit` is the wall's RGB material.
+Change just that value:
+
+```cpp
+// Before:
+float3(1.0, 0.0, 0.0), float3(0.63, 0.065, 0.05), hit);
+// After:
+float3(1.0, 0.0, 0.0), float3(0.05, 0.12, 0.63), hit);
+```
+
+Save, then **Build and Run**.
+
+![The material exercise: the left wall is now blue](images/cornell-box-blue-wall.png)
+
+**Checkpoint:** only the left wall's material changes from red to blue; the
+right wall stays green and the geometry stays in place. These are linear RGB
+reflectance values, not display hex colors. White surfaces do not become blue:
+this renderer does not simulate light bouncing from the wall.
+
+Restore `float3(0.63, 0.065, 0.05)` before the next exercise.
+
+## 6. Move a block and its shadow
+
+Find `void blocks(...)`. In its first `block` call, change only the center:
+
+```cpp
+// Before:
+float3(-0.40, 0.36, 0.35)
+// After:
+float3(-0.15, 0.36, 0.35)
+```
+
+The center is `(x, y, z)` in this sample's normalized world units. Positive x
+moves the short block toward the right. The next `float3(0.30, 0.36, 0.30)` gives
+its half extents, not its full dimensions. Its y center equals its y half extent,
+so its bottom still rests on the floor at y = 0. Save, then **Build and Run**.
+
+![The placement exercise: the short block moves toward the center](images/cornell-box-moved-block.png)
+
+**Checkpoint:** the short block moves right and its floor shadow moves with it;
+the tall block stays in place. Both visible geometry and shadow rays use
+`blocks`, so one edit updates both. This is procedural shader geometry rather
+than an editor transform or a mesh entity.
+
+Restore the original center before continuing.
+
+## 7. Adjust light strength
+
+At the end of `shade(...)`, change the direct-light multiplier from `12.0` to
+`6.0`, leaving the other values alone:
+
+```cpp
+// Before:
+return hit.albedo * (0.035 + illumination * (0.64 * 0.56 * 12.0 / (16.0 * 3.141593)));
+// After:
+return hit.albedo * (0.035 + illumination * (0.64 * 0.56 * 6.0 / (16.0 * 3.141593)));
+```
+
+Save, then **Build and Run**. **Checkpoint:** lit surfaces become dimmer, while
+the light's shape, block positions and shadow locations stay the same. The image
+will not become exactly half as bright because the shader also adds ambient
+light and applies tone mapping and display encoding. The visible ceiling patch
+uses a separate emissive value and keeps its brightness in this exercise.
+
+![The lighting exercise: directly lit surfaces become dimmer](images/cornell-box-dim-light.png)
+
+Restore `12.0`.
+
+## 8. Understand what creates shadows
+
+Inside the light-sampling loop in `shade`, temporarily comment out just this
+call:
+
+```cpp
+// blocks(point, toLight, shadow);
+```
+
+Save, then **Build and Run**. **Checkpoint:** the blocks still render, but their
+cast shadows disappear. Surface-facing light still shades their faces. You have
+removed the visibility test between each surface and each ceiling-light sample;
+you have not removed the blocks from the camera's scene query.
+
+![The visibility exercise: blocks render without cast shadows](images/cornell-box-no-shadows.png)
+
+Restore the call, save and run once more. **Checkpoint:** your result matches
+the starting scene. Restore all exercise edits before using the baseline as a
+reference or submitting unrelated project changes.
+
+## 9. Follow the engine frame lifecycle
+
+Open `src/main.cpp` and follow these functions in order:
+
+1. `Run` creates the Platform window and owns the event/frame loop.
+2. `Renderer::Start` starts RHI and creates the shaders, uniform and pipeline.
+3. `Renderer::Draw` begins a frame, uploads the current framebuffer dimensions,
+   draws a fullscreen triangle and ends the frame.
+4. Renderer shutdown releases GPU resources before the window is destroyed.
+
+The host uploads one aligned `float32[4]`: framebuffer width, height, manual sRGB
+encoding enable and flat-mode enable. Slang receives one `float4` at binding 0;
+generated reflection and C++ assertions check its size. If the attachment encodes
+sRGB, the shader leaves its output linear. Otherwise the shader encodes it after
+tone mapping. Errors return explicit statuses and use Ludus logging.
+
+The fragment shader constructs a camera ray for each pixel, finds the closest
+room plane or rotated box, then samples sixteen points on the ceiling light.
+The host provides the window and GPU lifecycle; this sample owns the scene and
+lighting algorithm. Read [Rendering and shaders](../development/fullscreen-rendering.md)
+when you are ready to create your own shader/uniform layout.
+
+You can now repeat the same edit–build–run loop in your own application. Use
+[Create your first project](../wiki/getting-started/first-project.md) for a new
+minimal project, and [Build and debug](../wiki/guides/build-and-debug.md) for the
+normal workspace workflow. This lesson does not provide a general scene editor,
+mesh pipeline or path tracer.
+
+## Manual setup and command-line workflow
+
+This route is for macOS, terminal users and explicit SDK/tool selection. Finish
+it before lesson 2, then use the commands here wherever a lesson says **Build and
+Run**. The editor route above performs its project preparation through Repair;
+it does not require these shell steps too.
+
+### Prepare the engine once
 
 Start with a Ludus checkout containing `examples/cornell-box`. Follow
 [Build and initialize](../development/building.md) for platform prerequisites.
@@ -45,7 +278,7 @@ configure, build and test do not download anything. Keep preparation separate
 from normal project builds. A previous SDK that predates Metal/fullscreen
 rendering is insufficient even if it has the same `0.1.0` version string.
 
-## 2. Select your tools and SDK
+### Select your tools and SDK
 
 Still at the engine checkout root, set up this shell:
 
@@ -73,7 +306,7 @@ CMake Tools, select this prepared CMake executable and enable preset mode, then
 select the sample's host preset. Opening/checking a project should not run the
 preparation commands automatically.
 
-## 3. Configure, build and test the independent project
+### Configure, build and test
 
 ```bash
 cd examples/cornell-box
@@ -109,32 +342,13 @@ render tests create real shaders, uniforms and a pipeline, upload the layout,
 submit frames and shut down. A missing/unusable GPU fails the tests; it does not
 silently pass. These checks establish rendering execution, not pixel accuracy.
 
-## 4. Run the materials stage
+### Run and repeat a lesson
 
-On Linux, use a Vulkan-capable driver and a Wayland desktop with a windowed
-Platform SDK. A headless SDK cannot open an interactive window.
-
-```bash
-# Linux:
-out/build/linux-clang-development/cornell_box --flat
-
-# macOS:
-out/build/macos-clang-development/cornell_box.app/Contents/MacOS/cornell_box --flat
-```
-
-![Flat-material stage captured from the running Metal sample](images/cornell-box-materials.png)
-
-The red and green walls identify the room's orientation. The white blocks and
-white room share the same material, so their interiors blend together in this
-unlit view; only their silhouettes against a colored wall distinguish them.
-This stage makes the contribution of lighting in the next step easy to see.
-The ceiling patch remains emissive in both modes. Close the window to exit.
-
-## 5. Run direct lighting and shadows
-
-Launch the same executable without `--flat`:
+From `examples/cornell-box`, rebuild after saving each source edit:
 
 ```bash
+cmake --build --preset "$engine_preset"
+
 # Linux:
 out/build/linux-clang-development/cornell_box
 
@@ -142,14 +356,9 @@ out/build/linux-clang-development/cornell_box
 out/build/macos-clang-development/cornell_box.app/Contents/MacOS/cornell_box
 ```
 
-Compare with the opening screenshot: the two blocks now have distinct lit tops
-and darker fronts, and cast shadows on the floor and walls. Resize the window;
-the camera's vertical field of view stays fixed and the framebuffer aspect ratio
-updates. The camera does not move, and there is no animation or random seed.
-Close the window to exit. macOS also produces an application bundle that can be
-opened normally after local preparation.
-
-For a bounded GPU check without any desktop window:
+For lesson 3, append `--flat` to your host's executable command. Remove it for
+later lessons. Close the running window before rebuilding and starting again.
+For a bounded GPU check without a desktop window:
 
 ```bash
 # Linux (requires a Vulkan adapter; software Vulkan is suitable for CI):
@@ -161,49 +370,21 @@ out/build/macos-clang-development/cornell_box.app/Contents/MacOS/cornell_box \
 ```
 
 `--frames=N` accepts 1..10000 successfully submitted frames. `--headless`
-requires it; an invalid argument returns exit code 2. Startup/draw failures and
-incomplete bounded runs return 1. Normal completion returns 0. The executable
-does not export image files: the guide's screenshots are captures of the real
-native window, taken on macOS Metal on October 7, 2026 at the default square
-window size. OS chrome, display scaling and minor GPU floating-point differences
-can vary; these are visual examples, not byte-identical cross-platform goldens.
-
-## How the sample works
-
-The host creates a public Platform window, starts RHI, and creates two shader
-handles, a 16-byte uniform and one pipeline. Each frame it pumps events, refreshes
-the native dimensions, acquires the frame, uploads the actual extent and draws
-one fullscreen triangle. Shutdown precedes window destruction. Errors use
-explicit statuses and Ludus logging; the application enables no C++ exceptions.
-
-The CPU uniform contains one aligned `float32[4]`: width and height in framebuffer
-pixels, manual sRGB encoding enable, and flat-mode enable. The shader declares
-one `float4` at binding 0; generated reflection and C++ layout assertions check
-its occupied size. If the attachment applies sRGB conversion, the shader leaves
-its output linear; otherwise it encodes explicitly after tone mapping. Follow
-[the rendering guide](../development/fullscreen-rendering.md) for the full API
-ownership and upload contract.
-
-The fragment shader generates a camera ray for each pixel. It finds the nearest
-of five bounded room planes and two rotated analytic boxes. Boxes use slab
-intersections in local coordinates, checking parallel rays before dividing.
-For a surface hit it evaluates diffuse direct lighting at sixteen fixed points
-on the ceiling rectangle and traces shadow rays against the two blocks. No
-secondary light-bounce rays, mesh assets, GPU ray-tracing extension, compute
-shader or history buffer are used. Reinhard-style `color / (1 + color)` tone
-mapping makes the bright emitter fit the display range.
-
-Change the wall colors in `scene`, block positions/extents/rotations in `blocks`,
-or light samples in `shade`, then rebuild the same preset. Keep the emissive
-patch dimensions and sampled light dimensions consistent when changing the
-light. More samples increase fragment cost; high-DPI windows shade more pixels.
+requires it; invalid arguments return 2, startup/draw failures and incomplete
+bounded runs return 1, and normal completion returns 0. Linux interactive runs
+need a Wayland desktop and a windowed Platform SDK. The executable does not
+export images; these screenshots were captured from the real native window on
+October 7, 2026 at its default square size.
 
 ## Validation and recovery
 
 CI builds the independent sample against the freshly installed SDK in the
 existing macOS/Metal and Linux/Vulkan jobs, runs CTest, and runs Clang 18
 static analysis on its source. A separate sample build enables ASan/UBSan.
-The macOS job also submits three frames through a live Cocoa window.
+The Linux job also starts without local presets and verifies the shared
+CLI/editor Repair backend, its read-only setup check and repeated repair. These
+checks cover the setup operations, not an end-to-end GUI interaction. The macOS
+job also submits three frames through a live Cocoa window.
 
 To run the sample sanitizer configuration locally:
 
@@ -218,21 +399,14 @@ the sample translation unit. Engine sanitizer validation remains in Ludus's
 existing sanitizer jobs. Clang 18 ASan cannot start on the macOS 26.6 development
 host; the macOS 14 CI job supplies that runtime validation.
 
-If tools or the SDK move, update the environment or ignored local presets and
+In the editor, use **Project → Repair Project Setup** after moving tools or the
+SDK. For the manual route, update the environment or ignored local presets and
 run `cmake --fresh --preset "$engine_preset"` before rebuilding/testing. A missing
 Slang compiler/validator fails during configure; shader build errors include the
 exact compiler command. A native window failure means checking the WindowServer
 or Wayland session and the SDK's Platform backend. GPU-startup errors are reported
 through the sample's logger. Repeated configure/build/test reuses the project
 without regenerating or replacing its source.
-
-`ludus.project.json` supplies editor/CLI project metadata and initially selects
-Linux Development. The release lock is explicitly unresolved: this repository
-sample does not claim a published SDK package. Use a local SDK override and the
-matching host preset if using project tooling. `cornell-box` is a sample identity,
-not a newly registered `ludus project create --template` option. The direct CMake
-workflow above is the reproducible route; general scene authoring and embedded
-editor viewports are outside this tutorial.
 
 ## Attribution
 

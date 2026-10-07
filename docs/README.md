@@ -59,7 +59,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Checked drag and radial contact kernels](development/dynamics-kernels.md)
 - [Continuous integration](development/continuous-integration.md)
 - [Engine configuration](wiki/guides/configuration.md)
-- [F4 filesystem measurements](development/filesystem-benchmark.md)
+- [Filesystem measurements](development/filesystem-benchmark.md)
 - [Game release setup, packaging and publishing](development/editor-game-releases.md)
 - [Generated public SDK reference](development/api-reference.md)
 - [Hash bytes without confusing identity](wiki/guides/hashing.md)
@@ -98,10 +98,10 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Game world reference](examples/world-demo.md)
 - [Ludus smoke application](examples/smoke.md)
 - [Packaged browser CI tests](development/tools/web-browser-tests.md)
-- [Render a Cornell box with the existing Ludus SDK](examples/cornell-box.md)
 - [Shader feasibility probe](development/tools/shader-probe.md)
 - [W0 WebGPU feasibility probe](development/tools/webgpu-probe.md)
 - [W1 browser FoundationBase probe](development/tools/web-foundation-probe.md)
+- [Your first rendered scene: Cornell box](examples/cornell-box.md)
 
 ## Architecture and design
 
@@ -152,6 +152,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Runtime UI architecture](architecture/ui.md)
 - [S2: dependency cook, source debugging and transactional replacement](architecture/luau-s2.md)
 - [S3: a visual encounter authoring workflow](architecture/visual-s3.md)
+- [S4: installed native/Luau behavior provider and project cooking](architecture/behavior-s4.md)
 - [Smart pointer architecture](architecture/smart-pointers.md)
 - [Terrain generation architecture](architecture/terrain-generation.md)
 - [Terrain systems architecture](architecture/terrain.md)

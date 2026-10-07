@@ -29,6 +29,13 @@ a project, work in the editor, and understand the systems behind each workflow.
 
     [Create a project →](getting-started/first-project.md)
 
+- **Render and change your first scene**
+
+    Open the Cornell box, then change a material, move a block and adjust lighting.
+    Follow screenshots and visible checkpoints at each step.
+
+    [First rendered scene →](../examples/cornell-box.md)
+
 - **Find a workflow**
 
     Build, run, debug, repair setup, or package a game with explicit steps.

@@ -330,12 +330,32 @@ def cmd_publish_upload(args) -> int:
     return EXIT_OK
 
 
+def cmd_scripts_cook(args) -> int:
+    from . import behavior_cook
+    import subprocess
+    try:
+        result = behavior_cook.cook(*(Path(getattr(args, name)) for name in
+            ("contract", "package", "output", "profile", "compiler", "analyzer")))
+    except (KeyError, TypeError, RecursionError, subprocess.SubprocessError) as error:
+        detail = getattr(error, "stderr", b"") or b""
+        raise ToolingError("BehaviorCookFailed", str(error) + "\n" + detail[-8192:].decode(errors="replace")) from error
+    _emit(args, {"cooked": str(result)})
+    if not getattr(args, "json", False):
+        print(f"Cooked behavior package: {result}")
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ludus", description="Ludus host tooling CLI")
     p.add_argument("--version", action="version", version=f"ludus {__version__}")
     p.add_argument("--json", action="store_true", help="emit a versioned JSON result")
     p.add_argument("--store", help="SDK store root (default: $LUDUS_SDK_STORE or ~/.local/share/ludus)")
     sub = p.add_subparsers(dest="group", required=True)
+    scripts = sub.add_parser("scripts", help="cook project-owned behavior assets").add_subparsers(dest="cmd", required=True)
+    cook = scripts.add_parser("cook", help="explicit paired-tool cook; never downloads tools")
+    for flag in ("contract", "package", "output", "profile", "compiler", "analyzer"):
+        cook.add_argument("--" + flag, required=True)
+    cook.set_defaults(func=cmd_scripts_cook)
 
     sdk = sub.add_parser("sdk", help="manage installed SDKs").add_subparsers(dest="cmd", required=True)
     sdk.add_parser("list").set_defaults(func=cmd_sdk_list)

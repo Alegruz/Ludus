@@ -1,14 +1,17 @@
 # Filesystem architecture
 
-Status: F0 design and reference review complete; F1 through F5 implemented. Validation is
-recorded in the implementation PR.
-Reference review follows the baseline and records revisions below. This is a storage architecture for
-Ludus; it does not implement an operating-system filesystem.
+Status: F0 design and reference review complete; F1 through F5 implemented.
+The delivery plan below records the completed baseline; F5 validation is recorded
+in [PR #146](https://github.com/Alegruz/Ludus/pull/146), and F4 measurements in the
+[benchmark evidence](../development/filesystem-benchmark.md).
+The [post-baseline improvement plan](#post-baseline-research-and-improvement-plan)
+tracks proposed experiments separately from implemented contracts. This is a
+storage architecture for Ludus; it does not implement an operating-system filesystem.
 
 ## Baseline decision
 
 Keep three boundaries: FoundationFilesystem owns explicit-error byte I/O and
-root capabilities; a later virtual namespace maps logical paths to immutable
+root capabilities; the virtual namespace maps logical paths to immutable
 mount snapshots; Content owns resource identity, schemas, hashes and decoding.
 Filesystem depends only on FoundationBase, never on logging, content, graphics,
 windowing, a global service locator or a not-yet-existing job system.
@@ -500,6 +503,91 @@ See the [filesystem guide](../wiki/guides/filesystem.md) for host integration an
 [measurement procedure](../development/filesystem-benchmark.md) for reproducible
 mixed loose/raw/LZ4 workloads and the measured synchronous baseline. These are
 storage delivery measurements, not resource decode or GPU residency claims.
+
+## Post-baseline research and improvement plan
+
+Completing F1-F5 establishes the byte-I/O, namespace, pack, scheduling and
+publication contracts above. It does not establish universal durability or
+optimal performance for every game's asset mix. Keep that baseline available
+while evaluating the proposals below. All FS-R items are **proposed**, with no
+implementation or measured benefit claimed by this plan. They are follow-up
+identifiers, not additional acceptance requirements for the completed F1-F5 work.
+
+### Venues and reading priorities
+
+Follow these venues for specific questions in the existing architecture. Start
+with FAST and OSDI/SOSP; use TOS for deeper storage studies and SYSTOR for practical
+experiments. These priorities are our assessment of applicability to Ludus.
+Conference programs are reading sources, not an instruction to attend, submit a
+paper or adopt every featured storage mechanism.
+
+| Venue | What to look for | Ludus boundary and relevance |
+| --- | --- | --- |
+| [USENIX FAST, Conference on File and Storage Technologies](https://www.usenix.org/conference/fast26/technical-sessions) | Crash consistency, workload characterization, caching, compression and storage performance | First choice across F3 packs, F4 streaming and F5 publication; separate kernel/device mechanisms from changes feasible inside our user-space SDK. |
+| [USENIX OSDI, Operating Systems Design and Implementation](https://www.usenix.org/conference/osdi25/technical-sessions), and [ACM SOSP, Symposium on Operating Systems Principles](https://sigops.org/s/conferences/sosp/2025/) | Recovery protocols, concurrency, ownership and system evaluation | Review persistence assumptions and revision/cancellation lifetime proofs before widening a contract. Distributed consistency protocols need a separate product need. |
+| [ACM SYSTOR, International Systems and Storage Conference](https://www.systor.org/2026/cfp/) | Experimental prototypes, deployment experience and workload comparisons | Useful for reproducible backend, cache and latency comparisons; select workloads that resemble asset delivery. |
+| [ACM Transactions on Storage (TOS)](https://dl.acm.org/journal/tos) | Detailed storage designs and their evaluations | First journal reading target for publication, packs and storage policy; verify assumptions against supported hosts. |
+| [ACM Transactions on Computer Systems (TOCS)](https://dl.acm.org/journal/tocs) | Broader system designs, concurrency and scheduling | Supplement storage reading when queueing, completion delivery or CPU sharing is the bottleneck. |
+
+### Research inputs and adaptations to investigate
+
+Thanks to the authors below for the methods and analysis informing this plan.
+Publication metadata, abstracts and the named sections were consulted. The
+proposed experiments are Ludus-specific interpretations; no cited implementation
+has been imported, and a full algorithm/artifact compatibility review remains
+required before adoption. Historical filesystem results and hardware speedups do
+not establish behavior or gains on our current Linux/macOS targets.
+
+| Reference and reviewed sections | Useful contribution | Proposed application and limits |
+| --- | --- | --- |
+| Thanumalayan Sankaranarayana Pillai, Vijay Chidambaram, Ramnatthan Alagappan, Samer Al-Kiswany, Andrea C. Arpaci-Dusseau and Remzi H. Arpaci-Dusseau, **All File Systems Are Not Created Equal: On the Complexity of Crafting Crash-Consistent Applications**, OSDI 2014, pp. 433-448; sections 2-3 ([paper and media](https://www.usenix.org/conference/osdi14/technical-sessions/presentation/pillai)) | Application correctness depends on storage ordering and atomicity assumptions; ALICE explores update protocols against persistence models. | FS-R1 specifies recovery expectations for each F5 sync policy and tests the host stack. Its historical Linux configurations do not certify APFS or modern kernels. |
+| Jayashree Mohan, Ashlie Martinez, Soujanya Ponnapalli, Pandian Raju and Vijay Chidambaram, **Finding Crash-Consistency Bugs with Bounded Black-Box Crash Testing**, OSDI 2018, pp. 33-50; sections 4-5 ([paper and media](https://www.usenix.org/conference/osdi18/presentation/mohan)) | Bounded workload exploration, block-I/O replay and explicit data/metadata recovery oracles; CrashMonkey and Ace demonstrate the approach. | FS-R1 adapts the testing method to our publication protocol. Bounds limit coverage; process termination alone does not simulate power loss. Verify artifact/kernel compatibility before reuse. |
+| Dongjoo Seo, Jihyeon Jung, Yeohwan Yoon, Ping-Xiang Chen, Yongsoo Joo, Sung-Soo Lim and Nikil Dutt, **DPAS: A Prompt, Accurate and Safe I/O Completion Method for SSDs**, FAST 2026, pp. 381-397; sections 4-5 ([paper and media](https://www.usenix.org/conference/fast26/presentation/seo)) | Completion strategies trade latency against CPU consumption, especially under contention and changing device latency. | FS-R2 adopts the comparison questions; FS-R3 considers backend experiments only after measurement. DPAS changes the Linux block layer; it is not a drop-in AsyncReader policy or a cooked-path watcher algorithm. |
+
+### Prioritized experiments and acceptance
+
+Start with FS-R1 and FS-R2 independently. FS-R2's traces determine whether FS-R3
+or FS-R4 has value. FS-R5 addresses authoring reliability and remains separate
+from storage throughput optimization. Each item belongs in a scoped follow-up PR
+with its baseline revision, inputs, result and outstanding limitations recorded.
+
+| ID / priority | Question and proposed experiment | Acceptance evidence before adoption |
+| --- | --- | --- |
+| FS-R1 / first: publication recovery | Extend F5's syscall-failure tests with bounded crash-state exploration for create/replace, empty/multi-block content and each sync policy. Check recovered bytes and directory entries after storage recovery. | Declare the permitted outcomes at each persistence boundary before testing. Preserve reproducible failing images/traces; record OS/kernel, filesystem/mount options and the crash model. Begin on disposable Linux images with ext4/XFS; track macOS/APFS coverage separately. A missing supported-host result remains an evidence gap, not a pass. |
+| FS-R2 / first: representative streaming | Extend the existing F4 benchmark with startup, level-transition and background-loading traces, realistic compressibility and host completion cadence. Compare synchronous and fixed worker counts with controlled CPU contention. | Verify identical byte results; report repeated p50/p95/p99 queue, service and delivery latency, CPU, throughput, bytes/requests retained, cancellations and frame impact when integrated. Record cold/warm cache methodology, hardware and instrumentation cost. Preserve regressions and inconclusive results alongside gains. |
+| FS-R3 / conditional on FS-R2: submission and completion | If traces expose syscall/handoff cost, compare compatible range batching/coalescing or a Linux io_uring backend against the blocking pool, one change at a time. A future Windows IOCP experiment needs its own native provider/support plan. | Preserve revision identity, caller destination ownership, byte/request budgets, latest-start deadlines, cancellation/drain and exactly-once collection. Define partial-read and coalesced cancellation behavior; rerun fault, allocation, race and sanitizer gates. Adopt only with repeatable benefit inside a declared CPU/memory budget. Keep the portable fallback and explicit Unsupported behavior. |
+| FS-R4 / conditional on FS-R2: pack cost and layout | Determine whether CRC/decode, block size, access layout or opened-file scratch contention dominates. Compare existing raw/LZ4 block sizes and trace-derived layouts using held-out gameplay traces. | Retain full-key lookup, integrity checks, decode/range bounds and opened-revision lifetime. Report CPU, tails, stored bytes, scratch and descriptor costs; validate byte equality, reproducibility and corrupt-input/fuzz cases. Prefer existing format knobs; any new codec, alignment or format version needs a separate compatibility decision. |
+| FS-R5 / next authoring study: hint recovery | Exercise repeated cooked publication, hint overflow, registration churn and observation errors through a real Content reload consumer. Consider OS notifications only if measured polling cost or detection latency is unacceptable. | Compare the settled catalog to an explicit validated rescan, retain old resources on failed replacement and retire GPU/audio users at their owner boundary. Measure observation/rescan work and overlapping residency. Any notification adapter retains bounded queues, overflow recovery and explicit registration; it never treats an event as content validity or mutates active readers. |
+
+FS-R1's oracle must distinguish live pathname publication from recovery after
+power loss. Under a declared crash model, a successfully acknowledged file-and-
+directory sync should recover the complete new destination; weaker or interrupted
+policies permit only the outcomes explicitly allowed by that stack/model. Report
+violations and revise support claims rather than relaxing the oracle to fit a
+result. File-only sync does not establish persistence of the renamed directory
+entry. The macOS implementation requests fsync, so testing must state device-cache
+assumptions; stronger cache flushing needs an explicit API/policy decision.
+Use process-kill tests for process-crash behavior and block replay or a controlled
+VM/device crash model for storage recovery, labeling the distinction in results.
+Tests operate on disposable storage, never a contributor's project/user root.
+
+### Turning a result into a maintained improvement
+
+1. Choose an FS-R item and state the observed problem, hypothesis and comparison
+   criteria before implementation. Keep the original baseline and a correctness
+   oracle; a negative result can close an experiment without changing runtime code.
+2. Read the relevant full sources/artifacts and record assumptions, exact adopted
+   ideas and departures here. Add attribution beside affected code when a method
+   is implemented. A publication name alone is not evidence of compatibility.
+3. Record reproducible commands and results in the
+   [filesystem measurement owner](../development/filesystem-benchmark.md), with
+   the revision, toolchain, host/storage configuration, seeds/traces, repeated-run
+   variability and recovery/backend coverage. Update this table's status and link
+   the result PR when an experiment is evaluated; do not erase failed comparisons.
+4. Adopt only after correctness and applicable platform, fault, sanitizer,
+   allocation, SDK and documentation checks pass. Update public API comments and
+   the canonical host guide if behavior changes. Keep Content identity/residency,
+   GPU upload policy and render/audio ownership outside FoundationFilesystem.
 
 ## Dependency and ownership map
 

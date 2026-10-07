@@ -105,7 +105,29 @@ set(Ludus_SDK_TSAN "@LUDUS_ENABLE_TSAN@")
 set(Ludus_SDK_COMPILER_ID "@LUDUS_COMPILER_ID@")
 set(Ludus_SDK_COMPILER_VERSION "@LUDUS_COMPILER_VERSION@")
 
+if(@LUDUS_BUILD_BEHAVIOR@ AND NOT TARGET LudusBehaviorProfile)
+    # Model the static archive dependency graph so one-pass linkers retain the
+    # correct ordering (raw archive lists lose the core's Foundation edges).
+    foreach(pair "Core;ludus_runtime_scripting" "Vm;Luau.VM" "Common;Luau.Common")
+        list(GET pair 0 identity)
+        list(GET pair 1 archive)
+        add_library(_LudusBehavior${identity} STATIC IMPORTED)
+        set_property(TARGET _LudusBehavior${identity} PROPERTY IMPORTED_LOCATION
+            "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/Ludus/behavior/@CMAKE_STATIC_LIBRARY_PREFIX@${archive}@CMAKE_STATIC_LIBRARY_SUFFIX@")
+    endforeach()
+    set_property(TARGET _LudusBehaviorCore PROPERTY INTERFACE_LINK_LIBRARIES
+        "_LudusBehaviorVm;Ludus::FoundationMath;Ludus::FoundationMemory")
+    set_property(TARGET _LudusBehaviorVm PROPERTY INTERFACE_LINK_LIBRARIES _LudusBehaviorCommon)
+    add_library(LudusBehaviorProfile INTERFACE IMPORTED)
+    set_property(TARGET LudusBehaviorProfile PROPERTY INTERFACE_LINK_LIBRARIES _LudusBehaviorCore)
+    unset(pair)
+    unset(identity)
+    unset(archive)
+endif()
 include("${CMAKE_CURRENT_LIST_DIR}/LudusTargets.cmake")
+if(@LUDUS_BUILD_BEHAVIOR@)
+    include("${CMAKE_CURRENT_LIST_DIR}/LudusBehavior.cmake")
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/LudusShaders.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/LudusReflection.cmake")

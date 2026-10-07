@@ -4,19 +4,16 @@
 #include <ludus/foundation/base/assert_config.hpp>
 #include <ludus/foundation/base/diagnostic_output.hpp>
 
-#if !defined(LUDUS_PLATFORM_MACOS)
-#    include <cerrno>
-#    include <cstdlib>
-#    include <cstring>
-#    include <sys/socket.h>
-#    include <sys/un.h>
-#    include <unistd.h>
-#endif
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 namespace fb = ludus::foundation;
 namespace fbd = ludus::foundation::diagnostics;
 
-#if !defined(LUDUS_PLATFORM_MACOS)
 namespace ludus::diagnostics
 {
 namespace
@@ -28,11 +25,8 @@ constexpr const char* CONTROL_FD_ENV = "LUDUS_DIAGNOSTIC_CONTROL_FD";
 // Local Debug opt-out. "0" forces report-only even on an interactive terminal.
 constexpr const char* INTERACTIVE_ENV = "LUDUS_DIAGNOSTIC_INTERACTIVE";
 
-// Build-flavor eligibility. Only the Debug flavor may present a dialog. The
-// generated LUDUS_ASSERT_DIALOGS_AVAILABLE capability macro is introduced by the
-// later decision milestone; until then, eligibility is gated on the existing
-// generated, SDK-owned, non-overridable build-flavor id (Debug == 1).
-constexpr bool BUILD_ELIGIBLE = LUDUS_BUILD_FLAVOR_ID == 1;
+// SDK-owned capability: only a non-CI Debug build may request presentation.
+constexpr bool BUILD_ELIGIBLE = LUDUS_ASSERT_DIALOGS_AVAILABLE == 1;
 
 // Parse a small nonnegative descriptor number without allocation. Returns -1 for
 // absent/empty/malformed values so a bad env never selects a fd.
@@ -55,6 +49,7 @@ int ReadDescriptor(const char* name) noexcept
     return result;
 }
 
+#if defined(LUDUS_PLATFORM_LINUX)
 // Nonblocking connect to a Unix display socket without retaining it. Success
 // proves a live endpoint is reachable, unlike a mere PATH/env lookup.
 bool CanConnectUnix(const char* path) noexcept
@@ -85,11 +80,6 @@ bool CanConnectUnix(const char* path) noexcept
     const bool reachable = result == 0 || errno == EINPROGRESS || errno == EISCONN;
     (void)::close(fd);
     return reachable;
-}
-
-bool HasInteractiveTerminal() noexcept
-{
-    return ::isatty(STDIN_FILENO) == 1 && ::isatty(STDOUT_FILENO) == 1;
 }
 
 // A found dialog executable is NOT proof of presentation: validate a live
@@ -144,6 +134,19 @@ bool HasGraphicalDisplay() noexcept
 
     errno = saved_errno;
     return available;
+}
+
+#else
+bool HasGraphicalDisplay() noexcept
+{
+    // Cocoa presentation is deferred; never mistake DISPLAY for a native UI.
+    return false;
+}
+#endif
+
+bool HasInteractiveTerminal() noexcept
+{
+    return ::isatty(STDIN_FILENO) == 1 && ::isatty(STDOUT_FILENO) == 1;
 }
 
 // Visible notice for a failed interactive setup. Uses the ordinary blocking
@@ -216,16 +219,3 @@ SessionResult InitializeDiagnosticSession(Interactivity requested) noexcept
     return result;
 }
 } // namespace ludus::diagnostics
-#else
-namespace ludus::diagnostics
-{
-SessionResult InitializeDiagnosticSession(Interactivity) noexcept
-{
-    // Native helper transport/presentation is deferred on macOS. Assertions
-    // still use FoundationBase's emergency output and terminal failure path.
-    SessionResult result{};
-    result.DetectedCi = fbd::IsContinuousIntegration();
-    return result;
-}
-} // namespace ludus::diagnostics
-#endif
