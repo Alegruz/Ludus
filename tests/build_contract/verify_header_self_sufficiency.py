@@ -19,7 +19,8 @@ its own include directories, a single translation unit's flags cannot resolve
 headers from other modules; this script therefore takes a representative TU's
 non-path flags and unions in the include directories (-I / -isystem / -iquote /
 -idirafter and their generated-header variants) from EVERY entry in the compile
-database, so any public header resolves regardless of which module owns it.
+database, plus public source include roots for optional modules with no compiled
+target in this profile, so every discovered public header can still be checked.
 
 Usage: verify_header_self_sufficiency.py <build_dir> [module/submodule]
 The optional module selects only public headers exported by a partial SDK.
@@ -92,13 +93,15 @@ def public_headers(root: Path) -> list[Path]:
     return sorted(h for h in headers if "internal" not in h.parts)
 
 
-def logical_include(header: Path) -> str:
-    include_root = header
+def public_include_root(header: Path) -> Path:
     for parent in header.parents:
         if parent.name == "include":
-            include_root = parent
-            break
-    return str(header.relative_to(include_root))
+            return parent
+    raise ValueError(f"Public header has no include root: {header}")
+
+
+def logical_include(header: Path) -> str:
+    return str(header.relative_to(public_include_root(header)))
 
 
 def representative_entry(entries):
@@ -122,6 +125,9 @@ def main() -> int:
     # representative TU. compiler_options() already strips -o/-c and the source.
     base_options = compiler_options(representative)
 
+    root = Path(__file__).resolve().parents[2]
+    headers = public_headers(root)
+
     # Union of every entry's header-search flags so a probe for any module's
     # header resolves. Deduplicate while preserving order.
     seen: set[str] = set()
@@ -129,6 +135,10 @@ def main() -> int:
     tokens: list[str] = []
     for entry in entries:
         tokens.extend(include_flags(entry))
+    # Default-off modules contribute no TU/include flags to the database. Their
+    # public headers are nevertheless discovered and must compile standalone.
+    for include_root in sorted({public_include_root(header) for header in headers}):
+        tokens.extend(["-I", str(include_root)])
     index = 0
     while index < len(tokens):
         token = tokens[index]
@@ -147,11 +157,9 @@ def main() -> int:
 
     options = base_options + aggregated_includes
 
-    root = Path(__file__).resolve().parents[2]
     failures: list[str] = []
     checked = 0
     skipped: list[str] = []
-    headers = public_headers(root)
     if len(sys.argv) > 2:
         module_root = (root / "modules" / sys.argv[2] / "include").resolve()
         headers = [header for header in headers if module_root in header.parents]

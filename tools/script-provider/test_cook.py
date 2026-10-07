@@ -77,6 +77,21 @@ class CookTests(unittest.TestCase):
         profile['compiler']='0'*64;profile_path.write_text(json.dumps(profile))
         with self.assertRaisesRegex(ValueError,'paired host tools'):cook.cook(*args)
         self.assertEqual(before,{name:(output/name).read_bytes() for name in before})
+    def test_long_string_imports_match_the_paired_compiler(self):
+        compiler=ROOT/'out/luau-probe/host-compiler/luau-compile'
+        analyzer=compiler.with_name('luau-analyze')
+        if not compiler.is_file() or not analyzer.is_file():self.skipTest('explicit paired tool preparation required')
+        profile={'version':1,'profile':cook.sha((ROOT/'config/luau_toolchain.json').read_bytes()),'compiler':cook.sha(compiler.read_bytes()),'analyzer':cook.sha(analyzer.read_bytes())}
+        profile_path=self.root/'profile.json';profile_path.write_text(json.dumps(profile))
+        original=(FIXTURE/'door.luau').read_text().replace('require([=[0000000000000600]=])','require("0000000000000600")')
+        asset='0000000000000600'
+        for literal,short in [('[[%s]]'%asset,False),('[=[%s]=]'%asset,False),('[==[\r\n%s]==]'%asset,False),('[[%s]]'%asset,True)]:
+            with self.subTest(literal=literal,short=short):
+                expression='require '+literal if short else 'require('+literal+')'
+                self.assertEqual(cook.imports(expression),[(asset,expression.index(literal),len(expression)-(0 if short else 1))])
+                (self.root/'door.luau').write_text(original.replace('require("'+asset+'")',expression))
+                destination=cook.cook(self.root/'contract.json',self.root/'package.json',self.root/'cooked',profile_path,compiler,analyzer)
+                self.assertTrue((destination/'behavior.lupack').is_file())
     def test_cli_reports_controlled_manifest_errors(self):
         program=ROOT/'scripts/ludus'
         result=subprocess.run([str(program),'scripts','cook','--contract',str(self.root/'contract.json'),'--package',str(self.root/'package.json'),'--output',str(self.root/'cooked'),'--profile',str(self.root/'absent.json'),'--compiler',str(self.root/'absent-compiler'),'--analyzer',str(self.root/'absent-analyzer')],capture_output=True,text=True)

@@ -236,11 +236,27 @@ def imports(text):
     result = []
     for index, token in enumerate(scanned):
         if token[:2] != ("word", "require"): continue
-        require(index + 3 < len(scanned) and (index == 0 or scanned[index-1][1] not in (".", ":")) and
-                scanned[index+1][1] == "(" and scanned[index+2][0] == "string" and
-                scanned[index+3][1] == ")", "require must use one literal asset identity")
-        literal = scanned[index+2]
-        identity = literal[1][1:-1]
+        require(index + 1 < len(scanned) and
+                (index == 0 or scanned[index-1][1] not in (".", ":")),
+                "require must use one literal asset identity")
+        if scanned[index+1][0] == "string":
+            literal = scanned[index+1]
+        else:
+            require(index + 3 < len(scanned) and scanned[index+1][1] == "(" and
+                    scanned[index+2][0] == "string" and scanned[index+3][1] == ")",
+                    "require must use one literal asset identity")
+            literal = scanned[index+2]
+        lexeme = literal[1]
+        opening = re.match(r"\[(=*)\[", lexeme)
+        if opening:
+            # Thanks to Roblox/Luau contributors, Ast/src/Lexer.cpp,
+            # Lexer::fixupMultilineString: align delimiters and first-line/EOL
+            # handling with the reviewed compiler, without copying its code.
+            # https://github.com/luau-lang/luau/blob/1eca9fda3e4753a1592000f6cfdf659aaa778b7d/Ast/src/Lexer.cpp#L1282
+            identity = lexeme[len(opening[0]):-(len(opening[1])+2)]
+            identity = identity.replace("\r\n", "\n").removeprefix("\n")
+        else:
+            identity = lexeme[1:-1]
         require(re.fullmatch(r"[0-9a-f]{16}", identity) and int(identity, 16), "invalid import identity")
         result.append((identity, literal[2], literal[3]))
     return result
