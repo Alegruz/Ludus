@@ -366,26 +366,36 @@ faster. An unsupported browser/host must receive a useful capability explanation
 
 Deliver in reviewable vertical slices with acceptance evidence:
 
-1. Extract project-settings documents/validation/save into the Qt-free core.
-   Prove the same fixtures and failure semantics headlessly, natively and in Wasm.
-   Test save-during-edit, conflicts, history/savepoint behavior, invalid buffers
-   and explicit allocation/error outcomes. Preserve existing serializers first.
-2. Redesign the shell and semantic controls using those operations. Verify real
-   keyboard, text, light/dark, narrow-container and panel-recovery tasks, including
-   macOS integration; an offscreen screenshot alone does not qualify a platform.
-3. Resolve browser frontend, large-model and native rendering risks with small
-   runnable prototypes. Test Unicode/IME, screen readers, virtualized selection,
-   compositor overlap and device/surface failure. Record decisions against the
-   same tasks. If Qt/Wasm fails hard browser tasks, adopt DOM for browser and
-   retire the preview frontend once it replaces its workflows.
-4. Ship one asset/scene slice: import, find, place, select, transform, Undo, save,
-   reopen and Play. Include cancelled/stale jobs, picking after resize, crash
-   recovery and a real rendered frame. Establish multiple-surface RHI support
-   before promising multiwindow scene previews.
-5. Add specialist material/animation/audio tools through the same schemas,
-   commands and preview ownership. Register trusted extensions statically first;
-   do not auto-load native project plugins or hot-unload Qt object code. Add
-   scripting or worker/plugin protocols only for a concrete task.
+1. **M1: Portable authoring core.** Extract project-settings documents,
+   validation and save into the Qt-free core. Prove the same fixtures and failure
+   semantics headlessly, natively and in Wasm. Test save-during-edit, conflicts,
+   history/savepoint behavior, invalid buffers and explicit allocation/error
+   outcomes. Preserve existing serializers first.
+2. **M2: Workspace shell.** Redesign the shell and semantic controls using those
+   operations. Verify real keyboard, text, light/dark, narrow-container and
+   panel-recovery tasks, including macOS integration; an offscreen screenshot
+   alone does not qualify a platform.
+3. **M3: Platform and viewport qualification.** Resolve browser frontend,
+   large-model and native rendering risks with small runnable prototypes. Test
+   Unicode/IME, screen readers, virtualized selection, compositor overlap and
+   device/surface failure. Record decisions against the same tasks. If Qt/Wasm
+   fails hard browser tasks, adopt DOM for browser and retire the preview frontend
+   once it replaces its workflows.
+4. **M4: End-to-end scene workflow.** Ship one asset/scene slice: import, find,
+   place, select, transform, Undo, save, reopen and Play. Include cancelled/stale
+   jobs, picking after resize, crash recovery and a real rendered frame. Establish
+   multiple-surface RHI support before promising multiwindow scene previews.
+5. **M5: Specialist authoring tools.** Add material/animation/audio tools through
+   the same schemas, commands and preview ownership. Register trusted extensions
+   statically first; do not auto-load native project plugins or hot-unload Qt
+   object code. Add scripting or worker/plugin protocols only for a concrete task.
+
+After M1–M4 pass their acceptance gates, record the implementation baseline and
+perform the [deferred research review](editor-gui-reference-review.md#deferred-review-after-the-first-implementation).
+Return to GDC/UIST and the other selected conferences, journals and talks with
+observed workflow, performance and maintenance problems; compare bounded
+experiments before changing the architecture. M3 qualification work remains part
+of the first implementation. Specialist readings follow the relevant M5 work.
 
 Per-document saves preserve conflict detection and atomic replacement semantics.
 Multiple files do not acquire a fictitious global filesystem transaction. Design
