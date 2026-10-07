@@ -111,3 +111,7 @@ Read the [GUI systems design](../../architecture/editor-gui-systems.md),
 [decision](../../decisions/0023-editor-presentation-and-document-core.md)
 and [actual reference review](../../architecture/editor-gui-reference-review.md)
 for ownership, transactions, platform gates and the book-informed refinements.
+
+[S6 safety and platform qualification](../../architecture/behavior-s6.md) is in
+progress: production allocation/resource recovery and shared SDK target admission
+are implemented; six-platform physical-device qualification remains pending.

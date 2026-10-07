@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "programs": [
+    {
+      "asset": "0000000000001001",
+      "revision": 1,
+      "source": "envelope.luau",
+      "entrypoint": true,
+      "imports": []
+    },
+    {
+      "asset": "0000000000001002",
+      "revision": 1,
+      "source": "allocation.luau",
+      "entrypoint": true,
+      "imports": []
+    },
+    {
+      "asset": "0000000000001003",
+      "revision": 1,
+      "source": "readonly.luau",
+      "entrypoint": true,
+      "imports": []
+    },
+    {
+      "asset": "0000000000001004",
+      "revision": 1,
+      "source": "numeric.luau",
+      "entrypoint": true,
+      "imports": []
+    },
+    {
+      "asset": "0000000000001005",
+      "revision": 1,
+      "source": "debugger.luau",
+      "entrypoint": true,
+      "imports": []
+    },
+    {
+      "asset": "0000000000001006",
+      "revision": 1,
+      "source": "runaway.luau",
+      "entrypoint": true,
+      "imports": []
+    },
+    {
+      "asset": "0000000000001007",
+      "revision": 1,
+      "source": "stack.luau",
+      "entrypoint": true,
+      "imports": []
+    },
+    {
+      "asset": "0000000000001008",
+      "revision": 1,
+      "source": "retained.luau",
+      "entrypoint": true,
+      "imports": []
+    }
+  ]
+}

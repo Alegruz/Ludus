@@ -1,5 +1,5 @@
-# S1 is experimental and deliberately absent from the installed SDK. The reviewed
-# longjmp profile has not completed production/platform acceptance (luau-s0.md).
+# Private S1 bridge, also used by the installed Behavior static link closure.
+# The reviewed longjmp profile still requires S6 device/platform qualification.
 include("${PROJECT_SOURCE_DIR}/cmake/LuauProfile.cmake")
 ludus_prepare_luau()
 add_library(ludus_runtime_scripting STATIC src/runtime.cpp src/state.cpp)

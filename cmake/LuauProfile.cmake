@@ -1,4 +1,5 @@
-# Experimental reviewed interpreter profile shared by S0-S4. Only S4 installs a private static link closure.
+# Reviewed interpreter profile shared by S0-S6. Behavior installs a private
+# static link closure; six-platform/device qualification remains in progress.
 include_guard(GLOBAL)
 function(ludus_prepare_luau)
     if(TARGET Luau.VM)

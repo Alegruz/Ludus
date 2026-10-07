@@ -15,6 +15,43 @@ GLOBALS = TOOL["verify"].__globals__
 
 
 class IntegrityTests(unittest.TestCase):
+    def test_host_compilers_use_prepared_tools_and_macos_sdk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / "out/host-tools"
+            (tools / "bin").mkdir(parents=True)
+            for name in ("clang", "clang++"):
+                (tools / "bin" / name).touch()
+            with patch.dict(GLOBALS, ROOT=root), patch("platform.system", return_value="Linux"):
+                options = TOOL["host_compiler_options"]()
+                self.assertEqual(len(options), 2)
+                self.assertIn(str(tools / "bin/clang++"), options[0])
+            with patch.dict(GLOBALS, ROOT=root), patch("platform.system", return_value="Darwin"):
+                with self.assertRaisesRegex(RuntimeError, "macOS SDK"):
+                    TOOL["host_compiler_options"]()
+                (tools / "macos-sdk").mkdir()
+                (tools / "libcxx-include").mkdir()
+                options = TOOL["host_compiler_options"]()
+                self.assertIn(f"-DCMAKE_OSX_SYSROOT={tools / 'macos-sdk'}", options)
+                self.assertIn('libcxx-include', options[-1])
+                self.assertIn('-nostdinc++', options[-1])
+            (tools / "bin/clang").unlink()
+            with patch.dict(GLOBALS, ROOT=root):
+                with self.assertRaisesRegex(RuntimeError, "compiler shims"):
+                    TOOL["host_compiler_options"]()
+
+    def test_stale_owned_host_cache_is_refreshed_without_rebuilding_repeats(self):
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            options = ['-DCMAKE_CXX_COMPILER=/prepared/clang++', '-DCMAKE_MAKE_PROGRAM=/prepared/ninja']
+            self.assertFalse(TOOL['host_cache_changed'](build, options))
+            cache = build/'CMakeCache.txt'
+            cache.write_text('CMAKE_CXX_COMPILER:FILEPATH=clang++-18\nCMAKE_MAKE_PROGRAM:FILEPATH=/prepared/ninja\n')
+            self.assertTrue(TOOL['host_cache_changed'](build, options))
+            cache.write_text('CMAKE_CXX_COMPILER:FILEPATH=/prepared/clang++\nCMAKE_MAKE_PROGRAM:FILEPATH=/prepared/ninja\n')
+            self.assertFalse(TOOL['host_cache_changed'](build, options))
+            self.assertTrue(TOOL['host_cache_changed'](build, [options[0], '-DCMAKE_MAKE_PROGRAM=/moved/ninja']))
+
     def test_modified_host_compiler_is_rejected_before_cooking(self):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)

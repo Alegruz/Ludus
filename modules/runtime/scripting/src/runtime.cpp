@@ -23,51 +23,81 @@
 
 namespace ludus::runtime::scripting
 {
+// Thanks to Roblox/Luau, "VM/src/lmem.cpp" at the pinned revision above:
+// frealloc must never reject a shrink. Retain physical capacity until growth or
+// free, counting headers and old+new storage against the physical heap cap.
+// See docs/architecture/behavior-s6.md for the allocator/resource audit.
 namespace
 {
-static_assert(std::is_trivially_destructible_v<CallContext>);
-static_assert(std::is_trivially_destructible_v<Identity>);
+constexpr usize ALIGNMENT = 16;
+struct alignas(ALIGNMENT) Allocation
+{
+    usize Bytes;
+};
+static_assert(sizeof(Allocation) == ALIGNMENT);
+static_assert(std::is_trivially_destructible_v<Allocation>);
+static_assert(std::is_trivially_copyable_v<Allocation>);
+} // namespace
 
 // Luau fixes its C allocator parameter order. Distinct wrapper types cannot
 // change this external signature.
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-void* Allocate(void* user, void* block, usize old_size, usize new_size) noexcept
+void* AllocateVm(void* user, void* block, usize old_size, usize new_size) noexcept
 {
     auto* memory = static_cast<Memory*>(user);
     const auto& domain = foundation::GetSystemAllocationDomain();
-    constexpr usize ALIGNMENT = 16;
+    auto* previous = block != nullptr ? static_cast<Allocation*>(block) - 1 : nullptr;
+    const usize old_bytes = previous != nullptr ? previous->Bytes : 0;
     if (new_size == 0)
     {
-        memory->Live -= old_size;
-        domain.Free(block, old_size, ALIGNMENT);
+        memory->Live -= old_bytes;
+        domain.Free(previous, old_bytes, ALIGNMENT);
         return nullptr;
     }
+    if (previous != nullptr && new_size <= old_bytes - sizeof(Allocation))
+    {
+        return block; // Shrink/equal-size and retained-capacity reuse cannot fail.
+    }
     ++memory->Attempts;
-    // FoundationMemory has allocate/free, not realloc. Bound the actual temporary
-    // old+new footprint before copying. Rejection preserves the original block.
-    if ((memory->FailAt != 0 && memory->Attempts >= memory->FailAt) || memory->Live > memory->Limit ||
-        new_size > memory->Limit - memory->Live)
+    if (new_size > ~usize{0} - sizeof(Allocation))
     {
         ++memory->Denied;
         return nullptr;
     }
-    void* output = domain.TryAllocate(new_size, ALIGNMENT);
-    if (output != nullptr)
+    const usize bytes = new_size + sizeof(Allocation);
+    if ((memory->FailAt != 0 && memory->Attempts >= memory->FailAt) || memory->Live > memory->Limit ||
+        bytes > memory->Limit - memory->Live)
     {
-        const usize peak = memory->Live + new_size;
-        if (peak > memory->Peak)
-        {
-            memory->Peak = peak;
-        }
-        if (block != nullptr)
-        {
-            std::memcpy(output, block, old_size < new_size ? old_size : new_size);
-            domain.Free(block, old_size, ALIGNMENT);
-        }
-        memory->Live = memory->Live - old_size + new_size;
+        ++memory->Denied;
+        return nullptr;
     }
+    void* raw = domain.TryAllocate(bytes, ALIGNMENT);
+    if (raw == nullptr)
+    {
+        ++memory->Denied;
+        return nullptr;
+    }
+    const Allocation allocation{bytes};
+    std::memcpy(raw, &allocation, sizeof(allocation)); // Starts the trivial header's lifetime.
+    void* output = static_cast<Allocation*>(raw) + 1;
+    const usize peak = memory->Live + bytes;
+    if (peak > memory->Peak)
+    {
+        memory->Peak = peak;
+    }
+    if (block != nullptr)
+    {
+        std::memcpy(output, block, old_size);
+        domain.Free(previous, old_bytes, ALIGNMENT);
+    }
+    memory->Live = memory->Live - old_bytes + bytes;
     return output;
 }
+
+namespace
+{
+static_assert(std::is_trivially_destructible_v<CallContext>);
+static_assert(std::is_trivially_destructible_v<Identity>);
 
 void Interrupt(lua_State* state, int32 gc) noexcept
 {
@@ -111,24 +141,35 @@ int32 Runtime::Initialize(lua_State* state) noexcept
     auto* runtime = static_cast<Runtime*>(lua_touserdata(state, 1));
     luaopen_base(state);
     lua_settop(state, 0);
-    // Remove environment replacement, dynamic authoring, host I/O, GC controls
-    // and script protection that could catch our cooperative interruption.
-    const char* denied[] = {"print",
-                            "loadstring",
-                            "getfenv",
-                            "setfenv",
-                            "newproxy",
-                            "collectgarbage",
-                            "gcinfo",
-                            "pcall",
-                            "xpcall",
-                            "rawset",
-                            "setmetatable"};
-    for (const char* name : denied)
+    // Copy only the reviewed base functions into a new environment. Upstream
+    // additions cannot silently widen this profile. No script protection can
+    // catch our safepoint interruption. See behavior-s6.md for the source audit.
+    constexpr const char* ALLOWED[] = {
+        "assert",
+        "error",
+        "getmetatable",
+        "ipairs",
+        "next",
+        "pairs",
+        "rawequal",
+        "rawget",
+        "rawlen",
+        "select",
+        "tonumber",
+        "tostring",
+        "type",
+        "typeof",
+        "_VERSION",
+    };
+    lua_createtable(state, 0, 16);
+    for (const char* name : ALLOWED)
     {
-        lua_pushnil(state);
-        lua_setglobal(state, name);
+        lua_getglobal(state, name);
+        lua_setfield(state, -2, name);
     }
+    lua_pushvalue(state, -1);
+    lua_setfield(state, -2, "_G");
+    lua_replace(state, LUA_GLOBALSINDEX);
     if (runtime->mExecution.Installer != nullptr)
     {
         runtime->mExecution.Installer(state);
@@ -143,8 +184,13 @@ int32 Runtime::Initialize(lua_State* state) noexcept
     {
         runtime->mLoading = i;
         const Program& program = runtime->mPrograms[i];
+        const usize denied = runtime->mMemory.Denied;
         if (luau_load(state, program.Source, reinterpret_cast<const char*>(program.Code), program.Bytes, 0) != 0)
         {
+            // Thanks to Roblox/Luau, VM/src/lvmload.cpp at the pinned revision:
+            // luau_load recovers OOM and returns 1; lua_error re-raises it as a
+            // runtime error. Preserve the explicit allocation cause separately.
+            runtime->mLoadAllocationFailure = runtime->mMemory.Denied != denied;
             lua_error(state);
         }
         lua_call(state, 0, 1);
@@ -509,7 +555,8 @@ Status Runtime::LoadPrograms(const Program* programs, usize count, Setup install
     mContext.Safepoints = 0;
     mContext.Interrupted = false;
     mContext.NativeStatus = 0;
-    mState = lua_newstate(Allocate, &mMemory);
+    mLoadAllocationFailure = false;
+    mState = lua_newstate(AllocateVm, &mMemory);
     if (mState == nullptr)
     {
         return Status::AllocationFailure;
@@ -525,8 +572,9 @@ Status Runtime::LoadPrograms(const Program* programs, usize count, Setup install
     {
         return Status::Completed;
     }
-    const Status result = status == LUA_ERRMEM ? Status::AllocationFailure
-                                               : (mContext.Interrupted ? Status::Interrupted : Status::ScriptFault);
+    const Status result = status == LUA_ERRMEM || mLoadAllocationFailure
+                              ? Status::AllocationFailure
+                              : (mContext.Interrupted ? Status::Interrupted : Status::ScriptFault);
     Close();
     return result;
 }

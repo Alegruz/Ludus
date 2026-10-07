@@ -55,6 +55,9 @@ struct Memory
     usize Denied = 0;
     usize Limit = usize{8} * 1024 * 1024;
 };
+// Private allocator boundary, shared with its direct contract tests. Physical
+// accounting includes retained payload capacity and allocator headers.
+[[nodiscard]] void* AllocateVm(void* user, void* block, usize old_size, usize new_size) noexcept;
 // This record, every generated binding local, and every crossed VM frame must
 // stay trivially destructible. Native services finish before the next VM call.
 struct CallContext
@@ -150,6 +153,7 @@ private:
     CallContext mContext;
     Execution mExecution;
     bool mEntered = false;
+    bool mLoadAllocationFailure = false;
     Program mPrograms[8];
     int32 mReferences[8] = {};
     usize mProgramCount = 0;
