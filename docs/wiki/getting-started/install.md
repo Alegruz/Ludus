@@ -62,7 +62,7 @@ an unprivileged user and defaults to the headless backend. Diagnostic and
 GameHost tests require local Unix socket operations even without a desktop or
 GPU; permit local IPC when running them inside a restricted sandbox.
 
-See [headless setup and the development container](https://github.com/Alegruz/Ludus/blob/main/docs/development/building.md#headless-and-sandboxed-builds)
+See [headless setup and the development container](../../development/building.md#headless-and-sandboxed-builds)
 for prerequisites and troubleshooting.
 
 See [contributing](../contribute/index.md) for the complete review gates.
