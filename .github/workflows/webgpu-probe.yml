@@ -118,9 +118,15 @@ jobs:
           import json
           from pathlib import Path
           import subprocess
+          import sys
           import urllib.request
 
-          native = json.loads(Path('config/tool_versions.json').read_text())['managed']
+          sys.path.insert(0, str(Path('scripts/python').resolve()))
+          from engine import configure_system_tool_shims
+
+          versions = json.loads(Path('config/tool_versions.json').read_text())
+          configure_system_tool_shims(Path.cwd(), versions)
+          native = versions['managed']
           web = json.loads(Path('config/web_toolchain.json').read_text())
           venv = Path('out/host-tools/venv')
           subprocess.run(['python3', '-m', 'venv', str(venv)], check=True)
