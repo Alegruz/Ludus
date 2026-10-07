@@ -109,6 +109,8 @@ Edit the linked documents for content changes.
 - [Ludus RHI and Graphics Device Interface Architecture](architecture/rhi-gdi.md)
 - [Scripting architecture Gems review](architecture/scripting-gems-review.md)
 - [Gameplay languages and visual authoring architecture](architecture/scripting.md)
+- [Smart pointer design and reference review](architecture/smart-pointers-reference-review.md)
+- [Smart pointer architecture](architecture/smart-pointers.md)
 - [Ludus Strings Literature Review](architecture/strings-gems-review.md)
 - [Ludus Strings Architecture](architecture/strings.md)
 - [Terrain Gems and research review](architecture/terrain-gems-review.md)
