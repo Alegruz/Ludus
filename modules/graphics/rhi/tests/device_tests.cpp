@@ -226,6 +226,12 @@ TEST_CASE("Published startup failure remains owned until explicit destruction", 
     CHECK(info.Startup.Error == StartupError::RequirementsUnsatisfied);
     CHECK(info.Startup.UnmetRequirement == RequirementFailure::UniformBufferSize);
     CHECK_FALSE(info.Enabled.FullscreenRaster);
+    CHECK(SetFrameTarget(device, surface, {}) == DeviceStatus::Failed);
+    CHECK(BeginFrame(device, surface) == DeviceStatus::Failed);
+    CHECK(EndFrame(device) == DeviceStatus::Failed);
+    FrameInfo frame{ .Width = 777 };
+    CHECK(GetFrameInfo(device, surface, frame) == DeviceStatus::Failed);
+    CHECK(frame.Width == 777);
     DeviceHandle other;
     SurfaceHandle otherTarget;
     CHECK(CreateDevice({}, {}, {}, other, otherTarget) == DeviceStatus::InvalidState);

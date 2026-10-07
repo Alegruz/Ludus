@@ -57,10 +57,11 @@ DeviceStatus State() noexcept
 }
 DeviceStatus FrameResult(FrameStatus status) noexcept
 {
-    // A backend can synchronously report loss from acquisition/submission.
-    if (GetStartup().State == StartupState::DeviceLost)
+    // Preserve terminal startup failure and synchronous acquisition/submission loss.
+    const auto state = State();
+    if (state == DeviceStatus::Failed || state == DeviceStatus::DeviceLost)
     {
-        return DeviceStatus::DeviceLost;
+        return state;
     }
     switch (status)
     {
