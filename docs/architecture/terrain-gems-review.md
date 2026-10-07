@@ -243,3 +243,94 @@ to assert an algorithm here. The selected chapters already justify the concrete
 seam, generation, authoring and backend refinements. Supporting recent author
 research and Epic documentation are cited at the relevant decisions in the
 architecture, with research extensions separated from shipped capability.
+
+## Post-baseline research queue
+
+Status: deferred evaluation plan, agreed on 2026-10-06. Implement and validate
+[the selected T0–T5 baseline](terrain.md#performance-and-delivery-gates) first.
+The baseline includes the Gems-driven refinements already specified above.
+Research-driven improvements follow that delivery; this queue adds no baseline
+algorithm, representation, backend or acceptance dependency. T6 remains optional.
+
+Before opening an improvement experiment, record the baseline's accepted targets,
+representative terrain/source fixtures, correctness results, image captures,
+cook/edit/streaming tail times and peak memory. Resolve baseline acceptance
+failures through the existing milestones. Completing this reading queue is not
+a prerequisite for implementing those milestones.
+
+### Venues to consult
+
+The priority below is a Ludus engineering judgment, based on the venues' scope
+and the concrete terrain work linked here. Consult papers, supplementary
+material and author code where available; a venue's reputation alone is not
+implementation evidence.
+
+| Priority | Venue | Evaluation focus |
+| --- | --- | --- |
+| 1 | Eurographics and **Computer Graphics Forum**, especially [State-of-the-Art Reports](https://diglib.eg.org/collections/c400c5c1-b64e-4618-8802-baf78ce50641) | Generation, erosion, authoring control and measurable terrain descriptors |
+| 2 | [SIGGRAPH / SIGGRAPH Asia](https://www.siggraph.org/siggraph-events/conferences/) and **ACM Transactions on Graphics** | Multiscale terrain detail, physical generation, rivers and alternative representations |
+| 3 | GDC Programming, starting with [Far Cry 5 terrain rendering](https://www.gdcvault.com/play/1025261/Terrain-Rendering-in-Far-Cry) | Shipped-engine LOD, stitching, streaming and integration with cliff geometry |
+| 4 | [I3D: Interactive 3D Graphics and Games](https://i3dsymposium.org/) | Interactive rendering and real-time algorithms |
+| 5 | [High-Performance Graphics](https://highperformancegraphics.org/2026/call-for-participation/) | Geometry/LOD, compression, bandwidth and GPU execution after baseline profiling |
+
+### Reading and experiment order
+
+These are candidates for future full technical review, not additional adopted
+algorithms. Bibliographic records, abstracts and author descriptions informed
+selection. The earlier design already flags analytical erosion and contour
+input as conditional extensions; their inclusion here does not expand that
+initial implementation scope.
+
+1. **Eric Galin, Eric Guérin, Adrien Peytavie, Guillaume Cordonnier, Marie-Paule
+   Cani, Bedrich Benes and James Gain**, *A Review of Digital Terrain Modeling*,
+   Computer Graphics Forum 38(2), Eurographics 2019
+   ([publisher record](https://diglib.eg.org/items/47f03175-46e8-44e8-94ef-663bef354d1c)).
+   Review the representation/generation landscape against the completed baseline
+   and identify a specific unmet need before proposing another subsystem.
+2. **Oscar Argudo, Eric Guérin, Hugo Schott and Eric Galin**, *Terrain Descriptors
+   for Landscape Synthesis, Analysis and Simulation*, Computer Graphics Forum
+   44(2), Eurographics 2025
+   ([publisher record](https://diglib.eg.org/items/a7833e48-561c-4607-a704-458bf0a7f3f0)).
+   First improvement candidate: choose useful slope, drainage and accessibility
+   diagnostics, test their runtime/cook cost and assess whether cheaper proxies
+   preserve the decisions artists or placement consumers need to make.
+3. **Hugo Schott, Eric Galin, Eric Guérin, Adrien Peytavie and Axel Paris**,
+   *Terrain Amplification using Multi-scale Erosion*, ACM Transactions on Graphics
+   43(4), SIGGRAPH 2024
+   ([author project](https://aparis69.github.io/public_html/projects/schott2024_Erosion.html)).
+   Evaluate an optional offline amplification stage against the baseline's
+   authored macro shapes, hydrology, detail quality, edit control and cook cost.
+4. **Petros Tzathas, Boris Gailleton, Philippe Steer and Guillaume Cordonnier**,
+   *Physically-based Analytical Erosion for fast Terrain Generation*, Computer
+   Graphics Forum 43(2), Eurographics 2024
+   ([publisher record](https://diglib.eg.org/items/0a412929-2e29-4bcb-a597-1a4b2cc558e2)).
+   Review network/elevation coupling, convergence and boundary behavior before
+   comparing it with the baseline solver. Keep it an offline stage experiment.
+5. **Benoît Huftier, Hugo Schott, Eric Galin, Oscar Argudo, Adrien Peytavie and
+   Eric Guérin**, *Terrain Synthesis and Authoring based on Iso-Contours*,
+   Computer Graphics Forum 45(2), Eurographics 2026
+   ([author project](https://h-schott.github.io/p/isos/)).
+   Prototype a source/import adapter; compare editing effort and reconstruction
+   quality while retaining the established heightfield cooker and runtime.
+6. **Jeremy Moore / Ubisoft**, *Terrain Rendering in Far Cry 5*, GDC Programming,
+   2018 ([session](https://www.gdcvault.com/play/1025261/Terrain-Rendering-in-Far-Cry)).
+   Review the production GPU LOD/culling/stitching and cliff integration choices
+   against measured T3/T5 bottlenecks. Historical platform timings are not Ludus
+   budgets; preserve the CPU reference and legal coverage contract.
+
+### Admission of an improvement
+
+Each experiment names one baseline limitation, the consulted sections and a
+falsifiable expected benefit. Run it on the same fixtures and targets as the
+baseline; report quality/error, tail latency, total live/scratch/retired bytes,
+authoring cost and implementation/debugging complexity as applicable. Include
+negative cases and retain the baseline comparison path.
+
+Promote a result only after its relevant seam, hole, collision, reproducibility,
+publication, bounded-work and resource-lifetime checks pass. Document tradeoffs,
+new prerequisites, source attribution and any asset migration in a separate
+reviewed change. A renderer speedup cannot silently change canonical geometry;
+a generation improvement cannot silently change existing recipes or saves.
+Inconclusive or unfavorable experiments remain research notes and do not become
+mandatory runtime complexity. Mark readings and experiments complete only when
+their evidence exists; the queue currently records no completed experiment.
