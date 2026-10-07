@@ -2,7 +2,10 @@
 
 namespace ludus::foundation::filesystem
 {
-WriteDirectory::~WriteDirectory() noexcept = default;
+WriteDirectory::~WriteDirectory() noexcept
+{
+    (void)Close();
+}
 WriteDirectory::WriteDirectory(WriteDirectory&& other) noexcept : mImpl(other.mImpl)
 {
     other.mImpl = nullptr;
