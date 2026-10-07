@@ -184,6 +184,10 @@ are not currently editor features.
 
 ## Sources and further reading
 
+The [delivery plan](../../architecture/randomness.md#delivery-plan-and-alternatives)
+tracks remaining implementation milestones and the research reading backlog to
+evaluate after the initial architecture is implemented.
+
 Thanks to the authors below for the ideas used in the implementation. The
 [architecture](../../architecture/randomness.md)
 and [consulted chapter review](../../architecture/randomness-gems-review.md)

@@ -2,7 +2,9 @@
 
 **Status:** Literature review informing the proposed
 [randomness architecture](randomness.md). No runtime implementation or Ludus
-performance result is supplied by this review.
+performance result is supplied by this review. The architecture owns the current
+[implementation milestones and later research backlog](randomness.md#delivery-plan-and-alternatives);
+this review preserves the evidence used to establish the initial design.
 
 The initial design preserved Ludus's PCG32 v1 stream, added Philox addressed
 samples for parallel work, separated sampling from gameplay policy, and versioned
