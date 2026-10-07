@@ -1,15 +1,75 @@
 #!/usr/bin/env python3
-"""Check the portable documentation index; optionally refresh its navigation."""
+"""Check canonical navigation, local Markdown links and setup command examples."""
 import argparse
+from contextlib import redirect_stderr
+from html.parser import HTMLParser
+import io
+import json
 from pathlib import Path
 import re
+import shlex
 import sys
+from urllib.parse import unquote, urlsplit
+
+import markdown
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "python"))
 from documentation import index_text, sources
 
 
+class Document(HTMLParser):
+    def __init__(self, text):
+        super().__init__()
+        self.links = []
+        self.ids = set()
+        self.feed(markdown.markdown(text, extensions=["toc", "attr_list", "md_in_html", "pymdownx.superfences"]))
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if "id" in attrs:
+            self.ids.add(attrs["id"])
+        value = attrs.get("href" if tag == "a" else "src") if tag in {"a", "img"} else None
+        if value:
+            self.links.append(value)
+
+
+def check_init_examples(text, label, presets):
+    """Require declared options and parse the CLI grammar; never execute setup."""
+    failures = []
+    for block in re.findall(r"^```(?:bash|sh|shell)?\s*\n(.*?)^```", text, re.M | re.S):
+        for line in block.replace("\\\n", " ").splitlines():
+            if not re.match(r"\s*\./init\.sh(?:\s|$)", line):
+                continue
+            diagnostic = io.StringIO()
+            try:
+                tokens = shlex.split(line, comments=True)[1:]
+                # Help is presentation, not an initialization example.
+                if "--help" in tokens or "-h" in tokens:
+                    continue
+                from engine import make_parser
+                parser = make_parser()
+                init = next(action.choices["init"] for action in parser._actions
+                            if isinstance(getattr(action, "choices", None), dict) and "init" in action.choices)
+                # argparse accepts unambiguous abbreviations such as --preset
+                # for --preset-only. Documentation must name the declared flag.
+                unknown = [token.split("=", 1)[0] for token in tokens
+                           if token.startswith("--") and token != "--"
+                           and token.split("=", 1)[0] not in init._option_string_actions]
+                if unknown:
+                    failures.append(f"{label}: invalid init.sh example: undeclared option {unknown[0]}")
+                    continue
+                with redirect_stderr(diagnostic):
+                    args = parser.parse_args(["init", *tokens])
+                if args.preset and presets and not any(value in args.preset for value in ("<", "$")) and args.preset not in presets:
+                    failures.append(f"{label}: unknown setup preset {args.preset}")
+            except (SystemExit, ValueError):
+                detail = diagnostic.getvalue().strip().splitlines()
+                failures.append(f"{label}: invalid init.sh example: {detail[-1] if detail else line.strip()}")
+    return failures
+
+
 def check(root, fix=False):
+    root = root.resolve()
     failures = []
     index = root / "docs/README.md"
     expected = index_text(root)
@@ -17,10 +77,57 @@ def check(root, fix=False):
         index.write_text(expected, encoding="utf-8")
     elif not index.is_file() or index.read_text(encoding="utf-8") != expected:
         failures.append("Stale docs/README.md; run python scripts/check-docs --fix-index")
-    for path in sources(root):
-        if re.search(r"\]\(https://github\.com/Alegruz/Ludus/(?:blob|tree)/main/docs/",
-                     path.read_text(encoding="utf-8")):
-            failures.append(f"{path.relative_to(root)}: use relative links to local documentation")
+    texts = {path: path.read_text(encoding="utf-8") for path in sources(root)}
+    documents = {path: Document(text) for path, text in texts.items()}
+    preset_file = root / "CMakePresets.json"
+    presets = {item["name"] for item in json.loads(preset_file.read_text())["configurePresets"]} if preset_file.is_file() else set()
+    for path, document in documents.items():
+        label = path.relative_to(root)
+        failures.extend(check_init_examples(texts[path], label, presets))
+        for value in document.links:
+            parts = urlsplit(value)
+            internal_doc = re.match(r"/Alegruz/Ludus/(?:blob|tree)/main/docs/", parts.path)
+            internal_readme = re.match(r"/Alegruz/Ludus/blob/main/(?:modules|apps|tools|examples|scripts/python)/.*/README\.md$", parts.path)
+            if parts.netloc == "github.com" and (internal_doc or internal_readme):
+                failures.append(f"{label}: use relative links to local documentation: {value}")
+            if parts.scheme or parts.netloc:
+                continue
+            target = (path.parent / unquote(parts.path)).resolve() if parts.path else path
+            if not target.is_relative_to(root / "docs"):
+                continue
+            # Generated API destinations are validated against the built artifact.
+            if target.is_relative_to(root / "docs/wiki/api"):
+                continue
+            if not target.exists():
+                failures.append(f"{label}: missing local documentation target {value}")
+            elif target in documents and parts.fragment and unquote(parts.fragment) not in documents[target].ids:
+                failures.append(f"{label}: missing local Markdown anchor {value}")
+    readme = root / "README.md"
+    if readme.is_file():
+        failures.extend(check_init_examples(readme.read_text(), "README.md", presets))
+    for directory in ("modules", "apps", "tools", "examples", "scripts/python"):
+        for path in (root / directory).rglob("README.md"):
+            if "node_modules" in path.parts:
+                continue
+            text = path.read_text(encoding="utf-8")
+            if "canonical documentation" not in text or len(text.splitlines()) > 8:
+                failures.append(f"{path.relative_to(root)}: keep this README as a short link to its owner in docs/")
+            owners = []
+            for value in Document(text).links:
+                parts = urlsplit(value)
+                if parts.scheme or parts.netloc:
+                    continue
+                target = (path.parent / unquote(parts.path)).resolve()
+                if not target.is_file():
+                    failures.append(f"{path.relative_to(root)}: missing canonical documentation {value}")
+                elif target.is_relative_to(root / "docs") and target.suffix == ".md":
+                    owners.append(target)
+            if not owners:
+                failures.append(f"{path.relative_to(root)}: link to a Markdown owner under docs/")
+    container = root / ".devcontainer/devcontainer.json"
+    if container.is_file():
+        command = json.loads(container.read_text()).get("postCreateCommand", "")
+        failures.extend(check_init_examples("```sh\n" + command + "\n```", container.relative_to(root), presets))
     return failures
 
 
@@ -33,7 +140,7 @@ def main():
     for failure in failures:
         print(failure, file=sys.stderr)
     if not failures:
-        print("Canonical documentation index and local documentation links passed.")
+        print("Canonical index, Markdown links, README owners and setup examples passed.")
     return bool(failures)
 
 

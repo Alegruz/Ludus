@@ -1,4 +1,8 @@
-# Editor-managed game releases
+# Game release setup, packaging and publishing
+
+For native payload rules and detailed package verification, read
+[native release packages](game-packaging-publishing.md). This guide owns shared
+Editor/CLI setup, browser releases and explicit uploads.
 
 Open an existing `ludus.project.json` in the Ludus Editor. Release actions require
 an idle workspace and a clean, saved version-2 CMake project.

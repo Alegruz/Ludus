@@ -22,13 +22,13 @@ annotations document intent; this spike does not yet implement generated API
 definitions or a type-checking acceptance gate.
 
 ```sh
-./init.sh --cli --preset linux-clang-development --preset-only --locked --with-tests --no-system-install
+./init.sh --cli linux-clang-development --preset-only --locked --with-tests --no-system-install
 ./scripts/luau-probe bootstrap
 ./scripts/luau-probe cook
 ./scripts/luau-probe run --preset linux-clang-development
 ./scripts/luau-probe check --preset linux-clang-development
 
-./init.sh --cli --preset linux-clang-asan-ubsan --preset-only --locked --with-tests --no-system-install
+./init.sh --cli linux-clang-asan-ubsan --preset-only --locked --with-tests --no-system-install
 ./scripts/luau-probe run --preset linux-clang-asan-ubsan
 python3 -m unittest discover -s tools/luau-probe -p 'test_*.py' -v
 ```

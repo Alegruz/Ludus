@@ -19,7 +19,7 @@ target_link_libraries(your_game PRIVATE Ludus::FoundationTime)
 ```
 
 Replace `your_game` with your application's existing target. Use the project's
-selected SDK and C++23 setup; see [project setup](project-setup.md). Include
+selected SDK and C++23 setup; see [project setup](../../development/project-sdk-workflow.md). Include
 `time.hpp` when naming timestamps/arithmetic and `timers.hpp` when naming timers.
 These headers are explicit opt-ins, outside Base's `core.h`.
 
@@ -224,8 +224,7 @@ Bolton**, *A Basic Scheduler*, Game Engine Gems 1, chapter 25, pp. 409–414, fo
 ideas informing the planned scheduling contract. Historical chapter code was
 not copied; local reference PDFs are outside the public wiki.
 
-See the [module guide](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/time/README.md),
-[time API](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/time/include/ludus/foundation/time/time.hpp),
+See the [time API](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/time/include/ludus/foundation/time/time.hpp),
 [timer API](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/time/include/ludus/foundation/time/timers.hpp),
 and [boundary tests](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/time/tests/time_tests.cpp)
 for exact implementation behavior.

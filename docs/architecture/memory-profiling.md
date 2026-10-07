@@ -47,7 +47,7 @@ proposed gates, not measured Ludus results.
 
 The implementation inspected on 2026-10-04 provides CPU trace scopes, frames,
 flows, and Perfetto JSON export. Its event kinds have no memory records, and its
-[README](../../modules/foundation/profiling/README.md) explicitly defers memory
+[README](../modules/foundation/profiling.md) explicitly defers memory
 profiling. That original working-tree audit predates the minimal Memory/domain
 implementation now present on main.
 

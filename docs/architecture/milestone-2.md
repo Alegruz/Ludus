@@ -1,5 +1,9 @@
 # Milestone 2 Architecture
 
+Historical milestone scope. These boundaries describe that milestone, not the
+current engine. See [current capabilities](../wiki/getting-started/status.md)
+and [the architecture map](../wiki/architecture/index.md) for current entry points.
+
 Milestone 2 is the first graphics milestone, not a renderer. It proves that an external Ludus application can use the installed SDK to initialize Vulkan, render into a swapchain image, and present a visible frame through the Milestone 1 runtime shell.
 
 ## Vulkan Presentation Path

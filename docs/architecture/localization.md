@@ -1,7 +1,7 @@
 # Ludus Localization Architecture
 
 **Status:** Architecture and implementation contract; the first static-text slice
-is implemented by [Localization](../../modules/localization/README.md). Its
+is implemented by [Localization](../modules/localization.md). Its
 `ludus-static-utf8-v1` profile stores literal UTF-8, provides catalog leases and
 exact bindings, and validates/cooks reviewed translations offline. Each successful
 load requires rebinding; schema-compatible binding reuse remains future work.

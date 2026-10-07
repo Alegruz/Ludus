@@ -70,7 +70,7 @@ execute jobs during `Wait`, so that call can run callbacks on its own thread.
 Select the documented helping policy deliberately. Completing CPU work does not
 prove GPU retirement or make concurrent world mutation safe.
 
-Read the [module API and example](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/threading/README.md)
+Read the [module API and example](../../modules/foundation/threading.md)
 and [task graph design](../../architecture/threading.md).
 Work stealing and engine consumer migration are later measured slices.
 

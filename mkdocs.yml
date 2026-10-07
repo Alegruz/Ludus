@@ -65,40 +65,48 @@ validation:
     absolute_links: warn
     unrecognized_links: warn
 nav:
-  - Start here: index.md
+  - Start here: wiki/index.md
   - Getting started:
-      - Install and launch: getting-started/install.md
-      - Create your first project: getting-started/first-project.md
-      - Current capabilities: getting-started/status.md
+      - Install and launch: wiki/getting-started/install.md
+      - Create your first project: wiki/getting-started/first-project.md
+      - Current capabilities: wiki/getting-started/status.md
   - Guides:
-      - Editor workspace: guides/editor.md
-      - Browser editor: guides/browser-editor.md
-      - Build, run and debug: guides/build-and-debug.md
-      - Repair project setup: guides/project-setup.md
-      - Platform targets and compatibility: guides/platform-targets.md
-      - Engine configuration: guides/configuration.md
-      - Strings and names: guides/strings.md
-      - Hashing: guides/hashing.md
-      - Deterministic randomness: guides/randomness.md
-      - High-resolution time: guides/time.md
-      - Audio workflow: guides/audio.md
-      - Package a game: guides/releases.md
-      - Troubleshooting: guides/troubleshooting.md
+      - Editor workspace: development/editor-workspace.md
+      - Browser editor: wiki/guides/browser-editor.md
+      - Build, run and debug: wiki/guides/build-and-debug.md
+      - Projects and setup repair: development/project-sdk-workflow.md
+      - Platform targets and compatibility: wiki/guides/platform-targets.md
+      - Engine configuration: wiki/guides/configuration.md
+      - Strings and names: wiki/guides/strings.md
+      - Hashing: wiki/guides/hashing.md
+      - Deterministic randomness: wiki/guides/randomness.md
+      - High-resolution time: wiki/guides/time.md
+      - Audio workflow: wiki/guides/audio.md
+      - Package and publish a game: development/editor-game-releases.md
+      - Troubleshooting: wiki/guides/troubleshooting.md
+  - Engine development:
+      - Build and initialize: development/building.md
+      - Native debugging: development/debugging.md
+      - Diagnostics: development/diagnostics.md
+      - Live gameplay editing: development/project-live-reload.md
+      - Rendering and shaders: development/fullscreen-rendering.md
+      - Release packages: development/game-packaging-publishing.md
+      - Browser editor build: development/browser-editor.md
   - Learn:
-      - How Ludus fits together: learn/architecture.md
-      - Reference reading paths: learn/references.md
-      - Glossary: learn/glossary.md
+      - How Ludus fits together: wiki/learn/architecture.md
+      - Reference reading paths: wiki/learn/references.md
+      - Glossary: wiki/learn/glossary.md
   - Engine architecture:
-      - Architecture map: architecture/index.md
-      - Foundation and jobs: architecture/foundation.md
-      - Startup and shutdown: architecture/lifecycle.md
-      - Platform and rendering: architecture/rendering.md
-      - Terrain and generation: architecture/terrain.md
-      - Worlds and frame updates: architecture/world.md
-      - Content and audio: architecture/content.md
-      - Runtime and editor: architecture/runtime.md
+      - Architecture map: wiki/architecture/index.md
+      - Foundation and jobs: wiki/architecture/foundation.md
+      - Startup and shutdown: wiki/architecture/lifecycle.md
+      - Platform and rendering: wiki/architecture/rendering.md
+      - Terrain and generation: wiki/architecture/terrain.md
+      - Worlds and frame updates: wiki/architecture/world.md
+      - Content and audio: wiki/architecture/content.md
+      - Runtime and editor: wiki/architecture/runtime.md
   - Contribute:
-      - Contribute to Ludus: contribute/index.md
-      - Improve this wiki: contribute/wiki.md
-      - Document public APIs: contribute/api-reference.md
-  - API reference: reference/index.md
+      - Contribute to Ludus: wiki/contribute/index.md
+      - Documentation and offline reading: development/wiki.md
+      - Document public APIs: development/api-reference.md
+  - API reference: wiki/reference/index.md

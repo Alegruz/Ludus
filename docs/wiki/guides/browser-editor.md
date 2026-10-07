@@ -46,4 +46,4 @@ a browser. The browser preview does not include a remote build service.
 
 The same Qt shell can serve a future macOS editor. Native macOS support still
 needs editor setup/launcher/build validation; a game viewport also requires a
-working graphics backend. See the [desktop editor guide](editor.md).
+working graphics backend. See the [desktop editor guide](../../development/editor-workspace.md).

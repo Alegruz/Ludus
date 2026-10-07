@@ -1,5 +1,9 @@
 # Milestone 0 Architecture
 
+Historical milestone scope. These boundaries describe that milestone, not the
+current engine. See [current capabilities](../wiki/getting-started/status.md)
+and [the architecture map](../wiki/architecture/index.md) for current entry points.
+
 Milestone 0 is a reproducible engine skeleton, not a renderer. It proves that a clean clone can bootstrap pinned tools, resolve dependencies, build, test, install, and be consumed as an SDK.
 
 ## Static Internal Libraries
