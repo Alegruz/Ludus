@@ -650,6 +650,32 @@ class BundleDeps(unittest.TestCase):
                 )
             self.assertEqual(ctx.exception.code, "ArchiveInvalid")
 
+    def test_mac_framework_link_uses_consumer_sdk_after_relocation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "producer with spaces"
+            package = root / "cache/harfbuzz/p"
+            config = package / "lib/cmake/harfbuzz/harfbuzzConfig.cmake"
+            config.parent.mkdir(parents=True)
+            framework = root / "out/host-tools/macos-sdk/System/Library/Frameworks/ApplicationServices.framework"
+            config.write_text('set_target_properties(harfbuzz::harfbuzz PROPERTIES\n'
+                              f'  INTERFACE_LINK_LIBRARIES "Threads::Threads;Freetype::Freetype;{framework};freetype")\n')
+            generators = root / "generators"
+            generators.mkdir()
+            (generators / "harfbuzz-config.cmake").write_text("# entry point\n")
+            prefix = root / "sdk"
+            self.bundle_deps.bundle_from_conan(prefix=prefix, generators_dir=generators,
+                package_dirs={"harfbuzz": package}, dependencies=("harfbuzz",))
+            bundled = prefix / "lib/cmake/Ludus/dependencies/packages/harfbuzz/lib/cmake/harfbuzz/harfbuzzConfig.cmake"
+            self.assertIn('Threads::Threads;Freetype::Freetype;$<LINK_LIBRARY:FRAMEWORK,ApplicationServices>;freetype', bundled.read_text())
+            self.assertEqual([], self.bundle_deps.audit_no_producer_paths(prefix, [str(root)]))
+
+    def test_mac_framework_rewrite_preserves_non_link_properties_and_private_paths(self) -> None:
+        text = ('INTERFACE_INCLUDE_DIRECTORIES "/sdk/System/Library/Frameworks/Cocoa.framework"\n'
+                'INTERFACE_LINK_LIBRARIES "/private/My.framework;Threads::Threads;/sdk/System/Library/Frameworks/Cocoa.framework"')
+        result = self.bundle_deps.relocate_apple_framework_links(text)
+        self.assertIn('INTERFACE_INCLUDE_DIRECTORIES "/sdk/System/Library/Frameworks/Cocoa.framework"', result)
+        self.assertIn('/private/My.framework;Threads::Threads;$<LINK_LIBRARY:FRAMEWORK,Cocoa>', result)
+
     def test_audit_detects_leak(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             prefix = Path(td) / "prefix"

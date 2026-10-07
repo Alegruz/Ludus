@@ -713,3 +713,10 @@ consumer clang-tidy, canonical documentation checks, strict MkDocs, wiki parity
 and offline packaging were run. Linux-only Editor process tests use `waitid`
 and cannot run on macOS; they remain in Linux CI and are outside this native
 CLI port. Native sanitizer validation remains in the macOS CI matrix.
+
+The native CI relocation audit exposed HarfBuzz's upstream export of an absolute
+producer `ApplicationServices.framework` path. Bundling now converts system
+framework link-interface entries to CMake's framework-name link feature, leaving
+other properties/private frameworks unchanged. Two regressions cover the export
+and preservation boundary; the installed journey also audits bundled CMake files
+for producer sysroot paths before building games.

@@ -98,6 +98,25 @@ def _copy_tree(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
+def relocate_apple_framework_links(text: str) -> str:
+    """Replace absolute system-framework link entries with consumer SDK lookup.
+
+    Only link-interface entries are rewritten. Include paths, arbitrary package
+    paths and private frameworks retain their existing validation/audit behavior.
+    """
+    # Thanks to Kitware's cmake-generator-expressions(7), Link Features/FRAMEWORK:
+    # a bare framework name uses the consuming Apple toolchain's search paths.
+    # https://cmake.org/cmake/help/v3.29/manual/cmake-generator-expressions.7.html#link-features
+    # Adapt the link interface rather than bundling Apple's SDK frameworks.
+    def relocate(match):
+        links = []
+        for link in match.group(2).split(";"):
+            framework = re.fullmatch(r"/[^\n;\"]*/System/Library/Frameworks/([A-Za-z0-9_]+)\.framework", link)
+            links.append(f"$<LINK_LIBRARY:FRAMEWORK,{framework.group(1)}>" if framework else link)
+        return match.group(1) + ";".join(links) + match.group(3)
+    return re.sub(r'(INTERFACE_LINK_LIBRARIES\s+")([^"]*)(")', relocate, text)
+
+
 def _rewrite_cmake_files_in(root: Path, replacements: list[tuple[str, str]]) -> int:
     rewritten = 0
     for cmake_file in list(root.rglob("*.cmake")) + list(root.rglob("*.cmake.py")):
@@ -105,7 +124,7 @@ def _rewrite_cmake_files_in(root: Path, replacements: list[tuple[str, str]]) -> 
             text = cmake_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        new = rewrite_producer_paths(text, replacements)
+        new = relocate_apple_framework_links(rewrite_producer_paths(text, replacements))
         if new != text:
             cmake_file.write_text(new, encoding="utf-8")
             rewritten += 1
@@ -252,7 +271,7 @@ def _bundle_and_rewrite_residual_roots(cmake_dir: Path, packages_dst: Path) -> N
             text = cmake_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        new = rewrite_producer_paths(text, replacements)
+        new = relocate_apple_framework_links(rewrite_producer_paths(text, replacements))
         if new != text:
             cmake_file.write_text(new, encoding="utf-8")
 

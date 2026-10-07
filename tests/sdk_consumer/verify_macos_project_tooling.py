@@ -36,6 +36,8 @@ def main():
         env["LUDUS_SDK_STORE"] = str(root / "store")
         relocated = root / "relocated sdk"
         shutil.copytree(sdk, relocated, symlinks=True)
+        for file in (relocated / "lib/cmake/Ludus/dependencies").rglob("*.cmake"):
+            assert "/out/host-tools/macos-sdk/" not in file.read_text(), file
         run([cli, "--version"], cwd=root, env=env)
         run([cli.parent / "python", "-c", "import ludus_tools,sys; assert not any(m == 'engine' or m.startswith(('PyQt','PySide')) for m in sys.modules)"], cwd=root, env=env)
         projects = []

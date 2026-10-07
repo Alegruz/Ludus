@@ -107,6 +107,8 @@ out/host-tools/venv/bin/ludus project run /path/to/MyGame
 checkout. Without `--sdk`, creation selects the host's Development profile,
 reuses only a current matching SDK, or explicitly prepares a separate ABI-keyed
 install. Preparation bundles the dependency closure before staged game validation.
+Bundled link interfaces select Apple system frameworks by name from the
+consumer's SDK, preserving relocation without embedding the producer sysroot.
 With `--sdk`, the project profile follows that SDK's native flavor; when combining
 `--tools` with another flavor, also pass its full `--profile` name.
 
