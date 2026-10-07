@@ -62,6 +62,11 @@ class CMakeSetupTests(unittest.TestCase):
     def test_stale_cache_is_reported_without_reconfigure(self) -> None:
         ninja = shutil.which("ninja")
         self.assertIsNotNone(ninja)
+        # This test checks cache comparison, not compiler execution. A local
+        # fixture keeps it independent of the host's LLVM installation path.
+        compiler = self.project / "tools with spaces" / "clang++"
+        compiler.parent.mkdir()
+        compiler.touch()
         prefix = self.project / "relocated-sdk"
         prefix.mkdir()
         build = self.project / "out/build/linux-clang-development"
@@ -77,7 +82,7 @@ class CMakeSetupTests(unittest.TestCase):
         before = cache.read_bytes()
         with self.assertRaisesRegex(ValueError, "stale CMake cache"):
             inspect_project_setup(self.cmake, ninja, self.project, build, self.env,
-                                  "linux-clang-development", compiler="/usr/bin/clang++-18",
+                                  "linux-clang-development", compiler=str(compiler),
                                   sdk_prefix=str(prefix))
         self.assertEqual(cache.read_bytes(), before)
 

@@ -7,6 +7,36 @@ Start with [Ludus Wiki](https://alegruz.github.io/Ludus/) for task guides,
 explanations and reference reading paths. Its
 [Markdown sources](docs/wiki/index.md) are also available in this checkout.
 
+## Headless contributor quick start
+
+On Linux, prepare one Development preset with tests, then build and run them:
+
+```bash
+git clone https://github.com/Alegruz/Ludus.git
+cd Ludus
+./init.sh --cli --preset linux-clang-development --preset-only --locked --with-tests
+./scripts/build linux-clang-development
+./scripts/test linux-clang-development
+```
+
+Ubuntu 24.04 with LLVM 18 is the native reference host. Setup installs missing
+system prerequisites using sudo. If LLVM 18 is already installed, including in
+a user-owned tool directory on `PATH`, add `--no-system-install`; setup checks
+the host tools before downloading the pinned CMake, Ninja and Conan packages.
+Dependency resolution and third-party builds print progress in the terminal.
+
+For hosts without sudo access, open a fresh checkout using the included
+[development container](docs/development/building.md#development-container).
+It provides Ubuntu 24.04 and LLVM 18 and prepares this preset automatically.
+Docker must already be available to your host user.
+
+Native builds select the headless window backend when Wayland development tools
+are absent. No desktop or GPU is required for portable engine tests. Diagnostic
+and GameHost integration tests do require local Unix socket operations; a sandbox
+that blocks those operations needs local IPC permission. See
+[headless and sandboxed builds](docs/development/building.md#headless-and-sandboxed-builds)
+for test limits and troubleshooting.
+
 ## macOS support
 
 The first macOS slice uses upstream Clang 18 and libc++ with Apple silicon

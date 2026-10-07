@@ -1004,11 +1004,13 @@ def prepare_conan_artifacts(
     if locked and not (root / "conan.lock").is_file():
         raise EngineError("Locked initialization requires the committed conan.lock")
     check_current_python(root, versions["minimum"]["python"])
+    # Fail before creating a venv or downloading managed tools when the host
+    # toolchain is unavailable (especially with --no-system-install).
+    configure_system_tool_shims(root, versions)
+    validate_required_system_tools(root, versions)
     create_or_update_venv(root)
     install_managed_tools(root, versions)
     validate_managed_tools(root, versions)
-    configure_system_tool_shims(root, versions)
-    validate_required_system_tools(root, versions)
     profile_path = install_conan_profile(root)
     run(
         [conan(root), "remote", "update", "conancenter", "--url", "https://center2.conan.io"],
@@ -1101,7 +1103,6 @@ def create_conan_lock(root: Path, profile_path: Path) -> None:
         ],
         cwd=lock_work_dir,
         env=env,
-        capture=True,
     )
     if lockfile.exists():
         # Conditional requirements differ by host (Linux Vulkan vs. macOS).
@@ -1109,7 +1110,7 @@ def create_conan_lock(root: Path, profile_path: Path) -> None:
         # graph resolution and merging succeed. Failures preserve the old lock.
         run([conan(root), "lock", "merge", "--lockfile", str(lockfile),
              "--lockfile", str(generated), "--lockfile-out", str(merged)],
-            cwd=lock_work_dir, env=env, capture=True)
+            cwd=lock_work_dir, env=env)
         merged.replace(lockfile)
     else:
         generated.replace(lockfile)
@@ -1147,7 +1148,6 @@ def conan_install_for_preset(root: Path, profile_path: Path, preset: str, *, loc
         ],
         cwd=root,
         env=tool_env(root),
-        capture=True,
     )
     write_bootstrap_marker(root, preset)
 

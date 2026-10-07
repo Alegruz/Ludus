@@ -1,5 +1,81 @@
 # Building Ludus
 
+## Headless and sandboxed builds
+
+Prepare only the preset you need, with tests explicitly enabled:
+
+```bash
+./init.sh --cli --preset linux-clang-development --preset-only --locked --with-tests
+./scripts/build linux-clang-development
+./scripts/test linux-clang-development
+```
+
+Use `--no-system-install` when system prerequisites are already available.
+User-owned LLVM 18 installations work when their `bin` directory is on `PATH`
+and their shared libraries are discoverable by the host loader. Setup resolves
+versioned executables such as `clang++-18` and creates project-local tool shims.
+It validates the host toolchain before creating the build-tool venv or downloading
+Python packages. `--no-system-install` still downloads the pinned managed tools
+and Conan dependencies; `--locked` preserves the committed dependency lock.
+Conan resolution, downloads and builds stream their output to the terminal.
+
+Outbound HTTPS access is needed during dependency setup. Builds and tests use
+the populated local cache. A headless build needs no Wayland packages; CMake
+selects the headless backend automatically when the client headers, protocols
+and scanner are unavailable. Inspect the configure output for the selected
+backend. Live compositor/GPU tests remain opt-in and skip when their prerequisites
+are absent; passing the portable tests does not validate hardware rendering.
+
+Some diagnostic and GameHost tests, and the installed SDK consumer, exercise
+Unix domain socket pairs (`SOCK_DGRAM` and `SOCK_SEQPACKET`), socket options and
+child processes. Sandboxes may restrict these even though no external service
+is contacted. `PermissionError: Operation not permitted` from socket operations,
+unavailable diagnostic transports or a host exiting before its protocol handshake
+can indicate a sandbox restriction. Allow local IPC in the execution environment,
+then rerun the affected tests:
+
+```bash
+out/host-tools/venv/bin/ctest --preset linux-clang-development --rerun-failed --output-on-failure
+```
+
+Verify the actual failure before attributing it to sandbox policy. Keep these
+tests enabled: they validate engine diagnostics and process supervision. To
+force diagnostic helpers into report-only mode during local headless work, set
+`LUDUS_DIAGNOSTIC_INTERACTIVE=0`.
+
+## Development container
+
+The checked-in `.devcontainer/` configuration supplies the Ubuntu 24.04 reference
+host, LLVM 18 (including formatting, analysis and sanitizer tools), Python venv
+support and native build prerequisites. It omits Wayland and Qt development
+packages so the default configuration uses the headless backend.
+
+Install Docker and the VS Code Dev Containers extension on the host, clone Ludus,
+and choose **Dev Containers: Reopen in Container**. Container creation prepares
+`linux-clang-development` with tests and the committed Conan lock; it downloads
+dependencies but does not build Ludus. Then run in the container terminal:
+
+```bash
+./scripts/doctor
+./scripts/build linux-clang-development
+./scripts/test linux-clang-development
+./scripts/install-sdk linux-clang-development
+```
+
+Setup runs as the unprivileged `vscode` user with `--no-system-install`. System
+packages are installed while building the image, so workspace initialization
+does not need sudo. The host still needs access to its Docker daemon; this
+configuration does not install Docker or grant daemon access. Container creation
+requires network access for the base image, Ubuntu packages and pinned dependencies.
+The Dockerfile accepts an optional BuildKit `proxy_ca` secret containing a trusted
+CA bundle for HTTPS package mirrors behind a proxy.
+
+Start with a fresh checkout or move existing generated `out/` state aside before
+switching between host and container builds. Tool shims, venvs, Conan files and
+CMake caches contain machine-specific paths. The container limits builds to two
+workers by default; adjust `CMAKE_BUILD_PARALLEL_LEVEL` for the available resources.
+Desktop/editor and GPU rendering validation require a separate capable host.
+
 ## Trees
 
 The source tree contains only hand-written project files. Generated state belongs under `out/`:

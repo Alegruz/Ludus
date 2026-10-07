@@ -44,12 +44,26 @@ Continue with [your first project](first-project.md).
 
 ## Engine contributors
 
-Use `./init.sh --cli --with-tests` to prepare native presets and tests. Then run:
+For a headless contributor checkout, prepare just Development with tests:
 
 ```bash
+./init.sh --cli --preset linux-clang-development --preset-only --locked --with-tests
 ./scripts/build linux-clang-development
 ./scripts/test linux-clang-development
 ```
+
+Omit `--preset-only` to prepare all native presets. If LLVM 18 is already on
+`PATH`, add `--no-system-install` to avoid system package installation. Managed
+tools and Conan dependencies still need network access during setup.
+
+Hosts without sudo can use the checked-in Ubuntu 24.04 development container
+with Docker and VS Code Dev Containers. It prepares Development with tests as
+an unprivileged user and defaults to the headless backend. Diagnostic and
+GameHost tests require local Unix socket operations even without a desktop or
+GPU; permit local IPC when running them inside a restricted sandbox.
+
+See [headless setup and the development container](https://github.com/Alegruz/Ludus/blob/main/docs/development/building.md#headless-and-sandboxed-builds)
+for prerequisites and troubleshooting.
 
 See [contributing](../contribute/index.md) for the complete review gates.
 
