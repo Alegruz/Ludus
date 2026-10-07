@@ -1,4 +1,5 @@
 """Host selection regressions for the compile-only macOS slice."""
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -32,6 +33,7 @@ class MacosSetupTests(unittest.TestCase):
             installed = engine.install_conan_profile(root)
             self.assertTrue(installed.read_text().startswith("first\n"))
             self.assertIn("tools.apple:sdk_path=", installed.read_text())
+            self.assertIn("tools.build:cxxflags=", installed.read_text())
             source.write_text("updated\n")
             self.assertTrue(engine.install_conan_profile(root).read_text().startswith("updated\n"))
 
@@ -49,12 +51,16 @@ class MacosSetupTests(unittest.TestCase):
             second = root / "relocated SDK"
             first.mkdir()
             second.mkdir()
+            for sdk in (first, second):
+                (sdk / "SDKSettings.json").write_text("{}")
+            (root / "toolchain/include/c++/v1/__config").write_text("fixture")
             with patch.dict(engine.os.environ, {"SDKROOT": ""}), \
                     patch.object(engine, "capture_command_quiet", return_value=(0, f'"-isysroot" "{first}"')):
                 engine.configure_macos_sdk(root)
             link = root / "out/host-tools/macos-sdk"
             self.assertEqual(link.resolve(), first.resolve())
-            with patch.dict(engine.os.environ, {"SDKROOT": str(second)}):
+            with patch.dict(engine.os.environ, {"SDKROOT": str(second)}), \
+                    patch.object(engine, "probe_macos_sdk", return_value=(0, "")):
                 engine.configure_macos_sdk(root)
                 engine.configure_macos_sdk(root)
             self.assertEqual(link.resolve(), second.resolve())
@@ -62,6 +68,122 @@ class MacosSetupTests(unittest.TestCase):
                 with self.assertRaises(engine.EngineError):
                     engine.configure_macos_sdk(root)
             self.assertEqual(link.resolve(), second.resolve())
+
+    def test_incompatible_default_sdk_falls_back_to_validated_sibling(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            compiler = root / "llvm/bin/clang++"
+            compiler.parent.mkdir(parents=True)
+            compiler.touch()
+            (root / "llvm/include/c++/v1").mkdir(parents=True)
+            newest = root / "SDKs/MacOSX27.0.sdk"
+            older = root / "SDKs/MacOSX26.5.sdk"
+            for sdk, version in ((newest, "27.0"), (older, "26.5")):
+                sdk.mkdir(parents=True)
+                (sdk / "SDKSettings.json").write_text('{"Version": "' + version + '"}')
+            with patch.dict(engine.os.environ, {"SDKROOT": ""}), \
+                    patch.object(engine, "clang_cxx", return_value=compiler), \
+                    patch.object(engine, "capture_command_quiet", return_value=(0, f'"-isysroot" "{newest}"')), \
+                    patch.object(engine, "probe_macos_sdk", side_effect=[(1, "NAN missing"), (0, "")]) as probe:
+                engine.configure_macos_sdk(root)
+            self.assertEqual((root / "out/host-tools/macos-sdk").resolve(), older.resolve())
+            self.assertEqual([call.args[1] for call in probe.call_args_list], [newest.resolve(), older.resolve()])
+
+    def test_explicit_incompatible_sdk_fails_before_changing_valid_links(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            compiler = root / "llvm/bin/clang++"
+            compiler.parent.mkdir(parents=True)
+            compiler.touch()
+            (root / "llvm/include/c++/v1").mkdir(parents=True)
+            old = root / "validated SDK"
+            new = root / "incompatible SDK"
+            old.mkdir()
+            new.mkdir()
+            link = root / "out/host-tools/macos-sdk"
+            engine.link_or_replace_symlink(link, old)
+            with patch.dict(engine.os.environ, {"SDKROOT": str(new)}), \
+                    patch.object(engine, "clang_cxx", return_value=compiler), \
+                    patch.object(engine, "probe_macos_sdk", return_value=(1, "NAN missing")) as probe:
+                with self.assertRaisesRegex(engine.EngineError, "Explicit SDKROOT is incompatible") as failure:
+                    engine.configure_macos_sdk(root)
+            self.assertIn("SDKROOT=/absolute/path", str(failure.exception))
+            self.assertIn("before dependency downloads", str(failure.exception))
+            self.assertEqual(probe.call_count, 1)
+            self.assertEqual(link.resolve(), old.resolve())
+
+    def test_no_compatible_installed_sdk_reports_recovery(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            compiler = root / "llvm/bin/clang++"
+            compiler.parent.mkdir(parents=True)
+            compiler.touch()
+            (root / "llvm/include/c++/v1").mkdir(parents=True)
+            sdk = root / "SDKs/MacOSX27.sdk"
+            sdk.mkdir(parents=True)
+            with patch.dict(engine.os.environ, {"SDKROOT": ""}), \
+                    patch.object(engine, "clang_cxx", return_value=compiler), \
+                    patch.object(engine, "capture_command_quiet", return_value=(0, f'"-isysroot" "{sdk}"')), \
+                    patch.object(engine, "probe_macos_sdk", return_value=(1, "NAN missing")):
+                with self.assertRaisesRegex(engine.EngineError, "No installed compatible") as failure:
+                    engine.configure_macos_sdk(root)
+            self.assertIn("Changing only the deployment target", str(failure.exception))
+            self.assertFalse((root / "out/host-tools/macos-sdk").exists())
+
+    def test_probe_uses_exact_headers_and_bounded_compile_link(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sdk = root / "SDK with spaces"
+            libcxx = root / "libcxx with spaces"
+            sdk.mkdir()
+            libcxx.mkdir()
+            (sdk / "SDKSettings.json").write_text("{}")
+            (libcxx / "__config").write_text("fixture")
+            with patch.object(engine, "capture_command_quiet", return_value=(0, "")) as capture:
+                engine.probe_macos_sdk(root, sdk, libcxx)
+            command = capture.call_args.args[0]
+            self.assertIn("-nostdinc++", command)
+            self.assertIn(root / "SDK with spaces", command)
+            self.assertIn(root / "libcxx with spaces", command)
+            self.assertIn("-o", command)
+            self.assertEqual(capture.call_args.kwargs["timeout"], 30)
+            self.assertIn("LudusSDK_missing_NAN", capture.call_args.kwargs["input_text"])
+
+    def test_bootstrap_identity_changes_when_sdk_moves_at_same_link(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = root / "first SDK"
+            second = root / "second SDK"
+            for sdk in (first, second):
+                sdk.mkdir()
+                (sdk / "SDKSettings.json").write_text("{}")
+            link = root / "out/host-tools/macos-sdk"
+            engine.link_or_replace_symlink(link, first)
+            with patch.object(engine.platform, "system", return_value="Darwin"):
+                before = engine.bootstrap_fingerprint(root)
+                engine.link_or_replace_symlink(link, second)
+                after = engine.bootstrap_fingerprint(root)
+            self.assertNotEqual(before, after)
+
+    def test_cache_repair_tracks_sdk_changes_and_accepts_equivalent_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            preset = "macos-clang-development"
+            cache = engine.build_dir_for_preset(root, preset) / "CMakeCache.txt"
+            cache.parent.mkdir(parents=True)
+            cache.write_text("\n".join(
+                f"{key}:FILEPATH={path.resolve()}" for key, path in (
+                    ("CMAKE_CXX_COMPILER", engine.clang_cxx(root)),
+                    ("CMAKE_MAKE_PROGRAM", engine.ninja(root)),
+                    ("CMAKE_TOOLCHAIN_FILE", root / "out/conan" / preset / "conan_toolchain.cmake"))))
+            stamp = cache.parent / ".ludus-macos-toolchain.json"
+            stamp.write_text(json.dumps(engine.macos_toolchain_identity(root)))
+            self.assertEqual(engine.cmake_cache_repair_reasons(root, preset), [])
+            first = root / "first SDK"
+            first.mkdir()
+            engine.link_or_replace_symlink(root / "out/host-tools/macos-sdk", first)
+            self.assertIn("macOS SDK/compiler/libc++ inputs changed or have not been recorded",
+                          engine.cmake_cache_repair_reasons(root, preset))
 
     def test_all_mac_profiles_have_build_types_and_host_defaults(self):
         for flavor in ("debug", "development", "profile", "release", "asan-ubsan"):

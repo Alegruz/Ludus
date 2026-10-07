@@ -4,6 +4,42 @@ Build this checkout to develop the engine or produce an installed SDK. For a
 game project, use [the independent-project workflow](project-sdk-workflow.md).
 All commands below run from the Ludus repository root.
 
+## Initialization and macOS SDK compatibility
+
+Run `./init.sh` before configuring the engine with a Ludus preset. Native
+preset toolchains require the current initialization record; an existing Conan
+file alone does not prove setup completed. A plain configure without a toolchain
+reports the init command. Advanced builds may provide a caller-owned toolchain;
+they still receive the feature dependency checks. Browser setup retains its
+separate Emscripten toolchain checks. Configuration never runs init for you.
+
+On macOS, init compiles and links a small probe using the actual Clang compiler,
+libc++ headers and SDK before installing managed tools or building Conan
+packages. It checks `NAN` and `INFINITY`, whose header definitions HarfBuzz needs.
+Clang 18 with the macOS 27 SDK fails this check; macOS 26.5 passes on the tested
+host. Without `SDKROOT`, init tests Clang's default SDK first, then installed
+sibling SDKs newest first, selecting the first that passes. It does not download
+an older SDK or change the system's Xcode selection.
+
+An explicit `SDKROOT` is validated and never silently replaced. If it fails,
+install/select a compatible SDK, then rerun init, for example:
+
+```bash
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk ./init.sh
+```
+
+If `SDKROOT` was set accidentally, use `unset SDKROOT` and rerun `./init.sh`.
+The path above must exist locally. Lowering the deployment target is insufficient:
+it changes the minimum supported OS, not the SDK's headers. Existing valid local
+SDK/header links are preserved when validation fails.
+
+Init records the real compiler/SDK/header destinations and metadata. Moving or
+retargeting them invalidates setup and refreshes native CMake caches during
+explicit repair. Conan dependencies receive the selected SDK, compiler paths and
+matching libc++ include flags too; cached dependency packages cannot substitute
+for the compiler/SDK probe. CMake independently checks the math-header contract
+so an overridden SDK fails during configure with recovery instructions.
+
 ## Missing or stale dependencies
 
 CMake configuration checks the dependencies required by enabled features before

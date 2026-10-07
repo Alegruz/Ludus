@@ -130,7 +130,7 @@ class DependencyDiagnosticsTests(unittest.TestCase):
     def test_optional_features_do_not_require_tools_or_packages(self):
         result = self.configure(f'include("{self.cmake}/LudusShaders.cmake")\n'
                                 f'include("{self.cmake}/LudusReflection.cmake")\n'
-                                'set(CMAKE_SYSTEM_NAME Darwin)\nset(EMSCRIPTEN TRUE)\nset(LUDUS_BUILD_TESTS OFF)\n'
+                                'set(CMAKE_SYSTEM_NAME Emscripten)\nset(EMSCRIPTEN TRUE)\nset(LUDUS_BUILD_TESTS OFF)\n'
                                 f'include("{self.cmake}/EngineDependencyPreflight.cmake")\n')
         self.assertEqual(result.returncode, 0, result.stdout)
 
