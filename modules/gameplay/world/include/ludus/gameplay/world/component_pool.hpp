@@ -44,7 +44,8 @@ public:
         foundation::core::Array<foundation::uint32> sparse;
         foundation::core::Array<EntityId> owners;
         foundation::core::Array<T> values;
-        if (!sparse.TryResize(count, MissingIndex()) || !owners.TryEnsureCapacity(count) || !values.TryEnsureCapacity(count))
+        if (!sparse.TryResize(count, MissingIndex()) || !owners.TryEnsureCapacity(count) ||
+            !values.TryEnsureCapacity(count))
         {
             return Status::AllocationFailure;
         }
