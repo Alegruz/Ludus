@@ -258,3 +258,86 @@ These comparisons support the chosen separation and numerical approach. They do
 not prove Ludus is faster, more comfortable or easier to author than an existing
 engine. That requires the implementation, representative scenes, traces, hardware
 measurements and camera playtests specified in the architecture.
+
+## Conference and journal research backlog
+
+Recorded October 6, 2026. Preserve this shortlist for an improvement pass after
+implementing and validating the initial [camera architecture](camera-systems.md#implementation-phases-and-acceptance).
+Follow its C0-C5 scope, acceptance gates and conditional features first; this
+queue does not make optional rails, shot search or renderer temporal features
+mandatory. Record the delivered revision, fixtures, tuning and measurements as
+the comparison baseline before starting research trials.
+
+The architecture remains the owner of camera contracts and delivery scope. This
+section owns the later venue search, reading queue and experiment records.
+Required checks of numeric, backend and API contracts still belong to initial
+implementation. The additional research does not require redesigning that
+implementation before it has a reproducible baseline.
+
+Publication records, abstracts, session descriptions and selected paper passages
+were screened for the recommendations below. Full paper reviews and complete
+talk viewing remain queued. Possible experiments are Ludus research questions;
+no new technique in this queue has been adopted or measured in the engine.
+Keep the completed Gems readings above distinct from this pending work.
+
+### Venues to search
+
+| Venue | Topics to screen for | Potential Ludus use after the baseline |
+| --- | --- | --- |
+| Eurographics and *Computer Graphics Forum* | Camera-control surveys, constraint satisfaction, frame coherence and visibility | Compare C1 transitions, C2 recovery and C5 shot-selection policies |
+| SIGGRAPH, SIGGRAPH Asia and *ACM Transactions on Graphics* | Image-space composition, subject-oriented camera representations, viewpoint manipulation and interpolation | Improve C3 group framing and authoring controls; evaluate composition-preserving blends |
+| ACM SIGGRAPH / Eurographics Symposium on Computer Animation (SCA) | Multi-subject framing, camera trajectories and visibility-aware transitions | Compare C2/C4/C5 movement and composition techniques |
+| GDC / GDC Vault | Production failure cases, player control, smoothing, shake, comfort and split screen | Improve tuning surfaces, regression fixtures and player evaluation for C0-C3 |
+
+The linked sources in the queue are archive entry points, not upcoming-event
+recommendations. Priorities and subsystem mappings are Ludus selection criteria.
+Begin with the GDC talks and survey, then investigate composition and visibility
+papers against concrete limitations observed in the implemented camera.
+
+### Initial reading queue
+
+| ID | Source and attribution | Full-review status | Question and possible experiment after review |
+| --- | --- | --- | --- |
+| CR-01 | Marc Christie, Patrick Olivier and Jean-Marie Normand, **Camera Control in Computer Graphics**, *Computer Graphics Forum* 27(8), pp. 2197-2218, 2008. [DOI](https://doi.org/10.1111/j.1467-8659.2008.01181.x) | Queued; publication record/abstract screened | Which constraint, optimization and occlusion approaches address an observed gap in our fixed pipeline? Classify baseline failures and select a bounded alternative for one failing fixture. |
+| CR-02 | John Nesky, **50 Camera Mistakes**, GDC 2014, thatgamecompany. [Session](https://www.gdcvault.com/play/1020460/50-Camera) | Queued; session description screened | Which camera behaviors impair direction, distance judgment, visibility or player control? Extend regression journeys and playtests, then compare changes to control deviation, recovery and player ratings. |
+| CR-03 | Squirrel Eiserloh, **Math for Game Programmers: Juicing Your Cameras With Math**, GDC 2016, SMU Guildhall. [Session](https://www.gdcvault.com/play/1023557/Math-for-Game-Programmers-Juicing); [slides](https://media.gdcvault.com/gdc2016/Presentations/Eiserloh_Squirrel_JuicingYourCameras.pdf) | Queued; session description screened | Which framing, smoothing, shake or split-screen ideas improve our delivered recipes? Compare response and comfort across recorded render cadences, keeping authoritative aim and gameplay state unchanged. |
+| CR-04 | Nicolas Halper, Ralf Helbing and Thomas Strothotte, **A Camera Engine for Computer Games: Managing the Trade-Off Between Constraint Satisfaction and Frame Coherence**, *Computer Graphics Forum* 20(3), pp. 174-183, Eurographics 2001. [DOI](https://doi.org/10.1111/1467-8659.00510) | Queued; publication record/abstract screened | How should composition and visibility losses be balanced against temporal coherence? Compare candidate scoring and switching policies in moving-target/occluder fixtures; measure shot switches, visible weight and movement discontinuities. |
+| CR-05 | Christophe Lino and Marc Christie, **Intuitive and Efficient Camera Control with the Toric Space**, *ACM Transactions on Graphics* 34(4), article 82, SIGGRAPH 2015. [DOI](https://doi.org/10.1145/2766965); [author manuscript](https://cinematography.inria.fr/files/2015/03/toric-space-tog-final.pdf) | Queued; abstract and selected passages screened | Does a subject-oriented representation improve two-subject composition and blends? Compare it with baseline group fitting on dialogue/combat fixtures, including coincident targets, aspect/FOV limits and obstructions. Revalidate physical safety for every candidate. |
+| CR-06 | Christophe Lino and Marc Christie, **Efficient Composition for Virtual Camera Control**, SCA 2012, pp. 65-70. [DOI](https://doi.org/10.2312/SCA/SCA12/065-070); [paper](https://diglib.eg.org/bitstreams/72db1d48-083e-490a-87f7-ac989b0ef214/download) | Queued; abstract and selected passages screened | Can geometric composition reduce search work for two or three subjects? Compare normalized screen-position error, supported/degenerate cases and CPU/query costs with baseline fitting under identical limits. |
+| CR-07 | Thomas Oskam, Robert W. Sumner, Nils Thuerey and Markus Gross, **Visibility Transition Planning for Dynamic Camera Control**, SCA 2009, pp. 47-56. [DOI](https://doi.org/10.1145/1599470.1599478); [paper](https://diglib.eg.org/bitstreams/92f4df56-ac30-4413-bd38-3694bb354f68/download) | Queued; abstract screened | When does bounded local recovery fail during a corner turn or a large transition? Compare visibility-aware candidate/traversal strategies. Consider a global roadmap only for a demonstrated need, recording preparation, memory, dynamic-scene and runtime costs. |
+| CR-08 | Roberto Ranon, Marc Christie and Christophe Lino, **Algorithms and Techniques for Virtual Camera Control**, Eurographics 2016 Tutorials. [DOI and tutorial materials](https://doi.org/10.2312/egt.20161033) | Queued; tutorial description screened | Which viewpoint, visibility and editing techniques merit a deeper review? Use the tutorial to expand a problem-specific shortlist, then review original papers before planning an implementation trial. |
+
+### Review and experiment records
+
+After the baseline, search the venue archives for observed problems in framing,
+visibility, motion, player control and authoring. Record each search date/scope,
+source authors/title/year, DOI or primary URL, access locator and reading status.
+Read original papers identified by surveys before crediting an algorithm to them.
+
+Use **Queued**, **Reading**, **Reviewed**, **Trial planned**, **Trial complete**,
+**Adopted**, **Deferred** or **Rejected**. Update the existing queue row and append
+the detailed record here as work progresses. An abstract screen is not a complete
+review, and a prototype is not evidence of improvement without a comparison.
+
+For each completed review or trial, record:
+
+1. Source ID, date and exact sections/pages or talk timestamps consulted, with
+   the relevant assumptions, limitations and departures from Ludus's design.
+2. A testable hypothesis and the affected camera stage/recipe or renderer adapter.
+3. The baseline revision, scene/query snapshot, target/control/request capture,
+   presentation schedule, effect seeds, tuning and supported toolchain/backend.
+4. A bounded prototype, reproduction commands and links to its tests or PR;
+   generated captures/results remain in ignored `out/`.
+5. Before/after CPU median/tail time, allocations, query counts, visible weight,
+   composition error, response lag, switching and motion discontinuities, with
+   failure/fallback rates and relevant player comfort/control observations.
+6. An adopt/defer/reject decision, including regressions, maintenance cost and
+   links to any changed contracts and attribution beside affected code.
+
+Retain the architecture's mandatory safety allowance, explicit failures,
+transactional publication and simulation/presentation separation in every trial.
+Exercise collision, infeasible framing, pause/hitches, target loss, interrupted
+blends and supported native/browser conditions. Reuse recorded-query replay for
+camera comparisons and separately test real query/backend integration. Improve
+one demonstrated limitation at a time; broader planners and worker/GPU scoring
+remain subject to the architecture's extension policy and measurements.
