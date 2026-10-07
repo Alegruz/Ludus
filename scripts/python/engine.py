@@ -36,7 +36,7 @@ def native_profile_name() -> str:
 
 
 PROJECT_CXX_STANDARD = "23"
-BOOTSTRAP_STATE_VERSION = 1
+BOOTSTRAP_STATE_VERSION = 2
 
 # ClangBuildAnalyzer aggregates Clang -ftime-trace outputs into a single ranked
 # report. Pinned so the profiling harness is reproducible. It is fetched/built
@@ -141,11 +141,14 @@ def bootstrap_fingerprint(root: Path) -> dict[str, object]:
     for relative_path in BOOTSTRAP_INPUTS:
         path = root / relative_path
         files[relative_path] = file_sha256(path) if path.is_file() else "missing"
-    return {
+    result = {
         "version": BOOTSTRAP_STATE_VERSION,
         "cxx_standard": PROJECT_CXX_STANDARD,
         "files": files,
     }
+    if platform.system() == "Darwin":
+        result["macos_toolchain"] = macos_toolchain_identity(root)
+    return result
 
 
 def bootstrap_marker_path(root: Path, preset: str) -> Path:
@@ -247,6 +250,8 @@ def capture_command_quiet(
     *,
     cwd: Path,
     env: dict[str, str] | None = None,
+    input_text: str | None = None,
+    timeout: int | None = None,
 ) -> tuple[int, str]:
     """Run a command quietly and return exit code and output."""
     try:
@@ -258,9 +263,11 @@ def capture_command_quiet(
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            input=input_text,
+            timeout=timeout,
         )
-    except FileNotFoundError:
-        return 127, ""
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 127, str(exc)
     return completed.returncode, completed.stdout.strip()
 
 
@@ -470,30 +477,105 @@ def configure_system_tool_shims(root: Path, versions: dict[str, dict[str, str]])
         configure_macos_sdk(root)
 
 
+def macos_toolchain_identity(root: Path) -> dict[str, str]:
+    """Record real toolchain inputs so SDK/header retargeting invalidates setup."""
+    paths = {
+        "compiler": clang_cxx(root),
+        "sdk": root / "out/host-tools/macos-sdk",
+        "libcxx": root / "out/host-tools/libcxx-include",
+    }
+    result = {name: str(path.resolve()) for name, path in paths.items()}
+    for name, path in (("sdk_settings", paths["sdk"] / "SDKSettings.json"),
+                       ("libcxx_config", paths["libcxx"] / "__config")):
+        result[name] = file_sha256(path) if path.is_file() else "missing"
+    return result
+
+
+def macos_sdk_candidates(preferred: Path) -> list[Path]:
+    """Prefer Clang's SDK, then test installed sibling SDKs newest first."""
+    siblings = list(preferred.parent.glob("MacOSX*.sdk"))
+    def sdk_version(path: Path) -> tuple[int, ...]:
+        try:
+            return version_tuple(str(json.loads((path / "SDKSettings.json").read_text())["Version"]))
+        except (OSError, KeyError, ValueError, TypeError):
+            return ()
+    ordered = [preferred, *sorted(siblings, key=sdk_version, reverse=True)]
+    result = []
+    for path in ordered:
+        resolved = path.resolve()
+        if resolved.is_dir() and resolved not in result:
+            result.append(resolved)
+    return result
+
+
+def probe_macos_sdk(root: Path, sdk: Path, libcxx: Path) -> tuple[int, str]:
+    # Compile and link rather than checking a version label: Apple SDK math
+    # headers can require compiler-resource macros absent from older Clang.
+    # This exercises the NAN/INFINITY contract that HarfBuzz's source uses.
+    for metadata in (sdk / "SDKSettings.json", libcxx / "__config"):
+        if not metadata.is_file():
+            return 1, f"Incomplete SDK/header installation: missing {metadata}"
+    source = ("#include <cmath>\n#include <string_view>\n"
+              "#ifndef NAN\n#error LudusSDK_missing_NAN\n#endif\n"
+              "#ifndef INFINITY\n#error LudusSDK_missing_INFINITY\n#endif\n"
+              "int main() { volatile double n = NAN; volatile double i = INFINITY; "
+              "return std::isnan(n) && std::isinf(i) && std::string_view(\"sdk\").size() == 3 ? 0 : 1; }\n")
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="ludus-sdk-probe-") as temporary:
+        return capture_command_quiet(
+            [clang_cxx(root), "-x", "c++", "-std=c++23", "-stdlib=libc++",
+             "-nostdinc++", "-isystem", libcxx, "-isysroot", sdk,
+             "-mmacosx-version-min=14.0", "-", "-o", Path(temporary) / "probe"],
+            cwd=root, input_text=source, timeout=30)
+
+
 def configure_macos_sdk(root: Path) -> None:
-    # Use the SDK selected by upstream Clang, which can differ from xcrun's
-    # latest SDK. Keep the machine path in an ignored, checkout-local symlink.
-    sdk = os.environ.get("SDKROOT", "")
+    explicit = os.environ.get("SDKROOT", "")
+    sdk = explicit
     if not sdk:
         code, output = capture_command_quiet(
             [clang_cxx(root), "-###", "-x", "c++", "-c", os.devnull], cwd=root)
         match = re.search(r'"-isysroot" "([^"\n]+)"', output)
         if code != 0 or not match:
-            raise EngineError("Clang 18 could not select a macOS SDK; install Xcode Command Line Tools or set SDKROOT")
+            raise EngineError("Clang could not select a macOS SDK. Install Xcode Command Line Tools, "
+                              "or set SDKROOT to an installed compatible SDK and rerun ./init.sh.")
         sdk = match.group(1)
     if not Path(sdk).is_dir():
-        raise EngineError(f"macOS SDK is missing: {sdk}")
-    link_or_replace_symlink(root / "out/host-tools/macos-sdk", Path(sdk))
+        raise EngineError(f"macOS SDK is missing: {sdk}. Set SDKROOT to an installed SDK and rerun ./init.sh.")
     libcxx = clang_cxx(root).resolve().parent.parent / "include/c++/v1"
     if not libcxx.is_dir():
-        raise EngineError(f"Clang 18 libc++ headers are missing: {libcxx}")
-    link_or_replace_symlink(root / "out/host-tools/libcxx-include", libcxx)
+        raise EngineError(f"Clang libc++ headers are missing: {libcxx}. Restore llvm@18 and rerun ./init.sh.")
+    candidates = [Path(sdk).resolve()] if explicit else macos_sdk_candidates(Path(sdk))
+    failures = []
+    for candidate in candidates:
+        code, output = probe_macos_sdk(root, candidate, libcxx)
+        if code == 0:
+            link_or_replace_symlink(root / "out/host-tools/macos-sdk", candidate)
+            link_or_replace_symlink(root / "out/host-tools/libcxx-include", libcxx)
+            print(f"Validated macOS SDK: {candidate} (Clang compile/link and NAN/INFINITY checks passed)")
+            if failures:
+                print(f"Skipped incompatible SDK: {Path(sdk).resolve()}")
+            return
+        failures.append(f"  {candidate}:\n{output[-2000:]}")
+    selection = "Explicit SDKROOT is incompatible" if explicit else "No installed compatible macOS SDK was found"
+    raise EngineError(
+        f"{selection} with {clang_cxx(root).resolve()}.\n"
+        "Compiler/SDK compile-link validation failed before dependency downloads or HarfBuzz builds.\n"
+        + "\n".join(failures) + "\nHow to fix:\n"
+        "  Install a macOS SDK compatible with Clang 18 (macOS 26.5 passes the current math-header probe).\n"
+        "  SDKROOT=/absolute/path/to/MacOSX26.5.sdk ./init.sh\n"
+        "  If SDKROOT was set accidentally, unset SDKROOT and rerun ./init.sh to test installed sibling SDKs.\n"
+        "Changing only the deployment target does not change the SDK headers.")
+
 
 def native_profile_contents(root: Path) -> str:
     source = root / "config/conan/profiles" / native_profile_name()
     text = source.read_text(encoding="utf-8")
     if platform.system() == "Darwin":
         text += f"tools.apple:sdk_path={root / 'out/host-tools/macos-sdk'}\n"
+        text += f"tools.build:cxxflags={['-nostdinc++', '-isystem', str(root / 'out/host-tools/libcxx-include')]!r}\n"
+        text = text.replace('tools.build:compiler_executables={"c":"clang","cpp":"clang++"}',
+                            f"tools.build:compiler_executables={dict(c=str(host_tools_bin_dir(root) / 'clang'), cpp=str(clang_cxx(root)))!r}")
     return text
 
 
@@ -1054,8 +1136,17 @@ def cmake_cache_repair_reasons(root: Path, preset: str) -> list[str]:
             reasons.append(f"{variable} is missing")
         elif actual.endswith("-NOTFOUND"):
             reasons.append(f"{variable} is {actual}")
-        elif actual != expected:
+        elif Path(actual).resolve() != Path(expected).resolve():
             reasons.append(f"{variable} is {actual}, expected {expected}")
+
+    if preset.startswith("macos-"):
+        identity_file = cache_path.parent / ".ludus-macos-toolchain.json"
+        try:
+            previous = json.loads(identity_file.read_text())
+        except (OSError, ValueError):
+            previous = None
+        if previous != macos_toolchain_identity(root):
+            reasons.append("macOS SDK/compiler/libc++ inputs changed or have not been recorded")
 
     generator = cmake_cache_value(cache_path, "CMAKE_GENERATOR")
     if generator is not None and generator != "Ninja":
@@ -1072,7 +1163,7 @@ def repair_existing_cmake_caches(root: Path, presets: Sequence[str]) -> None:
         print(f"Refreshing stale CMake cache for {preset}:")
         for reason in reasons:
             print(f"  - {reason}")
-        run([cmake(root), "--fresh", "-U", "Catch2_DIR", "--preset", preset], cwd=root, env=tool_env(root))
+        cmake_configure(root, preset)
 
 
 def create_conan_lock(root: Path, profile_path: Path) -> None:
@@ -1172,6 +1263,9 @@ def cmake_configure(root: Path, preset: str, extra_args: Sequence[str] = ()) -> 
         args.append("--fresh")
     args.extend(["-U", "Catch2_DIR", "--preset", preset, *extra_args])
     run(args, cwd=root, env=tool_env(root))
+    if preset.startswith("macos-"):
+        (build_dir_for_preset(root, preset) / ".ludus-macos-toolchain.json").write_text(
+            json.dumps(macos_toolchain_identity(root), sort_keys=True) + "\n")
 
 
 def cmake_build(root: Path, preset: str, extra_args: Sequence[str] = ()) -> None:
