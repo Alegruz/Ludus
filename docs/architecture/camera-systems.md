@@ -792,6 +792,13 @@ of unimplemented extension interfaces at phase zero.
 | C4 | Prepared rail and cinematic track adapter | Constant-distance travel, quaternion continuity limits, cuts/seeks/loops and immutable revision lifetime |
 | C5 | Optional shot-quality search and renderer temporal integration | Stable automatic selection, query accounting, split-screen/history isolation and actual temporal image tests |
 
+Implement and validate this initial architecture first, preserving the scope and
+conditional features of these phases. Record its delivered revision, fixtures,
+tuning and measurements as the baseline. Then use the
+[conference and journal research backlog](camera-systems-gems-review.md#conference-and-journal-research-backlog)
+for a separate improvement pass with reviewed sources and measured comparisons.
+The reference review owns that queue and its experiment/decision records.
+
 Basic reverse-Z rendering belongs in the appropriate graphics slice; camera unit
 tests can validate matrices before that slice exists. General scene rendering
 and temporal anti-aliasing remain separately implemented features. Do not report
