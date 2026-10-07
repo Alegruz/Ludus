@@ -61,3 +61,5 @@ Read the [RHI module guide](https://github.com/Alegruz/Ludus/blob/main/modules/g
 [public rendering contract](../../development/fullscreen-rendering.md)
 and [runtime UI design](../../architecture/ui.md).
 Continue with [world-to-presentation ownership](world.md).
+The [terrain proposal](terrain.md) describes how a future mesh/texture rendering
+slice can consume editable ground without owning physical terrain or generation.
