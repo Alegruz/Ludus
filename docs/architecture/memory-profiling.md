@@ -47,7 +47,7 @@ proposed gates, not measured Ludus results.
 
 The implementation inspected on 2026-10-04 provides CPU trace scopes, frames,
 flows, and Perfetto JSON export. Its event kinds have no memory records, and its
-[README](../../modules/foundation/profiling/README.md) explicitly defers memory
+[README](../modules/foundation/profiling.md) explicitly defers memory
 profiling. That original working-tree audit predates the minimal Memory/domain
 implementation now present on main.
 
@@ -557,6 +557,14 @@ No phase depends on adopting mimalloc, a job scheduler, an editor viewer, a new
 general hash container, or a lock-free queue. Existing CPU tracing can continue
 while memory gauges are added; do not extend its unsafe transport to satisfy a
 memory lifetime contract.
+
+## Research after the initial implementation
+
+Implement and validate the delivery phases above first. Subsequent improvements
+should start from the resulting artifacts, coverage limits and representative
+workload measurements. The reference review owns the
+[deferred conference and journal shortlist](memory-profiling-gems-review.md#research-follow-up-after-the-initial-implementation)
+and the evidence required before adopting a research-driven change.
 
 ## Alternatives and unresolved measurements
 

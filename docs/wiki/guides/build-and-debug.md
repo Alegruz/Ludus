@@ -31,7 +31,7 @@ ludus project run /path/to/MyGame --profile development
 ```
 
 Configure/build/run do not acquire SDKs or change the project's release lock.
-Resolve setup problems with [project setup](project-setup.md).
+Resolve setup problems with [project setup](../../development/project-sdk-workflow.md).
 
 ## From an engine checkout
 
@@ -69,6 +69,30 @@ The [S0 guide and lifetime audit](../../architecture/luau-s0.md)
 explain sanitizer/Web commands, the private loader fix, diagnostic Release
 configuration and remaining adoption gates. This slice has native Linux and
 Web probe coverage; Windows, macOS, Android and iOS require their own acceptance.
+
+## S1 native and Luau interaction
+
+After the pinned native setup:
+
+```bash
+./scripts/script-interaction bootstrap
+./scripts/script-interaction cook
+./scripts/script-interaction run --preset linux-clang-development
+./scripts/script-interaction check --preset linux-clang-development
+./scripts/script-interaction run --preset linux-clang-asan-ubsan
+```
+
+The opt-in headless fixture runs the same door interaction through native C++
+and generated Luau bindings. It checks declared state, ordered events, entity
+identity, phase/capability rules, command outcomes, and preservation of
+unpublished effects on fault. The native executable links no VM. Bootstrap
+builds the pinned compiler/analyzer as separate host tools; cook strictly checks
+the door behavior and fingerprints generated contracts and bytecode.
+
+The [S1 contract and acceptance guide](../../architecture/luau-s1.md)
+covers Web/Chromium commands, evidence locations and limitations. This remains
+an experimental integration with the reviewed S0 profile; it adds no installed
+scripting SDK, production asset/reload workflow, visual editor or C# runtime.
 
 ## Prepare native debugging
 

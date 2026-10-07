@@ -1,7 +1,7 @@
 # Ludus Localization Architecture
 
 **Status:** Architecture and implementation contract; the first static-text slice
-is implemented by [Localization](../../modules/localization/README.md). Its
+is implemented by [Localization](../modules/localization.md). Its
 `ludus-static-utf8-v1` profile stores literal UTF-8, provides catalog leases and
 exact bindings, and validates/cooks reviewed translations offline. Each successful
 load requires rebinding; schema-compatible binding reuse remains future work.
@@ -688,6 +688,15 @@ L1 static messages can ship independently. L2/L3 can be tested headlessly; a
 product cannot advertise a locale requiring paragraph/font capabilities until
 L4 and its asset/translator gates pass. This sequence does not require finishing
 all proposed Foundation systems first.
+
+Complete and validate the initial architecture through L0-L5 before beginning the
+broader conference/journal improvement pass. The existing static slice is an L1
+subset, not completion of those phases. Retain the accepted implementation
+revision, representative corpus, native/wasm behavior and workload measurements
+as the comparison baseline. Dependency/specification checks needed to implement
+this design remain part of the initial work. The
+[post-implementation research backlog](localization-gems-review.md#post-implementation-research-backlog)
+records the later reading queue and review/trial criteria for L6.
 
 | Alternative | Revisit condition |
 | --- | --- |

@@ -1,7 +1,8 @@
 # Developer tools: RAD Debugger, code editors, and future scripting
 
-Design baseline: 2026-10-01. Current implementation scope is D0/D1 below;
-editor and scripting milestones are proposals, not existing engine features.
+Design baseline: 2026-10-01. D0/D1 and an external-debugging subset of D3/D4 are implemented, as recorded in
+[implementation status](#implementation-status). D2 interactive acceptance and
+the remaining integration milestones are still pending.
 
 ## Goals and boundaries
 

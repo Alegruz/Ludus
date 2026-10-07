@@ -199,3 +199,80 @@ Subsequent reviewable slices, in order:
 The first kernel provides a maintainable correctness baseline and a controlled
 migration path. Those later capabilities are deliberately not advertised as
 implemented by this PR.
+
+## Post-baseline research and improvement plan
+
+Finish the initial architecture and its engine integration before changing the
+scheduler in response to the resources below. The bounded kernel is already
+implemented; the remaining baseline work is the first real consumer, useful
+execution traces, public API documentation and platform validation. The existing
+[staged growth plan](#performance-and-staged-growth) determines implementation
+order. This reading path supplies questions and comparison methods for later
+improvements; it does not select a replacement backend or expand the public API.
+
+### Baseline completion gate
+
+Before starting a scheduler optimization experiment:
+
+- Integrate one profiled immutable-range engine workload with disjoint outputs,
+  stable owner-side application and serial-oracle comparisons. Validate the
+  consumer's input/result lifetime, failure/cancellation handling, shutdown and
+  any applicable gameplay-code reload boundary against the contracts above.
+- Complete the task identity/flow and waiting measurements from the staged plan.
+  Record frame p50/p95/p99, critical path, dispatch-to-start latency, execution and
+  owner wait duration, grain sizes and the explicit worker budget. Measure tracing
+  overhead with tracing enabled and disabled.
+- Document the public API beside its declarations and record Linux, macOS and
+  serial-web validation in the [evidence owner](../development/threading-evidence.md).
+  Close the macOS CI runtime-test gap and obtain a completed sanitizer result;
+  a sanitizer-runtime failure before test entry is not a passing engine test.
+  Windows validation remains required before shipping the existing Windows backend.
+- Preserve a reproducible baseline: revision, compiler/build flavor, hardware,
+  worker/helping configuration, graph shape, workload inputs, output checks and
+  background load. Retain the bounded admission, zero steady scheduler allocation,
+  explicit error/outcome and owner-thread contracts when comparing alternatives.
+
+### Resources and their role
+
+Thanks to the authors and studios listed here for the research and engineering
+experience that motivates this follow-up. The source metadata, talk overview,
+paper abstracts and selected relevant sections were consulted to establish this
+reading path. A complete algorithm/proof review and a Ludus implementation
+evaluation remain future work; the table does not claim that these techniques
+have been adopted or that their reported gains transfer to Ludus.
+
+| Resource | Question to investigate after the baseline | Fit and limits for Ludus |
+| --- | --- | --- |
+| David Block / CD Projekt RED, **The Job System in 'Cyberpunk 2077': Scaling Night City on the CPU**, GDC Programming, 2024 ([session](https://gdcvault.com/play/1034234/The-Job-System-in-Cyberpunk)) | How should jobs compose across engine subsystems, expose dependency/blocker information and share the CPU budget? Review the thread-based dependency counters, debugging and profiling discussion first. | Closest practical starting point for the first consumer and readable traces. Treat the production engine's job API and resource-sharing decisions as examples; preserve Ludus's declared edges, run-to-completion callbacks and current world/Platform/RHI ownership. |
+| Sam Westrick, Darshan Dinesh Kumar and Seong-Heon Jung, **Scheduler Augmentation: A Lightweight, Customizable, Low-Cost Profiling Technique for Fork-Join Parallel Programs**, SPAA 2026, pp. 457-472 ([DOI](https://doi.org/10.1145/3816782.3819212), [paper](https://cs.nyu.edu/~shw8119/26/schedaug-spaa26.pdf), [artifact](https://github.com/nyu-parcour/scheduler-augmentation)) | Can scheduler observations identify tasks whose granularity costs more than their parallelism saves? Read the vertex interface in section 2, granularity analysis in section 3 and overhead evaluation before designing instrumentation. | A candidate for bounded, optional task-graph observations around existing profiler flows. Its fork/join pairing assumes series-parallel graphs; Ludus permits general sealed DAGs. Specify how observations handle arbitrary fan-in, failure, cancellation and graph reuse, and measure their storage and enabled/disabled overhead. |
+| Tsung-Wei Huang, Dian-Lun Lin, Chun-Xun Lin and Yibo Lin, **Taskflow: A Lightweight Parallel and Heterogeneous Task Graph Computing System**, IEEE Transactions on Parallel and Distributed Systems (TPDS), 33(6), 2022, pp. 1303-1320 ([DOI](https://doi.org/10.1109/TPDS.2021.3104255), [paper](https://taskflow.github.io/papers/tpds21-taskflow.pdf)) | How do work stealing and worker coordination keep useful parallel work moving while avoiding wasted resources when ready tasks become scarce? Review the scheduler and evaluation alongside the earlier ICPADS 2020 cross-check above. | Relevant if traces identify ready-queue contention, poor load balance or excessive wakeups. Its dynamic/control-flow and heterogeneous task model is broader than our frozen CPU DAG. Any adaptation must retain explicit CPU budgets, bounded storage, sleeping idle workers and the serial browser executor; a library import needs a separate compatibility review. |
+| David Chase and Yossi Lev, **Dynamic Circular Work-Stealing Deque**, SPAA 2005, pp. 21-28 ([DOI](https://doi.org/10.1145/1073970.1073974), [paper](https://www.cs.wm.edu/~dcschmidt/PDF/work-stealing-dequeue.pdf)) | What are the owner push/pop and thief steal rules, and how is the last-item race resolved? Review sections 2-4 before specifying worker-local queues and external injection. | Algorithmic groundwork for the conditional work-stealing slice. The paper's dynamic arrays and buffer reclamation do not directly satisfy fixed upfront capacity. Specify overflow/admission, index exhaustion, buffer lifetime and injection behavior for a bounded adaptation. Pair it with the weak-memory paper below rather than translating historical pseudocode directly. |
+| Nhat Minh Lê, Antoniu Pop, Albert Cohen and Francesco Zappa Nardelli, **Correct and Efficient Work-Stealing for Weak Memory Models**, PPoPP 2013, pp. 69-80 ([DOI](https://doi.org/10.1145/2442516.2442524), [paper](https://www.di.ens.fr/~zappa/readings/ppopp13.pdf)) | Which publication operations, fences and competing access rules make a Chase-Lev deque correct on weakly ordered hardware? Review the ARM/POWER proof and portable C11 variant together with the original deque. | Required technical review before a concurrent deque implementation, particularly for the macOS ARM64 target. Map the algorithm to C++23 atomics and Ludus's numeric bounds explicitly; its proof does not automatically cover our bounded adaptation, external injection, wake protocol or graph lifetimes. Validate the resulting implementation with race tests and ARM64 execution. |
+| Robert D. Blumofe and Charles E. Leiserson, **Scheduling Multithreaded Computations by Work Stealing**, Journal of the ACM (JACM), 46(5), 1999, pp. 720-748 ([DOI](https://doi.org/10.1145/324133.324234), [paper](https://www.cs.utexas.edu/~venkatar/sys_perf_analysis/ws_theory.pdf)) | Is performance limited by total work, dependency span or scheduler overhead? Use the work/span model to interpret scaling before attributing a slow frame to the ready queue. | Foundational analysis for structured parallel computations. The bounds assume fully strict computations and the paper's scheduler model; they are not a guarantee for Ludus's arbitrary DAGs, cancellation policy or game-frame deadlines. Measure the actual critical path and owner-side merge cost. |
+
+Follow GDC's Programming material for engine integration, PPoPP for concurrent
+runtime correctness, SPAA for scheduling/data structures and instrumentation,
+TPDS for complete runtime designs, and JACM for underlying scheduling theory.
+Start with Block, Scheduler Augmentation and Taskflow. Read Chase-Lev and Lê et al.
+together when measurements justify worker-local queues; use Blumofe-Leiserson to
+interpret work and critical-path limits throughout that review.
+
+### Turning research into an improvement
+
+1. Identify a measured problem in the completed baseline: task granularity,
+   dependency span, queue contention, load imbalance, wake overhead or owner merge.
+   Prefer batching/decomposition changes when they address the problem directly.
+2. Read the relevant full source and record the exact sections, assumptions,
+   adopted idea and departures in this architecture owner. Specify publication,
+   lifetime, capacity and wake behavior before implementing concurrency changes.
+   Add attribution beside affected code when an idea is actually adopted.
+3. Implement one reviewable experiment while retaining the baseline and serial
+   oracle. Compare identical inputs/outputs and CPU budgets on representative
+   Linux/macOS hardware, including ARM64, and retain serial-web correctness.
+   Exercise reuse, failure, cancellation and draining under the applicable
+   sanitizer and allocation gates. Report frame tails and instrumentation cost
+   as well as batch throughput; publish regressions and inconclusive results.
+4. Adopt the change only with a repeatable benefit and preserved contracts. Record
+   results in the evidence owner and update API comments when contracts change.
+   Fibers, multiple graphs/priorities, browser pthreads, render ownership and NUMA
+   affinity still require the separate need/design decisions in the staged plan.

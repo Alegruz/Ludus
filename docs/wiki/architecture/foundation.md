@@ -41,6 +41,14 @@ inferred from that older design document. Start with the
 [current memory API](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/memory/include/ludus/foundation/memory/allocation_domain.hpp),
 then read the [memory design and its historical scope](../../architecture/memory-management.md).
 
+## Smart-pointer design and implementation status
+
+The [smart-pointer architecture](../../architecture/smart-pointers.md) records
+current `UniquePtr` repair work and proposed ownership APIs. Its
+[reference review](../../architecture/smart-pointers-reference-review.md) tracks
+the rationale and consulted sources. Proposed facilities become SDK APIs when
+their implementation and validation slices are complete.
+
 ## Background computation has an explicit fence
 
 The job kernel separates graph construction from execution:
@@ -62,7 +70,7 @@ execute jobs during `Wait`, so that call can run callbacks on its own thread.
 Select the documented helping policy deliberately. Completing CPU work does not
 prove GPU retirement or make concurrent world mutation safe.
 
-Read the [module API and example](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/threading/README.md)
+Read the [module API and example](../../modules/foundation/threading.md)
 and [task graph design](../../architecture/threading.md).
 Work stealing and engine consumer migration are later measured slices.
 

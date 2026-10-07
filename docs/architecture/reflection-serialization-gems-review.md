@@ -48,3 +48,33 @@ seriously: normal C++ storage, readable generated code, explicit identity,
 bounded staging, one shared scalar validator, and a copied projection into the
 already existing Editor ABI. The larger registry and persistence services remain
 separate, explicit future work.
+
+## Follow-up conference and journal reading
+
+Evaluate these resources after implementing and validating the
+[initial architecture](reflection-serialization.md#next-production-slices).
+This reading queue was selected from primary venue records, abstracts and
+available source material. The potential applications below are questions for
+that later technical review; implementation decisions and performance claims
+require evidence from Ludus's own consumers.
+
+Start with Kennedy, ESCHER and Walker, which address compatibility and authoring
+directly. Then use PADS and the codec/parser papers to evaluate extensions and
+optimizations. Preserve the existing Gems attribution when applying a new source.
+
+| Priority and source | Question to investigate in Ludus |
+| --- | --- |
+| First: Stephen Kennedy, **Robustification Through Introspection and Analysis Tools (Avoiding Developer Taxes)**, GDC 2012, Havok. [Venue record](https://gdcvault.com/play/1016002/Robustification-Through-Introspection-and-Analysis). | Can comparisons of schema snapshots turn the baseline check into actionable compatibility reports and migration requirements? Retain explicit IDs and the closed manifest generator; evaluate the metadata-comparison idea independently of the talk's modified Clang frontend. |
+| First: Marco Piccioni, Manuel Oriol and Bertrand Meyer, **Class Schema Evolution for Persistent Object-Oriented Software: Model, Empirical Study, and Automated Support**, *IEEE Transactions on Software Engineering* 39(2), February 2013. [DOI](https://doi.org/10.1109/TSE.2011.123), [author manuscript](https://arxiv.org/abs/1103.0711). | How should immutable version history, explicit transformation functions and post-conversion semantic invariants support our durable saves? Study the ESCHER model while adapting its exception-based failures to statuses and private candidates. Automatic structural changes cannot infer the owner's intended semantics. |
+| First: Jeremy Walker, **Reflection for Tools Development**, GDC Canada 2010, Ubisoft Vancouver. [Venue record](https://gdcvault.com/play/1013168/Reflection-for-Tools). | How can shared descriptions support reusable, game-specific authoring workflows as strings, containers and custom projections reach the inspector? Evaluate those workflows through our copied GameApi records and owner-controlled transactions. |
+| Next: Kathleen Fisher and Robert Gruber, **PADS: A Domain-Specific Language for Processing Ad Hoc Data**, PLDI 2005, pp.295–304. [DOI](https://doi.org/10.1145/1065010.1065046), [authors' project and paper links](https://kathleenfisher.org/research/pads/). | Which declarative description and generated diagnostic-metadata techniques help extend the closed schema manifest to bounded strings/containers and useful error paths? Any language extension needs a real consumer, explicit limits and review of its generated code. |
+| Next: Daniel Lemire and Francisco Geiman Thiesen, **Reflection-based JSON in C++ at Gigabytes per Second**, CppCon 2025. [Session account](https://devblogs.microsoft.com/cppblog/cppcon2025-trip-report/), [C++26 Reflection for JSON Serialization — A Practical Journey, slides](https://simdjson.github.io/simdjson_talks/cppcon2025/cppcon_2025_slides.html). | Would specialized generated codecs reduce repeated traversal or intermediate scalar snapshots under the same validation and evolution semantics? Compare against our C++23 implementation; investigate standard reflection separately when both supported toolchains can use it. |
+| Next: Geoff Langdale and Daniel Lemire, **Parsing Gigabytes of JSON per Second**, *The VLDB Journal* 28, 2019, pp.941–960. [DOI and publisher record](https://doi.org/10.1007/s00778-019-00578-5), [author manuscript](https://arxiv.org/abs/1902.08318). | Which parsing and SIMD techniques improve the actual bounded authored documents? Measure native and Wasm paths with complete validation, exact integer handling, workspace limits and allocation-failure behavior. |
+| Focused follow-up: Daniel Lemire, **Number Parsing at a Gigabyte per Second**, *Software: Practice and Experience* 51(8), 2021, pp.1700–1727. [DOI](https://doi.org/10.1002/spe.2984), [author manuscript](https://arxiv.org/abs/2101.11408). | Can decimal-to-floating-point conversion improve while retaining the scalar codec's width, bounds, finite-value and fixture contracts? Review rounding correctness as well as throughput. |
+| Conditional networking follow-up: Deepthi Raghavan et al., **Cornflakes: Zero-Copy Serialization for Microsecond-Scale Networking**, SOSP 2023. [DOI](https://doi.org/10.1145/3600006.3613137), [author paper](https://www.microsoft.com/en-us/research/wp-content/uploads/2023/09/cornflakes-sosp23.pdf). | If network serialization becomes a measured bottleneck, when do copies outperform scatter/gather bookkeeping? The paper's datacenter NIC workloads need separate evaluation before applying its techniques to game networking, durable saves or browser targets. |
+
+Record accepted ideas, significant departures and rejected alternatives in this
+review. Put concise attribution beside materially affected code and keep the
+detailed contracts in the [architecture owner](reflection-serialization.md).
+The later improvement phase uses the initial implementation as its comparison
+baseline and retains its compatibility fixtures and failure tests.

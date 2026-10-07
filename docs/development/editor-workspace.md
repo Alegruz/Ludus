@@ -1,4 +1,4 @@
-# Ludus Editor workspace (E0) — usage and troubleshooting
+# Native editor workspace and troubleshooting
 
 The editor is an **optional, OFF-by-default** native developer tool
 (`apps/editor`, target `ludus_editor`). It opens a project descriptor, edits its
@@ -13,6 +13,24 @@ See the specification package for the authoritative contract:
 [editor architecture](../architecture/editor-architecture.md) and
 [interaction design](../architecture/editor-interaction-design.md) define S1
 and subsequent authoring stages.
+
+## Work areas and document ownership
+
+| Surface | Purpose |
+| --- | --- |
+| Welcome | New/Open and recent projects while no project is open |
+| Project settings | Project name, provider, source directory, preset, target and arguments |
+| Audio | Content selection, definitions, save and preview |
+| Configuration | Independent offline configuration preview and preference editing |
+| Live Inspector | Copied runtime state and supported live property operations |
+| Output | Selectable build/tool/runtime diagnostics |
+
+The Configuration workspace retains its explicitly loaded preview/draft across
+project changes. Quitting prompts for unsaved preferences. Project settings,
+audio definitions, offline preferences and live values have separate save owners.
+Applying to a session does not save a file; copying a live value to a tuning draft
+requires a separate save. See [configuration](../wiki/guides/configuration.md)
+and [native live editing](project-live-reload.md).
 
 ## Prerequisites (optional editor setup)
 
@@ -36,7 +54,8 @@ To manage Qt yourself, install it once (names vary by distribution) and use
 - Fedora/Amazon Linux: `sudo dnf install -y qt6-qtbase-devel qt6-qtwayland`
 
 Only the editor configure/build uses Qt. A default configure
-(`LUDUS_BUILD_EDITOR=OFF`) and all browser builds never search for Qt.
+(`LUDUS_BUILD_EDITOR=OFF`) and default engine browser builds never search for Qt. The separate
+[browser editor build](browser-editor.md) explicitly prepares WebAssembly Qt.
 
 ## Build the editor (Editor ON)
 
@@ -52,9 +71,9 @@ cmake --preset linux-clang-development -DLUDUS_USE_INIT_OPTIONS=OFF -DLUDUS_BUIL
 cmake --build --preset linux-clang-development --target ludus_editor
 ```
 
-`LUDUS_BUILD_EDITOR=ON` on an unsupported host (non-Linux, non-x64, or the
-browser toolchain) fails configuration with a specific message rather than
-producing a broken build.
+Native `LUDUS_BUILD_EDITOR=ON` requires Linux x64. Browser editor builds use
+the separate pinned Qt WebAssembly toolchain; ordinary browser engine setup does
+not enable the editor. Unsupported native hosts fail configuration explicitly.
 
 ## Launch
 
@@ -276,9 +295,8 @@ job/PID details available through Copy Job Details.
 An operation holds a cooperative, nonblocking lock on its build tree for the
 whole configure/build/run (including runtime ownership). A second editor
 instance targeting the same build tree gets a `Busy` result rather than racing
-it. This lock is cooperative: an independent CLI build against the same tree
-does not honor it, which is why concurrently modifying one build tree from two
-tools is unsupported (see Known limitations).
+it. The installed Ludus CLI shares this cooperative lock. Direct CMake or unrelated
+build tools bypass it; avoid modifying the same build tree concurrently.
 
 ## Copy Job Details
 
@@ -298,11 +316,13 @@ This first milestone does **not** promise:
 - recovery from a `SIGKILL` of the supervisor itself or machine loss;
 - power-loss durability on every filesystem (atomic replacement is not a
   durability guarantee);
-- coordination with independent CLI builds against the same build tree (the
-  per-tree lock is cooperative; external CLI invocations do not honor it);
+- coordination with direct CMake or unrelated build tools that bypass the shared
+  Editor/Ludus CLI cooperative lock;
 - that "Running" proves the game rendered a frame; it means the process started.
 
-Windows/macOS process backends and a browser editor are out of scope for E0.
+Windows/macOS native process backends remain outside this guide. The
+[browser editor](../wiki/guides/browser-editor.md) provides a bounded document
+preview through separate browser adapters.
 
 
 ## Debug a native game
@@ -323,13 +343,14 @@ for setup, session files and compatibility acceptance.
 
 ## Workspace layout (S1)
 
-![Default workspace captured from Qt at 1100×760](images/editor-workspace-default.png)
+![Historical S1 workspace captured from Qt at 1100×760](images/editor-workspace-default.png)
 
-This offscreen capture shows the default empty-project layout; it is presentation
-evidence, not native interaction or game-frame acceptance.
+This historical S1 offscreen capture predates the Welcome/recent-project changes.
+It records presentation at that stage; use the work-area table above for current
+layout roles. It does not establish native interaction or game-frame acceptance.
 
-Project settings and Audio occupy central tabs. Recent Projects, Live Inspector,
-and Output are movable panels; the status bar reports current workspace state.
+Project settings, Audio and Configuration occupy central work areas. Recents
+appear on Welcome and in the File menu; Live Inspector and Output are movable panels; the status bar reports current workspace state.
 The Game toolbar exposes the existing build/debug and Play controls. Toolbar
 and menu actions share controller capability gating. Project settings and Audio
 scroll when available space is small. Ctrl+S continues to save the project

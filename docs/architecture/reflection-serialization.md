@@ -192,6 +192,10 @@ snapshot is preferable to per-field locks.
 
 ## Next production slices
 
+Complete the initial architecture through the following owner-backed slices.
+The scalar implementation above is the starting point; each remaining slice
+needs a real consumer and acceptance evidence before it is considered complete.
+
 1. Add a real string/container consumer with owned fallible candidates, semantic
    owner validation, diagnostic paths, and a measured memory budget.
 2. Add schema history and migrations around a real durable-save consumer. Specify
@@ -201,15 +205,48 @@ snapshot is preferable to per-field locks.
    two-pass creation/linking. Persist authored/resource IDs in their own domains,
    remap saved entities to newly constructed entities, reject ownership cycles
    and arbitrary interior pointers, and publish the world transactionally.
-4. Add cooked subsystem formats for bulk loading only after profiling proves
-   the need. Authored JSON, durable saves, network snapshots, and cooked resource
-   layouts share schema meaning but need different codec and evolution policies.
+4. Generalize the existing editor transaction to multiple objects and containers,
+   using the stable identities and publication rules in
+   [Editor transaction](#editor-transaction). Add undo/redo through that same
+   prepare/commit path, with owned canonical before/after values.
 
 For graph loads, parse and migrate into private storage; discover all record
 identities; allocate candidates; type-check and fix references; validate semantic
 invariants; stage resources; publish at a safe point; retire the old world. Any
 failure leaves the active world usable. Resource acquisition and external I/O
 are owner responsibilities, never field callbacks during decoding.
+
+Each slice must preserve the exception-free failure and publication contracts,
+document its public API and owner workflow, and add the relevant malformed-input,
+allocation-failure, compatibility and lifetime tests. Validate generated bindings
+through the installed SDK and supported native/browser targets. Complete the
+public API documentation gaps and record the baseline measurements specified in
+[Performance and verification](#performance-and-verification) as part of this
+initial implementation work.
+
+Dynamic schema/plugin registration requires a concrete discovery consumer and
+module-generation leases. Cooked subsystem formats require profiling evidence
+for bulk loading. Inspector categories/custom controls and cached/direct codecs
+require a concrete usability need or measured benefit. These remain conditional
+extensions. Authored JSON, durable saves, network snapshots, and cooked resource
+layouts share schema meaning but need different codec and evolution policies.
+
+## Research after initial implementation
+
+Implement and validate the initial architecture above before undertaking the
+[conference and journal follow-up](reflection-serialization-gems-review.md#follow-up-conference-and-journal-reading).
+Start that later review with Kennedy's compatibility tooling, the ESCHER schema
+evolution paper, and Walker's authoring-tools talk. Then investigate generated
+codec and parser improvements against the implemented consumers and measured
+baseline.
+
+For each proposed improvement, record the source and relevant section, the
+concrete problem in Ludus, the change being evaluated, compatibility/lifetime
+implications, and comparative evidence. Keep explicit persistent identities,
+historical defaults, bounded owned staging, semantic owner validation, and
+safe-point publication as acceptance criteria. C++26 reflection is a future
+implementation option subject to native and web toolchain support. Performance
+results from another workload do not establish a gain for Ludus.
 
 ## Performance and verification
 

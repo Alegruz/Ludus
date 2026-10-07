@@ -26,8 +26,8 @@
 | GameHost | Runtime host for supported game-module and Play workflows |
 | S1 / S2 | Editor milestone names: workspace shell, then document interactions/undo |
 
-Continue with [architecture](architecture.md), [project setup](../guides/project-setup.md)
-or [the editor workspace](../guides/editor.md).
+Continue with [architecture](architecture.md), [project setup](../../development/project-sdk-workflow.md)
+or [the editor workspace](../../development/editor-workspace.md).
 
 For ownership, byte/text boundaries and hash policies, see [strings](../guides/strings.md)
 and [hashing](../guides/hashing.md).

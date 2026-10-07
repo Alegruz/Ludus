@@ -26,7 +26,10 @@ inactive flags stay undefined. New numeric selectors allow comparisons under
 `-Wundef` without migrating every consumer.
 
 Classifying a target is separate from shipping its engine backend. Linux/Clang 18
-and pinned Emscripten remain the validated engine builds. Detection of another
+is the native reference environment, and browser builds use pinned Emscripten.
+The subsequent [macOS Platform slice](macos-platform.md) supplies a Cocoa backend;
+FoundationBase also has a macOS Clang backend. Those module implementations do
+not establish support for every macOS engine workflow. Detection of another
 target does not bypass CMake's existing backend restrictions. Unknown targets fail
 at the detection boundary with a specific diagnostic instead of silently selecting
 a desktop/null implementation. Do not permit command-line overrides of detected
@@ -145,8 +148,8 @@ Platform `config.h` owns backend checks. Public code may include it without a
 selected backend; the owning implementation must select one. More than one
 backend, a selected flag other than 1, or an incompatible target/backend pair is
 an error. Wayland/X11 require desktop Linux; the canvas backend requires
-Emscripten; the native headless backend excludes Emscripten. X11 remains an
-existing reserved flag rather than a new implemented backend. Backend selection
+Emscripten; Cocoa requires macOS; the native headless backend excludes Emscripten.
+X11 remains an existing reserved flag rather than a new implemented backend. Backend selection
 stays private in CMake. Neither a compiled Wayland backend nor Linux detection
 proves that a compositor is reachable. Likewise, Emscripten can run under Node;
 the compatibility name `WEB` is not a claim about browser DOM availability.
@@ -212,6 +215,92 @@ add actual backend source selection and SDK/runtime tests as a separate measured
 step. When adding a runtime feature, test query failure and fallback as well as
 the success case. Console-specific SDK facts belong behind a reviewed private
 adapter; this public design makes no assumptions about confidential SDK macros.
+
+## Initial implementation completion gate
+
+Recorded 2026-10-06. The compiler-owned detection boundary is implemented:
+numeric selectors, active-only compatibility flags, pointer width and byte order,
+compiler feature queries, the opt-in constexpr descriptor, Platform backend
+checks, CMake's exported expected-target-OS guard, startup diagnostics and
+positive/negative cross-target compile tests are present. This is an audit of
+the existing implementation, not a claim that every recognized target has a
+validated engine port.
+
+Complete the following work before starting the broader research pass. This
+page owns the completion checklist and its evidence; update each entry when
+the linked implementation and validation are delivered.
+
+- [ ] Make the [compile-test harness](../../tests/build_contract/verify_target_detection.py) independent of the build host's default SDK/sysroot. On the audited macOS Clang 18.1.8 installation, four Apple mobile cases fail with an incompatible macOS sysroot before reaching the intended checks; all 76 cases pass with an explicitly neutral sysroot. Add regression coverage for host SDK defaults while retaining the macro-only Apple fixture and intended negative diagnostics.
+- [ ] Extend the same harness's raw-classification guard to first-party Objective-C++ `.mm` implementation files. Preserve the foundational detection boundary and test the guard's rejection behavior.
+- [ ] Extend the [installed SDK consumer](../../tests/sdk_consumer/main.cpp) to validate the intended native target without hardcoding Linux. Exercise the exported target guard and typed descriptor for Linux and the implemented macOS FoundationBase slice; keep module/SDK validation distinct from a complete engine port.
+- [ ] Add declaration-adjacent Doxygen contracts for the public detection API in [target.hpp](../../modules/foundation/base/include/ludus/foundation/base/target.hpp), including enums, values, descriptor fields, `kTarget` and name helpers. Remove only the resolved entries from `docs/api-undocumented.json` and run the [API reference gates](../development/api-reference.md).
+- [ ] Reconcile the detection design, ADR and [target usage guide](../wiki/guides/platform-targets.md) with the macOS FoundationBase/Cocoa additions. Preserve the distinction between recognition, implemented modules, validated workflows and live capabilities.
+
+Close this gate with reproducible warning-clean builds, FoundationBase and
+build-contract tests, format/tidy, sanitizer, header/include-boundary and
+build-time-budget checks using the pinned tools. Include installed native SDK
+consumer checks and the pinned Emscripten FoundationBase probe. Documentation
+changes also pass the canonical-source, strict MkDocs and generated API checks.
+Record the revision, commands, toolchain versions, tested hosts/targets and
+remaining validation limits as the baseline for later comparisons.
+
+Additional engine ports, native GCC/MSVC toolchain support and Emscripten memory64
+deployment are separately scoped work. The initial completion gate does not
+require speculative CPU probing; runtime dispatch still needs its first concrete
+consumer and multiple implementations as described above.
+
+## Conference and journal research backlog
+
+Finish and validate the initial implementation completion gate first. Preserve
+its revision and measurements, then review the sources below and trial promising
+ideas against that baseline. Required compiler, target SDK and backend
+specification checks remain part of the initial implementation.
+
+The venue/session metadata, abstracts and LLVM slides were screened when these
+resources were recommended. Full reviews and experiments remain queued. The
+questions below are proposed Ludus experiments, not claims that these sources
+have already informed the implementation. Keep the completed Gems review above
+as the record of sources actually adopted.
+
+### Initial reading queue
+
+| ID | Source and attribution | Status | Question and possible experiment after review |
+| --- | --- | --- | --- |
+| PD-R01 | Peter Smith, **How to cross-compile with LLVM based tools**, FOSDEM 2018, LLVM Toolchain devroom. [Session, slides and recording](https://archive.fosdem.org/2018/schedule/event/crosscompile/) | Queued; session description screened | How can we make target/toolchain inputs reproducible? Compare compile probes and installed-consumer builds across hosts with explicit target SDKs and deliberately mismatched host defaults. |
+| PD-R02 | Alex Bradbury, **Lessons learned from leveling up RISC-V LLVM testing**, EuroLLVM 2025. [Slides](https://llvm.org/devmtg/2025-04/slides/quick_talk/bradbury_lessons_learned.pdf); [programme and recording](https://llvm.org/devmtg/2025-04/) | Queued; abstract/slides screened | Which cross-build, emulation and real-target checks provide useful coverage at an acceptable CI cost? Trial a reproducible target-validation job and compare fault detection, local reproduction and elapsed time. |
+| PD-R03 | D. Richard Kuhn, Dolores R. Wallace and Albert M. Gallo Jr., **Software Fault Interactions and Implications for Software Testing**, *IEEE Transactions on Software Engineering* 30(6), pp. 418-421, 2004. [Authoring-organization record](https://csrc.nist.gov/pubs/journal/2004/06/software-fault-interactions-and-implications-for-s/final); [DOI](https://doi.org/10.1109/TSE.2004.24) | Queued; abstract screened | Would a constrained interaction matrix improve coverage of target, frontend/ABI, flavor and backend combinations? Compare it with the baseline cases using seeded classification/configuration faults; retain explicit rejection tests and do not equate limited interaction coverage with exhaustive correctness. |
+| PD-R04 | Xuejun Yang, Yang Chen, Eric Eide and John Regehr, **Finding and Understanding Bugs in C Compilers**, PLDI 2011, pp. 283-294. [Author-hosted paper](https://users.cs.utah.edu/~regehr/papers/pldi11-preprint.pdf); [DOI](https://doi.org/10.1145/1993498.1993532) | Queued; abstract screened | Can differential probes reveal gaps hidden by synthetic frontend tests? When adding real compiler support, compare normalized target facts and codegen-helper behavior across the applicable real frontends, with valid inputs and an explicit expected-result oracle. |
+| PD-R05 | Jonathan Protzenko et al., **EverCrypt: A Fast, Verified, Cross-Platform Cryptographic Provider**, IEEE Symposium on Security and Privacy, 2020. [Author publication page](https://www.microsoft.com/en-us/research/publication/evercrypt-a-fast-veri%EF%AC%81ed-cross-platform-cryptographic-provider/) | Queued; abstract/project description screened | When a CPU/math consumer needs dispatch, which implementation-selection contracts transfer to Ludus? Trial baseline and accelerated implementations behind one API; check runtime CPU/OS eligibility, query failure, fallback, identical results and dispatch cost. This does not add cryptography to the detection layer. |
+| PD-R06 | Joel Falcou, **Designing C++ portable SIMD support**, CppCon 2016. [Conference recording](https://www.youtube.com/watch?v=2HsLsTRxfbA) | Queued; talk description screened | Which SIMD abstraction boundaries fit a concrete math consumer? Compare portable and target-specific implementations for correctness, measured performance, header parse cost and build size. Treat the historical library proposal as a design reference, not an approved dependency. |
+
+Search FOSDEM's LLVM track and LLVM Developers' Meetings first for target,
+driver, SDK and testing topics. Search IEEE Transactions on Software Engineering
+and PLDI for configuration coverage and validation methods. Screen CppCon and
+the EverCrypt paper when a concrete runtime-dispatch consumer exists. These are
+historical resources and topic priorities, not an upcoming conference schedule.
+
+### Review and trial records
+
+For each source, record the review date and exact sections/pages or recording
+timestamps consulted, assumptions and limitations, the affected module, and a
+testable hypothesis. Distinguish design inspiration from adapted code. Extend
+the queue with attributed primary sources and the date/scope of each archive
+search; metadata screening alone does not complete a review.
+
+Use **Queued**, **Reading**, **Reviewed**, **Trial planned**, **Trial complete**,
+**Adopted**, **Deferred**, or **Rejected**. A trial records its baseline revision,
+commands, hosts/targets, SDK/compiler versions, workloads and test/PR links.
+Measure the relevant result: detected regressions and false positives, test
+duration, reproducibility, header parse time, binary size, allocations or runtime
+dispatch cost. Exercise failure and fallback paths alongside successful cases.
+Keep generated results in ignored `out/`.
+
+Retain an adopt/defer/reject decision with its evidence. Adopt an improvement
+only after its tests and measurements justify it; update the owning design/ADR
+and acknowledge the consulted source near any affected implementation. Preserve
+the macro-only foundational boundary, active-only flag compatibility,
+exception-free engine behavior and subsystem ownership of runtime capabilities.
+No queued source has a completed trial or adoption record yet.
 
 ## Primary toolchain references
 

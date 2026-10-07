@@ -107,7 +107,7 @@ Run `python3 -m unittest discover -s scripts/python -p 'test_ludus*.py' -v` with
 the pinned tools on PATH. Release tests compile real native executables, exercise
 CMake installation, corruption/failure cases and clean-extraction execution.
 They use a small fixture SDK to avoid graphics dependencies and do not establish
-relocation or license closure for a full production SDK. Full SDK acceptance,
-Real hosted gameplay needs its own evidence. The transport is tested with
+relocation or license closure for a full production SDK. Full SDK acceptance and
+real hosted gameplay need their own evidence. The transport is tested with
 isolated stubs; no live-account upload is part of local validation. See the
 [evidence ledger](game-packaging-publishing-evidence.md).

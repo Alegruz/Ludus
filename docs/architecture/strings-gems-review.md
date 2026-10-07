@@ -245,6 +245,70 @@ must be pinned when implemented, rather than silently following latest URLs.
 | [Abseil Cord](https://github.com/abseil/abseil-cpp/blob/master/absl/strings/cord.h) | Keep chunked text structures optional for consumers that benefit from them |
 | [C++ declaration rules](https://eel.is/c++draft/dcl.constexpr) | Distinguish immediate literal evaluation from potentially runtime constexpr calls |
 
+## Conference and journal research backlog
+
+Recorded 2026-10-06. Finish and validate the
+[initial strings architecture](strings.md#research-after-the-initial-architecture)
+first, record its revision and representative workload baseline, then use these
+resources to investigate improvements. This queue does not add an implementation
+dependency or replace the current ownership, failure, identity, or persistence
+contracts.
+
+The recommendations were screened from primary publication metadata, abstracts,
+and conference session descriptions. Full papers/talks remain **Queued**;
+this section makes no claim that they have been fully reviewed, their techniques
+adopted, or their reported results reproduced in Ludus. The questions below are
+our proposed experiments, not conclusions from the existing Gems review.
+
+### Venues and topics
+
+| Venue | Priority after baseline | Topic and Ludus relevance |
+| --- | --- | --- |
+| Information Systems and the International Symposium on Experimental Algorithms (SEA) | First | Static string dictionaries, front coding, tries, and measured storage/lookup tradeoffs; inform cooked dictionary alternatives |
+| CppCon | First | C++ string representation, terminators, allocation behavior, and cache-conscious hash-table design; inform owner-layout and intern-table trials |
+| Software: Practice and Experience and the International Symposium on String Processing and Information Retrieval (SPIRE) | First for text boundaries | UTF-8 validation and UTF-8/UTF-16 conversion; inform scalar/SIMD comparisons on short names and large imports |
+| VLDB, Proceedings of the VLDB Endowment (PVLDB), and The VLDB Journal | After an uncompressed dictionary baseline | String compression, random access, footprint, and decoding cost; evaluate compression for large cooked dictionaries |
+| SIGIR, the Workshop on Algorithm Engineering and Experiments (ALENEX), and ACM Journal of Experimental Algorithmics | Selective | Minimal perfect hashing, compact indexes, and reproducible algorithm comparisons; evaluate lookup for fixed symbol sets |
+
+These are archive-search priorities, not an upcoming conference schedule.
+Venue names identify where to search; the attributed primary sources below
+provide concrete entry points. Search wider topic shortlists after the first
+readings when a measured Ludus workload exposes a relevant problem.
+
+### Initial reading queue
+
+Begin with SR-01 through SR-03 after the baseline is validated; prioritize the
+remaining readings according to measured dictionary and text-boundary costs.
+
+| ID | Source and attribution | Full-review status | Ludus question and possible trial after review |
+| --- | --- | --- | --- |
+| SR-01 | Miguel A. Martínez-Prieto, Nieves R. Brisaboa, Rodrigo Cánovas, Francisco Claude, and Gonzalo Navarro, **Practical compressed string dictionaries**, *Information Systems* 56, pp. 73–108, 2016. [Publisher](https://www.sciencedirect.com/science/article/pii/S0306437915001672); [DOI](https://doi.org/10.1016/j.is.2015.08.008). Extends work presented at SEA 2011 | Queued; metadata/abstract screened | Which representation fits our exact lookup and index-to-spelling operations? Compare the initial offset/length blob against selected front-coded or trie alternatives on real symbol/path dictionaries; measure lookup, extraction, build time, and total footprint |
+| SR-02 | Nicholas Ormrod, **The strange details of std::string at Facebook**, CppCon 2016, Facebook. [Official recording](https://www.youtube.com/watch?v=kPR8h4-qZdk) | Queued; session description screened | Which object-size, inline-capacity, terminator, and growth tradeoffs matter for Ludus? Compare the proposed 32/40/48-byte owner candidates on observed length/mutation distributions while preserving the move-only and fallible-copy contracts |
+| SR-03 | Matt Kulukundis, **Designing a Fast, Efficient, Cache-friendly Hash Table, Step by Step**, CppCon 2017, Google. [Official recording](https://www.youtube.com/watch?v=ncHmEUmJZf4) | Queued; session description screened | Does control-byte/group probing improve our intern tables? Compare it with current linear probing across hits/misses, load factors, common prefixes, cold caches, growth peaks, and forced collisions; retain full-byte equality |
+| SR-04 | John Keiser and Daniel Lemire, **Validating UTF-8 In Less Than One Instruction Per Byte**, *Software: Practice and Experience* 51, issue 5, 2021. [Author publication page and paper](https://lemire.me/en/publication/arxiv2010.03090/); [DOI](https://doi.org/10.1002/spe.2920) | Queued; metadata/abstract screened | When does SIMD beat the scalar validator on our inputs? Compare short engine names and large imports, retaining invalid-byte diagnostics and testing truncated/page-boundary tails |
+| SR-05 | Daniel Lemire and Wojciech Muła, **Transcoding Billions of Unicode Characters per Second with SIMD Instructions**, *Software: Practice and Experience* 52, issue 2, 2022. [Author publication page and paper](https://lemire.me/en/publication/arxiv210910433/) | Queued; metadata/abstract screened | Which conversion path fits native text boundaries? Compare validation plus UTF-8/UTF-16 conversion, checked destination sizing, malformed-input behavior, caller-owned buffers, and dispatch overhead |
+| SR-06 | Peter Boncz, Thomas Neumann, and Viktor Leis, **FSST: Fast Random Access String Compression**, *Proceedings of the VLDB Endowment* 13, issue 12, pp. 2649–2661, VLDB 2020. [Paper](https://vldb.org/pvldb/vol13/p2649-boncz.pdf); [DOI](https://doi.org/10.14778/3407790.3407851) | Queued; metadata/abstract screened | Can individual-string compression save enough cooked memory to justify decoding? Compare against the uncompressed deduplicated blob, including dictionary metadata, caller scratch, selective reads, and retained/peak memory. Decoded text needs an explicit owner and cannot inherit zero-copy borrowed-view guarantees |
+| SR-07 | Giulio Ermanno Pibiri and Roberto Trani, **PTHash: Revisiting FCH Minimal Perfect Hashing**, SIGIR 2021. [Author paper](https://arxiv.org/abs/2104.10402); [DOI](https://doi.org/10.1145/3404835.3462849) | Queued; metadata/abstract screened | Is a generated index useful for a closed symbol set? Compare build time/peak memory, index size, and exact lookup against the frozen-table baseline. Validate membership by spelling, preserve deterministic persisted record indices through explicit remapping, and measure unknown-key queries |
+
+### Review and trial record
+
+For each full review, record the source/version, sections or talk timestamps
+actually consulted, relevant assumptions, adopted/adapted/rejected ideas, and
+an experiment tied to a concrete consumer. Preserve source attribution beside
+any resulting implementation and link back here for the detailed review.
+
+Use **Queued**, **Reading**, **Reviewed**, **Trial planned**, **Trial complete**,
+**Adopted**, **Deferred**, or **Rejected** as explicit statuses. A screened
+abstract is not a full review, and a paper's speedup is not a Ludus result.
+Keep full-review findings here; keep API/system contracts in the
+[architecture](strings.md) and public declarations.
+
+Trial one change at a time against the recorded baseline using the
+[measurement requirements](strings.md#measurements-that-choose-defaults).
+Report correctness and failure-path results alongside latency distributions,
+allocations, retained/peak bytes, and binary/header cost on supported profiles.
+Record the decision even when a promising technique is deferred or rejected.
+
 ## Evidence limits
 
 No local performance experiments compare the proposed owners, hash algorithms,

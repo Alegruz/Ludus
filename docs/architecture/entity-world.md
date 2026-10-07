@@ -1,7 +1,7 @@
 # Entities and component storage
 
 Status: Baseline implemented. Part of the [game world architecture](game-world.md).
-See [the reference guide](../../apps/world_demo/README.md) for the concrete API,
+See [the reference guide](../examples/world-demo.md) for the concrete API,
 bounds and policies; conditional extensions in this document remain proposed.
 
 An entity is identity. Its state lives in explicitly named component pools owned

@@ -63,5 +63,5 @@ concurrent structural world mutation. Retain input/output storage through
 completion, then merge valid results in stable order at an explicit tick boundary.
 
 Read [frame/tick policy](../../architecture/frame-update.md),
-[the reference application](https://github.com/Alegruz/Ludus/blob/main/apps/world_demo/README.md)
+[the reference application](../../examples/world-demo.md)
 and [the game-world design](../../architecture/game-world.md).
