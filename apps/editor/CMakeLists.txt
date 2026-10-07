@@ -69,6 +69,11 @@ qt_add_executable(ludus_editor
     src/internal/main_window.h
     src/internal/audio_workspace.h
     src/internal/audio_preview.h
+    src/internal/content_browser.h
+    src/content_catalog_model.cpp
+    src/content_import.cpp
+    src/content_jobs.cpp
+    src/content_workspace.cpp
     src/internal/script_workspace.h
     src/script_workspace.cpp
     src/configuration_workspace.cpp
@@ -116,6 +121,11 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         src/internal/main_window.h
         src/internal/audio_workspace.h
         src/internal/audio_preview.h
+        src/internal/content_browser.h
+        src/content_catalog_model.cpp
+        src/content_import.cpp
+        src/content_jobs.cpp
+        src/content_workspace.cpp
         src/internal/script_workspace.h
     src/script_workspace.cpp
         src/configuration_workspace.cpp
@@ -133,6 +143,8 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         tests/controller_tests.cpp
         tests/document_history_tests.cpp
         tests/document_interaction_tests.cpp
+        tests/content_import_gate_tests.cpp
+        tests/content_browser_tests.cpp
         tests/project_setup_dialog_tests.cpp
         tests/project_lifecycle_tests.cpp
         tests/workspace_layout_tests.cpp

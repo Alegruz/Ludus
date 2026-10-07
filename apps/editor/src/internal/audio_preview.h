@@ -10,6 +10,8 @@
 
 namespace ludus::editor
 {
+struct ContentImportSource;
+
 class AudioPreview final : public QObject
 {
     Q_OBJECT
@@ -18,7 +20,7 @@ public:
     ~AudioPreview() override;
     void Play(const QString& root, const audio::content::Sound& sound);
     void Play(const QString& root, const audio::content::Music& music);
-    void Import(const QString& root, const QString& file, const QString& id);
+    void Import(const ContentImportSource& source);
     void Stop();
     void Shutdown();
     [[nodiscard]] bool Reset();
