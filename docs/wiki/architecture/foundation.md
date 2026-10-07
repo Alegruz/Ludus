@@ -41,6 +41,14 @@ inferred from that older design document. Start with the
 [current memory API](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/memory/include/ludus/foundation/memory/allocation_domain.hpp),
 then read the [memory design and its historical scope](../../architecture/memory-management.md).
 
+## Smart-pointer design and implementation status
+
+The [smart-pointer architecture](../../architecture/smart-pointers.md) records
+current `UniquePtr` repair work and proposed ownership APIs. Its
+[reference review](../../architecture/smart-pointers-reference-review.md) tracks
+the rationale and consulted sources. Proposed facilities become SDK APIs when
+their implementation and validation slices are complete.
+
 ## Background computation has an explicit fence
 
 The job kernel separates graph construction from execution:
