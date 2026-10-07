@@ -122,11 +122,17 @@ def create_project(
     if itch_target is not None and not release:
         raise ToolingError(INVALID_PROJECT, "--itch-target requires --release")
     if release:
-        if preset.startswith("macos-"):
-            raise ToolingError(INVALID_PROJECT, "macOS release packaging is not implemented; create without --release")
         from .release_template import release_files
 
-        rendered.extend(release_files(target, itch_target))
+        platform = "linux-x64"
+        if preset.startswith("macos-"):
+            from .native import target_for_profile
+            triple = local_identity.target_triple if local_identity else target_for_profile(preset)
+            platforms = {"arm64-apple-darwin": "macos-arm64", "x86_64-apple-darwin": "macos-x64"}
+            if triple not in platforms:
+                raise ToolingError(INVALID_PROJECT, "macOS release creation requires a macOS SDK")
+            platform = platforms[triple]
+        rendered.extend(release_files(target, itch_target, platform=platform))
         for file in rendered:
             if file.relpath == "CMakeLists.txt":
                 file.content += '\ninclude(cmake/GameRelease.cmake)\n'

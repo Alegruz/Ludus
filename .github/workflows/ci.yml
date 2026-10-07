@@ -89,6 +89,16 @@ jobs:
           out/project-tooling-venv/bin/python -m pip install --no-deps ./scripts/python
           PATH="$PWD/out/host-tools/venv/bin:$PWD/out/host-tools/bin:$PATH" PYTHONPATH=scripts/python out/host-tools/venv/bin/python -m unittest test_project_setup test_macos_project_tooling test_creation_engine test_ludus_tools test_ludus_project_ops test_ludus_cli -v
           out/host-tools/venv/bin/python tests/sdk_consumer/verify_macos_project_tooling.py --sdk "$PWD/out/install/macos-clang-development" --tools "$PWD" --cli "$PWD/out/project-tooling-venv/bin/ludus"
+      - name: Verify signed macOS game release packages
+        env:
+          QT_QPA_PLATFORM: cocoa
+        run: |
+          ./init.sh --cli --preset macos-clang-release --preset-only --locked --no-system-install
+          out/host-tools/venv/bin/cmake --preset macos-clang-release -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
+          ./scripts/install-sdk macos-clang-release
+          PATH="$PWD/out/host-tools/venv/bin:$PWD/out/host-tools/bin:$PATH" PYTHONPATH=scripts/python out/host-tools/venv/bin/python -m unittest test_macos_release test_ludus_release test_ludus_itch_release -v
+          out/host-tools/venv/bin/python tests/sdk_consumer/verify_macos_release.py --sdk "$PWD/out/install/macos-clang-release" --tools "$PWD" --cli "$PWD/out/project-tooling-venv/bin/ludus"
+          LUDUS_SETUP_TEST_SDK="$PWD/out/install/macos-clang-development" LUDUS_RELEASE_TEST_SDK="$PWD/out/install/macos-clang-release" out/build/macos-clang-development/apps/editor/ludus_editor_tests '[.macos-release-journey]'
       - name: Verify native Cocoa Editor project lifecycle
         env:
           QT_QPA_PLATFORM: cocoa

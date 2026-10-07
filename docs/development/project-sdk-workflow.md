@@ -143,9 +143,10 @@ add the matching project-owned CMake preset (or hidden base), then run repair
 with the macOS SDK. Repair does not rewrite tracked project intent. Legacy
 version-1 projects still use the original Linux schema until explicit migration.
 
-The native Qt Editor, macOS game release packaging/signing, universal binaries,
-and native Intel acceptance are separate follow-ups. The shared descriptor
-readers accept the macOS v2 profiles; that does not enable the native Editor.
+The [native Qt Editor](editor-workspace.md) supports macOS project workflows.
+[macOS release packaging](game-packaging-publishing.md#macos-app-packages) creates
+and verifies local ad-hoc signed game apps. Universal binaries, Developer ID
+signing/notarization and native Intel acceptance remain separate follow-ups.
 
 ## Configure, build, run
 

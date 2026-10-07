@@ -205,6 +205,7 @@ endif()
         "rhs": "Darwin"
       },
       "cacheVariables": {
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "14.0",
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_PREFIX_PATH": "$env{LUDUS_SDK_PREFIX}",
         "CMAKE_CXX_COMPILER": "clang++",

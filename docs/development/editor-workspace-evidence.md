@@ -251,8 +251,9 @@ missing-setup diagnosis and repeated repair; ordinary offscreen tests remain a
 separate check. Darwin process regressions exercise non-reaping exit observation,
 descendant cleanup, cancellation, bounded output and uncertain ownership.
 See [current usage and limitations](editor-workspace.md#macos-validation).
-Live generation publication, RAD debugging and release packaging/signing remain
-guarded on macOS. Native acceptance targets Apple silicon; Intel is not claimed.
+Live generation publication and RAD debugging remain guarded on macOS.
+Game release packaging is covered by the later
+[macOS release acceptance](game-packaging-publishing-evidence.md#macos-release-packaging). Native acceptance targets Apple silicon; Intel is not claimed.
 
 Local Apple silicon acceptance: Qt 6.11.2 Cocoa, pinned Clang 18.1.8,
 macOS 26.6 and deployment baseline 14.0. The Cocoa journey passed all 37

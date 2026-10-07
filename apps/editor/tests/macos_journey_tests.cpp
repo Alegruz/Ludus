@@ -130,4 +130,57 @@ TEST_CASE("Cocoa editor creates checks repairs builds runs stops and reopens a m
         REQUIRE(window.grab().save(capture));
     }
 }
+
+TEST_CASE("Cocoa editor authors and verifies a macOS Release app", "[.macos-release-journey]")
+{
+    REQUIRE(QApplication::platformName() == QStringLiteral("cocoa"));
+    const auto sdk = qEnvironmentVariable("LUDUS_RELEASE_TEST_SDK");
+    REQUIRE(!sdk.isEmpty());
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const auto root = QStringLiteral(LUDUS_EDITOR_PROJECT_ROOT);
+    ToolingPaths paths;
+    paths.PythonPath = QDir(root).filePath(QStringLiteral("out/host-tools/venv/bin/python"));
+    paths.AdapterPath = QDir(root).filePath(QStringLiteral("scripts/python/editor_tool.py"));
+    paths.ToolingRoot = root;
+    EditorController controller(paths);
+    MainWindow window(&controller, nullptr, directory.filePath(QStringLiteral("workspace.json")));
+    window.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&window));
+    ProjectCreationOptions creation;
+    creation.Destination = directory.filePath(QStringLiteral("Release Game"));
+    creation.Name = QStringLiteral("Release Game");
+    creation.Sdk = qEnvironmentVariable("LUDUS_SETUP_TEST_SDK");
+    REQUIRE(!creation.Sdk.isEmpty());
+    controller.CreateProject(creation);
+    REQUIRE(WaitMac(
+        [&]() { return controller.State().Result.Kind != Outcome::None && controller.Caps().CanCloseImmediately; }));
+    INFO(controller.JobDetails().toStdString());
+    REQUIRE(controller.State().Result.Kind == Outcome::Success);
+    REQUIRE(controller.Caps().CanReleaseInit);
+    controller.SetupRelease(QStringLiteral("macos"), QStringLiteral("tester/game"));
+    REQUIRE(WaitMac([&]() { return controller.Caps().CanCloseImmediately; }));
+    INFO(controller.JobDetails().toStdString());
+    REQUIRE(controller.State().Result.Kind == Outcome::Success);
+    REQUIRE(QFile::exists(QDir(creation.Destination).filePath(QStringLiteral("ludus.release.json"))));
+    REQUIRE(controller.Caps().CanPackage);
+    controller.PackageRelease(QStringLiteral("macos-release"), QStringLiteral("0.1.0"), sdk);
+    REQUIRE(WaitMac([&]() { return controller.Caps().CanCloseImmediately; }));
+    INFO(controller.JobDetails().toStdString());
+    REQUIRE(controller.State().Result.Kind == Outcome::Success);
+    const QDir packages(QDir(creation.Destination).filePath(QStringLiteral("out/packages/macos-release")));
+    const auto directories = packages.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    REQUIRE(directories.size() == 1);
+    REQUIRE(QFile::exists(packages.filePath(directories.first() + QStringLiteral("/game.zip"))));
+    REQUIRE(QFile::exists(packages.filePath(directories.first() + QStringLiteral("/validation.json"))));
+    controller.PackageRelease(QStringLiteral("macos-release"), QStringLiteral("0.1.1"), sdk);
+    REQUIRE(controller.Caps().CanStop);
+    controller.Stop();
+    REQUIRE(WaitMac([&]() { return controller.Caps().CanCloseImmediately; }));
+    REQUIRE(controller.State().Result.Kind == Outcome::Cancelled);
+    REQUIRE(controller.State().Result.CleanupConfirmed);
+    REQUIRE(packages.entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() == 1);
+    REQUIRE(controller.CloseProject());
+    window.close();
+}
 #endif

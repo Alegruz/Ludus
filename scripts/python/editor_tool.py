@@ -929,8 +929,6 @@ class Operation:
             if self._operation in ("project_check", "project_setup"):
                 return self._execute_setup(descriptor)
             if self._operation in ("release_init", "package"):
-                if platform.system() == "Darwin" or descriptor.preset.startswith("macos-"):
-                    raise editor_project.ProjectError("ReleaseFailed", "macOS release packaging/signing is not implemented")
                 return self._execute_release(descriptor)
             if self._operation == "build_debug":
                 if platform.system() == "Darwin" or descriptor.preset.startswith("macos-"):

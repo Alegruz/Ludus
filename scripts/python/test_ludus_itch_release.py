@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from dataclasses import asdict
@@ -225,6 +226,7 @@ class EditorReleaseAdapterTests(unittest.TestCase):
                 editor_tool._validate_request({**base, key: value})
 
 
+@unittest.skipUnless(sys.platform == "linux", "live upload transport is Linux-only")
 class UploadTests(unittest.TestCase):
     def test_private_snapshot_exact_digest_credentials_and_receipt(self):
         with tempfile.TemporaryDirectory() as temp:

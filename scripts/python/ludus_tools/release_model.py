@@ -124,10 +124,11 @@ def load_release(project_dir: Path) -> ReleaseConfig:
         fields(profile, {"targetPlatform", "buildProfile", "target", "installComponent", "entryPoint"},
                {"configurePreset"}, f"profiles.{name}")
         platform = profile["targetPlatform"]
-        if platform not in ("linux-x64", "web") or profile["buildProfile"] != "release":
-            fail("only linux-x64 and web Release packaging are supported", "UnsupportedReleaseTarget")
-        preset = profile.get("configurePreset", "web-emscripten-release" if platform == "web" else "linux-clang-release")
-        if preset != ("web-emscripten-release" if platform == "web" else "linux-clang-release"):
+        if platform not in ("linux-x64", "macos-arm64", "macos-x64", "web") or profile["buildProfile"] != "release":
+            fail("only Linux x64, macOS arm64/x64 and web Release packaging are supported", "UnsupportedReleaseTarget")
+        expected_preset = "web-emscripten-release" if platform == "web" else "macos-clang-release" if platform.startswith("macos-") else "linux-clang-release"
+        preset = profile.get("configurePreset", expected_preset)
+        if preset != expected_preset:
             fail("release configurePreset does not match target platform")
         target = string(profile["target"], "target", 256)
         component = string(profile["installComponent"], "installComponent", 64)

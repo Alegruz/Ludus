@@ -702,7 +702,7 @@ missing toolchain inputs, Metal versus SPIR-V tool requirements, browser flag
 isolation, selected compiler probing and explicit profile/preparation tests.
 Linux CI runs these fixture contracts; native macOS CI additionally runs the
 installed journey above. Native Intel execution, universal binaries, Qt Editor
-acceptance, macOS release packaging/signing, and shipping-game acceptance remain
+acceptance and shipping-game acceptance remain
 unverified follow-ups.
 
 Local Apple silicon validation on macOS 26.6: 139 relevant Python CLI/setup
@@ -720,3 +720,7 @@ framework link-interface entries to CMake's framework-name link feature, leaving
 other properties/private frameworks unchanged. Two regressions cover the export
 and preservation boundary; the installed journey also audits bundled CMake files
 for producer sysroot paths before building games.
+
+The later [native Editor port](editor-workspace-evidence.md#native-macos-port) and
+[macOS release packaging](game-packaging-publishing-evidence.md#macos-release-packaging)
+extend this original project-tooling milestone. Their limits and evidence live in those owners.

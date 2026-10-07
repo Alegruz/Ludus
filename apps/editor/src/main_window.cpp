@@ -198,7 +198,8 @@ void MainWindow::BuildMenus()
     SetupReleaseAction_ = releaseMenu->addAction(QStringLiteral("Set Up &Releases..."));
     PackageReleaseAction_ = releaseMenu->addAction(QStringLiteral("&Package Release..."));
 #if defined(Q_OS_MACOS)
-    SetupReleaseAction_->setToolTip(QStringLiteral("macOS release packaging/signing is not available yet."));
+    SetupReleaseAction_->setToolTip(QStringLiteral(
+        "Build an ad-hoc signed macOS app. Developer ID signing and notarization require a separate workflow."));
     PackageReleaseAction_->setToolTip(SetupReleaseAction_->toolTip());
 #endif
     connect(SetupReleaseAction_, &QAction::triggered, this, &MainWindow::OnSetupRelease);
@@ -1045,16 +1046,34 @@ void MainWindow::OnSetupRelease()
     dialog->setWindowTitle(QStringLiteral("Set Up Releases"));
     auto* layout = new QFormLayout(dialog);
     auto* platform = new QComboBox(dialog);
+#if defined(Q_OS_MACOS)
+    platform->addItem(QStringLiteral("macOS app"), QStringLiteral("macos"));
+#else
     platform->addItem(QStringLiteral("Linux native"), QStringLiteral("linux-x64"));
+#endif
     platform->addItem(QStringLiteral("Browser (Emscripten)"), QStringLiteral("web"));
     auto* target = new QLineEdit(dialog);
     target->setPlaceholderText(QStringLiteral("username/game (optional)"));
-    auto* note = new QLabel(
-        QStringLiteral("Save release files into this project's repository. Setup also adds "
-                       "a GitHub workflow for v* tags and manual releases. Set ITCH_IO_TARGET on GitHub if left blank. "
-                       "Add BUTLER_API_KEY in the "
-                       "itch-release environment on GitHub. Setup never uploads or overwrites existing files."),
-        dialog);
+    auto* note = new QLabel(dialog);
+    const auto updateNote = [note, platform]() {
+        if (platform->currentData().toString() == QStringLiteral("macos"))
+        {
+            note->setText(
+                QStringLiteral("Save release files and a GitHub package workflow into this project's repository. "
+                               "Configure a matching Release SDK on GitHub. macOS creates an ad-hoc signed app; "
+                               "Developer ID signing and notarization require a separate workflow. "
+                               "Setup never uploads or overwrites existing files."));
+        }
+        else
+        {
+            note->setText(QStringLiteral(
+                "Save release files and an itch.io GitHub workflow into this project's repository. "
+                "Set ITCH_IO_TARGET on GitHub if left blank, and BUTLER_API_KEY in the itch-release environment. "
+                "Setup never uploads or overwrites existing files."));
+        }
+    };
+    connect(platform, &QComboBox::currentIndexChanged, dialog, updateNote);
+    updateNote();
     note->setWordWrap(true);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
     layout->addRow(QStringLiteral("Platform"), platform);
@@ -1077,7 +1096,11 @@ void MainWindow::OnPackageRelease()
     auto* layout = new QFormLayout(dialog);
     auto* profile = new QComboBox(dialog);
     profile->setEditable(true);
+#if defined(Q_OS_MACOS)
+    profile->addItem(QStringLiteral("macos-release"));
+#else
     profile->addItem(QStringLiteral("linux-release"));
+#endif
     profile->addItem(QStringLiteral("web-release"));
     auto* version = new QLineEdit(QStringLiteral("0.1.0"), dialog);
     auto* sdk = new QLineEdit(dialog);

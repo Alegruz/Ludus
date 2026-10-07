@@ -7,7 +7,7 @@ Editor/CLI setup, browser releases and explicit uploads.
 Open an existing `ludus.project.json` in the Ludus Editor. Release actions require
 an idle workspace and a clean, saved version-2 CMake project.
 
-Use **Release > Set Up Releases** to select Linux native or Emscripten browser
+Use **Release > Set Up Releases** to select Linux native, macOS app or Emscripten browser
 packaging and an optional itch.io `username/game`. Setup adds game-owned
 `ludus.release.json`, explicit `cmake/GameRelease.cmake` install rules, notices,
 release instructions and a GitHub workflow. It appends one CMake include and
@@ -23,9 +23,9 @@ Release browser SDK and an executable with `OUTPUT_NAME index` producing
 `index.js` and `index.wasm`. Generated install rules also require `index.html`.
 Other filenames/extra workers need explicitly authored install rules.
 
-Use **Release > Package Release** with `linux-release` or `web-release`, a version
+Use **Release > Package Release** with `linux-release`, `macos-release` or `web-release`, a version
 and an optional Release SDK prefix. The Editor uses the shared installed backend
-through its asynchronous tooling adapter. Configure, build and install retain
+through its asynchronous tooling adapter. Configure, build, install and macOS signing retain
 owned process groups, bounded output, cancellation and parent-loss cleanup.
 The verified package directory and SHA256 appear in Output. Packaging never uploads.
 
@@ -38,7 +38,7 @@ ludus project package verify <package-directory>
 ludus project publish plan MyGame --package <package-directory> --destination web --allow-local-inputs
 ```
 
-The existing native package policy remains unchanged. Browser verification checks
+Native policies are documented in the native release guide. Browser verification checks
 archive paths, hashes/modes, root HTML and local HTML asset references, required
 JavaScript/WebAssembly, Wasm header/section bounds and absence of debug custom
 sections/native binaries, plus notices/licenses. Installation must match the
@@ -51,7 +51,13 @@ native SDK catalog resolver. Their actual SDK manifest identity is recorded, and
 these packages are classified as local inputs. CI upload opts into those inputs
 explicitly after a separate build job and exact artifact digest check.
 
-## Automatic GitHub uploads
+macOS creates a local ad-hoc signed app and a package-only GitHub workflow.
+Set `LUDUS_RELEASE_SDK_URL` and `LUDUS_RELEASE_SDK_SHA256` for a matching thin
+Release SDK. It has no upload step or account secret. Live upload transport,
+Developer ID signing and notarization remain separate; see the
+[macOS package contract](game-packaging-publishing.md#macos-app-packages).
+
+## Automatic GitHub uploads (Linux and browser)
 
 The generated workflow runs for `v*` tags and manual dispatch. Actions and the
 Ludus tooling source are pinned to immutable commits. It builds and verifies the

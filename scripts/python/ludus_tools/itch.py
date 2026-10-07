@@ -111,6 +111,9 @@ def _run_upload(argv: list[str], env: dict[str, str], secret: str) -> int:
 def upload(project: Path, package: Path, *, destination: str, allow_local_inputs: bool = False,
            expected_digest: str | None = None, target_override: str | None = None) -> dict:
     """Caller must explicitly authorize this command; it can update a live page."""
+    import sys
+    if sys.platform != "linux":
+        fail("live itch.io upload transport requires Linux; macOS supports packaging and offline plans", "UnsupportedReleaseTarget")
     root = project.parent if project.is_file() else project
     root = root.resolve()
     # Serialize uploads for this project. CI also serializes the repository's

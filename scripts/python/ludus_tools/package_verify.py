@@ -31,7 +31,7 @@ def _check_path(name: str, seen: set[str]) -> None:
     if folded in seen:
         fail(f"duplicate/case-colliding payload path {name!r}", "InvalidPackage")
     seen.add(folded)
-    if Path(name).suffix in FORBIDDEN_SUFFIXES or name.startswith(("include/", "share/Ludus/", ".ludus/")):
+    if any(Path(part).suffix in FORBIDDEN_SUFFIXES for part in Path(name).parts) or name.startswith(("include/", "share/Ludus/", ".ludus/")):
         fail(f"authoring or debug file in player payload: {name!r}", "InvalidPackage")
 
 
@@ -64,7 +64,7 @@ def inventory(root: Path) -> list[dict]:
     return sorted(records, key=lambda record: record["path"])
 
 
-def extract_archive(archive: Path, destination: Path) -> dict:
+def extract_archive(archive: Path, destination: Path, *, run_command=None, env=None, cancel_check=None) -> dict:
     """Extract into a caller-owned empty directory, validating before writing."""
     if any(destination.iterdir()):
         fail("verification extraction directory must be empty", "InvalidPackage")
@@ -130,9 +130,11 @@ def extract_archive(archive: Path, destination: Path) -> dict:
                       "systemLibraries", "files"}, set(), "build-info.json")
     from .package_web import WEB_POLICY, validate_web
     web = manifest["targetPlatform"] == "web"
-    policy = WEB_POLICY if web else POLICY
+    from .package_macos import POLICY as MAC_POLICY, validate_native as validate_macos
+    macos = manifest["targetPlatform"] in ("macos-arm64", "macos-x64")
+    policy = WEB_POLICY if web else MAC_POLICY if macos else POLICY
     if (type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 1
-            or manifest["policy"] != policy or manifest["targetPlatform"] not in ("linux-x64", "web")
+            or manifest["policy"] != policy or manifest["targetPlatform"] not in ("linux-x64", "macos-arm64", "macos-x64", "web")
             or type(manifest["localInputs"]) is not bool):
         fail("unsupported package manifest/policy", "InvalidPackage")
     payload_path(manifest["entryPoint"])
@@ -153,9 +155,12 @@ def extract_archive(archive: Path, destination: Path) -> dict:
     from dataclasses import fields as dataclass_fields
     from .identity import SdkIdentity
     fields(manifest["sdk"], {field.name for field in dataclass_fields(SdkIdentity)}, set(), "sdk")
-    if (manifest["sdk"]["target_triple"] != ("wasm32-unknown-emscripten" if web else "x86_64-linux-gnu") or manifest["sdk"]["flavor"] != "Release"
+    triples = {"web": "wasm32-unknown-emscripten", "linux-x64": "x86_64-linux-gnu", "macos-arm64": "arm64-apple-darwin", "macos-x64": "x86_64-apple-darwin"}
+    if (manifest["sdk"]["target_triple"] != triples[manifest["targetPlatform"]] or manifest["sdk"]["flavor"] != "Release"
             or manifest["sdk"]["cxx_standard"] != "C++23"):
         fail("package SDK is not a supported native Release SDK", "InvalidPackage")
+    if macos and (manifest["sdk"]["cxx_runtime_abi"] != "libc++" or manifest["sdk"]["distro_baseline"] != "macos-14.0"):
+        fail("macOS package SDK must declare libc++ and the macOS 14.0 baseline", "InvalidPackage")
     records = manifest["files"]
     if not isinstance(records, list) or len(records) != len(entries) - 1:
         fail("manifest inventory does not match ZIP", "InvalidPackage")
@@ -175,13 +180,13 @@ def extract_archive(archive: Path, destination: Path) -> dict:
             fail(f"payload hash/size/mode mismatch: {record['path']}", "InvalidPackage")
     if records_seen != seen - {"build-info.json"}:
         fail("manifest inventory differs from ZIP", "InvalidPackage")
-    external = (validate_web if web else validate_native)(destination, manifest["entryPoint"])
+    external = validate_macos(destination, manifest["entryPoint"], manifest["targetPlatform"], runner=run_command, env=env, cancel_check=cancel_check) if macos else (validate_web if web else validate_native)(destination, manifest["entryPoint"])
     if external != manifest["systemLibraries"]:
         fail("system prerequisite inventory mismatch", "InvalidPackage")
     return manifest
 
 
-def verify_package(package_dir: Path) -> dict:
+def verify_package(package_dir: Path, *, run_command=None, env=None, cancel_check=None) -> dict:
     import tempfile
     from .release_model import read_json
 
@@ -197,13 +202,14 @@ def verify_package(package_dir: Path) -> dict:
     report = read_json(package_dir / "validation.json")
     fields(report, {"schemaVersion", "archiveSha256", "policy", "toolVersion", "checks"}, set(), "validation.json")
     from .package_web import WEB_POLICY
+    from .package_macos import POLICY as MAC_POLICY
     platform_check = "web" if report["policy"] == WEB_POLICY else "native"
     if (type(report["schemaVersion"]) is not int or report["schemaVersion"] != 1
-            or report["archiveSha256"] != sidecar["archiveSha256"] or report["policy"] not in (POLICY, WEB_POLICY)
+            or report["archiveSha256"] != sidecar["archiveSha256"] or report["policy"] not in (POLICY, WEB_POLICY, MAC_POLICY)
             or report["checks"] != ["payload", platform_check, "clean-extraction"]):
         fail("validation report does not describe this package", "InvalidPackage")
     with tempfile.TemporaryDirectory(prefix="ludus-package-verify-") as temp:
-        manifest = extract_archive(package_dir / "game.zip", Path(temp))
+        manifest = extract_archive(package_dir / "game.zip", Path(temp), run_command=run_command, env=env, cancel_check=cancel_check)
         if manifest["policy"] != report["policy"]:
             fail("validation policy disagrees with payload", "InvalidPackage")
         if sha256((Path(temp) / "build-info.json").read_bytes()) != sidecar["manifestSha256"]:
