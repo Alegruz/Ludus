@@ -177,6 +177,63 @@ music continues until an explicit restart or safe musical boundary in later work
 Peak-budget failure preserves the old revision. Whole-world restart is not
 required for an audio replacement.
 
+### Native saves
+
+The current `Content::SaveFile` adapter supports Linux and macOS. It keeps the
+same public signature and SHA-256 expected-digest policy. Other platforms return
+`Unsupported`; portable catalogs and JSON processing do not depend on this save
+backend. This adapter is separate from the proposed FoundationFilesystem F5
+persistence API and does not implement watchers or asynchronous acquisition.
+
+The caller supplies a trusted existing root and a validated relative UTF-8 path.
+Root symlinks are allowed; every child-directory component and destination is
+opened relative to a descriptor with symlink following disabled. Destinations
+must be regular files or absent; FIFO checks are nonblocking. Already-open
+directory mutation, hard links and privileged actors are not a sandbox guarantee.
+The caller creates parent directories; the adapter does not create them.
+
+A nonblocking exclusive `flock` on the parent directory serializes cooperating
+Ludus writers. A busy lock, missing expected file, or digest/absence mismatch
+returns `Conflict`. Other open/read errors retain their actual Content status
+(`IoError`, `Limit`, or `OutOfMemory`) rather than being called a conflict.
+The expected digest is checked before staging and immediately before rename;
+uncooperative writers can still race the final check and publication.
+
+Writes are capped at 32 MiB. The adapter exclusively creates `leaf.ludus-save`
+in the same directory with mode 0600. The suffix counts toward native filename
+limits. Existing temporary files or symlinks are never overwritten or removed;
+report `IoError` and inspect them before retrying. Checked complete writes retry
+interruptions and short progress; file sync and close must succeed before atomic
+publication. Darwin uses its `renameat` API, declared by `<sys/stdio.h>` without
+importing C stdio diagnostics; Linux retains its descriptor-relative rename
+syscall. Existing readers retain their opened revision after replacement.
+
+Failure before rename preserves the destination and attempts to remove the owned
+temporary. Cleanup may itself fail, so a crash or filesystem error can leave a
+temporary for manual inspection. `Ok` reports completed atomic publication.
+Directory sync after publication is best-effort; failure cannot roll back the
+completed rename and is not returned as a failed save. File `fsync` is not a
+drive-cache flush or a power-loss durability guarantee. This API intentionally
+does not claim those stronger guarantees.
+
+Native tests cover create/replace, empty files, stale/absent digests, busy locks,
+UTF-8 nested names, root aliases, child/leaf/temporary symlinks, FIFO/directory
+rejection, size admission and retained reader revisions. A separate exception-free
+test archive compiles the same implementation with private syscall seams on both
+Linux and macOS. It exercises interrupted/short/zero/partial writes, file sync and
+close failure, rename failure, an edit between digest checks, temporary cleanup,
+lock release on retry, and best-effort directory sync. Hooks are not installed or
+present in the production archive. macOS CI runs native and fault tests in
+Development and under ASan/UBSan, and analyzes the save implementation and tests.
+
+Thanks to **Apple**, *Mac OS X Manual Pages*,
+[flock(2)](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html),
+[rename(2)](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/rename.2.html)
+and [fsync(2)](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fsync.2.html),
+for advisory-lock ownership, atomic rename and the distinction between filesystem
+sync and drive durability used here. The implementation is independent; no
+upstream code was copied.
+
 ## Packaging and reproducibility
 
 Begin with a tool that accepts explicit root resource IDs, walks dependencies,

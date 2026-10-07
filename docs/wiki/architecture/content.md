@@ -4,7 +4,8 @@ Authored source files, catalog identity, acquired resource revisions and running
 playback have different owners. Keeping them separate allows validation and
 replacement without treating a live preview as a saved document.
 
-`Content` and `AudioContent` are SDK modules. The implemented composer,
+`Content` and `AudioContent` are SDK modules. Content file reads and atomic saves
+support Linux and macOS. The implemented composer,
 acquisition and output workflow described here is native Linux. Dynamic music,
 browser acquisition/output and complete gameplay-world binding have separate
 acceptance phases; linking a browser target does not establish that workflow.
@@ -24,6 +25,55 @@ Content stays below audio-specific behavior; AudioContent depends on Content
 and Audio. Qt adapters live in the editor. Parser, OS and audio-device types do
 not leak into installed public headers. See the
 [catalog/loading contract](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/content-resources.md).
+
+## Read and save native content
+
+Include `<ludus/content/content.h>` and link `Ludus::Content`. File operations are
+synchronous; run them outside audio callbacks and render critical paths. Choose a
+trusted existing root, then use relative UTF-8 paths. Parent directories must
+already exist. Symlinks inside the root and non-regular destinations are rejected;
+a symlink used to select the root itself is allowed.
+
+Read into owned bytes with an explicit cap, then keep the digest of the saved
+revision while editing your draft:
+
+```cpp
+ludus::content::Bytes saved;
+auto status = ludus::content::ReadFile(root, "catalog.json",
+                                     ludus::content::MAX_DOCUMENT_BYTES, saved);
+if (status == ludus::content::Status::Ok)
+{
+    const auto expected = ludus::content::Hash(saved.Data());
+    // draftBytes is the validated candidate document owned by the caller.
+    status = ludus::content::SaveFile(root, "catalog.json", draftBytes, &expected);
+}
+```
+
+`ReadFile` replaces its output only on success. `SaveFile` accepts up to 32 MiB
+and publishes an empty file for an empty span. Pass `nullptr` instead of a digest
+to require that a new file does not exist. After a successful save, retain the
+digest of the new bytes for the next edit.
+
+`Conflict` means the destination no longer matches your saved digest, the file
+was expected but disappeared, or another cooperating writer holds the parent
+directory lock. Retain the draft and offer reload/compare before retrying. I/O
+and admission failures have separate statuses. Other platforms return
+`Unsupported` for native saves.
+
+The adapter stages an exclusive 0600 `filename.ludus-save` file beside the
+destination, flushes and closes it, then atomically renames it. Existing open
+readers retain their old revision. The suffix counts toward native filename
+limits. A pre-existing temporary blocks a save with `IoError`; inspect it before
+removing it. Failed saves attempt to clean up only their own temporary.
+
+`Ok` means publication succeeded. Directory sync is best-effort after rename;
+this API does not promise power-loss durability. Conflict checks serialize
+cooperating writers only; external tools that ignore the lock can still race
+publication. A save covers one file at a time. These Content capabilities do not
+establish the full macOS composer or audio-device workflow.
+
+See the [native save contract and validation](https://github.com/Alegruz/Ludus/blob/main/docs/architecture/content-resources.md#native-saves)
+for the platform boundary, failure tests and remaining persistence work.
 
 ## Follow one sound through the system
 

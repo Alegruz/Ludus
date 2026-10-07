@@ -27,6 +27,7 @@ int ExerciseInstalledNetwork() noexcept;
 int ExerciseInstalledUi() noexcept;
 int ExerciseInstalledContainers() noexcept;
 int ExerciseInstalledFilesystem() noexcept;
+int ExerciseInstalledContent() noexcept;
 int ExerciseInstalledPack() noexcept;
 bool ExerciseInstalledStrings() noexcept;
 bool ExerciseInstalledParsing() noexcept;
@@ -249,6 +250,10 @@ int main()
     if (!PrimitiveContract())
     {
         return 8;
+    }
+    if (ExerciseInstalledContent() != 0)
+    {
+        return 20;
     }
     if (const int result = ExerciseInstalledFilesystem(); result != 0)
     {
