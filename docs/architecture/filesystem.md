@@ -45,7 +45,10 @@ syscall/allocation seam; production has no hooks or mutable fault state. Darwin
 tests exercise interrupted operations, short/partial reads, mutation during a
 read, allocation/metadata failure cleanup, close-on-exec and descriptor reuse
 after a failed close. macOS CI runs these tests and Content read adapters in
-Development and with ASan/UBSan. Content saves and watchers remain F5 work; F4 adds a separate dedicated I/O pool.
+Development and with ASan/UBSan. Content also supports Linux/macOS atomic saves
+through its separately tested adapter; see [native saves](content-resources.md#native-saves).
+FoundationFilesystem F5 persistence and watchers remain separate work; F4 adds
+a dedicated bounded I/O pool above retained virtual file revisions.
 
 ## Virtual namespace and shipping storage
 

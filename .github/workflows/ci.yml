@@ -35,7 +35,7 @@ jobs:
   macos-compile:
     needs: changes
     if: needs.changes.outputs.native_required == 'true'
-    name: macOS Cocoa, filesystem and Metal
+    name: macOS Cocoa, filesystem, Content and Metal
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +51,7 @@ jobs:
           ./scripts/build macos-clang-development
       - name: Test macOS setup contracts
         run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui test_metal_shaders -v
-      - name: Test native Cocoa, Metal, filesystem and Content read adapters
+      - name: Test native Cocoa, Metal, filesystem and Content reads and saves
         env:
           LUDUS_TEST_COCOA: "1"
         run: out/host-tools/venv/bin/ctest --preset macos-clang-development --label-regex 'platform|macos|filesystem|content|build-contract' --no-tests=error
@@ -68,6 +68,18 @@ jobs:
         run: |
           out/host-tools/venv/bin/cmake --install out/build/macos-clang-development
           out/host-tools/venv/bin/python tests/sdk_consumer/verify_metal_shader_build.py --sdk "$PWD/out/install/macos-clang-development" --cmake "$PWD/out/host-tools/venv/bin/cmake" --ninja "$PWD/out/host-tools/venv/bin/ninja" --cxx "$PWD/out/host-tools/bin/clang++" --slang "$PWD/out/shader-tools/slang/bin/slangc" --conan "$PWD/out/conan/macos-clang-development" --sysroot "$PWD/out/host-tools/macos-sdk" --libcxx "$PWD/out/host-tools/libcxx-include"
+      - name: Verify installed Content persistence
+        run: |
+          out/host-tools/venv/bin/cmake -S tests/sdk_consumer/content -B out/build/content-consumer -G Ninja \
+            -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" \
+            -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
+            -DCMAKE_OSX_SYSROOT="$PWD/out/host-tools/macos-sdk" -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+            -DCMAKE_CXX_FLAGS="-stdlib=libc++ -nostdinc++ -isystem \"$PWD/out/host-tools/libcxx-include\"" \
+            -DCMAKE_PREFIX_PATH="$PWD/out/install/macos-clang-development;$PWD/out/conan/macos-clang-development" \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          out/host-tools/venv/bin/cmake --build out/build/content-consumer --parallel 2
+          out/build/content-consumer/ludus_content_consumer
+          out/host-tools/bin/clang-tidy -p out/build/content-consumer --warnings-as-errors='*' tests/sdk_consumer/content.cpp
       - name: Analyze native filesystem production and test sources
         run: |
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/src/posix.cpp
@@ -85,14 +97,21 @@ jobs:
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/pack_tests.cpp
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/foundation/filesystem/tests/pack_fault_tests.cpp
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/content/tests/native_reads_tests.cpp
-      - name: Validate Cocoa, Metal, filesystem and Content reads with ASan and UBSan
+      - name: Analyze Content native persistence and tests
+        run: |
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/content/src/files.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' --extra-arg=-DLUDUS_CONTENT_SAVE_FAULT_TESTING=1 modules/content/src/files.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/content/tests/content_tests.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/content/tests/native_saves_tests.cpp
+          out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' modules/content/tests/save_fault_tests.cpp
+      - name: Validate Cocoa, Metal, filesystem and Content persistence with ASan and UBSan
         env:
           LUDUS_TEST_COCOA: "1"
         run: |
           ./init.sh --cli --preset macos-clang-asan-ubsan --preset-only --locked --with-tests --no-system-install
           out/host-tools/venv/bin/cmake --preset macos-clang-asan-ubsan -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
-          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_rhi_lifecycle_tests ludus_rhi_metal_tests ludus_rhi_render_tests ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_filesystem_namespace_fault_tests ludus_filesystem_pack_fault_tests ludus_filesystem_async_fault_tests ludus_content_tests
-          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_((platform_cocoa(_keymap)?|filesystem(_fault|_namespace_fault|_pack_fault|_async_fault)?|content|rhi_(metal|lifecycle))_tests|rhi_render_pixels)$' --no-tests=error
+          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_rhi_lifecycle_tests ludus_rhi_metal_tests ludus_rhi_render_tests ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_filesystem_namespace_fault_tests ludus_filesystem_pack_fault_tests ludus_filesystem_async_fault_tests ludus_content_tests ludus_content_save_fault_tests
+          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_((platform_cocoa(_keymap)?|filesystem(_fault|_namespace_fault|_pack_fault|_async_fault)?|content(_save_fault)?|rhi_(metal|lifecycle))_tests|rhi_render_pixels)$' --no-tests=error
 
   formatting:
     needs: changes

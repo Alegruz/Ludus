@@ -1,7 +1,10 @@
 #pragma once
 
 #include <ludus/foundation/base/core.h>
+#include <ludus/foundation/filesystem/filesystem.hpp>
 #include <ludus/foundation/filesystem/namespace.hpp>
+
+#include <span>
 
 namespace ludus::foundation::filesystem
 {

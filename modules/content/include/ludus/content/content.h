@@ -109,9 +109,36 @@ private:
 [[nodiscard]] bool ValidId(std::string_view value) noexcept;
 [[nodiscard]] bool ValidPath(std::string_view value) noexcept;
 
-// Native file operations never throw. Roots and paths are validated independently;
-// reads are capped, symlink escapes rejected, saves compare the expected digest.
+/// Read a regular file below a trusted native root into owned bytes.
+/// @param root Nonempty native root (up to 4096 bytes); a root symlink is allowed.
+/// @param path Valid relative UTF-8 path; symlinks below the root are rejected.
+/// @param cap Maximum admitted file size in bytes; empty files are valid.
+/// @param output Replaced only on success; unchanged on every failure.
+/// @return Ok, Invalid, NotFound, Limit, OutOfMemory, IoError, Conflict if the
+/// opened revision changes during reading, or Unsupported on other platforms.
+/// @note Synchronous Linux/macOS I/O; call outside render/audio critical paths.
 [[nodiscard]] Status ReadFile(std::string_view root, std::string_view path, usize cap, Bytes& output) noexcept;
+/// Atomically create or replace one native content file on Linux and macOS.
+/// @param root Trusted existing native directory (up to 4096 bytes); a root
+/// symlink is allowed. Already-open directory mutation is outside this boundary.
+/// @param path Valid relative UTF-8 path; parent directories must already exist.
+/// Symlinks below the root and non-regular destination files are rejected.
+/// @param data Bytes to publish, at most 32 MiB; empty data creates an empty file.
+/// @param expected Borrowed digest of the last-read destination, or nullptr to
+/// require absence. Checked under a nonblocking cooperative parent-directory lock
+/// before writing and again before publication. Only needed for this call.
+/// @return Ok means atomic pathname publication succeeded. Conflict means a busy
+/// lock, absent expected file, or digest/absence mismatch; Invalid, Limit,
+/// OutOfMemory and IoError report admission or prepublication failure.
+/// Unsupported is returned on other platforms. Failure preserves the destination;
+/// owned temporaries are removed where possible, and foreign temporaries retained.
+/// @note Synchronous; writers must cooperate with the directory lock for strict
+/// compare-and-swap. Uncooperative writers can race the final check and rename.
+/// @note Uses an exclusive 0600 same-directory temporary named with a
+/// .ludus-save suffix (subject to native filename limits). Successful replacement
+/// creates a new inode; existing readers retain the old revision. File fsync and
+/// close must succeed before publication; directory sync is best-effort afterward.
+/// Ok does not promise drive-cache flush or power-loss durability.
 [[nodiscard]] Status
 SaveFile(std::string_view root, std::string_view path, std::span<const uint8> data, const Digest* expected) noexcept;
 

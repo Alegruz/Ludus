@@ -1,4 +1,6 @@
 #include <ludus/foundation/filesystem/async.hpp>
+#include <ludus/foundation/filesystem/filesystem.hpp>
+#include <ludus/foundation/filesystem/namespace.hpp>
 
 #include "internal/async_native.hpp"
 #if defined(LUDUS_FILESYSTEM_ASYNC_FAULT_TESTING)
@@ -8,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <new>
+#include <span>
 
 namespace ludus::foundation::filesystem
 {
