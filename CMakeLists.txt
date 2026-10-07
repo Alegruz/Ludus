@@ -40,6 +40,7 @@ option(LUDUS_BUILD_SMOKE_APP "Build the smoke executable" ON)
 option(LUDUS_BUILD_WORLD_DEMO "Build the graphical game world reference (requires shader tools)" OFF)
 option(LUDUS_BUILD_SHADER_PROBE "Build the isolated offline shader feasibility probe" OFF)
 option(LUDUS_BUILD_LUAU_PROBE "Build the private S0 Luau feasibility probe (requires scripts/luau-probe bootstrap)" OFF)
+option(LUDUS_BUILD_SCRIPT_SESSION "Build the experimental S2 Luau debug/replacement session" OFF)
 option(LUDUS_BUILD_SCRIPT_INTERACTION "Build the experimental S1 native/Luau headless interaction" OFF)
 # The Editor workspace (apps/editor) is an OPTIONAL developer tool, OFF by
 # default. When OFF, configure/build/install and browser targets must not search
@@ -115,7 +116,7 @@ if(Git_FOUND)
 endif()
 
 set(LUDUS_GAME_COMPATIBILITY_IDENTITY
-    "${LUDUS_GIT_REVISION}|${LUDUS_SDK_VARIANT}|${LUDUS_CXX_RUNTIME_ABI}|${LUDUS_COMPILER_ID} ${LUDUS_COMPILER_VERSION}|${LUDUS_TARGET_TRIPLE}|abi-1.0")
+    "${LUDUS_GIT_REVISION}|${LUDUS_SDK_VARIANT}|${LUDUS_CXX_RUNTIME_ABI}|${LUDUS_COMPILER_ID} ${LUDUS_COMPILER_VERSION}|${LUDUS_TARGET_TRIPLE}|abi-1.1")
 
 configure_file(cmake/CheckSdkVariant.cmake.in "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" @ONLY)
 install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENTS)
@@ -240,9 +241,12 @@ if(LUDUS_BUILD_LUAU_PROBE)
     add_subdirectory(tools/luau-probe)
 endif()
 
-if(LUDUS_BUILD_SCRIPT_INTERACTION)
+if(LUDUS_BUILD_SCRIPT_INTERACTION OR LUDUS_BUILD_SCRIPT_SESSION)
     add_subdirectory(modules/runtime/scripting)
     add_subdirectory(tools/script-interaction)
+endif()
+if(LUDUS_BUILD_SCRIPT_SESSION)
+    add_subdirectory(tools/script-session)
 endif()
 
 install(

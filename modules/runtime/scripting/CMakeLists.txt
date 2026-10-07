@@ -2,9 +2,9 @@
 # longjmp profile has not completed production/platform acceptance (luau-s0.md).
 include("${PROJECT_SOURCE_DIR}/cmake/LuauProfile.cmake")
 ludus_prepare_luau()
-add_library(ludus_runtime_scripting STATIC src/runtime.cpp)
+add_library(ludus_runtime_scripting STATIC src/runtime.cpp src/state.cpp)
 target_include_directories(ludus_runtime_scripting PRIVATE src)
-target_link_libraries(ludus_runtime_scripting PRIVATE Luau.VM Ludus::FoundationBase Ludus::FoundationMemory)
+target_link_libraries(ludus_runtime_scripting PRIVATE Luau.VM Ludus::FoundationBase Ludus::FoundationMemory Ludus::FoundationMath)
 ludus_apply_project_defaults(ludus_runtime_scripting)
 set_target_properties(ludus_runtime_scripting PROPERTIES
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)

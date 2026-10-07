@@ -28,7 +28,9 @@ inline constexpr uint32 kAbiMajor = 1;
 
 // ABI minor version. Additive, backward-compatible table growth only. The host
 // accepts a module whose AbiMinor <= host minor and negotiates the common size.
-inline constexpr uint32 kAbiMinor = 0;
+/// ABI 1.1 appends the optional ScriptDebug callback; common-prefix negotiation
+/// preserves modules that advertise only earlier capabilities.
+inline constexpr uint32 kAbiMinor = 1;
 
 // Maximum byte length of an opaque identity string in module metadata. Keeps
 // every metadata record a bounded POD; the host validates lengths before use.
@@ -52,7 +54,11 @@ enum class Status : uint32
     OutOfRange = 8,
     NotPrepared = 9,
     MigrationUnsupported = 10,
-    Internal = 11
+    Internal = 11,
+    /// Update suspended a partial authoritative tick at a script safepoint.
+    /// Valid only with ScriptDebug; control/platform pumping continues, simulation
+    /// does not. The module must retire a stopped VM before Destroy returns.
+    ScriptPaused = 12
 };
 
 // Optional capabilities a module advertises in its metadata. Mandatory
@@ -65,7 +71,10 @@ enum class Capability : uint32
     None = 0,
     Reload = 1u << 0,
     Properties = 1u << 1,
-    AssetReload = 1u << 2
+    AssetReload = 1u << 2,
+    /// ABI 1.1 bounded, owner-thread debugger request/response and script pause.
+    /// Requires ProcessScriptDebug in the negotiated table; no VM pointer crosses.
+    ScriptDebug = 1u << 3
 };
 
 [[nodiscard]] constexpr Capability operator|(Capability a, Capability b) noexcept

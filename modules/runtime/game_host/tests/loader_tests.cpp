@@ -14,6 +14,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdlib>
+
 #include <dlfcn.h>
 
 using namespace ludus::runtime::game_host;
@@ -139,4 +141,32 @@ TEST_CASE("host Run distinguishes a missing module from an incompatible module",
     config.ModulePath = "/tmp/ludus-missing-live-reload-module.so";
     config.MaxFrames = 1;
     REQUIRE(Run(config) == RunResult::ModuleLoadFailed);
+}
+
+TEST_CASE("ScriptDebug requires minor 1 and a complete negotiated callback", "[loader][scripting]")
+{
+    REQUIRE(std::getenv("LUDUS_FIXTURE_FAIL") == nullptr);
+    const char* cases[] = {"script-debug-null", "script-debug-truncated", "script-debug-minor"};
+    for (const char* failure : cases)
+    {
+        REQUIRE(::setenv("LUDUS_FIXTURE_FAIL", failure, 1) == 0);
+        LoadedModule module;
+        const LoadStatus result = Load(LUDUS_FIXTURE_A_PATH, module, 1);
+        (void)::unsetenv("LUDUS_FIXTURE_FAIL");
+        CHECK(result == LoadStatus::MetadataInconsistent);
+        CHECK_FALSE(module.IsLoaded());
+    }
+}
+
+TEST_CASE("ABI 1.0 module without ScriptDebug retains its common prefix", "[loader][scripting]")
+{
+    REQUIRE(std::getenv("LUDUS_FIXTURE_FAIL") == nullptr);
+    REQUIRE(::setenv("LUDUS_FIXTURE_FAIL", "script-debug-legacy", 1) == 0);
+    LoadedModule module;
+    const LoadStatus result = Load(LUDUS_FIXTURE_A_PATH, module, 1);
+    (void)::unsetenv("LUDUS_FIXTURE_FAIL");
+    REQUIRE(result == LoadStatus::Ok);
+    CHECK(module.Metadata().AbiMinor == 0);
+    CHECK(module.Table().StructSize == offsetof(ludus::runtime::game_api::GameApiTable, ProcessScriptDebug));
+    CHECK(module.Table().ProcessScriptDebug == nullptr);
 }

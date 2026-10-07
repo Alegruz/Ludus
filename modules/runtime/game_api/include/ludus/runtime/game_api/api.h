@@ -152,6 +152,24 @@ struct GameApiTable final
                           uint64 logicalAssetId,
                           ByteView cookedArtifact,
                           uint64 artifactDigest) noexcept = nullptr;
+
+    /// Process a versioned script-debug request on the instance's owner thread.
+    /// @param request Borrowed UTF-8 extension JSON, at most 4096 bytes.
+    /// @param response Caller-owned response storage, at most 4096 bytes.
+    /// @param outBytesWritten Exact response length on Ok; zero on rejection.
+    /// @param outPaused One when the authoritative tick remains partial/stopped,
+    /// zero when normal Update may resume. The next Update must account for the
+    /// completed pending tick before starting another. Never save a partial tick.
+    /// @return Explicit status; the module must validate revision/execution/stop
+    /// tokens before mutation, bound inspection, and perform no watch evaluation.
+    /// @note Optional ABI 1.1 tail, gated by Capability::ScriptDebug. Unsupported
+    /// requests preserve simulation. Destroy cancels partial effects and retires
+    /// every VM/native closure before the host releases the module image.
+    Status (*ProcessScriptDebug)(GameInstance* instance,
+                                 ByteView request,
+                                 ByteSpan response,
+                                 usize* outBytesWritten,
+                                 uint32* outPaused) noexcept = nullptr;
 };
 
 // The single exported entry symbol. Spelled as a macro so host and module agree.

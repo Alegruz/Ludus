@@ -10,6 +10,8 @@ on:
       - 'config/luau_toolchain.json'
       - 'cmake/LuauProfile.cmake'
       - 'modules/runtime/scripting/**'
+      - 'tools/script-session/**'
+      - 'scripts/script-session'
       - 'tools/script-interaction/**'
       - 'tools/script-cook/**'
       - 'scripts/script-interaction'
@@ -213,6 +215,25 @@ jobs:
           ./scripts/script-interaction run --preset web-emscripten-release
           ./scripts/script-interaction check --preset web-emscripten-development
           ./scripts/script-interaction check --preset web-emscripten-release
+      - name: Validate S2 source debugger and transactional replacement in wasm
+        run: |
+          ./scripts/script-session cook
+          ./scripts/script-session run --preset web-emscripten-development
+          ./scripts/script-session run --preset web-emscripten-release
+          ./scripts/script-session check --preset web-emscripten-development
+          ./scripts/script-session check --preset web-emscripten-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luau-s2-web-session
+          path: |
+            out/build/web-emscripten-release/tools/script-session/ludus_script_session.*
+            out/build/web-emscripten-release/tools/script-session/index.html
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luau-s2-cook-evidence
+          path: out/script-session/cooked/
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: luau-s1-web-interaction
@@ -255,6 +276,10 @@ jobs:
           path: out/luau-s0-wasm
       - uses: actions/download-artifact@v4
         with:
+          name: luau-s2-web-session
+          path: out/luau-s2-wasm
+      - uses: actions/download-artifact@v4
+        with:
           name: luau-s1-web-interaction
           path: out/luau-s1-wasm
       - uses: actions/setup-node@v4
@@ -274,6 +299,8 @@ jobs:
           xvfb-run -a npm test
       - name: Test S0 wasm recovery and debugger in Chromium
         run: node tools/luau-probe/browser.mjs out/luau-s0-wasm/web-emscripten-release/tools/luau-probe
+      - name: Test S2 debugger heartbeat and replacement in Chromium
+        run: node tools/script-session/browser.mjs out/luau-s2-wasm
       - name: Test S1 state and effect publication in Chromium
         run: node tools/script-interaction/browser.mjs out/luau-s1-wasm
       - uses: actions/upload-artifact@v4

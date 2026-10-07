@@ -94,7 +94,8 @@ TEST_CASE("measured sizes and offsets on this target", "[abi]")
     STATIC_REQUIRE(offsetof(HostServices, AcquireWorkLease) == 48);
 
     STATIC_REQUIRE(sizeof(CreateInfo) == 56);
-    STATIC_REQUIRE(sizeof(GameApiTable) == 168);
+    STATIC_REQUIRE(sizeof(GameApiTable) == 176);
+    STATIC_REQUIRE(offsetof(GameApiTable, ProcessScriptDebug) == 168); // ABI 1.0 prefix is unchanged.
     STATIC_REQUIRE(sizeof(PropertyDescriptor) == 112);
     STATIC_REQUIRE(sizeof(PropertyValue) == 296);
     STATIC_REQUIRE(sizeof(PropertyEdit) == 296);
@@ -104,7 +105,7 @@ TEST_CASE("measured sizes and offsets on this target", "[abi]")
 TEST_CASE("abi version constants", "[abi]")
 {
     STATIC_REQUIRE(kAbiMajor == 1);
-    STATIC_REQUIRE(kAbiMinor == 0);
+    STATIC_REQUIRE(kAbiMinor == 1);
     STATIC_REQUIRE(kIdentityMax == 256);
 }
 

@@ -131,7 +131,8 @@ This slice supplies no installed scripting SDK, GameApi reload integration,
 production package, persistence codec, general binding generator, DAP server,
 visual editor or C# provider. S0 device evidence and workload/size budgets remain
 production adoption gates. S2 owns package/dependency validation, source maps,
-state capture/migration, debugger/reload and native-module retirement.
+state capture/migration, debugger/reload and native-module retirement; see the
+[implemented S2 slice](luau-s2.md) for its separate acceptance scope.
 Authoritative mutable globals/upvalues remain unsupported authoring practice;
 the strict checker alone does not prove that rule.
 

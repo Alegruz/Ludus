@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "packages": [
+    {
+      "name": "base",
+      "revision": 1,
+      "schema": 1,
+      "state_max": 10,
+      "programs": [
+        {
+          "asset": "0000000000000010",
+          "source": "logic_a.luau",
+          "entrypoint": false,
+          "dependencies": []
+        },
+        {
+          "asset": "0000000000000100",
+          "source": "root.luau",
+          "entrypoint": true,
+          "dependencies": [
+            "0000000000000010"
+          ]
+        },
+        {
+          "asset": "0000000000000101",
+          "source": "root.luau",
+          "entrypoint": true,
+          "dependencies": [
+            "0000000000000010"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "replacement",
+      "revision": 2,
+      "schema": 2,
+      "state_max": 10,
+      "programs": [
+        {
+          "asset": "0000000000000010",
+          "source": "logic_b.luau",
+          "entrypoint": false,
+          "dependencies": []
+        },
+        {
+          "asset": "0000000000000100",
+          "source": "root.luau",
+          "entrypoint": true,
+          "dependencies": [
+            "0000000000000010"
+          ]
+        },
+        {
+          "asset": "0000000000000101",
+          "source": "root.luau",
+          "entrypoint": true,
+          "dependencies": [
+            "0000000000000010"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "failed",
+      "revision": 3,
+      "schema": 2,
+      "state_max": 10,
+      "programs": [
+        {
+          "asset": "0000000000000010",
+          "source": "logic_fault.luau",
+          "entrypoint": false,
+          "dependencies": []
+        },
+        {
+          "asset": "0000000000000100",
+          "source": "root.luau",
+          "entrypoint": true,
+          "dependencies": [
+            "0000000000000010"
+          ]
+        },
+        {
+          "asset": "0000000000000101",
+          "source": "root.luau",
+          "entrypoint": true,
+          "dependencies": [
+            "0000000000000010"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "narrow",
+      "revision": 2,
+      "schema": 2,
+      "state_max": 1,
+      "programs": [
+        {
+          "asset": "0000000000000010",
+          "source": "logic_b.luau",
+          "entrypoint": false,
+          "dependencies": []
+        },
+        {
+          "asset": "0000000000000100",
+          "source": "root.luau",
+          "entrypoint": true,
+          "dependencies": [
+            "0000000000000010"
+          ]
+        },
+        {
+          "asset": "0000000000000101",
+          "source": "root.luau",
+          "entrypoint": true,
+          "dependencies": [
+            "0000000000000010"
+          ]
+        }
+      ]
+    }
+  ]
+}

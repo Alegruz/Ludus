@@ -50,7 +50,12 @@ enum class CommandKind : uint32
     ReadProperties = 7,
     ApplyEdits = 8,
     ReloadAsset = 9,
-    Stop = 10
+    Stop = 10,
+    /// ABI 1.1 capability-gated debugger extension over the existing control
+    /// channel. Carries extension=1, expected_generation and bounded payload;
+    /// request IDs retain/reconcile results like other mutations. Unsupported
+    /// modules reject it without entering a provider.
+    ScriptDebug = 11
 };
 
 // Host -> editor/supervisor events (design 10).

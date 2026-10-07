@@ -56,6 +56,12 @@ class ProbeTests(unittest.TestCase):
             time.sleep(0.005)
         self.fail("probe did not reach a bounded outcome")
 
+    def test_script_debug_requires_abi_1_1(self):
+        self.assertEqual(validate_metadata(dict(METADATA, abi_minor=1, capabilities=11))["capabilities"], 11)
+        for fields in ({"abi_minor": 2}, {"capabilities": 16}, {"capabilities": 11}):
+            with self.subTest(fields=fields), self.assertRaises(ProbeError):
+                validate_metadata(dict(METADATA, **fields))
+
     def test_embedded_symbols_id_and_malformed_offsets(self):
         path = self.root / "artifact"
         original = fixture_elf()

@@ -147,6 +147,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Reflection and serialization](architecture/reflection-serialization.md)
 - [Resource manager architecture](architecture/resource-management.md)
 - [Runtime UI architecture](architecture/ui.md)
+- [S2: dependency cook, source debugging and transactional replacement](architecture/luau-s2.md)
 - [Smart pointer architecture](architecture/smart-pointers.md)
 - [Terrain generation architecture](architecture/terrain-generation.md)
 - [Terrain systems architecture](architecture/terrain.md)
