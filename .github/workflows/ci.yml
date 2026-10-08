@@ -94,6 +94,7 @@ jobs:
       - name: Verify installed L0 renderer consumer
         run: |
           out/host-tools/venv/bin/cmake -S tests/sdk_consumer/renderer -B out/renderer-sdk -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
             -DCMAKE_PREFIX_PATH="$PWD/out/install/macos-clang-development;$PWD/out/conan/macos-clang-development" \
             -DCMAKE_OSX_SYSROOT="$PWD/out/host-tools/macos-sdk" -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
@@ -500,6 +501,7 @@ jobs:
           VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation out/build/linux-clang-development/modules/graphics/renderer/ludus_renderer_render_tests 2>&1 | tee out/renderer-vulkan-validation.log
           python3 -c 'from pathlib import Path; text=Path("out/renderer-vulkan-validation.log").read_text(); assert "Validation Error" not in text and "VUID-" not in text, text'
           out/host-tools/venv/bin/cmake -S tests/sdk_consumer/renderer -B out/renderer-sdk -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
             -DCMAKE_PREFIX_PATH="$PWD/out/install/linux-clang-development;$PWD/out/conan/linux-clang-development" \
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
