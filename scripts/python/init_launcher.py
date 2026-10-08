@@ -52,6 +52,12 @@ def select_interpreter(root):
 
 
 def main():
+    shell_sdkroot = os.environ.pop("LUDUS_INIT_SHELL_SDKROOT", None)
+    if shell_sdkroot is not None:
+        if shell_sdkroot:
+            os.environ["SDKROOT"] = shell_sdkroot
+        else:
+            os.environ.pop("SDKROOT", None)
     root = Path(__file__).resolve().parents[2]
     try:
         interpreter = select_interpreter(root)

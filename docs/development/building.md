@@ -21,7 +21,9 @@ host. Without `SDKROOT`, init tests Clang's default SDK first, then installed
 sibling SDKs newest first, selecting the first that passes. It does not download
 an older SDK or change the system's Xcode selection.
 
-An explicit `SDKROOT` is validated and never silently replaced. If it fails,
+An explicit `SDKROOT` supplied by your shell is validated and never silently
+replaced. `init.sh` preserves that choice before launching Python; a default SDK
+added by Apple's Python launcher does not prevent automatic SDK selection. If it fails,
 install/select a compatible SDK, then rerun init, for example:
 
 ```bash
