@@ -25,4 +25,7 @@ fi
 # Preserve the caller's choice before entering Python so automatic SDK selection
 # is not mistaken for an explicit override.
 export LUDUS_INIT_SHELL_SDKROOT="${SDKROOT-}"
+# xcrun can refuse to start Python for an invalid SDK before our diagnostics run.
+# The Python launcher restores the captured choice for engine setup.
+unset SDKROOT
 exec python3 "${repo_dir}/scripts/python/init_launcher.py" "$@"

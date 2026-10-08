@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -94,7 +95,11 @@ class LauncherTests(unittest.TestCase):
         binaries.mkdir()
         # Exercise Apple's injection on macOS, not just a mocked environment.
         python = "/usr/bin/python3" if platform.system() == "Darwin" else sys.executable
-        (binaries / "python3").symlink_to(python)
+        bootstrap = binaries / "python3"
+        bootstrap.write_text('#!/bin/sh\n'
+                             'if [ "${SDKROOT+x}" = x ]; then exit 72; fi\n'
+                             f'exec {shlex.quote(python)} "$@"\n')
+        bootstrap.chmod(0o755)
         prepared = self.root / "out/host-tools/venv/bin/python"
         prepared.parent.mkdir(parents=True)
         prepared.symlink_to(sys.executable)
