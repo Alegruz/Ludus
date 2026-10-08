@@ -180,3 +180,13 @@ for this jam baseline.
 
 Recorded checks and remaining limits are in the
 [validation record](../development/game-world-validation.md).
+
+## Author a level with the Editor
+
+The [S4 Scene workspace](../development/editor-workspace.md#s4-scene-authoring)
+shares this sample's private level codec, not its gameplay state. Native runs
+accept `--level <path>` (at most 64 KiB, regular file, strict v1 validation). It
+can be combined with `--headless` or `--frames 3` to qualify a saved scene. Invalid
+files fail before candidate activation; no source file is rewritten. Without
+`--level`, the built-in first room remains the default. Browser CLI file loading
+is not an authoring workflow.

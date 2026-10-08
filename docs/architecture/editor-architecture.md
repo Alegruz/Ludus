@@ -17,6 +17,14 @@ cancelled/stale-result handling. Its scale fixture measures a synthetic view;
 native scrolling and browser authoring still need acceptance. Later stages are
 acceptance contracts, not claims about existing features.
 
+The initial [S4 scene adapter](../development/editor-workspace.md#s4-scene-authoring)
+adds a private Qt-free typed document, bounded transactions/history, explicit
+recovery and a trusted separate render surface. It shares the world-demo codec,
+with 32 objects rather than a general project schema. Native rendering is opted
+in with pinned shaders; Cocoa/Metal has a native acceptance journey. Embedded
+pointer gizmos, multiple surfaces, large-scene and browser/native-platform
+qualification remain open. This does not complete the broader M1–M4 GUI gates.
+
 ## Product and engineering goals
 
 The editor should let a developer open a project, understand its setup, author
@@ -117,7 +125,8 @@ missing, oversized, or incompatible settings fall back to a useful default.
 Only locally generated layout blobs are eligible; project files cannot supply
 layout state. App and exact Qt versions are checked before restoring it.
 
-A future Scene tab composes a hierarchy, viewport, and document inspector. It
+The initial Scene tab supplies a bounded hierarchy and transform inspector with
+a separate trusted rendering window. A future embedded viewport extends it. It
 must first ship selection, transform editing, save/undo, and validation as one
 vertical slice. The viewport uses an explicit render-surface adapter to RHI;
 use trusted in-process authoring rendering from document snapshots, separately
