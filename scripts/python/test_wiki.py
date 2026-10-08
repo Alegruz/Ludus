@@ -123,6 +123,18 @@ class WikiArtifactTests(unittest.TestCase):
         (self.site / "guide/index.html").write_text('<a href="../../">Wrong root</a>')
         self.assertNotEqual(self.run_check().returncode, 0)
 
+    def test_shipped_players_check_assets_without_search_indexing(self):
+        player = self.site / "editor/players/cornell-box"
+        player.mkdir(parents=True)
+        (player / "index.html").write_text('<script src="player.js"></script>')
+        self.assertIn("missing local destination player.js", self.run_check().stderr)
+        (player / "player.js").write_text("app")
+        self.assertEqual(self.run_check().returncode, 0)
+        unexpected = self.site / "editor/players/unknown"
+        unexpected.mkdir()
+        (unexpected / "index.html").write_text("unexpected")
+        self.assertIn("Page missing from search index: editor/players/unknown/index.html", self.run_check().stderr)
+
     def test_empty_search_and_symlink_are_rejected(self):
         (self.site / "search/search_index.json").write_text('{"docs":[]}')
         (self.site / "leak").symlink_to(self.root / "source.md")
