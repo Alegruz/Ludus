@@ -22,6 +22,11 @@ than opening a guide.
 - Use **File → Open Sample** for writable copies of Cornell Box, Live Edit Game,
   Scripted Game or the installed SDK example. Each copy has its own folder;
   sample originals remain available for starting again.
+- Select **Play → Play Web Sample** for Cornell Box, Live Edit Game or Scripted
+  Game. Each has a shipped WebAssembly player inside the page: no SDK selection,
+  setup or local compilation is required. Close it with **Stop and close** or
+  Escape. Live Edit Game and Scripted Game support Pause/Resume and Restart;
+  Scripted Game opens its encounter after two Space presses on the focused canvas.
 - Use **Save and Download Project Folder** or **Download Project Folder** to
   export a `.tar` archive. The latter saves open script and scene edits before
   exporting. Extract the archive into a folder on your computer, then reopen
@@ -51,11 +56,17 @@ so the application cannot confirm whether you accepted or cancelled a download.
 
 ## Desktop actions
 
+Web Play runs the shipped sample build, including its compiled scripts and
+assets. Workspace source/data edits do not modify that prebuilt player. Download
+the project and rebuild on desktop to run those changes. Imported copies retain
+Web Play when their `ludus.web.json` identifies a shipped sample. Other imported
+projects need their own web build; the console-only SDK example has no game
+player. The browser does not compile C++ or cook edited Luau scripts.
+
 Local project creation/setup, CMake builds, native Run/Play, code reload, RAD
 debugging, release packaging, and audio import/preview require the desktop
 editor in this increment. Their tool adapters cannot start native processes in
 a browser. The browser preview does not include a remote build service.
 
-The same Qt shell can serve a future macOS editor. Native macOS support still
-needs editor setup/launcher/build validation; a game viewport also requires a
-working graphics backend. See the [desktop editor guide](../../development/editor-workspace.md).
+See the [desktop editor guide](../../development/editor-workspace.md) for native
+project setup and rebuilding downloaded changes.

@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from editor_web import PAYLOAD, download, extract, validate_package
+from editor_web import PAYLOAD, PLAYER_PAYLOAD, PLAYERS, download, extract, validate_package
 
 
 class EditorPackageTests(unittest.TestCase):
@@ -16,22 +16,35 @@ class EditorPackageTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.site = Path(self.directory.name)
-        for name in PAYLOAD:
+        for name in (*PAYLOAD, *PLAYER_PAYLOAD):
+            (self.site / name).parent.mkdir(parents=True, exist_ok=True)
             (self.site / name).write_text("ludus_editor.wasm")
         (self.site / "ludus_editor.wasm").write_bytes(b"\0asm\x01\0\0\0\x05\x06\x01\x01\x80\x04\x80\x20")
+        for sample in PLAYERS:
+            (self.site / "players" / sample / "game.wasm").write_bytes((self.site / "ludus_editor.wasm").read_bytes())
+            (self.site / "players" / sample / "game.js").write_text("game.wasm")
         (self.site / "licenses").mkdir()
-        for name in ("Ludus.txt", "Qt-LGPL-3.0.txt", "Emscripten.txt", "miniaudio.txt", "yyjson.txt"):
+        for name in ("Ludus.txt", "Qt-LGPL-3.0.txt", "Emscripten.txt", "miniaudio.txt", "yyjson.txt", "Luau.txt", "Luau-lua.txt", "emdawnwebgpu.txt", "webgpu-native.txt"):
             (self.site / "licenses" / name).write_text("notice")
         self.manifest()
 
     def manifest(self, **values):
         data = {"single_threaded": True, "sha256": {
-            name: hashlib.sha256((self.site / name).read_bytes()).hexdigest() for name in PAYLOAD}}
+            name: hashlib.sha256((self.site / name).read_bytes()).hexdigest() for name in (*PAYLOAD, *PLAYER_PAYLOAD)}}
         data.update(values)
         (self.site / "build-info.json").write_text(json.dumps(data))
 
     def test_complete_package(self):
         validate_package(self.site)
+
+    def test_player_is_required_and_checked(self):
+        asset = self.site / "players/live-edit-game/game.wasm"
+        asset.write_bytes(b"broken")
+        with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+            validate_package(self.site)
+        asset.unlink()
+        with self.assertRaisesRegex(ValueError, "Missing or symlinked"):
+            validate_package(self.site)
 
     def test_icon_is_required_in_browser_payload(self):
         (self.site / "ludus-icon.png").unlink()

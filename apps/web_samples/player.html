@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ludus web sample</title>
+<style>
+body { margin: 0; background: #101922; color: #edf3f7; font: 15px system-ui; }
+header { padding: 10px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+button { padding: 6px 12px; cursor: pointer; }
+canvas { display: block; width: 100%; height: calc(100vh - 100px); outline: none; }
+p { margin: 8px 10px; }
+</style>
+<header><strong id="title">Ludus sample</strong><button id="pause" hidden>Pause</button><button id="restart">Restart</button><span id="status" role="status">Loading…</span></header>
+<p id="instructions">Click the canvas to focus. Scripted Game: A/D or arrows and Space. Live Edit Game: watch the bouncing color animation.</p>
+<canvas id="canvas" width="800" height="600" tabindex="0" aria-label="Game canvas"></canvas>
+<script src="player.js"></script>
+<script src="game.js"></script>
+</html>

@@ -56,6 +56,7 @@ endif()
 # buffer live in a library so offscreen tests can exercise them without creating
 # widgets or launching tools. All headers are private (src/internal).
 add_library(ludus_editor_core STATIC
+    src/browser_player.cpp
     src/internal/tool_process.h
     src/internal/play_process.h
     src/internal/source_watch.h

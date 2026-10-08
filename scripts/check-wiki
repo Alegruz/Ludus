@@ -18,6 +18,16 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent / "python"))
 from documentation import digest, sources
 
+# Application documents still undergo link/asset validation. Keep this inventory
+# explicit so unrelated HTML cannot bypass the authored-page search gate, and
+# standalone documentation checks do not depend on browser build tools.
+APPLICATION_PAGES = {
+    "editor/index.html",
+    "editor/players/cornell-box/index.html",
+    "editor/players/live-edit-game/index.html",
+    "editor/players/scripted-game/index.html",
+}
+
 
 def check_sources(root, site):
     """Require exact source coverage and reject stale or altered build outputs."""
@@ -94,7 +104,7 @@ def check(root, site, config, documentation_only=False):
     pages = {
         path.relative_to(site).as_posix(): Page(path.read_text(encoding="utf-8"))
         for path in site.rglob("*.html") if not path.is_symlink()
-        and not (documentation_only and path.relative_to(site).as_posix() == "editor/index.html")
+        and not (documentation_only and path.relative_to(site).as_posix() in APPLICATION_PAGES)
     }
 
     def destination(value, origin):
@@ -159,7 +169,7 @@ def check(root, site, config, documentation_only=False):
                 manifest = json.loads((site / "documentation-sources.json").read_text(encoding="utf-8"))
                 static_pages = {entry["output"] for entry in manifest.get("assets", [])
                                 if entry["source"].endswith(".html")}
-            for missing in sorted(set(pages) - {"404.html", "editor/index.html"} - static_pages - indexed):
+            for missing in sorted(set(pages) - {"404.html"} - APPLICATION_PAGES - static_pages - indexed):
                 failures.append(f"Page missing from search index: {missing}")
     except (OSError, ValueError, KeyError, TypeError) as error:
         failures.append(f"Invalid search index: {error}")

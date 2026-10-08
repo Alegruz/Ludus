@@ -14,7 +14,7 @@ workspace behavior without solving the renderer/backend gap.
 
 ## Reproduce the Pages payload
 
-Use Python 3.12 or newer on Linux or macOS:
+Use Python 3.12 or newer on Linux x64, with Clang/LLD 18 installed:
 
 ```sh
 python scripts/build-web-editor --bootstrap
@@ -28,6 +28,21 @@ is in `config/editor_web_toolchain.json`; the compiler/WebGPU pins remain in
 `config/web_toolchain.json`. Qt is built from source with the engine SDK because
 prebuilt WebAssembly Qt requires its matching Emscripten version. A source build
 with Ludus's newer pinned SDK needs validation whenever either pin changes.
+
+The same build also prepares the pinned Luau compiler/analyzer and shader tools,
+then builds Cornell Box, Live Edit Game and Scripted Game as standalone static
+web players. These compile the existing sample C++ implementations; Scripted
+Game cooks its actual Luau package on the build host and links the Wasm provider.
+Cornell Box yields asynchronous device/pipeline creation through Asyncify. The
+players use the public browser RHI with WebGPU/WebGL 2 fallback and independent
+canvases; closing their iframe releases the entire player runtime. Native
+GameHost processes and dynamic module loading are not needed for web playback.
+
+Player assets under `players/<sample>/` are required and hash-checked alongside
+the editor payload. Every Wasm module uses the bounded single-threaded memory
+policy. The package includes Luau and WebGPU notices. A project opts into a
+shipped player with `ludus.web.json` (`version: 1`, `player` equal to a shipped
+sample identifier). Arbitrary URLs and unknown identifiers are rejected.
 
 This static Qt build uses no C++ exceptions, one thread and Asyncify for the
 existing modal dialogs. It needs no cross-origin isolation headers. The editor

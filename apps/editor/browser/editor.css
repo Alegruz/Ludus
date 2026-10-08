@@ -14,3 +14,8 @@ main { position: relative; flex: 1; min-height: 0; }
 #loading button { padding: 9px 18px; margin: 8px auto; background: #98c9ff; color: #121923; border: 0; border-radius: 5px; cursor: pointer; }
 footer { padding: 7px 18px; font-size: 12px; }
 @media (max-width: 640px) { header { flex-wrap: wrap; gap: 8px; } header strong { order: -1; width: 100%; } aside { font-size: 12px; } }
+dialog#web-player { width: min(1100px, 94vw); height: 90vh; max-width: 96vw; max-height: 96vh; padding: 12px; color: #edf3f7; background: #15202a; border: 1px solid #56727f; }
+dialog#web-player::backdrop { background: #000a; }
+.player-heading { display: flex; justify-content: space-between; align-items: center; }
+#web-player p { margin: 8px 0; }
+#web-player-frame { display: block; width: 100%; height: calc(100% - 80px); border: 0; }

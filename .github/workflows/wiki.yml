@@ -21,7 +21,7 @@ jobs:
   editor:
     name: Build or reuse browser editor
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -33,7 +33,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: out/editor-pages
-          key: editor-pages-v1-${{ runner.os }}-${{ hashFiles('apps/editor/**', 'examples/cornell-box/**', 'examples/live-edit-game/**', 'examples/scripted-game/**', 'examples/editor-sdk-project/**', 'modules/**', 'third_party/**', 'cmake/**', 'CMakeLists.txt', 'config/*.json', 'scripts/build-web-editor', 'scripts/python/editor_web.py', 'scripts/python/web_package.py', 'docs/wiki/editor/index.html', 'docs/wiki/assets/ludus-*.png') }}
+          key: editor-pages-v1-${{ runner.os }}-${{ hashFiles('apps/editor/**', 'apps/web_samples/**', 'scripts/script-provider', 'scripts/script-interaction', 'scripts/luau-probe', 'scripts/python/ludus_tools/behavior*.py', 'tools/reflection/**', 'examples/cornell-box/**', 'examples/live-edit-game/**', 'examples/scripted-game/**', 'examples/editor-sdk-project/**', 'modules/**', 'third_party/**', 'cmake/**', 'CMakeLists.txt', 'config/*.json', 'scripts/build-web-editor', 'scripts/python/editor_web.py', 'scripts/python/web_package.py', 'docs/wiki/editor/index.html', 'docs/wiki/assets/ludus-*.png') }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
@@ -51,24 +51,61 @@ jobs:
             out/editor-tools/host
             out/host-tools/emsdk
             out/host-tools/venv
+            out/luau-probe
+            out/script-interaction
+            out/shader-tools
           key: editor-tools-v1-${{ runner.os }}-${{ hashFiles('config/editor_web_toolchain.json', 'config/web_toolchain.json', 'config/tool_versions.json', 'scripts/python/editor_web.py') }}
-      - name: Compile the existing Qt editor for WebAssembly
+      - name: Install native tools for precompiled web samples
+        if: steps.payload.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18
+      - name: Compile the Qt editor and playable samples for WebAssembly
         if: steps.payload.outputs.cache-hit != 'true'
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
         run: python scripts/build-web-editor --bootstrap
       - name: Validate editor assets, memory and notices
+        id: validate-editor
         run: python scripts/build-web-editor --check-package
       - uses: actions/upload-artifact@v4
+        if: always() && steps.validate-editor.outcome == 'success'
         with:
           name: browser-editor
           path: out/editor-pages
           if-no-files-found: error
           retention-days: 7
 
+  sample-playback:
+    name: Playable web samples (software GPU)
+    needs: editor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: browser-editor
+          path: out/editor-pages
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify playable samples in Chromium
+        run: |
+          npm ci --prefix tools/web-browser-tests
+          cd tools/web-browser-tests
+          npx playwright install --with-deps chromium
+          node web_samples.mjs ../../out/editor-pages ../../out/web-sample-qa
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-sample-screenshots
+          path: out/web-sample-qa
+          if-no-files-found: ignore
+
   build:
     name: Build and check wiki
-    needs: editor
+    needs: [editor, sample-playback]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

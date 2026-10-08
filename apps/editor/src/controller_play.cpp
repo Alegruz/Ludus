@@ -1,3 +1,4 @@
+#include "internal/browser_player.h"
 #include "internal/controller.h"
 
 #include <ludus/foundation/base/types.h>
@@ -9,6 +10,10 @@
 #include <QJsonObject>
 
 #include <cstring>
+
+#if defined(Q_OS_WASM)
+extern "C" void LudusBrowserPlaySample(const char* player);
+#endif
 
 namespace ludus::editor
 {
@@ -80,6 +85,10 @@ Capabilities EditorController::Caps() const
 
 bool EditorController::CanPlay() const
 {
+#if defined(Q_OS_WASM)
+    return State_.Document == DocumentState::ProjectLoaded && !State_.Busy() &&
+           !BrowserPlayer(State_.DescriptorPath).isEmpty();
+#else
     return QFileInfo(Tooling_.PythonPath).isExecutable() && QFileInfo::exists(Tooling_.AdapterPath) &&
            QFileInfo::exists(QDir(Tooling_.ToolingRoot).filePath(QStringLiteral("scripts/python/play_tool.py"))) &&
            State_.Document == DocumentState::ProjectLoaded && State_.HasSaved && !SetupCheckPending_ &&
@@ -92,6 +101,7 @@ bool EditorController::CanPlay() const
             State_.Saved.Preset == QStringLiteral("linux-clang-development") ||
             State_.Saved.Preset == QStringLiteral("macos-clang-debug") ||
             State_.Saved.Preset == QStringLiteral("macos-clang-development"));
+#endif
 }
 
 bool EditorController::CanBuildReload() const
@@ -116,6 +126,11 @@ void EditorController::Play()
     {
         return;
     }
+#if defined(Q_OS_WASM)
+    const auto player = BrowserPlayer(State_.DescriptorPath).toUtf8();
+    LudusBrowserPlaySample(player.constData());
+    return;
+#endif
     if (State_.ProjectEpoch == ~uint64{0})
     {
         return;
