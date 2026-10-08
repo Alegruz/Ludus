@@ -419,15 +419,15 @@ void RasterDiscardSubmission() noexcept
         webgpu::RasterDiscardSubmission();
     }
 }
-RasterStatus LifetimeUpload(foundation::usize transfer,
+RasterStatus LifetimeUpload(usize transfer,
                             const BufferDescription& info,
-                            foundation::usize buffer,
-                            const foundation::uint8* bytes,
-                            foundation::usize size,
-                            foundation::uint32 request) noexcept
+                            const internal::LifetimeUploadTarget& uploadTarget,
+                            const uint8* bytes,
+                            usize size) noexcept
 {
-    return gActive == Backend::WebGL2 ? webgl::LifetimeUpload(transfer, info, buffer, bytes, size, request)
-                                      : webgpu::LifetimeUpload(transfer, info, buffer, bytes, size, request);
+
+    return gActive == Backend::WebGL2 ? webgl::LifetimeUpload(transfer, info, uploadTarget, bytes, size)
+                                      : webgpu::LifetimeUpload(transfer, info, uploadTarget, bytes, size);
 }
 RasterStatus
 LifetimeReadback(foundation::usize transfer, BufferRole role, const internal::LifetimeCopyRange& range) noexcept

@@ -119,11 +119,12 @@ VkBufferMemoryBarrier LifetimeVulkanBarrier(VkBuffer buffer) noexcept
 } // namespace
 RasterStatus LifetimeUpload(usize transferSlot,
                             const BufferDescription& info,
-                            usize bufferSlot,
+                            const internal::LifetimeUploadTarget& uploadTarget,
                             const uint8* bytes,
-                            usize size,
-                            uint32) noexcept
+                            usize size) noexcept
 {
+    const auto bufferSlot = uploadTarget.Buffer;
+
     auto& transfer = gLifetimeVulkan[0][transferSlot];
     if (transfer.Busy)
     {

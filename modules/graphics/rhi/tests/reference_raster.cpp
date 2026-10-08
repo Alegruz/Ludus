@@ -23,13 +23,9 @@ void Reset() noexcept
             status = RasterStatus::Pending;
         }
     }
-    for (auto& bytes : BufferBytes)
+    for (auto& size : BufferSizes)
     {
-        bytes.clear();
-    }
-    for (auto& bytes : ReadbackBytes)
-    {
-        bytes.clear();
+        size = 0;
     }
     for (auto& count : Creates)
     {
@@ -68,7 +64,12 @@ RasterCapabilities RasterLimits() noexcept
 RasterStatus
 RasterCreateBuffer(usize slot, const BufferDescription&, std::span<const uint8> bytes, uint32 request) noexcept
 {
-    reference::BufferBytes[slot].assign(bytes.begin(), bytes.end());
+    if (bytes.size() > internal::LIFETIME_TRANSFER_BYTES)
+    {
+        return RasterStatus::OutOfMemory;
+    }
+    std::memcpy(reference::BufferBytes[slot], bytes.data(), bytes.size());
+    reference::BufferSizes[slot] = bytes.size();
     return Created(internal::RasterKind::Buffer, request);
 }
 RasterStatus RasterCreateTexture(usize, const TextureDescription&, const TextureUpload&, uint32 request) noexcept
@@ -134,16 +135,19 @@ void RasterDiscardSubmission() noexcept
 }
 RasterStatus LifetimeUpload(usize transfer,
                             const BufferDescription&,
-                            usize buffer,
+                            const internal::LifetimeUploadTarget& uploadTarget,
                             const uint8* bytes,
-                            usize size,
-                            uint32 request) noexcept
+                            usize size) noexcept
 {
+    const auto buffer = uploadTarget.Buffer;
+    const auto request = uploadTarget.Request;
+
     if (reference::TransferStart != RasterStatus::Ready)
     {
         return reference::TransferStart;
     }
-    reference::BufferBytes[buffer].assign(bytes, bytes + size);
+    std::memcpy(reference::BufferBytes[buffer], bytes, size);
+    reference::BufferSizes[buffer] = size;
     reference::Transfers[0][transfer] = RasterStatus::Pending;
     ++reference::Copies;
     return Created(internal::RasterKind::Buffer, request);
@@ -158,8 +162,7 @@ RasterStatus LifetimeReadback(usize transfer, BufferRole, const internal::Lifeti
         return reference::TransferStart;
     }
     const auto& bytes = reference::BufferBytes[buffer];
-    reference::ReadbackBytes[transfer].assign(bytes.begin() + static_cast<isize>(offset),
-                                              bytes.begin() + static_cast<isize>(offset + size));
+    std::memcpy(reference::ReadbackBytes[transfer], bytes + offset, size);
     reference::Transfers[1][transfer] = RasterStatus::Pending;
     ++reference::Copies;
     return RasterStatus::Ready;
@@ -172,7 +175,7 @@ RasterStatus LifetimeCopyReadback(usize slot, uint8* output, usize size) noexcep
 {
     if (reference::ReadbackCopy == RasterStatus::Ready)
     {
-        std::memcpy(output, reference::ReadbackBytes[slot].data(), size);
+        std::memcpy(output, reference::ReadbackBytes[slot], size);
     }
     else
     {

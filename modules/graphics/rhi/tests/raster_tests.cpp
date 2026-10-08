@@ -530,7 +530,7 @@ TEST_CASE("Upload validation cancellation and memory failures retain the right o
     reference::Transfers[0][0] = RasterStatus::Ready;
     BufferHandle buffer;
     REQUIRE(TakeUploadedBuffer(session.Device, ticket, buffer) == RasterStatus::Ready);
-    CHECK(reference::BufferBytes[0].size() == 8);
+    CHECK(reference::BufferSizes[0] == 8);
     CHECK(reference::BufferBytes[0][6] == 0);
     CHECK(reference::BufferBytes[0][7] == 0);
 }

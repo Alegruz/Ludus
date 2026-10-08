@@ -117,8 +117,8 @@ SubmitCommands(DeviceHandle device, SurfaceHandle surface, CommandBatch& batch, 
 /// @param bytes Borrowed byte pointer; non-null with byteCount == description.Size.
 /// @param byteCount Bytes copied, nonzero and at most TransferBytes; buffer-role alignment applies.
 /// @param output Null ticket receiving ownership on Pending; failures preserve it.
-/// PollLifetime/GetStatus submits and polls without waiting. TakeUploadedBuffer transfers a Ready
-/// immutable result; Release cancels publication while retaining in-flight staging until completion.
+/// The copy is submitted before return; PollLifetime/GetStatus polls without waiting. TakeUploadedBuffer transfers a
+/// Ready immutable result; Release cancels publication while retaining in-flight staging until completion.
 [[nodiscard]] RasterStatus RequestBufferUpload(DeviceHandle device,
                                                const BufferDescription& description,
                                                const ludus::foundation::uint8* bytes,

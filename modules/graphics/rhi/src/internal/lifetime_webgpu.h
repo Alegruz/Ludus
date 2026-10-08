@@ -107,11 +107,13 @@ RasterStatus LifetimeWebStage(LifetimeWebTransfer& transfer, bool readback) noex
 } // namespace
 RasterStatus LifetimeUpload(usize transferSlot,
                             const BufferDescription& info,
-                            usize bufferSlot,
+                            const internal::LifetimeUploadTarget& uploadTarget,
                             const uint8* bytes,
-                            usize size,
-                            uint32 request) noexcept
+                            usize size) noexcept
 {
+    const auto bufferSlot = uploadTarget.Buffer;
+    const auto request = uploadTarget.Request;
+
     auto& transfer = gLifetimeWeb[0][transferSlot];
     if (transfer.Busy || transfer.Callbacks != 0)
     {

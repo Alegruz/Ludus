@@ -746,7 +746,7 @@ RasterStatus RequestBufferUpload(DeviceHandle device,
             }
             std::memcpy(record.Indices.GetData(), gUploadBytes[slot], byteCount);
         }
-        return backend::LifetimeUpload(slot, description, bufferSlot, gUploadBytes[slot], padded, record.Request);
+        return backend::LifetimeUpload(slot, description, {bufferSlot, record.Request}, gUploadBytes[slot], padded);
     });
     if (created != RasterStatus::Ready && created != RasterStatus::Pending)
     {

@@ -62,11 +62,12 @@ RasterStatus LifetimeGlFence(LifetimeGlTransfer& transfer) noexcept
 } // namespace
 RasterStatus LifetimeUpload(usize transferSlot,
                             const BufferDescription& info,
-                            usize bufferSlot,
+                            const internal::LifetimeUploadTarget& uploadTarget,
                             const uint8* bytes,
-                            usize size,
-                            uint32) noexcept
+                            usize size) noexcept
 {
+    const auto bufferSlot = uploadTarget.Buffer;
+
     auto& transfer = gLifetimeGl[0][transferSlot];
     const bool index = info.Role == BufferRole::Index16 || info.Role == BufferRole::Index32;
     const auto ready = LifetimeGlStage(transfer, false, index);

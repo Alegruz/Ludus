@@ -88,10 +88,9 @@ void RasterReset() noexcept;
 void RasterShutdown() noexcept;
 RasterStatus LifetimeUpload(foundation::usize,
                             const BufferDescription&,
-                            foundation::usize,
+                            const internal::LifetimeUploadTarget&,
                             const foundation::uint8*,
-                            foundation::usize,
-                            foundation::uint32) noexcept;
+                            foundation::usize) noexcept;
 RasterStatus LifetimeReadback(foundation::usize, BufferRole, const internal::LifetimeCopyRange&) noexcept;
 RasterStatus LifetimePollTransfer(bool, foundation::usize) noexcept;
 RasterStatus LifetimeCopyReadback(foundation::usize, foundation::uint8*, foundation::usize) noexcept;
@@ -131,10 +130,9 @@ void RasterReset() noexcept;
 void RasterShutdown() noexcept;
 RasterStatus LifetimeUpload(foundation::usize,
                             const BufferDescription&,
-                            foundation::usize,
+                            const internal::LifetimeUploadTarget&,
                             const foundation::uint8*,
-                            foundation::usize,
-                            foundation::uint32) noexcept;
+                            foundation::usize) noexcept;
 RasterStatus LifetimeReadback(foundation::usize, BufferRole, const internal::LifetimeCopyRange&) noexcept;
 RasterStatus LifetimePollTransfer(bool, foundation::usize) noexcept;
 RasterStatus LifetimeCopyReadback(foundation::usize, foundation::uint8*, foundation::usize) noexcept;

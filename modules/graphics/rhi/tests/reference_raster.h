@@ -1,6 +1,5 @@
 #pragma once
 #include "internal/raster.h"
-#include <vector>
 namespace ludus::graphics::rhi::reference
 {
 inline bool ProfileAvailable = true;
@@ -14,8 +13,9 @@ inline foundation::usize Creates[8]{};
 inline foundation::usize Destroys[8]{};
 inline foundation::usize Draws = 0;
 inline internal::RasterPacket Packet;
-inline std::vector<foundation::uint8> BufferBytes[internal::RASTER_CAPACITY];
-inline std::vector<foundation::uint8> ReadbackBytes[internal::LIFETIME_TRANSFERS];
+inline foundation::uint8 BufferBytes[internal::RASTER_CAPACITY][internal::LIFETIME_TRANSFER_BYTES]{};
+inline foundation::usize BufferSizes[internal::RASTER_CAPACITY]{};
+inline foundation::uint8 ReadbackBytes[internal::LIFETIME_TRANSFERS][internal::LIFETIME_TRANSFER_BYTES]{};
 inline RasterStatus Transfers[2][internal::LIFETIME_TRANSFERS];
 inline RasterStatus TransferStart = RasterStatus::Ready;
 inline RasterStatus ReadbackCopy = RasterStatus::Ready;

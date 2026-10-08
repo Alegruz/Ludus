@@ -91,6 +91,11 @@ struct RasterPacket final
     foundation::uint32 InstanceCount = 0;
     bool Index32 = false;
 };
+struct LifetimeUploadTarget final
+{
+    foundation::usize Buffer = 0;
+    foundation::uint32 Request = 0;
+};
 struct LifetimeCopyRange final
 {
     foundation::usize Buffer = 0;
@@ -147,10 +152,9 @@ void RasterReset() noexcept;
 void RasterShutdown() noexcept;
 RasterStatus LifetimeUpload(foundation::usize,
                             const BufferDescription&,
-                            foundation::usize,
+                            const internal::LifetimeUploadTarget&,
                             const foundation::uint8*,
-                            foundation::usize,
-                            foundation::uint32) noexcept;
+                            foundation::usize) noexcept;
 RasterStatus LifetimeReadback(foundation::usize, BufferRole, const internal::LifetimeCopyRange&) noexcept;
 RasterStatus LifetimePollTransfer(bool, foundation::usize) noexcept;
 RasterStatus LifetimeCopyReadback(foundation::usize, foundation::uint8*, foundation::usize) noexcept;

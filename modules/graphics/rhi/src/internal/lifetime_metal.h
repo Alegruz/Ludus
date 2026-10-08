@@ -54,11 +54,12 @@ RasterStatus LifetimeMetalCopy(LifetimeMetalTransfer& transfer,
 } // namespace
 RasterStatus LifetimeUpload(usize transferSlot,
                             const BufferDescription&,
-                            usize bufferSlot,
+                            const internal::LifetimeUploadTarget& uploadTarget,
                             const uint8* bytes,
-                            usize size,
-                            uint32) noexcept
+                            usize size) noexcept
 {
+    const auto bufferSlot = uploadTarget.Buffer;
+
     @autoreleasepool
     {
         auto& transfer = gLifetimeMetal[0][transferSlot];
