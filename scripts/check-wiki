@@ -17,9 +17,16 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "python"))
 from documentation import digest, sources
-from editor_web import PLAYERS
 
-APPLICATION_PAGES = {"editor/index.html", *(f"editor/players/{sample}/index.html" for sample in PLAYERS)}
+# Application documents still undergo link/asset validation. Keep this inventory
+# explicit so unrelated HTML cannot bypass the authored-page search gate, and
+# standalone documentation checks do not depend on browser build tools.
+APPLICATION_PAGES = {
+    "editor/index.html",
+    "editor/players/cornell-box/index.html",
+    "editor/players/live-edit-game/index.html",
+    "editor/players/scripted-game/index.html",
+}
 
 
 def check_sources(root, site):
