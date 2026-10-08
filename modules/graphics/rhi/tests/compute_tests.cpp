@@ -1,6 +1,7 @@
 #include "internal/lifecycle.h"
 #include "reference_raster.h"
 
+#include <ludus/graphics/rhi/compute.h>
 #include <ludus/graphics/rhi/graph.h>
 
 #include <catch2/catch_test_macros.hpp>

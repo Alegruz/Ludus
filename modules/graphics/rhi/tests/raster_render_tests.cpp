@@ -1,6 +1,7 @@
 #include <chrono>
 #include <cstring>
 #include <ludus/foundation/base/types.h>
+#include <ludus/graphics/rhi/compute.h>
 #include <ludus/graphics/rhi/lifetime.h>
 #include <thread>
 

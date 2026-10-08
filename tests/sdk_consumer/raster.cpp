@@ -1,6 +1,7 @@
 #include <ludus/foundation/base/config.h>
 #include <ludus/foundation/base/types.h>
 #include <ludus/foundation/time/time.hpp>
+#include <ludus/graphics/rhi/compute.h>
 #include <ludus/graphics/rhi/lifetime.h>
 
 #include "cull.h"

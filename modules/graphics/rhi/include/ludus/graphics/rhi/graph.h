@@ -3,6 +3,7 @@
 #include <ludus/foundation/base/types.h>
 
 #include <ludus/graphics/rhi/compute.h>
+#include <ludus/graphics/rhi/lifetime.h>
 
 namespace ludus::graphics::rhi
 {

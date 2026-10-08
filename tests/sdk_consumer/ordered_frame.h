@@ -1,4 +1,5 @@
 #pragma once
+#include <ludus/graphics/rhi/compute.h>
 #include <ludus/graphics/rhi/graph.h>
 // Shared acceptance packet authoring for the installed SDK and native pixel test.
 namespace ludus::qa

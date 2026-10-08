@@ -2,7 +2,7 @@
 
 #include <ludus/foundation/base/types.h>
 
-#include <ludus/graphics/rhi/lifetime.h>
+#include <ludus/graphics/rhi/raster.h>
 
 namespace ludus::graphics::rhi
 {
