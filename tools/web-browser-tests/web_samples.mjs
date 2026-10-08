@@ -24,7 +24,9 @@ const server = createServer(async (request, response) => {
 await new Promise(done => server.listen(0, '127.0.0.1', done));
 const browser = await chromium.launch({
   executablePath: process.env.LUDUS_QA_BROWSER || undefined,
-  args: ['--enable-unsafe-webgpu', '--enable-unsafe-swiftshader', '--use-angle=swiftshader'],
+  args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan',
+    '--use-webgpu-adapter=swiftshader', '--use-angle=swiftshader',
+    '--use-vulkan=swiftshader', '--disable-vulkan-surface', '--enable-unsafe-swiftshader'],
 });
 async function shot(page, name) {
   const box = await page.locator('canvas').boundingBox();
@@ -39,12 +41,18 @@ try {
     const page = await browser.newPage({viewport: {width: 1000, height: 760}});
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(`http://127.0.0.1:${server.address().port}/players/${sample}/`, {waitUntil: 'domcontentloaded', timeout: 60000});
-    await page.waitForFunction(() => document.getElementById('status').dataset.state === 'playing', undefined, {timeout: 60000});
+    page.on('console', message => console.log(sample, message.type(), message.text()));
+    await page.goto(`http://127.0.0.1:${server.address().port}/players/${sample}/index.html`, {waitUntil: 'domcontentloaded', timeout: 60000});
+    await page.waitForFunction(() => document.getElementById('status').dataset.state === 'playing' &&
+      Number(document.getElementById('status').dataset.frames) >= 3, undefined, {timeout: 60000});
+    // Submission precedes browser composition. Let the compositor present the
+    // completed frames before inspecting the canvas region.
+    await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
     const first = await shot(page, sample + '-playing');
     if (sample === 'cornell-box') {
       const colors = new Set();
       for (let index = 0; index < first.png.data.length; index += 256) colors.add(first.png.data.subarray(index, index + 3).toString('hex'));
+      console.log(sample, {width: first.png.width, height: first.png.height, colors: colors.size, center: first.pixel});
       assert.ok(colors.size > 20, 'Cornell must render a lit scene, not an empty/clear canvas');
     } else {
       await page.locator('#pause').click();

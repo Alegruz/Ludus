@@ -151,7 +151,8 @@ public:
         {
             return false;
         }
-        const auto pipeline = rhi::CreatePipeline({ .Vertex = mVertex, .Fragment = mFragment, .Uniform = mUniform }, mPipeline);
+        const auto pipeline =
+            rhi::CreatePipeline({ .Vertex = mVertex, .Fragment = mFragment, .Uniform = mUniform }, mPipeline);
         if (!ready(mPipeline, pipeline))
         {
             LUDUS_LOG_ERROR(LOG_SAMPLE, "Could not create Cornell box shaders, uniform or pipeline.");
