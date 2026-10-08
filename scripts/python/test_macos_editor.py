@@ -20,6 +20,31 @@ import init_ui
 
 
 class SetupTests(unittest.TestCase):
+    def test_repair_uses_prepared_sdk_instead_of_inherited_sdkroot(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sdk = root / "SDK with spaces"
+            sdk.mkdir()
+            link = root / "out/host-tools/macos-sdk"
+            link.parent.mkdir(parents=True)
+            link.symlink_to(sdk, target_is_directory=True)
+            with patch.object(platform, "system", return_value="Darwin"), \
+                 patch.dict(os.environ, {"SDKROOT": "/incompatible/MacOSX27.sdk",
+                                         "LUDUS_INIT_SHELL_SDKROOT": "/stale/sdk"}):
+                env = editor_tool.engine_setup_environment(root, engine)
+                self.assertEqual(env["SDKROOT"], str(sdk.resolve()))
+                self.assertNotIn("LUDUS_INIT_SHELL_SDKROOT", env)
+                self.assertEqual(os.environ["SDKROOT"], "/incompatible/MacOSX27.sdk")
+                link.unlink()
+                env = editor_tool.engine_setup_environment(root, engine)
+                self.assertNotIn("SDKROOT", env)
+                self.assertNotIn("LUDUS_INIT_SHELL_SDKROOT", env)
+
+    def test_linux_repair_preserves_environment(self):
+        with patch.object(platform, "system", return_value="Linux"), \
+             patch.dict(os.environ, {"SDKROOT": "/custom/sdk"}):
+            self.assertEqual(editor_tool.engine_setup_environment(Path("/tmp"), engine)["SDKROOT"], "/custom/sdk")
+
     def args(self, preset="macos-clang-development", *options):
         return engine.make_parser().parse_args(["init", "--cli", "--with-editor", preset, *options])
 

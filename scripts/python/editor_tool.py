@@ -66,6 +66,26 @@ _UNKNOWN_PROCESS_OWNERS: list["OwnedProcess"] = []
 FILE_API_CLIENT = "ludus-editor"
 
 
+def engine_setup_environment(root: Path, engine) -> dict[str, str]:
+    """Prepare the editor's own engine using its managed Apple toolchain.
+
+    GUI launch environments can contain an unrelated SDKROOT. This operation
+    explicitly chooses the editor's engine, so reuse its prepared SDK instead.
+    Without a prepared SDK, let init probe installed candidates normally.
+    Shell init keeps honoring explicit SDKROOT overrides independently.
+    """
+    env = engine.tool_env(root)
+    if platform.system() == "Darwin":
+        sdk = root / "out/host-tools/macos-sdk"
+        env.pop("LUDUS_INIT_SHELL_SDKROOT", None)
+        if sdk.is_dir():
+            env["SDKROOT"] = str(sdk.resolve())
+        else:
+            env.pop("SDKROOT", None)
+    env["CI"] = "true"
+    return env
+
+
 class ProtocolError(Exception):
     """Fatal protocol framing/version/type failure; cleans up then exits 2."""
 
@@ -1102,8 +1122,7 @@ class Operation:
                 root = self._context.tooling_root
                 from ludus_tools.native import default_profile
                 profile = descriptor.preset if descriptor else default_profile()
-                env = self._context.engine.tool_env(root)
-                env.update(CI="true")
+                env = engine_setup_environment(root, self._context.engine)
                 self._run_stage("configuring", [str(root / "scripts/init"), profile, "--preset-only", "--cli", "--no-system-install"], root, env, "ConfigureFailed")
                 self._run_stage("building", [str(root / "scripts/build"), profile], root, env, "BuildFailed")
                 if descriptor and "GraphicsRhi" in descriptor.engine.components:
