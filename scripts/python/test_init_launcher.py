@@ -1,7 +1,12 @@
 """Startup selection must bypass Apple's old Python before opening the GUI."""
 import json
+import os
 from pathlib import Path
+import platform
+import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -75,6 +80,41 @@ class LauncherTests(unittest.TestCase):
         executable, arguments = execute.call_args.args
         self.assertEqual(executable, "/prepared/python")
         self.assertEqual(arguments[2:], ["init", "--gui", "--preset", "macos-clang-debug"])
+
+    @unittest.skipUnless(shutil.which("bash"), "shell launcher requires bash")
+    def test_shell_sdk_choice_survives_actual_python_launcher(self):
+        source = Path(init_launcher.__file__).resolve().parents[2]
+        shutil.copy2(source / "init.sh", self.root)
+        scripts = self.root / "scripts/python"
+        scripts.mkdir(parents=True)
+        shutil.copy2(source / "scripts/python/init_launcher.py", scripts)
+        (scripts / "engine.py").write_text(
+            'import json,os\nprint(json.dumps({"sdk":os.environ.get("SDKROOT"),'
+            '"transport":os.environ.get("LUDUS_INIT_SHELL_SDKROOT")}))\n')
+        binaries = self.root / "bin"
+        binaries.mkdir()
+        # Exercise Apple's injection on macOS, not just a mocked environment.
+        python = "/usr/bin/python3" if platform.system() == "Darwin" else sys.executable
+        bootstrap = binaries / "python3"
+        bootstrap.write_text('#!/bin/sh\n'
+                             'if [ "${SDKROOT+x}" = x ]; then exit 72; fi\n'
+                             f'exec {shlex.quote(python)} "$@"\n')
+        bootstrap.chmod(0o755)
+        prepared = self.root / "out/host-tools/venv/bin/python"
+        prepared.parent.mkdir(parents=True)
+        prepared.symlink_to(sys.executable)
+        for choice in (None, "", "/SDK with spaces/explicit.sdk"):
+            with self.subTest(choice=choice):
+                env = os.environ.copy()
+                env["PATH"] = str(binaries) + os.pathsep + env.get("PATH", "")
+                env.pop("SDKROOT", None)
+                if choice is not None:
+                    env["SDKROOT"] = choice
+                result = subprocess.run(["bash", str(self.root / "init.sh"), "--cli"],
+                                        env=env, text=True, stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), {"sdk": choice or None, "transport": None})
 
 
 if __name__ == "__main__":
