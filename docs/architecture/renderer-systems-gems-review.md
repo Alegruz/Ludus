@@ -1,4 +1,4 @@
-# Low-level renderer systems: Gems reference review
+# Low-level renderer systems: reference review and research plan
 
 Status: Design evidence, October 7, 2026; no renderer implementation or benchmark.
 The [architecture](renderer-systems.md) was saved before searching the article map.
@@ -211,6 +211,112 @@ The paper's speedup is not a Ludus result. Full estimator review remains necessa
 before RT4 adoption; similarly, PBRT chapter 15's overview was inspected only as
 a wavefront follow-up source. Denoising/resampling never replaces independent
 raw reference samples in correctness comparisons.
+
+## Conference and journal research plan
+
+This is a contextualized reading plan for the [proposed renderer](renderer-systems.md),
+including Graphics Programming Conference (GPC). The venue ranking and the
+questions/gates below are Ludus engineering judgments. Official programs,
+session descriptions, publication pages and abstracts were checked; this section
+does **not** claim full slide/recording/paper review, companion-code inspection or
+validated implementation results. The actual Gems readings above remain separate
+evidence. A recommended talk is not an adopted algorithm or a dependency.
+
+### Where each venue helps
+
+Use REAC and GPC first for architecture and production constraints, GDC for
+targeted shipping experience, and HPG/JCGT for algorithms and validation. Read
+backend-specific material alongside the relevant API specification and Ludus's
+pinned profile. Select deeper transport research when an effect reaches its phase;
+do not make surveying every venue a prerequisite for the small L0 renderer.
+
+| Venue / publication | Ludus context and review priority |
+| --- | --- |
+| [Rendering Engine Architecture Conference (REAC), 2025 archive](https://enginearchitecture.org/2025.htm) | First priority for Renderer/GDI boundaries, instance processing, shader permutations and pass organization. Use production constraints to challenge maintainability and ownership choices in L0–L5. |
+| [Graphics Programming Conference (GPC), 2025 archive](https://graphicsprogrammingconference.com/archive/2025/) and [2024 archive](https://graphicsprogrammingconference.com/archive/2024/) | First priority alongside REAC. Select backend evolution, debugging, shader infrastructure, portability and path-tracer architecture sessions using the mapping below. |
+| [GDC, Frostbite FrameGraph session](https://www.gdcvault.com/play/1024612/FrameGraph-) | Targeted pass/resource planning and shipping-engine reviews. Ask how much automatic dependency planning GDI needs while retaining a readable authored sequence. |
+| [High-Performance Graphics (HPG), 2026 program](https://highperformancegraphics.net/2026/index.html) | Algorithm/performance review for L5 geometry and RT3–RT4 scaling. Prioritize animated geometry, BVH storage/traversal and reconstruction candidates after collecting Ludus bottlenecks. |
+| [Journal of Computer Graphics Techniques (JCGT)](https://jcgt.org/about.html) | Practical peer-reviewed techniques; author-provided code is available for some papers. Prioritize numerical correctness, sampling, filtering and compact data representations. Check licensing before adapting code. |
+| [Vulkanised, 2026 program](https://www.vulkan.org/events/vulkanised-2026) | RHI completion, frame pacing, hazards, shader tooling and native RT integration. Vulkan-specific mechanisms remain private; separately prove Metal and browser behavior or explicit unsupported results. |
+| [SIGGRAPH Advances in Real-Time Rendering in Games, 2026 course](https://advances.realtimerendering.com/s2026/index.html) | Production effect reviews for L4/L6 and RT2–RT4: sampling/reconstruction, radiance caching, volumetrics and geometry detail. Keep effects separate from baseline lifecycle requirements. |
+| [I3D, 2026 papers](https://i3dsymposium.org/2026/papers.html) | Interactive algorithm reviews, especially RT4 resampling. The ReSTIR PT publication already identified above needs its full estimator reviewed before implementation. |
+| [SIGGRAPH / SIGGRAPH Asia and ACM Transactions on Graphics (TOG)](https://www.siggraph.org/inside-siggraph/publications/) | Deeper material, transport and sampling work when specifying a reference profile or new estimator. Distinguish journal papers from conference-paper tracks. |
+| [Eurographics Symposium on Rendering (EGSR) / Computer Graphics Forum (CGF), 2025 program](https://conferences.eg.org/egsr2025/programme/) | Targeted shading, filtering and light-transport research for L3/L4 and RT1/RT4. Track each paper's actual publication; EGSR's program includes several publication tracks. |
+
+### GPC readings mapped to Ludus
+
+The 2025 talk names and speakers below are verified against the official archive;
+the 2024 Vulkan session is also described on [Khronos's event page](https://www.khronos.org/events/graphics-programming-conference).
+The archive links supply the slides/recordings where available. The final two
+columns are proposed Ludus review outputs, not findings asserted from unread talks.
+
+| Session and attribution | Owning boundary / phase | Question the full review should resolve | Required evidence before changing the design |
+| --- | --- | --- | --- |
+| Julien Koenen and Lukas Feller, “Vulkan in Enshrouded,” GPC 2024 | RHI/GDI; L1–L3 | Which abstraction, memory, synchronization and pipeline-compilation lessons expose gaps in our readiness/retirement contracts? | Upload/build/use/retire traces under overlap, allocation pressure and loss; compare cold pipeline stalls and peak memory. Keep native choices out of public Renderer. |
+| Sidney Just, “The aircraft of Theseus - Shipping X-Plane for 30 years,” GPC 2025 | Backend and shader-tool migration; L1–L5 | Which incremental migration boundaries and driver limitations should our portable profile and package versions account for? | Native/browser shader-layout fixtures, cache invalidation and supported-feature failure paths; preserve the R1 consumer contract during extensions. |
+| Sergey Sharybin, “Blender Cycles: architecture of a unified CPU/GPU path tracer,” GPC 2025 | Renderer transport versus traversal; RT1/RT4 | How should shared transport code, scheduling and interactive cancellation evolve across targets? What measurements justify splitting the initial loop into wavefront queues? | Same-profile raw images across execution variants; divergence/occupancy/dispatch/queue-memory measurements and bounded-queue failures. No immediate Cycles backend or CPU-tracer dependency. |
+| Martin Mittring, “ShaderToHuman (S2H) HLSL/GLSL library for debugging shaders,” GPC 2025 | Shader tools and Renderer inspection; L3 onward | Which diagnostic ideas can work with our SPIR-V/WGSL/GLSL/MSL packages and bounded source/view/pass labels? | A deliberately faulty shader identifies its invocation and inputs; overflow is safe, instrumentation is disabled by default, and readback is asynchronous. Library adoption needs a separate license/API/profile review. |
+| Dominik Lazarek and Philip Hammer, “Visibility Buffer and Deferred Rendering in DOOM: The Dark Ages,” GPC 2025 | Renderer geometry/material reconstruction; L5/L6 | Does a visibility-buffer variant beat our forward/clustered path for the actual geometry and material suite? | Compare CPU/GPU tails, bandwidth and memory, plus masked geometry, derivatives, MSAA and transparent-path correctness. Preserve the direct reference path. A production example alone does not change the default. |
+| Mircea Catana and Peter Bay Bastian, “Bringing Hitman to your pocket,” GPC 2025 | Metal backend, attachment policy and content profiles; L1/L3/L5 | Which tile-GPU constraints require private pass/format choices or authored lower-cost material variants? | Physical Apple-device pass timings and attachment traffic where observable; inspect load/store/resolve intent and image parity. Keep platform adaptation out of scene extraction. |
+| Lukas Feller, “Lessons learned from shipping a GPU Particle System,” GPC 2025 | Shader cooking and future particle adapter; L3/L6 | How should compute variants be admitted and prewarmed without unbounded compilation/cache growth? | Variant inventory, cook times, cache size, first-use/reload behavior and explicit failure budgets. GPU particle queues need their own overflow/lifetime plan before adoption. |
+
+For this task the session descriptions support the choice of readings; their
+implementation details remain pending. In particular, Cycles' experience is a
+reason to scrutinize RT4 scheduling, not proof that a wavefront implementation
+wins for Ludus's initial RT1 workload. The DOOM session is a comparison candidate,
+not proof that our portable forward baseline is obsolete. X-Plane and Hitman
+provide target-specific review cases, not permission to change all API profiles.
+
+### Additional targeted readings
+
+- Max Bukhalov and Egor Orachev, “Geometry rendering and shaders infrastructure
+  in Warhammer 40000: Space Marine 2,” and Nicolas Lopez and Michel Bouchard,
+  “Anvil Rendering Architecture,” [REAC 2025](https://enginearchitecture.org/2025.htm):
+  review the L0/L3/L5 instance, binding and permutation boundaries. Produce an
+  explicit packet/material/variant inventory and a measured comparison before
+  introducing indirection or GPU work generation.
+- Yuriy O'Donnell, [“FrameGraph: Extensible Rendering Architecture in Frostbite,”
+  GDC 2017](https://www.gdcvault.com/play/1024612/FrameGraph-): review L1/GDI pass
+  declarations. Require inspectable attachment preservation, dependency and
+  retirement plans, including shared-target rectangles and async uploads. Do not
+  infer native memory aliasing support on WebGPU from a frame-graph abstraction.
+- Charles Giessen, “Frames in Flight Demystified,” and Lucas Miguel Antunes da
+  Silva, “Solving All Synchronisation Problems with Timeline Semaphores,”
+  [Vulkanised 2026](https://www.vulkan.org/events/vulkanised-2026): review RHI's
+  accepted-use ledger and L1/L2 latency. Require resize/acquisition failure,
+  overlapping resource uses and device-loss traces. CPU completion and arbitrary
+  frame counts must not substitute for native retirement evidence.
+- Mark Jarzynski and Marc Olano, [“Hash Functions for GPU Rendering,” *JCGT* 9(3),
+  pp. 21–38 (2020)](https://jcgt.org/published/0009/03/02/): review RT1 random
+  sample addressing and quality. Supplement hash benchmarks with multi-seed
+  image convergence and pixel/sample/dimension correlation checks on supported
+  shader targets; a fast hash alone does not validate the entire sampler.
+- HPG 2026's [animated-geometry and BVH sessions](https://highperformancegraphics.net/2026/index.html)
+  are discovery entries for RT3's rebuild/refit and storage decisions. Full-paper
+  review must separate custom/software BVH techniques from operations actually
+  exposed by hardware acceleration-structure APIs. Do not promise access to
+  vendor-controlled BVH node layouts or transfer published timings to Ludus.
+
+### Review order and completion criteria
+
+1. **Architecture and lifetime:** Enshrouded Vulkan, X-Plane, REAC infrastructure,
+   Frostbite and Vulkanised. Resolve any L0–L3 ownership/hazard ambiguity first.
+2. **Shader iteration and portability:** ShaderToHuman, particle permutations and
+   Hitman. Specify diagnostic and cooking budgets before adding new variants.
+3. **Independent ray reference:** Cycles architecture and JCGT sampling, alongside
+   the actually inspected Gems/PBRT evidence above. Keep raw RT1 accumulation.
+4. **Measured advanced paths:** DOOM visibility buffers, HPG geometry/BVH work and
+   I3D/Advances transport/reconstruction. Implement only the candidate that answers
+   an observed L5/RT3/RT4 bottleneck at the target quality and maintenance budget.
+
+Each completed review records the exact sections/slides consulted, assumptions,
+applicable profiles, adopted idea or reason for rejection, and the owning contract
+or experiment. Architectural changes go into their existing owner, with this
+review linking the evidence. Implementation carries attribution beside affected
+code and meaningful regression/quality fixtures. Validate target-device timing,
+memory and image/temporal error; distinguish unavailable counters from zero.
+Thanks to the named authors and venue organizers for making these materials
+available. This plan imports no code/assets and establishes no new dependency.
 
 ## Other articles and current research
 

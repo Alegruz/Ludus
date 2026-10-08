@@ -3,9 +3,13 @@
 Status: Proposed design, October 7, 2026, audited against `8162d93`.
 This is an implementation plan, not a shipped renderer or a measured speedup.
 The initial decisions below were saved before opening the Gems article map.
-The [Gems review](renderer-systems-gems-review.md) records the subsequent article
-readings and the concrete revisions now incorporated below. Existing RHI,
-camera, resource and text documents retain their respective detailed contracts.
+The [reference review](renderer-systems-gems-review.md) records the subsequent
+article readings and the concrete revisions now incorporated below. Its
+[conference and journal plan](renderer-systems-gems-review.md#conference-and-journal-research-plan)
+maps GPC, REAC and other sources to Ludus's owners, phases and validation gates;
+recommended full readings remain distinct from completed source inspection.
+Existing RHI, camera, resource and text documents retain their respective detailed
+contracts.
 
 Build a small data-oriented `GraphicsRenderer` over the existing
 [RHI and GraphicsDevice design](rhi-gdi.md). Use immutable frame snapshots,
@@ -791,6 +795,10 @@ required before implementation.
 Optional advanced features must preserve scene/view/material identities and expose
 their own diagnostic data. A tiny scene, simple UI or limited GPU should not pay
 mandatory constant costs for a technique chosen to scale a different workload.
+The [contextualized research plan](renderer-systems-gems-review.md#review-order-and-completion-criteria)
+orders architecture/lifetime and shader-debugging reviews before advanced scaling.
+Record the consulted source sections and a concrete contract change or experiment
+before promoting a program description into an implementation decision.
 
 ## Implementation phases and acceptance
 

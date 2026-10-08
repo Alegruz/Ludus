@@ -205,7 +205,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Game world: Gems article review](architecture/game-world-gems-review.md)
 - [Historical profiling references: critical literature review](architecture/profiling-literature-review.md)
 - [Keyboard input: research and decision record](architecture/keyboard-input-research.md)
-- [Low-level renderer systems: Gems reference review](architecture/renderer-systems-gems-review.md)
+- [Low-level renderer systems: reference review and research plan](architecture/renderer-systems-gems-review.md)
 - [Ludus audio research and decisions](architecture/audio-research.md)
 - [Ludus editor reference reading guide](architecture/editor-reference-reading-guide.md)
 - [Ludus Editor workspace research and design decisions](architecture/editor-workspace-research.md)
