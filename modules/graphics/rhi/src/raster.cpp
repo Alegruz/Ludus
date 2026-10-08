@@ -1,4 +1,4 @@
-#include <ludus/graphics/rhi/lifetime.h>
+#include <ludus/graphics/rhi/graph.h>
 
 #include "internal/lifecycle.h"
 #include "internal/raster.h"
@@ -70,6 +70,13 @@ struct Record final
     bool QueuedPipeline = false;
     BufferDescription Buffer;
     TextureDescription Texture;
+    uint64 TextureRevision = 1;
+    RasterTextureUse TextureUse = RasterTextureUse::Undefined;
+    RasterTextureUse FrameTextureUse = RasterTextureUse::Undefined;
+    bool ColorDefined = false;
+    bool DepthDefined = false;
+    bool FrameColorDefined = false;
+    bool FrameDepthDefined = false;
     usize TextureSlot = 0;
     RasterShaderInfo Shader;
     RasterLayout Layout;
@@ -84,6 +91,13 @@ uint64 gFrameSubmission = 0;
 uint64 gFirstAcceptedSubmission = 0;
 uint64 gLastAcceptedSubmission = 0;
 usize gDrawCount = 0;
+RasterPassInfo gRasterPass;
+bool gSurfaceColorDefined = true;
+bool gSurfaceDepthDefined = false;
+bool gGraphExecuting = false;
+void ResetGraphRecords() noexcept;
+RasterStatus ValidatePacketPass(const RasterPacket&, const RasterPassInfo&, bool) noexcept;
+void RetainPacketTextures(const RasterPacket&) noexcept;
 
 Record& At(RasterKind kind, usize slot) noexcept
 {
@@ -326,6 +340,9 @@ void FrameRetain(RasterKind kind, usize slot) noexcept
     if (!record.InFrame)
     {
         record.InFrame = true;
+        record.FrameTextureUse = record.TextureUse;
+        record.FrameColorDefined = record.ColorDefined;
+        record.FrameDepthDefined = record.DepthDefined;
         ++record.References;
     }
 }
@@ -417,6 +434,17 @@ RasterStatus CreateTexture(DeviceHandle device,
     {
         return RasterStatus::InvalidDescription;
     }
+    if (description.Attachment)
+    {
+        if (!upload.Bytes.empty() || upload.RowPitch != 0)
+        {
+            return RasterStatus::InvalidDescription;
+        }
+        return Publish(RasterKind::Texture, output, [&](usize slot, Record& record) noexcept {
+            record.Texture = description;
+            return backend::RasterCreateTexture(slot, description, upload, record.Request);
+        });
+    }
     const usize row = static_cast<usize>(description.Width) * 4;
     if (upload.RowPitch < row || upload.RowPitch % 4 != 0 || upload.RowPitch > ~usize{0} / description.Height ||
         upload.Bytes.size() != upload.RowPitch * description.Height ||
@@ -426,6 +454,8 @@ RasterStatus CreateTexture(DeviceHandle device,
     }
     return Publish(RasterKind::Texture, output, [&](usize slot, Record& record) noexcept {
         record.Texture = description;
+        record.ColorDefined = true;
+        record.TextureUse = RasterTextureUse::SampledBoth;
         return backend::RasterCreateTexture(slot, description, upload, record.Request);
     });
 }
@@ -685,7 +715,13 @@ ValidatePipeline(DeviceHandle device, const RasterPipelineDescription& descripti
     info.Fragment = RasterAccess::Slot(description.Fragment);
     info.Layout = RasterAccess::Slot(description.Layout);
     info.Depth = description.Depth;
+    if (static_cast<uint8>(description.Target) > static_cast<uint8>(RasterTarget::Rgba8Srgb))
+    {
+        return RasterStatus::InvalidDescription;
+    }
     info.Blend = description.Blend;
+    info.Target = description.Target;
+    info.DepthWrite = description.DepthWrite;
     info.StreamCount = description.Streams.size();
     info.AttributeCount = description.Attributes.size();
     for (usize i = 0; i < info.StreamCount; ++i)
@@ -832,6 +868,7 @@ RasterStatus ValidateDraw(DeviceHandle device, const RasterDraw& draw, RasterPac
         }
         packet.Vertices[i] = RasterAccess::Slot(slice.Buffer);
         packet.Offsets[i] = slice.Offset;
+        packet.Sizes[i] = slice.Size;
     }
     return RasterStatus::Ready;
 }
@@ -874,6 +911,7 @@ RasterStatus EncodePacket(const RasterPacket& packet) noexcept
     {
         FrameRetain(RasterKind::Buffer, packet.Vertices[i]);
     }
+    RetainPacketTextures(packet);
     ++gDrawCount;
     return backend::RasterDraw(packet);
 }
@@ -887,7 +925,12 @@ RasterStatus DrawIndexed(DeviceHandle device, const RasterDraw& draw) noexcept
     }
     RasterPacket packet;
     const auto valid = ValidateDraw(device, draw, packet);
-    return valid == RasterStatus::Ready ? EncodePacket(packet) : valid;
+    if (valid != RasterStatus::Ready)
+    {
+        return valid;
+    }
+    const auto compatible = ValidatePacketPass(packet, gRasterPass, true);
+    return compatible == RasterStatus::Ready ? EncodePacket(packet) : compatible;
 }
 
 namespace internal
@@ -946,6 +989,10 @@ void RasterBeginFrame() noexcept
 {
     gFrameSubmission = 0;
     gDrawCount = 0;
+    gRasterPass = {};
+    gGraphExecuting = false;
+    gSurfaceColorDefined = true;
+    gSurfaceDepthDefined = false;
     Collect();
 }
 void RasterEndFrame(bool accepted) noexcept
@@ -975,6 +1022,13 @@ void RasterEndFrame(bool accepted) noexcept
             if (accepted)
             {
                 record.LastUse = gFrameSubmission;
+                if (&records == &gRecords[static_cast<usize>(RasterKind::Texture)])
+                {
+                    record.TextureUse = record.FrameTextureUse;
+                    record.ColorDefined = record.FrameColorDefined;
+                    record.DepthDefined = record.FrameDepthDefined;
+                    ++record.TextureRevision;
+                }
             }
             record.InFrame = false;
             --record.References;
@@ -990,6 +1044,7 @@ void ReleaseRasterResources() noexcept
     backend::RasterReset();
     backend::LifetimeReset();
     ResetLifetimeRecords();
+    ResetGraphRecords();
     for (usize kind = KINDS; kind-- > 0;)
     {
         for (usize slot = 0; slot < RASTER_CAPACITY; ++slot)
@@ -1073,6 +1128,10 @@ RasterStatus Destroy(DeviceHandle device, TextureHandle& handle) noexcept
     if (record == nullptr)
     {
         return RasterStatus::InvalidHandle;
+    }
+    if (record->ServiceOwned)
+    {
+        return RasterStatus::InvalidState;
     }
     record->Published = false;
     --record->References;
@@ -1291,3 +1350,5 @@ RasterStatus Destroy(DeviceHandle device, RasterPipelineHandle& handle) noexcept
 } // namespace ludus::graphics::rhi
 
 #include "internal/lifetime_services.h"
+
+#include "internal/ordered_graph.h"

@@ -78,6 +78,10 @@ RasterStatus RasterCreateSet(foundation::usize,
 RasterStatus RasterCreatePipeline(foundation::usize, const internal::RasterPipelineInfo&, foundation::uint32) noexcept;
 void RasterDestroy(internal::RasterKind, foundation::usize) noexcept;
 RasterStatus RasterDraw(const internal::RasterPacket&) noexcept;
+RasterStatus RasterPreparePass(const internal::RasterPassInfo&) noexcept;
+RasterStatus RasterBeginPass(const internal::RasterPassInfo&) noexcept;
+void RasterEndPass() noexcept;
+void RasterTextureBarrier(foundation::usize, RasterTextureUse) noexcept;
 // Reserve mandatory completion bookkeeping before the first draw; submission
 // cannot discover that its callback storage is exhausted after GPU work starts.
 RasterStatus RasterReserveSubmission() noexcept;
@@ -121,6 +125,10 @@ RasterStatus RasterCreateSet(foundation::usize,
 RasterStatus RasterCreatePipeline(foundation::usize, const internal::RasterPipelineInfo&, foundation::uint32) noexcept;
 void RasterDestroy(internal::RasterKind, foundation::usize) noexcept;
 RasterStatus RasterDraw(const internal::RasterPacket&) noexcept;
+RasterStatus RasterPreparePass(const internal::RasterPassInfo&) noexcept;
+RasterStatus RasterBeginPass(const internal::RasterPassInfo&) noexcept;
+void RasterEndPass() noexcept;
+void RasterTextureBarrier(foundation::usize, RasterTextureUse) noexcept;
 // Reserve mandatory completion bookkeeping before the first draw; submission
 // cannot discover that its callback storage is exhausted after GPU work starts.
 RasterStatus RasterReserveSubmission() noexcept;

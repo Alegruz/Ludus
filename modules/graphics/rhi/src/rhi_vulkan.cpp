@@ -17,6 +17,7 @@
 
 namespace ludus::graphics::rhi::backend
 {
+void RasterFrameExtent() noexcept;
 namespace
 {
 using namespace foundation;
@@ -992,12 +993,16 @@ FrameStatus Begin() noexcept
     pass.pClearValues = clears;
     vkCmdBeginRenderPass(frame.Command, &pass, VK_SUBPASS_CONTENTS_INLINE);
     gEncoding = true;
+    RasterFrameExtent();
     return FrameStatus::Ready;
 }
 FrameStatus End() noexcept
 {
     auto& frame = gFrames[gFrame];
-    vkCmdEndRenderPass(frame.Command);
+    if (gEncoding)
+    {
+        vkCmdEndRenderPass(frame.Command);
+    }
     gEncoding = false;
     if (!Check(vkEndCommandBuffer(frame.Command)) || !Check(vkResetFences(gDevice, 1, &frame.Fence)))
     {

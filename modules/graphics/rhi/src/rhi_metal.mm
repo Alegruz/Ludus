@@ -50,6 +50,7 @@
 // calling thread rather than mutating the facade from Metal callback threads.
 namespace ludus::graphics::rhi::backend
 {
+void RasterFrameExtent() noexcept;
 namespace
 {
 using namespace foundation;
@@ -429,6 +430,7 @@ FrameStatus Begin() noexcept
         {
             return FrameFailure();
         }
+        RasterFrameExtent();
         // Extent comes from the acquired texture, bounded by the target above.
         gFrame = {static_cast<uint32>(texture.width), static_cast<uint32>(texture.height), SurfaceEncoding::Unorm};
         return FrameStatus::Ready;
@@ -438,11 +440,14 @@ FrameStatus End() noexcept
 {
     @autoreleasepool
     {
-        if (gEncoder == nil)
+        if (gCommand == nil)
         {
             return FrameStatus::InvalidState;
         }
-        [gEncoder endEncoding];
+        if (gEncoder != nil)
+        {
+            [gEncoder endEncoding];
+        }
         gEncoder = nil;
         if (gDrawable != nil)
         {

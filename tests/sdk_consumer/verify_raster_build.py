@@ -9,6 +9,7 @@ def verify_raster(args, run, metal=False):
     with tempfile.TemporaryDirectory(prefix='ludus raster sdk-') as temporary:
         source = Path(temporary)/'source'; source.mkdir()
         shutil.copy2(Path(__file__).with_name('raster.cpp'),source/'raster.cpp')
+        shutil.copy2(Path(__file__).with_name('ordered_frame.h'),source/'ordered_frame.h')
         shutil.copy2(Path(__file__).with_name('shaders')/'raster.slang',source/'raster.slang')
         (source/'CMakeLists.txt').write_text('''cmake_minimum_required(VERSION 3.29)
 project(RasterSdkContract LANGUAGES CXX)

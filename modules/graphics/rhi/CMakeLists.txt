@@ -19,7 +19,7 @@ target_sources(ludus_graphics_rhi
         FILE_SET public_headers
         TYPE HEADERS
         BASE_DIRS include
-        FILES include/ludus/graphics/rhi/lifetime.h include/ludus/graphics/rhi/rhi.h include/ludus/graphics/rhi/render.h include/ludus/graphics/rhi/device.h include/ludus/graphics/rhi/raster.h
+        FILES include/ludus/graphics/rhi/graph.h include/ludus/graphics/rhi/lifetime.h include/ludus/graphics/rhi/rhi.h include/ludus/graphics/rhi/render.h include/ludus/graphics/rhi/device.h include/ludus/graphics/rhi/raster.h
 )
 
 target_link_libraries(ludus_graphics_rhi
@@ -153,6 +153,7 @@ endif()
 
 if(TARGET ludus_rhi_render_tests)
     target_sources(ludus_rhi_render_tests PRIVATE tests/raster_render_tests.cpp)
+    target_include_directories(ludus_rhi_render_tests PRIVATE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer")
     ludus_compile_shader(TARGET ludus_rhi_render_tests NAME raster RASTER
         SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/raster.slang"
         VERTEX vertexMain FRAGMENT fragmentMain)

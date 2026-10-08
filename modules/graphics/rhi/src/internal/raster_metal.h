@@ -22,6 +22,7 @@ struct RasterMetalPipeline final
 };
 id<MTLBuffer> gRasterBuffers[internal::RASTER_CAPACITY]{};
 id<MTLTexture> gRasterTextures[internal::RASTER_CAPACITY]{};
+id<MTLTexture> gRasterDepths[internal::RASTER_CAPACITY]{};
 id<MTLTexture> gRasterViews[internal::RASTER_CAPACITY]{};
 id<MTLSamplerState> gRasterSamplers[internal::RASTER_CAPACITY]{};
 RasterMetalShader gRasterShaders[internal::RASTER_CAPACITY];
@@ -30,6 +31,7 @@ internal::RasterSet gRasterSets[internal::RASTER_CAPACITY];
 RasterMetalPipeline gRasterPipelines[internal::RASTER_CAPACITY];
 uint64 gRasterOrdinals[FRAMES]{};
 uint64 gRasterCompleted = 0;
+uint32 gRasterWidth = 0, gRasterHeight = 0;
 bool RasterMetalBindings(NSArray<id<MTLBinding>>* bindings,
                          const internal::RasterShaderInfo& shader,
                          const internal::RasterPipelineInfo& pipeline) noexcept
@@ -119,17 +121,35 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
                                          width:info.Width
                                         height:info.Height
                                      mipmapped:NO];
-        descriptor.usage = MTLTextureUsageShaderRead;
+        descriptor.usage =
+            MTLTextureUsageShaderRead | (info.Attachment ? MTLTextureUsageRenderTarget : MTLTextureUsageUnknown);
         descriptor.storageMode = MTLStorageModeShared;
         auto texture = [gDevice newTextureWithDescriptor:descriptor];
         if (texture == nil)
         {
             return RasterStatus::OutOfMemory;
         }
-        [texture replaceRegion:MTLRegionMake2D(0, 0, info.Width, info.Height)
-                   mipmapLevel:0
-                     withBytes:upload.Bytes.data()
-                   bytesPerRow:upload.RowPitch];
+        if (!info.Attachment)
+        {
+            [texture replaceRegion:MTLRegionMake2D(0, 0, info.Width, info.Height)
+                       mipmapLevel:0
+                         withBytes:upload.Bytes.data()
+                       bytesPerRow:upload.RowPitch];
+        }
+        else
+        {
+            auto depth = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
+                                                                            width:info.Width
+                                                                           height:info.Height
+                                                                        mipmapped:NO];
+            depth.usage = MTLTextureUsageRenderTarget;
+            depth.storageMode = MTLStorageModePrivate;
+            gRasterDepths[slot] = [gDevice newTextureWithDescriptor:depth];
+            if (gRasterDepths[slot] == nil)
+            {
+                return RasterStatus::OutOfMemory;
+            }
+        }
         gRasterTextures[slot] = texture;
         return RasterStatus::Ready;
     }
@@ -200,7 +220,10 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
         MTLRenderPipelineDescriptor* descriptor = [MTLRenderPipelineDescriptor new];
         descriptor.vertexFunction = gRasterShaders[info.Vertex].Function;
         descriptor.fragmentFunction = gRasterShaders[info.Fragment].Function;
-        descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+        descriptor.colorAttachments[0].pixelFormat = info.Target == RasterTarget::Surface ? MTLPixelFormatBGRA8Unorm
+                                                     : info.Target == RasterTarget::Rgba8Unorm
+                                                         ? MTLPixelFormatRGBA8Unorm
+                                                         : MTLPixelFormatRGBA8Unorm_sRGB;
         descriptor.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
         auto color = descriptor.colorAttachments[0];
         color.blendingEnabled = info.Blend;
@@ -241,7 +264,7 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
         }
         MTLDepthStencilDescriptor* depth = [MTLDepthStencilDescriptor new];
         depth.depthCompareFunction = info.Depth ? MTLCompareFunctionLess : MTLCompareFunctionAlways;
-        depth.depthWriteEnabled = info.Depth;
+        depth.depthWriteEnabled = info.Depth && info.DepthWrite;
         auto state = [gDevice newDepthStencilStateWithDescriptor:depth];
         if (state == nil)
         {
@@ -260,6 +283,7 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             break;
         case internal::RasterKind::Texture:
             gRasterTextures[slot] = nil;
+            gRasterDepths[slot] = nil;
             break;
         case internal::RasterKind::View:
             gRasterViews[slot] = nil;
@@ -336,8 +360,12 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                           atIndex:internal::RASTER_BINDINGS + i];
     }
     [gEncoder setCullMode:MTLCullModeNone];
-    [gEncoder
-        setViewport:MTLViewport{0, 0, static_cast<float64>(gFrame.Width), static_cast<float64>(gFrame.Height), 0, 1}];
+    [gEncoder setViewport:MTLViewport{0,
+                                      0,
+                                      static_cast<float64>(gRasterWidth == 0 ? gFrame.Width : gRasterWidth),
+                                      static_cast<float64>(gRasterHeight == 0 ? gFrame.Height : gRasterHeight),
+                                      0,
+                                      1}];
     [gEncoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
                          indexCount:packet.IndexCount
                           indexType:packet.Index32 ? MTLIndexTypeUInt32 : MTLIndexTypeUInt16
@@ -345,6 +373,55 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                   indexBufferOffset:packet.IndexOffset
                       instanceCount:packet.InstanceCount];
     return RasterStatus::Ready;
+}
+void RasterFrameExtent() noexcept
+{
+    gRasterWidth = gRasterHeight = 0;
+}
+void RasterEndPass() noexcept
+{
+    if (gEncoder != nil)
+    {
+        [gEncoder endEncoding];
+        gEncoder = nil;
+    }
+}
+RasterStatus RasterPreparePass(const internal::RasterPassInfo&) noexcept
+{
+    return RasterStatus::Ready;
+}
+void RasterTextureBarrier(usize, RasterTextureUse) noexcept {}
+RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
+{
+    @autoreleasepool
+    {
+        const auto& state = info.Description;
+        const bool surface = info.Texture == internal::RASTER_CAPACITY;
+        auto color = surface ? (gDrawable != nil ? gDrawable.texture : gHeadless) : gRasterTextures[info.Texture];
+        auto depth = surface ? gDepth : gRasterDepths[info.Texture];
+        auto pass = [MTLRenderPassDescriptor renderPassDescriptor];
+        auto attachment = pass.colorAttachments[0];
+        attachment.texture = color;
+        attachment.loadAction = state.ColorLoad == RasterLoad::Clear  ? MTLLoadActionClear
+                                : state.ColorLoad == RasterLoad::Load ? MTLLoadActionLoad
+                                                                      : MTLLoadActionDontCare;
+        attachment.storeAction = state.ColorStore == RasterStore::Store ? MTLStoreActionStore : MTLStoreActionDontCare;
+        attachment.clearColor = MTLClearColorMake(static_cast<float64>(state.Clear[0]),
+                                                  static_cast<float64>(state.Clear[1]),
+                                                  static_cast<float64>(state.Clear[2]),
+                                                  static_cast<float64>(state.Clear[3]));
+        pass.depthAttachment.texture = depth;
+        pass.depthAttachment.loadAction = state.DepthLoad == RasterLoad::Clear  ? MTLLoadActionClear
+                                          : state.DepthLoad == RasterLoad::Load ? MTLLoadActionLoad
+                                                                                : MTLLoadActionDontCare;
+        pass.depthAttachment.storeAction =
+            state.DepthStore == RasterStore::Store ? MTLStoreActionStore : MTLStoreActionDontCare;
+        pass.depthAttachment.clearDepth = 1;
+        gEncoder = [gCommand renderCommandEncoderWithDescriptor:pass];
+        gRasterWidth = static_cast<uint32>(color.width);
+        gRasterHeight = static_cast<uint32>(color.height);
+        return gEncoder != nil ? RasterStatus::Ready : RasterStatus::Failed;
+    }
 }
 RasterStatus RasterReserveSubmission() noexcept
 {

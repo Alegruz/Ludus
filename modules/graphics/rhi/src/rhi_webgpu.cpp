@@ -489,7 +489,10 @@ FrameStatus Begin() noexcept
 }
 FrameStatus End() noexcept
 {
-    wgpuRenderPassEncoderEnd(gPass);
+    if (gPass != nullptr)
+    {
+        wgpuRenderPassEncoderEnd(gPass);
+    }
     WGPUCommandBuffer commands = wgpuCommandEncoderFinish(gEncoder, nullptr);
     if (commands == nullptr)
     {

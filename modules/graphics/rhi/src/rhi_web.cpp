@@ -367,6 +367,36 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
 {
     return gActive == Backend::WebGL2 ? webgl::RasterDraw(packet) : webgpu::RasterDraw(packet);
 }
+RasterStatus RasterPreparePass(const internal::RasterPassInfo& info) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterPreparePass(info) : webgpu::RasterPreparePass(info);
+}
+RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterBeginPass(info) : webgpu::RasterBeginPass(info);
+}
+void RasterEndPass() noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::RasterEndPass();
+    }
+    else
+    {
+        webgpu::RasterEndPass();
+    }
+}
+void RasterTextureBarrier(usize slot, RasterTextureUse use) noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::RasterTextureBarrier(slot, use);
+    }
+    else
+    {
+        webgpu::RasterTextureBarrier(slot, use);
+    }
+}
 RasterStatus RasterReserveSubmission() noexcept
 {
     return gActive == Backend::WebGL2 ? webgl::RasterReserveSubmission() : webgpu::RasterReserveSubmission();

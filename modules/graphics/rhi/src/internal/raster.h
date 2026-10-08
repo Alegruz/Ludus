@@ -2,7 +2,7 @@
 
 #include <ludus/foundation/base/types.h>
 
-#include <ludus/graphics/rhi/raster.h>
+#include <ludus/graphics/rhi/graph.h>
 
 namespace ludus::graphics::rhi::internal
 {
@@ -78,6 +78,8 @@ struct RasterPipelineInfo final
     foundation::usize AttributeCount = 0;
     bool Depth = false;
     bool Blend = false;
+    RasterTarget Target = RasterTarget::Surface;
+    bool DepthWrite = true;
 };
 struct RasterPacket final
 {
@@ -85,11 +87,17 @@ struct RasterPacket final
     foundation::usize Set = 0;
     foundation::usize Vertices[2]{};
     foundation::usize Offsets[2]{};
+    foundation::usize Sizes[2]{};
     foundation::usize Indices = 0;
     foundation::usize IndexOffset = 0;
     foundation::uint32 IndexCount = 0;
     foundation::uint32 InstanceCount = 0;
     bool Index32 = false;
+};
+struct RasterPassInfo final
+{
+    foundation::usize Texture = RASTER_CAPACITY;
+    RasterPassDescription Description;
 };
 struct LifetimeUploadTarget final
 {
@@ -107,6 +115,7 @@ bool FrameOpen() noexcept;
 bool ClaimRasterFrame() noexcept;
 void RasterBeginFrame() noexcept;
 void RasterEndFrame(bool accepted) noexcept;
+bool RasterFinishFrame() noexcept;
 void ReleaseRasterResources() noexcept;
 enum class RasterCallbacks : foundation::uint8
 {
@@ -142,6 +151,10 @@ RasterStatus RasterCreateSet(foundation::usize,
 RasterStatus RasterCreatePipeline(foundation::usize, const internal::RasterPipelineInfo&, foundation::uint32) noexcept;
 void RasterDestroy(internal::RasterKind, foundation::usize) noexcept;
 RasterStatus RasterDraw(const internal::RasterPacket&) noexcept;
+RasterStatus RasterPreparePass(const internal::RasterPassInfo&) noexcept;
+RasterStatus RasterBeginPass(const internal::RasterPassInfo&) noexcept;
+void RasterEndPass() noexcept;
+void RasterTextureBarrier(foundation::usize, RasterTextureUse) noexcept;
 // Reserve mandatory completion bookkeeping before the first draw; submission
 // cannot discover that its callback storage is exhausted after GPU work starts.
 RasterStatus RasterReserveSubmission() noexcept;

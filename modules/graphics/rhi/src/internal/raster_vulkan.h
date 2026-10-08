@@ -20,6 +20,18 @@ struct RasterVulkanTexture final
     VkImage Object = VK_NULL_HANDLE;
     VmaAllocation Allocation = nullptr;
     TextureDescription Info;
+    VkImage Depth = VK_NULL_HANDLE;
+    VmaAllocation DepthAllocation = nullptr;
+    VkImageView ColorView = VK_NULL_HANDLE;
+    VkImageView DepthView = VK_NULL_HANDLE;
+    VkFramebuffer Framebuffer = VK_NULL_HANDLE;
+    VkImageLayout ColorLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageLayout DepthLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkPipelineStageFlags ColorStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    VkAccessFlags ColorAccess = 0;
+    VkPipelineStageFlags ColorWriterStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    VkAccessFlags ColorWriterAccess = 0;
+    VkPipelineStageFlags SampleVisibility = 0;
     RasterVulkanBuffer Upload;
     VkCommandBuffer Command = VK_NULL_HANDLE;
     VkFence Fence = VK_NULL_HANDLE;
@@ -52,6 +64,16 @@ RasterVulkanSet gRasterSets[internal::RASTER_CAPACITY];
 RasterVulkanPipeline gRasterPipelines[internal::RASTER_CAPACITY];
 uint64 gRasterOrdinals[FRAMES]{};
 uint64 gRasterCompleted = 0;
+VkExtent2D gRasterExtent{};
+usize gRasterActiveTexture = internal::RASTER_CAPACITY;
+struct RasterVkPass final
+{
+    VkRenderPass Object = VK_NULL_HANDLE;
+    VkFormat Format = VK_FORMAT_UNDEFINED;
+    RasterPassDescription State;
+    bool Surface = false;
+};
+RasterVkPass gRasterPasses[192];
 RasterStatus RasterError(VkResult result) noexcept
 {
     if (result == VK_SUCCESS)
@@ -66,6 +88,108 @@ RasterStatus RasterError(VkResult result) noexcept
     }
     return result == VK_ERROR_OUT_OF_HOST_MEMORY || result == VK_ERROR_OUT_OF_DEVICE_MEMORY ? RasterStatus::OutOfMemory
                                                                                             : RasterStatus::Failed;
+}
+// Thanks to Khronos, Vulkan Guide, "Synchronization Examples", Graphics to
+// Graphics Dependencies (color attachment -> sampled image) and WAR/WAW cases:
+// https://docs.vulkan.org/guide/latest/synchronization_examples.html
+// Adapted to the retained Vulkan 1.1 barriers/render-pass path, not sync2.
+VkResult
+RasterVkRenderPass(VkFormat format, bool surface, const RasterPassDescription& state, VkRenderPass& output) noexcept
+{
+    RasterVkPass* available = nullptr;
+    for (auto& pass : gRasterPasses)
+    {
+        const auto& cached = pass.State;
+        if (pass.Object == VK_NULL_HANDLE)
+        {
+            if (available == nullptr)
+            {
+                available = &pass;
+            }
+            continue;
+        }
+        if (pass.Format == format && pass.Surface == surface && cached.ColorLoad == state.ColorLoad &&
+            cached.ColorStore == state.ColorStore && cached.DepthLoad == state.DepthLoad &&
+            cached.DepthStore == state.DepthStore && cached.DepthReadOnly == state.DepthReadOnly)
+        {
+            output = pass.Object;
+            return VK_SUCCESS;
+        }
+    }
+    if (available == nullptr)
+    {
+        return VK_ERROR_TOO_MANY_OBJECTS;
+    }
+    VkAttachmentDescription attachments[2]{};
+    auto& color = attachments[0];
+    color.format = format;
+    color.samples = VK_SAMPLE_COUNT_1_BIT;
+    color.loadOp = state.ColorLoad == RasterLoad::Clear  ? VK_ATTACHMENT_LOAD_OP_CLEAR
+                   : state.ColorLoad == RasterLoad::Load ? VK_ATTACHMENT_LOAD_OP_LOAD
+                                                         : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    color.storeOp =
+        state.ColorStore == RasterStore::Store ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    color.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    color.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    color.initialLayout = surface ? (gHeadless ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+                                  : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color.finalLayout = color.initialLayout;
+    auto& depth = attachments[1];
+    depth.format = gDepthFormat;
+    depth.samples = VK_SAMPLE_COUNT_1_BIT;
+    depth.loadOp = state.DepthLoad == RasterLoad::Clear  ? VK_ATTACHMENT_LOAD_OP_CLEAR
+                   : state.DepthLoad == RasterLoad::Load ? VK_ATTACHMENT_LOAD_OP_LOAD
+                                                         : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depth.storeOp =
+        state.DepthStore == RasterStore::Store ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depth.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth.initialLayout = depth.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference colorReference{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkAttachmentReference depthReference{1,
+                                         state.DepthReadOnly ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                                             : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorReference;
+    subpass.pDepthStencilAttachment = &depthReference;
+    VkSubpassDependency dependencies[2]{};
+    auto& incoming = dependencies[0];
+    incoming.srcSubpass = VK_SUBPASS_EXTERNAL;
+    incoming.dstSubpass = 0;
+    incoming.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    incoming.dstStageMask = incoming.srcStageMask;
+    incoming.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    incoming.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                             VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                             (state.DepthReadOnly ? 0U : VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+    auto& outgoing = dependencies[1];
+    outgoing.srcSubpass = 0;
+    outgoing.dstSubpass = VK_SUBPASS_EXTERNAL;
+    outgoing.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    outgoing.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    outgoing.dstStageMask =
+        surface && gHeadless ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    outgoing.dstAccessMask = surface && gHeadless ? VK_ACCESS_TRANSFER_READ_BIT : 0;
+    VkRenderPassCreateInfo create{};
+    create.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    create.attachmentCount = 2;
+    create.pAttachments = attachments;
+    create.subpassCount = 1;
+    create.pSubpasses = &subpass;
+    create.dependencyCount = 2;
+    create.pDependencies = dependencies;
+    const auto result = vkCreateRenderPass(gDevice, &create, nullptr, &available->Object);
+    if (result == VK_SUCCESS)
+    {
+        available->Format = format;
+        available->Surface = surface;
+        available->State = state;
+        output = available->Object;
+    }
+    return result;
 }
 VkResult RasterAllocator() noexcept
 {
@@ -152,7 +276,8 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     constexpr VkFormatFeatureFlags required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
                                               VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
                                               VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
-    if ((properties.optimalTilingFeatures & required) != required)
+    const auto features = required | (info.Attachment ? VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT : 0U);
+    if ((properties.optimalTilingFeatures & features) != features)
     {
         return RasterStatus::Unsupported;
     }
@@ -172,7 +297,8 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     image.arrayLayers = 1;
     image.samples = VK_SAMPLE_COUNT_1_BIT;
     image.tiling = VK_IMAGE_TILING_OPTIMAL;
-    image.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    image.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                  (info.Attachment ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0U);
     VmaAllocationCreateInfo allocation{};
     allocation.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     result = vmaCreateImage(gRasterAllocator, &image, &allocation, &texture.Object, &texture.Allocation, nullptr);
@@ -180,6 +306,55 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     {
         return RasterError(result);
     }
+    if (info.Attachment)
+    {
+        image.format = gDepthFormat;
+        image.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        result =
+            vmaCreateImage(gRasterAllocator, &image, &allocation, &texture.Depth, &texture.DepthAllocation, nullptr);
+        VkImageViewCreateInfo view{};
+        view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view.image = texture.Object;
+        view.format = format;
+        view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        if (result == VK_SUCCESS)
+        {
+            result = vkCreateImageView(gDevice, &view, nullptr, &texture.ColorView);
+        }
+        view.image = texture.Depth;
+        view.format = gDepthFormat;
+        view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        if (result == VK_SUCCESS)
+        {
+            result = vkCreateImageView(gDevice, &view, nullptr, &texture.DepthView);
+        }
+        VkRenderPass pass = VK_NULL_HANDLE;
+        if (result == VK_SUCCESS)
+        {
+            result = RasterVkRenderPass(format, false, {}, pass);
+        }
+        VkFramebufferCreateInfo framebuffer{};
+        framebuffer.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        const VkImageView views[2]{texture.ColorView, texture.DepthView};
+        framebuffer.renderPass = pass;
+        framebuffer.attachmentCount = 2;
+        framebuffer.pAttachments = views;
+        framebuffer.width = info.Width;
+        framebuffer.height = info.Height;
+        framebuffer.layers = 1;
+        if (result == VK_SUCCESS)
+        {
+            result = vkCreateFramebuffer(gDevice, &framebuffer, nullptr, &texture.Framebuffer);
+        }
+        return RasterError(result);
+    }
+    texture.ColorLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    texture.ColorStage = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    texture.ColorAccess = VK_ACCESS_SHADER_READ_BIT;
+    texture.ColorWriterStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    texture.ColorWriterAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
+    texture.SampleVisibility = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     RasterVulkanBuffer staging;
     result = RasterUploadBuffer(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, upload.Bytes, staging);
     VkCommandBuffer command = VK_NULL_HANDLE;
@@ -506,7 +681,7 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
     VkPipelineDepthStencilStateCreateInfo depth{};
     depth.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depth.depthTestEnable = info.Depth;
-    depth.depthWriteEnable = info.Depth;
+    depth.depthWriteEnable = info.Depth && info.DepthWrite;
     depth.depthCompareOp = VK_COMPARE_OP_LESS;
     VkPipelineColorBlendAttachmentState color{};
     color.colorWriteMask = 15;
@@ -536,6 +711,18 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
     create.pDynamicState = &dynamic;
     create.layout = pipeline.Layout;
     create.renderPass = gPass;
+    if (info.Target != RasterTarget::Surface)
+    {
+        result = RasterVkRenderPass(info.Target == RasterTarget::Rgba8Unorm ? VK_FORMAT_R8G8B8A8_UNORM
+                                                                            : VK_FORMAT_R8G8B8A8_SRGB,
+                                    false,
+                                    {},
+                                    create.renderPass);
+        if (result != VK_SUCCESS)
+        {
+            return RasterError(result);
+        }
+    }
     return RasterError(vkCreateGraphicsPipelines(gDevice, VK_NULL_HANDLE, 1, &create, nullptr, &pipeline.Object));
 }
 void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
@@ -554,6 +741,13 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             gRasterBuffers[slot] = {};
             break;
         case internal::RasterKind::Texture:
+            vkDestroyFramebuffer(gDevice, gRasterTextures[slot].Framebuffer, nullptr);
+            vkDestroyImageView(gDevice, gRasterTextures[slot].ColorView, nullptr);
+            vkDestroyImageView(gDevice, gRasterTextures[slot].DepthView, nullptr);
+            if (gRasterTextures[slot].Depth != VK_NULL_HANDLE)
+            {
+                vmaDestroyImage(gRasterAllocator, gRasterTextures[slot].Depth, gRasterTextures[slot].DepthAllocation);
+            }
             if (gRasterTextures[slot].Command != VK_NULL_HANDLE)
             {
                 vkFreeCommandBuffers(gDevice, gCommands, 1, &gRasterTextures[slot].Command);
@@ -600,14 +794,15 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
 {
     const auto& pipeline = gRasterPipelines[packet.Pipeline];
     const auto command = gFrames[gFrame].Command;
+    const auto extent = gRasterExtent.width == 0 ? gExtent : gRasterExtent;
     // Canonical Y-up clip coordinates, top-left pixel/readback coordinates.
     const VkViewport viewport{0,
-                              static_cast<float32>(gExtent.height),
-                              static_cast<float32>(gExtent.width),
-                              -static_cast<float32>(gExtent.height),
+                              static_cast<float32>(extent.height),
+                              static_cast<float32>(extent.width),
+                              -static_cast<float32>(extent.height),
                               0,
                               1};
-    const VkRect2D scissor{{0, 0}, gExtent};
+    const VkRect2D scissor{{0, 0}, extent};
     vkCmdSetViewport(command, 0, 1, &viewport);
     vkCmdSetScissor(command, 0, 1, &scissor);
     vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Object);
@@ -629,6 +824,144 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                          packet.IndexOffset,
                          packet.Index32 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
     vkCmdDrawIndexed(command, packet.IndexCount, packet.InstanceCount, 0, 0, 0);
+    return RasterStatus::Ready;
+}
+void RasterFrameExtent() noexcept
+{
+    gRasterExtent = {};
+    gRasterActiveTexture = internal::RASTER_CAPACITY;
+}
+void RasterEndPass() noexcept
+{
+    if (!gEncoding)
+    {
+        return;
+    }
+    vkCmdEndRenderPass(gFrames[gFrame].Command);
+    gEncoding = false;
+    if (gRasterActiveTexture != internal::RASTER_CAPACITY)
+    {
+        auto& texture = gRasterTextures[gRasterActiveTexture];
+        texture.ColorLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        texture.ColorStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        texture.ColorAccess = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        texture.ColorWriterStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        texture.ColorWriterAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        texture.SampleVisibility = 0;
+        texture.DepthLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    }
+}
+void RasterTextureBarrier(usize slot, RasterTextureUse use) noexcept
+{
+    auto& texture = gRasterTextures[slot];
+    const bool color = use == RasterTextureUse::ColorAttachment;
+    const VkPipelineStageFlags stage =
+        color                                    ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+        : use == RasterTextureUse::SampledVertex ? VK_PIPELINE_STAGE_VERTEX_SHADER_BIT
+        : use == RasterTextureUse::SampledFragment
+            ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+            : VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    const auto access =
+        color ? VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT : VK_ACCESS_SHADER_READ_BIT;
+    const auto layout = color ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    if (texture.ColorLayout == layout && (texture.SampleVisibility & stage) == stage && !color)
+    {
+        texture.ColorStage |= stage;
+        return;
+    }
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = texture.ColorLayout;
+    barrier.newLayout = layout;
+    barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.srcAccessMask = texture.ColorWriterAccess | texture.ColorAccess;
+    barrier.dstAccessMask = access;
+    barrier.image = texture.Object;
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(gFrames[gFrame].Command,
+                         texture.ColorStage | texture.ColorWriterStage,
+                         stage,
+                         0,
+                         0,
+                         nullptr,
+                         0,
+                         nullptr,
+                         1,
+                         &barrier);
+    texture.ColorLayout = layout;
+    texture.ColorStage = color ? stage : texture.ColorStage | stage;
+    texture.ColorAccess = access;
+    if (!color)
+    {
+        texture.SampleVisibility |= stage;
+    }
+}
+RasterStatus RasterPreparePass(const internal::RasterPassInfo& info) noexcept
+{
+    VkRenderPass pass = VK_NULL_HANDLE;
+    const bool surface = info.Texture == internal::RASTER_CAPACITY;
+    const auto format = surface ? gFormat : RasterPixelFormat(gRasterTextures[info.Texture].Info.Format);
+    const auto result = RasterVkRenderPass(format, surface, info.Description, pass);
+    return result == VK_ERROR_TOO_MANY_OBJECTS ? RasterStatus::CapacityExceeded : RasterError(result);
+}
+RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
+{
+    const bool surface = info.Texture == internal::RASTER_CAPACITY;
+    VkRenderPass pass = VK_NULL_HANDLE;
+    const auto format = surface ? gFormat : RasterPixelFormat(gRasterTextures[info.Texture].Info.Format);
+    const auto prepared = RasterVkRenderPass(format, surface, info.Description, pass);
+    if (prepared != VK_SUCCESS)
+    {
+        return RasterError(prepared);
+    }
+    VkFramebuffer framebuffer = surface ? gTargets[gImage] : gRasterTextures[info.Texture].Framebuffer;
+    gRasterExtent =
+        surface ? gExtent
+                : VkExtent2D{gRasterTextures[info.Texture].Info.Width, gRasterTextures[info.Texture].Info.Height};
+    gRasterActiveTexture = info.Texture;
+    if (!surface)
+    {
+        RasterTextureBarrier(info.Texture, RasterTextureUse::ColorAttachment);
+        auto& texture = gRasterTextures[info.Texture];
+        VkImageMemoryBarrier depth{};
+        depth.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        depth.oldLayout = texture.DepthLayout;
+        depth.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depth.srcQueueFamilyIndex = depth.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        depth.srcAccessMask =
+            texture.DepthLayout == VK_IMAGE_LAYOUT_UNDEFINED ? 0U : VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        depth.dstAccessMask =
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        depth.image = texture.Depth;
+        depth.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
+        const auto stages = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        vkCmdPipelineBarrier(gFrames[gFrame].Command,
+                             texture.DepthLayout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
+                                                                              : stages,
+                             stages,
+                             0,
+                             0,
+                             nullptr,
+                             0,
+                             nullptr,
+                             1,
+                             &depth);
+    }
+    VkClearValue clear[2]{};
+    for (usize i = 0; i < 4; ++i)
+    {
+        clear[0].color.float32[i] = info.Description.Clear[i];
+    }
+    clear[1].depthStencil = {1, 0};
+    VkRenderPassBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    begin.renderPass = pass;
+    begin.framebuffer = framebuffer;
+    begin.renderArea.extent = gRasterExtent;
+    begin.clearValueCount = 2;
+    begin.pClearValues = clear;
+    vkCmdBeginRenderPass(gFrames[gFrame].Command, &begin, VK_SUBPASS_CONTENTS_INLINE);
+    gEncoding = true;
     return RasterStatus::Ready;
 }
 RasterStatus RasterReserveSubmission() noexcept
@@ -702,6 +1035,14 @@ void RasterReset() noexcept
 }
 void RasterShutdown() noexcept
 {
+    for (auto& pass : gRasterPasses)
+    {
+        if (gDevice != VK_NULL_HANDLE)
+        {
+            vkDestroyRenderPass(gDevice, pass.Object, nullptr);
+        }
+        pass = {};
+    }
     if (gRasterAllocator != nullptr)
     {
         vmaDestroyAllocator(gRasterAllocator);

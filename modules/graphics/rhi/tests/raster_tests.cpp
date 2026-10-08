@@ -7,6 +7,7 @@
 #include <span>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 namespace ludus::graphics::rhi::backend
 {
 extern foundation::uint32 PendingToken;
@@ -805,4 +806,396 @@ TEST_CASE("Cancelled pipeline callbacks retain detached shader and layout depend
     CHECK(reference::Destroys[4] == 2);
     CHECK(reference::Destroys[5] == 1);
     CHECK(reference::Destroys[7] == 2);
+}
+
+namespace
+{
+struct GraphScene final
+{
+    OrderedGraph Graph;
+    GraphVersion Vertex, Index, Uniform;
+    GraphScene(DeviceHandle device, const Scene& scene)
+    {
+        REQUIRE(CreateOrderedGraph(device, Graph) == RasterStatus::Ready);
+        REQUIRE(ImportGraphBuffer(device, Graph, scene.Vertices, Vertex) == RasterStatus::Ready);
+        REQUIRE(ImportGraphBuffer(device, Graph, scene.Indices, Index) == RasterStatus::Ready);
+        REQUIRE(ImportGraphBuffer(device, Graph, scene.Uniform, Uniform) == RasterStatus::Ready);
+    }
+    void Add(DeviceHandle device, const Scene& scene, bool uniform = true)
+    {
+        const GraphUse uses[]{{Vertex, GraphAccessMode::Vertex, 0, 36},
+                              {Index, GraphAccessMode::Index, 0, 6},
+                              {Uniform, GraphAccessMode::Uniform, 0, 16}};
+        const auto draw = scene.Draw();
+        GraphPassDescription pass;
+        pass.Name = "scene";
+        pass.Source = "fixture.cpp";
+        pass.Line = 17;
+        pass.Uses = uses;
+        pass.UseCount = uniform ? 3 : 2;
+        pass.Draws = &draw;
+        pass.DrawCount = 1;
+        REQUIRE(AddGraphPass(device, Graph, pass) == RasterStatus::Ready);
+    }
+};
+struct GraphTexture final
+{
+    TextureHandle Texture;
+    GraphVersion Initial, Output;
+    GraphTexture(DeviceHandle device, OrderedGraph graph, bool pooled = false)
+    {
+        if (pooled)
+        {
+            REQUIRE(CreateGraphTexture(device, graph, {16, 8, RasterFormat::Rgba8Unorm, true}, Initial, Texture) ==
+                    RasterStatus::Ready);
+        }
+        else
+        {
+            REQUIRE(CreateTexture(device, {16, 8, RasterFormat::Rgba8Unorm, true}, {}, Texture) == RasterStatus::Ready);
+            RasterTextureState state;
+            REQUIRE(GetTextureState(device, Texture, state) == RasterStatus::Ready);
+            REQUIRE_FALSE(state.ColorDefined);
+            REQUIRE(ImportGraphTexture(device, graph, Texture, state, RasterTextureUse::SampledFragment, Initial) ==
+                    RasterStatus::Ready);
+        }
+        REQUIRE(NextGraphVersion(device, graph, Initial, Output) == RasterStatus::Ready);
+    }
+    void Add(DeviceHandle device,
+             OrderedGraph graph,
+             RasterLoad load = RasterLoad::Clear,
+             RasterStore store = RasterStore::Store,
+             bool sideEffect = false) const
+    {
+        const GraphUse use{Output,
+                           load == RasterLoad::Load ? GraphAccessMode::ColorReadWrite : GraphAccessMode::ColorWrite};
+        GraphPassDescription pass;
+        pass.Name = "offscreen";
+        pass.Attachment.Color = Texture;
+        pass.Attachment.ColorLoad = load;
+        pass.Attachment.ColorStore = store;
+        pass.Uses = &use;
+        pass.UseCount = 1;
+        pass.SideEffect = sideEffect;
+        REQUIRE(AddGraphPass(device, graph, pass) == RasterStatus::Ready);
+    }
+};
+} // namespace
+TEST_CASE("Ordered graph checks complete packet declarations before effects", "[rhi][graph]")
+{
+    Session session;
+    Scene scene(session.Device);
+    GraphScene graph(session.Device, scene);
+    SECTION("Missing reflected uniform use")
+    {
+        graph.Add(session.Device, scene, false);
+        GraphReport report;
+        CHECK(CompileOrderedGraph(session.Device, graph.Graph, report) == RasterStatus::InvalidDescription);
+        CHECK(report.ErrorPass == 0);
+        CHECK(reference::Draws == 0);
+        CHECK(reference::Submitted == 0);
+    }
+    SECTION("Accepted packets retain destroyed public owners")
+    {
+        graph.Add(session.Device, scene);
+        REQUIRE(Destroy(session.Device, scene.Pipeline) == RasterStatus::Ready);
+        REQUIRE(Destroy(session.Device, scene.Set) == RasterStatus::Ready);
+        REQUIRE(Destroy(session.Device, scene.Vertices) == RasterStatus::Ready);
+        REQUIRE(Destroy(session.Device, scene.Indices) == RasterStatus::Ready);
+        REQUIRE(Destroy(session.Device, scene.Uniform) == RasterStatus::Ready);
+        GraphReport report;
+        REQUIRE(CompileOrderedGraph(session.Device, graph.Graph, report) == RasterStatus::Ready);
+        CHECK(report.LivePasses == 1);
+        CHECK(std::strcmp(report.Names[0], "scene") == 0);
+        CHECK(std::strcmp(report.Sources[0], "fixture.cpp") == 0);
+        CHECK(report.Lines[0] == 17);
+        CHECK(report.WholeBufferHazards);
+        SubmissionToken completed;
+        REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, graph.Graph, completed) == RasterStatus::Ready);
+        CHECK(reference::Draws == 1);
+        CHECK(GetStatus(session.Device, completed) == RasterStatus::Pending);
+        CHECK(DiscardOrderedGraph(session.Device, graph.Graph) == RasterStatus::InvalidHandle);
+        reference::Completed = reference::Submitted;
+        CHECK(GetStatus(session.Device, completed) == RasterStatus::Ready);
+    }
+}
+TEST_CASE("Ordered graph versions produce RAW WAR WAW without reordering", "[rhi][graph]")
+{
+    Session session;
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    GraphTexture texture(session.Device, graph);
+    texture.Add(session.Device, graph);
+    const GraphUse sampled{texture.Output, GraphAccessMode::Sampled, 0, 0, RasterVisibility::Fragment};
+    GraphPassDescription composite;
+    composite.Name = "composite";
+    composite.Uses = &sampled;
+    composite.UseCount = 1;
+    REQUIRE(AddGraphPass(session.Device, graph, composite) == RasterStatus::Ready);
+    GraphVersion overwritten;
+    REQUIRE(NextGraphVersion(session.Device, graph, texture.Output, overwritten) == RasterStatus::Ready);
+    texture.Output = overwritten;
+    texture.Add(session.Device, graph);
+    REQUIRE(AddGraphRoot(session.Device, graph, overwritten, GraphRoot::History) == RasterStatus::Ready);
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::Ready);
+    CHECK(report.LivePasses == 3);
+    bool raw = false, war = false, waw = false;
+    for (usize i = 0; i < report.DependencyCount; ++i)
+    {
+        const auto& edge = report.Dependencies[i];
+        raw |= edge.Before == 0 && edge.After == 1 && edge.Hazard == GraphHazard::ReadAfterWrite;
+        war |= edge.Before == 1 && edge.After == 2 && edge.Hazard == GraphHazard::WriteAfterRead;
+        waw |= edge.Before == 0 && edge.After == 2 && edge.Hazard == GraphHazard::WriteAfterWrite;
+    }
+    CHECK(raw);
+    CHECK(war);
+    CHECK(waw);
+    CHECK(report.FirstUse[0] == 0);
+    CHECK(report.LastUse[0] == 2);
+}
+TEST_CASE("Ordered graph rejects forward reads stale versions undefined loads and roots", "[rhi][graph]")
+{
+    Session session;
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    GraphTexture texture(session.Device, graph);
+    SECTION("Forward read cannot move the producer")
+    {
+        const GraphUse use{texture.Output, GraphAccessMode::Sampled};
+        GraphPassDescription pass;
+        pass.Name = "forward";
+        pass.Uses = &use;
+        pass.UseCount = 1;
+        REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+        texture.Add(session.Device, graph);
+    }
+    SECTION("Load needs defined prior contents")
+    {
+        texture.Add(session.Device, graph, RasterLoad::Load);
+    }
+    SECTION("Partial draw after Discard never establishes initialization")
+    {
+        texture.Add(session.Device, graph, RasterLoad::Discard);
+        REQUIRE(AddGraphRoot(session.Device, graph, texture.Output, GraphRoot::History) == RasterStatus::Ready);
+    }
+    SECTION("Store Discard invalidates a cleared root")
+    {
+        texture.Add(session.Device, graph, RasterLoad::Clear, RasterStore::Discard);
+        REQUIRE(AddGraphRoot(session.Device, graph, texture.Output, GraphRoot::Export) == RasterStatus::Ready);
+    }
+    SECTION("Overwritten versions cannot be read later")
+    {
+        texture.Add(session.Device, graph);
+        const auto first = texture.Output;
+        GraphVersion second;
+        REQUIRE(NextGraphVersion(session.Device, graph, first, second) == RasterStatus::Ready);
+        texture.Output = second;
+        texture.Add(session.Device, graph);
+        const GraphUse use{first, GraphAccessMode::Sampled};
+        GraphPassDescription pass;
+        pass.Name = "stale";
+        pass.Uses = &use;
+        pass.UseCount = 1;
+        REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+    }
+    SECTION("Feedback is a conflicting duplicate physical declaration")
+    {
+        const GraphUse uses[]{{texture.Output, GraphAccessMode::ColorWrite},
+                              {texture.Initial, GraphAccessMode::Sampled}};
+        GraphPassDescription pass;
+        pass.Name = "feedback";
+        pass.Attachment.Color = texture.Texture;
+        pass.Uses = uses;
+        pass.UseCount = 2;
+        REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+    }
+    GraphReport report;
+    CHECK(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::InvalidDescription);
+    CHECK(reference::Passes == 0);
+    CHECK(reference::Draws == 0);
+    CHECK(reference::Submitted == 0);
+}
+TEST_CASE("Ordered graph culls only unobservable work and reference mode retains it", "[rhi][graph]")
+{
+    Session session;
+    const bool referenceMode = GENERATE(false, true);
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    GraphTexture unused(session.Device, graph);
+    unused.Add(session.Device, graph);
+    GraphTexture history(session.Device, graph);
+    history.Add(session.Device, graph);
+    REQUIRE(AddGraphRoot(session.Device, graph, history.Output, GraphRoot::History) == RasterStatus::Ready);
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, graph, report, referenceMode) == RasterStatus::Ready);
+    CHECK(report.LivePasses == (referenceMode ? 2 : 1));
+    CHECK(report.Culled[0] == !referenceMode);
+    CHECK_FALSE(report.Culled[1]);
+    CHECK(report.FirstUse[0] == (referenceMode ? 0 : 32));
+    SubmissionToken token;
+    REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, graph, token) == RasterStatus::Ready);
+    CHECK(reference::Passes == (referenceMode ? 2 : 1));
+    RasterTextureState historyState, unusedState;
+    REQUIRE(GetTextureState(session.Device, history.Texture, historyState) == RasterStatus::Ready);
+    REQUIRE(GetTextureState(session.Device, unused.Texture, unusedState) == RasterStatus::Ready);
+    CHECK(historyState.ColorDefined);
+    CHECK(unusedState.ColorDefined == referenceMode);
+    CHECK(historyState.Use == RasterTextureUse::SampledFragment);
+}
+TEST_CASE("Ordered graph preflight and skipped acquisition preserve retry while partial failure faults", "[rhi][graph]")
+{
+    Session session;
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    GraphTexture texture(session.Device, graph);
+    texture.Add(session.Device, graph, RasterLoad::Clear, RasterStore::Store, true);
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::Ready);
+    SubmissionToken token;
+    reference::PassPrepare = RasterStatus::OutOfMemory;
+    CHECK(ExecuteOrderedGraph(session.Device, session.Surface, graph, token) == RasterStatus::OutOfMemory);
+    CHECK(reference::Passes == 0);
+    CHECK(reference::Submitted == 0);
+    reference::PassPrepare = RasterStatus::Ready;
+    backend::NextFrame = FrameStatus::Skipped;
+    CHECK(ExecuteOrderedGraph(session.Device, session.Surface, graph, token) == RasterStatus::NotReady);
+    backend::NextFrame = FrameStatus::Ready;
+    reference::PassStart = RasterStatus::Failed;
+    CHECK(ExecuteOrderedGraph(session.Device, session.Surface, graph, token) == RasterStatus::Failed);
+    CHECK(GetStartup().State == StartupState::Failed);
+    CHECK(reference::Submitted == 0);
+}
+TEST_CASE("Pending history imports share direct-submission revisions without host waits", "[rhi][graph]")
+{
+    Session session;
+    OrderedGraph first;
+    REQUIRE(CreateOrderedGraph(session.Device, first) == RasterStatus::Ready);
+    GraphTexture texture(session.Device, first);
+    texture.Add(session.Device, first);
+    REQUIRE(AddGraphRoot(session.Device, first, texture.Output, GraphRoot::History) == RasterStatus::Ready);
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, first, report) == RasterStatus::Ready);
+    SubmissionToken dependency;
+    REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, first, dependency) == RasterStatus::Ready);
+    REQUIRE(GetStatus(session.Device, dependency) == RasterStatus::Pending);
+    RasterTextureState state;
+    REQUIRE(GetTextureState(session.Device, texture.Texture, state) == RasterStatus::Ready);
+    OrderedGraph second;
+    GraphVersion imported;
+    REQUIRE(CreateOrderedGraph(session.Device, second) == RasterStatus::Ready);
+    REQUIRE(ImportGraphTexture(session.Device,
+                               second,
+                               texture.Texture,
+                               state,
+                               RasterTextureUse::SampledFragment,
+                               imported) == RasterStatus::Ready);
+    const GraphUse use{imported, GraphAccessMode::Sampled};
+    GraphPassDescription pass;
+    pass.Name = "history";
+    pass.Uses = &use;
+    pass.UseCount = 1;
+    REQUIRE(AddGraphPass(session.Device, second, pass) == RasterStatus::Ready);
+    REQUIRE(CompileOrderedGraph(session.Device, second, report) == RasterStatus::Ready);
+    SECTION("Same-queue pending data is ordered without waiting")
+    {
+        SubmissionToken token;
+        REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, second, token) == RasterStatus::Ready);
+        CHECK(reference::Completed == 0);
+    }
+    SECTION("Direct accepted work invalidates a frozen import snapshot")
+    {
+        REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+        RasterPassDescription direct;
+        direct.Color = texture.Texture;
+        REQUIRE(BeginRasterPass(session.Device, direct) == RasterStatus::Ready);
+        REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+        SubmissionToken token;
+        CHECK(ExecuteOrderedGraph(session.Device, session.Surface, second, token) == RasterStatus::InvalidState);
+        REQUIRE(DiscardOrderedGraph(session.Device, second) == RasterStatus::Ready);
+    }
+}
+TEST_CASE("Transient object pooling waits for views leases and GPU completion and invalidates borrowed handles",
+          "[rhi][graph]")
+{
+    Session session;
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    GraphTexture first(session.Device, graph, true);
+    TextureViewHandle view;
+    REQUIRE(CreateTextureView(session.Device, first.Texture, view) == RasterStatus::Ready);
+    const auto old = first.Texture;
+    CHECK(Destroy(session.Device, first.Texture) == RasterStatus::InvalidState);
+    first.Add(session.Device, graph, RasterLoad::Clear, RasterStore::Store, true);
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::Ready);
+    SubmissionToken token;
+    REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, graph, token) == RasterStatus::Ready);
+    CHECK(GetStatus(session.Device, old) == RasterStatus::InvalidHandle);
+    OrderedGraph held;
+    REQUIRE(CreateOrderedGraph(session.Device, held) == RasterStatus::Ready);
+    for (usize i = 0; i < 7; ++i)
+    {
+        GraphTexture other(session.Device, held, true);
+    }
+    GraphVersion extra;
+    TextureHandle extraTexture;
+    CHECK(CreateGraphTexture(session.Device, held, {16, 8, RasterFormat::Rgba8Unorm, true}, extra, extraTexture) ==
+          RasterStatus::CapacityExceeded);
+    reference::Completed = reference::Submitted;
+    CHECK(CreateGraphTexture(session.Device, held, {16, 8, RasterFormat::Rgba8Unorm, true}, extra, extraTexture) ==
+          RasterStatus::CapacityExceeded);
+    REQUIRE(Destroy(session.Device, view) == RasterStatus::Ready);
+    REQUIRE(CreateGraphTexture(session.Device, held, {16, 8, RasterFormat::Rgba8Unorm, true}, extra, extraTexture) ==
+            RasterStatus::Ready);
+    CHECK(reference::Creates[static_cast<usize>(internal::RasterKind::Texture)] == 8);
+    CHECK(GetStatus(session.Device, old) == RasterStatus::InvalidHandle);
+    REQUIRE(DiscardOrderedGraph(session.Device, held) == RasterStatus::Ready);
+}
+TEST_CASE("Graph owner identities and capacity failures never issue effects", "[rhi][graph]")
+{
+    Session session;
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    GraphTexture texture(session.Device, graph);
+    OrderedGraph foreign;
+    REQUIRE(CreateOrderedGraph(session.Device, foreign) == RasterStatus::Ready);
+    GraphVersion next;
+    CHECK(NextGraphVersion(session.Device, foreign, texture.Initial, next) == RasterStatus::InvalidHandle);
+    for (usize i = 0; i < 32; ++i)
+    {
+        GraphPassDescription pass;
+        pass.Name = "surface";
+        REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+    }
+    GraphPassDescription extra;
+    extra.Name = "overflow";
+    CHECK(AddGraphPass(session.Device, graph, extra) == RasterStatus::CapacityExceeded);
+    CHECK(reference::Passes == 0);
+    REQUIRE(DiscardOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    CHECK(AddGraphPass(session.Device, graph, extra) == RasterStatus::InvalidHandle);
+}
+
+TEST_CASE("Idle transient pools evict whole objects when attachment dimensions change", "[rhi][graph]")
+{
+    Session session;
+    OrderedGraph initial;
+    REQUIRE(CreateOrderedGraph(session.Device, initial) == RasterStatus::Ready);
+    for (usize i = 0; i < 8; ++i)
+    {
+        GraphTexture texture(session.Device, initial, true);
+    }
+    REQUIRE(DiscardOrderedGraph(session.Device, initial) == RasterStatus::Ready);
+    OrderedGraph resized;
+    REQUIRE(CreateOrderedGraph(session.Device, resized) == RasterStatus::Ready);
+    GraphVersion version;
+    TextureHandle texture;
+    REQUIRE(CreateGraphTexture(session.Device, resized, {32, 16, RasterFormat::Rgba8Unorm, true}, version, texture) ==
+            RasterStatus::Ready);
+    CHECK(reference::Creates[static_cast<usize>(internal::RasterKind::Texture)] == 9);
+    CHECK(reference::Destroys[static_cast<usize>(internal::RasterKind::Texture)] == 1);
+    RasterTextureState state;
+    REQUIRE(GetTextureState(session.Device, texture, state) == RasterStatus::Ready);
+    CHECK_FALSE(state.ColorDefined);
+    CHECK_FALSE(state.DepthDefined);
+    REQUIRE(DiscardOrderedGraph(session.Device, resized) == RasterStatus::Ready);
 }

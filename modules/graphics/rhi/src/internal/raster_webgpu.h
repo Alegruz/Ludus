@@ -27,6 +27,9 @@ struct RasterWebCompletion final
 };
 WGPUBuffer gRasterBuffers[internal::RASTER_CAPACITY]{};
 WGPUTexture gRasterTextures[internal::RASTER_CAPACITY]{};
+WGPUTexture gRasterDepths[internal::RASTER_CAPACITY]{};
+WGPUTextureView gRasterAttachmentViews[internal::RASTER_CAPACITY]{};
+WGPUTextureView gRasterDepthViews[internal::RASTER_CAPACITY]{};
 WGPUTextureView gRasterViews[internal::RASTER_CAPACITY]{};
 WGPUSampler gRasterSamplers[internal::RASTER_CAPACITY]{};
 RasterWebShader gRasterShaders[internal::RASTER_CAPACITY];
@@ -181,10 +184,11 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     descriptor.dimension = WGPUTextureDimension_2D;
     descriptor.format =
         info.Format == RasterFormat::Rgba8Unorm ? WGPUTextureFormat_RGBA8Unorm : WGPUTextureFormat_RGBA8UnormSrgb;
-    descriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+    descriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst |
+                       (info.Attachment ? WGPUTextureUsage_RenderAttachment : WGPUTextureUsage_None);
     auto texture = wgpuDeviceCreateTexture(gDevice, &descriptor);
     gRasterTextures[slot] = texture;
-    if (texture != nullptr)
+    if (texture != nullptr && !info.Attachment)
     {
         WGPUTexelCopyTextureInfo destination = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
         destination.texture = texture;
@@ -197,6 +201,21 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
                               upload.Bytes.size(),
                               &layout,
                               &descriptor.size);
+    }
+    else if (texture != nullptr)
+    {
+        gRasterAttachmentViews[slot] = wgpuTextureCreateView(texture, nullptr);
+        descriptor.format = WGPUTextureFormat_Depth24Plus;
+        descriptor.usage = WGPUTextureUsage_RenderAttachment;
+        gRasterDepths[slot] = wgpuDeviceCreateTexture(gDevice, &descriptor);
+        if (gRasterDepths[slot] != nullptr)
+        {
+            gRasterDepthViews[slot] = wgpuTextureCreateView(gRasterDepths[slot], nullptr);
+        }
+        if (gRasterAttachmentViews[slot] == nullptr || gRasterDepthViews[slot] == nullptr)
+        {
+            internal::RasterFail(request, RasterStatus::OutOfMemory);
+        }
     }
     else
     {
@@ -342,7 +361,9 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
         }
     }
     WGPUColorTargetState target = WGPU_COLOR_TARGET_STATE_INIT;
-    target.format = gConfiguration.format;
+    target.format = info.Target == RasterTarget::Surface      ? gConfiguration.format
+                    : info.Target == RasterTarget::Rgba8Unorm ? WGPUTextureFormat_RGBA8Unorm
+                                                              : WGPUTextureFormat_RGBA8UnormSrgb;
     WGPUBlendState blend = WGPU_BLEND_STATE_INIT;
     blend.color.srcFactor = blend.alpha.srcFactor = WGPUBlendFactor_One;
     blend.color.dstFactor = blend.alpha.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
@@ -357,7 +378,7 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
     fragment.targets = &target;
     WGPUDepthStencilState depth = WGPU_DEPTH_STENCIL_STATE_INIT;
     depth.format = WGPUTextureFormat_Depth24Plus;
-    depth.depthWriteEnabled = info.Depth ? WGPUOptionalBool_True : WGPUOptionalBool_False;
+    depth.depthWriteEnabled = info.Depth && info.DepthWrite ? WGPUOptionalBool_True : WGPUOptionalBool_False;
     depth.depthCompare = info.Depth ? WGPUCompareFunction_Less : WGPUCompareFunction_Always;
     WGPURenderPipelineDescriptor descriptor = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
     descriptor.layout = pipeline.Layout;
@@ -391,6 +412,20 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             {
                 wgpuTextureRelease(gRasterTextures[slot]);
             }
+            if (gRasterAttachmentViews[slot])
+            {
+                wgpuTextureViewRelease(gRasterAttachmentViews[slot]);
+            }
+            if (gRasterDepthViews[slot])
+            {
+                wgpuTextureViewRelease(gRasterDepthViews[slot]);
+            }
+            if (gRasterDepths[slot])
+            {
+                wgpuTextureRelease(gRasterDepths[slot]);
+            }
+            gRasterAttachmentViews[slot] = gRasterDepthViews[slot] = nullptr;
+            gRasterDepths[slot] = nullptr;
             gRasterTextures[slot] = nullptr;
             break;
         case internal::RasterKind::View:
@@ -463,6 +498,52 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                                         WGPU_WHOLE_SIZE);
     wgpuRenderPassEncoderDrawIndexed(gPass, packet.IndexCount, packet.InstanceCount, 0, 0, 0);
     return RasterStatus::Ready;
+}
+void RasterEndPass() noexcept
+{
+    if (gPass != nullptr)
+    {
+        wgpuRenderPassEncoderEnd(gPass);
+        wgpuRenderPassEncoderRelease(gPass);
+        gPass = nullptr;
+    }
+}
+RasterStatus RasterPreparePass(const internal::RasterPassInfo&) noexcept
+{
+    return RasterStatus::Ready;
+}
+void RasterTextureBarrier(usize, RasterTextureUse) noexcept {}
+RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
+{
+    const auto& state = info.Description;
+    const bool surface = info.Texture == internal::RASTER_CAPACITY;
+    WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+    color.view = surface ? gView : gRasterAttachmentViews[info.Texture];
+    // Discard has no WebGPU load operation; security initialization clears, but
+    // the semantic ledger deliberately keeps those contents undefined.
+    color.loadOp = state.ColorLoad == RasterLoad::Load ? WGPULoadOp_Load : WGPULoadOp_Clear;
+    color.storeOp = state.ColorStore == RasterStore::Store ? WGPUStoreOp_Store : WGPUStoreOp_Discard;
+    color.clearValue = {static_cast<float64>(state.Clear[0]),
+                        static_cast<float64>(state.Clear[1]),
+                        static_cast<float64>(state.Clear[2]),
+                        static_cast<float64>(state.Clear[3])};
+    WGPURenderPassDepthStencilAttachment depth = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+    depth.view = surface ? gDepthView : gRasterDepthViews[info.Texture];
+    depth.depthReadOnly = state.DepthReadOnly;
+    // The browser bridge forwards this value even for read-only depth. Keep
+    // the ignored value finite instead of forwarding the C API's NaN default.
+    depth.depthClearValue = 1;
+    if (!state.DepthReadOnly)
+    {
+        depth.depthLoadOp = state.DepthLoad == RasterLoad::Load ? WGPULoadOp_Load : WGPULoadOp_Clear;
+        depth.depthStoreOp = state.DepthStore == RasterStore::Store ? WGPUStoreOp_Store : WGPUStoreOp_Discard;
+    }
+    WGPURenderPassDescriptor pass = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    pass.colorAttachmentCount = 1;
+    pass.colorAttachments = &color;
+    pass.depthStencilAttachment = &depth;
+    gPass = wgpuCommandEncoderBeginRenderPass(gEncoder, &pass);
+    return gPass != nullptr ? RasterStatus::Ready : RasterStatus::Failed;
 }
 RasterStatus RasterReserveSubmission() noexcept
 {

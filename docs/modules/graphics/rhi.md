@@ -8,7 +8,9 @@ WebGL 2 fallback. Public descriptions use engine types
 and opaque handles; installed consumers need no backend or private headers.
 
 The [public rendering guide](../../development/fullscreen-rendering.md)
-describes resource ownership, asynchronous readiness, frame updates and errors.
+describes resource ownership, asynchronous readiness, frame updates and errors,
+including the [R3 ordered raster graph](../../development/fullscreen-rendering.md#ordered-raster-graphs-r3)
+from `<ludus/graphics/rhi/graph.h>`. It shares the RHI resource/completion registry.
 The [Sandbox handoff](../../development/fullscreen-rendering-handoff.md)
 contains SDK commands, shader artifacts and validation evidence.
 

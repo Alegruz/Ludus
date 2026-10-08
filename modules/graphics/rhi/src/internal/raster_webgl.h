@@ -29,6 +29,13 @@ struct RasterGlCompletion final
 };
 GLuint gRasterBuffers[internal::RASTER_CAPACITY]{};
 GLuint gRasterTextures[internal::RASTER_CAPACITY]{};
+TextureDescription gRasterTextureDescriptions[internal::RASTER_CAPACITY];
+GLuint gRasterFramebuffers[internal::RASTER_CAPACITY]{};
+GLuint gRasterRenderTextures[internal::RASTER_CAPACITY]{};
+GLuint gRasterSampleFramebuffers[internal::RASTER_CAPACITY]{};
+internal::RasterPassInfo gRasterGlPass;
+bool gRasterGlPassOpen = false;
+GLuint gRasterDepths[internal::RASTER_CAPACITY]{};
 GLuint gRasterViews[internal::RASTER_CAPACITY]{};
 GLuint gRasterSamplers[internal::RASTER_CAPACITY]{};
 RasterGlShader gRasterShaders[internal::RASTER_CAPACITY];
@@ -237,6 +244,7 @@ RasterCreateBuffer(usize slot, const BufferDescription& info, std::span<const ui
 RasterStatus
 RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpload& upload, uint32) noexcept
 {
+    gRasterTextureDescriptions[slot] = info;
     glGenTextures(1, &gRasterTextures[slot]);
     glBindTexture(GL_TEXTURE_2D, gRasterTextures[slot]);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
@@ -254,6 +262,40 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
+    if (info.Attachment)
+    {
+        glGenTextures(1, &gRasterRenderTextures[slot]);
+        glBindTexture(GL_TEXTURE_2D, gRasterRenderTextures[slot]);
+        glTexStorage2D(GL_TEXTURE_2D,
+                       1,
+                       info.Format == RasterFormat::Rgba8Unorm ? GL_RGBA8 : GL_SRGB8_ALPHA8,
+                       static_cast<GLsizei>(info.Width),
+                       static_cast<GLsizei>(info.Height));
+        glGenRenderbuffers(1, &gRasterDepths[slot]);
+        glBindRenderbuffer(GL_RENDERBUFFER, gRasterDepths[slot]);
+        glRenderbufferStorage(GL_RENDERBUFFER,
+                              GL_DEPTH_COMPONENT24,
+                              static_cast<GLsizei>(info.Width),
+                              static_cast<GLsizei>(info.Height));
+        glGenFramebuffers(1, &gRasterFramebuffers[slot]);
+        glBindFramebuffer(GL_FRAMEBUFFER, gRasterFramebuffers[slot]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gRasterRenderTextures[slot], 0);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, gRasterDepths[slot]);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        {
+            return RasterStatus::Unsupported;
+        }
+        glGenFramebuffers(1, &gRasterSampleFramebuffers[slot]);
+        glBindFramebuffer(GL_FRAMEBUFFER, gRasterSampleFramebuffers[slot]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gRasterTextures[slot], 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        {
+            return RasterStatus::Unsupported;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
     return RasterGlResult();
 }
 RasterStatus RasterCreateView(usize slot, const internal::RasterViewSource& source, uint32) noexcept
@@ -329,6 +371,12 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             gRasterBuffers[slot] = 0;
             break;
         case internal::RasterKind::Texture:
+            glDeleteFramebuffers(1, &gRasterSampleFramebuffers[slot]);
+            glDeleteTextures(1, &gRasterRenderTextures[slot]);
+            gRasterSampleFramebuffers[slot] = gRasterRenderTextures[slot] = 0;
+            glDeleteFramebuffers(1, &gRasterFramebuffers[slot]);
+            glDeleteRenderbuffers(1, &gRasterDepths[slot]);
+            gRasterFramebuffers[slot] = gRasterDepths[slot] = 0;
             glDeleteTextures(1, &gRasterTextures[slot]);
             gRasterTextures[slot] = 0;
             break;
@@ -423,7 +471,7 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
         glDisable(GL_DEPTH_TEST);
     }
     glDepthFunc(GL_LESS);
-    glDepthMask(info.Depth ? GL_TRUE : GL_FALSE);
+    glDepthMask(info.Depth && info.DepthWrite ? GL_TRUE : GL_FALSE);
     if (info.Blend)
     {
         glEnable(GL_BLEND);
@@ -473,6 +521,82 @@ uint64 RasterCompleted() noexcept
         }
     }
     return gRasterCompleted;
+}
+void RasterEndPass() noexcept
+{
+    if (!gRasterGlPassOpen)
+    {
+        return;
+    }
+    const auto& pass = gRasterGlPass;
+    if (pass.Texture != internal::RASTER_CAPACITY && pass.Description.ColorStore == RasterStore::Store)
+    {
+        // GL framebuffer rows run bottom-up; uploaded/sampled texture rows in
+        // the portable API run top-down. A private flipped blit preserves the
+        // same UV convention as Metal, Vulkan and WebGPU, including Load passes.
+        const auto& texture = gRasterTextureDescriptions[pass.Texture];
+        const auto width = static_cast<GLint>(texture.Width), height = static_cast<GLint>(texture.Height);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, gRasterFramebuffers[pass.Texture]);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gRasterSampleFramebuffers[pass.Texture]);
+        glBlitFramebuffer(0, 0, width, height, 0, height, width, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_FRAMEBUFFER, gRasterFramebuffers[pass.Texture]);
+    }
+    GLenum discard[2]{};
+    GLsizei count = 0;
+    const bool surface = pass.Texture == internal::RASTER_CAPACITY;
+    if (pass.Description.ColorStore == RasterStore::Discard)
+    {
+        discard[count++] = surface ? GL_COLOR : GL_COLOR_ATTACHMENT0;
+    }
+    if (pass.Description.DepthStore == RasterStore::Discard)
+    {
+        discard[count++] = surface ? GL_DEPTH : GL_DEPTH_ATTACHMENT;
+    }
+    if (count != 0)
+    {
+        glInvalidateFramebuffer(GL_FRAMEBUFFER, count, discard);
+    }
+    gRasterGlPassOpen = false;
+}
+void RasterTextureBarrier(usize, RasterTextureUse) noexcept {}
+RasterStatus RasterPreparePass(const internal::RasterPassInfo& info) noexcept
+{
+    if (info.Texture == internal::RASTER_CAPACITY || gRasterFramebuffers[info.Texture] != 0)
+    {
+        return RasterStatus::Ready;
+    }
+    return RasterStatus::InvalidState;
+}
+RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
+{
+    gRasterGlPass = info;
+    gRasterGlPassOpen = true;
+    const auto& state = info.Description;
+    const bool surface = info.Texture == internal::RASTER_CAPACITY;
+    glBindFramebuffer(GL_FRAMEBUFFER, surface ? 0 : gRasterFramebuffers[info.Texture]);
+    const auto width = surface ? gTarget.Width : gRasterTextureDescriptions[info.Texture].Width;
+    const auto height = surface ? gTarget.Height : gRasterTextureDescriptions[info.Texture].Height;
+    glViewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_BLEND);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(state.DepthReadOnly ? GL_FALSE : GL_TRUE);
+    glClearColor(state.Clear[0], state.Clear[1], state.Clear[2], state.Clear[3]);
+    glClearDepthf(1);
+    GLbitfield clear = 0;
+    if (state.ColorLoad != RasterLoad::Load)
+    {
+        clear |= GL_COLOR_BUFFER_BIT;
+    }
+    if (state.DepthLoad != RasterLoad::Load)
+    {
+        clear |= GL_DEPTH_BUFFER_BIT;
+    }
+    if (clear != 0)
+    {
+        glClear(clear);
+    }
+    return RasterGlResult();
 }
 RasterStatus RasterReserveSubmission() noexcept
 {

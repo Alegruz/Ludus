@@ -89,6 +89,10 @@ void Fail(uint32 token, StartupError error) noexcept
     internal::ReleaseResources();
     backend::Shutdown();
 }
+void FaultRasterSession() noexcept
+{
+    Fail(gToken, StartupError::RenderingUnavailable);
+}
 void Complete(uint32 token, StartupError error, const BackendLimits& limits) noexcept
 {
     if (!Current(token) || gStartup.State != StartupState::Pending)
@@ -297,6 +301,10 @@ FrameStatus EndFrameStatus() noexcept
     if (!gFrame)
     {
         return FrameStatus::InvalidState;
+    }
+    if (!internal::RasterFinishFrame())
+    {
+        return FrameStatus::Failed;
     }
     gFrame = false;
     const auto result = backend::End();
