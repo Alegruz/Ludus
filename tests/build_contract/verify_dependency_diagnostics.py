@@ -95,6 +95,17 @@ class DependencyDiagnosticsTests(unittest.TestCase):
                             f"-DLUDUS_SPIRV_VALIDATOR={self.root}/gone-spirv-val"),
                             "LUDUS_SPIRV_VALIDATOR", "./scripts/shader-probe bootstrap")
 
+    def test_unsupported_native_probe_fails_before_dependency_discovery(self):
+        for system in ("Darwin", "Emscripten"):
+            with self.subTest(system=system):
+                body = (f'set(CMAKE_SYSTEM_NAME "{system}")\n'
+                        'set(LUDUS_BUILD_SHADER_PROBE ON)\n'
+                        f'include("{self.cmake}/EngineDependencyPreflight.cmake")\n')
+                result = self.configure(body)
+                self.assert_failure(result, "Shader feasibility probe",
+                                    "Linux Vulkan", "./init.sh --no-shader-probe", "Cornell box")
+                self.assertNotIn("volkConfig.cmake", result.stdout)
+
     def test_browser_cross_tool_and_provenance(self):
         args = (f"-DLUDUS_SLANG_COMPILER={self.tool}", f"-DLUDUS_SPIRV_VALIDATOR={self.tool}")
         self.assert_failure(self.configure(self.shader_body("Emscripten", "set(EMSCRIPTEN TRUE)"), *args),

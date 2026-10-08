@@ -70,6 +70,19 @@ class InitTests(unittest.TestCase):
                     init_ui.prepare_init(self.args("--gui", *options), engine)
                 gui.assert_not_called()
 
+    def test_macos_shader_probe_fails_before_gui_or_installation(self):
+        with patch.object(init_ui.platform, "system", return_value="Darwin"), \
+                patch.object(init_ui, "select_options") as gui, \
+                patch.object(engine, "command_init") as install:
+            with self.assertRaisesRegex(engine.EngineError, "Linux Vulkan.*--no-shader-probe"):
+                init_ui.prepare_init(self.args("--gui", "macos-clang-development", "--with-shader-probe"), engine)
+            gui.assert_not_called()
+            install.assert_not_called()
+        with patch.object(init_ui.platform, "system", return_value="Linux"):
+            self.assertTrue(init_ui.shader_probe_supported("linux-clang-development"))
+            self.assertFalse(init_ui.shader_probe_supported("macos-clang-development"))
+            self.assertFalse(init_ui.shader_probe_supported("web-emscripten-development"))
+
     def test_default_gui_and_noninteractive_routing(self):
         with patch.dict(os.environ, {"DISPLAY": ":test"}, clear=True), \
                 patch("sys.stdin.isatty", return_value=True), patch("sys.stdout.isatty", return_value=True):
@@ -258,6 +271,29 @@ class WindowTests(unittest.TestCase):
                  and widget.cget("text") == "Initialize").invoke()
         result = self.select(accept, engine.NATIVE_PRESET_PREFIX + "-development")
         self.assertTrue(result.with_editor)
+
+    def test_shader_probe_checkbox_follows_host_and_selected_preset(self):
+        def accept(window, widgets):
+            probe = next(widget for widget in widgets if widget.winfo_class() == "TCheckbutton"
+                         and widget.cget("text").startswith("Include shader feasibility probe"))
+            supported = platform.system() == "Linux"
+            self.assertEqual(probe.instate(["disabled"]), not supported)
+            probe.invoke()
+            self.assertEqual(bool(window.getvar(probe.cget("variable"))), supported)
+            presets = [widget for widget in widgets if widget.winfo_class() == "TCombobox"][1]
+            presets.set("web-emscripten-development")
+            presets.event_generate("<<ComboboxSelected>>")
+            window.update_idletasks()
+            self.assertTrue(probe.instate(["disabled"]))
+            self.assertFalse(window.getvar(probe.cget("variable")))
+            presets.set(engine.NATIVE_PRESET_PREFIX + "-development")
+            presets.event_generate("<<ComboboxSelected>>")
+            window.update_idletasks()
+            self.assertEqual(probe.instate(["disabled"]), not supported)
+            next(widget for widget in widgets if widget.winfo_class() == "TButton"
+                 and widget.cget("text") == "Initialize").invoke()
+        result = self.select(accept, engine.NATIVE_PRESET_PREFIX + "-development")
+        self.assertFalse(result.with_shader_probe)
 
     def test_browser_workflow_disables_native_options(self):
         def accept(window, widgets):

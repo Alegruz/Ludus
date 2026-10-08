@@ -22,3 +22,8 @@ endif()
 if(BUILD_TESTING)
     add_test(NAME scripted_game_static COMMAND scripted_game_shipping --headless --max-frames 2)
 endif()
+
+option(SCRIPTED_GAME_QUALIFICATION "Build the opt-in S7 reference workload" OFF)
+if(SCRIPTED_GAME_QUALIFICATION)
+    add_subdirectory(benchmarks)
+endif()
