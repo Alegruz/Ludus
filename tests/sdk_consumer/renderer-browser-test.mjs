@@ -60,6 +60,7 @@ try {
     assert.equal(images[0].data[(20*96+24)*4],255,'red object');
     assert.equal(images[0].data[(20*96+72)*4+1],255,'green object');
     assert.equal(images[0].data[(45*96+48)*4+2],255,'error material');
+    assert.deepEqual([...images[0].data.subarray((32*96+12)*4,(32*96+12)*4+4)],[25,26,52,255],'UNorm background');
     assert.deepEqual([...images[0].data.subarray((32*96+48)*4,(32*96+48)*4+4)],[70,134,13,255],'premultiplied painter overlays');
   }
   await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2));

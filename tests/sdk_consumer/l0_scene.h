@@ -30,7 +30,9 @@ inline rhi::RasterStatus BuildL0Scene(rr::Renderer& renderer,
     }
     items[0].Transform.Columns[0].X = items[0].Transform.Columns[1].Y = 4;
     items[0].Transform.Translation.Z = .8F;
-    items[0].Material.Color = {.1F, .1F, .2F, 1};
+    // Background RGBA8 codes 25,26,52 make both half-opacity blends land on integer
+    // codes: (140,13,26), then (70,134,13). Avoid backend-dependent UNorm rounding ties.
+    items[0].Material.Color = {25.F / 255.F, 26.F / 255.F, 52.F / 255.F, 1};
     items[1].Transform.Translation = {-.5F, .35F, .2F};
     items[1].Material.Color = {1, 0, 0, 1};
     items[2].Geometry = triangle;

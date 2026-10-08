@@ -65,6 +65,10 @@ TEST_CASE("L0 optimized packets match unsorted direct pixels with depth, errors 
     CHECK(images[0][red + 1] == 0);
     const usize green = (usize{20} * 96 + 72) * 4;
     CHECK(images[0][green + 1] == 255);
+    const usize background = (usize{32} * 96 + 12) * 4;
+    CHECK(images[0][background] == 25);
+    CHECK(images[0][background + 1] == 26);
+    CHECK(images[0][background + 2] == 52);
     const usize overlay = (usize{32} * 96 + 48) * 4;
     CHECK(images[0][overlay] == 70);
     CHECK(images[0][overlay + 1] == 134);
