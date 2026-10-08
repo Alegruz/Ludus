@@ -73,7 +73,8 @@ inline rhi::RasterStatus PrepareL1Presentations(rr::Renderer& renderer,
                                                 const rhi::TextureHandle (&targets)[2],
                                                 uint32 width,
                                                 uint32 height,
-                                                rr::Presentation (&output)[2]) noexcept
+                                                rr::Presentation (&output)[2],
+                                                rr::ScreenFit fit = rr::ScreenFit::Fit) noexcept
 {
     for (uint32 i = 0; i < 2; ++i)
     {
@@ -84,7 +85,7 @@ inline rhi::RasterStatus PrepareL1Presentations(rr::Renderer& renderer,
             return status;
         }
         rr::ViewMapping mapping;
-        status = rr::ResolveViewMapping({48, 48}, region, width, height, mapping);
+        status = rr::ResolveViewMapping({48, 48, fit}, region, width, height, mapping);
         if (status != rhi::RasterStatus::Ready)
         {
             return status;

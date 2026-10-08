@@ -23,7 +23,7 @@ try {
   const pin = JSON.parse(await readFile(new URL('../../config/shader_toolchain.json',import.meta.url))).wgsl_validator;
   assert.equal(browser.version(),pin.chromium_version);
   report.version = browser.version();
-  for (const phase of [0,1]) {
+  for (const phase of [0,1,2]) {
   let oracle, resizedOracle;
   for (const scenario of ['webgpu','webgl2','auto','fallback']) {
     const images = [], resizedImages = [];
@@ -34,27 +34,27 @@ try {
       const errors = [];
       page.on('pageerror',error => errors.push(String(error)));
       page.on('console',message => {if (message.type() === 'error') errors.push(message.text());});
-      await page.goto(`http://127.0.0.1:${server.address().port}/${phase === 1 ? 'renderer-views' : 'renderer'}.html?backend=${scenario === 'fallback'?'auto':scenario}${reference?'&reference=1':''}`);
+      await page.goto(`http://127.0.0.1:${server.address().port}/${phase > 0 ? 'renderer-views' : 'renderer'}.html?backend=${scenario === 'fallback'?'auto':scenario}${reference?'&reference=1':''}${phase===2?'&fit=fill':''}`);
       try { await page.waitForFunction(() => ['rendering','failed'].includes(document.querySelector('#status').dataset.state),{},{timeout:30000}); }
       catch (error) { throw new Error(JSON.stringify({scenario,reference,errors,state:await page.locator('#status').evaluate(n=>({...n.dataset}))}),{cause:error}); }
       const state = await page.locator('#status').evaluate(node => ({...node.dataset}));
       assert.equal(state.state,'rendering',JSON.stringify({scenario,state,errors}));
       assert.equal(state.frames,'5');
-      assert.equal(state.culled,reference?'0':phase === 1 ? '2':'1');
+      assert.equal(state.culled,reference?'0':phase > 0 ? '2':'1');
       assert.equal(state.backend,scenario==='fallback'?'webgl2':scenario==='auto'?'webgpu':scenario);
       assert.deepEqual(errors,[]);
       const png = await page.locator('#canvas').screenshot();
-      await writeFile(resolve(output,`l${phase}-${scenario}-${reference?'reference':'optimized'}.png`),png);
+      await writeFile(resolve(output,`l${phase===2?'1-fill':phase}-${scenario}-${reference?'reference':'optimized'}.png`),png);
       images.push(PNG.sync.read(png));
       await page.evaluate(() => {globalThis.__qaPause = false;});
-      if (phase === 1) {
+      if (phase > 0) {
         await page.waitForFunction(() => document.querySelector('#status').dataset.frames === '45' || document.querySelector('#status').dataset.state === 'failed', {}, {timeout:30000});
         const resized = await page.locator('#status').evaluate(n=>({...n.dataset}));
         assert.equal(resized.state,'rendering',JSON.stringify({scenario,reference,resized,errors}));
         assert.equal(resized.width,'120'); assert.equal(resized.height,'80');
         assert.equal(resized.zero,'1'); assert.equal(resized.resized,'1');
         const png = await page.locator('#canvas').screenshot();
-        await writeFile(resolve(output,`l1-resized-${scenario}-${reference?'reference':'optimized'}.png`),png);
+        await writeFile(resolve(output,`l1-${phase===2?'fill-':''}resized-${scenario}-${reference?'reference':'optimized'}.png`),png);
         resizedImages.push(PNG.sync.read(png));
         await page.evaluate(() => {globalThis.__qaPause = false;});
       }
@@ -78,7 +78,7 @@ try {
     } else {
       const check = (image,width,height) => {
         assert.equal(image.width,width); assert.equal(image.height,height);
-        const pane = width/2, bar = (height-pane)/2;
+        const pane = width/2, content = phase===2 ? height : pane, bar = phase===2 ? 0 : (height-pane)/2;
         const color = (x,y,expected,label) => {
           const offset=(y*width+x)*4;
           assert.deepEqual([...image.data.subarray(offset,offset+4)],expected,label);
@@ -86,8 +86,10 @@ try {
         for (const x of [pane/2,pane+pane/2]) color(x,height/2,[255,0,0,255],'near red survives later far green');
         color(4,bar+4,[0,255,0,255],'orthographic corner');
         color(pane+4,bar+4,[0,0,255,255],'perspective corner');
-        for (const x of [Math.floor(pane*.875),pane+Math.floor(pane*.875)]) color(x,bar+Math.floor(pane*.175),[255,0,255,255],'top-right overlay / top-left sampled UV');
-        for (const x of [pane/2,pane+pane/2]) color(x,2,[0,0,0,255],'letterbox bar');
+        for (const x of [Math.floor(pane/2+content*.325),pane+Math.floor(pane/2+content*.325)]) color(x,bar+Math.floor(content*.175),[255,0,255,255],'top-right overlay / top-left sampled UV');
+        if (phase===2) { color(pane/2,2,[0,255,0,255],'Fill has no bars'); color(pane+pane/2,2,[0,0,255,255],'Fill perspective top'); }
+        else for (const x of [pane/2,pane+pane/2]) color(x,2,[0,0,0,255],'letterbox bar');
+        if (phase===2) color(Math.floor(pane/2-content*.3125),height/2,[0,255,0,255],'Fill crops once');
       };
       check(images[0],96,64);
       assert.deepEqual(resizedImages[0].data,resizedImages[1].data,scenario+' resized direct image oracle');

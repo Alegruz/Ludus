@@ -146,3 +146,23 @@ TEST_CASE("Reverse-Z lenses map near and far correctly and infinite perspective 
     CHECK(rr::BuildViewDescription(invalid, mapping, sentinel) == rhi::RasterStatus::InvalidDescription);
     CHECK(sentinel.CullMargin == 123);
 }
+
+TEST_CASE("Fill projection distinguishes uncropped source from direct output and applies crop once",
+          "[renderer][views]")
+{
+    rr::ViewMapping mapping;
+    REQUIRE(rr::ResolveViewMapping({100, 50, rr::ScreenFit::Fill}, {0, 0, 100, 100}, 100, 100, mapping) ==
+            rhi::RasterStatus::Ready);
+    rr::ProjectionDescription lens;
+    rr::ViewDescription source, direct;
+    REQUIRE(rr::BuildViewDescription(lens, mapping, source) == rhi::RasterStatus::Ready);
+    REQUIRE(rr::BuildViewDescription(lens, mapping, direct, rr::ProjectionSpace::OutputRegion) ==
+            rhi::RasterStatus::Ready);
+    CHECK(direct.WorldToClip.At(0, 0) == 2 * source.WorldToClip.At(0, 0));
+    CHECK(source.OverlayToClip.At(0, 0) == 1);
+    CHECK(direct.OverlayToClip.At(0, 0) == 2);
+    direct.CullMargin = 123;
+    CHECK(rr::BuildViewDescription(lens, mapping, direct, static_cast<rr::ProjectionSpace>(255)) ==
+          rhi::RasterStatus::InvalidDescription);
+    CHECK(direct.CullMargin == 123);
+}

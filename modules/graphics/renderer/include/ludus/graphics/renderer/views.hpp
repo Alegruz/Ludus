@@ -115,10 +115,21 @@ struct ProjectionDescription final
     /// World units, greater than Near; ignored for PerspectiveInfinite.
     ludus::foundation::float32 Far = 1000;
 };
-/// Build a reverse-Z prepared-view description using the logical aspect and crop transform.
+/// Where the prepared geometry will be rasterized; crop must be applied exactly once.
+enum class ProjectionSpace : ludus::foundation::uint8
+{
+    /// Uncropped logical image in an offscreen target; DrawPresentation applies output crop.
+    LogicalScreen,
+    /// Direct output-region drawing; apply mapping crop to geometry and overlays here.
+    OutputRegion,
+};
+/// Build a reverse-Z prepared-view description using the logical aspect.
+/// LogicalScreen is the default for offscreen composition; OutputRegion applies Fill crop
+/// when drawing directly into mapping.Viewport. Do not compose a cropped OutputRegion view.
 /// Finite orthographic/perspective and infinite perspective reuse FoundationMath factories.
 /// Invalid/nonrepresentable inputs preserve output; Reference/CullMargin use their defaults.
 [[nodiscard]] rhi::RasterStatus BuildViewDescription(const ProjectionDescription& projection,
                                                      const ViewMapping& mapping,
-                                                     ViewDescription& output) noexcept;
+                                                     ViewDescription& output,
+                                                     ProjectionSpace space = ProjectionSpace::LogicalScreen) noexcept;
 } // namespace ludus::graphics::renderer

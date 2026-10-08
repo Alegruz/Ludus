@@ -203,9 +203,11 @@ Status MapVirtualToPhysical(const ViewMapping& mapping, math::Vector2 point, mat
 }
 Status BuildViewDescription(const ProjectionDescription& projection,
                             const ViewMapping& mapping,
-                            ViewDescription& output) noexcept
+                            ViewDescription& output,
+                            ProjectionSpace space) noexcept
 {
-    if (!ValidMapping(mapping) || !math::IsFinite(mapping.ClipTransform) || !math::IsFinite(projection.WorldToView))
+    if (!ValidMapping(mapping) || !math::IsFinite(projection.WorldToView) ||
+        (space != ProjectionSpace::LogicalScreen && space != ProjectionSpace::OutputRegion))
     {
         return Status::InvalidDescription;
     }
@@ -251,11 +253,12 @@ Status BuildViewDescription(const ProjectionDescription& projection,
         return Status::InvalidDescription;
     }
     ViewDescription result;
-    result.WorldToClip = mapping.ClipTransform * clipProjection * projection.WorldToView;
+    const auto crop = space == ProjectionSpace::OutputRegion ? mapping.ClipTransform : math::Matrix4::Identity();
+    result.WorldToClip = crop * clipProjection * projection.WorldToView;
     result.Depth = DepthConvention::ReverseZ;
     result.InfiniteFar = projection.Kind == ProjectionKind::PerspectiveInfinite;
-    // The same crop applies to authored clip-space overlays in PrepareView.
-    result.OverlayToClip = mapping.ClipTransform;
+    // Direct drawing crops geometry and overlays together; composition crops the sampled image.
+    result.OverlayToClip = crop;
     if (!math::IsFinite(result.WorldToClip))
     {
         return Status::InvalidDescription;

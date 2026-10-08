@@ -32,6 +32,7 @@ core::UniquePtr<ludus::platform::Window> gWindow;
 // clang-format off
 EM_JS(int32, Selection, (), { const s = new URL(location.href).searchParams.get('backend'); return s === 'webgpu' ? 1 : s === 'webgl2' ? 2 : 0; });
 EM_JS(int32, Reference, (), { return new URL(location.href).searchParams.has('reference') ? 1 : 0; });
+EM_JS(int32, Fill, (), { return new URL(location.href).searchParams.get('fit') === 'fill' ? 1 : 0; });
 EM_JS(int32, Paused, (), { return globalThis.__qaPause ? 1 : 0; });
 EM_JS(void, ResizeCanvas, (uint32 width, uint32 height), { const canvas = document.querySelector('#canvas'); canvas.width = width; canvas.height = height; });
 EM_JS(void, Report, (int32 state, uint32 frames, uint32 width, uint32 height, uint32 draws, uint32 culled, int32 backend, int32 zero, int32 resized), {
@@ -48,6 +49,10 @@ int32 Selection() noexcept
     return 0;
 }
 int32 Reference() noexcept
+{
+    return 0;
+}
+int32 Fill() noexcept
 {
     return 0;
 }
@@ -217,7 +222,12 @@ void Tick() noexcept
                 return;
             }
         }
-        if (ludus::qa::PrepareL1Presentations(gRenderer, gTargets, gWidth, gHeight, gPresentations) !=
+        if (ludus::qa::PrepareL1Presentations(gRenderer,
+                                              gTargets,
+                                              gWidth,
+                                              gHeight,
+                                              gPresentations,
+                                              Fill() ? rr::ScreenFit::Fill : rr::ScreenFit::Fit) !=
             rhi::RasterStatus::Ready)
         {
             Stop(true);
@@ -290,7 +300,12 @@ void Tick() noexcept
                     return;
                 }
             }
-            if (ludus::qa::PrepareL1Presentations(gRenderer, gNextTargets, 120, 80, gNextPresentations) !=
+            if (ludus::qa::PrepareL1Presentations(gRenderer,
+                                                  gNextTargets,
+                                                  120,
+                                                  80,
+                                                  gNextPresentations,
+                                                  Fill() ? rr::ScreenFit::Fill : rr::ScreenFit::Fit) !=
                 rhi::RasterStatus::Ready)
             {
                 Stop(true);

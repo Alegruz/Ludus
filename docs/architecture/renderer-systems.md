@@ -164,7 +164,11 @@ pixel edges remain representable.
 
 `BuildViewDescription` reuses FoundationMath's right-handed reverse-Z factories for
 centered orthographic, finite perspective and infinite perspective. It uses the logical
-screen aspect and applies Fill's crop to both world geometry and overlays. Infinite
+screen aspect. Its default `ProjectionSpace::LogicalScreen` produces an uncropped
+offscreen image; presentation applies Fill crop once. For direct output-region drawing,
+request `ProjectionSpace::OutputRegion` and use the mapping viewport/scissor; this
+applies crop to world geometry and overlays during preparation. Do not present that
+already cropped image. Infinite
 perspective uses five-plane culling. Near maps to one, far to zero. Prepared views
 retain their depth convention; reverse-Z preparation requires the L1 profile ready.
 `Submit` remains the conventional L0 compatibility path; L1 uses `DrawView` inside
@@ -214,7 +218,9 @@ The public-only installed SDK fixture renders orthographic and infinite perspect
 views, verifies zero-extent skips, replaces 48-square targets with 96-square targets,
 and resizes presentation from 96x64 to 120x80 over 120 accepted frames. Native pixels
 compare optimized finite perspective against direct infinite perspective; browser
-oracles compare optimized/direct and cross-backend images at both extents. Independent
+oracles compare optimized/direct and cross-backend images at both extents for Fit and
+Fill. A native Fill fixture compares logical-source composition with direct output
+samples and independently detects double cropping. Independent
 samples prove near red survives later far green, different orthographic/perspective
 corners, top-right overlay UV orientation, bars and neighboring view preservation.
 Unit fixtures cover mapping inverses, explicit DPI, crop/fit/integer fallback, shared
