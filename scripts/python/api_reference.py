@@ -133,6 +133,14 @@ def bootstrap(root, pin):
     elif system == "Darwin" and machine in {"arm64", "aarch64", "x86_64", "amd64"}:
         cpu = "arm64" if machine in {"arm64", "aarch64"} else "x64"
         selected = pin["macos_" + cpu]
+        minimum = tuple(int(part) for part in selected["minimum_macos"].split("."))
+        version = platform.mac_ver()[0]
+        if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", version):
+            raise ValueError("Cannot determine macOS version for Doxygen bootstrap; use --doxygen")
+        installed = tuple(int(part) for part in version.split("."))
+        if installed[:len(minimum)] < minimum:
+            raise ValueError(f"Pinned Doxygen bootstrap requires macOS {selected['minimum_macos']} or later; "
+                             "use --doxygen with a compatible build of the pinned version on older hosts")
         archive_name = "doxygen-macos-" + cpu + ".zip"
     else:
         raise ValueError("Automatic Doxygen bootstrap supports Linux x64 and macOS ARM64/x64; "

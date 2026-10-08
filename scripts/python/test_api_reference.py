@@ -15,6 +15,9 @@ from api_reference import bootstrap, check_coverage, check_extracted_files, cove
 
 class ApiReferenceTests(unittest.TestCase):
     def setUp(self):
+        mac_version = patch("api_reference.platform.mac_ver", return_value=("15.0", ("", "", ""), ""))
+        mac_version.start()
+        self.addCleanup(mac_version.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
@@ -140,7 +143,7 @@ class ApiReferenceTests(unittest.TestCase):
             if duplicate:
                 archive.writestr(entry, b"duplicate")
         content = data.getvalue()
-        selected = {"url": "https://example.test/doxygen.zip",
+        selected = {"minimum_macos": "15.0", "url": "https://example.test/doxygen.zip",
                     "sha256": hashlib.sha256(content).hexdigest(),
                     "archive_binary": "doxygen/doxygen"}
         return content, {"macos_arm64": selected, "macos_x64": selected}
@@ -198,6 +201,19 @@ class ApiReferenceTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "exactly one CLI binary"):
                         bootstrap(self.root, pin)
                 self.assertFalse((self.root / "out/doxygen-tools/bin/doxygen").exists())
+
+    @patch("api_reference.platform.machine", return_value="arm64")
+    @patch("api_reference.platform.system", return_value="Darwin")
+    def test_old_or_unknown_macos_fails_before_download(self, _system, _machine):
+        _, pin = self.mac_archive()
+        for version in ("14.7.8", "13.0", "", "unknown"):
+            with self.subTest(version=version), \
+                    patch("api_reference.platform.mac_ver", return_value=(version, (), "")), \
+                    patch("api_reference.urllib.request.urlopen") as download:
+                with self.assertRaisesRegex(ValueError, "use --doxygen"):
+                    bootstrap(self.root, pin)
+                download.assert_not_called()
+                self.assertFalse((self.root / "out").exists())
 
     def test_unsupported_host_fails_before_network_or_output(self):
         for system, machine in (("Windows", "AMD64"), ("Linux", "aarch64"), ("Darwin", "ppc")):

@@ -9,7 +9,7 @@ and SHA-256 checksums published by Doxygen.
 Downloads identify the documentation client with an explicit User-Agent; the
 checksum is verified before extracting or executing the binary.
 
-On macOS 13 or later, `python scripts/build-api --bootstrap` automatically selects
+On macOS 15 or later, `python scripts/build-api --bootstrap` automatically selects
 Apple Silicon (`arm64`) or Intel (`x86_64`) using the Python process architecture.
 An Intel Python running under Rosetta selects the Intel tool. Build MkDocs first
 as described below; no Homebrew, disk-image mounting or system-wide installation
@@ -19,7 +19,10 @@ including when its installed copy is missing or damaged. Failed downloads or
 extraction leave an existing executable intact. Only the CLI member is extracted;
 the GUI and search helpers are not installed. Other hosts may use
 `python scripts/build-api --doxygen /path/to/doxygen` with the pinned version.
-Plain previews never download Doxygen.
+The release binaries target macOS 15, despite the upstream download page's
+macOS 13+ label; older systems fail with a setup message before downloading or
+replacing tools. Use an explicit compatible build of the pinned Doxygen version
+on those systems. Plain previews never download Doxygen.
 
 ## Write caller contracts
 
