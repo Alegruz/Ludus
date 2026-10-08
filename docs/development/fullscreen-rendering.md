@@ -493,3 +493,138 @@ results remain separate from physical GPU/browser acceptance.
 
 Texture rings, mutable buffer updates, descriptor suballocation, general
 copy/pass APIs and a separate GraphicsDevice module remain later extensions.
+
+## Ordered raster graphs (R3)
+
+Include `<ludus/graphics/rhi/graph.h>` and inspect
+`DeviceInfo.Enabled.OrderedRasterGraph`. Requiring this feature also requires
+portable raster admission. The compiler and direct raster passes use the existing
+RHI registry, ownership leases and ordered submission tokens. All calls run on
+the owner thread; setup, compilation and execution start between frames.
+
+The first profile is four graphs, sixteen logical resources per graph, thirty-two
+ordered raster passes, sixteen declarations per pass, 256 retained draws per
+graph, and 512 semantic dependency report entries. Capacity rejection occurs
+before frame acquisition. Raster formats remain RGBA8 linear/sRGB, one mip,
+one layer and one sample, with one color attachment and private same-size depth.
+Compute, mutable buffers, general copy passes, MSAA/resolve, stencil, depth
+sampling, physical heap aliasing and pass merging remain outside this profile.
+
+### Author, compile and execute
+
+Create an `OrderedGraph`, import each physical buffer/texture once, reserve new
+attachment versions with `NextGraphVersion`, then append `GraphPassDescription`
+values in intended execution order. Each pass copies its diagnostic name/source,
+resource declarations and complete draw packets, retaining their physical
+records. It does not retain callbacks or caller arrays. Declarations must cover
+vertex/index slices and every immutable binding entry, including unused extra
+bindings that contribute to WebGPU's rendering scope. Samplers are retained by
+binding snapshots and have no memory-content hazard declaration.
+
+Buffer declarations carry byte ranges and roles. Reports explicitly identify
+conservative whole-buffer hazard tracking; the implementation does not claim
+subrange scheduling. Textures declare their complete color image. A pass cannot
+sample its own color attachment or declare conflicting uses of one physical
+resource. Clear establishes full initialization; Load requires defined prior
+contents; Discard followed by partial draws does not establish initialization.
+Store Discard invalidates contents. The acquired surface begins cleared by the
+existing frame path and must finish with defined stored color for presentation.
+Depth Clear uses one; Depth Load requires a stored prior depth image. A read-only
+depth pass requires Load and rejects pipelines that write depth. `DepthWrite=false`
+allows a depth-testing pipeline in that pass.
+
+Versions identify contents, not new storage. Reads must name the current produced
+version at that authored position. A later producer, an overwritten version,
+a missing declaration or an undefined load/root fails compilation. In-place
+writes produce RAW, WAR and WAW dependencies against the same physical image.
+No pass is silently reordered. Present/surface passes, explicit side effects,
+and Export/History/Readback roots retain observable work; future-frame history
+writes are roots even when this frame never reads them. Culling follows content
+dependencies rather than retaining overwritten work solely for WAW/WAR edges.
+Reference compilation disables culling while retaining the same validation.
+
+`CompileOrderedGraph` returns a fixed `GraphReport` containing authored names,
+source locations, culling flags, first/last live uses, and semantic dependencies
+with RAW/WAR/WAW reasons. Pass index 32 denotes an external import/final-use
+boundary; resource index 16 is the no-resource diagnostic sentinel. No GPU work
+occurs during compilation. Successful compilation freezes setup. Discard a
+rejected plan and rebuild if its declarations need changing.
+
+`ExecuteOrderedGraph` rechecks frozen import revisions, packet readiness,
+completion capacity and backend pass preparation before acquiring the current
+surface. Target skip and preflight failure preserve graph/token for retry. Once
+encoding begins, the graph is consumed even on failure; partial native/browser
+work faults the session rather than claiming rollback. Accepted execution
+publishes an R2 completion token and commits texture validity/use into the same
+registry used by direct drawing. Discarding an unexecuted graph drops CPU leases
+without GPU work. Shutdown/loss invalidates every graph incarnation.
+
+The fully checked packet authoring is
+[`tests/sdk_consumer/ordered_frame.h`](../../tests/sdk_consumer/ordered_frame.h),
+used by both native pixels and the installed-SDK consumer. It compiles an unused
+color pass, a depth-tested instanced scene, a Load pass with read-only depth,
+and a scene-texture composite to presentation. Pipeline `Target` selects the
+surface format or a matching RGBA8 offscreen format; dimensions are dynamic.
+
+### Imports, history and transient objects
+
+`GetTextureState` returns the registry's exact accepted-content snapshot:
+non-wrapping revision, last submission dependency, semantic use, and color/depth
+validity. `ImportGraphTexture` requires that snapshot and a final semantic use.
+The compiler and executor reject stale snapshots, including changes made by
+accepted direct passes or sampled direct draws. Pending same-queue dependencies
+are ordered by GPU commands and barriers, without a CPU completion wait.
+History uses persistent owned attachment textures, roots their produced version,
+and imports the resulting snapshot on the next execution. The caller decides
+which persistent image is the history source/destination; there is no automatic
+frame-index rotation. Readback roots preserve a consumer's data; scheduling and
+copy-out remain separate R2 buffer services. Texture readback is still deferred.
+
+`TextureDescription.Attachment=true` allocates undefined color/private depth
+with an empty upload. Direct `BeginRasterPass` switches attachments inside an
+acquired frame with the same load/store checks. Direct frame end makes written
+attachments sampleable for subsequent draws and records that final use. R2
+command batches remain surface-only; offscreen packet sequences use R3 graphs
+or explicit direct passes. Direct draws and R2 batches require a texture's last
+committed/draft sampled use to cover its binding visibility. Choose `SampledBoth`
+when exporting to arbitrary direct bindings; incompatible final color or narrower
+sampled use returns `InvalidState` before a draw/batch submission. Graph execution
+can transition these imports according to its declarations.
+
+`CreateGraphTexture` acquires from an eight-object whole-description pool during
+setup, before compilation. This early bounded acquisition lets callers build
+ordinary immutable texture views/binding snapshots before graph preflight; it
+is not interval-based physical aliasing. Every graph resource stays physically
+distinct through execution. Pool reuse requires all graph/view/binding/packet
+leases to end, validation callbacks to drain, and actual GPU completion. Idle
+objects may be evicted when descriptions change, such as resize. Fresh/reused
+contents start semantically undefined. The returned texture handle is borrowed:
+Destroy rejects it, graph consumption/discard invalidates it, and a later lease
+gets a new generation. Destroy owned views/binding sets when no longer needed
+or they keep the pool object retained. Persistent imports cannot borrow another
+graph's pool image; transient resources cannot escape through roots.
+
+### Backend lowering and acceptance
+
+Vulkan retains the legacy 1.1 render-pass path, privately cached compatible pass
+objects and VMA attachment allocation. One mapper translates semantic texture
+uses to color-output, shader-stage and depth-test barriers/layout transitions;
+there are no ALL_COMMANDS barriers or newer feature requirements. WebGPU closes
+rendering scopes before sampling an earlier attachment, uses creation flags and
+private depth views, and relies on ordered queue validation/completion rather
+than exposing fake barriers. Metal uses separate render encoders with explicit
+load/store state. WebGL 2 uses owned FBOs, depth renderbuffers and owner-context
+commands. Its portable top-left texture convention requires a private flipped
+color blit at stored attachment boundaries; this copy cost is deliberate and
+has no performance-improvement claim. Discard still remains semantically
+undefined when a browser backend security-clears its storage.
+
+Reference regressions cover packet retention, missing uses, forward/stale
+versions, feedback, undefined loads/stores/roots, RAW/WAR/WAW reports, history
+roots, direct/graph revision conflicts, retry/partial failure, identity/capacity
+and pool retirement across GPU completion and view leases. Native pixel tests
+exercise offscreen scene/UI/composite on Metal and Vulkan. The installed browser
+SDK harness adds forced WebGPU/WebGL graph/reference variants, validates pixels,
+compares complete optimized/reference images, and renders 120 frames. It retains
+all R1/R2 failure, fallback and transfer scenarios. Pinned Chromium software-GPU
+acceptance remains separate from physical-GPU/hosted-browser acceptance.

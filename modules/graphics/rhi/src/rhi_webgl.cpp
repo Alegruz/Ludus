@@ -273,6 +273,11 @@ FrameStatus End() noexcept
     {
         return FrameStatus::Failed;
     }
+    if (glGetError() != GL_NO_ERROR)
+    {
+        internal::Fail(gSession, StartupError::RenderingUnavailable);
+        return FrameStatus::Failed;
+    }
     // The browser presents the default framebuffer after the frame callback
     // returns; there is no explicit present. Context loss is surfaced by the
     // registered webglcontextlost callback (ContextLost), which the facade turns

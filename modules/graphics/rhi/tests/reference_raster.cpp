@@ -12,7 +12,8 @@ void Reset() noexcept
     LossOnCompletion = 0;
     Submitted = 0;
     Completed = 0;
-    Draws = 0;
+    Draws = Passes = Barriers = 0;
+    PassStart = PassPrepare = RasterStatus::Ready;
     Discards = 0;
     Copies = 0;
     TransferStart = ReadbackCopy = RasterStatus::Ready;
@@ -118,6 +119,20 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
     reference::Packet = packet;
     ++reference::Draws;
     return RasterStatus::Ready;
+}
+RasterStatus RasterPreparePass(const internal::RasterPassInfo&) noexcept
+{
+    return reference::PassPrepare;
+}
+void RasterEndPass() noexcept {}
+RasterStatus RasterBeginPass(const internal::RasterPassInfo&) noexcept
+{
+    ++reference::Passes;
+    return reference::PassStart;
+}
+void RasterTextureBarrier(usize, RasterTextureUse) noexcept
+{
+    ++reference::Barriers;
 }
 RasterStatus RasterReserveSubmission() noexcept
 {

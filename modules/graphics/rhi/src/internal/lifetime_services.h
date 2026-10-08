@@ -173,7 +173,8 @@ RasterStatus PacketStatus(const RasterPacket& packet) noexcept
 bool SamePipeline(const RasterPipelineInfo& a, const RasterPipelineInfo& b) noexcept
 {
     if (a.Vertex != b.Vertex || a.Fragment != b.Fragment || a.Layout != b.Layout || a.Depth != b.Depth ||
-        a.Blend != b.Blend || a.StreamCount != b.StreamCount || a.AttributeCount != b.AttributeCount)
+        a.Blend != b.Blend || a.Target != b.Target || a.DepthWrite != b.DepthWrite || a.StreamCount != b.StreamCount ||
+        a.AttributeCount != b.AttributeCount)
     {
         return false;
     }
@@ -477,9 +478,18 @@ SubmitCommands(DeviceHandle device, SurfaceHandle surface, CommandBatch& batch, 
     for (usize i = 0; i < record->Count; ++i)
     {
         const auto status = PacketStatus(record->Packets[i]);
+        if (At(RasterKind::Pipeline, record->Packets[i].Pipeline).Pipeline.Target != RasterTarget::Surface)
+        {
+            return RasterStatus::InvalidDescription;
+        }
         if (status != RasterStatus::Ready)
         {
             return status;
+        }
+        const auto compatible = ValidatePacketPass(record->Packets[i], {}, true);
+        if (compatible != RasterStatus::Ready)
+        {
+            return compatible;
         }
     }
     if (gSubmissions.Next == 0)

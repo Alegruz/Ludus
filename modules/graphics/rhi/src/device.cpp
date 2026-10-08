@@ -138,11 +138,12 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
     {
         return DeviceStatus::IdentityExhausted;
     }
-    const auto result = internal::StartOwned(application,
-                                             window,
-                                             description.Selection,
-                                             description.Limits,
-                                             description.Required.PortableRaster);
+    const auto result =
+        internal::StartOwned(application,
+                             window,
+                             description.Selection,
+                             description.Limits,
+                             description.Required.PortableRaster || description.Required.OrderedRasterGraph);
     if (result == StartStatus::Busy)
     {
         return DeviceStatus::InvalidState;
@@ -180,6 +181,8 @@ DeviceStatus GetDeviceInfo(DeviceHandle device, DeviceInfo& info) noexcept
         info.Enabled.FullscreenRaster = true;
         info.Supported.PortableRaster = backend::RasterLimits().MaxUniformRange >= 16384;
         info.Enabled.PortableRaster = info.Supported.PortableRaster;
+        info.Supported.OrderedRasterGraph = info.Supported.PortableRaster;
+        info.Enabled.OrderedRasterGraph = info.Supported.OrderedRasterGraph;
     }
     return state;
 }

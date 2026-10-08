@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "internal/readback.h"
+#include "ordered_frame.h"
 #include "raster.h"
 
 #include <span>
@@ -33,6 +34,15 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     {
         mode = 2;
     }
+    SECTION("Ordered graph optimizes unobservable passes")
+    {
+        mode = 3;
+    }
+    SECTION("Ordered graph reference keeps every legal pass")
+    {
+        mode = 4;
+    }
+    const bool graphMode = mode >= 3;
     struct Guard final
     {
         ~Guard() noexcept
@@ -70,7 +80,7 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     REQUIRE(rhi::CreateBuffer(device, {rhi::BufferRole::Uniform, sizeof(dim)}, RasterBytes(dim), backgroundUniform) ==
             rhi::RasterStatus::Ready);
     uint8 image[16]{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255};
-    if (mode != 0)
+    if (mode == 1 || mode == 2)
     {
         for (usize i = 0; i < sizeof(image); ++i)
         {
@@ -105,19 +115,30 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     REQUIRE(rhi::CreateBindingSet(device, layout, resources, set) == rhi::RasterStatus::Ready);
     resources[0].Buffer = backgroundUniform;
     REQUIRE(rhi::CreateBindingSet(device, layout, resources, backgroundSet) == rhi::RasterStatus::Ready);
-    // Public destruction detaches ownership while snapshots still retain records.
-    REQUIRE(rhi::Destroy(device, texture) == rhi::RasterStatus::Ready);
-    REQUIRE(rhi::Destroy(device, view) == rhi::RasterStatus::Ready);
-    REQUIRE(rhi::Destroy(device, sampler) == rhi::RasterStatus::Ready);
-    REQUIRE(rhi::Destroy(device, uniform) == rhi::RasterStatus::Ready);
-    REQUIRE(rhi::Destroy(device, backgroundUniform) == rhi::RasterStatus::Ready);
+    if (!graphMode)
+    {
+        // Public destruction detaches ownership while snapshots still retain records.
+        REQUIRE(rhi::Destroy(device, texture) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::Destroy(device, view) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::Destroy(device, sampler) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::Destroy(device, uniform) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::Destroy(device, backgroundUniform) == rhi::RasterStatus::Ready);
+    }
     const rhi::RasterVertexStream streams[2]{{20, false}, {8, true}};
     const rhi::RasterVertexAttribute attributes[3]{{0, 0, 0, rhi::RasterVertexFormat::Float3},
                                                    {1, 0, 12, rhi::RasterVertexFormat::Float2},
                                                    {2, 1, 0, rhi::RasterVertexFormat::Float2}};
     rhi::PipelineRequest request;
-    REQUIRE(rhi::RequestPipeline(device, {vs, fs, layout, streams, attributes, true, mode == 2}, request) ==
-            rhi::RasterStatus::Pending);
+    REQUIRE(rhi::RequestPipeline(device,
+                                 {vs,
+                                  fs,
+                                  layout,
+                                  streams,
+                                  attributes,
+                                  true,
+                                  mode == 2,
+                                  graphMode ? rhi::RasterTarget::Rgba8Unorm : rhi::RasterTarget::Surface},
+                                 request) == rhi::RasterStatus::Pending);
     REQUIRE(rhi::PollLifetime(device) == rhi::RasterStatus::Ready);
     rhi::RasterPipelineHandle pipeline;
     REQUIRE(rhi::GetRequestedPipeline(device, request, pipeline) == rhi::RasterStatus::Ready);
@@ -143,22 +164,75 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     const rhi::RasterDraw draw{pipeline, set, slices, index, 0, 6, 4, 2};
     const float64 clear = mode == 2 ? .25 : 0;
     REQUIRE(rhi::SetFrameTarget(device, surface, {96, 64, clear, clear, clear, 1}) == rhi::DeviceStatus::Ready);
-    rhi::CommandBatch batch;
-    REQUIRE(rhi::BeginCommands(device, batch) == rhi::RasterStatus::Ready);
-    REQUIRE(rhi::RecordDraw(device, batch, draw) == rhi::RasterStatus::Ready);
-    const rhi::RasterVertexSlice backgroundSlices[2]{{background, 0, sizeof(back)},
-                                                     {centerInstance, 0, sizeof(center)}};
-    REQUIRE(rhi::RecordDraw(device, batch, {pipeline, backgroundSet, backgroundSlices, index, 0, 6, 4, 1}) ==
-            rhi::RasterStatus::Ready);
-    REQUIRE(rhi::Release(device, request) == rhi::RasterStatus::Ready);
-    REQUIRE(rhi::Destroy(device, set) == rhi::RasterStatus::Ready);
-    REQUIRE(rhi::Destroy(device, backgroundSet) == rhi::RasterStatus::Ready);
-    REQUIRE(rhi::Destroy(device, vertices) == rhi::RasterStatus::Ready);
-    REQUIRE(rhi::Destroy(device, instances) == rhi::RasterStatus::Ready);
-    REQUIRE(rhi::Destroy(device, index) == rhi::RasterStatus::Ready);
-    REQUIRE(rhi::FinishCommands(device, batch) == rhi::RasterStatus::Ready);
     rhi::SubmissionToken completion;
-    REQUIRE(rhi::SubmitCommands(device, surface, batch, completion) == rhi::RasterStatus::Ready);
+    if (graphMode)
+    {
+        rhi::TextureHandle offscreen, unused;
+        rhi::TextureViewHandle offscreenView;
+        rhi::BindingSetHandle compositeSet;
+        rhi::RasterPipelineHandle ui, composite;
+        rhi::BufferHandle fullscreen;
+        REQUIRE(rhi::CreateTexture(device, {96, 64, rhi::RasterFormat::Rgba8Unorm, true}, {}, offscreen) ==
+                rhi::RasterStatus::Ready);
+        REQUIRE(rhi::CreateTexture(device, {96, 64, rhi::RasterFormat::Rgba8Unorm, true}, {}, unused) ==
+                rhi::RasterStatus::Ready);
+        REQUIRE(rhi::CreateTextureView(device, offscreen, offscreenView) == rhi::RasterStatus::Ready);
+        resources[0].Buffer = uniform;
+        resources[1].Texture = offscreenView;
+        REQUIRE(rhi::CreateBindingSet(device, layout, resources, compositeSet) == rhi::RasterStatus::Ready);
+        rhi::RasterPipelineDescription
+            uiDescription{vs, fs, layout, streams, attributes, true, false, rhi::RasterTarget::Rgba8Unorm, false};
+        REQUIRE(rhi::CreateRasterPipeline(device, uiDescription, ui) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::CreateRasterPipeline(device, {vs, fs, layout, streams, attributes}, composite) ==
+                rhi::RasterStatus::Ready);
+        const float32 full[20]{-1, -1, 0, 0, 1, -1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, -1, 0, 1, 1};
+        REQUIRE(rhi::CreateBuffer(device, {rhi::BufferRole::Vertex, sizeof(full)}, RasterBytes(full), fullscreen) ==
+                rhi::RasterStatus::Ready);
+        ludus::qa::OrderedFrameInputs inputs{vertices,
+                                             background,
+                                             instances,
+                                             centerInstance,
+                                             index,
+                                             uniform,
+                                             backgroundUniform,
+                                             fullscreen,
+                                             texture,
+                                             offscreen,
+                                             unused,
+                                             pipeline,
+                                             ui,
+                                             composite,
+                                             set,
+                                             backgroundSet,
+                                             compositeSet,
+                                             false};
+        rhi::OrderedGraph graph;
+        rhi::GraphReport report;
+        REQUIRE(ludus::qa::BuildOrderedFrame(device, inputs, graph, report, mode == 4) == rhi::RasterStatus::Ready);
+        // Plan retention, not public ownership, protects attachments during submit.
+        REQUIRE(rhi::Destroy(device, offscreen) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::Destroy(device, unused) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::Destroy(device, offscreenView) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::ExecuteOrderedGraph(device, surface, graph, completion) == rhi::RasterStatus::Ready);
+    }
+    else
+    {
+        rhi::CommandBatch batch;
+        REQUIRE(rhi::BeginCommands(device, batch) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::RecordDraw(device, batch, draw) == rhi::RasterStatus::Ready);
+        const rhi::RasterVertexSlice backgroundSlices[2]{{background, 0, sizeof(back)},
+                                                         {centerInstance, 0, sizeof(center)}};
+        REQUIRE(rhi::RecordDraw(device, batch, {pipeline, backgroundSet, backgroundSlices, index, 0, 6, 4, 1}) ==
+                rhi::RasterStatus::Ready);
+        REQUIRE(rhi::Release(device, request) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::Destroy(device, set) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::Destroy(device, backgroundSet) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::Destroy(device, vertices) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::Destroy(device, instances) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::Destroy(device, index) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::FinishCommands(device, batch) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::SubmitCommands(device, surface, batch, completion) == rhi::RasterStatus::Ready);
+    }
     uint8 pixels[96 * 64 * 4]{};
     REQUIRE(rhi::backend::ReadHeadlessPixels(pixels));
     CHECK(rhi::GetStatus(device, completion) == rhi::RasterStatus::Ready);

@@ -48,6 +48,8 @@ struct DeviceFeatures final
     bool Compute = false;
     /// General indirect draw/dispatch operations (not implemented).
     bool IndirectRendering = false;
+    /// Ordered portable raster graph, version/hazard validation and offscreen passes (R3).
+    bool OrderedRasterGraph = false;
 };
 
 /// Backend code compiled into this artifact; does not promise adapter/runtime availability.

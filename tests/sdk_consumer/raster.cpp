@@ -3,6 +3,7 @@
 #include <ludus/foundation/time/time.hpp>
 #include <ludus/graphics/rhi/lifetime.h>
 
+#include "ordered_frame.h"
 #include "raster.h"
 
 #include <span>
@@ -21,7 +22,14 @@ rhi::SurfaceHandle gSurface;
 rhi::RasterShaderHandle gVertex, gFragment;
 rhi::BindingLayoutHandle gLayout;
 rhi::BindingSetHandle gSet, gBackgroundSet;
-rhi::RasterPipelineHandle gPipeline;
+rhi::RasterPipelineHandle gPipeline, gUiPipeline, gCompositePipeline;
+rhi::PipelineRequest gUiRequest, gCompositeRequest;
+rhi::TextureHandle gOffscreen, gUnused;
+rhi::TextureViewHandle gOffscreenView;
+rhi::BindingSetHandle gCompositeSet;
+rhi::BufferHandle gFullscreen;
+rhi::OrderedGraph gGraph;
+bool gHasGraph = false;
 rhi::PipelineRequest gPipelineRequest, gSharedPipelineRequest;
 rhi::UploadTicket gVertexUpload, gIndexUpload, gCancelledUpload;
 rhi::ReadbackTicket gReadback;
@@ -52,7 +60,10 @@ EM_JS(int32, SlowTransfers, (), { return globalThis.__qaSlowTransfers ? 1 : 0; }
 EM_JS(int32, Paused, (), { return globalThis.__qaPause ? 1 : 0; });
 EM_JS(int32, Variant, (), {
     const value = new URL(location.href).searchParams.get('variant');
-    return value === 'srgb' ? 1 : value === 'blend' ? 2 : 0;
+    return value === 'srgb' ? 1 : value === 'blend' ? 2 : value === 'graph' ? 3 : value === 'graph-reference' ? 4 : 0;
+});
+EM_JS(void, ReportGraph, (uint32 live, uint32 dependencies), {
+    const node = document.getElementById('status'); node.dataset.livePasses = live; node.dataset.dependencies = dependencies;
 });
 EM_JS(int32, Selection, (), {
     const value = new URL(location.href).searchParams.get('backend');
@@ -67,8 +78,9 @@ int32 SlowTransfers() noexcept
 }
 int32 Variant() noexcept
 {
-    return 0;
+    return 3;
 }
+void ReportGraph(uint32, uint32) noexcept {}
 int32 Paused() noexcept
 {
     return 0;
@@ -119,7 +131,7 @@ bool Create() noexcept
     const float32 dim[4]{.5F, .5F, .5F, 1};
     uint8 image[16]{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255};
     const auto mode = Variant();
-    if (mode != 0)
+    if (mode == 1 || mode == 2)
     {
         for (usize i = 0; i < sizeof(image); ++i)
         {
@@ -140,6 +152,19 @@ bool Create() noexcept
     const float32 offsets[4]{-.45F, 0, .45F, 0};
     const float32 center[2]{0, 0};
     const uint32 indices[6]{0, 1, 2, 0, 2, 3};
+    if (mode >= 3)
+    {
+        const float32 fullscreen[20]{-1, -1, 0, 0, 1, -1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, -1, 0, 1, 1};
+        if (!Accepted(rhi::CreateTexture(gDevice, {96, 64, rhi::RasterFormat::Rgba8Unorm, true}, {}, gOffscreen)) ||
+            !Accepted(rhi::CreateTexture(gDevice, {96, 64, rhi::RasterFormat::Rgba8Unorm, true}, {}, gUnused)) ||
+            !Accepted(rhi::CreateBuffer(gDevice,
+                                        {rhi::BufferRole::Vertex, sizeof(fullscreen)},
+                                        Bytes(fullscreen),
+                                        gFullscreen)))
+        {
+            return false;
+        }
+    }
     return Accepted(rhi::CreateRasterShader(gDevice, vertex, gVertex)) &&
            Accepted(rhi::CreateRasterShader(gDevice, fragment, gFragment)) &&
            Accepted(rhi::CreateBindingLayout(gDevice, fragment.Bindings, gLayout)) &&
@@ -236,7 +261,8 @@ void Tick() noexcept
     {
         const bool ready = Ready(gVertex) && Ready(gFragment) && Ready(gLayout) && Ready(gTint) && Ready(gDim) &&
                            Ready(gTexture) && Ready(gSampler) && Ready(gVertexUpload) && Ready(gBackground) &&
-                           Ready(gInstances) && Ready(gCenter) && Ready(gIndexUpload);
+                           Ready(gInstances) && Ready(gCenter) && Ready(gIndexUpload) &&
+                           (Variant() < 3 || (Ready(gOffscreen) && Ready(gUnused) && Ready(gFullscreen)));
         if (gFailed)
         {
             Stop(true);
@@ -258,11 +284,16 @@ void Tick() noexcept
             Stop(true);
             return;
         }
+        if (Variant() >= 3 && !Accepted(rhi::CreateTextureView(gDevice, gOffscreen, gOffscreenView)))
+        {
+            Stop(true);
+            return;
+        }
         gStep = 2;
     }
     if (gStep == 2)
     {
-        if (!Ready(gView))
+        if (!Ready(gView) || (Variant() >= 3 && !Ready(gOffscreenView)))
         {
             if (gFailed)
             {
@@ -288,16 +319,53 @@ void Tick() noexcept
             Stop(true);
             return;
         }
+        if (Variant() >= 3)
+        {
+            bindings[0].Buffer = gTint;
+            bindings[1].Texture = gOffscreenView;
+            if (!Accepted(rhi::CreateBindingSet(gDevice, gLayout, bindings, gCompositeSet)))
+            {
+                Stop(true);
+                return;
+            }
+        }
         const rhi::RasterVertexStream streams[2]{{20, false}, {8, true}};
         const rhi::RasterVertexAttribute attributes[3]{{0, 0, 0, rhi::RasterVertexFormat::Float3},
                                                        {1, 0, 12, rhi::RasterVertexFormat::Float2},
                                                        {2, 1, 0, rhi::RasterVertexFormat::Float2}};
-        if (!Accepted(rhi::RequestPipeline(gDevice,
-                                           {gVertex, gFragment, gLayout, streams, attributes, true, Variant() == 2},
-                                           gPipelineRequest)) ||
-            !Accepted(rhi::RequestPipeline(gDevice,
-                                           {gVertex, gFragment, gLayout, streams, attributes, true, Variant() == 2},
-                                           gSharedPipelineRequest)))
+        if (!Accepted(
+                rhi::RequestPipeline(gDevice,
+                                     {gVertex,
+                                      gFragment,
+                                      gLayout,
+                                      streams,
+                                      attributes,
+                                      true,
+                                      Variant() == 2,
+                                      Variant() >= 3 ? rhi::RasterTarget::Rgba8Unorm : rhi::RasterTarget::Surface},
+                                     gPipelineRequest)) ||
+            !Accepted(
+                rhi::RequestPipeline(gDevice,
+                                     {gVertex,
+                                      gFragment,
+                                      gLayout,
+                                      streams,
+                                      attributes,
+                                      true,
+                                      Variant() == 2,
+                                      Variant() >= 3 ? rhi::RasterTarget::Rgba8Unorm : rhi::RasterTarget::Surface},
+                                     gSharedPipelineRequest)))
+        {
+            Stop(true);
+            return;
+        }
+        if (Variant() >= 3 &&
+            (!Accepted(rhi::RequestPipeline(
+                 gDevice,
+                 {gVertex, gFragment, gLayout, streams, attributes, true, false, rhi::RasterTarget::Rgba8Unorm, false},
+                 gUiRequest)) ||
+             !Accepted(
+                 rhi::RequestPipeline(gDevice, {gVertex, gFragment, gLayout, streams, attributes}, gCompositeRequest))))
         {
             Stop(true);
             return;
@@ -307,7 +375,8 @@ void Tick() noexcept
     if (gStep == 3)
     {
         const bool ready = Ready(gSet) && Ready(gBackgroundSet) && Ready(gPipelineRequest) &&
-                           Ready(gSharedPipelineRequest) && Ready(gReadback);
+                           Ready(gSharedPipelineRequest) && Ready(gReadback) &&
+                           (Variant() < 3 || (Ready(gCompositeSet) && Ready(gUiRequest) && Ready(gCompositeRequest)));
         if (gFailed)
         {
             Stop(true);
@@ -336,14 +405,21 @@ void Tick() noexcept
                 return;
             }
         }
-        if (rhi::Destroy(gDevice, gTint) != rhi::RasterStatus::Ready ||
-            rhi::Destroy(gDevice, gDim) != rhi::RasterStatus::Ready ||
-            rhi::Destroy(gDevice, gTexture) != rhi::RasterStatus::Ready ||
-            rhi::Destroy(gDevice, gView) != rhi::RasterStatus::Ready ||
-            rhi::Destroy(gDevice, gSampler) != rhi::RasterStatus::Ready ||
-            rhi::Destroy(gDevice, gVertex) != rhi::RasterStatus::Ready ||
-            rhi::Destroy(gDevice, gFragment) != rhi::RasterStatus::Ready ||
-            rhi::Destroy(gDevice, gLayout) != rhi::RasterStatus::Ready)
+        if (Variant() >= 3 &&
+            (rhi::GetRequestedPipeline(gDevice, gUiRequest, gUiPipeline) != rhi::RasterStatus::Ready ||
+             rhi::GetRequestedPipeline(gDevice, gCompositeRequest, gCompositePipeline) != rhi::RasterStatus::Ready))
+        {
+            Stop(true);
+            return;
+        }
+        if (Variant() < 3 && (rhi::Destroy(gDevice, gTint) != rhi::RasterStatus::Ready ||
+                              rhi::Destroy(gDevice, gDim) != rhi::RasterStatus::Ready ||
+                              rhi::Destroy(gDevice, gTexture) != rhi::RasterStatus::Ready ||
+                              rhi::Destroy(gDevice, gView) != rhi::RasterStatus::Ready ||
+                              rhi::Destroy(gDevice, gSampler) != rhi::RasterStatus::Ready ||
+                              rhi::Destroy(gDevice, gVertex) != rhi::RasterStatus::Ready ||
+                              rhi::Destroy(gDevice, gFragment) != rhi::RasterStatus::Ready ||
+                              rhi::Destroy(gDevice, gLayout) != rhi::RasterStatus::Ready))
         {
             Stop(true);
             return;
@@ -354,6 +430,53 @@ void Tick() noexcept
     if (rhi::SetFrameTarget(gDevice, gSurface, {96, 64, clear, clear, clear, 1}) != rhi::DeviceStatus::Ready)
     {
         Stop(true);
+        return;
+    }
+    if (Variant() >= 3)
+    {
+        if (!gHasGraph)
+        {
+            const ludus::qa::OrderedFrameInputs inputs{gVertices,
+                                                       gBackground,
+                                                       gInstances,
+                                                       gCenter,
+                                                       gIndices,
+                                                       gTint,
+                                                       gDim,
+                                                       gFullscreen,
+                                                       gTexture,
+                                                       gOffscreen,
+                                                       gUnused,
+                                                       gPipeline,
+                                                       gUiPipeline,
+                                                       gCompositePipeline,
+                                                       gSet,
+                                                       gBackgroundSet,
+                                                       gCompositeSet};
+            rhi::GraphReport report;
+            if (ludus::qa::BuildOrderedFrame(gDevice, inputs, gGraph, report, Variant() == 4) !=
+                rhi::RasterStatus::Ready)
+            {
+                Stop(true);
+                return;
+            }
+            ReportGraph(report.LivePasses, report.DependencyCount);
+            gHasGraph = true;
+        }
+        const auto submitted = rhi::ExecuteOrderedGraph(gDevice, gSurface, gGraph, gCompletion);
+        if (submitted == rhi::RasterStatus::NotReady || submitted == rhi::RasterStatus::CapacityExceeded)
+        {
+            return;
+        }
+        if (submitted != rhi::RasterStatus::Ready)
+        {
+            Stop(true);
+            return;
+        }
+        gHasGraph = false;
+        gHasCompletion = true;
+        ++gFrames;
+        Report(gStep, gFrames, 0, static_cast<int32>(info.Startup.SelectedBackend));
         return;
     }
     if (!gHasBatch)

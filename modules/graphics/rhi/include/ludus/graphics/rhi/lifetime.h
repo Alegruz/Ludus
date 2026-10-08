@@ -100,7 +100,8 @@ struct LifetimeCapabilities final
 /// A skipped target returns NotReady and preserves the finished batch for retry.
 /// Native failure after encoding begins can submit partial work: a non-null completion
 /// still identifies that accepted GPU work; inspect the returned failure independently.
-/// Preflight/admission failure preserves batch and completion.
+/// Preflight/admission failure preserves batch and completion. Sampled textures
+/// must have defined contents and a committed sampled use covering binding visibility.
 [[nodiscard]] RasterStatus
 SubmitCommands(DeviceHandle device, SurfaceHandle surface, CommandBatch& batch, SubmissionToken& completion) noexcept;
 /// End an open direct frame with completion tracking, including clear-only frames.

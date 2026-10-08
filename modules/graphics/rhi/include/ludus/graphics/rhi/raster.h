@@ -159,7 +159,7 @@ struct BufferDescription final
     /// Allocation and initial-content length in bytes; nonzero and bounded by capabilities.
     ludus::foundation::usize Size = 0;
 };
-/// Supported sampled formats; all textures have one mip, one layer and one sample.
+/// Supported color formats; all textures have one mip, one layer and one sample.
 enum class RasterFormat : ludus::foundation::uint8
 {
     /// Four unsigned normalized channels, interpreted as linear light.
@@ -167,7 +167,7 @@ enum class RasterFormat : ludus::foundation::uint8
     /// Four unsigned normalized channels; RGB decodes sRGB during sampling, alpha remains linear.
     Rgba8Srgb,
 };
-/// Immutable two-dimensional sampled texture description.
+/// Two-dimensional sampled texture or mutable color attachment description.
 struct TextureDescription final
 {
     /// Pixel width, nonzero and bounded by enabled limits.
@@ -176,6 +176,9 @@ struct TextureDescription final
     ludus::foundation::uint32 Height = 0;
     /// Sampling conversion; no automatic upload conversion occurs.
     RasterFormat Format = RasterFormat::Rgba8Unorm;
+    /// Allocate undefined color and private depth attachments instead of uploading bytes.
+    /// Attachment textures remain sampleable; clear/store defines color contents.
+    bool Attachment = false;
 };
 /// Borrowed complete RGBA8 upload, copied/consumed before CreateTexture returns.
 struct TextureUpload final
@@ -314,10 +317,20 @@ struct RasterVertexStream final
     /// False advances per vertex; true advances per instance with divisor one.
     bool PerInstance = false;
 };
+/// Color attachment compatibility baked into an immutable raster pipeline.
+enum class RasterTarget : ludus::foundation::uint8
+{
+    /// Acquired session target's negotiated format.
+    Surface,
+    /// Linear RGBA8 offscreen color attachment.
+    Rgba8Unorm,
+    /// sRGB RGBA8 offscreen color attachment.
+    Rgba8Srgb,
+};
 /// Immutable triangle-list pipeline, independent of particular buffers or bindings.
-/// The target is the session's surface/headless color format, one sample, with
-/// frame-owned depth cleared to one. Resize preserves pipelines while format changes
-/// require the existing explicit session restart. Depth uses canonical [0,1] coordinates.
+/// Target selects the negotiated surface or an explicit offscreen color format,
+/// with one sample and private depth. Dimensions are dynamic; format changes need
+/// a compatible pipeline. Depth uses canonical [0,1] coordinates.
 struct RasterPipelineDescription final
 {
     /// Ready vertex stage retained by the pipeline.
@@ -334,6 +347,10 @@ struct RasterPipelineDescription final
     bool Depth = false;
     /// Enable premultiplied-alpha blending in the target's linear domain.
     bool Blend = false;
+    /// Color format compatibility; dimensions are dynamic and not part of the key.
+    RasterTarget Target = RasterTarget::Surface;
+    /// When Depth is enabled, false tests depth without modifying it.
+    bool DepthWrite = true;
 };
 /// One vertex-stream slice, borrowed during DrawIndexed and retained through submission.
 struct RasterVertexSlice final
@@ -391,11 +408,12 @@ struct RasterCapabilities final
 /// for draw-range checks; vertex/uniform input is consumed by the backend before return.
 [[nodiscard]] RasterStatus
 CreateBuffer(DeviceHandle, const BufferDescription&, std::span<const ludus::foundation::uint8>, BufferHandle&) noexcept;
-/// Create a sampled texture from complete RGBA8 rows; invalid pitch/range preserves output.
+/// Create a sampled texture from complete RGBA8 rows, or an undefined attachment
+/// with empty upload and zero pitch. Invalid description preserves output.
 [[nodiscard]] RasterStatus
 CreateTexture(DeviceHandle, const TextureDescription&, const TextureUpload&, TextureHandle&) noexcept;
 /// Create a complete, original-format view, retaining its texture. Partial sampled ranges,
-/// format reinterpretation and attachment views are outside this first profile.
+/// format reinterpretation and separate depth views are unsupported.
 [[nodiscard]] RasterStatus CreateTextureView(DeviceHandle, TextureHandle, TextureViewHandle&) noexcept;
 /// Create immutable filter/address state; no engine allocations on a warmed resource path.
 [[nodiscard]] RasterStatus CreateSampler(DeviceHandle, const SamplerDescription&, SamplerHandle&) noexcept;
@@ -416,6 +434,8 @@ CreateRasterPipeline(DeviceHandle, const RasterPipelineDescription&, RasterPipel
 /// Encode an indexed/instanced packet into the explicit device's open frame.
 /// Retain all referenced records until backend completion; drawing cannot mix with
 /// DrawFullscreen in the same frame. Rejected packets issue no native draw.
+/// Sampled textures must have defined contents and a committed/draft sampled use
+/// covering the binding visibility; otherwise InvalidDescription/InvalidState.
 [[nodiscard]] RasterStatus DrawIndexed(DeviceHandle, const RasterDraw&) noexcept;
 /// Query asynchronous validation for an owned Buffer record; stale/foreign handles are rejected.
 [[nodiscard]] RasterStatus GetStatus(DeviceHandle, BufferHandle) noexcept;

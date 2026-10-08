@@ -17,12 +17,14 @@
 
 namespace ludus::graphics::rhi::backend
 {
+void RasterFrameExtent() noexcept;
 namespace
 {
 using namespace foundation;
 constexpr logging::LogCategory LOG_RHI{"RHI"};
 constexpr usize FRAMES = 2;
 constexpr usize IMAGES = 8;
+void RasterVkDependencies(bool surface, VkSubpassDependency (&dependencies)[2]) noexcept;
 struct Frame final
 {
     VkCommandBuffer Command = VK_NULL_HANDLE;
@@ -252,21 +254,7 @@ bool CreatePass() noexcept
     subpass.pColorAttachments = &reference;
     subpass.pDepthStencilAttachment = &depthReference;
     VkSubpassDependency dependencies[2]{};
-    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependencies[0].dstSubpass = 0;
-    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                                   VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-                                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    dependencies[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    dependencies[0].dstStageMask = dependencies[0].srcStageMask;
-    dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                                    VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    dependencies[1].srcSubpass = 0;
-    dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
-    dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependencies[1].dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    dependencies[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    RasterVkDependencies(true, dependencies);
     VkRenderPassCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     info.attachmentCount = 2;
@@ -992,12 +980,16 @@ FrameStatus Begin() noexcept
     pass.pClearValues = clears;
     vkCmdBeginRenderPass(frame.Command, &pass, VK_SUBPASS_CONTENTS_INLINE);
     gEncoding = true;
+    RasterFrameExtent();
     return FrameStatus::Ready;
 }
 FrameStatus End() noexcept
 {
     auto& frame = gFrames[gFrame];
-    vkCmdEndRenderPass(frame.Command);
+    if (gEncoding)
+    {
+        vkCmdEndRenderPass(frame.Command);
+    }
     gEncoding = false;
     if (!Check(vkEndCommandBuffer(frame.Command)) || !Check(vkResetFences(gDevice, 1, &frame.Fence)))
     {
