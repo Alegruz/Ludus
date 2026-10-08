@@ -1090,7 +1090,7 @@ class Operation:
         self._check_cancel()
 
     def _execute_setup(self, descriptor) -> OperationResult:
-        from ludus_tools.project_setup import check_project, repair_project, supported_project
+        from ludus_tools.project_setup import check_project, repair_project, supported_project, select_repair_sdk
         from ludus_tools.create import create_project
         self._stage = "configuring"
         self._writer.phase(self._stage)
@@ -1143,6 +1143,13 @@ class Operation:
                                verify_staged=lambda staged: repair_project(staged, sdk=sdk, web_sdk=web, **options))
                 message = "Project created and verified; ready to open"
             else:
+                if sdk is None:
+                    from ludus_tools.creation_engine import prepare_creation_sdk
+                    root = self._context.tooling_root
+                    sdk = select_repair_sdk(self._project_path, tooling_root=root,
+                        prepare=lambda prefix: prepare_creation_sdk(root, prefix, runner=runner,
+                            cancel_check=self._check_release_cancel, profile=descriptor.preset))
+                    self._writer.output(self._stage, "stdout", f"Selected engine: {sdk}\n")
                 message = repair_project(self._project_path, sdk=sdk, web_sdk=web, **options)
         self._writer.output(self._stage, "stdout", message + "\n")
         return OperationResult("success", self._stage, "Ok", message)

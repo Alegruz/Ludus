@@ -150,6 +150,30 @@ void MainWindow::BuildMenus()
     QMenu* fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
     OpenAction_ = fileMenu->addAction(QStringLiteral("&Open Project..."));
     OpenAction_->setShortcut(QKeySequence::Open);
+    auto* samples = fileMenu->addMenu(QStringLiteral("Open &Sample"));
+    samples->setObjectName(QStringLiteral("openSampleMenu"));
+    for (const auto& id : {QStringLiteral("cornell-box"),
+                           QStringLiteral("live-edit-game"),
+                           QStringLiteral("scripted-game"),
+                           QStringLiteral("editor-sdk-project")})
+    {
+        auto* action = samples->addAction(id);
+        connect(action, &QAction::triggered, this, [this, id]() {
+            if (!Controller_->Caps().CanOpen)
+            {
+                return;
+            }
+            QString descriptor;
+            if (!CopyEditorSample(id, descriptor))
+            {
+                QMessageBox::warning(this,
+                                     QStringLiteral("Open Sample"),
+                                     QStringLiteral("Could not create a writable copy of the sample."));
+                return;
+            }
+            OpenProjectPath(descriptor);
+        });
+    }
     RecentMenu_ = fileMenu->addMenu(QStringLiteral("Recent &Projects"));
     RecentMenu_->setObjectName(QStringLiteral("recentProjectsMenu"));
     connect(RecentMenu_, &QMenu::aboutToShow, this, &MainWindow::RenderRecentProjects);
@@ -190,16 +214,20 @@ void MainWindow::BuildMenus()
     connect(SetupProjectAction_, &QAction::triggered, this, &MainWindow::OnSetupProject);
 
 #if defined(Q_OS_WASM)
-    SaveAction_->setText(QStringLiteral("Save and &Download Project"));
-    ExportProjectAction_ = fileMenu->addAction(QStringLiteral("Download Project Descriptor..."));
+    SaveAction_->setText(QStringLiteral("Save and &Download Project Folder"));
+    ExportProjectAction_ = fileMenu->addAction(QStringLiteral("Download Project Folder..."));
     connect(ExportProjectAction_, &QAction::triggered, this, [this]() {
+        if ((Scripts_->Dirty() && !Scripts_->Save()) || (Scene_->Dirty() && !Scene_->Save()))
+        {
+            return;
+        }
         if (Controller_->Caps().CanSave)
         {
             Controller_->Save();
         }
         if (!Controller_->State().Dirty())
         {
-            (void)DownloadEditorDocument(this, Controller_->State().DescriptorPath);
+            (void)DownloadEditorProject(this, Controller_->State().DescriptorPath);
         }
     });
 #endif
@@ -452,9 +480,10 @@ void MainWindow::OnOpenRequested()
     const auto epoch = Controller_->State().ProjectEpoch;
     OpenEditorDocument(this,
                        {
-                           .Title = QStringLiteral("Open Project Descriptor"),
+                           .Title = QStringLiteral("Open Project Folder"),
                            .Directory = directory,
                            .Filter = QStringLiteral("Ludus Project (*.json)"),
+                           .ProjectFolder = true,
                        },
                        [this, epoch](const QString& path) {
                            if (Controller_->State().ProjectEpoch == epoch)
@@ -529,7 +558,7 @@ bool MainWindow::SaveProjectSettings()
 #if defined(Q_OS_WASM)
     if (!Controller_->State().Dirty())
     {
-        (void)DownloadEditorDocument(this, Controller_->State().DescriptorPath);
+        (void)DownloadEditorProject(this, Controller_->State().DescriptorPath);
     }
 #endif
     return !Controller_->State().Dirty();
