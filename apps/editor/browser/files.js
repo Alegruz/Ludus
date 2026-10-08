@@ -2,6 +2,10 @@
 // in JavaScript: export copied bytes through a linked library and explicit names.
 // https://emscripten.org/docs/porting/connecting_cpp_and_javascript/Interacting-with-code.html
 addToLibrary({
+  LudusBrowserPlaySample__deps: ['$UTF8ToString'],
+  LudusBrowserPlaySample: function(player) {
+    globalThis.ludusPlaySample(UTF8ToString(player));
+  },
   LudusBrowserDownloadDocument__deps: ['$UTF8ToString'],
   LudusBrowserDownloadDocument: function(name, bytes, size) {
     const filename = UTF8ToString(name);

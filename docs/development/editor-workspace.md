@@ -588,9 +588,8 @@ This first milestone does **not** promise:
   Editor/Ludus CLI cooperative lock;
 - that "Running" proves the game rendered a frame; it means the process started.
 
-Windows/macOS native process backends remain outside this guide. The
-[browser editor](../wiki/guides/browser-editor.md) provides a bounded document
-preview through separate browser adapters.
+The [browser editor](../wiki/guides/browser-editor.md) imports complete project
+folders and plays shipped web sample builds through separate browser adapters.
 
 
 ## Debug a native game
@@ -676,6 +675,11 @@ copy of a bundled example. Copies live under the editor's application data
 folder on desktop and in session storage in the browser. The existing sample
 never changes when you edit a copy. The [browser guide](../wiki/guides/browser-editor.md)
 describes export and session limits.
+
+In the browser, **Play → Play Web Sample** runs the precompiled Cornell Box,
+Live Edit Game or Scripted Game player without engine selection or setup.
+The player uses the shipped build; source/data changes in the workspace require
+a desktop rebuild. The console-only SDK example has no web game player.
 
 **Project → Repair Project Setup → Automatic** reuses the selected engine.
 For an unresolved version-2 CMake project without a local selection, it discovers

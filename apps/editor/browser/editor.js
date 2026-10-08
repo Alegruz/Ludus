@@ -7,6 +7,24 @@ const loading = document.getElementById("loading");
 const status = document.getElementById("status");
 const retry = document.getElementById("retry");
 const screen = document.getElementById("screen");
+globalThis.ludusPlaySample = function(id) {
+  const titles = {'cornell-box': 'Cornell Box', 'live-edit-game': 'Live Edit Game', 'scripted-game': 'Scripted Game'};
+  if (!Object.hasOwn(titles, id)) return;
+  const dialog = document.getElementById('web-player');
+  const frame = document.getElementById('web-player-frame');
+  document.getElementById('web-player-title').textContent = titles[id];
+  frame.src = 'players/' + id + '/index.html';
+  dialog.showModal();
+  frame.focus();
+};
+document.getElementById('web-player-close').addEventListener('click', () => document.getElementById('web-player').close());
+document.getElementById('web-player').addEventListener('close', () => {
+  document.getElementById('web-player-frame').src = 'about:blank';
+});
+window.addEventListener('message', event => {
+  if (event.origin === location.origin && event.source === document.getElementById('web-player-frame').contentWindow &&
+      event.data?.type === 'ludus-close-player') document.getElementById('web-player').close();
+});
 retry.addEventListener("click", () => location.reload());
 window.addEventListener("beforeunload", event => {
   if (globalThis.ludusEditorEdited) {

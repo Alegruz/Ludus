@@ -262,6 +262,11 @@ void MainWindow::BuildMenus()
     QMenu* playMenu = menuBar()->addMenu(QStringLiteral("&Play"));
     PlayAction_ = playMenu->addAction(QStringLiteral("Build and Play"));
     PlayAction_->setObjectName(QStringLiteral("play.start"));
+#if defined(Q_OS_WASM)
+    PlayAction_->setText(QStringLiteral("Play Web Sample"));
+    PlayAction_->setToolTip(
+        QStringLiteral("Play the shipped web build. Workspace source edits require a desktop rebuild."));
+#endif
 #if defined(Q_OS_MACOS)
     PlayAction_->setToolTip(QStringLiteral("Build and Play uses the saved macOS Debug or Development profile."));
     BuildDebugAction_->setToolTip(QStringLiteral("RAD debugging is available on Linux x64 only."));
@@ -302,7 +307,13 @@ void MainWindow::BuildMenus()
     connect(RedoTuningAction_, &QAction::triggered, Controller_, &EditorController::RedoTuningDocument);
     connect(SaveTuningAction_, &QAction::triggered, Controller_, &EditorController::SaveTuningDocument);
     connect(DiscardTuningAction_, &QAction::triggered, Controller_, &EditorController::DiscardTuningDocumentDraft);
-    connect(PlayAction_, &QAction::triggered, this, [this]() { LaunchAfterPreview(LaunchAction::Play); });
+    connect(PlayAction_, &QAction::triggered, this, [this]() {
+#if defined(Q_OS_WASM)
+        Controller_->Play();
+#else
+        LaunchAfterPreview(LaunchAction::Play);
+#endif
+    });
     connect(BuildReloadAction_, &QAction::triggered, this, [this]() {
         if (Scripts_->ConfirmDiscard())
         {

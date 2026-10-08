@@ -1,3 +1,4 @@
+#include "internal/browser_player.h"
 #include "internal/controller.h"
 #include "internal/main_window.h"
 
@@ -21,6 +22,33 @@
 #include <QToolBar>
 
 using namespace ludus::editor;
+
+TEST_CASE("Browser players admit only shipped sample identifiers", "[editor][browser-player]")
+{
+    QTemporaryDir directory;
+    const auto descriptor = directory.filePath(QStringLiteral("ludus.project.json"));
+    CHECK(BrowserPlayer(descriptor).isEmpty());
+    QFile metadata(directory.filePath(QStringLiteral("ludus.web.json")));
+    for (const auto& id :
+         {QStringLiteral("cornell-box"), QStringLiteral("live-edit-game"), QStringLiteral("scripted-game")})
+    {
+        REQUIRE(metadata.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        metadata.write(
+            QJsonDocument(QJsonObject{{QStringLiteral("version"), 1}, {QStringLiteral("player"), id}}).toJson());
+        metadata.close();
+        CHECK(BrowserPlayer(descriptor) == id);
+    }
+    for (const auto& bytes : {QByteArrayLiteral("{\"version\":1,\"player\":\"../escape\"}"),
+                              QByteArrayLiteral("{\"version\":2,\"player\":\"cornell-box\"}"),
+                              QByteArrayLiteral("{\"version\":1,\"player\":\"https://example.test\"}"),
+                              QByteArrayLiteral("invalid")})
+    {
+        REQUIRE(metadata.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        metadata.write(bytes);
+        metadata.close();
+        CHECK(BrowserPlayer(descriptor).isEmpty());
+    }
+}
 
 namespace
 {

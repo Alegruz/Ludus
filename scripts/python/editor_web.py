@@ -15,10 +15,13 @@ import tarfile
 import urllib.request
 import venv
 
-from web_package import SDK_NOTICES, validate_wasm
+from web_package import SDK_NOTICES, PORT_NOTICES, validate_wasm
 
 ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD = ("index.html", "editor.css", "editor.js", "ludus-icon.png", "ludus_editor.js", "ludus_editor.wasm", "qtloader.js")
+PLAYERS = ("cornell-box", "live-edit-game", "scripted-game")
+PLAYER_PAYLOAD = tuple(f"players/{sample}/{name}" for sample in PLAYERS
+                       for name in ("index.html", "player.js", "game.js", "game.wasm"))
 
 
 def run(argv, *, env=None, cwd=ROOT):
@@ -91,18 +94,22 @@ def qt_build(cmake, ninja, source, build, prefix, host, env):
 
 def validate_package(site: Path):
     manifest = json.loads((site / "build-info.json").read_text())
-    for name in PAYLOAD:
+    for name in (*PAYLOAD, *PLAYER_PAYLOAD):
         path = site / name
         if not path.is_file() or path.is_symlink():
             raise ValueError("Missing or symlinked editor asset: " + name)
         if hashlib.sha256(path.read_bytes()).hexdigest() != manifest["sha256"].get(name):
             raise ValueError("Editor asset checksum mismatch: " + name)
     validate_wasm((site / "ludus_editor.wasm").read_bytes())
+    for sample in PLAYERS:
+        validate_wasm((site / "players" / sample / "game.wasm").read_bytes())
+        if "game.wasm" not in (site / "players" / sample / "game.js").read_text():
+            raise ValueError("Sample JavaScript does not name its wasm module: " + sample)
     if "ludus_editor.wasm" not in (site / "ludus_editor.js").read_text():
         raise ValueError("Editor JavaScript does not name the staged wasm module.")
     if manifest.get("single_threaded") is not True:
         raise ValueError("Pages editor must not require shared memory.")
-    for name in ("Ludus.txt", "Qt-LGPL-3.0.txt", "Emscripten.txt", "miniaudio.txt", "yyjson.txt"):
+    for name in ("Ludus.txt", "Qt-LGPL-3.0.txt", "Emscripten.txt", "miniaudio.txt", "yyjson.txt", "Luau.txt", "Luau-lua.txt", "emdawnwebgpu.txt", "webgpu-native.txt"):
         if not (site / "licenses" / name).is_file():
             raise ValueError("Missing editor license: " + name)
     print("Editor package: verified assets, hashes, single-threaded wasm memory and notices.")
@@ -120,6 +127,13 @@ def package(build: Path, source: Path, sdk: Path, qt_lock: dict, web_lock: dict)
     shutil.copyfile(ROOT / "docs/wiki/assets/ludus-icon.png", site / "ludus-icon.png")
     for name in ("ludus_editor.js", "ludus_editor.wasm", "qtloader.js"):
         shutil.copyfile(build / "apps/editor" / name, site / name)
+    for sample in PLAYERS:
+        destination = site / "players" / sample
+        destination.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / "apps/web_samples/player.html", destination / "index.html")
+        shutil.copyfile(ROOT / "apps/web_samples/player.js", destination / "player.js")
+        for name in ("game.js", "game.wasm"):
+            shutil.copyfile(build / "apps/web_samples" / sample / name, destination / name)
     licenses = site / "licenses"
     licenses.mkdir(exist_ok=True)
     shutil.copyfile(ROOT / "LICENSE", licenses / "Ludus.txt")
@@ -148,6 +162,16 @@ def package(build: Path, source: Path, sdk: Path, qt_lock: dict, web_lock: dict)
     shutil.copyfile(ROOT / "third_party/yyjson/LICENSE", licenses / "yyjson.txt")
     for relative, name in SDK_NOTICES.items():
         shutil.copyfile(sdk / "upstream/emscripten" / relative, licenses / name)
+    for relative, name in (("LICENSE.txt", "Luau.txt"), ("lua_LICENSE.txt", "Luau-lua.txt")):
+        shutil.copyfile(ROOT / "out/luau-probe/source" / relative, licenses / name)
+    port = sdk / "upstream/emscripten/cache/ports/emdawnwebgpu/emdawnwebgpu_pkg"
+    for relative, name in PORT_NOTICES.items():
+        shutil.copyfile(port / relative, licenses / name)
+    header = (port / "webgpu/include/webgpu/webgpu.h").read_bytes()
+    notice, separator, _ = header.partition(b"#ifndef WEBGPU_H_")
+    if not separator or b"BSD 3-Clause License" not in notice:
+        raise ValueError("Pinned WebGPU native notice is missing")
+    (licenses / "webgpu-native.txt").write_bytes(notice)
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     notice = f"""Ludus Editor browser preview
 Ludus sources and rebuild instructions: https://github.com/Alegruz/Ludus/tree/{commit}
@@ -159,7 +183,7 @@ Tool and payload identity: build-info.json.
 """
     (site / "NOTICE.txt").write_text(notice)
     manifest = {"commit": commit, "qt": qt_lock, "browser_toolchain": web_lock, "single_threaded": True,
-                "sha256": {name: hashlib.sha256((site / name).read_bytes()).hexdigest() for name in PAYLOAD}}
+                "sha256": {name: hashlib.sha256((site / name).read_bytes()).hexdigest() for name in (*PAYLOAD, *PLAYER_PAYLOAD)}}
     (site / "build-info.json").write_text(json.dumps(manifest, indent=2) + "\n")
     validate_package(site)
     return site
@@ -212,6 +236,13 @@ def main() -> int:
     if f'QT_REPO_MODULE_VERSION "{qt_lock["qt"]}"' not in (source / ".cmake.conf").read_text():
         raise ValueError("Qt source version differs from the pinned editor toolchain.")
     env = sdk_environment(sdk, web_lock)
+    if args.bootstrap:
+        if not (ROOT / "out/host-tools/bin/clang++").is_file():
+            from engine import configure_system_tool_shims, load_tool_versions
+            configure_system_tool_shims(ROOT, load_tool_versions(ROOT))
+        run([sys.executable, ROOT / "scripts/script-provider", "bootstrap"])
+        run([sys.executable, ROOT / "scripts/shader-probe", "bootstrap"])
+        run([sys.executable, ROOT / "scripts/bootstrap-spirv-cross"])
     identity = {"qt": qt_lock, "web": web_lock}
     stamp = prefix / "ludus-build.json"
     if args.rebuild_qt or not stamp.exists() or json.loads(stamp.read_text()) != identity:
@@ -222,8 +253,12 @@ def main() -> int:
          f"-DCMAKE_TOOLCHAIN_FILE={prefix / 'lib/cmake/Qt6/qt.toolchain.cmake'}", f"-DQT_HOST_PATH={host}",
          "-DCMAKE_BUILD_TYPE=MinSizeRel", "-DLUDUS_BUILD_FLAVOR=Release", "-DLUDUS_USE_INIT_OPTIONS=OFF",
          "-DLUDUS_BUILD_TESTS=OFF", "-DLUDUS_BUILD_SMOKE_APP=OFF", "-DLUDUS_BUILD_WEB_PROBES=OFF",
-         "-DLUDUS_BUILD_EDITOR=ON", "-DLUDUS_WARNINGS_AS_ERRORS=ON"], env=env)
-    run([cmake, "--build", app, "--target", "ludus_editor", "--parallel", os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", "2")], env=env)
+         "-DLUDUS_BUILD_EDITOR=ON", "-DLUDUS_WARNINGS_AS_ERRORS=ON", "-DLUDUS_BUILD_WEB_SAMPLES=ON", "-DLUDUS_BUILD_BEHAVIOR=ON",
+         f"-DLUDUS_SLANG_COMPILER={ROOT / 'out/shader-tools/slang/bin/slangc'}",
+         f"-DLUDUS_SPIRV_VALIDATOR={ROOT / 'out/shader-tools/spirv-tools/usr/bin/spirv-val'}",
+         f"-DLUDUS_SPIRV_CROSS={ROOT / 'out/shader-tools/spirv-cross/bin/spirv-cross'}"], env=env)
+    run([cmake, "--build", app, "--target", "ludus_editor", "ludus_web_live_edit", "ludus_web_scripted", "ludus_web_cornell",
+         "--parallel", os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", "2")], env=env)
     print("Staged browser editor: " + str(package(app, source, sdk, qt_lock, web_lock)))
     return 0
 

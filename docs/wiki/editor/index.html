@@ -17,7 +17,7 @@
     <strong>Ludus Editor <span>Browser preview</span></strong>
     <a href="../guides/browser-editor/">Help and supported actions</a>
   </header>
-  <aside>Project and configuration editing · Session files: download your changes before leaving · Builds, Play and debugging require the desktop editor.</aside>
+  <aside>Open Sample → Play Web Sample · Play the shipped web builds without setup · Download workspace edits before leaving.</aside>
   <main>
     <div id="loading" role="status" aria-live="polite">
       <h1>Open your workspace in the browser</h1>
@@ -28,6 +28,11 @@
     <div id="screen" aria-label="Ludus editor workspace"></div>
   </main>
   <footer><a href="NOTICE.txt">Third-party notices and source</a> · <a href="build-info.json">Build information</a></footer>
+  <dialog id="web-player" aria-labelledby="web-player-title">
+    <div class="player-heading"><strong id="web-player-title">Web sample</strong><button id="web-player-close" type="button">Stop and close</button></div>
+    <p>Playing the shipped build. Workspace source edits take effect after a desktop rebuild.</p>
+    <iframe id="web-player-frame" title="Playable Ludus sample" allow="autoplay; fullscreen" src="about:blank"></iframe>
+  </dialog>
   <noscript>The editor requires JavaScript and WebAssembly. <a href="../guides/editor/">Use the desktop editor.</a></noscript>
 </body>
 </html>

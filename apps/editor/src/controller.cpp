@@ -405,8 +405,8 @@ void EditorController::ScheduleSetupCheck()
 {
 #if defined(Q_OS_WASM)
     SetupCheckPending_ = false;
-    State_.SetupStatus =
-        QStringLiteral("Browser workspace: local builds, Play and debugger require the desktop editor.");
+    State_.SetupStatus = QStringLiteral(
+        "Browser workspace: Play Web Sample runs the shipped build. Download edits for a desktop rebuild.");
     return;
 #endif
     // Open/Reload remain metadata operations. Queue the trusted read-only check

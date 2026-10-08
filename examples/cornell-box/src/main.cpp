@@ -14,6 +14,10 @@
 #include <string_view>
 #include <type_traits>
 
+#if defined(__EMSCRIPTEN__)
+#    include <emscripten.h>
+#endif
+
 #include "camera.hpp"
 #include "cornell.h"
 
@@ -99,7 +103,17 @@ public:
     }
     bool Start(const rhi::WindowInfo& window) noexcept
     {
-        if (rhi::Start({ .Name = "Ludus Cornell Box", .Version = 1 }, window) != rhi::StartStatus::Ready)
+        const auto started = rhi::Start({ .Name = "Ludus Cornell Box", .Version = 1 }, window);
+#if defined(__EMSCRIPTEN__)
+        // Browser device/pipeline callbacks need the event loop while the native
+        // sample retains its synchronous lifetime. Asyncify is confined to this player.
+        while (rhi::GetStartup().State == rhi::StartupState::Pending)
+        {
+            emscripten_sleep(10);
+        }
+#endif
+        if ((started != rhi::StartStatus::Ready && started != rhi::StartStatus::Pending) ||
+            rhi::GetStartup().State != rhi::StartupState::Ready)
         {
             LUDUS_LOG_ERROR(LOG_SAMPLE, "RHI startup failed (error {}).", static_cast<uint32>(rhi::GetStartup().Error));
             return false;
@@ -110,11 +124,27 @@ public:
             LUDUS_LOG_ERROR(LOG_SAMPLE, "Shader uniform reflection differs from the 80-byte CPU layout.");
             return false;
         }
-        if (rhi::CreateShader(ludus::shaders::cornell::Vertex(), mVertex) != rhi::ResourceStatus::Ready ||
-            rhi::CreateShader(ludus::shaders::cornell::Fragment(), mFragment) != rhi::ResourceStatus::Ready ||
-            rhi::CreateUniform(sizeof(Uniforms), mUniform) != rhi::ResourceStatus::Ready ||
-            rhi::CreatePipeline({ .Vertex = mVertex, .Fragment = mFragment, .Uniform = mUniform }, mPipeline) !=
-                rhi::ResourceStatus::Ready)
+        const auto ready = [](auto handle, rhi::ResourceStatus status) noexcept {
+#if defined(__EMSCRIPTEN__)
+            while (status == rhi::ResourceStatus::Pending)
+            {
+                emscripten_sleep(10);
+                status = rhi::GetStatus(handle);
+            }
+#else
+            (void)handle;
+#endif
+            return status == rhi::ResourceStatus::Ready;
+        };
+        const auto vertex = rhi::CreateShader(ludus::shaders::cornell::Vertex(), mVertex);
+        const auto fragment = rhi::CreateShader(ludus::shaders::cornell::Fragment(), mFragment);
+        const auto uniform = rhi::CreateUniform(sizeof(Uniforms), mUniform);
+        if (!ready(mVertex, vertex) || !ready(mFragment, fragment) || !ready(mUniform, uniform))
+        {
+            return false;
+        }
+        const auto pipeline = rhi::CreatePipeline({ .Vertex = mVertex, .Fragment = mFragment, .Uniform = mUniform }, mPipeline);
+        if (!ready(mPipeline, pipeline))
         {
             LUDUS_LOG_ERROR(LOG_SAMPLE, "Could not create Cornell box shaders, uniform or pipeline.");
             return false;
@@ -221,6 +251,9 @@ int32 Run(const Options& options) noexcept
     uint32 attempts = 0;
     while (options.Frames == 0 || rendered < options.Frames)
     {
+#if defined(__EMSCRIPTEN__)
+        emscripten_sleep(16);
+#endif
         if (window)
         {
             if (!window->HandleEvent({}))
@@ -233,6 +266,9 @@ int32 Run(const Options& options) noexcept
         if (status == rhi::FrameStatus::Ready)
         {
             ++rendered;
+#if defined(__EMSCRIPTEN__)
+            EM_ASM({ globalThis.ludusPlayerStatus('playing', $0); }, rendered);
+#endif
             if (rendered == 1)
             {
                 LUDUS_LOG_INFO(LOG_SAMPLE, "Cornell box rendered. Close the window to exit.");
@@ -277,5 +313,11 @@ int main(int argc, char** argv)
         result = Run(options);
     }
     LogSystem::Shutdown();
+#if defined(__EMSCRIPTEN__)
+    if (result != 0)
+    {
+        EM_ASM({ globalThis.ludusPlayerStatus('failed', 0); });
+    }
+#endif
     return result;
 }
