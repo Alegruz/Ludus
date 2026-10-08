@@ -141,7 +141,11 @@ and executes them during setup. `--validate`, the Full validation workflow, and
 Use `--with-smoke-app` / `--no-smoke-app` to select the smoke app and native input
 demo, and `--with-web-probes` / `--no-web-probes` for browser feasibility probes.
 `--with-shader-probe` / `--no-shader-probe` controls the isolated native shader
-probe (off by default); it requires its separate pinned shader tools. Required engine
+probe (off by default, Linux Vulkan only); it requires its separate pinned shader
+tools. The GUI disables this option on macOS. Metal shader compilation,
+`world_demo` and the Cornell box sample do not require it. If an older init saved
+this option on macOS, rerun `./init.sh --no-shader-probe` to repair the saved
+choices before configuring again. Required engine
 modules and the native diagnostics helper remain available for applications and
 the editor. Browser presets reject native tests, RAD, editor setup,
 `--all-presets`, `--validate`, and `--ci`.
