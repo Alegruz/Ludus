@@ -60,6 +60,10 @@ remain sample/test boundaries.
 Read the [RHI module guide](../../modules/graphics/rhi.md),
 [public rendering contract](../../development/fullscreen-rendering.md)
 and [runtime UI design](../../architecture/ui.md).
+The [renderer systems proposal](../../architecture/renderer-systems.md) connects
+scene packets, views and virtual screens, materials, lighting, debug drawing and
+GPU text above RHI/GDI; its [reference review](../../architecture/renderer-systems-gems-review.md)
+explains the Gems-driven design changes. These renderer facilities remain proposed.
 Continue with [world-to-presentation ownership](world.md).
 The [terrain proposal](terrain.md) describes how a future mesh/texture rendering
 slice can consume editable ground without owning physical terrain or generation.
