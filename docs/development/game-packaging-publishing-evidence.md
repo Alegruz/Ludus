@@ -201,3 +201,21 @@ repository's hosted release needs its own configured SDK archive and execution.
 No Developer ID signing, notarization, Gatekeeper approval, universal binary,
 native Intel execution, distributable Qt Editor or live itch.io upload is claimed.
 See the [current package contract](game-packaging-publishing.md#macos-app-packages).
+
+## Native macOS butler acquisition
+
+The shared installer selects the pinned 15.31.0 `darwin-arm64` or
+`darwin-amd64` archive, retaining the existing `linux-amd64` pin. The explicit
+`tools install-butler` command works in the standalone wheel. Hashes were
+recorded from the versioned upstream HTTPS archives; the Apple silicon executable
+reports `v15.31.0` with revision `54a2dd86ed68ab72b25a8d753fa7f88dc552ef7f`.
+See [the installation contract](game-packaging-publishing.md#install-the-pinned-butler-tool).
+
+Portable tests cover host admission/aliases, archive and binary corruption,
+malformed/duplicate/linked ZIP entries, bounded copying, insecure redirects,
+interruption cleanup, existing output preservation, publication races and
+structured CLI results. CI additionally installs the wheel and downloads the
+real pin on Linux x64, macOS arm64 and macOS Intel, runs only `butler version`
+with a clean environment, and verifies repeated installation preserves the
+existing executable. No login, live push or upload-transport qualification is
+part of these checks.
