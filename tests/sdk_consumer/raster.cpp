@@ -7,6 +7,7 @@
 #include "ordered_frame.h"
 #include "raster.h"
 
+#include <cstring>
 #include <span>
 
 #if defined(LUDUS_PLATFORM_WEB)
