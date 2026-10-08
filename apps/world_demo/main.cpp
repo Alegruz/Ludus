@@ -47,6 +47,14 @@ int main(int argc, char** argv)
     config.EnableConsole = true;
     config.EnableFile = false;
     ludus::foundation::logging::LogSystem::Initialize(config);
+    // Every explicit error exit must join the logging flush worker too.
+    struct LoggerCleanup final
+    {
+        ~LoggerCleanup() noexcept
+        {
+            ludus::foundation::logging::LogSystem::Shutdown();
+        }
+    } cleanup;
     // --level is an explicit bounded read. The same codec validates Editor and
     // runtime; loading never rewrites, builds or repairs the source project.
     char levelBytes[65536] = {};
@@ -148,7 +156,6 @@ int main(int argc, char** argv)
                        "Headless reference: ticks={} hash={}",
                        session.World().GetTick(),
                        session.World().GetReplayHash());
-        ludus::foundation::logging::LogSystem::Shutdown();
         return 0;
     }
 #if LUDUS_TARGET_OS == LUDUS_OS_WEB
@@ -178,7 +185,6 @@ int main(int argc, char** argv)
                    application.GetPresentedFrames());
     const auto state = application.GetState();
     application.Shutdown();
-    ludus::foundation::logging::LogSystem::Shutdown();
     return state == AppState::Failed ? 1 : 0;
 #endif
 }

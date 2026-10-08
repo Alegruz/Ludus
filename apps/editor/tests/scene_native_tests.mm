@@ -120,6 +120,18 @@ TEST_CASE("Cocoa scene authoring presents Metal frames and accepts native keyboa
         CHECK(process.exitStatus() == QProcess::NormalExit);
         CHECK(process.exitCode() == 0);
         CHECK(process.readAllStandardOutput().contains(QByteArrayLiteral("presented 3 frames")));
+        // A malformed authored source is a normal status failure, never an
+        // abort caused by leaving the player's logging worker running.
+        const auto invalidPath = scenePath + QStringLiteral(".invalid.json");
+        QFile invalid(invalidPath);
+        REQUIRE(invalid.open(QIODevice::WriteOnly));
+        REQUIRE(invalid.write(QByteArrayLiteral("{}")) == 2);
+        invalid.close();
+        process.start(player, {QStringLiteral("--level"), invalidPath});
+        REQUIRE(process.waitForStarted(5000));
+        REQUIRE(process.waitForFinished(10000));
+        CHECK(process.exitStatus() == QProcess::NormalExit);
+        CHECK(process.exitCode() == 1);
     }
     preview.Stop();
     CHECK(document.Loaded());
