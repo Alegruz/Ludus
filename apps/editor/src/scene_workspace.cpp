@@ -31,9 +31,9 @@ world_demo::Name Name(const QString& text)
     const auto bytes = text.toLatin1();
     if (bytes.size() < 32)
     {
-        for (foundation::int64 i = 0; i < bytes.size(); ++i)
+        for (foundation::usize i = 0; i < static_cast<foundation::usize>(bytes.size()); ++i)
         {
-            name.Text[i] = bytes[i];
+            name.Text[i] = bytes.constData()[i];
         }
     }
     return name;
