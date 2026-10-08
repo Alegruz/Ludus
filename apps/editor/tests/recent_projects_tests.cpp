@@ -9,10 +9,12 @@
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
+#include <QIcon>
 #include <QLabel>
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPixmap>
 #include <QPushButton>
 #include <QTemporaryDir>
 #include <QTest>
@@ -39,6 +41,17 @@ ToolingPaths NoTooling()
     return {};
 }
 } // namespace
+
+TEST_CASE("Editor branding is embedded and decodes without external artwork files", "[editor][brand]")
+{
+    QTemporaryDir directory;
+    EditorController controller(NoTooling(), nullptr, directory.filePath(QStringLiteral("recent.json")));
+    MainWindow window(&controller, nullptr, directory.filePath(QStringLiteral("workspace.json")));
+    CHECK_FALSE(window.windowIcon().pixmap(32, 32).isNull());
+    const auto* logo = window.findChild<QLabel*>(QStringLiteral("welcomeLogo"));
+    REQUIRE(logo != nullptr);
+    CHECK_FALSE(logo->pixmap().isNull());
+}
 
 TEST_CASE("Recent projects persist in bounded most-recent order without duplicate paths", "[editor][recent]")
 {

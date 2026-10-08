@@ -19,8 +19,8 @@ theme:
   name: material
   language: en
   font: false
-  logo: assets/ludus.svg
-  favicon: assets/ludus.svg
+  logo: assets/ludus-mark.png
+  favicon: assets/ludus-icon.png
   palette:
     - scheme: default
       primary: custom

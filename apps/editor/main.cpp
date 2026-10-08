@@ -18,6 +18,7 @@
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
+#include <QIcon>
 #include <QString>
 
 namespace
@@ -51,6 +52,7 @@ int main(int argc, char** argv)
 {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("Ludus Editor"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/ludus/ludus-icon.png")));
 
     namespace logging = ludus::foundation::logging;
     logging::LogConfig logConfig;

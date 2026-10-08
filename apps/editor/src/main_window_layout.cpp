@@ -21,6 +21,7 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIcon>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
@@ -39,6 +40,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QVBoxLayout>
+#include <QVariant>
 #include <QWidget>
 
 namespace ludus::editor
@@ -204,21 +206,41 @@ void MainWindow::BuildUi()
     recentLayout->setContentsMargins(24, 24, 24, 24);
     recentLayout->setSpacing(12);
     auto* title = new QLabel(QStringLiteral("Welcome to Ludus"), recentPanel);
+    auto* brand = new QLabel(recentPanel);
+    brand->setObjectName(QStringLiteral("welcomeLogo"));
+    brand->setAccessibleName(QStringLiteral("Ludus logo"));
+    brand->setPixmap(QIcon(QStringLiteral(":/ludus/ludus-mark.png")).pixmap(48, 48));
     auto font = title->font();
     font.setBold(true);
+    font.setPointSize(font.pointSize() + 6);
     title->setFont(font);
     auto* intro = new QLabel(QStringLiteral("Create a project or continue where you left off."), recentPanel);
     intro->setWordWrap(true);
+    intro->setProperty("visualRole", QStringLiteral("secondary"));
     WelcomeNewButton_ = new QPushButton(QStringLiteral("New Project..."), recentPanel);
     WelcomeNewButton_->setObjectName(QStringLiteral("welcomeNewProject"));
-    recentLayout->addWidget(title);
+    WelcomeNewButton_->setProperty("visualRole", QStringLiteral("primary"));
+    auto* brandHeading = new QHBoxLayout;
+    brandHeading->addWidget(brand);
+    brandHeading->addWidget(title);
+    brandHeading->addStretch();
+    recentLayout->addLayout(brandHeading);
     recentLayout->addWidget(intro);
-    recentLayout->addWidget(WelcomeNewButton_);
+    auto* welcomeActions = new QHBoxLayout;
+    welcomeActions->addWidget(WelcomeNewButton_);
+    welcomeActions->addWidget(BrowseProjectButton_);
+    welcomeActions->addStretch();
+    recentLayout->addLayout(welcomeActions);
+    recentLayout->addSpacing(12);
     recentLayout->addWidget(new QLabel(QStringLiteral("Recent projects"), recentPanel));
     recentLayout->addWidget(RecentEmptyLabel_);
-    recentLayout->addWidget(RecentList_);
-    recentLayout->addWidget(RecentOpenButton_);
-    recentLayout->addWidget(BrowseProjectButton_);
+    RecentEmptyLabel_->setAlignment(Qt::AlignTop);
+    recentLayout->addWidget(RecentList_, 1);
+    recentLayout->addStretch();
+    auto* recentActions = new QHBoxLayout;
+    recentActions->addWidget(RecentOpenButton_);
+    recentActions->addStretch();
+    recentLayout->addLayout(recentActions);
     WorkTabs_->insertTab(0, Welcome_, QStringLiteral("Welcome"));
     WorkTabs_->setCurrentWidget(Welcome_);
     connect(RecentList_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {

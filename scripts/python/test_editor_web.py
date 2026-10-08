@@ -33,6 +33,11 @@ class EditorPackageTests(unittest.TestCase):
     def test_complete_package(self):
         validate_package(self.site)
 
+    def test_icon_is_required_in_browser_payload(self):
+        (self.site / "ludus-icon.png").unlink()
+        with self.assertRaisesRegex(ValueError, "Missing or symlinked editor asset: ludus-icon.png"):
+            validate_package(self.site)
+
     def test_modified_missing_and_symlinked_assets(self):
         asset = self.site / "editor.js"
         asset.write_text("changed")
