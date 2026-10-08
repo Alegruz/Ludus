@@ -1,8 +1,11 @@
 #include "internal/readback.h"
 #include "l0_scene.h"
+#include "l1_scene.h"
+#include "renderer_composite.h"
 #include "renderer_flat.h"
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
+#include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/lifetime.h>
@@ -76,4 +79,153 @@ TEST_CASE("L0 optimized packets match unsorted direct pixels with depth, errors 
     const usize error = (usize{45} * 96 + 48) * 4;
     CHECK(images[0][error] == 255);
     CHECK(images[0][error + 2] == 255);
+}
+TEST_CASE("L1 offscreen split views preserve neighbors, reverse-Z order and top-left UVs", "[renderer][views][gpu]")
+{
+    rhi::Shutdown();
+    struct Guard
+    {
+        ~Guard()
+        {
+            rhi::Shutdown();
+        }
+    } guard;
+    rhi::DeviceHandle device;
+    rhi::SurfaceHandle surface;
+    rhi::StartupInfo failure;
+    rhi::DeviceDescription description;
+    description.Required.PortableRaster = true;
+    const auto started = rhi::CreateDevice({}, { .Width = 96, .Height = 64 }, description, device, surface, &failure);
+#if defined(LUDUS_TEST_METAL)
+    if (started != rhi::DeviceStatus::Ready && failure.Error == rhi::StartupError::AdapterUnavailable)
+    {
+        SKIP("No Metal adapter on this host");
+    }
+#endif
+    REQUIRE(started == rhi::DeviceStatus::Ready);
+    rr::Renderer renderer;
+    REQUIRE(renderer.Initialize(device,
+                                ludus::shaders::renderer_flat::Vertex(),
+                                ludus::shaders::renderer_flat::Fragment()) == rhi::RasterStatus::Ready);
+    REQUIRE(renderer.InitializeViews(ludus::shaders::renderer_composite::Vertex(),
+                                     ludus::shaders::renderer_composite::Fragment()) == rhi::RasterStatus::Ready);
+    rr::Mesh mesh;
+    REQUIRE(renderer.CreateMesh({ludus::qa::L1_QUAD, 4, ludus::qa::L1_INDICES, 6}, mesh) == rhi::RasterStatus::Ready);
+    rr::Snapshot snapshot;
+    REQUIRE(ludus::qa::BuildL1Snapshot(renderer, mesh, snapshot) == rhi::RasterStatus::Ready);
+    rhi::TextureHandle targets[2];
+    for (auto& target : targets)
+    {
+        REQUIRE(rhi::CreateTexture(device, {48, 48, rhi::RasterFormat::Rgba8Unorm, true}, {}, target) ==
+                rhi::RasterStatus::Ready);
+    }
+    rr::Presentation presentations[2];
+    REQUIRE(ludus::qa::PrepareL1Presentations(renderer, targets, 96, 64, presentations) == rhi::RasterStatus::Ready);
+    uint8 images[2][96 * 64 * 4]{};
+    for (usize variant = 0; variant < 2; ++variant)
+    {
+        rr::PreparedView views[2];
+        rr::ViewReport report;
+        for (usize i = 0; i < 2; ++i)
+        {
+            REQUIRE(ludus::qa::BuildL1View(renderer, snapshot, i == 1, variant == 1, variant == 1, views[i], report) ==
+                    rhi::RasterStatus::Ready);
+        }
+        REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Ready);
+        REQUIRE(ludus::qa::DrawL1Frame(renderer, views, targets, presentations) == rhi::RasterStatus::Ready);
+        rhi::SubmissionToken completion;
+        REQUIRE(rhi::EndFrame(device, completion) == rhi::RasterStatus::Ready);
+        for (auto& view : views)
+        {
+            REQUIRE(renderer.Release(view) == rhi::RasterStatus::Ready);
+        }
+        REQUIRE(rhi::backend::ReadHeadlessPixels(images[variant]));
+    }
+    CHECK(std::memcmp(images[0], images[1], sizeof(images[0])) == 0);
+    const auto color = [&](uint32 x, uint32 y, const core::StaticArray<uint8, 3>& rgb) {
+        const auto offset = (static_cast<usize>(y) * 96 + static_cast<usize>(x)) * 4;
+        CHECK(images[0][offset] == rgb[0]);
+        CHECK(images[0][offset + 1] == rgb[1]);
+        CHECK(images[0][offset + 2] == rgb[2]);
+        CHECK(images[0][offset + 3] == 255);
+    };
+    color(24, 32, {255, 0, 0});
+    color(72, 32, {255, 0, 0});
+    color(4, 12, {0, 255, 0});
+    color(52, 12, {0, 0, 255});
+    color(42, 16, {255, 0, 255});
+    color(90, 16, {255, 0, 255});
+    color(42, 48, {0, 255, 0});
+    color(90, 48, {0, 0, 255});
+    color(24, 2, {0, 0, 0});
+    color(72, 2, {0, 0, 0});
+}
+TEST_CASE("L1 explicit viewport/scissor preserves the outside surface and empty scissors draw nothing",
+          "[renderer][views][gpu]")
+{
+    rhi::Shutdown();
+    struct Guard
+    {
+        ~Guard()
+        {
+            rhi::Shutdown();
+        }
+    } guard;
+    rhi::DeviceHandle device;
+    rhi::SurfaceHandle surface;
+    rhi::StartupInfo failure;
+    rhi::DeviceDescription description;
+    description.Required.PortableRaster = true;
+    const auto started = rhi::CreateDevice({}, { .Width = 96, .Height = 64 }, description, device, surface, &failure);
+#if defined(LUDUS_TEST_METAL)
+    if (started != rhi::DeviceStatus::Ready && failure.Error == rhi::StartupError::AdapterUnavailable)
+    {
+        SKIP("No Metal adapter on this host");
+    }
+#endif
+    REQUIRE(started == rhi::DeviceStatus::Ready);
+    rr::Renderer renderer;
+    REQUIRE(renderer.Initialize(device,
+                                ludus::shaders::renderer_flat::Vertex(),
+                                ludus::shaders::renderer_flat::Fragment()) == rhi::RasterStatus::Ready);
+    REQUIRE(renderer.InitializeViews(ludus::shaders::renderer_composite::Vertex(),
+                                     ludus::shaders::renderer_composite::Fragment()) == rhi::RasterStatus::Ready);
+    rr::Mesh mesh;
+    REQUIRE(renderer.CreateMesh({ludus::qa::L1_QUAD, 4, ludus::qa::L1_INDICES, 6}, mesh) == rhi::RasterStatus::Ready);
+    rr::SceneItem item;
+    item.Geometry = mesh;
+    item.SourceId = 1;
+    item.Transform.Translation.Z = .5F;
+    rr::Snapshot snapshot;
+    REQUIRE(renderer.CreateSnapshot(&item, 1, snapshot) == rhi::RasterStatus::Ready);
+    rr::ViewDescription viewDescription;
+    viewDescription.Depth = rr::DepthConvention::ReverseZ;
+    rr::PreparedView view;
+    rr::ViewReport report;
+    REQUIRE(renderer.PrepareView(snapshot, viewDescription, view, report) == rhi::RasterStatus::Ready);
+    for (const bool empty : {false, true})
+    {
+        REQUIRE(rhi::SetFrameTarget(device, surface, {96, 64, 1, 1, 0, 1}) == rhi::DeviceStatus::Ready);
+        REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Ready);
+        rhi::RasterPassDescription pass;
+        pass.ColorLoad = rhi::RasterLoad::Load;
+        pass.UseViewport = pass.UseScissor = true;
+        pass.Viewport = {0, 0, 24, 24};
+        pass.Scissor = {3, 3, empty ? 0U : 6U, 6};
+        REQUIRE(renderer.DrawView(view, pass) == rhi::RasterStatus::Ready);
+        rhi::SubmissionToken completion;
+        REQUIRE(rhi::EndFrame(device, completion) == rhi::RasterStatus::Ready);
+        uint8 pixels[96 * 64 * 4];
+        REQUIRE(rhi::backend::ReadHeadlessPixels(pixels));
+        const auto inside = (usize{4} * 96 + 4) * 4;
+        CHECK(pixels[inside] == 255);
+        CHECK(pixels[inside + 1] == (empty ? 255 : 0));
+        CHECK(pixels[inside + 2] == (empty ? 0 : 255));
+        for (const auto offset : {(usize{12} * 96 + 12) * 4, (usize{50} * 96 + 50) * 4})
+        {
+            CHECK(pixels[offset] == 255);
+            CHECK(pixels[offset + 1] == 255);
+            CHECK(pixels[offset + 2] == 0);
+        }
+    }
 }

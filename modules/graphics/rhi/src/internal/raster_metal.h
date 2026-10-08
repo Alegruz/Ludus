@@ -34,6 +34,7 @@ internal::ComputePipelineInfo gComputeInfos[internal::RASTER_CAPACITY];
 uint64 gRasterOrdinals[FRAMES]{};
 uint64 gRasterCompleted = 0;
 uint32 gRasterWidth = 0, gRasterHeight = 0;
+RasterPassDescription gRasterRegion{};
 bool RasterMetalBindings(NSArray<id<MTLBinding>>* bindings,
                          const internal::RasterShaderInfo& shader,
                          const internal::RasterPipelineInfo& pipeline) noexcept
@@ -331,7 +332,13 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
             return RasterStatus::Failed;
         }
         MTLDepthStencilDescriptor* depth = [MTLDepthStencilDescriptor new];
-        depth.depthCompareFunction = info.Depth ? MTLCompareFunctionLess : MTLCompareFunctionAlways;
+        const MTLCompareFunction comparisons[]{MTLCompareFunctionLess,
+                                               MTLCompareFunctionLessEqual,
+                                               MTLCompareFunctionGreater,
+                                               MTLCompareFunctionGreaterEqual,
+                                               MTLCompareFunctionAlways};
+        depth.depthCompareFunction =
+            info.Depth ? comparisons[static_cast<usize>(info.DepthCompare)] : MTLCompareFunctionAlways;
         depth.depthWriteEnabled = info.Depth && info.DepthWrite;
         auto state = [gDevice newDepthStencilStateWithDescriptor:depth];
         if (state == nil)
@@ -432,12 +439,26 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                           atIndex:internal::RASTER_BINDINGS + i];
     }
     [gEncoder setCullMode:MTLCullModeNone];
-    [gEncoder setViewport:MTLViewport{0,
-                                      0,
-                                      static_cast<float64>(gRasterWidth == 0 ? gFrame.Width : gRasterWidth),
-                                      static_cast<float64>(gRasterHeight == 0 ? gFrame.Height : gRasterHeight),
+    internal::RasterArea area;
+    const auto width = gRasterWidth == 0 ? gFrame.Width : gRasterWidth;
+    const auto height = gRasterHeight == 0 ? gFrame.Height : gRasterHeight;
+    if (!internal::RasterResolveArea(gRasterRegion, width, height, area))
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    if (area.Empty)
+    {
+        return RasterStatus::Ready;
+    }
+    const auto& v = area.Viewport;
+    const auto& c = area.Scissor;
+    [gEncoder setViewport:MTLViewport{static_cast<float64>(v.X),
+                                      static_cast<float64>(v.Y),
+                                      static_cast<float64>(v.Width),
+                                      static_cast<float64>(v.Height),
                                       0,
                                       1}];
+    [gEncoder setScissorRect:MTLScissorRect{c.X, c.Y, c.Width, c.Height}];
     if (packet.Indirect != internal::RASTER_CAPACITY)
     {
         [gEncoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
@@ -461,6 +482,7 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
 void RasterFrameExtent() noexcept
 {
     gRasterWidth = gRasterHeight = 0;
+    gRasterRegion = {};
 }
 void RasterEndPass() noexcept
 {
@@ -500,8 +522,9 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
                                                                                 : MTLLoadActionDontCare;
         pass.depthAttachment.storeAction =
             state.DepthStore == RasterStore::Store ? MTLStoreActionStore : MTLStoreActionDontCare;
-        pass.depthAttachment.clearDepth = 1;
+        pass.depthAttachment.clearDepth = static_cast<float64>(state.ClearDepth);
         gEncoder = [gCommand renderCommandEncoderWithDescriptor:pass];
+        gRasterRegion = state;
         gRasterWidth = static_cast<uint32>(color.width);
         gRasterHeight = static_cast<uint32>(color.height);
         return gEncoder != nil ? RasterStatus::Ready : RasterStatus::Failed;

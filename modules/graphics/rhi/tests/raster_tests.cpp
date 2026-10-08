@@ -1298,3 +1298,77 @@ TEST_CASE("Direct draws and R2 batches reject graph imports without compatible s
     CHECK(reference::Draws == (mode == 3 ? 2 : 0));
     REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
 }
+TEST_CASE("L1 depth comparison participates in pipeline request identity", "[rhi][raster][lifetime]")
+{
+    Session session;
+    Scene scene(session.Device);
+    const RasterVertexStream stream{12, false};
+    const RasterVertexAttribute attribute{0, 0, 0, RasterVertexFormat::Float3};
+    RasterPipelineDescription description{scene.Vertex,
+                                          scene.Fragment,
+                                          scene.Layout,
+                                          {&stream, 1},
+                                          {&attribute, 1},
+                                          true};
+    PipelineRequest conventional, reverse, same;
+    REQUIRE(RequestPipeline(session.Device, description, conventional) == RasterStatus::Pending);
+    REQUIRE(GetStatus(session.Device, conventional) == RasterStatus::Ready);
+    const auto created = reference::Creates[7];
+    description.DepthCompare = RasterDepthCompare::Greater;
+    REQUIRE(RequestPipeline(session.Device, description, reverse) == RasterStatus::Pending);
+    REQUIRE(GetStatus(session.Device, reverse) == RasterStatus::Ready);
+    CHECK(reference::Creates[7] == created + 1);
+    REQUIRE(RequestPipeline(session.Device, description, same) == RasterStatus::Ready);
+    CHECK(reference::Creates[7] == created + 1);
+    description.DepthCompare = static_cast<RasterDepthCompare>(255);
+    PipelineRequest rejected;
+    CHECK(RequestPipeline(session.Device, description, rejected) == RasterStatus::InvalidDescription);
+    CHECK(reference::Creates[7] == created + 1);
+    REQUIRE(Release(session.Device, conventional) == RasterStatus::Ready);
+    REQUIRE(Release(session.Device, reverse) == RasterStatus::Ready);
+    REQUIRE(Release(session.Device, same) == RasterStatus::Ready);
+}
+TEST_CASE("L1 frozen surface viewport checks actual acquisition without faulting the device", "[rhi][graph]")
+{
+    Session session;
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    GraphPassDescription pass;
+    pass.Name = "stale surface extent";
+    pass.Attachment.UseViewport = true;
+    pass.Attachment.Viewport = {0, 0, 97, 64};
+    pass.Attachment.ClearDepth = 0;
+    REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::Ready);
+    SubmissionToken completion;
+    CHECK(ExecuteOrderedGraph(session.Device, session.Surface, graph, completion) == RasterStatus::InvalidDescription);
+    CHECK(GetStatus(session.Device, completion) == RasterStatus::Pending);
+    CHECK(reference::Draws == 0);
+    CHECK(DiscardOrderedGraph(session.Device, graph) == RasterStatus::InvalidHandle);
+    DeviceInfo info;
+    CHECK(GetDeviceInfo(session.Device, info) == DeviceStatus::Ready);
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    RasterPassDescription invalid;
+    invalid.ClearDepth = 2;
+    CHECK(BeginRasterPass(session.Device, invalid) == RasterStatus::InvalidDescription);
+    SubmissionToken next;
+    CHECK(EndFrame(session.Device, next) == RasterStatus::Ready);
+}
+TEST_CASE("L1 rectangle intersection handles empty and overflowing scissors without wrap", "[rhi][raster]")
+{
+    internal::RasterArea area;
+    RasterPassDescription pass;
+    pass.UseScissor = true;
+    pass.Scissor = {90, 60, ~uint32{0}, ~uint32{0}};
+    REQUIRE(internal::RasterResolveArea(pass, 96, 64, area));
+    CHECK(area.Scissor.Width == 6);
+    CHECK(area.Scissor.Height == 4);
+    CHECK_FALSE(area.Empty);
+    pass.Scissor = {~uint32{0}, 0, ~uint32{0}, 1};
+    REQUIRE(internal::RasterResolveArea(pass, 96, 64, area));
+    CHECK(area.Empty);
+    pass.UseViewport = true;
+    pass.Viewport = {95, 0, ~uint32{0}, 1};
+    CHECK_FALSE(internal::RasterResolveArea(pass, 96, 64, area));
+}

@@ -4,6 +4,7 @@
 #include <limits>
 #include <ludus/foundation/math/vector.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
+#include <ludus/graphics/renderer/views.hpp>
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/lifetime.h>
 #include <ludus/graphics/rhi/raster.h>
@@ -57,6 +58,22 @@ struct Session
         fragment.Artifact.Wgsl = "flat fragment fixture";
         fragment.Artifact.WgslEntry = "fragmentMain";
         REQUIRE(renderer.Initialize(Device, vertex, fragment) == rhi::RasterStatus::Ready);
+    }
+    void EnableViews()
+    {
+        const rhi::RasterShaderInput inputs[]{{0, rhi::RasterVertexFormat::Float4}};
+        const rhi::RasterBinding bindings[]{{0, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
+                                            {1, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0}};
+        rhi::RasterShaderDescription vertex, fragment;
+        vertex.Artifact.Stage = rhi::ShaderStage::Vertex;
+        vertex.Artifact.Wgsl = "composite vertex fixture";
+        vertex.Artifact.WgslEntry = "vertexMain";
+        vertex.Inputs = inputs;
+        fragment.Artifact.Stage = rhi::ShaderStage::Fragment;
+        fragment.Artifact.Wgsl = "composite fragment fixture";
+        fragment.Artifact.WgslEntry = "fragmentMain";
+        fragment.Bindings = bindings;
+        REQUIRE(Renderer.InitializeViews(vertex, fragment) == rhi::RasterStatus::Ready);
     }
     ~Session()
     {
@@ -261,4 +278,111 @@ TEST_CASE("Pending geometry is not published as a snapshot and foreign meshes re
     session.Renderer.Reset();
     session.Initialize(session.Renderer);
     CHECK(session.Renderer.GetStatus(stale) == rhi::RasterStatus::InvalidHandle);
+}
+TEST_CASE("L1 explicit passes pair reverse-Z depth and retain detached offscreen presentations", "[renderer][views]")
+{
+    Session session;
+    session.EnableViews();
+    const auto item = session.Item(1);
+    rr::Snapshot snapshot;
+    rr::PreparedView view;
+    rr::ViewReport report;
+    REQUIRE(session.Renderer.CreateSnapshot(&item, 1, snapshot) == rhi::RasterStatus::Ready);
+    rr::ViewDescription description;
+    description.Depth = rr::DepthConvention::ReverseZ;
+    REQUIRE(session.Renderer.PrepareView(snapshot, description, view, report) == rhi::RasterStatus::Ready);
+    rhi::SubmissionToken completion;
+    CHECK(session.Renderer.Submit(view, session.Surface, completion) == rhi::RasterStatus::InvalidDescription);
+    rhi::TextureHandle target;
+    REQUIRE(rhi::CreateTexture(session.Device, {32, 32, rhi::RasterFormat::Rgba8Unorm, true}, {}, target) ==
+            rhi::RasterStatus::Ready);
+    rr::ViewMapping mapping;
+    REQUIRE(rr::ResolveViewMapping({32, 32}, {0, 0, 48, 64}, 96, 64, mapping) == rhi::RasterStatus::Ready);
+    rr::Presentation presentation;
+    REQUIRE(session.Renderer.PreparePresentation(target, mapping, presentation) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::BeginFrame(session.Device, session.Surface) == rhi::DeviceStatus::Ready);
+    rhi::RasterPassDescription pass;
+    pass.Color = target;
+    REQUIRE(session.Renderer.DrawView(view, pass) == rhi::RasterStatus::Ready);
+    CHECK(rhi::reference::Pass.Description.ClearDepth == 0);
+    CHECK(rhi::reference::Pipelines[rhi::reference::Packet.Pipeline].DepthCompare == rhi::RasterDepthCompare::Greater);
+    REQUIRE(session.Renderer.DrawPresentation(presentation) == rhi::RasterStatus::Ready);
+    CHECK(rhi::reference::Pass.Description.ColorLoad == rhi::RasterLoad::Load);
+    CHECK(rhi::reference::Pass.Description.Viewport.Width == 48);
+    CHECK(rhi::reference::Pass.Description.Viewport.Y == 8);
+    REQUIRE(rhi::EndFrame(session.Device, completion) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::Destroy(session.Device, target) == rhi::RasterStatus::Ready);
+    const auto stale = presentation;
+    REQUIRE(session.Renderer.Release(presentation) == rhi::RasterStatus::Ready);
+    CHECK(session.Renderer.GetStatus(stale) == rhi::RasterStatus::InvalidHandle);
+    CHECK(rhi::reference::Destroys[static_cast<usize>(rhi::internal::RasterKind::Texture)] == 0);
+    rhi::reference::Completed = rhi::reference::Submitted;
+    REQUIRE(rhi::PollLifetime(session.Device) == rhi::RasterStatus::Ready);
+    CHECK(rhi::reference::Destroys[static_cast<usize>(rhi::internal::RasterKind::Texture)] == 1);
+}
+TEST_CASE("L1 undefined targets, stale identities and overflowing rectangles reject explicitly", "[renderer][views]")
+{
+    Session session;
+    session.EnableViews();
+    rhi::TextureHandle target;
+    REQUIRE(rhi::CreateTexture(session.Device, {32, 32, rhi::RasterFormat::Rgba8Unorm, true}, {}, target) ==
+            rhi::RasterStatus::Ready);
+    rr::ViewMapping mapping;
+    REQUIRE(rr::ResolveViewMapping({32, 32}, {0, 0, 96, 64}, 96, 64, mapping) == rhi::RasterStatus::Ready);
+    rr::Presentation presentation;
+    REQUIRE(session.Renderer.PreparePresentation(target, mapping, presentation) == rhi::RasterStatus::Ready);
+    rr::ViewMapping resizedMapping;
+    REQUIRE(rr::ResolveViewMapping({32, 32}, {0, 0, 120, 80}, 120, 80, resizedMapping) == rhi::RasterStatus::Ready);
+    rr::Presentation resized;
+    REQUIRE(session.Renderer.PreparePresentation(target, resizedMapping, resized) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::BeginFrame(session.Device, session.Surface) == rhi::DeviceStatus::Ready);
+    const auto passesBeforeResize = rhi::reference::Passes;
+    CHECK(session.Renderer.DrawPresentation(resized) == rhi::RasterStatus::NotReady);
+    CHECK(rhi::reference::Passes == passesBeforeResize);
+    CHECK(session.Renderer.DrawPresentation(presentation) == rhi::RasterStatus::InvalidDescription);
+    rhi::RasterPassDescription pass;
+    pass.UseViewport = true;
+    pass.Viewport = {95, 0, ~uint32{0}, 1};
+    const auto previous = rhi::reference::Passes;
+    CHECK(rhi::BeginRasterPass(session.Device, pass) == rhi::RasterStatus::InvalidDescription);
+    CHECK(rhi::reference::Passes == previous);
+    pass.Viewport = {0, 0, 96, 64};
+    pass.UseScissor = true;
+    pass.Scissor = {~uint32{0}, 0, ~uint32{0}, 1};
+    CHECK(rhi::BeginRasterPass(session.Device, pass) == rhi::RasterStatus::Ready);
+    rhi::SubmissionToken completion;
+    REQUIRE(rhi::EndFrame(session.Device, completion) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(presentation) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::Destroy(session.Device, target) == rhi::RasterStatus::Ready);
+}
+TEST_CASE("L1 infinite reverse-Z culling keeps distant geometry and reports capacity without publishing",
+          "[renderer][views]")
+{
+    Session session;
+    session.EnableViews();
+    auto item = session.Item(11, {0, 0, -100000});
+    rr::Snapshot snapshot;
+    REQUIRE(session.Renderer.CreateSnapshot(&item, 1, snapshot) == rhi::RasterStatus::Ready);
+    rr::ViewMapping mapping;
+    REQUIRE(rr::ResolveViewMapping({96, 64}, {0, 0, 96, 64}, 96, 64, mapping) == rhi::RasterStatus::Ready);
+    rr::ProjectionDescription projection;
+    projection.Kind = rr::ProjectionKind::PerspectiveInfinite;
+    rr::ViewDescription description;
+    REQUIRE(rr::BuildViewDescription(projection, mapping, description) == rhi::RasterStatus::Ready);
+    rr::PreparedView view;
+    rr::ViewReport report;
+    REQUIRE(session.Renderer.PrepareView(snapshot, description, view, report) == rhi::RasterStatus::Ready);
+    CHECK(report.Visible == 1);
+    rhi::TextureHandle target;
+    REQUIRE(rhi::CreateTexture(session.Device, {96, 64, rhi::RasterFormat::Rgba8Unorm, true}, {}, target) ==
+            rhi::RasterStatus::Ready);
+    rr::Presentation presentations[4];
+    for (auto& presentation : presentations)
+    {
+        REQUIRE(session.Renderer.PreparePresentation(target, mapping, presentation) == rhi::RasterStatus::Ready);
+    }
+    rr::Presentation overflow;
+    CHECK(session.Renderer.PreparePresentation(target, mapping, overflow) == rhi::RasterStatus::CapacityExceeded);
+    REQUIRE(session.Renderer.Release(presentations[0]) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.PreparePresentation(target, mapping, overflow) == rhi::RasterStatus::Ready);
 }

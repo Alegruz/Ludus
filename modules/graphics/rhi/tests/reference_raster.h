@@ -20,6 +20,8 @@ inline foundation::usize Barriers = 0;
 inline RasterStatus PassStart = RasterStatus::Ready;
 inline RasterStatus PassPrepare = RasterStatus::Ready;
 inline internal::RasterPacket Packet;
+inline internal::RasterPassInfo Pass;
+inline internal::RasterPipelineInfo Pipelines[internal::RASTER_CAPACITY]{};
 inline foundation::uint8 BufferBytes[internal::RASTER_CAPACITY][internal::LIFETIME_TRANSFER_BYTES]{};
 inline foundation::usize BufferSizes[internal::RASTER_CAPACITY]{};
 inline foundation::uint8 ReadbackBytes[internal::LIFETIME_TRANSFERS][internal::LIFETIME_TRANSFER_BYTES]{};

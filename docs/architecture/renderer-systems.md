@@ -1,7 +1,7 @@
 # Low-level renderer systems architecture
 
-Status: L0 portable scene submission implemented, October 8, 2026; dependency
-audit refreshed against R4 at `d232cb5`. L1–L6 remain an implementation plan.
+Status: L0 portable scene submission and L1 views/depth implemented, October 8,
+2026; L1 starts from the merged L0 at `fe53e42`. L2–L6 remain an implementation plan.
 Correctness fixtures do not establish a measured speedup.
 The initial decisions below were saved before opening the Gems article map.
 The [reference review](renderer-systems-gems-review.md) records the subsequent
@@ -61,10 +61,11 @@ public contracts with Doxygen and source attribution beside affected code.
 | [Resources](resource-management.md) | Content/audio portions exist; general coordinator and graphics streaming are proposed | Do not block the first scene on a universal asset manager |
 | [Frame update](frame-update.md), [world](game-world.md), [UI](ui.md) | Separate simulation, presentation and UI ownership | Extraction adapters sit above Renderer; it must not depend on an ECS or UI toolkit |
 
-R1 currently clears depth to one and supports less-than depth. FoundationMath's
-intended 3D convention is reverse-Z `[0,1]`. Never silently pair the reverse-Z
-camera projection with that state. The first 3D phase must add explicit clear
-and compare state, then prove near/far ordering on all supported backends.
+The R1 compatibility frame still clears depth to one and defaults to less-than
+depth. L1 adds explicit pass clear depth and pipeline comparison state. FoundationMath's
+intended 3D convention is reverse-Z `[0,1]`. Pair reverse-Z projections with clear zero and Greater explicitly. The L1
+fixtures prove ordering on native and browser backends; existing consumers keep
+their conventional default.
 Existing R1 consumers keep their documented behavior. Similarly, its 16 records
 per kind, RGBA8-only single-mip sampling and one binding group are compatibility
 limits, not an adequate streaming/lighting contract.
@@ -118,12 +119,12 @@ bounds of this initial profile, not performance targets or a streaming budget.
 
 Opaque objects use the view transform, depth clear one and less-than depth testing.
 Use near-zero/far-one projection; do not pass FoundationMath's reverse-Z factories
-unchanged. L1 owns the explicit depth-policy migration. Overlays use their own
+unchanged. Use the L1 view builder and explicit frame/pass path below for reverse-Z. Overlays use their own
 local-to-clip affine transform, ignore the world view and render after opaque draws
 without depth testing. Overlay inputs use straight linear RGBA; preparation converts
 RGB to premultiplied values. Unauthored flat materials default to opaque magenta.
-Textures, arbitrary shaders/material templates, submeshes, viewport/scissor, offscreen
-composition and live instance updates remain later phases.
+General textures, arbitrary shaders/material templates, submeshes and live
+instance updates remain later phases. L1 adds viewport/scissor and offscreen composition.
 
 Visibility reuses FoundationMath's outward-rounded affine AABB transform and checked
 frustum classification, including reflection/shear and boundary contact. Overlays are
@@ -147,6 +148,78 @@ coplanar overlap, invalid/stale identities, pending dependencies, capacity recov
 skipped targets and GPU retention. Metal and pinned Chromium WebGPU/WebGL 2 are local
 qualification paths; Linux Vulkan validation and supported-host sanitizers are CI
 gates. Software GPU checks make no physical GPU performance claim.
+
+## Views and depth (L1)
+
+The [view API](../../modules/graphics/renderer/include/ludus/graphics/renderer/views.hpp)
+provides allocation-free `ResolveViewMapping`, `SplitViewRectangle`, physical/window
+pointer conversion and `BuildViewDescription`. A resolved mapping carries the actual
+drawable dimensions, rounded viewport, owning region, origin, per-axis scale, crop
+transform and IntegerFit fallback. Input uses top-left pixel-edge coordinates and
+half-open regions. Window input receives explicit physical pixels per window unit;
+DPI is applied once. Picking rejects bars/cropped exterior unless clamping is requested.
+Zero extent returns NotReady without replacing outputs. Checked shared split edges
+cover odd dimensions without cracks. Mapping extents are bounded to 2^24 so binary32
+pixel edges remain representable.
+
+`BuildViewDescription` reuses FoundationMath's right-handed reverse-Z factories for
+centered orthographic, finite perspective and infinite perspective. It uses the logical
+screen aspect and applies Fill's crop to both world geometry and overlays. Infinite
+perspective uses five-plane culling. Near maps to one, far to zero. Prepared views
+retain their depth convention; reverse-Z preparation requires the L1 profile ready.
+`Submit` remains the conventional L0 compatibility path; L1 uses `DrawView` inside
+an acquired frame and finishes with R2 `EndFrame(device, completion)`.
+
+Cook the installed composition shader alongside `renderer_flat`, then call
+`InitializeViews(renderer_composite::Vertex(), renderer_composite::Fragment())`
+after the flat renderer becomes Ready. Poll `PollViews` on subsequent owner turns
+until Ready. L1 setup adds five pipelines, an immutable nearest/clamp sampler and
+one index buffer. Pipeline creation stays outside frame drawing. It consumes the
+existing RHI budgets rather than increasing them; a full L0 allocation can explicitly
+reject L1 setup. Failed L1 setup leaves the L0 profile usable but requires Reset to
+release its partial candidate before restarting.
+
+Create linear RGBA8 RHI attachment textures with `TextureDescription.Attachment=true`.
+`DrawView` selects a compatible surface/offscreen flat pipeline and pairs the prepared
+view's depth convention with Less/clear one or Greater/clear zero. Its pass has explicit
+load/store, viewport and scissor. Clears always cover the complete attachment; they
+are never interpreted as per-view rectangular clears. To preserve neighboring split
+views with independent clear colors/depth, draw each into its own offscreen target,
+then composite into the shared surface with `DrawPresentation`. Ordinary R3 direct
+pass switching ends the producer and establishes the sampled use; RHI's single
+ledger retains attachments, bindings and geometry until actual completion.
+
+`PreparePresentation` copies immutable quad geometry and a resolved mapping and
+retains the sampled texture incarnation through its view/binding snapshot. The
+source pixel aspect must match the logical screen aspect; its shading resolution
+can differ. Four presentations are bounded separately, each using one vertex buffer,
+view and binding set. Ready/Pending alone grants ownership. Poll presentation status
+between frames; it may create the binding snapshot after asynchronous dependencies
+are ready. Repeated draws create no renderer resources or heap allocations.
+Destroying the original texture owner cannot invalidate an accepted presentation;
+undefined sampled contents still reject. Top-left UVs are shared across backends,
+including WebGL's existing stored-attachment flip.
+
+Presentation geometry is prepared between frames. `DrawPresentation` compares its
+mapping dimensions with the **actual acquired extent** before changing the pass;
+a resize mismatch returns NotReady. End that frame, resolve a replacement mapping
+using the acquired dimensions, prepare the replacement, then release the old
+presentation between frames. Rendering resolution changes similarly create a full
+replacement target/presentation pair before publication; old GPU uses retire through
+completion. No automatic target mutation, history allocation or hidden DPI state is
+introduced. PreparedView/Presentation identities carry owner, slot and non-wrapping
+generation; there is no temporal history in this flat L1 profile.
+
+The public-only installed SDK fixture renders orthographic and infinite perspective
+views, verifies zero-extent skips, replaces 48-square targets with 96-square targets,
+and resizes presentation from 96x64 to 120x80 over 120 accepted frames. Native pixels
+compare optimized finite perspective against direct infinite perspective; browser
+oracles compare optimized/direct and cross-backend images at both extents. Independent
+samples prove near red survives later far green, different orthographic/perspective
+corners, top-right overlay UV orientation, bars and neighboring view preservation.
+Unit fixtures cover mapping inverses, explicit DPI, crop/fit/integer fallback, shared
+split edges, output preservation, five-plane culling, stale handles, capacity recovery
+and texture retention after release. These checks establish correctness, not a speedup.
 
 ## Owners and module shape
 
@@ -887,7 +960,7 @@ These phases complement RHI R0–R5; they do not rename or claim completion of t
 | Phase | Deliverable and prerequisites | Acceptance |
 | --- | --- | --- |
 | L0: portable scene packets (implemented) | R1 static flat/unlit meshes with fixed transforms, immutable snapshots, CPU visibility, ordered 2D overlays, error materials; remain within current limits and R1-compatible depth | Public-only SDK fixture on Vulkan/Metal/WebGPU/WebGL; invalid/stale inputs, capacity failure and pixels match an unsorted direct path |
-| L1: views and depth | GDI/RHI explicit attachments, clear/compare state and frame retention; orthographic/perspective, virtual screens, offscreen/split views | Reverse-Z ordering, clip/UV orientation, letterbox picking, DPI, zero extent, resize and neighboring view preservation |
+| L1: views and depth (implemented) | GDI/RHI explicit attachments, clear/compare state and frame retention; orthographic/perspective, virtual screens, offscreen/split views | Reverse-Z ordering, clip/UV orientation, letterbox picking, DPI, zero extent, resize and neighboring view preservation |
 | L2: mutable data and overlays | Completion-scoped uploads/updates; dynamic instances, debug triangles, R8 text adapter | In-flight overwrite stress, line near-plane/degenerate cases, painter/scissor order, atlas pressure, CPU text fixtures and loss/restart |
 | L3: material/content versions | Cook/reflection/layout expansion, texture formats/mips and pipeline prewarm | Per-target layout fixtures; invalid reload preserves old image; mip/color semantics; bounded cache/upload overlap and deterministic fallback |
 | L4: lighting baseline | Lit material, bounded direct lists, environment, shadows, baked assets, linear intermediate/output | Reference BRDF/color tests; no double lighting, shadow invalidation/atlas borders, saturation/overflow and LDR/HDR capability variants |

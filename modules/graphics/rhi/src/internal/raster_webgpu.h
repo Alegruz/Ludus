@@ -27,6 +27,7 @@ struct RasterWebCompletion final
 };
 WGPUBuffer gRasterBuffers[internal::RASTER_CAPACITY]{};
 WGPUTexture gRasterTextures[internal::RASTER_CAPACITY]{};
+TextureDescription gRasterTextureDescriptions[internal::RASTER_CAPACITY]{};
 WGPUTexture gRasterDepths[internal::RASTER_CAPACITY]{};
 WGPUTextureView gRasterAttachmentViews[internal::RASTER_CAPACITY]{};
 WGPUTextureView gRasterDepthViews[internal::RASTER_CAPACITY]{};
@@ -286,6 +287,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
                        (info.Attachment ? WGPUTextureUsage_RenderAttachment : WGPUTextureUsage_None);
     auto texture = wgpuDeviceCreateTexture(gDevice, &descriptor);
     gRasterTextures[slot] = texture;
+    gRasterTextureDescriptions[slot] = info;
     if (texture != nullptr && !info.Attachment)
     {
         WGPUTexelCopyTextureInfo destination = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
@@ -481,7 +483,12 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
     WGPUDepthStencilState depth = WGPU_DEPTH_STENCIL_STATE_INIT;
     depth.format = WGPUTextureFormat_Depth24Plus;
     depth.depthWriteEnabled = info.Depth && info.DepthWrite ? WGPUOptionalBool_True : WGPUOptionalBool_False;
-    depth.depthCompare = info.Depth ? WGPUCompareFunction_Less : WGPUCompareFunction_Always;
+    const WGPUCompareFunction comparisons[]{WGPUCompareFunction_Less,
+                                            WGPUCompareFunction_LessEqual,
+                                            WGPUCompareFunction_Greater,
+                                            WGPUCompareFunction_GreaterEqual,
+                                            WGPUCompareFunction_Always};
+    depth.depthCompare = info.Depth ? comparisons[static_cast<usize>(info.DepthCompare)] : WGPUCompareFunction_Always;
     WGPURenderPipelineDescriptor descriptor = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
     descriptor.layout = pipeline.Layout;
     descriptor.vertex.module = gRasterShaders[info.Vertex].Object;
@@ -591,8 +598,17 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             break;
     }
 }
+internal::RasterArea gRasterArea{};
+void RasterFrameExtent() noexcept
+{
+    gRasterArea = {};
+}
 RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
 {
+    if (gRasterArea.Empty)
+    {
+        return RasterStatus::Ready;
+    }
     const auto& pipeline = gRasterPipelines[packet.Pipeline];
     wgpuRenderPassEncoderSetPipeline(gPass, pipeline.Object);
     wgpuRenderPassEncoderSetBindGroup(gPass, 0, gRasterSets[packet.Set], 0, nullptr);
@@ -652,7 +668,7 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
     depth.depthReadOnly = state.DepthReadOnly;
     // The browser bridge forwards this value even for read-only depth. Keep
     // the ignored value finite instead of forwarding the C API's NaN default.
-    depth.depthClearValue = 1;
+    depth.depthClearValue = state.ClearDepth;
     if (!state.DepthReadOnly)
     {
         depth.depthLoadOp = state.DepthLoad == RasterLoad::Load ? WGPULoadOp_Load : WGPULoadOp_Clear;
@@ -662,8 +678,28 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
     pass.colorAttachmentCount = 1;
     pass.colorAttachments = &color;
     pass.depthStencilAttachment = &depth;
+    const auto width = surface ? gTarget.Width : gRasterTextureDescriptions[info.Texture].Width;
+    const auto height = surface ? gTarget.Height : gRasterTextureDescriptions[info.Texture].Height;
+    if (!internal::RasterResolveArea(state, width, height, gRasterArea))
+    {
+        return RasterStatus::InvalidDescription;
+    }
     gPass = wgpuCommandEncoderBeginRenderPass(gEncoder, &pass);
-    return gPass != nullptr ? RasterStatus::Ready : RasterStatus::Failed;
+    if (gPass == nullptr)
+    {
+        return RasterStatus::Failed;
+    }
+    const auto& v = gRasterArea.Viewport;
+    const auto& c = gRasterArea.Scissor;
+    wgpuRenderPassEncoderSetViewport(gPass,
+                                     static_cast<float32>(v.X),
+                                     static_cast<float32>(v.Y),
+                                     static_cast<float32>(v.Width),
+                                     static_cast<float32>(v.Height),
+                                     0,
+                                     1);
+    wgpuRenderPassEncoderSetScissorRect(gPass, c.X, c.Y, c.Width, c.Height);
+    return RasterStatus::Ready;
 }
 RasterStatus RasterReserveSubmission() noexcept
 {

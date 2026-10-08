@@ -513,6 +513,29 @@ RasterStatus CreateTexture(DeviceHandle device,
         return backend::RasterCreateTexture(slot, description, upload, record.Request);
     });
 }
+bool IsNull(TextureHandle handle) noexcept
+{
+    return RasterAccess::Owner(handle) == 0;
+}
+RasterStatus GetTextureDescription(DeviceHandle device, TextureHandle handle, TextureDescription& output) noexcept
+{
+    const auto admission = Admission(device, false);
+    if (admission != RasterStatus::Ready)
+    {
+        return admission;
+    }
+    const auto* record = Resolve(handle, RasterKind::Texture);
+    if (record == nullptr)
+    {
+        return RasterStatus::InvalidHandle;
+    }
+    if (record->Status != RasterStatus::Ready)
+    {
+        return record->Status == RasterStatus::Pending ? RasterStatus::NotReady : record->Status;
+    }
+    output = record->Texture;
+    return RasterStatus::Ready;
+}
 RasterStatus CreateTextureView(DeviceHandle device, TextureHandle texture, TextureViewHandle& output) noexcept
 {
     const auto admission = Admission(device);
@@ -824,7 +847,12 @@ ValidatePipeline(DeviceHandle device, const RasterPipelineDescription& descripti
     }
     info.Blend = description.Blend;
     info.Target = description.Target;
+    if (static_cast<uint8>(description.DepthCompare) > static_cast<uint8>(RasterDepthCompare::Always))
+    {
+        return RasterStatus::InvalidDescription;
+    }
     info.DepthWrite = description.DepthWrite;
+    info.DepthCompare = description.DepthCompare;
     info.StreamCount = description.Streams.size();
     info.AttributeCount = description.Attributes.size();
     for (usize i = 0; i < info.StreamCount; ++i)
