@@ -293,7 +293,7 @@ The initial profile is deliberately bounded:
 | Bindings | One group/set, at most eight unique binding numbers below eight; uniform ranges, sampled 2D textures and non-comparison samplers |
 | Vertex input | At most two streams, per-vertex or divisor-one per-instance, stride 4..256 divisible by four; eight unique float2/3/4 attributes |
 | Draw | Triangle list, Index16/Index32, zero base vertex/first instance, 1024 draws per frame; fixed primitive-restart indices are rejected |
-| State | No culling, one color target, one sample; optional less-than depth test/write and premultiplied-alpha blend |
+| State | No culling, one color target, one sample; explicit depth comparison/write and premultiplied-alpha blend; defaults retain less-than |
 
 Draws use canonical clip depth [0,1], Y-up geometry and texture UV (0,0) at
 the first uploaded row. Vulkan uses a negative-height viewport; the GLSL ES
@@ -530,9 +530,28 @@ resource. Clear establishes full initialization; Load requires defined prior
 contents; Discard followed by partial draws does not establish initialization.
 Store Discard invalidates contents. The acquired surface begins cleared by the
 existing frame path and must finish with defined stored color for presentation.
-Depth Clear uses one; Depth Load requires a stored prior depth image. A read-only
+Depth Clear uses explicit `ClearDepth` in [0,1], defaulting to one; Depth Load
+requires a stored prior depth image. A read-only
 depth pass requires Load and rejects pipelines that write depth. `DepthWrite=false`
 allows a depth-testing pipeline in that pass.
+
+L1 adds `RasterDepthCompare` (Less, LessEqual, Greater, GreaterEqual and Always).
+Pipeline requests compare that field explicitly, so reverse-Z and conventional
+variants cannot alias. Existing R1 descriptions keep Less/clear one. Pass rectangles
+use top-left physical pixels and half-open edges. An explicit viewport must be nonempty
+and fit the actual attachment; scissors intersect drawable bounds and an empty
+intersection encodes no draw. Disabling either rectangle selects the complete actual
+attachment. Clears are whole-attachment regardless of rectangles, preserving R3's
+initialization contract. Use separate offscreen targets and Load composition for
+independently cleared split views; see [L1 usage](../architecture/renderer-systems.md#views-and-depth-l1).
+
+Offscreen viewport bounds validate during setup. Surface bounds validate against the
+actual acquired extent before switching direct passes; rejection preserves the current
+pass. A frozen graph can encounter a changed surface extent only after acquisition:
+an invalid surface viewport consumes that graph and returns InvalidDescription with
+any accepted clear-only completion published separately. It does not fault the device.
+`GetTextureDescription` copies an owned texture's immutable descriptor without native
+objects; `IsNull(TextureHandle)` identifies the surface selector, not resource readiness.
 
 Versions identify contents, not new storage. Reads must name the current produced
 version at that authored position. A later producer, an overwritten version,

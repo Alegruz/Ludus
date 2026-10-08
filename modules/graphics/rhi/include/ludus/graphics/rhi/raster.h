@@ -343,6 +343,20 @@ enum class RasterTarget : ludus::foundation::uint8
     /// sRGB RGBA8 offscreen color attachment.
     Rgba8Srgb,
 };
+/// Canonical [0,1] depth comparison; reversal is explicit rather than inferred from a matrix.
+enum class RasterDepthCompare : ludus::foundation::uint8
+{
+    /// Pass when incoming depth is strictly smaller (conventional depth).
+    Less,
+    /// Pass on smaller or equal depth.
+    LessEqual,
+    /// Pass when incoming depth is strictly larger (reverse-Z).
+    Greater,
+    /// Pass on larger or equal depth.
+    GreaterEqual,
+    /// Accept every depth value; DepthWrite still controls writes.
+    Always,
+};
 /// Immutable triangle-list pipeline, independent of particular buffers or bindings.
 /// Target selects the negotiated surface or an explicit offscreen color format,
 /// with one sample and private depth. Dimensions are dynamic; format changes need
@@ -359,7 +373,7 @@ struct RasterPipelineDescription final
     std::span<const RasterVertexStream> Streams;
     /// Up to eight attributes; copied before return.
     std::span<const RasterVertexAttribute> Attributes;
-    /// Enable less-than depth testing and depth writes; false preserves depth.
+    /// Enable the explicit comparison and optional depth writes; false preserves depth.
     bool Depth = false;
     /// Enable premultiplied-alpha blending in the target's linear domain.
     bool Blend = false;
@@ -367,6 +381,8 @@ struct RasterPipelineDescription final
     RasterTarget Target = RasterTarget::Surface;
     /// When Depth is enabled, false tests depth without modifying it.
     bool DepthWrite = true;
+    /// Comparison when Depth is enabled; defaults preserve R1 conventional depth.
+    RasterDepthCompare DepthCompare = RasterDepthCompare::Less;
 };
 /// One vertex-stream slice, borrowed during DrawIndexed and retained through submission.
 struct RasterVertexSlice final
@@ -433,6 +449,11 @@ CreateBuffer(DeviceHandle, const BufferDescription&, std::span<const ludus::foun
 /// with empty upload and zero pitch. Invalid description preserves output.
 [[nodiscard]] RasterStatus
 CreateTexture(DeviceHandle, const TextureDescription&, const TextureUpload&, TextureHandle&) noexcept;
+/// Return whether the texture identity is the null surface selector; no ownership/state query.
+[[nodiscard]] bool IsNull(TextureHandle) noexcept;
+/// Copy the immutable description of an owned texture; owner-thread only, including open frames.
+/// Invalid/unready handles preserve output; does not expose native objects or extend ownership.
+[[nodiscard]] RasterStatus GetTextureDescription(DeviceHandle, TextureHandle, TextureDescription&) noexcept;
 /// Create a complete, original-format view, retaining its texture. Partial sampled ranges,
 /// format reinterpretation and separate depth views are unsupported.
 [[nodiscard]] RasterStatus CreateTextureView(DeviceHandle, TextureHandle, TextureViewHandle&) noexcept;

@@ -23,6 +23,7 @@
 #endif
 namespace ludus::graphics::rhi::LUDUS_RHI_WEBGPU_NAMESPACE
 {
+void RasterFrameExtent() noexcept;
 namespace
 {
 using namespace ludus::foundation;
@@ -456,6 +457,7 @@ FrameStatus Begin() noexcept
     {
         return FrameFailure();
     }
+    RasterFrameExtent();
     WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
     color.view = gView;
     color.loadOp = WGPULoadOp_Clear;

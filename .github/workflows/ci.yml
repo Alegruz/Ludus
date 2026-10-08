@@ -91,7 +91,7 @@ jobs:
         run: |
           out/host-tools/venv/bin/cmake --install out/build/macos-clang-development
           out/host-tools/venv/bin/python tests/sdk_consumer/verify_metal_shader_build.py --sdk "$PWD/out/install/macos-clang-development" --cmake "$PWD/out/host-tools/venv/bin/cmake" --ninja "$PWD/out/host-tools/venv/bin/ninja" --cxx "$PWD/out/host-tools/bin/clang++" --slang "$PWD/out/shader-tools/slang/bin/slangc" --conan "$PWD/out/conan/macos-clang-development" --sysroot "$PWD/out/host-tools/macos-sdk" --libcxx "$PWD/out/host-tools/libcxx-include"
-      - name: Verify installed L0 renderer consumer
+      - name: Verify installed L0/L1 renderer consumers
         run: |
           out/host-tools/venv/bin/cmake -S tests/sdk_consumer/renderer -B out/renderer-sdk -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -102,6 +102,7 @@ jobs:
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
           out/host-tools/venv/bin/cmake --build out/renderer-sdk --parallel 2
           out/renderer-sdk/ludus_sdk_renderer_consumer
+          out/renderer-sdk/ludus_sdk_renderer_views_consumer
       - name: Verify installed macOS game-project tooling
         run: |
           ./scripts/install-sdk macos-clang-development
@@ -508,6 +509,7 @@ jobs:
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val"
           out/host-tools/venv/bin/cmake --build out/renderer-sdk --parallel 2
           out/renderer-sdk/ludus_sdk_renderer_consumer
+          out/renderer-sdk/ludus_sdk_renderer_views_consumer
       - name: Build and test the independent Cornell box tutorial (Vulkan)
         run: |
           sudo apt-get install -y -qq libvulkan1 mesa-vulkan-drivers

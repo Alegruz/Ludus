@@ -126,8 +126,9 @@ RasterStatus RasterCreateSet(usize, const internal::RasterLayout&, const interna
 {
     return Created(internal::RasterKind::Set, request);
 }
-RasterStatus RasterCreatePipeline(usize, const internal::RasterPipelineInfo&, uint32 request) noexcept
+RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo& info, uint32 request) noexcept
 {
+    reference::Pipelines[slot] = info;
     return Created(internal::RasterKind::Pipeline, request);
 }
 void RasterDestroy(internal::RasterKind kind, usize) noexcept
@@ -145,8 +146,9 @@ RasterStatus RasterPreparePass(const internal::RasterPassInfo&) noexcept
     return reference::PassPrepare;
 }
 void RasterEndPass() noexcept {}
-RasterStatus RasterBeginPass(const internal::RasterPassInfo&) noexcept
+RasterStatus RasterBeginPass(const internal::RasterPassInfo& pass) noexcept
 {
+    reference::Pass = pass;
     ++reference::Passes;
     return reference::PassStart;
 }

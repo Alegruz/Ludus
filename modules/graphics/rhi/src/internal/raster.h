@@ -82,6 +82,7 @@ struct RasterPipelineInfo final
     bool Blend = false;
     RasterTarget Target = RasterTarget::Surface;
     bool DepthWrite = true;
+    RasterDepthCompare DepthCompare = RasterDepthCompare::Less;
 };
 struct ComputePipelineInfo final
 {
@@ -115,6 +116,46 @@ struct RasterPassInfo final
     foundation::usize Texture = RASTER_CAPACITY;
     RasterPassDescription Description;
 };
+// Canonical rectangles stay top-left; API-specific Y conversion occurs only in backends.
+struct RasterArea final
+{
+    RasterRectangle Viewport{}, Scissor{};
+    bool Empty = false;
+};
+inline bool RasterResolveArea(const RasterPassDescription& pass,
+                              foundation::uint32 width,
+                              foundation::uint32 height,
+                              RasterArea& area) noexcept
+{
+    const RasterRectangle full{0, 0, width, height};
+    area.Viewport = pass.UseViewport ? pass.Viewport : full;
+    const auto& v = area.Viewport;
+    if (v.Width == 0 || v.Height == 0 || v.X > width || v.Y > height || v.Width > width - v.X ||
+        v.Height > height - v.Y)
+    {
+        return false;
+    }
+    area.Scissor = pass.UseScissor ? pass.Scissor : full;
+    auto& s = area.Scissor;
+    if (s.X > width)
+    {
+        s.X = width;
+    }
+    if (s.Y > height)
+    {
+        s.Y = height;
+    }
+    if (s.Width > width - s.X)
+    {
+        s.Width = width - s.X;
+    }
+    if (s.Height > height - s.Y)
+    {
+        s.Height = height - s.Y;
+    }
+    area.Empty = s.Width == 0 || s.Height == 0;
+    return true;
+}
 struct LifetimeUploadTarget final
 {
     foundation::usize Buffer = 0;

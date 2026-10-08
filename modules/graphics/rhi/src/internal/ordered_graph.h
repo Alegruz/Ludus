@@ -235,9 +235,11 @@ RasterTarget PassTarget(const RasterPassInfo& pass) noexcept
 }
 RasterStatus ValidatePassDescription(const RasterPassDescription& description, RasterPassInfo& pass) noexcept
 {
+    const bool validDepth = description.ClearDepth >= 0 && description.ClearDepth <= 1;
     if (static_cast<uint8>(description.ColorLoad) > 2 || static_cast<uint8>(description.DepthLoad) > 2 ||
         static_cast<uint8>(description.ColorStore) > 1 || static_cast<uint8>(description.DepthStore) > 1 ||
-        (description.DepthReadOnly && description.DepthLoad != RasterLoad::Load))
+        (description.DepthReadOnly && description.DepthLoad != RasterLoad::Load) || !validDepth ||
+        (description.UseViewport && (description.Viewport.Width == 0 || description.Viewport.Height == 0)))
     {
         return RasterStatus::InvalidDescription;
     }
@@ -272,6 +274,11 @@ RasterStatus ValidatePassDescription(const RasterPassDescription& description, R
         return RasterStatus::IdentityExhausted;
     }
     pass.Texture = RasterAccess::Slot(description.Color);
+    RasterArea area;
+    if (!RasterResolveArea(description, texture->Texture.Width, texture->Texture.Height, area))
+    {
+        return RasterStatus::InvalidDescription;
+    }
     return RasterStatus::Ready;
 }
 RasterStatus ValidatePacketPass(const RasterPacket& packet, const RasterPassInfo& pass, bool contents) noexcept
@@ -525,6 +532,15 @@ RasterStatus BeginRasterPass(DeviceHandle device, const RasterPassDescription& d
     if (valid != RasterStatus::Ready)
     {
         return valid;
+    }
+    if (pass.Texture == RASTER_CAPACITY)
+    {
+        const auto extent = GetFrameInfo();
+        RasterArea area;
+        if (!RasterResolveArea(description, extent.Width, extent.Height, area))
+        {
+            return RasterStatus::InvalidDescription;
+        }
     }
     bool color = gSurfaceColorDefined;
     bool depth = gSurfaceDepthDefined;
@@ -1446,6 +1462,22 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
     {
         handle = {};
         return RasterStatus::Failed;
+    }
+    // Surface rectangles can only be checked against the actual acquired extent.
+    // Acquisition may already encode its clear; report that accepted work separately.
+    const auto extent = GetFrameInfo();
+    for (usize p = 0; p < graph->PassCount; ++p)
+    {
+        const auto& pass = graph->Passes[p];
+        RasterArea area;
+        if (!graph->Report.Culled[p] && !pass.IsCompute && pass.Info.Texture == RASTER_CAPACITY &&
+            !RasterResolveArea(pass.Info.Description, extent.Width, extent.Height, area))
+        {
+            const auto ended = EndFrame(device, completion);
+            ResetGraph(*graph);
+            handle = {};
+            return ended == RasterStatus::Ready ? RasterStatus::InvalidDescription : ended;
+        }
     }
     gFrameSubmission = gSubmissions.Next;
     gGraphExecuting = true;

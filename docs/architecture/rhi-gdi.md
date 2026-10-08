@@ -38,6 +38,12 @@ policy above this boundary. Its [Gems review](renderer-systems-gems-review.md)
 records later renderer-specific refinements. Device/resource lifetime and pass
 lowering remain owned here; neither proposal implies implementation readiness.
 
+L1 renderer integration adds explicit depth comparisons/clear values and pass
+viewport/scissor rectangles to these existing owners. Its usage and lifetime rules
+are in the [renderer L1 guide](renderer-systems.md#views-and-depth-l1); the
+[R3 contract](../development/fullscreen-rendering.md#ordered-raster-graphs-r3)
+owns actual attachment bounds, full clears and completion semantics.
+
 ## Current implementation and compatibility
 
 The current fullscreen API has four backends: Vulkan on Linux, Metal on macOS,

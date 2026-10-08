@@ -3,7 +3,7 @@
 // Camera / projection helpers (design §8). Canonical clip volume: NDC X/Y in
 // [-1,1], depth Z in [0,1], Y up (matches WebGPU). All projections are
 // REVERSE-Z: a near plane maps to depth 1 and far to depth 0, which pairs with a
-// future renderer clearing depth to 0 and comparing Greater/GreaterEqual. Math
+// renderer clearing depth to 0 and comparing Greater/GreaterEqual (Renderer L1). Math
 // supplies the matrices and this contract only; it adds no depth-enabled RHI
 // feature and alters no existing smoke pipeline.
 //

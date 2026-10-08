@@ -7,6 +7,7 @@
 #include <ludus/foundation/math/transform.hpp>
 #include <ludus/foundation/math/vector.hpp>
 #include <ludus/graphics/rhi/device.h>
+#include <ludus/graphics/rhi/graph.h>
 #include <ludus/graphics/rhi/lifetime.h>
 #include <ludus/graphics/rhi/raster.h>
 
@@ -43,6 +44,25 @@ private:
     ludus::foundation::uint32 Slot = 0;
     /// Grants the private renderer access to assign and validate this incarnation.
     friend struct internal::Access;
+};
+/// Forward declaration of the shared logical/physical mapping contract in views.hpp.
+struct ViewMapping;
+/// Immutable sampled target and presentation geometry retained through GPU completion.
+struct Presentation final
+{
+private:
+    ludus::foundation::uint64 Owner = 0, Generation = 0;
+    ludus::foundation::uint32 Slot = 0;
+    /// Grants private access to the renderer incarnation.
+    friend struct internal::Access;
+};
+/// Explicit pairing of projection matrices, clear values and comparisons.
+enum class DepthConvention : ludus::foundation::uint8
+{
+    /// R1 compatibility: near zero, far one, clear one, strict Less.
+    Conventional,
+    /// Near one, far zero, clear zero, strict Greater.
+    ReverseZ,
 };
 /// Opaque scene geometry precedes painter-ordered overlays.
 enum class Layer : ludus::foundation::uint8
@@ -87,12 +107,18 @@ struct SceneItem final
 /// Finite canonical clip transform: XY [-1,1], Z [0,1], Y up.
 struct ViewDescription final
 {
-    /// World-to-clip using conventional near-zero/far-one depth. L0 does not accept reverse-Z by contract.
+    /// Finite world-to-clip matrix matching the explicit Depth convention.
     ludus::foundation::math::Matrix4 WorldToClip = ludus::foundation::math::Matrix4::Identity();
     /// Finite nonnegative world-unit margin for conservative opaque AABB culling.
     ludus::foundation::float32 CullMargin = 0;
     /// Keep source order and one draw per object, with visibility disabled, for image comparison.
     bool Reference = false;
+    /// Defaults preserve existing L0 projection behavior; reverse-Z requires InitializeViews.
+    DepthConvention Depth = DepthConvention::Conventional;
+    /// Select five-plane culling for an infinite reverse-Z perspective projection.
+    bool InfiniteFar = false;
+    /// Canonical overlay crop transform, applied independently of the world camera.
+    ludus::foundation::math::Matrix4 OverlayToClip = ludus::foundation::math::Matrix4::Identity();
 };
 /// Bounded packet report, copied to caller storage; source IDs follow actual draw/instance order.
 struct ViewReport final
@@ -119,11 +145,14 @@ struct Limits final
     ludus::foundation::uint32 Views = 4;
     /// At most 256 scene objects and draw packets per snapshot/view.
     ludus::foundation::uint32 Objects = 256;
+    /// Four retained target presentations, each consuming one RHI vertex buffer and binding set.
+    ludus::foundation::uint32 Presentations = 4;
 };
 /// Portable static flat/unlit renderer, one owner thread per device.
 /// Setup copies data and may allocate/create GPU resources. Repeated Submit creates
 /// no renderer resources or heap allocations; RHI retains accepted work through completion.
-/// All calls and destruction require a closed RHI frame. Reset before destroying the device.
+/// Setup/release and destruction require a closed RHI frame; DrawView/DrawPresentation
+/// require an acquired open frame. Reset before destroying the device.
 /// See the portable scene submission section in `docs/architecture/renderer-systems.md` for the canonical guide.
 class Renderer final
 {
@@ -148,6 +177,13 @@ public:
     /// Advance asynchronous shader/layout/pipeline setup without blocking. Ready permits scene setup.
     /// Pending/failure retains ownership until Reset; no automatic backend switch.
     [[nodiscard]] rhi::RasterStatus Poll() noexcept;
+    /// Enable L1 surface/offscreen reverse-Z and target composition after Initialize is Ready.
+    /// Uses the shipped renderer_composite.slang stages; Ready/Pending publishes setup ownership.
+    /// Failure preserves the usable L0 profile; failed published setup requires Reset.
+    [[nodiscard]] rhi::RasterStatus InitializeViews(const rhi::RasterShaderDescription& vertex,
+                                                    const rhi::RasterShaderDescription& fragment) noexcept;
+    /// Advance L1 resource/pipeline creation on later owner turns; no GPU wait or backend switch.
+    [[nodiscard]] rhi::RasterStatus PollViews() noexcept;
     /// Release all public identities/resources; accepted CPU/GPU uses retire through RHI.
     /// @pre Owner thread, no open frame; invalidates every previously issued logical handle.
     void Reset() noexcept;
@@ -179,7 +215,8 @@ public:
     PrepareView(Snapshot handle, const ViewDescription& description, PreparedView& output, ViewReport& report) noexcept;
     /// Poll the prepared immutable instance buffer without blocking.
     [[nodiscard]] rhi::RasterStatus GetStatus(PreparedView handle) const noexcept;
-    /// Record/submit the prepared packets on the acquired surface with R1 clear/depth behavior.
+    /// Record/submit conventional-depth packets with R1 clear/depth behavior.
+    /// Reverse-Z views return InvalidDescription; use DrawView in an acquired shared frame.
     /// @param handle Ready view. It remains reusable after successful submission.
     /// @param surface Borrowed surface owned by the initialized device.
     /// @param completion Null completion receiving accepted GPU work; may be published on partial failure.
@@ -187,6 +224,34 @@ public:
     /// Returned failure is independent of a possible non-null completion (R2 partial-work contract).
     [[nodiscard]] rhi::RasterStatus
     Submit(PreparedView handle, rhi::SurfaceHandle surface, rhi::SubmissionToken& completion) noexcept;
+    /// Draw a ready view in an acquired frame using explicit attachment/load/store/rectangles.
+    /// L1 must be Ready. Null pass.Color selects the acquired surface; offscreen targets must
+    /// be linear RGBA8 attachments. View depth chooses Less/Greater and the matching clear.
+    /// Clear is whole-attachment regardless of viewport/scissor; use offscreen composition
+    /// for independently cleared neighboring views. Accepted packets retain resources until
+    /// the caller ends the frame with R2 EndFrame. Later rejection does not undo earlier work.
+    [[nodiscard]] rhi::RasterStatus DrawView(PreparedView handle,
+                                             const rhi::RasterPassDescription& description) noexcept;
+    /// Copy presentation geometry/mapping and retain the sampled linear RGBA8 attachment.
+    /// Four presentation slots, one vertex buffer and binding snapshot each; shared RHI
+    /// budgets may exhaust earlier. Ready/Pending publishes output; failure preserves it.
+    /// Source must already be Ready, but may have undefined contents until a later draw.
+    /// Its pixel aspect must equal the mapping's logical aspect; render resolution may differ.
+    /// @param source Owned RHI attachment; may be destroyed after accepted preparation.
+    /// @param mapping Resolved output mapping; recreated explicitly after drawable resize.
+    /// @param output Null presentation receiving ownership.
+    [[nodiscard]] rhi::RasterStatus
+    PreparePresentation(rhi::TextureHandle source, const ViewMapping& mapping, Presentation& output) noexcept;
+    /// Advance asynchronous presentation geometry/view/binding creation between frames;
+    /// may create its binding snapshot once dependencies become Ready. Failure still requires Release.
+    [[nodiscard]] rhi::RasterStatus GetStatus(Presentation handle) noexcept;
+    /// Composite into the acquired surface, preserving its defined color outside the mapped
+    /// viewport/scissor. Undefined sampled color rejects; resize mismatch returns NotReady
+    /// before changing the current pass. Mapping uses the actual acquired extent.
+    /// Caller ends the shared frame with R2 EndFrame; no renderer allocations during drawing.
+    [[nodiscard]] rhi::RasterStatus DrawPresentation(Presentation handle) noexcept;
+    /// Detach presentation CPU ownership; sampled texture/geometry retire after accepted GPU uses.
+    [[nodiscard]] rhi::RasterStatus Release(Presentation& handle) noexcept;
     /// Drop a prepared view and any retry batch; clear handle. GPU retirement remains in RHI.
     [[nodiscard]] rhi::RasterStatus Release(PreparedView& handle) noexcept;
 

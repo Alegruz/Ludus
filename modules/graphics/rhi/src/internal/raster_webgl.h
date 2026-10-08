@@ -484,7 +484,35 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
     {
         glDisable(GL_DEPTH_TEST);
     }
-    glDepthFunc(GL_LESS);
+    const GLenum comparisons[]{GL_LESS, GL_LEQUAL, GL_GREATER, GL_GEQUAL, GL_ALWAYS};
+    internal::RasterArea area;
+    const auto& pass = gRasterGlPass;
+    const bool surface = !gRasterGlPassOpen || pass.Texture == internal::RASTER_CAPACITY;
+    const auto width = surface ? gTarget.Width : gRasterTextureDescriptions[pass.Texture].Width;
+    const auto height = surface ? gTarget.Height : gRasterTextureDescriptions[pass.Texture].Height;
+    if (!internal::RasterResolveArea(gRasterGlPassOpen ? pass.Description : RasterPassDescription{},
+                                     width,
+                                     height,
+                                     area))
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    if (area.Empty)
+    {
+        return RasterStatus::Ready;
+    }
+    const auto& v = area.Viewport;
+    const auto& c = area.Scissor;
+    glViewport(static_cast<GLint>(v.X),
+               static_cast<GLint>(height - v.Y - v.Height),
+               static_cast<GLsizei>(v.Width),
+               static_cast<GLsizei>(v.Height));
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(static_cast<GLint>(c.X),
+              static_cast<GLint>(height - c.Y - c.Height),
+              static_cast<GLsizei>(c.Width),
+              static_cast<GLsizei>(c.Height));
+    glDepthFunc(comparisons[static_cast<usize>(info.DepthCompare)]);
     glDepthMask(info.Depth && info.DepthWrite ? GL_TRUE : GL_FALSE);
     if (info.Blend)
     {
@@ -538,6 +566,7 @@ uint64 RasterCompleted() noexcept
 }
 void RasterEndPass() noexcept
 {
+    glDisable(GL_SCISSOR_TEST);
     if (!gRasterGlPassOpen)
     {
         return;
@@ -596,7 +625,7 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glDepthMask(state.DepthReadOnly ? GL_FALSE : GL_TRUE);
     glClearColor(state.Clear[0], state.Clear[1], state.Clear[2], state.Clear[3]);
-    glClearDepthf(1);
+    glClearDepthf(state.ClearDepth);
     GLbitfield clear = 0;
     if (state.ColorLoad != RasterLoad::Load)
     {

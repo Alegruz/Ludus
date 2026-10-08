@@ -75,6 +75,7 @@ RasterVulkanPipeline gRasterPipelines[internal::RASTER_CAPACITY];
 uint64 gRasterOrdinals[FRAMES]{};
 uint64 gRasterCompleted = 0;
 VkExtent2D gRasterExtent{};
+RasterPassDescription gRasterRegion{};
 usize gRasterActiveTexture = internal::RASTER_CAPACITY;
 struct RasterVkPass final
 {
@@ -862,7 +863,12 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
     depth.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depth.depthTestEnable = info.Depth;
     depth.depthWriteEnable = info.Depth && info.DepthWrite;
-    depth.depthCompareOp = VK_COMPARE_OP_LESS;
+    const VkCompareOp comparisons[]{VK_COMPARE_OP_LESS,
+                                    VK_COMPARE_OP_LESS_OR_EQUAL,
+                                    VK_COMPARE_OP_GREATER,
+                                    VK_COMPARE_OP_GREATER_OR_EQUAL,
+                                    VK_COMPARE_OP_ALWAYS};
+    depth.depthCompareOp = comparisons[static_cast<usize>(info.DepthCompare)];
     VkPipelineColorBlendAttachmentState color{};
     color.colorWriteMask = 15;
     color.blendEnable = info.Blend;
@@ -980,14 +986,27 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
     const auto& pipeline = gRasterPipelines[packet.Pipeline];
     const auto command = gFrames[gFrame].Command;
     const auto extent = gRasterExtent.width == 0 ? gExtent : gRasterExtent;
-    // Canonical Y-up clip coordinates, top-left pixel/readback coordinates.
-    const VkViewport viewport{0,
-                              static_cast<float32>(extent.height),
-                              static_cast<float32>(extent.width),
-                              -static_cast<float32>(extent.height),
+    internal::RasterArea area;
+    if (!internal::RasterResolveArea(gRasterRegion, extent.width, extent.height, area))
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    if (area.Empty)
+    {
+        return RasterStatus::Ready;
+    }
+    const auto& v = area.Viewport;
+    const auto& c = area.Scissor;
+    // Thanks to Khronos, "VkViewport", Vulkan specification:
+    // https://docs.vulkan.org/refpages/latest/refpages/source/VkViewport.html
+    // Negative height and a lower-edge Y preserve canonical Y-up/top-left pixels.
+    const VkViewport viewport{static_cast<float32>(v.X),
+                              static_cast<float32>(v.Y + v.Height),
+                              static_cast<float32>(v.Width),
+                              -static_cast<float32>(v.Height),
                               0,
                               1};
-    const VkRect2D scissor{{0, 0}, extent};
+    const VkRect2D scissor{{static_cast<int32>(c.X), static_cast<int32>(c.Y)}, {c.Width, c.Height}};
     vkCmdSetViewport(command, 0, 1, &viewport);
     vkCmdSetScissor(command, 0, 1, &scissor);
     vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Object);
@@ -1025,6 +1044,7 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
 void RasterFrameExtent() noexcept
 {
     gRasterExtent = {};
+    gRasterRegion = {};
     gRasterActiveTexture = internal::RASTER_CAPACITY;
 }
 void RasterEndPass() noexcept
@@ -1114,6 +1134,7 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
     gRasterExtent =
         surface ? gExtent
                 : VkExtent2D{gRasterTextures[info.Texture].Info.Width, gRasterTextures[info.Texture].Info.Height};
+    gRasterRegion = info.Description;
     gRasterActiveTexture = info.Texture;
     if (!surface)
     {
@@ -1148,7 +1169,7 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
     {
         clear[0].color.float32[i] = info.Description.Clear[i];
     }
-    clear[1].depthStencil = {1, 0};
+    clear[1].depthStencil = {info.Description.ClearDepth, 0};
     VkRenderPassBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     begin.renderPass = pass;

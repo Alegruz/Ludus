@@ -44,6 +44,18 @@ enum class RasterTextureUse : ludus::foundation::uint8
     /// Read/write as a color attachment.
     ColorAttachment,
 };
+/// Top-left physical-pixel rectangle with half-open edges; zero area clips every draw.
+struct RasterRectangle final
+{
+    /// Left edge in physical pixels.
+    ludus::foundation::uint32 X = 0;
+    /// Top edge in physical pixels.
+    ludus::foundation::uint32 Y = 0;
+    /// Horizontal pixel count.
+    ludus::foundation::uint32 Width = 0;
+    /// Vertical pixel count.
+    ludus::foundation::uint32 Height = 0;
+};
 /// One raster pass: one color attachment and its private, same-size depth image.
 /// Null Color selects the acquired surface. One mip/layer/sample; no resolve,
 /// stencil, storage, partial initialization or depth sampling in this profile.
@@ -57,12 +69,22 @@ struct RasterPassDescription final
     RasterStore ColorStore = RasterStore::Store;
     /// Linear clear RGBA values, each finite and in [0,1].
     ludus::foundation::float32 Clear[4]{0, 0, 0, 1};
-    /// Depth initialization; clear always uses canonical depth one.
+    /// Full-depth initialization using ClearDepth; independent of viewport/scissor.
     RasterLoad DepthLoad = RasterLoad::Clear;
     /// Whether initialized depth survives for a later pass on this attachment.
     RasterStore DepthStore = RasterStore::Discard;
     /// Reject depth-writing pipelines; Load is required for read-only depth.
     bool DepthReadOnly = false;
+    /// Finite canonical clear depth in [0,1]; zero pairs with reverse-Z comparisons.
+    ludus::foundation::float32 ClearDepth = 1;
+    /// Explicit viewport when UseViewport is true; must fit the actual attachment.
+    RasterRectangle Viewport{};
+    /// Explicit scissor when UseScissor is true; intersected with attachment bounds.
+    RasterRectangle Scissor{};
+    /// False selects the complete actual attachment, including after resize.
+    bool UseViewport = false;
+    /// False clips only against attachment bounds. An enabled empty scissor is a no-op.
+    bool UseScissor = false;
 };
 /// Snapshot from the single RHI registry; describes accepted same-queue work,
 /// including pending GPU uses, rather than presentation or CPU frame numbers.

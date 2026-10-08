@@ -1,4 +1,5 @@
 #include <ludus/graphics/renderer/renderer.hpp>
+#include <ludus/graphics/renderer/views.hpp>
 
 #include <ludus/foundation/containers/stable_sort.hpp>
 #include <ludus/foundation/math/geometry.hpp>
@@ -140,7 +141,7 @@ struct Rect final
 {
     float64 Left = -1, Bottom = -1, Right = 1, Top = 1;
 };
-Rect ProjectBounds(const math::Aabb3& bounds, const math::Matrix4& matrix) noexcept
+Rect ProjectBounds(const math::Aabb3& bounds, const math::Matrix4& matrix, bool reverse = false) noexcept
 {
     Rect result{1e300, 1e300, -1e300, -1e300};
     for (usize corner = 0; corner < 8; ++corner)
@@ -158,7 +159,7 @@ Rect ProjectBounds(const math::Aabb3& bounds, const math::Matrix4& matrix) noexc
             }
         }
         // Near-plane crossings conservatively block ordering. Projection division is setup-only.
-        if (clip[3] <= 1e-6 || clip[2] <= 0)
+        if (clip[3] <= 1e-6 || (reverse ? clip[3] - clip[2] <= 0 : clip[2] <= 0))
         {
             return {};
         }
@@ -234,8 +235,26 @@ struct Renderer::State final
         rhi::CommandBatch Retry{};
         bool HasRetry = false;
         usize SnapshotSlot = 0, Visible = 0, DrawCount = 0;
+        DepthConvention Depth = DepthConvention::Conventional;
         Packet Packets[OBJECTS];
     };
+    struct PresentationRecord final : SlotIdentity
+    {
+        rhi::BufferHandle Vertices{};
+        rhi::TextureViewHandle Texture{};
+        rhi::BindingSetHandle Bindings{};
+        ViewMapping Mapping;
+        uint32 Phase = 0;
+        Status Setup = Status::Pending;
+    };
+    PresentationRecord Presentations[VIEWS];
+    rhi::RasterShaderHandle CompositeVertex{}, CompositeFragment{};
+    rhi::BindingLayoutHandle CompositeLayout{};
+    rhi::SamplerHandle CompositeSampler{};
+    rhi::BufferHandle CompositeIndices{};
+    rhi::RasterPipelineHandle SurfaceReverse{}, TargetOpaque{}, TargetReverse{}, TargetOverlay{}, Composite{};
+    Status ViewsSetup = Status::NotReady;
+    uint32 ViewsPhase = 0;
     uint64 Owner = 0;
     rhi::DeviceHandle Device;
     rhi::RasterShaderHandle Vertex{}, Fragment{};
@@ -276,12 +295,36 @@ struct Renderer::State final
                 static_cast<void>(rhi::Destroy(Device, mesh.Indices));
             }
         }
+        for (auto& presentation : Presentations)
+        {
+            if (presentation.Used)
+            {
+                DropPresentation(presentation);
+            }
+        }
+        const rhi::RasterPipelineHandle extra[]{SurfaceReverse, TargetOpaque, TargetReverse, TargetOverlay, Composite};
+        for (auto pipeline : extra)
+        {
+            static_cast<void>(rhi::Destroy(Device, pipeline));
+        }
+        static_cast<void>(rhi::Destroy(Device, CompositeIndices));
+        static_cast<void>(rhi::Destroy(Device, CompositeSampler));
+        static_cast<void>(rhi::Destroy(Device, CompositeLayout));
+        static_cast<void>(rhi::Destroy(Device, CompositeFragment));
+        static_cast<void>(rhi::Destroy(Device, CompositeVertex));
         static_cast<void>(rhi::Destroy(Device, Overlay));
         static_cast<void>(rhi::Destroy(Device, Opaque));
         static_cast<void>(rhi::Destroy(Device, Bindings));
         static_cast<void>(rhi::Destroy(Device, Layout));
         static_cast<void>(rhi::Destroy(Device, Fragment));
         static_cast<void>(rhi::Destroy(Device, Vertex));
+    }
+    void DropPresentation(PresentationRecord& presentation) noexcept
+    {
+        static_cast<void>(rhi::Destroy(Device, presentation.Bindings));
+        static_cast<void>(rhi::Destroy(Device, presentation.Texture));
+        static_cast<void>(rhi::Destroy(Device, presentation.Vertices));
+        Retire(presentation);
     }
     void DropMesh(usize index) noexcept
     {
@@ -484,6 +527,412 @@ Status Renderer::Poll() noexcept
         }
     }
 }
+Status Renderer::InitializeViews(const rhi::RasterShaderDescription& vertex,
+                                 const rhi::RasterShaderDescription& fragment) noexcept
+{
+    if (!mState || mState->Setup != Status::Ready)
+    {
+        return Status::NotReady;
+    }
+    auto& s = *mState;
+    if (s.ViewsSetup != Status::NotReady)
+    {
+        return Status::InvalidState;
+    }
+    if (vertex.Artifact.Stage != rhi::ShaderStage::Vertex || fragment.Artifact.Stage != rhi::ShaderStage::Fragment ||
+        vertex.Inputs.size() != 1 || vertex.Inputs[0].Location != 0 ||
+        vertex.Inputs[0].Format != rhi::RasterVertexFormat::Float4 || !vertex.Bindings.empty() ||
+        !fragment.Inputs.empty() || fragment.Bindings.size() != 2)
+    {
+        return Status::InvalidDescription;
+    }
+    const auto& texture = fragment.Bindings[0];
+    const auto& sampler = fragment.Bindings[1];
+    if (texture.Binding != 0 || texture.Kind != rhi::RasterBindingKind::Texture2D ||
+        texture.Visibility != rhi::RasterVisibility::Fragment || sampler.Binding != 1 ||
+        sampler.Kind != rhi::RasterBindingKind::Sampler || sampler.Visibility != rhi::RasterVisibility::Fragment ||
+        texture.MinSize != 0 || sampler.MinSize != 0)
+    {
+        return Status::InvalidDescription;
+    }
+    auto status = rhi::CreateRasterShader(s.Device, vertex, s.CompositeVertex);
+    if (Accepted(status))
+    {
+        status = rhi::CreateRasterShader(s.Device, fragment, s.CompositeFragment);
+    }
+    if (!Accepted(status))
+    {
+        static_cast<void>(rhi::Destroy(s.Device, s.CompositeVertex));
+        static_cast<void>(rhi::Destroy(s.Device, s.CompositeFragment));
+        s.CompositeVertex = {};
+        s.CompositeFragment = {};
+        return status;
+    }
+    s.ViewsSetup = Status::Pending;
+    return PollViews();
+}
+Status Renderer::PollViews() noexcept
+{
+    if (!mState)
+    {
+        return Status::InvalidState;
+    }
+    auto& s = *mState;
+    if (s.ViewsSetup != Status::Pending)
+    {
+        return s.ViewsSetup;
+    }
+    const rhi::RasterVertexStream streams[]{{12, false}, {80, true}};
+    const rhi::RasterVertexAttribute attributes[]{{0, 0, 0, rhi::RasterVertexFormat::Float3},
+                                                  {1, 1, 0, rhi::RasterVertexFormat::Float4},
+                                                  {2, 1, 16, rhi::RasterVertexFormat::Float4},
+                                                  {3, 1, 32, rhi::RasterVertexFormat::Float4},
+                                                  {4, 1, 48, rhi::RasterVertexFormat::Float4},
+                                                  {5, 1, 64, rhi::RasterVertexFormat::Float4}};
+    const rhi::RasterVertexStream quadStreams[]{{16, false}};
+    const rhi::RasterVertexAttribute quadAttributes[]{{0, 0, 0, rhi::RasterVertexFormat::Float4}};
+    for (;;)
+    {
+        auto status = Status::Ready;
+        if (s.ViewsPhase == 0)
+        {
+            status = rhi::GetStatus(s.Device, s.CompositeVertex);
+            if (status == Status::Ready)
+            {
+                status = rhi::GetStatus(s.Device, s.CompositeFragment);
+            }
+            if (status == Status::Ready)
+            {
+                const rhi::RasterBinding entries[]{
+                    {0, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
+                    {1, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0}};
+                status = rhi::CreateBindingLayout(s.Device, entries, s.CompositeLayout);
+                if (Accepted(status))
+                {
+                    status = rhi::CreateSampler(s.Device, {}, s.CompositeSampler);
+                }
+                const uint32 indices[]{0, 1, 2, 2, 3, 0};
+                if (Accepted(status))
+                {
+                    status = rhi::CreateBuffer(s.Device,
+                                               {rhi::BufferRole::Index32, sizeof(indices)},
+                                               {reinterpret_cast<const uint8*>(indices), sizeof(indices)},
+                                               s.CompositeIndices);
+                }
+                ++s.ViewsPhase;
+            }
+        }
+        else if (s.ViewsPhase == 1)
+        {
+            status = rhi::GetStatus(s.Device, s.CompositeLayout);
+            if (status == Status::Ready)
+            {
+                status = rhi::GetStatus(s.Device, s.CompositeSampler);
+            }
+            if (status == Status::Ready)
+            {
+                status = rhi::GetStatus(s.Device, s.CompositeIndices);
+            }
+            if (status == Status::Ready)
+            {
+                rhi::RasterPipelineDescription description{s.Vertex, s.Fragment, s.Layout, streams, attributes, true};
+                description.DepthCompare = rhi::RasterDepthCompare::Greater;
+                status = rhi::CreateRasterPipeline(s.Device, description, s.SurfaceReverse);
+                ++s.ViewsPhase;
+            }
+        }
+        else if (s.ViewsPhase >= 2 && s.ViewsPhase <= 4)
+        {
+            const rhi::RasterPipelineHandle previous[]{s.SurfaceReverse, s.TargetOpaque, s.TargetReverse};
+            status = rhi::GetStatus(s.Device, previous[s.ViewsPhase - 2]);
+            if (status == Status::Ready)
+            {
+                rhi::RasterPipelineDescription description{s.Vertex,
+                                                           s.Fragment,
+                                                           s.Layout,
+                                                           streams,
+                                                           attributes,
+                                                           s.ViewsPhase != 4,
+                                                           s.ViewsPhase == 4};
+                description.Target = rhi::RasterTarget::Rgba8Unorm;
+                if (s.ViewsPhase == 3)
+                {
+                    description.DepthCompare = rhi::RasterDepthCompare::Greater;
+                }
+                rhi::RasterPipelineHandle* targets[]{&s.TargetOpaque, &s.TargetReverse, &s.TargetOverlay};
+                status = rhi::CreateRasterPipeline(s.Device, description, *targets[s.ViewsPhase - 2]);
+                ++s.ViewsPhase;
+            }
+        }
+        else if (s.ViewsPhase == 5)
+        {
+            status = rhi::GetStatus(s.Device, s.TargetOverlay);
+            if (status == Status::Ready)
+            {
+                status = rhi::CreateRasterPipeline(
+                    s.Device,
+                    {s.CompositeVertex, s.CompositeFragment, s.CompositeLayout, quadStreams, quadAttributes},
+                    s.Composite);
+                ++s.ViewsPhase;
+            }
+        }
+        else
+        {
+            status = rhi::GetStatus(s.Device, s.Composite);
+            if (status == Status::Ready)
+            {
+                s.ViewsSetup = Status::Ready;
+            }
+        }
+        if (status == Status::Pending)
+        {
+            return status;
+        }
+        if (status != Status::Ready)
+        {
+            s.ViewsSetup = status;
+            return status;
+        }
+        if (s.ViewsSetup == Status::Ready)
+        {
+            return Status::Ready;
+        }
+    }
+}
+Status Renderer::DrawView(PreparedView handle, const rhi::RasterPassDescription& description) noexcept
+{
+    auto status = GetStatus(handle);
+    if (status != Status::Ready)
+    {
+        return status;
+    }
+    if (mState->ViewsSetup != Status::Ready)
+    {
+        return Status::NotReady;
+    }
+    auto& s = *mState;
+    auto& view = s.ViewRecords[Access::Slot(handle)];
+    auto pass = description;
+    pass.ClearDepth = view.Depth == DepthConvention::ReverseZ ? 0 : 1;
+    const bool surface = rhi::IsNull(description.Color);
+    if (!surface)
+    {
+        rhi::TextureDescription texture;
+        const auto targetStatus = rhi::GetTextureDescription(s.Device, description.Color, texture);
+        if (targetStatus != Status::Ready)
+        {
+            return targetStatus;
+        }
+        if (!texture.Attachment || texture.Format != rhi::RasterFormat::Rgba8Unorm)
+        {
+            return Status::Unsupported;
+        }
+    }
+    status = rhi::BeginRasterPass(s.Device, pass);
+    if (status != Status::Ready)
+    {
+        return status;
+    }
+    for (usize i = 0; i < view.DrawCount; ++i)
+    {
+        const auto& packet = view.Packets[i];
+        const auto& mesh = s.MeshRecords[packet.MeshSlot];
+        const rhi::RasterVertexSlice slices[]{
+            {mesh.Vertices, 0, mesh.VertexCount * sizeof(math::Vector3)},
+            {view.Instances, packet.First * sizeof(Instance), packet.Count * sizeof(Instance)}};
+        const auto opaque = surface ? (view.Depth == DepthConvention::ReverseZ ? s.SurfaceReverse : s.Opaque)
+                                    : (view.Depth == DepthConvention::ReverseZ ? s.TargetReverse : s.TargetOpaque);
+        const auto overlay = surface ? s.Overlay : s.TargetOverlay;
+        status = rhi::DrawIndexed(s.Device,
+                                  {packet.Pass == Layer::Opaque ? opaque : overlay,
+                                   s.Bindings,
+                                   slices,
+                                   mesh.Indices,
+                                   0,
+                                   mesh.IndexCount,
+                                   mesh.VertexCount,
+                                   packet.Count});
+        if (status != Status::Ready)
+        {
+            return status;
+        }
+    }
+    return Status::Ready;
+}
+Status
+Renderer::PreparePresentation(rhi::TextureHandle source, const ViewMapping& mapping, Presentation& output) noexcept
+{
+    if (!mState || mState->ViewsSetup != Status::Ready)
+    {
+        return Status::NotReady;
+    }
+    if (Access::Owner(output) != 0)
+    {
+        return Status::InvalidState;
+    }
+    auto& s = *mState;
+    ViewMapping resolved;
+    auto status =
+        ResolveViewMapping(mapping.Screen, mapping.Region, mapping.DrawableWidth, mapping.DrawableHeight, resolved);
+    if (status != Status::Ready)
+    {
+        return status;
+    }
+    rhi::TextureDescription description;
+    status = rhi::GetTextureDescription(s.Device, source, description);
+    if (status != Status::Ready)
+    {
+        return status;
+    }
+    if (!description.Attachment || description.Format != rhi::RasterFormat::Rgba8Unorm)
+    {
+        return Status::Unsupported;
+    }
+    // Logical dimensions define the sampled image's aspect. Rendering resolution is independent.
+    if (static_cast<float64>(description.Width) * static_cast<float64>(resolved.Screen.Height) !=
+        static_cast<float64>(description.Height) * static_cast<float64>(resolved.Screen.Width))
+    {
+        return Status::InvalidDescription;
+    }
+    usize index = 0;
+    status = FreeSlot(s.Presentations, index);
+    if (status != Status::Ready)
+    {
+        return status;
+    }
+    auto& p = s.Presentations[index];
+    p.Mapping = resolved;
+    p.Phase = 0;
+    p.Setup = Status::Pending;
+    const auto sx = resolved.ClipTransform.At(0, 0), sy = resolved.ClipTransform.At(1, 1);
+    const math::Vector4 vertices[]{{-sx, -sy, 0, 1}, {sx, -sy, 1, 1}, {sx, sy, 1, 0}, {-sx, sy, 0, 0}};
+    status = rhi::CreateBuffer(s.Device,
+                               {rhi::BufferRole::Vertex, sizeof(vertices)},
+                               {reinterpret_cast<const uint8*>(vertices), sizeof(vertices)},
+                               p.Vertices);
+    if (Accepted(status))
+    {
+        status = rhi::CreateTextureView(s.Device, source, p.Texture);
+    }
+    if (!Accepted(status))
+    {
+        static_cast<void>(rhi::Destroy(s.Device, p.Texture));
+        static_cast<void>(rhi::Destroy(s.Device, p.Vertices));
+        p.Texture = {};
+        p.Vertices = {};
+        return status;
+    }
+    p.Used = p.Owned = true;
+    output = Access::Make<Presentation>({s.Owner, p.Generation, index});
+    status = GetStatus(output);
+    if (!Accepted(status))
+    {
+        static_cast<void>(Release(output));
+    }
+    return status;
+}
+Status Renderer::GetStatus(Presentation handle) noexcept
+{
+    if (!mState)
+    {
+        return Status::InvalidHandle;
+    }
+    auto& s = *mState;
+    auto* p = Resolve(s.Presentations, s.Owner, handle);
+    if (p == nullptr)
+    {
+        return Status::InvalidHandle;
+    }
+    if (p->Setup != Status::Pending)
+    {
+        return p->Setup;
+    }
+    auto status = rhi::GetStatus(s.Device, p->Vertices);
+    if (status == Status::Ready)
+    {
+        status = rhi::GetStatus(s.Device, p->Texture);
+    }
+    if (status != Status::Ready)
+    {
+        if (status != Status::Pending)
+        {
+            p->Setup = status;
+        }
+        return status;
+    }
+    if (p->Phase == 0)
+    {
+        const rhi::RasterBindingResource resources[]{{ .Binding = 0, .Texture = p->Texture },
+                                                     { .Binding = 1, .Sampler = s.CompositeSampler }};
+        status = rhi::CreateBindingSet(s.Device, s.CompositeLayout, resources, p->Bindings);
+        if (!Accepted(status))
+        {
+            p->Setup = status;
+            return status;
+        }
+        p->Phase = 1;
+    }
+    status = rhi::GetStatus(s.Device, p->Bindings);
+    if (status != Status::Pending)
+    {
+        p->Setup = status;
+    }
+    return status;
+}
+Status Renderer::DrawPresentation(Presentation handle) noexcept
+{
+    if (!mState)
+    {
+        return Status::InvalidHandle;
+    }
+    auto& s = *mState;
+    const auto* p = Resolve(s.Presentations, s.Owner, handle);
+    if (p == nullptr)
+    {
+        return Status::InvalidHandle;
+    }
+    if (p->Setup != Status::Ready)
+    {
+        return p->Setup == Status::Pending ? Status::NotReady : p->Setup;
+    }
+    const auto extent = rhi::GetFrameInfo();
+    if (extent.Width == 0 || extent.Height == 0)
+    {
+        return Status::InvalidState;
+    }
+    if (extent.Width != p->Mapping.DrawableWidth || extent.Height != p->Mapping.DrawableHeight)
+    {
+        return Status::NotReady;
+    }
+    rhi::RasterPassDescription pass;
+    pass.ColorLoad = rhi::RasterLoad::Load;
+    pass.Viewport = p->Mapping.Viewport;
+    pass.Scissor = p->Mapping.Region;
+    pass.UseViewport = pass.UseScissor = true;
+    auto status = rhi::BeginRasterPass(s.Device, pass);
+    if (status != Status::Ready)
+    {
+        return status;
+    }
+    const rhi::RasterVertexSlice vertices[]{{p->Vertices, 0, 4 * sizeof(math::Vector4)}};
+    return rhi::DrawIndexed(s.Device, {s.Composite, p->Bindings, vertices, s.CompositeIndices, 0, 6, 4});
+}
+Status Renderer::Release(Presentation& handle) noexcept
+{
+    if (!mState)
+    {
+        return Status::InvalidHandle;
+    }
+    auto* p = Resolve(mState->Presentations, mState->Owner, handle);
+    if (p == nullptr)
+    {
+        return Status::InvalidHandle;
+    }
+    mState->DropPresentation(*p);
+    handle = {};
+    return Status::Ready;
+}
+
 Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) noexcept
 {
     if (!mState || mState->Setup != Status::Ready)
@@ -689,14 +1138,22 @@ Status Renderer::PrepareView(Snapshot handle,
         return Status::InvalidHandle;
     }
     if (!math::IsFinite(description.WorldToClip) || !math::IsFinite(description.CullMargin) ||
-        description.CullMargin < 0)
+        description.CullMargin < 0 || !math::IsFinite(description.OverlayToClip) ||
+        static_cast<uint8>(description.Depth) > static_cast<uint8>(DepthConvention::ReverseZ) ||
+        (description.InfiniteFar && description.Depth != DepthConvention::ReverseZ))
     {
         return Status::InvalidDescription;
     }
+    if (description.Depth == DepthConvention::ReverseZ && mState->ViewsSetup != Status::Ready)
+    {
+        return Status::NotReady;
+    }
     math::Frustum frustum, overlay;
-    if (math::TryExtractFrustum(description.WorldToClip, math::FrustumMode::FinitePerspectiveOrOrthographic, frustum) !=
-            math::MathStatus::Success ||
-        math::TryExtractFrustum(math::Matrix4::Identity(),
+    if (math::TryExtractFrustum(description.WorldToClip,
+                                description.InfiniteFar ? math::FrustumMode::InfiniteReverseZPerspective
+                                                        : math::FrustumMode::FinitePerspectiveOrOrthographic,
+                                frustum) != math::MathStatus::Success ||
+        math::TryExtractFrustum(description.OverlayToClip,
                                 math::FrustumMode::FinitePerspectiveOrOrthographic,
                                 overlay) != math::MathStatus::Success)
     {
@@ -740,7 +1197,7 @@ Status Renderer::PrepareView(Snapshot handle,
             auto& candidate = candidates[count++];
             candidate.Item = i;
             candidate.MeshSlot = item.MeshSlot;
-            const auto clip = (pass == Layer::Opaque ? description.WorldToClip : math::Matrix4::Identity()) *
+            const auto clip = (pass == Layer::Opaque ? description.WorldToClip : description.OverlayToClip) *
                               Matrix(item.Input.Transform);
             if (!math::IsFinite(clip))
             {
@@ -759,7 +1216,9 @@ Status Renderer::PrepareView(Snapshot handle,
                 candidate.Data.Color.Z *= candidate.Data.Color.W;
             }
             candidate.Bounds =
-                ProjectBounds(item.Bounds, pass == Layer::Opaque ? description.WorldToClip : math::Matrix4::Identity());
+                ProjectBounds(item.Bounds,
+                              pass == Layer::Opaque ? description.WorldToClip : description.OverlayToClip,
+                              pass == Layer::Opaque && description.Depth == DepthConvention::ReverseZ);
         }
         if (pass == Layer::Opaque)
         {
@@ -831,6 +1290,7 @@ Status Renderer::PrepareView(Snapshot handle,
             return status;
         }
     }
+    view.Depth = description.Depth;
     view.Visible = count;
     view.SnapshotSlot = Access::Slot(handle);
     ++mState->SnapshotRecords[view.SnapshotSlot].References;
@@ -868,6 +1328,10 @@ Status Renderer::Submit(PreparedView handle, rhi::SurfaceHandle surface, rhi::Su
         return status;
     }
     auto& view = mState->ViewRecords[Access::Slot(handle)];
+    if (view.Depth != DepthConvention::Conventional)
+    {
+        return Status::InvalidDescription;
+    }
     if (!view.HasRetry)
     {
         status = rhi::BeginCommands(mState->Device, view.Retry);
