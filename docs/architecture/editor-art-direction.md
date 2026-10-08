@@ -7,8 +7,9 @@ set the visual direction for the editor, default project icon, documentation
 and eventual website. It does not prescribe the art style of games made with
 Ludus.
 
-This is a design target, not a claim that the production theme or application
-icons have shipped. The [multiplatform GUI systems](editor-gui-systems.md) and
+The artwork is wired into the editor's Qt resources, Welcome and recent-project
+views, macOS app bundle, wiki branding and browser editor package. The production
+theme remains a design target. The [multiplatform GUI systems](editor-gui-systems.md) and
 [interaction design](editor-interaction-design.md) continue to own the compact
 contextual row, useful central documents and optional secondary panels. Native
 OS decoration/menu conventions stay native; the browser gets no simulated OS
@@ -31,15 +32,18 @@ reduce decisions without hiding failures or silently changing engine identity.
 
 ## Ludus Block identity
 
-![Approved Ludus editor and default project icon: a mint extruded L on a rounded charcoal tile.](images/ludus-block-icon.png)
+![Approved Ludus editor and default project icon: a mint extruded L on a rounded charcoal tile.](../wiki/assets/ludus-icon.png)
 
-The [standalone transparent mark](images/ludus-block-mark.png) and
-[rounded tile icon](images/ludus-block-icon.png) are the approved visual
+The [standalone transparent mark](../wiki/assets/ludus-mark.png) and
+[rounded tile icon](../wiki/assets/ludus-icon.png) are the approved visual
 references. Both are 1254 × 1254 PNGs with alpha, created with built-in image
 generation and approved by the project owner on October 7, 2026.
-They establish the appearance; production vector masters, size-specific exports
-and platform icon packaging remain implementation work. The earlier flat wiki
-mark is an existing asset awaiting adoption of this direction.
+These PNGs are the shared artwork source for Qt resources, wiki branding and
+browser packaging. The macOS bundle uses a derived ICNS file containing 16,
+32, 128, 256 and 512 logical pixel icons at 1× and 2×. Regenerate it with macOS
+`sips` exports named `icon_NxN.png` / `icon_NxN@2x.png` in a `.iconset` directory,
+then `iconutil -c icns`; preserve the approved source artwork. A production
+vector master and optically tuned small-size artwork remain future refinement.
 
 The letter should read as a building block: substantial, approachable and
 precise. Preserve the upright stem, projecting foot, open inner corner and

@@ -14,6 +14,12 @@ See the specification package for the authoritative contract:
 [interaction design](../architecture/editor-interaction-design.md) define S1
 and subsequent authoring stages.
 
+The editor embeds the approved [Ludus Block artwork](../architecture/editor-art-direction.md)
+for its application/window icon, Welcome view and recent-project fallback icons.
+macOS bundles include the derived ICNS resource for Finder and Dock. The shared
+PNG sources live in `docs/wiki/assets/` and also supply the wiki and browser
+editor package; launching the native editor does not need those files on disk.
+
 ## Work areas and document ownership
 
 | Surface | Purpose |

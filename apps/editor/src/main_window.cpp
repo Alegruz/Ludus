@@ -25,6 +25,7 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeySequence>
@@ -53,6 +54,7 @@ MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QStr
     : QMainWindow(parent), Controller_(controller), WorkspaceSettingsFile_(workspaceSettingsFile)
 {
     setWindowTitle(QStringLiteral("Ludus Editor"));
+    setWindowIcon(QIcon(QStringLiteral(":/ludus/ludus-icon.png")));
     ApplyWorkspaceBoundaries(this);
     BuildUi();
     BuildMenus();
@@ -615,6 +617,7 @@ void MainWindow::RenderRecentProjects()
         const bool missing = !QFileInfo(project.DescriptorPath).isFile();
         const QString name = missing ? QStringLiteral("%1 (missing)").arg(project.Name) : project.Name;
         auto* item = new QListWidgetItem(name + QStringLiteral("\n") + project.DescriptorPath, RecentList_);
+        item->setIcon(windowIcon());
         item->setData(Qt::UserRole, project.DescriptorPath);
         item->setToolTip(project.DescriptorPath);
         if (project.DescriptorPath == selectedPath)
@@ -624,7 +627,7 @@ void MainWindow::RenderRecentProjects()
         // Escape ampersands so project names/paths are literal menu labels.
         QString label = name + QStringLiteral(" — ") + project.DescriptorPath;
         label.replace(QStringLiteral("&"), QStringLiteral("&&"));
-        auto* action = RecentMenu_->addAction(label);
+        auto* action = RecentMenu_->addAction(windowIcon(), label);
         action->setData(project.DescriptorPath);
         action->setToolTip(project.DescriptorPath);
         connect(action, &QAction::triggered, this, [this, path = project.DescriptorPath]() {

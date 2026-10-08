@@ -100,11 +100,21 @@ qt_add_executable(ludus_editor
     src/controller_play.cpp
 )
 set_target_properties(ludus_editor PROPERTIES AUTOMOC ON)
+set(editor_brand_assets
+    "${PROJECT_SOURCE_DIR}/docs/wiki/assets/ludus-icon.png"
+    "${PROJECT_SOURCE_DIR}/docs/wiki/assets/ludus-mark.png")
+qt_add_resources(ludus_editor ludus_brand
+    PREFIX "/ludus"
+    BASE "${PROJECT_SOURCE_DIR}/docs/wiki/assets"
+    FILES ${editor_brand_assets})
 if(APPLE)
+    target_sources(ludus_editor PRIVATE resources/ludus.icns)
+    set_source_files_properties(resources/ludus.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     set_target_properties(ludus_editor PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_GUI_IDENTIFIER "org.ludus.editor"
-        MACOSX_BUNDLE_BUNDLE_NAME "Ludus Editor")
+        MACOSX_BUNDLE_BUNDLE_NAME "Ludus Editor"
+        MACOSX_BUNDLE_ICON_FILE "ludus.icns")
 endif()
 target_include_directories(ludus_editor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_definitions(ludus_editor PRIVATE QT_NO_KEYWORDS QT_NO_CAST_FROM_ASCII)
@@ -171,6 +181,10 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         tests/macos_journey_tests.cpp
     )
     set_target_properties(ludus_editor_tests PROPERTIES AUTOMOC ON)
+    qt_add_resources(ludus_editor_tests ludus_brand
+        PREFIX "/ludus"
+        BASE "${PROJECT_SOURCE_DIR}/docs/wiki/assets"
+        FILES ${editor_brand_assets})
     target_include_directories(ludus_editor_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/modules/audio/tests")
     target_compile_definitions(ludus_editor_tests PRIVATE QT_NO_KEYWORDS QT_NO_CAST_FROM_ASCII
         "LUDUS_EDITOR_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\""

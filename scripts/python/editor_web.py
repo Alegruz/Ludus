@@ -18,7 +18,7 @@ import venv
 from web_package import SDK_NOTICES, validate_wasm
 
 ROOT = Path(__file__).resolve().parents[2]
-PAYLOAD = ("index.html", "editor.css", "editor.js", "ludus_editor.js", "ludus_editor.wasm", "qtloader.js")
+PAYLOAD = ("index.html", "editor.css", "editor.js", "ludus-icon.png", "ludus_editor.js", "ludus_editor.wasm", "qtloader.js")
 
 
 def run(argv, *, env=None, cwd=ROOT):
@@ -113,7 +113,11 @@ def package(build: Path, source: Path, sdk: Path, qt_lock: dict, web_lock: dict)
     site.mkdir(parents=True, exist_ok=True)
     for name in ("index.html", "editor.css", "editor.js"):
         source_file = ROOT / "docs/wiki/editor/index.html" if name == "index.html" else ROOT / "apps/editor/browser" / name
-        shutil.copyfile(source_file, site / name)
+        if name == "index.html":
+            (site / name).write_text(source_file.read_text().replace("../assets/ludus-icon.png", "ludus-icon.png"))
+        else:
+            shutil.copyfile(source_file, site / name)
+    shutil.copyfile(ROOT / "docs/wiki/assets/ludus-icon.png", site / "ludus-icon.png")
     for name in ("ludus_editor.js", "ludus_editor.wasm", "qtloader.js"):
         shutil.copyfile(build / "apps/editor" / name, site / name)
     licenses = site / "licenses"

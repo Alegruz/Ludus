@@ -20,6 +20,7 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIcon>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
@@ -201,6 +202,10 @@ void MainWindow::BuildUi()
     recentLayout->setContentsMargins(24, 24, 24, 24);
     recentLayout->setSpacing(12);
     auto* title = new QLabel(QStringLiteral("Welcome to Ludus"), recentPanel);
+    auto* brand = new QLabel(recentPanel);
+    brand->setObjectName(QStringLiteral("welcomeLogo"));
+    brand->setAccessibleName(QStringLiteral("Ludus logo"));
+    brand->setPixmap(QIcon(QStringLiteral(":/ludus/ludus-mark.png")).pixmap(48, 48));
     auto font = title->font();
     font.setBold(true);
     title->setFont(font);
@@ -208,7 +213,11 @@ void MainWindow::BuildUi()
     intro->setWordWrap(true);
     WelcomeNewButton_ = new QPushButton(QStringLiteral("New Project..."), recentPanel);
     WelcomeNewButton_->setObjectName(QStringLiteral("welcomeNewProject"));
-    recentLayout->addWidget(title);
+    auto* brandHeading = new QHBoxLayout;
+    brandHeading->addWidget(brand);
+    brandHeading->addWidget(title);
+    brandHeading->addStretch();
+    recentLayout->addLayout(brandHeading);
     recentLayout->addWidget(intro);
     recentLayout->addWidget(WelcomeNewButton_);
     recentLayout->addWidget(new QLabel(QStringLiteral("Recent projects"), recentPanel));
