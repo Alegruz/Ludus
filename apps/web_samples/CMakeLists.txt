@@ -24,13 +24,13 @@ target_link_libraries(ludus_web_scripted PRIVATE Ludus::Behavior)
 
 option(LUDUS_BUILD_WEB_CORNELL "Build the shader-tool-dependent Cornell web player" ON)
 if(LUDUS_BUILD_WEB_CORNELL)
-add_executable(ludus_web_cornell "${PROJECT_SOURCE_DIR}/examples/cornell-box/src/main.cpp"
-    "${PROJECT_SOURCE_DIR}/examples/cornell-box/src/camera.cpp")
-target_include_directories(ludus_web_cornell PRIVATE "${PROJECT_SOURCE_DIR}/examples/cornell-box/src")
-target_link_libraries(ludus_web_cornell PRIVATE Ludus::GameplayCamera)
-ludus_compile_shader(TARGET ludus_web_cornell NAME cornell
-    SOURCE "${PROJECT_SOURCE_DIR}/examples/cornell-box/shaders/cornell.slang" VERTEX vertexMain FRAGMENT fragmentMain)
-target_link_options(ludus_web_cornell PRIVATE -sASYNCIFY=1)
+    add_executable(ludus_web_cornell "${PROJECT_SOURCE_DIR}/examples/cornell-box/src/main.cpp"
+        "${PROJECT_SOURCE_DIR}/examples/cornell-box/src/camera.cpp")
+    target_include_directories(ludus_web_cornell PRIVATE "${PROJECT_SOURCE_DIR}/examples/cornell-box/src")
+    target_link_libraries(ludus_web_cornell PRIVATE Ludus::GameplayCamera)
+    ludus_compile_shader(TARGET ludus_web_cornell NAME cornell
+        SOURCE "${PROJECT_SOURCE_DIR}/examples/cornell-box/shaders/cornell.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+    target_link_options(ludus_web_cornell PRIVATE -sASYNCIFY=1)
 endif()
 
 foreach(target ludus_web_live_edit ludus_web_scripted ludus_web_cornell)

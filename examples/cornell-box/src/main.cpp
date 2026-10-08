@@ -27,6 +27,14 @@ using namespace ludus::foundation;
 namespace rhi = ludus::graphics::rhi;
 LUDUS_DEFINE_LOG_CATEGORY(LOG_SAMPLE, "CornellBox");
 
+#if defined(__EMSCRIPTEN__)
+// clang-format off
+EM_JS(void, WebStatus, (const char* state, uint32 frames), {
+    globalThis.ludusPlayerStatus(UTF8ToString(state), frames);
+});
+// clang-format on
+#endif
+
 // Five float4 rows match each emitted target; camera rays are renderer-owned.
 struct alignas(16) Uniforms final
 {
@@ -107,7 +115,7 @@ public:
 #if defined(__EMSCRIPTEN__)
         // Browser device/pipeline callbacks need the event loop while the native
         // sample retains its synchronous lifetime. Asyncify is confined to this player.
-        while (rhi::GetStartup().State == rhi::StartupState::Pending)
+        for (uint32 attempt = 0; rhi::GetStartup().State == rhi::StartupState::Pending && attempt < 3000; ++attempt)
         {
             emscripten_sleep(10);
         }
@@ -126,7 +134,7 @@ public:
         }
         const auto ready = [](auto handle, rhi::ResourceStatus status) noexcept {
 #if defined(__EMSCRIPTEN__)
-            while (status == rhi::ResourceStatus::Pending)
+            for (uint32 attempt = 0; status == rhi::ResourceStatus::Pending && attempt < 3000; ++attempt)
             {
                 emscripten_sleep(10);
                 status = rhi::GetStatus(handle);
@@ -267,7 +275,7 @@ int32 Run(const Options& options) noexcept
         {
             ++rendered;
 #if defined(__EMSCRIPTEN__)
-            EM_ASM({ globalThis.ludusPlayerStatus('playing', $0); }, rendered);
+            WebStatus("playing", rendered);
 #endif
             if (rendered == 1)
             {
@@ -316,7 +324,7 @@ int main(int argc, char** argv)
 #if defined(__EMSCRIPTEN__)
     if (result != 0)
     {
-        EM_ASM({ globalThis.ludusPlayerStatus('failed', 0); });
+        WebStatus("failed", 0);
     }
 #endif
     return result;
