@@ -3,7 +3,9 @@
 #include <ludus/foundation/base/pointer.hpp>
 
 #include "internal/scene_document.h"
-#include <ludus/graphics/rhi/render.h>
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+#    include <ludus/graphics/rhi/render.h>
+#endif
 #include <ludus/platform/base/window.h>
 
 #include <QObject>
@@ -52,10 +54,12 @@ private:
     [[nodiscard]] bool Render() noexcept;
     SceneDocument* Document_;
     foundation::UniquePtr<platform::Window> Window_;
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
     graphics::rhi::ShaderHandle Vertex_{};
     graphics::rhi::ShaderHandle Fragment_{};
     graphics::rhi::UniformHandle Uniform_{};
     graphics::rhi::PipelineHandle Pipeline_{};
+#endif
     input::KeyboardRecord Queue_[64]{};
     foundation::usize QueueCount_ = 0;
     bool Suppressed_[input::KEY_COUNT]{};
