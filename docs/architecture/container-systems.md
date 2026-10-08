@@ -35,6 +35,15 @@ object lifetime and relocation in the existing audited helpers. This is a
 useful vertical slice without a new allocator, SIMD portability layer, or a
 second lifetime implementation.
 
+## Caller-scratch stable ordering
+
+`StableSort` in `ludus/foundation/containers/stable_sort.hpp` provides a nonallocating
+stable merge sort for initialized caller-owned arrays. It takes separate scratch
+storage, preserves equivalent input order and requires nonthrowing assignment and
+comparison. Its declaration owns the exact input/failure contract. L0 Renderer uses
+it during static view preparation; it is independently tested against a standard
+stable-sort oracle on empty, duplicate-heavy and non-power-of-two sizes through 257.
+
 ## Baseline architecture, before the Gems review
 
 ```mermaid

@@ -91,6 +91,17 @@ jobs:
         run: |
           out/host-tools/venv/bin/cmake --install out/build/macos-clang-development
           out/host-tools/venv/bin/python tests/sdk_consumer/verify_metal_shader_build.py --sdk "$PWD/out/install/macos-clang-development" --cmake "$PWD/out/host-tools/venv/bin/cmake" --ninja "$PWD/out/host-tools/venv/bin/ninja" --cxx "$PWD/out/host-tools/bin/clang++" --slang "$PWD/out/shader-tools/slang/bin/slangc" --conan "$PWD/out/conan/macos-clang-development" --sysroot "$PWD/out/host-tools/macos-sdk" --libcxx "$PWD/out/host-tools/libcxx-include"
+      - name: Verify installed L0 renderer consumer
+        run: |
+          out/host-tools/venv/bin/cmake -S tests/sdk_consumer/renderer -B out/renderer-sdk -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
+            -DCMAKE_PREFIX_PATH="$PWD/out/install/macos-clang-development;$PWD/out/conan/macos-clang-development" \
+            -DCMAKE_OSX_SYSROOT="$PWD/out/host-tools/macos-sdk" -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+            -DCMAKE_CXX_FLAGS="-stdlib=libc++ -nostdinc++ -isystem $PWD/out/host-tools/libcxx-include" \
+            -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc"
+          out/host-tools/venv/bin/cmake --build out/renderer-sdk --parallel 2
+          out/renderer-sdk/ludus_sdk_renderer_consumer
       - name: Verify installed macOS game-project tooling
         run: |
           ./scripts/install-sdk macos-clang-development
@@ -483,10 +494,20 @@ jobs:
           out/host-tools/venv/bin/cmake --preset linux-clang-development \
             -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val"
-          out/host-tools/venv/bin/cmake --build out/build/linux-clang-development --target ludus_rhi_render_tests --parallel 2
+          out/host-tools/venv/bin/cmake --build out/build/linux-clang-development --target ludus_rhi_render_tests ludus_renderer_render_tests --parallel 2
           set -o pipefail
           VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation out/build/linux-clang-development/modules/graphics/rhi/ludus_rhi_render_tests 2>&1 | tee out/raster-vulkan-validation.log
           python3 -c 'from pathlib import Path; text=Path("out/raster-vulkan-validation.log").read_text(); assert "Validation Error" not in text and "VUID-" not in text, text'
+          VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation out/build/linux-clang-development/modules/graphics/renderer/ludus_renderer_render_tests 2>&1 | tee out/renderer-vulkan-validation.log
+          python3 -c 'from pathlib import Path; text=Path("out/renderer-vulkan-validation.log").read_text(); assert "Validation Error" not in text and "VUID-" not in text, text'
+          out/host-tools/venv/bin/cmake -S tests/sdk_consumer/renderer -B out/renderer-sdk -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
+            -DCMAKE_PREFIX_PATH="$PWD/out/install/linux-clang-development;$PWD/out/conan/linux-clang-development" \
+            -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
+            -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val"
+          out/host-tools/venv/bin/cmake --build out/renderer-sdk --parallel 2
+          out/renderer-sdk/ludus_sdk_renderer_consumer
       - name: Build and test the independent Cornell box tutorial (Vulkan)
         run: |
           sudo apt-get install -y -qq libvulkan1 mesa-vulkan-drivers
