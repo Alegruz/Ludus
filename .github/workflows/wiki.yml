@@ -66,6 +66,27 @@ jobs:
       - name: Validate editor assets, memory and notices
         id: validate-editor
         run: python scripts/build-web-editor --check-package
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.validate-editor.outcome == 'success'
+        with:
+          name: browser-editor
+          path: out/editor-pages
+          if-no-files-found: error
+          retention-days: 7
+
+  sample-playback:
+    name: Playable web samples (software GPU)
+    needs: editor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: browser-editor
+          path: out/editor-pages
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -81,17 +102,10 @@ jobs:
           name: browser-sample-screenshots
           path: out/web-sample-qa
           if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
-        if: always() && steps.validate-editor.outcome == 'success'
-        with:
-          name: browser-editor
-          path: out/editor-pages
-          if-no-files-found: error
-          retention-days: 7
 
   build:
     name: Build and check wiki
-    needs: editor
+    needs: [editor, sample-playback]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

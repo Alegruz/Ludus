@@ -37,29 +37,34 @@ async function shot(page, name) {
   return {png, pixel: [...png.data.slice(offset, offset + 3)]};
 }
 try {
-  for (const sample of samples) {
-    const page = await browser.newPage({viewport: {width: 1000, height: 760}});
+  for (const sample of samples) for (const backend of ['auto', 'webgl']) {
+    // Cornell's direct-light shader is deliberately expensive. Keep software
+    // GPU qualification bounded while still checking the actual lit scene.
+    const viewport = sample === 'cornell-box' ? {width: 400, height: 400} : {width: 1000, height: 760};
+    const page = await browser.newPage({viewport});
+    if (backend === 'webgl') await page.addInitScript(() => Object.defineProperty(navigator, 'gpu', {value: undefined}));
+    const name = sample + '-' + backend;
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    page.on('console', message => console.log(sample, message.type(), message.text()));
+    page.on('console', message => console.log(name, message.type(), message.text()));
     await page.goto(`http://127.0.0.1:${server.address().port}/players/${sample}/index.html`, {waitUntil: 'domcontentloaded', timeout: 60000});
     await page.waitForFunction(() => document.getElementById('status').dataset.state === 'playing' &&
       Number(document.getElementById('status').dataset.frames) >= 3, undefined, {timeout: 60000});
     // Submission precedes browser composition. Let the compositor present the
     // completed frames before inspecting the canvas region.
     await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
-    const first = await shot(page, sample + '-playing');
+    const first = await shot(page, name + '-playing');
     if (sample === 'cornell-box') {
       const colors = new Set();
       for (let index = 0; index < first.png.data.length; index += 256) colors.add(first.png.data.subarray(index, index + 3).toString('hex'));
-      console.log(sample, {width: first.png.width, height: first.png.height, colors: colors.size, center: first.pixel});
+      console.log(name, {width: first.png.width, height: first.png.height, colors: colors.size, center: first.pixel});
       assert.ok(colors.size > 20, 'Cornell must render a lit scene, not an empty/clear canvas');
     } else {
       await page.locator('#pause').click();
       await page.waitForFunction(() => document.getElementById('status').dataset.state === 'paused');
-      const frozen = await shot(page, sample + '-paused');
+      const frozen = await shot(page, name + '-paused');
       await page.waitForTimeout(350);
-      assert.deepEqual((await shot(page, sample + '-still-paused')).pixel, frozen.pixel);
+      assert.deepEqual((await shot(page, name + '-still-paused')).pixel, frozen.pixel);
       await page.locator('#pause').click();
       await page.waitForFunction(() => document.getElementById('status').dataset.state === 'playing');
       if (sample === 'scripted-game') {
@@ -71,18 +76,18 @@ try {
           await page.keyboard.up('Space');
           await page.waitForTimeout(150);
         }
-        const changed = await shot(page, sample + '-interaction');
+        const changed = await shot(page, name + '-interaction');
         assert.ok(changed.pixel[1] > changed.pixel[0] + 50, 'Two Space presses must invoke the real Luau interaction and turn the scene green');
       } else {
         await page.waitForTimeout(350);
-        assert.notDeepEqual((await shot(page, sample + '-resumed')).pixel, frozen.pixel);
+        assert.notDeepEqual((await shot(page, name + '-resumed')).pixel, frozen.pixel);
       }
     }
     assert.deepEqual(errors, []);
     await page.locator('#restart').click();
     await page.waitForFunction(() => document.getElementById('status').dataset.state === 'playing');
     await page.close();
-    console.log('PASS', sample, 'rendering, controls and restart');
+    console.log('PASS', name, 'rendering, controls and restart');
   }
 } finally {
   await browser.close();

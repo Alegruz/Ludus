@@ -32,6 +32,9 @@ LUDUS_DEFINE_LOG_CATEGORY(LOG_SAMPLE, "CornellBox");
 EM_JS(void, WebStatus, (const char* state, uint32 frames), {
     globalThis.ludusPlayerStatus(UTF8ToString(state), frames);
 });
+EM_ASYNC_JS(void, AwaitBrowserFrame, (), {
+    await new Promise(done => requestAnimationFrame(done));
+});
 // clang-format on
 #endif
 
@@ -261,7 +264,9 @@ int32 Run(const Options& options) noexcept
     while (options.Frames == 0 || rendered < options.Frames)
     {
 #if defined(__EMSCRIPTEN__)
-        emscripten_sleep(16);
+        // Render on the browser's presentation cadence rather than an independent
+        // timer, which can outpace composition and accumulate GPU submissions.
+        AwaitBrowserFrame();
 #endif
         if (window)
         {
