@@ -23,6 +23,8 @@ jobs:
   host-tooling:
     name: Host tooling (ludus_tools) unit tests
     runs-on: ubuntu-24.04
+    outputs:
+      native_required: ${{ steps.scope.outputs.native_required }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,6 +68,8 @@ jobs:
           PATH=/tmp/ludus-venv/bin:$PATH PYTHONPATH=/tmp/ludus-venv/lib/python3.11/site-packages:${{ github.workspace }}/scripts/python /tmp/ludus-venv/bin/python -m unittest test_ludus_release test_ludus_itch_release test_macos_release test_ludus_butler -v
 
   butler-install:
+    needs: host-tooling
+    if: needs.host-tooling.outputs.native_required == 'true'
     name: Pinned butler installation (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
     strategy:
