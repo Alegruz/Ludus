@@ -270,7 +270,9 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
             const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
             while (rhi::GetStatus(device, ticket) == rhi::RasterStatus::Pending &&
                    std::chrono::steady_clock::now() < until)
+            {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
             uint32 actual[5]{};
             REQUIRE(rhi::CopyReadback(device, ticket, reinterpret_cast<uint8*>(actual), sizeof(actual)) ==
                     rhi::RasterStatus::Ready);
@@ -312,7 +314,9 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     REQUIRE(rhi::backend::ReadHeadlessPixels(pixels));
     CHECK(rhi::GetStatus(device, completion) == rhi::RasterStatus::Ready);
     if (computeMode)
+    {
         CHECK(std::memcmp(pixels, computePixels, sizeof(pixels)) == 0);
+    }
     const uint8 high = mode == 1 ? 55 : mode == 2 ? 160 : 255;
     const uint8 low = mode == 2 ? 32 : 0;
     const uint32 xs[4]{12, 36, 60, 84};

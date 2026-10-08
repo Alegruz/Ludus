@@ -239,6 +239,10 @@ StartStatus StartSelected(const ApplicationInfo& app,
 } // namespace
 namespace internal
 {
+bool RequiresComputeProfile() noexcept
+{
+    return gStartup.State == StartupState::Pending && gRequireCompute;
+}
 StartStatus StartOwned(const ApplicationInfo& app,
                        const WindowInfo& window,
                        BackendSelection selection,

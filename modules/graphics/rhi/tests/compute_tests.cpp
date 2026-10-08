@@ -55,7 +55,9 @@ struct Kernel final
         const uint8 bytes[16]{};
         Buffer = existing;
         if (GetStatus(device, Buffer) == RasterStatus::InvalidHandle)
+        {
             REQUIRE(CreateBuffer(device, {BufferRole::Storage, 16}, bytes, Buffer) == RasterStatus::Ready);
+        }
         const RasterBinding binding{0,
                                     write ? RasterBindingKind::StorageReadWrite : RasterBindingKind::StorageRead,
                                     RasterVisibility::Compute,
@@ -71,7 +73,7 @@ struct Kernel final
         REQUIRE(CreateBindingSet(device, Layout, {&resource, 1}, Set) == RasterStatus::Ready);
         REQUIRE(CreateComputePipeline(device, {Shader, Layout}, Pipeline) == RasterStatus::Ready);
     }
-    ComputeDispatch Dispatch() const noexcept
+    [[nodiscard]] ComputeDispatch Dispatch() const noexcept
     {
         return {Pipeline, Set};
     }
@@ -154,7 +156,9 @@ TEST_CASE("Compute layouts and workgroup limits reject unsupported contracts wit
     CHECK(reference::Creates[static_cast<usize>(internal::RasterKind::Shader)] == 0);
     RasterBinding bindings[5];
     for (uint32 i = 0; i < 5; ++i)
+    {
         bindings[i] = {i, RasterBindingKind::StorageReadWrite, RasterVisibility::Compute, 4};
+    }
     BindingLayoutHandle layout;
     CHECK(CreateBindingLayout(session.Device, bindings, layout) == RasterStatus::InvalidDescription);
     bindings[0].Visibility = RasterVisibility::Fragment;
