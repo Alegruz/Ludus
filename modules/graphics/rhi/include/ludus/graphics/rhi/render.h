@@ -45,10 +45,15 @@ enum class ResourceStatus : ludus::foundation::uint8
     /// An explicit device-owner operation was stopped by device loss; recreate the session.
     DeviceLost,
 };
+/// Shader execution stage; Compute is accepted by the R4 reflected resource API.
 enum class ShaderStage : ludus::foundation::uint8
 {
+    /// Vertex input and transform stage.
     Vertex,
-    Fragment
+    /// Raster fragment stage.
+    Fragment,
+    /// Buffer compute stage, used only by the R4 reflected shader API.
+    Compute
 };
 /// Per-target shader artifacts, borrowed only during CreateShader.
 /// Each backend consumes its own source/binary and explicit entry name.

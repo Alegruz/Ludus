@@ -200,8 +200,11 @@ def compile_metal(args, lock):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for key in ('source', 'output', 'name', 'vertex', 'fragment', 'compiler', 'lock'):
+    for key in ('source', 'output', 'name', 'compiler', 'lock'):
         parser.add_argument('--' + key, required=True)
+    parser.add_argument('--vertex')
+    parser.add_argument('--fragment')
+    parser.add_argument('--compute')
     parser.add_argument('--validator')
     parser.add_argument('--metal', action='store_true')
     parser.add_argument('--raster', action='store_true')
@@ -217,7 +220,11 @@ def main():
         raise RuntimeError('Slang version differs from SDK pin')
     if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', args.name):
         raise RuntimeError('Invalid shader name')
-    if args.raster:
+    if args.compute and (args.vertex or args.fragment or args.raster):
+        raise RuntimeError("Compute is mutually exclusive with raster/fullscreen stages")
+    if not args.compute and (not args.vertex or not args.fragment):
+        raise RuntimeError("Raster/fullscreen compilation requires vertex and fragment entries")
+    if args.raster or args.compute:
         from compile_raster import compile_raster
         compile_raster(args, lock)
         return

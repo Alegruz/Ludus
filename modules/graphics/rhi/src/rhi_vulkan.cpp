@@ -59,6 +59,7 @@ VkPhysicalDevice gPhysical = VK_NULL_HANDLE;
 VkDevice gDevice = VK_NULL_HANDLE;
 VkQueue gQueue = VK_NULL_HANDLE;
 uint32 gFamily = 0;
+bool gQueueCompute = false;
 VkSurfaceKHR gSurface = VK_NULL_HANDLE;
 VkSwapchainKHR gSwapchain = VK_NULL_HANDLE;
 VkCommandPool gCommands = VK_NULL_HANDLE;
@@ -717,6 +718,7 @@ bool ConnectWindow(const WindowInfo& window) noexcept
             {
                 gPhysical = devices[i];
                 gFamily = static_cast<uint32>(j);
+                gQueueCompute = (properties[j].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
                 break;
             }
         }

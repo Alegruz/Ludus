@@ -3,6 +3,7 @@
 #include <ludus/foundation/time/time.hpp>
 #include <ludus/graphics/rhi/lifetime.h>
 
+#include "cull.h"
 #include "ordered_frame.h"
 #include "raster.h"
 
@@ -30,6 +31,14 @@ rhi::BindingSetHandle gCompositeSet;
 rhi::BufferHandle gFullscreen;
 rhi::OrderedGraph gGraph;
 bool gHasGraph = false;
+bool gUseCompute = false;
+bool gArgumentsVerified = false;
+bool gHasArgumentReadback = false;
+rhi::BufferHandle gCandidates, gArguments;
+rhi::RasterShaderHandle gComputeShader;
+rhi::BindingLayoutHandle gComputeLayout;
+rhi::ComputeDispatch gDispatch;
+rhi::ReadbackTicket gArgumentReadback;
 rhi::PipelineRequest gPipelineRequest, gSharedPipelineRequest;
 rhi::UploadTicket gVertexUpload, gIndexUpload, gCancelledUpload;
 rhi::ReadbackTicket gReadback;
@@ -60,7 +69,7 @@ EM_JS(int32, SlowTransfers, (), { return globalThis.__qaSlowTransfers ? 1 : 0; }
 EM_JS(int32, Paused, (), { return globalThis.__qaPause ? 1 : 0; });
 EM_JS(int32, Variant, (), {
     const value = new URL(location.href).searchParams.get('variant');
-    return value === 'srgb' ? 1 : value === 'blend' ? 2 : value === 'graph' ? 3 : value === 'graph-reference' ? 4 : 0;
+    return value === 'srgb' ? 1 : value === 'blend' ? 2 : value === 'graph' ? 3 : value === 'graph-reference' ? 4 : value === 'compute' ? 5 : value === 'cpu' ? 6 : value === 'compute-required' ? 7 : value === 'compute-reference' ? 8 : 0;
 });
 EM_JS(void, ReportGraph, (uint32 live, uint32 dependencies), {
     const node = document.getElementById('status'); node.dataset.livePasses = live; node.dataset.dependencies = dependencies;
@@ -78,7 +87,7 @@ int32 SlowTransfers() noexcept
 }
 int32 Variant() noexcept
 {
-    return 3;
+    return 5;
 }
 void ReportGraph(uint32, uint32) noexcept {}
 int32 Paused() noexcept
@@ -149,7 +158,28 @@ bool Create() noexcept
                              .4F,  .75F,  .25F, 1, 0, .4F,  -.75F, .25F, 1, 1};
     const float32 background[20]{-.95F, -.95F, .75F, 0, 1, -.95F, .95F,  .75F, 0, 0,
                                  .95F,  .95F,  .75F, 1, 0, .95F,  -.95F, .75F, 1, 1};
-    const float32 offsets[4]{-.45F, 0, .45F, 0};
+    float32 offsets[4]{};
+    if (ludus::qa::CullCpuInstances(offsets) != 2)
+        return false;
+    rhi::DeviceInfo info;
+    if (rhi::GetDeviceInfo(gDevice, info) != rhi::DeviceStatus::Ready)
+        return false;
+    gUseCompute = (mode == 5 || mode == 8) && info.Enabled.Compute;
+    if (gUseCompute)
+    {
+        for (auto& value : offsets)
+            value = 0;
+        const uint32 zero[5]{};
+        const auto kernel = ludus::shaders::cull::Compute();
+        if (!Accepted(rhi::CreateBuffer(gDevice,
+                                        {rhi::BufferRole::Storage, 32},
+                                        Bytes(ludus::qa::CULL_CANDIDATES),
+                                        gCandidates)) ||
+            !Accepted(rhi::CreateBuffer(gDevice, {rhi::BufferRole::StorageIndirect, 20}, Bytes(zero), gArguments)) ||
+            !Accepted(rhi::CreateRasterShader(gDevice, kernel, gComputeShader)) ||
+            !Accepted(rhi::CreateBindingLayout(gDevice, kernel.Bindings, gComputeLayout)))
+            return false;
+    }
     const float32 center[2]{0, 0};
     const uint32 indices[6]{0, 1, 2, 0, 2, 3};
     if (mode >= 3)
@@ -184,8 +214,11 @@ bool Create() noexcept
                                       {rhi::BufferRole::Vertex, sizeof(background)},
                                       Bytes(background),
                                       gBackground)) &&
-           Accepted(
-               rhi::CreateBuffer(gDevice, {rhi::BufferRole::Vertex, sizeof(offsets)}, Bytes(offsets), gInstances)) &&
+           Accepted(rhi::CreateBuffer(
+               gDevice,
+               {gUseCompute ? rhi::BufferRole::StorageVertex : rhi::BufferRole::Vertex, sizeof(offsets)},
+               Bytes(offsets),
+               gInstances)) &&
            Accepted(rhi::CreateBuffer(gDevice, {rhi::BufferRole::Vertex, sizeof(center)}, Bytes(center), gCenter)) &&
            Accepted(rhi::RequestBufferUpload(gDevice,
                                              {rhi::BufferRole::Index32, sizeof(indices)},
@@ -243,6 +276,35 @@ void Tick() noexcept
         gCompletion = {};
         gHasCompletion = false;
     }
+    if (gUseCompute && gFrames > 0 && !gArgumentsVerified)
+    {
+        if (!gHasArgumentReadback)
+        {
+            if (rhi::RequestBufferReadback(gDevice, gArguments, 0, 20, gArgumentReadback) != rhi::RasterStatus::Pending)
+            {
+                Stop(true);
+                return;
+            }
+            gHasArgumentReadback = true;
+        }
+        if (!Ready(gArgumentReadback))
+        {
+            if (gFailed)
+                Stop(true);
+            return;
+        }
+        uint32 actual[5]{};
+        const uint32 expected[5]{6, 2, 0, 0, 0};
+        if (rhi::CopyReadback(gDevice, gArgumentReadback, reinterpret_cast<uint8*>(actual), sizeof(actual)) !=
+                rhi::RasterStatus::Ready ||
+            std::memcmp(actual, expected, sizeof(actual)) != 0 ||
+            rhi::Release(gDevice, gArgumentReadback) != rhi::RasterStatus::Ready)
+        {
+            Stop(true);
+            return;
+        }
+        gArgumentsVerified = true;
+    }
     if (gFrames == 120)
     {
         Stop(false);
@@ -259,10 +321,12 @@ void Tick() noexcept
     }
     if (gStep == 1)
     {
-        const bool ready = Ready(gVertex) && Ready(gFragment) && Ready(gLayout) && Ready(gTint) && Ready(gDim) &&
-                           Ready(gTexture) && Ready(gSampler) && Ready(gVertexUpload) && Ready(gBackground) &&
-                           Ready(gInstances) && Ready(gCenter) && Ready(gIndexUpload) &&
-                           (Variant() < 3 || (Ready(gOffscreen) && Ready(gUnused) && Ready(gFullscreen)));
+        const bool ready =
+            Ready(gVertex) && Ready(gFragment) && Ready(gLayout) && Ready(gTint) && Ready(gDim) && Ready(gTexture) &&
+            Ready(gSampler) && Ready(gVertexUpload) && Ready(gBackground) && Ready(gInstances) && Ready(gCenter) &&
+            Ready(gIndexUpload) && (Variant() < 3 || (Ready(gOffscreen) && Ready(gUnused) && Ready(gFullscreen))) &&
+            (!gUseCompute ||
+             (Ready(gCandidates) && Ready(gArguments) && Ready(gComputeShader) && Ready(gComputeLayout)));
         if (gFailed)
         {
             Stop(true);
@@ -300,6 +364,18 @@ void Tick() noexcept
                 Stop(true);
             }
             return;
+        }
+        if (gUseCompute)
+        {
+            const rhi::RasterBindingResource computeBindings[]{{0, gCandidates, 0, 32},
+                                                               {1, gInstances, 0, 16},
+                                                               {2, gArguments, 0, 20}};
+            if (!Accepted(rhi::CreateBindingSet(gDevice, gComputeLayout, computeBindings, gDispatch.Bindings)) ||
+                !Accepted(rhi::CreateComputePipeline(gDevice, {gComputeShader, gComputeLayout}, gDispatch.Pipeline)))
+            {
+                Stop(true);
+                return;
+            }
         }
         rhi::RasterBindingResource bindings[3]{};
         bindings[0].Buffer = gTint;
@@ -376,7 +452,8 @@ void Tick() noexcept
     {
         const bool ready = Ready(gSet) && Ready(gBackgroundSet) && Ready(gPipelineRequest) &&
                            Ready(gSharedPipelineRequest) && Ready(gReadback) &&
-                           (Variant() < 3 || (Ready(gCompositeSet) && Ready(gUiRequest) && Ready(gCompositeRequest)));
+                           (Variant() < 3 || (Ready(gCompositeSet) && Ready(gUiRequest) && Ready(gCompositeRequest))) &&
+                           (!gUseCompute || (Ready(gDispatch.Bindings) && Ready(gDispatch.Pipeline)));
         if (gFailed)
         {
             Stop(true);
@@ -436,25 +513,31 @@ void Tick() noexcept
     {
         if (!gHasGraph)
         {
-            const ludus::qa::OrderedFrameInputs inputs{gVertices,
-                                                       gBackground,
-                                                       gInstances,
-                                                       gCenter,
-                                                       gIndices,
-                                                       gTint,
-                                                       gDim,
-                                                       gFullscreen,
-                                                       gTexture,
-                                                       gOffscreen,
-                                                       gUnused,
-                                                       gPipeline,
-                                                       gUiPipeline,
-                                                       gCompositePipeline,
-                                                       gSet,
-                                                       gBackgroundSet,
-                                                       gCompositeSet};
+            ludus::qa::OrderedFrameInputs inputs{gVertices,
+                                                 gBackground,
+                                                 gInstances,
+                                                 gCenter,
+                                                 gIndices,
+                                                 gTint,
+                                                 gDim,
+                                                 gFullscreen,
+                                                 gTexture,
+                                                 gOffscreen,
+                                                 gUnused,
+                                                 gPipeline,
+                                                 gUiPipeline,
+                                                 gCompositePipeline,
+                                                 gSet,
+                                                 gBackgroundSet,
+                                                 gCompositeSet};
+            if (gUseCompute)
+            {
+                inputs.Compute = &gDispatch;
+                inputs.Candidates = gCandidates;
+                inputs.Arguments = gArguments;
+            }
             rhi::GraphReport report;
-            if (ludus::qa::BuildOrderedFrame(gDevice, inputs, gGraph, report, Variant() == 4) !=
+            if (ludus::qa::BuildOrderedFrame(gDevice, inputs, gGraph, report, Variant() == 4 || Variant() == 8) !=
                 rhi::RasterStatus::Ready)
             {
                 Stop(true);
@@ -553,6 +636,7 @@ int main()
 #endif
     rhi::DeviceDescription description;
     description.Required.PortableRaster = true;
+    description.Required.Compute = Variant() == 7;
     description.Selection = Selection() == 1   ? rhi::BackendSelection::WebGPU
                             : Selection() == 2 ? rhi::BackendSelection::WebGL2
                                                : rhi::BackendSelection::Auto;

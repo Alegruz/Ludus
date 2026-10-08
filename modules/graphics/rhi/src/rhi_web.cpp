@@ -302,6 +302,25 @@ WGPURenderPassEncoder ProbePass() noexcept
 
 namespace ludus::graphics::rhi::backend
 {
+ComputeCapabilities ComputeLimits() noexcept
+{
+    return gActive == Backend::WebGL2 ? ComputeCapabilities{} : webgpu::ComputeLimits();
+}
+RasterStatus ComputeCreatePipeline(usize slot, const internal::ComputePipelineInfo& info, uint32 request) noexcept
+{
+    return gActive == Backend::WebGL2 ? RasterStatus::Unsupported : webgpu::ComputeCreatePipeline(slot, info, request);
+}
+RasterStatus ComputeEncode(const internal::ComputePacket& packet) noexcept
+{
+    return gActive == Backend::WebGL2 ? RasterStatus::Unsupported : webgpu::ComputeEncode(packet);
+}
+void ComputeBufferBarrier(usize slot, GraphAccessMode access) noexcept
+{
+    if (gActive != Backend::WebGL2)
+    {
+        webgpu::ComputeBufferBarrier(slot, access);
+    }
+}
 RasterCapabilities RasterLimits() noexcept
 {
     return gActive == Backend::WebGL2 ? webgl::RasterLimits() : webgpu::RasterLimits();

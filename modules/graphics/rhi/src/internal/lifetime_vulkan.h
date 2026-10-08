@@ -196,10 +196,12 @@ RasterStatus LifetimeReadback(usize transferSlot, BufferRole, const internal::Li
         return RasterError(result);
     }
     auto source = LifetimeVulkanBarrier(gRasterBuffers[bufferSlot].Object);
-    source.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+    source.srcAccessMask =
+        VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | gRasterBuffers[bufferSlot].WriterAccess;
     source.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
     vkCmdPipelineBarrier(transfer.Command,
-                         VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT |
+                             gRasterBuffers[bufferSlot].WriterStage,
                          VK_PIPELINE_STAGE_TRANSFER_BIT,
                          0,
                          0,
@@ -223,7 +225,13 @@ RasterStatus LifetimeReadback(usize transferSlot, BufferRole, const internal::Li
                          &host,
                          0,
                          nullptr);
-    return RasterError(LifetimeVulkanSubmit(transfer));
+    const auto submitted = LifetimeVulkanSubmit(transfer);
+    if (submitted == VK_SUCCESS)
+    {
+        gRasterBuffers[bufferSlot].Stage |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+        gRasterBuffers[bufferSlot].Access |= VK_ACCESS_TRANSFER_READ_BIT;
+    }
+    return RasterError(submitted);
 }
 RasterStatus LifetimePollTransfer(bool readback, usize slot) noexcept
 {

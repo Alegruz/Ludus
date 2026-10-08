@@ -27,12 +27,12 @@ try {
   const pin = JSON.parse(await readFile(new URL('../../config/shader_toolchain.json',import.meta.url))).wgsl_validator;
   assert.equal(browser.version(),pin.chromium_version);
   report.version = browser.version();
-  for (const scenario of ['webgpu','webgl2','auto','auto-fallback','webgpu-srgb','webgl2-srgb','webgpu-blend','webgl2-blend','webgpu-graph','webgl2-graph','webgpu-graph-reference','webgl2-graph-reference','invalid-shader','invalid-pipeline','invalid-upload','invalid-readback','slow-completion','transfer-loss','device-loss']) {
+  for (const scenario of ['webgpu','webgl2','auto','auto-fallback','webgpu-srgb','webgl2-srgb','webgpu-blend','webgl2-blend','webgpu-graph','webgl2-graph','webgpu-graph-reference','webgl2-graph-reference','webgpu-cpu','webgpu-compute','webgpu-compute-reference','webgl2-cpu','webgl2-compute','auto-fallback-compute','webgl2-compute-required','invalid-shader','invalid-pipeline','invalid-upload','invalid-readback','slow-completion','transfer-loss','device-loss']) {
     const context = await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
     await context.addInitScript(scenario => {
       window.__qaPause = false;
       window.__qaSlowTransfers = scenario === 'slow-completion';
-      if (scenario === 'auto-fallback') Object.defineProperty(navigator,'gpu',{get:() => undefined});
+      if (scenario.startsWith('auto-fallback')) Object.defineProperty(navigator,'gpu',{get:() => undefined});
       if (navigator.gpu) {
         const requestAdapter = navigator.gpu.requestAdapter.bind(navigator.gpu);
         navigator.gpu.requestAdapter = async (...args) => {
@@ -82,18 +82,18 @@ try {
     const errors = [];
     page.on('pageerror',error => errors.push(String(error)));
     page.on('console',message => report.console.push({scenario,type:message.type(),text:message.text()}));
-    const variant = scenario.endsWith('-graph-reference') ? 'graph-reference' : scenario.endsWith('-graph') ? 'graph' : scenario.endsWith('-srgb') ? 'srgb' : scenario.endsWith('-blend') ? 'blend' : '';
+    const variant = scenario.endsWith('-compute-required') ? 'compute-required' : scenario.endsWith('-compute-reference') ? 'compute-reference' : scenario.endsWith('-compute') ? 'compute' : scenario.endsWith('-cpu') ? 'cpu' : scenario.endsWith('-graph-reference') ? 'graph-reference' : scenario.endsWith('-graph') ? 'graph' : scenario.endsWith('-srgb') ? 'srgb' : scenario.endsWith('-blend') ? 'blend' : '';
     const selection = scenario.startsWith('webgpu') ? 'webgpu' : scenario.startsWith('webgl2') ? 'webgl2' : scenario.startsWith('invalid') || scenario === 'device-loss' || scenario === 'slow-completion' || scenario === 'transfer-loss' ? 'webgpu' : 'auto';
     await page.goto(`http://127.0.0.1:${server.address().port}/raster.html?backend=${selection}&variant=${variant}`);
     const result = {scenario};
-    if (scenario.startsWith('invalid') || scenario === 'transfer-loss') {
+    if (scenario.startsWith('invalid') || scenario === 'transfer-loss' || scenario === 'webgl2-compute-required') {
       await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'failed',null,{timeout:20000});
       assert.equal(await page.locator('#status').getAttribute('data-frames'),'0');
       if (scenario === 'invalid-readback') assert.equal(await page.evaluate(() => window.__qaReadbackCompletionObserved),true,'map failure must not retire the outstanding copy');
     } else {
       await page.waitForFunction(() => document.querySelector('#status').dataset.frames === '5',null,{timeout:20000});
       result.backend = await page.locator('#status').getAttribute('data-backend');
-      if (scenario === 'auto-fallback' || scenario.startsWith('webgl2')) assert.equal(result.backend,'webgl2');
+      if (scenario.startsWith('auto-fallback') || scenario.startsWith('webgl2')) assert.equal(result.backend,'webgl2');
       else assert.equal(result.backend,'webgpu');
       if (scenario === 'device-loss') {
         await page.evaluate(() => {window.__qaDevice.destroy(); window.__qaPause=false;});
@@ -119,6 +119,12 @@ try {
             const optimized = PNG.sync.read(await readFile(resolve(output,scenario.replace('-reference','')+'.png')));
             assert.deepEqual(image.data,optimized.data,`${scenario} reference and optimized complete images`);
           }
+        }
+        if (variant === 'compute' || variant === 'compute-reference') {
+          const gpu = result.backend === 'webgpu';
+          assert.equal(await page.locator('#status').getAttribute('data-live-passes'), gpu ? (variant === 'compute-reference' ? '5' : '4') : '3');
+          const cpu = PNG.sync.read(await readFile(resolve(output,(gpu ? 'webgpu-cpu' : 'webgl2-cpu')+'.png')));
+          assert.deepEqual(image.data,cpu.data,`${scenario} compute/CPU complete images`);
         }
         await writeFile(resolve(output,`${scenario}.png`),bytes);
         await page.evaluate(() => {window.__qaPause=false;});

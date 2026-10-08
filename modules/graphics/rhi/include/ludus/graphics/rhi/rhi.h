@@ -111,6 +111,8 @@ enum class RequirementFailure : ludus::foundation::uint8
     UniformBufferSize,
     /// Required portable raster profile is unavailable on the negotiated device.
     PortableRaster,
+    /// Required buffer compute/indirect profile is unavailable on this backend.
+    Compute,
 };
 struct StartupInfo final
 {

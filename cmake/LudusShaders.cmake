@@ -3,16 +3,22 @@ include("${CMAKE_CURRENT_LIST_DIR}/LudusDependencies.cmake")
 # No downloads at configure/build time. Host tools remain separate from target
 # compilers, including when cross-compiling to wasm.
 function(ludus_compile_shader)
-    cmake_parse_arguments(PARSE_ARGV 0 SH "RASTER" "TARGET;NAME;SOURCE;VERTEX;FRAGMENT" "INCLUDES;DEFINES;DEPENDS")
+    cmake_parse_arguments(PARSE_ARGV 0 SH "RASTER" "TARGET;NAME;SOURCE;VERTEX;FRAGMENT;COMPUTE" "INCLUDES;DEFINES;DEPENDS")
     if(SH_UNPARSED_ARGUMENTS OR NOT TARGET "${SH_TARGET}" OR
-       NOT SH_NAME MATCHES "^[A-Za-z_][A-Za-z_0-9]*$" OR NOT SH_SOURCE OR NOT SH_VERTEX OR NOT SH_FRAGMENT)
-        message(FATAL_ERROR "ludus_compile_shader requires TARGET NAME SOURCE VERTEX FRAGMENT; optional INCLUDES DEFINES DEPENDS")
+       NOT SH_NAME MATCHES "^[A-Za-z_][A-Za-z_0-9]*$" OR NOT SH_SOURCE OR (NOT SH_COMPUTE AND (NOT SH_VERTEX OR NOT SH_FRAGMENT)) OR (SH_COMPUTE AND (SH_VERTEX OR SH_FRAGMENT OR SH_RASTER)))
+        message(FATAL_ERROR "ludus_compile_shader requires TARGET NAME SOURCE and either VERTEX/FRAGMENT or COMPUTE; optional RASTER INCLUDES DEFINES DEPENDS")
     endif()
     ludus_require_tool(LUDUS_SLANG_COMPILER "Shader compilation"
         "From the Ludus source repository root: ./scripts/shader-probe bootstrap" -version)
     set(backend_args)
     if(SH_RASTER)
         list(APPEND backend_args --raster)
+    endif()
+    set(stage_args --vertex "${SH_VERTEX}" --fragment "${SH_FRAGMENT}")
+    set(reflection_byproducts "vertex.reflection.json" "fragment.reflection.json")
+    if(SH_COMPUTE)
+        set(stage_args --compute "${SH_COMPUTE}")
+        set(reflection_byproducts)
     endif()
     set(backend_depends)
     set(backend_byproducts)
@@ -31,11 +37,19 @@ function(ludus_compile_shader)
         list(APPEND backend_byproducts "${SH_NAME}.vertex.wgsl" "${SH_NAME}.fragment.wgsl"
              "vertex.wgsl.reflection.json" "fragment.wgsl.reflection.json")
     endif()
+    if(SH_COMPUTE)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+            set(backend_byproducts "${SH_NAME}.compute.metal" "compute.reflection.json")
+        else()
+            set(backend_byproducts "${SH_NAME}.compute.spv" "${SH_NAME}.compute.wgsl" "compute.reflection.json" "compute.wgsl.reflection.json")
+        endif()
+    endif()
     ludus_require_python("Shader compilation")
     get_filename_component(source "${SH_SOURCE}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
     ludus_require_file("${source}" "Shader compilation" "Restore the shader source or correct SOURCE in ludus_compile_shader.")
     set(output "${CMAKE_CURRENT_BINARY_DIR}/ludus-shaders/${SH_TARGET}/${SH_NAME}")
     list(TRANSFORM backend_byproducts PREPEND "${output}/")
+    list(TRANSFORM reflection_byproducts PREPEND "${output}/")
     set(args)
     foreach(path IN LISTS SH_INCLUDES)
         get_filename_component(path "${path}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -52,7 +66,7 @@ function(ludus_compile_shader)
     # Optional GLSL ES 3.00 (WebGL 2) backend artifact. Enabled only when the
     # pinned SPIR-V -> GLSL ES translator is provided; SPIR-V/WGSL builds are
     # unchanged otherwise. The browser build carries both WGSL and GLSL ES.
-    if(EMSCRIPTEN OR (LUDUS_SPIRV_CROSS AND NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin"))
+    if(NOT SH_COMPUTE AND (EMSCRIPTEN OR (LUDUS_SPIRV_CROSS AND NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")))
         ludus_require_tool(LUDUS_SPIRV_CROSS "GLSL ES shader translation"
             "From the Ludus source repository root: ./scripts/bootstrap-spirv-cross")
         ludus_require_file("${LUDUS_SPIRV_CROSS}.build.json" "GLSL ES shader translation"
@@ -61,7 +75,7 @@ function(ludus_compile_shader)
     set(cross_args)
     set(cross_depends)
     set(cross_byproducts)
-    if(LUDUS_SPIRV_CROSS AND NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    if(NOT SH_COMPUTE AND LUDUS_SPIRV_CROSS AND NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         set(cross_lock "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/shaders/spirv_cross_toolchain.json")
         if(EXISTS "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/spirv_cross_toolchain.json")
             set(cross_lock "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/spirv_cross_toolchain.json")
@@ -77,11 +91,10 @@ function(ludus_compile_shader)
     endif()
     add_custom_command(
         OUTPUT "${output}/${SH_NAME}.h"
-        BYPRODUCTS ${backend_byproducts} "${output}/vertex.reflection.json"
-                   "${output}/fragment.reflection.json" "${output}/manifest.json"
+        BYPRODUCTS ${backend_byproducts} ${reflection_byproducts} "${output}/manifest.json"
                    ${cross_byproducts}
         COMMAND "${Python3_EXECUTABLE}" "${driver}" --source "${source}" --output "${output}"
-                --name "${SH_NAME}" --vertex "${SH_VERTEX}" --fragment "${SH_FRAGMENT}"
+                --name "${SH_NAME}" ${stage_args}
                 --lock "${lock}" --compiler "${LUDUS_SLANG_COMPILER}" ${backend_args} ${cross_args} ${args}
         DEPENDS "${source}" "${driver}" "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/shaders/compile_raster.py" "${lock}" "${LUDUS_SLANG_COMPILER}" ${backend_depends} ${cross_depends} ${SH_DEPENDS}
         DEPFILE "${output}/shader.d"

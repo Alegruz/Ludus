@@ -3,14 +3,17 @@
 namespace ludus::graphics::rhi::reference
 {
 inline bool ProfileAvailable = true;
+inline bool ComputeAvailable = true;
+inline foundation::usize Dispatches = 0;
+inline RasterStatus ComputeResult = RasterStatus::Ready;
 inline RasterStatus Next = RasterStatus::Ready;
 inline RasterStatus Submission = RasterStatus::Ready;
 inline foundation::uint32 LastRequest = 0;
 inline foundation::uint32 LossOnCompletion = 0;
 inline foundation::uint64 Submitted = 0;
 inline foundation::uint64 Completed = 0;
-inline foundation::usize Creates[8]{};
-inline foundation::usize Destroys[8]{};
+inline foundation::usize Creates[static_cast<foundation::usize>(internal::RasterKind::Count)]{};
+inline foundation::usize Destroys[static_cast<foundation::usize>(internal::RasterKind::Count)]{};
 inline foundation::usize Draws = 0;
 inline foundation::usize Passes = 0;
 inline foundation::usize Barriers = 0;

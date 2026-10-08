@@ -65,6 +65,7 @@ if(LUDUS_SDK_RENDER_TESTS)
     add_executable(ludus_sdk_raster_consumer raster.cpp)
     target_link_libraries(ludus_sdk_raster_consumer PRIVATE Ludus::GraphicsRhi Ludus::FoundationTime)
     target_compile_options(ludus_sdk_raster_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions)
+    ludus_compile_shader(TARGET ludus_sdk_raster_consumer NAME cull SOURCE shaders/cull.slang COMPUTE computeMain)
     ludus_compile_shader(TARGET ludus_sdk_raster_consumer NAME raster RASTER SOURCE shaders/raster.slang
         VERTEX vertexMain FRAGMENT fragmentMain)
     if(EMSCRIPTEN)

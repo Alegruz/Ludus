@@ -23,6 +23,7 @@ bool gFrame = false;
 bool gDrawn = false;
 bool gRasterDrawn = false;
 bool gRequireRaster = false;
+bool gRequireCompute = false;
 internal::FallbackHandler gFallback = nullptr;
 } // namespace
 namespace internal
@@ -131,6 +132,12 @@ void Complete(uint32 token, StartupError error, const BackendLimits& limits) noe
         Fail(token, StartupError::RequirementsUnsatisfied);
         return;
     }
+    if (gRequireCompute && backend::ComputeLimits().MaxStorageRange == 0)
+    {
+        gStartup.UnmetRequirement = RequirementFailure::Compute;
+        Fail(token, StartupError::RequirementsUnsatisfied);
+        return;
+    }
     RecordAttempt(token, gStartup.SelectedBackend, StartupError::None);
     gStartup.MaxTextureDimension2D = maxTextureDimension;
     gStartup.Capabilities =
@@ -189,7 +196,8 @@ StartStatus StartSelected(const ApplicationInfo& app,
                           const WindowInfo& window,
                           BackendSelection selection,
                           const DeviceRequirements& requirements,
-                          bool requireRaster = false) noexcept
+                          bool requireRaster = false,
+                          bool requireCompute = false) noexcept
 {
     if (internal::SessionBusy())
     {
@@ -198,6 +206,7 @@ StartStatus StartSelected(const ApplicationInfo& app,
     gStartup.Requested = selection;
     gStartup.Requirements = requirements;
     gRequireRaster = requireRaster;
+    gRequireCompute = requireCompute;
     // A forced selection the build cannot provide fails explicitly; it never
     // silently switches to another backend.
     if (!backend::Supports(selection))
@@ -234,9 +243,10 @@ StartStatus StartOwned(const ApplicationInfo& app,
                        const WindowInfo& window,
                        BackendSelection selection,
                        const DeviceRequirements& limits,
-                       bool requireRaster) noexcept
+                       bool requireRaster,
+                       bool requireCompute) noexcept
 {
-    return StartSelected(app, window, selection, limits, requireRaster);
+    return StartSelected(app, window, selection, limits, requireRaster, requireCompute);
 }
 } // namespace internal
 StartStatus Start(const ApplicationInfo& app, const WindowInfo& window) noexcept

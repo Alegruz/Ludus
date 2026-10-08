@@ -350,6 +350,35 @@ TEST_CASE("Fixed restart indices and forged layout substitution issue no native 
     REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
 }
 
+TEST_CASE("Indexed indirect packets reject wrong roles, misalignment, truncation and stale owners", "[rhi][compute]")
+{
+    Session session;
+    Scene scene(session.Device);
+    const uint8 bytes[20]{};
+    BufferHandle arguments;
+    REQUIRE(CreateBuffer(session.Device, {BufferRole::StorageIndirect, sizeof(bytes)}, bytes, arguments) ==
+            RasterStatus::Ready);
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    auto draw = scene.Draw();
+    draw.Indirect = scene.Uniform;
+    CHECK(DrawIndexed(session.Device, draw) == RasterStatus::InvalidDescription);
+    draw.Indirect = arguments;
+    draw.IndirectOffset = 1;
+    CHECK(DrawIndexed(session.Device, draw) == RasterStatus::InvalidDescription);
+    draw.IndirectOffset = 4;
+    CHECK(DrawIndexed(session.Device, draw) == RasterStatus::InvalidDescription);
+    CHECK(reference::Draws == 0);
+    draw.IndirectOffset = 0;
+    REQUIRE(DrawIndexed(session.Device, draw) == RasterStatus::Ready);
+    CHECK(reference::Draws == 1);
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+    REQUIRE(Destroy(session.Device, arguments) == RasterStatus::Ready);
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    CHECK(DrawIndexed(session.Device, draw) == RasterStatus::InvalidHandle);
+    CHECK(reference::Draws == 1);
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+}
+
 TEST_CASE("Completion-observed device loss closes resource admission before native work", "[rhi][raster]")
 {
     Session session;

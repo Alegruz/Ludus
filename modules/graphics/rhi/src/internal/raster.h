@@ -39,6 +39,7 @@ enum class RasterKind : foundation::uint8
     Layout,
     Set,
     Pipeline,
+    ComputePipeline,
     Count
 };
 struct RasterLayout final
@@ -52,6 +53,7 @@ struct RasterShaderInfo final
     RasterLayout Layout;
     RasterShaderInput Inputs[8]{};
     foundation::usize InputCount = 0;
+    foundation::uint32 WorkgroupSize[3]{1, 1, 1};
     char UniformBlocks[RASTER_BINDINGS][64]{};
     char TextureNames[RASTER_BINDINGS][64]{};
     foundation::uint32 TextureSamplers[RASTER_BINDINGS]{};
@@ -81,6 +83,18 @@ struct RasterPipelineInfo final
     RasterTarget Target = RasterTarget::Surface;
     bool DepthWrite = true;
 };
+struct ComputePipelineInfo final
+{
+    foundation::usize Shader = 0;
+    foundation::usize Layout = 0;
+    foundation::uint32 WorkgroupSize[3]{1, 1, 1};
+};
+struct ComputePacket final
+{
+    foundation::usize Pipeline = 0;
+    foundation::usize Set = 0;
+    foundation::uint32 Groups[3]{1, 1, 1};
+};
 struct RasterPacket final
 {
     foundation::usize Pipeline = 0;
@@ -93,6 +107,8 @@ struct RasterPacket final
     foundation::uint32 IndexCount = 0;
     foundation::uint32 InstanceCount = 0;
     bool Index32 = false;
+    foundation::usize Indirect = RASTER_CAPACITY;
+    foundation::usize IndirectOffset = 0;
 };
 struct RasterPassInfo final
 {
@@ -131,6 +147,11 @@ void ResetLifetimeRecords() noexcept;
 namespace ludus::graphics::rhi::backend
 {
 RasterCapabilities RasterLimits() noexcept;
+ComputeCapabilities ComputeLimits() noexcept;
+RasterStatus
+ComputeCreatePipeline(foundation::usize, const internal::ComputePipelineInfo&, foundation::uint32) noexcept;
+RasterStatus ComputeEncode(const internal::ComputePacket&) noexcept;
+void ComputeBufferBarrier(foundation::usize, GraphAccessMode) noexcept;
 RasterStatus RasterCreateBuffer(foundation::usize,
                                 const BufferDescription&,
                                 std::span<const foundation::uint8>,

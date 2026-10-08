@@ -11,6 +11,9 @@ The [public rendering guide](../../development/fullscreen-rendering.md)
 describes resource ownership, asynchronous readiness, frame updates and errors,
 including the [R3 ordered raster graph](../../development/fullscreen-rendering.md#ordered-raster-graphs-r3)
 from `<ludus/graphics/rhi/graph.h>`. It shares the RHI resource/completion registry.
+The [R4 compute profile](../../development/fullscreen-rendering.md#buffer-compute-and-indirect-rendering-r4)
+adds buffer compute and indexed indirect draws on Vulkan, Metal and WebGPU,
+with an explicitly authored CPU/direct variant for WebGL 2.
 The [Sandbox handoff](../../development/fullscreen-rendering-handoff.md)
 contains SDK commands, shader artifacts and validation evidence.
 

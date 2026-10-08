@@ -1,4 +1,4 @@
-"""Bounded portable raster artifacts/reflection; selected by --raster in the SDK driver."""
+"""Bounded raster and buffer-compute artifacts/reflection for the installed SDK."""
 import hashlib
 import json
 from pathlib import Path
@@ -8,7 +8,8 @@ import struct
 # Thanks to the Slang team, "Using the Reflection API", User Guide,
 # https://docs.shader-slang.org/en/latest/external/slang/docs/user-guide/09-reflection.html
 # Reflect each target independently. No cross-target CPU packing is inferred.
-# This profile rejects storage, resource arrays, extra groups and unsupported inputs.
+# Raster rejects storage; compute accepts bounded structured buffers. Both reject
+# resource arrays, extra groups and unsupported inputs.
 def raster_interface(document, stage, metal=False):
     points = [x for x in document['entryPoints'] if x['stage'] == stage]
     if len(points) != 1:
@@ -27,7 +28,8 @@ def raster_interface(document, stage, metal=False):
         bindings = resource.get('bindings', [resource.get('binding', {})])
         descriptors = [b for b in bindings if b.get('kind') == 'descriptorTableSlot']
         if metal and not descriptors:
-            descriptors = [b for b in bindings if b.get('kind') in ('constantBuffer', 'shaderResource', 'samplerState')]
+            native_kinds = ('constantBuffer',) if stage == 'compute' else ('constantBuffer', 'shaderResource', 'samplerState')
+            descriptors = [b for b in bindings if b.get('kind') in native_kinds]
         if len(descriptors) != 1 or descriptors[0].get('space', 0) != 0:
             raise RuntimeError('Raster resources require one descriptor in group/set zero')
         index = descriptors[0]['index']
@@ -40,6 +42,16 @@ def raster_interface(document, stage, metal=False):
             size = resource['type']['elementVarLayout']['binding']['size']
             if not 0 < size <= 16384:
                 raise RuntimeError('Uniform occupied range exceeds the raster profile')
+        elif stage == 'compute' and kind == 'resource' and resource['type'].get('baseShape') == 'structuredBuffer':
+            result = resource['type'].get('resultType', {})
+            scalar = result if result.get('kind') == 'scalar' else result.get('elementType', {})
+            width = 1 if result.get('kind') == 'scalar' else result.get('elementCount')
+            if result.get('kind') not in ('scalar', 'vector') or scalar.get('scalarType') not in ('float32', 'uint32', 'int32') or width not in (1, 2, 4):
+                raise RuntimeError('Compute storage requires scalar32, vector2 or vector4 elements')
+            if resource['type'].get('access', 'read') not in ('read', 'readWrite'):
+                raise RuntimeError('Unsupported compute storage access')
+            kind = 'StorageReadWrite' if resource['type'].get('access') == 'readWrite' else 'StorageRead'
+            size = 4 * width
         elif kind == 'samplerState':
             if resource['type'].get('isComparison', False) or 'comparison' in str(resource['type'].get('flavor', '')).lower():
                 raise RuntimeError('Comparison samplers are outside the raster profile')
@@ -53,12 +65,17 @@ def raster_interface(document, stage, metal=False):
             kind = 'Texture2D'
         else:
             raise RuntimeError('Unsupported raster resource shape: ' + kind)
+        if stage == 'compute' and kind not in ('UniformBuffer', 'StorageRead', 'StorageReadWrite'):
+            raise RuntimeError('Compute profile accepts buffer bindings only')
         if metal:
-            native_kind = {'UniformBuffer': 'constantBuffer', 'Texture2D': 'shaderResource', 'Sampler': 'samplerState'}[kind]
+            native_kind = {'StorageRead': 'constantBuffer', 'StorageReadWrite': 'constantBuffer', 'UniformBuffer': 'constantBuffer', 'Texture2D': 'shaderResource', 'Sampler': 'samplerState'}[kind]
             native = [b for b in bindings if b.get('kind') == native_kind]
             if len(native) != 1 or native[0]['index'] != index:
                 raise RuntimeError('Metal binding remapping is outside this raster profile')
         value = {'binding': index, 'kind': kind, 'size': size, 'name': resource['name']}
+        if kind in ('StorageRead', 'StorageReadWrite'):
+            value['scalar'] = scalar['scalarType']
+            value['width'] = width
         if kind == 'UniformBuffer':
             value['offsets'] = {field['name']: field['binding']['offset'] for field in resource['type']['elementType']['fields']}
         entries.append(value)
@@ -84,7 +101,15 @@ def raster_interface(document, stage, metal=False):
     if stage == 'vertex':
         for parameter in point.get('parameters', []):
             input_field(parameter)
-    return {'entries': entries, 'inputs': inputs}
+    result = {'entries': entries, 'inputs': inputs}
+    if stage == 'compute':
+        group = point.get('threadGroupSize')
+        if not isinstance(group, list) or len(group) != 3 or any(type(x) is not int or x <= 0 for x in group) or group[0] * group[1] * group[2] > 256 or any(x > cap for x, cap in zip(group, (256, 256, 64))):
+            raise RuntimeError('Compute local workgroup dimensions exceed the bounded profile')
+        if sum(x['kind'].startswith('Storage') for x in entries) > 4:
+            raise RuntimeError('Compute supports at most four storage bindings')
+        result['workgroup'] = group
+    return result
 
 
 def glsl_interface(code, reflected, cross_reflection):
@@ -213,17 +238,19 @@ def compile_raster(args, lock):
     output.mkdir(parents=True, exist_ok=True)
     extra = [part for path in args.include for part in ('-I', path)] + ['-D' + value for value in args.define]
     commands, dependencies, artifacts, interfaces = [], [], {}, {}
+    stages = [('compute', args.compute)] if getattr(args, 'compute', None) else [('vertex', args.vertex), ('fragment', args.fragment)]
+    compute = stages[0][0] == 'compute'
     if not args.metal:
         if not args.validator or hashlib.sha256(Path(args.validator).read_bytes()).hexdigest() != lock['spirv_tools']['val_sha256']:
             raise RuntimeError('Raster SPIR-V validator differs from SDK pin')
-    if args.spirv_cross:
+    if args.spirv_cross and not compute:
         pin = json.loads(Path(args.spirv_cross_lock).read_text())['spirv_cross']
         tool = Path(args.spirv_cross).resolve()
         build = json.loads(Path(str(tool) + '.build.json').read_text())
         if any(build.get(key) != pin[key] for key in ('tag', 'commit', 'source_sha256')) or build.get('binary_sha256') != hashlib.sha256(tool.read_bytes()).hexdigest():
             raise RuntimeError('Raster SPIRV-Cross identity differs from verified pin')
     target = 'metal' if args.metal else 'spirv'
-    for stage, name in (('vertex', args.vertex), ('fragment', args.fragment)):
+    for stage, name in stages:
         artifact = output / f'{args.name}.{stage}.{"metal" if args.metal else "spv"}'
         reflection, depfile = output / f'{stage}.reflection.json', output / f'{stage}.d'
         command = [args.compiler, args.source, '-target', target, '-profile', 'sm_6_0' if args.metal else 'spirv_1_3',
@@ -233,14 +260,28 @@ def compile_raster(args, lock):
         interfaces[(target, stage)] = raster_interface(json.loads(reflection.read_text()), stage, args.metal)
         if args.metal:
             code = artifact.read_text()
-            names = re.findall(r'\[\[' + stage + r'\]\]\s+\w+\s+(\w+)\s*\(', code)
+            if compute:
+                # Slang emits non-const device pointers for StructuredBuffer.
+                # Preserve the independently reflected read-only contract in MSL,
+                # including the compiler's context member and entry argument.
+                for binding in interfaces[(target, stage)]['entries']:
+                    if binding['kind'] != 'StorageRead':
+                        continue
+                    scalar = {'float32': 'float', 'uint32': 'uint', 'int32': 'int'}[binding['scalar']]
+                    element = scalar if binding['width'] == 1 else scalar + str(binding['width'])
+                    pattern = r'(?<!const )\b' + element + r'\s+device\s*\*\s+' + re.escape(binding['name']) + r'(?:_\d+)?\b'
+                    code, count = re.subn(pattern, lambda match: 'const ' + match[0], code)
+                    if count < 1:
+                        raise RuntimeError('Metal emitted read-only storage parameter is missing')
+                artifact.write_text(code)
+            names = re.findall(r'\[\[' + ('kernel' if compute else stage) + r'\]\]\s+\w+\s+(\w+)\s*\(', code)
             if len(names) != 1:
                 raise RuntimeError('Expected one emitted Metal raster entry')
             artifacts[(target, stage)] = (code, names[0])
         else:
             run([args.validator, '--target-env', 'vulkan1.1', str(artifact)])
             artifacts[(target, stage)] = (artifact.read_bytes(), entry(artifact))
-            if args.spirv_cross:
+            if args.spirv_cross and not compute:
                 essl = output / f'{args.name}.{stage}.essl'
                 command = [args.spirv_cross, str(artifact), '--version', '300', '--es', '--fixup-clipspace', '--output', str(essl)]
                 commands.append(command); run(command)
@@ -254,7 +295,7 @@ def compile_raster(args, lock):
                 interfaces[('glsl', stage)] = interface
                 artifacts[('glsl', stage)] = (essl.read_text(), 'main')
     if not args.metal:
-        for stage, source_entry in (('vertex', args.vertex), ('fragment', args.fragment)):
+        for stage, source_entry in stages:
             artifact = output / f'{args.name}.{stage}.wgsl'
             reflection, depfile = output / f'{stage}.wgsl.reflection.json', output / f'{stage}.wgsl.d'
             command = [args.compiler, args.source, '-target', 'wgsl', '-profile', 'sm_6_0', '-entry', source_entry,
@@ -263,13 +304,26 @@ def compile_raster(args, lock):
             dependencies.append(depfile.read_text().split(':', 1)[1].strip())
             interface = raster_interface(json.loads(reflection.read_text()), stage)
             code = wgsl_contract(artifact.read_text(), interface, stage)
-            names = re.findall(r'@' + stage + r'\s+fn\s+(\w+)', code)
+            if compute:
+                local = re.search(r'@workgroup_size\((\d+),\s*(\d+),\s*(\d+)\)', code)
+                if local is None or [int(x) for x in local.groups()] != interface['workgroup']:
+                    raise RuntimeError('WGSL emitted workgroup differs from reflection')
+                for binding in interface['entries']:
+                    if not binding['kind'].startswith('Storage'):
+                        continue
+                    scalar = {'float32': 'f32', 'uint32': 'u32', 'int32': 'i32'}[binding['scalar']]
+                    element = scalar if binding['width'] == 1 else f'vec{binding["width"]}<{scalar}>'
+                    access = 'read' if binding['kind'] == 'StorageRead' else 'read_write'
+                    pattern = r'@binding\(' + str(binding['binding']) + r'\)\s+@group\(0\)\s+var<storage,\s*' + access + r'>\s+\w+\s*:\s*array<' + re.escape(element) + r'>\s*;'
+                    if re.search(pattern, code) is None:
+                        raise RuntimeError('WGSL emitted storage packing/access differs from reflection')
+            names = re.findall(r'@' + stage + (r'\s+@workgroup_size\([^)]*\)' if compute else '') + r'\s+fn\s+(\w+)', code)
             if len(names) != 1:
                 raise RuntimeError('Expected one emitted WGSL raster entry')
             artifact.write_text(code)
             artifacts[('wgsl', stage)] = (code, names[0])
             interfaces[('wgsl', stage)] = interface
-    if args.spirv_cross and interfaces[('glsl', 'vertex')]['varyings'] != interfaces[('glsl', 'fragment')]['varyings']:
+    if args.spirv_cross and not compute and interfaces[('glsl', 'vertex')]['varyings'] != interfaces[('glsl', 'fragment')]['varyings']:
         raise RuntimeError('GLSL ES raster stage varying interfaces differ')
     header = '#pragma once\n#include <ludus/foundation/base/config.h>\n#include <ludus/graphics/rhi/raster.h>\n'
     header += f'namespace ludus::shaders::{args.name} {{\n'
@@ -306,13 +360,15 @@ def compile_raster(args, lock):
             header += f' result.UniformBlocks[{binding}] = "{block}";\n'
         for binding, texture in interface.get('textures', {}).items():
             header += f' result.TextureNames[{binding}] = "{texture["name"]}"; result.TextureSamplers[{binding}] = {texture["sampler"]};\n'
+        for axis, size in enumerate(interface.get('workgroup', [])):
+            header += f' result.WorkgroupSize[{axis}] = {size};\n'
         header += ' return result;\n}\n'
-    for stage in ('vertex', 'fragment'):
+    for stage, _ in stages:
         if args.metal:
             header += f'inline auto {stage.title()}() noexcept {{ return Metal{stage.title()}(); }}\n'
         else:
             header += f'inline auto {stage.title()}() noexcept {{\n#if defined(LUDUS_PLATFORM_WEB)\n auto result = Wgsl{stage.title()}();\n'
-            if args.spirv_cross:
+            if args.spirv_cross and not compute:
                 header += f' auto glsl = Glsl{stage.title()}(); result.Artifact.GlslEs = glsl.Artifact.GlslEs; result.Artifact.GlslEsEntry = glsl.Artifact.GlslEsEntry;\n'
                 # Web source/metadata is selected after startup, so packing is
                 # verified equal here; native target packing remains independent.

@@ -104,8 +104,10 @@ DeviceStatus ValidateDeviceDescription(const DeviceDescription& description) noe
     {
         return DeviceStatus::InvalidDescription;
     }
-    return description.Required.Compute || description.Required.IndirectRendering ? DeviceStatus::Unsupported
-                                                                                  : DeviceStatus::Ready;
+    return description.Selection == BackendSelection::WebGL2 &&
+                   (description.Required.Compute || description.Required.IndirectRendering)
+               ? DeviceStatus::Unsupported
+               : DeviceStatus::Ready;
 }
 BackendAvailability GetCompiledBackends() noexcept
 {
@@ -143,7 +145,9 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
                              window,
                              description.Selection,
                              description.Limits,
-                             description.Required.PortableRaster || description.Required.OrderedRasterGraph);
+                             description.Required.PortableRaster || description.Required.OrderedRasterGraph ||
+                                 description.Required.Compute || description.Required.IndirectRendering,
+                             description.Required.Compute || description.Required.IndirectRendering);
     if (result == StartStatus::Busy)
     {
         return DeviceStatus::InvalidState;
@@ -183,6 +187,10 @@ DeviceStatus GetDeviceInfo(DeviceHandle device, DeviceInfo& info) noexcept
         info.Enabled.PortableRaster = info.Supported.PortableRaster;
         info.Supported.OrderedRasterGraph = info.Supported.PortableRaster;
         info.Enabled.OrderedRasterGraph = info.Supported.OrderedRasterGraph;
+        info.Supported.Compute = info.Supported.PortableRaster && backend::ComputeLimits().MaxStorageRange != 0;
+        info.Enabled.Compute = info.Supported.Compute;
+        info.Supported.IndirectRendering = info.Supported.Compute;
+        info.Enabled.IndirectRendering = info.Supported.IndirectRendering;
     }
     return state;
 }

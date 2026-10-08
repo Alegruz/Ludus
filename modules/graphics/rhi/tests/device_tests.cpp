@@ -73,7 +73,7 @@ TEST_CASE("Explicit RHI owners cancel pending work and isolate foreign surfaces 
     REQUIRE(GetDeviceInfo(next, info) == DeviceStatus::Ready);
     CHECK(info.Supported.FullscreenRaster);
     CHECK(info.Enabled.FullscreenRaster);
-    CHECK_FALSE(info.Enabled.Compute);
+    CHECK(info.Enabled.Compute);
     const auto before = info.Startup.Capabilities.MaxFrameDimension2D;
     CHECK(GetDeviceInfo(oldDevice, info) == DeviceStatus::InvalidHandle);
     CHECK(info.Startup.Capabilities.MaxFrameDimension2D == before);
@@ -119,6 +119,7 @@ TEST_CASE("Required workloads reject before startup and synchronous failures pre
     const auto token = backend::PendingToken;
     StartupInfo diagnostic;
     diagnostic.MaxTextureDimension2D = 777;
+    description.Selection = BackendSelection::WebGL2;
     description.Required.Compute = true;
     CHECK(ValidateDeviceDescription(description) == DeviceStatus::Unsupported);
     CHECK(CreateDevice({}, {}, description, device, surface, &diagnostic) == DeviceStatus::Unsupported);
@@ -183,7 +184,7 @@ TEST_CASE("Explicit owner survives fallback attempts but loss stops all work", "
     CHECK(info.Startup.WebGpu.Error == StartupError::RequirementsUnsatisfied);
     CHECK(info.Startup.WebGL2.Error == StartupError::None);
     CHECK(info.Enabled.FullscreenRaster);
-    CHECK_FALSE(info.Enabled.Compute);
+    CHECK(info.Enabled.Compute);
     const auto current = internal::Reissue(first);
     CHECK(current == 0);
     // The current fallback token is not the cancelled first request.

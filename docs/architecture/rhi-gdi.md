@@ -6,7 +6,8 @@ This document was drafted before opening the article map, then refined
 through [five complete reference chapters](rhi-gdi-gems-review.md) and current
 primary documentation. The first implementation slice now adds effective
 fullscreen capabilities, copied startup requirements, explicit requirement and
-backend-selection failures, and requirement-aware browser fallback. Remaining R0 work and R4-R5 are proposals. The first bounded R3 ordered graph
+backend-selection failures, and requirement-aware browser fallback. Remaining R0 work and R5 are proposals. The first bounded R4 buffer-compute/indirect
+profile is implemented; see the [compute contract](../development/fullscreen-rendering.md#buffer-compute-and-indirect-rendering-r4). The first bounded R3 ordered graph
 profile is implemented; see the [graph contract](../development/fullscreen-rendering.md#ordered-raster-graphs-r3). The first bounded R2 lifetime
 service profile is implemented in the existing RHI registry; see the
 [lifetime contract](../development/fullscreen-rendering.md#lifetime-services-r2). The first bounded R1 portable
@@ -688,7 +689,7 @@ external memory/semaphore interoperability.
 | R1 Portable resources | Initial bounded profile implemented; broader copy/update/attachment APIs deferred | Buffer/texture/view/sampler, general reflection/layout, immutable bindings/pipelines, indexed and instanced draws | Identical textured/depth diagnostic scenes on Vulkan, Metal, forced WebGPU, forced WebGL 2 and Auto; packing/limits/copy/view mismatch rejection |
 | R2 Lifetime services | Initial bounded profile implemented; texture streaming and descriptor arenas deferred | Completion tokens, retained records, upload/readback rings, Vulkan allocator adapter, pipeline requests | Destroy before/after finish/submit, discard, resource dependency retention, slow GPU/ring exhaustion, memory failure, cancellation, loss, resize/shutdown |
 | R3 Ordered graph | Implemented bounded portable raster profile | Authored pass list, in-place texture versions, RAW/WAR/WAW reports, roots/culling, completion-gated whole-object pool, attachment lowering | [R3 contracts and acceptance](../development/fullscreen-rendering.md#ordered-raster-graphs-r3): offscreen scene, read-only-depth UI and composite; reference/optimized images; history/import and undeclared-use regressions |
-| R4 Compute renderer | Proposed | Capability-specific storage/compute/indirect effects and authored raster/CPU variants | Compute correctness plus supported limits; WebGL chooses a declared variant or fails before executing |
+| R4 Compute renderer | Initial bounded buffer profile implemented; storage textures and broader effects deferred | Single-queue storage buffers, reflected compute pipeline/dispatch, indexed indirect draws and authored CPU/direct variant | [R4 contracts and acceptance](../development/fullscreen-rendering.md#buffer-compute-and-indirect-rendering-r4): GPU culling/compaction, argument readback and CPU image oracle; WebGL selects the authored variant or fails before execution |
 | R5 Measured optimization | Proposed | Select only justified aliasing, parallel recording, pass merging, async queues or bindless services | Representative CPU/GPU/latency/memory evidence, adversarial synchronization tests, debug controls, consumer/SDK maintenance cost |
 
 R2 resource retention and safe completion are prerequisites for scalable R1

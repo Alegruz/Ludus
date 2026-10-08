@@ -58,7 +58,7 @@ GPU cases explicitly skip when no Metal adapter is present; policy/window checks
 still execute. `LUDUS_TEST_COCOA=1` enables the WindowServer presentation case.
 Clang 18 ASan cannot start on the local macOS 26.6 host; macOS 14 CI executes
 the sanitizer suite. This slice provides the existing fullscreen API; general
-meshes, compute, textures, depth and blending remain future work.
+meshes, compute, textures, depth and blending are covered by the later R1–R4 slices below.
 
 ### Optional GLSL ES 3.00 (WebGL 2) backend artifact
 
@@ -152,18 +152,19 @@ if (started == rhi::DeviceStatus::Ready || started == rhi::DeviceStatus::Pending
     {
         // Use device-aware CreateShader/CreateUniform/CreatePipeline, GetStatus,
         // UpdateUniform and DrawFullscreen overloads; check every result.
-        // Compute remains false: preferences cannot enable unimplemented APIs.
+        // Inspect info.Enabled.Compute before choosing the GPU compute variant.
     }
     (void)rhi::DestroyDevice(device);
 }
 ```
 
 Poll once per application tick while Pending; continue only after Ready. Keep
-the borrowed Platform window/canvas alive until `DestroyDevice`. Required `Compute` or `IndirectRendering` returns Unsupported before
-launching startup. Required `PortableRaster` validates the negotiated bounded
+the borrowed Platform window/canvas alive until `DestroyDevice`. Required `Compute` or `IndirectRendering` rejects forced WebGL 2 before
+launching startup; other backends validate their enabled compute limits before Ready.
+Required `PortableRaster` validates the negotiated bounded
 profile before Ready, including each browser Auto attempt; see the
 [portable raster contract](#portable-raster-r1). `GetCompiledBackends` reports compiled code, independent of
-adapter availability. Supported/Enabled report implemented fullscreen and portable raster operations
+adapter availability. Supported/Enabled report implemented fullscreen, portable raster and bounded compute operations
 only after Ready; they make no claim about raw adapter features. The copied
 request retains its preferred features, including unavailable ones. Effective
 limit requirements apply to every Auto attempt through the existing negotiation.
@@ -507,8 +508,8 @@ ordered raster passes, sixteen declarations per pass, 256 retained draws per
 graph, and 512 semantic dependency report entries. Capacity rejection occurs
 before frame acquisition. Raster formats remain RGBA8 linear/sRGB, one mip,
 one layer and one sample, with one color attachment and private same-size depth.
-Compute, mutable buffers, general copy passes, MSAA/resolve, stencil, depth
-sampling, physical heap aliasing and pass merging remain outside this profile.
+R4 extends this profile with buffer compute below. General copy passes, MSAA/resolve,
+stencil, depth sampling, physical heap aliasing and pass merging remain deferred.
 
 ### Author, compile and execute
 
@@ -628,3 +629,107 @@ SDK harness adds forced WebGPU/WebGL graph/reference variants, validates pixels,
 compares complete optimized/reference images, and renders 120 frames. It retains
 all R1/R2 failure, fallback and transfer scenarios. Pinned Chromium software-GPU
 acceptance remains separate from physical-GPU/hosted-browser acceptance.
+
+## Buffer compute and indirect rendering (R4)
+
+Include `<ludus/graphics/rhi/compute.h>` for compute pipelines and limits, and
+`<ludus/graphics/rhi/graph.h>` to execute dispatches. Vulkan, Metal and WebGPU
+expose `DeviceInfo.Enabled.Compute` and `IndirectRendering` only when their
+negotiated buffer profile is available. Vulkan requires compute support on its
+existing graphics queue. WebGL 2 exposes neither. Requiring either feature
+checks every Auto attempt before Ready; forced WebGL 2 fails before startup.
+Preferences allow an application to select its own CPU/direct-draw variant after
+Ready. The engine does not translate or emulate a compute kernel on WebGL 2.
+
+### Buffers, kernels and limits
+
+`BufferRole::Storage`, `StorageVertex` and `StorageIndirect` allocate buffers
+with complete initial bytes. The latter two also support vertex/instance input
+or indexed indirect arguments, respectively. Their role never changes. Initial
+sizes and storage binding lengths are multiples of four; binding offsets obey
+`GetComputeCapabilities().StorageOffsetAlignment`. Storage buffers are bounded
+by the lower enabled range and 16 MiB. Layouts retain at most four storage
+bindings and eight total buffer bindings. Uniform buffers can also be read by
+compute. Each storage entry uses `StorageRead` or `StorageReadWrite`,
+`RasterVisibility::Compute`, and a reflected minimum element stride. Storage
+textures, raster-stage storage access and CPU update/upload of existing storage
+buffers remain deferred.
+
+The installed shader helper accepts one compute entry:
+
+```cmake
+ludus_compile_shader(TARGET my_renderer NAME cull
+    SOURCE shaders/cull.slang COMPUTE computeMain)
+```
+
+The generated `ludus::shaders::cull::Compute()` description selects the native
+MSL/SPIR-V or browser WGSL artifact, with target-specific reflection and verified
+workgroup dimensions. No GLSL ES compute artifact is generated. The bounded
+helper accepts structured-buffer scalar32, vector2 or vector4 elements
+(`float32`, `uint32`, `int32`); arbitrary structures, resource arrays and
+specialization-controlled local sizes are outside this helper profile.
+`CreateRasterShader` accepts its Compute stage, then `CreateComputePipeline`
+retains that shader and its exact group-zero layout. Poll Pending creation and
+check every result, as with raster resources. Pipeline creation, binding
+snapshots and destruction share the existing RHI registry and R2 leases.
+
+Local dimensions are nonzero, at most 256/256/64 along x/y/z, and at most 256
+invocations in total, further bounded by enabled device limits. Dispatch counts
+are nonzero and at most 65535 on each axis, again clamped to enabled limits.
+`GetComputeCapabilities` is authoritative. The renderer checks these limits and
+reflection; bounds checks, shader-local synchronization and race freedom are
+kernel obligations. There is no indirect dispatch or separate asynchronous queue.
+
+### Ordered dispatches and indirect commands
+
+Set `GraphPassDescription.Dispatch` to one `ComputeDispatch`; omit raster draws
+and attachments. The graph copies and retains the packet. Multiple dependent
+dispatches need separate authored passes. Declare every buffer binding, including
+unused extra entries, with matching byte range and Compute visibility. Read-only
+storage names the current version. Read/write storage reserves the next version
+with `NextGraphVersion`; it also depends on the preceding contents, preserving
+bytes outside the declared write range. Complete creation bytes establish initial
+contents. Whole-buffer RAW/WAR/WAW tracking remains conservative; there is no
+subrange scheduling or physical aliasing. Export/History/Readback buffer roots
+preserve observable compute work. Frozen imports reject accepted writes from
+another graph, and successful submissions advance the shared content revision.
+
+An indirect `RasterDraw` supplies a ready `StorageIndirect` buffer and a
+four-byte-aligned `IndirectOffset` containing `IndexedIndirectArguments`.
+Declare those twenty bytes with `GraphAccessMode::Indirect`. The same packet
+still supplies mesh/index/instance slices and nonzero maximum `IndexCount` and
+`InstanceCount`, which are validated before execution. The producing kernel
+must keep actual counts within those maxima and write zero `FirstIndex`,
+`BaseVertex` and `FirstInstance`; packet `IndexOffset` selects the mesh. Zero
+actual instance count culls the draw. The GPU arguments are not read back on the
+rendering hot path, so kernel correctness is part of this contract. The profile
+issues one indexed indirect command per packet, without indirect count buffers.
+
+Vulkan lowers declared buffer uses to compute shader, vertex input, uniform
+shader or draw-indirect access/stage barriers on the existing queue. It retains
+writer visibility across multiple readers and subsequent R2 readback/copies.
+Metal uses tracked resources and separate compute/render encoders; WebGPU uses
+storage/vertex/indirect creation flags and ordered compute/render usage scopes.
+Neither exposes invented native barriers. Completion, deferred destruction,
+preflight retry and partial-encoding failure follow R2/R3.
+
+### Acceptance fixture
+
+The shared [`ordered_frame.h`](../../tests/sdk_consumer/ordered_frame.h) fixture
+has an authored CPU culling function and the
+[`cull.slang`](../../tests/sdk_consumer/shaders/cull.slang) GPU variant. A single
+invocation compacts four candidates into two visible instances and writes one
+indexed indirect command. GPU output buffers start at zero. Native tests read
+back the generated command through R2 and compare the complete rendered image
+against the CPU/direct variant. The installed browser consumer also reads back
+the command. Its harness compares compute/reference images to the CPU oracle,
+checks WebGL 2 and Auto fallback, rejects required compute on WebGL 2 before any
+frame, and preserves the existing readiness/loss/transfer scenarios over 120 frames.
+
+Reference tests cover negotiated failure, layouts/local/dispatch bounds, missing
+uses, mutable-buffer RAW/WAR/WAW and history roots, culling, frozen revisions,
+retry, retention through completion and failure after encoding begins. Metal and
+pinned Chromium software-GPU checks run locally; Linux Vulkan, formal pinned
+SPIR-V validation and supported-host sanitizers are CI gates. Browser software
+GPU evidence remains separate from physical GPU/browser qualification. This
+fixture establishes correctness; it makes no performance improvement claim.

@@ -29,6 +29,8 @@ RasterMetalShader gRasterShaders[internal::RASTER_CAPACITY];
 internal::RasterLayout gRasterLayouts[internal::RASTER_CAPACITY];
 internal::RasterSet gRasterSets[internal::RASTER_CAPACITY];
 RasterMetalPipeline gRasterPipelines[internal::RASTER_CAPACITY];
+id<MTLComputePipelineState> gComputePipelines[internal::RASTER_CAPACITY]{};
+internal::ComputePipelineInfo gComputeInfos[internal::RASTER_CAPACITY];
 uint64 gRasterOrdinals[FRAMES]{};
 uint64 gRasterCompleted = 0;
 uint32 gRasterWidth = 0, gRasterHeight = 0;
@@ -59,8 +61,11 @@ bool RasterMetalBindings(NSArray<id<MTLBinding>>* bindings,
             {
                 continue;
             }
-            if (entry.Kind == RasterBindingKind::UniformBuffer && binding.type == MTLBindingTypeBuffer &&
-                binding.access == MTLBindingAccessReadOnly)
+            if ((entry.Kind == RasterBindingKind::UniformBuffer || entry.Kind == RasterBindingKind::StorageRead ||
+                 entry.Kind == RasterBindingKind::StorageReadWrite) &&
+                binding.type == MTLBindingTypeBuffer &&
+                (binding.access == MTLBindingAccessReadOnly ||
+                 (entry.Kind == RasterBindingKind::StorageReadWrite && binding.access == MTLBindingAccessReadWrite)))
             {
                 found = ((id<MTLBufferBinding>)binding).bufferDataSize <= entry.MinSize;
             }
@@ -100,6 +105,68 @@ RasterCapabilities RasterLimits() noexcept
         .DrawsPerFrame = static_cast<uint32>(internal::RASTER_DRAWS),
     };
 }
+// Thanks to Apple, "MTLComputeCommandEncoder" and Metal's tracked-resource
+// synchronization: encoder boundaries order storage writes before raster reads.
+// https://developer.apple.com/documentation/metal/mtlcomputecommandencoder
+ComputeCapabilities ComputeLimits() noexcept
+{
+    if (gDevice == nil)
+    {
+        return {};
+    }
+    const auto threads = gDevice.maxThreadsPerThreadgroup;
+    constexpr usize range = usize{16} * 1024 * 1024;
+    return {gDevice.maxBufferLength < range ? gDevice.maxBufferLength : range,
+            256,
+            {static_cast<uint32>(threads.width < 256 ? threads.width : 256),
+             static_cast<uint32>(threads.height < 256 ? threads.height : 256),
+             static_cast<uint32>(threads.depth < 64 ? threads.depth : 64)},
+            256,
+            {65535, 65535, 65535}};
+}
+RasterStatus ComputeCreatePipeline(usize slot, const internal::ComputePipelineInfo& info, uint32) noexcept
+{
+    @autoreleasepool
+    {
+        NSError* error = nil;
+        MTLComputePipelineReflection* reflection = nil;
+        auto pipeline = [gDevice newComputePipelineStateWithFunction:gRasterShaders[info.Shader].Function
+                                                             options:BINDING_INFO | MTLPipelineOptionBufferTypeInfo
+                                                          reflection:&reflection
+                                                               error:&error];
+        const uint32 threads = info.WorkgroupSize[0] * info.WorkgroupSize[1] * info.WorkgroupSize[2];
+        if (pipeline == nil || reflection == nil || threads > pipeline.maxTotalThreadsPerThreadgroup ||
+            !RasterMetalBindings(reflection.bindings, gRasterShaders[info.Shader].Info, {}))
+        {
+            LogError(error);
+            return RasterStatus::Failed;
+        }
+        gComputePipelines[slot] = pipeline;
+        gComputeInfos[slot] = info;
+        return RasterStatus::Ready;
+    }
+}
+RasterStatus ComputeEncode(const internal::ComputePacket& packet) noexcept
+{
+    auto encoder = [gCommand computeCommandEncoder];
+    if (encoder == nil)
+    {
+        return RasterStatus::OutOfMemory;
+    }
+    [encoder setComputePipelineState:gComputePipelines[packet.Pipeline]];
+    const auto& set = gRasterSets[packet.Set];
+    const auto& layout = gRasterLayouts[set.Layout];
+    for (usize i = 0; i < layout.Count; ++i)
+    {
+        [encoder setBuffer:gRasterBuffers[set.Slots[i]] offset:set.Offsets[i] atIndex:layout.Entries[i].Binding];
+    }
+    const auto& info = gComputeInfos[packet.Pipeline];
+    [encoder dispatchThreadgroups:MTLSizeMake(packet.Groups[0], packet.Groups[1], packet.Groups[2])
+            threadsPerThreadgroup:MTLSizeMake(info.WorkgroupSize[0], info.WorkgroupSize[1], info.WorkgroupSize[2])];
+    [encoder endEncoding];
+    return RasterStatus::Ready;
+}
+void ComputeBufferBarrier(usize, GraphAccessMode) noexcept {}
 RasterStatus RasterCreateBuffer(usize slot, const BufferDescription&, std::span<const uint8> bytes, uint32) noexcept
 {
     @autoreleasepool
@@ -192,8 +259,9 @@ RasterStatus RasterCreateShader(usize slot,
         options.languageVersion = MTLLanguageVersion2_3;
         id<MTLLibrary> library = [gDevice newLibraryWithSource:source options:options error:&error];
         id<MTLFunction> function = [library newFunctionWithName:name];
-        if (function == nil || function.functionType != (info.Stage == ShaderStage::Vertex ? MTLFunctionTypeVertex
-                                                                                           : MTLFunctionTypeFragment))
+        if (function == nil || function.functionType != (info.Stage == ShaderStage::Vertex     ? MTLFunctionTypeVertex
+                                                         : info.Stage == ShaderStage::Fragment ? MTLFunctionTypeFragment
+                                                                                               : MTLFunctionTypeKernel))
         {
             LogError(error);
             return RasterStatus::Failed;
@@ -303,6 +371,10 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
         case internal::RasterKind::Pipeline:
             gRasterPipelines[slot] = {};
             break;
+        case internal::RasterKind::ComputePipeline:
+            gComputePipelines[slot] = nil;
+            gComputeInfos[slot] = {};
+            break;
         case internal::RasterKind::Count:
             break;
     }
@@ -366,12 +438,24 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                                       static_cast<float64>(gRasterHeight == 0 ? gFrame.Height : gRasterHeight),
                                       0,
                                       1}];
-    [gEncoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
-                         indexCount:packet.IndexCount
-                          indexType:packet.Index32 ? MTLIndexTypeUInt32 : MTLIndexTypeUInt16
-                        indexBuffer:gRasterBuffers[packet.Indices]
-                  indexBufferOffset:packet.IndexOffset
-                      instanceCount:packet.InstanceCount];
+    if (packet.Indirect != internal::RASTER_CAPACITY)
+    {
+        [gEncoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                              indexType:packet.Index32 ? MTLIndexTypeUInt32 : MTLIndexTypeUInt16
+                            indexBuffer:gRasterBuffers[packet.Indices]
+                      indexBufferOffset:packet.IndexOffset
+                         indirectBuffer:gRasterBuffers[packet.Indirect]
+                   indirectBufferOffset:packet.IndirectOffset];
+    }
+    else
+    {
+        [gEncoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                             indexCount:packet.IndexCount
+                              indexType:packet.Index32 ? MTLIndexTypeUInt32 : MTLIndexTypeUInt16
+                            indexBuffer:gRasterBuffers[packet.Indices]
+                      indexBufferOffset:packet.IndexOffset
+                          instanceCount:packet.InstanceCount];
+    }
     return RasterStatus::Ready;
 }
 void RasterFrameExtent() noexcept
