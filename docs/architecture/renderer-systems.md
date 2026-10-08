@@ -115,8 +115,10 @@ explains why Ludus does not adopt his general object/XML pipeline.
 | Scheduled range uploads, mutable instance/constants and R8/mip sampling | RHI validates operations; GDI owns tickets, bounded staging and readiness |
 | Reflection/layout growth and ready pipeline requests | Shader tools validate targets; GDI caches/prewarms; Renderer chooses material variants |
 | Compute/storage and indirect operations | Independently negotiated RHI capabilities; Renderer has an authored direct/CPU alternative |
+| Acceleration-structure descriptions/builds, shader query support and exact retained versions | Optional RHI extension; GDI declares build/read/scratch hazards; Renderer owns ray-scene selection and transport |
 
-Each extension requires native and browser evidence under the pinned toolchains.
+Each extension requires native and browser evidence under the pinned toolchains,
+including explicit unsupported results for optional features.
 Do not increase current R1 limits globally as an incidental renderer refactor.
 Keep first consumers within existing limits or explicitly fail their requested
 profile. Detailed retention, state and submission rules remain owned by
@@ -419,6 +421,258 @@ blending, composite into a supported linear intermediate then encode once.
 Antialiasing starts with a simple spatial variant or verified MSAA path; TAA
 is a later feature needing motion vectors, jitter and history rejection tests.
 
+## Ray tracing and path tracing
+
+Ray tracing supplies intersection and visibility queries. Path tracing uses those
+queries to estimate light transport through sampled paths. A ray-traced shadow
+does not require a path tracer; a path tracer does not require a native ray
+pipeline or recursive hit shaders. Treat traversal, transport, sample reuse and
+reconstruction as separate private components with shared scene contracts.
+
+| Rendering mode | Role and initial scope | Cost and fallback policy |
+| --- | --- | --- |
+| Raster | Portable gameplay and direct-draw correctness path | Existing portable profile remains independently usable |
+| Hybrid rays | Raster primary visibility plus selected ray visibility, reflections or indirect diffuse | Effects have independent ray/build/history budgets and authored raster/bake/probe alternatives |
+| Progressive reference path tracing | Frozen-scene editor/debug captures; direct and indirect transport for supported materials | Accumulate independent samples without denoising or temporal reuse; explicit unsupported status on devices/content outside the profile |
+| Real-time path tracing | Optional high-end gameplay mode with moving scenes | Requires measured sampling/reconstruction quality and tail latency; no universal frame-rate promise |
+
+One `GraphicsRenderer` accepts the same scene/view/material versions for these
+modes. Each mode composes a concrete pass plan; do not introduce another asset
+manager, camera stack or GPU lifetime registry. Hybrid transport replaces a
+specified lighting term rather than adding another copy of it. For example,
+ray-traced indirect diffuse replaces the selected probe/lightmap indirect term.
+Full path tracing evaluates supported emitters and scattering directly; it does
+not also add baked lighting, ambient occlusion or prefiltered IBL approximations.
+Record any intentionally mixed approximation in the capture's rendering profile.
+
+### Traversal capability and backend boundary
+
+Start with opaque triangle acceleration structures and shader ray queries on
+verified native devices. Expose distinct capabilities for structure build/update,
+inline queries, dedicated ray pipelines, procedural intersections and motion;
+also query limits, alignment, scratch requirements and shader target support.
+`Unsupported`, `NotReady`, capacity failure and device loss remain explicit.
+Ray hardware, compute availability and bindless support are separate facts.
+
+Khronos's [ray tracing guide](https://docs.vulkan.org/guide/latest/extensions/ray_tracing.html)
+distinguishes shared acceleration structures from query and pipeline execution.
+Queries fit ordinary shader passes; dedicated stages offer different scheduling
+choices. Begin with query-based compute effects and a loop-based path integrator.
+Keep nearest accepted hit and early-exit visibility as separate shader operations.
+Add native ray pipelines only when measured traversal/shading divergence or a
+required intersection program warrants them. Shader binding tables, native
+addresses, hit-group indexing and recursion limits then remain backend details;
+do not force Metal's model into a Vulkan-shaped public table abstraction.
+
+The existing Vulkan subset does not establish support: negotiate the necessary
+extensions/features/dependencies in a separate RHI profile and validate shader
+compiler output. [Metal acceleration structures](https://developer.apple.com/documentation/metal/ray-tracing-with-acceleration-structures)
+also require device/OS/compiler evidence; the pinned MSL 2.3 raster target is not
+proof that a proposed ray shader works. A newer ray target needs an explicit
+toolchain/profile change. Ludus's current WebGPU/WebGL paths have no hardware
+ray contract. A bounded software BVH compute experiment is possible after compute
+support, but it is another implementation with its own cost, not a hardware
+capability or a required browser fallback. Do not hide CPU readbacks behind it.
+
+### Scene and acceleration-structure ownership
+
+Renderer's private ray scene references exact mesh, deformation, transform,
+material and texture versions. BLAS (bottom-level acceleration structures)
+describe geometry; TLAS (top-level structures) instance those geometries. RHI
+owns native structures and authoritative retention; GDI schedules their work.
+
+- Reuse one static BLAS per compatible mesh/geometry version across instances.
+  Key it by layout, topology, build flags and opacity classification. TLAS records
+  contain stable instance IDs, masks, transforms and bounded shading-table indices.
+  A material reload that changes opacity may require a different structure version.
+- The ray scene includes offscreen shadow casters and reflection/indirect geometry.
+  Camera frustum culling of raster packets must not remove ray-visible instances.
+  Streaming regions, ray masks, trace distance and proxy/LOD selection are explicit
+  quality policies. Reference captures require a frozen complete declared scene;
+  missing geometry/residency is a status, not an invisible approximation.
+- Raster and rays use the same selected pose and object transforms. Skin/morph
+  evaluation completes before building/refitting its BLAS and before raster use.
+  Refit only when supported and topology/build flags permit it. Rebuild after
+  measured traversal degradation; animated geometry can make repeated refits slow.
+  Bound rebuild work and expose deferrals or quality reductions.
+- Keep BLAS geometry local and use a declared render origin for TLAS, rays and
+  shading. Multiple views can share a compatible TLAS or use different origin
+  versions. Validate nonuniform/mirrored transforms and geometric-normal winding;
+  singular transforms fail admission. Rebasing invalidates incompatible histories.
+- Declare deformation-write to build-read, BLAS-build to TLAS-build and final
+  build-write to trace-read dependencies. Scratch reuse waits for completion of
+  all overlapping builds, not the end of CPU recording. Cross-queue execution
+  requires explicit RHI ownership and completion evidence.
+- Compaction or relocation publishes a new ready version after its copy/build
+  dependency. Retain every old structure and shading resource until its accepted
+  uses complete; TLAS versions retain the BLAS versions they reference. Never
+  patch an in-flight TLAS address or replace its shading table in place. Build
+  inputs remain alive through builds and longer when later shading reads them.
+
+Start serialized on one queue with static geometry and a full TLAS build when
+instances change. Add supported updates, amortized static builds, compaction and
+queue overlap individually after measuring build time, traversal time and peak
+overlap memory. AS caching is session-local initially; native serialization needs
+an explicit device/driver compatibility and content validation contract.
+
+### Material and intersection parity
+
+Cook one surface description into raster evaluation and ray evaluation/sampling
+variants. Private shader functions define BSDF evaluation, sample and probability
+density with matching lobe weights and conventions; a shared name alone does not
+prove equivalence. Validate albedo, roughness, normals, UVs, emission, handedness
+and texture encoding with raster/ray AOVs (auxiliary output images).
+
+The first reference profile is RGB, triangle surfaces, diffuse/GGX reflection,
+opaque and explicitly alpha-masked materials, finite area emitters, analytic
+point/spot/directional lights and an environment. Add transmission with Fresnel,
+IOR/medium tracking and total internal reflection under a separate tested profile;
+volumes, subsurface scattering, hair and spectral transport are further features.
+Raster alpha blending is not a physically specified transmission model. Unsupported
+materials make a capture incomplete or fail its requested reference profile;
+an error-material preview must never be labeled a reference image.
+
+Retain geometric and shading normals separately, including their front/back-side
+meaning. Opacity acceptance uses the declared texture/threshold/LOD policy in
+both closest-hit and shadow queries; an opaque early-exit query cannot be reused
+for alpha-masked casters without candidate filtering. Two-sided masks and
+transmission visibility are distinct policies. Ray texture filtering has no
+implicit raster derivatives: initially use an explicit fixed-mip reference policy,
+then add verified footprints/ray cones as a named filtering profile. Residency
+and mip-policy changes invalidate accumulation; compare like filtering models.
+
+Carsten Wächter and Nikolaus Binder's “A Fast and Robust Method for Avoiding
+Self-Intersection” (*Ray Tracing Gems*, chapter 6, sections 6.2–6.3) motivates
+barycentric hit reconstruction and scale-aware offsets along the oriented
+**geometric** normal. Thanks to the authors. A global `0.001` offset, shading-normal
+offset or primitive-ID rejection alone is insufficient. Verify the chosen method
+under Ludus's transforms/compiler precision; the chapter itself identifies thin
+crevices and extreme transforms as limitations. Define normalized directions,
+ray interval units and endpoint handling, including offsetting both endpoints
+for area-light visibility segments. Expose offset diagnostics instead of scene
+authors tuning a hidden epsilon.
+
+### Progressive reference integrator
+
+Jakub Boksansky and Adam Marrs's “The Reference Path Tracer” (*Ray Tracing Gems II*,
+chapter 14, especially 14.3.1–14.3.7) supports integrating an inspectable reference
+into the existing renderer. Thanks to them: retain their staged primary-ray/AOV
+checks, shared scene data and simple iterative transport, while replacing their
+DXR-specific setup with Ludus's optional traversal contract. This is a planned
+reference implementation, not a claim that their sample or companion code shipped.
+
+1. Freeze a scene snapshot and all exact resource versions. Generate pinhole
+   rays from the same camera/projection and viewport conventions as raster,
+   sampling within pixel footprints. Compare unjittered center rays first; camera
+   near/far clipping is an explicit primary-visibility policy, distinct from
+   secondary-ray ranges. Thin lens and shutter/motion integration are extensions.
+2. Carry radiance, throughput, sample state and previous sampling information in
+   a bounded iterative loop. At a hit, evaluate emission, sample a light and its
+   visibility, then sample the BSDF to continue. An escaped path evaluates the
+   environment. Start with one light sample and one continuation per vertex.
+3. Combine light and BSDF sampling with multiple importance sampling (MIS).
+   Light selection probability multiplies the light's conditional density;
+   convert area and directional densities to the same measure before weighting.
+   Evaluate the competing density for BSDF-hit emitters/environment and handle
+   delta lights/lobes separately. This avoids double-counting emission and
+   excessive noise from choosing only one proposal. Zero-light and zero-density
+   cases terminate or contribute zero safely, without invalid arithmetic.
+4. Begin compensated Russian roulette after a defined minimum depth; divide
+   surviving throughput by survival probability. A finite maximum depth truncates
+   transport and introduces bias: report it in metadata and perform depth
+   sensitivity checks. Accumulation converges to the declared truncated model,
+   not an unqualified physical ground truth. Energy clamps, path regularization
+   and roughness modifications belong to separately labeled preview profiles.
+5. Accumulate scene-linear, unexposed radiance in FP32 with a defined numerical
+   accumulation scheme and checked per-pixel sample counts. Exposure/tone mapping
+   operate on the displayed mean, never on accumulated samples. For long exports,
+   combine bounded sample batches with a higher-precision offline accumulator;
+   document rounding and count limits. Export linear HDR plus the profile metadata.
+
+Anders Lindqvist's “Multiple Importance Sampling 101” (*Ray Tracing Gems II*,
+chapter 20, sections 20.1.3–20.2) adds the explicit same-measure and matching-PDF
+checks. Thanks to Lindqvist; choose and test a documented heuristic rather than
+copying the sample's scene/light assumptions. The [Gems review](renderer-systems-gems-review.md#ray-and-path-tracing-follow-up)
+records this revision. PBRT 4th edition, [section 13.4](https://pbr-book.org/4ed/Light_Transport_I_Surface_Reflection/A_Better_Path_Tracer),
+provides a further check on emission weights and compensated path termination;
+Ludus's RGB/bounded profile differs from its broader transport implementation.
+
+Use deterministic random sample addressing by pixel, sample index and dimension,
+with a capture seed and versioned sampler. Retries reproduce uncommitted samples;
+the accepted-work boundary controls accumulation just as it controls other
+histories. Store an accumulation key containing camera, viewport/resolution,
+scene/pose, lights, materials/textures, origin, sampler and integrator versions.
+Reset on any change that alters the sampled integral; changing only display
+exposure need not reset unexposed data. Overlays never enter accumulated radiance.
+Raw, independently sampled accumulation is the validation output; a denoised
+preview is an additional image. Measure convergence across multiple seeds.
+Nonfinite contributions or broken density invariants invalidate a reference
+batch and report the offending sample; replacing them with black silently would
+bias the result. Capture jobs reserve a bounded residency budget for their pinned
+versions and support cancellation, releasing submitted uses through completion.
+
+### Hybrid and real-time transport
+
+Introduce effects in order: selected shadow visibility, then roughness-aware
+reflections, then indirect diffuse, each with its own quality and fallback policy.
+Raster provides primary visibility and the attributes needed to launch secondary
+rays. Hit shading uses the same ray-scene tables; screen-only geometry/material
+data is inadequate for an offscreen hit. Assign contributions explicitly so
+reflection/probe blending and partial shadow replacement do not double light.
+
+Trace into effect-specific linear signal buffers with validity, normal/depth,
+roughness, motion and any required hit-distance guides. Define whether signals
+contain albedo, their exposure domain, motion direction/units and guide spaces.
+Keep reconstruction behind concrete pass functions with those contracts. Reproject
+using actual previous camera/object/deformation data; reject disocclusions and
+incompatible material/light/geometry versions. Reflection motion may require hit
+surface motion in addition to the primary surface. A stable camera alone does not
+make a lighting history valid. Bound history memory separately for each view.
+
+Start with ordinary sampling plus a modest, inspectable temporal/spatial filter.
+ReSTIR DI (direct light sampling), GI (indirect paths) and PT (path resampling)
+are different upgrades. Reservoir reuse requires specified target densities,
+weights, sample identity, visibility revalidation, age limits and bias policy;
+do not substitute “reuse the last ray” for an estimator. The May 2026 paper
+[ReSTIR PT Enhanced](https://research.nvidia.com/labs/rtr/publication/lin2026restirptenhanced/)
+by Daqi Lin, Markus Kettunen and Chris Wyman identifies contemporary work on
+reconnection, correlation and reuse cost. Its abstract is discovery evidence,
+not a completed algorithm review or a Ludus speedup. Review the full estimator
+and validate it against the independent reference before adopting it.
+
+Keep a single loop kernel initially. A wavefront implementation can later split
+intersection, hit shading and shadow work into compact queues when divergence
+and occupancy measurements justify added dispatches/storage; PBRT's
+[chapter 15](https://pbr-book.org/4ed/Wavefront_Rendering_on_GPUs) is a follow-up
+source. Queue bounds are correctness contracts: process bounded tiles or return
+an explicit incomplete result instead of dropping paths. Sorting, ray reordering,
+adaptive sampling and reduced resolution need independent quality/cost evidence.
+Fix sampling variance and AS build/traversal costs before adding a general GPU
+work scheduler. No vendor denoiser or resampling SDK is a mandatory dependency.
+
+### Ray milestones and evidence
+
+These optional milestones depend on explicit compute/material/attachment and RHI
+extensions; they do not claim any existing R1 backend already traces rays.
+
+| Phase | Deliverable | Acceptance |
+| --- | --- | --- |
+| RT0: scene/query foundation | Optional native capability profile, static triangle BLAS/TLAS, retained tables, primary and visibility queries | Raster/ray instance, position, normal, UV and depth agreement; offscreen hits; build/read/lifetime stress; unsupported devices preserve raster |
+| RT1: progressive reference | Frozen RGB surface profile, light/environment/BSDF sampling, MIS, raw accumulation and HDR export | Furnace/Cornell/emissive fixtures, sampling/PDF normalization, multiple seeds/depths, no double lighting; unsupported content and overflow are visible |
+| RT2: hybrid effects | Bounded shadows, reflections and then indirect diffuse with reconstruction/fallbacks | Raw and reconstructed images compared to RT1; moving/disoccluded/reloaded scenes, per-view history, build/ray/filter median and tail times |
+| RT3: dynamic scene scaling | Skinned/morphed BLAS, measured refit/rebuild, optional compaction and scheduling | Pose parity, changing topology/opacity, extreme/mirrored transforms, thin geometry, streaming/rebase/loss and peak overlap memory |
+| RT4: high-end real-time PT | Reviewed resampling, reconstruction and optional wavefront/ray-pipeline variants | Scene suite at fixed resolution/quality budget; temporal artifacts and error versus RT1; measured target-GPU benefit and disabled-mode support |
+
+Track AS resident/scratch/pending bytes, build/refit/compaction costs, traced
+ray classes, path-depth distribution, opacity candidates, NaN/invalid-PDF counts,
+sample counts, rejected histories and incomplete tiles. Actual hardware traversal
+statistics may be unavailable; distinguish estimates from measured counters.
+Inspect instance/primitive IDs, barycentrics, geometric/shading normals, ray offsets,
+BSDF/light PDFs, MIS weights, direct/indirect/emission AOVs and raw/filtered error.
+Selected-pixel path logging is bounded and opt-in. Reference scene fixtures and
+statistical image tolerances matter more than reproducing one vendor's exact
+floating-point image. No synchronous shipping-frame readback is required.
+
 ## Debug drawing, sprites, text and fonts
 
 Debug submissions contain explicit view mask, space, depth mode, color domain,
@@ -508,9 +762,10 @@ that record. Do not build a second command serializer to obtain basic tracing.
 Optimization acceptance compares image correctness and memory/latency as well as
 throughput. Turn on a new path only after representative scenes show an improvement
 at acceptable tail latency and maintenance cost. Keep opt-outs for investigation.
-GPU-driven geometry, async compute, ray-traced GI, virtual textures and virtual
-shadow maps need separate proposals with residency, synchronization, capability
-fallback and debugging evidence. They are modern candidates, not unconditional
+GPU-driven geometry, async compute, virtual textures and virtual shadow maps need
+separate proposals with residency, synchronization, capability fallback and
+debugging evidence. Ray/path tracing follows the optional RT0–RT4 plan above.
+These are modern candidates, not unconditional
 definitions of a good low-level renderer.
 
 ### Modern technique selection
@@ -529,7 +784,7 @@ required before implementation.
 | GPU visibility/indirect | CPU submission/culling dominates after ordinary batching | Stable object IDs, output capacity, conservative occlusion, direct reference mode |
 | Bindless/mesh shaders | Verified target limits and workload justify reduced binding or geometry work | Descriptor/version retirement and authored portable shader variants |
 | Temporal upscaling/TAA | Shading cost or image quality warrants history complexity | Motion vectors for camera/object/deformation, disocclusion, exposure and jitter conventions |
-| Ray-traced/stochastic lighting | Dynamic scenes need quality beyond bake/probe/direct-light approximations | Acceleration-structure ownership, geometry/material parity, sampling and denoiser history budgets |
+| Hybrid ray tracing / real-time path tracing | Dynamic scenes need quality beyond bake/probe/direct-light approximations | RT0–RT4: shared ray scene, retained structures, independent reference, reviewed estimators and reconstruction budgets |
 | Virtual textures/shadows | Measured working set exceeds conventional residency | Page-table versions, feedback latency, initialization, eviction proof and coarse fallback |
 | Async compute | Actual queue overlap improves total time without excessive bandwidth contention | Cross-queue dependencies, ownership and completion proof in RHI |
 
@@ -549,7 +804,7 @@ These phases complement RHI R0–R5; they do not rename or claim completion of t
 | L3: material/content versions | Cook/reflection/layout expansion, texture formats/mips and pipeline prewarm | Per-target layout fixtures; invalid reload preserves old image; mip/color semantics; bounded cache/upload overlap and deterministic fallback |
 | L4: lighting baseline | Lit material, bounded direct lists, environment, shadows, baked assets, linear intermediate/output | Reference BRDF/color tests; no double lighting, shadow invalidation/atlas borders, saturation/overflow and LDR/HDR capability variants |
 | L5: measured scaling | Clustered forward, improved culling/LOD, optional native parallel recording | Dense-light and many-object fixtures; direct-path comparisons, overflow correctness, physical GPU median/tail/memory/latency evidence |
-| L6: optional advanced effects | Separate approved temporal/GPU-driven/RT/virtual-residency plans | Capability probes and disabled-path support; image/temporal tests and workload-specific gains before default enablement |
+| L6: optional advanced effects | Temporal/GPU-driven/virtual-residency plans and the RT0–RT4 ray plan | Capability probes and disabled-path support; image/temporal tests and workload-specific gains before default enablement |
 
 Use empty, single triangle, Cornell box, transparent intersections, split-screen,
 many small meshes, many lights, heavy overdraw, animated bounds, streamed textures,

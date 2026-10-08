@@ -9,7 +9,8 @@ camera, resource and text contracts remain in their existing owners.
 
 Searched the local `references/game-dev-gems-toc.md` for renderer architecture,
 submission, viewport, materials/shaders, culling, lighting, shadows, atlases and
-fonts. Selected six articles for actual text inspection. Read the relevant
+fonts, then ray/path tracing for the follow-up. Selected six initial articles and
+three ray/path-tracing chapters for actual text inspection. Read the relevant
 sections listed below, including limitations and tradeoffs; this is not a claim
 to have read every chapter/book or inspected companion code. The atlas and font
 chapters were inspected through their conclusions/references. Some source text
@@ -30,6 +31,9 @@ not alter the design merely because their names sounded relevant.
 | Arseny Kapoulkine, “Writing an Efficient Vulkan Renderer,” *GPU Zen 2* (2019), IV.4 | pp. 215–247; revisited 4.4–4.6, ordered dependencies, attachments and pipelines | 227–259; pertinent sections 250–257 |
 | Manny Ko, “A Fast and High-Quality Texture Atlasing Algorithm,” *Game Engine Gems 3* (2016), chapter 9 | pp. 111–120; packing decomposition, borders and topology-aware filtering | 106–115 |
 | Aurelio Reis, “Fast Font Rendering with Instancing,” *Game Programming Gems 8* (2010), 1.1 | pp. 3–11; quad data, batching, instancing limits and painter order | 18–26 |
+| Jakub Boksansky and Adam Marrs, “The Reference Path Tracer,” *Ray Tracing Gems II* (2021), chapter 14; [DOI](https://doi.org/10.1007/978-1-4842-7185-8_14) | pp. 161–187; selected portions of 14.2 and 14.3.1–14.3.7: scene/build lifetime, primary-ray parity, RNG/accumulation, termination and light visibility | 207–233 |
+| Anders Lindqvist, “Multiple Importance Sampling 101,” *Ray Tracing Gems II* (2021), chapter 20; [DOI](https://doi.org/10.1007/978-1-4842-7185-8_20) | pp. 327–337; 20.1–20.2, especially density measure conversion and matching sampler/PDF evaluation | 368–378; pertinent 368–377 |
+| Carsten Wächter and Nikolaus Binder, “A Fast and Robust Method for Avoiding Self-Intersection,” *Ray Tracing Gems* (2019), chapter 6; [DOI](https://doi.org/10.1007/978-1-4842-4427-2_6) | pp. 77–85; 6.1–6.3 and limitations on p. 85 | 113–121 |
 
 Visual inspection covered *GPU Pro 3* Figure 4.23 (printed p. 313), *GPU Pro 4*
 Figure 4.3 (p. 108), and *Game Engine Gems 3* Figure 9.1 (p. 113). The first
@@ -138,6 +142,75 @@ layout or font-quality specification.
 | Texture semantics and atlases | Distinct atlas owners and mip/filter footprints reserved before packing | Lightmap seams, sprite bleed and glyph gutters |
 | Instanced glyphs | Small-label and batch-break comparisons, preserved painter order | Pixel parity and upload-byte/CPU/GPU measurements |
 | Pipeline prewarming | Enumerate legal material states; expose cold misses | First-use/reload/driver-cache failure behavior |
+| Ray tracing previously an optional technique row | Shared ray scene and RT0–RT4 plan: traversal, reference transport, hybrid effects and high-end PT | AS lifetime/pose parity, estimator convergence, reconstruction quality and target-device budgets |
+
+## Ray and path tracing follow-up
+
+The follow-up reads the three chapters above from the catalog's *Ray Tracing
+Gems* entries. The [architecture's ray/path section](renderer-systems.md#ray-tracing-and-path-tracing)
+now separates intersection infrastructure, independent reference integration,
+hybrid lighting and real-time reconstruction. This is additional design work;
+no existing RHI implementation or browser capability is implied.
+
+**Boksansky and Marrs:** Their in-engine progressive reference uses the existing
+scene and compares primary hits/material attributes against raster output before
+building up transport. It distinguishes persistent geometry/structures from
+temporary build scratch, handles RNG/linear accumulation, and makes termination
+and light visibility explicit. This motivates an early reference mode, exact
+resource/pose parity, AOV comparisons and completion-scoped build memory. The
+discussion of maximum depth acknowledges truncation bias; the accumulation
+discussion permits a highest-resolution texture policy at a performance cost.
+
+**Departure:** Use explicit fixed-mip/filtering metadata rather than claim all
+texture models agree; isolate query execution from transport instead of adopting
+the sample's DXR ray pipeline and bindless setup. Add immutable build/shading
+versions, accumulation keys and incomplete-content statuses under Ludus's current
+owners. Reference quality applies only to the declared supported transport model.
+No sample code, assets or vendor integration layer was imported.
+
+**Lindqvist:** Light sampling and material sampling favor different configurations.
+His MIS construction compares probabilities in a common measure and requires
+the separately evaluated light PDF to match the actual selection/sampling scheme.
+The architecture therefore requires the light-selection probability, conditional
+light density, explicit area/direction conversion and BSDF-hit emission weighting.
+These are correctness requirements, not merely a late performance optimization.
+
+**Departure:** The chapter's example uses surface-area densities and the balance
+heuristic; Ludus may use directional densities and another verified heuristic.
+Analytic delta lights/lobes need explicit handling beyond the finite-area examples.
+Normalization and multi-seed convergence fixtures accompany the estimator.
+
+**Wächter and Binder:** They analyze why primitive exclusion, fixed `tmin`,
+shading-normal offsets and fixed-length origin offsets fail. Barycentric surface
+reconstruction plus adaptive geometric-normal offsets motivates the ray-spawn
+contract and diagnostics. Their limitations include very thin crevices and large
+instance transforms; this adds thin-geometry/extreme-transform fixtures and a
+render-origin rule, not a promise of perfect self-intersection elimination.
+
+**Departure:** Verify the method against the actual backend precision and
+instancing path before choosing constants or copying code. Numerical safeguards
+must preserve nearby valid intersections as well as remove acne. The architecture
+records the idea without reproducing the chapter's implementation.
+
+Current cross-checks consulted Khronos's [ray tracing guide](https://docs.vulkan.org/guide/latest/extensions/ray_tracing.html)
+for separate query/pipeline capabilities, shared acceleration structures and
+build/read/scratch synchronization; Apple's [acceleration-structure documentation](https://developer.apple.com/documentation/metal/ray-tracing-with-acceleration-structures)
+was available only as a search summary, with the full page requiring JavaScript.
+Metal contracts/toolchain support still require implementation-time verification.
+Matt Pharr, Wenzel Jakob and Greg Humphreys's *Physically Based Rendering*, fourth
+edition (2023), [section 13.4](https://pbr-book.org/4ed/Light_Transport_I_Surface_Reflection/A_Better_Path_Tracer),
+was inspected for MIS emission weights and compensated termination. Its spectral
+and wider material model is not silently adopted as the RGB reference scope.
+
+Daqi Lin, Markus Kettunen and Chris Wyman's [“ReSTIR PT Enhanced: Algorithmic
+Advances for Faster and More Robust ReSTIR Path Tracing”](https://research.nvidia.com/labs/rtr/publication/lin2026restirptenhanced/)
+(*I3D / Proceedings of the ACM on Computer Graphics and Interactive Techniques*,
+May 2026) was checked through its publication page and abstract. It identifies
+reconnection, sample correlation and reuse overhead as contemporary review topics.
+The paper's speedup is not a Ludus result. Full estimator review remains necessary
+before RT4 adoption; similarly, PBRT chapter 15's overview was inspected only as
+a wavefront follow-up source. Denoising/resampling never replaces independent
+raw reference samples in correctness comparisons.
 
 ## Other articles and current research
 
