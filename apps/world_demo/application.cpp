@@ -66,7 +66,7 @@ bool Accepted(rhi::ResourceStatus status) noexcept
     return status == rhi::ResourceStatus::Ready || status == rhi::ResourceStatus::Pending;
 }
 } // namespace
-bool Application::Start(rhi::BackendSelection selection) noexcept
+bool Application::Start(rhi::BackendSelection selection, const char* levelBytes, usize levelSize) noexcept
 {
     Shutdown();
     mSession = Session{};
@@ -120,7 +120,8 @@ bool Application::Start(rhi::BackendSelection selection) noexcept
         mState = AppState::Failed;
         return false;
     }
-    if (mSession.RequestLoad(ExampleLevel()).Error != LevelError::None)
+    if (mSession.RequestLoad(levelBytes != nullptr ? std::string_view(levelBytes, levelSize) : ExampleLevel()).Error !=
+        LevelError::None)
     {
         Shutdown();
         mState = AppState::Failed;

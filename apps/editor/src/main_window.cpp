@@ -5,6 +5,7 @@
 #include "internal/editor_files.h"
 #include "internal/project_creation_dialog.h"
 #include "internal/project_setup_dialog.h"
+#include "internal/scene_workspace.h"
 #include "internal/script_workspace.h"
 #include "internal/workspace_style.h"
 
@@ -77,6 +78,30 @@ MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QStr
                 }
             }
         }
+    });
+    connect(Scene_, &SceneWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
+    connect(Scene_, &SceneWorkspace::PlayRequested, this, [this]() {
+        const auto& state = Controller_->State();
+        const auto base = QFileInfo(state.DescriptorPath).absolutePath();
+        const auto source = QDir(base).absoluteFilePath(state.Saved.SourceDir);
+        const auto cwd = QDir(state.Saved.Version == 2 ? base : source).absoluteFilePath(state.Saved.RunCwd);
+        bool matches = false;
+        for (int i = 0; i + 1 < state.Saved.RunArgs.size(); ++i)
+        {
+            if (state.Saved.RunArgs[i] == QStringLiteral("--level") &&
+                QFileInfo(QDir(cwd).absoluteFilePath(state.Saved.RunArgs[i + 1])).canonicalFilePath() == Scene_->Path())
+            {
+                matches = true;
+            }
+        }
+        if (state.Saved.Target != QStringLiteral("ludus_world_demo") || !matches)
+        {
+            StatusLabel_->setText(
+                QStringLiteral("For this scene adapter, set the executable target to ludus_world_demo and run "
+                               "arguments to --level and this scene path, then save Project settings."));
+            return;
+        }
+        LaunchAfterPreview(LaunchAction::Run);
     });
     connect(Scripts_, &ScriptWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
     connect(qApp, &QApplication::focusChanged, this, [this](QWidget* before, QWidget* after) {
@@ -312,10 +337,11 @@ void MainWindow::BuildMenus()
 
 void MainWindow::LaunchAfterPreview(LaunchAction action, const QString& debugger, bool setup)
 {
-    if (AudioLaunchPending_ || AudioClosing_ || !Scripts_->ConfirmDiscard())
+    if (AudioLaunchPending_ || AudioClosing_ || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard())
     {
         return;
     }
+    Scene_->StopPreview();
     AudioLaunchPending_ = true;
     Audio_->setEnabled(false);
     Audio_->ShutdownPreview();
@@ -439,7 +465,7 @@ void MainWindow::OnOpenRequested()
 void MainWindow::OpenProjectPath(const QString& path)
 {
     if (path.isEmpty() || !Controller_->Caps().CanOpen || Content_->Importing() || AudioClosing_ ||
-        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()))
+        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard()))
     {
         return;
     }
@@ -454,6 +480,11 @@ void MainWindow::OpenProjectPath(const QString& path)
 void MainWindow::OnSaveRequested()
 {
     auto* area = WorkTabs_->currentWidget();
+    if (area == Scene_)
+    {
+        (void)Scene_->Save();
+        return;
+    }
     if (area == Scripts_)
     {
         (void)Scripts_->Save();
@@ -487,7 +518,8 @@ bool MainWindow::SaveProjectSettings()
         StatusLabel_->setText(QStringLiteral("Finish or cancel content work before saving a changed source root."));
         return false;
     }
-    if (state.Draft.SourceDir != state.Saved.SourceDir && (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()))
+    if (state.Draft.SourceDir != state.Saved.SourceDir &&
+        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard()))
     {
         return false;
     }
@@ -508,7 +540,7 @@ void MainWindow::OnReloadRequested()
         return;
     }
     CommitProjectFields();
-    if (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard())
+    if (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard())
     {
         return;
     }
@@ -568,6 +600,7 @@ void MainWindow::OnStateChanged()
     if (state.Document == DocumentState::ProjectLoaded)
     {
         const auto root = QDir(QFileInfo(state.DescriptorPath).absolutePath()).absoluteFilePath(state.Saved.SourceDir);
+        Scene_->SetProject(root, state.ProjectEpoch);
         Scripts_->SetProject(QFileInfo(state.DescriptorPath).absolutePath(), root, state.Saved.Preset);
         Audio_->SetRoot(QDir(root).absoluteFilePath(QStringLiteral("content")));
         Content_->SetProject(QDir(root).absoluteFilePath(QStringLiteral("content")), state.ProjectEpoch);
@@ -575,6 +608,7 @@ void MainWindow::OnStateChanged()
 
     else
     {
+        Scene_->SetProject({}, state.ProjectEpoch);
         Scripts_->SetProject({}, {}, {});
         Audio_->SetRoot(QString());
         Content_->SetProject(QString(), state.ProjectEpoch);
@@ -975,7 +1009,7 @@ bool MainWindow::ConfirmProjectChange(const QString& action)
 void MainWindow::OnNewProject()
 {
     if (!Controller_->Caps().CanProjectCreate || Content_->Importing() ||
-        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()) ||
+        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard()) ||
         !ConfirmProjectChange(QStringLiteral("creating another project")))
     {
         return;
@@ -990,7 +1024,7 @@ void MainWindow::OnNewProject()
 void MainWindow::OnCloseProject()
 {
     if (!Controller_->Caps().CanCloseProject || Content_->Importing() || AudioLaunchPending_ || AudioClosing_ ||
-        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()) ||
+        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard()) ||
         !ConfirmProjectChange(QStringLiteral("closing the project")))
     {
         return;
@@ -1133,7 +1167,8 @@ void MainWindow::closeEvent(QCloseEvent* event)
             event->ignore();
             return;
         }
-        if ((!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard()) || !Configuration_->ConfirmDiscard())
+        if ((!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard()) ||
+            !Configuration_->ConfirmDiscard())
         {
             event->ignore();
             return;

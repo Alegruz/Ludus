@@ -3,9 +3,9 @@
 The editor is an **optional, OFF-by-default** native developer tool
 (`apps/editor`, target `ludus_editor`). It opens a project descriptor, edits its
 native build/launch settings, saves, reopens, configures/builds, runs the
-selected executable in a separate process, stops it, and reports failures. It is
-not a scene editor and embeds no game framebuffer; the runtime has its own
-window and the editor's status area only describes it.
+selected executable in a separate process, stops it, and reports failures. It
+also provides a bounded world-demo scene authoring adapter. Trusted authoring
+rendering and gameplay use separate windows; the status area describes the runtime.
 
 See the specification package for the authoritative contract:
 `.kiro/specs/editor-workspace/{requirements,design,tasks}.md` and
@@ -20,6 +20,8 @@ and subsequent authoring stages.
 | --- | --- |
 | Welcome | New/Open and recent projects while no project is open |
 | Project settings | Project name, provider, source directory, preset, target and arguments |
+| Scene | World-demo level selection, transforms, history, save/recovery and trusted preview |
+| Scripts | Project-owned script and sequence drafts |
 | Audio | Content selection, definitions, save and preview |
 | Configuration | Independent offline configuration preview and preference editing |
 | Live Inspector | Copied runtime state and supported live property operations |
@@ -290,6 +292,115 @@ With the Qt prerequisites installed, include the editor in sanitizer validation:
 ./scripts/build linux-clang-asan-ubsan
 ./scripts/test linux-clang-asan-ubsan
 ```
+
+## S4 scene authoring
+
+The Scene tab is the first concrete game-owned adapter, using the same v1
+[level codec](../architecture/level-data.md) as [world demo](../examples/world-demo.md).
+It accepts up to 64 KiB of JSON, 32 authored objects and 16 collision boxes.
+Player, enemy, exit and their assets belong to this sample schema; they are not
+engine entity types or a general reflection API. Open reads a regular file inside
+the current saved source root. Invalid candidates preserve the current scene,
+identity, selection and history. Browser scene authoring is explicitly unavailable.
+
+Select an authored ID in the hierarchy. Enter position in metres, rotation in
+radians, and positive scale in the inspector, then **Apply transform**. Incomplete
+numbers remain editable buffers bound to the original object and revision; Save
+refuses invalid or stale pending text. **Reset pending fields** explicitly accepts
+current document values after a buffer conflict. Duplicate a
+selected enemy or exit to place another object with a fresh authored ID. The
+schema permits exactly one player. Selection survives canonical ordering and
+Undo/Redo; a temporarily missing object does not become another row's object.
+The shared Save/Undo/Redo actions follow the active work area and focused text.
+
+The private Qt-free scene document validates whole candidates before publication.
+Its fixed history retains 32 snapshots (under 512 KiB), uses monotonic revisions,
+and compares saved content separately from revision. A transform gesture previews
+only transient state, accepts one history item, and cancels on Escape, focus loss,
+resize or surface teardown. Save captures the committed draft, not a preview;
+acknowledging an older saved snapshot leaves subsequent edits dirty. Both sample
+runtime and Editor use the original codec and canonical authored-ID ordering.
+
+### Enable the rendered authoring surface
+
+The normal Editor build supports document work without shader tools. For a
+trusted native rendered preview, explicitly prepare the pinned tools and select
+`LUDUS_EDITOR_RENDER_PREVIEW`. For Linux:
+
+```bash
+./init.sh --cli linux-clang-development --preset-only --with-editor --with-tests
+./scripts/shader-probe bootstrap
+out/host-tools/venv/bin/cmake --preset linux-clang-development \
+  -DLUDUS_EDITOR_RENDER_PREVIEW=ON -DLUDUS_BUILD_WORLD_DEMO=ON \
+  -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
+  -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val"
+out/host-tools/venv/bin/cmake --build --preset linux-clang-development \
+  --target ludus_editor ludus_editor_tests ludus_editor_scene_tests ludus_world_demo
+```
+
+For macOS use `macos-clang-development` and omit `LUDUS_SPIRV_VALIDATOR`; its
+pinned Slang path emits Metal. With tools prepared, **Open rendered preview**
+creates one main-thread Platform-owned window and connects it to RHI. No Qt
+`winId()` borrowing, cross-process embedding, CPU-painted stand-in or project
+module loading is involved. Shutdown releases RHI before the window. This
+recovery path supports one authoring surface; multiwindow/multisurface ownership
+and an embedded mouse gizmo remain follow-ups.
+
+In the preview, WASD moves the white pick cursor, Enter picks an object, Tab
+cycles IDs, and arrow keys preview a 0.1-metre transform. Releasing all arrows
+accepts one edit. Escape cancels. The CPU pick uses the shader's rotated/scaled
+rectangles and draw order, and compares document, revision, camera, surface and
+transient-preview identities. Resize and cancelled previews invalidate older
+frames. Native Cocoa events are normalized through either the host responder
+or Ludus event pump, with duplicate suppression. Rendering failure leaves the
+document editable/saveable; reopening the preview starts a fresh RHI session.
+
+### Save, recovery and Play
+
+Scene Save uses a cooperative sidecar lock, compares the current source bytes
+with the loaded baseline, and publishes through `QSaveFile` with direct-write
+fallback disabled. Source conflicts and failed replacement preserve draft and
+history. These are atomic-visibility/cooperating-writer guarantees, not an
+exclusive lock against external programs or power-loss durability.
+
+Committed dirty revisions also write a bounded `<scene>.ludus-recovery` snapshot
+atomically. Its version, baseline SHA-256 and payload SHA-256 reject changed
+sources and truncated/changed recovery. Reopening never applies recovery
+silently: **Restore recovery snapshot** creates an undoable edit only over the
+matching saved source. Failed recovery writes are reported. Pending numeric text
+and transient gestures are not journaled. This first recovery slot is shared per
+scene; a later cooperating editor may replace it. Save/discard removes it; normal
+Undo back to saved content removes recovery written by this editor. This is a
+last-successful-snapshot policy, not a claim that every keystroke survives a crash.
+
+For this adapter's **Play saved scene**, configure Project settings to build
+`ludus_world_demo` with `LUDUS_BUILD_WORLD_DEMO=ON`, and set run arguments to
+`--level` followed by the scene path (relative to the configured run working
+directory, or absolute). Save Project settings. The action saves the scene,
+closes authoring rendering, then uses the existing supervised Build/Run workflow.
+The child independently reads and validates that saved file before activation;
+simulation never writes authored transforms back to the Editor. The action does
+not rewrite project settings or execute a different target implicitly. On macOS
+this sample Build/Run is distinct from the still-unavailable native Live Play /
+hot-reload protocol. `--headless --level <file>` and `--frames 3 --level <file>`
+provide bounded player acceptance paths.
+
+Portable scene tests cover failed-load rollback, all-or-nothing multi-target
+edits, cancelled gestures, saved-content history, eviction, save-during-edit
+acknowledgement, and stale picking. Widget/persistence tests cover invalid
+buffers, canonical save/reopen, source conflicts, placement and corrupt/stale /
+failed recovery publication. The opt-in Cocoa journey exercises actual Metal
+frames, native keys, resize, save/reopen, and a separately rendered player:
+
+```bash
+QT_QPA_PLATFORM=cocoa LUDUS_SCENE_TEST_PLAYER="$PWD/out/build/macos-clang-development/apps/world_demo/ludus_world_demo" \
+  out/build/macos-clang-development/apps/editor/ludus_editor_tests '[.scene-native]'
+```
+
+Linux compilation and portable/offscreen checks do not qualify native Wayland
+input or compositor behavior. Windows embedding, pointer gizmos, general project
+schemas, large-scene measurements and browser authoring remain explicit gates.
+See [rendering/platform obligations](../architecture/editor-gui-systems.md#rendering-and-platform-hosts).
 
 ## S3 content browser
 

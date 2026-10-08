@@ -57,6 +57,10 @@ constexpr usize MAX_EVENTS_PER_PUMP = 256;
 CocoaWindow* gWindows[MAX_WINDOWS] = {};
 bool gInitialized = false;
 bool gOwnsApplication = false;
+// A host such as Qt may dispatch AppKit events without entering PumpEvents.
+// Responder routing below covers that path; this pointer prevents duplicate
+// physical records when our own pump already normalized the same event.
+NSEvent* gNormalizedEvent = nil;
 LudusCocoaApplicationDelegate* gApplicationDelegate = nil;
 LudusCocoaApplicationObserver* gApplicationObserver = nil;
 
@@ -172,12 +176,27 @@ void PumpEvents() noexcept
                     window->KeyEvent(event);
                 }
             }
+            NSEvent* previous = gNormalizedEvent;
+            gNormalizedEvent = event;
             [NSApp sendEvent:event];
+            gNormalizedEvent = previous;
         }
         [NSApp updateWindows];
     }
 }
 } // namespace
+
+void DispatchResponderKey(NSEvent* event) noexcept
+{
+    if (!MainThread() || event == gNormalizedEvent)
+    {
+        return;
+    }
+    if (auto* window = FindWindow(event.window))
+    {
+        window->KeyEvent(event);
+    }
+}
 
 void CloseAllWindows() noexcept
 {
@@ -521,16 +540,15 @@ void CocoaWindow::KeyEvent(NSEvent* event) noexcept
 }
 - (void)keyDown:(NSEvent*)event
 {
-    // The shared pump already delivered the physical event to its owning sink.
-    (void)event;
+    ludus::platform::cocoa::DispatchResponderKey(event);
 }
 - (void)keyUp:(NSEvent*)event
 {
-    (void)event;
+    ludus::platform::cocoa::DispatchResponderKey(event);
 }
 - (void)flagsChanged:(NSEvent*)event
 {
-    (void)event;
+    ludus::platform::cocoa::DispatchResponderKey(event);
 }
 @end
 

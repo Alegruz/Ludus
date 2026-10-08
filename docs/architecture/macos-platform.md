@@ -55,6 +55,9 @@ Window focus loss, application deactivation and close deliver an empty, unfocuse
 release events. Attaching or replacing a sink synchronizes its current baseline
 on the next pump. Physical events normalize before AppKit dispatch, including
 Command shortcuts and key-up events that AppKit may otherwise route specially.
+When an existing host such as Qt pumps AppKit, the owned view's key/modifier
+responders normalize events too. Events already normalized by Ludus's pump are
+suppressed in that responder path, so native delivery remains exactly once.
 Callbacks ingest input only: they must not destroy a window during dispatch.
 
 ## Validation

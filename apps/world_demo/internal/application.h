@@ -18,8 +18,9 @@ enum class AppState : uint8
 class Application final
 {
 public:
-    [[nodiscard]] bool
-    Start(graphics::rhi::BackendSelection selection = graphics::rhi::BackendSelection::Auto) noexcept;
+    [[nodiscard]] bool Start(graphics::rhi::BackendSelection selection = graphics::rhi::BackendSelection::Auto,
+                             const char* levelBytes = nullptr,
+                             usize levelSize = 0) noexcept;
     [[nodiscard]] AppState Frame() noexcept;
     void Shutdown() noexcept;
     /// Opt in to immediate planar player follow; default retains authored fixed camera.

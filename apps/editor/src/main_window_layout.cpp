@@ -2,6 +2,7 @@
 #include "internal/configuration_workspace.h"
 #include "internal/content_browser.h"
 #include "internal/main_window.h"
+#include "internal/scene_workspace.h"
 #include "internal/script_workspace.h"
 
 #include <ludus/foundation/base/types.h>
@@ -117,6 +118,8 @@ void MainWindow::BuildUi()
     Audio_ = new AudioWorkspace(audioScroll);
     audioScroll->setWidget(Audio_);
     WorkTabs_->addTab(audioScroll, QStringLiteral("&Audio"));
+    Scene_ = new SceneWorkspace(WorkTabs_);
+    WorkTabs_->addTab(Scene_, QStringLiteral("&Scene"));
     Scripts_ = new ScriptWorkspace(Controller_, WorkTabs_);
     WorkTabs_->addTab(Scripts_, QStringLiteral("&Scripts"));
     Configuration_ = new ConfigurationWorkspace(WorkTabs_);
