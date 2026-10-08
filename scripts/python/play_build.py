@@ -8,13 +8,14 @@ import hashlib
 import os
 from pathlib import Path
 import selectors
+import sys
 
 from editor_tool import (Operation, OperationResult, Plan, configure_argv, FILE_API_CLIENT,
                          ProtocolError, _StageFailed, Cancelled)
 from ludus_tools.cmake_setup import validate_project_presets
 from ludus_tools.resolve import assert_stamp_unchanged, write_stamp
 from play_documents import DocumentError, TuningDocument, encode_authored, read_play_descriptor
-from play_probe import ModuleProbe, ProbeError, elf_identity
+from play_probe import ModuleProbe, ProbeError, native_identity
 from play_session import PublishError, publish_generation, source_input_digest
 
 
@@ -73,10 +74,12 @@ class GenerationOperation(Operation):
             return OperationResult("failed", self._stage, code, str(exc), cleanup_confirmed=confirmed)
 
     def _probe(self, staging, module_name, host_name, lease_fd):
-        module = elf_identity(staging / module_name)
-        host = elf_identity(staging / host_name)
-        if module["elf_type"] != 3:
-            raise ProbeError("gameplay module must be an ELF shared object")
+        module = native_identity(staging / module_name, staging / (module_name + ".dwarf") if sys.platform == "darwin" else None)
+        host = native_identity(staging / host_name, staging / (host_name + ".dwarf") if sys.platform == "darwin" else None)
+        if module["artifact_type"] != "module" or (sys.platform == "darwin" and host["artifact_type"] != "host"):
+            raise ProbeError("generation requires a gameplay module and a native host executable")
+        if sys.platform == "darwin" and module["cpu"] != host["cpu"]:
+            raise ProbeError("gameplay module and host architectures disagree")
         probe = ModuleProbe(staging / host_name, staging / module_name, cwd=self._plan.run_cwd,
                             env=self._plan.env, lease_fd=lease_fd)
         selector = selectors.DefaultSelector()
@@ -102,12 +105,28 @@ class GenerationOperation(Operation):
         return {**metadata, "module_build_id": module["build_id"], "host_build_id": host["build_id"],
                 "embedded_symbols": module["embedded_symbols"] and host["embedded_symbols"]}
 
+    def _symbols(self, module, host, plan):
+        if sys.platform != "darwin":
+            return None, None
+        # Prefer dsymutil from the selected pinned compiler, never an unrelated Homebrew LLVM.
+        compiler = Path(plan.compiler or self._context.engine.clang_cxx(self._context.tooling_root)).resolve()
+        tool = compiler.parent / "dsymutil"
+        if not tool.is_file():
+            raise PublishError("pinned dsymutil is missing; run init before live play")
+        symbols = []
+        for artifact in (module, host):
+            output = artifact.with_name(artifact.name + ".dwarf")
+            self._run_stage("publishing", [str(tool), "--flat", "--out", str(output), str(artifact)],
+                            plan.source_dir, plan.env, "SymbolsFailed")
+            symbols.append(output)
+        return tuple(symbols)
+
     def _build_generation(self, descriptor, plan):
         self._plan = plan
         sidecar = read_play_descriptor(self._project_path.parent)
         if sidecar is None:
             raise PublishError("project has no ludus.play.json; executable Run remains available")
-        if plan.descriptor.preset not in ("linux-clang-debug", "linux-clang-development"):
+        if plan.descriptor.preset not in ("linux-clang-debug", "linux-clang-development", "macos-clang-debug", "macos-clang-development"):
             raise PublishError("live editing requires a Debug or Development native build")
         try:
             validate_project_presets(plan.cmake[0], plan.source_dir, plan.env, plan.descriptor.preset)
@@ -140,9 +159,10 @@ class GenerationOperation(Operation):
         self._stage = "publishing"
         self._writer.phase(self._stage)
         self._check_cancel()
+        symbols = self._symbols(module, host, plan)
         generation = publish_generation(
             generations_root=self._project_path.parent / ".ludus/generations" / descriptor.preset,
-            module_artifact=module, host_artifact=host, symbol_artifact=None,
+            module_artifact=module, host_artifact=host, symbol_artifact=symbols[0], host_symbol_artifact=symbols[1],
             declared_source_inputs=inputs, pre_build_source_digest=before,
             authored_payload=encode_authored(document) if document else None,
             manifest_fields=dict(project_id=project_identity(self._project_path), game_id=game_id,

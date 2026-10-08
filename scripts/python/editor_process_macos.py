@@ -94,3 +94,17 @@ def group_members(leader: int) -> list[int] | None:
         if info.group == leader and info.status != 5:  # SZOMB
             members.append(pid)
     return members
+
+
+def process_stopped(pid: int) -> bool:
+    """Treat Darwin SSTOP or unreadable live process state as stopped/unknown.
+
+    Native LLDB all-stop and SIGSTOP suspend the process. Per-thread non-stop
+    debugging is outside this acceptance profile; callers must continue before reload.
+    """
+    info = _ShortInfo()
+    ctypes.set_errno(0)
+    count = _pidinfo(pid, 13, 0, ctypes.byref(info), ctypes.sizeof(info))
+    if count != ctypes.sizeof(info) or info.pid != pid:
+        return ctypes.get_errno() != errno.ESRCH
+    return info.status == 4  # SSTOP in Darwin sys/proc.h

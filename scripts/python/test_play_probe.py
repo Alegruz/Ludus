@@ -29,6 +29,15 @@ def fixture_elf() -> bytes:
     return header + program + sections + note + names + b"x"
 
 
+def fixture_macho(kind=8, cpu=0x100000c, uuid=b"0123456789abcdef", symbols=False):
+    commands = struct.pack("<II16s", 0x1b, 24, uuid)
+    if symbols:
+        segment = struct.pack("<II16sQQQQIIII", 0x19, 152, b"__DWARF", 0, 1, 208, 1, 0, 0, 1, 0)
+        section = struct.pack("<16s16sQQIIIIIIII", b"__debug_info", b"__DWARF", 0, 1, 208, 0, 0, 0, 0, 0, 0, 0)
+        commands += segment + section
+    return struct.pack("<8I", 0xfeedfacf, cpu, 0, kind, 2 if symbols else 1, len(commands), 0, 0) + commands + (b"x" if symbols else b"")
+
+
 class ProbeTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -82,6 +91,36 @@ class ProbeTests(unittest.TestCase):
             elf_identity(path)
         self.assertFalse(elf_identity(path, require_symbols=False)["embedded_symbols"])
 
+    def test_macho_detached_symbols_match_uuid_cpu_and_kind(self):
+        from play_macos import identity
+        image, debug = self.root / "game", self.root / "game.dwarf"
+        image.write_bytes(fixture_macho())
+        debug.write_bytes(fixture_macho(kind=10, symbols=True))
+        self.assertEqual(identity(image, debug)["build_id"], b"0123456789abcdef".hex())
+        self.assertFalse(identity(image, debug)["embedded_symbols"])
+        for change in ({"uuid": b"fedcba9876543210"}, {"cpu": 0x1000007}, {"kind": 8}, {"symbols": False}):
+            debug.write_bytes(fixture_macho(**({"kind": 10, "symbols": True} | change)))
+            with self.subTest(change=change), self.assertRaises(ProbeError):
+                identity(image, debug)
+        with self.assertRaisesRegex(ProbeError, "detached"):
+            identity(image)
+
+    def test_macho_malformed_tables_duplicate_uuid_and_section_ranges(self):
+        from play_macos import inspect
+        path = self.root / "malformed"
+        original = fixture_macho(kind=10, symbols=True)
+        variants = [original[:31], original.replace(b"__debug_info", b"__other_info")]
+        for offset, data in ((0, b"\xca\xfe\xba\xbe"), (16, struct.pack("<I", 4097)),
+                             (20, struct.pack("<I", 2**32-1)), (36, struct.pack("<I", 7)),
+                             (172, struct.pack("<I", 2**32-1))):
+            changed = bytearray(original); changed[offset:offset+len(data)] = data; variants.append(changed)
+        uuid = struct.pack("<II16s", 0x1b, 24, b"0123456789abcdef")
+        variants.append(struct.pack("<8I", 0xfeedfacf, 0x100000c, 0, 8, 2, 48, 0, 0) + uuid * 2)
+        for data in variants[:1] + variants[2:]:
+            path.write_bytes(data)
+            with self.subTest(data=bytes(data[:24])), self.assertRaises(ProbeError):
+                inspect(path)
+
     def test_query_is_exact_and_closes_owned_process(self):
         probe = self.probe("import json\nprint(" + repr(json.dumps(METADATA)) + ")\n")
         self.assertEqual(self.finish(probe), METADATA)
@@ -127,7 +166,7 @@ class ProbeTests(unittest.TestCase):
         (tasks / "1/status").write_text("State:\tR (running)\nTracerPid:\t7\n")
         worker = tasks / "2/status"
         worker.write_text("State:\tt (tracing stop)\nTracerPid:\t7\n")
-        with patch("play_probe.Path", return_value=tasks):
+        with patch("play_probe.sys.platform", "linux"), patch("play_probe.Path", return_value=tasks):
             self.assertTrue(debugger_stopped(123))
             worker.write_text("State:\tS (sleeping)\nTracerPid:\t7\n")
             self.assertFalse(debugger_stopped(123))

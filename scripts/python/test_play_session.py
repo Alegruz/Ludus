@@ -200,6 +200,33 @@ class GenerationPublishTests(unittest.TestCase):
             "embedded_symbols": True,
         }
 
+    def test_detached_host_symbols_are_hashed_and_legacy_manifest_is_readable(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            module, host, symbols = self._artifacts(root)
+            host_symbols = root / "host.dwarf"
+            host_symbols.write_bytes(b"HOST SYMBOLS")
+            gen = play_session.publish_generation(
+                generations_root=root / "generations", module_artifact=module, host_artifact=host,
+                symbol_artifact=symbols, host_symbol_artifact=host_symbols,
+                manifest_fields={**self._fields(), "embedded_symbols": False}, declared_source_inputs=[module])
+            manifest = play_session.read_manifest(gen)
+            self.assertEqual(manifest["schema"], 3)
+            self.assertEqual(manifest["host_symbol_file"], host_symbols.name)
+            self.assertEqual(manifest["files"][host_symbols.name], play_session.sha256_file(host_symbols))
+            target = gen / host_symbols.name
+            target.chmod(0o644)
+            target.write_bytes(b"changed")
+            with self.assertRaisesRegex(play_session.PublishError, "hash mismatch"):
+                play_session.read_manifest(gen)
+            legacy = play_session.publish_generation(
+                generations_root=root / "generations", module_artifact=module, host_artifact=host,
+                symbol_artifact=None, manifest_fields=self._fields(), declared_source_inputs=[module])
+            path = legacy / "manifest.json"
+            data = json.loads(path.read_bytes()); data["schema"] = 2; del data["host_symbol_file"]
+            path.chmod(0o644); path.write_text(json.dumps(data))
+            self.assertIsNone(play_session.read_manifest(legacy)["host_symbol_file"])
+
     def test_publish_is_atomic_and_immutable(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

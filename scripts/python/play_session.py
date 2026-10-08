@@ -31,7 +31,7 @@ from typing import Any
 # payload is module + symbols, not a dynamic plugin graph.
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_PAYLOAD_FILES = 16
-MANIFEST_SCHEMA = 2
+MANIFEST_SCHEMA = 3
 
 # Default retention: active, candidate and previous generation (design 5).
 DEFAULT_RETENTION = 3
@@ -68,6 +68,7 @@ class GenerationManifest:
     embedded_symbols: bool
     files: dict[str, str] = field(default_factory=dict)  # relative path -> sha256
     created_unix: int = 0
+    host_symbol_file: str | None = None
 
     def to_json(self) -> str:
         return json.dumps(self.__dict__, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
@@ -88,7 +89,7 @@ def source_input_digest(source_files: list[Path]) -> str:
     of the declared inputs so a change between build and publication is visible.
     """
     digest = hashlib.sha256()
-    for path in sorted(source_files, key=lambda p: str(p)):
+    for path in sorted((p.resolve() for p in source_files), key=lambda p: str(p)):
         try:
             digest.update(str(path).encode("utf-8"))
             digest.update(b"\0")
@@ -153,6 +154,7 @@ def _publish_generation_locked(
     pre_build_source_digest: str | None = None,
     generation_id: str,
     publication_fd: int,
+    host_symbol_artifact: Path | None = None,
     validate_payloads: Any = None,
     authored_payload: bytes | None = None,
 ) -> Path:
@@ -170,7 +172,7 @@ def _publish_generation_locked(
         raise PublishError(f"module artifact missing: {module_artifact}")
     if not host_artifact.is_file():
         raise PublishError(f"host artifact missing: {host_artifact}")
-    artifacts = [module_artifact, host_artifact] + ([symbol_artifact] if symbol_artifact is not None else [])
+    artifacts = [module_artifact, host_artifact] + [p for p in (symbol_artifact, host_symbol_artifact) if p is not None]
     if any(path.stat().st_size > 512 * 1024 * 1024 for path in artifacts) or \
             sum(path.stat().st_size for path in artifacts) > 1024 * 1024 * 1024:
         raise PublishError("native payload exceeds the bounded generation inventory")
@@ -187,7 +189,7 @@ def _publish_generation_locked(
         payload_files: dict[str, str] = {}
         module_name = module_artifact.name
         host_name = host_artifact.name
-        names = [module_name, host_name] + ([symbol_artifact.name] if symbol_artifact is not None else [])
+        names = [p.name for p in artifacts]
         if authored_payload is not None:
             names.append("authored.bin")
             if not isinstance(authored_payload, bytes) or len(authored_payload) > 256 * 1024:
@@ -209,6 +211,11 @@ def _publish_generation_locked(
             symbol_name = symbol_artifact.name
             shutil.copy2(symbol_artifact, staging / symbol_name)
             payload_files[symbol_name] = sha256_file(staging / symbol_name)
+        if host_symbol_artifact is not None:
+            if not host_symbol_artifact.is_file():
+                raise PublishError("requested host symbol artifact is missing")
+            shutil.copy2(host_symbol_artifact, staging / host_symbol_artifact.name)
+            payload_files[host_symbol_artifact.name] = sha256_file(staging / host_symbol_artifact.name)
         if authored_payload is not None:
             (staging / "authored.bin").write_bytes(authored_payload)
             payload_files["authored.bin"] = sha256_file(staging / "authored.bin")
@@ -223,6 +230,9 @@ def _publish_generation_locked(
             raise PublishError("host copy hash mismatch; corrupt staging")
         if symbol_artifact is not None and payload_files[symbol_artifact.name] != sha256_file(symbol_artifact):
             raise PublishError("symbol copy hash mismatch; corrupt staging")
+
+        if host_symbol_artifact is not None and payload_files[host_symbol_artifact.name] != sha256_file(host_symbol_artifact):
+            raise PublishError("host symbol copy hash mismatch; corrupt staging")
 
         # Query the immutable COPIES in an owned process before exposure. A
         # constructor/query crash never executes in the editor or active host.
@@ -242,6 +252,7 @@ def _publish_generation_locked(
             module_file=module_name,
             host_file=host_name,
             symbol_file=symbol_name,
+            host_symbol_file=host_symbol_artifact.name if host_symbol_artifact is not None else None,
             authored_file="authored.bin" if authored_payload is not None else None,
             sdk_identity=manifest_fields.get("sdk_identity", ""),
             build_request_revision=manifest_fields.get("build_request_revision", ""),
@@ -320,14 +331,17 @@ def _validate_manifest(generation_dir: Path, data: Any, generation_id: str) -> N
     for key in ("module_build_id", "host_build_id"):
         if not isinstance(data[key], str) or re.fullmatch(r"(?:[0-9a-f]{2}){8,64}", data[key]) is None:
             raise PublishError(f"invalid {key}")
-    if data["embedded_symbols"] is not True:
-        raise PublishError("native live editing requires matching embedded debug symbols")
+    if type(data["embedded_symbols"]) is not bool or (not data["embedded_symbols"] and
+            (data["symbol_file"] is None or data["host_symbol_file"] is None)):
+        raise PublishError("native live editing requires matching debug symbols")
     files = data["files"]
     if not isinstance(files, dict) or not 2 <= len(files) <= MAX_PAYLOAD_FILES:
         raise PublishError("invalid payload inventory")
     required = {data["module_file"], data["host_file"]}
     if data["symbol_file"] is not None:
         required.add(data["symbol_file"])
+    if data["host_symbol_file"] is not None:
+        required.add(data["host_symbol_file"])
     if data["authored_file"] is not None:
         required.add(data["authored_file"])
     if set(files) != required or len(required) < 2:
@@ -356,6 +370,9 @@ def read_manifest(generation_dir: Path) -> dict[str, Any]:
     try:
         from play_documents import decode
         data = decode(manifest_path.read_bytes())
+        if isinstance(data, dict) and data.get("schema") == 2 and "host_symbol_file" not in data:
+            # Existing ELF generations have embedded symbols and no host sidecar.
+            data = {**data, "schema": MANIFEST_SCHEMA, "host_symbol_file": None}
         _validate_manifest(generation_dir, data, generation_dir.name)
     except (ValueError, TypeError) as exc:
         raise PublishError("malformed generation manifest") from exc

@@ -17,7 +17,7 @@ class PlayDocumentsTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.obj = {"version": 1, "game": GAME, "objects": [
             {"id": OBJECT, "properties": [{"id": PROPERTY, "kind": "float32", "value": 1.0}]}]}
         self.path = self.root / "game.tuning.json"

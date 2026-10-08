@@ -88,11 +88,11 @@ class ToolingTests(unittest.TestCase):
         context = editor_tool.ToolContext(self.root, engine, cmake_targets)
         with patch.object(editor_tool, "_resolve_managed_cmake", return_value="/managed/cmake"):
             plan = editor_tool.build_plan(context, descriptor.parse_descriptor_file(project / "ludus.project.json"), project)
-            self.assertEqual(plan.resolution.prefix, sdk)
-            self.assertEqual(plan.env["LUDUS_SDK_PREFIX"], str(sdk))
+            self.assertEqual(plan.resolution.prefix, sdk.resolve())
+            self.assertEqual(plan.env["LUDUS_SDK_PREFIX"], str(sdk.resolve()))
             argv = editor_tool.configure_argv(plan)
             self.assertIn(f"-DCMAKE_CXX_COMPILER={compiler}", argv)
-            self.assertEqual(argv[argv.index("-S")+1], str(project))
+            self.assertEqual(argv[argv.index("-S")+1], str(project.resolve()))
             compiler.write_text("#!/bin/sh\necho 'clang version 19.0.0'\n")
             with self.assertRaisesRegex(ToolingError, "compiler_version"):
                 editor_tool.build_plan(context, plan.descriptor, project)

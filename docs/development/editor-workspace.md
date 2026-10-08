@@ -96,8 +96,10 @@ platform/RHI backend, including Metal. Version-2 descriptors expose all three
 macOS game profiles; the Editor itself uses Debug, Development or ASan/UBSan.
 Version-1 descriptors retain their original Linux preset contract.
 
-Live Play/reload generation publication still requires Linux ELF build IDs and
-embedded DWARF. Its macOS UI action is guarded and disabled; use Build and Run.
+Live Play and native reload support macOS Debug/Development profiles with
+validated Mach-O UUIDs and immutable detached DWARF symbols. Build and Play,
+Build and Reload, Pause/Step, live edits and opt-in source watching share the
+existing isolated host supervisor; see [native live editing](project-live-reload.md#macos-setup-and-symbols).
 RAD debugging remains disabled on macOS, with a backend error if invoked directly.
 Game release setup and packaging now share the
 [macOS ad-hoc app backend](game-packaging-publishing.md#macos-app-packages).

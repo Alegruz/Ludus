@@ -208,7 +208,7 @@ void MainWindow::BuildMenus()
     PlayAction_ = playMenu->addAction(QStringLiteral("Build and Play"));
     PlayAction_->setObjectName(QStringLiteral("play.start"));
 #if defined(Q_OS_MACOS)
-    PlayAction_->setToolTip(QStringLiteral("Live Play is not available on macOS yet; use Build and Run."));
+    PlayAction_->setToolTip(QStringLiteral("Build and Play uses the saved macOS Debug or Development profile."));
     BuildDebugAction_->setToolTip(QStringLiteral("RAD debugging is available on Linux x64 only."));
 #endif
     BuildReloadAction_ = playMenu->addAction(QStringLiteral("Build and Reload Code"));
