@@ -545,6 +545,20 @@ jobs:
           name: behavior-s6-linux-sanitized-evidence
           path: out/build/linux-clang-asan-ubsan/tools/script-provider/safety-evidence.json
           if-no-files-found: error
+      - name: Validate S7 installed-SDK reference semantics with sanitizers
+        run: |
+          out/host-tools/venv/bin/cmake --install out/build/linux-clang-asan-ubsan
+          out/host-tools/venv/bin/python scripts/python/engine.py bundle-sdk-dependencies \
+            linux-clang-asan-ubsan --prefix out/install/linux-clang-asan-ubsan
+          ./scripts/script-qualification --sdk out/install/linux-clang-asan-ubsan \
+            --output out/behavior-s7-sanitized --verify-only
+      - uses: actions/upload-artifact@v4
+        with:
+          name: behavior-s7-linux-sanitized-reference
+          path: |
+            out/behavior-s7-sanitized/current.json
+            out/behavior-s7-sanitized/run-*/evidence.json
+          if-no-files-found: error
       - name: Test with sanitizers
         env:
           LUDUS_RELOAD_METRICS: ${{ runner.temp }}/live-reload-asan-ubsan.jsonl
@@ -559,6 +573,45 @@ jobs:
       - name: Report compiler cache
         if: always()
         run: if command -v ccache >/dev/null; then ccache --show-stats >> "$GITHUB_STEP_SUMMARY"; fi
+
+  scripting-qualification:
+    needs: [changes, formatting]
+    if: needs.changes.outputs.native_required == 'true'
+    name: S7 reference performance and release acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/native-setup
+        with:
+          preset: linux-clang-release
+          cache-variant: scripting-qualification
+          conan-cache-writer: 'false'
+      - name: Build the headless Release Behavior SDK
+        run: |
+          ./scripts/script-provider bootstrap
+          out/host-tools/venv/bin/cmake --preset linux-clang-release \
+            -DLUDUS_USE_INIT_OPTIONS=OFF -DLUDUS_BUILD_BEHAVIOR=ON \
+            -DLUDUS_BUILD_BEHAVIOR_ACCEPTANCE=OFF -DLUDUS_BUILD_TESTS=OFF \
+            -DLUDUS_BUILD_EDITOR=OFF -DLUDUS_PLATFORM_ENABLE_WAYLAND=OFF \
+            -DLUDUS_WARNINGS_AS_ERRORS=ON
+          out/host-tools/venv/bin/cmake --build --preset linux-clang-release --parallel 2
+          ./scripts/install-sdk linux-clang-release
+      - name: Validate qualification evidence and run the reference workload
+        run: |
+          out/host-tools/venv/bin/python -m unittest discover -s tools/behavior-qualification -p 'test_*.py'
+          ./scripts/script-qualification --sdk out/install/linux-clang-release \
+            --output out/behavior-s7-release --check
+      - name: Publish reference evidence and extracted-player archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: behavior-s7-linux-release-reference
+          path: |
+            out/behavior-s7-release/current.json
+            out/behavior-s7-release/run-*/evidence.json
+            out/behavior-s7-release/run-*/*.log
+            out/behavior-s7-release/run-*/scripted-game-release.zip
+          if-no-files-found: error
 
   filesystem-fuzz:
     needs: [changes, formatting]
@@ -787,7 +840,7 @@ jobs:
     # changes whose classification and routing regressions succeeded.
     # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions
     name: Ubuntu Clang
-    needs: [changes, macos-compile, formatting, debug-runtime, development, sanitizers, filesystem-fuzz, threading-races, analysis, editor, assertion-policy, pch, build-budget]
+    needs: [changes, macos-compile, formatting, debug-runtime, development, sanitizers, filesystem-fuzz, threading-races, analysis, editor, assertion-policy, pch, build-budget, scripting-qualification]
     if: always()
     runs-on: ubuntu-24.04
     steps:

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "programs": [
+    {"asset":"0000000000000100","revision":1,"graph":"encounter.json","entrypoint":true,"imports":[]},
+    {"asset":"0000000000000101","revision":1,"source":"encounter.luau","entrypoint":true,"imports":[]},
+    {"asset":"0000000000000102","revision":1,"source":"empty.luau","entrypoint":true,"imports":[]},
+    {"asset":"0000000000000103","revision":1,"source":"scalar.luau","entrypoint":true,"imports":[]},
+    {"asset":"0000000000000104","revision":1,"source":"operation.luau","entrypoint":true,"imports":[]}
+  ]
+}

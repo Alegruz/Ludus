@@ -92,6 +92,7 @@ nav:
       - Behavior contracts and cooking: architecture/behavior-s4.md
       - Editor behavior authoring and debugging: architecture/behavior-s5.md
       - Behavior safety and platform qualification: architecture/behavior-s6.md
+      - Behavior reference performance and release acceptance: architecture/behavior-s7.md
       - Live gameplay editing: development/project-live-reload.md
       - Rendering and shaders: development/fullscreen-rendering.md
       - Benchmark scenes and suites: development/benchmark-scenes.md

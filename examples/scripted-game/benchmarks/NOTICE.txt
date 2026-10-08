@@ -1,0 +1,4 @@
+Ludus scripted-game S7 headless reference qualification payload.
+This original example includes owner-admitted paired Luau code embedded in the
+static player. Runtime license notices are included under licenses/Ludus/.
+This is reference-workload evidence, not a commercial game or device certification.
