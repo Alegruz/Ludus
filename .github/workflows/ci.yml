@@ -538,6 +538,8 @@ jobs:
       - name: Validate S7 installed-SDK reference semantics with sanitizers
         run: |
           out/host-tools/venv/bin/cmake --install out/build/linux-clang-asan-ubsan
+          out/host-tools/venv/bin/python scripts/python/engine.py bundle-sdk-dependencies \
+            linux-clang-asan-ubsan --prefix out/install/linux-clang-asan-ubsan
           ./scripts/script-qualification --sdk out/install/linux-clang-asan-ubsan \
             --output out/behavior-s7-sanitized --verify-only
       - uses: actions/upload-artifact@v4

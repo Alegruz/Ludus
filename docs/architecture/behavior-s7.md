@@ -62,7 +62,15 @@ out/host-tools/venv/bin/cmake --build --preset linux-clang-release --parallel 2
 `--verify-only` accepts a Development or sanitized SDK and runs the same consumer
 acceptance tests without publishing timing, release or iteration evidence. For
 example, after building a Behavior-enabled ASan/UBSan profile, install that SDK
-with `cmake --install out/build/linux-clang-asan-ubsan`, then pass
+with `cmake --install out/build/linux-clang-asan-ubsan` and stage its prepared
+redistributable dependencies with the existing installer command:
+
+```bash
+out/host-tools/venv/bin/python scripts/python/engine.py bundle-sdk-dependencies \
+  linux-clang-asan-ubsan --prefix out/install/linux-clang-asan-ubsan
+```
+
+Then pass
 `--sdk out/install/linux-clang-asan-ubsan --verify-only`. The benchmark targets
 inherit the installed SDK's sanitizer flags and stay exception-free.
 
