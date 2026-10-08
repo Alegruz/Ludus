@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "workload": "scripted-game-reference-1",
+  "scope": "reference-fixture-not-game-capacity",
+  "active_encounters": 100,
+  "inactive_encounters": 1000,
+  "samples": 300,
+  "warmup_samples": 30,
+  "heap_limit_bytes": 8388608,
+  "safepoints": 100000,
+  "proposed_tick_budget_ns": 833333,
+  "timing_policy": "report-only",
+  "unqualified": ["game-derived-budgets", "10000-waiting-tasks", "gc-pause-distribution", "human-designer-usability", "physical-device-release"]
+}

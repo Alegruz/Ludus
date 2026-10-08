@@ -115,3 +115,7 @@ for ownership, transactions, platform gates and the book-informed refinements.
 [S6 safety and platform qualification](../../architecture/behavior-s6.md) is in
 progress: production allocation/resource recovery and shared SDK target admission
 are implemented; six-platform physical-device qualification remains pending.
+
+[S7 reference acceptance](../../architecture/behavior-s7.md) adds installed-SDK
+native/text/sequence measurements, save/cook observation and extracted headless
+Release player checks. Game-derived scale and usability qualification remain pending.

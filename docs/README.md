@@ -158,6 +158,7 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [S4: installed native/Luau behavior provider and project cooking](architecture/behavior-s4.md)
 - [S5: Editor authoring, behavior debugging and GameHost generations](architecture/behavior-s5.md)
 - [S6: Behavior safety and platform qualification](architecture/behavior-s6.md)
+- [S7 reference performance and release acceptance](architecture/behavior-s7.md)
 - [Smart pointer architecture](architecture/smart-pointers.md)
 - [Terrain generation architecture](architecture/terrain-generation.md)
 - [Terrain systems architecture](architecture/terrain.md)
