@@ -1,6 +1,8 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/raster.h"
 #include "internal/resources.h"
+#include "internal/vma.h"
 
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/graphics/rhi/render.h>
@@ -69,6 +71,10 @@ bool gAcquiredWait = false;
 bool gOwnedImage = false;
 bool gInstanceMaintenance = false;
 VkDeviceMemory gHeadlessMemory = VK_NULL_HANDLE;
+VkImage gDepthImage = VK_NULL_HANDLE;
+VkImageView gDepthView = VK_NULL_HANDLE;
+VkDeviceMemory gDepthMemory = VK_NULL_HANDLE;
+VkFormat gDepthFormat = VK_FORMAT_D32_SFLOAT;
 uint32 gImageCount = 0;
 uint32 gImage = 0;
 usize gFrame = 0;
@@ -186,6 +192,12 @@ void ReleaseTargets() noexcept
         vkDestroySemaphore(gDevice, gFinished[i], nullptr);
         gFinished[i] = VK_NULL_HANDLE;
     }
+    vkDestroyImageView(gDevice, gDepthView, nullptr);
+    vkDestroyImage(gDevice, gDepthImage, nullptr);
+    vkFreeMemory(gDevice, gDepthMemory, nullptr);
+    gDepthView = VK_NULL_HANDLE;
+    gDepthImage = VK_NULL_HANDLE;
+    gDepthMemory = VK_NULL_HANDLE;
     if (gHeadless)
     {
         vkDestroyImage(gDevice, gImages[0], nullptr);
@@ -209,25 +221,46 @@ bool CreatePass() noexcept
     {
         return true;
     }
-    VkAttachmentDescription color{};
+    VkFormatProperties depthProperties{};
+    vkGetPhysicalDeviceFormatProperties(gPhysical, VK_FORMAT_D32_SFLOAT, &depthProperties);
+    gDepthFormat = (depthProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0
+                       ? VK_FORMAT_D32_SFLOAT
+                       : VK_FORMAT_D16_UNORM;
+    VkAttachmentDescription attachments[2]{};
+    auto& color = attachments[0];
     color.format = gFormat;
     color.samples = VK_SAMPLE_COUNT_1_BIT;
     color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     color.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     color.finalLayout = gHeadless ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    auto& depth = attachments[1];
+    depth.format = gDepthFormat;
+    depth.samples = VK_SAMPLE_COUNT_1_BIT;
+    depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depth.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depth.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference depthReference{1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
     VkAttachmentReference reference{};
     reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &reference;
+    subpass.pDepthStencilAttachment = &depthReference;
     VkSubpassDependency dependencies[2]{};
     dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
     dependencies[0].dstSubpass = 0;
-    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                                   VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependencies[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependencies[0].dstStageMask = dependencies[0].srcStageMask;
+    dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                                    VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     dependencies[1].srcSubpass = 0;
     dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
     dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -236,8 +269,8 @@ bool CreatePass() noexcept
     dependencies[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
     VkRenderPassCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    info.attachmentCount = 1;
-    info.pAttachments = &color;
+    info.attachmentCount = 2;
+    info.pAttachments = attachments;
     info.subpassCount = 1;
     info.pSubpasses = &subpass;
     info.dependencyCount = 2;
@@ -379,6 +412,38 @@ bool CreateTargets() noexcept
     {
         return false;
     }
+    VkImageCreateInfo depthImage{};
+    depthImage.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    depthImage.imageType = VK_IMAGE_TYPE_2D;
+    depthImage.format = gDepthFormat;
+    depthImage.extent = {gExtent.width, gExtent.height, 1};
+    depthImage.mipLevels = 1;
+    depthImage.arrayLayers = 1;
+    depthImage.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthImage.tiling = VK_IMAGE_TILING_OPTIMAL;
+    depthImage.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    if (!Check(vkCreateImage(gDevice, &depthImage, nullptr, &gDepthImage)))
+    {
+        return false;
+    }
+    VkMemoryRequirements depthMemory{};
+    vkGetImageMemoryRequirements(gDevice, gDepthImage, &depthMemory);
+    if (!Allocate(depthMemory, 0, gDepthMemory) || !Check(vkBindImageMemory(gDevice, gDepthImage, gDepthMemory, 0)))
+    {
+        return false;
+    }
+    VkImageViewCreateInfo depthView{};
+    depthView.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    depthView.image = gDepthImage;
+    depthView.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    depthView.format = gDepthFormat;
+    depthView.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    depthView.subresourceRange.levelCount = 1;
+    depthView.subresourceRange.layerCount = 1;
+    if (!Check(vkCreateImageView(gDevice, &depthView, nullptr, &gDepthView)))
+    {
+        return false;
+    }
     for (usize i = 0; i < gImageCount; ++i)
     {
         VkImageViewCreateInfo view{};
@@ -396,8 +461,9 @@ bool CreateTargets() noexcept
         VkFramebufferCreateInfo target{};
         target.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         target.renderPass = gPass;
-        target.attachmentCount = 1;
-        target.pAttachments = &gViews[i];
+        const VkImageView attachments[2]{gViews[i], gDepthView};
+        target.attachmentCount = 2;
+        target.pAttachments = attachments;
         target.width = gExtent.width;
         target.height = gExtent.height;
         target.layers = 1;
@@ -857,6 +923,11 @@ FrameStatus Begin() noexcept
     {
         return Failure();
     }
+    (void)RasterCompleted();
+    if (gDevice == VK_NULL_HANDLE)
+    {
+        return FrameStatus::Failed;
+    }
     gImage = 0;
     if (!gHeadless)
     {
@@ -905,7 +976,9 @@ FrameStatus Begin() noexcept
     {
         return Failure();
     }
-    VkClearValue clear{};
+    VkClearValue clears[2]{};
+    auto& clear = clears[0];
+    clears[1].depthStencil = {1, 0};
     clear.color.float32[0] = static_cast<float32>(gTarget.Red);
     clear.color.float32[1] = static_cast<float32>(gTarget.Green);
     clear.color.float32[2] = static_cast<float32>(gTarget.Blue);
@@ -915,8 +988,8 @@ FrameStatus Begin() noexcept
     pass.renderPass = gPass;
     pass.framebuffer = gTargets[gImage];
     pass.renderArea.extent = gExtent;
-    pass.clearValueCount = 1;
-    pass.pClearValues = &clear;
+    pass.clearValueCount = 2;
+    pass.pClearValues = clears;
     vkCmdBeginRenderPass(frame.Command, &pass, VK_SUBPASS_CONTENTS_INLINE);
     gEncoding = true;
     return FrameStatus::Ready;
@@ -1198,6 +1271,9 @@ ResourceStatus CreatePipeline(usize slot, const PipelineResources& resources, ui
     info.pViewportState = &viewport;
     info.pRasterizationState = &raster;
     info.pMultisampleState = &samples;
+    VkPipelineDepthStencilStateCreateInfo depth{};
+    depth.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    info.pDepthStencilState = &depth;
     info.pColorBlendState = &blend;
     info.pDynamicState = &dynamic;
     info.layout = pipeline.Layout;
@@ -1357,3 +1433,5 @@ bool ReadHeadlessPixels(std::span<uint8> pixels) noexcept
 }
 #endif
 } // namespace ludus::graphics::rhi::backend
+
+#include "internal/raster_vulkan.h"

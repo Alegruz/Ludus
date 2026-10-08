@@ -140,6 +140,8 @@ ludus_compile_shader(TARGET sample NAME sample SOURCE diagnostic.slang VERTEX ve
         run(command + ['-DLUDUS_SPIRV_VALIDATOR=' + str(bad_validator)])
         failure = run([args.cmake, '--build', build], success=False)
         assert 'validator differs' in failure
+    from verify_raster_build import verify_raster
+    verify_raster(args, run, metal=False)
     print('Installed shader helper: no-op, source/include/option rebuild, reflected contracts, binding and integrity rejection passed')
 
 if __name__ == '__main__': main()

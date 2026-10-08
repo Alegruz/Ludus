@@ -299,3 +299,113 @@ WGPURenderPassEncoder ProbePass() noexcept
     return gActive == Backend::WebGPU ? webgpu::ProbePass() : nullptr;
 }
 } // namespace ludus::graphics::rhi::backend
+
+namespace ludus::graphics::rhi::backend
+{
+RasterCapabilities RasterLimits() noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterLimits() : webgpu::RasterLimits();
+}
+RasterStatus
+RasterCreateBuffer(usize slot, const BufferDescription& info, std::span<const uint8> bytes, uint32 id) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterCreateBuffer(slot, info, bytes, id)
+                                      : webgpu::RasterCreateBuffer(slot, info, bytes, id);
+}
+RasterStatus
+RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpload& upload, uint32 id) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterCreateTexture(slot, info, upload, id)
+                                      : webgpu::RasterCreateTexture(slot, info, upload, id);
+}
+RasterStatus RasterCreateView(usize slot, const internal::RasterViewSource& source, uint32 id) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterCreateView(slot, source, id)
+                                      : webgpu::RasterCreateView(slot, source, id);
+}
+RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uint32 id) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterCreateSampler(slot, info, id)
+                                      : webgpu::RasterCreateSampler(slot, info, id);
+}
+RasterStatus RasterCreateShader(usize slot,
+                                const ShaderDescription& info,
+                                const internal::RasterShaderInfo& metadata,
+                                uint32 id) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterCreateShader(slot, info, metadata, id)
+                                      : webgpu::RasterCreateShader(slot, info, metadata, id);
+}
+RasterStatus RasterCreateLayout(usize slot, const internal::RasterLayout& info, uint32 id) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterCreateLayout(slot, info, id)
+                                      : webgpu::RasterCreateLayout(slot, info, id);
+}
+RasterStatus
+RasterCreateSet(usize slot, const internal::RasterLayout& layout, const internal::RasterSet& info, uint32 id) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterCreateSet(slot, layout, info, id)
+                                      : webgpu::RasterCreateSet(slot, layout, info, id);
+}
+RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo& info, uint32 id) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterCreatePipeline(slot, info, id)
+                                      : webgpu::RasterCreatePipeline(slot, info, id);
+}
+void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::RasterDestroy(kind, slot);
+    }
+    else
+    {
+        webgpu::RasterDestroy(kind, slot);
+    }
+}
+RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterDraw(packet) : webgpu::RasterDraw(packet);
+}
+RasterStatus RasterReserveSubmission() noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterReserveSubmission() : webgpu::RasterReserveSubmission();
+}
+void RasterSubmit(uint64 ordinal) noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::RasterSubmit(ordinal);
+    }
+    else
+    {
+        webgpu::RasterSubmit(ordinal);
+    }
+}
+uint64 RasterCompleted() noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterCompleted() : webgpu::RasterCompleted();
+}
+void RasterReset() noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::RasterReset();
+    }
+    else
+    {
+        webgpu::RasterReset();
+    }
+}
+void RasterShutdown() noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::RasterShutdown();
+    }
+    else
+    {
+        webgpu::RasterShutdown();
+    }
+}
+} // namespace ludus::graphics::rhi::backend

@@ -61,6 +61,32 @@ def decode(frame):
     return kind, incident, frame[HEADER_SIZE:]
 
 
+def drain_reports(report_recv, stop, packets):
+    """Drain queued datagrams after child exit before stopping on a quiet socket."""
+    while True:
+        try:
+            packets.append(report_recv.recv(4096))
+        except socket.timeout:
+            if stop.is_set():
+                return
+        except OSError:
+            return
+
+
+def test_report_drain_after_exit():
+    report_recv, report_send = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+    with report_recv, report_send:
+        report_recv.settimeout(0.01)
+        report_send.send(b"minimal report")
+        report_send.send(b"detailed fatal message")
+        stop = threading.Event()
+        stop.set()
+        packets = []
+        drain_reports(report_recv, stop, packets)
+        assert packets == [b"minimal report", b"detailed fatal message"], packets
+    print("  Child exit preserves queued minimal and detailed reports OK")
+
+
 def run(binary, mode, responder, timeout=8, extra_env=None):
     """Launch the child with report+control sockets; `responder(control)` plays
     the helper on a worker thread. The `timeout` is a watchdog: an accidental
@@ -73,13 +99,6 @@ def run(binary, mode, responder, timeout=8, extra_env=None):
     stop = threading.Event()
     packets = []
 
-    def drain():
-        while not stop.is_set():
-            try:
-                packets.append(report_recv.recv(4096))
-            except (socket.timeout, OSError):
-                pass
-
     def helper():
         try:
             responder(control_helper)
@@ -91,7 +110,7 @@ def run(binary, mode, responder, timeout=8, extra_env=None):
             except OSError:
                 pass
 
-    drainer = threading.Thread(target=drain)
+    drainer = threading.Thread(target=drain_reports, args=(report_recv, stop, packets))
     worker = threading.Thread(target=helper)
     drainer.start()
     worker.start()
@@ -373,6 +392,7 @@ def test_stream_oversized_reply(binary):
 
 def main():
     binary = sys.argv[1]
+    test_report_drain_after_exit()
     test_closed_peer_on_next_request(binary)
     test_stream_fragmentation(binary)
     test_stream_coalesced_stale_reply(binary)

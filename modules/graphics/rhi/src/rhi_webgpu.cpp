@@ -1,5 +1,6 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/raster.h"
 #include "internal/resources.h"
 #include "internal/webgpu_probe.h"
 #include <ludus/foundation/base/core.h>
@@ -41,6 +42,8 @@ WGPUSurfaceConfiguration gConfiguration = WGPU_SURFACE_CONFIGURATION_INIT;
 WGPUTexture gTexture = nullptr;
 WGPUTextureView gView = nullptr;
 WGPUCommandEncoder gEncoder = nullptr;
+WGPUTexture gDepthTexture = nullptr;
+WGPUTextureView gDepthView = nullptr;
 WGPURenderPassEncoder gPass = nullptr;
 
 void ReleaseFrame() noexcept
@@ -61,6 +64,16 @@ void ReleaseFrame() noexcept
     {
         wgpuTextureRelease(gTexture);
     }
+    if (gDepthView != nullptr)
+    {
+        wgpuTextureViewRelease(gDepthView);
+    }
+    if (gDepthTexture != nullptr)
+    {
+        wgpuTextureRelease(gDepthTexture);
+    }
+    gDepthView = nullptr;
+    gDepthTexture = nullptr;
     gPass = nullptr;
     gEncoder = nullptr;
     gView = nullptr;
@@ -451,6 +464,26 @@ FrameStatus Begin() noexcept
     WGPURenderPassDescriptor descriptor = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     descriptor.colorAttachmentCount = 1;
     descriptor.colorAttachments = &color;
+    WGPUTextureDescriptor depthTexture = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    depthTexture.size = {gTarget.Width, gTarget.Height, 1};
+    depthTexture.format = WGPUTextureFormat_Depth24Plus;
+    depthTexture.usage = WGPUTextureUsage_RenderAttachment;
+    gDepthTexture = wgpuDeviceCreateTexture(gDevice, &depthTexture);
+    if (gDepthTexture == nullptr)
+    {
+        return FrameFailure();
+    }
+    gDepthView = wgpuTextureCreateView(gDepthTexture, nullptr);
+    if (gDepthView == nullptr)
+    {
+        return FrameFailure();
+    }
+    WGPURenderPassDepthStencilAttachment depth = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+    depth.view = gDepthView;
+    depth.depthLoadOp = WGPULoadOp_Clear;
+    depth.depthStoreOp = WGPUStoreOp_Discard;
+    depth.depthClearValue = 1;
+    descriptor.depthStencilAttachment = &depth;
     gPass = wgpuCommandEncoderBeginRenderPass(gEncoder, &descriptor);
     return gPass != nullptr ? FrameStatus::Ready : FrameFailure();
 }
@@ -596,6 +629,11 @@ ResourceStatus CreatePipeline(usize slot, const backend::PipelineResources& reso
     descriptor.vertex.entryPoint = { .data = gShaders[vertex].Entry, .length = WGPU_STRLEN };
     descriptor.fragment = &fragmentState;
     descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    WGPUDepthStencilState depth = WGPU_DEPTH_STENCIL_STATE_INIT;
+    depth.format = WGPUTextureFormat_Depth24Plus;
+    depth.depthWriteEnabled = WGPUOptionalBool_False;
+    depth.depthCompare = WGPUCompareFunction_Always;
+    descriptor.depthStencil = &depth;
     pipeline.Object = wgpuDeviceCreateRenderPipeline(gDevice, &descriptor);
     CheckResource(id);
     return pipeline.Object != nullptr && pipeline.Group != nullptr && pipeline.Layout != nullptr &&
@@ -677,3 +715,5 @@ ResourceStatus Draw(usize slot) noexcept
     return ResourceStatus::Ready;
 }
 } // namespace ludus::graphics::rhi::LUDUS_RHI_WEBGPU_NAMESPACE
+
+#include "internal/raster_webgpu.h"

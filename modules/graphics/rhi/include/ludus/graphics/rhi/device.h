@@ -42,7 +42,7 @@ struct DeviceFeatures final
 {
     /// The existing one-triangle fullscreen shader/uniform/pipeline path.
     bool FullscreenRaster = false;
-    /// General buffers, textures and indexed/instanced rendering (not implemented).
+    /// The bounded buffer/texture/binding and indexed/instanced profile in raster.h.
     bool PortableRaster = false;
     /// General compute/storage operations (not implemented).
     bool Compute = false;
@@ -71,7 +71,8 @@ struct DeviceDescription final
     BackendSelection Selection = BackendSelection::Auto;
     /// Minimum effective fullscreen limits; checked on each backend attempt.
     DeviceRequirements Limits;
-    /// Workloads that must be implemented before any backend request is launched.
+    /// Required workloads; unimplemented operations reject before startup, while the
+    /// portable raster profile is verified on each negotiated backend before Ready.
     DeviceFeatures Required{ .FullscreenRaster = true };
     /// Optional workloads; inspect Enabled after Ready rather than assuming availability.
     DeviceFeatures Preferred;

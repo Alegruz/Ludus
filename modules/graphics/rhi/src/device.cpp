@@ -3,6 +3,7 @@
 #include "internal/backend.h"
 #include "internal/device.h"
 #include "internal/lifecycle.h"
+#include "internal/raster.h"
 
 namespace ludus::graphics::rhi
 {
@@ -103,9 +104,8 @@ DeviceStatus ValidateDeviceDescription(const DeviceDescription& description) noe
     {
         return DeviceStatus::InvalidDescription;
     }
-    return description.Required.PortableRaster || description.Required.Compute || description.Required.IndirectRendering
-               ? DeviceStatus::Unsupported
-               : DeviceStatus::Ready;
+    return description.Required.Compute || description.Required.IndirectRendering ? DeviceStatus::Unsupported
+                                                                                  : DeviceStatus::Ready;
 }
 BackendAvailability GetCompiledBackends() noexcept
 {
@@ -138,7 +138,11 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
     {
         return DeviceStatus::IdentityExhausted;
     }
-    const auto result = Start(application, window, description.Selection, description.Limits);
+    const auto result = internal::StartOwned(application,
+                                             window,
+                                             description.Selection,
+                                             description.Limits,
+                                             description.Required.PortableRaster);
     if (result == StartStatus::Busy)
     {
         return DeviceStatus::InvalidState;
@@ -174,6 +178,8 @@ DeviceStatus GetDeviceInfo(DeviceHandle device, DeviceInfo& info) noexcept
     {
         info.Supported.FullscreenRaster = true;
         info.Enabled.FullscreenRaster = true;
+        info.Supported.PortableRaster = backend::RasterLimits().MaxUniformRange >= 16384;
+        info.Enabled.PortableRaster = info.Supported.PortableRaster;
     }
     return state;
 }

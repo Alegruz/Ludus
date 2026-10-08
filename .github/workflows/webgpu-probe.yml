@@ -164,6 +164,27 @@ jobs:
           ./scripts/check web-emscripten-development --all
           ./scripts/test web-emscripten-release
           ./scripts/check web-emscripten-release --all
+      - name: Build an installed portable raster browser SDK consumer
+        run: |
+          out/host-tools/venv/bin/cmake --install out/build/web-emscripten-development --prefix "$PWD/out/install/raster-web-sdk"
+          . out/host-tools/emsdk/emsdk_env.sh
+          out/host-tools/venv/bin/cmake -S tests/sdk_consumer/raster -B out/build/raster-web-sdk -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/out/host-tools/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" \
+            -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH="$PWD/out/install/raster-web-sdk" \
+            -DLudus_DIR="$PWD/out/install/raster-web-sdk/lib/cmake/Ludus" \
+            -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
+            -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
+            -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
+          out/host-tools/venv/bin/cmake --build out/build/raster-web-sdk --parallel 2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raster-web-sdk-consumer
+          path: |
+            out/build/raster-web-sdk/raster.js
+            out/build/raster-web-sdk/raster.wasm
+            out/build/raster-web-sdk/raster.html
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: web-foundation-probes
@@ -342,6 +363,10 @@ jobs:
           path: out/luau-s1-wasm
       - uses: actions/download-artifact@v4
         with:
+          name: raster-web-sdk-consumer
+          path: out/raster-web-sdk-consumer
+      - uses: actions/download-artifact@v4
+        with:
           name: world-camera-web-release
           path: out/world-camera-web-release
       - uses: actions/setup-node@v4
@@ -359,6 +384,8 @@ jobs:
           python3 -m zipfile -e out/packages/ludus-web-smoke-release.zip out/browser-qa/extracted
           cd tools/web-browser-tests
           xvfb-run -a npm test
+      - name: Test installed portable raster pixels, API selection and failures
+        run: node tests/sdk_consumer/raster-browser-test.mjs out/raster-web-sdk-consumer out/browser-qa/results/raster
       - name: Check fixed and follow camera pixels on WebGPU and WebGL
         run: |
           node apps/world_demo/tests/browser-test.mjs out/world-camera-web-release out/browser-qa/results/world-camera-webgpu

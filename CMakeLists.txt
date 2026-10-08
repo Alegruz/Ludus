@@ -328,6 +328,9 @@ endif()
 # FreeType/HarfBuzz, assertion/concurrency paths->Threads).
 if(NOT APPLE)
     ludus_sdk_register_dependency(volk "1.4.357.0" "MIT" bundled)
+    if(NOT EMSCRIPTEN)
+        ludus_sdk_register_dependency(VulkanMemoryAllocator "3.3.0" "MIT" bundled)
+    endif()
 endif()
 if(NOT EMSCRIPTEN)
     ludus_sdk_register_dependency(freetype "2.14.3"   "FTL-or-GPLv2"        bundled)
@@ -413,9 +416,11 @@ if(NOT EMSCRIPTEN)
     install(FILES apps/game_host/main.cpp
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus" RENAME LudusGameHostMain.cpp)
 endif()
-install(FILES cmake/shaders/compile_shader.py config/shader_toolchain.json config/spirv_cross_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
+install(FILES cmake/shaders/compile_shader.py cmake/shaders/compile_raster.py config/shader_toolchain.json config/spirv_cross_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
 
 install(FILES third_party/xxhash/LICENSE DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}/licenses" RENAME xxhash-LICENSE)
 
 install(FILES cmake/LudusReflection.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
 install(FILES tools/reflection/generate.py DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/reflection")
+
+install(FILES third_party/vma/LICENSE.txt DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}/licenses" RENAME VMA-LICENSE)

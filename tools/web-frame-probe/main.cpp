@@ -71,6 +71,11 @@ void BuildDemo() noexcept
     fragment.targetCount = 1;
     fragment.targets = &color;
     WGPURenderPipelineDescriptor descriptor = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    WGPUDepthStencilState depth = WGPU_DEPTH_STENCIL_STATE_INIT;
+    depth.format = WGPUTextureFormat_Depth24Plus;
+    depth.depthWriteEnabled = WGPUOptionalBool_False;
+    depth.depthCompare = WGPUCompareFunction_Always;
+    descriptor.depthStencil = &depth;
     descriptor.vertex.module = shader;
     descriptor.vertex.entryPoint = { .data = "vertex", .length = WGPU_STRLEN };
     descriptor.fragment = &fragment;

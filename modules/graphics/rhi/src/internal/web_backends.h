@@ -6,6 +6,7 @@
 // one browser artifact with no duplicate symbols. rhi_webgpu.cpp is compiled
 // with LUDUS_RHI_WEBGPU_NAMESPACE=webgpu and rhi_webgl.cpp with
 // LUDUS_RHI_WEBGL_NAMESPACE=webgl. The dispatcher routes to the active one.
+#include "raster.h"
 #include "resources.h"
 #include <ludus/foundation/base/types.h>
 
@@ -53,3 +54,66 @@ WGPUDevice ProbeDevice() noexcept;
 WGPUTextureFormat ProbeFormat() noexcept;
 WGPURenderPassEncoder ProbePass() noexcept;
 } // namespace ludus::graphics::rhi::webgpu
+
+namespace ludus::graphics::rhi::webgpu
+{
+RasterCapabilities RasterLimits() noexcept;
+RasterStatus RasterCreateBuffer(foundation::usize,
+                                const BufferDescription&,
+                                std::span<const foundation::uint8>,
+                                foundation::uint32) noexcept;
+RasterStatus
+RasterCreateTexture(foundation::usize, const TextureDescription&, const TextureUpload&, foundation::uint32) noexcept;
+RasterStatus RasterCreateView(foundation::usize, const internal::RasterViewSource&, foundation::uint32) noexcept;
+RasterStatus RasterCreateSampler(foundation::usize, const SamplerDescription&, foundation::uint32) noexcept;
+RasterStatus RasterCreateShader(foundation::usize,
+                                const ShaderDescription&,
+                                const internal::RasterShaderInfo&,
+                                foundation::uint32) noexcept;
+RasterStatus RasterCreateLayout(foundation::usize, const internal::RasterLayout&, foundation::uint32) noexcept;
+RasterStatus RasterCreateSet(foundation::usize,
+                             const internal::RasterLayout&,
+                             const internal::RasterSet&,
+                             foundation::uint32) noexcept;
+RasterStatus RasterCreatePipeline(foundation::usize, const internal::RasterPipelineInfo&, foundation::uint32) noexcept;
+void RasterDestroy(internal::RasterKind, foundation::usize) noexcept;
+RasterStatus RasterDraw(const internal::RasterPacket&) noexcept;
+// Reserve mandatory completion bookkeeping before the first draw; submission
+// cannot discover that its callback storage is exhausted after GPU work starts.
+RasterStatus RasterReserveSubmission() noexcept;
+void RasterSubmit(foundation::uint64 ordinal) noexcept;
+foundation::uint64 RasterCompleted() noexcept;
+void RasterReset() noexcept;
+void RasterShutdown() noexcept;
+} // namespace ludus::graphics::rhi::webgpu
+namespace ludus::graphics::rhi::webgl
+{
+RasterCapabilities RasterLimits() noexcept;
+RasterStatus RasterCreateBuffer(foundation::usize,
+                                const BufferDescription&,
+                                std::span<const foundation::uint8>,
+                                foundation::uint32) noexcept;
+RasterStatus
+RasterCreateTexture(foundation::usize, const TextureDescription&, const TextureUpload&, foundation::uint32) noexcept;
+RasterStatus RasterCreateView(foundation::usize, const internal::RasterViewSource&, foundation::uint32) noexcept;
+RasterStatus RasterCreateSampler(foundation::usize, const SamplerDescription&, foundation::uint32) noexcept;
+RasterStatus RasterCreateShader(foundation::usize,
+                                const ShaderDescription&,
+                                const internal::RasterShaderInfo&,
+                                foundation::uint32) noexcept;
+RasterStatus RasterCreateLayout(foundation::usize, const internal::RasterLayout&, foundation::uint32) noexcept;
+RasterStatus RasterCreateSet(foundation::usize,
+                             const internal::RasterLayout&,
+                             const internal::RasterSet&,
+                             foundation::uint32) noexcept;
+RasterStatus RasterCreatePipeline(foundation::usize, const internal::RasterPipelineInfo&, foundation::uint32) noexcept;
+void RasterDestroy(internal::RasterKind, foundation::usize) noexcept;
+RasterStatus RasterDraw(const internal::RasterPacket&) noexcept;
+// Reserve mandatory completion bookkeeping before the first draw; submission
+// cannot discover that its callback storage is exhausted after GPU work starts.
+RasterStatus RasterReserveSubmission() noexcept;
+void RasterSubmit(foundation::uint64 ordinal) noexcept;
+foundation::uint64 RasterCompleted() noexcept;
+void RasterReset() noexcept;
+void RasterShutdown() noexcept;
+} // namespace ludus::graphics::rhi::webgl

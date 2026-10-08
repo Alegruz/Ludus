@@ -119,13 +119,13 @@ TEST_CASE("Required workloads reject before startup and synchronous failures pre
     const auto token = backend::PendingToken;
     StartupInfo diagnostic;
     diagnostic.MaxTextureDimension2D = 777;
-    description.Required.PortableRaster = true;
+    description.Required.Compute = true;
     CHECK(ValidateDeviceDescription(description) == DeviceStatus::Unsupported);
     CHECK(CreateDevice({}, {}, description, device, surface, &diagnostic) == DeviceStatus::Unsupported);
     CHECK(diagnostic.MaxTextureDimension2D == 777);
     CHECK(backend::PendingToken == token);
     CHECK(GetStartup().State == StartupState::Idle);
-    description.Required.PortableRaster = false;
+    description.Required.Compute = false;
     description.Required.Compute = true;
     CHECK(CreateDevice({}, {}, description, device, surface) == DeviceStatus::Unsupported);
     description.Required.Compute = false;

@@ -6,8 +6,10 @@ This document was drafted before opening the article map, then refined
 through [five complete reference chapters](rhi-gdi-gems-review.md) and current
 primary documentation. The first implementation slice now adds effective
 fullscreen capabilities, copied startup requirements, explicit requirement and
-backend-selection failures, and requirement-aware browser fallback. Remaining
-R0 work and R1-R5 are proposals. The first explicit R0 device slice now shares
+backend-selection failures, and requirement-aware browser fallback. Remaining R0 work and R2-R5 are proposals. The first bounded R1 portable
+resource/raster profile is implemented alongside the fullscreen facade, with
+minimum CPU/GPU retirement accompanying its general resources; see the
+[portable raster contract](../development/fullscreen-rendering.md#portable-raster-r1). The first explicit R0 device slice now shares
 the facade session/registry, validates device and target owners, and rejects
 unimplemented required workloads before startup; see the
 [public usage contract](../development/fullscreen-rendering.md#explicit-r0-device-ownership).
@@ -35,7 +37,7 @@ and WebGPU or WebGL 2 in the browser. Its common API remains deliberately bounde
 | --- | --- | --- |
 | [Public lifecycle](../../modules/graphics/rhi/include/ludus/graphics/rhi/rhi.h) and [facade](../../modules/graphics/rhi/src/rhi.cpp) | One main-thread session, asynchronous browser startup, statuses, generation tokens, frame begin/end | Preserve behavior; add an explicit device API alongside it |
 | [Public fullscreen resources](../../modules/graphics/rhi/include/ludus/graphics/rhi/render.h) | Eight resources per kind, shaders, one uniform binding, pipelines tied to a uniform, one fullscreen triangle | This is a compatibility slice, not a general buffer/texture/pass API |
-| [Vulkan](../../modules/graphics/rhi/src/rhi_vulkan.cpp) | Vulkan 1.1 render passes, two fenced command/uniform slots, owned headless image, maintenance1 presentation retirement on Wayland, individual device-memory allocations | General resources need allocation and retirement services; do not require Vulkan 1.3 merely to refactor |
+| [Vulkan](../../modules/graphics/rhi/src/rhi_vulkan.cpp) | Vulkan 1.1 render passes, two fenced command/uniform slots, owned headless image, maintenance1 presentation retirement on Wayland, private VMA 3.3.0 for general raster resources; legacy frame targets retain their existing allocation path | General resources need allocation and retirement services; do not require Vulkan 1.3 merely to refactor |
 | [Metal](../../modules/graphics/rhi/src/rhi_metal.mm) | Two command-buffer-fenced shared uniform slots, Cocoa drawables and private headless textures; submitted commands retain their resources | Preserve the shipped fullscreen path; general resources, layouts, encoders and completion services remain part of this migration |
 | [Browser dispatcher](../../modules/graphics/rhi/src/rhi_web.cpp) | WebGPU startup with one permitted WebGL 2 fallback and Platform-managed canvas replacement | Preserve ADR 0014 and callback isolation |
 | [Shader build helper](../../cmake/shaders/compile_shader.py) | Pinned Slang emits SPIR-V/WGSL and macOS MSL 2.3; pinned SPIRV-Cross emits GLSL ES 3.00, with bounded per-target layout validation | Retain proven targets; general reflection/layout support is future work |
@@ -674,7 +676,7 @@ external memory/semaphore interoperability.
 | Phase | Current status | Deliverable | Required evidence |
 | --- | --- | --- | --- |
 | R0 Contracts | Partial: fullscreen capabilities, copied requirements, explicit device/target owners, required/preferred workload admission and reference-backend lifecycle tests are implemented; general resource slot/generation identities and broader feature/format/limit negotiation remain | Device capabilities/results/ownership, compatibility facade, reference validator and loss protocol | Existing fullscreen/SDK behavior preserved; stale/cross-owner handles, pending cancellation, late callbacks and requirement failure covered |
-| R1 Portable resources | Proposed | Buffer/texture/view/sampler, general reflection/layout, immutable bindings/pipelines, indexed and instanced draws | Identical textured/depth diagnostic scenes on Vulkan, Metal, forced WebGPU, forced WebGL 2 and Auto; packing/limits/copy/view mismatch rejection |
+| R1 Portable resources | Initial bounded profile implemented; broader copy/update/attachment APIs deferred | Buffer/texture/view/sampler, general reflection/layout, immutable bindings/pipelines, indexed and instanced draws | Identical textured/depth diagnostic scenes on Vulkan, Metal, forced WebGPU, forced WebGL 2 and Auto; packing/limits/copy/view mismatch rejection |
 | R2 Lifetime services | Proposed | Completion tokens, retained records, upload/readback rings, Vulkan allocator adapter, pipeline requests | Destroy before/after finish/submit, discard, resource dependency retention, slow GPU/ring exhaustion, memory failure, cancellation, loss, resize/shutdown |
 | R3 Ordered graph | Proposed | Explicit pass list, version/hazard compiler, pooling, narrow synchronization, reports | Offscreen scene to composite/UI, graph roots/history/import contracts, undeclared-use detection, reference versus optimized image agreement |
 | R4 Compute renderer | Proposed | Capability-specific storage/compute/indirect effects and authored raster/CPU variants | Compute correctness plus supported limits; WebGL chooses a declared variant or fails before executing |

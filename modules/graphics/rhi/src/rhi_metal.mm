@@ -1,5 +1,6 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/raster.h"
 #include "internal/resources.h"
 #if defined(LUDUS_RHI_TEST_READBACK)
 #    include "internal/readback.h"
@@ -26,9 +27,12 @@
 #import <Metal/MTLBuffer.h>
 #import <Metal/MTLCommandBuffer.h>
 #import <Metal/MTLCommandQueue.h>
+#import <Metal/MTLDepthStencil.h>
 #import <Metal/MTLDevice.h>
 #import <Metal/MTLLibrary.h>
 #import <Metal/MTLRenderPipeline.h>
+#import <Metal/MTLSampler.h>
+#import <Metal/MTLVertexDescriptor.h>
 #import <QuartzCore/CAMetalLayer.h>
 #if defined(LUDUS_METAL_LOCAL_INFINITY)
 #    undef INFINITY
@@ -82,6 +86,7 @@ id<MTLCommandBuffer> gSubmitted[FRAMES]{};
 id<MTLCommandBuffer> gCommand = nil;
 id<MTLRenderCommandEncoder> gEncoder = nil;
 id<MTLTexture> gHeadless = nil;
+id<MTLTexture> gDepth = nil;
 id<CAMetalDrawable> gDrawable = nil;
 CAMetalLayer* gLayer = nil;
 CALayer* gPreviousLayer = nil;
@@ -288,6 +293,7 @@ void ShutdownRendering() noexcept
             command = nil;
         }
         gHeadless = nil;
+        gDepth = nil;
         gFrame = {};
         gSlot = 0;
         gRendering = false;
@@ -354,6 +360,7 @@ FrameStatus Begin() noexcept
             return FrameStatus::Skipped;
         }
         [gSubmitted[gSlot] waitUntilCompleted];
+        (void)RasterCompleted();
         if (gSubmitted[gSlot] != nil && !CheckCommand(gSubmitted[gSlot]))
         {
             return FrameStatus::Failed;
@@ -391,8 +398,27 @@ FrameStatus Begin() noexcept
         {
             return FrameFailure();
         }
+        if (gDepth == nil || gDepth.width != texture.width || gDepth.height != texture.height)
+        {
+            MTLTextureDescriptor* depth =
+                [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
+                                                                   width:texture.width
+                                                                  height:texture.height
+                                                               mipmapped:NO];
+            depth.usage = MTLTextureUsageRenderTarget;
+            depth.storageMode = MTLStorageModePrivate;
+            gDepth = [gDevice newTextureWithDescriptor:depth];
+        }
+        if (gDepth == nil)
+        {
+            return FrameFailure();
+        }
         gCommand = [gQueue commandBuffer];
         MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
+        pass.depthAttachment.texture = gDepth;
+        pass.depthAttachment.loadAction = MTLLoadActionClear;
+        pass.depthAttachment.storeAction = MTLStoreActionDontCare;
+        pass.depthAttachment.clearDepth = 1;
         pass.colorAttachments[0].texture = texture;
         pass.colorAttachments[0].loadAction = MTLLoadActionClear;
         pass.colorAttachments[0].storeAction = MTLStoreActionStore;
@@ -498,6 +524,7 @@ ResourceStatus CreatePipeline(usize slot, const PipelineResources& resources, ui
         description.vertexFunction = gShaders[resources.Vertex].Function;
         description.fragmentFunction = gShaders[resources.Fragment].Function;
         description.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+        description.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
         NSError* error = nil;
         MTLRenderPipelineReflection* reflection = nil;
         id<MTLRenderPipelineState> pipeline =
@@ -620,3 +647,5 @@ bool ReadHeadlessPixels(std::span<uint8> pixels) noexcept
 }
 #endif
 } // namespace ludus::graphics::rhi::backend
+
+#include "internal/raster_metal.h"
