@@ -461,6 +461,8 @@ only after completion. That final browser copy can incur IPC/CPU cost; this
 profile promises no driver time budget or throughput improvement. Native
 shutdown may wait for submitted work; browser callback cells stay occupied
 across shutdown until late callbacks drain safely.
+Admission skips those occupied callback cells so the remaining free slices stay
+usable after restart.
 
 ### Pipeline requests
 

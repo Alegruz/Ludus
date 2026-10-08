@@ -105,6 +105,11 @@ RasterStatus LifetimeWebStage(LifetimeWebTransfer& transfer, bool readback) noex
     return transfer.Staging != nullptr ? RasterStatus::Ready : RasterStatus::OutOfMemory;
 }
 } // namespace
+bool LifetimeTransferAvailable(bool readback, usize slot) noexcept
+{
+    const auto& transfer = gLifetimeWeb[readback ? 1 : 0][slot];
+    return !transfer.Busy && transfer.Callbacks == 0;
+}
 RasterStatus LifetimeUpload(usize transferSlot,
                             const BufferDescription& info,
                             const internal::LifetimeUploadTarget& uploadTarget,

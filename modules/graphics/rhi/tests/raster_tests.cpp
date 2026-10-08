@@ -678,6 +678,68 @@ TEST_CASE("Loss and restart invalidate every lifetime identity", "[rhi][lifetime
     CHECK(GetStatus(replacement.Device, completion) == RasterStatus::InvalidHandle);
     CHECK(DiscardCommands(replacement.Device, batch) == RasterStatus::InvalidHandle);
 }
+TEST_CASE("Restart admits free transfer slices while old backend callbacks retain other cells", "[rhi][lifetime]")
+{
+    Session session;
+    bool readback = false;
+    SECTION("Upload")
+    {
+        readback = false;
+    }
+    SECTION("Readback")
+    {
+        readback = true;
+    }
+    const uint8 bytes[16]{1, 2, 3, 4};
+    BufferHandle source;
+    REQUIRE(CreateBuffer(session.Device, {BufferRole::Uniform, 16}, bytes, source) == RasterStatus::Ready);
+    const auto request = [&](UploadTicket& upload, ReadbackTicket& read) {
+        return readback ? RequestBufferReadback(session.Device, source, 0, 16, read)
+                        : RequestBufferUpload(session.Device, {BufferRole::Uniform, 16}, bytes, 16, upload);
+    };
+    UploadTicket oldUpload;
+    ReadbackTicket oldReadback;
+    REQUIRE(request(oldUpload, oldReadback) == RasterStatus::Pending);
+    reference::RetainTransfersOnReset = true;
+    REQUIRE(DestroyDevice(session.Device) == DeviceStatus::Ready);
+    session.Surface = {};
+    REQUIRE(CreateDevice({}, {}, {}, session.Device, session.Surface) == DeviceStatus::Pending);
+    internal::Complete(backend::PendingToken, StartupError::None, {4096, 16384});
+    CHECK((readback ? GetStatus(session.Device, oldReadback) : GetStatus(session.Device, oldUpload)) ==
+          RasterStatus::InvalidHandle);
+    source = {};
+    REQUIRE(CreateBuffer(session.Device, {BufferRole::Uniform, 16}, bytes, source) == RasterStatus::Ready);
+    UploadTicket uploads[4];
+    ReadbackTicket reads[4];
+    for (usize i = 0; i < 3; ++i)
+    {
+        REQUIRE(request(uploads[i], reads[i]) == RasterStatus::Pending);
+    }
+    CHECK(reference::Copies == 4);
+    CHECK(request(uploads[3], reads[3]) == RasterStatus::CapacityExceeded);
+    const usize direction = readback ? 1 : 0;
+    // An old-session callback drains only its own physical cell. Slot zero can
+    // now accept new work without changing the three new-session requests.
+    reference::TransferOccupied[direction][0] = false;
+    REQUIRE(request(uploads[3], reads[3]) == RasterStatus::Pending);
+    CHECK(reference::Copies == 5);
+    for (auto& status : reference::Transfers[direction])
+    {
+        status = RasterStatus::Ready;
+    }
+    if (readback)
+    {
+        uint8 actual[16]{};
+        REQUIRE(CopyReadback(session.Device, reads[0], actual, sizeof(actual)) == RasterStatus::Ready);
+        CHECK(std::memcmp(actual, bytes, sizeof(bytes)) == 0);
+    }
+    for (usize i = 0; i < 4; ++i)
+    {
+        REQUIRE((readback ? Release(session.Device, reads[i]) : Release(session.Device, uploads[i])) ==
+                RasterStatus::Ready);
+    }
+    reference::RetainTransfersOnReset = false;
+}
 TEST_CASE("Pipeline cache canonicalizes attributes and distinguishes immutable fixed state", "[rhi][lifetime]")
 {
     Session session;

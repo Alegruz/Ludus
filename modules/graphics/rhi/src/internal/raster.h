@@ -150,6 +150,8 @@ void RasterSubmit(foundation::uint64 ordinal) noexcept;
 foundation::uint64 RasterCompleted() noexcept;
 void RasterReset() noexcept;
 void RasterShutdown() noexcept;
+// Logical records can reset while an old browser callback still owns its cell.
+bool LifetimeTransferAvailable(bool, foundation::usize) noexcept;
 RasterStatus LifetimeUpload(foundation::usize,
                             const BufferDescription&,
                             const internal::LifetimeUploadTarget&,

@@ -16,6 +16,14 @@ void Reset() noexcept
     Discards = 0;
     Copies = 0;
     TransferStart = ReadbackCopy = RasterStatus::Ready;
+    RetainTransfersOnReset = false;
+    for (auto& direction : TransferOccupied)
+    {
+        for (auto& occupied : direction)
+        {
+            occupied = false;
+        }
+    }
     for (auto& direction : Transfers)
     {
         for (auto& status : direction)
@@ -133,6 +141,10 @@ void RasterDiscardSubmission() noexcept
 {
     ++reference::Discards;
 }
+bool LifetimeTransferAvailable(bool readback, usize slot) noexcept
+{
+    return !reference::TransferOccupied[readback ? 1 : 0][slot];
+}
 RasterStatus LifetimeUpload(usize transfer,
                             const BufferDescription&,
                             const internal::LifetimeUploadTarget& uploadTarget,
@@ -142,6 +154,10 @@ RasterStatus LifetimeUpload(usize transfer,
     const auto buffer = uploadTarget.Buffer;
     const auto request = uploadTarget.Request;
 
+    if (!LifetimeTransferAvailable(false, transfer))
+    {
+        return RasterStatus::CapacityExceeded;
+    }
     if (reference::TransferStart != RasterStatus::Ready)
     {
         return reference::TransferStart;
@@ -149,6 +165,7 @@ RasterStatus LifetimeUpload(usize transfer,
     std::memcpy(reference::BufferBytes[buffer], bytes, size);
     reference::BufferSizes[buffer] = size;
     reference::Transfers[0][transfer] = RasterStatus::Pending;
+    reference::TransferOccupied[0][transfer] = true;
     ++reference::Copies;
     return Created(internal::RasterKind::Buffer, request);
 }
@@ -157,6 +174,10 @@ RasterStatus LifetimeReadback(usize transfer, BufferRole, const internal::Lifeti
     const auto buffer = range.Buffer;
     const auto offset = range.Offset;
     const auto size = range.Size;
+    if (!LifetimeTransferAvailable(true, transfer))
+    {
+        return RasterStatus::CapacityExceeded;
+    }
     if (reference::TransferStart != RasterStatus::Ready)
     {
         return reference::TransferStart;
@@ -164,6 +185,7 @@ RasterStatus LifetimeReadback(usize transfer, BufferRole, const internal::Lifeti
     const auto& bytes = reference::BufferBytes[buffer];
     std::memcpy(reference::ReadbackBytes[transfer], bytes + offset, size);
     reference::Transfers[1][transfer] = RasterStatus::Pending;
+    reference::TransferOccupied[1][transfer] = true;
     ++reference::Copies;
     return RasterStatus::Ready;
 }
@@ -186,8 +208,21 @@ RasterStatus LifetimeCopyReadback(usize slot, uint8* output, usize size) noexcep
 void LifetimeReleaseTransfer(bool readback, usize slot) noexcept
 {
     reference::Transfers[readback ? 1 : 0][slot] = RasterStatus::Failed;
+    reference::TransferOccupied[readback ? 1 : 0][slot] = false;
 }
-void LifetimeReset() noexcept {}
+void LifetimeReset() noexcept
+{
+    if (!reference::RetainTransfersOnReset)
+    {
+        for (auto& direction : reference::TransferOccupied)
+        {
+            for (auto& occupied : direction)
+            {
+                occupied = false;
+            }
+        }
+    }
+}
 void RasterShutdown() noexcept {}
 void RasterReset() noexcept
 {

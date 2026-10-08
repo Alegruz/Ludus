@@ -98,7 +98,7 @@ void ResetLifetime(T& record) noexcept
     record.Generation = generation;
 }
 template <typename T, usize N>
-RasterStatus ReserveLifetime(T (&records)[N], usize& slot) noexcept
+RasterStatus ReserveLifetime(T (&records)[N], usize& slot, bool (*available)(usize) noexcept = nullptr) noexcept
 {
     bool exhausted = false;
     for (slot = 0; slot < N; ++slot)
@@ -110,6 +110,10 @@ RasterStatus ReserveLifetime(T (&records)[N], usize& slot) noexcept
         if (records[slot].Generation == 0)
         {
             exhausted = true;
+            continue;
+        }
+        if (available != nullptr && !available(slot))
+        {
             continue;
         }
         return RasterStatus::Ready;
@@ -727,7 +731,9 @@ RasterStatus RequestBufferUpload(DeviceHandle device,
         return polled;
     }
     usize slot = 0;
-    const auto reserved = ReserveLifetime(gUploads, slot);
+    const auto reserved = ReserveLifetime(gUploads, slot, [](usize candidate) noexcept {
+        return backend::LifetimeTransferAvailable(false, candidate);
+    });
     if (reserved != RasterStatus::Ready)
     {
         return reserved;
@@ -799,7 +805,9 @@ RasterStatus RequestBufferReadback(DeviceHandle device,
         return polled;
     }
     usize slot = 0;
-    const auto reserved = ReserveLifetime(gReadbacks, slot);
+    const auto reserved = ReserveLifetime(gReadbacks, slot, [](usize candidate) noexcept {
+        return backend::LifetimeTransferAvailable(true, candidate);
+    });
     if (reserved != RasterStatus::Ready)
     {
         return reserved;

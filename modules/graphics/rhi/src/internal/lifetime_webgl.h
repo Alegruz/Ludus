@@ -60,6 +60,10 @@ RasterStatus LifetimeGlFence(LifetimeGlTransfer& transfer) noexcept
     return RasterStatus::Ready;
 }
 } // namespace
+bool LifetimeTransferAvailable(bool readback, usize slot) noexcept
+{
+    return !gLifetimeGl[readback ? 1 : 0][slot].Busy;
+}
 RasterStatus LifetimeUpload(usize transferSlot,
                             const BufferDescription& info,
                             const internal::LifetimeUploadTarget& uploadTarget,

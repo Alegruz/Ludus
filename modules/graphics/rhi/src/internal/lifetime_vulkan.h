@@ -117,6 +117,10 @@ VkBufferMemoryBarrier LifetimeVulkanBarrier(VkBuffer buffer) noexcept
     return barrier;
 }
 } // namespace
+bool LifetimeTransferAvailable(bool readback, usize slot) noexcept
+{
+    return !gLifetimeVulkan[readback ? 1 : 0][slot].Busy;
+}
 RasterStatus LifetimeUpload(usize transferSlot,
                             const BufferDescription& info,
                             const internal::LifetimeUploadTarget& uploadTarget,

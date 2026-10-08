@@ -52,6 +52,10 @@ RasterStatus LifetimeMetalCopy(LifetimeMetalTransfer& transfer,
     return RasterStatus::Ready;
 }
 } // namespace
+bool LifetimeTransferAvailable(bool readback, usize slot) noexcept
+{
+    return !gLifetimeMetal[readback ? 1 : 0][slot].Busy;
+}
 RasterStatus LifetimeUpload(usize transferSlot,
                             const BufferDescription&,
                             const internal::LifetimeUploadTarget& uploadTarget,

@@ -86,6 +86,7 @@ void RasterSubmit(foundation::uint64 ordinal) noexcept;
 foundation::uint64 RasterCompleted() noexcept;
 void RasterReset() noexcept;
 void RasterShutdown() noexcept;
+bool LifetimeTransferAvailable(bool, foundation::usize) noexcept;
 RasterStatus LifetimeUpload(foundation::usize,
                             const BufferDescription&,
                             const internal::LifetimeUploadTarget&,
@@ -128,6 +129,7 @@ void RasterSubmit(foundation::uint64 ordinal) noexcept;
 foundation::uint64 RasterCompleted() noexcept;
 void RasterReset() noexcept;
 void RasterShutdown() noexcept;
+bool LifetimeTransferAvailable(bool, foundation::usize) noexcept;
 RasterStatus LifetimeUpload(foundation::usize,
                             const BufferDescription&,
                             const internal::LifetimeUploadTarget&,

@@ -17,6 +17,8 @@ inline foundation::uint8 BufferBytes[internal::RASTER_CAPACITY][internal::LIFETI
 inline foundation::usize BufferSizes[internal::RASTER_CAPACITY]{};
 inline foundation::uint8 ReadbackBytes[internal::LIFETIME_TRANSFERS][internal::LIFETIME_TRANSFER_BYTES]{};
 inline RasterStatus Transfers[2][internal::LIFETIME_TRANSFERS];
+inline bool TransferOccupied[2][internal::LIFETIME_TRANSFERS]{};
+inline bool RetainTransfersOnReset = false;
 inline RasterStatus TransferStart = RasterStatus::Ready;
 inline RasterStatus ReadbackCopy = RasterStatus::Ready;
 inline foundation::usize Discards = 0;

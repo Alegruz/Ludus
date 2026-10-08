@@ -419,6 +419,11 @@ void RasterDiscardSubmission() noexcept
         webgpu::RasterDiscardSubmission();
     }
 }
+bool LifetimeTransferAvailable(bool readback, foundation::usize slot) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::LifetimeTransferAvailable(readback, slot)
+                                      : webgpu::LifetimeTransferAvailable(readback, slot);
+}
 RasterStatus LifetimeUpload(usize transfer,
                             const BufferDescription& info,
                             const internal::LifetimeUploadTarget& uploadTarget,
