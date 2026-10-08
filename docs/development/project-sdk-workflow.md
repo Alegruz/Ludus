@@ -5,6 +5,12 @@ SDKs, project creation and migration, building with the CLI (and the Editor),
 direct CMake use, recovery and the current compatibility limits. It documents the
 workflow implemented by `.kiro/specs/project-sdk-workflow`.
 
+On macOS, **Project → Repair Project Setup → Build and install the engine used
+by this editor** reuses the Apple SDK prepared in that engine checkout. An
+unrelated `SDKROOT` inherited by the GUI does not replace it. If no prepared SDK
+exists, init tests installed SDKs automatically. Running `./init.sh` yourself
+continues to honor an explicit shell `SDKROOT` override.
+
 > Scope. Native project tooling supports **Linux x64** (Ubuntu 24.04) and
 > **macOS** with pinned upstream Clang 18, single-config Ninja, and
 > Debug/Development/Release SDK identities. The installed macOS CLI has native
