@@ -46,6 +46,10 @@ class GuiUnavailable(RuntimeError):
     """The optional Tk window cannot be opened on this host."""
 
 
+def shader_probe_supported(preset: str) -> bool:
+    return platform.system() == "Linux" and preset.startswith("linux-clang-")
+
+
 def apply_defaults(args: argparse.Namespace) -> argparse.Namespace:
     result = copy.copy(args)
     persona = next(persona for persona in PERSONAS if persona.key == args.persona)
@@ -62,6 +66,11 @@ def apply_defaults(args: argparse.Namespace) -> argparse.Namespace:
 
 
 def validate_options(args: argparse.Namespace, engine) -> None:
+    if args.with_shader_probe and not shader_probe_supported(args.preset):
+        raise engine.EngineError(
+            "The shader feasibility probe requires the Linux Vulkan backend; macOS uses Metal. "
+            "Rerun ./init.sh --no-shader-probe. This optional probe is not required for "
+            "Metal shader compilation, world_demo or the Cornell box sample.")
     if args.all_presets and args.preset_only:
         raise engine.EngineError("--all-presets and --preset-only describe conflicting initialization scopes")
     if (args.validate or args.ci or args.run_tests) and not args.with_tests:
@@ -179,7 +188,7 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
             ("run_tests", "Build and run native tests after setup"),
             ("with_smoke_app", "Include sample applications (smoke and native input demo)"),
             ("with_web_probes", "Include browser feasibility probes"),
-            ("with_shader_probe", "Include native shader feasibility probe (separate pinned tools required)"),
+            ("with_shader_probe", "Include shader feasibility probe (Linux Vulkan only; separate pinned tools required)"),
             ("validate", "Build and run full validation after setup"),
             ("skip_checks", "Skip formatting and static analysis during validation"),
             ("skip_sanitizers", "Skip sanitizer build and tests during validation"),
@@ -213,7 +222,10 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
                 flags["with_tests"].set(True)
             if not browser:
                 flags["with_web_probes"].set(False)
-            controls["with_shader_probe"].configure(state="disabled" if browser else "normal")
+            probe_supported = shader_probe_supported(preset.get())
+            if not probe_supported:
+                flags["with_shader_probe"].set(False)
+            controls["with_shader_probe"].configure(state="normal" if probe_supported else "disabled")
             controls["with_web_probes"].configure(state="normal" if browser else "disabled")
             controls["with_tests"].configure(state="disabled" if browser or validating or flags["run_tests"].get() else "normal")
             controls["run_tests"].configure(state="disabled" if browser or validating else "normal")

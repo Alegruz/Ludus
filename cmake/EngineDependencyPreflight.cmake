@@ -1,5 +1,10 @@
 # Optional dependencies are checked only for enabled features.
 include("${CMAKE_CURRENT_LIST_DIR}/LudusDependencies.cmake")
+if(LUDUS_BUILD_SHADER_PROBE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    ludus_dependency_error("Shader feasibility probe" "the Linux Vulkan backend"
+        "LUDUS_BUILD_SHADER_PROBE is enabled, but this optional Vulkan probe is unsupported on ${CMAKE_SYSTEM_NAME}. macOS uses Metal."
+        "Rerun ./init.sh --no-shader-probe to update saved local setup choices.\n  For custom configurations without saved init choices, set LUDUS_BUILD_SHADER_PROBE=OFF.\n  Metal shader compilation, world_demo and the Cornell box sample do not require this probe.")
+endif()
 get_filename_component(setup_preset "${CMAKE_BINARY_DIR}" NAME)
 set(setup_recovery "From the repository root: ./init.sh --cli --preset ${setup_preset} --preset-only --locked")
 if(NOT setup_preset MATCHES "^(linux|macos)-clang-(debug|development|profile|release|asan-ubsan|tsan)$")
