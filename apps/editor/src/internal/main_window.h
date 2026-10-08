@@ -38,6 +38,7 @@ class AudioWorkspace;
 class ConfigurationWorkspace;
 class ContentWorkspace;
 class ScriptWorkspace;
+class SceneWorkspace;
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -94,6 +95,7 @@ private:
     void RenderProperties();
     void RenderRecentProjects();
 
+    SceneWorkspace* Scene_ = nullptr;
     ScriptWorkspace* Scripts_ = nullptr;
     ConfigurationWorkspace* Configuration_ = nullptr;
     QWidget* ProjectSettings_ = nullptr;

@@ -1,6 +1,7 @@
 #include "internal/application.h"
 #include <ludus/foundation/base/config.h>
 #include <ludus/foundation/base/parse_number.hpp>
+#include <ludus/foundation/filesystem/filesystem.hpp>
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
@@ -46,10 +47,82 @@ int main(int argc, char** argv)
     config.EnableConsole = true;
     config.EnableFile = false;
     ludus::foundation::logging::LogSystem::Initialize(config);
-    if (argc > 1 && std::string_view(argv[1]) == "--headless")
+    // --level is an explicit bounded read. The same codec validates Editor and
+    // runtime; loading never rewrites, builds or repairs the source project.
+    char levelBytes[65536] = {};
+    usize levelSize = 0;
+    bool headless = false;
+    bool follow = false;
+    uint64 frameLimit = 0;
+    for (int argument = 1; argument < argc; ++argument)
+    {
+        const std::string_view flag(argv[argument]);
+        if (flag == "--headless")
+        {
+            headless = true;
+        }
+        else if (flag == "--follow-camera")
+        {
+            follow = true;
+        }
+        else if (flag == "--frames" && argument + 1 < argc)
+        {
+            const std::string_view text(argv[++argument]);
+            if (ParseUint64(text.data(), text.size(), frameLimit) != NumberParseStatus::Success || frameLimit == 0)
+            {
+                return 1;
+            }
+        }
+        else if (flag == "--level" && argument + 1 < argc)
+        {
+            const std::string_view path(argv[++argument]);
+            if (levelSize != 0 || path.empty() || path.size() > 4096)
+            {
+                return 1;
+            }
+            // Split only at this existing filesystem compatibility boundary;
+            // Directory owns the root and refuses child symlinks.
+            auto slash = std::string_view::npos;
+            for (usize i = 0; i < path.size(); ++i)
+            {
+                if (path[i] == '/')
+                {
+                    slash = i;
+                }
+            }
+            const auto root = slash == std::string_view::npos ? std::string_view(".")
+                              : slash == 0                    ? path.substr(0, 1)
+                                                              : path.substr(0, slash);
+            const auto leaf = slash == std::string_view::npos ? path : path.substr(slash + 1);
+            ludus::foundation::filesystem::Directory directory;
+            ludus::foundation::filesystem::File file;
+            if (!directory.Open(root).Succeeded() || !directory.OpenRead(leaf, file).Succeeded() || file.Size() == 0 ||
+                file.Size() > sizeof(levelBytes))
+            {
+                return 1;
+            }
+            levelSize = static_cast<usize>(file.Size());
+            const auto read = file.ReadAt(0, {reinterpret_cast<uint8*>(levelBytes), levelSize});
+            if (!read.Outcome.Succeeded() || read.BytesRead != levelSize)
+            {
+                return 1;
+            }
+            Level checked;
+            if (ReadLevel({levelBytes, levelSize}, checked).Error != LevelError::None)
+            {
+                return 1;
+            }
+        }
+        else
+        {
+            return 1;
+        }
+    }
+    const auto source = levelSize != 0 ? std::string_view(levelBytes, levelSize) : ExampleLevel();
+    if (headless)
     {
         Session session;
-        if (session.RequestLoad(ExampleLevel()).Error != LevelError::None)
+        if (session.RequestLoad(source).Error != LevelError::None)
         {
             return 1;
         }
@@ -79,23 +152,17 @@ int main(int argc, char** argv)
         return 0;
     }
 #if LUDUS_TARGET_OS == LUDUS_OS_WEB
+    (void)follow;
+    (void)frameLimit;
     gApplication.SetCameraFollow(FollowCameraRequested());
     (void)gApplication.Start();
     emscripten_set_main_loop(Frame, 0, true);
 #else
-    uint64 frameLimit = 0;
-    if (argc == 3 && std::string_view(argv[1]) == "--frames")
-    {
-        const std::string_view text(argv[2]);
-        const auto parsed = ParseUint64(text.data(), text.size(), frameLimit);
-        if (parsed != NumberParseStatus::Success || frameLimit == 0)
-        {
-            return 1;
-        }
-    }
     Application application;
-    application.SetCameraFollow(argc == 2 && std::string_view(argv[1]) == "--follow-camera");
-    if (!application.Start())
+    application.SetCameraFollow(follow);
+    if (!application.Start(ludus::graphics::rhi::BackendSelection::Auto,
+                           levelSize != 0 ? levelBytes : nullptr,
+                           levelSize))
     {
         return 1;
     }

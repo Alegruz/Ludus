@@ -43,6 +43,14 @@ endif()
 # Q_SLOTS/Q_EMIT and the typed (pointer-to-member) connect overloads instead.
 # AUTOMOC is enabled per target below, not globally.
 
+# Rendering is explicitly opted in with the pinned offline shader compiler.
+# The document UI remains available when graphics tools/surfaces are unavailable.
+option(LUDUS_EDITOR_RENDER_PREVIEW "Build the trusted native authoring surface (requires pinned shader tools)" OFF)
+set(editor_scene_preview_source src/scene_preview_unavailable.cpp)
+if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT EMSCRIPTEN)
+    set(editor_scene_preview_source src/scene_preview.cpp)
+endif()
+
 # --- Shared editor logic library ---------------------------------------------
 # The transition function, project store, tool-process protocol framing and log
 # buffer live in a library so offscreen tests can exercise them without creating
@@ -71,8 +79,19 @@ target_link_libraries(ludus_editor_core
 )
 ludus_apply_project_defaults(ludus_editor_core)
 
+# Private portable scene document; deliberately no Qt, Platform, RHI or game runtime.
+add_library(ludus_editor_scene STATIC src/scene_document.cpp)
+target_include_directories(ludus_editor_scene PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(ludus_editor_scene PUBLIC ludus_world_level PRIVATE Ludus::FoundationMath)
+ludus_apply_project_defaults(ludus_editor_scene)
+
 # --- Editor application ------------------------------------------------------
 qt_add_executable(ludus_editor
+    src/internal/scene_preview.h
+    src/internal/scene_workspace.h
+    ${editor_scene_preview_source}
+    src/scene_store.cpp
+    src/scene_workspace.cpp
     src/internal/controller.h
     src/internal/configuration_workspace.h
     src/internal/main_window.h
@@ -111,6 +130,7 @@ target_compile_definitions(ludus_editor PRIVATE QT_NO_KEYWORDS QT_NO_CAST_FROM_A
 target_link_libraries(ludus_editor
     PRIVATE
         ludus_editor_core
+        ludus_editor_scene
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets
@@ -119,8 +139,14 @@ target_link_libraries(ludus_editor
         Ludus::AudioContent
         Ludus::FoundationConfigJson
         Ludus::RuntimeConfiguration
+        Ludus::FoundationMath
 )
 ludus_apply_project_defaults(ludus_editor)
+target_link_libraries(ludus_editor PRIVATE Ludus::Platform)
+if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT EMSCRIPTEN)
+    target_link_libraries(ludus_editor PRIVATE Ludus::GraphicsRhi)
+    ludus_compile_shader(TARGET ludus_editor NAME editor_scene SOURCE "${PROJECT_SOURCE_DIR}/apps/world_demo/shaders/world_scene.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+endif()
 
 # The editor is a developer tool, never part of the installed SDK: no install()
 # rule and no LudusTargets export entry here, by design (E01).
@@ -132,6 +158,12 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
     find_package(Catch2 3 REQUIRED)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Test)
     add_executable(ludus_editor_tests
+        src/internal/scene_preview.h
+        src/internal/scene_workspace.h
+        ${editor_scene_preview_source}
+        src/scene_store.cpp
+        src/scene_workspace.cpp
+        tests/scene_workspace_tests.cpp
         src/internal/controller.h
         src/internal/configuration_workspace.h
         src/internal/main_window.h
@@ -143,7 +175,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         src/content_jobs.cpp
         src/content_workspace.cpp
         src/internal/script_workspace.h
-    src/script_workspace.cpp
+        src/script_workspace.cpp
         src/configuration_workspace.cpp
         src/editor_files.cpp
         src/audio_workspace.cpp
@@ -189,6 +221,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
     target_link_libraries(ludus_editor_tests
         PRIVATE
             ludus_editor_core
+            ludus_editor_scene
             Qt6::Core
             Qt6::Gui
             Qt6::Widgets
@@ -198,8 +231,24 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
             Ludus::AudioContent
             Ludus::FoundationConfigJson
             Ludus::RuntimeConfiguration
+            Ludus::FoundationMath
             Catch2::Catch2)
     ludus_apply_project_defaults(ludus_editor_tests)
+    target_link_libraries(ludus_editor_tests PRIVATE Ludus::Platform)
+    if(LUDUS_EDITOR_RENDER_PREVIEW)
+        target_link_libraries(ludus_editor_tests PRIVATE Ludus::GraphicsRhi)
+        ludus_compile_shader(TARGET ludus_editor_tests NAME editor_scene SOURCE "${PROJECT_SOURCE_DIR}/apps/world_demo/shaders/world_scene.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+    endif()
+    if(APPLE AND LUDUS_EDITOR_RENDER_PREVIEW)
+        target_sources(ludus_editor_tests PRIVATE tests/scene_native_tests.mm)
+        target_link_libraries(ludus_editor_tests PRIVATE "-framework Cocoa")
+    endif()
+    add_executable(ludus_editor_scene_tests tests/scene_document_tests.cpp)
+    target_link_libraries(ludus_editor_scene_tests PRIVATE ludus_editor_scene Ludus::FoundationMath Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_editor_scene_tests)
+    ludus_enable_test_exceptions(ludus_editor_scene_tests)
+    add_test(NAME ludus_editor_scene_tests COMMAND ludus_editor_scene_tests)
+    set_tests_properties(ludus_editor_scene_tests PROPERTIES LABELS "unit;editor;scene")
     # Catch2 reports assertion failures by throwing; test targets (only) re-enable
     # exceptions. Engine/app targets above stay exception-free (-fno-exceptions).
     ludus_enable_test_exceptions(ludus_editor_tests)
