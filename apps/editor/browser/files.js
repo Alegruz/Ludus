@@ -4,7 +4,7 @@
 addToLibrary({
   LudusBrowserDownloadDocument__deps: ['$UTF8ToString'],
   LudusBrowserDownloadDocument: function(name, bytes, size) {
-    const url = URL.createObjectURL(new Blob([HEAPU8.slice(bytes, bytes + size)], {type: 'application/json'}));
+    const url = URL.createObjectURL(new Blob([HEAPU8.slice(bytes, bytes + size)], {type: 'application/octet-stream'}));
     const link = document.createElement('a');
     link.href = url;
     link.download = UTF8ToString(name);

@@ -126,6 +126,17 @@ qt_add_resources(ludus_editor ludus_brand
     PREFIX "/ludus"
     BASE "${PROJECT_SOURCE_DIR}/docs/wiki/assets"
     FILES ${editor_brand_assets})
+# Ship editable, self-contained examples with both presentations. Generated
+# build outputs and local machine settings are never part of the sample library.
+set(editor_sample_files)
+foreach(sample cornell-box live-edit-game scripted-game editor-sdk-project)
+    file(GLOB_RECURSE sample_files CONFIGURE_DEPENDS
+        "${PROJECT_SOURCE_DIR}/examples/${sample}/*")
+    list(FILTER sample_files EXCLUDE REGEX "/(out|build|\\.ludus)/|CMakeUserPresets\\.json$")
+    list(APPEND editor_sample_files ${sample_files})
+endforeach()
+qt_add_resources(ludus_editor ludus_samples
+    PREFIX "/samples" BASE "${PROJECT_SOURCE_DIR}/examples" FILES ${editor_sample_files})
 if(APPLE)
     target_sources(ludus_editor PRIVATE resources/ludus.icns)
     set_source_files_properties(resources/ludus.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
@@ -218,6 +229,8 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         PREFIX "/ludus"
         BASE "${PROJECT_SOURCE_DIR}/docs/wiki/assets"
         FILES ${editor_brand_assets})
+    qt_add_resources(ludus_editor_tests ludus_samples
+        PREFIX "/samples" BASE "${PROJECT_SOURCE_DIR}/examples" FILES ${editor_sample_files})
     target_include_directories(ludus_editor_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/modules/audio/tests")
     target_compile_definitions(ludus_editor_tests PRIVATE QT_NO_KEYWORDS QT_NO_CAST_FROM_ASCII
         "LUDUS_EDITOR_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\""
@@ -281,9 +294,8 @@ endif()
 if(EMSCRIPTEN)
     find_package(Qt6 6.10.3 EXACT REQUIRED COMPONENTS GuiPrivate)
     target_link_libraries(ludus_editor PRIVATE Qt6::GuiPrivate)
-    set_property(TARGET ludus_editor APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/browser/files.js" "${CMAKE_CURRENT_SOURCE_DIR}/browser/example.project.json")
+    set_property(TARGET ludus_editor APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/browser/files.js")
     set_target_properties(ludus_editor PROPERTIES QT_WASM_INITIAL_MEMORY 33554432 QT_WASM_MAXIMUM_MEMORY 268435456)
     target_link_options(ludus_editor PRIVATE "-sASYNCIFY_STACK_SIZE=131072"
-        "--js-library=${CMAKE_CURRENT_SOURCE_DIR}/browser/files.js"
-        "--embed-file=${CMAKE_CURRENT_SOURCE_DIR}/browser/example.project.json@/browser-example/ludus.project.json")
+        "--js-library=${CMAKE_CURRENT_SOURCE_DIR}/browser/files.js")
 endif()

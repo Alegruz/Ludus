@@ -666,3 +666,21 @@ Inspect, source/node breakpoints and step controls use the existing out-of-proce
 GameHost channel; partial script ticks block native reload. See the
 [S5 workflow and acceptance](../architecture/behavior-s5.md) for the SDK-only sample,
 draft conflict handling, source-map identity checks and supported limits.
+
+## Opening complete projects and samples
+
+**File → Open Project** selects the folder containing `ludus.project.json`.
+Native editing uses that folder directly; browser editing copies its sources and
+assets into session storage. **File → Open Sample** creates a separate writable
+copy of a bundled example. Copies live under the editor's application data
+folder on desktop and in session storage in the browser. The existing sample
+never changes when you edit a copy. The [browser guide](../wiki/guides/browser-editor.md)
+describes export and session limits.
+
+**Project → Repair Project Setup → Automatic** reuses the selected engine.
+For an unresolved version-2 CMake project without a local selection, it discovers
+or prepares the editor's engine automatically, then validates and builds the
+project and runs tests. This happens only after explicit repair; opening a
+project remains read-only. A missing, corrupt or incompatible explicit selection
+still reports its error so you can choose a replacement. Advanced engine
+selection remains available for deliberate overrides.

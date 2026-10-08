@@ -3,13 +3,20 @@
 #include <ludus/foundation/base/types.h>
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QList>
 #include <QMessageBox>
 #include <QPointer>
 #include <QSaveFile>
+#include <QSet>
 #include <QSharedPointer>
+#include <QStandardPaths>
+#include <QStringList>
 #include <QWeakPointer>
 #include <QWidget>
 
@@ -21,6 +28,24 @@
 
 namespace ludus::editor
 {
+namespace
+{
+bool IsGeneratedProjectPath(const QString& relative)
+{
+    for (const auto& name : {QStringLiteral("out"),
+                             QStringLiteral("build"),
+                             QStringLiteral(".git"),
+                             QStringLiteral(".ludus"),
+                             QStringLiteral("node_modules")})
+    {
+        if (relative == name || relative.startsWith(name + QLatin1Char('/')))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace
 #if defined(Q_OS_WASM)
 namespace
 {
@@ -33,6 +58,15 @@ struct BrowserImport
 {
     QPointer<QWidget> Owner;
     QString Name;
+    QString Directory;
+    QString Descriptor;
+    QStringList Paths;
+    QList<foundation::uint32> Indices;
+    emscripten::val Files = emscripten::val::undefined();
+    foundation::uint32 Index = 0;
+    bool Folder = false;
+    bool Admitted = false;
+    foundation::int64 ChargedBytes = 0;
     emscripten::val Input = emscripten::val::undefined();
     QSharedPointer<qstdweb::EventCallback> Change;
     QSharedPointer<qstdweb::EventCallback> Cancel;
@@ -62,7 +96,6 @@ void OpenEditorDocument(QWidget* owner,
                         const std::function<void(const QString&)>& loaded)
 {
 #if defined(Q_OS_WASM)
-    (void)dialog;
     if (PendingImport)
     {
         return;
@@ -70,6 +103,7 @@ void OpenEditorDocument(QWidget* owner,
     auto state = QSharedPointer<BrowserImport>::create();
     PendingImport = state;
     state->Owner = owner;
+    state->Folder = dialog.ProjectFolder;
     state->Completed = loaded;
     const QWeakPointer<BrowserImport> weak(state);
     // Thanks to Qt Group, qstdweb::EventCallback/FileReader (Qt 6.10.3): these
@@ -79,17 +113,37 @@ void OpenEditorDocument(QWidget* owner,
     // check size before reading, and release selection on cancellation.
     // https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/file
     // https://developer.mozilla.org/en-US/docs/Web/API/HTMLInputElement/cancel_event
+    // MDN contributors, "HTMLInputElement: webkitdirectory property": retain
+    // File.webkitRelativePath while copying a selected directory hierarchy.
+    // https://developer.mozilla.org/en-US/docs/Web/API/HTMLInputElement/webkitdirectory
     // Only this private adapter depends on the exact pinned Qt implementation.
     // https://code.qt.io/cgit/qt/qtbase.git/tree/src/corelib/platform/wasm/qstdweb.cpp?h=v6.10.3
     state->Input = emscripten::val::global("document").call<emscripten::val>("createElement", emscripten::val("input"));
     state->Input.set("type", emscripten::val("file"));
-    state->Input.set("accept", emscripten::val(".json,application/json"));
+    if (state->Folder)
+    {
+        state->Input.set("webkitdirectory", true);
+        state->Input.set("multiple", true);
+    }
+    else
+    {
+        state->Input.set("accept", emscripten::val(".json,application/json"));
+    }
     state->Input.set("hidden", true);
     auto finish = [weak]() {
         const auto state = weak.toStrongRef();
         if (state)
         {
             state->Input.call<void>("remove");
+            if (!state->Admitted)
+            {
+                ImportedBytes -= state->ChargedBytes;
+                state->ChargedBytes = 0;
+                if (!state->Directory.isEmpty())
+                {
+                    (void)QDir(state->Directory).removeRecursively();
+                }
+            }
             if (PendingImport == state)
             {
                 PendingImport.clear();
@@ -108,31 +162,53 @@ void OpenEditorDocument(QWidget* owner,
                 return;
             }
             const auto files = state->Input["files"];
-            if (files["length"].as<foundation::uint32>() != 1)
+            const auto count = files["length"].as<foundation::uint32>();
+            if (count == 0 || count > 100000 || (!state->Folder && count != 1))
             {
+                Report(state->Owner,
+                       QStringLiteral("Choose a source project folder with at most 4096 imported files."));
                 finish();
                 return;
             }
-            const qstdweb::File file(files[0]);
-            state->Size = file.size();
-            if (state->Size == 0 || state->Size > static_cast<foundation::uint64>(MAX_DOCUMENT_BYTES) ||
-                state->Size > static_cast<foundation::uint64>(MAX_IMPORT_BYTES - ImportedBytes))
+            foundation::uint64 total = 0;
+            for (foundation::uint32 index = 0; index < count; ++index)
             {
-                Report(
-                    state->Owner,
-                    QStringLiteral(
-                        "Choose a nonempty JSON document up to 1 MiB. This session admits up to 32 MiB of imports."));
+                const qstdweb::File file(files[index]);
+                const auto path = state->Folder
+                                      ? QString::fromStdString(files[index]["webkitRelativePath"].as<std::string>())
+                                      : QFileInfo(QString::fromStdString(file.name())).fileName();
+                if (state->Folder && IsGeneratedProjectPath(path.section(QLatin1Char('/'), 1)))
+                {
+                    continue;
+                }
+                total += file.size();
+                if (file.size() > static_cast<foundation::uint64>(MAX_IMPORT_BYTES) ||
+                    total > static_cast<foundation::uint64>(MAX_IMPORT_BYTES - ImportedBytes) ||
+                    (!state->Folder &&
+                     (file.size() == 0 || file.size() > static_cast<foundation::uint64>(MAX_DOCUMENT_BYTES))))
+                {
+                    Report(state->Owner,
+                           QStringLiteral("Import refused: invalid paths or the 32 MiB session limit exceeded."));
+                    finish();
+                    return;
+                }
+                state->Paths.append(path);
+                state->Indices.append(index);
+            }
+            if (!ValidateEditorImportPaths(state->Paths, state->Folder, state->Descriptor))
+            {
+                Report(state->Owner,
+                       QStringLiteral(
+                           "Choose a folder containing ludus.project.json with valid, unique relative file paths."));
                 finish();
                 return;
             }
-            state->Name = QFileInfo(QString::fromStdString(file.name())).fileName();
-            if (state->Name.isEmpty() || state->Name == QStringLiteral(".") || state->Name == QStringLiteral(".."))
-            {
-                Report(state->Owner, QStringLiteral("The selected document has no usable filename."));
-                finish();
-                return;
-            }
-            ImportedBytes += static_cast<foundation::int64>(state->Size);
+            state->ChargedBytes = static_cast<foundation::int64>(total);
+            ImportedBytes += state->ChargedBytes;
+            state->Files = files;
+            state->Directory = QStringLiteral("/browser-imports/") + QString::number(++ImportSerial);
+            state->Size = qstdweb::File(files[state->Indices[0]]).size();
+            state->Name = state->Paths[0];
             state->Reader = QSharedPointer<qstdweb::FileReader>::create();
             auto failed = [weak, finish](const emscripten::val&) {
                 const auto state = weak.toStrongRef();
@@ -159,26 +235,41 @@ void OpenEditorDocument(QWidget* owner,
                     return;
                 }
                 const auto bytes = qstdweb::Uint8Array(result).copyToQByteArray();
-                const auto directory = QStringLiteral("/browser-imports/") + QString::number(++ImportSerial);
-                const auto path = QDir(directory).filePath(state->Name);
+                const auto path = QDir(state->Directory).filePath(state->Name);
                 QSaveFile output(path);
                 output.setDirectWriteFallback(false);
-                if (!QDir().mkpath(directory) || !output.open(QIODevice::WriteOnly) ||
+                if (!QDir().mkpath(QFileInfo(path).absolutePath()) || !output.open(QIODevice::WriteOnly) ||
                     output.write(bytes) != bytes.size() || !output.commit())
                 {
                     Report(state->Owner, QStringLiteral("Import failed; the current document was retained."));
                     finish();
                     return;
                 }
+                ++state->Index;
+                if (state->Index < static_cast<foundation::uint32>(state->Paths.size()))
+                {
+                    state->Name = state->Paths[state->Index];
+                    const qstdweb::File next(state->Files[state->Indices[state->Index]]);
+                    state->Size = next.size();
+                    state->Reader->readAsArrayBuffer(next.slice(0, state->Size));
+                    return;
+                }
+                state->Admitted = true;
+                const auto descriptor = state->Folder ? QDir(state->Directory).filePath(state->Descriptor) : path;
                 finish();
-                state->Completed(path);
+                state->Completed(descriptor);
             });
-            state->Reader->readAsArrayBuffer(file.slice(0, state->Size));
+            state->Reader->readAsArrayBuffer(qstdweb::File(files[state->Indices[0]]).slice(0, state->Size));
         });
     emscripten::val::global("document")["body"].call<void>("appendChild", state->Input);
     state->Input.call<void>("click");
 #else
-    const auto path = QFileDialog::getOpenFileName(owner, dialog.Title, dialog.Directory, dialog.Filter);
+    const auto selection = dialog.ProjectFolder
+                               ? QFileDialog::getExistingDirectory(owner, dialog.Title, dialog.Directory)
+                               : QFileDialog::getOpenFileName(owner, dialog.Title, dialog.Directory, dialog.Filter);
+    const auto path = dialog.ProjectFolder && !selection.isEmpty()
+                          ? QDir(selection).filePath(QStringLiteral("ludus.project.json"))
+                          : selection;
     if (!path.isEmpty())
     {
         loaded(path);
@@ -186,7 +277,219 @@ void OpenEditorDocument(QWidget* owner,
 #endif
 }
 
+bool ValidateEditorImportPaths(const QStringList& paths, bool folder, QString& descriptor)
+{
+    if (paths.isEmpty() || paths.size() > 4096 || (!folder && paths.size() != 1))
+    {
+        return false;
+    }
+    QSet<QString> unique;
+    QString project;
+    QString root;
+    for (const auto& path : paths)
+    {
+        const auto parts = path.split(QLatin1Char('/'));
+        if (path.toUtf8().size() > 4096 || QDir::isAbsolutePath(path) || path.contains(QLatin1Char('\\')) ||
+            path.contains(QChar(0)) || unique.contains(path) || (!folder && parts.size() != 1))
+        {
+            return false;
+        }
+        for (const auto& part : parts)
+        {
+            if (part.isEmpty() || part == QStringLiteral(".") || part == QStringLiteral(".."))
+            {
+                return false;
+            }
+        }
+        if (folder)
+        {
+            if (parts.size() < 2 || (!root.isEmpty() && parts.first() != root))
+            {
+                return false;
+            }
+            root = parts.first();
+            if (parts.size() == 2 && parts.back() == QStringLiteral("ludus.project.json"))
+            {
+                project = path;
+            }
+        }
+        unique.insert(path);
+    }
+    if (folder && project.isEmpty())
+    {
+        return false;
+    }
+    descriptor = folder ? project : paths.first();
+    return true;
+}
+
+bool EncodeEditorProjectArchive(const QString& directory, QByteArray& archive)
+{
+    constexpr foundation::int64 maxBytes = 32LL * 1024 * 1024;
+    if (!QDir(directory).exists())
+    {
+        return false;
+    }
+    QByteArray result;
+    QDirIterator files(directory, QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    foundation::uint32 count = 0;
+    while (files.hasNext())
+    {
+        const auto path = files.next();
+        const auto relative = QDir(directory).relativeFilePath(path);
+        if (IsGeneratedProjectPath(relative))
+        {
+            continue;
+        }
+        if (QFileInfo(path).isSymLink())
+        {
+            return false;
+        }
+        if (QFileInfo(path).isDir())
+        {
+            continue;
+        }
+        QFile input(path);
+        if (++count > 4096 || QFileInfo(path).isSymLink() || !input.open(QIODevice::ReadOnly) ||
+            input.size() > maxBytes || result.size() + input.size() + 2048 > maxBytes)
+        {
+            return false;
+        }
+        auto name = relative.toUtf8();
+        QByteArray prefix;
+        if (name.size() > 100)
+        {
+            const auto slash = name.lastIndexOf('/', 155);
+            if (slash <= 0 || name.size() - slash - 1 > 100)
+            {
+                return false;
+            }
+            prefix = name.first(slash);
+            name = name.sliced(slash + 1);
+        }
+        QByteArray header(512, '\0');
+        header.replace(0, name.size(), name);
+        header.replace(100, 7, QByteArrayLiteral("0000644"));
+        header.replace(108, 7, QByteArrayLiteral("0000000"));
+        header.replace(116, 7, QByteArrayLiteral("0000000"));
+        header.replace(124, 11, QByteArray::number(input.size(), 8).rightJustified(11, '0'));
+        header.replace(136, 11, QByteArrayLiteral("00000000000"));
+        header.replace(148, 8, QByteArray(8, ' '));
+        header[156] = '0';
+        header.replace(257, 5, QByteArrayLiteral("ustar"));
+        header.replace(263, 2, QByteArrayLiteral("00"));
+        header.replace(345, prefix.size(), prefix);
+        foundation::uint32 checksum = 0;
+        for (const auto byte : header)
+        {
+            checksum += static_cast<foundation::uint8>(byte);
+        }
+        header.replace(148, 6, QByteArray::number(checksum, 8).rightJustified(6, '0'));
+        header[154] = '\0';
+        header[155] = ' ';
+        const auto data = input.readAll();
+        if (data.size() != input.size())
+        {
+            return false;
+        }
+        result.append(header);
+        result.append(data);
+        result.append(QByteArray((512 - data.size() % 512) % 512, '\0'));
+    }
+    result.append(QByteArray(1024, '\0'));
+    archive = result;
+    return true;
+}
+
+bool CopyEditorSample(const QString& id, QString& descriptor, const QString& destinationRoot)
+{
+    if (id != QStringLiteral("cornell-box") && id != QStringLiteral("live-edit-game") &&
+        id != QStringLiteral("scripted-game") && id != QStringLiteral("editor-sdk-project"))
+    {
+        return false;
+    }
+    const auto source = QStringLiteral(":/samples/") + id;
+    const auto base = destinationRoot.isEmpty()
+                          ? QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+                                .filePath(QStringLiteral("sample-projects"))
+                          : destinationRoot;
+    QString destination;
+    for (foundation::uint32 serial = 1; serial <= 10000; ++serial)
+    {
+        const auto candidate = QDir(base).filePath(id + QLatin1Char('-') + QString::number(serial));
+        if (!QFileInfo::exists(candidate))
+        {
+            destination = candidate;
+            break;
+        }
+    }
+    if (destination.isEmpty() || !QDir().mkpath(destination))
+    {
+        return false;
+    }
+    QDirIterator files(source, QDir::Files, QDirIterator::Subdirectories);
+    while (files.hasNext())
+    {
+        const auto input = files.next();
+        const auto output = QDir(destination).filePath(QDir(source).relativeFilePath(input));
+        if (!QDir().mkpath(QFileInfo(output).absolutePath()) || !QFile::copy(input, output) ||
+            !QFile::setPermissions(output, QFileDevice::ReadOwner | QFileDevice::WriteOwner))
+        {
+            (void)QDir(destination).removeRecursively();
+            return false;
+        }
+    }
+    const auto result = QDir(destination).filePath(QStringLiteral("ludus.project.json"));
+    if (!QFileInfo::exists(result))
+    {
+        (void)QDir(destination).removeRecursively();
+        return false;
+    }
+#if defined(Q_OS_MACOS)
+    QFile original(result);
+    if (!original.open(QIODevice::ReadOnly))
+    {
+        (void)QDir(destination).removeRecursively();
+        return false;
+    }
+    auto document = QJsonDocument::fromJson(original.readAll()).object();
+    original.close();
+    if (document.value(QStringLiteral("version")).toInt() == 2)
+    {
+        document.insert(QStringLiteral("preset"), QStringLiteral("macos-clang-development"));
+        QSaveFile output(result);
+        const auto bytes = QJsonDocument(document).toJson();
+        if (!output.open(QIODevice::WriteOnly) || output.write(bytes) != bytes.size() || !output.commit())
+        {
+            (void)QDir(destination).removeRecursively();
+            return false;
+        }
+    }
+#endif
+    descriptor = result;
+    return true;
+}
+
 #if defined(Q_OS_WASM)
+bool DownloadEditorProject(QWidget* owner, const QString& descriptor)
+{
+    QByteArray bytes;
+    const auto directory = QFileInfo(descriptor).absolutePath();
+    if (!QFileInfo::exists(descriptor) || !EncodeEditorProjectArchive(directory, bytes))
+    {
+        Report(
+            owner,
+            QStringLiteral(
+                "Could not export the project: maximum 4096 regular files and 32 MiB; unsupported paths or symlinks."));
+        return false;
+    }
+    const auto name = (QFileInfo(directory).fileName() + QStringLiteral(".tar")).toUtf8();
+    LudusBrowserDownloadDocument(name.constData(),
+                                 reinterpret_cast<const foundation::uint8*>(bytes.constData()),
+                                 static_cast<foundation::int32>(bytes.size()));
+    return true;
+}
+
 bool DownloadEditorDocument(QWidget* owner, const QString& path)
 {
     QFile file(path);
