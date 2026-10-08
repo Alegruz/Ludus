@@ -232,10 +232,12 @@ including frame clearing, fullscreen pipelines, MSL shaders and uniform uploads.
 See the [Metal rendering guide](fullscreen-rendering.md#macos-metal). FoundationFilesystem provides [native regular-file reads](../architecture/filesystem.md),
 including pinned roots, revision clones and independent offset reads. Content
 read adapters use this backend. Vulkan/Volk is excluded on macOS. Content supports [atomic native saves](../architecture/content-resources.md#native-saves).
-Audio stream workers, audio device output, interactive diagnostic helpers, the Qt editor,
-Linux debugger journeys, the world demo (libc++ 18 lacks floating-point
-`from_chars`), and release packaging are deferred. Portable modules
-still compile; the smoke app can present through Metal. Linux and browser
+Audio stream/device output, interactive diagnostic helpers, the
+[native Qt Editor](editor-workspace.md), and the
+[world demo](../examples/world-demo.md) support macOS. Game
+[release packaging](game-packaging-publishing.md#macos-app-packages) creates
+ad-hoc signed app bundles. Live Play/RAD debugging and Developer ID signing/
+notarization remain deferred. The smoke app can present through Metal. Linux and browser
 backends retain their existing implementations.
 
 

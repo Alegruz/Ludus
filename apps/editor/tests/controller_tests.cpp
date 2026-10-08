@@ -613,13 +613,12 @@ TEST_CASE("macOS keeps native build/run while gating deferred debugger and live 
     CHECK(controller.State().Saved.Preset == QStringLiteral("macos-clang-development"));
     CHECK(controller.Caps().CanBuildRun);
     CHECK_FALSE(controller.Caps().CanBuildDebug);
-    CHECK_FALSE(controller.Caps().CanReleaseInit);
-    CHECK_FALSE(controller.Caps().CanPackage);
+    CHECK(controller.Caps().CanReleaseInit);
+    CHECK(controller.Caps().CanPackage);
     CHECK_FALSE(controller.CanPlay());
     const auto job = controller.State().ActiveJob;
     controller.BuildDebug();
     controller.Play();
-    controller.SetupRelease(QStringLiteral("linux-x64"), {});
     CHECK(controller.State().ActiveJob == job);
 }
 #endif

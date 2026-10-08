@@ -435,7 +435,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup = proj.add_parser("release", help="set up release files for an existing project").add_subparsers(dest="release_action", required=True)
     init = setup.add_parser("init")
     init.add_argument("project")
-    init.add_argument("--platform", choices=("linux-x64", "web"), default="linux-x64")
+    init.add_argument("--platform", choices=("linux-x64", "macos", "web"), default="macos" if sys.platform == "darwin" else "linux-x64")
     init.add_argument("--itch-target")
     init.add_argument("--tools-ref")
     init.add_argument("--build-command-json", type=_json.loads, help="project bootstrap argv as a JSON array, without a shell")

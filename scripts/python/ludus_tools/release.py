@@ -6,6 +6,7 @@ import errno
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import zipfile
 from dataclasses import asdict, replace
@@ -43,14 +44,25 @@ def _source_state(root: Path) -> dict:
 
 
 def _publish_directory(staging: Path, destination: Path) -> None:
-    """Linux atomic no-replace rename; never expose an incomplete directory."""
+    """Native atomic no-replace rename; never expose an incomplete directory."""
     libc = ctypes.CDLL(None, use_errno=True)
-    rename = getattr(libc, "renameat2", None)
-    if rename is None:
-        fail("atomic package publication requires Linux renameat2", "MissingTools")
-    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    if sys.platform == "darwin":
+        # Apple XNU sys/stdio.h, renamex_np(RENAME_EXCL=4): same-filesystem,
+        # atomic no-replace publication, including a destination created in a race.
+        # https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/stdio.h
+        rename = getattr(libc, "renamex_np", None)
+        if rename is None:
+            fail("atomic package publication requires Darwin renamex_np", "MissingTools")
+        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        argv = [os.fsencode(staging), os.fsencode(destination), 4]
+    else:
+        rename = getattr(libc, "renameat2", None)
+        if rename is None:
+            fail("atomic package publication requires Linux renameat2", "MissingTools")
+        rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        argv = [-100, os.fsencode(staging), -100, os.fsencode(destination), 1]
     rename.restype = ctypes.c_int
-    if rename(-100, os.fsencode(staging), -100, os.fsencode(destination), 1) != 0:
+    if rename(*argv) != 0:
         if ctypes.get_errno() == errno.EEXIST:
             fail("package destination already exists", "DestinationExists")
         fail(f"cannot atomically publish package: {os.strerror(ctypes.get_errno())}", "GenerationFailed")
@@ -87,12 +99,21 @@ def package_project(project: Path, *, profile: str, version: str,
     if selected.target_platform == "web":
         from .package_web import package_web
         return package_web(project, profile=profile, version=version, sdk=sdk, run_command=run_command, cancel_check=cancel_check)
-    resolved = operations.resolve_project(project, store=store, cli_sdk_prefix=sdk, profile="linux-clang-release")
-    if resolved.resolution.identity.target_triple != "x86_64-linux-gnu":
+    macos = selected.target_platform.startswith("macos-")
+    if macos and sys.platform != "darwin":
+        fail("macOS packaging requires a macOS host", "UnsupportedReleaseTarget")
+    if macos:
+        from .package_macos import POLICY as policy, executable_identity as identity, sign_payload, validate_native as validate_macos
+        validator = lambda root, entry: validate_macos(root, entry, selected.target_platform, runner=runner, env=env, cancel_check=cancel_check)
+    else:
+        policy, identity, validator = POLICY, executable_identity, validate_native
+    resolved = operations.resolve_project(project, store=store, cli_sdk_prefix=sdk, profile=selected.configure_preset)
+    triples = {"linux-x64": "x86_64-linux-gnu", "macos-arm64": "arm64-apple-darwin", "macos-x64": "x86_64-apple-darwin"}
+    if resolved.resolution.identity.target_triple != triples[selected.target_platform]:
         fail("SDK target does not match release profile", "SdkIncompatible")
     if resolved.resolution.identity.engine_version != resolved.descriptor.engine.version:
         fail("SDK engine version does not match project requirement", "SdkIncompatible")
-    resolved.descriptor = replace(resolved.descriptor, target=selected.target, preset="linux-clang-release")
+    resolved.descriptor = replace(resolved.descriptor, target=selected.target, preset=selected.configure_preset)
     lock_digest = file_digest(paths.lock_path)
     descriptor_digest = file_digest(paths.descriptor_path)
     source = _source_state(root)
@@ -108,7 +129,8 @@ def package_project(project: Path, *, profile: str, version: str,
         query_codemodel(resolved.paths.build_dir, "ludus-cli")
         # Configure explicitly each time: CMake/source/preset edits also matter.
         for argv in (
-            operations.configure_argv(cmake, "linux-clang-release", resolved.paths.source_dir, resolved.paths.build_dir),
+            [*operations.configure_argv(cmake, selected.configure_preset, resolved.paths.source_dir, resolved.paths.build_dir),
+             "--fresh", "-DLudus_DIR=" + str(resolved.resolution.prefix / "lib/cmake/Ludus")],
             operations.build_argv(cmake, resolved.paths.build_dir, selected.target),
         ):
             if runner(argv, cwd=resolved.paths.source_dir, env=env) != 0:
@@ -129,8 +151,11 @@ def package_project(project: Path, *, profile: str, version: str,
         if runner(install, cwd=resolved.paths.source_dir, env=env) != 0:
             fail("release installation failed", "BuildFailed")
         records = inventory(payload)
-        external = validate_native(payload, selected.entry_point)
-        if executable_identity(payload / selected.entry_point) != executable_identity(artifact):
+        if macos:
+            sign_payload(payload, selected.entry_point, runner, env, cancel_check)
+            records = inventory(payload)  # signing adds the sealed-resource manifest
+        external = validator(payload, selected.entry_point)
+        if identity(payload / selected.entry_point) != identity(artifact):
             fail("installed program sections differ from the selected CMake artifact", "InvalidPackage")
         # Policy prohibits source/build/SDK machine paths in the actual payload.
         needles = [str(p.resolve()).encode("utf-8") for p in (root, resolved.paths.source_dir,
@@ -151,7 +176,7 @@ def package_project(project: Path, *, profile: str, version: str,
                     "entryPoint": selected.entry_point, "version": version, "source": source,
                     "engineLockSha256": lock_digest, "releaseConfigSha256": config.digest,
                     "sdk": asdict(resolved.resolution.identity), "localInputs": source["dirty"] or resolved.resolution.is_override,
-                    "policy": POLICY, "systemLibraries": external, "files": records}
+                    "policy": policy, "systemLibraries": external, "files": records}
         completed = Path(temp) / "package"
         completed.mkdir()
         archive = completed / "game.zip"
@@ -162,10 +187,11 @@ def package_project(project: Path, *, profile: str, version: str,
                    "releaseConfigSha256": config.digest, "toolVersion": __version__}
         (completed / "package.json").write_bytes(canonical(sidecar))
         (completed / "validation.json").write_bytes(canonical({
-            "schemaVersion": 1, "archiveSha256": archive_digest, "policy": POLICY,
+            "schemaVersion": 1, "archiveSha256": archive_digest, "policy": policy,
             "toolVersion": __version__, "checks": ["payload", "native", "clean-extraction"],
         }))
-        verify_package(completed)
+        verification = {"run_command": runner, "env": env, "cancel_check": cancel_check} if macos else {}
+        verify_package(completed, **verification)
         if cancel_check:
             cancel_check()
         destination = package_parent / archive_digest
@@ -173,7 +199,7 @@ def package_project(project: Path, *, profile: str, version: str,
         # two valid projects share a chosen output profile.
         with BuildTreeLock(package_parent):
             if destination.exists() or destination.is_symlink():
-                if destination.is_symlink() or verify_package(destination) != verify_package(completed):
+                if destination.is_symlink() or verify_package(destination, **verification) != verify_package(completed, **verification):
                     fail("existing package conflicts with generated package", "Conflict")
                 return destination
             _publish_directory(completed, destination)

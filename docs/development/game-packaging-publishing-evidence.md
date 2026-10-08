@@ -140,3 +140,64 @@ Browser verification is static and does not establish dynamic JavaScript URL
 closure or hosted runtime behavior. A submitted-upload receipt deliberately does
 not assert processing completion. Native runtime dependency closure is not
 asserted for Sandbox.
+
+## macOS release packaging
+
+Branch `codex/macos-release-packaging` extends the installed CLI and native
+Editor's shared backend with `macos-release` thin arm64/x64 app payloads.
+Local Apple silicon acceptance uses macOS 26.6, upstream Clang 18.1.8,
+CMake 3.29.6, Ninja 1.11.1.3, Qt 6.11.2 Cocoa and a macOS 14.0 deployment target.
+The isolated checkout used the available macOS 26.5 SDK: rebuilding Catch2
+against the newly installed SDK 27.0 fails in Clang 18 libc++'s `INFINITY` use.
+No shared tools or user checkout were changed to address that local setup issue.
+
+A complete production Release SDK built warning-clean and was installed with
+its bundled dependencies. Its 68 CTest cases passed, with the native Cocoa test
+explicitly opted in through `LUDUS_TEST_COCOA=1` after the initial headless
+invocation skipped every case in that executable. The full offscreen Editor
+suite passed; `[.macos-release-journey]` passed 23 assertions for a real native
+Cocoa window, Development project creation, no-overwrite release setup,
+verified Release-SDK packaging and Stop cleanup without another published package.
+Modified Editor sources passed pinned formatting and clang-tidy 18.
+
+```bash
+PATH="$PWD/out/host-tools/venv/bin:$PWD/out/host-tools/bin:$PATH" \
+    PYTHONPATH=scripts/python out/host-tools/venv/bin/python -m unittest \
+    test_macos_release test_ludus_release test_ludus_itch_release \
+    test_macos_project_tooling test_editor_tool test_process_ownership -v
+out/host-tools/venv/bin/python tests/sdk_consumer/verify_macos_release.py \
+    --sdk "$PWD/out/install/macos-clang-release" --tools "$PWD" \
+    --cli "$PWD/out/project-tooling-venv/bin/ludus"
+QT_QPA_PLATFORM=cocoa \
+    LUDUS_SETUP_TEST_SDK="$PWD/out/install/macos-clang-development" \
+    LUDUS_RELEASE_TEST_SDK="$PWD/out/install/macos-clang-release" \
+    out/build/macos-clang-development/apps/editor/ludus_editor_tests '[.macos-release-journey]'
+```
+
+Portable tests reject malformed/foreign/debug Mach-O images, bad loader paths
+and mismatched platform/preset metadata; native cases check deterministic
+signed archives, sealed-resource tampering, architecture mismatch, a relocated
+relative dylib closure, real CMake install-name/RPATH rewriting with preserved
+program identity, failed/cancelled signing and atomic no-replace publication.
+The installed-wheel acceptance runs outside the checkout with a relocated full
+Release SDK, links the native component closure, signs and verifies an app,
+reuses identical packages, executes clean extracted code without an SDK/tooling
+runtime environment, builds an offline plan, rejects a stale executable after
+a failed current build and preserves existing release setup. A conflicting SDK
+preset cannot override the resolved Release SDK used for packaging.
+
+macOS CI runs those native and Cocoa journeys; the existing macOS 14 sanitizer
+Editor gate covers the changed controller/UI code. Linux host-tooling and
+installed-wheel jobs run the portable new contracts alongside existing ELF/web
+release and upload regressions. Local Clang 18 ASan startup on macOS 26.6 remains
+unverified as recorded in the build guide; CI provides native sanitizer evidence.
+Documentation link/index, strict MkDocs, API coverage, wiki parity and offline
+source/HTML packaging checks passed without new public documentation gaps.
+
+The generated game workflow chooses an explicit CPU runner, pins tools/source
+and the Release SDK digest, and produces a verified GitHub artifact. It has no
+live account/upload step. Generating its YAML is covered; a newly generated game
+repository's hosted release needs its own configured SDK archive and execution.
+No Developer ID signing, notarization, Gatekeeper approval, universal binary,
+native Intel execution, distributable Qt Editor or live itch.io upload is claimed.
+See the [current package contract](game-packaging-publishing.md#macos-app-packages).

@@ -171,15 +171,17 @@ class NativeIdentityTests(unittest.TestCase):
                     with self.assertRaisesRegex(ToolingError, "SDK target"):
                         native.validate_target(load_prefix_manifest(sdk), "macos-clang-development")
 
-    def test_deferred_mac_release_packaging_fails_before_creation(self):
+    def test_mac_release_creation_is_explicit_and_uses_app_entry(self):
+        from ludus_tools.release_model import load_release
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             sdk = _write_sdk_prefix(root / "sdk", mac_manifest())
             destination = root / "Game"
-            with self.assertRaisesRegex(ToolingError, "macOS release packaging"):
-                create_project(destination, name="Game", template_id="minimal", engine_version="",
-                               local_sdk_prefix=sdk, release=True)
-            self.assertFalse(destination.exists())
+            create_project(destination, name="Game", template_id="minimal", engine_version="",
+                           local_sdk_prefix=sdk, release=True)
+            profile = load_release(destination).profiles["macos-release"]
+            self.assertEqual("Game.app/Contents/MacOS/Game", profile.entry_point)
+            self.assertEqual("macos-clang-release", profile.configure_preset)
 
     def test_host_default_and_store_precedence(self):
         with patch("ludus_tools.native.platform.system", return_value="Darwin"):

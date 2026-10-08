@@ -98,9 +98,10 @@ Version-1 descriptors retain their original Linux preset contract.
 
 Live Play/reload generation publication still requires Linux ELF build IDs and
 embedded DWARF. Its macOS UI action is guarded and disabled; use Build and Run.
-RAD debugging and release packaging/signing are also disabled on macOS, with
-backend errors if invoked directly. These deferred features do not block ordinary
-build/run. The Editor is built from the tooling checkout; this port does not add
+RAD debugging remains disabled on macOS, with a backend error if invoked directly.
+Game release setup and packaging now share the
+[macOS ad-hoc app backend](game-packaging-publishing.md#macos-app-packages).
+Developer ID signing and notarization remain separate distribution work. The Editor is built from the tooling checkout; this port does not add
 an installed/signable Editor application bundle to the runtime SDK. The local
 macOS build produces `ludus_editor.app`, with the required Qt frameworks supplied
 by the opted-in development installation; the File API launcher resolves its

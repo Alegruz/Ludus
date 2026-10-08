@@ -78,7 +78,7 @@ class ReleaseModelTests(unittest.TestCase):
             create.create_project(root / "plain", name="Plain", template_id="minimal", engine_version="0.1.0")
             self.assertFalse((root / "plain/ludus.release.json").exists())
             create.create_project(root / "release", name="My Game", template_id="minimal", engine_version="0.1.0",
-                                  release=True, itch_target="tester/mygame")
+                                  release=True, itch_target="tester/mygame", preset="linux-clang-development")
             parsed = model.load_release(root / "release")
             self.assertEqual(parsed.profiles["linux-release"].target, "My_Game")
             self.assertIn("include(cmake/GameRelease.cmake)", (root / "release/CMakeLists.txt").read_text())
@@ -316,7 +316,7 @@ class ProjectRoundtripTests(unittest.TestCase):
         (licenses / "LICENSE").write_text("Fixture SDK license")
         project = root / "My Game 日本語"
         create.create_project(project, name="MyGame", template_id="minimal", engine_version="0.1.0",
-                              local_sdk_prefix=sdk, release=True, itch_target="tester/mygame")
+                              local_sdk_prefix=sdk, release=True, itch_target="tester/mygame", preset="linux-clang-development")
         return project, sdk
 
     def test_build_extract_plan_and_failed_build_preserves_package(self):

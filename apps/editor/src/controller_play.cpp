@@ -68,7 +68,7 @@ Capabilities EditorController::Caps() const
         }
     }
 #if defined(Q_OS_MACOS)
-    caps.CanBuildDebug = caps.CanReleaseInit = caps.CanPackage = false;
+    caps.CanBuildDebug = false;
 #endif
 #if defined(Q_OS_WASM)
     caps.CanConfigure = caps.CanBuild = caps.CanBuildRun = caps.CanBuildDebug = false;

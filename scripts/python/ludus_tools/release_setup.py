@@ -161,7 +161,23 @@ NATIVE_SDK_STEP = r"""      - name: Acquire digest-pinned Release SDK (no upload
 
 
 def workflow_text(profile: str, destination: str, platform: str) -> str:
-    return WORKFLOW.replace('PROFILE_TOKEN', profile).replace('DESTINATION_TOKEN', destination).replace('NATIVE_SDK_STEP', NATIVE_SDK_STEP.rstrip() if platform == 'linux-x64' else '')
+    text = WORKFLOW
+    if platform.startswith("macos-"):
+        # GitHub, GitHub-hosted runners reference: explicit native CPU labels.
+        # https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+        runner = "macos-14" if platform == "macos-arm64" else "macos-15-intel"
+        text = text.split("  upload:\n", 1)[0].replace("name: itch.io release", "name: macOS release package").replace("runs-on: ubuntu-24.04", "runs-on: " + runner)
+        start = text.index("          sudo apt-get update -qq")
+        end = text.index("          ref=$(cat", start)
+        text = text[:start] + """          brew install python@3.12 llvm@18
+          python_bin="$(brew --prefix python@3.12)/bin/python3.12"
+          llvm_prefix="$(brew --prefix llvm@18)"
+          "$python_bin" -m venv /tmp/ludus-release-tools
+          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          echo 'MACOSX_DEPLOYMENT_TARGET=14.0' >> "$GITHUB_ENV"
+          echo "CXXFLAGS=-stdlib=libc++ -nostdinc++ -isystem $llvm_prefix/include/c++/v1" >> "$GITHUB_ENV"
+""" + text[end:]
+    return text.replace('PROFILE_TOKEN', profile).replace('DESTINATION_TOKEN', destination).replace('NATIVE_SDK_STEP', NATIVE_SDK_STEP.rstrip() if platform != 'web' else '')
 
 
 def setup_release(project: Path, *, platform: str = "linux-x64", itch_target: str | None = None,
@@ -174,15 +190,18 @@ def setup_release(project: Path, *, platform: str = "linux-x64", itch_target: st
         fail("release setup requires a saved version-2 CMake project")
     if model.source_dir != ".":
         fail("release setup currently requires source_dir '.'; add install rules manually for nested sources")
-    if platform not in ("web", "linux-x64"):
+    if platform not in ("web", "linux-x64", "macos", "macos-arm64", "macos-x64"):
         fail("unsupported release platform")
     if tools_ref is not None and not re.fullmatch(r"[a-f0-9]{40}", tools_ref):
         fail("tools ref must be an immutable 40-character Ludus commit")
-    if itch_target and not tools_ref:
+    if itch_target and not tools_ref and not platform.startswith("macos"):
         fail("CI upload setup requires --tools-ref <Ludus commit>")
-    rendered = release_files(model.target, itch_target)
+    if platform == "macos":
+        from .native import target_for_profile
+        platform = "macos-arm64" if target_for_profile("macos-clang-release") == "arm64-apple-darwin" else "macos-x64"
+    rendered = release_files(model.target, itch_target, platform=platform if platform != "web" else "linux-x64")
     config = json_bytes(rendered[0].content.encode(), "release template")
-    profile, destination = "linux-release", "linux"
+    profile, destination = ("macos-release", "macos") if platform.startswith("macos-") else ("linux-release", "linux")
     if platform == "web":
         profile, destination = "web-release", "web"
         config['profiles'] = {profile: {'targetPlatform': 'web', 'buildProfile': 'release', 'target': model.target,
@@ -205,14 +224,18 @@ endif()
 '''.replace('TARGET_TOKEN', model.target)
     if tools_ref:
         if not itch_target:
-            config["itch"] = {"channels": {destination: {"packageProfile": profile, "channel": "html5" if platform == "web" else "linux-stable"}}}
+            config["itch"] = {"channels": {destination: {"packageProfile": profile, "channel": "html5" if platform == "web" else destination + "-stable"}}}
         config['automation'] = {'provider': 'github-actions', 'releaseTags': True, 'buildCommand': build_command if build_command is not None else (['./scripts/release-prepare'] if (root / 'scripts/release-prepare').is_file() else [])}
         rendered.extend([TemplateFile('.github/workflows/itch-release.yml', workflow_text(profile, destination, platform)),
                          TemplateFile('config/ludus-tools-revision.txt', tools_ref + '\n')])
     rendered[0].content = canonical(config).decode()
     if platform == 'web':
         next(file for file in rendered if file.relpath == 'RELEASING.md').content = next(file for file in rendered if file.relpath == 'RELEASING.md').content.replace('linux-release', 'web-release').replace('--destination linux', '--destination web')
-    next(file for file in rendered if file.relpath == "RELEASING.md").content += '''
+    release_guide = next(file for file in rendered if file.relpath == "RELEASING.md")
+    if platform.startswith("macos-") and tools_ref:
+        release_guide.content += "\nCI: set LUDUS_RELEASE_SDK_URL and LUDUS_RELEASE_SDK_SHA256 for a matching Release SDK. Push a v* tag or run the macOS release package workflow. It has no upload job or account secret.\n"
+    elif not platform.startswith("macos-"):
+        release_guide.content += '''
 Editor: use Release > Package Release after setup. Commit the generated files.
 For CI, set the itch-release environment secret BUTLER_API_KEY. If no target
 was saved, set the repository variable ITCH_IO_TARGET to username/game. Push a v* tag or
