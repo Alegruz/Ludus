@@ -58,6 +58,9 @@ void MainWindow::BuildUi()
     WorkTabs_ = new QTabWidget(this);
     WorkTabs_->setObjectName(QStringLiteral("workspaceTabs"));
     WorkTabs_->setAccessibleName(QStringLiteral("Authoring work areas"));
+    // Tab labels must not force the whole workspace wider than its container.
+    WorkTabs_->setUsesScrollButtons(true);
+    WorkTabs_->setElideMode(Qt::ElideRight);
     setCentralWidget(WorkTabs_);
     auto* projectScroll = new QScrollArea(WorkTabs_);
     ProjectSettings_ = projectScroll;
@@ -129,7 +132,11 @@ void MainWindow::BuildUi()
 
     InspectorDock_ = new QDockWidget(QStringLiteral("Live Inspector"), this);
     InspectorDock_->setObjectName(QStringLiteral("liveInspectorDock"));
-    auto* inspector = new QWidget(InspectorDock_);
+    auto* inspectorScroll = new QScrollArea(InspectorDock_);
+    inspectorScroll->setObjectName(QStringLiteral("liveInspectorScroll"));
+    inspectorScroll->setWidgetResizable(true);
+    inspectorScroll->setFrameShape(QFrame::NoFrame);
+    auto* inspector = new QWidget(inspectorScroll);
     auto* inspectorLayout = new QVBoxLayout(inspector);
     // --- Runtime status area (describes the running app; not a framebuffer) ---
     RuntimeLabel_ = new QLabel(inspector);
@@ -167,7 +174,8 @@ void MainWindow::BuildUi()
     inspectorLayout->addWidget(Properties_, 1);
     inspectorLayout->addWidget(ApplySessionButton_);
     inspectorLayout->addWidget(ApplyDocumentButton_);
-    InspectorDock_->setWidget(inspector);
+    inspectorScroll->setWidget(inspector);
+    InspectorDock_->setWidget(inspectorScroll);
     addDockWidget(Qt::RightDockWidgetArea, InspectorDock_);
 
     OutputDock_ = new QDockWidget(QStringLiteral("Output"), this);
