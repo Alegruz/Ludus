@@ -201,7 +201,14 @@ RasterStatus LifetimeReadback(usize transferSlot, BufferRole, const internal::Li
     }
     wgpuQueueSubmit(gQueue, 1, &command);
     wgpuCommandBufferRelease(command);
-    ++transfer.Callbacks;
+    // A failed map is not proof that the submitted copy completed. Track queue
+    // retirement independently so cancellation cannot recycle its slice/source.
+    transfer.Callbacks += 2;
+    WGPUQueueWorkDoneCallbackInfo done = WGPU_QUEUE_WORK_DONE_CALLBACK_INFO_INIT;
+    done.mode = WGPUCallbackMode_AllowSpontaneous;
+    done.callback = LifetimeWebDone;
+    done.userdata1 = &transfer;
+    (void)wgpuQueueOnSubmittedWorkDone(gQueue, done);
     WGPUBufferMapCallbackInfo callback = WGPU_BUFFER_MAP_CALLBACK_INFO_INIT;
     callback.mode = WGPUCallbackMode_AllowSpontaneous;
     callback.callback = LifetimeWebMapped;

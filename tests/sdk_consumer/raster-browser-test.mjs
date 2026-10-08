@@ -49,6 +49,8 @@ try {
             device.createBuffer = desc => {
               const object = buffer(scenario === 'invalid-upload' && (desc.usage & GPUBufferUsage.VERTEX) && (desc.usage & GPUBufferUsage.COPY_DST) ? {...desc,size:4} : desc);
               if (scenario === 'invalid-readback' && (desc.usage & GPUBufferUsage.MAP_READ)) {
+                window.__qaReadbackStarted = true;
+                window.__qaReadbackCompletionObserved = false;
                 const map = object.mapAsync.bind(object);
                 object.mapAsync = (mode, offset, size) => map(mode, offset + 1, size);
               }
@@ -58,6 +60,12 @@ try {
             device.queue.onSubmittedWorkDone = (...args) => {
               const promise = done(...args);
               if (scenario === 'transfer-loss') { device.destroy(); }
+              if (scenario === 'invalid-readback' && window.__qaReadbackStarted) {
+                return promise.then(() => new Promise(resolve => setTimeout(() => {
+                  window.__qaReadbackCompletionObserved = true;
+                  resolve();
+                },100)));
+              }
               return scenario === 'slow-completion' ? promise.then(() => new Promise(resolve => setTimeout(resolve,30))) : promise;
             };
             return device;
@@ -81,6 +89,7 @@ try {
     if (scenario.startsWith('invalid') || scenario === 'transfer-loss') {
       await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'failed',null,{timeout:20000});
       assert.equal(await page.locator('#status').getAttribute('data-frames'),'0');
+      if (scenario === 'invalid-readback') assert.equal(await page.evaluate(() => window.__qaReadbackCompletionObserved),true,'map failure must not retire the outstanding copy');
     } else {
       await page.waitForFunction(() => document.querySelector('#status').dataset.frames === '5',null,{timeout:20000});
       result.backend = await page.locator('#status').getAttribute('data-backend');
