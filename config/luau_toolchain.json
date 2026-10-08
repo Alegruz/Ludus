@@ -5,5 +5,5 @@
   "optimization_level": 1,
   "debug_level": 2,
   "profile": "s0-interpreter-longjmp-loader-lifetime-v1",
-  "status": "experimental; not an installed SDK dependency"
+  "status": "opt-in installed Behavior provider; six-platform qualification in progress"
 }

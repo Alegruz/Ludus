@@ -18,7 +18,7 @@ def main():
         try:
             run('--preset',args.preset,'-DLUDUS_BUILD_BEHAVIOR=OFF','-DLUDUS_BUILD_BEHAVIOR_ACCEPTANCE=OFF')
             run('--install',ROOT/'out/build'/args.preset,'--prefix',prefix)
-            for relative in ('include/ludus/runtime/behavior','lib/Ludus/behavior','share/Ludus/behavior','share/Ludus/licenses/Luau','lib/cmake/Ludus/LudusBehavior.cmake','lib/libludus_runtime_behavior.a'):
+            for relative in ('include/ludus/runtime/behavior','lib/Ludus/behavior','share/Ludus/behavior','share/Ludus/licenses/Luau','lib/cmake/Ludus/LudusBehavior.cmake','lib/cmake/Ludus/LudusBehaviorProfile.cmake','lib/libludus_runtime_behavior.a'):
                 if (prefix/relative).exists():raise AssertionError('stale optional payload: '+relative)
             manifest=json.loads((prefix/'share/Ludus/LudusSdkManifest.json').read_text())
             if 'Behavior' in manifest['components'] or any(dep['name']=='Luau' for dep in manifest['dependencies']):raise AssertionError('disabled dependency remained in manifest')

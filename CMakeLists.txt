@@ -53,6 +53,10 @@ option(LUDUS_BUILD_SCRIPT_INTERACTION "Build the experimental S1 native/Luau hea
 option(LUDUS_BUILD_EDITOR "Build the optional Qt editor workspace (apps/editor)" OFF)
 option(LUDUS_BUILD_WEB_PROBES "Build browser feasibility probes" ON)
 include(EngineInitOptions)
+if(LUDUS_BUILD_BEHAVIOR)
+    include(LudusBehaviorProfile)
+    ludus_behavior_admit_profile("${PROJECT_SOURCE_DIR}/config/behavior_profiles.json" LUDUS_BEHAVIOR_TARGET_PROFILE)
+endif()
 if(EMSCRIPTEN)
     # Native Catch2 test targets are not browser executables.
     if(LUDUS_BUILD_TESTS)
@@ -123,6 +127,8 @@ set(LUDUS_GAME_COMPATIBILITY_IDENTITY
 
 configure_file(cmake/CheckSdkVariant.cmake.in "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" @ONLY)
 install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENTS)
+
+include(EngineDependencyPreflight)
 
 add_subdirectory(modules/foundation/base)
 # Portable bounded networking primitives are shared by native and web targets.
@@ -397,7 +403,7 @@ install(
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${LUDUS_ENGINE_PACKAGE_NAME}/dependencies"
 )
 
-install(FILES cmake/LudusShaders.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
+install(FILES cmake/LudusDependencies.cmake cmake/LudusShaders.cmake DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
 # Gameplay project helper + host/shipping main templates (project-live-reload).
 if(NOT EMSCRIPTEN)
     install(FILES

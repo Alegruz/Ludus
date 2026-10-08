@@ -1,5 +1,5 @@
 # Optional installed provider. Ordinary C++/data SDKs acquire no Luau payload.
-find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+ludus_require_python("Behavior provider")
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/script-provider" verify-tools
     RESULT_VARIABLE behavior_tools_result OUTPUT_QUIET)
 if(NOT behavior_tools_result EQUAL 0)
@@ -19,6 +19,14 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/profile.json"
 add_library(ludus_runtime_behavior STATIC src/behavior.cpp)
 add_library(Ludus::Behavior ALIAS ludus_runtime_behavior)
 set_target_properties(ludus_runtime_behavior PROPERTIES EXPORT_NAME Behavior)
+if(LUDUS_BEHAVIOR_TARGET_PROFILE MATCHES "-wasm32$")
+    set(behavior_arch LUDUS_CPU_WASM32)
+elseif(LUDUS_BEHAVIOR_TARGET_PROFILE MATCHES "-arm64$")
+    set(behavior_arch LUDUS_CPU_ARM64)
+else()
+    set(behavior_arch LUDUS_CPU_X86_64)
+endif()
+target_compile_definitions(ludus_runtime_behavior PUBLIC "LUDUS_BEHAVIOR_EXPECTED_ARCH=${behavior_arch}")
 target_sources(ludus_runtime_behavior PUBLIC FILE_SET public_headers TYPE HEADERS BASE_DIRS include FILES
     include/ludus/runtime/behavior/behavior.h)
 target_compile_definitions(ludus_runtime_behavior PRIVATE "LUDUS_BEHAVIOR_PROFILE=\"${behavior_profile}\"")
@@ -55,7 +63,10 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/profile.json"
 install(PROGRAMS "${behavior_tools}/luau-compile" "${behavior_tools}/luau-analyze"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/Ludus/behavior/bin")
 install(FILES "${PROJECT_SOURCE_DIR}/cmake/LudusBehavior.cmake"
+    "${PROJECT_SOURCE_DIR}/cmake/LudusBehaviorProfile.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus")
+install(FILES "${PROJECT_SOURCE_DIR}/config/behavior_profiles.json"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/Ludus/behavior" RENAME profiles.json)
 # Player release helpers already copy share/Ludus/licenses recursively.
 install(FILES "${PROJECT_SOURCE_DIR}/out/luau-probe/source/LICENSE.txt"
     "${PROJECT_SOURCE_DIR}/out/luau-probe/source/lua_LICENSE.txt"

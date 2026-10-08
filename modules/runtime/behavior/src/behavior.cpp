@@ -749,6 +749,11 @@ struct LuauProvider::Impl
 };
 static_assert(std::is_trivially_destructible_v<Value>);
 static_assert(std::is_trivially_destructible_v<Outcome>);
+static_assert(std::is_trivially_destructible_v<EntityRef>);
+static_assert(std::is_trivially_destructible_v<Record>);
+static_assert(std::is_trivially_destructible_v<Services>);
+static_assert(std::is_trivially_destructible_v<CommandResult>);
+static_assert(std::is_trivially_destructible_v<Transaction>);
 
 // Owner-thread acquisition, candidate publication and invocation retirement.
 LuauProvider::~LuauProvider() noexcept

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import platform
 from pathlib import Path
 import shlex
 import subprocess
@@ -85,6 +86,40 @@ def host_tool(name: str) -> str:
     return str(path)
 
 
+
+def host_compiler_options() -> list[str]:
+    """Use init's pinned shims, including its macOS SDK/libc++ pairing."""
+    tools = ROOT / "out/host-tools"
+    options = []
+    for language, executable in (("CXX", "clang++"), ("C", "clang")):
+        compiler = tools / "bin" / executable
+        require(compiler.is_file(), "Prepare pinned compiler shims with init.sh")
+        options.append(f"-DCMAKE_{language}_COMPILER={compiler}")
+    if platform.system() == "Darwin":
+        sdk, libcxx = tools / "macos-sdk", tools / "libcxx-include"
+        require(sdk.is_dir() and libcxx.is_dir(), "Prepare the pinned macOS SDK/libc++ with init.sh")
+        options += [f"-DCMAKE_OSX_SYSROOT={sdk}", "-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0",
+                    f'-DCMAKE_CXX_FLAGS=-stdlib=libc++ -nostdinc++ -isystem "{libcxx}"']
+    return options
+
+
+def host_cache_changed(build: Path, options: list[str]) -> bool:
+    """Refresh stale owned compiler caches, while preserving repeat bootstrap builds."""
+    cache = build / "CMakeCache.txt"
+    if not cache.is_file():
+        return False
+    cached = {}
+    for line in cache.read_text().splitlines():
+        if not line.startswith(("#", "//")) and ":" in line and "=" in line:
+            key, value = line.split("=", 1)
+            cached[key.split(":", 1)[0]] = value
+    for option in options:
+        key, value = option.removeprefix("-D").split("=", 1)
+        if cached.get(key) != value:
+            return True
+    return False
+
+
 def bootstrap() -> None:
     WORK.mkdir(parents=True, exist_ok=True)
     archive = WORK / "luau.tar.gz"
@@ -102,9 +137,10 @@ def bootstrap() -> None:
     build = WORK / "host-compiler"
     # Upstream compiler/CLI exceptions stay in this separate host process. This
     # executable includes no Ludus code and is never linked into the probe/SDK.
-    run([host_tool("cmake"), "-S", str(SOURCE), "-B", str(build), "-G", "Ninja",
-         "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_CXX_COMPILER=clang++-18",
-         "-DCMAKE_C_COMPILER=clang-18", f"-DCMAKE_MAKE_PROGRAM={host_tool('ninja')}",
+    options = [*host_compiler_options(), f"-DCMAKE_MAKE_PROGRAM={host_tool('ninja')}"]
+    refresh = ["--fresh"] if host_cache_changed(build, options) else []
+    run([host_tool("cmake"), *refresh, "-S", str(SOURCE), "-B", str(build), "-G", "Ninja",
+         "-DCMAKE_BUILD_TYPE=Release", *options,
          "-DLUAU_BUILD_TESTS=OFF", "-DLUAU_BUILD_CLI=ON", "-DLUAU_BUILD_WEB=OFF"])
     run([host_tool("cmake"), "--build", str(build), "--target", "Luau.Compile.CLI", "-j", "2"])
     (WORK / "compiler-manifest.json").write_text(json.dumps({

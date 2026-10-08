@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare, cook and validate the optional installed S4 provider."""
+"""Prepare, cook and validate the optional installed provider and S6 safety suite."""
 import argparse
 import hashlib
 import json
@@ -8,6 +8,7 @@ import runpy
 import sys
 import shlex
 import subprocess
+import tempfile
 ROOT=Path(__file__).resolve().parent.parent
 S1=runpy.run_path(str(ROOT/'scripts/script-interaction'),run_name='s1_tool')
 sys.path.insert(0,str(ROOT/'scripts/python'))
@@ -18,9 +19,17 @@ def cook():
     work=ROOT/'out/script-provider'; work.mkdir(parents=True,exist_ok=True)
     profile={'version':1,**json.loads((ROOT/'out/script-interaction/host.json').read_text())}
     profile['profile']=profile.pop('pin')
-    (work/'profile.json').write_text(json.dumps(profile)+'\n')
+    profile_path=work/'profile.json'
+    content=json.dumps(profile)+'\n'
+    if not profile_path.is_file() or profile_path.read_text()!=content:
+        with tempfile.TemporaryDirectory(dir=work,prefix='.profile-') as temporary:
+            candidate=Path(temporary)/'profile.json'
+            candidate.write_text(content)
+            candidate.replace(profile_path)
     fixture=ROOT/'tools/script-provider/fixtures'
-    return behavior_cook.cook(fixture/'contract.json',fixture/'package.json',work/'cooked',work/'profile.json',S1['COMPILER'],S1['ANALYZER'])
+    result=behavior_cook.cook(fixture/'contract.json',fixture/'package.json',work/'cooked',work/'profile.json',S1['COMPILER'],S1['ANALYZER'])
+    behavior_cook.cook(fixture/'contract.json',ROOT/'tools/script-provider/safety-fixtures/package.json',work/'safety',work/'profile.json',S1['COMPILER'],S1['ANALYZER'])
+    return result
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -33,25 +42,28 @@ def main():
     elif args.action=='verify-tools': S1['check_host']()
     elif args.action=='verify':
         S1['check_host']()
-        work=ROOT/'out/script-provider/cooked'
-        pointer=behavior_cook.read_json(work/'current.json')
-        evidence=behavior_cook.read_json(work/pointer['key']/'evidence.json')
         fixture=ROOT/'tools/script-provider/fixtures'
-        expected=behavior_cook.cook_key(behavior_cook.contract(fixture/'contract.json'),behavior_cook.package(fixture/'package.json'),behavior_cook.read_json(ROOT/'out/script-provider/profile.json'))
-        behavior_cook.require(expected==pointer['key']==evidence['key'],'stale S4 cook; run script-provider cook')
-        behavior_cook.require(evidence['outputs']=={p.name:behavior_cook.sha(p.read_bytes()) for p in (work/pointer['key']).iterdir() if p.name!='evidence.json'}, 'modified S4 cook')
+        for directory,package in [('cooked',fixture/'package.json'),('safety',ROOT/'tools/script-provider/safety-fixtures/package.json')]:
+            work=ROOT/'out/script-provider'/directory
+            pointer=behavior_cook.read_json(work/'current.json')
+            evidence=behavior_cook.read_json(work/pointer['key']/'evidence.json')
+            expected=behavior_cook.cook_key(behavior_cook.contract(fixture/'contract.json'),behavior_cook.package(package),behavior_cook.read_json(ROOT/'out/script-provider/profile.json'))
+            behavior_cook.require(expected==pointer['key']==evidence['key'],'stale provider cook; run script-provider cook')
+            behavior_cook.require(evidence['outputs']=={p.name:behavior_cook.sha(p.read_bytes()) for p in (work/pointer['key']).iterdir() if p.name!='evidence.json'}, 'modified provider cook')
     elif args.action=='run':
         cook()
         extra=['-DLUDUS_BUILD_BEHAVIOR=ON','-DLUDUS_BUILD_BEHAVIOR_ACCEPTANCE=ON','-DLUDUS_WARNINGS_AS_ERRORS=ON']
+        if args.preset.endswith(('release','profile')): extra += ['-DLUDUS_COMPILED_LOG_LEVEL=2']
         if args.preset.startswith('web-'): extra += ['-DLUDUS_BUILD_SMOKE_APP=OFF','-DLUDUS_BUILD_WEB_PROBES=OFF']
         S1['run']([S1['host_tool']('cmake'),'--preset',args.preset,*extra])
-        targets=['ludus_behavior_acceptance'] if args.preset.startswith('web-') else ['ludus_behavior_acceptance','ludus_behavior_tests']
+        targets=['ludus_behavior_acceptance','ludus_behavior_safety','ludus_behavior_allocator_contract']
+        if not args.preset.startswith('web-'): targets += ['ludus_behavior_tests']
         S1['run']([S1['host_tool']('cmake'),'--build','--preset',args.preset,'--target',*targets,'-j','2'])
         S1['run']([S1['host_tool']('ctest'),'--preset',args.preset,'-R','^ludus_behavior_','--output-on-failure','--no-tests=error'])
     else:
         S1['check'](args.preset,args.fix)
         from formatting import format_source
-        paths=list((ROOT/'modules/runtime/behavior').rglob('*.cpp'))+list((ROOT/'modules/runtime/behavior').rglob('*.h'))+list((ROOT/'tools/script-provider').rglob('*.cpp'))
+        paths=list((ROOT/'modules/runtime/behavior').rglob('*.cpp'))+list((ROOT/'modules/runtime/behavior').rglob('*.h'))+list((ROOT/'tools/script-provider').rglob('*.cpp'))+list((ROOT/'tools/script-provider').rglob('*.h'))
         for source in paths:
             code=source.read_text()
             formatted=format_source(code,source,'clang-format-18')
@@ -77,5 +89,5 @@ if __name__=='__main__':
     try:main()
     except (OSError,ValueError,KeyError,TypeError,RecursionError,RuntimeError,subprocess.SubprocessError) as error:
         detail=error.stderr.decode(errors='replace')[-8192:] if isinstance(error,subprocess.CalledProcessError) and error.stderr else ''
-        print('S4 provider failed: '+str(error)+'\n'+detail,file=sys.stderr)
+        print('Behavior provider failed: '+str(error)+'\n'+detail,file=sys.stderr)
         raise SystemExit(1)

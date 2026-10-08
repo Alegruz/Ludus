@@ -11,7 +11,9 @@ node debugging/replacement. [S4](behavior-s4.md) adds the optional installed
 native/Luau provider, project contracts, paired cooking and static player-package
 acceptance. [S5](behavior-s5.md) integrates project text/sequence authoring, cooking,
 source/node debugging and VM retirement into the actual Editor/GameHost workflow.
-Six-platform/safety qualification and representative release acceptance remain S6–S7; the production design below still includes future
+[S6](behavior-s6.md) is in progress with production safety sweeps and shared target
+admission. Six-platform/device qualification and representative release acceptance
+remain S6–S7; the production design below still includes future
 capabilities. The [Gems review](scripting-gems-review.md) records the literature review
 and resulting refinements.
 
@@ -870,7 +872,7 @@ or creating a worker VM pool.
 | S3 | One useful visual sequence/state machine workflow | Designer authors, reviews, debugs, reloads, and tests an encounter; stable IDs, undo, semantic merge/diff, node source maps, and text/graph effect equivalence. |
 | S4 | Installed native/Luau provider, generated project bindings, cook and static shipping | Optional `Ludus::Behavior`; closed project contracts; state codecs/migration; staged effects and fault retirement; paired offline cooker; relocated SDK-only project with real configure/build/test and failed-candidate retention. See [implemented scope](behavior-s4.md). |
 | S5 | Editor/GameHost authoring and debugging integration — implemented | [Bounded desktop workflow](behavior-s5.md): project-owned text/graph assets, shared cook controls, diagnostics and source/node stops in the actual editor; explicit reload/restart and native module lease retirement. |
-| S6 | Six-platform and safety acceptance | Windows, macOS, Linux, Web, Android and iOS builds/runs in declared profiles; physical device/browser acceptance; remaining trampoline/resource/security audits and unsupported-profile rejection. |
+| S6 | Six-platform and safety acceptance — in progress | [Implemented safety/profile slice](behavior-s6.md): shared target admission; production allocator/resource/security sweeps; native/Node/Chromium evidence. Windows/Android/iOS engine backends and six-platform physical-device qualification remain pending. |
 | S7 | Representative scale, usability and release qualification | Game-derived budgets, iteration/performance/size evidence, representative designer workflow and release packaging. Specialist extensions need measured game requirements. |
 | C0 optional | C# feasibility for a named project and target profile | Pinned runtime/compiler/deployment choice; native interop layout and explicit errors; process/assembly ownership; debugger and package/startup cost; declared reload/restart, trust, and resource-control capabilities. No all-platform claim from a desktop host test. |
 | C1 optional | Useful C# behavior and mixed-provider acceptance | Generated bindings/codecs; equivalent effects/state; ordered Luau/native/C# events; failed candidate preservation; delegate/GC-root retirement; native module lease retirement; repeated reload or declared restart; managed exceptions stay inside the provider. |
