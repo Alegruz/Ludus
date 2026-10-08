@@ -7,6 +7,7 @@
 // sections 2, 7.
 
 #include "internal/controller.h"
+#include "internal/editor_files.h"
 #include "internal/main_window.h"
 
 #include <ludus/foundation/base/types.h>
@@ -91,7 +92,11 @@ int main(int argc, char** argv)
     window.resize(900, 700);
 #if defined(Q_OS_WASM)
     window.showMaximized();
-    controller.OpenProject(QStringLiteral("/browser-example/ludus.project.json"));
+    QString sample;
+    if (ludus::editor::CopyEditorSample(QStringLiteral("cornell-box"), sample))
+    {
+        controller.OpenProject(sample);
+    }
 #else
     window.show();
 #endif

@@ -239,20 +239,20 @@ TEST_CASE("Authoring areas remain reachable at smaller workspace sizes", "[edito
 "source_dir":".","preset":"linux-clang-debug","target":"app","run":{"cwd":".","args":[]}})json"));
     descriptor.close();
     controller.OpenProject(descriptor.fileName());
+    auto* inspector = window.findChild<QScrollArea*>(QStringLiteral("liveInspectorScroll"));
+    REQUIRE(inspector != nullptr);
     // Optional captures are for human review, never a golden-image assertion.
     const auto captures = qEnvironmentVariable("LUDUS_EDITOR_LAYOUT_CAPTURE");
-    for (const auto& size : {QSize(1100, 760), QSize(900, 640)})
+    for (const auto& size : {QSize(1100, 760), QSize(900, 640), QSize(800, 640)})
     {
         window.resize(size);
         QApplication::processEvents();
-        INFO("Window minimum hint: " << window.minimumSizeHint().width());
-        INFO("Authoring minimum hint: " << tabs->minimumSizeHint().width());
-        INFO(
-            "Inspector minimum hint: " << Dock(window, QStringLiteral("liveInspectorDock"))->minimumSizeHint().width());
         CHECK(window.width() <= size.width());
         CHECK(window.height() <= size.height());
         CHECK(project->viewport()->width() > 100);
         CHECK(project->viewport()->height() > 100);
+        CHECK(inspector->viewport()->width() > 100);
+        CHECK(inspector->viewport()->height() > 100);
         if (!captures.isEmpty())
         {
             REQUIRE(window.grab().save(captures + QStringLiteral("-%1.png").arg(size.width())));

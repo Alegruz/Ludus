@@ -7,8 +7,8 @@ description: Open the existing Ludus editor workspace in your browser.
 [Launch Ludus Editor in your browser →](../editor/index.html)
 
 The browser preview runs the existing Qt Widgets application as WebAssembly.
-It opens a bundled example project descriptor so you can explore the workspace
-and edit its settings immediately. A desktop browser with WebAssembly and WebGL
+It opens a writable Cornell Box sample with its sources and shaders so you can
+explore a complete project immediately. A desktop browser with WebAssembly and WebGL
 is required. The first download includes Qt and the editor; it may take longer
 than opening a guide.
 
@@ -16,16 +16,28 @@ than opening a guide.
 
 - Edit the example project's name, provider, source directory, preset, target,
   working directory, and arguments.
-- Open an existing project descriptor using **File → Open Project**. The browser
-  uploads only that JSON document; it does not grant access to its project folder.
-- Use **Save and Download Project** or **Download Project Descriptor** to export
-  edits, then place the downloaded document back in your desktop project.
+- Use **File → Open Project** and select the folder containing
+  `ludus.project.json`. The browser copies the folder's files, including source,
+  shaders and assets, into its session filesystem, preserving relative paths.
+- Use **File → Open Sample** for writable copies of Cornell Box, Live Edit Game,
+  Scripted Game or the installed SDK example. Each copy has its own folder;
+  sample originals remain available for starting again.
+- Use **Save and Download Project Folder** or **Download Project Folder** to
+  export a `.tar` archive. The latter saves open script and scene edits before
+  exporting. Extract the archive into a folder on your computer, then reopen
+  that folder to continue. Save configuration preferences separately using their
+  download action. Build outputs and `.ludus` machine settings are excluded.
 - Open the **Configuration** tab, load a cooked project bundle or preference
   document, inspect inherited values, edit/reset preferences, and download sparse
   preference overrides.
 - Arrange the existing panels and inspect output and workflow status.
 
-Imports are limited to 1 MiB per JSON document and 32 MiB per session. Invalid
+Project imports admit at most 4096 files and 32 MiB per session; individual
+configuration documents remain limited to 1 MiB. Generated `out`, `build`,
+`.git`, `.ludus` and `node_modules` trees are omitted during project import and
+export. Project exports are limited to
+4096 regular files and 32 MiB. Symbolic links and paths exceeding ustar limits
+cannot be exported. Select a source folder without generated build outputs. Invalid
 imports preserve the current document. Document formats and validation are the
 same as in the desktop application.
 

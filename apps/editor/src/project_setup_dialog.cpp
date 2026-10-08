@@ -78,7 +78,7 @@ ProjectSetupDialog::ProjectSetupDialog(const QString& projectDirectory, QWidget*
     Engine_ = new QComboBox(this);
     Engine_->setObjectName(QStringLiteral("setupEngineChoice"));
     Engine_->setAccessibleName(QStringLiteral("Engine for desktop builds"));
-    Engine_->addItem(QStringLiteral("Use this project's selected engine (recommended)"));
+    Engine_->addItem(QStringLiteral("Automatic (recommended)"));
     Engine_->addItem(QStringLiteral("Build and install the engine used by this editor"));
     Engine_->addItem(QStringLiteral("Choose a different installed engine…"));
     layout->addWidget(Engine_);
@@ -152,9 +152,10 @@ void ProjectSetupDialog::Refresh() noexcept
     switch (choice)
     {
         case EngineChoice::Current:
-            EngineHelp_->setText(QStringLiteral("Uses the engine already selected for this project. "
-                                                "No folders need to be entered. If an engine has not been selected, "
-                                                "choose one of the other options."));
+            EngineHelp_->setText(
+                QStringLiteral("Reuses the selected engine, or prepares this editor's engine for a new project. "
+                               "No folders need to be entered. First-time preparation may download tools. "
+                               "Incompatible selections need an explicit replacement."));
             break;
         case EngineChoice::Build:
             EngineHelp_->setText(QStringLiteral("Builds and installs a desktop engine from this editor's Ludus "

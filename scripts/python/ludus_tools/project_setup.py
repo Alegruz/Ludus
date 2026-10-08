@@ -280,6 +280,25 @@ def check_project(path: Path, *, tooling_root: Path, profile: str | None = None,
     return "Setup checked: selectable presets, SDKs, tools and IDE settings"
 
 
+def select_repair_sdk(path: Path, *, tooling_root: Path, prepare=None) -> Path:
+    """Reuse selected/locked engines; prepare the editor engine for unresolved projects.
+
+    Explicit local overrides and release locks retain their existing precedence.
+    A corrupt, moved or incompatible selection requires an explicit replacement;
+    automatic discovery never silently rewrites that selection.
+    Called only by explicit repair, never by read-only project loading.
+    """
+    _, descriptor, _ = supported_project(path)
+    try:
+        return resolve_project(path, store=SdkStore(), profile=descriptor.preset,
+                               enforce_host_toolchain=False).resolution.prefix
+    except ToolingError as exc:
+        if exc.code != "UnresolvedLock":
+            raise
+    from .creation_engine import select_creation_sdk
+    return select_creation_sdk(tooling_root, profile=descriptor.preset, prepare=prepare)
+
+
 def repair_project(path: Path, *, tooling_root: Path, sdk: Path | None = None,
                    web_sdk: Path | None = None, disable_web: bool = False, profile: str | None = None,
                    runner=run_command, cancel_check=lambda: None):

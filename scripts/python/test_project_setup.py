@@ -54,6 +54,26 @@ class ProjectSetupTests(unittest.TestCase):
     def snapshot(self):
         return {str(p.relative_to(self.project)): p.read_bytes() for p in self.project.rglob("*") if p.is_file()}
 
+    def test_automatic_repair_reuses_selection_without_preparing(self):
+        prepared = []
+        selected = setup.select_repair_sdk(self.project, tooling_root=self.tools,
+                                          prepare=lambda p: prepared.append(p))
+        self.assertEqual(selected, self.sdk)
+        self.assertEqual(prepared, [])
+
+    def test_automatic_repair_prepares_only_unresolved_projects(self):
+        with patch.object(setup, "resolve_project", side_effect=ToolingError("UnresolvedLock", "new project")), \
+             patch("ludus_tools.creation_engine.select_creation_sdk", return_value=self.sdk) as select:
+            callback = lambda p: p
+            self.assertEqual(setup.select_repair_sdk(self.project, tooling_root=self.tools, prepare=callback), self.sdk)
+            select.assert_called_once_with(self.tools, profile=self.profile, prepare=callback)
+        for code in ("SdkNotFound", "SdkCorrupt", "SdkIncompatible", "LockMismatch"):
+            with patch.object(setup, "resolve_project", side_effect=ToolingError(code, "selected engine failed")), \
+                 patch("ludus_tools.creation_engine.select_creation_sdk") as select:
+                with self.assertRaises(ToolingError):
+                    setup.select_repair_sdk(self.project, tooling_root=self.tools)
+                select.assert_not_called()
+
     def test_fresh_clone_missing_local_setup_and_open_are_read_only(self):
         before = self.snapshot()
         with self.assertRaisesRegex(ToolingError, "setup is missing"):
