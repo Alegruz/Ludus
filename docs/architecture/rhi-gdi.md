@@ -28,6 +28,12 @@ layer, named `GraphicsDevice` in code. This interpretation is a naming assumptio
 Windows GDI is outside the scope. RHI means rendering hardware interface. These
 are proposed roles, not two duplicate wrappers around every graphics call.
 
+The [low-level renderer systems architecture](renderer-systems.md) owns the
+proposed scene submission, views/virtual screens, materials, lighting and overlay
+policy above this boundary. Its [Gems review](renderer-systems-gems-review.md)
+records later renderer-specific refinements. Device/resource lifetime and pass
+lowering remain owned here; neither proposal implies implementation readiness.
+
 ## Current implementation and compatibility
 
 The current fullscreen API has four backends: Vulkan on Linux, Metal on macOS,
