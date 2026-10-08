@@ -1,7 +1,8 @@
 # Low-level renderer systems architecture
 
-Status: Proposed design, October 7, 2026, audited against `8162d93`.
-This is an implementation plan, not a shipped renderer or a measured speedup.
+Status: L0 portable scene submission implemented, October 8, 2026; dependency
+audit refreshed against R4 at `d232cb5`. L1–L6 remain an implementation plan.
+Correctness fixtures do not establish a measured speedup.
 The initial decisions below were saved before opening the Gems article map.
 The [reference review](renderer-systems-gems-review.md) records the subsequent
 article readings and the concrete revisions now incorporated below. Its
@@ -54,7 +55,7 @@ public contracts with Doxygen and source attribution beside affected code.
 | Inspected owner | Shipped boundary | Renderer implication |
 | --- | --- | --- |
 | [R1 portable raster](../development/fullscreen-rendering.md#portable-raster-r1) | Vulkan, Metal, WebGPU and WebGL 2; indexed instanced triangles, immutable resources, one acquired color target and private depth | A small flat/unlit consumer can use it now; general pass attachments, streaming and modern depth policy need explicit extensions |
-| [RHI/GDI architecture](rhi-gdi.md) | R0/R1 slices exist; most GDI services and R2–R5 are proposed | Do not treat pass compilation, upload rings or compute as available APIs |
+| [RHI/GDI architecture](rhi-gdi.md) | R2 lifetime services, R3 ordered graph and R4 buffer compute/indirect profiles are implemented; R5 remains proposed | Reuse retained batches/completion and authored graph passes; storage textures, raster-stage storage and general mutable uploads remain deferred |
 | [Camera systems](camera-systems.md) | C0 evaluation is implemented; advanced rigs/history remain proposed | Consume `CameraSample`; renderer owns projection, jitter, render-origin conversion and history |
 | [Text](text-font-rendering-research.md) and [FontSystem](../../modules/text/include/ludus/text/font_system.h) | Native CPU shaping and grayscale rasterization; bounded run contract, no automatic paragraph layout; atlas/GPU work remains pending in the [F0–F6 ledger](../../.kiro/specs/text-font-rendering/tasks.md) | Reuse CPU text; bounded atlas and GPU text adapter need implementation and backend evidence |
 | [Resources](resource-management.md) | Content/audio portions exist; general coordinator and graphics streaming are proposed | Do not block the first scene on a universal asset manager |
@@ -67,6 +68,85 @@ and compare state, then prove near/far ordering on all supported backends.
 Existing R1 consumers keep their documented behavior. Similarly, its 16 records
 per kind, RGBA8-only single-mip sampling and one binding group are compatibility
 limits, not an adequate streaming/lighting contract.
+
+## Portable scene submission (L0)
+
+`Ludus::GraphicsRenderer` now supplies the first portable static scene consumer.
+Its public contract is [renderer.hpp](../../modules/graphics/renderer/include/ludus/graphics/renderer/renderer.hpp).
+It depends on FoundationMath and GraphicsRhi, with FoundationContainers privately;
+application adapters provide ordinary values without an ECS, UI or gameplay-camera
+link. Native and browser builds export the same component.
+
+Compile the installed flat shader during the application build:
+
+```cmake
+find_package(Ludus CONFIG REQUIRED COMPONENTS GraphicsRenderer)
+target_link_libraries(my_app PRIVATE Ludus::GraphicsRenderer)
+ludus_compile_shader(TARGET my_app NAME renderer_flat RASTER
+    SOURCE "${Ludus_DIR}/shaders/renderer_flat.slang"
+    VERTEX vertexMain FRAGMENT fragmentMain)
+```
+
+Create a ready portable-raster device, then initialize `Renderer` with the generated
+`renderer_flat::Vertex()` and `Fragment()` descriptions. Poll pending setup on later
+owner-thread turns. `CreateMesh` copies finite position-only geometry and uint32
+mesh-local indices; poll a pending mesh before snapshot admission. `CreateSnapshot`
+copies `SceneItem` transforms, flat materials and nonzero unique application source
+IDs, and retains each mesh incarnation. Editing the original items or releasing a
+mesh cannot change an accepted snapshot. A new snapshot cannot use a detached mesh.
+
+`PrepareView` copies a finite conventional world-to-clip transform, derives visibility
+and creates one immutable instance buffer during setup. Sorting/instance scratch is
+reserved in renderer-owned storage at initialization, keeping preparation within the
+browser default stack rather than requiring application stack overrides. Repeated `Submit` only records
+bounded retained R2 packets; it performs no renderer heap allocation or resource
+creation. The prepared view remains reusable. Releasing its source snapshot/meshes
+is legal. The application sets the drawable extent/clear through RHI `SetFrameTarget`
+between frames before submission; zero extent retains work for retry. Releasing the
+view drops CPU ownership while accepted GPU uses retire in
+RHI. Poll the returned completion independently from presentation. A skipped target
+retains a finished batch for retry; terminal failure is still explicit. Reset the
+renderer between frames before destroying its borrowed device.
+
+L0 uses six mesh slots, four snapshot slots, four prepared views and 256 objects per
+snapshot/view. Retained versions consume slots until their last consumer releases.
+The six meshes require twelve RHI buffers and four nonempty views require four more;
+other RHI consumers and GPU retirement can exhaust that shared sixteen-record budget
+earlier. Setup failures preserve public outputs; Ready/Pending creation alone grants
+ownership. Large geometry is also constrained by enabled RHI buffer limits. These are
+bounds of this initial profile, not performance targets or a streaming budget.
+
+Opaque objects use the view transform, depth clear one and less-than depth testing.
+Use near-zero/far-one projection; do not pass FoundationMath's reverse-Z factories
+unchanged. L1 owns the explicit depth-policy migration. Overlays use their own
+local-to-clip affine transform, ignore the world view and render after opaque draws
+without depth testing. Overlay inputs use straight linear RGBA; preparation converts
+RGB to premultiplied values. Unauthored flat materials default to opaque magenta.
+Textures, arbitrary shaders/material templates, submeshes, viewport/scissor, offscreen
+composition and live instance updates remain later phases.
+
+Visibility reuses FoundationMath's outward-rounded affine AABB transform and checked
+frustum classification, including reflection/shear and boundary contact. Overlays are
+classified against the canonical clip volume. Opaque mesh sorting uses the new
+caller-scratch `FoundationContainers::StableSort` only within mutually disjoint
+projected-bound runs. Near-plane crossings block reordering. Overlapping geometry
+keeps input order, including coplanar depth ties; painter overlays always keep input
+order. Adjacent compatible packets instance through a fixed 80-byte record containing
+four clip-transform rows and a color. This conservative ordering may batch less than
+a general opaque state sort; measure before extending it. `ViewReport` records actual
+source order, visibility and draw counts. `ViewDescription::Reference` disables
+visibility, sorting and instancing while preserving the same opaque/overlay semantics.
+
+The public-only [SDK consumer](../../tests/sdk_consumer/renderer/CMakeLists.txt)
+and [shared scene](../../tests/sdk_consumer/l0_scene.h) exercise the installed shader,
+detached source ownership and 120 submissions. Native pixel tests and the
+[browser harness](../../tests/sdk_consumer/renderer-browser-test.mjs) compare optimized
+and unsorted direct images, with independent color samples to reject equally blank
+images. Unit tests cover empty and 256-object scenes, tangency/shear, painter ordering,
+coplanar overlap, invalid/stale identities, pending dependencies, capacity recovery,
+skipped targets and GPU retention. Metal and pinned Chromium WebGPU/WebGL 2 are local
+qualification paths; Linux Vulkan validation and supported-host sanitizers are CI
+gates. Software GPU checks make no physical GPU performance claim.
 
 ## Owners and module shape
 
@@ -806,7 +886,7 @@ These phases complement RHI R0–R5; they do not rename or claim completion of t
 
 | Phase | Deliverable and prerequisites | Acceptance |
 | --- | --- | --- |
-| L0: portable scene packets | R1 static flat/unlit meshes with fixed transforms, immutable snapshots, CPU visibility, ordered 2D overlays, error materials; remain within current limits and R1-compatible depth | Public-only SDK fixture on Vulkan/Metal/WebGPU/WebGL; invalid/stale inputs, capacity failure and pixels match an unsorted direct path |
+| L0: portable scene packets (implemented) | R1 static flat/unlit meshes with fixed transforms, immutable snapshots, CPU visibility, ordered 2D overlays, error materials; remain within current limits and R1-compatible depth | Public-only SDK fixture on Vulkan/Metal/WebGPU/WebGL; invalid/stale inputs, capacity failure and pixels match an unsorted direct path |
 | L1: views and depth | GDI/RHI explicit attachments, clear/compare state and frame retention; orthographic/perspective, virtual screens, offscreen/split views | Reverse-Z ordering, clip/UV orientation, letterbox picking, DPI, zero extent, resize and neighboring view preservation |
 | L2: mutable data and overlays | Completion-scoped uploads/updates; dynamic instances, debug triangles, R8 text adapter | In-flight overwrite stress, line near-plane/degenerate cases, painter/scissor order, atlas pressure, CPU text fixtures and loss/restart |
 | L3: material/content versions | Cook/reflection/layout expansion, texture formats/mips and pipeline prewarm | Per-target layout fixtures; invalid reload preserves old image; mip/color semantics; bounded cache/upload overlap and deterministic fallback |

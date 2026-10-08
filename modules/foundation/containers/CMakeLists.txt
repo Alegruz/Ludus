@@ -19,6 +19,7 @@ target_sources(
             include
         FILES
             include/ludus/foundation/containers/static_array.hpp
+            include/ludus/foundation/containers/stable_sort.hpp
             include/ludus/foundation/containers/array.hpp
             include/ludus/foundation/containers/sorted_map.hpp
             include/ludus/foundation/containers/relocation.hpp
@@ -51,6 +52,7 @@ if(LUDUS_BUILD_TESTS)
         ludus_foundation_containers_tests
         PRIVATE
             tests/static_array_tests.cpp
+            tests/stable_sort_tests.cpp
             tests/array_tests.cpp
             tests/sorted_map_tests.cpp
             tests/relocation_tests.cpp

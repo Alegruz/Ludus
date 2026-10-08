@@ -15,7 +15,8 @@ those systems where the application needs them.
 | Surface | Current responsibility | Important limit |
 | --- | --- | --- |
 | Platform | Linux/Wayland or browser canvas integration; headless support where provided | A compile-time target is not a guarantee of a validated desktop backend |
-| GraphicsRhi | Native Vulkan; browser WebGPU or WebGL 2 | Bounded public rendering slice, not a complete scene renderer |
+| GraphicsRhi | Native Vulkan/Metal; browser WebGPU or WebGL 2 | Bounded public rendering slice, not a complete scene renderer |
+| GraphicsRenderer | Static flat/unlit scene snapshots, CPU visibility, retained packets and ordered overlays | L0; advanced views, materials and lighting remain planned |
 | Ui | Portable runtime UI core | Qt desktop tools have a separate UI owner |
 | Text | Native FreeType/HarfBuzz-backed text facilities | Browser dependency bootstrap is still pending |
 
@@ -64,8 +65,8 @@ The [renderer systems proposal](../../architecture/renderer-systems.md) connects
 scene packets, views and virtual screens, materials, lighting, debug drawing and
 GPU text above RHI/GDI; its [reference review](../../architecture/renderer-systems-gems-review.md)
 explains the Gems-driven design changes and maps conference/journal readings,
-including GPC, to implementation phases and validation. These renderer facilities
-remain proposed.
+including GPC, to implementation phases and validation. [L0 portable scene submission](../../architecture/renderer-systems.md#portable-scene-submission-l0)
+is implemented; the later phases remain proposed.
 Continue with [world-to-presentation ownership](world.md).
 The [terrain proposal](terrain.md) describes how a future mesh/texture rendering
 slice can consume editable ground without owning physical terrain or generation.
