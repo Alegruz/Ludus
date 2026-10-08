@@ -434,6 +434,8 @@ CreateRasterPipeline(DeviceHandle, const RasterPipelineDescription&, RasterPipel
 /// Encode an indexed/instanced packet into the explicit device's open frame.
 /// Retain all referenced records until backend completion; drawing cannot mix with
 /// DrawFullscreen in the same frame. Rejected packets issue no native draw.
+/// Sampled textures must have defined contents and a committed/draft sampled use
+/// covering the binding visibility; otherwise InvalidDescription/InvalidState.
 [[nodiscard]] RasterStatus DrawIndexed(DeviceHandle, const RasterDraw&) noexcept;
 /// Query asynchronous validation for an owned Buffer record; stale/foreign handles are rejected.
 [[nodiscard]] RasterStatus GetStatus(DeviceHandle, BufferHandle) noexcept;

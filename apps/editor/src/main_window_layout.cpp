@@ -58,6 +58,11 @@ void MainWindow::BuildUi()
     WorkTabs_ = new QTabWidget(this);
     WorkTabs_->setObjectName(QStringLiteral("workspaceTabs"));
     WorkTabs_->setAccessibleName(QStringLiteral("Authoring work areas"));
+    // Thanks to Qt Group, QTabWidget, elideMode/usesScrollButtons properties:
+    // https://doc.qt.io/qt-6/qtabwidget.html#elideMode-prop
+    // Keep long styled labels reachable without setting the minimum window width.
+    WorkTabs_->setElideMode(Qt::ElideRight);
+    WorkTabs_->setUsesScrollButtons(true);
     setCentralWidget(WorkTabs_);
     auto* projectScroll = new QScrollArea(WorkTabs_);
     ProjectSettings_ = projectScroll;

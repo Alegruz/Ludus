@@ -585,7 +585,11 @@ with an empty upload. Direct `BeginRasterPass` switches attachments inside an
 acquired frame with the same load/store checks. Direct frame end makes written
 attachments sampleable for subsequent draws and records that final use. R2
 command batches remain surface-only; offscreen packet sequences use R3 graphs
-or explicit direct passes.
+or explicit direct passes. Direct draws and R2 batches require a texture's last
+committed/draft sampled use to cover its binding visibility. Choose `SampledBoth`
+when exporting to arbitrary direct bindings; incompatible final color or narrower
+sampled use returns `InvalidState` before a draw/batch submission. Graph execution
+can transition these imports according to its declarations.
 
 `CreateGraphTexture` acquires from an eight-object whole-description pool during
 setup, before compilation. This early bounded acquisition lets callers build

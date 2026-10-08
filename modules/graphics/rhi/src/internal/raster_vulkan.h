@@ -93,6 +93,30 @@ RasterStatus RasterError(VkResult result) noexcept
 // Graphics Dependencies (color attachment -> sampled image) and WAR/WAW cases:
 // https://docs.vulkan.org/guide/latest/synchronization_examples.html
 // Adapted to the retained Vulkan 1.1 barriers/render-pass path, not sync2.
+// Thanks to Khronos, Vulkan Specification, "Render Pass Compatibility":
+// https://docs.vulkan.org/spec/latest/chapters/renderpass.html#renderpass-compatibility
+// Dependencies must match across compatible pass objects, including read-only
+// depth variants and the original surface pipeline/framebuffer render pass.
+void RasterVkDependencies(bool surface, VkSubpassDependency (&dependencies)[2]) noexcept
+{
+    auto& incoming = dependencies[0];
+    incoming.srcSubpass = VK_SUBPASS_EXTERNAL;
+    incoming.dstSubpass = 0;
+    incoming.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    incoming.dstStageMask = incoming.srcStageMask;
+    incoming.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    incoming.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                             VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    auto& outgoing = dependencies[1];
+    outgoing.srcSubpass = 0;
+    outgoing.dstSubpass = VK_SUBPASS_EXTERNAL;
+    outgoing.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    outgoing.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    outgoing.dstStageMask =
+        surface && gHeadless ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    outgoing.dstAccessMask = surface && gHeadless ? VK_ACCESS_TRANSFER_READ_BIT : 0;
+}
 VkResult
 RasterVkRenderPass(VkFormat format, bool surface, const RasterPassDescription& state, VkRenderPass& output) noexcept
 {
@@ -155,24 +179,7 @@ RasterVkRenderPass(VkFormat format, bool surface, const RasterPassDescription& s
     subpass.pColorAttachments = &colorReference;
     subpass.pDepthStencilAttachment = &depthReference;
     VkSubpassDependency dependencies[2]{};
-    auto& incoming = dependencies[0];
-    incoming.srcSubpass = VK_SUBPASS_EXTERNAL;
-    incoming.dstSubpass = 0;
-    incoming.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-                            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    incoming.dstStageMask = incoming.srcStageMask;
-    incoming.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    incoming.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-                             VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                             (state.DepthReadOnly ? 0U : VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
-    auto& outgoing = dependencies[1];
-    outgoing.srcSubpass = 0;
-    outgoing.dstSubpass = VK_SUBPASS_EXTERNAL;
-    outgoing.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    outgoing.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    outgoing.dstStageMask =
-        surface && gHeadless ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    outgoing.dstAccessMask = surface && gHeadless ? VK_ACCESS_TRANSFER_READ_BIT : 0;
+    RasterVkDependencies(surface, dependencies);
     VkRenderPassCreateInfo create{};
     create.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     create.attachmentCount = 2;

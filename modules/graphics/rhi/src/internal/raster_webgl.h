@@ -635,6 +635,8 @@ void RasterSubmit(uint64 ordinal) noexcept
 }
 void RasterReset() noexcept
 {
+    gRasterGlPassOpen = false;
+    gRasterGlPass = {};
     if (gContext > 0 && !emscripten_is_webgl_context_lost(gContext))
     {
         glFinish();

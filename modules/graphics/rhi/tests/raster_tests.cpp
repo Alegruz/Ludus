@@ -1199,3 +1199,73 @@ TEST_CASE("Idle transient pools evict whole objects when attachment dimensions c
     CHECK_FALSE(state.DepthDefined);
     REQUIRE(DiscardOrderedGraph(session.Device, resized) == RasterStatus::Ready);
 }
+
+TEST_CASE("Direct draws and R2 batches reject graph imports without compatible sampled visibility", "[rhi][graph]")
+{
+    Session session;
+    Scene scene(session.Device);
+    const auto mode = GENERATE(0, 1, 2, 3);
+    TextureHandle texture;
+    REQUIRE(CreateTexture(session.Device, {16, 8, RasterFormat::Rgba8Unorm, true}, {}, texture) == RasterStatus::Ready);
+    if (mode != 0)
+    {
+        OrderedGraph graph;
+        GraphVersion initial, written;
+        RasterTextureState state;
+        REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+        REQUIRE(GetTextureState(session.Device, texture, state) == RasterStatus::Ready);
+        const auto finalUse = mode == 1   ? RasterTextureUse::ColorAttachment
+                              : mode == 2 ? RasterTextureUse::SampledFragment
+                                          : RasterTextureUse::SampledBoth;
+        REQUIRE(ImportGraphTexture(session.Device, graph, texture, state, finalUse, initial) == RasterStatus::Ready);
+        REQUIRE(NextGraphVersion(session.Device, graph, initial, written) == RasterStatus::Ready);
+        const GraphUse write{written, GraphAccessMode::ColorWrite};
+        GraphPassDescription pass;
+        pass.Name = "external state";
+        pass.Attachment.Color = texture;
+        pass.Uses = &write;
+        pass.UseCount = 1;
+        REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+        REQUIRE(AddGraphRoot(session.Device, graph, written, GraphRoot::History) == RasterStatus::Ready);
+        GraphReport report;
+        REQUIRE(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::Ready);
+        SubmissionToken completion;
+        REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, graph, completion) == RasterStatus::Ready);
+    }
+    TextureViewHandle view;
+    REQUIRE(CreateTextureView(session.Device, texture, view) == RasterStatus::Ready);
+    const RasterBinding entries[]{{0, RasterBindingKind::UniformBuffer, RasterVisibility::Both, 16},
+                                  {1, RasterBindingKind::Texture2D, RasterVisibility::Both, 0}};
+    BindingLayoutHandle layout;
+    REQUIRE(CreateBindingLayout(session.Device, entries, layout) == RasterStatus::Ready);
+    const RasterBindingResource resources[]{{ .Buffer = scene.Uniform, .Size = 16 }, { .Binding = 1, .Texture = view }};
+    BindingSetHandle set;
+    REQUIRE(CreateBindingSet(session.Device, layout, resources, set) == RasterStatus::Ready);
+    const RasterVertexStream stream{12, false};
+    const RasterVertexAttribute attribute{0, 0, 0, RasterVertexFormat::Float3};
+    RasterPipelineHandle pipeline;
+    REQUIRE(CreateRasterPipeline(session.Device,
+                                 {scene.Vertex, scene.Fragment, layout, {&stream, 1}, {&attribute, 1}, true},
+                                 pipeline) == RasterStatus::Ready);
+    const RasterDraw draw{pipeline, set, scene.Slices, scene.Indices, 0, 3, 3, 1};
+    CommandBatch batch;
+    REQUIRE(BeginCommands(session.Device, batch) == RasterStatus::Ready);
+    REQUIRE(RecordDraw(session.Device, batch, draw) == RasterStatus::Ready);
+    REQUIRE(FinishCommands(session.Device, batch) == RasterStatus::Ready);
+    const auto before = reference::Submitted;
+    const auto expected = mode == 0   ? RasterStatus::InvalidDescription
+                          : mode == 3 ? RasterStatus::Ready
+                                      : RasterStatus::InvalidState;
+    SubmissionToken completion;
+    CHECK(SubmitCommands(session.Device, session.Surface, batch, completion) == expected);
+    if (mode != 3)
+    {
+        CHECK(reference::Submitted == before);
+        CHECK(reference::Draws == 0);
+        REQUIRE(DiscardCommands(session.Device, batch) == RasterStatus::Ready);
+    }
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    CHECK(DrawIndexed(session.Device, draw) == expected);
+    CHECK(reference::Draws == (mode == 3 ? 2 : 0));
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+}

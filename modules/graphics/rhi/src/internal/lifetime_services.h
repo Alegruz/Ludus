@@ -486,6 +486,11 @@ SubmitCommands(DeviceHandle device, SurfaceHandle surface, CommandBatch& batch, 
         {
             return status;
         }
+        const auto compatible = ValidatePacketPass(record->Packets[i], {}, true);
+        if (compatible != RasterStatus::Ready)
+        {
+            return compatible;
+        }
     }
     if (gSubmissions.Next == 0)
     {

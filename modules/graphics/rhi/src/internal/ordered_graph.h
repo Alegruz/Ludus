@@ -302,6 +302,19 @@ RasterStatus ValidatePacketPass(const RasterPacket& packet, const RasterPassInfo
         {
             return RasterStatus::InvalidDescription;
         }
+        if (contents)
+        {
+            const auto use = texture.InFrame ? texture.FrameTextureUse : texture.TextureUse;
+            const auto visibility = static_cast<uint8>(layout.Entries[i].Visibility);
+            const uint8 available = use == RasterTextureUse::SampledVertex     ? 1
+                                    : use == RasterTextureUse::SampledFragment ? 2
+                                    : use == RasterTextureUse::SampledBoth     ? 3
+                                                                               : 0;
+            if ((available & visibility) != visibility)
+            {
+                return RasterStatus::InvalidState;
+            }
+        }
     }
     return RasterStatus::Ready;
 }
@@ -357,6 +370,10 @@ RasterStatus StartPass(const RasterPassInfo& pass) noexcept
     if (gRasterPass.Texture != RASTER_CAPACITY && gRasterPass.Texture != pass.Texture)
     {
         backend::RasterTextureBarrier(gRasterPass.Texture, RasterTextureUse::SampledBoth);
+        if (GetStartup().State == StartupState::Ready)
+        {
+            At(RasterKind::Texture, gRasterPass.Texture).FrameTextureUse = RasterTextureUse::SampledBoth;
+        }
     }
     if (GetStartup().State != StartupState::Ready)
     {

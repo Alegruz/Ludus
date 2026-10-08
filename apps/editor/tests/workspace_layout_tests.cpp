@@ -245,6 +245,10 @@ TEST_CASE("Authoring areas remain reachable at smaller workspace sizes", "[edito
     {
         window.resize(size);
         QApplication::processEvents();
+        INFO("Window minimum hint: " << window.minimumSizeHint().width());
+        INFO("Authoring minimum hint: " << tabs->minimumSizeHint().width());
+        INFO(
+            "Inspector minimum hint: " << Dock(window, QStringLiteral("liveInspectorDock"))->minimumSizeHint().width());
         CHECK(window.width() <= size.width());
         CHECK(window.height() <= size.height());
         CHECK(project->viewport()->width() > 100);
