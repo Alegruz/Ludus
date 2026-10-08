@@ -358,6 +358,10 @@ uint64 RasterCompleted() noexcept
 {
     for (usize i = 0; i < FRAMES; ++i)
     {
+        if (gSubmitted[i] != nil && !CheckCommand(gSubmitted[i]))
+        {
+            return gRasterCompleted;
+        }
         if (gSubmitted[i] != nil && gSubmitted[i].status == MTLCommandBufferStatusCompleted &&
             gRasterOrdinals[i] > gRasterCompleted)
         {

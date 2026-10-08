@@ -1,12 +1,14 @@
 # Ludus RHI and Graphics Device Interface Architecture
 
 **Status:** Proposed architecture, 2026-10-04; implementation status and deferred
-research plan updated 2026-10-06. Intended for engine implementation review.
+research plan updated 2026-10-07. Intended for engine implementation review.
 This document was drafted before opening the article map, then refined
 through [five complete reference chapters](rhi-gdi-gems-review.md) and current
 primary documentation. The first implementation slice now adds effective
 fullscreen capabilities, copied startup requirements, explicit requirement and
-backend-selection failures, and requirement-aware browser fallback. Remaining R0 work and R2-R5 are proposals. The first bounded R1 portable
+backend-selection failures, and requirement-aware browser fallback. Remaining R0 work and R3-R5 are proposals. The first bounded R2 lifetime
+service profile is implemented in the existing RHI registry; see the
+[lifetime contract](../development/fullscreen-rendering.md#lifetime-services-r2). The first bounded R1 portable
 resource/raster profile is implemented alongside the fullscreen facade, with
 minimum CPU/GPU retirement accompanying its general resources; see the
 [portable raster contract](../development/fullscreen-rendering.md#portable-raster-r1). The first explicit R0 device slice now shares
@@ -683,7 +685,7 @@ external memory/semaphore interoperability.
 | --- | --- | --- | --- |
 | R0 Contracts | Partial: fullscreen capabilities, copied requirements, explicit device/target owners, required/preferred workload admission and reference-backend lifecycle tests are implemented; general resource slot/generation identities and broader feature/format/limit negotiation remain | Device capabilities/results/ownership, compatibility facade, reference validator and loss protocol | Existing fullscreen/SDK behavior preserved; stale/cross-owner handles, pending cancellation, late callbacks and requirement failure covered |
 | R1 Portable resources | Initial bounded profile implemented; broader copy/update/attachment APIs deferred | Buffer/texture/view/sampler, general reflection/layout, immutable bindings/pipelines, indexed and instanced draws | Identical textured/depth diagnostic scenes on Vulkan, Metal, forced WebGPU, forced WebGL 2 and Auto; packing/limits/copy/view mismatch rejection |
-| R2 Lifetime services | Proposed | Completion tokens, retained records, upload/readback rings, Vulkan allocator adapter, pipeline requests | Destroy before/after finish/submit, discard, resource dependency retention, slow GPU/ring exhaustion, memory failure, cancellation, loss, resize/shutdown |
+| R2 Lifetime services | Initial bounded profile implemented; texture streaming and descriptor arenas deferred | Completion tokens, retained records, upload/readback rings, Vulkan allocator adapter, pipeline requests | Destroy before/after finish/submit, discard, resource dependency retention, slow GPU/ring exhaustion, memory failure, cancellation, loss, resize/shutdown |
 | R3 Ordered graph | Proposed | Explicit pass list, version/hazard compiler, pooling, narrow synchronization, reports | Offscreen scene to composite/UI, graph roots/history/import contracts, undeclared-use detection, reference versus optimized image agreement |
 | R4 Compute renderer | Proposed | Capability-specific storage/compute/indirect effects and authored raster/CPU variants | Compute correctness plus supported limits; WebGL chooses a declared variant or fails before executing |
 | R5 Measured optimization | Proposed | Select only justified aliasing, parallel recording, pass merging, async queues or bindless services | Representative CPU/GPU/latency/memory evidence, adversarial synchronization tests, debug controls, consumer/SDK maintenance cost |

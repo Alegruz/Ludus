@@ -1,5 +1,6 @@
 #include "reference_raster.h"
 #include "internal/lifecycle.h"
+#include <cstring>
 namespace ludus::graphics::rhi::reference
 {
 void Reset() noexcept
@@ -12,6 +13,28 @@ void Reset() noexcept
     Submitted = 0;
     Completed = 0;
     Draws = 0;
+    Discards = 0;
+    Copies = 0;
+    TransferStart = ReadbackCopy = RasterStatus::Ready;
+    RetainTransfersOnReset = false;
+    for (auto& direction : TransferOccupied)
+    {
+        for (auto& occupied : direction)
+        {
+            occupied = false;
+        }
+    }
+    for (auto& direction : Transfers)
+    {
+        for (auto& status : direction)
+        {
+            status = RasterStatus::Pending;
+        }
+    }
+    for (auto& size : BufferSizes)
+    {
+        size = 0;
+    }
     for (auto& count : Creates)
     {
         count = 0;
@@ -46,8 +69,15 @@ RasterCapabilities RasterLimits() noexcept
     }
     return {usize{64} * 1024 * 1024, 4096, 256, 16384, 16, 1024};
 }
-RasterStatus RasterCreateBuffer(usize, const BufferDescription&, std::span<const uint8>, uint32 request) noexcept
+RasterStatus
+RasterCreateBuffer(usize slot, const BufferDescription&, std::span<const uint8> bytes, uint32 request) noexcept
 {
+    if (bytes.size() > internal::LIFETIME_TRANSFER_BYTES)
+    {
+        return RasterStatus::OutOfMemory;
+    }
+    std::memcpy(reference::BufferBytes[slot], bytes.data(), bytes.size());
+    reference::BufferSizes[slot] = bytes.size();
     return Created(internal::RasterKind::Buffer, request);
 }
 RasterStatus RasterCreateTexture(usize, const TextureDescription&, const TextureUpload&, uint32 request) noexcept
@@ -106,6 +136,92 @@ uint64 RasterCompleted() noexcept
         internal::Fail(token, StartupError::DeviceLost);
     }
     return reference::Completed;
+}
+void RasterDiscardSubmission() noexcept
+{
+    ++reference::Discards;
+}
+bool LifetimeTransferAvailable(bool readback, usize slot) noexcept
+{
+    return !reference::TransferOccupied[readback ? 1 : 0][slot];
+}
+RasterStatus LifetimeUpload(usize transfer,
+                            const BufferDescription&,
+                            const internal::LifetimeUploadTarget& uploadTarget,
+                            const uint8* bytes,
+                            usize size) noexcept
+{
+    const auto buffer = uploadTarget.Buffer;
+    const auto request = uploadTarget.Request;
+
+    if (!LifetimeTransferAvailable(false, transfer))
+    {
+        return RasterStatus::CapacityExceeded;
+    }
+    if (reference::TransferStart != RasterStatus::Ready)
+    {
+        return reference::TransferStart;
+    }
+    std::memcpy(reference::BufferBytes[buffer], bytes, size);
+    reference::BufferSizes[buffer] = size;
+    reference::Transfers[0][transfer] = RasterStatus::Pending;
+    reference::TransferOccupied[0][transfer] = true;
+    ++reference::Copies;
+    return Created(internal::RasterKind::Buffer, request);
+}
+RasterStatus LifetimeReadback(usize transfer, BufferRole, const internal::LifetimeCopyRange& range) noexcept
+{
+    const auto buffer = range.Buffer;
+    const auto offset = range.Offset;
+    const auto size = range.Size;
+    if (!LifetimeTransferAvailable(true, transfer))
+    {
+        return RasterStatus::CapacityExceeded;
+    }
+    if (reference::TransferStart != RasterStatus::Ready)
+    {
+        return reference::TransferStart;
+    }
+    const auto& bytes = reference::BufferBytes[buffer];
+    std::memcpy(reference::ReadbackBytes[transfer], bytes + offset, size);
+    reference::Transfers[1][transfer] = RasterStatus::Pending;
+    reference::TransferOccupied[1][transfer] = true;
+    ++reference::Copies;
+    return RasterStatus::Ready;
+}
+RasterStatus LifetimePollTransfer(bool readback, usize slot) noexcept
+{
+    return reference::Transfers[readback ? 1 : 0][slot];
+}
+RasterStatus LifetimeCopyReadback(usize slot, uint8* output, usize size) noexcept
+{
+    if (reference::ReadbackCopy == RasterStatus::Ready)
+    {
+        std::memcpy(output, reference::ReadbackBytes[slot], size);
+    }
+    else
+    {
+        output[0] = 0;
+    } // Deliberately dirty backend scratch on failure.
+    return reference::ReadbackCopy;
+}
+void LifetimeReleaseTransfer(bool readback, usize slot) noexcept
+{
+    reference::Transfers[readback ? 1 : 0][slot] = RasterStatus::Failed;
+    reference::TransferOccupied[readback ? 1 : 0][slot] = false;
+}
+void LifetimeReset() noexcept
+{
+    if (!reference::RetainTransfersOnReset)
+    {
+        for (auto& direction : reference::TransferOccupied)
+        {
+            for (auto& occupied : direction)
+            {
+                occupied = false;
+            }
+        }
+    }
 }
 void RasterShutdown() noexcept {}
 void RasterReset() noexcept

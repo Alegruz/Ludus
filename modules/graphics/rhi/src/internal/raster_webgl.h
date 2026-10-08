@@ -455,6 +455,13 @@ uint64 RasterCompleted() noexcept
             continue;
         }
         const auto status = glClientWaitSync(completion.Sync, 0, 0);
+        if (status == GL_WAIT_FAILED)
+        {
+            internal::Fail(gSession,
+                           emscripten_is_webgl_context_lost(gContext) ? StartupError::DeviceLost
+                                                                      : StartupError::RenderingUnavailable);
+            return gRasterCompleted;
+        }
         if (status == GL_ALREADY_SIGNALED || status == GL_CONDITION_SATISFIED)
         {
             if (completion.Ordinal > gRasterCompleted)

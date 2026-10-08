@@ -408,4 +408,68 @@ void RasterShutdown() noexcept
         webgpu::RasterShutdown();
     }
 }
+void RasterDiscardSubmission() noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::RasterDiscardSubmission();
+    }
+    else
+    {
+        webgpu::RasterDiscardSubmission();
+    }
+}
+bool LifetimeTransferAvailable(bool readback, foundation::usize slot) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::LifetimeTransferAvailable(readback, slot)
+                                      : webgpu::LifetimeTransferAvailable(readback, slot);
+}
+RasterStatus LifetimeUpload(usize transfer,
+                            const BufferDescription& info,
+                            const internal::LifetimeUploadTarget& uploadTarget,
+                            const uint8* bytes,
+                            usize size) noexcept
+{
+
+    return gActive == Backend::WebGL2 ? webgl::LifetimeUpload(transfer, info, uploadTarget, bytes, size)
+                                      : webgpu::LifetimeUpload(transfer, info, uploadTarget, bytes, size);
+}
+RasterStatus
+LifetimeReadback(foundation::usize transfer, BufferRole role, const internal::LifetimeCopyRange& range) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::LifetimeReadback(transfer, role, range)
+                                      : webgpu::LifetimeReadback(transfer, role, range);
+}
+RasterStatus LifetimePollTransfer(bool readback, foundation::usize slot) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::LifetimePollTransfer(readback, slot)
+                                      : webgpu::LifetimePollTransfer(readback, slot);
+}
+RasterStatus LifetimeCopyReadback(foundation::usize slot, foundation::uint8* output, foundation::usize size) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::LifetimeCopyReadback(slot, output, size)
+                                      : webgpu::LifetimeCopyReadback(slot, output, size);
+}
+void LifetimeReleaseTransfer(bool readback, foundation::usize slot) noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::LifetimeReleaseTransfer(readback, slot);
+    }
+    else
+    {
+        webgpu::LifetimeReleaseTransfer(readback, slot);
+    }
+}
+void LifetimeReset() noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::LifetimeReset();
+    }
+    else
+    {
+        webgpu::LifetimeReset();
+    }
+}
 } // namespace ludus::graphics::rhi::backend

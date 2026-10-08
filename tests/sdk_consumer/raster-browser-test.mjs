@@ -27,10 +27,11 @@ try {
   const pin = JSON.parse(await readFile(new URL('../../config/shader_toolchain.json',import.meta.url))).wgsl_validator;
   assert.equal(browser.version(),pin.chromium_version);
   report.version = browser.version();
-  for (const scenario of ['webgpu','webgl2','auto','auto-fallback','webgpu-srgb','webgl2-srgb','webgpu-blend','webgl2-blend','invalid-shader','invalid-pipeline','device-loss']) {
+  for (const scenario of ['webgpu','webgl2','auto','auto-fallback','webgpu-srgb','webgl2-srgb','webgpu-blend','webgl2-blend','invalid-shader','invalid-pipeline','invalid-upload','invalid-readback','slow-completion','transfer-loss','device-loss']) {
     const context = await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
     await context.addInitScript(scenario => {
       window.__qaPause = false;
+      window.__qaSlowTransfers = scenario === 'slow-completion';
       if (scenario === 'auto-fallback') Object.defineProperty(navigator,'gpu',{get:() => undefined});
       if (navigator.gpu) {
         const requestAdapter = navigator.gpu.requestAdapter.bind(navigator.gpu);
@@ -42,8 +43,31 @@ try {
             const device = await requestDevice(...args); window.__qaDevice = device;
             const shader = device.createShaderModule.bind(device);
             device.createShaderModule = desc => shader(scenario === 'invalid-shader' ? {...desc,code:'invalid WGSL'} : desc);
-            const pipeline = device.createRenderPipeline.bind(device);
-            device.createRenderPipeline = desc => pipeline(scenario === 'invalid-pipeline' ? {...desc,vertex:{...desc.vertex,entryPoint:'missing'}} : desc);
+            const pipeline = device.createRenderPipelineAsync.bind(device);
+            device.createRenderPipelineAsync = desc => pipeline(scenario === 'invalid-pipeline' ? {...desc,vertex:{...desc.vertex,entryPoint:'missing'}} : desc);
+            const buffer = device.createBuffer.bind(device);
+            device.createBuffer = desc => {
+              const object = buffer(scenario === 'invalid-upload' && (desc.usage & GPUBufferUsage.VERTEX) && (desc.usage & GPUBufferUsage.COPY_DST) ? {...desc,size:4} : desc);
+              if (scenario === 'invalid-readback' && (desc.usage & GPUBufferUsage.MAP_READ)) {
+                window.__qaReadbackStarted = true;
+                window.__qaReadbackCompletionObserved = false;
+                const map = object.mapAsync.bind(object);
+                object.mapAsync = (mode, offset, size) => map(mode, offset + 1, size);
+              }
+              return object;
+            };
+            const done = device.queue.onSubmittedWorkDone.bind(device.queue);
+            device.queue.onSubmittedWorkDone = (...args) => {
+              const promise = done(...args);
+              if (scenario === 'transfer-loss') { device.destroy(); }
+              if (scenario === 'invalid-readback' && window.__qaReadbackStarted) {
+                return promise.then(() => new Promise(resolve => setTimeout(() => {
+                  window.__qaReadbackCompletionObserved = true;
+                  resolve();
+                },100)));
+              }
+              return scenario === 'slow-completion' ? promise.then(() => new Promise(resolve => setTimeout(resolve,30))) : promise;
+            };
             return device;
           };
           return adapter;
@@ -59,12 +83,13 @@ try {
     page.on('pageerror',error => errors.push(String(error)));
     page.on('console',message => report.console.push({scenario,type:message.type(),text:message.text()}));
     const variant = scenario.endsWith('-srgb') ? 'srgb' : scenario.endsWith('-blend') ? 'blend' : '';
-    const selection = scenario.startsWith('webgpu') ? 'webgpu' : scenario.startsWith('webgl2') ? 'webgl2' : scenario.startsWith('invalid') || scenario === 'device-loss' ? 'webgpu' : 'auto';
+    const selection = scenario.startsWith('webgpu') ? 'webgpu' : scenario.startsWith('webgl2') ? 'webgl2' : scenario.startsWith('invalid') || scenario === 'device-loss' || scenario === 'slow-completion' || scenario === 'transfer-loss' ? 'webgpu' : 'auto';
     await page.goto(`http://127.0.0.1:${server.address().port}/raster.html?backend=${selection}&variant=${variant}`);
     const result = {scenario};
-    if (scenario.startsWith('invalid')) {
+    if (scenario.startsWith('invalid') || scenario === 'transfer-loss') {
       await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'failed',null,{timeout:20000});
       assert.equal(await page.locator('#status').getAttribute('data-frames'),'0');
+      if (scenario === 'invalid-readback') assert.equal(await page.evaluate(() => window.__qaReadbackCompletionObserved),true,'map failure must not retire the outstanding copy');
     } else {
       await page.waitForFunction(() => document.querySelector('#status').dataset.frames === '5',null,{timeout:20000});
       result.backend = await page.locator('#status').getAttribute('data-backend');

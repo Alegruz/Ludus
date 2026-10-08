@@ -1435,3 +1435,5 @@ bool ReadHeadlessPixels(std::span<uint8> pixels) noexcept
 } // namespace ludus::graphics::rhi::backend
 
 #include "internal/raster_vulkan.h"
+
+#include "internal/lifetime_vulkan.h"

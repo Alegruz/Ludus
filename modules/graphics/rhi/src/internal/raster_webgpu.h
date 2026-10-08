@@ -16,6 +16,7 @@ struct RasterWebPipeline final
     WGPURenderPipeline Object = nullptr;
     WGPUPipelineLayout Layout = nullptr;
     internal::RasterPipelineInfo Info;
+    uint32 Request = 0;
 };
 struct RasterWebCompletion final
 {
@@ -50,6 +51,36 @@ void RasterValidated(WGPUPopErrorScopeStatus status,
         Diagnose(message);
     }
     internal::RasterComplete(Token(request), result);
+}
+void RasterPipelineCreated(WGPUCreatePipelineAsyncStatus status,
+                           WGPURenderPipeline object,
+                           WGPUStringView message,
+                           void* userdata,
+                           void*) noexcept
+{
+    const auto request = Token(userdata);
+    bool adopted = false;
+    for (auto& pipeline : gRasterPipelines)
+    {
+        if (pipeline.Request == request)
+        {
+            pipeline.Object = object;
+            adopted = true;
+            break;
+        }
+    }
+    if (!adopted && object != nullptr)
+    {
+        wgpuRenderPipelineRelease(object);
+    }
+    if (status != WGPUCreatePipelineAsyncStatus_Success)
+    {
+        Diagnose(message);
+    }
+    internal::RasterComplete(request,
+                             status == WGPUCreatePipelineAsyncStatus_Success && object != nullptr
+                                 ? RasterStatus::Ready
+                                 : RasterStatus::Failed);
 }
 void RasterScopes(uint32 request) noexcept
 {
@@ -118,6 +149,7 @@ RasterCreateBuffer(usize slot, const BufferDescription& info, std::span<const ui
     descriptor.usage = info.Role == BufferRole::Uniform  ? WGPUBufferUsage_Uniform
                        : info.Role == BufferRole::Vertex ? WGPUBufferUsage_Vertex
                                                          : WGPUBufferUsage_Index;
+    descriptor.usage |= WGPUBufferUsage_CopySrc;
     auto object = wgpuDeviceCreateBuffer(gDevice, &descriptor);
     gRasterBuffers[slot] = object;
     if (object != nullptr && wgpuBufferGetMapState(object) == WGPUBufferMapState_Mapped)
@@ -278,6 +310,8 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
     RasterScopes(request);
     auto& pipeline = gRasterPipelines[slot];
     pipeline.Info = info;
+    pipeline.Request = request;
+    internal::RasterExpect(request, internal::RasterCallbacks::Three);
     WGPUPipelineLayoutDescriptor layout = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
     layout.bindGroupLayoutCount = 1;
     layout.bindGroupLayouts = &gRasterLayouts[info.Layout];
@@ -334,7 +368,11 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
     descriptor.fragment = &fragment;
     descriptor.depthStencil = &depth;
     descriptor.primitive.topology = WGPUPrimitiveTopology_TriangleList;
-    pipeline.Object = wgpuDeviceCreateRenderPipeline(gDevice, &descriptor);
+    WGPUCreateRenderPipelineAsyncCallbackInfo callback = WGPU_CREATE_RENDER_PIPELINE_ASYNC_CALLBACK_INFO_INIT;
+    callback.mode = WGPUCallbackMode_AllowSpontaneous;
+    callback.callback = RasterPipelineCreated;
+    callback.userdata1 = Userdata(request);
+    wgpuDeviceCreateRenderPipelineAsync(gDevice, &descriptor, callback);
     return RasterPop(request);
 }
 void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
