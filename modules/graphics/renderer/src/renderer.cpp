@@ -1,7 +1,16 @@
 #include <ludus/graphics/renderer/renderer.hpp>
 
 #include <ludus/foundation/containers/stable_sort.hpp>
+#include <ludus/foundation/math/geometry.hpp>
+#include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/queries.hpp>
+#include <ludus/foundation/math/scalar.hpp>
+#include <ludus/foundation/math/status.hpp>
+#include <ludus/foundation/math/transform.hpp>
+#include <ludus/foundation/math/vector.hpp>
+#include <ludus/graphics/rhi/device.h>
+#include <ludus/graphics/rhi/lifetime.h>
+#include <ludus/graphics/rhi/raster.h>
 
 #include <atomic>
 #include <new>

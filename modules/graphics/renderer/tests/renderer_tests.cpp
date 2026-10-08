@@ -2,7 +2,11 @@
 #include "reference_raster.h"
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
+#include <ludus/foundation/math/vector.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
+#include <ludus/graphics/rhi/device.h>
+#include <ludus/graphics/rhi/lifetime.h>
+#include <ludus/graphics/rhi/raster.h>
 using namespace ludus::foundation;
 namespace rr = ludus::graphics::renderer;
 namespace rhi = ludus::graphics::rhi;

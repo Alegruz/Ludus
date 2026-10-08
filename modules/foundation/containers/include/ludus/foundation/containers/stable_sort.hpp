@@ -8,7 +8,7 @@ namespace ludus::foundation
 {
 /// Stable O(count log count) merge sort with no allocation.
 /// @param values Mutable array of count initialized elements.
-/// @param scratch Separate array of at least count initialized elements; contents are overwritten.
+/// @param scratch Separate array of at least count initialized elements; contents may be overwritten.
 /// @param count Element count; zero permits null arrays.
 /// @param less Nonthrowing strict weak order; equivalent values retain their input order.
 /// @return False for a null nonempty array or identical arrays, preserving values; otherwise true.

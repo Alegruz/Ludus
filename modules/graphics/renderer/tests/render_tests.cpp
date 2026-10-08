@@ -4,6 +4,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include <ludus/graphics/renderer/renderer.hpp>
+#include <ludus/graphics/rhi/device.h>
+#include <ludus/graphics/rhi/lifetime.h>
+#include <ludus/graphics/rhi/raster.h>
 namespace rhi = ludus::graphics::rhi;
 namespace rr = ludus::graphics::renderer;
 using namespace ludus::foundation;

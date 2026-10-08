@@ -1,11 +1,14 @@
 #pragma once
 
-#include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/transform.hpp>
+#include <ludus/foundation/math/vector.hpp>
+#include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/lifetime.h>
+#include <ludus/graphics/rhi/raster.h>
 
 namespace ludus::graphics::renderer
 {

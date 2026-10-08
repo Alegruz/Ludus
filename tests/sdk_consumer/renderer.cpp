@@ -3,6 +3,9 @@
 #include <ludus/foundation/base/config.h>
 #include <ludus/foundation/time/time.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
+#include <ludus/graphics/rhi/device.h>
+#include <ludus/graphics/rhi/lifetime.h>
+#include <ludus/graphics/rhi/raster.h>
 #if defined(LUDUS_PLATFORM_WEB)
 #    include <emscripten.h>
 #    include <ludus/platform/base/window.h>
