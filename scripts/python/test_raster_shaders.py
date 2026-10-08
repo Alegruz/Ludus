@@ -52,4 +52,36 @@ class RasterReflectionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'differs from location reflection'):
             glsl_varyings(vertex,{'outputs':[{'name':'absent','type':'vec2','location':0}]},'vertex')
 
+    def compute_fixture(self):
+        return {'parameters':[{'name':'records','binding':{'kind':'descriptorTableSlot','index':0},
+                  'type':{'kind':'resource','baseShape':'structuredBuffer','access':'readWrite',
+                          'resultType':{'kind':'vector','elementCount':2,
+                                        'elementType':{'kind':'scalar','scalarType':'float32'}}}}],
+                'entryPoints':[{'stage':'compute','threadGroupSize':[64,1,1],
+                                'bindings':[{'name':'records','binding':{'used':1}}]}]}
+
+    def test_compute_storage_access_stride_and_workgroup(self):
+        data=self.compute_fixture()
+        value=raster_interface(data,'compute')
+        self.assertEqual(value['workgroup'],[64,1,1])
+        self.assertEqual(value['entries'][0]['kind'],'StorageReadWrite')
+        self.assertEqual(value['entries'][0]['size'],8)
+        data['parameters'][0]['type']['access']='read'
+        self.assertEqual(raster_interface(data,'compute')['entries'][0]['kind'],'StorageRead')
+        for group in ([0,1,1],[257,1,1],[16,17,1],[1,1,65],[1,1],None):
+            invalid=copy.deepcopy(data);invalid['entryPoints'][0]['threadGroupSize']=group
+            with self.assertRaisesRegex(RuntimeError,'workgroup'):raster_interface(invalid,'compute')
+
+    def test_compute_rejects_unportable_elements_and_extra_storage(self):
+        data=self.compute_fixture()
+        for change in ({'elementCount':3},{'elementType':{'kind':'scalar','scalarType':'float64'}},
+                       {'kind':'struct','fields':[]}):
+            invalid=copy.deepcopy(data);invalid['parameters'][0]['type']['resultType'].update(change)
+            with self.assertRaisesRegex(RuntimeError,'scalar32'):raster_interface(invalid,'compute')
+        for i in range(1,5):
+            resource=copy.deepcopy(data['parameters'][0]);resource['name']=f'records{i}';resource['binding']['index']=i
+            data['parameters'].append(resource)
+            data['entryPoints'][0]['bindings'].append({'name':resource['name'],'binding':{'used':1}})
+        with self.assertRaisesRegex(RuntimeError,'four storage'):raster_interface(data,'compute')
+
 if __name__=='__main__':unittest.main()

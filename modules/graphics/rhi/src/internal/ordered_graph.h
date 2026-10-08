@@ -74,6 +74,7 @@ struct GraphResourceRecord final
     bool Root = false;
     bool Transient = false;
     RasterTextureState Import;
+    uint64 BufferRevision = 0;
     RasterTextureUse Final = RasterTextureUse::SampledBoth;
 };
 struct GraphPassRecord final
@@ -84,6 +85,8 @@ struct GraphPassRecord final
     usize FirstDraw = 0;
     usize DrawCount = 0;
     bool SideEffect = false;
+    bool IsCompute = false;
+    ComputePacket Dispatch;
 };
 struct GraphRecord final : LifetimeRecord
 {
@@ -188,6 +191,13 @@ void DropGraph(GraphRecord& graph) noexcept
     for (usize i = 0; i < graph.DrawCount; ++i)
     {
         PacketReferences(graph.Draws[i], false);
+    }
+    for (usize p = 0; p < graph.PassCount; ++p)
+    {
+        if (graph.Passes[p].IsCompute)
+        {
+            ComputeReferences(graph.Passes[p].Dispatch, false);
+        }
     }
     for (usize i = 0; i < graph.ResourceCount; ++i)
     {
@@ -590,7 +600,12 @@ ImportGraphBuffer(DeviceHandle device, OrderedGraph handle, BufferHandle buffer,
     {
         return source->Status == RasterStatus::Pending ? RasterStatus::NotReady : source->Status;
     }
-    return AddImport(*graph, handle, RasterKind::Buffer, RasterAccess::Slot(buffer), output);
+    const auto added = AddImport(*graph, handle, RasterKind::Buffer, RasterAccess::Slot(buffer), output);
+    if (added == RasterStatus::Ready)
+    {
+        graph->Resources[GraphAccess::Resource(output)].BufferRevision = source->BufferRevision;
+    }
+    return added;
 }
 RasterStatus ImportGraphTexture(DeviceHandle device,
                                 OrderedGraph handle,
@@ -732,8 +747,10 @@ NextGraphVersion(DeviceHandle device, OrderedGraph handle, GraphVersion previous
         return RasterStatus::InvalidState;
     }
     auto& resource = graph->Resources[GraphAccess::Resource(previous)];
-    if (resource.Kind != RasterKind::Texture || !At(resource.Kind, resource.Slot).Texture.Attachment ||
-        GraphAccess::Version(previous) != resource.Versions)
+    const auto& physical = At(resource.Kind, resource.Slot);
+    const bool mutableResource =
+        resource.Kind == RasterKind::Texture ? physical.Texture.Attachment : StorageRole(physical.Buffer.Role);
+    if (!mutableResource || GraphAccess::Version(previous) != resource.Versions)
     {
         return RasterStatus::InvalidDescription;
     }
@@ -770,10 +787,26 @@ RasterStatus AddGraphPass(DeviceHandle device, OrderedGraph handle, const GraphP
     {
         return RasterStatus::InvalidDescription;
     }
-    const auto valid = ValidatePassDescription(description.Attachment, pass.Info);
-    if (valid != RasterStatus::Ready)
+    pass.IsCompute = description.Dispatch != nullptr;
+    if (pass.IsCompute)
     {
-        return valid;
+        if (description.DrawCount != 0 || RasterAccess::Owner(description.Attachment.Color) != 0)
+        {
+            return RasterStatus::InvalidDescription;
+        }
+        const auto valid = ValidateCompute(device, *description.Dispatch, pass.Dispatch);
+        if (valid != RasterStatus::Ready)
+        {
+            return valid;
+        }
+    }
+    else
+    {
+        const auto valid = ValidatePassDescription(description.Attachment, pass.Info);
+        if (valid != RasterStatus::Ready)
+        {
+            return valid;
+        }
     }
     for (usize i = 0; i < description.UseCount; ++i)
     {
@@ -782,8 +815,8 @@ RasterStatus AddGraphPass(DeviceHandle device, OrderedGraph handle, const GraphP
         {
             return RasterStatus::InvalidHandle;
         }
-        if (static_cast<uint8>(use.Access) > 5 || static_cast<uint8>(use.Visibility) < 1 ||
-            static_cast<uint8>(use.Visibility) > 3)
+        if (static_cast<uint8>(use.Access) > 8 || static_cast<uint8>(use.Visibility) < 1 ||
+            static_cast<uint8>(use.Visibility) > 4)
         {
             return RasterStatus::InvalidDescription;
         }
@@ -804,6 +837,10 @@ RasterStatus AddGraphPass(DeviceHandle device, OrderedGraph handle, const GraphP
     pass.SideEffect = description.SideEffect;
     const auto index = graph->PassCount++;
     graph->Passes[index] = pass;
+    if (pass.IsCompute)
+    {
+        ComputeReferences(pass.Dispatch, true);
+    }
     std::memcpy(graph->Report.Names[index], name, sizeof(name));
     std::memcpy(graph->Report.Sources[index], source, sizeof(source));
     graph->Report.Lines[index] = description.Line;
@@ -831,7 +868,7 @@ RasterStatus AddGraphRoot(DeviceHandle device, OrderedGraph handle, GraphVersion
         return RasterStatus::InvalidDescription;
     }
     auto& resource = graph->Resources[GraphAccess::Resource(version)];
-    if (resource.Transient || (root != GraphRoot::Readback && resource.Kind != RasterKind::Texture))
+    if (resource.Transient)
     {
         return RasterStatus::InvalidDescription;
     }
@@ -847,7 +884,8 @@ namespace
 {
 bool IsWrite(GraphAccessMode access) noexcept
 {
-    return access == GraphAccessMode::ColorWrite || access == GraphAccessMode::ColorReadWrite;
+    return access == GraphAccessMode::ColorWrite || access == GraphAccessMode::ColorReadWrite ||
+           access == GraphAccessMode::StorageReadWrite;
 }
 const GraphUse* FindUse(const GraphRecord& graph,
                         const GraphPassRecord& pass,
@@ -901,6 +939,16 @@ CheckDeclaredPacket(const GraphRecord& graph, const GraphPassRecord& pass, const
                 GraphAccessMode::Index,
                 packet.IndexOffset,
                 indexSize) == nullptr)
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    if (packet.Indirect != RASTER_CAPACITY && FindUse(graph,
+                                                      pass,
+                                                      RasterKind::Buffer,
+                                                      packet.Indirect,
+                                                      GraphAccessMode::Indirect,
+                                                      packet.IndirectOffset,
+                                                      sizeof(IndexedIndirectArguments)) == nullptr)
     {
         return RasterStatus::InvalidDescription;
     }
@@ -979,6 +1027,11 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
             report.ErrorResource = static_cast<uint32>(r);
             return RasterStatus::InvalidState;
         }
+        if (resource.Kind == RasterKind::Buffer && resource.BufferRevision != physical.BufferRevision)
+        {
+            report.ErrorResource = static_cast<uint32>(r);
+            return RasterStatus::InvalidState;
+        }
         tracks[r].Defined =
             resource.Kind == RasterKind::Buffer || (!resource.Transient && resource.Import.ColorDefined);
         tracks[r].DepthDefined = !resource.Transient && resource.Import.DepthDefined;
@@ -987,8 +1040,8 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
     {
         report.ErrorPass = static_cast<uint32>(p);
         const auto& pass = graph.Passes[p];
-        live[p] = reference || pass.SideEffect || pass.Info.Texture == RASTER_CAPACITY;
-        bool attachment = pass.Info.Texture == RASTER_CAPACITY;
+        live[p] = reference || pass.SideEffect || (!pass.IsCompute && pass.Info.Texture == RASTER_CAPACITY);
+        bool attachment = !pass.IsCompute && pass.Info.Texture == RASTER_CAPACITY;
         if (attachment)
         {
             const auto& state = pass.Info.Description;
@@ -1041,16 +1094,26 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
             {
                 const auto& buffer = At(resource.Kind, resource.Slot).Buffer;
                 if (use.Size == 0 || !Fits(use.Offset, use.Size, buffer.Size) ||
-                    (use.Access == GraphAccessMode::Vertex && buffer.Role != BufferRole::Vertex) ||
+                    (use.Access == GraphAccessMode::Vertex && buffer.Role != BufferRole::Vertex &&
+                     buffer.Role != BufferRole::StorageVertex) ||
                     (use.Access == GraphAccessMode::Index && buffer.Role != BufferRole::Index16 &&
                      buffer.Role != BufferRole::Index32) ||
                     (use.Access == GraphAccessMode::Uniform && buffer.Role != BufferRole::Uniform) ||
-                    static_cast<uint8>(use.Access) > 2)
+                    (use.Access == GraphAccessMode::Indirect && buffer.Role != BufferRole::StorageIndirect) ||
+                    ((use.Access == GraphAccessMode::StorageRead || use.Access == GraphAccessMode::StorageReadWrite) &&
+                     (!pass.IsCompute || !StorageRole(buffer.Role) || use.Visibility != RasterVisibility::Compute)) ||
+                    (pass.IsCompute && use.Access != GraphAccessMode::Uniform &&
+                     use.Access != GraphAccessMode::StorageRead && use.Access != GraphAccessMode::StorageReadWrite) ||
+                    (use.Access == GraphAccessMode::Sampled || use.Access == GraphAccessMode::ColorWrite ||
+                     use.Access == GraphAccessMode::ColorReadWrite))
                 {
                     return RasterStatus::InvalidDescription;
                 }
             }
-            else if (use.Offset != 0 || use.Size != 0 || (!write && use.Access != GraphAccessMode::Sampled))
+            else if (pass.IsCompute || use.Offset != 0 || use.Size != 0 ||
+                     use.Visibility == RasterVisibility::Compute ||
+                     (use.Access != GraphAccessMode::Sampled && use.Access != GraphAccessMode::ColorWrite &&
+                      use.Access != GraphAccessMode::ColorReadWrite))
             {
                 return RasterStatus::InvalidDescription;
             }
@@ -1075,20 +1138,31 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
                 track.ReadAccess[p] = use.Access;
                 continue;
             }
-            if (resource.Kind != RasterKind::Texture || resource.Slot != pass.Info.Texture ||
-                version != track.Version + 1 || version == 0)
+            if (version != track.Version + 1 || version == 0 ||
+                (resource.Kind == RasterKind::Texture && resource.Slot != pass.Info.Texture))
             {
                 return RasterStatus::InvalidDescription;
             }
-            attachment = true;
             const auto& description = pass.Info.Description;
-            const bool load = description.ColorLoad == RasterLoad::Load;
-            if (load != (use.Access == GraphAccessMode::ColorReadWrite) || (load && !track.Defined) ||
-                (description.DepthLoad == RasterLoad::Load && !track.DepthDefined))
+            const bool bufferWrite = resource.Kind == RasterKind::Buffer;
+            const bool load = bufferWrite || description.ColorLoad == RasterLoad::Load;
+            if (bufferWrite)
             {
-                return RasterStatus::InvalidDescription;
+                if (!track.Defined)
+                {
+                    return RasterStatus::InvalidDescription;
+                }
             }
-            if ((load || description.DepthLoad == RasterLoad::Load) && track.Writer != 32 &&
+            else
+            {
+                attachment = true;
+                if (load != (use.Access == GraphAccessMode::ColorReadWrite) || (load && !track.Defined) ||
+                    (description.DepthLoad == RasterLoad::Load && !track.DepthDefined))
+                {
+                    return RasterStatus::InvalidDescription;
+                }
+            }
+            if ((load || (!bufferWrite && description.DepthLoad == RasterLoad::Load)) && track.Writer != 32 &&
                 !AddDependency(report, track.Writer, p, r, GraphHazard::ReadAfterWrite, track.LastWrite, use.Access))
             {
                 return RasterStatus::CapacityExceeded;
@@ -1115,17 +1189,35 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
             track.Writer = static_cast<uint32>(p);
             track.LastWrite = use.Access;
             track.Version = version;
-            track.Defined = description.ColorStore == RasterStore::Store &&
-                            (description.ColorLoad == RasterLoad::Clear || (load && track.Defined));
+            track.Defined = bufferWrite || (description.ColorStore == RasterStore::Store &&
+                                            (description.ColorLoad == RasterLoad::Clear || (load && track.Defined)));
             track.DepthDefined = description.DepthStore == RasterStore::Store &&
                                  (description.DepthLoad == RasterLoad::Clear ||
                                   (description.DepthLoad == RasterLoad::Load && track.DepthDefined));
         }
-        if (!attachment)
+        if (!attachment && !pass.IsCompute)
         {
             return RasterStatus::InvalidDescription;
         }
         report.ErrorResource = 16;
+        if (pass.IsCompute)
+        {
+            const auto& set = At(RasterKind::Set, pass.Dispatch.Set).Set;
+            const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
+            for (usize i = 0; i < layout.Count; ++i)
+            {
+                const auto& binding = layout.Entries[i];
+                const auto access = binding.Kind == RasterBindingKind::UniformBuffer ? GraphAccessMode::Uniform
+                                    : binding.Kind == RasterBindingKind::StorageRead
+                                        ? GraphAccessMode::StorageRead
+                                        : GraphAccessMode::StorageReadWrite;
+                if (FindUse(graph, pass, RasterKind::Buffer, set.Slots[i], access, set.Offsets[i], set.Sizes[i], 4) ==
+                    nullptr)
+                {
+                    return RasterStatus::InvalidDescription;
+                }
+            }
+        }
         for (usize i = 0; i < pass.DrawCount; ++i)
         {
             const auto valid = CheckDeclaredPacket(graph, pass, graph.Draws[pass.FirstDraw + i]);
@@ -1296,8 +1388,10 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
         {
             return physical.Status;
         }
-        if (resource.Kind == RasterKind::Texture &&
-            (!SameTextureState(resource.Import, TextureState(physical)) || physical.TextureRevision == ~uint64{0}))
+        if ((resource.Kind == RasterKind::Buffer &&
+             (resource.BufferRevision != physical.BufferRevision || physical.BufferRevision == ~uint64{0})) ||
+            (resource.Kind == RasterKind::Texture &&
+             (!SameTextureState(resource.Import, TextureState(physical)) || physical.TextureRevision == ~uint64{0})))
         {
             return RasterStatus::InvalidState;
         }
@@ -1317,7 +1411,8 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
                 return status;
             }
         }
-        const auto prepared = backend::RasterPreparePass(pass.Info);
+        const auto prepared =
+            pass.IsCompute ? ComputePacketStatus(pass.Dispatch) : backend::RasterPreparePass(pass.Info);
         const auto currentPrepare = Admission(device, false);
         if (currentPrepare != RasterStatus::Ready)
         {
@@ -1378,6 +1473,17 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
         {
             const auto& use = pass.Uses[i];
             const auto& resource = graph->Resources[GraphAccess::Resource(use.Resource)];
+            if (resource.Kind == RasterKind::Buffer)
+            {
+                backend::ComputeBufferBarrier(resource.Slot, use.Access);
+                const auto currentBuffer = Admission(device, false);
+                if (currentBuffer != RasterStatus::Ready)
+                {
+                    handle = {};
+                    return currentBuffer;
+                }
+                FrameRetain(RasterKind::Buffer, resource.Slot);
+            }
             if (resource.Kind != RasterKind::Texture || use.Access != GraphAccessMode::Sampled)
             {
                 continue;
@@ -1396,7 +1502,7 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
             FrameRetain(RasterKind::Texture, resource.Slot);
             At(RasterKind::Texture, resource.Slot).FrameTextureUse = sampled;
         }
-        const auto started = backend::RasterBeginPass(pass.Info);
+        const auto started = pass.IsCompute ? EncodeCompute(pass.Dispatch) : backend::RasterBeginPass(pass.Info);
         if (started != RasterStatus::Ready)
         {
             internal::FaultRasterSession();
@@ -1409,7 +1515,10 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
             handle = {};
             return current;
         }
-        ApplyPassState(pass.Info);
+        if (!pass.IsCompute)
+        {
+            ApplyPassState(pass.Info);
+        }
         for (usize i = 0; i < pass.DrawCount; ++i)
         {
             const auto encoded = EncodePacket(graph->Draws[pass.FirstDraw + i]);
@@ -1437,6 +1546,24 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
     for (usize r = 0; r < graph->ResourceCount; ++r)
     {
         const auto& resource = graph->Resources[r];
+        if (resource.Kind == RasterKind::Buffer && graph->Report.FirstUse[r] != 32)
+        {
+            const auto role = At(RasterKind::Buffer, resource.Slot).Buffer.Role;
+            if (StorageRole(role))
+            {
+                backend::ComputeBufferBarrier(resource.Slot,
+                                              role == BufferRole::StorageVertex ? GraphAccessMode::Vertex
+                                              : role == BufferRole::StorageIndirect
+                                                  ? GraphAccessMode::Indirect
+                                                  : GraphAccessMode::StorageReadWrite);
+                const auto currentBuffer = Admission(device, false);
+                if (currentBuffer != RasterStatus::Ready)
+                {
+                    handle = {};
+                    return currentBuffer;
+                }
+            }
+        }
         if (resource.Kind != RasterKind::Texture || (resource.Transient && graph->Report.FirstUse[r] == 32))
         {
             continue;

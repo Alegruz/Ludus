@@ -2,6 +2,7 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/graphics/rhi/compute.h>
 #include <ludus/graphics/rhi/lifetime.h>
 
 namespace ludus::graphics::rhi
@@ -107,7 +108,7 @@ private:
     /// Grants the private compiler access to resource/version provenance.
     friend struct internal::GraphAccess;
 };
-/// Actual use of a declared immutable buffer or complete color texture.
+/// Actual use of a declared buffer range or complete color texture.
 enum class GraphAccessMode : ludus::foundation::uint8
 {
     /// Vertex stream read; range must cover the packet's slice.
@@ -122,11 +123,17 @@ enum class GraphAccessMode : ludus::foundation::uint8
     ColorWrite,
     /// Attachment Load of the preceding version and write of a new version.
     ColorReadWrite,
+    /// Read-only compute storage range.
+    StorageRead,
+    /// Read/write compute storage range, writing the next in-place version.
+    StorageReadWrite,
+    /// Indexed indirect argument range.
+    Indirect,
 };
 /// One declared use; whole textures and conservative whole-buffer hazards.
 struct GraphUse final
 {
-    /// Read version, or newly reserved output version for attachment writes.
+    /// Read version, or newly reserved output version for attachment/storage writes.
     GraphVersion Resource{};
     /// Required resource role and access.
     GraphAccessMode Access = GraphAccessMode::Sampled;
@@ -134,7 +141,8 @@ struct GraphUse final
     ludus::foundation::usize Offset = 0;
     /// Nonzero buffer length; zero for textures.
     ludus::foundation::usize Size = 0;
-    /// Required raster stages for uniform/sample uses; other uses ignore it.
+    /// Required stages for uniform/sample/storage uses; storage requires Compute.
+    /// Vertex/index/indirect and attachment uses ignore it.
     RasterVisibility Visibility = RasterVisibility::Both;
 };
 /// Copied authored pass; no callbacks, lambdas or borrowed data survive AddGraphPass.
@@ -158,6 +166,9 @@ struct GraphPassDescription final
     ludus::foundation::usize DrawCount = 0;
     /// Observable work which must survive culling.
     bool SideEffect = false;
+    /// Optional single compute dispatch. Non-null forbids raster attachments/draws;
+    /// copied and retained before return. Null selects the existing raster pass.
+    const ComputeDispatch* Dispatch = nullptr;
 };
 /// Resource roots observable after this execution.
 enum class GraphRoot : ludus::foundation::uint8
@@ -227,8 +238,9 @@ struct GraphReport final
 };
 /// Reserve one of four bounded graphs; null output required, failure preserves it.
 [[nodiscard]] RasterStatus CreateOrderedGraph(DeviceHandle, OrderedGraph&) noexcept;
-/// Import immutable buffer contents, retaining the physical record. Output version
-/// starts at zero. No duplicate physical imports; at most sixteen graph resources.
+/// Import current buffer contents and freeze their accepted revision, retaining the
+/// physical record. Output version starts at zero. No duplicate physical imports;
+/// at most sixteen graph resources. Compute writes invalidate earlier frozen plans.
 [[nodiscard]] RasterStatus ImportGraphBuffer(DeviceHandle, OrderedGraph, BufferHandle, GraphVersion&) noexcept;
 /// Import a persistent texture using an exact registry snapshot. Stale snapshots
 /// reject; final use must be a sampled stage or ColorAttachment. Same-queue pending
@@ -248,14 +260,14 @@ struct GraphReport final
 /// both outputs and can be polled using GetStatus on the texture before setup continues.
 [[nodiscard]] RasterStatus
 CreateGraphTexture(DeviceHandle, OrderedGraph, const TextureDescription&, GraphVersion&, TextureHandle&) noexcept;
-/// Reserve the next attachment version without allocating new physical storage.
+/// Reserve the next attachment or storage-buffer version without new physical storage.
 /// May reserve before its producer is added; compilation verifies authored ordering.
 [[nodiscard]] RasterStatus NextGraphVersion(DeviceHandle, OrderedGraph, GraphVersion, GraphVersion&) noexcept;
 /// Copy one ordered pass and retain its validated packets. Failure changes no graph
 /// state. Uses/declarations are verified by CompileOrderedGraph before any GPU work.
 [[nodiscard]] RasterStatus AddGraphPass(DeviceHandle, OrderedGraph, const GraphPassDescription&) noexcept;
 /// Mark a version as externally observable. Transient pool resources cannot escape;
-/// History/Export require persistent textures. Compilation rejects undefined roots.
+/// History/Export require persistent textures or buffers. Compilation rejects undefined roots.
 [[nodiscard]] RasterStatus AddGraphRoot(DeviceHandle, OrderedGraph, GraphVersion, GraphRoot) noexcept;
 /// Validate versions, actual packet uses, initialization, capacities and roots, then
 /// report dependencies/lifetimes. Reference mode keeps all otherwise legal passes.

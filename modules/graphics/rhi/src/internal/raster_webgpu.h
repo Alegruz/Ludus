@@ -36,6 +36,13 @@ RasterWebShader gRasterShaders[internal::RASTER_CAPACITY];
 WGPUBindGroupLayout gRasterLayouts[internal::RASTER_CAPACITY]{};
 WGPUBindGroup gRasterSets[internal::RASTER_CAPACITY]{};
 RasterWebPipeline gRasterPipelines[internal::RASTER_CAPACITY];
+struct ComputeWebPipeline final
+{
+    WGPUComputePipeline Object = nullptr;
+    WGPUPipelineLayout Layout = nullptr;
+    uint32 Request = 0;
+};
+ComputeWebPipeline gComputePipelines[internal::RASTER_CAPACITY];
 RasterWebCompletion gRasterCompletions[internal::RASTER_CAPACITY];
 RasterWebCompletion* gRasterReserved = nullptr;
 uint64 gRasterCompleted = 0;
@@ -75,6 +82,36 @@ void RasterPipelineCreated(WGPUCreatePipelineAsyncStatus status,
     if (!adopted && object != nullptr)
     {
         wgpuRenderPipelineRelease(object);
+    }
+    if (status != WGPUCreatePipelineAsyncStatus_Success)
+    {
+        Diagnose(message);
+    }
+    internal::RasterComplete(request,
+                             status == WGPUCreatePipelineAsyncStatus_Success && object != nullptr
+                                 ? RasterStatus::Ready
+                                 : RasterStatus::Failed);
+}
+void ComputePipelineCreated(WGPUCreatePipelineAsyncStatus status,
+                            WGPUComputePipeline object,
+                            WGPUStringView message,
+                            void* userdata,
+                            void*) noexcept
+{
+    const auto request = Token(userdata);
+    bool adopted = false;
+    for (auto& pipeline : gComputePipelines)
+    {
+        if (pipeline.Request == request)
+        {
+            pipeline.Object = object;
+            adopted = true;
+            break;
+        }
+    }
+    if (!adopted && object != nullptr)
+    {
+        wgpuComputePipelineRelease(object);
     }
     if (status != WGPUCreatePipelineAsyncStatus_Success)
     {
@@ -142,6 +179,64 @@ RasterCapabilities RasterLimits() noexcept
             static_cast<uint32>(internal::RASTER_CAPACITY),
             static_cast<uint32>(internal::RASTER_DRAWS)};
 }
+ComputeCapabilities ComputeLimits() noexcept
+{
+    WGPULimits limits = WGPU_LIMITS_INIT;
+    if (gDevice == nullptr || wgpuDeviceGetLimits(gDevice, &limits) != WGPUStatus_Success ||
+        limits.maxStorageBuffersPerShaderStage < 4 || limits.maxComputeInvocationsPerWorkgroup < 256)
+    {
+        return {};
+    }
+    constexpr uint64 range = uint64{16} * 1024 * 1024;
+    const auto dispatch =
+        limits.maxComputeWorkgroupsPerDimension < 65535 ? limits.maxComputeWorkgroupsPerDimension : 65535;
+    return {static_cast<usize>(limits.maxStorageBufferBindingSize < range ? limits.maxStorageBufferBindingSize : range),
+            limits.minStorageBufferOffsetAlignment > 256 ? limits.minStorageBufferOffsetAlignment : 256,
+            {limits.maxComputeWorkgroupSizeX < 256 ? limits.maxComputeWorkgroupSizeX : 256,
+             limits.maxComputeWorkgroupSizeY < 256 ? limits.maxComputeWorkgroupSizeY : 256,
+             limits.maxComputeWorkgroupSizeZ < 64 ? limits.maxComputeWorkgroupSizeZ : 64},
+            256,
+            {dispatch, dispatch, dispatch}};
+}
+RasterStatus ComputeCreatePipeline(usize slot, const internal::ComputePipelineInfo& info, uint32 request) noexcept
+{
+    RasterScopes(request);
+    internal::RasterExpect(request, internal::RasterCallbacks::Three);
+    auto& pipeline = gComputePipelines[slot];
+    pipeline.Request = request;
+    WGPUPipelineLayoutDescriptor layout = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    layout.bindGroupLayoutCount = 1;
+    layout.bindGroupLayouts = &gRasterLayouts[info.Layout];
+    pipeline.Layout = wgpuDeviceCreatePipelineLayout(gDevice, &layout);
+    WGPUComputePipelineDescriptor descriptor = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+    descriptor.layout = pipeline.Layout;
+    descriptor.compute.module = gRasterShaders[info.Shader].Object;
+    descriptor.compute.entryPoint = {gRasterShaders[info.Shader].Entry, WGPU_STRLEN};
+    WGPUCreateComputePipelineAsyncCallbackInfo callback = WGPU_CREATE_COMPUTE_PIPELINE_ASYNC_CALLBACK_INFO_INIT;
+    callback.mode = WGPUCallbackMode_AllowSpontaneous;
+    callback.callback = ComputePipelineCreated;
+    callback.userdata1 = Userdata(request);
+    wgpuDeviceCreateComputePipelineAsync(gDevice, &descriptor, callback);
+    return RasterPop(request);
+}
+// Thanks to W3C, "WebGPU", compute passes and resource usage scopes: closing
+// the compute scope establishes a legal storage-write to vertex/indirect handoff.
+// https://www.w3.org/TR/webgpu/#compute-passes
+RasterStatus ComputeEncode(const internal::ComputePacket& packet) noexcept
+{
+    auto pass = wgpuCommandEncoderBeginComputePass(gEncoder, nullptr);
+    if (pass == nullptr)
+    {
+        return RasterStatus::OutOfMemory;
+    }
+    wgpuComputePassEncoderSetPipeline(pass, gComputePipelines[packet.Pipeline].Object);
+    wgpuComputePassEncoderSetBindGroup(pass, 0, gRasterSets[packet.Set], 0, nullptr);
+    wgpuComputePassEncoderDispatchWorkgroups(pass, packet.Groups[0], packet.Groups[1], packet.Groups[2]);
+    wgpuComputePassEncoderEnd(pass);
+    wgpuComputePassEncoderRelease(pass);
+    return RasterStatus::Ready;
+}
+void ComputeBufferBarrier(usize, GraphAccessMode) noexcept {}
 RasterStatus
 RasterCreateBuffer(usize slot, const BufferDescription& info, std::span<const uint8> bytes, uint32 request) noexcept
 {
@@ -149,9 +244,12 @@ RasterCreateBuffer(usize slot, const BufferDescription& info, std::span<const ui
     WGPUBufferDescriptor descriptor = WGPU_BUFFER_DESCRIPTOR_INIT;
     descriptor.size = (bytes.size() + 3) & ~usize{3};
     descriptor.mappedAtCreation = true;
-    descriptor.usage = info.Role == BufferRole::Uniform  ? WGPUBufferUsage_Uniform
-                       : info.Role == BufferRole::Vertex ? WGPUBufferUsage_Vertex
-                                                         : WGPUBufferUsage_Index;
+    descriptor.usage = info.Role == BufferRole::Uniform           ? WGPUBufferUsage_Uniform
+                       : info.Role == BufferRole::Vertex          ? WGPUBufferUsage_Vertex
+                       : info.Role == BufferRole::Storage         ? WGPUBufferUsage_Storage
+                       : info.Role == BufferRole::StorageVertex   ? WGPUBufferUsage_Storage | WGPUBufferUsage_Vertex
+                       : info.Role == BufferRole::StorageIndirect ? WGPUBufferUsage_Storage | WGPUBufferUsage_Indirect
+                                                                  : WGPUBufferUsage_Index;
     descriptor.usage |= WGPUBufferUsage_CopySrc;
     auto object = wgpuDeviceCreateBuffer(gDevice, &descriptor);
     gRasterBuffers[slot] = object;
@@ -268,9 +366,12 @@ RasterStatus RasterCreateLayout(usize slot, const internal::RasterLayout& info, 
         entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
         entry.binding = source.Binding;
         entry.visibility = static_cast<WGPUShaderStage>(source.Visibility);
-        if (source.Kind == RasterBindingKind::UniformBuffer)
+        if (source.Kind == RasterBindingKind::UniformBuffer || source.Kind == RasterBindingKind::StorageRead ||
+            source.Kind == RasterBindingKind::StorageReadWrite)
         {
-            entry.buffer.type = WGPUBufferBindingType_Uniform;
+            entry.buffer.type = source.Kind == RasterBindingKind::UniformBuffer ? WGPUBufferBindingType_Uniform
+                                : source.Kind == RasterBindingKind::StorageRead ? WGPUBufferBindingType_ReadOnlyStorage
+                                                                                : WGPUBufferBindingType_Storage;
             entry.buffer.minBindingSize = source.MinSize;
         }
         else if (source.Kind == RasterBindingKind::Texture2D)
@@ -302,7 +403,8 @@ RasterStatus RasterCreateSet(usize slot,
         auto& entry = entries[i];
         entry = WGPU_BIND_GROUP_ENTRY_INIT;
         entry.binding = source.Binding;
-        if (source.Kind == RasterBindingKind::UniformBuffer)
+        if (source.Kind == RasterBindingKind::UniformBuffer || source.Kind == RasterBindingKind::StorageRead ||
+            source.Kind == RasterBindingKind::StorageReadWrite)
         {
             entry.buffer = gRasterBuffers[info.Slots[i]];
             entry.offset = info.Offsets[i];
@@ -474,6 +576,17 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             }
             gRasterPipelines[slot] = {};
             break;
+        case internal::RasterKind::ComputePipeline:
+            if (gComputePipelines[slot].Object)
+            {
+                wgpuComputePipelineRelease(gComputePipelines[slot].Object);
+            }
+            if (gComputePipelines[slot].Layout)
+            {
+                wgpuPipelineLayoutRelease(gComputePipelines[slot].Layout);
+            }
+            gComputePipelines[slot] = {};
+            break;
         case internal::RasterKind::Count:
             break;
     }
@@ -496,7 +609,14 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                                         packet.Index32 ? WGPUIndexFormat_Uint32 : WGPUIndexFormat_Uint16,
                                         packet.IndexOffset,
                                         WGPU_WHOLE_SIZE);
-    wgpuRenderPassEncoderDrawIndexed(gPass, packet.IndexCount, packet.InstanceCount, 0, 0, 0);
+    if (packet.Indirect != internal::RASTER_CAPACITY)
+    {
+        wgpuRenderPassEncoderDrawIndexedIndirect(gPass, gRasterBuffers[packet.Indirect], packet.IndirectOffset);
+    }
+    else
+    {
+        wgpuRenderPassEncoderDrawIndexed(gPass, packet.IndexCount, packet.InstanceCount, 0, 0, 0);
+    }
     return RasterStatus::Ready;
 }
 void RasterEndPass() noexcept

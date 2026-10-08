@@ -190,6 +190,19 @@ bool RasterGlProgram(GLuint program, RasterGlPipeline& pipeline) noexcept
     return true;
 }
 } // namespace
+ComputeCapabilities ComputeLimits() noexcept
+{
+    return {};
+}
+RasterStatus ComputeCreatePipeline(usize, const internal::ComputePipelineInfo&, uint32) noexcept
+{
+    return RasterStatus::Unsupported;
+}
+RasterStatus ComputeEncode(const internal::ComputePacket&) noexcept
+{
+    return RasterStatus::Unsupported;
+}
+void ComputeBufferBarrier(usize, GraphAccessMode) noexcept {}
 RasterCapabilities RasterLimits() noexcept
 {
     if (gContext <= 0)
@@ -402,6 +415,7 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             glDeleteVertexArrays(1, &gRasterPipelines[slot].Array);
             gRasterPipelines[slot] = {};
             break;
+        case internal::RasterKind::ComputePipeline:
         case internal::RasterKind::Count:
             break;
     }

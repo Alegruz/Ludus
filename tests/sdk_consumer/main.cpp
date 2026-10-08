@@ -312,6 +312,8 @@ int main()
     ludus::graphics::rhi::DeviceHandle explicitDevice;
     ludus::graphics::rhi::SurfaceHandle explicitSurface;
     ludus::graphics::rhi::DeviceDescription explicitRequest;
+    // Required compute on WebGL2 rejects before backend startup on every host.
+    explicitRequest.Selection = ludus::graphics::rhi::BackendSelection::WebGL2;
     explicitRequest.Required.Compute = true;
     if (ludus::graphics::rhi::CreateDevice({}, {}, explicitRequest, explicitDevice, explicitSurface) !=
             ludus::graphics::rhi::DeviceStatus::Unsupported ||

@@ -1,9 +1,11 @@
 #include <chrono>
 #include <cstring>
 #include <ludus/foundation/base/types.h>
+#include <ludus/graphics/rhi/compute.h>
 #include <ludus/graphics/rhi/lifetime.h>
 #include <thread>
 
+#include "cull.h"
 #include "internal/readback.h"
 #include "ordered_frame.h"
 #include "raster.h"
@@ -42,7 +44,16 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     {
         mode = 4;
     }
+    SECTION("Compute culling and indexed indirect drawing")
+    {
+        mode = 5;
+    }
+    SECTION("Authored CPU culling and direct drawing")
+    {
+        mode = 6;
+    }
     const bool graphMode = mode >= 3;
+    const bool computeMode = mode == 5;
     struct Guard final
     {
         ~Guard() noexcept
@@ -56,6 +67,7 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     rhi::StartupInfo failure;
     rhi::DeviceDescription description;
     description.Required.PortableRaster = true;
+    description.Required.Compute = computeMode;
     const auto started = rhi::CreateDevice({}, { .Width = 96, .Height = 64 }, description, device, surface, &failure);
 #if defined(LUDUS_TEST_METAL)
     if (started != rhi::DeviceStatus::Ready && failure.Error == rhi::StartupError::AdapterUnavailable)
@@ -146,7 +158,10 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
                              .4F,  .75F,  .25F, 1, 0, .4F,  -.75F, .25F, 1, 1};
     const float32 back[20]{-.95F, -.95F, .75F, 0, 1, -.95F, .95F,  .75F, 0, 0,
                            .95F,  .95F,  .75F, 1, 0, .95F,  -.95F, .75F, 1, 1};
-    const float32 offsets[4]{-.45F, 0, .45F, 0};
+    float32 offsets[4]{};
+    REQUIRE(ludus::qa::CullCpuInstances(offsets) == 2);
+    const float32 undefinedOffsets[4]{};
+    uint8 computePixels[96 * 64 * 4]{};
     const float32 center[2]{0, 0};
     const uint16 indices[6]{0, 1, 2, 0, 2, 3};
     rhi::BufferHandle vertices, background, instances, centerInstance, index;
@@ -154,8 +169,10 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
             rhi::RasterStatus::Ready);
     REQUIRE(rhi::CreateBuffer(device, {rhi::BufferRole::Vertex, sizeof(back)}, RasterBytes(back), background) ==
             rhi::RasterStatus::Ready);
-    REQUIRE(rhi::CreateBuffer(device, {rhi::BufferRole::Vertex, sizeof(offsets)}, RasterBytes(offsets), instances) ==
-            rhi::RasterStatus::Ready);
+    REQUIRE(rhi::CreateBuffer(device,
+                              {computeMode ? rhi::BufferRole::StorageVertex : rhi::BufferRole::Vertex, sizeof(offsets)},
+                              computeMode ? RasterBytes(undefinedOffsets) : RasterBytes(offsets),
+                              instances) == rhi::RasterStatus::Ready);
     REQUIRE(rhi::CreateBuffer(device, {rhi::BufferRole::Vertex, sizeof(center)}, RasterBytes(center), centerInstance) ==
             rhi::RasterStatus::Ready);
     REQUIRE(rhi::CreateBuffer(device, {rhi::BufferRole::Index16, sizeof(indices)}, RasterBytes(indices), index) ==
@@ -206,14 +223,75 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
                                              backgroundSet,
                                              compositeSet,
                                              false};
+        rhi::ComputeDispatch dispatch;
+        rhi::BufferHandle candidates, arguments;
+        if (computeMode)
+        {
+            const auto& authored = ludus::qa::CULL_CANDIDATES;
+            const uint32 zero[5]{};
+            REQUIRE(rhi::CreateBuffer(device,
+                                      {rhi::BufferRole::Storage, sizeof(authored)},
+                                      RasterBytes(authored),
+                                      candidates) == rhi::RasterStatus::Ready);
+            REQUIRE(rhi::CreateBuffer(device,
+                                      {rhi::BufferRole::StorageIndirect, sizeof(zero)},
+                                      RasterBytes(zero),
+                                      arguments) == rhi::RasterStatus::Ready);
+            const auto kernel = ludus::shaders::cull::Compute();
+            rhi::RasterShaderHandle shader;
+            rhi::BindingLayoutHandle computeLayout;
+            REQUIRE(rhi::CreateRasterShader(device, kernel, shader) == rhi::RasterStatus::Ready);
+            REQUIRE(rhi::CreateBindingLayout(device, kernel.Bindings, computeLayout) == rhi::RasterStatus::Ready);
+            const rhi::RasterBindingResource bindings[]{{0, candidates, 0, 32},
+                                                        {1, instances, 0, 16},
+                                                        {2, arguments, 0, 20}};
+            REQUIRE(rhi::CreateBindingSet(device, computeLayout, bindings, dispatch.Bindings) ==
+                    rhi::RasterStatus::Ready);
+            REQUIRE(rhi::CreateComputePipeline(device, {shader, computeLayout}, dispatch.Pipeline) ==
+                    rhi::RasterStatus::Ready);
+            inputs.Compute = &dispatch;
+            inputs.Candidates = candidates;
+            inputs.Arguments = arguments;
+        }
         rhi::OrderedGraph graph;
         rhi::GraphReport report;
         REQUIRE(ludus::qa::BuildOrderedFrame(device, inputs, graph, report, mode == 4) == rhi::RasterStatus::Ready);
         // Plan retention, not public ownership, protects attachments during submit.
-        REQUIRE(rhi::Destroy(device, offscreen) == rhi::RasterStatus::Ready);
-        REQUIRE(rhi::Destroy(device, unused) == rhi::RasterStatus::Ready);
+        if (!computeMode)
+        {
+            REQUIRE(rhi::Destroy(device, offscreen) == rhi::RasterStatus::Ready);
+            REQUIRE(rhi::Destroy(device, unused) == rhi::RasterStatus::Ready);
+        }
         REQUIRE(rhi::Destroy(device, offscreenView) == rhi::RasterStatus::Ready);
         REQUIRE(rhi::ExecuteOrderedGraph(device, surface, graph, completion) == rhi::RasterStatus::Ready);
+        if (computeMode)
+        {
+            rhi::ReadbackTicket ticket;
+            REQUIRE(rhi::RequestBufferReadback(device, arguments, 0, 20, ticket) == rhi::RasterStatus::Pending);
+            const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (rhi::GetStatus(device, ticket) == rhi::RasterStatus::Pending &&
+                   std::chrono::steady_clock::now() < until)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            uint32 actual[5]{};
+            REQUIRE(rhi::CopyReadback(device, ticket, reinterpret_cast<uint8*>(actual), sizeof(actual)) ==
+                    rhi::RasterStatus::Ready);
+            const uint32 expected[5]{6, 2, 0, 0, 0};
+            CHECK(std::memcmp(actual, expected, sizeof(actual)) == 0);
+            REQUIRE(rhi::Release(device, ticket) == rhi::RasterStatus::Ready);
+            REQUIRE(rhi::backend::ReadHeadlessPixels(computePixels));
+            rhi::BufferHandle cpuInstances;
+            REQUIRE(rhi::CreateBuffer(device,
+                                      {rhi::BufferRole::Vertex, sizeof(offsets)},
+                                      RasterBytes(offsets),
+                                      cpuInstances) == rhi::RasterStatus::Ready);
+            inputs.Compute = nullptr;
+            inputs.Instances = cpuInstances;
+            REQUIRE(ludus::qa::BuildOrderedFrame(device, inputs, graph, report, false) == rhi::RasterStatus::Ready);
+            completion = {};
+            REQUIRE(rhi::ExecuteOrderedGraph(device, surface, graph, completion) == rhi::RasterStatus::Ready);
+        }
     }
     else
     {
@@ -236,6 +314,10 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     uint8 pixels[96 * 64 * 4]{};
     REQUIRE(rhi::backend::ReadHeadlessPixels(pixels));
     CHECK(rhi::GetStatus(device, completion) == rhi::RasterStatus::Ready);
+    if (computeMode)
+    {
+        CHECK(std::memcmp(pixels, computePixels, sizeof(pixels)) == 0);
+    }
     const uint8 high = mode == 1 ? 55 : mode == 2 ? 160 : 255;
     const uint8 low = mode == 2 ? 32 : 0;
     const uint32 xs[4]{12, 36, 60, 84};

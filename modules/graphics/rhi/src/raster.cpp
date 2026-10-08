@@ -69,6 +69,9 @@ struct Record final
     bool ServiceOwned = false;
     bool QueuedPipeline = false;
     BufferDescription Buffer;
+    uint64 BufferRevision = 1;
+    bool FrameBufferWritten = false;
+    ComputePipelineInfo Compute;
     TextureDescription Texture;
     uint64 TextureRevision = 1;
     RasterTextureUse TextureUse = RasterTextureUse::Undefined;
@@ -97,6 +100,16 @@ bool gSurfaceDepthDefined = false;
 bool gGraphExecuting = false;
 void ResetGraphRecords() noexcept;
 RasterStatus ValidatePacketPass(const RasterPacket&, const RasterPassInfo&, bool) noexcept;
+RasterStatus ComputeAdmission(DeviceHandle, bool = true) noexcept;
+bool StorageRole(BufferRole role) noexcept
+{
+    return role == BufferRole::Storage || role == BufferRole::StorageVertex || role == BufferRole::StorageIndirect;
+}
+bool BufferBinding(RasterBindingKind kind) noexcept
+{
+    return kind == RasterBindingKind::UniformBuffer || kind == RasterBindingKind::StorageRead ||
+           kind == RasterBindingKind::StorageReadWrite;
+}
 void RetainPacketTextures(const RasterPacket&) noexcept;
 
 Record& At(RasterKind kind, usize slot) noexcept
@@ -169,15 +182,20 @@ void Dependencies(Record& record, RasterKind kind, bool retain) noexcept
         reference(RasterKind::Shader, record.Pipeline.Fragment);
         reference(RasterKind::Layout, record.Pipeline.Layout);
     }
+    else if (kind == RasterKind::ComputePipeline)
+    {
+        reference(RasterKind::Shader, record.Compute.Shader);
+        reference(RasterKind::Layout, record.Compute.Layout);
+    }
     else if (kind == RasterKind::Set)
     {
         const auto& layout = At(RasterKind::Layout, record.Set.Layout).Layout;
         for (usize i = 0; i < layout.Count; ++i)
         {
             const auto type = layout.Entries[i].Kind;
-            reference(type == RasterBindingKind::UniformBuffer ? RasterKind::Buffer
-                      : type == RasterBindingKind::Texture2D   ? RasterKind::View
-                                                               : RasterKind::Sampler,
+            reference(BufferBinding(type)                    ? RasterKind::Buffer
+                      : type == RasterBindingKind::Texture2D ? RasterKind::View
+                                                             : RasterKind::Sampler,
                       record.Set.Slots[i]);
         }
         reference(RasterKind::Layout, record.Set.Layout);
@@ -280,15 +298,39 @@ RasterStatus Publish(RasterKind kind, T& output, Create create) noexcept
 bool ValidBinding(const RasterBinding& binding) noexcept
 {
     const auto visibility = static_cast<uint8>(binding.Visibility);
-    return binding.Binding < RASTER_BINDINGS && visibility >= 1 && visibility <= 3 &&
-           (binding.Kind == RasterBindingKind::UniformBuffer
-                ? binding.MinSize > 0 && binding.MinSize <= 16384
-                : (binding.Kind == RasterBindingKind::Texture2D || binding.Kind == RasterBindingKind::Sampler) &&
-                      binding.MinSize == 0);
+    if (binding.Binding >= RASTER_BINDINGS || visibility < 1 || visibility > 4)
+    {
+        return false;
+    }
+    if (binding.Kind == RasterBindingKind::UniformBuffer)
+    {
+        return binding.MinSize > 0 && binding.MinSize <= 16384;
+    }
+    if (binding.Kind == RasterBindingKind::StorageRead || binding.Kind == RasterBindingKind::StorageReadWrite)
+    {
+        const auto limits = backend::ComputeLimits();
+        return visibility == 4 && binding.MinSize > 0 && binding.MinSize % 4 == 0 &&
+               binding.MinSize <= limits.MaxStorageRange;
+    }
+    return visibility != 4 &&
+           (binding.Kind == RasterBindingKind::Texture2D || binding.Kind == RasterBindingKind::Sampler) &&
+           binding.MinSize == 0;
 }
 bool CopyLayout(std::span<const RasterBinding> entries, RasterLayout& layout) noexcept
 {
     if (entries.size() > RASTER_BINDINGS)
+    {
+        return false;
+    }
+    usize storageBindings = 0;
+    for (const auto& entry : entries)
+    {
+        if (entry.Kind == RasterBindingKind::StorageRead || entry.Kind == RasterBindingKind::StorageReadWrite)
+        {
+            ++storageBindings;
+        }
+    }
+    if (storageBindings > 4)
     {
         return false;
     }
@@ -352,7 +394,7 @@ bool ShaderFits(const RasterShaderInfo& shader, const RasterLayout& layout) noex
     {
         const auto& need = shader.Layout.Entries[i];
         bool found = false;
-        const auto stage = shader.Stage == ShaderStage::Vertex ? 1U : 2U;
+        const auto stage = shader.Stage == ShaderStage::Vertex ? 1U : shader.Stage == ShaderStage::Fragment ? 2U : 4U;
         for (usize j = 0; j < layout.Count; ++j)
         {
             const auto& entry = layout.Entries[j];
@@ -392,9 +434,21 @@ RasterStatus CreateBuffer(DeviceHandle device,
     }
     const auto limits = backend::RasterLimits();
     if (description.Size == 0 || bytes.size() != description.Size || description.Size > limits.MaxBufferSize ||
-        static_cast<uint8>(description.Role) > static_cast<uint8>(BufferRole::Uniform))
+        static_cast<uint8>(description.Role) > static_cast<uint8>(BufferRole::StorageIndirect))
     {
         return RasterStatus::InvalidDescription;
+    }
+    if (StorageRole(description.Role))
+    {
+        const auto compute = ComputeAdmission(device);
+        if (compute != RasterStatus::Ready)
+        {
+            return compute;
+        }
+        if (description.Size > backend::ComputeLimits().MaxStorageRange)
+        {
+            return RasterStatus::InvalidDescription;
+        }
     }
     const usize alignment = description.Role == BufferRole::Index16   ? 2
                             : description.Role == BufferRole::Uniform ? 16
@@ -506,10 +560,41 @@ CreateRasterShader(DeviceHandle device, const RasterShaderDescription& descripti
     }
     RasterShaderInfo info;
     info.Stage = description.Artifact.Stage;
-    if ((info.Stage != ShaderStage::Vertex && info.Stage != ShaderStage::Fragment) ||
+    if ((info.Stage != ShaderStage::Vertex && info.Stage != ShaderStage::Fragment &&
+         info.Stage != ShaderStage::Compute) ||
         !CopyLayout(description.Bindings, info.Layout))
     {
         return RasterStatus::InvalidDescription;
+    }
+    if (info.Stage == ShaderStage::Compute)
+    {
+        const auto compute = ComputeAdmission(device);
+        if (compute != RasterStatus::Ready)
+        {
+            return compute;
+        }
+        const auto limits = backend::ComputeLimits();
+        uint32 product = 1;
+        for (usize i = 0; i < 3; ++i)
+        {
+            const auto size = description.WorkgroupSize[i];
+            if (size == 0 || size > limits.MaxWorkgroupSize[i] || size > limits.MaxWorkgroupInvocations / product)
+            {
+                return RasterStatus::InvalidDescription;
+            }
+            product *= size;
+            info.WorkgroupSize[i] = size;
+        }
+    }
+    for (const auto& binding : description.Bindings)
+    {
+        if (static_cast<uint8>(binding.Visibility) != (info.Stage == ShaderStage::Compute  ? 4
+                                                       : info.Stage == ShaderStage::Vertex ? 1
+                                                                                           : 2) &&
+            (info.Stage == ShaderStage::Compute || binding.Visibility != RasterVisibility::Both))
+        {
+            return RasterStatus::InvalidDescription;
+        }
     }
     for (usize i = 0; i < RASTER_BINDINGS; ++i)
     {
@@ -521,7 +606,7 @@ CreateRasterShader(DeviceHandle device, const RasterShaderDescription& descripti
         }
         info.TextureSamplers[i] = description.TextureSamplers[i];
     }
-    if (description.Inputs.size() > 8 || (info.Stage == ShaderStage::Fragment && !description.Inputs.empty()))
+    if (description.Inputs.size() > 8 || (info.Stage != ShaderStage::Vertex && !description.Inputs.empty()))
     {
         return RasterStatus::InvalidDescription;
     }
@@ -649,9 +734,9 @@ RasterStatus CreateBindingSet(DeviceHandle device,
             return RasterStatus::InvalidDescription;
         }
         const auto kind = layout.Entries[i].Kind;
-        const auto* resource = kind == RasterBindingKind::UniformBuffer ? Resolve(entry->Buffer, RasterKind::Buffer)
-                               : kind == RasterBindingKind::Texture2D   ? Resolve(entry->Texture, RasterKind::View)
-                                                                        : Resolve(entry->Sampler, RasterKind::Sampler);
+        const auto* resource = BufferBinding(kind)                    ? Resolve(entry->Buffer, RasterKind::Buffer)
+                               : kind == RasterBindingKind::Texture2D ? Resolve(entry->Texture, RasterKind::View)
+                                                                      : Resolve(entry->Sampler, RasterKind::Sampler);
         if (resource == nullptr)
         {
             return RasterStatus::InvalidHandle;
@@ -668,9 +753,20 @@ RasterStatus CreateBindingSet(DeviceHandle device,
         {
             return RasterStatus::InvalidDescription;
         }
-        set.Slots[i] = kind == RasterBindingKind::UniformBuffer ? RasterAccess::Slot(entry->Buffer)
-                       : kind == RasterBindingKind::Texture2D   ? RasterAccess::Slot(entry->Texture)
-                                                                : RasterAccess::Slot(entry->Sampler);
+        if (kind == RasterBindingKind::StorageRead || kind == RasterBindingKind::StorageReadWrite)
+        {
+            const auto compute = backend::ComputeLimits();
+            if (!StorageRole(resource->Buffer.Role) || compute.StorageOffsetAlignment == 0 ||
+                entry->Offset % compute.StorageOffsetAlignment != 0 || entry->Size % 4 != 0 ||
+                entry->Size < layout.Entries[i].MinSize || entry->Size > compute.MaxStorageRange ||
+                !Fits(entry->Offset, entry->Size, resource->Buffer.Size))
+            {
+                return RasterStatus::InvalidDescription;
+            }
+        }
+        set.Slots[i] = BufferBinding(kind)                    ? RasterAccess::Slot(entry->Buffer)
+                       : kind == RasterBindingKind::Texture2D ? RasterAccess::Slot(entry->Texture)
+                                                              : RasterAccess::Slot(entry->Sampler);
         set.Offsets[i] = entry->Offset;
         set.Sizes[i] = entry->Size;
     }
@@ -710,6 +806,13 @@ ValidatePipeline(DeviceHandle device, const RasterPipelineDescription& descripti
         description.Attributes.size() != vertex->Shader.InputCount)
     {
         return RasterStatus::InvalidDescription;
+    }
+    for (usize i = 0; i < layout->Layout.Count; ++i)
+    {
+        if (layout->Layout.Entries[i].Visibility == RasterVisibility::Compute)
+        {
+            return RasterStatus::InvalidDescription;
+        }
     }
     info.Vertex = RasterAccess::Slot(description.Vertex);
     info.Fragment = RasterAccess::Slot(description.Fragment);
@@ -841,6 +944,34 @@ RasterStatus ValidateDraw(DeviceHandle device, const RasterDraw& draw, RasterPac
             return RasterStatus::InvalidDescription;
         }
     }
+    if (RasterAccess::Owner(draw.Indirect) != 0)
+    {
+        const auto compute = ComputeAdmission(device, false);
+        if (compute != RasterStatus::Ready)
+        {
+            return compute;
+        }
+        const auto* indirect = Resolve(draw.Indirect, RasterKind::Buffer);
+        if (indirect == nullptr)
+        {
+            return RasterStatus::InvalidHandle;
+        }
+        if (indirect->Status != RasterStatus::Ready)
+        {
+            return indirect->Status == RasterStatus::Pending ? RasterStatus::NotReady : indirect->Status;
+        }
+        if (indirect->Buffer.Role != BufferRole::StorageIndirect || draw.IndirectOffset % 4 != 0 ||
+            !Fits(draw.IndirectOffset, sizeof(IndexedIndirectArguments), indirect->Buffer.Size))
+        {
+            return RasterStatus::InvalidDescription;
+        }
+        packet.Indirect = RasterAccess::Slot(draw.Indirect);
+        packet.IndirectOffset = draw.IndirectOffset;
+    }
+    else if (draw.IndirectOffset != 0)
+    {
+        return RasterStatus::InvalidDescription;
+    }
     packet.Pipeline = RasterAccess::Slot(draw.Pipeline);
     packet.Set = RasterAccess::Slot(draw.Bindings);
     packet.Indices = RasterAccess::Slot(draw.Indices);
@@ -861,8 +992,9 @@ RasterStatus ValidateDraw(DeviceHandle device, const RasterDraw& draw, RasterPac
             return buffer->Status == RasterStatus::Pending ? RasterStatus::NotReady : buffer->Status;
         }
         const usize count = info.Streams[i].PerInstance ? draw.InstanceCount : draw.VertexCount;
-        if (buffer->Buffer.Role != BufferRole::Vertex || slice.Offset % 4 != 0 ||
-            !Fits(slice.Offset, slice.Size, buffer->Buffer.Size) || count > slice.Size / info.Streams[i].Stride)
+        if ((buffer->Buffer.Role != BufferRole::Vertex && buffer->Buffer.Role != BufferRole::StorageVertex) ||
+            slice.Offset % 4 != 0 || !Fits(slice.Offset, slice.Size, buffer->Buffer.Size) ||
+            count > slice.Size / info.Streams[i].Stride)
         {
             return RasterStatus::InvalidDescription;
         }
@@ -907,6 +1039,10 @@ RasterStatus EncodePacket(const RasterPacket& packet) noexcept
     FrameRetain(RasterKind::Pipeline, packet.Pipeline);
     FrameRetain(RasterKind::Set, packet.Set);
     FrameRetain(RasterKind::Buffer, packet.Indices);
+    if (packet.Indirect != RASTER_CAPACITY)
+    {
+        FrameRetain(RasterKind::Buffer, packet.Indirect);
+    }
     for (usize i = 0; i < At(RasterKind::Pipeline, packet.Pipeline).Pipeline.StreamCount; ++i)
     {
         FrameRetain(RasterKind::Buffer, packet.Vertices[i]);
@@ -1030,6 +1166,11 @@ void RasterEndFrame(bool accepted) noexcept
                     ++record.TextureRevision;
                 }
             }
+            if (accepted && record.FrameBufferWritten)
+            {
+                ++record.BufferRevision;
+            }
+            record.FrameBufferWritten = false;
             record.InFrame = false;
             --record.References;
         }
@@ -1350,5 +1491,7 @@ RasterStatus Destroy(DeviceHandle device, RasterPipelineHandle& handle) noexcept
 } // namespace ludus::graphics::rhi
 
 #include "internal/lifetime_services.h"
+
+#include "internal/compute_services.h"
 
 #include "internal/ordered_graph.h"

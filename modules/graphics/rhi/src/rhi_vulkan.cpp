@@ -59,6 +59,7 @@ VkPhysicalDevice gPhysical = VK_NULL_HANDLE;
 VkDevice gDevice = VK_NULL_HANDLE;
 VkQueue gQueue = VK_NULL_HANDLE;
 uint32 gFamily = 0;
+bool gQueueCompute = false;
 VkSurfaceKHR gSurface = VK_NULL_HANDLE;
 VkSwapchainKHR gSwapchain = VK_NULL_HANDLE;
 VkCommandPool gCommands = VK_NULL_HANDLE;
@@ -717,6 +718,14 @@ bool ConnectWindow(const WindowInfo& window) noexcept
             {
                 gPhysical = devices[i];
                 gFamily = static_cast<uint32>(j);
+                gQueueCompute = (properties[j].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
+                // Required workloads filter candidates before committing to a
+                // queue/adapter, so a later usable candidate remains reachable.
+                if (internal::RequiresComputeProfile() && ComputeLimits().MaxStorageRange == 0)
+                {
+                    gPhysical = VK_NULL_HANDLE;
+                    continue;
+                }
                 break;
             }
         }

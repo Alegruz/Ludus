@@ -14,6 +14,10 @@ struct RasterVulkanBuffer final
 {
     VkBuffer Object = VK_NULL_HANDLE;
     VmaAllocation Allocation = nullptr;
+    VkPipelineStageFlags Stage = VK_PIPELINE_STAGE_HOST_BIT;
+    VkAccessFlags Access = VK_ACCESS_HOST_WRITE_BIT;
+    VkPipelineStageFlags WriterStage = VK_PIPELINE_STAGE_HOST_BIT;
+    VkAccessFlags WriterAccess = VK_ACCESS_HOST_WRITE_BIT;
 };
 struct RasterVulkanTexture final
 {
@@ -55,6 +59,12 @@ struct RasterVulkanPipeline final
 };
 VmaAllocator gRasterAllocator = nullptr;
 RasterVulkanBuffer gRasterBuffers[internal::RASTER_CAPACITY];
+struct ComputeVulkanPipeline final
+{
+    VkPipeline Object = VK_NULL_HANDLE;
+    VkPipelineLayout Layout = VK_NULL_HANDLE;
+};
+ComputeVulkanPipeline gComputePipelines[internal::RASTER_CAPACITY];
 RasterVulkanTexture gRasterTextures[internal::RASTER_CAPACITY];
 VkImageView gRasterViews[internal::RASTER_CAPACITY]{};
 VkSampler gRasterSamplers[internal::RASTER_CAPACITY]{};
@@ -245,8 +255,10 @@ VkResult RasterUploadBuffer(VkBufferUsageFlags usage, std::span<const uint8> byt
 VkDescriptorType RasterDescriptor(RasterBindingKind kind) noexcept
 {
     return kind == RasterBindingKind::UniformBuffer ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-           : kind == RasterBindingKind::Texture2D   ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-                                                    : VK_DESCRIPTOR_TYPE_SAMPLER;
+           : kind == RasterBindingKind::StorageRead || kind == RasterBindingKind::StorageReadWrite
+               ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+           : kind == RasterBindingKind::Texture2D ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+                                                  : VK_DESCRIPTOR_TYPE_SAMPLER;
 }
 VkFormat RasterPixelFormat(RasterFormat format) noexcept
 {
@@ -266,12 +278,150 @@ RasterCapabilities RasterLimits() noexcept
             static_cast<uint32>(internal::RASTER_CAPACITY),
             static_cast<uint32>(internal::RASTER_DRAWS)};
 }
+ComputeCapabilities ComputeLimits() noexcept
+{
+    if (gPhysical == VK_NULL_HANDLE || !gQueueCompute)
+    {
+        return {};
+    }
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(gPhysical, &properties);
+    const auto& limits = properties.limits;
+    if (limits.maxPerStageDescriptorStorageBuffers < 4 || limits.maxComputeWorkGroupInvocations < 256)
+    {
+        return {};
+    }
+    constexpr usize range = usize{16} * 1024 * 1024;
+    ComputeCapabilities result;
+    result.MaxStorageRange = limits.maxStorageBufferRange < range ? limits.maxStorageBufferRange : range;
+    result.StorageOffsetAlignment =
+        limits.minStorageBufferOffsetAlignment > 256 ? limits.minStorageBufferOffsetAlignment : 256;
+    result.MaxWorkgroupInvocations = 256;
+    const uint32 size[3]{256, 256, 64};
+    for (usize i = 0; i < 3; ++i)
+    {
+        result.MaxWorkgroupSize[i] =
+            limits.maxComputeWorkGroupSize[i] < size[i] ? limits.maxComputeWorkGroupSize[i] : size[i];
+        result.MaxDispatch[i] = limits.maxComputeWorkGroupCount[i] < 65535 ? limits.maxComputeWorkGroupCount[i] : 65535;
+    }
+    return result;
+}
+RasterStatus ComputeCreatePipeline(usize slot, const internal::ComputePipelineInfo& info, uint32) noexcept
+{
+    auto& pipeline = gComputePipelines[slot];
+    VkPipelineLayoutCreateInfo layout{};
+    layout.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layout.setLayoutCount = 1;
+    layout.pSetLayouts = &gRasterLayouts[info.Layout];
+    auto result = vkCreatePipelineLayout(gDevice, &layout, nullptr, &pipeline.Layout);
+    if (result != VK_SUCCESS)
+    {
+        return RasterError(result);
+    }
+    VkComputePipelineCreateInfo descriptor{};
+    descriptor.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    descriptor.layout = pipeline.Layout;
+    descriptor.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    descriptor.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    descriptor.stage.module = gRasterShaders[info.Shader].Object;
+    descriptor.stage.pName = gRasterShaders[info.Shader].Entry;
+    return RasterError(vkCreateComputePipelines(gDevice, VK_NULL_HANDLE, 1, &descriptor, nullptr, &pipeline.Object));
+}
+RasterStatus ComputeEncode(const internal::ComputePacket& packet) noexcept
+{
+    const auto command = gFrames[gFrame].Command;
+    const auto& pipeline = gComputePipelines[packet.Pipeline];
+    vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Object);
+    vkCmdBindDescriptorSets(command,
+                            VK_PIPELINE_BIND_POINT_COMPUTE,
+                            pipeline.Layout,
+                            0,
+                            1,
+                            &gRasterSets[packet.Set].Object,
+                            0,
+                            nullptr);
+    vkCmdDispatch(command, packet.Groups[0], packet.Groups[1], packet.Groups[2]);
+    return RasterStatus::Ready;
+}
+// Thanks to Khronos, "Synchronization Examples", compute-to-compute and
+// compute-to-graphics dependencies. This adapts the narrow stage/access pairs to
+// Vulkan 1.1 barriers and retains the original writer for later independent reads.
+// https://docs.vulkan.org/guide/latest/synchronization_examples.html
+void ComputeBufferBarrier(usize slot, GraphAccessMode use) noexcept
+{
+    auto& buffer = gRasterBuffers[slot];
+    VkPipelineStageFlags stage = 0;
+    VkAccessFlags access = 0;
+    switch (use)
+    {
+        case GraphAccessMode::Vertex:
+            stage = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+            access = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+            break;
+        case GraphAccessMode::Index:
+            stage = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+            access = VK_ACCESS_INDEX_READ_BIT;
+            break;
+        case GraphAccessMode::Uniform:
+            stage = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                    (gQueueCompute ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : 0U);
+            access = VK_ACCESS_UNIFORM_READ_BIT;
+            break;
+        case GraphAccessMode::Indirect:
+            stage = VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+            access = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+            break;
+        case GraphAccessMode::StorageRead:
+            stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+            access = VK_ACCESS_SHADER_READ_BIT;
+            break;
+        case GraphAccessMode::StorageReadWrite:
+            stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+            access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            break;
+        default:
+            return;
+    }
+    VkBufferMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    barrier.buffer = buffer.Object;
+    barrier.size = VK_WHOLE_SIZE;
+    barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.srcAccessMask = buffer.Access | buffer.WriterAccess;
+    barrier.dstAccessMask = access;
+    vkCmdPipelineBarrier(gFrames[gFrame].Command,
+                         buffer.Stage | buffer.WriterStage,
+                         stage,
+                         0,
+                         0,
+                         nullptr,
+                         1,
+                         &barrier,
+                         0,
+                         nullptr);
+    if (use == GraphAccessMode::StorageReadWrite)
+    {
+        buffer.Stage = buffer.WriterStage = stage;
+        buffer.Access = access;
+        buffer.WriterAccess = VK_ACCESS_SHADER_WRITE_BIT;
+    }
+    else
+    {
+        buffer.Stage |= stage;
+        buffer.Access |= access;
+    }
+}
 RasterStatus
 RasterCreateBuffer(usize slot, const BufferDescription& info, std::span<const uint8> bytes, uint32) noexcept
 {
-    const auto usage = info.Role == BufferRole::Uniform  ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
-                       : info.Role == BufferRole::Vertex ? VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-                                                         : VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    const auto usage = info.Role == BufferRole::Uniform   ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+                       : info.Role == BufferRole::Vertex  ? VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+                       : info.Role == BufferRole::Storage ? VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                       : info.Role == BufferRole::StorageVertex
+                           ? VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+                       : info.Role == BufferRole::StorageIndirect
+                           ? VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT
+                           : VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
     return RasterError(RasterUploadBuffer(usage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, bytes, gRasterBuffers[slot]));
 }
 RasterStatus
@@ -490,10 +640,14 @@ RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uin
     create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     return RasterError(vkCreateSampler(gDevice, &create, nullptr, &gRasterSamplers[slot]));
 }
-RasterStatus
-RasterCreateShader(usize slot, const ShaderDescription& info, const internal::RasterShaderInfo&, uint32) noexcept
+RasterStatus RasterCreateShader(usize slot,
+                                const ShaderDescription& info,
+                                const internal::RasterShaderInfo& reflected,
+                                uint32) noexcept
 {
     bool found = false;
+    uint32 entryId = 0;
+    bool localSize = info.Stage != ShaderStage::Compute;
     for (usize offset = 5; offset < info.Spirv.size();)
     {
         const auto word = info.Spirv[offset];
@@ -506,13 +660,25 @@ RasterCreateShader(usize slot, const ShaderDescription& info, const internal::Ra
         {
             const auto* name = reinterpret_cast<const char*>(info.Spirv.data() + offset + 3);
             const auto length = info.SpirvEntry.size();
-            found = found || (info.Spirv[offset + 1] == (info.Stage == ShaderStage::Vertex ? 0U : 4U) &&
+            found = found || (info.Spirv[offset + 1] == (info.Stage == ShaderStage::Vertex     ? 0U
+                                                         : info.Stage == ShaderStage::Fragment ? 4U
+                                                                                               : 5U) &&
                               length < (count - 3) * sizeof(uint32) && name[length] == '\0' &&
                               std::memcmp(name, info.SpirvEntry.data(), length) == 0);
         }
+        if ((word & 65535U) == 15 && count >= 4 && found && entryId == 0)
+        {
+            entryId = info.Spirv[offset + 2];
+        }
+        if ((word & 65535U) == 16 && count == 6 && info.Spirv[offset + 1] == entryId && info.Spirv[offset + 2] == 17)
+        {
+            localSize = info.Spirv[offset + 3] == reflected.WorkgroupSize[0] &&
+                        info.Spirv[offset + 4] == reflected.WorkgroupSize[1] &&
+                        info.Spirv[offset + 5] == reflected.WorkgroupSize[2];
+        }
         offset += count;
     }
-    if (!found)
+    if (!found || !localSize)
     {
         return RasterStatus::InvalidDescription;
     }
@@ -537,6 +703,10 @@ RasterStatus RasterCreateLayout(usize slot, const internal::RasterLayout& info, 
         {
             entries[i].stageFlags |= VK_SHADER_STAGE_VERTEX_BIT;
         }
+        if ((static_cast<uint8>(entry.Visibility) & 4) != 0)
+        {
+            entries[i].stageFlags |= VK_SHADER_STAGE_COMPUTE_BIT;
+        }
         if ((static_cast<uint8>(entry.Visibility) & 2) != 0)
         {
             entries[i].stageFlags |= VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -552,14 +722,16 @@ RasterStatus
 RasterCreateSet(usize slot, const internal::RasterLayout& layout, const internal::RasterSet& info, uint32) noexcept
 {
     auto& set = gRasterSets[slot];
-    VkDescriptorPoolSize sizes[3]{{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0},
+    VkDescriptorPoolSize sizes[4]{{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0},
                                   {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 0},
-                                  {VK_DESCRIPTOR_TYPE_SAMPLER, 0}};
+                                  {VK_DESCRIPTOR_TYPE_SAMPLER, 0},
+                                  {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0}};
     for (usize i = 0; i < layout.Count; ++i)
     {
-        ++sizes[static_cast<usize>(layout.Entries[i].Kind)].descriptorCount;
+        const auto kind = static_cast<usize>(layout.Entries[i].Kind);
+        ++sizes[kind > 2 ? 3 : kind].descriptorCount;
     }
-    VkDescriptorPoolSize used[3]{};
+    VkDescriptorPoolSize used[4]{};
     uint32 count = 0;
     for (const auto& size : sizes)
     {
@@ -605,7 +777,8 @@ RasterCreateSet(usize slot, const internal::RasterLayout& layout, const internal
         write.dstBinding = entry.Binding;
         write.descriptorCount = 1;
         write.descriptorType = RasterDescriptor(entry.Kind);
-        if (entry.Kind == RasterBindingKind::UniformBuffer)
+        if (entry.Kind == RasterBindingKind::UniformBuffer || entry.Kind == RasterBindingKind::StorageRead ||
+            entry.Kind == RasterBindingKind::StorageReadWrite)
         {
             buffers[i] = {gRasterBuffers[info.Slots[i]].Object, info.Offsets[i], info.Sizes[i]};
             write.pBufferInfo = &buffers[i];
@@ -793,6 +966,11 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             vkDestroyPipelineLayout(gDevice, gRasterPipelines[slot].Layout, nullptr);
             gRasterPipelines[slot] = {};
             break;
+        case internal::RasterKind::ComputePipeline:
+            vkDestroyPipeline(gDevice, gComputePipelines[slot].Object, nullptr);
+            vkDestroyPipelineLayout(gDevice, gComputePipelines[slot].Layout, nullptr);
+            gComputePipelines[slot] = {};
+            break;
         case internal::RasterKind::Count:
             break;
     }
@@ -830,7 +1008,18 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                          gRasterBuffers[packet.Indices].Object,
                          packet.IndexOffset,
                          packet.Index32 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
-    vkCmdDrawIndexed(command, packet.IndexCount, packet.InstanceCount, 0, 0, 0);
+    if (packet.Indirect != internal::RASTER_CAPACITY)
+    {
+        vkCmdDrawIndexedIndirect(command,
+                                 gRasterBuffers[packet.Indirect].Object,
+                                 packet.IndirectOffset,
+                                 1,
+                                 sizeof(IndexedIndirectArguments));
+    }
+    else
+    {
+        vkCmdDrawIndexed(command, packet.IndexCount, packet.InstanceCount, 0, 0, 0);
+    }
     return RasterStatus::Ready;
 }
 void RasterFrameExtent() noexcept

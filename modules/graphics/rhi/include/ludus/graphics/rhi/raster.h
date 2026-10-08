@@ -139,7 +139,7 @@ enum class RasterStatus : ludus::foundation::uint8
     /// The device was lost; recreate resources in a new session.
     DeviceLost,
 };
-/// Buffer creation role. One immutable role per buffer in this first raster profile.
+/// Buffer creation role, fixed for its lifetime. Storage roles permit graph compute writes.
 enum class BufferRole : ludus::foundation::uint8
 {
     /// Per-vertex or per-instance attributes.
@@ -150,6 +150,12 @@ enum class BufferRole : ludus::foundation::uint8
     Index32,
     /// Uniform bytes with independently verified shader packing.
     Uniform,
+    /// Mutable compute storage, initialized by complete creation bytes.
+    Storage,
+    /// Mutable compute storage also consumed as vertex/instance records.
+    StorageVertex,
+    /// Mutable compute storage also consumed as one indexed indirect command.
+    StorageIndirect,
 };
 /// Immutable buffer description; complete initial bytes are consumed before return.
 struct BufferDescription final
@@ -223,6 +229,10 @@ enum class RasterBindingKind : ludus::foundation::uint8
     Texture2D,
     /// Non-comparison sampler.
     Sampler,
+    /// Read-only compute storage buffer range.
+    StorageRead,
+    /// Read/write compute storage buffer range; shader write races remain kernel obligations.
+    StorageReadWrite,
 };
 /// Shader stage visibility mask.
 enum class RasterVisibility : ludus::foundation::uint8
@@ -233,17 +243,20 @@ enum class RasterVisibility : ludus::foundation::uint8
     Fragment = 2,
     /// Visible to both raster stages.
     Both = 3,
+    /// Compute stage only; no raster/storage writes in this profile.
+    Compute = 4,
 };
 /// One immutable layout entry; binding numbers must be unique and less than eight.
 struct RasterBinding final
 {
     /// Group/set-zero binding number.
     ludus::foundation::uint32 Binding = 0;
-    /// Resource type; arrays and storage resources are unsupported in this profile.
+    /// Resource type; resource arrays and storage textures are unsupported.
     RasterBindingKind Kind = RasterBindingKind::UniformBuffer;
     /// Stages allowed to use this entry.
     RasterVisibility Visibility = RasterVisibility::Both;
-    /// Minimum occupied uniform bytes from this target's reflection; zero for other kinds.
+    /// Minimum occupied uniform bytes or storage element stride from target reflection;
+    /// zero for textures/samplers. Storage ranges must contain at least one element.
     ludus::foundation::usize MinSize = 0;
 };
 /// Portable float vertex attribute width.
@@ -280,6 +293,9 @@ struct RasterShaderDescription final
     std::string_view TextureNames[8]{};
     /// Sampler binding paired with each GLSL ES texture; irrelevant for other targets.
     ludus::foundation::uint32 TextureSamplers[8]{};
+    /// Independently reflected local dimensions for Compute; ignored for raster.
+    /// Positive dimensions/product must fit the negotiated compute limits.
+    ludus::foundation::uint32 WorkgroupSize[3]{1, 1, 1};
 };
 /// One immutable binding snapshot entry; exactly the resource matching Kind is used.
 struct RasterBindingResource final
@@ -383,6 +399,11 @@ struct RasterDraw final
     ludus::foundation::uint32 VertexCount = 0;
     /// Number of instances, positive; instance streams need this many records.
     ludus::foundation::uint32 InstanceCount = 1;
+    /// Optional StorageIndirect buffer. Non-null selects one indirect command;
+    /// counts above are conservative bounds, not CPU copies of GPU arguments.
+    BufferHandle Indirect{};
+    /// Four-byte-aligned command offset, covering IndexedIndirectArguments.
+    ludus::foundation::usize IndirectOffset = 0;
 };
 /// Enabled bounded raster profile, published only for a ready device.
 struct RasterCapabilities final

@@ -135,6 +135,10 @@ void PacketReferences(const RasterPacket& packet, bool retain) noexcept
     reference(RasterKind::Pipeline, packet.Pipeline);
     reference(RasterKind::Set, packet.Set);
     reference(RasterKind::Buffer, packet.Indices);
+    if (packet.Indirect != RASTER_CAPACITY)
+    {
+        reference(RasterKind::Buffer, packet.Indirect);
+    }
     for (usize i = 0; i < At(RasterKind::Pipeline, packet.Pipeline).Pipeline.StreamCount; ++i)
     {
         reference(RasterKind::Buffer, packet.Vertices[i]);
@@ -159,6 +163,10 @@ RasterStatus PacketStatus(const RasterPacket& packet) noexcept
         {
             return record->Status;
         }
+    }
+    if (packet.Indirect != RASTER_CAPACITY && At(RasterKind::Buffer, packet.Indirect).Status != RasterStatus::Ready)
+    {
+        return At(RasterKind::Buffer, packet.Indirect).Status;
     }
     for (usize i = 0; i < records[0]->Pipeline.StreamCount; ++i)
     {

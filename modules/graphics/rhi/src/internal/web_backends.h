@@ -58,6 +58,11 @@ WGPURenderPassEncoder ProbePass() noexcept;
 namespace ludus::graphics::rhi::webgpu
 {
 RasterCapabilities RasterLimits() noexcept;
+ComputeCapabilities ComputeLimits() noexcept;
+RasterStatus
+ComputeCreatePipeline(foundation::usize, const internal::ComputePipelineInfo&, foundation::uint32) noexcept;
+RasterStatus ComputeEncode(const internal::ComputePacket&) noexcept;
+void ComputeBufferBarrier(foundation::usize, GraphAccessMode) noexcept;
 RasterStatus RasterCreateBuffer(foundation::usize,
                                 const BufferDescription&,
                                 std::span<const foundation::uint8>,
@@ -105,6 +110,11 @@ void LifetimeReset() noexcept;
 namespace ludus::graphics::rhi::webgl
 {
 RasterCapabilities RasterLimits() noexcept;
+ComputeCapabilities ComputeLimits() noexcept;
+RasterStatus
+ComputeCreatePipeline(foundation::usize, const internal::ComputePipelineInfo&, foundation::uint32) noexcept;
+RasterStatus ComputeEncode(const internal::ComputePacket&) noexcept;
+void ComputeBufferBarrier(foundation::usize, GraphAccessMode) noexcept;
 RasterStatus RasterCreateBuffer(foundation::usize,
                                 const BufferDescription&,
                                 std::span<const foundation::uint8>,

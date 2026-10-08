@@ -1,4 +1,5 @@
 #include "reference_raster.h"
+#include "internal/backend.h"
 #include "internal/lifecycle.h"
 #include <cstring>
 namespace ludus::graphics::rhi::reference
@@ -6,6 +7,9 @@ namespace ludus::graphics::rhi::reference
 void Reset() noexcept
 {
     ProfileAvailable = true;
+    ComputeAvailable = true;
+    Dispatches = 0;
+    ComputeResult = RasterStatus::Ready;
     Next = RasterStatus::Ready;
     Submission = RasterStatus::Ready;
     LastRequest = 0;
@@ -62,6 +66,22 @@ RasterStatus Created(internal::RasterKind kind, uint32 request) noexcept
     return reference::Next;
 }
 } // namespace
+ComputeCapabilities ComputeLimits() noexcept
+{
+    return reference::ProfileAvailable && reference::ComputeAvailable && Kind() != Backend::WebGL2
+               ? ComputeCapabilities{16777216, 256, {256, 256, 64}, 256, {65535, 65535, 65535}}
+               : ComputeCapabilities{};
+}
+RasterStatus ComputeCreatePipeline(usize, const internal::ComputePipelineInfo&, uint32 request) noexcept
+{
+    return Created(internal::RasterKind::ComputePipeline, request);
+}
+RasterStatus ComputeEncode(const internal::ComputePacket&) noexcept
+{
+    ++reference::Dispatches;
+    return reference::ComputeResult;
+}
+void ComputeBufferBarrier(usize, GraphAccessMode) noexcept {}
 RasterCapabilities RasterLimits() noexcept
 {
     if (!reference::ProfileAvailable)

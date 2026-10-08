@@ -27,6 +27,8 @@
 #import <Metal/MTLBuffer.h>
 #import <Metal/MTLCommandBuffer.h>
 #import <Metal/MTLCommandQueue.h>
+#import <Metal/MTLComputeCommandEncoder.h>
+#import <Metal/MTLComputePipeline.h>
 #import <Metal/MTLDepthStencil.h>
 #import <Metal/MTLDevice.h>
 #import <Metal/MTLLibrary.h>

@@ -44,9 +44,9 @@ struct DeviceFeatures final
     bool FullscreenRaster = false;
     /// The bounded buffer/texture/binding and indexed/instanced profile in raster.h.
     bool PortableRaster = false;
-    /// General compute/storage operations (not implemented).
+    /// Bounded single-queue buffer compute operations (R4); unavailable on WebGL2.
     bool Compute = false;
-    /// General indirect draw/dispatch operations (not implemented).
+    /// One indexed indirect draw per packet (R4); indirect dispatch is deferred.
     bool IndirectRendering = false;
     /// Ordered portable raster graph, version/hazard validation and offscreen passes (R3).
     bool OrderedRasterGraph = false;
