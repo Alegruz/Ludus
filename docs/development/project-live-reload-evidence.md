@@ -20,7 +20,7 @@ and the installed Development SDK:
 | Validation | Actual result and scope |
 | --- | --- |
 | Native warning-clean build and installed SDK consumer | PASS |
-| Loader, protocol, session, reload, configuration and supervisor acceptance | PASS; actual Mach-O module generations and symbol sidecars |
+| Loader, protocol, session, reload, configuration and supervisor acceptance | PASS; actual Mach-O module generations and symbol sidecars; the existing Linux socket-buffer saturation fixture explicitly skips on macOS |
 | Native Cocoa editor journey | PASS, 138 assertions: setup repair, Build and Play, ten warm reloads, ten edits, paused source reload, checkpoint rejection preserving the old generation, configuration replacement, project switching and close during build |
 | Python identity/publication/process guards | PASS; Mach-O bounds/UUID fixtures, schema-2 compatibility, sidecar retention and an actual stopped child |
 | Formatting and affected editor static analysis | PASS with pinned Clang 18 |
