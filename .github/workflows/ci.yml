@@ -673,8 +673,8 @@ jobs:
         run: |
           ./scripts/shader-probe bootstrap
           out/host-tools/venv/bin/cmake --preset linux-clang-development -DLUDUS_EDITOR_RENDER_PREVIEW=ON -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val"
-      - name: Build editor tests without rebuilding every engine test target
-        run: out/host-tools/venv/bin/cmake --build --preset linux-clang-development --target ludus_editor_tests ludus_editor_scene_tests
+      - name: Build Editor application and its test targets
+        run: out/host-tools/venv/bin/cmake --build --preset linux-clang-development --target ludus_editor ludus_editor_tests ludus_editor_scene_tests
       - name: Verify editor initialization and offscreen tests
         run: out/host-tools/venv/bin/ctest --preset linux-clang-development --label-regex '^editor$' --no-tests=error
       - name: Measure the content browser projection
