@@ -408,4 +408,63 @@ void RasterShutdown() noexcept
         webgpu::RasterShutdown();
     }
 }
+void RasterDiscardSubmission() noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::RasterDiscardSubmission();
+    }
+    else
+    {
+        webgpu::RasterDiscardSubmission();
+    }
+}
+RasterStatus LifetimeUpload(foundation::usize transfer,
+                            const BufferDescription& info,
+                            foundation::usize buffer,
+                            const foundation::uint8* bytes,
+                            foundation::usize size,
+                            foundation::uint32 request) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::LifetimeUpload(transfer, info, buffer, bytes, size, request)
+                                      : webgpu::LifetimeUpload(transfer, info, buffer, bytes, size, request);
+}
+RasterStatus
+LifetimeReadback(foundation::usize transfer, BufferRole role, const internal::LifetimeCopyRange& range) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::LifetimeReadback(transfer, role, range)
+                                      : webgpu::LifetimeReadback(transfer, role, range);
+}
+RasterStatus LifetimePollTransfer(bool readback, foundation::usize slot) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::LifetimePollTransfer(readback, slot)
+                                      : webgpu::LifetimePollTransfer(readback, slot);
+}
+RasterStatus LifetimeCopyReadback(foundation::usize slot, foundation::uint8* output, foundation::usize size) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::LifetimeCopyReadback(slot, output, size)
+                                      : webgpu::LifetimeCopyReadback(slot, output, size);
+}
+void LifetimeReleaseTransfer(bool readback, foundation::usize slot) noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::LifetimeReleaseTransfer(readback, slot);
+    }
+    else
+    {
+        webgpu::LifetimeReleaseTransfer(readback, slot);
+    }
+}
+void LifetimeReset() noexcept
+{
+    if (gActive == Backend::WebGL2)
+    {
+        webgl::LifetimeReset();
+    }
+    else
+    {
+        webgpu::LifetimeReset();
+    }
+}
 } // namespace ludus::graphics::rhi::backend

@@ -489,3 +489,5 @@ ResourceStatus Draw(usize slot) noexcept
 } // namespace ludus::graphics::rhi::LUDUS_RHI_WEBGL_NAMESPACE
 
 #include "internal/raster_webgl.h"
+
+#include "internal/lifetime_webgl.h"

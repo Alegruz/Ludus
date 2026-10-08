@@ -299,7 +299,9 @@ the first uploaded row. Vulkan uses a negative-height viewport; the GLSL ES
 artifact converts clip depth. The frame's private depth attachment clears to
 one. Pipelines remain valid on resize because the session target format stays
 fixed. General render targets, explicit pass/encoder objects, updates, resource
-copy commands, mip generation, upload rings and storage/compute are later slices.
+texture copy commands, mip generation and storage/compute are later slices.
+[R2 lifetime services](#lifetime-services-r2) add retained batches and bounded
+buffer upload/readback rings alongside the direct frame API.
 Initial Vulkan texture uploads normally use a synchronous setup copy. A timed-out
 copy remains Pending and retains staging until its fence signals; poll GetStatus.
 This is not a
@@ -365,7 +367,8 @@ VMA handles mapped allocation flush alignment. The existing ordered queue's
 fences establish resource retirement; Metal uses command-buffer completion,
 WebGPU queue work-done callbacks, and WebGL nonblocking sync polling.
 The minimum retirement mechanism accompanies the first general resources;
-R2's upload/descriptor rings and broader lifetime service remain future work.
+R2 exposes this same retirement ledger through the services below; dynamic
+descriptor arenas and texture streaming remain deferred.
 
 The native RHI pixel fixture draws two textured instances, then a farther,
 differently tinted background; it checks texture orientation, instancing and
@@ -378,3 +381,113 @@ device-loss paths in pinned Chromium. Browser software-GPU results are separate
 from physical GPU and hosted-browser acceptance. These checks make no throughput
 or allocation-performance claim. See the architecture's
 [phase evidence](../architecture/rhi-gdi.md#implementation-phases-and-acceptance).
+
+## Lifetime services (R2)
+
+Include `<ludus/graphics/rhi/lifetime.h>` with a ready device that enabled
+`PortableRaster`. These services share R1's registry and dependency graph;
+there is no second device or ownership ledger. All calls run on the device's
+owner thread, between frames unless a query or tracked `EndFrame` says otherwise.
+
+The first service profile has four command batches, 256 draw packets per batch,
+four upload slices and four readback slices independently, 256 KiB per slice,
+and sixteen independently owned pipeline requests. Query
+`GetLifetimeCapabilities`; retained/cancelled work counts against capacity.
+Records still count against the R1 per-kind limits. `CapacityExceeded` is
+retryable after safe retirement, without waiting inside an admission call.
+
+### Record, finish, submit or discard
+
+`BeginCommands` creates a Recording batch. `RecordDraw` validates and copies
+one complete draw, retaining geometry, the binding snapshot, pipeline and their
+resource dependencies. No backend command is emitted during recording. Destroy
+public handles after acceptance if desired: the retained packet uses the same
+physical records. `FinishCommands` closes recording once. Submit the Finished
+batch to its device/surface or `DiscardCommands` either Recording or Finished
+work; discard emits no GPU work.
+
+```cpp
+rhi::CommandBatch batch;
+rhi::SubmissionToken completion;
+// Check each result; these calls require Ready before advancing.
+rhi::BeginCommands(device, batch);
+rhi::RecordDraw(device, batch, draw);
+rhi::FinishCommands(device, batch);
+rhi::SubmitCommands(device, surface, batch, completion);
+```
+
+The snippet shows call order; the complete checked consumer is
+[`tests/sdk_consumer/raster.cpp`](../../tests/sdk_consumer/raster.cpp).
+A skipped target returns `NotReady` and preserves the Finished batch for retry.
+Preflight or completion-capacity rejection preserves it too. Once encoding
+starts, an error may accompany an accepted partial submission; inspect both
+status and completion. A successful submission consumes the batch and shifts
+its leases to GPU retirement. A later resize acquires the current target without
+changing immutable pipeline identity. Shutdown/loss invalidates batches and
+releases their physical dependencies at the backend's safe teardown boundary.
+
+`EndFrame(device, completion)` tracks direct and clear-only frames as well.
+`GetStatus(device, completion)` is a zero-wait query: `Pending` means accepted
+ordered work is outstanding, `Ready` means GPU execution completed. A complete
+higher token covers earlier accepted work on the same queue/session. Tokens are
+borrowed, require no release, never wrap, and are invalid across device restart.
+GPU completion does not prove presentation or pixel correctness.
+
+### Upload and readback rings
+
+`RequestBufferUpload` copies complete immutable initial bytes before return.
+The ticket owns a ring slice and destination buffer; the caller can immediately
+reuse its byte storage. Poll its status on later owner/event-loop turns, then
+`TakeUploadedBuffer` transfers the Ready buffer into a null output.
+`Release(ticket)` cancels publication, preserving staging and the private result
+until GPU work and creation validation retire. Uniform/vertex/index role and
+size/alignment rules still apply. Index16 uploads pad only the private copy to
+four bytes; public size and index validation keep the original byte count.
+
+`RequestBufferReadback` retains a Ready buffer and copies a bounded range to a
+separate ring. Offsets and sizes must be multiples of four within the original
+buffer size. After status becomes Ready, `CopyReadback` copies into caller
+storage; it never exposes a native mapping and preserves destination bytes on
+Pending/rejection/failure. Release the ticket even after a terminal request
+failure. Destroying the source handle before completion is safe. Logical
+cancellation does not recycle an in-flight copy or mapping.
+
+Vulkan uses the existing private VMA adapter, cached mapped staging, narrow
+transfer/host barriers and zero-timeout fence queries. Metal uses shared staging
+and submitted blits. WebGPU uses copy buffers, asynchronous validation/work-done
+and read mapping; mapping success is separate from queue progress. WebGL 2 uses
+type-compatible copy buffers, zero-timeout sync queries and `getBufferSubData`
+only after completion. That final browser copy can incur IPC/CPU cost; this
+profile promises no driver time budget or throughput improvement. Native
+shutdown may wait for submitted work; browser callback cells stay occupied
+across shutdown until late callbacks drain safely.
+
+### Pipeline requests
+
+`RequestPipeline` copies the description and retains immutable shader/layout
+incarnations immediately. Equivalent descriptions share one pending/ready/failed
+record; comparison includes every active field, canonical attribute locations,
+fixed state and device session, with no pointer/padding/hash identity.
+`PollLifetime` launches at most one queued pipeline per call. WebGPU uses
+asynchronous driver creation; Vulkan, Metal and WebGL create on the context owner
+and may occupy that call. There is no portable worker-thread compilation or
+persistent driver-cache promise in this slice.
+
+`GetRequestedPipeline` borrows the Ready pipeline while its request is owned.
+Do not Destroy that borrowed handle: release the request. Other requests and
+accepted batches retain independent leases. The last request removes the cache
+entry; callbacks and CPU/GPU work keep physical records until safe retirement.
+Cancelling a queued request before launch creates no backend pipeline. Failures
+remain explicit; no backend switch or fallback pipeline is inserted.
+
+Reference tests cover finish/discard/submit, destruction at each boundary,
+capacity and delayed completion, cancellation, memory/validation failure and
+restart. Native pixel tests render from detached retained records; native
+transfer tests compare all four buffer roles. The installed SDK consumer checks
+uploads/readbacks, shared pipeline requests, completion and final-frame
+resource release on forced WebGPU/WebGL 2 and Auto. The browser harness adds
+pipeline, transfer and mapping failures and device loss. Software-GPU browser
+results remain separate from physical GPU/browser acceptance.
+
+Texture rings, mutable buffer updates, descriptor suballocation, general
+copy/pass APIs and a separate GraphicsDevice module remain later extensions.

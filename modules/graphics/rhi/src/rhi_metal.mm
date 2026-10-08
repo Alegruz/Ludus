@@ -649,3 +649,5 @@ bool ReadHeadlessPixels(std::span<uint8> pixels) noexcept
 } // namespace ludus::graphics::rhi::backend
 
 #include "internal/raster_metal.h"
+
+#include "internal/lifetime_metal.h"

@@ -9,6 +9,10 @@ namespace ludus::graphics::rhi::internal
 inline constexpr foundation::usize RASTER_CAPACITY = 16;
 inline constexpr foundation::usize RASTER_BINDINGS = 8;
 inline constexpr foundation::usize RASTER_DRAWS = 1024;
+inline constexpr foundation::usize LIFETIME_BATCHES = 4;
+inline constexpr foundation::usize LIFETIME_BATCH_DRAWS = 256;
+inline constexpr foundation::usize LIFETIME_TRANSFERS = 4;
+inline constexpr foundation::usize LIFETIME_TRANSFER_BYTES = foundation::usize{256} * 1024;
 // Shared by callback requests and submission ordinals; zero stays exhausted.
 template <typename T>
 struct RasterSequence final
@@ -87,6 +91,12 @@ struct RasterPacket final
     foundation::uint32 InstanceCount = 0;
     bool Index32 = false;
 };
+struct LifetimeCopyRange final
+{
+    foundation::usize Buffer = 0;
+    foundation::usize Offset = 0;
+    foundation::usize Size = 0;
+};
 // These hooks join the existing frame/loss owner, not a second session.
 bool FrameOpen() noexcept;
 bool ClaimRasterFrame() noexcept;
@@ -96,11 +106,13 @@ void ReleaseRasterResources() noexcept;
 enum class RasterCallbacks : foundation::uint8
 {
     One = 1,
-    Two = 2
+    Two = 2,
+    Three = 3
 };
 void RasterExpect(foundation::uint32 request, RasterCallbacks callbacks) noexcept;
 void RasterComplete(foundation::uint32 request, RasterStatus status) noexcept;
 void RasterFail(foundation::uint32 request, RasterStatus status) noexcept;
+void ResetLifetimeRecords() noexcept;
 } // namespace ludus::graphics::rhi::internal
 namespace ludus::graphics::rhi::backend
 {
@@ -128,8 +140,20 @@ RasterStatus RasterDraw(const internal::RasterPacket&) noexcept;
 // Reserve mandatory completion bookkeeping before the first draw; submission
 // cannot discover that its callback storage is exhausted after GPU work starts.
 RasterStatus RasterReserveSubmission() noexcept;
+void RasterDiscardSubmission() noexcept;
 void RasterSubmit(foundation::uint64 ordinal) noexcept;
 foundation::uint64 RasterCompleted() noexcept;
 void RasterReset() noexcept;
 void RasterShutdown() noexcept;
+RasterStatus LifetimeUpload(foundation::usize,
+                            const BufferDescription&,
+                            foundation::usize,
+                            const foundation::uint8*,
+                            foundation::usize,
+                            foundation::uint32) noexcept;
+RasterStatus LifetimeReadback(foundation::usize, BufferRole, const internal::LifetimeCopyRange&) noexcept;
+RasterStatus LifetimePollTransfer(bool, foundation::usize) noexcept;
+RasterStatus LifetimeCopyReadback(foundation::usize, foundation::uint8*, foundation::usize) noexcept;
+void LifetimeReleaseTransfer(bool, foundation::usize) noexcept;
+void LifetimeReset() noexcept;
 } // namespace ludus::graphics::rhi::backend

@@ -141,7 +141,7 @@ RasterCreateBuffer(usize slot, const BufferDescription& info, std::span<const ui
     const auto usage = info.Role == BufferRole::Uniform  ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
                        : info.Role == BufferRole::Vertex ? VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
                                                          : VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    return RasterError(RasterUploadBuffer(usage, bytes, gRasterBuffers[slot]));
+    return RasterError(RasterUploadBuffer(usage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, bytes, gRasterBuffers[slot]));
 }
 RasterStatus
 RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpload& upload, uint32 request) noexcept
@@ -652,9 +652,11 @@ uint64 RasterCompleted() noexcept
             continue;
         }
         const auto result = vkGetFenceStatus(gDevice, texture.Fence);
-        if (result == VK_ERROR_DEVICE_LOST)
+        if (result != VK_SUCCESS && result != VK_NOT_READY)
         {
-            internal::Fail(gSession, StartupError::DeviceLost);
+            internal::Fail(gSession,
+                           result == VK_ERROR_DEVICE_LOST ? StartupError::DeviceLost
+                                                          : StartupError::RenderingUnavailable);
             return gRasterCompleted;
         }
         if (result == VK_SUCCESS)
@@ -675,9 +677,11 @@ uint64 RasterCompleted() noexcept
             continue;
         }
         const auto result = vkGetFenceStatus(gDevice, gFrames[i].Fence);
-        if (result == VK_ERROR_DEVICE_LOST)
+        if (result != VK_SUCCESS && result != VK_NOT_READY)
         {
-            internal::Fail(gSession, StartupError::DeviceLost);
+            internal::Fail(gSession,
+                           result == VK_ERROR_DEVICE_LOST ? StartupError::DeviceLost
+                                                          : StartupError::RenderingUnavailable);
             return gRasterCompleted;
         }
         if (result == VK_SUCCESS && gRasterOrdinals[i] > gRasterCompleted)

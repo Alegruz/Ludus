@@ -81,10 +81,22 @@ RasterStatus RasterDraw(const internal::RasterPacket&) noexcept;
 // Reserve mandatory completion bookkeeping before the first draw; submission
 // cannot discover that its callback storage is exhausted after GPU work starts.
 RasterStatus RasterReserveSubmission() noexcept;
+void RasterDiscardSubmission() noexcept;
 void RasterSubmit(foundation::uint64 ordinal) noexcept;
 foundation::uint64 RasterCompleted() noexcept;
 void RasterReset() noexcept;
 void RasterShutdown() noexcept;
+RasterStatus LifetimeUpload(foundation::usize,
+                            const BufferDescription&,
+                            foundation::usize,
+                            const foundation::uint8*,
+                            foundation::usize,
+                            foundation::uint32) noexcept;
+RasterStatus LifetimeReadback(foundation::usize, BufferRole, const internal::LifetimeCopyRange&) noexcept;
+RasterStatus LifetimePollTransfer(bool, foundation::usize) noexcept;
+RasterStatus LifetimeCopyReadback(foundation::usize, foundation::uint8*, foundation::usize) noexcept;
+void LifetimeReleaseTransfer(bool, foundation::usize) noexcept;
+void LifetimeReset() noexcept;
 } // namespace ludus::graphics::rhi::webgpu
 namespace ludus::graphics::rhi::webgl
 {
@@ -112,8 +124,20 @@ RasterStatus RasterDraw(const internal::RasterPacket&) noexcept;
 // Reserve mandatory completion bookkeeping before the first draw; submission
 // cannot discover that its callback storage is exhausted after GPU work starts.
 RasterStatus RasterReserveSubmission() noexcept;
+void RasterDiscardSubmission() noexcept;
 void RasterSubmit(foundation::uint64 ordinal) noexcept;
 foundation::uint64 RasterCompleted() noexcept;
 void RasterReset() noexcept;
 void RasterShutdown() noexcept;
+RasterStatus LifetimeUpload(foundation::usize,
+                            const BufferDescription&,
+                            foundation::usize,
+                            const foundation::uint8*,
+                            foundation::usize,
+                            foundation::uint32) noexcept;
+RasterStatus LifetimeReadback(foundation::usize, BufferRole, const internal::LifetimeCopyRange&) noexcept;
+RasterStatus LifetimePollTransfer(bool, foundation::usize) noexcept;
+RasterStatus LifetimeCopyReadback(foundation::usize, foundation::uint8*, foundation::usize) noexcept;
+void LifetimeReleaseTransfer(bool, foundation::usize) noexcept;
+void LifetimeReset() noexcept;
 } // namespace ludus::graphics::rhi::webgl

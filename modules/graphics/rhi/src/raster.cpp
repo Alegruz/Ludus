@@ -1,4 +1,4 @@
-#include <ludus/graphics/rhi/raster.h>
+#include <ludus/graphics/rhi/lifetime.h>
 
 #include "internal/lifecycle.h"
 #include "internal/raster.h"
@@ -66,6 +66,8 @@ struct Record final
     RasterStatus Status = RasterStatus::Failed;
     bool Published = false;
     bool InFrame = false;
+    bool ServiceOwned = false;
+    bool QueuedPipeline = false;
     BufferDescription Buffer;
     TextureDescription Texture;
     usize TextureSlot = 0;
@@ -79,6 +81,8 @@ Record gRecords[KINDS][RASTER_CAPACITY];
 RasterSequence<uint32> gRequests;
 RasterSequence<uint64> gSubmissions;
 uint64 gFrameSubmission = 0;
+uint64 gFirstAcceptedSubmission = 0;
+uint64 gLastAcceptedSubmission = 0;
 usize gDrawCount = 0;
 
 Record& At(RasterKind kind, usize slot) noexcept
@@ -645,9 +649,10 @@ RasterStatus CreateBindingSet(DeviceHandle device,
         return backend::RasterCreateSet(slot, layout, set, record.Request);
     });
 }
-RasterStatus CreateRasterPipeline(DeviceHandle device,
-                                  const RasterPipelineDescription& description,
-                                  RasterPipelineHandle& output) noexcept
+namespace
+{
+RasterStatus
+ValidatePipeline(DeviceHandle device, const RasterPipelineDescription& description, RasterPipelineInfo& info) noexcept
 {
     const auto admission = Admission(device);
     if (admission != RasterStatus::Ready)
@@ -676,7 +681,6 @@ RasterStatus CreateRasterPipeline(DeviceHandle device,
     {
         return RasterStatus::InvalidDescription;
     }
-    RasterPipelineInfo info;
     info.Vertex = RasterAccess::Slot(description.Vertex);
     info.Fragment = RasterAccess::Slot(description.Fragment);
     info.Layout = RasterAccess::Slot(description.Layout);
@@ -725,21 +729,32 @@ RasterStatus CreateRasterPipeline(DeviceHandle device,
         }
         info.Attributes[i] = attribute;
     }
+    return RasterStatus::Ready;
+}
+} // namespace
+RasterStatus CreateRasterPipeline(DeviceHandle device,
+                                  const RasterPipelineDescription& description,
+                                  RasterPipelineHandle& output) noexcept
+{
+    RasterPipelineInfo info;
+    const auto valid = ValidatePipeline(device, description, info);
+    if (valid != RasterStatus::Ready)
+    {
+        return valid;
+    }
     return Publish(RasterKind::Pipeline, output, [&](usize slot, Record& record) noexcept {
         record.Pipeline = info;
         return backend::RasterCreatePipeline(slot, info, record.Request);
     });
 }
-RasterStatus DrawIndexed(DeviceHandle device, const RasterDraw& draw) noexcept
+namespace
+{
+RasterStatus ValidateDraw(DeviceHandle device, const RasterDraw& draw, RasterPacket& packet) noexcept
 {
     const auto admission = Admission(device, false);
     if (admission != RasterStatus::Ready)
     {
         return admission;
-    }
-    if (!FrameOpen())
-    {
-        return RasterStatus::InvalidState;
     }
     const auto* pipeline = Resolve(draw.Pipeline, RasterKind::Pipeline);
     const auto* set = Resolve(draw.Bindings, RasterKind::Set);
@@ -790,7 +805,6 @@ RasterStatus DrawIndexed(DeviceHandle device, const RasterDraw& draw) noexcept
             return RasterStatus::InvalidDescription;
         }
     }
-    RasterPacket packet;
     packet.Pipeline = RasterAccess::Slot(draw.Pipeline);
     packet.Set = RasterAccess::Slot(draw.Bindings);
     packet.Indices = RasterAccess::Slot(draw.Indices);
@@ -819,22 +833,35 @@ RasterStatus DrawIndexed(DeviceHandle device, const RasterDraw& draw) noexcept
         packet.Vertices[i] = RasterAccess::Slot(slice.Buffer);
         packet.Offsets[i] = slice.Offset;
     }
+    return RasterStatus::Ready;
+}
+RasterStatus ReserveFrameSubmission() noexcept
+{
+    if (gFrameSubmission != 0)
+    {
+        return RasterStatus::Ready;
+    }
+    if (gSubmissions.Next == 0)
+    {
+        return RasterStatus::IdentityExhausted;
+    }
+    const auto result = backend::RasterReserveSubmission();
+    if (result == RasterStatus::Ready)
+    {
+        gFrameSubmission = gSubmissions.Next;
+    }
+    return result;
+}
+RasterStatus EncodePacket(const RasterPacket& packet) noexcept
+{
     if (gDrawCount >= RASTER_DRAWS)
     {
         return RasterStatus::CapacityExceeded;
     }
-    if (gFrameSubmission == 0)
+    const auto reservation = ReserveFrameSubmission();
+    if (reservation != RasterStatus::Ready)
     {
-        if (gSubmissions.Next == 0)
-        {
-            return RasterStatus::IdentityExhausted;
-        }
-        const auto reservation = backend::RasterReserveSubmission();
-        if (reservation != RasterStatus::Ready)
-        {
-            return reservation;
-        }
-        gFrameSubmission = gSubmissions.Take();
+        return reservation;
     }
     if (!ClaimRasterFrame())
     {
@@ -843,13 +870,26 @@ RasterStatus DrawIndexed(DeviceHandle device, const RasterDraw& draw) noexcept
     FrameRetain(RasterKind::Pipeline, packet.Pipeline);
     FrameRetain(RasterKind::Set, packet.Set);
     FrameRetain(RasterKind::Buffer, packet.Indices);
-    for (usize i = 0; i < info.StreamCount; ++i)
+    for (usize i = 0; i < At(RasterKind::Pipeline, packet.Pipeline).Pipeline.StreamCount; ++i)
     {
         FrameRetain(RasterKind::Buffer, packet.Vertices[i]);
     }
     ++gDrawCount;
     return backend::RasterDraw(packet);
 }
+} // namespace
+RasterStatus DrawIndexed(DeviceHandle device, const RasterDraw& draw) noexcept
+{
+    if (!FrameOpen())
+    {
+        const auto admission = Admission(device, false);
+        return admission == RasterStatus::Ready ? RasterStatus::InvalidState : admission;
+    }
+    RasterPacket packet;
+    const auto valid = ValidateDraw(device, draw, packet);
+    return valid == RasterStatus::Ready ? EncodePacket(packet) : valid;
+}
+
 namespace internal
 {
 void RasterExpect(uint32 request, RasterCallbacks callbacks) noexcept
@@ -912,7 +952,17 @@ void RasterEndFrame(bool accepted) noexcept
 {
     if (gFrameSubmission != 0 && accepted)
     {
+        (void)gSubmissions.Take();
+        if (gFirstAcceptedSubmission == 0)
+        {
+            gFirstAcceptedSubmission = gFrameSubmission;
+        }
+        gLastAcceptedSubmission = gFrameSubmission;
         backend::RasterSubmit(gFrameSubmission);
+    }
+    if (!accepted)
+    {
+        backend::RasterDiscardSubmission();
     }
     for (auto& records : gRecords)
     {
@@ -938,6 +988,8 @@ void ReleaseRasterResources() noexcept
     // Shutdown owns all physical release. Native reset waits or drops the lost
     // device; browser callbacks retain their stable bookkeeping until delivery.
     backend::RasterReset();
+    backend::LifetimeReset();
+    ResetLifetimeRecords();
     for (usize kind = KINDS; kind-- > 0;)
     {
         for (usize slot = 0; slot < RASTER_CAPACITY; ++slot)
@@ -954,6 +1006,8 @@ void ReleaseRasterResources() noexcept
         }
     }
     backend::RasterShutdown();
+    gFirstAcceptedSubmission = 0;
+    gLastAcceptedSubmission = 0;
     gFrameSubmission = 0;
     gDrawCount = 0;
 }
@@ -1224,6 +1278,10 @@ RasterStatus Destroy(DeviceHandle device, RasterPipelineHandle& handle) noexcept
     {
         return RasterStatus::InvalidHandle;
     }
+    if (record->ServiceOwned)
+    {
+        return RasterStatus::InvalidState;
+    }
     record->Published = false;
     --record->References;
     handle = {};
@@ -1231,3 +1289,5 @@ RasterStatus Destroy(DeviceHandle device, RasterPipelineHandle& handle) noexcept
     return RasterStatus::Ready;
 }
 } // namespace ludus::graphics::rhi
+
+#include "internal/lifetime_services.h"

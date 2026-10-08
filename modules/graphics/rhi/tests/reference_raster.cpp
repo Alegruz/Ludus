@@ -1,5 +1,6 @@
 #include "reference_raster.h"
 #include "internal/lifecycle.h"
+#include <cstring>
 namespace ludus::graphics::rhi::reference
 {
 void Reset() noexcept
@@ -12,6 +13,24 @@ void Reset() noexcept
     Submitted = 0;
     Completed = 0;
     Draws = 0;
+    Discards = 0;
+    Copies = 0;
+    TransferStart = ReadbackCopy = RasterStatus::Ready;
+    for (auto& direction : Transfers)
+    {
+        for (auto& status : direction)
+        {
+            status = RasterStatus::Pending;
+        }
+    }
+    for (auto& bytes : BufferBytes)
+    {
+        bytes.clear();
+    }
+    for (auto& bytes : ReadbackBytes)
+    {
+        bytes.clear();
+    }
     for (auto& count : Creates)
     {
         count = 0;
@@ -46,8 +65,10 @@ RasterCapabilities RasterLimits() noexcept
     }
     return {usize{64} * 1024 * 1024, 4096, 256, 16384, 16, 1024};
 }
-RasterStatus RasterCreateBuffer(usize, const BufferDescription&, std::span<const uint8>, uint32 request) noexcept
+RasterStatus
+RasterCreateBuffer(usize slot, const BufferDescription&, std::span<const uint8> bytes, uint32 request) noexcept
 {
+    reference::BufferBytes[slot].assign(bytes.begin(), bytes.end());
     return Created(internal::RasterKind::Buffer, request);
 }
 RasterStatus RasterCreateTexture(usize, const TextureDescription&, const TextureUpload&, uint32 request) noexcept
@@ -107,6 +128,63 @@ uint64 RasterCompleted() noexcept
     }
     return reference::Completed;
 }
+void RasterDiscardSubmission() noexcept
+{
+    ++reference::Discards;
+}
+RasterStatus LifetimeUpload(usize transfer,
+                            const BufferDescription&,
+                            usize buffer,
+                            const uint8* bytes,
+                            usize size,
+                            uint32 request) noexcept
+{
+    if (reference::TransferStart != RasterStatus::Ready)
+    {
+        return reference::TransferStart;
+    }
+    reference::BufferBytes[buffer].assign(bytes, bytes + size);
+    reference::Transfers[0][transfer] = RasterStatus::Pending;
+    ++reference::Copies;
+    return Created(internal::RasterKind::Buffer, request);
+}
+RasterStatus LifetimeReadback(usize transfer, BufferRole, const internal::LifetimeCopyRange& range) noexcept
+{
+    const auto buffer = range.Buffer;
+    const auto offset = range.Offset;
+    const auto size = range.Size;
+    if (reference::TransferStart != RasterStatus::Ready)
+    {
+        return reference::TransferStart;
+    }
+    const auto& bytes = reference::BufferBytes[buffer];
+    reference::ReadbackBytes[transfer].assign(bytes.begin() + static_cast<isize>(offset),
+                                              bytes.begin() + static_cast<isize>(offset + size));
+    reference::Transfers[1][transfer] = RasterStatus::Pending;
+    ++reference::Copies;
+    return RasterStatus::Ready;
+}
+RasterStatus LifetimePollTransfer(bool readback, usize slot) noexcept
+{
+    return reference::Transfers[readback ? 1 : 0][slot];
+}
+RasterStatus LifetimeCopyReadback(usize slot, uint8* output, usize size) noexcept
+{
+    if (reference::ReadbackCopy == RasterStatus::Ready)
+    {
+        std::memcpy(output, reference::ReadbackBytes[slot].data(), size);
+    }
+    else
+    {
+        output[0] = 0;
+    } // Deliberately dirty backend scratch on failure.
+    return reference::ReadbackCopy;
+}
+void LifetimeReleaseTransfer(bool readback, usize slot) noexcept
+{
+    reference::Transfers[readback ? 1 : 0][slot] = RasterStatus::Failed;
+}
+void LifetimeReset() noexcept {}
 void RasterShutdown() noexcept {}
 void RasterReset() noexcept
 {
