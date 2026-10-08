@@ -8,6 +8,7 @@ streaming protocol in editor_tool.py).
 
 Commands:
 
+    ludus tools install-butler <destination>
     ludus sdk list
     ludus sdk install --archive <sdk-archive> [--repair] [--store <dir>]
     ludus sdk remove --digest <sha256>
@@ -352,12 +353,26 @@ def cmd_scripts_cook(args) -> int:
     return EXIT_OK
 
 
+def cmd_install_butler(args) -> int:
+    from .butler import BUTLER_VERSION, host_artifact, install_butler
+    artifact = host_artifact()
+    binary = install_butler(Path(args.destination))
+    _emit(args, {"tool": "butler", "version": BUTLER_VERSION, "platform": artifact.channel, "executable": str(binary)})
+    if not getattr(args, "json", False):
+        print(f"Installed butler {BUTLER_VERSION}: {binary}")
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ludus", description="Ludus host tooling CLI")
     p.add_argument("--version", action="version", version=f"ludus {__version__}")
     p.add_argument("--json", action="store_true", help="emit a versioned JSON result")
     p.add_argument("--store", help="SDK store root (default: $LUDUS_SDK_STORE or the native user data directory)")
     sub = p.add_subparsers(dest="group", required=True)
+    tools = sub.add_parser("tools", help="explicitly acquire optional host tools").add_subparsers(dest="cmd", required=True)
+    butler = tools.add_parser("install-butler", help="download the pinned host butler executable; never logs in or uploads")
+    butler.add_argument("destination", help="directory for butler; an existing executable is never replaced")
+    butler.set_defaults(func=cmd_install_butler)
     scripts = sub.add_parser("scripts", help="cook project-owned behavior assets").add_subparsers(dest="cmd", required=True)
     cook = scripts.add_parser("cook", help="explicit paired-tool cook; never downloads tools")
     for flag in ("contract", "package", "output", "profile", "compiler", "analyzer"):

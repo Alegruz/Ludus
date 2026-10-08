@@ -169,6 +169,40 @@ use stable `InvalidRelease`, `UnsupportedReleaseTarget`, `InvalidPackage`,
 `Conflict`, `BuildFailed`, `SdkIncompatible` and `MissingTools` categories through
 the existing host-tooling error boundary. A failed operation never uploads.
 
+## Install the pinned butler tool
+
+The installed CLI can explicitly acquire butler 15.31.0 for Linux x64,
+macOS Apple silicon, or macOS Intel:
+
+```bash
+ludus tools install-butler /path/to/private-tools
+/path/to/private-tools/butler version
+# Machine-readable installation result:
+ludus --json tools install-butler /path/to/another-tools-directory
+```
+
+The running host's OS and CPU select the versioned upstream archive. A Python
+process running under Rosetta reports x64 and selects the Intel executable;
+native arm64 Python selects the Apple silicon executable. Other hosts fail
+before downloading or creating directories.
+
+Both archive and executable SHA-256 values are pinned in the shared installer.
+Downloads and extracted executable bytes are bounded to 128 MiB; redirects must
+remain HTTPS. Only `butler` is installed, with owner-only executable permissions.
+Optional 7-zip libraries are excluded, following the
+[upstream installation manual](https://itch.io/docs/butler/installing.html).
+
+The destination may be a new or existing ordinary directory. Existing files are
+preserved; an existing `butler`, including a symlink, causes `Conflict` before
+any download. Use another destination to reinstall. Verified bytes are published
+atomically without replacement. Failure or interruption removes private staging
+and a newly created empty destination; parent directories may remain.
+
+Installation does not execute butler, modify PATH/shell settings, use
+`BUTLER_API_KEY`, log in, or upload. No project check/open/build implicitly
+installs it. macOS live upload supervision remains guarded; this command supplies
+an independently usable pinned tool without enabling `project publish upload`.
+
 ## Validation scope
 
 Run `python3 -m unittest discover -s scripts/python -p 'test_ludus*.py' -v` with

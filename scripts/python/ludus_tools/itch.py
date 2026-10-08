@@ -1,7 +1,6 @@
 """Explicit itch.io upload of a verified private package snapshot; no retries."""
 from __future__ import annotations
 
-import hashlib
 import os
 import selectors
 import shutil
@@ -9,50 +8,14 @@ import signal
 import subprocess
 import tempfile
 import time
-import urllib.request
-import zipfile
 from pathlib import Path
 
+from .butler import BUTLER_VERSION, install_butler
 from .buildlock import BuildTreeLock
 from .package_verify import file_digest
 from .release import publish_plan
 from .release_model import canonical, fail
 from .errors import ToolingError
-
-BUTLER_VERSION = "15.31.0"
-BUTLER_URL = f"https://broth.itch.zone/butler/linux-amd64/{BUTLER_VERSION}/archive/default"
-BUTLER_ARCHIVE_SHA256 = "4f2a3f22b12f870923504d4b6935535cad377b45859f5fe9419e3adc0611a48c"
-BUTLER_BINARY_SHA256 = "578e1ebe8548ddf2a1b8374d5a85c0308668df3c06a2a1b9edb6ad1112c606eb"
-MAX_DOWNLOAD = 128 * 1024 * 1024
-
-
-def install_butler(destination: Path) -> Path:
-    """Install only the pinned executable into a caller-owned private directory."""
-    archive = destination / "butler.zip"
-    digest = hashlib.sha256()
-    count = 0
-    with urllib.request.urlopen(BUTLER_URL, timeout=30) as source, archive.open("xb") as output:
-        if not source.geturl().startswith("https://"):
-            fail("butler download redirected outside HTTPS", "MissingTools")
-        while block := source.read(1024 * 1024):
-            count += len(block)
-            if count > MAX_DOWNLOAD:
-                fail("butler download exceeds size limit", "MissingTools")
-            digest.update(block)
-            output.write(block)
-    if digest.hexdigest() != BUTLER_ARCHIVE_SHA256:
-        fail("butler archive digest mismatch", "MissingTools")
-    binary = destination / "butler"
-    with zipfile.ZipFile(archive) as reader:
-        if reader.getinfo("butler").file_size > MAX_DOWNLOAD:
-            fail("oversized butler executable", "MissingTools")
-        with reader.open("butler") as source, binary.open("xb") as output:
-            shutil.copyfileobj(source, output, 1024 * 1024)
-    if file_digest(binary) != BUTLER_BINARY_SHA256:
-        fail("butler executable digest mismatch", "MissingTools")
-    binary.chmod(0o700)
-    archive.unlink()
-    return binary
 
 
 def _run_upload(argv: list[str], env: dict[str, str], secret: str) -> int:
