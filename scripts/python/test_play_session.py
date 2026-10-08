@@ -227,6 +227,31 @@ class GenerationPublishTests(unittest.TestCase):
             path.chmod(0o644); path.write_text(json.dumps(data))
             self.assertIsNone(play_session.read_manifest(legacy)["host_symbol_file"])
 
+    def test_darwin_rename_then_seal_and_failed_seal_cleanup(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            module, host, _ = self._artifacts(root)
+            gens = root / "generations"
+            rename = os.rename
+            chmod = os.chmod
+            def darwin_rename(source, destination):
+                if not source.stat().st_mode & 0o200:
+                    raise PermissionError("Darwin directory rename requires write access")
+                rename(source, destination)
+            def fail_seal(path, mode, **kwargs):
+                if mode == 0o555:
+                    raise PermissionError("seal failure")
+                chmod(path, mode, **kwargs)
+            fields = dict(generations_root=gens, module_artifact=module, host_artifact=host,
+                          symbol_artifact=None, manifest_fields=self._fields(), declared_source_inputs=[module])
+            with mock.patch("play_session.sys.platform", "darwin"), mock.patch("play_session.os.rename", darwin_rename):
+                gen = play_session.publish_generation(**fields)
+                self.assertFalse(gen.stat().st_mode & 0o222)
+                self.assertEqual(play_session.read_manifest(gen)["schema"], 3)
+                with mock.patch("play_session.os.chmod", fail_seal), self.assertRaisesRegex(PermissionError, "seal failure"):
+                    play_session.publish_generation(**fields)
+                self.assertEqual([gen], [p for p in gens.iterdir() if p.is_dir()])
+
     def test_publish_is_atomic_and_immutable(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

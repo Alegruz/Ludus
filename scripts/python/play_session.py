@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 import fcntl
@@ -280,12 +281,20 @@ def _publish_generation_locked(
             raise PublishError("source inputs changed during publication; result is Superseded")
         for child in staging.iterdir():
             os.chmod(child, 0o444 | (child.stat().st_mode & 0o111))
-        os.chmod(staging, 0o555)
+        if sys.platform != "darwin":
+            os.chmod(staging, 0o555)
 
         final = generations_root / gen_id
         if final.exists():
             raise PublishError(f"generation id already exists (never reuse): {gen_id}")
+        # Darwin requires a writable source directory for rename. Lease acquisition
+        # and GC share our publication lock; no consumer receives this path until
+        # sealing completes. Rebind staging so a sealing failure removes the moved
+        # directory rather than leaving a writable generation behind.
         os.rename(staging, final)
+        staging = final
+        if sys.platform == "darwin":
+            os.chmod(final, 0o555)
         return final
     except Exception as exc:
         # Uncertain native ownership pins its files. Staging directories are
