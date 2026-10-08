@@ -9,7 +9,8 @@ Ludus.
 
 The artwork is wired into the editor's Qt resources, Welcome and recent-project
 views, macOS app bundle, wiki branding and browser editor package. The production
-theme remains a design target. The [multiplatform GUI systems](editor-gui-systems.md) and
+theme now applies the light/dark roles below to the Qt workspace and project
+creation dialog. The [multiplatform GUI systems](editor-gui-systems.md) and
 [interaction design](editor-interaction-design.md) continue to own the compact
 contextual row, useful central documents and optional secondary panels. Native
 OS decoration/menu conventions stay native; the browser gets no simulated OS
@@ -110,7 +111,9 @@ The captured concept views are [Quiet Studio](../development/images/editor-direc
 [Open Workshop](../development/images/editor-direction-workshop.jpg). Actual Qt
 creation captures: [dark](../development/images/editor-project-creation-dark.png)
 and [light](../development/images/editor-project-creation-light.png); these show
-the native usability fix, not a finished production theme.
+the implemented Ludus Block theme. Workspace captures are available in
+[dark](../development/images/editor-block-workspace-dark.png) and
+[light](../development/images/editor-block-workspace-light.png) appearance.
 
 ## Common interaction rules
 
@@ -134,10 +137,12 @@ the native usability fix, not a finished production theme.
 
 ## Visual system target
 
-The HTML study has isolated surface/text/border/accent/radius tokens. The native
-fix currently preserves platform fonts, palette, controls and window decoration,
-adding only explicit palette-appropriate panel/dialog/splitter outlines. It uses
-logical pixels and layout managers, with no custom title-bar hit testing.
+The HTML study has isolated surface/text/border/accent/radius tokens. The Qt
+component layer now applies these roles to panel surfaces, tabs, fields,
+buttons, lists, table headers and focus borders. Welcome groups its primary
+creation/open actions above the recent-project list. Application palette changes
+refresh the light/dark appearance; platform fonts, menus and window decoration
+remain native. It uses logical pixels and layout managers, with no custom title-bar hit testing.
 
 Use cool charcoal surfaces, mint actions, readable neutral text and modest
 rounding. Translate the logo's construction into clear panel grouping and

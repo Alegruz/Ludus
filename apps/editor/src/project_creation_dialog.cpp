@@ -12,6 +12,7 @@
 #include <QPushButton>
 #include <QStandardPaths>
 #include <QVBoxLayout>
+#include <QVariant>
 
 namespace ludus::editor
 {
@@ -26,7 +27,7 @@ ProjectCreationDialog::ProjectCreationDialog(QWidget* parent) : QDialog(parent)
     setObjectName(QStringLiteral("newProjectDialog"));
     setWindowTitle(QStringLiteral("New Ludus Project"));
     setMinimumWidth(540);
-    ApplyWorkspaceBoundaries(this);
+    ApplyWorkspaceStyle(this);
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(20, 20, 20, 20);
     layout->setSpacing(12);
@@ -113,6 +114,7 @@ ProjectCreationDialog::ProjectCreationDialog(QWidget* parent) : QDialog(parent)
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     Create_ = buttons->button(QDialogButtonBox::Ok);
     Create_->setText(QStringLiteral("Create Project"));
+    Create_->setProperty("visualRole", QStringLiteral("primary"));
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
         Update();

@@ -2,6 +2,7 @@
 #include "internal/controller.h"
 #include "internal/main_window.h"
 #include "internal/project_creation_dialog.h"
+#include "internal/workspace_style.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -12,6 +13,7 @@
 #include <QDir>
 #include <QFile>
 #include <QKeySequence>
+#include <QMainWindow>
 #include <QMessageBox>
 #include <QPalette>
 #include <QPixmap>
@@ -197,4 +199,30 @@ TEST_CASE("Project creation dark and light captures support visual review", "[ed
         REQUIRE(dialog.grab().save(capture + (dark ? QStringLiteral("-dark.png") : QStringLiteral("-light.png"))));
     }
     QApplication::setPalette(original);
+}
+
+TEST_CASE("Workspace appearance follows application palette changes", "[editor][appearance]")
+{
+    const auto original = QApplication::palette();
+    QMainWindow workspace;
+    ApplyWorkspaceStyle(&workspace);
+    workspace.show();
+    // ApplicationPaletteChange is dispatched while the application event loop runs.
+    QTimer::singleShot(0, &workspace, [&]() {
+        auto dark = original;
+        dark.setColor(QPalette::Window, QColor(QStringLiteral("#202428")));
+        QApplication::setPalette(dark);
+        QApplication::processEvents();
+        CHECK(workspace.palette().color(QPalette::Window).lightness() < 128);
+        CHECK(workspace.palette().color(QPalette::Text).lightness() > 128);
+        auto light = original;
+        light.setColor(QPalette::Window, QColor(QStringLiteral("#ffffff")));
+        QApplication::setPalette(light);
+        QApplication::processEvents();
+        CHECK(workspace.palette().color(QPalette::Window).lightness() > 128);
+        CHECK(workspace.palette().color(QPalette::Text).lightness() < 128);
+        QApplication::setPalette(original);
+        QApplication::quit();
+    });
+    QApplication::exec();
 }

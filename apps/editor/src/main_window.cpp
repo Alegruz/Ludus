@@ -55,7 +55,7 @@ MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QStr
 {
     setWindowTitle(QStringLiteral("Ludus Editor"));
     setWindowIcon(QIcon(QStringLiteral(":/ludus/ludus-icon.png")));
-    ApplyWorkspaceBoundaries(this);
+    ApplyWorkspaceStyle(this);
     BuildUi();
     BuildMenus();
     InitializeWorkspace();
