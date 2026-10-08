@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import struct
+import sys
 import time
 from typing import Any
 
@@ -100,6 +101,18 @@ def elf_identity(path: Path, *, require_symbols: bool = True) -> dict[str, Any]:
         return {"build_id": next(iter(build_ids)), "embedded_symbols": symbols, "elf_type": kind}
 
 
+def native_identity(path: Path, symbols: Path | None = None) -> dict[str, Any]:
+    """Select the host's native format; never execute the inspected artifact."""
+    if sys.platform == "darwin":
+        from play_macos import identity
+        return identity(path, symbols)
+    if sys.platform != "linux":
+        raise ProbeError("native live editing supports Linux and macOS")
+    result = elf_identity(path)
+    return {**result, "matching_symbols": True,
+            "artifact_type": "module" if result["elf_type"] == 3 else "host"}
+
+
 def validate_metadata(value: Any, expected: dict | None = None) -> dict:
     fields = {"sdk_identity", "abi_major", "abi_minor", "capabilities", "property_schema", "checkpoint_schema"}
     if not isinstance(value, dict) or set(value) != fields:
@@ -123,6 +136,9 @@ def validate_metadata(value: Any, expected: dict | None = None) -> dict:
 
 
 def debugger_stopped(pid: int) -> bool:
+    if sys.platform == "darwin":
+        from editor_process_macos import process_stopped
+        return process_stopped(pid)
     try:
         # Non-stop debugging can suspend a game worker while the leader runs.
         # Any traced stopped thread keeps that generation's code reachable.

@@ -601,7 +601,7 @@ TEST_CASE("Live Play ownership prevents a competing RAD debug job", "[editor][de
 }
 
 #if defined(Q_OS_MACOS)
-TEST_CASE("macOS keeps native build/run while gating deferred debugger and live tooling", "[editor][macos]")
+TEST_CASE("macOS keeps native build/run while gating deferred debugger and missing play tools", "[editor][macos]")
 {
     QTemporaryDir dir;
     const QByteArray descriptor = QByteArrayLiteral(R"json({"version":2,"name":"Mac Game","provider":"cmake",

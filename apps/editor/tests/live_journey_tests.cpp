@@ -16,6 +16,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <QSysInfo>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -42,6 +43,28 @@ void Write(const QString& path, const QByteArray& contents)
     REQUIRE(file.open(QIODevice::WriteOnly));
     REQUIRE(file.write(contents) == contents.size());
     REQUIRE(file.commit());
+}
+void SelectNativeProfile(const QString& descriptor)
+{
+#if defined(Q_OS_MACOS)
+    QFile input(descriptor);
+    REQUIRE(input.open(QIODevice::ReadOnly));
+    auto document = QJsonDocument::fromJson(input.readAll()).object();
+    input.close();
+    document.insert(QStringLiteral("preset"), QStringLiteral("macos-clang-development"));
+    Write(descriptor, QJsonDocument(document).toJson());
+#else
+    Q_UNUSED(descriptor);
+#endif
+}
+QString NativeTarget()
+{
+#if defined(Q_OS_MACOS)
+    return QSysInfo::currentCpuArchitecture() == QStringLiteral("arm64") ? QStringLiteral("arm64-apple-darwin")
+                                                                         : QStringLiteral("x86_64-apple-darwin");
+#else
+    return QStringLiteral("x86_64-linux-gnu");
+#endif
 }
 int SpeedRow(const EditorController& controller)
 {
@@ -84,19 +107,23 @@ TEST_CASE("native editor installed SDK build play edit reload asset and reopen",
     REQUIRE(QDir(project.path()).mkdir(QStringLiteral("src")));
     for (const auto& name : {QStringLiteral("CMakeLists.txt"),
                              QStringLiteral("CMakePresets.json"),
+                             QStringLiteral("body.schema.json"),
+                             QStringLiteral("body.schema.baseline.json"),
                              QStringLiteral("ludus.play.json"),
                              QStringLiteral("game.tuning.json"),
                              QStringLiteral("frame-clear.json"),
-                             QStringLiteral("src/game.cpp")})
+                             QStringLiteral("src/game.cpp"),
+                             QStringLiteral("src/body.h")})
     {
         REQUIRE(QFile::copy(sample.filePath(name), project.filePath(name)));
     }
     const auto descriptor = project.filePath(QStringLiteral("ludus.project.json"));
     REQUIRE(QFile::copy(sample.filePath(QStringLiteral("ludus.project.json")), descriptor));
+    SelectNativeProfile(descriptor);
     REQUIRE(QFile::copy(sample.filePath(QStringLiteral("ludus.lock.json")),
                         project.filePath(QStringLiteral("ludus.lock.json"))));
     REQUIRE(QDir(project.path()).mkdir(QStringLiteral(".ludus")));
-    const QJsonObject sdkOverride{{QStringLiteral("target"), QStringLiteral("x86_64-linux-gnu")},
+    const QJsonObject sdkOverride{{QStringLiteral("target"), NativeTarget()},
                                   {QStringLiteral("flavor"), QStringLiteral("Development")},
                                   {QStringLiteral("prefix"), qEnvironmentVariable("LUDUS_SDK_PREFIX")}};
     Write(project.filePath(QStringLiteral(".ludus/local.json")),
@@ -106,15 +133,19 @@ TEST_CASE("native editor installed SDK build play edit reload asset and reopen",
     REQUIRE(QDir(secondProject.path()).mkdir(QStringLiteral("src")));
     for (const auto& name : {QStringLiteral("CMakeLists.txt"),
                              QStringLiteral("CMakePresets.json"),
+                             QStringLiteral("body.schema.json"),
+                             QStringLiteral("body.schema.baseline.json"),
                              QStringLiteral("ludus.project.json"),
                              QStringLiteral("ludus.lock.json"),
                              QStringLiteral("ludus.play.json"),
                              QStringLiteral("game.tuning.json"),
                              QStringLiteral("frame-clear.json"),
-                             QStringLiteral("src/game.cpp")})
+                             QStringLiteral("src/game.cpp"),
+                             QStringLiteral("src/body.h")})
     {
         REQUIRE(QFile::copy(sample.filePath(name), secondProject.filePath(name)));
     }
+    SelectNativeProfile(secondProject.filePath(QStringLiteral("ludus.project.json")));
     REQUIRE(QDir(secondProject.path()).mkdir(QStringLiteral(".ludus")));
     REQUIRE(QFile::copy(project.filePath(QStringLiteral(".ludus/local.json")),
                         secondProject.filePath(QStringLiteral(".ludus/local.json"))));
@@ -169,6 +200,7 @@ TEST_CASE("native editor installed SDK build play edit reload asset and reopen",
     controller.SetupProject(qEnvironmentVariable("LUDUS_SDK_PREFIX"), {}, false);
     REQUIRE(Wait([&]() { return !controller.State().Busy() && controller.Caps().CanProjectSetup; }));
     INFO(controller.JobDetails().toStdString());
+    INFO(controller.Log().Text().toStdString());
     REQUIRE(controller.State().Result.Kind == Outcome::Success);
     REQUIRE(QFileInfo::exists(project.filePath(QStringLiteral("CMakeUserPresets.json"))));
     REQUIRE(controller.CanPlay());
@@ -179,11 +211,12 @@ TEST_CASE("native editor installed SDK build play edit reload asset and reopen",
                (controller.State().Result.Kind == Outcome::Failed && !controller.State().Busy());
     });
     INFO(controller.JobDetails().toStdString());
+    INFO(controller.Log().Text().toStdString());
     REQUIRE(started);
     REQUIRE(controller.PlayState().Phase == PlayPhase::Running);
     REQUIRE(controller.PlayState().HostPid > 0);
     REQUIRE(!controller.PlayState().HostArgv.isEmpty());
-    REQUIRE(controller.PlayState().HostCwd == project.path());
+    REQUIRE(controller.PlayState().HostCwd == QFileInfo(project.path()).canonicalFilePath());
     REQUIRE(!controller.PlayState().SdkIdentity.isEmpty());
     REQUIRE(controller.JobDetails().contains(controller.PlayState().HostArgv.front()));
     controller.PlayCommand(QStringLiteral("Pause"));
@@ -207,6 +240,7 @@ TEST_CASE("native editor installed SDK build play edit reload asset and reopen",
                                 iteration % 2 == 0 ? QStringLiteral("0.4") : QStringLiteral("0.5"));
         const bool edited = Wait([&]() { return SpeedIs(controller, expected) && controller.CanEditProperties(); });
         INFO(controller.JobDetails().toStdString());
+        INFO(controller.Log().Text().toStdString());
         CAPTURE(iteration, expected);
         REQUIRE(edited);
         edits.append(elapsed.elapsed() - startedAt);

@@ -94,8 +94,8 @@ void SendCommand(int fd, const Message& m)
 std::vector<Message> DrainEvents(int fd, FrameReader& reader, int budgetMs)
 {
     std::vector<Message> events;
-    const int steps = budgetMs / 5;
-    for (int i = 0; i < steps; ++i)
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(budgetMs);
+    while (std::chrono::steady_clock::now() < deadline)
     {
         pollfd pfd = {};
         pfd.fd = fd;
@@ -107,7 +107,7 @@ std::vector<Message> DrainEvents(int fd, FrameReader& reader, int budgetMs)
             const ssize_t n = ::read(fd, buf.data(), buf.size());
             if (n > 0)
             {
-                reader.Append(buf.data(), static_cast<std::size_t>(n));
+                reader.Append(buf.data(), static_cast<ludus::foundation::usize>(n));
                 std::string payload;
                 while (reader.Next(payload))
                 {
@@ -172,6 +172,41 @@ bool HasStatus(const std::vector<Message>& events, uint64 request, const char* s
     }
     return false;
 }
+// Replies are asynchronous: wait for their identity rather than assuming a
+// host thread is scheduled within a 50 ms observation window on a CI runner.
+template <typename Predicate>
+std::vector<Message> AwaitEvents(int fd, FrameReader& reader, const Predicate& complete)
+{
+    std::vector<Message> events;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!complete(events) && std::chrono::steady_clock::now() < deadline)
+    {
+        const auto batch = DrainEvents(fd, reader, 20);
+        events.insert(events.end(), batch.begin(), batch.end());
+    }
+    REQUIRE(complete(events));
+    return events;
+}
+
+std::vector<Message> AwaitStatus(int fd, FrameReader& reader, uint64 request)
+{
+    return AwaitEvents(fd, reader, [request](const std::vector<Message>& events) {
+        for (const auto& event : events)
+        {
+            uint64 id = 0;
+            if (event.GetHexId("request", id) && id == request && event.Has("status"))
+            {
+                return true;
+            }
+        }
+        return false;
+    });
+}
+
+std::vector<Message> AwaitEvent(int fd, FrameReader& reader, const char* event)
+{
+    return AwaitEvents(fd, reader, [event](const std::vector<Message>& events) { return HasEvent(events, event); });
+}
 } // namespace
 
 TEST_CASE("initial gameplay waits for Hello and the selected Load", "[session][startup]")
@@ -183,7 +218,7 @@ TEST_CASE("initial gameplay waits for Hello and the selected Load", "[session][s
     REQUIRE(session.PrepareInitialLoad(LUDUS_FIXTURE_A_PATH, 42, {}));
     RunResult result = RunResult::Internal;
     HostWorker worker(sockets[0], [&] { result = session.RunLoop(0); });
-    const auto ready = DrainEvents(sockets[0], reader, 50);
+    const auto ready = AwaitEvent(sockets[0], reader, "SessionReady");
     REQUIRE(HasEvent(ready, "SessionReady"));
     REQUIRE_FALSE(HasEvent(ready, "ModuleReady"));
     Message load;
@@ -191,30 +226,30 @@ TEST_CASE("initial gameplay waits for Hello and the selected Load", "[session][s
     load.SetHexId("request", 1);
     load.SetHexId("generation", 42);
     SendCommand(sockets[0], load);
-    REQUIRE(HasStatus(DrainEvents(sockets[0], reader, 50), 1, "InvalidRequest"));
+    REQUIRE(HasStatus(AwaitStatus(sockets[0], reader, 1), 1, "InvalidRequest"));
     Message hello;
     hello.SetString("command", "Hello");
     hello.SetHexId("request", 2);
     SendCommand(sockets[0], hello);
-    REQUIRE(HasStatus(DrainEvents(sockets[0], reader, 50), 2, "Ok"));
+    REQUIRE(HasStatus(AwaitStatus(sockets[0], reader, 2), 2, "Ok"));
     load.SetHexId("request", 3);
     load.SetHexId("generation", 43);
     SendCommand(sockets[0], load);
-    REQUIRE(HasStatus(DrainEvents(sockets[0], reader, 50), 3, "InvalidRequest"));
+    REQUIRE(HasStatus(AwaitStatus(sockets[0], reader, 3), 3, "InvalidRequest"));
     load.SetHexId("request", 4);
     load.SetHexId("generation", 42);
     SendCommand(sockets[0], load);
-    const auto loaded = DrainEvents(sockets[0], reader, 50);
+    const auto loaded = AwaitStatus(sockets[0], reader, 4);
     REQUIRE(HasEvent(loaded, "ModuleReady"));
     REQUIRE(HasStatus(loaded, 4, "Ok"));
     load.SetHexId("request", 5);
     SendCommand(sockets[0], load);
-    REQUIRE(HasStatus(DrainEvents(sockets[0], reader, 50), 5, "InvalidRequest"));
+    REQUIRE(HasStatus(AwaitStatus(sockets[0], reader, 5), 5, "InvalidRequest"));
     Message stop;
     stop.SetString("command", "Stop");
     stop.SetHexId("request", 6);
     SendCommand(sockets[0], stop);
-    REQUIRE(HasEvent(DrainEvents(sockets[0], reader, 50), "SessionEnded"));
+    REQUIRE(HasEvent(AwaitEvent(sockets[0], reader, "SessionEnded"), "SessionEnded"));
     worker.join();
     CHECK(result == RunResult::Ok);
     CHECK(session.ActiveGeneration() == 42);
@@ -238,7 +273,7 @@ TEST_CASE("session performs a full reload transaction over the protocol", "[sess
     HostWorker hostThread(editorEnd, [&] { result = session.RunLoop(0); });
 
     // Collect the ready events.
-    auto startup = DrainEvents(editorEnd, reader, 100);
+    auto startup = AwaitEvent(editorEnd, reader, "ModuleReady");
     REQUIRE(HasEvent(startup, "SessionReady"));
     REQUIRE(HasEvent(startup, "ModuleReady"));
 
@@ -249,7 +284,7 @@ TEST_CASE("session performs a full reload transaction over the protocol", "[sess
         pause.SetHexId("request", 1);
         SendCommand(editorEnd, pause);
     }
-    (void)DrainEvents(editorEnd, reader, 50);
+    (void)AwaitStatus(editorEnd, reader, 1);
     {
         Message reload;
         reload.SetString("command", protocol::CommandKindName(CommandKind::Reload));
@@ -258,7 +293,7 @@ TEST_CASE("session performs a full reload transaction over the protocol", "[sess
         reload.SetHexId("generation", 2);
         SendCommand(editorEnd, reload);
     }
-    auto reloadEvents = DrainEvents(editorEnd, reader, 200);
+    auto reloadEvents = AwaitStatus(editorEnd, reader, 2);
     REQUIRE(HasReloadPhase(reloadEvents, "Validate"));
     REQUIRE(HasReloadPhase(reloadEvents, "Quiesce"));
     REQUIRE(HasReloadPhase(reloadEvents, "Snapshot"));
@@ -274,7 +309,7 @@ TEST_CASE("session performs a full reload transaction over the protocol", "[sess
         stop.SetHexId("request", 3);
         SendCommand(editorEnd, stop);
     }
-    auto ending = DrainEvents(editorEnd, reader, 100);
+    auto ending = AwaitEvent(editorEnd, reader, "SessionEnded");
     REQUIRE(HasEvent(ending, "SessionEnded"));
 
     hostThread.join();
@@ -293,7 +328,7 @@ TEST_CASE("property batches are conditional, atomic and replayable across reload
     REQUIRE(session.LoadInitial(LUDUS_FIXTURE_A_PATH));
     RunResult result = RunResult::Internal;
     HostWorker worker(sv[0], [&] { result = session.RunLoop(0); });
-    (void)DrainEvents(sv[0], reader, 60);
+    (void)AwaitEvent(sv[0], reader, "ModuleReady");
     auto command = [](std::string_view name, uint64 request) {
         Message message;
         message.SetString("command", name);
@@ -315,16 +350,17 @@ TEST_CASE("property batches are conditional, atomic and replayable across reload
         REQUIRE(found);
     };
     SendCommand(sv[0], command("Pause", 1));
-    expectStatus(DrainEvents(sv[0], reader, 60), 1, "Ok");
+    expectStatus(AwaitStatus(sv[0], reader, 1), 1, "Ok");
     auto read = [&](uint64 request) {
         SendCommand(sv[0], command("ReadProperties", request));
-        auto events = DrainEvents(sv[0], reader, 60);
+        auto events = AwaitStatus(sv[0], reader, request);
         expectStatus(events, request, "Ok");
         std::vector<Message> properties;
         for (const auto& event : events)
         {
             std::vector<Message> rows;
-            if (event.GetRecords("properties", rows))
+            uint64 id = 0;
+            if (event.GetHexId("request", id) && id == request && event.GetRecords("properties", rows))
             {
                 properties.insert(properties.end(), rows.begin(), rows.end());
             }
@@ -357,7 +393,7 @@ TEST_CASE("property batches are conditional, atomic and replayable across reload
     Message bad = label;
     bad.SetString("value", std::string(32, 'x')); // Module-specific 31-byte bound.
     SendCommand(sv[0], batch(3, {speed, bad}));
-    expectStatus(DrainEvents(sv[0], reader, 60), 3, "InvalidRequest");
+    expectStatus(AwaitStatus(sv[0], reader, 3), 3, "InvalidRequest");
     auto unchanged = read(4);
     for (usize i = 0; i < before.size(); ++i)
     {
@@ -365,7 +401,7 @@ TEST_CASE("property batches are conditional, atomic and replayable across reload
     }
     auto edit = batch(5, {speed, label});
     SendCommand(sv[0], edit);
-    expectStatus(DrainEvents(sv[0], reader, 60), 5, "Ok");
+    expectStatus(AwaitStatus(sv[0], reader, 5), 5, "Ok");
     const auto after = read(6);
     uint64 bits = 0;
     uint64 editedRevision = 0;
@@ -374,37 +410,37 @@ TEST_CASE("property batches are conditional, atomic and replayable across reload
     REQUIRE(after[0].GetHexId("revision", editedRevision));
     CHECK(editedRevision == revision + 1);
     SendCommand(sv[0], edit); // Lost reply retry must not advance revision twice.
-    expectStatus(DrainEvents(sv[0], reader, 60), 5, "Ok");
+    expectStatus(AwaitStatus(sv[0], reader, 5), 5, "Ok");
     const auto retry = read(7);
     REQUIRE(retry[0].GetHexId("revision", editedRevision));
     CHECK(editedRevision == revision + 1);
     SendCommand(sv[0], batch(8, {speed}));
-    expectStatus(DrainEvents(sv[0], reader, 60), 8, "StaleRevision");
+    expectStatus(AwaitStatus(sv[0], reader, 8), 8, "StaleRevision");
     Message nonfinite = speed;
     nonfinite.SetHexId("revision", editedRevision);
     nonfinite.SetUint("bits", 0x7FC00000);
     SendCommand(sv[0], batch(9, {nonfinite}));
-    expectStatus(DrainEvents(sv[0], reader, 60), 9, "InvalidRequest");
+    expectStatus(AwaitStatus(sv[0], reader, 9), 9, "InvalidRequest");
     auto reload = command("Reload", 10);
     reload.SetString("module_path", LUDUS_FIXTURE_B_PATH);
     reload.SetHexId("generation", 2);
     SendCommand(sv[0], reload);
-    expectStatus(DrainEvents(sv[0], reader, 100), 10, "Ok");
+    expectStatus(AwaitStatus(sv[0], reader, 10), 10, "Ok");
     auto staleSchema = batch(11, {speed});
     SendCommand(sv[0], staleSchema);
-    expectStatus(DrainEvents(sv[0], reader, 60), 11, "SchemaChanged");
+    expectStatus(AwaitStatus(sv[0], reader, 11), 11, "SchemaChanged");
     auto oldGeneration = command("Pause", 12);
     oldGeneration.SetHexId("expected_generation", 1);
     SendCommand(sv[0], oldGeneration);
-    expectStatus(DrainEvents(sv[0], reader, 60), 12, "SchemaChanged");
+    expectStatus(AwaitStatus(sv[0], reader, 12), 12, "SchemaChanged");
     auto unknownField = command("Resume", 13);
     unknownField.SetUint("surprise", 1);
     SendCommand(sv[0], unknownField);
-    expectStatus(DrainEvents(sv[0], reader, 60), 13, "InvalidRequest");
+    expectStatus(AwaitStatus(sv[0], reader, 13), 13, "InvalidRequest");
     auto status = command("Status", 14);
     status.SetHexId("reconcile", 5);
     SendCommand(sv[0], status);
-    auto events = DrainEvents(sv[0], reader, 60);
+    auto events = AwaitStatus(sv[0], reader, 14);
     bool reconciled = false;
     for (const auto& event : events)
     {
@@ -417,7 +453,7 @@ TEST_CASE("property batches are conditional, atomic and replayable across reload
     }
     CHECK(reconciled);
     SendCommand(sv[0], command("Stop", 15));
-    (void)DrainEvents(sv[0], reader, 80);
+    (void)AwaitEvent(sv[0], reader, "SessionEnded");
     worker.join();
     CHECK(result == RunResult::Ok);
     ::close(sv[0]);
@@ -456,7 +492,7 @@ TEST_CASE("pause then step advances exactly one simulation tick (no catch-up)", 
     REQUIRE(session.LoadInitial(LUDUS_FIXTURE_A_PATH));
     RunResult result = RunResult::Internal;
     HostWorker hostThread(editorEnd, [&] { result = session.RunLoop(0); });
-    (void)DrainEvents(editorEnd, reader, 80);
+    (void)AwaitEvent(editorEnd, reader, "ModuleReady");
 
     // Pause.
     {
@@ -465,7 +501,7 @@ TEST_CASE("pause then step advances exactly one simulation tick (no catch-up)", 
         pause.SetHexId("request", 1);
         SendCommand(editorEnd, pause);
     }
-    (void)DrainEvents(editorEnd, reader, 60);
+    (void)AwaitStatus(editorEnd, reader, 1);
 
     // Status: record sim ticks while paused.
     {
@@ -474,7 +510,7 @@ TEST_CASE("pause then step advances exactly one simulation tick (no catch-up)", 
         status.SetHexId("request", 2);
         SendCommand(editorEnd, status);
     }
-    auto s1 = DrainEvents(editorEnd, reader, 60);
+    auto s1 = AwaitStatus(editorEnd, reader, 2);
     ludus::foundation::uint64 ticksPaused = 0;
     REQUIRE(LatestStatusUint(s1, "sim_ticks", ticksPaused));
 
@@ -486,7 +522,7 @@ TEST_CASE("pause then step advances exactly one simulation tick (no catch-up)", 
         status.SetHexId("request", 3);
         SendCommand(editorEnd, status);
     }
-    auto s2 = DrainEvents(editorEnd, reader, 60);
+    auto s2 = AwaitStatus(editorEnd, reader, 3);
     ludus::foundation::uint64 ticksStillPaused = 0;
     REQUIRE(LatestStatusUint(s2, "sim_ticks", ticksStillPaused));
     REQUIRE(ticksStillPaused == ticksPaused);
@@ -498,14 +534,14 @@ TEST_CASE("pause then step advances exactly one simulation tick (no catch-up)", 
         step.SetHexId("request", 4);
         SendCommand(editorEnd, step);
     }
-    (void)DrainEvents(editorEnd, reader, 60);
+    (void)AwaitStatus(editorEnd, reader, 4);
     {
         Message status;
         status.SetString("command", protocol::CommandKindName(CommandKind::Status));
         status.SetHexId("request", 5);
         SendCommand(editorEnd, status);
     }
-    auto s3 = DrainEvents(editorEnd, reader, 60);
+    auto s3 = AwaitStatus(editorEnd, reader, 5);
     ludus::foundation::uint64 ticksAfterStep = 0;
     REQUIRE(LatestStatusUint(s3, "sim_ticks", ticksAfterStep));
     REQUIRE(ticksAfterStep == ticksPaused + 1);
@@ -516,7 +552,7 @@ TEST_CASE("pause then step advances exactly one simulation tick (no catch-up)", 
         stop.SetHexId("request", 6);
         SendCommand(editorEnd, stop);
     }
-    (void)DrainEvents(editorEnd, reader, 80);
+    (void)AwaitEvent(editorEnd, reader, "SessionEnded");
     hostThread.join();
     REQUIRE(result == RunResult::Ok);
     ::close(editorEnd);
@@ -535,7 +571,7 @@ TEST_CASE("reload to an incompatible module keeps the session alive", "[session]
     REQUIRE(session.LoadInitial(LUDUS_FIXTURE_A_PATH));
     RunResult result = RunResult::Internal;
     HostWorker hostThread(editorEnd, [&] { result = session.RunLoop(0); });
-    (void)DrainEvents(editorEnd, reader, 80);
+    (void)AwaitEvent(editorEnd, reader, "ModuleReady");
 
     {
         Message reload;
@@ -545,7 +581,7 @@ TEST_CASE("reload to an incompatible module keeps the session alive", "[session]
         reload.SetHexId("generation", 2);
         SendCommand(editorEnd, reload);
     }
-    auto events = DrainEvents(editorEnd, reader, 150);
+    auto events = AwaitStatus(editorEnd, reader, 1);
     REQUIRE(HasReloadPhase(events, "Rejected"));
 
     // The session is still running: Status returns Ok and Stop ends cleanly.
@@ -555,7 +591,7 @@ TEST_CASE("reload to an incompatible module keeps the session alive", "[session]
         stop.SetHexId("request", 2);
         SendCommand(editorEnd, stop);
     }
-    (void)DrainEvents(editorEnd, reader, 80);
+    (void)AwaitEvent(editorEnd, reader, "SessionEnded");
     hostThread.join();
     REQUIRE(result == RunResult::Ok);
     ::close(editorEnd);
@@ -571,17 +607,17 @@ TEST_CASE("duplicate Step is applied once and acknowledged IDs are never replaye
     REQUIRE(session.LoadInitial(LUDUS_FIXTURE_A_PATH));
     HostWorker worker(editorEnd, [&] { (void)session.RunLoop(0); });
     FrameReader reader;
-    (void)DrainEvents(editorEnd, reader, 50);
+    (void)AwaitEvent(editorEnd, reader, "ModuleReady");
     Message pause;
     pause.SetString("command", "Pause");
     pause.SetHexId("request", 1);
     SendCommand(editorEnd, pause);
-    (void)DrainEvents(editorEnd, reader, 50);
+    (void)AwaitStatus(editorEnd, reader, 1);
     Message status;
     status.SetString("command", "Status");
     status.SetHexId("request", 2);
     SendCommand(editorEnd, status);
-    auto before = DrainEvents(editorEnd, reader, 50);
+    auto before = AwaitStatus(editorEnd, reader, 2);
     uint64 ticks = 0;
     REQUIRE(LatestStatusUint(before, "sim_ticks", ticks));
     Message step;
@@ -589,30 +625,30 @@ TEST_CASE("duplicate Step is applied once and acknowledged IDs are never replaye
     step.SetHexId("request", 3);
     SendCommand(editorEnd, step);
     SendCommand(editorEnd, step);
-    (void)DrainEvents(editorEnd, reader, 50);
+    (void)AwaitStatus(editorEnd, reader, 3);
     status.SetHexId("request", 4);
     SendCommand(editorEnd, status);
-    auto after = DrainEvents(editorEnd, reader, 50);
+    auto after = AwaitStatus(editorEnd, reader, 4);
     uint64 advanced = 0;
     REQUIRE(LatestStatusUint(after, "sim_ticks", advanced));
     REQUIRE(advanced == ticks + 1);
     Message mismatch = step;
     mismatch.SetString("command", "Resume");
     SendCommand(editorEnd, mismatch);
-    REQUIRE(HasStatus(DrainEvents(editorEnd, reader, 50), 3, "InvalidRequest"));
+    REQUIRE(HasStatus(AwaitStatus(editorEnd, reader, 3), 3, "InvalidRequest"));
     Message ack;
     ack.SetString("command", "Ack");
     ack.SetHexId("request", 5);
     ack.SetHexId("acknowledge", 3);
     SendCommand(editorEnd, ack);
-    (void)DrainEvents(editorEnd, reader, 50);
+    (void)AwaitStatus(editorEnd, reader, 5);
     SendCommand(editorEnd, step);
-    REQUIRE(HasStatus(DrainEvents(editorEnd, reader, 50), 3, "InvalidRequest"));
+    REQUIRE(HasStatus(AwaitStatus(editorEnd, reader, 3), 3, "InvalidRequest"));
     Message stop;
     stop.SetString("command", "Stop");
     stop.SetHexId("request", 6);
     SendCommand(editorEnd, stop);
-    (void)DrainEvents(editorEnd, reader, 80);
+    (void)AwaitEvent(editorEnd, reader, "SessionEnded");
     worker.join();
     ::close(editorEnd);
     ::close(sv[1]);

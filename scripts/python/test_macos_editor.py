@@ -6,6 +6,7 @@ import errno
 import os
 from pathlib import Path
 import platform
+import signal
 import sys
 import tempfile
 import time
@@ -100,6 +101,22 @@ class ProcessTests(unittest.TestCase):
                 os.waitpid(child.pid, os.WNOHANG)
         finally:
             if child._proc.returncode is None:
+                child.cleanup(cancelled=True)
+
+    def test_stopped_child_is_observed_and_can_be_cleaned(self):
+        from editor_process_macos import process_stopped
+        child = editor_tool.OwnedProcess([sys.executable, "-c", "import time; time.sleep(60)"], "/tmp", dict(os.environ))
+        try:
+            os.kill(child.pid, signal.SIGSTOP)
+            deadline = time.monotonic() + 5
+            while not process_stopped(child.pid) and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertTrue(process_stopped(child.pid))
+            os.kill(child.pid, signal.SIGCONT)
+            self.assertTrue(child.cleanup(cancelled=True).confirmed)
+        finally:
+            if child._proc.returncode is None:
+                os.kill(child.pid, signal.SIGCONT)
                 child.cleanup(cancelled=True)
 
     def test_inventory_failure_and_truncation_are_unknown(self):

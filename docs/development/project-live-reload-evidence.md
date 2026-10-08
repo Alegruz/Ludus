@@ -5,6 +5,36 @@ initial Kiro ledger: its headless runs and two reused module paths did not prove
 native rendering, complete checkpoint equality, bounded distinct-image residency,
 or actual debugger single stepping. The committed requirements remain unchanged.
 
+## macOS live play and native reload, 2026-10-07
+
+The macOS implementation extends the existing host to native Debug and
+Development projects. Publication retains flat DWARF sidecars for both the
+Mach-O module and executable, checks their matching UUIDs, and hashes them in
+the immutable generation inventory. The supervisor blocks commands while the
+host is stopped by an all-stop debugger. Editor-integrated LLDB launch/attach
+and non-stop debugging remain outside this change.
+
+Local validation uses Apple Silicon, macOS 26, pinned Clang 18.1.8, Qt Cocoa,
+and the installed Development SDK:
+
+| Validation | Actual result and scope |
+| --- | --- |
+| Native warning-clean build and installed SDK consumer | PASS |
+| Loader, protocol, session, reload, configuration and supervisor acceptance | PASS; actual Mach-O module generations and symbol sidecars; the existing Linux socket-buffer saturation fixture explicitly skips on macOS |
+| Native Cocoa editor journey | PASS, 138 assertions: setup repair, Build and Play, ten warm reloads, ten edits, paused source reload, checkpoint rejection preserving the old generation, configuration replacement, project switching and close during build |
+| Python identity/publication/process guards | PASS; Mach-O bounds/UUID fixtures, schema-2 compatibility, sidecar retention and an actual stopped child |
+| Formatting and affected editor static analysis | PASS with pinned Clang 18 |
+| Local ASan/UBSan runtime execution | Blocked: instrumented executables stall before assertions on this macOS 26 host; the macOS 14 CI sanitizer lane remains required |
+
+```bash
+QT_QPA_PLATFORM=cocoa LUDUS_SDK_PREFIX=/absolute/path/to/sdk \
+  out/build/macos-clang-development/apps/editor/ludus_editor_tests '[.live-journey]'
+```
+
+These checks do not claim Intel hardware acceptance, integrated debugger UI,
+or resolution of the older milestone's unmeasured visible-latency work below.
+Published-head CI and mergeability must still be checked after publication.
+
 ## Local takeover and current-main integration, 2026-10-03
 
 The implementation checkout incorporates main

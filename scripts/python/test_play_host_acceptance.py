@@ -18,7 +18,7 @@ import time
 from play_build import project_identity, source_inputs
 from play_assets import artifact_digest, cook_frame_clear
 from play_documents import TuningDocument, digest, encode_authored, read_play_descriptor
-from play_probe import ModuleProbe, elf_identity
+from play_probe import ModuleProbe, native_identity
 from play_session import publish_generation
 
 
@@ -87,7 +87,7 @@ def main():
     parser.add_argument("--destructor-crash", type=Path, required=True)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="ludus play actor ") as td:
-        project = Path(td)
+        project = Path(td).resolve()
         descriptor = project / "ludus.project.json"
         descriptor.write_text(json.dumps(dict(version=1, name="actor", provider="cmake", source_dir=".",
                                              preset="linux-clang-development", target="host",
@@ -123,9 +123,21 @@ def main():
                     time.sleep(0.005)
             finally:
                 assert probe.cancel()
-            return {**metadata, "module_build_id":elf_identity(staging / module)["build_id"],
-                    "host_build_id":elf_identity(staging / host)["build_id"], "embedded_symbols":True}
-        published = [publish_generation(
+            return {**metadata, "module_build_id":native_identity(staging / module, staging / (module + ".dwarf") if sys.platform == "darwin" else None)["build_id"],
+                    "host_build_id":native_identity(staging / host, staging / (host + ".dwarf") if sys.platform == "darwin" else None)["build_id"], "embedded_symbols":sys.platform != "darwin"}
+        symbols = {}
+        def publish_native(**kwargs):
+            if sys.platform == "darwin":
+                for role in ("module", "host"):
+                    artifact = kwargs[role + "_artifact"]
+                    if artifact not in symbols:
+                        output = project / (artifact.name + ".dwarf")
+                        subprocess.run([str(Path(os.environ["LUDUS_DSYMUTIL"])), "--flat", "--out", str(output), str(artifact)], check=True)
+                        symbols[artifact] = output
+                kwargs["symbol_artifact"] = symbols[kwargs["module_artifact"]]
+                kwargs["host_symbol_artifact"] = symbols[kwargs["host_artifact"]]
+            return publish_generation(**kwargs)
+        published = [publish_native(
             generations_root=generations, module_artifact=module, host_artifact=args.host,
             symbol_artifact=None, declared_source_inputs=inputs, authored_payload=encode_authored(tuning),
             validate_payloads=verify,
@@ -195,7 +207,7 @@ def main():
             assert json.loads(tuning_path.read_bytes())["objects"][0]["properties"][0]["value"] == 0.75
             # A second start cannot reuse old replies/session identity.
             inputs = source_inputs(project, project, sidecar, project / "out/build/linux-clang-development")
-            fresh = publish_generation(
+            fresh = publish_native(
                 generations_root=generations, module_artifact=args.a, host_artifact=args.host,
                 symbol_artifact=None, declared_source_inputs=inputs,
                 authored_payload=encode_authored(TuningDocument(tuning_path).saved), validate_payloads=verify,
@@ -233,7 +245,7 @@ def main():
                                      asset_id="1000000000000001", artifact=cooked.hex(), digest="0000000000000001")
             assert invalid["status"] == "ReloadRejected", invalid
             assert client.command(31, command="Status")["host"]["clear_asset_generation"] == status["clear_asset_generation"]
-            dying = publish_generation(
+            dying = publish_native(
                 generations_root=generations, module_artifact=args.destructor_crash, host_artifact=args.host,
                 symbol_artifact=None, declared_source_inputs=inputs,
                 authored_payload=encode_authored(TuningDocument(tuning_path).saved), validate_payloads=verify,
@@ -253,7 +265,7 @@ def main():
         finally:
             if client.proc.poll() is None:
                 client.close()
-        retired_paths = [publish_generation(
+        retired_paths = [publish_native(
             generations_root=generations, module_artifact=module, host_artifact=args.host,
             symbol_artifact=None, declared_source_inputs=inputs,
             authored_payload=encode_authored(TuningDocument(tuning_path).saved), validate_payloads=verify,

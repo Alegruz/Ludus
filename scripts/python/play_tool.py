@@ -24,7 +24,7 @@ from ludus_tools.errors import ToolingError
 from play_build import project_identity, source_inputs
 from play_assets import publish_frame_clear
 from play_documents import DocumentError, TuningDocument, decode, read_bounded, read_play_descriptor, digest
-from play_probe import ModuleProbe, ProbeError, elf_identity, debugger_stopped
+from play_probe import ModuleProbe, ProbeError, native_identity, debugger_stopped
 from play_session import (GenerationLease, GenerationStoreLease, PublishError, read_manifest,
                           collect_generations, LeaseSet, source_input_digest)
 
@@ -177,8 +177,10 @@ class PlaySupervisor:
             if source_input_digest(inputs) != manifest["source_input_digest"]:
                 raise ProtocolError("project source inputs changed after this generation was published")
             for key, file in (("module_build_id", "module_file"), ("host_build_id", "host_file")):
-                if elf_identity(generation / manifest[file])["build_id"] != manifest[key]:
-                    raise ProtocolError("ELF build ID disagrees with manifest")
+                symbols = manifest["symbol_file" if file == "module_file" else "host_symbol_file"]
+                identity = native_identity(generation / manifest[file], generation / symbols if symbols else None)
+                if identity["build_id"] != manifest[key]:
+                    raise ProtocolError("native build ID disagrees with manifest")
             if self.active is not None and manifest["sdk_identity"] != self.active["manifest"]["sdk_identity"]:
                 raise ProtocolError("SDK identity changed; stop and restart instead of reload")
             if self.plan.runtime_identity is not None and manifest["sdk_identity"] != self.plan.runtime_identity:

@@ -194,7 +194,7 @@ if(LUDUS_BUILD_TESTS)
     if(NOT Python3_Interpreter_FOUND)
         message(FATAL_ERROR "Native play-supervisor acceptance requires Python 3.10+")
     endif()
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
         add_test(NAME ludus_game_host_configuration_acceptance
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/configuration_acceptance.py"
                 "$<TARGET_FILE:ludus_game_host_app>" "$<TARGET_FILE:ludus_game_fixture_A>")
@@ -211,7 +211,14 @@ if(LUDUS_BUILD_TESTS)
                 --destructor-crash "$<TARGET_FILE:ludus_game_fixture_D>")
         set_tests_properties(ludus_game_host_supervisor_acceptance PROPERTIES
             TIMEOUT 120 LABELS "runtime;session;supervisor;reload")
-    endif() # Linux process supervisor/configuration journeys
+        if(APPLE)
+            get_filename_component(_ludus_compiler_real "${CMAKE_CXX_COMPILER}" REALPATH)
+            get_filename_component(_ludus_compiler_bin "${_ludus_compiler_real}" DIRECTORY)
+            find_program(LUDUS_DSYMUTIL NAMES dsymutil HINTS "${_ludus_compiler_bin}" NO_DEFAULT_PATH REQUIRED)
+            set_tests_properties(ludus_game_host_supervisor_acceptance PROPERTIES
+                ENVIRONMENT "LUDUS_DSYMUTIL=${LUDUS_DSYMUTIL}")
+        endif()
+    endif() # Native process supervisor/configuration journeys
     set(_ludus_debugger_eligible OFF)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_BUILD_TYPE STREQUAL "Debug"
        AND NOT LUDUS_ENABLE_ASAN AND NOT LUDUS_ENABLE_UBSAN AND NOT LUDUS_ENABLE_TSAN)

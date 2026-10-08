@@ -1,8 +1,10 @@
 # Native gameplay live editing
 
-The first supported host is Linux x64 with the pinned Clang 18 toolchain and a
-matching Debug or Development SDK. Native gameplay libraries use `.so` on this
-host. Windows DLL loading remains a separate backend and is not implemented.
+Supported hosts are Linux x64 and macOS arm64/x64 with pinned Clang 18 and a
+matching Debug or Development SDK. CMake resolves the module's actual artifact;
+Linux uses ELF and macOS uses thin Mach-O. Windows DLL loading remains a separate
+backend and is not implemented. macOS requires the pinned compiler's sibling
+`dsymutil`; automatic setup does not install a different LLVM toolchain.
 
 The editor reads project metadata without loading game code or preparing a
 build. It reports missing/stale CMake setup through the shared setup validator.
@@ -51,11 +53,39 @@ filename. The host creates its own Platform/Input/RHI session and native window;
 the editor communicates with a separate bounded supervisor. Gameplay libraries
 link only the small GameApi contract and receive explicit host services.
 
+## macOS setup and symbols
+
+Use `macos-clang-debug` or `macos-clang-development` in a version-2 project
+and select the corresponding SDK through the shared project setup workflow.
+The Editor enables Build and Play, manual Build and Reload, and opt-in source
+watching for those profiles. Release and browser profiles do not enable native
+live play. Project loading remains read-only; initialize/repair explicitly.
+
+Generation builds run the selected pinned compiler's `dsymutil --flat` for both
+module and host before copying anything into the immutable store. The manifest
+records both symbol files and their SHA-256 digests. A bounded static reader
+requires each thin ARM64/x64 image to have exactly one nonzero `LC_UUID`, and
+requires each detached `MH_DSYM` file's UUID, CPU and subtype to match its image,
+with a nonempty `__DWARF,__debug_info` section. Universal images, missing,
+truncated, mismatched or stale symbols reject before gameplay Query/Create.
+A generation uses schema 3; existing schema-2 ELF generations remain readable.
+The pinned host runs Query in a separately supervised process before publication
+and activation. No native game code runs inside the editor.
+
+Detached `.dwarf` files remain leased with active/candidate/previous generations.
+For manual LLDB use `target symbols add /absolute/generation/game.dwarf` after
+loading that module; integrated RAD/LLDB launch and automatic symbol refresh
+remain separate tooling work. Darwin all-stop/SIGSTOP is detected through the
+system process API, blocks reload and suspends heartbeat/query timeout budgets.
+Continue the process before reloading. Per-thread non-stop debugging is outside
+this acceptance profile. Release signing/notarization and hardened-runtime
+library validation are outside this local development host.
+
 ## Play and change code
 
 Open the saved project, then choose **Play → Build and Play**. The build publishes
-a new immutable generation containing the module, matching host, embedded debug
-information and verified manifest. It validates SDK identity, symbols, hashes
+a new immutable generation containing the module, matching host, debug information (embedded ELF DWARF or
+detached Mach-O DWARF) and verified manifest. It validates SDK identity, symbols, hashes
 and declared source inputs before launching code.
 
 **Build and Reload Code** builds while the current generation continues playing.
@@ -134,3 +164,10 @@ system settings. Editor-integrated debugger launch/attach, RAD and other OS
 loaders require additional acceptance; use the existing executable/debugger
 workflow or a manual restart where symbol refresh is limited. See the
 [evidence ledger](project-live-reload-evidence.md) for actual verified scope.
+
+## Consulted macOS references
+
+Thanks to **Apple**, [XNU Mach-O loader declarations](https://github.com/apple-oss-distributions/xnu/blob/main/EXTERNAL_HEADERS/mach-o/loader.h),
+for the UUID, image and section layouts used by the bounded independent reader.
+Thanks to **LLVM**, [dsymutil command guide](https://llvm.org/docs/CommandGuide/dsymutil.html),
+for the flat detached DWARF workflow. No implementation code is copied.

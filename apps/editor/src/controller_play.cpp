@@ -80,9 +80,6 @@ Capabilities EditorController::Caps() const
 
 bool EditorController::CanPlay() const
 {
-#if defined(Q_OS_MACOS)
-    return false; // Mach-O generation/symbol publication is not implemented yet.
-#else
     return QFileInfo(Tooling_.PythonPath).isExecutable() && QFileInfo::exists(Tooling_.AdapterPath) &&
            QFileInfo::exists(QDir(Tooling_.ToolingRoot).filePath(QStringLiteral("scripts/python/play_tool.py"))) &&
            State_.Document == DocumentState::ProjectLoaded && State_.HasSaved && !SetupCheckPending_ &&
@@ -91,9 +88,10 @@ bool EditorController::CanPlay() const
            PlayState_.Phase == PlayPhase::Stopped &&
            QFileInfo::exists(
                QDir(QFileInfo(State_.DescriptorPath).absolutePath()).filePath(QStringLiteral("ludus.play.json"))) &&
-           State_.Saved.Preset != QStringLiteral("linux-clang-release") &&
-           !State_.Saved.Preset.startsWith(QStringLiteral("macos-"));
-#endif
+           (State_.Saved.Preset == QStringLiteral("linux-clang-debug") ||
+            State_.Saved.Preset == QStringLiteral("linux-clang-development") ||
+            State_.Saved.Preset == QStringLiteral("macos-clang-debug") ||
+            State_.Saved.Preset == QStringLiteral("macos-clang-development"));
 }
 
 bool EditorController::CanBuildReload() const

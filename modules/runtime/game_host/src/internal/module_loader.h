@@ -3,7 +3,7 @@
 // Private module loader (project-live-reload design 5/6/7).
 //
 // Loads a gameplay module from an absolute canonical path inside a leased
-// generation directory. On Linux it uses dlopen with immediate resolution and
+// generation directory. On Linux and macOS it uses dlopen with immediate resolution and
 // local scope (RTLD_NOW | RTLD_LOCAL), resolves exactly one public entry symbol
 // (LudusGetGameApi), negotiates the common ABI table size, fills a host-owned
 // table and validates the module's embedded Query identity against the host
