@@ -8,9 +8,12 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
+import zipfile
 import urllib.request
 import xml.etree.ElementTree as ET
 
@@ -121,32 +124,81 @@ def check_extracted_files(root, xml, inputs):
 
 
 def bootstrap(root, pin):
-    if platform.system() != "Linux" or platform.machine() not in {"x86_64", "AMD64"}:
-        raise ValueError("Automatic Doxygen bootstrap supports Linux x64; use --doxygen on other hosts")
+    """Install only the verified CLI member; leave an existing tool intact on failure."""
+    system, machine = platform.system(), platform.machine().lower()
+    if system == "Linux" and machine in {"x86_64", "amd64"}:
+        selected = {"url": pin["linux_x64_url"], "sha256": pin["sha256"],
+                    "archive_binary": pin["archive_binary"]}
+        archive_name = "doxygen.tar.gz"
+    elif system == "Darwin" and machine in {"arm64", "aarch64", "x86_64", "amd64"}:
+        cpu = "arm64" if machine in {"arm64", "aarch64"} else "x64"
+        selected = pin["macos_" + cpu]
+        archive_name = "doxygen-macos-" + cpu + ".zip"
+    else:
+        raise ValueError("Automatic Doxygen bootstrap supports Linux x64 and macOS ARM64/x64; "
+                         "use --doxygen on other hosts")
+    # Thanks to Dimitri van Heesch / Doxygen, Download and its SHA-256 table:
+    # https://www.doxygen.nl/download.html. Use native CLI ZIPs instead of mounting DMGs.
     directory = root / "out/doxygen-tools"
     directory.mkdir(parents=True, exist_ok=True)
-    archive = directory / "doxygen.tar.gz"
-    if not archive.exists() or hashlib.sha256(archive.read_bytes()).hexdigest() != pin["sha256"]:
-        request = urllib.request.Request(pin["linux_x64_url"], headers={"User-Agent": "Ludus-docs/1.0"})
-        with urllib.request.urlopen(request, timeout=120) as response, archive.open("wb") as output:
-            shutil.copyfileobj(response, output)
-    if hashlib.sha256(archive.read_bytes()).hexdigest() != pin["sha256"]:
-        raise ValueError("Doxygen archive SHA-256 mismatch")
+    archive = directory / archive_name
     binary = directory / "bin/doxygen"
-    binary.parent.mkdir(exist_ok=True)
-    with tarfile.open(archive) as package:
-        entry = package.getmember(pin["archive_binary"])
-        if not entry.isfile():
-            raise ValueError("Doxygen binary is not a regular archive member")
-        with package.extractfile(entry) as source, binary.open("wb") as output:
-            shutil.copyfileobj(source, output)
-    binary.chmod(0o755)
+    limit = 256 * 1024 * 1024
+
+    def digest(path):
+        with path.open("rb") as source:
+            return hashlib.file_digest(source, "sha256").hexdigest()
+
+    def copy_bounded(source, output):
+        total = 0
+        while chunk := source.read(1024 * 1024):
+            total += len(chunk)
+            if total > limit:
+                raise ValueError("Doxygen download or binary exceeds size limit")
+            output.write(chunk)
+
+    with tempfile.TemporaryDirectory(prefix="staging-", dir=directory) as temporary:
+        staging = Path(temporary)
+        if not archive.is_file() or archive.stat().st_size > limit or digest(archive) != selected["sha256"]:
+            candidate = staging / archive_name
+            request = urllib.request.Request(selected["url"], headers={"User-Agent": "Ludus-docs/1.0"})
+            with urllib.request.urlopen(request, timeout=120) as response, candidate.open("wb") as output:
+                copy_bounded(response, output)
+            if digest(candidate) != selected["sha256"]:
+                raise ValueError("Doxygen archive SHA-256 mismatch")
+            candidate.replace(archive)
+        candidate = staging / "doxygen"
+        member = selected["archive_binary"]
+        if archive_name.endswith(".zip"):
+            with zipfile.ZipFile(archive) as package:
+                entries = [entry for entry in package.infolist() if entry.filename == member]
+                if len(entries) != 1:
+                    raise ValueError("Doxygen archive must contain exactly one CLI binary")
+                entry = entries[0]
+                mode = entry.external_attr >> 16
+                if entry.is_dir() or stat.S_IFMT(mode) not in {0, stat.S_IFREG} or entry.file_size > limit:
+                    raise ValueError("Doxygen binary is not a bounded regular archive member")
+                with package.open(entry) as source, candidate.open("wb") as output:
+                    copy_bounded(source, output)
+        else:
+            with tarfile.open(archive) as package:
+                entries = [entry for entry in package.getmembers() if entry.name == member]
+                if len(entries) != 1:
+                    raise ValueError("Doxygen archive must contain exactly one CLI binary")
+                entry = entries[0]
+                if not entry.isfile() or entry.size > limit:
+                    raise ValueError("Doxygen binary is not a bounded regular archive member")
+                with package.extractfile(entry) as source, candidate.open("wb") as output:
+                    copy_bounded(source, output)
+        candidate.chmod(0o755)
+        binary.parent.mkdir(exist_ok=True)
+        candidate.replace(binary)
     return str(binary)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bootstrap", action="store_true", help="Download the hash-pinned official Linux x64 binary")
+    parser.add_argument("--bootstrap", action="store_true", help="Download the hash-pinned official binary for Linux x64 or macOS ARM64/x64")
     parser.add_argument("--doxygen", default="doxygen", help="Path to the pinned Doxygen executable")
     parser.add_argument("--update-baseline", action="store_true", help="Explicitly replace the reviewed legacy gap baseline")
     args = parser.parse_args()
@@ -194,5 +246,5 @@ def main():
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, ValueError, subprocess.CalledProcessError, ET.ParseError, tarfile.TarError) as error:
+    except (OSError, ValueError, subprocess.CalledProcessError, ET.ParseError, tarfile.TarError, zipfile.BadZipFile, KeyError) as error:
         raise SystemExit(f"API documentation: {error}")

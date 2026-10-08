@@ -114,6 +114,39 @@ jobs:
         with:
           path: out/wiki
 
+  macos-documentation-tools:
+    name: Documentation tools (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-14, macos-15-intel]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r docs/wiki-requirements.txt
+      - run: python -m unittest discover -s scripts/python -p 'test_api*.py' -v
+      - run: python scripts/check-docs
+      - run: python -m mkdocs build --strict
+      - run: python scripts/build-api --bootstrap
+      - name: Verify cached bootstrap without network
+        run: |
+          PYTHONPATH=scripts/python python - <<'PY'
+          import json
+          from pathlib import Path
+          from unittest.mock import patch
+          from api_reference import bootstrap
+          with patch("api_reference.urllib.request.urlopen", side_effect=AssertionError("unexpected download")):
+              bootstrap(Path.cwd(), json.loads(Path("config/doxygen_toolchain.json").read_text()))
+          PY
+      - run: python scripts/check-wiki --documentation-only
+      - run: python scripts/package-docs
+
   deploy:
     name: Publish wiki to GitHub Pages
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'

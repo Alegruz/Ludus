@@ -5,6 +5,9 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+import stat
+import zipfile
+import warnings
 from unittest.mock import patch
 
 from api_reference import bootstrap, check_coverage, check_extracted_files, coverage, public_inputs
@@ -125,6 +128,87 @@ class ApiReferenceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
                 bootstrap(self.root, pin)
         self.assertFalse((self.root / "out/doxygen-tools/bin/doxygen").exists())
+
+    def mac_archive(self, kind="regular", duplicate=False):
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, "w") as archive:
+            entry = zipfile.ZipInfo("doxygen/doxygen")
+            entry.create_system = 3
+            entry.external_attr = ((stat.S_IFLNK if kind == "symlink" else stat.S_IFREG) | 0o755) << 16
+            archive.writestr(entry, b"native binary")
+            archive.writestr("../../unexpected", b"never extract")
+            if duplicate:
+                archive.writestr(entry, b"duplicate")
+        content = data.getvalue()
+        selected = {"url": "https://example.test/doxygen.zip",
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                    "archive_binary": "doxygen/doxygen"}
+        return content, {"macos_arm64": selected, "macos_x64": selected}
+
+    def test_mac_architectures_and_cached_binary_repair(self):
+        content, pin = self.mac_archive()
+        for machine in ("arm64", "aarch64", "x86_64", "AMD64"):
+            with self.subTest(machine=machine), patch("api_reference.platform.system", return_value="Darwin"), \
+                    patch("api_reference.platform.machine", return_value=machine):
+                with patch("api_reference.urllib.request.urlopen", return_value=io.BytesIO(content)):
+                    binary = Path(bootstrap(self.root, pin))
+                self.assertEqual(binary.read_bytes(), b"native binary")
+                binary.write_bytes(b"damaged")
+                with patch("api_reference.urllib.request.urlopen", side_effect=AssertionError("network")):
+                    bootstrap(self.root, pin)
+                self.assertEqual(binary.read_bytes(), b"native binary")
+                self.assertFalse((self.root / "unexpected").exists())
+
+    @patch("api_reference.platform.machine", return_value="arm64")
+    @patch("api_reference.platform.system", return_value="Darwin")
+    def test_mac_rejects_symlink_and_preserves_existing_binary(self, _system, _machine):
+        content, pin = self.mac_archive("symlink")
+        binary = self.root / "out/doxygen-tools/bin/doxygen"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"existing tool")
+        with patch("api_reference.urllib.request.urlopen", return_value=io.BytesIO(content)):
+            with self.assertRaisesRegex(ValueError, "regular archive member"):
+                bootstrap(self.root, pin)
+        self.assertEqual(binary.read_bytes(), b"existing tool")
+        self.assertFalse(list(binary.parents[1].glob("staging-*")))
+
+    @patch("api_reference.platform.machine", return_value="x86_64")
+    @patch("api_reference.platform.system", return_value="Darwin")
+    def test_failed_mac_download_preserves_existing_archive_and_binary(self, _system, _machine):
+        content, pin = self.mac_archive()
+        with patch("api_reference.urllib.request.urlopen", return_value=io.BytesIO(content)):
+            binary = Path(bootstrap(self.root, pin))
+        pin["macos_x64"]["sha256"] = "0" * 64
+        with patch("api_reference.urllib.request.urlopen", return_value=io.BytesIO(b"bad")):
+            with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+                bootstrap(self.root, pin)
+        self.assertEqual(binary.read_bytes(), b"native binary")
+        self.assertEqual((binary.parents[1] / "doxygen-macos-x64.zip").read_bytes(), content)
+
+    @patch("api_reference.platform.machine", return_value="arm64")
+    @patch("api_reference.platform.system", return_value="Darwin")
+    def test_mac_duplicate_and_missing_cli_members_fail(self, _system, _machine):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            content, pin = self.mac_archive(duplicate=True)
+        for member in ("doxygen/doxygen", "missing"):
+            with self.subTest(member=member):
+                pin["macos_arm64"]["archive_binary"] = member
+                with patch("api_reference.urllib.request.urlopen", return_value=io.BytesIO(content)):
+                    with self.assertRaisesRegex(ValueError, "exactly one CLI binary"):
+                        bootstrap(self.root, pin)
+                self.assertFalse((self.root / "out/doxygen-tools/bin/doxygen").exists())
+
+    def test_unsupported_host_fails_before_network_or_output(self):
+        for system, machine in (("Windows", "AMD64"), ("Linux", "aarch64"), ("Darwin", "ppc")):
+            with self.subTest(system=system, machine=machine), \
+                    patch("api_reference.platform.system", return_value=system), \
+                    patch("api_reference.platform.machine", return_value=machine), \
+                    patch("api_reference.urllib.request.urlopen") as download:
+                with self.assertRaisesRegex(ValueError, "use --doxygen"):
+                    bootstrap(self.root, {})
+                download.assert_not_called()
+                self.assertFalse((self.root / "out").exists())
 
     def test_concepts_are_subject_to_the_coverage_gate(self):
         self.root.joinpath("index.xml").write_text(

@@ -4,9 +4,22 @@ Doxygen extracts XML from Ludus's public headers; MkDocs renders the API pages
 with the same Material theme and search as the rest of the wiki. It is documentation
 tooling only: no engine link dependency or native SDK/toolchain configuration is
 required. `config/doxygen_toolchain.json` pins the official executable version,
-Linux x64 archive from the official GitHub release and SHA-256 published by Doxygen.
+Linux x64 and macOS Apple Silicon/Intel archives from the official GitHub release
+and SHA-256 checksums published by Doxygen.
 Downloads identify the documentation client with an explicit User-Agent; the
 checksum is verified before extracting or executing the binary.
+
+On macOS 13 or later, `python scripts/build-api --bootstrap` automatically selects
+Apple Silicon (`arm64`) or Intel (`x86_64`) using the Python process architecture.
+An Intel Python running under Rosetta selects the Intel tool. Build MkDocs first
+as described below; no Homebrew, disk-image mounting or system-wide installation
+is needed. Archives and the executable stay in ignored `out/doxygen-tools/`.
+Repeat runs verify and reuse the cached archive and restore the CLI from it,
+including when its installed copy is missing or damaged. Failed downloads or
+extraction leave an existing executable intact. Only the CLI member is extracted;
+the GUI and search helpers are not installed. Other hosts may use
+`python scripts/build-api --doxygen /path/to/doxygen` with the pinned version.
+Plain previews never download Doxygen.
 
 ## Write caller contracts
 
@@ -124,4 +137,4 @@ Thanks to **MkDocs**, [Plugins](https://www.mkdocs.org/dev-guide/plugins/)
 and [API Reference](https://www.mkdocs.org/dev-guide/api/#mkdocs.structure.files.File.generated),
 for the hooks and generated-file interfaces used to join the normal site build.
 The [official download page](https://www.doxygen.nl/download.html) supplies the
-pinned Linux archive checksum. No upstream implementation code is copied.
+pinned archive checksums. No upstream implementation code is copied.
