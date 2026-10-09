@@ -401,7 +401,13 @@ TEST_CASE("L2 R8 coverage orientation, painter scissors and clipped thick lines 
         CHECK(image[offset + 2] == blue);
     };
     color(8, 48, 255, 0, 0);
-    color(24, 48, 128, 128, 0);
+    // UNorm destination-alpha blend precision differs: llvmpipe gives red 127,
+    // Metal/Chromium give 128. Bound only that observed one-code-value rounding.
+    const usize blend = (usize{48} * 96 + 24) * 4;
+    CHECK(image[blend] >= 127);
+    CHECK(image[blend] <= 128);
+    CHECK(image[blend + 1] == 128);
+    CHECK(image[blend + 2] == 0);
     color(40, 48, 0, 0, 0);
     color(80, 4, 255, 255, 255);
     color(80, 28, 0, 0, 0);
