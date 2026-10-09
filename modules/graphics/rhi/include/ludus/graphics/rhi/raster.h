@@ -165,7 +165,7 @@ struct BufferDescription final
     /// Allocation and initial-content length in bytes; nonzero and bounded by capabilities.
     ludus::foundation::usize Size = 0;
 };
-/// Supported color formats; all textures have one mip, one layer and one sample.
+/// Portable color/data formats; one layer and one sample, with immutable mip chains.
 enum class RasterFormat : ludus::foundation::uint8
 {
     /// Four unsigned normalized channels, interpreted as linear light.
@@ -174,6 +174,8 @@ enum class RasterFormat : ludus::foundation::uint8
     Rgba8Srgb,
     /// Single unsigned normalized coverage/data channel; sampled only, never an attachment.
     R8Unorm,
+    /// Two normalized linear data channels; sampled only, never an attachment.
+    Rg8Unorm,
 };
 /// Two-dimensional sampled texture or mutable color attachment description.
 struct TextureDescription final
@@ -187,16 +189,35 @@ struct TextureDescription final
     /// Allocate undefined color and private depth attachments instead of uploading bytes.
     /// Attachment textures remain sampleable; clear/store defines color contents.
     bool Attachment = false;
+    /// Initialized mip levels, 1..floor(log2(max(Width,Height)))+1, at most 16.
+    /// Attachments require one; sampled views cover this entire initialized range.
+    ludus::foundation::uint32 MipLevels = 1;
+    /// Request nonblocking native upload readiness; Pending owns staging until completion.
+    /// Legacy RGBA single-level creation defaults to its existing setup behavior.
+    bool AsyncUpload = false;
 };
-/// Borrowed complete R8 or RGBA8 upload, copied/consumed before CreateTexture returns.
+/// One complete initialized mip within the borrowed upload byte blob.
+struct TextureMipUpload final
+{
+    /// Four-byte-aligned offset; levels must be tightly concatenated in ascending order.
+    ludus::foundation::usize Offset = 0;
+    /// Bytes between rows, multiple of four, including optional padding.
+    ludus::foundation::usize RowPitch = 0;
+};
+/// Borrowed complete R8/RG8/RGBA8 chain, copied/consumed before CreateTexture returns.
 struct TextureUpload final
 {
     /// Rows in top-left image order, including optional padding between rows.
     std::span<const ludus::foundation::uint8> Bytes;
     /// Bytes between rows; multiple of four and at least Width times the format channel count.
     ludus::foundation::usize RowPitch = 0;
+    /// Empty selects the legacy single-mip RowPitch. Otherwise exactly MipLevels
+    /// descriptors; RowPitch must be zero. All metadata is consumed before return.
+    // Explicit default preserves two-field aggregate callers under -Wmissing-field-initializers.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::span<const TextureMipUpload> Mips{};
 };
-/// Portable minification/magnification filter; the one-mip profile has no mip interpolation.
+/// Portable within-level minification/magnification filter; mip interpolation is separate.
 enum class RasterFilter : ludus::foundation::uint8
 {
     /// Select one texel.
@@ -212,6 +233,16 @@ enum class RasterAddress : ludus::foundation::uint8
     /// Repeat the texture at integer coordinate boundaries.
     Repeat,
 };
+/// Independent minification selection across initialized mip levels.
+enum class RasterMipFilter : ludus::foundation::uint8
+{
+    /// Clamp to level zero; preserves the legacy sampling profile.
+    None,
+    /// Select the nearest level.
+    Nearest,
+    /// Interpolate neighboring levels.
+    Linear,
+};
 /// Immutable sampler state; anisotropy and comparison sampling are unsupported.
 struct SamplerDescription final
 {
@@ -221,6 +252,12 @@ struct SamplerDescription final
     RasterAddress U = RasterAddress::Clamp;
     /// Vertical addressing.
     RasterAddress V = RasterAddress::Clamp;
+    /// Mip selection; defaults to the legacy level-zero sampler.
+    RasterMipFilter MipFilter = RasterMipFilter::None;
+    /// Finite minimum LOD, 0..15; None requires zero.
+    ludus::foundation::float32 MinLod = 0;
+    /// Finite maximum LOD, MinLod..15; clamped to initialized texture levels by sampling.
+    ludus::foundation::float32 MaxLod = 15;
 };
 /// Resource kind reflected at a binding in group/set zero.
 enum class RasterBindingKind : ludus::foundation::uint8
@@ -279,6 +316,39 @@ struct RasterShaderInput final
     /// Exact float component count expected by the selected target artifact.
     RasterVertexFormat Format = RasterVertexFormat::Float3;
 };
+/// Bounded authored uniform shapes, independently reflected for each target.
+/// Matrix order/array stride remain properties of the cooked target, not CPU math types.
+enum class RasterUniformShape : ludus::foundation::uint8
+{
+    /// Unclassified shape; legacy/other schemas cannot satisfy a typed material ABI.
+    Opaque,
+    /// One IEEE binary32 value.
+    Float32,
+    /// Two IEEE binary32 components.
+    Float2,
+    /// Three IEEE binary32 components.
+    Float3,
+    /// Four IEEE binary32 components.
+    Float4,
+    /// Four by four IEEE binary32 matrix.
+    Float4x4,
+    /// Bounded fixed array of Float4 values.
+    Float4Array,
+    /// Bounded fixed array of Float4x4 values.
+    Float4x4Array,
+};
+/// One independently reflected top-level uniform member offset and authored shape.
+struct RasterUniformMember final
+{
+    /// Group-zero uniform binding containing the member.
+    ludus::foundation::uint32 Binding = 0;
+    /// Copied/consumed schema name, nonempty and at most 63 bytes.
+    std::string_view Name;
+    /// Byte offset inside the binding's occupied range, multiple of four.
+    ludus::foundation::usize Offset = 0;
+    /// Cooked authored numeric shape; Opaque retains legacy admission but rejects typed material ABI.
+    RasterUniformShape Shape = RasterUniformShape::Opaque;
+};
 /// Per-target interface metadata emitted by the offline shader tool.
 /// Hand-authored artifacts must supply independently verified matching reflection.
 struct RasterShaderDescription final
@@ -298,6 +368,12 @@ struct RasterShaderDescription final
     /// Independently reflected local dimensions for Compute; ignored for raster.
     /// Positive dimensions/product must fit the negotiated compute limits.
     ludus::foundation::uint32 WorkgroupSize[3]{1, 1, 1};
+    /// At most 64 unique (binding,name) top-level offsets. Empty preserves legacy
+    /// artifacts; schema-aware consumers require a complete expected member set.
+    /// Consumed before shader creation returns; never retained as borrowed names.
+    // Explicit default preserves existing aggregate callers under -Wmissing-field-initializers.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::span<const RasterUniformMember> UniformMembers{};
 };
 /// One immutable binding snapshot entry; exactly the resource matching Kind is used.
 struct RasterBindingResource final
@@ -447,7 +523,7 @@ struct RasterCapabilities final
 /// for draw-range checks; vertex/uniform input is consumed by the backend before return.
 [[nodiscard]] RasterStatus
 CreateBuffer(DeviceHandle, const BufferDescription&, std::span<const ludus::foundation::uint8>, BufferHandle&) noexcept;
-/// Create a sampled texture from complete RGBA8 rows, or an undefined attachment
+/// Create a sampled texture from a complete initialized R8/RG8/RGBA8 mip chain, or an undefined attachment
 /// with empty upload and zero pitch. Invalid description preserves output.
 [[nodiscard]] RasterStatus
 CreateTexture(DeviceHandle, const TextureDescription&, const TextureUpload&, TextureHandle&) noexcept;
@@ -456,7 +532,7 @@ CreateTexture(DeviceHandle, const TextureDescription&, const TextureUpload&, Tex
 /// Copy the immutable description of an owned texture; owner-thread only, including open frames.
 /// Invalid/unready handles preserve output; does not expose native objects or extend ownership.
 [[nodiscard]] RasterStatus GetTextureDescription(DeviceHandle, TextureHandle, TextureDescription&) noexcept;
-/// Create a complete, original-format view, retaining its texture. Partial sampled ranges,
+/// Create a complete initialized-mip, original-format view, retaining its texture. Partial sampled ranges,
 /// format reinterpretation and separate depth views are unsupported.
 [[nodiscard]] RasterStatus CreateTextureView(DeviceHandle, TextureHandle, TextureViewHandle&) noexcept;
 /// Create immutable filter/address state; no engine allocations on a warmed resource path.

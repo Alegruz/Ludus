@@ -1,8 +1,8 @@
 # Low-level renderer systems architecture
 
-Status: L0 scene submission, L1 views/depth and L2 mutable versions/overlays
-implemented, October 8, 2026. L2 starts from merged L1 at `df231de`.
-L3–L6 remain an implementation plan.
+Status: L0 scene submission, L1 views/depth, L2 mutable versions/overlays and
+L3 material/content versions implemented, October 8, 2026. L3 starts from merged
+L2 at `5ee169f`. L4–L6 remain an implementation plan.
 Correctness fixtures do not establish a measured speedup.
 The initial decisions below were saved before opening the Gems article map.
 The [reference review](renderer-systems-gems-review.md) records the subsequent
@@ -67,9 +67,9 @@ depth. L1 adds explicit pass clear depth and pipeline comparison state. Foundati
 intended 3D convention is reverse-Z `[0,1]`. Pair reverse-Z projections with clear zero and Greater explicitly. The L1
 fixtures prove ordering on native and browser backends; existing consumers keep
 their conventional default.
-Existing R1 consumers keep their documented behavior. Similarly, its 16 records
-per kind, RGBA8-only single-mip sampling and one binding group are compatibility
-limits, not an adequate streaming/lighting contract.
+Existing R1 consumers keep their documented behavior. L3 expands the initial 16 records per kind to 32 and supplies immutable R8, RG8
+and linear/sRGB RGBA8 mip chains. One binding group remains the portable profile;
+this bounded content slice does not establish a general streaming/lighting contract.
 
 ## Portable scene submission (L0)
 
@@ -303,6 +303,98 @@ checks old bytes and texture retention, exercises capacity recovery, and invalid
 stale handles on release/restart. CPU fixtures cover Latin, Hangul and Arabic shaping,
 cluster provenance, warm cache reuse, transparent gutters and atlas pressure.
 These are correctness checks; no throughput or physical GPU speedup is claimed.
+
+## Implemented L3: material and content versions
+
+L3 extends the existing Renderer with [MaterialProgram, MaterialVersion and
+MaterialDescription](../../modules/graphics/renderer/include/ludus/graphics/renderer/materials.hpp).
+A program owns one immutable shader/layout incarnation and six R2 pipeline-cache
+requests: surface/offscreen × conventional depth/reverse-Z/painter. Create and poll
+programs outside an acquired frame. A ready program admits immutable material
+parameters, a sampler and an exact retained sampled texture view. Draws perform no
+shader compilation, binding construction or parameter upload. Mesh creation copies
+positions and optional finite top-left UVs into a 20-byte vertex; L0 flat shaders
+ignore UVs. Existing flat/error materials keep their behavior.
+
+```cmake
+ludus_compile_shader(TARGET my_app NAME renderer_material RASTER
+    SOURCE "${Ludus_DIR}/shaders/renderer_material.slang"
+    VERTEX vertexMain FRAGMENT fragmentMain)
+ludus_cook_texture(TARGET my_app NAME albedo SOURCE assets/albedo.texture.json)
+```
+
+The installed shader ABI has seven vertex inputs (position, four transform rows,
+instance color, UV) and fragment bindings 0/1/2 (48-byte uniform/texture/sampler).
+Per-target reflection exposes and verifies float4 `Tint`, `UvTransform`, `Options`
+at 0/16/32 before admission. Equal-sized incompatible numeric shapes reject. The offline raster layout verifier additionally accepts
+bounded float4 and float4x4 arrays and matrices, with independently checked WGSL
+and GLSL ES packing, including pinned Slang's narrow matrix storage wrappers;
+unsupported nested/runtime layouts reject. Source compilation
+and generated manifests remain build-time work, never renderer reload work.
+
+Use `PrewarmMaterialProgram` and `GetStatus` until ready, then `CreateMaterial` and
+poll that candidate. `PublishMaterial(candidate, current)` transfers a ready owned
+candidate into the current identity and detaches the previous owner. Failed or
+pending admission preserves the old material; callers keep drawing its prepared
+views. Snapshots and prepared views retain their exact material/program/texture
+incarnations, and RHI retains accepted GPU dependencies after public release.
+Publication changes future snapshot inputs, not previously captured views. Release
+unpublished candidates explicitly. A program's null texture uses its ready white
+fallback; a null scene surface uses L0's magenta flat/error material. Opaque and
+masked materials use the scene layer and write depth; Painter uses the Overlay
+layer and premultiplies straight color/texture alpha exactly once. This remains an
+unlit schema; lights, tangents and physically based shading belong to L4.
+
+The raw texture JSON contains integer `width`, `height` (1..4096), `format`
+(`R8Unorm`, `Rg8Unorm`, `Rgba8Unorm`, `Rgba8Srgb`), `semantic` (`color`, `data`,
+`normal`, `mask`) and complete top-down tightly packed integer-byte `pixels`.
+Color/normal require RGBA8; sRGB is color-only. Complete upload footprint must
+fit 64 MiB (or the device's lower enabled limit at admission). The cooker writes a complete
+immutable chain down to 1×1, four-byte padded rows, source/upload hashes and
+inspectable level offsets/pitches. Fractional box footprints include odd edges;
+sRGB RGB is decoded before filtering and re-encoded afterward, alpha stays linear.
+Color filtering associates alpha then restores straight alpha, avoiding transparent
+RGB bleed. Normal RGB is decoded, averaged and renormalized (degenerate averages
+use +Z). Data averages channels independently. Optional mask `cutoff` in (0,1]
+selects the nearest attainable discrete coverage using a monotone alpha scale;
+the manifest reports coverage error, which need not be zero. Thanks to Khronos's
+[KTX 2.0 §3.10.2, Use of Transfer Functions](https://registry.khronos.org/KTX/specs/2.0/ktxspec.v2.html#_use_of_transfer_functions)
+for the decode/filter/encode rule. This raw profile includes no image codec,
+compressed formats or runtime mip generation.
+
+RHI requires every declared sampled level to be initialized; offsets/pitches and
+aggregate upload extent are validated before native work. Sampled views expose the
+whole exact format/chain. Attachment textures remain single-mip RGBA8. Mip filters
+and finite LOD clamps are explicit; the compatibility sampler clamps level zero.
+`MaterialDescription::Lod` selects derivatives (-1) or an explicit initialized
+level for deterministic previews, still subject to the sampler's mip/LOD clamps. Streaming residency/partial mip ranges remain
+planned. `AsyncUpload` requests nonblocking Vulkan setup with fence-retained staging;
+mip/data uploads also use that path. The cooker sets it. Legacy one-level RGBA8
+setup retains its compatibility behavior; native/browser readiness is always explicit.
+
+Default budgets are two program and eight material records, including detached
+CPU-retained incarnations. RHI's 32 records per kind cover L0/L1's seven pipelines,
+L2's six and two overlapping six-variant programs (25); this changes table capacity,
+not binding or hardware limits. R2 pipeline, upload and retirement budgets still
+apply independently: backpressure returns an explicit status, never overwrites old
+content. No unbounded cache, persisted driver blobs or draw-time permutations were
+added. Thanks to the [Khronos Vulkan Guide, Pipeline Cache](https://docs.vulkan.org/guide/latest/pipeline_cache.html)
+for motivating explicit prewarm; implementation uses Ludus's existing field-comparing
+R2 cache.
+
+The public-only [L3 SDK fixture](../../tests/sdk_consumer/renderer_materials.cpp)
+cooks and renders color mips, masked coverage, painter blending and transactional
+red→green replacement over 120 frames. Native pixel fixtures compare surface and
+offscreen conventional/reverse-Z output, including a prepared view retained across
+publication and rejected reload. Browser checks compare optimized/reference and
+WebGPU/WebGL2/Auto/fallback images before and after replacement. Unit fixtures
+exercise bounded overlap, stale identities, retained old versions, exact ABI rejection
+and no additional pipeline creation during draws. Cooker fixtures independently
+check transfer functions, odd areas, normal normalization and mask quantization.
+The installed SDK separately cooks a matrix/vector-array/matrix-array fixture and
+checks its target's 240-byte range and 0/64/96/224 member offsets.
+These establish correctness; physical GPU performance, streaming throughput and
+compressed-content quality require separate qualification.
 
 ## Owners and module shape
 
@@ -1045,7 +1137,7 @@ These phases complement RHI R0–R5; they do not rename or claim completion of t
 | L0: portable scene packets (implemented) | R1 static flat/unlit meshes with fixed transforms, immutable snapshots, CPU visibility, ordered 2D overlays, error materials; remain within current limits and R1-compatible depth | Public-only SDK fixture on Vulkan/Metal/WebGPU/WebGL; invalid/stale inputs, capacity failure and pixels match an unsorted direct path |
 | L1: views and depth (implemented) | GDI/RHI explicit attachments, clear/compare state and frame retention; orthographic/perspective, virtual screens, offscreen/split views | Reverse-Z ordering, clip/UV orientation, letterbox picking, DPI, zero extent, resize and neighboring view preservation |
 | L2: mutable data and overlays (implemented) | Completion-scoped replacement uploads; dynamic instances, debug triangles, R8 text adapter | In-flight overwrite stress, line near-plane/degenerate cases, painter/scissor order, atlas pressure, CPU text fixtures and loss/restart |
-| L3: material/content versions | Cook/reflection/layout expansion, texture formats/mips and pipeline prewarm | Per-target layout fixtures; invalid reload preserves old image; mip/color semantics; bounded cache/upload overlap and deterministic fallback |
+| L3: material/content versions (implemented) | Cook/reflection/layout expansion, texture formats/mips and pipeline prewarm | Per-target layout fixtures; invalid reload preserves old image; mip/color semantics; bounded cache/upload overlap and deterministic fallback |
 | L4: lighting baseline | Lit material, bounded direct lists, environment, shadows, baked assets, linear intermediate/output | Reference BRDF/color tests; no double lighting, shadow invalidation/atlas borders, saturation/overflow and LDR/HDR capability variants |
 | L5: measured scaling | Clustered forward, improved culling/LOD, optional native parallel recording | Dense-light and many-object fixtures; direct-path comparisons, overflow correctness, physical GPU median/tail/memory/latency evidence |
 | L6: optional advanced effects | Temporal/GPU-driven/virtual-residency plans and the RT0–RT4 ray plan | Capability probes and disabled-path support; image/temporal tests and workload-specific gains before default enablement |

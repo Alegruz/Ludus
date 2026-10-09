@@ -131,6 +131,50 @@ try {
     report.cases.push({phase:3,scenario,...final});
     await context.close();
   }
+  let materialOracles = [];
+  for (const scenario of ['webgpu','webgl2','auto','fallback']) {
+    const variants = [];
+    for (const reference of [false,true]) {
+      const context = await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
+      if (scenario === 'fallback') await context.addInitScript(() => Object.defineProperty(navigator,'gpu',{get:()=>undefined}));
+      const page = await context.newPage(), errors = [], images = [];
+      page.on('pageerror',error=>errors.push(String(error)));
+      page.on('console',message=>{if(message.type()==='error') errors.push(message.text());});
+      await page.goto(`http://127.0.0.1:${server.address().port}/renderer-materials.html?backend=${scenario==='fallback'?'auto':scenario}${reference?'&reference=1':''}`);
+      for (const frames of [5,80]) {
+        try { await page.waitForFunction(n=>document.querySelector('#status').dataset.frames===String(n)||document.querySelector('#status').dataset.state==='failed',frames,{timeout:30000}); }
+        catch(error) { throw new Error(JSON.stringify({scenario,reference,frames,errors,state:await page.locator('#status').evaluate(n=>({...n.dataset}))}),{cause:error}); }
+        const state=await page.locator('#status').evaluate(n=>({...n.dataset}));
+        assert.equal(state.state,'rendering',JSON.stringify({state,errors}));
+        assert.equal(state.backend,scenario==='fallback'?'webgl2':scenario==='auto'?'webgpu':scenario);
+        assert.deepEqual(errors,[]);
+        const png=await page.locator('#canvas').screenshot(), image=PNG.sync.read(png);
+        await writeFile(resolve(output,`l3-${scenario}-${reference?'reference':'optimized'}-${frames}.png`),png);
+        assert.equal(image.width,96); assert.equal(image.height,64);
+        const color=(x,y,expected)=>assert.deepEqual([...image.data.subarray((y*96+x)*4,(y*96+x)*4+4)],expected,`L3 ${frames} pixel ${x},${y}`);
+        const gray=[...image.data.subarray((16*96+16)*4,(16*96+16)*4+4)];
+        assert.ok(gray[0]>=127&&gray[0]<=129,'sRGB mip filtered in linear light');
+        assert.deepEqual(gray,[gray[0],gray[0],gray[0],255]);
+        color(40,8,[255,255,255,255]); color(56,8,[0,0,0,255]);
+        color(8,48,frames===5?[255,0,0,255]:[0,255,0,255]);
+        color(72,8,[0,0,255,255]); color(88,8,[0,0,0,255]); color(80,48,[255,0,255,255]);
+        const blend=[...image.data.subarray((48*96+48)*4,(48*96+48)*4+4)];
+        assert.ok(blend[frames===5?0:1]>=127&&blend[frames===5?0:1]<=128,'single painter premultiplication');
+        assert.equal(blend[frames===5?1:0],0); assert.equal(blend[2],128); assert.equal(blend[3],255);
+        images.push(image.data);
+        await page.evaluate(()=>{globalThis.__qaPause=false;});
+      }
+      await page.waitForFunction(()=>['passed','failed'].includes(document.querySelector('#status').dataset.state),{},{timeout:30000});
+      const final=await page.locator('#status').evaluate(n=>({...n.dataset}));
+      assert.equal(final.state,'passed',JSON.stringify({final,errors})); assert.equal(final.frames,'120'); assert.deepEqual(errors,[]);
+      report.cases.push({phase:4,scenario,reference,...final}); variants.push(images); await context.close();
+    }
+    for (let frame=0;frame<2;++frame) {
+      assert.deepEqual(variants[0][frame],variants[1][frame],'L3 direct reference pixels');
+      if(materialOracles[frame]) assert.deepEqual(variants[0][frame],materialOracles[frame],'L3 cross-backend pixels');
+      else materialOracles[frame]=variants[0][frame];
+    }
+  }
   await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2));
-  console.log('L0/L1/L2 renderer SDK: WebGPU/WebGL2/Auto/fallback match direct and cross-backend pixels over 120 frames, including split views, zero extent and resize');
+  console.log('L0/L1/L2/L3 renderer SDK: WebGPU/WebGL2/Auto/fallback match direct and cross-backend pixels over 120 frames, including split views, zero extent and resize');
 } finally { await browser?.close(); server.close(); }

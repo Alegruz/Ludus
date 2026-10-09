@@ -184,12 +184,14 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     @autoreleasepool
     {
         MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
-            texture2DDescriptorWithPixelFormat:info.Format == RasterFormat::R8Unorm      ? MTLPixelFormatR8Unorm
+            texture2DDescriptorWithPixelFormat:info.Format == RasterFormat::Rg8Unorm     ? MTLPixelFormatRG8Unorm
+                                               : info.Format == RasterFormat::R8Unorm    ? MTLPixelFormatR8Unorm
                                                : info.Format == RasterFormat::Rgba8Unorm ? MTLPixelFormatRGBA8Unorm
                                                                                          : MTLPixelFormatRGBA8Unorm_sRGB
                                          width:info.Width
                                         height:info.Height
                                      mipmapped:NO];
+        descriptor.mipmapLevelCount = info.MipLevels;
         descriptor.usage =
             MTLTextureUsageShaderRead | (info.Attachment ? MTLTextureUsageRenderTarget : MTLTextureUsageUnknown);
         descriptor.storageMode = MTLStorageModeShared;
@@ -200,10 +202,17 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         }
         if (!info.Attachment)
         {
-            [texture replaceRegion:MTLRegionMake2D(0, 0, info.Width, info.Height)
-                       mipmapLevel:0
-                         withBytes:upload.Bytes.data()
-                       bytesPerRow:upload.RowPitch];
+            uint32 width = info.Width, height = info.Height;
+            for (usize level = 0; level < info.MipLevels; ++level)
+            {
+                const auto mip = upload.Mips.empty() ? TextureMipUpload{0, upload.RowPitch} : upload.Mips[level];
+                [texture replaceRegion:MTLRegionMake2D(0, 0, width, height)
+                           mipmapLevel:level
+                             withBytes:upload.Bytes.data() + mip.Offset
+                           bytesPerRow:mip.RowPitch];
+                width = width > 1 ? width / 2 : 1;
+                height = height > 1 ? height / 2 : 1;
+            }
         }
         else
         {
@@ -235,6 +244,11 @@ RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uin
         MTLSamplerDescriptor* descriptor = [MTLSamplerDescriptor new];
         descriptor.minFilter = descriptor.magFilter =
             info.Filter == RasterFilter::Nearest ? MTLSamplerMinMagFilterNearest : MTLSamplerMinMagFilterLinear;
+        descriptor.mipFilter = info.MipFilter == RasterMipFilter::Linear    ? MTLSamplerMipFilterLinear
+                               : info.MipFilter == RasterMipFilter::Nearest ? MTLSamplerMipFilterNearest
+                                                                            : MTLSamplerMipFilterNotMipmapped;
+        descriptor.lodMinClamp = info.MinLod;
+        descriptor.lodMaxClamp = info.MipFilter == RasterMipFilter::None ? 0 : info.MaxLod;
         descriptor.sAddressMode =
             info.U == RasterAddress::Clamp ? MTLSamplerAddressModeClampToEdge : MTLSamplerAddressModeRepeat;
         descriptor.tAddressMode =

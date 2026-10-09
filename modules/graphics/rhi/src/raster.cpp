@@ -485,14 +485,25 @@ RasterStatus CreateTexture(DeviceHandle device,
     if (description.Width == 0 || description.Height == 0 || description.Width > maxDimension ||
         description.Height > maxDimension ||
         (description.Format != RasterFormat::Rgba8Unorm && description.Format != RasterFormat::Rgba8Srgb &&
-         description.Format != RasterFormat::R8Unorm) ||
-        (description.Attachment && description.Format == RasterFormat::R8Unorm))
+         description.Format != RasterFormat::R8Unorm && description.Format != RasterFormat::Rg8Unorm) ||
+        (description.Attachment && (description.Format == RasterFormat::R8Unorm ||
+                                    description.Format == RasterFormat::Rg8Unorm || description.MipLevels != 1)))
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    uint32 levels = 1;
+    for (uint32 extent = description.Width > description.Height ? description.Width : description.Height; extent > 1;
+         extent /= 2)
+    {
+        ++levels;
+    }
+    if (description.MipLevels == 0 || description.MipLevels > levels || description.MipLevels > 16)
     {
         return RasterStatus::InvalidDescription;
     }
     if (description.Attachment)
     {
-        if (!upload.Bytes.empty() || upload.RowPitch != 0)
+        if (!upload.Bytes.empty() || upload.RowPitch != 0 || !upload.Mips.empty())
         {
             return RasterStatus::InvalidDescription;
         }
@@ -501,10 +512,30 @@ RasterStatus CreateTexture(DeviceHandle device,
             return backend::RasterCreateTexture(slot, description, upload, record.Request);
         });
     }
-    const usize row = static_cast<usize>(description.Width) * (description.Format == RasterFormat::R8Unorm ? 1U : 4U);
-    if (upload.RowPitch < row || upload.RowPitch % 4 != 0 || upload.RowPitch > ~usize{0} / description.Height ||
-        upload.Bytes.size() != upload.RowPitch * description.Height ||
-        upload.Bytes.size() > textureLimits.MaxBufferSize)
+    if ((upload.Mips.empty() && description.MipLevels != 1) ||
+        (!upload.Mips.empty() && (upload.Mips.size() != description.MipLevels || upload.RowPitch != 0)))
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    usize occupied = 0;
+    uint32 width = description.Width, height = description.Height;
+    const usize channels = description.Format == RasterFormat::R8Unorm    ? 1U
+                           : description.Format == RasterFormat::Rg8Unorm ? 2U
+                                                                          : 4U;
+    for (usize level = 0; level < description.MipLevels; ++level)
+    {
+        const auto pitch = upload.Mips.empty() ? upload.RowPitch : upload.Mips[level].RowPitch;
+        const auto offset = upload.Mips.empty() ? usize{0} : upload.Mips[level].Offset;
+        if (pitch < static_cast<usize>(width) * channels || pitch % 4 != 0 || offset != occupied ||
+            occupied > upload.Bytes.size() || pitch > (upload.Bytes.size() - occupied) / height)
+        {
+            return RasterStatus::InvalidDescription;
+        }
+        occupied += pitch * height;
+        width = width > 1 ? width / 2 : 1;
+        height = height > 1 ? height / 2 : 1;
+    }
+    if (upload.Bytes.data() == nullptr || occupied != upload.Bytes.size() || occupied > textureLimits.MaxBufferSize)
     {
         return RasterStatus::InvalidDescription;
     }
@@ -566,8 +597,12 @@ RasterStatus CreateSampler(DeviceHandle device, const SamplerDescription& descri
     {
         return admission;
     }
+    // Positive range predicates reject NaN as well as infinities without a math dependency.
+    const bool validLod = description.MinLod >= 0 && description.MinLod <= 15 &&
+                          description.MaxLod >= description.MinLod && description.MaxLod <= 15;
     if (static_cast<uint8>(description.Filter) > 1 || static_cast<uint8>(description.U) > 1 ||
-        static_cast<uint8>(description.V) > 1)
+        static_cast<uint8>(description.V) > 1 || static_cast<uint8>(description.MipFilter) > 2 || !validLod ||
+        (description.MipFilter == RasterMipFilter::None && description.MinLod != 0))
     {
         return RasterStatus::InvalidDescription;
     }
@@ -619,6 +654,35 @@ CreateRasterShader(DeviceHandle device, const RasterShaderDescription& descripti
             (info.Stage == ShaderStage::Compute || binding.Visibility != RasterVisibility::Both))
         {
             return RasterStatus::InvalidDescription;
+        }
+    }
+    if (description.UniformMembers.size() > 64)
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    for (usize i = 0; i < description.UniformMembers.size(); ++i)
+    {
+        const auto& member = description.UniformMembers[i];
+        char name[64]{};
+        bool valid = false;
+        for (const auto& binding : description.Bindings)
+        {
+            valid |= binding.Binding == member.Binding && binding.Kind == RasterBindingKind::UniformBuffer &&
+                     member.Offset < binding.MinSize;
+        }
+        if (!valid || member.Offset % 4 != 0 || member.Name.empty() || !CopyName(member.Name, name) ||
+            static_cast<uint8>(member.Shape) > static_cast<uint8>(RasterUniformShape::Float4x4Array))
+        {
+            return RasterStatus::InvalidDescription;
+        }
+        for (usize j = 0; j < i; ++j)
+        {
+            const auto& previous = description.UniformMembers[j];
+            if (previous.Binding == member.Binding &&
+                (previous.Name == member.Name || previous.Offset == member.Offset))
+            {
+                return RasterStatus::InvalidDescription;
+            }
         }
     }
     for (usize i = 0; i < RASTER_BINDINGS; ++i)

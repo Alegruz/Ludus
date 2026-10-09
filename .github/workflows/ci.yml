@@ -59,7 +59,7 @@ jobs:
           out/host-tools/venv/bin/cmake --preset macos-clang-development -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" -DLUDUS_EDITOR_RENDER_PREVIEW=ON -DLUDUS_BUILD_WORLD_DEMO=ON
           ./scripts/build macos-clang-development
       - name: Test macOS setup contracts
-        run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui test_metal_shaders test_raster_shaders test_macos_editor test_editor_tool test_process_ownership test_play_probe test_play_session test_play_build test_play_documents test_play_assets -v
+        run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui test_metal_shaders test_raster_shaders test_texture_cooker test_macos_editor test_editor_tool test_process_ownership test_play_probe test_play_session test_play_build test_play_documents test_play_assets -v
       - name: Test native Cocoa, Metal, filesystem, Content and Audio
         env:
           LUDUS_TEST_COCOA: "1"
@@ -91,7 +91,7 @@ jobs:
         run: |
           out/host-tools/venv/bin/cmake --install out/build/macos-clang-development
           out/host-tools/venv/bin/python tests/sdk_consumer/verify_metal_shader_build.py --sdk "$PWD/out/install/macos-clang-development" --cmake "$PWD/out/host-tools/venv/bin/cmake" --ninja "$PWD/out/host-tools/venv/bin/ninja" --cxx "$PWD/out/host-tools/bin/clang++" --slang "$PWD/out/shader-tools/slang/bin/slangc" --conan "$PWD/out/conan/macos-clang-development" --sysroot "$PWD/out/host-tools/macos-sdk" --libcxx "$PWD/out/host-tools/libcxx-include"
-      - name: Verify installed L0/L1/L2 renderer consumers
+      - name: Verify installed L0/L1/L2/L3 renderer consumers
         run: |
           out/host-tools/venv/bin/cmake -S tests/sdk_consumer/renderer -B out/renderer-sdk -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -104,6 +104,7 @@ jobs:
           out/renderer-sdk/ludus_sdk_renderer_consumer
           out/renderer-sdk/ludus_sdk_renderer_views_consumer
           out/renderer-sdk/ludus_sdk_renderer_overlays_consumer
+          out/renderer-sdk/ludus_sdk_renderer_materials_consumer
       - name: Verify installed macOS game-project tooling
         run: |
           ./scripts/install-sdk macos-clang-development
@@ -313,7 +314,7 @@ jobs:
       - name: Test reproducible packs with the independent LZ4 decoder
         run: python3 -m unittest discover -s scripts/python -p test_pack_builder.py -v
       - name: Test Metal shader reflection contracts
-        run: PYTHONPATH=scripts/python python3 -m unittest test_metal_shaders test_raster_shaders -v
+        run: PYTHONPATH=scripts/python python3 -m unittest test_metal_shaders test_raster_shaders test_texture_cooker -v
       - name: Test optional RAD tooling contracts
         run: python3 -m unittest discover -s scripts/python -p 'test_rad_debugger.py' -v
       - name: Test graphical and CLI initialization routing
@@ -512,6 +513,7 @@ jobs:
           out/renderer-sdk/ludus_sdk_renderer_consumer
           out/renderer-sdk/ludus_sdk_renderer_views_consumer
           out/renderer-sdk/ludus_sdk_renderer_overlays_consumer
+          out/renderer-sdk/ludus_sdk_renderer_materials_consumer
       - name: Build and test the independent Cornell box tutorial (Vulkan)
         run: |
           sudo apt-get install -y -qq libvulkan1 mesa-vulkan-drivers
