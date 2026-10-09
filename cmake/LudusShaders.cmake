@@ -103,3 +103,23 @@ function(ludus_compile_shader)
     target_sources(${SH_TARGET} PRIVATE "${output}/${SH_NAME}.h")
     target_include_directories(${SH_TARGET} PRIVATE "${output}")
 endfunction()
+
+# Cook a bounded raw-texel JSON source into immutable portable upload bytes/mips.
+# This performs no downloads and requires only the existing host Python tool.
+function(ludus_cook_texture)
+    cmake_parse_arguments(PARSE_ARGV 0 TEX "" "TARGET;NAME;SOURCE" "")
+    if(TEX_UNPARSED_ARGUMENTS OR NOT TARGET "${TEX_TARGET}" OR
+       NOT TEX_NAME MATCHES "^[A-Za-z_][A-Za-z_0-9]*$" OR NOT TEX_SOURCE)
+        message(FATAL_ERROR "ludus_cook_texture requires TARGET NAME SOURCE")
+    endif()
+    get_filename_component(source "${TEX_SOURCE}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    ludus_require_file("${source}" "Texture cooking" "Restore the authored raw-texel source.")
+    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+    set(output "${CMAKE_CURRENT_BINARY_DIR}/ludus-textures/${TEX_TARGET}/${TEX_NAME}")
+    set(driver "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/shaders/cook_texture.py")
+    add_custom_command(OUTPUT "${output}/${TEX_NAME}.h"
+        COMMAND "${Python3_EXECUTABLE}" "${driver}" --source "${source}" --name "${TEX_NAME}" --output "${output}"
+        DEPENDS "${source}" "${driver}" BYPRODUCTS "${output}/manifest.json" VERBATIM)
+    target_sources("${TEX_TARGET}" PRIVATE "${output}/${TEX_NAME}.h")
+    target_include_directories("${TEX_TARGET}" PRIVATE "${output}")
+endfunction()

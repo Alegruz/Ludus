@@ -55,7 +55,7 @@ def uniform_size(path):
 # Independent std140 derivation from the emitted GLSL ES block. Deliberately
 # narrow for the fullscreen contract, not a general GLSL parser. Does not borrow
 # SPIR-V/WGSL offsets; the backend re-checks against the real linked program.
-GLSL_ES_KINDS = {'float': (4, 4), 'vec2': (8, 8), 'vec3': (12, 16), 'vec4': (16, 16)}
+GLSL_ES_KINDS = {'float': (4, 4), 'vec2': (8, 8), 'vec3': (12, 16), 'vec4': (16, 16), 'mat4': (64, 16)}
 
 
 def glsl_es_layout(code):
@@ -66,7 +66,7 @@ def glsl_es_layout(code):
         raise RuntimeError('GLSL ES uniform block is not std140')
     # Slang can lower a fixed array to a one-field std140 wrapper struct.
     # Accept exactly that shape; arbitrary/nested structs remain unsupported.
-    primitive = r'(?:highp\s+|mediump\s+|lowp\s+)?(vec[234]|float)\s+(\w+)\s*(?:\[\s*([0-9]+)\s*\])?'
+    primitive = r'(?:highp\s+|mediump\s+|lowp\s+)?(vec[234]|mat4|float)\s+(\w+)\s*(?:\[\s*([0-9]+)\s*\])?'
     wrappers = {}
     for type_name, body in re.findall(r'struct\s+(\w+)\s*\{([^}]+)\}\s*;', code):
         field = re.fullmatch(r'\s*' + primitive + r'\s*;\s*', body)
@@ -80,6 +80,9 @@ def glsl_es_layout(code):
     for declaration in match.group(2).split(';'):
         if not declaration.strip():
             continue
+        major = re.match(r'\s*layout\((row_major|column_major)\)\s*', declaration)
+        if major:
+            declaration = declaration[major.end():]
         field = re.fullmatch(r'\s*' + primitive + r'\s*', declaration)
         if field:
             kind, name, count = field.groups()
@@ -89,6 +92,8 @@ def glsl_es_layout(code):
                 raise RuntimeError('GLSL ES layout contains unsupported field types; refusing an inferred layout')
             kind, count = wrappers[wrapper.group(1)]
             name = wrapper.group(2)
+        if major and kind != 'mat4':
+            raise RuntimeError('GLSL ES matrix order qualifier requires mat4 or its fixed array wrapper')
         if name in offsets:
             raise RuntimeError("Duplicate GLSL ES uniform member")
         size, align = GLSL_ES_KINDS[kind]

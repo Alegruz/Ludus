@@ -302,7 +302,7 @@ TEST_CASE("Pending dependencies publish no handles and multiple validation scope
 TEST_CASE("Portable pool capacity and owner restart preserve stale handle rejection", "[rhi][raster]")
 {
     Session session;
-    SamplerHandle samplers[16];
+    SamplerHandle samplers[internal::RASTER_CAPACITY];
     for (auto& sampler : samplers)
     {
         REQUIRE(CreateSampler(session.Device, {}, sampler) == RasterStatus::Ready);
@@ -664,7 +664,7 @@ TEST_CASE("Pipeline pending failure cancellation and request capacity remain exp
     REQUIRE(Release(session.Device, first) == RasterStatus::Ready);
     REQUIRE(PollLifetime(session.Device) == RasterStatus::Ready);
     CHECK(reference::Creates[7] == created);
-    PipelineRequest requests[16];
+    PipelineRequest requests[internal::RASTER_CAPACITY];
     for (auto& request : requests)
     {
         REQUIRE(RequestPipeline(session.Device, description, request) == RasterStatus::Pending);
@@ -1371,4 +1371,44 @@ TEST_CASE("L1 rectangle intersection handles empty and overflowing scissors with
     pass.UseViewport = true;
     pass.Viewport = {95, 0, ~uint32{0}, 1};
     CHECK_FALSE(internal::RasterResolveArea(pass, 96, 64, area));
+}
+TEST_CASE("L3 complete immutable mip uploads reject holes, overflow and attachment chains", "[rhi][raster][l3]")
+{
+    Session session;
+    const uint8 bytes[32]{};
+    TextureMipUpload mips[]{{0, 4}, {20, 4}, {28, 4}};
+    TextureDescription description{3, 5, RasterFormat::R8Unorm, false, 3, true};
+    TextureHandle texture;
+    CHECK(CreateTexture(session.Device, description, {bytes, 0, {mips, 2}}, texture) ==
+          RasterStatus::InvalidDescription);
+    mips[1].Offset = 21;
+    CHECK(CreateTexture(session.Device, description, {bytes, 0, mips}, texture) == RasterStatus::InvalidDescription);
+    mips[1].Offset = 20;
+    mips[2].RowPitch = ~usize{0} - 3;
+    CHECK(CreateTexture(session.Device, description, {bytes, 0, mips}, texture) == RasterStatus::InvalidDescription);
+    mips[2].RowPitch = 4;
+    REQUIRE(CreateTexture(session.Device, description, {bytes, 0, mips}, texture) == RasterStatus::Ready);
+    TextureDescription copy;
+    REQUIRE(GetTextureDescription(session.Device, texture, copy) == RasterStatus::Ready);
+    CHECK(copy.MipLevels == 3);
+    REQUIRE(Destroy(session.Device, texture) == RasterStatus::Ready);
+    description.MipLevels = 4;
+    CHECK(CreateTexture(session.Device, description, {bytes, 0, mips}, texture) == RasterStatus::InvalidDescription);
+    description = {2, 2, RasterFormat::Rgba8Unorm, true, 2};
+    CHECK(CreateTexture(session.Device, description, {}, texture) == RasterStatus::InvalidDescription);
+    description = {2, 2, RasterFormat::Rg8Unorm};
+    const uint8 rg[8]{};
+    REQUIRE(CreateTexture(session.Device, description, {rg, 4}, texture) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, texture) == RasterStatus::Ready);
+    description.Attachment = true;
+    CHECK(CreateTexture(session.Device, description, {}, texture) == RasterStatus::InvalidDescription);
+    SamplerHandle sampler;
+    SamplerDescription invalid;
+    invalid.MinLod = 1;
+    CHECK(CreateSampler(session.Device, invalid, sampler) == RasterStatus::InvalidDescription);
+    invalid.MipFilter = RasterMipFilter::Linear;
+    invalid.MaxLod = 0;
+    CHECK(CreateSampler(session.Device, invalid, sampler) == RasterStatus::InvalidDescription);
+    invalid.MaxLod = 15;
+    REQUIRE(CreateSampler(session.Device, invalid, sampler) == RasterStatus::Ready);
 }

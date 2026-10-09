@@ -6,6 +6,7 @@
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/transform.hpp>
 #include <ludus/foundation/math/vector.hpp>
+#include <ludus/graphics/renderer/materials.hpp>
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/graph.h>
 #include <ludus/graphics/rhi/lifetime.h>
@@ -78,7 +79,7 @@ struct FlatMaterial final
     /// Straight RGBA in [0,1]; opacity must be one for Opaque. Renderer premultiplies Overlay RGB.
     ludus::foundation::math::Vector4 Color{1, 0, 1, 1};
 };
-/// Borrowed static position-only triangle-list geometry, copied by CreateMesh.
+/// Borrowed static position/optional-UV triangle-list geometry, copied by CreateMesh.
 struct MeshDescription final
 {
     /// Finite mesh-local XYZ positions, tightly packed Vector3 records.
@@ -89,6 +90,9 @@ struct MeshDescription final
     const ludus::foundation::uint32* Indices = nullptr;
     /// Positive multiple of three, representable by uint32.
     ludus::foundation::usize IndexCount = 0;
+    /// Optional finite top-left UVs, exactly VertexCount records; null supplies zero UV.
+    /// Copied into the shared position/UV mesh stream during creation.
+    const ludus::foundation::math::Vector2* Texcoords = nullptr;
 };
 /// Ordinary scene values; renderer has no ECS, gameplay camera or UI dependency.
 struct SceneItem final
@@ -103,6 +107,9 @@ struct SceneItem final
     ludus::foundation::uint64 SourceId = 0;
     /// Pass and ordering semantics.
     Layer Pass = Layer::Opaque;
+    /// Optional ready material incarnation replacing FlatMaterial entirely. Null keeps
+    /// the L0 flat/error material. Snapshot retains its exact texture/program version.
+    MaterialVersion Surface{};
 };
 /// Finite canonical clip transform: XY [-1,1], Z [0,1], Y up.
 struct ViewDescription final
@@ -151,8 +158,12 @@ struct Limits final
     ludus::foundation::uint32 Objects = 256;
     /// Four retained target presentations, each consuming one RHI vertex buffer and binding set.
     ludus::foundation::uint32 Presentations = 4;
+    /// Two overlapping prewarmed shader/layout incarnations for reload.
+    ludus::foundation::uint32 MaterialPrograms = 2;
+    /// Eight live/retained immutable parameter and texture versions.
+    ludus::foundation::uint32 Materials = 8;
 };
-/// Portable static flat/unlit renderer, one owner thread per device.
+/// Portable flat/textured unlit renderer, one owner thread per device.
 /// Setup copies data and may allocate/create GPU resources. Repeated Submit creates
 /// no renderer resources or heap allocations; RHI retains accepted work through completion.
 /// Setup/release and destruction require a closed RHI frame; DrawView/DrawPresentation
@@ -188,6 +199,31 @@ public:
                                                     const rhi::RasterShaderDescription& fragment) noexcept;
     /// Advance L1 resource/pipeline creation on later owner turns; no GPU wait or backend switch.
     [[nodiscard]] rhi::RasterStatus PollViews() noexcept;
+    /// Validate the installed unlit material ABI and prewarm every legal surface/offscreen
+    /// conventional/reverse-Z/painter pipeline through R2's bounded cache, between frames.
+    /// Two logical program versions; all six pipelines must be Ready before material creation.
+    /// Null output required; Ready/Pending grants ownership. Failures preserve output.
+    /// No driver pipeline work occurs in DrawView/Submit; no persistent native cache is implied.
+    [[nodiscard]] rhi::RasterStatus PrewarmMaterialProgram(const rhi::RasterShaderDescription& vertex,
+                                                           const rhi::RasterShaderDescription& fragment,
+                                                           MaterialProgram& output) noexcept;
+    /// Advance candidate prewarming between frames; Ready is immutable and allocation-free.
+    [[nodiscard]] rhi::RasterStatus GetStatus(MaterialProgram handle) noexcept;
+    /// Detach program ownership; earlier material/snapshot/GPU uses retain its resources.
+    [[nodiscard]] rhi::RasterStatus Release(MaterialProgram& handle) noexcept;
+    /// Copy parameters, sampler and exact sampled view; eight logical material versions.
+    /// Requires a Ready owned program and Ready RGBA8 texture (or null white fallback).
+    /// Ready/Pending grants ownership; invalid input/capacity preserves null output.
+    [[nodiscard]] rhi::RasterStatus
+    CreateMaterial(MaterialProgram program, const MaterialDescription& description, MaterialVersion& output) noexcept;
+    /// Complete candidate binding creation between frames, without blocking.
+    [[nodiscard]] rhi::RasterStatus GetStatus(MaterialVersion handle) noexcept;
+    /// Atomically publish a Ready candidate and detach current (which may be null).
+    /// Both are owned by this renderer and must be different. Failure preserves both;
+    /// earlier snapshots/views retain current's old contents. Invalid reload never swaps.
+    [[nodiscard]] rhi::RasterStatus PublishMaterial(MaterialVersion& candidate, MaterialVersion& current) noexcept;
+    /// Detach material ownership; earlier snapshot/view/GPU uses retain the exact version.
+    [[nodiscard]] rhi::RasterStatus Release(MaterialVersion& handle) noexcept;
     /// Release all public identities/resources; accepted CPU/GPU uses retire through RHI.
     /// @pre Owner thread, no open frame; invalidates every previously issued logical handle.
     void Reset() noexcept;

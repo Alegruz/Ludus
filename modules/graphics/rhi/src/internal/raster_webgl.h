@@ -261,21 +261,33 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     glGenTextures(1, &gRasterTextures[slot]);
     glBindTexture(GL_TEXTURE_2D, gRasterTextures[slot]);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH,
-                  static_cast<GLint>(upload.RowPitch / (info.Format == RasterFormat::R8Unorm ? 1U : 4U)));
-    glTexImage2D(GL_TEXTURE_2D,
-                 0,
-                 info.Format == RasterFormat::R8Unorm      ? GL_R8
-                 : info.Format == RasterFormat::Rgba8Unorm ? GL_RGBA8
-                                                           : GL_SRGB8_ALPHA8,
-                 static_cast<GLsizei>(info.Width),
-                 static_cast<GLsizei>(info.Height),
-                 0,
-                 info.Format == RasterFormat::R8Unorm ? GL_RED : GL_RGBA,
-                 GL_UNSIGNED_BYTE,
-                 upload.Bytes.data());
+    uint32 width = info.Width, height = info.Height;
+    for (uint32 level = 0; level < info.MipLevels; ++level)
+    {
+        const auto mip = upload.Mips.empty() ? TextureMipUpload{0, upload.RowPitch} : upload.Mips[level];
+        const usize channels = info.Format == RasterFormat::R8Unorm    ? 1U
+                               : info.Format == RasterFormat::Rg8Unorm ? 2U
+                                                                       : 4U;
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, static_cast<GLint>(mip.RowPitch / channels));
+        glTexImage2D(GL_TEXTURE_2D,
+                     static_cast<GLint>(level),
+                     info.Format == RasterFormat::R8Unorm      ? GL_R8
+                     : info.Format == RasterFormat::Rg8Unorm   ? GL_RG8
+                     : info.Format == RasterFormat::Rgba8Unorm ? GL_RGBA8
+                                                               : GL_SRGB8_ALPHA8,
+                     static_cast<GLsizei>(width),
+                     static_cast<GLsizei>(height),
+                     0,
+                     info.Format == RasterFormat::R8Unorm    ? GL_RED
+                     : info.Format == RasterFormat::Rg8Unorm ? GL_RG
+                                                             : GL_RGBA,
+                     GL_UNSIGNED_BYTE,
+                     info.Attachment ? nullptr : upload.Bytes.data() + mip.Offset);
+        width = width > 1 ? width / 2 : 1;
+        height = height > 1 ? height / 2 : 1;
+    }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(info.MipLevels - 1));
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
     if (info.Attachment)
@@ -324,7 +336,14 @@ RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uin
     glGenSamplers(1, &gRasterSamplers[slot]);
     const GLuint sampler = gRasterSamplers[slot];
     const auto filter = info.Filter == RasterFilter::Nearest ? GL_NEAREST : GL_LINEAR;
-    glSamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, filter);
+    const auto minFilter =
+        info.MipFilter == RasterMipFilter::None ? filter
+        : info.MipFilter == RasterMipFilter::Nearest
+            ? (info.Filter == RasterFilter::Nearest ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_NEAREST)
+            : (info.Filter == RasterFilter::Nearest ? GL_NEAREST_MIPMAP_LINEAR : GL_LINEAR_MIPMAP_LINEAR);
+    glSamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, minFilter);
+    glSamplerParameterf(sampler, GL_TEXTURE_MIN_LOD, info.MinLod);
+    glSamplerParameterf(sampler, GL_TEXTURE_MAX_LOD, info.MipFilter == RasterMipFilter::None ? 0 : info.MaxLod);
     glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, filter);
     glSamplerParameteri(sampler, GL_TEXTURE_WRAP_S, info.U == RasterAddress::Clamp ? GL_CLAMP_TO_EDGE : GL_REPEAT);
     glSamplerParameteri(sampler, GL_TEXTURE_WRAP_T, info.V == RasterAddress::Clamp ? GL_CLAMP_TO_EDGE : GL_REPEAT);

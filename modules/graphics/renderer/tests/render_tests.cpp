@@ -9,6 +9,7 @@
 #include <cstring>
 #include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
+#include <ludus/graphics/renderer/views.hpp>
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/lifetime.h>
 #include <ludus/graphics/rhi/raster.h>
@@ -414,4 +415,172 @@ TEST_CASE("L2 R8 coverage orientation, painter scissors and clipped thick lines 
     color(60, 16, 0, 0, 255);
     color(32, 16, 0, 0, 0);
     REQUIRE(overlays.Release(prepared) == rhi::RasterStatus::Ready);
+}
+#include "l3_color.h"
+#include "l3_scene.h"
+#include "renderer_material.h"
+TEST_CASE("L3 native material reload, color mips, mask and prewarmed targets preserve independent pixels",
+          "[renderer][gpu][l3]")
+{
+    rhi::Shutdown();
+    struct Guard
+    {
+        ~Guard()
+        {
+            rhi::Shutdown();
+        }
+    } guard;
+    rhi::DeviceHandle device;
+    rhi::SurfaceHandle surface;
+    rhi::StartupInfo failure;
+    rhi::DeviceDescription required;
+    required.Required.PortableRaster = true;
+    const auto started = rhi::CreateDevice({}, { .Width = 96, .Height = 64 }, required, device, surface, &failure);
+#if defined(LUDUS_TEST_METAL)
+    if (started != rhi::DeviceStatus::Ready && failure.Error == rhi::StartupError::AdapterUnavailable)
+        SKIP("No Metal adapter");
+#endif
+    REQUIRE(started == rhi::DeviceStatus::Ready);
+    rr::Renderer renderer;
+    REQUIRE(renderer.Initialize(device,
+                                ludus::shaders::renderer_flat::Vertex(),
+                                ludus::shaders::renderer_flat::Fragment()) == rhi::RasterStatus::Ready);
+    REQUIRE(renderer.InitializeViews(ludus::shaders::renderer_composite::Vertex(),
+                                     ludus::shaders::renderer_composite::Fragment()) == rhi::RasterStatus::Ready);
+    const auto wait = [&](auto handle) {
+        auto status = renderer.GetStatus(handle);
+        for (usize i = 0; i < 100000 && status == rhi::RasterStatus::Pending; ++i)
+            status = renderer.GetStatus(handle);
+        REQUIRE(status == rhi::RasterStatus::Ready);
+    };
+    rr::MaterialProgram program;
+    const auto warmed = renderer.PrewarmMaterialProgram(ludus::shaders::renderer_material::Vertex(),
+                                                        ludus::shaders::renderer_material::Fragment(),
+                                                        program);
+    REQUIRE((warmed == rhi::RasterStatus::Pending || warmed == rhi::RasterStatus::Ready));
+    wait(program);
+    rhi::TextureHandle texture, mask;
+    const auto uploaded = rhi::CreateTexture(device,
+                                             ludus::textures::l3_color::Description(),
+                                             ludus::textures::l3_color::Upload(),
+                                             texture);
+    REQUIRE((uploaded == rhi::RasterStatus::Pending || uploaded == rhi::RasterStatus::Ready));
+    auto ready = rhi::GetStatus(device, texture);
+    for (usize i = 0; i < 100000 && ready == rhi::RasterStatus::Pending; ++i)
+    {
+        REQUIRE(rhi::PollLifetime(device) == rhi::RasterStatus::Ready);
+        ready = rhi::GetStatus(device, texture);
+    }
+    REQUIRE(ready == rhi::RasterStatus::Ready);
+    const uint8 maskBytes[]{255, 255, 255, 0, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 0};
+    REQUIRE(rhi::CreateTexture(device, {2, 2, rhi::RasterFormat::Rgba8Unorm}, {maskBytes, 8}, mask) ==
+            rhi::RasterStatus::Ready);
+    rr::MaterialVersion materials[ludus::qa::L3_MATERIALS];
+    for (usize i = 0; i < ludus::qa::L3_MATERIALS; ++i)
+    {
+        const auto status =
+            renderer.CreateMaterial(program, ludus::qa::L3Material(i, i == 4 ? mask : texture), materials[i]);
+        REQUIRE((status == rhi::RasterStatus::Ready || status == rhi::RasterStatus::Pending));
+        wait(materials[i]);
+    }
+    REQUIRE(rhi::Destroy(device, texture) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::Destroy(device, mask) == rhi::RasterStatus::Ready);
+    rr::Mesh mesh;
+    REQUIRE(ludus::qa::L3Mesh(renderer, mesh) == rhi::RasterStatus::Ready);
+    rr::SceneItem items[8];
+    ludus::qa::L3Items(mesh, materials, items);
+    rr::Snapshot snapshot;
+    REQUIRE(renderer.CreateSnapshot(items, 8, snapshot) == rhi::RasterStatus::Ready);
+    rr::PreparedView prior;
+    rr::ViewReport report;
+    REQUIRE(renderer.PrepareView(snapshot, {}, prior, report) == rhi::RasterStatus::Ready);
+    auto changed = ludus::qa::L3Material(2, {});
+    changed.Tint = {0, 1, 0, 1};
+    rr::MaterialVersion candidate;
+    REQUIRE(renderer.CreateMaterial(program, changed, candidate) == rhi::RasterStatus::Ready);
+    REQUIRE(renderer.PublishMaterial(candidate, materials[2]) == rhi::RasterStatus::Ready);
+    changed.Tint.X = 2;
+    CHECK(renderer.CreateMaterial(program, changed, candidate) == rhi::RasterStatus::InvalidDescription);
+    // Old view still resolves red despite publication and an invalid subsequent reload.
+    REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Ready);
+    REQUIRE(renderer.DrawView(prior, {}) == rhi::RasterStatus::Ready);
+    rhi::SubmissionToken completion;
+    REQUIRE(rhi::EndFrame(device, completion) == rhi::RasterStatus::Ready);
+    uint8 oldImage[96 * 64 * 4];
+    REQUIRE(rhi::backend::ReadHeadlessPixels(oldImage));
+    CHECK(oldImage[(48 * 96 + 16) * 4] == 255);
+    CHECK(oldImage[(48 * 96 + 16) * 4 + 1] == 0);
+    REQUIRE(renderer.Release(prior) == rhi::RasterStatus::Ready);
+    REQUIRE(renderer.Release(snapshot) == rhi::RasterStatus::Ready);
+    // Four prewarmed opaque/depth/target states, with reference ordering equivalence.
+    uint8 oracle[96 * 64 * 4]{};
+    for (usize variant = 0; variant < 4; ++variant)
+    {
+        ludus::qa::L3Items(mesh, materials, items);
+        const bool reverse = variant >= 2, offscreen = (variant % 2) != 0;
+        if (reverse)
+            items[5].Transform.Translation.Z = .1F;
+        REQUIRE(renderer.CreateSnapshot(items, 8, snapshot) == rhi::RasterStatus::Ready);
+        rr::PreparedView view;
+        rr::ViewDescription description;
+        description.Reference = offscreen;
+        description.Depth = reverse ? rr::DepthConvention::ReverseZ : rr::DepthConvention::Conventional;
+        REQUIRE(renderer.PrepareView(snapshot, description, view, report) == rhi::RasterStatus::Ready);
+        rhi::TextureHandle target;
+        rr::Presentation presentation;
+        rhi::RasterPassDescription pass;
+        if (offscreen)
+        {
+            REQUIRE(rhi::CreateTexture(device, {96, 64, rhi::RasterFormat::Rgba8Unorm, true}, {}, target) ==
+                    rhi::RasterStatus::Ready);
+            rr::ViewMapping mapping;
+            REQUIRE(rr::ResolveViewMapping({96, 64, rr::ScreenFit::Stretch}, {0, 0, 96, 64}, 96, 64, mapping) ==
+                    rhi::RasterStatus::Ready);
+            const auto prepared = renderer.PreparePresentation(target, mapping, presentation);
+            REQUIRE((prepared == rhi::RasterStatus::Ready || prepared == rhi::RasterStatus::Pending));
+            wait(presentation);
+            pass.Color = target;
+        }
+        REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Ready);
+        REQUIRE(renderer.DrawView(view, pass) == rhi::RasterStatus::Ready);
+        if (offscreen)
+            REQUIRE(renderer.DrawPresentation(presentation) == rhi::RasterStatus::Ready);
+        completion = {};
+        REQUIRE(rhi::EndFrame(device, completion) == rhi::RasterStatus::Ready);
+        uint8 image[96 * 64 * 4];
+        REQUIRE(rhi::backend::ReadHeadlessPixels(image));
+        if (variant == 0)
+            std::memcpy(oracle, image, sizeof(image));
+        else
+            CHECK(std::memcmp(oracle, image, sizeof(image)) == 0);
+        const auto color = [&](usize x, usize y, uint8 red, uint8 green, uint8 blue) {
+            const auto offset = (y * 96 + x) * 4;
+            CHECK(image[offset] == red);
+            CHECK(image[offset + 1] == green);
+            CHECK(image[offset + 2] == blue);
+        };
+        const auto mip = (usize{8} * 96 + 16) * 4;
+        CHECK(image[mip] >= 127);
+        CHECK(image[mip] <= 129);
+        CHECK(image[mip + 1] == image[mip]);
+        CHECK(image[mip + 2] == image[mip]);
+        color(40, 8, 255, 255, 255);
+        color(56, 8, 0, 0, 0);
+        color(16, 48, 0, 255, 0);
+        color(72, 8, 0, 0, 255);
+        color(88, 8, 0, 0, 0);
+        color(80, 48, 255, 0, 255);
+        const auto blend = (usize{48} * 96 + 48) * 4;
+        CHECK(image[blend] == 0);
+        CHECK(image[blend + 1] >= 127);
+        CHECK(image[blend + 1] <= 128);
+        CHECK(image[blend + 2] == 128);
+        REQUIRE(renderer.Release(view) == rhi::RasterStatus::Ready);
+        REQUIRE(renderer.Release(snapshot) == rhi::RasterStatus::Ready);
+        if (offscreen)
+        {
+            REQUIRE(renderer.Release(presentation) == rhi::RasterStatus::Ready);
+            REQUIRE(rhi::Destroy(device, target) == rhi::RasterStatus::Ready);
+        }
+    }
 }

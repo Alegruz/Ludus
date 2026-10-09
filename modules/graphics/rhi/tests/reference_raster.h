@@ -9,6 +9,8 @@ inline RasterStatus ComputeResult = RasterStatus::Ready;
 inline RasterStatus Next = RasterStatus::Ready;
 inline RasterStatus Submission = RasterStatus::Ready;
 inline foundation::uint32 LastRequest = 0;
+inline foundation::uint32 PendingRequests[internal::RASTER_CAPACITY]{};
+inline foundation::usize PendingCount = 0;
 inline foundation::uint32 LossOnCompletion = 0;
 inline foundation::uint64 Submitted = 0;
 inline foundation::uint64 Completed = 0;

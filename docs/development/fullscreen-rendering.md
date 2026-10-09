@@ -280,7 +280,12 @@ once per tick. A dependency that is still pending returns NotReady without
 publishing an output. A published failed resource must still be destroyed.
 All operations are serialized on the device's owner thread.
 
-The initial profile is deliberately bounded:
+The historical R1 profile below is deliberately bounded. L1 adds targets/depth,
+L2 adds R8 coverage, and [L3 material/content versions](../architecture/renderer-systems.md#implemented-l3-material-and-content-versions)
+expand current tables to 32 records per kind, sampled R8/RG8/RGBA8 mip chains
+and explicit mip samplers. Public declarations are the current API contract.
+
+The original R1 profile:
 
 | Facility | Contract |
 | --- | --- |
@@ -506,8 +511,10 @@ the owner thread; setup, compilation and execution start between frames.
 The first profile is four graphs, sixteen logical resources per graph, thirty-two
 ordered raster passes, sixteen declarations per pass, 256 retained draws per
 graph, and 512 semantic dependency report entries. Capacity rejection occurs
-before frame acquisition. Raster formats remain RGBA8 linear/sRGB, one mip,
-one layer and one sample, with one color attachment and private same-size depth.
+before frame acquisition. Attachment formats remain single-mip RGBA8 linear/sRGB, one layer and one
+sample, with one color attachment and private same-size depth. L3 additionally
+permits complete sampled R8/RG8/RGBA8 mip chains; graph hazards conservatively
+cover the whole sampled chain.
 R4 extends this profile with buffer compute below. General copy passes, MSAA/resolve,
 stencil, depth sampling, physical heap aliasing and pass merging remain deferred.
 

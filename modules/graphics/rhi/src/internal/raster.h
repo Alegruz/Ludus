@@ -6,7 +6,7 @@
 
 namespace ludus::graphics::rhi::internal
 {
-inline constexpr foundation::usize RASTER_CAPACITY = 16;
+inline constexpr foundation::usize RASTER_CAPACITY = 32;
 inline constexpr foundation::usize RASTER_BINDINGS = 8;
 inline constexpr foundation::usize RASTER_DRAWS = 1024;
 inline constexpr foundation::usize LIFETIME_BATCHES = 4;

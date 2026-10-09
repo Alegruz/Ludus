@@ -179,7 +179,7 @@ jobs:
             -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
             -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
           out/host-tools/venv/bin/cmake --build out/build/raster-web-sdk --parallel 2
-      - name: Build installed L0/L1/L2 renderer browser SDK consumers
+      - name: Build installed L0/L1/L2/L3 renderer browser SDK consumers
         run: |
           out/host-tools/venv/bin/cmake --install out/build/web-emscripten-development --prefix "$PWD/out/install/raster-web-sdk"
           . out/host-tools/emsdk/emsdk_env.sh
@@ -203,8 +203,11 @@ jobs:
             out/build/renderer-web-sdk/renderer-views.wasm
             out/build/renderer-web-sdk/renderer-views.html
             out/build/renderer-web-sdk/renderer-overlays.js
+            out/build/renderer-web-sdk/renderer-materials.js
             out/build/renderer-web-sdk/renderer-overlays.wasm
+            out/build/renderer-web-sdk/renderer-materials.wasm
             out/build/renderer-web-sdk/renderer-overlays.html
+            out/build/renderer-web-sdk/renderer-materials.html
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
@@ -419,7 +422,7 @@ jobs:
           xvfb-run -a npm test
       - name: Test installed portable raster pixels, API selection and failures
         run: node tests/sdk_consumer/raster-browser-test.mjs out/raster-web-sdk-consumer out/browser-qa/results/raster
-      - name: Test installed L0/L1/L2 renderer against direct and cross-backend image oracles
+      - name: Test installed L0/L1/L2/L3 renderer against direct and cross-backend image oracles
         run: node tests/sdk_consumer/renderer-browser-test.mjs out/renderer-web-sdk-consumer out/browser-qa/results/renderer
       - name: Check fixed and follow camera pixels on WebGPU and WebGL
         run: |

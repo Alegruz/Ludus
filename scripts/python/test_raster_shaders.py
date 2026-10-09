@@ -85,3 +85,38 @@ class RasterReflectionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'four storage'):raster_interface(data,'compute')
 
 if __name__=='__main__':unittest.main()
+
+class MaterialUniformLayoutTests(unittest.TestCase):
+    def test_matrix_and_fixed_vector_array_layouts_are_independent(self):
+        from compile_shader import glsl_es_layout
+        wgsl='@binding(0) @group(0) var<uniform> params : Data; struct Data { transform : mat4x4<f32>, colors : array<vec4<f32>, 2>, tint : vec4<f32>, };'
+        layout={'entries':[{'binding':0,'kind':'UniformBuffer','size':112,'offsets':{'transform':0,'colors':64,'tint':96}}]}
+        self.assertEqual(wgsl_contract(wgsl,layout,'fragment'),wgsl)
+        glsl='layout(std140) uniform Data { mat4 transform; vec4 colors[2]; vec4 tint; } params;'
+        derived=glsl_es_layout(glsl)
+        self.assertEqual(derived['offsets'],layout['entries'][0]['offsets']); self.assertEqual(derived['size'],112)
+        wrong=copy.deepcopy(layout); wrong['entries'][0]['offsets']['tint']=80
+        with self.assertRaisesRegex(RuntimeError,'packing differs'):wgsl_contract(wgsl,wrong,'fragment')
+        with self.assertRaisesRegex(RuntimeError,'bounded'):wgsl_contract(wgsl.replace('array<vec4<f32>, 2>','array<f32, 2>'),layout,'fragment')
+
+    def test_emitted_row_major_mat4_wrapper_offsets_are_independent(self):
+        from compile_shader import glsl_es_layout
+        layout=glsl_es_layout('struct Matrices { highp mat4 data[2]; }; layout(std140) uniform Values { layout(row_major) mat4 Transform; vec4 Colors[2]; layout(row_major) Matrices Bones; vec4 Tint; };')
+        self.assertEqual(layout['offsets'],{'Transform':0,'Colors':64,'Bones':96,'Tint':224})
+        self.assertEqual(layout['size'],240)
+        with self.assertRaises(RuntimeError):
+            glsl_es_layout('layout(std140) uniform Values { layout(row_major) vec4 Tint; };')
+
+    def test_pinned_slang_matrix_storage_wrappers_are_verified(self):
+        code='struct _MatrixStorage_float4x4_ColMajorstd140_0 { @align(16) data_0 : array<vec4<f32>, i32(4)>, }; struct _Array_std140_matrixx3Cfloatx2C4x2C4x3E2_0 { @align(16) data_1 : array<_MatrixStorage_float4x4_ColMajorstd140_0, i32(2)>, }; @binding(0) @group(0) var<uniform> params : Data; struct Data { transform : _MatrixStorage_float4x4_ColMajorstd140_0, colors : array<vec4<f32>, i32(2)>, bones : _Array_std140_matrixx3Cfloatx2C4x2C4x3E2_0, tint : vec4<f32>, };'
+        layout={'entries':[{'binding':0,'kind':'UniformBuffer','size':240,'offsets':{'transform':0,'colors':64,'bones':96,'tint':224}}]}
+        self.assertEqual(wgsl_contract(code,layout,'fragment'),code)
+        with self.assertRaisesRegex(RuntimeError,'exactly four'):
+            wgsl_contract(code.replace('i32(4)','i32(3)'),layout,'fragment')
+
+    def test_numeric_shapes_distinguish_float4_from_equal_sized_unsigned_vectors(self):
+        from compile_raster import uniform_shape
+        value={'kind':'vector','elementCount':4,'elementType':{'kind':'scalar','scalarType':'float32'}}
+        self.assertEqual(uniform_shape(value),'Float4')
+        value['elementType']['scalarType']='uint32'
+        self.assertEqual(uniform_shape(value),'Opaque')

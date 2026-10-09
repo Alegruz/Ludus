@@ -1,0 +1,404 @@
+#include "l3_color.h"
+#include "l3_layout.h"
+#include "l3_scene.h"
+#include "renderer_composite.h"
+#include "renderer_flat.h"
+#include "renderer_material.h"
+#include <ludus/foundation/base/config.h>
+#include <ludus/foundation/time/time.hpp>
+#include <ludus/graphics/renderer/renderer.hpp>
+#include <ludus/graphics/rhi/device.h>
+#include <ludus/graphics/rhi/lifetime.h>
+#if defined(LUDUS_PLATFORM_WEB)
+#    include <emscripten.h>
+#    include <ludus/platform/base/window.h>
+#endif
+namespace
+{
+using namespace ludus::foundation;
+namespace rr = ludus::graphics::renderer;
+namespace rhi = ludus::graphics::rhi;
+rhi::DeviceHandle gDevice;
+rhi::SurfaceHandle gSurface;
+rr::Renderer gRenderer;
+rr::MaterialProgram gProgram, gReload;
+rr::MaterialVersion gViewMaterial;
+rr::MaterialVersion gMaterials[ludus::qa::L3_MATERIALS];
+rhi::TextureHandle gTexture, gMask;
+usize gMaterialIndex = 0;
+bool gReloaded = false;
+rr::Mesh gMesh;
+rr::Snapshot gSnapshot;
+rr::PreparedView gView;
+uint32 gStep = 0, gFrames = 0;
+bool gDone = false, gFailed = false;
+#if defined(LUDUS_PLATFORM_WEB)
+core::UniquePtr<ludus::platform::Window> gWindow;
+// clang-format off
+EM_JS(int32, Selection, (), { const s = new URL(location.href).searchParams.get('backend'); return s === 'webgpu' ? 1 : s === 'webgl2' ? 2 : 0; });
+EM_JS(int32, Reference, (), { return new URL(location.href).searchParams.has('reference') ? 1 : 0; });
+EM_JS(void, Progress, (uint32 step, uint32 frames), { Object.assign(document.querySelector('#status').dataset,{step,current:frames}); });
+EM_JS(int32, Paused, (), { return globalThis.__qaPause ? 1 : 0; });
+EM_JS(void, Report, (int32 state, uint32 frames, int32 backend), {
+    const node = document.querySelector('#status');
+    node.dataset.state = state === 2 ? 'failed' : state === 1 ? 'passed' : state === 3 ? 'rendering' : 'loading';
+    if (state === 3) globalThis.__qaPause = true;
+    Object.assign(node.dataset, {frames, backend: backend === 1 ? 'webgpu' : backend === 2 ? 'webgl2' : 'native'});
+    node.textContent = node.dataset.state + ' frames=' + frames;
+});
+// clang-format on
+#else
+int32 Selection() noexcept
+{
+    return 0;
+}
+int32 Reference() noexcept
+{
+    return 0;
+}
+int32 Paused() noexcept
+{
+    return 0;
+}
+void Report(int32, uint32, int32) noexcept {}
+void Progress(uint32, uint32) noexcept {}
+#endif
+void Publish(int32 state) noexcept
+{
+    rhi::DeviceInfo info;
+    static_cast<void>(rhi::GetDeviceInfo(gDevice, info));
+    Report(state, gFrames, static_cast<int32>(info.Startup.SelectedBackend));
+}
+void Stop(bool failed) noexcept
+{
+    gDone = true;
+    gFailed = failed;
+    Publish(failed ? 2 : 1);
+#if defined(LUDUS_PLATFORM_WEB)
+    emscripten_cancel_main_loop();
+#endif
+    rhi::FrameInfo frame;
+    if (rhi::GetFrameInfo(gDevice, gSurface, frame) == rhi::DeviceStatus::Ready)
+    {
+        rhi::SubmissionToken completion;
+        static_cast<void>(rhi::EndFrame(gDevice, completion));
+    }
+    gRenderer.Reset();
+    rhi::Shutdown();
+}
+bool Accepted(rhi::RasterStatus status) noexcept
+{
+    return status == rhi::RasterStatus::Ready || status == rhi::RasterStatus::Pending;
+}
+bool Wait(rhi::RasterStatus status) noexcept
+{
+    if (status == rhi::RasterStatus::Pending || status == rhi::RasterStatus::NotReady)
+    {
+        return true;
+    }
+    if (status != rhi::RasterStatus::Ready)
+    {
+        Stop(true);
+        return true;
+    }
+    return false;
+}
+void Tick() noexcept
+{
+    Progress(gStep, gFrames);
+    if (gDone || Paused() != 0)
+    {
+        return;
+    }
+    rhi::DeviceInfo info;
+    auto device = rhi::GetDeviceInfo(gDevice, info);
+    if (device == rhi::DeviceStatus::Pending)
+    {
+        return;
+    }
+    if (device != rhi::DeviceStatus::Ready)
+    {
+        Stop(true);
+        return;
+    }
+    if (gStep == 0)
+    {
+        if (!Accepted(gRenderer.Initialize(gDevice,
+                                           ludus::shaders::renderer_flat::Vertex(),
+                                           ludus::shaders::renderer_flat::Fragment())))
+        {
+            Stop(true);
+            return;
+        }
+        gStep = 1;
+    }
+    if (gStep == 1)
+    {
+        if (Wait(gRenderer.Poll()))
+        {
+            return;
+        }
+        if (!Accepted(gRenderer.InitializeViews(ludus::shaders::renderer_composite::Vertex(),
+                                                ludus::shaders::renderer_composite::Fragment())))
+        {
+            Stop(true);
+            return;
+        }
+        gStep = 2;
+    }
+    if (gStep == 2)
+    {
+        if (Wait(gRenderer.PollViews()))
+        {
+            return;
+        }
+        if (!Accepted(gRenderer.PrewarmMaterialProgram(ludus::shaders::renderer_material::Vertex(),
+                                                       ludus::shaders::renderer_material::Fragment(),
+                                                       gProgram)) ||
+            !Accepted(rhi::CreateTexture(gDevice,
+                                         ludus::textures::l3_color::Description(),
+                                         ludus::textures::l3_color::Upload(),
+                                         gTexture)) ||
+            !Accepted(ludus::qa::L3Mesh(gRenderer, gMesh)))
+        {
+            Stop(true);
+            return;
+        }
+        const uint8 bytes[]{255, 255, 255, 0, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 0};
+        rhi::TextureDescription mask{2, 2, rhi::RasterFormat::Rgba8Unorm};
+        mask.AsyncUpload = true;
+        if (!Accepted(rhi::CreateTexture(gDevice, mask, {bytes, 8}, gMask)))
+        {
+            Stop(true);
+            return;
+        }
+        gStep = 3;
+    }
+    if (Wait(rhi::PollLifetime(gDevice)))
+    {
+        return;
+    }
+    if (gStep == 3)
+    {
+        if (Wait(gRenderer.GetStatus(gProgram)) || Wait(gRenderer.GetStatus(gMesh)) ||
+            Wait(rhi::GetStatus(gDevice, gTexture)) || Wait(rhi::GetStatus(gDevice, gMask)))
+        {
+            return;
+        }
+        while (gMaterialIndex < ludus::qa::L3_MATERIALS)
+        {
+            auto description = ludus::qa::L3Material(gMaterialIndex, gMaterialIndex == 4 ? gMask : gTexture);
+            if (!Accepted(gRenderer.CreateMaterial(gProgram, description, gMaterials[gMaterialIndex])))
+            {
+                Stop(true);
+                return;
+            }
+            ++gMaterialIndex;
+        }
+        gStep = 4;
+    }
+    if (gStep == 4)
+    {
+        for (auto material : gMaterials)
+        {
+            if (Wait(gRenderer.GetStatus(material)))
+            {
+                return;
+            }
+        }
+        if (gRenderer.CreateSnapshot(nullptr, 0, gSnapshot) != rhi::RasterStatus::Ready)
+        {
+            Stop(true);
+            return;
+        }
+        // Caller texture ownership/source buffers are gone; immutable bindings retain them.
+        if (rhi::Destroy(gDevice, gTexture) != rhi::RasterStatus::Ready ||
+            rhi::Destroy(gDevice, gMask) != rhi::RasterStatus::Ready)
+        {
+            Stop(true);
+            return;
+        }
+        // Invalid reload ABI must preserve every current material and issue no draw-time compilation.
+        auto fragment = ludus::shaders::renderer_material::Fragment();
+        fragment.UniformMembers = {};
+        rr::MaterialProgram rejected;
+        if (gRenderer.PrewarmMaterialProgram(ludus::shaders::renderer_material::Vertex(), fragment, rejected) !=
+            rhi::RasterStatus::InvalidDescription)
+        {
+            Stop(true);
+            return;
+        }
+        gStep = 5;
+    }
+    if (gStep == 5)
+    {
+        if (gFrames == 60 && !gReloaded)
+        {
+            if (!Accepted(gRenderer.PrewarmMaterialProgram(ludus::shaders::renderer_material::Vertex(),
+                                                           ludus::shaders::renderer_material::Fragment(),
+                                                           gReload)))
+            {
+                Stop(true);
+                return;
+            }
+            gStep = 8;
+            return;
+        }
+        rr::SceneItem items[8];
+        ludus::qa::L3Items(gMesh, gMaterials, items);
+        if (gRenderer.ReplaceSnapshot(items, 8, gSnapshot) != rhi::RasterStatus::Ready)
+        {
+            Stop(true);
+            return;
+        }
+        rr::ViewDescription description;
+        description.ScheduledUpload = true;
+        description.Reference = Reference() != 0;
+        rr::ViewReport report;
+        const auto prepared = gRenderer.PrepareView(gSnapshot, description, gView, report);
+        if (prepared == rhi::RasterStatus::CapacityExceeded)
+        {
+            return;
+        }
+        if (!Accepted(prepared))
+        {
+            Stop(true);
+            return;
+        }
+        gStep = 6;
+    }
+    if (gStep == 8)
+    {
+        if (Wait(gRenderer.GetStatus(gReload)))
+        {
+            return;
+        }
+        auto description = ludus::qa::L3Material(2, {});
+        description.Tint = {0, 1, 0, 1};
+        if (!Accepted(gRenderer.CreateMaterial(gReload, description, gViewMaterial)))
+        {
+            Stop(true);
+            return;
+        }
+        gStep = 9;
+    }
+    if (gStep == 9)
+    {
+        if (Wait(gRenderer.GetStatus(gViewMaterial)))
+        {
+            return;
+        }
+        if (gRenderer.PublishMaterial(gViewMaterial, gMaterials[2]) != rhi::RasterStatus::Ready)
+        {
+            Stop(true);
+            return;
+        }
+        gReloaded = true;
+        gStep = 5;
+        return;
+    }
+    if (Wait(gRenderer.GetStatus(gView)))
+    {
+        return;
+    }
+    if (rhi::SetFrameTarget(gDevice, gSurface, {96, 64, 0, 0, 0, 1}) != rhi::DeviceStatus::Ready)
+    {
+        Stop(true);
+        return;
+    }
+    const auto begun = rhi::BeginFrame(gDevice, gSurface);
+    if (begun == rhi::DeviceStatus::Skipped)
+    {
+        return;
+    }
+    if (begun != rhi::DeviceStatus::Ready)
+    {
+        Stop(true);
+        return;
+    }
+    rhi::RasterPassDescription pass;
+    pass.DepthStore = rhi::RasterStore::Store;
+    rhi::SubmissionToken completion;
+    if (gRenderer.DrawView(gView, pass) != rhi::RasterStatus::Ready ||
+        rhi::EndFrame(gDevice, completion) != rhi::RasterStatus::Ready ||
+        gRenderer.Release(gView) != rhi::RasterStatus::Ready)
+    {
+        Stop(true);
+        return;
+    }
+    ++gFrames;
+    gStep = 5;
+    if (gFrames == 5 || gFrames == 80)
+    {
+        Publish(3);
+    }
+    if (gFrames == 120)
+    {
+        Stop(false);
+    }
+}
+} // namespace
+int main()
+{
+    const auto layout = ludus::shaders::l3_layout::Fragment();
+    if (layout.Bindings.size() != 1 || layout.Bindings[0].MinSize != 240 || layout.UniformMembers.size() != 4)
+    {
+        return 1;
+    }
+    const char* names[]{"Transform", "Colors", "Bones", "Tint"};
+    const usize offsets[]{0, 64, 96, 224};
+    const rhi::RasterUniformShape shapes[]{rhi::RasterUniformShape::Float4x4,
+                                           rhi::RasterUniformShape::Float4Array,
+                                           rhi::RasterUniformShape::Float4x4Array,
+                                           rhi::RasterUniformShape::Float4};
+    for (usize i = 0; i < 4; ++i)
+    {
+        if (layout.UniformMembers[i].Name != names[i] || layout.UniformMembers[i].Offset != offsets[i] ||
+            layout.UniformMembers[i].Shape != shapes[i])
+        {
+            return 1;
+        }
+    }
+
+    rhi::WindowInfo window;
+    window.Width = 96;
+    window.Height = 64;
+#if defined(LUDUS_PLATFORM_WEB)
+    ludus::platform::WindowManager manager;
+    ludus::platform::WindowBase::CreateInfo settings;
+    settings.Width = 96;
+    settings.Height = 64;
+    settings.CanvasSelector = "#canvas";
+    settings.CaptureBrowserInput = false;
+    if (!manager.Initialize({}) || !manager.CreateWindow(settings, gWindow))
+    {
+        return 1;
+    }
+    window = gWindow->GetNativeWindowInfo();
+#endif
+    rhi::DeviceDescription description;
+    description.Required.PortableRaster = true;
+    description.Selection = Selection() == 1   ? rhi::BackendSelection::WebGPU
+                            : Selection() == 2 ? rhi::BackendSelection::WebGL2
+                                               : rhi::BackendSelection::Auto;
+    const auto started = rhi::CreateDevice({}, window, description, gDevice, gSurface);
+    if (started != rhi::DeviceStatus::Ready && started != rhi::DeviceStatus::Pending)
+    {
+        Stop(true);
+        return 1;
+    }
+#if defined(LUDUS_PLATFORM_WEB)
+    emscripten_set_main_loop(Tick, 0, 1);
+#else
+    const auto start = time::NowTicks();
+    while (!gDone && time::NowTicks() - start < 15 * time::NANOSECONDS_PER_SECOND)
+    {
+        Tick();
+    }
+    if (!gDone)
+    {
+        Stop(true);
+    }
+#endif
+    return gFailed ? 1 : 0;
+}

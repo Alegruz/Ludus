@@ -281,7 +281,9 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     WGPUTextureDescriptor descriptor = WGPU_TEXTURE_DESCRIPTOR_INIT;
     descriptor.size = {info.Width, info.Height, 1};
     descriptor.dimension = WGPUTextureDimension_2D;
-    descriptor.format = info.Format == RasterFormat::R8Unorm      ? WGPUTextureFormat_R8Unorm
+    descriptor.mipLevelCount = info.MipLevels;
+    descriptor.format = info.Format == RasterFormat::Rg8Unorm     ? WGPUTextureFormat_RG8Unorm
+                        : info.Format == RasterFormat::R8Unorm    ? WGPUTextureFormat_R8Unorm
                         : info.Format == RasterFormat::Rgba8Unorm ? WGPUTextureFormat_RGBA8Unorm
                                                                   : WGPUTextureFormat_RGBA8UnormSrgb;
     descriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst |
@@ -291,17 +293,26 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     gRasterTextureDescriptions[slot] = info;
     if (texture != nullptr && !info.Attachment)
     {
-        WGPUTexelCopyTextureInfo destination = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
-        destination.texture = texture;
-        WGPUTexelCopyBufferLayout layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
-        layout.bytesPerRow = static_cast<uint32>(upload.RowPitch);
-        layout.rowsPerImage = info.Height;
-        wgpuQueueWriteTexture(gQueue,
-                              &destination,
-                              upload.Bytes.data(),
-                              upload.Bytes.size(),
-                              &layout,
-                              &descriptor.size);
+        uint32 width = info.Width, height = info.Height;
+        for (uint32 level = 0; level < info.MipLevels; ++level)
+        {
+            const auto mip = upload.Mips.empty() ? TextureMipUpload{0, upload.RowPitch} : upload.Mips[level];
+            WGPUTexelCopyTextureInfo destination = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+            destination.texture = texture;
+            destination.mipLevel = level;
+            WGPUTexelCopyBufferLayout layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
+            layout.bytesPerRow = static_cast<uint32>(mip.RowPitch);
+            layout.rowsPerImage = height;
+            const WGPUExtent3D extent{width, height, 1};
+            wgpuQueueWriteTexture(gQueue,
+                                  &destination,
+                                  upload.Bytes.data() + mip.Offset,
+                                  mip.RowPitch * height,
+                                  &layout,
+                                  &extent);
+            width = width > 1 ? width / 2 : 1;
+            height = height > 1 ? height / 2 : 1;
+        }
     }
     else if (texture != nullptr)
     {
@@ -338,7 +349,10 @@ RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uin
         info.Filter == RasterFilter::Nearest ? WGPUFilterMode_Nearest : WGPUFilterMode_Linear;
     descriptor.addressModeU = info.U == RasterAddress::Clamp ? WGPUAddressMode_ClampToEdge : WGPUAddressMode_Repeat;
     descriptor.addressModeV = info.V == RasterAddress::Clamp ? WGPUAddressMode_ClampToEdge : WGPUAddressMode_Repeat;
-    descriptor.lodMaxClamp = 0;
+    descriptor.mipmapFilter =
+        info.MipFilter == RasterMipFilter::Linear ? WGPUMipmapFilterMode_Linear : WGPUMipmapFilterMode_Nearest;
+    descriptor.lodMinClamp = info.MinLod;
+    descriptor.lodMaxClamp = info.MipFilter == RasterMipFilter::None ? 0 : info.MaxLod;
     gRasterSamplers[slot] = wgpuDeviceCreateSampler(gDevice, &descriptor);
     return RasterPop(request);
 }

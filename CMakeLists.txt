@@ -427,7 +427,7 @@ if(NOT EMSCRIPTEN)
     install(FILES apps/game_host/main.cpp
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus" RENAME LudusGameHostMain.cpp)
 endif()
-install(FILES cmake/shaders/compile_shader.py cmake/shaders/compile_raster.py config/shader_toolchain.json config/spirv_cross_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
+install(FILES cmake/shaders/compile_shader.py cmake/shaders/compile_raster.py cmake/shaders/cook_texture.py config/shader_toolchain.json config/spirv_cross_toolchain.json DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Ludus/shaders")
 
 install(FILES third_party/xxhash/LICENSE DESTINATION "${CMAKE_INSTALL_DATADIR}/${LUDUS_ENGINE_PACKAGE_NAME}/licenses" RENAME xxhash-LICENSE)
 

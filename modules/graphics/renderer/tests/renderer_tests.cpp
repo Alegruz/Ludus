@@ -556,3 +556,206 @@ TEST_CASE("Prepared overlays copy commands, cancel uploads safely and retain exa
     REQUIRE(overlays.Release(extra) == rhi::RasterStatus::Ready);
     overlays.Reset();
 }
+namespace
+{
+struct MaterialFixture final
+{
+    rhi::RasterShaderInput Inputs[7];
+    rhi::RasterBinding Bindings[3]{{0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Fragment, 48},
+                                   {1, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
+                                   {2, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0}};
+    rhi::RasterUniformMember Members[3]{{0, "Tint", 0, rhi::RasterUniformShape::Float4},
+                                        {0, "UvTransform", 16, rhi::RasterUniformShape::Float4},
+                                        {0, "Options", 32, rhi::RasterUniformShape::Float4}};
+    rhi::RasterShaderDescription Vertex, Fragment;
+    MaterialFixture()
+    {
+        for (uint32 i = 0; i < 7; ++i)
+        {
+            Inputs[i] = {i,
+                         i == 0   ? rhi::RasterVertexFormat::Float3
+                         : i == 6 ? rhi::RasterVertexFormat::Float2
+                                  : rhi::RasterVertexFormat::Float4};
+        }
+        Vertex.Artifact.Stage = rhi::ShaderStage::Vertex;
+        Vertex.Artifact.Wgsl = "material vertex";
+        Vertex.Artifact.WgslEntry = "vertexMain";
+        Vertex.Inputs = Inputs;
+        Fragment.Artifact.Stage = rhi::ShaderStage::Fragment;
+        Fragment.Artifact.Wgsl = "material fragment";
+        Fragment.Artifact.WgslEntry = "fragmentMain";
+        Fragment.Bindings = Bindings;
+        Fragment.UniformMembers = Members;
+    }
+    rr::MaterialProgram Prewarm(rr::Renderer& renderer)
+    {
+        rr::MaterialProgram program;
+        auto status = renderer.PrewarmMaterialProgram(Vertex, Fragment, program);
+        REQUIRE((status == rhi::RasterStatus::Ready || status == rhi::RasterStatus::Pending));
+        for (usize i = 0; i < 20 && status == rhi::RasterStatus::Pending; ++i)
+        {
+            status = renderer.GetStatus(program);
+        }
+        REQUIRE(status == rhi::RasterStatus::Ready);
+        return program;
+    }
+};
+} // namespace
+TEST_CASE("L3 prewarms six variants and retains exact material versions through reload and completion",
+          "[renderer][l3]")
+{
+    Session session;
+    session.EnableViews();
+    MaterialFixture fixture;
+    auto program = fixture.Prewarm(session.Renderer);
+    const auto pipelines = rhi::reference::Creates[7];
+    CHECK(pipelines == 13); // Seven L0/L1 plus six legal material states.
+    rr::MaterialVersion old;
+    rr::MaterialDescription description;
+    description.Tint = {1, 0, 0, 1};
+    REQUIRE(session.Renderer.CreateMaterial(program, description, old) == rhi::RasterStatus::Ready);
+    auto item = session.Item(1);
+    item.Surface = old;
+    item.Material.Color.X = std::numeric_limits<float32>::quiet_NaN(); // Ignored by the complete surface schema.
+    rr::Snapshot snapshot;
+    REQUIRE(session.Renderer.CreateSnapshot(&item, 1, snapshot) == rhi::RasterStatus::Ready);
+    rr::PreparedView view;
+    rr::ViewReport report;
+    REQUIRE(session.Renderer.PrepareView(snapshot, {}, view, report) == rhi::RasterStatus::Ready);
+    const auto prior = old;
+    rr::MaterialVersion candidate;
+    description.Tint = {0, 1, 0, 1};
+    REQUIRE(session.Renderer.CreateMaterial(program, description, candidate) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.PublishMaterial(candidate, old) == rhi::RasterStatus::Ready);
+    CHECK(session.Renderer.GetStatus(prior) == rhi::RasterStatus::InvalidHandle);
+    CHECK(session.Renderer.GetStatus(candidate) == rhi::RasterStatus::InvalidHandle);
+    description.Tint.X = 2;
+    CHECK(session.Renderer.CreateMaterial(program, description, candidate) == rhi::RasterStatus::InvalidDescription);
+    CHECK(session.Renderer.PublishMaterial(candidate, old) == rhi::RasterStatus::InvalidHandle);
+    CHECK(session.Renderer.GetStatus(old) == rhi::RasterStatus::Ready);
+    fixture.Members[1].Shape = rhi::RasterUniformShape::Float3;
+    rr::MaterialProgram wrongShape;
+    CHECK(session.Renderer.PrewarmMaterialProgram(fixture.Vertex, fixture.Fragment, wrongShape) ==
+          rhi::RasterStatus::InvalidDescription);
+    fixture.Members[1].Shape = rhi::RasterUniformShape::Float4;
+    fixture.Members[1].Offset = 20;
+    rr::MaterialProgram rejected;
+    CHECK(session.Renderer.PrewarmMaterialProgram(fixture.Vertex, fixture.Fragment, rejected) ==
+          rhi::RasterStatus::InvalidDescription);
+    CHECK(rhi::reference::Creates[7] == pipelines);
+    REQUIRE(session.Renderer.Release(program) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::BeginFrame(session.Device, session.Surface) == rhi::DeviceStatus::Ready);
+    REQUIRE(session.Renderer.DrawView(view, {}) == rhi::RasterStatus::Ready);
+    rhi::SubmissionToken completion;
+    REQUIRE(rhi::EndFrame(session.Device, completion) == rhi::RasterStatus::Ready);
+    CHECK(rhi::reference::Creates[7] == pipelines);
+    REQUIRE(session.Renderer.Release(view) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(snapshot) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(old) == rhi::RasterStatus::Ready);
+    const auto retired = rhi::reference::Destroys[7];
+    CHECK(retired < 6);
+    rhi::reference::Completed = rhi::reference::Submitted;
+    REQUIRE(rhi::PollLifetime(session.Device) == rhi::RasterStatus::Ready);
+    CHECK(rhi::reference::Destroys[7] >= 6);
+}
+TEST_CASE("L3 alpha domains, cache pressure and stale incarnations reject before scene activation", "[renderer][l3]")
+{
+    Session session;
+    MaterialFixture fixture;
+    auto program = fixture.Prewarm(session.Renderer);
+    rr::MaterialVersion materials[8];
+    for (auto& material : materials)
+    {
+        REQUIRE(session.Renderer.CreateMaterial(program, {}, material) == rhi::RasterStatus::Ready);
+    }
+    rr::MaterialVersion extra;
+    CHECK(session.Renderer.CreateMaterial(program, {}, extra) == rhi::RasterStatus::CapacityExceeded);
+    const auto stale = materials[0];
+    REQUIRE(session.Renderer.Release(materials[0]) == rhi::RasterStatus::Ready);
+    rr::MaterialDescription painter;
+    painter.Alpha = rr::MaterialAlpha::Painter;
+    painter.Tint = {0, 0, 1, .5F};
+    REQUIRE(session.Renderer.CreateMaterial(program, painter, extra) == rhi::RasterStatus::Ready);
+    CHECK(session.Renderer.GetStatus(stale) == rhi::RasterStatus::InvalidHandle);
+    auto item = session.Item(1);
+    item.Surface = extra;
+    rr::Snapshot snapshot;
+    CHECK(session.Renderer.CreateSnapshot(&item, 1, snapshot) == rhi::RasterStatus::InvalidDescription);
+    item.Pass = rr::Layer::Overlay;
+    REQUIRE(session.Renderer.CreateSnapshot(&item, 1, snapshot) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(extra) == rhi::RasterStatus::Ready);
+    CHECK(session.Renderer.CreateMaterial(program, painter, extra) == rhi::RasterStatus::CapacityExceeded);
+    REQUIRE(session.Renderer.Release(snapshot) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.CreateMaterial(program, painter, extra) == rhi::RasterStatus::Ready);
+    auto second = fixture.Prewarm(session.Renderer);
+    rr::MaterialProgram third;
+    CHECK(session.Renderer.PrewarmMaterialProgram(fixture.Vertex, fixture.Fragment, third) ==
+          rhi::RasterStatus::CapacityExceeded);
+    REQUIRE(session.Renderer.Release(second) == rhi::RasterStatus::Ready);
+    CHECK(session.Renderer.GetStatus(second) == rhi::RasterStatus::InvalidHandle);
+    session.Renderer.Reset();
+    CHECK(session.Renderer.GetStatus(program) == rhi::RasterStatus::InvalidHandle);
+}
+TEST_CASE("L3 rejects nonfinite parameters and failed replacement admission without changing current", "[renderer][l3]")
+{
+    Session session;
+    MaterialFixture fixture;
+    auto program = fixture.Prewarm(session.Renderer);
+    rr::MaterialVersion current, candidate;
+    REQUIRE(session.Renderer.CreateMaterial(program, {}, current) == rhi::RasterStatus::Ready);
+    rr::MaterialDescription invalid;
+    invalid.AlphaCutoff = std::numeric_limits<float32>::quiet_NaN();
+    CHECK(session.Renderer.CreateMaterial(program, invalid, candidate) == rhi::RasterStatus::InvalidDescription);
+    invalid = {};
+    invalid.Lod = std::numeric_limits<float32>::quiet_NaN();
+    CHECK(session.Renderer.CreateMaterial(program, invalid, candidate) == rhi::RasterStatus::InvalidDescription);
+    invalid.Lod = std::numeric_limits<float32>::infinity();
+    CHECK(session.Renderer.CreateMaterial(program, invalid, candidate) == rhi::RasterStatus::InvalidDescription);
+    rhi::reference::Next = rhi::RasterStatus::Failed;
+    CHECK(session.Renderer.CreateMaterial(program, {}, candidate) == rhi::RasterStatus::Failed);
+    CHECK(session.Renderer.PublishMaterial(candidate, current) == rhi::RasterStatus::InvalidHandle);
+    CHECK(session.Renderer.GetStatus(current) == rhi::RasterStatus::Ready);
+    rr::MaterialProgram rejected;
+    CHECK(session.Renderer.PrewarmMaterialProgram(fixture.Vertex, fixture.Fragment, rejected) ==
+          rhi::RasterStatus::Failed);
+    rhi::reference::Next = rhi::RasterStatus::Ready;
+    auto replacement = fixture.Prewarm(session.Renderer);
+    REQUIRE(session.Renderer.CreateMaterial(replacement, {}, candidate) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.PublishMaterial(candidate, current) == rhi::RasterStatus::Ready);
+    CHECK(session.Renderer.GetStatus(candidate) == rhi::RasterStatus::InvalidHandle);
+    REQUIRE(session.Renderer.Release(replacement) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(current) == rhi::RasterStatus::Ready);
+}
+
+TEST_CASE("L3 pending publication and failed validation keep the ready material active", "[renderer][l3]")
+{
+    Session session;
+    MaterialFixture fixture;
+    auto program = fixture.Prewarm(session.Renderer);
+    rr::MaterialVersion current, candidate;
+    REQUIRE(session.Renderer.CreateMaterial(program, {}, current) == rhi::RasterStatus::Ready);
+    rhi::reference::Next = rhi::RasterStatus::Pending;
+    rhi::reference::PendingCount = 0;
+    REQUIRE(session.Renderer.CreateMaterial(program, {}, candidate) == rhi::RasterStatus::Pending);
+    REQUIRE(rhi::reference::PendingCount == 3);
+    CHECK(session.Renderer.PublishMaterial(candidate, current) == rhi::RasterStatus::NotReady);
+    CHECK(session.Renderer.GetStatus(current) == rhi::RasterStatus::Ready);
+    for (usize i = 0; i < rhi::reference::PendingCount; ++i)
+    {
+        rhi::internal::RasterComplete(rhi::reference::PendingRequests[i],
+                                      i == 0 ? rhi::RasterStatus::Failed : rhi::RasterStatus::Ready);
+    }
+    CHECK(session.Renderer.PublishMaterial(candidate, current) == rhi::RasterStatus::Failed);
+    CHECK(session.Renderer.GetStatus(current) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(candidate) == rhi::RasterStatus::Ready);
+    rhi::reference::PendingCount = 0;
+    REQUIRE(session.Renderer.CreateMaterial(program, {}, candidate) == rhi::RasterStatus::Pending);
+    for (usize i = 0; i < rhi::reference::PendingCount; ++i)
+    {
+        rhi::internal::RasterComplete(rhi::reference::PendingRequests[i], rhi::RasterStatus::Ready);
+    }
+    rhi::reference::Next = rhi::RasterStatus::Ready;
+    REQUIRE(session.Renderer.GetStatus(candidate) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.PublishMaterial(candidate, current) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(current) == rhi::RasterStatus::Ready);
+}

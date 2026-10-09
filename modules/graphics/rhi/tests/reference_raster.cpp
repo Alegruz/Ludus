@@ -13,6 +13,7 @@ void Reset() noexcept
     Next = RasterStatus::Ready;
     Submission = RasterStatus::Ready;
     LastRequest = 0;
+    PendingCount = 0;
     LossOnCompletion = 0;
     Submitted = 0;
     Completed = 0;
@@ -61,6 +62,10 @@ RasterStatus Created(internal::RasterKind kind, uint32 request) noexcept
     reference::LastRequest = request;
     if (reference::Next == RasterStatus::Pending)
     {
+        if (reference::PendingCount < internal::RASTER_CAPACITY)
+        {
+            reference::PendingRequests[reference::PendingCount++] = request;
+        }
         internal::RasterExpect(request, internal::RasterCallbacks::One);
     }
     return reference::Next;
@@ -88,7 +93,7 @@ RasterCapabilities RasterLimits() noexcept
     {
         return {};
     }
-    return {usize{64} * 1024 * 1024, 4096, 256, 16384, 16, 1024};
+    return {usize{64} * 1024 * 1024, 4096, 256, 16384, static_cast<uint32>(internal::RASTER_CAPACITY), 1024};
 }
 RasterStatus
 RasterCreateBuffer(usize slot, const BufferDescription&, std::span<const uint8> bytes, uint32 request) noexcept

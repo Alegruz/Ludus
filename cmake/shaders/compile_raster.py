@@ -10,6 +10,22 @@ import struct
 # Reflect each target independently. No cross-target CPU packing is inferred.
 # Raster rejects storage; compute accepts bounded structured buffers. Both reject
 # resource arrays, extra groups and unsupported inputs.
+def uniform_shape(value):
+    kind = value.get('kind')
+    if kind == 'scalar' and value.get('scalarType') == 'float32':
+        return 'Float32'
+    if value.get('elementType', {}).get('scalarType') == 'float32':
+        if kind == 'vector' and value.get('elementCount') in (2,3,4):
+            return 'Float' + str(value['elementCount'])
+        if kind == 'matrix' and value.get('rowCount') == value.get('columnCount') == 4:
+            return 'Float4x4'
+    if kind == 'array' and type(value.get('elementCount')) is int and 1 <= value['elementCount'] <= 256:
+        shape = uniform_shape(value.get('elementType', {}))
+        if shape in ('Float4', 'Float4x4'):
+            return shape + 'Array'
+    return 'Opaque'
+
+
 def raster_interface(document, stage, metal=False):
     points = [x for x in document['entryPoints'] if x['stage'] == stage]
     if len(points) != 1:
@@ -78,6 +94,7 @@ def raster_interface(document, stage, metal=False):
             value['width'] = width
         if kind == 'UniformBuffer':
             value['offsets'] = {field['name']: field['binding']['offset'] for field in resource['type']['elementType']['fields']}
+            value['shapes'] = {field['name']: uniform_shape(field.get('type', {})) for field in resource['type']['elementType']['fields']}
         entries.append(value)
     inputs = []
     def input_field(field):
@@ -153,6 +170,43 @@ def glsl_interface(code, reflected, cross_reflection):
     return names, textures
 
 
+def wgsl_uniform_type(code, kind, depth=0):
+    """Only scalar/vector/mat4 and bounded fixed vec4/mat4 storage shapes.
+
+    Pinned Slang lowers std140 matrices to a single aligned vec4[4] field,
+    and matrix arrays to a one-field array wrapper. Derive those emitted shapes
+    instead of trusting reflected sizes; reject arbitrary nested structures.
+    """
+    kinds = {'f32': (4,4), 'vec2<f32>': (8,8), 'vec3<f32>': (12,16),
+             'vec4<f32>': (16,16), 'mat4x4<f32>': (64,16)}
+    if kind in kinds:
+        return kinds[kind]
+    if depth > 3:
+        raise RuntimeError('Browser raster uniform wrappers exceed bounded nesting')
+    array = re.fullmatch(r'array<\s*(.+?)\s*,\s*(?:[iu]32\(\s*(\d+)\s*\)|(\d+))\s*>', kind)
+    if array:
+        element, cast_count, bare_count = array.groups()
+        count = int(cast_count or bare_count)
+        if not 1 <= count <= 256:
+            raise RuntimeError('Browser raster uniform array count exceeds bounded profile')
+        if element not in ('vec4<f32>', 'mat4x4<f32>') and not re.fullmatch(r'_MatrixStorage_float4x4_(?:ColMajor|RowMajor)std140_\d+', element):
+            raise RuntimeError('Browser raster uniforms require bounded vec4/mat4 arrays')
+        stride, alignment = wgsl_uniform_type(code, element, depth+1)
+        return stride * count, alignment
+    matrix = re.fullmatch(r'_MatrixStorage_float4x4_(?:ColMajor|RowMajor)std140_\d+', kind)
+    wrapped_array = re.fullmatch(r'_Array_std140_matrixx3Cfloatx2C4x2C4x3E\d+_\d+', kind)
+    if matrix or wrapped_array:
+        structures = re.findall(r'struct\s+' + re.escape(kind) + r'\s*\{([^}]+)\}', code)
+        if len(structures) == 1:
+            field = re.fullmatch(r'\s*@align\(16\)\s+data_\d+\s*:\s*(array<.+>)\s*,\s*;?\s*', structures[0])
+            if field:
+                inner = field[1]
+                if matrix and re.fullmatch(r'array<vec4<f32>,\s*(?:[iu]32\(4\)|4)>', inner) is None:
+                    raise RuntimeError('Browser raster matrix storage requires exactly four vec4 columns/rows')
+                return wgsl_uniform_type(code, inner, depth+1)
+    raise RuntimeError('Browser raster uniforms require float/vector/mat4 or bounded vec4/mat4 arrays')
+
+
 def wgsl_contract(code, reflected, stage):
     """Verify emitted uniform packing and normalize bounded vertex input locations.
 
@@ -191,20 +245,33 @@ def wgsl_contract(code, reflected, stage):
         if structure is None:
             raise RuntimeError('WGSL emitted uniform struct is missing')
         occupied, alignment, offsets = 0, 1, {}
-        for member in structure[1].split(','):
+        # Commas inside array<T,N> are not field separators. Reject nested
+        # structures/runtime arrays; fixed vec4/mat4 arrays have verified strides.
+        members, start, depth = [], 0, 0
+        for index, char in enumerate(structure[1]):
+            depth += (char == '<') - (char == '>')
+            if depth < 0:
+                raise RuntimeError('WGSL uniform type brackets are malformed')
+            if char == ',' and depth == 0:
+                members.append(structure[1][start:index]); start = index + 1
+        members.append(structure[1][start:])
+        for member in members:
             if not member.strip():
                 continue
-            field = re.fullmatch(r'\s*(?:@align\((\d+)\)\s*)?(\w+)\s*:\s*(f32|vec[234]<f32>)\s*', member)
+            field = re.fullmatch(r'\s*(?:@align\((\d+)\)\s*)?(\w+)\s*:\s*(.+?)\s*', member)
             if field is None:
-                raise RuntimeError('Browser raster uniforms require flat float/vector members')
+                raise RuntimeError('Browser raster uniform member is malformed')
             explicit, name, kind = field.groups()
-            size, natural = {'f32':(4,4),'vec2<f32>':(8,8),'vec3<f32>':(12,16),'vec4<f32>':(16,16)}[kind]
+            size, natural = wgsl_uniform_type(code, kind)
             align = max(int(explicit or 1), natural)
             if align & (align-1):
                 raise RuntimeError('WGSL uniform alignment is invalid')
             alignment = max(alignment, align)
             occupied = (occupied+align-1)//align*align
-            offsets[re.sub(r'_\d+$', '', name)] = occupied
+            stem = re.sub(r'_\d+$', '', name)
+            if stem in offsets:
+                raise RuntimeError('Duplicate WGSL uniform member')
+            offsets[stem] = occupied
             occupied += size
         size = (occupied+alignment-1)//alignment*alignment
         if size != entry['size'] or offsets != entry['offsets']:
@@ -343,6 +410,17 @@ def compile_raster(args, lock):
             for binding in interface['entries']:
                 header += '{' + f'{binding["binding"]},graphics::rhi::RasterBindingKind::{binding["kind"]},graphics::rhi::RasterVisibility::{stage.title()},{binding["size"]}' + '},\n'
             header += '};\n'
+        members = [(entry['binding'], name, offset, entry['shapes'][name]) for entry in interface['entries']
+                   for name, offset in entry.get('offsets', {}).items()]
+        if len(members) > 64:
+            raise RuntimeError('Uniform schema exceeds 64 top-level members')
+        if members:
+            header += f'inline constexpr graphics::rhi::RasterUniformMember {label}_MEMBERS[] = {{\n'
+            for binding, member, offset, shape in members:
+                if re.fullmatch(r'[A-Za-z_]\w{0,62}', member) is None:
+                    raise RuntimeError('Uniform member name exceeds the schema profile')
+                header += '{' + f'{binding},"{member}",{offset},graphics::rhi::RasterUniformShape::{shape}' + '},\n'
+            header += '};\n'
         if interface['inputs']:
             header += f'inline constexpr graphics::rhi::RasterShaderInput {label}_INPUTS[] = {{\n'
             for value in interface['inputs']:
@@ -354,6 +432,8 @@ def compile_raster(args, lock):
         header += f' result.Artifact.{field} = {label}; result.Artifact.{field}Entry = "{name}";\n'
         if interface['entries']:
             header += f' result.Bindings = {label}_BINDINGS;\n'
+        if members:
+            header += f' result.UniformMembers = {label}_MEMBERS;\n'
         if interface['inputs']:
             header += f' result.Inputs = {label}_INPUTS;\n'
         for binding, block in interface.get('blocks', {}).items():

@@ -263,7 +263,8 @@ VkDescriptorType RasterDescriptor(RasterBindingKind kind) noexcept
 }
 VkFormat RasterPixelFormat(RasterFormat format) noexcept
 {
-    return format == RasterFormat::R8Unorm      ? VK_FORMAT_R8_UNORM
+    return format == RasterFormat::Rg8Unorm     ? VK_FORMAT_R8G8_UNORM
+           : format == RasterFormat::R8Unorm    ? VK_FORMAT_R8_UNORM
            : format == RasterFormat::Rgba8Unorm ? VK_FORMAT_R8G8B8A8_UNORM
                                                 : VK_FORMAT_R8G8B8A8_SRGB;
 }
@@ -453,7 +454,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     image.imageType = VK_IMAGE_TYPE_2D;
     image.format = format;
     image.extent = {info.Width, info.Height, 1};
-    image.mipLevels = 1;
+    image.mipLevels = info.MipLevels;
     image.arrayLayers = 1;
     image.samples = VK_SAMPLE_COUNT_1_BIT;
     image.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -544,7 +545,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         barrier.image = texture.Object;
-        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, info.MipLevels, 0, 1};
         vkCmdPipelineBarrier(command,
                              VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -555,12 +556,28 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
                              nullptr,
                              1,
                              &barrier);
-        VkBufferImageCopy copy{};
-        copy.bufferRowLength = static_cast<uint32>(upload.RowPitch / (info.Format == RasterFormat::R8Unorm ? 1U : 4U));
-        copy.bufferImageHeight = info.Height;
-        copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        copy.imageExtent = {info.Width, info.Height, 1};
-        vkCmdCopyBufferToImage(command, staging.Object, texture.Object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        VkBufferImageCopy copies[16]{};
+        uint32 width = info.Width, height = info.Height;
+        for (uint32 level = 0; level < info.MipLevels; ++level)
+        {
+            const auto mip = upload.Mips.empty() ? TextureMipUpload{0, upload.RowPitch} : upload.Mips[level];
+            const usize channels = info.Format == RasterFormat::R8Unorm    ? 1U
+                                   : info.Format == RasterFormat::Rg8Unorm ? 2U
+                                                                           : 4U;
+            copies[level].bufferOffset = mip.Offset;
+            copies[level].bufferRowLength = static_cast<uint32>(mip.RowPitch / channels);
+            copies[level].bufferImageHeight = height;
+            copies[level].imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
+            copies[level].imageExtent = {width, height, 1};
+            width = width > 1 ? width / 2 : 1;
+            height = height > 1 ? height / 2 : 1;
+        }
+        vkCmdCopyBufferToImage(command,
+                               staging.Object,
+                               texture.Object,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               info.MipLevels,
+                               copies);
         barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -593,9 +610,10 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         result = vkQueueSubmit(gQueue, 1, &submit, fence);
         submitted = result == VK_SUCCESS;
     }
-    // R8 atlas replacement is a streaming operation: retain owned staging and
+    // Immutable content/atlas replacement is a streaming operation: retain owned staging and
     // poll its fence through RasterCompleted instead of waiting on the GPU.
-    if (submitted && info.Format == RasterFormat::R8Unorm)
+    if (submitted && (info.AsyncUpload || info.MipLevels > 1 || info.Format == RasterFormat::R8Unorm ||
+                      info.Format == RasterFormat::Rg8Unorm))
     {
         texture.Upload = staging;
         texture.Command = command;
@@ -638,7 +656,7 @@ RasterStatus RasterCreateView(usize slot, const internal::RasterViewSource& sour
     info.image = gRasterTextures[source.Texture].Object;
     info.viewType = VK_IMAGE_VIEW_TYPE_2D;
     info.format = RasterPixelFormat(gRasterTextures[source.Texture].Info.Format);
-    info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, gRasterTextures[source.Texture].Info.MipLevels, 0, 1};
     return RasterError(vkCreateImageView(gDevice, &info, nullptr, &gRasterViews[slot]));
 }
 RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uint32) noexcept
@@ -646,7 +664,10 @@ RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uin
     VkSamplerCreateInfo create{};
     create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     create.minFilter = create.magFilter = info.Filter == RasterFilter::Nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
-    create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    create.mipmapMode =
+        info.MipFilter == RasterMipFilter::Linear ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    create.minLod = info.MinLod;
+    create.maxLod = info.MipFilter == RasterMipFilter::None ? 0 : info.MaxLod;
     create.addressModeU =
         info.U == RasterAddress::Clamp ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE : VK_SAMPLER_ADDRESS_MODE_REPEAT;
     create.addressModeV =
