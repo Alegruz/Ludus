@@ -189,6 +189,7 @@ if(EMSCRIPTEN)
     add_subdirectory(modules/platform)
     add_subdirectory(modules/graphics/rhi)
     add_subdirectory(modules/graphics/renderer)
+    add_subdirectory(modules/graphics/text)
     # NOTE: Ludus::Text is intentionally NOT built for the Emscripten target yet.
     # Its FreeType/HarfBuzz dependencies are resolved natively through Conan; the
     # separate pinned web source-bootstrap for those libraries is still pending
@@ -213,6 +214,7 @@ else()
     add_subdirectory(modules/graphics/rhi)
     add_subdirectory(modules/graphics/renderer)
     add_subdirectory(modules/text)
+    add_subdirectory(modules/graphics/text)
 
     # Qt-free static GameHost runtime library and loader (project-live-reload
     # design section 2). Native-only: it uses dlopen and the Platform/RHI

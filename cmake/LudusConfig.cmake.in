@@ -38,16 +38,12 @@ if(NOT "@CMAKE_SYSTEM_NAME@" MATCHES "^(Emscripten|Darwin)$")
 endif()
 
 # Text links FreeType/HarfBuzz statically (PRIVATE on the static lib does not
-# relieve the final consumer of the static link dependency). When their bundled
-# CMake metadata is present, resolve the imported targets so a Text consumer
-# links cleanly from the relocated SDK.
+# relieve the final consumer of the static link dependency). Resolve their
+# imported targets from bundled metadata or the producer dependency prefix so
+# Text/GraphicsText links cleanly from both installed and relocated SDKs.
 if(NOT "@CMAKE_SYSTEM_NAME@" STREQUAL "Emscripten")
-    if(EXISTS "${_ludus_dep_search}/freetype-config.cmake" OR EXISTS "${_ludus_dep_search}/FreetypeConfig.cmake")
-        find_dependency(freetype CONFIG)
-    endif()
-    if(EXISTS "${_ludus_dep_search}/harfbuzz-config.cmake")
-        find_dependency(harfbuzz CONFIG)
-    endif()
+    find_dependency(freetype CONFIG)
+    find_dependency(harfbuzz CONFIG)
 endif()
 
 # Threads is a system dependency pulled in by the assertion/concurrency paths.

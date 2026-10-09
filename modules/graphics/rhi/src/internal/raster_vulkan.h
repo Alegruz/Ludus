@@ -263,7 +263,9 @@ VkDescriptorType RasterDescriptor(RasterBindingKind kind) noexcept
 }
 VkFormat RasterPixelFormat(RasterFormat format) noexcept
 {
-    return format == RasterFormat::Rgba8Unorm ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R8G8B8A8_SRGB;
+    return format == RasterFormat::R8Unorm      ? VK_FORMAT_R8_UNORM
+           : format == RasterFormat::Rgba8Unorm ? VK_FORMAT_R8G8B8A8_UNORM
+                                                : VK_FORMAT_R8G8B8A8_SRGB;
 }
 } // namespace
 RasterCapabilities RasterLimits() noexcept
@@ -554,7 +556,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
                              1,
                              &barrier);
         VkBufferImageCopy copy{};
-        copy.bufferRowLength = static_cast<uint32>(upload.RowPitch / 4);
+        copy.bufferRowLength = static_cast<uint32>(upload.RowPitch / (info.Format == RasterFormat::R8Unorm ? 1U : 4U));
         copy.bufferImageHeight = info.Height;
         copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         copy.imageExtent = {info.Width, info.Height, 1};
@@ -590,6 +592,17 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         submit.pCommandBuffers = &command;
         result = vkQueueSubmit(gQueue, 1, &submit, fence);
         submitted = result == VK_SUCCESS;
+    }
+    // R8 atlas replacement is a streaming operation: retain owned staging and
+    // poll its fence through RasterCompleted instead of waiting on the GPU.
+    if (submitted && info.Format == RasterFormat::R8Unorm)
+    {
+        texture.Upload = staging;
+        texture.Command = command;
+        texture.Fence = fence;
+        texture.Request = request;
+        internal::RasterExpect(request, internal::RasterCallbacks::One);
+        return RasterStatus::Pending;
     }
     if (submitted)
     {

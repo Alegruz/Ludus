@@ -1,5 +1,7 @@
 # Text/font rendering research and decisions
 
+L2 now implements the shared [GraphicsText atlas and Renderer adapter](renderer-systems.md#implemented-l2-mutable-versions-and-overlays), including native CPU Text preparation and portable R8 sampling. Browser CPU shaping/source bootstrap and the standalone F0–F6 acceptance gates remain pending.
+
 Research date: 2026-10-01. Implementation baseline: `origin/main` at `fa0fc7f`.
 This document records the design research, including local PDF findings, so Kiro
 can implement without access to `references/` or this conversation. The

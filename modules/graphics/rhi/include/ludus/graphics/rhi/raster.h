@@ -172,6 +172,8 @@ enum class RasterFormat : ludus::foundation::uint8
     Rgba8Unorm,
     /// Four unsigned normalized channels; RGB decodes sRGB during sampling, alpha remains linear.
     Rgba8Srgb,
+    /// Single unsigned normalized coverage/data channel; sampled only, never an attachment.
+    R8Unorm,
 };
 /// Two-dimensional sampled texture or mutable color attachment description.
 struct TextureDescription final
@@ -186,12 +188,12 @@ struct TextureDescription final
     /// Attachment textures remain sampleable; clear/store defines color contents.
     bool Attachment = false;
 };
-/// Borrowed complete RGBA8 upload, copied/consumed before CreateTexture returns.
+/// Borrowed complete R8 or RGBA8 upload, copied/consumed before CreateTexture returns.
 struct TextureUpload final
 {
     /// Rows in top-left image order, including optional padding between rows.
     std::span<const ludus::foundation::uint8> Bytes;
-    /// Bytes between rows; multiple of four and at least Width * 4.
+    /// Bytes between rows; multiple of four and at least Width times the format channel count.
     ludus::foundation::usize RowPitch = 0;
 };
 /// Portable minification/magnification filter; the one-mip profile has no mip interpolation.

@@ -1,7 +1,8 @@
 # Low-level renderer systems architecture
 
-Status: L0 portable scene submission and L1 views/depth implemented, October 8,
-2026; L1 starts from the merged L0 at `fe53e42`. L2–L6 remain an implementation plan.
+Status: L0 scene submission, L1 views/depth and L2 mutable versions/overlays
+implemented, October 8, 2026. L2 starts from merged L1 at `df231de`.
+L3–L6 remain an implementation plan.
 Correctness fixtures do not establish a measured speedup.
 The initial decisions below were saved before opening the Gems article map.
 The [reference review](renderer-systems-gems-review.md) records the subsequent
@@ -57,7 +58,7 @@ public contracts with Doxygen and source attribution beside affected code.
 | [R1 portable raster](../development/fullscreen-rendering.md#portable-raster-r1) | Vulkan, Metal, WebGPU and WebGL 2; indexed instanced triangles, immutable resources, one acquired color target and private depth | A small flat/unlit consumer can use it now; general pass attachments, streaming and modern depth policy need explicit extensions |
 | [RHI/GDI architecture](rhi-gdi.md) | R2 lifetime services, R3 ordered graph and R4 buffer compute/indirect profiles are implemented; R5 remains proposed | Reuse retained batches/completion and authored graph passes; storage textures, raster-stage storage and general mutable uploads remain deferred |
 | [Camera systems](camera-systems.md) | C0 evaluation is implemented; advanced rigs/history remain proposed | Consume `CameraSample`; renderer owns projection, jitter, render-origin conversion and history |
-| [Text](text-font-rendering-research.md) and [FontSystem](../../modules/text/include/ludus/text/font_system.h) | Native CPU shaping and grayscale rasterization; bounded run contract, no automatic paragraph layout; atlas/GPU work remains pending in the [F0–F6 ledger](../../.kiro/specs/text-font-rendering/tasks.md) | Reuse CPU text; bounded atlas and GPU text adapter need implementation and backend evidence |
+| [Text](text-font-rendering-research.md) and [FontSystem](../../modules/text/include/ludus/text/font_system.h) | Native CPU shaping/rasterization plus L2 GraphicsText R8 atlas/Renderer adapter; browser consumes copied coverage fixtures, CPU font bootstrap remains pending in the [F0–F6 ledger](../../.kiro/specs/text-font-rendering/tasks.md) | Keep shaping independent; standalone F0–F6 gates and browser CPU font dependencies remain incomplete |
 | [Resources](resource-management.md) | Content/audio portions exist; general coordinator and graphics streaming are proposed | Do not block the first scene on a universal asset manager |
 | [Frame update](frame-update.md), [world](game-world.md), [UI](ui.md) | Separate simulation, presentation and UI ownership | Extraction adapters sit above Renderer; it must not depend on an ECS or UI toolkit |
 
@@ -226,6 +227,82 @@ corners, top-right overlay UV orientation, bars and neighboring view preservatio
 Unit fixtures cover mapping inverses, explicit DPI, crop/fit/integer fallback, shared
 split edges, output preservation, five-plane culling, stale handles, capacity recovery
 and texture retention after release. These checks establish correctness, not a speedup.
+
+## Implemented L2: mutable versions and overlays
+
+L2 adds completion-scoped **replacement versions**, rather than exposing unsafe
+in-place writes. `ReplaceSnapshot` publishes a copied dynamic instance scene
+atomically; earlier prepared views retain the old snapshot. Set
+`ViewDescription::ScheduledUpload` to copy instance bytes into R2's bounded staging
+ring. Preparation returns Pending, with an owned prepared view. Poll RHI lifetime
+and view readiness between frames before drawing. Release the previous version
+after accepted submission; its physical resources remain in the authoritative RHI
+registry until GPU completion. Source arrays and CPU lists can immediately be reused.
+Admission failure keeps the prior snapshot/ready image. Exhausted upload/resource
+quotas cause explicit backpressure, never a wait or an implicit eviction.
+
+The [overlay API](../../modules/graphics/renderer/include/ludus/graphics/renderer/overlays.hpp)
+uses one reserved CPU triangle arena for solids, thick lines and coverage quads.
+Append operations allocate nothing and reject complete commands on overflow.
+Homogeneous lines clip the positive-W and canonical near/far planes before
+perspective division; physical widths have a one-pixel minimum. Butt caps and a
+square for zero projected length are deliberate baseline choices. Each view builds
+its own expanded list using that view's clip coordinates and actual viewport size.
+World-unit widths, joins, persistent timed commands, worker merging and x-ray
+convenience helpers remain later debug features.
+
+Cook installed `renderer_overlay.slang` with the existing shader helper. Initialize
+`OverlayRenderer`, then poll its fixed pipelines. `Prepare` copies the complete list
+and captures an exact R8 atlas view/binding; four logical versions share existing
+RHI quotas. `GetStatus` completes upload ownership and binding setup between frames.
+`Draw` consumes the ready version during an acquired frame. Every command loads
+and stores initialized color and depth, with read-only depth; the scene pass must
+store depth even for mixed always-visible/depth-tested lists. Surface and linear
+RGBA8 offscreen pipelines support conventional/reverse-Z tests without modifying
+scene depth. Command scissors intersect the pass scissor. Only adjacent compatible
+commands merge; font quads and debug triangles retain their authored painter order.
+All colors are straight display-linear RGBA, premultiplied once in the shader.
+Compose after scene/history production; this baseline has no temporal history.
+
+[GraphicsText](../../modules/graphics/text/include/ludus/graphics/text/coverage_atlas.hpp)
+owns a 256-square CPU R8 shadow and at most 512 sized glyph-cache entries. Shelves
+reserve a transparent one-texel gutter before packing, with linear filtering and
+no mipmaps. Cells never move or evict until an explicit reset. `Publish` copies a
+complete page into a new immutable sampled R8 texture. Vulkan retains staging and
+polls the upload fence; WebGPU validates asynchronously. Destroying the public
+page handle or resetting the CPU shadow cannot change an already prepared label.
+Publication, retained old/new pages and pending GPU retirement all count against
+RHI resource quotas. Dirty rectangles and range updates are deferred until a
+measured need warrants their additional hazard contract.
+
+The native [Text bridge](../../modules/graphics/text/include/ludus/graphics/text/text_adapter.hpp)
+consumes existing shaped glyph IDs, 26.6 positions, bearings and original byte
+clusters. It copies temporary raster masks immediately, then produces generic
+baseline-relative quads. Caller-assigned font content versions prevent cross-font
+cache aliases. Warm runs use the cache without reshaping or rasterization. Missing
+glyphs use the face's visible `.notdef`; atlas pressure is a status that lets the
+caller retain its earlier label. Paragraph layout/fallback remain CPU/UI policy.
+CPU Text's FreeType/HarfBuzz bootstrap is still native-only; the browser GraphicsText
+target accepts copied R8 masks and shaped placements without pretending to shape
+Unicode. The standalone [F0–F6 ledger](../../.kiro/specs/text-font-rendering/tasks.md)
+remains authoritative for that larger text milestone.
+
+The simple baseline expands quads into the same triangle stream as debug geometry,
+sharing one index buffer and one upload per list, rather than adding a separate
+instanced glyph path. There is no per-line/per-glyph GPU allocation. Fixed-quad
+instancing remains a measured optimization; it must preserve these exact ordering,
+scissor and coverage contracts. Whole-version replacement similarly favors a
+small, auditable lifetime contract over premature in-place range mutation.
+
+The public-only [L2 SDK fixture](../../tests/sdk_consumer/renderer_overlays.cpp)
+renders 120 accepted frames with new scheduled instance and overlay versions,
+without waiting for preceding frame completion. Native and browser pixel oracles
+check R8 orientation, painter blending, scissor intersections and near-clipped
+thick lines. Reference-backend stress holds submissions outstanding, cancels uploads,
+checks old bytes and texture retention, exercises capacity recovery, and invalidates
+stale handles on release/restart. CPU fixtures cover Latin, Hangul and Arabic shaping,
+cluster provenance, warm cache reuse, transparent gutters and atlas pressure.
+These are correctness checks; no throughput or physical GPU speedup is claimed.
 
 ## Owners and module shape
 
@@ -967,7 +1044,7 @@ These phases complement RHI R0–R5; they do not rename or claim completion of t
 | --- | --- | --- |
 | L0: portable scene packets (implemented) | R1 static flat/unlit meshes with fixed transforms, immutable snapshots, CPU visibility, ordered 2D overlays, error materials; remain within current limits and R1-compatible depth | Public-only SDK fixture on Vulkan/Metal/WebGPU/WebGL; invalid/stale inputs, capacity failure and pixels match an unsorted direct path |
 | L1: views and depth (implemented) | GDI/RHI explicit attachments, clear/compare state and frame retention; orthographic/perspective, virtual screens, offscreen/split views | Reverse-Z ordering, clip/UV orientation, letterbox picking, DPI, zero extent, resize and neighboring view preservation |
-| L2: mutable data and overlays | Completion-scoped uploads/updates; dynamic instances, debug triangles, R8 text adapter | In-flight overwrite stress, line near-plane/degenerate cases, painter/scissor order, atlas pressure, CPU text fixtures and loss/restart |
+| L2: mutable data and overlays (implemented) | Completion-scoped replacement uploads; dynamic instances, debug triangles, R8 text adapter | In-flight overwrite stress, line near-plane/degenerate cases, painter/scissor order, atlas pressure, CPU text fixtures and loss/restart |
 | L3: material/content versions | Cook/reflection/layout expansion, texture formats/mips and pipeline prewarm | Per-target layout fixtures; invalid reload preserves old image; mip/color semantics; bounded cache/upload overlap and deterministic fallback |
 | L4: lighting baseline | Lit material, bounded direct lists, environment, shadows, baked assets, linear intermediate/output | Reference BRDF/color tests; no double lighting, shadow invalidation/atlas borders, saturation/overflow and LDR/HDR capability variants |
 | L5: measured scaling | Clustered forward, improved culling/LOD, optional native parallel recording | Dense-light and many-object fixtures; direct-path comparisons, overflow correctness, physical GPU median/tail/memory/latency evidence |

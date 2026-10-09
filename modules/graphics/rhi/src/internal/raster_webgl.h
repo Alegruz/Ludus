@@ -261,14 +261,17 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     glGenTextures(1, &gRasterTextures[slot]);
     glBindTexture(GL_TEXTURE_2D, gRasterTextures[slot]);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, static_cast<GLint>(upload.RowPitch / 4));
+    glPixelStorei(GL_UNPACK_ROW_LENGTH,
+                  static_cast<GLint>(upload.RowPitch / (info.Format == RasterFormat::R8Unorm ? 1U : 4U)));
     glTexImage2D(GL_TEXTURE_2D,
                  0,
-                 info.Format == RasterFormat::Rgba8Unorm ? GL_RGBA8 : GL_SRGB8_ALPHA8,
+                 info.Format == RasterFormat::R8Unorm      ? GL_R8
+                 : info.Format == RasterFormat::Rgba8Unorm ? GL_RGBA8
+                                                           : GL_SRGB8_ALPHA8,
                  static_cast<GLsizei>(info.Width),
                  static_cast<GLsizei>(info.Height),
                  0,
-                 GL_RGBA,
+                 info.Format == RasterFormat::R8Unorm ? GL_RED : GL_RGBA,
                  GL_UNSIGNED_BYTE,
                  upload.Bytes.data());
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);

@@ -113,6 +113,10 @@ struct ViewDescription final
     ludus::foundation::float32 CullMargin = 0;
     /// Keep source order and one draw per object, with visibility disabled, for image comparison.
     bool Reference = false;
+    /// Schedule a bounded R2 upload version instead of immediate immutable creation.
+    /// PrepareView then returns Pending; poll GetStatus between frames before drawing.
+    /// Caller snapshots/arrays may be released immediately; accepted GPU versions never change.
+    bool ScheduledUpload = false;
     /// Defaults preserve existing L0 projection behavior; reverse-Z requires InitializeViews.
     DepthConvention Depth = DepthConvention::Conventional;
     /// Select five-plane culling for an infinite reverse-Z perspective projection.
@@ -201,6 +205,11 @@ public:
     /// reject atomically, preserving output and all existing scenes. Null output required.
     [[nodiscard]] rhi::RasterStatus
     CreateSnapshot(const SceneItem* items, ludus::foundation::usize count, Snapshot& output) noexcept;
+    /// Atomically replace an owned snapshot with a complete copied dynamic scene.
+    /// Earlier views retain exact snapshot/mesh versions. Admission failure preserves
+    /// current; requires one free snapshot slot, between frames.
+    [[nodiscard]] rhi::RasterStatus
+    ReplaceSnapshot(const SceneItem* items, ludus::foundation::usize count, Snapshot& current) noexcept;
     /// Detach snapshot ownership and clear handle; existing prepared views remain valid.
     [[nodiscard]] rhi::RasterStatus Release(Snapshot& handle) noexcept;
     /// Cull, safely order and instance a copied view during setup, retaining the snapshot.

@@ -281,8 +281,9 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     WGPUTextureDescriptor descriptor = WGPU_TEXTURE_DESCRIPTOR_INIT;
     descriptor.size = {info.Width, info.Height, 1};
     descriptor.dimension = WGPUTextureDimension_2D;
-    descriptor.format =
-        info.Format == RasterFormat::Rgba8Unorm ? WGPUTextureFormat_RGBA8Unorm : WGPUTextureFormat_RGBA8UnormSrgb;
+    descriptor.format = info.Format == RasterFormat::R8Unorm      ? WGPUTextureFormat_R8Unorm
+                        : info.Format == RasterFormat::Rgba8Unorm ? WGPUTextureFormat_RGBA8Unorm
+                                                                  : WGPUTextureFormat_RGBA8UnormSrgb;
     descriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst |
                        (info.Attachment ? WGPUTextureUsage_RenderAttachment : WGPUTextureUsage_None);
     auto texture = wgpuDeviceCreateTexture(gDevice, &descriptor);
