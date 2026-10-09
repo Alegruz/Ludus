@@ -1,7 +1,10 @@
 # Text/font rendering implementation milestones
 
-Status: all implementation tasks unchecked. This file is the execution/evidence
-ledger, not evidence that code or GPU validation already exists.
+Status: native F0–F2 evidence exists below. Renderer L2 also implements the shared
+GraphicsText R8 atlas/quad adapter using the existing cooked raster shader seam;
+see [current integration](../../../docs/architecture/renderer-systems.md#implemented-l2-mutable-versions-and-overlays).
+Browser CPU font bootstrap and standalone F3–F6 acceptance remain pending. This
+ledger does not promote the integrated subset into completion of every text gate.
 
 Read [requirements.md](requirements.md), [design.md](design.md), and
 [research](../../../docs/architecture/text-font-rendering-research.md) before
@@ -30,8 +33,8 @@ Requirements: T01, T02, T15.
   build via Conan; FT/HB headers are SYSTEM includes. The Text target is added
   only in the **native** configure; it is intentionally not added to the
   Emscripten configure until the web FreeType/HarfBuzz source-bootstrap exists
-  (otherwise the browser configure fails `find_package(freetype)`). **GraphicsText
-  target pending** — belongs to the atlas/GPU milestones.)
+  (otherwise the browser configure fails `find_package(freetype)`). **GraphicsText target implemented by L2**, with a portable copied-coverage
+  adapter and a native-only CPU Text bridge.)
 - [x] Add fixed licensed Latin/Hangul/Arabic fixture font assets with hashes.
   Test asset loading without system fonts or runtime network. (Native done;
   **browser packaging pending** with the web path.)

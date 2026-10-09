@@ -484,7 +484,9 @@ RasterStatus CreateTexture(DeviceHandle device,
     const auto maxDimension = textureLimits.MaxTextureDimension2D;
     if (description.Width == 0 || description.Height == 0 || description.Width > maxDimension ||
         description.Height > maxDimension ||
-        (description.Format != RasterFormat::Rgba8Unorm && description.Format != RasterFormat::Rgba8Srgb))
+        (description.Format != RasterFormat::Rgba8Unorm && description.Format != RasterFormat::Rgba8Srgb &&
+         description.Format != RasterFormat::R8Unorm) ||
+        (description.Attachment && description.Format == RasterFormat::R8Unorm))
     {
         return RasterStatus::InvalidDescription;
     }
@@ -499,7 +501,7 @@ RasterStatus CreateTexture(DeviceHandle device,
             return backend::RasterCreateTexture(slot, description, upload, record.Request);
         });
     }
-    const usize row = static_cast<usize>(description.Width) * 4;
+    const usize row = static_cast<usize>(description.Width) * (description.Format == RasterFormat::R8Unorm ? 1U : 4U);
     if (upload.RowPitch < row || upload.RowPitch % 4 != 0 || upload.RowPitch > ~usize{0} / description.Height ||
         upload.Bytes.size() != upload.RowPitch * description.Height ||
         upload.Bytes.size() > textureLimits.MaxBufferSize)

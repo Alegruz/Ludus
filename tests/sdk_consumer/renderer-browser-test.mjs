@@ -100,6 +100,37 @@ try {
   }
   }
 
+  let overlayOracle;
+  for (const scenario of ['webgpu','webgl2','auto','fallback']) {
+    const context = await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
+    if (scenario === 'fallback') await context.addInitScript(() => Object.defineProperty(navigator,'gpu',{get:()=>undefined}));
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror',error=>errors.push(String(error)));
+    page.on('console',message=>{if(message.type()==='error') errors.push(message.text());});
+    await page.goto(`http://127.0.0.1:${server.address().port}/renderer-overlays.html?backend=${scenario==='fallback'?'auto':scenario}`);
+    await page.waitForFunction(()=>['rendering','failed'].includes(document.querySelector('#status').dataset.state),{},{timeout:30000});
+    const state = await page.locator('#status').evaluate(n=>({...n.dataset}));
+    assert.equal(state.state,'rendering',JSON.stringify({state,errors}));
+    assert.equal(state.frames,'5');
+    assert.equal(state.backend,scenario==='fallback'?'webgl2':scenario==='auto'?'webgpu':scenario);
+    assert.deepEqual(errors,[]);
+    const png = await page.locator('#canvas').screenshot();
+    await writeFile(resolve(output,`l2-${scenario}.png`),png);
+    const image = PNG.sync.read(png);
+    if(overlayOracle) assert.deepEqual(image.data,overlayOracle,'L2 cross-backend painter/coverage image');
+    else overlayOracle=image.data;
+    const color=(x,y,expected)=>assert.deepEqual([...image.data.subarray((y*96+x)*4,(y*96+x)*4+4)],expected,`L2 pixel ${x},${y}`);
+    color(8,48,[255,0,0,255]); color(24,48,[128,128,0,255]); color(40,48,[0,0,0,255]);
+    color(80,4,[255,255,255,255]); color(80,28,[0,0,0,255]); color(60,16,[0,0,255,255]);
+    color(72,32,[255,0,0,255]); color(24,26,[0,0,0,255]);
+    await page.evaluate(()=>{globalThis.__qaPause=false;});
+    await page.waitForFunction(()=>['passed','failed'].includes(document.querySelector('#status').dataset.state),{},{timeout:30000});
+    const final=await page.locator('#status').evaluate(n=>({...n.dataset}));
+    assert.equal(final.state,'passed',JSON.stringify({final,errors})); assert.equal(final.frames,'120'); assert.deepEqual(errors,[]);
+    report.cases.push({phase:3,scenario,...final});
+    await context.close();
+  }
   await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2));
-  console.log('L0/L1 renderer SDK: WebGPU/WebGL2/Auto/fallback match direct and cross-backend pixels over 120 frames, including split views, zero extent and resize');
+  console.log('L0/L1/L2 renderer SDK: WebGPU/WebGL2/Auto/fallback match direct and cross-backend pixels over 120 frames, including split views, zero extent and resize');
 } finally { await browser?.close(); server.close(); }

@@ -1,8 +1,10 @@
 #include "internal/readback.h"
 #include "l0_scene.h"
 #include "l1_scene.h"
+#include "l2_scene.h"
 #include "renderer_composite.h"
 #include "renderer_flat.h"
+#include "renderer_overlay.h"
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include <ludus/foundation/containers/static_array.hpp>
@@ -316,4 +318,100 @@ TEST_CASE("L1 Fill crops logical offscreen pixels once and matches direct output
         sample(8, 32, {0, 0, 255});
         sample(89, 11, {255, 0, 255});
     }
+}
+TEST_CASE("L2 R8 coverage orientation, painter scissors and clipped thick lines have independent pixel oracles",
+          "[renderer][l2][gpu]")
+{
+    rhi::Shutdown();
+    struct Guard
+    {
+        ~Guard()
+        {
+            rhi::Shutdown();
+        }
+    } guard;
+    rhi::DeviceHandle device;
+    rhi::SurfaceHandle surface;
+    rhi::StartupInfo failure;
+    rhi::DeviceDescription description;
+    description.Required.PortableRaster = true;
+    const auto started = rhi::CreateDevice({}, { .Width = 96, .Height = 64 }, description, device, surface, &failure);
+#if defined(LUDUS_TEST_METAL)
+    if (started != rhi::DeviceStatus::Ready && failure.Error == rhi::StartupError::AdapterUnavailable)
+    {
+        SKIP("No Metal adapter on this host");
+    }
+#endif
+    REQUIRE(started == rhi::DeviceStatus::Ready);
+    rr::OverlayRenderer overlays;
+    const auto initialized = overlays.Initialize(device,
+                                                 ludus::shaders::renderer_overlay::Vertex(),
+                                                 ludus::shaders::renderer_overlay::Fragment());
+    REQUIRE((initialized == rhi::RasterStatus::Ready || initialized == rhi::RasterStatus::Pending));
+    auto setup = initialized;
+    for (usize i = 0; i < 100000 && setup == rhi::RasterStatus::Pending; ++i)
+    {
+        setup = overlays.Poll();
+    }
+    REQUIRE(setup == rhi::RasterStatus::Ready);
+    rr::OverlayList list;
+    ludus::graphics::text::CoverageAtlas atlas;
+    REQUIRE(ludus::qa::BuildL2List(list, atlas) == rhi::RasterStatus::Ready);
+    rhi::TextureHandle texture;
+    const auto published = atlas.Publish(device, texture);
+    REQUIRE((published == rhi::RasterStatus::Ready || published == rhi::RasterStatus::Pending));
+    bool textureReady = false;
+    for (usize i = 0; i < 100000 && !textureReady; ++i)
+    {
+        REQUIRE(overlays.Poll() == rhi::RasterStatus::Ready);
+        const auto status = rhi::GetStatus(device, texture);
+        REQUIRE((status == rhi::RasterStatus::Ready || status == rhi::RasterStatus::Pending));
+        textureReady = status == rhi::RasterStatus::Ready;
+    }
+    REQUIRE(textureReady);
+    rr::PreparedOverlay prepared;
+    REQUIRE(overlays.Prepare(list, texture, prepared) == rhi::RasterStatus::Pending);
+    // Bounded nonblocking poll; native transfer completion may lag submission.
+    bool ready = false;
+    for (usize i = 0; i < 100000 && !ready; ++i)
+    {
+        REQUIRE(overlays.Poll() == rhi::RasterStatus::Ready);
+        const auto status = overlays.GetStatus(prepared);
+        REQUIRE((status == rhi::RasterStatus::Ready || status == rhi::RasterStatus::Pending));
+        ready = status == rhi::RasterStatus::Ready;
+    }
+    REQUIRE(ready);
+    // Logical atlas/CPU release cannot invalidate prepared version.
+    REQUIRE(rhi::Destroy(device, texture) == rhi::RasterStatus::Ready);
+    atlas.Reset();
+    list.Clear();
+    REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Ready);
+    rhi::RasterPassDescription pass;
+    pass.DepthStore = rhi::RasterStore::Store;
+    REQUIRE(rhi::BeginRasterPass(device, pass) == rhi::RasterStatus::Ready);
+    REQUIRE(overlays.Draw(prepared, pass) == rhi::RasterStatus::Ready);
+    rhi::SubmissionToken completion;
+    REQUIRE(rhi::EndFrame(device, completion) == rhi::RasterStatus::Ready);
+    uint8 image[96 * 64 * 4];
+    REQUIRE(rhi::backend::ReadHeadlessPixels(image));
+    const auto color = [&](uint32 x, uint32 y, uint8 red, uint8 green, uint8 blue) {
+        const usize offset = (static_cast<usize>(y) * 96 + x) * 4;
+        CHECK(image[offset] == red);
+        CHECK(image[offset + 1] == green);
+        CHECK(image[offset + 2] == blue);
+    };
+    color(8, 48, 255, 0, 0);
+    // UNorm destination-alpha blend precision differs: llvmpipe gives red 127,
+    // Metal/Chromium give 128. Bound only that observed one-code-value rounding.
+    const usize blend = (usize{48} * 96 + 24) * 4;
+    CHECK(image[blend] >= 127);
+    CHECK(image[blend] <= 128);
+    CHECK(image[blend + 1] == 128);
+    CHECK(image[blend + 2] == 0);
+    color(40, 48, 0, 0, 0);
+    color(80, 4, 255, 255, 255);
+    color(80, 28, 0, 0, 0);
+    color(60, 16, 0, 0, 255);
+    color(32, 16, 0, 0, 0);
+    REQUIRE(overlays.Release(prepared) == rhi::RasterStatus::Ready);
 }

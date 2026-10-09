@@ -232,6 +232,8 @@ struct Renderer::State final
     struct ViewRecord final : SlotIdentity
     {
         rhi::BufferHandle Instances{};
+        rhi::UploadTicket Upload{};
+        bool UploadOwned = false;
         rhi::CommandBatch Retry{};
         bool HasRetry = false;
         usize SnapshotSlot = 0, Visible = 0, DrawCount = 0;
@@ -356,6 +358,11 @@ struct Renderer::State final
         if (view.HasRetry)
         {
             static_cast<void>(rhi::DiscardCommands(Device, view.Retry));
+        }
+        if (view.UploadOwned)
+        {
+            static_cast<void>(rhi::Release(Device, view.Upload));
+            view.UploadOwned = false;
         }
         if (view.Visible != 0)
         {
@@ -1119,6 +1126,27 @@ Status Renderer::Release(Snapshot& handle) noexcept
     handle = {};
     return Status::Ready;
 }
+Status Renderer::ReplaceSnapshot(const SceneItem* items, usize count, Snapshot& current) noexcept
+{
+    if (!mState || Resolve(mState->SnapshotRecords, mState->Owner, current) == nullptr)
+    {
+        return Status::InvalidHandle;
+    }
+    Snapshot replacement;
+    const auto status = CreateSnapshot(items, count, replacement);
+    if (status != Status::Ready)
+    {
+        return status;
+    }
+    const auto released = Release(current);
+    if (released != Status::Ready)
+    {
+        static_cast<void>(Release(replacement));
+        return released;
+    }
+    current = replacement;
+    return Status::Ready;
+}
 Status Renderer::PrepareView(Snapshot handle,
                              const ViewDescription& description,
                              PreparedView& output,
@@ -1281,10 +1309,22 @@ Status Renderer::PrepareView(Snapshot handle,
     if (count != 0)
     {
         const auto bytes = count * sizeof(Instance);
-        status = rhi::CreateBuffer(mState->Device,
-                                   {rhi::BufferRole::Vertex, bytes},
-                                   {reinterpret_cast<const uint8*>(instances), bytes},
-                                   view.Instances);
+        if (description.ScheduledUpload)
+        {
+            status = rhi::RequestBufferUpload(mState->Device,
+                                              {rhi::BufferRole::Vertex, bytes},
+                                              reinterpret_cast<const uint8*>(instances),
+                                              bytes,
+                                              view.Upload);
+            view.UploadOwned = status == Status::Pending;
+        }
+        else
+        {
+            status = rhi::CreateBuffer(mState->Device,
+                                       {rhi::BufferRole::Vertex, bytes},
+                                       {reinterpret_cast<const uint8*>(instances), bytes},
+                                       view.Instances);
+        }
         if (!Accepted(status))
         {
             return status;
@@ -1307,7 +1347,7 @@ Status Renderer::GetStatus(PreparedView handle) const noexcept
     {
         return Status::InvalidHandle;
     }
-    const auto* view = Resolve(mState->ViewRecords, mState->Owner, handle);
+    auto* view = Resolve(mState->ViewRecords, mState->Owner, handle);
     if (view == nullptr)
     {
         return Status::InvalidHandle;
@@ -1317,6 +1357,20 @@ Status Renderer::GetStatus(PreparedView handle) const noexcept
     if (status != Status::Ready)
     {
         return status;
+    }
+    if (view->UploadOwned)
+    {
+        const auto upload = rhi::GetStatus(mState->Device, view->Upload);
+        if (upload != Status::Ready)
+        {
+            return upload;
+        }
+        const auto taken = rhi::TakeUploadedBuffer(mState->Device, view->Upload, view->Instances);
+        if (taken != Status::Ready)
+        {
+            return taken;
+        }
+        view->UploadOwned = false;
     }
     return view->Visible == 0 ? Status::Ready : rhi::GetStatus(mState->Device, view->Instances);
 }

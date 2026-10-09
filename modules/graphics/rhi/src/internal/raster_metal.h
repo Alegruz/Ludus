@@ -184,8 +184,9 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     @autoreleasepool
     {
         MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
-            texture2DDescriptorWithPixelFormat:info.Format == RasterFormat::Rgba8Unorm ? MTLPixelFormatRGBA8Unorm
-                                                                                       : MTLPixelFormatRGBA8Unorm_sRGB
+            texture2DDescriptorWithPixelFormat:info.Format == RasterFormat::R8Unorm      ? MTLPixelFormatR8Unorm
+                                               : info.Format == RasterFormat::Rgba8Unorm ? MTLPixelFormatRGBA8Unorm
+                                                                                         : MTLPixelFormatRGBA8Unorm_sRGB
                                          width:info.Width
                                         height:info.Height
                                      mipmapped:NO];
