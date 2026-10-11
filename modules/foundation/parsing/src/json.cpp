@@ -9,7 +9,7 @@
 #include <yyjson.h>
 
 // Thanks to Tim Bray (editor) and the IETF, "The JavaScript Object Notation
-// (JSON) Data Interchange Format", RFC 8259 (2017), sections 4, 7-9:
+// (JSON) Data Interchange Format", RFC 8259 (2017), sections 2-9 (decoded-key comparison in 8.3):
 // https://www.rfc-editor.org/rfc/rfc8259 . Adopt JSON syntax and decoded-key
 // comparison; duplicate-key rejection and bounded admission are Ludus policies.
 // Thanks to YaoYuan (ibireme) and yyjson contributors, "yyjson 0.10.0",

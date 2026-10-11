@@ -541,9 +541,11 @@ Status ShapeInternal(FontSystem* system,
 
     // Thanks to the HarfBuzz contributors, "Working with HarfBuzz clusters",
     // HarfBuzz Manual: https://harfbuzz.github.io/working-with-harfbuzz-clusters.html .
-    // Preserve input UTF-8 byte clusters through shaping/reordering with level 0;
-    // these are cluster associations, not one glyph per character or a full
-    // paragraph bidi/caret model. See docs/architecture/text-font-rendering-research.md.
+    // Use input UTF-8 byte offsets as cluster values. Level 0 may merge mark/
+    // joiner clusters with the preceding base and retains monotone associations
+    // through shaping/reordering; individual input boundaries need not survive.
+    // This is not a full paragraph bidi/caret model. Research owner:
+    // docs/architecture/text-font-rendering-research.md.
     hb_buffer_set_cluster_level(buffer, HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES);
     hb_buffer_set_direction(buffer,
                             runSpec.TextDirection == Direction::RightToLeft ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
