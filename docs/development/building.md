@@ -408,6 +408,35 @@ out/host-tools/venv/bin/cmake
 
 Run `./init.sh` before pressing the CMake Tools Build button. If the extension still reports `/usr/bin/cmake` or an older CMake version, reload the VS Code window so it picks up `.vscode/settings.json` and the freshly installed managed tools.
 
+After building the native preset you want to edit, select it explicitly:
+
+```bash
+./scripts/setup-editor macos-clang-development # use linux-clang-development on Linux
+```
+
+Install reference `clangd-18` on Linux (`sudo apt-get install clangd-18`); Homebrew
+`llvm@18` supplies it on macOS. Initialization creates its managed shim when
+available. Existing prepared checkouts can rerun initialization to add the shim.
+Then run **clangd: Restart language server**. The tracked clangd launcher uses
+that selection's database with reference LLVM 18 builtin headers and the preset's
+explicit SDK/libc++ paths. It executes no external query driver. It rejects
+missing/stale setup, moved checkouts, wrong-host presets and incomplete source
+inventories. Opening the editor does not download, configure or repair anything.
+
+**Ludus: Select prepared editor preset** performs the same operation. Build,
+test, format, tidy, analyzer, tooling and build-cost tasks use that selection.
+Compiler/tidy diagnostics enter VS Code's Problems panel through `$gcc`.
+CMake Tools maintains its own interactive preset selector: select the same
+preset there, or use the Ludus tasks. Changing that selector alone does not
+change clangd. Browser editing is not admitted by this native launcher.
+
+Selection lives in ignored `out/editor/selection.json`; repair changes only that
+file, preserving custom settings, tasks, launch configurations and user presets.
+After moving tools or the checkout, prepare/build again and rerun setup. Failed
+selection leaves the previous record intact, but the launcher revalidates it
+before use. See the [CI guide](continuous-integration.md#q1-analysis-and-host-tooling)
+for the advisory check rollout and pinned quality-tool preparation.
+
 ## Checks
 
 Run both formatting and targeted clang-tidy:

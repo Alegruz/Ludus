@@ -469,6 +469,7 @@ def configure_system_tool_shims(root: Path, versions: dict[str, dict[str, str]])
         ("ld.lld", (f"ld.lld-{clang_major}", "ld.lld"), minimum["lld"]),
         ("clang-format", (f"clang-format-{clang_major}", "clang-format"), minimum["clang-format"]),
         ("clang-tidy", (f"clang-tidy-{clang_major}", "clang-tidy"), minimum["clang-tidy"]),
+        ("clangd", (f"clangd-{clang_major}", "clangd"), minimum["clang"]),
     ]
 
     for shim_name, candidates, minimum_version in specs:
@@ -1563,9 +1564,12 @@ def compile_database_files(build_dir: Path) -> set[Path]:
         raise EngineError(str(exc)) from exc
 
 
-def run_tidy(root: Path, preset: str) -> None:
+def run_tidy(root: Path, preset: str, *, analyzer: bool = False) -> None:
     versions = load_tool_versions(root)
     clang_tidy = find_system_tool(root, "clang-tidy", versions)
+    actual_version = executable_version(clang_tidy, ("--version",), root)
+    if not version_tuple(actual_version) or version_tuple(actual_version)[0] != llvm_major_version(versions):
+        raise EngineError("Static analysis requires reference clang-tidy 18")
     build_dir = build_dir_for_preset(root, preset)
     if not (build_dir / "compile_commands.json").is_file() or not list(
             (build_dir / ".cmake/api/v1/reply").glob("index-*.json")):
@@ -1575,6 +1579,9 @@ def run_tidy(root: Path, preset: str) -> None:
     except ValueError as exc:
         raise EngineError(str(exc)) from exc
     directory = analysis_directory(root)
+    policy = root / ("config/clang-analyzer.yml" if analyzer else ".clang-tidy")
+    report["analysis"] = {"tool_version": actual_version, "tool_sha256": file_sha256(Path(clang_tidy)),
+                          "policy": str(policy.relative_to(root)), "policy_sha256": file_sha256(policy)}
     (directory / "inventory.json").write_text(json.dumps(report, indent=2) + "\n")
     header_roots = sorted({str(root.resolve()), report["source_root"]})
     header_filter = f"^({'|'.join(re.escape(path) for path in header_roots)})/({'|'.join(TIDY_ROOTS)})/.*"
@@ -1585,8 +1592,9 @@ def run_tidy(root: Path, preset: str) -> None:
         database = directory / "commands" / str(index)
         database.mkdir(parents=True)
         (database / "compile_commands.json").write_text(json.dumps([entry]) + "\n")
+        options = [f"--config-file={root / 'config/clang-analyzer.yml'}"] if analyzer else []
         commands.append([clang_tidy, "-p", database, "--quiet", "--warnings-as-errors=*",
-                         f"--header-filter={header_filter}", entry["file"]])
+                         *options, f"--header-filter={header_filter}", entry["file"]])
     print(f"Analysis inventory: {len(report['sources'])} sources, {len(entries)} compile commands", flush=True)
     run_analysis_commands(root, commands, directory=directory)
 
@@ -1718,7 +1726,10 @@ def command_check(args: argparse.Namespace) -> int:
     root = repo_root()
     # getattr guards callers that build the Namespace by hand (e.g. command_init).
     include_cleaner = getattr(args, "include_cleaner", False)
-    explicit = args.format or args.tidy or include_cleaner
+    analyzer = getattr(args, "analyzer", False)
+    tooling = getattr(args, "tooling", False)
+    inventory_only = getattr(args, "inventory", False)
+    explicit = args.format or args.tidy or include_cleaner or analyzer or tooling or inventory_only
     run_all = args.all or not explicit
 
     if args.format or run_all:
@@ -1727,11 +1738,28 @@ def command_check(args: argparse.Namespace) -> int:
     # needs no configured build.
     if args.format or run_all:
         run_foundational_includes(root)
-    if args.tidy or run_all or include_cleaner:
+    if args.tidy or run_all or include_cleaner or analyzer or inventory_only:
         ensure_bootstrap_for_preset(root, args.preset)
+    if inventory_only:
+        try:
+            entries, report = inventory(root, build_dir_for_preset(root, args.preset))
+        except ValueError as error:
+            raise EngineError(str(error)) from error
+        directory = analysis_directory(root)
+        (directory / "inventory.json").write_text(json.dumps(report, indent=2) + "\n")
+        print(f"Validated source inventory: {len(report['sources'])} sources, {len(entries)} compile commands")
     if args.tidy or run_all:
         cmake_configure(root, args.preset)
         run_tidy(root, args.preset)
+    if analyzer:
+        run_tidy(root, args.preset, analyzer=True)
+    if tooling:
+        from tooling_quality import check
+        try:
+            check(root)
+        except RuntimeError as error:
+            # CLI __main__ and importable engine have distinct exception classes.
+            raise EngineError(str(error)) from error
     # Advisory: only when explicitly requested, never part of --all / the default.
     if include_cleaner:
         cmake_configure(root, args.preset)
@@ -2306,6 +2334,9 @@ def make_parser() -> argparse.ArgumentParser:
     check_parser.add_argument("preset", nargs="?", default=DEFAULT_PRESET)
     check_parser.add_argument("--format", action="store_true", help="verify clang-format")
     check_parser.add_argument("--tidy", action="store_true", help="run targeted clang-tidy")
+    check_parser.add_argument("--analyzer", action="store_true", help="run advisory stable LLVM analyzer rules on the complete configured inventory")
+    check_parser.add_argument("--tooling", action="store_true", help="check Python and workflows with prepared pinned Ruff/actionlint")
+    check_parser.add_argument("--inventory", action="store_true", help="validate complete configured source inventory without running analyzers")
     check_parser.add_argument(
         "--include-cleaner",
         action="store_true",
