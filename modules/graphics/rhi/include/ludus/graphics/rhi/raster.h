@@ -3,6 +3,7 @@
 #include <ludus/foundation/base/types.h>
 
 #include <ludus/graphics/rhi/device.h>
+#include <ludus/graphics/rhi/profile.h>
 #include <ludus/graphics/rhi/render.h>
 
 #include <span>
@@ -164,18 +165,6 @@ struct BufferDescription final
     BufferRole Role = BufferRole::Vertex;
     /// Allocation and initial-content length in bytes; nonzero and bounded by capabilities.
     ludus::foundation::usize Size = 0;
-};
-/// Portable color/data formats; one layer and one sample, with immutable mip chains.
-enum class RasterFormat : ludus::foundation::uint8
-{
-    /// Four unsigned normalized channels, interpreted as linear light.
-    Rgba8Unorm,
-    /// Four unsigned normalized channels; RGB decodes sRGB during sampling, alpha remains linear.
-    Rgba8Srgb,
-    /// Single unsigned normalized coverage/data channel; sampled only, never an attachment.
-    R8Unorm,
-    /// Two normalized linear data channels; sampled only, never an attachment.
-    Rg8Unorm,
 };
 /// Two-dimensional sampled texture or mutable color attachment description.
 struct TextureDescription final
@@ -499,25 +488,13 @@ struct RasterDraw final
     /// Four-byte-aligned command offset, covering IndexedIndirectArguments.
     ludus::foundation::usize IndirectOffset = 0;
 };
-/// Enabled bounded raster profile, published only for a ready device.
-struct RasterCapabilities final
-{
-    /// Maximum bytes per buffer; zero when unavailable.
-    ludus::foundation::usize MaxBufferSize = 0;
-    /// Maximum width/height of sampled textures.
-    ludus::foundation::uint32 MaxTextureDimension2D = 0;
-    /// Uniform range offset alignment in bytes.
-    ludus::foundation::usize UniformOffsetAlignment = 0;
-    /// Maximum bound uniform range in bytes.
-    ludus::foundation::usize MaxUniformRange = 0;
-    /// Maximum records of each resource kind, including retained/detached records.
-    ludus::foundation::uint32 ResourcesPerKind = 0;
-    /// Maximum accepted draws in a frame; exhaustion rejects before native work.
-    ludus::foundation::uint32 DrawsPerFrame = 0;
-};
 /// Query the enabled raster profile. Invalid owner preserves output; non-ready devices
 /// return their state and zero the capability value. All operations are owner-thread only.
 [[nodiscard]] RasterStatus GetRasterCapabilities(DeviceHandle, RasterCapabilities&) noexcept;
+/// Query one known format's enabled uses and limits on the owner thread, including open frames.
+/// Invalid owner or malformed format preserves output. Non-ready devices zero it;
+/// valid but unavailable formats return Unsupported with zero output. No allocation or GPU wait.
+[[nodiscard]] RasterStatus GetFormatCapabilities(DeviceHandle, RasterFormat, FormatCapabilities&) noexcept;
 /// Create a buffer from exactly Size initial bytes; creation is forbidden in an open frame.
 /// Failure preserves a null output. Index content is copied into bounded engine storage
 /// for draw-range checks; vertex/uniform input is consumed by the backend before return.

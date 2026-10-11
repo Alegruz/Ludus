@@ -4,6 +4,10 @@ namespace ludus::graphics::rhi::reference
 {
 inline bool ProfileAvailable = true;
 inline bool ComputeAvailable = true;
+inline bool FormatUnavailable[4]{};
+inline bool FormatBlendUnavailable = false;
+inline bool OverrideRasterLimits = false;
+inline RasterCapabilities RasterLimitOverride;
 inline foundation::usize Dispatches = 0;
 inline RasterStatus ComputeResult = RasterStatus::Ready;
 inline RasterStatus Next = RasterStatus::Ready;

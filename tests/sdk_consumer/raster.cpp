@@ -167,6 +167,16 @@ bool Create() noexcept
     rhi::DeviceInfo info;
     if (rhi::GetDeviceInfo(gDevice, info) != rhi::DeviceStatus::Ready)
         return false;
+    rhi::FormatCapabilities format;
+    if (rhi::GetFormatCapabilities(gDevice, rhi::RasterFormat::Rgba8Unorm, format) != rhi::RasterStatus::Ready ||
+        !format.Uses.Sampled || !format.Uses.Blendable || format.SampleCounts != 1 || format.Uses.Storage ||
+        format.Uses.CopySource || format.Uses.CopyDestination ||
+        info.UnmetProfilePreference.Requirement != rhi::ProfileRequirement::ColorAttachmentCount ||
+        info.UnmetProfilePreference.Requested != 2 || info.UnmetProfilePreference.Available != 1 ||
+        info.UnmetPreferences.Compute == info.Enabled.Compute)
+    {
+        return false;
+    }
     gUseCompute = (mode == 5 || mode == 8) && info.Enabled.Compute;
     if (gUseCompute)
     {
@@ -649,7 +659,19 @@ int main()
 #endif
     rhi::DeviceDescription description;
     description.Required.PortableRaster = true;
+    description.RequiredProfile.Raster.MinBindings = 3;
+    description.RequiredProfile.Raster.MinVertexBuffers = 2;
+    description.RequiredProfile.Raster.MinUniformRange = 48;
+    description.RequiredProfile.FormatCount = 1;
+    description.RequiredProfile.Formats[0] =
+    {
+        .Format = rhi::RasterFormat::Rgba8Unorm,
+        .Uses = { .Sampled = true, .Filterable = true, .ColorAttachment = true, .Blendable = true },
+        .MinDimension2D = 96,
+    };
     description.Required.Compute = Variant() == 7;
+    description.Preferred.Compute = true;
+    description.PreferredProfile.Raster.MinColorAttachments = 2;
     description.Selection = Selection() == 1   ? rhi::BackendSelection::WebGPU
                             : Selection() == 2 ? rhi::BackendSelection::WebGL2
                                                : rhi::BackendSelection::Auto;

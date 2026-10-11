@@ -1,4 +1,6 @@
 #pragma once
+
+#include "profile.h"
 // Included only by the WebGPU backend. Thanks to W3C, WebGPU, sections
 // "Error Scopes" and "GPUQueue" (validation and ordered completion):
 // https://www.w3.org/TR/webgpu/#error-scopes and https://www.w3.org/TR/webgpu/#gpuqueue
@@ -180,6 +182,15 @@ RasterCapabilities RasterLimits() noexcept
             static_cast<uint32>(internal::RASTER_CAPACITY),
             static_cast<uint32>(internal::RASTER_DRAWS)};
 }
+// Thanks to W3C GPU for the Web Working Group, "WebGPU", texture format capabilities.
+// https://www.w3.org/TR/webgpu/#texture-format-caps
+// Intersect guaranteed normalized-format support with Ludus's implemented uses;
+// no storage/copy/MSAA or R8/RG8 attachment path is advertised.
+FormatCapabilities FormatLimits(RasterFormat format) noexcept
+{
+    return gDevice == nullptr ? FormatCapabilities{} : internal::PortableFormatLimits(format, RasterLimits());
+}
+
 ComputeCapabilities ComputeLimits() noexcept
 {
     WGPULimits limits = WGPU_LIMITS_INIT;

@@ -1,4 +1,6 @@
 #pragma once
+
+#include "profile.h"
 // Included only by rhi_webgl.cpp. Thanks to Khronos, OpenGL ES 3.0.6,
 // sections 2.8 (vertex arrays), 2.12.6 (uniform blocks) and 5.2 (sync objects):
 // https://registry.khronos.org/OpenGL/specs/es/3.0/es_spec_3.0.pdf
@@ -235,6 +237,15 @@ RasterCapabilities RasterLimits() noexcept
             static_cast<uint32>(internal::RASTER_CAPACITY),
             static_cast<uint32>(internal::RASTER_DRAWS)};
 }
+// Thanks to Khronos Group, "WebGL 2.0 Specification", texture formats and GLES 3.0 constraints.
+// https://registry.khronos.org/webgl/specs/2.0.0/
+// Intersect guaranteed normalized-format support with Ludus's implemented uses;
+// no storage/copy/MSAA or R8/RG8 attachment path is advertised.
+FormatCapabilities FormatLimits(RasterFormat format) noexcept
+{
+    return gContext <= 0 ? FormatCapabilities{} : internal::PortableFormatLimits(format, RasterLimits());
+}
+
 RasterStatus
 RasterCreateBuffer(usize slot, const BufferDescription& info, std::span<const uint8> bytes, uint32) noexcept
 {

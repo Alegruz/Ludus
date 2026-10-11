@@ -321,6 +321,10 @@ void ComputeBufferBarrier(usize slot, GraphAccessMode access) noexcept
         webgpu::ComputeBufferBarrier(slot, access);
     }
 }
+FormatCapabilities FormatLimits(RasterFormat format) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::FormatLimits(format) : webgpu::FormatLimits(format);
+}
 RasterCapabilities RasterLimits() noexcept
 {
     return gActive == Backend::WebGL2 ? webgl::RasterLimits() : webgpu::RasterLimits();

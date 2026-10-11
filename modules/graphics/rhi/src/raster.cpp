@@ -1,6 +1,7 @@
 #include <ludus/graphics/rhi/graph.h>
 
 #include "internal/lifecycle.h"
+#include "internal/profile.h"
 #include "internal/raster.h"
 
 #include <ludus/foundation/containers/array.hpp>
@@ -470,6 +471,24 @@ RasterStatus CreateBuffer(DeviceHandle device,
         return backend::RasterCreateBuffer(slot, description, bytes, record.Request);
     });
 }
+RasterStatus GetFormatCapabilities(DeviceHandle device, RasterFormat format, FormatCapabilities& output) noexcept
+{
+    if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Rg8Unorm))
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    const auto admission = Admission(device, false);
+    if (admission != RasterStatus::Ready)
+    {
+        if (admission != RasterStatus::InvalidHandle)
+        {
+            output = {};
+        }
+        return admission;
+    }
+    output = internal::CurrentDeviceProfile().Formats[static_cast<usize>(format)];
+    return output.Uses.Sampled ? RasterStatus::Ready : RasterStatus::Unsupported;
+}
 RasterStatus CreateTexture(DeviceHandle device,
                            const TextureDescription& description,
                            const TextureUpload& upload,
@@ -490,6 +509,13 @@ RasterStatus CreateTexture(DeviceHandle device,
                                     description.Format == RasterFormat::Rg8Unorm || description.MipLevels != 1)))
     {
         return RasterStatus::InvalidDescription;
+    }
+    const auto format = internal::CurrentDeviceProfile().Formats[static_cast<usize>(description.Format)];
+    const auto dimension = description.Attachment ? format.MaxAttachmentDimension2D : format.MaxSampledDimension2D;
+    if (!format.Uses.Sampled || !format.Uses.Filterable || (description.Attachment && !format.Uses.ColorAttachment) ||
+        description.Width > dimension || description.Height > dimension || description.MipLevels > format.MaxMipLevels)
+    {
+        return RasterStatus::Unsupported;
     }
     uint32 levels = 1;
     for (uint32 extent = description.Width > description.Height ? description.Width : description.Height; extent > 1;
@@ -910,6 +936,16 @@ ValidatePipeline(DeviceHandle device, const RasterPipelineDescription& descripti
     if (static_cast<uint8>(description.Target) > static_cast<uint8>(RasterTarget::Rgba8Srgb))
     {
         return RasterStatus::InvalidDescription;
+    }
+    if (description.Target != RasterTarget::Surface)
+    {
+        const auto format =
+            description.Target == RasterTarget::Rgba8Unorm ? RasterFormat::Rgba8Unorm : RasterFormat::Rgba8Srgb;
+        const auto capabilities = internal::CurrentDeviceProfile().Formats[static_cast<usize>(format)];
+        if (!capabilities.Uses.ColorAttachment || (description.Blend && !capabilities.Uses.Blendable))
+        {
+            return RasterStatus::Unsupported;
+        }
     }
     info.Blend = description.Blend;
     info.Target = description.Target;

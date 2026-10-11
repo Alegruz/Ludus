@@ -2,6 +2,7 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/graphics/rhi/profile.h>
 #include <ludus/platform/native_window.h>
 
 #include <string>
@@ -82,6 +83,8 @@ struct AttemptInfo final
 {
     bool Attempted = false;
     StartupError Error = StartupError::None;
+    /// Required profile failure for this browser attempt; None for other outcomes.
+    ProfileDiagnostic ProfileFailure;
 };
 // Effective limits of the implemented fullscreen API, not raw adapter limits.
 // Available only while Ready; zero in all other states. Sizes are bytes.
@@ -113,6 +116,8 @@ enum class RequirementFailure : ludus::foundation::uint8
     PortableRaster,
     /// Required buffer compute/indirect profile is unavailable on this backend.
     Compute,
+    /// A required general raster/compute limit or format/use constraint was unmet.
+    Profile,
 };
 struct StartupInfo final
 {
@@ -128,6 +133,8 @@ struct StartupInfo final
     DeviceRequirements Requirements;
     // First unmet requirement of the final attempt; None for other failures.
     RequirementFailure UnmetRequirement = RequirementFailure::None;
+    /// First unmet required profile constraint of the final attempt; preserved on failure.
+    ProfileDiagnostic ProfileFailure;
 };
 // Duplicate Start is Busy until Shutdown, including failed/lost sessions.
 // The two-argument form selects Auto on the browser and Vulkan natively.

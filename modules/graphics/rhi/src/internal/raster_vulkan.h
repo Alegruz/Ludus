@@ -1,4 +1,6 @@
 #pragma once
+
+#include "profile.h"
 // Private implementation included only by rhi_vulkan.cpp. Thanks to AMD GPUOpen,
 // "Vulkan Memory Allocator 3.3.0", Quick start and Memory mapping (flush alignment),
 // https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/memory_mapping.html
@@ -269,6 +271,101 @@ VkFormat RasterPixelFormat(RasterFormat format) noexcept
                                                 : VK_FORMAT_R8G8B8A8_SRGB;
 }
 } // namespace
+// Thanks to Khronos Group, "Vulkan Specification", Formats and
+// vkGetPhysicalDeviceImageFormatProperties: query the actual combined image usage,
+// not only individual feature bits. Keep Vulkan 1.1 and engine profile bounds.
+// https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceImageFormatProperties.html
+FormatCapabilities FormatLimits(RasterFormat format) noexcept
+{
+    if (gPhysical == VK_NULL_HANDLE || static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Rg8Unorm))
+    {
+        return {};
+    }
+    const auto pixel = RasterPixelFormat(format);
+    VkFormatProperties properties{};
+    vkGetPhysicalDeviceFormatProperties(gPhysical, pixel, &properties);
+    constexpr VkFormatFeatureFlags required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                              VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+                                              VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+    if ((properties.optimalTilingFeatures & required) != required)
+    {
+        return {};
+    }
+    constexpr VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    VkImageFormatProperties sampled{};
+    if (vkGetPhysicalDeviceImageFormatProperties(gPhysical,
+                                                 pixel,
+                                                 VK_IMAGE_TYPE_2D,
+                                                 VK_IMAGE_TILING_OPTIMAL,
+                                                 usage,
+                                                 0,
+                                                 &sampled) != VK_SUCCESS ||
+        (sampled.sampleCounts & VK_SAMPLE_COUNT_1_BIT) == 0)
+    {
+        return {};
+    }
+    auto result = internal::PortableFormatLimits(format, RasterLimits());
+    if (sampled.maxExtent.width < result.MaxSampledDimension2D)
+    {
+        result.MaxSampledDimension2D = sampled.maxExtent.width;
+    }
+    if (sampled.maxExtent.height < result.MaxSampledDimension2D)
+    {
+        result.MaxSampledDimension2D = sampled.maxExtent.height;
+    }
+    uint32 extentMips = 1;
+    for (auto extent = result.MaxSampledDimension2D; extent > 1; extent >>= 1U)
+    {
+        ++extentMips;
+    }
+    if (extentMips < result.MaxMipLevels)
+    {
+        result.MaxMipLevels = extentMips;
+    }
+    if (sampled.maxMipLevels < result.MaxMipLevels)
+    {
+        result.MaxMipLevels = sampled.maxMipLevels;
+    }
+    VkImageFormatProperties color{}, depth{};
+    const bool attachment = result.Uses.ColorAttachment &&
+                            (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0 &&
+                            vkGetPhysicalDeviceImageFormatProperties(gPhysical,
+                                                                     pixel,
+                                                                     VK_IMAGE_TYPE_2D,
+                                                                     VK_IMAGE_TILING_OPTIMAL,
+                                                                     usage | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                                                                     0,
+                                                                     &color) == VK_SUCCESS &&
+                            vkGetPhysicalDeviceImageFormatProperties(gPhysical,
+                                                                     VK_FORMAT_D32_SFLOAT,
+                                                                     VK_IMAGE_TYPE_2D,
+                                                                     VK_IMAGE_TILING_OPTIMAL,
+                                                                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                                                                     0,
+                                                                     &depth) == VK_SUCCESS &&
+                            (color.sampleCounts & depth.sampleCounts & VK_SAMPLE_COUNT_1_BIT) != 0;
+    result.Uses.ColorAttachment = attachment;
+    result.Uses.Blendable =
+        attachment && (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT) != 0;
+    result.SampleCounts = attachment ? 1U : 0U;
+    result.MaxAttachmentDimension2D = attachment ? result.MaxSampledDimension2D : 0;
+    VkPhysicalDeviceProperties device{};
+    vkGetPhysicalDeviceProperties(gPhysical, &device);
+    const uint32 bounds[]{color.maxExtent.width,
+                          color.maxExtent.height,
+                          depth.maxExtent.width,
+                          depth.maxExtent.height,
+                          device.limits.maxFramebufferWidth,
+                          device.limits.maxFramebufferHeight};
+    for (const auto bound : bounds)
+    {
+        if (bound < result.MaxAttachmentDimension2D)
+        {
+            result.MaxAttachmentDimension2D = bound;
+        }
+    }
+    return result;
+}
 RasterCapabilities RasterLimits() noexcept
 {
     VkPhysicalDeviceProperties properties{};

@@ -197,8 +197,77 @@ The reference-backend lifecycle suite tests admission, copied requirements,
 output preservation, cancellation, late completions, fallback generations,
 cross-owner misuse, loss and non-wrapping owner exhaustion. R1/R2 add typed
 slot/generation resources, retained command batches and deferred retirement;
-R3 adds ordered graph compilation. Broader feature/format/limit negotiation and
-independent devices/surfaces remain [architecture extensions](../architecture/rhi-gdi.md#remaining-work-and-decision-gates).
+R3 adds ordered graph compilation. [Profile negotiation](#profile-format-and-limit-negotiation)
+adds enabled limit/format admission; independent devices/surfaces remain [architecture extensions](../architecture/rhi-gdi.md#remaining-work-and-decision-gates).
+
+### Profile, format and limit negotiation
+
+`DeviceDescription::RequiredProfile` adds copied raster, compute and format
+constraints to the existing workload flags and fullscreen minima. Admission checks
+the selected backend's enabled limits before publishing Ready and before resource
+creation. Every Auto fallback attempt checks the same copied request. A nonzero
+required raster constraint or format request implies portable raster admission;
+a nonzero compute constraint implies compute admission. A forced WebGL 2 compute
+requirement rejects before launching startup.
+
+```cpp
+rhi::DeviceDescription description;
+description.RequiredProfile.Raster.MinBindings = 3;
+description.RequiredProfile.Raster.MinVertexBuffers = 2;
+description.RequiredProfile.Raster.MinUniformRange = 48;
+description.RequiredProfile.Raster.MaxUniformOffsetAlignment = 256;
+description.RequiredProfile.FormatCount = 1;
+description.RequiredProfile.Formats[0] =
+{
+    .Format = rhi::RasterFormat::Rgba8Unorm,
+    .Uses = { .Sampled = true, .Filterable = true, .ColorAttachment = true, .Blendable = true },
+    .MinDimension2D = 96,
+};
+```
+
+Zero limit fields impose no additional constraint. `Min*` fields ask for at least
+that effective capacity; `MaxUniformOffsetAlignment` and
+`MaxStorageOffsetAlignment` ask for an alignment no larger than that value.
+Workgroup axis limits and invocation product are independent bounds, not a promise
+that every combination fits. Limits are not memory reservations: resource creation
+still checks dimensions, mip packing, aggregate upload size and allocation errors.
+
+While Ready, `DeviceInfo::Profile` contains the immutable raster/interface/compute
+limits and four `FormatCapabilities` entries indexed by `RasterFormat`. Include
+`profile.h` to use the profile vocabulary directly, or `raster.h` to call
+`GetFormatCapabilities(device, format, output)`. Invalid owners or malformed format
+enums preserve query output; pending, failed or lost devices zero it. A known but
+unavailable format returns Unsupported with zero output. `DeviceInfo` profile
+snapshots are also zero outside Ready, so an earlier ready snapshot must not be
+used after loss/restart.
+
+Format use flags describe implemented operations. All supported formats allow
+complete sampled views and linear filtering. Only RGBA8 linear/sRGB support the
+current single-color/private-depth attachment and blend path, within backend
+format limits. R8/RG8 remain sampled only. SampleCounts is a bit mask (value 1 for
+one sample); MSAA is not enabled. Storage and general texture copy source/destination
+uses remain false, even if the native driver supports them. Creation uploads and
+frame readback do not constitute general texture-copy APIs. Vulkan checks the
+combined sampled/upload/attachment usage and private-depth bounds; portable
+backends intersect their guaranteed normalized formats with Ludus's implemented
+profile. Texture and offscreen pipeline creation enforce the admitted snapshot.
+
+A request contains up to four unique format entries; invalid format values, counts,
+duplicates, empty use sets or invalid sample counts return InvalidDescription
+without launching a backend or publishing outputs. A required constraint miss
+reports `StartupError::RequirementsUnsatisfied`, `RequirementFailure::Profile`
+and `StartupInfo::ProfileFailure`. That bounded diagnostic records the first
+unmet field, requested/effective bound, format and axis where relevant. Browser
+attempt records retain their own profile failure; a successful fallback clears the
+final failure while preserving the first attempt's reason.
+
+`PreferredProfile` uses the same vocabulary without failing admission or elevating
+limits. Inspect `DeviceInfo::UnmetProfilePreference` for its first unmet constraint
+and `UnmetPreferences` for unavailable preferred workload flags. These diagnostics
+are valid only while Ready. Supported/Enabled remain implemented operations on
+the enabled device; this API does not enumerate raw adapter maxima or enable a
+feature based on its backend name. The pinned WebGPU default-device request policy
+is preserved. Independent devices/surfaces remain a separate extension.
 
 ### Compatibility facade
 
