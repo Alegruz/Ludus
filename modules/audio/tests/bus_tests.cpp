@@ -67,9 +67,10 @@ float32 RenderPeak(AudioSystem& sys, uint32 busIndex, ClipHandle clip)
     float32 peak = 0.0F;
     for (uint32 f = 0; f < frames; ++f)
     {
-        peak = std::max({peak,
-                         std::fabs(out[static_cast<std::size_t>(f) * 2]),
-                         std::fabs(out[static_cast<std::size_t>(f) * 2 + 1])});
+        const float32 left = std::fabs(out[static_cast<ludus::foundation::usize>(f) * 2]);
+        const float32 right = std::fabs(out[static_cast<ludus::foundation::usize>(f) * 2 + 1]);
+        peak = left > peak ? left : peak;
+        peak = right > peak ? right : peak;
     }
     return peak;
 }
