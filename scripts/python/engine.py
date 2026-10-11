@@ -71,6 +71,10 @@ BOOTSTRAP_INPUTS = (
     "config/conan/profiles/macos-clang-x86_64",
     "conanfile.py",
     "conan.lock",
+    "third_party/catch2/conanfile.py",
+    "tests/support/prepare_catch_headers.py",
+    "tests/support/catch_stream.hpp",
+    "tests/support/catch_stream.cpp",
     "CMakePresets.json",
 )
 
@@ -1068,7 +1072,7 @@ def clang_cxx(root: Path) -> Path:
 # the exact version the engine requires. These are exported into the project
 # Conan cache before the lockfile is resolved so the graph can see them. See
 # third_party/<name>/conanfile.py and the text/font rendering design (section 2).
-LOCAL_CONAN_RECIPES: tuple[str, ...] = ("third_party/harfbuzz",)
+LOCAL_CONAN_RECIPES: tuple[str, ...] = ("third_party/harfbuzz", "third_party/catch2")
 
 
 def export_local_recipes(root: Path) -> None:

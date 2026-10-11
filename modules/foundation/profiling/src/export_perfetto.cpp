@@ -5,8 +5,8 @@
 #include "internal/trace_event.hpp"
 
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/stable_sort.hpp>
 
-#include <algorithm>
 #include <cstdio>
 #include <string>
 
@@ -201,14 +201,24 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
         return false;
     }
 
-    // Pointer iterators are contiguous, so std::stable_sort works unchanged.
-    std::stable_sort(events.begin(), events.end(), [](const FlatEvent& a, const FlatEvent& b) noexcept {
-        if (a.ThreadId != b.ThreadId)
-        {
-            return a.ThreadId < b.ThreadId;
-        }
-        return a.Ticks < b.Ticks;
-    });
+    foundation::Array<FlatEvent> scratch;
+    if (!scratch.TryResize(events.GetSize()))
+    {
+        return false;
+    }
+    if (!foundation::StableSort(events.GetData(),
+                                scratch.GetData(),
+                                events.GetSize(),
+                                [](const FlatEvent& a, const FlatEvent& b) noexcept {
+                                    if (a.ThreadId != b.ThreadId)
+                                    {
+                                        return a.ThreadId < b.ThreadId;
+                                    }
+                                    return a.Ticks < b.Ticks;
+                                }))
+    {
+        return false;
+    }
 
     std::string out;
     out.reserve(events.size() * 96 + 256);

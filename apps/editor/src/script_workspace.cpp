@@ -1,6 +1,9 @@
 #include "internal/script_workspace.h"
 
 #include <ludus/foundation/base/types.h>
+#include <ludus/foundation/containers/sort.hpp>
+
+#include <utility>
 
 #include <QAbstractItemDelegate>
 #include <QApplication>
@@ -28,9 +31,6 @@
 #include <QTextDocument>
 #include <QTextEdit>
 #include <QVBoxLayout>
-
-#include <algorithm>
-#include <utility>
 
 namespace ludus::editor
 {
@@ -194,10 +194,16 @@ void ScriptWorkspace::SetProject(const QString& root, const QString& source, con
     Dirty_ = false;
     Sidecar_ = Object(Read(QDir(root).filePath(QStringLiteral("ludus.scripts.json"))));
     const auto name = Sidecar_.value(QStringLiteral("name")).toString();
-    const bool nameValid = !name.isEmpty() && name.size() <= 64 && name.at(0).isLetter() &&
-                           std::all_of(name.begin(), name.end(), [](QChar c) {
-                               return c.unicode() < 128 && (c.isLetterOrNumber() || c == QLatin1Char('_'));
-                           });
+    const bool nameValid = !name.isEmpty() && name.size() <= 64 && name.at(0).isLetter() && [&name]() {
+        for (QChar c : name)
+        {
+            if (c.unicode() >= 128 || (!c.isLetterOrNumber() && c != QLatin1Char('_')))
+            {
+                return false;
+            }
+        }
+        return true;
+    }();
     if (Sidecar_.size() != 4 || Sidecar_.value(QStringLiteral("version")).toInt() != 1 || !nameValid ||
         Within(root, Sidecar_.value(QStringLiteral("contract")).toString()).isEmpty())
     {
@@ -545,10 +551,12 @@ bool ScriptWorkspace::MapsMatch() const
         for (const auto& key : {QStringLiteral("nodes"), QStringLiteral("variables")})
         {
             auto entries = value.value(key).toArray().toVariantList();
-            std::sort(entries.begin(), entries.end(), [](const QVariant& a, const QVariant& b) {
-                return a.toMap().value(QStringLiteral("id")).toString() <
-                       b.toMap().value(QStringLiteral("id")).toString();
-            });
+            foundation::Sort(entries.data(),
+                             static_cast<foundation::usize>(entries.size()),
+                             [](const QVariant& a, const QVariant& b) {
+                                 return a.toMap().value(QStringLiteral("id")).toString() <
+                                        b.toMap().value(QStringLiteral("id")).toString();
+                             });
             value.insert(key, QJsonArray::fromVariantList(entries));
         }
         bytes = QJsonDocument(value).toJson(QJsonDocument::Compact);
@@ -637,9 +645,17 @@ void ScriptWorkspace::Refresh()
     const auto pointer = Object(Read(QDir(output).filePath(QStringLiteral("current.json"))));
     const auto key = pointer.value(QStringLiteral("key")).toString();
     Evidence_ = {};
-    if (key.size() == 64 && std::all_of(key.begin(), key.end(), [](QChar c) {
-            return (c >= QLatin1Char('0') && c <= QLatin1Char('9')) || (c >= QLatin1Char('a') && c <= QLatin1Char('f'));
-        }))
+    if (key.size() == 64 && [&key]() {
+            for (QChar c : key)
+            {
+                if (!((c >= QLatin1Char('0') && c <= QLatin1Char('9')) ||
+                      (c >= QLatin1Char('a') && c <= QLatin1Char('f'))))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }())
     {
         Evidence_ = Object(Read(Within(output, key + QStringLiteral("/evidence.json"))));
     }

@@ -1,11 +1,13 @@
 #include "internal/world.h"
 
+#include <ludus/foundation/containers/sort.hpp>
+#include <ludus/foundation/math/scalar.hpp>
 #include <ludus/foundation/profiling/profiling.hpp>
 
-#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <limits>
+
 namespace ludus::world_demo
 {
 namespace
@@ -110,7 +112,7 @@ Status GameWorld::Prepare(const Level& level, uint32 capacity) noexcept
         return status;
     }
     mLevel = level;
-    std::sort(mLevel.Entities, mLevel.Entities + mLevel.EntityCount, [](const Recipe& first, const Recipe& second) {
+    foundation::Sort(mLevel.Entities, mLevel.EntityCount, [](const Recipe& first, const Recipe& second) {
         return first.Id.View() < second.Id.View();
     });
     return Status::Success;
@@ -370,8 +372,8 @@ void GameWorld::Intent(TickInput input) noexcept
     {
         if (!motion->Override)
         {
-            motion->Velocity = {std::clamp(input.Axis.X, -1.0F, 1.0F) * motion->Speed,
-                                std::clamp(input.Axis.Y, -1.0F, 1.0F) * motion->Speed};
+            motion->Velocity = {foundation::math::Clamp(input.Axis.X, -1.0F, 1.0F) * motion->Speed,
+                                foundation::math::Clamp(input.Axis.Y, -1.0F, 1.0F) * motion->Speed};
         }
     }
     const auto owners = mEnemies.GetOwners();
@@ -455,9 +457,9 @@ void GameWorld::MoveAndCollide() noexcept
                     position = center + extent + size;
                 }
             }
-            position = std::clamp(position,
-                                  (axis == 0 ? mLevel.Minimum.X + half.X : mLevel.Minimum.Y + half.Y),
-                                  (axis == 0 ? mLevel.Maximum.X - half.X : mLevel.Maximum.Y - half.Y));
+            position = foundation::math::Clamp(position,
+                                               (axis == 0 ? mLevel.Minimum.X + half.X : mLevel.Minimum.Y + half.Y),
+                                               (axis == 0 ? mLevel.Maximum.X - half.X : mLevel.Maximum.Y - half.Y));
             transform->Current = proposed;
         }
     }
@@ -488,7 +490,7 @@ void GameWorld::MoveAndCollide() noexcept
         }
         exit->Touching = touching;
     }
-    std::sort(mContacts, mContacts + mContactCount, [&](const ContactEvent& first, const ContactEvent& second) {
+    foundation::Sort(mContacts, mContactCount, [&](const ContactEvent& first, const ContactEvent& second) {
         const auto a = mRegistry.GetCreationSequence(first.First);
         const auto b = mRegistry.GetCreationSequence(second.First);
         return a != b ? a < b
@@ -547,7 +549,7 @@ Status GameWorld::Gameplay(TickInput input, Name& nextLevel) noexcept
             {
                 enemies[count++] = entity;
             }
-            std::sort(enemies, enemies + count, [&](EntityId first, EntityId second) {
+            foundation::Sort(enemies, count, [&](EntityId first, EntityId second) {
                 return mRegistry.GetCreationSequence(first) < mRegistry.GetCreationSequence(second);
             });
             for (usize index = 0; index < count; ++index)
@@ -570,7 +572,7 @@ Status GameWorld::Gameplay(TickInput input, Name& nextLevel) noexcept
     {
         enemies[count++] = entity;
     }
-    std::sort(enemies, enemies + count, [&](EntityId first, EntityId second) {
+    foundation::Sort(enemies, count, [&](EntityId first, EntityId second) {
         return mRegistry.GetCreationSequence(first) < mRegistry.GetCreationSequence(second);
     });
     for (usize index = 0; index < count; ++index)
@@ -741,7 +743,7 @@ Status GameWorld::RunTick(TickInput input) noexcept
     auto& trace = mTrace[mTraceNext];
     trace = { .Tick = mTick + 1, .Input = input, .Completions = mCompletionCount };
     mTraceNext = (mTraceNext + 1) % 64;
-    mTraceCount = std::min(mTraceCount + 1, static_cast<usize>(64));
+    mTraceCount = foundation::math::Min(mTraceCount + 1, static_cast<usize>(64));
     mPhase = Phase::BeginTick;
     mStagedCount = 0;
     mOutcomeCount = 0;
@@ -751,7 +753,7 @@ Status GameWorld::RunTick(TickInput input) noexcept
     }
     const auto completionCount = mCompletionCount;
     mCompletionCount = 0;
-    std::sort(mCompletions, mCompletions + completionCount, [](const Completion& first, const Completion& second) {
+    foundation::Sort(mCompletions, completionCount, [](const Completion& first, const Completion& second) {
         return first.Request < second.Request;
     });
     for (usize index = 0; index < completionCount; ++index)
@@ -912,7 +914,7 @@ bool GameWorld::Extract(float32 alpha,
             entities[count++] = entity;
         }
     }
-    std::sort(entities, entities + count, [&](EntityId first, EntityId second) {
+    foundation::Sort(entities, count, [&](EntityId first, EntityId second) {
         return mRegistry.GetCreationSequence(first) < mRegistry.GetCreationSequence(second);
     });
     for (usize index = 0; index < count; ++index)
@@ -964,7 +966,7 @@ uint64 GameWorld::GetReplayHash() const noexcept
             requests[requestCount++] = request;
         }
     }
-    std::sort(requests, requests + requestCount, [](const RequestLease& first, const RequestLease& second) {
+    foundation::Sort(requests, requestCount, [](const RequestLease& first, const RequestLease& second) {
         return first.Id < second.Id;
     });
     mix(requestCount);
@@ -1022,7 +1024,7 @@ uint64 GameWorld::GetReplayHash() const noexcept
     {
         entities[count++] = entity;
     }
-    std::sort(entities, entities + count, [&](EntityId first, EntityId second) {
+    foundation::Sort(entities, count, [&](EntityId first, EntityId second) {
         return mRegistry.GetCreationSequence(first) < mRegistry.GetCreationSequence(second);
     });
     mix(count);
@@ -1118,8 +1120,8 @@ Status TickDriver::Advance(GameWorld& world, float64 delta, TickInput input, boo
         return Status::Success;
     }
     mInput.Sample(input);
-    mDiscarded += std::max(0.0, delta - 0.25);
-    mDebt += std::min(delta, 0.25);
+    mDiscarded += foundation::math::Max(0.0, delta - 0.25);
+    mDebt += foundation::math::Min(delta, 0.25);
     usize count = 0;
     while (mDebt + 1e-12 >= TickDuration && count < 4)
     {
@@ -1129,7 +1131,7 @@ Status TickDriver::Advance(GameWorld& world, float64 delta, TickInput input, boo
             SetMode(Mode::Faulted);
             return status;
         }
-        mDebt = std::max(0.0, mDebt - TickDuration);
+        mDebt = foundation::math::Max(0.0, mDebt - TickDuration);
         ++count;
     }
     if (mDebt >= TickDuration)

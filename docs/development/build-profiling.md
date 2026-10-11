@@ -289,3 +289,35 @@ aggregate policy. All per-header limits, overrides, exclusions, profile inputs
 and tests remain unchanged. No performance improvement is claimed. Verify the
 next full CI profile and tighten the aggregate when repeated comparable runs
 support doing so.
+
+## PR 204 standard-format dependency cleanup
+
+The [PR 204 build-budget job](https://github.com/Alegruz/Ludus/actions/runs/38178357133/job/114585651898)
+measured 343.9 seconds of summed frontend parsing against the unchanged 320-second
+budget, with 1376 compile edges and two uncached jobs. Ranked project headers
+passed; the aggregate failed. Catch2's unconditional chrono stringification
+spread `<chrono>` to 135 compilations (55.148 seconds of inclusive header time).
+The report also measured 137 instantiations each of narrow and wide `vformat_to`,
+20.181 and 15.344 seconds respectively. These timings overlap; do not add them
+or treat them as predicted savings.
+
+Repository-owned `<format>` includes and standard-format calls are banned,
+including test fixtures and the independent WebGPU probe. File-sink filenames
+and logging fixture names use the existing bounded Ludus formatter. Production
+sorting uses Ludus heap/merge sorting; min/max/clamp use scalar helpers or
+local comparisons, and fixed buffer copy/fill uses loops.
+
+The pinned local Catch2 3.4.0 recipe rebuilds the test runtime with its adapted
+headers, preserving licenses and the assertion model. Its stream insertions
+compile behind a test-only boundary and chrono printers are available through
+explicit `<catch2/catch_chrono_stringmaker.hpp>`. No binary built against the old
+inline definitions is mixed with the adapted test headers. The dependency's
+private runtime includes remain in its normal dependency build; every engine
+and test translation unit remains in the existing profile, without a PCH or
+a budget increase. `./init.sh --with-tests` prepares this recipe; stale upstream
+packages fail configuration with a repair instruction. Value-printing and
+intentional-failure regressions verify diagnostics and failing exit codes.
+
+`python tools/check_build_time_includes.py` runs before CI compilation and rejects
+standard formatting in owned sources and heavy headers in public module headers.
+Concepts, traits and explicitly approved low-level operations remain permitted.
