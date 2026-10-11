@@ -1,8 +1,9 @@
 # Resource manager architecture
 
 Status: Stage 1 AudioContent integration and the Stage 2 fixed-capacity native
-coordinator are implemented. Cooking, replacement transactions, required DAGs,
-additional consumer adapters and streaming below remain proposals. The initial
+coordinator and Stage 3 immutable CPU mesh consumer are implemented. Cooking,
+replacement transactions, required DAGs, GPU residency adapters and streaming
+below remain proposals. The initial
 review used repository HEAD `144a708` on 2026-10-04. Stage 2 implementation and
 bounded acceptance are described below; no performance improvement is claimed.
 
@@ -193,6 +194,55 @@ identity, overflow admission and delayed cleanup. Native audio tests withhold wo
 exit while proving shared installation/cancellation and retain budget until an
 actual submitted voice reaches terminal acknowledgment. These are correctness
 acceptance tests, not cold/warm latency or workload benchmarks.
+
+## Implemented Stage 3 profile
+
+[`MeshDefinitionAdapter`](../../modules/runtime/resources/include/ludus/runtime/resources/mesh.h),
+exported by the existing `Ludus::Resources` component, prepares immutable CPU
+triangle geometry for a second consumer. Content catalog kind `mesh` keeps
+exact ID/path/type matching. The coordinator implementation is unchanged; audio
+and mesh readiness, cancellation and retirement remain adapter-owned.
+
+Compose at most 16 `MeshSource` records explicitly. Initialize validates topology,
+finite positions/UVs and finite nonzero optional normals, copies source metadata,
+and borrows the arrays. Keep those arrays immutable and alive until adapter
+destruction. Limits are 4096 vertices and 12288 triangle-list indices per source,
+with at most 16 candidate/resident slots. No file decoder, mesh binary schema,
+PBRT/FBX/glTF importer or filesystem worker is implied. Tools or application
+composition supply prepared arrays; source paths are labels, not runtime reads.
+
+Resolve and BeginAcquire remain free of adapter preparation. Owner-side Service
+allocates candidate arrays explicitly at Begin, then Poll copies at most 128
+vertices and 384 indices per visit. Complete arrays publish together. Equal
+requests share one copy; cancellation drops only its caller. The largest source's
+array byte size is reserved per operation, conservatively overcharging smaller
+meshes. Borrowed source memory, adapter control storage (reported by ControlBytes),
+allocator bookkeeping and renderer/GPU copies are outside that reservation.
+Allocation can occupy a cold owner turn; record bounds are not measured time bounds.
+
+Borrow with `content::Kind::Mesh`, then pass the `MeshDefinition` arrays to
+`Renderer::CreateMesh` while holding the lease. The renderer copies them before
+returning Ready/Pending. Release the CPU lease and service its retirement; renderer
+mesh/snapshot/view and submitted RHI uses retain independently owned GPU versions.
+CPU reservation release is therefore proof of CPU-copy cleanup only, never GPU
+completion. GPU readiness still uses Renderer::GetStatus. Release renderer owners
+and let RHI prove accepted-use retirement through its existing completion services.
+
+A native mixed-adapter regression holds the sound worker before its read while a
+mesh becomes ready through the same manager, then lets sound acquisition finish.
+The public-only installed-SDK renderer fixture creates its quad and triangle through
+resource leases, destroys CPU resource ownership before drawing, and preserves its
+existing image oracle. Production renderer/RHI tests delay queue completion after
+CPU teardown. The portable in-memory mesh adapter has no native worker dependency;
+browser acceptance uses the same SDK fixture.
+
+This is the Stage 3 exit, not complete reference-scene support. Next implement
+required mesh/material/texture dependencies and activation (Stage 4), offline
+conversion/artifact manifests (Stage 5), and larger measured bounded capacities.
+Texture/material resource adapters and GPU residency accounting remain separate
+work. Stage 2's 64 assets/16 versions and the renderer's own limits still apply.
+Reinitialize an adapter only after all managers using its previous descriptor have
+completed shutdown; a new profile needs new copied descriptors and reservations.
 
 ## Identity and lifetime
 
@@ -764,7 +814,7 @@ The review describes design inspiration; it does not supply copied implementatio
 | --- | --- |
 | 1 (implemented) | Audit existing AudioContent request/lease/session boundaries, joining cancellation, and ownership provenance; preserve version-1 fixtures and its cache/retirement behavior. Establish a tested nonblocking integration boundary before exposing the new runtime API. |
 | 2 (implemented) | Fixed-capacity coordinator, one owner, exact-ID lookup, scoped requests, deduplicated operations, lease tokens, durable result records, and explicit budgets. Demonstrate two callers acquiring one sound with independent cancellation. |
-| 3 | Add a second demonstrated consumer, initially immutable game definitions or existing shaders. Prove different readiness/retirement adapters share the core without new special-case branches. Keep one-pending AudioContent limitations visible until separately extended. |
+| 3 (implemented) | Immutable CPU mesh definitions demonstrate a second consumer, bounded staged copies, immediate CPU retirement, mixed native sound/mesh acquisition and an installed-SDK renderer handoff. Renderer/RHI separately own copied GPU data; no graphics-specific branch enters the coordinator. One-pending AudioContent limits remain. |
 | 4 | Add transactional replacement and required DAG scheduling. Prove diamond sharing, parent/child replacement coherence, last-good retention, and physical retirement. |
 | 5 | Add cooker dependency manifests, exact artifact keys, dump tooling, deterministic release publication, and optional independently chunked packs. Measure against loose files. |
 | 6 | Add actual mip/LOD/chunk streaming after RHI capabilities exist; implement trace-driven layout, deadlines, and alternative cache policy only with representative evidence. |

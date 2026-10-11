@@ -20,8 +20,8 @@ if(LUDUS_BUILD_TESTS)
     # Exercise the production renderer/RHI registry with the existing deterministic backend.
     add_executable(ludus_renderer_tests tests/renderer_tests.cpp tests/reference_backend.cpp src/renderer.cpp src/views.cpp src/overlays.cpp src/lighting.cpp tests/views_tests.cpp
         ../rhi/src/rhi.cpp ../rhi/src/device.cpp ../rhi/src/raster.cpp ../rhi/tests/reference_raster.cpp)
-    target_include_directories(ludus_renderer_tests PRIVATE include ../rhi/include ../rhi/src ../rhi/tests)
-    target_link_libraries(ludus_renderer_tests PRIVATE Ludus::Platform Ludus::FoundationContainers Ludus::FoundationMath Catch2::Catch2WithMain)
+    target_include_directories(ludus_renderer_tests PRIVATE include ../rhi/include ../rhi/src ../rhi/tests "${PROJECT_SOURCE_DIR}/tests/sdk_consumer")
+    target_link_libraries(ludus_renderer_tests PRIVATE Ludus::Platform Ludus::FoundationContainers Ludus::FoundationMath Ludus::Resources Catch2::Catch2WithMain)
     target_compile_options(ludus_renderer_tests PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang,GNU>:-ffp-contract=off>)
     ludus_apply_project_defaults(ludus_renderer_tests)
     ludus_enable_test_exceptions(ludus_renderer_tests)

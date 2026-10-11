@@ -81,8 +81,12 @@ parent segments, backslash or absolute prefix. Resolve under the canonical conte
 root and reject symlink escapes too. Files must be regular files. Do not interpret
 IDs as paths. Catalog entries can move without changing IDs.
 
-Version 1 accepts only the three kinds above. Future level catalogs may share
-this identity policy through a versioned extension; this package does not silently
+Version 1 now also accepts `mesh` for Stage 3 immutable CPU geometry. Existing
+three-kind catalogs retain their byte/schema behavior; older readers reject this
+new kind explicitly. A mesh path is a normalized identity/source label in the
+initial in-memory adapter, not a file-format or runtime-import promise. See the
+[implemented mesh profile](resource-management.md#implemented-stage-3-profile).
+Future level catalogs may share this identity policy through a versioned extension; this package does not silently
 change the game-owned level schema. A game binding validates that a level's audio
 key names the required sound/music kind. Numeric resource indices are resolved
 on the cold path and never persisted as authored identity.

@@ -166,9 +166,10 @@ private:
 /// Resource category recorded in the authored catalog.
 enum class Kind : uint8
 {
-    AudioSource,
-    Sound,
-    Music
+    AudioSource, ///< Encoded audio source bytes.
+    Sound,       ///< Immutable sound definition referencing audio sources.
+    Music,       ///< Immutable music definition; playback state has a separate owner.
+    Mesh,        ///< Immutable CPU triangle geometry; renderer installation is separate.
 };
 struct Resource final
 {

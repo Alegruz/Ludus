@@ -1,5 +1,6 @@
 #include "l0_scene.h"
 #include "renderer_flat.h"
+#include "resource_mesh.h"
 #include <ludus/foundation/base/config.h>
 #include <ludus/foundation/time/time.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
@@ -122,8 +123,7 @@ void Tick() noexcept
         {
             return;
         }
-        if (!Accept(gRenderer.CreateMesh({ludus::qa::L0_QUAD, 4, ludus::qa::L0_INDICES, 6}, gQuad)) ||
-            !Accept(gRenderer.CreateMesh({ludus::qa::L0_TRIANGLE, 3, ludus::qa::L0_INDICES, 3}, gTriangle)))
+        if (!ludus::qa::CreateResourceMeshes(gRenderer, gQuad, gTriangle))
         {
             Stop(true);
             return;
