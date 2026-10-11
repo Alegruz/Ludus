@@ -113,6 +113,8 @@ try {
           }
         }
         if (variant.startsWith('merge')) {
+          assert.deepEqual([...image.data.subarray((16*96+12)*4,(16*96+12)*4+4)],[191,0,0,255],`${scenario} painter order red`);
+          assert.deepEqual([...image.data.subarray((48*96+12)*4,(48*96+12)*4+4)],[0,0,159,255],`${scenario} painter order blue`);
           assert.equal(await page.locator('#status').getAttribute('data-live-passes'),'17');
           assert.equal(await page.locator('#status').getAttribute('data-raster-passes'),variant === 'merge' ? '2' : '17');
           if (variant === 'merge-reference') {

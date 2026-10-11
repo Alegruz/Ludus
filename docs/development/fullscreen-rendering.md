@@ -824,13 +824,14 @@ Use `--backend vulkan` on the native Vulkan host. Record actual device identity;
 software Vulkan evidence must be labelled as such. The harness compares one
 binary with merging on/off, alternates which mode runs first, warms 16 pairs per
 workload and records 128 pairs for each of 1/8/16/31 layers. Every completed RGBA
-image must match before a result is accepted. It writes raw sample logs and JSON
+image must match before a result is accepted; independent red/blue pixels verify
+painter order and reject identically empty results. It writes raw sample logs and JSON
 with p50/p95/p99 CPU distributions, executable hash, revision, dirty state, host,
 pass/draw counts and logical memory. It requires a complete sample set and fails
 on an image or execution failure. Timing thresholds are not CI correctness gates.
 
 The shared SDK fixture draws a textured/instanced scene, painter-ordered overlays
-with differing immutable binding snapshots, then samples the attachment into the
+with differing hues/alpha and immutable binding snapshots, then samples the attachment into the
 surface. Setup CPU time includes authoring/compile; execute CPU time includes
 preflight/acquire/encode/submit. The subsequent full-image readback forces real
 completion outside those timers. Its host wait duration is neither GPU duration
@@ -841,19 +842,19 @@ Initial evidence, 2026-10-11: base `f9cc7c8` plus this R5 implementation, pinned
 Clang 18.1.8, Development/RelWithDebInfo, no PCH, Apple M5 (8 GPU cores), Metal 4,
 macOS 26.6 (25G72), headless 96x64. Three runs passed 3,072 measured submissions
 and every paired full-image comparison. Generated results live in
-`out/r5-metal-measurements/report.json` and `run-*.log` in the task worktree.
+`out/r5-painter-measurements/report.json` and `run-*.log` in the task worktree.
 
 | Layers | Raster scopes off/on | Median execute CPU off/on (µs, range across three runs) | p95 execute CPU off/on (µs, range) |
 | --- | --- | --- | --- |
-| 1 | 2 / 2 | 26.3–27.4 / 26.2–27.3 | 31.2–33.7 / 33.0–35.3 |
-| 8 | 9 / 2 | 54.2–56.7 / 25.3–27.2 | 59.8–65.3 / 29.8–32.9 |
-| 16 | 17 / 2 | 100.0–107.4 / 31.8–34.1 | 114.0–136.6 / 36.8–41.8 |
-| 31 | 32 / 2 | 173.1–210.3 / 35.8–41.8 | 201.3–249.9 / 44.7–52.8 |
+| 1 | 2 / 2 | 23.9–25.9 / 23.7–26.0 | 27.5–94.7 / 28.1–82.2 |
+| 8 | 9 / 2 | 47.4–65.9 / 22.2–31.5 | 51.1–107.6 / 26.1–91.0 |
+| 16 | 17 / 2 | 85.0–105.6 / 27.6–33.0 | 95.6–208.2 / 35.0–54.2 |
+| 31 | 32 / 2 | 209.2–272.0 / 42.0–58.8 | 245.0–405.6 / 52.8–89.2 |
 
-Setup medians remained approximately 2.8–3.0, 7.2–7.5, 14.1–16.1 and 25.6–32.4 µs
+Setup medians remained approximately 2.4–2.9, 6.3–8.8, 13.0–15.3 and 32.0–42.8 µs
 across the corresponding paired workloads. Both modes used 82,704 bytes of fixed
 plan-slot storage, 308 logical buffer bytes and 49,168 color/depth bytes; neither
-mode changed draw count or frame buffering. The single-layer control had no
+mode changed draw count or frame buffering. Host load produced visible tail variability. The single-layer control had no
 consistent benefit. **Decision: adopt only as an explicit opt-in** for compatible
 pass-heavy workloads. These tiny headless scenes establish an explainable CPU
 benefit, not a universal renderer/GPU/latency budget. Measure the target consumer

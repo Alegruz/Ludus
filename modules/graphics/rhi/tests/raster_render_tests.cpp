@@ -92,7 +92,7 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     rhi::BindingLayoutHandle layout;
     REQUIRE(rhi::CreateBindingLayout(device, fragment.Bindings, layout) == rhi::RasterStatus::Ready);
     const float32 tint[4]{1, 1, 1, 1};
-    const float32 dim[4]{0.5F, 0.5F, 0.5F, mode == 7 ? .5F : 1};
+    const float32 dim[4]{mode == 7 ? .25F : .5F, .5F, mode == 7 ? .125F : .5F, mode == 7 ? .5F : 1};
     rhi::BufferHandle uniform, backgroundUniform;
     REQUIRE(rhi::CreateBuffer(device, {rhi::BufferRole::Uniform, sizeof(tint)}, RasterBytes(tint), uniform) ==
             rhi::RasterStatus::Ready);
@@ -321,6 +321,18 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
                         }
                     }
                     REQUIRE(std::memcmp(baseline, merged, sizeof(baseline)) == 0);
+                    if (layers > 1)
+                    {
+                        // Different hues make painter-order reversal observable;
+                        // equal images alone would allow two identically empty results.
+                        const usize top = (usize{16} * 96 + 12) * 4;
+                        const usize bottom = (usize{48} * 96 + 12) * 4;
+                        CHECK(baseline[top] == (layers % 2 == 0 ? 191 : 255));
+                        CHECK(baseline[top + 1] == 0);
+                        CHECK(baseline[top + 2] == 0);
+                        CHECK(baseline[top + 3] == 255);
+                        CHECK(baseline[bottom + 2] == (layers % 2 == 0 ? 159 : 255));
+                    }
                 }
             }
             return;

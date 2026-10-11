@@ -140,7 +140,7 @@ bool Create() noexcept
     const auto vertex = ludus::shaders::raster::Vertex();
     const auto fragment = ludus::shaders::raster::Fragment();
     const float32 tint[4]{1, 1, 1, 1};
-    const float32 dim[4]{.5F, .5F, .5F, Variant() >= 9 ? .5F : 1};
+    const float32 dim[4]{Variant() >= 9 ? .25F : .5F, .5F, Variant() >= 9 ? .125F : .5F, Variant() >= 9 ? .5F : 1};
     uint8 image[16]{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255};
     const auto mode = Variant();
     if (mode == 1 || mode == 2)
