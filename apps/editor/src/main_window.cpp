@@ -85,6 +85,8 @@ MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QStr
     });
     connect(Scene_, &SceneWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
     connect(World_, &WorldWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
+    connect(World_, &WorldWorkspace::PreviewStarting, Scene_, &SceneWorkspace::StopPreview);
+    connect(Scene_, &SceneWorkspace::PreviewStarting, World_, &WorldWorkspace::StopPreview);
     connect(Scene_, &SceneWorkspace::PlayRequested, this, [this]() {
         const auto& state = Controller_->State();
         const auto base = QFileInfo(state.DescriptorPath).absolutePath();
@@ -387,6 +389,7 @@ void MainWindow::LaunchAfterPreview(LaunchAction action, const QString& debugger
         return;
     }
     Scene_->StopPreview();
+    World_->StopPreview();
     AudioLaunchPending_ = true;
     Audio_->setEnabled(false);
     Audio_->ShutdownPreview();
@@ -1319,6 +1322,8 @@ void MainWindow::closeEvent(QCloseEvent* event)
             }
             CloseConfirmed_ = true;
         }
+        Scene_->StopPreview();
+        World_->StopPreview();
         AudioClosing_ = true;
         Audio_->ShutdownPreview();
         Content_->Shutdown();

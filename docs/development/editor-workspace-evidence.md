@@ -370,3 +370,56 @@ World browser file actions explain and enforce the native-editor limitation.
 Runtime binding, production-scale worlds, hierarchy/prefabs and schema migrations
 are explicit remaining capabilities. Audience scenarios are designed acceptance
 cases, not interviews or a user study.
+
+## World renderer/camera adapter: first native 3D preview slice
+
+The canonical workflow, audience acceptance cases, binding/asset contracts and
+limits are in [World renderer and camera preview](editor-workspace.md#world-renderer-and-camera-preview).
+This slice uses GraphicsRenderer's existing flat/textured-unlit mesh/view/material
+APIs and GameplayCamera C0; L4 lighting/shadows and production-scale/importer/gizmo
+workflows are not claimed. The editable sample remains an authoring example,
+with game-owned runtime integration required.
+
+Local validation uses an isolated task worktree, macOS 26.6 arm64, Clang/LLVM
+18.1.8, managed CMake 3.29.6/Ninja 1.11.1.3 and Qt 6.11.2. Toolchain/dependency
+inputs are shared read-only; every cache, generated shader and output is local.
+
+- Rendering regressions cover strict Ludus-owned JSON parsing and exact integer
+  mesh indices, bounded mesh/PNG assets, path traversal/symlink refusal, stable
+  camera selection, fixed/orthographic-follow evaluation, cross-field lens and
+  rigid-pose failure, orbit/reference controls, tiny geometry framing and
+  output preservation. Seventeen cases and 604 assertions pass.
+- UI checks cover nonblocking owned-worker extraction, generation-bound late-result
+  refusal, repeated-edit coalescing, pending-load cancellation, state clearing on
+  document replacement, linear/display tint conversion, unchanged/stale tint
+  dialogs and atomic Apply/Undo. Navigation leaves World history unchanged.
+- Styled 800×640 inspection confirms persistent commands/inspector reachability;
+  advanced camera/diagnostic settings scroll within a bounded area. This is
+  layout evidence, not screen-reader/IME or representative-user acceptance.
+- Native Cocoa/Metal acceptance presents authored textured geometry, follows
+  applied transforms and Undo, preserves the orbit anchor until Frame All,
+  compares normal/reference visibility, shares materials across repeated
+  objects, resizes and reopens its owned device/window. An independent headless
+  Metal oracle checks extracted cube foreground/background pixels.
+- Review fixes include persistent stale-preview feedback, worker generation
+  guards, cancellation before native publication, document-bound tint callbacks,
+  explicit render-session handoff, fixed editor navigation during object edits,
+  shared texture/tint versions and reuse of GPU resources for unchanged assets.
+- Complete Development and Debug/UBSan editor suites each pass 143 tests,
+  six explicit skips and 2,602 assertions. UBSan halts on errors. Native
+  Cocoa/Metal acceptance passes 116 assertions (117 when exporting its pixel
+  artifact), including shared-material instancing and the independent pixel oracle.
+- Project formatting/foundational include checks, documentation inventory,
+  strict MkDocs/API generation (134 public headers, no new gaps) and wiki parity pass.
+- Local Clang-tidy 18 cannot parse the macOS 26.6 SDK's Objective-C++ libc++
+  builtins (`__builtin_clzg`, `__builtin_ctzg`, `__is_nothrow_convertible`). The
+  native test compiles warning-clean; its pinned-tidy qualification is a separate
+  macOS CI gate, not a locally clean Objective-C++ analysis claim.
+- CI explicitly analyzes the new sources/tests on Linux and macOS and adds the
+  native renderer/camera acceptance journey to the macOS job.
+
+The previously documented local Clang 18 ASan startup deadlock remains a host
+limitation. Local UBSan evidence and reference/native ASan CI are separate gates;
+current CI qualification is recorded by the associated pull request checks.
+Browser file/render parity and moderated sessions with the five audiences and
+content disciplines remain separate acceptance work.

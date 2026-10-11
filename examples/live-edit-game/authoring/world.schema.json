@@ -38,6 +38,66 @@
           "unit": "m",
           "min": -10000,
           "max": 10000
+        },
+        {
+          "id": "rx",
+          "label": "Rotation X",
+          "type": "number",
+          "default": 0,
+          "help": "Fixed-axis rotations: apply X, then Y, then Z.",
+          "unit": "°",
+          "min": -360,
+          "max": 360
+        },
+        {
+          "id": "ry",
+          "label": "Rotation Y",
+          "type": "number",
+          "default": 0,
+          "help": "Fixed-axis rotations: apply X, then Y, then Z.",
+          "unit": "°",
+          "min": -360,
+          "max": 360
+        },
+        {
+          "id": "rz",
+          "label": "Rotation Z",
+          "type": "number",
+          "default": 0,
+          "help": "Fixed-axis rotations: apply X, then Y, then Z.",
+          "unit": "°",
+          "min": -360,
+          "max": 360
+        },
+        {
+          "id": "sx",
+          "label": "Scale X",
+          "type": "number",
+          "default": 1,
+          "help": "Positive local axis scale.",
+          "unit": "",
+          "min": 0.001,
+          "max": 1000
+        },
+        {
+          "id": "sy",
+          "label": "Scale Y",
+          "type": "number",
+          "default": 1,
+          "help": "Positive local axis scale.",
+          "unit": "",
+          "min": 0.001,
+          "max": 1000
+        },
+        {
+          "id": "sz",
+          "label": "Scale Z",
+          "type": "number",
+          "default": 1,
+          "help": "Positive local axis scale.",
+          "unit": "",
+          "min": 0.001,
+          "max": 1000
         }
       ]
     },
@@ -156,6 +216,139 @@
           "max": 4096
         }
       ]
+    },
+    {
+      "id": "renderable",
+      "label": "Renderable",
+      "help": "Opaque flat or textured unlit preview. Tint is linear RGB; PNG colors are sRGB. Lighting/shadows are not previewed by this adapter.",
+      "required": false,
+      "properties": [
+        {
+          "id": "mesh",
+          "label": "Mesh",
+          "type": "asset",
+          "default": "",
+          "asset_kind": "mesh",
+          "unit": "",
+          "help": "Choose a project-declared mesh."
+        },
+        {
+          "id": "texture",
+          "label": "Color texture",
+          "type": "asset",
+          "default": "",
+          "asset_kind": "texture",
+          "unit": "",
+          "help": "Choose a project-declared texture."
+        },
+        {
+          "id": "visible",
+          "label": "Visible in preview",
+          "type": "boolean",
+          "default": true,
+          "unit": "",
+          "help": "Hidden objects are omitted from the preview."
+        },
+        {
+          "id": "r",
+          "label": "Tint R",
+          "type": "number",
+          "default": 1,
+          "min": 0,
+          "max": 1,
+          "unit": "",
+          "help": "Tint R for the 3D preview."
+        },
+        {
+          "id": "g",
+          "label": "Tint G",
+          "type": "number",
+          "default": 1,
+          "min": 0,
+          "max": 1,
+          "unit": "",
+          "help": "Tint G for the 3D preview."
+        },
+        {
+          "id": "b",
+          "label": "Tint B",
+          "type": "number",
+          "default": 1,
+          "min": 0,
+          "max": 1,
+          "unit": "",
+          "help": "Tint B for the 3D preview."
+        }
+      ]
+    },
+    {
+      "id": "camera",
+      "label": "Camera",
+      "help": "C0 rigid -Z-forward camera. Scale must be one. XY follow supports only identity rotation and the orthographic lens.",
+      "required": false,
+      "properties": [
+        {
+          "id": "projection",
+          "label": "Projection",
+          "type": "enum",
+          "default": "perspective",
+          "choices": [
+            "perspective",
+            "orthographic",
+            "infinite"
+          ],
+          "unit": "",
+          "help": "Reverse-Z lens with physical drawable aspect."
+        },
+        {
+          "id": "fov",
+          "label": "Vertical field of view",
+          "type": "number",
+          "default": 60,
+          "min": 1,
+          "max": 179,
+          "unit": "°",
+          "help": "Vertical field of view for the 3D preview."
+        },
+        {
+          "id": "span",
+          "label": "Orthographic vertical span",
+          "type": "number",
+          "default": 8,
+          "min": 0.01,
+          "max": 10000,
+          "unit": "m",
+          "help": "Orthographic vertical span for the 3D preview."
+        },
+        {
+          "id": "near",
+          "label": "Near plane",
+          "type": "number",
+          "default": 0.1,
+          "min": 0.001,
+          "max": 10000,
+          "unit": "m",
+          "help": "Near plane for the 3D preview."
+        },
+        {
+          "id": "far",
+          "label": "Far plane",
+          "type": "number",
+          "default": 100,
+          "min": 0.01,
+          "max": 100000,
+          "unit": "m",
+          "help": "Far plane for the 3D preview."
+        },
+        {
+          "id": "follow",
+          "label": "XY follow target",
+          "type": "entity",
+          "default": "",
+          "unit": "",
+          "help": "None is a fixed camera. Following requires an orthographic lens and identity rotation."
+        }
+      ]
     }
   ],
   "assets": [
@@ -168,6 +361,11 @@
       "id": "audio.pickup",
       "label": "Pickup sound",
       "kind": "audio"
+    },
+    {
+      "id": "texture.ludus",
+      "label": "Ludus logo color texture",
+      "kind": "texture"
     }
   ]
 }

@@ -141,6 +141,11 @@ jobs:
           LUDUS_SCENE_TEST_PLAYER: ${{ github.workspace }}/out/build/macos-clang-development/apps/world_demo/ludus_world_demo
         run: out/build/macos-clang-development/apps/editor/ludus_editor_tests '[.scene-native]'
 
+      - name: Verify native World renderer and camera authoring
+        env:
+          QT_QPA_PLATFORM: cocoa
+        run: out/build/macos-clang-development/apps/editor/ludus_editor_tests '[.render-native]'
+
       - name: Analyze native Editor production and regression sources
         run: |
           out/host-tools/bin/clang-tidy -p out/build/macos-clang-development --warnings-as-errors='*' \
@@ -150,9 +155,12 @@ jobs:
             apps/editor/src/scene_document.cpp apps/editor/src/scene_store.cpp \
             apps/editor/src/scene_workspace.cpp apps/editor/src/scene_preview.cpp \
             apps/editor/src/world_document.cpp apps/editor/src/world_workspace.cpp \
+            apps/editor/src/render_scene.cpp apps/editor/src/render_preview.cpp \
+            apps/editor/src/render_load_job.cpp apps/editor/src/render_panel.cpp \
+            apps/editor/tests/render_authoring_tests.cpp \
             apps/editor/tests/world_workspace_tests.cpp \
             apps/editor/tests/scene_document_tests.cpp apps/editor/tests/scene_workspace_tests.cpp \
-            apps/editor/tests/scene_native_tests.mm \
+            apps/editor/tests/scene_native_tests.mm apps/editor/tests/render_native_tests.mm \
             apps/editor/tests/macos_journey_tests.cpp apps/editor/tests/live_journey_tests.cpp
 
       - name: Verify installed macOS diagnostic helper
@@ -830,6 +838,9 @@ jobs:
             apps/editor/src/scene_document.cpp apps/editor/src/scene_store.cpp \
             apps/editor/src/scene_workspace.cpp apps/editor/src/scene_preview.cpp \
             apps/editor/src/world_document.cpp apps/editor/src/world_workspace.cpp \
+            apps/editor/src/render_scene.cpp apps/editor/src/render_preview.cpp \
+            apps/editor/src/render_load_job.cpp apps/editor/src/render_panel.cpp \
+            apps/editor/tests/render_authoring_tests.cpp \
             apps/editor/tests/world_workspace_tests.cpp \
             apps/editor/tests/scene_document_tests.cpp apps/editor/tests/scene_workspace_tests.cpp
       - name: Verify S5 Editor, installed Behavior SDK and GameHost journey
