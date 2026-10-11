@@ -29,6 +29,40 @@ def quantize(value):
     return max(0, min(255, math.floor(value + 0.5)))
 
 
+def validate_bake(document):
+    bake = document.get('bake')
+    if bake is None:
+        return None
+    if not isinstance(bake, dict) or document.get('format') != 'Rgba8Unorm' or document.get('semantic') != 'data' or document.get('mip_levels') != 1:
+        raise ValueError('Bake chart requires linear RGBA8 data with one clamped mip')
+    for key in ('source_id', 'scene_revision', 'dependency_revision'):
+        value = bake.get(key)
+        if type(value) is not int or not 1 <= value < 2 ** 64:
+            raise ValueError('Bake identities/revisions must be nonzero uint64')
+    direct = bake.get('direct_light_id', 0)
+    if type(direct) is not int or not 0 <= direct < 2 ** 64:
+        raise ValueError('Baked direct light identity must be uint64')
+    for key, count in (('transform', 12), ('scale', 3)):
+        values = bake.get(key)
+        if not isinstance(values, list) or len(values) != count or any(type(v) not in (int, float) or abs(v) > 1000000 or not math.isfinite(v) or (v != 0 and abs(v) < 2 ** -149) for v in values):
+            raise ValueError('Bake transform/scale must be bounded representable numeric arrays')
+        if key == 'scale' and any(not 0 <= v <= 10000 for v in values):
+            raise ValueError('Bake scale must be 0..10000')
+    width, height = document['width'], document['height']
+    gutter = bake.get('gutter', 1)
+    if type(gutter) is not int or not 1 <= gutter <= 16 or width < 2 * gutter + 2 or height < 2 * gutter + 2:
+        raise ValueError('Bake chart needs a nonempty interior and 1..16 replicated gutter texels')
+    pixels = document['pixels']
+    for y in range(height):
+        for x in range(width):
+            sx, sy = min(max(x, gutter), width - gutter - 1), min(max(y, gutter), height - gutter - 1)
+            if pixels[(y * width + x) * 4:(y * width + x + 1) * 4] != pixels[(sy * width + sx) * 4:(sy * width + sx + 1) * 4]:
+                raise ValueError('Bake gutters must replicate the nearest chart-interior texel')
+    return dict(bake, direct_light_id=direct, gutter=gutter,
+                uv_transform=[(width - 2 * gutter - 1) / width, (height - 2 * gutter - 1) / height,
+                              (gutter + 0.5) / width, (gutter + 0.5) / height])
+
+
 def cook(document):
     formats = {'R8Unorm': 1, 'Rg8Unorm': 2, 'Rgba8Unorm': 4, 'Rgba8Srgb': 4}
     width, height, fmt = document.get('width'), document.get('height'), document.get('format')
@@ -38,10 +72,15 @@ def cook(document):
     if fmt not in formats or semantic not in ('color', 'data', 'normal', 'mask'):
         raise ValueError('Unknown portable format/semantic')
     channels = formats[fmt]
-    probe_width, probe_height, footprint = width, height, 0
+    maximum_levels = max(width, height).bit_length()
+    requested_levels = document.get("mip_levels", maximum_levels)
+    if type(requested_levels) is not int or not 1 <= requested_levels <= maximum_levels:
+        raise ValueError("mip_levels must be within the complete initialized image chain")
+    probe_width, probe_height, footprint, probe_level = width, height, 0, 0
     while True:
         footprint += (probe_width * channels + 3) // 4 * 4 * probe_height
-        if probe_width == probe_height == 1:
+        probe_level += 1
+        if probe_level == requested_levels:
             break
         probe_width, probe_height = max(1, probe_width // 2), max(1, probe_height // 2)
     if footprint > 64 * 1024 * 1024:
@@ -50,6 +89,7 @@ def cook(document):
         raise ValueError('sRGB is color only; color/normal require RGBA8')
     if not isinstance(pixels, list) or len(pixels) != width * height * channels or any(type(v) is not int or not 0 <= v <= 255 for v in pixels):
         raise ValueError('Source must contain complete tightly packed byte texels')
+    validate_bake(document)
     cutoff = document.get('cutoff')
     if cutoff is not None and (semantic != 'mask' or channels not in (1, 4) or type(cutoff) not in (int, float) or not math.isfinite(cutoff) or not 0 < cutoff <= 1):
         raise ValueError('Coverage cutoff requires R8/RGBA8 mask and finite (0,1] threshold')
@@ -63,7 +103,7 @@ def cook(document):
             blob.extend(pixels[row * width * channels:(row + 1) * width * channels])
             blob.extend(bytes(pitch - width * channels))
         levels.append(level)
-        if width == height == 1:
+        if len(levels) == requested_levels:
             break
         next_width, next_height = max(1, width // 2), max(1, height // 2)
         reduced = []
@@ -126,14 +166,27 @@ def main():
     blob, levels = cook(document)
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
+    bake = validate_bake(document)
     prefix = '#pragma once\n#include <ludus/graphics/rhi/raster.h>\n'
+    if bake is not None: prefix += '#include <ludus/graphics/renderer/lighting.hpp>\n'
     prefix += f'namespace ludus::textures::{args.name} {{\n'
     prefix += 'inline constexpr foundation::uint8 BYTES[] = {' + ','.join(map(str, blob)) + '};\n'
     prefix += 'inline constexpr graphics::rhi::TextureMipUpload MIPS[] = {' + ','.join('{' + f'{v["offset"]},{v["row_pitch"]}' + '}' for v in levels) + '};\n'
     prefix += 'inline graphics::rhi::TextureDescription Description() noexcept { return {' + f'{document["width"]},{document["height"]},graphics::rhi::RasterFormat::{document["format"]},false,{len(levels)},true' + '}; }\n'
     prefix += 'inline graphics::rhi::TextureUpload Upload() noexcept { return {BYTES,0,MIPS}; }\n}\n'
+    if bake is not None:
+        def vector(values):
+            return '{' + ','.join(format(float(v), '.9g') + ('F' if '.' in format(float(v), '.9g') or 'e' in format(float(v), '.9g') else '.0F') for v in values) + '}'
+        transform = bake['transform']
+        columns = '{' + ','.join(vector(transform[i:i + 3]) for i in range(0, 9, 3)) + '}'
+        body = 'inline graphics::renderer::BakedLighting Bake(graphics::rhi::TextureHandle texture) noexcept { graphics::renderer::BakedLighting result; result.Texture=texture;'
+        body += 'result.Scale=' + vector(bake['scale']) + ';result.UvTransform=' + vector(bake['uv_transform']) + ';'
+        for field, key in [('SourceId','source_id'),('SceneRevision','scene_revision'),('DependencyRevision','dependency_revision'),('DirectLightId','direct_light_id')]:
+            body += f'result.{field}={bake[key]}ULL;'
+        body += 'result.Transform={' + columns + ',' + vector(transform[9:]) + '};return result;}\n'
+        prefix = prefix[:-2] + body + '}\n'
     (out / f'{args.name}.h').write_text(prefix)
-    (out / 'manifest.json').write_text(json.dumps({'source_sha256': hashlib.sha256(source).hexdigest(), 'upload_sha256': hashlib.sha256(blob).hexdigest(), 'semantic': document['semantic'], 'format': document['format'], 'levels': levels}, indent=2) + '\n')
+    (out / 'manifest.json').write_text(json.dumps({'source_sha256': hashlib.sha256(source).hexdigest(), 'upload_sha256': hashlib.sha256(blob).hexdigest(), 'semantic': document['semantic'], 'format': document['format'], 'levels': levels, 'bake': bake}, indent=2) + '\n')
 
 
 if __name__ == '__main__':

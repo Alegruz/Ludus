@@ -6,6 +6,7 @@
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/transform.hpp>
 #include <ludus/foundation/math/vector.hpp>
+#include <ludus/graphics/renderer/lighting.hpp>
 #include <ludus/graphics/renderer/materials.hpp>
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/graph.h>
@@ -93,6 +94,10 @@ struct MeshDescription final
     /// Optional finite top-left UVs, exactly VertexCount records; null supplies zero UV.
     /// Copied into the shared position/UV mesh stream during creation.
     const ludus::foundation::math::Vector2* Texcoords = nullptr;
+    /// Optional finite nonzero mesh-local normals, normalized while copying. Lit snapshots require them.
+    const ludus::foundation::math::Vector3* Normals = nullptr;
+    /// Optional finite bake-chart UVs, exactly VertexCount records; null uses Texcoords.
+    const ludus::foundation::math::Vector2* BakeTexcoords = nullptr;
 };
 /// Ordinary scene values; renderer has no ECS, gameplay camera or UI dependency.
 struct SceneItem final
@@ -110,6 +115,10 @@ struct SceneItem final
     /// Optional ready material incarnation replacing FlatMaterial entirely. Null keeps
     /// the L0 flat/error material. Snapshot retains its exact texture/program version.
     MaterialVersion Surface{};
+    /// Exact bake scene revision; zero declares no valid baked chart.
+    ludus::foundation::uint64 BakeSceneRevision = 0;
+    /// Exact bake dependency revision; mismatch selects environment and dynamic direct lighting.
+    ludus::foundation::uint64 BakeDependencyRevision = 0;
 };
 /// Finite canonical clip transform: XY [-1,1], Z [0,1], Y up.
 struct ViewDescription final
@@ -128,6 +137,15 @@ struct ViewDescription final
     DepthConvention Depth = DepthConvention::Conventional;
     /// Select five-plane culling for an infinite reverse-Z perspective projection.
     bool InfiniteFar = false;
+    /// Finite world-space camera position in meters, [-1000000,1000000]; required for lit shading.
+    ludus::foundation::math::Vector3 CameraPosition{0, 0, 1};
+    /// Prepare an opaque/masked caster view; skips overlays and disables camera visibility shortcuts.
+    /// ShadowAtlas preparation sets this; ordinary callers should keep false.
+    bool ShadowCasters = false;
+    /// Use constant CameraForward for orthographic specular evaluation; perspective uses CameraPosition.
+    bool OrthographicCamera = false;
+    /// Nonzero finite world direction from camera into scene, normalized during preparation.
+    ludus::foundation::math::Vector3 CameraForward{0, 0, -1};
     /// Canonical overlay crop transform, applied independently of the world camera.
     ludus::foundation::math::Matrix4 OverlayToClip = ludus::foundation::math::Matrix4::Identity();
 };
@@ -142,6 +160,10 @@ struct ViewReport final
     ludus::foundation::uint32 Culled = 0;
     /// Indexed draws after adjacent compatible instancing.
     ludus::foundation::uint32 Draws = 0;
+    /// Visible lit instances using environment because an authored bake key/transform mismatched.
+    ludus::foundation::uint32 BakeFallbacks = 0;
+    /// Visible lit instances using unshadowed direct light after conservative caster invalidation.
+    ludus::foundation::uint32 ShadowFallbacks = 0;
     /// Actual per-instance source order; first Visible entries are meaningful.
     ludus::foundation::uint64 SourceIds[256]{};
 };
@@ -152,8 +174,8 @@ struct Limits final
     ludus::foundation::uint32 Meshes = 6;
     /// Four resident/retained snapshots.
     ludus::foundation::uint32 Snapshots = 4;
-    /// Four prepared views (one RHI instance buffer each).
-    ludus::foundation::uint32 Views = 4;
+    /// Eight prepared views, including up to four shadow light views.
+    ludus::foundation::uint32 Views = 8;
     /// At most 256 scene objects and draw packets per snapshot/view.
     ludus::foundation::uint32 Objects = 256;
     /// Four retained target presentations, each consuming one RHI vertex buffer and binding set.
@@ -162,8 +184,10 @@ struct Limits final
     ludus::foundation::uint32 MaterialPrograms = 2;
     /// Eight live/retained immutable parameter and texture versions.
     ludus::foundation::uint32 Materials = 8;
+    /// Two resident/retained immutable shadow atlases for overlap and replacement.
+    ludus::foundation::uint32 ShadowAtlases = 2;
 };
-/// Portable flat/textured unlit renderer, one owner thread per device.
+/// Portable flat/unlit/lit renderer, one owner thread per device.
 /// Setup copies data and may allocate/create GPU resources. Repeated Submit creates
 /// no renderer resources or heap allocations; RHI retains accepted work through completion.
 /// Setup/release and destruction require a closed RHI frame; DrawView/DrawPresentation
@@ -224,6 +248,58 @@ public:
     [[nodiscard]] rhi::RasterStatus PublishMaterial(MaterialVersion& candidate, MaterialVersion& current) noexcept;
     /// Detach material ownership; earlier snapshot/view/GPU uses retain the exact version.
     [[nodiscard]] rhi::RasterStatus Release(MaterialVersion& handle) noexcept;
+    /// Enable linear lighting output and opaque shadow rendering after InitializeViews is Ready.
+    /// Uses renderer_output.slang and renderer_shadow.slang; Ready/Pending owns setup resources.
+    /// HdrColor enables prewarmed RGBA16F flat pipelines; RGBA8 remains the authored fallback.
+    /// Failures preserve earlier profiles; a failed published setup requires Reset.
+    [[nodiscard]] rhi::RasterStatus InitializeLighting(const rhi::RasterShaderDescription& outputVertex,
+                                                       const rhi::RasterShaderDescription& outputFragment,
+                                                       const rhi::RasterShaderDescription& shadowFragment) noexcept;
+    /// Advance lighting setup without blocking, between frames.
+    [[nodiscard]] rhi::RasterStatus PollLighting() noexcept;
+    /// Validate renderer_lit.slang and prewarm linear RGBA8/RGBA16F plus masked shadow variants.
+    /// Shadow fragment uses the same typed uniform schema and a subset of the lit bindings.
+    /// Sixteen vertex locations required; HDR variants are omitted when HdrColor is false.
+    /// Ready/Pending grants program ownership; failure preserves null output.
+    [[nodiscard]] rhi::RasterStatus PrewarmLitProgram(const rhi::RasterShaderDescription& vertex,
+                                                      const rhi::RasterShaderDescription& fragment,
+                                                      const rhi::RasterShaderDescription& shadowFragment,
+                                                      MaterialProgram& output) noexcept;
+    /// Copy an immutable lit material and normalized bounded light list, between frames.
+    /// Report and null output are preserved on failure. Shadows must be rendered and Ready;
+    /// bake/shadow views are retained even after their owners are released.
+    [[nodiscard]] rhi::RasterStatus CreateLitMaterial(MaterialProgram program,
+                                                      const LitMaterialDescription& description,
+                                                      MaterialVersion& output,
+                                                      LightSelection& report) noexcept;
+    /// Copy light regions and prepare retained conventional-depth caster views/atlas, between frames.
+    /// Invalid gutters/overlap, unsupported masked-unlit casters or point maps preserve null output.
+    /// Ready/Pending grants ownership; drawing is required before material sampling is admitted.
+    [[nodiscard]] rhi::RasterStatus
+    PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& description, ShadowAtlas& output) noexcept;
+    /// Poll retained atlas/instance setup. Ready does not mean it has been rendered yet.
+    [[nodiscard]] rhi::RasterStatus GetStatus(ShadowAtlas handle) const noexcept;
+    /// Render all prepared regions in an acquired frame; no allocation or shader creation.
+    /// Only one accepted draw per immutable atlas. A partial failure permanently rejects reuse;
+    /// recreate a candidate. Caller must end/submit the frame before material creation.
+    [[nodiscard]] rhi::RasterStatus DrawShadowAtlas(ShadowAtlas handle) noexcept;
+    /// Detach atlas ownership; materials retain the exact rendered texture and caster version.
+    [[nodiscard]] rhi::RasterStatus Release(ShadowAtlas& handle) noexcept;
+    /// Prepare retained linear scene/display source and immutable exposure/output parameters.
+    /// Accepts RGBA8 or supported RGBA16F attachments. Encode=false is required for drawing
+    /// into a linear display target; UI can blend there before a second encode-only presentation.
+    [[nodiscard]] rhi::RasterStatus PrepareLightingPresentation(rhi::TextureHandle source,
+                                                                const ViewMapping& mapping,
+                                                                const LightingOutput& lighting,
+                                                                Presentation& output) noexcept;
+    /// Compose a Ready lighting presentation in an acquired frame; select surface or linear RGBA8.
+    /// Actual surface encoding selects shader or hardware conversion, exactly once. No blending.
+    /// Draw into a display intermediate with Encode=false, then UI, then an encode-only surface pass.
+    [[nodiscard]] rhi::RasterStatus DrawLightingPresentation(Presentation handle,
+                                                             const rhi::RasterPassDescription& description =
+                                                             {
+                                                                 .ColorLoad = rhi::RasterLoad::Load,
+                                                             }) noexcept;
     /// Release all public identities/resources; accepted CPU/GPU uses retire through RHI.
     /// @pre Owner thread, no open frame; invalidates every previously issued logical handle.
     void Reset() noexcept;
@@ -301,6 +377,20 @@ public:
     [[nodiscard]] rhi::RasterStatus Release(PreparedView& handle) noexcept;
 
 private:
+    [[nodiscard]] rhi::RasterStatus PrewarmProgram(const rhi::RasterShaderDescription& vertex,
+                                                   const rhi::RasterShaderDescription& fragment,
+                                                   const rhi::RasterShaderDescription* shadow,
+                                                   MaterialProgram& output) noexcept;
+    [[nodiscard]] rhi::RasterStatus CreateMaterialData(MaterialProgram program,
+                                                       const MaterialDescription& description,
+                                                       const ludus::foundation::uint8* bytes,
+                                                       ludus::foundation::usize size,
+                                                       const LitMaterialDescription* lighting,
+                                                       MaterialVersion& output) noexcept;
+    [[nodiscard]] rhi::RasterStatus PreparePresentationData(rhi::TextureHandle source,
+                                                            const ViewMapping& mapping,
+                                                            const LightingOutput* lighting,
+                                                            Presentation& output) noexcept;
     struct State;
     ludus::foundation::core::UniquePtr<State> mState;
 };

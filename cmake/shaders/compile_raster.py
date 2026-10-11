@@ -112,7 +112,7 @@ def raster_interface(document, stage, metal=False):
         if ty['kind'] != 'vector' or count not in (2, 3, 4) or ty['elementType'].get('scalarType') != 'float32':
             raise RuntimeError('Vertex input lies outside float2/3/4 profile')
         location = binding['index']
-        if not 0 <= location < 8 or any(x['location'] == location for x in inputs):
+        if not 0 <= location < 16 or any(x['location'] == location for x in inputs):
             raise RuntimeError('Vertex input location is duplicated or out of range')
         inputs.append({'location': location, 'format': 'Float' + str(count), 'name': field['name']})
     if stage == 'vertex':
@@ -299,6 +299,15 @@ def glsl_varyings(code, reflection, stage):
     return code, sorted(interface)
 
 
+def verify_varyings(vertex, fragment):
+    """A fragment may consume a typed subset of vertex outputs (e.g. shadows)."""
+    if len(dict(vertex)) != len(vertex) or len(dict(fragment)) != len(fragment):
+        raise RuntimeError('GLSL ES raster stage varying locations repeat')
+    outputs = dict(vertex)
+    if any(outputs.get(location) != kind for location, kind in fragment):
+        raise RuntimeError('GLSL ES raster stage varying interfaces differ')
+
+
 def compile_raster(args, lock):
     from compile_shader import entry, run
     output = Path(args.output)
@@ -390,8 +399,8 @@ def compile_raster(args, lock):
             artifact.write_text(code)
             artifacts[('wgsl', stage)] = (code, names[0])
             interfaces[('wgsl', stage)] = interface
-    if args.spirv_cross and not compute and interfaces[('glsl', 'vertex')]['varyings'] != interfaces[('glsl', 'fragment')]['varyings']:
-        raise RuntimeError('GLSL ES raster stage varying interfaces differ')
+    if args.spirv_cross and not compute:
+        verify_varyings(interfaces[('glsl', 'vertex')]['varyings'], interfaces[('glsl', 'fragment')]['varyings'])
     header = '#pragma once\n#include <ludus/foundation/base/config.h>\n#include <ludus/graphics/rhi/raster.h>\n'
     header += f'namespace ludus::shaders::{args.name} {{\n'
     for (backend, stage), (data, name) in artifacts.items():

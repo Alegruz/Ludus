@@ -7,6 +7,7 @@ namespace ludus::graphics::rhi::reference
 void Reset() noexcept
 {
     ProfileAvailable = true;
+    HdrAvailable = true;
     ComputeAvailable = true;
     Dispatches = 0;
     ComputeResult = RasterStatus::Ready;
@@ -36,6 +37,10 @@ void Reset() noexcept
         {
             status = RasterStatus::Pending;
         }
+    }
+    for (auto& pipeline : Pipelines)
+    {
+        pipeline = {};
     }
     for (auto& size : BufferSizes)
     {
@@ -93,7 +98,14 @@ RasterCapabilities RasterLimits() noexcept
     {
         return {};
     }
-    return {usize{64} * 1024 * 1024, 4096, 256, 16384, static_cast<uint32>(internal::RASTER_CAPACITY), 1024};
+    return {usize{64} * 1024 * 1024,
+            4096,
+            256,
+            16384,
+            static_cast<uint32>(internal::RASTER_CAPACITY),
+            1024,
+            16,
+            reference::HdrAvailable};
 }
 RasterStatus
 RasterCreateBuffer(usize slot, const BufferDescription&, std::span<const uint8> bytes, uint32 request) noexcept

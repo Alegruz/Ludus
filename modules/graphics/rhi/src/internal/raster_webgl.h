@@ -35,6 +35,7 @@ GLuint gRasterRenderTextures[internal::RASTER_CAPACITY]{};
 GLuint gRasterSampleFramebuffers[internal::RASTER_CAPACITY]{};
 internal::RasterPassInfo gRasterGlPass;
 bool gRasterGlPassOpen = false;
+bool gRasterHdrProbed = false, gRasterHdr = false;
 GLuint gRasterDepths[internal::RASTER_CAPACITY]{};
 GLuint gRasterViews[internal::RASTER_CAPACITY]{};
 GLuint gRasterSamplers[internal::RASTER_CAPACITY]{};
@@ -100,8 +101,12 @@ bool RasterGlProgram(GLuint program, RasterGlPipeline& pipeline) noexcept
         return false;
     }
     GLint count = 0;
+    // Thanks to Khronos, OpenGL ES 3.0.6, section 2.12.5 "Vertex Attributes":
+    // linked programs expose only active attributes. Shadow fragments can eliminate
+    // unused lit vertex inputs; verify every active location/type against the cook.
+    // https://registry.khronos.org/OpenGL/specs/es/3.0/es_spec_3.0.pdf
     glGetProgramiv(program, GL_ACTIVE_ATTRIBUTES, &count);
-    if (count < 0 || static_cast<usize>(count) != vertex.InputCount)
+    if (count < 0 || static_cast<usize>(count) > vertex.InputCount)
     {
         return false;
     }
@@ -228,12 +233,19 @@ RasterCapabilities RasterLimits() noexcept
     {
         return {};
     }
+    if (!gRasterHdrProbed)
+    {
+        gRasterHdr = emscripten_webgl_enable_extension(gContext, "EXT_color_buffer_float") == EM_TRUE;
+        gRasterHdrProbed = true;
+    }
     return {64U * 1024U * 1024U,
             gMaxDimension < 4096 ? gMaxDimension : 4096,
             static_cast<usize>(alignment > 256 ? alignment : 256),
             16384,
             static_cast<uint32>(internal::RASTER_CAPACITY),
-            static_cast<uint32>(internal::RASTER_DRAWS)};
+            static_cast<uint32>(internal::RASTER_DRAWS),
+            static_cast<uint32>(attributes < 16 ? attributes : 16),
+            gRasterHdr};
 }
 RasterStatus
 RasterCreateBuffer(usize slot, const BufferDescription& info, std::span<const uint8> bytes, uint32) noexcept
@@ -271,7 +283,8 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         glPixelStorei(GL_UNPACK_ROW_LENGTH, static_cast<GLint>(mip.RowPitch / channels));
         glTexImage2D(GL_TEXTURE_2D,
                      static_cast<GLint>(level),
-                     info.Format == RasterFormat::R8Unorm      ? GL_R8
+                     info.Format == RasterFormat::Rgba16Float  ? GL_RGBA16F
+                     : info.Format == RasterFormat::R8Unorm    ? GL_R8
                      : info.Format == RasterFormat::Rg8Unorm   ? GL_RG8
                      : info.Format == RasterFormat::Rgba8Unorm ? GL_RGBA8
                                                                : GL_SRGB8_ALPHA8,
@@ -281,7 +294,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
                      info.Format == RasterFormat::R8Unorm    ? GL_RED
                      : info.Format == RasterFormat::Rg8Unorm ? GL_RG
                                                              : GL_RGBA,
-                     GL_UNSIGNED_BYTE,
+                     info.Format == RasterFormat::Rgba16Float ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE,
                      info.Attachment ? nullptr : upload.Bytes.data() + mip.Offset);
         width = width > 1 ? width / 2 : 1;
         height = height > 1 ? height / 2 : 1;
@@ -296,7 +309,9 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         glBindTexture(GL_TEXTURE_2D, gRasterRenderTextures[slot]);
         glTexStorage2D(GL_TEXTURE_2D,
                        1,
-                       info.Format == RasterFormat::Rgba8Unorm ? GL_RGBA8 : GL_SRGB8_ALPHA8,
+                       info.Format == RasterFormat::Rgba16Float  ? GL_RGBA16F
+                       : info.Format == RasterFormat::Rgba8Unorm ? GL_RGBA8
+                                                                 : GL_SRGB8_ALPHA8,
                        static_cast<GLsizei>(info.Width),
                        static_cast<GLsizei>(info.Height));
         glGenRenderbuffers(1, &gRasterDepths[slot]);
@@ -702,6 +717,7 @@ void RasterReset() noexcept
 {
     gRasterGlPassOpen = false;
     gRasterGlPass = {};
+    gRasterHdrProbed = gRasterHdr = false;
     if (gContext > 0 && !emscripten_is_webgl_context_lost(gContext))
     {
         glFinish();
