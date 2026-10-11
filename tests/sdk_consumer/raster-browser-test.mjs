@@ -27,7 +27,7 @@ try {
   const pin = JSON.parse(await readFile(new URL('../../config/shader_toolchain.json',import.meta.url))).wgsl_validator;
   assert.equal(browser.version(),pin.chromium_version);
   report.version = browser.version();
-  for (const scenario of ['webgpu','webgl2','auto','auto-fallback','webgpu-srgb','webgl2-srgb','webgpu-blend','webgl2-blend','webgpu-graph','webgl2-graph','webgpu-graph-reference','webgl2-graph-reference','webgpu-cpu','webgpu-compute','webgpu-compute-reference','webgl2-cpu','webgl2-compute','auto-fallback-compute','webgl2-compute-required','invalid-shader','invalid-pipeline','invalid-upload','invalid-readback','slow-completion','transfer-loss','device-loss']) {
+  for (const scenario of ['webgpu','webgl2','auto','auto-fallback','webgpu-srgb','webgl2-srgb','webgpu-blend','webgl2-blend','webgpu-graph','webgl2-graph','webgpu-graph-reference','webgl2-graph-reference','webgpu-merge','webgpu-merge-reference','webgl2-merge','webgl2-merge-reference','auto-fallback-merge','webgpu-cpu','webgpu-compute','webgpu-compute-reference','webgl2-cpu','webgl2-compute','auto-fallback-compute','webgl2-compute-required','invalid-shader','invalid-pipeline','invalid-upload','invalid-readback','slow-completion','transfer-loss','device-loss']) {
     const context = await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
     await context.addInitScript(scenario => {
       window.__qaPause = false;
@@ -82,7 +82,7 @@ try {
     const errors = [];
     page.on('pageerror',error => errors.push(String(error)));
     page.on('console',message => report.console.push({scenario,type:message.type(),text:message.text()}));
-    const variant = scenario.endsWith('-compute-required') ? 'compute-required' : scenario.endsWith('-compute-reference') ? 'compute-reference' : scenario.endsWith('-compute') ? 'compute' : scenario.endsWith('-cpu') ? 'cpu' : scenario.endsWith('-graph-reference') ? 'graph-reference' : scenario.endsWith('-graph') ? 'graph' : scenario.endsWith('-srgb') ? 'srgb' : scenario.endsWith('-blend') ? 'blend' : '';
+    const variant = scenario.endsWith('-merge-reference') ? 'merge-reference' : scenario.endsWith('-merge') ? 'merge' : scenario.endsWith('-compute-required') ? 'compute-required' : scenario.endsWith('-compute-reference') ? 'compute-reference' : scenario.endsWith('-compute') ? 'compute' : scenario.endsWith('-cpu') ? 'cpu' : scenario.endsWith('-graph-reference') ? 'graph-reference' : scenario.endsWith('-graph') ? 'graph' : scenario.endsWith('-srgb') ? 'srgb' : scenario.endsWith('-blend') ? 'blend' : '';
     const selection = scenario.startsWith('webgpu') ? 'webgpu' : scenario.startsWith('webgl2') ? 'webgl2' : scenario.startsWith('invalid') || scenario === 'device-loss' || scenario === 'slow-completion' || scenario === 'transfer-loss' ? 'webgpu' : 'auto';
     await page.goto(`http://127.0.0.1:${server.address().port}/raster.html?backend=${selection}&variant=${variant}`);
     const result = {scenario};
@@ -105,11 +105,21 @@ try {
         assert.equal(image.width,96); assert.equal(image.height,64);
         const high = variant === 'srgb' ? 55 : variant === 'blend' ? 160 : 255;
         const low = variant === 'blend' ? 32 : 0;
-        for (const [i,x] of [12,36,60,84].entries()) {
+        for (const [i,x] of (variant.startsWith('merge') ? [] : [12,36,60,84]).entries()) {
           const left = i%2 === 0;
           for (const [y,expected] of [[16,left?[high,low,low,255]:[low,high,low,255]],[48,left?[low,low,high,255]:[high,high,high,255]]]) {
             const offset = (y*image.width+x)*4;
             assert.deepEqual([...image.data.subarray(offset,offset+4)],expected,`${scenario} pixel ${x},${y}`);
+          }
+        }
+        if (variant.startsWith('merge')) {
+          assert.deepEqual([...image.data.subarray((16*96+12)*4,(16*96+12)*4+4)],[191,0,0,255],`${scenario} painter order red`);
+          assert.deepEqual([...image.data.subarray((48*96+12)*4,(48*96+12)*4+4)],[0,0,159,255],`${scenario} painter order blue`);
+          assert.equal(await page.locator('#status').getAttribute('data-live-passes'),'17');
+          assert.equal(await page.locator('#status').getAttribute('data-raster-passes'),variant === 'merge' ? '2' : '17');
+          if (variant === 'merge-reference') {
+            const merged = PNG.sync.read(await readFile(resolve(output,scenario.replace('-reference','')+'.png')));
+            assert.deepEqual(image.data,merged.data,`${scenario} painter-order complete images`);
           }
         }
         if (variant.startsWith('graph')) {

@@ -228,6 +228,16 @@ struct GraphDependency final
     /// Later semantic access.
     GraphAccessMode Destination = GraphAccessMode::Sampled;
 };
+/// Owner-thread investigation controls; neither option changes authored draw order.
+struct GraphCompileOptions final
+{
+    /// Keep every legal authored pass when false; initialization is still validated.
+    bool CullPasses = true;
+    /// Opt into conservative consecutive raster-pass merging. Equal attachment,
+    /// read scopes and rectangles, Load/Store preservation and no side effects are
+    /// required. Compute and incompatible passes always retain their boundaries.
+    bool MergeRasterPasses = false;
+};
 /// Deterministic report copied to caller storage; no heap allocations or strings.
 struct GraphReport final
 {
@@ -235,6 +245,21 @@ struct GraphReport final
     ludus::foundation::uint32 PassCount = 0;
     /// Passes retained by roots, or all passes in reference mode.
     ludus::foundation::uint32 LivePasses = 0;
+    /// Planned raster encoder/pass starts, excluding the facade's acquisition clear.
+    ludus::foundation::uint32 RasterPasses = 0;
+    /// Live compute dispatches; each retains a separate compute scope.
+    ludus::foundation::uint32 ComputePasses = 0;
+    /// Raster boundaries removed by the explicit merge option.
+    ludus::foundation::uint32 MergedPasses = 0;
+    /// Live direct and indirect draw packets; zero-instance indirect work still counts.
+    ludus::foundation::uint32 DrawCount = 0;
+    /// Fixed service storage reserved per graph slot, including unused bounded capacity.
+    ludus::foundation::usize PlanStorageBytes = 0;
+    /// Sum of imported buffer sizes, including unused imports; logical bytes, not driver allocation.
+    ludus::foundation::uint64 BufferBytes = 0;
+    /// Imported initialized mip texel bytes and private 32-bit depth bytes for attachments.
+    /// Includes unused imports; excludes driver padding, staging, surface and pool slack.
+    ludus::foundation::uint64 TextureBytes = 0;
     /// Number of semantic dependencies (maximum 512).
     ludus::foundation::uint32 DependencyCount = 0;
     /// Failing pass/resource, or 32/16 when not applicable.
@@ -251,6 +276,8 @@ struct GraphReport final
     ludus::foundation::uint32 Lines[32]{};
     /// True for passes removed by root analysis.
     bool Culled[32]{};
+    /// Authored index of the first pass in this raster group; 32 for culled/compute passes.
+    ludus::foundation::uint32 RasterGroup[32]{};
     /// First live use for each resource, or 32 if unused.
     ludus::foundation::uint32 FirstUse[16]{};
     /// Last live use for each resource, or 32 if unused.
@@ -297,6 +324,11 @@ CreateGraphTexture(DeviceHandle, OrderedGraph, const TextureDescription&, GraphV
 /// freezes setup; no execution occurs. Whole resources remain physically distinct.
 [[nodiscard]] RasterStatus
 CompileOrderedGraph(DeviceHandle, OrderedGraph, GraphReport&, bool reference = false) noexcept;
+/// Compile with explicit culling/merging controls, retaining the same validation,
+/// failure, freeze and ownership contract as the compatibility overload above.
+/// Reports logical passes/dependencies separately from planned raster groups.
+[[nodiscard]] RasterStatus
+CompileOrderedGraph(DeviceHandle, OrderedGraph, GraphReport&, const GraphCompileOptions&) noexcept;
 /// Preflight frozen imports/packets and backend pass objects, acquire a frame, encode
 /// authored live order and submit once. Preflight/target skip preserves graph/token for
 /// retry; once encoding begins graph is consumed even on failure. Partial backend work

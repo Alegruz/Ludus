@@ -1337,7 +1337,120 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
     return RasterStatus::Ready;
 }
 } // namespace
+namespace
+{
+bool SameGraphRectangle(const RasterRectangle& a, const RasterRectangle& b) noexcept
+{
+    return a.X == b.X && a.Y == b.Y && a.Width == b.Width && a.Height == b.Height;
+}
+// Thanks to Khronos, Vulkan Specification, "Fragment Operations", rasterization
+// order (https://docs.vulkan.org/spec/latest/chapters/fragops.html), and W3C/GPUWeb,
+// WebGPU, "Resource Usages" (https://www.w3.org/TR/webgpu/#resource-usages).
+// Only ordinary attachment operations combine; identical read scopes avoid new
+// cross-pass resource hazards. No barrier is issued inside the merged scope.
+// See docs/architecture/rhi-gdi.md, "Backend lowering and optional optimization".
+bool CanMergeRaster(const GraphPassRecord& before, const GraphPassRecord& after) noexcept
+{
+    const auto& a = before.Info.Description;
+    const auto& b = after.Info.Description;
+    if (before.IsCompute || after.IsCompute || before.SideEffect || after.SideEffect ||
+        before.Info.Texture != after.Info.Texture || b.ColorLoad != RasterLoad::Load ||
+        b.DepthLoad != RasterLoad::Load || a.ColorStore != RasterStore::Store || b.ColorStore != RasterStore::Store ||
+        a.DepthStore != RasterStore::Store || b.DepthStore != RasterStore::Store ||
+        a.DepthReadOnly != b.DepthReadOnly || a.UseViewport != b.UseViewport || a.UseScissor != b.UseScissor ||
+        (a.UseViewport && !SameGraphRectangle(a.Viewport, b.Viewport)) ||
+        (a.UseScissor && !SameGraphRectangle(a.Scissor, b.Scissor)) || before.UseCount != after.UseCount)
+    {
+        return false;
+    }
+    for (usize i = 0; i < before.UseCount; ++i)
+    {
+        const auto& x = before.Uses[i];
+        const auto& y = after.Uses[i];
+        if (GraphAccess::Resource(x.Resource) != GraphAccess::Resource(y.Resource))
+        {
+            return false;
+        }
+        if (IsWrite(x.Access) && y.Access == GraphAccessMode::ColorReadWrite &&
+            (x.Access == GraphAccessMode::ColorWrite || x.Access == GraphAccessMode::ColorReadWrite))
+        {
+            continue; // Compiler already proved the consecutive attachment version chain.
+        }
+        if (x.Access != y.Access || GraphAccess::Version(x.Resource) != GraphAccess::Version(y.Resource) ||
+            x.Offset != y.Offset || x.Size != y.Size || x.Visibility != y.Visibility || IsWrite(x.Access))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+void PlanRasterGroups(const GraphRecord& graph, GraphReport& report, bool merge) noexcept
+{
+    report.RasterPasses = report.ComputePasses = report.MergedPasses = report.DrawCount = 0;
+    report.PlanStorageBytes = sizeof(GraphRecord);
+    report.BufferBytes = report.TextureBytes = 0;
+    for (usize r = 0; r < graph.ResourceCount; ++r)
+    {
+        const auto& resource = graph.Resources[r];
+        const auto& physical = At(resource.Kind, resource.Slot);
+        if (resource.Kind == RasterKind::Buffer)
+        {
+            report.BufferBytes += physical.Buffer.Size;
+        }
+        else
+        {
+            const auto& texture = physical.Texture;
+            const uint64 pixels = uint64{texture.Width} * texture.Height;
+            const uint64 channels = texture.Format == RasterFormat::R8Unorm    ? 1U
+                                    : texture.Format == RasterFormat::Rg8Unorm ? 2U
+                                                                               : 4U;
+            uint32 width = texture.Width, height = texture.Height;
+            for (uint32 level = 0; level < texture.MipLevels; ++level)
+            {
+                report.TextureBytes += uint64{width} * height * channels;
+                width = width > 1 ? width / 2 : 1;
+                height = height > 1 ? height / 2 : 1;
+            }
+            if (texture.Attachment)
+            {
+                report.TextureBytes += pixels * 4U;
+            }
+        }
+    }
+    for (usize p = 0; p < graph.PassCount; ++p)
+    {
+        report.RasterGroup[p] = 32;
+        if (report.Culled[p])
+        {
+            continue;
+        }
+        const auto& pass = graph.Passes[p];
+        report.DrawCount += static_cast<uint32>(pass.DrawCount);
+        if (pass.IsCompute)
+        {
+            ++report.ComputePasses;
+        }
+        else if (merge && p != 0 && report.RasterGroup[p - 1] != 32 && CanMergeRaster(graph.Passes[p - 1], pass))
+        {
+            report.RasterGroup[p] = report.RasterGroup[p - 1];
+            ++report.MergedPasses;
+        }
+        else
+        {
+            report.RasterGroup[p] = static_cast<uint32>(p);
+            ++report.RasterPasses;
+        }
+    }
+}
+} // namespace
 RasterStatus CompileOrderedGraph(DeviceHandle device, OrderedGraph handle, GraphReport& output, bool reference) noexcept
+{
+    return CompileOrderedGraph(device, handle, output, GraphCompileOptions{!reference, false});
+}
+RasterStatus CompileOrderedGraph(DeviceHandle device,
+                                 OrderedGraph handle,
+                                 GraphReport& output,
+                                 const GraphCompileOptions& options) noexcept
 {
     GraphRecord* graph = nullptr;
     const auto admission = GraphAdmission(device, handle, graph);
@@ -1360,7 +1473,19 @@ RasterStatus CompileOrderedGraph(DeviceHandle device, OrderedGraph handle, Graph
     {
         report.FirstUse[i] = report.LastUse[i] = 32;
     }
-    const auto compiled = CompileGraph(*graph, report, reference);
+    const auto compiled = CompileGraph(*graph, report, !options.CullPasses);
+    // A rejected plan never publishes encoder groups or cost estimates.
+    report.RasterPasses = report.ComputePasses = report.MergedPasses = report.DrawCount = 0;
+    report.PlanStorageBytes = 0;
+    report.BufferBytes = report.TextureBytes = 0;
+    for (auto& group : report.RasterGroup)
+    {
+        group = 32;
+    }
+    if (compiled == RasterStatus::Ready)
+    {
+        PlanRasterGroups(*graph, report, options.MergeRasterPasses);
+    }
     output = report;
     if (compiled == RasterStatus::Ready)
     {
@@ -1494,58 +1619,62 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
             continue;
         }
         const auto& pass = graph->Passes[p];
-        backend::RasterEndPass();
-        const auto currentEnd = Admission(device, false);
-        if (currentEnd != RasterStatus::Ready)
+        const bool continuation = !pass.IsCompute && graph->Report.RasterGroup[p] != p;
+        if (!continuation)
         {
-            handle = {};
-            return currentEnd;
-        }
-        for (usize i = 0; i < pass.UseCount; ++i)
-        {
-            const auto& use = pass.Uses[i];
-            const auto& resource = graph->Resources[GraphAccess::Resource(use.Resource)];
-            if (resource.Kind == RasterKind::Buffer)
-            {
-                backend::ComputeBufferBarrier(resource.Slot, use.Access);
-                const auto currentBuffer = Admission(device, false);
-                if (currentBuffer != RasterStatus::Ready)
-                {
-                    handle = {};
-                    return currentBuffer;
-                }
-                FrameRetain(RasterKind::Buffer, resource.Slot);
-            }
-            if (resource.Kind != RasterKind::Texture || use.Access != GraphAccessMode::Sampled)
-            {
-                continue;
-            }
-            const auto visibility = static_cast<uint8>(use.Visibility);
-            const auto sampled = visibility == 1   ? RasterTextureUse::SampledVertex
-                                 : visibility == 2 ? RasterTextureUse::SampledFragment
-                                                   : RasterTextureUse::SampledBoth;
-            backend::RasterTextureBarrier(resource.Slot, sampled);
-            const auto currentBarrier = Admission(device, false);
-            if (currentBarrier != RasterStatus::Ready)
+            backend::RasterEndPass();
+            const auto currentEnd = Admission(device, false);
+            if (currentEnd != RasterStatus::Ready)
             {
                 handle = {};
-                return currentBarrier;
+                return currentEnd;
             }
-            FrameRetain(RasterKind::Texture, resource.Slot);
-            At(RasterKind::Texture, resource.Slot).FrameTextureUse = sampled;
-        }
-        const auto started = pass.IsCompute ? EncodeCompute(pass.Dispatch) : backend::RasterBeginPass(pass.Info);
-        if (started != RasterStatus::Ready)
-        {
-            internal::FaultRasterSession();
-            handle = {};
-            return started;
-        }
-        const auto current = Admission(device, false);
-        if (current != RasterStatus::Ready)
-        {
-            handle = {};
-            return current;
+            for (usize i = 0; i < pass.UseCount; ++i)
+            {
+                const auto& use = pass.Uses[i];
+                const auto& resource = graph->Resources[GraphAccess::Resource(use.Resource)];
+                if (resource.Kind == RasterKind::Buffer)
+                {
+                    backend::ComputeBufferBarrier(resource.Slot, use.Access);
+                    const auto currentBuffer = Admission(device, false);
+                    if (currentBuffer != RasterStatus::Ready)
+                    {
+                        handle = {};
+                        return currentBuffer;
+                    }
+                    FrameRetain(RasterKind::Buffer, resource.Slot);
+                }
+                if (resource.Kind != RasterKind::Texture || use.Access != GraphAccessMode::Sampled)
+                {
+                    continue;
+                }
+                const auto visibility = static_cast<uint8>(use.Visibility);
+                const auto sampled = visibility == 1   ? RasterTextureUse::SampledVertex
+                                     : visibility == 2 ? RasterTextureUse::SampledFragment
+                                                       : RasterTextureUse::SampledBoth;
+                backend::RasterTextureBarrier(resource.Slot, sampled);
+                const auto currentBarrier = Admission(device, false);
+                if (currentBarrier != RasterStatus::Ready)
+                {
+                    handle = {};
+                    return currentBarrier;
+                }
+                FrameRetain(RasterKind::Texture, resource.Slot);
+                At(RasterKind::Texture, resource.Slot).FrameTextureUse = sampled;
+            }
+            const auto started = pass.IsCompute ? EncodeCompute(pass.Dispatch) : backend::RasterBeginPass(pass.Info);
+            if (started != RasterStatus::Ready)
+            {
+                internal::FaultRasterSession();
+                handle = {};
+                return started;
+            }
+            const auto current = Admission(device, false);
+            if (current != RasterStatus::Ready)
+            {
+                handle = {};
+                return current;
+            }
         }
         if (!pass.IsCompute)
         {
