@@ -26,8 +26,9 @@
 // observable side effects). For such a type a container may grow its storage by
 // memcpy'ing the elements and skipping the per-element destructor calls.
 //
-// The pinned C++23/Clang 18 toolchain does not expose this property, so Ludus uses an
-// opt-in trait, exactly like Folly's IsRelocatable and EASTL's memcpy fast path:
+// C++23 provides no portable std::is_trivially_relocatable trait. Ludus does not
+// use Clang's __is_trivially_relocatable intrinsic; it uses an explicit opt-in
+// trait, drawing on Folly's IsRelocatable and EASTL's byte-copy dispatch:
 //
 //   * By default IsTriviallyRelocatable<T> is std::is_trivially_copyable_v<T>,
 //     which the standard already guarantees is byte-copyable. This is the safe
