@@ -5,6 +5,7 @@
 #include "internal/content_browser.h"
 #include "internal/scene_workspace.h"
 #include "internal/script_workspace.h"
+#include "internal/world_workspace.h"
 
 #include <QAbstractItemDelegate>
 #include <QAction>
@@ -46,8 +47,10 @@ void MainWindow::RenderDocumentActions()
     const bool configuration = area == Configuration_;
     const bool scripts = area == Scripts_;
     const bool scene = area == Scene_;
+    const bool world = area == World_;
     SaveAction_->setText(project         ? QStringLiteral("&Save Project Settings")
                          : audio         ? QStringLiteral("&Save Audio")
+                         : world         ? QStringLiteral("&Save World")
                          : scene         ? QStringLiteral("&Save Scene")
                          : scripts       ? QStringLiteral("&Save Script Asset")
                          : configuration ? QStringLiteral("&Save Preferences")
@@ -60,6 +63,7 @@ void MainWindow::RenderDocumentActions()
                                         : QString());
     SaveAction_->setEnabled(project   ? Controller_->Caps().CanEdit && !rootBlocked
                             : audio   ? Audio_->CanSave()
+                            : world   ? World_->CanSave()
                             : scene   ? Scene_->CanSave()
                             : scripts ? Scripts_->CanSave()
                                       : configuration && Configuration_->Preview() != nullptr);
@@ -86,10 +90,12 @@ void MainWindow::RenderDocumentActions()
     else
     {
         const bool inProject = project && (focus == nullptr || ProjectSettings_->isAncestorOf(focus));
-        UndoAction_->setEnabled(scene     ? Scene_->CanUndo()
+        UndoAction_->setEnabled(world     ? World_->CanUndo()
+                                : scene   ? Scene_->CanUndo()
                                 : scripts ? Scripts_->CanUndo()
                                           : inProject && Controller_->CanUndoProject());
-        RedoAction_->setEnabled(scene     ? Scene_->CanRedo()
+        RedoAction_->setEnabled(world     ? World_->CanRedo()
+                                : scene   ? Scene_->CanRedo()
                                 : scripts ? Scripts_->CanRedo()
                                           : inProject && Controller_->CanRedoProject());
     }
@@ -109,6 +115,10 @@ void MainWindow::OnUndoRequested()
     else if (auto* plain = qobject_cast<QPlainTextEdit*>(QApplication::focusWidget()))
     {
         plain->undo();
+    }
+    else if (WorkTabs_->currentWidget() == World_)
+    {
+        World_->Undo();
     }
     else if (WorkTabs_->currentWidget() == Scene_)
     {
@@ -139,6 +149,10 @@ void MainWindow::OnRedoRequested()
     else if (auto* plain = qobject_cast<QPlainTextEdit*>(QApplication::focusWidget()))
     {
         plain->redo();
+    }
+    else if (WorkTabs_->currentWidget() == World_)
+    {
+        World_->Redo();
     }
     else if (WorkTabs_->currentWidget() == Scene_)
     {

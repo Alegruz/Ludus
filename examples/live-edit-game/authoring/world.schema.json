@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "id": "ludus.world.starter.v1",
+  "label": "Component authoring starter",
+  "components": [
+    {
+      "id": "transform",
+      "label": "Position",
+      "help": "Place an entity in the world. Values are in metres.",
+      "required": true,
+      "properties": [
+        {
+          "id": "x",
+          "label": "X",
+          "type": "number",
+          "default": 0,
+          "help": "Horizontal position",
+          "unit": "m",
+          "min": -10000,
+          "max": 10000
+        },
+        {
+          "id": "y",
+          "label": "Y",
+          "type": "number",
+          "default": 0,
+          "help": "Vertical position",
+          "unit": "m",
+          "min": -10000,
+          "max": 10000
+        },
+        {
+          "id": "z",
+          "label": "Z",
+          "type": "number",
+          "default": 0,
+          "help": "Depth position",
+          "unit": "m",
+          "min": -10000,
+          "max": 10000
+        }
+      ]
+    },
+    {
+      "id": "presentation",
+      "label": "Presentation",
+      "help": "Content-facing options for artists, audio designers and localization. Logical asset IDs are declared by the game owner.",
+      "required": false,
+      "properties": [
+        {
+          "id": "visible",
+          "label": "Visible",
+          "type": "boolean",
+          "default": true,
+          "help": "Disable rendering while keeping the entity.",
+          "unit": ""
+        },
+        {
+          "id": "asset",
+          "label": "Visual asset",
+          "type": "asset",
+          "default": "",
+          "help": "Choose a declared game asset.",
+          "unit": "",
+          "asset_kind": "mesh"
+        },
+        {
+          "id": "sound",
+          "label": "Sound asset",
+          "type": "asset",
+          "default": "",
+          "help": "Choose a declared audio asset.",
+          "unit": "",
+          "asset_kind": "audio"
+        },
+        {
+          "id": "caption",
+          "label": "Localization key",
+          "type": "string",
+          "default": "object.name",
+          "help": "Use the project localization key, not translated text.",
+          "unit": ""
+        },
+        {
+          "id": "style",
+          "label": "Display style",
+          "type": "enum",
+          "default": "solid",
+          "help": "Select a presentation style.",
+          "unit": "",
+          "choices": [
+            "solid",
+            "wireframe"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "behavior",
+      "label": "Behavior",
+      "help": "Game-defined values. The game adapter decides how these map to typed pools.",
+      "required": false,
+      "properties": [
+        {
+          "id": "enabled",
+          "label": "Enabled",
+          "type": "boolean",
+          "default": true,
+          "help": "Include the entity in simulation.",
+          "unit": ""
+        },
+        {
+          "id": "priority",
+          "label": "Priority",
+          "type": "integer",
+          "default": 0,
+          "help": "Ordering priority.",
+          "unit": "",
+          "min": -100,
+          "max": 100
+        },
+        {
+          "id": "target",
+          "label": "Target entity",
+          "type": "entity",
+          "default": "",
+          "help": "Stable reference; None means no target.",
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "id": "experiment",
+      "label": "Rendering experiment",
+      "help": "A researcher-owned example of extending the inspector without adding editor widgets.",
+      "required": false,
+      "properties": [
+        {
+          "id": "roughness",
+          "label": "Roughness",
+          "type": "number",
+          "default": 0.5,
+          "help": "Surface experiment parameter.",
+          "unit": "",
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "samples",
+          "label": "Sample count",
+          "type": "integer",
+          "default": 16,
+          "help": "Experiment sample count.",
+          "unit": "",
+          "min": 1,
+          "max": 4096
+        }
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "id": "mesh.cube",
+      "label": "Cube mesh",
+      "kind": "mesh"
+    },
+    {
+      "id": "audio.pickup",
+      "label": "Pickup sound",
+      "kind": "audio"
+    }
+  ]
+}

@@ -323,3 +323,50 @@ resolved its Qt assertion. Linux reference-toolchain ASan/UBSan CI remains
 required before marking the change ready. Full native-platform suites and
 moderated sessions with representative programming/content disciplines remain
 separate acceptance work.
+
+## Gameplay World workspace: first declarative component-authoring slice
+
+This slice adds a World document owner beside the existing sample Scene adapter.
+The canonical workflow, schema contract, audience scenarios and scope limits are
+in [Gameplay world authoring](editor-workspace.md#gameplay-world-authoring).
+The editable `live-edit-game/authoring` starter is embedded in the sample library;
+it is not bound to that game's runtime.
+
+Evidence collected on macOS arm64 using Clang/LLVM 18.1.8, managed CMake 3.29.6,
+Ninja 1.11.1.3 and Qt 6.11.2, in an isolated task worktree:
+
+- Native editor/application tests build warning-clean with warnings-as-errors.
+- World regressions: 13 cases and 432 assertions pass. They cover strict bounded
+  schema/document loading, stable identity, required/optional/tag components,
+  self-reference duplication, referenced deletion, typed conversion, asset kinds,
+  invalid text preservation, file/schema/lock conflicts, symlinks, new-file
+  creation, explicit damaged/stale recovery refusal, recovery-write failure reporting, long reference labels, menu ownership and cancelled
+  Close Project.
+- Complete Development and clean Debug/UBSan editor suites: each 126 passed,
+  six explicitly skipped and 1,992 assertions passed. UBSan uses
+  `halt_on_error=1:print_stacktrace=1`. Native filesystem-watch cases run with
+  host access; no game/runtime rendering is inferred from offscreen results.
+- Existing scene-document Debug/UBSan regressions: four cases, 138 assertions pass.
+- Clang-tidy 18 passes for the new model/workspace/tests and changed MainWindow,
+  layout and document-command units. Project formatter covers the changed C++.
+- Styled 800×640 World screenshot inspected: entity list and persistent commands
+  remain available; long component help and full-height fields scroll in the
+  inspector. Regressions check that fields are not compressed below their minimum
+  size. This is offscreen layout evidence, not native pointer/IME/screen-reader
+  acceptance.
+- Review found and fixed replacement-before-discard validation, re-reading a
+  same-file reopen after Save, in-place entity/reference-label refresh, removal
+  of matching recovery when Undo reaches the saved baseline, and compressed
+  inspector rows, bounded reference-picker sizing and persistent recovery-write
+  failure feedback. The associated failure/identity/layout paths have regressions.
+- Canonical documentation index/link checks, strict MkDocs, API inventory
+  generation (133 public headers, no new documentation gaps) and documentation
+  wiki parity checks pass.
+
+The previously recorded Clang 18 ASan startup deadlock on this macOS host remains
+an unavailable gate; the UBSan result does not establish a clean ASan result.
+Reference Linux ASan/UBSan and browser compilation qualification remain pending.
+World browser file actions explain and enforce the native-editor limitation.
+Runtime binding, production-scale worlds, hierarchy/prefabs and schema migrations
+are explicit remaining capabilities. Audience scenarios are designed acceptance
+cases, not interviews or a user study.
