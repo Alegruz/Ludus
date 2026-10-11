@@ -1,10 +1,13 @@
 #pragma once
 
 // Thanks to Meta/Folly contributors, "folly/Traits.h", "IsRelocatable":
-// https://github.com/facebook/folly/blob/main/folly/docs/Traits.md , and
-// Electronic Arts/EASTL contributors, "vector.h" (relocatable growth paths):
-// https://github.com/electronicarts/EASTL/blob/master/include/EASTL/vector.h .
-// Their trait-controlled byte relocation informs this independent Ludus trait.
+// https://github.com/facebook/folly/blob/4dda9bd1227b5fa24c8c83c4fa515d0f980534ff/folly/docs/Traits.md .
+// Electronic Arts/EASTL contributors, "vector.h", DoGrow/DoRealloc, and
+// "memory.h", uninitialized_copy_impl (trait-selected byte copying):
+// https://github.com/electronicarts/EASTL/blob/e323f67e5d93fdadcd44f7998069d804697b1945/include/EASTL/vector.h
+// https://github.com/electronicarts/EASTL/blob/e323f67e5d93fdadcd44f7998069d804697b1945/include/EASTL/memory.h .
+// Folly's relocation opt-in and EASTL's byte-copy dispatch inform this independent
+// Ludus trait; EASTL's growth also destroys the old elements.
 // Thanks also to Arthur O'Dwyer, "std::is_trivially_relocatable", WG21 P1144R12
 // (2024), sections 2 and 3.3, for relocation terminology and trait fallback:
 // https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p1144r12.html .
@@ -23,8 +26,7 @@
 // observable side effects). For such a type a container may grow its storage by
 // memcpy'ing the elements and skipping the per-element destructor calls.
 //
-// The C++ standard does not yet expose this property (P1144 / P2786 are still in
-// flight and Clang 18 defines no feature-test macro for it), so Ludus uses an
+// The pinned C++23/Clang 18 toolchain does not expose this property, so Ludus uses an
 // opt-in trait, exactly like Folly's IsRelocatable and EASTL's memcpy fast path:
 //
 //   * By default IsTriviallyRelocatable<T> is std::is_trivially_copyable_v<T>,
