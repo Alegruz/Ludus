@@ -43,6 +43,9 @@ public:
     /// @param id Catalog resource identifier copied into the pending job.
     /// @param draft Optional sound draft copied and validated before worker launch.
     /// @param musicDraft Optional music draft; mutually exclusive with draft.
+    /// @param snapshot Optional immutable version-1 catalog copied before launch;
+    /// worker lookup uses this snapshot instead of reopening catalog.json. Source
+    /// files remain loose-file revisions; this does not freeze their path contents.
     /// @return Pending after launch or while an acquisition is already pending;
     /// Invalid for invalid input/uninitialized audio; OutOfMemory for allocation
     /// failure; Limit if loader identity space is exhausted; IoError for worker
@@ -50,7 +53,8 @@ public:
     [[nodiscard]] ContentStatus Begin(std::string_view root,
                                       std::string_view id,
                                       const Sound* draft = nullptr,
-                                      const Music* musicDraft = nullptr) noexcept;
+                                      const Music* musicDraft = nullptr,
+                                      const ludus::content::Catalog* snapshot = nullptr) noexcept;
     /// Install completed acquisition on the control owner after routing checks.
     /// @param routing Bus/group names borrowed during this call.
     /// @param output Receives the new lease on Ok; preserved on failure/Pending.

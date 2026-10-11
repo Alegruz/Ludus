@@ -1,7 +1,10 @@
 #include "presentation.h"
+#include "resource_adapter.h"
+#include <ludus/content/content.h>
 #include <ludus/foundation/logging/log.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/logging/log_system.hpp>
+#include <ludus/runtime/resources/manager.h>
 
 #include <ludus/foundation/math/scalar.hpp>
 
@@ -35,6 +38,26 @@ bool Acquire(audio::content::Loader& loader,
     loader.Cancel();
     return false;
 }
+struct ResourceCleanup final
+{
+    ludus::resources::Manager& Manager;
+    audio::AudioSystem& Audio;
+    SoundResourceAdapter& Adapter;
+    ~ResourceCleanup() noexcept
+    {
+        (void)Manager.Shutdown();
+        Adapter.CancelAndJoin();
+        Audio.StopAll();
+        (void)Audio.BeginShutdown();
+        while (Manager.Shutdown() != ludus::resources::Status::Ok)
+        {
+            Audio.Service();
+            Manager.Service(64);
+            const timespec wait{0, 1000000};
+            nanosleep(&wait, nullptr);
+        }
+    }
+};
 bool Run(std::string_view root, bool native) noexcept
 {
     audio::BusConfig buses[3];
@@ -55,16 +78,60 @@ bool Run(std::string_view root, bool native) noexcept
         LUDUS_LOG_ERROR(ludus::foundation::logging::LOG_CORE, "Audio initialization: {}", audio::ToString(initialized));
         return false;
     }
-    audio::content::Loader loader(system);
-    audio::content::Lease soundLease, musicLease;
-    if (!Acquire(loader, root, "sound/impact", routing, soundLease) ||
-        !Acquire(loader, root, "music/theme", routing, musicLease))
+    // Game and preview callers share one sound operation, with independent demand.
+    // Keep the mounted loose-file root immutable during this sample session.
+    ludus::content::Bytes catalogBytes;
+    ludus::content::Catalog catalog;
+    ludus::content::Diagnostic diagnostic;
+    ludus::content::Text<4096> resourceRoot;
+    if (!resourceRoot.Set(root) ||
+        ludus::content::ReadFile(root, "catalog.json", ludus::content::MAX_DOCUMENT_BYTES, catalogBytes) !=
+            ludus::content::Status::Ok ||
+        catalog.Read(catalogBytes.String(), diagnostic) != ludus::content::Status::Ok)
     {
         return false;
     }
-    audio::content::Sound sound;
-    audio::app::EventDescriptor descriptor;
-    if (loader.GetSound(soundLease, sound, descriptor) != ludus::content::Status::Ok)
+    SoundResourceAdapter soundAdapter(system, catalog, resourceRoot, routing);
+    auto resourceAdapter = soundAdapter.Descriptor();
+    ludus::resources::Manager resources;
+    ResourceCleanup resourceCleanup{resources, system, soundAdapter};
+    ludus::resources::ScopeHandle gameScope, previewScope;
+    ludus::resources::AssetHandle soundAsset;
+    ludus::resources::RequestHandle gameRequest, previewRequest;
+    ludus::content::ResourceId gameName, previewName, soundId;
+    if (!gameName.Set("level/audio-demo") || !previewName.Set("preview/audio-demo") || !soundId.Set("sound/impact") ||
+        resources.Initialize(catalog, &resourceAdapter, 1) != ludus::resources::Status::Ok ||
+        resources.OpenScope(gameName, gameScope) != ludus::resources::Status::Ok ||
+        resources.OpenScope(previewName, previewScope) != ludus::resources::Status::Ok ||
+        resources.Resolve(soundId, ludus::content::Kind::Sound, soundAsset) != ludus::resources::Status::Ok ||
+        resources.BeginAcquire(gameScope, soundAsset, gameRequest) != ludus::resources::Status::Ok ||
+        resources.BeginAcquire(previewScope, soundAsset, previewRequest) != ludus::resources::Status::Ok ||
+        resources.Cancel(previewRequest) != ludus::resources::Status::Ok ||
+        resources.CloseScope(previewScope) != ludus::resources::Status::Ok)
+    {
+        return false;
+    }
+    ludus::resources::Lease soundLease;
+    ludus::resources::Status acquired = ludus::resources::Status::Pending;
+    for (uint32 i = 0; i < 10000 && acquired == ludus::resources::Status::Pending; ++i)
+    {
+        resources.Service();
+        acquired = resources.TakeLease(gameRequest, soundLease);
+        const timespec wait{0, 1000000};
+        nanosleep(&wait, nullptr);
+    }
+    const void* soundView = nullptr;
+    if (acquired != ludus::resources::Status::Ok ||
+        resources.Borrow(soundLease.Token(), ludus::content::Kind::Sound, soundView) != ludus::resources::Status::Ok)
+    {
+        return false;
+    }
+    const auto& payload = *static_cast<const SoundResourceAdapter::Payload*>(soundView);
+    const auto& sound = payload.Definition;
+    const auto& descriptor = payload.Descriptor;
+    audio::content::Loader loader(system);
+    audio::content::Lease musicLease;
+    if (!Acquire(loader, root, "music/theme", routing, musicLease))
     {
         return false;
     }
@@ -162,6 +229,7 @@ bool Run(std::string_view root, bool native) noexcept
         }
         presentation.Service(tick);
         loader.Service();
+        resources.Service();
         const timespec wait{0, native ? 16666667L : 1000000L};
         nanosleep(&wait, nullptr);
     }
@@ -179,7 +247,7 @@ bool Run(std::string_view root, bool native) noexcept
                    snapshot.Errors);
     (void)system.Stop(musicVoice);
     system.StopAll();
-    if (loader.Release(soundLease) != ludus::content::Status::Ok ||
+    if (soundLease.Release() != ludus::resources::Status::Ok ||
         loader.Release(musicLease) != ludus::content::Status::Ok)
     {
         return false;
