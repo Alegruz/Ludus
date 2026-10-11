@@ -58,6 +58,11 @@ bool ByteCursor::ReadUint64LittleEndian(uint64& output) noexcept
     return true;
 }
 
+// Thanks to the Unicode Consortium, "The Unicode Standard 17.0", section 3.9,
+// tables 3-6/3-7, for scalar decoding and well-formed UTF-8 byte ranges:
+// https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/ .
+// Reject overlong encodings, surrogates and values above U+10FFFF; no
+// normalization, grapheme segmentation or replacement-character recovery.
 ParseStatus ValidateUtf8(std::string_view input, ParseError& error) noexcept
 {
     error = {};

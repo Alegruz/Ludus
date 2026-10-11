@@ -1,5 +1,23 @@
 #pragma once
 
+// Thanks to Meta/Folly contributors, "folly/Traits.h", "IsRelocatable":
+// https://github.com/facebook/folly/blob/4dda9bd1227b5fa24c8c83c4fa515d0f980534ff/folly/docs/Traits.md .
+// Electronic Arts/EASTL contributors, "vector.h", DoGrow/DoRealloc, and
+// "memory.h", uninitialized_copy_impl (trait-selected byte copying):
+// https://github.com/electronicarts/EASTL/blob/e323f67e5d93fdadcd44f7998069d804697b1945/include/EASTL/vector.h
+// https://github.com/electronicarts/EASTL/blob/e323f67e5d93fdadcd44f7998069d804697b1945/include/EASTL/memory.h .
+// Folly's relocation opt-in and EASTL's byte-copy dispatch inform this independent
+// Ludus trait; EASTL's growth also destroys the old elements.
+// Thanks also to Arthur O'Dwyer, "std::is_trivially_relocatable", WG21 P1144R12
+// (2024), sections 2 and 3.3, for relocation terminology and trait fallback:
+// https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p1144r12.html .
+// Alisdair Meredith, Mungo Gill, Joshua Berne, Corentin Jabot, Pablo Halpern and
+// Lori Hughes, "Trivial Relocatability For C++26", WG21 P2786R13 (2025), section 7:
+// https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p2786r13.html . Thank
+// you for the comparison of relocation/replacement; neither proposal's language
+// machinery is implemented here. Keep a C++23 trivially-copyable default plus
+// explicit author opt-in. Detailed review: docs/architecture/containers.md.
+//
 // Trivial-relocation trait for Ludus containers.
 //
 // "Relocation" is move-construct-then-destroy-the-source. A type is *trivially
@@ -8,9 +26,9 @@
 // observable side effects). For such a type a container may grow its storage by
 // memcpy'ing the elements and skipping the per-element destructor calls.
 //
-// The C++ standard does not yet expose this property (P1144 / P2786 are still in
-// flight and Clang 18 defines no feature-test macro for it), so Ludus uses an
-// opt-in trait, exactly like Folly's IsRelocatable and EASTL's memcpy fast path:
+// C++23 provides no portable std::is_trivially_relocatable trait. Ludus does not
+// use Clang's __is_trivially_relocatable intrinsic; it uses an explicit opt-in
+// trait, drawing on Folly's IsRelocatable and EASTL's byte-copy dispatch:
 //
 //   * By default IsTriviallyRelocatable<T> is std::is_trivially_copyable_v<T>,
 //     which the standard already guarantees is byte-copyable. This is the safe

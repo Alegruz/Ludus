@@ -181,6 +181,10 @@ bool FramePresenter::ReplaceClearConfiguration(game_api::ByteView artifact, ludu
     {
         return false;
     }
+    // Thanks to Glenn Fowler, Landon Curt Noll and Phong Vo, "FNV Hash",
+    // "FNV-1a alternate algorithm" and "Parameters of the FNV-1/FNV-1a hash":
+    // https://www.isthe.com/chongo/tech/comp/fnv/ . Adopt the XOR/multiply sequence
+    // and published constants for a non-cryptographic hash; collisions remain possible.
     ludus::foundation::uint64 computed = 0xCBF29CE484222325ULL;
     for (ludus::foundation::usize i = 0; i < artifact.Size; ++i)
     {
