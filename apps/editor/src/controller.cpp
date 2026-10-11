@@ -203,6 +203,7 @@ bool EditorController::CloseProject()
     State_.NextJob = nextJob;
     SetupCheckPending_ = false;
     SetupCheckJob_ = 0;
+    PendingSetupDetails_.clear();
     PendingCreatedProject_.clear();
     PlayState_ = PlaySnapshot{};
     Watch_.Stop();
@@ -364,6 +365,7 @@ void EditorController::StartJob(ActionKind kind, ToolOperation operation, const 
         return; // duplicate/invalid starts cannot create a second job
     }
     PendingDebuggerPrompt_ = false;
+    PendingSetupDetails_.clear();
     State_ = BeginJob(State_, kind);
     SetupCheckJob_ = operation == ToolOperation::ProjectCheck || operation == ToolOperation::ProjectSetup ||
                              operation == ToolOperation::InspectSetup
@@ -656,6 +658,12 @@ void EditorController::OnToolEvent(const ProtocolEvent& event)
             }
             break;
         }
+        case ProtocolEvent::Type::SetupDetails:
+            if (event.Job == SetupCheckJob_ && !State_.StopLatched)
+            {
+                PendingSetupDetails_ = event.Text;
+            }
+            break;
         case ProtocolEvent::Type::Generation:
             if (GenerationJob_ && !State_.StopLatched)
             {
@@ -691,10 +699,13 @@ void EditorController::OnToolEvent(const ProtocolEvent& event)
                                      result.CleanupConfirmed;
             if (event.Job == SetupCheckJob_)
             {
-                State_.SetupStatus = result.Kind == Outcome::Success
-                                         ? QStringLiteral("CMake setup ready: %1").arg(result.Message)
-                                         : QStringLiteral("CMake setup needs attention: %1").arg(result.Message);
+                State_.SetupStatus =
+                    result.Kind == Outcome::Success
+                        ? QStringLiteral("CMake setup ready: %1")
+                              .arg(PendingSetupDetails_.isEmpty() ? result.Message : PendingSetupDetails_)
+                        : QStringLiteral("CMake setup needs attention: %1").arg(result.Message);
                 SetupCheckJob_ = 0;
+                PendingSetupDetails_.clear();
             }
             State_ = ApplyResult(State_, event.Job, result);
             if (GenerationJob_)
@@ -724,6 +735,7 @@ void EditorController::OnToolEvent(const ProtocolEvent& event)
             {
                 State_.SetupStatus = QStringLiteral("CMake setup validation unavailable: %1").arg(event.Message);
                 SetupCheckJob_ = 0;
+                PendingSetupDetails_.clear();
             }
             if (State_.ActiveJob != 0)
             {

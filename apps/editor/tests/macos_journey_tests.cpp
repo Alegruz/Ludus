@@ -61,12 +61,12 @@ TEST_CASE("Cocoa editor creates checks repairs builds runs stops and reopens a m
     creation.Name = QStringLiteral("Mac Game");
     creation.Sdk = sdk;
     controller.CreateProject(creation);
-    REQUIRE(WaitMac([&]() {
-        return controller.State().Document == DocumentState::ProjectLoaded &&
-               controller.State().Result.Kind != Outcome::None && controller.Caps().CanCloseImmediately;
-    }));
+    const bool created = WaitMac(
+        [&]() { return controller.State().Result.Kind != Outcome::None && controller.Caps().CanCloseImmediately; });
     INFO(controller.JobDetails().toStdString());
+    REQUIRE(created);
     REQUIRE(controller.State().Result.Kind == Outcome::Success);
+    REQUIRE(controller.State().Document == DocumentState::ProjectLoaded);
     REQUIRE(controller.State().Saved.Preset == QStringLiteral("macos-clang-development"));
     CHECK_FALSE(controller.State().Dirty());
     CHECK_FALSE(controller.Caps().CanBuildDebug);
@@ -76,7 +76,7 @@ TEST_CASE("Cocoa editor creates checks repairs builds runs stops and reopens a m
     bool selected = false;
     for (const auto* selector : selectors)
     {
-        selected = selected || selector->currentText() == QStringLiteral("macos-clang-development");
+        selected = selected || selector->currentData().toString() == QStringLiteral("macos-clang-development");
     }
     REQUIRE(selected);
     controller.BuildRun();
@@ -123,6 +123,8 @@ TEST_CASE("Cocoa editor creates checks repairs builds runs stops and reopens a m
         INFO(controller.JobDetails().toStdString());
         REQUIRE(controller.State().Result.Kind == Outcome::Success);
         REQUIRE(QFile::exists(presets));
+        CHECK(controller.State().SetupStatus.contains(QStringLiteral("Installation: ") + sdk));
+        CHECK(controller.State().SetupStatus.contains(QStringLiteral("Engine revision: ")));
     }
     const auto capture = qEnvironmentVariable("LUDUS_MACOS_EDITOR_CAPTURE");
     if (!capture.isEmpty())

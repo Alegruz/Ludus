@@ -19,6 +19,7 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QFrame>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
@@ -61,16 +62,74 @@ void MainWindow::BuildUi()
     // Tab labels must not force the whole workspace wider than its container.
     WorkTabs_->setUsesScrollButtons(true);
     WorkTabs_->setElideMode(Qt::ElideRight);
+    // The central area can shrink; scrollable work areas own content overflow.
+    WorkTabs_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     setCentralWidget(WorkTabs_);
     auto* projectScroll = new QScrollArea(WorkTabs_);
     ProjectSettings_ = projectScroll;
     projectScroll->setObjectName(QStringLiteral("projectSettingsScroll"));
     projectScroll->setWidgetResizable(true);
+    projectScroll->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     projectScroll->setFrameShape(QFrame::NoFrame);
 
     // --- Project settings form ---
     auto* form = new QWidget(projectScroll);
-    auto* formLayout = new QFormLayout(form);
+    auto* projectLayout = new QVBoxLayout(form);
+    auto* heading = new QLabel(QStringLiteral("Your project"), form);
+    auto headingFont = heading->font();
+    headingFont.setBold(true);
+    heading->setFont(headingFont);
+    projectLayout->addWidget(heading);
+    const auto label = [form, projectLayout](const QString& name) {
+        auto* value = new QLabel(form);
+        value->setObjectName(name);
+        value->setTextFormat(Qt::PlainText);
+        value->setWordWrap(true);
+        value->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        value->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+        projectLayout->addWidget(value);
+        return value;
+    };
+    ProjectIdentity_ = label(QStringLiteral("projectIdentity"));
+    ProjectSetupStatus_ = label(QStringLiteral("projectSetupStatus"));
+    ProjectNextStep_ = label(QStringLiteral("projectNextStep"));
+    auto* lifecycle = new QWidget(form);
+    auto* lifecycleLayout = new QGridLayout(lifecycle);
+    lifecycleLayout->setContentsMargins(0, 0, 0, 0);
+    const auto button = [lifecycle, lifecycleLayout](const QString& name, const QString& text) {
+        auto* value = new QPushButton(text, lifecycle);
+        value->setObjectName(name);
+        const auto index = lifecycleLayout->count();
+        lifecycleLayout->addWidget(value, index / 3, index % 3);
+        return value;
+    };
+    ProjectCheckButton_ = button(QStringLiteral("projectCheckSetup"), QStringLiteral("Check setup"));
+    ProjectRepairButton_ = button(QStringLiteral("projectRepairSetup"), QStringLiteral("Repair setup…"));
+    ProjectSaveButton_ = button(QStringLiteral("projectSaveSettings"), QStringLiteral("Save settings"));
+    ProjectRunButton_ = button(QStringLiteral("projectBuildRun"), QStringLiteral("Build and run"));
+    ProjectStopButton_ = button(QStringLiteral("projectStop"), QStringLiteral("Stop"));
+    projectLayout->addWidget(lifecycle);
+    connect(ProjectCheckButton_, &QPushButton::clicked, this, [this]() { CheckSetupAction_->trigger(); });
+    connect(ProjectRepairButton_, &QPushButton::clicked, this, [this]() { SetupProjectAction_->trigger(); });
+    connect(ProjectSaveButton_, &QPushButton::clicked, this, [this]() { (void)SaveProjectSettings(); });
+    connect(ProjectRunButton_, &QPushButton::clicked, this, [this]() { BuildRunAction_->trigger(); });
+    connect(ProjectStopButton_, &QPushButton::clicked, this, [this]() { StopAction_->trigger(); });
+    auto* basic = new QFormLayout;
+    projectLayout->addLayout(basic);
+    auto* advanced = new QPushButton(QStringLiteral("Show build and launch details"), form);
+    advanced->setObjectName(QStringLiteral("projectAdvanced"));
+    advanced->setCheckable(true);
+    auto* details = new QWidget(form);
+    details->setObjectName(QStringLiteral("projectBuildDetails"));
+    auto* formLayout = new QFormLayout(details);
+    details->hide();
+    projectLayout->addWidget(advanced);
+    projectLayout->addWidget(details);
+    connect(advanced, &QPushButton::toggled, details, &QWidget::setVisible);
+    connect(advanced, &QPushButton::toggled, advanced, [advanced](bool expanded) {
+        advanced->setText(expanded ? QStringLiteral("Hide build and launch details")
+                                   : QStringLiteral("Show build and launch details"));
+    });
     NameEdit_ = new QLineEdit(form);
     NameEdit_->setObjectName(QStringLiteral("projectName"));
     NameEdit_->setAccessibleName(QStringLiteral("Project name"));
@@ -80,21 +139,30 @@ void MainWindow::BuildUi()
     SourceDirEdit_ = new QLineEdit(form);
     SourceDirEdit_->setObjectName(QStringLiteral("projectSource"));
     PresetBox_ = new QComboBox(form);
-    PresetBox_->addItem(QStringLiteral("linux-clang-debug"));
-    PresetBox_->addItem(QStringLiteral("linux-clang-development"));
-    PresetBox_->addItem(QStringLiteral("linux-clang-release"));
-    PresetBox_->addItem(QStringLiteral("macos-clang-debug"));
-    PresetBox_->addItem(QStringLiteral("macos-clang-development"));
-    PresetBox_->addItem(QStringLiteral("macos-clang-release"));
+    PresetBox_->addItem(QStringLiteral("Linux: Debug — investigate code"), QStringLiteral("linux-clang-debug"));
+    PresetBox_->addItem(QStringLiteral("Linux: Development — everyday work"),
+                        QStringLiteral("linux-clang-development"));
+    PresetBox_->addItem(QStringLiteral("Linux: Release — distribute the game"), QStringLiteral("linux-clang-release"));
+    PresetBox_->addItem(QStringLiteral("macOS: Debug — investigate code"), QStringLiteral("macos-clang-debug"));
+    PresetBox_->addItem(QStringLiteral("macOS: Development — everyday work"),
+                        QStringLiteral("macos-clang-development"));
+    PresetBox_->addItem(QStringLiteral("macOS: Release — distribute the game"), QStringLiteral("macos-clang-release"));
     TargetBox_ = new QComboBox(form);
     TargetBox_->setObjectName(QStringLiteral("projectTarget"));
     TargetBox_->setEditable(true); // target can be entered before configuration
     CwdEdit_ = new QLineEdit(form);
 
-    formLayout->addRow(QStringLiteral("&Name"), NameEdit_);
+    basic->addRow(QStringLiteral("&Name"), NameEdit_);
     formLayout->addRow(QStringLiteral("&Provider"), ProviderBox_);
     formLayout->addRow(QStringLiteral("&Source directory"), SourceDirEdit_);
-    formLayout->addRow(QStringLiteral("Pre&set"), PresetBox_);
+    PresetBox_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    PresetBox_->setMinimumContentsLength(20);
+    PresetBox_->setObjectName(QStringLiteral("projectProfile"));
+    PresetBox_->setAccessibleName(QStringLiteral("Build profile"));
+    PresetBox_->setToolTip(
+        QStringLiteral("Development: everyday work. Debug: investigate code. Release: optimized distribution. "
+                       "Save a changed profile before checking or repairing its setup."));
+    basic->addRow(QStringLiteral("Build &profile"), PresetBox_);
     formLayout->addRow(QStringLiteral("Executable &target"), TargetBox_);
     formLayout->addRow(QStringLiteral("Run &working directory"), CwdEdit_);
 
@@ -113,7 +181,7 @@ void MainWindow::BuildUi()
     formLayout->addRow(QString(), argsButtons);
 
     projectScroll->setWidget(form);
-    WorkTabs_->addTab(projectScroll, QStringLiteral("&Project settings"));
+    WorkTabs_->addTab(projectScroll, QStringLiteral("&Project"));
     Content_ = new ContentWorkspace(WorkTabs_);
     WorkTabs_->addTab(Content_, QStringLiteral("&Content"));
     auto* audioScroll = new QScrollArea(WorkTabs_);
