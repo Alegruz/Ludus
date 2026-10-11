@@ -1434,13 +1434,21 @@ TEST_CASE("R5 merges only compatible raster scopes and retains completion leases
     pass.Name = "second";
     pass.Attachment.ColorLoad = pass.Attachment.DepthLoad = RasterLoad::Load;
     if (variant == 2)
+    {
         pass.SideEffect = true;
+    }
     if (variant == 3)
+    {
         pass.Attachment.ColorLoad = RasterLoad::Clear;
+    }
     if (variant == 4)
+    {
         pass.Attachment.DepthLoad = RasterLoad::Clear;
+    }
     if (variant == 5)
+    {
         pass.Attachment.DepthStore = RasterStore::Discard;
+    }
     if (variant == 6)
     {
         pass.Attachment.UseScissor = true;
