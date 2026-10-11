@@ -11,7 +11,10 @@ await mkdir(output, {recursive:true});
 const server = createServer(async (request,response) => {
   const path = resolve(root, '.' + new URL(request.url,'http://localhost').pathname);
   if (!path.startsWith(root + sep)) { response.writeHead(403).end(); return; }
-  try { response.writeHead(200, {'Content-Type':path.endsWith('.wasm')?'application/wasm':path.endsWith('.js')?'text/javascript':'text/html'}).end(await readFile(path)); }
+  try {
+    const body = await readFile(path);
+    response.writeHead(200, {'Content-Type':path.endsWith('.wasm')?'application/wasm':path.endsWith('.js')?'text/javascript':'text/html'}).end(body);
+  }
   catch { response.writeHead(404).end(); }
 });
 await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
