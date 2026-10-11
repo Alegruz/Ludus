@@ -233,7 +233,7 @@ that every combination fits. Limits are not memory reservations: resource creati
 still checks dimensions, mip packing, aggregate upload size and allocation errors.
 
 While Ready, `DeviceInfo::Profile` contains the immutable raster/interface/compute
-limits and four `FormatCapabilities` entries indexed by `RasterFormat`. Include
+limits and five `FormatCapabilities` entries indexed by `RasterFormat`. Include
 `profile.h` to use the profile vocabulary directly, or `raster.h` to call
 `GetFormatCapabilities(device, format, output)`. Invalid owners or malformed format
 enums preserve query output; pending, failed or lost devices zero it. A known but
@@ -244,7 +244,10 @@ used after loss/restart.
 Format use flags describe implemented operations. All supported formats allow
 complete sampled views and linear filtering. Only RGBA8 linear/sRGB support the
 current single-color/private-depth attachment and blend path, within backend
-format limits. R8/RG8 remain sampled only. SampleCounts is a bit mask (value 1 for
+format limits. R8/RG8 remain sampled only. L4 adds RGBA16F when `HdrColor` is enabled: it supports
+sampling/filtering/blending through a single-mip color attachment, while creation
+uploads remain unsupported. Its format query is zero/Unsupported when unavailable.
+SampleCounts is a bit mask (value 1 for
 one sample); MSAA is not enabled. Storage and general texture copy source/destination
 uses remain false, even if the native driver supports them. Creation uploads and
 frame readback do not constitute general texture-copy APIs. Vulkan checks the
@@ -252,7 +255,7 @@ combined sampled/upload/attachment usage and private-depth bounds; portable
 backends intersect their guaranteed normalized formats with Ludus's implemented
 profile. Texture and offscreen pipeline creation enforce the admitted snapshot.
 
-A request contains up to four unique format entries; invalid format values, counts,
+A request contains up to five unique format entries; invalid format values, counts,
 duplicates, empty use sets or invalid sample counts return InvalidDescription
 without launching a backend or publishing outputs. A required constraint miss
 reports `StartupError::RequirementsUnsatisfied`, `RequirementFailure::Profile`
@@ -354,7 +357,10 @@ All operations are serialized on the device's owner thread.
 The historical R1 profile below is deliberately bounded. L1 adds targets/depth,
 L2 adds R8 coverage, and [L3 material/content versions](../architecture/renderer-systems.md#implemented-l3-material-and-content-versions)
 expand current tables to 32 records per kind, sampled R8/RG8/RGBA8 mip chains
-and explicit mip samplers. Public declarations are the current API contract.
+and explicit mip samplers. [L4 lighting](../architecture/renderer-systems.md#implemented-l4-bounded-forward-lighting)
+expands tables to 64, enables up to sixteen queried vertex attributes, and adds
+capability-gated single-mip sampleable/filterable/blendable RGBA16F attachments.
+Public declarations are the current API contract.
 
 The original R1 profile:
 
@@ -367,7 +373,7 @@ The original R1 profile:
 | Uploads | Complete top-left RGBA8 rows, explicit pitch divisible by four; caller bytes consumed/copied before return; aggregate upload at most the maximum buffer size |
 | Views | Complete original-format sampled views; no reinterpretation, partial sampled range or attachment view |
 | Bindings | One group/set, at most eight unique binding numbers below eight; uniform ranges, sampled 2D textures and non-comparison samplers |
-| Vertex input | At most two streams, per-vertex or divisor-one per-instance, stride divisible by four, 4..256 on native/WebGPU and 4..252 on WebGL 2; eight unique float2/3/4 attributes |
+| Vertex input | At most two streams, per-vertex or divisor-one per-instance, stride divisible by four, 4..256 on native/WebGPU and 4..252 on WebGL 2; up to the queried maximum (at most sixteen) unique float2/3/4 attributes |
 | Draw | Triangle list, Index16/Index32, zero base vertex/first instance, 1024 draws per frame; fixed primitive-restart indices are rejected |
 | State | No culling, one color target, one sample; explicit depth comparison/write and premultiplied-alpha blend; defaults retain less-than |
 
@@ -583,7 +589,7 @@ the owner thread; setup, compilation and execution start between frames.
 The first profile is four graphs, sixteen logical resources per graph, thirty-two
 ordered raster passes, sixteen declarations per pass, 256 retained draws per
 graph, and 512 semantic dependency report entries. Capacity rejection occurs
-before frame acquisition. Attachment formats remain single-mip RGBA8 linear/sRGB, one layer and one
+before frame acquisition. Attachment formats remain single-mip RGBA8 linear/sRGB or capability-gated L4 RGBA16F, one layer and one
 sample, with one color attachment and private same-size depth. L3 additionally
 permits complete sampled R8/RG8/RGBA8 mip chains; graph hazards conservatively
 cover the whole sampled chain.
@@ -665,7 +671,7 @@ The fully checked packet authoring is
 used by both native pixels and the installed-SDK consumer. It compiles an unused
 color pass, a depth-tested instanced scene, a Load pass with read-only depth,
 and a scene-texture composite to presentation. Pipeline `Target` selects the
-surface format or a matching RGBA8 offscreen format; dimensions are dynamic.
+surface format or a matching RGBA8/RGBA16F offscreen format; dimensions are dynamic.
 
 ### Imports, history and transient objects
 

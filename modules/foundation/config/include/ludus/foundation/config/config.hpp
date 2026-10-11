@@ -46,7 +46,7 @@ enum class Type : uint8
     Enum,
     String,
 };
-// Declared precedence, independent of mutation time. Defaults are implicit.
+/// Declared precedence, independent of mutation time. Defaults are implicit.
 enum class Layer : uint8
 {
     Engine,
@@ -73,8 +73,10 @@ enum class Apply : uint8
     NextLaunch,
 };
 
-// Owned bounded text. Only the field selected by Kind has semantic meaning.
-// Copy on the control boundary; hot consumers materialize ordinary options.
+/// @brief Owned bounded text.
+///
+/// Only the field selected by Kind has semantic meaning.
+/// Copy on the control boundary; hot consumers materialize ordinary options.
 struct Value final
 {
     Type Kind = Type::Bool;
@@ -94,8 +96,9 @@ struct Value final
     friend bool operator==(const Value& left, const Value& right) noexcept;
 };
 
-// Immutable schema storage (including names, help and enum spans) must outlive
-// the Context. No schema pointers may survive unloading their owning module.
+/// @brief Immutable schema storage (including names, help and enum spans) must outlive the Context.
+///
+/// No schema pointers may survive unloading their owning module.
 struct Descriptor final
 {
     std::string_view Name;
@@ -121,13 +124,13 @@ struct Diagnostic final
 {
     Status Result = Status::Ok;
     StaticString<128> Key{};
-    usize Record = 0; // Semantic record index, never a parser byte offset.
+    usize Record = 0; ///< Semantic record index, never a parser byte offset.
     usize ByteOffset = UNKNOWN_BYTE_OFFSET;
 };
 struct Origin final
 {
     StaticString<128> Source{};
-    uint32 Line = 0; // Zero means unavailable; never fabricate a location.
+    uint32 Line = 0; ///< Zero means unavailable; never fabricate a location.
 };
 struct Assignment final
 {
@@ -154,15 +157,16 @@ struct Explanation final
 };
 struct Limits final
 {
-    usize MaxSettings = 256; // Hard ceiling: 4096.
+    usize MaxSettings = 256; ///< Hard ceiling: 4096.
     usize MaxStorageBytes = usize{64} * 1024 * 1024;
-    usize MaxEdits = 64; // Hard ceiling: 4096 for startup/bundle replacement.
+    usize MaxEdits = 64; ///< Hard ceiling: 4096 for startup/bundle replacement.
 };
 using ValidateFunction = Status (*)(void*, std::span<const Value>, Diagnostic&) noexcept;
 
-// One control owner. Read/prepare/commit are not a concurrent facade. Consumers
-// copy their typed options at a safe point. Prepare is side-effect-free; commit
-// allocates nothing and calls no user code. No runtime I/O or global service.
+/// @brief One control owner.
+///
+/// Read/prepare/commit are not a concurrent facade. Consumers copy their typed options at a safe point. Prepare is
+/// side-effect-free; commit allocates nothing and calls no user code. No runtime I/O or global service.
 class Context final
 {
 public:
@@ -182,8 +186,9 @@ public:
     [[nodiscard]] Status Bind(std::string_view name, Binding& output) const noexcept;
     [[nodiscard]] Status Explain(Binding binding, Explanation& output) const noexcept;
     [[nodiscard]] Status ReadLayer(Binding binding, Layer layer, Value& output, Origin& origin) const noexcept;
-    // Replace clears that entire layer in the candidate; patch changes only the
-    // specified keys. All assignments, including masked values, are checked.
+    /// @brief Replace clears that entire layer in the candidate; patch changes only the specified keys.
+    ///
+    /// All assignments, including masked values, are checked.
     [[nodiscard]] Status Prepare(Layer layer,
                                  std::span<const Assignment> edits,
                                  bool replace,
@@ -192,8 +197,9 @@ public:
     [[nodiscard]] Status ReadPrepared(Binding binding, Value& output) const noexcept;
     [[nodiscard]] Status Commit(uint64 expectedRevision, Diagnostic& error) noexcept;
     void Discard() noexcept;
-    // Subsequent restart-only changes become requested/pending; simulation
-    // settings freeze. Called after initial options reach their native owners.
+    /// @brief Subsequent restart-only changes become requested/pending; simulation settings freeze.
+    ///
+    /// Called after initial options reach their native owners.
     [[nodiscard]] Status SealStartup() noexcept;
 
 private:

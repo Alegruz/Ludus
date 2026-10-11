@@ -420,7 +420,7 @@ RasterStatus GetRasterCapabilities(DeviceHandle device, RasterCapabilities& outp
     {
         return admission;
     }
-    output = admission == RasterStatus::Ready ? backend::RasterLimits() : RasterCapabilities{};
+    output = admission == RasterStatus::Ready ? internal::CurrentDeviceProfile().Raster : RasterCapabilities{};
     return admission;
 }
 RasterStatus CreateBuffer(DeviceHandle device,
@@ -473,7 +473,7 @@ RasterStatus CreateBuffer(DeviceHandle device,
 }
 RasterStatus GetFormatCapabilities(DeviceHandle device, RasterFormat format, FormatCapabilities& output) noexcept
 {
-    if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Rg8Unorm))
+    if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Rgba16Float))
     {
         return RasterStatus::InvalidDescription;
     }
@@ -504,11 +504,16 @@ RasterStatus CreateTexture(DeviceHandle device,
     if (description.Width == 0 || description.Height == 0 || description.Width > maxDimension ||
         description.Height > maxDimension ||
         (description.Format != RasterFormat::Rgba8Unorm && description.Format != RasterFormat::Rgba8Srgb &&
-         description.Format != RasterFormat::R8Unorm && description.Format != RasterFormat::Rg8Unorm) ||
+         description.Format != RasterFormat::R8Unorm && description.Format != RasterFormat::Rg8Unorm &&
+         description.Format != RasterFormat::Rgba16Float) ||
         (description.Attachment && (description.Format == RasterFormat::R8Unorm ||
                                     description.Format == RasterFormat::Rg8Unorm || description.MipLevels != 1)))
     {
         return RasterStatus::InvalidDescription;
+    }
+    if (description.Format == RasterFormat::Rgba16Float && !description.Attachment)
+    {
+        return RasterStatus::Unsupported;
     }
     const auto format = internal::CurrentDeviceProfile().Formats[static_cast<usize>(description.Format)];
     const auto dimension = description.Attachment ? format.MaxAttachmentDimension2D : format.MaxSampledDimension2D;
@@ -721,7 +726,8 @@ CreateRasterShader(DeviceHandle device, const RasterShaderDescription& descripti
         }
         info.TextureSamplers[i] = description.TextureSamplers[i];
     }
-    if (description.Inputs.size() > 8 || (info.Stage != ShaderStage::Vertex && !description.Inputs.empty()))
+    if (description.Inputs.size() > backend::RasterLimits().MaxVertexAttributes ||
+        (info.Stage != ShaderStage::Vertex && !description.Inputs.empty()))
     {
         return RasterStatus::InvalidDescription;
     }
@@ -729,7 +735,7 @@ CreateRasterShader(DeviceHandle device, const RasterShaderDescription& descripti
     for (usize i = 0; i < info.InputCount; ++i)
     {
         const auto& input = description.Inputs[i];
-        if (input.Location >= 8 || static_cast<uint8>(input.Format) > 2)
+        if (input.Location >= backend::RasterLimits().MaxVertexAttributes || static_cast<uint8>(input.Format) > 2)
         {
             return RasterStatus::InvalidDescription;
         }
@@ -917,7 +923,7 @@ ValidatePipeline(DeviceHandle device, const RasterPipelineDescription& descripti
     }
     if (vertex->Shader.Stage != ShaderStage::Vertex || fragment->Shader.Stage != ShaderStage::Fragment ||
         !ShaderFits(vertex->Shader, layout->Layout) || !ShaderFits(fragment->Shader, layout->Layout) ||
-        description.Streams.size() > 2 || description.Attributes.size() > 8 ||
+        description.Streams.size() > 2 || description.Attributes.size() > backend::RasterLimits().MaxVertexAttributes ||
         description.Attributes.size() != vertex->Shader.InputCount)
     {
         return RasterStatus::InvalidDescription;
@@ -933,14 +939,15 @@ ValidatePipeline(DeviceHandle device, const RasterPipelineDescription& descripti
     info.Fragment = RasterAccess::Slot(description.Fragment);
     info.Layout = RasterAccess::Slot(description.Layout);
     info.Depth = description.Depth;
-    if (static_cast<uint8>(description.Target) > static_cast<uint8>(RasterTarget::Rgba8Srgb))
+    if (static_cast<uint8>(description.Target) > static_cast<uint8>(RasterTarget::Rgba16Float))
     {
         return RasterStatus::InvalidDescription;
     }
     if (description.Target != RasterTarget::Surface)
     {
-        const auto format =
-            description.Target == RasterTarget::Rgba8Unorm ? RasterFormat::Rgba8Unorm : RasterFormat::Rgba8Srgb;
+        const auto format = description.Target == RasterTarget::Rgba16Float  ? RasterFormat::Rgba16Float
+                            : description.Target == RasterTarget::Rgba8Unorm ? RasterFormat::Rgba8Unorm
+                                                                             : RasterFormat::Rgba8Srgb;
         const auto capabilities = internal::CurrentDeviceProfile().Formats[static_cast<usize>(format)];
         if (!capabilities.Uses.ColorAttachment || (description.Blend && !capabilities.Uses.Blendable))
         {
@@ -972,8 +979,9 @@ ValidatePipeline(DeviceHandle device, const RasterPipelineDescription& descripti
         const auto& attribute = description.Attributes[i];
         const auto format = static_cast<uint8>(attribute.Format);
         const usize size = (static_cast<usize>(format) + 2) * 4;
-        if (format > 2 || attribute.Location >= 8 || attribute.Stream >= info.StreamCount ||
-            attribute.Offset % 4 != 0 || !Fits(attribute.Offset, size, info.Streams[attribute.Stream].Stride))
+        if (format > 2 || attribute.Location >= backend::RasterLimits().MaxVertexAttributes ||
+            attribute.Stream >= info.StreamCount || attribute.Offset % 4 != 0 ||
+            !Fits(attribute.Offset, size, info.Streams[attribute.Stream].Stride))
         {
             return RasterStatus::InvalidDescription;
         }

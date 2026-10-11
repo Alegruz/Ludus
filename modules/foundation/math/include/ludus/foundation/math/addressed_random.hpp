@@ -25,14 +25,16 @@ using core::uint16;
 using core::uint32;
 using core::uint64;
 
-// Frozen identifiers to store in the owner's replay/content manifest. Changing
-// any formula, constants, packing or mapping requires a new version/API.
+/// @brief Frozen identifiers to store in the owner's replay/content manifest.
+///
+/// Changing any formula, constants, packing or mapping requires a new version/API.
 inline constexpr uint32 RandomKeyDerivationVersion = 1;
 inline constexpr uint32 RandomAddressLayoutVersion = 1;
 inline constexpr uint32 RandomBoundedMappingVersion = 1;
 
-// Plain replay data; Value may also restore a previously derived key. A key is
-// not secret and is not a globally unique identifier.
+/// @brief Plain replay data; Value may also restore a previously derived key.
+///
+/// A key is not secret and is not a globally unique identifier.
 struct RandomKey
 {
     uint64 Value = 0;
@@ -45,8 +47,9 @@ struct RandomAddress
     uint16 Dimension = 0;
 };
 
-// Wide external fields for checked construction. Named fields avoid exchanging
-// positional scope/event/dimension arguments before they are narrowed.
+/// @brief Wide external fields for checked construction.
+///
+/// Named fields avoid exchanging positional scope/event/dimension arguments before they are narrowed.
 struct RandomAddressInput
 {
     uint64 Scope = 0;
@@ -59,32 +62,38 @@ struct RandomBlock
     uint32 Values[4] = {};
 };
 
-// Domain IDs are persistent, nonzero numeric IDs assigned by the owner. Within
-// one root seed, different IDs derive distinct keys; statistical independence
-// and collision freedom between different roots are not promised.
+/// @brief Domain IDs are persistent, nonzero numeric IDs assigned by the owner.
+///
+/// Within one root seed, different IDs derive distinct keys; statistical independence and collision freedom between
+/// different roots are not promised.
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): documented root seed / domain ID order.
 [[nodiscard]] MathStatus TryMakeRandomKey(uint64 rootSeed, uint32 domainId, RandomKey& out) noexcept;
 
-// Use this checked boundary BEFORE narrowing external event/dimension values.
-// Scope is a stable entity/chunk ID; Event is an explicit occurrence counter;
-// Dimension is a stable semantic slot. Do not use pointers, thread IDs, job
-// indices or a shared incrementing draw count. Outputs are unchanged on failure.
+/// @brief Use this checked boundary BEFORE narrowing external event/dimension values.
+///
+/// Scope is a stable entity/chunk ID; Event is an explicit occurrence counter;
+/// Dimension is a stable semantic slot. Do not use pointers, thread IDs, job
+/// indices or a shared incrementing draw count. Outputs are unchanged on failure.
 [[nodiscard]] MathStatus TryMakeRandomAddress(RandomAddressInput input, RandomAddress& out) noexcept;
 
-// Pure Philox4x32-10, attempt zero, selected lane. Repeating an address repeats
-// the result. There is no mutable state, initialization, cache or allocation.
+/// @brief Pure Philox4x32-10, attempt zero, selected lane.
+///
+/// Repeating an address repeats the result. There is no mutable state, initialization, cache or allocation.
 [[nodiscard]] uint32 SampleUInt32(RandomKey key, RandomAddress address) noexcept;
 
-// High 24 bits times 2^-24: [0,1), exactly one raw sample, identical to PCG v1's
-// float conversion. This does not make downstream FP simulation deterministic.
+/// @brief High 24 bits times 2^-24: [0,1), exactly one raw sample, identical to PCG v1's float conversion.
+///
+/// This does not make downstream FP simulation deterministic.
 [[nodiscard]] float32 SampleFloat01(RandomKey key, RandomAddress address) noexcept;
 
-// Four consecutive dimensions in one Philox evaluation. Dimension must be a
-// multiple of four (max 65532); no silent rounding to a different address.
+/// @brief Four consecutive dimensions in one Philox evaluation.
+///
+/// Dimension must be a multiple of four (max 65532); no silent rounding to a different address.
 [[nodiscard]] MathStatus TrySampleBlock(RandomKey key, RandomAddress address, RandomBlock& out) noexcept;
 
-// Precompute the division for repeated sampling with the same bound. Default
-// bound is one; checked construction prevents an inconsistent threshold.
+/// @brief Precompute the division for repeated sampling with the same bound.
+///
+/// Default bound is one; checked construction prevents an inconsistent threshold.
 class PreparedBound32
 {
 public:

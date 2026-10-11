@@ -8,8 +8,9 @@
 #include <utility>
 namespace ludus::gameplay::world
 {
-// Plain owned state only: construction/move/destruction must not allocate or
-// invoke gameplay. Owner/value spans have identical lengths and are phase-local.
+/// @brief Plain owned state only: construction/move/destruction must not allocate or invoke gameplay.
+///
+/// Owner/value spans have identical lengths and are phase-local.
 template <typename T>
 class ComponentPool final
 {

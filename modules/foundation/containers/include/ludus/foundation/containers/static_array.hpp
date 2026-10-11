@@ -33,6 +33,8 @@
 
 namespace ludus::foundation::core
 {
+/// Fixed-size owning aggregate; no allocation. Element count is a compile-time constant.
+/// Bounds and nonempty element access are caller preconditions.
 template <typename ElementType, usize Count>
 struct StaticArray
 {
@@ -41,7 +43,7 @@ struct StaticArray
     using Iterator = ElementType*;
     using ConstIterator = const ElementType*;
 
-    // Public storage: an aggregate cannot hide this and remain brace-initializable.
+    /// Aggregate storage for Count live elements; prefer the indexed accessors.
     ElementType mData[Count];
 
     // --- Size / capacity (all compile-time constants) -----------------------
@@ -181,9 +183,7 @@ struct StaticArray
     [[nodiscard]] friend constexpr auto operator<=>(const StaticArray&, const StaticArray&) = default;
 };
 
-// Zero-size specialization. std::array<T,0> is allowed and data() returns a
-// valid, non-dereferenceable pointer; we mirror that. Keeping it a distinct
-// specialization avoids a zero-length array member (ill-formed / an extension).
+/// Empty fixed-size aggregate. Data/iterators are nondereferenceable; element access is invalid.
 template <typename ElementType>
 struct StaticArray<ElementType, 0>
 {
@@ -281,7 +281,7 @@ struct StaticArray<ElementType, 0>
     }
 };
 
-// Non-member Swap for ADL.
+/// Non-member Swap for ADL.
 template <typename ElementType, usize Count>
 constexpr void Swap(StaticArray<ElementType, Count>& a,
                     StaticArray<ElementType, Count>& b) noexcept(noexcept(a.Swap(b)))

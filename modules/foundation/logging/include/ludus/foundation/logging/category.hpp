@@ -7,10 +7,10 @@
 namespace ludus::foundation::logging
 {
 
-// Compile-time FNV-1a hash used to derive a stable 32-bit category id from the
-// category name. Runtime filtering compares these integer ids rather than
-// performing a string-map lookup on every logging call
-// (.kiro/specs/logging-redesign/design.md section 3).
+/// @brief Compile-time FNV-1a hash used to derive a stable 32-bit category id from the category name.
+///
+/// Runtime filtering compares these integer ids rather than performing a string-map lookup on every logging call
+/// (.kiro/specs/logging-redesign/design.md section 3).
 [[nodiscard]] constexpr uint32 HashLogCategory(std::string_view name) noexcept
 {
     constexpr uint32 FNV_OFFSET_BASIS = 2166136261u;
@@ -25,16 +25,16 @@ namespace ludus::foundation::logging
     return hash;
 }
 
-// A logging category. Instances are expected to be declared `inline constexpr`
-// at namespace scope so their id is computed at compile time and no dynamic
-// registration is needed on the logging hot path.
-//
-// The descriptor stays a literal type (no atomics inside it): per-category
-// runtime overrides live in a separate process-lifetime registry keyed by id
-// (see log_system.hpp / the internal registry), so a category can be declared
-// in a header and filtered safely before any registration runs, and so the
-// hot-path predicate is a small set of scalar loads with no lock or map lookup
-// (requirements R13).
+/// @brief A logging category.
+///
+/// Instances are expected to be declared `inline constexpr` at namespace scope so their id is computed at compile
+/// time and no dynamic registration is needed on the logging hot path.
+/// The descriptor stays a literal type (no atomics inside it): per-category
+/// runtime overrides live in a separate process-lifetime registry keyed by id
+/// (see log_system.hpp / the internal registry), so a category can be declared
+/// in a header and filtered safely before any registration runs, and so the
+/// hot-path predicate is a small set of scalar loads with no lock or map lookup
+/// (requirements R13).
 struct LogCategory
 {
     uint32 Id;
@@ -45,8 +45,8 @@ struct LogCategory
     {
     }
 
-    // Explicit two-argument form kept for parity with the specification's
-    // examples and for tests that construct categories at runtime.
+    /// @brief Explicit two-argument form kept for parity with the specification's
+    /// examples and for tests that construct categories at runtime.
     constexpr LogCategory(uint32 category_id, std::string_view category_name) noexcept
         : Id(category_id), Name(category_name)
     {

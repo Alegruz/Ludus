@@ -8,6 +8,7 @@ namespace ludus::graphics::rhi::reference
 void Reset() noexcept
 {
     ProfileAvailable = true;
+    HdrAvailable = true;
     ComputeAvailable = true;
     FormatBlendUnavailable = false;
     OverrideRasterLimits = false;
@@ -43,6 +44,10 @@ void Reset() noexcept
         {
             status = RasterStatus::Pending;
         }
+    }
+    for (auto& pipeline : Pipelines)
+    {
+        pipeline = {};
     }
     for (auto& size : BufferSizes)
     {
@@ -96,7 +101,8 @@ RasterStatus ComputeEncode(const internal::ComputePacket&) noexcept
 void ComputeBufferBarrier(usize, GraphAccessMode) noexcept {}
 FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
-    if (static_cast<uint8>(format) > 3 || reference::FormatUnavailable[static_cast<usize>(format)])
+    if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Rgba16Float) ||
+        reference::FormatUnavailable[static_cast<usize>(format)])
     {
         return {};
     }
@@ -121,7 +127,14 @@ RasterCapabilities RasterLimits() noexcept
     {
         return reference::RasterLimitOverride;
     }
-    return {usize{64} * 1024 * 1024, 4096, 256, 16384, static_cast<uint32>(internal::RASTER_CAPACITY), 1024};
+    return {usize{64} * 1024 * 1024,
+            4096,
+            256,
+            16384,
+            static_cast<uint32>(internal::RASTER_CAPACITY),
+            1024,
+            16,
+            reference::HdrAvailable};
 }
 RasterStatus
 RasterCreateBuffer(usize slot, const BufferDescription&, std::span<const uint8> bytes, uint32 request) noexcept

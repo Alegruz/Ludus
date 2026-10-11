@@ -4,45 +4,60 @@
 
 namespace ludus::foundation::time
 {
-// Distinct domains: a duration is an interval; a timestamp is a reading of the
-// process's monotonic CPU clock. Neither is UTC, a GPU counter or a game tick.
+/// Elapsed interval in integer nanoseconds, independent of any timestamp epoch.
 struct Duration
 {
+    /// Interval length in nanoseconds; zero is a valid duration.
     uint64 Nanoseconds = 0;
+    /// Compare exact interval lengths.
     bool operator==(const Duration&) const noexcept = default;
 };
 
+/// Reading of the process monotonic CPU clock; not UTC, a GPU counter or a game tick.
 struct Timestamp
 {
+    /// Nanoseconds since the monotonic clock's unspecified epoch.
     uint64 Nanoseconds = 0;
+    /// Compare exact readings; meaningful only within the same clock domain.
     bool operator==(const Timestamp&) const noexcept = default;
 };
 
+/// Result of checked time arithmetic or a timer transition.
 enum class TimeStatus : uint8
 {
+    /// The operation succeeded and its output is available.
     Ok,
+    /// The interval or timestamp sum exceeds the uint64 range.
     Overflow,
+    /// The later sample precedes the relevant earlier sample.
     ClockRegression,
+    /// The requested operation is unavailable in the timer's current state.
     InvalidState
 };
 
+/// Exact conversion factor from seconds to stored nanoseconds.
 inline constexpr uint64 NANOSECONDS_PER_SECOND = 1'000'000'000;
 
-// Same source/epoch as profiling and logging. Nanoseconds are the storage unit,
-// not a resolution guarantee. No engine allocation, lock or initialization.
-// Readings are non-decreasing on one thread; equal readings are valid.
-// Timestamps do not establish a happens-before relation between threads.
+/// @brief Read the monotonic clock shared with profiling and logging, in nanoseconds.
+///
+/// No engine allocation, lock or initialization is required. Readings are
+/// non-decreasing on one thread; equal readings are valid. Units do not guarantee
+/// resolution. Timestamps do not establish a happens-before relation between threads.
 [[nodiscard]] uint64 NowTicks() noexcept;
+/// Read NowTicks() as a typed timestamp in the same monotonic clock domain.
 [[nodiscard]] inline Timestamp Now() noexcept
 {
     return {NowTicks()};
 }
 
-// Outputs are unchanged on failure. Addition never wraps. Elapsed rejects
-// reversed samples. Convert the resulting small interval, not two large epochs.
+/// Add interval lengths without wrapping; Overflow leaves out unchanged.
 [[nodiscard]] TimeStatus TryAdd(Duration left, Duration right, Duration& out) noexcept;
+/// Add an interval to a timestamp; Overflow leaves out unchanged.
 [[nodiscard]] TimeStatus TryAdd(Timestamp start, Duration interval, Timestamp& out) noexcept;
+/// Compute end minus start; ClockRegression leaves out unchanged.
+/// @pre Both samples share the same monotonic clock domain.
 [[nodiscard]] TimeStatus TryElapsed(Timestamp start, Timestamp end, Duration& out) noexcept;
+/// Convert an interval to seconds with float64 rounding; large intervals may lose precision.
 [[nodiscard]] constexpr float64 ToSeconds(Duration interval) noexcept
 {
     return static_cast<float64>(interval.Nanoseconds) / static_cast<float64>(NANOSECONDS_PER_SECOND);

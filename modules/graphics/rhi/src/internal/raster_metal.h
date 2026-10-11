@@ -97,7 +97,7 @@ bool RasterMetalBindings(NSArray<id<MTLBinding>>* bindings,
 } // namespace
 // Thanks to Apple, "Metal Feature Set Tables", ordinary 8/16/32-bit normalized formats.
 // https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf
-// Intersect guaranteed normalized-format support with Ludus's implemented uses;
+// Intersect guaranteed normalized formats and enabled HDR with implemented uses;
 // no storage/copy/MSAA or R8/RG8 attachment path is advertised.
 FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
@@ -118,6 +118,8 @@ RasterCapabilities RasterLimits() noexcept
         .MaxUniformRange = 16384,
         .ResourcesPerKind = static_cast<uint32>(internal::RASTER_CAPACITY),
         .DrawsPerFrame = static_cast<uint32>(internal::RASTER_DRAWS),
+        .MaxVertexAttributes = 16,
+        .HdrColor = true,
     };
 }
 // Thanks to Apple, "MTLComputeCommandEncoder" and Metal's tracked-resource
@@ -198,7 +200,8 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     @autoreleasepool
     {
         MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
-            texture2DDescriptorWithPixelFormat:info.Format == RasterFormat::Rg8Unorm     ? MTLPixelFormatRG8Unorm
+            texture2DDescriptorWithPixelFormat:info.Format == RasterFormat::Rgba16Float  ? MTLPixelFormatRGBA16Float
+                                               : info.Format == RasterFormat::Rg8Unorm   ? MTLPixelFormatRG8Unorm
                                                : info.Format == RasterFormat::R8Unorm    ? MTLPixelFormatR8Unorm
                                                : info.Format == RasterFormat::Rgba8Unorm ? MTLPixelFormatRGBA8Unorm
                                                                                          : MTLPixelFormatRGBA8Unorm_sRGB
@@ -318,10 +321,11 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
         MTLRenderPipelineDescriptor* descriptor = [MTLRenderPipelineDescriptor new];
         descriptor.vertexFunction = gRasterShaders[info.Vertex].Function;
         descriptor.fragmentFunction = gRasterShaders[info.Fragment].Function;
-        descriptor.colorAttachments[0].pixelFormat = info.Target == RasterTarget::Surface ? MTLPixelFormatBGRA8Unorm
-                                                     : info.Target == RasterTarget::Rgba8Unorm
-                                                         ? MTLPixelFormatRGBA8Unorm
-                                                         : MTLPixelFormatRGBA8Unorm_sRGB;
+        descriptor.colorAttachments[0].pixelFormat =
+            info.Target == RasterTarget::Rgba16Float  ? MTLPixelFormatRGBA16Float
+            : info.Target == RasterTarget::Surface    ? MTLPixelFormatBGRA8Unorm
+            : info.Target == RasterTarget::Rgba8Unorm ? MTLPixelFormatRGBA8Unorm
+                                                      : MTLPixelFormatRGBA8Unorm_sRGB;
         descriptor.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
         auto color = descriptor.colorAttachments[0];
         color.blendingEnabled = info.Blend;

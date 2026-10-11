@@ -33,8 +33,9 @@ enum class ParseLimit : uint8
 
 inline constexpr usize UNKNOWN_BYTE_OFFSET = ~usize{0};
 
-// Byte offsets, never character indices. A DOM validation error may have no
-// source offset; do not render UNKNOWN_BYTE_OFFSET as a location in the file.
+/// @brief Byte offsets, never character indices.
+///
+/// A DOM validation error may have no source offset; do not render UNKNOWN_BYTE_OFFSET as a location in the file.
 struct ParseError final
 {
     ParseStatus Status = ParseStatus::Ok;
@@ -56,8 +57,10 @@ struct SourcePosition final
     usize ByteColumn = 1;
 };
 
-// Checked, borrowed input. Failed operations leave both cursor and output
-// unchanged. There is no native-layout cast, allocation, or hidden I/O.
+/// @brief Checked, borrowed input.
+///
+/// Failed operations leave both cursor and output unchanged. There is no native-layout cast, allocation, or hidden
+/// I/O.
 class ByteCursor final
 {
 public:
@@ -81,10 +84,13 @@ private:
     usize mPosition = 0;
 };
 
-// Validates Unicode scalar values, including shortest encoding and surrogate
-// exclusion. Embedded NUL is valid UTF-8; each format decides whether to allow it.
+/// @brief Validates Unicode scalar values, including shortest encoding and surrogate exclusion.
+///
+/// Embedded NUL is valid UTF-8; each format decides whether to allow it.
 [[nodiscard]] ParseStatus ValidateUtf8(std::string_view input, ParseError& error) noexcept;
-// On-demand, linear location lookup. CRLF is one newline; bare CR is a newline.
-// Accepts an offset at EOF. Out-of-range offsets preserve output.
+/// @brief On-demand, linear location lookup.
+///
+/// CRLF is one newline; bare CR is a newline.
+/// Accepts an offset at EOF. Out-of-range offsets preserve output.
 [[nodiscard]] bool LocateByte(std::string_view input, usize offset, SourcePosition& output) noexcept;
 } // namespace ludus::foundation::parsing

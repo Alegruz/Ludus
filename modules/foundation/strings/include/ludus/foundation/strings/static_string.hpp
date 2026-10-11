@@ -16,8 +16,9 @@ AssignBounded(char* destination, usize& size, usize capacity, std::string_view s
 AppendBounded(char* destination, usize& size, usize capacity, std::string_view source) noexcept;
 } // namespace detail
 
-// Capacity excludes the extra terminator. Counted operations preserve embedded
-// zero bytes. Overflow preserves the entire old value; no silent truncation.
+/// @brief Capacity excludes the extra terminator.
+///
+/// Counted operations preserve embedded zero bytes. Overflow preserves the entire old value; no silent truncation.
 template <usize Capacity>
 class StaticString final
 {

@@ -37,12 +37,13 @@ struct QueueCounters final
     uint64 RejectedFull = 0;
 };
 
-// One connection/direction, one thread. Owns bytes; no heap or locks. Control,
-// input and bulk are FIFO; snapshot is a single newest complete snapshot.
-// Round-robin across nonempty lanes bounds starvation (message fairness).
-// Budget includes the application envelope, not backend framing/IP overhead.
-// On successful dequeue the caller owns the message and must retain it until
-// the transport accepts it; a WouldBlock backend must never silently discard it.
+/// @brief One connection/direction, one thread.
+///
+/// Owns bytes; no heap or locks. Control, input and bulk are FIFO; snapshot is a single newest complete snapshot.
+/// Round-robin across nonempty lanes bounds starvation (message fairness).
+/// Budget includes the application envelope, not backend framing/IP overhead.
+/// On successful dequeue the caller owns the message and must retain it until
+/// the transport accepts it; a WouldBlock backend must never silently discard it.
 class SendQueue final
 {
 public:

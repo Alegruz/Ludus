@@ -25,11 +25,11 @@ using ludus::foundation::uint64;
 using ludus::foundation::uint8;
 using ludus::foundation::usize;
 
-inline constexpr usize POLICY_TABLE_CAPACITY = 64; // fixed policy table size
-inline constexpr usize ADAPTER_LOOP_CAPACITY = 64; // tracked owned loops
+inline constexpr usize POLICY_TABLE_CAPACITY = 64; ///< fixed policy table size
+inline constexpr usize ADAPTER_LOOP_CAPACITY = 64; ///< tracked owned loops
 inline constexpr usize DIALOGUE_MEMBER_CAPACITY = 16;
 
-// Why an event was suppressed before admission (owner-side; no VoiceHandle).
+/// Why an event was suppressed before admission (owner-side; no VoiceHandle).
 enum class SuppressReason : uint8
 {
     None,
@@ -38,38 +38,41 @@ enum class SuppressReason : uint8
     TableFull,
 };
 
-// Result of a policed trigger. On Admitted the Voice is valid; otherwise the
-// Reason explains the owner-side suppression (no activity/duck created).
+/// @brief Result of a policed trigger.
+///
+/// On Admitted the Voice is valid; otherwise the Reason explains the owner-side suppression (no activity/duck
+/// created).
 struct TriggerResult final
 {
     bool Admitted = false;
     VoiceHandle Voice{};
     SuppressReason Suppressed = SuppressReason::None;
-    Status EngineStatus = Status::Ok; // engine admission status when attempted
+    Status EngineStatus = Status::Ok; ///< engine admission status when attempted
 };
 
-// A policed one-shot/loop request. EventId + OwnerTag key the policy table.
+/// A policed one-shot/loop request. EventId + OwnerTag key the policy table.
 struct TriggerRequest final
 {
-    uint32 EventId = 0;              // numeric event id (policy key part 1)
-    uint32 OwnerTag = 0;             // generation-aware owner tag (policy key part 2)
-    uint64 CooldownTicks = 0;        // minimum application ticks between admissions
-    bool SuppressWhileActive = true; // AlreadyActive suppression
-    PlayParams Play{};               // resolved numeric parameters (copied)
-    bool IsOwnedLoop = false;        // track for explicit teardown on owner removal
+    uint32 EventId = 0;              ///< numeric event id (policy key part 1)
+    uint32 OwnerTag = 0;             ///< generation-aware owner tag (policy key part 2)
+    uint64 CooldownTicks = 0;        ///< minimum application ticks between admissions
+    bool SuppressWhileActive = true; ///< AlreadyActive suppression
+    PlayParams Play{};               ///< resolved numeric parameters (copied)
+    bool IsOwnedLoop = false;        ///< track for explicit teardown on owner removal
 };
 
-inline constexpr usize MAX_VARIATIONS = 16; // bounded variation list per event
+inline constexpr usize MAX_VARIATIONS = 16; ///< bounded variation list per event
 
-// A typed, application-owned event descriptor (design section 9): it selects a
-// prepared clip from a bounded variation list plus bus/group/priority/gain and
-// spatial defaults. Validated before playback; invalid fields are reported with
-// a specific code so a designer can find the offending field without listening.
+/// @brief A typed, application-owned event descriptor (design section 9): it selects a prepared clip from a bounded
+/// variation list plus bus/group/priority/gain and spatial defaults.
+///
+/// Validated before playback; invalid fields are reported with a specific code so a designer can find the offending
+/// field without listening.
 struct EventDescriptor final
 {
     uint32 EventId = 0;
-    uint32 VariationCount = 0;               // 1..MAX_VARIATIONS
-    ClipHandle Variations[MAX_VARIATIONS]{}; // prepared clip handles
+    uint32 VariationCount = 0;               ///< 1..MAX_VARIATIONS
+    ClipHandle Variations[MAX_VARIATIONS]{}; ///< prepared clip handles
     uint32 BusIndex = 0;
     uint32 GroupIndex = 0;
     uint8 Priority = PRIORITY_MIN;
@@ -82,8 +85,8 @@ struct EventDescriptor final
     float32 MaxDistance = 100.0F;
 };
 
-// The specific descriptor field that failed validation (design section 9:
-// "Diagnostics identify the descriptor/tag and invalid field").
+/// @brief The specific descriptor field that failed validation (design section 9:
+/// "Diagnostics identify the descriptor/tag and invalid field").
 enum class DescriptorField : uint8
 {
     None,
@@ -101,12 +104,12 @@ struct DescriptorValidation final
 {
     bool Valid = false;
     DescriptorField Field = DescriptorField::None;
-    uint32 BadVariationIndex = 0; // meaningful when Field == VariationHandle
+    uint32 BadVariationIndex = 0; ///< meaningful when Field == VariationHandle
 };
 
-// A thin adapter owning a bounded policy table, tracked owned loops, and one
-// shared dialogue duck context. All members are fixed-size; it allocates nothing
-// after construction.
+/// @brief A thin adapter owning a bounded policy table, tracked owned loops, and one shared dialogue duck context.
+///
+/// All members are fixed-size; it allocates nothing after construction.
 class EventAdapter final
 {
 public:
@@ -115,24 +118,24 @@ public:
     EventAdapter(const EventAdapter&) = delete;
     EventAdapter& operator=(const EventAdapter&) = delete;
 
-    // Evaluate policy at application clock `nowTicks`, then (only if not
-    // suppressed) attempt admission. Policy state (cooldown/active) updates ONLY
-    // on successful engine admission; a QueueFull/NotReady/GroupCapacity failure
-    // consumes no cooldown and leaves no active/duck state. A full policy table
-    // for a new key returns TableFull. Reports owner events to the attached sink.
+    /// @brief Evaluate policy at application clock `nowTicks`, then (only if not suppressed) attempt admission.
+    ///
+    /// Policy state (cooldown/active) updates ONLY on successful engine admission; a
+    /// QueueFull/NotReady/GroupCapacity failure consumes no cooldown and leaves no active/duck state. A full
+    /// policy table for a new key returns TableFull. Reports owner events to the attached sink.
     [[nodiscard]] TriggerResult Trigger(const TriggerRequest& req, uint64 nowTicks) noexcept;
 
     // --- Typed event descriptors (design section 9) ---------------------
-    // Validate a descriptor's fields before any playback: nonempty bounded
-    // variation list, prepared variation handles, in-range bus/group IDs, finite
-    // gain/rate and valid distances. Returns the first offending field. No
-    // engine state is touched; this is owner-side authoring validation.
+    /// @brief Validate a descriptor's fields before any playback: nonempty bounded variation list, prepared
+    /// variation handles, in-range bus/group IDs, finite gain/rate and valid distances.
+    ///
+    /// Returns the first offending field. No engine state is touched; this is owner-side authoring validation.
     [[nodiscard]] DescriptorValidation ValidateDescriptor(const EventDescriptor& desc) const noexcept;
 
-    // Trigger a validated descriptor: select one variation deterministically from
-    // `seed` (recorded in the trace; never re-rolled on reentry), resolve the
-    // play parameters, and run the policed admission path. An invalid descriptor
-    // is reported owner-side (OwnerEvent) and admits nothing.
+    /// @brief Trigger a validated descriptor: select one variation deterministically from `seed` (recorded in
+    /// the trace; never re-rolled on reentry), resolve the play parameters, and run the policed admission path.
+    ///
+    /// An invalid descriptor is reported owner-side (OwnerEvent) and admits nothing.
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): named descriptor args.
     [[nodiscard]] TriggerResult TriggerDescriptor(const EventDescriptor& desc,
                                                   uint32 ownerTag,
@@ -141,19 +144,21 @@ public:
                                                   uint64 nowTicks,
                                                   bool suppressWhileActive = true) noexcept;
 
-    // Call every service tick: observe durable terminals so active/cooldown and
-    // dialogue-duck membership release correctly, and reclaim expired entries.
+    /// @brief Call every service tick: observe durable terminals so active/cooldown and
+    /// dialogue-duck membership release correctly, and reclaim expired entries.
     void Update(uint64 nowTicks) noexcept;
 
-    // Stop all owned loops for `ownerTag` (entity removal). Detached one-shots
-    // are not tracked here and may finish naturally.
+    /// @brief Stop all owned loops for `ownerTag` (entity removal).
+    ///
+    /// Detached one-shots are not tracked here and may finish naturally.
     void StopOwnedLoops(uint32 ownerTag) noexcept;
 
     // --- Overlapping dialogue duck (design section 8/9) -----------------
-    // Begin/trigger a dialogue line that participates in a single shared duck
-    // modifier on `duckBusIndex`. The duck is created on the first accepted
-    // member and released only after the last member durably terminates. A
-    // failed admission creates no member and no duck.
+    /// @brief Begin/trigger a dialogue line that participates in a single shared duck modifier on
+    /// `duckBusIndex`.
+    ///
+    /// The duck is created on the first accepted member and released only after the last member durably
+    /// terminates. A failed admission creates no member and no duck.
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): named duck config.
     void ConfigureDialogueDuck(uint32 duckBusIndex, float32 duckDb) noexcept;
     [[nodiscard]] TriggerResult TriggerDialogue(const TriggerRequest& req, uint64 nowTicks) noexcept;

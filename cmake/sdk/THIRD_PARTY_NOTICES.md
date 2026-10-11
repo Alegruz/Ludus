@@ -83,7 +83,8 @@ The complete license is bundled as `xxhash-LICENSE`. Used privately by Foundatio
 ## Optional Luau behavior provider
 
 Only SDKs with the `Behavior` component bundle Luau at reviewed commit
-`1eca9fda3e4753a1592000f6cfdf659aaa778b7d` with Ludus's loader-owner patch
+`1eca9fda3e4753a1592000f6cfdf659aaa778b7d` with Ludus's loader-owner and
+assertion-helper linkage patches
 (`config/luau_toolchain.json`). Copyright Roblox Corporation and contributors;
 Luau and its Lua portions are MIT licensed. Both complete notices are installed
 under `share/Ludus/licenses/Luau/` and copied by the standard game release helper.

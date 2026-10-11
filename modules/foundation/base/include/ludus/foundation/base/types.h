@@ -19,27 +19,32 @@
 
 namespace ludus::foundation::core
 {
-// Unsigned integers.
+/// Exact 8-bit unsigned integer for explicit-width values.
 using uint8 = std::uint8_t;
+/// Exact 16-bit unsigned integer for explicit-width values.
 using uint16 = std::uint16_t;
+/// Exact 32-bit unsigned integer for explicit-width values.
 using uint32 = std::uint32_t;
+/// Exact 64-bit unsigned integer for explicit-width values.
 using uint64 = std::uint64_t;
 
-// Signed integers.
+/// Exact 8-bit signed integer for explicit-width values.
 using int8 = std::int8_t;
+/// Exact 16-bit signed integer for explicit-width values.
 using int16 = std::int16_t;
+/// Exact 32-bit signed integer for explicit-width values.
 using int32 = std::int32_t;
+/// Exact 64-bit signed integer for explicit-width values.
 using int64 = std::int64_t;
 
-// Size and pointer-difference types. usize is what sizeof, array indexing, and
-// container .size() return; isize is its signed counterpart (ptrdiff_t). Kept
-// as the platform types so the codebase never fights the language on widths.
+/// Native unsigned size/index type; matches sizeof and container sizes, not a wire format.
 using usize = std::size_t;
+/// Native signed pointer-difference type; width follows the target ABI.
 using isize = std::ptrdiff_t;
 
-// Floating point. IEEE binary32/binary64 representation is verified once in
-// src/types.cpp; aliases do not set rounding, trap, or denormal handling policy.
+/// IEEE binary32 scalar; does not select rounding, trap or denormal policy.
 using float32 = float;
+/// IEEE binary64 scalar; does not select rounding, trap or denormal policy.
 using float64 = double;
 
 // Cheap storage checks belong here; numeric representation checks compile once

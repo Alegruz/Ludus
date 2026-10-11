@@ -14,14 +14,14 @@ bool Any(const TextureUses& uses) noexcept
 } // namespace
 bool ValidProfileRequirements(const DeviceProfileRequirements& requirements) noexcept
 {
-    if (requirements.FormatCount > 4)
+    if (requirements.FormatCount > 5)
     {
         return false;
     }
     for (uint32 i = 0; i < requirements.FormatCount; ++i)
     {
         const auto& entry = requirements.Formats[i];
-        if (static_cast<uint8>(entry.Format) > static_cast<uint8>(RasterFormat::Rg8Unorm) || !Any(entry.Uses) ||
+        if (static_cast<uint8>(entry.Format) > static_cast<uint8>(RasterFormat::Rgba16Float) || !Any(entry.Uses) ||
             entry.MinMipLevels == 0 || entry.SampleCount == 0 || entry.SampleCount > 64 ||
             (entry.SampleCount & (entry.SampleCount - 1)) != 0 ||
             (entry.SampleCount != 1 && !entry.Uses.ColorAttachment && !entry.Uses.Blendable))
@@ -320,22 +320,28 @@ DeviceProfile QueryDeviceProfile() noexcept
     {
         return {};
     }
-    result.Interface = {8, 2, 8, backend::RasterVertexStrideLimit(), 1, 1};
+    result.Interface = {8, 2, result.Raster.MaxVertexAttributes, backend::RasterVertexStrideLimit(), 1, 1};
     result.Compute = backend::ComputeLimits();
-    for (usize i = 0; i < 4; ++i)
+    for (usize i = 0; i < 5; ++i)
     {
         result.Formats[i] = backend::FormatLimits(static_cast<RasterFormat>(i));
     }
+    result.Raster.HdrColor = result.Formats[static_cast<usize>(RasterFormat::Rgba16Float)].Uses.Blendable;
     return result;
 }
 FormatCapabilities PortableFormatLimits(RasterFormat format, const RasterCapabilities& limits) noexcept
 {
     if (limits.MaxUniformRange < 16384 || limits.MaxTextureDimension2D == 0 ||
-        static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Rg8Unorm))
+        static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Rgba16Float))
     {
         return {};
     }
-    const bool attachment = format == RasterFormat::Rgba8Unorm || format == RasterFormat::Rgba8Srgb;
+    const bool hdr = format == RasterFormat::Rgba16Float;
+    if (hdr && !limits.HdrColor)
+    {
+        return {};
+    }
+    const bool attachment = hdr || format == RasterFormat::Rgba8Unorm || format == RasterFormat::Rgba8Srgb;
     uint32 levels = 1;
     for (auto extent = limits.MaxTextureDimension2D; extent > 1; extent /= 2)
     {
@@ -346,7 +352,7 @@ FormatCapabilities PortableFormatLimits(RasterFormat format, const RasterCapabil
         .Uses = { .Sampled = true, .Filterable = true, .ColorAttachment = attachment, .Blendable = attachment },
         .MaxSampledDimension2D = limits.MaxTextureDimension2D,
         .MaxAttachmentDimension2D = attachment ? limits.MaxTextureDimension2D : 0,
-        .MaxMipLevels = levels < 16 ? levels : 16,
+        .MaxMipLevels = hdr ? 1U : (levels < 16 ? levels : 16),
         .SampleCounts = attachment ? 1U : 0U,
     };
 }

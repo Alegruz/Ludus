@@ -3,6 +3,7 @@
 
 if(LUDUS_BUILD_TESTS)
     find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+    add_subdirectory(quality)
     find_package(Catch2 3 REQUIRED CONFIG)
     add_executable(ludus_build_contract_tests build_contract/exception_tests.cpp)
     target_link_libraries(ludus_build_contract_tests PRIVATE Catch2::Catch2WithMain)

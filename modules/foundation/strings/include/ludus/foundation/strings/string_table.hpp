@@ -10,8 +10,9 @@
 
 namespace ludus::foundation
 {
-// Index is meaningful only inside its enclosing table/snapshot. Never persist
-// a runtime NameId or compare indices across dictionaries.
+/// @brief Index is meaningful only inside its enclosing table/snapshot.
+///
+/// Never persist a runtime NameId or compare indices across dictionaries.
 struct StringIndex final
 {
     uint32 Value{0xffffffffU};
@@ -31,7 +32,7 @@ struct NameLiteral final
 {
     std::string_view Spelling;
     uint64 Fingerprint;
-    // Source must remain alive until binding. consteval does not prove lifetime.
+    /// Source must remain alive until binding. consteval does not prove lifetime.
     template <usize N>
     consteval explicit NameLiteral(const char (&spelling)[N]) noexcept
         : Spelling(spelling, N - 1), Fingerprint(SymbolFingerprint64(Spelling))
@@ -46,11 +47,11 @@ enum class StringHashPolicy : uint8
 struct StringTableConfig final
 {
     usize MaxSpellingBytes{4096};
-    uint32 MaxEntries{65536};                        // includes empty entry at index zero
-    usize MaxAllocatedBytes{usize{8} * 1024 * 1024}; // includes rehash/growth peak
+    uint32 MaxEntries{65536};                        ///< includes empty entry at index zero
+    usize MaxAllocatedBytes{usize{8} * 1024 * 1024}; ///< includes rehash/growth peak
     StringHashPolicy HashPolicy{StringHashPolicy::Trusted};
     SipHashKey Key{};
-    bool HasSecretKey{}; // caller acquired a secret from platform entropy
+    bool HasSecretKey{}; ///< caller acquired a secret from platform entropy
     bool RequireUtf8{true};
     bool RejectEmbeddedZero{true};
 };
@@ -72,8 +73,9 @@ public:
     [[nodiscard]] StringStatus TryFind(std::string_view value, NameId& output) const noexcept;
     [[nodiscard]] StringStatus TryResolve(NameId id, std::string_view& output) const& noexcept;
     StringStatus TryResolve(NameId, std::string_view&) const&& = delete;
-    // Caller quiesces ALL concurrent operations. Consumes this table and keeps
-    // every token/index stable; output must be empty. No allocation required.
+    /// @brief Caller quiesces ALL concurrent operations.
+    ///
+    /// Consumes this table and keeps every token/index stable; output must be empty. No allocation required.
     [[nodiscard]] StringStatus TryFreeze(FrozenStringTable& output) noexcept;
 
 private:
@@ -104,8 +106,9 @@ private:
     StringTable::State* mState{};
     friend class StringTable;
 };
-// Empty output required; failure preserves output. The runtime token issuer
-// must be linked once into the host; plugins use the host's table API.
+/// @brief Empty output required; failure preserves output.
+///
+/// The runtime token issuer must be linked once into the host; plugins use the host's table API.
 [[nodiscard]] StringStatus
 CreateTable(const StringTableConfig& config, const AllocationDomain& domain, StringTable& output) noexcept;
 } // namespace ludus::foundation

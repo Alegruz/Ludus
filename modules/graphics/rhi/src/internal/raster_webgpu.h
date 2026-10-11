@@ -184,11 +184,13 @@ RasterCapabilities RasterLimits() noexcept
             limits.minUniformBufferOffsetAlignment > 256 ? limits.minUniformBufferOffsetAlignment : 256,
             static_cast<usize>(limits.maxUniformBufferBindingSize < 16384 ? limits.maxUniformBufferBindingSize : 16384),
             static_cast<uint32>(internal::RASTER_CAPACITY),
-            static_cast<uint32>(internal::RASTER_DRAWS)};
+            static_cast<uint32>(internal::RASTER_DRAWS),
+            limits.maxVertexAttributes < 16 ? limits.maxVertexAttributes : 16,
+            true};
 }
 // Thanks to W3C GPU for the Web Working Group, "WebGPU", texture format capabilities.
 // https://www.w3.org/TR/webgpu/#texture-format-caps
-// Intersect guaranteed normalized-format support with Ludus's implemented uses;
+// Intersect guaranteed normalized formats and enabled HDR with implemented uses;
 // no storage/copy/MSAA or R8/RG8 attachment path is advertised.
 FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
@@ -297,7 +299,8 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     descriptor.size = {info.Width, info.Height, 1};
     descriptor.dimension = WGPUTextureDimension_2D;
     descriptor.mipLevelCount = info.MipLevels;
-    descriptor.format = info.Format == RasterFormat::Rg8Unorm     ? WGPUTextureFormat_RG8Unorm
+    descriptor.format = info.Format == RasterFormat::Rgba16Float  ? WGPUTextureFormat_RGBA16Float
+                        : info.Format == RasterFormat::Rg8Unorm   ? WGPUTextureFormat_RG8Unorm
                         : info.Format == RasterFormat::R8Unorm    ? WGPUTextureFormat_R8Unorm
                         : info.Format == RasterFormat::Rgba8Unorm ? WGPUTextureFormat_RGBA8Unorm
                                                                   : WGPUTextureFormat_RGBA8UnormSrgb;
@@ -469,7 +472,7 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
     layout.bindGroupLayoutCount = 1;
     layout.bindGroupLayouts = &gRasterLayouts[info.Layout];
     pipeline.Layout = wgpuDeviceCreatePipelineLayout(gDevice, &layout);
-    WGPUVertexAttribute attributes[2][8]{};
+    WGPUVertexAttribute attributes[2][16]{};
     WGPUVertexBufferLayout buffers[2]{};
     for (usize stream = 0; stream < info.StreamCount; ++stream)
     {
@@ -495,7 +498,8 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
         }
     }
     WGPUColorTargetState target = WGPU_COLOR_TARGET_STATE_INIT;
-    target.format = info.Target == RasterTarget::Surface      ? gConfiguration.format
+    target.format = info.Target == RasterTarget::Rgba16Float  ? WGPUTextureFormat_RGBA16Float
+                    : info.Target == RasterTarget::Surface    ? gConfiguration.format
                     : info.Target == RasterTarget::Rgba8Unorm ? WGPUTextureFormat_RGBA8Unorm
                                                               : WGPUTextureFormat_RGBA8UnormSrgb;
     WGPUBlendState blend = WGPU_BLEND_STATE_INIT;

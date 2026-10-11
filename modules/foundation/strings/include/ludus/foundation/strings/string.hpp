@@ -10,9 +10,10 @@
 
 namespace ludus::foundation
 {
-// Unique, move-only storage. The domain must outlive this owner. Explicit clone
-// makes deep-copy allocation and failure visible. Moves carry the original
-// domain; assignment of bytes retains the destination domain.
+/// @brief Unique, move-only storage.
+///
+/// The domain must outlive this owner. Explicit clone makes deep-copy allocation and failure visible. Moves carry
+/// the original domain; assignment of bytes retains the destination domain.
 class String final
 {
 public:
@@ -50,7 +51,7 @@ public:
 
     [[nodiscard]] StringStatus TryAssign(std::string_view value) noexcept;
     [[nodiscard]] StringStatus TryAppend(std::string_view value) noexcept;
-    // One reserve/commit for the batch, including self-borrowed slices.
+    /// One reserve/commit for the batch, including self-borrowed slices.
     [[nodiscard]] StringStatus TryAppendMany(std::span<const std::string_view> values) noexcept;
     [[nodiscard]] StringStatus TryEnsureCapacity(usize capacity) noexcept;
     [[nodiscard]] StringStatus CloneTo(const AllocationDomain& domain, String& output) const noexcept;
@@ -70,7 +71,7 @@ private:
     } mStorage;
 };
 
-// Reusable append buffer; no expression templates or hidden copy allocation.
+/// Reusable append buffer; no expression templates or hidden copy allocation.
 class StringBuilder final
 {
 public:

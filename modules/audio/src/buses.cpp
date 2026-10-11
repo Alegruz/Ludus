@@ -11,6 +11,11 @@
 // (buses were validated so a parent index is always smaller, giving a safe
 // reverse-index fold). Per-bus input and post-gain peak/RMS meters use a fixed
 // window; pre-clamp overs are counted at the root.
+// Thanks to Robert Sparks, "Context-Driven, Layered Mixing", Game Programming
+// Gems 7 (2008), section 4.5, pp. 341-347, for categories, base mix and layered
+// modifiers. Ludus uses a bounded bus tree, one base mix and attenuation-only
+// modifiers while keeping user gain/mute independent; it omits the MIDI tool
+// and arbitrary effects. Reviewed scope: docs/architecture/audio-research.md.
 
 namespace ludus::audio
 {

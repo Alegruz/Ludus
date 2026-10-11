@@ -35,8 +35,9 @@
 namespace ludus::foundation::logging
 {
 
-// Argument tag for the narrow typed grammar. Kept in the public header because
-// packing happens at the call site; the values are lightweight scalars/views.
+/// @brief Argument tag for the narrow typed grammar.
+///
+/// Kept in the public header because packing happens at the call site; the values are lightweight scalars/views.
 enum class ArgTag : uint8
 {
     StrView,
@@ -47,9 +48,10 @@ enum class ArgTag : uint8
     F64,
 };
 
-// Small POD carried on the producer stack. Strings are BORROWED only for the
-// duration of the submit call; the engine copies formatted bytes into a bounded
-// buffer before returning, so nothing borrowed escapes (requirements R24).
+/// @brief Small POD carried on the producer stack.
+///
+/// Strings are BORROWED only for the duration of the submit call; the engine copies formatted bytes into a bounded
+/// buffer before returning, so nothing borrowed escapes (requirements R24).
 struct FormatArg
 {
     ArgTag Tag;

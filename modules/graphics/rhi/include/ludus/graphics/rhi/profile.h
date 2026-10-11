@@ -15,6 +15,9 @@ enum class RasterFormat : ludus::foundation::uint8
     R8Unorm,
     /// Two normalized linear data channels; sampled only, never an attachment.
     Rg8Unorm,
+    /// Linear binary16 RGBA color attachment, sampleable/filterable/blendable when HdrColor is enabled.
+    /// Uploaded binary16 textures are outside this profile; create with Attachment=true.
+    Rgba16Float,
 };
 /// Enabled bounded raster profile, published only for a ready device.
 struct RasterCapabilities final
@@ -31,6 +34,11 @@ struct RasterCapabilities final
     ludus::foundation::uint32 ResourcesPerKind = 0;
     /// Maximum accepted draws in a frame; exhaustion rejects before native work.
     ludus::foundation::uint32 DrawsPerFrame = 0;
+    /// Enabled attribute locations, bounded at sixteen; L4 requires all sixteen.
+    ludus::foundation::uint32 MaxVertexAttributes = 0;
+    /// RGBA16F attachment supports sampling, linear filtering and blending.
+    /// False selects the authored linear RGBA8 fallback; no automatic backend switch.
+    bool HdrColor = false;
 };
 /// Bounded single-queue buffer compute profile; zero fields mean unavailable.
 /// Storage textures, atomics between queues and indirect dispatch are deferred.
@@ -110,8 +118,8 @@ struct DeviceProfile final
     RasterInterfaceCapabilities Interface;
     /// Negotiated bounded buffer-compute limits; zero if unavailable.
     ComputeCapabilities Compute;
-    /// Four format entries indexed by RasterFormat, including unsupported uses.
-    FormatCapabilities Formats[4]{};
+    /// Five format entries indexed by RasterFormat, including unsupported uses.
+    FormatCapabilities Formats[5]{};
 };
 /// Raster admission constraints; zero fields impose no additional requirement.
 /// Nonzero fields imply required portable raster for required profile admission.
@@ -179,8 +187,8 @@ struct DeviceProfileRequirements final
     RasterRequirements Raster;
     /// Additional compute limits.
     ComputeRequirements Compute;
-    /// At most four unique known format requests.
-    FormatRequirement Formats[4]{};
+    /// At most five unique known format requests.
+    FormatRequirement Formats[5]{};
     /// Number of valid entries in Formats; larger counts or duplicates are malformed.
     ludus::foundation::uint32 FormatCount = 0;
 };

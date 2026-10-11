@@ -230,6 +230,10 @@ RasterTarget PassTarget(const RasterPassInfo& pass) noexcept
     {
         return RasterTarget::Surface;
     }
+    if (At(RasterKind::Texture, pass.Texture).Texture.Format == RasterFormat::Rgba16Float)
+    {
+        return RasterTarget::Rgba16Float;
+    }
     return At(RasterKind::Texture, pass.Texture).Texture.Format == RasterFormat::Rgba8Unorm ? RasterTarget::Rgba8Unorm
                                                                                             : RasterTarget::Rgba8Srgb;
 }

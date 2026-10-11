@@ -22,8 +22,10 @@ using ludus::foundation::uint32;
 using ludus::foundation::uint64;
 using ludus::foundation::uint8;
 
-// ABI major version. Bumped on any incompatible layout/semantics change. The
-// host rejects a module whose AbiMajor differs before calling Create.
+/// @brief ABI major version.
+///
+/// Bumped on any incompatible layout/semantics change. The host rejects a module whose AbiMajor differs before
+/// calling Create.
 inline constexpr uint32 kAbiMajor = 1;
 
 // ABI minor version. Additive, backward-compatible table growth only. The host
@@ -32,14 +34,16 @@ inline constexpr uint32 kAbiMajor = 1;
 /// preserves modules that advertise only earlier capabilities.
 inline constexpr uint32 kAbiMinor = 1;
 
-// Maximum byte length of an opaque identity string in module metadata. Keeps
-// every metadata record a bounded POD; the host validates lengths before use.
+/// @brief Maximum byte length of an opaque identity string in module metadata.
+///
+/// Keeps every metadata record a bounded POD; the host validates lengths before use.
 inline constexpr uint32 kIdentityMax = 256;
 
-// Explicit status for every boundary call. Ok is always success. The host never
-// treats a non-zero status as a crash; native crashes/hangs are host failures
-// handled by the supervisor, not catchable reload statuses (design 6/7). The
-// 32-bit base is a fixed part of the ABI wire layout, not a value-count choice.
+/// @brief Explicit status for every boundary call.
+///
+/// Ok is always success. The host never treats a non-zero status as a crash; native crashes/hangs are host failures
+/// handled by the supervisor, not catchable reload statuses (design 6/7). The 32-bit base is a fixed part of the
+/// ABI wire layout, not a value-count choice.
 // NOLINTNEXTLINE(performance-enum-size)
 enum class Status : uint32
 {
@@ -61,10 +65,11 @@ enum class Status : uint32
     ScriptPaused = 12
 };
 
-// Optional capabilities a module advertises in its metadata. Mandatory
-// operations (Query/Create/Destroy/Update) are always present; these flags gate
-// the reload and live-edit tables. A module lacking Reload offers only Restart.
-// The 32-bit base is the fixed ABI capability bitset width.
+/// @brief Optional capabilities a module advertises in its metadata.
+///
+/// Mandatory operations (Query/Create/Destroy/Update) are always present; these flags gate the reload and live-edit
+/// tables. A module lacking Reload offers only Restart.
+/// The 32-bit base is the fixed ABI capability bitset width.
 // NOLINTNEXTLINE(performance-enum-size)
 enum class Capability : uint32
 {

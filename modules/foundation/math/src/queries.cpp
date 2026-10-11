@@ -64,6 +64,10 @@ constexpr float64 kInf = std::numeric_limits<float64>::infinity();
 // ===========================================================================
 // Plane
 // ===========================================================================
+// Thanks to John Olsen, "Vector and Plane Tricks", Game Programming Gems 2
+// (2001), section 2.2, pp. 182-190, for signed distance, projection and reflection
+// using a unit normal. Ludus derives signs from dot(n,p)+d=0, checks inputs and
+// leaves collision response to callers. See docs/architecture/math-research.md.
 MathStatus TryMakePlane(Vector3 normal, Vector3 point, Plane& out) noexcept
 {
     if (!IsFinite(normal) || !IsFinite(point))
@@ -304,6 +308,11 @@ MathStatus TryTransformAabb(const Affine2& a, const Aabb2& box, Aabb2& out) noex
 // ===========================================================================
 // Ray queries
 // ===========================================================================
+// Thanks to Jacco Bikker, "Fast Generic Ray Queries for Games", Game Programming
+// Gems 7 (2008), section 2.2, pp. 127-141, for bounded parametric ray intervals.
+// Ludus keeps primitive tests separate from traversal and checks zero direction
+// components instead of using unchecked reciprocals or compact pointer tricks.
+// Source scope: docs/architecture/math-research.md.
 bool IsValidInterval(const RayInterval& interval) noexcept
 {
     if (std::isnan(interval.MinT) || std::isnan(interval.MaxT))
@@ -513,6 +522,12 @@ struct D3
 }
 } // namespace
 
+// Thanks to Graham Rhodes, "Fast, Robust Intersection of 3D Line Segments",
+// Game Programming Gems 2 (2001), section 2.3, pp. 191-204, for constrained
+// closest-point queries and explicit parallel/degenerate cases. Ludus instead
+// enumerates an interior stationary candidate and four endpoint projections in
+// double precision, with a fixed tie rule; this is not an exact predicate.
+// Source scope and adaptations: docs/architecture/math-research.md.
 MathStatus TryClosestPointsSegments(Vector3 p0, Vector3 p1, Vector3 q0, Vector3 q1, SegmentClosest& out) noexcept
 {
     if (!IsFinite(p0) || !IsFinite(p1) || !IsFinite(q0) || !IsFinite(q1))
@@ -633,6 +648,11 @@ namespace
 }
 } // namespace
 
+// Thanks to Waldemar Celes, "Extracting Frustum and Camera Information", Game
+// Programming Gems 4 (2004), section 2.2, pp. 147-156, for pulling clip planes
+// back through the point transform. Ludus uses 0<=z<=w, reverse-Z near/far labels
+// and an inactive far plane for infinite perspective, rather than OpenGL depth.
+// See docs/architecture/math-research.md for source scope and the derivation.
 MathStatus TryExtractFrustum(const Matrix4& worldToClip, FrustumMode mode, Frustum& out) noexcept
 {
     if (!IsFinite(worldToClip))

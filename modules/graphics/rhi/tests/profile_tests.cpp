@@ -105,7 +105,8 @@ TEST_CASE("Required profile limits and formats fail before resource creation wit
     ProfileRequirement expected = ProfileRequirement::None;
     SECTION("engine capacity")
     {
-        request.RequiredProfile.Raster.MinResourcesPerKind = 33;
+        request.RequiredProfile.Raster.MinResourcesPerKind =
+            static_cast<ludus::foundation::uint32>(internal::RASTER_CAPACITY) + 1;
         expected = ProfileRequirement::ResourceCount;
     }
     SECTION("binding capacity")
@@ -208,7 +209,7 @@ TEST_CASE("Malformed profile requests never launch a backend and preserve output
     request.RequiredProfile.Formats[0].Uses.Sampled = true;
     SECTION("too many formats")
     {
-        request.RequiredProfile.FormatCount = 5;
+        request.RequiredProfile.FormatCount = 6;
     }
     SECTION("invalid format")
     {
@@ -233,7 +234,7 @@ TEST_CASE("Malformed profile requests never launch a backend and preserve output
     }
     SECTION("malformed preference")
     {
-        request.PreferredProfile.FormatCount = 5;
+        request.PreferredProfile.FormatCount = 6;
     }
     const auto token = backend::PendingToken;
     StartupInfo failure;
@@ -408,5 +409,83 @@ TEST_CASE("Stride admission honors the enabled backend's aligned boundary", "[rh
     {
         REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Ready);
         CHECK(info.Profile.Interface.MaxVertexStride == request.RequiredProfile.Raster.MinVertexStride);
+    }
+}
+
+TEST_CASE("Negotiation retains L4 HDR formats and sixteen vertex attributes", "[rhi][profile][hdr]")
+{
+    ProfileFixture fixture;
+    DeviceDescription request;
+    request.RequiredProfile.Raster.MinVertexAttributes = 16;
+    request.RequiredProfile.FormatCount = 5;
+    for (ludus::foundation::uint32 i = 0; i < 5; ++i)
+    {
+        request.RequiredProfile.Formats[i].Format = static_cast<RasterFormat>(i);
+        request.RequiredProfile.Formats[i].Uses.Sampled = true;
+    }
+    request.RequiredProfile.Formats[4].Uses.ColorAttachment = true;
+    request.RequiredProfile.Formats[4].Uses.Blendable = true;
+    REQUIRE(ValidateDeviceDescription(request) == DeviceStatus::Ready);
+    REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
+    fixture.Complete();
+    DeviceInfo info;
+    REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Ready);
+    CHECK(info.Profile.Interface.MaxVertexAttributes == 16);
+    CHECK(info.Profile.Raster.HdrColor);
+    FormatCapabilities format;
+    REQUIRE(GetFormatCapabilities(fixture.Device, RasterFormat::Rgba16Float, format) == RasterStatus::Ready);
+    CHECK(format.Uses.Sampled);
+    CHECK(format.Uses.Filterable);
+    CHECK(format.Uses.ColorAttachment);
+    CHECK(format.Uses.Blendable);
+    CHECK(format.MaxMipLevels == 1);
+    TextureHandle texture;
+    CHECK(CreateTexture(fixture.Device,
+                        { .Width = 16, .Height = 16, .Format = RasterFormat::Rgba16Float, .Attachment = true },
+                        {},
+                        texture) == RasterStatus::Ready);
+    TextureHandle uploaded;
+    CHECK(CreateTexture(fixture.Device,
+                        {
+                            .Width = 16,
+                            .Height = 16,
+                            .Format = RasterFormat::Rgba16Float,
+                        },
+                        {},
+                        uploaded) == RasterStatus::Unsupported);
+}
+
+TEST_CASE("Unavailable HDR requirements reject while preferences preserve the LDR fallback", "[rhi][profile][hdr]")
+{
+    ProfileFixture fixture;
+    reference::HdrAvailable = false;
+    DeviceDescription request;
+    bool required = false;
+    SECTION("required HDR")
+    {
+        required = true;
+        request.RequiredProfile.FormatCount = 1;
+        request.RequiredProfile.Formats[0] = { .Format = RasterFormat::Rgba16Float, .Uses = { .Blendable = true } };
+    }
+    SECTION("preferred HDR")
+    {
+        request.PreferredProfile.FormatCount = 1;
+        request.PreferredProfile.Formats[0] = { .Format = RasterFormat::Rgba16Float, .Uses = { .Blendable = true } };
+    }
+    REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
+    fixture.Complete();
+    DeviceInfo info;
+    REQUIRE(GetDeviceInfo(fixture.Device, info) == (required ? DeviceStatus::Failed : DeviceStatus::Ready));
+    const auto diagnostic = required ? info.Startup.ProfileFailure : info.UnmetProfilePreference;
+    CHECK(diagnostic.Requirement == ProfileRequirement::Blendable);
+    CHECK(diagnostic.Format == RasterFormat::Rgba16Float);
+    CHECK_FALSE(info.Profile.Raster.HdrColor);
+    if (!required)
+    {
+        FormatCapabilities format;
+        CHECK(GetFormatCapabilities(fixture.Device, RasterFormat::Rgba16Float, format) == RasterStatus::Unsupported);
+        CHECK(format.MaxMipLevels == 0);
+        CHECK(GetFormatCapabilities(fixture.Device, RasterFormat::Rgba8Unorm, format) == RasterStatus::Ready);
+        CHECK(format.Uses.Blendable);
     }
 }

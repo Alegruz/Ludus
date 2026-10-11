@@ -1,4 +1,9 @@
 #include <ludus/audio/audio_debug.h>
+// Thanks to Scott Patterson, "Game Audio Design Patterns", Game Programming
+// Gems 2 (2001), section 6.1, pp. 514-520, for separating sound identity from
+// playback handles behind a small command facade. Ludus uses typed session/
+// generation checks and control-thread polling rather than render callbacks.
+// Reviewed design influences: docs/architecture/audio-research.md.
 #include <ludus/audio/audio_system.h>
 
 #include <ludus/foundation/base/core.h>

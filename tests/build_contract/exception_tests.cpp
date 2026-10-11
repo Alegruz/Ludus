@@ -18,7 +18,9 @@ TEST_CASE("test-only exception policy permits unwinding", "[build-contract]")
 
     const auto fail = [&destroyed] {
         const Cleanup cleanup{destroyed};
-        throw 7;
+        // This test deliberately throws a primitive to verify the test-only
+        // exception boundary. Production exceptions remain compile-time errors.
+        throw 7; // NOLINT(hicpp-exception-baseclass)
     };
     CHECK_THROWS_AS(fail(), int);
     CHECK(destroyed);

@@ -20,10 +20,11 @@ namespace ludus::foundation::math
 using core::float32;
 using core::usize;
 
-// Policy for checked matrix inversion. Dimensionless thresholds (design §4):
-// minReciprocalCondition rejects ill-conditioned matrices; maxResidual rejects
-// a narrowed inverse whose two-sided residual is too large. These are rejection
-// policies, not forward-error guarantees.
+/// @brief Policy for checked matrix inversion.
+///
+/// Dimensionless thresholds (design §4): minReciprocalCondition rejects ill-conditioned matrices; maxResidual
+/// rejects a narrowed inverse whose two-sided residual is too large. These are rejection policies, not forward-
+/// error guarantees.
 struct InversePolicy
 {
     float32 MinReciprocalCondition = 1e-6f;
@@ -33,6 +34,7 @@ struct InversePolicy
 // ===========================================================================
 // Matrix3 — three Vector3 columns.
 // ===========================================================================
+/// Column-major 3x3 matrix acting on column vectors; default is zero, not identity.
 struct Matrix3
 {
     Vector3 Columns[3] = {};
@@ -46,12 +48,12 @@ struct Matrix3
         return Matrix3{{Vector3{1, 0, 0}, Vector3{0, 1, 0}, Vector3{0, 0, 1}}};
     }
 
-    // At(row, column): element in [0,3). An out-of-range index is a caller
-    // precondition violation, reported by LUDUS_ASSERT in development. Because
-    // assertions are resumable (ADR 0006), the index is also clamped into range
-    // so a resumed assertion yields a defined in-bounds read rather than an
-    // out-of-range access (MA05). Direct Columns[] indexing keeps ordinary C++
-    // preconditions; this SDK indexed helper is memory-safe regardless.
+    /// @brief At(row, column): element in [0,3).
+    ///
+    /// An out-of-range index is a caller precondition violation, reported by LUDUS_ASSERT in development.
+    /// Because assertions are resumable (ADR 0006), the index is also clamped into range so a resumed assertion
+    /// yields a defined in-bounds read rather than an out-of-range access (MA05). Direct Columns[] indexing
+    /// keeps ordinary C++ preconditions; this SDK indexed helper is memory-safe regardless.
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): (row, column) is the conventional element-accessor order.
     [[nodiscard]] constexpr float32 At(usize row, usize column) const noexcept
     {
@@ -89,6 +91,7 @@ struct Matrix3
 // ===========================================================================
 // Matrix4 — four Vector4 columns.
 // ===========================================================================
+/// Column-major 4x4 matrix; A*B applies B then A. Default is zero, not identity.
 struct Matrix4
 {
     Vector4 Columns[4] = {};
@@ -102,8 +105,8 @@ struct Matrix4
         return Matrix4{{Vector4{1, 0, 0, 0}, Vector4{0, 1, 0, 0}, Vector4{0, 0, 1, 0}, Vector4{0, 0, 0, 1}}};
     }
 
-    // See Matrix3::At: resumable-assertion-safe (index clamped after the assert
-    // so a resumed assertion cannot cause an out-of-range access; MA05).
+    /// @brief See Matrix3::At: resumable-assertion-safe (index clamped after the assert
+    /// so a resumed assertion cannot cause an out-of-range access; MA05).
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): (row, column) is the conventional element-accessor order.
     [[nodiscard]] constexpr float32 At(usize row, usize column) const noexcept
     {
@@ -140,25 +143,26 @@ struct Matrix4
 }
 
 // --- Rotation <-> matrix ----------------------------------------------------
-// Matrix3 from a UNIT quaternion (trusted unit input). Matches Rotate(q,v).
+/// Matrix3 from a UNIT quaternion (trusted unit input). Matches Rotate(q,v).
 [[nodiscard]] Matrix3 ToMatrix3(Quaternion q) noexcept;
 
-// TryToRotation: convert an approximately-orthonormal, positive-determinant
-// Matrix3 to a unit quaternion using the largest-component branch (design §6).
-// Rejects scale, shear, reflection and zero bases (Degenerate), using the
-// orthogonality/length/determinant tolerance in `policy`. The result's rotation
-// action is validated before success. Output unchanged on failure.
+/// Tolerance policy for extracting a unit rotation from an approximately orthonormal basis.
 struct RotationExtractionPolicy
 {
-    float32 OrthoTolerance = 1e-5f; // dimensionless length/orthogonality/det slack
+    /// Dimensionless slack for basis length, orthogonality and determinant validation.
+    float32 OrthoTolerance = 1e-5f;
 };
+/// Extract a unit rotation; reject scale, shear, reflection and degenerate/nonfinite bases.
+/// Validate the result's rotation action; failure preserves out.
 [[nodiscard]] MathStatus TryToRotation(const Matrix3& basis, RotationExtractionPolicy policy, Quaternion& out) noexcept;
+/// Extract a unit rotation using the default tolerance policy; failure preserves out.
 [[nodiscard]] MathStatus TryToRotation(const Matrix3& basis, Quaternion& out) noexcept;
 
 // --- Checked inverse --------------------------------------------------------
-// Fixed-stack scaled-pivot Gauss-Jordan with condition/residual policy. Returns
-// output unchanged on failure (IllConditioned / Degenerate / OutOfRange /
-// NonFiniteInput). In-place inversion is supported.
+/// @brief Fixed-stack scaled-pivot Gauss-Jordan with condition/residual policy.
+///
+/// Returns output unchanged on failure (IllConditioned / Degenerate / OutOfRange / NonFiniteInput). In-place
+/// inversion is supported.
 [[nodiscard]] MathStatus TryInverse(const Matrix3& m, InversePolicy policy, Matrix3& out) noexcept;
 [[nodiscard]] MathStatus TryInverse(const Matrix4& m, InversePolicy policy, Matrix4& out) noexcept;
 [[nodiscard]] MathStatus TryInverse(const Matrix3& m, Matrix3& out) noexcept;

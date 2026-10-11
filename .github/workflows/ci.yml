@@ -58,6 +58,19 @@ jobs:
         run: |
           out/host-tools/venv/bin/cmake --preset macos-clang-development -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" -DLUDUS_EDITOR_RENDER_PREVIEW=ON -DLUDUS_BUILD_WORLD_DEMO=ON
           ./scripts/build macos-clang-development
+      - name: Require complete macOS source inventory
+        run: ./scripts/check macos-clang-development --inventory
+      - name: Review complete macOS analyzer baseline
+        continue-on-error: true
+        run: ./scripts/check macos-clang-development --analyzer
+      - name: Preserve macOS analyzer baseline
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analyzer-macos
+          path: out/quality/analysis/
+          if-no-files-found: error
+          retention-days: 14
       - name: Test macOS setup contracts
         run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui test_metal_shaders test_raster_shaders test_texture_cooker test_macos_editor test_editor_tool test_process_ownership test_play_probe test_play_session test_play_build test_play_documents test_play_assets -v
       - name: Test native Cocoa, Metal, filesystem, Content and Audio
@@ -91,7 +104,7 @@ jobs:
         run: |
           out/host-tools/venv/bin/cmake --install out/build/macos-clang-development
           out/host-tools/venv/bin/python tests/sdk_consumer/verify_metal_shader_build.py --sdk "$PWD/out/install/macos-clang-development" --cmake "$PWD/out/host-tools/venv/bin/cmake" --ninja "$PWD/out/host-tools/venv/bin/ninja" --cxx "$PWD/out/host-tools/bin/clang++" --slang "$PWD/out/shader-tools/slang/bin/slangc" --conan "$PWD/out/conan/macos-clang-development" --sysroot "$PWD/out/host-tools/macos-sdk" --libcxx "$PWD/out/host-tools/libcxx-include"
-      - name: Verify installed L0/L1/L2/L3 renderer consumers
+      - name: Verify installed L0/L1/L2/L3/L4 renderer consumers
         run: |
           out/host-tools/venv/bin/cmake -S tests/sdk_consumer/renderer -B out/renderer-sdk -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -105,6 +118,7 @@ jobs:
           out/renderer-sdk/ludus_sdk_renderer_views_consumer
           out/renderer-sdk/ludus_sdk_renderer_overlays_consumer
           out/renderer-sdk/ludus_sdk_renderer_materials_consumer
+          out/renderer-sdk/ludus_sdk_renderer_lighting_consumer
       - name: Verify installed macOS game-project tooling
         run: |
           ./scripts/install-sdk macos-clang-development
@@ -148,6 +162,8 @@ jobs:
             apps/editor/src/recent_projects.cpp apps/editor/tests/controller_tests.cpp \
             apps/editor/src/scene_document.cpp apps/editor/src/scene_store.cpp \
             apps/editor/src/scene_workspace.cpp apps/editor/src/scene_preview.cpp \
+            apps/editor/src/world_document.cpp apps/editor/src/world_workspace.cpp \
+            apps/editor/tests/world_workspace_tests.cpp \
             apps/editor/tests/scene_document_tests.cpp apps/editor/tests/scene_workspace_tests.cpp \
             apps/editor/tests/scene_native_tests.mm \
             apps/editor/tests/macos_journey_tests.cpp apps/editor/tests/live_journey_tests.cpp
@@ -271,8 +287,19 @@ jobs:
           out/host-tools/venv/bin/cmake --preset macos-clang-asan-ubsan -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" -DLUDUS_EDITOR_RENDER_PREVIEW=ON
           out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_editor_tests ludus_editor_scene_tests ludus_game_host_app ludus_game_host_loader_tests ludus_game_host_session_tests ludus_game_host_reload_tests ludus_game_host_protocol_tests ludus_game_fixture_C ludus_game_fixture_D ludus_game_fixture_H ludus_audio_tests ludus_audio_content_tests ludus_rhi_lifecycle_tests ludus_rhi_metal_tests ludus_rhi_render_tests ludus_platform_cocoa_tests ludus_platform_cocoa_keymap_tests ludus_filesystem_tests ludus_filesystem_fault_tests ludus_filesystem_namespace_fault_tests ludus_filesystem_pack_fault_tests ludus_filesystem_async_fault_tests ludus_filesystem_persistence_fault_tests ludus_filesystem_watch_fault_tests ludus_content_tests ludus_content_save_fault_tests
 
+          out/host-tools/venv/bin/cmake --build --preset macos-clang-asan-ubsan --target ludus_asan_control_child ludus_ubsan_control_child
+          out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --label-regex sanitizer-control --output-on-failure --no-tests=error
           out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --tests-regex '^ludus_((platform_cocoa(_keymap)?|filesystem(_fault|_namespace_fault|_pack_fault|_async_fault|_persistence_fault|_watch_fault)?|content(_save_fault)?|audio(_device|_content)?|rhi_(metal|lifecycle))_tests|rhi_render_pixels)$' --no-tests=error
           out/host-tools/venv/bin/ctest --preset macos-clang-asan-ubsan --label-regex '^(editor|loader|session|reload|protocol)$' --no-tests=error
+
+      - name: Preserve macOS sanitizer control diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-sanitizer-controls
+          path: out/build/macos-clang-asan-ubsan/tests/quality/*-evidence/
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Qualify production Behavior provider with macOS sanitizers
         run: ./scripts/script-provider run --preset macos-clang-asan-ubsan
@@ -296,7 +323,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install pinned formatter and GUI test dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18 python3-venv python3-tk xvfb xauth liblz4-1
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-format-18 clang-tidy-18 python3-venv python3-tk xvfb xauth liblz4-1
       - name: Install pinned CMake and Ninja for live project setup tests
         run: |
           python3 - <<'PY'
@@ -309,6 +336,21 @@ jobs:
           engine.install_managed_tools(root, engine.load_tool_versions(root))
           PY
           echo "$PWD/out/host-tools/venv/bin" >> "$GITHUB_PATH"
+      - name: Prepare pinned tooling quality checks
+        run: ./scripts/setup-quality-tools
+      - name: Test tooling checks and editor preset boundaries
+        run: PYTHONPATH=scripts/python python3 -m unittest test_quality_tools test_editor_setup -v
+      - name: Review Python and workflow correctness baseline
+        continue-on-error: true
+        run: ./scripts/check --tooling
+      - name: Preserve tooling quality evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tooling-quality
+          path: out/quality/tooling/
+          if-no-files-found: error
+          retention-days: 14
       - name: Test formatting and staged-file preservation
         run: python3 -m unittest discover -s scripts/python -p 'test_formatting.py' -v
       - name: Test reproducible packs with the independent LZ4 decoder
@@ -320,7 +362,7 @@ jobs:
       - name: Test graphical and CLI initialization routing
         run: xvfb-run -a env LUDUS_TEST_GUI=1 python3 -m unittest discover -s scripts/python -p 'test_init*.py' -v
       - name: Test CI initialization and analysis contracts
-        run: python3 -m unittest discover -s scripts/python -p 'test_ci.py' -v
+        run: PYTHONPATH=scripts/python python3 -m unittest test_ci test_quality -v
       - name: Live reload tooling tests
         run: |
           python3 -m unittest discover -s scripts/python -p 'test_play*.py' -v
@@ -514,6 +556,7 @@ jobs:
           out/renderer-sdk/ludus_sdk_renderer_views_consumer
           out/renderer-sdk/ludus_sdk_renderer_overlays_consumer
           out/renderer-sdk/ludus_sdk_renderer_materials_consumer
+          out/renderer-sdk/ludus_sdk_renderer_lighting_consumer
       - name: Build and test the independent Cornell box tutorial (Vulkan)
         run: |
           sudo apt-get install -y -qq libvulkan1 mesa-vulkan-drivers
@@ -566,6 +609,16 @@ jobs:
           editor: 'true'
       - name: Build with sanitizers
         run: ./scripts/build linux-clang-asan-ubsan
+      - name: Prove ASan detection and fatal UBSan before acceptance
+        run: out/host-tools/venv/bin/ctest --preset linux-clang-asan-ubsan --label-regex sanitizer-control --output-on-failure --no-tests=error
+      - name: Preserve sanitizer control diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitizer-controls
+          path: out/build/linux-clang-asan-ubsan/tests/quality/*-evidence/
+          if-no-files-found: error
+          retention-days: 14
       - name: Validate S0 Luau allocation failure and lifetime profile with sanitizers
         run: |
           ./scripts/luau-probe bootstrap
@@ -704,16 +757,21 @@ jobs:
           out/host-tools/venv/bin/cmake --preset linux-clang-development -B out/build/threading-tsan \
             -DLUDUS_ENABLE_TSAN=ON -DLUDUS_WARNINGS_AS_ERRORS=ON
           out/host-tools/venv/bin/cmake --build out/build/threading-tsan --parallel 2 \
-            --target ludus_foundation_threading_tests ludus_threading_startup_tests ludus_filesystem_tests ludus_filesystem_async_fault_tests ludus_audio_content_tests ludus_audio_content_worker_tests
+            --target ludus_tsan_control_child ludus_foundation_threading_tests ludus_threading_startup_tests ludus_filesystem_tests ludus_filesystem_async_fault_tests ludus_audio_content_tests ludus_audio_content_worker_tests ludus_resources_tests ludus_resources_audio_tests
+      - name: Prove TSan detection before race acceptance
+        run: out/host-tools/venv/bin/ctest --test-dir out/build/threading-tsan --label-regex sanitizer-control --output-on-failure --no-tests=error
       - name: Test dependencies, publication, cancellation and startup with TSan
-        run: out/host-tools/venv/bin/ctest --test-dir out/build/threading-tsan --tests-regex "ludus_(foundation_threading|threading_startup|filesystem|filesystem_async_fault|audio_content|audio_content_worker)_tests" --output-on-failure --no-tests=error
+        run: out/host-tools/venv/bin/ctest --test-dir out/build/threading-tsan --tests-regex "ludus_(foundation_threading|threading_startup|filesystem|filesystem_async_fault|audio_content|audio_content_worker|resources|resources_audio)_tests" --output-on-failure --no-tests=error
       - name: Preserve race-detection diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: threading-tsan
-          path: out/build/threading-tsan/Testing/Temporary/
+          path: |
+            out/build/threading-tsan/Testing/Temporary/
+            out/build/threading-tsan/tests/quality/*-evidence/
           if-no-files-found: error
+          retention-days: 14
 
   analysis:
     needs: [changes, formatting]
@@ -724,6 +782,7 @@ jobs:
       matrix:
         shard: [0, 1]
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     env:
       LUDUS_TIDY_JOBS: "2"
       LUDUS_TIDY_SHARD_COUNT: "2"
@@ -740,6 +799,17 @@ jobs:
         run: ./scripts/build linux-clang-development
       - name: Analyze every project translation unit
         run: ./scripts/check linux-clang-development --tidy
+      - name: Review complete stable analyzer baseline
+        continue-on-error: true
+        run: ./scripts/check linux-clang-development --analyzer
+      - name: Preserve source inventory and bounded analysis diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysis-${{ matrix.shard }}
+          path: out/quality/analysis/
+          if-no-files-found: error
+          retention-days: 14
       - name: Report compiler cache
         if: always()
         run: if command -v ccache >/dev/null; then ccache --show-stats >> "$GITHUB_STEP_SUMMARY"; fi
@@ -790,6 +860,8 @@ jobs:
             apps/editor/tests/script_workspace_tests.cpp \
             apps/editor/src/scene_document.cpp apps/editor/src/scene_store.cpp \
             apps/editor/src/scene_workspace.cpp apps/editor/src/scene_preview.cpp \
+            apps/editor/src/world_document.cpp apps/editor/src/world_workspace.cpp \
+            apps/editor/tests/world_workspace_tests.cpp \
             apps/editor/tests/scene_document_tests.cpp apps/editor/tests/scene_workspace_tests.cpp
       - name: Verify S5 Editor, installed Behavior SDK and GameHost journey
         run: |

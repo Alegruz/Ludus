@@ -4,7 +4,8 @@ The editor is an **optional, OFF-by-default** native developer tool
 (`apps/editor`, target `ludus_editor`). It opens a project descriptor, edits its
 native build/launch settings, saves, reopens, configures/builds, runs the
 selected executable in a separate process, stops it, and reports failures. It
-also provides a bounded world-demo scene authoring adapter. Trusted authoring
+also provides project-defined component authoring in World and a bounded
+world-demo scene authoring adapter in Scene. Trusted authoring
 rendering and gameplay use separate windows; the status area describes the runtime.
 
 See the specification package for the authoritative contract:
@@ -26,6 +27,7 @@ editor package; launching the native editor does not need those files on disk.
 | --- | --- |
 | Welcome | New/Open and recent projects while no project is open |
 | Project | Setup/engine overview, lifecycle actions, name/profile and expandable build/launch details |
+| World | Project-defined entities/components, typed fields, references, history and save/recovery |
 | Scene | World-demo level selection, transforms, history, save/recovery and trusted preview |
 | Scripts | Project-owned script and sequence drafts |
 | Audio | Content selection, definitions, save and preview |
@@ -366,6 +368,129 @@ With the Qt prerequisites installed, include the editor in sanitizer validation:
 ./scripts/build linux-clang-asan-ubsan
 ./scripts/test linux-clang-asan-ubsan
 ```
+
+## Gameplay world authoring
+
+The **World** tab edits game-owned entity/component data independently of the
+sample-specific **Scene** adapter. It never loads project code or guesses C++
+component layouts. The project supplies `authoring/world.schema.json` under its
+saved source directory; the editor builds its inspector from that schema.
+
+### Start with an example
+
+1. Use **File → Open Sample → live-edit-game** to obtain a writable sample copy.
+   Opening world data does not require downloading tools or building the game.
+2. Select **World → Open World…**, then `authoring/starter.world.json`.
+3. Select **Starter Cube**. Edit its position or presentation fields. Units,
+   project help, enum choices and logical asset names appear in the inspector.
+4. Use **Apply Changes** to validate all fields as one edit. Invalid text stays
+   visible and the applied document stays intact. **Reset Fields** restores the
+   last applied values. Selection and structural commands wait for Apply/Reset.
+5. Use **Add Entity**, **Duplicate**, or **Add Component**. Required components
+   arrive with defaults; optional components have **Remove Component**. Tags
+   with no properties are supported. Entity names can repeat; stable IDs differ.
+6. **File → Save World** (the normal Save shortcut while World is selected)
+   applies valid pending fields and writes only the world document. Undo/Redo
+   operates on whole applied edits; a focused text field retains its own text
+   history. New World creates its file on the first successful Save.
+
+The starter includes designer placement, artist presentation, sound asset,
+localization-key, behavior-target and rendering-experiment fields. These are
+**authoring examples**, not a runtime integration for `live-edit-game`: its
+shipped gameplay remains driven by its existing tuning adapter. World does not
+launch a viewport or send edits to Live Inspector. A game adapter must explicitly
+read world data and map it to its typed component pools before it can affect
+play. Do not assume Build and Run consumes a World document automatically.
+
+### Use cases and review criteria
+
+Experience and discipline are independent: an experienced artist should not
+need C++ knowledge to edit a component, and an engine engineer should not have
+to implement a widget for each new numeric field.
+
+| Consumer/task | Interaction and acceptance criterion |
+| --- | --- |
+| Introductory developer creates a pickup | Start from a named entity and project defaults; add Presentation, choose a mesh and sound, save and reopen without editing JSON. An incomplete number remains visible with an actionable message. |
+| Developer moving from Unity, Unreal or Godot changes composition | Use entity list plus component inspector, add/remove optional components, duplicate and Undo. Required components explain why removal is unavailable. |
+| Professional designer or artist makes a precise batch of inspector edits | Apply the name and component values atomically. A failed property prevents partial publication; Undo restores the entire edit. File conflicts preserve the draft and history. |
+| Audio or localization contributor assigns content | Use labeled logical asset choices filtered by declared kind and a localization-key string. No machine asset paths are stored. This is key assignment, not translation management or audio preview. |
+| Engine engineer defines custom component data | Own stable component/property IDs, explicit bounds/defaults/help and the runtime adapter. Unknown fields/schema mismatch fail closed, preserving the current document. No reflection plug-in or project binary is executed. |
+| Rendering researcher adds an experiment parameter | Declare units, finite bounds, numeric/enum fields and optional components. The existing inspector renders them. This slice has float32 numeric text input; float64 precision, material graphs and experiment execution remain future work. |
+| QA validates a broken or interrupted authoring session | Invalid/duplicate-key JSON, missing references, locks and stale schemas produce explicit failure. Restore Recovery is opt-in, bound to the saved world and schema, validated before use, and undoable. |
+
+These are designed task scenarios exercised by automated regressions and visual
+review, **not evidence of a user study**. Validate with representatives of each
+experience level and discipline before calling the interaction broadly usable.
+
+### Project-owned file contract
+
+Both schema and world are strict UTF-8 JSON with `version: 1`. See the editable
+sample's `authoring/world.schema.json` and `authoring/starter.world.json` for
+complete examples. Stable identifiers use 1–64 ASCII letters, digits, `_`, `-`,
+`.` or `:`; they are not runtime generational `EntityId` values. Unknown members,
+duplicate object keys, duplicate definition/asset/entity IDs and missing
+properties are rejected. Different entities may have the same display name.
+
+The schema root has `id`, `label`, `components` and `assets`. Each component has
+`id`, `label`, `help`, `required` and a `properties` array. Every property has
+`id`, `label`, `help`, `unit`, `type` and `default`:
+
+| Type | Additional schema / authoring behavior |
+| --- | --- |
+| `boolean` | Checkbox and boolean default |
+| `number` | Finite ordered `min`/`max` within ±1e30; complete numeric input parsed by Ludus's float32 converter; untouched loaded numeric values retain their JSON value |
+| `integer` | Finite ordered `min`/`max` within ±2147483647; integral values only |
+| `string` | UTF-8 text of at most 512 bytes |
+| `enum` | `choices`: 1–64 unique strings, each at most 128 UTF-8 bytes; default is one of them |
+| `entity` | Empty-string default. Picker uses a stable ID in the current world or empty for None |
+| `asset` | Empty-string default and `asset_kind`. Picker uses a declared logical asset ID of that kind or empty for None |
+
+Each declared asset has `id`, `label` and `kind`. The list is supplied by the
+project schema; it is not automatically populated from Content Browser and does
+not prove that an asset exists or is loadable at runtime. A game's importer/binder
+must verify that separately. Asset kinds prevent choosing a sound for a mesh field.
+
+The world root has `schema` (the schema's stable ID) and `entities`. An entity has
+`id`, `name` and `components`, an object keyed by component ID; each value is an
+object keyed by property ID. Every attached component supplies every declared
+property. Required components are present on every entity. Deleting an entity
+referenced by another entity is rejected with the referring property; clear or
+reassign that reference first. Duplicate creates a new stable ID, remaps its
+self-references, and preserves references to other entities.
+
+Runtime integration stays game-owned: parse/validate into temporary owned data;
+create registry entities; map persisted IDs to new runtime handles; populate
+`ComponentPool<T>` with the game's chosen types; resolve references only after
+all identities exist. Publish the new world only after all phases succeed. Save
+persistent IDs, never pool indices or runtime handles. The editor document is a
+private Qt presentation model, not an installed engine API or serialization ABI.
+
+### Save, recovery and scope
+
+Schema loading and opening are read-only. World files must be regular files in
+the source folder; symlinks and symlinked ancestors are refused. The schema is
+frozen while a world is open. Save refuses a missing/changed schema, a changed
+world source or a cooperative editor lock, keeping edits and history available.
+Writes use an atomic replacement with direct-write fallback disabled. The lock
+and baseline comparison coordinate cooperating editors, not arbitrary writers
+racing the final filesystem rename. New World refuses existing destinations.
+
+Applied edits to an existing saved world produce a sibling `.ludus-recovery`
+snapshot with schema/base and payload digests. Opening never applies it. Restore
+Recovery is available on a clean document and validates the current disk source,
+schema and entire recovery payload before creating one Undo item. Save removes
+recovery. Undo back to the saved baseline removes matching recovery. Unapplied
+text and never-saved new worlds do not have crash recovery; Save is required to
+preserve them. Each world path has one recovery slot, so concurrent authoring of
+the same document should use version control and separate working copies.
+
+Limits: schema 64 KiB, world 512 KiB, 128 entities, 16 component definitions,
+32 properties per component, 4096 declared assets and 32 applied history entries.
+These bounds keep this first slice predictable; large production-world UX,
+hierarchy/parenting, multi-selection, prefab/archetype workflows, schema migrations,
+viewport gizmos, automatic runtime binding and browser import/export are still
+unsupported. The browser World tab explains its native-editor requirement and
+disables its file actions. The existing sample Scene workflow remains available.
 
 ## S4 scene authoring
 

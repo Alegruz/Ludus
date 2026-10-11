@@ -118,6 +118,11 @@ Vector3 Rotate(Quaternion q, Vector3 v) noexcept
     return Vector3{static_cast<float32>(rx), static_cast<float32>(ry), static_cast<float32>(rz)};
 }
 
+// Thanks to Stan Melax, "The Shortest Arc Quaternion", Game Programming Gems 1
+// (2000), section 2.10, pp. 214-217, for the dot/cross half-angle construction.
+// Ludus adds checked double intermediates, a stable near-opposite branch and a
+// deterministic exact-opposite axis; the chapter's sample omits opposite inputs.
+// See docs/architecture/math-research.md for the reviewed source and adaptations.
 MathStatus TryRotationBetween(Vector3 from, Vector3 to, Quaternion& out) noexcept
 {
     if (!IsFinite(from) || !IsFinite(to))
@@ -199,6 +204,11 @@ namespace
 }
 } // namespace
 
+// Thanks to Jason Shankel, "Interpolating Quaternions", Game Programming Gems 1
+// (2000), section 2.9, pp. 205-213, for hemisphere correction, spherical
+// interpolation and the normalized close-angle fallback. Ludus exposes separate
+// nlerp/slerp operations and uses double intermediates; squad/spin curves are
+// outside this implementation. Source scope: docs/architecture/math-research.md.
 Quaternion NlerpShortest(Quaternion a, Quaternion b, float32 t) noexcept
 {
     LUDUS_ASSERT(std::isfinite(t));

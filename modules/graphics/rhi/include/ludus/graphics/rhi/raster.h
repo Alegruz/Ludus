@@ -380,7 +380,7 @@ struct RasterBindingResource final
     /// Sampler identity; ignored for other entries.
     SamplerHandle Sampler{};
 };
-/// One immutable vertex attribute; locations must be unique and below eight.
+/// One immutable vertex attribute; locations must be unique and below MaxVertexAttributes.
 struct RasterVertexAttribute final
 {
     /// Shader input location.
@@ -409,6 +409,8 @@ enum class RasterTarget : ludus::foundation::uint8
     Rgba8Unorm,
     /// sRGB RGBA8 offscreen color attachment.
     Rgba8Srgb,
+    /// Linear RGBA16F attachment; requires RasterCapabilities::HdrColor.
+    Rgba16Float,
 };
 /// Canonical [0,1] depth comparison; reversal is explicit rather than inferred from a matrix.
 enum class RasterDepthCompare : ludus::foundation::uint8
@@ -438,7 +440,7 @@ struct RasterPipelineDescription final
     BindingLayoutHandle Layout{};
     /// Up to two streams; copied before return.
     std::span<const RasterVertexStream> Streams;
-    /// Up to eight attributes; copied before return.
+    /// Up to MaxVertexAttributes (at most sixteen) attributes; copied before return.
     std::span<const RasterVertexAttribute> Attributes;
     /// Enable the explicit comparison and optional depth writes; false preserves depth.
     bool Depth = false;

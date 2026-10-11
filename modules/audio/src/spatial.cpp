@@ -10,6 +10,12 @@
 // displacement onto the listener Right vector. Separate panning/attenuation
 // positions with a per-voice attenuation-origin choice. The true emitter
 // position is never rewritten. Selection envelopes are excluded from the score.
+// Thanks to Guy Somberg, "Listeners for Third-Person Cameras", Game Audio
+// Programming: Principles and Practices, chapter 11, pp. 197-208, for separating
+// attenuation origin from panning pose. Ludus evaluates both displacements
+// directly and preserves the emitter position; this is a stereo policy, not
+// fabricated middleware positions or an acoustics implementation.
+// Reviewed design influences: docs/architecture/audio-research.md.
 
 namespace ludus::audio
 {

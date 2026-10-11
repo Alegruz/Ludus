@@ -3,8 +3,9 @@
 namespace ludus::graphics::rhi::reference
 {
 inline bool ProfileAvailable = true;
+inline bool HdrAvailable = true;
 inline bool ComputeAvailable = true;
-inline bool FormatUnavailable[4]{};
+inline bool FormatUnavailable[5]{};
 inline bool FormatBlendUnavailable = false;
 inline bool OverrideRasterLimits = false;
 inline RasterCapabilities RasterLimitOverride;

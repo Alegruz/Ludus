@@ -29,14 +29,15 @@ using ludus::foundation::uint64;
 using ludus::foundation::uint8;
 using ludus::foundation::usize;
 
-// Fixed capacities (frozen in M0). Pending transitions queued between steps, the
-// output step-event buffer, and the action/binding domains. Overflow of the
-// pending ring is a bounded, observable loss event, never growth or a crash.
+/// @brief Fixed capacities (frozen in M0).
+///
+/// Pending transitions queued between steps, the output step-event buffer, and the action/binding domains. Overflow
+/// of the pending ring is a bounded, observable loss event, never growth or a crash.
 inline constexpr usize PENDING_CAPACITY = 256;
 inline constexpr usize ACTION_CAPACITY = 64;
 inline constexpr usize BINDING_CAPACITY = 256;
 
-// Admission result for a single Ingest (K02, K07).
+/// Admission result for a single Ingest (K02, K07).
 enum class AdmissionStatus : uint8
 {
     Accepted,          // queued and/or changed live state
@@ -45,7 +46,7 @@ enum class AdmissionStatus : uint8
     RecoveredWithLoss, // pending ring was full: batch discarded, suppression armed
 };
 
-// Step-advance result (K03). A repeated or decreasing id changes nothing.
+/// Step-advance result (K03). A repeated or decreasing id changes nothing.
 enum class StepStatus : uint8
 {
     Ok,
@@ -53,11 +54,12 @@ enum class StepStatus : uint8
     SequenceExhausted, // uint64 id space or the ingestion sequence is exhausted
 };
 
-// Immutable per-step keyboard view, published by ConsumeStep and stable until
-// the next consumption/reset publication (K02, K05). Down is retained held
-// state; Pressed/Released are OR-accumulated actual transitions in the step (not
-// current & ~previous). A baseline-synchronized held key reports Down but no
-// Pressed. Reset status is distinct from a fabricated Released.
+/// @brief Immutable per-step keyboard view, published by ConsumeStep and stable until the next consumption/reset
+/// publication (K02, K05).
+///
+/// Down is retained held state; Pressed/Released are OR-accumulated actual transitions in the step (not current &
+/// ~previous). A baseline-synchronized held key reports Down but no Pressed. Reset status is distinct from a
+/// fabricated Released.
 struct KeyboardSnapshot final
 {
     uint64 StepId = 0;
@@ -68,14 +70,14 @@ struct KeyboardSnapshot final
     bool Down[KEY_COUNT] = {};
     bool Pressed[KEY_COUNT] = {};
     bool Released[KEY_COUNT] = {};
-    // True for keys installed by a baseline and not yet released+repressed; such
-    // keys are Down but cannot activate actions (K06).
+    /// @brief True for keys installed by a baseline and not yet released+repressed; such
+    /// keys are Down but cannot activate actions (K06).
     bool Suppressed[KEY_COUNT] = {};
 };
 
-// One ordered record as it was consumed for the current step, including the
-// reset boundary marker. Multiplicity is preserved: two Down/Up pairs appear as
-// four entries (K02). Borrowed until the next ConsumeStep.
+/// @brief One ordered record as it was consumed for the current step, including the reset boundary marker.
+///
+/// Multiplicity is preserved: two Down/Up pairs appear as four entries (K02). Borrowed until the next ConsumeStep.
 struct StepEvent final
 {
     enum class Kind : uint8
@@ -88,19 +90,20 @@ struct StepEvent final
     KeyTransition Transition = KeyTransition::Down;
     Key PhysicalKey = Key::Unknown;
     RecordSource Source = RecordSource::Synthetic;
-    ResetReason Reset = ResetReason::None; // meaningful when Which == ResetBoundary
+    ResetReason Reset = ResetReason::None; ///< meaningful when Which == ResetBoundary
     uint64 Sequence = 0;
     uint64 StepId = 0;
 };
 
-// Owned, bounded binding configuration passed to ReplaceBindings. Copied into
-// the system's storage on success; the caller's storage need not outlive it.
+/// @brief Owned, bounded binding configuration passed to ReplaceBindings.
+///
+/// Copied into the system's storage on success; the caller's storage need not outlive it.
 struct BindingMap final
 {
     std::span<const Binding> Bindings;
 };
 
-// Diagnostic counters (always cheap, always available; K07, K13).
+/// Diagnostic counters (always cheap, always available; K07, K13).
 struct InputCounters final
 {
     uint64 Accepted = 0;
@@ -128,56 +131,61 @@ public:
     InputSystem& operator=(InputSystem&&) = delete;
 
     // --- Ingestion (K02, K04, K07) --------------------------------------
-    // Validate, update live state, and append an owned transition. Repeats and
-    // duplicate down/up are Ignored without creating edges. Invalid keys and
-    // records for an unfocused window are RejectedInvalid. Overflow returns
-    // RecoveredWithLoss. noexcept, no allocation, no lock.
+    /// @brief Validate, update live state, and append an owned transition.
+    ///
+    /// Repeats and duplicate down/up are Ignored without creating edges. Invalid keys and records for an
+    /// unfocused window are RejectedInvalid. Overflow returns RecoveredWithLoss. noexcept, no allocation, no
+    /// lock.
     AdmissionStatus Ingest(const KeyboardRecord& record) noexcept;
 
-    // Current physical held state only (diagnostics, not simulation edges).
+    /// Current physical held state only (diagnostics, not simulation edges).
     [[nodiscard]] bool GetLiveDown(Key key) const noexcept;
 
     // --- Step ownership (K03) -------------------------------------------
-    // stepId must be strictly increasing. Clears previous step edges, applies a
-    // pending reset (if any) then all queued transitions in order, evaluates
-    // actions, and publishes the snapshot and step-event view.
+    /// @brief stepId must be strictly increasing.
+    ///
+    /// Clears previous step edges, applies a pending reset (if any) then all queued transitions in order,
+    /// evaluates actions, and publishes the snapshot and step-event view.
     StepStatus ConsumeStep(uint64 stepId) noexcept;
 
     [[nodiscard]] const KeyboardSnapshot& GetKeyboardSnapshot() const noexcept;
 
-    // Ordered records consumed for the current step (borrowed until next step).
+    /// Ordered records consumed for the current step (borrowed until next step).
     [[nodiscard]] std::span<const StepEvent> GetStepEvents() const noexcept;
 
     // --- Actions (K08, K09) ---------------------------------------------
     [[nodiscard]] ActionStatus GetAction(ActionId id, ActionState& out) const noexcept;
 
-    // Validate transactionally and commit only on success. On success a reset is
-    // queued (MapReplaced) so old actions cancel and held keys are suppressed on
-    // the next step. On failure the active map is untouched. Must not be called
-    // from a callback or mid-consumption.
+    /// @brief Validate transactionally and commit only on success.
+    ///
+    /// On success a reset is queued (MapReplaced) so old actions cancel and held keys are suppressed on the
+    /// next step. On failure the active map is untouched. Must not be called from a callback or mid-
+    /// consumption.
     BindingStatus ReplaceBindings(const BindingMap& map) noexcept;
 
     [[nodiscard]] uint32 GetMapVersion() const noexcept;
 
     // --- Reset / focus (K05, K06) ---------------------------------------
-    // Queue a reset/baseline synchronization. FocusEntered/ExplicitLive install
-    // the supplied held set as a suppressed baseline; the cancellation reasons
-    // install an empty unfocused baseline. Coalesces with any pending reset into
-    // the latest baseline while retaining reason accounting. Never needs queue
-    // room.
+    /// @brief Queue a reset/baseline synchronization.
+    ///
+    /// FocusEntered/ExplicitLive install the supplied held set as a suppressed baseline; the cancellation
+    /// reasons install an empty unfocused baseline. Coalesces with any pending reset into the latest baseline
+    /// while retaining reason accounting. Never needs queue room.
     void RequestReset(ResetReason reason, const FocusBaseline& baseline) noexcept;
 
     // --- Diagnostics (K07, K13) -----------------------------------------
     [[nodiscard]] const InputCounters& GetCounters() const noexcept;
 
-    // Attach/detach an opt-in bounded trace. Attaching does not transfer
-    // ownership; the trace must outlive the attachment. Null detaches.
+    /// @brief Attach/detach an opt-in bounded trace.
+    ///
+    /// Attaching does not transfer ownership; the trace must outlive the attachment. Null detaches.
     void SetDebugTrace(InputDebugTrace* trace) noexcept;
 
-    // True when construction allocated its fixed storage. If false, every
-    // operation degrades to a safe no-op/neutral result; the caller should
-    // treat construction as failed. Setup failure is reported explicitly here
-    // rather than through an exception (engine code is -fno-exceptions).
+    /// @brief True when construction allocated its fixed storage.
+    ///
+    /// If false, every operation degrades to a safe no-op/neutral result; the caller should treat construction
+    /// as failed. Setup failure is reported explicitly here rather than through an exception (engine code is
+    /// -fno-exceptions).
     [[nodiscard]] bool IsValid() const noexcept
     {
         return mImpl.Get() != nullptr;

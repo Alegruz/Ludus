@@ -9,7 +9,7 @@
 
 namespace ludus::foundation::core
 {
-// Stateless ordering policy. Keys must provide a nonthrowing strict weak order.
+/// Stateless ordering policy. Keys must provide a nonthrowing strict weak order.
 struct KeyLess
 {
     template <typename KeyType>
@@ -20,11 +20,13 @@ struct KeyLess
     }
 };
 
-// One contiguous, sorted allocation. O(log n) lookup, O(n) insertion/removal.
-// Keys are exposed only through const entries; Find permits value mutation.
-// Insert/remove invalidate borrows at/after the position, growth invalidates
-// all borrows, failed/duplicate insertion invalidates none. Single-owner.
-// See docs/architecture/container-systems.md for the full lifetime contract.
+/// @brief One contiguous, sorted allocation.
+///
+/// O(log n) lookup, O(n) insertion/removal.
+/// Keys are exposed only through const entries; Find permits value mutation.
+/// Insert/remove invalidate borrows at/after the position, growth invalidates
+/// all borrows, failed/duplicate insertion invalidates none. Single-owner.
+/// See docs/architecture/container-systems.md for the full lifetime contract.
 template <typename KeyType, typename ValueType, typename Compare = KeyLess>
 class SortedMap
 {
@@ -50,8 +52,8 @@ public:
 
     struct InsertResult
     {
-        ValueType* Value = nullptr; // nullptr: allocation/capacity failure.
-        bool Inserted = false;      // non-null and false: existing key, untouched.
+        ValueType* Value = nullptr; ///< nullptr: allocation/capacity failure.
+        bool Inserted = false;      ///< non-null and false: existing key, untouched.
     };
 
     SortedMap() noexcept = default;

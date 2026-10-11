@@ -10,6 +10,6 @@ bool NeedsCompute(const DeviceProfileRequirements&) noexcept;
 ProfileDiagnostic CheckProfile(const DeviceProfileRequirements&, const DeviceProfile&) noexcept;
 DeviceProfile QueryDeviceProfile() noexcept;
 DeviceProfile CurrentDeviceProfile() noexcept;
-// Guaranteed normalized-format operations intersected with the implemented profile.
+// Guaranteed normalized formats and the enabled L4 HDR attachment profile.
 FormatCapabilities PortableFormatLimits(RasterFormat, const RasterCapabilities&) noexcept;
 } // namespace ludus::graphics::rhi::internal
