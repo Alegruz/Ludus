@@ -4,7 +4,10 @@
 [RHI and GDI architecture](rhi-gdi.md) was saved before opening
 [the article map](../../references/game-dev-gems-toc.md). This review selected
 relevant articles, read their actual text, cross-checked modern API constraints,
-and updated the architecture. It did not implement or benchmark a renderer.
+and updated the architecture. That historical review did not implement or
+benchmark a renderer. Implementation status and the research gate were reconciled
+on 2026-10-11; the [architecture implementation record](rhi-gdi.md#implementation-phases-and-acceptance)
+owns the shipped baseline and its evidence.
 
 The durable contribution of these references is explicit ownership and data
 flow, with optimizations selected by workload. The final Ludus proposal retains
@@ -206,24 +209,29 @@ reuse, and a serial ordered pass compiler. CUDA/other compute domains and native
 advanced rendering stay explicit extensions.
 
 The books do not prove correctness of Ludus's handle retention, graph compiler,
-callback publication, external-state ledger, or cross-API bridge. The proposed
-implementation phases must establish those through adversarial tests, native and
-browser rendering, installed-SDK checks, and measurements on target devices.
+callback publication, external-state ledger, or cross-API bridge. The bounded
+R0–R5 implementation now has adversarial tests, native/browser
+rendering and installed-SDK acceptance evidence, recorded in the architecture.
+That evidence does not establish a future cross-API bridge, broader capabilities
+or unmeasured target-device performance; each extension keeps its own proof gate.
 
 ## Research after the initial implementation
 
-**Status:** Deferred reading and improvement queue, 2026-10-06. Implement and
-validate the initial [RHI/GDI architecture and its R0-R5 acceptance criteria](rhi-gdi.md#implementation-phases-and-acceptance)
-first, then investigate these resources for improvements. Keep the current
-architecture as the implementation baseline. The portable R0-R3 path, selected
-R4 consumers and measured R5 extensions retain their existing scope and gates.
+**Status:** Queued reading and improvement trials, reconciled 2026-10-11.
+The initial bounded [R0–R5 profiles](rhi-gdi.md#implementation-phases-and-acceptance)
+are implemented. The architecture's [baseline and evidence record](rhi-gdi.md#baseline-and-evidence-record)
+pins the accepted implementation, supported profile owners, diagnostic scenes,
+reproduction commands and measurement limits. Its
+[remaining work](rhi-gdi.md#remaining-work-and-decision-gates) separates consumer
+extensions from optional research; completing every extension is not a
+prerequisite for a selected trial.
 
-Before starting this follow-up, record the accepted implementation revision,
-supported backend/profile matrix, diagnostic scenes, reproduction commands and
-CPU/GPU/latency/memory results. Use that baseline when evaluating a proposed
-change. Required API/specification checks and the references already adopted
-above still inform initial implementation; this queue does not require an
-additional research-led redesign before it exists.
+Use that recorded baseline when evaluating a change. Pin the trial's revision,
+backend/profile and workload, retain a control path, and report unavailable
+GPU/latency/backing measurements explicitly. Adopt a technique only after its
+correctness, relevant benefit and maintenance cost are established. Required
+API/specification checks and the references already adopted above remain normal
+implementation inputs. This queue has not yet produced additional adopted changes.
 
 The venue programs, session descriptions and available abstracts were screened
 for this shortlist. None of the new talks or papers below has a completed full

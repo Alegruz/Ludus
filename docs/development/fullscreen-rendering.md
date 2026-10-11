@@ -195,10 +195,10 @@ their behavior.
 
 The reference-backend lifecycle suite tests admission, copied requirements,
 output preservation, cancellation, late completions, fallback generations,
-cross-owner misuse, loss and non-wrapping owner exhaustion. General typed
-resource slot/generation contracts, broader feature/format/limit negotiation,
-encoders and deferred retirement are subsequent slices of the
-[RHI/GDI architecture](../architecture/rhi-gdi.md#implementation-phases-and-acceptance).
+cross-owner misuse, loss and non-wrapping owner exhaustion. R1/R2 add typed
+slot/generation resources, retained command batches and deferred retirement;
+R3 adds ordered graph compilation. Broader feature/format/limit negotiation and
+independent devices/surfaces remain [architecture extensions](../architecture/rhi-gdi.md#remaining-work-and-decision-gates).
 
 ### Compatibility facade
 
@@ -268,7 +268,9 @@ binding snapshots and indexed/instanced triangle pipelines on Vulkan, Metal,
 WebGPU and WebGL 2. It uses the explicit device and existing acquired frame
 surface/headless color target. It does not introduce a second device session.
 Request `DeviceDescription::Required.PortableRaster = true` when this workload
-is mandatory. Compute and indirect rendering remain unavailable.
+is mandatory. [R4](#buffer-compute-and-indirect-rendering-r4) separately enables
+buffer compute and indexed indirect rendering on Vulkan, Metal and WebGPU;
+WebGL 2 requires an authored CPU/direct variant.
 
 `GetRasterCapabilities` reports effective allocation, texture dimension,
 uniform offset/range, record and per-frame draw bounds. Limits are verified on
@@ -304,10 +306,11 @@ Draws use canonical clip depth [0,1], Y-up geometry and texture UV (0,0) at
 the first uploaded row. Vulkan uses a negative-height viewport; the GLSL ES
 artifact converts clip depth. The frame's private depth attachment clears to
 one. Pipelines remain valid on resize because the session target format stays
-fixed. General render targets, explicit pass/encoder objects, updates, resource
-texture copy commands, mip generation and storage/compute are later slices.
-[R2 lifetime services](#lifetime-services-r2) add retained batches and bounded
-buffer upload/readback rings alongside the direct frame API.
+fixed. [R2 lifetime services](#lifetime-services-r2) add retained batches and
+bounded buffer upload/readback rings; [R3](#ordered-raster-graphs-r3) adds offscreen
+raster passes and [R4](#buffer-compute-and-indirect-rendering-r4) adds buffer compute.
+Existing-resource updates, general texture copy/readback commands, mip generation
+and storage textures remain extensions.
 Initial Vulkan texture uploads normally use a synchronous setup copy. A timed-out
 copy remains Pending and retains staging until its fence signals; poll GetStatus.
 This is not a
@@ -516,7 +519,9 @@ sample, with one color attachment and private same-size depth. L3 additionally
 permits complete sampled R8/RG8/RGBA8 mip chains; graph hazards conservatively
 cover the whole sampled chain.
 R4 extends this profile with buffer compute below. General copy passes, MSAA/resolve,
-stencil, depth sampling, physical heap aliasing and pass merging remain deferred.
+stencil, depth sampling and physical heap aliasing remain deferred.
+[R5](#measured-pass-merging-r5) adds explicit opt-in merging of compatible
+consecutive raster passes.
 
 ### Author, compile and execute
 

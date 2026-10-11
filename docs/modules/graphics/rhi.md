@@ -82,5 +82,7 @@ enabled device, without elevating its limits to the adapter's maximum support.
 `UnmetRequirement`. Native builds accept only Auto and report
 `BackendUnavailable` for forced browser policies. Busy does not alter a session.
 
-The [architecture proposal](../../architecture/rhi-gdi.md) records the
-remaining RHI/GDI migration and the completed capability slice.
+The [architecture implementation record](../../architecture/rhi-gdi.md#implementation-phases-and-acceptance)
+records the bounded R0–R5 baseline and its evidence. Its
+[remaining-work gates](../../architecture/rhi-gdi.md#remaining-work-and-decision-gates)
+separate consumer extensions and qualification gaps from optional research.

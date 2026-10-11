@@ -1,26 +1,18 @@
 # Ludus RHI and Graphics Device Interface Architecture
 
-**Status:** Proposed architecture, 2026-10-04; implementation status and deferred
-research plan updated 2026-10-11. Intended for engine implementation review.
-This document was drafted before opening the article map, then refined
-through [five complete reference chapters](rhi-gdi-gems-review.md) and current
-primary documentation. The first implementation slice now adds effective
-fullscreen capabilities, copied startup requirements, explicit requirement and
-backend-selection failures, and requirement-aware browser fallback. Remaining R0 work is proposed. The initial bounded R5 pass-merging path is
-implemented as an explicit opt-in; see the [measurement and control contract](../development/fullscreen-rendering.md#measured-pass-merging-r5). The first bounded R4 buffer-compute/indirect
-profile is implemented; see the [compute contract](../development/fullscreen-rendering.md#buffer-compute-and-indirect-rendering-r4). The first bounded R3 ordered graph
-profile is implemented; see the [graph contract](../development/fullscreen-rendering.md#ordered-raster-graphs-r3). The first bounded R2 lifetime
-service profile is implemented in the existing RHI registry; see the
-[lifetime contract](../development/fullscreen-rendering.md#lifetime-services-r2). The first bounded R1 portable
-resource/raster profile is implemented alongside the fullscreen facade, with
-minimum CPU/GPU retirement accompanying its general resources; see the
-[portable raster contract](../development/fullscreen-rendering.md#portable-raster-r1). The first explicit R0 device slice now shares
-the facade session/registry, validates device and target owners, and rejects
-unimplemented required workloads before startup; see the
-[public usage contract](../development/fullscreen-rendering.md#explicit-r0-device-ownership).
-A paired Metal overlay workload measured lower CPU acquire/encode/submit cost
-with full-image agreement. This is workload-specific CPU evidence, not a GPU or
-presentation claim; accepted ADRs and the public API define shipped behavior.
+**Status:** Implemented bounded R0–R5 baseline and broader target architecture;
+implementation status reconciled 2026-10-11 against `main` at `5659894`.
+The initial design was drafted on 2026-10-04 before opening the article map,
+then refined through [five complete reference chapters](rhi-gdi-gems-review.md)
+and primary API documentation. The [implementation record](#implementation-phases-and-acceptance)
+separates shipped profiles from the [remaining work](#remaining-work-and-decision-gates).
+Public declarations and the [rendering guide](../development/fullscreen-rendering.md)
+define the current API and its bounds. The broader contracts below are design
+targets wherever that implementation record does not identify a shipped path.
+
+R5 adds opt-in raster pass merging. A paired Metal overlay workload measured
+lower CPU acquire/encode/submit cost with full-image agreement; this is
+workload-specific CPU evidence, not a GPU or presentation claim.
 
 Ludus should use a **small explicit RHI, a Graphics Device Interface that plans
 and manages GPU work, and a renderer that owns scene policy**. Make resource
@@ -30,15 +22,19 @@ through measured capability paths. This gives Vulkan and WebGPU room to perform
 well while keeping WebGL 2 a useful raster backend.
 
 Here **GDI means Graphics Device Interface**, the proposed engine device services
-layer, named `GraphicsDevice` in code. This interpretation is a naming assumption;
+layer, with `GraphicsDevice` as its proposed module name. These services currently
+live inside `GraphicsRhi`; there is no separate `GraphicsDevice` module.
+This interpretation is a naming assumption;
 Windows GDI is outside the scope. RHI means rendering hardware interface. These
 are proposed roles, not two duplicate wrappers around every graphics call.
 
 The [low-level renderer systems architecture](renderer-systems.md) owns the
-proposed scene submission, views/virtual screens, materials, lighting and overlay
-policy above this boundary. Its [Gems review](renderer-systems-gems-review.md)
+scene submission, views/virtual screens, materials, lighting and overlay
+policy above this boundary, including the implemented L0–L3 profiles. Its
+[Gems review](renderer-systems-gems-review.md)
 records later renderer-specific refinements. Device/resource lifetime and pass
-lowering remain owned here; neither proposal implies implementation readiness.
+lowering remain owned here; broader renderer features retain their own
+acceptance gates.
 
 L1 renderer integration adds explicit depth comparisons/clear values and pass
 viewport/scissor rectangles to these existing owners. Its usage and lifetime rules
@@ -48,17 +44,21 @@ owns actual attachment bounds, full clears and completion semantics.
 
 ## Current implementation and compatibility
 
-The current fullscreen API has four backends: Vulkan on Linux, Metal on macOS,
-and WebGPU or WebGL 2 in the browser. Its common API remains deliberately bounded:
+The current RHI has Vulkan on Linux, Metal on macOS, and WebGPU or WebGL 2
+in the browser. General APIs share the compatibility facade's owner and registry.
+Their capabilities describe implemented operations on the enabled device.
 
-| Existing boundary | Observed implementation | Consequence for this design |
+| Existing boundary | Implemented scope | Design boundary |
 | --- | --- | --- |
-| [Public lifecycle](../../modules/graphics/rhi/include/ludus/graphics/rhi/rhi.h) and [facade](../../modules/graphics/rhi/src/rhi.cpp) | One main-thread session, asynchronous browser startup, statuses, generation tokens, frame begin/end | Preserve behavior; add an explicit device API alongside it |
-| [Public fullscreen resources](../../modules/graphics/rhi/include/ludus/graphics/rhi/render.h) | Eight resources per kind, shaders, one uniform binding, pipelines tied to a uniform, one fullscreen triangle | This is a compatibility slice, not a general buffer/texture/pass API |
-| [Vulkan](../../modules/graphics/rhi/src/rhi_vulkan.cpp) | Vulkan 1.1 render passes, two fenced command/uniform slots, owned headless image, maintenance1 presentation retirement on Wayland, private VMA 3.3.0 for general raster resources; legacy frame targets retain their existing allocation path | General resources need allocation and retirement services; do not require Vulkan 1.3 merely to refactor |
-| [Metal](../../modules/graphics/rhi/src/rhi_metal.mm) | Two command-buffer-fenced shared uniform slots, Cocoa drawables and private headless textures; submitted commands retain their resources | Preserve the shipped fullscreen path; general resources, layouts, encoders and completion services remain part of this migration |
-| [Browser dispatcher](../../modules/graphics/rhi/src/rhi_web.cpp) | WebGPU startup with one permitted WebGL 2 fallback and Platform-managed canvas replacement | Preserve ADR 0014 and callback isolation |
-| [Shader build helper](../../cmake/shaders/compile_shader.py) | Pinned Slang emits SPIR-V/WGSL and macOS MSL 2.3; pinned SPIRV-Cross emits GLSL ES 3.00, with bounded per-target layout validation | Retain proven targets; general reflection/layout support is future work |
+| [Lifecycle](../../modules/graphics/rhi/include/ludus/graphics/rhi/rhi.h), [explicit device](../../modules/graphics/rhi/include/ludus/graphics/rhi/device.h) and [facade](../../modules/graphics/rhi/src/rhi.cpp) | One main-thread device/session and borrowed surface, copied requirements, asynchronous browser startup, owner validation and explicit loss/restart | Broader feature/format negotiation and multiple independent devices/surfaces are extensions |
+| [Fullscreen resources](../../modules/graphics/rhi/include/ludus/graphics/rhi/render.h) | Eight resources per kind, one uniform binding, one fullscreen triangle and legacy `InUse` rejection | Preserve this compatibility contract separately from general resources |
+| [Portable raster](../../modules/graphics/rhi/include/ludus/graphics/rhi/raster.h) | Typed generational resources, reflected immutable bindings/pipelines and indexed/instanced draws; renderer L1–L3 extend depth, targets and sampled mip formats | Full copy/update, attachment/view and descriptor APIs remain bounded or deferred |
+| [Lifetime services](../../modules/graphics/rhi/include/ludus/graphics/rhi/lifetime.h) | Retained command batches, actual completion tokens, bounded buffer upload/readback rings and canonical pipeline requests | No general texture streaming or persistent driver cache |
+| [Ordered graph](../../modules/graphics/rhi/include/ludus/graphics/rhi/graph.h) | Authored order, in-place versions, RAW/WAR/WAW reports, culling, completion-gated object pooling and opt-in raster merging | Conservative whole-resource hazards; no heap aliasing, parallel recording or async queues |
+| [Compute](../../modules/graphics/rhi/include/ludus/graphics/rhi/compute.h) | Single-queue buffer dispatch and indexed indirect drawing on Vulkan, Metal and WebGPU | WebGL 2 requires an authored CPU/direct variant; storage textures and indirect dispatch are deferred |
+| [Vulkan](../../modules/graphics/rhi/src/rhi_vulkan.cpp) and [Metal](../../modules/graphics/rhi/src/rhi_metal.mm) | Both lower the bounded R0–R5 profiles; Vulkan general allocations use private VMA 3.3.0, while legacy frame targets retain their allocation path | Keep native allocation, synchronization and presentation retirement private |
+| [Browser dispatcher](../../modules/graphics/rhi/src/rhi_web.cpp) | WebGPU startup with one requirement-aware WebGL 2 fallback and Platform-managed canvas replacement | Preserve ADR 0014 and callback isolation |
+| [Shader build helper](../../cmake/shaders/compile_shader.py) | Pinned Slang emits SPIR-V/WGSL and macOS MSL 2.3; pinned SPIRV-Cross emits GLSL ES 3.00, with bounded raster/compute reflection and target layout validation | Reject unverified layout forms; broader package/feature support is future work |
 
 Retain `Start`, `GetStartup`, frame statuses, and `DrawFullscreen` as a facade
 through the migration. Keep existing resource ownership and `InUse` rejection
@@ -76,6 +76,13 @@ pins in `config/web_toolchain.json`, `config/shader_toolchain.json`, or
 
 ## Module boundaries and ownership
 
+Today the runtime dependency is
+`GraphicsRenderer -> GraphicsRhi -> Foundation/Platform`. Graph, pipeline-request,
+upload/readback and pool services are implemented inside the RHI registry.
+The diagram and ownership split below describe a possible future extraction of
+those services into `GraphicsDevice`, not an additional shipped wrapper or registry.
+Extract it only when a consumer and maintenance benefit justify the boundary.
+
 ```mermaid
 flowchart TD
     App[Game and editor] --> Renderer[GraphicsRenderer scene and material policy]
@@ -91,7 +98,7 @@ flowchart TD
     Package --> Device
 ```
 
-Runtime dependency direction is
+The target dependency direction after that extraction would be
 `GraphicsRenderer -> GraphicsDevice -> GraphicsRhi -> Foundation/Platform`.
 Shader package arrows describe input data. A device need not have a surface;
 Platform still owns any borrowed window/canvas. Initially instantiate one device
@@ -126,18 +133,19 @@ modules/graphics/rhi/
 modules/graphics/device/
   include/ludus/graphics/device/   uploads, readbacks, pipeline requests, passes
   src/internal/                   pass compiler, pools, import planning
-modules/graphics/renderer/        only when scene/material consumers justify it
+modules/graphics/renderer/        existing scene/material consumers
 ```
 
-These directories and targets are proposals. Split large backend translation
-units by ownership as features grow; avoid a class per native function. Public
+The backend subdirectories and separate device target are proposed; RHI and
+Renderer already exist. Split large backend translation units by ownership as features grow; avoid a class per native function. Public
 headers use Ludus aliases, small descriptions, opaque typed handles, and spans.
 Backend SDK headers, heavy standard-library headers, owning caches, and private
 headers stay behind `.cpp` boundaries. Explicit includes, `#pragma once`,
 exception-free failure paths, `noexcept`, and header parse budgets apply.
 
-Bind one small **private function table per device** at startup. Native
-single-backend builds can use direct binding; the browser uses its existing
+For a future multi-device implementation, bind one small **private function table
+per device** at startup. Current backends use the private single-session dispatch
+boundary. Native single-backend builds can use direct binding; the browser uses its existing
 selection boundary. Dispatch at meaningful encoder/resource operations, not
 through an interface object attached to every draw/resource. Native encoders
 record their actual command buffers; WebGPU records its encoders; WebGL executes
@@ -148,23 +156,31 @@ second universal native-command bytecode or serialization framework.
 
 A backend name is not a feature guarantee. Record four distinct facts: compiled
 backends, adapter-supported features, device-enabled features/limits, and the
-renderer path selected for this workload. Immutable `DeviceCapabilities` is
-published only when startup is ready. Requests include required and preferred
+renderer path selected for this workload. The current API publishes `DeviceInfo`
+with implemented Supported/Enabled
+features, plus `GetRasterCapabilities`, `GetComputeCapabilities` and
+`GetLifetimeCapabilities`. A fuller immutable capability snapshot is a target
+for future format/feature negotiation, not an existing `DeviceCapabilities` type.
+Requests include required and preferred
 features; unmet requirements fail before resource creation, while preferences
 select a supported path. Browser Auto fallback must validate the application's
 requirements against the fallback as well.
 
-Use requirements as workload bundles, with individually queryable capabilities:
+The broader target uses workload bundles with individually queryable capabilities:
 
-| Workload bundle | Intended operations | Vulkan | WebGPU | WebGL 2 |
-| --- | --- | --- | --- | --- |
-| Portable raster | Direct indexed/instanced draws, uniforms, sampled textures/samplers, color/depth passes, uploads/copies | Implement | Implement | Implement within verified limits |
-| Portable compute | Compute dispatch, storage buffers/textures within format/access limits | Query and implement | Query enabled limits/formats | Unsupported |
-| Indirect rendering | Indirect draw/dispatch and specified argument layouts | Query each operation | Query each operation and optional features | Outside the core baseline |
-| Native advanced | Descriptor indexing/bindless, mesh shaders, ray tracing, multiple physical queues, heap aliasing, external sharing | Optional independent paths | Only individually verified enabled features | Unsupported unless a specific extension is deliberately added |
+| Workload bundle | Intended operations | Vulkan | Metal | WebGPU | WebGL 2 |
+| --- | --- | --- | --- | --- | --- |
+| Portable raster | Direct indexed/instanced draws, uniforms, sampled textures/samplers, color/depth passes, uploads/copies | Implement | Implement | Implement | Implement within verified limits |
+| Portable compute | Compute dispatch, storage buffers/textures within format/access limits | Query and implement | Query and implement | Query enabled limits/formats | Unsupported |
+| Indirect rendering | Indirect draw/dispatch and specified argument layouts | Query each operation | Query each operation | Query each operation and optional features | Outside the core baseline |
+| Native advanced | Descriptor indexing/bindless, mesh shaders, ray tracing, multiple physical queues, heap aliasing, external sharing | Optional independent paths | Only individually verified capabilities | Only individually verified enabled features | Unsupported unless a specific extension is deliberately added |
 
-The table is a target contract, not a claim that the current fullscreen RHI
-implements these features. No operation is enabled merely because a latest spec
+This target table includes operations beyond the shipped profiles. Portable
+raster, lifetime services and ordered raster graphs run on all four backends;
+buffer compute and indexed indirect draws run on Vulkan, Metal and WebGPU.
+Neither storage textures nor indirect dispatch
+is enabled today; the rendering guide owns the exact per-profile restrictions.
+No operation is enabled merely because a latest spec
 or a proposal mentions it. The pinned browser C API and real runtime must expose
 and pass its conformance case. WebGPU is not restricted by Ludus's WebGL baseline;
 compute renderers remain available on suitable devices.
@@ -203,7 +219,9 @@ compute specifications as the deployed WebGL 2 baseline.
 
 ## Resource and command contracts
 
-Expose only the concepts needed by real consumers:
+Expose only the concepts needed by real consumers. This table describes target
+concepts, not exact public symbol names. Current recording uses `CommandBatch`
+and `OrderedGraph`; there is no general public `CommandEncoder` interface.
 
 | Concept | Contract |
 | --- | --- |
@@ -222,7 +240,9 @@ not own a particular material's data. Viewport, scissor, and declared dynamic
 buffer offsets are encoder data; target dimensions are not a pipeline key unless
 an explicit specialization makes them so.
 
-All calls return a small status/result and optional bounded diagnostic ID.
+The target error vocabulary below describes distinctions the APIs must preserve;
+individual headers define their actual status enums and output contracts.
+Calls return an explicit status/result, with bounded diagnostics where supported.
 Creation accepts a null output handle; Ready/Pending creates exactly one owned
 incarnation, while validation/admission failure leaves it null and rolls back
 private reservation. A published Pending incarnation consumes its generation
@@ -330,9 +350,10 @@ GPU allocation belongs to RHI. GDI manages budgets and schedules, without
 assuming that FoundationMemory arenas are already implemented. Frame storage
 resets only after its CPU packet jobs and GPU storage leases have retired.
 
-For general Vulkan resources, use a **pinned private VMA adapter** as the default
-implementation choice instead of growing the current allocation-per-resource
-helper into a new allocator. VMA returns explicit errors and does not require
+General Vulkan resources already use a **pinned private VMA 3.3.0 adapter**.
+Keep that allocation boundary rather than extending the legacy frame-target
+allocation-per-resource helper into a second allocator. VMA returns explicit
+errors and does not require
 C++ exceptions; its implementation belongs in one private translation unit.
 Respect memory requirements, dedicated allocations, heap budgets, and
 non-coherent flush/invalidate alignment. Host allocation callbacks require a
@@ -410,8 +431,9 @@ Keep the pinned offline shader chain: Slang to SPIR-V/WGSL and macOS MSL 2.3,
 plus SPIR-V through SPIRV-Cross to GLSL ES 3.00. General packages add versioned
 schema, source/tool hashes, target/profile/features, explicit entry names,
 resource bindings/access, vertex/fragment interface, and layout identity. Native consumers do not need
-host compiler tools at runtime. Expanding the current one-uniform helper is a
-separate implemented step, with rejection of every unverified layout form.
+host compiler tools at runtime. The helper already supports bounded raster and
+buffer-compute reflection alongside the legacy one-uniform profile. Broader
+package forms must continue rejecting every unverified layout.
 
 Reflect the selected target and validate emitted artifacts, not only source
 language declarations. Generate host upload structures/static layout checks or
@@ -444,6 +466,13 @@ technique manifests separate from driver blobs. Limit permutations before trying
 to solve their explosion through more compilation threads.
 
 ## Pass declarations and deterministic compilation
+
+The shipped [R3/R4 contracts](../development/fullscreen-rendering.md#ordered-raster-graphs-r3)
+use complete retained packets and conservative whole-texture/whole-buffer hazards.
+Subresource tracking, copy passes, resolves and broader attachment forms below
+are target extensions. `CreateGraphTexture` acquires from a bounded whole-object
+pool during setup; compilation validates and reports resource lifetimes, rather
+than allocating transient storage from those intervals.
 
 The first GDI execution API is an **ordered pass list with declared resources**.
 That list is compiled as a graph for validation, dependencies, culling, and
@@ -490,8 +519,10 @@ Compilation proceeds through one inspectable implementation:
 4. Mark roots: present, exported/history resources, readbacks, and explicit side
    effects. Cull only passes that contribute to none. Future-frame history writes
    are observable roots, even if this frame does not sample them.
-5. Compute first/last uses and acquire compatible transient objects. Initially
-   pool complete matching descriptions; fresh/aliased storage starts undefined.
+5. Compute first/last uses and validate retained transient objects. The current
+   setup-time pool matches complete descriptions and gates reuse on completion.
+   Interval-driven allocation or heap aliasing would be separate extensions;
+   fresh/aliased storage starts undefined.
 6. Produce semantic dependencies and a backend lowering plan, including upload
    imports, final uses, presentation, and cross-execution obligations.
 7. Encode and submit, transferring leases to submission records. Commit the
@@ -565,8 +596,12 @@ and initialize the new contents. Lifetime intervals on a CPU pass list are
 insufficient once queues overlap. WebGPU/WebGL can pool objects without claiming
 control over physical allocation aliasing.
 
-Merge raster passes only when attachment/load/store/resolve behavior and resource
-scopes stay legal and measurements show a benefit. One logical pass is not
+The shipped [R5 merging contract](../development/fullscreen-rendering.md#measured-pass-merging-r5)
+is explicit opt-in through `GraphCompileOptions::MergeRasterPasses`; the default
+keeps logical raster passes separate. It merges only compatible consecutive
+passes while preserving draw order and legal resource scopes. Broader merging
+with resolve or other attachment forms needs separate correctness and measurement
+proof. One logical pass is not
 necessarily one submission. Start with one graphics submission per rendered
 frame plus budgeted upload work; split to feed the GPU sooner only when latency
 and utilization measurements justify it. No fixed historical millisecond,
@@ -630,17 +665,24 @@ pass, handle owner/generation, actual versus declared use, prior writer, format,
 layout, and completion obligation. Store native errors alongside engine status
 rather than flattening every failure to a generic rendering error.
 
-Export a readable execution report with authored/culled passes, dependency
-reasons, resource versions/lifetimes, lowered barriers, binding layout, pipeline
+The current `GraphReport` exposes authored/culled passes, dependency reasons,
+resource versions/lifetimes, raster groups and logical plan/buffer/texture byte
+counts. These are not driver allocations or physical backing estimates. The
+[R5 guide](../development/fullscreen-rendering.md#measured-pass-merging-r5) owns
+report definitions and measurement limits.
+
+Extend the readable execution report as needed with lowered barriers, binding
+layout, pipeline
 keys, pool assignments, upload/readback traffic, pending retirements, and
 surface generation. Normal logging and profiling may drop optional records
 under pressure; record diagnostic loss and never crash device work because a
 name, capture, or telemetry allocation failed. Do not build a custom capture
 viewer before existing logs/artifacts answer the needed questions.
 
-Provide controlled investigation modes: serial recording, one physical queue,
-no pass culling/merging, no aliasing, fresh transient resources, and disabled
-state-cache elision. All modes still produce valid dependencies and initialization.
+Current `GraphCompileOptions` independently controls culling and merging;
+serial recording, one physical queue and no heap aliasing are structural bounds,
+not additional runtime switches. Future investigation modes can include
+fresh transient resources and disabled state-cache elision. All modes still produce valid dependencies and initialization.
 A graph dump maps execution functions back to setup sites. Debug changes can
 hide timing or lifetime bugs, so compare the original optimized plan as well.
 Epic's [RDG debugging documentation](https://dev.epicgames.com/documentation/en-us/unreal-engine/render-dependency-graph-in-unreal-engine)
@@ -656,13 +698,12 @@ GPU duration. Do not compare unrelated queue clocks without calibration.
 
 ## D3D12 Metal and compute expansion
 
-The current macOS Metal backend implements the bounded fullscreen API described
-in the [public rendering guide](../development/fullscreen-rendering.md#macos-metal).
-Its general device/resource/layout/pass/token API remains proposed; D3D12 is a
-future backend for those same contracts. Their binding systems, residency, heaps,
-native barrier choices, command allocator reuse and completion mechanisms stay
-private. Future backend
-conformance must prove all common semantics before the renderer uses it.
+The current macOS Metal backend implements the same bounded device, raster,
+lifetime, ordered graph, buffer-compute and merging profiles as Vulkan, within
+its enabled capabilities. The [public rendering guide](../development/fullscreen-rendering.md#macos-metal)
+owns setup and platform limits. D3D12 remains a future backend for those contracts.
+Their binding systems, residency, heaps, native barrier choices, command allocator
+reuse and completion mechanisms stay private. Future backend conformance must prove all common semantics before the renderer uses it.
 D3D12 allocator reset requires completed GPU uses, and Metal resource
 synchronization depends on its selected API and hazard mode; portable dependencies
 remain meaningful in both.
@@ -691,28 +732,73 @@ external memory/semaphore interoperability.
 
 ## Implementation phases and acceptance
 
-| Phase | Current status | Deliverable | Required evidence |
-| --- | --- | --- | --- |
-| R0 Contracts | Partial: fullscreen capabilities, copied requirements, explicit device/target owners, required/preferred workload admission and reference-backend lifecycle tests are implemented; general resource slot/generation identities and broader feature/format/limit negotiation remain | Device capabilities/results/ownership, compatibility facade, reference validator and loss protocol | Existing fullscreen/SDK behavior preserved; stale/cross-owner handles, pending cancellation, late callbacks and requirement failure covered |
-| R1 Portable resources | Initial bounded profile implemented; broader copy/update/attachment APIs deferred | Buffer/texture/view/sampler, general reflection/layout, immutable bindings/pipelines, indexed and instanced draws | Identical textured/depth diagnostic scenes on Vulkan, Metal, forced WebGPU, forced WebGL 2 and Auto; packing/limits/copy/view mismatch rejection |
-| R2 Lifetime services | Initial bounded profile implemented; texture streaming and descriptor arenas deferred | Completion tokens, retained records, upload/readback rings, Vulkan allocator adapter, pipeline requests | Destroy before/after finish/submit, discard, resource dependency retention, slow GPU/ring exhaustion, memory failure, cancellation, loss, resize/shutdown |
-| R3 Ordered graph | Implemented bounded portable raster profile | Authored pass list, in-place texture versions, RAW/WAR/WAW reports, roots/culling, completion-gated whole-object pool, attachment lowering | [R3 contracts and acceptance](../development/fullscreen-rendering.md#ordered-raster-graphs-r3): offscreen scene, read-only-depth UI and composite; reference/optimized images; history/import and undeclared-use regressions |
-| R4 Compute renderer | Initial bounded buffer profile implemented; storage textures and broader effects deferred | Single-queue storage buffers, reflected compute pipeline/dispatch, indexed indirect draws and authored CPU/direct variant | [R4 contracts and acceptance](../development/fullscreen-rendering.md#buffer-compute-and-indirect-rendering-r4): GPU culling/compaction, argument readback and CPU image oracle; WebGL selects the authored variant or fails before execution |
-| R5 Measured optimization | Initial bounded opt-in raster merging and paired measurement harness implemented; other extensions deferred | Select only justified aliasing, parallel recording, pass merging, async queues or bindless services | Representative CPU/GPU/latency/memory evidence, adversarial synchronization tests, debug controls, consumer/SDK maintenance cost |
+All initial bounded profiles are implemented. Phase completion does not claim
+that every broader target contract in this document is available.
 
-R2 resource retention and safe completion are prerequisites for scalable R1
-uploads, not permission to ship unsafe intermediate resources. Implement R1/R2
-as small vertical slices: introduce the minimum retirement service with the
-first general buffer, then expand it. GDI graph/pipeline services arrive with
-actual consumers; do not create all proposed files and interfaces at R0.
+| Phase | Shipped baseline | Contract and acceptance owner |
+| --- | --- | --- |
+| R0 Contracts | Copied requirements, explicit device/target owners, required/preferred workload admission, reference lifecycle validation and compatibility facade | [Explicit device ownership](../development/fullscreen-rendering.md#explicit-r0-device-ownership); general slot/generation identities arrived with R1/R2 |
+| R1 Portable resources | Typed resources, reflected immutable bindings/pipelines and indexed/instanced raster; renderer L1–L3 extend attachments, depth and sampled formats | [Portable raster](../development/fullscreen-rendering.md#portable-raster-r1) and linked renderer extensions |
+| R2 Lifetime services | Completion tokens, retained batches/records, buffer upload/readback rings, private Vulkan allocator and canonical pipeline requests | [Lifetime services](../development/fullscreen-rendering.md#lifetime-services-r2) |
+| R3 Ordered graph | Authored order, in-place versions, RAW/WAR/WAW reports, roots/culling, completion-gated object pool and attachment lowering | [Ordered graphs](../development/fullscreen-rendering.md#ordered-raster-graphs-r3) |
+| R4 Buffer compute | Single-queue storage buffers, reflected dispatch, indexed indirect draw and authored CPU/direct variant | [Compute and indirect rendering](../development/fullscreen-rendering.md#buffer-compute-and-indirect-rendering-r4) |
+| R5 Measured optimization | Opt-in raster merging, independent culling/merging controls, paired benchmark and image comparison | [Measured pass merging](../development/fullscreen-rendering.md#measured-pass-merging-r5) |
 
-Implement and validate this initial architecture through the phases and acceptance
-criteria above before beginning the broader conference/journal improvement pass.
-Record the accepted revision, supported profiles, workloads and measurements as
-its comparison baseline. The [deferred research queue](rhi-gdi-gems-review.md#research-after-the-initial-implementation)
-tracks that later work; its sources are screened candidates, not new prerequisites
-or adopted changes to this design. API/specification checks needed to implement
-the baseline remain part of normal implementation.
+### Baseline and evidence record
+
+The latest RHI milestone is [R5, PR 189](https://github.com/Alegruz/Ludus/pull/189),
+merged at `859d02d`; this reconciliation uses repository revision `5659894`.
+R5 source revision `e4a6b7a83ef9a1572e77c92af55ca57c681c5b98` passed all 28
+executed CI checks, including native/browser builds, sanitizer and static-analysis
+checks, installed/relocated SDK consumers and packaged browser rendering tests.
+The [device lifecycle tests](../../modules/graphics/rhi/tests/device_tests.cpp),
+[raster tests](../../modules/graphics/rhi/tests/raster_tests.cpp),
+[render tests](../../modules/graphics/rhi/tests/raster_render_tests.cpp),
+[compute tests](../../modules/graphics/rhi/tests/compute_tests.cpp) and
+[installed raster consumer](../../tests/sdk_consumer/raster.cpp) are reproducible
+acceptance sources, not substitutes for target-hardware qualification.
+
+The [rendering guide](../development/fullscreen-rendering.md#paired-native-measurements)
+owns diagnostic workloads, reproduction commands and the paired R5 measurements.
+Use the toolchain pins in `config/tool_versions.json`, `config/web_toolchain.json`,
+`config/shader_toolchain.json` and `config/spirv_cross_toolchain.json` at the
+comparison revision. The headless Metal runs establish a workload-specific CPU
+benefit with identical full images and logical byte counts. GPU duration,
+input-to-display latency and driver allocation/backing measurements are
+unavailable and recorded as such. Software Vulkan/browser correctness evidence
+does not establish physical GPU performance or complete Wayland/hosted-iframe
+qualification.
+
+This bounded baseline is ready for selected trials from the
+[research queue](rhi-gdi-gems-review.md#research-after-the-initial-implementation).
+Before each trial, pin its comparison revision, backend/profile, workload and
+reproduction command; retain the original path and report unavailable measurements
+explicitly. Reading a source does not adopt it. Adoption needs a consumer,
+correctness evidence and measurements relevant to the proposed benefit, with
+maintenance cost assessed. API/specification checks remain normal implementation
+work; the queued conference/journal sources are not prerequisites for this baseline.
+
+### Remaining work and decision gates
+
+These are extensions or qualification gaps, not unfinished R0–R5 promises. Select
+work from a concrete consumer or a measurable problem; do not create a new phase
+that requires implementing the whole target architecture at once.
+
+| Candidate | Trigger | Acceptance gate |
+| --- | --- | --- |
+| Fuller feature/format/use/sample/limit negotiation; independent devices/surfaces | A renderer or editor workload exceeds current enabled profiles or needs independent presentation ownership | Admission/fallback tests against enabled limits, stale/cross-owner rejection, loss and surface lifetime coverage on each selected backend |
+| Existing-buffer updates, texture upload/copy/readback and streaming | Content needs incremental residency or mutable GPU data beyond new-buffer tickets and immutable sampled mip chains | Bounded source ownership, pitch/range validation, completion-gated reuse, pressure/cancellation/loss tests and measured transfer stalls |
+| Descriptor arenas and dynamic binding offsets | A measured material/draw workload exceeds immutable binding capacity or spends excessive CPU time creating snapshots | Canonical identity and lifetime correctness, enabled alignment/range checks, installed-SDK examples and CPU/memory comparison |
+| Partial sampled/attachment views, sampled depth, stencil, MSAA/resolve and more attachments | A selected effect requires an attachment form outside the current single-color/private-depth profile | Per-backend format/use validation, initialization/feedback rejection, image oracles and legal synchronization |
+| Storage textures, raster-stage storage, indirect dispatch and broader compute effects | A concrete compute-capable renderer variant needs them | Reflected target layouts, hazard/declaration validation, GPU result oracle and an explicit unsupported or authored alternative path |
+| GPU/presentation timing, backing/pending/high-water telemetry and target qualification | A proposed optimization or shipping profile needs evidence the current logical-byte/CPU reports cannot provide | Clock-domain/availability reporting; physical GPU and relevant Wayland/hosted-browser runs; no zero or CPU proxy for unavailable GPU/display results |
+| Heap aliasing, parallel recording, async queues, bindless or newer Vulkan paths | A reproducible bottleneck justifies a selected research experiment | Retained baseline/control path, adversarial synchronization and lifetime tests, image equality, relevant CPU/GPU/memory/latency measurements and maintenance assessment |
+| Separate `GraphicsDevice`, D3D12 or external compute domains | A consumer demonstrates an ownership/module or platform requirement | One authoritative registry/ledger, common semantic conformance, explicit interoperability ownership and installed-consumer evidence |
+
+### Qualification targets
+
+The following remains the acceptance checklist for new extensions and broader
+shipping profiles, not a claim that every case or metric has already been proven.
 
 The validation suite must include resource failure rollback; handle and token
 exhaustion; binding replacement while old packets remain; shader hot reload with
@@ -765,7 +851,7 @@ benefit. The architecture leaves measured extension points for them without
 making them prerequisites for a correct portable frame.
 
 
-## First implementation slice: capability negotiation
+## Historical first implementation slice: capability negotiation
 
 `StartupInfo.Capabilities` is a value snapshot of the implemented fullscreen
 API's effective limits while the session is Ready. It is zero during startup,
@@ -773,7 +859,8 @@ failure, device loss and shutdown. Raw adapter support is not advertised as an
 engine operation. Frame dimensions are bounded by the backend's image/viewport
 (and Vulkan framebuffer) limits; uniform sizes are capped by the negotiated
 binding/allocation limits, the 16 KiB engine capacity, and 16-byte size granularity.
-Resource capacities and the single draw per frame reflect current validation.
+Resource capacities and the single draw per frame describe the compatibility
+facade, not the current general raster/graph APIs.
 
 The four-argument `Start(app, window, selection, requirements)` copies minimum
 frame/uniform requirements before asynchronous requests. Every backend attempt
@@ -791,6 +878,9 @@ Busy requests, copied inputs, stale completion, loss and both fallback outcomes.
 Browser tests inject insufficient negotiated limits on WebGPU and WebGL to prove
 that fallback and rejection occur before any resource creation or frame.
 
-This slice retains the existing singleton owner and monotonic handles. Explicit
-multi-device ownership, typed generational handles and the reference plan
-validator remain R0 work; no `GraphicsDevice` module is created yet.
+This historical slice retained the singleton owner and monotonic facade handles.
+The explicit device API and R1/R2 subsequently added owner-validated typed
+generational resources and retained lifetime services; R3 added the reference
+plan validator. Independent multi-device/surface ownership and a separate
+`GraphicsDevice` module remain possible extensions, as recorded in
+[remaining work](#remaining-work-and-decision-gates).
