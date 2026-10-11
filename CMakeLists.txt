@@ -312,7 +312,7 @@ write_basic_package_version_file(
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationTime FoundationLogging
-    FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content AudioContent GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
+    FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()
