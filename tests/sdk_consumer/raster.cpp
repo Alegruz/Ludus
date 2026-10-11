@@ -5,6 +5,7 @@
 #include <ludus/graphics/rhi/lifetime.h>
 
 #include "cull.h"
+#include "merged_frame.h"
 #include "ordered_frame.h"
 #include "raster.h"
 
@@ -71,10 +72,10 @@ EM_JS(int32, SlowTransfers, (), { return globalThis.__qaSlowTransfers ? 1 : 0; }
 EM_JS(int32, Paused, (), { return globalThis.__qaPause ? 1 : 0; });
 EM_JS(int32, Variant, (), {
     const value = new URL(location.href).searchParams.get('variant');
-    return value === 'srgb' ? 1 : value === 'blend' ? 2 : value === 'graph' ? 3 : value === 'graph-reference' ? 4 : value === 'compute' ? 5 : value === 'cpu' ? 6 : value === 'compute-required' ? 7 : value === 'compute-reference' ? 8 : 0;
+    return value === 'merge' ? 9 : value === 'merge-reference' ? 10 : value === 'srgb' ? 1 : value === 'blend' ? 2 : value === 'graph' ? 3 : value === 'graph-reference' ? 4 : value === 'compute' ? 5 : value === 'cpu' ? 6 : value === 'compute-required' ? 7 : value === 'compute-reference' ? 8 : 0;
 });
-EM_JS(void, ReportGraph, (uint32 live, uint32 dependencies), {
-    const node = document.getElementById('status'); node.dataset.livePasses = live; node.dataset.dependencies = dependencies;
+EM_JS(void, ReportGraph, (uint32 live, uint32 dependencies, uint32 raster), {
+    const node = document.getElementById('status'); node.dataset.livePasses = live; node.dataset.dependencies = dependencies; node.dataset.rasterPasses = raster;
 });
 EM_JS(int32, Selection, (), {
     const value = new URL(location.href).searchParams.get('backend');
@@ -91,7 +92,7 @@ int32 Variant() noexcept
 {
     return 5;
 }
-void ReportGraph(uint32, uint32) noexcept {}
+void ReportGraph(uint32, uint32, uint32) noexcept {}
 int32 Paused() noexcept
 {
     return 0;
@@ -139,7 +140,7 @@ bool Create() noexcept
     const auto vertex = ludus::shaders::raster::Vertex();
     const auto fragment = ludus::shaders::raster::Fragment();
     const float32 tint[4]{1, 1, 1, 1};
-    const float32 dim[4]{.5F, .5F, .5F, 1};
+    const float32 dim[4]{.5F, .5F, .5F, Variant() >= 9 ? .5F : 1};
     uint8 image[16]{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255};
     const auto mode = Variant();
     if (mode == 1 || mode == 2)
@@ -438,10 +439,17 @@ void Tick() noexcept
             return;
         }
         if (Variant() >= 3 &&
-            (!Accepted(rhi::RequestPipeline(
-                 gDevice,
-                 {gVertex, gFragment, gLayout, streams, attributes, true, false, rhi::RasterTarget::Rgba8Unorm, false},
-                 gUiRequest)) ||
+            (!Accepted(rhi::RequestPipeline(gDevice,
+                                            {gVertex,
+                                             gFragment,
+                                             gLayout,
+                                             streams,
+                                             attributes,
+                                             Variant() < 9,
+                                             Variant() >= 9,
+                                             rhi::RasterTarget::Rgba8Unorm,
+                                             false},
+                                            gUiRequest)) ||
              !Accepted(
                  rhi::RequestPipeline(gDevice, {gVertex, gFragment, gLayout, streams, attributes}, gCompositeRequest))))
         {
@@ -539,13 +547,16 @@ void Tick() noexcept
                 inputs.Arguments = gArguments;
             }
             rhi::GraphReport report;
-            if (ludus::qa::BuildOrderedFrame(gDevice, inputs, gGraph, report, Variant() == 4 || Variant() == 8) !=
-                rhi::RasterStatus::Ready)
+            const auto built =
+                Variant() >= 9
+                    ? ludus::qa::BuildMergedFrame(gDevice, inputs, gGraph, report, Variant() == 9)
+                    : ludus::qa::BuildOrderedFrame(gDevice, inputs, gGraph, report, Variant() == 4 || Variant() == 8);
+            if (built != rhi::RasterStatus::Ready)
             {
                 Stop(true);
                 return;
             }
-            ReportGraph(report.LivePasses, report.DependencyCount);
+            ReportGraph(report.LivePasses, report.DependencyCount, report.RasterPasses);
             gHasGraph = true;
         }
         const auto submitted = rhi::ExecuteOrderedGraph(gDevice, gSurface, gGraph, gCompletion);

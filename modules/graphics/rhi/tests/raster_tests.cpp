@@ -1412,3 +1412,139 @@ TEST_CASE("L3 complete immutable mip uploads reject holes, overflow and attachme
     invalid.MaxLod = 15;
     REQUIRE(CreateSampler(session.Device, invalid, sampler) == RasterStatus::Ready);
 }
+
+TEST_CASE("R5 merges only compatible raster scopes and retains completion leases", "[rhi][graph][merge]")
+{
+    Session session;
+    Scene scene(session.Device);
+    GraphScene graph(session.Device, scene);
+    const auto variant = GENERATE(0, 1, 2, 3, 4, 5, 6, 7);
+    GraphUse uses[]{{graph.Vertex, GraphAccessMode::Vertex, 0, 36},
+                    {graph.Index, GraphAccessMode::Index, 0, 6},
+                    {graph.Uniform, GraphAccessMode::Uniform, 0, 16}};
+    const auto draw = scene.Draw();
+    GraphPassDescription pass;
+    pass.Name = "first";
+    pass.Attachment.DepthStore = RasterStore::Store;
+    pass.Uses = uses;
+    pass.UseCount = 3;
+    pass.Draws = &draw;
+    pass.DrawCount = 1;
+    REQUIRE(AddGraphPass(session.Device, graph.Graph, pass) == RasterStatus::Ready);
+    pass.Name = "second";
+    pass.Attachment.ColorLoad = pass.Attachment.DepthLoad = RasterLoad::Load;
+    if (variant == 2)
+        pass.SideEffect = true;
+    if (variant == 3)
+        pass.Attachment.ColorLoad = RasterLoad::Clear;
+    if (variant == 4)
+        pass.Attachment.DepthLoad = RasterLoad::Clear;
+    if (variant == 5)
+        pass.Attachment.DepthStore = RasterStore::Discard;
+    if (variant == 6)
+    {
+        pass.Attachment.UseScissor = true;
+        pass.Attachment.Scissor = {0, 0, 1, 1};
+    }
+    if (variant == 7)
+    {
+        const auto temp = uses[0];
+        uses[0] = uses[1];
+        uses[1] = temp;
+    }
+    REQUIRE(AddGraphPass(session.Device, graph.Graph, pass) == RasterStatus::Ready);
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, graph.Graph, report, GraphCompileOptions{true, variant != 1}) ==
+            RasterStatus::Ready);
+    CHECK(report.LivePasses == 2);
+    CHECK(report.RasterPasses == (variant == 0 ? 1 : 2));
+    CHECK(report.MergedPasses == (variant == 0 ? 1 : 0));
+    CHECK(report.DrawCount == 2);
+    CHECK(report.ComputePasses == 0);
+    CHECK(report.BufferBytes == 58);
+    CHECK(report.TextureBytes == 0);
+    CHECK(report.PlanStorageBytes > sizeof(GraphReport));
+    CHECK(report.RasterGroup[0] == 0);
+    CHECK(report.RasterGroup[1] == (variant == 0 ? 0 : 1));
+    REQUIRE(Destroy(session.Device, scene.Vertices) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, scene.Pipeline) == RasterStatus::Ready);
+    SubmissionToken token;
+    REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, graph.Graph, token) == RasterStatus::Ready);
+    CHECK(reference::Passes == report.RasterPasses);
+    CHECK(reference::Draws == 2);
+    CHECK(reference::Destroys[7] == 0);
+    CHECK(GetStatus(session.Device, token) == RasterStatus::Pending);
+    reference::Completed = reference::Submitted;
+    REQUIRE(PollLifetime(session.Device) == RasterStatus::Ready);
+    CHECK(reference::Destroys[7] == 1);
+}
+
+TEST_CASE("R5 attachment chains keep versions, barriers and final depth validity", "[rhi][graph][merge]")
+{
+    Session session;
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    GraphTexture texture(session.Device, graph);
+    const auto variant = GENERATE(0, 1, 2);
+    GraphVersion previous = texture.Initial;
+    for (uint32 i = 0; i < 3; ++i)
+    {
+        GraphVersion next;
+        if (i == 0)
+        {
+            next = texture.Output;
+        }
+        else
+        {
+            REQUIRE(NextGraphVersion(session.Device, graph, previous, next) == RasterStatus::Ready);
+        }
+        const GraphUse use{next, i == 0 ? GraphAccessMode::ColorWrite : GraphAccessMode::ColorReadWrite};
+        GraphPassDescription pass;
+        pass.Name = "versioned attachment";
+        pass.Attachment.Color = texture.Texture;
+        pass.Attachment.ColorLoad = pass.Attachment.DepthLoad = i == 0 ? RasterLoad::Clear : RasterLoad::Load;
+        pass.Attachment.DepthStore = RasterStore::Store;
+        pass.Attachment.DepthReadOnly = variant == 1 && i == 2;
+        pass.Attachment.ColorStore = variant == 2 && i == 2 ? RasterStore::Discard : RasterStore::Store;
+        pass.Uses = &use;
+        pass.UseCount = 1;
+        REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+        previous = next;
+    }
+    REQUIRE(AddGraphRoot(session.Device, graph, previous, GraphRoot::History) == RasterStatus::Ready);
+    GraphReport report;
+    const auto status = CompileOrderedGraph(session.Device, graph, report, GraphCompileOptions{true, true});
+    if (variant == 2)
+    {
+        CHECK(status == RasterStatus::InvalidDescription);
+        CHECK(report.RasterPasses == 0);
+        CHECK(report.PlanStorageBytes == 0);
+        CHECK(reference::Passes == 0);
+        REQUIRE(DiscardOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+        return;
+    }
+    REQUIRE(status == RasterStatus::Ready);
+    CHECK(report.RasterPasses == (variant == 0 ? 1 : 2));
+    CHECK(report.TextureBytes == uint64{16} * 8 * 8);
+    CHECK(report.LastUse[0] == 2);
+    CHECK(report.DependencyCount >= 3);
+    // Target skips retain the frozen group plan; retry issues one submission.
+    backend::NextFrame = FrameStatus::Skipped;
+    SubmissionToken token;
+    CHECK(ExecuteOrderedGraph(session.Device, session.Surface, graph, token) == RasterStatus::NotReady);
+    CHECK(reference::Passes == 0);
+    backend::NextFrame = FrameStatus::Ready;
+    REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, graph, token) == RasterStatus::Ready);
+    CHECK(reference::Passes == report.RasterPasses);
+    CHECK(reference::Submitted != 0);
+    RasterTextureState state;
+    REQUIRE(GetTextureState(session.Device, texture.Texture, state) == RasterStatus::Ready);
+    CHECK(state.ColorDefined);
+    CHECK(state.DepthDefined);
+    CHECK(state.Use == RasterTextureUse::SampledFragment);
+    REQUIRE(Destroy(session.Device, texture.Texture) == RasterStatus::Ready);
+    CHECK(reference::Destroys[1] == 0);
+    reference::Completed = reference::Submitted;
+    REQUIRE(PollLifetime(session.Device) == RasterStatus::Ready);
+    CHECK(reference::Destroys[1] == 1);
+}

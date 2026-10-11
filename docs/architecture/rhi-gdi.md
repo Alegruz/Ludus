@@ -1,12 +1,13 @@
 # Ludus RHI and Graphics Device Interface Architecture
 
 **Status:** Proposed architecture, 2026-10-04; implementation status and deferred
-research plan updated 2026-10-08. Intended for engine implementation review.
+research plan updated 2026-10-11. Intended for engine implementation review.
 This document was drafted before opening the article map, then refined
 through [five complete reference chapters](rhi-gdi-gems-review.md) and current
 primary documentation. The first implementation slice now adds effective
 fullscreen capabilities, copied startup requirements, explicit requirement and
-backend-selection failures, and requirement-aware browser fallback. Remaining R0 work and R5 are proposals. The first bounded R4 buffer-compute/indirect
+backend-selection failures, and requirement-aware browser fallback. Remaining R0 work is proposed. The initial bounded R5 pass-merging path is
+implemented as an explicit opt-in; see the [measurement and control contract](../development/fullscreen-rendering.md#measured-pass-merging-r5). The first bounded R4 buffer-compute/indirect
 profile is implemented; see the [compute contract](../development/fullscreen-rendering.md#buffer-compute-and-indirect-rendering-r4). The first bounded R3 ordered graph
 profile is implemented; see the [graph contract](../development/fullscreen-rendering.md#ordered-raster-graphs-r3). The first bounded R2 lifetime
 service profile is implemented in the existing RHI registry; see the
@@ -17,8 +18,9 @@ minimum CPU/GPU retirement accompanying its general resources; see the
 the facade session/registry, validates device and target owners, and rejects
 unimplemented required workloads before startup; see the
 [public usage contract](../development/fullscreen-rendering.md#explicit-r0-device-ownership).
-No performance gain has been measured; accepted
-ADRs and the public API define shipped behavior.
+A paired Metal overlay workload measured lower CPU acquire/encode/submit cost
+with full-image agreement. This is workload-specific CPU evidence, not a GPU or
+presentation claim; accepted ADRs and the public API define shipped behavior.
 
 Ludus should use a **small explicit RHI, a Graphics Device Interface that plans
 and manages GPU work, and a renderer that owns scene policy**. Make resource
@@ -696,7 +698,7 @@ external memory/semaphore interoperability.
 | R2 Lifetime services | Initial bounded profile implemented; texture streaming and descriptor arenas deferred | Completion tokens, retained records, upload/readback rings, Vulkan allocator adapter, pipeline requests | Destroy before/after finish/submit, discard, resource dependency retention, slow GPU/ring exhaustion, memory failure, cancellation, loss, resize/shutdown |
 | R3 Ordered graph | Implemented bounded portable raster profile | Authored pass list, in-place texture versions, RAW/WAR/WAW reports, roots/culling, completion-gated whole-object pool, attachment lowering | [R3 contracts and acceptance](../development/fullscreen-rendering.md#ordered-raster-graphs-r3): offscreen scene, read-only-depth UI and composite; reference/optimized images; history/import and undeclared-use regressions |
 | R4 Compute renderer | Initial bounded buffer profile implemented; storage textures and broader effects deferred | Single-queue storage buffers, reflected compute pipeline/dispatch, indexed indirect draws and authored CPU/direct variant | [R4 contracts and acceptance](../development/fullscreen-rendering.md#buffer-compute-and-indirect-rendering-r4): GPU culling/compaction, argument readback and CPU image oracle; WebGL selects the authored variant or fails before execution |
-| R5 Measured optimization | Proposed | Select only justified aliasing, parallel recording, pass merging, async queues or bindless services | Representative CPU/GPU/latency/memory evidence, adversarial synchronization tests, debug controls, consumer/SDK maintenance cost |
+| R5 Measured optimization | Initial bounded opt-in raster merging and paired measurement harness implemented; other extensions deferred | Select only justified aliasing, parallel recording, pass merging, async queues or bindless services | Representative CPU/GPU/latency/memory evidence, adversarial synchronization tests, debug controls, consumer/SDK maintenance cost |
 
 R2 resource retention and safe completion are prerequisites for scalable R1
 uploads, not permission to ship unsafe intermediate resources. Implement R1/R2
