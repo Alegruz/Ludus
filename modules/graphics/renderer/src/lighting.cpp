@@ -167,6 +167,10 @@ rhi::RasterStatus BuildDirectionalShadowMatrix(const math::Aabb3& bounds,
     width += 2 * step;
     height += 2 * step;
     const auto near = minimum.Z - step, depth = maximum.Z - minimum.Z + 2 * step;
+    if (!math::IsFinite(near) || !math::IsFinite(depth) || depth <= 0)
+    {
+        return rhi::RasterStatus::InvalidDescription;
+    }
     math::Matrix4 matrix{};
     for (usize column = 0; column < 3; ++column)
     {

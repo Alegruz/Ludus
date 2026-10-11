@@ -887,6 +887,9 @@ TEST_CASE("L4 direct lists saturate stably and BRDF guards preserve reference ou
     CHECK(rr::BuildDirectionalShadowMatrix({{-1, -1, 0}, {1, 1, 1}}, {}, 32, matrix) ==
           rhi::RasterStatus::InvalidDescription);
     CHECK(matrix == old);
+    CHECK(rr::BuildDirectionalShadowMatrix({{-1, -1, -3e38F}, {1, 1, 3e38F}}, {0, 0, 1}, 32, matrix) ==
+          rhi::RasterStatus::InvalidDescription);
+    CHECK(matrix == old);
 }
 TEST_CASE("L4 lit versions retain atlases and invalidate changed casters conservatively", "[renderer][l4]")
 {
