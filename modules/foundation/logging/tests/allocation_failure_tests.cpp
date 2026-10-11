@@ -53,7 +53,7 @@ TEST_CASE("Async owner allocation failure preserves synchronous logging", "[logg
     config.EnableConsole = false;
     config.EnableFile = false;
     config.EnableDebugger = false;
-    config.FlushIntervalMilliseconds = 0;
+    config.FlushIntervalMilliseconds = 1000;
     gFailBackendAllocation = true;
     const LogInitResult result = LogSystem::Initialize(config);
     gFailBackendAllocation = false;

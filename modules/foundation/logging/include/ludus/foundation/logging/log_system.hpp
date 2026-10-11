@@ -141,7 +141,8 @@ public:
     /// Requests for async, file, or debugger sinks return Degraded with Synchronous mode; unsupported requested
     /// sinks report unhealthy. No timed flush worker runs.
     /// Reentrant console callbacks cannot change lifecycle (Incomplete).
-    /// Native async-owner allocation failure returns Degraded with Synchronous mode, retaining initialized sinks.
+    /// Native async-owner allocation failure returns Degraded with Synchronous mode, retaining initialized sinks
+    /// and disabling the timed flush worker; explicit and shutdown flushes remain available.
     static LogInitResult Initialize(const LogConfig& config);
     static LogStatus Shutdown();
 

@@ -10,6 +10,10 @@ void Insert(std::ostream& stream, const std::string& value)
 {
     stream << value;
 }
+void Insert(std::ostream& stream, std::string_view value)
+{
+    stream << value;
+}
 void Insert(std::ostream& stream, const char* value)
 {
     stream << value;

@@ -32,8 +32,8 @@ upgrade is a separate change requiring probe, analysis, and runtime evidence.
 The W0 probe is a standalone CMake project in `tools/webgpu-probe`. It includes
 only Ludus's numeric aliases and does not link FoundationBase or bypass the
 Linux runtime guard. It uses C++23, no extensions, `-fno-exceptions`, the project
-warning set, and warnings-as-errors. It exercises `std::expected`, floating
-the pinned language/toolchain before requesting an adapter. The historical
+warning set, and warnings-as-errors. It validates the pinned language/toolchain
+before requesting an adapter. The historical
 standard-library format/conversion feature checks were retired with the build-time
 cleanup; probe diagnostics use bounded, allocation-free decimal output.
 

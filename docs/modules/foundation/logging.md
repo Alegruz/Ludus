@@ -145,4 +145,5 @@ Session and rotation filenames use the bounded Ludus formatter, checking
 truncation and format errors before file creation. Native asynchronous backend
 ownership uses `UniquePtr` and nonthrowing allocation; if that allocation fails,
 initialization reports `Degraded` with `Synchronous` mode and keeps the prepared
-sinks. Standard formatting machinery is not used by the logger or its fixtures.
+sinks. It disables the timed flush worker to avoid allocating another thread after
+the failure; explicit and shutdown flushes remain available. Standard formatting machinery is not used by the logger or its fixtures.

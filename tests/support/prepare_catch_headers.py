@@ -21,8 +21,42 @@ def prepare(source, destination):
         "internal/catch_reusable_string_stream.hpp": source / "internal/catch_reusable_string_stream.hpp",
         "internal/catch_decomposer.hpp": source / "internal/catch_decomposer.hpp",
         "catch_tostring.hpp": source / "catch_tostring.hpp",
+        "matchers/internal/catch_matchers_impl.hpp": source / "matchers/internal/catch_matchers_impl.hpp",
+        "interfaces/catch_interfaces_capture.hpp": source / "interfaces/catch_interfaces_capture.hpp",
+        "benchmark/detail/catch_benchmark_stats_fwd.hpp": source / "benchmark/detail/catch_benchmark_stats_fwd.hpp",
     }
     contents = {name: path.read_text(encoding="utf-8") for name, path in files.items()}
+    contents["interfaces/catch_interfaces_capture.hpp"] = replace_once(
+        contents["interfaces/catch_interfaces_capture.hpp"], "#include <chrono>\n", "")
+    # Catch's benchmark ABI names duration<double, nano> even in ordinary
+    # assertions. Use each supported vendor's duration definition, avoiding
+    # calendar/locale/format machinery; do not declare anything in namespace std.
+    # Thanks to GNU libstdc++ 14 bits/chrono.h, LLVM libc++ __chrono/duration.h,
+    # and Microsoft STL __msvc_chrono.hpp for their separated duration headers:
+    # https://github.com/gcc-mirror/gcc/blob/releases/gcc-14.2.0/libstdc++-v3/include/bits/chrono.h
+    # https://github.com/llvm/llvm-project/blob/llvmorg-18.1.8/libcxx/include/__chrono/duration.h
+    # https://github.com/microsoft/STL/blob/main/stl/inc/__msvc_chrono.hpp
+    contents["benchmark/detail/catch_benchmark_stats_fwd.hpp"] = replace_once(
+        contents["benchmark/detail/catch_benchmark_stats_fwd.hpp"], "#include <chrono>", """
+#include <ratio>
+#if defined(__GLIBCXX__)
+#  include <bits/chrono.h>
+#elif defined(_LIBCPP_VERSION)
+#  include <__chrono/duration.h>
+#elif defined(_MSVC_STL_VERSION)
+#  include <__msvc_chrono.hpp>
+#else
+// Retain correctness on an unqualified standard library; profile it before
+// claiming the lightweight boundary on that toolchain.
+#  include <chrono>
+#endif
+""")
+    contents["matchers/internal/catch_matchers_impl.hpp"] = replace_once(
+        contents["matchers/internal/catch_matchers_impl.hpp"],
+        "os << Catch::Detail::stringify( m_arg )\n               << ' '\n               << m_matcher.toString();",
+        "ludus::test::Insert(os, Catch::Detail::stringify( m_arg ));\n"
+        "            ludus::test::Insert(os, ' ');\n"
+        "            ludus::test::Insert(os, m_matcher.toString());")
     stream = contents["internal/catch_reusable_string_stream.hpp"]
     stream = replace_once(stream, "#include <ostream>", '#include "catch_stream.hpp"')
     stream = replace_once(stream, "*m_oss << value;", "ludus::test::Insert(*m_oss, value);")

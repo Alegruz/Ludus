@@ -13,6 +13,11 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         message(FATAL_ERROR "Catch2 is stale: initialize the pinned Ludus diagnostic recipe with ./init.sh --with-tests")
     endif()
 
+    add_library(ludus_catch_header_boundary_tests OBJECT tests/support/catch_header_boundary.cpp)
+    target_link_libraries(ludus_catch_header_boundary_tests PRIVATE Catch2::Catch2)
+    ludus_apply_project_defaults(ludus_catch_header_boundary_tests)
+    ludus_enable_test_exceptions(ludus_catch_header_boundary_tests)
+
     add_executable(ludus_test_diagnostics_tests tests/support/catch_diagnostics_tests.cpp)
     target_link_libraries(ludus_test_diagnostics_tests PRIVATE Ludus::FoundationBase Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_test_diagnostics_tests)

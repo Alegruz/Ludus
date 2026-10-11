@@ -310,7 +310,11 @@ local comparisons, and fixed buffer copy/fill uses loops.
 The pinned local Catch2 3.4.0 recipe rebuilds the test runtime with its adapted
 headers, preserving licenses and the assertion model. Its stream insertions
 compile behind a test-only boundary and chrono printers are available through
-explicit `<catch2/catch_chrono_stringmaker.hpp>`. No binary built against the old
+explicit `<catch2/catch_chrono_stringmaker.hpp>`. Benchmark forward declarations
+retain their exact `duration<double, nano>` ABI through the qualified vendors'
+small duration headers, avoiding calendar/locale/format definitions. Unknown
+standard libraries retain the upstream chrono include until separately qualified.
+No declarations are invented inside namespace `std`. No binary built against the old
 inline definitions is mixed with the adapted test headers. The dependency's
 private runtime includes remain in its normal dependency build; every engine
 and test translation unit remains in the existing profile, without a PCH or

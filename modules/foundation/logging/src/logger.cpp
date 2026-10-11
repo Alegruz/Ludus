@@ -444,6 +444,7 @@ LogInitResult LogSystem::Initialize(const LogConfig& config)
         else
         {
             effective = LogMode::Synchronous;
+            s.FlushIntervalMs = 0; // Do not request another allocation for a timed worker after allocation failure.
             s.EffectiveMode.store(effective, std::memory_order_relaxed);
             result.EffectiveMode = effective;
             result.Status = LogStatus::Degraded;

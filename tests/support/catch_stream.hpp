@@ -2,6 +2,7 @@
 
 #include <iosfwd>
 #include <string>
+#include <string_view>
 #include <type_traits>
 
 // Test-only stream boundary. Catch2's runtime still owns its diagnostic stream;
@@ -9,6 +10,7 @@
 namespace ludus::test
 {
 void Insert(std::ostream& stream, const std::string& value);
+void Insert(std::ostream& stream, std::string_view value);
 void Insert(std::ostream& stream, const char* value);
 void Insert(std::ostream& stream, char value);
 void Insert(std::ostream& stream, signed char value);
