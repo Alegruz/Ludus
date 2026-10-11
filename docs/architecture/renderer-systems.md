@@ -1,8 +1,8 @@
 # Low-level renderer systems architecture
 
 Status: L0 scene submission, L1 views/depth, L2 mutable versions/overlays and
-L3 material/content versions implemented, October 8, 2026. L3 starts from merged
-L2 at `5ee169f`. L4–L6 remain an implementation plan.
+L3 material/content versions and L4 lighting baseline implemented, October 11, 2026. L4 starts from merged
+L3 at `f9cc7c8`. L5–L6 remain an implementation plan.
 Correctness fixtures do not establish a measured speedup.
 The initial decisions below were saved before opening the Gems article map.
 The [reference review](renderer-systems-gems-review.md) records the subsequent
@@ -67,8 +67,9 @@ depth. L1 adds explicit pass clear depth and pipeline comparison state. Foundati
 intended 3D convention is reverse-Z `[0,1]`. Pair reverse-Z projections with clear zero and Greater explicitly. The L1
 fixtures prove ordering on native and browser backends; existing consumers keep
 their conventional default.
-Existing R1 consumers keep their documented behavior. L3 expands the initial 16 records per kind to 32 and supplies immutable R8, RG8
-and linear/sRGB RGBA8 mip chains. One binding group remains the portable profile;
+Existing R1 consumers keep their documented behavior. L3 expanded the initial 16
+records per kind to 32 and supplied immutable R8, RG8 and linear/sRGB RGBA8 mip
+chains. L4 expands records to 64 and adds the bounded lighting profile below. One binding group remains the portable profile;
 this bounded content slice does not establish a general streaming/lighting contract.
 
 ## Portable scene submission (L0)
@@ -313,7 +314,7 @@ requests: surface/offscreen × conventional depth/reverse-Z/painter. Create and 
 programs outside an acquired frame. A ready program admits immutable material
 parameters, a sampler and an exact retained sampled texture view. Draws perform no
 shader compilation, binding construction or parameter upload. Mesh creation copies
-positions and optional finite top-left UVs into a 20-byte vertex; L0 flat shaders
+positions and optional finite top-left UVs into a 20-byte vertex in L3 (40 bytes with L4 normals/bake UVs); L0 flat shaders
 ignore UVs. Existing flat/error materials keep their behavior.
 
 ```cmake
@@ -343,14 +344,14 @@ unpublished candidates explicitly. A program's null texture uses its ready white
 fallback; a null scene surface uses L0's magenta flat/error material. Opaque and
 masked materials use the scene layer and write depth; Painter uses the Overlay
 layer and premultiplies straight color/texture alpha exactly once. This remains an
-unlit schema; lights, tangents and physically based shading belong to L4.
+unlit schema; the lit baseline is described below. Tangent-space normal maps remain planned.
 
 The raw texture JSON contains integer `width`, `height` (1..4096), `format`
 (`R8Unorm`, `Rg8Unorm`, `Rgba8Unorm`, `Rgba8Srgb`), `semantic` (`color`, `data`,
 `normal`, `mask`) and complete top-down tightly packed integer-byte `pixels`.
 Color/normal require RGBA8; sRGB is color-only. Complete upload footprint must
-fit 64 MiB (or the device's lower enabled limit at admission). The cooker writes a complete
-immutable chain down to 1×1, four-byte padded rows, source/upload hashes and
+fit 64 MiB (or the device's lower enabled limit at admission). The cooker defaults to a complete
+immutable chain down to 1×1; optional integer `mip_levels` selects a complete prefix. It writes four-byte padded rows, source/upload hashes and
 inspectable level offsets/pitches. Fractional box footprints include odd edges;
 sRGB RGB is decoded before filtering and re-encoded afterward, alpha stays linear.
 Color filtering associates alpha then restores straight alpha, avoiding transparent
@@ -364,7 +365,7 @@ compressed formats or runtime mip generation.
 
 RHI requires every declared sampled level to be initialized; offsets/pitches and
 aggregate upload extent are validated before native work. Sampled views expose the
-whole exact format/chain. Attachment textures remain single-mip RGBA8. Mip filters
+whole exact format/chain. Attachment textures remain single-mip; L4 adds capability-gated RGBA16F. Mip filters
 and finite LOD clamps are explicit; the compatibility sampler clamps level zero.
 `MaterialDescription::Lod` selects derivatives (-1) or an explicit initialized
 level for deterministic previews, still subject to the sampler's mip/LOD clamps. Streaming residency/partial mip ranges remain
@@ -373,7 +374,7 @@ mip/data uploads also use that path. The cooker sets it. Legacy one-level RGBA8
 setup retains its compatibility behavior; native/browser readiness is always explicit.
 
 Default budgets are two program and eight material records, including detached
-CPU-retained incarnations. RHI's 32 records per kind cover L0/L1's seven pipelines,
+CPU-retained incarnations. L3's historical RHI budget of 32 records per kind covered L0/L1's seven pipelines,
 L2's six and two overlapping six-variant programs (25); this changes table capacity,
 not binding or hardware limits. R2 pipeline, upload and retirement budgets still
 apply independently: backpressure returns an explicit status, never overwrites old
@@ -395,6 +396,161 @@ The installed SDK separately cooks a matrix/vector-array/matrix-array fixture an
 checks its target's 240-byte range and 0/64/96/224 member offsets.
 These establish correctness; physical GPU performance, streaming throughput and
 compressed-content quality require separate qualification.
+
+## Implemented L4: bounded forward lighting
+
+L4 adds [lighting.hpp](../../modules/graphics/renderer/include/ludus/graphics/renderer/lighting.hpp)
+and three installed Slang sources: `renderer_lit.slang`, `renderer_shadow.slang`,
+and `renderer_output.slang`. It preserves L0–L3 callers and immutable version
+publication. Calls are serialized on the renderer/device owner thread; prepare,
+prewarm and poll between acquired frames, then draw only ready resources.
+Failure preserves caller outputs unless a documented accepted candidate is pending
+or failed. Release failed/pending candidates explicitly. No draw compiles a shader,
+creates bindings, allocates scene storage or changes an accepted material version.
+
+Initialize flat rendering and views, then call `InitializeLighting(outputVertex,
+outputFragment, flatShadowFragment)` and poll `PollLighting`. Cook the lit source
+with `fragmentMain` and again with `shadowMain`, and pass their vertex, lighting
+fragment and masked-shadow fragment descriptions to `PrewarmLitProgram`.
+`GetStatus(program)` completes the legal depth/painter variants for linear RGBA8,
+optional RGBA16F, and conventional-depth masked shadows. Opaque/masked lit materials
+belong to the scene layer; painter lit materials belong to Overlay. Lit views draw
+into a linear attachment with `DrawView`; legacy surface `Submit` rejects them.
+
+Meshes copy position, base UV, normalized normal and bake UV into a 40-byte vertex.
+Lit snapshots require normals and an invertible finite normal transform (inverse
+transpose components bounded to 1e12), and world bounds within ±1e6 meters.
+Instances occupy 192 bytes, retaining the legacy clip/color prefix. Perspective
+specular evaluation uses `ViewDescription::CameraPosition`; orthographic views
+use the opposite normalized `CameraForward`. Both camera fields are validated.
+The installed ABI has sixteen vertex attributes, a 1040-byte fragment uniform at
+binding 0, base texture/sampler at 1/2, bake texture at 3, and shadow texture/nearest
+sampler at 4/5. Reflection verifies all member names, offsets and numeric shapes,
+including the masked-shadow subset, before admission. Fewer than sixteen enabled
+attributes returns Unsupported. The RHI exposes the enabled attribute bound (up
+to sixteen); original shaders still use their original eight-attribute profile.
+
+### Material and direct-light model
+
+`CreateLitMaterial` copies metallic [0,1], perceptual roughness [0.045,1], emission,
+constant environment irradiance/radiance and the L3 base texture/tint/alpha schema.
+Linear emission/environment components are bounded to 10000. The baseline uses
+single-scatter isotropic GGX, height-correlated Smith visibility, Schlick Fresnel,
+a fixed dielectric F0 of 0.04 and Fresnel-weighted Lambert diffuse. Metallic removes
+diffuse. There is no multiscatter compensation, normal-map/tangent profile, BRDF
+LUT or environment convolution. Constant specular radiance uses a declared Fresnel
+approximation; it is a deterministic fallback, not a full image-based-lighting bake.
+`EvaluateLitBrdf` is an allocation-free independent CPU reference returning BRDF ×
+max(N·L,0); degenerate/invalid inputs preserve its output.
+
+Thanks to Google and the Filament authors, [*Physically Based Rendering in Filament*,
+§4.4 Standard model and §5.2.2 Direct lighting](https://google.github.io/filament/main/filament.html),
+for the GGX/Smith/Schlick model and photometric conventions. Code credits the source
+and records the simpler single-scatter/constant-environment departures.
+
+Directional intensity is illuminance in lux; point and spot intensity is candela.
+Positions/ranges use meters. Point/spot evaluation uses inverse-square attenuation,
+a smooth finite range, and for spots a squared smooth cone between distinct inner
+and outer half-angle cosines. Zero-distance attenuation is bounded at 1e-4 square
+meters. Intensity is finite [0,1e6], hue channels [0,1], range [0.01,1e6]. Every
+submitted light is validated, including dropped entries, and identities must be
+unique/nonzero. `SelectDirectLights` admits at most 128, retaining the eight smallest
+SourceIds in ascending order. `LightSelection::Dropped` reports successful
+saturation; excess input capacity rejects and preserves output. Stable selection
+avoids frame-order flicker; it does not promise brightness-optimal selection.
+Shader radiance clamps finite output to 65504 before attachment conversion. Emissive
+materials do not create lights. Clustered lists belong to L5.
+
+### Baked chart admission and replacement
+
+The offline raw-texel cooker accepts optional `bake` metadata only for linear
+`Rgba8Unorm`, semantic `data`, and `mip_levels: 1`. It validates nonzero uint64
+`source_id`, `scene_revision`, `dependency_revision`; optional `direct_light_id`
+(zero means indirect-only); twelve column-major affine `transform` components;
+three `scale` components; and integer `gutter` (1..16, default one). Every gutter
+texel must replicate its nearest interior texel, and the interior is at least 2×2.
+The generated `Bake(texture)` returns the immutable metadata and texel-center UV
+transform; the manifest retains that metadata with source/upload hashes.
+See the [SDK bake source](../../tests/sdk_consumer/l4-bake.texture.json) for a complete
+example. The input is authored irradiance, not a runtime lightmapper or chart packer.
+
+Materials retain a ready single-mip linear RGBA8 chart. Bake UVs are clamped to [0,1]
+before the supplied interior transform, so bilinear level-zero sampling cannot cross
+a gutter. A valid bake requires exact SourceId, both revisions and affine transform
+on each SceneItem. It replaces environment diffuse irradiance. If `DirectLightId`
+identifies a selected light, it also replaces that light's **direct diffuse** term;
+dynamic direct specular remains. Indirect-only charts preserve all direct lighting.
+A moved object or mismatched revision uses environment diffuse and all dynamic direct
+terms, counted by `ViewReport::BakeFallbacks`. No stale chart is silently applied.
+
+### Immutable shadow atlases
+
+`PrepareShadowAtlas(snapshot, description, atlas)` retains the exact opaque/masked
+caster snapshot and up to four light views in a [4,2048] RGBA8 atlas. Call `GetStatus`,
+then draw once with `DrawShadowAtlas` inside an acquired frame and successfully end
+that frame before publishing materials using it. Partial drawing failure poisons the
+candidate; a failed/aborted frame requires discarding it and preparing another.
+Ready rendered atlases may be retained by lit materials after public ownership is
+released. Two atlas incarnations support bounded overlap. No in-place rewrite can
+change the image of an older prepared view.
+
+Cells leave a clear texel on all sides and separate expanded gutter rectangles.
+All cells use conventional Z [0,1], clear depth one, independent of camera reverse-Z.
+Depth is packed into RG16 within RGBA8; nearest 2×2 manual PCF clamps each sample to
+that cell's interior texel centers. Receiver bias is explicit [0,0.01] in normalized
+light depth. Region order chooses the first containing projection, permitting two
+explicit directional cascades and spot projections. Point lights remain supported
+for direct evaluation; point shadow maps return Unsupported. Opaque flat/unlit
+geometry casts; masked casters require the lit alpha shader; painters never cast.
+
+`BuildDirectionalShadowMatrix` fits finite unjittered caster/receiver bounds, snaps
+XY center to a texel grid and pads one texel. The caller owns cascade splits and
+spot projection authoring; no temporal jitter or automatic fit policy is hidden.
+Atlas light identity, position/direction/range/cone must match selected material
+lights; color/intensity may change without changing visibility. New geometry,
+source identity, transform, opacity domain, or masked material incarnation invalidates
+cached visibility. The complete caster set is compared conservatively; even a moved
+caster outside the main view selects unshadowed direct lighting and increments
+`ShadowFallbacks`. Lighting-only opaque material replacement keeps visibility valid.
+A new rendered atlas is required to restore shadows; no stale shadow is sampled.
+
+### Linear composition and capabilities
+
+`RasterCapabilities::HdrColor` requires sampleable, linearly filterable, blendable
+RGBA16F color attachments. Vulkan queries format features, Metal/WebGPU expose the
+supported profile, and WebGL 2 requires `EXT_color_buffer_float`. Rgba16Float is
+attachment-only, one mip; unsupported devices return Unsupported and callers choose
+the linear RGBA8 LDR path. LDR clips radiance above one before tone mapping; HDR
+preserves it. This is explicit quality selection, not a failed-frame fallback.
+
+`PrepareLightingPresentation` retains an immutable source, mapping and manual
+exposure. It precreates both output encoding choices and selects one using the
+acquired `FrameInfo.Encoding`. Apply exposure and guarded per-channel Reinhard once.
+For UI composition, tone-map scene into a **linear RGBA8 display intermediate** with
+`Encode=false`, blend linear UI there, then present with `ToneMap=false`, exposure
+one and `Encode=true`. Hardware sRGB attachments encode automatically; unorm surfaces
+use the shader's sRGB curve, so conversion occurs once. Draw-time encoding selection
+creates no resource. Old unlit textured materials are not admitted to HDR targets;
+flat overlays remain available. Exposure is manual; auto exposure and tone-map curves
+beyond Reinhard remain planned.
+
+Default renderer budgets are eight prepared views (four shadow views plus scene/UI
+and overlap), two atlases, two programs, eight materials, four snapshots and four
+presentations. RHI tables grow to 64 per kind: two seven-variant lit programs,
+L0/L1's seven, L2's six, output/shadow and HDR flat variants exceed L3's 32. These are
+bounded record capacities, not wider bindings, allocations or hardware guarantees.
+
+The shared [public-only SDK fixture](../../tests/sdk_consumer/renderer_lighting.cpp)
+uses cooked bake metadata, valid/invalid bake revisions, all four atlas cells,
+masked casters, a retained atlas across lighting-only replacement and moved-caster
+fallback. It renders LDR/HDR, emission, environment and painter samples through a
+linear display intermediate over 120 frames. Native pixel tests compare reference
+and optimized images and independent interior values. Browser checks cover forced
+WebGPU/WebGL 2, Auto and unavailable-WebGPU fallback with both profiles, before and
+after caster movement. Unit tests cover stable overflow, malformed ABI/input,
+reference BRDF guards, retained atlases and conservative invalidation; cooker tests
+cover gutters, revisions and mip admission. These validate correctness, not physical
+GPU performance or production bake quality.
 
 ## Owners and module shape
 
@@ -1138,7 +1294,7 @@ These phases complement RHI R0–R5; they do not rename or claim completion of t
 | L1: views and depth (implemented) | GDI/RHI explicit attachments, clear/compare state and frame retention; orthographic/perspective, virtual screens, offscreen/split views | Reverse-Z ordering, clip/UV orientation, letterbox picking, DPI, zero extent, resize and neighboring view preservation |
 | L2: mutable data and overlays (implemented) | Completion-scoped replacement uploads; dynamic instances, debug triangles, R8 text adapter | In-flight overwrite stress, line near-plane/degenerate cases, painter/scissor order, atlas pressure, CPU text fixtures and loss/restart |
 | L3: material/content versions (implemented) | Cook/reflection/layout expansion, texture formats/mips and pipeline prewarm | Per-target layout fixtures; invalid reload preserves old image; mip/color semantics; bounded cache/upload overlap and deterministic fallback |
-| L4: lighting baseline | Lit material, bounded direct lists, environment, shadows, baked assets, linear intermediate/output | Reference BRDF/color tests; no double lighting, shadow invalidation/atlas borders, saturation/overflow and LDR/HDR capability variants |
+| L4: lighting baseline (implemented) | Lit material, bounded direct lists, environment, shadows, baked assets, linear intermediate/output | Reference BRDF/color tests; no double lighting, shadow invalidation/atlas borders, saturation/overflow and LDR/HDR capability variants |
 | L5: measured scaling | Clustered forward, improved culling/LOD, optional native parallel recording | Dense-light and many-object fixtures; direct-path comparisons, overflow correctness, physical GPU median/tail/memory/latency evidence |
 | L6: optional advanced effects | Temporal/GPU-driven/virtual-residency plans and the RT0–RT4 ray plan | Capability probes and disabled-path support; image/temporal tests and workload-specific gains before default enablement |
 

@@ -50,3 +50,25 @@ class TextureCookerTests(unittest.TestCase):
     def test_complete_chain_budget_rejects_before_pixel_processing(self):
         with self.assertRaisesRegex(ValueError,'64 MiB'):
             cook({'width':4096,'height':4096,'format':'Rgba8Unorm','semantic':'color','pixels':[]})
+
+    def test_bake_gutters_metadata_and_single_mip_are_verified(self):
+        source={'width':4,'height':4,'format':'Rgba8Unorm','semantic':'data','mip_levels':1,'pixels':[128,64,32,255]*16,
+                'bake':{'source_id':1,'scene_revision':2,'dependency_revision':3,'transform':[1,0,0,0,1,0,0,0,1,0,0,0],'scale':[2,2,2],'direct_light_id':9}}
+        blob,levels=cook(source)
+        self.assertEqual(len(levels),1)
+        self.assertEqual(len(blob),64)
+        source['pixels'][0]=255
+        with self.assertRaisesRegex(ValueError,'gutters'):cook(source)
+        source['pixels'][0]=128
+        source['bake']['scene_revision']=0
+        with self.assertRaisesRegex(ValueError,'uint64'):cook(source)
+        source['bake']['scene_revision']=2
+        source['mip_levels']=2
+        with self.assertRaisesRegex(ValueError,'one clamped mip'):cook(source)
+
+    def test_explicit_initialized_range_is_bounded(self):
+        source={'width':4,'height':4,'format':'R8Unorm','semantic':'data','pixels':[0]*16,'mip_levels':1}
+        self.assertEqual(len(cook(source)[1]),1)
+        for value in (0,4,True,1.5):
+            source['mip_levels']=value
+            with self.assertRaises(ValueError):cook(source)

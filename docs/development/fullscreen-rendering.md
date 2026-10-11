@@ -283,7 +283,10 @@ All operations are serialized on the device's owner thread.
 The historical R1 profile below is deliberately bounded. L1 adds targets/depth,
 L2 adds R8 coverage, and [L3 material/content versions](../architecture/renderer-systems.md#implemented-l3-material-and-content-versions)
 expand current tables to 32 records per kind, sampled R8/RG8/RGBA8 mip chains
-and explicit mip samplers. Public declarations are the current API contract.
+and explicit mip samplers. [L4 lighting](../architecture/renderer-systems.md#implemented-l4-bounded-forward-lighting)
+expands tables to 64, enables up to sixteen queried vertex attributes, and adds
+capability-gated single-mip sampleable/filterable/blendable RGBA16F attachments.
+Public declarations are the current API contract.
 
 The original R1 profile:
 
@@ -511,7 +514,7 @@ the owner thread; setup, compilation and execution start between frames.
 The first profile is four graphs, sixteen logical resources per graph, thirty-two
 ordered raster passes, sixteen declarations per pass, 256 retained draws per
 graph, and 512 semantic dependency report entries. Capacity rejection occurs
-before frame acquisition. Attachment formats remain single-mip RGBA8 linear/sRGB, one layer and one
+before frame acquisition. Attachment formats remain single-mip RGBA8 linear/sRGB or capability-gated L4 RGBA16F, one layer and one
 sample, with one color attachment and private same-size depth. L3 additionally
 permits complete sampled R8/RG8/RGBA8 mip chains; graph hazards conservatively
 cover the whole sampled chain.
@@ -591,7 +594,7 @@ The fully checked packet authoring is
 used by both native pixels and the installed-SDK consumer. It compiles an unused
 color pass, a depth-tested instanced scene, a Load pass with read-only depth,
 and a scene-texture composite to presentation. Pipeline `Target` selects the
-surface format or a matching RGBA8 offscreen format; dimensions are dynamic.
+surface format or a matching RGBA8/RGBA16F offscreen format; dimensions are dynamic.
 
 ### Imports, history and transient objects
 

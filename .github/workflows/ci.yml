@@ -105,6 +105,7 @@ jobs:
           out/renderer-sdk/ludus_sdk_renderer_views_consumer
           out/renderer-sdk/ludus_sdk_renderer_overlays_consumer
           out/renderer-sdk/ludus_sdk_renderer_materials_consumer
+          out/renderer-sdk/ludus_sdk_renderer_lighting_consumer
       - name: Verify installed macOS game-project tooling
         run: |
           ./scripts/install-sdk macos-clang-development
@@ -514,6 +515,7 @@ jobs:
           out/renderer-sdk/ludus_sdk_renderer_views_consumer
           out/renderer-sdk/ludus_sdk_renderer_overlays_consumer
           out/renderer-sdk/ludus_sdk_renderer_materials_consumer
+          out/renderer-sdk/ludus_sdk_renderer_lighting_consumer
       - name: Build and test the independent Cornell box tutorial (Vulkan)
         run: |
           sudo apt-get install -y -qq libvulkan1 mesa-vulkan-drivers

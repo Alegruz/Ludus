@@ -263,16 +263,28 @@ VkDescriptorType RasterDescriptor(RasterBindingKind kind) noexcept
 }
 VkFormat RasterPixelFormat(RasterFormat format) noexcept
 {
-    return format == RasterFormat::Rg8Unorm     ? VK_FORMAT_R8G8_UNORM
+    return format == RasterFormat::Rgba16Float  ? VK_FORMAT_R16G16B16A16_SFLOAT
+           : format == RasterFormat::Rg8Unorm   ? VK_FORMAT_R8G8_UNORM
            : format == RasterFormat::R8Unorm    ? VK_FORMAT_R8_UNORM
            : format == RasterFormat::Rgba8Unorm ? VK_FORMAT_R8G8B8A8_UNORM
                                                 : VK_FORMAT_R8G8B8A8_SRGB;
 }
 } // namespace
+bool gRasterHdrProbed = false, gRasterHdr = false;
 RasterCapabilities RasterLimits() noexcept
 {
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(gPhysical, &properties);
+    if (!gRasterHdrProbed)
+    {
+        VkFormatProperties hdr{};
+        vkGetPhysicalDeviceFormatProperties(gPhysical, VK_FORMAT_R16G16B16A16_SFLOAT, &hdr);
+        constexpr auto required = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+                                  VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                  VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+        gRasterHdr = (hdr.optimalTilingFeatures & required) == required;
+        gRasterHdrProbed = true;
+    }
     const auto max = properties.limits.maxImageDimension2D;
     const usize alignment = properties.limits.minUniformBufferOffsetAlignment;
     return {usize{64} * 1024 * 1024,
@@ -280,7 +292,9 @@ RasterCapabilities RasterLimits() noexcept
             alignment > 256 ? alignment : 256,
             properties.limits.maxUniformBufferRange < 16384 ? properties.limits.maxUniformBufferRange : 16384,
             static_cast<uint32>(internal::RASTER_CAPACITY),
-            static_cast<uint32>(internal::RASTER_DRAWS)};
+            static_cast<uint32>(internal::RASTER_DRAWS),
+            properties.limits.maxVertexInputAttributes < 16 ? properties.limits.maxVertexInputAttributes : 16,
+            gRasterHdr};
 }
 ComputeCapabilities ComputeLimits() noexcept
 {
@@ -857,7 +871,7 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
     stages[0].pName = gRasterShaders[info.Vertex].Entry;
     stages[1].pName = gRasterShaders[info.Fragment].Entry;
     VkVertexInputBindingDescription bindings[2]{};
-    VkVertexInputAttributeDescription attributes[8]{};
+    VkVertexInputAttributeDescription attributes[16]{};
     for (usize i = 0; i < info.StreamCount; ++i)
     {
         bindings[i] = {static_cast<uint32>(i),
@@ -933,8 +947,9 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
     create.renderPass = gPass;
     if (info.Target != RasterTarget::Surface)
     {
-        result = RasterVkRenderPass(info.Target == RasterTarget::Rgba8Unorm ? VK_FORMAT_R8G8B8A8_UNORM
-                                                                            : VK_FORMAT_R8G8B8A8_SRGB,
+        result = RasterVkRenderPass(info.Target == RasterTarget::Rgba16Float  ? VK_FORMAT_R16G16B16A16_SFLOAT
+                                    : info.Target == RasterTarget::Rgba8Unorm ? VK_FORMAT_R8G8B8A8_UNORM
+                                                                              : VK_FORMAT_R8G8B8A8_SRGB,
                                     false,
                                     {},
                                     create.renderPass);
@@ -1277,6 +1292,7 @@ uint64 RasterCompleted() noexcept
 }
 void RasterReset() noexcept
 {
+    gRasterHdrProbed = gRasterHdr = false;
     WaitIdle();
     for (auto& ordinal : gRasterOrdinals)
     {

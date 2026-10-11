@@ -3,6 +3,7 @@
 namespace ludus::graphics::rhi::reference
 {
 inline bool ProfileAvailable = true;
+inline bool HdrAvailable = true;
 inline bool ComputeAvailable = true;
 inline foundation::usize Dispatches = 0;
 inline RasterStatus ComputeResult = RasterStatus::Ready;

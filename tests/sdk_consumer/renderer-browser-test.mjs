@@ -23,6 +23,7 @@ try {
   const pin = JSON.parse(await readFile(new URL('../../config/shader_toolchain.json',import.meta.url))).wgsl_validator;
   assert.equal(browser.version(),pin.chromium_version);
   report.version = browser.version();
+  if (process.env.LUDUS_RENDERER_L4_ONLY !== '1') {
   for (const phase of [0,1,2]) {
   let oracle, resizedOracle;
   for (const scenario of ['webgpu','webgl2','auto','fallback']) {
@@ -175,6 +176,51 @@ try {
       else materialOracles[frame]=variants[0][frame];
     }
   }
+  }
+  const lightingOracles = new Map();
+  for (const scenario of ['webgpu','webgl2','auto','fallback']) {
+    for (const ldr of [false,true]) {
+      const variants=[];
+      for (const reference of [false,true]) {
+        const context=await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
+        if(scenario==='fallback') await context.addInitScript(()=>Object.defineProperty(navigator,'gpu',{get:()=>undefined}));
+        const page=await context.newPage(), errors=[], images=[];
+        page.on('pageerror',error=>errors.push(String(error)));
+        page.on('console',message=>{if(message.type()==='error') errors.push(message.text());});
+        await page.goto(`http://127.0.0.1:${server.address().port}/renderer-lighting.html?backend=${scenario==='fallback'?'auto':scenario}${reference?'&reference=1':''}${ldr?'&ldr=1':''}`);
+        let hdr;
+        for(const frames of [5,80]) {
+          try { await page.waitForFunction(n=>document.querySelector('#status').dataset.frames===String(n)||document.querySelector('#status').dataset.state==='failed',frames,{timeout:30000}); }
+          catch(error) { throw new Error(JSON.stringify({scenario,reference,ldr,frames,errors,state:await page.locator('#status').evaluate(n=>({...n.dataset}))}),{cause:error}); }
+          const state=await page.locator('#status').evaluate(n=>({...n.dataset}));
+          assert.equal(state.state,'rendering',JSON.stringify({state,errors}));
+          assert.equal(state.backend,scenario==='fallback'?'webgl2':scenario==='auto'?'webgpu':scenario);
+          assert.deepEqual(errors,[]); hdr=state.hdr==='1'; if(ldr) assert.equal(hdr,false);
+          const png=await page.locator('#canvas').screenshot(), image=PNG.sync.read(png);
+          await writeFile(resolve(output,`l4-${scenario}-${hdr?'hdr':'ldr'}-${reference?'reference':'optimized'}-${frames}.png`),png);
+          const color=(x,y,expected)=>{
+            const pixel=[...image.data.subarray((y*96+x)*4,(y*96+x)*4+4)];
+            for(let c=0;c<3;++c) assert.ok(Math.abs(pixel[c]-expected[c])<=2,`L4 ${frames} (${x},${y}) channel ${c}: ${pixel[c]} vs ${expected[c]}`);
+            assert.equal(pixel[3],255);
+          };
+          for(const x of [16,48,80]) color(x,18,[102,102,102]);
+          color(16,46,[hdr?231:188,0,0]); color(48,46,[188,188,188]); color(80,46,[hdr?213:188,0,0]);
+          color(48,32,frames===5?[0,0,0]:[102,102,102]); color(70,32,[102,102,102]);
+          images.push(image.data); await page.evaluate(()=>{globalThis.__qaPause=false;});
+        }
+        await page.waitForFunction(()=>['passed','failed'].includes(document.querySelector('#status').dataset.state),{},{timeout:30000});
+        const final=await page.locator('#status').evaluate(n=>({...n.dataset}));
+        assert.equal(final.state,'passed',JSON.stringify({final,errors})); assert.equal(final.frames,'120'); assert.deepEqual(errors,[]);
+        report.cases.push({phase:5,scenario,reference,ldr,...final}); variants.push(images); await context.close();
+        for(let frame=0;frame<2;++frame) {
+          const key=`${hdr}-${frame}`, prior=lightingOracles.get(key);
+          if(prior) for(let i=0;i<images[frame].length;++i) assert.ok(Math.abs(images[frame][i]-prior[i])<=1,'L4 cross-backend quantization');
+          else lightingOracles.set(key,images[frame]);
+        }
+      }
+      for(let frame=0;frame<2;++frame) assert.deepEqual(variants[0][frame],variants[1][frame],'L4 direct reference pixels');
+    }
+  }
   await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2));
-  console.log('L0/L1/L2/L3 renderer SDK: WebGPU/WebGL2/Auto/fallback match direct and cross-backend pixels over 120 frames, including split views, zero extent and resize');
+  console.log('L0/L1/L2/L3/L4 renderer SDK: WebGPU/WebGL2/Auto/fallback match direct and cross-backend pixels over 120 frames, including split views, zero extent and resize');
 } finally { await browser?.close(); server.close(); }

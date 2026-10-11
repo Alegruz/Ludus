@@ -6,7 +6,7 @@
 
 namespace ludus::graphics::rhi::internal
 {
-inline constexpr foundation::usize RASTER_CAPACITY = 32;
+inline constexpr foundation::usize RASTER_CAPACITY = 64;
 inline constexpr foundation::usize RASTER_BINDINGS = 8;
 inline constexpr foundation::usize RASTER_DRAWS = 1024;
 inline constexpr foundation::usize LIFETIME_BATCHES = 4;
@@ -51,7 +51,7 @@ struct RasterShaderInfo final
 {
     ShaderStage Stage = ShaderStage::Vertex;
     RasterLayout Layout;
-    RasterShaderInput Inputs[8]{};
+    RasterShaderInput Inputs[16]{};
     foundation::usize InputCount = 0;
     foundation::uint32 WorkgroupSize[3]{1, 1, 1};
     char UniformBlocks[RASTER_BINDINGS][64]{};
@@ -75,7 +75,7 @@ struct RasterPipelineInfo final
     foundation::usize Fragment = 0;
     foundation::usize Layout = 0;
     RasterVertexStream Streams[2]{};
-    RasterVertexAttribute Attributes[8]{};
+    RasterVertexAttribute Attributes[16]{};
     foundation::usize StreamCount = 0;
     foundation::usize AttributeCount = 0;
     bool Depth = false;

@@ -6,9 +6,16 @@ import sys
 import unittest
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'cmake/shaders'))
-from compile_raster import raster_interface, wgsl_contract, glsl_interface, glsl_varyings
+from compile_raster import raster_interface, wgsl_contract, glsl_interface, glsl_varyings, verify_varyings
 
 class RasterReflectionTests(unittest.TestCase):
+    def test_fragment_varyings_may_be_a_typed_subset(self):
+        verify_varyings([(0,'vec2'),(1,'vec3')],[(0,'vec2')])
+        verify_varyings([(0,'vec2')],[])
+        for fragment in [[(0,'vec3')],[(2,'vec2')],[(0,'vec2'),(0,'vec2')]]:
+            with self.assertRaises(RuntimeError):
+                verify_varyings([(0,'vec2'),(1,'vec3')],fragment)
+
     def fixture(self):
         scalar={'kind':'scalar','scalarType':'float32'}
         return {'parameters':[{'name':'settings','binding':{'kind':'descriptorTableSlot','index':0},

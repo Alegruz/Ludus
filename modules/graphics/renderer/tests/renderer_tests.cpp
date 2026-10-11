@@ -197,7 +197,7 @@ TEST_CASE("Snapshot and view capacities recover after release, including clear-o
         REQUIRE(session.Renderer.CreateSnapshot(nullptr, 0, snapshot) == rhi::RasterStatus::Ready);
     }
     CHECK(session.Renderer.CreateSnapshot(nullptr, 0, extra) == rhi::RasterStatus::CapacityExceeded);
-    rr::PreparedView views[4], extraView;
+    rr::PreparedView views[8], extraView;
     rr::ViewReport report;
     for (auto& view : views)
     {
@@ -758,4 +758,302 @@ TEST_CASE("L3 pending publication and failed validation keep the ready material 
     REQUIRE(session.Renderer.GetStatus(candidate) == rhi::RasterStatus::Ready);
     REQUIRE(session.Renderer.PublishMaterial(candidate, current) == rhi::RasterStatus::Ready);
     REQUIRE(session.Renderer.Release(current) == rhi::RasterStatus::Ready);
+}
+namespace
+{
+struct LitFixture final
+{
+    rhi::RasterShaderInput Inputs[16];
+    rhi::RasterBinding Bindings[6]{{0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Fragment, 1040},
+                                   {1, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
+                                   {2, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0},
+                                   {3, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
+                                   {4, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
+                                   {5, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0}};
+    rhi::RasterUniformMember Members[11];
+    rhi::RasterShaderDescription Vertex, Fragment, Shadow;
+    LitFixture()
+    {
+        for (uint32 i = 0; i < 16; ++i)
+        {
+            Inputs[i] = {i,
+                         (i == 0 || i == 7)    ? rhi::RasterVertexFormat::Float3
+                         : (i == 6 || i == 15) ? rhi::RasterVertexFormat::Float2
+                                               : rhi::RasterVertexFormat::Float4};
+        }
+        const char* names[]{"Tint",
+                            "UvTransform",
+                            "Options",
+                            "Pbr",
+                            "Emission",
+                            "EnvironmentIrradiance",
+                            "EnvironmentRadiance",
+                            "BakeScale",
+                            "BakeUv",
+                            "Lights",
+                            "ShadowData"};
+        for (usize i = 0; i < 11; ++i)
+        {
+            Members[i] = {0,
+                          names[i],
+                          i == 10 ? 656 : i * 16,
+                          i >= 9 ? rhi::RasterUniformShape::Float4Array : rhi::RasterUniformShape::Float4};
+        }
+        Vertex.Artifact.Stage = rhi::ShaderStage::Vertex;
+        Vertex.Artifact.Wgsl = "lit vertex";
+        Vertex.Artifact.WgslEntry = "vertexMain";
+        Vertex.Inputs = Inputs;
+        Fragment.Artifact.Stage = rhi::ShaderStage::Fragment;
+        Fragment.Artifact.Wgsl = "lit fragment";
+        Fragment.Artifact.WgslEntry = "fragmentMain";
+        Fragment.Bindings = Bindings;
+        Fragment.UniformMembers = Members;
+        Shadow = Fragment;
+        Shadow.Artifact.Wgsl = "masked shadow";
+        Shadow.Bindings = {Bindings, 3};
+    }
+    void Enable(Session& session)
+    {
+        session.EnableViews();
+        const rhi::RasterShaderInput input[]{{0, rhi::RasterVertexFormat::Float4}};
+        const rhi::RasterBinding bindings[]{
+            {0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Fragment, 16},
+            {1, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
+            {2, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0}};
+        const rhi::RasterUniformMember members[]{{0, "Output", 0, rhi::RasterUniformShape::Float4}};
+        auto vertex = Vertex;
+        vertex.Inputs = input;
+        auto fragment = Fragment;
+        fragment.Bindings = bindings;
+        fragment.UniformMembers = members;
+        auto shadow = Shadow;
+        shadow.Bindings = {};
+        shadow.UniformMembers = {};
+        REQUIRE(session.Renderer.InitializeLighting(vertex, fragment, shadow) == rhi::RasterStatus::Ready);
+    }
+    rr::MaterialProgram Prewarm(Session& session)
+    {
+        rr::MaterialProgram program;
+        auto status = session.Renderer.PrewarmLitProgram(Vertex, Fragment, Shadow, program);
+        for (usize i = 0; i < 20 && status == rhi::RasterStatus::Pending; ++i)
+        {
+            status = session.Renderer.GetStatus(program);
+        }
+        REQUIRE(status == rhi::RasterStatus::Ready);
+        return program;
+    }
+};
+} // namespace
+TEST_CASE("L4 direct lists saturate stably and BRDF guards preserve reference outputs", "[renderer][l4]")
+{
+    rr::DirectLight lights[10];
+    for (usize i = 0; i < 10; ++i)
+    {
+        lights[i].SourceId = 10 - i;
+        lights[i].Direction = {0, 0, -2};
+    }
+    rr::LightSelection selected;
+    REQUIRE(rr::SelectDirectLights(lights, 10, selected) == rhi::RasterStatus::Ready);
+    CHECK(selected.Count == 8);
+    CHECK(selected.Dropped == 2);
+    for (usize i = 0; i < 8; ++i)
+    {
+        CHECK(selected.Lights[i].SourceId == i + 1);
+        CHECK(selected.Lights[i].Direction.Z == -1);
+    }
+    lights[9].Intensity = std::numeric_limits<float32>::quiet_NaN();
+    CHECK(rr::SelectDirectLights(lights, 10, selected) == rhi::RasterStatus::InvalidDescription);
+    CHECK(selected.Count == 8);
+    CHECK(selected.Dropped == 2);
+    CHECK(rr::SelectDirectLights(lights, 129, selected) == rhi::RasterStatus::CapacityExceeded);
+    math::Vector3 result{9, 8, 7};
+    REQUIRE(rr::EvaluateLitBrdf({1, 1, 1}, 0, 1, {0, 0, 1}, {0, 0, 1}, {0, 0, 1}, result) == rhi::RasterStatus::Ready);
+    CHECK(math::NearlyEqual(result.X, (0.96F + 0.01F) / math::kPiF, 1e-6F, 1e-6F));
+    CHECK(result.X == result.Y);
+    CHECK(result.Y == result.Z);
+    REQUIRE(rr::EvaluateLitBrdf({1, 1, 1}, 1, 1, {0, 0, 1}, {0, 0, 1}, {0, 0, 1}, result) == rhi::RasterStatus::Ready);
+    CHECK(math::NearlyEqual(result.X, 0.25F / math::kPiF, 1e-6F, 1e-6F));
+    REQUIRE(rr::EvaluateLitBrdf({1, 1, 1}, 0, 0.045F, {0, 0, 1}, {0, 0, 1}, {0, 0, -1}, result) ==
+            rhi::RasterStatus::Ready);
+    CHECK(result == math::Vector3{});
+    CHECK(rr::EvaluateLitBrdf({1, 1, 1}, 0, 0, {0, 0, 1}, {0, 0, 1}, {0, 0, 1}, result) ==
+          rhi::RasterStatus::InvalidDescription);
+    CHECK(result == math::Vector3{});
+    math::Matrix4 matrix;
+    CHECK(rr::BuildDirectionalShadowMatrix({{-1, -1, 0}, {1, 1, 1}}, {0, 0, -1}, 32, matrix) ==
+          rhi::RasterStatus::Ready);
+    CHECK(math::IsFinite(matrix));
+    auto old = matrix;
+    CHECK(rr::BuildDirectionalShadowMatrix({{-1, -1, 0}, {1, 1, 1}}, {}, 32, matrix) ==
+          rhi::RasterStatus::InvalidDescription);
+    CHECK(matrix == old);
+}
+TEST_CASE("L4 lit versions retain atlases and invalidate changed casters conservatively", "[renderer][l4]")
+{
+    Session session;
+    LitFixture fixture;
+    fixture.Enable(session);
+    auto program = fixture.Prewarm(session);
+    const math::Vector3 positions[]{{-.2F, -.2F, .5F}, {.2F, -.2F, .5F}, {0, .2F, .5F}};
+    const math::Vector3 normals[]{{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
+    const uint32 indices[]{0, 1, 2};
+    rr::Mesh mesh;
+    rr::MeshDescription geometry{positions, 3, indices, 3};
+    geometry.Normals = normals;
+    REQUIRE(session.Renderer.CreateMesh(geometry, mesh) == rhi::RasterStatus::Ready);
+    rr::DirectLight light;
+    light.SourceId = 71;
+    rr::LitMaterialDescription description;
+    description.Lights = &light;
+    description.LightCount = 1;
+    rr::MaterialVersion initial;
+    rr::LightSelection selected;
+    REQUIRE(session.Renderer.CreateLitMaterial(program, description, initial, selected) == rhi::RasterStatus::Ready);
+    auto item = session.Item(1);
+    item.Geometry = mesh;
+    item.Surface = initial;
+    rr::Snapshot casters;
+    REQUIRE(session.Renderer.CreateSnapshot(&item, 1, casters) == rhi::RasterStatus::Ready);
+    rr::ShadowRegion region;
+    region.Light = light;
+    region.Interior = {1, 1, 14, 14};
+    rr::ShadowAtlasDescription atlasDescription{16, 16, &region, 1};
+    rr::ShadowAtlas atlas;
+    REQUIRE(session.Renderer.PrepareShadowAtlas(casters, atlasDescription, atlas) == rhi::RasterStatus::Ready);
+    description.Shadows = atlas;
+    rr::MaterialVersion replacement;
+    CHECK(session.Renderer.CreateLitMaterial(program, description, replacement, selected) ==
+          rhi::RasterStatus::NotReady);
+    REQUIRE(rhi::BeginFrame(session.Device, session.Surface) == rhi::DeviceStatus::Ready);
+    REQUIRE(session.Renderer.DrawShadowAtlas(atlas) == rhi::RasterStatus::Ready);
+    CHECK(session.Renderer.DrawShadowAtlas(atlas) == rhi::RasterStatus::InvalidState);
+    rhi::SubmissionToken completion;
+    REQUIRE(rhi::EndFrame(session.Device, completion) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.CreateLitMaterial(program, description, replacement, selected) ==
+            rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(atlas) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.PublishMaterial(replacement, initial) == rhi::RasterStatus::Ready);
+    item.Surface = initial;
+    rr::Snapshot same;
+    REQUIRE(session.Renderer.CreateSnapshot(&item, 1, same) == rhi::RasterStatus::Ready);
+    rr::PreparedView view;
+    rr::ViewReport report;
+    REQUIRE(session.Renderer.PrepareView(same, {}, view, report) == rhi::RasterStatus::Ready);
+    CHECK(report.ShadowFallbacks == 0);
+    REQUIRE(session.Renderer.Release(view) == rhi::RasterStatus::Ready);
+    item.Transform.Translation.X = .01F;
+    rr::Snapshot moved;
+    REQUIRE(session.Renderer.CreateSnapshot(&item, 1, moved) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.PrepareView(moved, {}, view, report) == rhi::RasterStatus::Ready);
+    CHECK(report.ShadowFallbacks == 1);
+    REQUIRE(session.Renderer.Release(initial) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(program) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(mesh) == rhi::RasterStatus::Ready);
+    CHECK(session.Renderer.GetStatus(view) == rhi::RasterStatus::Ready);
+}
+TEST_CASE("L4 rejects malformed light/layout/bake data before publication", "[renderer][l4]")
+{
+    Session session;
+    LitFixture fixture;
+    fixture.Enable(session);
+    rr::MaterialProgram invalid;
+    fixture.Members[10].Offset = 640;
+    CHECK(session.Renderer.PrewarmLitProgram(fixture.Vertex, fixture.Fragment, fixture.Shadow, invalid) ==
+          rhi::RasterStatus::InvalidDescription);
+    fixture.Members[10].Offset = 656;
+    auto program = fixture.Prewarm(session);
+    rr::LitMaterialDescription description;
+    description.Roughness = std::numeric_limits<float32>::quiet_NaN();
+    rr::MaterialVersion material;
+    rr::LightSelection report;
+    report.Dropped = 99;
+    CHECK(session.Renderer.CreateLitMaterial(program, description, material, report) ==
+          rhi::RasterStatus::InvalidDescription);
+    CHECK(report.Dropped == 99);
+    description.Roughness = .5F;
+    REQUIRE(session.Renderer.CreateLitMaterial(program, description, material, report) == rhi::RasterStatus::Ready);
+    auto item = session.Item(1);
+    item.Surface = material;
+    rr::Snapshot snapshot;
+    CHECK(session.Renderer.CreateSnapshot(&item, 1, snapshot) == rhi::RasterStatus::InvalidDescription);
+    item.Surface = {};
+    REQUIRE(session.Renderer.CreateSnapshot(&item, 1, snapshot) == rhi::RasterStatus::Ready);
+    rr::ShadowRegion regions[2];
+    for (auto& region : regions)
+    {
+        region.Light.SourceId = 1;
+        region.Interior = {1, 1, 6, 6};
+    }
+    rr::ShadowAtlas atlas;
+    CHECK(session.Renderer.PrepareShadowAtlas(snapshot, {16, 16, regions, 2}, atlas) ==
+          rhi::RasterStatus::InvalidDescription);
+    regions[0].Light.Kind = rr::LightKind::Point;
+    CHECK(session.Renderer.PrepareShadowAtlas(snapshot, {16, 16, regions, 1}, atlas) == rhi::RasterStatus::Unsupported);
+}
+
+TEST_CASE("L4 capability negotiation admits LDR without HDR pipelines", "[renderer][l4]")
+{
+    Session session;
+    rhi::reference::HdrAvailable = false;
+    LitFixture fixture;
+    fixture.Enable(session);
+    auto program = fixture.Prewarm(session);
+    rhi::RasterCapabilities caps;
+    REQUIRE(rhi::GetRasterCapabilities(session.Device, caps) == rhi::RasterStatus::Ready);
+    CHECK_FALSE(caps.HdrColor);
+    rhi::TextureHandle target;
+    CHECK(rhi::CreateTexture(session.Device, {16, 16, rhi::RasterFormat::Rgba16Float, true}, {}, target) ==
+          rhi::RasterStatus::Unsupported);
+    rr::MaterialVersion material;
+    rr::LightSelection selected;
+    REQUIRE(session.Renderer.CreateLitMaterial(program, {}, material, selected) == rhi::RasterStatus::Ready);
+    CHECK(selected.Count == 0);
+    for (const auto& pipeline : rhi::reference::Pipelines)
+    {
+        CHECK(pipeline.Target != rhi::RasterTarget::Rgba16Float);
+    }
+}
+TEST_CASE("L4 reference BRDF remains finite at grazing and reciprocal directions", "[renderer][l4]")
+{
+    const math::Vector3 view{.6F, 0, .8F}, light{0, .8F, .6F}, normal{0, 0, 1};
+    math::Vector3 forward, reverse;
+    REQUIRE(rr::EvaluateLitBrdf({.7F, .3F, .1F}, .4F, .6F, normal, view, light, forward) == rhi::RasterStatus::Ready);
+    REQUIRE(rr::EvaluateLitBrdf({.7F, .3F, .1F}, .4F, .6F, normal, light, view, reverse) == rhi::RasterStatus::Ready);
+    CHECK(math::NearlyEqual(forward.X / .6F, reverse.X / .8F, 1e-6F, 1e-6F));
+    CHECK(math::NearlyEqual(forward.Y / .6F, reverse.Y / .8F, 1e-6F, 1e-6F));
+    for (float32 roughness : {.045F, .5F, 1.0F})
+    {
+        REQUIRE(rr::EvaluateLitBrdf({1, 1, 1}, 1, roughness, normal, {1, 0, 1e-6F}, {-1, 0, 1e-6F}, forward) ==
+                rhi::RasterStatus::Ready);
+        CHECK(math::IsFinite(forward));
+        CHECK(forward.X >= 0);
+    }
+}
+
+TEST_CASE("L4 gutter admission tolerates cooked odd-dimension float rounding", "[renderer][l4]")
+{
+    Session session;
+    LitFixture fixture;
+    fixture.Enable(session);
+    auto program = fixture.Prewarm(session);
+    uint8 pixels[5 * 7 * 4];
+    for (auto& byte : pixels)
+    {
+        byte = 255;
+    }
+    rhi::TextureHandle texture;
+    REQUIRE(rhi::CreateTexture(session.Device, {5, 7, rhi::RasterFormat::Rgba8Unorm}, {pixels, 20}, texture) ==
+            rhi::RasterStatus::Ready);
+    rr::LitMaterialDescription description;
+    description.Bake.Texture = texture;
+    description.Bake.SourceId = 1;
+    description.Bake.SceneRevision = description.Bake.DependencyRevision = 1;
+    description.Bake.UvTransform = {2.0F / 5, 4.0F / 7, 1.5F / 5, 1.5F / 7};
+    rr::MaterialVersion material;
+    rr::LightSelection selected;
+    REQUIRE(session.Renderer.CreateLitMaterial(program, description, material, selected) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(material) == rhi::RasterStatus::Ready);
+    description.Bake.UvTransform = {1, 1, 0, 0};
+    CHECK(session.Renderer.CreateLitMaterial(program, description, material, selected) ==
+          rhi::RasterStatus::InvalidDescription);
 }
