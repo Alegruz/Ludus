@@ -61,6 +61,7 @@ struct ProtocolEvent
         RuntimeStarted,
         DebuggerStarted,
         Generation,
+        SetupDetails,
         Result,
         Error, // local framing/protocol error (not from the adapter)
     };

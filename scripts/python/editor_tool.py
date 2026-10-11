@@ -281,6 +281,12 @@ class ProtocolWriter:
         self.control({"type": "debugger_started", "pid": pid, "debugger": debugger,
                       "executable": executable})
 
+    def setup_details(self, text: str) -> None:
+        # Separate from the reserved terminal summary and lossy output credit.
+        if not text or len(text.encode("utf-8")) > 16 * 1024:
+            raise ProtocolError("setup details exceeded 16 KiB or were empty")
+        self.control({"type": "setup_details", "text": text})
+
     def result(self, outcome: str, stage: str, code: str, message: str,
                cleanup_confirmed: bool, exit_code: Optional[int], sig: Optional[int]) -> None:
         message = message.encode("utf-8")[:256].decode("utf-8", "ignore")
@@ -1152,7 +1158,9 @@ class Operation:
                     self._writer.output(self._stage, "stdout", f"Selected engine: {sdk}\n")
                 message = repair_project(self._project_path, sdk=sdk, web_sdk=web, **options)
         self._writer.output(self._stage, "stdout", message + "\n")
-        return OperationResult("success", self._stage, "Ok", message)
+        if self._operation in ("project_check", "project_setup"):
+            self._writer.setup_details(message)
+        return OperationResult("success", self._stage, "Ok", message.split("\n", 1)[0])
 
     def _execute_release(self, descriptor) -> OperationResult:
         from ludus_tools.release_setup import setup_release

@@ -219,6 +219,7 @@ private:
     PlayProcess Play_;
     SourceWatch Watch_;
     uint64 SetupCheckJob_ = 0;
+    QString PendingSetupDetails_;
     bool SetupCheckPending_ = false;
     PlaySnapshot PlayState_;
     uint64 NextPlayRequest_ = 1;

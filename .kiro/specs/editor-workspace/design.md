@@ -371,6 +371,7 @@ events echo protocol/job/type. Required event payloads:
 | targets | sorted unique executable target names, preset |
 | output | stage, stream stdout/stderr, text, end_offset (16-character lowercase hex); bounded chunks, not necessarily complete lines |
 | runtime_started | pid (diagnostic only), executable, cwd, args |
+| setup_details | nonempty text up to 16 KiB UTF-8; only project_check/project_setup, before the terminal result; selected engine/setup evidence, published in the overview only after successful completion |
 | result | outcome success/failed/cancelled, stage, code, message, cleanup_confirmed boolean, exit_code or null, signal or null |
 
 Cancellation message: `{"protocol":1,"job":"0000000000000001","type":"cancel"}`.

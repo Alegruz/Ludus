@@ -59,6 +59,22 @@ class MacosProjectSetupTests(fixtures.ProjectSetupTests):
         self.assertIn("-nostdinc++", cache["CMAKE_CXX_FLAGS"])
         self.assertIn(str(self.tools / "out/host-tools/libcxx-include"), cache["CMAKE_CXX_FLAGS"])
 
+    def test_canonical_sysroot_cache_does_not_reject_fresh_setup(self):
+        sysroot = self.tools / "out/host-tools/macos-sdk"
+        actual = self.root / "Apple SDK"
+        sysroot.rename(actual)
+        sysroot.symlink_to(actual)
+        self.repair()
+        cache = setup.read_object(self.project / "CMakeUserPresets.json")["configurePresets"][0]["cacheVariables"]
+        self.assertEqual(str(actual.resolve()), cache["CMAKE_OSX_SYSROOT"])
+        # Reproduce CMake's observed canonical cache value from the native journey.
+        cached = self.project / "out/build" / self.profile / "CMakeCache.txt"
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.write_text("".join(f"{key}:STRING={value}\n" for key, value in cache.items()))
+        before = self.snapshot()
+        setup.check_project(self.project, tooling_root=self.tools, runner=self.runner)
+        self.assertEqual(before, self.snapshot())
+
     def test_retargeted_sysroot_symlink_requires_explicit_repair(self):
         sysroot = self.tools / "out/host-tools/macos-sdk"
         original = self.root / "sdk-one"
