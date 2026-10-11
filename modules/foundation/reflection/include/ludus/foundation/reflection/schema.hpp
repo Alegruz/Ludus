@@ -45,11 +45,13 @@ enum class Status : uint8
 
 struct SchemaId final
 {
-    uint8 Bytes[16]{}; // UUID bytes in canonical textual order, never native integers.
+    uint8 Bytes[16]{}; ///< UUID bytes in canonical textual order, never native integers.
 };
 
-// Owned scalar snapshot. Only the member selected by Type is meaningful.
-// Int64/Uint64 never pass through a floating-point representation.
+/// @brief Owned scalar snapshot.
+///
+/// Only the member selected by Type is meaningful.
+/// Int64/Uint64 never pass through a floating-point representation.
 struct Value final
 {
     Kind Type = Kind::Bool;
@@ -64,7 +66,7 @@ struct Value final
 // Stable numbers and reserved retired IDs inform our independent schema contract.
 struct Field final
 {
-    uint32 Id = 0; // Nonzero, scoped to the schema; reserve retired IDs forever.
+    uint32 Id = 0; ///< Nonzero, scoped to the schema; reserve retired IDs forever.
     std::string_view Key;
     std::string_view Label;
     Value Default;
@@ -92,19 +94,22 @@ struct Diagnostic final
 {
     Status Code = Status::Ok;
     uint32 FieldId = 0;
-    usize ByteOffset = ~usize{0}; // Unknown offset is not a location in the file.
+    usize ByteOffset = ~usize{0}; ///< Unknown offset is not a location in the file.
 };
 
-// Borrowed immutable tables must outlive every call. No registry, static
-// registration, object pointers, native layout, or module ownership is hidden
-// here. Generated getters are explicitly called by the owner's composition root.
+/// @brief Borrowed immutable tables must outlive every call.
+///
+/// No registry, static registration, object pointers, native layout, or module ownership is hidden here. Generated
+/// getters are explicitly called by the owner's composition root.
 [[nodiscard]] Status ValidateSchema(const Schema& schema, Diagnostic& error) noexcept;
 [[nodiscard]] Status ValidateValue(const Field& field, const Value& value) noexcept;
 [[nodiscard]] const Field* FindField(const Schema& schema, uint32 id) noexcept;
 [[nodiscard]] Status ValidateValues(const Schema& schema, std::span<const Value> values, Diagnostic& error) noexcept;
 
-// Field-order snapshots. The destination is unchanged on every failure;
-// source and destination may alias. Bounded stack staging, no allocation.
+/// @brief Field-order snapshots.
+///
+/// The destination is unchanged on every failure; source and destination may alias. Bounded stack staging, no
+/// allocation.
 [[nodiscard]] Status PrepareValues(const Schema& schema,
                                    std::span<const Value> current,
                                    std::span<const Edit> edits,

@@ -11,10 +11,11 @@ using ludus::foundation::UniquePtr;
 
 class WindowHeadless;
 
-// Headless (null) windowing backend used when no real backend (e.g. Wayland)
-// is available at build time. It lets the platform module compile and link
-// on headless CI runners and hosts without a display server. Initialization
-// succeeds; created windows report no events so a main loop exits promptly.
+/// @brief Headless (null) windowing backend used when no real backend (e.g.
+///
+/// Wayland) is available at build time. It lets the platform module compile and link on headless CI runners and
+/// hosts without a display server. Initialization succeeds; created windows report no events so a main loop exits
+/// promptly.
 bool InitializeHeadless(const WindowManager::InitializeInfo& info) noexcept;
 UniquePtr<WindowHeadless> CreateWindow(const Window::CreateInfo& info) noexcept;
 
@@ -24,7 +25,7 @@ public:
     friend UniquePtr<WindowHeadless> CreateWindow(const Window::CreateInfo& info) noexcept;
 
 public:
-    // No display to pump; report "no more events" so callers stop cleanly.
+    /// No display to pump; report "no more events" so callers stop cleanly.
     bool HandleEvent(const Event& event) noexcept override;
 
 private:

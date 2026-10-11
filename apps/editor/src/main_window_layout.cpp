@@ -4,6 +4,7 @@
 #include "internal/main_window.h"
 #include "internal/scene_workspace.h"
 #include "internal/script_workspace.h"
+#include "internal/world_workspace.h"
 
 #include <ludus/foundation/base/types.h>
 #include <ludus/foundation/logging/category.hpp>
@@ -191,6 +192,8 @@ void MainWindow::BuildUi()
     Audio_ = new AudioWorkspace(audioScroll);
     audioScroll->setWidget(Audio_);
     WorkTabs_->addTab(audioScroll, QStringLiteral("&Audio"));
+    World_ = new WorldWorkspace(WorkTabs_);
+    WorkTabs_->addTab(World_, QStringLiteral("&World"));
     Scene_ = new SceneWorkspace(WorkTabs_);
     WorkTabs_->addTab(Scene_, QStringLiteral("&Scene"));
     Scripts_ = new ScriptWorkspace(Controller_, WorkTabs_);

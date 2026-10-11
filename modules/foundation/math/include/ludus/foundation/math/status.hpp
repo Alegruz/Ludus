@@ -20,37 +20,38 @@ namespace ludus::foundation::math
 {
 using core::uint8;
 
+/// Checked math result; failure preserves outputs. A geometric miss can still be Success.
 enum class MathStatus : uint8
 {
-    // The operation succeeded; outputs are written and meaningful.
+    /// The operation succeeded; outputs are written and meaningful.
     Success = 0,
 
-    // An input was NaN or infinite where a finite value is required.
+    /// An input was NaN or infinite where a finite value is required.
     NonFiniteInput,
 
-    // An input violated a documented domain precondition that is not purely a
-    // finiteness problem (e.g. a non-positive length threshold, reversed
-    // interval bounds, a zero-length direction, a bound of zero).
+    /// An input violated a documented domain precondition that is not purely a
+    /// finiteness problem (e.g. a negative length threshold, reversed
+    /// interval bounds or a zero sampling bound).
     InvalidArgument,
 
-    // The input is mathematically degenerate for this operation (e.g. a
-    // zero-length vector to normalize, coincident eye/target, a basis that is
-    // not a rotation, a singular linear block).
+    /// The input is mathematically degenerate for this operation (e.g. a
+    /// zero-length vector to normalize, coincident eye/target, a basis that is
+    /// not a rotation, a singular linear block).
     Degenerate,
 
-    // The operation is numerically ill-conditioned beyond the policy threshold
-    // (e.g. an inverse whose reciprocal condition estimate or residual fails).
+    /// The operation is numerically ill-conditioned beyond the policy threshold
+    /// (e.g. an inverse whose reciprocal condition estimate or residual fails).
     IllConditioned,
 
-    // A finite, well-formed input produced a result that is not representable in
-    // the output type (overflow / narrowing to non-finite).
+    /// A finite, well-formed input produced a result that is not representable in
+    /// the output type (overflow / narrowing to non-finite).
     OutOfRange,
 
-    // Two spans that must match in length did not (batch APIs).
+    /// Two spans that must match in length did not (batch APIs).
     SizeMismatch,
 };
 
-// IsSuccess — tiny readable predicate for call sites that branch on status.
+/// IsSuccess — tiny readable predicate for call sites that branch on status.
 [[nodiscard]] constexpr bool IsSuccess(MathStatus status) noexcept
 {
     return status == MathStatus::Success;

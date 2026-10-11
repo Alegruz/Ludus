@@ -25,17 +25,18 @@ namespace ludus::foundation::math
 {
 using core::float32;
 
-// Transform a batch of points by an Affine3. Spans must match in length
-// (SizeMismatch otherwise). Validates the affine and every input point before
-// writing anything; if any transformed point would be non-finite, the whole
-// batch is rejected (OutOfRange) with outputs unchanged. Empty matching spans
-// succeed. Exact in-place supported; partial overlap rejected (InvalidArgument).
+/// @brief Transform a batch of points by an Affine3.
+///
+/// Spans must match in length (SizeMismatch otherwise). Validates the affine and every input point before writing
+/// anything; if any transformed point would be non-finite, the whole batch is rejected (OutOfRange) with outputs
+/// unchanged. Empty matching spans succeed. Exact in-place supported; partial overlap rejected (InvalidArgument).
 [[nodiscard]] MathStatus
 TryTransformPoints(const Affine3& transform, std::span<const Vector3> input, std::span<Vector3> output) noexcept;
 
-// Classify a batch of spheres against a frustum with a caller margin. Spans must
-// match in length. Validates the margin and every sphere before writing; input
-// and output must be disjoint. Empty matching spans succeed.
+/// @brief Classify a batch of spheres against a frustum with a caller margin.
+///
+/// Spans must match in length. Validates the margin and every sphere before writing; input and output must be
+/// disjoint. Empty matching spans succeed.
 [[nodiscard]] MathStatus TryClassifySpheres(const Frustum& frustum,
                                             std::span<const Sphere> input,
                                             float32 margin,

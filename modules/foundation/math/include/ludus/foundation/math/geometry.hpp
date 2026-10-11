@@ -70,8 +70,9 @@ enum class HitResult : uint8
     Hit = 1,
 };
 
-// Ray/primitive hit: on Hit, EntryT/ExitT are the parametric interval (float64).
-// On Miss the fields are neutral zeros and must not be interpreted.
+/// @brief Ray/primitive hit: on Hit, EntryT/ExitT are the parametric interval (float64).
+///
+/// On Miss the fields are neutral zeros and must not be interpreted.
 struct RayHit
 {
     HitResult Result = HitResult::Miss;
@@ -79,8 +80,10 @@ struct RayHit
     float64 ExitT = 0.0;
 };
 
-// Closest-points-between-segments result: parameters S,T in [0,1], the two
-// closest points, and the squared distance. All meaningful only on Success.
+/// @brief Closest-points-between-segments result: parameters S,T in [0,1], the two closest points, and the squared
+/// distance.
+///
+/// All meaningful only on Success.
 struct SegmentClosest
 {
     float64 S = 0.0;
@@ -97,13 +100,14 @@ enum class FrustumMode : uint8
     InfiniteReverseZPerspective = 1,
 };
 
-// Six inward-facing normalized planes plus an active mask. For an infinite
-// reverse-Z perspective frustum the far plane (depthLower) is inactive. Plane
-// order: Left, Right, Bottom, Top, Near, Far (physical labels under reverse-Z).
+/// @brief Six inward-facing normalized planes plus an active mask.
+///
+/// For an infinite reverse-Z perspective frustum the far plane (depthLower) is inactive. Plane order: Left, Right,
+/// Bottom, Top, Near, Far (physical labels under reverse-Z).
 struct Frustum
 {
     Plane Planes[6] = {};
-    uint8 ActiveMask = 0x3f; // bit i set => Planes[i] is active
+    uint8 ActiveMask = 0x3f; ///< bit i set => Planes[i] is active
     FrustumMode Mode = FrustumMode::FinitePerspectiveOrOrthographic;
 };
 

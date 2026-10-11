@@ -39,6 +39,7 @@ class ConfigurationWorkspace;
 class ContentWorkspace;
 class ScriptWorkspace;
 class SceneWorkspace;
+class WorldWorkspace;
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -96,6 +97,7 @@ private:
     void RenderRecentProjects();
 
     SceneWorkspace* Scene_ = nullptr;
+    WorldWorkspace* World_ = nullptr;
     ScriptWorkspace* Scripts_ = nullptr;
     ConfigurationWorkspace* Configuration_ = nullptr;
     QWidget* ProjectSettings_ = nullptr;

@@ -29,7 +29,7 @@ using core::float32;
 // ===========================================================================
 struct Affine2
 {
-    Vector2 Columns[2] = {Vector2{1, 0}, Vector2{0, 1}}; // linear block L
+    Vector2 Columns[2] = {Vector2{1, 0}, Vector2{0, 1}}; ///< linear block L
     Vector2 Translation = {0, 0};
 
     [[nodiscard]] static constexpr Affine2 Identity() noexcept
@@ -64,7 +64,7 @@ struct Affine2
 // ===========================================================================
 struct Affine3
 {
-    Vector3 Columns[3] = {Vector3{1, 0, 0}, Vector3{0, 1, 0}, Vector3{0, 0, 1}}; // linear block L
+    Vector3 Columns[3] = {Vector3{1, 0, 0}, Vector3{0, 1, 0}, Vector3{0, 0, 1}}; ///< linear block L
     Vector3 Translation = {0, 0, 0};
 
     [[nodiscard]] static constexpr Affine3 Identity() noexcept
@@ -96,27 +96,29 @@ struct Affine3
     return IsFinite(a.Columns[0]) && IsFinite(a.Columns[1]) && IsFinite(a.Columns[2]) && IsFinite(a.Translation);
 }
 
-// Linear block of an Affine3 as a Matrix3 (helper for conversions/queries).
+/// Linear block of an Affine3 as a Matrix3 (helper for conversions/queries).
 [[nodiscard]] constexpr Matrix3 LinearBlock(const Affine3& a) noexcept
 {
     return Matrix3{{a.Columns[0], a.Columns[1], a.Columns[2]}};
 }
 
 // --- Checked affine inverse / normal transform ------------------------------
-// Inverse(A) = { inverse(A.L), -inverse(A.L) * A.t }, evaluating the LINEAR
-// block's condition separately (singular scale -> IllConditioned/Degenerate).
-// Translation computed in double and narrow-checked. In-place supported.
+/// @brief Inverse(A) = { inverse(A.L), -inverse(A.L) * A.t }, evaluating the LINEAR
+/// block's condition separately (singular scale -> IllConditioned/Degenerate).
+///
+/// Translation computed in double and narrow-checked. In-place supported.
 [[nodiscard]] MathStatus TryInverse(const Affine2& a, InversePolicy policy, Affine2& out) noexcept;
 [[nodiscard]] MathStatus TryInverse(const Affine3& a, InversePolicy policy, Affine3& out) noexcept;
 [[nodiscard]] MathStatus TryInverse(const Affine2& a, Affine2& out) noexcept;
 [[nodiscard]] MathStatus TryInverse(const Affine3& a, Affine3& out) noexcept;
 
-// NormalMatrix(A) = transpose(inverse(A.L)); singular L fails.
+/// NormalMatrix(A) = transpose(inverse(A.L)); singular L fails.
 [[nodiscard]] MathStatus TryNormalMatrix(const Affine3& a, InversePolicy policy, Matrix3& out) noexcept;
 
-// TryTransformNormal applies the normal matrix then robustly normalises. A
-// zero-length input normal fails Degenerate; a singular transform fails the
-// inverse. Do NOT use TransformVector for normals under non-uniform scale/shear.
+/// @brief TryTransformNormal applies the normal matrix then robustly normalises.
+///
+/// A zero-length input normal fails Degenerate; a singular transform fails the inverse. Do NOT use TransformVector
+/// for normals under non-uniform scale/shear.
 [[nodiscard]] MathStatus TryTransformNormal(const Affine3& a, Vector3 normal, Vector3& out) noexcept;
 
 // ===========================================================================
@@ -129,12 +131,15 @@ struct TransformTRS
     Vector3 Scale = {1, 1, 1};
 };
 
-// Trusted conversion: accepts previously-validated authoring values (unit
-// rotation assumed). L = Rotation(q) * Diagonal(scale).
+/// @brief Trusted conversion: accepts previously-validated authoring values (unit rotation assumed).
+///
+/// L = Rotation(q) * Diagonal(scale).
 [[nodiscard]] Affine3 ToAffine3(const TransformTRS& trs) noexcept;
 
-// Checked conversion for imported data: validates finite fields and a unit
-// rotation (within rotationUnitTol). Output unchanged on failure.
+/// @brief Checked conversion for imported data: validates finite fields and a unit rotation (within
+/// rotationUnitTol).
+///
+/// Output unchanged on failure.
 [[nodiscard]] MathStatus TryToAffine3(const TransformTRS& trs, float32 rotationUnitTol, Affine3& out) noexcept;
 
 // ===========================================================================
@@ -151,15 +156,16 @@ struct TransformTRS
     }};
 }
 
-// Transform a homogeneous point: produces a Vector4; it never silently divides.
+/// Transform a homogeneous point: produces a Vector4; it never silently divides.
 [[nodiscard]] constexpr Vector4 TransformHomogeneous(const Matrix4& m, Vector4 p) noexcept
 {
     return m * p;
 }
 
-// TryPerspectiveDivide: divide xyz by w. Rejects non-finite input, w == 0, or
-// abs(w) <= minAbsW (caller-supplied finite non-negative threshold), and a
-// non-representable result (OutOfRange). Negative w is permitted (visibility is
-// a separate operation). Output unchanged on failure.
+/// @brief TryPerspectiveDivide: divide xyz by w.
+///
+/// Rejects non-finite input, w == 0, or abs(w) <= minAbsW (caller-supplied finite non-negative threshold), and a
+/// non-representable result (OutOfRange). Negative w is permitted (visibility is a separate operation). Output
+/// unchanged on failure.
 [[nodiscard]] MathStatus TryPerspectiveDivide(Vector4 clip, float32 minAbsW, Vector3& out) noexcept;
 } // namespace ludus::foundation::math

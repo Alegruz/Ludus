@@ -8,8 +8,9 @@ namespace internal
 {
 struct RegistryTestAccess;
 }
-// The game owns the structural facade. Systems receive only const registry
-// access, component values and command recording. All borrows end at commit.
+/// @brief The game owns the structural facade.
+///
+/// Systems receive only const registry access, component values and command recording. All borrows end at commit.
 class EntityRegistry final
 {
 public:
@@ -18,7 +19,7 @@ public:
     EntityRegistry& operator=(const EntityRegistry&) = delete;
     EntityRegistry(EntityRegistry&& other) noexcept;
     EntityRegistry& operator=(EntityRegistry&& other) noexcept;
-    // Initialization is transactional; initialized registries cannot be reset.
+    /// Initialization is transactional; initialized registries cannot be reset.
     [[nodiscard]] Status TryInitialize(foundation::uint32 capacity) noexcept;
     [[nodiscard]] Status TryCreate(EntityId& output) noexcept;
     [[nodiscard]] Status CheckStructuralBudget(foundation::usize creates, foundation::usize releases) const noexcept;

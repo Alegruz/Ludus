@@ -11,8 +11,9 @@
 
 namespace ludus::text
 {
-// `Pending` denotes staged/asynchronous progress, never success that can be
-// drawn immediately. Backend/library detail is mapped into these bounded codes.
+/// @brief `Pending` denotes staged/asynchronous progress, never success that can be drawn immediately.
+///
+/// Backend/library detail is mapped into these bounded codes.
 enum class Status : ludus::foundation::uint8
 {
     Ok,
@@ -38,7 +39,8 @@ enum class Status : ludus::foundation::uint8
     return status == Status::Ok;
 }
 
-// Stable, bounded, human-readable name for diagnostics/logging. Never throws
-// and never allocates; returns a static string.
+/// @brief Stable, bounded, human-readable name for diagnostics/logging.
+///
+/// Never throws and never allocates; returns a static string.
 [[nodiscard]] const char* ToString(Status status) noexcept;
 } // namespace ludus::text

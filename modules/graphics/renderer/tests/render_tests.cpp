@@ -2,9 +2,14 @@
 #include "l0_scene.h"
 #include "l1_scene.h"
 #include "l2_scene.h"
+#include "l4_scene.h"
 #include "renderer_composite.h"
 #include "renderer_flat.h"
+#include "renderer_lit.h"
+#include "renderer_lit_shadow.h"
+#include "renderer_output.h"
 #include "renderer_overlay.h"
+#include "renderer_shadow.h"
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include <ludus/foundation/containers/static_array.hpp>
@@ -395,13 +400,13 @@ TEST_CASE("L2 R8 coverage orientation, painter scissors and clipped thick lines 
     REQUIRE(rhi::EndFrame(device, completion) == rhi::RasterStatus::Ready);
     uint8 image[96 * 64 * 4];
     REQUIRE(rhi::backend::ReadHeadlessPixels(image));
-    const auto color = [&](uint32 x, uint32 y, uint8 red, uint8 green, uint8 blue) {
+    const auto color = [&](uint32 x, uint32 y, const uint8(&rgb)[3]) {
         const usize offset = (static_cast<usize>(y) * 96 + x) * 4;
-        CHECK(image[offset] == red);
-        CHECK(image[offset + 1] == green);
-        CHECK(image[offset + 2] == blue);
+        CHECK(image[offset] == rgb[0]);
+        CHECK(image[offset + 1] == rgb[1]);
+        CHECK(image[offset + 2] == rgb[2]);
     };
-    color(8, 48, 255, 0, 0);
+    color(8, 48, {255, 0, 0});
     // UNorm destination-alpha blend precision differs: llvmpipe gives red 127,
     // Metal/Chromium give 128. Bound only that observed one-code-value rounding.
     const usize blend = (usize{48} * 96 + 24) * 4;
@@ -409,11 +414,11 @@ TEST_CASE("L2 R8 coverage orientation, painter scissors and clipped thick lines 
     CHECK(image[blend] <= 128);
     CHECK(image[blend + 1] == 128);
     CHECK(image[blend + 2] == 0);
-    color(40, 48, 0, 0, 0);
-    color(80, 4, 255, 255, 255);
-    color(80, 28, 0, 0, 0);
-    color(60, 16, 0, 0, 255);
-    color(32, 16, 0, 0, 0);
+    color(40, 48, {0, 0, 0});
+    color(80, 4, {255, 255, 255});
+    color(80, 28, {0, 0, 0});
+    color(60, 16, {0, 0, 255});
+    color(32, 16, {0, 0, 0});
     REQUIRE(overlays.Release(prepared) == rhi::RasterStatus::Ready);
 }
 #include "l3_color.h"
@@ -438,7 +443,9 @@ TEST_CASE("L3 native material reload, color mips, mask and prewarmed targets pre
     const auto started = rhi::CreateDevice({}, { .Width = 96, .Height = 64 }, required, device, surface, &failure);
 #if defined(LUDUS_TEST_METAL)
     if (started != rhi::DeviceStatus::Ready && failure.Error == rhi::StartupError::AdapterUnavailable)
+    {
         SKIP("No Metal adapter");
+    }
 #endif
     REQUIRE(started == rhi::DeviceStatus::Ready);
     rr::Renderer renderer;
@@ -450,7 +457,9 @@ TEST_CASE("L3 native material reload, color mips, mask and prewarmed targets pre
     const auto wait = [&](auto handle) {
         auto status = renderer.GetStatus(handle);
         for (usize i = 0; i < 100000 && status == rhi::RasterStatus::Pending; ++i)
+        {
             status = renderer.GetStatus(handle);
+        }
         REQUIRE(status == rhi::RasterStatus::Ready);
     };
     rr::MaterialProgram program;
@@ -508,8 +517,8 @@ TEST_CASE("L3 native material reload, color mips, mask and prewarmed targets pre
     REQUIRE(rhi::EndFrame(device, completion) == rhi::RasterStatus::Ready);
     uint8 oldImage[96 * 64 * 4];
     REQUIRE(rhi::backend::ReadHeadlessPixels(oldImage));
-    CHECK(oldImage[(48 * 96 + 16) * 4] == 255);
-    CHECK(oldImage[(48 * 96 + 16) * 4 + 1] == 0);
+    CHECK(oldImage[(usize{48} * 96 + 16) * 4] == 255);
+    CHECK(oldImage[(usize{48} * 96 + 16) * 4 + 1] == 0);
     REQUIRE(renderer.Release(prior) == rhi::RasterStatus::Ready);
     REQUIRE(renderer.Release(snapshot) == rhi::RasterStatus::Ready);
     // Four prewarmed opaque/depth/target states, with reference ordering equivalence.
@@ -519,7 +528,9 @@ TEST_CASE("L3 native material reload, color mips, mask and prewarmed targets pre
         ludus::qa::L3Items(mesh, materials, items);
         const bool reverse = variant >= 2, offscreen = (variant % 2) != 0;
         if (reverse)
+        {
             items[5].Transform.Translation.Z = .1F;
+        }
         REQUIRE(renderer.CreateSnapshot(items, 8, snapshot) == rhi::RasterStatus::Ready);
         rr::PreparedView view;
         rr::ViewDescription description;
@@ -544,32 +555,38 @@ TEST_CASE("L3 native material reload, color mips, mask and prewarmed targets pre
         REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Ready);
         REQUIRE(renderer.DrawView(view, pass) == rhi::RasterStatus::Ready);
         if (offscreen)
+        {
             REQUIRE(renderer.DrawPresentation(presentation) == rhi::RasterStatus::Ready);
+        }
         completion = {};
         REQUIRE(rhi::EndFrame(device, completion) == rhi::RasterStatus::Ready);
         uint8 image[96 * 64 * 4];
         REQUIRE(rhi::backend::ReadHeadlessPixels(image));
         if (variant == 0)
+        {
             std::memcpy(oracle, image, sizeof(image));
+        }
         else
+        {
             CHECK(std::memcmp(oracle, image, sizeof(image)) == 0);
-        const auto color = [&](usize x, usize y, uint8 red, uint8 green, uint8 blue) {
+        }
+        const auto color = [&](usize x, usize y, const uint8(&rgb)[3]) {
             const auto offset = (y * 96 + x) * 4;
-            CHECK(image[offset] == red);
-            CHECK(image[offset + 1] == green);
-            CHECK(image[offset + 2] == blue);
+            CHECK(image[offset] == rgb[0]);
+            CHECK(image[offset + 1] == rgb[1]);
+            CHECK(image[offset + 2] == rgb[2]);
         };
         const auto mip = (usize{8} * 96 + 16) * 4;
         CHECK(image[mip] >= 127);
         CHECK(image[mip] <= 129);
         CHECK(image[mip + 1] == image[mip]);
         CHECK(image[mip + 2] == image[mip]);
-        color(40, 8, 255, 255, 255);
-        color(56, 8, 0, 0, 0);
-        color(16, 48, 0, 255, 0);
-        color(72, 8, 0, 0, 255);
-        color(88, 8, 0, 0, 0);
-        color(80, 48, 255, 0, 255);
+        color(40, 8, {255, 255, 255});
+        color(56, 8, {0, 0, 0});
+        color(16, 48, {0, 255, 0});
+        color(72, 8, {0, 0, 255});
+        color(88, 8, {0, 0, 0});
+        color(80, 48, {255, 0, 255});
         const auto blend = (usize{48} * 96 + 48) * 4;
         CHECK(image[blend] == 0);
         CHECK(image[blend + 1] >= 127);
@@ -582,5 +599,271 @@ TEST_CASE("L3 native material reload, color mips, mask and prewarmed targets pre
             REQUIRE(renderer.Release(presentation) == rhi::RasterStatus::Ready);
             REQUIRE(rhi::Destroy(device, target) == rhi::RasterStatus::Ready);
         }
+    }
+}
+TEST_CASE("L4 GGX lighting and linear HDR/LDR output match independent interior references", "[renderer][l4][gpu]")
+{
+    rhi::Shutdown();
+    struct Guard
+    {
+        ~Guard()
+        {
+            rhi::Shutdown();
+        }
+    } guard;
+    rhi::DeviceHandle device;
+    rhi::SurfaceHandle surface;
+    rhi::StartupInfo failure;
+    rhi::DeviceDescription description;
+    description.Required.PortableRaster = true;
+    const auto started = rhi::CreateDevice({}, { .Width = 96, .Height = 64 }, description, device, surface, &failure);
+#if defined(LUDUS_TEST_METAL)
+    if (started != rhi::DeviceStatus::Ready && failure.Error == rhi::StartupError::AdapterUnavailable)
+    {
+        SKIP("No Metal adapter on this host");
+    }
+#endif
+    REQUIRE(started == rhi::DeviceStatus::Ready);
+    rhi::RasterCapabilities caps;
+    REQUIRE(rhi::GetRasterCapabilities(device, caps) == rhi::RasterStatus::Ready);
+    const math::Vector3 positions[]{{-1, -1, .5F}, {1, -1, .5F}, {1, 1, .5F}, {-1, 1, .5F}};
+    const math::Vector3 normals[]{{0, 0, 1}, {0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
+    const uint32 indices[]{0, 1, 2, 0, 2, 3};
+    uint8 images[2][96 * 64 * 4];
+    for (usize hdr = 0; hdr < (caps.HdrColor ? 2U : 1U); ++hdr)
+    {
+        for (usize scenario = 0; scenario < 7; ++scenario)
+        {
+            for (usize reference = 0; reference < 2; ++reference)
+            {
+                rr::Renderer renderer;
+                auto wait = [&](auto handle) {
+                    auto status = renderer.GetStatus(handle);
+                    for (usize i = 0; i < 100000 && status == rhi::RasterStatus::Pending; ++i)
+                    {
+                        status = renderer.GetStatus(handle);
+                    }
+                    REQUIRE(status == rhi::RasterStatus::Ready);
+                };
+                REQUIRE(renderer.Initialize(device,
+                                            ludus::shaders::renderer_flat::Vertex(),
+                                            ludus::shaders::renderer_flat::Fragment()) == rhi::RasterStatus::Ready);
+                REQUIRE(renderer.InitializeViews(ludus::shaders::renderer_composite::Vertex(),
+                                                 ludus::shaders::renderer_composite::Fragment()) ==
+                        rhi::RasterStatus::Ready);
+                REQUIRE(renderer.InitializeLighting(ludus::shaders::renderer_output::Vertex(),
+                                                    ludus::shaders::renderer_output::Fragment(),
+                                                    ludus::shaders::renderer_shadow::Fragment()) ==
+                        rhi::RasterStatus::Ready);
+                rr::MaterialProgram program;
+                const auto warming = renderer.PrewarmLitProgram(ludus::shaders::renderer_lit::Vertex(),
+                                                                ludus::shaders::renderer_lit::Fragment(),
+                                                                ludus::shaders::renderer_lit_shadow::Fragment(),
+                                                                program);
+                REQUIRE((warming == rhi::RasterStatus::Ready || warming == rhi::RasterStatus::Pending));
+                wait(program);
+                rr::Mesh mesh;
+                rr::MeshDescription geometry{positions, 4, indices, 6};
+                geometry.Normals = normals;
+                REQUIRE(renderer.CreateMesh(geometry, mesh) == rhi::RasterStatus::Ready);
+                rr::DirectLight light;
+                light.SourceId = 1;
+                if (scenario == 4 || scenario == 5)
+                {
+                    light.Kind = scenario == 4 ? rr::LightKind::Point : rr::LightKind::Spot;
+                    light.Position = {0, 0, 2.5F};
+                    light.Intensity = 4;
+                    light.Range = 100;
+                }
+                rr::LitMaterialDescription material;
+                material.Surface.Tint = {.5F, .5F, .5F, 1};
+                material.Roughness = 1;
+                material.Lights = &light;
+                material.LightCount = 1;
+                if (scenario == 6)
+                {
+                    light.Intensity = 1000000;
+                    material.Roughness = .045F;
+                }
+                if (scenario == 1)
+                {
+                    material.Emission = {4, 0, 0};
+                    material.LightCount = 0;
+                }
+                if (scenario == 2)
+                {
+                    material.Metallic = 1;
+                    material.Surface.Tint = {1, 1, 1, 1};
+                    material.EnvironmentRadiance = {1, 1, 1};
+                    material.LightCount = 0;
+                }
+                if (scenario == 3)
+                {
+                    material.Emission = {4, 0, 0};
+                    material.LightCount = 0;
+                    material.Surface.Alpha = rr::MaterialAlpha::Painter;
+                    material.Surface.Tint.W = .5F;
+                }
+                rr::MaterialVersion version;
+                rr::LightSelection lights;
+                const auto created = renderer.CreateLitMaterial(program, material, version, lights);
+                REQUIRE((created == rhi::RasterStatus::Ready || created == rhi::RasterStatus::Pending));
+                wait(version);
+                rr::SceneItem item;
+                item.Geometry = mesh;
+                item.Surface = version;
+                item.SourceId = 1;
+                if (scenario == 3)
+                {
+                    item.Pass = rr::Layer::Overlay;
+                }
+                rr::Snapshot snapshot;
+                REQUIRE(renderer.CreateSnapshot(&item, 1, snapshot) == rhi::RasterStatus::Ready);
+                rr::ViewDescription viewDescription;
+                viewDescription.Reference = reference != 0;
+                rr::PreparedView view;
+                rr::ViewReport report;
+                const auto prepared = renderer.PrepareView(snapshot, viewDescription, view, report);
+                REQUIRE((prepared == rhi::RasterStatus::Ready || prepared == rhi::RasterStatus::Pending));
+                wait(view);
+                rhi::TextureHandle target;
+                REQUIRE(rhi::CreateTexture(
+                            device,
+                            {96, 64, hdr != 0 ? rhi::RasterFormat::Rgba16Float : rhi::RasterFormat::Rgba8Unorm, true},
+                            {},
+                            target) == rhi::RasterStatus::Ready);
+                rr::ViewMapping mapping;
+                REQUIRE(rr::ResolveViewMapping({96, 64}, {0, 0, 96, 64}, 96, 64, mapping) == rhi::RasterStatus::Ready);
+                rr::Presentation output;
+                const auto composed = renderer.PrepareLightingPresentation(target, mapping, {}, output);
+                REQUIRE((composed == rhi::RasterStatus::Ready || composed == rhi::RasterStatus::Pending));
+                wait(output);
+                REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Ready);
+                rhi::RasterPassDescription pass;
+                pass.Color = target;
+                REQUIRE(renderer.DrawView(view, pass) == rhi::RasterStatus::Ready);
+                REQUIRE(renderer.DrawLightingPresentation(output) == rhi::RasterStatus::Ready);
+                rhi::SubmissionToken completion;
+                REQUIRE(rhi::EndFrame(device, completion) == rhi::RasterStatus::Ready);
+                REQUIRE(rhi::backend::ReadHeadlessPixels(images[reference]));
+                const usize center = (usize{32} * 96 + 48) * 4;
+                // Closed-form GGX/Lambert at N=V=L, white-metal furnace, explicit Reinhard+sRGB.
+                const int32 expected = scenario == 6                      ? (hdr != 0 ? 255 : 188)
+                                       : (scenario == 0 || scenario >= 4) ? 103
+                                       : scenario == 1                    ? (hdr != 0 ? 231 : 188)
+                                       : scenario == 2                    ? 188
+                                                                          : (hdr != 0 ? 213 : 188);
+                const auto difference = static_cast<int32>(images[reference][center]) - expected;
+                CHECK(difference >= -2);
+                CHECK(difference <= 2);
+                CHECK(images[reference][center + 3] == 255);
+                if (scenario == 1 || scenario == 3)
+                {
+                    CHECK(images[reference][center + 1] == 0);
+                }
+                REQUIRE(rhi::Destroy(device, target) == rhi::RasterStatus::Ready);
+            }
+            CHECK(std::memcmp(images[0], images[1], sizeof(images[0])) == 0);
+        }
+    }
+}
+
+TEST_CASE("L4 baked direct diffuse and immutable cascade/spot atlases survive caster reload", "[renderer][l4][gpu]")
+{
+    rhi::Shutdown();
+    struct Guard
+    {
+        ~Guard()
+        {
+            rhi::Shutdown();
+        }
+    } guard;
+    rhi::DeviceHandle device;
+    rhi::SurfaceHandle surface;
+    rhi::StartupInfo failure;
+    rhi::DeviceDescription description;
+    description.Required.PortableRaster = true;
+    const auto started = rhi::CreateDevice({}, { .Width = 96, .Height = 64 }, description, device, surface, &failure);
+#if defined(LUDUS_TEST_METAL)
+    if (started != rhi::DeviceStatus::Ready && failure.Error == rhi::StartupError::AdapterUnavailable)
+    {
+        SKIP("No Metal adapter on this host");
+    }
+#endif
+    REQUIRE(started == rhi::DeviceStatus::Ready);
+    rhi::RasterCapabilities caps;
+    REQUIRE(rhi::GetRasterCapabilities(device, caps) == rhi::RasterStatus::Ready);
+    for (usize hdr = 0; hdr < (caps.HdrColor ? 2U : 1U); ++hdr)
+    {
+        uint8 images[2][2][96 * 64 * 4];
+        for (usize reference = 0; reference < 2; ++reference)
+        {
+            rr::Renderer renderer;
+            ludus::qa::L4Scene scene;
+            scene.Hdr = hdr != 0;
+            scene.Reference = reference != 0;
+            REQUIRE(renderer.Initialize(device,
+                                        ludus::shaders::renderer_flat::Vertex(),
+                                        ludus::shaders::renderer_flat::Fragment()) == rhi::RasterStatus::Ready);
+            REQUIRE(renderer.InitializeViews(ludus::shaders::renderer_composite::Vertex(),
+                                             ludus::shaders::renderer_composite::Fragment()) ==
+                    rhi::RasterStatus::Ready);
+            REQUIRE(renderer.InitializeLighting(ludus::shaders::renderer_output::Vertex(),
+                                                ludus::shaders::renderer_output::Fragment(),
+                                                ludus::shaders::renderer_shadow::Fragment()) ==
+                    rhi::RasterStatus::Ready);
+            auto status = renderer.PrewarmLitProgram(ludus::shaders::renderer_lit::Vertex(),
+                                                     ludus::shaders::renderer_lit::Fragment(),
+                                                     ludus::shaders::renderer_lit_shadow::Fragment(),
+                                                     scene.Program);
+            REQUIRE(ludus::qa::L4Scene::Accepted(status));
+            for (usize i = 0; i < 100000; ++i)
+            {
+                status = scene.Advance(renderer, device, surface);
+                if (status != rhi::RasterStatus::Pending && status != rhi::RasterStatus::NotReady)
+                {
+                    break;
+                }
+            }
+            REQUIRE(status == rhi::RasterStatus::Ready);
+            for (usize moved = 0; moved < 2; ++moved)
+            {
+                if (moved != 0)
+                {
+                    status = scene.MoveCaster(renderer);
+                    for (usize i = 0; i < 100000 && status == rhi::RasterStatus::Pending; ++i)
+                    {
+                        status = scene.MoveCaster(renderer);
+                    }
+                    REQUIRE(status == rhi::RasterStatus::Ready);
+                }
+                REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Ready);
+                REQUIRE(scene.Draw(renderer) == rhi::RasterStatus::Ready);
+                rhi::SubmissionToken completion;
+                REQUIRE(rhi::EndFrame(device, completion) == rhi::RasterStatus::Ready);
+                REQUIRE(rhi::backend::ReadHeadlessPixels(images[reference][moved]));
+                const auto color = [&](const usize(&position)[2], int32 expected) {
+                    const auto offset = (position[1] * 96 + position[0]) * 4;
+                    const auto difference = static_cast<int32>(images[reference][moved][offset]) - expected;
+                    CHECK(difference >= -2);
+                    CHECK(difference <= 2);
+                    CHECK(images[reference][moved][offset + 3] == 255);
+                };
+                color({16, 18}, 102);
+                color({48, 18}, 102);
+                color({80, 18}, 102);
+                color({16, 46}, hdr != 0 ? 231 : 188);
+                color({48, 46}, 188);
+                color({80, 46}, hdr != 0 ? 213 : 188);
+                color({48, 32}, moved != 0 ? 102 : 0);
+                color({70, 32}, 102);
+                CHECK(scene.Report.BakeFallbacks == 1);
+                CHECK(scene.Report.ShadowFallbacks == moved);
+            }
+            renderer.Reset();
+            REQUIRE(rhi::Destroy(device, scene.Target) == rhi::RasterStatus::Ready);
+            REQUIRE(rhi::Destroy(device, scene.Display) == rhi::RasterStatus::Ready);
+        }
+        CHECK(std::memcmp(images[0], images[1], sizeof(images[0])) == 0);
     }
 }

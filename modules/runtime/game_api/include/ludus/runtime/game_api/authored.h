@@ -6,11 +6,12 @@
 
 namespace ludus::runtime::game_api
 {
-// Saved tuning JSON is validated by tooling, then encoded into this bounded
-// transport: LTUN, version u32, game u64, count u32; records carry object u64,
-// property u64, kind u32, byte count u32 and explicit little-endian payload.
-// This is a transport version, independent of the module's property schema.
-// Modules validate their own IDs/kinds/bounds before publishing an instance.
+/// @brief Saved tuning JSON is validated by tooling, then encoded into this bounded
+/// transport: LTUN, version u32, game u64, count u32; records carry object u64,
+/// property u64, kind u32, byte count u32 and explicit little-endian payload.
+///
+/// This is a transport version, independent of the module's property schema.
+/// Modules validate their own IDs/kinds/bounds before publishing an instance.
 struct AuthoredRecord final
 {
     uint64 Object = 0;

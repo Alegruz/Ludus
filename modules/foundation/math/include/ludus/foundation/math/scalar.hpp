@@ -85,10 +85,10 @@ template <typename ScalarType>
     return a < b ? b : a;
 }
 
-// Clamp is TRUSTED: finite value and ordered bounds (lo <= hi) are caller
-// obligations, checked by LUDUS_ASSERT in development. With lo > hi the result
-// is unspecified-but-safe (returns lo). Checked ingress validates its bounds
-// before calling Clamp.
+/// @brief Clamp value into the inclusive interval [lo, hi].
+///
+/// Finite operands and ordered bounds are caller obligations. Reversed bounds
+/// trigger a development assertion; there is no checked-domain status result.
 template <typename ScalarType>
 [[nodiscard]] constexpr ScalarType Clamp(ScalarType value, ScalarType lo, ScalarType hi) noexcept
 {
@@ -96,14 +96,12 @@ template <typename ScalarType>
     return value < lo ? lo : (hi < value ? hi : value);
 }
 
-// IsFinite — true only for a finite value (not NaN, not +/-Inf). Implemented
-// without <cmath> in the header via the standard self-comparison / range idiom
-// so the public header stays libm-free; the .cpp uses std::isfinite where it
-// needs it internally.
+/// True for a finite value; false for NaN and either infinity.
 [[nodiscard]] constexpr bool IsFinite(float32 value) noexcept
 {
     return value == value && value < __builtin_huge_valf() && value > -__builtin_huge_valf();
 }
+/// @copydoc ludus::foundation::math::IsFinite(float32)
 [[nodiscard]] constexpr bool IsFinite(float64 value) noexcept
 {
     return value == value && value < __builtin_huge_val() && value > -__builtin_huge_val();
@@ -136,40 +134,48 @@ template <typename ScalarType>
 [[nodiscard]] float64 Ceil(float64 value) noexcept;
 
 // --- Interpolation ----------------------------------------------------------
-// Lerp is UNCLAMPED and preserves exactly a at t=0 and b at t=1 for finite
-// inputs (it is not the naive a + t*(b-a), which loses the b endpoint). t
-// outside [0,1] extrapolates and may overflow. Defined in scalar.cpp.
+/// @brief Lerp is UNCLAMPED and preserves exactly a at t=0 and b at t=1 for finite inputs (it is not the naive a +
+/// t*(b-a), which loses the b endpoint). t outside [0,1] extrapolates and may overflow.
+///
+/// Defined in scalar.cpp.
 [[nodiscard]] float32 Lerp(float32 a, float32 b, float32 t) noexcept;
+/// @copydoc ludus::foundation::math::Lerp(float32, float32, float32)
 [[nodiscard]] float64 Lerp(float64 a, float64 b, float64 t) noexcept;
 
-// SmoothStep01 clamps finite t into [0,1] then returns t*t*(3-2*t). A NaN t
-// yields NaN. Defined in scalar.cpp.
+/// @brief SmoothStep01 clamps finite t into [0,1] then returns t*t*(3-2*t).
+///
+/// A NaN t yields NaN. Defined in scalar.cpp.
 [[nodiscard]] float32 SmoothStep01(float32 t) noexcept;
+/// @copydoc ludus::foundation::math::SmoothStep01(float32)
 [[nodiscard]] float64 SmoothStep01(float64 t) noexcept;
 
-// TrySmoothStep maps x through the Hermite smoothstep over [edge0, edge1],
-// clamping to [0,1]. Rejects non-finite inputs (NonFiniteInput) and equal or
-// reversed bounds (InvalidArgument). On failure *out is unchanged.
+/// @brief TrySmoothStep maps x through the Hermite smoothstep over [edge0, edge1], clamping to [0,1].
+///
+/// Rejects non-finite inputs (NonFiniteInput) and equal or reversed bounds (InvalidArgument). On failure *out is
+/// unchanged.
 [[nodiscard]] MathStatus TrySmoothStep(float32 edge0, float32 edge1, float32 x, float32& out) noexcept;
+/// @copydoc ludus::foundation::math::TrySmoothStep(float32, float32, float32, float32&)
 [[nodiscard]] MathStatus TrySmoothStep(float64 edge0, float64 edge1, float64 x, float64& out) noexcept;
 
-// NearlyEqual: abs(a-b) <= max(absTol, relTol*max(abs(a),abs(b))). Negative or
-// non-finite tolerances or operands return false; infinities are never nearly
-// equal (even two identical infinities return false, since the comparison is
-// about finite proximity). float32 uses a float64 intermediate. There is no
-// default tolerance — callers must pass tolerances meaningful for their units.
+/// @brief NearlyEqual: abs(a-b) <= max(absTol, relTol*max(abs(a),abs(b))).
+///
+/// Negative or non-finite tolerances or operands return false; infinities are never nearly equal (even two
+/// identical infinities return false, since the comparison is about finite proximity). float32 uses a float64
+/// intermediate. There is no default tolerance — callers must pass tolerances meaningful for their units.
 [[nodiscard]] bool NearlyEqual(float32 a, float32 b, float32 absTol, float32 relTol) noexcept;
+/// @copydoc ludus::foundation::math::NearlyEqual(float32, float32, float32, float32)
 [[nodiscard]] bool NearlyEqual(float64 a, float64 b, float64 absTol, float64 relTol) noexcept;
 
-// TryApproachExponential: exact first-order exponential decay of `current`
-// toward a constant `target` over dt at the given rate. Requires finite current
-// and target, and finite non-negative rate and dt (else NonFiniteInput /
-// InvalidArgument, output unchanged). rate==0 or dt==0 preserves current. The
-// blend is computed as -expm1(-rate*dt) in float64; a very large rate*dt
-// saturates the blend to 1 without forming an invalid product. This is NOT a
-// spring, velocity model or moving-target integrator.
+/// @brief TryApproachExponential: exact first-order exponential decay of `current` toward a constant `target` over
+/// dt at the given rate.
+///
+/// Requires finite current and target, and finite non-negative rate and dt (else NonFiniteInput / InvalidArgument,
+/// output unchanged). rate==0 or dt==0 preserves current. The blend is computed as -expm1(-rate*dt) in float64; a
+/// very large rate*dt saturates the blend to 1 without forming an invalid product. This is NOT a spring, velocity
+/// model or moving-target integrator.
 [[nodiscard]] MathStatus
 TryApproachExponential(float32 current, float32 target, float32 rate, float32 dt, float32& out) noexcept;
+/// @copydoc ludus::foundation::math::TryApproachExponential(float32, float32, float32, float32, float32&)
 [[nodiscard]] MathStatus
 TryApproachExponential(float64 current, float64 target, float64 rate, float64 dt, float64& out) noexcept;
 } // namespace ludus::foundation::math

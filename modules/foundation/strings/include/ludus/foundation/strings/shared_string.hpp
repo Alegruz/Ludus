@@ -13,9 +13,11 @@ class String;
 // Thanks to The Qt Company, "Implicit Sharing", Qt 6 documentation,
 // https://doc.qt.io/qt-6/implicit-sharing.html: adapt cheap shared copies, with
 // an immutable API instead of mutation/detachment. See docs/architecture/strings.md.
-// Immutable bytes shared by copies. Separate handles may be copied/destroyed on
-// different threads after publication; concurrent access to the same handle is
-// the caller's responsibility. Empty has no allocation. No copy-on-write.
+/// @brief Immutable bytes shared by copies, without copy-on-write.
+///
+/// Separate handles may be copied/destroyed on different threads after publication;
+/// synchronize access to the same handle externally. Empty has no allocation.
+/// The allocation domain must outlive all shared owners.
 class SharedString final
 {
 public:
@@ -46,7 +48,7 @@ private:
     void Release() noexcept;
     friend StringStatus CreateShared(std::string_view, const AllocationDomain&, SharedString&) noexcept;
 };
-// Output unchanged on failure, even when source borrows the old output.
+/// Output unchanged on failure, even when source borrows the old output.
 [[nodiscard]] StringStatus
 CreateShared(std::string_view value, const AllocationDomain& domain, SharedString& output) noexcept;
 [[nodiscard]] StringStatus CopyToString(const SharedString& value, String& output) noexcept;

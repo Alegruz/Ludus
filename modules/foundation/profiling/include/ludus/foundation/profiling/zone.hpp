@@ -34,9 +34,10 @@ namespace ludus::foundation::profiling
 // "FNV-1a alternate algorithm" and "Parameters of the FNV-1/FNV-1a hash":
 // https://www.isthe.com/chongo/tech/comp/fnv/ . Adopt the XOR/multiply sequence
 // and published constants for a non-cryptographic hash; collisions remain possible.
-// Compile-time FNV-1a (32-bit) — identical construction to the logging category
-// hash, kept independent so the two subsystems do not couple. Used for both site
-// ids and category ids (C3).
+/// @brief Compile-time FNV-1a (32-bit) — identical construction to the logging category hash, kept independent so
+/// the two subsystems do not couple.
+///
+/// Used for both site ids and category ids (C3).
 [[nodiscard]] constexpr uint32 HashZoneName(std::string_view name) noexcept
 {
     constexpr uint32 FNV_OFFSET_BASIS = 2166136261u;
@@ -51,9 +52,10 @@ namespace ludus::foundation::profiling
     return hash;
 }
 
-// A coarse capture/display grouping. Declared `inline constexpr` at namespace
-// scope, e.g. `LUDUS_PROFILE_CATEGORY(Render, "Render");`. Id 0 (empty name)
-// means "uncategorised".
+/// @brief A coarse capture/display grouping.
+///
+/// Declared `inline constexpr` at namespace scope, e.g. `LUDUS_PROFILE_CATEGORY(Render, "Render");`. Id 0 (empty
+/// name) means "uncategorised".
 struct ProfileCategory
 {
     uint32 Id;
@@ -70,23 +72,24 @@ struct ProfileCategory
     }
 };
 
-// The "no category" sentinel.
+/// The "no category" sentinel.
 inline constexpr ProfileCategory PROFILE_CATEGORY_NONE{0u, std::string_view{}};
 
-// Per-site static metadata. One `static constexpr` instance per instrumentation
-// site (not per hit): bounded binary-size cost proportional to distinct sites
-// (§14, gate G9). Trivially a literal type so it lives in read-only data.
+/// @brief Per-site static metadata.
+///
+/// One `static constexpr` instance per instrumentation site (not per hit): bounded binary-size cost proportional to
+/// distinct sites (§14, gate G9). Trivially a literal type so it lives in read-only data.
 struct ZoneDescriptor
 {
-    uint32 SiteId;         // HashZoneName(Name)
-    uint32 CategoryId;     // ProfileCategory::Id, or 0
-    std::string_view Name; // borrowed string literal; process-lifetime
-    std::string_view File; // __FILE__ / source_location; process-lifetime
+    uint32 SiteId;         ///< HashZoneName(Name)
+    uint32 CategoryId;     ///< ProfileCategory::Id, or 0
+    std::string_view Name; ///< borrowed string literal; process-lifetime
+    std::string_view File; ///< __FILE__ / source_location; process-lifetime
     uint32 Line;
 
-    // constexpr (not consteval): a `static constexpr` site descriptor is still
-    // forced to compile-time evaluation by its storage, while LUDUS_PROFILE_
-    // FUNCTION can construct one at runtime from the non-constant __func__.
+    /// @brief constexpr (not consteval): a `static constexpr` site descriptor is still
+    /// forced to compile-time evaluation by its storage, while LUDUS_PROFILE_
+    /// FUNCTION can construct one at runtime from the non-constant __func__.
     constexpr ZoneDescriptor(std::string_view zone_name,
                              ProfileCategory category = PROFILE_CATEGORY_NONE,
                              const std::source_location& location = std::source_location::current()) noexcept
