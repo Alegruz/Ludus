@@ -16,8 +16,7 @@ struct ApplicationInfo final
 
 using WindowInfo = ludus::platform::NativeWindowInfo;
 
-// One main-thread session. Start never waits for browser requests; poll GetStartup.
-// The connected platform window/canvas must remain alive until Shutdown.
+/// Renderer backend selected for a session; availability depends on target and startup.
 enum class Backend : ludus::foundation::uint8
 {
     Vulkan,
@@ -75,17 +74,19 @@ enum class FrameStatus : ludus::foundation::uint8
     Failed,
     Skipped
 };
-// Bounded per-backend attempt diagnostics for an Auto session. Each attempt
-// records whether it ran and its final error; the engine never asserts the GPU
-// itself is unsupported. QA reads these; ordinary player text does not.
+/// @brief Bounded per-backend attempt diagnostics for an Auto session.
+///
+/// Each attempt records whether it ran and its final error; the engine never asserts the GPU itself is unsupported.
+/// QA reads these; ordinary player text does not.
 struct AttemptInfo final
 {
     bool Attempted = false;
     StartupError Error = StartupError::None;
 };
-// Effective limits of the implemented fullscreen API, not raw adapter limits.
-// Available only while Ready; zero in all other states. Sizes are bytes.
-// A dimension limit is an upper bound, not a reservation or surface guarantee.
+/// @brief Effective limits of the implemented fullscreen API, not raw adapter limits.
+///
+/// Available only while Ready; zero in all other states. Sizes are bytes.
+/// A dimension limit is an upper bound, not a reservation or surface guarantee.
 struct DeviceCapabilities final
 {
     ludus::foundation::uint32 MaxFrameDimension2D = 0;
@@ -96,9 +97,10 @@ struct DeviceCapabilities final
     ludus::foundation::uint32 MaxPipelines = 0;
     ludus::foundation::uint32 MaxDrawsPerFrame = 0;
 };
-// Copied at Start; zero imposes no additional requirement. Negotiation completes
-// before Ready and before callers can create resources. Auto checks every attempt.
-// Validates enabled limits; this slice retains WebGPU's default device policy.
+/// @brief Copied at Start; zero imposes no additional requirement.
+///
+/// Negotiation completes before Ready and before callers can create resources. Auto checks every attempt.
+/// Validates enabled limits; this slice retains WebGPU's default device policy.
 struct DeviceRequirements final
 {
     ludus::foundation::uint32 MinFrameDimension2D = 0;
@@ -116,7 +118,7 @@ enum class RequirementFailure : ludus::foundation::uint8
 };
 struct StartupInfo final
 {
-    // The backend actually selected for this session (not merely requested).
+    /// The backend actually selected for this session (not merely requested).
     Backend SelectedBackend = Backend::Vulkan;
     StartupState State = StartupState::Idle;
     StartupError Error = StartupError::None;
@@ -126,13 +128,16 @@ struct StartupInfo final
     AttemptInfo WebGL2;
     DeviceCapabilities Capabilities;
     DeviceRequirements Requirements;
-    // First unmet requirement of the final attempt; None for other failures.
+    /// First unmet requirement of the final attempt; None for other failures.
     RequirementFailure UnmetRequirement = RequirementFailure::None;
 };
-// Duplicate Start is Busy until Shutdown, including failed/lost sessions.
-// The two-argument form selects Auto on the browser and Vulkan natively.
+/// @brief Start the main-thread session using Auto backend selection.
+///
+/// Native Auto selects Vulkan on Linux and Metal on macOS. Duplicate calls are
+/// Busy until Shutdown, including failed/lost sessions. The window/canvas must
+/// outlive the session. Browser startup is asynchronous; poll GetStartup.
 [[nodiscard]] StartStatus Start(const ApplicationInfo& appInfo, const WindowInfo& windowInfo) noexcept;
-// Explicit browser backend selection. Native rejects forced browser backends.
+/// Explicit browser backend selection. Native rejects forced browser backends.
 [[nodiscard]] StartStatus
 Start(const ApplicationInfo& appInfo, const WindowInfo& windowInfo, BackendSelection selection) noexcept;
 [[nodiscard]] StartStatus Start(const ApplicationInfo& appInfo,
@@ -140,9 +145,11 @@ Start(const ApplicationInfo& appInfo, const WindowInfo& windowInfo, BackendSelec
                                 BackendSelection selection,
                                 const DeviceRequirements& requirements) noexcept;
 [[nodiscard]] StartupInfo GetStartup() noexcept;
-// Surface settings for the next frame. Zero dimensions skip acquisition.
-// Call only between frames after Ready; dimensions must fit negotiated limits.
-// Native Vulkan negotiates/clamps the requested extent against surface limits.
+/// @brief Surface settings for the next frame.
+///
+/// Zero dimensions skip acquisition.
+/// Call only between frames after Ready; dimensions must fit negotiated limits.
+/// Native Vulkan negotiates/clamps the requested extent against surface limits.
 struct FrameTarget final
 {
     ludus::foundation::uint32 Width = 0;
@@ -156,13 +163,13 @@ struct FrameTarget final
 [[nodiscard]] FrameStatus BeginFrameStatus() noexcept;
 [[nodiscard]] FrameStatus EndFrameStatus() noexcept;
 
-// Native synchronous conveniences retained for source compatibility. Browser
-// builds return false; use Start/GetStartup there. Do not mix the two lifecycles.
+/// Native synchronous compatibility startup; browser returns false. Use Start/GetStartup there.
+/// @pre Do not mix the synchronous and asynchronous lifecycle entry points.
 [[nodiscard]] bool Initialize(const ApplicationInfo& appInfo) noexcept;
 [[nodiscard]] bool ConnectWindow(const WindowInfo& windowInfo) noexcept;
 [[nodiscard]] bool InitializeRendering() noexcept;
 void ShutdownRendering() noexcept;
-// Idempotent; invalidates pending callbacks before releasing backend handles.
+/// Idempotent; invalidates pending callbacks before releasing backend handles.
 void Shutdown() noexcept;
 [[nodiscard]] bool BeginFrame() noexcept;
 [[nodiscard]] bool EndFrame() noexcept;

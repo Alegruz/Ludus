@@ -18,19 +18,19 @@
 
 namespace ludus::platform
 {
-// Three callbacks, any of which may be null. UserData is passed back verbatim.
-//
-//  OnRecord  — one normalized key transition for the attached gameplay window.
-//  OnReset   — a focus/lifecycle reset (leave/close/capability/seat loss) with a
-//              baseline. FocusEntered carries the synchronized held set; the
-//              cancellation reasons carry an empty, unfocused baseline.
-//  (OnReset covers focus-enter too: reason == ResetReason::FocusEntered.)
+/// @brief Two optional normalized keyboard callbacks with borrowed user data.
+///
+/// UserData is passed back verbatim. Detach before destroying its owner.
+/// Callbacks must immediately consume or copy their borrowed payloads.
 struct KeyboardSink final
 {
+    /// Deliver one normalized transition for the attached gameplay window; null skips delivery.
     void (*OnRecord)(void* userData, const ludus::input::KeyboardRecord& record) noexcept = nullptr;
+    /// Deliver a focus/lifecycle reset; FocusEntered carries held keys, cancellation an empty baseline.
     void (*OnReset)(void* userData,
                     ludus::input::ResetReason reason,
                     const ludus::input::FocusBaseline& baseline) noexcept = nullptr;
+    /// Caller-owned callback context, borrowed until detachment or window destruction.
     void* UserData = nullptr;
 };
 } // namespace ludus::platform

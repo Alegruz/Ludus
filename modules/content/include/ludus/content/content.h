@@ -142,9 +142,10 @@ private:
 [[nodiscard]] Status
 SaveFile(std::string_view root, std::string_view path, std::span<const uint8> data, const Digest* expected) noexcept;
 
-// A descriptor-bound regular file. Atomic replacement leaves an open revision
-// intact; in-place size/timestamp changes fail subsequent reads. Clone creates
-// independent seek state, never an unvalidated pathname reopen.
+/// @brief A descriptor-bound regular file.
+///
+/// Atomic replacement leaves an open revision intact; in-place size/timestamp changes fail subsequent reads. Clone
+/// creates independent seek state, never an unvalidated pathname reopen.
 class FileReader final
 {
 public:
@@ -162,7 +163,7 @@ private:
     struct Impl;
     Impl* mImpl = nullptr;
 };
-// Caller owns the returned catalog; loading is transactional.
+/// Resource category recorded in the authored catalog.
 enum class Kind : uint8
 {
     AudioSource,
@@ -175,6 +176,7 @@ struct Resource final
     ResourcePath Path;
     Kind Type = Kind::AudioSource;
 };
+/// Move-only owner of catalog entries; Read publishes a replacement transactionally.
 class Catalog final
 {
 public:

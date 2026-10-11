@@ -12,8 +12,10 @@
 
 namespace ludus::content
 {
-// Compatibility facade. Typed Content and Audio validation stays in its domain.
-// Borrowed nodes and strings remain valid until their document is destroyed.
+/// @brief Compatibility facade.
+///
+/// Typed Content and Audio validation stays in its domain.
+/// Borrowed nodes and strings expire on the document's next Read or destruction.
 struct JsonValue final
 {
     const void* Value = nullptr;
@@ -40,8 +42,10 @@ public:
 private:
     foundation::parsing::JsonDocument mDocument;
 };
-// Fixed-capacity canonical writer. Numeric spelling/escaping use the same pinned
-// C codec. Overflow reports failure and never returns a truncated document.
+/// @brief Fixed-capacity canonical writer.
+///
+/// Numeric spelling/escaping use the same pinned C codec. Overflow reports failure and never returns a truncated
+/// document.
 class JsonWriter final
 {
 public:

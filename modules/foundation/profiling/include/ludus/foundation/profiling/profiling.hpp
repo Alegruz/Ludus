@@ -71,11 +71,12 @@ void RegisterSite(const ZoneDescriptor& descriptor) noexcept;
 
 } // namespace detail
 
-// RAII scope. ctor emits Begin, dtor emits End (paired within the thread — C5).
-// Non-template, trivially small. The End reuses the site id so the dtor does not
-// re-read the descriptor. Guaranteed to fire on early return (there are no
-// exceptions under -fno-exceptions). Copy/move deleted so an event is never
-// emitted twice or dropped.
+/// @brief RAII scope. ctor emits Begin, dtor emits End (paired within the thread — C5).
+///
+/// Non-template, trivially small. The End reuses the site id so the dtor does not
+/// re-read the descriptor. Guaranteed to fire on early return (there are no
+/// exceptions under -fno-exceptions). Copy/move deleted so an event is never
+/// emitted twice or dropped.
 class ScopedZone
 {
 public:

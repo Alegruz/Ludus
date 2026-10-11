@@ -18,18 +18,23 @@
 
 namespace ludus::foundation::core
 {
+/// Exact unqualified Ludus unsigned integer alias; excludes bool, characters and enums.
 template <typename ValueType>
 concept UnsignedInteger =
     std::is_same_v<ValueType, uint8> || std::is_same_v<ValueType, uint16> || std::is_same_v<ValueType, uint32> ||
     std::is_same_v<ValueType, uint64> || std::is_same_v<ValueType, usize>;
 
+/// Exact unqualified Ludus signed or unsigned integer alias; excludes bool, characters and enums.
 template <typename ValueType>
 concept Integer =
     UnsignedInteger<ValueType> || std::is_same_v<ValueType, int8> || std::is_same_v<ValueType, int16> ||
     std::is_same_v<ValueType, int32> || std::is_same_v<ValueType, int64> || std::is_same_v<ValueType, isize>;
 
-// Bool, plain/Unicode characters, enums, floats, and qualified output types are
-// intentionally excluded. An alias cannot distinguish int32 from native int.
+/// @brief Convert an integer only when its value fits the destination range.
+///
+/// @return True on success; false preserves out. Output may alias the input.
+/// Bool, characters, enums, floats and qualified outputs are excluded; aliases
+/// cannot distinguish int32 from native int.
 template <Integer DestinationType, Integer SourceType>
 [[nodiscard]] constexpr bool TryIntegerCast(SourceType value, DestinationType& out) noexcept
 {
@@ -42,8 +47,7 @@ template <Integer DestinationType, Integer SourceType>
     return true;
 }
 
-// Generic overflow builtins have defined behavior even at signed limits and
-// are constexpr on the validated native Clang and Emscripten toolchains.
+/// Add without wrapping or saturation; false preserves out, including aliased operands.
 template <Integer ValueType>
 [[nodiscard]] constexpr bool TryAdd(ValueType left, ValueType right, ValueType& out) noexcept
 {
@@ -56,6 +60,7 @@ template <Integer ValueType>
     return true;
 }
 
+/// Subtract without wrapping or saturation; false preserves out, including aliased operands.
 template <Integer ValueType>
 [[nodiscard]] constexpr bool TrySubtract(ValueType left, ValueType right, ValueType& out) noexcept
 {
@@ -68,6 +73,7 @@ template <Integer ValueType>
     return true;
 }
 
+/// Multiply without wrapping or saturation; false preserves out, including aliased operands.
 template <Integer ValueType>
 [[nodiscard]] constexpr bool TryMultiply(ValueType left, ValueType right, ValueType& out) noexcept
 {

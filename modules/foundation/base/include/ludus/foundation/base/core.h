@@ -35,32 +35,36 @@
 namespace ludus::foundation::core
 {
 
-// nullptr_t: the Ludus-scoped spelling of the null pointer literal's type.
+/// nullptr_t: the Ludus-scoped spelling of the null pointer literal's type.
 using nullptr_t = decltype(nullptr);
 
-// DerivedFrom: BaseType is a proper (non-identical) base of DerivedType. Used by
-// UniquePtr's converting assignment and other polymorphic-ownership seams.
+/// @brief DerivedFrom: BaseType is a proper (non-identical) base of DerivedType.
+///
+/// Used by UniquePtr's converting assignment and other polymorphic-ownership seams.
 template <typename DerivedType, typename BaseType>
 concept DerivedFrom = std::is_base_of_v<BaseType, DerivedType> && !std::is_same_v<DerivedType, BaseType>;
 
-// Move: unconditional cast to an rvalue reference. The Ludus-named, verb-first
-// spelling of std::move; call sites read as engine vocabulary and never import
-// the std name. Free and constexpr.
+/// @brief Move: unconditional cast to an rvalue reference.
+///
+/// The Ludus-named, verb-first spelling of std::move; call sites read as engine vocabulary and never import the std
+/// name. Free and constexpr.
 template <typename ValueType>
 [[nodiscard]] constexpr std::remove_reference_t<ValueType>&& Move(ValueType&& value) noexcept
 {
     return static_cast<std::remove_reference_t<ValueType>&&>(value);
 }
 
-// Forward: perfect-forward a value while preserving its value category. The two
-// overloads mirror std::forward's contract (the rvalue overload must not be
-// asked to forward as an lvalue).
+/// @brief Forward: perfect-forward a value while preserving its value category.
+///
+/// The two overloads mirror std::forward's contract (the rvalue overload must not be asked to forward as an
+/// lvalue).
 template <typename ValueType>
 [[nodiscard]] constexpr ValueType&& Forward(std::remove_reference_t<ValueType>& value) noexcept
 {
     return static_cast<ValueType&&>(value);
 }
 
+/// Preserve an rvalue's category when forwarding; ValueType must not be an lvalue reference.
 template <typename ValueType>
 [[nodiscard]] constexpr ValueType&& Forward(std::remove_reference_t<ValueType>&& value) noexcept
 {

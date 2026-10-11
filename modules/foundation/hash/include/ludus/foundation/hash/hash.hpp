@@ -37,12 +37,15 @@ struct SipHashKey final
     return result;
 }
 
-// Non-cryptographic XXH3, pinned 0.8.3; no public vendor headers or hash cache.
+/// Non-cryptographic XXH3, pinned 0.8.3; no public vendor headers or hash cache.
 [[nodiscard]] uint64 TableHash64(std::span<const uint8> bytes) noexcept;
-// XXH3-128 seed zero/default secret. Persistent format v1: Low then High,
-// each little endian, over caller-defined canonical bytes. Not an identity.
+/// @brief XXH3-128 seed zero/default secret.
+///
+/// Persistent format v1: Low then High, each little endian, over caller-defined canonical bytes. Not an identity.
 [[nodiscard]] Fingerprint128 StableFingerprint128(std::span<const uint8> bytes) noexcept;
-// SipHash-2-4. Caller supplies a platform-generated secret key for hostile input;
-// this module performs no entropy acquisition and provides no fixed fallback.
+/// @brief SipHash-2-4.
+///
+/// Caller supplies a platform-generated secret key for hostile input; this module performs no entropy acquisition
+/// and provides no fixed fallback.
 [[nodiscard]] uint64 KeyedTableHash64(std::span<const uint8> bytes, SipHashKey key) noexcept;
 } // namespace ludus::foundation

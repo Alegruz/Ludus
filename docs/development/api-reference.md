@@ -43,6 +43,35 @@ source attribution and link lengthy explanations to their architecture owner.
 For a concrete example, read
 [`AllocationDomain`](https://github.com/Alegruz/Ludus/blob/main/modules/foundation/memory/include/ludus/foundation/memory/allocation_domain.hpp).
 
+## API comments and implementation comments
+
+Clean code and API documentation serve different readers. Keep implementation
+comments for non-obvious reasoning, invariants and source attribution. Put a
+Doxygen contract beside the public declaration so callers can understand the
+API without reading its implementation. Avoid narrating obvious statements or
+adding descriptions that merely repeat a symbol's name.
+
+Ordinary `//` comments are not extracted. Use `///` before a declaration or
+`///<` after a field or enum value. A file introduction does not document its
+types, and a comment before several declarations documents only the first.
+Give each overload its own contract; use `@copydoc` with an explicit qualified
+signature only when the contracts are identical. Keep analysis suppressions and
+implementation notes as ordinary comments.
+
+For example, checked arithmetic needs a failure contract even though its name
+is clear:
+
+```cpp
+/// Add without wrapping or saturation; false preserves out, including aliased operands.
+template <Integer ValueType>
+[[nodiscard]] constexpr bool TryAdd(ValueType left, ValueType right, ValueType& out) noexcept;
+```
+
+Separate a concise `@brief` from longer details with a blank documentation line.
+Use code formatting for header names and template expressions so angle brackets
+are not parsed as HTML. Check the extracted reference as well as coverage:
+recognizing a comment does not prove its lifetime or failure claims are correct.
+
 ## Inputs and boundaries
 
 `scripts/build-api` reads literal `PUBLIC`/`INTERFACE FILE_SET public_headers`

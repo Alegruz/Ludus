@@ -17,7 +17,7 @@ struct AssertionSite
 {
     const char* File;
     const char* Function;
-    const char* Expression; // nullptr for unconditional fatal
+    const char* Expression; ///< nullptr for unconditional fatal
     uint32 Line;
 };
 

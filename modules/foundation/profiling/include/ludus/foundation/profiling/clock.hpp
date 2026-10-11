@@ -26,14 +26,15 @@
 namespace ludus::foundation::profiling
 {
 
-// Current monotonic timestamp in nanoseconds. No engine allocations or locks;
-// units do not promise ns resolution.
-// This is the compatibility timestamp entry point on the instrumentation hot path.
-// Timestamps do not establish a happens-before relation between threads.
+/// @brief Current monotonic timestamp in nanoseconds.
+///
+/// No engine allocations or locks; units do not promise ns resolution.
+/// This is the compatibility timestamp entry point on the instrumentation hot path.
+/// Timestamps do not establish a happens-before relation between threads.
 [[nodiscard]] uint64 NowTicks() noexcept;
 
-// Compatibility denominator: always one because exported timestamps remain
-// integer nanoseconds regardless of the underlying physical clock resolution.
+/// @brief Compatibility denominator: always one because exported timestamps remain
+/// integer nanoseconds regardless of the underlying physical clock resolution.
 [[nodiscard]] uint64 TicksPerNanosecondDenominator() noexcept;
 
 } // namespace ludus::foundation::profiling
