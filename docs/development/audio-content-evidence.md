@@ -47,6 +47,76 @@ Editor source import is capped at 32 MiB; a manually registered native music
 source can be larger. The starter editor/packager profile is buses
 `master/sfx/music`, groups `default/impacts`; runtime callers supply a profile.
 
+## Resource manager Stage 1
+
+Stage 1 adds a tested native AudioContent boundary for the proposed
+[resource coordinator](../architecture/resource-management.md#implementation-sequence-and-validation).
+It does not implement the Stage 2 coordinator, multiple pending acquisitions,
+request deduplication, or graphics resource adapters. Content catalog and
+sound/music version-1 encodings remain unchanged.
+
+The ownership audit establishes these boundaries:
+
+| Boundary | Contract |
+| --- | --- |
+| Control owner | One serialized owner calls Loader and AudioSystem; the worker never installs resources or accesses AudioSystem. AudioSystem outlives Loader. |
+| Acquisition | Begin copies root, ID, drafts, sample rate and audio session. One pending job owns its catalog, candidate PCM and source readers until completion. A second Begin returns Pending and cannot replace that job, including while cancellation drains. |
+| Completion | The worker's release store to Done is its final access to job storage. Poll observes it with acquire ordering, detaches the native thread, validates the audio session and routing, then installs or discards the candidate. Poll never joins or waits for file/decode work or native thread exit. Detach failure returns IoError before installation and retains the job for blocking Cancel. |
+| Cancellation | RequestCancel is an idempotent signal. Poll stays Pending until job completion, then returns Cancelled without issuing a lease, even if acquisition finished successfully before the signal. Existing leases are unaffected. Cancel and destruction retain their blocking join contract for an outstanding job; use those only at cold shutdown boundaries. |
+| Lease provenance | A lease contains slot, generation and a nonreused process-local loader owner token. Copying does not acquire another lease. Foreign, stale, duplicate-release and destroyed-loader tokens cannot operate on a matching slot in another loader. Owner exhaustion rejects new acquisition rather than wrapping. Leases are runtime tokens, not serialized content. Rebuild SDK consumers for the changed lease layout. |
+| Session and retirement | Completion from a stopped/replaced audio session cannot install. Session-invalid leases cannot supply new playback, but their issuing loader can still release them. Shared compatible clips retain existing reference behavior; last release asks AudioSystem to retire them, and voices retain physical lifetime through its acknowledgments. Music playback retains an independent cloned file reader and stream. |
+
+Cancellation and acquisition errors take precedence over revision-table saturation;
+only an otherwise successful candidate becomes Limit when all 64 revisions are
+occupied. Success publishes a complete revision; failure/Pending preserves the
+caller's lease output. Poll installation and candidate destruction remain cold
+bounded work, including freeing candidate PCM on a cache hit. This boundary makes
+no audio-callback suitability or wall-clock latency guarantee. The native worker
+may still be returning after detachment, but can no longer touch job, Loader or
+AudioSystem storage.
+
+A control-owner cancellation loop is:
+
+```cpp
+loader.RequestCancel();
+// On subsequent control-owner turns; no sleep or join in the service loop:
+const auto status = loader.Poll(routing, candidateLease, diagnostic);
+// Pending: retain the loader and retry later.
+// Cancelled: the acquisition has drained; a new Begin may be submitted.
+// IoError from detach failure: retain the loader and use blocking Cancel
+// at a cold shutdown boundary. Existing resident leases remain usable.
+```
+
+The dedicated `ludus_audio_content_worker_tests` target compiles the production
+loader with a private test seam; the installed library and headers expose no
+hooks. Tests stall before acquisition and after completion publication, proving
+that Poll returns while native thread exit is withheld. They exercise cancellation
+draining, preservation of active leases and outputs, successful installation,
+failed acquisition, stopped sessions, saturation, foreign/reused leases and
+loader destruction. The existing AudioContent fixtures continue to cover clip
+sharing, old playback, failed replacement and retained music source descriptors.
+
+Stage 1 local validation uses macOS 26.6 with upstream Clang 18.1.8 and
+independent worktree build outputs. Development builds are warning-clean with
+warnings as errors; all four affected Audio/Content/AudioContent test targets
+pass, including seven deterministic worker cases. Compile-policy, public-header
+self-sufficiency and foundational-include gates pass. Clang 18 format/tidy,
+strict MkDocs, pinned Doxygen 1.18.0 (no new gaps), and documentation artifact
+checks pass; 13 documented legacy API gaps are removed from the baseline. The
+public-only AudioContent SDK consumer builds and runs against an isolated SDK
+installation, including RequestCancel draining and lease-output preservation.
+
+The ASan/UBSan build succeeds, but execution stalls before main in Clang 18's
+ASan shadow-memory initialization on this host; a native stack sample confirms
+that runtime boundary. TSan builds succeed but both AudioContent executables
+terminate before main on this host; the crash report identifies sanitizer
+platform initialization through dyld introspection. Local TSan execution is
+unverified.
+These are not sanitizer passes. The existing [macOS validation limitations](building.md#macos-support)
+apply. Ubuntu CI runs ASan/UBSan, and its race-detection job now explicitly builds
+and runs both AudioContent test targets under TSan. Review readiness requires
+those supported-host checks to pass. No performance claim is made.
+
 ## Host and reproducible commands
 
 Ubuntu 24.04, pinned Clang/LLVM 18.1.3, CMake 3.29.6, Ninja, Python 3.12.3 and
