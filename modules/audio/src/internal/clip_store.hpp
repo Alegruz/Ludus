@@ -1,5 +1,11 @@
 #pragma once
 
+// Thanks to Ian Lewis, "A Low-Level Sound API", Game Programming Gems 2 (2001),
+// section 6.7, pp. 559-560, for shared wave storage with independent per-play
+// cursors. Ludus keeps prepared clips immutable and retires pins away from the
+// render path, without DirectSound inheritance or frame-driven device mixing.
+// Reviewed design influences: docs/architecture/audio-research.md.
+
 // Immutable prepared resident PCM storage, per .kiro/specs/audio/design.md
 // sections 3, 6 and 7. A clip owns finite float32 PCM at the session rate and is
 // shared immutably across voices; each voice keeps its own cursor. Clips are

@@ -308,6 +308,11 @@ MathStatus TryTransformAabb(const Affine2& a, const Aabb2& box, Aabb2& out) noex
 // ===========================================================================
 // Ray queries
 // ===========================================================================
+// Thanks to Jacco Bikker, "Fast Generic Ray Queries for Games", Game Programming
+// Gems 7 (2008), section 2.2, pp. 127-141, for bounded parametric ray intervals.
+// Ludus keeps primitive tests separate from traversal and checks zero direction
+// components instead of using unchecked reciprocals or compact pointer tricks.
+// Source scope: docs/architecture/math-research.md.
 bool IsValidInterval(const RayInterval& interval) noexcept
 {
     if (std::isnan(interval.MinT) || std::isnan(interval.MaxT))

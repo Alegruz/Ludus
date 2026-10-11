@@ -1,3 +1,8 @@
+// Thanks to Keith Weiner, "Interactive Processing Pipeline for Digital Audio",
+// Game Programming Gems 2 (2001), section 6.4, pp. 529-538, for explicit input
+// consumption/output production and consumer-requested frame counts. Ludus uses
+// preallocated scratch and bounded chunks, rather than the chapter's general
+// retry/backfill pipeline. Reviewed scope: docs/architecture/audio-research.md.
 #include "internal/voice_kernel.hpp"
 
 #include <cmath>
