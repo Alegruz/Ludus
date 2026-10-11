@@ -4,36 +4,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
-#include <new>
 
-namespace
-{
-// This test executable is owner-serialized. Fail exactly one engine nothrow
-// array allocation; ordinary Catch2 allocations and all unarmed calls remain real.
-ludus::foundation::int32 FailArrayAfter = -1;
-} // namespace
-void* operator new[](ludus::foundation::usize bytes, const std::nothrow_t&) noexcept
-{
-    if (FailArrayAfter == 0)
-    {
-        FailArrayAfter = -1;
-        return nullptr;
-    }
-    if (FailArrayAfter > 0)
-    {
-        --FailArrayAfter;
-    }
-    // Use the real array allocator so ASan observes the matching new[]/delete[].
-    // Exceptions are permitted only in this test translation unit.
-    try
-    {
-        return ::operator new[](bytes);
-    }
-    catch (const std::bad_alloc&)
-    {
-        return nullptr;
-    }
-}
+#include "internal/mesh_test_hooks.hpp"
+
 TEST_CASE("Partial mesh allocation failure keeps reservation until cleanup and permits retry", "[resources][mesh]")
 {
     using namespace ludus::foundation;
@@ -60,7 +33,7 @@ TEST_CASE("Partial mesh allocation failure keeps reservation until cleanup and p
         r::Manager& Manager;
         ~Cleanup()
         {
-            FailArrayAfter = -1;
+            r::internal::FailMeshArrayAllocationAfter(-1);
             while (Manager.Shutdown() != r::Status::Ok)
             {
                 Manager.Service(24);
@@ -74,9 +47,9 @@ TEST_CASE("Partial mesh allocation failure keeps reservation until cleanup and p
     REQUIRE(manager.Resolve(source.Resource.Id, c::Kind::Mesh, asset) == r::Status::Ok);
     r::RequestHandle failed;
     REQUIRE(manager.BeginAcquire(scope, asset, failed) == r::Status::Ok);
-    FailArrayAfter = GENERATE(0, 1, 2, 3);
+    r::internal::FailMeshArrayAllocationAfter(GENERATE(0, 1, 2, 3));
     manager.Service(1); // Begin fails after potentially owning earlier arrays.
-    FailArrayAfter = -1;
+    r::internal::FailMeshArrayAllocationAfter(-1);
     r::RequestInfo result;
     REQUIRE(manager.GetRequest(failed, result) == r::Status::Ok);
     CHECK(result.State == r::RequestState::Failed);

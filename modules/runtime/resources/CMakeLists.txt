@@ -9,7 +9,10 @@ install(TARGETS ludus_resources EXPORT LudusTargets ARCHIVE DESTINATION "${CMAKE
     FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
-    add_executable(ludus_resources_tests tests/manager_tests.cpp tests/mesh_tests.cpp tests/mesh_allocation_tests.cpp)
+    add_executable(ludus_resources_tests tests/manager_tests.cpp tests/mesh_tests.cpp tests/mesh_allocation_tests.cpp src/mesh.cpp)
+    # Compile the exact production mesh implementation with a private allocation
+    # injector. The production archive has no hook; no global allocator is replaced.
+    target_compile_definitions(ludus_resources_tests PRIVATE LUDUS_RESOURCE_MESH_TEST_ALLOCATIONS=1)
     target_include_directories(ludus_resources_tests PRIVATE src)
     target_link_libraries(ludus_resources_tests PRIVATE Ludus::Resources Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_resources_tests)

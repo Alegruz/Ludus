@@ -1,5 +1,9 @@
 #include <ludus/runtime/resources/mesh.h>
 
+#if defined(LUDUS_RESOURCE_MESH_TEST_ALLOCATIONS)
+#    include "internal/mesh_test_hooks.hpp"
+#endif
+
 #include <atomic>
 #include <new>
 
@@ -8,10 +12,30 @@ namespace ludus::resources
 // Thanks to James Boer, "A Generic Resource Manager", Game Programming Gems,
 // section 1.7, pp. 80-87, for separating generic lifetime from type preparation.
 // This original CPU adapter uses immutable copied versions and explicit leases;
-// renderer uploads have a separate owner. See docs/architecture/resource-management-reference-review.md.
+// Renderer uploads have a separate owner; no chapter implementation is copied.
+// Review: https://github.com/Alegruz/Ludus/blob/main/docs/architecture/resource-management-reference-review.md
 namespace
 {
 std::atomic<uint64> NextEpoch{1};
+#if defined(LUDUS_RESOURCE_MESH_TEST_ALLOCATIONS)
+int32 FailArrayAfter = -1;
+#endif
+template <typename T>
+T* AllocateArray(usize count) noexcept
+{
+#if defined(LUDUS_RESOURCE_MESH_TEST_ALLOCATIONS)
+    if (FailArrayAfter == 0)
+    {
+        FailArrayAfter = -1;
+        return nullptr;
+    }
+    if (FailArrayAfter > 0)
+    {
+        --FailArrayAfter;
+    }
+#endif
+    return new (std::nothrow) T[count];
+}
 uint64 ReserveEpoch() noexcept
 {
     auto next = NextEpoch.load(std::memory_order_relaxed);
@@ -59,6 +83,12 @@ uint64 Bytes(const MeshDefinition& mesh) noexcept
            mesh.IndexCount * sizeof(uint32);
 }
 } // namespace
+#if defined(LUDUS_RESOURCE_MESH_TEST_ALLOCATIONS)
+void internal::FailMeshArrayAllocationAfter(int32 count) noexcept
+{
+    FailArrayAfter = count;
+}
+#endif
 struct MeshDefinitionAdapter::State final
 {
     struct Job final
@@ -204,15 +234,15 @@ Status MeshDefinitionAdapter::Begin(void* context, const content::Resource& reso
         job.Used = true;
         job.Source = source;
         candidate = &job; // Any partial allocation remains owned until Retire.
-        job.Positions = new (std::nothrow) foundation::math::Vector3[source->VertexCount];
-        job.Indices = new (std::nothrow) uint32[source->IndexCount];
+        job.Positions = AllocateArray<foundation::math::Vector3>(source->VertexCount);
+        job.Indices = AllocateArray<uint32>(source->IndexCount);
         if (source->Texcoords != nullptr)
         {
-            job.Texcoords = new (std::nothrow) foundation::math::Vector2[source->VertexCount];
+            job.Texcoords = AllocateArray<foundation::math::Vector2>(source->VertexCount);
         }
         if (source->Normals != nullptr)
         {
-            job.Normals = new (std::nothrow) foundation::math::Vector3[source->VertexCount];
+            job.Normals = AllocateArray<foundation::math::Vector3>(source->VertexCount);
         }
         if (job.Positions == nullptr || job.Indices == nullptr ||
             (source->Texcoords != nullptr && job.Texcoords == nullptr) ||
