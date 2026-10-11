@@ -7,10 +7,11 @@
 namespace ludus::foundation::logging
 {
 
-// Severity levels, ordered from most to least verbose. The underlying integer
-// ordering is load-bearing: runtime and compile-time filtering both rely on
-// `level >= threshold` comparisons, so the numeric order must never change
-// without updating the filtering logic and the compiled-level macros.
+/// @brief Severity levels, ordered from most to least verbose.
+///
+/// The underlying integer ordering is load-bearing: runtime and compile-time filtering both rely on `level >=
+/// threshold` comparisons, so the numeric order must never change without updating the filtering logic and the
+/// compiled-level macros.
 enum class LogLevel : uint8
 {
     Trace = 0,
@@ -21,9 +22,10 @@ enum class LogLevel : uint8
     Fatal = 5,
 };
 
-// Fixed-width, right-padded five-character label used by the console and file
-// sinks (e.g. "INFO ", "TRACE"). Returns "?????" for out-of-range values so a
-// corrupted record can never index out of bounds.
+/// @brief Fixed-width, right-padded five-character label used by the console and file sinks (e.g. "INFO ",
+/// "TRACE").
+///
+/// Returns "?????" for out-of-range values so a corrupted record can never index out of bounds.
 [[nodiscard]] constexpr std::string_view ToPaddedString(LogLevel level) noexcept
 {
     switch (level)

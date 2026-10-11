@@ -12,10 +12,10 @@ inline constexpr usize SIMULATOR_CAPACITY = 32;
 struct LinkConfig final
 {
     uint64 DelayUs = 0;
-    uint32 JitterUs = 0; // additional uniform [0, JitterUs] delay; can reorder
+    uint32 JitterUs = 0; ///< additional uniform [0, JitterUs] delay; can reorder
     uint16 LossPerTenThousand = 0;
     uint16 DuplicatePerTenThousand = 0;
-    uint32 Seed = 1; // deterministic test seed, never a security RNG
+    uint32 Seed = 1; ///< deterministic test seed, never a security RNG
 };
 
 enum class LinkStatus : uint8
@@ -39,12 +39,13 @@ struct LinkCounters final
     uint64 RejectedFull = 0;
 };
 
-// One direction, explicitly advanced by caller time (microseconds). All valid
-// Send/Receive calls, including Full/Empty results, advance the monotonic clock.
-// Reset validates before clearing; bad configuration preserves the old link.
-// Full/overflow leaves packet storage and RNG unchanged. Send copies opaque bytes
-// (also supports malformed-message fixtures); Receive publishes owned bytes.
-// Duplication admission is atomic: both copies must fit. No sleep/OS/thread/heap.
+/// @brief One direction, explicitly advanced by caller time (microseconds).
+///
+/// All valid Send/Receive calls, including Full/Empty results, advance the monotonic clock.
+/// Reset validates before clearing; bad configuration preserves the old link.
+/// Full/overflow leaves packet storage and RNG unchanged. Send copies opaque bytes
+/// (also supports malformed-message fixtures); Receive publishes owned bytes.
+/// Duplication admission is atomic: both copies must fit. No sleep/OS/thread/heap.
 class LinkSimulator final
 {
 public:

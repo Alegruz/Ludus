@@ -33,7 +33,7 @@ enum class JobOutcome : uint8
     Blocked,
 };
 
-// Only Succeeded, Failed, and Cancelled are valid callback return values.
+/// Only Succeeded, Failed, and Cancelled are valid callback return values.
 using JobFunction = JobOutcome (*)(void* context) noexcept;
 
 struct JobHandle
@@ -51,8 +51,9 @@ struct JobGraphConfig
 
 struct JobSystemConfig
 {
-    // Explicit budget: excludes the calling thread, which may help in Wait.
-    // Zero selects the serial executor; browser builds require zero.
+    /// @brief Explicit budget: excludes the calling thread, which may help in Wait.
+    ///
+    /// Zero selects the serial executor; browser builds require zero.
     uint32 WorkerCount = 0;
 };
 
@@ -80,8 +81,10 @@ class JobSystem;
 // pp. 459-467, for bounded communication. The host owns graph/context lifetimes;
 // a mutex/atomic publication proof replaces historical volatile examples.
 // See docs/architecture/threading.md for the reviewed sources and departures.
-// Build/reset on one owner thread. All contexts and their inputs/outputs must
-// outlive Wait. Graph storage is fixed at Initialize and never grows at run time.
+/// @brief Bounded dependency graph built and reset on one owner thread.
+///
+/// Contexts and their inputs/outputs must outlive Wait. Initialize fixes storage
+/// capacity; the graph never grows at run time.
 class JobGraph final
 {
 public:
@@ -96,7 +99,7 @@ public:
     [[nodiscard]] JobStatus Add(JobFunction function, void* context, JobHandle& handle) noexcept;
     [[nodiscard]] JobStatus DependsOn(JobHandle dependent, JobHandle prerequisite) noexcept;
     [[nodiscard]] JobStatus Seal() noexcept;
-    // Wait must release a submitted graph before resetting or editing it.
+    /// Wait must release a submitted graph before resetting or editing it.
     [[nodiscard]] JobStatus Reset() noexcept;
     [[nodiscard]] JobStatus GetOutcome(JobHandle handle, JobOutcome& outcome) const noexcept;
 
@@ -105,11 +108,12 @@ private:
     detail::GraphState* mState = nullptr;
 };
 
-// Lifecycle and Submit/Wait are serialized by the application owner. Snapshot
-// and Cancel may be called concurrently, while the system remains initialized.
-// One graph may be in flight per system; unrelated systems have independent pools.
-// Callbacks must run to completion, never block on jobs/I/O, and never call a
-// system lifecycle method. Wait helps by default; pass false to only wait.
+/// @brief Lifecycle and Submit/Wait are serialized by the application owner.
+///
+/// Snapshot and Cancel may be called concurrently, while the system remains initialized.
+/// One graph may be in flight per system; unrelated systems have independent pools.
+/// Callbacks must run to completion, never block on jobs/I/O, and never call a
+/// system lifecycle method. Wait helps by default; pass false to only wait.
 class JobSystem final
 {
 public:
@@ -125,7 +129,7 @@ public:
     [[nodiscard]] JobStatus Wait(JobOutcome& outcome, bool help = true) noexcept;
     [[nodiscard]] JobStatus Cancel() noexcept;
     [[nodiscard]] JobStatus Snapshot(JobSnapshot& snapshot) const noexcept;
-    // Drains accepted work, wakes sleepers, and joins every started worker.
+    /// Drains accepted work, wakes sleepers, and joins every started worker.
     [[nodiscard]] JobStatus Shutdown() noexcept;
 
 private:

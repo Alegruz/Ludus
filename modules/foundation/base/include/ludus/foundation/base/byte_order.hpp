@@ -51,24 +51,34 @@ template <bool LittleEndian, UnsignedInteger ValueType>
 }
 } // namespace detail
 
+/// Read the first sizeof(ValueType) bytes as a little-endian unsigned integer.
+/// Unaligned input is supported; false preserves out when input is too short.
 template <UnsignedInteger ValueType>
 [[nodiscard]] constexpr bool TryReadLittleEndian(std::span<const uint8> bytes, ValueType& out) noexcept
 {
     return detail::TryReadEndian<true>(bytes, out);
 }
 
+/// Read the first sizeof(ValueType) bytes as a big-endian unsigned integer.
+/// Unaligned input is supported; false preserves out when input is too short.
 template <UnsignedInteger ValueType>
 [[nodiscard]] constexpr bool TryReadBigEndian(std::span<const uint8> bytes, ValueType& out) noexcept
 {
     return detail::TryReadEndian<false>(bytes, out);
 }
 
+/// Write a little-endian unsigned integer into the first sizeof(ValueType) bytes.
+/// Unaligned output is supported; trailing bytes stay untouched. Short buffers
+/// return false without modifying any bytes.
 template <UnsignedInteger ValueType>
 [[nodiscard]] constexpr bool TryWriteLittleEndian(ValueType value, std::span<uint8> bytes) noexcept
 {
     return detail::TryWriteEndian<true>(value, bytes);
 }
 
+/// Write a big-endian unsigned integer into the first sizeof(ValueType) bytes.
+/// Unaligned output is supported; trailing bytes stay untouched. Short buffers
+/// return false without modifying any bytes.
 template <UnsignedInteger ValueType>
 [[nodiscard]] constexpr bool TryWriteBigEndian(ValueType value, std::span<uint8> bytes) noexcept
 {

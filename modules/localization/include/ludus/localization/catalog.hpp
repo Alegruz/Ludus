@@ -38,7 +38,7 @@ struct Diagnostic final
     usize Offset{};
 };
 
-// Exact authored identity; neither dictionary indices nor hashes are persistent.
+/// Exact authored identity; neither dictionary indices nor hashes are persistent.
 struct MessageKey final
 {
     std::string_view Domain;
@@ -66,14 +66,16 @@ struct ResolvedText final
     Origin Provenance{Origin::Source};
 };
 
-// Immutable snapshot AND lifetime lease. Copies share one allocation. Separate
-// copies may be read/destroyed on different threads after synchronized publication.
-// The allocation domain must outlive every copy. Borrowed views require a live
-// lease; assignment/destruction of the last lease invalidates them.
-//
-// Each successful prepare gets a new token, even for identical schemas/locales.
-// Rebind after replacement; copies/moves retain the token. There is no global
-// current language, implicit fallback, or cross-catalog binding compatibility.
+/// @brief Immutable snapshot AND lifetime lease.
+///
+/// Copies share one allocation. Separate copies may be read/destroyed on different threads after synchronized
+/// publication.
+/// The allocation domain must outlive every copy. Borrowed views require a live
+/// lease; assignment/destruction of the last lease invalidates them.
+///
+/// Each successful prepare gets a new token, even for identical schemas/locales.
+/// Rebind after replacement; copies/moves retain the token. There is no global
+/// current language, implicit fallback, or cross-catalog binding compatibility.
 class Catalog final
 {
 public:
@@ -93,9 +95,9 @@ public:
     [[nodiscard]] std::string_view GetSourceLocale() const& noexcept;
     [[nodiscard]] std::string_view GetSourceLocale() const&& = delete;
 
-    // Cold exact-key binary search; outputs are unchanged on any failure.
+    /// Cold exact-key binary search; outputs are unchanged on any failure.
     [[nodiscard]] Status BindMessage(MessageKey key, MessageBinding& output) const noexcept;
-    // O(1), zero allocation. Literal UTF-8; braces/apostrophes are not patterns.
+    /// O(1), zero allocation. Literal UTF-8; braces/apostrophes are not patterns.
     [[nodiscard]] Status ResolveStatic(MessageBinding binding, ResolvedText& output) const& noexcept;
     [[nodiscard]] Status ResolveStatic(MessageBinding, ResolvedText&) const&& = delete;
 
@@ -110,10 +112,11 @@ private:
     PrepareCatalog(std::span<const uint8>, const foundation::AllocationDomain&, Catalog&, Diagnostic&) noexcept;
 };
 
-// Validates the portable static-UTF8 v1 format and copies the caller's bytes.
-// Transactional, including an input that borrows the previous output. No I/O.
-// Caller must not mutate input concurrently. Failure preserves output; diagnostic
-// reports a byte offset, including malformed cooked files without allocating.
+/// @brief Validates the portable static-UTF8 v1 format and copies the caller's bytes.
+///
+/// Transactional, including an input that borrows the previous output. No I/O.
+/// Caller must not mutate input concurrently. Failure preserves output; diagnostic
+/// reports a byte offset, including malformed cooked files without allocating.
 [[nodiscard]] Status PrepareCatalog(std::span<const uint8> bytes,
                                     const foundation::AllocationDomain& domain,
                                     Catalog& output,

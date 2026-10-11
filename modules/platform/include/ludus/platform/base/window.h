@@ -28,8 +28,10 @@ public:
         ludus::foundation::uint32 Width = 800;
         /// Requested content height; Cocoa interprets this in logical points (1..16384).
         ludus::foundation::uint32 Height = 600;
-        // Browser only. Selector is copied at creation; the matching canvas is
-        // borrowed and must remain in the DOM until this window is destroyed.
+        /// @brief Browser only.
+        ///
+        /// Selector is copied at creation; the matching canvas is borrowed and must remain in the DOM until
+        /// this window is destroyed.
         std::string_view CanvasSelector = "#canvas";
         ludus::foundation::uint32 FramebufferLimit = 4096;
         bool CaptureBrowserInput = true;
@@ -46,9 +48,10 @@ public:
     /// Create, pump, query and destroy Cocoa windows on the main thread; sinks must not destroy them during dispatch.
     virtual bool HandleEvent(const Event& event) noexcept = 0;
 
-    // Browser snapshots/events are copied into caller-owned storage. Native
-    // backends return false. Call HandleEvent once per animation frame to refresh
-    // CSS size/DPR/DOM attachment; callbacks also update state between frames.
+    /// @brief Browser snapshots/events are copied into caller-owned storage.
+    ///
+    /// Native backends return false. Call HandleEvent once per animation frame to refresh CSS size/DPR/DOM
+    /// attachment; callbacks also update state between frames.
     virtual bool GetBrowserState(browser::WindowState&) const noexcept
     {
         return false;
@@ -57,7 +60,7 @@ public:
     {
         return false;
     }
-    // Supply the actual device texture-dimension limit after GPU startup.
+    /// Supply the actual device texture-dimension limit after GPU startup.
     virtual bool SetBrowserFramebufferLimit(ludus::foundation::uint32) noexcept
     {
         return false;
@@ -70,12 +73,12 @@ public:
         return mNativeWindowInfo;
     }
 
-    // Attach a normalized keyboard sink to THIS window (K10). The sink and its
-    // user data are borrowed: detach (or destroy the window) before the sink's
-    // user data goes away. Backends that deliver keyboard transitions (Wayland)
-    // route native events to the sink of the attached gameplay window; backends
-    // without keyboard delivery (headless) simply retain it. Attaching replaces
-    // any previous sink. This does not synthesize events by itself.
+    /// @brief Attach a normalized keyboard sink to THIS window (K10).
+    ///
+    /// The sink and its user data are borrowed: detach (or destroy the window) before the sink's user data goes
+    /// away. Backends that deliver keyboard transitions (Wayland) route native events to the sink of the
+    /// attached gameplay window; backends without keyboard delivery (headless) simply retain it. Attaching
+    /// replaces any previous sink. This does not synthesize events by itself.
     LUDUS_INLINE void AttachKeyboardSink(const KeyboardSink& sink) noexcept
     {
         mKeyboardSink = sink;

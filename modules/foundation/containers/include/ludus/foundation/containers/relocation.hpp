@@ -29,9 +29,10 @@
 
 namespace ludus::foundation::core
 {
-// Primary template: a type is trivially relocatable if it is trivially copyable.
-// Specialize (via LUDUS_TRIVIALLY_RELOCATABLE) to opt a non-trivially-copyable
-// but bitwise-relocatable type into the memcpy growth path.
+/// @brief Primary template: a type is trivially relocatable if it is trivially copyable.
+///
+/// Specialize (via LUDUS_TRIVIALLY_RELOCATABLE) to opt a non-trivially-copyable
+/// but bitwise-relocatable type into the memcpy growth path.
 template <typename ElementType>
 struct IsTriviallyRelocatableTrait : std::bool_constant<std::is_trivially_copyable_v<ElementType>>
 {

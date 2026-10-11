@@ -83,6 +83,13 @@ ComputeGrowthCapacity(usize currentCapacity, // NOLINT(bugprone-easily-swappable
 }
 } // namespace detail
 
+/// @brief Owning, contiguous, growable sequence with explicit fallible mutation APIs.
+///
+/// Growth invalidates all element borrows; ordered insertion/removal invalidates
+/// borrows at and after the affected position. Failed Try operations preserve
+/// the container. Infallible allocating operations terminate on exhaustion or
+/// capacity overflow. A default or moved-from array owns no storage.
+/// @note One owner; synchronize access externally. See docs/architecture/containers.md.
 template <typename ElementType>
 class Array
 {
@@ -104,8 +111,10 @@ public:
     // --- Construction / destruction ----------------------------------------
     constexpr Array() noexcept = default;
 
-    // Braces supply elements: Array<int32>{3} holds one value, whereas (3)
-    // value-initializes three elements. The list's const elements are copied.
+    /// @brief Braces supply elements: `Array<int32>{3}` holds one value, whereas (3) value-initializes three
+    /// elements.
+    ///
+    /// The list's const elements are copied.
     Array(std::initializer_list<ElementType> items) noexcept(std::is_nothrow_copy_constructible_v<ElementType>)
         requires std::is_copy_constructible_v<ElementType>
     {
@@ -222,10 +231,10 @@ public:
         return detail::MaxElementCount(kElementSize);
     }
 
-    // Guarantee GetCapacity() >= newCapacity without changing GetSize(). If the
-    // current capacity already satisfies the request, does nothing (never
-    // shrinks). This is the Ludus-native spelling of "reserve": the name states
-    // the postcondition. Infallible (fatal on OOM/overflow).
+    /// @brief Guarantee GetCapacity() >= newCapacity without changing GetSize().
+    ///
+    /// If the current capacity already satisfies the request, does nothing (never shrinks). This is the Ludus-
+    /// native spelling of "reserve": the name states the postcondition. Infallible (fatal on OOM/overflow).
     void EnsureCapacity(usize newCapacity)
     {
         if (!TryEnsureCapacity(newCapacity))
@@ -234,7 +243,7 @@ public:
         }
     }
 
-    // Fallible EnsureCapacity: returns false (container unchanged) on OOM/overflow.
+    /// Fallible EnsureCapacity: returns false (container unchanged) on OOM/overflow.
     [[nodiscard]] bool TryEnsureCapacity(usize newCapacity)
     {
         if (newCapacity <= mCapacity)
@@ -274,8 +283,8 @@ public:
         return TryResizeImpl(newSize, &value);
     }
 
-    // Release capacity down to the current size (best effort; never grows, never
-    // fails observably — on OOM it keeps the larger allocation).
+    /// @brief Release capacity down to the current size (best effort; never grows, never
+    /// fails observably — on OOM it keeps the larger allocation).
     void TrimCapacity()
     {
         if (mSize == mCapacity)
@@ -375,8 +384,9 @@ public:
         AddInPlace(static_cast<ElementType&&>(value));
     }
 
-    // Construct a new element in place at the end from `args`. Returns a
-    // reference to the new element.
+    /// @brief Construct a new element in place at the end from `args`.
+    ///
+    /// Returns a reference to the new element.
     template <typename... Args>
     ElementType& AddInPlace(Args&&... args)
     {
@@ -398,7 +408,7 @@ public:
         return *slot;
     }
 
-    // Fallible add: returns false (container unchanged) on OOM/overflow.
+    /// Fallible add: returns false (container unchanged) on OOM/overflow.
     [[nodiscard]] bool TryAdd(const ElementType& value)
     {
         return TryAddInPlace(value) != nullptr;
@@ -422,7 +432,8 @@ public:
         return slot;
     }
 
-    // Append a contiguous range to the end. Single capacity check + one copy.
+    /// Append a contiguous range to the end; allocation failure is fatal.
+    /// @pre Input must not overlap this array's storage.
     void AddRange(std::span<const ElementType> items)
     {
         if (!TryAddRange(items))
@@ -465,7 +476,7 @@ public:
         internal::DestroyRange(mData + mSize, mData + mSize + 1);
     }
 
-    // Order-preserving remove at `index` (shifts the tail left). O(n).
+    /// Order-preserving remove at `index` (shifts the tail left). O(n).
     void RemoveAt(usize index) noexcept
     {
         LUDUS_ASSERT(index < mSize);
@@ -474,7 +485,7 @@ public:
         internal::DestroyRange(mData + mSize, mData + mSize + 1);
     }
 
-    // Order-preserving remove of the index range [first, last). O(n).
+    /// Order-preserving remove of the index range [first, last). O(n).
     void RemoveRange(usize first, usize last) noexcept
     {
         LUDUS_ASSERT(first <= last);
@@ -496,9 +507,11 @@ public:
         mSize -= count;
     }
 
-    // O(1) removal when order does not matter: overwrite the slot with the last
-    // element, then drop the last. The engine-preferred removal; named so the
-    // O(1) swap behaviour (and the resulting reorder) is explicit at call sites.
+    /// @brief O(1) removal when order does not matter: overwrite the slot with the last element, then drop the
+    /// last.
+    ///
+    /// The engine-preferred removal; named so the O(1) swap behaviour (and the resulting reorder) is explicit
+    /// at call sites.
     void RemoveAtSwap(usize index) noexcept
     {
         LUDUS_ASSERT(index < mSize);
@@ -521,7 +534,7 @@ public:
         return InsertAtInPlace(index, static_cast<ElementType&&>(value));
     }
 
-    // Construct a new element in place at `index`, shifting the tail right. O(n).
+    /// Construct a new element in place at `index`, shifting the tail right. O(n).
     template <typename... Args>
     ElementType& InsertAtInPlace(usize index, Args&&... args)
     {
@@ -546,8 +559,10 @@ public:
         return mData[index];
     }
 
-    // Fallible ordered insertion. Allocate before touching arguments so OOM
-    // also preserves aliased rvalues and caller-owned move-only values.
+    /// @brief Fallible ordered insertion.
+    ///
+    /// Allocate before touching arguments so OOM also preserves aliased rvalues and caller-owned move-only
+    /// values.
     [[nodiscard]] ElementType*
     TryInsertAt(usize index, const ElementType& value) noexcept(noexcept(TryInsertAtInPlace(index, value)))
     {
@@ -617,7 +632,7 @@ public:
         return std::span<const ElementType>(mData, mSize);
     }
 
-    // Build an Array by copying a contiguous view (explicit range factory).
+    /// Build an Array by copying a contiguous view (explicit range factory).
     [[nodiscard]] static Array FromRange(std::span<const ElementType> items)
     {
         Array result;
@@ -862,7 +877,7 @@ private:
     usize mCapacity = 0;
 };
 
-// Non-member Swap for ADL.
+/// Non-member Swap for ADL.
 template <typename ElementType>
 void Swap(Array<ElementType>& a, Array<ElementType>& b) noexcept
 {

@@ -17,9 +17,10 @@ enum class SequenceStatus : uint8
     Ambiguous,
 };
 
-// Sliding 64-message duplicate filter, not a transport ACK or security mechanism.
-// Serial arithmetic assumes a live sequence span < 2^31. The exactly-half-range
-// case is rejected. Start a fresh window for every session/channel/direction.
+/// @brief Sliding 64-message duplicate filter, not a transport ACK or security mechanism.
+///
+/// Serial arithmetic assumes a live sequence span < 2^31. The exactly-half-range
+/// case is rejected. Start a fresh window for every session/channel/direction.
 class SequenceWindow final
 {
 public:
