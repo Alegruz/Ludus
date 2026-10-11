@@ -1,10 +1,13 @@
 # Resource manager architecture
 
-Status: Proposed architecture for Ludus. The existing Content catalog and native
-AudioContent loader are implemented; the shared resource coordinator, cooked
-catalog, and general streaming policies below are proposals. Reviewed against
+Status: Stage 1 AudioContent integration boundary implemented; the existing
+Content catalog and native AudioContent loader remain available. The shared
+resource coordinator (Stage 2 onward), cooked catalog, and general streaming
+policies below remain proposals. Reviewed against
 repository HEAD `144a708` on 2026-10-04, with unrelated local changes present.
-No runtime implementation or performance measurements are part of this design.
+The original architecture review did not implement runtime code or claim
+performance measurements. Stage 1 behavior and validation are recorded in the
+[audio integration evidence](../development/audio-content-evidence.md#resource-manager-stage-1).
 
 Use **one explicit coordinator for resource metadata and loading, immutable
 resident versions, typed handles for identity, and explicit leases for lifetime**.
@@ -48,7 +51,7 @@ proof that all users have finished.
 | Inspected implementation | Consequence |
 | --- | --- |
 | [Content API](../../modules/content/include/ludus/content/content.h) | Version 1 has bounded string IDs, three audio kinds, owned bytes, SHA-256 digests, transactional catalog reads, and descriptor-bound native file readers. Preserve its formats and error behavior. |
-| [AudioContent API](../../modules/audio/content/include/ludus/audio/content/loader.h) and [loader](../../modules/audio/content/src/loader.cpp) | One control owner, one pending acquisition, 64 revision slots, prepared clip sharing, and separate music playback instances. Cancel joins its native worker; Poll also eventually joins. A nonblocking concurrent acquisition service is future work. |
+| [AudioContent API](../../modules/audio/content/include/ludus/audio/content/loader.h) and [loader](../../modules/audio/content/src/loader.cpp) | One control owner, one pending acquisition, 64 revision slots, prepared clip sharing, and separate music playback instances. Cancel/destruction join its native worker; RequestCancel signals and Poll drains without joining. Leases carry loader provenance. One pending acquisition remains; concurrent acquisition service is future work. |
 | [RHI resource API](../../modules/graphics/rhi/include/ludus/graphics/rhi/render.h) | The public slice exposes bounded shader, uniform, and pipeline resources. Mesh/texture residency and general GPU completion tickets must be implemented before those adapters can make their promised guarantees. |
 | [Level loading](level-data.md) and [frame updates](frame-update.md) | Keep candidate-world activation and explicit frame/tick boundaries. The manager supplies resource readiness; the session commits game state. |
 
@@ -677,7 +680,7 @@ The review describes design inspiration; it does not supply copied implementatio
 
 | Stage | Deliverable and exit condition |
 | --- | --- |
-| 1 | Audit existing AudioContent request/lease/session boundaries, joining cancellation, and ownership provenance; preserve version-1 fixtures and its cache/retirement behavior. Establish a tested nonblocking integration boundary before exposing the new runtime API. |
+| 1 (implemented) | Audit existing AudioContent request/lease/session boundaries, joining cancellation, and ownership provenance; preserve version-1 fixtures and its cache/retirement behavior. Establish a tested nonblocking integration boundary before exposing the new runtime API. |
 | 2 | Fixed-capacity coordinator, one owner, exact-ID lookup, scoped requests, deduplicated operations, lease tokens, durable result records, and explicit budgets. Demonstrate two callers acquiring one sound with independent cancellation. |
 | 3 | Add a second demonstrated consumer, initially immutable game definitions or existing shaders. Prove different readiness/retirement adapters share the core without new special-case branches. Keep one-pending AudioContent limitations visible until separately extended. |
 | 4 | Add transactional replacement and required DAG scheduling. Prove diamond sharing, parent/child replacement coherence, last-good retention, and physical retirement. |

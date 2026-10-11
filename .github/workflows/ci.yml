@@ -704,9 +704,9 @@ jobs:
           out/host-tools/venv/bin/cmake --preset linux-clang-development -B out/build/threading-tsan \
             -DLUDUS_ENABLE_TSAN=ON -DLUDUS_WARNINGS_AS_ERRORS=ON
           out/host-tools/venv/bin/cmake --build out/build/threading-tsan --parallel 2 \
-            --target ludus_foundation_threading_tests ludus_threading_startup_tests ludus_filesystem_tests ludus_filesystem_async_fault_tests
+            --target ludus_foundation_threading_tests ludus_threading_startup_tests ludus_filesystem_tests ludus_filesystem_async_fault_tests ludus_audio_content_tests ludus_audio_content_worker_tests
       - name: Test dependencies, publication, cancellation and startup with TSan
-        run: out/host-tools/venv/bin/ctest --test-dir out/build/threading-tsan --tests-regex "ludus_(foundation_threading|threading_startup|filesystem|filesystem_async_fault)_tests" --output-on-failure --no-tests=error
+        run: out/host-tools/venv/bin/ctest --test-dir out/build/threading-tsan --tests-regex "ludus_(foundation_threading|threading_startup|filesystem|filesystem_async_fault|audio_content|audio_content_worker)_tests" --output-on-failure --no-tests=error
       - name: Preserve race-detection diagnostics
         if: always()
         uses: actions/upload-artifact@v4

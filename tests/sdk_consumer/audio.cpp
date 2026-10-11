@@ -93,7 +93,7 @@ int ExerciseInstalledAudio() noexcept
     {
         return 38;
     }
-    content::Lease lease;
+    content::Lease lease{63, 17, 29};
     ludus::content::Diagnostic diagnostic;
     auto result = ludus::content::Status::Pending;
     for (uint32 i = 0; i < 1000 && result == ludus::content::Status::Pending; ++i)
@@ -102,9 +102,26 @@ int ExerciseInstalledAudio() noexcept
         const timespec wait{0, 1000000};
         nanosleep(&wait, nullptr);
     }
-    if (result != ludus::content::Status::NotFound || audio.BeginShutdown() != Status::Ok)
+    if (result != ludus::content::Status::NotFound || lease != content::Lease{63, 17, 29})
     {
         return 39;
+    }
+    if (loader.Begin(root, "sound/missing") != ludus::content::Status::Pending)
+    {
+        return 40;
+    }
+    loader.RequestCancel();
+    result = ludus::content::Status::Pending;
+    for (uint32 i = 0; i < 1000 && result == ludus::content::Status::Pending; ++i)
+    {
+        result = loader.Poll({}, lease, diagnostic);
+        const timespec wait{0, 1000000};
+        nanosleep(&wait, nullptr);
+    }
+    if (result != ludus::content::Status::Cancelled || lease != content::Lease{63, 17, 29} ||
+        audio.BeginShutdown() != Status::Ok)
+    {
+        return 41;
     }
     return 0;
 }
