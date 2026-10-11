@@ -18,6 +18,36 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  api-documentation:
+    name: Public API documentation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          # The PR base commit must be available for the shrink-only baseline gate.
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: docs/wiki-requirements.txt
+      - name: Install pinned documentation tools
+        run: python -m pip install -r docs/wiki-requirements.txt
+      - name: Test API documentation enforcement
+        run: python -m unittest discover -s scripts/python -p 'test_api*.py' -v
+      - name: Build the authored wiki
+        run: python -m mkdocs build --strict
+      - name: Reject new API gaps and baseline additions in pull requests
+        if: github.event_name == 'pull_request'
+        env:
+          API_BASELINE_REF: ${{ github.event.pull_request.base.sha }}
+        run: python scripts/build-api --bootstrap --baseline-ref "$API_BASELINE_REF"
+      - name: Validate API documentation on main and manual runs
+        if: github.event_name != 'pull_request'
+        run: python scripts/build-api --bootstrap
+
   editor:
     name: Build or reuse browser editor
     runs-on: ubuntu-24.04

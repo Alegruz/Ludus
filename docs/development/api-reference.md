@@ -140,9 +140,14 @@ Classes/structs/unions/concepts, public members, aliases/macros/constants and en
 are covered. Namespace/file descriptions are not required.
 
 CI rejects new gaps, changed undocumented signatures and removal of previously
-documented descriptions. Existing gaps are visible in the coverage report;
-Resolved entries must be removed in the change that documents them; reviewed
-baseline maintenance also removes deleted symbols. Parameter
+documented descriptions. The independent **Public API documentation** job runs
+on every pull request, without waiting for the browser editor build. It passes
+`--baseline-ref` with the PR base commit SHA and rejects any baseline additions,
+including replacing an old signature with a new one. The checkout must contain
+that commit; missing history fails rather than skipping the comparison.
+Existing gaps are visible in the coverage report. Resolved/deleted entries
+must be removed in the same change; retaining them fails the extraction gate
+and could otherwise allow later removal of a newly documented contract. Parameter
 documentation errors are handled by Doxygen warnings-as-errors; this description
 gate does not prove semantic completeness or automatically require every parameter.
 No blanket conversion of plain comments or invented contracts is performed.
@@ -150,7 +155,13 @@ No blanket conversion of plain comments or invented contracts is performed.
 `out/api-reference/coverage.json` reports gaps and resolved/removed entries.
 Remove resolved baseline entries with the change that documents them. The
 explicit `--update-baseline` switch is for a reviewed migration; do not use it
-to make failing coverage checks pass.
+to make failing coverage checks pass. It cannot be combined with `--baseline-ref`,
+and CI allows the resulting baseline only when it is a subset of the base
+commit's entries. Local comparison uses the same gate, for example:
+
+```bash
+out/wiki-venv/bin/python scripts/build-api --bootstrap --baseline-ref origin/main
+```
 
 The combined HTML checker checks API local links/assets/anchors and requires
 MkDocs search coverage for every wiki and API page.

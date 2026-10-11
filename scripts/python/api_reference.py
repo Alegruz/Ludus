@@ -111,6 +111,39 @@ def check_coverage(missing, baseline):
     return sorted(missing - set(baseline))
 
 
+def baseline_at_revision(root, revision):
+    """Read the trusted comparison baseline, failing if its commit is unavailable."""
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--verify", "--end-of-options", revision + "^{commit}"],
+            cwd=root, text=True, stderr=subprocess.PIPE,
+        ).strip()
+        contents = subprocess.check_output(
+            ["git", "show", commit + ":docs/api-undocumented.json"],
+            cwd=root, text=True, stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"Cannot read API baseline at {revision}; fetch the comparison commit and its baseline") from error
+    return json.loads(contents)
+
+
+def check_baseline_growth(baseline, previous):
+    additions = sorted(set(baseline) - set(previous))
+    if additions:
+        raise ValueError("Legacy API documentation baseline may only shrink; document these symbols:\n" +
+                         "\n".join(additions))
+
+
+def validate_coverage(missing, baseline):
+    failures = check_coverage(missing, baseline)
+    if failures:
+        raise ValueError("New undocumented public symbols:\n" + "\n".join(failures))
+    resolved = sorted(set(baseline) - missing)
+    if resolved:
+        raise ValueError("Remove resolved or deleted symbols from docs/api-undocumented.json:\n" +
+                         "\n".join(resolved))
+
+
 def check_extracted_files(root, xml, inputs):
     expected = {str(path.relative_to(root)) for path in inputs}
     actual = set()
@@ -204,12 +237,18 @@ def bootstrap(root, pin):
     return str(binary)
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bootstrap", action="store_true", help="Download the hash-pinned official binary for Linux x64 or macOS ARM64/x64")
     parser.add_argument("--doxygen", default="doxygen", help="Path to the pinned Doxygen executable")
-    parser.add_argument("--update-baseline", action="store_true", help="Explicitly replace the reviewed legacy gap baseline")
-    args = parser.parse_args()
+    baseline_options = parser.add_mutually_exclusive_group()
+    baseline_options.add_argument("--update-baseline", action="store_true", help="Explicitly replace the reviewed legacy gap baseline")
+    baseline_options.add_argument("--baseline-ref", help="Require the baseline to only shrink relative to this Git commit/ref (CI uses the PR base SHA)")
+    args = parser.parse_args(argv)
+    baseline_path = ROOT / "docs/api-undocumented.json"
+    baseline = json.loads(baseline_path.read_text())
+    if args.baseline_ref:
+        check_baseline_growth(baseline, baseline_at_revision(ROOT, args.baseline_ref))
     pin = json.loads((ROOT / "config/doxygen_toolchain.json").read_text())
     executable = bootstrap(ROOT, pin) if args.bootstrap else args.doxygen
     version = subprocess.check_output([executable, "--version"], text=True).split()[0]
@@ -230,7 +269,6 @@ def main():
     symbols, missing = coverage(output / "xml")
     if not symbols:
         raise ValueError("Doxygen produced no public symbols")
-    baseline_path = ROOT / "docs/api-undocumented.json"
     if args.update_baseline:
         baseline_path.write_text(json.dumps(sorted(missing), indent=2) + "\n")
     baseline = json.loads(baseline_path.read_text())
@@ -239,8 +277,7 @@ def main():
               "documented": len(symbols - missing), "undocumented": sorted(missing),
               "new_gaps": failures, "resolved_or_removed": sorted(set(baseline) - missing)}
     (output / "coverage.json").write_text(json.dumps(report, indent=2) + "\n")
-    if failures:
-        raise ValueError("New undocumented public symbols:\n" + "\n".join(failures))
+    validate_coverage(missing, baseline)
     site = ROOT / "out/wiki"
     if not (site / "index.html").is_file():
         raise ValueError("Build MkDocs before build-api; it cleans the shared output")
