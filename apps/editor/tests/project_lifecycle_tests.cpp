@@ -6,13 +6,19 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <QAbstractItemModel>
 #include <QAction>
 #include <QApplication>
 #include <QColor>
+#include <QComboBox>
 #include <QDialog>
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeySequence>
+#include <QLabel>
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPalette>
@@ -225,4 +231,109 @@ TEST_CASE("Workspace appearance follows application palette changes", "[editor][
         QApplication::quit();
     });
     QApplication::exec();
+}
+
+TEST_CASE("Project overview explains setup and reveals build details without editing", "[editor][lifecycle][overview]")
+{
+    QTemporaryDir directory;
+    EditorController controller({}, nullptr, directory.filePath(QStringLiteral("recent.json")));
+    MainWindow window(&controller, nullptr, directory.filePath(QStringLiteral("workspace.json")));
+    window.resize(800, 650);
+    window.show();
+    controller.OpenProject(Project(directory));
+    QApplication::processEvents();
+    auto* identity = window.findChild<QLabel*>(QStringLiteral("projectIdentity"));
+    auto* setup = window.findChild<QLabel*>(QStringLiteral("projectSetupStatus"));
+    auto* next = window.findChild<QLabel*>(QStringLiteral("projectNextStep"));
+    auto* advanced = window.findChild<QPushButton*>(QStringLiteral("projectAdvanced"));
+    auto* details = window.findChild<QWidget*>(QStringLiteral("projectBuildDetails"));
+    auto* profile = window.findChild<QComboBox*>(QStringLiteral("projectProfile"));
+    REQUIRE(identity != nullptr);
+    REQUIRE(setup != nullptr);
+    REQUIRE(next != nullptr);
+    REQUIRE(advanced != nullptr);
+    REQUIRE(details != nullptr);
+    REQUIRE(profile != nullptr);
+    CHECK(identity->textFormat() == Qt::PlainText);
+    CHECK(identity->text().contains(directory.path()));
+    CHECK(identity->text().contains(QStringLiteral("linux-clang-debug")));
+    CHECK(setup->text() == controller.State().SetupStatus);
+    CHECK_FALSE(details->isVisible());
+    CHECK(profile->isVisible());
+    const auto release = profile->findData(QStringLiteral("linux-clang-release"));
+    REQUIRE(release >= 0);
+    CHECK_FALSE(profile->model()->flags(profile->model()->index(release, 0)).testFlag(Qt::ItemIsEnabled));
+    CHECK(next->text().contains(QStringLiteral("This project owns its engine and build setup")));
+    const auto original = controller.State().Draft;
+    QTest::mouseClick(advanced, Qt::LeftButton);
+    CHECK(details->isVisible());
+    QTest::mouseClick(advanced, Qt::LeftButton);
+    CHECK_FALSE(details->isVisible());
+    CHECK(controller.State().Draft == original);
+    CHECK_FALSE(controller.State().Dirty());
+    CHECK(controller.State().ActiveJob == 0);
+    const auto capture = qEnvironmentVariable("LUDUS_PROJECT_OVERVIEW_CAPTURE");
+    if (!capture.isEmpty())
+    {
+        REQUIRE(window.grab().save(capture));
+    }
+}
+
+TEST_CASE("Friendly build profiles preserve preset identity and require explicit save", "[editor][lifecycle][overview]")
+{
+    QTemporaryDir directory;
+    const auto path = Project(directory);
+    // Exercise v2 profiles without claiming setup exists on this computer.
+    QFile file(path);
+    REQUIRE(file.open(QIODevice::ReadOnly));
+    auto object = QJsonDocument::fromJson(file.readAll()).object();
+    file.close();
+    object.insert(QStringLiteral("version"), 2);
+    object.insert(QStringLiteral("engine"),
+                  QJsonObject{{QStringLiteral("version"), QStringLiteral("0.1.0")},
+                              {QStringLiteral("components"), QJsonArray{QStringLiteral("FoundationBase")}},
+                              {QStringLiteral("features"), QJsonArray{}}});
+    REQUIRE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write(QJsonDocument(object).toJson());
+    file.close();
+    EditorController controller({}, nullptr, directory.filePath(QStringLiteral("recent.json")));
+    MainWindow window(&controller, nullptr, directory.filePath(QStringLiteral("workspace.json")));
+    window.show();
+    controller.OpenProject(path);
+    auto* profile = window.findChild<QComboBox*>(QStringLiteral("projectProfile"));
+    auto* identity = window.findChild<QLabel*>(QStringLiteral("projectIdentity"));
+    auto* next = window.findChild<QLabel*>(QStringLiteral("projectNextStep"));
+    auto* save = window.findChild<QPushButton*>(QStringLiteral("projectSaveSettings"));
+    auto* run = window.findChild<QPushButton*>(QStringLiteral("projectBuildRun"));
+    auto* check = window.findChild<QPushButton*>(QStringLiteral("projectCheckSetup"));
+    auto* repair = window.findChild<QPushButton*>(QStringLiteral("projectRepairSetup"));
+    REQUIRE(profile != nullptr);
+    REQUIRE(identity != nullptr);
+    REQUIRE(next != nullptr);
+    REQUIRE(save != nullptr);
+    REQUIRE(run != nullptr);
+    REQUIRE(check != nullptr);
+    REQUIRE(repair != nullptr);
+    REQUIRE(controller.State().Saved.HasEngine);
+    CHECK(identity->text().contains(QStringLiteral("Required engine: Ludus 0.1.0")));
+    CHECK(identity->text().contains(QStringLiteral("FoundationBase")));
+    for (ludus::foundation::int32 i = 0; i < profile->count(); ++i)
+    {
+        profile->setCurrentIndex(i);
+        CHECK(controller.State().Draft.Preset == profile->itemData(i).toString());
+        CHECK(controller.State().Saved.Preset == QStringLiteral("linux-clang-debug"));
+    }
+    REQUIRE(controller.State().Dirty());
+    CHECK(next->text().contains(QStringLiteral("Save your project settings")));
+    CHECK_FALSE(run->isEnabled());
+    CHECK_FALSE(check->isEnabled());
+    CHECK_FALSE(repair->isEnabled());
+    CHECK(controller.State().ActiveJob == 0);
+    save->click();
+    CHECK_FALSE(controller.State().Dirty());
+    CHECK(controller.Store().Load(path).Parse.Descriptor.Preset == QStringLiteral("macos-clang-release"));
+    CHECK(identity->text().contains(QStringLiteral("macos-clang-release")));
+    CHECK(check->isEnabled() == controller.Caps().CanProjectCheck);
+    CHECK(repair->isEnabled() == controller.Caps().CanProjectSetup);
+    CHECK(run->isEnabled() == controller.Caps().CanBuildRun);
 }

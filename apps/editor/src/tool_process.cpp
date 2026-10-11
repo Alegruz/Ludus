@@ -360,6 +360,20 @@ bool ToolProcess::DispatchFrame(const QByteArray& line)
         AcknowledgeCredit();
         return true;
     }
+    if (type == QStringLiteral("setup_details"))
+    {
+        event.Text = object.value(QStringLiteral("text")).toString();
+        if ((Launch_.Operation != ToolOperation::ProjectCheck && Launch_.Operation != ToolOperation::ProjectSetup) ||
+            event.Text.isEmpty() || static_cast<usize>(event.Text.toUtf8().size()) > usize{16} * 1024u ||
+            TerminalDelivered_)
+        {
+            FailProtocol(QStringLiteral("invalid setup details"));
+            return false;
+        }
+        event.Kind = ProtocolEvent::Type::SetupDetails;
+        Q_EMIT Event(event);
+        return true;
+    }
     if (type == QStringLiteral("generation"))
     {
         event.Kind = ProtocolEvent::Type::Generation;

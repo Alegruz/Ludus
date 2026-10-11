@@ -5,6 +5,9 @@
 
 #include <atomic>
 #include <new>
+#if defined(LUDUS_AUDIO_CONTENT_WORKER_TESTING)
+#    include "internal/worker_test_hooks.hpp"
+#endif
 #if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
 #    include <pthread.h>
 #endif
@@ -13,6 +16,23 @@ namespace ludus::audio::content
 {
 namespace
 {
+// Owner provenance is process-local and never reused, including after destruction.
+std::atomic<uint64> NEXT_OWNER{1};
+uint64 ReserveOwner() noexcept
+{
+    auto owner = NEXT_OWNER.load(std::memory_order_relaxed);
+    while (owner != 0xFFFFFFFFFFFFFFFFULL)
+    {
+        if (NEXT_OWNER.compare_exchange_weak(owner, owner + 1, std::memory_order_relaxed))
+        {
+            return owner;
+        }
+    }
+    return 0;
+}
+#if defined(LUDUS_AUDIO_CONTENT_WORKER_TESTING)
+internal::WorkerTestHooks WORKER_TEST_HOOKS;
+#endif
 SourceFormat Format(std::string_view path) noexcept
 {
     return path.ends_with(".flac") ? SourceFormat::Flac : SourceFormat::Wav;
@@ -43,6 +63,9 @@ struct Acquisition final
     std::atomic<bool> Cancelled{false};
     std::atomic<bool> Done{false};
     ContentStatus Result = ContentStatus::Pending;
+#if defined(LUDUS_AUDIO_CONTENT_WORKER_TESTING)
+    internal::WorkerTestHooks TestHooks;
+#endif
 #if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
     pthread_t Thread{};
 #endif
@@ -199,6 +222,7 @@ struct Loader::Impl final
 {
     explicit Impl(AudioSystem& audio) noexcept : Audio(audio) {}
     AudioSystem& Audio;
+    uint64 Owner = ReserveOwner();
     Acquisition* Pending = nullptr;
     struct Clip final
     {
@@ -233,6 +257,11 @@ struct Loader::Impl final
         VoiceHandle Voice;
     };
     Playing Streams[4];
+    void ReleasePending() noexcept
+    {
+        delete Pending;
+        Pending = nullptr;
+    }
     void Drop(uint32 index) noexcept
     {
         auto& clip = Clips[index];
@@ -257,7 +286,7 @@ Loader::~Loader() noexcept
         {
             if (mImpl->Revisions[i].InUse)
             {
-                (void)Release({i, mImpl->Revisions[i].Generation});
+                (void)Release({i, mImpl->Revisions[i].Generation, mImpl->Owner});
             }
         }
         for (auto& stream : mImpl->Streams)
@@ -285,6 +314,10 @@ Loader::Begin(std::string_view root, std::string_view id, const Sound* draft, co
     if (!ludus::content::ValidId(id) || root.size() > 4096 || (draft != nullptr && musicDraft != nullptr))
     {
         return ContentStatus::Invalid;
+    }
+    if (mImpl->Owner == 0)
+    {
+        return ContentStatus::Limit;
     }
     auto* job = new (std::nothrow) Acquisition();
     if (job == nullptr)
@@ -333,13 +366,33 @@ Loader::Begin(std::string_view root, std::string_view id, const Sound* draft, co
         job->MusicDraft = true;
     }
 #if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
+#    if defined(LUDUS_AUDIO_CONTENT_WORKER_TESTING)
+    job->TestHooks = WORKER_TEST_HOOKS;
+#    endif
     if (pthread_create(
             &job->Thread,
             nullptr,
             [](void* input) -> void* {
                 auto* acquisition = static_cast<Acquisition*>(input);
+#    if defined(LUDUS_AUDIO_CONTENT_WORKER_TESTING)
+                const auto hooks = acquisition->TestHooks;
+                if (hooks.BeforeRun != nullptr)
+                {
+                    hooks.BeforeRun(hooks.Context);
+                }
+#    endif
                 acquisition->Run();
+                // Final access to acquisition: acquire-observing Poll may detach
+                // and destroy it before this native thread returns. Never add
+                // job access or job-owned cleanup after publication. This is the
+                // Stage 1 boundary in docs/architecture/resource-management.md.
                 acquisition->Done.store(true, std::memory_order_release);
+#    if defined(LUDUS_AUDIO_CONTENT_WORKER_TESTING)
+                if (hooks.AfterCompletion != nullptr)
+                {
+                    hooks.AfterCompletion(hooks.Context);
+                }
+#    endif
                 return nullptr;
             },
             job) != 0)
@@ -354,19 +407,24 @@ Loader::Begin(std::string_view root, std::string_view id, const Sound* draft, co
     return ContentStatus::Unsupported;
 #endif
 }
+void Loader::RequestCancel() noexcept
+{
+    if (mImpl != nullptr && mImpl->Pending != nullptr)
+    {
+        mImpl->Pending->Cancelled.store(true, std::memory_order_release);
+    }
+}
 void Loader::Cancel() noexcept
 {
     if (mImpl == nullptr || mImpl->Pending == nullptr)
     {
         return;
     }
-    auto* job = mImpl->Pending;
-    job->Cancelled.store(true, std::memory_order_release);
+    RequestCancel();
 #if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
-    pthread_join(job->Thread, nullptr);
+    pthread_join(mImpl->Pending->Thread, nullptr);
 #endif
-    delete job;
-    mImpl->Pending = nullptr;
+    mImpl->ReleasePending();
 }
 ContentStatus Loader::Poll(const Routing& routing, Lease& output, Diagnostic& diagnostic) noexcept
 {
@@ -383,9 +441,18 @@ ContentStatus Loader::Poll(const Routing& routing, Lease& output, Diagnostic& di
     {
         return ContentStatus::Pending;
     }
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
+    // Detach only completed work. On failure retain ownership for Cancel's join;
+    // no candidate installation or lease mutation has happened yet.
+    if (pthread_detach(job->Thread) != 0)
+    {
+        return ContentStatus::IoError;
+    }
+#endif
     SystemSnapshot audioState;
     mImpl->Audio.GetSystemSnapshot(audioState);
-    auto result = job->Session == mImpl->Audio.GetSession() && audioState.State == SystemState::Ready
+    auto result = !job->Cancelled.load(std::memory_order_acquire) && job->Session == mImpl->Audio.GetSession() &&
+                          audioState.State == SystemState::Ready
                       ? job->Result
                       : ContentStatus::Cancelled;
     diagnostic = job->Error;
@@ -398,13 +465,13 @@ ContentStatus Loader::Poll(const Routing& routing, Lease& output, Diagnostic& di
             break;
         }
     }
-    if (index == 64)
+    if (result == ContentStatus::Ok && index == 64)
     {
         result = ContentStatus::Limit;
     }
     if (result != ContentStatus::Ok)
     {
-        Cancel();
+        mImpl->ReleasePending();
         return result;
     }
     auto& revision = mImpl->Revisions[index];
@@ -414,7 +481,7 @@ ContentStatus Loader::Poll(const Routing& routing, Lease& output, Diagnostic& di
                           : Resolve(job->Definition, job->Catalog, routing, descriptor, diagnostic);
     if (result != ContentStatus::Ok)
     {
-        Cancel();
+        mImpl->ReleasePending();
         return result;
     }
     revision.Count = 0;
@@ -473,7 +540,7 @@ ContentStatus Loader::Poll(const Routing& routing, Lease& output, Diagnostic& di
             {
                 mImpl->Drop(revision.Clips[i]);
             }
-            Cancel();
+            mImpl->ReleasePending();
             return result;
         }
         descriptor.VariationCount = static_cast<uint32>(revision.Count);
@@ -493,13 +560,13 @@ ContentStatus Loader::Poll(const Routing& routing, Lease& output, Diagnostic& di
         job->Input = nullptr;
         revision.Format = job->Formats[0];
     }
-    output = {index, revision.Generation};
-    Cancel();
+    output = {index, revision.Generation, mImpl->Owner};
+    mImpl->ReleasePending();
     return ContentStatus::Ok;
 }
 ContentStatus Loader::GetSound(Lease lease, Sound& definition, app::EventDescriptor& descriptor) const noexcept
 {
-    if (mImpl == nullptr || lease.Slot >= 64)
+    if (mImpl == nullptr || lease.Slot >= 64 || lease.Owner != mImpl->Owner)
     {
         return ContentStatus::Invalid;
     }
@@ -522,7 +589,7 @@ ContentStatus Loader::GetSound(Lease lease, Sound& definition, app::EventDescrip
 }
 ContentStatus Loader::GetMusic(Lease lease, Music& definition) const noexcept
 {
-    if (mImpl == nullptr || lease.Slot >= 64)
+    if (mImpl == nullptr || lease.Slot >= 64 || lease.Owner != mImpl->Owner)
     {
         return ContentStatus::Invalid;
     }
@@ -585,7 +652,7 @@ Status Loader::PlayMusic(Lease lease, VoiceHandle& voice) noexcept
 }
 ContentStatus Loader::Release(Lease lease) noexcept
 {
-    if (mImpl == nullptr || lease.Slot >= 64)
+    if (mImpl == nullptr || lease.Slot >= 64 || lease.Owner != mImpl->Owner)
     {
         return ContentStatus::Invalid;
     }
@@ -625,4 +692,10 @@ void Loader::Service() noexcept
         }
     }
 }
+#if defined(LUDUS_AUDIO_CONTENT_WORKER_TESTING)
+void internal::SetWorkerTestHooks(WorkerTestHooks hooks) noexcept
+{
+    WORKER_TEST_HOOKS = hooks;
+}
+#endif
 } // namespace ludus::audio::content

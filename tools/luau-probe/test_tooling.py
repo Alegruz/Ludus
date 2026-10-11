@@ -15,6 +15,15 @@ GLOBALS = TOOL["verify"].__globals__
 
 
 class IntegrityTests(unittest.TestCase):
+    def test_assertion_profile_preserves_the_body_and_rejects_changed_pins(self):
+        declaration = b"LUAU_NOINLINE inline int assertCallHandler("
+        body = b"const char* expression) { return expression != nullptr; }\n"
+        self.assertEqual(TOOL["assertion_profile"](declaration + body),
+                         b"LUAU_NOINLINE static inline int assertCallHandler(" + body)
+        for data in (b"unrecognized source", declaration + declaration):
+            with self.subTest(data=data), self.assertRaisesRegex(RuntimeError, "no longer matches"):
+                TOOL["assertion_profile"](data)
+
     def test_host_compilers_use_prepared_tools_and_macos_sdk(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

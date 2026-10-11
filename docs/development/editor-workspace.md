@@ -25,7 +25,7 @@ editor package; launching the native editor does not need those files on disk.
 | Surface | Purpose |
 | --- | --- |
 | Welcome | New/Open and recent projects while no project is open |
-| Project settings | Project name, provider, source directory, preset, target and arguments |
+| Project | Setup/engine overview, lifecycle actions, name/profile and expandable build/launch details |
 | Scene | World-demo level selection, transforms, history, save/recovery and trusted preview |
 | Scripts | Project-owned script and sequence drafts |
 | Audio | Content selection, definitions, save and preview |
@@ -39,6 +39,72 @@ audio definitions, offline preferences and live values have separate save owners
 Applying to a session does not save a file; copying a live value to a tuning draft
 requires a separate save. See [configuration](../wiki/guides/configuration.md)
 and [native live editing](project-live-reload.md).
+
+## Project lifecycle: tasks and audiences
+
+The **Project** tab shows the project folder, committed engine requirement and
+components (v2 SDK projects), saved build profile, and the last read-only setup
+check. A successful SDK check identifies the actual selected engine version,
+revision, target, flavor, installation and selection source, including local
+overrides. An unchecked or failed check is not a claim that the project is ready.
+These results describe the saved project and computer inputs at check time;
+recheck after changing installations outside the editor.
+
+**Check setup**, **Repair setup**, **Save settings**, **Build and run**, and
+**Stop** use the existing controller commands and their capability gates. Dirty
+settings must be saved before checks/repair/build. Save settings saves only the
+project descriptor; audio, scenes, scripts and configuration keep their own save
+owners. Opening a project still does not configure, download, repair or build it.
+Repair's browser checkbox and engine selection retain their explicit behavior.
+
+Name and build profile are visible. Profile labels explain **Development** for
+everyday work, **Debug** for investigating code, and **Release** for distribution,
+with Linux/macOS named explicitly. Version-1 descriptors disable profiles outside
+their original Linux Debug/Development contract. Labels preserve the exact
+underlying preset IDs; profile selection edits a draft and never switches engines or builds
+implicitly. The saved preset ID remains visible in the overview. **Build and
+launch details** reveals provider, source directory, executable target, working
+directory and the exact argument list. Expanding/collapsing only changes the
+presentation and preserves settings and history.
+
+The following are designed use cases, not claims of interviews or usability
+studies. Experience and discipline are independent: a professional artist may
+need simple setup while a beginning programmer wants detailed build controls.
+No role choice gates access to capabilities.
+
+| Consumer and real task | Workflow and observable acceptance |
+| --- | --- |
+| First-time developer creates a game | Welcome → New Project → Name/Location → Create. Existing automatic engine selection stages and verifies the project. Errors retain the current project; no successful publication is claimed before build/tests. Project shows where files live and how to run. |
+| Unity/Unreal/Godot user opens a team clone | Open the descriptor, read setup status, then explicitly Repair if tools/presets are missing. Learn the engine requirement and profile from the overview; no need to understand CMake fields to repair. |
+| Experienced developer switches from iteration to a release build | Select the named profile, Save settings, Check/Repair its setup, then Build or Package through existing menus. Profile intent stays distinct from SDK acquisition and release packaging. |
+| Designer, artist, sound designer or localization contributor joins a project | Open and diagnose setup without changing team metadata. Use the relevant work area; the Project tab explains that content documents save separately. Setup remains explicit rather than blocking access to readable content. Localization authoring itself remains a separate editor gap. |
+| QA reproduces a launch issue | Expand build/launch details to inspect target, working directory and exact arguments; select the intended profile, save, run and stop. Copy Job Details in Output supplies exact process evidence. Failed builds never launch an older artifact. |
+| Engine/tool engineer uses a local SDK | Repair with a selected installed engine; verify revision, prefix and local override in the successful check. Existing repair preserves custom presets and unrelated IDE settings; committed engine requirements are not rewritten. |
+| Rendering researcher runs an experimental executable | Reveal target/preset/arguments, configure to discover executables, select the target and launch separately. Check reports the actual selected SDK; shader prerequisites remain explicit. This does not create a renderer authoring panel. |
+
+### Delivery boundary and next lifecycle work
+
+This first UX slice improves orientation and access to existing verified tooling.
+It does not deliver an installed Editor distribution, SDK archive/store browser,
+release-version upgrade/migration UI, arbitrary custom-preset discovery, or
+browser/native workflow parity. Existing CLI owners remain the source of those
+operations. Future UI must reuse their preview/validation/locking semantics and
+show expected/actual engine identities before committing a change; upgrade must
+preserve project-owned source and custom settings, support failure recovery, and
+never conflate a machine-local override with a committed team engine update.
+
+SDK setup identity travels through a bounded, job-tagged `setup_details` control
+event (at most 16 KiB of UTF-8), separately from the reserved terminal summary
+and output credit. The controller publishes it only after a successful setup
+result; failure and cancellation show their own outcome. This private protocol
+requires the matching editor/tooling version.
+
+Acceptance covers keyboard/mouse disclosure, profile identity and explicit save,
+read-only checks with selected engine evidence, disabled commands, pending
+argument text, history and project switching. Offscreen Qt tests validate behavior;
+native screenshots validate layout separately. No automated result establishes
+that representative users completed these journeys comfortably. Moderated task
+sessions with programming and content disciplines remain a usability gate.
 
 ## Prerequisites (optional editor setup)
 

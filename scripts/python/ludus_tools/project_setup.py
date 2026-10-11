@@ -160,7 +160,9 @@ def _inputs(root: Path, source: Path, sdk: Path, profile: str, web_sdk: Path | N
         if not baseline:
             raise ToolingError(INVALID_PROJECT, "macOS SDK must record its deployment baseline")
         architecture = native.target_triple.split("-", 1)[0]
-        cache.update(CMAKE_OSX_SYSROOT=str(sysroot), CMAKE_OSX_ARCHITECTURES=architecture,
+        # CMake resolves an SDK symlink in its cache. Generate that same path;
+        # configured above retains the managed link for retarget detection.
+        cache.update(CMAKE_OSX_SYSROOT=str(sysroot.resolve()), CMAKE_OSX_ARCHITECTURES=architecture,
                      CMAKE_OSX_DEPLOYMENT_TARGET=baseline.group(1),
                      CMAKE_CXX_FLAGS=f'-stdlib=libc++ -nostdinc++ -isystem "{libcxx}"')
     shaders = "ludus_compile_shader" in (source / "CMakeLists.txt").read_text()
@@ -277,7 +279,13 @@ def check_project(path: Path, *, tooling_root: Path, profile: str | None = None,
     env = environment(tooling_root)
     verify_tool_versions(configured, tooling_root, runner, env, resolved.resolution.identity)
     _list(source, configured, records, runner, env)
-    return "Setup checked: selectable presets, SDKs, tools and IDE settings"
+    identity = resolved.resolution.identity
+    return ("Setup checked: selectable presets, SDKs, tools and IDE settings\n"
+            f"Selected engine: Ludus {identity.engine_version} · {identity.flavor} · {identity.target_triple}\n"
+            f"Engine revision: {identity.source_revision or 'unknown'}\n"
+            f"Selection: {resolved.resolution.source}"
+            f"{' (local override)' if resolved.resolution.is_override else ''}\n"
+            f"Installation: {sdk}")
 
 
 def select_repair_sdk(path: Path, *, tooling_root: Path, prepare=None) -> Path:

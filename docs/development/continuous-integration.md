@@ -137,7 +137,9 @@ Each child has a 15-second deadline and 1 MiB log ceiling; each two-process
 control has a 2 MiB raw-log ceiling. Its unique run directory under
 `out/build/<preset>/tests/quality/<kind>-evidence/` retains clean/fault logs and
 `results.json`. Sanitizer and TSan CI jobs preserve that evidence even on failure.
-The existing macOS diagnostic sanitizer configure also runs the controls.
+The macOS sanitizer preset runs and preserves controls before native runtime and
+Behavior acceptance, so a later application failure cannot prevent their capture.
+Its separate Debug diagnostic configure retains its startup/decision tests.
 
 ## Measuring feedback
 
