@@ -174,6 +174,10 @@ namespace
     return generation;
 }
 
+// Thanks to the HarfBuzz contributors, "FreeType integration", HarfBuzz Manual:
+// https://harfbuzz.github.io/integration-freetype.html . Adapt its face-size
+// change notification and matching load flags to checked, reusable font slots.
+// Research owner: docs/architecture/text-font-rendering-research.md.
 // Ensure the FT face is sized to `pixelHeight` and the hb font agrees. Only
 // re-sizes when the requested height differs from the last applied one, and
 // always reports hb-ft the current state (design: alternating sizes must not
@@ -535,6 +539,11 @@ Status ShapeInternal(FontSystem* system,
         return Status::OutOfMemory;
     }
 
+    // Thanks to the HarfBuzz contributors, "Working with HarfBuzz clusters",
+    // HarfBuzz Manual: https://harfbuzz.github.io/working-with-harfbuzz-clusters.html .
+    // Preserve input UTF-8 byte clusters through shaping/reordering with level 0;
+    // these are cluster associations, not one glyph per character or a full
+    // paragraph bidi/caret model. See docs/architecture/text-font-rendering-research.md.
     hb_buffer_set_cluster_level(buffer, HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES);
     hb_buffer_set_direction(buffer,
                             runSpec.TextDirection == Direction::RightToLeft ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);

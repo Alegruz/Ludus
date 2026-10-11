@@ -96,6 +96,11 @@ uint64 OverlayList::DroppedCommands() const noexcept
 {
     return mState ? mState->Dropped : 0;
 }
+// Thanks to Aurelio Reis, "Fast Font Rendering with Instancing", Game Programming
+// Gems 8 (2010), section 1.1, pp. 3-11, for compatible batch boundaries and
+// painter-order constraints. Merge adjacent compatible commands only; this
+// expanded-vertex overlay path does not implement the chapter's instancing or
+// D3D9 upload method. Review: docs/architecture/renderer-systems-gems-review.md.
 Status OverlayList::Append(const OverlayVertex* vertices, usize count, const OverlayStyle& style) noexcept
 {
     if (!mState)

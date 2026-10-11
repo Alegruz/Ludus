@@ -11,6 +11,14 @@
 #include <string>
 
 // -----------------------------------------------------------------------------
+// Thanks to Google/Chromium contributors, "Trace Event Format", duration,
+// instant and flow events, for the phase/track/timestamp interchange contract:
+// https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
+// and Perfetto contributors, "Visualizing external trace formats with Perfetto":
+// https://perfetto.dev/docs/getting-started/other-formats . Adopt Chrome JSON
+// B/E, instant and flow records; synthesized incomplete ends are Ludus policy.
+// Design owner: docs/architecture/profiling-final.md.
+//
 // Perfetto / Chrome Trace Event JSON exporter (final design §16 primary path).
 //
 // This is the ANALYSIS + VISUALIZATION-export layer: it runs entirely off the

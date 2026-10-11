@@ -7,6 +7,10 @@
 namespace ludus::foundation::logging
 {
 
+// Thanks to Glenn Fowler, Landon Curt Noll and Phong Vo, "FNV Hash",
+// "FNV-1a alternate algorithm" and "Parameters of the FNV-1/FNV-1a hash":
+// https://www.isthe.com/chongo/tech/comp/fnv/ . Adopt the XOR/multiply sequence
+// and published constants for a non-cryptographic hash; collisions remain possible.
 // Compile-time FNV-1a hash used to derive a stable 32-bit category id from the
 // category name. Runtime filtering compares these integer ids rather than
 // performing a string-map lookup on every logging call

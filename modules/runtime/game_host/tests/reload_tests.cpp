@@ -257,6 +257,10 @@ TEST_CASE("candidate rejects malformed tagged checkpoints before promotion", "[r
         {
             malformedHeader.ProjectId = 8;
         }
+        // Thanks to Glenn Fowler, Landon Curt Noll and Phong Vo, "FNV Hash",
+        // "FNV-1a alternate algorithm" and "Parameters of the FNV-1/FNV-1a hash":
+        // https://www.isthe.com/chongo/tech/comp/fnv/ . Adopt the XOR/multiply sequence
+        // and published constants for a non-cryptographic hash; collisions remain possible.
         uint64 digest = 0xCBF29CE484222325ULL;
         for (usize i = 0; i < written; ++i)
         {

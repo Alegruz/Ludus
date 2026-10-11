@@ -1,5 +1,20 @@
 #pragma once
 
+// Thanks to Meta/Folly contributors, "folly/Traits.h", "IsRelocatable":
+// https://github.com/facebook/folly/blob/main/folly/docs/Traits.md , and
+// Electronic Arts/EASTL contributors, "vector.h" (relocatable growth paths):
+// https://github.com/electronicarts/EASTL/blob/master/include/EASTL/vector.h .
+// Their trait-controlled byte relocation informs this independent Ludus trait.
+// Thanks also to Arthur O'Dwyer, "std::is_trivially_relocatable", WG21 P1144R12
+// (2024), sections 2 and 3.3, for relocation terminology and trait fallback:
+// https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p1144r12.html .
+// Alisdair Meredith, Mungo Gill, Joshua Berne, Corentin Jabot, Pablo Halpern and
+// Lori Hughes, "Trivial Relocatability For C++26", WG21 P2786R13 (2025), section 7:
+// https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p2786r13.html . Thank
+// you for the comparison of relocation/replacement; neither proposal's language
+// machinery is implemented here. Keep a C++23 trivially-copyable default plus
+// explicit author opt-in. Detailed review: docs/architecture/containers.md.
+//
 // Trivial-relocation trait for Ludus containers.
 //
 // "Relocation" is move-construct-then-destroy-the-source. A type is *trivially
