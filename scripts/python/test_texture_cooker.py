@@ -72,3 +72,14 @@ class TextureCookerTests(unittest.TestCase):
         for value in (0,4,True,1.5):
             source['mip_levels']=value
             with self.assertRaises(ValueError):cook(source)
+
+    def test_bake_numeric_boundaries_reject_before_header_generation(self):
+        source={'width':4,'height':4,'format':'Rgba8Unorm','semantic':'data','mip_levels':1,'pixels':[255]*64,
+                'bake':{'source_id':1,'scene_revision':1,'dependency_revision':1,'transform':[1,0,0,0,1,0,0,0,1,0,0,0],'scale':[1,1,1]}}
+        for field,index in [('transform',9),('scale',0)]:
+            for value in [1e-46,-1e-46,10 ** 1000]:
+                source['bake'][field][index]=value
+                with self.assertRaisesRegex(ValueError,'representable'):cook(source)
+            source['bake'][field][index]=2 ** -149
+            self.assertEqual(len(cook(source)[1]),1)
+            source['bake'][field][index]=0

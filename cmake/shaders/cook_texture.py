@@ -44,8 +44,8 @@ def validate_bake(document):
         raise ValueError('Baked direct light identity must be uint64')
     for key, count in (('transform', 12), ('scale', 3)):
         values = bake.get(key)
-        if not isinstance(values, list) or len(values) != count or any(type(v) not in (int, float) or not math.isfinite(v) or abs(v) > 1000000 for v in values):
-            raise ValueError('Bake transform/scale must be bounded finite numeric arrays')
+        if not isinstance(values, list) or len(values) != count or any(type(v) not in (int, float) or abs(v) > 1000000 or not math.isfinite(v) or (v != 0 and abs(v) < 2 ** -149) for v in values):
+            raise ValueError('Bake transform/scale must be bounded representable numeric arrays')
         if key == 'scale' and any(not 0 <= v <= 10000 for v in values):
             raise ValueError('Bake scale must be 0..10000')
     width, height = document['width'], document['height']

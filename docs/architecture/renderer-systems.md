@@ -467,8 +467,10 @@ The offline raw-texel cooker accepts optional `bake` metadata only for linear
 `Rgba8Unorm`, semantic `data`, and `mip_levels: 1`. It validates nonzero uint64
 `source_id`, `scene_revision`, `dependency_revision`; optional `direct_light_id`
 (zero means indirect-only); twelve column-major affine `transform` components;
-three `scale` components; and integer `gutter` (1..16, default one). Every gutter
-texel must replicate its nearest interior texel, and the interior is at least 2×2.
+three `scale` components; and integer `gutter` (1..16, default one). Nonzero numeric
+components below binary32's minimum magnitude (`2^-149`) are rejected before header
+generation; zero and representable subnormal values are accepted. Every gutter texel
+must replicate its nearest interior texel, and the interior is at least 2×2.
 The generated `Bake(texture)` returns the immutable metadata and texel-center UV
 transform; the manifest retains that metadata with source/upload hashes.
 See the [SDK bake source](../../tests/sdk_consumer/l4-bake.texture.json) for a complete
