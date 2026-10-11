@@ -1,9 +1,8 @@
-#include <ludus/foundation/math/vector.hpp>
-#include <ludus/runtime/resources/mesh.h>
+#pragma once
 
-#include <catch2/catch_test_macros.hpp>
-#include <limits>
-
+// Included by the existing test translation unit to avoid repeated Catch2 parsing.
+namespace mesh_cases
+{
 using namespace ludus::foundation;
 namespace r = ludus::resources;
 namespace c = ludus::content;
@@ -168,3 +167,4 @@ TEST_CASE("Mesh validation preserves drained profile and rejects malformed geome
     REQUIRE(f.Adapter.Initialize(&input, 1) == r::Status::Ok);
     CHECK(f.Adapter.Descriptor().Epoch(&f.Adapter) != epoch);
 }
+} // namespace mesh_cases

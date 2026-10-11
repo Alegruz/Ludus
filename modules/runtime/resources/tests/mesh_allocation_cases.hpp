@@ -1,12 +1,8 @@
-#include <ludus/foundation/base/types.h>
+#pragma once
 
-#include <ludus/runtime/resources/mesh.h>
-
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
-
-#include "internal/mesh_test_hooks.hpp"
-
+// Included by the existing test translation unit to avoid repeated Catch2 parsing.
+namespace mesh_allocation_cases
+{
 TEST_CASE("Partial mesh allocation failure keeps reservation until cleanup and permits retry", "[resources][mesh]")
 {
     using namespace ludus::foundation;
@@ -70,3 +66,4 @@ TEST_CASE("Partial mesh allocation failure keeps reservation until cleanup and p
     REQUIRE(manager.Borrow(lease.Token(), c::Kind::Mesh, payload) == r::Status::Ok);
     CHECK(static_cast<const r::MeshDefinition*>(payload)->Normals[0].Z == 1);
 }
+} // namespace mesh_allocation_cases

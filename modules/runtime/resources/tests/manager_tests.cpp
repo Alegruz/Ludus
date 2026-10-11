@@ -1,10 +1,14 @@
 #include <ludus/content/content.h>
 #include <ludus/runtime/resources/manager.h>
+#include <ludus/runtime/resources/mesh.h>
 
 #include "internal/counters.hpp"
+#include "internal/mesh_test_hooks.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+
+#include <limits>
 
 using namespace ludus::foundation;
 namespace r = ludus::resources;
@@ -438,3 +442,6 @@ TEST_CASE("Initialization validates limits and uses fresh nonwrapping identity",
     REQUIRE_FALSE(r::internal::Advance(generation));
     REQUIRE(generation == 0xFFFFFFFFU);
 }
+
+#include "mesh_allocation_cases.hpp"
+#include "mesh_cases.hpp"
