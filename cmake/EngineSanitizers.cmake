@@ -15,6 +15,10 @@ function(ludus_configure_project_sanitizers target_name)
 
     if(LUDUS_ENABLE_UBSAN)
         list(APPEND enabled_sanitizers "undefined")
+        # Thanks to LLVM, Clang 18 "UndefinedBehaviorSanitizer", Usage: the
+        # default recovers after most findings. A diagnostic must fail a test.
+        # https://releases.llvm.org/18.1.8/tools/clang/docs/UndefinedBehaviorSanitizer.html
+        target_compile_options(${target_name} INTERFACE -fno-sanitize-recover=undefined)
     endif()
 
     if(LUDUS_ENABLE_TSAN)

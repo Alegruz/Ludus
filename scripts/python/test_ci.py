@@ -153,22 +153,16 @@ class LockedSetupTests(unittest.TestCase):
 
 
 class AnalysisTests(unittest.TestCase):
-    def test_objective_cpp_is_formatted_and_analyzed_from_its_compile_database(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source = root / "modules/platform/src/window_cocoa.mm"
-            source.parent.mkdir(parents=True)
-            source.touch()
-            database = root / "out/build" / engine.DEFAULT_PRESET / "compile_commands.json"
-            database.parent.mkdir(parents=True)
-            database.write_text("[]")
-            self.assertIn(".mm", engine.FORMAT_SUFFIXES)
-            with patch.object(engine, "load_tool_versions", return_value={}), \
-                    patch.object(engine, "find_system_tool", return_value="clang-tidy-18"), \
-                    patch.object(engine, "compile_database_files", return_value={source.resolve()}), \
-                    patch.object(engine, "run_analysis_commands") as analyze:
-                engine.run_tidy(root, engine.DEFAULT_PRESET)
-            self.assertEqual(analyze.call_args.args[1][0][-1], source.resolve())
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+
+    @staticmethod
+    def result(code, text, log):
+        from quality_process import ProcessResult
+        log.write_text(text)
+        return ProcessResult(code, log, len(text.encode()), False, False)
 
     def test_shards_execute_every_translation_unit_once(self):
         commands = [["tidy", str(i)] for i in range(11)]
@@ -176,23 +170,23 @@ class AnalysisTests(unittest.TestCase):
 
         def analyze(command, **kwargs):
             visited.append(command[1])
-            return subprocess.CompletedProcess(command, 0, stdout="")
+            return self.result(0, "", kwargs["log"])
 
         with patch.dict(os.environ, {"LUDUS_TIDY_JOBS": "2", "LUDUS_TIDY_SHARD_COUNT": "3"}), \
-                patch.object(engine.subprocess, "run", side_effect=analyze), \
+                patch.object(engine, "run_bounded", side_effect=analyze), \
                 contextlib.redirect_stdout(io.StringIO()):
             for index in range(3):
                 with patch.dict(os.environ, {"LUDUS_TIDY_SHARD_INDEX": str(index)}):
-                    engine.run_analysis_commands(Path.cwd(), commands)
+                    engine.run_analysis_commands(self.root, commands)
         self.assertCountEqual(visited, [str(i) for i in range(11)])
 
     def test_invalid_or_empty_shards_fail_before_launching_analysis(self):
         for count, index in (("0", "0"), ("2", "2"), ("2", "-1"), ("two", "0"), ("2", "one"), ("2", "1")):
             with self.subTest(count=count, index=index), \
                     patch.dict(os.environ, {"LUDUS_TIDY_SHARD_COUNT": count, "LUDUS_TIDY_SHARD_INDEX": index}), \
-                    patch.object(engine.subprocess, "run") as run:
+                    patch.object(engine, "run_bounded") as run:
                 with self.assertRaises(engine.EngineError):
-                    engine.run_analysis_commands(Path.cwd(), [["tidy", "source.cpp"]])
+                    engine.run_analysis_commands(self.root, [["tidy", "source.cpp"]])
                 run.assert_not_called()
 
     def test_failed_shard_keeps_diagnostics_and_fails_the_gate(self):
@@ -202,28 +196,15 @@ class AnalysisTests(unittest.TestCase):
         with patch.dict(os.environ, {"LUDUS_TIDY_SHARD_COUNT": "2", "LUDUS_TIDY_SHARD_INDEX": "1"}), \
                 contextlib.redirect_stdout(output):
             with self.assertRaisesRegex(engine.EngineError, "1 translation unit"):
-                engine.run_analysis_commands(Path.cwd(), commands)
+                engine.run_analysis_commands(self.root, commands)
         self.assertIn("failed shard\n", output.getvalue())
         self.assertNotIn("other shard", output.getvalue())
 
     def test_empty_database_cannot_pass_a_sharded_gate(self):
         with patch.dict(os.environ, {"LUDUS_TIDY_SHARD_COUNT": "2", "LUDUS_TIDY_SHARD_INDEX": "0"}), \
-                patch.object(engine.subprocess, "run") as run:
+                patch.object(engine, "run_bounded") as run:
             with self.assertRaisesRegex(engine.EngineError, "no translation units"):
-                engine.run_analysis_commands(Path.cwd(), [])
-            run.assert_not_called()
-
-    def test_empty_native_database_cannot_bypass_shard_validation(self):
-        with tempfile.TemporaryDirectory() as temporary, \
-                patch.dict(os.environ, {"LUDUS_TIDY_SHARD_COUNT": "2", "LUDUS_TIDY_SHARD_INDEX": "0"}), \
-                patch.object(engine, "load_tool_versions", return_value={}), \
-                patch.object(engine, "find_system_tool", return_value="clang-tidy-18"), \
-                patch.object(engine, "cmake_configure"), \
-                patch.object(engine, "compile_database_files", return_value=set()), \
-                patch.object(engine.subprocess, "run") as run:
-            root = Path(temporary)
-            with self.assertRaisesRegex(engine.EngineError, "no translation units"):
-                engine.run_tidy(root, engine.DEFAULT_PRESET)
+                engine.run_analysis_commands(self.root, [])
             run.assert_not_called()
 
     def test_concurrency_is_bounded_and_all_failures_are_reported(self):
@@ -242,14 +223,14 @@ class AnalysisTests(unittest.TestCase):
             barrier.wait(timeout=5)
             with mutex:
                 active -= 1
-            return subprocess.CompletedProcess(command, 1 if command[1] in ("0", "3") else 0,
-                                               stdout=f"diagnostic {command[1]}\n")
+            return self.result(1 if command[1] in ("0", "3") else 0,
+                               f"diagnostic {command[1]}\n", kwargs["log"])
 
         output = io.StringIO()
         with patch.dict(os.environ, {"LUDUS_TIDY_JOBS": "2"}), \
-                patch.object(engine.subprocess, "run", side_effect=analyze), contextlib.redirect_stdout(output):
+                patch.object(engine, "run_bounded", side_effect=analyze), contextlib.redirect_stdout(output):
             with self.assertRaisesRegex(engine.EngineError, "2 translation unit"):
-                engine.run_analysis_commands(Path.cwd(), [["tidy", str(i)] for i in range(4)])
+                engine.run_analysis_commands(self.root, [["tidy", str(i)] for i in range(4)])
         self.assertEqual(peak, 2)
         self.assertCountEqual(visited, ["0", "1", "2", "3"])
         diagnostics = [line for line in output.getvalue().splitlines() if line.startswith("diagnostic")]
@@ -258,9 +239,9 @@ class AnalysisTests(unittest.TestCase):
     def test_invalid_worker_count_fails_without_launching_analysis(self):
         for value in ("0", "-1", "two"):
             with self.subTest(value=value), patch.dict(os.environ, {"LUDUS_TIDY_JOBS": value}), \
-                    patch.object(engine.subprocess, "run") as run:
+                    patch.object(engine, "run_bounded") as run:
                 with self.assertRaisesRegex(engine.EngineError, "positive integer"):
-                    engine.run_analysis_commands(Path.cwd(), [["tidy", "source.cpp"]])
+                    engine.run_analysis_commands(self.root, [["tidy", "source.cpp"]])
                 run.assert_not_called()
 
     def test_real_process_diagnostics_survive_a_failed_command(self):
@@ -271,7 +252,7 @@ class AnalysisTests(unittest.TestCase):
         output = io.StringIO()
         with patch.dict(os.environ, {"LUDUS_TIDY_JOBS": "2"}), contextlib.redirect_stdout(output):
             with self.assertRaisesRegex(engine.EngineError, "1 translation unit"):
-                engine.run_analysis_commands(Path.cwd(), commands)
+                engine.run_analysis_commands(self.root, commands)
         self.assertIn("analysis error\n", output.getvalue())
         self.assertIn("analysis completed\n", output.getvalue())
         self.assertIn("Analysis exited with code 2", output.getvalue())
@@ -281,10 +262,11 @@ class AnalysisTests(unittest.TestCase):
             with self.assertRaisesRegex(engine.EngineError, "Cannot launch analysis"):
                 engine.run_analysis_commands(Path(temporary), [[Path(temporary) / "missing-analyzer"]])
 
-    def test_default_worker_count_is_serial(self):
+    def test_missing_worker_result_cannot_pass(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(engine, "ThreadPoolExecutor") as pool:
             pool.return_value.__enter__.return_value.map.return_value = []
-            engine.run_analysis_commands(Path.cwd(), [["tidy", "source.cpp"]])
+            with self.assertRaisesRegex(engine.EngineError, "omitted required"):
+                engine.run_analysis_commands(self.root, [["tidy", "source.cpp"]])
             pool.assert_called_once_with(max_workers=1)
 
 

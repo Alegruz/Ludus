@@ -16,7 +16,7 @@ install/export rules.
 The [toolchain record](../../config/luau_toolchain.json) pins compiler and VM to
 `1eca9fda3e4753a1592000f6cfdf659aaa778b7d`, archive SHA-256
 `5b93ecef638a485065f042be1f48436e2d835deb9cdea7ccdccbfaa467e74a48`.
-The experimental profile is `s0-interpreter-longjmp-loader-lifetime-v1`.
+The experimental profile is `s0-interpreter-longjmp-loader-lifetime-v2`.
 The compiler uses optimization level 1 and debug level 2. Fixture `--!strict`
 annotations document intent; this spike does not yet implement generated API
 definitions or a type-checking acceptance gate.
@@ -104,6 +104,29 @@ This is a source-audit finding, not a claim that ASan diagnosed longjmp UB or th
 every unmodified allocation fail point necessarily leaks. The unmodified pin is
 not approved for production. Before S1 adoption, decide whether to obtain an
 upstream fix, change the reviewed pin, or explicitly maintain this small profile.
+
+### Sanitizer function-prefix profile
+
+Q0 fatal UBSan exposed a Clang 18 Mach-O prefix/coalescing problem at VM close.
+The callback in `lgc.cpp` and indirect call in `lmem.cpp` have matching signatures
+and object-file type hashes. The preceding shared noinline `assertCallHandler`
+is emitted as a coalesced inline function; its atom also contains the following
+local callback's sanitizer prefix. Selecting another translation unit's helper
+can therefore give the callback a different linked prefix and a false
+function-type-mismatch finding. Both Apple ld and LLVM 18 ld64.lld reproduced it.
+
+Thanks to Roblox/Luau's
+[Common.h at the pinned revision](https://github.com/luau-lang/luau/blob/1eca9fda3e4753a1592000f6cfdf659aaa778b7d/Common/include/Luau/Common.h)
+for the existing assertion contract. The v2 profile gives only
+`assertCallHandler` internal linkage with `static inline`; its body, noinline
+attribute, shared handler storage, licenses and diagnostics are preserved.
+`scripts/luau-probe` applies one exact checked substitution and source verification
+includes the transformed header. The compiler/VM revision and archive checksum
+remain pinned; the profile fingerprint invalidates old cooked evidence.
+
+A Clang 18 UBSan-only VM create/close reproducer aborted before this edit and
+exited zero afterward. Required macOS Behavior and safety acceptance exercises
+VM close with ASan/UBSan; no sanitizer check or recovery policy is disabled.
 
 ## Executed contracts
 

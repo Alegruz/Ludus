@@ -1,14 +1,16 @@
 # Engineering quality and CI architecture
 
-Status: proposed, October 7, 2026. Repository baseline: `01f5ecf` plus the
-current working tree. This document specifies an implementation plan; it does
-not claim that new checks, presets, reports or services are installed. The
+Status: Q0 implemented; Q1–Q4 proposed, October 11, 2026. Q0 implementation
+baseline: `f9cc7c8`. The initial proposal used `01f5ecf` plus its working tree.
+Only the Q0 failure controls and inventory are implemented; later checks,
+presets, reports and services remain an implementation plan. The
 [CI guide](../development/continuous-integration.md) owns current behavior.
 The initial decisions were recorded before the
 [reference review](engineering-quality-gems-review.md). Sections 5, 6 and 8 now
 incorporate its scenario coverage, reproducibility, profiling and failure-context
-improvements. This is the final proposal after that review, not implementation
-or performance evidence.
+improvements. The [implemented Q0 contracts](../development/continuous-integration.md#sanitizer-failure-controls)
+cover fatal UBSan, isolated sanitizer controls and bounded analysis inventory.
+No performance improvement is claimed.
 
 ## 1. Objectives and boundaries
 
@@ -64,7 +66,7 @@ acceptance, documentation checks and ClangBuildAnalyzer budgets. Preserve these
 gates during migration. Their existence does not establish coverage of every
 backend or lifetime path.
 
-Observed gaps at the baseline:
+Observed gaps at the initial proposal baseline (the CI guide records Q0 fixes):
 
 | Observation | Proposed correction |
 | --- | --- |
@@ -465,7 +467,7 @@ enter those guides only after implementation and successful evidence.
 
 | Phase | Deliverables | Acceptance before promotion |
 | --- | --- | --- |
-| Q0: Failure semantics | Fatal UBSan, negative controls, complete source inventory, bounded logs | Known-bad isolated processes fail; omissions/missing artifacts fail; current clean checks remain green |
+| Q0: Failure semantics (implemented) | Fatal UBSan, negative controls, complete configured-source inventory, bounded analysis/control logs | Known-bad isolated processes fail; omissions/missing artifacts fail; current clean checks remain green |
 | Q1: Analysis and editor | Reviewed stable analyzer rules, Ruff/actionlint, preset-aware clangd/tasks | Full supported compile databases analyzed; zero required-source omission; repeated repair preserves custom settings |
 | Q2: Evidence and coverage | Shared report schema, JUnit/raw artifacts, Clang coverage profile | Parallel profiles merge correctly; fresh/moved checkout works; failed tests/reporters cannot yield success; local reproduction succeeds |
 | Q3: Runtime exploration | Expanded TSan/fuzzing, selected Linux Memcheck | Fully instrumented targets, seeded reproducibility, original/minimized crash preservation and bounded runtime |

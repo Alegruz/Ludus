@@ -59,6 +59,21 @@ def loader_profile(data: bytes) -> bytes:
     return text.encode()
 
 
+def assertion_profile(data: bytes) -> bytes:
+    """Keep sanitizer function prefixes out of a coalesced header-function atom.
+
+    Thanks to Roblox/Luau, Common/include/Luau/Common.h at the recorded pin.
+    With Clang 18 Mach-O, coalescing its noinline external inline helper can
+    replace the next local function's UBSan type prefix with another TU's prefix.
+    Give only this helper internal linkage; the shared handler and diagnostics
+    retain their existing contract. No sanitizer instrumentation is disabled.
+    See docs/architecture/luau-s0.md#sanitizer-function-prefix-profile.
+    """
+    old = "LUAU_NOINLINE inline int assertCallHandler("
+    require(data.count(old.encode()) == 1, "Assertion profile no longer matches the pinned source")
+    return data.replace(old.encode(), b"LUAU_NOINLINE static inline int assertCallHandler(")
+
+
 def source_entries() -> dict[str, bytes]:
     archive = WORK / "luau.tar.gz"
     require(archive.is_file() and sha(archive.read_bytes()) == PIN["archive_sha256"],
@@ -76,6 +91,8 @@ def source_entries() -> dict[str, bytes]:
                 data = stream.read()
                 if relative.as_posix() == "VM/src/lvmload.cpp":
                     data = loader_profile(data)
+                elif relative.as_posix() == "Common/include/Luau/Common.h":
+                    data = assertion_profile(data)
                 entries[relative.as_posix()] = data
     return entries
 

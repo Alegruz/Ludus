@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tempfile
 import urllib.request
 import venv
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from formatting import format_source
+from analysis_inventory import compilation_entries, inventory, request_codemodel, SOURCE_ROOTS
+from quality_process import ANALYSIS_SECONDS, LANE_BYTES, LOG_BYTES, LogBudget, run_bounded
 
 
 NATIVE_PRESET_PREFIX = "macos-clang" if platform.system() == "Darwin" else "linux-clang"
@@ -59,7 +62,7 @@ PRESET_BUILD_TYPES.update({
 HOST_PRESETS = tuple(name for name in PRESET_BUILD_TYPES if name.startswith(NATIVE_PRESET_PREFIX))
 
 FORMAT_SUFFIXES = {".m", ".mm", ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
-TIDY_ROOTS = ("modules", "apps")
+TIDY_ROOTS = SOURCE_ROOTS
 
 BOOTSTRAP_INPUTS = (
     "config/tool_versions.json",
@@ -1257,6 +1260,7 @@ def configure_needs_fresh_cache(root: Path, preset: str) -> bool:
 
 
 def cmake_configure(root: Path, preset: str, extra_args: Sequence[str] = ()) -> None:
+    request_codemodel(build_dir_for_preset(root, preset))
     args: list[object] = [cmake(root)]
     if configure_needs_fresh_cache(root, preset):
         print(f"Refreshing stale CMake cache for {preset}.")
@@ -1553,42 +1557,49 @@ def run_format_check(root: Path, *, fix: bool) -> None:
 
 
 def compile_database_files(build_dir: Path) -> set[Path]:
-    database = build_dir / "compile_commands.json"
-    if not database.is_file():
-        raise EngineError(f"missing compilation database: {database}")
     try:
-        entries = json.loads(database.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise EngineError(f"failed to parse {database}: {exc}") from exc
-    return {Path(entry["file"]).resolve() for entry in entries if "file" in entry}
+        return {Path(entry["file"]) for entry in compilation_entries(build_dir)}
+    except ValueError as exc:
+        raise EngineError(str(exc)) from exc
 
 
 def run_tidy(root: Path, preset: str) -> None:
     versions = load_tool_versions(root)
     clang_tidy = find_system_tool(root, "clang-tidy", versions)
-    build_dir = root / "out" / "build" / preset
-    if not (build_dir / "compile_commands.json").is_file():
+    build_dir = build_dir_for_preset(root, preset)
+    if not (build_dir / "compile_commands.json").is_file() or not list(
+            (build_dir / ".cmake/api/v1/reply").glob("index-*.json")):
         cmake_configure(root, preset)
+    try:
+        entries, report = inventory(root, build_dir)
+    except ValueError as exc:
+        raise EngineError(str(exc)) from exc
+    directory = analysis_directory(root)
+    (directory / "inventory.json").write_text(json.dumps(report, indent=2) + "\n")
+    header_roots = sorted({str(root.resolve()), report["source_root"]})
+    header_filter = f"^({'|'.join(re.escape(path) for path in header_roots)})/({'|'.join(TIDY_ROOTS)})/.*"
+    commands = []
+    # A single-entry database makes each compiled configuration explicit; tidy
+    # cannot silently choose another target's defines for the same source file.
+    for index, entry in enumerate(entries):
+        database = directory / "commands" / str(index)
+        database.mkdir(parents=True)
+        (database / "compile_commands.json").write_text(json.dumps([entry]) + "\n")
+        commands.append([clang_tidy, "-p", database, "--quiet", "--warnings-as-errors=*",
+                         f"--header-filter={header_filter}", entry["file"]])
+    print(f"Analysis inventory: {len(report['sources'])} sources, {len(entries)} compile commands", flush=True)
+    run_analysis_commands(root, commands, directory=directory)
 
-    compiled_files = compile_database_files(build_dir)
-    requested_files = [path.resolve() for path in source_files(root, {".cpp", ".cc", ".cxx", ".mm"}, TIDY_ROOTS)]
-    tidy_files = [path for path in requested_files if path in compiled_files]
 
-    if not tidy_files:
-        print("No project source files from modules/apps were found in the compilation database.")
-
-    header_filter = f"^{re.escape(str(root))}/(modules|apps)/.*"
-    commands = [
-        [clang_tidy, "-p", build_dir, "--quiet", "--warnings-as-errors=*",
-         f"--header-filter={header_filter}", path]
-        for path in tidy_files
-    ]
-    run_analysis_commands(root, commands)
+def analysis_directory(root: Path) -> Path:
+    parent = root / "out/quality/analysis"
+    parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix="run-", dir=parent))
 
 
 def run_analysis_commands(root: Path, commands: Sequence[Sequence[object]], *,
-                          env: dict[str, str] | None = None) -> None:
-    """Bound analysis concurrency and report complete, ordered diagnostics."""
+                          env: dict[str, str] | None = None, directory: Path | None = None) -> None:
+    """Bound concurrency, output and runtime; incomplete analysis always fails."""
     try:
         jobs = int(os.environ.get("LUDUS_TIDY_JOBS", "1"))
     except ValueError as exc:
@@ -1604,33 +1615,50 @@ def run_analysis_commands(root: Path, commands: Sequence[Sequence[object]], *,
         raise EngineError("Analysis requires a positive shard count and 0 <= index < count")
     total = len(commands)
     commands = commands[shard_index::shard_count]
-    if shard_count > 1 and not commands:
-        raise EngineError("Analysis shard has no translation units; reduce the shard count")
-    if shard_count > 1:
-        print(f"Analysis shard {shard_index + 1}/{shard_count}: {len(commands)} of {total} translation units")
     if not commands:
-        return
+        raise EngineError("Analysis shard has no translation units; required analysis cannot be empty")
+    if shard_count > 1:
+        print(f"Analysis shard {shard_index + 1}/{shard_count}: {len(commands)} of {total} compile commands")
+    directory = directory or analysis_directory(root)
+    budget = LogBudget(LANE_BYTES)
+    print(f"Analysis evidence: {directory}", flush=True)
 
-    def analyze(command: Sequence[object]) -> subprocess.CompletedProcess[str]:
+    def analyze(item):
+        index, command = item
         try:
-            return subprocess.run(
-                [str(arg) for arg in command], cwd=root, check=False, text=True,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
-            )
+            return run_bounded(command, cwd=root, env=env, log=directory / f"{index}.log",
+                               timeout=ANALYSIS_SECONDS, limit=LOG_BYTES, budget=budget), None
         except OSError as exc:
-            raise EngineError(f"Cannot launch analysis: {command_line(command)}: {exc}") from exc
+            return None, f"Cannot launch analysis: {command_line(command)}: {exc}"
 
-    failures = 0
+    records = []
     with ThreadPoolExecutor(max_workers=min(jobs, len(commands))) as pool:
-        for command, result in zip(commands, pool.map(analyze, commands)):
+        for command, (result, error) in zip(commands, pool.map(analyze, enumerate(commands))):
             print(f"+ {command_line(command)}", flush=True)
-            if result.stdout:
-                print(result.stdout, end="", flush=True)
-            if result.returncode:
-                failures += 1
-                print(f"Analysis exited with code {result.returncode}", flush=True)
+            if result is not None:
+                if result.log.is_file():
+                    print(result.log.read_text(encoding="utf-8", errors="replace"), end="", flush=True)
+                state = "pass" if result.complete and result.returncode == 0 else "fail"
+                record = {"argv": [str(arg) for arg in command], "state": state,
+                          "exit_code": result.returncode, "log": result.log.name,
+                          "bytes": result.bytes_written, "truncated": result.truncated,
+                          "timed_out": result.timed_out, "complete": result.complete}
+                if state != "pass":
+                    print(f"Analysis exited with code {result.returncode}; complete={result.complete}", flush=True)
+            else:
+                record = {"argv": [str(arg) for arg in command], "state": "error", "error": error}
+                print(error, flush=True)
+            records.append(record)
+    report = {"version": 1, "total_commands": total, "shard_index": shard_index,
+              "shard_count": shard_count, "expected": len(commands), "completed": len(records),
+              "results": records}
+    (directory / "results.json").write_text(json.dumps(report, indent=2) + "\n")
+    failures = sum(record["state"] != "pass" for record in records)
+    if len(records) != len(commands):
+        raise EngineError("Static analysis omitted required compile commands")
     if failures:
-        raise EngineError(f"Static analysis failed for {failures} translation unit(s)")
+        details = next((record["error"] for record in records if "error" in record), "")
+        raise EngineError(f"Static analysis failed for {failures} translation unit(s). {details}")
 
 
 def run_include_cleaner(root: Path, preset: str) -> None:
