@@ -317,7 +317,11 @@ def verify_identity(build_dir: Path, source_dir: Path, engine: Any, client: str 
     Guards against reading a reply from an unrelated tree (design section 7:
     verify source/build identity before Run).
     """
-    _, model, aggregate = _latest_codemodel(build_dir, client, engine)
+    _, model, _ = _latest_codemodel(build_dir, client, engine)
+    _verify_model_identity(model, build_dir, source_dir, engine)
+
+
+def _verify_model_identity(model: Any, build_dir: Path, source_dir: Path, engine: Any) -> None:
     paths = (model or {}).get("paths") or {}
     reported_source = paths.get("source")
     reported_build = paths.get("build")
@@ -331,3 +335,42 @@ def verify_identity(build_dir: Path, source_dir: Path, engine: Any, client: str 
         raise engine.EngineError(
             f"CMake codemodel build root {reported_build!r} does not match expected {build_dir}"
         )
+
+
+def compiled_sources(build_dir: Path, source_dir: Path, engine: Any,
+                     client: str = "ludus-quality") -> tuple[list[dict], str]:
+    """Return compiled target sources, preserving repeated per-target instances.
+
+    Shares the version, identity, reference confinement and bounded JSON reader
+    with editor/debugger discovery. Headers/resources without compileGroupIndex
+    are excluded; generated source ownership is retained for the caller to report.
+    """
+    # Thanks to Kitware, "cmake-file-api(7)", codemodel v2 target sources:
+    # compileGroupIndex identifies compiled sources, independently of the database.
+    # https://cmake.org/cmake/help/v3.29/manual/cmake-file-api.7.html
+    reply, model, aggregate = _latest_codemodel(build_dir, client, engine)
+    _verify_model_identity(model, build_dir, source_dir, engine)
+    configuration = _select_configuration(model, build_dir, engine)
+    sources = []
+    try:
+        targets = configuration["targets"]
+        if not isinstance(targets, list) or len(targets) > MAX_TARGET_ENTRIES:
+            raise engine.EngineError("invalid or oversized CMake source target inventory")
+        for entry in targets:
+            target = _bounded_read_json(_reply_reference(reply, entry["jsonFile"], engine), aggregate, engine)
+            for item in target.get("sources", []):
+                if "compileGroupIndex" not in item:
+                    continue
+                group = item["compileGroupIndex"]
+                groups = target.get("compileGroups", [])
+                if type(group) is not int or not isinstance(groups, list) or not 0 <= group < len(groups):
+                    raise engine.EngineError("invalid CMake source compile-group reference")
+                if not isinstance(item["path"], str) or not item["path"]:
+                    raise engine.EngineError("invalid CMake compiled source path")
+                if type(item.get("isGenerated", False)) is not bool:
+                    raise engine.EngineError("invalid CMake generated-source ownership")
+                sources.append({"path": str((source_dir / item["path"]).resolve()),
+                                "generated": item.get("isGenerated", False)})
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise engine.EngineError("invalid CMake compiled source inventory; reconfigure") from exc
+    return sources, model["paths"]["source"]

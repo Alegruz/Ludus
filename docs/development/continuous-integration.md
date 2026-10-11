@@ -5,7 +5,7 @@ This guide records the implemented workflows. The proposed
 the next tooling, evidence and platform improvements; its
 [reference review](../architecture/engineering-quality-gems-review.md) records
 the Game Programming Gems ideas incorporated after the initial design.
-New checks in that proposal are not enabled by this guide.
+Q0 failure semantics are implemented below; later phases remain proposals.
 
 Native CI runs on pull requests, pushes to `main`, and manual dispatches.
 Feature branches are validated through their pull requests, avoiding a duplicate
@@ -32,8 +32,8 @@ For changes requiring native validation, source formatting, foundational include
 boundaries, and Python tooling tests run first. Independent jobs then validate:
 
 - Development builds, all native tests, and the installed SDK consumer, without PCH;
-- ASan/UBSan builds and tests;
-- ThreadSanitizer concurrency tests;
+- ASan/UBSan builds and tests, with clean-startup and known-defect controls;
+- ThreadSanitizer concurrency tests and a known-race control;
 - macOS platform builds, Cocoa tests, static analysis, and sanitizers;
 - full Clang static analysis, including test translation units;
 - optional editor initialization and offscreen tests;
@@ -77,9 +77,71 @@ keep their separate cache policy. The native setup action installs ccache.
 ## Analysis and timing
 
 `LUDUS_TIDY_JOBS` sets the maximum number of concurrent native clang-tidy
-processes. The local default is one; CI uses two. Diagnostics are buffered per
-translation unit and printed in source order. Every command finishes before
-analysis reports failure, so one failing file does not hide later diagnostics.
+processes. The local default is one; CI uses two. Diagnostics are saved per
+compile command and printed in source/variant order.
+The selected preset's CMake File API codemodel is reconciled with its compilation
+database. All compiled first-party C, C++, Objective-C and Objective-C++ sources
+under `modules/`, `apps/`, `tools/`, `tests/` and `examples/` are inventoried;
+platform-disabled sources are outside that configured scope. CMake-declared
+generated sources and prepared/external dependencies are reported as exclusions.
+This does not claim coverage of optional targets or separately configured SDK
+consumers absent from that preset; their existing dedicated checks remain.
+
+Missing files, malformed/stale databases, missing source or target variants, and
+empty required scopes fail. Exact duplicate commands are deduplicated; distinct
+commands for the same source are analyzed using separate single-entry databases.
+`LUDUS_TIDY_SHARD_COUNT` and `LUDUS_TIDY_SHARD_INDEX` select deterministic shards
+only after the full inventory is validated. Empty shards fail.
+
+Ignored `out/quality/analysis/run-*/` contains `inventory.json`, the exact
+single-entry compile databases, original combined stdout/stderr byte prefixes
+and `results.json`. Each process has a 300-second deadline and a 1 MiB diagnostic
+limit; the invocation has a shared 100 MiB raw-log budget. A timeout, truncation,
+missing log, launch failure or omitted result fails even if the process returns
+zero. Independent commands still report findings. CI always uploads each shard's
+available evidence with 14-day retention; a missing artifact fails the upload.
+These are Q0 inventory/control records, not the proposed Q2 full run schema.
+
+## Sanitizer failure controls
+
+`LUDUS_ENABLE_UBSAN=ON` propagates `-fno-sanitize-recover=undefined` through the
+same project options as sanitizer instrumentation. Recoverable UB therefore
+fails the invoking test. Thanks to LLVM's
+[Clang 18 UBSan usage contract](https://releases.llvm.org/18.1.8/tools/clang/docs/UndefinedBehaviorSanitizer.html#usage)
+for the fatal recovery policy and signed-overflow control.
+
+Enabled ASan, UBSan and TSan builds register `sanitizer-control` CTest tests.
+Their deliberately defective children live only in `tests/quality/`; they are
+never installed or called by production. Each Python driver requires clean
+startup to exit zero, then requires a separate defect process to exit nonzero
+and emit the specific bounds/overflow/race diagnostic. A recovery exit, unrelated
+crash, runtime startup failure, truncated output or timeout is a failed control.
+`WILL_FAIL` alone is insufficient and is not used.
+
+Run the controls after building the selected sanitizer preset:
+
+```bash
+./scripts/build linux-clang-asan-ubsan
+out/host-tools/venv/bin/ctest --preset linux-clang-asan-ubsan --label-regex sanitizer-control --output-on-failure --no-tests=error
+```
+
+On macOS use `macos-clang-asan-ubsan`. TSan remains a separate build tree;
+its existing CI job now builds and runs `ludus_tsan_control_child` before the
+concurrency acceptance suite. Native Clang controls explicitly locate the
+compiler's LLVM symbolizer; missing symbolizers fail configuration. Control
+children receive explicit sanitizer options with no inherited suppression/log
+redirection; UBSan requests runtime recovery to prove the compiler policy still
+terminates. This environment applies only to the test children.
+
+Each child has a 15-second deadline and 1 MiB log ceiling; each two-process
+control has a 2 MiB raw-log ceiling. Its unique run directory under
+`out/build/<preset>/tests/quality/<kind>-evidence/` retains clean/fault logs and
+`results.json`. Sanitizer and TSan CI jobs preserve that evidence even on failure.
+The macOS sanitizer preset runs and preserves controls before native runtime and
+Behavior acceptance, so a later application failure cannot prevent their capture.
+Its separate Debug diagnostic configure retains its startup/decision tests.
+
+## Measuring feedback
 
 GitHub's separate setup/build/test/analysis steps expose phase durations.
 Compiler jobs publish cache statistics, and the budget job uploads its detailed

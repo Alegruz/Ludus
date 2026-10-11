@@ -39,6 +39,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QStandardItemModel>
 #include <QTableWidget>
 #include <QTimer>
 #include <QToolBar>
@@ -432,7 +433,7 @@ ProjectDescriptor MainWindow::DraftFromFields() const
     draft.Name = NameEdit_->text();
     draft.ProviderKind = ProviderBox_->currentText() == QStringLiteral("cmake") ? Provider::Cmake : Provider::Ludus;
     draft.SourceDir = SourceDirEdit_->text();
-    draft.Preset = PresetBox_->currentText();
+    draft.Preset = PresetBox_->currentData().toString();
     draft.Target = TargetBox_->currentText();
     draft.RunCwd = CwdEdit_->text();
     draft.RunArgs.clear();
@@ -747,9 +748,17 @@ void MainWindow::RenderFields()
     {
         ProviderBox_->setCurrentText(provider);
     }
-    if (PresetBox_->currentText() != draft.Preset)
+    auto* profiles = static_cast<QStandardItemModel*>(PresetBox_->model());
+    for (foundation::int32 index = 0; index < PresetBox_->count(); ++index)
     {
-        PresetBox_->setCurrentText(draft.Preset);
+        const auto preset = PresetBox_->itemData(index).toString();
+        const bool supported = draft.Version == 2 || preset == QStringLiteral("linux-clang-debug") ||
+                               preset == QStringLiteral("linux-clang-development");
+        profiles->item(index)->setEnabled(supported);
+    }
+    if (PresetBox_->currentData().toString() != draft.Preset)
+    {
+        PresetBox_->setCurrentIndex(PresetBox_->findData(draft.Preset));
     }
 
     // Executable-only dropdown after Configure; the current (possibly invalid)
@@ -868,6 +877,19 @@ void MainWindow::RenderCapabilities()
     ClearAction_->setEnabled(caps.CanClearOutput);
     CopyAction_->setEnabled(caps.CanCopyJobDetails);
 
+    // Lifecycle buttons reuse the same command gates as menus/toolbars.
+    ProjectCheckButton_->setEnabled(CheckSetupAction_->isEnabled());
+    ProjectCheckButton_->setToolTip(CheckSetupAction_->toolTip());
+    ProjectRepairButton_->setEnabled(SetupProjectAction_->isEnabled());
+    ProjectRepairButton_->setToolTip(SetupProjectAction_->toolTip());
+    ProjectRunButton_->setEnabled(BuildRunAction_->isEnabled());
+    ProjectRunButton_->setToolTip(BuildRunAction_->toolTip());
+    ProjectStopButton_->setEnabled(StopAction_->isEnabled());
+    ProjectSaveButton_->setEnabled(caps.CanSave && !Content_->Importing());
+#if defined(Q_OS_WASM)
+    ProjectSaveButton_->setText(QStringLiteral("Save and download"));
+#endif
+
     const bool editable = caps.CanEdit;
     NameEdit_->setEnabled(editable);
     ProviderBox_->setEnabled(editable);
@@ -883,6 +905,56 @@ void MainWindow::RenderCapabilities()
 void MainWindow::RenderStatus()
 {
     const WorkspaceState& state = Controller_->State();
+    const auto& project = state.Saved;
+    const QString engine = project.HasEngine
+                               ? QStringLiteral("Required engine: Ludus %1\nRequired components: %2")
+                                     .arg(project.Engine.Version, project.Engine.Components.join(QStringLiteral(", ")))
+                               : QStringLiteral("Engine selection is owned by this project's build definitions.");
+    ProjectIdentity_->setText(
+        QStringLiteral("Project folder: %1\n%2\nSaved build profile: %3")
+            .arg(QDir::toNativeSeparators(QFileInfo(state.DescriptorPath).absolutePath()), engine, project.Preset));
+    ProjectSetupStatus_->setText(state.SetupStatus.isEmpty()
+                                     ? QStringLiteral("Setup has not been checked for this project.")
+                                     : state.SetupStatus);
+    QString next;
+#if defined(Q_OS_WASM)
+    next = QStringLiteral("Download your changes to keep them. Use the desktop editor to repair setup and build "
+                          "your project. Browser Play runs a shipped sample; it does not rebuild your changes.");
+#else
+    if (state.OperationPhase == Phase::CleanupUnknown)
+    {
+        next =
+            QStringLiteral("Process cleanup could not be confirmed. Open Output and copy job details before recovery.");
+    }
+    else if (state.Busy())
+    {
+        next =
+            QStringLiteral("An operation is in progress. Follow its progress in Output; Stop requests cancellation.");
+    }
+    else if (Controller_->PlayState().Phase != PlayPhase::Stopped)
+    {
+        next = QStringLiteral("A live session is open. Use its inspector and Play controls, or Stop before repairing "
+                              "setup or starting a separate build and run.");
+    }
+    else if (state.Dirty())
+    {
+        next = QStringLiteral("Save your project settings before checking setup, repairing, or building. "
+                              "Other work areas save their own documents separately.");
+    }
+    else if (project.Version != 2 || project.ProviderKind != Provider::Cmake)
+    {
+        next = QStringLiteral("This project owns its engine and build setup. Use Build → Configure / Refresh Targets "
+                              "to discover executables, then Build and run. SDK repair is available for version-2 "
+                              "CMake game projects. Build and launch details exposes this project's settings.");
+    }
+    else
+    {
+        next = QStringLiteral("Check setup to verify this computer's tools and engine. Repair setup fixes missing or "
+                              "stale settings and verifies a build and tests. Build and run launches the saved target "
+                              "in a separate window. Open Content, Scene, Audio or Scripts to work on game content.");
+    }
+#endif
+    ProjectNextStep_->setText(next);
     QString phase;
     switch (state.OperationPhase)
     {
@@ -924,7 +996,7 @@ void MainWindow::RenderStatus()
         status += QStringLiteral("  —  last result: %1").arg(QString::fromLatin1(ResultCodeName(state.Result.Code)));
         if (!state.Result.Message.isEmpty())
         {
-            status += QStringLiteral(" (%1)").arg(state.Result.Message);
+            status += QStringLiteral(" (%1)").arg(state.Result.Message.section(QLatin1Char('\n'), 0, 0));
         }
     }
     if (state.OperationPhase == Phase::CleanupUnknown)
@@ -933,10 +1005,11 @@ void MainWindow::RenderStatus()
     }
     if (!state.SetupStatus.isEmpty())
     {
-        status += QStringLiteral("\n") + state.SetupStatus;
+        status += QStringLiteral("\n") + state.SetupStatus.section(QLatin1Char('\n'), 0, 0);
     }
     StatusLabel_->setText(status);
-    StatusLabel_->setToolTip(status);
+    StatusLabel_->setToolTip(status + QStringLiteral("\n") + state.Result.Message + QStringLiteral("\n") +
+                             state.SetupStatus);
 
     if (state.OperationPhase == Phase::Debugging)
     {

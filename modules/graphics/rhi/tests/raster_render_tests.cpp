@@ -1,4 +1,6 @@
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ludus/foundation/base/types.h>
 #include <ludus/graphics/rhi/compute.h>
@@ -7,6 +9,7 @@
 
 #include "cull.h"
 #include "internal/readback.h"
+#include "merged_frame.h"
 #include "ordered_frame.h"
 #include "raster.h"
 
@@ -52,6 +55,10 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     {
         mode = 6;
     }
+    SECTION("R5 merged painter order matches unmerged complete image")
+    {
+        mode = 7;
+    }
     const bool graphMode = mode >= 3;
     const bool computeMode = mode == 5;
     struct Guard final
@@ -85,7 +92,7 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     rhi::BindingLayoutHandle layout;
     REQUIRE(rhi::CreateBindingLayout(device, fragment.Bindings, layout) == rhi::RasterStatus::Ready);
     const float32 tint[4]{1, 1, 1, 1};
-    const float32 dim[4]{0.5F, 0.5F, 0.5F, 1};
+    const float32 dim[4]{mode == 7 ? .25F : .5F, .5F, mode == 7 ? .125F : .5F, mode == 7 ? .5F : 1};
     rhi::BufferHandle uniform, backgroundUniform;
     REQUIRE(rhi::CreateBuffer(device, {rhi::BufferRole::Uniform, sizeof(tint)}, RasterBytes(tint), uniform) ==
             rhi::RasterStatus::Ready);
@@ -199,6 +206,11 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
         REQUIRE(rhi::CreateBindingSet(device, layout, resources, compositeSet) == rhi::RasterStatus::Ready);
         rhi::RasterPipelineDescription
             uiDescription{vs, fs, layout, streams, attributes, true, false, rhi::RasterTarget::Rgba8Unorm, false};
+        if (mode == 7)
+        {
+            uiDescription.Depth = false;
+            uiDescription.Blend = true;
+        }
         REQUIRE(rhi::CreateRasterPipeline(device, uiDescription, ui) == rhi::RasterStatus::Ready);
         REQUIRE(rhi::CreateRasterPipeline(device, {vs, fs, layout, streams, attributes}, composite) ==
                 rhi::RasterStatus::Ready);
@@ -255,6 +267,76 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
         }
         rhi::OrderedGraph graph;
         rhi::GraphReport report;
+        if (mode == 7)
+        {
+            uint8 baseline[96 * 64 * 4]{}, merged[96 * 64 * 4]{};
+            // Optional benchmark output is test-only (ADR 0003). CPU setup includes
+            // authoring/compile; execute includes acquire/encode/submit. A readback
+            // waits for actual completion and checks every image outside those timers.
+            const bool benchmark = std::getenv("LUDUS_RHI_BENCHMARK") != nullptr;
+            if (benchmark)
+            {
+                std::printf("R5BACKEND,%u\n", static_cast<uint32>(rhi::GetStartup().SelectedBackend));
+            }
+            const uint32 counts[]{1, 8, 16, 31};
+            for (const auto layers : counts)
+            {
+                const uint32 iterations = benchmark ? 144 : 1;
+                for (uint32 iteration = 0; iteration < iterations; ++iteration)
+                {
+                    for (uint32 turn = 0; turn < 2; ++turn)
+                    {
+                        const bool merge = (turn + iteration) % 2 != 0;
+                        const auto setupStart = std::chrono::steady_clock::now();
+                        REQUIRE(ludus::qa::BuildMergedFrame(device, inputs, graph, report, merge, layers) ==
+                                rhi::RasterStatus::Ready);
+                        const auto executeStart = std::chrono::steady_clock::now();
+                        completion = {};
+                        REQUIRE(rhi::ExecuteOrderedGraph(device, surface, graph, completion) ==
+                                rhi::RasterStatus::Ready);
+                        const auto executeEnd = std::chrono::steady_clock::now();
+                        REQUIRE(rhi::backend::ReadHeadlessPixels(merge ? merged : baseline));
+                        const auto completionEnd = std::chrono::steady_clock::now();
+                        CHECK(report.RasterPasses == (merge ? 2 : layers + 1));
+                        CHECK(report.MergedPasses == (merge ? layers - 1 : 0));
+                        CHECK(report.DrawCount == layers + 2);
+                        if (benchmark && iteration >= 16)
+                        {
+                            const auto ns = [](auto from, auto to) {
+                                return static_cast<float64>(
+                                    std::chrono::duration_cast<std::chrono::nanoseconds>(to - from).count());
+                            };
+                            std::printf("R5,%u,%u,%u,%.0f,%.0f,%.0f,%u,%u,%.0f,%.0f,%.0f\n",
+                                        layers,
+                                        iteration - 16,
+                                        merge ? 1U : 0U,
+                                        ns(setupStart, executeStart),
+                                        ns(executeStart, executeEnd),
+                                        ns(executeEnd, completionEnd),
+                                        report.RasterPasses,
+                                        report.DrawCount,
+                                        static_cast<float64>(report.PlanStorageBytes),
+                                        static_cast<float64>(report.BufferBytes),
+                                        static_cast<float64>(report.TextureBytes));
+                        }
+                    }
+                    REQUIRE(std::memcmp(baseline, merged, sizeof(baseline)) == 0);
+                    if (layers > 1)
+                    {
+                        // Different hues make painter-order reversal observable;
+                        // equal images alone would allow two identically empty results.
+                        const usize top = (usize{16} * 96 + 12) * 4;
+                        const usize bottom = (usize{48} * 96 + 12) * 4;
+                        CHECK(baseline[top] == (layers % 2 == 0 ? 191 : 255));
+                        CHECK(baseline[top + 1] == 0);
+                        CHECK(baseline[top + 2] == 0);
+                        CHECK(baseline[top + 3] == 255);
+                        CHECK(baseline[bottom + 2] == (layers % 2 == 0 ? 159 : 255));
+                    }
+                }
+            }
+            return;
+        }
         REQUIRE(ludus::qa::BuildOrderedFrame(device, inputs, graph, report, mode == 4) == rhi::RasterStatus::Ready);
         // Plan retention, not public ownership, protects attachments during submit.
         if (!computeMode)

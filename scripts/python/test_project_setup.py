@@ -88,6 +88,18 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertEqual(6, len(self.calls))
         self.assertTrue(all("--list-presets=" in a[-1] or a[-1] == "--version" for a in self.calls))
 
+    def test_checked_identity_is_visible_and_read_only(self):
+        self.repair()
+        before = self.snapshot()
+        self.calls.clear()
+        result = setup.check_project(self.project, tooling_root=self.tools, runner=self.runner)
+        self.assertIn("Selected engine: Ludus " + self.manifest()["version"], result)
+        self.assertIn(self.manifest()["source_revision"], result)
+        self.assertIn("Installation: " + str(self.sdk.resolve()), result)
+        self.assertIn("(local override)", result)
+        self.assertEqual(before, self.snapshot())
+        self.assertTrue(all("--list-presets=" in a[-1] or a[-1] == "--version" for a in self.calls))
+
     def test_repeated_repair_preserves_custom_presets_and_editor_settings(self):
         custom = {"name": "my-build", "configurePreset": self.profile}
         setup.write_object(self.project / "CMakeUserPresets.json", {"version": 6, "buildPresets": [custom]})

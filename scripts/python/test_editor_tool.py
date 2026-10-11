@@ -839,3 +839,27 @@ class RealProcessTests(unittest.TestCase):
                 return
             time.sleep(0.02)
         self.fail(f"process {pid} was not cleaned up within {timeout}s")
+
+
+class SetupDetailsProtocolTests(unittest.TestCase):
+    def test_details_keep_long_unicode_paths_out_of_reserved_terminal(self):
+        frames = []
+        writer = editor_tool.ProtocolWriter("0000000000000001", frames.append)
+        details = "Selected engine: Ludus 0.1.0\nInstallation: /" + "日本語/" * 100
+        writer.setup_details(details)
+        writer.result("success", "configuring", "Ok", "Setup checked", True, 0, None)
+        self.assertEqual(details, json.loads(frames[0])["text"])
+        self.assertEqual("Setup checked", json.loads(frames[1])["message"])
+        self.assertLess(sum(map(len, frames)), editor_tool.CONTROL_RESERVE_BYTES)
+
+    def test_details_bound_and_terminal_reserve(self):
+        frames = []
+        writer = editor_tool.ProtocolWriter("0000000000000001", frames.append)
+        for text in ("", "日" * 6000):
+            with self.assertRaises(editor_tool.ProtocolError):
+                writer.setup_details(text)
+        writer._control_total = editor_tool.CONTROL_AGGREGATE_CAP - editor_tool.CONTROL_RESERVE_BYTES
+        with self.assertRaises(editor_tool.ProtocolError):
+            writer.setup_details("identity")
+        writer.result("failed", "configuring", "ProtocolError", "Details unavailable", True, None, None)
+        self.assertEqual(1, len(frames))

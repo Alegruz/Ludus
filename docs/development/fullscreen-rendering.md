@@ -195,10 +195,10 @@ their behavior.
 
 The reference-backend lifecycle suite tests admission, copied requirements,
 output preservation, cancellation, late completions, fallback generations,
-cross-owner misuse, loss and non-wrapping owner exhaustion. General typed
-resource slot/generation contracts, broader feature/format/limit negotiation,
-encoders and deferred retirement are subsequent slices of the
-[RHI/GDI architecture](../architecture/rhi-gdi.md#implementation-phases-and-acceptance).
+cross-owner misuse, loss and non-wrapping owner exhaustion. R1/R2 add typed
+slot/generation resources, retained command batches and deferred retirement;
+R3 adds ordered graph compilation. Broader feature/format/limit negotiation and
+independent devices/surfaces remain [architecture extensions](../architecture/rhi-gdi.md#remaining-work-and-decision-gates).
 
 ### Compatibility facade
 
@@ -268,7 +268,9 @@ binding snapshots and indexed/instanced triangle pipelines on Vulkan, Metal,
 WebGPU and WebGL 2. It uses the explicit device and existing acquired frame
 surface/headless color target. It does not introduce a second device session.
 Request `DeviceDescription::Required.PortableRaster = true` when this workload
-is mandatory. Compute and indirect rendering remain unavailable.
+is mandatory. [R4](#buffer-compute-and-indirect-rendering-r4) separately enables
+buffer compute and indexed indirect rendering on Vulkan, Metal and WebGPU;
+WebGL 2 requires an authored CPU/direct variant.
 
 `GetRasterCapabilities` reports effective allocation, texture dimension,
 uniform offset/range, record and per-frame draw bounds. Limits are verified on
@@ -304,10 +306,11 @@ Draws use canonical clip depth [0,1], Y-up geometry and texture UV (0,0) at
 the first uploaded row. Vulkan uses a negative-height viewport; the GLSL ES
 artifact converts clip depth. The frame's private depth attachment clears to
 one. Pipelines remain valid on resize because the session target format stays
-fixed. General render targets, explicit pass/encoder objects, updates, resource
-texture copy commands, mip generation and storage/compute are later slices.
-[R2 lifetime services](#lifetime-services-r2) add retained batches and bounded
-buffer upload/readback rings alongside the direct frame API.
+fixed. [R2 lifetime services](#lifetime-services-r2) add retained batches and
+bounded buffer upload/readback rings; [R3](#ordered-raster-graphs-r3) adds offscreen
+raster passes and [R4](#buffer-compute-and-indirect-rendering-r4) adds buffer compute.
+Existing-resource updates, general texture copy/readback commands, mip generation
+and storage textures remain extensions.
 Initial Vulkan texture uploads normally use a synchronous setup copy. A timed-out
 copy remains Pending and retains staging until its fence signals; poll GetStatus.
 This is not a
@@ -516,7 +519,9 @@ sample, with one color attachment and private same-size depth. L3 additionally
 permits complete sampled R8/RG8/RGBA8 mip chains; graph hazards conservatively
 cover the whole sampled chain.
 R4 extends this profile with buffer compute below. General copy passes, MSAA/resolve,
-stencil, depth sampling, physical heap aliasing and pass merging remain deferred.
+stencil, depth sampling and physical heap aliasing remain deferred.
+[R5](#measured-pass-merging-r5) adds explicit opt-in merging of compatible
+consecutive raster passes.
 
 ### Author, compile and execute
 
@@ -759,3 +764,113 @@ pinned Chromium software-GPU checks run locally; Linux Vulkan, formal pinned
 SPIR-V validation and supported-host sanitizers are CI gates. Browser software
 GPU evidence remains separate from physical GPU/browser qualification. This
 fixture establishes correctness; it makes no performance improvement claim.
+
+
+## Measured pass merging (R5)
+
+`CompileOrderedGraph(device, graph, report, GraphCompileOptions{true, true})`
+opts into consecutive raster-pass merging. The first option controls culling,
+independently of merging. The existing `bool reference` overload preserves its
+R3/R4 behavior: culling is disabled in reference mode and merging stays disabled.
+Use `{true, false}` to compare the same live workload without merging, or
+`{false, false}` to inspect every legal authored pass. Validation, owner-thread
+use, frozen import revisions, retry, failure and completion contracts remain
+those of [ordered graphs](#ordered-raster-graphs-r3).
+
+The current rule requires consecutive authored, live raster passes with the same
+physical color/depth attachment. Both must Store color and depth; the later pass
+must Load both, with matching depth-read-only mode, viewport and scissor. Read
+use lists must match field by field, including order, physical resource, version,
+range and visibility; only the validated color output version may advance.
+Different pipelines/bindings/draw packets remain legal and execute in authored
+order. Compute, declared side effects, a culled gap, clears, discards, changed
+read scopes or rectangles prevent merging. No barrier executes inside a group:
+its identical external read scope is synchronized before its first pass. The
+last store happens at group end. Every logical pass still updates the registry's
+color/depth/version ledger and retains its packets through R2 completion.
+
+This adapts ordinary attachment ordering from Khronos's
+[Vulkan Specification, Fragment Operations](https://docs.vulkan.org/spec/latest/chapters/fragops.html)
+and the W3C/GPUWeb [resource usage rules](https://www.w3.org/TR/webgpu/#resource-usages).
+Thanks to their authors for specifying the ordering and usage-scope constraints.
+It adds no subpasses, attachment feedback, query scope, aliasing or queue overlap.
+Vulkan/Metal/WebGPU reduce render-pass/encoder starts. WebGL2 also avoids repeated
+framebuffer setup and intermediate flipped sampling blits; final sampling still
+uses the established texture-origin conversion.
+
+`GraphReport` separates authored/live passes from `RasterPasses`, `ComputePasses`,
+`MergedPasses` and `DrawCount`. `RasterGroup` maps each live raster pass to its first
+authored group member; 32 denotes compute/culled entries. Dependencies, names,
+setup locations and logical lifetimes remain intact. Counts describe a successful
+plan, excluding the facade's acquisition clear, final barriers, driver-internal
+commands and presentation. A failed compile publishes no group/cost estimates.
+
+`PlanStorageBytes` reports the service's fixed per-slot storage, including unused
+bounded capacity. `BufferBytes` and `TextureBytes` sum all imported logical payloads,
+including unused imports, initialized mip levels and private 32-bit attachment
+depth. They exclude surface storage, native padding, staging, other graphs,
+retired resources and unused pool objects. These values are not physical backing
+or memory high-water measurements. Compilation and grouping use bounded storage;
+no additional engine heap allocation occurs for grouping. Driver/browser
+allocation counts remain unavailable in the current harness.
+
+### Paired native measurements
+
+Build the native test target with the pinned toolchain and shader tools, then run:
+
+```bash
+python scripts/benchmark-rhi \
+  --executable out/build/<preset>/modules/graphics/rhi/ludus_rhi_render_tests \
+  --backend metal --device '<actual GPU, OS and driver>' \
+  --output out/rhi-benchmark --runs 3
+```
+
+Use `--backend vulkan` on the native Vulkan host. Record actual device identity;
+software Vulkan evidence must be labelled as such. The harness compares one
+binary with merging on/off, alternates which mode runs first, warms 16 pairs per
+workload and records 128 pairs for each of 1/8/16/31 layers. Every completed RGBA
+image must match before a result is accepted; independent red/blue pixels verify
+painter order and reject identically empty results. It writes raw sample logs and JSON
+with p50/p95/p99 CPU distributions, executable hash, revision, dirty state, host,
+pass/draw counts and logical memory. It requires a complete sample set and fails
+on an image or execution failure. Timing thresholds are not CI correctness gates.
+
+The shared SDK fixture draws a textured/instanced scene, painter-ordered overlays
+with differing hues/alpha and immutable binding snapshots, then samples the attachment into the
+surface. Setup CPU time includes authoring/compile; execute CPU time includes
+preflight/acquire/encode/submit. The subsequent full-image readback forces real
+completion outside those timers. Its host wait duration is neither GPU duration
+nor input-to-display latency. GPU timestamps, presentation latency, opaque driver
+allocations and physical backing are explicitly unavailable (`null`), never zero.
+
+Initial evidence, 2026-10-11: base `f9cc7c8` plus this R5 implementation, pinned
+Clang 18.1.8, Development/RelWithDebInfo, no PCH, Apple M5 (8 GPU cores), Metal 4,
+macOS 26.6 (25G72), headless 96x64. Three runs passed 3,072 measured submissions
+and every paired full-image comparison. Generated results live in
+`out/r5-painter-measurements/report.json` and `run-*.log` in the task worktree.
+
+| Layers | Raster scopes off/on | Median execute CPU off/on (µs, range across three runs) | p95 execute CPU off/on (µs, range) |
+| --- | --- | --- | --- |
+| 1 | 2 / 2 | 23.9–25.9 / 23.7–26.0 | 27.5–94.7 / 28.1–82.2 |
+| 8 | 9 / 2 | 47.4–65.9 / 22.2–31.5 | 51.1–107.6 / 26.1–91.0 |
+| 16 | 17 / 2 | 85.0–105.6 / 27.6–33.0 | 95.6–208.2 / 35.0–54.2 |
+| 31 | 32 / 2 | 209.2–272.0 / 42.0–58.8 | 245.0–405.6 / 52.8–89.2 |
+
+Setup medians remained approximately 2.4–2.9, 6.3–8.8, 13.0–15.3 and 32.0–42.8 µs
+across the corresponding paired workloads. Both modes used 82,704 bytes of fixed
+plan-slot storage, 308 logical buffer bytes and 49,168 color/depth bytes; neither
+mode changed draw count or frame buffering. Host load produced visible tail variability. The single-layer control had no
+consistent benefit. **Decision: adopt only as an explicit opt-in** for compatible
+pass-heavy workloads. These tiny headless scenes establish an explainable CPU
+benefit, not a universal renderer/GPU/latency budget. Measure the target consumer
+before enabling it. Parallel recording, async queues, bindless services and native
+heap aliasing remain deferred pending their own workloads and evidence.
+
+Unit regressions cover boundary mismatches, retained detached packets, versioned
+attachments, undefined discarded roots, skipped acquisition/retry and GPU-gated
+retirement. Native tests compare complete merged/unmerged images at all four
+sizes; the installed browser consumer compares `merge`/`merge-reference` on forced
+WebGPU/WebGL2 and tests Auto fallback. Existing fullscreen, raster, multipass,
+compute/CPU, upload/readback, resize and loss suites remain acceptance regressions;
+those cases have no new speedup claim. Physical/hosted browser, Vulkan/Wayland and
+presentation qualification are separate from software Chromium and headless Metal.

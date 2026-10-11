@@ -371,3 +371,48 @@ TEST_CASE("A debugger frame cannot claim game Running or escape its operation", 
     }
     CHECK(rejected);
 }
+
+TEST_CASE("Setup identity is bounded and belongs to a setup operation", "[editor][project][protocol]")
+{
+    const QString prefix = QStringLiteral("import json, sys\n"
+                                          "print(json.dumps({'protocol':1,'type':'ready'}), flush=True)\n"
+                                          "r=json.loads(sys.stdin.readline())\n"
+                                          "e={'protocol':1,'job':r['job'],'type':'setup_details'}\n");
+    const QString suffix = QStringLiteral("print(json.dumps(e), flush=True)\n"
+                                          "print(json.dumps({'protocol':1,'job':r['job'],'type':'result',"
+                                          "'outcome':'success','code':'Ok','message':'Setup checked',"
+                                          "'cleanup_confirmed':True}), flush=True)\n");
+    const auto valid = RunAdapter(prefix + QStringLiteral("e['text']='Installation: /' + '日本語/' * 100\n") + suffix,
+                                  ToolOperation::ProjectCheck);
+    bool sawDetails = false;
+    for (const auto& event : valid)
+    {
+        CHECK(event.Kind != ProtocolEvent::Type::Error);
+        if (event.Kind == ProtocolEvent::Type::SetupDetails)
+        {
+            CHECK(event.Text.endsWith(QStringLiteral("日本語/")));
+            CHECK(event.Text.toUtf8().size() > 256);
+            sawDetails = true;
+        }
+    }
+    CHECK(sawDetails);
+    for (const auto& operation : {ToolOperation::ProjectCheck, ToolOperation::Build})
+    {
+        const auto rejected = RunAdapter(prefix + QStringLiteral("e['text']='日' * 6000\n") + suffix, operation);
+        bool sawError = false;
+        for (const auto& event : rejected)
+        {
+            CHECK(event.Kind != ProtocolEvent::Type::SetupDetails);
+            sawError = sawError || event.Kind == ProtocolEvent::Type::Error;
+        }
+        CHECK(sawError);
+    }
+    const auto unrelated = RunAdapter(prefix + QStringLiteral("e['text']='identity'\n") + suffix, ToolOperation::Build);
+    bool sawError = false;
+    for (const auto& event : unrelated)
+    {
+        CHECK(event.Kind != ProtocolEvent::Type::SetupDetails);
+        sawError = sawError || event.Kind == ProtocolEvent::Type::Error;
+    }
+    CHECK(sawError);
+}

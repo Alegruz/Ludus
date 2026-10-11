@@ -14,6 +14,9 @@ from `<ludus/graphics/rhi/graph.h>`. It shares the RHI resource/completion regis
 The [R4 compute profile](../../development/fullscreen-rendering.md#buffer-compute-and-indirect-rendering-r4)
 adds buffer compute and indexed indirect draws on Vulkan, Metal and WebGPU,
 with an explicitly authored CPU/direct variant for WebGL 2.
+The [R5 measured pass-merging path](../../development/fullscreen-rendering.md#measured-pass-merging-r5)
+adds explicit investigation controls, planned scope/cost reports and a paired
+image/CPU measurement harness. Merging remains opt-in for compatible workloads.
 The [Sandbox handoff](../../development/fullscreen-rendering-handoff.md)
 contains SDK commands, shader artifacts and validation evidence.
 
@@ -79,5 +82,7 @@ enabled device, without elevating its limits to the adapter's maximum support.
 `UnmetRequirement`. Native builds accept only Auto and report
 `BackendUnavailable` for forced browser policies. Busy does not alter a session.
 
-The [architecture proposal](../../architecture/rhi-gdi.md) records the
-remaining RHI/GDI migration and the completed capability slice.
+The [architecture implementation record](../../architecture/rhi-gdi.md#implementation-phases-and-acceptance)
+records the bounded R0–R5 baseline and its evidence. Its
+[remaining-work gates](../../architecture/rhi-gdi.md#remaining-work-and-decision-gates)
+separate consumer extensions and qualification gaps from optional research.

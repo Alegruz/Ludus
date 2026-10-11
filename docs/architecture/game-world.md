@@ -24,6 +24,7 @@ fiber scheduler, or editor before the game can run.
 | [Entities and component storage](entity-world.md) | What identifies an entity and who owns its state? |
 | [Frame and tick updates](frame-update.md) | When do input, gameplay, events, async results, and rendering take effect? |
 | [Gems article review](game-world-gems-review.md) | Which chapters were read, which changes did they justify, and which techniques were deferred? |
+| [Gameplay foundation extension](gameplay-foundations.md) | How can this baseline grow into static cells, agent simulation, addressed messages, streaming, scripting integration and session flow? |
 
 The contracts in those documents describe the implementation baseline and future
 extensions. The identity/storage APIs now exist in the SDK; game-owned types and

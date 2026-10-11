@@ -260,3 +260,66 @@ macOS 26.6 and deployment baseline 14.0. The Cocoa journey passed all 37
 assertions, including real game launch/Stop and repeated project setup repair.
 The complete offscreen Editor CTest passed; 68 Python setup/adapter/ownership
 checks passed (four opt-in GUI cases skipped in that noninteractive invocation).
+
+## Project/SDK lifecycle orientation (2026-10-11)
+
+Implemented on `codex/project-lifecycle-ux`, isolated from the primary checkout,
+starting from freshly fetched `origin/main` at `f9cc7c8`. The task/use-case matrix
+and delivery boundary are in [the workspace guide](editor-workspace.md#project-lifecycle-tasks-and-audiences).
+Experience and discipline are independent; the proposed journeys include
+beginners, other-engine users, professionals, engine engineers, researchers,
+content contributors and QA. These are design scenarios, not interview evidence.
+
+The Project tab now exposes setup/selected SDK identity, lifecycle actions,
+friendly profile labels with exact preset data, explicit descriptor save, and
+expandable build/launch details. Existing controller guards, cancellation,
+read-only open/check and separate document save ownership remain authoritative.
+SDK identity uses a bounded private control report instead of truncated terminal
+text or droppable ordinary output. Native acceptance found and fixed a macOS
+setup bug: CMake canonicalizes the managed sysroot symlink; generated presets
+must use the same resolved path while signatures still detect link retargeting.
+
+Validation host: macOS 26.6, Apple Silicon, Clang/LLVM 18.1.8, CMake 3.29.6,
+Ninja 1.11.1.3, Qt 6.11.2/Cocoa. Installed SDK input was Ludus 0.1.0 Development,
+`arm64-apple-darwin`, revision `be22bf31afd9bceefaec2aa6a9d84a2fc8e3ccce`.
+Tools and SDK inputs were shared read-only; build trees and outputs were isolated.
+
+- The complete configured native Development build (including editor/tests)
+  passes with warnings-as-errors.
+- Complete Development and clean Debug/UBSan offscreen suites: each 113 passed,
+  six explicitly skipped, 1,561 assertions passed. UBSan ran with
+  `halt_on_error=1:print_stacktrace=1`. Python setup/creation/project/adapter suites:
+  112 passed.
+- Native Cocoa overview/profile tests pass (59 assertions); small-window
+  reachability passes (32 assertions). Screenshots at 800×640 and normal workspace
+  sizes were visually inspected for wrapping, scrolling and accessible controls.
+- The real Cocoa SDK journey creates, configures/builds/tests, opens, runs, stops
+  an owned long-running game, reopens with missing local presets without repair,
+  then repairs twice (42 assertions passed). Successful reports include complete
+  installation identity.
+- Browser file-bridge Node tests pass (2). No Qt-Wasm UI build or browser parity
+  qualification was performed for this slice.
+- Repository formatting and foundational include checks pass. Changed C++
+  sources pass Clang-tidy 18; documentation
+  inventory, strict MkDocs, generated API and documentation-only wiki checks pass.
+
+The `scripts/check --all` wrapper stops at the isolated checkout's absent local
+Conan bootstrap marker/toolchain. Gate components use the existing isolated
+compilation database with explicit shared read-only dependency inputs; no
+bootstrap repair writes to the primary checkout. Full static analysis covered 315 configured translation units. After preparing
+and successfully rechecking 32 initially missing module-map inputs, 311 C++
+units pass, including all changed sources. Four unchanged Objective-C++ units
+(Metal/Cocoa implementation and tests) remain blocked: Clang-tidy 18 cannot
+parse Apple SDK libc++ builtins including `__is_nothrow_convertible`,
+`__builtin_clzg` and `__builtin_ctzg`. The local whole-tree gate is not clean.
+
+The combined ASan/UBSan editor builds, but its Clang 18 ASan runtime deadlocks
+before `main` on this host. A sampled stack shows initialization re-entering
+`AsanInitInternal` through dyld shared-cache iteration, `_Block_copy`, and malloc,
+then waiting in `StaticSpinMutex::LockSlow`. The process was terminated; this is
+an unavailable runtime gate, **not** a clean ASan result. A clean Debug/UBSan rebuild and full run pass. An intermediate incremental
+build retained an old controller layout in one object; the clean rebuild
+resolved its Qt assertion. Linux reference-toolchain ASan/UBSan CI remains
+required before marking the change ready. Full native-platform suites and
+moderated sessions with representative programming/content disciplines remain
+separate acceptance work.

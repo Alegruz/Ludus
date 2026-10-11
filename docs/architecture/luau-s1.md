@@ -14,8 +14,9 @@ LUDUS_BUILD_SCRIPT_INTERACTION defaults to OFF.
 ## Profile and reproduction
 
 S1 maintains the reviewed experimental profile
-s0-interpreter-longjmp-loader-lifetime-v1, including its exact loader ownership
-adjustment and both MIT notices. [The S0 audit](luau-s0.md) remains authoritative.
+s0-interpreter-longjmp-loader-lifetime-v2, including its exact loader ownership
+and assertion-helper linkage adjustments and both MIT notices.
+[The S0 audit](luau-s0.md) remains authoritative.
 This is a decision to maintain that small profile for this opt-in integration,
 not approval of the unmodified pin or a production dependency. cmake/LuauProfile.cmake
 shares source verification and VM/Common configuration between S0 and S1.

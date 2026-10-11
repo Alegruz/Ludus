@@ -120,6 +120,16 @@ private:
     QDockWidget* OutputDock_ = nullptr;
     QToolBar* GameToolbar_ = nullptr;
 
+    // Project lifecycle presentation; controller actions own all operations.
+    QLabel* ProjectIdentity_ = nullptr;
+    QLabel* ProjectSetupStatus_ = nullptr;
+    QLabel* ProjectNextStep_ = nullptr;
+    QPushButton* ProjectCheckButton_ = nullptr;
+    QPushButton* ProjectRepairButton_ = nullptr;
+    QPushButton* ProjectRunButton_ = nullptr;
+    QPushButton* ProjectSaveButton_ = nullptr;
+    QPushButton* ProjectStopButton_ = nullptr;
+
     // Settings form controls.
     QLineEdit* NameEdit_ = nullptr;
     QComboBox* ProviderBox_ = nullptr;

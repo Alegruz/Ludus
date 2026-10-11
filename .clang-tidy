@@ -29,7 +29,7 @@ Checks: >
   readability-redundant-member-init,
   readability-simplify-boolean-expr
 WarningsAsErrors: ''
-HeaderFilterRegex: '(.*/)?(modules|apps)/.*'
+HeaderFilterRegex: '(.*/)?(modules|apps|tools|tests|examples)/.*'
 FormatStyle: file
 CheckOptions:
   - key: readability-braces-around-statements.ShortStatementLines
