@@ -148,6 +148,8 @@ jobs:
             apps/editor/src/recent_projects.cpp apps/editor/tests/controller_tests.cpp \
             apps/editor/src/scene_document.cpp apps/editor/src/scene_store.cpp \
             apps/editor/src/scene_workspace.cpp apps/editor/src/scene_preview.cpp \
+            apps/editor/src/world_document.cpp apps/editor/src/world_workspace.cpp \
+            apps/editor/tests/world_workspace_tests.cpp \
             apps/editor/tests/scene_document_tests.cpp apps/editor/tests/scene_workspace_tests.cpp \
             apps/editor/tests/scene_native_tests.mm \
             apps/editor/tests/macos_journey_tests.cpp apps/editor/tests/live_journey_tests.cpp
@@ -790,6 +792,8 @@ jobs:
             apps/editor/tests/script_workspace_tests.cpp \
             apps/editor/src/scene_document.cpp apps/editor/src/scene_store.cpp \
             apps/editor/src/scene_workspace.cpp apps/editor/src/scene_preview.cpp \
+            apps/editor/src/world_document.cpp apps/editor/src/world_workspace.cpp \
+            apps/editor/tests/world_workspace_tests.cpp \
             apps/editor/tests/scene_document_tests.cpp apps/editor/tests/scene_workspace_tests.cpp
       - name: Verify S5 Editor, installed Behavior SDK and GameHost journey
         run: |
