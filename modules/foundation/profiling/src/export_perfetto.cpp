@@ -13,9 +13,13 @@
 // -----------------------------------------------------------------------------
 // Thanks to Google/Chromium contributors, "Trace Event Format", duration,
 // instant and flow events, for the phase/track/timestamp interchange contract:
+// The publisher maintains this living specification (consulted 2026-10-11):
 // https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
-// and Perfetto contributors, "Visualizing external trace formats with Perfetto":
-// https://perfetto.dev/docs/getting-started/other-formats . Adopt Chrome JSON
+// Thanks also to Perfetto contributors, "Visualizing external trace formats with
+// Perfetto", "Chrome JSON format", pinned documentation confirming those fields
+// and supported phases, with a reference to the original specification:
+// https://github.com/google/perfetto/blob/59400b15c6ff8186ba0bba69f78c2cd454eea8b4/docs/getting-started/other-formats.md
+// Adopt Chrome JSON
 // B/E, instant and flow records; synthesized incomplete ends are Ludus policy.
 // Design owner: docs/architecture/profiling-final.md.
 //

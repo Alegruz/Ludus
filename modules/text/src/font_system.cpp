@@ -174,8 +174,9 @@ namespace
     return generation;
 }
 
-// Thanks to the HarfBuzz contributors, "FreeType integration", HarfBuzz Manual:
-// https://harfbuzz.github.io/integration-freetype.html . Adapt its face-size
+// Thanks to the HarfBuzz contributors, "FreeType integration", Manual 14.5.1:
+// https://github.com/harfbuzz/harfbuzz/blob/14.5.1/docs/usermanual-integration.xml
+// (integration-freetype section). Adapt its face-size
 // change notification and matching load flags to checked, reusable font slots.
 // Research owner: docs/architecture/text-font-rendering-research.md.
 // Ensure the FT face is sized to `pixelHeight` and the hb font agrees. Only
@@ -540,7 +541,8 @@ Status ShapeInternal(FontSystem* system,
     }
 
     // Thanks to the HarfBuzz contributors, "Working with HarfBuzz clusters",
-    // HarfBuzz Manual: https://harfbuzz.github.io/working-with-harfbuzz-clusters.html .
+    // HarfBuzz Manual 14.5.1, cluster levels 0 and 1:
+    // https://github.com/harfbuzz/harfbuzz/blob/14.5.1/docs/usermanual-clusters.xml .
     // Use input UTF-8 byte offsets as cluster values. Level 0 may merge mark/
     // joiner clusters with the preceding base and retains monotone associations
     // through shaping/reordering; individual input boundaries need not survive.
