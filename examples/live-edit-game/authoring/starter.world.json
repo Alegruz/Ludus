@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "schema": "ludus.world.starter.v1",
+  "entities": [
+    {
+      "id": "starter.cube",
+      "name": "Starter Cube",
+      "components": {
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "presentation": {
+          "visible": true,
+          "asset": "mesh.cube",
+          "sound": "",
+          "caption": "object.cube",
+          "style": "solid"
+        }
+      }
+    },
+    {
+      "id": "starter.target",
+      "name": "Target Marker",
+      "components": {
+        "transform": {
+          "x": 2,
+          "y": 0,
+          "z": 0
+        },
+        "behavior": {
+          "enabled": true,
+          "priority": 0,
+          "target": "starter.cube"
+        }
+      }
+    }
+  ]
+}

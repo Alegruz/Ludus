@@ -1,0 +1,526 @@
+#include "internal/controller.h"
+#include "internal/main_window.h"
+#include "internal/world_document.h"
+#include "internal/world_workspace.h"
+
+#include "internal/workspace_style.h"
+#include <QAction>
+#include <QApplication>
+#include <QComboBox>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QLockFile>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QTabWidget>
+#include <QTemporaryDir>
+#include <QTest>
+#include <QTimer>
+#include <catch2/catch_test_macros.hpp>
+
+using namespace ludus::editor;
+namespace
+{
+QByteArray Read(const QString& path)
+{
+    QFile file(path);
+    REQUIRE(file.open(QIODevice::ReadOnly));
+    return file.readAll();
+}
+void Write(const QString& path, const QByteArray& bytes)
+{
+    QFile file(path);
+    REQUIRE(file.open(QIODevice::WriteOnly));
+    REQUIRE(file.write(bytes) == bytes.size());
+}
+QByteArray Schema()
+{
+    return Read(QStringLiteral(LUDUS_EDITOR_PROJECT_ROOT "/examples/live-edit-game/authoring/world.schema.json"));
+}
+QByteArray Starter()
+{
+    return Read(QStringLiteral(LUDUS_EDITOR_PROJECT_ROOT "/examples/live-edit-game/authoring/starter.world.json"));
+}
+QString Fixture(QTemporaryDir& dir)
+{
+    REQUIRE(dir.isValid());
+    REQUIRE(QDir(QFileInfo(dir.path()).canonicalFilePath()).mkdir(QStringLiteral("authoring")));
+    Write(QDir(QFileInfo(dir.path()).canonicalFilePath()).filePath(QStringLiteral("authoring/world.schema.json")),
+          Schema());
+    const auto path =
+        QDir(QFileInfo(dir.path()).canonicalFilePath()).filePath(QStringLiteral("authoring/starter.world.json"));
+    Write(path, Starter());
+    return path;
+}
+WorldDocument Document()
+{
+    WorldDocument document;
+    QString error;
+    REQUIRE(document.LoadSchema(Schema(), error));
+    REQUIRE(document.Load(Starter(), error));
+    return document;
+}
+QJsonObject Property(const QString& key)
+{
+    const auto document = Document();
+    const auto component = key.section(QLatin1Char('/'), 0, 0);
+    const auto id = key.section(QLatin1Char('/'), 1, 1);
+    for (const auto value : document.Component(component).value(QStringLiteral("properties")).toArray())
+    {
+        if (value.toObject().value(QStringLiteral("id")).toString() == id)
+        {
+            return value.toObject();
+        }
+    }
+    FAIL("Property fixture absent");
+    return {};
+}
+QLineEdit* Field(WorldWorkspace& view, const QString& key)
+{
+    auto* field = view.findChild<QLineEdit*>(QStringLiteral("worldField:") + key);
+    REQUIRE(field != nullptr);
+    return field;
+}
+void Type(QLineEdit* field, const QString& text)
+{
+    field->setFocus();
+    field->selectAll();
+    QTest::keyClicks(field, text);
+}
+} // namespace
+TEST_CASE("World authoring requires a valid project-owned schema and preserves failed loads", "[editor][world]")
+{
+    WorldDocument document;
+    QString error;
+    CHECK_FALSE(document.New(error));
+    CHECK_FALSE(document.Load(QByteArrayLiteral("{}"), error));
+    CHECK_FALSE(document.Loaded());
+    CHECK_FALSE(document.LoadSchema(QByteArrayLiteral("{\"version\":1,\"version\":1}"), error));
+    REQUIRE(document.LoadSchema(Schema(), error));
+    REQUIRE(document.Load(Starter(), error));
+    const auto before = document.Draft();
+    CHECK_FALSE(document.Load(Starter().replace("\"version\": 1", "\"version\": 1, \"version\": 1"), error));
+    CHECK(document.Draft() == before);
+    auto unknown = before;
+    unknown.insert(QStringLiteral("schema"), QStringLiteral("another-game"));
+    CHECK_FALSE(document.Load(QJsonDocument(unknown).toJson(), error));
+    CHECK(document.Draft() == before);
+    CHECK_FALSE(document.Dirty());
+    CHECK_FALSE(document.LoadSchema(Schema(), error));
+}
+TEST_CASE("World entity and component transactions retain stable identity and undo whole edits", "[editor][world]")
+{
+    auto document = Document();
+    QString error, id = QStringLiteral("unchanged");
+    CHECK_FALSE(document.CreateEntity(error, QString(), id));
+    CHECK(id == QStringLiteral("unchanged"));
+    CHECK_FALSE(document.CanUndo());
+    REQUIRE(document.CreateEntity(error, QStringLiteral("灯光 — Éclairage"), id));
+    const auto original = id;
+    REQUIRE(document.Attach(id, error, QStringLiteral("presentation")));
+    CHECK_FALSE(document.Attach(id, error, QStringLiteral("presentation")));
+    CHECK_FALSE(document.Detach(id, error, QStringLiteral("transform")));
+    REQUIRE(document.RenameEntity(id, error, QStringLiteral("Key light")));
+    CHECK(document.Entity(id).value(QStringLiteral("id")) == QJsonValue(original));
+    REQUIRE(document.Undo());
+    CHECK(document.Entity(id).value(QStringLiteral("name")).toString() == QStringLiteral("灯光 — Éclairage"));
+    REQUIRE(document.Redo());
+    auto props = document.Entity(id).value(QStringLiteral("components")).toObject();
+    auto presentation = props.value(QStringLiteral("presentation")).toObject();
+    presentation.insert(QStringLiteral("asset"), QStringLiteral("not.declared"));
+    props.insert(QStringLiteral("presentation"), presentation);
+    const auto before = document.Draft();
+    CHECK_FALSE(document.Edit(id, props, QStringLiteral("Changed"), error));
+    CHECK(document.Draft() == before);
+    REQUIRE(document.Detach(id, error, QStringLiteral("presentation")));
+    REQUIRE(document.Undo());
+    CHECK(document.Entity(id).value(QStringLiteral("components")).toObject().contains(QStringLiteral("presentation")));
+    CHECK_FALSE(document.RemoveEntity(QStringLiteral("starter.cube"), error));
+    CHECK(error.contains(QStringLiteral("Target entity")));
+    REQUIRE(document.RemoveEntity(id, error));
+    REQUIRE(document.Undo());
+    CHECK_FALSE(document.Entity(id).isEmpty());
+}
+TEST_CASE("World duplication remaps self references and preserves other references", "[editor][world]")
+{
+    auto document = Document();
+    QString error;
+    auto entity = document.Entity(QStringLiteral("starter.target"));
+    auto components = entity.value(QStringLiteral("components")).toObject();
+    auto behavior = components.value(QStringLiteral("behavior")).toObject();
+    behavior.insert(QStringLiteral("target"), QStringLiteral("starter.target"));
+    components.insert(QStringLiteral("behavior"), behavior);
+    REQUIRE(document.Edit(QStringLiteral("starter.target"), components, QStringLiteral("Self"), error));
+    QString copy;
+    REQUIRE(document.DuplicateEntity(error, QStringLiteral("starter.target"), copy));
+    CHECK(copy != QStringLiteral("starter.target"));
+    CHECK(document.Entity(copy)
+              .value(QStringLiteral("components"))
+              .toObject()
+              .value(QStringLiteral("behavior"))
+              .toObject()
+              .value(QStringLiteral("target")) == QJsonValue(copy));
+    REQUIRE(document.Undo());
+    REQUIRE(document.Undo());
+    REQUIRE(document.DuplicateEntity(error, QStringLiteral("starter.target"), copy));
+    CHECK(document.Entity(copy)
+              .value(QStringLiteral("components"))
+              .toObject()
+              .value(QStringLiteral("behavior"))
+              .toObject()
+              .value(QStringLiteral("target")) == QJsonValue(QStringLiteral("starter.cube")));
+}
+TEST_CASE("World typed conversion rejects partial nonfinite fractional and unknown input without changing output",
+          "[editor][world]")
+{
+    QString error;
+    QJsonValue result = QStringLiteral("preserved");
+    const auto number = Property(QStringLiteral("experiment/roughness"));
+    for (const auto& bad : {QStringLiteral("-"),
+                            QStringLiteral("nan"),
+                            QStringLiteral("inf"),
+                            QStringLiteral("1.2"),
+                            QStringLiteral("0.5tail")})
+    {
+        CHECK_FALSE(WorldDocument::ParseValue(number, bad, result, error));
+        CHECK(result == QJsonValue(QStringLiteral("preserved")));
+    }
+    REQUIRE(WorldDocument::ParseValue(number, QStringLiteral("0.25"), result, error));
+    CHECK(result == QJsonValue(0.25));
+    const auto integer = Property(QStringLiteral("experiment/samples"));
+    CHECK_FALSE(WorldDocument::ParseValue(integer, QStringLiteral("2.5"), result, error));
+    CHECK_FALSE(WorldDocument::ParseValue(integer, QStringLiteral("2147483648"), result, error));
+    CHECK_FALSE(WorldDocument::ParseValue(integer, QStringLiteral("0"), result, error));
+    REQUIRE(WorldDocument::ParseValue(integer, QStringLiteral("4096"), result, error));
+    CHECK(result == QJsonValue(4096));
+    CHECK_FALSE(WorldDocument::ParseValue(Property(QStringLiteral("presentation/style")),
+                                          QStringLiteral("missing"),
+                                          result,
+                                          error));
+    auto document = Document();
+    const auto before = document.Draft();
+    auto malformed = before;
+    auto entities = malformed.value(QStringLiteral("entities")).toArray();
+    entities.append(entities[0]);
+    malformed.insert(QStringLiteral("entities"), entities);
+    CHECK_FALSE(document.Restore(malformed, error));
+    CHECK(document.Draft() == before);
+}
+TEST_CASE("World inspector preserves invalid text disables selection and saves one atomic edit", "[editor][world]")
+{
+    QTemporaryDir dir;
+    const auto path = Fixture(dir);
+    WorldWorkspace view;
+    view.SetProject(dir.path(), 1);
+    REQUIRE(view.Open(path));
+    auto* list = view.findChild<QListWidget*>(QStringLiteral("worldEntities"));
+    REQUIRE(list != nullptr);
+    list->setCurrentRow(0);
+    auto* x = Field(view, QStringLiteral("transform/x"));
+    auto* name = view.findChild<QLineEdit*>(QStringLiteral("worldEntityName"));
+    REQUIRE(name != nullptr);
+    const auto before = view.Document().Draft();
+    Type(x, QStringLiteral("-"));
+    Type(name, QStringLiteral("Artist cube"));
+    CHECK(view.Dirty());
+    CHECK_FALSE(list->isEnabled());
+    CHECK_FALSE(view.CanUndo());
+    CHECK_FALSE(view.Save());
+    CHECK(view.Document().Draft() == before);
+    CHECK(x->text() == QStringLiteral("-"));
+    CHECK(name->text() == QStringLiteral("Artist cube"));
+    Type(x, QStringLiteral("0.5"));
+    REQUIRE(view.Save());
+    CHECK_FALSE(view.Dirty());
+    CHECK(list->item(0)->text() == QStringLiteral("Artist cube"));
+    CHECK(list->isEnabled());
+    CHECK(view.Document().Entity(QStringLiteral("starter.cube")).value(QStringLiteral("name")) ==
+          QJsonValue(QStringLiteral("Artist cube")));
+    WorldWorkspace reopened;
+    reopened.SetProject(dir.path(), 1);
+    REQUIRE(reopened.Open(path));
+    CHECK(reopened.Document().Draft() == view.Document().Draft());
+    view.Undo();
+    CHECK(view.Dirty());
+    view.Redo();
+    CHECK_FALSE(view.Dirty());
+}
+TEST_CASE("World saves refuse changed files schemas locks and symlink paths while retaining edits", "[editor][world]")
+{
+    QTemporaryDir dir;
+    const auto path = Fixture(dir);
+    WorldWorkspace view;
+    view.SetProject(dir.path(), 1);
+    REQUIRE(view.Open(path));
+    auto* list = view.findChild<QListWidget*>(QStringLiteral("worldEntities"));
+    list->setCurrentRow(0);
+    Type(Field(view, QStringLiteral("transform/x")), QStringLiteral("3"));
+    REQUIRE(view.Apply());
+    const auto draft = view.Document().Draft();
+    Write(path, Starter() + ' ');
+    CHECK_FALSE(view.Save());
+    CHECK(view.Document().Draft() == draft);
+    CHECK(Read(path) == Starter() + ' ');
+    Write(path, Starter());
+    const auto schemaPath =
+        QDir(QFileInfo(dir.path()).canonicalFilePath()).filePath(QStringLiteral("authoring/world.schema.json"));
+    Write(schemaPath, Schema() + ' ');
+    CHECK_FALSE(view.Save());
+    Write(schemaPath, Schema());
+    QLockFile lock(path + QStringLiteral(".ludus-editor-lock"));
+    REQUIRE(lock.tryLock());
+    CHECK_FALSE(view.Save());
+    lock.unlock();
+    REQUIRE(view.Save());
+    REQUIRE(lock.tryLock());
+    list->setCurrentRow(0);
+    Type(Field(view, QStringLiteral("transform/x")), QStringLiteral("5"));
+    REQUIRE(view.Apply());
+    CHECK(view.findChild<QLabel*>(QStringLiteral("worldStatus"))
+              ->text()
+              .contains(QStringLiteral("Recovery could not be written")));
+    lock.unlock();
+    REQUIRE(view.Save());
+
+    const auto alias = QDir(QFileInfo(dir.path()).canonicalFilePath()).filePath(QStringLiteral("alias.world.json"));
+    REQUIRE(QFile::link(path, alias));
+    WorldWorkspace second;
+    second.SetProject(dir.path(), 2);
+    CHECK_FALSE(second.Open(alias));
+    CHECK_FALSE(second.Create(path));
+    QTemporaryDir outside;
+    const auto other =
+        QDir(QFileInfo(outside.path()).canonicalFilePath()).filePath(QStringLiteral("outside.world.json"));
+    Write(other, Starter());
+    CHECK_FALSE(second.Open(other));
+}
+TEST_CASE("World creation publishes only on Save and recovery is explicit bound and undoable", "[editor][world]")
+{
+    QTemporaryDir dir;
+    const auto path = Fixture(dir);
+    WorldWorkspace view;
+    view.SetProject(dir.path(), 1);
+    REQUIRE(view.Open(path));
+    auto* list = view.findChild<QListWidget*>(QStringLiteral("worldEntities"));
+    list->setCurrentRow(0);
+    Type(Field(view, QStringLiteral("transform/x")), QStringLiteral("7"));
+    REQUIRE(view.Apply());
+    CHECK(Read(path) == Starter());
+    const auto recovery = path + QStringLiteral(".ludus-recovery");
+    REQUIRE(QFile::exists(recovery));
+    WorldWorkspace reopened;
+    reopened.SetProject(dir.path(), 1);
+    REQUIRE(reopened.Open(path));
+    CHECK_FALSE(reopened.Dirty());
+    REQUIRE(reopened.Recover());
+    CHECK(reopened.Dirty());
+    CHECK(reopened.Document().Draft() == view.Document().Draft());
+    reopened.Undo();
+    CHECK_FALSE(reopened.Dirty());
+    reopened.Redo();
+    REQUIRE(reopened.Save());
+    CHECK_FALSE(QFile::exists(recovery));
+    WorldWorkspace fresh;
+    fresh.SetProject(dir.path(), 2);
+    const auto newPath = QDir(QFileInfo(dir.path()).canonicalFilePath()).filePath(QStringLiteral("new.world.json"));
+    REQUIRE(fresh.Create(newPath));
+    CHECK(fresh.Dirty());
+    CHECK_FALSE(QFile::exists(newPath));
+    fresh.findChild<QPushButton*>(QStringLiteral("worldAdd"))->click();
+    REQUIRE(fresh.Save());
+    CHECK(QFile::exists(newPath));
+    CHECK_FALSE(fresh.Dirty());
+}
+TEST_CASE("World schema and document resource limits are enforced", "[editor][world]")
+{
+    auto document = Document();
+    QString error;
+    QString id;
+    for (ludus::foundation::uint32 i = 2; i < 128; ++i)
+    {
+        REQUIRE(document.CreateEntity(error, QStringLiteral("Entity"), id));
+    }
+    const auto before = document.Draft();
+    CHECK_FALSE(document.CreateEntity(error, QStringLiteral("Overflow"), id));
+    CHECK(document.Draft() == before);
+    CHECK_FALSE(document.Load(QByteArray(524289, ' '), error));
+    CHECK(document.Draft() == before);
+    WorldDocument fresh;
+    CHECK_FALSE(fresh.LoadSchema(QByteArray(65537, ' '), error));
+}
+TEST_CASE("World layout remains usable in a compact desktop window", "[editor][world]")
+{
+    QTemporaryDir dir;
+    const auto path = Fixture(dir);
+    WorldWorkspace view;
+    view.SetProject(dir.path(), 1);
+    REQUIRE(view.Open(path));
+    ApplyWorkspaceStyle(&view);
+    view.resize(800, 640);
+    view.show();
+    view.findChild<QListWidget*>(QStringLiteral("worldEntities"))->setCurrentRow(0);
+    QTest::qWait(10);
+    CHECK(view.minimumSizeHint().width() <= 800);
+    for (auto* field : view.findChildren<QLineEdit*>())
+    {
+        CHECK(field->height() >= field->minimumSizeHint().height());
+    }
+    CHECK(view.findChild<QPushButton*>(QStringLiteral("worldApply"))->geometry().bottom() <= view.height());
+    // A long entity name plus persisted UUID must not widen the inspector.
+    auto* list = view.findChild<QListWidget*>(QStringLiteral("worldEntities"));
+    list->setCurrentRow(1);
+    auto* name = view.findChild<QLineEdit*>(QStringLiteral("worldEntityName"));
+    Type(name, QString(120, QLatin1Char('T')));
+    REQUIRE(view.Apply());
+    list->setCurrentRow(0);
+    list->setCurrentRow(1);
+    QTest::qWait(10);
+    CHECK(view.minimumSizeHint().width() <= 800);
+
+    if (qEnvironmentVariableIsSet("LUDUS_WORLD_SCREENSHOT"))
+    {
+        REQUIRE(view.grab().save(qEnvironmentVariable("LUDUS_WORLD_SCREENSHOT")));
+    }
+}
+
+TEST_CASE("World failed replacement keeps pending fields and a cancelled close preserves work", "[editor][world]")
+{
+    QTemporaryDir dir;
+    const auto path = Fixture(dir);
+    WorldWorkspace view;
+    view.SetProject(dir.path(), 1);
+    REQUIRE(view.Open(path));
+    view.findChild<QListWidget*>(QStringLiteral("worldEntities"))->setCurrentRow(0);
+    auto* field = Field(view, QStringLiteral("transform/x"));
+    Type(field, QStringLiteral("-"));
+    CHECK_FALSE(
+        view.Open(QDir(QFileInfo(dir.path()).canonicalFilePath()).filePath(QStringLiteral("missing.world.json"))));
+    CHECK(field->text() == QStringLiteral("-"));
+    CHECK(view.Dirty());
+    CHECK_FALSE(view.Create(path));
+    CHECK(field->text() == QStringLiteral("-"));
+    QTimer::singleShot(0, []() {
+        auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        REQUIRE(box != nullptr);
+        box->done(QMessageBox::Cancel);
+    });
+    CHECK_FALSE(view.ConfirmDiscard());
+    CHECK(view.Dirty());
+    CHECK(field->text() == QStringLiteral("-"));
+}
+
+TEST_CASE("World menu Save and history own the active document and Close Project can cancel", "[editor][world]")
+{
+    QTemporaryDir dir;
+    const auto path = Fixture(dir);
+    ProjectDescriptor descriptor;
+    descriptor.Name = QStringLiteral("World team");
+    descriptor.ProviderKind = Provider::Cmake;
+    descriptor.SourceDir = QStringLiteral(".");
+    descriptor.Preset = QStringLiteral("linux-clang-development");
+    descriptor.Target = QStringLiteral("sample");
+    descriptor.RunCwd = QStringLiteral(".");
+    const auto project = QDir(QFileInfo(dir.path()).canonicalFilePath()).filePath(QStringLiteral("ludus.project.json"));
+    Write(project, SerializeDescriptor(descriptor));
+    EditorController controller(
+        {QStringLiteral("/missing/python"), QStringLiteral("/missing/editor_tool.py"), QStringLiteral("/missing")});
+    MainWindow window(&controller);
+    controller.OpenProject(project);
+    window.show();
+    QTest::qWait(100);
+    auto* world = window.findChild<WorldWorkspace*>();
+    REQUIRE(world != nullptr);
+    REQUIRE(world->Open(path));
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("workspaceTabs"));
+    REQUIRE(tabs != nullptr);
+    tabs->setCurrentWidget(world);
+    world->findChild<QListWidget*>(QStringLiteral("worldEntities"))->setCurrentRow(0);
+    Type(Field(*world, QStringLiteral("transform/x")), QStringLiteral("4"));
+    auto* save = window.findChild<QAction*>(QStringLiteral("document.save"));
+    REQUIRE(save != nullptr);
+    CHECK(save->text() == QStringLiteral("&Save World"));
+    REQUIRE(save->isEnabled());
+    save->trigger();
+    CHECK_FALSE(world->Dirty());
+    CHECK(Read(project) == SerializeDescriptor(descriptor));
+    world->findChild<QListWidget*>(QStringLiteral("worldEntities"))->setFocus();
+    auto* undo = window.findChild<QAction*>(QStringLiteral("document.undo"));
+    REQUIRE(undo != nullptr);
+    undo->trigger();
+    CHECK(world->Dirty());
+    QTimer::singleShot(0, []() {
+        auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        REQUIRE(box != nullptr);
+        box->done(QMessageBox::Cancel);
+    });
+    REQUIRE(QMetaObject::invokeMethod(&window, "OnCloseProject", Qt::DirectConnection));
+    CHECK(controller.State().DescriptorPath == project);
+    CHECK(world->Dirty());
+    world->Redo();
+    CHECK_FALSE(world->Dirty());
+}
+
+TEST_CASE("World tags and asset kinds allow custom schemas while rejecting the wrong resource type", "[editor][world]")
+{
+    auto schema = QJsonDocument::fromJson(Schema()).object();
+    auto definitions = schema.value(QStringLiteral("components")).toArray();
+    definitions.append(QJsonObject{{QStringLiteral("id"), QStringLiteral("qa.marker")},
+                                   {QStringLiteral("label"), QStringLiteral("QA marker")},
+                                   {QStringLiteral("help"), QStringLiteral("Mark entities for a test pass.")},
+                                   {QStringLiteral("required"), false},
+                                   {QStringLiteral("properties"), QJsonArray{}}});
+    schema.insert(QStringLiteral("components"), definitions);
+    WorldDocument document;
+    QString error;
+    REQUIRE(document.LoadSchema(QJsonDocument(schema).toJson(), error));
+    REQUIRE(document.Load(Starter(), error));
+    REQUIRE(document.Attach(QStringLiteral("starter.cube"), error, QStringLiteral("qa.marker")));
+    auto components = document.Entity(QStringLiteral("starter.cube")).value(QStringLiteral("components")).toObject();
+    auto presentation = components.value(QStringLiteral("presentation")).toObject();
+    presentation.insert(QStringLiteral("sound"), QStringLiteral("mesh.cube"));
+    components.insert(QStringLiteral("presentation"), presentation);
+    const auto before = document.Draft();
+    CHECK_FALSE(document.Edit(QStringLiteral("starter.cube"), components, QStringLiteral("Cube"), error));
+    CHECK(error.contains(QStringLiteral("audio")));
+    CHECK(document.Draft() == before);
+}
+
+TEST_CASE("World recovery rejects damaged payloads and stale schemas without replacing the document", "[editor][world]")
+{
+    QTemporaryDir dir;
+    const auto path = Fixture(dir);
+    WorldWorkspace source;
+    source.SetProject(dir.path(), 1);
+    REQUIRE(source.Open(path));
+    source.findChild<QListWidget*>(QStringLiteral("worldEntities"))->setCurrentRow(0);
+    Type(Field(source, QStringLiteral("transform/x")), QStringLiteral("1"));
+    REQUIRE(source.Apply());
+    const auto recovery = path + QStringLiteral(".ludus-recovery");
+    const auto valid = Read(recovery);
+    WorldWorkspace restored;
+    restored.SetProject(dir.path(), 1);
+    REQUIRE(restored.Open(path));
+    const auto before = restored.Document().Draft();
+    Write(recovery, valid.left(40));
+    CHECK_FALSE(restored.Recover());
+    CHECK(restored.Document().Draft() == before);
+    Write(recovery, valid + 'x');
+    CHECK_FALSE(restored.Recover());
+    CHECK_FALSE(restored.Dirty());
+    Write(recovery, valid);
+    const auto schemaPath =
+        QDir(QFileInfo(dir.path()).canonicalFilePath()).filePath(QStringLiteral("authoring/world.schema.json"));
+    Write(schemaPath, Schema() + ' ');
+    CHECK_FALSE(restored.Recover());
+    CHECK(restored.Document().Draft() == before);
+    Write(schemaPath, Schema());
+    REQUIRE(restored.Recover());
+    REQUIRE(restored.Dirty());
+    // Never replace an applied dirty draft with recovery without a loss-of-work decision.
+    CHECK_FALSE(restored.Recover());
+}

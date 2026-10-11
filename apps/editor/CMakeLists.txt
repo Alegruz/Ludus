@@ -90,6 +90,9 @@ ludus_apply_project_defaults(ludus_editor_scene)
 qt_add_executable(ludus_editor
     src/internal/scene_preview.h
     src/internal/scene_workspace.h
+    src/internal/world_workspace.h
+    src/world_document.cpp
+    src/world_workspace.cpp
     ${editor_scene_preview_source}
     src/scene_store.cpp
     src/scene_workspace.cpp
@@ -162,6 +165,7 @@ target_link_libraries(ludus_editor
         Ludus::FoundationConfigJson
         Ludus::RuntimeConfiguration
         Ludus::FoundationMath
+        Ludus::FoundationParsingJson
 )
 ludus_apply_project_defaults(ludus_editor)
 target_link_libraries(ludus_editor PRIVATE Ludus::Platform)
@@ -183,9 +187,13 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
     add_executable(ludus_editor_tests
         src/internal/scene_preview.h
         src/internal/scene_workspace.h
+        src/internal/world_workspace.h
+        src/world_document.cpp
+        src/world_workspace.cpp
         ${editor_scene_preview_source}
         src/scene_store.cpp
         src/scene_workspace.cpp
+        tests/world_workspace_tests.cpp
         tests/scene_workspace_tests.cpp
         src/internal/controller.h
         src/internal/configuration_workspace.h
@@ -261,6 +269,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
             Ludus::FoundationConfigJson
             Ludus::RuntimeConfiguration
             Ludus::FoundationMath
+            Ludus::FoundationParsingJson
             Catch2::Catch2)
     ludus_apply_project_defaults(ludus_editor_tests)
     target_link_libraries(ludus_editor_tests PRIVATE Ludus::Platform)
