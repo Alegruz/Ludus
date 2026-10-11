@@ -1,3 +1,8 @@
+// Thanks to NIST, "Secure Hash Standard (SHS)", FIPS PUB 180-4 (2015), sections
+// 4.1.2/4.2.2, 5.1.1/5.2.1/5.3.3 and 6.2, for the SHA-256 functions, constants,
+// preprocessing and compression algorithm: https://doi.org/10.6028/NIST.FIPS.180-4
+// This specification citation identifies the algorithm; it does not establish
+// the implementation's original code provenance or imply FIPS validation.
 #include <ludus/content/content.h>
 
 namespace ludus::content

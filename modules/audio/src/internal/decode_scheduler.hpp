@@ -2,6 +2,13 @@
 
 // Incremental cold-worker decode scheduler, per .kiro/specs/audio/design.md
 // section 9 and the Game Audio Programming vol 1 ch.3 / vol 3 ch.9 follow-ups.
+// Thanks to Blair Bitonti, "Streaming Sound", Game Audio Programming: Principles
+// and Practices, chapter 3, pp. 31-47, for buffered runway and in-flight ownership;
+// and Robert Gay, "Voice Management and Virtualization", Game Audio Programming
+// 3: Principles and Practices, chapter 9, pp. 133-142, for resource limits and
+// streamed residency. Ludus splits cold prepares into bounded units and rechecks
+// refill deadlines; it does not promise OS scheduling or copy optical-media
+// tuning. Reviewed source scope: docs/architecture/audio-research.md.
 //
 // This is the deadline-first incremental decode DISCIPLINE, independent of the
 // (A4-pending) stream rings, device consumption and OS thread. It is pure,

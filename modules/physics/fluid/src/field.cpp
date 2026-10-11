@@ -1,3 +1,11 @@
+// Thanks to Robert Bridson, Fluid Simulation for Computer Graphics, second
+// edition (2015), chapter 3 and sections 12.2-12.3, pp. 180-183, and his UBC
+// "Shallow water" lecture (2005), for semi-Lagrangian tracing, staggered
+// velocities and height-driven pressure:
+// https://www.cs.ubc.ca/~rbridson/courses/533d-fall-2005/nov17-cs533d-slides.pdf
+// Ludus assumes a flat bed; its drainage limiter, substep factor, caps and foam
+// heuristic are local choices, not source recipes. Reviewed sources and the
+// departure from incompressible projection: docs/architecture/fluid-field-reference-review.md.
 #include <ludus/physics/fluid/field.h>
 
 #include <ludus/foundation/containers/array.hpp>

@@ -1,5 +1,14 @@
 #pragma once
 
+// Thanks to Jason Page, "MultiStream-The Art of Writing a Next-Gen Audio Engine",
+// Game Programming Gems 7 (2008), section 4.2, pp. 305-319, for keeping related
+// commands in one atomic batch. Thanks also to Guy Somberg, "Thread-Safe Command
+// Buffer", Game Audio Programming 4: Principles and Practices, chapter 12,
+// pp. 238-261, for publication/retirement ownership and receiver progress.
+// These are design influences: Ludus retains fixed SPSC rings with immutable
+// publication, not Page's SPU/DMA path or Somberg's three-buffer implementation.
+// Reviewed source scope: docs/architecture/audio-research.md.
+
 // Fixed-capacity single-producer / single-consumer ring for audio command
 // batches and debug snapshots, per .kiro/specs/audio/design.md section 4 and 11.
 //

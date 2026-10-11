@@ -13,7 +13,14 @@ namespace ludus::foundation::logging::internal
 // Bounded multi-producer / single-consumer queue of OWNED log records
 // (design.md section 7; requirements R24/R35/R36/R37/R38).
 //
-// This is a Dmitry-Vyukov-style bounded queue: each cell carries a `Sequence`
+// Thanks to Dmitry Vyukov, "Bounded MPMC queue", 1024cores, algorithm/code:
+// https://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue
+// Adopt the per-cell sequence and ticket-claim publication protocol. Ludus uses
+// embedded owned log records, bounded producer retries/drop accounting and one
+// consumer without a dequeue CAS; it retains the stalled-producer limitation.
+// Author-hosted page: https://sites.google.com/site/1024cores/home/lock-free-algorithms/queues/bounded-mpmc-queue
+//
+// This is a Vyukov-style bounded queue: each cell carries a `Sequence`
 // atomic that encodes whose turn it is. A producer only claims a ticket by a
 // SUCCESSFUL compare-exchange on the enqueue position, and only after it has
 // confirmed the target cell is free for that ticket. Therefore:

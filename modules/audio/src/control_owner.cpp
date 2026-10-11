@@ -13,6 +13,14 @@
 
 // This translation unit completes AudioSystem::Impl (storage defined in
 // internal/impl.hpp) with the boundary/render/service logic.
+// Thanks to Guy Somberg, "Sound Engine State Machine", Game Audio Programming:
+// Principles and Practices, chapter 2, pp. 13-30, for reversible virtualization
+// versus terminal stopping; and Robert Gay, "Voice Management and Virtualization",
+// Game Audio Programming 3: Principles and Practices, chapter 9, pp. 133-142,
+// for distinguishing physical voice budgets from per-family limits. Ludus
+// prepares before Play, uses fixed resident groups and charges fades globally;
+// loading states, overlapping pools and automatic stream virtualization are
+// outside this implementation. Reviewed scope: docs/architecture/audio-research.md.
 
 namespace ludus::audio
 {

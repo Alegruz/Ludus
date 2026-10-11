@@ -1,5 +1,10 @@
 // Scalar batch operations (design §12). Precise FP flags; <cmath>/<limits>
 // permitted (ADR 0003/0010). No heap scratch; the preflight recomputes.
+// Thanks to Nicolas Guillemot and Marc Fauconneau Dufresne, "Portable SIMD
+// Programs Using ISPC", Game Engine Gems 3 (2016), chapter 16, PDF pp. 204-213,
+// for the bulk-across-objects design direction. These are scalar reference
+// loops with caller-owned output and preflight validation, not an ISPC port or
+// a claim of vectorization. Reviewed scope: docs/architecture/math-research.md.
 
 #include <ludus/foundation/math/batch.hpp>
 #include <ludus/foundation/math/queries.hpp>
