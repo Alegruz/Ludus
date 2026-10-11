@@ -96,6 +96,12 @@ MathStatus TryLookAt(Vector3 eye, Vector3 target, Vector3 upHint, Matrix4& outVi
     return FromRows(rows, outView);
 }
 
+// Thanks to Nathan Reed, "Visualizing Depth Precision", NVIDIA Technical Blog
+// (2015), https://developer.nvidia.com/blog/visualizing-depth-precision/, for the
+// floating-depth reverse-Z design rationale. The perspective and orthographic
+// coefficients below are derived for Ludus's RH, 0<=z<=w convention with checked
+// double intermediates; this credits design inspiration, not copied formulas.
+// Reviewed source and depth contract: docs/architecture/math-research.md.
 MathStatus TryPerspectiveReverseZ(float32 verticalFovRadians,
                                   float32 aspect,
                                   float32 nearPlane,

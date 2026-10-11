@@ -9,6 +9,11 @@
 
 namespace ludus::foundation::math
 {
+// Thanks to Jason Shankel, "Matrix-Quaternion Conversions", Game Programming
+// Gems 1 (2000), section 2.8, pp. 200-204, for quaternion/matrix conversion and
+// extracting a large component before division. Ludus checks a finite,
+// approximately orthonormal, positive-determinant basis before extraction.
+// Source scope and convention adaptations: docs/architecture/math-research.md.
 Matrix3 ToMatrix3(Quaternion q) noexcept
 {
     LUDUS_ASSERT(IsFinite(q));

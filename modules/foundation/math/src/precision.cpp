@@ -7,6 +7,11 @@
 
 namespace ludus::foundation::math
 {
+// Thanks to Peter Freese, "Solving Accuracy Problems in Large World Coordinates",
+// Game Programming Gems 4 (2004), section 2.3, pp. 157-170, for using a shared
+// origin and subtracting before local arithmetic. Ludus uses double world
+// coordinates and checked float narrowing, not the chapter's cell-plus-offset
+// representation. Source scope: docs/architecture/math-research.md.
 MathStatus TryMakeRelative(Vector3d position, Vector3d origin, float64 maxAbsComponent, Vector3& out) noexcept
 {
     if (!IsFinite(position) || !IsFinite(origin) || !std::isfinite(maxAbsComponent))
