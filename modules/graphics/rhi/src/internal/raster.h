@@ -188,6 +188,7 @@ void ResetLifetimeRecords() noexcept;
 namespace ludus::graphics::rhi::backend
 {
 RasterCapabilities RasterLimits() noexcept;
+ludus::foundation::uint32 RasterVertexStrideLimit() noexcept;
 FormatCapabilities FormatLimits(RasterFormat) noexcept;
 ComputeCapabilities ComputeLimits() noexcept;
 RasterStatus

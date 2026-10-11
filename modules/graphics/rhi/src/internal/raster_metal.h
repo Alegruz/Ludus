@@ -103,6 +103,10 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
     return gDevice == nil ? FormatCapabilities{} : internal::PortableFormatLimits(format, RasterLimits());
 }
+uint32 RasterVertexStrideLimit() noexcept
+{
+    return 256;
+}
 RasterCapabilities RasterLimits() noexcept
 {
     const usize max = usize{64} * 1024 * 1024;

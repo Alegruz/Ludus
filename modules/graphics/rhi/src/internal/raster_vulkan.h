@@ -366,6 +366,10 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     }
     return result;
 }
+uint32 RasterVertexStrideLimit() noexcept
+{
+    return 256;
+}
 RasterCapabilities RasterLimits() noexcept
 {
     VkPhysicalDeviceProperties properties{};

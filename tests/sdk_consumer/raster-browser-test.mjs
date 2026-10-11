@@ -27,10 +27,11 @@ try {
   const pin = JSON.parse(await readFile(new URL('../../config/shader_toolchain.json',import.meta.url))).wgsl_validator;
   assert.equal(browser.version(),pin.chromium_version);
   report.version = browser.version();
-  for (const scenario of ['webgpu','webgl2','auto','auto-fallback','webgpu-profile-limit-failure','webgl2-profile-limit-failure','auto-profile-limit-fallback','webgpu-srgb','webgl2-srgb','webgpu-blend','webgl2-blend','webgpu-graph','webgl2-graph','webgpu-graph-reference','webgl2-graph-reference','webgpu-merge','webgpu-merge-reference','webgl2-merge','webgl2-merge-reference','auto-fallback-merge','webgpu-cpu','webgpu-compute','webgpu-compute-reference','webgl2-cpu','webgl2-compute','auto-fallback-compute','webgl2-compute-required','invalid-shader','invalid-pipeline','invalid-upload','invalid-readback','slow-completion','transfer-loss','device-loss']) {
+  for (const scenario of ['webgpu','webgl2','auto','auto-fallback','webgpu-profile-limit-failure','webgl2-profile-limit-failure','auto-profile-limit-fallback','webgpu-stride-256','webgl2-stride-252','webgl2-stride-profile-failure','webgpu-srgb','webgl2-srgb','webgpu-blend','webgl2-blend','webgpu-graph','webgl2-graph','webgpu-graph-reference','webgl2-graph-reference','webgpu-merge','webgpu-merge-reference','webgl2-merge','webgl2-merge-reference','auto-fallback-merge','webgpu-cpu','webgpu-compute','webgpu-compute-reference','webgl2-cpu','webgl2-compute','auto-fallback-compute','webgl2-compute-required','invalid-shader','invalid-pipeline','invalid-upload','invalid-readback','slow-completion','transfer-loss','device-loss']) {
     const context = await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
     await context.addInitScript(scenario => {
       window.__qaPause = false;
+      window.__qaRequiredStride = scenario === 'webgl2-stride-252' ? 252 : scenario.includes('stride') ? 256 : 0;
       window.__qaSlowTransfers = scenario === 'slow-completion';
       if (scenario.startsWith('auto-fallback')) Object.defineProperty(navigator,'gpu',{get:() => undefined});
       if (navigator.gpu) {
@@ -105,7 +106,7 @@ try {
     const selection = scenario.startsWith('webgpu') ? 'webgpu' : scenario.startsWith('webgl2') ? 'webgl2' : scenario.startsWith('invalid') || scenario === 'device-loss' || scenario === 'slow-completion' || scenario === 'transfer-loss' ? 'webgpu' : 'auto';
     await page.goto(`http://127.0.0.1:${server.address().port}/raster.html?backend=${selection}&variant=${variant}`);
     const result = {scenario};
-    if (scenario.startsWith('invalid') || scenario === 'transfer-loss' || scenario === 'webgl2-compute-required' || scenario.endsWith('profile-limit-failure')) {
+    if (scenario.startsWith('invalid') || scenario === 'transfer-loss' || scenario === 'webgl2-compute-required' || (scenario.endsWith('profile-limit-failure') || scenario.endsWith('stride-profile-failure'))) {
       await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'failed',null,{timeout:20000});
       assert.equal(await page.locator('#status').getAttribute('data-frames'),'0');
       if (scenario === 'webgpu-profile-limit-failure') assert.equal(await page.evaluate(() => window.__qaCreates),0,'admission must precede buffer creation');

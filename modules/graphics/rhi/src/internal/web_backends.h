@@ -58,6 +58,7 @@ WGPURenderPassEncoder ProbePass() noexcept;
 namespace ludus::graphics::rhi::webgpu
 {
 RasterCapabilities RasterLimits() noexcept;
+ludus::foundation::uint32 RasterVertexStrideLimit() noexcept;
 FormatCapabilities FormatLimits(RasterFormat) noexcept;
 ComputeCapabilities ComputeLimits() noexcept;
 RasterStatus
@@ -111,6 +112,7 @@ void LifetimeReset() noexcept;
 namespace ludus::graphics::rhi::webgl
 {
 RasterCapabilities RasterLimits() noexcept;
+ludus::foundation::uint32 RasterVertexStrideLimit() noexcept;
 FormatCapabilities FormatLimits(RasterFormat) noexcept;
 ComputeCapabilities ComputeLimits() noexcept;
 RasterStatus

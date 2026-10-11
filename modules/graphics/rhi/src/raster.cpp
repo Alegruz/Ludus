@@ -960,7 +960,8 @@ ValidatePipeline(DeviceHandle device, const RasterPipelineDescription& descripti
     for (usize i = 0; i < info.StreamCount; ++i)
     {
         const auto& stream = description.Streams[i];
-        if (stream.Stride == 0 || stream.Stride > 256 || stream.Stride % 4 != 0)
+        if (stream.Stride == 0 || stream.Stride > internal::CurrentDeviceProfile().Interface.MaxVertexStride ||
+            stream.Stride % 4 != 0)
         {
             return RasterStatus::InvalidDescription;
         }

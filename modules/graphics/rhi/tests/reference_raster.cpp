@@ -107,6 +107,10 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     }
     return result;
 }
+uint32 RasterVertexStrideLimit() noexcept
+{
+    return Kind() == Backend::WebGL2 ? 252U : 256U;
+}
 RasterCapabilities RasterLimits() noexcept
 {
     if (!reference::ProfileAvailable)

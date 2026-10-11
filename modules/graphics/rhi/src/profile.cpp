@@ -320,7 +320,7 @@ DeviceProfile QueryDeviceProfile() noexcept
     {
         return {};
     }
-    result.Interface = {8, 2, 8, 256, 1, 1};
+    result.Interface = {8, 2, 8, backend::RasterVertexStrideLimit(), 1, 1};
     result.Compute = backend::ComputeLimits();
     for (usize i = 0; i < 4; ++i)
     {

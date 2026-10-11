@@ -69,6 +69,7 @@ EM_JS(void, Report, (uint32 step, uint32 frames, int32 failed, int32 backend), {
     node.textContent = node.dataset.state + ' frames=' + frames;
 });
 EM_JS(int32, SlowTransfers, (), { return globalThis.__qaSlowTransfers ? 1 : 0; });
+EM_JS(uint32, RequiredStride, (), { return globalThis.__qaRequiredStride || 0; });
 EM_JS(int32, Paused, (), { return globalThis.__qaPause ? 1 : 0; });
 EM_JS(int32, Variant, (), {
     const value = new URL(location.href).searchParams.get('variant');
@@ -84,6 +85,10 @@ EM_JS(int32, Selection, (), {
 // clang-format on
 #else
 void Report(uint32, uint32, int32, int32) noexcept {}
+uint32 RequiredStride() noexcept
+{
+    return 0;
+}
 int32 SlowTransfers() noexcept
 {
     return 0;
@@ -422,6 +427,18 @@ void Tick() noexcept
         const rhi::RasterVertexAttribute attributes[3]{{0, 0, 0, rhi::RasterVertexFormat::Float3},
                                                        {1, 0, 12, rhi::RasterVertexFormat::Float2},
                                                        {2, 1, 0, rhi::RasterVertexFormat::Float2}};
+        if (info.Profile.Interface.MaxVertexStride == 252)
+        {
+            const rhi::RasterVertexStream invalidStreams[]{{256, false}, {8, true}};
+            rhi::RasterPipelineHandle rejected;
+            if (rhi::CreateRasterPipeline(gDevice,
+                                          {gVertex, gFragment, gLayout, invalidStreams, attributes},
+                                          rejected) != rhi::RasterStatus::InvalidDescription)
+            {
+                Stop(true);
+                return;
+            }
+        }
         if (!Accepted(
                 rhi::RequestPipeline(gDevice,
                                      {gVertex,
@@ -659,6 +676,7 @@ int main()
 #endif
     rhi::DeviceDescription description;
     description.Required.PortableRaster = true;
+    description.RequiredProfile.Raster.MinVertexStride = RequiredStride();
     description.RequiredProfile.Raster.MinBindings = 3;
     description.RequiredProfile.Raster.MinVertexBuffers = 2;
     description.RequiredProfile.Raster.MinUniformRange = 48;

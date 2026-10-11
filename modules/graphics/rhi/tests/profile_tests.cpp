@@ -49,7 +49,7 @@ TEST_CASE("Profile requests are copied and enabled snapshots are invalidated by 
 {
     ProfileFixture fixture;
     DeviceDescription request;
-    request.RequiredProfile.Raster.MinBufferSize = 64U * 1024U * 1024U;
+    request.RequiredProfile.Raster.MinBufferSize = ludus::foundation::usize{64} * 1024U * 1024U;
     request.RequiredProfile.Raster.MaxUniformOffsetAlignment = 256;
     request.RequiredProfile.Compute.MinWorkgroupSize[2] = 64;
     request.RequiredProfile.Compute.MinWorkgroupInvocations = 256;
@@ -67,7 +67,7 @@ TEST_CASE("Profile requests are copied and enabled snapshots are invalidated by 
     request.RequiredProfile.Formats[0].Uses.Storage = true;
     DeviceInfo info;
     REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Pending);
-    CHECK(info.Description.RequiredProfile.Raster.MinBufferSize == 64U * 1024U * 1024U);
+    CHECK(info.Description.RequiredProfile.Raster.MinBufferSize == ludus::foundation::usize{64} * 1024U * 1024U);
     CHECK_FALSE(info.Description.RequiredProfile.Formats[0].Uses.Storage);
     CHECK(info.Profile.Raster.MaxBufferSize == 0);
     FormatCapabilities format;
@@ -263,7 +263,7 @@ TEST_CASE("Preferred constraints report misses without failing or changing enabl
     CHECK_FALSE(info.Enabled.Compute);
     CHECK(info.UnmetProfilePreference.Requirement == ProfileRequirement::StorageRange);
     CHECK(info.UnmetProfilePreference.Available == 0);
-    CHECK(info.Profile.Raster.MaxBufferSize == 64U * 1024U * 1024U);
+    CHECK(info.Profile.Raster.MaxBufferSize == ludus::foundation::usize{64} * 1024U * 1024U);
     REQUIRE(DestroyDevice(fixture.Device) == DeviceStatus::Ready);
     fixture.Surface = {};
     request.RequiredProfile.Compute.MinStorageRange = 4;
@@ -329,7 +329,7 @@ TEST_CASE("Fallback profile failure preserves both diagnostics and clears enable
     request.RequiredProfile.Raster.MinTextureDimension2D = 2048;
     REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
     reference::OverrideRasterLimits = true;
-    reference::RasterLimitOverride = {64U * 1024U * 1024U, 1024, 256, 16384, 32, 128};
+    reference::RasterLimitOverride = {ludus::foundation::usize{64} * 1024U * 1024U, 1024, 256, 16384, 32, 128};
     internal::SetFallback([](ludus::foundation::uint32 token, StartupError error) noexcept {
         if (backend::ActiveKind != Backend::WebGPU)
         {
@@ -372,4 +372,41 @@ TEST_CASE("Unavailable preferred format uses remain optional", "[rhi][profile]")
     CHECK(info.UnmetProfilePreference.Available == 0);
     CHECK(info.Profile.Formats[0].Uses.Sampled);
     CHECK_FALSE(info.Profile.Formats[0].Uses.Storage);
+}
+
+TEST_CASE("Stride admission honors the enabled backend's aligned boundary", "[rhi][profile]")
+{
+    ProfileFixture fixture;
+    DeviceDescription request;
+    bool rejected = false;
+    SECTION("WebGPU supports 256 bytes")
+    {
+        request.RequiredProfile.Raster.MinVertexStride = 256;
+    }
+    SECTION("WebGL supports 252 bytes")
+    {
+        backend::ActiveKind = Backend::WebGL2;
+        request.RequiredProfile.Raster.MinVertexStride = 252;
+    }
+    SECTION("WebGL rejects 256 bytes before Ready")
+    {
+        backend::ActiveKind = Backend::WebGL2;
+        request.RequiredProfile.Raster.MinVertexStride = 256;
+        rejected = true;
+    }
+    REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
+    fixture.Complete();
+    DeviceInfo info;
+    if (rejected)
+    {
+        REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Failed);
+        CHECK(info.Startup.ProfileFailure.Requirement == ProfileRequirement::VertexStride);
+        CHECK(info.Startup.ProfileFailure.Requested == 256);
+        CHECK(info.Startup.ProfileFailure.Available == 252);
+    }
+    else
+    {
+        REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Ready);
+        CHECK(info.Profile.Interface.MaxVertexStride == request.RequiredProfile.Raster.MinVertexStride);
+    }
 }

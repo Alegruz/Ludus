@@ -205,6 +205,14 @@ RasterStatus ComputeEncode(const internal::ComputePacket&) noexcept
     return RasterStatus::Unsupported;
 }
 void ComputeBufferBarrier(usize, GraphAccessMode) noexcept {}
+// Thanks to Khronos, "WebGL 2.0 Specification", vertexAttribIPointer and
+// WebGL 1.0 section "Vertex Attribute Data Stride": the API caps stride at 255.
+// Ludus uses four-byte-aligned float attributes, so its largest legal stride is 252.
+// https://registry.khronos.org/webgl/specs/1.0/#VERTEX_ATTRIB_POINTER
+uint32 RasterVertexStrideLimit() noexcept
+{
+    return 252;
+}
 RasterCapabilities RasterLimits() noexcept
 {
     if (gContext <= 0)

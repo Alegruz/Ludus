@@ -92,7 +92,7 @@ struct RasterInterfaceCapabilities final
     ludus::foundation::uint32 MaxVertexBuffers = 0;
     /// Maximum float vertex attributes.
     ludus::foundation::uint32 MaxVertexAttributes = 0;
-    /// Maximum vertex stride in bytes.
+    /// Maximum four-byte-aligned vertex stride in bytes; 252 on WebGL 2, 256 elsewhere.
     ludus::foundation::uint32 MaxVertexStride = 0;
     /// Maximum color attachments in one raster pass.
     ludus::foundation::uint32 MaxColorAttachments = 0;

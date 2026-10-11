@@ -367,7 +367,7 @@ The original R1 profile:
 | Uploads | Complete top-left RGBA8 rows, explicit pitch divisible by four; caller bytes consumed/copied before return; aggregate upload at most the maximum buffer size |
 | Views | Complete original-format sampled views; no reinterpretation, partial sampled range or attachment view |
 | Bindings | One group/set, at most eight unique binding numbers below eight; uniform ranges, sampled 2D textures and non-comparison samplers |
-| Vertex input | At most two streams, per-vertex or divisor-one per-instance, stride 4..256 divisible by four; eight unique float2/3/4 attributes |
+| Vertex input | At most two streams, per-vertex or divisor-one per-instance, stride divisible by four, 4..256 on native/WebGPU and 4..252 on WebGL 2; eight unique float2/3/4 attributes |
 | Draw | Triangle list, Index16/Index32, zero base vertex/first instance, 1024 draws per frame; fixed primitive-restart indices are rejected |
 | State | No culling, one color target, one sample; explicit depth comparison/write and premultiplied-alpha blend; defaults retain less-than |
 

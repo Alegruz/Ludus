@@ -164,6 +164,10 @@ void RasterDone(WGPUQueueWorkDoneStatus status, WGPUStringView, void* userdata, 
     }
 }
 } // namespace
+uint32 RasterVertexStrideLimit() noexcept
+{
+    return 256;
+}
 RasterCapabilities RasterLimits() noexcept
 {
     WGPULimits limits = WGPU_LIMITS_INIT;
