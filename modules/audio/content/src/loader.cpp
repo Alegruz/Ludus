@@ -46,6 +46,7 @@ struct Acquisition final
     bool Draft = false;
     bool MusicDraft = false;
     bool IsMusic = false;
+    bool HasSnapshot = false;
     ludus::content::Catalog Catalog;
     Bytes Sources[16];
     ludus::content::Digest Digests[16];
@@ -72,15 +73,18 @@ struct Acquisition final
     void Run() noexcept
     {
         Bytes bytes;
-        Result = ludus::content::ReadFile(Root.View(), "catalog.json", ludus::content::MAX_DOCUMENT_BYTES, bytes);
-        if (Result != ContentStatus::Ok)
+        if (!HasSnapshot)
         {
-            return;
-        }
-        Result = Catalog.Read(bytes.String(), Error);
-        if (Result != ContentStatus::Ok)
-        {
-            return;
+            Result = ludus::content::ReadFile(Root.View(), "catalog.json", ludus::content::MAX_DOCUMENT_BYTES, bytes);
+            if (Result != ContentStatus::Ok)
+            {
+                return;
+            }
+            Result = Catalog.Read(bytes.String(), Error);
+            if (Result != ContentStatus::Ok)
+            {
+                return;
+            }
         }
         const auto* entry = Catalog.Find(Id.View());
         if (entry == nullptr)
@@ -300,8 +304,11 @@ Loader::~Loader() noexcept
         delete mImpl;
     }
 }
-ContentStatus
-Loader::Begin(std::string_view root, std::string_view id, const Sound* draft, const Music* musicDraft) noexcept
+ContentStatus Loader::Begin(std::string_view root,
+                            std::string_view id,
+                            const Sound* draft,
+                            const Music* musicDraft,
+                            const ludus::content::Catalog* snapshot) noexcept
 {
     if (mImpl == nullptr)
     {
@@ -333,6 +340,19 @@ Loader::Begin(std::string_view root, std::string_view id, const Sound* draft, co
     job->Session = mImpl->Audio.GetSession();
     (void)job->Root.Set(root);
     (void)job->Id.Set(id);
+    if (snapshot != nullptr)
+    {
+        for (const auto& entry : snapshot->Entries())
+        {
+            const auto status = job->Catalog.Put(entry);
+            if (status != ContentStatus::Ok)
+            {
+                delete job;
+                return status;
+            }
+        }
+        job->HasSnapshot = true;
+    }
     Bytes canonical;
     Diagnostic error;
     if (draft != nullptr)

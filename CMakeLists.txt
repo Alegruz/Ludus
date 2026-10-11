@@ -177,6 +177,7 @@ if(NOT EMSCRIPTEN)
 endif()
 add_subdirectory(modules/content)
 add_subdirectory(modules/audio/content)
+add_subdirectory(modules/runtime/resources)
 
 # Ludus::GameApi is a header-only INTERFACE target defining the gameplay module
 # ABI (project-live-reload design section 2). It links no engine implementation,
