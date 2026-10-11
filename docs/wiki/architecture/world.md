@@ -65,3 +65,10 @@ completion, then merge valid results in stable order at an explicit tick boundar
 Read [frame/tick policy](../../architecture/frame-update.md),
 [the reference application](../../examples/world-demo.md)
 and [the game-world design](../../architecture/game-world.md).
+
+The proposed [gameplay foundation extension](../../architecture/gameplay-foundations.md)
+builds on these contracts with static cells, agent scheduling, typed messages,
+streaming lifetimes, scripting integration and session flow. Its
+[Gems review](../../architecture/gameplay-foundations-gems-review.md)
+records the chapter-derived refinements and deferred alternatives. These larger
+facilities remain proposals with their own delivery and acceptance stages.
