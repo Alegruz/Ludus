@@ -1,9 +1,9 @@
 {
   "C_Cpp.intelliSenseEngine": "disabled",
+  "clangd.path": "${workspaceFolder}/scripts/clangd",
   "clangd.arguments": [
     "--background-index",
-    "--clang-tidy",
-    "--compile-commands-dir=${workspaceFolder}/out/build/linux-clang-development"
+    "--clang-tidy"
   ],
   "cmake.cmakePath": "${workspaceFolder}/out/host-tools/venv/bin/cmake",
   "cmake.configureEnvironment": {
