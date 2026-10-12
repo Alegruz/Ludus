@@ -31,12 +31,19 @@ int main(int argumentCount, char**)
     return value == 0 ? 1 : 0;
 #elif defined(LUDUS_CONTROL_TSAN)
     std::atomic<bool> ready{false};
-    int32 value = 0;
-    auto write = [&ready, &value](int32 input) {
+    std::atomic<ludus::foundation::uint32> completed{0};
+    volatile int32 value = 0;
+    auto write = [&ready, &completed, &value](int32 input) {
         while (!ready.load(std::memory_order_acquire))
         {
         }
         value = input;
+        // Keep both writers alive until both volatile accesses occur. Relaxed
+        // atomics deliberately leave the writes unordered for the race control.
+        completed.fetch_add(1, std::memory_order_relaxed);
+        while (completed.load(std::memory_order_relaxed) != 2)
+        {
+        }
     };
     std::thread first(write, 1);
     std::thread second(write, 2);

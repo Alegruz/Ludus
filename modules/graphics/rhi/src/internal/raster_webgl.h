@@ -1,4 +1,6 @@
 #pragma once
+
+#include "profile.h"
 // Included only by rhi_webgl.cpp. Thanks to Khronos, OpenGL ES 3.0.6,
 // sections 2.8 (vertex arrays), 2.12.6 (uniform blocks) and 5.2 (sync objects):
 // https://registry.khronos.org/OpenGL/specs/es/3.0/es_spec_3.0.pdf
@@ -208,6 +210,14 @@ RasterStatus ComputeEncode(const internal::ComputePacket&) noexcept
     return RasterStatus::Unsupported;
 }
 void ComputeBufferBarrier(usize, GraphAccessMode) noexcept {}
+// Thanks to Khronos, "WebGL 2.0 Specification", vertexAttribIPointer and
+// WebGL 1.0 section "Vertex Attribute Data Stride": the API caps stride at 255.
+// Ludus uses four-byte-aligned float attributes, so its largest legal stride is 252.
+// https://registry.khronos.org/webgl/specs/1.0/#VERTEX_ATTRIB_POINTER
+uint32 RasterVertexStrideLimit() noexcept
+{
+    return 252;
+}
 RasterCapabilities RasterLimits() noexcept
 {
     if (gContext <= 0)
@@ -247,6 +257,15 @@ RasterCapabilities RasterLimits() noexcept
             static_cast<uint32>(attributes < 16 ? attributes : 16),
             gRasterHdr};
 }
+// Thanks to Khronos Group, "WebGL 2.0 Specification", texture formats and GLES 3.0 constraints.
+// https://registry.khronos.org/webgl/specs/2.0.0/
+// Intersect guaranteed normalized formats and enabled HDR with implemented uses;
+// no storage/copy/MSAA or R8/RG8 attachment path is advertised.
+FormatCapabilities FormatLimits(RasterFormat format) noexcept
+{
+    return gContext <= 0 ? FormatCapabilities{} : internal::PortableFormatLimits(format, RasterLimits());
+}
+
 RasterStatus
 RasterCreateBuffer(usize slot, const BufferDescription& info, std::span<const uint8> bytes, uint32) noexcept
 {

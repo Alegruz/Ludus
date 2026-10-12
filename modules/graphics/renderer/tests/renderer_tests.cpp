@@ -30,10 +30,11 @@ struct Session
     rhi::SurfaceHandle Surface;
     rr::Renderer Renderer;
     rr::Mesh Mesh;
-    Session()
+    explicit Session(bool hdrAvailable = true)
     {
         rhi::Shutdown();
         rhi::reference::Reset();
+        rhi::reference::HdrAvailable = hdrAvailable;
         rhi::backend::ImmediateError = rhi::StartupError::None;
         rhi::backend::NextFrame = rhi::FrameStatus::Ready;
         rhi::backend::ActiveKind = rhi::Backend::WebGPU;
@@ -1007,8 +1008,7 @@ TEST_CASE("L4 rejects malformed light/layout/bake data before publication", "[re
 
 TEST_CASE("L4 capability negotiation admits LDR without HDR pipelines", "[renderer][l4]")
 {
-    Session session;
-    rhi::reference::HdrAvailable = false;
+    Session session(false);
     LitFixture fixture;
     fixture.Enable(session);
     auto program = fixture.Prewarm(session);

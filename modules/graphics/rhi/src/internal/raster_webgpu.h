@@ -1,4 +1,6 @@
 #pragma once
+
+#include "profile.h"
 // Included only by the WebGPU backend. Thanks to W3C, WebGPU, sections
 // "Error Scopes" and "GPUQueue" (validation and ordered completion):
 // https://www.w3.org/TR/webgpu/#error-scopes and https://www.w3.org/TR/webgpu/#gpuqueue
@@ -162,6 +164,10 @@ void RasterDone(WGPUQueueWorkDoneStatus status, WGPUStringView, void* userdata, 
     }
 }
 } // namespace
+uint32 RasterVertexStrideLimit() noexcept
+{
+    return 256;
+}
 RasterCapabilities RasterLimits() noexcept
 {
     WGPULimits limits = WGPU_LIMITS_INIT;
@@ -182,6 +188,15 @@ RasterCapabilities RasterLimits() noexcept
             limits.maxVertexAttributes < 16 ? limits.maxVertexAttributes : 16,
             true};
 }
+// Thanks to W3C GPU for the Web Working Group, "WebGPU", texture format capabilities.
+// https://www.w3.org/TR/webgpu/#texture-format-caps
+// Intersect guaranteed normalized formats and enabled HDR with implemented uses;
+// no storage/copy/MSAA or R8/RG8 attachment path is advertised.
+FormatCapabilities FormatLimits(RasterFormat format) noexcept
+{
+    return gDevice == nullptr ? FormatCapabilities{} : internal::PortableFormatLimits(format, RasterLimits());
+}
+
 ComputeCapabilities ComputeLimits() noexcept
 {
     WGPULimits limits = WGPU_LIMITS_INIT;

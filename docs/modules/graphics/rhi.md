@@ -82,6 +82,10 @@ enabled device, without elevating its limits to the adapter's maximum support.
 `UnmetRequirement`. Native builds accept only Auto and report
 `BackendUnavailable` for forced browser policies. Busy does not alter a session.
 
+The [profile negotiation guide](../../development/fullscreen-rendering.md#profile-format-and-limit-negotiation)
+covers copied required/preferred raster/compute/format constraints, enabled
+capability snapshots and per-attempt fallback diagnostics.
+
 The [architecture implementation record](../../architecture/rhi-gdi.md#implementation-phases-and-acceptance)
 records the bounded R0–R5 baseline and its evidence. Its
 [remaining-work gates](../../architecture/rhi-gdi.md#remaining-work-and-decision-gates)

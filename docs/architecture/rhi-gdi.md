@@ -50,7 +50,7 @@ Their capabilities describe implemented operations on the enabled device.
 
 | Existing boundary | Implemented scope | Design boundary |
 | --- | --- | --- |
-| [Lifecycle](../../modules/graphics/rhi/include/ludus/graphics/rhi/rhi.h), [explicit device](../../modules/graphics/rhi/include/ludus/graphics/rhi/device.h) and [facade](../../modules/graphics/rhi/src/rhi.cpp) | One main-thread device/session and borrowed surface, copied requirements, asynchronous browser startup, owner validation and explicit loss/restart | Broader feature/format negotiation and multiple independent devices/surfaces are extensions |
+| [Lifecycle](../../modules/graphics/rhi/include/ludus/graphics/rhi/rhi.h), [explicit device](../../modules/graphics/rhi/include/ludus/graphics/rhi/device.h) and [facade](../../modules/graphics/rhi/src/rhi.cpp) | One main-thread device/session and borrowed surface, copied requirements, asynchronous browser startup, owner validation and explicit loss/restart | Enabled raster/compute/format constraints are negotiated before Ready; independent devices/surfaces remain extensions |
 | [Fullscreen resources](../../modules/graphics/rhi/include/ludus/graphics/rhi/render.h) | Eight resources per kind, one uniform binding, one fullscreen triangle and legacy `InUse` rejection | Preserve this compatibility contract separately from general resources |
 | [Portable raster](../../modules/graphics/rhi/include/ludus/graphics/rhi/raster.h) | Typed generational resources, reflected immutable bindings/pipelines and indexed/instanced draws; renderer L1–L3 extend depth, targets and sampled mip formats | Full copy/update, attachment/view and descriptor APIs remain bounded or deferred |
 | [Lifetime services](../../modules/graphics/rhi/include/ludus/graphics/rhi/lifetime.h) | Retained command batches, actual completion tokens, bounded buffer upload/readback rings and canonical pipeline requests | No general texture streaming or persistent driver cache |
@@ -159,8 +159,12 @@ backends, adapter-supported features, device-enabled features/limits, and the
 renderer path selected for this workload. The current API publishes `DeviceInfo`
 with implemented Supported/Enabled
 features, plus `GetRasterCapabilities`, `GetComputeCapabilities` and
-`GetLifetimeCapabilities`. A fuller immutable capability snapshot is a target
-for future format/feature negotiation, not an existing `DeviceCapabilities` type.
+`GetLifetimeCapabilities`. `DeviceInfo::Profile` now supplies an immutable enabled raster/interface/compute
+and format snapshot, with copied required/preferred admission constraints. The
+legacy `StartupInfo::Capabilities` uses `DeviceCapabilities` for fullscreen limits.
+The [profile negotiation guide](../development/fullscreen-rendering.md#profile-format-and-limit-negotiation)
+owns current request, diagnostic and fallback semantics; raw adapter catalogs
+and new native feature enabling remain future extensions.
 Requests include required and preferred
 features; unmet requirements fail before resource creation, while preferences
 select a supported path. Browser Auto fallback must validate the application's
@@ -737,7 +741,7 @@ that every broader target contract in this document is available.
 
 | Phase | Shipped baseline | Contract and acceptance owner |
 | --- | --- | --- |
-| R0 Contracts | Copied requirements, explicit device/target owners, required/preferred workload admission, reference lifecycle validation and compatibility facade | [Explicit device ownership](../development/fullscreen-rendering.md#explicit-r0-device-ownership); general slot/generation identities arrived with R1/R2 |
+| R0 Contracts | Copied requirements, explicit device/target owners, required/preferred workload admission, reference lifecycle validation, copied enabled profile/format constraints and compatibility facade | [Explicit device ownership](../development/fullscreen-rendering.md#explicit-r0-device-ownership); general slot/generation identities arrived with R1/R2 |
 | R1 Portable resources | Typed resources, reflected immutable bindings/pipelines and indexed/instanced raster; renderer L1–L3 extend attachments, depth and sampled formats | [Portable raster](../development/fullscreen-rendering.md#portable-raster-r1) and linked renderer extensions |
 | R2 Lifetime services | Completion tokens, retained batches/records, buffer upload/readback rings, private Vulkan allocator and canonical pipeline requests | [Lifetime services](../development/fullscreen-rendering.md#lifetime-services-r2) |
 | R3 Ordered graph | Authored order, in-place versions, RAW/WAR/WAW reports, roots/culling, completion-gated object pool and attachment lowering | [Ordered graphs](../development/fullscreen-rendering.md#ordered-raster-graphs-r3) |
@@ -780,13 +784,20 @@ work; the queued conference/journal sources are not prerequisites for this basel
 
 ### Remaining work and decision gates
 
+R0 follow-up adds enabled raster/compute/interface limits, format/use/sample
+queries, copied required/preferred constraints and per-attempt diagnostics for
+all implemented profiles. It preserves the one-device/surface scope and pinned
+WebGPU default limit policy. Storage textures, MSAA, general copies and new formats
+still require their own implementation and qualification; reporting their native
+availability would not make them engine operations.
+
 These are extensions or qualification gaps, not unfinished R0–R5 promises. Select
 work from a concrete consumer or a measurable problem; do not create a new phase
 that requires implementing the whole target architecture at once.
 
 | Candidate | Trigger | Acceptance gate |
 | --- | --- | --- |
-| Fuller feature/format/use/sample/limit negotiation; independent devices/surfaces | A renderer or editor workload exceeds current enabled profiles or needs independent presentation ownership | Admission/fallback tests against enabled limits, stale/cross-owner rejection, loss and surface lifetime coverage on each selected backend |
+| New format/feature paths, raw adapter catalogs and independent devices/surfaces | A renderer or editor workload exceeds current enabled profiles or needs independent presentation ownership | Admission/fallback tests against enabled limits, stale/cross-owner rejection, loss and surface lifetime coverage on each selected backend |
 | Existing-buffer updates, texture upload/copy/readback and streaming | Content needs incremental residency or mutable GPU data beyond new-buffer tickets and immutable sampled mip chains | Bounded source ownership, pitch/range validation, completion-gated reuse, pressure/cancellation/loss tests and measured transfer stalls |
 | Descriptor arenas and dynamic binding offsets | A measured material/draw workload exceeds immutable binding capacity or spends excessive CPU time creating snapshots | Canonical identity and lifetime correctness, enabled alignment/range checks, installed-SDK examples and CPU/memory comparison |
 | Partial sampled/attachment views, sampled depth, stencil, MSAA/resolve and more attachments | A selected effect requires an attachment form outside the current single-color/private-depth profile | Per-backend format/use validation, initialization/feedback rejection, image oracles and legal synchronization |

@@ -2,6 +2,7 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/graphics/rhi/profile.h>
 #include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>
 
@@ -78,6 +79,11 @@ struct DeviceDescription final
     DeviceFeatures Required{ .FullscreenRaster = true };
     /// Optional workloads; inspect Enabled after Ready rather than assuming availability.
     DeviceFeatures Preferred;
+    /// Copied profile constraints, checked on every enabled backend attempt before Ready.
+    /// Nonzero raster/compute constraints imply admission of that workload.
+    DeviceProfileRequirements RequiredProfile;
+    /// Optional constraints; unmet values do not prevent Ready or elevate backend limits.
+    DeviceProfileRequirements PreferredProfile;
 };
 
 /// Result of an explicit device operation; each operation documents output preservation.
@@ -120,12 +126,19 @@ struct DeviceInfo final
     DeviceFeatures Supported;
     /// Operations available to this session; zero before Ready or after loss.
     DeviceFeatures Enabled;
+    /// Immutable enabled limit/format snapshot; zero before Ready and after failure/loss.
+    DeviceProfile Profile;
+    /// Preferred workloads absent from Enabled; populated only while Ready.
+    DeviceFeatures UnmetPreferences;
+    /// First unmet preferred profile constraint; populated only while Ready.
+    ProfileDiagnostic UnmetProfilePreference;
 };
 
 /// Reference admission validator shared by every backend; performs no allocation or GPU work.
 /// @return Ready for implemented required workloads, Unsupported for missing workloads,
-/// InvalidDescription for a malformed selection enum.
-/// Limits and backend selection are validated by startup, not inferred from a backend name.
+/// InvalidDescription for malformed selection, format count/identity, duplicate format or sample count.
+/// Actual limits and format uses are checked on each backend attempt before Ready;
+/// no feature or limit is inferred from a backend name.
 [[nodiscard]] DeviceStatus ValidateDeviceDescription(const DeviceDescription& description) noexcept;
 /// Query backend build availability without starting a device or requesting an adapter.
 [[nodiscard]] BackendAvailability GetCompiledBackends() noexcept;

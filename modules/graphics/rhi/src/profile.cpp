@@ -1,0 +1,359 @@
+#include "internal/profile.h"
+#include "internal/raster.h"
+
+namespace ludus::graphics::rhi::internal
+{
+using namespace foundation;
+namespace
+{
+bool Any(const TextureUses& uses) noexcept
+{
+    return uses.Sampled || uses.Filterable || uses.ColorAttachment || uses.Blendable || uses.Storage ||
+           uses.CopySource || uses.CopyDestination;
+}
+} // namespace
+bool ValidProfileRequirements(const DeviceProfileRequirements& requirements) noexcept
+{
+    if (requirements.FormatCount > 5)
+    {
+        return false;
+    }
+    for (uint32 i = 0; i < requirements.FormatCount; ++i)
+    {
+        const auto& entry = requirements.Formats[i];
+        if (static_cast<uint8>(entry.Format) > static_cast<uint8>(RasterFormat::Rgba16Float) || !Any(entry.Uses) ||
+            entry.MinMipLevels == 0 || entry.SampleCount == 0 || entry.SampleCount > 64 ||
+            (entry.SampleCount & (entry.SampleCount - 1)) != 0 ||
+            (entry.SampleCount != 1 && !entry.Uses.ColorAttachment && !entry.Uses.Blendable))
+        {
+            return false;
+        }
+        for (uint32 j = 0; j < i; ++j)
+        {
+            if (entry.Format == requirements.Formats[j].Format)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+bool NeedsRaster(const DeviceProfileRequirements& requirements) noexcept
+{
+    const auto& r = requirements.Raster;
+    return requirements.FormatCount != 0 || r.MinBufferSize != 0 || r.MinTextureDimension2D != 0 ||
+           r.MaxUniformOffsetAlignment != 0 || r.MinUniformRange != 0 || r.MinResourcesPerKind != 0 ||
+           r.MinDrawsPerFrame != 0 || r.MinBindings != 0 || r.MinVertexBuffers != 0 || r.MinVertexAttributes != 0 ||
+           r.MinVertexStride != 0 || r.MinColorAttachments != 0 || r.MinTextureLayers != 0;
+}
+bool NeedsCompute(const DeviceProfileRequirements& requirements) noexcept
+{
+    const auto& c = requirements.Compute;
+    if (c.MinStorageRange != 0 || c.MaxStorageOffsetAlignment != 0 || c.MinWorkgroupInvocations != 0)
+    {
+        return true;
+    }
+    for (usize i = 0; i < 3; ++i)
+    {
+        if (c.MinWorkgroupSize[i] != 0 || c.MinDispatch[i] != 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+ProfileDiagnostic CheckProfile(const DeviceProfileRequirements& requirements, const DeviceProfile& profile) noexcept
+{
+    if (requirements.Raster.MinBufferSize != 0 && requirements.Raster.MinBufferSize > profile.Raster.MaxBufferSize)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::BufferSize,
+            .Requested = requirements.Raster.MinBufferSize,
+            .Available = profile.Raster.MaxBufferSize,
+        };
+    }
+    if (requirements.Raster.MinTextureDimension2D != 0 &&
+        requirements.Raster.MinTextureDimension2D > profile.Raster.MaxTextureDimension2D)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::TextureDimension,
+            .Requested = requirements.Raster.MinTextureDimension2D,
+            .Available = profile.Raster.MaxTextureDimension2D,
+        };
+    }
+    if (requirements.Raster.MaxUniformOffsetAlignment != 0 &&
+        (profile.Raster.UniformOffsetAlignment == 0 ||
+         profile.Raster.UniformOffsetAlignment > requirements.Raster.MaxUniformOffsetAlignment))
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::UniformAlignment,
+            .Requested = requirements.Raster.MaxUniformOffsetAlignment,
+            .Available = profile.Raster.UniformOffsetAlignment,
+        };
+    }
+    if (requirements.Raster.MinUniformRange != 0 &&
+        requirements.Raster.MinUniformRange > profile.Raster.MaxUniformRange)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::UniformRange,
+            .Requested = requirements.Raster.MinUniformRange,
+            .Available = profile.Raster.MaxUniformRange,
+        };
+    }
+    if (requirements.Raster.MinResourcesPerKind != 0 &&
+        requirements.Raster.MinResourcesPerKind > profile.Raster.ResourcesPerKind)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::ResourceCount,
+            .Requested = requirements.Raster.MinResourcesPerKind,
+            .Available = profile.Raster.ResourcesPerKind,
+        };
+    }
+    if (requirements.Raster.MinDrawsPerFrame != 0 &&
+        requirements.Raster.MinDrawsPerFrame > profile.Raster.DrawsPerFrame)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::DrawCount,
+            .Requested = requirements.Raster.MinDrawsPerFrame,
+            .Available = profile.Raster.DrawsPerFrame,
+        };
+    }
+    if (requirements.Raster.MinBindings != 0 && requirements.Raster.MinBindings > profile.Interface.MaxBindings)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::BindingCount,
+            .Requested = requirements.Raster.MinBindings,
+            .Available = profile.Interface.MaxBindings,
+        };
+    }
+    if (requirements.Raster.MinVertexBuffers != 0 &&
+        requirements.Raster.MinVertexBuffers > profile.Interface.MaxVertexBuffers)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::VertexBufferCount,
+            .Requested = requirements.Raster.MinVertexBuffers,
+            .Available = profile.Interface.MaxVertexBuffers,
+        };
+    }
+    if (requirements.Raster.MinVertexAttributes != 0 &&
+        requirements.Raster.MinVertexAttributes > profile.Interface.MaxVertexAttributes)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::VertexAttributeCount,
+            .Requested = requirements.Raster.MinVertexAttributes,
+            .Available = profile.Interface.MaxVertexAttributes,
+        };
+    }
+    if (requirements.Raster.MinVertexStride != 0 &&
+        requirements.Raster.MinVertexStride > profile.Interface.MaxVertexStride)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::VertexStride,
+            .Requested = requirements.Raster.MinVertexStride,
+            .Available = profile.Interface.MaxVertexStride,
+        };
+    }
+    if (requirements.Raster.MinColorAttachments != 0 &&
+        requirements.Raster.MinColorAttachments > profile.Interface.MaxColorAttachments)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::ColorAttachmentCount,
+            .Requested = requirements.Raster.MinColorAttachments,
+            .Available = profile.Interface.MaxColorAttachments,
+        };
+    }
+    if (requirements.Raster.MinTextureLayers != 0 &&
+        requirements.Raster.MinTextureLayers > profile.Interface.MaxTextureLayers)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::TextureLayerCount,
+            .Requested = requirements.Raster.MinTextureLayers,
+            .Available = profile.Interface.MaxTextureLayers,
+        };
+    }
+    if (requirements.Compute.MinStorageRange != 0 &&
+        requirements.Compute.MinStorageRange > profile.Compute.MaxStorageRange)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::StorageRange,
+            .Requested = requirements.Compute.MinStorageRange,
+            .Available = profile.Compute.MaxStorageRange,
+        };
+    }
+    if (requirements.Compute.MaxStorageOffsetAlignment != 0 &&
+        (profile.Compute.StorageOffsetAlignment == 0 ||
+         profile.Compute.StorageOffsetAlignment > requirements.Compute.MaxStorageOffsetAlignment))
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::StorageAlignment,
+            .Requested = requirements.Compute.MaxStorageOffsetAlignment,
+            .Available = profile.Compute.StorageOffsetAlignment,
+        };
+    }
+    for (usize i = 0; i < 3; ++i)
+    {
+        if (requirements.Compute.MinWorkgroupSize[i] > profile.Compute.MaxWorkgroupSize[i])
+        {
+            return
+            {
+                .Requirement = ProfileRequirement::WorkgroupSize,
+                .Axis = static_cast<uint32>(i),
+                .Requested = requirements.Compute.MinWorkgroupSize[i],
+                .Available = profile.Compute.MaxWorkgroupSize[i],
+            };
+        }
+    }
+    if (requirements.Compute.MinWorkgroupInvocations > profile.Compute.MaxWorkgroupInvocations)
+    {
+        return
+        {
+            .Requirement = ProfileRequirement::WorkgroupInvocations,
+            .Requested = requirements.Compute.MinWorkgroupInvocations,
+            .Available = profile.Compute.MaxWorkgroupInvocations,
+        };
+    }
+    for (usize i = 0; i < 3; ++i)
+    {
+        if (requirements.Compute.MinDispatch[i] > profile.Compute.MaxDispatch[i])
+        {
+            return
+            {
+                .Requirement = ProfileRequirement::DispatchCount,
+                .Axis = static_cast<uint32>(i),
+                .Requested = requirements.Compute.MinDispatch[i],
+                .Available = profile.Compute.MaxDispatch[i],
+            };
+        }
+    }
+    for (uint32 i = 0; i < requirements.FormatCount; ++i)
+    {
+        const auto& request = requirements.Formats[i];
+        const auto& format = profile.Formats[static_cast<usize>(request.Format)];
+        if (request.Uses.Sampled && !format.Uses.Sampled)
+        {
+            return { .Requirement = ProfileRequirement::Sampled, .Format = request.Format, .Requested = 1 };
+        }
+        if (request.Uses.Filterable && !format.Uses.Filterable)
+        {
+            return { .Requirement = ProfileRequirement::Filterable, .Format = request.Format, .Requested = 1 };
+        }
+        if (request.Uses.ColorAttachment && !format.Uses.ColorAttachment)
+        {
+            return { .Requirement = ProfileRequirement::ColorAttachment, .Format = request.Format, .Requested = 1 };
+        }
+        if (request.Uses.Blendable && !format.Uses.Blendable)
+        {
+            return { .Requirement = ProfileRequirement::Blendable, .Format = request.Format, .Requested = 1 };
+        }
+        if (request.Uses.Storage && !format.Uses.Storage)
+        {
+            return { .Requirement = ProfileRequirement::Storage, .Format = request.Format, .Requested = 1 };
+        }
+        if (request.Uses.CopySource && !format.Uses.CopySource)
+        {
+            return { .Requirement = ProfileRequirement::CopySource, .Format = request.Format, .Requested = 1 };
+        }
+        if (request.Uses.CopyDestination && !format.Uses.CopyDestination)
+        {
+            return { .Requirement = ProfileRequirement::CopyDestination, .Format = request.Format, .Requested = 1 };
+        }
+        const bool sampled = request.Uses.Sampled || request.Uses.Filterable;
+        const bool attachment = request.Uses.ColorAttachment || request.Uses.Blendable;
+        uint32 dimension = sampled ? format.MaxSampledDimension2D : format.MaxAttachmentDimension2D;
+        if (attachment && format.MaxAttachmentDimension2D < dimension)
+        {
+            dimension = format.MaxAttachmentDimension2D;
+        }
+        if (request.MinDimension2D > dimension)
+        {
+            return
+            {
+                .Requirement = ProfileRequirement::FormatDimension,
+                .Format = request.Format,
+                .Requested = request.MinDimension2D,
+                .Available = dimension,
+            };
+        }
+        const uint32 mips = attachment ? 1 : format.MaxMipLevels;
+        if (request.MinMipLevels > mips)
+        {
+            return
+            {
+                .Requirement = ProfileRequirement::MipCount,
+                .Format = request.Format,
+                .Requested = request.MinMipLevels,
+                .Available = mips,
+            };
+        }
+        if (attachment && (format.SampleCounts & request.SampleCount) == 0)
+        {
+            return
+            {
+                .Requirement = ProfileRequirement::SampleCount,
+                .Format = request.Format,
+                .Requested = request.SampleCount,
+                .Available = format.SampleCounts,
+            };
+        }
+    }
+    return {};
+}
+DeviceProfile QueryDeviceProfile() noexcept
+{
+    DeviceProfile result;
+    result.Raster = backend::RasterLimits();
+    if (result.Raster.MaxUniformRange < 16384)
+    {
+        return {};
+    }
+    result.Interface = {8, 2, result.Raster.MaxVertexAttributes, backend::RasterVertexStrideLimit(), 1, 1};
+    result.Compute = backend::ComputeLimits();
+    for (usize i = 0; i < 5; ++i)
+    {
+        result.Formats[i] = backend::FormatLimits(static_cast<RasterFormat>(i));
+    }
+    result.Raster.HdrColor = result.Formats[static_cast<usize>(RasterFormat::Rgba16Float)].Uses.Blendable;
+    return result;
+}
+FormatCapabilities PortableFormatLimits(RasterFormat format, const RasterCapabilities& limits) noexcept
+{
+    if (limits.MaxUniformRange < 16384 || limits.MaxTextureDimension2D == 0 ||
+        static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Rgba16Float))
+    {
+        return {};
+    }
+    const bool hdr = format == RasterFormat::Rgba16Float;
+    if (hdr && !limits.HdrColor)
+    {
+        return {};
+    }
+    const bool attachment = hdr || format == RasterFormat::Rgba8Unorm || format == RasterFormat::Rgba8Srgb;
+    uint32 levels = 1;
+    for (auto extent = limits.MaxTextureDimension2D; extent > 1; extent /= 2)
+    {
+        ++levels;
+    }
+    return
+    {
+        .Uses = { .Sampled = true, .Filterable = true, .ColorAttachment = attachment, .Blendable = attachment },
+        .MaxSampledDimension2D = limits.MaxTextureDimension2D,
+        .MaxAttachmentDimension2D = attachment ? limits.MaxTextureDimension2D : 0,
+        .MaxMipLevels = hdr ? 1U : (levels < 16 ? levels : 16),
+        .SampleCounts = attachment ? 1U : 0U,
+    };
+}
+} // namespace ludus::graphics::rhi::internal

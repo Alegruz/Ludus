@@ -1,6 +1,7 @@
 #include "reference_raster.h"
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/profile.h"
 #include <cstring>
 namespace ludus::graphics::rhi::reference
 {
@@ -9,6 +10,12 @@ void Reset() noexcept
     ProfileAvailable = true;
     HdrAvailable = true;
     ComputeAvailable = true;
+    FormatBlendUnavailable = false;
+    OverrideRasterLimits = false;
+    for (auto& unavailable : FormatUnavailable)
+    {
+        unavailable = false;
+    }
     Dispatches = 0;
     ComputeResult = RasterStatus::Ready;
     Next = RasterStatus::Ready;
@@ -92,11 +99,33 @@ RasterStatus ComputeEncode(const internal::ComputePacket&) noexcept
     return reference::ComputeResult;
 }
 void ComputeBufferBarrier(usize, GraphAccessMode) noexcept {}
+FormatCapabilities FormatLimits(RasterFormat format) noexcept
+{
+    if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Rgba16Float) ||
+        reference::FormatUnavailable[static_cast<usize>(format)])
+    {
+        return {};
+    }
+    auto result = internal::PortableFormatLimits(format, RasterLimits());
+    if (reference::FormatBlendUnavailable)
+    {
+        result.Uses.Blendable = false;
+    }
+    return result;
+}
+uint32 RasterVertexStrideLimit() noexcept
+{
+    return Kind() == Backend::WebGL2 ? 252U : 256U;
+}
 RasterCapabilities RasterLimits() noexcept
 {
     if (!reference::ProfileAvailable)
     {
         return {};
+    }
+    if (reference::OverrideRasterLimits)
+    {
+        return reference::RasterLimitOverride;
     }
     return {usize{64} * 1024 * 1024,
             4096,
