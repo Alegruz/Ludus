@@ -1,3 +1,8 @@
+#include "internal/backend.h"
+#include <ludus/foundation/base/checked_integer.hpp>
+
+#include "internal/measurement.h"
+
 #include <ludus/graphics/rhi/graph.h>
 
 #include "internal/lifecycle.h"
@@ -286,7 +291,7 @@ RasterStatus Reserve(RasterKind kind, usize& slot) noexcept
     auto& records = gRecords[static_cast<usize>(kind)];
     bool exhausted = false;
     const auto limit = static_cast<usize>(kind) < RASTER_KINDS ? usize{CurrentDeviceProfile().Raster.ResourcesPerKind}
-                                                               : RASTER_CAPACITY;
+                                                               : usize{CurrentStorageLimits().RayResourcesPerKind};
     for (slot = 0; slot < limit; ++slot)
     {
         if (slot == records.GetSize())
@@ -1474,6 +1479,7 @@ void ReleaseRasterResources() noexcept
     // device; browser callbacks retain their stable bookkeeping until delivery.
     backend::RayDrain();
     backend::RasterReset();
+    backend::TimingReset();
     backend::LifetimeReset();
     ResetLifetimeRecords();
     ResetGraphRecords();
@@ -1503,6 +1509,69 @@ void ReleaseRasterResources() noexcept
     gDrawCount = 0;
 }
 } // namespace internal
+RasterStatus GetAllocationTelemetry(DeviceHandle device, AllocationTelemetry& output) noexcept
+{
+    const auto status = Admission(device, false);
+    if (status == RasterStatus::InvalidHandle)
+    {
+        return status;
+    }
+    output = {};
+    if (status != RasterStatus::Ready)
+    {
+        return status;
+    }
+    static uint64 lastOwner = 0, peak = 0, blockPeak = 0;
+    const auto owner = internal::DeviceOwner();
+    if (lastOwner != owner)
+    {
+        lastOwner = owner;
+        peak = 0;
+        blockPeak = 0;
+    }
+    output.ApiBytesAvailable = backend::Kind() == Backend::Metal || backend::Kind() == Backend::Vulkan;
+    for (usize kind = 0; kind < 2; ++kind)
+    {
+        for (usize slot = 0; slot < gRecords[kind].GetSize(); ++slot)
+        {
+            const auto& record = gRecords[kind][slot];
+            if (record.Owner == 0)
+            {
+                continue;
+            }
+            output.LogicalBytes += record.StorageBytes;
+            uint64 bytes = 0;
+            if (!backend::RasterAllocationBytes(static_cast<RasterKind>(kind), slot, bytes))
+            {
+                output.ApiBytesAvailable = false;
+                continue;
+            }
+            if (!foundation::TryAdd(output.ApiBytes, bytes, output.ApiBytes) ||
+                (!record.Published && !foundation::TryAdd(output.RetiringApiBytes, bytes, output.RetiringApiBytes)))
+            {
+                output = {};
+                return RasterStatus::CapacityExceeded;
+            }
+        }
+    }
+    if (!output.ApiBytesAvailable)
+    {
+        output.ApiBytes = 0;
+        output.RetiringApiBytes = 0;
+    }
+    else if (output.ApiBytes > peak)
+    {
+        peak = output.ApiBytes;
+    }
+    output.PeakObservedApiBytes = peak;
+    output.AllocatorBlockBytesAvailable = backend::AllocatorBlockBytes(output.AllocatorBlockBytes);
+    if (output.AllocatorBlockBytesAvailable && output.AllocatorBlockBytes > blockPeak)
+    {
+        blockPeak = output.AllocatorBlockBytes;
+    }
+    output.PeakObservedAllocatorBlockBytes = output.AllocatorBlockBytesAvailable ? blockPeak : 0;
+    return RasterStatus::Ready;
+}
 RasterStatus GetStorageUsage(DeviceHandle device, StorageUsage& output) noexcept
 {
     const auto status = Admission(device, false);

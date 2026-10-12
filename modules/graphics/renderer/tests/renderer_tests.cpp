@@ -30,7 +30,7 @@ struct Session
     rhi::SurfaceHandle Surface;
     rr::Renderer Renderer;
     rr::Mesh Mesh;
-    explicit Session(bool hdrAvailable = true)
+    explicit Session(bool hdrAvailable = true, const rr::Limits& limits = {}, const rhi::StorageLimits& storage = {})
     {
         rhi::Shutdown();
         rhi::reference::Reset();
@@ -39,14 +39,20 @@ struct Session
         rhi::backend::NextFrame = rhi::FrameStatus::Ready;
         rhi::backend::ActiveKind = rhi::Backend::WebGPU;
         rhi::backend::SelectionSupported = true;
-        REQUIRE(rhi::CreateDevice({}, {}, {}, Device, Surface) == rhi::DeviceStatus::Pending);
+        rhi::DeviceDescription deviceDescription;
+        deviceDescription.Storage = storage;
+        REQUIRE(rhi::CreateDevice({}, {}, deviceDescription, Device, Surface) == rhi::DeviceStatus::Pending);
         rhi::internal::Complete(rhi::backend::PendingToken, rhi::StartupError::None, {4096, 16384});
-        Initialize(Renderer);
+        Initialize(Renderer, limits);
         const math::Vector3 positions[]{{-.1F, -.1F, .5F}, {.1F, -.1F, .5F}, {0, .1F, .5F}};
         const uint32 indices[]{0, 1, 2};
         REQUIRE(Renderer.CreateMesh({positions, 3, indices, 3}, Mesh) == rhi::RasterStatus::Ready);
     }
-    void Initialize(rr::Renderer& renderer)
+    void Initialize(rr::Renderer& renderer, const rr::Limits& limits = {})
+    {
+        REQUIRE(InitializeStatus(renderer, limits) == rhi::RasterStatus::Ready);
+    }
+    rhi::RasterStatus InitializeStatus(rr::Renderer& renderer, const rr::Limits& limits)
     {
         rhi::RasterShaderInput inputs[6];
         for (uint32 i = 0; i < 6; ++i)
@@ -61,7 +67,7 @@ struct Session
         fragment.Artifact.Stage = rhi::ShaderStage::Fragment;
         fragment.Artifact.Wgsl = "flat fragment fixture";
         fragment.Artifact.WgslEntry = "fragmentMain";
-        REQUIRE(renderer.Initialize(Device, vertex, fragment) == rhi::RasterStatus::Ready);
+        return renderer.Initialize(Device, vertex, fragment, limits);
     }
     void EnableViews()
     {
@@ -1530,4 +1536,202 @@ TEST_CASE("RT1 white furnace preserves energy across seeds and explicit depth li
     CHECK(means[0] == means[1]);
     CHECK(means[2] == means[3]);
     CHECK(math::Abs(means[0] - means[2]) < .035F);
+}
+
+TEST_CASE("Budgeted renderer pools exceed old limits and retain detached versions", "[renderer][capacity]")
+{
+    rr::Limits limits;
+    limits.Meshes = 20;
+    limits.Materials = 16;
+    limits.Objects = 513; // Exercises the incomplete final 16-object culling group.
+    rhi::StorageLimits storage;
+    storage.ResourcesPerKind = 128;
+    storage.DrawsPerPlan = 1024;
+    Session session(true, limits, storage);
+    CHECK(session.Renderer.GetConfiguredLimits().Objects == 513);
+    CHECK(session.Renderer.GetHostBytes() <= limits.HostBytes);
+    session.EnableViews();
+    MaterialFixture fixture;
+    auto program = fixture.Prewarm(session.Renderer);
+    rr::MaterialVersion materials[16];
+    for (auto& material : materials)
+    {
+        REQUIRE(session.Renderer.CreateMaterial(program, {}, material) == rhi::RasterStatus::Ready);
+    }
+    rr::MaterialVersion excessMaterial;
+    CHECK(session.Renderer.CreateMaterial(program, {}, excessMaterial) == rhi::RasterStatus::CapacityExceeded);
+    CHECK(session.Renderer.GetStatus(excessMaterial) == rhi::RasterStatus::InvalidHandle);
+    const math::Vector3 positions[]{{-.1F, -.1F, .5F}, {.1F, -.1F, .5F}, {0, .1F, .5F}};
+    const uint32 indices[]{0, 1, 2};
+    rr::Mesh meshes[20];
+    meshes[0] = session.Mesh;
+    for (usize i = 1; i < 20; ++i)
+    {
+        REQUIRE(session.Renderer.CreateMesh({positions, 3, indices, 3}, meshes[i]) == rhi::RasterStatus::Ready);
+    }
+    rr::Mesh excessMesh;
+    CHECK(session.Renderer.CreateMesh({positions, 3, indices, 3}, excessMesh) == rhi::RasterStatus::CapacityExceeded);
+    CHECK(session.Renderer.GetStatus(excessMesh) == rhi::RasterStatus::InvalidHandle);
+    rr::SceneItem items[514];
+    for (usize i = 0; i < 514; ++i)
+    {
+        items[i] = session.Item(i + 1);
+        items[i].Geometry = meshes[i % 20];
+        items[i].Surface = materials[i % 16];
+    }
+    rr::Snapshot snapshot;
+    CHECK(session.Renderer.CreateSnapshot(items, 514, snapshot) == rhi::RasterStatus::CapacityExceeded);
+    REQUIRE(session.Renderer.CreateSnapshot(items, 513, snapshot) == rhi::RasterStatus::Ready);
+    const auto staleMesh = meshes[19];
+    const auto staleMaterial = materials[15];
+    for (auto& mesh : meshes)
+    {
+        REQUIRE(session.Renderer.Release(mesh) == rhi::RasterStatus::Ready);
+    }
+    for (auto& material : materials)
+    {
+        REQUIRE(session.Renderer.Release(material) == rhi::RasterStatus::Ready);
+    }
+    CHECK(session.Renderer.GetStatus(staleMesh) == rhi::RasterStatus::InvalidHandle);
+    CHECK(session.Renderer.GetStatus(staleMaterial) == rhi::RasterStatus::InvalidHandle);
+    // Snapshot retention consumes every mesh/material slot despite owner detachment.
+    CHECK(session.Renderer.CreateMesh({positions, 3, indices, 3}, excessMesh) == rhi::RasterStatus::CapacityExceeded);
+    CHECK(session.Renderer.CreateMaterial(program, {}, excessMaterial) == rhi::RasterStatus::CapacityExceeded);
+    uint64 order[513];
+    bool lod[513];
+    order[0] = 777;
+    lod[0] = true;
+    rr::ViewReport report;
+    report.Visible = 999;
+    report.SourceIdOutput = order;
+    report.SelectedLodOutput = lod;
+    report.DetailCapacity = 512;
+    rr::PreparedView view;
+    CHECK(session.Renderer.PrepareView(snapshot, { .Reference = true }, view, report) ==
+          rhi::RasterStatus::CapacityExceeded);
+    CHECK(report.Visible == 999);
+    CHECK(order[0] == 777);
+    CHECK(lod[0]);
+    report.DetailCapacity = 513;
+    REQUIRE(session.Renderer.PrepareView(snapshot, { .Reference = true }, view, report) == rhi::RasterStatus::Ready);
+    CHECK(report.Visible == 513);
+    CHECK(report.Draws == 513);
+    CHECK(report.Reported == 256);
+    for (usize i = 0; i < 513; ++i)
+    {
+        CHECK(order[i] == i + 1);
+        CHECK_FALSE(lod[i]);
+        if (i < 256)
+        {
+            CHECK(report.SourceIds[i] == order[i]);
+        }
+    }
+    rr::PreparedView grouped;
+    rr::ViewReport prefix;
+    REQUIRE(session.Renderer.PrepareView(snapshot, {}, grouped, prefix) == rhi::RasterStatus::Ready);
+    CHECK(prefix.Visible == 513);
+    CHECK(prefix.Reported == 256);
+    REQUIRE(session.Renderer.Release(grouped) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(snapshot) == rhi::RasterStatus::Ready);
+    rhi::SubmissionToken completion;
+    REQUIRE(session.Renderer.Submit(view, session.Surface, completion) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(view) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.CreateMesh({positions, 3, indices, 3}, excessMesh) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.CreateMaterial(program, {}, excessMaterial) == rhi::RasterStatus::Ready);
+    CHECK(session.Renderer.GetStatus(staleMesh) == rhi::RasterStatus::InvalidHandle);
+    CHECK(session.Renderer.GetStatus(staleMaterial) == rhi::RasterStatus::InvalidHandle);
+    rhi::reference::Completed = rhi::reference::Submitted;
+    REQUIRE(rhi::PollLifetime(session.Device) == rhi::RasterStatus::Ready);
+}
+TEST_CASE("Renderer capacity validation and exact host budget preserve failed initialization", "[renderer][capacity]")
+{
+    Session session;
+    rr::Renderer renderer;
+    rr::Limits limits;
+    limits.Materials = 0;
+    CHECK(session.InitializeStatus(renderer, limits) == rhi::RasterStatus::InvalidDescription);
+    CHECK(renderer.GetHostBytes() == 0);
+    limits = {};
+    limits.Objects = ~uint32{0};
+    CHECK(session.InitializeStatus(renderer, limits) == rhi::RasterStatus::InvalidDescription);
+    limits = {};
+    limits.HostBytes = 1;
+    CHECK(session.InitializeStatus(renderer, limits) == rhi::RasterStatus::CapacityExceeded);
+    CHECK(renderer.GetHostBytes() == 0);
+    limits = {};
+    limits.Views = ~uint32{0} - 3;
+    CHECK(session.InitializeStatus(renderer, limits) == rhi::RasterStatus::InvalidDescription);
+    limits = {};
+    limits.Meshes = ~uint32{0} - 1;
+    CHECK(session.InitializeStatus(renderer, limits) == rhi::RasterStatus::CapacityExceeded);
+    CHECK(renderer.GetHostBytes() == 0);
+    limits = {};
+    limits.Objects = 1025; // More than the negotiated frame packet count.
+    CHECK(session.InitializeStatus(renderer, limits) == rhi::RasterStatus::Unsupported);
+    const auto exact = session.Renderer.GetHostBytes();
+    limits = {};
+    limits.HostBytes = exact - 1;
+    CHECK(session.InitializeStatus(renderer, limits) == rhi::RasterStatus::CapacityExceeded);
+    limits.HostBytes = exact;
+    REQUIRE(session.InitializeStatus(renderer, limits) == rhi::RasterStatus::Ready);
+    CHECK(renderer.GetHostBytes() == exact);
+    renderer.Reset();
+    CHECK(renderer.GetHostBytes() == 0);
+    REQUIRE(session.InitializeStatus(renderer, {}) == rhi::RasterStatus::Ready);
+}
+
+TEST_CASE("RT1 retains and shades instances beyond the old 256-entry table", "[renderer][rt1][capacity]")
+{
+    rr::Limits limits;
+    limits.Objects = 513;
+    Session session(true, limits);
+    REQUIRE(session.Renderer.Release(session.Mesh) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.EnableReferenceRendering(
+                {},
+                {rr::ReferenceTraversal::CpuOracle, usize{4} * 1024 * 1024, 0, 1}) == rhi::RasterStatus::Ready);
+    LitFixture fixture;
+    fixture.Enable(session);
+    auto program = fixture.Prewarm(session);
+    const math::Vector3 positions[]{{-1, -1, .5F}, {1, -1, .5F}, {1, 1, .5F}, {-1, 1, .5F}};
+    const math::Vector3 normals[]{{0, 0, -1}, {0, 0, -1}, {0, 0, -1}, {0, 0, -1}};
+    const uint32 indices[]{0, 2, 1, 0, 3, 2};
+    rr::MeshDescription description{positions, 4, indices, 6};
+    description.Normals = normals;
+    REQUIRE(session.Renderer.CreateMesh(description, session.Mesh) == rhi::RasterStatus::Ready);
+    rr::LitMaterialDescription material;
+    material.Emission = {3, 2, 1};
+    rr::MaterialVersion version;
+    rr::LightSelection selection;
+    REQUIRE(session.Renderer.CreateLitMaterial(program, material, version, selection) == rhi::RasterStatus::Ready);
+    rr::SceneItem items[513];
+    for (usize i = 0; i < 513; ++i)
+    {
+        items[i] = session.Item(i + 1);
+        items[i].Surface = version;
+        items[i].Transform.Translation.X = i == 512 ? 0 : static_cast<float32>(10 + i * 3);
+    }
+    rr::Snapshot snapshot;
+    REQUIRE(session.Renderer.CreateSnapshot(items, 513, snapshot) == rhi::RasterStatus::Ready);
+    rr::ReferenceCaptureDescription captureDescription;
+    captureDescription.OrthographicCamera = true;
+    captureDescription.Width = captureDescription.Height = 1;
+    captureDescription.CenterRays = true;
+    captureDescription.MaxDepth = 1;
+    rr::ReferenceCapture capture;
+    REQUIRE(session.Renderer.BeginReferenceCapture(snapshot, captureDescription, capture) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(session.Mesh) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(version) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(snapshot) == rhi::RasterStatus::Ready);
+    auto status = rhi::RasterStatus::Pending;
+    for (usize step = 0; step < 20 && status == rhi::RasterStatus::Pending; ++step)
+    {
+        status = session.Renderer.AdvanceReferenceCapture(capture);
+    }
+    REQUIRE(status == rhi::RasterStatus::Ready);
+    rr::ReferencePixel pixel;
+    REQUIRE(session.Renderer.CopyReferencePixels(capture, &pixel, 1) == rhi::RasterStatus::Ready);
+    CHECK(pixel.Samples == 1);
+    CHECK(pixel.Emission == math::Vector3{3, 2, 1});
+    REQUIRE(session.Renderer.Release(capture) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(program) == rhi::RasterStatus::Ready);
 }

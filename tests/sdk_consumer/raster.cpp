@@ -3,6 +3,7 @@
 #include <ludus/foundation/time/time.hpp>
 #include <ludus/graphics/rhi/compute.h>
 #include <ludus/graphics/rhi/lifetime.h>
+#include <ludus/graphics/rhi/measurement.h>
 
 #include "cull.h"
 #include "merged_frame.h"
@@ -55,6 +56,7 @@ rhi::TextureViewHandle gView;
 rhi::SamplerHandle gSampler;
 uint32 gStep = 0;
 uint32 gFrames = 0;
+bool gTimingArmed = false;
 bool gDone = false;
 bool gFailed = false;
 #if defined(LUDUS_PLATFORM_WEB)
@@ -67,6 +69,12 @@ EM_JS(void, Report, (uint32 step, uint32 frames, int32 failed, int32 backend), {
     node.dataset.frames = frames;
     node.dataset.backend = backend === 3 ? 'metal' : backend === 1 ? 'webgpu' : backend === 2 ? 'webgl2' : 'vulkan';
     node.textContent = node.dataset.state + ' frames=' + frames;
+});
+EM_JS(int32, Measure, (), { return new URL(location.href).searchParams.has('timing') ? 1 : 0; });
+EM_JS(void, ReportTiming, (uint32 state, float64 ns, float64 logical, int32 apiAvailable), {
+    const node = document.getElementById('status');
+    node.dataset.timingState = state; node.dataset.gpuNs = ns;
+    node.dataset.logicalBytes = logical; node.dataset.apiBytesAvailable = apiAvailable;
 });
 EM_JS(int32, SlowTransfers, (), { return globalThis.__qaSlowTransfers ? 1 : 0; });
 EM_JS(uint32, RequiredStride, (), { return globalThis.__qaRequiredStride || 0; });
@@ -84,6 +92,11 @@ EM_JS(int32, Selection, (), {
 });
 // clang-format on
 #else
+int32 Measure() noexcept
+{
+    return 0;
+}
+void ReportTiming(uint32, float64, float64, int32) noexcept {}
 void Report(uint32, uint32, int32, int32) noexcept {}
 uint32 RequiredStride() noexcept
 {
@@ -280,6 +293,21 @@ void Tick() noexcept
     {
         Stop(true);
         return;
+    }
+    if (Measure() != 0 && gTimingArmed)
+    {
+        rhi::GpuTiming sample;
+        rhi::AllocationTelemetry memory;
+        if (rhi::GetGpuTiming(gDevice, sample) != rhi::RasterStatus::Ready ||
+            rhi::GetAllocationTelemetry(gDevice, memory) != rhi::RasterStatus::Ready)
+        {
+            Stop(true);
+            return;
+        }
+        ReportTiming(static_cast<uint32>(sample.State),
+                     sample.DurationNanoseconds,
+                     static_cast<float64>(memory.LogicalBytes),
+                     memory.ApiBytesAvailable ? 1 : 0);
     }
     if (gHasCompletion)
     {
@@ -541,6 +569,16 @@ void Tick() noexcept
         gStep = 4;
     }
     const float64 clear = Variant() == 2 ? .25 : 0;
+    if (Measure() != 0 && !gTimingArmed)
+    {
+        const auto armed = rhi::ArmGpuTiming(gDevice);
+        if (armed != rhi::RasterStatus::Ready && armed != rhi::RasterStatus::Unsupported)
+        {
+            Stop(true);
+            return;
+        }
+        gTimingArmed = true;
+    }
     if (rhi::SetFrameTarget(gDevice, gSurface, {96, 64, clear, clear, clear, 1}) != rhi::DeviceStatus::Ready)
     {
         Stop(true);
@@ -675,6 +713,7 @@ int main()
     window = gWindow->GetNativeWindowInfo();
 #endif
     rhi::DeviceDescription description;
+    description.EnableGpuTiming = Measure() != 0;
     description.Required.PortableRaster = true;
     description.RequiredProfile.Raster.MinVertexStride = RequiredStride();
     description.RequiredProfile.Raster.MinBindings = 3;

@@ -127,9 +127,15 @@ out/host-tools/venv/bin/ctest --preset linux-clang-asan-ubsan --label-regex sani
 
 On macOS use `macos-clang-asan-ubsan`. TSan remains a separate build tree;
 its existing CI job now builds and runs `ludus_tsan_control_child` before the
-concurrency acceptance suite. Its volatile raced writes remain visible in optimized
-builds; a relaxed atomic rendezvous keeps both writers alive without ordering
-those writes. Native Clang controls explicitly locate the
+concurrency acceptance suite. It follows LLVM's [Clang 18.1.8 ThreadSanitizer
+usage example](https://releases.llvm.org/18.1.8/tools/clang/docs/ThreadSanitizer.html#usage):
+parent and worker write one shared volatile slot before joining. A pre-write start
+gate lets the worker begin after thread construction, but does not order the
+conflicting writes. The raced slot is aligned separately from the gate, and no
+post-write atomic rendezvous can interfere with the control. Volatile stores remain
+visible in optimized builds. CI requires 16 consecutive successful clean/fault
+control pairs with `--repeat until-fail:16`; any failure stops acceptance rather
+than retrying to obtain a pass. Native Clang controls explicitly locate the
 compiler's LLVM symbolizer; missing symbolizers fail configuration. Control
 children receive explicit sanitizer options with no inherited suppression/log
 redirection; UBSan requests runtime recovery to prove the compiler policy still

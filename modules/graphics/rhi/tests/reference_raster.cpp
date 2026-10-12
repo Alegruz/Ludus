@@ -332,6 +332,48 @@ void LifetimeReset() noexcept
         }
     }
 }
+bool AllocatorBlockBytes(uint64& bytes) noexcept
+{
+    bytes = 0;
+    return false;
+}
+MeasurementAdapter TimingAdapter() noexcept
+{
+    return {};
+}
+RasterStatus TimingArm() noexcept
+{
+    if (reference::Timing.State == GpuTimingState::Armed || reference::Timing.State == GpuTimingState::Pending)
+    {
+        return RasterStatus::InvalidState;
+    }
+    if (reference::TimingAdmission != RasterStatus::Ready)
+    {
+        return reference::TimingAdmission;
+    }
+    reference::Timing = { .State = GpuTimingState::Armed };
+    return RasterStatus::Ready;
+}
+GpuTiming TimingPoll() noexcept
+{
+    const auto result = reference::Timing;
+    if (reference::TimingLossToken != 0)
+    {
+        const auto token = reference::TimingLossToken;
+        reference::TimingLossToken = 0;
+        internal::Fail(token, StartupError::DeviceLost);
+    }
+    return result;
+}
+void TimingReset() noexcept
+{
+    reference::Timing = {};
+}
+bool RasterAllocationBytes(internal::RasterKind, usize, uint64& output) noexcept
+{
+    output = reference::AllocationBytes;
+    return reference::AllocationAvailable;
+}
 void RasterShutdown() noexcept {}
 void RasterReset() noexcept
 {

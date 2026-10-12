@@ -64,7 +64,7 @@ struct ReferenceSceneData final
     Array<ReferenceTriangle> Triangles;
     Array<uint32> Order, Emitters;
     Array<ReferenceBvhNode> Nodes;
-    ReferenceInstance Instances[256];
+    Array<ReferenceInstance> Instances;
     usize InstanceCount = 0;
     rhi::RaySceneHandle Native{};
     uint64 FingerprintLow = 0, FingerprintHigh = 0;

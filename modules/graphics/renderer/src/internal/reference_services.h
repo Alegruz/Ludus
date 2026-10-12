@@ -456,7 +456,7 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
         {
             continue;
         }
-        if (item.MaterialSlot == MATERIALS || !Materials[item.MaterialSlot].Lit ||
+        if (item.MaterialSlot == NO_MATERIAL || !Materials[item.MaterialSlot].Lit ||
             !Materials[item.MaterialSlot].Reference || !MeshRecords[item.MeshSlot].Reference)
         {
             return Status::Unsupported;
@@ -505,11 +505,11 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
     const usize pixels = usize(description.Width) * description.Height, tile = Reference->Options.TilePixels;
     const bool oracle = Reference->Options.Traversal == ReferenceTraversal::CpuOracle;
     const uint64 bvhBytes = oracle ? uint64(triangles) * (2 * sizeof(internal::ReferenceBvhNode) + sizeof(uint32)) : 0;
-    const uint64 fixedWide = sizeof(ReferenceJob) + uint64(pixels) * sizeof(internal::ReferenceAccumulator) +
-                             uint64(tile) * sizeof(internal::ReferencePath) +
-                             uint64(tile) * 2 * (sizeof(rhi::RayInput) + sizeof(rhi::RayResult)) +
-                             uint64(triangles) * sizeof(ReferenceTriangle) + bvhBytes +
-                             uint64(emitters) * sizeof(uint32);
+    const uint64 fixedWide =
+        sizeof(ReferenceJob) + uint64(instances) * sizeof(internal::ReferenceInstance) +
+        uint64(pixels) * sizeof(internal::ReferenceAccumulator) + uint64(tile) * sizeof(internal::ReferencePath) +
+        uint64(tile) * 2 * (sizeof(rhi::RayInput) + sizeof(rhi::RayResult)) +
+        uint64(triangles) * sizeof(ReferenceTriangle) + bvhBytes + uint64(emitters) * sizeof(uint32);
     const uint64 signatureBytes = uint64(triangles) * 132 + uint64(instances) * 116 + uint64(lights.Count) * 64 + 12;
     const uint64 nativeSetup =
         oracle ? 0
@@ -546,7 +546,8 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
     {
         return Status::InvalidDescription;
     }
-    if (!job->Pixels.TryEnsureCapacity(pixels) || !job->Pixels.TryResize(pixels) ||
+    if (!job->Scene.Instances.TryEnsureCapacity(instances) || !job->Scene.Instances.TryResize(instances) ||
+        !job->Pixels.TryEnsureCapacity(pixels) || !job->Pixels.TryResize(pixels) ||
         !job->Paths.TryEnsureCapacity(tile) || !job->Paths.TryResize(tile) || !job->Rays.TryEnsureCapacity(tile * 2) ||
         !job->Rays.TryResize(tile * 2) || !job->Hits.TryEnsureCapacity(tile * 2) || !job->Hits.TryResize(tile * 2) ||
         !job->Scene.Triangles.TryEnsureCapacity(triangles) || !job->Scene.Triangles.TryResize(triangles) ||
@@ -675,7 +676,8 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
     job->Info.SceneFingerprintLow = job->Scene.FingerprintLow;
     job->Info.SceneFingerprintHigh = job->Scene.FingerprintHigh;
     job->Info.CpuBytes =
-        sizeof(ReferenceJob) + job->Pixels.GetCapacity() * sizeof(internal::ReferenceAccumulator) +
+        sizeof(ReferenceJob) + job->Scene.Instances.GetCapacity() * sizeof(internal::ReferenceInstance) +
+        job->Pixels.GetCapacity() * sizeof(internal::ReferenceAccumulator) +
         job->Paths.GetCapacity() * sizeof(internal::ReferencePath) + job->Rays.GetCapacity() * sizeof(rhi::RayInput) +
         job->Hits.GetCapacity() * sizeof(rhi::RayResult) +
         job->Scene.Triangles.GetCapacity() * sizeof(ReferenceTriangle) +

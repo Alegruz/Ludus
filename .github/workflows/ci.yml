@@ -59,7 +59,7 @@ jobs:
           out/host-tools/venv/bin/cmake --preset macos-clang-development -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross" -DLUDUS_EDITOR_RENDER_PREVIEW=ON -DLUDUS_BUILD_WORLD_DEMO=ON
           ./scripts/build macos-clang-development
       - name: Test macOS setup contracts
-        run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui test_metal_shaders test_raster_shaders test_texture_cooker test_macos_editor test_editor_tool test_process_ownership test_play_probe test_play_session test_play_build test_play_documents test_play_assets -v
+        run: PYTHONPATH=scripts/python python3 -m unittest test_macos_setup test_init_launcher test_init_ui test_rhi_measurements test_metal_shaders test_raster_shaders test_texture_cooker test_macos_editor test_editor_tool test_process_ownership test_play_probe test_play_session test_play_build test_play_documents test_play_assets -v
       - name: Test native Cocoa, Metal, filesystem, Content and Audio
         env:
           LUDUS_TEST_COCOA: "1"
@@ -455,7 +455,7 @@ jobs:
           python3 -m unittest discover -s tools/scene_cooker -v
           PYTHONPATH=scripts/python python3 -m unittest test_scene_assets -v
       - name: Test Metal shader reflection contracts
-        run: PYTHONPATH=scripts/python python3 -m unittest test_metal_shaders test_raster_shaders test_texture_cooker -v
+        run: PYTHONPATH=scripts/python python3 -m unittest test_rhi_measurements test_metal_shaders test_raster_shaders test_texture_cooker -v
       - name: Test optional RAD tooling contracts
         run: python3 -m unittest discover -s scripts/python -p 'test_rad_debugger.py' -v
       - name: Test graphical and CLI initialization routing
@@ -890,7 +890,7 @@ jobs:
           out/host-tools/venv/bin/cmake --build out/build/threading-tsan --parallel 2 \
             --target ludus_tsan_control_child ludus_foundation_threading_tests ludus_threading_startup_tests ludus_filesystem_tests ludus_filesystem_async_fault_tests ludus_audio_content_tests ludus_audio_content_worker_tests ludus_resources_tests ludus_resources_audio_tests
       - name: Prove TSan detection before race acceptance
-        run: out/host-tools/venv/bin/ctest --test-dir out/build/threading-tsan --label-regex sanitizer-control --output-on-failure --no-tests=error
+        run: out/host-tools/venv/bin/ctest --test-dir out/build/threading-tsan --label-regex sanitizer-control --output-on-failure --no-tests=error --repeat until-fail:16
       - name: Test dependencies, publication, cancellation and startup with TSan
         run: out/host-tools/venv/bin/ctest --test-dir out/build/threading-tsan --tests-regex "ludus_(foundation_threading|threading_startup|filesystem|filesystem_async_fault|audio_content|audio_content_worker|resources|resources_audio)_tests" --output-on-failure --no-tests=error
       - name: Preserve race-detection diagnostics

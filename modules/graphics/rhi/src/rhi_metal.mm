@@ -1,5 +1,6 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/measurement.h"
 #include "internal/raster.h"
 #include "internal/ray_backend.h"
 #include "internal/resources.h"
@@ -56,6 +57,8 @@
 namespace ludus::graphics::rhi::backend
 {
 void RasterFrameExtent() noexcept;
+void TimingBegin() noexcept;
+void TimingEnd() noexcept;
 namespace
 {
 using namespace foundation;
@@ -458,6 +461,7 @@ FrameStatus End() noexcept
         {
             [gCommand presentDrawable:gDrawable];
         }
+        TimingEnd();
         [gCommand commit];
         gSubmitted[gSlot] = gCommand;
         gCommand = nil;
@@ -663,3 +667,5 @@ bool ReadHeadlessPixels(std::span<uint8> pixels) noexcept
 #include "internal/lifetime_metal.h"
 
 #include "internal/ray_metal.h"
+
+#include "internal/measurement_metal.h"

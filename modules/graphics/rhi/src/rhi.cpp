@@ -1,5 +1,6 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/measurement.h"
 #include "internal/profile.h"
 #include "internal/raster.h"
 #include "internal/resources.h"
@@ -408,6 +409,7 @@ void ShutdownRendering() noexcept
 void Shutdown() noexcept
 {
     gDeviceOwner = 0;
+    internal::SetGpuTimingRequest(false);
     gRayProfileRequest = false;
     gFallback = nullptr;
     gToken = 0;

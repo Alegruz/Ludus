@@ -1,6 +1,7 @@
 #include <ludus/graphics/renderer/renderer.hpp>
 #include <ludus/graphics/renderer/views.hpp>
 
+#include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/containers/stable_sort.hpp>
 #include <ludus/foundation/math/geometry.hpp>
@@ -62,8 +63,7 @@ struct Access final
 namespace
 {
 using internal::Access;
-constexpr usize MESHES = 6, SNAPSHOTS = 4, VIEWS = 8, OBJECTS = 256;
-constexpr usize PROGRAMS = 2, MATERIALS = 8, SHADOWS = 2;
+constexpr usize NO_MATERIAL = ~usize{0}, NO_SHADOW = ~usize{0};
 constexpr usize LIT_BYTES = 1040, CLUSTER_BYTES = 8800;
 constexpr uint64 LAST_ID = ~uint64{0};
 // An explicit Initialize reserves identity; no resource registration at static initialization.
@@ -80,6 +80,29 @@ uint64 ReserveOwner() noexcept
     }
     return 0;
 }
+bool ValidCapacities(const Limits& limits) noexcept
+{
+    constexpr uint32 invalid = ~uint32{0};
+    const uint32 counts[]{limits.Meshes,
+                          limits.Snapshots,
+                          limits.Views,
+                          limits.Objects,
+                          limits.Presentations,
+                          limits.MaterialPrograms,
+                          limits.Materials,
+                          limits.ShadowAtlases};
+    for (const auto count : counts)
+    {
+        if (count == 0 || count == invalid)
+        {
+            return false;
+        }
+    }
+    // Mesh reference counters cover primary and LOD references in every snapshot.
+    return limits.HostBytes != 0 && uint64(limits.Objects) * limits.Snapshots <= invalid / 2 &&
+           // Snapshot references include prepared views, atlases and four RT1 captures.
+           uint64(limits.Views) + limits.ShadowAtlases + 4 <= invalid;
+}
 bool Accepted(Status status) noexcept
 {
     return status == Status::Ready || status == Status::Pending;
@@ -95,11 +118,11 @@ struct SlotIdentity
     bool Used = false;
     bool Owned = false;
 };
-template <typename T, usize N>
-Status FreeSlot(const T (&slots)[N], usize& output) noexcept
+template <typename T>
+Status FreeSlot(const T* slots, usize count, usize& output) noexcept
 {
     bool exhausted = false;
-    for (usize i = 0; i < N; ++i)
+    for (usize i = 0; i < count; ++i)
     {
         if (!slots[i].Used)
         {
@@ -113,16 +136,36 @@ Status FreeSlot(const T (&slots)[N], usize& output) noexcept
     }
     return exhausted ? Status::IdentityExhausted : Status::CapacityExceeded;
 }
-template <typename T, usize N, typename Handle>
-T* Resolve(T (&slots)[N], uint64 owner, Handle handle) noexcept
+template <typename T, typename Handle>
+T* Resolve(T* slots, usize count, uint64 owner, Handle handle) noexcept
 {
     const auto index = Access::Slot(handle);
-    if (Access::Owner(handle) != owner || index >= N)
+    if (Access::Owner(handle) != owner || index >= count)
     {
         return nullptr;
     }
     auto& slot = slots[index];
     return slot.Used && slot.Owned && slot.Generation == Access::Generation(handle) ? &slot : nullptr;
+}
+template <typename T>
+Status FreeSlot(const Array<T>& slots, usize& output) noexcept
+{
+    return FreeSlot(slots.GetData(), slots.GetSize(), output);
+}
+template <typename T, usize N>
+Status FreeSlot(const T (&slots)[N], usize& output) noexcept
+{
+    return FreeSlot(slots, N, output);
+}
+template <typename T, typename Handle>
+T* Resolve(Array<T>& slots, uint64 owner, Handle handle) noexcept
+{
+    return Resolve(slots.GetData(), slots.GetSize(), owner, handle);
+}
+template <typename T, usize N, typename Handle>
+T* Resolve(T (&slots)[N], uint64 owner, Handle handle) noexcept
+{
+    return Resolve(slots, N, owner, handle);
 }
 void Retire(SlotIdentity& slot) noexcept
 {
@@ -204,7 +247,7 @@ bool Overlap(const Rect& left, const Rect& right) noexcept
 }
 struct Candidate final
 {
-    usize Item = 0, MeshSlot = 0, MaterialSlot = MATERIALS;
+    usize Item = 0, MeshSlot = 0, MaterialSlot = NO_MATERIAL;
     bool Coarse = false;
     Rect Bounds;
     Instance Data;
@@ -231,14 +274,14 @@ struct Renderer::State final
     struct Item final
     {
         SceneItem Input;
-        usize MeshSlot = 0, MaterialSlot = MATERIALS;
+        usize MeshSlot = 0, MaterialSlot = NO_MATERIAL;
         math::Aabb3 Bounds;
     };
     struct SnapshotRecord final : SlotIdentity
     {
-        Item Items[OBJECTS];
-        math::Aabb3 Groups[OBJECTS / 16];
-        bool HasGroup[OBJECTS / 16]{};
+        Array<Item> Items;
+        Array<math::Aabb3> Groups;
+        Array<bool> HasGroup;
         usize Count = 0;
         uint32 References = 0;
     };
@@ -247,7 +290,7 @@ struct Renderer::State final
         usize MeshSlot = 0, First = 0;
         uint32 Count = 0;
         Layer Pass = Layer::Opaque;
-        usize MaterialSlot = MATERIALS;
+        usize MaterialSlot = NO_MATERIAL;
     };
     struct ViewRecord final : SlotIdentity
     {
@@ -258,7 +301,7 @@ struct Renderer::State final
         bool HasRetry = false;
         usize SnapshotSlot = 0, Visible = 0, DrawCount = 0;
         DepthConvention Depth = DepthConvention::Conventional;
-        Packet Packets[OBJECTS];
+        Array<Packet> Packets;
     };
     struct PresentationRecord final : SlotIdentity
     {
@@ -300,7 +343,7 @@ struct Renderer::State final
         bool Lit = false, HasBake = false, Clustered = false, ClusterViewCreated = false;
         rhi::TextureHandle ClusterTexture{};
         rhi::TextureViewHandle ClusterView{};
-        usize ParameterSize = 48, ShadowSlot = SHADOWS;
+        usize ParameterSize = 48, ShadowSlot = NO_SHADOW;
         rhi::TextureViewHandle BakeTexture{}, ShadowTexture{};
         rhi::SamplerHandle ShadowSampler{};
         BakedLighting Bake;
@@ -314,16 +357,16 @@ struct Renderer::State final
         uint32 Width = 0, Height = 0, References = 0;
         bool Rendered = false, Failed = false;
     };
-    ShadowRecord Shadows[SHADOWS];
+    Array<ShadowRecord> Shadows;
     Status LightingSetup = Status::NotReady;
     uint32 LightingPhase = 0;
     bool Hdr = false;
     rhi::RasterShaderHandle OutputVertex{}, OutputFragment{}, FlatShadowFragment{};
     rhi::BindingLayoutHandle OutputLayout{};
     rhi::RasterPipelineHandle OutputPipelines[2]{}, HdrFlat[3]{}, FlatShadow{};
-    ProgramRecord Programs[PROGRAMS];
-    MaterialRecord Materials[MATERIALS];
-    PresentationRecord Presentations[4];
+    Array<ProgramRecord> Programs;
+    Array<MaterialRecord> Materials;
+    Array<PresentationRecord> Presentations;
     rhi::RasterShaderHandle CompositeVertex{}, CompositeFragment{};
     rhi::BindingLayoutHandle CompositeLayout{};
     rhi::SamplerHandle CompositeSampler{};
@@ -339,12 +382,16 @@ struct Renderer::State final
     rhi::RasterPipelineHandle Opaque{}, Overlay{};
     uint32 Phase = 0;
     Status Setup = Status::Pending;
-    MeshRecord MeshRecords[MESHES];
-    SnapshotRecord SnapshotRecords[SNAPSHOTS];
-    ViewRecord ViewRecords[VIEWS];
+    Array<MeshRecord> MeshRecords;
+    Array<SnapshotRecord> SnapshotRecords;
+    Array<ViewRecord> ViewRecords;
     // Reserved once: PrepareView must fit the browser's default 64 KiB stack.
-    Candidate Candidates[OBJECTS]{}, Scratch[OBJECTS]{};
-    Instance Instances[OBJECTS]{};
+    Array<Candidate> Candidates, Scratch;
+    Array<Instance> Instances;
+    Array<math::FrustumRelation> GroupRelations;
+    Limits Capacities;
+    usize HostBytes = 0;
+    Status ReserveStorage(const Limits&) noexcept;
     core::UniquePtr<LightClusters> ClusterScratch;
     core::UniquePtr<internal::ReferenceState> Reference;
     Status PrepareReferenceMesh(const MeshDescription&,
@@ -361,14 +408,14 @@ struct Renderer::State final
     ~State()
     {
         ClearReference();
-        for (usize i = 0; i < VIEWS; ++i)
+        for (usize i = 0; i < ViewRecords.GetSize(); ++i)
         {
             if (ViewRecords[i].Used)
             {
                 DropView(i);
             }
         }
-        for (usize i = 0; i < SNAPSHOTS; ++i)
+        for (usize i = 0; i < SnapshotRecords.GetSize(); ++i)
         {
             auto& scene = SnapshotRecords[i];
             if (scene.Used)
@@ -385,7 +432,7 @@ struct Renderer::State final
                 static_cast<void>(rhi::Destroy(Device, mesh.Indices));
             }
         }
-        for (usize i = 0; i < MATERIALS; ++i)
+        for (usize i = 0; i < Materials.GetSize(); ++i)
         {
             if (Materials[i].Used)
             {
@@ -393,7 +440,7 @@ struct Renderer::State final
                 DropMaterial(i);
             }
         }
-        for (usize i = 0; i < PROGRAMS; ++i)
+        for (usize i = 0; i < Programs.GetSize(); ++i)
         {
             if (Programs[i].Used)
             {
@@ -401,7 +448,7 @@ struct Renderer::State final
                 DropProgram(i);
             }
         }
-        for (usize i = 0; i < SHADOWS; ++i)
+        for (usize i = 0; i < Shadows.GetSize(); ++i)
         {
             if (Shadows[i].Used)
             {
@@ -479,7 +526,7 @@ struct Renderer::State final
             static_cast<void>(rhi::Destroy(Device, m.ShadowSampler));
             static_cast<void>(rhi::Destroy(Device, m.ClusterView));
             static_cast<void>(rhi::Destroy(Device, m.ClusterTexture));
-            if (m.ShadowSlot != SHADOWS)
+            if (m.ShadowSlot != NO_SHADOW)
             {
                 --Shadows[m.ShadowSlot].References;
                 DropShadow(m.ShadowSlot);
@@ -551,8 +598,8 @@ struct Renderer::State final
                 {
                     return false;
                 }
-                const auto ax = x.MaterialSlot == MATERIALS ? MaterialAlpha::Opaque : Materials[x.MaterialSlot].Alpha;
-                const auto ay = y.MaterialSlot == MATERIALS ? MaterialAlpha::Opaque : Materials[y.MaterialSlot].Alpha;
+                const auto ax = x.MaterialSlot == NO_MATERIAL ? MaterialAlpha::Opaque : Materials[x.MaterialSlot].Alpha;
+                const auto ay = y.MaterialSlot == NO_MATERIAL ? MaterialAlpha::Opaque : Materials[y.MaterialSlot].Alpha;
                 if (ax != ay || (ax == MaterialAlpha::Masked && x.MaterialSlot != y.MaterialSlot))
                 {
                     return false;
@@ -614,7 +661,7 @@ struct Renderer::State final
                 --MeshRecords[mesh].References;
                 DropMesh(mesh);
                 const auto material = scene.Items[i].MaterialSlot;
-                if (material != MATERIALS)
+                if (material != NO_MATERIAL)
                 {
                     --Materials[material].References;
                     DropMaterial(material);
@@ -646,11 +693,74 @@ struct Renderer::State final
         Retire(view);
     }
 };
+Status Renderer::State::ReserveStorage(const Limits& limits) noexcept
+{
+    usize bytes = sizeof(State);
+    const usize groups = usize(limits.Objects) / 16 + (limits.Objects % 16 != 0 ? 1U : 0U);
+    const auto charge = [&bytes](usize count, usize width) noexcept {
+        usize requested = 0;
+        return TryMultiply(count, width, requested) && TryAdd(bytes, requested, bytes);
+    };
+    usize snapshotItems = 0, snapshotGroups = 0, viewPackets = 0;
+    if (!TryMultiply(usize(limits.Snapshots), usize(limits.Objects), snapshotItems) ||
+        !TryMultiply(usize(limits.Snapshots), groups, snapshotGroups) ||
+        !TryMultiply(usize(limits.Views), usize(limits.Objects), viewPackets) ||
+        !charge(limits.Meshes, sizeof(MeshRecord)) || !charge(limits.Snapshots, sizeof(SnapshotRecord)) ||
+        !charge(limits.Views, sizeof(ViewRecord)) || !charge(limits.Materials, sizeof(MaterialRecord)) ||
+        !charge(limits.MaterialPrograms, sizeof(ProgramRecord)) ||
+        !charge(limits.ShadowAtlases, sizeof(ShadowRecord)) ||
+        !charge(limits.Presentations, sizeof(PresentationRecord)) || !charge(snapshotItems, sizeof(Item)) ||
+        !charge(snapshotGroups, sizeof(math::Aabb3) + sizeof(bool)) || !charge(viewPackets, sizeof(Packet)) ||
+        !charge(limits.Objects, 2 * sizeof(Candidate) + sizeof(Instance)) ||
+        !charge(groups, sizeof(math::FrustumRelation)) || bytes > limits.HostBytes)
+    {
+        return Status::CapacityExceeded;
+    }
+    // Exact reservations avoid geometric slack and growth overlap; addresses stay
+    // stable for the renderer lifetime. PrepareView reuses these CPU workspaces.
+    const auto reserve = []<typename T>(Array<T>& values, usize count) noexcept {
+        return values.TryEnsureCapacity(count) && values.TryResize(count);
+    };
+    if (!reserve(MeshRecords, limits.Meshes) || !reserve(SnapshotRecords, limits.Snapshots) ||
+        !reserve(ViewRecords, limits.Views) || !reserve(Materials, limits.Materials) ||
+        !reserve(Programs, limits.MaterialPrograms) || !reserve(Shadows, limits.ShadowAtlases) ||
+        !reserve(Presentations, limits.Presentations) || !reserve(Candidates, limits.Objects) ||
+        !reserve(Scratch, limits.Objects) || !reserve(Instances, limits.Objects) || !reserve(GroupRelations, groups))
+    {
+        return Status::OutOfMemory;
+    }
+    for (auto& snapshot : SnapshotRecords)
+    {
+        if (!reserve(snapshot.Items, limits.Objects) || !reserve(snapshot.Groups, groups) ||
+            !reserve(snapshot.HasGroup, groups))
+        {
+            return Status::OutOfMemory;
+        }
+    }
+    for (auto& view : ViewRecords)
+    {
+        if (!reserve(view.Packets, limits.Objects))
+        {
+            return Status::OutOfMemory;
+        }
+    }
+    Capacities = limits;
+    HostBytes = bytes;
+    return Status::Ready;
+}
 Renderer::Renderer() noexcept = default;
 Renderer::~Renderer() = default;
 Limits Renderer::GetLimits() noexcept
 {
     return {};
+}
+Limits Renderer::GetConfiguredLimits() const noexcept
+{
+    return mState ? mState->Capacities : Limits{};
+}
+usize Renderer::GetHostBytes() const noexcept
+{
+    return mState ? mState->HostBytes : 0;
 }
 void Renderer::Reset() noexcept
 {
@@ -658,11 +768,16 @@ void Renderer::Reset() noexcept
 }
 Status Renderer::Initialize(rhi::DeviceHandle device,
                             const rhi::RasterShaderDescription& vertex,
-                            const rhi::RasterShaderDescription& fragment) noexcept
+                            const rhi::RasterShaderDescription& fragment,
+                            const Limits& limits) noexcept
 {
     if (mState)
     {
         return Status::InvalidState;
+    }
+    if (!ValidCapacities(limits))
+    {
+        return Status::InvalidDescription;
     }
     rhi::RasterCapabilities capabilities;
     auto status = rhi::GetRasterCapabilities(device, capabilities);
@@ -670,7 +785,7 @@ Status Renderer::Initialize(rhi::DeviceHandle device,
     {
         return status;
     }
-    if (capabilities.DrawsPerFrame < OBJECTS || capabilities.ResourcesPerKind < 16)
+    if (capabilities.DrawsPerFrame < limits.Objects || capabilities.ResourcesPerKind < 16)
     {
         return Status::Unsupported;
     }
@@ -694,6 +809,12 @@ Status Renderer::Initialize(rhi::DeviceHandle device,
     }
     mState.Reset(state);
     state->Device = device;
+    status = state->ReserveStorage(limits);
+    if (status != Status::Ready)
+    {
+        Reset();
+        return status;
+    }
     state->Owner = ReserveOwner();
     if (state->Owner == 0)
     {
@@ -1012,7 +1133,7 @@ Status Renderer::DrawView(PreparedView handle, const rhi::RasterPassDescription&
     for (usize i = 0; i < view.DrawCount; ++i)
     {
         const auto slot = view.Packets[i].MaterialSlot;
-        if (slot != MATERIALS && ((s.Materials[slot].Lit && surface) || (!s.Materials[slot].Lit && hdr)))
+        if (slot != NO_MATERIAL && ((s.Materials[slot].Lit && surface) || (!s.Materials[slot].Lit && hdr)))
         {
             return Status::Unsupported;
         }
@@ -1035,7 +1156,7 @@ Status Renderer::DrawView(PreparedView handle, const rhi::RasterPassDescription&
         const auto overlay = hdr ? s.HdrFlat[2] : (surface ? s.Overlay : s.TargetOverlay);
         auto pipeline = packet.Pass == Layer::Opaque ? opaque : overlay;
         auto bindings = s.Bindings;
-        if (packet.MaterialSlot != MATERIALS)
+        if (packet.MaterialSlot != NO_MATERIAL)
         {
             const auto& material = s.Materials[packet.MaterialSlot];
             const auto& program = s.Programs[material.ProgramSlot];
@@ -1847,7 +1968,7 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
     {
         const auto bakeSource = m.HasBake ? lighting->Bake.Texture : s.Programs[m.ProgramSlot].White;
         const auto shadowSource =
-            m.ShadowSlot != SHADOWS ? s.Shadows[m.ShadowSlot].Texture : s.Programs[m.ProgramSlot].White;
+            m.ShadowSlot != NO_SHADOW ? s.Shadows[m.ShadowSlot].Texture : s.Programs[m.ProgramSlot].White;
         status = rhi::CreateTextureView(s.Device, bakeSource, m.BakeTexture);
         if (Accepted(status))
         {
@@ -2194,7 +2315,7 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
     {
         return Status::InvalidState;
     }
-    if (count > OBJECTS)
+    if (count > mState->Capacities.Objects)
     {
         return Status::CapacityExceeded;
     }
@@ -2247,7 +2368,7 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
         {
             return Status::InvalidDescription;
         }
-        usize materialSlot = MATERIALS;
+        usize materialSlot = NO_MATERIAL;
         if (Access::Owner(item.Surface) != 0)
         {
             status = GetStatus(item.Surface);
@@ -2311,7 +2432,7 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
                      math::Max(b.Max.Y, coarse.Max.Y),
                      math::Max(b.Max.Z, coarse.Max.Z)};
         }
-        if (materialSlot != MATERIALS && mState->Materials[materialSlot].Lit)
+        if (materialSlot != NO_MATERIAL && mState->Materials[materialSlot].Lit)
         {
             const auto& bounds = destination.Bounds;
             if (math::Abs(bounds.Min.X) > 1000000 || math::Abs(bounds.Min.Y) > 1000000 ||
@@ -2353,7 +2474,7 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
             ++mState->MeshRecords[Access::Slot(item.Input.LodGeometry)].References;
         }
         ++mState->MeshRecords[snapshot.Items[i].MeshSlot].References;
-        if (snapshot.Items[i].MaterialSlot != MATERIALS)
+        if (snapshot.Items[i].MaterialSlot != NO_MATERIAL)
         {
             ++mState->Materials[snapshot.Items[i].MaterialSlot].References;
         }
@@ -2465,7 +2586,7 @@ Status Renderer::PrepareView(Snapshot handle,
     auto& scratch = mState->Scratch;
     usize count = 0, opaqueCount = 0;
     uint32 boundsTests = 0, culledGroups = 0;
-    math::FrustumRelation groups[OBJECTS / 16]{};
+    auto& groups = mState->GroupRelations;
     if (!description.Reference)
     {
         for (usize i = 0; i < (snapshot->Count + 15) / 16; ++i)
@@ -2530,8 +2651,8 @@ Status Renderer::PrepareView(Snapshot handle,
                 candidate.Data.Rows[row] = rows.Columns[row];
             }
             candidate.Data.Color =
-                item.MaterialSlot == MATERIALS ? item.Input.Material.Color : math::Vector4{1, 1, 1, 1};
-            if (item.MaterialSlot != MATERIALS && mState->Materials[item.MaterialSlot].Clustered)
+                item.MaterialSlot == NO_MATERIAL ? item.Input.Material.Color : math::Vector4{1, 1, 1, 1};
+            if (item.MaterialSlot != NO_MATERIAL && mState->Materials[item.MaterialSlot].Clustered)
             {
                 candidate.Data.Color.Y = description.Reference || description.DirectLighting ? 1.0F : 0.0F;
             }
@@ -2544,7 +2665,7 @@ Status Renderer::PrepareView(Snapshot handle,
                                   description.CameraPosition.Y,
                                   description.CameraPosition.Z,
                                   1};
-            if (item.MaterialSlot != MATERIALS && mState->Materials[item.MaterialSlot].Lit)
+            if (item.MaterialSlot != NO_MATERIAL && mState->Materials[item.MaterialSlot].Lit)
             {
                 const auto& material = mState->Materials[item.MaterialSlot];
                 math::Matrix3 normal;
@@ -2563,7 +2684,7 @@ Status Renderer::PrepareView(Snapshot handle,
                                                  bake.Transform == item.Input.Transform
                                              ? 1.0F
                                              : 0.0F;
-                if (material.ShadowSlot != SHADOWS)
+                if (material.ShadowSlot != NO_SHADOW)
                 {
                     candidate.Data.Eye.W =
                         mState->SameCasters(mState->SnapshotRecords[mState->Shadows[material.ShadowSlot].SnapshotSlot],
@@ -2644,11 +2765,19 @@ Status Renderer::PrepareView(Snapshot handle,
                     break;
                 }
             }
-            static_cast<void>(StableSort(candidates + first, scratch, last - first, MeshLess{}));
+            static_cast<void>(StableSort(candidates.GetData() + first, scratch.GetData(), last - first, MeshLess{}));
             first = last;
         }
     }
+    if ((report.SourceIdOutput != nullptr || report.SelectedLodOutput != nullptr) && report.DetailCapacity < count)
+    {
+        return Status::CapacityExceeded;
+    }
     ViewReport result;
+    result.SourceIdOutput = report.SourceIdOutput;
+    result.SelectedLodOutput = report.SelectedLodOutput;
+    result.DetailCapacity = report.DetailCapacity;
+    result.Reported = static_cast<uint32>(count < 256 ? count : 256);
     result.BoundsTests = boundsTests;
     result.CulledGroups = culledGroups;
     result.Submitted = static_cast<uint32>(snapshot->Count);
@@ -2661,15 +2790,18 @@ Status Renderer::PrepareView(Snapshot handle,
         const auto& candidate = candidates[i];
         const auto& item = snapshot->Items[candidate.Item].Input;
         instances[i] = candidate.Data;
-        result.SourceIds[i] = item.SourceId;
-        result.SelectedLods[i] = candidate.Coarse;
+        if (i < result.Reported)
+        {
+            result.SourceIds[i] = item.SourceId;
+            result.SelectedLods[i] = candidate.Coarse;
+        }
         result.LodObjects += candidate.Coarse ? 1U : 0U;
-        if (candidate.MaterialSlot != MATERIALS && mState->Materials[candidate.MaterialSlot].Lit)
+        if (candidate.MaterialSlot != NO_MATERIAL && mState->Materials[candidate.MaterialSlot].Lit)
         {
             const auto& material = mState->Materials[candidate.MaterialSlot];
             result.BakeFallbacks += material.HasBake && candidate.Data.Color.X == 0 ? 1U : 0U;
             result.ShadowFallbacks +=
-                material.ShadowSlot != SHADOWS && (static_cast<uint32>(candidate.Data.Eye.W) & 1U) == 0 ? 1U : 0U;
+                material.ShadowSlot != NO_SHADOW && (static_cast<uint32>(candidate.Data.Eye.W) & 1U) == 0 ? 1U : 0U;
         }
         if (!description.Reference && view.DrawCount != 0 &&
             view.Packets[view.DrawCount - 1].MeshSlot == candidate.MeshSlot &&
@@ -2691,7 +2823,7 @@ Status Renderer::PrepareView(Snapshot handle,
         {
             status = rhi::RequestBufferUpload(mState->Device,
                                               {rhi::BufferRole::Vertex, bytes},
-                                              reinterpret_cast<const uint8*>(instances),
+                                              reinterpret_cast<const uint8*>(instances.GetData()),
                                               bytes,
                                               view.Upload);
             view.UploadOwned = status == Status::Pending;
@@ -2700,7 +2832,7 @@ Status Renderer::PrepareView(Snapshot handle,
         {
             status = rhi::CreateBuffer(mState->Device,
                                        {rhi::BufferRole::Vertex, bytes},
-                                       {reinterpret_cast<const uint8*>(instances), bytes},
+                                       {reinterpret_cast<const uint8*>(instances.GetData()), bytes},
                                        view.Instances);
         }
         if (!Accepted(status))
@@ -2715,6 +2847,17 @@ Status Renderer::PrepareView(Snapshot handle,
     view.Used = view.Owned = true;
     view.HasRetry = false;
     result.Draws = static_cast<uint32>(view.DrawCount);
+    for (usize i = 0; i < count; ++i)
+    {
+        if (result.SourceIdOutput != nullptr)
+        {
+            result.SourceIdOutput[i] = snapshot->Items[candidates[i].Item].Input.SourceId;
+        }
+        if (result.SelectedLodOutput != nullptr)
+        {
+            result.SelectedLodOutput[i] = candidates[i].Coarse;
+        }
+    }
     report = result;
     output = Access::Make<PreparedView>({mState->Owner, view.Generation, slot});
     return status;
@@ -2763,7 +2906,7 @@ Status Renderer::Submit(PreparedView handle, rhi::SurfaceHandle surface, rhi::Su
     for (usize i = 0; i < view.DrawCount; ++i)
     {
         const auto material = view.Packets[i].MaterialSlot;
-        if (material != MATERIALS && mState->Materials[material].Lit)
+        if (material != NO_MATERIAL && mState->Materials[material].Lit)
         {
             return Status::Unsupported;
         }
@@ -2789,7 +2932,7 @@ Status Renderer::Submit(PreparedView handle, rhi::SurfaceHandle surface, rhi::Su
                 {view.Instances, packet.First * sizeof(Instance), packet.Count * sizeof(Instance)}};
             auto pipeline = packet.Pass == Layer::Opaque ? mState->Opaque : mState->Overlay;
             auto bindings = mState->Bindings;
-            if (packet.MaterialSlot != MATERIALS)
+            if (packet.MaterialSlot != NO_MATERIAL)
             {
                 const auto& material = mState->Materials[packet.MaterialSlot];
                 pipeline = mState->Programs[material.ProgramSlot].Pipelines[packet.Pass == Layer::Opaque ? 0 : 2];
@@ -3034,12 +3177,17 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     }
     if (clustered && !s.ClusterScratch)
     {
+        if (sizeof(LightClusters) > s.Capacities.HostBytes - s.HostBytes)
+        {
+            return Status::CapacityExceeded;
+        }
         auto* workspace = new (std::nothrow) LightClusters;
         if (workspace == nullptr)
         {
             return Status::OutOfMemory;
         }
         s.ClusterScratch.Reset(workspace);
+        s.HostBytes += sizeof(LightClusters);
     }
     auto* clusters = s.ClusterScratch.Get();
     LightSelection selected;
@@ -3276,7 +3424,7 @@ Renderer::PrepareShadowAtlas(Snapshot handle, const ShadowAtlasDescription& desc
     for (usize i = 0; i < snapshot->Count; ++i)
     {
         const auto& item = snapshot->Items[i];
-        if (item.Input.Pass == Layer::Opaque && item.MaterialSlot != MATERIALS &&
+        if (item.Input.Pass == Layer::Opaque && item.MaterialSlot != NO_MATERIAL &&
             s.Materials[item.MaterialSlot].Alpha == MaterialAlpha::Masked && !s.Materials[item.MaterialSlot].Lit)
         {
             return Status::Unsupported;
@@ -3400,7 +3548,7 @@ Status Renderer::DrawShadowAtlas(ShadowAtlas handle) noexcept
             const auto& mesh = s.MeshRecords[packet.MeshSlot];
             auto pipeline = s.FlatShadow;
             auto bindings = s.Bindings;
-            if (packet.MaterialSlot != MATERIALS && s.Materials[packet.MaterialSlot].Alpha == MaterialAlpha::Masked)
+            if (packet.MaterialSlot != NO_MATERIAL && s.Materials[packet.MaterialSlot].Alpha == MaterialAlpha::Masked)
             {
                 const auto& material = s.Materials[packet.MaterialSlot];
                 pipeline = s.Programs[material.ProgramSlot].ShadowPipeline;

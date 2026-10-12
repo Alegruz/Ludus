@@ -159,20 +159,26 @@ def test_malformed_handshake(child):
 def test_stderr_closed(child):
     report_recv, report_send = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
     packets = []
+    child_finished = threading.Event()
     report_recv.settimeout(0.2)
 
     def drain():
-        try:
-            while True:
+        while True:
+            try:
                 packets.append(report_recv.recv(4096))
-        except OSError:
-            pass
+            except socket.timeout:
+                # A quiet socket does not mean the sanitized child has finished startup.
+                if child_finished.is_set():
+                    return
+            except OSError:
+                return
 
     worker = threading.Thread(target=drain)
     worker.start()
     try:
         result = run_direct(child, "stderr-closed", report_fd=report_send.fileno(), timeout=5)
     finally:
+        child_finished.set()
         worker.join()
         report_recv.close()
         report_send.close()
