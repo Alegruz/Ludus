@@ -5,10 +5,10 @@
 #include "internal/vma.h"
 
 #include <ludus/foundation/logging/log_format.hpp>
+#include <ludus/foundation/math/scalar.hpp>
 #include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>
 
-#include <algorithm>
 #include <cstring>
 #include <initializer_list>
 #include <span>
@@ -310,8 +310,10 @@ bool CreateTargets() noexcept
         }
         else
         {
-            gExtent.width = std::clamp(gExtent.width, caps.minImageExtent.width, caps.maxImageExtent.width);
-            gExtent.height = std::clamp(gExtent.height, caps.minImageExtent.height, caps.maxImageExtent.height);
+            gExtent.width =
+                foundation::math::Clamp(gExtent.width, caps.minImageExtent.width, caps.maxImageExtent.width);
+            gExtent.height =
+                foundation::math::Clamp(gExtent.height, caps.minImageExtent.height, caps.maxImageExtent.height);
         }
         uint32 count = 0;
         if (!Check(vkGetPhysicalDeviceSurfaceFormatsKHR(gPhysical, gSurface, &count, nullptr)) || count == 0 ||
@@ -357,10 +359,10 @@ bool CreateTargets() noexcept
         {
             return CreatePass();
         }
-        uint32 desired = std::max(caps.minImageCount, 2U);
+        uint32 desired = foundation::math::Max(caps.minImageCount, 2U);
         if (caps.maxImageCount != 0)
         {
-            desired = std::min(desired, caps.maxImageCount);
+            desired = foundation::math::Min(desired, caps.maxImageCount);
         }
         if (desired > IMAGES || (caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0)
         {

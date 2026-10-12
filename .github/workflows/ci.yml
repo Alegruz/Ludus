@@ -368,6 +368,10 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts/python -p 'test_play*.py' -v
           python3 -m unittest discover -s scripts/python -p 'test_process_ownership.py' -v
+      - name: Reject standard formatting and heavy public headers
+        run: |
+          python3 tools/check_build_time_includes.py
+          python3 tests/build_time/policy_tests.py
       - name: Verify source formatting before builds
         run: ./scripts/check --format
       - name: Test S0 Luau source and bytecode integrity contracts

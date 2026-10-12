@@ -416,3 +416,15 @@ library, or claiming a speedup for the first SortedMap consumer. The implemented
 vertical slice follows the allocation/lifetime separation directly: allocate
 before construction, stage resource-registry copies before commit, and verify
 failed insertion leaves borrowed and move-only values intact.
+
+## In-place ordering
+
+`foundation::Sort(values, count, less)` in `containers/sort.hpp` uses an in-place
+heap sort: O(count log count) comparisons, O(1) auxiliary storage, no allocation
+and no stability guarantee. Elements must support nonthrowing move construction
+and assignment, and the comparator must provide a nonthrowing strict weak
+ordering. A zero count permits a null pointer. Element addresses remain valid;
+values can move between positions. Use the existing `StableSort` with separate
+initialized scratch storage when equal keys must retain their input order.
+The Perfetto exporter uses that stable operation and returns failure if scratch
+allocation fails.

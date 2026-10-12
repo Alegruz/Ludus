@@ -140,3 +140,10 @@ process (termination is owned by the caller / the assertion subsystem).
 
 See `.kiro/specs/logging-redesign/` for the full requirements, design, tasks, and
 decision log.
+
+Session and rotation filenames use the bounded Ludus formatter, checking
+truncation and format errors before file creation. Native asynchronous backend
+ownership uses `UniquePtr` and nonthrowing allocation; if that allocation fails,
+initialization reports `Degraded` with `Synchronous` mode and keeps the prepared
+sinks. It disables the timed flush worker to avoid allocating another thread after
+the failure; explicit and shutdown flushes remain available. Standard formatting machinery is not used by the logger or its fixtures.

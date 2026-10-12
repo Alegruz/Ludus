@@ -139,6 +139,13 @@ if(LUDUS_BUILD_TESTS)
     ludus_apply_project_defaults(ludus_foundation_logging_tests)
     ludus_enable_test_exceptions(ludus_foundation_logging_tests)
 
+    add_executable(ludus_logging_allocation_failure_tests tests/allocation_failure_tests.cpp)
+    target_include_directories(ludus_logging_allocation_failure_tests PRIVATE src)
+    target_link_libraries(ludus_logging_allocation_failure_tests PRIVATE Ludus::FoundationLogging Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_logging_allocation_failure_tests)
+    ludus_enable_test_exceptions(ludus_logging_allocation_failure_tests)
+    add_test(NAME ludus_logging_allocation_failure_tests COMMAND ludus_logging_allocation_failure_tests)
+
     add_test(NAME ludus_foundation_logging_tests COMMAND ludus_foundation_logging_tests)
     set_tests_properties(ludus_foundation_logging_tests PROPERTIES LABELS "unit;foundation;logging")
 endif()
