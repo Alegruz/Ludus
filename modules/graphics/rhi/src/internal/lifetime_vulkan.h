@@ -30,7 +30,7 @@ VkResult LifetimeVulkanBegin(LifetimeVulkanTransfer& transfer, bool readback) no
     {
         VkBufferCreateInfo buffer{};
         buffer.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        buffer.size = internal::LIFETIME_TRANSFER_BYTES;
+        buffer.size = internal::CurrentStorageLimits().TransferBytes;
         buffer.usage = readback ? VK_BUFFER_USAGE_TRANSFER_DST_BIT : VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
         VmaAllocationCreateInfo allocation{};
         allocation.usage = VMA_MEMORY_USAGE_AUTO;
@@ -232,6 +232,253 @@ RasterStatus LifetimeReadback(usize transferSlot, BufferRole, const internal::Li
         gRasterBuffers[bufferSlot].Access |= VK_ACCESS_TRANSFER_READ_BIT;
     }
     return RasterError(submitted);
+}
+// Thanks to Khronos, "Synchronization Examples", transfer/host and image
+// dependencies (https://docs.vulkan.org/guide/latest/synchronization_examples.html).
+// Transfers keep conservative whole-resource barriers and one ordered queue.
+RasterStatus
+LifetimeBufferUpdate(usize slot, BufferRole, const internal::LifetimeCopyRange& range, const uint8* bytes) noexcept
+{
+    auto& transfer = gLifetimeVulkan[0][slot];
+    if (transfer.Busy)
+    {
+        return RasterStatus::CapacityExceeded;
+    }
+    auto result = LifetimeVulkanBegin(transfer, false);
+    if (result != VK_SUCCESS)
+    {
+        return RasterError(result);
+    }
+    std::memcpy(transfer.Mapped, bytes, range.Size);
+    result = vmaFlushAllocation(gRasterAllocator, transfer.Staging.Allocation, 0, range.Size);
+    if (result != VK_SUCCESS)
+    {
+        return RasterError(result);
+    }
+    auto& destination = gRasterBuffers[range.Buffer];
+    auto barrier = LifetimeVulkanBarrier(destination.Object);
+    barrier.srcAccessMask = destination.Access | destination.WriterAccess;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(transfer.Command,
+                         destination.Stage | destination.WriterStage,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0,
+                         0,
+                         nullptr,
+                         1,
+                         &barrier,
+                         0,
+                         nullptr);
+    const VkBufferCopy copy{0, range.Offset, range.Size};
+    vkCmdCopyBuffer(transfer.Command, transfer.Staging.Object, destination.Object, 1, &copy);
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    vkCmdPipelineBarrier(transfer.Command,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         0,
+                         0,
+                         nullptr,
+                         1,
+                         &barrier,
+                         0,
+                         nullptr);
+    result = LifetimeVulkanSubmit(transfer);
+    if (result == VK_SUCCESS)
+    {
+        destination.Stage = destination.WriterStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        destination.Access = destination.WriterAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
+    }
+    return RasterError(result);
+}
+namespace
+{
+struct LifetimeVkImageTransition final
+{
+    VkImageLayout Before;
+    VkImageLayout After;
+    VkAccessFlags SourceAccess;
+    VkAccessFlags DestinationAccess;
+};
+void LifetimeVkImageBarrier(VkCommandBuffer command,
+                            const RasterVulkanTexture& texture,
+                            const LifetimeVkImageTransition& transition) noexcept
+{
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask = transition.Before == VK_IMAGE_LAYOUT_UNDEFINED ? 0U : transition.SourceAccess;
+    barrier.dstAccessMask = transition.DestinationAccess;
+    barrier.oldLayout = transition.Before;
+    barrier.newLayout = transition.After;
+    barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = texture.Object;
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture.Info.MipLevels, 0, 1};
+    vkCmdPipelineBarrier(command,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         0,
+                         0,
+                         nullptr,
+                         0,
+                         nullptr,
+                         1,
+                         &barrier);
+}
+VkImageSubresourceLayers LifetimeVkLayers(const TextureRegion& region) noexcept
+{
+    return {VK_IMAGE_ASPECT_COLOR_BIT, region.Mip, 0, 1};
+}
+VkOffset3D LifetimeVkOffset(const TextureRegion& region) noexcept
+{
+    return {static_cast<int32>(region.X), static_cast<int32>(region.Y), 0};
+}
+} // namespace
+RasterStatus LifetimeTextureTransfer(usize slot, const internal::TextureTransfer& info, const uint8* bytes) noexcept
+{
+    const bool readback = info.Operation == internal::TextureTransferOperation::Readback;
+    const bool update = info.Operation == internal::TextureTransferOperation::Update;
+    auto& transfer = gLifetimeVulkan[readback ? 1 : 0][slot];
+    if (transfer.Busy)
+    {
+        return RasterStatus::CapacityExceeded;
+    }
+    auto result = LifetimeVulkanBegin(transfer, readback);
+    if (result != VK_SUCCESS)
+    {
+        return RasterError(result);
+    }
+    if (update)
+    {
+        std::memcpy(transfer.Mapped, bytes, info.Size);
+        result = vmaFlushAllocation(gRasterAllocator, transfer.Staging.Allocation, 0, info.Size);
+        if (result != VK_SUCCESS)
+        {
+            return RasterError(result);
+        }
+    }
+    constexpr VkAccessFlags memory = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    if (!update)
+    {
+        const auto& source = gRasterTextures[info.Source];
+        LifetimeVkImageBarrier(transfer.Command,
+                               source,
+                               {
+                                   .Before = source.ColorLayout,
+                                   .After = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                   .SourceAccess = source.ColorAccess | source.ColorWriterAccess,
+                                   .DestinationAccess = VK_ACCESS_TRANSFER_READ_BIT,
+                               });
+    }
+    if (!readback)
+    {
+        const auto& destination = gRasterTextures[info.Destination];
+        LifetimeVkImageBarrier(transfer.Command,
+                               destination,
+                               {
+                                   .Before = destination.ColorLayout,
+                                   .After = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   .SourceAccess = destination.ColorAccess | destination.ColorWriterAccess,
+                                   .DestinationAccess = VK_ACCESS_TRANSFER_WRITE_BIT,
+                               });
+    }
+    const auto& region = readback ? info.SourceRegion : info.DestinationRegion;
+    VkBufferImageCopy buffer{};
+    buffer.bufferRowLength = static_cast<uint32>(info.RowPitch / 4);
+    buffer.bufferImageHeight = region.Height;
+    buffer.imageSubresource = LifetimeVkLayers(region);
+    buffer.imageOffset = LifetimeVkOffset(region);
+    buffer.imageExtent = {region.Width, region.Height, 1};
+    if (update)
+    {
+        vkCmdCopyBufferToImage(transfer.Command,
+                               transfer.Staging.Object,
+                               gRasterTextures[info.Destination].Object,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               1,
+                               &buffer);
+    }
+    else if (readback)
+    {
+        vkCmdCopyImageToBuffer(transfer.Command,
+                               gRasterTextures[info.Source].Object,
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               transfer.Staging.Object,
+                               1,
+                               &buffer);
+        auto host = LifetimeVulkanBarrier(transfer.Staging.Object);
+        host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+        vkCmdPipelineBarrier(transfer.Command,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_HOST_BIT,
+                             0,
+                             0,
+                             nullptr,
+                             1,
+                             &host,
+                             0,
+                             nullptr);
+    }
+    else
+    {
+        VkImageCopy copy{};
+        copy.srcSubresource = LifetimeVkLayers(info.SourceRegion);
+        copy.srcOffset = LifetimeVkOffset(info.SourceRegion);
+        copy.dstSubresource = LifetimeVkLayers(info.DestinationRegion);
+        copy.dstOffset = LifetimeVkOffset(info.DestinationRegion);
+        copy.extent = {region.Width, region.Height, 1};
+        vkCmdCopyImage(transfer.Command,
+                       gRasterTextures[info.Source].Object,
+                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       gRasterTextures[info.Destination].Object,
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1,
+                       &copy);
+    }
+    if (!update)
+    {
+        const auto& source = gRasterTextures[info.Source];
+        LifetimeVkImageBarrier(transfer.Command,
+                               source,
+                               {
+                                   .Before = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                   .After = source.ColorLayout,
+                                   .SourceAccess = VK_ACCESS_TRANSFER_READ_BIT,
+                                   .DestinationAccess = memory,
+                               });
+    }
+    if (!readback)
+    {
+        const auto& destination = gRasterTextures[info.Destination];
+        LifetimeVkImageBarrier(transfer.Command,
+                               destination,
+                               {
+                                   .Before = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   .After = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                   .SourceAccess = VK_ACCESS_TRANSFER_WRITE_BIT,
+                                   .DestinationAccess = VK_ACCESS_SHADER_READ_BIT,
+                               });
+    }
+    result = LifetimeVulkanSubmit(transfer);
+    if (result == VK_SUCCESS)
+    {
+        if (!update)
+        {
+            gRasterTextures[info.Source].ColorStage |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+            gRasterTextures[info.Source].ColorAccess |= VK_ACCESS_TRANSFER_READ_BIT;
+        }
+        if (!readback)
+        {
+            auto& destination = gRasterTextures[info.Destination];
+            destination.ColorLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            destination.ColorStage = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+            destination.ColorAccess = VK_ACCESS_SHADER_READ_BIT;
+            destination.ColorWriterStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+            destination.ColorWriterAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
+            destination.SampleVisibility = destination.ColorStage;
+        }
+    }
+    return RasterError(result);
 }
 RasterStatus LifetimePollTransfer(bool readback, usize slot) noexcept
 {

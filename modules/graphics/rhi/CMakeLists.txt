@@ -172,6 +172,13 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN AND LUDUS_SLANG_COMPILER AND (APPLE OR L
         SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/cull.slang" COMPUTE computeMain)
     ludus_compile_shader(TARGET ludus_rhi_r6_consumer NAME raster RASTER
         SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/raster.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+    add_executable(ludus_rhi_r8_consumer "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/r8.cpp")
+    target_link_libraries(ludus_rhi_r8_consumer PRIVATE Ludus::GraphicsRhi Ludus::FoundationTime)
+    ludus_apply_project_defaults(ludus_rhi_r8_consumer)
+    ludus_compile_shader(TARGET ludus_rhi_r8_consumer NAME raster RASTER
+        SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/raster.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+    add_test(NAME ludus_rhi_r8_consumer COMMAND ludus_rhi_r8_consumer)
+    set_tests_properties(ludus_rhi_r8_consumer PROPERTIES LABELS "rhi;gpu;build-contract" TIMEOUT 45)
     add_test(NAME ludus_rhi_r6_consumer COMMAND ludus_rhi_r6_consumer)
     set_tests_properties(ludus_rhi_r6_consumer PROPERTIES LABELS "rhi;gpu;build-contract" TIMEOUT 45)
 endif()

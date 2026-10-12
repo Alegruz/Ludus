@@ -293,14 +293,16 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     const auto pixel = RasterPixelFormat(format);
     VkFormatProperties properties{};
     vkGetPhysicalDeviceFormatProperties(gPhysical, pixel, &properties);
-    constexpr VkFormatFeatureFlags required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
-                                              VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
-                                              VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+    const VkFormatFeatureFlags required =
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+        VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
+        (format == RasterFormat::Rgba8Unorm ? VK_FORMAT_FEATURE_TRANSFER_SRC_BIT : 0U);
     if ((properties.optimalTilingFeatures & required) != required)
     {
         return {};
     }
-    constexpr VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    const VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                    (format == RasterFormat::Rgba8Unorm ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0U);
     VkImageFormatProperties sampled{};
     if (vkGetPhysicalDeviceImageFormatProperties(gPhysical,
                                                  pixel,
@@ -553,7 +555,9 @@ RasterCreateBuffer(usize slot, const BufferDescription& info, std::span<const ui
                        : info.Role == BufferRole::StorageIndirect
                            ? VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT
                            : VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    return RasterError(RasterUploadBuffer(usage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, bytes, gRasterBuffers[slot]));
+    return RasterError(RasterUploadBuffer(usage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                          bytes,
+                                          gRasterBuffers[slot]));
 }
 RasterStatus
 RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpload& upload, uint32 request) noexcept
@@ -561,9 +565,10 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     VkFormatProperties properties{};
     const auto format = RasterPixelFormat(info.Format);
     vkGetPhysicalDeviceFormatProperties(gPhysical, format, &properties);
-    constexpr VkFormatFeatureFlags required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
-                                              VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
-                                              VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+    const VkFormatFeatureFlags required =
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+        VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
+        (info.Format == RasterFormat::Rgba8Unorm ? VK_FORMAT_FEATURE_TRANSFER_SRC_BIT : 0U);
     const auto features = required | (info.Attachment ? VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT : 0U);
     if ((properties.optimalTilingFeatures & features) != features)
     {
@@ -586,6 +591,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     image.samples = VK_SAMPLE_COUNT_1_BIT;
     image.tiling = VK_IMAGE_TILING_OPTIMAL;
     image.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                  (info.Format == RasterFormat::Rgba8Unorm ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0U) |
                   (info.Attachment ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0U);
     VmaAllocationCreateInfo allocation{};
     allocation.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
@@ -636,6 +642,10 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
             result = vkCreateFramebuffer(gDevice, &framebuffer, nullptr, &texture.Framebuffer);
         }
         return RasterError(result);
+    }
+    if (info.DeferredInitialization)
+    {
+        return RasterStatus::Ready;
     }
     texture.ColorLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     texture.ColorStage = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;

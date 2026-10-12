@@ -78,6 +78,10 @@ TEST_CASE("Profile requests are copied and enabled snapshots are invalidated by 
     CHECK(info.Profile.Storage.Submissions == 0);
     CHECK(info.Profile.Storage.HostBytes == 0);
     CHECK(info.Profile.Storage.ResourceBytes == 0);
+    CHECK(info.Profile.Storage.RayResourcesPerKind == 0);
+    CHECK(info.Profile.Storage.RayInstances == 0);
+    CHECK(info.Profile.Storage.TransferSlices == 0);
+    CHECK(info.Profile.Storage.TransferBytes == 0);
     CHECK(internal::CurrentDeviceProfile().Storage.ResourcesPerKind == 0);
     FormatCapabilities format;
     format.MaxMipLevels = 777;
@@ -111,6 +115,10 @@ TEST_CASE("Profile requests are copied and enabled snapshots are invalidated by 
     CHECK(info.Profile.Storage.Submissions == 0);
     CHECK(info.Profile.Storage.HostBytes == 0);
     CHECK(info.Profile.Storage.ResourceBytes == 0);
+    CHECK(info.Profile.Storage.RayResourcesPerKind == 0);
+    CHECK(info.Profile.Storage.RayInstances == 0);
+    CHECK(info.Profile.Storage.TransferSlices == 0);
+    CHECK(info.Profile.Storage.TransferBytes == 0);
     CHECK(internal::CurrentDeviceProfile().Storage.ResourcesPerKind == 0);
     CHECK(info.Profile.Formats[0].SampleCounts == 0);
     CHECK(GetFormatCapabilities(fixture.Device, RasterFormat::Rg8Unorm, format) == RasterStatus::DeviceLost);
@@ -170,9 +178,10 @@ TEST_CASE("Required profile limits and formats fail before resource creation wit
         request.RequiredProfile.Formats[0].Uses.Storage = true;
         expected = ProfileRequirement::Storage;
     }
-    SECTION("creation uploads do not enable general copies")
+    SECTION("R8 copy profile excludes other formats")
     {
         request.RequiredProfile.FormatCount = 1;
+        request.RequiredProfile.Formats[0].Format = RasterFormat::Rg8Unorm;
         request.RequiredProfile.Formats[0].Uses.CopyDestination = true;
         expected = ProfileRequirement::CopyDestination;
     }

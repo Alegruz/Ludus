@@ -98,6 +98,7 @@ struct Record final
     ComputePipelineInfo Compute;
     TextureDescription Texture;
     uint64 TextureRevision = 1;
+    uint32 InitializedMips = 0;
     RasterTextureUse TextureUse = RasterTextureUse::Undefined;
     RasterTextureUse FrameTextureUse = RasterTextureUse::Undefined;
     bool ColorDefined = false;
@@ -653,7 +654,12 @@ RasterStatus CreateTexture(DeviceHandle device,
         storageWidth = storageWidth > 1 ? storageWidth / 2 : 1;
         storageHeight = storageHeight > 1 ? storageHeight / 2 : 1;
     }
-    if (description.Attachment)
+    if (description.DeferredInitialization &&
+        (description.Attachment || description.RetainCpuContent || description.Format != RasterFormat::Rgba8Unorm))
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    if (description.Attachment || description.DeferredInitialization)
     {
         if (!upload.Bytes.empty() || upload.RowPitch != 0 || !upload.Mips.empty())
         {
@@ -724,6 +730,7 @@ RasterStatus CreateTexture(DeviceHandle device,
                 }
             }
             record.ColorDefined = true;
+            record.InitializedMips = (uint32{1} << description.MipLevels) - 1;
             record.TextureUse = RasterTextureUse::SampledBoth;
             return backend::RasterCreateTexture(slot, description, upload, record.Request);
         },
@@ -767,6 +774,10 @@ RasterStatus CreateTextureView(DeviceHandle device, TextureHandle texture, Textu
     if (source->Status != RasterStatus::Ready)
     {
         return source->Status == RasterStatus::Pending ? RasterStatus::NotReady : source->Status;
+    }
+    if (!source->Texture.Attachment && !source->ColorDefined)
+    {
+        return RasterStatus::InvalidState;
     }
     return Publish(RasterKind::View, output, [&](usize slot, Record& record) noexcept {
         record.TextureSlot = RasterAccess::Slot(texture);
@@ -1892,6 +1903,7 @@ RasterStatus Destroy(DeviceHandle device, RasterPipelineHandle& handle) noexcept
 } // namespace ludus::graphics::rhi
 
 #include "internal/lifetime_services.h"
+#include "internal/mutable_transfers.h"
 
 #include "internal/compute_services.h"
 

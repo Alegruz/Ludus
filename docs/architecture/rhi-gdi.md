@@ -55,11 +55,11 @@ Their capabilities describe implemented operations on the enabled device.
 | --- | --- | --- |
 | [Lifecycle](../../modules/graphics/rhi/include/ludus/graphics/rhi/rhi.h), [explicit device](../../modules/graphics/rhi/include/ludus/graphics/rhi/device.h) and [facade](../../modules/graphics/rhi/src/rhi.cpp) | One main-thread device/session and borrowed surface, copied requirements, asynchronous browser startup, owner validation and explicit loss/restart | Enabled raster/compute/format constraints are negotiated before Ready; independent devices/surfaces remain extensions |
 | [Fullscreen resources](../../modules/graphics/rhi/include/ludus/graphics/rhi/render.h) | Eight resources per kind, one uniform binding, one fullscreen triangle and legacy `InUse` rejection | Preserve this compatibility contract separately from general resources |
-| [Portable raster](../../modules/graphics/rhi/include/ludus/graphics/rhi/raster.h) | Typed generational resources, reflected immutable bindings/pipelines and indexed/instanced draws; renderer L1–L3 extend depth, targets and sampled mip formats | Full copy/update, attachment/view and descriptor APIs remain bounded or deferred |
-| [Lifetime services](../../modules/graphics/rhi/include/ludus/graphics/rhi/lifetime.h) | Retained command batches, actual completion tokens, bounded buffer upload/readback rings and canonical pipeline requests | No general texture streaming or persistent driver cache |
+| [Portable raster](../../modules/graphics/rhi/include/ludus/graphics/rhi/raster.h) | Typed generational resources, reflected immutable bindings/pipelines and indexed/instanced draws; renderer L1–L3 extend depth, targets and sampled mip formats | R8 adds bounded mutation/copy/readback; extended attachment/view and descriptor APIs remain deferred |
+| [Lifetime services](../../modules/graphics/rhi/include/ludus/graphics/rhi/lifetime.h) | Retained command batches, actual completion tokens, bounded buffer/texture transfers, initialized mip primitives and canonical pipeline requests | Partial sampled views, sparse memory/eviction and persistent driver cache remain extensions |
 | [Ordered graph](../../modules/graphics/rhi/include/ludus/graphics/rhi/graph.h) | Authored order, in-place versions, RAW/WAR/WAW reports, culling, completion-gated object pooling and opt-in raster merging | Conservative whole-resource hazards; no heap aliasing, parallel recording or async queues |
 | [Compute](../../modules/graphics/rhi/include/ludus/graphics/rhi/compute.h) | Single-queue buffer dispatch and indexed indirect drawing on Vulkan, Metal and WebGPU | WebGL 2 requires an authored CPU/direct variant; storage textures and indirect dispatch are deferred |
-| [Vulkan](../../modules/graphics/rhi/src/rhi_vulkan.cpp) and [Metal](../../modules/graphics/rhi/src/rhi_metal.mm) | Both lower the bounded R0–R5 profiles; Vulkan general allocations use private VMA 3.3.0, while legacy frame targets retain their allocation path | Keep native allocation, synchronization and presentation retirement private |
+| [Vulkan](../../modules/graphics/rhi/src/rhi_vulkan.cpp) and [Metal](../../modules/graphics/rhi/src/rhi_metal.mm) | Both lower bounded raster/compute, R6 storage, R7 measurement and R8 transfers; Vulkan general allocations use private VMA 3.3.0, while legacy frame targets retain their allocation path | Keep native allocation, synchronization and presentation retirement private |
 | [Browser dispatcher](../../modules/graphics/rhi/src/rhi_web.cpp) | WebGPU startup with one requirement-aware WebGL 2 fallback and Platform-managed canvas replacement | Preserve ADR 0014 and callback isolation |
 | [Shader build helper](../../cmake/shaders/compile_shader.py) | Pinned Slang emits SPIR-V/WGSL and macOS MSL 2.3; pinned SPIRV-Cross emits GLSL ES 3.00, with bounded raster/compute reflection and target layout validation | Reject unverified layout forms; broader package/feature support is future work |
 
@@ -407,6 +407,13 @@ No synchronous per-draw queries or readbacks in normal renderer behavior.
 Cancellation removes the consumer but keeps physical staging retained until safe.
 
 ## Bindings shaders and pipelines
+
+The [render graph authoring proposal](render-graph-authoring.md) adds an offline
+graph/schema compiler and editor workflow above this boundary. It emits explicit
+uses, reflected layouts and finite pipeline recipes through the existing graph
+and pipeline-request seams. Shader configurations belong to the asset author;
+resource connectivity cannot manufacture permutations. RHI retains sole ownership
+of handle lifetime, hazard lowering and accepted-submission state.
 
 Use explicit layouts and immutable binding snapshots. A recommended raster
 scheme groups View/Frame, Material, and Draw data by update frequency, with
@@ -758,8 +765,10 @@ merged at `859d02d`; its evidence reconciliation used repository revision `56598
 [R0 negotiation, PR 201](https://github.com/Alegruz/Ludus/pull/201), subsequently
 merged at `fb6842c`, adds copied enabled limits, format/use constraints and
 required/preferred admission. The follow-up roadmap was assigned against comparison revision `0344d67`;
-current statuses and evidence are recorded below. R6 is proposed in
-[PR 215](https://github.com/Alegruz/Ludus/pull/215).
+current statuses and evidence are recorded below. R6 was merged in
+[PR 215](https://github.com/Alegruz/Ludus/pull/215); R7 in
+[PR 216](https://github.com/Alegruz/Ludus/pull/216). R8 is submitted in
+[PR 219](https://github.com/Alegruz/Ludus/pull/219).
 R5 source revision `e4a6b7a83ef9a1572e77c92af55ca57c681c5b98` passed all 28
 executed CI checks, including native/browser builds, sanitizer and static-analysis
 checks, installed/relocated SDK consumers and packaged browser rendering tests.
@@ -796,7 +805,8 @@ R0 capability, format and limit negotiation is implemented. The remaining
 one-device/surface scope, resource table bounds and restricted operations are
 assigned below. R6 implements configurable, budgeted storage, and R7 provides
 measurement and qualification tooling with explicitly open host acceptance.
-R8–R17 remain **planned and not implemented**. They extend the
+R8 adds mutable transfers and incremental initialized mip primitives; partial
+sampling remains R9a. R9–R17 remain **planned and not implemented**. They extend the
 shipped R0–R5 profiles rather than reopening their original acceptance.
 
 #### Follow-up milestones R6–R17
@@ -812,7 +822,7 @@ requiring those higher-level systems to be implemented first.
 | --- | --- | --- | --- |
 | **R6: scalable resource and plan storage (Implemented)** | Replace fixed general-resource/backend tables and GDI graph/batch storage with stable, budgeted capacity. Negotiate configured maxima before Ready; grow backing between frames, without changing published limits or allocating during command execution. Keep the fullscreen facade's separate compatibility bounds. | R0/R1/R2/R3 | Exceed the historical 64 records per kind, 16 resources/32 passes per graph, 256 draws per retained batch/graph and 1024 draws per frame in independently budgeted fixtures. Include at least 72 small resident textures and 405 prepared draw packets. Test stable handles through growth, allocation rollback, checked capacity arithmetic, generation exhaustion, pending/detached/in-flight retention and loss/restart. Optional RT0 now uses stable pages with independently configured ray resource and instance counts; [renderer L5.1](renderer-systems.md#l51-budgeted-scene-capacity) owns its integration and capacity evidence. Counts prove capacity, not full reference-scene performance. |
 | **R7: GPU measurement and qualification (Measurement/workflow implemented; host gates open)** | R7a: optional GPU timing and actual allocation/retirement telemetry, with logical, API-allocated and physical/resident bytes distinguished. R7b: named physical-GPU and host/surface qualification records. | Existing R2/R3/R5; extend telemetry for each later milestone | Query lifecycle, clock domains, precision/disjointness, reporting overhead and unavailable results are explicit. CPU acquire/encode/submit time is not GPU duration or display latency. Qualification records pin hardware, workload and enabled profile, include resize/loss and selected Wayland/hosted-browser journeys, and report measured CPU/GPU distributions and peak memory. Unavailable physical residency/display observations are not invented; their qualification remains open. |
-| **R8: mutable transfers and residency primitives** | R8a: existing-buffer updates and bounded 2D texture upload/update/copy/readback. R8b: incremental initialized mip residency and staging budgets with explicit source ownership, completion and cancellation. | R8a: R6 plus existing R2/R3; R8b: R8a/R9a initialized-view contracts; use R7 evidence | Round trips, offset/pitch/range checks, partial initialization, RAW/WAR/WAW and cancellation/pressure/loss tests. Mutation must reject, order or rename around retained/in-flight uses; never overwrite host-visible GPU data still in use. Reuse staging only after actual completion. Later texture types/block formats extend these checks in R9. Residency here does not promise sparse GPU memory or consumer eviction policy. |
+| **R8: mutable transfers and residency primitives (Implemented, RGBA8 transfer profile)** | R8a: existing-buffer updates and bounded 2D texture upload/update/copy/readback. R8b: incremental initialized mip residency and staging budgets with explicit source ownership, completion and cancellation. | R8a: R6 plus existing R2/R3; R8b initialization: R8a; sampling partial residency: R9a initialized-view contracts; use R7 evidence | Round trips, offset/pitch/range checks, partial initialization, RAW/WAR/WAW and cancellation/pressure/loss tests. Mutation must reject, order or rename around retained/in-flight uses; never overwrite host-visible GPU data still in use. Reuse staging only after actual completion. Later texture types/block formats extend these checks in R9. Residency here does not promise sparse GPU memory or consumer eviction policy. |
 | **R9: texture types, formats and views** | R9a: partial sampled views/mip/layer/aspect ranges and uploaded HDR formats. R9b: arrays/cubemaps. R9c: 3D textures and compressed formats, each with explicit enabled format/use support and target reflection. | R6/R8a; partial views initially use conservative R3 hazards | Validate block-edge layouts, mip/slice bounds, cube orientation, 3D addressing, initialized sampling and retained view lifetimes. Installed SDK pixels/readback qualify every claimed backend/profile. Unsupported format/use combinations reject explicitly; array/cube/3D and compression capabilities are independent. |
 | **R10: attachment extensions** | R10a: multiple color attachments, sampled depth and stencil. R10b: MSAA/resolve. R10c: partial attachment views and extended GDI load/store declarations. | Existing R1/R3 plus R6; R9a/view aspects for sampled depth and R10c; no dependency on all texture types or transfers | Validate per-format/sample limits, attachment compatibility, resolves, depth/stencil behavior, feedback and undefined loads. Prove graph/direct image agreement, loss/resize retirement and authored alternatives. Conservatively track full-resource hazards until R13a; stencil, attachment counts and MSAA are separate capabilities. |
 | **R11: scalable binding and optional bindless** | R11a: descriptor arenas and dynamic offsets. R11b: reflected binding arrays and separately enabled descriptor indexing/bindless, with explicit reachable-resource declarations and completion-gated reuse. | R11a: R6 and existing R1/R2; R11b: R11a plus verified target reflection/capabilities; R9 only for new texture types/views | Alignment/range checks, descriptor exhaustion/rollback, in-flight replacement and stale index tests. Arrays do not imply runtime-sized/non-uniform indexing or update-after-bind. Retain all declared reachable resources; unsafe or undeclared access rejects. Compare binding CPU cost and retained memory through R7. Bindless is optional and does not remove table/memory budgets. |
@@ -825,9 +835,12 @@ requiring those higher-level systems to be implemented first.
 
 R6 storage and R7a measurement support are implemented; R7b physical Vulkan/Wayland
 and deployed physical-browser journeys remain open. See the
-[R7 usage and named qualification evidence](../development/fullscreen-rendering.md#gpu-measurement-and-qualification-r7). R8a can
-follow directly; R8b follows R9a so partially resident mips have valid sampled
-views. R9/R10 and R11a proceed once their listed prerequisites are present.
+[R7 usage and named qualification evidence](../development/fullscreen-rendering.md#gpu-measurement-and-qualification-r7).
+[R8a transfers and R8b mip initialization/staging budgets](../development/fullscreen-rendering.md#mutable-transfers-and-mip-initialization-r8)
+are implemented for the RGBA8 transfer profile. R8b initializes mips incrementally
+and gates the existing full-resource view until all mips are defined. R9a remains
+the prerequisite for sampling a partially initialized allocation through a partial
+view. R9/R10 and R11a proceed once their listed prerequisites are present.
 R12a reuses R4 and R15a reuses R3 without waiting for the texture/attachment
 series. R14 is a separate ownership
 track. R16a/R17a provide an early native RT query track; scalable bindings,
@@ -846,7 +859,11 @@ Each named subprofile is tracked separately as **Planned**, **In progress**,
 **Implemented** or **Qualified**, with PR/revision, backend/profile matrix and
 evidence links. R6 is Implemented with the
 [storage contract and SDK fixture](../development/fullscreen-rendering.md#scalable-resource-and-plan-storage-r6);
-R7–R17 subprofiles remain Planned. Implemented means
+R7a is Implemented and R7b physical host gates remain open. R8a and R8b's
+initialized-mip/staging primitives are Implemented with their
+[transfer contract and SDK journey](../development/fullscreen-rendering.md#mutable-transfers-and-mip-initialization-r8);
+partial sampled views remain Planned under R9a. R9–R17 subprofiles remain Planned.
+Implemented means
 the declared operations and failure paths pass SDK/correctness gates; Qualified
 adds the named hardware/workload measurements. Unavailable evidence stays open.
 An umbrella milestone cannot be marked complete by selecting only its easiest

@@ -1,0 +1,546 @@
+# Render graph authoring, shader builds and pipeline management
+
+Status: Proposed architecture, October 12, 2026. This defines the renderer
+authoring/compiler contract; it does not claim an implemented graph editor,
+general shader-function compiler or new RHI capability. Baseline: `5c44d19`.
+The existing [Renderer](renderer-systems.md), [RHI/GDI](rhi-gdi.md),
+[editor](editor-architecture.md) and [game reload](project-live-reload.md) retain
+their implementation and lifetime contracts.
+
+## Decision and scope
+
+Author rendering through reusable typed graphs. A shader function is the smallest
+programmable unit; execution/resource nodes describe how those functions run.
+Compile the authored documents into immutable shader packages and an inspectable
+execution plan. The runtime executes that plan through the existing RHI instead
+of traversing editor objects or generating shaders during a draw.
+
+**Authors define the legal compilation space. Users select within it. Connecting
+or disconnecting a port never creates a shader configuration.** The compiler can
+optimize a chosen program without changing its observable behavior; it cannot
+invent techniques, remove declared effects or expose new permutations.
+
+Start with raster, explicit serial pass order, ordinary resource bindings and a
+local incremental build. Keep async compute, native heap aliasing, bindless,
+distributed cooking and a visual shader-expression language conditional on a
+measured requirement and separately implemented backend contracts. Advanced ray
+nodes use the [ray milestones](renderer-systems.md#ray-tracing-and-path-tracing)
+and [RHI capability gates](rhi-gdi.md#resource-and-command-contracts); a visible
+editor node does not establish platform support.
+
+This is the owner of graph composition, compilation choices, shared shader
+schemas, build provenance, camera/scene coverage and their editor workflow.
+Backend synchronization, handles, completion and command legality stay with RHI;
+scene extraction and shading policy stay with Renderer. Detailed rendering
+algorithms remain in their existing owners.
+
+Thanks to Donald Revie, "Designing a Data-Driven Renderer," *GPU Pro 3*, V.4,
+sections 4.4-4.8, pp. 307-317, for separating shared representation from rendering
+context, exposing techniques and documenting data-driven optimization/editing
+costs. We retain complete immutable inputs and move interpretation into cooking;
+his context-stack traversal is not our resource-hazard graph. The
+[follow-up review](renderer-systems-gems-review.md#render-graph-and-shader-authoring-follow-up)
+records source evidence and explicit departures.
+
+## Owners and representations
+
+| Owner | Responsibility | Boundary |
+| --- | --- | --- |
+| Project documents / editor core | Graph, schema and technique sources; stable IDs, versions, selection, undo and explicit save | Qt/browser panels project this data; widget state never defines rendering semantics |
+| Offline authoring tools | Graph validation/lowering, schema generation, shader cooking, dependency keys and reports | Shared CLI and editor job path; no engine dependency on the GUI or compiler |
+| Renderer | Immutable view/scene extraction, draw-item routing, material technique selection and coverage diagnostics | Receives typed values and leases; does not depend on GameplayWorld |
+| GDI services / current RHI graph seam | Plan instantiation, imported resources, bounded uploads, pipeline requests and transient reuse | Use current implemented seams first; do not introduce a second handle/state registry |
+| RHI/backend | Pipeline creation, bindings, actual resource state, barriers, command submission and completion | One authoritative submission/lifetime implementation |
+| GameHost / reload coordinator | Version admission and frame-boundary activation | No callbacks or pointers into unloadable game code in persistent plans |
+
+Keep four explicit representations: authored document, validated/lowered graph,
+cooked package and frame instance. They have different lifetimes. A text editor
+and the visual editor modify the same bounded, versioned source format; generated
+headers, target shaders, caches and reports are build products, not parallel
+authored truth. Start with canonical JSON records and stable IDs, using the
+existing parsing/configuration owners; file extensions and SDK API spellings are
+implementation decisions. Reject unknown schema versions rather than guess.
+
+The lowering representation needs only typed tables, graph edges, pass records,
+configuration IDs and source mappings. Use concrete functions and Ludus-owned
+containers with explicit allocation/status contracts. Do not create a universal
+runtime interpreter, a polymorphic object per shader instruction, or a public
+pass class per effect. Bound nodes, ports, nesting, expansion, resources, source
+sizes and build jobs before admitting a document.
+
+## Node and connection contracts
+
+Everything authored is a graph, with different connection domains:
+
+| Node/edge domain | Meaning | Compiler treatment |
+| --- | --- | --- |
+| Shader function / value | Typed computation, stage inputs/outputs and logical resource requirements | Compose within legal stage boundaries and generate entry wrappers |
+| Execution | Raster draw, compute dispatch, ray invocation, copy, clear, resolve or presentation | Defines invocation, fixed state, uses and ordering; validates supported profile |
+| Resource | Texture/buffer versions, imported targets, persistent history and exported results | Validates descriptor, access, initialization and lifetime requirements |
+| Scene/view | Scene snapshot, camera/view, query and draw-item stream | Renderer supplies CPU values and draw selection; not a GPU texture |
+| Subgraph | Immutable referenced graph plus exposed interface and chosen configuration | Lower through the same rules, preserving the nested source path |
+
+`VSMain`, `PSMain` and `RayGen` can be named function nodes. They are not
+individually schedulable frame passes. Rasterization/interpolation connects
+vertex outputs to fragment inputs; these edges do not allocate intermediate
+textures. Stage inputs, derivatives, built-ins, payloads and invocation rules
+need stage-aware validation. Ray function tables and recursion remain an
+optional backend profile, not arbitrary ordinary-function links.
+
+Each function node declares a signature, stage eligibility, parameter schema,
+logical resources/access and effects. The shader author writes computations and
+resource accesses against that interface. The graph binds actual resources;
+generated wrappers assign physical bindings and target semantics. Handwritten
+entry points may supply the equivalent manifest, checked against reflection.
+Neither path requires hand-authored descriptor numbers, barriers or per-frame
+resource wiring in shader code. Reflection checks declarations; it cannot prove
+every dynamic resource index or hidden effect. Restrict access to declared
+interfaces, reject unverifiable patterns or require conservative explicit uses.
+
+Offer typed value-provider nodes for standard engine inputs (view transforms,
+draw transforms, frame time and declared scene textures). A provider has a schema,
+update frequency and explicit data/resource dependencies; generated bindings
+resolve it before encoding. Cache derived CPU values once at their declared
+view/draw frequency and invalidate on input revision, rather than hiding a mutable
+global state behind convenient uniform names. Thanks to Patrick Cozzi,
+"A Framework for GLSL Engine Uniforms," *Game Engine Gems 2*, chapter 6,
+sections 6.2-6.6, pp. 83-92, for automatic inputs with explicit state and derived
+value caching. We adapt that contract, not its string maps or per-uniform virtual
+factories; see the [reading evidence](renderer-systems-gems-review.md#render-graph-and-shader-authoring-follow-up).
+
+A port carries stable identity, direction/domain, type/schema version, required
+or optional connection policy and configuration availability. GPU resource ports
+add format/class, extent/layers/mips, samples, access and aspect/range constraints.
+State color space and alpha convention where meaningful. Describe requested
+resource usage as a checked union of legal producers/consumers; unsupported
+attachment-plus-sampling/resolve combinations reject. Extents are data or bounded
+expressions, not compile-time shader switches by default.
+
+Each output names a logical resource version. Writes produce a new version;
+preserve/load requires a dependency on initialized previous contents. External
+targets are imports supplied to the root graph, including an acquired back
+buffer. An output edge exposes the written version, not an instruction to bind
+an arbitrary GPU object after execution. Multiple writers must use explicit
+version/order edges or a composition node. Clear/load/discard, store, depth,
+stencil, blend and resolve intent are part of the execution contract.
+
+Reject incompatible connections, multiple unresolved writers, uninitialized
+reads, recursive imports and within-frame execution cycles. Previous/next-frame
+history is an explicit persistent import/export with reset/invalidation policy;
+it is not a cycle hidden inside the current frame graph. A subgraph exposes its
+interface and effect summary, not permission to rewrite its internals.
+
+## Cameras, reusable raster graphs and scene coverage
+
+Every active presentation camera must have at least one valid graph route to its
+designated presentation target and Present operation. Creating one assigns the
+default raster graph. Inactive cameras need no executing route; texture cameras
+terminate at an exported offscreen texture. Loading a saved broken assignment
+reports it and preserves the document instead of silently replacing it.
+
+The saved `RasterizeGraph` exposes scene, view/camera, material policy, vertex
+contract and target requirements, plus Color and Depth outputs. Its target is
+supplied/requested by the parent; its implementation does not hardcode a surface.
+The default initially uses a documented default-material override on admitted
+vertex layouts. It does not promise compatibility with arbitrary mesh layouts.
+Later scene-material selection uses explicit compatible technique interfaces.
+
+```text
+Scene + View + material policy + compatible target
+                         |
+                         v
+                 [RasterizeGraph]
+                   |          |
+                 Color      Depth
+                   |
+        Export texture, compose, or Present
+```
+
+Reuse a graph definition across cameras with separate view inputs, instance IDs
+and resource/history ownership. Multiple cameras sharing a surface declare
+viewport rectangles and clear/composition order. Two independent producers
+connected to one back buffer do not implicitly blend or preserve one another.
+
+Graph legality and scene coverage are separate validation results. Coverage is
+per draw item (submesh/material slot/LOD representation), required rendering role
+and view, rather than one Boolean per entity. Renderer adapters extract those
+records from World/Scene/Level without a dependency from RHI to gameplay.
+
+First determine which items the view intends to render from explicit visibility,
+layer and authoring rules. Then find compatible active routes to the required
+output. Keep intention separate from compatibility: a layout/material mismatch
+must not disappear inside a query filter. Depth coverage alone does not satisfy
+color/presentation coverage. Shadow and color participation are legitimate
+distinct roles; unexpected duplication within a role is diagnosed unless the
+author declares additive/compositional participation.
+
+Report Covered, Unsupported (reason and rejected route), Conflicting, or
+IntentionallyExcluded. Ordinary visibility/occlusion culling is an execution
+outcome, not proof of an unsupported layout. Report against graph, scene, view,
+material/schema and capability revisions; streaming/new content invalidates
+affected coverage. Cache by compatible render signature and update changed
+items, with a full reference scan for validation. Dynamic selection that cannot
+be proved complete remains explicitly Unknown until evaluated.
+
+An error route is an authored, ready editor technique for the same rendering
+role. Use visible error geometry only when its position/layout path is valid;
+otherwise draw a bounds/marker proxy and retain the original reason. It cannot
+make required depth correct for unknown deformation/coverage, and cannot turn
+missing capability or failed pipelines into success. Shipping policy explicitly
+rejects required incomplete coverage or admits a named fallback; it never
+silently hides required objects.
+
+## Author-owned compilation choices
+
+An asset declares an explicit finite list of legal configuration tuples, default
+selection, admitted target profiles and child-configuration mappings. Users choose
+only those entries. Runtime values, scene size, camera count and connection count
+do not become shader configurations. Prefer a named mode over independent
+Boolean switches; independent dimensions are allowed only with a bounded,
+reviewable legal-tuple set. Specialization constants, generic/type substitutions
+and link-time choices are configurations too, not ways around the manifest.
+
+Keep connection policy, compilation choice and effects separate:
+
+| Declaration | Result |
+| --- | --- |
+| Color may be unused in `ColorAndDepth` | Execute the authored program and retain its effects; unused result has no external consumer |
+| Color must be consumed in `ColorAndDepth` | Missing consumer is a graph error |
+| Author exposes `DepthOnly` | User can select that separately authored/validated technique |
+| Author exposes an automatic selection rule | Rule may choose a listed configuration; the UI/build report displays that choice |
+| No depth-only choice exists | Disconnecting Color never synthesizes a depth-only shader |
+
+Example interface, conceptual rather than a new file-format promise:
+
+```text
+RasterizeGraph configurations:
+  ColorAndDepth: Color optional-consumer; Depth optional-consumer
+  DepthOnly:     Depth required-consumer; Color unavailable
+
+Default: ColorAndDepth
+Selection: explicit
+DepthOnly technique: authored geometry + coverage/depth implementation
+```
+
+Unconsumed Color does not mean free color rendering. Allocate/store what the
+chosen technique requires and show that cost. Removing a shader stage, changing
+attachment topology or selecting another material technique requires an authored
+configuration. Backend optimization of dead calculations or irrelevant stores
+within the same observable contract does not expose an additional configuration.
+Validate effect summaries when deciding whether whole unreachable passes can be
+culled: presentation, exports, history writes, externally observable storage
+writes, readbacks and declared required effects are roots. A write to an unused
+transient resource is not independently observable, provided the declared effect
+contract proves it has no other effects. Unknown effects retain work or reject
+it. Debug
+preview of an output is an explicit extra consumer and may change resource
+retention/culling; it must never silently request a shader permutation.
+
+`DepthOnly` must preserve deformation, alpha clipping/sample coverage and custom
+depth where required. Transparent materials do not automatically enter a pre-Z
+role. A depth-only pass is a pre-Z pass only when the later shading technique
+declares matching geometry, coverage, samples and depth comparison/write state.
+Authors may share geometry/coverage functions between techniques; the compiler
+does not derive semantic equivalence from arbitrary `PSMain` code. Enforce this
+with parity fixtures, not just matching signatures. `[[nodiscard]]`-like port
+warnings cannot establish these semantics.
+
+Nested graphs map parent choices to child choices explicitly. Composition
+validates all selected tuples against a project/target budget; it does not take
+an unrestricted Cartesian product. Count declared tuples, selected reachable
+tuples, unique stage programs, emitted target artifacts and pipeline recipes
+separately. Deduplicate identical canonical programs across graph instances;
+never count deduplication as permission to expose an unbounded source space.
+Budget failure reports the authoring nodes/choices responsible, without silently
+dropping profiles, outputs or features. New budget values require measured review.
+
+An exposed shader-function/material slot is an author-declared extension point,
+with stage/schema/effect and technique constraints. List the concrete project
+implementations and legal combinations in the package closure before cooking.
+Implementing new shader code creates a new authored asset revision; connecting
+an ordinary value, adding an instance or selecting an imported graph does not
+create a new shader. An open interface is not permission to compile arbitrary
+new per-object types at runtime. All nested/extension contributions enter the
+same count and budget report.
+
+Thanks to Arseny Kapoulkine, "Writing an Efficient Vulkan Renderer," *GPU Zen 2*,
+IV.4, sections 4.5-4.6.3, pp. 239-245, for complete technique state and the warning
+that shader plus fixed-state combinations multiply. Review whether a small
+computation can remain runtime data/work, or a rare effect can have a separate
+authored pass, before adding another static tuple. This is an author decision
+with measured cost, not a compiler-created permutation or a promise that every
+pipeline can cheaply remain resident. Detailed [source findings](renderer-systems-gems-review.md#render-graph-and-shader-authoring-follow-up)
+record the departures.
+
+## Shared schemas and CPU/GPU layout
+
+Define fields, stable IDs, units/defaults, resource kinds and packing policy once
+in an authoritative schema. The editor is a view/controller for that source; an
+equivalent text source is accepted under the same rules. Generate C++ value
+definitions, shader declarations, serialization/upload packing, inspector
+metadata and interface/layout identities. Derived files are regenerated and
+verified in CI. Do not manually maintain a second shader-side struct.
+
+A restricted shared header is optional when both compilers accept it and every
+supported target proves the layout. Single-source semantics do not promise
+identical C++/shader bytes. Verify scalar representation, offsets, alignment,
+array/matrix strides, matrix order and resource categories from each emitted
+target. Use generated target packing where representations differ. Reject
+unverified types, unbounded arrays, native pointers and accidental host `bool`
+or object layouts at the GPU boundary. CPU generated code follows Ludus types,
+include boundaries and exception-free explicit errors.
+
+Separate logical schema identity from target binding/byte-layout identity.
+Compatibility is a checked descriptor comparison, not a name/hash match or
+equal total byte size. Stable field IDs support diagnostics and declared
+migration; they do not authorize reinterpreting old bytes. Logical View/Material/
+Draw grouping remains an update-frequency convention, lowered to the verified
+Vulkan/Metal/WebGPU/WebGL profile rather than requiring identical descriptor sets.
+
+Engine graph interfaces belong to versioned SDK schemas; game graphs may extend
+them through declared material/function interfaces. Ship built-in graph templates
+and required shader sources or pin-compatible modules in the authoring SDK so a
+game can build a legal composition without recompiling the engine binary.
+Shipping runtimes consume cooked packages and need no Slang compiler. Engine
+ABI changes still require a host rebuild/restart; custom game schema changes
+use a declared adapter/migration or reject activation.
+
+## Deterministic shader and graph build
+
+```text
+Saved source snapshot: graph + dependencies + schemas + shader functions
+  -> validate configurations/profiles and calculate count/budget report
+  -> lower graph and generate schema/binding/entry wrappers + source map
+  -> compile selected programs with the pinned shader chain
+  -> reflect and validate each emitted target, stage interface and effect uses
+  -> package shaders, graph plan, layouts, pipeline recipes and diagnostics
+  -> prewarm device pipelines -> admit compatible immutable generation
+```
+
+Reuse [the existing pinned shader toolchain](../decisions/0010-shader-toolchain-feasibility.md)
+and [GLSL ES lowering](../decisions/0013-browser-glsl-es-shader-toolchain.md).
+Extend the current offline helper at its owning boundary; do not replace it with
+a second editor compiler. A persistent Slang worker/module cache can later reduce
+front-end repetition if measurements justify it and the pinned API is qualified.
+Module/link-time specialization must still use the authored configuration list.
+Do not assume current documentation or a newer compiler establishes support on
+the project's pinned version.
+
+Build keys include canonical semantic graph/configuration data, transitive source
+and import hashes, schema/layout policy, entry functions, emitted binding maps,
+target/profile/features, all code-generation flags, debug/optimization mode and
+compiler/tool/generator versions. Keep editor positions/selection, timestamps,
+absolute machine paths and camera/object counts out of shader identity. Separate
+per-stage keys, graph-plan keys and pipeline keys so moving a node, editing a
+runtime parameter or changing only pass order does not rebuild unrelated shader
+code. Source maps/debug-path remapping have their own deterministic inputs.
+
+Preserve source-to-intermediate-to-target provenance and expose Open Source from
+generated diagnostics/selected artifacts. Generated-source views are read-only;
+editing the owner regenerates intermediates instead of losing changes on the
+next cook. Thanks to Rémi Arnaud, "The Game Asset Pipeline," *Game Engine Gems 1*,
+chapter 2, sections 2.2-2.3, pp. 24-30, for readable intermediate data, tracked
+dependencies and source-directed editing. We use a local shared build service;
+COLLADA, DCC round trips and automatic source rewriting are not dependencies.
+
+Use local content-addressed immutable outputs first. Concurrent jobs share only
+validated immutable cache entries; each build owns its staging directory and
+writable tool state. Hashes are checked against full identities at lookup and
+artifact integrity at load. Publication is atomic after all dependencies match
+the captured source snapshot. Cancellation/stale revision discards the candidate;
+partial output cannot replace the last good package. A missing/corrupt cache
+entry causes a rebuild, never a false ready state.
+
+The package records configuration IDs and why selected, dependencies/provenance,
+schema and target layout descriptors, shader entry artifacts, declared uses and
+effects, pipeline recipes, required capabilities, resource/plan bounds and stable
+authored-node mappings. Keep validation/source diagnostics and compilation time/
+artifact bytes in a readable sidecar report. Runtime encoding uses resolved
+numeric records; no source parser or string search per draw.
+
+| Edit/action | Expected invalidation |
+| --- | --- |
+| Move a node or change panel layout | Presentation metadata only |
+| Change a runtime material value or add a camera using the same graph/profile | Values/frame instance; no new shader configuration |
+| Disconnect optional Color without changing the selected technique | Consumer/resource plan; same stage programs and authored pipeline attachment contract |
+| Select declared DepthOnly | Select/build its listed programs/recipes; no additional inferred tuple |
+| Change pass order only | Validate/rebuild affected plan; reuse unchanged stage programs |
+| Connect shader value functions while authoring a new graph revision | Rebuild affected authored stage composition and verify its manifest/budget |
+| Change a shared schema or imported shader source | Invalidate transitive affected programs, layouts and bindings; coordinate CPU interface if changed |
+| Resize an ordinary target | Resource instance; pipeline only if format/samples/state actually changes |
+
+Package every configuration that content may select during execution; explicit
+configuration switching selects a cooked/prewarmed entry or waits outside drawing
+for a newly admitted generation. Observed use can prioritize prewarm work, but
+observations alone cannot prove the completeness of all runtime choices.
+
+## Pipeline readiness and execution
+
+Separate shader configurations from pipeline recipes and device pipeline objects.
+Different vertex layouts, attachment formats, sample counts or fixed state can
+require distinct pipelines without another shader program. Authors bound their
+admitted pipeline state/profile combinations too. Pipeline keys include exact
+shader versions, binding layouts, vertex interface, topology, raster/depth/blend
+state, formats, samples and permitted specialization values; compare complete
+canonical descriptions after hashing. Extent, camera ID, target handle and
+ordinary uniform values normally do not belong in the key.
+
+A portable recipe manifest supplies prewarm requests. Driver caches are optional
+device/driver-qualified accelerators, not portable source truth or a promise of
+zero cold compilation. Track Missing/Pending/Ready/Failed independently from
+shader-package status. Required pipelines must be Ready before activating the
+candidate route. Optional effects use an authored ready fallback or explicit
+pending/unsupported status. The diagnostic error route itself must be prewarmed.
+Draw encoding never blocks on compilation or constructs a new pipeline key.
+
+Lower the dependency graph to a deterministic author-visible serial order first:
+dependencies constrain order, explicit order edges express semantic order, stable
+authored ordinals break remaining ties. Supply that ordered plan to existing
+RHI/GDI graph validation. It owns hazard lowering and accepted-submission state;
+the authoring compiler never commits speculative GPU state. Reflection and
+declared uses must agree; widen conservative ranges instead of guessing safety.
+Keep streaming outside the frame graph with explicit imported readiness.
+
+Cache plans by topology/configuration/profile/resource compatibility. Bind fresh
+scene/view data and imported resources each frame, retaining exact versions.
+Extent-only resize updates checked resource descriptors/pools; shader rebuild is
+unnecessary unless an authored specialization depends on it. Still validate
+actual imported state, readiness, format/sample changes and completion obligations
+on execution. Frame histories are per graph instance/view with explicit reset
+conditions. Warm paths reuse reserved arenas and tables; capacity exhaustion
+returns a bounded diagnostic rather than allocating without limit or dropping
+required draws.
+
+Use exact-descriptor transient pooling with completion proof first. Native memory
+aliasing, pass merging/reordering, parallel recording and multiple GPU queues
+are later independent optimizations with a serial/non-aliasing control, image/
+effect parity, memory measurements and schedule diagnostics. WebGPU pooling
+does not imply physical heap aliasing. Every optimization retains source mapping
+and can be disabled in a diagnostic execution mode that preserves legal commands.
+
+## Editor interaction, diagnostics and hot reload
+
+Provide one Renderer workspace over the shared document/command core. The graph
+canvas, node inspector, schemas and shader source editor use stable IDs and one
+save/undo/conflict policy. Show function, execution and resource domains visually;
+reject illegal links with actionable reasons. Double-click a subgraph to navigate
+its source; edits create a draft/new asset version rather than secretly mutating
+all imported runtime instances. Expose configuration choices and their count/cost
+before build. Layout-only edits do not compile; parameter edits follow declared
+runtime update paths; configuration/source edits build a candidate.
+
+Build, Preview and Apply to Session are explicit actions. Background compilation
+is an opt-in preference and never implicitly saves drafts or applies stale output.
+Jobs capture project epoch, document/dependency revisions, target and request ID;
+the GUI thread never waits for a compiler, device or host shutdown. Unsaved preview
+uses an explicit immutable draft snapshot visibly distinct from saved content.
+The trusted authoring preview owns a separate scene/view/resource instance; live
+gameplay rendering remains behind the existing out-of-process GameHost boundary.
+
+Three inspectors make failures traceable:
+
+| Inspector | Required information |
+| --- | --- |
+| Build/configurations | Declared/selected configurations, per-target shader and pipeline counts, cache hits/misses, rebuild reason, provenance and source diagnostics |
+| Compiled plan/resources | Authored-to-lowered path, execution order, resource versions/ranges, initialization, clear/load/store/resolve, lifetimes/retained bytes and hazards |
+| Coverage/frame | Camera/output routes, missing draw items and rejection reasons, chosen material/technique, pending pipelines, fallback usage, CPU/GPU timings and capture labels |
+
+Generated code diagnostics map to authored function/file/line and nested node
+path. Retain an inspectable generated-source view, configuration comparison and
+machine-readable plan dump for regression reproduction. Label GPU captures with
+asset/configuration/node IDs and generation; resource previews explicitly show
+format/color/depth interpretation and any extra readback/retention cost. Keep
+instrumentation bounded/opt-in and use existing logging/profiling rather than
+another telemetry service. A diagnostic serial execution mode aids comparisons
+but cannot conceal declared effects or invalid initialization.
+
+Preview and live execution use the same cooked configuration, Renderer/RHI
+contract and target profile, with explicit scene/view differences. Compare a
+frozen fixture through both paths; a thumbnail-only approximation is not live
+parity evidence. Share immutable shader packages and resource leases across
+preview instances where the device permits; clone small parameter values, not
+textures or GPU programs. Preserve intentional shared parameters through explicit
+versioned bindings. Thanks to Curtiss Murphy, "Support Your Local Artist: Adding
+Shaders to Your Engine," *Game Programming Gems 7*, section 7.4, pp. 541-554,
+for in-engine iteration, program/parameter separation and the duplicate-texture
+failure example. We use typed versions and existing host lifetimes instead of
+his singleton/prototype class hierarchy and direct reload/reassignment.
+
+Reload stages a consistent graph + shaders + layouts + bindings + pipeline set.
+Require complete dependencies, profile/coverage admission and ready required
+pipelines; publish at a frame boundary. Failure keeps the prior generation and
+its diagnostics visible. Retire old GPU resources through RHI completion and old
+game callbacks through GameHost quiescence separately: neither proves the other
+is safe. Host-owned copied values/validated handles survive module unload;
+persistent plans never retain pointers into game memory.
+
+If a CPU schema changes, rebuild its generated game interface and stage a
+compatible game generation/adapter before activation. If coordinated activation
+is not available, return RestartRequired instead of publishing incompatible
+halves. Built-in engine schemas stay compatible with the running SDK; loading a
+new game shader package cannot mutate a compiled engine ABI. Browser dynamic
+game-module reload remains subject to its existing documented limitations.
+
+Parameter migration retains a value only when stable field identity, type,
+meaning/units and declared conversion agree. A renamed label is metadata; a
+changed semantic field requires explicit conversion/default and a visible diff.
+Do not match by similar names or reinterpret bytes. Preserve the saved document
+and last valid runtime values on conflict. Thanks to Christopher Maughan,
+"The Design of FX Composer," *GPU Gems*, chapter 30, sections 30.3.1 and
+30.6.2-30.6.4, for parameter reconciliation and separate device-independent
+compilation/device instantiation. We retain strict migration and prewarm
+admission instead of its COM plug-ins, separate device per panel and lazy
+ApplyToDevice path; see the [review](renderer-systems-gems-review.md#render-graph-and-shader-authoring-follow-up).
+
+## Contemporary cross-checks
+
+These are focused documentation checks, not proof that another engine's complete
+architecture fits Ludus or that current features exist on our pinned tools.
+
+- Thanks to Epic Games, [Render Dependency Graph](https://dev.epicgames.com/documentation/unreal-engine/render-dependency-graph-in-unreal-engine),
+  especially Debugging and Validation: declared resource dependencies, lifetime
+  visualization and individual optimization controls inform our compiled-plan
+  inspector and serial control. We keep checked lowering/RHI validation active;
+  an optimization-disabled run can change memory/timing and mask concurrency
+  failures, so repeat the optimized path separately. We do not import its
+  immediate-mode C++ setup API or infer shader variants from graph liveness.
+- Thanks to Epic Games, [PSO Precaching](https://dev.epicgames.com/documentation/en-us/unreal-engine/pso-precaching-for-unreal-engine),
+  Global Shader PSO Precaching: authored compile eligibility and narrower precache
+  eligibility are distinct. Ludus reports selected required recipes versus the
+  full legal build manifest and measures first-use misses. Runtime observation
+  audits manifest completeness; it cannot manufacture undeclared shader choices.
+- Thanks to the Slang authors, [Using the Reflection API](https://shader-slang.org/slang/user-guide/reflection.html)
+  and [Link-time Specialization and Module Precompilation](https://shader-slang.org/slang/user-guide/link-time-specialization):
+  type versus target/context layout motivates generated packing; module reuse is
+  a later build optimization under the same manifest. Keep our own compiler,
+  options and dependency compatibility checks for distributed precompiled SDK
+  modules; a source-absent module's freshness result is insufficient. Qualify
+  these APIs on pinned Slang before adoption; no toolchain update is implied.
+- Thanks to the Khronos Group, [Vulkan Fragment Operations](https://docs.vulkan.org/spec/latest/chapters/fragops.html),
+  shader termination, depth replacement and multisample coverage: depth-only
+  techniques must preserve relevant fragment work. Separately verify each
+  admitted backend; Vulkan stage omission does not establish portable support.
+
+## Delivery, optimization gates and acceptance
+
+| Stage | Deliverable | Required acceptance |
+| --- | --- | --- |
+| RG0: contract vertical slice | Saved/imported raster graph, explicit ColorAndDepth/DepthOnly choices, camera target routes and CLI validator | Same graph to offscreen/Present; recursion/type/initialization failures; no implicit variant on disconnected Color; serial plan dump |
+| RG1: build integration | Shared schemas, existing shader-helper extension, packages and local incremental cache | Target layout/entry fixtures; deterministic clean builds; correct transitive invalidation; corrupt/cancelled/stale build preserves prior output; configuration and pipeline bounds |
+| RG2: Renderer integration | Scene matching, coverage reports, ready pipeline admission and error route | Mixed layouts/material slots; missing/conflicting roles; alpha/deformation/depth parity; capability rejection; no compile during draw; streaming/resize/history invalidation |
+| RG3: editor and reload | Graph/schema/source editing, preview, undo/save, diagnostics and atomic version activation | CLI/editor equivalent result; mapped errors; draft/save separation; failed reload old pixels preserved; pending pipelines; CPU schema mismatch/migration and unload/completion lifetime fixtures |
+| RG4: measured scheduling/memory work | Optional pooling improvements, merging/aliasing/parallel paths individually | Identical serial-control pixels/effects and actual retained memory; named native/browser profiles; repeated resize/reload and frames in flight; unsupported paths explicit |
+
+Run representative native and browser raster fixtures under pinned tools, SDK
+consumer checks, warning/format/tidy gates and sanitizers for implementation.
+Ray nodes require their own independently negotiated tests. Measure cold/warm
+shader builds, invalidation fan-out, unique programs/PSOs, driver creation time,
+first-use misses, CPU plan/encoding time, allocations, GPU time and transient/
+retained bytes, including p50/p95 and workload/tool/device metadata. Compare
+against current Renderer output before claiming improvement. These are acceptance
+metrics, not unsupported claims that this proposal is already faster.
+
+The initial design above precedes the targeted article review. Source-informed
+refinements and their exact evidence are recorded in the existing
+[renderer reference review](renderer-systems-gems-review.md); detailed contracts
+remain here rather than duplicated in an editor guide or wiki mirror.

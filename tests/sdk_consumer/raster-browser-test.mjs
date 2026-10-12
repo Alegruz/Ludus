@@ -11,7 +11,7 @@ const {PNG} = require('pngjs');
 const root = resolve(process.argv[2]);
 const output = resolve(process.argv[3] || 'out/raster-browser');
 await mkdir(output, {recursive:true});
-for (const name of ['raster.html','raster.js','raster.wasm','r6.html','r6.js','r6.wasm']) await access(resolve(root,name));
+for (const name of ['raster.html','raster.js','raster.wasm','r6.html','r6.js','r6.wasm','r8.html','r8.js','r8.wasm']) await access(resolve(root,name));
 const server = createServer(async (request, response) => {
   const pathname = new URL(request.url, 'http://localhost').pathname;
   const path = resolve(root, '.' + pathname);
@@ -237,6 +237,86 @@ try {
       report.cases.push({scenario,outcome:'passed',objectsPerKind:72,graphDraws:405,batchDraws:1100});
       await context.close();
     }
+  }
+
+  for (const backend of ['webgpu','webgl2','auto','fallback','webgpu-invalid-copy','webgpu-loss']) {
+    const scenario = `r8-${backend}`;
+    const context = await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
+    await context.addInitScript(fallback => {
+      window.__qaPause = false;
+      if (fallback === 'fallback') Object.defineProperty(navigator,'gpu',{value:undefined,configurable:true});
+      if (navigator.gpu && (fallback === 'webgpu-invalid-copy' || fallback === 'webgpu-loss')) {
+        const requestAdapter = navigator.gpu.requestAdapter.bind(navigator.gpu);
+        navigator.gpu.requestAdapter = async (...args) => {
+          const adapter = await requestAdapter(...args);
+          if (!adapter) return adapter;
+          const requestDevice = adapter.requestDevice.bind(adapter);
+          adapter.requestDevice = async (...args) => {
+            const device = await requestDevice(...args);
+            if (fallback === 'webgpu-invalid-copy') {
+              const createEncoder = device.createCommandEncoder.bind(device);
+              device.createCommandEncoder = (...args) => {
+                const encoder = createEncoder(...args);
+                const copy = encoder.copyTextureToTexture.bind(encoder);
+                encoder.copyTextureToTexture = (source,destination,size) => copy(source,destination,{...size,width:size.width+1});
+                return encoder;
+              };
+            } else {
+              const done = device.queue.onSubmittedWorkDone.bind(device.queue);
+              let started = false;
+              device.queue.onSubmittedWorkDone = (...args) => {
+                const promise = done(...args);
+                if (!started) {
+                  started = true;
+                  setTimeout(() => device.destroy(),100);
+                  return promise.then(() => new Promise(resolve => setTimeout(() => {
+                    window.__qaDelayedTransferDone = true; resolve();
+                  },700)));
+                }
+                return promise;
+              };
+            }
+            return device;
+          };
+          return adapter;
+        };
+      }
+      new MutationObserver(() => {
+        if (document.querySelector('#status')?.dataset.frames === '1') window.__qaPause = true;
+      }).observe(document,{attributes:true,subtree:true});
+    }, backend);
+    const page = await context.newPage(); lastPage = page;
+    const errors = [];
+    page.on('pageerror',error => errors.push(String(error)));
+    page.on('console',message => report.console.push({scenario,type:message.type(),text:message.text()}));
+    await page.goto(`http://127.0.0.1:${server.address().port}/r8.html?backend=${backend === 'fallback' ? 'auto' : backend.startsWith('webgpu-') ? 'webgpu' : backend}`);
+    if (backend === 'webgpu-invalid-copy' || backend === 'webgpu-loss') {
+      await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'failed',null,{timeout:30000});
+      if (backend === 'webgpu-loss') {
+        await page.waitForFunction(() => window.__qaDelayedTransferDone,null,{timeout:5000});
+      }
+      assert.deepEqual(errors,[]);
+      report.cases.push({scenario,outcome:'passed',expectedFailure:true});
+      await context.close();
+      continue;
+    }
+    await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'rendering' && window.__qaPause,null,{timeout:30000});
+    const bytes = await page.locator('canvas').screenshot();
+    const image = PNG.sync.read(bytes);
+    for (const [x,y,color] of [[24,16,[255,0,0,255]],[72,16,[0,255,0,255]],[24,48,[0,0,255,255]],[72,48,[255,255,255,255]]]) {
+      const offset = (y*image.width+x)*4;
+      assert.deepEqual([...image.data.subarray(offset,offset+4)],color,`${scenario} mutable pixel ${x},${y}`);
+    }
+    if (backend !== 'webgpu') {
+      const reference = PNG.sync.read(await readFile(resolve(output,'r8-webgpu.png')));
+      assert.deepEqual(image.data,reference.data,`${scenario} complete updated images`);
+    }
+    await writeFile(resolve(output,`${scenario}.png`),bytes);
+    await page.evaluate(() => {window.__qaPause=false;});
+    await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'passed',null,{timeout:30000});
+    assert.deepEqual(errors,[]);
+    report.cases.push({scenario,outcome:'passed',initializedMips:3,textureReadback:true,renderedReadback:true});
+    await context.close();
   }
 
 } catch (error) {

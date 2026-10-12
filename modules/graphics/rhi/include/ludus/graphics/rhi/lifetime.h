@@ -65,6 +65,92 @@ private:
     /// Grants private registry access to assign and validate this incarnation.
     friend struct internal::LifetimeAccess;
 };
+/// Owned R8 mutation request; copied source bytes and resource leases survive cancellation.
+/// Owner-thread use between frames. Release exactly once, including after failure.
+/// Cancellation drops notification ownership; it does not undo accepted GPU writes.
+struct TransferTicket final
+{
+private:
+    ludus::foundation::uint64 Owner = 0;
+    ludus::foundation::uint64 Generation = 0;
+    ludus::foundation::uint32 Slot = 0;
+    /// Grants private registry access to this request incarnation.
+    friend struct internal::LifetimeAccess;
+};
+/// Top-left texel rectangle in one allocated 2D mip; all dimensions are in pixels.
+struct TextureRegion final
+{
+    /// Zero-based mip level.
+    ludus::foundation::uint32 Mip = 0;
+    /// First column in the mip.
+    ludus::foundation::uint32 X = 0;
+    /// First top-oriented row in the mip.
+    ludus::foundation::uint32 Y = 0;
+    /// Nonzero rectangle width.
+    ludus::foundation::uint32 Width = 0;
+    /// Nonzero rectangle height.
+    ludus::foundation::uint32 Height = 0;
+};
+/// Logical initialization of allocated mips; does not measure physical GPU residency.
+struct TextureResidency final
+{
+    /// Allocated mip count; backing for every mip is reserved at creation.
+    ludus::foundation::uint32 MipLevels = 0;
+    /// Bit i proves that every texel of mip i has initialized contents.
+    ludus::foundation::uint32 InitializedMips = 0;
+    /// Logical texel bytes of initialized mips, excluding padding and private depth.
+    ludus::foundation::uint64 InitializedBytes = 0;
+};
+/// Copy logical mip initialization without waiting; Pending writes do not publish new bits.
+/// Invalid handles preserve output. Owner-thread only; no sparse-memory or eviction promise.
+[[nodiscard]] RasterStatus GetTextureResidency(DeviceHandle, TextureHandle, TextureResidency&) noexcept;
+/// Submit a copied update to an existing buffer between frames. Offset/size are multiples
+/// of four, nonzero and within the allocation and TransferBytes. All buffer roles are legal.
+/// Pending publishes a null ticket; other results preserve it. Ready buffers with CPU leases
+/// (bindings, batches, graphs, ray inputs, transfers) or unfinished GPU uses reject InvalidState.
+/// Accepted writes make the destination Pending until actual completion; another request returns NotReady.
+/// Release the completed ticket before another mutation; cancellation cannot undo accepted writes.
+[[nodiscard]] RasterStatus RequestBufferUpdate(DeviceHandle,
+                                               BufferHandle,
+                                               ludus::foundation::usize offset,
+                                               const ludus::foundation::uint8* bytes,
+                                               ludus::foundation::usize size,
+                                               TransferTicket&) noexcept;
+/// Copy caller rows into owned staging and submit a bounded RGBA8Unorm mip rectangle update.
+/// Row pitch is a multiple of four, at least Width*4; byteCount must equal RowPitch*Height.
+/// Internal 256-byte row packing must also fit TransferBytes. CPU-retained textures reject Unsupported.
+/// Destination leases/in-flight uses reject InvalidState. An undefined mip requires its complete
+/// rectangle; success defines that mip after completion. Output publication/cancellation matches buffer updates.
+[[nodiscard]] RasterStatus RequestTextureUpdate(DeviceHandle,
+                                                TextureHandle,
+                                                const TextureRegion&,
+                                                const ludus::foundation::uint8* bytes,
+                                                ludus::foundation::usize byteCount,
+                                                ludus::foundation::usize rowPitch,
+                                                TransferTicket&) noexcept;
+/// Submit an exact-format RGBA8Unorm GPU copy between distinct textures/mips of equal rectangle size.
+/// Source mip must be initialized; source ownership is retained through completion. Destination mutation
+/// obeys RequestTextureUpdate's lease/initialization rules. Pending publishes a null ticket; rejection preserves it.
+[[nodiscard]] RasterStatus RequestTextureCopy(DeviceHandle,
+                                              TextureHandle source,
+                                              const TextureRegion& sourceRegion,
+                                              TextureHandle destination,
+                                              const TextureRegion& destinationRegion,
+                                              TransferTicket&) noexcept;
+/// Schedule RGBA8Unorm texel readback into owned staging; source mip must be initialized.
+/// Caller row pitch is four-byte aligned and at least Width*4; both caller and 256-byte staging
+/// rows must fit TransferBytes. CopyReadback returns RowPitch*Height top-oriented bytes with zero padding.
+/// Pending publishes a null output; rejection preserves it. The source survives public destruction.
+[[nodiscard]] RasterStatus RequestTextureReadback(DeviceHandle,
+                                                  TextureHandle,
+                                                  const TextureRegion&,
+                                                  ludus::foundation::usize rowPitch,
+                                                  ReadbackTicket&) noexcept;
+/// Nonblocking mutation completion poll. Ready proves execution; failure remains explicit.
+[[nodiscard]] RasterStatus GetStatus(DeviceHandle, TransferTicket) noexcept;
+/// Drop notification ownership and clear the ticket. Leases/staging retire only after GPU completion.
+/// Invalid/stale handles preserve the ticket; cancellation does not roll back writes.
+[[nodiscard]] RasterStatus Release(DeviceHandle, TransferTicket&) noexcept;
 /// Owned prewarm request retaining a shared immutable pipeline and its shader/layout dependencies.
 /// Main-thread use only. Release exactly once; stale copies are rejected.
 struct PipelineRequest final
@@ -87,7 +173,7 @@ private:
     /// Grants private registry access to the owner and monotonic queue ordinal.
     friend struct internal::LifetimeAccess;
 };
-/// Effective configured service maxima and fixed transfer budgets for a ready portable-raster device.
+/// Effective configured service maxima and configured transfer budgets for a ready portable-raster device.
 struct LifetimeCapabilities final
 {
     /// Number of recording/finished batches, including retained dependency records.
@@ -96,12 +182,12 @@ struct LifetimeCapabilities final
     ludus::foundation::uint32 DrawsPerBatch = 0;
     /// Simultaneous uploads and readbacks independently, including cancelled in-flight slots.
     ludus::foundation::uint32 TransfersPerDirection = 0;
-    /// Maximum bytes in one upload/readback ring slice.
+    /// Configured bytes in one upload/readback ring slice, including internal row padding.
     ludus::foundation::usize TransferBytes = 0;
     /// Simultaneous independently owned pipeline requests.
     ludus::foundation::uint32 PipelineRequests = 0;
 };
-/// Query fixed budgets; invalid owner preserves output, unavailable device writes zero budgets.
+/// Query configured budgets; invalid owner preserves output, unavailable device writes zero budgets.
 [[nodiscard]] RasterStatus GetLifetimeCapabilities(DeviceHandle device, LifetimeCapabilities& output) noexcept;
 /// Reserve a recording batch in a null output between frames. Ready publishes ownership.
 /// Admission failure preserves output; no caller storage is borrowed.
