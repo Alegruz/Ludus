@@ -1,7 +1,10 @@
 #include "internal/world_document.h"
 
 #include <ludus/foundation/base/parse_number.hpp>
+#include <ludus/foundation/math/quaternion.hpp>
 #include <ludus/foundation/math/scalar.hpp>
+#include <ludus/foundation/math/transform.hpp>
+#include <ludus/foundation/math/vector.hpp>
 #include <ludus/foundation/parsing/json.hpp>
 
 #include <QJsonDocument>
@@ -33,6 +36,14 @@ bool Id(const QString& text)
         }
     }
     return true;
+}
+bool ResourceId(const QJsonValue& value, const QString& kind)
+{
+    const auto text = value.toString();
+    const auto prefix = kind + QLatin1Char('/');
+    const auto uuid = text.mid(prefix.size());
+    return value.isString() && text.startsWith(prefix) && uuid.size() == 36 &&
+           QUuid(uuid).toString(QUuid::WithoutBraces) == uuid;
 }
 bool Text(const QJsonValue& value, foundation::int64 limit)
 {
@@ -141,7 +152,8 @@ bool WorldDocument::LoadSchema(const QByteArray& bytes, QString& error)
                  QStringLiteral("id"),
                  QStringLiteral("label"),
                  QStringLiteral("components"),
-                 QStringLiteral("assets")}) ||
+                 QStringLiteral("assets"),
+                 QStringLiteral("scene_transform")}) ||
         schema.value(QStringLiteral("version")) != QJsonValue(1) ||
         !Id(schema.value(QStringLiteral("id")).toString()) || !Text(schema.value(QStringLiteral("label")), 128) ||
         !schema.value(QStringLiteral("components")).isArray() || !schema.value(QStringLiteral("assets")).isArray())
@@ -149,10 +161,9 @@ bool WorldDocument::LoadSchema(const QByteArray& bytes, QString& error)
         return Fail(error, QStringLiteral("Schema needs version 1, stable id, label, components and assets arrays."));
     }
     const auto components = schema.value(QStringLiteral("components")).toArray();
-    if (components.isEmpty() || components.size() > 16 ||
-        schema.value(QStringLiteral("assets")).toArray().size() > 4096)
+    if (components.size() > 16 || schema.value(QStringLiteral("assets")).toArray().size() > 4096)
     {
-        return Fail(error, QStringLiteral("Schema supports 1–16 components and at most 4096 declared assets."));
+        return Fail(error, QStringLiteral("Schema supports 0–16 components and at most 4096 declared assets."));
     }
     QSet<QString> ids;
     for (const auto value : components)
@@ -265,6 +276,59 @@ bool WorldDocument::LoadSchema(const QByteArray& bytes, QString& error)
         }
         ids.insert(id);
     }
+    if (schema.contains(QStringLiteral("scene_transform")))
+    {
+        const auto binding = schema.value(QStringLiteral("scene_transform")).toObject();
+        if (!schema.value(QStringLiteral("scene_transform")).isObject() || binding.size() != 4 ||
+            !Fields(binding,
+                    {QStringLiteral("component"),
+                     QStringLiteral("position"),
+                     QStringLiteral("rotation"),
+                     QStringLiteral("scale")}))
+        {
+            return Fail(error, QStringLiteral("Invalid scene transform binding."));
+        }
+        QJsonObject definition;
+        for (const auto value : components)
+        {
+            if (value.toObject().value(QStringLiteral("id")) == binding.value(QStringLiteral("component")))
+            {
+                definition = value.toObject();
+                break;
+            }
+        }
+        if (!definition.value(QStringLiteral("required")).toBool())
+        {
+            return Fail(error, QStringLiteral("Scene transform binding needs a required component."));
+        }
+        QSet<QString> names;
+        for (const auto& key : {QStringLiteral("position"), QStringLiteral("rotation"), QStringLiteral("scale")})
+        {
+            const auto axes = binding.value(key).toArray();
+            if (!binding.value(key).isArray() || axes.size() != 3)
+            {
+                return Fail(error, QStringLiteral("Scene transform bindings need three property IDs per group."));
+            }
+            for (const auto axis : axes)
+            {
+                QJsonObject property;
+                for (const auto field : definition.value(QStringLiteral("properties")).toArray())
+                {
+                    if (field.toObject().value(QStringLiteral("id")) == axis)
+                    {
+                        property = field.toObject();
+                        break;
+                    }
+                }
+                if (!axis.isString() || names.contains(axis.toString()) ||
+                    property.value(QStringLiteral("type")) != QJsonValue(QStringLiteral("number")))
+                {
+                    return Fail(error, QStringLiteral("Scene placement needs nine distinct numeric properties."));
+                }
+                names.insert(axis.toString());
+            }
+        }
+    }
     Schema_ = schema;
     error.clear();
     return true;
@@ -296,7 +360,11 @@ QJsonObject WorldDocument::Entity(const QString& id) const
 bool WorldDocument::Validate(const QJsonObject& candidate, QString& error) const
 {
     if (!HasSchema() ||
-        !Fields(candidate, {QStringLiteral("version"), QStringLiteral("schema"), QStringLiteral("entities")}) ||
+        !Fields(candidate,
+                {QStringLiteral("version"),
+                 QStringLiteral("schema"),
+                 QStringLiteral("entities"),
+                 QStringLiteral("scene")}) ||
         candidate.value(QStringLiteral("version")) != QJsonValue(1) ||
         candidate.value(QStringLiteral("schema")) != Schema_.value(QStringLiteral("id")) ||
         !candidate.value(QStringLiteral("entities")).isArray())
@@ -319,8 +387,12 @@ bool WorldDocument::Validate(const QJsonObject& candidate, QString& error) const
         const auto e = value.toObject();
         const auto id = e.value(QStringLiteral("id")).toString();
         if (!value.isObject() ||
-            !Fields(e, {QStringLiteral("id"), QStringLiteral("name"), QStringLiteral("components")}) || !Id(id) ||
-            ids.contains(id) || !Text(e.value(QStringLiteral("name")), 128) ||
+            !Fields(e,
+                    {QStringLiteral("id"),
+                     QStringLiteral("name"),
+                     QStringLiteral("components"),
+                     QStringLiteral("scene")}) ||
+            !Id(id) || ids.contains(id) || !Text(e.value(QStringLiteral("name")), 128) ||
             e.value(QStringLiteral("name")).toString().trimmed().isEmpty() ||
             !e.value(QStringLiteral("components")).isObject())
         {
@@ -393,6 +465,140 @@ bool WorldDocument::Validate(const QJsonObject& candidate, QString& error) const
                     }
                 }
             }
+        }
+    }
+    if (candidate.contains(QStringLiteral("scene")))
+    {
+        const auto scene = candidate.value(QStringLiteral("scene")).toObject();
+        if (!candidate.value(QStringLiteral("scene")).isObject() ||
+            !Fields(scene,
+                    {QStringLiteral("version"),
+                     QStringLiteral("id"),
+                     QStringLiteral("name"),
+                     QStringLiteral("profile"),
+                     QStringLiteral("camera"),
+                     QStringLiteral("imports")}) ||
+            scene.size() != 6 || scene.value(QStringLiteral("version")) != QJsonValue(1) ||
+            QUuid(scene.value(QStringLiteral("id")).toString()).isNull() ||
+            scene.value(QStringLiteral("profile")) != QJsonValue(QStringLiteral("resident-reference-v1")) ||
+            !Text(scene.value(QStringLiteral("name")), 128) || !scene.value(QStringLiteral("camera")).isObject() ||
+            !scene.value(QStringLiteral("imports")).isArray())
+        {
+            return Fail(error, QStringLiteral("Invalid cooked-scene metadata."));
+        }
+        const auto camera = scene.value(QStringLiteral("camera")).toObject();
+        if (camera.size() != 4 ||
+            !Fields(camera,
+                    {QStringLiteral("eye"), QStringLiteral("target"), QStringLiteral("up"), QStringLiteral("fov")}))
+        {
+            return Fail(error, QStringLiteral("Invalid scene camera."));
+        }
+        foundation::math::Vector3 vectors[3];
+        foundation::int32 index = 0;
+        for (const auto& key : {QStringLiteral("eye"), QStringLiteral("target"), QStringLiteral("up")})
+        {
+            const auto values = camera.value(key).toArray();
+            if (!camera.value(key).isArray() || values.size() != 3)
+            {
+                return Fail(error, QStringLiteral("Invalid camera vector."));
+            }
+            for (const auto number : values)
+            {
+                if (!number.isDouble() || !foundation::math::IsFinite(number.toDouble()) || number.toDouble() < -1e12 ||
+                    number.toDouble() > 1e12)
+                {
+                    return Fail(error, QStringLiteral("Nonfinite or oversized camera vector."));
+                }
+            }
+            vectors[index++] = {static_cast<foundation::float32>(values[0].toDouble()),
+                                static_cast<foundation::float32>(values[1].toDouble()),
+                                static_cast<foundation::float32>(values[2].toDouble())};
+        }
+        const auto fov = camera.value(QStringLiteral("fov"));
+        const auto forward = vectors[1] - vectors[0];
+        const auto cross = foundation::math::Cross(forward, vectors[2]);
+        if (!fov.isDouble() || !foundation::math::IsFinite(fov.toDouble()) || fov.toDouble() <= 0 ||
+            fov.toDouble() >= 3.141592653589793 || foundation::math::Dot(forward, forward) <= 1e-12F ||
+            foundation::math::Dot(cross, cross) <= 1e-12F)
+        {
+            return Fail(error, QStringLiteral("Degenerate scene camera."));
+        }
+        const auto imports = scene.value(QStringLiteral("imports")).toArray();
+        if (imports.size() > 128)
+        {
+            return Fail(error, QStringLiteral("Too many scene imports."));
+        }
+        for (const auto resource : imports)
+        {
+            if (!ResourceId(resource, QStringLiteral("scene")))
+            {
+                return Fail(error, QStringLiteral("Invalid import provenance."));
+            }
+        }
+    }
+    for (const auto value : entities)
+    {
+        const auto entity = value.toObject();
+        if (!entity.contains(QStringLiteral("scene")))
+        {
+            continue;
+        }
+        const auto scene = entity.value(QStringLiteral("scene")).toObject();
+        if (!candidate.contains(QStringLiteral("scene")) || !entity.value(QStringLiteral("scene")).isObject() ||
+            !Fields(scene,
+                    {QStringLiteral("mesh"),
+                     QStringLiteral("material"),
+                     QStringLiteral("parent"),
+                     QStringLiteral("basis"),
+                     QStringLiteral("position"),
+                     QStringLiteral("rotation"),
+                     QStringLiteral("scale")}) ||
+            scene.size() != (Schema_.contains(QStringLiteral("scene_transform")) ? 4 : 7) ||
+            !ResourceId(scene.value(QStringLiteral("mesh")), QStringLiteral("mesh")) ||
+            !ResourceId(scene.value(QStringLiteral("material")), QStringLiteral("material")) ||
+            !scene.value(QStringLiteral("parent")).isString())
+        {
+            return Fail(error, QStringLiteral("Invalid scene instance."));
+        }
+        for (const auto& key :
+             {QStringLiteral("basis"), QStringLiteral("position"), QStringLiteral("rotation"), QStringLiteral("scale")})
+        {
+            const auto placement = ScenePlacement(entity);
+            const auto numbers = placement.value(key).toArray();
+            if (!placement.value(key).isArray() || numbers.size() != (key == QStringLiteral("basis") ? 9 : 3))
+            {
+                return Fail(error, QStringLiteral("Invalid instance placement."));
+            }
+            for (const auto number : numbers)
+            {
+                const auto n = number.toDouble();
+                if (!number.isDouble() || !foundation::math::IsFinite(n) || n < -1000000 || n > 1000000 ||
+                    (key == QStringLiteral("scale") && n <= 0) ||
+                    (key == QStringLiteral("rotation") && (n < -360 || n > 360)))
+                {
+                    return Fail(error, QStringLiteral("Instance placement is outside its finite bounds."));
+                }
+            }
+        }
+        auto parent = scene.value(QStringLiteral("parent")).toString();
+        QSet<QString> seen{entity.value(QStringLiteral("id")).toString()};
+        while (!parent.isEmpty())
+        {
+            QJsonObject ancestor;
+            for (const auto other : entities)
+            {
+                if (other.toObject().value(QStringLiteral("id")) == QJsonValue(parent))
+                {
+                    ancestor = other.toObject();
+                    break;
+                }
+            }
+            if (seen.contains(parent) || !ancestor.value(QStringLiteral("scene")).isObject())
+            {
+                return Fail(error, QStringLiteral("Scene parent is missing or forms a cycle."));
+            }
+            seen.insert(parent);
+            parent = ancestor.value(QStringLiteral("scene")).toObject().value(QStringLiteral("parent")).toString();
         }
     }
     error.clear();
@@ -583,7 +789,11 @@ bool WorldDocument::Detach(const QString& entity, QString& error, const QString&
     e.insert(QStringLiteral("components"), components);
     return ReplaceEntity(e, error);
 }
-bool WorldDocument::Edit(const QString& entity, const QJsonObject& components, const QString& name, QString& error)
+bool WorldDocument::Edit(const QString& entity,
+                         const QJsonObject& components,
+                         const QString& name,
+                         QString& error,
+                         const QJsonObject* scene)
 {
     auto e = Entity(entity);
     if (e.isEmpty())
@@ -592,7 +802,179 @@ bool WorldDocument::Edit(const QString& entity, const QJsonObject& components, c
     }
     e.insert(QStringLiteral("name"), name);
     e.insert(QStringLiteral("components"), components);
+    if (scene != nullptr)
+    {
+        e.insert(QStringLiteral("scene"), *scene);
+    }
     return ReplaceEntity(e, error);
+}
+bool WorldDocument::ImportScene(const QJsonObject& level, QString& error)
+{
+    if (!level.value(QStringLiteral("objects")).isArray())
+    {
+        return Fail(error, QStringLiteral("Missing imported instances."));
+    }
+    auto candidate = Draft_;
+    auto entities = candidate.value(QStringLiteral("entities")).toArray();
+    for (const auto value : level.value(QStringLiteral("objects")).toArray())
+    {
+        const auto object = value.toObject();
+        const auto id = object.value(QStringLiteral("id")).toString();
+        if (!Entity(id).isEmpty())
+        {
+            if (!Entity(id).value(QStringLiteral("scene")).isObject())
+            {
+                return Fail(error, QStringLiteral("An imported ID collides with an existing gameplay entity."));
+            }
+            continue; // Existing entities and all their edits remain authoritative.
+        }
+        const auto transform = object.value(QStringLiteral("transform")).toArray();
+        if (transform.size() != 12)
+        {
+            return Fail(error, QStringLiteral("Invalid imported affine transform."));
+        }
+        QJsonArray basis, position;
+        for (foundation::int32 i = 0; i < 12; ++i)
+        {
+            if (i < 9)
+            {
+                basis.append(transform[i]);
+            }
+            else
+            {
+                position.append(transform[i]);
+            }
+        }
+        QJsonObject components;
+        for (const auto definition : Schema_.value(QStringLiteral("components")).toArray())
+        {
+            const auto c = definition.toObject();
+            if (c.value(QStringLiteral("required")).toBool())
+            {
+                components.insert(c.value(QStringLiteral("id")).toString(), Defaults(c));
+            }
+        }
+        QJsonObject instance{{QStringLiteral("mesh"), object.value(QStringLiteral("mesh"))},
+                             {QStringLiteral("material"), object.value(QStringLiteral("material"))},
+                             {QStringLiteral("parent"), object.value(QStringLiteral("parent"))},
+                             {QStringLiteral("basis"), basis}};
+        const auto binding = Schema_.value(QStringLiteral("scene_transform")).toObject();
+        if (binding.isEmpty())
+        {
+            instance.insert(QStringLiteral("position"), position);
+            instance.insert(QStringLiteral("rotation"), QJsonArray{0, 0, 0});
+            instance.insert(QStringLiteral("scale"), QJsonArray{1, 1, 1});
+        }
+        else
+        {
+            const auto component = binding.value(QStringLiteral("component")).toString();
+            auto values = components.value(component).toObject();
+            for (const auto& key : {QStringLiteral("position"), QStringLiteral("rotation"), QStringLiteral("scale")})
+            {
+                const auto axes = binding.value(key).toArray();
+                for (foundation::int32 axis = 0; axis < 3; ++axis)
+                {
+                    values.insert(axes[axis].toString(),
+                                  key == QStringLiteral("position")
+                                      ? position[axis]
+                                      : QJsonValue(key == QStringLiteral("scale") ? 1 : 0));
+                }
+            }
+            components.insert(component, values);
+        }
+        entities.append(QJsonObject{{QStringLiteral("id"), id},
+                                    {QStringLiteral("name"), object.value(QStringLiteral("name"))},
+                                    {QStringLiteral("components"), components},
+                                    {QStringLiteral("scene"), instance}});
+    }
+    auto metadata = level;
+    metadata.remove(QStringLiteral("objects"));
+    candidate.insert(QStringLiteral("scene"), metadata);
+    candidate.insert(QStringLiteral("entities"), entities);
+    return Commit(candidate, error);
+}
+QJsonObject WorldDocument::ScenePlacement(const QJsonObject& entity) const
+{
+    auto scene = entity.value(QStringLiteral("scene")).toObject();
+    const auto binding = Schema_.value(QStringLiteral("scene_transform")).toObject();
+    if (!binding.isEmpty() && !scene.isEmpty())
+    {
+        const auto values = entity.value(QStringLiteral("components"))
+                                .toObject()
+                                .value(binding.value(QStringLiteral("component")).toString())
+                                .toObject();
+        for (const auto& key : {QStringLiteral("position"), QStringLiteral("rotation"), QStringLiteral("scale")})
+        {
+            QJsonArray axes;
+            for (const auto property : binding.value(key).toArray())
+            {
+                axes.append(values.value(property.toString()));
+            }
+            scene.insert(key, axes);
+        }
+    }
+    return scene;
+}
+QJsonObject WorldDocument::SceneLevel() const
+{
+    auto level = Draft_.value(QStringLiteral("scene")).toObject();
+    if (level.isEmpty())
+    {
+        return {};
+    }
+    namespace math = foundation::math;
+    QJsonArray objects;
+    for (const auto value : Draft_.value(QStringLiteral("entities")).toArray())
+    {
+        const auto entity = value.toObject();
+        const auto scene = ScenePlacement(entity);
+        if (scene.isEmpty())
+        {
+            continue;
+        }
+        const auto basis = scene.value(QStringLiteral("basis")).toArray();
+        const auto position = scene.value(QStringLiteral("position")).toArray();
+        const auto rotation = scene.value(QStringLiteral("rotation")).toArray();
+        const auto scale = scene.value(QStringLiteral("scale")).toArray();
+        math::Affine3 base;
+        for (foundation::int32 column = 0; column < 3; ++column)
+        {
+            base.Columns[column] = {
+                static_cast<foundation::float32>(basis[static_cast<foundation::isize>(column) * 3].toDouble()),
+                static_cast<foundation::float32>(basis[column * 3 + 1].toDouble()),
+                static_cast<foundation::float32>(basis[column * 3 + 2].toDouble())};
+        }
+        math::Quaternion qx, qy, qz;
+        constexpr foundation::float32 radians = 0.017453292519943295F;
+        (void)math::TryFromAxisAngle({1, 0, 0}, static_cast<foundation::float32>(rotation[0].toDouble()) * radians, qx);
+        (void)math::TryFromAxisAngle({0, 1, 0}, static_cast<foundation::float32>(rotation[1].toDouble()) * radians, qy);
+        (void)math::TryFromAxisAngle({0, 0, 1}, static_cast<foundation::float32>(rotation[2].toDouble()) * radians, qz);
+        math::TransformTRS adjustment;
+        (void)math::TryNormalize(qz * qy * qx, adjustment.Rotation);
+        adjustment.Scale = {static_cast<foundation::float32>(scale[0].toDouble()),
+                            static_cast<foundation::float32>(scale[1].toDouble()),
+                            static_cast<foundation::float32>(scale[2].toDouble())};
+        const auto affine = math::Compose(base, math::ToAffine3(adjustment));
+        QJsonArray transform;
+        for (const auto column : affine.Columns)
+        {
+            transform.append(static_cast<foundation::float64>(column.X));
+            transform.append(static_cast<foundation::float64>(column.Y));
+            transform.append(static_cast<foundation::float64>(column.Z));
+        }
+        for (const auto number : position)
+        {
+            transform.append(number);
+        }
+        objects.append(QJsonObject{{QStringLiteral("id"), entity.value(QStringLiteral("id"))},
+                                   {QStringLiteral("name"), entity.value(QStringLiteral("name"))},
+                                   {QStringLiteral("parent"), scene.value(QStringLiteral("parent"))},
+                                   {QStringLiteral("mesh"), scene.value(QStringLiteral("mesh"))},
+                                   {QStringLiteral("material"), scene.value(QStringLiteral("material"))},
+                                   {QStringLiteral("transform"), transform}});
+    }
+    level.insert(QStringLiteral("objects"), objects);
+    return level;
 }
 QByteArray WorldDocument::Encode() const
 {

@@ -1,4 +1,7 @@
 #include "internal/world_workspace.h"
+
+#include "internal/controller.h"
+#include "internal/level_workspace.h"
 #include "internal/render_panel.h"
 
 #include <ludus/foundation/math/scalar.hpp>
@@ -26,6 +29,7 @@
 #include <QSaveFile>
 #include <QScrollArea>
 #include <QSplitter>
+#include <QUuid>
 #include <QVBoxLayout>
 
 namespace ludus::editor
@@ -75,18 +79,19 @@ QString Display(const QJsonValue& value)
     return value.toString();
 }
 } // namespace
-WorldWorkspace::WorldWorkspace(QWidget* parent) : QWidget(parent)
+WorldWorkspace::WorldWorkspace(QWidget* parent) : WorldWorkspace(ToolingPaths{}, parent) {}
+WorldWorkspace::WorldWorkspace(const ToolingPaths& tooling, QWidget* parent) : QWidget(parent)
 {
     setObjectName(QStringLiteral("worldWorkspace"));
     auto* layout = new QVBoxLayout(this);
     auto* intro = new QLabel(QStringLiteral("World — entities and project-defined components"), this);
     intro->setWordWrap(true);
     layout->addWidget(intro);
-    auto* help = new QLabel(
-        QStringLiteral(
-            "Create or open a world, then select an entity to edit its components. Your project's "
-            "authoring/world.schema.json supplies types, defaults and help. Runtime binding belongs to the game."),
-        this);
+    auto* help =
+        new QLabel(QStringLiteral("Create or open a world, import a scene, and edit placement and components together. "
+                                  "Projects may supply authoring/world.schema.json for gameplay fields. Runtime "
+                                  "binding belongs to the game."),
+                   this);
     help->setWordWrap(true);
     layout->addWidget(help);
     auto* files = new QHBoxLayout;
@@ -99,6 +104,23 @@ WorldWorkspace::WorldWorkspace(QWidget* parent) : QWidget(parent)
     files->addWidget(create);
     files->addWidget(open);
     files->addWidget(Recovery_);
+    Import_ = new QPushButton(QStringLiteral("Import scene…"), this);
+    Import_->setObjectName(QStringLiteral("worldImportScene"));
+    files->addWidget(Import_);
+    CancelScene_ = new QPushButton(QStringLiteral("Cancel scene operation"), this);
+    CancelScene_->setObjectName(QStringLiteral("worldCancelScene"));
+    files->addWidget(CancelScene_);
+    connect(CancelScene_, &QPushButton::clicked, this, [this]() { Scene_->CancelOperation(); });
+    connect(Import_, &QPushButton::clicked, this, [this]() {
+        const auto source = QFileDialog::getOpenFileName(this,
+                                                         QStringLiteral("Import reference scene"),
+                                                         {},
+                                                         QStringLiteral("PBRT scene (scene-v4.pbrt)"));
+        if (!source.isEmpty())
+        {
+            (void)ImportScene(QFileInfo(source).absolutePath());
+        }
+    });
     files->addStretch();
     layout->addLayout(files);
     PathLabel_ = new QLabel(this);
@@ -129,6 +151,18 @@ WorldWorkspace::WorldWorkspace(QWidget* parent) : QWidget(parent)
     commands->addWidget(Duplicate_);
     commands->addWidget(Remove_);
     hierarchy->addLayout(commands);
+    Scene_ = new LevelWorkspace(tooling, this);
+    Scene_->hide();
+    Viewport_ = Scene_->TakeViewport(split);
+    Viewport_->setObjectName(QStringLiteral("worldSceneViewport"));
+    Viewport_->hide();
+    connect(Scene_, &LevelWorkspace::OperationFinished, this, &WorldWorkspace::SceneCompleted);
+    connect(Scene_, &LevelWorkspace::AssetsVerified, this, &WorldWorkspace::SceneVerified);
+    connect(Scene_, &LevelWorkspace::DocumentChanged, this, [this]() { Changed(); });
+    connect(Scene_, &LevelWorkspace::PreviewStarting, this, [this]() {
+        Render_->Stop();
+        Q_EMIT PreviewStarting();
+    });
     auto* scroll = new QScrollArea(split);
     scroll->setWidgetResizable(true);
     auto* inspector = new QWidget(scroll);
@@ -169,7 +203,7 @@ WorldWorkspace::WorldWorkspace(QWidget* parent) : QWidget(parent)
         auto* picker = new QFileDialog(this,
                                        creating ? QStringLiteral("New World") : QStringLiteral("Open World"),
                                        Root_,
-                                       QStringLiteral("World documents (*.world.json)"));
+                                       QStringLiteral("World documents (*.world.json *.lulevel)"));
         picker->setAttribute(Qt::WA_DeleteOnClose);
         picker->setFileMode(creating ? QFileDialog::AnyFile : QFileDialog::ExistingFile);
         picker->setAcceptMode(creating ? QFileDialog::AcceptSave : QFileDialog::AcceptOpen);
@@ -279,7 +313,7 @@ WorldWorkspace::WorldWorkspace(QWidget* parent) : QWidget(parent)
                                  "runtime binding are not available for this document type."));
 #endif
     Render();
-    Changed(QStringLiteral("Open a project with an authoring schema to begin."));
+    Changed(QStringLiteral("Open a project to begin authoring its world."));
 }
 void WorldWorkspace::SetProject(const QString& root, foundation::uint64 epoch)
 {
@@ -289,6 +323,14 @@ void WorldWorkspace::SetProject(const QString& root, foundation::uint64 epoch)
         return;
     }
     StopPreview();
+    Scene_->SetProject(canonical, epoch);
+    ValidatedScene_ = {};
+    ValidatedWorld_.clear();
+    SceneError_.clear();
+    Importing_ = false;
+    SavePending_ = false;
+    SaveValidated_ = false;
+    ConversionPath_.clear();
     Root_ = canonical;
     Epoch_ = epoch;
     Path_.clear();
@@ -303,8 +345,7 @@ void WorldWorkspace::SetProject(const QString& root, foundation::uint64 epoch)
     RecoveryFailed_ = false;
     Render();
     Changed(Root_.isEmpty() ? QStringLiteral("Open a project to begin.")
-                            : QStringLiteral("New or Open World loads this project's authoring/world.schema.json. See "
-                                             "the live-edit-game sample for a starter."));
+                            : QStringLiteral("Create or open a World, then import a scene or add gameplay entities."));
 }
 bool WorldWorkspace::Inside(const QString& path, bool existing) const
 {
@@ -329,10 +370,16 @@ bool WorldWorkspace::LoadProjectSchema(WorldDocument& candidate, QByteArray& sch
 {
     const auto path = QDir(Root_).filePath(QStringLiteral("authoring/world.schema.json"));
     QString error;
+    if (!QFileInfo::exists(path) && !QFileInfo(path).isSymLink())
+    {
+        schema = QByteArrayLiteral(
+            "{\"version\":1,\"id\":\"ludus.world.default.v1\",\"label\":\"World\",\"components\":[],\"assets\":[]}");
+        return candidate.LoadSchema(schema, error);
+    }
     if (!Inside(path, true) || !Read(path, schema, 65536))
     {
-        Changed(QStringLiteral("Missing or unreadable authoring/world.schema.json. The game owner must provide a "
-                               "schema; use the live-edit-game sample to learn the workflow."));
+        Changed(QStringLiteral("Unreadable or unsafe authoring/world.schema.json. Repair the declared schema before "
+                               "opening or creating a World."));
         return false;
     }
     if (!candidate.LoadSchema(schema, error))
@@ -344,6 +391,40 @@ bool WorldWorkspace::LoadProjectSchema(WorldDocument& candidate, QByteArray& sch
 }
 bool WorldWorkspace::Open(const QString& path)
 {
+    if (SceneBusy())
+    {
+        return false;
+    }
+    if (path.endsWith(QStringLiteral(".lulevel")))
+    {
+        if (!Inside(path, true))
+        {
+            return false;
+        }
+        const auto destination = path.chopped(8) + QStringLiteral(".world.json");
+        WorldDocument candidate;
+        QByteArray schema;
+        QString error;
+        if (!Inside(destination, false) || !LoadProjectSchema(candidate, schema) || !candidate.New(error) ||
+            !ConfirmDiscard())
+        {
+            Changed(QStringLiteral("Choose a level without an existing converted World document."));
+            return false;
+        }
+        ConversionPath_ = destination;
+        ConversionSchema_ = schema;
+        SceneGeneration_ = DocumentGeneration_;
+        Importing_ = true;
+        Scene_->SetWorldSnapshot(candidate);
+        if (!Scene_->Open(path))
+        {
+            Importing_ = false;
+            ConversionPath_.clear();
+            return false;
+        }
+        Changed(QStringLiteral("Converting the level to a World document; the original level is preserved."));
+        return true;
+    }
     WorldDocument candidate;
     QByteArray schema, bytes;
     QString error;
@@ -368,14 +449,18 @@ bool WorldWorkspace::Open(const QString& path)
     // Save in the confirmation can change the same file being reopened.
     // Validate the current bytes again before replacing the live document.
     QByteArray currentSchema;
-    if (!Read(QDir(Root_).filePath(QStringLiteral("authoring/world.schema.json")), currentSchema, 65536) ||
-        currentSchema != schema || !Read(path, bytes, WorldDocument::MaxBytes) || !candidate.Load(bytes, error))
+    WorldDocument currentDefinition;
+    if (!LoadProjectSchema(currentDefinition, currentSchema) || currentSchema != schema ||
+        !Read(path, bytes, WorldDocument::MaxBytes) || !candidate.Load(bytes, error))
     {
         Changed(QStringLiteral("Incoming world/schema changed while opening. Retry Open World."));
         return false;
     }
     RecoveryFailed_ = false;
     StopPreview();
+    ValidatedScene_ = {};
+    ValidatedWorld_.clear();
+    SceneError_.clear();
     ++DocumentGeneration_;
     Document_ = candidate;
     Render_->SetWorld(Root_, &Document_);
@@ -386,11 +471,16 @@ bool WorldWorkspace::Open(const QString& path)
     Pending_ = false;
     Unsaved_ = false;
     Render();
+    RefreshScene();
     Changed(QStringLiteral("World opened. Select an entity or add one; recovery is restored only when requested."));
     return true;
 }
 bool WorldWorkspace::Create(const QString& path)
 {
+    if (SceneBusy())
+    {
+        return false;
+    }
     if (!Inside(path, false))
     {
         Changed(QStringLiteral(
@@ -414,6 +504,9 @@ bool WorldWorkspace::Create(const QString& path)
     }
     RecoveryFailed_ = false;
     StopPreview();
+    ValidatedScene_ = {};
+    ValidatedWorld_.clear();
+    SceneError_.clear();
     ++DocumentGeneration_;
     Document_ = candidate;
     Render_->SetWorld(Root_, &Document_);
@@ -426,6 +519,147 @@ bool WorldWorkspace::Create(const QString& path)
     Render();
     Changed(QStringLiteral("New world. Add entities, then Save World to create the file."));
     return true;
+}
+bool WorldWorkspace::SceneBusy() const noexcept
+{
+    return Scene_ != nullptr && Scene_->Busy();
+}
+bool WorldWorkspace::ImportScene(const QString& source)
+{
+    if (!Document_.Loaded() || Pending_ || SceneBusy())
+    {
+        return false;
+    }
+    auto level = Document_.SceneLevel();
+    if (level.isEmpty())
+    {
+        level = QJsonObject{{QStringLiteral("version"), 1},
+                            {QStringLiteral("id"), QUuid::createUuid().toString(QUuid::WithoutBraces)},
+                            {QStringLiteral("name"), QFileInfo(Path_).completeBaseName()},
+                            {QStringLiteral("profile"), QStringLiteral("resident-reference-v1")},
+                            {QStringLiteral("objects"), QJsonArray{}},
+                            {QStringLiteral("imports"), QJsonArray{}},
+                            {QStringLiteral("camera"),
+                             QJsonObject{{QStringLiteral("eye"), QJsonArray{0, 0, 3}},
+                                         {QStringLiteral("target"), QJsonArray{0, 0, 0}},
+                                         {QStringLiteral("up"), QJsonArray{0, 1, 0}},
+                                         {QStringLiteral("fov"), 1.0471975512}}}};
+    }
+    SceneGeneration_ = DocumentGeneration_;
+    Importing_ = true;
+    Scene_->SetWorldSnapshot(Document_);
+    if (!Scene_->ImportInto(level, source))
+    {
+        Importing_ = false;
+        return false;
+    }
+    Changed(QStringLiteral("Importing scene assets into World…"));
+    return true;
+}
+void WorldWorkspace::RefreshScene()
+{
+    const auto level = Document_.SceneLevel();
+    if (level.isEmpty())
+    {
+        Scene_->StopPreview();
+        ValidatedScene_ = {};
+    }
+    else if (!SceneBusy() && (level != ValidatedScene_ || Document_.Encode() != ValidatedWorld_))
+    {
+        SceneGeneration_ = DocumentGeneration_;
+        Scene_->SetWorldSnapshot(Document_);
+        (void)Scene_->Assemble(level);
+    }
+}
+void WorldWorkspace::SceneCompleted(bool accepted)
+{
+    if (SceneGeneration_ != DocumentGeneration_)
+    {
+        return;
+    }
+    const bool importing = Importing_;
+    Importing_ = false;
+    const auto conversion = ConversionPath_;
+    ConversionPath_.clear();
+    if (!accepted)
+    {
+        SceneError_ = Scene_->StatusText();
+        Changed(SceneError_);
+        if (SavePending_)
+        {
+            SavePending_ = false;
+            (void)Save();
+        }
+        return;
+    }
+    SceneError_.clear();
+    if (!conversion.isEmpty())
+    {
+        WorldDocument candidate;
+        QString error;
+        WorldDocument currentDefinition;
+        QByteArray currentSchema;
+        if (!Inside(conversion, false) || !LoadProjectSchema(currentDefinition, currentSchema) ||
+            currentSchema != ConversionSchema_ || !candidate.LoadSchema(ConversionSchema_, error) ||
+            !candidate.New(error) || !candidate.ImportScene(Scene_->Document(), error))
+        {
+            ValidatedScene_ = {};
+            RefreshScene();
+            Changed(error.isEmpty() ? QStringLiteral("Conversion inputs changed; previous World retained.") : error);
+            return;
+        }
+        Document_ = candidate;
+        SchemaDisk_ = ConversionSchema_;
+        Disk_.clear();
+        Path_ = conversion;
+        Unsaved_ = true;
+        Pending_ = false;
+        Selected_.clear();
+        ++DocumentGeneration_;
+        Render_->SetWorld(Root_, &Document_);
+    }
+    ValidatedScene_ = Scene_->Document();
+    if (importing && conversion.isEmpty())
+    {
+        QString error;
+        if (!Document_.ImportScene(Scene_->Document(), error))
+        {
+            ValidatedScene_ = {};
+            RefreshScene();
+            Changed(error);
+            return;
+        }
+        Render();
+        Snapshot();
+    }
+    ValidatedWorld_ = Document_.Encode();
+    Render();
+    Changed(importing ? QStringLiteral("Scene imported. Select its entities to edit placement and gameplay components.")
+                      : QStringLiteral("World viewport updated; scene assets validated."));
+    if (SavePending_)
+    {
+        SavePending_ = false;
+        (void)Save();
+    }
+}
+void WorldWorkspace::SceneVerified(bool accepted)
+{
+    if (SceneGeneration_ != DocumentGeneration_)
+    {
+        return;
+    }
+    const bool saving = SavePending_;
+    SavePending_ = false;
+    if (!accepted)
+    {
+        Changed(Scene_->StatusText());
+        return;
+    }
+    if (saving)
+    {
+        SaveValidated_ = true;
+        (void)Save();
+    }
 }
 void WorldWorkspace::Render()
 {
@@ -449,6 +683,9 @@ void WorldWorkspace::Render()
     }
     Rendering_ = false;
     RenderInspector();
+    const bool scene = Document_.Draft().contains(QStringLiteral("scene"));
+    Viewport_->setVisible(scene);
+    Render_->setVisible(!scene);
 }
 void WorldWorkspace::RenderInspector()
 {
@@ -485,6 +722,45 @@ void WorldWorkspace::RenderInspector()
     id->setWordWrap(true);
     id->setTextInteractionFlags(Qt::TextSelectableByMouse);
     Inspector_->addWidget(id);
+    if (entity.value(QStringLiteral("scene")).isObject())
+    {
+        auto* group = new QGroupBox(QStringLiteral("Scene instance"));
+        auto* rows = new QFormLayout(group);
+        const auto scene = entity.value(QStringLiteral("scene")).toObject();
+        auto* help =
+            new QLabel(QStringLiteral("Position is local to the parent. Rotation (X, Y, Z) and scale adjust the "
+                                      "imported basis; zero rotation and unit scale preserve the source geometry."),
+                       group);
+        help->setWordWrap(true);
+        rows->addRow(help);
+        if (!Document_.Schema().contains(QStringLiteral("scene_transform")))
+        {
+            for (const auto& key : {QStringLiteral("position"), QStringLiteral("rotation"), QStringLiteral("scale")})
+            {
+                const auto values = scene.value(key).toArray();
+                for (foundation::int32 axis = 0; axis < 3; ++axis)
+                {
+                    const auto fieldKey = QStringLiteral("scene/") + key + QString::number(axis);
+                    auto* field = new QLineEdit(Display(values[axis]), group);
+                    field->setObjectName(QStringLiteral("worldField:") + fieldKey);
+                    Fields_.insert(fieldKey, field);
+                    connect(field, &QLineEdit::textEdited, this, [this]() { Pending(); });
+                    const auto unit = key == QStringLiteral("position")   ? QStringLiteral(" (m)")
+                                      : key == QStringLiteral("rotation") ? QStringLiteral(" (°)")
+                                                                          : QString();
+                    rows->addRow(key + QStringLiteral(" ") + QString(QChar('X' + axis)) + unit, field);
+                }
+            }
+        }
+        auto* assets = new QLabel(QStringLiteral("Mesh: %1\nMaterial: %2")
+                                      .arg(scene.value(QStringLiteral("mesh")).toString(),
+                                           scene.value(QStringLiteral("material")).toString()),
+                                  group);
+        assets->setWordWrap(true);
+        assets->setTextFormat(Qt::PlainText);
+        rows->addRow(assets);
+        Inspector_->addWidget(group);
+    }
     const auto attached = entity.value(QStringLiteral("components")).toObject();
     for (const auto definition : Document_.Schema().value(QStringLiteral("components")).toArray())
     {
@@ -705,15 +981,27 @@ void WorldWorkspace::Changed(const QString& message)
                  ? QStringLiteral(" Recovery could not be written; Save World is required to preserve this edit.")
                  : QString()));
     }
-    Entities_->setEnabled(!Pending_);
-    Add_->setEnabled(Document_.Loaded() && !Pending_ && Entities_->count() < 128);
-    Duplicate_->setEnabled(!Selected_.isEmpty() && !Pending_ && Entities_->count() < 128);
-    Remove_->setEnabled(!Selected_.isEmpty() && !Pending_);
-    Attach_->setEnabled(!Selected_.isEmpty() && !Pending_ && Components_->count() > 0);
-    Components_->setEnabled(!Pending_);
-    Apply_->setEnabled(Pending_);
-    Reset_->setEnabled(Pending_);
-    Recovery_->setEnabled(Document_.Loaded() && !Dirty() && !Unsaved_ &&
+    const bool busy = SceneBusy();
+    if (Name_ != nullptr)
+    {
+        Name_->setEnabled(!busy);
+    }
+    for (auto* field : Fields_)
+    {
+        field->setEnabled(!busy);
+    }
+    Entities_->setEnabled(!Pending_ && !busy);
+    Import_->setEnabled(Document_.Loaded() && !Pending_ && !busy);
+    CancelScene_->setVisible(busy);
+    CancelScene_->setEnabled(Scene_->CanCancel());
+    Add_->setEnabled(Document_.Loaded() && !Pending_ && Entities_->count() < 128 && !busy);
+    Duplicate_->setEnabled(!Selected_.isEmpty() && !Pending_ && Entities_->count() < 128 && !busy);
+    Remove_->setEnabled(!Selected_.isEmpty() && !Pending_ && !busy);
+    Attach_->setEnabled(!Selected_.isEmpty() && !Pending_ && Components_->count() > 0 && !busy);
+    Components_->setEnabled(!Pending_ && !busy);
+    Apply_->setEnabled(Pending_ && !busy);
+    Reset_->setEnabled(Pending_ && !busy);
+    Recovery_->setEnabled(Document_.Loaded() && !busy && !Dirty() && !Unsaved_ &&
                           QFileInfo::exists(Path_ + QStringLiteral(".ludus-recovery")));
     PathLabel_->setText(Path_.isEmpty()
                             ? QStringLiteral("No world open")
@@ -723,6 +1011,10 @@ void WorldWorkspace::Changed(const QString& message)
 }
 bool WorldWorkspace::Apply()
 {
+    if (SceneBusy())
+    {
+        return false;
+    }
     if (!Pending_)
     {
         return Document_.Loaded();
@@ -770,7 +1062,45 @@ bool WorldWorkspace::Apply()
         }
         c.value() = values;
     }
-    if (!Document_.Edit(Selected_, components, Name_->text(), error))
+    auto scene = Document_.Entity(Selected_).value(QStringLiteral("scene")).toObject();
+    if (!scene.isEmpty() && !Document_.Schema().contains(QStringLiteral("scene_transform")))
+    {
+        for (const auto& key : {QStringLiteral("position"), QStringLiteral("rotation"), QStringLiteral("scale")})
+        {
+            auto values = scene.value(key).toArray();
+            for (foundation::int32 axis = 0; axis < 3; ++axis)
+            {
+                auto* field =
+                    qobject_cast<QLineEdit*>(Fields_.value(QStringLiteral("scene/") + key + QString::number(axis)));
+                if (field == nullptr)
+                {
+                    Changed(QStringLiteral("Scene inspector is stale."));
+                    return false;
+                }
+                if (field->text() == Display(values[axis]))
+                {
+                    continue;
+                }
+                const QJsonObject property{{QStringLiteral("type"), QStringLiteral("number")},
+                                           {QStringLiteral("label"), key},
+                                           {QStringLiteral("min"),
+                                            key == QStringLiteral("scale")      ? 0.000001
+                                            : key == QStringLiteral("rotation") ? -360
+                                                                                : -1000000},
+                                           {QStringLiteral("max"), key == QStringLiteral("rotation") ? 360 : 1000000}};
+                QJsonValue value;
+                if (!WorldDocument::ParseValue(property, field->text(), value, error))
+                {
+                    field->setFocus();
+                    Changed(error);
+                    return false;
+                }
+                values[axis] = value;
+            }
+            scene.insert(key, values);
+        }
+    }
+    if (!Document_.Edit(Selected_, components, Name_->text(), error, scene.isEmpty() ? nullptr : &scene))
     {
         Changed(error);
         return false;
@@ -807,10 +1137,29 @@ bool WorldWorkspace::Save()
     {
         return false;
     }
+    const auto level = Document_.SceneLevel();
+    const bool validated = SaveValidated_;
+    SaveValidated_ = false;
+    if (!level.isEmpty() && !validated)
+    {
+        if (!SceneBusy())
+        {
+            SceneGeneration_ = DocumentGeneration_;
+            Scene_->SetWorldSnapshot(Document_);
+            (void)Scene_->VerifyAssets(level);
+        }
+        if (!SceneBusy())
+        {
+            Changed(QStringLiteral("Scene validation could not start; World edits remain open."));
+            return false;
+        }
+        SavePending_ = true;
+        Changed(QStringLiteral("Saving World after scene asset validation finishes…"));
+        return true;
+    }
     QByteArray schema;
-    if (!Inside(QDir(Root_).filePath(QStringLiteral("authoring/world.schema.json")), true) ||
-        !Read(QDir(Root_).filePath(QStringLiteral("authoring/world.schema.json")), schema, 65536) ||
-        schema != SchemaDisk_)
+    WorldDocument definition;
+    if (!LoadProjectSchema(definition, schema) || schema != SchemaDisk_)
     {
         Changed(QStringLiteral("The project schema changed. Save was refused; keep this world open and reconcile the "
                                "schema before retrying."));
@@ -841,7 +1190,8 @@ bool WorldWorkspace::Save()
     Document_.AcknowledgeSave();
     RecoveryFailed_ = false;
     (void)QFile::remove(Path_ + QStringLiteral(".ludus-recovery"));
-    Changed(QStringLiteral("World saved."));
+    Changed(SceneError_.isEmpty() ? QStringLiteral("World saved.")
+                                  : QStringLiteral("World saved. Previous viewport retained: ") + SceneError_);
     return true;
 }
 QByteArray WorldWorkspace::RecoveryHeader() const
@@ -851,6 +1201,7 @@ QByteArray WorldWorkspace::RecoveryHeader() const
 }
 void WorldWorkspace::Snapshot()
 {
+    RefreshScene();
     Render_->WorldChanged();
     RecoveryFailed_ = Document_.Dirty() && !Unsaved_;
     if (!Unsaved_ && !Document_.Dirty() && Inside(Path_, true))
@@ -887,9 +1238,9 @@ bool WorldWorkspace::Recover()
 {
     QByteArray envelope, current, schema;
     const auto header = RecoveryHeader();
-    if (Dirty() || Unsaved_ || !Inside(Path_, true) || !Read(Path_, current, WorldDocument::MaxBytes) ||
-        current != Disk_ || !Read(QDir(Root_).filePath(QStringLiteral("authoring/world.schema.json")), schema, 65536) ||
-        schema != SchemaDisk_ ||
+    WorldDocument definition;
+    if (SceneBusy() || Dirty() || Unsaved_ || !Inside(Path_, true) || !Read(Path_, current, WorldDocument::MaxBytes) ||
+        current != Disk_ || !LoadProjectSchema(definition, schema) || schema != SchemaDisk_ ||
         !Read(Path_ + QStringLiteral(".ludus-recovery"), envelope, WorldDocument::MaxBytes + 256) ||
         !envelope.startsWith(header))
     {
@@ -919,12 +1270,18 @@ bool WorldWorkspace::Recover()
     Pending_ = false;
     Selected_.clear();
     Render();
+    RefreshScene();
     Render_->WorldChanged();
     Changed(QStringLiteral("Recovery restored for review. Save World to publish it."));
     return true;
 }
 bool WorldWorkspace::ConfirmDiscard()
 {
+    if (SceneBusy())
+    {
+        Changed(QStringLiteral("Wait for the scene operation to finish before closing or changing documents."));
+        return false;
+    }
     if (!Dirty())
     {
         return true;
@@ -938,7 +1295,8 @@ bool WorldWorkspace::ConfirmDiscard()
                              QMessageBox::Cancel);
     if (answer == QMessageBox::Save)
     {
-        return Save();
+        const bool requested = Save();
+        return requested && !SceneBusy() && !SavePending_ && !Dirty();
     }
     if (answer != QMessageBox::Discard)
     {
@@ -946,6 +1304,7 @@ bool WorldWorkspace::ConfirmDiscard()
     }
     Pending_ = false;
     Document_.Discard();
+    RefreshScene();
     Render_->WorldChanged();
     // Keep a new world marked unsaved until its caller closes/replaces it.
     // Discard only author-owned recovery for the same baseline, never symlinks.
@@ -962,10 +1321,11 @@ bool WorldWorkspace::ConfirmDiscard()
 void WorldWorkspace::StopPreview() noexcept
 {
     Render_->Stop();
+    Scene_->StopPreview();
 }
 void WorldWorkspace::Undo()
 {
-    if (!Pending_ && Document_.Undo())
+    if (!Pending_ && !SceneBusy() && Document_.Undo())
     {
         Render();
         Snapshot();
@@ -974,7 +1334,7 @@ void WorldWorkspace::Undo()
 }
 void WorldWorkspace::Redo()
 {
-    if (!Pending_ && Document_.Redo())
+    if (!Pending_ && !SceneBusy() && Document_.Redo())
     {
         Render();
         Snapshot();

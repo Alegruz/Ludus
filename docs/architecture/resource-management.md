@@ -731,7 +731,7 @@ benefits and explicit release acknowledgment.
 
 ## Project scene import and saved-level workflow
 
-Status: Stage 5 implements the initial fully resident native **3D Levels** workflow.
+Status: Stage 5 implements the initial fully resident native scene workflow, now integrated into **World** authoring.
 The [Editor guide](../development/editor-workspace.md#project-owned-3d-levels-and-reference-import)
 owns its user-facing steps and source-profile limits. The standalone staircase2
 sample remains historical prototype evidence.

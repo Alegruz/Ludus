@@ -1,4 +1,5 @@
 #include "internal/controller.h"
+#include "internal/level_workspace.h"
 #include "internal/main_window.h"
 #include "internal/world_document.h"
 #include "internal/world_workspace.h"
@@ -8,6 +9,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -16,7 +18,10 @@
 #include <QListWidget>
 #include <QLockFile>
 #include <QMessageBox>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QPushButton>
+#include <QStandardPaths>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTest>
@@ -523,4 +528,356 @@ TEST_CASE("World recovery rejects damaged payloads and stale schemas without rep
     REQUIRE(restored.Dirty());
     // Never replace an applied dirty draft with recovery without a loss-of-work decision.
     CHECK_FALSE(restored.Recover());
+}
+
+namespace
+{
+WorldDocument UnboundDocument()
+{
+    auto schema = QJsonDocument::fromJson(Schema()).object();
+    schema.remove(QStringLiteral("scene_transform"));
+    WorldDocument document;
+    QString error;
+    REQUIRE(document.LoadSchema(QJsonDocument(schema).toJson(), error));
+    REQUIRE(document.Load(Starter(), error));
+    return document;
+}
+QJsonObject ImportedLevel()
+{
+    return QJsonObject{
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("id"), QStringLiteral("a8517f65-8127-4bf4-99c2-e53b1a6d9700")},
+        {QStringLiteral("name"), QStringLiteral("Room")},
+        {QStringLiteral("profile"), QStringLiteral("resident-reference-v1")},
+        {QStringLiteral("imports"), QJsonArray{}},
+        {QStringLiteral("camera"),
+         QJsonObject{{QStringLiteral("eye"), QJsonArray{0, 0, 3}},
+                     {QStringLiteral("target"), QJsonArray{0, 0, 0}},
+                     {QStringLiteral("up"), QJsonArray{0, 1, 0}},
+                     {QStringLiteral("fov"), 1.0}}},
+        {QStringLiteral("objects"),
+         QJsonArray{
+             QJsonObject{{QStringLiteral("id"), QStringLiteral("b8517f65-8127-4bf4-99c2-e53b1a6d9700")},
+                         {QStringLiteral("name"), QStringLiteral("Imported pickup")},
+                         {QStringLiteral("parent"), QString()},
+                         {QStringLiteral("mesh"), QStringLiteral("mesh/00000000-0000-4000-8000-000000000001")},
+                         {QStringLiteral("material"), QStringLiteral("material/00000000-0000-4000-8000-000000000002")},
+                         {QStringLiteral("transform"), QJsonArray{1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 3, 4}}}}},
+    };
+}
+} // namespace
+TEST_CASE("Imported scene instances share entity components placement persistence and history",
+          "[editor][world][unified]")
+{
+    auto document = UnboundDocument();
+    const auto original = document.Draft();
+    QString error;
+    REQUIRE(document.ImportScene(ImportedLevel(), error));
+    const auto id = QStringLiteral("b8517f65-8127-4bf4-99c2-e53b1a6d9700");
+    REQUIRE(document.Entity(id).value(QStringLiteral("components")).toObject().contains(QStringLiteral("transform")));
+    REQUIRE(document.Attach(id, error, QStringLiteral("behavior")));
+    const auto beforePlacement = document.Draft();
+    auto scene = document.Entity(id).value(QStringLiteral("scene")).toObject();
+    scene.insert(QStringLiteral("position"), QJsonArray{5, 6, 7});
+    scene.insert(QStringLiteral("rotation"), QJsonArray{0, 0, 90});
+    scene.insert(QStringLiteral("scale"), QJsonArray{2, 3, 4});
+    auto components = document.Entity(id).value(QStringLiteral("components")).toObject();
+    auto behavior = components.value(QStringLiteral("behavior")).toObject();
+    behavior.insert(QStringLiteral("priority"), 8);
+    components.insert(QStringLiteral("behavior"), behavior);
+    REQUIRE(document.Edit(id, components, QStringLiteral("Pickup"), error, &scene));
+    auto projected = document.SceneLevel().value(QStringLiteral("objects")).toArray()[0].toObject();
+    const auto transform = projected.value(QStringLiteral("transform")).toArray();
+    CHECK(transform[9] == QJsonValue(5));
+    CHECK(transform[10] == QJsonValue(6));
+    CHECK(transform[11] == QJsonValue(7));
+    CHECK(transform[1].toDouble() > 1.99);
+    CHECK(transform[3].toDouble() < -2.99);
+    CHECK(transform[8] == QJsonValue(4));
+    REQUIRE(document.Undo());
+    CHECK(document.Draft() == beforePlacement);
+    REQUIRE(document.Redo());
+    WorldDocument reopened;
+    auto schema = QJsonDocument::fromJson(Schema()).object();
+    schema.remove(QStringLiteral("scene_transform"));
+    REQUIRE(reopened.LoadSchema(QJsonDocument(schema).toJson(), error));
+    REQUIRE(reopened.Load(document.Encode(), error));
+    CHECK(reopened.Draft() == document.Draft());
+    CHECK(reopened.SceneLevel() == document.SceneLevel());
+    QString copy;
+    REQUIRE(document.DuplicateEntity(error, id, copy));
+    CHECK(document.Entity(copy).value(QStringLiteral("scene")) == document.Entity(id).value(QStringLiteral("scene")));
+    CHECK(document.SceneLevel().value(QStringLiteral("objects")).toArray().size() == 2);
+    REQUIRE(document.RemoveEntity(copy, error));
+    CHECK(document.SceneLevel().value(QStringLiteral("objects")).toArray().size() == 1);
+    REQUIRE(document.Undo()); // delete
+    REQUIRE(document.Undo()); // duplicate
+    REQUIRE(document.Undo()); // placement and behavior edit
+    REQUIRE(document.Undo()); // attach
+    REQUIRE(document.Undo()); // import
+    CHECK(document.Draft() == original);
+    CHECK(document.SceneLevel().isEmpty());
+}
+TEST_CASE("Invalid scene placement and parent references preserve the shared document", "[editor][world][unified]")
+{
+    auto document = UnboundDocument();
+    QString error;
+    REQUIRE(document.ImportScene(ImportedLevel(), error));
+    const auto before = document.Draft();
+    const auto id = QStringLiteral("b8517f65-8127-4bf4-99c2-e53b1a6d9700");
+    const auto entity = document.Entity(id);
+    for (const auto& key : {QStringLiteral("scale"), QStringLiteral("rotation"), QStringLiteral("parent")})
+    {
+        auto scene = entity.value(QStringLiteral("scene")).toObject();
+        scene.insert(key,
+                     key == QStringLiteral("parent")  ? QJsonValue(id)
+                     : key == QStringLiteral("scale") ? QJsonValue(QJsonArray{0, 1, 1})
+                                                      : QJsonValue(QJsonArray{0, 0, 361}));
+        CHECK_FALSE(document.Edit(id,
+                                  entity.value(QStringLiteral("components")).toObject(),
+                                  QStringLiteral("changed"),
+                                  error,
+                                  &scene));
+        CHECK(document.Draft() == before);
+    }
+    auto imported = ImportedLevel();
+    auto objects = imported.value(QStringLiteral("objects")).toArray();
+    objects.append(objects[0]);
+    imported.insert(QStringLiteral("objects"), objects);
+    WorldDocument empty;
+    auto schema = QJsonDocument::fromJson(Schema()).object();
+    schema.remove(QStringLiteral("scene_transform"));
+    REQUIRE(empty.LoadSchema(QJsonDocument(schema).toJson(), error));
+    REQUIRE(empty.New(error));
+    CHECK_FALSE(empty.ImportScene(imported, error));
+    CHECK(empty.Draft().value(QStringLiteral("entities")).toArray().isEmpty());
+}
+TEST_CASE("World provides scene authoring without a project component schema", "[editor][world][unified]")
+{
+    QTemporaryDir directory;
+    WorldWorkspace workspace;
+    workspace.SetProject(directory.path(), 1);
+    const auto path = QDir(QFileInfo(directory.path()).canonicalFilePath()).filePath(QStringLiteral("main.world.json"));
+    REQUIRE(workspace.Create(path));
+    REQUIRE(workspace.Save());
+    WorldWorkspace reopened;
+    reopened.SetProject(directory.path(), 2);
+    REQUIRE(reopened.Open(path));
+    CHECK(reopened.Document().Draft() == workspace.Document().Draft());
+    CHECK_FALSE(QFileInfo::exists(directory.filePath(QStringLiteral("authoring/world.schema.json"))));
+    const auto root = QFileInfo(directory.path()).canonicalFilePath();
+    REQUIRE(QDir(root).mkdir(QStringLiteral("authoring")));
+    REQUIRE(QFile::link(QDir(root).filePath(QStringLiteral("missing.schema.json")),
+                        QDir(root).filePath(QStringLiteral("authoring/world.schema.json"))));
+    WorldWorkspace unsafe;
+    unsafe.SetProject(root, 3);
+    CHECK_FALSE(unsafe.Create(QDir(root).filePath(QStringLiteral("unsafe.world.json"))));
+}
+TEST_CASE("Editor exposes a single World tab for scene and component authoring", "[editor][world][unified]")
+{
+    QTemporaryDir directory;
+    ToolingPaths tools;
+    tools.ToolingRoot = QStringLiteral(LUDUS_EDITOR_PROJECT_ROOT);
+    EditorController controller(tools, nullptr, directory.filePath(QStringLiteral("recent.json")));
+    MainWindow window(&controller, nullptr, directory.filePath(QStringLiteral("workspace.json")));
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("workspaceTabs"));
+    REQUIRE(tabs != nullptr);
+    ludus::foundation::int32 worlds = 0;
+    for (ludus::foundation::int32 i = 0; i < tabs->count(); ++i)
+    {
+        const auto text = tabs->tabText(i).remove(QLatin1Char('&'));
+        worlds += text == QStringLiteral("World") ? 1 : 0;
+        CHECK(text != QStringLiteral("3D Levels"));
+    }
+    CHECK(worlds == 1);
+}
+
+TEST_CASE("Converted cooked levels edit placement and gameplay in World and survive reopening",
+          "[editor][world][unified]")
+{
+    QTemporaryDir directory;
+    const auto path = Fixture(directory);
+    ToolingPaths tools;
+    tools.ToolingRoot = QStringLiteral(LUDUS_EDITOR_PROJECT_ROOT);
+    tools.PythonPath = QStandardPaths::findExecutable(QStringLiteral("python3"));
+    QProcess prepare;
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("PYTHONPATH"),
+                       QDir(tools.ToolingRoot).filePath(QStringLiteral("scripts/python")));
+    prepare.setProcessEnvironment(environment);
+    prepare.start(
+        tools.PythonPath,
+        {QStringLiteral("-c"),
+         QStringLiteral("from pathlib import Path; import sys; from unittest.mock import patch; "
+                        "from ludus_tools import scene_assets as a; from test_scene_assets import fixture; "
+                        "r=Path(sys.argv[1]); s=r/'external'; s.mkdir(); (s/'source').write_text('fixture'); "
+                        "p=patch.object(a.scene_cook,'cook',side_effect=fixture); p.start(); "
+                        "v=a.import_scene(r,s,a.new_level()); p.stop(); a.save_level(r,'scenes/room.lulevel',v)"),
+         directory.path()});
+    REQUIRE(prepare.waitForFinished(10000));
+    INFO(prepare.readAllStandardError().constData());
+    REQUIRE(prepare.exitCode() == 0);
+    const auto levelPath =
+        QDir(QFileInfo(directory.path()).canonicalFilePath()).filePath(QStringLiteral("scenes/room.lulevel"));
+    const auto originalLevel = Read(levelPath);
+    WorldWorkspace workspace(tools, nullptr);
+    workspace.SetProject(directory.path(), 1);
+    REQUIRE(workspace.Open(levelPath));
+    const auto drain = [&workspace]() {
+        QElapsedTimer timer;
+        timer.start();
+        while (!workspace.CanSave() && timer.elapsed() < 15000)
+        {
+            QTest::qWait(10);
+        }
+        INFO(workspace.findChild<QLabel*>(QStringLiteral("worldStatus"))->text().toStdString());
+        INFO(workspace.findChild<LevelWorkspace*>()->StatusText().toStdString());
+        REQUIRE(workspace.CanSave());
+    };
+    drain();
+    auto* entities = workspace.findChild<QListWidget*>(QStringLiteral("worldEntities"));
+    REQUIRE(entities != nullptr);
+    REQUIRE(entities->count() == 1);
+    entities->setCurrentRow(0);
+    CHECK(workspace.findChild<QLineEdit*>(QStringLiteral("worldField:scene/position0")) == nullptr);
+    Type(Field(workspace, QStringLiteral("transform/x")), QStringLiteral("0.25"));
+    REQUIRE(workspace.Apply());
+    drain();
+    auto* choices = workspace.findChild<QComboBox*>(QStringLiteral("worldComponentChoice"));
+    REQUIRE(choices != nullptr);
+    choices->setCurrentIndex(choices->findData(QStringLiteral("behavior")));
+    workspace.findChild<QPushButton*>(QStringLiteral("worldAttach"))->click();
+    drain();
+    Type(Field(workspace, QStringLiteral("behavior/priority")), QStringLiteral("7"));
+    REQUIRE(workspace.Apply());
+    drain();
+    REQUIRE(workspace.Save());
+    drain();
+    CHECK_FALSE(workspace.Dirty());
+    const auto document = workspace.Document().Draft();
+    REQUIRE(document.value(QStringLiteral("entities"))
+                .toArray()[0]
+                .toObject()
+                .value(QStringLiteral("components"))
+                .toObject()
+                .contains(QStringLiteral("behavior")));
+    CHECK(Read(levelPath) == originalLevel);
+    workspace.resize(1100, 800);
+    workspace.show();
+    QTest::qWait(50);
+    if (qEnvironmentVariableIsSet("LUDUS_UNIFIED_WORLD_SCREENSHOT"))
+    {
+        REQUIRE(workspace.grab().save(qEnvironmentVariable("LUDUS_UNIFIED_WORLD_SCREENSHOT")));
+    }
+    workspace.StopPreview();
+    WorldWorkspace reopened(tools, nullptr);
+    reopened.SetProject(directory.path(), 2);
+    REQUIRE(reopened.Open(
+        QDir(QFileInfo(directory.path()).canonicalFilePath()).filePath(QStringLiteral("scenes/room.world.json"))));
+    QElapsedTimer timer;
+    timer.start();
+    while (!reopened.CanSave() && timer.elapsed() < 15000)
+    {
+        QTest::qWait(10);
+    }
+    REQUIRE(reopened.CanSave());
+    CHECK(reopened.Document().Draft() == document);
+    CHECK_FALSE(reopened.Dirty());
+    reopened.StopPreview();
+    for (const auto& file :
+         {QStringLiteral("render.preview.json"), QStringLiteral("cube.mesh.json"), QStringLiteral("ludus.png")})
+    {
+        Write(QDir(QFileInfo(directory.path()).canonicalFilePath()).filePath(QStringLiteral("authoring/") + file),
+              Read(QStringLiteral(":/samples/live-edit-game/authoring/") + file));
+    }
+    WorldDocument mixedDocument;
+    QString error;
+    REQUIRE(mixedDocument.LoadSchema(Schema(), error));
+    REQUIRE(mixedDocument.Load(Read(QStringLiteral(":/samples/live-edit-game/authoring/rendering.world.json")), error));
+    REQUIRE(mixedDocument.ImportScene(QJsonDocument::fromJson(originalLevel).object(), error));
+    const auto mixedPath =
+        QDir(QFileInfo(directory.path()).canonicalFilePath()).filePath(QStringLiteral("scenes/mixed.world.json"));
+    Write(mixedPath, mixedDocument.Encode());
+    WorldWorkspace mixed(tools, nullptr);
+    mixed.SetProject(directory.path(), 3);
+    REQUIRE(mixed.Open(mixedPath));
+    timer.restart();
+    while (!mixed.CanSave() && timer.elapsed() < 15000)
+    {
+        QTest::qWait(10);
+    }
+    REQUIRE(mixed.CanSave());
+    auto* service = mixed.findChild<LevelWorkspace*>();
+    REQUIRE(service != nullptr);
+    CHECK(service->PreviewScene().Objects.size() == 2);
+    CHECK(mixed.findChild<QListWidget*>(QStringLiteral("worldEntities"))->count() == 4);
+    CHECK(mixed.findChild<QListWidget*>(QStringLiteral("worldEntities"))->isEnabled());
+    auto* mixedEntities = mixed.findChild<QListWidget*>(QStringLiteral("worldEntities"));
+    mixedEntities->setCurrentRow(0);
+    Type(Field(mixed, QStringLiteral("transform/x")), QStringLiteral("-1"));
+    REQUIRE(mixed.Save()); // Save waits for the newly applied render snapshot.
+    timer.restart();
+    while (!mixed.CanSave() && timer.elapsed() < 15000)
+    {
+        QTest::qWait(10);
+    }
+    REQUIRE(mixed.CanSave());
+    CHECK_FALSE(mixed.Dirty());
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    auto* viewport = mixed.findChild<QLabel*>(QStringLiteral("worldSceneViewport"));
+    REQUIRE(viewport != nullptr);
+    REQUIRE_FALSE(viewport->pixmap().isNull());
+    const auto image = viewport->pixmap().toImage();
+    bool visible = false;
+    for (ludus::foundation::int32 y = 0; y < image.height(); ++y)
+    {
+        for (ludus::foundation::int32 x = 0; x < image.width(); ++x)
+        {
+            visible =
+                visible || qRed(image.pixel(x, y)) > 0 || qGreen(image.pixel(x, y)) > 0 || qBlue(image.pixel(x, y)) > 0;
+        }
+    }
+    CHECK(visible);
+#endif
+    mixed.resize(1100, 800);
+    mixed.show();
+    QTest::qWait(50);
+    if (qEnvironmentVariableIsSet("LUDUS_UNIFIED_WORLD_SCREENSHOT"))
+    {
+        REQUIRE(mixed.grab().save(qEnvironmentVariable("LUDUS_UNIFIED_WORLD_SCREENSHOT")));
+    }
+    mixed.StopPreview();
+    REQUIRE(mixed.Save());
+    timer.restart();
+    while (!mixed.CanSave() && timer.elapsed() < 15000)
+    {
+        QTest::qWait(10);
+    }
+    REQUIRE(mixed.CanSave());
+    CHECK_FALSE(service->PreviewRunning()); // Asset verification does not need a viewport.
+    CHECK_FALSE(service->Dirty());          // The service owns no second unsaved document.
+    REQUIRE(mixed.Open(mixedPath));
+    timer.restart();
+    while (!mixed.CanSave() && timer.elapsed() < 15000)
+    {
+        QTest::qWait(10);
+    }
+    REQUIRE(mixed.CanSave());
+#if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
+    CHECK(service->PreviewRunning());
+#endif
+    const auto second =
+        QDir(QFileInfo(directory.path()).canonicalFilePath()).filePath(QStringLiteral("scenes/second.lulevel"));
+    REQUIRE(QFile::copy(levelPath, second));
+    REQUIRE(mixed.Open(second)); // No hidden 3D Levels discard prompt.
+    timer.restart();
+    while (!mixed.CanSave() && timer.elapsed() < 15000)
+    {
+        QTest::qWait(10);
+    }
+    REQUIRE(mixed.CanSave());
+    CHECK(mixed.Document().Draft().value(QStringLiteral("entities")).toArray().size() == 1);
+    CHECK_FALSE(service->Dirty());
+    mixed.StopPreview();
+    (void)path;
 }

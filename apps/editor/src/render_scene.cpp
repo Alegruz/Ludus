@@ -11,6 +11,7 @@
 
 #include <QBuffer>
 #include <QCryptographicHash>
+#include <QDataStream>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -459,6 +460,10 @@ bool RenderScene::Load(const QString& root, const WorldDocument& world, RenderSc
     for (const auto value : world.Draft().value(QStringLiteral("entities")).toArray())
     {
         const auto entity = value.toObject();
+        if (entity.contains(QStringLiteral("scene")))
+        {
+            continue;
+        }
         if (!Attached(entity, renderable) && !Attached(entity, cameraBinding))
         {
             continue;
@@ -677,6 +682,183 @@ bool RenderScene::View(const PreviewViewOptions& options, rr::ViewDescription& o
     output = view;
     error.clear();
     return true;
+}
+bool RenderScene::Merge(const RenderScene& authored,
+                        const QByteArray& cooked,
+                        const QJsonObject& level,
+                        RenderScene& output,
+                        QString& error,
+                        const QJsonObject& revisions)
+{
+    if (authored.Objects.isEmpty())
+    {
+        if (!cooked.isEmpty())
+        {
+            return LoadCooked(cooked, level, output, error, revisions);
+        }
+        output = {};
+        error.clear();
+        return true;
+    }
+    resources::SceneDefinition imported;
+    if (!cooked.isEmpty() && resources::SceneDefinition::Decode(reinterpret_cast<const uint8*>(cooked.constData()),
+                                                                static_cast<usize>(cooked.size()),
+                                                                imported) != resources::Status::Ok)
+    {
+        return Fail(error, QStringLiteral("Invalid imported scene during World composition."));
+    }
+    const auto meshCount = imported.Meshes.GetSize() + static_cast<usize>(authored.Meshes.size());
+    const auto materialCount = imported.Materials.GetSize() + static_cast<usize>(authored.Objects.size());
+    const auto textureCount = imported.Textures.GetSize() + static_cast<usize>(authored.Objects.size());
+    const auto objectCount = imported.Objects.GetSize() + static_cast<usize>(authored.Objects.size());
+    if (meshCount > 6 || materialCount > 8 || textureCount > 8 || objectCount > 128)
+    {
+        return Fail(
+            error,
+            QStringLiteral("Combined World exceeds six meshes, eight materials/textures or 128 visible instances."));
+    }
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    stream.writeRawData("LUSCN01\0", 8);
+    stream << uint32{2} << static_cast<uint32>(meshCount) << static_cast<uint32>(materialCount)
+           << static_cast<uint32>(textureCount) << static_cast<uint32>(objectCount);
+    const auto camera = level.value(QStringLiteral("camera")).toObject();
+    for (const auto& key : {QStringLiteral("eye"), QStringLiteral("target"), QStringLiteral("up")})
+    {
+        for (const auto n : camera.value(key).toArray())
+        {
+            stream << static_cast<float32>(n.toDouble());
+        }
+    }
+    stream << static_cast<float32>(camera.value(QStringLiteral("fov")).toDouble());
+    for (const auto& texture : imported.Textures)
+    {
+        stream << texture.Width << texture.Height << static_cast<uint32>(texture.Pixels.GetSize());
+        stream.writeRawData(reinterpret_cast<const char*>(texture.Pixels.GetData()),
+                            static_cast<int32>(texture.Pixels.GetSize()));
+    }
+    // The reference profile has no base-color multiplier. Bake the validated
+    // schema tint into transient sRGB pixels; durable source assets stay intact.
+    for (const auto& object : authored.Objects)
+    {
+        QImage image = object.Texture < 0 ? QImage(1, 1, QImage::Format_RGBA8888)
+                                          : authored.Textures[object.Texture].Pixels.copy();
+        if (image.isNull())
+        {
+            return Fail(error, QStringLiteral("World texture allocation failed."));
+        }
+        if (object.Texture < 0)
+        {
+            image.fill(Qt::white);
+        }
+        for (int32 y = 0; y < image.height(); ++y)
+        {
+            auto* pixels = image.scanLine(y);
+            for (int32 x = 0; x < image.width(); ++x)
+            {
+                const float32 tint[3]{object.Tint.X, object.Tint.Y, object.Tint.Z};
+                for (int32 channel = 0; channel < 3; ++channel)
+                {
+                    const auto linear = math::DecodeSrgb(static_cast<float32>(pixels[x * 4 + channel]) / 255.0F);
+                    pixels[x * 4 + channel] = static_cast<uint8>(
+                        math::Floor(static_cast<float64>(math::EncodeSrgb(linear * tint[channel])) * 255.0 + .5));
+                }
+            }
+        }
+        stream << static_cast<uint32>(image.width()) << static_cast<uint32>(image.height())
+               << static_cast<uint32>(image.width() * image.height() * 4);
+        const int32 rowBytes = image.width() * 4; // Preview textures are bounded to 2048 pixels per axis.
+        for (int32 y = 0; y < image.height(); ++y)
+        {
+            stream.writeRawData(reinterpret_cast<const char*>(image.constScanLine(y)), rowBytes);
+        }
+    }
+    for (const auto& material : imported.Materials)
+    {
+        stream << material.Texture << uint32{material.Repeat ? 1U : 0U} << material.Metallic << material.Roughness
+               << material.Emission.X << material.Emission.Y << material.Emission.Z;
+    }
+    for (int32 i = 0; i < authored.Objects.size(); ++i)
+    {
+        stream << static_cast<uint32>(imported.Textures.GetSize() + static_cast<usize>(i)) << uint32{0} << float32{0}
+               << float32{.5F} << float32{0} << float32{0} << float32{0};
+    }
+    for (const auto& mesh : imported.Meshes)
+    {
+        stream << static_cast<uint32>(mesh.Positions.GetSize()) << static_cast<uint32>(mesh.Indices.GetSize());
+        for (usize i = 0; i < mesh.Positions.GetSize(); ++i)
+        {
+            stream << mesh.Positions[i].X << mesh.Positions[i].Y << mesh.Positions[i].Z << mesh.Normals[i].X
+                   << mesh.Normals[i].Y << mesh.Normals[i].Z << mesh.Texcoords[i].X << mesh.Texcoords[i].Y;
+        }
+        for (const auto index : mesh.Indices)
+        {
+            stream << index;
+        }
+    }
+    for (const auto& mesh : authored.Meshes)
+    {
+        QVector<math::Vector3> normals(mesh.Positions.size());
+        for (int32 i = 0; i < mesh.Indices.size(); i += 3)
+        {
+            const auto a = mesh.Indices[i], b = mesh.Indices[i + 1], c = mesh.Indices[i + 2];
+            const auto normal =
+                math::Cross(mesh.Positions[b] - mesh.Positions[a], mesh.Positions[c] - mesh.Positions[a]);
+            normals[a] = normals[a] + normal;
+            normals[b] = normals[b] + normal;
+            normals[c] = normals[c] + normal;
+        }
+        stream << static_cast<uint32>(mesh.Positions.size()) << static_cast<uint32>(mesh.Indices.size());
+        for (int32 i = 0; i < mesh.Positions.size(); ++i)
+        {
+            math::Vector3 normal;
+            if (math::TryNormalize(normals[i], normal) != math::MathStatus::Success)
+            {
+                return Fail(error, QStringLiteral("Schema mesh has a degenerate shading normal."));
+            }
+            stream << mesh.Positions[i].X << mesh.Positions[i].Y << mesh.Positions[i].Z << normal.X << normal.Y
+                   << normal.Z << mesh.Uvs[i].X << mesh.Uvs[i].Y;
+        }
+        for (const auto index : mesh.Indices)
+        {
+            stream << index;
+        }
+    }
+    for (const auto& object : imported.Objects)
+    {
+        stream << object.Mesh << object.Material;
+        for (const auto column : object.Transform.Columns)
+        {
+            stream << column.X << column.Y << column.Z;
+        }
+        stream << object.Transform.Translation.X << object.Transform.Translation.Y << object.Transform.Translation.Z;
+    }
+    auto mergedLevel = level;
+    auto objects = level.value(QStringLiteral("objects")).toArray();
+    for (int32 i = 0; i < authored.Objects.size(); ++i)
+    {
+        const auto& object = authored.Objects[i];
+        stream << static_cast<uint32>(imported.Meshes.GetSize() + static_cast<usize>(object.Mesh))
+               << static_cast<uint32>(imported.Materials.GetSize() + static_cast<usize>(i));
+        for (const auto column : object.Transform.Columns)
+        {
+            stream << column.X << column.Y << column.Z;
+        }
+        stream << object.Transform.Translation.X << object.Transform.Translation.Y << object.Transform.Translation.Z;
+        objects.append(
+            QJsonObject{{QStringLiteral("id"), object.Id},
+                        {QStringLiteral("name"), object.Name},
+                        {QStringLiteral("mesh"), QStringLiteral("preview/") + authored.Meshes[object.Mesh].Id},
+                        {QStringLiteral("material"), QStringLiteral("preview/") + object.Id}});
+    }
+    mergedLevel.insert(QStringLiteral("objects"), objects);
+    if (stream.status() != QDataStream::Ok || bytes.size() > 67108864)
+    {
+        return Fail(error, QStringLiteral("Combined World exceeds its cooked byte budget."));
+    }
+    return LoadCooked(bytes, mergedLevel, output, error, revisions);
 }
 bool RenderScene::LoadCooked(const QByteArray& bytes,
                              const QJsonObject& level,

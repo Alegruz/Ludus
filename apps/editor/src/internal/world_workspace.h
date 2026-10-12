@@ -19,11 +19,15 @@ namespace ludus::editor
 {
 // Desktop, project-owned schema UI. No runtime pools or project code are loaded.
 class RenderPanel;
+class LevelWorkspace;
+struct ToolingPaths;
 class WorldWorkspace final : public QWidget
 {
     Q_OBJECT
 public:
     explicit WorldWorkspace(QWidget* parent = nullptr);
+    WorldWorkspace(const ToolingPaths& tooling, QWidget* parent);
+    [[nodiscard]] bool ImportScene(const QString& source);
     void SetProject(const QString& root, foundation::uint64 epoch);
     [[nodiscard]] bool Open(const QString& path);
     [[nodiscard]] bool Create(const QString& path);
@@ -35,15 +39,15 @@ public:
     }
     [[nodiscard]] bool CanSave() const noexcept
     {
-        return Document_.Loaded();
+        return Document_.Loaded() && !SceneBusy();
     }
     [[nodiscard]] bool CanUndo() const noexcept
     {
-        return !Pending_ && Document_.CanUndo();
+        return !Pending_ && !SceneBusy() && Document_.CanUndo();
     }
     [[nodiscard]] bool CanRedo() const noexcept
     {
-        return !Pending_ && Document_.CanRedo();
+        return !Pending_ && !SceneBusy() && Document_.CanRedo();
     }
     void StopPreview() noexcept;
     void Undo();
@@ -61,6 +65,10 @@ Q_SIGNALS:
 private:
     [[nodiscard]] bool LoadProjectSchema(WorldDocument& candidate, QByteArray& schema);
     [[nodiscard]] bool Inside(const QString& path, bool existing) const;
+    [[nodiscard]] bool SceneBusy() const noexcept;
+    void RefreshScene();
+    void SceneCompleted(bool accepted);
+    void SceneVerified(bool accepted);
     void Render();
     void RenderInspector();
     void Changed(const QString& message = {});
@@ -70,6 +78,20 @@ private:
     [[nodiscard]] QByteArray RecoveryHeader() const;
     WorldDocument Document_;
     RenderPanel* Render_ = nullptr;
+    LevelWorkspace* Scene_ = nullptr;
+    QWidget* Viewport_ = nullptr;
+    QPushButton* Import_ = nullptr;
+    QPushButton* CancelScene_ = nullptr;
+    bool Importing_ = false;
+    bool SavePending_ = false;
+    bool SaveValidated_ = false;
+    QJsonObject ValidatedScene_;
+    QByteArray ValidatedWorld_;
+    QString SceneError_;
+    QString ConversionPath_;
+    QByteArray ConversionSchema_;
+    foundation::uint64 SceneGeneration_ = 0;
+
     QString Root_;
     QString Path_;
     QString Selected_;

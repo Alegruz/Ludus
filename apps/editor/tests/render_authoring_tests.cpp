@@ -544,3 +544,50 @@ TEST_CASE("Renderer snapshot admission protects fixed handle arrays even for an 
     CHECK_FALSE(preview.SetScene(invalid));
     CHECK(preview.Scene().Identity == f.Scene.Identity);
 }
+
+TEST_CASE("World composes schema meshes into cooked renderer data with bounded failure",
+          "[editor][unified][render-authoring]")
+{
+    Fixture fixture;
+    const QJsonObject level{
+        {QStringLiteral("id"), QStringLiteral("a8517f65-8127-4bf4-99c2-e53b1a6d9700")},
+        {QStringLiteral("objects"), QJsonArray{}},
+        {QStringLiteral("camera"),
+         QJsonObject{{QStringLiteral("eye"), QJsonArray{0, 0, 3}},
+                     {QStringLiteral("target"), QJsonArray{0, 0, 0}},
+                     {QStringLiteral("up"), QJsonArray{0, 1, 0}},
+                     {QStringLiteral("fov"), 1.0}}},
+    };
+    RenderScene combined;
+    REQUIRE(RenderScene::Merge(fixture.Scene, {}, level, combined, fixture.Error, {}));
+    REQUIRE(combined.Definition);
+    CHECK(combined.Lit);
+    CHECK(combined.Objects.size() == fixture.Scene.Objects.size());
+    CHECK(combined.Objects[0].Id == fixture.Scene.Objects[0].Id);
+    CHECK(combined.Objects[0].Transform == fixture.Scene.Objects[0].Transform);
+    CHECK(combined.Definition->Meshes.GetSize() == 1);
+    CHECK(combined.Definition->Meshes[0].Normals.GetSize() == combined.Definition->Meshes[0].Positions.GetSize());
+    const auto retained = combined.Identity;
+    auto excessive = fixture.Scene;
+    for (int32 i = 0; i < 8; ++i)
+    {
+        excessive.Objects.append(fixture.Scene.Objects[0]);
+    }
+    CHECK_FALSE(RenderScene::Merge(excessive, {}, level, combined, fixture.Error, {}));
+    CHECK(combined.Identity == retained);
+    const auto definition = combined.Definition.toWeakRef();
+    {
+        RenderPreview preview;
+        REQUIRE(preview.SetScene(combined));
+        combined = {};
+        CHECK_FALSE(definition.isNull());
+        REQUIRE(preview.SetScene(fixture.Scene));
+        CHECK(definition.isNull()); // Replacement retires the previous lease and definition.
+        REQUIRE(RenderScene::Merge(fixture.Scene, {}, level, combined, fixture.Error, {}));
+        const auto lastDefinition = combined.Definition.toWeakRef();
+        REQUIRE(preview.SetScene(combined));
+        combined = {};
+        REQUIRE(preview.SetScene({}));
+        CHECK(lastDefinition.isNull());
+    }
+}

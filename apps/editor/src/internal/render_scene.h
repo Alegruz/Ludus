@@ -80,6 +80,13 @@ struct RenderScene final
                                          RenderScene& output,
                                          QString& error,
                                          const QJsonObject& revisions);
+    // Combine schema-bound entities and imported geometry before renderer admission.
+    [[nodiscard]] static bool Merge(const RenderScene& authored,
+                                    const QByteArray& cooked,
+                                    const QJsonObject& level,
+                                    RenderScene& output,
+                                    QString& error,
+                                    const QJsonObject& revisions);
     QVector<PreviewMesh> Meshes;
     QVector<PreviewTexture> Textures;
     QVector<PreviewObject> Objects;
