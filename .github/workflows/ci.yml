@@ -110,6 +110,16 @@ jobs:
           out/renderer-sdk/ludus_sdk_renderer_scaling_consumer
           out/renderer-sdk/ludus_sdk_reference_capture out/reference.luhdr
           python3 scripts/reference-hdr out/reference.luhdr --pfm out/reference.pfm --manifest out/reference.json
+          out/host-tools/venv/bin/ctest --test-dir out/renderer-sdk/reference-scene --output-on-failure
+          out/host-tools/bin/clang-tidy -p out/renderer-sdk --warnings-as-errors='*' examples/reference-scene/src/main.cpp
+          out/host-tools/venv/bin/python - <<'PYFORMAT'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts/python')
+          from formatting import format_source
+          path = Path('examples/reference-scene/src/main.cpp')
+          assert format_source(path.read_text(), path, 'out/host-tools/bin/clang-format') == path.read_text()
+          PYFORMAT
       - name: Verify installed macOS game-project tooling
         run: |
           ./scripts/install-sdk macos-clang-development
@@ -439,6 +449,8 @@ jobs:
         run: python3 -m unittest discover -s scripts/python -p 'test_formatting.py' -v
       - name: Test reproducible packs with the independent LZ4 decoder
         run: python3 -m unittest discover -s scripts/python -p test_pack_builder.py -v
+      - name: Test scene conversion encodings and geometry
+        run: python3 -m unittest discover -s tools/scene_cooker -v
       - name: Test Metal shader reflection contracts
         run: PYTHONPATH=scripts/python python3 -m unittest test_metal_shaders test_raster_shaders test_texture_cooker -v
       - name: Test optional RAD tooling contracts
@@ -652,6 +664,27 @@ jobs:
           out/renderer-sdk/ludus_sdk_renderer_scaling_consumer
           out/renderer-sdk/ludus_sdk_reference_capture out/reference.luhdr
           python3 scripts/reference-hdr out/reference.luhdr --pfm out/reference.pfm --manifest out/reference.json
+          out/host-tools/venv/bin/ctest --test-dir out/renderer-sdk/reference-scene --output-on-failure
+          out/host-tools/bin/clang-tidy -p out/renderer-sdk --warnings-as-errors='*' examples/reference-scene/src/main.cpp
+          out/host-tools/venv/bin/python - <<'PYFORMAT'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts/python')
+          from formatting import format_source
+          path = Path('examples/reference-scene/src/main.cpp')
+          assert format_source(path.read_text(), path, 'out/host-tools/bin/clang-format') == path.read_text()
+          PYFORMAT
+      - name: Check the reference scene consumer with ASan and UBSan
+        run: |
+          out/host-tools/venv/bin/cmake -S examples/reference-scene -B out/reference-scene-sanitized -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLUDUS_SCENE_SANITIZERS=ON \
+            -DCMAKE_CXX_COMPILER="$PWD/out/host-tools/bin/clang++" -DCMAKE_MAKE_PROGRAM="$PWD/out/host-tools/venv/bin/ninja" \
+            -DCMAKE_PREFIX_PATH="$PWD/out/install/linux-clang-development;$PWD/out/conan/linux-clang-development" \
+            -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
+            -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val" \
+            -DLUDUS_SPIRV_CROSS="$PWD/out/shader-tools/spirv-cross/bin/spirv-cross"
+          out/host-tools/venv/bin/cmake --build out/reference-scene-sanitized --parallel 2
+          out/host-tools/venv/bin/ctest --test-dir out/reference-scene-sanitized --output-on-failure
       - name: Build and test the independent Cornell box tutorial (Vulkan)
         run: |
           sudo apt-get install -y -qq libvulkan1 mesa-vulkan-drivers

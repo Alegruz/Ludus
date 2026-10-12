@@ -100,6 +100,7 @@ nav:
       - Browser editor build: development/browser-editor.md
   - Samples:
       - Your first rendered scene: examples/cornell-box.md
+      - Cook and capture staircase2: examples/reference-scene.md
   - Learn:
       - How Ludus fits together: wiki/learn/architecture.md
       - Reference reading paths: wiki/learn/references.md
