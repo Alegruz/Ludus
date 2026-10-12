@@ -264,7 +264,12 @@ not a change to Content's version-1 catalog serialization.
 
 Admission walks the required closure in child-first order and preflights every
 adapter, version/operation slot and combined peak reservation before accepting
-anything. Existing exact work is charged once, including diamond leaves. Parents
+anything. Adapter::MaxCandidates declares 1..16 slots for an exact context/type
+pair, reserved across retained snapshots until physical cleanup. The entire
+closure must fit that capacity as well as the core tables, so a leaf cannot occupy
+the last slot its parent needs. Composition reserves those slots exclusively for
+this manager; other managers or outside backend owners are not counted. Existing
+exact work is charged once, including diamond leaves. Parents
 wait on pending counts; child completion wakes their dependent records without
 blocking a worker. A parent must provide Adapter::BeginBound. Its temporary
 DependencyView array names complete immutable child payloads; retaining those
@@ -335,8 +340,8 @@ physical parent/mesh cleanup. The public-only installed-SDK renderer fixture
 prepares and activates its two mesh roots together, then preserves its image
 oracle after complete CPU resource shutdown. Renderer/RHI GPU ownership remains
 independent. The private audio sample adapter still supports only one resident
-sound, so overlapping sound replacement needs a finer multi-resident audio
-retirement adapter before it can use this protocol.
+sound, so its one-slot declaration rejects overlapping sound replacement at admission.
+A finer multi-resident audio retirement adapter is needed for that use.
 
 New public parameters and Adapter fields preserve existing source call sites with
 defaults, but change native ABI/layout; rebuild the SDK and its consumers together.

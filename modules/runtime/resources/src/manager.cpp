@@ -797,7 +797,8 @@ struct Manager::Impl final
             const auto& adapter = adapters[i];
             if (adapter.Epoch == nullptr || (adapter.Begin == nullptr && adapter.BeginBound == nullptr) ||
                 adapter.Poll == nullptr || adapter.Cancel == nullptr || adapter.Retire == nullptr ||
-                adapter.Validate == nullptr || adapter.Epoch(adapter.Context) == 0)
+                adapter.Validate == nullptr || adapter.MaxCandidates == 0 || adapter.MaxCandidates > 16 ||
+                adapter.Epoch(adapter.Context) == 0)
             {
                 return Status::InvalidState;
             }
@@ -983,6 +984,28 @@ struct Manager::Impl final
             if (plan.Slots[asset] != NONE)
             {
                 continue;
+            }
+            // Reserve the adapter's finite candidate slots for the entire closure,
+            // including residents and physical cleanup across retained snapshots.
+            // Otherwise a leaf could occupy the last slot needed by its parent.
+            uint32 occupied = 0;
+            for (uint32 i = 0; i < Limits.Versions; ++i)
+            {
+                const auto& version = Versions[i];
+                if (version.Used && !version.PhysicalRetired)
+                {
+                    const auto& provider = Provider(version);
+                    occupied += provider.Context == adapter.Context && provider.Type == adapter.Type ? 1U : 0U;
+                }
+            }
+            for (uint32 i = 0; i < plan.Count; ++i)
+            {
+                const auto& provider = snapshot.Adapters[plan.AdapterIndices[plan.NewAssets[i]]];
+                occupied += provider.Context == adapter.Context && provider.Type == adapter.Type ? 1U : 0U;
+            }
+            if (occupied >= adapter.MaxCandidates)
+            {
+                return Status::QueueFull;
             }
             plan.NewAssets[plan.Count++] = asset;
             const auto& cost = adapter.Peak;
@@ -1684,6 +1707,7 @@ Lease& Lease::operator=(Lease&& other) noexcept
         (void)Release();
         mManager = other.mManager;
         mToken = other.mToken;
+        other.mManager = nullptr;
         other.mToken = {};
     }
     return *this;

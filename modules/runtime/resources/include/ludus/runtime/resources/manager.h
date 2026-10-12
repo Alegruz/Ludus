@@ -168,6 +168,11 @@ struct Adapter final
     /// also usable for leaves when Begin is null. All children are ready before
     /// this call. The same candidate/error/retirement contract as Begin applies.
     Status (*BeginBound)(void*, const content::Resource&, const DependencyView*, usize, void*&) noexcept = nullptr;
+    /// 1..16 reserved candidate/resident slots for this exact Context/Type pair.
+    /// Charged across this manager's snapshots until physical acknowledgment;
+    /// the complete closure must fit before dispatch. Context composition must
+    /// reserve this capacity exclusively for the manager; outside owners are not counted.
+    uint32 MaxCandidates = 16;
 };
 /// Fixed capacities, bounded by the implementation maxima documented below.
 /// Normal saturation never blocks cancellation, release, close or shutdown.

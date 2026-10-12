@@ -120,7 +120,7 @@ struct Fixture final
     r::Manager Manager;
     r::AssetHandle Root;
     r::ScopeHandle Scope;
-    explicit Fixture(r::Config config = {})
+    explicit Fixture(r::Config config = {}, uint32 capacity = 16)
     {
         for (const char* name : {"root", "left", "right", "leaf"})
         {
@@ -135,7 +135,8 @@ struct Fixture final
         Edge(2, "left", "leaf");
         Edge(3, "right", "leaf");
         Edge(4, "left", "leaf"); // One hold, first authoring property wins.
-        const auto adapter = Initial.Descriptor();
+        auto adapter = Initial.Descriptor();
+        adapter.MaxCandidates = capacity;
         REQUIRE(Manager.Initialize(Catalog, &adapter, 1, config, Graph()) == r::Status::Ok);
         REQUIRE(Manager.Resolve(Id("root"), c::Kind::Sound, Root) == r::Status::Ok);
         REQUIRE(Manager.OpenScope(Id("original"), Scope) == r::Status::Ok);
@@ -662,5 +663,64 @@ TEST_CASE("Parent publication preserves descendant provenance if readiness chang
     CHECK(info.Failure.Chain[0].View() == "root");
     CHECK(info.Failure.Chain[2].View() == "leaf");
     CHECK(f.Manager.Inspect().Versions == 0);
+}
+} // namespace dag_cases
+
+namespace dag_cases
+{
+TEST_CASE("Adapter slot capacity admits no partial closure and counts retained snapshots",
+          "[resources][dag][replacement]")
+{
+    const auto capacity = GENERATE(3U, 4U);
+    Fixture f({}, capacity);
+    auto descriptor = f.Initial.Descriptor();
+    descriptor.MaxCandidates = capacity;
+    r::TransactionHandle transaction;
+    const auto admitted = f.Manager.BeginReplacement(f.Catalog, &descriptor, 1, f.Graph(2), &f.Root, 1, transaction);
+    if (capacity == 3)
+    {
+        CHECK(admitted == r::Status::QueueFull);
+        f.Pump();
+        CHECK(f.Initial.Begins[3] == 0);
+        CHECK(f.Manager.Inspect().Versions == 0);
+    }
+    else
+    {
+        REQUIRE(admitted == r::Status::Ok);
+        f.Pump();
+        REQUIRE(f.Manager.Commit(transaction) == r::Status::Ok);
+        REQUIRE(f.Manager.EndTransaction(transaction) == r::Status::Ok);
+        r::TransactionHandle rejected;
+        CHECK(f.Manager.BeginReplacement(f.Catalog, &descriptor, 1, f.Graph(3), &f.Root, 1, rejected) ==
+              r::Status::QueueFull);
+        CHECK(f.Manager.Inspect().CurrentRevision == 2);
+        CHECK(f.Manager.Inspect().Versions == 4);
+        CHECK(f.Initial.Begins[3] == 1);
+    }
+}
+TEST_CASE("Move assignment empties the source even when it outlives its manager", "[resources][ownership]")
+{
+    r::Lease source;
+    {
+        Fixture f;
+        const auto request = f.Acquire(f.Scope);
+        f.Pump();
+        REQUIRE(f.Manager.TakeLease(request, source) == r::Status::Ok);
+        r::Lease target;
+        target = Move(source);
+        CHECK(source.Token().Owner == 0);
+        CHECK(source.Release() == r::Status::Ok);
+        CHECK(f.Manager.Inspect().Leases == 1);
+        CHECK(f.Borrow(target)->Value == 10);
+        REQUIRE(target.Release() == r::Status::Ok);
+        // Populate it again so scope exit tests the destructor without calling
+        // Release on the moved-from wrapper first.
+        const auto again = f.Acquire(f.Scope);
+        f.Pump();
+        REQUIRE(f.Manager.TakeLease(again, source) == r::Status::Ok);
+        target = Move(source);
+        REQUIRE(target.Release() == r::Status::Ok);
+    }
+    CHECK(source.Release() == r::Status::Ok);
 }
 } // namespace dag_cases
