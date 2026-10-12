@@ -127,7 +127,9 @@ out/host-tools/venv/bin/ctest --preset linux-clang-asan-ubsan --label-regex sani
 
 On macOS use `macos-clang-asan-ubsan`. TSan remains a separate build tree;
 its existing CI job now builds and runs `ludus_tsan_control_child` before the
-concurrency acceptance suite. Native Clang controls explicitly locate the
+concurrency acceptance suite. Its volatile raced writes remain visible in optimized
+builds; a relaxed atomic rendezvous keeps both writers alive without ordering
+those writes. Native Clang controls explicitly locate the
 compiler's LLVM symbolizer; missing symbolizers fail configuration. Control
 children receive explicit sanitizer options with no inherited suppression/log
 redirection; UBSan requests runtime recovery to prove the compiler policy still
@@ -209,4 +211,7 @@ Compiler jobs publish cache statistics, and the budget job uploads its detailed
 profile. Compare cold and warm runs across several commits when evaluating
 changes; parallel jobs can lower completion time while increasing runner minutes.
 The browser workflow continues to test the exact packaged Release ZIP and
-cancels superseded pull-request runs independently.
+cancels superseded pull-request runs independently. Renderer browser coverage runs
+in separate baseline (L0–L4) and scaling (L5) jobs, each with a ten-minute
+budget and its own evidence artifact. All image oracles and backend cases remain
+required; the packaged browser lane retains RHI, camera and scripting coverage.

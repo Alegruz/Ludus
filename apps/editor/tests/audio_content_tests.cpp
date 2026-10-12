@@ -225,3 +225,39 @@ TEST_CASE("Cancelling close preserves the audio draft and does not save workspac
     QTRY_VERIFY_WITH_TIMEOUT(!window.isVisible(), 3000);
     CHECK(QFileInfo::exists(preferences));
 }
+
+TEST_CASE("Audio workspace rejects mesh entries even when their bytes resemble an audio definition",
+          "[editor][audio][mesh]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    Fixture(directory.path());
+    const auto root = directory.path().toUtf8();
+    content::Bytes bytes;
+    content::Diagnostic diagnostic;
+    content::Catalog catalog;
+    REQUIRE(content::ReadFile(root.constData(), "catalog.json", content::MAX_DOCUMENT_BYTES, bytes) ==
+            content::Status::Ok);
+    const auto catalogDigest = content::Hash(bytes.Data());
+    REQUIRE(catalog.Read(bytes.String(), diagnostic) == content::Status::Ok);
+    content::Resource mesh;
+    mesh.Type = content::Kind::Mesh;
+    REQUIRE(mesh.Id.Set("mesh/disguised"));
+    REQUIRE(mesh.Path.Set("mesh.json"));
+    REQUIRE(catalog.Put(mesh) == content::Status::Ok);
+    REQUIRE(catalog.Write(bytes) == content::Status::Ok);
+    REQUIRE(content::SaveFile(root.constData(), "catalog.json", bytes.Data(), &catalogDigest) == content::Status::Ok);
+    audio::content::Sound disguised;
+    REQUIRE(disguised.Id.Set("mesh/disguised"));
+    REQUIRE(disguised.Bus.Set("sfx"));
+    REQUIRE(disguised.Group.Set("default"));
+    REQUIRE(disguised.Variations[0].Set("source/hit"));
+    disguised.VariationCount = 1;
+    REQUIRE(audio::content::WriteSound(disguised, bytes) == content::Status::Ok);
+    Save(root.constData(), "mesh.json", bytes);
+    ludus::editor::AudioWorkspace workspace;
+    workspace.SetRoot(directory.path());
+    CHECK_FALSE(workspace.OpenResource(QStringLiteral("mesh/disguised")));
+    CHECK_FALSE(workspace.CanSave());
+    CHECK(workspace.OpenResource(QStringLiteral("sound/hit")));
+}

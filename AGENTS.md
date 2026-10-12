@@ -157,6 +157,15 @@ engine code. Discuss such cases in the PR before adding them.
   removal of existing descriptions. This baseline records legacy debt; do not add
   new gaps or regenerate it to bypass checks. Remove resolved entries in the change that documents them.
   Generated HTML/XML/report files stay in ignored `out/`, never source control.
+- The legacy API documentation baseline may only shrink. CI compares it with
+  the PR's base commit and rejects added entries, including renamed signatures.
+  Resolved/deleted entries must be removed; do not regenerate the baseline to
+  excuse missing comments. Public API documentation runs as an independent CI
+  job, even when the browser editor build fails.
+- Review API comments for meaningful caller contracts as well as extraction.
+  CI detects missing descriptions; it cannot prove that ownership, lifetime,
+  thread-affinity or failure claims agree with the implementation. Clear names
+  and readable implementation code do not replace public API contracts.
 
 ### One documentation source, online and offline
 

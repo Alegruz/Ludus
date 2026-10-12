@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "schema": "ludus.world.starter.v1",
+  "transform": {
+    "component": "transform",
+    "properties": {
+      "x": "x",
+      "y": "y",
+      "z": "z",
+      "rx": "rx",
+      "ry": "ry",
+      "rz": "rz",
+      "sx": "sx",
+      "sy": "sy",
+      "sz": "sz"
+    }
+  },
+  "renderable": {
+    "component": "renderable",
+    "properties": {
+      "mesh": "mesh",
+      "texture": "texture",
+      "visible": "visible",
+      "r": "r",
+      "g": "g",
+      "b": "b"
+    }
+  },
+  "camera": {
+    "component": "camera",
+    "properties": {
+      "projection": "projection",
+      "fov": "fov",
+      "span": "span",
+      "near": "near",
+      "far": "far",
+      "follow": "follow"
+    }
+  },
+  "meshes": [
+    {
+      "id": "mesh.cube",
+      "path": "authoring/cube.mesh.json"
+    }
+  ],
+  "textures": [
+    {
+      "id": "texture.ludus",
+      "path": "authoring/ludus.png"
+    }
+  ]
+}

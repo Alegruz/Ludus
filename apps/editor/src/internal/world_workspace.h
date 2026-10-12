@@ -18,6 +18,7 @@ QT_END_NAMESPACE
 namespace ludus::editor
 {
 // Desktop, project-owned schema UI. No runtime pools or project code are loaded.
+class RenderPanel;
 class WorldWorkspace final : public QWidget
 {
     Q_OBJECT
@@ -44,6 +45,7 @@ public:
     {
         return !Pending_ && Document_.CanRedo();
     }
+    void StopPreview() noexcept;
     void Undo();
     void Redo();
     [[nodiscard]] bool Apply();
@@ -54,6 +56,7 @@ public:
     }
 Q_SIGNALS:
     void DocumentChanged();
+    void PreviewStarting();
 
 private:
     [[nodiscard]] bool LoadProjectSchema(WorldDocument& candidate, QByteArray& schema);
@@ -62,15 +65,18 @@ private:
     void RenderInspector();
     void Changed(const QString& message = {});
     void Pending();
+    void PickTint(const QString& id, const QJsonObject& binding);
     void Snapshot();
     [[nodiscard]] QByteArray RecoveryHeader() const;
     WorldDocument Document_;
+    RenderPanel* Render_ = nullptr;
     QString Root_;
     QString Path_;
     QString Selected_;
     QByteArray Disk_;
     QByteArray SchemaDisk_;
     foundation::uint64 Epoch_ = ~foundation::uint64{0};
+    foundation::uint64 DocumentGeneration_ = 0;
     bool Pending_ = false;
     bool Unsaved_ = false;
     bool Rendering_ = false;

@@ -87,9 +87,13 @@ ContentWorkspace::ContentWorkspace(QWidget* parent) : QWidget(parent)
     });
     connect(Table_, &QTableView::activated, this, [this](const QModelIndex& index) {
         const auto* row = Model_->Row(Proxy_->mapToSource(index));
-        if (row != nullptr && row->Kind != content::Kind::AudioSource)
+        if (row != nullptr && (row->Kind == content::Kind::Sound || row->Kind == content::Kind::Music))
         {
             Q_EMIT OpenAudio(row->Id);
+        }
+        else if (row != nullptr && row->Kind == content::Kind::Mesh)
+        {
+            Status_->setText(QStringLiteral("Mesh editing is not available yet."));
         }
     });
     connect(Refresh_, &QPushButton::clicked, this, &ContentWorkspace::Refresh);
