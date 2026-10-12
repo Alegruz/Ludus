@@ -14,7 +14,9 @@ conversion and display changes are described below.
 This is a scene-specific offline vertical slice. The private sample bundle does
 not implement the general Stage 5 cooker, resource catalog, asynchronous GPU
 residency, or editor scene import. Those remain part of the
-[resource manager architecture](../architecture/resource-management.md).
+[project scene import and saved-level workflow](../architecture/resource-management.md#project-scene-import-and-saved-level-workflow).
+The standalone commands below are prototype evidence; they do not provide the
+project → scene → import → viewport → save/reopen product workflow.
 
 ## Prepare the SDK and tools
 

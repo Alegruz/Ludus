@@ -728,6 +728,88 @@ second resource-specific heap, global free hook, or payload-moving defragmenter.
 Specialized pools and arena chunks are adapter choices with measured lifetime
 benefits and explicit release acknowledgment.
 
+## Project scene import and saved-level workflow
+
+Status: required product workflow; not implemented by the standalone staircase2
+conversion/capture prototype. The editor already opens/creates projects and saves
+project-owned world documents, but reference-scene import, suitable lit 3D asset
+bindings and resource-backed reopening still require integration.
+
+The user-facing acceptance sequence is:
+
+1. Create a project or open an existing project.
+2. Create a scene/level or open a saved scene/level in that project.
+3. Choose **Import reference scene**, select the source and let the editor validate,
+   convert and prepare its assets. Conversion is an internal tool operation.
+4. See the imported geometry, materials, textures, lights and camera in the current
+   scene's rendered viewport. The scene remains editable and is marked dirty.
+5. Save the scene/level. Closing and reopening it restores the imported content
+   from project-owned assets without invoking the source importer again.
+
+Project setup and repair follow the existing
+[project SDK workflow](project-sdk-workflow.md). Import must not require editing
+CMake targets, run arguments, renderer source, asset schemas or machine paths.
+An existing project receives the same import operation as a newly created one.
+
+### Durable assets and document ownership
+
+The project owns an asset catalog, immutable cooked artifacts and their dependency
+manifests. Their durable location must be included when the project is copied or
+packaged; an ignored build directory or disposable derived-data cache is not the
+sole owner of a saved level's assets. Preserve attribution/license files with
+imported content. Source locations are provenance and optional reimport inputs,
+not mandatory inputs for reopening an already cooked scene.
+
+The scene/level document owns persistent object IDs, hierarchy, transforms,
+camera and light settings, and stable resource IDs for mesh/material bindings.
+The catalog resolves those resource IDs to exact artifact revisions and required
+texture/material/mesh dependencies. Never serialize renderer handles, GPU pointers,
+leases, request IDs or temporary absolute import paths into the scene document.
+Several levels may reference the same immutable assets while retaining independent
+object placement and edits.
+
+The editor performs import on bounded workers, validates the complete candidate
+closure and reports unsupported features and material approximations. Publish the
+candidate into the open document and its renderer bindings at a controlled
+boundary; failure or cancellation preserves the current scene and its last-good
+rendered version. The resource manager coordinates versions and leases; the
+renderer/RHI own GPU preparation and retirement. Saving verifies that the referenced
+artifact closure is durable before publishing the level document. A failed save
+keeps the document dirty and preserves the previous saved level.
+
+Reopening resolves the saved IDs through the project catalog and loads the cooked
+closure through the resource manager and renderer adapters. Runtime decoding and
+GPU preparation are normal loading work; source-format parsing/conversion is not.
+Only an explicit import/reimport/update operation changes authored asset revisions.
+Importing a second instance must support independent scene objects while reusing
+compatible existing resources. Importing into an existing scene preserves its
+other objects, assets and saved data.
+
+### Implementation admission and acceptance
+
+Stage 5 supplies the project asset/cooking/catalog foundation. Complete the level
+asset-reference contract, texture/material/renderer resource adapters and editor
+import/viewport/save integration as part of this product milestone. Budget and
+validate a profile that admits the reference scene's complete dependency closure;
+the small Stage 3/4 acceptance profiles are not an implicit scene-size guarantee.
+Mip/LOD/chunk streaming in Stage 6 remains a separate capability and is not required
+for a fully resident scene that fits its declared CPU/GPU budgets.
+
+The first complete acceptance test uses staircase2 through the workflow above:
+save, close the editor, move/copy the project, remove access to the original external
+reference-scene directory and discard temporary build/cook caches, then reopen the
+saved level. Verify the hierarchy, asset IDs, transforms, materials, textures,
+lights and camera, render it successfully, and assert that the importer was not
+invoked. Exercise both new and existing projects and both new and existing levels.
+Additional regressions cover shared assets across two levels, duplicate import,
+unsupported source features, missing/corrupt cooked dependencies, failed/cancelled
+imports, failed saves, and source-edit conflicts while retaining last-good data.
+
+Standalone converter invocations, a special executable for one scene, or a saved
+PNG demonstrate isolated mechanisms. They do not satisfy this editor workflow's
+exit condition. The [staircase2 prototype guide](../examples/reference-scene.md)
+records that limited evidence without claiming product integration.
+
 ## Cooking and storage
 
 The [common resource-format roadmap](parsing.md#game-resource-formats) records
@@ -925,7 +1007,7 @@ The review describes design inspiration; it does not supply copied implementatio
 | 2 (implemented) | Fixed-capacity coordinator, one owner, exact-ID lookup, scoped requests, deduplicated operations, lease tokens, durable result records, and explicit budgets. Demonstrate two callers acquiring one sound with independent cancellation. |
 | 3 (implemented) | Immutable CPU mesh definitions demonstrate a second consumer, bounded staged copies, immediate CPU retirement, mixed native sound/mesh acquisition and an installed-SDK renderer handoff. Renderer/RHI separately own copied GPU data; no graphics-specific branch enters the coordinator. One-pending AudioContent limits remain. |
 | 4 | Implemented: transactional replacement and required DAG scheduling. Prove diamond sharing, parent/child replacement coherence, last-good retention, and physical retirement. |
-| 5 | Add cooker dependency manifests, exact artifact keys, dump tooling, deterministic release publication, and optional independently chunked packs. Measure against loose files. |
+| 5 | Add project-owned cooked assets/catalogs, dependency manifests, exact artifact keys, dump tooling and deterministic publication. Complete the [project scene import and saved-level workflow](#project-scene-import-and-saved-level-workflow), including level references and renderer/editor adapters. Reopen a moved saved project without source reimport. Independently chunked packs remain optional; measure against loose files. |
 | 6 | Add actual mip/LOD/chunk streaming after RHI capabilities exist; implement trace-driven layout, deadlines, and alternative cache policy only with representative evidence. |
 
 Do not introduce remote caches, custom lock-free tables, universal reflection,
