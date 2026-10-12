@@ -331,6 +331,33 @@ TEST_CASE("Content completion runs on the GUI owner and shutdown acknowledges ca
     CHECK_FALSE(jobs.Start(request));
 }
 
+TEST_CASE("Destroying active content owners retires copied work without late delivery",
+          "[editor][content][concurrency]")
+{
+    QTemporaryDir root;
+    const auto catalog = QByteArrayLiteral("{\"version\":1,\"resources\":[]}\n");
+    Write(root.filePath(QStringLiteral("catalog.json")), catalog);
+    bool delivered = false;
+    for (uint32 attempt = 0; attempt < 32; ++attempt)
+    {
+        ContentJobs jobs;
+        ContentRequest request;
+        request.Root = root.path();
+        request.Operation = attempt;
+        QObject::connect(&jobs, &ContentJobs::Completed, QApplication::instance(), [&](const ContentResult&) {
+            delivered = true;
+        });
+        REQUIRE(jobs.Start(request));
+        // Destroy before polling completion; detached retirement must not borrow
+        // the GUI owner's implementation or emit a later completion to it.
+    }
+    QTest::qWait(100);
+    CHECK_FALSE(delivered);
+    QFile file(root.filePath(QStringLiteral("catalog.json")));
+    REQUIRE(file.open(QIODevice::ReadOnly));
+    CHECK(file.readAll() == catalog);
+}
+
 TEST_CASE("Browser imports acknowledge publication and refresh the selected stable ID", "[editor][content][widget]")
 {
     QTemporaryDir root, exported;

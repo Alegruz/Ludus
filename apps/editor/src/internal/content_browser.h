@@ -69,7 +69,7 @@ struct ContentResult final
     content::Digest CatalogDigest;
 };
 
-// One bounded request at a time. Workers touch only shared owned state. Polling
+// One bounded request at a time. Each worker owns its copied state. Polling
 // runs only during an operation; destruction cancels without joining a thread.
 // Finished acknowledges owned work before normal window shutdown completes.
 class ContentJobs final : public QObject

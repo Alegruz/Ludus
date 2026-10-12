@@ -59,6 +59,7 @@ public:
 Q_SIGNALS:
     void DocumentChanged();
     void PlayRequested();
+    void PreviewStarting();
 
 private:
     void Render();

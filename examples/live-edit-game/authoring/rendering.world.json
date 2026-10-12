@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "schema": "ludus.world.starter.v1",
+  "entities": [
+    {
+      "id": "starter.cube",
+      "name": "Starter Cube",
+      "components": {
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "z": 0,
+          "rx": 0,
+          "ry": 25,
+          "rz": 0,
+          "sx": 1,
+          "sy": 1,
+          "sz": 1
+        },
+        "presentation": {
+          "visible": true,
+          "asset": "mesh.cube",
+          "sound": "",
+          "caption": "object.cube",
+          "style": "solid"
+        },
+        "renderable": {
+          "mesh": "mesh.cube",
+          "texture": "texture.ludus",
+          "visible": true,
+          "r": 1,
+          "g": 1,
+          "b": 1
+        }
+      }
+    },
+    {
+      "id": "starter.target",
+      "name": "Target Marker",
+      "components": {
+        "transform": {
+          "x": 2,
+          "y": 0,
+          "z": 0,
+          "rx": 0,
+          "ry": 0,
+          "rz": 0,
+          "sx": 1,
+          "sy": 1,
+          "sz": 1
+        },
+        "behavior": {
+          "enabled": true,
+          "priority": 0,
+          "target": "starter.cube"
+        }
+      }
+    },
+    {
+      "id": "preview.camera",
+      "name": "Preview Camera",
+      "components": {
+        "transform": {
+          "x": 0,
+          "y": 0,
+          "z": 6,
+          "rx": 0,
+          "ry": 0,
+          "rz": 0,
+          "sx": 1,
+          "sy": 1,
+          "sz": 1
+        },
+        "camera": {
+          "projection": "perspective",
+          "fov": 60,
+          "span": 8,
+          "near": 0.1,
+          "far": 100,
+          "follow": ""
+        }
+      }
+    }
+  ]
+}

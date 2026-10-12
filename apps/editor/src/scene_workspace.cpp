@@ -72,6 +72,7 @@ SceneWorkspace::SceneWorkspace(QWidget* parent) : QWidget(parent), Preview_(&Doc
     PreviewButton_ = button({QStringLiteral("Open rendered preview"), QStringLiteral("scene.preview")}, [this]() {
         if (Apply())
         {
+            Q_EMIT PreviewStarting();
             (void)Preview_.Start();
         }
     });

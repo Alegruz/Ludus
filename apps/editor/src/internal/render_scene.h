@@ -1,0 +1,83 @@
+#pragma once
+
+#include <ludus/foundation/base/types.h>
+
+#include <ludus/foundation/math/transform.hpp>
+#include <ludus/foundation/math/vector.hpp>
+#include <ludus/gameplay/camera/evaluation.hpp>
+#include <ludus/graphics/renderer/views.hpp>
+
+#include "internal/world_document.h"
+
+#include <QImage>
+#include <QJsonObject>
+#include <QVector>
+
+namespace ludus::editor
+{
+// Private extraction adapter: project bindings name existing World properties.
+// Load validates every file before replacing output; no game code is executed.
+struct PreviewMesh final
+{
+    QString Id;
+    QVector<foundation::math::Vector3> Positions;
+    QVector<foundation::math::Vector2> Uvs;
+    QVector<foundation::uint32> Indices;
+};
+struct PreviewTexture final
+{
+    QString Id;
+    QImage Pixels;
+};
+struct PreviewSurface final
+{
+    foundation::int32 Texture = 0;
+    foundation::math::Vector4 Tint{1, 1, 1, 1};
+};
+struct PreviewObject final
+{
+    QString Id;
+    QString Name;
+    foundation::int32 Mesh = 0;
+    foundation::int32 Texture = -1;
+    foundation::int32 Surface = -1;
+    foundation::math::Affine3 Transform;
+    foundation::math::Vector4 Tint{1, 1, 1, 1};
+};
+struct PreviewCamera final
+{
+    QString Id;
+    QString Name;
+    QString FollowId;
+    gameplay::camera::CameraSample Sample;
+    gameplay::camera::CameraTrace Trace;
+};
+struct PreviewViewOptions final
+{
+    foundation::int32 Camera = -1;
+    foundation::math::Vector2 OrbitDegrees{25, 20};
+    foundation::float32 Distance = 3;
+    foundation::uint32 Width = 0, Height = 0;
+    bool Reference = false;
+    const foundation::math::Vector3* OrbitCenter = nullptr;
+    foundation::float32 OrbitRadius = 0;
+};
+struct RenderScene final
+{
+    QVector<PreviewMesh> Meshes;
+    QVector<PreviewTexture> Textures;
+    QVector<PreviewObject> Objects;
+    QVector<PreviewSurface> Surfaces;
+    QVector<PreviewCamera> Cameras;
+    foundation::math::Vector3 Center{};
+    foundation::float32 Radius = 1;
+    QByteArray Identity;
+    QByteArray AssetsIdentity;
+    QJsonObject RenderableBinding;
+    [[nodiscard]] static bool
+    Load(const QString& root, const WorldDocument& world, RenderScene& output, QString& error);
+    // camera=-1 selects the independent editor orbit. All failures preserve output.
+    [[nodiscard]] bool
+    View(const PreviewViewOptions& options, graphics::renderer::ViewDescription& output, QString& error) const;
+};
+} // namespace ludus::editor

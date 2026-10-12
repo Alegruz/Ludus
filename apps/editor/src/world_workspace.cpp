@@ -1,6 +1,12 @@
 #include "internal/world_workspace.h"
+#include "internal/render_panel.h"
+
+#include <ludus/foundation/math/scalar.hpp>
 
 #include <QCheckBox>
+#include <QColorDialog>
+#include <QColorSpace>
+#include <QColorTransform>
 #include <QComboBox>
 #include <QCryptographicHash>
 #include <QDir>
@@ -100,6 +106,10 @@ WorldWorkspace::WorldWorkspace(QWidget* parent) : QWidget(parent)
     PathLabel_->setWordWrap(true);
     PathLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     layout->addWidget(PathLabel_);
+    Render_ = new RenderPanel(this);
+    layout->addWidget(Render_);
+    connect(Render_, &RenderPanel::Starting, this, &WorldWorkspace::PreviewStarting);
+    connect(Render_, &RenderPanel::TintRequested, this, &WorldWorkspace::PickTint);
     auto* split = new QSplitter(this);
     layout->addWidget(split, 1);
     auto* left = new QWidget(split);
@@ -278,6 +288,7 @@ void WorldWorkspace::SetProject(const QString& root, foundation::uint64 epoch)
     {
         return;
     }
+    StopPreview();
     Root_ = canonical;
     Epoch_ = epoch;
     Path_.clear();
@@ -286,7 +297,9 @@ void WorldWorkspace::SetProject(const QString& root, foundation::uint64 epoch)
     SchemaDisk_.clear();
     Pending_ = false;
     Unsaved_ = false;
+    ++DocumentGeneration_;
     Document_.Clear();
+    Render_->SetWorld(Root_, &Document_);
     RecoveryFailed_ = false;
     Render();
     Changed(Root_.isEmpty() ? QStringLiteral("Open a project to begin.")
@@ -362,7 +375,10 @@ bool WorldWorkspace::Open(const QString& path)
         return false;
     }
     RecoveryFailed_ = false;
+    StopPreview();
+    ++DocumentGeneration_;
     Document_ = candidate;
+    Render_->SetWorld(Root_, &Document_);
     SchemaDisk_ = schema;
     Disk_ = bytes;
     Path_ = QFileInfo(path).absoluteFilePath();
@@ -397,7 +413,10 @@ bool WorldWorkspace::Create(const QString& path)
         return false;
     }
     RecoveryFailed_ = false;
+    StopPreview();
+    ++DocumentGeneration_;
     Document_ = candidate;
+    Render_->SetWorld(Root_, &Document_);
     SchemaDisk_ = schema;
     Disk_.clear();
     Path_ = QFileInfo(path).absoluteFilePath();
@@ -596,6 +615,80 @@ void WorldWorkspace::RenderInspector()
     }
     Inspector_->addStretch();
 }
+void WorldWorkspace::PickTint(const QString& id, const QJsonObject& binding)
+{
+    if (Pending_ || id != Selected_ || Document_.Entity(id).isEmpty())
+    {
+        return;
+    }
+    const auto component = binding.value(QStringLiteral("component")).toString();
+    const auto properties = binding.value(QStringLiteral("properties")).toObject();
+    const auto values = Document_.Entity(id).value(QStringLiteral("components")).toObject().value(component).toObject();
+    const auto channel = [&values, &properties](const QString& key) {
+        return static_cast<foundation::float32>(
+            foundation::math::Clamp(values.value(properties.value(key).toString()).toDouble(),
+                                    foundation::float64{0},
+                                    foundation::float64{1}));
+    };
+    // Thanks to The Qt Company, "QColorTransform Class", Qt 6 GUI:
+    // https://doc.qt.io/qt-6/qcolortransform.html . Private presentation converts
+    // display-sRGB picker colors to the renderer's linear tint; engine values
+    // remain plain RGB, and no independent transfer approximation is introduced.
+    const auto linearToDisplay =
+        QColorSpace(QColorSpace::SRgbLinear).transformationToColorSpace(QColorSpace(QColorSpace::SRgb));
+    const auto displayToLinear =
+        QColorSpace(QColorSpace::SRgb).transformationToColorSpace(QColorSpace(QColorSpace::SRgbLinear));
+    const auto initial = linearToDisplay.map(
+        QColor::fromRgbF(channel(QStringLiteral("r")), channel(QStringLiteral("g")), channel(QStringLiteral("b"))));
+    auto* picker = new QColorDialog(initial, this);
+    picker->setObjectName(QStringLiteral("worldTintPicker"));
+    picker->setWindowTitle(QStringLiteral("Tint — ") + Document_.Entity(id).value(QStringLiteral("name")).toString());
+    picker->setAttribute(Qt::WA_DeleteOnClose);
+    const auto generation = DocumentGeneration_;
+    const auto draft = Document_.Draft();
+    connect(picker,
+            &QColorDialog::colorSelected,
+            this,
+            [this, id, component, properties, generation, draft, initial, displayToLinear](const QColor& display) {
+                if (DocumentGeneration_ != generation || id != Selected_ || Pending_ || Document_.Draft() != draft)
+                {
+                    Changed(QStringLiteral(
+                        "World or selection changed while choosing tint. Choose again; fields were preserved."));
+                    return;
+                }
+                if (display.rgba64() == initial.rgba64())
+                {
+                    Changed(QStringLiteral("Tint is unchanged."));
+                    return;
+                }
+                QLineEdit* fields[3]{};
+                const QString names[]{QStringLiteral("r"), QStringLiteral("g"), QStringLiteral("b")};
+                for (foundation::usize i = 0; i < 3; ++i)
+                {
+                    fields[i] = qobject_cast<QLineEdit*>(
+                        Fields_.value(FieldKey(component, properties.value(names[i]).toString())));
+                    if (fields[i] == nullptr)
+                    {
+                        Changed(QStringLiteral("Tint mapping no longer matches the inspector. Fields were preserved."));
+                        return;
+                    }
+                }
+                const auto linear = displayToLinear.map(display);
+                if (!linear.isValid())
+                {
+                    return;
+                }
+                const foundation::float32 channels[]{linear.redF(), linear.greenF(), linear.blueF()};
+                for (foundation::usize i = 0; i < 3; ++i)
+                {
+                    fields[i]->setText(QString::number(static_cast<foundation::float64>(channels[i]), 'g', 17));
+                }
+                Pending();
+                Changed(QStringLiteral(
+                    "Tint chosen. Apply Changes validates all fields together; Reset Fields cancels it."));
+            });
+    picker->open();
+}
 void WorldWorkspace::Pending()
 {
     Pending_ = true;
@@ -625,6 +718,7 @@ void WorldWorkspace::Changed(const QString& message)
     PathLabel_->setText(Path_.isEmpty()
                             ? QStringLiteral("No world open")
                             : (Dirty() ? QStringLiteral("● ") : QString()) + QDir(Root_).relativeFilePath(Path_));
+    Render_->SetSelection(Selected_, Pending_);
     Q_EMIT DocumentChanged();
 }
 bool WorldWorkspace::Apply()
@@ -757,6 +851,7 @@ QByteArray WorldWorkspace::RecoveryHeader() const
 }
 void WorldWorkspace::Snapshot()
 {
+    Render_->WorldChanged();
     RecoveryFailed_ = Document_.Dirty() && !Unsaved_;
     if (!Unsaved_ && !Document_.Dirty() && Inside(Path_, true))
     {
@@ -824,6 +919,7 @@ bool WorldWorkspace::Recover()
     Pending_ = false;
     Selected_.clear();
     Render();
+    Render_->WorldChanged();
     Changed(QStringLiteral("Recovery restored for review. Save World to publish it."));
     return true;
 }
@@ -850,6 +946,7 @@ bool WorldWorkspace::ConfirmDiscard()
     }
     Pending_ = false;
     Document_.Discard();
+    Render_->WorldChanged();
     // Keep a new world marked unsaved until its caller closes/replaces it.
     // Discard only author-owned recovery for the same baseline, never symlinks.
     QByteArray envelope;
@@ -861,6 +958,10 @@ bool WorldWorkspace::ConfirmDiscard()
     Render();
     Changed(QStringLiteral("Changes discarded."));
     return true;
+}
+void WorldWorkspace::StopPreview() noexcept
+{
+    Render_->Stop();
 }
 void WorldWorkspace::Undo()
 {

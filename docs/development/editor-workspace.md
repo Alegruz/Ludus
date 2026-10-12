@@ -27,7 +27,7 @@ editor package; launching the native editor does not need those files on disk.
 | --- | --- |
 | Welcome | New/Open and recent projects while no project is open |
 | Project | Setup/engine overview, lifecycle actions, name/profile and expandable build/launch details |
-| World | Project-defined entities/components, typed fields, references, history and save/recovery |
+| World | Project-defined entities/components, typed fields, references, history/save/recovery and bound native 3D preview |
 | Scene | World-demo level selection, transforms, history, save/recovery and trusted preview |
 | Scripts | Project-owned script and sequence drafts |
 | Audio | Content selection, definitions, save and preview |
@@ -491,6 +491,117 @@ hierarchy/parenting, multi-selection, prefab/archetype workflows, schema migrati
 viewport gizmos, automatic runtime binding and browser import/export are still
 unsupported. The browser World tab explains its native-editor requirement and
 disables its file actions. The existing sample Scene workflow remains available.
+
+## World renderer and camera preview
+
+World now has a native 3D authoring adapter using the engine's mesh, unlit material,
+reverse-Z view and C0 camera APIs. It extracts **applied** World data; it never loads
+project code or changes simulation state. Camera/orbit/reference controls are
+preview settings and do not enter Save, Undo or recovery. The engine's current
+L4 lighting implementation remains available to games, but this adapter previews
+opaque flat/textured unlit surfaces only. See the owning
+[renderer contract](../architecture/renderer-systems.md) and
+[camera contract](../architecture/camera-systems.md).
+
+### Try a 3D authoring workflow
+
+Build the native editor using [Enable the rendered authoring surface](#enable-the-rendered-authoring-surface); the same option cooks the trusted renderer stages.
+
+1. Open a writable **live-edit-game** sample and select **World**.
+2. Open `authoring/rendering.world.json`, then choose **Preview 3D**.
+   The native renderer opens its own window. Asset validation runs in an owned
+   worker; the World editor remains responsive during bounded file reads/decoding.
+3. Select **Starter Cube** in World. Edit Position/rotation/scale or Renderable
+   tint, visibility, mesh and color texture; **Apply Changes** updates the preview.
+   **Tint…** opens a display-sRGB picker and fills pending linear RGB values;
+   Apply/Reset still own the transaction, while numeric fields remain available.
+   **Save World** persists the applied data. Invalid fields stay in the inspector.
+4. Expand **Camera and diagnostics**. Use editor orbit/distance or select
+   **Preview Camera** to see its authored pose and lens. **Frame all visible
+   objects** explicitly recenters/rescales editor navigation without moving saved
+   objects or cameras. Applied object transforms preserve the existing editor
+   viewpoint so their movement/scale changes stay visible.
+   The settings area scrolls at small window sizes.
+5. Select the camera entity in World to edit projection, vertical FOV in degrees,
+   orthographic span, near/far distances or XY-follow target. Camera scale must
+   be one. Apply validates the World schema; preview validation additionally
+   checks cross-field lens and C0 recipe constraints.
+6. Use **Reload preview assets** after editing mesh/PNG/binding files outside the
+   editor. An accepted preview is a frozen snapshot, not a file-watching promise.
+   Invalid replacement files retain the prior preview with persistent stale-data
+   feedback. **Close preview** cancels pending publication and closes its device.
+
+The native Scene sample preview and World 3D preview share one device admission
+boundary. Opening either closes the other authoring surface; launching a game
+also closes World rendering. Project/document replacement prevents late worker
+results from reopening or publishing into another document. Failed GPU setup
+stops the surface with feedback and preserves World edits; reopening retries.
+Browser builds and native builds without `LUDUS_EDITOR_RENDER_PREVIEW` explain
+why rendering is unavailable. The existing Scene workflow is still its separate
+world-demo adapter.
+
+### Audience tasks and acceptance cases
+
+| Consumer/task | Supported path and observable acceptance |
+| --- | --- |
+| Beginner follows a starter | Open the shipped textured cube, preview, edit a named position field, Apply, Save and Undo. Navigation never dirties the document; required transforms already exist. |
+| Unity/Unreal/Godot user blocks out a scene | Add Renderable to an entity, assign declared mesh/texture, adjust XYZ rotation and positive scale, then frame all or select a camera. Asset IDs and camera selection survive unrelated edits. |
+| Artist/designer/audio/localization contributor reviews content | Mesh/color-texture choices use the existing typed inspector; non-rendering entities remain part of World. Edit visible/tint or camera framing without a compiler/toolchain command. Pending inspector text is never silently treated as applied geometry. |
+| Professional integrates a bounded project scene | Bind existing project component/property IDs, use indexed XYZ/UV meshes and sRGB PNG color textures, and check lens/capacity errors before publication. No glTF/FBX importer or production-scale scene claim is implied. |
+| Engine engineer owns a custom world | Supply the explicit semantic mapping below. No C++ component layout is guessed, no ECS storage is borrowed and no project library is loaded. Runtime extraction remains game-owned. |
+| Rendering researcher compares visibility | Use the copied submitted/visible/culled/draw counts, authored-camera trace and reference mode. Reference disables CPU culling/sorting/instancing, while normal GPU clipping still applies. This is inspection, not a profiler or lighting/shadow workbench. |
+| QA tests broken inputs and lifecycle | Corrupt JSON/PNG/indices, retarget a path, change lens ordering, close during a load, switch documents, resize and reopen. Failures preserve authoring data; stale workers cannot publish and stale preview feedback stays visible. |
+
+These are designed acceptance scenarios and automated/native checks, not
+representative-user interview evidence. Native frame acceptance and existing
+renderer pixel tests serve different purposes; offscreen widget tests do not
+prove displayed GPU pixels, pointer interactions, IME or screen-reader behavior.
+
+### Project-owned preview bindings and assets
+
+The source root supplies `authoring/render.preview.json`, a strict version-1
+object containing `schema` equal to the World schema ID, `transform`, `renderable`,
+`camera`, `meshes` and `textures`. Each semantic role is an object with a
+`component` ID and `properties` map. Component and property IDs may be renamed:
+the map keys below are semantic names; the map values are project property IDs.
+The `camera` role may be `null` when the project uses editor orbit only.
+Unknown fields, duplicate keys, missing/duplicate mappings and wrong property
+types reject. The shipped descriptor is a complete example.
+
+| Role | Required semantic map keys and property types |
+| --- | --- |
+| transform | `x`, `y`, `z`, `rx`, `ry`, `rz`, `sx`, `sy`, `sz`: number. Translation uses world units; rotations use degrees, applying X then Y then Z; scales are positive. |
+| renderable | `mesh`, `texture`: asset; `visible`: boolean; `r`, `g`, `b`: number in [0,1], interpreted as linear tint. Empty texture selects flat color; visible renderables require a mapped mesh. |
+| camera | `projection`: enum with supported values `perspective`, `orthographic`, `infinite`; `fov`, `span`, `near`, `far`: number; `follow`: entity. Empty follow is fixed; nonempty follow resolves a transformed target through C0's immediate orthographic XY recipe with zero offset. |
+
+Renderable/camera entities must also have the mapped transform component. Camera
+rotation is rigid, +Y up and -Z forward; XY follow requires identity rotation.
+Other entity components remain untouched. Camera selection uses the persistent
+World ID and falls back visibly to editor orbit when the selected camera is removed.
+
+`meshes` and `textures` are arrays of `{ "id": "...", "path": "..." }` entries.
+IDs must already be declared in World schema assets with kind `mesh` or `texture`.
+Paths are normalized project-relative regular files; traversal, absolute paths,
+symlinks and unreadable files reject. Mesh files are strict JSON objects with
+`version: 1`, `positions` (XYZ arrays), matching `uvs` (top-left XY arrays) and
+triangle-list `indices`. Each index must be a nonnegative integer JSON token within the vertex array
+(decimal/exponent indices are not accepted).
+Meshes have at most 4096 vertices/12288 indices and a 1 MiB file limit. PNG color
+textures have a 4 MiB file limit, at most 2048 pixels per axis, one initialized
+mip and nearest/clamp sampling; bytes are interpreted as sRGB with opaque output.
+PNG profiles do not select another render color space in this adapter.
+
+The adapter validates at most six declared meshes/eight textures and eight
+distinct texture/tint combinations (identical surfaces are shared), within the renderer's fixed material-version budget.
+World retains its 128-entity bound. Positions, transformed vertices and numeric
+extraction are bounded to ±1,000,000. Resource admission can fail earlier on a
+particular device; file/schema validation does not promise GPU availability.
+It validates every declared preview asset, including unused entries.
+
+The sample cube mesh, texture and rendering World are editor authoring examples;
+they do not drive live-edit-game's runtime. Lighting, shadows, bake authoring,
+masked/painter surfaces, UV/sampler/mip editing, mesh importers, viewport picking,
+transform gizmos, hierarchy/prefabs and browser rendering remain later slices.
 
 ## S4 scene authoring
 
