@@ -103,3 +103,8 @@ if(NOT EMSCRIPTEN AND LUDUS_SPIRV_CROSS)
         SOURCE "${Ludus_DIR}/shaders/renderer_lit.slang" VERTEX vertexMain FRAGMENT shadowMain)
     ludus_compile_ray_queries(TARGET ludus_sdk_reference_capture NAME ray_query)
 endif()
+
+# Build the real offline scene consumer through the same installed-SDK boundary.
+if(NOT EMSCRIPTEN AND LUDUS_SPIRV_CROSS)
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../examples/reference-scene" reference-scene)
+endif()
