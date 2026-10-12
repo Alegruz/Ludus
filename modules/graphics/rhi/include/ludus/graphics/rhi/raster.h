@@ -274,7 +274,8 @@ struct TextureCpuContent final
 [[nodiscard]] RasterStatus
 GetTextureCpuContent(DeviceHandle, TextureHandle, ludus::foundation::uint32 mip, TextureCpuContent&) noexcept;
 /// Query through a retained sampled view, including after its source texture owner
-/// was destroyed. Same readiness/failure rules; the view must remain retained.
+/// was destroyed. mip is relative to the view (zero selects BaseMip), and must
+/// be less than its MipCount. Same readiness/failure rules; keep the view retained.
 [[nodiscard]] RasterStatus
 GetTextureCpuContent(DeviceHandle, TextureViewHandle, ludus::foundation::uint32 mip, TextureCpuContent&) noexcept;
 /// Portable within-level minification/magnification filter; mip interpolation is separate.
