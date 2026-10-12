@@ -27,7 +27,7 @@ DOCUMENTATION_FILES = frozenset({
     "scripts/python/test_wiki.py",
 })
 NATIVE_JOBS = (
-    "macos-compile", "formatting", "debug-runtime", "development",
+    "macos-compile", "macos-sanitizers", "macos-analysis", "formatting", "debug-runtime", "development",
     "sanitizers", "filesystem-fuzz", "threading-races", "analysis", "editor",
     "assertion-policy", "pch", "build-budget", "scripting-qualification",
 )
