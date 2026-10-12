@@ -988,9 +988,14 @@ historical 192 format/load/store/depth combinations. Other backends encode that
 state directly. Execution cannot grow engine storage.
 Whole-batch/graph frame-limit rejection happens before native draw work and
 preserves the plan for retry or discard. General limits do not enlarge the
-fullscreen compatibility facade, fixed upload/readback staging rings, or the
-separate initial ray-query record limits. Ray allocation telemetry retains its
-existing `GetRayAllocation`/`GetRayResourceStats` contract.
+fullscreen compatibility facade or fixed upload/readback staging rings. Optional
+RT0 records now use the same stable-page host accounting with independent
+`StorageLimits::RayResourcesPerKind`; `RayInstances` requests the static TLAS
+instance ceiling reported by `RayCapabilities::MaxInstances`. Instance identity
+representation/device bounds and per-resource ray byte budgets remain enforced.
+Ray allocation telemetry retains `GetRayAllocation`/`GetRayResourceStats`;
+structure/buffer/scratch bytes stay in those categories rather than general
+`ResourceBytes`. See [renderer L5.1](../architecture/renderer-systems.md#l51-budgeted-scene-capacity).
 
 `GetStorageUsage` copies current and peak accounting without allocating or
 waiting. `HostBytes` includes registry/backend metadata, optional retained CPU texture copies, owned packet/use/report

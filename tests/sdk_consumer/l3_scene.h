@@ -9,16 +9,22 @@ inline graphics::renderer::MaterialDescription L3Material(foundation::usize inde
     namespace rr = graphics::renderer;
     rr::MaterialDescription material;
     if (index == 0 || index == 1 || index == 4)
+    {
         material.Texture = texture;
+    }
     if (index == 0)
     {
         material.Lod = 1;
         material.Sampler.MipFilter = graphics::rhi::RasterMipFilter::Nearest;
     }
     if (index == 2)
+    {
         material.Tint = {1, 0, 0, 1};
+    }
     if (index == 3)
+    {
         material.Tint = {0, 0, 1, 1};
+    }
     if (index == 4)
     {
         material.Alpha = rr::MaterialAlpha::Masked;
@@ -30,7 +36,9 @@ inline graphics::renderer::MaterialDescription L3Material(foundation::usize inde
         material.Tint = {0, 0, 1, .5F};
     }
     if (index == 6)
+    {
         material.Tint = {1, 0, 1, 1};
+    }
     return material;
 }
 inline void L3Items(graphics::renderer::Mesh mesh,
@@ -60,7 +68,9 @@ inline void L3Items(graphics::renderer::Mesh mesh,
         item.Transform.Columns[1].Y = (r.W - r.Y) / 64;
         item.Transform.Translation = {(r.X + r.Z) / 96 - 1, 1 - (r.Y + r.W) / 64, i == 5 ? -.1F : 0};
         if (i == 7)
+        {
             item.Pass = rr::Layer::Overlay;
+        }
     }
 }
 inline graphics::rhi::RasterStatus L3Mesh(graphics::renderer::Renderer& renderer,

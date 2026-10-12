@@ -262,7 +262,11 @@ CreateRayScene(DeviceHandle device, const RaySceneDescription& description, RayS
     {
         return StorageFailure();
     }
-    usize uvOffsets[RASTER_CAPACITY]{};
+    StorageArray<usize> uvOffsets;
+    if (!uvOffsets.TryResize(gRecords[static_cast<usize>(RasterKind::RayGeometry)].GetSize()))
+    {
+        return StorageFailure();
+    }
     for (usize i = 0; i < description.Count; ++i)
     {
         const auto& input = description.Instances[i];

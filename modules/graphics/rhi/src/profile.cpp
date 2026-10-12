@@ -387,6 +387,8 @@ bool ValidStorageLimits(const StorageLimits& limits) noexcept
 {
     constexpr foundation::uint32 invalid = ~foundation::uint32{0};
     const foundation::uint32 counts[]{limits.ResourcesPerKind,
+                                      limits.RayResourcesPerKind,
+                                      limits.RayInstances,
                                       limits.DrawsPerFrame,
                                       limits.Batches,
                                       limits.DrawsPerPlan,

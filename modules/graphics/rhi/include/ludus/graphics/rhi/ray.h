@@ -63,7 +63,8 @@ struct RayCapabilities final
     bool Updates = false;
     /// Motion geometry; false for RT0.
     bool Motion = false;
-    /// Maximum instances per scene in the bounded shading-table profile.
+    /// Enabled maximum instances per scene, clamped from StorageLimits::RayInstances
+    /// by backend/representation limits. Per-scene byte budgets may reject smaller scenes.
     ludus::foundation::uint32 MaxInstances = 0;
     /// Maximum rays per submitted batch; larger jobs must explicitly tile.
     ludus::foundation::uint32 MaxRays = 0;

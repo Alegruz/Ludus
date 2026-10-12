@@ -40,9 +40,9 @@ struct RayVulkanBatch final
     VkFence Fence = VK_NULL_HANDLE;
     usize Count = 0;
 };
-RayVulkanStructure gRayVulkanGeometry[internal::RASTER_CAPACITY], gRayVulkanScene[internal::RASTER_CAPACITY];
-RayVulkanProgram gRayVulkanProgram[internal::RASTER_CAPACITY];
-RayVulkanBatch gRayVulkanBatch[internal::RASTER_CAPACITY];
+internal::StorageTable<RayVulkanStructure> gRayVulkanGeometry, gRayVulkanScene;
+internal::StorageTable<RayVulkanProgram> gRayVulkanProgram;
+internal::StorageTable<RayVulkanBatch> gRayVulkanBatch;
 void RayVulkanDropBuffer(RayVulkanBuffer& buffer) noexcept
 {
     if (buffer.Object != VK_NULL_HANDLE)
@@ -294,18 +294,25 @@ RayCapabilities RayLimits() noexcept
         return {};
     }
     const auto bufferLimit = ComputeLimits().MaxStorageRange;
+    const auto requested = internal::CurrentStorageLimits().RayInstances;
+    const auto supported =
+        gRayProperties.maxInstanceCount < requested ? static_cast<uint32>(gRayProperties.maxInstanceCount) : requested;
+    // Vulkan instanceCustomIndex is a 24-bit field; query results use that identity.
     return
     {
         .StaticTriangles = true,
         .InlineQueries = true,
-        .MaxInstances =
-            gRayProperties.maxInstanceCount < 256 ? static_cast<uint32>(gRayProperties.maxInstanceCount) : 256U,
+        .MaxInstances = supported < 0x01000000U ? supported : 0x01000000U,
         .MaxRays = 4096,
         .MaxBufferBytes = bufferLimit < usize{64} * 1024 * 1024 ? bufferLimit : usize{64} * 1024 * 1024,
     };
 }
 RasterStatus RayCreateProgram(usize slot, const ShaderDescription& description) noexcept
 {
+    if (!gRayVulkanProgram.EnsureSlots(slot + 1))
+    {
+        return internal::StorageFailure();
+    }
     if (description.Spirv.size() < 5 || description.Spirv[0] != 0x07230203 || description.SpirvEntry.empty() ||
         description.SpirvEntry.size() >= 64)
     {
@@ -375,6 +382,10 @@ RasterStatus RayCreateProgram(usize slot, const ShaderDescription& description) 
 RasterStatus
 RayCreateGeometry(usize slot, const RayGeometryDescription& description, RayAllocation& allocation) noexcept
 {
+    if (!gRayVulkanGeometry.EnsureSlots(slot + 1))
+    {
+        return internal::StorageFailure();
+    }
     const auto& d = description;
     const auto vertexBytes = d.VertexCount * 3 * sizeof(float32), indexBytes = d.IndexCount * sizeof(uint32);
     if (d.IndexCount / 3 > gRayProperties.maxPrimitiveCount || vertexBytes > d.ByteBudget ||
@@ -422,6 +433,10 @@ RayCreateGeometry(usize slot, const RayGeometryDescription& description, RayAllo
 RasterStatus
 RayCreateScene(usize slot, const internal::NativeRaySceneDescription& description, RayAllocation& allocation) noexcept
 {
+    if (!gRayVulkanScene.EnsureSlots(slot + 1))
+    {
+        return internal::StorageFailure();
+    }
     const auto* input = description.Instances;
     const auto* opacity = description.Opacity;
     const auto count = description.Count, scalarCount = description.ScalarCount, budget = description.ByteBudget;
@@ -490,6 +505,10 @@ RayCreateScene(usize slot, const internal::NativeRaySceneDescription& descriptio
 }
 RasterStatus RaySubmit(usize slot, const internal::NativeRaySubmission& submission, RayAllocation& allocation) noexcept
 {
+    if (!gRayVulkanBatch.EnsureSlots(slot + 1))
+    {
+        return internal::StorageFailure();
+    }
     const auto programSlot = submission.Program, sceneSlot = submission.Scene, count = submission.Count;
     const auto* rays = submission.Rays;
 
@@ -658,15 +677,15 @@ RasterStatus RayRead(usize slot, RayResult* output, usize count) noexcept
 }
 void RayDestroy(internal::RasterKind kind, usize slot) noexcept
 {
-    if (kind == internal::RasterKind::RayGeometry)
+    if (kind == internal::RasterKind::RayGeometry && slot < gRayVulkanGeometry.GetSize())
     {
         RayVulkanDropStructure(gRayVulkanGeometry[slot]);
     }
-    else if (kind == internal::RasterKind::RayScene)
+    else if (kind == internal::RasterKind::RayScene && slot < gRayVulkanScene.GetSize())
     {
         RayVulkanDropStructure(gRayVulkanScene[slot]);
     }
-    else if (kind == internal::RasterKind::RayProgram)
+    else if (kind == internal::RasterKind::RayProgram && slot < gRayVulkanProgram.GetSize())
     {
         auto& program = gRayVulkanProgram[slot];
         if (program.Pipeline != VK_NULL_HANDLE)
@@ -687,7 +706,7 @@ void RayDestroy(internal::RasterKind kind, usize slot) noexcept
         }
         program = {};
     }
-    else if (kind == internal::RasterKind::RayBatch)
+    else if (kind == internal::RasterKind::RayBatch && slot < gRayVulkanBatch.GetSize())
     {
         auto& batch = gRayVulkanBatch[slot];
         if (batch.Pool != VK_NULL_HANDLE)
