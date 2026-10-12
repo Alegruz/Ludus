@@ -1,8 +1,19 @@
 #include <ludus/foundation/base/types.h>
 
 #if defined(LUDUS_CONTROL_TSAN)
-#    include <atomic>
-#    include <thread>
+#    include <pthread.h>
+
+namespace
+{
+// Keep the control slot independent of thread-wrapper allocation/lifetime state.
+alignas(64) volatile ludus::foundation::int32 raceValue = 0;
+
+void* WriteRaceValue(void*) noexcept
+{
+    raceValue = 1;
+    return nullptr;
+}
+} // namespace
 #endif
 
 // Deliberate test-only defects. Run through sanitizer_control.py, which checks
@@ -31,23 +42,22 @@ int main(int argumentCount, char**)
     return value == 0 ? 1 : 0;
 #elif defined(LUDUS_CONTROL_TSAN)
     // Thanks to LLVM, "ThreadSanitizer", Clang 18.1.8, Usage (tiny_race.c),
-    // for conflicting parent/worker writes before join. Adapted to std::thread,
-    // a pre-write start gate and an isolated volatile slot; no post-write rendezvous.
+    // for conflicting parent/worker writes before join. Keep its direct pthread
+    // creation/join topology, adapted to a Ludus volatile slot and explicit errors.
     // https://releases.llvm.org/18.1.8/tools/clang/docs/ThreadSanitizer.html
-    std::atomic<bool> ready{false};
-    alignas(64) volatile int32 value = 0;
-    std::thread worker([&ready, &value] {
-        while (!ready.load(std::memory_order_acquire))
-        {
-        }
-        value = 1;
-    });
-    // Both writes follow the release; neither write happens-before the other.
-    // Keep atomics on separate storage and all synchronization before the defect.
-    ready.store(true, std::memory_order_release);
-    value = 2;
-    worker.join();
-    return value == 0 ? 1 : 0;
+    pthread_t worker{};
+    if (pthread_create(&worker, nullptr, WriteRaceValue, nullptr) != 0)
+    {
+        return 1;
+    }
+    // Creation precedes both writes; join follows both. Neither write is ordered
+    // before the other, regardless of which thread the scheduler runs first.
+    raceValue = 2;
+    if (pthread_join(worker, nullptr) != 0)
+    {
+        return 1;
+    }
+    return raceValue == 0 ? 1 : 0;
 #else
 #    error A sanitizer control kind is required
 #endif

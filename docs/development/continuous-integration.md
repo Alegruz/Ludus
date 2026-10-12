@@ -129,10 +129,10 @@ On macOS use `macos-clang-asan-ubsan`. TSan remains a separate build tree;
 its existing CI job now builds and runs `ludus_tsan_control_child` before the
 concurrency acceptance suite. It follows LLVM's [Clang 18.1.8 ThreadSanitizer
 usage example](https://releases.llvm.org/18.1.8/tools/clang/docs/ThreadSanitizer.html#usage):
-parent and worker write one shared volatile slot before joining. A pre-write start
-gate lets the worker begin after thread construction, but does not order the
-conflicting writes. The raced slot is aligned separately from the gate, and no
-post-write atomic rendezvous can interfere with the control. Volatile stores remain
+parent and worker write one shared global volatile slot before joining, using
+direct `pthread_create`/`pthread_join` calls with explicit error checks. The
+control has no atomic start gate or C++ thread-wrapper lifetime state; neither
+write happens-before the other even when the worker finishes first. Volatile stores remain
 visible in optimized builds. CI requires 16 consecutive successful clean/fault
 control pairs with `--repeat until-fail:16`; any failure stops acceptance rather
 than retrying to obtain a pass. Native Clang controls explicitly locate the
