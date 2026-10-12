@@ -7,6 +7,13 @@ has one editable source shared by the website and offline readers. The expected 
 
 ## Source and tooling
 
+Agents and contributors must follow the [one-source publication rule](../../AGENTS.md#one-documentation-source-online-and-offline).
+Before creating a public page, find and update its existing owner. New pages
+need a distinct reader purpose and belong in `docs/`, where the generated index,
+wiki publication and search include them. Task navigation may promote that
+same source. Keep compatibility pages as short links and private notes outside
+this tree; do not maintain separate wiki summaries of engineering contracts.
+
 - `docs/`: canonical authored Markdown and local documentation assets.
 - `docs/wiki/`: task guides, learning paths and small site assets within that tree.
 - `docs/README.md`: generated portable navigation to every authored document.

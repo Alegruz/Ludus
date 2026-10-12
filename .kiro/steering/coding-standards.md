@@ -54,6 +54,15 @@ CRT operation. Concepts and approved compile-time utilities remain permitted.
 code, including tests. A `.cpp` boundary alone does not authorize a heavy STL
 facility; follow the measured build-time rules in `AGENTS.md`.
 
+## Public documentation
+
+Follow [AGENTS.md's one-source publication rule](../../AGENTS.md#one-documentation-source-online-and-offline).
+Search for an existing owner before creating a page. Public reader documents
+belong in `docs/` and must appear in wiki publication, the task menus or **All
+documents** index, and search. Do not create wiki mirrors or miscellaneous reports
+without a distinct reader need. Keep private material outside the published tree
+and run the required documentation checks before a PR.
+
 ## Other standing rules
 
 - C++23, no compiler extensions; pinned Clang/LLVM 18 toolchain.

@@ -169,15 +169,29 @@ engine code. Discuss such cases in the PR before adding them.
 
 ### One documentation source, online and offline
 
-- `docs/` is the canonical source of authored documentation. `docs/wiki/`
-  contains task guides and navigation, not separately maintained copies of
-  engineering documents. Publish the same Markdown content and local assets
-  through MkDocs. Presentation and navigation may differ; contracts, examples,
-  status and attribution must not.
-- Edit the existing owner before adding a page. A guide and a design review may
-  serve different reader needs, but link to the owner of detailed contracts
-  instead of restating them. Never require contributors to synchronize prose
-  between a local document and a wiki page.
+- This rule is mandatory for every agent and contributor creating or changing
+  **public** documentation. `docs/` is the canonical source of authored public
+  Markdown and local documentation assets. Every public document must appear in
+  wiki publication, navigation through task menus or the **All documents** index,
+  and search. Do not put reader pages in an unregistered location, exclude them
+  from publication, or treat a GitHub source link as wiki inclusion. Tooling
+  inputs and generated API pages follow their existing publication paths.
+- Before creating a page, search `docs/` for its existing owner and update that
+  source first. Add a page only for a distinct reader task, contract, decision or
+  evidence record with a concrete purpose. Do not create miscellaneous task
+  reports, summaries or handoffs just to record work.
+- `docs/wiki/` contains distinct task guides and reading paths, not separately
+  maintained copies of engineering documents. Never create a wiki mirror,
+  shortened copy or paraphrased version of an existing design/development page.
+  A guide and a review may serve different reader needs, but reading paths link
+  to the owner of detailed contracts instead of restating them. Contributors must
+  never have to synchronize prose between a local document and a wiki version.
+- Publish the same Markdown content and local assets online and offline.
+  Presentation and navigation may differ; contracts, examples, status and
+  attribution must not. When consolidating a published page, preserve useful
+  unique material and attribution in its owner, update links and task navigation,
+  and keep old URLs usable through a redirect or short compatibility link.
+  Compatibility entry points must not carry a second content body.
 - Keep module, sample and tool READMEs as short links to their guide under `docs/`,
   so those instructions enter the wiki and offline bundle. Label historical
   milestone scope and link current usage/evidence before retaining older plans.
@@ -187,12 +201,18 @@ engine code. Discuss such cases in the PR before adding them.
   include directive. External reference citations may remain online.
 - API comments beside public declarations are the canonical API contract;
   Doxygen/MkDocs output is generated from them, never edited independently.
+- Keep private notes, credentials, machine-specific output and separately
+  supplied reference books outside `docs/`. The publication requirement applies
+  to public docs; it does not authorize publishing private material.
 - Keep the local index current with `python scripts/check-docs --fix-index`.
-  Run `python scripts/check-docs`, a strict MkDocs build and
-  `python scripts/check-wiki --documentation-only` for documentation changes.
-  Publication additionally checks the combined browser editor payload without
-  that flag. The checks require every
-  authored page to appear in the site and reject stale source/output manifests.
+  Before a documentation commit or PR, run `python scripts/check-docs`, a strict
+  MkDocs build and `python scripts/check-wiki --documentation-only`. Run the
+  documentation regressions with `python -m unittest discover -s scripts/python
+  -p test_docs.py -v` and the corresponding `test_wiki.py` suite. Confirm new pages
+  appear in the index and wiki search, with edit links to their canonical sources;
+  report unavailable checks explicitly. The checks require every authored page
+  to appear in the site and reject stale source/output manifests. Publication
+  additionally checks the combined browser editor payload without that flag.
   See `docs/development/wiki.md` for API generation and offline packaging.
 - Ship Markdown sources and the checked HTML site together for offline use.
   Package an existing build with `python scripts/package-docs`; reading the

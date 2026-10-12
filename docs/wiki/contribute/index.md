@@ -35,6 +35,12 @@ window decoration or device interaction.
 
 ## Keep the documentation honest
 
+Follow the [one-source publication rule](../../../AGENTS.md#one-documentation-source-online-and-offline):
+search for an existing owner before creating a page, keep one canonical public
+source in `docs/`, and verify its wiki publication, index and search. Reading
+paths link to contracts; they do not maintain shortened copies. New pages need
+a distinct reader task, contract, decision or evidence purpose.
+
 Update a task guide when a workflow changes. Separate current behavior from
 architecture proposals, and state the environment needed by a command. Do not
 turn a catalogued title into a claim that its chapter was consulted or adopted.
