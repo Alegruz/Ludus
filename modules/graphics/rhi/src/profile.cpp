@@ -1,5 +1,6 @@
 #include "internal/profile.h"
 #include "internal/raster.h"
+#include "internal/storage.h"
 
 namespace ludus::graphics::rhi::internal
 {
@@ -316,6 +317,15 @@ DeviceProfile QueryDeviceProfile() noexcept
 {
     DeviceProfile result;
     result.Raster = backend::RasterLimits();
+    result.Storage = CurrentStorageLimits();
+    if (result.Raster.ResourcesPerKind > result.Storage.ResourcesPerKind)
+    {
+        result.Raster.ResourcesPerKind = result.Storage.ResourcesPerKind;
+    }
+    if (result.Raster.DrawsPerFrame > result.Storage.DrawsPerFrame)
+    {
+        result.Raster.DrawsPerFrame = result.Storage.DrawsPerFrame;
+    }
     if (result.Raster.MaxUniformRange < 16384)
     {
         return {};
@@ -355,5 +365,121 @@ FormatCapabilities PortableFormatLimits(RasterFormat format, const RasterCapabil
         .MaxMipLevels = hdr ? 1U : (levels < 16 ? levels : 16),
         .SampleCounts = attachment ? 1U : 0U,
     };
+}
+} // namespace ludus::graphics::rhi::internal
+
+namespace ludus::graphics::rhi::internal
+{
+namespace
+{
+StorageLimits gStorageLimits;
+StorageUsage gStorageUsage;
+RasterStatus gStorageFailure = RasterStatus::CapacityExceeded;
+#if defined(LUDUS_RHI_TEST_STORAGE)
+bool gFailStorageAllocation = false;
+#endif
+} // namespace
+const StorageLimits& CurrentStorageLimits() noexcept
+{
+    return gStorageLimits;
+}
+bool ValidStorageLimits(const StorageLimits& limits) noexcept
+{
+    constexpr foundation::uint32 invalid = ~foundation::uint32{0};
+    const foundation::uint32 counts[]{limits.ResourcesPerKind,
+                                      limits.DrawsPerFrame,
+                                      limits.Batches,
+                                      limits.DrawsPerPlan,
+                                      limits.Graphs,
+                                      limits.ResourcesPerGraph,
+                                      limits.PassesPerGraph,
+                                      limits.DependenciesPerGraph,
+                                      limits.TransientTextures,
+                                      limits.RasterPassStates,
+                                      limits.Submissions};
+    for (const auto count : counts)
+    {
+        if (count == 0 || count == invalid)
+        {
+            return false;
+        }
+    }
+    return limits.HostBytes != 0 && limits.ResourceBytes != 0;
+}
+bool ConfigureStorage(const StorageLimits& limits) noexcept
+{
+    if (!ValidStorageLimits(limits) || limits.HostBytes < gStorageUsage.HostBytes ||
+        limits.ResourceBytes < gStorageUsage.ResourceBytes)
+    {
+        return false;
+    }
+    gStorageLimits = limits;
+    return true;
+}
+RasterStatus StorageFailure() noexcept
+{
+    return gStorageFailure;
+}
+bool ReserveHostStorage(foundation::usize bytes) noexcept
+{
+#if defined(LUDUS_RHI_TEST_STORAGE)
+    if (gFailStorageAllocation)
+    {
+        gFailStorageAllocation = false;
+        gStorageFailure = RasterStatus::OutOfMemory;
+        return false;
+    }
+#endif
+    gStorageFailure = FrameOpen() ? RasterStatus::InvalidState : RasterStatus::CapacityExceeded;
+    if (FrameOpen() || bytes > gStorageLimits.HostBytes - gStorageUsage.HostBytes)
+    {
+        return false;
+    }
+    gStorageUsage.HostBytes += bytes;
+    if (gStorageUsage.HostBytes > gStorageUsage.PeakHostBytes)
+    {
+        gStorageUsage.PeakHostBytes = gStorageUsage.HostBytes;
+    }
+    return true;
+}
+void ReleaseHostStorage(foundation::usize bytes) noexcept
+{
+    gStorageUsage.HostBytes -= bytes;
+}
+void StorageAllocationFailed() noexcept
+{
+    gStorageFailure = RasterStatus::OutOfMemory;
+}
+void StorageCapacityFailed() noexcept
+{
+    gStorageFailure = RasterStatus::CapacityExceeded;
+}
+#if defined(LUDUS_RHI_TEST_STORAGE)
+void FailNextStorageAllocation() noexcept
+{
+    gFailStorageAllocation = true;
+}
+#endif
+bool ReserveResourceStorage(foundation::uint64 bytes) noexcept
+{
+    gStorageFailure = RasterStatus::CapacityExceeded;
+    if (bytes > gStorageLimits.ResourceBytes - gStorageUsage.ResourceBytes)
+    {
+        return false;
+    }
+    gStorageUsage.ResourceBytes += bytes;
+    if (gStorageUsage.ResourceBytes > gStorageUsage.PeakResourceBytes)
+    {
+        gStorageUsage.PeakResourceBytes = gStorageUsage.ResourceBytes;
+    }
+    return true;
+}
+void ReleaseResourceStorage(foundation::uint64 bytes) noexcept
+{
+    gStorageUsage.ResourceBytes -= bytes;
+}
+StorageUsage CurrentStorageUsage() noexcept
+{
+    return gStorageUsage;
 }
 } // namespace ludus::graphics::rhi::internal

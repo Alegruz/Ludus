@@ -82,6 +82,9 @@ struct DeviceDescription final
     DeviceFeatures Required{ .FullscreenRaster = true };
     /// Optional workloads; inspect Enabled after Ready rather than assuming availability.
     DeviceFeatures Preferred;
+    /// R6 general resource/plan maxima and memory budgets, copied before startup.
+    /// Growth is owner-thread only between frames; enabled maxima stay immutable until shutdown.
+    StorageLimits Storage;
     /// Copied profile constraints, checked on every enabled backend attempt before Ready.
     /// Nonzero raster/compute constraints imply admission of that workload.
     DeviceProfileRequirements RequiredProfile;
@@ -142,7 +145,8 @@ struct DeviceInfo final
 
 /// Reference admission validator shared by every backend; performs no allocation or GPU work.
 /// @return Ready for implemented required workloads, Unsupported for missing workloads,
-/// InvalidDescription for malformed selection, format count/identity, duplicate format or sample count.
+/// InvalidDescription for malformed selection, format count/identity, duplicate format, sample count,
+/// zero/reserved storage counts or zero byte budgets.
 /// Actual limits and format uses are checked on each backend attempt before Ready;
 /// no feature or limit is inferred from a backend name.
 [[nodiscard]] DeviceStatus ValidateDeviceDescription(const DeviceDescription& description) noexcept;

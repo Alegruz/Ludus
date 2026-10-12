@@ -19,6 +19,45 @@ enum class RasterFormat : ludus::foundation::uint8
     /// Uploaded binary16 textures are outside this profile; create with Attachment=true.
     Rgba16Float,
 };
+/// Copied R6 storage maxima and explicit byte budgets. Configure before startup.
+/// Counts are limits, not reservations; creation may fail under byte/allocation pressure.
+/// Defaults preserve the original general profiles. The fullscreen facade is separate.
+/// Counts must be nonzero and below UINT32_MAX; byte budgets must be nonzero.
+/// Stable metadata pages persist across device restart; startup rejects a host budget
+/// smaller than already committed metadata. Native resources still retire on shutdown.
+struct StorageLimits final
+{
+    /// Maximum live/pending/retained records of each general raster/compute resource kind.
+    /// Ray-query records retain their separate initial profile bounds.
+    ludus::foundation::uint32 ResourcesPerKind = 64;
+    /// Maximum accepted direct/indirect packets in one frame.
+    ludus::foundation::uint32 DrawsPerFrame = 1024;
+    /// Maximum independently retained command batches.
+    ludus::foundation::uint32 Batches = 4;
+    /// Maximum packets per batch or graph, including culled packets.
+    ludus::foundation::uint32 DrawsPerPlan = 256;
+    /// Maximum independently owned graph plans.
+    ludus::foundation::uint32 Graphs = 4;
+    /// Maximum imported/transient logical resources per graph.
+    ludus::foundation::uint32 ResourcesPerGraph = 16;
+    /// Maximum authored passes and resource versions per graph.
+    ludus::foundation::uint32 PassesPerGraph = 32;
+    /// Maximum semantic dependency entries per graph.
+    ludus::foundation::uint32 DependenciesPerGraph = 512;
+    /// Maximum retained transient texture-pool entries.
+    ludus::foundation::uint32 TransientTextures = 8;
+    /// Maximum cached format/load/store/depth render-pass combinations on Vulkan.
+    /// Other backends encode this state directly and do not consume these records.
+    ludus::foundation::uint32 RasterPassStates = 192;
+    /// Maximum simultaneous submission completion records on callback backends.
+    ludus::foundation::uint32 Submissions = 64;
+    /// Host storage budget in bytes: registry/backend metadata, plans, scratch and index copies.
+    /// Includes retained page slack and growth overlap; excludes allocator overhead and driver allocations.
+    ludus::foundation::usize HostBytes = ludus::foundation::usize{64} * 1024 * 1024;
+    /// Logical buffer/texture byte budget, including pending/detached records and private depth.
+    /// Excludes native padding, driver allocation metadata, facade targets and transfer-ring staging.
+    ludus::foundation::uint64 ResourceBytes = ludus::foundation::uint64{512} * 1024 * 1024;
+};
 /// Enabled bounded raster profile, published only for a ready device.
 struct RasterCapabilities final
 {
@@ -118,6 +157,23 @@ struct DeviceProfile final
     RasterInterfaceCapabilities Interface;
     /// Negotiated bounded buffer-compute limits; zero if unavailable.
     ComputeCapabilities Compute;
+    /// Immutable configured R6 storage maxima and budgets; all zero outside Ready.
+    StorageLimits Storage
+    {
+        .ResourcesPerKind = 0,
+        .DrawsPerFrame = 0,
+        .Batches = 0,
+        .DrawsPerPlan = 0,
+        .Graphs = 0,
+        .ResourcesPerGraph = 0,
+        .PassesPerGraph = 0,
+        .DependenciesPerGraph = 0,
+        .TransientTextures = 0,
+        .RasterPassStates = 0,
+        .Submissions = 0,
+        .HostBytes = 0,
+        .ResourceBytes = 0,
+    };
     /// Five format entries indexed by RasterFormat, including unsupported uses.
     FormatCapabilities Formats[5]{};
 };

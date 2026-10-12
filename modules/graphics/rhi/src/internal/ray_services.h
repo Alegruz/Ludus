@@ -40,7 +40,16 @@ bool RayTransform(const float32* values) noexcept
 }
 bool RayRecord(Record& record) noexcept
 {
+    if (!ReserveHostStorage(sizeof(RayRecordInfo)))
+    {
+        return false;
+    }
+    record.AuxiliaryHostBytes = sizeof(RayRecordInfo);
     auto* allocation = new (std::nothrow) RayRecordInfo;
+    if (allocation == nullptr)
+    {
+        StorageAllocationFailed();
+    }
     record.Ray = core::UniquePtr<RayRecordInfo>(allocation);
     return static_cast<bool>(record.Ray);
 }
@@ -209,7 +218,7 @@ CreateRayGeometry(DeviceHandle device, const RayGeometryDescription& description
     return Publish(RasterKind::RayGeometry, output, [&d](usize slot, Record& record) noexcept {
         if (!RayRecord(record) || !record.Ray->TriangleUvs.TryResize(d.IndexCount * 2))
         {
-            return RasterStatus::OutOfMemory;
+            return StorageFailure();
         }
         record.Ray->Count = d.IndexCount / 3;
         auto& uv = record.Ray->TriangleUvs;
@@ -240,8 +249,8 @@ CreateRayScene(DeviceHandle device, const RaySceneDescription& description, RayS
         return RasterStatus::InvalidDescription;
     }
     Collect();
-    Array<NativeRayInstance> instances;
-    Array<float32> opacity;
+    StorageArray<NativeRayInstance> instances;
+    StorageArray<float32> opacity;
     const usize maxScalars =
         (description.ByteBudget < limits.MaxBufferBytes ? description.ByteBudget : limits.MaxBufferBytes) /
         sizeof(float32);
@@ -251,7 +260,7 @@ CreateRayScene(DeviceHandle device, const RaySceneDescription& description, RayS
     }
     if (!instances.TryResize(description.Count) || !opacity.TryResize(description.Count * 12))
     {
-        return RasterStatus::OutOfMemory;
+        return StorageFailure();
     }
     usize uvOffsets[RASTER_CAPACITY]{};
     for (usize i = 0; i < description.Count; ++i)
@@ -302,7 +311,7 @@ CreateRayScene(DeviceHandle device, const RaySceneDescription& description, RayS
             }
             if (!opacity.TryResize(begin + appended))
             {
-                return RasterStatus::OutOfMemory;
+                return StorageFailure();
             }
             uvOffsets[native.Geometry] = begin / 4;
             for (usize triangle = 0; triangle < geometry->Ray->Count; ++triangle)
@@ -322,7 +331,7 @@ CreateRayScene(DeviceHandle device, const RaySceneDescription& description, RayS
         }
         if (!opacity.TryResize(alphaOffset + padded))
         {
-            return RasterStatus::OutOfMemory;
+            return StorageFailure();
         }
         for (usize texel = 0; texel < texels; ++texel)
         {
@@ -352,7 +361,7 @@ CreateRayScene(DeviceHandle device, const RaySceneDescription& description, RayS
                    [&description, &instances, &opacity](usize slot, Record& record) noexcept {
                        if (!RayRecord(record) || !record.Ray->GeometrySlots.TryResize(description.Count))
                        {
-                           return RasterStatus::OutOfMemory;
+                           return StorageFailure();
                        }
                        record.Ray->Count = description.Count;
                        for (usize i = 0; i < description.Count; ++i)
@@ -413,7 +422,7 @@ RasterStatus SubmitRayQueries(DeviceHandle device,
     return Publish(RasterKind::RayBatch, output, [&rays, count, program, scene](usize slot, Record& record) noexcept {
         if (!RayRecord(record))
         {
-            return RasterStatus::OutOfMemory;
+            return StorageFailure();
         }
         record.Ray->Scene = RasterAccess::Slot(scene);
         record.Ray->Program = RasterAccess::Slot(program);
@@ -505,12 +514,8 @@ RasterStatus GetRayResourceStats(DeviceHandle device, RayResourceStats& output) 
     RayResourceStats result;
     for (usize kind = RASTER_KINDS; kind < KINDS; ++kind)
     {
-        const auto* pool = RecordPool(kind);
-        if (pool == nullptr)
-        {
-            continue;
-        }
-        for (usize slot = 0; slot < RASTER_CAPACITY; ++slot)
+        const auto& pool = gRecords[kind];
+        for (usize slot = 0; slot < pool.GetSize(); ++slot)
         {
             const auto& record = pool[slot];
             if (record.Owner == 0 || !record.Ray)

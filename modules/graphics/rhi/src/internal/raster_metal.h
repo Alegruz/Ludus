@@ -22,17 +22,17 @@ struct RasterMetalPipeline final
     id<MTLDepthStencilState> Depth = nil;
     internal::RasterPipelineInfo Info;
 };
-id<MTLBuffer> gRasterBuffers[internal::RASTER_CAPACITY]{};
-id<MTLTexture> gRasterTextures[internal::RASTER_CAPACITY]{};
-id<MTLTexture> gRasterDepths[internal::RASTER_CAPACITY]{};
-id<MTLTexture> gRasterViews[internal::RASTER_CAPACITY]{};
-id<MTLSamplerState> gRasterSamplers[internal::RASTER_CAPACITY]{};
-RasterMetalShader gRasterShaders[internal::RASTER_CAPACITY];
-internal::RasterLayout gRasterLayouts[internal::RASTER_CAPACITY];
-internal::RasterSet gRasterSets[internal::RASTER_CAPACITY];
-RasterMetalPipeline gRasterPipelines[internal::RASTER_CAPACITY];
-id<MTLComputePipelineState> gComputePipelines[internal::RASTER_CAPACITY]{};
-internal::ComputePipelineInfo gComputeInfos[internal::RASTER_CAPACITY];
+internal::StorageTable<id<MTLBuffer>> gRasterBuffers;
+internal::StorageTable<id<MTLTexture>> gRasterTextures;
+internal::StorageTable<id<MTLTexture>> gRasterDepths;
+internal::StorageTable<id<MTLTexture>> gRasterViews;
+internal::StorageTable<id<MTLSamplerState>> gRasterSamplers;
+internal::StorageTable<RasterMetalShader> gRasterShaders;
+internal::StorageTable<internal::RasterLayout> gRasterLayouts;
+internal::StorageTable<internal::RasterSet> gRasterSets;
+internal::StorageTable<RasterMetalPipeline> gRasterPipelines;
+internal::StorageTable<id<MTLComputePipelineState>> gComputePipelines;
+internal::StorageTable<internal::ComputePipelineInfo> gComputeInfos;
 uint64 gRasterOrdinals[FRAMES]{};
 uint64 gRasterCompleted = 0;
 uint32 gRasterWidth = 0, gRasterHeight = 0;
@@ -116,8 +116,8 @@ RasterCapabilities RasterLimits() noexcept
         .MaxTextureDimension2D = 4096,
         .UniformOffsetAlignment = 256,
         .MaxUniformRange = 16384,
-        .ResourcesPerKind = static_cast<uint32>(internal::RASTER_CAPACITY),
-        .DrawsPerFrame = static_cast<uint32>(internal::RASTER_DRAWS),
+        .ResourcesPerKind = internal::CurrentStorageLimits().ResourcesPerKind,
+        .DrawsPerFrame = internal::CurrentStorageLimits().DrawsPerFrame,
         .MaxVertexAttributes = 16,
         .HdrColor = true,
     };
@@ -498,7 +498,7 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                                       0,
                                       1}];
     [gEncoder setScissorRect:MTLScissorRect{c.X, c.Y, c.Width, c.Height}];
-    if (packet.Indirect != internal::RASTER_CAPACITY)
+    if (packet.Indirect != internal::RASTER_INVALID)
     {
         [gEncoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
                               indexType:packet.Index32 ? MTLIndexTypeUInt32 : MTLIndexTypeUInt16
@@ -541,7 +541,7 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
     @autoreleasepool
     {
         const auto& state = info.Description;
-        const bool surface = info.Texture == internal::RASTER_CAPACITY;
+        const bool surface = info.Texture == internal::RASTER_INVALID;
         auto color = surface ? (gDrawable != nil ? gDrawable.texture : gHeadless) : gRasterTextures[info.Texture];
         auto depth = surface ? gDepth : gRasterDepths[info.Texture];
         auto pass = [MTLRenderPassDescriptor renderPassDescriptor];
@@ -606,4 +606,38 @@ void RasterReset() noexcept
     gRasterCompleted = 0;
 }
 void RasterShutdown() noexcept {}
+
+RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
+{
+    switch (kind)
+    {
+        case internal::RasterKind::Buffer:
+            return gRasterBuffers.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Texture:
+            return gRasterTextures.EnsureSlots(count) && gRasterDepths.EnsureSlots(count) ? RasterStatus::Ready
+                                                                                          : internal::StorageFailure();
+        case internal::RasterKind::View:
+            return gRasterViews.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Sampler:
+            return gRasterSamplers.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Shader:
+            return gRasterShaders.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Layout:
+            return gRasterLayouts.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Set:
+            return gRasterSets.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Pipeline:
+            return gRasterPipelines.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::ComputePipeline:
+            return gComputePipelines.EnsureSlots(count) && gComputeInfos.EnsureSlots(count)
+                       ? RasterStatus::Ready
+                       : internal::StorageFailure();
+        default:
+            return RasterStatus::InvalidDescription;
+    }
+}
+RasterStatus RasterPrepareStorage() noexcept
+{
+    return RasterStatus::Ready;
+}
 } // namespace ludus::graphics::rhi::backend

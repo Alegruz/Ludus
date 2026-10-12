@@ -23,7 +23,8 @@ StartStatus StartOwned(const ApplicationInfo&,
                        const DeviceRequirements&,
                        bool,
                        bool,
-                       const DeviceProfileRequirements&) noexcept;
+                       const DeviceProfileRequirements&,
+                       const StorageLimits&) noexcept;
 // Numeric callback tokens never borrow application memory and never wrap.
 bool Current(ludus::foundation::uint32 token) noexcept;
 // Queried backend limits; the facade applies engine capacity/size granularity.

@@ -265,7 +265,9 @@ public:
         }
     }
 
+    /// Copy-fill resize requires copy-constructible elements; value-initialized resize supports move-only types.
     void Resize(usize newSize, const ElementType& value)
+        requires std::is_copy_constructible_v<ElementType>
     {
         if (!TryResizeImpl(newSize, &value))
         {
@@ -279,6 +281,7 @@ public:
     }
 
     [[nodiscard]] bool TryResize(usize newSize, const ElementType& value)
+        requires std::is_copy_constructible_v<ElementType>
     {
         return TryResizeImpl(newSize, &value);
     }
@@ -840,7 +843,7 @@ private:
         {
             internal::UninitializedValueConstruct(resizedData + mSize, added);
         }
-        else
+        else if constexpr (std::is_copy_constructible_v<ElementType>)
         {
             internal::UninitializedFill(resizedData + mSize, added, *fill);
         }

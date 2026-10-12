@@ -222,6 +222,9 @@ jobs:
             out/build/raster-web-sdk/raster.js
             out/build/raster-web-sdk/raster.wasm
             out/build/raster-web-sdk/raster.html
+            out/build/raster-web-sdk/r6.js
+            out/build/raster-web-sdk/r6.wasm
+            out/build/raster-web-sdk/r6.html
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:

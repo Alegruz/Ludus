@@ -60,25 +60,25 @@ struct RasterVulkanPipeline final
     internal::RasterPipelineInfo Info;
 };
 VmaAllocator gRasterAllocator = nullptr;
-RasterVulkanBuffer gRasterBuffers[internal::RASTER_CAPACITY];
+internal::StorageTable<RasterVulkanBuffer> gRasterBuffers;
 struct ComputeVulkanPipeline final
 {
     VkPipeline Object = VK_NULL_HANDLE;
     VkPipelineLayout Layout = VK_NULL_HANDLE;
 };
-ComputeVulkanPipeline gComputePipelines[internal::RASTER_CAPACITY];
-RasterVulkanTexture gRasterTextures[internal::RASTER_CAPACITY];
-VkImageView gRasterViews[internal::RASTER_CAPACITY]{};
-VkSampler gRasterSamplers[internal::RASTER_CAPACITY]{};
-RasterVulkanShader gRasterShaders[internal::RASTER_CAPACITY];
-VkDescriptorSetLayout gRasterLayouts[internal::RASTER_CAPACITY]{};
-RasterVulkanSet gRasterSets[internal::RASTER_CAPACITY];
-RasterVulkanPipeline gRasterPipelines[internal::RASTER_CAPACITY];
+internal::StorageTable<ComputeVulkanPipeline> gComputePipelines;
+internal::StorageTable<RasterVulkanTexture> gRasterTextures;
+internal::StorageTable<VkImageView> gRasterViews;
+internal::StorageTable<VkSampler> gRasterSamplers;
+internal::StorageTable<RasterVulkanShader> gRasterShaders;
+internal::StorageTable<VkDescriptorSetLayout> gRasterLayouts;
+internal::StorageTable<RasterVulkanSet> gRasterSets;
+internal::StorageTable<RasterVulkanPipeline> gRasterPipelines;
 uint64 gRasterOrdinals[FRAMES]{};
 uint64 gRasterCompleted = 0;
 VkExtent2D gRasterExtent{};
 RasterPassDescription gRasterRegion{};
-usize gRasterActiveTexture = internal::RASTER_CAPACITY;
+usize gRasterActiveTexture = internal::RASTER_INVALID;
 struct RasterVkPass final
 {
     VkRenderPass Object = VK_NULL_HANDLE;
@@ -86,7 +86,7 @@ struct RasterVkPass final
     RasterPassDescription State;
     bool Surface = false;
 };
-RasterVkPass gRasterPasses[192];
+internal::StorageTable<RasterVkPass> gRasterPasses;
 RasterStatus RasterError(VkResult result) noexcept
 {
     if (result == VK_SUCCESS)
@@ -133,9 +133,16 @@ void RasterVkDependencies(bool surface, VkSubpassDependency (&dependencies)[2]) 
 VkResult
 RasterVkRenderPass(VkFormat format, bool surface, const RasterPassDescription& state, VkRenderPass& output) noexcept
 {
-    RasterVkPass* available = nullptr;
-    for (auto& pass : gRasterPasses)
+    const auto limit = internal::CurrentStorageLimits().RasterPassStates;
+    if (!gRasterPasses.EnsureSlots(limit))
     {
+        return internal::StorageFailure() == RasterStatus::OutOfMemory ? VK_ERROR_OUT_OF_HOST_MEMORY
+                                                                       : VK_ERROR_TOO_MANY_OBJECTS;
+    }
+    RasterVkPass* available = nullptr;
+    for (usize i = 0; i < limit; ++i)
+    {
+        auto& pass = gRasterPasses[i];
         const auto& cached = pass.State;
         if (pass.Object == VK_NULL_HANDLE)
         {
@@ -397,8 +404,8 @@ RasterCapabilities RasterLimits() noexcept
             max < 4096 ? max : 4096,
             alignment > 256 ? alignment : 256,
             properties.limits.maxUniformBufferRange < 16384 ? properties.limits.maxUniformBufferRange : 16384,
-            static_cast<uint32>(internal::RASTER_CAPACITY),
-            static_cast<uint32>(internal::RASTER_DRAWS),
+            internal::CurrentStorageLimits().ResourcesPerKind,
+            internal::CurrentStorageLimits().DrawsPerFrame,
             properties.limits.maxVertexInputAttributes < 16 ? properties.limits.maxVertexInputAttributes : 16,
             gRasterHdr};
 }
@@ -1188,7 +1195,7 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                          gRasterBuffers[packet.Indices].Object,
                          packet.IndexOffset,
                          packet.Index32 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
-    if (packet.Indirect != internal::RASTER_CAPACITY)
+    if (packet.Indirect != internal::RASTER_INVALID)
     {
         vkCmdDrawIndexedIndirect(command,
                                  gRasterBuffers[packet.Indirect].Object,
@@ -1206,7 +1213,7 @@ void RasterFrameExtent() noexcept
 {
     gRasterExtent = {};
     gRasterRegion = {};
-    gRasterActiveTexture = internal::RASTER_CAPACITY;
+    gRasterActiveTexture = internal::RASTER_INVALID;
 }
 void RasterEndPass() noexcept
 {
@@ -1216,7 +1223,7 @@ void RasterEndPass() noexcept
     }
     vkCmdEndRenderPass(gFrames[gFrame].Command);
     gEncoding = false;
-    if (gRasterActiveTexture != internal::RASTER_CAPACITY)
+    if (gRasterActiveTexture != internal::RASTER_INVALID)
     {
         auto& texture = gRasterTextures[gRasterActiveTexture];
         texture.ColorLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -1276,14 +1283,14 @@ void RasterTextureBarrier(usize slot, RasterTextureUse use) noexcept
 RasterStatus RasterPreparePass(const internal::RasterPassInfo& info) noexcept
 {
     VkRenderPass pass = VK_NULL_HANDLE;
-    const bool surface = info.Texture == internal::RASTER_CAPACITY;
+    const bool surface = info.Texture == internal::RASTER_INVALID;
     const auto format = surface ? gFormat : RasterPixelFormat(gRasterTextures[info.Texture].Info.Format);
     const auto result = RasterVkRenderPass(format, surface, info.Description, pass);
     return result == VK_ERROR_TOO_MANY_OBJECTS ? RasterStatus::CapacityExceeded : RasterError(result);
 }
 RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
 {
-    const bool surface = info.Texture == internal::RASTER_CAPACITY;
+    const bool surface = info.Texture == internal::RASTER_INVALID;
     VkRenderPass pass = VK_NULL_HANDLE;
     const auto format = surface ? gFormat : RasterPixelFormat(gRasterTextures[info.Texture].Info.Format);
     const auto prepared = RasterVkRenderPass(format, surface, info.Description, pass);
@@ -1427,5 +1434,37 @@ void RasterShutdown() noexcept
         vmaDestroyAllocator(gRasterAllocator);
         gRasterAllocator = nullptr;
     }
+}
+
+RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
+{
+    switch (kind)
+    {
+        case internal::RasterKind::Buffer:
+            return gRasterBuffers.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Texture:
+            return gRasterTextures.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::View:
+            return gRasterViews.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Sampler:
+            return gRasterSamplers.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Shader:
+            return gRasterShaders.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Layout:
+            return gRasterLayouts.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Set:
+            return gRasterSets.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Pipeline:
+            return gRasterPipelines.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::ComputePipeline:
+            return gComputePipelines.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        default:
+            return RasterStatus::InvalidDescription;
+    }
+}
+RasterStatus RasterPrepareStorage() noexcept
+{
+    return gRasterPasses.EnsureSlots(internal::CurrentStorageLimits().RasterPassStates) ? RasterStatus::Ready
+                                                                                        : internal::StorageFailure();
 }
 } // namespace ludus::graphics::rhi::backend

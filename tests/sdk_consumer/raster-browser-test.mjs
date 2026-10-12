@@ -1,7 +1,7 @@
 // Installed-SDK raster conformance. Real shader compilation, indexed instances,
 // depth, texture origin and retained snapshots on both forced APIs and Auto.
 import assert from 'node:assert/strict';
-import {readFile, writeFile, mkdir} from 'node:fs/promises';
+import {readFile, writeFile, mkdir, access} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {resolve, sep} from 'node:path';
 import {createRequire} from 'node:module';
@@ -11,11 +11,15 @@ const {PNG} = require('pngjs');
 const root = resolve(process.argv[2]);
 const output = resolve(process.argv[3] || 'out/raster-browser');
 await mkdir(output, {recursive:true});
+for (const name of ['raster.html','raster.js','raster.wasm','r6.html','r6.js','r6.wasm']) await access(resolve(root,name));
 const server = createServer(async (request, response) => {
   const pathname = new URL(request.url, 'http://localhost').pathname;
   const path = resolve(root, '.' + pathname);
   if (!path.startsWith(root + sep)) {response.writeHead(403).end(); return;}
-  try {response.writeHead(200, {'Content-Type':path.endsWith('.wasm') ? 'application/wasm' : path.endsWith('.js') ? 'text/javascript' : 'text/html'}).end(await readFile(path));}
+  try {
+    const bytes = await readFile(path);
+    response.writeHead(200, {'Content-Type':path.endsWith('.wasm') ? 'application/wasm' : path.endsWith('.js') ? 'text/javascript' : 'text/html'}).end(bytes);
+  }
   catch {response.writeHead(404).end();}
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -23,6 +27,7 @@ const args = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-webgp
 const report = {kind:'real Chromium software GPU; physical GPU acceptance separate', args, cases:[], console:[]};
 let browser, lastPage;
 try {
+  assert.equal((await fetch(`http://127.0.0.1:${server.address().port}/missing-asset`)).status,404);
   browser = await chromium.launch({headless:true, args});
   const pin = JSON.parse(await readFile(new URL('../../config/shader_toolchain.json',import.meta.url))).wgsl_validator;
   assert.equal(browser.version(),pin.chromium_version);
@@ -167,6 +172,49 @@ try {
     await context.close();
   }
   report.outcome='passed';
+  for (const backend of ['webgpu','webgl2','auto','fallback']) {
+    for (const reference of [false,true]) {
+      const scenario = `r6-${backend}${reference ? '-reference' : ''}`;
+      const context = await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
+      await context.addInitScript(fallback => {
+        window.__qaPause = false;
+        if (fallback) Object.defineProperty(navigator,'gpu',{value:undefined,configurable:true});
+        new MutationObserver(() => {
+          if (document.querySelector('#status')?.dataset.frames === '1') window.__qaPause = true;
+        }).observe(document,{attributes:true,subtree:true});
+      }, backend === 'fallback');
+      const page = await context.newPage(); lastPage = page;
+      const errors = [];
+      page.on('pageerror',error => errors.push(String(error)));
+      page.on('console',message => report.console.push({scenario,type:message.type(),text:message.text()}));
+      const selection = backend === 'fallback' ? 'auto' : backend;
+      await page.goto(`http://127.0.0.1:${server.address().port}/r6.html?backend=${selection}&reference=${reference ? '1' : '0'}`);
+      await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'rendering' && window.__qaPause,null,{timeout:30000});
+      assert.equal(await page.locator('#status').getAttribute('data-passes'),'40');
+      assert.equal(await page.locator('#status').getAttribute('data-draws'),'405');
+      assert.equal(await page.locator('#status').getAttribute('data-compute'),backend === 'webgl2' || backend === 'fallback' ? '0' : '1');
+      const bytes = await page.locator('canvas').screenshot();
+      const image = PNG.sync.read(bytes);
+      for (const [i,x] of [12,36,60,84].entries()) {
+        for (const [y,expected] of [[16,i%2 === 0 ? [255,0,0,255] : [0,255,0,255]],[48,i%2 === 0 ? [0,0,255,255] : [255,255,255,255]]]) {
+          const offset = (y*image.width+x)*4;
+          assert.deepEqual([...image.data.subarray(offset,offset+4)],expected,`${scenario} pixel ${x},${y}`);
+        }
+      }
+      if (reference) {
+        const graph = PNG.sync.read(await readFile(resolve(output,`r6-${backend}.png`)));
+        assert.deepEqual(image.data,graph.data,`${scenario} graph/direct complete images`);
+      }
+      await writeFile(resolve(output,`${scenario}.png`),bytes);
+      await page.evaluate(() => {window.__qaPause=false;});
+      await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'passed',null,{timeout:30000});
+      assert.equal(await page.locator('#status').getAttribute('data-frames'),'3');
+      assert.deepEqual(errors,[]);
+      report.cases.push({scenario,outcome:'passed',objectsPerKind:72,graphDraws:405,batchDraws:1100});
+      await context.close();
+    }
+  }
+
 } catch (error) {
   report.outcome='failed'; report.error=String(error);
   report.lastStatus = lastPage ? await lastPage.locator('#status').evaluate(node => ({text:node.textContent,...node.dataset})) : null;

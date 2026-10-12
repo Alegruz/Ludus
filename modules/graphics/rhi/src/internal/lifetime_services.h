@@ -19,7 +19,7 @@ struct LifetimeAccess final
     template <typename T>
     static usize Slot(T handle) noexcept
     {
-        return handle.Slot == 0 ? RASTER_CAPACITY : handle.Slot - 1;
+        return handle.Slot == 0 ? RASTER_INVALID : handle.Slot - 1;
     }
     template <typename T>
     static uint64 Generation(T handle) noexcept
@@ -56,7 +56,7 @@ struct BatchRecord final : LifetimeRecord
 {
     bool Finished = false;
     usize Count = 0;
-    RasterPacket Packets[LIFETIME_BATCH_DRAWS]{};
+    StorageArray<RasterPacket> Packets;
 };
 struct TransferRecord final : LifetimeRecord
 {
@@ -69,10 +69,10 @@ struct PipelineLease final : LifetimeRecord
 {
     usize Pipeline = 0;
 };
-BatchRecord gBatches[LIFETIME_BATCHES];
+StorageTable<BatchRecord> gBatches;
 TransferRecord gUploads[LIFETIME_TRANSFERS];
 TransferRecord gReadbacks[LIFETIME_TRANSFERS];
-PipelineLease gPipelineLeases[RASTER_CAPACITY];
+StorageTable<PipelineLease> gPipelineLeases;
 alignas(16) uint8 gReadbackScratch[LIFETIME_TRANSFER_BYTES]{};
 alignas(16) uint8 gUploadBytes[LIFETIME_TRANSFERS][LIFETIME_TRANSFER_BYTES]{};
 
@@ -89,6 +89,44 @@ T* ResolveLifetime(T (&records)[N], H handle) noexcept
                    record.Generation == LifetimeAccess::Generation(handle)
                ? &record
                : nullptr;
+}
+template <typename T, typename H>
+T* ResolveLifetime(StorageTable<T>& records, H handle) noexcept
+{
+    const auto slot = LifetimeAccess::Slot(handle);
+    if (slot >= records.GetSize() || LifetimeAccess::Owner(handle) == 0)
+    {
+        return nullptr;
+    }
+    auto& record = records[slot];
+    return record.Published && record.Owner == DeviceOwner() && record.Owner == LifetimeAccess::Owner(handle) &&
+                   record.Generation == LifetimeAccess::Generation(handle)
+               ? &record
+               : nullptr;
+}
+template <typename T>
+RasterStatus ReserveLifetime(StorageTable<T>& records, usize& slot, usize limit) noexcept
+{
+    bool exhausted = false;
+    for (slot = 0; slot < limit; ++slot)
+    {
+        if (slot == records.GetSize() && !records.EnsureSlots(slot + 1))
+        {
+            return StorageFailure();
+        }
+        const auto& record = records[slot];
+        if (record.Owner != 0)
+        {
+            continue;
+        }
+        if (record.Generation == 0)
+        {
+            exhausted = true;
+            continue;
+        }
+        return RasterStatus::Ready;
+    }
+    return exhausted ? RasterStatus::IdentityExhausted : RasterStatus::CapacityExceeded;
 }
 template <typename T>
 void ResetLifetime(T& record) noexcept
@@ -135,7 +173,7 @@ void PacketReferences(const RasterPacket& packet, bool retain) noexcept
     reference(RasterKind::Pipeline, packet.Pipeline);
     reference(RasterKind::Set, packet.Set);
     reference(RasterKind::Buffer, packet.Indices);
-    if (packet.Indirect != RASTER_CAPACITY)
+    if (packet.Indirect != RASTER_INVALID)
     {
         reference(RasterKind::Buffer, packet.Indirect);
     }
@@ -164,7 +202,7 @@ RasterStatus PacketStatus(const RasterPacket& packet) noexcept
             return record->Status;
         }
     }
-    if (packet.Indirect != RASTER_CAPACITY && At(RasterKind::Buffer, packet.Indirect).Status != RasterStatus::Ready)
+    if (packet.Indirect != RASTER_INVALID && At(RasterKind::Buffer, packet.Indirect).Status != RasterStatus::Ready)
     {
         return At(RasterKind::Buffer, packet.Indirect).Status;
     }
@@ -305,11 +343,11 @@ RasterStatus GetLifetimeCapabilities(DeviceHandle device, LifetimeCapabilities& 
     {
         return admission;
     }
-    output = admission == RasterStatus::Ready ? LifetimeCapabilities{static_cast<uint32>(LIFETIME_BATCHES),
-                                                                     static_cast<uint32>(LIFETIME_BATCH_DRAWS),
+    output = admission == RasterStatus::Ready ? LifetimeCapabilities{CurrentStorageLimits().Batches,
+                                                                     CurrentStorageLimits().DrawsPerPlan,
                                                                      static_cast<uint32>(LIFETIME_TRANSFERS),
                                                                      LIFETIME_TRANSFER_BYTES,
-                                                                     static_cast<uint32>(RASTER_CAPACITY)}
+                                                                     CurrentStorageLimits().ResourcesPerKind}
                                               : LifetimeCapabilities{};
     return admission;
 }
@@ -325,7 +363,7 @@ RasterStatus BeginCommands(DeviceHandle device, CommandBatch& output) noexcept
         return RasterStatus::InvalidState;
     }
     usize slot = 0;
-    const auto reservation = ReserveLifetime(gBatches, slot);
+    const auto reservation = ReserveLifetime(gBatches, slot, CurrentStorageLimits().Batches);
     if (reservation != RasterStatus::Ready)
     {
         return reservation;
@@ -352,7 +390,7 @@ RasterStatus RecordDraw(DeviceHandle device, CommandBatch batch, const RasterDra
     {
         return RasterStatus::InvalidState;
     }
-    if (record->Count == LIFETIME_BATCH_DRAWS)
+    if (record->Count == CurrentStorageLimits().DrawsPerPlan)
     {
         return RasterStatus::CapacityExceeded;
     }
@@ -361,6 +399,10 @@ RasterStatus RecordDraw(DeviceHandle device, CommandBatch batch, const RasterDra
     if (valid != RasterStatus::Ready)
     {
         return valid;
+    }
+    if (!record->Packets.TryResize(record->Count + 1))
+    {
+        return StorageFailure();
     }
     PacketReferences(packet, true);
     record->Packets[record->Count++] = packet;
@@ -483,6 +525,10 @@ SubmitCommands(DeviceHandle device, SurfaceHandle surface, CommandBatch& batch, 
     {
         return RasterStatus::InvalidState;
     }
+    if (record->Count > CurrentDeviceProfile().Raster.DrawsPerFrame)
+    {
+        return RasterStatus::CapacityExceeded;
+    }
     for (usize i = 0; i < record->Count; ++i)
     {
         const auto status = PacketStatus(record->Packets[i]);
@@ -503,6 +549,11 @@ SubmitCommands(DeviceHandle device, SurfaceHandle surface, CommandBatch& batch, 
     if (gSubmissions.Next == 0)
     {
         return RasterStatus::IdentityExhausted;
+    }
+    const auto preparedStorage = backend::RasterPrepareStorage();
+    if (preparedStorage != RasterStatus::Ready)
+    {
+        return preparedStorage;
     }
     const auto reserve = backend::RasterReserveSubmission();
     if (reserve != RasterStatus::Ready)
@@ -560,13 +611,13 @@ RasterStatus PollLifetime(DeviceHandle device) noexcept
     {
         return current;
     }
-    for (auto& pipeline : gRecords[static_cast<usize>(RasterKind::Pipeline)])
+    for (usize slot = 0; slot < gRecords[static_cast<usize>(RasterKind::Pipeline)].GetSize(); ++slot)
     {
+        auto& pipeline = At(RasterKind::Pipeline, slot);
         if (!pipeline.QueuedPipeline)
         {
             continue;
         }
-        const auto slot = static_cast<usize>(&pipeline - gRecords[static_cast<usize>(RasterKind::Pipeline)]);
         pipeline.QueuedPipeline = false;
         const auto status = backend::RasterCreatePipeline(slot, pipeline.Pipeline, pipeline.Request);
         if (pipeline.Owner == 0)
@@ -597,13 +648,13 @@ RequestPipeline(DeviceHandle device, const RasterPipelineDescription& descriptio
     }
     CanonicalizePipeline(info);
     usize leaseSlot = 0;
-    const auto reservation = ReserveLifetime(gPipelineLeases, leaseSlot);
+    const auto reservation = ReserveLifetime(gPipelineLeases, leaseSlot, CurrentStorageLimits().ResourcesPerKind);
     if (reservation != RasterStatus::Ready)
     {
         return reservation;
     }
-    usize pipelineSlot = RASTER_CAPACITY;
-    for (usize i = 0; i < RASTER_CAPACITY; ++i)
+    usize pipelineSlot = RASTER_INVALID;
+    for (usize i = 0; i < gRecords[static_cast<usize>(RasterKind::Pipeline)].GetSize(); ++i)
     {
         const auto& record = At(RasterKind::Pipeline, i);
         if (record.Owner == DeviceOwner() && record.Published && record.ServiceOwned &&
@@ -614,7 +665,7 @@ RequestPipeline(DeviceHandle device, const RasterPipelineDescription& descriptio
             break;
         }
     }
-    if (pipelineSlot == RASTER_CAPACITY)
+    if (pipelineSlot == RASTER_INVALID)
     {
         const auto reserved = Reserve(RasterKind::Pipeline, pipelineSlot);
         if (reserved != RasterStatus::Ready)
@@ -760,18 +811,22 @@ RasterStatus RequestBufferUpload(DeviceHandle device,
     const usize padded = (byteCount + 3) & ~usize{3};
     std::memset(gUploadBytes[slot] + byteCount, 0, padded - byteCount);
     BufferHandle buffer;
-    const auto created = Publish(RasterKind::Buffer, buffer, [&](usize bufferSlot, Record& record) noexcept {
-        record.Buffer = description;
-        if (description.Role == BufferRole::Index16 || description.Role == BufferRole::Index32)
-        {
-            if (!record.Indices.TryResize(byteCount))
+    const auto created = Publish(
+        RasterKind::Buffer,
+        buffer,
+        [&](usize bufferSlot, Record& record) noexcept {
+            record.Buffer = description;
+            if (description.Role == BufferRole::Index16 || description.Role == BufferRole::Index32)
             {
-                return RasterStatus::OutOfMemory;
+                if (!record.Indices.TryResize(byteCount))
+                {
+                    return StorageFailure();
+                }
+                std::memcpy(record.Indices.GetData(), gUploadBytes[slot], byteCount);
             }
-            std::memcpy(record.Indices.GetData(), gUploadBytes[slot], byteCount);
-        }
-        return backend::LifetimeUpload(slot, description, {bufferSlot, record.Request}, gUploadBytes[slot], padded);
-    });
+            return backend::LifetimeUpload(slot, description, {bufferSlot, record.Request}, gUploadBytes[slot], padded);
+        },
+        description.Size);
     if (created != RasterStatus::Ready && created != RasterStatus::Pending)
     {
         return created;

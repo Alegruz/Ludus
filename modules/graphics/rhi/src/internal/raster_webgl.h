@@ -29,23 +29,23 @@ struct RasterGlCompletion final
     uint64 Ordinal = 0;
     bool Reserved = false;
 };
-GLuint gRasterBuffers[internal::RASTER_CAPACITY]{};
-GLuint gRasterTextures[internal::RASTER_CAPACITY]{};
-TextureDescription gRasterTextureDescriptions[internal::RASTER_CAPACITY];
-GLuint gRasterFramebuffers[internal::RASTER_CAPACITY]{};
-GLuint gRasterRenderTextures[internal::RASTER_CAPACITY]{};
-GLuint gRasterSampleFramebuffers[internal::RASTER_CAPACITY]{};
+internal::StorageTable<GLuint> gRasterBuffers;
+internal::StorageTable<GLuint> gRasterTextures;
+internal::StorageTable<TextureDescription> gRasterTextureDescriptions;
+internal::StorageTable<GLuint> gRasterFramebuffers;
+internal::StorageTable<GLuint> gRasterRenderTextures;
+internal::StorageTable<GLuint> gRasterSampleFramebuffers;
 internal::RasterPassInfo gRasterGlPass;
 bool gRasterGlPassOpen = false;
 bool gRasterHdrProbed = false, gRasterHdr = false;
-GLuint gRasterDepths[internal::RASTER_CAPACITY]{};
-GLuint gRasterViews[internal::RASTER_CAPACITY]{};
-GLuint gRasterSamplers[internal::RASTER_CAPACITY]{};
-RasterGlShader gRasterShaders[internal::RASTER_CAPACITY];
-internal::RasterLayout gRasterLayouts[internal::RASTER_CAPACITY];
-internal::RasterSet gRasterSets[internal::RASTER_CAPACITY];
-RasterGlPipeline gRasterPipelines[internal::RASTER_CAPACITY];
-RasterGlCompletion gRasterCompletions[internal::RASTER_CAPACITY];
+internal::StorageTable<GLuint> gRasterDepths;
+internal::StorageTable<GLuint> gRasterViews;
+internal::StorageTable<GLuint> gRasterSamplers;
+internal::StorageTable<RasterGlShader> gRasterShaders;
+internal::StorageTable<internal::RasterLayout> gRasterLayouts;
+internal::StorageTable<internal::RasterSet> gRasterSets;
+internal::StorageTable<RasterGlPipeline> gRasterPipelines;
+internal::StorageTable<RasterGlCompletion> gRasterCompletions;
 RasterGlCompletion* gRasterReserved = nullptr;
 uint64 gRasterCompleted = 0;
 RasterStatus RasterGlResult() noexcept
@@ -252,8 +252,8 @@ RasterCapabilities RasterLimits() noexcept
             gMaxDimension < 4096 ? gMaxDimension : 4096,
             static_cast<usize>(alignment > 256 ? alignment : 256),
             16384,
-            static_cast<uint32>(internal::RASTER_CAPACITY),
-            static_cast<uint32>(internal::RASTER_DRAWS),
+            internal::CurrentStorageLimits().ResourcesPerKind,
+            internal::CurrentStorageLimits().DrawsPerFrame,
             static_cast<uint32>(attributes < 16 ? attributes : 16),
             gRasterHdr};
 }
@@ -547,7 +547,7 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
     const GLenum comparisons[]{GL_LESS, GL_LEQUAL, GL_GREATER, GL_GEQUAL, GL_ALWAYS};
     internal::RasterArea area;
     const auto& pass = gRasterGlPass;
-    const bool surface = !gRasterGlPassOpen || pass.Texture == internal::RASTER_CAPACITY;
+    const bool surface = !gRasterGlPassOpen || pass.Texture == internal::RASTER_INVALID;
     const auto width = surface ? gTarget.Width : gRasterTextureDescriptions[pass.Texture].Width;
     const auto height = surface ? gTarget.Height : gRasterTextureDescriptions[pass.Texture].Height;
     if (!internal::RasterResolveArea(gRasterGlPassOpen ? pass.Description : RasterPassDescription{},
@@ -632,7 +632,7 @@ void RasterEndPass() noexcept
         return;
     }
     const auto& pass = gRasterGlPass;
-    if (pass.Texture != internal::RASTER_CAPACITY && pass.Description.ColorStore == RasterStore::Store)
+    if (pass.Texture != internal::RASTER_INVALID && pass.Description.ColorStore == RasterStore::Store)
     {
         // GL framebuffer rows run bottom-up; uploaded/sampled texture rows in
         // the portable API run top-down. A private flipped blit preserves the
@@ -646,7 +646,7 @@ void RasterEndPass() noexcept
     }
     GLenum discard[2]{};
     GLsizei count = 0;
-    const bool surface = pass.Texture == internal::RASTER_CAPACITY;
+    const bool surface = pass.Texture == internal::RASTER_INVALID;
     if (pass.Description.ColorStore == RasterStore::Discard)
     {
         discard[count++] = surface ? GL_COLOR : GL_COLOR_ATTACHMENT0;
@@ -664,7 +664,7 @@ void RasterEndPass() noexcept
 void RasterTextureBarrier(usize, RasterTextureUse) noexcept {}
 RasterStatus RasterPreparePass(const internal::RasterPassInfo& info) noexcept
 {
-    if (info.Texture == internal::RASTER_CAPACITY || gRasterFramebuffers[info.Texture] != 0)
+    if (info.Texture == internal::RASTER_INVALID || gRasterFramebuffers[info.Texture] != 0)
     {
         return RasterStatus::Ready;
     }
@@ -675,7 +675,7 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
     gRasterGlPass = info;
     gRasterGlPassOpen = true;
     const auto& state = info.Description;
-    const bool surface = info.Texture == internal::RASTER_CAPACITY;
+    const bool surface = info.Texture == internal::RASTER_INVALID;
     glBindFramebuffer(GL_FRAMEBUFFER, surface ? 0 : gRasterFramebuffers[info.Texture]);
     const auto width = surface ? gTarget.Width : gRasterTextureDescriptions[info.Texture].Width;
     const auto height = surface ? gTarget.Height : gRasterTextureDescriptions[info.Texture].Height;
@@ -708,8 +708,9 @@ RasterStatus RasterReserveSubmission() noexcept
     {
         return RasterStatus::Ready;
     }
-    for (auto& completion : gRasterCompletions)
+    for (usize i = 0; i < internal::CurrentStorageLimits().Submissions; ++i)
     {
+        auto& completion = gRasterCompletions[i];
         if (completion.Sync == nullptr && !completion.Reserved)
         {
             completion.Reserved = true;
@@ -757,4 +758,40 @@ void RasterReset() noexcept
     gRasterCompleted = 0;
 }
 void RasterShutdown() noexcept {}
+
+RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
+{
+    switch (kind)
+    {
+        case internal::RasterKind::Buffer:
+            return gRasterBuffers.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Texture:
+            return gRasterTextures.EnsureSlots(count) && gRasterTextureDescriptions.EnsureSlots(count) &&
+                           gRasterFramebuffers.EnsureSlots(count) && gRasterRenderTextures.EnsureSlots(count) &&
+                           gRasterSampleFramebuffers.EnsureSlots(count) && gRasterDepths.EnsureSlots(count)
+                       ? RasterStatus::Ready
+                       : internal::StorageFailure();
+        case internal::RasterKind::View:
+            return gRasterViews.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Sampler:
+            return gRasterSamplers.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Shader:
+            return gRasterShaders.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Layout:
+            return gRasterLayouts.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Set:
+            return gRasterSets.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Pipeline:
+            return gRasterPipelines.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::ComputePipeline:
+            return RasterStatus::Unsupported;
+        default:
+            return RasterStatus::InvalidDescription;
+    }
+}
+RasterStatus RasterPrepareStorage() noexcept
+{
+    return gRasterCompletions.EnsureSlots(internal::CurrentStorageLimits().Submissions) ? RasterStatus::Ready
+                                                                                        : internal::StorageFailure();
+}
 } // namespace ludus::graphics::rhi::LUDUS_RHI_WEBGL_NAMESPACE

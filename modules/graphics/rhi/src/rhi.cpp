@@ -3,6 +3,7 @@
 #include "internal/profile.h"
 #include "internal/raster.h"
 #include "internal/resources.h"
+#include "internal/storage.h"
 #include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>
 
@@ -227,11 +228,19 @@ StartStatus StartSelected(const ApplicationInfo& app,
                           const DeviceRequirements& requirements,
                           bool requireRaster = false,
                           bool requireCompute = false,
-                          const DeviceProfileRequirements& profile = {}) noexcept
+                          const DeviceProfileRequirements& profile = {},
+                          const StorageLimits& storage = {}) noexcept
 {
     if (internal::SessionBusy())
     {
         return StartStatus::Busy;
+    }
+    if (!internal::ConfigureStorage(storage))
+    {
+        gStartup = {};
+        gStartup.State = StartupState::Failed;
+        gStartup.Error = StartupError::DeviceUnavailable;
+        return StartStatus::Failed;
     }
     gStartup.Requested = selection;
     gStartup.Requirements = requirements;
@@ -281,9 +290,10 @@ StartStatus StartOwned(const ApplicationInfo& app,
                        const DeviceRequirements& limits,
                        bool requireRaster,
                        bool requireCompute,
-                       const DeviceProfileRequirements& profile) noexcept
+                       const DeviceProfileRequirements& profile,
+                       const StorageLimits& storage) noexcept
 {
-    return StartSelected(app, window, selection, limits, requireRaster, requireCompute, profile);
+    return StartSelected(app, window, selection, limits, requireRaster, requireCompute, profile, storage);
 }
 } // namespace internal
 StartStatus Start(const ApplicationInfo& app, const WindowInfo& window) noexcept
@@ -331,6 +341,10 @@ FrameStatus BeginFrameStatus() noexcept
     if (gFrame)
     {
         return FrameStatus::InvalidState;
+    }
+    if (!internal::PrepareRasterFrame())
+    {
+        return FrameStatus::Failed;
     }
     const auto result = backend::Begin();
     gFrame = result == FrameStatus::Ready;

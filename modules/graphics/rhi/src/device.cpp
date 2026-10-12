@@ -6,6 +6,7 @@
 #include "internal/profile.h"
 #include "internal/raster.h"
 #include "internal/ray_backend.h"
+#include "internal/storage.h"
 
 namespace ludus::graphics::rhi
 {
@@ -106,7 +107,8 @@ DeviceStatus ValidateDeviceDescription(const DeviceDescription& description) noe
     {
         return DeviceStatus::InvalidDescription;
     }
-    if (!internal::ValidProfileRequirements(description.RequiredProfile) ||
+    if (!internal::ValidStorageLimits(description.Storage) ||
+        !internal::ValidProfileRequirements(description.RequiredProfile) ||
         !internal::ValidProfileRequirements(description.PreferredProfile))
     {
         return DeviceStatus::InvalidDescription;
@@ -166,7 +168,8 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
             internal::NeedsRaster(description.RequiredProfile) || internal::NeedsCompute(description.RequiredProfile),
         description.Required.Compute || description.Required.IndirectRendering || description.Required.RayQueries ||
             internal::NeedsCompute(description.RequiredProfile),
-        description.RequiredProfile);
+        description.RequiredProfile,
+        description.Storage);
     if (result == StartStatus::Busy)
     {
         return DeviceStatus::InvalidState;

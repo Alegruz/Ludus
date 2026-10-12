@@ -11,6 +11,27 @@ namespace internal
 /// Private access to lifetime-service identities.
 struct LifetimeAccess;
 } // namespace internal
+/// Owner-thread R6 accounting; bytes are engine storage/logical resources, not physical VRAM.
+struct StorageUsage final
+{
+    /// Currently committed host storage, including retained page slack and backend metadata.
+    ludus::foundation::usize HostBytes = 0;
+    /// Maximum committed host bytes, including overlap during growth, for this process storage epoch.
+    ludus::foundation::usize PeakHostBytes = 0;
+    /// Current logical buffer/texture bytes, retained through pending callbacks/GPU completion.
+    ludus::foundation::uint64 ResourceBytes = 0;
+    /// Maximum simultaneous logical resource bytes in this storage epoch.
+    ludus::foundation::uint64 PeakResourceBytes = 0;
+    /// Published general resources, including resources still being created.
+    ludus::foundation::uint64 PublishedRecords = 0;
+    /// General resources with unfinished creation callbacks.
+    ludus::foundation::uint64 PendingRecords = 0;
+    /// Resources whose public owner was destroyed but dependencies/GPU work retain storage.
+    ludus::foundation::uint64 DetachedRecords = 0;
+};
+/// Copy current accounting without waiting or allocating; owner-thread only.
+/// Invalid handles preserve output. Other unavailable states zero output and report their status.
+[[nodiscard]] RasterStatus GetStorageUsage(DeviceHandle, StorageUsage&) noexcept;
 /// Owned retained draw batch, scoped to one device incarnation. Copies do not transfer ownership.
 /// Main-thread use only. Submit or discard exactly once; stale copies are rejected.
 struct CommandBatch final
@@ -66,7 +87,7 @@ private:
     /// Grants private registry access to the owner and monotonic queue ordinal.
     friend struct internal::LifetimeAccess;
 };
-/// Effective fixed service budgets for a ready portable-raster device.
+/// Effective configured service maxima and fixed transfer budgets for a ready portable-raster device.
 struct LifetimeCapabilities final
 {
     /// Number of recording/finished batches, including retained dependency records.

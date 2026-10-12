@@ -24,7 +24,7 @@ struct GraphAccess final
     }
     static usize Slot(OrderedGraph h) noexcept
     {
-        return h.Slot == 0 ? 4 : h.Slot - 1;
+        return h.Slot == 0 ? RASTER_INVALID : h.Slot - 1;
     }
     static void Set(OrderedGraph& h, const RasterIdentity& identity) noexcept
     {
@@ -38,7 +38,7 @@ struct GraphAccess final
     }
     static usize Resource(GraphVersion v) noexcept
     {
-        return v.Resource == 0 ? 16 : v.Resource - 1;
+        return v.Resource == 0 ? RASTER_INVALID : v.Resource - 1;
     }
     static uint32 Version(GraphVersion v) noexcept
     {
@@ -60,11 +60,26 @@ struct GraphAccess final
 } // namespace internal
 namespace
 {
-constexpr usize GRAPH_COUNT = 4;
-constexpr usize GRAPH_RESOURCES = 16;
-constexpr usize GRAPH_PASSES = 32;
-constexpr usize GRAPH_DEPENDENCIES = 512;
-constexpr usize GRAPH_POOL = 8;
+usize GraphCount() noexcept
+{
+    return CurrentStorageLimits().Graphs;
+}
+usize GraphResources() noexcept
+{
+    return CurrentStorageLimits().ResourcesPerGraph;
+}
+usize GraphPasses() noexcept
+{
+    return CurrentStorageLimits().PassesPerGraph;
+}
+usize GraphDependencies() noexcept
+{
+    return CurrentStorageLimits().DependenciesPerGraph;
+}
+usize GraphPool() noexcept
+{
+    return CurrentStorageLimits().TransientTextures;
+}
 struct GraphResourceRecord final
 {
     RasterKind Kind = RasterKind::Buffer;
@@ -80,7 +95,7 @@ struct GraphResourceRecord final
 struct GraphPassRecord final
 {
     RasterPassInfo Info;
-    GraphUse Uses[GRAPH_RESOURCES]{};
+    StorageArray<GraphUse> Uses;
     usize UseCount = 0;
     usize FirstDraw = 0;
     usize DrawCount = 0;
@@ -88,28 +103,36 @@ struct GraphPassRecord final
     bool IsCompute = false;
     ComputePacket Dispatch;
 };
+struct FullGraphReport final
+{
+    GraphReport Summary;
+    StorageArray<GraphPassDiagnostic> Passes;
+    StorageArray<GraphResourceDiagnostic> Resources;
+    StorageArray<GraphDependency> Dependencies;
+};
 struct GraphRecord final : LifetimeRecord
 {
     bool Compiled = false;
     usize ResourceCount = 0;
     usize PassCount = 0;
     usize DrawCount = 0;
-    GraphResourceRecord Resources[GRAPH_RESOURCES]{};
-    GraphPassRecord Passes[GRAPH_PASSES]{};
-    RasterPacket Draws[LIFETIME_BATCH_DRAWS]{};
-    GraphReport Report;
+    StorageArray<GraphResourceRecord> Resources;
+    StorageArray<GraphPassRecord> Passes;
+    StorageArray<RasterPacket> Draws;
+    FullGraphReport Report;
+    bool ReportAvailable = false;
 };
 struct GraphPoolRecord final
 {
     bool Occupied = false;
     usize Texture = 0;
 };
-GraphRecord gGraphs[GRAPH_COUNT];
-GraphPoolRecord gGraphPool[GRAPH_POOL];
+StorageTable<GraphRecord> gGraphs;
+StorageTable<GraphPoolRecord> gGraphPool;
 GraphRecord* ResolveGraph(OrderedGraph handle) noexcept
 {
     const auto slot = GraphAccess::Slot(handle);
-    if (slot >= GRAPH_COUNT)
+    if (slot >= gGraphs.GetSize())
     {
         return nullptr;
     }
@@ -171,6 +194,7 @@ void ResetGraph(GraphRecord& graph) noexcept
     static_cast<LifetimeRecord&>(graph) = {};
     graph.Generation = generation;
     graph.Compiled = false;
+    graph.ReportAvailable = false;
     graph.ResourceCount = graph.PassCount = graph.DrawCount = 0;
     for (auto& resource : graph.Resources)
     {
@@ -226,7 +250,7 @@ void ResetGraphRecords() noexcept
 }
 RasterTarget PassTarget(const RasterPassInfo& pass) noexcept
 {
-    if (pass.Texture == RASTER_CAPACITY)
+    if (pass.Texture == RASTER_INVALID)
     {
         return RasterTarget::Surface;
     }
@@ -367,7 +391,7 @@ void ApplyPassState(const RasterPassInfo& pass) noexcept
     const auto& description = pass.Description;
     bool* color = &gSurfaceColorDefined;
     bool* depth = &gSurfaceDepthDefined;
-    if (pass.Texture != RASTER_CAPACITY)
+    if (pass.Texture != RASTER_INVALID)
     {
         FrameRetain(RasterKind::Texture, pass.Texture);
         auto& texture = At(RasterKind::Texture, pass.Texture);
@@ -388,7 +412,7 @@ RasterStatus StartPass(const RasterPassInfo& pass) noexcept
     {
         return GetStartup().State == StartupState::DeviceLost ? RasterStatus::DeviceLost : RasterStatus::Failed;
     }
-    if (gRasterPass.Texture != RASTER_CAPACITY && gRasterPass.Texture != pass.Texture)
+    if (gRasterPass.Texture != RASTER_INVALID && gRasterPass.Texture != pass.Texture)
     {
         backend::RasterTextureBarrier(gRasterPass.Texture, RasterTextureUse::SampledBoth);
         if (GetStartup().State == StartupState::Ready)
@@ -441,7 +465,7 @@ RasterStatus AddImport(GraphRecord& graph,
     {
         return RasterStatus::InvalidState;
     }
-    if (graph.ResourceCount == GRAPH_RESOURCES)
+    if (graph.ResourceCount == GraphResources())
     {
         return RasterStatus::CapacityExceeded;
     }
@@ -452,6 +476,12 @@ RasterStatus AddImport(GraphRecord& graph,
             return RasterStatus::InvalidDescription;
         }
     }
+    if (!graph.Resources.TryResize(graph.ResourceCount + 1) ||
+        !graph.Report.Resources.TryResize(graph.ResourceCount + 1))
+    {
+        return StorageFailure();
+    }
+    graph.ReportAvailable = false;
     const auto index = graph.ResourceCount++;
     auto& resource = graph.Resources[index];
     resource.Kind = kind;
@@ -484,7 +514,7 @@ bool RasterFinishFrame() noexcept
     {
         return true;
     }
-    for (usize slot = 0; slot < RASTER_CAPACITY; ++slot)
+    for (usize slot = 0; slot < gRecords[static_cast<usize>(RasterKind::Texture)].GetSize(); ++slot)
     {
         auto& texture = At(RasterKind::Texture, slot);
         if (texture.InFrame && texture.Texture.Attachment &&
@@ -537,7 +567,7 @@ RasterStatus BeginRasterPass(DeviceHandle device, const RasterPassDescription& d
     {
         return valid;
     }
-    if (pass.Texture == RASTER_CAPACITY)
+    if (pass.Texture == RASTER_INVALID)
     {
         const auto extent = GetFrameInfo();
         RasterArea area;
@@ -548,7 +578,7 @@ RasterStatus BeginRasterPass(DeviceHandle device, const RasterPassDescription& d
     }
     bool color = gSurfaceColorDefined;
     bool depth = gSurfaceDepthDefined;
-    if (pass.Texture != RASTER_CAPACITY)
+    if (pass.Texture != RASTER_INVALID)
     {
         const auto& texture = At(RasterKind::Texture, pass.Texture);
         color = texture.InFrame ? texture.FrameColorDefined : texture.ColorDefined;
@@ -591,7 +621,7 @@ RasterStatus CreateOrderedGraph(DeviceHandle device, OrderedGraph& output) noexc
         return RasterStatus::InvalidState;
     }
     usize slot = 0;
-    const auto reserved = ReserveLifetime(gGraphs, slot);
+    const auto reserved = ReserveLifetime(gGraphs, slot, GraphCount());
     if (reserved != RasterStatus::Ready)
     {
         return reserved;
@@ -685,7 +715,7 @@ RasterStatus CreateGraphTexture(DeviceHandle device,
     {
         return RasterStatus::InvalidState;
     }
-    if (graph->ResourceCount == GRAPH_RESOURCES)
+    if (graph->ResourceCount == GraphResources())
     {
         return RasterStatus::CapacityExceeded;
     }
@@ -693,19 +723,24 @@ RasterStatus CreateGraphTexture(DeviceHandle device,
     {
         return RasterStatus::InvalidDescription;
     }
+    if (!graph->Resources.TryResize(graph->ResourceCount + 1) ||
+        !graph->Report.Resources.TryResize(graph->ResourceCount + 1) || !gGraphPool.EnsureSlots(GraphPool()))
+    {
+        return StorageFailure();
+    }
     const auto completed = backend::RasterCompleted();
     const auto current = Admission(device);
     if (current != RasterStatus::Ready)
     {
         return current;
     }
-    usize freePool = GRAPH_POOL, evictPool = GRAPH_POOL;
-    for (usize i = 0; i < GRAPH_POOL; ++i)
+    usize freePool = GraphPool(), evictPool = GraphPool();
+    for (usize i = 0; i < GraphPool(); ++i)
     {
         const auto& pool = gGraphPool[i];
         if (!pool.Occupied)
         {
-            if (freePool == GRAPH_POOL)
+            if (freePool == GraphPool())
             {
                 freePool = i;
             }
@@ -714,7 +749,7 @@ RasterStatus CreateGraphTexture(DeviceHandle device,
         auto& texture = At(RasterKind::Texture, pool.Texture);
         const bool idle = texture.References == 1 && texture.LastUse <= completed && texture.Callbacks == 0 &&
                           texture.Status != RasterStatus::Pending;
-        if (idle && evictPool == GRAPH_POOL)
+        if (idle && evictPool == GraphPool())
         {
             evictPool = i;
         }
@@ -727,14 +762,14 @@ RasterStatus CreateGraphTexture(DeviceHandle device,
             return AddImport(*graph, handle, RasterKind::Texture, pool.Texture, version, true);
         }
     }
-    if (freePool == GRAPH_POOL && evictPool != GRAPH_POOL)
+    if (freePool == GraphPool() && evictPool != GraphPool())
     {
         freePool = evictPool;
         Release(RasterKind::Texture, gGraphPool[freePool].Texture);
         gGraphPool[freePool] = {};
         Collect();
     }
-    if (freePool == GRAPH_POOL)
+    if (freePool == GraphPool())
     {
         return RasterStatus::CapacityExceeded;
     }
@@ -774,10 +809,11 @@ NextGraphVersion(DeviceHandle device, OrderedGraph handle, GraphVersion previous
     {
         return RasterStatus::InvalidDescription;
     }
-    if (resource.Versions == GRAPH_PASSES)
+    if (resource.Versions == GraphPasses())
     {
         return RasterStatus::CapacityExceeded;
     }
+    graph->ReportAvailable = false;
     GraphAccess::Set(output, handle, {GraphAccess::Resource(previous), ++resource.Versions});
     return RasterStatus::Ready;
 }
@@ -789,8 +825,9 @@ RasterStatus AddGraphPass(DeviceHandle device, OrderedGraph handle, const GraphP
     {
         return admission;
     }
-    if (graph->PassCount == GRAPH_PASSES || description.DrawCount > LIFETIME_BATCH_DRAWS - graph->DrawCount ||
-        description.UseCount > GRAPH_RESOURCES)
+    if (graph->PassCount == GraphPasses() ||
+        description.DrawCount > CurrentStorageLimits().DrawsPerPlan - graph->DrawCount ||
+        description.UseCount > GraphResources())
     {
         return RasterStatus::CapacityExceeded;
     }
@@ -828,6 +865,10 @@ RasterStatus AddGraphPass(DeviceHandle device, OrderedGraph handle, const GraphP
             return valid;
         }
     }
+    if (!pass.Uses.TryResize(description.UseCount))
+    {
+        return StorageFailure();
+    }
     for (usize i = 0; i < description.UseCount; ++i)
     {
         const auto& use = description.Uses[i];
@@ -842,7 +883,11 @@ RasterStatus AddGraphPass(DeviceHandle device, OrderedGraph handle, const GraphP
         }
         pass.Uses[i] = use;
     }
-    RasterPacket packets[LIFETIME_BATCH_DRAWS]{};
+    StorageArray<RasterPacket> packets;
+    if (!packets.TryResize(description.DrawCount))
+    {
+        return StorageFailure();
+    }
     for (usize i = 0; i < description.DrawCount; ++i)
     {
         const auto draw = ValidateDraw(device, description.Draws[i], packets[i]);
@@ -855,15 +900,21 @@ RasterStatus AddGraphPass(DeviceHandle device, OrderedGraph handle, const GraphP
     pass.FirstDraw = graph->DrawCount;
     pass.DrawCount = description.DrawCount;
     pass.SideEffect = description.SideEffect;
+    if (!graph->Passes.TryResize(graph->PassCount + 1) || !graph->Report.Passes.TryResize(graph->PassCount + 1) ||
+        !graph->Draws.TryResize(graph->DrawCount + description.DrawCount))
+    {
+        return StorageFailure();
+    }
+    graph->ReportAvailable = false;
     const auto index = graph->PassCount++;
-    graph->Passes[index] = pass;
+    graph->Passes[index] = Move(pass);
     if (pass.IsCompute)
     {
         ComputeReferences(pass.Dispatch, true);
     }
-    std::memcpy(graph->Report.Names[index], name, sizeof(name));
-    std::memcpy(graph->Report.Sources[index], source, sizeof(source));
-    graph->Report.Lines[index] = description.Line;
+    std::memcpy(graph->Report.Passes[index].Name, name, sizeof(name));
+    std::memcpy(graph->Report.Passes[index].Source, source, sizeof(source));
+    graph->Report.Passes[index].Line = description.Line;
     for (usize i = 0; i < description.DrawCount; ++i)
     {
         PacketReferences(packets[i], true);
@@ -896,6 +947,7 @@ RasterStatus AddGraphRoot(DeviceHandle device, OrderedGraph handle, GraphVersion
     {
         return RasterStatus::InvalidState;
     }
+    graph->ReportAvailable = false;
     resource.Root = true;
     resource.RootVersion = GraphAccess::Version(version);
     return RasterStatus::Ready;
@@ -962,13 +1014,13 @@ CheckDeclaredPacket(const GraphRecord& graph, const GraphPassRecord& pass, const
     {
         return RasterStatus::InvalidDescription;
     }
-    if (packet.Indirect != RASTER_CAPACITY && FindUse(graph,
-                                                      pass,
-                                                      RasterKind::Buffer,
-                                                      packet.Indirect,
-                                                      GraphAccessMode::Indirect,
-                                                      packet.IndirectOffset,
-                                                      sizeof(IndexedIndirectArguments)) == nullptr)
+    if (packet.Indirect != RASTER_INVALID && FindUse(graph,
+                                                     pass,
+                                                     RasterKind::Buffer,
+                                                     packet.Indirect,
+                                                     GraphAccessMode::Indirect,
+                                                     packet.IndirectOffset,
+                                                     sizeof(IndexedIndirectArguments)) == nullptr)
     {
         return RasterStatus::InvalidDescription;
     }
@@ -1000,14 +1052,14 @@ CheckDeclaredPacket(const GraphRecord& graph, const GraphPassRecord& pass, const
 struct GraphTrack final
 {
     uint32 Version = 0;
-    uint32 Writer = 32;
-    uint32 Readers = 0;
+    uint32 Writer = GRAPH_EXTERNAL_INDEX;
+    StorageArray<bool> Readers;
     bool Defined = false;
     bool DepthDefined = false;
     GraphAccessMode LastWrite = GraphAccessMode::ColorWrite;
-    GraphAccessMode ReadAccess[GRAPH_PASSES]{};
+    StorageArray<GraphAccessMode> ReadAccess;
 };
-bool AddDependency(GraphReport& report,
+bool AddDependency(FullGraphReport& report,
                    usize before,
                    usize after,
                    usize resource,
@@ -1015,41 +1067,58 @@ bool AddDependency(GraphReport& report,
                    GraphAccessMode source,
                    GraphAccessMode destination) noexcept
 {
-    if (report.DependencyCount == GRAPH_DEPENDENCIES)
+    if (report.Summary.DependencyCount == GraphDependencies())
+    {
+        StorageCapacityFailed();
+        return false;
+    }
+    if (!report.Dependencies.TryResize(report.Summary.DependencyCount + 1))
     {
         return false;
     }
-    report.Dependencies[report.DependencyCount++] = {static_cast<uint32>(before),
-                                                     static_cast<uint32>(after),
-                                                     static_cast<uint32>(resource),
-                                                     hazard,
-                                                     source,
-                                                     destination};
+    report.Dependencies[report.Summary.DependencyCount++] = {static_cast<uint32>(before),
+                                                             static_cast<uint32>(after),
+                                                             static_cast<uint32>(resource),
+                                                             hazard,
+                                                             source,
+                                                             destination};
     return true;
 }
-RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool reference) noexcept
+RasterStatus CompileGraph(GraphRecord& graph, FullGraphReport& report, bool reference) noexcept
 {
-    GraphTrack tracks[GRAPH_RESOURCES]{};
-    bool live[GRAPH_PASSES]{};
+    StorageArray<GraphTrack> tracks;
+    StorageArray<bool> live;
     bool surfaceColor = true, surfaceDepth = false;
-    bool imported[GRAPH_RESOURCES]{};
+    StorageArray<bool> imported;
+    if (!tracks.TryResize(graph.ResourceCount) || !live.TryResize(graph.PassCount) ||
+        !imported.TryResize(graph.ResourceCount))
+    {
+        return StorageFailure();
+    }
+    for (auto& track : tracks)
+    {
+        if (!track.Readers.TryResize(graph.PassCount) || !track.ReadAccess.TryResize(graph.PassCount))
+        {
+            return StorageFailure();
+        }
+    }
     for (usize r = 0; r < graph.ResourceCount; ++r)
     {
         const auto& resource = graph.Resources[r];
         const auto& physical = At(resource.Kind, resource.Slot);
         if (physical.Status != RasterStatus::Ready)
         {
-            report.ErrorResource = static_cast<uint32>(r);
+            report.Summary.ErrorResource = static_cast<uint32>(r);
             return physical.Status;
         }
         if (resource.Kind == RasterKind::Texture && !SameTextureState(resource.Import, TextureState(physical)))
         {
-            report.ErrorResource = static_cast<uint32>(r);
+            report.Summary.ErrorResource = static_cast<uint32>(r);
             return RasterStatus::InvalidState;
         }
         if (resource.Kind == RasterKind::Buffer && resource.BufferRevision != physical.BufferRevision)
         {
-            report.ErrorResource = static_cast<uint32>(r);
+            report.Summary.ErrorResource = static_cast<uint32>(r);
             return RasterStatus::InvalidState;
         }
         tracks[r].Defined =
@@ -1058,10 +1127,10 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
     }
     for (usize p = 0; p < graph.PassCount; ++p)
     {
-        report.ErrorPass = static_cast<uint32>(p);
+        report.Summary.ErrorPass = static_cast<uint32>(p);
         const auto& pass = graph.Passes[p];
-        live[p] = reference || pass.SideEffect || (!pass.IsCompute && pass.Info.Texture == RASTER_CAPACITY);
-        bool attachment = !pass.IsCompute && pass.Info.Texture == RASTER_CAPACITY;
+        live[p] = reference || pass.SideEffect || (!pass.IsCompute && pass.Info.Texture == RASTER_INVALID);
+        bool attachment = !pass.IsCompute && pass.Info.Texture == RASTER_INVALID;
         if (attachment)
         {
             const auto& state = pass.Info.Description;
@@ -1081,7 +1150,7 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
         {
             const auto& use = pass.Uses[i];
             const auto r = GraphAccess::Resource(use.Resource);
-            report.ErrorResource = static_cast<uint32>(r);
+            report.Summary.ErrorResource = static_cast<uint32>(r);
             const auto& resource = graph.Resources[r];
             auto& track = tracks[r];
             for (usize j = 0; j < i; ++j)
@@ -1098,7 +1167,7 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
                 const bool priorWrite = resource.Import.Use == RasterTextureUse::ColorAttachment;
                 if ((priorWrite || write) &&
                     !AddDependency(report,
-                                   32,
+                                   GRAPH_EXTERNAL_INDEX,
                                    p,
                                    r,
                                    priorWrite ? (write ? GraphHazard::WriteAfterWrite : GraphHazard::ReadAfterWrite)
@@ -1106,7 +1175,7 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
                                    priorWrite ? GraphAccessMode::ColorWrite : GraphAccessMode::Sampled,
                                    use.Access))
                 {
-                    return RasterStatus::CapacityExceeded;
+                    return StorageFailure();
                 }
             }
             imported[r] = true;
@@ -1144,17 +1213,17 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
                 {
                     return RasterStatus::InvalidDescription;
                 }
-                if (track.Writer != 32 && !AddDependency(report,
-                                                         track.Writer,
-                                                         p,
-                                                         r,
-                                                         GraphHazard::ReadAfterWrite,
-                                                         track.LastWrite,
-                                                         use.Access))
+                if (track.Writer != GRAPH_EXTERNAL_INDEX && !AddDependency(report,
+                                                                           track.Writer,
+                                                                           p,
+                                                                           r,
+                                                                           GraphHazard::ReadAfterWrite,
+                                                                           track.LastWrite,
+                                                                           use.Access))
                 {
-                    return RasterStatus::CapacityExceeded;
+                    return StorageFailure();
                 }
-                track.Readers |= uint32{1} << p;
+                track.Readers[p] = true;
                 track.ReadAccess[p] = use.Access;
                 continue;
             }
@@ -1182,30 +1251,34 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
                     return RasterStatus::InvalidDescription;
                 }
             }
-            if ((load || (!bufferWrite && description.DepthLoad == RasterLoad::Load)) && track.Writer != 32 &&
+            if ((load || (!bufferWrite && description.DepthLoad == RasterLoad::Load)) &&
+                track.Writer != GRAPH_EXTERNAL_INDEX &&
                 !AddDependency(report, track.Writer, p, r, GraphHazard::ReadAfterWrite, track.LastWrite, use.Access))
             {
-                return RasterStatus::CapacityExceeded;
+                return StorageFailure();
             }
-            if (track.Writer != 32 &&
+            if (track.Writer != GRAPH_EXTERNAL_INDEX &&
                 !AddDependency(report, track.Writer, p, r, GraphHazard::WriteAfterWrite, track.LastWrite, use.Access))
             {
-                return RasterStatus::CapacityExceeded;
+                return StorageFailure();
             }
             for (usize reader = 0; reader < p; ++reader)
             {
-                if ((track.Readers & (uint32{1} << reader)) != 0 && !AddDependency(report,
-                                                                                   reader,
-                                                                                   p,
-                                                                                   r,
-                                                                                   GraphHazard::WriteAfterRead,
-                                                                                   track.ReadAccess[reader],
-                                                                                   use.Access))
+                if (track.Readers[reader] && !AddDependency(report,
+                                                            reader,
+                                                            p,
+                                                            r,
+                                                            GraphHazard::WriteAfterRead,
+                                                            track.ReadAccess[reader],
+                                                            use.Access))
                 {
-                    return RasterStatus::CapacityExceeded;
+                    return StorageFailure();
                 }
             }
-            track.Readers = 0;
+            for (auto& reader : track.Readers)
+            {
+                reader = false;
+            }
             track.Writer = static_cast<uint32>(p);
             track.LastWrite = use.Access;
             track.Version = version;
@@ -1219,7 +1292,7 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
         {
             return RasterStatus::InvalidDescription;
         }
-        report.ErrorResource = 16;
+        report.Summary.ErrorResource = GRAPH_EXTERNAL_INDEX;
         if (pass.IsCompute)
         {
             const auto& set = At(RasterKind::Set, pass.Dispatch.Set).Set;
@@ -1247,14 +1320,14 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
             }
         }
     }
-    report.ErrorPass = 32;
+    report.Summary.ErrorPass = GRAPH_EXTERNAL_INDEX;
     if (!surfaceColor)
     {
         return RasterStatus::InvalidDescription;
     }
     for (usize r = 0; r < graph.ResourceCount; ++r)
     {
-        report.ErrorResource = static_cast<uint32>(r);
+        report.Summary.ErrorResource = static_cast<uint32>(r);
         const auto& resource = graph.Resources[r];
         const auto& track = tracks[r];
         if (resource.Root)
@@ -1263,7 +1336,7 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
             {
                 return RasterStatus::InvalidDescription;
             }
-            if (track.Writer != 32)
+            if (track.Writer != GRAPH_EXTERNAL_INDEX)
             {
                 live[track.Writer] = true;
             }
@@ -1277,7 +1350,7 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
         {
             continue;
         }
-        for (usize i = 0; i < report.DependencyCount; ++i)
+        for (usize i = 0; i < report.Summary.DependencyCount; ++i)
         {
             const auto& edge = report.Dependencies[i];
             if (edge.After == p && edge.Before < p && edge.Hazard == GraphHazard::ReadAfterWrite)
@@ -1288,31 +1361,31 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
     }
     for (usize p = 0; p < graph.PassCount; ++p)
     {
-        report.Culled[p] = !live[p];
+        report.Passes[p].Culled = !live[p];
         if (!live[p])
         {
             continue;
         }
-        ++report.LivePasses;
+        ++report.Summary.LivePasses;
         const auto& pass = graph.Passes[p];
         for (usize i = 0; i < pass.UseCount; ++i)
         {
             const auto r = GraphAccess::Resource(pass.Uses[i].Resource);
-            if (report.FirstUse[r] == 32)
+            if (report.Resources[r].FirstUse == GRAPH_EXTERNAL_INDEX)
             {
-                report.FirstUse[r] = static_cast<uint32>(p);
+                report.Resources[r].FirstUse = static_cast<uint32>(p);
             }
-            report.LastUse[r] = static_cast<uint32>(p);
+            report.Resources[r].LastUse = static_cast<uint32>(p);
         }
     }
     for (usize r = 0; r < graph.ResourceCount; ++r)
     {
         const auto& resource = graph.Resources[r];
-        if (resource.Kind != RasterKind::Texture || report.LastUse[r] == 32)
+        if (resource.Kind != RasterKind::Texture || report.Resources[r].LastUse == GRAPH_EXTERNAL_INDEX)
         {
             continue;
         }
-        const auto p = report.LastUse[r];
+        const auto p = report.Resources[r].LastUse;
         const auto& pass = graph.Passes[p];
         for (usize i = 0; i < pass.UseCount; ++i)
         {
@@ -1325,19 +1398,19 @@ RasterStatus CompileGraph(GraphRecord& graph, GraphReport& report, bool referenc
             if ((write || finalWrite) &&
                 !AddDependency(report,
                                p,
-                               32,
+                               GRAPH_EXTERNAL_INDEX,
                                r,
                                write ? (finalWrite ? GraphHazard::WriteAfterWrite : GraphHazard::ReadAfterWrite)
                                      : GraphHazard::WriteAfterRead,
                                use.Access,
                                finalWrite ? GraphAccessMode::ColorWrite : GraphAccessMode::Sampled))
             {
-                report.ErrorResource = static_cast<uint32>(r);
-                return RasterStatus::CapacityExceeded;
+                report.Summary.ErrorResource = static_cast<uint32>(r);
+                return StorageFailure();
             }
         }
     }
-    report.ErrorResource = 16;
+    report.Summary.ErrorResource = GRAPH_EXTERNAL_INDEX;
     return RasterStatus::Ready;
 }
 } // namespace
@@ -1388,61 +1461,100 @@ bool CanMergeRaster(const GraphPassRecord& before, const GraphPassRecord& after)
     }
     return true;
 }
-void PlanRasterGroups(const GraphRecord& graph, GraphReport& report, bool merge) noexcept
+void CopyGraphSummary(const GraphRecord& graph, GraphReport& output) noexcept
 {
-    report.RasterPasses = report.ComputePasses = report.MergedPasses = report.DrawCount = 0;
-    report.PlanStorageBytes = sizeof(GraphRecord);
-    report.BufferBytes = report.TextureBytes = 0;
+    output = graph.Report.Summary;
+    output.ResourceCount = static_cast<uint32>(graph.ResourceCount);
+    output.ReportedPasses = static_cast<uint32>(graph.PassCount < 32 ? graph.PassCount : 32);
+    output.ReportedResources = static_cast<uint32>(graph.ResourceCount < 16 ? graph.ResourceCount : 16);
+    output.ReportedDependencies = output.DependencyCount < 512 ? output.DependencyCount : 512;
+    output.DiagnosticsTruncated = graph.PassCount > 32 || graph.ResourceCount > 16 || output.DependencyCount > 512;
+    for (usize i = 0; i < output.ReportedPasses; ++i)
+    {
+        const auto& pass = graph.Report.Passes[i];
+        std::memcpy(output.Names[i], pass.Name, sizeof(pass.Name));
+        std::memcpy(output.Sources[i], pass.Source, sizeof(pass.Source));
+        output.Lines[i] = pass.Line;
+        output.Culled[i] = pass.Culled;
+        output.RasterGroup[i] = pass.RasterGroup;
+    }
+    for (usize i = 0; i < output.ReportedResources; ++i)
+    {
+        output.FirstUse[i] = graph.Report.Resources[i].FirstUse;
+        output.LastUse[i] = graph.Report.Resources[i].LastUse;
+    }
+    for (usize i = 0; i < output.ReportedDependencies; ++i)
+    {
+        output.Dependencies[i] = graph.Report.Dependencies[i];
+    }
+}
+void PlanRasterGroups(const GraphRecord& graph, FullGraphReport& report, bool merge) noexcept
+{
+    report.Summary.RasterPasses = report.Summary.ComputePasses = report.Summary.MergedPasses =
+        report.Summary.DrawCount = 0;
+    report.Summary.PlanStorageBytes =
+        sizeof(GraphRecord) + graph.Resources.GetCapacity() * sizeof(GraphResourceRecord) +
+        graph.Passes.GetCapacity() * sizeof(GraphPassRecord) + graph.Draws.GetCapacity() * sizeof(RasterPacket) +
+        report.Passes.GetCapacity() * sizeof(GraphPassDiagnostic) +
+        report.Resources.GetCapacity() * sizeof(GraphResourceDiagnostic) +
+        report.Dependencies.GetCapacity() * sizeof(GraphDependency);
+    for (const auto& pass : graph.Passes)
+    {
+        report.Summary.PlanStorageBytes += pass.Uses.GetCapacity() * sizeof(GraphUse);
+    }
+    report.Summary.BufferBytes = report.Summary.TextureBytes = 0;
     for (usize r = 0; r < graph.ResourceCount; ++r)
     {
         const auto& resource = graph.Resources[r];
         const auto& physical = At(resource.Kind, resource.Slot);
         if (resource.Kind == RasterKind::Buffer)
         {
-            report.BufferBytes += physical.Buffer.Size;
+            report.Summary.BufferBytes += physical.Buffer.Size;
         }
         else
         {
             const auto& texture = physical.Texture;
             const uint64 pixels = uint64{texture.Width} * texture.Height;
-            const uint64 channels = texture.Format == RasterFormat::R8Unorm    ? 1U
-                                    : texture.Format == RasterFormat::Rg8Unorm ? 2U
-                                                                               : 4U;
+            const uint64 channels = texture.Format == RasterFormat::R8Unorm       ? 1U
+                                    : texture.Format == RasterFormat::Rg8Unorm    ? 2U
+                                    : texture.Format == RasterFormat::Rgba16Float ? 8U
+                                                                                  : 4U;
             uint32 width = texture.Width, height = texture.Height;
             for (uint32 level = 0; level < texture.MipLevels; ++level)
             {
-                report.TextureBytes += uint64{width} * height * channels;
+                report.Summary.TextureBytes += uint64{width} * height * channels;
                 width = width > 1 ? width / 2 : 1;
                 height = height > 1 ? height / 2 : 1;
             }
             if (texture.Attachment)
             {
-                report.TextureBytes += pixels * 4U;
+                report.Summary.TextureBytes += pixels * 4U;
             }
         }
     }
     for (usize p = 0; p < graph.PassCount; ++p)
     {
-        report.RasterGroup[p] = 32;
-        if (report.Culled[p])
+        report.Passes[p].RasterGroup = GRAPH_EXTERNAL_INDEX;
+        if (report.Passes[p].Culled)
         {
             continue;
         }
         const auto& pass = graph.Passes[p];
-        report.DrawCount += static_cast<uint32>(pass.DrawCount);
+        report.Summary.DrawCount += static_cast<uint32>(pass.DrawCount);
         if (pass.IsCompute)
         {
-            ++report.ComputePasses;
+            ++report.Summary.ComputePasses;
         }
-        else if (merge && p != 0 && report.RasterGroup[p - 1] != 32 && CanMergeRaster(graph.Passes[p - 1], pass))
+        else if (merge && p != 0 && report.Passes[p - 1].RasterGroup != GRAPH_EXTERNAL_INDEX &&
+                 CanMergeRaster(graph.Passes[p - 1], pass))
         {
-            report.RasterGroup[p] = report.RasterGroup[p - 1];
-            ++report.MergedPasses;
+            report.Passes[p].RasterGroup = report.Passes[p - 1].RasterGroup;
+            ++report.Summary.MergedPasses;
         }
         else
         {
-            report.RasterGroup[p] = static_cast<uint32>(p);
-            ++report.RasterPasses;
+            report.Passes[p].RasterGroup = static_cast<uint32>(p);
+            ++report.Summary.RasterPasses;
         }
     }
 }
@@ -1465,37 +1577,101 @@ RasterStatus CompileOrderedGraph(DeviceHandle device,
     // Compile in service-owned storage rather than duplicating the report on
     // the browser stack alongside the caller's output report.
     auto& report = graph->Report;
-    report.PassCount = static_cast<uint32>(graph->PassCount);
-    report.LivePasses = report.DependencyCount = 0;
-    report.ErrorPass = 32;
-    report.ErrorResource = 16;
-    for (auto& culled : report.Culled)
+    report.Summary.PassCount = static_cast<uint32>(graph->PassCount);
+    report.Summary.LivePasses = report.Summary.DependencyCount = 0;
+    report.Summary.ErrorPass = GRAPH_EXTERNAL_INDEX;
+    report.Summary.ErrorResource = GRAPH_EXTERNAL_INDEX;
+    for (auto& pass : report.Passes)
     {
-        culled = false;
+        pass.Culled = false;
     }
-    for (usize i = 0; i < GRAPH_RESOURCES; ++i)
+    for (usize i = 0; i < graph->ResourceCount; ++i)
     {
-        report.FirstUse[i] = report.LastUse[i] = 32;
+        report.Resources[i].FirstUse = report.Resources[i].LastUse = GRAPH_EXTERNAL_INDEX;
     }
     const auto compiled = CompileGraph(*graph, report, !options.CullPasses);
     // A rejected plan never publishes encoder groups or cost estimates.
-    report.RasterPasses = report.ComputePasses = report.MergedPasses = report.DrawCount = 0;
-    report.PlanStorageBytes = 0;
-    report.BufferBytes = report.TextureBytes = 0;
-    for (auto& group : report.RasterGroup)
+    report.Summary.RasterPasses = report.Summary.ComputePasses = report.Summary.MergedPasses =
+        report.Summary.DrawCount = 0;
+    report.Summary.PlanStorageBytes = 0;
+    report.Summary.BufferBytes = report.Summary.TextureBytes = 0;
+    for (auto& pass : report.Passes)
     {
-        group = 32;
+        pass.RasterGroup = GRAPH_EXTERNAL_INDEX;
     }
     if (compiled == RasterStatus::Ready)
     {
         PlanRasterGroups(*graph, report, options.MergeRasterPasses);
     }
-    output = report;
+    CopyGraphSummary(*graph, output);
+    graph->ReportAvailable = true;
     if (compiled == RasterStatus::Ready)
     {
         graph->Compiled = true;
     }
     return compiled;
+}
+RasterStatus
+GetGraphPassDiagnostic(DeviceHandle device, OrderedGraph handle, uint32 index, GraphPassDiagnostic& output) noexcept
+{
+    GraphRecord* graph = nullptr;
+    const auto status = GraphAdmission(device, handle, graph, false);
+    if (status != RasterStatus::Ready)
+    {
+        return status;
+    }
+    if (!graph->ReportAvailable)
+    {
+        return RasterStatus::NotReady;
+    }
+    if (index >= graph->PassCount)
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    output = graph->Report.Passes[index];
+    return RasterStatus::Ready;
+}
+RasterStatus GetGraphResourceDiagnostic(DeviceHandle device,
+                                        OrderedGraph handle,
+                                        uint32 index,
+                                        GraphResourceDiagnostic& output) noexcept
+{
+    GraphRecord* graph = nullptr;
+    const auto status = GraphAdmission(device, handle, graph, false);
+    if (status != RasterStatus::Ready)
+    {
+        return status;
+    }
+    if (!graph->ReportAvailable)
+    {
+        return RasterStatus::NotReady;
+    }
+    if (index >= graph->ResourceCount)
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    output = graph->Report.Resources[index];
+    return RasterStatus::Ready;
+}
+RasterStatus
+GetGraphDependency(DeviceHandle device, OrderedGraph handle, uint32 index, GraphDependency& output) noexcept
+{
+    GraphRecord* graph = nullptr;
+    const auto status = GraphAdmission(device, handle, graph, false);
+    if (status != RasterStatus::Ready)
+    {
+        return status;
+    }
+    if (!graph->ReportAvailable)
+    {
+        return RasterStatus::NotReady;
+    }
+    if (index >= graph->Report.Summary.DependencyCount)
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    output = graph->Report.Dependencies[index];
+    return RasterStatus::Ready;
 }
 RasterStatus DiscardOrderedGraph(DeviceHandle device, OrderedGraph& handle) noexcept
 {
@@ -1525,6 +1701,10 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
     {
         return RasterStatus::InvalidState;
     }
+    if (graph->Report.Summary.DrawCount > CurrentDeviceProfile().Raster.DrawsPerFrame)
+    {
+        return RasterStatus::CapacityExceeded;
+    }
     for (usize i = 0; i < graph->ResourceCount; ++i)
     {
         const auto& resource = graph->Resources[i];
@@ -1543,7 +1723,7 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
     }
     for (usize p = 0; p < graph->PassCount; ++p)
     {
-        if (graph->Report.Culled[p])
+        if (graph->Report.Passes[p].Culled)
         {
             continue;
         }
@@ -1573,6 +1753,11 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
     {
         return RasterStatus::IdentityExhausted;
     }
+    const auto preparedStorage = backend::RasterPrepareStorage();
+    if (preparedStorage != RasterStatus::Ready)
+    {
+        return preparedStorage;
+    }
     const auto reserve = backend::RasterReserveSubmission();
     if (reserve != RasterStatus::Ready)
     {
@@ -1599,7 +1784,7 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
     {
         const auto& pass = graph->Passes[p];
         RasterArea area;
-        if (!graph->Report.Culled[p] && !pass.IsCompute && pass.Info.Texture == RASTER_CAPACITY &&
+        if (!graph->Report.Passes[p].Culled && !pass.IsCompute && pass.Info.Texture == RASTER_INVALID &&
             !RasterResolveArea(pass.Info.Description, extent.Width, extent.Height, area))
         {
             const auto ended = EndFrame(device, completion);
@@ -1618,12 +1803,12 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
     }
     for (usize p = 0; p < graph->PassCount; ++p)
     {
-        if (graph->Report.Culled[p])
+        if (graph->Report.Passes[p].Culled)
         {
             continue;
         }
         const auto& pass = graph->Passes[p];
-        const bool continuation = !pass.IsCompute && graph->Report.RasterGroup[p] != p;
+        const bool continuation = !pass.IsCompute && graph->Report.Passes[p].RasterGroup != p;
         if (!continuation)
         {
             backend::RasterEndPass();
@@ -1711,7 +1896,7 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
     for (usize r = 0; r < graph->ResourceCount; ++r)
     {
         const auto& resource = graph->Resources[r];
-        if (resource.Kind == RasterKind::Buffer && graph->Report.FirstUse[r] != 32)
+        if (resource.Kind == RasterKind::Buffer && graph->Report.Resources[r].FirstUse != GRAPH_EXTERNAL_INDEX)
         {
             const auto role = At(RasterKind::Buffer, resource.Slot).Buffer.Role;
             if (StorageRole(role))
@@ -1729,7 +1914,8 @@ RasterStatus ExecuteOrderedGraph(DeviceHandle device,
                 }
             }
         }
-        if (resource.Kind != RasterKind::Texture || (resource.Transient && graph->Report.FirstUse[r] == 32))
+        if (resource.Kind != RasterKind::Texture ||
+            (resource.Transient && graph->Report.Resources[r].FirstUse == GRAPH_EXTERNAL_INDEX))
         {
             continue;
         }
