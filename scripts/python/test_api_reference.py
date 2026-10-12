@@ -1,7 +1,9 @@
 """Regressions for accidental publication and documentation coverage loss."""
 import hashlib
 import io
+import json
 from pathlib import Path
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -10,7 +12,8 @@ import zipfile
 import warnings
 from unittest.mock import patch
 
-from api_reference import bootstrap, check_coverage, check_extracted_files, coverage, public_inputs
+from api_reference import (baseline_at_revision, bootstrap, check_baseline_growth, check_coverage,
+                           check_extracted_files, coverage, main, public_inputs, validate_coverage)
 
 
 class ApiReferenceTests(unittest.TestCase):
@@ -65,6 +68,62 @@ class ApiReferenceTests(unittest.TestCase):
         self.assertEqual(check_coverage({"function ns::Old()"}, baseline), [])
         self.assertEqual(check_coverage({"function ns::Old(int)"}, baseline), ["function ns::Old(int)"])
         self.assertEqual(check_coverage({"function ns::Documented()"}, baseline), ["function ns::Documented()"])
+
+    def test_adding_a_gap_to_the_baseline_cannot_excuse_a_new_api(self):
+        previous = ["function ns::Legacy()"]
+        proposed = previous + ["function ns::New()"]
+        # This bypassed the old gate: both missing descriptions were allowlisted.
+        self.assertEqual(check_coverage(set(proposed), proposed), [])
+        with self.assertRaisesRegex(ValueError, "may only shrink.*"):
+            check_baseline_growth(proposed, previous)
+        with self.assertRaisesRegex(ValueError, "ns::Legacy\\(int\\)"):
+            check_baseline_growth(["function ns::Legacy(int)"], previous)
+
+    def test_resolved_and_deleted_baseline_entries_cannot_be_reactivated(self):
+        baseline = ["function ns::Legacy()", "function ns::Resolved()", "struct ns::Deleted"]
+        missing = {"function ns::Legacy()"}
+        with self.assertRaisesRegex(ValueError, "Remove resolved or deleted symbols"):
+            validate_coverage(missing, baseline)
+        reduced = sorted(missing)
+        check_baseline_growth(reduced, baseline)
+        validate_coverage(missing, reduced)
+        with self.assertRaisesRegex(ValueError, "New undocumented.*"):
+            validate_coverage(missing | {"function ns::Resolved()"}, reduced)
+
+    def commit_baseline(self, baseline):
+        subprocess.run(["git", "init", "--quiet"], cwd=self.root, check=True)
+        (self.root / "docs").mkdir()
+        (self.root / "docs/api-undocumented.json").write_text(json.dumps(baseline))
+        subprocess.run(["git", "add", "docs/api-undocumented.json"], cwd=self.root, check=True)
+        subprocess.run(["git", "-c", "user.name=Documentation test", "-c", "user.email=test@example.invalid",
+                        "commit", "--quiet", "-m", "Baseline"], cwd=self.root, check=True)
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.root, text=True).strip()
+
+    def test_cli_uses_the_base_commit_and_rejects_growth_before_bootstrap(self):
+        original = ["function ns::Legacy()"]
+        commit = self.commit_baseline(original)
+        path = self.root / "docs/api-undocumented.json"
+        proposed = original + ["enumvalue ns::Mode::New"]
+        path.write_text(json.dumps(proposed))
+        self.assertEqual(baseline_at_revision(self.root, commit), original)
+        with patch("api_reference.ROOT", self.root), patch("api_reference.bootstrap") as download:
+            with self.assertRaisesRegex(ValueError, "ns::Mode::New"):
+                main(["--bootstrap", "--baseline-ref", commit])
+            download.assert_not_called()
+        self.assertEqual(json.loads(path.read_text()), proposed)
+
+    def test_unavailable_comparison_history_fails_closed(self):
+        self.commit_baseline([])
+        with patch("api_reference.ROOT", self.root), patch("api_reference.bootstrap") as download:
+            with self.assertRaisesRegex(ValueError, "Cannot read API baseline"):
+                main(["--bootstrap", "--baseline-ref", "missing-commit"])
+            download.assert_not_called()
+
+    def test_update_baseline_cannot_be_combined_with_comparison(self):
+        with patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaises(SystemExit) as failure:
+                main(["--update-baseline", "--baseline-ref", "HEAD"])
+        self.assertEqual(failure.exception.code, 2)
 
     def test_extraction_cannot_omit_or_add_input_files(self):
         public = self.root / "public.h"
