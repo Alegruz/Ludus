@@ -1,5 +1,6 @@
 """Creation engine precedence, freshness and cancellation boundaries."""
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -112,6 +113,25 @@ class CreationEngineTests(unittest.TestCase):
             prepare_creation_sdk(self.root, self.prefix, runner=runner, cancel_check=cancel)
         self.assertEqual(len(self.calls), 2)
         self.assertFalse(self.prefix.exists())
+
+    def test_preparation_preserves_cli_sdkroot_and_copies_editor_environment(self):
+        for supplied in (None, {"SDKROOT": "/prepared/sdk", "PATH": "/managed/tools"}):
+            environments = []
+            def runner(argv, *, cwd, env):
+                environments.append(env.copy())
+            def cancel():
+                if len(environments) == 2:
+                    raise ToolingError("Cancelled", "cancelled")
+            original = dict(supplied) if supplied is not None else None
+            with patch.dict(os.environ, {"SDKROOT": "/explicit/cli/sdk"}), \
+                 self.assertRaisesRegex(ToolingError, "cancelled"):
+                prepare_creation_sdk(self.root, self.prefix, runner=runner,
+                                     cancel_check=cancel, environ=supplied)
+            self.assertEqual(len(environments), 2)
+            for env in environments:
+                self.assertEqual(env["SDKROOT"], "/explicit/cli/sdk" if supplied is None else "/prepared/sdk")
+                self.assertEqual(env["CI"], "true")
+            self.assertEqual(supplied, original)
 
     def test_cancelled_preparation_stops_before_next_command(self):
         def runner(argv, **kwargs):
