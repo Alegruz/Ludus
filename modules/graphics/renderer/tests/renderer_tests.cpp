@@ -1,5 +1,6 @@
 #include "internal/lifecycle.h"
 #include "reference_raster.h"
+#include "resource_mesh.h"
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
 #include <ludus/foundation/math/scalar.hpp>
@@ -1069,6 +1070,32 @@ TEST_CASE("L4 gutter admission tolerates cooked odd-dimension float rounding", "
     description.Bake.UvTransform = {1, 1, 0, 0};
     CHECK(session.Renderer.CreateLitMaterial(program, description, material, selected) ==
           rhi::RasterStatus::InvalidDescription);
+}
+
+TEST_CASE("Resource mesh CPU copies retire while independent renderer versions remain submitted",
+          "[renderer][resources]")
+{
+    Session session;
+    REQUIRE(session.Renderer.Release(session.Mesh) == rhi::RasterStatus::Ready);
+    rr::Mesh quad, triangle;
+    REQUIRE(ludus::qa::CreateResourceMeshes(session.Renderer, quad, triangle));
+    // The helper's manager/adapter/source metadata have already been destroyed.
+    CHECK(session.Renderer.GetStatus(quad) == rhi::RasterStatus::Ready);
+    rr::Snapshot snapshot;
+    rr::PreparedView view;
+    rr::ViewReport report;
+    REQUIRE(ludus::qa::BuildL0Scene(session.Renderer, quad, triangle, false, snapshot, view, report) ==
+            rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(quad) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(triangle) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(snapshot) == rhi::RasterStatus::Ready);
+    rhi::SubmissionToken completion;
+    REQUIRE(session.Renderer.Submit(view, session.Surface, completion) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(view) == rhi::RasterStatus::Ready);
+    CHECK(rhi::GetStatus(session.Device, completion) == rhi::RasterStatus::Pending);
+    rhi::reference::Completed = rhi::reference::Submitted;
+    REQUIRE(rhi::PollLifetime(session.Device) == rhi::RasterStatus::Ready);
+    CHECK(rhi::GetStatus(session.Device, completion) == rhi::RasterStatus::Ready);
 }
 
 TEST_CASE("L5 conservative clusters preserve lights, boundaries and overflow", "[renderer][l5]")

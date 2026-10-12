@@ -47,7 +47,9 @@ inline rhi::RasterStatus BuildL0Scene(rr::Renderer& renderer,
     items[7].Material.Color = {0, 1, 0, .5F};
     auto status = renderer.CreateSnapshot(items, 8, snapshot);
     if (status != rhi::RasterStatus::Ready)
+    {
         return status;
+    }
     rr::ViewDescription description;
     description.Reference = reference;
     return renderer.PrepareView(snapshot, description, view, report);

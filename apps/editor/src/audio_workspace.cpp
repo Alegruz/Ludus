@@ -347,6 +347,11 @@ void AudioWorkspace::Open()
         Message_->setText(QStringLiteral("Create a sound or music definition referencing this source."));
         return;
     }
+    if (entry->Type != ludus::content::Kind::Sound && entry->Type != ludus::content::Kind::Music)
+    {
+        Message_->setText(QStringLiteral("This resource is not a sound or music definition."));
+        return;
+    }
     ludus::content::Bytes bytes;
     ludus::content::Diagnostic diagnostic;
     const auto root = Root_.toUtf8();

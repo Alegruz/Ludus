@@ -3,6 +3,7 @@
 #include <ludus/audio/audio_system.h>
 #include <ludus/content/content.h>
 #include <ludus/runtime/resources/manager.h>
+#include <ludus/runtime/resources/mesh.h>
 
 #include "internal/worker_test_hooks.hpp"
 #include "wav_fixture.h"
@@ -189,9 +190,19 @@ TEST_CASE("Two scoped callers acquire one real sound with independent cancellati
     REQUIRE(root.Set(fixture.Root));
     Gate gate;
     sample::SoundResourceAdapter adapter(system, fixture.Catalog, root, ROUTING);
-    const auto descriptor = adapter.Descriptor();
+    const math::Vector3 positions[]{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    const uint32 indices[]{0, 1, 2};
+    r::MeshSource meshSource;
+    meshSource.Resource.Type = content::Kind::Mesh;
+    meshSource.Resource.Id = Key("mesh/triangle");
+    REQUIRE(meshSource.Resource.Path.Set("triangle.mesh"));
+    meshSource.Geometry = {positions, 3, indices, 3};
+    REQUIRE(fixture.Catalog.Put(meshSource.Resource) == content::Status::Ok);
+    r::MeshDefinitionAdapter meshes;
+    REQUIRE(meshes.Initialize(&meshSource, 1) == r::Status::Ok);
+    const r::Adapter descriptors[]{adapter.Descriptor(), meshes.Descriptor()};
     r::Manager manager;
-    REQUIRE(manager.Initialize(fixture.Catalog, &descriptor, 1) == r::Status::Ok);
+    REQUIRE(manager.Initialize(fixture.Catalog, descriptors, 2) == r::Status::Ok);
     Drain drain{manager, system, gate};
     r::ScopeHandle a, b;
     r::AssetHandle asset;
@@ -209,6 +220,21 @@ TEST_CASE("Two scoped callers acquire one real sound with independent cancellati
     REQUIRE(Wait(gate.Entered));
     REQUIRE(manager.Cancel(first) == r::Status::Ok);
     REQUIRE(manager.CloseScope(a) == r::Status::Ok);
+    r::AssetHandle meshAsset;
+    r::ScopeHandle meshScope;
+    r::RequestHandle meshRequest;
+    REQUIRE(manager.OpenScope(Key("mesh/preview"), meshScope) == r::Status::Ok);
+    REQUIRE(manager.Resolve(meshSource.Resource.Id, content::Kind::Mesh, meshAsset) == r::Status::Ok);
+    REQUIRE(manager.BeginAcquire(meshScope, meshAsset, meshRequest) == r::Status::Ok);
+    REQUIRE(Pump(manager, meshRequest)); // Audio worker is still gated before reading.
+    r::Lease meshLease;
+    REQUIRE(manager.TakeLease(meshRequest, meshLease) == r::Status::Ok);
+    const void* meshPayload = nullptr;
+    REQUIRE(manager.Borrow(meshLease.Token(), content::Kind::Mesh, meshPayload) == r::Status::Ok);
+    CHECK(static_cast<const r::MeshDefinition*>(meshPayload)->VertexCount == 3);
+    REQUIRE(meshLease.Release() == r::Status::Ok);
+    REQUIRE(manager.CloseScope(meshScope) == r::Status::Ok);
+    manager.Service(24);
     gate.AllowWork();
     REQUIRE(Wait(gate.Completed));
     REQUIRE(Pump(manager, second));
@@ -227,7 +253,7 @@ TEST_CASE("Two scoped callers acquire one real sound with independent cancellati
     REQUIRE(system.PlayClip(play, voice) == audio::Status::Ok);
     REQUIRE(lease.Release() == r::Status::Ok);
     manager.Service(64);
-    REQUIRE(manager.Inspect().ResidentBytes == descriptor.Peak.ResidentBytes);
+    REQUIRE(manager.Inspect().ResidentBytes == descriptors[0].Peak.ResidentBytes);
     REQUIRE(manager.Shutdown() == r::Status::Pending);
     float32 output[1024];
     for (uint32 i = 0; i < 30; ++i)
