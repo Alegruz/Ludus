@@ -46,10 +46,35 @@ inline bool CreateResourceMeshes(graphics::renderer::Renderer& renderer,
             // CPU-only bounded slots, no worker or GPU acknowledgment dependency.
             while (Manager.Shutdown() != resources::Status::Ok)
             {
-                Manager.Service(24);
+                Manager.Service(64);
             }
         }
     } cleanup{manager};
+    resources::AssetHandle roots[2];
+    for (foundation::usize i = 0; i < 2; ++i)
+    {
+        if (manager.Resolve(sources[i].Resource.Id, content::Kind::Mesh, roots[i]) != resources::Status::Ok)
+        {
+            return false;
+        }
+    }
+    resources::TransactionHandle transaction;
+    resources::DependencyGraph graph;
+    graph.Revision = 2;
+    if (manager.BeginReplacement(catalog, &descriptor, 1, graph, roots, 2, transaction) != resources::Status::Ok)
+    {
+        return false;
+    }
+    // Prepare both CPU definitions privately, then activate the whole binding set.
+    for (foundation::usize turn = 0; turn < 4; ++turn)
+    {
+        manager.Service(64);
+    }
+    if (manager.Commit(transaction) != resources::Status::Ok ||
+        manager.EndTransaction(transaction) != resources::Status::Ok)
+    {
+        return false;
+    }
     resources::Lease leases[2];
     resources::ScopeHandle scope;
     content::ResourceId name;
@@ -60,17 +85,15 @@ inline bool CreateResourceMeshes(graphics::renderer::Renderer& renderer,
     graphics::renderer::Mesh* outputs[]{&quad, &triangle};
     for (foundation::usize i = 0; i < 2; ++i)
     {
-        resources::AssetHandle asset;
         resources::RequestHandle request;
-        if (manager.Resolve(sources[i].Resource.Id, content::Kind::Mesh, asset) != resources::Status::Ok ||
-            manager.BeginAcquire(scope, asset, request) != resources::Status::Ok)
+        if (manager.BeginAcquire(scope, roots[i], request) != resources::Status::Ok)
         {
             return false;
         }
         // Setup-only in-memory input, not an event-loop wait for asynchronous I/O/GPU.
         for (foundation::usize turn = 0; turn < 4; ++turn)
         {
-            manager.Service(24);
+            manager.Service(64);
         }
         if (manager.TakeLease(request, leases[i]) != resources::Status::Ok)
         {

@@ -1,9 +1,9 @@
 # Resource manager architecture
 
 Status: Stage 1 AudioContent integration and the Stage 2 fixed-capacity native
-coordinator and Stage 3 immutable CPU mesh consumer are implemented. Cooking,
-replacement transactions, required DAGs, GPU residency adapters and streaming
-below remain proposals. The initial
+coordinator, Stage 3 immutable CPU mesh consumer, and Stage 4 required DAGs and
+explicit replacement transactions are implemented. Cooking, GPU residency adapters
+and streaming below remain proposals. The initial
 review used repository HEAD `144a708` on 2026-10-04. Stage 2 implementation and
 bounded acceptance are described below; no performance improvement is claimed.
 
@@ -123,8 +123,9 @@ control owner. Adapter function tables are copied at composition; their contexts
 and code outlive the manager. No static registration or Audio/RHI dependency enters
 the coordinator. Its public declaration comments own the exact API contracts.
 
-One incarnation fixes the catalog, preparation profile and adapter set. A load key
-is its exact asset record and adapter epoch; equal requests share one operation
+The original Stage 2 profile fixed catalog metadata and adapters for an
+incarnation; Stage 4 extends it with immutable snapshots. A load key includes its
+exact asset, snapshot, adapter epoch and direct child-version bindings; equal requests share one operation
 and peak reservation. Resolve performs no I/O. Even a resident hit creates a
 request. Ready results hold their exact version until claimed, cancelled or closed;
 failed/cancelled results remain observable until EndRequest or scope close. A copied
@@ -137,7 +138,7 @@ The fixed physical tables hold at most 64 catalog entries, 16 scopes, 32 request
 Config can lower admitted capacities without shrinking the physical allocation.
 Slot generations saturate permanently and manager owner identities are never
 reused. Service rotates through at most the requested number of operation/version
-records, capped at one full table traversal; callbacks may perform bounded cold
+records (including transaction records in Stage 4), capped at one full table traversal; callbacks may perform bounded cold
 installation/cleanup work, so this is not an audio callback or a measured time
 budget. There is no concurrent-producer command queue in this profile.
 
@@ -156,8 +157,8 @@ must not be described as a hard process-memory cap.
 Idle versions immediately enter retirement when their final request/lease hold
 ends. A request arriving after that point creates a new operation; it cannot
 resurrect retiring storage. Persistent idle caching/LRU, failure caching, priorities,
-transactional replacement, dependency scheduling and cooked artifact revision keys
-remain later work. Keep loose-file roots immutable during an incarnation: copied
+and cooked artifact revision keys remain later work. Stage 4 adds replacement and
+required dependencies as described below. Keep loose-file roots immutable during an incarnation: copied
 catalog metadata pins names/paths, not changing source-file contents. Loader's
 optional catalog snapshot copies those metadata before worker dispatch and avoids
 reopening catalog.json, while retaining descriptor-bound reads of individual files. The added optional
@@ -200,8 +201,8 @@ acceptance tests, not cold/warm latency or workload benchmarks.
 [`MeshDefinitionAdapter`](../../modules/runtime/resources/include/ludus/runtime/resources/mesh.h),
 exported by the existing `Ludus::Resources` component, prepares immutable CPU
 triangle geometry for a second consumer. Content catalog kind `mesh` keeps
-exact ID/path/type matching. The coordinator implementation is unchanged; audio
-and mesh readiness, cancellation and retirement remain adapter-owned.
+exact ID/path/type matching. Audio and mesh readiness, cancellation and
+retirement remain adapter-owned.
 
 Compose at most 16 `MeshSource` records explicitly. Initialize validates topology,
 finite positions/UVs and finite nonzero optional normals, copies source metadata,
@@ -236,13 +237,112 @@ existing image oracle. Production renderer/RHI tests delay queue completion afte
 CPU teardown. The portable in-memory mesh adapter has no native worker dependency;
 browser acceptance uses the same SDK fixture.
 
-This is the Stage 3 exit, not complete reference-scene support. Next implement
-required mesh/material/texture dependencies and activation (Stage 4), offline
-conversion/artifact manifests (Stage 5), and larger measured bounded capacities.
+Stage 4 now supplies required dependencies and activation. Complete reference-scene
+support still needs offline conversion/artifact manifests (Stage 5), concrete
+scene/material/texture adapters and larger measured bounded capacities.
 Texture/material resource adapters and GPU residency accounting remain separate
 work. Stage 2's 64 assets/16 versions and the renderer's own limits still apply.
 Reinitialize an adapter only after all managers using its previous descriptor have
 completed shutdown; a new profile needs new copied descriptors and reservations.
+
+## Implemented Stage 4 profile
+
+The existing `Ludus::Resources` component now supports a copied required resident
+DAG and explicit replacement transactions. This is coordinator infrastructure:
+no new scene file format, importer, material/texture adapter or GPU installation
+policy is implied. The native mesh adapter remains a concrete CPU consumer.
+
+Pass `DependencyGraph` to Initialize. Edges use exact parent/child catalog IDs
+and an optional bounded authoring property path. Missing references return NotFound
+with named provenance; cycles return Cycle with a bounded path and explicit
+truncation. Repeated parent/child pairs retain the first property and create one
+hold. The initial profile accepts 128 input edges, eight distinct children per
+parent, and at most eight distinct nodes in an admitted root closure. All catalog
+nodes are cycle-checked, including currently unused ones. Optional, build-only and
+package references are not part of this graph. The graph is composition input,
+not a change to Content's version-1 catalog serialization.
+
+Admission walks the required closure in child-first order and preflights every
+adapter, version/operation slot and combined peak reservation before accepting
+anything. Existing exact work is charged once, including diamond leaves. Parents
+wait on pending counts; child completion wakes their dependent records without
+blocking a worker. A parent must provide Adapter::BeginBound. Its temporary
+DependencyView array names complete immutable child payloads; retaining those
+payload pointers is valid through that parent's physical Retire acknowledgment.
+The coordinator retains each direct child once per parent version, independently
+of external leases. A failed parent also retains children until its own cleanup
+acknowledgment. Zero-byte failed records can briefly remain for propagation after
+physical cleanup; Inspect's Versions includes these records, whereas byte counters
+already reflect acknowledged release. BorrowDependency exposes only direct,
+exact-version children of a valid parent lease.
+
+Replacement follows this owner-side flow:
+
+1. Keep the same catalog ID/type set, create immutable source/adapter profiles and
+   assign a nonzero increasing application revision. Paths, profiles and required
+   edges may change. Resolve produces logical root handles that survive replacement.
+2. Call BeginReplacement with the complete desired root set (one to eight handles,
+   duplicates removed). The coordinator copies a private catalog/adapter/graph
+   snapshot and admits its whole closure. Service prepares it without changing
+   CurrentRevision. OpenTransactionScope optionally gives validation code a private
+   scope for candidate acquisition and leases.
+3. Observe GetTransaction until Ready, then call Commit at the application's
+   reader boundary. Commit validates every root and dependency before publication;
+   afterward the binding switch contains no allocation, callback or fallible step.
+   The entire root set becomes current together. Ordinary new scopes see it;
+   existing scopes keep their previous immutable snapshot and exact bindings.
+4. EndTransaction consumes the durable outcome. CancelTransaction drops only the
+   attempt's root demand; private scope requests/leases remain owned. Failed,
+   cancelled or superseded attempts preserve the current last-good set. Cleanup
+   proceeds through Service and adapter retirement acknowledgment.
+
+After valid output/root-token preconditions, a newer desired revision supersedes
+older active attempts even if its subsequent graph validation or admission fails.
+Older out-of-order completions cannot commit. Retrying the same desired revision
+is allowed after failure/cancellation, but never after committing that revision.
+The current revision and desired revision are separately observable. A changed
+adapter epoch invalidates usability; it does not silently rebind an activated
+snapshot to a new subsystem session. Provider contexts and immutable source data
+for every admitted snapshot must survive Manager::Shutdown returning Ok; never
+reinitialize an adapter still referenced by any snapshot.
+
+Committed roots pin their whole exact closure even with no external lease. Old
+activated snapshots remain pinned while old scopes are open, including a closing
+scope blocked by a lease. Once those scopes close, root demand drops and parent
+retirement precedes child retirement. Ordinary acquisitions outside an activated
+root set retain Stage 2's immediate idle retirement. Closing a scope does not
+unpublish the current set; Shutdown drops current root pins, closes admission and
+requires all external leases and physical retirement to drain. There is no empty
+root-set activation or idle cache eviction API in this initial profile.
+
+Fixed storage adds four catalog snapshots and four durable transactions (Config
+can lower admission limits); existing 64 assets, 8 operations, 16 versions and
+64 leases remain. MetadataBytes defaults to 512 KiB to cover copied paths, DAGs
+and failure outcomes; Inspect reports the actual coordinator block size, excluding
+allocator overhead and adapter storage. Reinitialization briefly owns both the
+old drained block and the new block. A replacement conservatively prepares its
+entire closure in a new snapshot rather than reusing versions across snapshots.
+Its peak must fit alongside last-good and retiring versions: retiring bytes never
+finance admission before physical acknowledgment. Retained terminal transactions
+consume slots until EndTransaction. Saturation never blocks cancellation, lease
+release, scope close or shutdown. Service's record count bounds work, not latency.
+
+Deterministic tests cover diamond sharing, duplicate edges, readiness ordering,
+missing/cyclic graphs, atomic closure rejection, named failure/retry, multi-root
+publication, old-scope coherence, last-good retention, supersession including
+failed newer admission, private leases after cancellation, table saturation and
+physical parent/mesh cleanup. The public-only installed-SDK renderer fixture
+prepares and activates its two mesh roots together, then preserves its image
+oracle after complete CPU resource shutdown. Renderer/RHI GPU ownership remains
+independent. The private audio sample adapter still supports only one resident
+sound, so overlapping sound replacement needs a finer multi-resident audio
+retirement adapter before it can use this protocol.
+
+New public parameters and Adapter fields preserve existing source call sites with
+defaults, but change native ABI/layout; rebuild the SDK and its consumers together.
+The [reference review](resource-management-reference-review.md) owns attribution:
+Hamaide's pending-count/dependent scheduling informs readiness, while this bounded
+single-owner transaction protocol and immutable scoped snapshots are original.
 
 ## Identity and lifetime
 
@@ -815,7 +915,7 @@ The review describes design inspiration; it does not supply copied implementatio
 | 1 (implemented) | Audit existing AudioContent request/lease/session boundaries, joining cancellation, and ownership provenance; preserve version-1 fixtures and its cache/retirement behavior. Establish a tested nonblocking integration boundary before exposing the new runtime API. |
 | 2 (implemented) | Fixed-capacity coordinator, one owner, exact-ID lookup, scoped requests, deduplicated operations, lease tokens, durable result records, and explicit budgets. Demonstrate two callers acquiring one sound with independent cancellation. |
 | 3 (implemented) | Immutable CPU mesh definitions demonstrate a second consumer, bounded staged copies, immediate CPU retirement, mixed native sound/mesh acquisition and an installed-SDK renderer handoff. Renderer/RHI separately own copied GPU data; no graphics-specific branch enters the coordinator. One-pending AudioContent limits remain. |
-| 4 | Add transactional replacement and required DAG scheduling. Prove diamond sharing, parent/child replacement coherence, last-good retention, and physical retirement. |
+| 4 | Implemented: transactional replacement and required DAG scheduling. Prove diamond sharing, parent/child replacement coherence, last-good retention, and physical retirement. |
 | 5 | Add cooker dependency manifests, exact artifact keys, dump tooling, deterministic release publication, and optional independently chunked packs. Measure against loose files. |
 | 6 | Add actual mip/LOD/chunk streaming after RHI capabilities exist; implement trace-driven layout, deadlines, and alternative cache policy only with representative evidence. |
 
