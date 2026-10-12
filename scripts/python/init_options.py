@@ -10,6 +10,7 @@ VARIABLES = {
     "with_smoke_app": "LUDUS_BUILD_SMOKE_APP",
     "with_web_probes": "LUDUS_BUILD_WEB_PROBES",
     "with_editor": "LUDUS_BUILD_EDITOR",
+    "with_editor_preview": "LUDUS_EDITOR_RENDER_PREVIEW",
     "with_shader_probe": "LUDUS_BUILD_SHADER_PROBE",
 }
 
@@ -50,6 +51,7 @@ def save_options(root: Path, presets, args) -> None:
         data[preset] = {variable: bool(getattr(args, name)) for name, variable in VARIABLES.items()}
         # Enable Qt only for the explicitly selected supported editor preset.
         data[preset]["LUDUS_BUILD_EDITOR"] = args.with_editor and preset == args.preset
+        data[preset]["LUDUS_EDITOR_RENDER_PREVIEW"] = data[preset]["LUDUS_BUILD_EDITOR"] and args.with_editor_preview
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")

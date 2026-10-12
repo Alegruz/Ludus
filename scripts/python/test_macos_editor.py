@@ -70,7 +70,8 @@ class SetupTests(unittest.TestCase):
                  patch.object(engine, "cmake_build") as build, patch.object(init_editor.cmake_targets, "query_codemodel"):
                 init_editor.setup_editor(self.args("macos-clang-development", "--no-system-install"), engine)
                 run.assert_not_called()
-                self.assertEqual(configure.call_args.args[2], ["-DLUDUS_BUILD_EDITOR=ON", f"-DQt6_DIR={qt}/lib/cmake/Qt6"])
+                self.assertEqual(configure.call_args.args[2], ["-DLUDUS_BUILD_EDITOR=ON", "-DLUDUS_EDITOR_RENDER_PREVIEW=ON",
+                          *init_editor.preview_tool_args(engine.repo_root()), f"-DQt6_DIR={qt}/lib/cmake/Qt6"])
                 self.assertEqual(build.call_args.args[1], "macos-clang-development")
 
     def test_explicit_install_is_only_qtbase(self):

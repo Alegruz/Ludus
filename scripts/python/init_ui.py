@@ -162,7 +162,7 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
         description = tk.StringVar()
         summary = tk.StringVar()
         flags = {name: tk.BooleanVar(value=getattr(args, name)) for name in (
-            "preset_only", "no_system_install", "with_rad_debugger", "with_editor", "with_tests",
+            "preset_only", "no_system_install", "with_rad_debugger", "with_editor", "with_editor_preview", "with_tests",
             "run_tests", "with_smoke_app", "with_web_probes", "with_shader_probe", "validate",
             "skip_checks", "skip_sanitizers", "skip_sdk", "ci",
         )}
@@ -183,7 +183,7 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
             ("preset_only", "Prepare only the selected preset"),
             ("no_system_install", "Use existing system packages (skip automatic package installation)"),
             ("with_rad_debugger", "Build optional RAD Debugger (Linux x64)"),
-            ("with_editor", "Build Ludus editor (native host; installs optional Qt 6 packages)"),
+            ("with_editor", "Build Ludus editor (3D preview included by default)"),
             ("with_tests", "Include native test targets and their dependencies"),
             ("run_tests", "Build and run native tests after setup"),
             ("with_smoke_app", "Include sample applications (smoke and native input demo)"),
@@ -217,6 +217,8 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
             if not editor_supported:
                 flags["with_editor"].set(False)
             controls["with_editor"].configure(state="normal" if editor_supported else "disabled")
+            controls["with_editor_preview"].configure(
+                state="normal" if editor_supported and flags["with_editor"].get() else "disabled")
             validating = flags["validate"].get() or flags["ci"].get()
             if validating or flags["run_tests"].get():
                 flags["with_tests"].set(True)
@@ -247,6 +249,8 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
                 action = "Setup plus test builds and execution"
             included = [label for name, label in (("with_tests", "tests"), ("with_smoke_app", "samples"),
                         ("with_web_probes", "browser probes"), ("with_shader_probe", "shader probe"), ("with_editor", "editor")) if flags[name].get()]
+            if flags["with_editor"].get():
+                included.append("3D preview + shader tools" if flags["with_editor_preview"].get() else "document-only editor")
             summary.set(f"{action} for {scope}.\nOptional targets: {', '.join(included) or 'none'}.\n"
                         "Progress and any sudo password prompt appear in the launching terminal.")
 
@@ -270,7 +274,24 @@ def select_options(args: argparse.Namespace, engine) -> argparse.Namespace | Non
         workflow.bind("<<ComboboxSelected>>", change_workflow)
         presets.bind("<<ComboboxSelected>>", lambda _event: refresh())
         description.set(next(item.description for item in PERSONAS if item.key == args.persona))
-        separator_row = 5 + len(labels)
+        advanced_row = 5 + len(labels)
+        advanced = ttk.LabelFrame(panel, text="Advanced editor setup", padding=8)
+        advanced.grid(row=advanced_row + 1, column=0, columnspan=2, sticky="ew")
+        controls["with_editor_preview"] = ttk.Checkbutton(
+            advanced, text="Include 3D preview and pinned shader tools (disable for a lightweight editor)",
+            variable=flags["with_editor_preview"], command=refresh)
+        controls["with_editor_preview"].pack(anchor="w")
+        advanced.grid_remove()
+
+        def toggle_advanced():
+            if advanced.winfo_ismapped():
+                advanced.grid_remove()
+            else:
+                advanced.grid()
+
+        ttk.Button(panel, text="Advanced setup", command=toggle_advanced).grid(
+            row=advanced_row, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        separator_row = advanced_row + 2
         ttk.Separator(panel).grid(row=separator_row, column=0, columnspan=2, sticky="ew", pady=14)
         ttk.Label(panel, textvariable=summary, wraplength=600).grid(
             row=separator_row + 1, column=0, columnspan=2, sticky="w")

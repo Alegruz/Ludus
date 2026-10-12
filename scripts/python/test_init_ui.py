@@ -143,7 +143,35 @@ class EditorSetupTests(unittest.TestCase):
             self.addCleanup(host.stop)
 
     def args(self, *options):
-        return init_ui.apply_defaults(engine.make_parser().parse_args(["init", "--cli", "--with-editor", "linux-clang-development", *options]))
+        return init_ui.apply_defaults(engine.make_parser().parse_args(["init", "--cli", "--with-editor", "--no-editor-preview", "linux-clang-development", *options]))
+
+    def test_preview_tools_follow_default_opt_out_and_host(self):
+        root = engine.repo_root()
+        for host, tool_count in (("Linux", 2), ("Darwin", 1)):
+            with self.subTest(host=host), patch.object(init_editor.platform, "system", return_value=host):
+                preset = "macos-clang-development" if host == "Darwin" else "linux-clang-development"
+                for options, calls in (((), 1), (("--no-editor-preview",), 0), (("--no-editor",), 0)):
+                    args = init_ui.apply_defaults(engine.make_parser().parse_args(
+                        ["init", "--cli", preset, *([] if "--no-editor" in options else ["--with-editor"]), *options]))
+                    with patch.object(engine, "run") as run:
+                        init_editor.prepare_editor_preview(args, engine)
+                    self.assertEqual(run.call_count, calls)
+                    if calls:
+                        self.assertEqual(run.call_args.args[0],
+                                         [engine.venv_python(root), root / "scripts/shader-probe", "bootstrap"])
+                tools = init_editor.preview_tool_args(root)
+                self.assertEqual(len(tools), tool_count)
+                self.assertIn("LUDUS_SLANG_COMPILER", tools[0])
+
+    def test_default_editor_configures_rendering_and_pinned_tools(self):
+        args = init_ui.apply_defaults(engine.make_parser().parse_args(
+            ["init", "--cli", "linux-clang-development", "--with-editor", "--no-system-install"]))
+        with patch.object(engine, "run"), patch.object(init_editor.cmake_targets, "query_codemodel"), \
+                patch.object(engine, "cmake_configure") as configure, patch.object(engine, "cmake_build"):
+            init_editor.setup_editor(args, engine)
+        self.assertEqual(configure.call_args.args[2],
+                         ["-DLUDUS_BUILD_EDITOR=ON", "-DLUDUS_EDITOR_RENDER_PREVIEW=ON",
+                          *init_editor.preview_tool_args(engine.repo_root())])
 
     def test_existing_packages_are_not_installed_again(self):
         with patch.object(engine, "host_supports_apt_install", return_value=True), \
@@ -153,7 +181,7 @@ class EditorSetupTests(unittest.TestCase):
             init_editor.setup_editor(self.args(), engine)
         run.assert_not_called()
         self.assertEqual(query.call_args.args[1], "ludus-editor")
-        self.assertEqual(configure.call_args.args[2], ["-DLUDUS_BUILD_EDITOR=ON"])
+        self.assertEqual(configure.call_args.args[2], ["-DLUDUS_BUILD_EDITOR=ON", "-DLUDUS_EDITOR_RENDER_PREVIEW=OFF"])
         self.assertEqual(build.call_args.args[2], ["--target", "ludus_editor"])
 
     def test_installs_only_missing_opted_in_packages(self):
@@ -169,7 +197,7 @@ class EditorSetupTests(unittest.TestCase):
     def test_sanitizer_editor_setup_keeps_the_selected_profile_and_existing_qt(self):
         args = init_ui.prepare_init(engine.make_parser().parse_args([
             "init", "--cli", "linux-clang-asan-ubsan", "--preset-only", "--with-editor",
-            "--with-tests", "--no-system-install"]), engine)
+            "--with-tests", "--no-system-install", "--no-editor-preview"]), engine)
         with patch.object(engine, "run") as run, \
                 patch.object(init_editor.cmake_targets, "query_codemodel"), \
                 patch.object(engine, "cmake_configure") as configure, \
@@ -177,7 +205,7 @@ class EditorSetupTests(unittest.TestCase):
             init_editor.setup_editor(args, engine)
         run.assert_not_called()
         self.assertTrue(args.with_tests)
-        configure.assert_called_once_with(engine.repo_root(), "linux-clang-asan-ubsan", ["-DLUDUS_BUILD_EDITOR=ON"])
+        configure.assert_called_once_with(engine.repo_root(), "linux-clang-asan-ubsan", ["-DLUDUS_BUILD_EDITOR=ON", "-DLUDUS_EDITOR_RENDER_PREVIEW=OFF"])
         build.assert_called_once_with(engine.repo_root(), "linux-clang-asan-ubsan", ["--target", "ludus_editor"])
 
     def test_no_system_install_uses_existing_qt_and_propagates_configure_failure(self):
@@ -191,6 +219,24 @@ class EditorSetupTests(unittest.TestCase):
         run.assert_not_called()
         build.assert_not_called()
 
+    def test_init_prepares_preview_after_host_tools_and_before_cache_repair(self):
+        args = init_ui.apply_defaults(engine.make_parser().parse_args([
+            "init", "--cli", "linux-clang-development", "--with-editor", "--no-system-install"]))
+        calls = Mock()
+        with contextlib.ExitStack() as stack:
+            for module, name in ((engine, "prepare_conan_artifacts"), (init_editor, "prepare_editor_preview"),
+                                 (engine, "repair_existing_cmake_caches"), (init_editor, "setup_editor")):
+                calls.attach_mock(stack.enter_context(patch.object(module, name)), name)
+            for name in ("check_current_python", "configure_system_tool_shims", "command_install_hooks"):
+                stack.enter_context(patch.object(engine, name))
+            stack.enter_context(patch.object(engine, "load_tool_versions", return_value={"minimum": {"python": "3.10"}}))
+            stack.enter_context(patch.object(engine, "command_doctor", return_value=0))
+            stack.enter_context(patch.object(init_options, "save_options"))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            engine.command_init(args)
+        self.assertEqual([call[0] for call in calls.mock_calls],
+                         ["prepare_conan_artifacts", "prepare_editor_preview", "repair_existing_cmake_caches", "setup_editor"])
+
     def test_init_calls_editor_setup_only_when_selected(self):
         for enabled in (False, True):
             with self.subTest(enabled=enabled), contextlib.ExitStack() as stack:
@@ -202,10 +248,12 @@ class EditorSetupTests(unittest.TestCase):
                 stack.enter_context(patch.object(engine, "load_tool_versions", return_value={"minimum": {"python": "3.10"}}))
                 stack.enter_context(patch.object(engine, "command_doctor", return_value=0))
                 stack.enter_context(patch.object(init_options, "save_options"))
+                preview = stack.enter_context(patch.object(init_editor, "prepare_editor_preview"))
                 setup = stack.enter_context(patch.object(init_editor, "setup_editor"))
                 stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
                 self.assertEqual(engine.command_init(args), 0)
                 self.assertEqual(setup.call_count, int(enabled))
+                preview.assert_called_once_with(args, engine)
 
 
 @unittest.skipUnless(os.environ.get("LUDUS_TEST_GUI") == "1", "requires a desktop display")
@@ -271,6 +319,27 @@ class WindowTests(unittest.TestCase):
                  and widget.cget("text") == "Initialize").invoke()
         result = self.select(accept, engine.NATIVE_PRESET_PREFIX + "-development")
         self.assertTrue(result.with_editor)
+
+    def test_advanced_setup_can_disable_default_editor_preview(self):
+        def accept(window, widgets):
+            editor = next(widget for widget in widgets if widget.winfo_class() == "TCheckbutton"
+                          and widget.cget("text").startswith("Build Ludus editor"))
+            editor.invoke()
+            preview = next(widget for widget in widgets if widget.winfo_class() == "TCheckbutton"
+                           and widget.cget("text").startswith("Include 3D preview"))
+            self.assertTrue(window.getvar(preview.cget("variable")))
+            self.assertFalse(preview.instate(["disabled"]))
+            self.assertFalse(preview.winfo_ismapped())
+            next(widget for widget in widgets if widget.winfo_class() == "TButton"
+                 and widget.cget("text") == "Advanced setup").invoke()
+            window.update_idletasks()
+            self.assertTrue(preview.winfo_ismapped())
+            preview.invoke()
+            next(widget for widget in widgets if widget.winfo_class() == "TButton"
+                 and widget.cget("text") == "Initialize").invoke()
+        result = self.select(accept, engine.NATIVE_PRESET_PREFIX + "-development")
+        self.assertTrue(result.with_editor)
+        self.assertFalse(result.with_editor_preview)
 
     def test_shader_probe_checkbox_follows_host_and_selected_preset(self):
         def accept(window, widgets):

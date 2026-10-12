@@ -68,6 +68,11 @@ class OptionsTests(unittest.TestCase):
             init_options.save_options(root, tuple(engine.PRESET_BUILD_TYPES), self.args("--with-editor"))
             for preset in engine.PRESET_BUILD_TYPES:
                 self.assertEqual(init_options.read_options(root, preset)["LUDUS_BUILD_EDITOR"], preset == engine.DEFAULT_PRESET)
+                self.assertEqual(init_options.read_options(root, preset)["LUDUS_EDITOR_RENDER_PREVIEW"],
+                                 preset == engine.DEFAULT_PRESET)
+            init_options.save_options(root, (engine.DEFAULT_PRESET,), self.args("--with-editor", "--no-editor-preview"))
+            self.assertTrue(init_options.read_options(root, engine.DEFAULT_PRESET)["LUDUS_BUILD_EDITOR"])
+            self.assertFalse(init_options.read_options(root, engine.DEFAULT_PRESET)["LUDUS_EDITOR_RENDER_PREVIEW"])
 
     def test_test_dependencies_and_bootstrap_fingerprint_follow_selection(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -106,6 +111,21 @@ class OptionsTests(unittest.TestCase):
                 self.assertEqual(test.call_count, runs)
                 build.assert_not_called()
 
+    def test_configure_resolves_preview_tools_after_a_fresh_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            init_options.save_options(root, (engine.DEFAULT_PRESET,), self.args("--with-editor"))
+            with patch.object(engine, "request_codemodel"), \
+                    patch.object(engine, "configure_needs_fresh_cache", return_value=True), \
+                    patch.object(engine, "cmake", return_value=Path("cmake")), \
+                    patch.object(engine, "tool_env", return_value={}), patch.object(engine, "run") as run, \
+                    patch.object(engine, "macos_toolchain_identity", return_value={}):
+                engine.build_dir_for_preset(root, engine.DEFAULT_PRESET).mkdir(parents=True)
+                engine.cmake_configure(root, engine.DEFAULT_PRESET)
+            command = run.call_args.args[0]
+            self.assertIn("--fresh", command)
+            self.assertIn(f"-DLUDUS_SLANG_COMPILER={root / 'out/shader-tools/slang/bin/slangc'}", command)
+
     def test_direct_cmake_configuration_keeps_choices_across_reconfigure(self):
         cmake = shutil.which("cmake")
         if not cmake:
@@ -117,12 +137,14 @@ class OptionsTests(unittest.TestCase):
             (root / "CMakeLists.txt").write_text(
                 'cmake_minimum_required(VERSION 3.19)\nproject(Options NONE)\n'
                 'option(LUDUS_BUILD_TESTS "tests" ON)\noption(LUDUS_BUILD_SMOKE_APP "samples" ON)\n'
+                'option(LUDUS_EDITOR_RENDER_PREVIEW "preview" ON)\n'
                 f'include("{module}")\n', encoding="utf-8")
             build = root / "out/build" / engine.DEFAULT_PRESET
-            for extra in ([], ["-DLUDUS_BUILD_TESTS=ON", "-DLUDUS_BUILD_SMOKE_APP=ON"]):
+            for extra in ([], ["-DLUDUS_BUILD_TESTS=ON", "-DLUDUS_BUILD_SMOKE_APP=ON", "-DLUDUS_EDITOR_RENDER_PREVIEW=ON"]):
                 subprocess.run([cmake, "-S", str(root), "-B", str(build), *extra], check=True, capture_output=True)
                 self.assertEqual(engine.cmake_cache_value(build / "CMakeCache.txt", "LUDUS_BUILD_TESTS"), "OFF")
                 self.assertEqual(engine.cmake_cache_value(build / "CMakeCache.txt", "LUDUS_BUILD_SMOKE_APP"), "OFF")
+                self.assertEqual(engine.cmake_cache_value(build / "CMakeCache.txt", "LUDUS_EDITOR_RENDER_PREVIEW"), "OFF")
             subprocess.run([cmake, "-S", str(root), "-B", str(build), "-DLUDUS_USE_INIT_OPTIONS=OFF",
                             "-DLUDUS_BUILD_TESTS=ON"], check=True, capture_output=True)
             self.assertEqual(engine.cmake_cache_value(build / "CMakeCache.txt", "LUDUS_BUILD_TESTS"), "ON")

@@ -43,9 +43,13 @@ endif()
 # Q_SLOTS/Q_EMIT and the typed (pointer-to-member) connect overloads instead.
 # AUTOMOC is enabled per target below, not globally.
 
-# Rendering is explicitly opted in with the pinned offline shader compiler.
-# The document UI remains available when graphics tools/surfaces are unavailable.
-option(LUDUS_EDITOR_RENDER_PREVIEW "Build the trusted native authoring surface (requires pinned shader tools)" OFF)
+# Native editor builds include rendering; lightweight builds explicitly opt out.
+# Browser builds retain their separate document-only authoring path.
+set(editor_render_preview_default ON)
+if(EMSCRIPTEN)
+    set(editor_render_preview_default OFF)
+endif()
+option(LUDUS_EDITOR_RENDER_PREVIEW "Build the trusted native authoring surface (requires pinned shader tools)" ${editor_render_preview_default})
 set(editor_scene_preview_source src/scene_preview_unavailable.cpp)
 if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT EMSCRIPTEN)
     set(editor_scene_preview_source src/scene_preview.cpp)

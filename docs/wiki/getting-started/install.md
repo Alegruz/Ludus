@@ -26,7 +26,7 @@ From the checkout root, launch the setup window:
 1. Under **Workflow**, select **Application developer**.
 2. Keep **Build preset** set to `linux-clang-development` and
    **Prepare only the selected preset** checked.
-3. Check **Build Ludus editor (Linux x64; installs optional Qt 6 packages)**.
+3. Check **Build Ludus editor (3D preview included by default)**.
 4. Choose **Initialize**. The selection window closes and preparation continues
    in the terminal; leave that terminal open and follow its progress.
 

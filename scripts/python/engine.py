@@ -1265,6 +1265,10 @@ def configure_needs_fresh_cache(root: Path, preset: str) -> bool:
 
 
 def cmake_configure(root: Path, preset: str, extra_args: Sequence[str] = ()) -> None:
+    from init_options import read_options
+    from init_editor import preview_tool_args
+    if read_options(root, preset).get("LUDUS_EDITOR_RENDER_PREVIEW", False):
+        extra_args = [*preview_tool_args(root), *extra_args]
     request_codemodel(build_dir_for_preset(root, preset))
     args: list[object] = [cmake(root)]
     if configure_needs_fresh_cache(root, preset):
@@ -1373,6 +1377,8 @@ def command_init(args: argparse.Namespace) -> int:
     from init_options import save_options
     save_options(root, presets, args)
     prepare_conan_artifacts(root, versions, presets, locked=args.locked)
+    from init_editor import prepare_editor_preview
+    prepare_editor_preview(args, sys.modules[__name__])
     repair_existing_cmake_caches(root, presets)
     if args.with_rad_debugger:
         command_setup_rad_debugger(args)
@@ -2275,10 +2281,16 @@ def make_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--with-rad-debugger", action="store_true", help="also build the optional pinned Linux RAD Debugger")
     editor = init_parser.add_mutually_exclusive_group()
     editor.add_argument("--with-editor", dest="with_editor", action="store_true",
-                        help="install optional Qt prerequisites and build the native Ludus editor")
+                        help="install Qt and pinned shader tools, then build the native editor with 3D preview")
     editor.add_argument("--no-editor", dest="with_editor", action="store_false",
                         help="skip optional editor setup (default)")
     init_parser.set_defaults(with_editor=False)
+    preview = init_parser.add_mutually_exclusive_group()
+    preview.add_argument("--with-editor-preview", dest="with_editor_preview", action="store_true",
+                         help="include native editor 3D preview and prepare pinned shader tools (default)")
+    preview.add_argument("--no-editor-preview", dest="with_editor_preview", action="store_false",
+                         help="build a lightweight document-only editor without shader tools")
+    init_parser.set_defaults(with_editor_preview=True)
     for name, label in (("tests", "native test targets and Catch2 dependencies"),
                         ("smoke-app", "sample applications (smoke and native input demo)"),
                         ("web-probes", "browser feasibility probes"),
