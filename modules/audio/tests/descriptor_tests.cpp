@@ -171,9 +171,10 @@ TEST_CASE("A scheduled voice emits zero before its exact sub-span StartFrame", "
     float32 preStart = 0.0F;
     for (uint32 f = 0; f < 300; ++f)
     {
-        preStart = std::max({preStart,
-                             std::fabs(out[static_cast<std::size_t>(f) * 2]),
-                             std::fabs(out[static_cast<std::size_t>(f) * 2 + 1])});
+        const float32 left = std::fabs(out[static_cast<ludus::foundation::usize>(f) * 2]);
+        const float32 right = std::fabs(out[static_cast<ludus::foundation::usize>(f) * 2 + 1]);
+        preStart = left > preStart ? left : preStart;
+        preStart = right > preStart ? right : preStart;
     }
     REQUIRE(preStart == 0.0F);
 
@@ -183,9 +184,10 @@ TEST_CASE("A scheduled voice emits zero before its exact sub-span StartFrame", "
     float32 postStart = 0.0F;
     for (uint32 f = 450; f < frames; ++f)
     {
-        postStart = std::max({postStart,
-                              std::fabs(out[static_cast<std::size_t>(f) * 2]),
-                              std::fabs(out[static_cast<std::size_t>(f) * 2 + 1])});
+        const float32 left = std::fabs(out[static_cast<ludus::foundation::usize>(f) * 2]);
+        const float32 right = std::fabs(out[static_cast<ludus::foundation::usize>(f) * 2 + 1]);
+        postStart = left > postStart ? left : postStart;
+        postStart = right > postStart ? right : postStart;
     }
     REQUIRE(postStart > 0.001F);
 }

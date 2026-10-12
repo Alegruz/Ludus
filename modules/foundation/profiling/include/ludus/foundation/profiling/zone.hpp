@@ -30,6 +30,10 @@
 namespace ludus::foundation::profiling
 {
 
+// Thanks to Glenn Fowler, Landon Curt Noll and Phong Vo, "FNV Hash",
+// "FNV-1a alternate algorithm" and "Parameters of the FNV-1/FNV-1a hash":
+// https://www.isthe.com/chongo/tech/comp/fnv/ . Adopt the XOR/multiply sequence
+// and published constants for a non-cryptographic hash; collisions remain possible.
 /// @brief Compile-time FNV-1a (32-bit) — identical construction to the logging category hash, kept independent so
 /// the two subsystems do not couple.
 ///

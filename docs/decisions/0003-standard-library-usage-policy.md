@@ -35,6 +35,7 @@ establish permission for production call sites.
 | `<iostream>`, `std::cout`, `std::cerr`, `std::endl` | Heavy global stream objects with static-init cost; encourages ad-hoc logging | `LUDUS_LOG_*` from `FoundationLogging`; the emergency path for pre-init/fatal |
 | C++ exceptions (`throw` / `try` / `catch`) | Engine builds with `-fno-exceptions` | Status codes, `bool`, Ludus-owned results, out-parameters (see `AGENTS.md`) |
 | `std::uint32_t`, `std::size_t`, raw `float`/`double`, etc. as spellings | Widths should be explicit and consistent | `uint32`, `usize`, `float32`, ... from `types.h` |
+| `<format>` and `std::format`/`std::vformat`/format-to/argument-store calls (including repository-owned tests) | Large parsing and template-instantiation cost | Bounded Ludus formatter; check truncation/error status |
 | `<sstream>` in engine code | Allocating, stream-formatting machinery | Format into a caller-owned buffer or use the owning Ludus formatter |
 | `printf`-family for diagnostics (`std::printf`, `fprintf` to stdout/stderr) | Same reason as iostream; unstructured | `LUDUS_LOG_*` |
 
@@ -132,7 +133,8 @@ Necessary existing standard-library and CRT uses may be maintained within
 their current implementation boundaries, including facilities absent from the
 new-code allowlist. Examples include Logging's `std::thread`,
 `std::condition_variable` and `std::hash`, Editor's `std::function`, and existing
-containers, conversion, formatting and filesystem calls. This compatibility
+containers, conversion and filesystem calls. Standard formatting machinery is
+retired rather than grandfathered. This compatibility
 permission does not authorize adding those facilities to new APIs or subsystems.
 Their replacement belongs in focused, validated changes that preserve existing
 contracts; existing use is not precedent for new code.

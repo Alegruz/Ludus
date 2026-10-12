@@ -42,6 +42,10 @@ using protocol::ReloadPhase;
 // Checkpoint body cap (design 8): 16 MiB.
 constexpr usize kMaxCheckpointBody = static_cast<usize>(16) * 1024 * 1024;
 
+// Thanks to Glenn Fowler, Landon Curt Noll and Phong Vo, "FNV Hash",
+// "FNV-1a alternate algorithm" and "Parameters of the FNV-1/FNV-1a hash":
+// https://www.isthe.com/chongo/tech/comp/fnv/ . Adopt the XOR/multiply sequence
+// and published constants for a non-cryptographic hash; collisions remain possible.
 // FNV-1a over the body for host-side envelope digest validation.
 [[nodiscard]] uint64 Fnv1a(const ludus::foundation::uint8* data, usize size) noexcept
 {

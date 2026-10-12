@@ -10,5 +10,17 @@
     "lld": "18.0.0",
     "clang-format": "18.0.0",
     "clang-tidy": "18.0.0"
+  },
+  "quality": {
+    "ruff": "0.17.0",
+    "actionlint": {
+      "version": "1.7.11",
+      "sha256": {
+        "darwin_amd64": "17ffc17fed8f0258ef6ad4aed932d3272464c7ef7d64e1cb0d65aa97c9752107",
+        "darwin_arm64": "a21ba7366d8329e7223faee0ed69eb13da27fe8acabb356bb7eb0b7f1e1cb6d8",
+        "linux_amd64": "900919a84f2229bac68ca9cd4103ea297abc35e9689ebb842c6e34a3d1b01b0a",
+        "linux_arm64": "21bc0dfb57a913fe175298c2a9e906ee630f747cb66d0a934d0d4b69f4ee1235"
+      }
+    }
   }
 }

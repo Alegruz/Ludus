@@ -1,11 +1,11 @@
 #include <ludus/foundation/base/checked_integer.hpp>
+#include <ludus/foundation/containers/sort.hpp>
 #include <ludus/foundation/filesystem/namespace.hpp>
 
 #if defined(LUDUS_FILESYSTEM_NAMESPACE_FAULT_TESTING)
 #    include "internal/namespace_test_hooks.hpp"
 #endif
 
-#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <new>
@@ -163,7 +163,7 @@ public:
         {
             return {{Status::InvalidArgument}};
         }
-        const usize count = std::min(destination.size(), mEntry.Length - begin);
+        const usize count = (destination.size() < mEntry.Length - begin ? destination.size() : mEntry.Length - begin);
         if (count != 0)
         {
             std::memcpy(destination.data(), mEntry.Bytes + begin, count);
@@ -306,7 +306,7 @@ Result CreateMemoryProvider(std::span<const MemoryEntry> entries, ProviderHandle
     }
     if (next->Count != 0)
     {
-        std::sort(next->Index, next->Index + next->Count, [](const StoredEntry* a, const StoredEntry* b) noexcept {
+        foundation::Sort(next->Index, next->Count, [](const StoredEntry* a, const StoredEntry* b) noexcept {
             return a->Key() < b->Key();
         });
         for (usize i = 1; i < next->Count; ++i)
@@ -447,11 +447,9 @@ Result MountSnapshot::Create(std::span<const Mount> mounts, uint64 generation, M
             stored.Id = input.Id;
             stored.Source = input.Source;
         }
-        std::sort(next.mImpl->Mounts,
-                  next.mImpl->Mounts + mounts.size(),
-                  [](const StoredMount& a, const StoredMount& b) noexcept {
-                      return a.Priority != b.Priority ? a.Priority > b.Priority : a.Id < b.Id;
-                  });
+        foundation::Sort(next.mImpl->Mounts, mounts.size(), [](const StoredMount& a, const StoredMount& b) noexcept {
+            return a.Priority != b.Priority ? a.Priority > b.Priority : a.Id < b.Id;
+        });
     }
     output = Move(next);
     return {};

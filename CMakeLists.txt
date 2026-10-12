@@ -131,6 +131,8 @@ install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENT
 
 include(EngineDependencyPreflight)
 
+include(EngineTestDiagnostics)
+
 add_subdirectory(modules/foundation/base)
 # Portable bounded networking primitives are shared by native and web targets.
 add_subdirectory(modules/network/core)

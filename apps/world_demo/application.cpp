@@ -1,7 +1,6 @@
 #include "internal/application.h"
 #include "internal/camera_view.h"
 #include "world_scene.h"
-#include <algorithm>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/foundation/profiling/clock.hpp>
 #include <ludus/foundation/profiling/profiling.hpp>

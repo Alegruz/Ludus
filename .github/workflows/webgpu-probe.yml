@@ -265,6 +265,22 @@ jobs:
             out/host-tools/venv/bin/cmake --build --preset "$preset" --target ludus_world_demo --parallel 2
             ./scripts/check "$preset" --tidy
           done
+      - name: Review complete browser analyzer baselines
+        continue-on-error: true
+        run: |
+          failed=0
+          for preset in web-emscripten-development web-emscripten-release; do
+            ./scripts/check "$preset" --analyzer || failed=1
+          done
+          exit "$failed"
+      - name: Preserve browser analysis inventories and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analyzer-browser
+          path: out/quality/analysis/
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: world-camera-web-release

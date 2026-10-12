@@ -1,5 +1,6 @@
 #include <ludus/foundation/base/byte_order.hpp>
 #include <ludus/foundation/base/checked_integer.hpp>
+#include <ludus/foundation/containers/sort.hpp>
 #include <ludus/foundation/filesystem/pack.hpp>
 
 #include "internal/pack_codec.hpp"
@@ -7,7 +8,6 @@
 #    include "internal/pack_test_hooks.hpp"
 #endif
 
-#include <algorithm>
 #include <cstring>
 #include <mutex>
 #include <new>
@@ -303,7 +303,8 @@ ReadResult PackFile::ReadAt(uint64 offset, std::span<uint8> destination) const n
         {
             return {{Status::CorruptData}, progress};
         }
-        const usize count = std::min(requested - progress, decoded.size() - within);
+        const usize count =
+            (requested - progress < decoded.size() - within ? requested - progress : decoded.size() - within);
         std::memcpy(destination.data() + progress, decoded.data() + within, count);
         progress += count;
     }
@@ -370,7 +371,9 @@ Result ParseIndex(PackProvider& provider, usize indexSize, const PackLimits& lim
         for (uint32 j = 0; j < entry.Count; ++j)
         {
             const auto& block = provider.Blocks[entry.First + j];
-            const uint64 expected = std::min(static_cast<uint64>(header.BlockSize), entry.Decoded - decoded);
+            const uint64 expected =
+                (static_cast<uint64>(header.BlockSize) < entry.Decoded - decoded ? static_cast<uint64>(header.BlockSize)
+                                                                                 : entry.Decoded - decoded);
             if (block.Decoded != expected || !TryAdd(stored, static_cast<uint64>(block.Stored), stored))
             {
                 return {Status::CorruptData};
@@ -395,7 +398,7 @@ Result ParseIndex(PackProvider& provider, usize indexSize, const PackLimits& lim
     {
         ranges[i] = {provider.Blocks[i].Offset, provider.Blocks[i].Stored};
     }
-    std::sort(ranges, ranges + header.Blocks, [](const Range& a, const Range& b) noexcept {
+    foundation::Sort(ranges, header.Blocks, [](const Range& a, const Range& b) noexcept {
         return a.Offset < b.Offset;
     });
     uint64 end = header.Payload;

@@ -5,16 +5,169 @@
       "label": "Ludus: Set up optional RAD Debugger",
       "type": "process",
       "command": "${workspaceFolder}/scripts/setup-rad-debugger",
-      "options": { "cwd": "${workspaceFolder}" },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
       "problemMatcher": []
     },
     {
       "label": "Ludus: Debug target with RAD",
       "type": "process",
       "command": "${workspaceFolder}/scripts/debug",
-      "args": ["${input:ludusDebugPreset}", "${input:ludusDebugTarget}"],
-      "options": { "cwd": "${workspaceFolder}" },
+      "args": [
+        "${input:ludusDebugPreset}",
+        "${input:ludusDebugTarget}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
       "problemMatcher": []
+    },
+    {
+      "label": "Ludus: Build selected preset",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/editor-task",
+      "args": [
+        "build"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "Ludus: Test selected preset",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/editor-task",
+      "args": [
+        "test"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "Ludus: Check formatting",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/editor-task",
+      "args": [
+        "format"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ludus: Check clang-tidy",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/editor-task",
+      "args": [
+        "tidy"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "Ludus: Review analyzer baseline",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/editor-task",
+      "args": [
+        "analyzer"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "Ludus: Check Python and workflows",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/editor-task",
+      "args": [
+        "tooling"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ludus: Profile build cost",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/editor-task",
+      "args": [
+        "profile-build"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "Ludus: Check build budget",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/editor-task",
+      "args": [
+        "build-budget"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ludus: Select prepared editor preset",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/setup-editor",
+      "args": [
+        "${input:ludusEditorPreset}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Ludus: Apply formatting",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/editor-task",
+      "args": [
+        "format-fix"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "Ludus: Review include hygiene",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/editor-task",
+      "args": [
+        "include-cleaner"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
     }
   ],
   "inputs": [
@@ -22,7 +175,10 @@
       "id": "ludusDebugPreset",
       "type": "pickString",
       "description": "Native debug build preset",
-      "options": ["linux-clang-debug", "linux-clang-development"],
+      "options": [
+        "linux-clang-debug",
+        "linux-clang-development"
+      ],
       "default": "linux-clang-debug"
     },
     {
@@ -30,6 +186,24 @@
       "type": "promptString",
       "description": "CMake executable target to build and debug",
       "default": "ludus_smoke"
+    },
+    {
+      "id": "ludusEditorPreset",
+      "type": "pickString",
+      "description": "Prepared native editor preset (must match this host)",
+      "options": [
+        "linux-clang-debug",
+        "linux-clang-development",
+        "linux-clang-profile",
+        "linux-clang-release",
+        "linux-clang-asan-ubsan",
+        "macos-clang-debug",
+        "macos-clang-development",
+        "macos-clang-profile",
+        "macos-clang-release",
+        "macos-clang-asan-ubsan"
+      ],
+      "default": "linux-clang-development"
     }
   ]
 }

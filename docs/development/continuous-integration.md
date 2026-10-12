@@ -141,6 +141,67 @@ The macOS sanitizer preset runs and preserves controls before native runtime and
 Behavior acceptance, so a later application failure cannot prevent their capture.
 Its separate Debug diagnostic configure retains its startup/decision tests.
 
+## Q1 analysis and host tooling
+
+Platform/tooling owns the new baseline checks and finding triage. They remain
+advisory for at least two weeks; promotion requires reviewed Linux/macOS/browser
+inventories and findings, an accountable maintainer and measured runtime cost.
+Existing format, tidy, compiler, sanitizer and source-inventory gates stay
+required. Advisory commands still exit unsuccessfully for findings, missing
+tools, omissions, timeouts or incomplete output; CI explicitly tolerates their
+step failure during rollout and preserves their evidence. Artifact failures are
+not advisory. Complete macOS source admission has a separate required
+`--inventory` step; Linux/browser inventories run inside their required tidy
+checks. Analyzer findings cannot excuse source omissions.
+
+```bash
+./scripts/setup-quality-tools   # explicit network install into ignored out/
+./scripts/check --tooling       # no installation, configure or engine build
+./scripts/check linux-clang-development --analyzer
+```
+
+`config/tool_versions.json` pins Ruff and actionlint, including SHA-256 checksums
+for actionlint's Linux/macOS x86_64/arm64 archives. Checks verify exact executable
+versions and record executable digests. `ruff.toml` enables selected syntax,
+undefined-name, duplicate-definition/key and invalid-control-flow rules. It
+does not introduce formatting or import-order churn. The command inventories
+tracked Python files and Python entry points without extensions; vendor code is
+excluded explicitly. Stage new files before a local check to include them.
+actionlint checks every `.github/workflows/` YAML workflow's syntax and expression
+contracts. Embedded Python/ShellCheck adapters are disabled so optional unpinned
+tools cannot silently change the check. Composite action YAML is not claimed as
+actionlint coverage. ShellCheck remains a separate future rollout.
+
+`config/clang-analyzer.yml` selects stable LLVM 18 `core`, `cplusplus` and `unix`
+families. Experimental/opt-in checkers are not enabled.
+The released Move check uses `WarnOn=KnownsOnly`: it models known standard types
+without treating Ludus' documented empty/reusable moved-from states as errors.
+`--analyzer` uses the same
+complete per-configuration native inventory and bounded execution as required
+tidy. Browser checks now reconcile their database with the independent CMake
+File API too, retaining explicit Emscripten flags. Linux shards, the complete
+macOS Development build and both browser profiles produce advisory baselines;
+no baseline suppression file is generated. Fix a finding or justify a narrow
+source suppression before promotion.
+
+The initial local macOS Development scan examined 267 sources / 291 compile
+commands, including fault-test variants, with no inventory omissions. After
+reviewing the Move model, four commands report findings in three sources:
+`diagnostic_format.cpp` (null argument/count relationship), `namespace.cpp`
+(empty span versus entry allocation, two variants), and `jobs.cpp` (graph
+destruction/initialization). These remain unsuppressed advisory findings for
+maintainer path review; this scan does not establish that they are defects or
+that other supported-platform baselines are clean. The same build passes its
+native headless tests; device availability is reported separately.
+
+Unique `out/quality/tooling/run-*/` directories retain Ruff/actionlint logs,
+commands, versions, digests, source counts and status. Analyzer evidence remains
+under `out/quality/analysis/run-*/`. CI uploads both for 14 days, including failed
+checks. Regression controls prove actual Ruff/actionlint/analyzer diagnostics
+reject known-bad inputs and cover checksum, empty/missing scope and editor setup
+boundaries. [VS Code setup](building.md#vs-code) uses the same prepared preset
+for clangd and Ludus tasks without rewriting custom editor files.
+
 ## Measuring feedback
 
 GitHub's separate setup/build/test/analysis steps expose phase durations.

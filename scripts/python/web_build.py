@@ -12,6 +12,7 @@ import urllib.request
 import venv
 
 from formatting import format_source
+from analysis_inventory import inventory, request_codemodel, SOURCE_ROOTS
 
 PRESETS = ("web-emscripten-development", "web-emscripten-release")
 
@@ -20,7 +21,7 @@ def analysis_commands(root: Path, entries: list[dict], tidy: str, sysroot: Path,
                       owned_generated: tuple[Path, ...] = ()) -> list[list[str]]:
     """Analyze owned sources and probes, leaving pinned vendor implementations alone."""
     root = root.resolve()
-    owned_roots = tuple(root / directory for directory in ("modules", "apps", "tools", "tests"))
+    owned_roots = tuple(root / directory for directory in SOURCE_ROOTS)
     generated = {path.resolve() for path in owned_generated}
     commands = []
     for entry in entries:
@@ -64,6 +65,15 @@ def command(args, engine) -> int:
     run_foundational_includes = engine.run_foundational_includes
 
     root = repo_root()
+    if args.command == "check" and getattr(args, "tooling", False):
+        from tooling_quality import check
+        try:
+            check(root)
+        except RuntimeError as error:
+            raise EngineError(str(error)) from error
+        if not any((args.format, args.tidy, args.all, args.include_cleaner,
+                    getattr(args, "analyzer", False), getattr(args, "inventory", False))):
+            return 0
     if args.preset not in PRESETS:
         raise EngineError("Unknown browser preset: " + args.preset)
     if args.command not in ("init", "bootstrap", "doctor", "build", "test", "check"):
@@ -133,6 +143,7 @@ def command(args, engine) -> int:
                 if not path.is_file():
                     raise EngineError("Missing shader tool; run ./init.sh " + args.preset + " --preset-only")
                 shader_args.append("-D" + variable + "=" + str(path))
+        request_codemodel(root / "out/build" / args.preset)
         run([emscripten / "emcmake", cmake, "--preset", args.preset, *shader_args], cwd=root, env=env)
         if args.command in ("init", "bootstrap"):
             print("Browser configure complete; next: ./scripts/build " + args.preset)
@@ -146,7 +157,9 @@ def command(args, engine) -> int:
                 run([host_bin / "ctest", "--preset", args.preset, *options], cwd=root, env=env)
             return 0
 
-        all_checks = args.all or not (args.format or args.tidy or args.include_cleaner)
+        analyzer = getattr(args, "analyzer", False)
+        inventory_only = getattr(args, "inventory", False)
+        all_checks = args.all or not (args.format or args.tidy or args.include_cleaner or analyzer or inventory_only or getattr(args, "tooling", False))
         if args.include_cleaner:
             raise EngineError("Browser include-cleaner is not implemented; use format/tidy checks")
         if args.format or all_checks:
@@ -160,16 +173,37 @@ def command(args, engine) -> int:
                     path.write_text(formatted)
                 elif formatted != original:
                     raise EngineError(f"Browser {probe} needs repository formatting")
-        if args.tidy or all_checks:
+        if args.tidy or all_checks or analyzer or inventory_only:
+            entries, report = inventory(root, build)
+            directory = engine.analysis_directory(root)
+            (directory / "inventory.json").write_text(json.dumps(report, indent=2) + "\n")
+            if inventory_only and not (args.tidy or all_checks or analyzer):
+                return 0
             tidy = shutil.which("clang-tidy-18")
             if not tidy:
                 raise EngineError("clang-tidy 18 is required")
-            entries = json.loads((build / "compile_commands.json").read_text())
+            actual = engine.executable_version(tidy, ("--version",), root)
+            if not engine.version_tuple(actual) or engine.version_tuple(actual)[0] != 18:
+                raise EngineError("Browser analysis requires reference clang-tidy 18")
+            policy = root / ("config/clang-analyzer.yml" if analyzer and not (args.tidy or all_checks) else ".clang-tidy")
+            report["analysis"] = {"tool_version": actual, "tool_sha256": engine.file_sha256(Path(tidy)),
+                                  "policy": str(policy.relative_to(root)), "policy_sha256": engine.file_sha256(policy)}
+            (directory / "inventory.json").write_text(json.dumps(report, indent=2) + "\n")
             sysroot = emscripten / "cache/sysroot"
             commands = analysis_commands(root, entries, tidy, sysroot)
-            if not commands:
-                raise EngineError("No owned browser translation units found for analysis")
-            engine.run_analysis_commands(root, commands, env=env)
+            if not commands or len(commands) != len(entries):
+                raise EngineError("Browser analysis omitted required translation units")
+            if args.tidy or all_checks:
+                engine.run_analysis_commands(root, commands, env=env, directory=directory)
+            if analyzer:
+                if args.tidy or all_checks:
+                    directory = engine.analysis_directory(root)
+                    policy = root / "config/clang-analyzer.yml"
+                    report["analysis"].update(policy=str(policy.relative_to(root)), policy_sha256=engine.file_sha256(policy))
+                    (directory / "inventory.json").write_text(json.dumps(report, indent=2) + "\n")
+                for command in commands:
+                    command.insert(1, f"--config-file={root / 'config/clang-analyzer.yml'}")
+                engine.run_analysis_commands(root, commands, env=env, directory=directory)
         return 0
     except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
         raise EngineError(str(error)) from error

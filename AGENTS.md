@@ -240,6 +240,11 @@ It applies to production code in `modules/`, `apps/`, and `examples/`.
   modules first; implement a missing operation in its owning module, with an
   explicit allocation/error contract and appropriate tests. A namespace alias or
   wrapper around an STL container/algorithm is not a Ludus implementation.
+- **No standard formatting machinery.** Do not include `<format>` or call
+  `std::format`, `std::vformat`, `std::format_to`, `std::vformat_to`, or
+  `std::make_format_args` in repository-owned code, including tests. Use the
+  bounded Ludus formatter with explicit error/truncation status. Moving an
+  expensive STL facility into a `.cpp` does not by itself authorize it.
 - **Keep the explicit exceptions narrow.** Concepts, type traits and approved
   compile-time utilities are permitted. Approved low-level atomics, construction
   primitives and C runtime operations have the restrictions recorded in ADR 0003;
@@ -267,7 +272,12 @@ It applies to production code in `modules/`, `apps/`, and `examples/`.
   `<regex>`, `<iostream>`) from a public header.** Type-erase or PIMPL the
   expensive facility behind a `.cpp` boundary; templated public APIs should erase
   to a non-template implementation as early as possible (see ADR 0004: the
-  logging `Log()` erases to `std::format_args`).
+  logging call sites pack `FormatArg` values for the compiled `FormatInto` parser).
+- Trace transitive dependencies, including test framework headers. Do not
+  substitute another heavy formatting/streaming package, use PCH to hide a
+  regression from the budget, exclude compilations, or increase a limit to
+  avoid implementing a cheaper Ludus operation. Compare uncached profiles with
+  the same compiler, test graph and concurrency; preserve assertion diagnostics.
 - Build time is budgeted, not vibes. `config/build_budget.json` sets a per-header
   average parse-time budget; the `Build-time budget` CI job (and
   `./scripts/check-build-budget`) fails if a project header exceeds it. If a build
