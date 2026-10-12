@@ -1,5 +1,6 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/measurement.h"
 #include "internal/raster.h"
 #include "internal/ray_backend.h"
 #include "internal/resources.h"
@@ -19,6 +20,8 @@
 namespace ludus::graphics::rhi::backend
 {
 void RasterFrameExtent() noexcept;
+void TimingBegin() noexcept;
+void TimingEnd() noexcept;
 namespace
 {
 using namespace foundation;
@@ -1068,6 +1071,7 @@ FrameStatus Begin() noexcept
     {
         return Failure();
     }
+    TimingBegin();
     VkClearValue clears[2]{};
     auto& clear = clears[0];
     clears[1].depthStencil = {1, 0};
@@ -1095,6 +1099,7 @@ FrameStatus End() noexcept
         vkCmdEndRenderPass(frame.Command);
     }
     gEncoding = false;
+    TimingEnd();
     if (!Check(vkEndCommandBuffer(frame.Command)) || !Check(vkResetFences(gDevice, 1, &frame.Fence)))
     {
         return Failure();
@@ -1535,3 +1540,5 @@ bool ReadHeadlessPixels(std::span<uint8> pixels) noexcept
 #include "internal/lifetime_vulkan.h"
 
 #include "internal/ray_vulkan.h"
+
+#include "internal/measurement_vulkan.h"

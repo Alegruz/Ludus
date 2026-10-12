@@ -32,7 +32,7 @@ try {
   const pin = JSON.parse(await readFile(new URL('../../config/shader_toolchain.json',import.meta.url))).wgsl_validator;
   assert.equal(browser.version(),pin.chromium_version);
   report.version = browser.version();
-  for (const scenario of ['webgpu','webgl2','auto','auto-fallback','webgpu-profile-limit-failure','webgl2-profile-limit-failure','auto-profile-limit-fallback','webgpu-stride-256','webgl2-stride-252','webgl2-stride-profile-failure','webgpu-srgb','webgl2-srgb','webgpu-blend','webgl2-blend','webgpu-graph','webgl2-graph','webgpu-graph-reference','webgl2-graph-reference','webgpu-merge','webgpu-merge-reference','webgl2-merge','webgl2-merge-reference','auto-fallback-merge','webgpu-cpu','webgpu-compute','webgpu-compute-reference','webgl2-cpu','webgl2-compute','auto-fallback-compute','webgl2-compute-required','invalid-shader','invalid-pipeline','invalid-upload','invalid-readback','slow-completion','transfer-loss','device-loss']) {
+  for (const scenario of ['webgpu-timing-merge','webgpu-timing-loss-merge','webgpu-no-timestamps-timing-merge','webgl2-timing-merge','webgpu','webgl2','auto','auto-fallback','webgpu-profile-limit-failure','webgl2-profile-limit-failure','auto-profile-limit-fallback','webgpu-stride-256','webgl2-stride-252','webgl2-stride-profile-failure','webgpu-srgb','webgl2-srgb','webgpu-blend','webgl2-blend','webgpu-graph','webgl2-graph','webgpu-graph-reference','webgl2-graph-reference','webgpu-merge','webgpu-merge-reference','webgl2-merge','webgl2-merge-reference','auto-fallback-merge','webgpu-cpu','webgpu-compute','webgpu-compute-reference','webgl2-cpu','webgl2-compute','auto-fallback-compute','webgl2-compute-required','invalid-shader','invalid-pipeline','invalid-upload','invalid-readback','slow-completion','transfer-loss','device-loss']) {
     const context = await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
     await context.addInitScript(scenario => {
       window.__qaPause = false;
@@ -44,6 +44,9 @@ try {
         navigator.gpu.requestAdapter = async (...args) => {
           const adapter = await requestAdapter(...args);
           if (!adapter) return adapter;
+          if (scenario.includes('no-timestamps')) {
+            Object.defineProperty(adapter, 'features', {value:new Set([...adapter.features].filter(name => name !== 'timestamp-query'))});
+          }
           const requestDevice = adapter.requestDevice.bind(adapter);
           adapter.requestDevice = async (...args) => {
             const device = await requestDevice(...args); window.__qaDevice = device;
@@ -61,6 +64,12 @@ try {
             device.createBuffer = desc => {
               window.__qaCreates = (window.__qaCreates || 0) + 1;
               const object = buffer(scenario === 'invalid-upload' && (desc.usage & GPUBufferUsage.VERTEX) && (desc.usage & GPUBufferUsage.COPY_DST) ? {...desc,size:4} : desc);
+              if (scenario.includes('timing-loss') && desc.size === 32 && (desc.usage & GPUBufferUsage.MAP_READ)) {
+                const map = object.mapAsync.bind(object);
+                object.mapAsync = (...args) => map(...args).then(() => new Promise(resolve => setTimeout(() => {
+                  window.__qaTimingMapDelivered = true; resolve();
+                },2000)));
+              }
               if (scenario === 'invalid-readback' && (desc.usage & GPUBufferUsage.MAP_READ)) {
                 window.__qaReadbackStarted = true;
                 window.__qaReadbackCompletionObserved = false;
@@ -109,7 +118,7 @@ try {
     page.on('console',message => report.console.push({scenario,type:message.type(),text:message.text()}));
     const variant = scenario.endsWith('-merge-reference') ? 'merge-reference' : scenario.endsWith('-merge') ? 'merge' : scenario.endsWith('-compute-required') ? 'compute-required' : scenario.endsWith('-compute-reference') ? 'compute-reference' : scenario.endsWith('-compute') ? 'compute' : scenario.endsWith('-cpu') ? 'cpu' : scenario.endsWith('-graph-reference') ? 'graph-reference' : scenario.endsWith('-graph') ? 'graph' : scenario.endsWith('-srgb') ? 'srgb' : scenario.endsWith('-blend') ? 'blend' : '';
     const selection = scenario.startsWith('webgpu') ? 'webgpu' : scenario.startsWith('webgl2') ? 'webgl2' : scenario.startsWith('invalid') || scenario === 'device-loss' || scenario === 'slow-completion' || scenario === 'transfer-loss' ? 'webgpu' : 'auto';
-    await page.goto(`http://127.0.0.1:${server.address().port}/raster.html?backend=${selection}&variant=${variant}`);
+    await page.goto(`http://127.0.0.1:${server.address().port}/raster.html?backend=${selection}&variant=${variant}${scenario.includes('timing') ? '&timing=1' : ''}`);
     const result = {scenario};
     if (scenario.startsWith('invalid') || scenario === 'transfer-loss' || scenario === 'webgl2-compute-required' || (scenario.endsWith('profile-limit-failure') || scenario.endsWith('stride-profile-failure'))) {
       await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'failed',null,{timeout:20000});
@@ -119,11 +128,25 @@ try {
     } else {
       await page.waitForFunction(() => document.querySelector('#status').dataset.frames === '5',null,{timeout:20000});
       result.backend = await page.locator('#status').getAttribute('data-backend');
+      if (scenario.includes('timing') && !scenario.includes('timing-loss')) {
+        await page.waitForFunction(() => ['3','4','5','6'].includes(document.querySelector('#status').dataset.timingState));
+        result.timing = await page.locator('#status').evaluate(node => ({state:Number(node.dataset.timingState),gpuNs:Number(node.dataset.gpuNs),logicalBytes:Number(node.dataset.logicalBytes),apiBytesAvailable:Number(node.dataset.apiBytesAvailable)}));
+        assert.ok(result.timing.logicalBytes > 0);
+        assert.equal(result.timing.apiBytesAvailable,0);
+        if (scenario.includes('no-timestamps')) assert.equal(result.timing.state,4);
+        else if (scenario.startsWith('webgpu')) assert.equal(result.timing.state,3);
+        if (result.timing.state === 3) assert.ok(result.timing.gpuNs >= 0);
+        else assert.equal(result.timing.gpuNs,0);
+      }
       if (scenario.startsWith('auto-fallback') || scenario === 'auto-profile-limit-fallback' || scenario.startsWith('webgl2')) assert.equal(result.backend,'webgl2');
       else assert.equal(result.backend,'webgpu');
-      if (scenario === 'device-loss') {
+      if (scenario === 'device-loss' || scenario.includes('timing-loss')) {
         await page.evaluate(() => {window.__qaDevice.destroy(); window.__qaPause=false;});
         await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'failed',null,{timeout:20000});
+        if (scenario.includes('timing-loss')) {
+          await page.waitForFunction(() => window.__qaTimingMapDelivered);
+          assert.equal(await page.locator('#status').getAttribute('data-state'),'failed','late timing callback cannot revive the owner');
+        }
       } else {
         const box = await page.locator('#canvas').boundingBox();
         const bytes = await page.screenshot({clip:{x:box.x,y:box.y,width:box.width,height:box.height}});

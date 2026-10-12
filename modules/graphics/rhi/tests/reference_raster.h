@@ -1,7 +1,13 @@
 #pragma once
+#include "internal/measurement.h"
 #include "internal/raster.h"
 namespace ludus::graphics::rhi::reference
 {
+inline GpuTiming Timing;
+inline foundation::uint32 TimingLossToken = 0;
+inline RasterStatus TimingAdmission = RasterStatus::Ready;
+inline bool AllocationAvailable = true;
+inline foundation::uint64 AllocationBytes = 128;
 inline bool ProfileAvailable = true;
 inline bool HdrAvailable = true;
 inline bool ComputeAvailable = true;

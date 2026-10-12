@@ -5,6 +5,7 @@
 #include <ludus/foundation/base/types.h>
 #include <ludus/graphics/rhi/compute.h>
 #include <ludus/graphics/rhi/lifetime.h>
+#include <ludus/graphics/rhi/measurement.h>
 #include <thread>
 
 #include "cull.h"
@@ -73,6 +74,7 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     rhi::SurfaceHandle surface;
     rhi::StartupInfo failure;
     rhi::DeviceDescription description;
+    description.EnableGpuTiming = std::getenv("LUDUS_RHI_GPU_TIMING") != nullptr;
     description.Required.PortableRaster = true;
     description.Required.Compute = computeMode;
     const auto started = rhi::CreateDevice({}, { .Width = 96, .Height = 64 }, description, device, surface, &failure);
@@ -276,6 +278,27 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
             const bool benchmark = std::getenv("LUDUS_RHI_BENCHMARK") != nullptr;
             if (benchmark)
             {
+                rhi::MeasurementAdapter adapter;
+                REQUIRE(rhi::GetMeasurementAdapter(device, adapter) == rhi::RasterStatus::Ready);
+                std::printf("R7ADAPTER,");
+                for (usize byte = 0; byte < sizeof(adapter.Name) && adapter.Name[byte] != '\0'; ++byte)
+                {
+                    std::printf("%02x", static_cast<uint32>(static_cast<uint8>(adapter.Name[byte])));
+                }
+                std::printf(",%u,%u,%u,%u,%u\n",
+                            adapter.VendorId,
+                            adapter.DeviceId,
+                            adapter.DriverVersion,
+                            adapter.SoftwareKnown ? 1U : 0U,
+                            adapter.Software ? 1U : 0U);
+                rhi::DeviceInfo profile;
+                REQUIRE(rhi::GetDeviceInfo(device, profile) == rhi::DeviceStatus::Ready);
+                std::printf("R7PROFILE,%u,%u,%u,%u,%u\n",
+                            profile.Enabled.PortableRaster ? 1U : 0U,
+                            profile.Enabled.Compute ? 1U : 0U,
+                            profile.Enabled.OrderedRasterGraph ? 1U : 0U,
+                            profile.Profile.Storage.ResourcesPerKind,
+                            profile.Profile.Storage.DrawsPerFrame);
                 std::printf("R5BACKEND,%u\n", static_cast<uint32>(rhi::GetStartup().SelectedBackend));
             }
             const uint32 counts[]{1, 8, 16, 31};
@@ -290,6 +313,10 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
                         const auto setupStart = std::chrono::steady_clock::now();
                         REQUIRE(ludus::qa::BuildMergedFrame(device, inputs, graph, report, merge, layers) ==
                                 rhi::RasterStatus::Ready);
+                        const auto armStart = std::chrono::steady_clock::now();
+                        const auto armed =
+                            description.EnableGpuTiming ? rhi::ArmGpuTiming(device) : rhi::RasterStatus::Unsupported;
+                        REQUIRE((armed == rhi::RasterStatus::Ready || armed == rhi::RasterStatus::Unsupported));
                         const auto executeStart = std::chrono::steady_clock::now();
                         completion = {};
                         REQUIRE(rhi::ExecuteOrderedGraph(device, surface, graph, completion) ==
@@ -297,6 +324,13 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
                         const auto executeEnd = std::chrono::steady_clock::now();
                         REQUIRE(rhi::backend::ReadHeadlessPixels(merge ? merged : baseline));
                         const auto completionEnd = std::chrono::steady_clock::now();
+                        rhi::GpuTiming timing;
+                        rhi::AllocationTelemetry memory;
+                        REQUIRE(rhi::GetGpuTiming(device, timing) == rhi::RasterStatus::Ready);
+                        REQUIRE(rhi::GetAllocationTelemetry(device, memory) == rhi::RasterStatus::Ready);
+                        REQUIRE(timing.State != rhi::GpuTimingState::Armed);
+                        REQUIRE(timing.State != rhi::GpuTimingState::Pending);
+                        const auto pollEnd = std::chrono::steady_clock::now();
                         CHECK(report.RasterPasses == (merge ? 2 : layers + 1));
                         CHECK(report.MergedPasses == (merge ? layers - 1 : 0));
                         CHECK(report.DrawCount == layers + 2);
@@ -306,6 +340,23 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
                                 return static_cast<float64>(
                                     std::chrono::duration_cast<std::chrono::nanoseconds>(to - from).count());
                             };
+                            std::printf("R7,%u,%u,%u,%u,%.0f,%.9g,%u,%.0f,%u,%.0f,%.0f,%.0f,%.0f,%u,%.0f,%.0f\n",
+                                        layers,
+                                        iteration - 16,
+                                        merge ? 1U : 0U,
+                                        static_cast<uint32>(timing.State),
+                                        timing.DurationNanoseconds,
+                                        timing.TickNanoseconds,
+                                        timing.ValidBits,
+                                        static_cast<float64>(memory.LogicalBytes),
+                                        memory.ApiBytesAvailable ? 1U : 0U,
+                                        static_cast<float64>(memory.ApiBytes),
+                                        static_cast<float64>(memory.PeakObservedApiBytes),
+                                        ns(armStart, executeStart),
+                                        ns(completionEnd, pollEnd),
+                                        memory.AllocatorBlockBytesAvailable ? 1U : 0U,
+                                        static_cast<float64>(memory.AllocatorBlockBytes),
+                                        static_cast<float64>(memory.PeakObservedAllocatorBlockBytes));
                             std::printf("R5,%u,%u,%u,%.0f,%.0f,%.0f,%u,%u,%.0f,%.0f,%.0f\n",
                                         layers,
                                         iteration - 16,

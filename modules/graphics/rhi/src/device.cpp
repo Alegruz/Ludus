@@ -3,6 +3,7 @@
 #include "internal/backend.h"
 #include "internal/device.h"
 #include "internal/lifecycle.h"
+#include "internal/measurement.h"
 #include "internal/profile.h"
 #include "internal/raster.h"
 #include "internal/ray_backend.h"
@@ -157,6 +158,7 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
     {
         return DeviceStatus::IdentityExhausted;
     }
+    internal::SetGpuTimingRequest(description.EnableGpuTiming);
     internal::SetRayProfileRequest(description.Required.RayQueries || description.Preferred.RayQueries);
     const auto result = internal::StartOwned(
         application,
@@ -235,6 +237,89 @@ DeviceStatus GetDeviceInfo(DeviceHandle device, DeviceInfo& info) noexcept
     }
     return state;
 }
+RasterStatus GetMeasurementAdapter(DeviceHandle device, MeasurementAdapter& output) noexcept
+{
+    if (!Valid(device))
+    {
+        return RasterStatus::InvalidHandle;
+    }
+    output = {};
+    if (State() == DeviceStatus::DeviceLost)
+    {
+        return RasterStatus::DeviceLost;
+    }
+    if (State() != DeviceStatus::Ready)
+    {
+        return State() == DeviceStatus::Failed ? RasterStatus::Failed : RasterStatus::NotReady;
+    }
+    output = backend::TimingAdapter();
+    return RasterStatus::Ready;
+}
+RasterStatus ArmGpuTiming(DeviceHandle device) noexcept
+{
+    if (!Valid(device))
+    {
+        return RasterStatus::InvalidHandle;
+    }
+    if (State() == DeviceStatus::DeviceLost)
+    {
+        return RasterStatus::DeviceLost;
+    }
+    if (State() != DeviceStatus::Ready)
+    {
+        return State() == DeviceStatus::Failed ? RasterStatus::Failed : RasterStatus::NotReady;
+    }
+    if (internal::FrameOpen())
+    {
+        return RasterStatus::InvalidState;
+    }
+    if (!internal::GpuTimingRequested())
+    {
+        return RasterStatus::Unsupported;
+    }
+    const auto result = backend::TimingArm();
+    return State() == DeviceStatus::DeviceLost ? RasterStatus::DeviceLost
+           : State() == DeviceStatus::Failed   ? RasterStatus::Failed
+                                               : result;
+}
+RasterStatus GetGpuTiming(DeviceHandle device, GpuTiming& output) noexcept
+{
+    if (!Valid(device))
+    {
+        return RasterStatus::InvalidHandle;
+    }
+    output = {};
+    if (State() == DeviceStatus::DeviceLost)
+    {
+        return RasterStatus::DeviceLost;
+    }
+    if (State() != DeviceStatus::Ready)
+    {
+        return State() == DeviceStatus::Failed ? RasterStatus::Failed : RasterStatus::NotReady;
+    }
+    output = internal::GpuTimingRequested() ? backend::TimingPoll() : GpuTiming{ .State = GpuTimingState::Unavailable };
+    if (State() != DeviceStatus::Ready)
+    {
+        output = {};
+        return State() == DeviceStatus::DeviceLost ? RasterStatus::DeviceLost : RasterStatus::Failed;
+    }
+    return RasterStatus::Ready;
+}
+namespace internal
+{
+namespace
+{
+bool gGpuTimingRequested = false;
+}
+void SetGpuTimingRequest(bool requested) noexcept
+{
+    gGpuTimingRequested = requested;
+}
+bool GpuTimingRequested() noexcept
+{
+    return gGpuTimingRequested;
+}
+} // namespace internal
 DeviceStatus DestroyDevice(DeviceHandle& device) noexcept
 {
     if (!Valid(device))

@@ -923,8 +923,10 @@ with differing hues/alpha and immutable binding snapshots, then samples the atta
 surface. Setup CPU time includes authoring/compile; execute CPU time includes
 preflight/acquire/encode/submit. The subsequent full-image readback forces real
 completion outside those timers. Its host wait duration is neither GPU duration
-nor input-to-display latency. GPU timestamps, presentation latency, opaque driver
-allocations and physical backing are explicitly unavailable (`null`), never zero.
+nor input-to-display latency. The original R5 harness leaves GPU timestamps,
+presentation latency and physical backing unavailable (`null`), never zero.
+[R7 measurement](#gpu-measurement-and-qualification-r7) adds optional device-clock
+intervals and scoped native API allocation observations.
 
 Initial evidence, 2026-10-11: base `f9cc7c8` plus this R5 implementation, pinned
 Clang 18.1.8, Development/RelWithDebInfo, no PCH, Apple M5 (8 GPU cores), Metal 4,
@@ -1029,3 +1031,155 @@ Reference-backend tests additionally cover all nine kinds at 80 objects each,
 retained slot reuse, pending byte pressure, allocation rollback, checked host
 arithmetic, high-index WAR hazards and more than 512 diagnostic dependencies.
 These fixtures prove capacity/correctness; hardware performance remains R7.
+
+
+## GPU measurement and qualification (R7)
+
+`measurement.h` adds optional frame probes, scoped allocation/retirement snapshots
+and selected-adapter observations. The public declarations own the API contract.
+Enable `DeviceDescription::EnableGpuTiming` before startup, then arm between frames:
+
+```cpp
+#include <ludus/graphics/rhi/measurement.h>
+
+// device/surface were created with EnableGpuTiming = true.
+const auto armed = ArmGpuTiming(device);
+if (armed == RasterStatus::Ready)
+{
+    // Submit an ordinary frame, command batch, or ordered graph.
+    // Later, on the owner thread, poll without waiting:
+    GpuTiming sample;
+    if (GetGpuTiming(device, sample) == RasterStatus::Ready &&
+        sample.State == GpuTimingState::Available)
+    {
+        const auto elapsedNanoseconds = sample.DurationNanoseconds;
+        // Record elapsedNanoseconds alongside a separate CPU sample.
+    }
+}
+```
+
+There is one optional probe per session, independent of general resource/plan
+capacity. A skipped acquire keeps it armed; a recording frame also remains armed
+until submission. An armed/pending sample cannot be overwritten. Terminal samples
+persist until re-armed; destroying the device cancels them. Native teardown uses
+the existing drain before releasing query storage. WebGPU map callbacks carry a
+non-reused generation, so late callbacks after loss/destruction cannot publish into
+a new probe. Timing-disabled sessions issue no timing commands.
+
+The observed interval encloses the acquired frame's clear, graph pass transitions,
+raster and compute commands. It is an elapsed device-clock interval, including GPU
+stalls; WebGL can include idle gaps while the CPU feeds commands. It excludes the
+later readback and display journey and does not measure GPU busy-cycle totals.
+CPU acquire/encode/submit, queue completion, GPU elapsed time and presentation
+completion remain separate observations. No result correlates device and CPU clock
+epochs or substitutes CPU elapsed time when a GPU result is unavailable.
+
+| Backend | Timing implementation | Precision and unavailable results |
+| --- | --- | --- |
+| Metal | Retained command buffer; `GPUStartTime`/`GPUEndTime` after successful completion | API exposes seconds, but no precision guarantee; tick/valid-bit observations remain unknown. Invalid timestamps and command errors produce explicit terminal states. |
+| Vulkan | Two timestamps enclosing the graphics command buffer, nonblocking availability polling | Queue `timestampValidBits` and device `timestampPeriod` are reported. Modular rollover is allowed only when the independent CPU elapsed bound is shorter than one counter period; ambiguous wraps are disjoint. A CPU bound validates the counter, never supplies the GPU duration. |
+| WebGPU | Optional `timestamp-query`, requested only when supported and opted in; two empty compute marker passes and asynchronous resolve/readback | Four valid indices work around the pinned emdawn bridge's handling of absent indices. Indices 0/3 enclose every frame encoder. Privacy quantization/accuracy is unknown; a genuine quantized zero remains available. Unsupported timing does not fabricate a duration. |
+| WebGL2 | Optional `EXT_disjoint_timer_query_webgl2` elapsed query | Query availability is polled after returning to the event loop. `GPU_DISJOINT_EXT`, unsafe JavaScript integer results and context loss invalidate the result. Tick/precision are unknown. |
+
+Thanks to Apple for [command-buffer timing](https://developer.apple.com/documentation/metal/mtlcommandbuffer/gpustarttime)
+and [resource allocation sizes](https://developer.apple.com/documentation/metal/mtlresource/allocatedsize),
+Khronos for [Vulkan timestamp queries](https://docs.vulkan.org/spec/latest/chapters/queries.html)
+and the [WebGL timer-query extension, revision 4](https://registry.khronos.org/webgl/extensions/EXT_disjoint_timer_query_webgl2/),
+and W3C/GPUWeb for [pass timestamps and query resolution](https://www.w3.org/TR/webgpu/).
+The implementation adapts their lifecycle and availability contracts; it does not
+copy their sample code or assume common CPU/GPU epochs.
+
+### Memory observations and reporting cost
+
+`GetStorageUsage` retains R6's host/logical high-water counters.
+`GetAllocationTelemetry` counts general raster/compute buffer and texture logical
+bytes through deferred retirement. Its resource API bytes use Metal `allocatedSize`
+or Vulkan VMA allocation spans, including private depth and retained texture-upload
+backing. Detached resources remain charged until dependencies and GPU completion
+permit physical release. Views/bindings do not double-count shared backing.
+
+Vulkan also reports actual `vkAllocateMemory` block bytes in the raster allocator,
+including pool slack, transfer rings and ray allocations sharing that allocator.
+That broader scope is explicitly separate from general resource binding spans;
+it excludes the facade and swapchain. Thanks to AMD GPUOpen for
+[Vulkan Memory Allocator 3.3.0 statistics](https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/statistics.html),
+which distinguish block bytes from allocation bytes. Metal has no corresponding
+allocator-block observation. WebGPU/WebGL texture backing is opaque, so complete
+resource API byte totals are unavailable on those backends. No partial sum becomes
+a complete total. Physical residency remains unavailable everywhere; API allocations,
+VMA block bytes and unified-memory allocations must never be relabelled as physical
+VRAM/residency. General scope excludes facade/surface storage, transfer rings and
+ray objects; use the broader Vulkan block field or the existing ray contract for
+those separately identified scopes.
+
+Peaks of API spans and allocator blocks are **observed peaks at query calls**;
+intervening allocation spikes can be missed. Sample at meaningful setup, submission,
+retirement and resize boundaries. The R6 logical/host peaks are continuously tracked
+by their owning counters. Reporting traverses current resource records and, on
+Vulkan, VMA statistics; it waits for no GPU and allocates no engine storage, but is
+not a constant-time hot-path operation. Timing setup/polling and extra marker/resolve
+commands also cost work. The paired harness records arm and poll/report CPU cost and
+runs the same workload with instrumentation disabled to expose that cost.
+
+### Named qualification records
+
+```bash
+python scripts/benchmark-rhi \
+  --executable out/build/<preset>/modules/graphics/rhi/ludus_rhi_render_tests \
+  --backend metal --device '<GPU, OS and driver label>' --gpu-timing \
+  --qualification-name '<stable hardware-host-workload name>' \
+  --output out/rhi-qualification --runs 3
+```
+
+The runner preserves raw logs and writes a versioned `report.json` with the actual
+selected-adapter observation, caller's host label, host OS, relevant enabled profile
+(raster/compute/ordered graph and resource/draw maxima), source revision/dirty state,
+executable hash, capture time, 96x64 workload, shader-enabled binary, warmup and
+sample identities. Each 1/8/16/31-layer merged/unmerged workload has CPU and available
+GPU p50/p95/p99 distributions, explicit GPU state counts, precision observations,
+logical/API/allocator memory scopes and sampled peaks. It rejects missing/duplicate
+samples, nonfinite values and a duration attached to an unavailable result. Timing
+thresholds are evidence, not correctness gates. Every paired complete image and
+independent painter-order pixel must pass first. Controls use the same executable,
+adapter and workload with timing disabled; their results are retained separately.
+
+A record observes physical GPU identity only when the selected backend identifies
+hardware and reports its name. Software or privacy-hidden identities remain open.
+Physical residency, input-to-display observations and unexecuted host/surface
+journeys stay `null`/`open`. Local localhost software-browser coverage does not
+qualify a deployed hosted-browser journey or a physical browser GPU. A destroy/
+restart test does not qualify actual hardware loss/recovery.
+
+Initial R7 evidence, 2026-10-12, base `5014834` plus this implementation (dirty tree
+recorded): Clang 18.1.8, Development/RelWithDebInfo, no PCH, Apple M5, macOS 26.6
+(25G72), headless 96x64. The named `apple-m5-metal-headless-r7` record passed three
+runs: 3,072 instrumented samples plus 3,072 control samples, with every paired full
+image correct. Resource logical bytes were 98,628; resource API allocation bytes
+and observed peak were 197,044. Physical residency, allocator block sizes and display
+latency remained unavailable. Raw evidence lives in the task worktree's ignored
+`out/r7-qualification/`; the checked-in evidence is this summary and reproducible
+fixture/runner.
+
+| Layers | GPU median off/on (µs, range across three runs) | GPU p95 off/on (µs, range) |
+| --- | --- | --- |
+| 1 | 25.38–52.88 / 25.25–53.96 | 26.00–68.83 / 26.00–69.75 |
+| 8 | 66.54–67.75 / 25.04–25.25 | 69.25–73.38 / 25.75–26.62 |
+| 16 | 128.38–349.54 / 25.12–27.88 | 367.75–415.46 / 25.75–29.12 |
+| 31 | 473.12–544.79 / 28.25–31.00 | 503.46–885.00 / 28.79–36.38 |
+
+Here off/on means **pass merging**, with timing enabled in both modes. Median probe
+arm cost was 41–83 ns and combined poll/memory-report cost 375–792 ns; these are CPU
+observations on this workload, not universal overhead guarantees. Variability in
+unmerged runs is retained rather than filtered out.
+
+| Named journey | Current evidence |
+| --- | --- |
+| `apple-m5-metal-headless-r7` | Paired physical GPU measurements and scoped memory above; enabled raster/compute/ordered graph, 64 resources per kind and 1024 frame draws. |
+| `apple-m5-cocoa-r7` | Real WindowServer/Metal test: zero-size skip, 160→80→96 pixel target resize, acquired dimensions, completed timing, pending teardown, stale owner and device restart. Display latency and hardware-loss recovery remain open. |
+| `chromium-140-software-local-r7` | Installed SDK, pinned Emscripten 4.0.23/emdawn and Chromium 140.0.7339.186: WebGPU/WebGL multipass pixels/timing, unsupported optional feature, delayed map callback after device loss, plus R1–R6 conformance. Physical GPU/hosted deployment remain open. |
+| `vulkan-physical-wayland-r7` | Open: requires a named physical Vulkan GPU, driver and compositor/session, resize/loss journeys and measurement records. CI software Vulkan correctness is separate. |
+| `hosted-browser-physical-r7` | Open: requires a deployed origin, actual browser/OS/GPU observation, canvas resize/device-loss/recovery and CPU/GPU distributions. Privacy-hidden identity/residency/display observations remain open. |
+
+R7's measurement API and qualification workflow are implemented. Physical Vulkan/
+Wayland and deployed physical-browser qualification remain explicit acceptance
+work; the initial Metal and software-browser results do not close those gates.

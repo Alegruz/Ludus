@@ -1,5 +1,6 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/measurement.h"
 #include "internal/raster.h"
 #include "internal/resources.h"
 #include <ludus/foundation/base/core.h>
@@ -90,6 +91,9 @@ bool ValidColor(float64 value) noexcept
 }
 } // namespace
 
+void TimingBegin() noexcept;
+void TimingEnd() noexcept;
+void TimingSubmitted() noexcept;
 Backend Kind() noexcept
 {
     return Backend::WebGL2;
@@ -245,6 +249,7 @@ FrameStatus Begin() noexcept
         internal::Fail(gSession, StartupError::RenderingUnavailable);
         return FrameStatus::Failed;
     }
+    TimingBegin();
     // Default framebuffer (the canvas). Resize is a viewport change; the backing
     // store is sized by Platform's resize observer, which the app mirrors into
     // the FrameTarget width/height.
@@ -268,6 +273,7 @@ FrameStatus Begin() noexcept
 }
 FrameStatus End() noexcept
 {
+    TimingEnd();
     gFrameOpen = false;
     if (gContext <= 0 || emscripten_is_webgl_context_lost(gContext))
     {
@@ -496,3 +502,5 @@ ResourceStatus Draw(usize slot) noexcept
 #include "internal/raster_webgl.h"
 
 #include "internal/lifetime_webgl.h"
+
+#include "internal/measurement_webgl.h"
