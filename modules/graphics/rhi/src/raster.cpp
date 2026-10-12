@@ -3,8 +3,12 @@
 #include "internal/lifecycle.h"
 #include "internal/profile.h"
 #include "internal/raster.h"
+#include "internal/ray_backend.h"
 
+#include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/containers/array.hpp>
+
+#include <new>
 
 #include <cstring>
 
@@ -56,8 +60,22 @@ namespace
 using namespace foundation;
 using namespace internal;
 constexpr usize KINDS = static_cast<usize>(RasterKind::Count);
+struct CpuTextureRecord final
+{
+    Array<uint8> Bytes;
+    TextureMipUpload Mips[16];
+};
+struct RayRecordInfo final
+{
+    Array<usize> GeometrySlots;
+    Array<float32> TriangleUvs;
+    usize Scene = 0, Program = 0, Count = 0;
+    RayAllocation Allocation;
+};
 struct Record final
 {
+    core::UniquePtr<RayRecordInfo> Ray;
+    core::UniquePtr<CpuTextureRecord> CpuTexture;
     uint64 Owner = 0;
     uint64 Generation = 1;
     uint64 LastUse = 0;
@@ -88,7 +106,19 @@ struct Record final
     RasterPipelineInfo Pipeline;
     Array<uint8> Indices;
 };
-Record gRecords[KINDS][RASTER_CAPACITY];
+constexpr usize RASTER_KINDS = static_cast<usize>(RasterKind::RayGeometry);
+Record gRecords[RASTER_KINDS][RASTER_CAPACITY];
+struct RayRecordPool final
+{
+    Record Records[RASTER_CAPACITY];
+};
+core::UniquePtr<RayRecordPool> gRayRecordPools[KINDS - RASTER_KINDS];
+Record* RecordPool(usize kind) noexcept
+{
+    return kind < RASTER_KINDS                    ? gRecords[kind]
+           : gRayRecordPools[kind - RASTER_KINDS] ? gRayRecordPools[kind - RASTER_KINDS]->Records
+                                                  : nullptr;
+}
 RasterSequence<uint32> gRequests;
 RasterSequence<uint64> gSubmissions;
 uint64 gFrameSubmission = 0;
@@ -115,7 +145,7 @@ void RetainPacketTextures(const RasterPacket&) noexcept;
 
 Record& At(RasterKind kind, usize slot) noexcept
 {
-    return gRecords[static_cast<usize>(kind)][slot];
+    return RecordPool(static_cast<usize>(kind))[slot];
 }
 RasterStatus Admission(DeviceHandle device, bool mutation = true) noexcept
 {
@@ -144,6 +174,10 @@ Record* Resolve(T handle, RasterKind kind, bool published = true) noexcept
 {
     const auto slot = RasterAccess::Slot(handle);
     if (slot >= RASTER_CAPACITY || RasterAccess::Owner(handle) == 0)
+    {
+        return nullptr;
+    }
+    if (RecordPool(static_cast<usize>(kind)) == nullptr)
     {
         return nullptr;
     }
@@ -188,6 +222,18 @@ void Dependencies(Record& record, RasterKind kind, bool retain) noexcept
         reference(RasterKind::Shader, record.Compute.Shader);
         reference(RasterKind::Layout, record.Compute.Layout);
     }
+    else if (kind == RasterKind::RayScene)
+    {
+        for (auto slot : record.Ray->GeometrySlots)
+        {
+            reference(RasterKind::RayGeometry, slot);
+        }
+    }
+    else if (kind == RasterKind::RayBatch)
+    {
+        reference(RasterKind::RayProgram, record.Ray->Program);
+        reference(RasterKind::RayScene, record.Ray->Scene);
+    }
     else if (kind == RasterKind::Set)
     {
         const auto& layout = At(RasterKind::Layout, record.Set.Layout).Layout;
@@ -205,14 +251,35 @@ void Dependencies(Record& record, RasterKind kind, bool retain) noexcept
 void Collect() noexcept
 {
     const auto completed = backend::RasterCompleted();
+    for (usize kind = static_cast<usize>(RasterKind::RayGeometry); kind < KINDS; ++kind)
+    {
+        auto* pool = RecordPool(kind);
+        if (pool == nullptr)
+        {
+            continue;
+        }
+        for (usize slot = 0; slot < RASTER_CAPACITY; ++slot)
+        {
+            auto& record = pool[slot];
+            if (record.Owner != 0 && record.Status == RasterStatus::Pending)
+            {
+                record.Status = backend::RayPoll(static_cast<RasterKind>(kind), slot);
+            }
+        }
+    }
     // Acyclic dependencies can expose another detached record in each pass.
     for (usize pass = 0; pass < KINDS; ++pass)
     {
         for (usize kind = KINDS; kind-- > 0;)
         {
+            auto* pool = RecordPool(kind);
+            if (pool == nullptr)
+            {
+                continue;
+            }
             for (usize slot = 0; slot < RASTER_CAPACITY; ++slot)
             {
-                auto& record = gRecords[kind][slot];
+                auto& record = pool[slot];
                 if (record.Owner == 0 || record.References != 0 || record.Status == RasterStatus::Pending ||
                     record.Callbacks != 0 || record.LastUse > completed)
                 {
@@ -221,6 +288,8 @@ void Collect() noexcept
                 backend::RasterDestroy(static_cast<RasterKind>(kind), slot);
                 Dependencies(record, static_cast<RasterKind>(kind), false);
                 const auto generation = RasterNextGeneration(record.Generation);
+                record.CpuTexture.Reset();
+                record.Ray.Reset();
                 record = {};
                 record.Generation = generation;
             }
@@ -233,6 +302,16 @@ RasterStatus Reserve(RasterKind kind, usize& slot) noexcept
     if (GetStartup().State != StartupState::Ready)
     {
         return GetStartup().State == StartupState::DeviceLost ? RasterStatus::DeviceLost : RasterStatus::Failed;
+    }
+    const auto index = static_cast<usize>(kind);
+    if (index >= RASTER_KINDS && !gRayRecordPools[index - RASTER_KINDS])
+    {
+        auto* allocation = new (std::nothrow) RayRecordPool;
+        if (allocation == nullptr)
+        {
+            return RasterStatus::OutOfMemory;
+        }
+        gRayRecordPools[index - RASTER_KINDS].Reset(allocation);
     }
     bool exhausted = false;
     for (slot = 0; slot < RASTER_CAPACITY; ++slot)
@@ -283,6 +362,8 @@ RasterStatus Publish(RasterKind kind, T& output, Create create) noexcept
     {
         backend::RasterDestroy(kind, slot);
         const auto generation = record.Generation;
+        record.CpuTexture.Reset();
+        record.Ray.Reset();
         record = {};
         record.Generation = generation;
         return result;
@@ -511,6 +592,10 @@ RasterStatus CreateTexture(DeviceHandle device,
     {
         return RasterStatus::InvalidDescription;
     }
+    if (description.RetainCpuContent && (description.Attachment || description.Format == RasterFormat::Rgba16Float))
+    {
+        return RasterStatus::InvalidDescription;
+    }
     if (description.Format == RasterFormat::Rgba16Float && !description.Attachment)
     {
         return RasterStatus::Unsupported;
@@ -572,6 +657,23 @@ RasterStatus CreateTexture(DeviceHandle device,
     }
     return Publish(RasterKind::Texture, output, [&](usize slot, Record& record) noexcept {
         record.Texture = description;
+        if (description.RetainCpuContent)
+        {
+            auto* copy = new (std::nothrow) CpuTextureRecord;
+            if (copy == nullptr)
+            {
+                return RasterStatus::OutOfMemory;
+            }
+            record.CpuTexture.Reset(copy);
+            if (!copy->Bytes.TryAddRange(upload.Bytes))
+            {
+                return RasterStatus::OutOfMemory;
+            }
+            for (usize level = 0; level < description.MipLevels; ++level)
+            {
+                copy->Mips[level] = upload.Mips.empty() ? TextureMipUpload{0, upload.RowPitch} : upload.Mips[level];
+            }
+        }
         record.ColorDefined = true;
         record.TextureUse = RasterTextureUse::SampledBoth;
         return backend::RasterCreateTexture(slot, description, upload, record.Request);
@@ -1321,24 +1423,36 @@ void ReleaseRasterResources() noexcept
 {
     // Shutdown owns all physical release. Native reset waits or drops the lost
     // device; browser callbacks retain their stable bookkeeping until delivery.
+    backend::RayDrain();
     backend::RasterReset();
     backend::LifetimeReset();
     ResetLifetimeRecords();
     ResetGraphRecords();
     for (usize kind = KINDS; kind-- > 0;)
     {
+        auto* pool = RecordPool(kind);
+        if (pool == nullptr)
+        {
+            continue;
+        }
         for (usize slot = 0; slot < RASTER_CAPACITY; ++slot)
         {
-            auto& record = gRecords[kind][slot];
+            auto& record = pool[slot];
             if (record.Owner == 0)
             {
                 continue;
             }
             backend::RasterDestroy(static_cast<RasterKind>(kind), slot);
             const auto generation = RasterNextGeneration(record.Generation);
+            record.CpuTexture.Reset();
+            record.Ray.Reset();
             record = {};
             record.Generation = generation;
         }
+    }
+    for (auto& pool : gRayRecordPools)
+    {
+        pool.Reset();
     }
     backend::RasterShutdown();
     gFirstAcceptedSubmission = 0;
@@ -1634,3 +1748,74 @@ RasterStatus Destroy(DeviceHandle device, RasterPipelineHandle& handle) noexcept
 #include "internal/compute_services.h"
 
 #include "internal/ordered_graph.h"
+
+#include "internal/ray_services.h"
+
+namespace ludus::graphics::rhi
+{
+namespace
+{
+RasterStatus CpuTextureContent(const Record& record, uint32 mip, TextureCpuContent& output) noexcept
+{
+    if (record.Status != RasterStatus::Ready)
+    {
+        return record.Status == RasterStatus::Pending ? RasterStatus::NotReady : record.Status;
+    }
+    if (!record.CpuTexture)
+    {
+        return RasterStatus::Unsupported;
+    }
+    if (mip >= record.Texture.MipLevels)
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    const auto& source = *record.CpuTexture;
+    uint32 width = record.Texture.Width, height = record.Texture.Height;
+    for (uint32 level = 0; level < mip; ++level)
+    {
+        width = width > 1 ? width / 2 : 1;
+        height = height > 1 ? height / 2 : 1;
+    }
+    const auto& range = source.Mips[mip];
+    output = {source.Bytes.GetData() + range.Offset,
+              range.RowPitch * height,
+              range.RowPitch,
+              width,
+              height,
+              record.Texture.Format};
+    return RasterStatus::Ready;
+}
+} // namespace
+RasterStatus
+GetTextureCpuContent(DeviceHandle device, TextureHandle handle, uint32 mip, TextureCpuContent& output) noexcept
+{
+    const auto status = Admission(device, false);
+    if (status != RasterStatus::Ready)
+    {
+        return status;
+    }
+    Collect();
+    const auto* record = Resolve(handle, RasterKind::Texture);
+    return record == nullptr ? RasterStatus::InvalidHandle : CpuTextureContent(*record, mip, output);
+}
+RasterStatus
+GetTextureCpuContent(DeviceHandle device, TextureViewHandle handle, uint32 mip, TextureCpuContent& output) noexcept
+{
+    const auto status = Admission(device, false);
+    if (status != RasterStatus::Ready)
+    {
+        return status;
+    }
+    Collect();
+    const auto* record = Resolve(handle, RasterKind::View);
+    if (record == nullptr)
+    {
+        return RasterStatus::InvalidHandle;
+    }
+    if (record->Status != RasterStatus::Ready)
+    {
+        return record->Status == RasterStatus::Pending ? RasterStatus::NotReady : record->Status;
+    }
+    return CpuTextureContent(At(RasterKind::Texture, record->TextureSlot), mip, output);
+}
+} // namespace ludus::graphics::rhi

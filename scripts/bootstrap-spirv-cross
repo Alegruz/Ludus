@@ -29,11 +29,15 @@ def cached_translator(destination: Path, pin: dict, compiler: str) -> bool:
 def main() -> None:
     ROOT = Path(__file__).resolve().parent.parent
     pin = json.loads((ROOT / 'config/spirv_cross_toolchain.json').read_text())['spirv_cross']
-    if platform.system() != 'Linux' or platform.machine() != 'x86_64':
-        raise SystemExit('Pinned bootstrap currently supports Linux x86_64 only')
+    if (platform.system(), platform.machine()) not in {('Linux','x86_64'), ('Darwin','arm64'), ('Darwin','x86_64')}:
+        raise SystemExit('Pinned bootstrap supports Linux x86_64 and native macOS')
     tools = ROOT / 'out/shader-tools'
     destination = tools / 'spirv-cross'
-    compiler = subprocess.check_output(['clang++-18', '--version'], text=True).splitlines()[0]
+    cxx = str(ROOT / 'out/host-tools/bin/clang++') if platform.system() == 'Darwin' else 'clang++-18'
+    cc = str(ROOT / 'out/host-tools/bin/clang') if platform.system() == 'Darwin' else 'clang-18'
+    compiler = subprocess.check_output([cxx, '--version'], text=True).splitlines()[0]
+    if 'clang version 18.' not in compiler:
+        raise SystemExit('SPIRV-Cross bootstrap requires pinned Clang 18')
     archive = tools / 'spirv-cross-src/spirv-cross.tar.gz'
     archive.parent.mkdir(parents=True, exist_ok=True)
     if not archive.exists() or digest(archive) != pin['source_sha256']:
@@ -48,17 +52,30 @@ def main() -> None:
     source = archive.parent / 'source'
     source.mkdir(exist_ok=True)
     with tarfile.open(archive) as contents:
-        contents.extractall(source, filter='data')
+        if hasattr(tarfile, 'data_filter'):
+            contents.extractall(source, filter='data')
+        else:
+            # Python 3.10 lacks extraction filters; pinned archives still must not
+            # escape their extraction root or introduce special files/symlinks.
+            for member in contents.getmembers():
+                parts = Path(member.name).parts
+                if Path(member.name).is_absolute() or '..' in parts or not (member.isfile() or member.isdir()):
+                    raise SystemExit('Unsafe SPIRV-Cross source member')
+            contents.extractall(source)
     roots = [p for p in source.iterdir() if p.is_dir()]
     if len(roots) != 1: raise SystemExit('Unexpected source archive layout')
     cmake = ROOT / 'out/host-tools/venv/bin/cmake'
     build = tools / 'spirv-cross-build'
+    native_args = []
+    if platform.system() == 'Darwin':
+        native_args = ['-DCMAKE_OSX_SYSROOT=' + str(ROOT / 'out/host-tools/macos-sdk'),
+                       '-DCMAKE_CXX_FLAGS=-nostdinc++ -isystem "' + str(ROOT / 'out/host-tools/libcxx-include') + '" -stdlib=libc++']
     subprocess.run([str(cmake), '-S', str(roots[0]), '-B', str(build), '-G', 'Ninja',
         '-DCMAKE_MAKE_PROGRAM=' + str(ROOT/'out/host-tools/venv/bin/ninja'),
-        '-DCMAKE_CXX_COMPILER=clang++-18', '-DCMAKE_C_COMPILER=clang-18',
+        '-DCMAKE_CXX_COMPILER=' + cxx, '-DCMAKE_C_COMPILER=' + cc,
         '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_INSTALL_PREFIX=' + str(destination),
         '-DSPIRV_CROSS_ENABLE_TESTS=OFF', '-DSPIRV_CROSS_ENABLE_HLSL=ON',
-        '-DSPIRV_CROSS_ENABLE_MSL=ON', '-DSPIRV_CROSS_ENABLE_CPP=ON'], check=True)
+        '-DSPIRV_CROSS_ENABLE_MSL=ON', '-DSPIRV_CROSS_ENABLE_CPP=ON'] + native_args, check=True)
     subprocess.run([str(cmake), '--build', str(build), '-j', os.environ.get('CMAKE_BUILD_PARALLEL_LEVEL', '4')], check=True)
     subprocess.run([str(cmake), '--install', str(build)], check=True)
     (destination / 'LICENSE').write_bytes((roots[0]/'LICENSE').read_bytes())

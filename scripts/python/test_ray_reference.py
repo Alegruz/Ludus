@@ -1,0 +1,65 @@
+"""Independent regressions for fixed ray bindings and raw reference export boundaries."""
+import importlib.util
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+import struct
+import sys
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'cmake/shaders'))
+import compile_ray  # noqa: E402
+
+loader = SourceFileLoader('reference_hdr', str(ROOT / 'scripts/reference-hdr'))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+hdr = importlib.util.module_from_spec(spec)
+loader.exec_module(hdr)
+
+
+class RayCookTests(unittest.TestCase):
+    def test_bindings_must_preserve_resource_identity(self):
+        source = 'intersection_query q; kernel void main0(' + ','.join(
+            f'float4 {name} [[buffer({index})]]' for index, name in enumerate(('scene','rays','hits','opacity','parameters'))) + ') {}'
+        self.assertEqual(compile_ray.verify_metal(source), 'main0')
+        with self.assertRaises(RuntimeError):
+            compile_ray.verify_metal(source.replace('scene [[buffer(0)]]', 'scene [[buffer(4)]]').replace('parameters [[buffer(4)]]','parameters [[buffer(0)]]'))
+        with self.assertRaises(RuntimeError):
+            compile_ray.verify_metal(source + 'kernel void other() {}')
+
+    def test_malformed_instruction_rejects_before_shader_publication(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'bad.spv'
+            path.write_bytes(struct.pack('<6I',0x07230203,0x10500,0,1,0,17))
+            with self.assertRaises(RuntimeError):
+                compile_ray.verify_spirv(path)
+
+
+class ReferenceExportTests(unittest.TestCase):
+    def capture(self):
+        data = bytearray(256)
+        data[:8] = b'LUHDR01\0'
+        struct.pack_into('<10I',data,8,1,1,1,256,2,1,4,3,2,32)
+        return data + struct.pack('<fffIfffI',1,2,3,4,0,0,0,0)
+
+    def test_partial_counts_and_radiance_are_preserved(self):
+        metadata, pixels = hdr.decode(self.capture())
+        self.assertTrue(metadata['partial'])
+        self.assertEqual(metadata['minimum_samples'],0)
+        self.assertEqual(pixels[0],(1,2,3,4))
+
+    def test_complete_short_nonfinite_and_unknown_profile_reject(self):
+        data = self.capture()
+        struct.pack_into('<I',data,44,0)
+        with self.assertRaises(ValueError): hdr.decode(data)
+        data = self.capture()
+        struct.pack_into('<f',data,256,float('nan'))
+        with self.assertRaises(ValueError): hdr.decode(data)
+        data = self.capture()
+        struct.pack_into('<I',data,12,2)
+        with self.assertRaises(ValueError): hdr.decode(data)
+        with self.assertRaises(ValueError): hdr.decode(self.capture()[:-1])
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -80,3 +80,20 @@ TEST_CASE("Double scalar exponential and rounding preserve mathematical directio
     CHECK(Floor(1.25) == 1.0);
     CHECK(Ceil(1.25) == 2.0);
 }
+
+TEST_CASE("sRGB transfer and FP32 predecessor honor their bounded domains", "[math][color]")
+{
+    using ludus::foundation::float32;
+    CHECK(DecodeSrgb(0) == 0);
+    CHECK(DecodeSrgb(1) == 1);
+    CHECK(Abs(DecodeSrgb(.04045F) - .0031308F) < 1e-7F);
+    for (ludus::foundation::usize i = 0; i <= 255; ++i)
+    {
+        const auto channel = float32(i) / 255;
+        CHECK(Abs(EncodeSrgb(DecodeSrgb(channel)) - channel) < 2e-7F);
+    }
+    CHECK_FALSE(IsFinite(DecodeSrgb(-.1F)));
+    CHECK_FALSE(IsFinite(EncodeSrgb(1.1F)));
+    CHECK(NextFloatDown(1) < 1);
+    CHECK(NextFloatDown(0) < 0);
+}

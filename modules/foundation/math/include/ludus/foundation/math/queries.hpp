@@ -53,6 +53,26 @@ using core::float64;
 [[nodiscard]] MathStatus TryTransformAabb(const Affine2& a, const Aabb2& box, Aabb2& out) noexcept;
 
 // --- Ray queries ------------------------------------------------------------
+/// Error-aware origin offset input; every vector is finite world-space data.
+struct RayOriginOffset final
+{
+    /// Reconstructed surface position in world units.
+    Vector3 Position{};
+    /// Nonnegative absolute componentwise reconstruction error in world units.
+    Vector3 Error{};
+    /// Unit geometric surface normal, not a perturbed/interpolated shading normal.
+    Vector3 GeometricNormal{0, 0, 1};
+    /// Unit outgoing ray direction, determining which side of the surface to offset.
+    Vector3 Direction{0, 0, 1};
+};
+/// Project the supplied error along the oriented geometric normal and round each
+/// nonzero normal component outward. Near zero, a minimum normal float32 step
+/// avoids a denormal-only offset being lost by GPU arithmetic. No global scene
+/// epsilon or primitive-ID rejection. This requires a valid supplied error bound
+/// and cannot preserve gaps smaller than the representable/error interval.
+/// Unit-vector squared lengths must be within 1e-5; invalid/nonfinite/range errors
+/// preserve output. No allocation; precise FoundationMath implementation only.
+[[nodiscard]] MathStatus TryOffsetRayOrigin(const RayOriginOffset&, Vector3& output) noexcept;
 /// Validate a RayInterval: finite minT >= 0, maxT >= minT (maxT may be +inf).
 [[nodiscard]] bool IsValidInterval(const RayInterval& interval) noexcept;
 

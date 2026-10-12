@@ -628,6 +628,10 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             }
             gComputePipelines[slot] = {};
             break;
+        case internal::RasterKind::RayGeometry:
+        case internal::RasterKind::RayScene:
+        case internal::RasterKind::RayProgram:
+        case internal::RasterKind::RayBatch:
         case internal::RasterKind::Count:
             break;
     }

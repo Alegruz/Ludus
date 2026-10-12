@@ -5,6 +5,7 @@
 #include "internal/lifecycle.h"
 #include "internal/profile.h"
 #include "internal/raster.h"
+#include "internal/ray_backend.h"
 
 namespace ludus::graphics::rhi
 {
@@ -110,6 +111,13 @@ DeviceStatus ValidateDeviceDescription(const DeviceDescription& description) noe
     {
         return DeviceStatus::InvalidDescription;
     }
+    const auto compiled = GetCompiledBackends();
+    if (description.Required.RayQueries &&
+        ((!compiled.Metal && !compiled.Vulkan) || description.Selection == BackendSelection::WebGPU ||
+         description.Selection == BackendSelection::WebGL2))
+    {
+        return DeviceStatus::Unsupported;
+    }
     return description.Selection == BackendSelection::WebGL2 &&
                    (description.Required.Compute || description.Required.IndirectRendering ||
                     internal::NeedsCompute(description.RequiredProfile))
@@ -147,15 +155,16 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
     {
         return DeviceStatus::IdentityExhausted;
     }
+    internal::SetRayProfileRequest(description.Required.RayQueries || description.Preferred.RayQueries);
     const auto result = internal::StartOwned(
         application,
         window,
         description.Selection,
         description.Limits,
         description.Required.PortableRaster || description.Required.OrderedRasterGraph ||
-            description.Required.Compute || description.Required.IndirectRendering ||
+            description.Required.Compute || description.Required.IndirectRendering || description.Required.RayQueries ||
             internal::NeedsRaster(description.RequiredProfile) || internal::NeedsCompute(description.RequiredProfile),
-        description.Required.Compute || description.Required.IndirectRendering ||
+        description.Required.Compute || description.Required.IndirectRendering || description.Required.RayQueries ||
             internal::NeedsCompute(description.RequiredProfile),
         description.RequiredProfile);
     if (result == StartStatus::Busy)
@@ -170,6 +179,11 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
         }
         Shutdown();
         return DeviceStatus::Failed;
+    }
+    if (result == StartStatus::Ready && description.Required.RayQueries && !backend::RayLimits().InlineQueries)
+    {
+        Shutdown();
+        return DeviceStatus::Unsupported;
     }
     const auto owner = gOwners.Take();
     internal::SetDeviceOwner(owner);
@@ -191,6 +205,9 @@ DeviceStatus GetDeviceInfo(DeviceHandle device, DeviceInfo& info) noexcept
     const auto state = State();
     if (state == DeviceStatus::Ready)
     {
+        info.FrameOpen = internal::FrameOpen();
+        info.Supported.RayQueries = backend::RayLimits().InlineQueries;
+        info.Enabled.RayQueries = info.Supported.RayQueries;
         info.Supported.FullscreenRaster = true;
         info.Enabled.FullscreenRaster = true;
         info.Profile = internal::CurrentDeviceProfile();
@@ -208,6 +225,7 @@ DeviceStatus GetDeviceInfo(DeviceHandle device, DeviceInfo& info) noexcept
             .PortableRaster = gDescription.Preferred.PortableRaster && !info.Enabled.PortableRaster,
             .Compute = gDescription.Preferred.Compute && !info.Enabled.Compute,
             .IndirectRendering = gDescription.Preferred.IndirectRendering && !info.Enabled.IndirectRendering,
+            .RayQueries = gDescription.Preferred.RayQueries && !info.Enabled.RayQueries,
             .OrderedRasterGraph = gDescription.Preferred.OrderedRasterGraph && !info.Enabled.OrderedRasterGraph,
         };
         info.UnmetProfilePreference = internal::CheckProfile(gDescription.PreferredProfile, info.Profile);

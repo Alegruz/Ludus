@@ -184,6 +184,9 @@ struct TextureDescription final
     /// Request nonblocking native upload readiness; Pending owns staging until completion.
     /// Legacy RGBA single-level creation defaults to its existing setup behavior.
     bool AsyncUpload = false;
+    /// Opt-in copied CPU texels for fixed-mip reference shading. Uploaded R8/RG8/RGBA8
+    /// only; attachments and RGBA16Float reject. Ordinary textures allocate no shadow.
+    bool RetainCpuContent = false;
 };
 /// One complete initialized mip within the borrowed upload byte blob.
 struct TextureMipUpload final
@@ -206,6 +209,33 @@ struct TextureUpload final
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::span<const TextureMipUpload> Mips{};
 };
+/// Borrowed immutable initialized texels of one mip, with original row padding.
+/// Valid only while the queried texture/view incarnation remains retained. Copy
+/// before releasing that owner; no GPU readback or implicit residency fallback.
+struct TextureCpuContent final
+{
+    /// Borrowed complete rows for the selected mip.
+    const ludus::foundation::uint8* Bytes = nullptr;
+    /// Number of initialized bytes including row padding.
+    ludus::foundation::usize Size = 0;
+    /// Bytes between top-left-oriented rows.
+    ludus::foundation::usize RowPitch = 0;
+    /// Selected mip width in pixels.
+    ludus::foundation::uint32 Width = 0;
+    /// Selected mip height in pixels.
+    ludus::foundation::uint32 Height = 0;
+    /// Exact source format; decoding remains the consumer's declared shading policy.
+    RasterFormat Format = RasterFormat::Rgba8Unorm;
+};
+/// Query an explicitly retained CPU shadow. No allocation/wait; failure preserves
+/// output. Missing shadow returns Unsupported, pending upload NotReady, bad mip
+/// InvalidDescription. Owner-thread only. The texture must remain retained.
+[[nodiscard]] RasterStatus
+GetTextureCpuContent(DeviceHandle, TextureHandle, ludus::foundation::uint32 mip, TextureCpuContent&) noexcept;
+/// Query through a retained sampled view, including after its source texture owner
+/// was destroyed. Same readiness/failure rules; the view must remain retained.
+[[nodiscard]] RasterStatus
+GetTextureCpuContent(DeviceHandle, TextureViewHandle, ludus::foundation::uint32 mip, TextureCpuContent&) noexcept;
 /// Portable within-level minification/magnification filter; mip interpolation is separate.
 enum class RasterFilter : ludus::foundation::uint8
 {

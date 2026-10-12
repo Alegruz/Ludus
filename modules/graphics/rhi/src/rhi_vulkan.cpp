@@ -1,6 +1,7 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
 #include "internal/raster.h"
+#include "internal/ray_backend.h"
 #include "internal/resources.h"
 #include "internal/vma.h"
 
@@ -60,6 +61,8 @@ VkDevice gDevice = VK_NULL_HANDLE;
 VkQueue gQueue = VK_NULL_HANDLE;
 uint32 gFamily = 0;
 bool gQueueCompute = false;
+bool gRayEnabled = false, gRayApiAvailable = false;
+VkPhysicalDeviceAccelerationStructurePropertiesKHR gRayProperties{};
 VkSurfaceKHR gSurface = VK_NULL_HANDLE;
 VkSwapchainKHR gSwapchain = VK_NULL_HANDLE;
 VkCommandPool gCommands = VK_NULL_HANDLE;
@@ -547,7 +550,13 @@ bool Initialize(const ApplicationInfo& app) noexcept
     application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     application.pApplicationName = app.Name.c_str();
     application.applicationVersion = app.Version;
-    application.apiVersion = VK_API_VERSION_1_1;
+    uint32 loaderVersion = VK_API_VERSION_1_0;
+    if (vkEnumerateInstanceVersion != nullptr)
+    {
+        static_cast<void>(vkEnumerateInstanceVersion(&loaderVersion));
+    }
+    gRayApiAvailable = internal::RequestsRayProfile() && loaderVersion >= VK_API_VERSION_1_2;
+    application.apiVersion = gRayApiAvailable ? VK_API_VERSION_1_2 : VK_API_VERSION_1_1;
     VkInstanceCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     info.pApplicationInfo = &application;
@@ -630,7 +639,8 @@ bool ConnectWindow(const WindowInfo& window) noexcept
         queue.queueFamilyIndex = gFamily;
         queue.queueCount = 1;
         queue.pQueuePriorities = &priority;
-        const char* extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME};
+        const char* extensions[5] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME};
+        uint32 enabledExtensions = gHeadless ? 0U : 2U;
         VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT maintenance{};
         maintenance.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
         if (!gHeadless)
@@ -669,13 +679,94 @@ bool ConnectWindow(const WindowInfo& window) noexcept
                 return false;
             }
         }
+        VkPhysicalDeviceBufferDeviceAddressFeatures address{};
+        address.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR structures{};
+        structures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+        VkPhysicalDeviceRayQueryFeaturesKHR queries{};
+        queries.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+        gRayEnabled = false;
+        if (gRayApiAvailable && properties.apiVersion >= VK_API_VERSION_1_2 && gQueueCompute)
+        {
+            uint32 extensionCount = 0;
+            if (vkEnumerateDeviceExtensionProperties(gPhysical, nullptr, &extensionCount, nullptr) == VK_SUCCESS &&
+                extensionCount <= 512)
+            {
+                VkExtensionProperties available[512]{};
+                if (vkEnumerateDeviceExtensionProperties(gPhysical, nullptr, &extensionCount, available) == VK_SUCCESS)
+                {
+                    const char* required[]{VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+                                           VK_KHR_RAY_QUERY_EXTENSION_NAME,
+                                           VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
+                    bool complete = true;
+                    for (const char* name : required)
+                    {
+                        bool found = false;
+                        for (usize i = 0; i < extensionCount; ++i)
+                        {
+                            found = found || std::strcmp(name, available[i].extensionName) == 0;
+                        }
+                        complete = complete && found;
+                    }
+                    if (complete)
+                    {
+                        address.pNext = &structures;
+                        structures.pNext = &queries;
+                        VkPhysicalDeviceFeatures2 features{};
+                        features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+                        features.pNext = &address;
+                        vkGetPhysicalDeviceFeatures2(gPhysical, &features);
+                        gRayEnabled =
+                            address.bufferDeviceAddress && structures.accelerationStructure && queries.rayQuery;
+                        if (gRayEnabled)
+                        {
+                            // Enable only the implemented static/query subset, not unrelated advertised bits.
+                            address =
+                            {
+                                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
+                                .pNext = &structures,
+                                .bufferDeviceAddress = VK_TRUE,
+                            };
+                            structures =
+                            {
+                                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+                                .pNext = &queries,
+                                .accelerationStructure = VK_TRUE,
+                            };
+                            queries =
+                            {
+                                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+                                .rayQuery = VK_TRUE,
+                            };
+                            for (const char* name : required)
+                            {
+                                extensions[enabledExtensions++] = name;
+                            }
+                            queries.pNext = gHeadless ? nullptr : &maintenance;
+                            gRayProperties =
+                            {
+                                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR,
+                            };
+                            VkPhysicalDeviceProperties2 rayProperties
+                            {
+                                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                .pNext = &gRayProperties,
+                            };
+                            vkGetPhysicalDeviceProperties2(gPhysical, &rayProperties);
+                        }
+                    }
+                }
+            }
+        }
         VkDeviceCreateInfo device{};
         device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         device.queueCreateInfoCount = 1;
         device.pQueueCreateInfos = &queue;
-        device.enabledExtensionCount = gHeadless ? 0U : 2U;
+        device.enabledExtensionCount = enabledExtensions;
         device.ppEnabledExtensionNames = extensions;
-        device.pNext = gHeadless ? nullptr : &maintenance;
+        device.pNext = gRayEnabled ? static_cast<void*>(&address)
+                       : gHeadless ? nullptr
+                                   : static_cast<void*>(&maintenance);
         if (!Check(vkCreateDevice(gPhysical, &device, nullptr, &gDevice)))
         {
             return false;
@@ -865,6 +956,8 @@ void Shutdown() noexcept
         volkFinalize();
     }
     gPhysical = VK_NULL_HANDLE;
+    gRayEnabled = gRayApiAvailable = false;
+    gRayProperties = {};
     gQueue = VK_NULL_HANDLE;
     gFrame = 0;
     gSession = 0;
@@ -1440,3 +1533,5 @@ bool ReadHeadlessPixels(std::span<uint8> pixels) noexcept
 #include "internal/raster_vulkan.h"
 
 #include "internal/lifetime_vulkan.h"
+
+#include "internal/ray_vulkan.h"
