@@ -268,7 +268,7 @@ RasterCreateBuffer(usize slot, const BufferDescription& info, std::span<const ui
                        : info.Role == BufferRole::StorageVertex   ? WGPUBufferUsage_Storage | WGPUBufferUsage_Vertex
                        : info.Role == BufferRole::StorageIndirect ? WGPUBufferUsage_Storage | WGPUBufferUsage_Indirect
                                                                   : WGPUBufferUsage_Index;
-    descriptor.usage |= WGPUBufferUsage_CopySrc;
+    descriptor.usage |= WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst;
     auto object = wgpuDeviceCreateBuffer(gDevice, &descriptor);
     gRasterBuffers[slot] = object;
     if (object != nullptr && wgpuBufferGetMapState(object) == WGPUBufferMapState_Mapped)
@@ -305,11 +305,12 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
                         : info.Format == RasterFormat::Rgba8Unorm ? WGPUTextureFormat_RGBA8Unorm
                                                                   : WGPUTextureFormat_RGBA8UnormSrgb;
     descriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst |
+                       (info.Format == RasterFormat::Rgba8Unorm ? WGPUTextureUsage_CopySrc : WGPUTextureUsage_None) |
                        (info.Attachment ? WGPUTextureUsage_RenderAttachment : WGPUTextureUsage_None);
     auto texture = wgpuDeviceCreateTexture(gDevice, &descriptor);
     gRasterTextures[slot] = texture;
     gRasterTextureDescriptions[slot] = info;
-    if (texture != nullptr && !info.Attachment)
+    if (texture != nullptr && !info.Attachment && !info.DeferredInitialization)
     {
         uint32 width = info.Width, height = info.Height;
         for (uint32 level = 0; level < info.MipLevels; ++level)
@@ -332,7 +333,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
             height = height > 1 ? height / 2 : 1;
         }
     }
-    else if (texture != nullptr)
+    else if (texture != nullptr && info.Attachment)
     {
         gRasterAttachmentViews[slot] = wgpuTextureCreateView(texture, nullptr);
         descriptor.format = WGPUTextureFormat_Depth24Plus;
@@ -347,7 +348,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
             internal::RasterFail(request, RasterStatus::OutOfMemory);
         }
     }
-    else
+    else if (texture == nullptr)
     {
         internal::RasterFail(request, RasterStatus::OutOfMemory);
     }

@@ -37,6 +37,8 @@ inline internal::RasterPassInfo Pass;
 inline internal::StorageTable<internal::RasterPipelineInfo> Pipelines;
 inline internal::StorageTable<foundation::Array<foundation::uint8>> BufferBytes;
 inline internal::StorageTable<foundation::usize> BufferSizes;
+inline internal::StorageTable<foundation::Array<foundation::uint8>> TextureBytes;
+inline internal::StorageTable<TextureDescription> TextureDescriptions;
 inline foundation::uint8 ReadbackBytes[internal::LIFETIME_TRANSFERS][internal::LIFETIME_TRANSFER_BYTES]{};
 inline RasterStatus Transfers[2][internal::LIFETIME_TRANSFERS];
 inline bool TransferOccupied[2][internal::LIFETIME_TRANSFERS]{};

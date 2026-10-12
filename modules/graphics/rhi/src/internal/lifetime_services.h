@@ -64,6 +64,14 @@ struct TransferRecord final : LifetimeRecord
     usize Source = 0;
     usize Size = 0;
     BufferHandle Upload{};
+    bool Mutable = false;
+    bool CompletedMutation = false;
+    RasterKind Kind = RasterKind::Buffer;
+    usize Other = RASTER_INVALID;
+    TextureRegion Region;
+    usize RowPitch = 0;
+    usize NativePitch = 0;
+    usize NativeSize = 0;
 };
 struct PipelineLease final : LifetimeRecord
 {
@@ -150,7 +158,7 @@ RasterStatus ReserveLifetime(T (&records)[N], usize& slot, bool (*available)(usi
             exhausted = true;
             continue;
         }
-        if (available != nullptr && !available(slot))
+        if (slot >= CurrentStorageLimits().TransferSlices || (available != nullptr && !available(slot)))
         {
             continue;
         }
@@ -262,7 +270,15 @@ void RetireTransfer(TransferRecord& record, bool readback, usize slot) noexcept
     backend::LifetimeReleaseTransfer(readback, slot);
     if (readback)
     {
-        Release(RasterKind::Buffer, record.Source);
+        Release(record.Kind, record.Source);
+    }
+    else if (record.Mutable)
+    {
+        Release(record.Kind, record.Source);
+        if (record.Other != RASTER_INVALID)
+        {
+            Release(RasterKind::Texture, record.Other);
+        }
     }
     else
     {
@@ -297,7 +313,28 @@ void PollTransfers() noexcept
                 continue;
             }
             record.Status = status;
-            if (!readback && status == RasterStatus::Ready)
+            if (!readback && record.Mutable && !record.CompletedMutation)
+            {
+                auto& destination = At(record.Kind, record.Source);
+                destination.Status = status;
+                if (status == RasterStatus::Ready)
+                {
+                    if (record.Kind == RasterKind::Buffer)
+                    {
+                        ++destination.BufferRevision;
+                    }
+                    else
+                    {
+                        destination.InitializedMips |= uint32{1} << record.Region.Mip;
+                        destination.ColorDefined =
+                            destination.InitializedMips == ((uint32{1} << destination.Texture.MipLevels) - 1);
+                        destination.TextureUse = RasterTextureUse::SampledBoth;
+                        ++destination.TextureRevision;
+                    }
+                }
+                record.CompletedMutation = true;
+            }
+            if (!readback && !record.Mutable && status == RasterStatus::Ready)
             {
                 const auto* buffer = Resolve(record.Upload, RasterKind::Buffer, false);
                 record.Status = buffer != nullptr ? buffer->Status : RasterStatus::Failed;
@@ -345,8 +382,8 @@ RasterStatus GetLifetimeCapabilities(DeviceHandle device, LifetimeCapabilities& 
     }
     output = admission == RasterStatus::Ready ? LifetimeCapabilities{CurrentStorageLimits().Batches,
                                                                      CurrentStorageLimits().DrawsPerPlan,
-                                                                     static_cast<uint32>(LIFETIME_TRANSFERS),
-                                                                     LIFETIME_TRANSFER_BYTES,
+                                                                     CurrentStorageLimits().TransferSlices,
+                                                                     CurrentStorageLimits().TransferBytes,
                                                                      CurrentStorageLimits().ResourcesPerKind}
                                               : LifetimeCapabilities{};
     return admission;
@@ -790,7 +827,7 @@ RasterStatus RequestBufferUpload(DeviceHandle device,
     {
         return RasterStatus::InvalidDescription;
     }
-    if (byteCount > LIFETIME_TRANSFER_BYTES)
+    if (byteCount > CurrentStorageLimits().TransferBytes)
     {
         return RasterStatus::CapacityExceeded;
     }
@@ -868,7 +905,7 @@ RasterStatus RequestBufferReadback(DeviceHandle device,
     {
         return RasterStatus::InvalidDescription;
     }
-    if (size > LIFETIME_TRANSFER_BYTES)
+    if (size > CurrentStorageLimits().TransferBytes)
     {
         return RasterStatus::CapacityExceeded;
     }
@@ -900,6 +937,7 @@ RasterStatus RequestBufferReadback(DeviceHandle device,
     request.Published = true;
     request.Source = RasterAccess::Slot(source);
     request.Size = size;
+    request.NativeSize = size;
     Retain(RasterKind::Buffer, request.Source);
     LifetimeAccess::Set(output, {DeviceOwner(), slot, request.Generation});
     return RasterStatus::Pending;
@@ -996,10 +1034,29 @@ RasterStatus CopyReadback(DeviceHandle device, ReadbackTicket ticket, uint8* out
     {
         return status;
     }
-    const auto copied = backend::LifetimeCopyReadback(LifetimeAccess::Slot(ticket), gReadbackScratch, record->Size);
+    const auto copied =
+        backend::LifetimeCopyReadback(LifetimeAccess::Slot(ticket), gReadbackScratch, record->NativeSize);
     if (copied == RasterStatus::Ready)
     {
-        std::memcpy(output, gReadbackScratch, record->Size);
+        const auto current = Admission(device, false);
+        if (current != RasterStatus::Ready)
+        {
+            return current;
+        }
+        if (record->Kind == RasterKind::Texture)
+        {
+            std::memset(output, 0, record->Size);
+            for (usize row = 0; row < record->Region.Height; ++row)
+            {
+                std::memcpy(output + row * record->RowPitch,
+                            gReadbackScratch + row * record->NativePitch,
+                            static_cast<usize>(record->Region.Width) * 4);
+            }
+        }
+        else
+        {
+            std::memcpy(output, gReadbackScratch, record->Size);
+        }
     }
     return copied;
 }

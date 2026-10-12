@@ -23,7 +23,7 @@ RasterStatus LifetimeMetalStage(LifetimeMetalTransfer& transfer) noexcept
     }
     if (transfer.Staging == nil)
     {
-        transfer.Staging = [gDevice newBufferWithLength:internal::LIFETIME_TRANSFER_BYTES
+        transfer.Staging = [gDevice newBufferWithLength:internal::CurrentStorageLimits().TransferBytes
                                                 options:MTLResourceStorageModeShared];
     }
     return transfer.Staging != nil ? RasterStatus::Ready : RasterStatus::OutOfMemory;
@@ -93,6 +93,110 @@ RasterStatus LifetimeReadback(usize transferSlot, BufferRole, const internal::Li
         return ready == RasterStatus::Ready
                    ? LifetimeMetalCopy(transfer, gRasterBuffers[bufferSlot], offset, transfer.Staging, size)
                    : ready;
+    }
+}
+// Thanks to Apple, "MTLBlitCommandEncoder", Metal API documentation,
+// https://developer.apple.com/documentation/metal/mtlblitcommandencoder
+// for queued buffer/texture copies; all staging survives command completion.
+RasterStatus
+LifetimeBufferUpdate(usize slot, BufferRole, const internal::LifetimeCopyRange& range, const uint8* bytes) noexcept
+{
+    @autoreleasepool
+    {
+        auto& transfer = gLifetimeMetal[0][slot];
+        const auto ready = LifetimeMetalStage(transfer);
+        if (ready != RasterStatus::Ready)
+        {
+            return ready;
+        }
+        std::memcpy([transfer.Staging contents], bytes, range.Size);
+        transfer.Command = [gQueue commandBuffer];
+        if (transfer.Command == nil)
+        {
+            return RasterStatus::OutOfMemory;
+        }
+        auto encoder = [transfer.Command blitCommandEncoder];
+        if (encoder == nil)
+        {
+            transfer.Command = nil;
+            return RasterStatus::OutOfMemory;
+        }
+        [encoder copyFromBuffer:transfer.Staging
+                   sourceOffset:0
+                       toBuffer:gRasterBuffers[range.Buffer]
+              destinationOffset:range.Offset
+                           size:range.Size];
+        [encoder endEncoding];
+        transfer.Busy = true;
+        [transfer.Command commit];
+        return RasterStatus::Ready;
+    }
+}
+RasterStatus LifetimeTextureTransfer(usize slot, const internal::TextureTransfer& info, const uint8* bytes) noexcept
+{
+    @autoreleasepool
+    {
+        const bool readback = info.Operation == internal::TextureTransferOperation::Readback;
+        auto& transfer = gLifetimeMetal[readback ? 1 : 0][slot];
+        const auto ready = LifetimeMetalStage(transfer);
+        if (ready != RasterStatus::Ready)
+        {
+            return ready;
+        }
+        transfer.Command = [gQueue commandBuffer];
+        if (transfer.Command == nil)
+        {
+            return RasterStatus::OutOfMemory;
+        }
+        auto encoder = [transfer.Command blitCommandEncoder];
+        if (encoder == nil)
+        {
+            transfer.Command = nil;
+            return RasterStatus::OutOfMemory;
+        }
+        const auto& source = info.SourceRegion;
+        const auto& destination = info.DestinationRegion;
+        if (info.Operation == internal::TextureTransferOperation::Update)
+        {
+            std::memcpy([transfer.Staging contents], bytes, info.Size);
+            [encoder copyFromBuffer:transfer.Staging
+                       sourceOffset:0
+                  sourceBytesPerRow:info.RowPitch
+                sourceBytesPerImage:info.Size
+                         sourceSize:MTLSizeMake(destination.Width, destination.Height, 1)
+                          toTexture:gRasterTextures[info.Destination]
+                   destinationSlice:0
+                   destinationLevel:destination.Mip
+                  destinationOrigin:MTLOriginMake(destination.X, destination.Y, 0)];
+        }
+        else if (readback)
+        {
+            [encoder copyFromTexture:gRasterTextures[info.Source]
+                             sourceSlice:0
+                             sourceLevel:source.Mip
+                            sourceOrigin:MTLOriginMake(source.X, source.Y, 0)
+                              sourceSize:MTLSizeMake(source.Width, source.Height, 1)
+                                toBuffer:transfer.Staging
+                       destinationOffset:0
+                  destinationBytesPerRow:info.RowPitch
+                destinationBytesPerImage:info.Size];
+        }
+        else
+        {
+            [encoder copyFromTexture:gRasterTextures[info.Source]
+                         sourceSlice:0
+                         sourceLevel:source.Mip
+                        sourceOrigin:MTLOriginMake(source.X, source.Y, 0)
+                          sourceSize:MTLSizeMake(source.Width, source.Height, 1)
+                           toTexture:gRasterTextures[info.Destination]
+                    destinationSlice:0
+                    destinationLevel:destination.Mip
+                   destinationOrigin:MTLOriginMake(destination.X, destination.Y, 0)];
+        }
+        [encoder endEncoding];
+        transfer.Busy = true;
+        [transfer.Command commit];
+        return RasterStatus::Ready;
     }
 }
 RasterStatus LifetimePollTransfer(bool readback, usize slot) noexcept
