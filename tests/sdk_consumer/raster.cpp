@@ -188,7 +188,7 @@ bool Create() noexcept
     rhi::FormatCapabilities format;
     if (rhi::GetFormatCapabilities(gDevice, rhi::RasterFormat::Rgba8Unorm, format) != rhi::RasterStatus::Ready ||
         !format.Uses.Sampled || !format.Uses.Blendable || format.SampleCounts != 1 || format.Uses.Storage ||
-        format.Uses.CopySource || format.Uses.CopyDestination ||
+        !format.Uses.CopySource || !format.Uses.CopyDestination ||
         info.UnmetProfilePreference.Requirement != rhi::ProfileRequirement::ColorAttachmentCount ||
         info.UnmetProfilePreference.Requested != 2 || info.UnmetProfilePreference.Available != 1 ||
         info.UnmetPreferences.Compute == info.Enabled.Compute)
