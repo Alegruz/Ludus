@@ -356,9 +356,9 @@ All operations are serialized on the device's owner thread.
 
 The historical R1 profile below is deliberately bounded. L1 adds targets/depth,
 L2 adds R8 coverage, and [L3 material/content versions](../architecture/renderer-systems.md#implemented-l3-material-and-content-versions)
-expand current tables to 32 records per kind, sampled R8/RG8/RGBA8 mip chains
+expanded the original tables to 32 records per kind, sampled R8/RG8/RGBA8 mip chains
 and explicit mip samplers. [L4 lighting](../architecture/renderer-systems.md#implemented-l4-bounded-forward-lighting)
-expands tables to 64, enables up to sixteen queried vertex attributes, and adds
+expanded tables to 64, enables up to sixteen queried vertex attributes, and adds
 capability-gated single-mip sampleable/filterable/blendable RGBA16F attachments.
 Public declarations are the current API contract.
 
@@ -366,7 +366,7 @@ The original R1 profile:
 
 | Facility | Contract |
 | --- | --- |
-| Records | 16 of each kind, including detached records retained by dependencies, validation or submitted work |
+| Records | Configured `Storage.ResourcesPerKind` (default 64), including pending/detached records retained by dependencies or submitted work |
 | Buffers | Complete immutable initial bytes, at most 64 MiB or the lower enabled limit; Vertex, Index16, Index32 or Uniform role |
 | Uniforms | Bound range at most 16 KiB, range size a multiple of 16, offsets aligned to the queried limit (at least 256); allocation may be larger than a bound range |
 | Textures | RGBA8 linear or sRGB sampling, at most 4096 in each dimension or the lower enabled limit; one mip/layer/sample |
@@ -374,7 +374,7 @@ The original R1 profile:
 | Views | Complete original-format sampled views; no reinterpretation, partial sampled range or attachment view |
 | Bindings | One group/set, at most eight unique binding numbers below eight; uniform ranges, sampled 2D textures and non-comparison samplers |
 | Vertex input | At most two streams, per-vertex or divisor-one per-instance, stride divisible by four, 4..256 on native/WebGPU and 4..252 on WebGL 2; up to the queried maximum (at most sixteen) unique float2/3/4 attributes |
-| Draw | Triangle list, Index16/Index32, zero base vertex/first instance, 1024 draws per frame; fixed primitive-restart indices are rejected |
+| Draw | Triangle list, Index16/Index32, zero base vertex/first instance, configured `Storage.DrawsPerFrame` (default 1024); fixed primitive-restart indices are rejected |
 | State | No culling, one color target, one sample; explicit depth comparison/write and premultiplied-alpha blend; defaults retain less-than |
 
 Draws use canonical clip depth [0,1], Y-up geometry and texture UV (0,0) at
@@ -475,7 +475,9 @@ owner thread, between frames unless a query or tracked `EndFrame` says otherwise
 
 The first service profile has four command batches, 256 draw packets per batch,
 four upload slices and four readback slices independently, 256 KiB per slice,
-and sixteen independently owned pipeline requests. Query
+and sixteen independently owned pipeline requests. These are historical R2 bounds;
+R6 configures batch/packet/pipeline-request limits, while transfer rings retain
+their existing fixed bounds. Query
 `GetLifetimeCapabilities`; retained/cancelled work counts against capacity.
 Records still count against the R1 per-kind limits. `CapacityExceeded` is
 retryable after safe retirement, without waiting inside an admission call.
@@ -586,7 +588,9 @@ portable raster admission. The compiler and direct raster passes use the existin
 RHI registry, ownership leases and ordered submission tokens. All calls run on
 the owner thread; setup, compilation and execution start between frames.
 
-The first profile is four graphs, sixteen logical resources per graph, thirty-two
+R6 makes graph, resource, pass, declaration, draw and transient-pool ceilings
+configurable through `DeviceDescription.Storage`. The historical first profile
+was four graphs, sixteen logical resources per graph, thirty-two
 ordered raster passes, sixteen declarations per pass, 256 retained draws per
 graph, and 512 semantic dependency report entries. Capacity rejection occurs
 before frame acquisition. Attachment formats remain single-mip RGBA8 linear/sRGB or capability-gated L4 RGBA16F, one layer and one
@@ -650,10 +654,13 @@ writes are roots even when this frame never reads them. Culling follows content
 dependencies rather than retaining overwritten work solely for WAW/WAR edges.
 Reference compilation disables culling while retaining the same validation.
 
-`CompileOrderedGraph` returns a fixed `GraphReport` containing authored names,
-source locations, culling flags, first/last live uses, and semantic dependencies
-with RAW/WAR/WAW reasons. Pass index 32 denotes an external import/final-use
-boundary; resource index 16 is the no-resource diagnostic sentinel. No GPU work
+`CompileOrderedGraph` returns totals and copied diagnostic prefixes in `GraphReport`,
+including names, source locations, culling flags, first/last live uses, and
+RAW/WAR/WAW dependencies. Iterate the prefix arrays with `ReportedPasses`,
+`ReportedResources` and `ReportedDependencies`; full counts may exceed those
+arrays. Use the indexed diagnostic queries for the complete compiled plan.
+`GRAPH_EXTERNAL_INDEX` denotes external boundaries, unused resources and
+inapplicable error/group indices. No GPU work
 occurs during compilation. Successful compilation freezes setup. Discard a
 rejected plan and rebuild if its declarations need changing.
 
@@ -698,7 +705,7 @@ when exporting to arbitrary direct bindings; incompatible final color or narrowe
 sampled use returns `InvalidState` before a draw/batch submission. Graph execution
 can transition these imports according to its declarations.
 
-`CreateGraphTexture` acquires from an eight-object whole-description pool during
+`CreateGraphTexture` acquires from a configured whole-description pool (default eight objects) during
 setup, before compilation. This early bounded acquisition lets callers build
 ordinary immutable texture views/binding snapshots before graph preflight; it
 is not interval-based physical aliasing. Every graph resource stays physically
@@ -875,13 +882,14 @@ uses the established texture-origin conversion.
 
 `GraphReport` separates authored/live passes from `RasterPasses`, `ComputePasses`,
 `MergedPasses` and `DrawCount`. `RasterGroup` maps each live raster pass to its first
-authored group member; 32 denotes compute/culled entries. Dependencies, names,
+authored group member; `GRAPH_EXTERNAL_INDEX` denotes compute/culled entries. Dependencies, names,
 setup locations and logical lifetimes remain intact. Counts describe a successful
 plan, excluding the facade's acquisition clear, final barriers, driver-internal
 commands and presentation. A failed compile publishes no group/cost estimates.
 
-`PlanStorageBytes` reports the service's fixed per-slot storage, including unused
-bounded capacity. `BufferBytes` and `TextureBytes` sum all imported logical payloads,
+`PlanStorageBytes` reports the graph control record and its owned payload capacities,
+including unused reserved capacity; shared table-page slack and compile scratch
+are accounted by `GetStorageUsage` instead. `BufferBytes` and `TextureBytes` sum all imported logical payloads,
 including unused imports, initialized mip levels and private 32-bit attachment
 depth. They exclude surface storage, native padding, staging, other graphs,
 retired resources and unused pool objects. These values are not physical backing
@@ -949,3 +957,69 @@ WebGPU/WebGL2 and tests Auto fallback. Existing fullscreen, raster, multipass,
 compute/CPU, upload/readback, resize and loss suites remain acceptance regressions;
 those cases have no new speedup claim. Physical/hosted browser, Vulkan/Wayland and
 presentation qualification are separate from software Chromium and headless Metal.
+
+
+## Scalable resource and plan storage (R6)
+
+Set `DeviceDescription.Storage` before `CreateDevice`. The ready
+`DeviceInfo.Profile.Storage` copies those maxima and byte budgets; changing the
+original description cannot change an active device. Counts must be nonzero and
+below `UINT32_MAX`, and both byte budgets must be nonzero. These are admission
+ceilings, not eager reservations or promises that every combination fits memory.
+Query enabled raster limits as well as the copied storage profile.
+
+```cpp
+rhi::DeviceDescription description;
+description.Storage.ResourcesPerKind = 128;
+description.Storage.ResourcesPerGraph = 160;
+description.Storage.PassesPerGraph = 64;
+description.Storage.DrawsPerPlan = 1536;
+description.Storage.DrawsPerFrame = 2048;
+```
+
+The registry and Vulkan/Metal/WebGPU/WebGL resource tables grow in stable pages.
+Batch and graph payloads grow during setup, and compilation allocates its scratch
+and full diagnostics before execution. Frame admission prepares completion
+records before acquiring the target. Execution cannot grow engine storage.
+Whole-batch/graph frame-limit rejection happens before native draw work and
+preserves the plan for retry or discard. General limits do not enlarge the
+fullscreen compatibility facade, fixed upload/readback staging rings, or the
+separate initial ray-query record limits. Ray allocation telemetry retains its
+existing `GetRayAllocation`/`GetRayResourceStats` contract.
+
+`GetStorageUsage` copies current and peak accounting without allocating or
+waiting. `HostBytes` includes registry/backend metadata, optional retained CPU texture copies, owned packet/use/report
+arrays, compiler scratch, index shadows, page slack and overlapping allocations
+while growing. `ResourceBytes` counts logical buffer bytes and initialized texture
+mip extents, including private 32-bit depth for attachments. RGBA16F color counts
+eight bytes per texel. Pending creation, detached dependencies and submitted uses
+retain the charge until physical retirement. These counters exclude allocator
+headers, native driver padding/metadata, facade targets and transfer staging; they
+are not physical or resident GPU-memory measurements (R7).
+
+Capacity/budget exhaustion reports `CapacityExceeded`; allocation failure reports
+`OutOfMemory`. Failed creation preserves caller outputs and refunds logical
+resource reservations. Setup can retain successfully allocated spare capacity
+when a later allocation fails; that capacity stays charged and reusable. Stable
+metadata pages are retained across shutdown/restart so late browser callback
+addresses remain valid. A new device cannot choose a host budget below those
+committed pages. Peaks describe the process storage epoch, rather than resetting
+on each device. Shutdown/loss still releases native objects and invalidates old
+handles, plans and completion tokens.
+
+`GraphReport` keeps bounded copied prefixes for compatibility; its totals cover
+the complete plan. After a compile attempt, call `GetGraphPassDiagnostic`,
+`GetGraphResourceDiagnostic` and `GetGraphDependency` with authored/indexed
+positions. Queries copy into caller-owned output, allocate nothing, and remain
+valid until graph mutation, discard or consumed execution. Missing diagnostics,
+invalid indices or stale handles preserve output.
+
+The [public SDK fixture](../../tests/sdk_consumer/r6.cpp) creates at least 72
+objects of every supported general resource kind, executes 405 prepared draws
+across 40 graph passes, and submits a separate 1,100-draw batch. Browser tests
+compare complete graph/direct images on forced WebGPU, forced WebGL 2 and both
+Auto paths. The native target `ludus_rhi_r6_consumer` exercises the same public API.
+Reference-backend tests additionally cover all nine kinds at 80 objects each,
+retained slot reuse, pending byte pressure, allocation rollback, checked host
+arithmetic, high-index WAR hazards and more than 512 diagnostic dependencies.
+These fixtures prove capacity/correctness; hardware performance remains R7.

@@ -454,6 +454,14 @@ void RasterReset() noexcept
         webgpu::RasterReset();
     }
 }
+RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterGrow(kind, count) : webgpu::RasterGrow(kind, count);
+}
+RasterStatus RasterPrepareStorage() noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::RasterPrepareStorage() : webgpu::RasterPrepareStorage();
+}
 void RasterShutdown() noexcept
 {
     if (gActive == Backend::WebGL2)

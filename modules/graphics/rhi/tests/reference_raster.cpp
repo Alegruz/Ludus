@@ -74,7 +74,7 @@ RasterStatus Created(internal::RasterKind kind, uint32 request) noexcept
     reference::LastRequest = request;
     if (reference::Next == RasterStatus::Pending)
     {
-        if (reference::PendingCount < internal::RASTER_CAPACITY)
+        if (reference::PendingRequests.TryResize(reference::PendingCount + 1))
         {
             reference::PendingRequests[reference::PendingCount++] = request;
         }
@@ -83,6 +83,24 @@ RasterStatus Created(internal::RasterKind kind, uint32 request) noexcept
     return reference::Next;
 }
 } // namespace
+RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
+{
+    if (kind == internal::RasterKind::Buffer)
+    {
+        return reference::BufferBytes.EnsureSlots(count) && reference::BufferSizes.EnsureSlots(count)
+                   ? RasterStatus::Ready
+                   : internal::StorageFailure();
+    }
+    if (kind == internal::RasterKind::Pipeline)
+    {
+        return reference::Pipelines.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+    }
+    return RasterStatus::Ready;
+}
+RasterStatus RasterPrepareStorage() noexcept
+{
+    return RasterStatus::Ready;
+}
 ComputeCapabilities ComputeLimits() noexcept
 {
     return reference::ProfileAvailable && reference::ComputeAvailable && Kind() != Backend::WebGL2
@@ -131,8 +149,8 @@ RasterCapabilities RasterLimits() noexcept
             4096,
             256,
             16384,
-            static_cast<uint32>(internal::RASTER_CAPACITY),
-            1024,
+            internal::CurrentStorageLimits().ResourcesPerKind,
+            internal::CurrentStorageLimits().DrawsPerFrame,
             16,
             reference::HdrAvailable};
 }
@@ -143,7 +161,11 @@ RasterCreateBuffer(usize slot, const BufferDescription&, std::span<const uint8> 
     {
         return RasterStatus::OutOfMemory;
     }
-    std::memcpy(reference::BufferBytes[slot], bytes.data(), bytes.size());
+    if (!reference::BufferBytes[slot].TryResize(bytes.size()))
+    {
+        return RasterStatus::OutOfMemory;
+    }
+    std::memcpy(reference::BufferBytes[slot].GetData(), bytes.data(), bytes.size());
     reference::BufferSizes[slot] = bytes.size();
     return Created(internal::RasterKind::Buffer, request);
 }
@@ -245,7 +267,11 @@ RasterStatus LifetimeUpload(usize transfer,
     {
         return reference::TransferStart;
     }
-    std::memcpy(reference::BufferBytes[buffer], bytes, size);
+    if (!reference::BufferBytes[buffer].TryResize(size))
+    {
+        return RasterStatus::OutOfMemory;
+    }
+    std::memcpy(reference::BufferBytes[buffer].GetData(), bytes, size);
     reference::BufferSizes[buffer] = size;
     reference::Transfers[0][transfer] = RasterStatus::Pending;
     reference::TransferOccupied[0][transfer] = true;
@@ -265,7 +291,7 @@ RasterStatus LifetimeReadback(usize transfer, BufferRole, const internal::Lifeti
     {
         return reference::TransferStart;
     }
-    const auto& bytes = reference::BufferBytes[buffer];
+    const auto* bytes = reference::BufferBytes[buffer].GetData();
     std::memcpy(reference::ReadbackBytes[transfer], bytes + offset, size);
     reference::Transfers[1][transfer] = RasterStatus::Pending;
     reference::TransferOccupied[1][transfer] = true;

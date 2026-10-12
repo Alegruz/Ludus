@@ -4,9 +4,12 @@
 
 #include <ludus/graphics/rhi/graph.h>
 
+#include "storage.h"
+
 namespace ludus::graphics::rhi::internal
 {
 inline constexpr foundation::usize RASTER_CAPACITY = 64;
+inline constexpr foundation::usize RASTER_INVALID = foundation::usize{0xffffffffU};
 inline constexpr foundation::usize RASTER_BINDINGS = 8;
 inline constexpr foundation::usize RASTER_DRAWS = 1024;
 inline constexpr foundation::usize LIFETIME_BATCHES = 4;
@@ -112,12 +115,12 @@ struct RasterPacket final
     foundation::uint32 IndexCount = 0;
     foundation::uint32 InstanceCount = 0;
     bool Index32 = false;
-    foundation::usize Indirect = RASTER_CAPACITY;
+    foundation::usize Indirect = RASTER_INVALID;
     foundation::usize IndirectOffset = 0;
 };
 struct RasterPassInfo final
 {
-    foundation::usize Texture = RASTER_CAPACITY;
+    foundation::usize Texture = RASTER_INVALID;
     RasterPassDescription Description;
 };
 // Canonical rectangles stay top-left; API-specific Y conversion occurs only in backends.
@@ -174,6 +177,7 @@ struct LifetimeCopyRange final
 // These hooks join the existing frame/loss owner, not a second session.
 bool FrameOpen() noexcept;
 bool ClaimRasterFrame() noexcept;
+bool PrepareRasterFrame() noexcept;
 void RasterBeginFrame() noexcept;
 void RasterEndFrame(bool accepted) noexcept;
 bool RasterFinishFrame() noexcept;
@@ -199,6 +203,8 @@ RasterStatus
 ComputeCreatePipeline(foundation::usize, const internal::ComputePipelineInfo&, foundation::uint32) noexcept;
 RasterStatus ComputeEncode(const internal::ComputePacket&) noexcept;
 void ComputeBufferBarrier(foundation::usize, GraphAccessMode) noexcept;
+RasterStatus RasterGrow(internal::RasterKind, foundation::usize) noexcept;
+RasterStatus RasterPrepareStorage() noexcept;
 RasterStatus RasterCreateBuffer(foundation::usize,
                                 const BufferDescription&,
                                 std::span<const foundation::uint8>,

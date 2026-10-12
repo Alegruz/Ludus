@@ -1,6 +1,7 @@
 #include "internal/lifecycle.h"
 #include "reference_raster.h"
 
+#include <ludus/foundation/containers/array.hpp>
 #include <ludus/graphics/rhi/lifetime.h>
 
 #include <cstring>
@@ -24,7 +25,7 @@ struct Session final
 {
     DeviceHandle Device;
     SurfaceHandle Surface;
-    Session()
+    explicit Session(const StorageLimits& storage = {})
     {
         Shutdown();
         reference::Reset();
@@ -32,7 +33,9 @@ struct Session final
         backend::NextFrame = FrameStatus::Ready;
         backend::ActiveKind = Backend::WebGPU;
         backend::SelectionSupported = true;
-        REQUIRE(CreateDevice({}, {}, {}, Device, Surface) == DeviceStatus::Pending);
+        DeviceDescription description;
+        description.Storage = storage;
+        REQUIRE(CreateDevice({}, {}, description, Device, Surface) == DeviceStatus::Pending);
         internal::Complete(backend::PendingToken, StartupError::None, {4096, 16384});
     }
     ~Session() noexcept
@@ -1060,7 +1063,7 @@ TEST_CASE("Ordered graph culls only unobservable work and reference mode retains
     CHECK(report.LivePasses == (referenceMode ? 2 : 1));
     CHECK(report.Culled[0] == !referenceMode);
     CHECK_FALSE(report.Culled[1]);
-    CHECK(report.FirstUse[0] == (referenceMode ? 0 : 32));
+    CHECK(report.FirstUse[0] == (referenceMode ? 0U : GRAPH_EXTERNAL_INDEX));
     SubmissionToken token;
     REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, graph, token) == RasterStatus::Ready);
     CHECK(reference::Passes == (referenceMode ? 2 : 1));
@@ -1555,4 +1558,430 @@ TEST_CASE("R5 attachment chains keep versions, barriers and final depth validity
     reference::Completed = reference::Submitted;
     REQUIRE(PollLifetime(session.Device) == RasterStatus::Ready);
     CHECK(reference::Destroys[1] == 1);
+}
+
+TEST_CASE("R6 pages grow every general resource kind without invalidating earlier handles", "[rhi][r6]")
+{
+    StorageLimits limits;
+    limits.ResourcesPerKind = 96;
+    Session session(limits);
+    Scene scene(session.Device);
+    const RasterBinding binding{0, RasterBindingKind::UniformBuffer, RasterVisibility::Both, 16};
+    const RasterBinding computeBinding{0, RasterBindingKind::UniformBuffer, RasterVisibility::Compute, 16};
+    BindingLayoutHandle computeLayout;
+    REQUIRE(CreateBindingLayout(session.Device, {&computeBinding, 1}, computeLayout) == RasterStatus::Ready);
+    RasterShaderDescription vertex;
+    vertex.Artifact.Stage = ShaderStage::Vertex;
+    vertex.Artifact.Wgsl = "fixture vertex";
+    vertex.Artifact.WgslEntry = "vertexMain";
+    const RasterShaderInput input{0, RasterVertexFormat::Float3};
+    vertex.Inputs = {&input, 1};
+    vertex.Bindings = {&binding, 1};
+    auto compute = vertex;
+    compute.Artifact.Stage = ShaderStage::Compute;
+    compute.Artifact.WgslEntry = "computeMain";
+    compute.Inputs = {};
+    compute.Bindings = {&computeBinding, 1};
+    RasterShaderHandle computeShader;
+    REQUIRE(CreateRasterShader(session.Device, compute, computeShader) == RasterStatus::Ready);
+    const RasterVertexStream stream{12, false};
+    const RasterVertexAttribute attribute{0, 0, 0, RasterVertexFormat::Float3};
+    const RasterBindingResource resource{ .Buffer = scene.Uniform, .Size = 16 };
+    Array<BufferHandle> buffers(80);
+    Array<TextureHandle> textures(80);
+    Array<TextureViewHandle> views(80);
+    Array<SamplerHandle> samplers(80);
+    Array<RasterShaderHandle> shaders(80);
+    Array<BindingLayoutHandle> layouts(80);
+    Array<BindingSetHandle> sets(80);
+    Array<RasterPipelineHandle> pipelines(80);
+    Array<ComputePipelineHandle> kernels(80);
+    const uint8 bytes[16]{};
+    const uint8 texel[4]{1, 2, 3, 255};
+    for (usize i = 0; i < 80; ++i)
+    {
+        REQUIRE(CreateBuffer(session.Device, {BufferRole::Uniform, 16}, bytes, buffers[i]) == RasterStatus::Ready);
+        REQUIRE(CreateTexture(session.Device, {1, 1}, {texel, 4}, textures[i]) == RasterStatus::Ready);
+        REQUIRE(CreateTextureView(session.Device, textures[i], views[i]) == RasterStatus::Ready);
+        REQUIRE(CreateSampler(session.Device, {}, samplers[i]) == RasterStatus::Ready);
+        REQUIRE(CreateRasterShader(session.Device, vertex, shaders[i]) == RasterStatus::Ready);
+        REQUIRE(CreateBindingLayout(session.Device, {&binding, 1}, layouts[i]) == RasterStatus::Ready);
+        REQUIRE(CreateBindingSet(session.Device, scene.Layout, {&resource, 1}, sets[i]) == RasterStatus::Ready);
+        REQUIRE(CreateRasterPipeline(session.Device,
+                                     {scene.Vertex, scene.Fragment, scene.Layout, {&stream, 1}, {&attribute, 1}, true},
+                                     pipelines[i]) == RasterStatus::Ready);
+        REQUIRE(CreateComputePipeline(session.Device, {computeShader, computeLayout}, kernels[i]) ==
+                RasterStatus::Ready);
+    }
+    limits.ResourcesPerKind = 1;
+    DeviceInfo info;
+    REQUIRE(GetDeviceInfo(session.Device, info) == DeviceStatus::Ready);
+    CHECK(info.Profile.Raster.ResourcesPerKind == 96);
+    CHECK(info.Profile.Storage.ResourcesPerKind == 96);
+    CHECK(GetStatus(session.Device, scene.Vertex) == RasterStatus::Ready);
+    CHECK(GetStatus(session.Device, textures[0]) == RasterStatus::Ready);
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    REQUIRE(DrawIndexed(session.Device, scene.Draw()) == RasterStatus::Ready);
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+    CHECK(reference::Draws == 1);
+    for (usize kind = 0; kind < static_cast<usize>(internal::RasterKind::RayGeometry); ++kind)
+    {
+        CHECK(reference::Creates[kind] >= 80);
+    }
+    StorageUsage usage;
+    REQUIRE(GetStorageUsage(session.Device, usage) == RasterStatus::Ready);
+    CHECK(usage.PublishedRecords >= 720);
+    CHECK(usage.HostBytes <= info.Profile.Storage.HostBytes);
+    CHECK(usage.PeakHostBytes <= info.Profile.Storage.HostBytes);
+}
+TEST_CASE("R6 texture slots remain occupied by retained views and reject stale reuse", "[rhi][r6][lifetime]")
+{
+    StorageLimits limits;
+    limits.ResourcesPerKind = 72;
+    Session session(limits);
+    Array<TextureHandle> textures(72);
+    const uint8 texel[4]{};
+    for (auto& texture : textures)
+    {
+        REQUIRE(CreateTexture(session.Device, {1, 1}, {texel, 4}, texture) == RasterStatus::Ready);
+    }
+    TextureViewHandle view;
+    REQUIRE(CreateTextureView(session.Device, textures[0], view) == RasterStatus::Ready);
+    const auto stale = textures[0];
+    REQUIRE(Destroy(session.Device, textures[0]) == RasterStatus::Ready);
+    TextureHandle replacement;
+    CHECK(CreateTexture(session.Device, {1, 1}, {texel, 4}, replacement) == RasterStatus::CapacityExceeded);
+    REQUIRE(Destroy(session.Device, view) == RasterStatus::Ready);
+    REQUIRE(CreateTexture(session.Device, {1, 1}, {texel, 4}, replacement) == RasterStatus::Ready);
+    CHECK(GetStatus(session.Device, stale) == RasterStatus::InvalidHandle);
+    CHECK(GetStatus(session.Device, replacement) == RasterStatus::Ready);
+}
+TEST_CASE("R6 byte budgets include detached pending resources and recover after callbacks", "[rhi][r6][budget]")
+{
+    StorageLimits limits;
+    limits.ResourceBytes = 16;
+    Session session(limits);
+    reference::Next = RasterStatus::Pending;
+    const uint8 bytes[16]{};
+    BufferHandle buffer;
+    REQUIRE(CreateBuffer(session.Device, {BufferRole::Uniform, 16}, bytes, buffer) == RasterStatus::Pending);
+    const auto request = reference::LastRequest;
+    REQUIRE(Destroy(session.Device, buffer) == RasterStatus::Ready);
+    StorageUsage usage;
+    REQUIRE(GetStorageUsage(session.Device, usage) == RasterStatus::Ready);
+    CHECK(usage.ResourceBytes == 16);
+    CHECK(usage.DetachedRecords == 1);
+    CHECK(usage.PendingRecords == 1);
+    BufferHandle next;
+    CHECK(CreateBuffer(session.Device, {BufferRole::Uniform, 16}, bytes, next) == RasterStatus::CapacityExceeded);
+    CHECK(reference::Creates[0] == 1);
+    internal::RasterComplete(request, RasterStatus::Ready);
+    reference::Next = RasterStatus::Ready;
+    REQUIRE(CreateBuffer(session.Device, {BufferRole::Uniform, 16}, bytes, next) == RasterStatus::Ready);
+    REQUIRE(GetStorageUsage(session.Device, usage) == RasterStatus::Ready);
+    CHECK(usage.ResourceBytes == 16);
+    REQUIRE(Destroy(session.Device, next) == RasterStatus::Ready);
+    REQUIRE(GetStorageUsage(session.Device, usage) == RasterStatus::Ready);
+    CHECK(usage.ResourceBytes == 0);
+}
+TEST_CASE("R6 allocation failure rolls back a resource reservation", "[rhi][r6][allocation]")
+{
+    Session session;
+    const uint32 indices[3]{0, 1, 2};
+    BufferHandle buffer;
+    internal::FailNextStorageAllocation();
+    CHECK(CreateBuffer(session.Device, {BufferRole::Index32, sizeof(indices)}, Bytes(indices), buffer) ==
+          RasterStatus::OutOfMemory);
+    CHECK(reference::Creates[0] == 0);
+    StorageUsage usage;
+    REQUIRE(GetStorageUsage(session.Device, usage) == RasterStatus::Ready);
+    CHECK(usage.ResourceBytes == 0);
+    REQUIRE(CreateBuffer(session.Device, {BufferRole::Index32, sizeof(indices)}, Bytes(indices), buffer) ==
+            RasterStatus::Ready);
+    CHECK(GetStatus(session.Device, buffer) == RasterStatus::Ready);
+}
+TEST_CASE("R6 retained batches exceed original draw limits and preflight whole frames", "[rhi][r6][batch]")
+{
+    const bool admit = GENERATE(false, true);
+    StorageLimits limits;
+    limits.DrawsPerPlan = 1200;
+    limits.DrawsPerFrame = admit ? 1500U : 1000U;
+    Session session(limits);
+    Scene scene(session.Device);
+    CommandBatch batch;
+    REQUIRE(BeginCommands(session.Device, batch) == RasterStatus::Ready);
+    for (usize i = 0; i < 1100; ++i)
+    {
+        REQUIRE(RecordDraw(session.Device, batch, scene.Draw()) == RasterStatus::Ready);
+    }
+    REQUIRE(FinishCommands(session.Device, batch) == RasterStatus::Ready);
+    SubmissionToken token;
+    const auto status = SubmitCommands(session.Device, session.Surface, batch, token);
+    CHECK(status == (admit ? RasterStatus::Ready : RasterStatus::CapacityExceeded));
+    CHECK(reference::Draws == (admit ? 1100U : 0U));
+    if (!admit)
+    {
+        REQUIRE(DiscardCommands(session.Device, batch) == RasterStatus::Ready);
+    }
+}
+TEST_CASE("R6 plans admit 72 textures and 405 draws with complete indexed diagnostics", "[rhi][r6][graph]")
+{
+    StorageLimits limits;
+    limits.ResourcesPerKind = 128;
+    limits.ResourcesPerGraph = 80;
+    limits.PassesPerGraph = 64;
+    limits.DrawsPerPlan = 512;
+    Session session(limits);
+    Scene scene(session.Device);
+    GraphScene graph(session.Device, scene);
+    Array<TextureHandle> textures(72);
+    Array<GraphUse> uses(75);
+    uses[0] = {graph.Vertex, GraphAccessMode::Vertex, 0, 36};
+    uses[1] = {graph.Index, GraphAccessMode::Index, 0, 6};
+    uses[2] = {graph.Uniform, GraphAccessMode::Uniform, 0, 16};
+    const uint8 texel[4]{};
+    for (usize i = 0; i < 72; ++i)
+    {
+        REQUIRE(CreateTexture(session.Device, {1, 1}, {texel, 4}, textures[i]) == RasterStatus::Ready);
+        GraphVersion texture;
+        RasterTextureState state;
+        REQUIRE(GetTextureState(session.Device, textures[i], state) == RasterStatus::Ready);
+        REQUIRE(ImportGraphTexture(session.Device,
+                                   graph.Graph,
+                                   textures[i],
+                                   state,
+                                   RasterTextureUse::SampledBoth,
+                                   texture) == RasterStatus::Ready);
+        uses[i + 3] = {texture, GraphAccessMode::Sampled};
+    }
+    const auto draw = scene.Draw();
+    Array<RasterDraw> draws(15, draw);
+    for (uint32 i = 0; i < 40; ++i)
+    {
+        GraphPassDescription pass;
+        pass.Name = "scaled scene";
+        pass.Source = "r6_fixture.cpp";
+        pass.Line = i + 100;
+        pass.Uses = uses.GetData();
+        pass.UseCount = uses.GetSize();
+        pass.Draws = draws.GetData();
+        pass.DrawCount = i == 39 ? 15U : 10U;
+        REQUIRE(AddGraphPass(session.Device, graph.Graph, pass) == RasterStatus::Ready);
+    }
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, graph.Graph, report) == RasterStatus::Ready);
+    CHECK(report.PassCount == 40);
+    CHECK(report.DrawCount == 405);
+    CHECK(report.ReportedPasses == 32);
+    CHECK(report.ReportedResources == 16);
+    CHECK(report.DiagnosticsTruncated);
+    GraphPassDiagnostic pass;
+    REQUIRE(GetGraphPassDiagnostic(session.Device, graph.Graph, 39, pass) == RasterStatus::Ready);
+    CHECK(pass.Line == 139);
+    CHECK_FALSE(pass.Culled);
+    GraphResourceDiagnostic resource;
+    REQUIRE(GetGraphResourceDiagnostic(session.Device, graph.Graph, 74, resource) == RasterStatus::Ready);
+    CHECK(resource.FirstUse == 0);
+    CHECK(resource.LastUse == 39);
+    SubmissionToken token;
+    REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, graph.Graph, token) == RasterStatus::Ready);
+    CHECK(reference::Draws == 405);
+    CHECK(reference::Passes == 40);
+    CHECK(GetGraphPassDiagnostic(session.Device, graph.Graph, 39, pass) == RasterStatus::InvalidHandle);
+}
+TEST_CASE("R6 dependencies and versions exceed fixed report prefixes without colliding with external indices",
+          "[rhi][r6][graph]")
+{
+    StorageLimits limits;
+    limits.PassesPerGraph = 650;
+    limits.DependenciesPerGraph = 700;
+    Session session(limits);
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    TextureHandle texture;
+    REQUIRE(CreateTexture(session.Device, {1, 1, RasterFormat::Rgba8Unorm, true}, {}, texture) == RasterStatus::Ready);
+    GraphVersion version;
+    RasterTextureState state;
+    REQUIRE(GetTextureState(session.Device, texture, state) == RasterStatus::Ready);
+    REQUIRE(ImportGraphTexture(session.Device, graph, texture, state, RasterTextureUse::SampledBoth, version) ==
+            RasterStatus::Ready);
+    for (uint32 i = 0; i < 600; ++i)
+    {
+        GraphVersion next;
+        REQUIRE(NextGraphVersion(session.Device, graph, version, next) == RasterStatus::Ready);
+        const GraphUse use{next, GraphAccessMode::ColorWrite};
+        GraphPassDescription pass;
+        pass.Name = "versioned clear";
+        pass.Attachment.Color = texture;
+        pass.Uses = &use;
+        pass.UseCount = 1;
+        pass.SideEffect = true;
+        REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+        version = next;
+    }
+    REQUIRE(AddGraphRoot(session.Device, graph, version, GraphRoot::History) == RasterStatus::Ready);
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::Ready);
+    CHECK(report.PassCount == 600);
+    CHECK(report.LivePasses == 600);
+    REQUIRE(report.DependencyCount > 512);
+    CHECK(report.ReportedDependencies == 512);
+    CHECK(report.ErrorPass == GRAPH_EXTERNAL_INDEX);
+    GraphDependency edge;
+    REQUIRE(GetGraphDependency(session.Device, graph, 512, edge) == RasterStatus::Ready);
+    CHECK(edge.Before == 512);
+    CHECK(edge.After == 513);
+    REQUIRE(GetGraphDependency(session.Device, graph, report.DependencyCount - 1, edge) == RasterStatus::Ready);
+    CHECK(edge.After == GRAPH_EXTERNAL_INDEX);
+    REQUIRE(DiscardOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+}
+
+TEST_CASE("R6 readers above pass 32 retain WAR dependencies", "[rhi][r6][graph]")
+{
+    StorageLimits limits;
+    limits.PassesPerGraph = 64;
+    Session session(limits);
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    GraphTexture texture(session.Device, graph);
+    texture.Add(session.Device, graph);
+    const GraphUse sampled{texture.Output, GraphAccessMode::Sampled, 0, 0, RasterVisibility::Fragment};
+    GraphPassDescription reader;
+    reader.Name = "many readers";
+    reader.Uses = &sampled;
+    reader.UseCount = 1;
+    reader.SideEffect = true;
+    for (uint32 i = 0; i < 40; ++i)
+    {
+        REQUIRE(AddGraphPass(session.Device, graph, reader) == RasterStatus::Ready);
+    }
+    GraphVersion overwritten;
+    REQUIRE(NextGraphVersion(session.Device, graph, texture.Output, overwritten) == RasterStatus::Ready);
+    texture.Output = overwritten;
+    texture.Add(session.Device, graph);
+    REQUIRE(AddGraphRoot(session.Device, graph, overwritten, GraphRoot::History) == RasterStatus::Ready);
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::Ready);
+    uint32 readers = 0;
+    for (uint32 i = 0; i < report.DependencyCount; ++i)
+    {
+        GraphDependency edge;
+        REQUIRE(GetGraphDependency(session.Device, graph, i, edge) == RasterStatus::Ready);
+        if (edge.Hazard == GraphHazard::WriteAfterRead && edge.After == 41)
+        {
+            CHECK(edge.Before >= 1);
+            CHECK(edge.Before <= 40);
+            ++readers;
+        }
+    }
+    CHECK(readers == 40);
+}
+TEST_CASE("R6 checked host growth and frame admission preserve existing storage", "[rhi][r6][storage]")
+{
+    Session session;
+    internal::StorageArray<uint64> values;
+    REQUIRE(values.TryResize(2));
+    values[0] = 47;
+    CHECK_FALSE(values.TryResize(~usize{0}));
+    CHECK(internal::StorageFailure() == RasterStatus::CapacityExceeded);
+    CHECK(values.GetSize() == 2);
+    CHECK(values[0] == 47);
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    CHECK_FALSE(values.TryResize(3));
+    CHECK(internal::StorageFailure() == RasterStatus::InvalidState);
+    CHECK(values.GetSize() == 2);
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+    StorageUsage usage;
+    REQUIRE(GetStorageUsage(session.Device, usage) == RasterStatus::Ready);
+    auto limits = internal::CurrentStorageLimits();
+    limits.HostBytes = usage.HostBytes;
+    REQUIRE(internal::ConfigureStorage(limits));
+    CHECK_FALSE(values.TryResize(3));
+    CHECK(internal::StorageFailure() == RasterStatus::CapacityExceeded);
+    CHECK(values[0] == 47);
+    limits.HostBytes = StorageLimits{}.HostBytes;
+    REQUIRE(internal::ConfigureStorage(limits));
+    REQUIRE(values.TryResize(3));
+    CHECK(values[0] == 47);
+}
+TEST_CASE("R6 rejects invalid startup counts and budgets", "[rhi][r6][storage]")
+{
+    Shutdown();
+    DeviceDescription description;
+    description.Storage.ResourcesPerKind = GENERATE(0U, ~uint32{0});
+    CHECK(ValidateDeviceDescription(description) == DeviceStatus::InvalidDescription);
+    description.Storage = {};
+    description.Storage.HostBytes = 0;
+    CHECK(ValidateDeviceDescription(description) == DeviceStatus::InvalidDescription);
+    description.Storage = {};
+    description.Storage.ResourceBytes = 0;
+    CHECK(ValidateDeviceDescription(description) == DeviceStatus::InvalidDescription);
+}
+
+TEST_CASE("R6 grown resource pages retire through GPU completion and device loss", "[rhi][r6][lifetime]")
+{
+    StorageLimits limits;
+    limits.ResourcesPerKind = 128;
+    Session session(limits);
+    Scene scene(session.Device);
+    const uint8 bytes[16]{};
+    Array<BufferHandle> buffers(80);
+    for (auto& buffer : buffers)
+    {
+        REQUIRE(CreateBuffer(session.Device, {BufferRole::Uniform, 16}, bytes, buffer) == RasterStatus::Ready);
+    }
+    const auto stale = buffers[79];
+    BindingSetHandle set;
+    const RasterBindingResource resource{ .Buffer = buffers[79], .Size = 16 };
+    REQUIRE(CreateBindingSet(session.Device, scene.Layout, {&resource, 1}, set) == RasterStatus::Ready);
+    auto draw = scene.Draw();
+    draw.Bindings = set;
+    CommandBatch batch;
+    REQUIRE(BeginCommands(session.Device, batch) == RasterStatus::Ready);
+    REQUIRE(RecordDraw(session.Device, batch, draw) == RasterStatus::Ready);
+    REQUIRE(FinishCommands(session.Device, batch) == RasterStatus::Ready);
+    SubmissionToken completion;
+    REQUIRE(SubmitCommands(session.Device, session.Surface, batch, completion) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, set) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, buffers[79]) == RasterStatus::Ready);
+    StorageUsage usage;
+    REQUIRE(GetStorageUsage(session.Device, usage) == RasterStatus::Ready);
+    CHECK(usage.DetachedRecords == 2);
+    CHECK(usage.ResourceBytes >= uint64{80} * 16);
+    reference::Completed = reference::Submitted;
+    REQUIRE(GetStatus(session.Device, completion) == RasterStatus::Ready);
+    SamplerHandle collect;
+    REQUIRE(CreateSampler(session.Device, {}, collect) == RasterStatus::Ready);
+    REQUIRE(GetStorageUsage(session.Device, usage) == RasterStatus::Ready);
+    CHECK(usage.DetachedRecords == 0);
+    CHECK(GetStatus(session.Device, stale) == RasterStatus::InvalidHandle);
+    reference::LossOnCompletion = backend::PendingToken;
+    CHECK(GetStatus(session.Device, buffers[78]) == RasterStatus::DeviceLost);
+    REQUIRE(DestroyDevice(session.Device) == DeviceStatus::Ready);
+    session.Surface = {};
+    DeviceDescription description;
+    description.Storage = limits;
+    REQUIRE(CreateDevice({}, {}, description, session.Device, session.Surface) == DeviceStatus::Pending);
+    internal::Complete(backend::PendingToken, StartupError::None, {4096, 16384});
+    REQUIRE(GetStorageUsage(session.Device, usage) == RasterStatus::Ready);
+    CHECK(usage.ResourceBytes == 0);
+    CHECK(usage.HostBytes > 0);
+    CHECK(GetStatus(session.Device, stale) == RasterStatus::InvalidHandle);
+}
+
+TEST_CASE("R6 retained CPU texture copies roll back host allocation failure", "[rhi][r6][storage]")
+{
+    Session session;
+    TextureHandle texture;
+    const uint8 bytes[4]{1, 2, 3, 255};
+    TextureDescription description{1, 1};
+    description.RetainCpuContent = true;
+    internal::FailNextStorageAllocation();
+    CHECK(CreateTexture(session.Device, description, {bytes, 4}, texture) == RasterStatus::OutOfMemory);
+    CHECK(reference::Creates[1] == 0);
+    StorageUsage usage;
+    REQUIRE(GetStorageUsage(session.Device, usage) == RasterStatus::Ready);
+    CHECK(usage.ResourceBytes == 0);
+    REQUIRE(CreateTexture(session.Device, description, {bytes, 4}, texture) == RasterStatus::Ready);
+    CHECK(GetStatus(session.Device, texture) == RasterStatus::Ready);
 }

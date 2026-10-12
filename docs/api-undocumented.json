@@ -1131,7 +1131,6 @@
   "function ludus::foundation::core::Array::IsEmpty() const noexcept",
   "function ludus::foundation::core::Array::RemoveLast() noexcept",
   "function ludus::foundation::core::Array::Resize(usize newSize)",
-  "function ludus::foundation::core::Array::Resize(usize newSize, const ElementType &value)",
   "function ludus::foundation::core::Array::Swap(Array &other) noexcept",
   "function ludus::foundation::core::Array::TryAdd(ElementType &&value)",
   "function ludus::foundation::core::Array::TryAddInPlace(Args &&... args)",

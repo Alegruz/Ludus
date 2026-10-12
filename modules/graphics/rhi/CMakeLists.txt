@@ -106,6 +106,7 @@ endif()
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
     add_executable(ludus_rhi_lifecycle_tests tests/lifecycle_tests.cpp tests/device_tests.cpp tests/profile_tests.cpp tests/raster_tests.cpp tests/compute_tests.cpp tests/reference_raster.cpp src/rhi.cpp src/device.cpp src/profile.cpp src/raster.cpp src/ray_unsupported.cpp)
+    target_compile_definitions(ludus_rhi_lifecycle_tests PRIVATE LUDUS_RHI_TEST_STORAGE=1)
     target_include_directories(ludus_rhi_lifecycle_tests PRIVATE include src)
     target_link_libraries(ludus_rhi_lifecycle_tests PRIVATE Ludus::Platform Ludus::FoundationContainers Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_rhi_lifecycle_tests)
@@ -161,6 +162,18 @@ if(TARGET ludus_rhi_render_tests)
     ludus_compile_shader(TARGET ludus_rhi_render_tests NAME raster RASTER
         SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/raster.slang"
         VERTEX vertexMain FRAGMENT fragmentMain)
+endif()
+
+if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN AND LUDUS_SLANG_COMPILER AND (APPLE OR LUDUS_SPIRV_VALIDATOR))
+    add_executable(ludus_rhi_r6_consumer "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/r6.cpp")
+    target_link_libraries(ludus_rhi_r6_consumer PRIVATE Ludus::GraphicsRhi Ludus::FoundationTime)
+    ludus_apply_project_defaults(ludus_rhi_r6_consumer)
+    ludus_compile_shader(TARGET ludus_rhi_r6_consumer NAME cull
+        SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/cull.slang" COMPUTE computeMain)
+    ludus_compile_shader(TARGET ludus_rhi_r6_consumer NAME raster RASTER
+        SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/raster.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+    add_test(NAME ludus_rhi_r6_consumer COMMAND ludus_rhi_r6_consumer)
+    set_tests_properties(ludus_rhi_r6_consumer PROPERTIES LABELS "rhi;gpu;build-contract" TIMEOUT 45)
 endif()
 
 if(TARGET ludus_rhi_render_tests AND LUDUS_SPIRV_CROSS)

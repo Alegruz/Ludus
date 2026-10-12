@@ -167,6 +167,49 @@ try {
     await context.close();
   }
   report.outcome='passed';
+  for (const backend of ['webgpu','webgl2','auto','fallback']) {
+    for (const reference of [false,true]) {
+      const scenario = `r6-${backend}${reference ? '-reference' : ''}`;
+      const context = await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
+      await context.addInitScript(fallback => {
+        window.__qaPause = false;
+        if (fallback) Object.defineProperty(navigator,'gpu',{value:undefined,configurable:true});
+        new MutationObserver(() => {
+          if (document.querySelector('#status')?.dataset.frames === '1') window.__qaPause = true;
+        }).observe(document,{attributes:true,subtree:true});
+      }, backend === 'fallback');
+      const page = await context.newPage(); lastPage = page;
+      const errors = [];
+      page.on('pageerror',error => errors.push(String(error)));
+      page.on('console',message => report.console.push({scenario,type:message.type(),text:message.text()}));
+      const selection = backend === 'fallback' ? 'auto' : backend;
+      await page.goto(`http://127.0.0.1:${server.address().port}/r6.html?backend=${selection}&reference=${reference ? '1' : '0'}`);
+      await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'rendering' && window.__qaPause,null,{timeout:30000});
+      assert.equal(await page.locator('#status').getAttribute('data-passes'),'40');
+      assert.equal(await page.locator('#status').getAttribute('data-draws'),'405');
+      assert.equal(await page.locator('#status').getAttribute('data-compute'),backend === 'webgl2' || backend === 'fallback' ? '0' : '1');
+      const bytes = await page.locator('canvas').screenshot();
+      const image = PNG.sync.read(bytes);
+      for (const [i,x] of [12,36,60,84].entries()) {
+        for (const [y,expected] of [[16,i%2 === 0 ? [255,0,0,255] : [0,255,0,255]],[48,i%2 === 0 ? [0,0,255,255] : [255,255,255,255]]]) {
+          const offset = (y*image.width+x)*4;
+          assert.deepEqual([...image.data.subarray(offset,offset+4)],expected,`${scenario} pixel ${x},${y}`);
+        }
+      }
+      if (reference) {
+        const graph = PNG.sync.read(await readFile(resolve(output,`r6-${backend}.png`)));
+        assert.deepEqual(image.data,graph.data,`${scenario} graph/direct complete images`);
+      }
+      await writeFile(resolve(output,`${scenario}.png`),bytes);
+      await page.evaluate(() => {window.__qaPause=false;});
+      await page.waitForFunction(() => document.querySelector('#status').dataset.state === 'passed',null,{timeout:30000});
+      assert.equal(await page.locator('#status').getAttribute('data-frames'),'3');
+      assert.deepEqual(errors,[]);
+      report.cases.push({scenario,outcome:'passed',objectsPerKind:72,graphDraws:405,batchDraws:1100});
+      await context.close();
+    }
+  }
+
 } catch (error) {
   report.outcome='failed'; report.error=String(error);
   report.lastStatus = lastPage ? await lastPage.locator('#status').evaluate(node => ({text:node.textContent,...node.dataset})) : null;

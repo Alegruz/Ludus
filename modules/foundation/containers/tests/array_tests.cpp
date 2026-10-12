@@ -839,3 +839,45 @@ TEST_CASE("Array self-referential AddInPlace of move-eligible relocatable across
     REQUIRE(v.GetSize() == 3);
     REQUIRE(v[2].Value == 200);
 }
+
+namespace
+{
+template <typename T>
+concept HasCopyFillResize = requires(Array<T>& values, const T& value) {
+    values.TryResize(2, value);
+    values.Resize(2, value);
+};
+static_assert(HasCopyFillResize<int32>);
+static_assert(!HasCopyFillResize<tst::MoveOnly>);
+} // namespace
+TEST_CASE("Array value resize preserves move-only elements and rejects overflow", "[array][resize][move-only]")
+{
+    const bool fallible = GENERATE(false, true);
+    const usize capacity = GENERATE(usize{1}, usize{8});
+    tst::LifetimeLedger ledger;
+    {
+        Array<tst::MoveOnly> values;
+        values.EnsureCapacity(capacity);
+        values.Add(tst::MoveOnly{&ledger, 41});
+        if (fallible)
+        {
+            REQUIRE(values.TryResize(4));
+        }
+        else
+        {
+            values.Resize(4);
+        }
+        REQUIRE(values.GetSize() == 4);
+        CHECK(values[0].Value() == 41);
+        CHECK(values[3].Value() == 0);
+        const auto* pointer = values.GetData();
+        REQUIRE_FALSE(values.TryResize(Array<tst::MoveOnly>::GetMaxSize() + 1));
+        CHECK(values.GetData() == pointer);
+        CHECK(values.GetSize() == 4);
+        CHECK(values[0].Value() == 41);
+        REQUIRE(values.TryResize(1));
+        CHECK(values[0].Value() == 41);
+        REQUIRE(values.TryResize(0));
+    }
+    CHECK(ledger.Balanced());
+}

@@ -212,13 +212,37 @@ enum class GraphHazard : ludus::foundation::uint8
     /// Ordered in-place writes, even when contents are discarded.
     WriteAfterWrite,
 };
+/// Sentinel for an external pass or an unavailable pass/resource index; never an authored index.
+inline constexpr ludus::foundation::uint32 GRAPH_EXTERNAL_INDEX = ~ludus::foundation::uint32{0};
+/// Full diagnostic for one authored pass. Copied values own their bounded text.
+struct GraphPassDiagnostic final
+{
+    /// Copied authored pass name, zero-terminated.
+    char Name[64]{};
+    /// Copied source path, zero-terminated; empty when not supplied.
+    char Source[128]{};
+    /// Authored source line, zero when not supplied.
+    ludus::foundation::uint32 Line = 0;
+    /// True when root analysis removed this pass.
+    bool Culled = false;
+    /// First pass in its raster group; GRAPH_EXTERNAL_INDEX for culled/compute passes.
+    ludus::foundation::uint32 RasterGroup = GRAPH_EXTERNAL_INDEX;
+};
+/// Full diagnostic for one logical graph resource.
+struct GraphResourceDiagnostic final
+{
+    /// First live authored use, or GRAPH_EXTERNAL_INDEX when unused.
+    ludus::foundation::uint32 FirstUse = GRAPH_EXTERNAL_INDEX;
+    /// Last live authored use, or GRAPH_EXTERNAL_INDEX when unused.
+    ludus::foundation::uint32 LastUse = GRAPH_EXTERNAL_INDEX;
+};
 /// One bounded report entry; pass indices are zero-based authored positions.
 struct GraphDependency final
 {
-    /// Producer/reader pass, or 32 for the external import contract.
-    ludus::foundation::uint32 Before = 32;
-    /// Dependent pass, or 32 for the final external use.
-    ludus::foundation::uint32 After = 32;
+    /// Producer/reader pass, or GRAPH_EXTERNAL_INDEX for an external import.
+    ludus::foundation::uint32 Before = GRAPH_EXTERNAL_INDEX;
+    /// Dependent pass, or GRAPH_EXTERNAL_INDEX for the final external use.
+    ludus::foundation::uint32 After = GRAPH_EXTERNAL_INDEX;
     /// Zero-based logical resource index.
     ludus::foundation::uint32 Resource = 0;
     /// RAW, WAR or WAW reason.
@@ -238,10 +262,12 @@ struct GraphCompileOptions final
     /// required. Compute and incompatible passes always retain their boundaries.
     bool MergeRasterPasses = false;
 };
-/// Deterministic report copied to caller storage; no heap allocations or strings.
+/// Deterministic fixed-size summary copied without allocation. Totals cover the full plan.
+/// Diagnostic arrays contain only prefixes, bounded by ReportedPasses/Resources/Dependencies.
+/// Use the indexed diagnostic queries for larger plans; never index arrays by total counts.
 struct GraphReport final
 {
-    /// Authored passes admitted to this graph (maximum 32).
+    /// Total authored passes admitted under the configured R6 limit.
     ludus::foundation::uint32 PassCount = 0;
     /// Passes retained by roots, or all passes in reference mode.
     ludus::foundation::uint32 LivePasses = 0;
@@ -253,21 +279,29 @@ struct GraphReport final
     ludus::foundation::uint32 MergedPasses = 0;
     /// Live direct and indirect draw packets; zero-instance indirect work still counts.
     ludus::foundation::uint32 DrawCount = 0;
-    /// Fixed service storage reserved per graph slot, including unused bounded capacity.
+    /// Owned graph control/payload bytes, including allocated slack; excludes shared table pages and compiler scratch.
     ludus::foundation::usize PlanStorageBytes = 0;
     /// Sum of imported buffer sizes, including unused imports; logical bytes, not driver allocation.
     ludus::foundation::uint64 BufferBytes = 0;
     /// Imported initialized mip texel bytes and private 32-bit depth bytes for attachments.
     /// Includes unused imports; excludes driver padding, staging, surface and pool slack.
     ludus::foundation::uint64 TextureBytes = 0;
-    /// Number of semantic dependencies (maximum 512).
+    /// Total semantic dependencies, including entries beyond the copied prefix.
     ludus::foundation::uint32 DependencyCount = 0;
-    /// Failing pass/resource, or 32/16 when not applicable.
-    ludus::foundation::uint32 ErrorPass = 32;
-    /// Failing resource or 16 when not applicable.
-    ludus::foundation::uint32 ErrorResource = 16;
+    /// Failing pass, or GRAPH_EXTERNAL_INDEX when not applicable.
+    ludus::foundation::uint32 ErrorPass = GRAPH_EXTERNAL_INDEX;
+    /// Failing resource, or GRAPH_EXTERNAL_INDEX when not applicable.
+    ludus::foundation::uint32 ErrorResource = GRAPH_EXTERNAL_INDEX;
     /// Conservative whole-buffer tracking is always used in this initial profile.
     bool WholeBufferHazards = true;
+    /// Number of initialized entries in Names/Sources/Lines/Culled/RasterGroup, at most 32.
+    ludus::foundation::uint32 ReportedPasses = 0;
+    /// Number of initialized FirstUse/LastUse entries, at most 16.
+    ludus::foundation::uint32 ReportedResources = 0;
+    /// Number of initialized copied Dependencies entries, at most 512.
+    ludus::foundation::uint32 ReportedDependencies = 0;
+    /// True when any diagnostic prefix omits full-plan entries; indexed queries remain complete.
+    bool DiagnosticsTruncated = false;
     /// Authored pass diagnostic names.
     char Names[32][64]{};
     /// Copied setup source locations.
@@ -276,20 +310,32 @@ struct GraphReport final
     ludus::foundation::uint32 Lines[32]{};
     /// True for passes removed by root analysis.
     bool Culled[32]{};
-    /// Authored index of the first pass in this raster group; 32 for culled/compute passes.
+    /// Authored index of the first pass in this raster group; GRAPH_EXTERNAL_INDEX for culled/compute passes.
     ludus::foundation::uint32 RasterGroup[32]{};
-    /// First live use for each resource, or 32 if unused.
+    /// First live use for each resource, or GRAPH_EXTERNAL_INDEX if unused.
     ludus::foundation::uint32 FirstUse[16]{};
-    /// Last live use for each resource, or 32 if unused.
+    /// Last live use for each resource, or GRAPH_EXTERNAL_INDEX if unused.
     ludus::foundation::uint32 LastUse[16]{};
     /// Semantic dependencies in stable pass/resource/hazard order.
     GraphDependency Dependencies[512]{};
 };
-/// Reserve one of four bounded graphs; null output required, failure preserves it.
+/// Copy an authored pass diagnostic after a compile attempt; owner-thread only, no allocation.
+/// Admission, invalid owner/index or missing compile diagnostics preserve output.
+[[nodiscard]] RasterStatus
+GetGraphPassDiagnostic(DeviceHandle, OrderedGraph, ludus::foundation::uint32, GraphPassDiagnostic&) noexcept;
+/// Copy a resource lifetime diagnostic after a compile attempt; failures preserve output.
+/// Resource indices refer to import order; owner-thread only, no allocation.
+[[nodiscard]] RasterStatus
+GetGraphResourceDiagnostic(DeviceHandle, OrderedGraph, ludus::foundation::uint32, GraphResourceDiagnostic&) noexcept;
+/// Copy one full-plan dependency after a compile attempt; failures preserve output.
+/// Index follows deterministic dependency order; owner-thread only, no allocation.
+[[nodiscard]] RasterStatus
+GetGraphDependency(DeviceHandle, OrderedGraph, ludus::foundation::uint32, GraphDependency&) noexcept;
+/// Reserve a graph under StorageLimits::Graphs; null output required, failure preserves it.
 [[nodiscard]] RasterStatus CreateOrderedGraph(DeviceHandle, OrderedGraph&) noexcept;
 /// Import current buffer contents and freeze their accepted revision, retaining the
 /// physical record. Output version starts at zero. No duplicate physical imports;
-/// at most sixteen graph resources. Compute writes invalidate earlier frozen plans.
+/// resource count is bounded by StorageLimits::ResourcesPerGraph. Compute writes invalidate earlier frozen plans.
 [[nodiscard]] RasterStatus ImportGraphBuffer(DeviceHandle, OrderedGraph, BufferHandle, GraphVersion&) noexcept;
 /// Import a persistent texture using an exact registry snapshot. Stale snapshots
 /// reject; final use must be a sampled stage or ColorAttachment. Same-queue pending
@@ -300,7 +346,7 @@ struct GraphReport final
                                               const RasterTextureState&,
                                               RasterTextureUse finalUse,
                                               GraphVersion&) noexcept;
-/// Acquire a matching complete attachment object from an eight-object bounded pool.
+/// Acquire a matching complete attachment object under StorageLimits::TransientTextures.
 /// Reuse requires no other leases and actual GPU completion. Contents begin undefined.
 /// Returned texture is borrowed from the graph/pool: Destroy rejects it; create views
 /// and binding sets normally and destroy those owners to permit later pooling. A stale

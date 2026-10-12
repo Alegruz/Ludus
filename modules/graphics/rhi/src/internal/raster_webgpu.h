@@ -27,26 +27,26 @@ struct RasterWebCompletion final
     bool Busy = false;
     bool Submitted = false;
 };
-WGPUBuffer gRasterBuffers[internal::RASTER_CAPACITY]{};
-WGPUTexture gRasterTextures[internal::RASTER_CAPACITY]{};
-TextureDescription gRasterTextureDescriptions[internal::RASTER_CAPACITY]{};
-WGPUTexture gRasterDepths[internal::RASTER_CAPACITY]{};
-WGPUTextureView gRasterAttachmentViews[internal::RASTER_CAPACITY]{};
-WGPUTextureView gRasterDepthViews[internal::RASTER_CAPACITY]{};
-WGPUTextureView gRasterViews[internal::RASTER_CAPACITY]{};
-WGPUSampler gRasterSamplers[internal::RASTER_CAPACITY]{};
-RasterWebShader gRasterShaders[internal::RASTER_CAPACITY];
-WGPUBindGroupLayout gRasterLayouts[internal::RASTER_CAPACITY]{};
-WGPUBindGroup gRasterSets[internal::RASTER_CAPACITY]{};
-RasterWebPipeline gRasterPipelines[internal::RASTER_CAPACITY];
+internal::StorageTable<WGPUBuffer> gRasterBuffers;
+internal::StorageTable<WGPUTexture> gRasterTextures;
+internal::StorageTable<TextureDescription> gRasterTextureDescriptions;
+internal::StorageTable<WGPUTexture> gRasterDepths;
+internal::StorageTable<WGPUTextureView> gRasterAttachmentViews;
+internal::StorageTable<WGPUTextureView> gRasterDepthViews;
+internal::StorageTable<WGPUTextureView> gRasterViews;
+internal::StorageTable<WGPUSampler> gRasterSamplers;
+internal::StorageTable<RasterWebShader> gRasterShaders;
+internal::StorageTable<WGPUBindGroupLayout> gRasterLayouts;
+internal::StorageTable<WGPUBindGroup> gRasterSets;
+internal::StorageTable<RasterWebPipeline> gRasterPipelines;
 struct ComputeWebPipeline final
 {
     WGPUComputePipeline Object = nullptr;
     WGPUPipelineLayout Layout = nullptr;
     uint32 Request = 0;
 };
-ComputeWebPipeline gComputePipelines[internal::RASTER_CAPACITY];
-RasterWebCompletion gRasterCompletions[internal::RASTER_CAPACITY];
+internal::StorageTable<ComputeWebPipeline> gComputePipelines;
+internal::StorageTable<RasterWebCompletion> gRasterCompletions;
 RasterWebCompletion* gRasterReserved = nullptr;
 uint64 gRasterCompleted = 0;
 void RasterValidated(WGPUPopErrorScopeStatus status,
@@ -183,8 +183,8 @@ RasterCapabilities RasterLimits() noexcept
             limits.maxTextureDimension2D < 4096 ? limits.maxTextureDimension2D : 4096,
             limits.minUniformBufferOffsetAlignment > 256 ? limits.minUniformBufferOffsetAlignment : 256,
             static_cast<usize>(limits.maxUniformBufferBindingSize < 16384 ? limits.maxUniformBufferBindingSize : 16384),
-            static_cast<uint32>(internal::RASTER_CAPACITY),
-            static_cast<uint32>(internal::RASTER_DRAWS),
+            internal::CurrentStorageLimits().ResourcesPerKind,
+            internal::CurrentStorageLimits().DrawsPerFrame,
             limits.maxVertexAttributes < 16 ? limits.maxVertexAttributes : 16,
             true};
 }
@@ -663,7 +663,7 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                                         packet.Index32 ? WGPUIndexFormat_Uint32 : WGPUIndexFormat_Uint16,
                                         packet.IndexOffset,
                                         WGPU_WHOLE_SIZE);
-    if (packet.Indirect != internal::RASTER_CAPACITY)
+    if (packet.Indirect != internal::RASTER_INVALID)
     {
         wgpuRenderPassEncoderDrawIndexedIndirect(gPass, gRasterBuffers[packet.Indirect], packet.IndirectOffset);
     }
@@ -690,7 +690,7 @@ void RasterTextureBarrier(usize, RasterTextureUse) noexcept {}
 RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
 {
     const auto& state = info.Description;
-    const bool surface = info.Texture == internal::RASTER_CAPACITY;
+    const bool surface = info.Texture == internal::RASTER_INVALID;
     WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
     color.view = surface ? gView : gRasterAttachmentViews[info.Texture];
     // Discard has no WebGPU load operation; security initialization clears, but
@@ -745,8 +745,9 @@ RasterStatus RasterReserveSubmission() noexcept
     {
         return RasterStatus::Ready;
     }
-    for (auto& completion : gRasterCompletions)
+    for (usize i = 0; i < internal::CurrentStorageLimits().Submissions; ++i)
     {
+        auto& completion = gRasterCompletions[i];
         if (!completion.Busy)
         {
             completion = {0, gSession, true, false};
@@ -788,4 +789,40 @@ void RasterReset() noexcept
     gRasterCompleted = 0;
 }
 void RasterShutdown() noexcept {}
+
+RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
+{
+    switch (kind)
+    {
+        case internal::RasterKind::Buffer:
+            return gRasterBuffers.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Texture:
+            return gRasterTextures.EnsureSlots(count) && gRasterTextureDescriptions.EnsureSlots(count) &&
+                           gRasterDepths.EnsureSlots(count) && gRasterAttachmentViews.EnsureSlots(count) &&
+                           gRasterDepthViews.EnsureSlots(count)
+                       ? RasterStatus::Ready
+                       : internal::StorageFailure();
+        case internal::RasterKind::View:
+            return gRasterViews.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Sampler:
+            return gRasterSamplers.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Shader:
+            return gRasterShaders.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Layout:
+            return gRasterLayouts.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Set:
+            return gRasterSets.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::Pipeline:
+            return gRasterPipelines.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        case internal::RasterKind::ComputePipeline:
+            return gComputePipelines.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+        default:
+            return RasterStatus::InvalidDescription;
+    }
+}
+RasterStatus RasterPrepareStorage() noexcept
+{
+    return gRasterCompletions.EnsureSlots(internal::CurrentStorageLimits().Submissions) ? RasterStatus::Ready
+                                                                                        : internal::StorageFailure();
+}
 } // namespace ludus::graphics::rhi::LUDUS_RHI_WEBGPU_NAMESPACE
