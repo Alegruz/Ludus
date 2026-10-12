@@ -121,7 +121,7 @@ struct ComputeCapabilities final
     ludus::foundation::uint32 MaxDispatch[3]{};
 };
 /// Implemented texture operations; native support alone never enables an engine API.
-/// Storage remains unimplemented; R8 enables bounded RGBA8Unorm copy uses.
+/// Storage remains unimplemented; copy flags describe bounded R8 RGBA8Unorm D2 operations.
 struct TextureUses final
 {
     /// Original-format sampled views in the enabled dimensions.
@@ -149,7 +149,7 @@ struct FormatCapabilities final
     ludus::foundation::uint32 MaxSampledDimension2D = 0;
     /// Maximum attachment width/height, including its private depth allocation.
     ludus::foundation::uint32 MaxAttachmentDimension2D = 0;
-    /// Maximum sampled mip count, additionally bounded by the texture dimensions.
+    /// Maximum sampled mip count, additionally bounded by spatial extents (including volume depth).
     ludus::foundation::uint32 MaxMipLevels = 0;
     /// Attachment sample counts as a bit mask: bit value 1 means one sample, 4 means four.
     /// The current profile supports only 1; zero when no attachment is supported.

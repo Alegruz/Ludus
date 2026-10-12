@@ -179,7 +179,8 @@ struct TextureDescription final
     /// Allocate undefined color and private depth attachments instead of uploading bytes.
     /// Attachment textures remain sampleable; clear/store defines color contents.
     bool Attachment = false;
-    /// Allocated mip levels, 1..floor(log2(max(Width,Height)))+1, at most 16.
+    /// Allocated mips, at most floor(log2(largest spatial extent))+1 and sixteen.
+    /// D3 includes depth in that extent; array layers and cube face counts do not.
     /// Attachments require one; initial upload defines all unless DeferredInitialization.
     /// Each sampled view requires initialized contents only in its selected range.
     ludus::foundation::uint32 MipLevels = 1;
@@ -582,9 +583,11 @@ struct RasterDraw final
 /// for draw-range checks; vertex/uniform input is consumed by the backend before return.
 [[nodiscard]] RasterStatus
 CreateBuffer(DeviceHandle, const BufferDescription&, std::span<const ludus::foundation::uint8>, BufferHandle&) noexcept;
-/// Create a sampled texture from a complete initialized R8/RG8/RGBA8 mip chain, or an undefined attachment
-/// with empty upload and zero pitch. DeferredInitialization allocates undefined sampled RGBA8 mips
-/// for R8 completion-gated full-mip uploads. Invalid description preserves output.
+/// Create a sampled allocation from a complete original-format mip/slice chain, including enabled HDR/BC.
+/// The borrowed blob must not exceed RasterCapabilities::MaxBufferSize; all logical backing consumes
+/// StorageLimits::ResourceBytes. Empty upload/zero pitch selects an attachment or deferred RGBA8 D2
+/// allocation. Owner-thread only, between frames. Ready/Pending publishes ownership and consumes
+/// caller bytes/metadata before return; other results preserve output. Poll Pending with GetStatus.
 [[nodiscard]] RasterStatus
 CreateTexture(DeviceHandle, const TextureDescription&, const TextureUpload&, TextureHandle&) noexcept;
 /// Return whether the texture identity is the null surface selector; no ownership/state query.

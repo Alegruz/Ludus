@@ -1355,7 +1355,13 @@ length are validated before backend work. Uncompressed pitches are four-byte
 aligned (binary16 RGBA pitches are eight-byte aligned). HDR bytes are original
 IEEE binary16 channel encodings. Creation consumes/copies all caller bytes and
 metadata before returning; `Pending` owns asynchronous validation/upload work.
-Logical allocation bytes include every slice and rounded-up compressed block.
+The complete borrowed blob, including row padding, retains the existing
+`RasterCapabilities.MaxBufferSize` ceiling (64 MiB or the lower enabled limit).
+Logical allocation bytes include every slice and rounded-up compressed block,
+and independently consume `StorageLimits.ResourceBytes`. The dimension/layer
+maxima do not reserve memory or remove these byte limits. Required mip counts
+are bounded by the selected dimension's largest enabled spatial extent; array
+layer and cube face counts never add mip levels.
 
 ### Views and bindings
 

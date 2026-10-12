@@ -532,10 +532,21 @@ TEST_CASE("R9 format dimensions and partial view requirements negotiate before R
         .MinDepthOrLayers = 257,
         .PartialViews = true,
     };
+    ProfileRequirement expected = ProfileRequirement::TextureLayerCount;
+    ludus::foundation::uint64 available = 256;
+    SECTION("array layers") {}
+    SECTION("volume mip count")
+    {
+        request.RequiredProfile.Formats[0].Dimension = TextureDimension::D3;
+        request.RequiredProfile.Formats[0].MinDepthOrLayers = 0;
+        request.RequiredProfile.Formats[0].MinMipLevels = 10;
+        expected = ProfileRequirement::MipCount;
+        available = 9;
+    }
     REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
     fixture.Complete();
     DeviceInfo info;
     REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Failed);
-    CHECK(info.Startup.ProfileFailure.Requirement == ProfileRequirement::TextureLayerCount);
-    CHECK(info.Startup.ProfileFailure.Available == 256);
+    CHECK(info.Startup.ProfileFailure.Requirement == expected);
+    CHECK(info.Startup.ProfileFailure.Available == available);
 }

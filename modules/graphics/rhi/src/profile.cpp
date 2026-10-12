@@ -318,7 +318,13 @@ ProfileDiagnostic CheckProfile(const DeviceProfileRequirements& requirements, co
                 .Available = dimension,
             };
         }
-        const uint32 mips = attachment ? 1 : format.MaxMipLevels;
+        uint32 extentMips = 1;
+        for (uint32 extent = sampledDimension; extent > 1; extent >>= 1U)
+        {
+            ++extentMips;
+        }
+        const uint32 sampledMips = format.MaxMipLevels < extentMips ? format.MaxMipLevels : extentMips;
+        const uint32 mips = attachment ? 1 : sampledMips;
         if (request.MinMipLevels > mips)
         {
             return
