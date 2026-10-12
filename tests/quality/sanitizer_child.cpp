@@ -1,15 +1,25 @@
 #include <ludus/foundation/base/types.h>
 
 #if defined(LUDUS_CONTROL_TSAN)
+#    include <atomic>
 #    include <pthread.h>
 
 namespace
 {
 // Keep the control slot independent of thread-wrapper allocation/lifetime state.
 alignas(64) volatile ludus::foundation::int32 raceValue = 0;
+alignas(64) std::atomic<bool> parentWritten{false};
 
 void* WriteRaceValue(void*) noexcept
 {
+    // Relaxed polling orders wall-clock execution without synchronizing the slot.
+    // Thanks to LLVM's compiler-rt, tsan_interface_atomic.cpp (Clang 18.1.8),
+    // AtomicLoad/AtomicStore relaxed fast paths, for confirming no clock acquire
+    // or release is added for this test-only rendezvous.
+    // https://github.com/llvm/llvm-project/blob/llvmorg-18.1.8/compiler-rt/lib/tsan/rtl/tsan_interface_atomic.cpp
+    while (!parentWritten.load(std::memory_order_relaxed))
+    {
+    }
     raceValue = 1;
     return nullptr;
 }
@@ -50,9 +60,10 @@ int main(int argumentCount, char**)
     {
         return 1;
     }
-    // Creation precedes both writes; join follows both. Neither write is ordered
-    // before the other, regardless of which thread the scheduler runs first.
+    // Force the worker's conflicting access to observe the live parent's write.
+    // A release/acquire gate here would order the writes and remove the defect.
     raceValue = 2;
+    parentWritten.store(true, std::memory_order_relaxed);
     if (pthread_join(worker, nullptr) != 0)
     {
         return 1;
