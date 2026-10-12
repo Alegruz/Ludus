@@ -311,32 +311,74 @@ struct Manager::Impl final
             adapter.Cancel(adapter.Context, version.Candidate);
         }
     }
-    [[nodiscard]] Status Usable(const Version& version) const noexcept
+    [[nodiscard]] Error OwnError(const Version& version, Status cause) const noexcept
     {
+        Error error;
+        error.Cause = cause;
+        error.Asset = version.Asset;
+        error.Chain[0] = version.Asset;
+        error.Count = 1;
+        return error;
+    }
+    [[nodiscard]] Error InheritedError(const Version& parent, Version::Binding binding, Error error) const noexcept
+    {
+        if (error.Count == MAX_FAILURE_CHAIN)
+        {
+            error.Truncated = true;
+        }
+        else
+        {
+            ++error.Count;
+        }
+        for (uint32 i = error.Count - 1; i > 0; --i)
+        {
+            error.Chain[i] = error.Chain[i - 1];
+        }
+        error.Chain[0] = parent.Asset;
+        error.Edge = binding.Edge;
+        return error;
+    }
+    [[nodiscard]] Status Usable(const Version& version, Error* failure = nullptr) const noexcept
+    {
+        const auto reject = [&](Status cause) noexcept {
+            if (failure != nullptr)
+            {
+                *failure = OwnError(version, cause);
+            }
+            return cause;
+        };
         if (version.PhysicalRetired || version.Payload == nullptr)
         {
-            return Status::Failed;
+            return reject(Status::Failed);
         }
         const auto& adapter = Provider(version);
         if (version.Epoch != adapter.Epoch(adapter.Context))
         {
-            return Status::DeviceLost;
+            return reject(Status::DeviceLost);
         }
         const auto result = adapter.Validate(adapter.Context, version.Payload);
         if (result != Status::Ok)
         {
-            return result;
+            return reject(result);
         }
         for (uint32 i = 0; i < version.DependencyCount; ++i)
         {
-            const auto& child = Versions[version.Dependencies[i].Version];
-            if (!child.Used || !child.Live)
-            {
-                return Status::DependencyFailed;
-            }
-            const auto childResult = Usable(child);
+            const auto binding = version.Dependencies[i];
+            const auto& child = Versions[binding.Version];
+            Error childError;
+            const auto childResult = !child.Used || !child.Live
+                                         ? Status::DependencyFailed
+                                         : Usable(child, failure != nullptr ? &childError : nullptr);
             if (childResult != Status::Ok)
             {
+                if (failure != nullptr)
+                {
+                    if (childError.Cause == Status::Ok)
+                    {
+                        childError = child.Failure.Cause != Status::Ok ? child.Failure : OwnError(child, childResult);
+                    }
+                    *failure = InheritedError(version, binding, childError);
+                }
                 return childResult;
             }
         }
@@ -363,39 +405,14 @@ struct Manager::Impl final
     }
     void SetError(Version& version, Status cause) noexcept
     {
-        version.Failure = {};
-        version.Failure.Cause = cause;
-        version.Failure.Asset = version.Asset;
-        version.Failure.Chain[0] = version.Asset;
-        version.Failure.Count = 1;
+        version.Failure = OwnError(version, cause);
     }
     void DependencyError(Version& parent, Version::Binding binding, Status cause) noexcept
     {
         const auto& child = Versions[binding.Version];
         parent.DependencyResult = Status::DependencyFailed;
-        parent.Failure = child.Failure;
-        if (parent.Failure.Cause == Status::Ok)
-        {
-            parent.Failure.Cause = cause;
-            parent.Failure.Asset = child.Asset;
-            parent.Failure.Chain[0] = child.Asset;
-            parent.Failure.Count = 1;
-        }
-        auto& failure = parent.Failure;
-        if (failure.Count == MAX_FAILURE_CHAIN)
-        {
-            failure.Truncated = true;
-        }
-        else
-        {
-            ++failure.Count;
-        }
-        for (uint32 i = failure.Count - 1; i > 0; --i)
-        {
-            failure.Chain[i] = failure.Chain[i - 1];
-        }
-        failure.Chain[0] = parent.Asset;
-        failure.Edge = binding.Edge;
+        parent.Failure =
+            InheritedError(parent, binding, child.Failure.Cause == Status::Ok ? OwnError(child, cause) : child.Failure);
     }
     void WakeParents(uint32 childIndex, Status result) noexcept
     {
@@ -602,7 +619,9 @@ struct Manager::Impl final
             return;
         }
         Complete(index,
-                 result == Status::Ok ? (version.Payload == nullptr ? Status::Failed : Usable(version)) : result);
+                 result == Status::Ok
+                     ? (version.Payload == nullptr ? Status::Failed : Usable(version, &version.Failure))
+                     : result);
     }
     void ServiceVersion(uint32 index) noexcept
     {
@@ -670,10 +689,9 @@ struct Manager::Impl final
             }
             else
             {
-                const auto usable = Usable(root);
+                const auto usable = Usable(root, &root.Failure);
                 if (usable != Status::Ok)
                 {
-                    SetError(root, usable);
                     transaction.Info.Failure = Describe(root);
                     StopTransaction(index, usable);
                     return;

@@ -25,6 +25,7 @@ struct GraphBackend final
     bool Drain[4]{true, true, true, true};
     r::Status Result[4]{r::Status::Ok, r::Status::Ok, r::Status::Ok, r::Status::Ok};
     bool FailOwned = false;
+    bool Invalid[4]{};
     static uint32 Node(const c::ResourceId& id) noexcept
     {
         return id.View() == "root" ? 0U : id.View() == "left" ? 1U : id.View() == "right" ? 2U : 3U;
@@ -64,6 +65,12 @@ struct GraphBackend final
         job.Used = false;
         return r::Status::Ok;
     }
+    static r::Status ValidatePayload(void* context, const void* payload) noexcept
+    {
+        return static_cast<GraphBackend*>(context)->Invalid[static_cast<const Payload*>(payload)->Value % 10]
+                   ? r::Status::Failed
+                   : r::Status::Ok;
+    }
     r::Adapter Descriptor() noexcept
     {
         r::Adapter adapter;
@@ -101,7 +108,7 @@ struct GraphBackend final
         adapter.Poll = &PollJob;
         adapter.Cancel = [](void* context, void*) noexcept { ++static_cast<GraphBackend*>(context)->Cancels; };
         adapter.Retire = &RetireJob;
-        adapter.Validate = [](void*, const void*) noexcept { return r::Status::Ok; };
+        adapter.Validate = &ValidatePayload;
         return adapter;
     }
 };
@@ -607,5 +614,53 @@ TEST_CASE("An activated snapshot refuses implicit rebinding after an epoch chang
     CHECK(f.Manager.BeginAcquire(current, f.Root, output) == r::Status::DeviceLost);
     CHECK(output.Owner == 0);
     CHECK(f.Manager.Inspect().Versions == 4);
+}
+} // namespace dag_cases
+
+namespace dag_cases
+{
+TEST_CASE("Commit preflight reports a no-longer-usable descendant without publishing", "[resources][replacement]")
+{
+    GraphBackend candidate;
+    Fixture f;
+    const auto transaction = f.Replace(candidate, 2);
+    f.Pump();
+    candidate.Invalid[3] = true;
+    CHECK(f.Manager.Commit(transaction) == r::Status::Failed);
+    CHECK(f.Manager.Inspect().CurrentRevision == 1);
+    r::TransactionInfo info;
+    REQUIRE(f.Manager.GetTransaction(transaction, info) == r::Status::Ok);
+    CHECK(info.State == r::TransactionState::Failed);
+    CHECK(info.Failure.Asset.View() == "leaf");
+    CHECK(info.Failure.Cause == r::Status::Failed);
+    REQUIRE(info.Failure.Count == 3);
+    CHECK(info.Failure.Chain[0].View() == "root");
+    CHECK(info.Failure.Chain[2].View() == "leaf");
+    CHECK(info.Failure.Property.View() == "left");
+}
+} // namespace dag_cases
+
+namespace dag_cases
+{
+TEST_CASE("Parent publication preserves descendant provenance if readiness changes during preparation",
+          "[resources][dag]")
+{
+    Fixture f;
+    f.Initial.Complete[0] = false;
+    const auto request = f.Acquire(f.Scope);
+    f.Pump();
+    REQUIRE(f.Initial.Begins[0] == 1);
+    f.Initial.Invalid[3] = true;
+    f.Initial.Complete[0] = true;
+    f.Pump();
+    r::RequestInfo info;
+    REQUIRE(f.Manager.GetRequest(request, info) == r::Status::Ok);
+    CHECK(info.State == r::RequestState::Failed);
+    CHECK(info.Failure.Asset.View() == "leaf");
+    CHECK(info.Failure.Cause == r::Status::Failed);
+    REQUIRE(info.Failure.Count == 3);
+    CHECK(info.Failure.Chain[0].View() == "root");
+    CHECK(info.Failure.Chain[2].View() == "leaf");
+    CHECK(f.Manager.Inspect().Versions == 0);
 }
 } // namespace dag_cases
