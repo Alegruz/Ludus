@@ -32,7 +32,7 @@ TEST_CASE("Partial mesh allocation failure keeps reservation until cleanup and p
             r::internal::FailMeshArrayAllocationAfter(-1);
             while (Manager.Shutdown() != r::Status::Ok)
             {
-                Manager.Service(24);
+                Manager.Service(64);
             }
         }
     } cleanup{manager};
@@ -51,7 +51,7 @@ TEST_CASE("Partial mesh allocation failure keeps reservation until cleanup and p
     CHECK(result.State == r::RequestState::Failed);
     CHECK(result.Result == r::Status::OutOfMemory);
     CHECK(manager.Inspect().ResidentBytes == descriptor.Peak.ResidentBytes);
-    manager.Service(24);
+    manager.Service(64);
     CHECK(manager.Inspect().ResidentBytes == 0);
     REQUIRE(manager.GetRequest(failed, result) == r::Status::Ok);
     CHECK(result.Result == r::Status::OutOfMemory); // Durable after physical cleanup.
@@ -59,7 +59,7 @@ TEST_CASE("Partial mesh allocation failure keeps reservation until cleanup and p
     REQUIRE(manager.BeginAcquire(scope, asset, retry) == r::Status::Ok);
     for (usize turn = 0; turn < 4; ++turn)
     {
-        manager.Service(24);
+        manager.Service(64);
     }
     REQUIRE(manager.TakeLease(retry, lease) == r::Status::Ok);
     const void* payload = nullptr;

@@ -22,6 +22,7 @@ resources::Adapter SoundResourceAdapter::Descriptor() noexcept
 {
     resources::Adapter adapter;
     adapter.Context = this;
+    adapter.MaxCandidates = 1;
     // Policy reservations for this demonstrator, not measured strict decoder or
     // driver heap bounds. Core enforcement covers these declared peaks only.
     adapter.Peak = {128ULL * 1024 * 1024, audio::RESIDENT_PCM_CAP_BYTES};

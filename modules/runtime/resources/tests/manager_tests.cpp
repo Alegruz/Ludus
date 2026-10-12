@@ -445,3 +445,5 @@ TEST_CASE("Initialization validates limits and uses fresh nonwrapping identity",
 
 #include "mesh_allocation_cases.hpp"
 #include "mesh_cases.hpp"
+
+#include "dag_cases.hpp"
