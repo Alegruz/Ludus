@@ -194,6 +194,7 @@ void ResetGraph(GraphRecord& graph) noexcept
     static_cast<LifetimeRecord&>(graph) = {};
     graph.Generation = generation;
     graph.Compiled = false;
+    graph.ReportAvailable = false;
     graph.ResourceCount = graph.PassCount = graph.DrawCount = 0;
     for (auto& resource : graph.Resources)
     {
@@ -1463,6 +1464,7 @@ bool CanMergeRaster(const GraphPassRecord& before, const GraphPassRecord& after)
 void CopyGraphSummary(const GraphRecord& graph, GraphReport& output) noexcept
 {
     output = graph.Report.Summary;
+    output.ResourceCount = static_cast<uint32>(graph.ResourceCount);
     output.ReportedPasses = static_cast<uint32>(graph.PassCount < 32 ? graph.PassCount : 32);
     output.ReportedResources = static_cast<uint32>(graph.ResourceCount < 16 ? graph.ResourceCount : 16);
     output.ReportedDependencies = output.DependencyCount < 512 ? output.DependencyCount : 512;

@@ -311,7 +311,7 @@ CreateRayScene(DeviceHandle device, const RaySceneDescription& description, RayS
             }
             if (!opacity.TryResize(begin + appended))
             {
-                return RasterStatus::OutOfMemory;
+                return StorageFailure();
             }
             uvOffsets[native.Geometry] = begin / 4;
             for (usize triangle = 0; triangle < geometry->Ray->Count; ++triangle)
@@ -331,7 +331,7 @@ CreateRayScene(DeviceHandle device, const RaySceneDescription& description, RayS
         }
         if (!opacity.TryResize(alphaOffset + padded))
         {
-            return RasterStatus::OutOfMemory;
+            return StorageFailure();
         }
         for (usize texel = 0; texel < texels; ++texel)
         {
@@ -422,7 +422,7 @@ RasterStatus SubmitRayQueries(DeviceHandle device,
     return Publish(RasterKind::RayBatch, output, [&rays, count, program, scene](usize slot, Record& record) noexcept {
         if (!RayRecord(record))
         {
-            return RasterStatus::OutOfMemory;
+            return StorageFailure();
         }
         record.Ray->Scene = RasterAccess::Slot(scene);
         record.Ray->Program = RasterAccess::Slot(program);

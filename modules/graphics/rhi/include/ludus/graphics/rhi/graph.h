@@ -269,6 +269,8 @@ struct GraphReport final
 {
     /// Total authored passes admitted under the configured R6 limit.
     ludus::foundation::uint32 PassCount = 0;
+    /// Total logical resources in import/transient creation order, including unused imports.
+    ludus::foundation::uint32 ResourceCount = 0;
     /// Passes retained by roots, or all passes in reference mode.
     ludus::foundation::uint32 LivePasses = 0;
     /// Planned raster encoder/pass starts, excluding the facade's acquisition clear.
@@ -320,7 +322,8 @@ struct GraphReport final
     GraphDependency Dependencies[512]{};
 };
 /// Copy an authored pass diagnostic after a compile attempt; owner-thread only, no allocation.
-/// Admission, invalid owner/index or missing compile diagnostics preserve output.
+/// NotReady before a compile attempt; InvalidDescription for an out-of-range authored index.
+/// Admission failure and all rejected queries preserve output.
 [[nodiscard]] RasterStatus
 GetGraphPassDiagnostic(DeviceHandle, OrderedGraph, ludus::foundation::uint32, GraphPassDiagnostic&) noexcept;
 /// Copy a resource lifetime diagnostic after a compile attempt; failures preserve output.

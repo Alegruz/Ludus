@@ -86,7 +86,7 @@ struct RasterVkPass final
     RasterPassDescription State;
     bool Surface = false;
 };
-RasterVkPass gRasterPasses[192];
+internal::StorageTable<RasterVkPass> gRasterPasses;
 RasterStatus RasterError(VkResult result) noexcept
 {
     if (result == VK_SUCCESS)
@@ -133,9 +133,16 @@ void RasterVkDependencies(bool surface, VkSubpassDependency (&dependencies)[2]) 
 VkResult
 RasterVkRenderPass(VkFormat format, bool surface, const RasterPassDescription& state, VkRenderPass& output) noexcept
 {
-    RasterVkPass* available = nullptr;
-    for (auto& pass : gRasterPasses)
+    const auto limit = internal::CurrentStorageLimits().RasterPassStates;
+    if (!gRasterPasses.EnsureSlots(limit))
     {
+        return internal::StorageFailure() == RasterStatus::OutOfMemory ? VK_ERROR_OUT_OF_HOST_MEMORY
+                                                                       : VK_ERROR_TOO_MANY_OBJECTS;
+    }
+    RasterVkPass* available = nullptr;
+    for (usize i = 0; i < limit; ++i)
+    {
+        auto& pass = gRasterPasses[i];
         const auto& cached = pass.State;
         if (pass.Object == VK_NULL_HANDLE)
         {
@@ -1457,6 +1464,7 @@ RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
 }
 RasterStatus RasterPrepareStorage() noexcept
 {
-    return RasterStatus::Ready;
+    return gRasterPasses.EnsureSlots(internal::CurrentStorageLimits().RasterPassStates) ? RasterStatus::Ready
+                                                                                        : internal::StorageFailure();
 }
 } // namespace ludus::graphics::rhi::backend

@@ -1771,6 +1771,7 @@ TEST_CASE("R6 plans admit 72 textures and 405 draws with complete indexed diagno
     GraphReport report;
     REQUIRE(CompileOrderedGraph(session.Device, graph.Graph, report) == RasterStatus::Ready);
     CHECK(report.PassCount == 40);
+    CHECK(report.ResourceCount == 75);
     CHECK(report.DrawCount == 405);
     CHECK(report.ReportedPasses == 32);
     CHECK(report.ReportedResources == 16);
@@ -1911,6 +1912,9 @@ TEST_CASE("R6 rejects invalid startup counts and budgets", "[rhi][r6][storage]")
     description.Storage.ResourcesPerKind = GENERATE(0U, ~uint32{0});
     CHECK(ValidateDeviceDescription(description) == DeviceStatus::InvalidDescription);
     description.Storage = {};
+    description.Storage.RasterPassStates = GENERATE(0U, ~uint32{0});
+    CHECK(ValidateDeviceDescription(description) == DeviceStatus::InvalidDescription);
+    description.Storage = {};
     description.Storage.HostBytes = 0;
     CHECK(ValidateDeviceDescription(description) == DeviceStatus::InvalidDescription);
     description.Storage = {};
@@ -1984,4 +1988,38 @@ TEST_CASE("R6 retained CPU texture copies roll back host allocation failure", "[
     CHECK(usage.ResourceBytes == 0);
     REQUIRE(CreateTexture(session.Device, description, {bytes, 4}, texture) == RasterStatus::Ready);
     CHECK(GetStatus(session.Device, texture) == RasterStatus::Ready);
+}
+
+TEST_CASE("R6 recycled graph slots reject queries before replacement compilation", "[rhi][r6][graph]")
+{
+    Session session;
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    GraphPassDescription pass;
+    pass.Name = "recycled diagnostics";
+    REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::Ready);
+    REQUIRE(DiscardOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    GraphPassDiagnostic diagnostic;
+    diagnostic.Line = 911;
+    CHECK(GetGraphPassDiagnostic(session.Device, graph, 0, diagnostic) == RasterStatus::NotReady);
+    CHECK(diagnostic.Line == 911);
+    GraphResourceDiagnostic resource;
+    resource.LastUse = 911;
+    CHECK(GetGraphResourceDiagnostic(session.Device, graph, 0, resource) == RasterStatus::NotReady);
+    CHECK(resource.LastUse == 911);
+    GraphDependency edge;
+    edge.Before = 911;
+    CHECK(GetGraphDependency(session.Device, graph, 0, edge) == RasterStatus::NotReady);
+    CHECK(edge.Before == 911);
+    REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+    REQUIRE(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::Ready);
+    REQUIRE(GetGraphPassDiagnostic(session.Device, graph, 0, diagnostic) == RasterStatus::Ready);
+    SubmissionToken completion;
+    REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, graph, completion) == RasterStatus::Ready);
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    CHECK(GetGraphPassDiagnostic(session.Device, graph, 0, diagnostic) == RasterStatus::NotReady);
+    REQUIRE(DiscardOrderedGraph(session.Device, graph) == RasterStatus::Ready);
 }

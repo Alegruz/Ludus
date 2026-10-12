@@ -395,6 +395,7 @@ bool ValidStorageLimits(const StorageLimits& limits) noexcept
                                       limits.PassesPerGraph,
                                       limits.DependenciesPerGraph,
                                       limits.TransientTextures,
+                                      limits.RasterPassStates,
                                       limits.Submissions};
     for (const auto count : counts)
     {

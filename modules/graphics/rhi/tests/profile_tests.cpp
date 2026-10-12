@@ -1,4 +1,5 @@
 #include "internal/lifecycle.h"
+#include "internal/profile.h"
 #include "reference_raster.h"
 
 #include <ludus/graphics/rhi/device.h>
@@ -70,6 +71,14 @@ TEST_CASE("Profile requests are copied and enabled snapshots are invalidated by 
     CHECK(info.Description.RequiredProfile.Raster.MinBufferSize == ludus::foundation::usize{64} * 1024U * 1024U);
     CHECK_FALSE(info.Description.RequiredProfile.Formats[0].Uses.Storage);
     CHECK(info.Profile.Raster.MaxBufferSize == 0);
+    CHECK(info.Profile.Storage.ResourcesPerKind == 0);
+    CHECK(info.Profile.Storage.DrawsPerFrame == 0);
+    CHECK(info.Profile.Storage.Graphs == 0);
+    CHECK(info.Profile.Storage.RasterPassStates == 0);
+    CHECK(info.Profile.Storage.Submissions == 0);
+    CHECK(info.Profile.Storage.HostBytes == 0);
+    CHECK(info.Profile.Storage.ResourceBytes == 0);
+    CHECK(internal::CurrentDeviceProfile().Storage.ResourcesPerKind == 0);
     FormatCapabilities format;
     format.MaxMipLevels = 777;
     CHECK(GetFormatCapabilities(fixture.Device, RasterFormat::Rg8Unorm, format) == RasterStatus::NotReady);
@@ -77,6 +86,8 @@ TEST_CASE("Profile requests are copied and enabled snapshots are invalidated by 
     fixture.Complete();
     REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Ready);
     CHECK(info.Enabled.Compute);
+    CHECK(info.Profile.Storage.ResourcesPerKind == 64);
+    CHECK(info.Profile.Storage.HostBytes == StorageLimits{}.HostBytes);
     CHECK(info.Profile.Interface.MaxBindings == 8);
     REQUIRE(GetFormatCapabilities(fixture.Device, RasterFormat::Rg8Unorm, format) == RasterStatus::Ready);
     CHECK(format.Uses.Filterable);
@@ -93,6 +104,14 @@ TEST_CASE("Profile requests are copied and enabled snapshots are invalidated by 
     internal::Fail(backend::PendingToken, StartupError::DeviceLost);
     REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::DeviceLost);
     CHECK(info.Profile.Raster.MaxBufferSize == 0);
+    CHECK(info.Profile.Storage.ResourcesPerKind == 0);
+    CHECK(info.Profile.Storage.DrawsPerFrame == 0);
+    CHECK(info.Profile.Storage.Graphs == 0);
+    CHECK(info.Profile.Storage.RasterPassStates == 0);
+    CHECK(info.Profile.Storage.Submissions == 0);
+    CHECK(info.Profile.Storage.HostBytes == 0);
+    CHECK(info.Profile.Storage.ResourceBytes == 0);
+    CHECK(internal::CurrentDeviceProfile().Storage.ResourcesPerKind == 0);
     CHECK(info.Profile.Formats[0].SampleCounts == 0);
     CHECK(GetFormatCapabilities(fixture.Device, RasterFormat::Rg8Unorm, format) == RasterStatus::DeviceLost);
     CHECK(format.MaxMipLevels == 0);

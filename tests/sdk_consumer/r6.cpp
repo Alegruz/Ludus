@@ -314,7 +314,7 @@ bool DrawGraph() noexcept
     rhi::GraphReport report;
     rhi::GraphPassDiagnostic last;
     if (!Checked(rhi::CompileOrderedGraph(gDevice, graph, report)) || report.PassCount != 40 ||
-        report.DrawCount != 405 || !report.DiagnosticsTruncated ||
+        report.ResourceCount != 147 || report.DrawCount != 405 || !report.DiagnosticsTruncated ||
         !Checked(rhi::GetGraphPassDiagnostic(gDevice, graph, 39, last)) || last.Line != 40)
     {
         return false;

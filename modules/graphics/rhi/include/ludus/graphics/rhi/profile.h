@@ -46,6 +46,9 @@ struct StorageLimits final
     ludus::foundation::uint32 DependenciesPerGraph = 512;
     /// Maximum retained transient texture-pool entries.
     ludus::foundation::uint32 TransientTextures = 8;
+    /// Maximum cached format/load/store/depth render-pass combinations on Vulkan.
+    /// Other backends encode this state directly and do not consume these records.
+    ludus::foundation::uint32 RasterPassStates = 192;
     /// Maximum simultaneous submission completion records on callback backends.
     ludus::foundation::uint32 Submissions = 64;
     /// Host storage budget in bytes: registry/backend metadata, plans, scratch and index copies.
@@ -154,8 +157,23 @@ struct DeviceProfile final
     RasterInterfaceCapabilities Interface;
     /// Negotiated bounded buffer-compute limits; zero if unavailable.
     ComputeCapabilities Compute;
-    /// Immutable configured R6 storage maxima and budgets for this session.
-    StorageLimits Storage;
+    /// Immutable configured R6 storage maxima and budgets; all zero outside Ready.
+    StorageLimits Storage
+    {
+        .ResourcesPerKind = 0,
+        .DrawsPerFrame = 0,
+        .Batches = 0,
+        .DrawsPerPlan = 0,
+        .Graphs = 0,
+        .ResourcesPerGraph = 0,
+        .PassesPerGraph = 0,
+        .DependenciesPerGraph = 0,
+        .TransientTextures = 0,
+        .RasterPassStates = 0,
+        .Submissions = 0,
+        .HostBytes = 0,
+        .ResourceBytes = 0,
+    };
     /// Five format entries indexed by RasterFormat, including unsupported uses.
     FormatCapabilities Formats[5]{};
 };

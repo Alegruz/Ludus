@@ -980,7 +980,10 @@ description.Storage.DrawsPerFrame = 2048;
 The registry and Vulkan/Metal/WebGPU/WebGL resource tables grow in stable pages.
 Batch and graph payloads grow during setup, and compilation allocates its scratch
 and full diagnostics before execution. Frame admission prepares completion
-records before acquiring the target. Execution cannot grow engine storage.
+records before acquiring the target. Vulkan also prepares its configured
+`RasterPassStates` metadata cache before a frame; the default retains the
+historical 192 format/load/store/depth combinations. Other backends encode that
+state directly. Execution cannot grow engine storage.
 Whole-batch/graph frame-limit rejection happens before native draw work and
 preserves the plan for retry or discard. General limits do not enlarge the
 fullscreen compatibility facade, fixed upload/readback staging rings, or the
@@ -1007,8 +1010,8 @@ committed pages. Peaks describe the process storage epoch, rather than resetting
 on each device. Shutdown/loss still releases native objects and invalidates old
 handles, plans and completion tokens.
 
-`GraphReport` keeps bounded copied prefixes for compatibility; its totals cover
-the complete plan. After a compile attempt, call `GetGraphPassDiagnostic`,
+`GraphReport` keeps bounded copied prefixes for compatibility; `PassCount`,
+`ResourceCount` and `DependencyCount` cover the complete plan. After a compile attempt, call `GetGraphPassDiagnostic`,
 `GetGraphResourceDiagnostic` and `GetGraphDependency` with authored/indexed
 positions. Queries copy into caller-owned output, allocate nothing, and remain
 valid until graph mutation, discard or consumed execution. Missing diagnostics,
