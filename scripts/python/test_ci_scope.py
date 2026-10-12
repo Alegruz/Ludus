@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -140,6 +141,18 @@ class GitComparisonTests(unittest.TestCase):
 
 
 class RequiredGateTests(unittest.TestCase):
+    def test_workflow_gate_requires_every_classified_native_job(self):
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
+        gate = workflow.split("\n  linux:", 1)[1]
+        dependencies = re.search(r"needs: \[([^\]]+)\]", gate)
+        self.assertIsNotNone(dependencies)
+        self.assertCountEqual([name.strip() for name in dependencies.group(1).split(",")],
+                              ["changes", *ci_scope.NATIVE_JOBS])
+        # A missing workflow job must not silently remove validation while the
+        # Python gate still expects it, including docs-only routing.
+        jobs = set(re.findall(r"^  ([a-z][a-z0-9-]*):$", workflow, re.MULTILINE))
+        self.assertTrue(set(ci_scope.NATIVE_JOBS) <= jobs)
+
     def results(self, native_required=True):
         return {
             "changes": {"result": "success", "outputs": {"native_required": "true" if native_required else "false"}},

@@ -40,6 +40,30 @@ class NativePrerequisiteTests(unittest.TestCase):
                                     env=environment, capture_output=True, text=True, timeout=3)
             self.assertEqual(result.returncode, 124, result.stdout + result.stderr)
 
+    def test_macos_cache_launchers_survive_restricted_consumer_path(self):
+        action = (self.ROOT / ".github/actions/macos-setup/action.yml").read_text()
+        command = action.split("    - name: Configure compiler caching\n", 1)[1]
+        command = command.split("      run: |\n", 1)[1].split("    - name:", 1)[0]
+        with tempfile.TemporaryDirectory(prefix="cache launcher ") as temporary:
+            root = Path(temporary)
+            tool = root / "ccache"
+            tool.write_text('#!/bin/sh\ncase "$1" in --max-size=*|--zero-stats) exit 0;; esac\nexec "$@"\n')
+            tool.chmod(0o755)
+            environment_file = root / "github-env"
+            environment = {**os.environ, "PATH": str(root), "GITHUB_ENV": str(environment_file),
+                           "GITHUB_WORKSPACE": str(root)}
+            subprocess.run(["/bin/bash", "-e", "-c", command], env=environment, check=True)
+            exported = dict(line.split("=", 1) for line in environment_file.read_text().splitlines())
+            for language in ("C", "CXX", "OBJCXX"):
+                launcher = exported[f"CMAKE_{language}_COMPILER_LAUNCHER"]
+                self.assertEqual(launcher, str(tool))
+                # Release/relocation tests deliberately exclude Homebrew's bin
+                # directory. The launcher must work without searching PATH.
+                result = subprocess.run([launcher, "/bin/echo", "compiler-ran"],
+                                        env={"PATH": "/usr/bin:/bin"}, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), "compiler-ran")
+
     def test_cache_report_survives_missing_prerequisite_and_reports_when_available(self):
         workflow = (self.ROOT / ".github/workflows/ci.yml").read_text()
         commands = [line.strip().removeprefix("run: ") for line in workflow.splitlines()
