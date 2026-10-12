@@ -29,11 +29,30 @@ def validate_editor_options(args, engine) -> None:
         raise engine.EngineError("Editor setup requires " + ", ".join(SUPPORTED_PRESETS) + "; browser editor setup is unsupported")
 
 
+def preview_tool_args(root: Path) -> list[str]:
+    """Resolve repository-local pinned tools for native editor configuration."""
+    result = [f"-DLUDUS_SLANG_COMPILER={root / 'out/shader-tools/slang/bin/slangc'}"]
+    if platform.system() != "Darwin":
+        result.append(f"-DLUDUS_SPIRV_VALIDATOR={root / 'out/shader-tools/spirv-tools/usr/bin/spirv-val'}")
+    return result
+
+
+def prepare_editor_preview(args, engine) -> None:
+    """Acquire verified shader tools only for selected rendered editor setup."""
+    if args.with_editor and args.with_editor_preview:
+        validate_editor_options(args, engine)
+        root = engine.repo_root()
+        engine.run([engine.venv_python(root), root / "scripts/shader-probe", "bootstrap"], cwd=root)
+
+
 def setup_editor(args, engine) -> None:
     if not args.with_editor:
         return
     validate_editor_options(args, engine)
     root = engine.repo_root()
+    preview_args = [f"-DLUDUS_EDITOR_RENDER_PREVIEW={'ON' if args.with_editor_preview else 'OFF'}"]
+    if args.with_editor_preview:
+        preview_args.extend(preview_tool_args(root))
     if platform.system() == "Darwin":
         brew = shutil.which("brew")
         if not args.no_system_install:
@@ -50,7 +69,7 @@ def setup_editor(args, engine) -> None:
             if status == 0 and (Path(output.strip()) / "lib/cmake/Qt6").is_dir():
                 qt_args = [f"-DQt6_DIR={output.strip()}/lib/cmake/Qt6"]
         cmake_targets.query_codemodel(engine.build_dir_for_preset(root, args.preset), "ludus-editor")
-        engine.cmake_configure(root, args.preset, ["-DLUDUS_BUILD_EDITOR=ON", *qt_args])
+        engine.cmake_configure(root, args.preset, ["-DLUDUS_BUILD_EDITOR=ON", *preview_args, *qt_args])
         engine.cmake_build(root, args.preset, ["--target", "ludus_editor"])
         return
     if not args.no_system_install:
@@ -71,5 +90,5 @@ def setup_editor(args, engine) -> None:
         print("Using existing Qt 6.4+ packages for the optional editor (--no-system-install).")
 
     cmake_targets.query_codemodel(engine.build_dir_for_preset(root, args.preset), "ludus-editor")
-    engine.cmake_configure(root, args.preset, ["-DLUDUS_BUILD_EDITOR=ON"])
+    engine.cmake_configure(root, args.preset, ["-DLUDUS_BUILD_EDITOR=ON", *preview_args])
     engine.cmake_build(root, args.preset, ["--target", "ludus_editor"])

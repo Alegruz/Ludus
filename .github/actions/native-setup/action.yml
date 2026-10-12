@@ -29,7 +29,9 @@ runs:
       run: |
         packages=(gdb clang-18 llvm-18 lld-18 clang-format-18 clang-tidy-18 python3-venv ccache libwayland-dev wayland-protocols libwayland-bin)
         if [[ "$WITH_EDITOR" == true ]]; then
-          packages+=(qt6-base-dev qt6-wayland)
+          # Preview is included in editor setup; offscreen rendering tests
+          # still need a Vulkan loader and Mesa's software device.
+          packages+=(qt6-base-dev qt6-wayland libvulkan1 mesa-vulkan-drivers)
         fi
         # Stalled package mirrors must fail promptly so the job can be retried.
         apt_options=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3)

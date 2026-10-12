@@ -117,7 +117,16 @@ managed Python venv). Qt is not added to Conan or the SDK. Default initializatio
 skips editor setup; select **Build Ludus editor** in the setup window or use
 `./init.sh --cli --with-editor` to install missing Ubuntu/Debian Qt packages or
 Homebrew `qtbase` on macOS and
-build the selected native Debug, Development or ASan/UBSan editor. `--no-editor` explicitly
+build the selected native Debug, Development or ASan/UBSan editor with 3D preview.
+Editor setup also acquires the checksum-verified pinned shader tools: Slang on
+macOS, plus SPIR-V Tools on Linux. In **Advanced setup**, clear **Include 3D
+preview and pinned shader tools** for a lightweight document-only editor, or use
+`--no-editor-preview` with `--with-editor` in the CLI. That path skips shader-tool
+setup and explicitly disables rendering, including in an existing build cache.
+The preview choice is saved for the selected editor preset and applies to later
+script, direct CMake and IDE builds. `--no-system-install` skips system package
+installation; it does not skip the managed shader tools when preview is enabled.
+`--no-editor` explicitly
 disables the editor for the prepared presets. Initialization also excludes test
 targets by default; use `--with-tests` to include editor tests or `--run-tests` to
 build and execute the enabled tests after setup.
@@ -143,11 +152,14 @@ The editor is gated behind `LUDUS_BUILD_EDITOR` (OFF by default). Configure a
 native preset with the option ON using the managed CMake, then build the target:
 
 ```bash
-./init.sh --cli --with-editor                # optional Qt prerequisites + editor build
+./init.sh --cli --with-editor                # Qt + pinned shader tools + rendered editor
 # Or manage Qt and the editor build yourself:
 ./init.sh                                   # pinned tools + managed venv (once)
 # Editor ON configure/build (managed cmake shown as `cmake` for brevity):
-cmake --preset linux-clang-development -DLUDUS_USE_INIT_OPTIONS=OFF -DLUDUS_BUILD_EDITOR=ON
+./scripts/shader-probe bootstrap
+cmake --preset linux-clang-development -DLUDUS_USE_INIT_OPTIONS=OFF -DLUDUS_BUILD_EDITOR=ON \
+  -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" \
+  -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val"
 cmake --build --preset linux-clang-development --target ludus_editor
 ```
 
@@ -690,9 +702,19 @@ runtime and Editor use the original codec and canonical authored-ID ordering.
 
 ### Enable the rendered authoring surface
 
-The normal Editor build supports document work without shader tools. For a
-trusted native rendered preview, explicitly prepare the pinned tools and select
-`LUDUS_EDITOR_RENDER_PREVIEW`. For Linux:
+Native editor builds enable `LUDUS_EDITOR_RENDER_PREVIEW` by default. Normal
+`init.sh` editor setup prepares the pinned tools and builds preview automatically:
+
+```bash
+./init.sh --cli linux-clang-development --preset-only --with-editor
+```
+
+For a lightweight document-only build, use `--with-editor --no-editor-preview`
+or clear the preview checkbox in **Advanced setup**. Manual CMake builds can use
+`-DLUDUS_EDITOR_RENDER_PREVIEW=OFF`; browser editor builds keep preview off by
+default. Existing manual CMake caches retain their explicit option value.
+
+To prepare tools and select additional rendered sample targets manually on Linux:
 
 ```bash
 ./init.sh --cli linux-clang-development --preset-only --with-editor --with-tests

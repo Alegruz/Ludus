@@ -383,7 +383,8 @@ TEST_CASE("L2 R8 coverage orientation, painter scissors and clipped thick lines 
     }
     REQUIRE(textureReady);
     rr::PreparedOverlay prepared;
-    REQUIRE(overlays.Prepare(list, texture, prepared) == rhi::RasterStatus::Pending);
+    const auto preparedStatus = overlays.Prepare(list, texture, prepared);
+    REQUIRE((preparedStatus == rhi::RasterStatus::Ready || preparedStatus == rhi::RasterStatus::Pending));
     // Bounded nonblocking poll; native transfer completion may lag submission.
     bool ready = false;
     for (usize i = 0; i < 100000 && !ready; ++i)

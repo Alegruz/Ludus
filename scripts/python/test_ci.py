@@ -23,6 +23,25 @@ import web_build
 class NativePrerequisiteTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
 
+    def test_rendered_editor_setup_installs_software_vulkan_before_initialization(self):
+        action = (self.ROOT / ".github/actions/native-setup/action.yml").read_text()
+        step = action.split("    - name: Install native prerequisites\n", 1)[1]
+        command = step.split("      run: |\n", 1)[1].split("    - name:", 1)[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name, body in (("timeout", 'shift 3; exec "$@"'), ("sudo", 'exec "$@"'),
+                               ("apt-get", 'printf "%s\n" "$@"')):
+                tool = root / name
+                tool.write_text("#!/bin/sh\n" + body + "\n")
+                tool.chmod(0o755)
+            for editor in ("false", "true"):
+                environment = {**os.environ, "PATH": str(root), "WITH_EDITOR": editor}
+                result = subprocess.run(["/bin/bash", "-e", "-c", command], env=environment,
+                                        capture_output=True, text=True, check=True)
+                arguments = result.stdout.splitlines()
+                for package in ("qt6-base-dev", "qt6-wayland", "libvulkan1", "mesa-vulkan-drivers"):
+                    self.assertEqual(package in arguments, editor == "true", package)
+
     @unittest.skipUnless(shutil.which("timeout"), "GNU timeout is provided by the Linux CI runner")
     def test_silent_package_update_has_a_wall_clock_deadline(self):
         action = (self.ROOT / ".github/actions/native-setup/action.yml").read_text()
