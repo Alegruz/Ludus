@@ -202,9 +202,15 @@ class SanitizerDriverTests(TemporaryTest):
         path.chmod(0o755)
         return path
 
-    def verify(self, body):
+    def verify(self, body, kind="ubsan"):
         with contextlib.redirect_stdout(io.StringIO()):
-            return sanitizer_control.verify("ubsan", self.child(body), self.root / "evidence", "none")
+            return sanitizer_control.verify(kind, self.child(body), self.root / "evidence", "none")
+
+    def test_tsan_requires_its_specific_fatal_finding(self):
+        self.assertFalse(self.verify("sys.exit(0)\n", "tsan"))
+        self.assertFalse(self.verify("if len(sys.argv)>1:\n print('WARNING: ThreadSanitizer: data race'); sys.exit(0)\n", "tsan"))
+        self.assertFalse(self.verify("sys.exit(66 if len(sys.argv)>1 else 0)\n", "tsan"))
+        self.assertTrue(self.verify("if len(sys.argv)>1:\n print('WARNING: ThreadSanitizer: data race'); sys.exit(66)\n", "tsan"))
 
     def test_recoverable_finding_is_a_failure(self):
         self.assertFalse(self.verify("if len(sys.argv)>1: print('runtime error: signed integer overflow')\n"))

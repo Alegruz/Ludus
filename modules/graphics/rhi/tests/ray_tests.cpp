@@ -175,3 +175,97 @@ TEST_CASE("Native RT0 filters opacity, traces offscreen instances and retains de
     CHECK(stats.BuildScratchBytes == 0);
     REQUIRE(rhi::DestroyDevice(device) == rhi::DeviceStatus::Ready);
 }
+
+TEST_CASE("RT0 budgeted records and instances exceed legacy ceilings with retained identities",
+          "[rhi][gpu][ray][capacity]")
+{
+    rhi::Shutdown();
+    struct Guard final
+    {
+        ~Guard() noexcept
+        {
+            rhi::Shutdown();
+        }
+    } guard;
+    rhi::DeviceHandle device;
+    rhi::SurfaceHandle surface;
+    rhi::DeviceDescription description;
+    description.Required.PortableRaster = true;
+    description.Preferred.RayQueries = true;
+    description.Storage.RayResourcesPerKind = 72;
+    description.Storage.RayInstances = 513;
+    REQUIRE(rhi::CreateDevice({},
+                              {
+                                  .Width = 8,
+                                  .Height = 8,
+                              },
+                              description,
+                              device,
+                              surface) == rhi::DeviceStatus::Ready);
+    rhi::RayCapabilities capabilities;
+    if (rhi::GetRayCapabilities(device, capabilities) == rhi::RasterStatus::Unsupported)
+    {
+        SKIP("Optional native ray queries unavailable");
+    }
+    REQUIRE(capabilities.MaxInstances == 513);
+    const float32 positions[]{-1, -1, 0, 1, -1, 0, 0, 1, 0};
+    const uint32 indices[]{0, 1, 2};
+    const rhi::RayGeometryDescription mesh{positions, 3, indices, 3, nullptr, usize{16} * 1024 * 1024};
+    rhi::RayGeometryHandle geometries[72];
+    for (auto& geometry : geometries)
+    {
+        REQUIRE(rhi::CreateRayGeometry(device, mesh, geometry) == rhi::RasterStatus::Pending);
+        REQUIRE(Poll(device, geometry) == rhi::RasterStatus::Ready);
+    }
+    rhi::RayGeometryHandle excess;
+    CHECK(rhi::CreateRayGeometry(device, mesh, excess) == rhi::RasterStatus::CapacityExceeded);
+    CHECK(rhi::GetStatus(device, excess) == rhi::RasterStatus::InvalidHandle);
+    rhi::RayInstanceDescription instances[514];
+    for (usize i = 0; i < 514; ++i)
+    {
+        instances[i].Geometry = geometries[i % 72];
+        instances[i].Transform[3] = static_cast<float32>(i * 3);
+    }
+    rhi::RaySceneHandle scene;
+    CHECK(rhi::CreateRayScene(device, {instances, 514, usize{16} * 1024 * 1024}, scene) ==
+          rhi::RasterStatus::InvalidDescription);
+    CHECK(rhi::GetStatus(device, scene) == rhi::RasterStatus::InvalidHandle);
+    REQUIRE(rhi::CreateRayScene(device, {instances, 513, usize{16} * 1024 * 1024}, scene) ==
+            rhi::RasterStatus::Pending);
+    REQUIRE(Poll(device, scene) == rhi::RasterStatus::Ready);
+    const auto staleGeometry = geometries[71];
+    for (auto& geometry : geometries)
+    {
+        REQUIRE(rhi::Destroy(device, geometry) == rhi::RasterStatus::Ready);
+    }
+    CHECK(rhi::CreateRayGeometry(device, mesh, excess) == rhi::RasterStatus::CapacityExceeded);
+    rhi::RayQueryProgram program;
+    REQUIRE(rhi::CreateRayQueryProgram(device, ludus::shaders::ray_query::Query(), program) ==
+            rhi::RasterStatus::Ready);
+    const uint32 identities[]{0, 64, 512};
+    rhi::RayInput rays[3];
+    for (usize i = 0; i < 3; ++i)
+    {
+        rays[i].Origin[0] = static_cast<float32>(identities[i] * 3);
+        rays[i].Origin[2] = 1;
+    }
+    rhi::RayQueryBatch batch;
+    REQUIRE(rhi::SubmitRayQueries(device, program, scene, rays, 3, batch) == rhi::RasterStatus::Pending);
+    REQUIRE(rhi::Destroy(device, scene) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::Destroy(device, program) == rhi::RasterStatus::Ready);
+    REQUIRE(Poll(device, batch) == rhi::RasterStatus::Ready);
+    CHECK(rhi::CreateRayGeometry(device, mesh, excess) == rhi::RasterStatus::CapacityExceeded);
+    rhi::RayResult results[3];
+    REQUIRE(rhi::ReadRayResults(device, batch, results, 3) == rhi::RasterStatus::Ready);
+    for (usize i = 0; i < 3; ++i)
+    {
+        CHECK(results[i].Hit == 1);
+        CHECK(results[i].Instance == identities[i]);
+        CHECK(results[i].Distance == 1);
+    }
+    REQUIRE(rhi::Destroy(device, batch) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::CreateRayGeometry(device, mesh, excess) == rhi::RasterStatus::Pending);
+    REQUIRE(Poll(device, excess) == rhi::RasterStatus::Ready);
+    CHECK(rhi::GetStatus(device, staleGeometry) == rhi::RasterStatus::InvalidHandle);
+    REQUIRE(rhi::Destroy(device, excess) == rhi::RasterStatus::Ready);
+}

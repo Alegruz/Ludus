@@ -30,26 +30,23 @@ int main(int argumentCount, char**)
     value = value + argumentCount;
     return value == 0 ? 1 : 0;
 #elif defined(LUDUS_CONTROL_TSAN)
+    // Thanks to LLVM, "ThreadSanitizer", Clang 18.1.8, Usage (tiny_race.c),
+    // for conflicting parent/worker writes before join. Adapted to std::thread,
+    // a pre-write start gate and an isolated volatile slot; no post-write rendezvous.
+    // https://releases.llvm.org/18.1.8/tools/clang/docs/ThreadSanitizer.html
     std::atomic<bool> ready{false};
-    std::atomic<ludus::foundation::uint32> completed{0};
-    volatile int32 value = 0;
-    auto write = [&ready, &completed, &value](int32 input) {
+    alignas(64) volatile int32 value = 0;
+    std::thread worker([&ready, &value] {
         while (!ready.load(std::memory_order_acquire))
         {
         }
-        value = input;
-        // Keep both writers alive until both volatile accesses occur. Relaxed
-        // atomics deliberately leave the writes unordered for the race control.
-        completed.fetch_add(1, std::memory_order_relaxed);
-        while (completed.load(std::memory_order_relaxed) != 2)
-        {
-        }
-    };
-    std::thread first(write, 1);
-    std::thread second(write, 2);
+        value = 1;
+    });
+    // Both writes follow the release; neither write happens-before the other.
+    // Keep atomics on separate storage and all synchronization before the defect.
     ready.store(true, std::memory_order_release);
-    first.join();
-    second.join();
+    value = 2;
+    worker.join();
     return value == 0 ? 1 : 0;
 #else
 #    error A sanitizer control kind is required

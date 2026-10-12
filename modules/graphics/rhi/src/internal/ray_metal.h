@@ -20,7 +20,7 @@ struct RayMetalScene final
     id<MTLAccelerationStructure> Structure = nil;
     id<MTLBuffer> Instances = nil, Opacity = nil, Scratch = nil;
     id<MTLCommandBuffer> Command = nil;
-    foundation::usize Geometries[internal::RASTER_CAPACITY]{};
+    internal::StorageArray<foundation::usize> Geometries;
     foundation::usize GeometryCount = 0;
 };
 struct RayMetalBatch final
@@ -29,10 +29,10 @@ struct RayMetalBatch final
     id<MTLCommandBuffer> Command = nil;
     foundation::usize Count = 0;
 };
-RayMetalGeometry gRayMetalGeometry[internal::RASTER_CAPACITY];
-RayMetalScene gRayMetalScene[internal::RASTER_CAPACITY];
-RayMetalBatch gRayMetalBatch[internal::RASTER_CAPACITY];
-id<MTLComputePipelineState> gRayMetalPrograms[internal::RASTER_CAPACITY]{};
+internal::StorageTable<RayMetalGeometry> gRayMetalGeometry;
+internal::StorageTable<RayMetalScene> gRayMetalScene;
+internal::StorageTable<RayMetalBatch> gRayMetalBatch;
+internal::StorageTable<id<MTLComputePipelineState>> gRayMetalPrograms;
 RasterStatus RayMetalCommandStatus(id<MTLCommandBuffer> command) noexcept
 {
     if (command == nil)
@@ -72,7 +72,7 @@ RayCapabilities RayLimits() noexcept
     {
         .StaticTriangles = true,
         .InlineQueries = true,
-        .MaxInstances = 256,
+        .MaxInstances = internal::CurrentStorageLimits().RayInstances,
         .MaxRays = 4096,
         .MaxBufferBytes =
             gDevice.maxBufferLength < usize{64} * 1024 * 1024 ? gDevice.maxBufferLength : usize{64} * 1024 * 1024,
@@ -80,6 +80,10 @@ RayCapabilities RayLimits() noexcept
 }
 RasterStatus RayCreateProgram(usize slot, const ShaderDescription& description) noexcept
 {
+    if (!gRayMetalPrograms.EnsureSlots(slot + 1))
+    {
+        return internal::StorageFailure();
+    }
     @autoreleasepool
     {
         if (description.Msl.empty() || description.MslEntry.empty())
@@ -164,6 +168,10 @@ RasterStatus RayCreateProgram(usize slot, const ShaderDescription& description) 
 }
 RasterStatus RayCreateGeometry(usize slot, const RayGeometryDescription& d, RayAllocation& allocation) noexcept
 {
+    if (!gRayMetalGeometry.EnsureSlots(slot + 1))
+    {
+        return internal::StorageFailure();
+    }
     @autoreleasepool
     {
         const usize vertexBytes = d.VertexCount * 3 * sizeof(float32), indexBytes = d.IndexCount * sizeof(uint32);
@@ -223,6 +231,10 @@ RasterStatus RayCreateGeometry(usize slot, const RayGeometryDescription& d, RayA
 RasterStatus
 RayCreateScene(usize slot, const internal::NativeRaySceneDescription& description, RayAllocation& allocation) noexcept
 {
+    if (!gRayMetalScene.EnsureSlots(slot + 1))
+    {
+        return internal::StorageFailure();
+    }
     const auto* input = description.Instances;
     const auto* opacity = description.Opacity;
     const auto count = description.Count, scalarCount = description.ScalarCount, budget = description.ByteBudget;
@@ -236,6 +248,10 @@ RayCreateScene(usize slot, const internal::NativeRaySceneDescription& descriptio
             return RasterStatus::CapacityExceeded;
         }
         RayMetalScene scene;
+        if (!scene.Geometries.TryResize(count))
+        {
+            return internal::StorageFailure();
+        }
         scene.Instances = [gDevice newBufferWithLength:instanceBytes options:MTLResourceStorageModeShared];
         scene.Opacity = [gDevice newBufferWithBytes:opacity length:opacityBytes options:MTLResourceStorageModeShared];
         if (scene.Instances == nil || scene.Opacity == nil)
@@ -243,7 +259,7 @@ RayCreateScene(usize slot, const internal::NativeRaySceneDescription& descriptio
             return RasterStatus::OutOfMemory;
         }
         auto* instances = static_cast<MTLAccelerationStructureInstanceDescriptor*>(scene.Instances.contents);
-        id<MTLAccelerationStructure> structures[internal::RASTER_CAPACITY]{};
+        auto* structures = [NSMutableArray<id<MTLAccelerationStructure>> array];
         for (usize i = 0; i < count; ++i)
         {
             const auto& source = input[i];
@@ -255,7 +271,7 @@ RayCreateScene(usize slot, const internal::NativeRaySceneDescription& descriptio
             if (index == scene.GeometryCount)
             {
                 scene.Geometries[index] = source.Geometry;
-                structures[index] = gRayMetalGeometry[source.Geometry].Structure;
+                [structures addObject:gRayMetalGeometry[source.Geometry].Structure];
                 ++scene.GeometryCount;
             }
             auto& instance = instances[i];
@@ -273,7 +289,7 @@ RayCreateScene(usize slot, const internal::NativeRaySceneDescription& descriptio
         auto* descriptor = [MTLInstanceAccelerationStructureDescriptor descriptor];
         descriptor.instanceDescriptorBuffer = scene.Instances;
         descriptor.instanceCount = count;
-        descriptor.instancedAccelerationStructures = [NSArray arrayWithObjects:structures count:scene.GeometryCount];
+        descriptor.instancedAccelerationStructures = structures;
         const auto sizes = [gDevice accelerationStructureSizesWithDescriptor:descriptor];
         if (!RayMetalSizes(sizes, instanceBytes + opacityBytes, budget, allocation))
         {
@@ -297,13 +313,17 @@ RayCreateScene(usize slot, const internal::NativeRaySceneDescription& descriptio
                               scratchBuffer:scene.Scratch
                         scratchBufferOffset:0];
         [encoder endEncoding];
-        gRayMetalScene[slot] = scene;
-        [scene.Command commit];
+        gRayMetalScene[slot] = Move(scene);
+        [gRayMetalScene[slot].Command commit];
         return RasterStatus::Pending;
     }
 }
 RasterStatus RaySubmit(usize slot, const internal::NativeRaySubmission& submission, RayAllocation& allocation) noexcept
 {
+    if (!gRayMetalBatch.EnsureSlots(slot + 1))
+    {
+        return internal::StorageFailure();
+    }
     const auto program = submission.Program, scene = submission.Scene, count = submission.Count;
     const auto* rays = submission.Rays;
 
@@ -388,38 +408,44 @@ RasterStatus RayRead(usize slot, RayResult* output, usize count) noexcept
 }
 void RayDestroy(internal::RasterKind kind, usize slot) noexcept
 {
-    if (kind == internal::RasterKind::RayGeometry)
+    if (kind == internal::RasterKind::RayGeometry && slot < gRayMetalGeometry.GetSize())
     {
         gRayMetalGeometry[slot] = {};
     }
-    else if (kind == internal::RasterKind::RayScene)
+    else if (kind == internal::RasterKind::RayScene && slot < gRayMetalScene.GetSize())
     {
         gRayMetalScene[slot] = {};
     }
-    else if (kind == internal::RasterKind::RayBatch)
+    else if (kind == internal::RasterKind::RayBatch && slot < gRayMetalBatch.GetSize())
     {
         gRayMetalBatch[slot] = {};
     }
-    else if (kind == internal::RasterKind::RayProgram)
+    else if (kind == internal::RasterKind::RayProgram && slot < gRayMetalPrograms.GetSize())
     {
         gRayMetalPrograms[slot] = nil;
     }
 }
 void RayDrain() noexcept
 {
-    for (usize i = 0; i < internal::RASTER_CAPACITY; ++i)
+    for (auto& batch : gRayMetalBatch)
     {
-        if (gRayMetalBatch[i].Command != nil)
+        if (batch.Command != nil)
         {
-            [gRayMetalBatch[i].Command waitUntilCompleted];
+            [batch.Command waitUntilCompleted];
         }
-        if (gRayMetalScene[i].Command != nil)
+    }
+    for (auto& scene : gRayMetalScene)
+    {
+        if (scene.Command != nil)
         {
-            [gRayMetalScene[i].Command waitUntilCompleted];
+            [scene.Command waitUntilCompleted];
         }
-        if (gRayMetalGeometry[i].Command != nil)
+    }
+    for (auto& geometry : gRayMetalGeometry)
+    {
+        if (geometry.Command != nil)
         {
-            [gRayMetalGeometry[i].Command waitUntilCompleted];
+            [geometry.Command waitUntilCompleted];
         }
     }
 }

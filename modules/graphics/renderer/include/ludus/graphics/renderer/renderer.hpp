@@ -167,7 +167,7 @@ struct ViewDescription final
     /// Canonical overlay crop transform, applied independently of the world camera.
     ludus::foundation::math::Matrix4 OverlayToClip = ludus::foundation::math::Matrix4::Identity();
 };
-/// Bounded packet report, copied to caller storage; source IDs follow actual draw/instance order.
+/// Packet counts and a diagnostic prefix, copied to caller storage; IDs follow draw/instance order.
 struct ViewReport final
 {
     /// Number of submitted snapshot objects.
@@ -188,30 +188,46 @@ struct ViewReport final
     ludus::foundation::uint32 BoundsTests = 0;
     /// Number of visible objects selecting coarse detail.
     ludus::foundation::uint32 LodObjects = 0;
-    /// Coarse selections in the same order as SourceIds; feed back by source identity for hysteresis.
+    /// First Reported coarse selections; feed back by source identity for hysteresis.
     bool SelectedLods[256]{};
-    /// Actual per-instance source order; first Visible entries are meaningful.
+    /// First Reported source identities in actual per-instance order.
     ludus::foundation::uint64 SourceIds[256]{};
+    /// Number of meaningful entries in the inline arrays, min(Visible, 256).
+    ludus::foundation::uint32 Reported = 0;
+    /// Optional borrowed full-order output, written only after successful preparation.
+    /// Null omits this output; otherwise DetailCapacity must accommodate every visible object.
+    ludus::foundation::uint64* SourceIdOutput = nullptr;
+    /// Optional borrowed full-order LOD output with the same capacity contract.
+    bool* SelectedLodOutput = nullptr;
+    /// Caller-provided element capacity for either nonnull output array. Failure preserves both arrays.
+    ludus::foundation::usize DetailCapacity = 0;
 };
-/// Fixed logical budgets; RHI resources shared with other consumers may exhaust earlier.
+/// Initialization-time renderer capacities. All counts are positive and below UINT32_MAX.
+/// Metadata and per-view/snapshot workspaces are reserved once; no runtime pool growth.
+/// Detached incarnations consume slots until their renderer references retire.
+/// RHI byte/resource/packet budgets are independent and may exhaust earlier.
 struct Limits final
 {
-    /// Six resident/retained meshes (two RHI buffers each).
+    /// Maximum resident/retained meshes (two RHI buffers each).
     ludus::foundation::uint32 Meshes = 6;
-    /// Four resident/retained snapshots.
+    /// Maximum resident/retained snapshots.
     ludus::foundation::uint32 Snapshots = 4;
-    /// Eight prepared views, including up to four shadow light views.
+    /// Maximum prepared views, including shadow light views.
     ludus::foundation::uint32 Views = 8;
-    /// At most 256 scene objects and draw packets per snapshot/view.
+    /// Maximum objects and draw packets per snapshot/view; must fit RHI DrawsPerFrame.
     ludus::foundation::uint32 Objects = 256;
-    /// Four retained target presentations, each consuming one RHI vertex buffer and binding set.
+    /// Maximum retained target presentations, each consuming RHI buffers and binding sets.
     ludus::foundation::uint32 Presentations = 4;
-    /// Two overlapping prewarmed shader/layout incarnations for reload.
+    /// Maximum overlapping prewarmed shader/layout incarnations for reload.
     ludus::foundation::uint32 MaterialPrograms = 2;
-    /// Eight live/retained immutable parameter and texture versions.
+    /// Maximum live/retained immutable parameter and texture versions.
     ludus::foundation::uint32 Materials = 8;
-    /// Two resident/retained immutable shadow atlases for overlap and replacement.
+    /// Maximum resident/retained immutable shadow atlases for overlap and replacement.
     ludus::foundation::uint32 ShadowAtlases = 2;
+    /// Positive byte ceiling for State, registry records and all reserved CPU workspaces.
+    /// Excludes allocator overhead, transient mesh upload conversion, RT1's separately budgeted
+    /// CPU data, RHI resources and driver allocations. Exhaustion returns CapacityExceeded.
+    ludus::foundation::usize HostBytes = ludus::foundation::usize{64} * 1024 * 1024;
 };
 /// Portable flat/unlit/lit renderer, one owner thread per device.
 /// Setup copies data and may allocate/create GPU resources. Repeated Submit creates
@@ -236,9 +252,11 @@ public:
     /// @param device Borrowed ready device, which must outlive this renderer.
     /// @param vertex Cooked vertex description from the installed shader helper.
     /// @param fragment Cooked fragment description from the same flat program.
+    /// @param limits Copied capacities and host budget; invalid/overflowing requests preserve uninitialized state.
     [[nodiscard]] rhi::RasterStatus Initialize(rhi::DeviceHandle device,
                                                const rhi::RasterShaderDescription& vertex,
-                                               const rhi::RasterShaderDescription& fragment) noexcept;
+                                               const rhi::RasterShaderDescription& fragment,
+                                               const Limits& limits = {}) noexcept;
     /// Advance asynchronous shader/layout/pipeline setup without blocking. Ready permits scene setup.
     /// Pending/failure retains ownership until Reset; no automatic backend switch.
     [[nodiscard]] rhi::RasterStatus Poll() noexcept;
@@ -389,8 +407,13 @@ public:
     /// Release all public identities/resources; accepted CPU/GPU uses retire through RHI.
     /// @pre Owner thread, no open frame; invalidates every previously issued logical handle.
     void Reset() noexcept;
-    /// Return fixed logical budgets (not a promise of unoccupied RHI capacity).
+    /// Return compatibility defaults; use GetConfiguredLimits for an initialized renderer.
     [[nodiscard]] static Limits GetLimits() noexcept;
+    /// Copied configured capacities, or defaults while uninitialized. Owner-thread only.
+    [[nodiscard]] Limits GetConfiguredLimits() const noexcept;
+    /// Reserved renderer metadata/workspace bytes, zero while uninitialized.
+    /// Exclusions match Limits::HostBytes; this is requested storage, not physical memory usage.
+    [[nodiscard]] ludus::foundation::usize GetHostBytes() const noexcept;
     /// Copy geometry and derive exact mesh-local bounds. Null output required.
     /// Ready/Pending publishes mesh ownership; rejected input preserves output.
     [[nodiscard]] rhi::RasterStatus CreateMesh(const MeshDescription& description, Mesh& output) noexcept;

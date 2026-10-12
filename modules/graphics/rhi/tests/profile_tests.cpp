@@ -78,6 +78,8 @@ TEST_CASE("Profile requests are copied and enabled snapshots are invalidated by 
     CHECK(info.Profile.Storage.Submissions == 0);
     CHECK(info.Profile.Storage.HostBytes == 0);
     CHECK(info.Profile.Storage.ResourceBytes == 0);
+    CHECK(info.Profile.Storage.RayResourcesPerKind == 0);
+    CHECK(info.Profile.Storage.RayInstances == 0);
     CHECK(info.Profile.Storage.TransferSlices == 0);
     CHECK(info.Profile.Storage.TransferBytes == 0);
     CHECK(internal::CurrentDeviceProfile().Storage.ResourcesPerKind == 0);
@@ -113,6 +115,8 @@ TEST_CASE("Profile requests are copied and enabled snapshots are invalidated by 
     CHECK(info.Profile.Storage.Submissions == 0);
     CHECK(info.Profile.Storage.HostBytes == 0);
     CHECK(info.Profile.Storage.ResourceBytes == 0);
+    CHECK(info.Profile.Storage.RayResourcesPerKind == 0);
+    CHECK(info.Profile.Storage.RayInstances == 0);
     CHECK(info.Profile.Storage.TransferSlices == 0);
     CHECK(info.Profile.Storage.TransferBytes == 0);
     CHECK(internal::CurrentDeviceProfile().Storage.ResourcesPerKind == 0);

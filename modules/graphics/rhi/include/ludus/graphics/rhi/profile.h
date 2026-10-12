@@ -28,8 +28,13 @@ enum class RasterFormat : ludus::foundation::uint8
 struct StorageLimits final
 {
     /// Maximum live/pending/retained records of each general raster/compute resource kind.
-    /// Ray-query records retain their separate initial profile bounds.
     ludus::foundation::uint32 ResourcesPerKind = 64;
+    /// Maximum live/pending/retained records of each optional RT0 resource kind.
+    /// Native metadata uses stable budgeted pages, independent of raster resource counts.
+    ludus::foundation::uint32 RayResourcesPerKind = 64;
+    /// Requested maximum static TLAS instances; RayCapabilities reports the backend-clamped limit.
+    /// Instance inputs, opacity metadata, structures and scratch also require explicit byte budgets.
+    ludus::foundation::uint32 RayInstances = 256;
     /// Maximum accepted direct/indirect packets in one frame.
     ludus::foundation::uint32 DrawsPerFrame = 1024;
     /// Maximum independently retained command batches.
@@ -165,6 +170,8 @@ struct DeviceProfile final
     StorageLimits Storage
     {
         .ResourcesPerKind = 0,
+        .RayResourcesPerKind = 0,
+        .RayInstances = 0,
         .DrawsPerFrame = 0,
         .Batches = 0,
         .DrawsPerPlan = 0,
