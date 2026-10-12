@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""Collect paired L5 native correctness and CPU latency measurements; GPU timings remain unavailable."""
+import argparse
+import csv
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import subprocess
+
+
+def percentile(values, fraction):
+    ordered = sorted(values)
+    return ordered[min(len(ordered)-1, int((len(ordered)-1)*fraction))]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--executable', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--backend', choices=('metal', 'vulkan'), required=True)
+    parser.add_argument('--device', required=True, help='Actual adapter and driver identity; software adapters are not physical GPU evidence')
+    parser.add_argument('--runs', type=int, default=3)
+    args = parser.parse_args()
+    if not 1 <= args.runs <= 10:
+        parser.error('--runs must be 1..10')
+    args.output.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for run in range(args.runs):
+        process = subprocess.run([str(args.executable.resolve()), '[l5]'],
+            env={**os.environ, 'LUDUS_RENDERER_BENCHMARK':'1'}, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, check=False)
+        (args.output / f'run-{run}.log').write_text(process.stdout)
+        if process.returncode:
+            raise SystemExit(f'Correctness/benchmark failure: run-{run}.log')
+        expected = 'L5BACKEND,' + ('3' if args.backend == 'metal' else '0')
+        if expected not in process.stdout.splitlines():
+            raise SystemExit('Benchmark binary backend differs from --backend')
+        samples = [list(map(int, line[1:])) for line in csv.reader(process.stdout.splitlines()) if line and line[0] == 'L5']
+        if len(samples) != 576:
+            raise SystemExit(f'Incomplete measurement: {len(samples)} of 576 samples')
+        for scenario in range(3):
+            for reference in range(3):
+                selected = [s for s in samples if s[0] == scenario and s[1] == reference]
+                if sorted(s[2] for s in selected) != list(range(64)):
+                    raise SystemExit('Invalid paired sample identities')
+                result = {'run':run, 'scenario':('localized','overflow','outside-grid')[scenario],
+                    'variant':('clustered','direct-reference','direct-optimized')[reference], 'reference':reference == 1, 'samples':64, 'resolution':selected[0][7:9],
+                    'visible':selected[0][9], 'culled':selected[0][10], 'draws':selected[0][11],
+                    'bounds_tests':selected[0][12], 'known_scene_gpu_bytes':selected[0][13],
+                    'cold_scene_setup_cpu_ns':selected[0][3]}
+                for name, column in [('prepare_cpu_ns',4),('record_cpu_ns',5),('completion_readback_cpu_ns',6)]:
+                    values = [s[column] for s in selected]
+                    result[name] = {'median':percentile(values,.5),'p95':percentile(values,.95),'p99':percentile(values,.99)}
+                values = [s[4]+s[5]+s[6] for s in selected]
+                result['serialized_frame_cpu_ns'] = {'median':percentile(values,.5),'p95':percentile(values,.95),'p99':percentile(values,.99)}
+                rows.append(result)
+    root = Path(__file__).resolve().parent.parent
+    source_paths = [p for p in (root/'modules/graphics/renderer').rglob('*') if p.suffix in ('.cpp','.h','.hpp','.slang')]
+    source_paths += [root/'tests/sdk_consumer/l5_scene.h', root/'cmake/shaders/compile_raster.py', Path(__file__).resolve()]
+    report = {'source_base_revision':subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip(),
+        'source_files_sha256':{str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(source_paths)}, 'backend':args.backend,'device_driver':args.device,'host':platform.platform(),
+        'executable_sha256':hashlib.sha256(args.executable.read_bytes()).hexdigest(),
+        'tool_pins':{name:json.loads((root/'config'/name).read_text()) for name in ('tool_versions.json','shader_toolchain.json')},
+        'gpu_pass_time_ns':None, 'frames_in_flight':1,
+        'scope':'640x360 paired LDR microfixtures; 8 warmup + 64 samples. CPU clock including serialized completion/readback, not GPU timestamps. Known memory excludes driver/pipelines, retired versions and fixed renderer CPU storage. Cold setup excludes shader/pipeline prewarm. No AAA scene or throughput qualification.',
+        'results':rows}
+    (args.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
+    print(args.output/'report.json')
+
+
+if __name__ == '__main__':
+    main()
