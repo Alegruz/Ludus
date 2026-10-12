@@ -2,6 +2,7 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/graphics/rhi/profile.h>
 #include <ludus/graphics/rhi/raster.h>
 
 namespace ludus::graphics::rhi
@@ -16,22 +17,6 @@ private:
     ludus::foundation::uint32 Slot = 0;
     /// Grants shared registry access to this incarnation.
     friend struct internal::RasterAccess;
-};
-/// Bounded single-queue buffer compute profile; zero fields mean unavailable.
-/// Storage textures, atomics between queues and indirect dispatch are deferred.
-/// Layouts contain at most four storage bindings and eight total buffer bindings.
-struct ComputeCapabilities final
-{
-    /// Maximum storage binding range in bytes.
-    ludus::foundation::usize MaxStorageRange = 0;
-    /// Storage binding offset alignment in bytes.
-    ludus::foundation::usize StorageOffsetAlignment = 0;
-    /// Maximum local threads along each axis.
-    ludus::foundation::uint32 MaxWorkgroupSize[3]{};
-    /// Maximum product of local workgroup dimensions.
-    ludus::foundation::uint32 MaxWorkgroupInvocations = 0;
-    /// Maximum dispatched workgroups along each axis.
-    ludus::foundation::uint32 MaxDispatch[3]{};
 };
 /// Immutable compute stage and exact group-zero layout; dependencies must be ready.
 struct ComputePipelineDescription final

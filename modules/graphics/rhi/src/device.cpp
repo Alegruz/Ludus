@@ -3,6 +3,7 @@
 #include "internal/backend.h"
 #include "internal/device.h"
 #include "internal/lifecycle.h"
+#include "internal/profile.h"
 #include "internal/raster.h"
 
 namespace ludus::graphics::rhi
@@ -104,8 +105,14 @@ DeviceStatus ValidateDeviceDescription(const DeviceDescription& description) noe
     {
         return DeviceStatus::InvalidDescription;
     }
+    if (!internal::ValidProfileRequirements(description.RequiredProfile) ||
+        !internal::ValidProfileRequirements(description.PreferredProfile))
+    {
+        return DeviceStatus::InvalidDescription;
+    }
     return description.Selection == BackendSelection::WebGL2 &&
-                   (description.Required.Compute || description.Required.IndirectRendering)
+                   (description.Required.Compute || description.Required.IndirectRendering ||
+                    internal::NeedsCompute(description.RequiredProfile))
                ? DeviceStatus::Unsupported
                : DeviceStatus::Ready;
 }
@@ -140,14 +147,17 @@ DeviceStatus CreateDevice(const ApplicationInfo& application,
     {
         return DeviceStatus::IdentityExhausted;
     }
-    const auto result =
-        internal::StartOwned(application,
-                             window,
-                             description.Selection,
-                             description.Limits,
-                             description.Required.PortableRaster || description.Required.OrderedRasterGraph ||
-                                 description.Required.Compute || description.Required.IndirectRendering,
-                             description.Required.Compute || description.Required.IndirectRendering);
+    const auto result = internal::StartOwned(
+        application,
+        window,
+        description.Selection,
+        description.Limits,
+        description.Required.PortableRaster || description.Required.OrderedRasterGraph ||
+            description.Required.Compute || description.Required.IndirectRendering ||
+            internal::NeedsRaster(description.RequiredProfile) || internal::NeedsCompute(description.RequiredProfile),
+        description.Required.Compute || description.Required.IndirectRendering ||
+            internal::NeedsCompute(description.RequiredProfile),
+        description.RequiredProfile);
     if (result == StartStatus::Busy)
     {
         return DeviceStatus::InvalidState;
@@ -183,14 +193,24 @@ DeviceStatus GetDeviceInfo(DeviceHandle device, DeviceInfo& info) noexcept
     {
         info.Supported.FullscreenRaster = true;
         info.Enabled.FullscreenRaster = true;
-        info.Supported.PortableRaster = backend::RasterLimits().MaxUniformRange >= 16384;
+        info.Profile = internal::CurrentDeviceProfile();
+        info.Supported.PortableRaster = info.Profile.Raster.MaxUniformRange >= 16384;
         info.Enabled.PortableRaster = info.Supported.PortableRaster;
         info.Supported.OrderedRasterGraph = info.Supported.PortableRaster;
         info.Enabled.OrderedRasterGraph = info.Supported.OrderedRasterGraph;
-        info.Supported.Compute = info.Supported.PortableRaster && backend::ComputeLimits().MaxStorageRange != 0;
+        info.Supported.Compute = info.Supported.PortableRaster && info.Profile.Compute.MaxStorageRange != 0;
         info.Enabled.Compute = info.Supported.Compute;
         info.Supported.IndirectRendering = info.Supported.Compute;
         info.Enabled.IndirectRendering = info.Supported.IndirectRendering;
+        info.UnmetPreferences =
+        {
+            .FullscreenRaster = gDescription.Preferred.FullscreenRaster && !info.Enabled.FullscreenRaster,
+            .PortableRaster = gDescription.Preferred.PortableRaster && !info.Enabled.PortableRaster,
+            .Compute = gDescription.Preferred.Compute && !info.Enabled.Compute,
+            .IndirectRendering = gDescription.Preferred.IndirectRendering && !info.Enabled.IndirectRendering,
+            .OrderedRasterGraph = gDescription.Preferred.OrderedRasterGraph && !info.Enabled.OrderedRasterGraph,
+        };
+        info.UnmetProfilePreference = internal::CheckProfile(gDescription.PreferredProfile, info.Profile);
     }
     return state;
 }

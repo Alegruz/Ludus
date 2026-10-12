@@ -14,8 +14,13 @@ bool SessionBusy() noexcept;
 // True only while starting an owned session that requires the R4 profile.
 bool RequiresComputeProfile() noexcept;
 void FaultRasterSession() noexcept;
-StartStatus
-StartOwned(const ApplicationInfo&, const WindowInfo&, BackendSelection, const DeviceRequirements&, bool, bool) noexcept;
+StartStatus StartOwned(const ApplicationInfo&,
+                       const WindowInfo&,
+                       BackendSelection,
+                       const DeviceRequirements&,
+                       bool,
+                       bool,
+                       const DeviceProfileRequirements&) noexcept;
 // Numeric callback tokens never borrow application memory and never wrap.
 bool Current(ludus::foundation::uint32 token) noexcept;
 // Queried backend limits; the facade applies engine capacity/size granularity.

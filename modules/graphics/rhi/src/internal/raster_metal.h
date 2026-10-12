@@ -1,4 +1,6 @@
 #pragma once
+
+#include "profile.h"
 // Private implementation included only by rhi_metal.mm: native device/frame
 // ownership remains in the existing backend translation unit.
 // Thanks to Apple, "Resource Fundamentals", Metal Programming Guide (retained
@@ -93,6 +95,18 @@ bool RasterMetalBindings(NSArray<id<MTLBinding>>* bindings,
     return true;
 }
 } // namespace
+// Thanks to Apple, "Metal Feature Set Tables", ordinary 8/16/32-bit normalized formats.
+// https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf
+// Intersect guaranteed normalized formats and enabled HDR with implemented uses;
+// no storage/copy/MSAA or R8/RG8 attachment path is advertised.
+FormatCapabilities FormatLimits(RasterFormat format) noexcept
+{
+    return gDevice == nil ? FormatCapabilities{} : internal::PortableFormatLimits(format, RasterLimits());
+}
+uint32 RasterVertexStrideLimit() noexcept
+{
+    return 256;
+}
 RasterCapabilities RasterLimits() noexcept
 {
     const usize max = usize{64} * 1024 * 1024;

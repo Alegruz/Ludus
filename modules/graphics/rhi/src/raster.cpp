@@ -1,6 +1,7 @@
 #include <ludus/graphics/rhi/graph.h>
 
 #include "internal/lifecycle.h"
+#include "internal/profile.h"
 #include "internal/raster.h"
 
 #include <ludus/foundation/containers/array.hpp>
@@ -419,7 +420,7 @@ RasterStatus GetRasterCapabilities(DeviceHandle device, RasterCapabilities& outp
     {
         return admission;
     }
-    output = admission == RasterStatus::Ready ? backend::RasterLimits() : RasterCapabilities{};
+    output = admission == RasterStatus::Ready ? internal::CurrentDeviceProfile().Raster : RasterCapabilities{};
     return admission;
 }
 RasterStatus CreateBuffer(DeviceHandle device,
@@ -470,6 +471,24 @@ RasterStatus CreateBuffer(DeviceHandle device,
         return backend::RasterCreateBuffer(slot, description, bytes, record.Request);
     });
 }
+RasterStatus GetFormatCapabilities(DeviceHandle device, RasterFormat format, FormatCapabilities& output) noexcept
+{
+    if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Rgba16Float))
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    const auto admission = Admission(device, false);
+    if (admission != RasterStatus::Ready)
+    {
+        if (admission != RasterStatus::InvalidHandle)
+        {
+            output = {};
+        }
+        return admission;
+    }
+    output = internal::CurrentDeviceProfile().Formats[static_cast<usize>(format)];
+    return output.Uses.Sampled ? RasterStatus::Ready : RasterStatus::Unsupported;
+}
 RasterStatus CreateTexture(DeviceHandle device,
                            const TextureDescription& description,
                            const TextureUpload& upload,
@@ -492,16 +511,16 @@ RasterStatus CreateTexture(DeviceHandle device,
     {
         return RasterStatus::InvalidDescription;
     }
-    if (description.Format == RasterFormat::Rgba16Float)
+    if (description.Format == RasterFormat::Rgba16Float && !description.Attachment)
     {
-        if (!description.Attachment)
-        {
-            return RasterStatus::Unsupported;
-        }
-        if (!textureLimits.HdrColor)
-        {
-            return RasterStatus::Unsupported;
-        }
+        return RasterStatus::Unsupported;
+    }
+    const auto format = internal::CurrentDeviceProfile().Formats[static_cast<usize>(description.Format)];
+    const auto dimension = description.Attachment ? format.MaxAttachmentDimension2D : format.MaxSampledDimension2D;
+    if (!format.Uses.Sampled || !format.Uses.Filterable || (description.Attachment && !format.Uses.ColorAttachment) ||
+        description.Width > dimension || description.Height > dimension || description.MipLevels > format.MaxMipLevels)
+    {
+        return RasterStatus::Unsupported;
     }
     uint32 levels = 1;
     for (uint32 extent = description.Width > description.Height ? description.Width : description.Height; extent > 1;
@@ -924,9 +943,16 @@ ValidatePipeline(DeviceHandle device, const RasterPipelineDescription& descripti
     {
         return RasterStatus::InvalidDescription;
     }
-    if (description.Target == RasterTarget::Rgba16Float && !backend::RasterLimits().HdrColor)
+    if (description.Target != RasterTarget::Surface)
     {
-        return RasterStatus::Unsupported;
+        const auto format = description.Target == RasterTarget::Rgba16Float  ? RasterFormat::Rgba16Float
+                            : description.Target == RasterTarget::Rgba8Unorm ? RasterFormat::Rgba8Unorm
+                                                                             : RasterFormat::Rgba8Srgb;
+        const auto capabilities = internal::CurrentDeviceProfile().Formats[static_cast<usize>(format)];
+        if (!capabilities.Uses.ColorAttachment || (description.Blend && !capabilities.Uses.Blendable))
+        {
+            return RasterStatus::Unsupported;
+        }
     }
     info.Blend = description.Blend;
     info.Target = description.Target;
@@ -941,7 +967,8 @@ ValidatePipeline(DeviceHandle device, const RasterPipelineDescription& descripti
     for (usize i = 0; i < info.StreamCount; ++i)
     {
         const auto& stream = description.Streams[i];
-        if (stream.Stride == 0 || stream.Stride > 256 || stream.Stride % 4 != 0)
+        if (stream.Stride == 0 || stream.Stride > internal::CurrentDeviceProfile().Interface.MaxVertexStride ||
+            stream.Stride % 4 != 0)
         {
             return RasterStatus::InvalidDescription;
         }

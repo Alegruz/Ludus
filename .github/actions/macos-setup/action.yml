@@ -1,0 +1,70 @@
+name: Prepare macOS CI
+description: Prepare pinned macOS tools with locked dependency and compiler caches
+inputs:
+  preset:
+    description: Native preset to prepare
+    required: true
+  cache-variant:
+    description: Compiler and dependency cache owner (native or sanitizers)
+    default: native
+runs:
+  using: composite
+  steps:
+    - name: Install upstream Clang 18 and native prerequisites
+      shell: bash
+      run: brew install llvm@18 qtbase ccache
+    # Match Linux cache policy: locked dependency identities and rolling compiler
+    # snapshots. Do not cache CMake trees, SDKs, shims or generated preset files.
+    - name: Restore locked macOS dependencies
+      id: dependencies
+      uses: actions/cache/restore@v4
+      with:
+        path: out/conan/home
+        key: conan-macos-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cache-variant }}-${{ hashFiles('conanfile.py', 'conan.lock', 'third_party/**', 'config/conan/**', 'config/tool_versions.json', 'CMakePresets.json') }}
+    - name: Restore macOS compiler outputs
+      id: compiler
+      uses: actions/cache/restore@v4
+      with:
+        path: out/ccache
+        key: ccache-macos-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**', 'config/luau_toolchain.json') }}-${{ github.sha }}
+        restore-keys: |
+          ccache-macos-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cache-variant }}-${{ hashFiles('config/tool_versions.json', 'config/conan/**', 'config/luau_toolchain.json') }}-
+    - name: Configure compiler caching
+      shell: bash
+      run: |
+        ccache_program="$(command -v ccache)"
+        echo "CCACHE_DIR=$GITHUB_WORKSPACE/out/ccache" >> "$GITHUB_ENV"
+        echo 'LUDUS_ENABLE_CCACHE=1' >> "$GITHUB_ENV"
+        # CMake environment defaults also cover independent SDK consumers and
+        # Luau host tools; the engine configures its C/C++ launchers explicitly.
+        echo "CMAKE_C_COMPILER_LAUNCHER=$ccache_program" >> "$GITHUB_ENV"
+        echo "CMAKE_CXX_COMPILER_LAUNCHER=$ccache_program" >> "$GITHUB_ENV"
+        echo "CMAKE_OBJCXX_COMPILER_LAUNCHER=$ccache_program" >> "$GITHUB_ENV"
+        CCACHE_DIR="$GITHUB_WORKSPACE/out/ccache" ccache --max-size=500M
+        CCACHE_DIR="$GITHUB_WORKSPACE/out/ccache" ccache --zero-stats
+    - name: Prepare pinned native dependencies
+      shell: bash
+      env:
+        PRESET: ${{ inputs.preset }}
+      run: |
+        ./init.sh --cli --preset "$PRESET" --preset-only --locked --with-tests --with-editor --no-system-install
+        git diff --exit-code -- conan.lock
+    - name: Prepare pinned Metal shader compiler and Behavior tools
+      shell: bash
+      run: |
+        ./scripts/shader-probe bootstrap
+        ./scripts/script-provider bootstrap
+        ./scripts/script-provider cook
+outputs:
+  dependency-cache-key:
+    description: Locked dependency snapshot key to save after all profiles are prepared
+    value: ${{ steps.dependencies.outputs.cache-primary-key }}
+  dependency-cache-hit:
+    description: Whether the locked dependency snapshot already exists
+    value: ${{ steps.dependencies.outputs.cache-hit }}
+  compiler-cache-key:
+    description: Exact rolling compiler snapshot key to save after builds
+    value: ${{ steps.compiler.outputs.cache-primary-key }}
+  compiler-cache-hit:
+    description: Whether the exact compiler snapshot already exists
+    value: ${{ steps.compiler.outputs.cache-hit }}

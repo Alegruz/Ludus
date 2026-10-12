@@ -1,5 +1,6 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/profile.h"
 #include "internal/raster.h"
 #include "internal/resources.h"
 #include <ludus/graphics/rhi/render.h>
@@ -24,10 +25,16 @@ bool gDrawn = false;
 bool gRasterDrawn = false;
 bool gRequireRaster = false;
 bool gRequireCompute = false;
+DeviceProfileRequirements gRequiredProfile;
+DeviceProfile gProfile;
 internal::FallbackHandler gFallback = nullptr;
 } // namespace
 namespace internal
 {
+DeviceProfile CurrentDeviceProfile() noexcept
+{
+    return gStartup.State == StartupState::Ready ? gProfile : DeviceProfile{};
+}
 bool FrameOpen() noexcept
 {
     return gFrame;
@@ -81,9 +88,11 @@ void Fail(uint32 token, StartupError error) noexcept
     gStartup.State = error == StartupError::DeviceLost ? StartupState::DeviceLost : StartupState::Failed;
     gStartup.Error = error;
     gStartup.Capabilities = {};
+    gProfile = {};
     if (error != StartupError::RequirementsUnsatisfied)
     {
         gStartup.UnmetRequirement = RequirementFailure::None;
+        gStartup.ProfileFailure = {};
     }
     gFrame = false;
     internal::ReleaseRasterResources();
@@ -126,6 +135,14 @@ void Complete(uint32 token, StartupError error, const BackendLimits& limits) noe
         Fail(token, StartupError::RequirementsUnsatisfied);
         return;
     }
+    const auto profile = QueryDeviceProfile();
+    gStartup.ProfileFailure = CheckProfile(gRequiredProfile, profile);
+    if (gStartup.ProfileFailure.Requirement != ProfileRequirement::None)
+    {
+        gStartup.UnmetRequirement = RequirementFailure::Profile;
+        Fail(token, StartupError::RequirementsUnsatisfied);
+        return;
+    }
     if (gRequireRaster && backend::RasterLimits().MaxUniformRange < 16384)
     {
         gStartup.UnmetRequirement = RequirementFailure::PortableRaster;
@@ -138,6 +155,7 @@ void Complete(uint32 token, StartupError error, const BackendLimits& limits) noe
         Fail(token, StartupError::RequirementsUnsatisfied);
         return;
     }
+    gProfile = profile;
     RecordAttempt(token, gStartup.SelectedBackend, StartupError::None);
     gStartup.MaxTextureDimension2D = maxTextureDimension;
     gStartup.Capabilities =
@@ -159,6 +177,7 @@ void SelectBackend(uint32 token, Backend backend) noexcept
         return;
     }
     gStartup.SelectedBackend = backend;
+    gStartup.ProfileFailure = {};
     gStartup.UnmetRequirement = RequirementFailure::None;
 }
 uint32 Reissue(uint32 token) noexcept
@@ -187,6 +206,7 @@ void RecordAttempt(uint32 token, Backend backend, StartupError error) noexcept
     {
         attempt->Attempted = true;
         attempt->Error = error;
+        attempt->ProfileFailure = gStartup.ProfileFailure;
     }
 }
 } // namespace internal
@@ -197,7 +217,8 @@ StartStatus StartSelected(const ApplicationInfo& app,
                           BackendSelection selection,
                           const DeviceRequirements& requirements,
                           bool requireRaster = false,
-                          bool requireCompute = false) noexcept
+                          bool requireCompute = false,
+                          const DeviceProfileRequirements& profile = {}) noexcept
 {
     if (internal::SessionBusy())
     {
@@ -207,6 +228,8 @@ StartStatus StartSelected(const ApplicationInfo& app,
     gStartup.Requirements = requirements;
     gRequireRaster = requireRaster;
     gRequireCompute = requireCompute;
+    gRequiredProfile = profile;
+    gProfile = {};
     // A forced selection the build cannot provide fails explicitly; it never
     // silently switches to another backend.
     if (!backend::Supports(selection))
@@ -248,9 +271,10 @@ StartStatus StartOwned(const ApplicationInfo& app,
                        BackendSelection selection,
                        const DeviceRequirements& limits,
                        bool requireRaster,
-                       bool requireCompute) noexcept
+                       bool requireCompute,
+                       const DeviceProfileRequirements& profile) noexcept
 {
-    return StartSelected(app, window, selection, limits, requireRaster, requireCompute);
+    return StartSelected(app, window, selection, limits, requireRaster, requireCompute, profile);
 }
 } // namespace internal
 StartStatus Start(const ApplicationInfo& app, const WindowInfo& window) noexcept

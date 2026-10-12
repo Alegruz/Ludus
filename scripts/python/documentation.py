@@ -33,7 +33,8 @@ def group(relative):
     """Classify a document's role, without claiming its proposal is implemented."""
     name, parts = relative.stem, relative.parts
     if relative.as_posix() in {"wiki/contribute/wiki.md", "wiki/contribute/api-reference.md",
-                                "wiki/guides/editor.md", "wiki/guides/project-setup.md", "wiki/guides/releases.md"}:
+                                "wiki/guides/editor.md", "wiki/guides/project-setup.md", "wiki/guides/releases.md",
+                                "wiki/guides/configuration.md", "wiki/guides/audio.md"}:
         return "Earlier entry points"
     if relative.as_posix() == "architecture/profiling.md" or name in {"milestone-0", "milestone-1", "milestone-2"}:
         return "Historical baselines"

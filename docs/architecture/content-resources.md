@@ -192,6 +192,26 @@ required for an audio replacement.
 
 ### Native saves
 
+Include `<ludus/content/content.h>` and link `Ludus::Content`. Read saved bytes
+into an owned buffer, then use their digest when publishing a validated draft:
+
+```cpp
+ludus::content::Bytes saved;
+auto status = ludus::content::ReadFile(root, "catalog.json",
+                                     ludus::content::MAX_DOCUMENT_BYTES, saved);
+if (status == ludus::content::Status::Ok)
+{
+    const auto expected = ludus::content::Hash(saved.Data());
+    // draftBytes is the validated candidate document owned by the caller.
+    status = ludus::content::SaveFile(root, "catalog.json", draftBytes, &expected);
+}
+```
+
+`ReadFile` replaces its output only on success. After a successful save, retain
+the digest of the new bytes for the next edit. Pass `nullptr` instead of an
+expected digest to require that a new destination does not exist. Run these
+synchronous operations outside audio callbacks and render critical paths.
+
 The current `Content::SaveFile` adapter supports Linux and macOS. It keeps the
 same public signature and SHA-256 expected-digest policy. Other platforms return
 `Unsupported`; portable catalogs and JSON processing do not depend on this save
