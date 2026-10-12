@@ -12,7 +12,6 @@
 #include <ludus/graphics/renderer/renderer.hpp>
 
 #include <cstring>
-#include <string_view>
 
 #include "ray_query.h"
 #include "renderer_composite.h"
@@ -261,10 +260,19 @@ bool Load(Reader& reader,
     return true;
 }
 
-bool Number(std::string_view text, uint32 maximum, uint32& output) noexcept
+bool Number(const char* text, uint32 maximum, uint32& output) noexcept
 {
+    usize size = 0;
+    while (size <= 1024 && text[size] != '\0')
+    {
+        ++size;
+    }
+    if (size > 1024)
+    {
+        return false;
+    }
     uint64 value = 0;
-    if (ParseUint64(text.data(), text.size(), value) != NumberParseStatus::Success || value == 0 || value > maximum)
+    if (ParseUint64(text, size, value) != NumberParseStatus::Success || value == 0 || value > maximum)
     {
         return false;
     }

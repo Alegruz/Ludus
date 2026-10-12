@@ -53,6 +53,20 @@ def main():
         )
         assert all(pixel[:3] == (0.5, 0.5, 0.5) for pixel in pixels), pixels
         good = (root / "capture.luhdr").read_bytes()
+        for invalid in (
+            "",
+            "0",
+            "1025",
+            "-1",
+            "99999999999999999999999999",
+            "1" * 1025,
+        ):
+            result = subprocess.run(
+                [binary, str(root), str(root), invalid, "2"], timeout=30
+            )
+            assert result.returncode == 2, result.returncode
+            assert (root / "capture.luhdr").read_bytes() == good
+
         cases = [data[:7], data[:-1], data + b"x"]
         too_many = data[:]
         struct.pack_into("<I", too_many, 12, 1000000)
