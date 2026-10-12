@@ -1142,6 +1142,7 @@ class Operation:
                 root = self._context.tooling_root
                 sdk = select_creation_sdk(root, explicit=sdk,
                     prepare=lambda prefix: prepare_creation_sdk(root, prefix, runner=runner,
+                                                               environ=engine_setup_environment(root, self._context.engine),
                                                                cancel_check=self._check_release_cancel))
                 self._writer.output(self._stage, "stdout", f"Selected Development engine: {sdk}\n")
                 create_project(self._project_path, name=self._options["name"], template_id="minimal",
@@ -1154,6 +1155,7 @@ class Operation:
                     root = self._context.tooling_root
                     sdk = select_repair_sdk(self._project_path, tooling_root=root,
                         prepare=lambda prefix: prepare_creation_sdk(root, prefix, runner=runner,
+                            environ=engine_setup_environment(root, self._context.engine),
                             cancel_check=self._check_release_cancel, profile=descriptor.preset))
                     self._writer.output(self._stage, "stdout", f"Selected engine: {sdk}\n")
                 message = repair_project(self._project_path, sdk=sdk, web_sdk=web, **options)

@@ -96,11 +96,17 @@ def select_creation_sdk(root: Path, *, explicit: Path | None = None,
     return prefix
 
 
-def prepare_creation_sdk(root: Path, prefix: Path, *, runner, cancel_check=None, profile: str | None = None):
-    """Shared explicit preparation; no system installs or project hooks."""
+def prepare_creation_sdk(root: Path, prefix: Path, *, runner, cancel_check=None,
+                         profile: str | None = None, environ=None):
+    """Prepare explicitly, using a caller-selected environment when supplied.
+
+    The Editor supplies its managed Apple SDK policy; CLI callers retain their
+    shell overrides. Copy the environment without changing the caller's mapping.
+    No system installs or project hooks run.
+    """
     profile = profile or PROFILE
     from .project_setup import environment
-    env = environment(root)
+    env = environment(root) if environ is None else dict(environ)
     env["CI"] = "true"
     commands = ([str(root / "scripts/init"), profile, "--preset-only", "--cli", "--no-system-install"],
                 [str(root / "scripts/build"), profile])
