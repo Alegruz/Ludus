@@ -55,11 +55,11 @@ Their capabilities describe implemented operations on the enabled device.
 | --- | --- | --- |
 | [Lifecycle](../../modules/graphics/rhi/include/ludus/graphics/rhi/rhi.h), [explicit device](../../modules/graphics/rhi/include/ludus/graphics/rhi/device.h) and [facade](../../modules/graphics/rhi/src/rhi.cpp) | One main-thread device/session and borrowed surface, copied requirements, asynchronous browser startup, owner validation and explicit loss/restart | Enabled raster/compute/format constraints are negotiated before Ready; independent devices/surfaces remain extensions |
 | [Fullscreen resources](../../modules/graphics/rhi/include/ludus/graphics/rhi/render.h) | Eight resources per kind, one uniform binding, one fullscreen triangle and legacy `InUse` rejection | Preserve this compatibility contract separately from general resources |
-| [Portable raster](../../modules/graphics/rhi/include/ludus/graphics/rhi/raster.h) | Typed generational resources, reflected immutable bindings/pipelines and indexed/instanced draws; renderer L1–L3 extend depth, targets and sampled mip formats | Full copy/update, attachment/view and descriptor APIs remain bounded or deferred |
-| [Lifetime services](../../modules/graphics/rhi/include/ludus/graphics/rhi/lifetime.h) | Retained command batches, actual completion tokens, bounded buffer upload/readback rings and canonical pipeline requests | No general texture streaming or persistent driver cache |
+| [Portable raster](../../modules/graphics/rhi/include/ludus/graphics/rhi/raster.h) | Typed generational resources, reflected immutable bindings/pipelines and indexed/instanced draws; renderer L1–L3 extend depth, targets and sampled mip formats | R8 adds bounded mutation/copy/readback; extended attachment/view and descriptor APIs remain deferred |
+| [Lifetime services](../../modules/graphics/rhi/include/ludus/graphics/rhi/lifetime.h) | Retained command batches, actual completion tokens, bounded buffer/texture transfers, initialized mip primitives and canonical pipeline requests | Partial sampled views, sparse memory/eviction and persistent driver cache remain extensions |
 | [Ordered graph](../../modules/graphics/rhi/include/ludus/graphics/rhi/graph.h) | Authored order, in-place versions, RAW/WAR/WAW reports, culling, completion-gated object pooling and opt-in raster merging | Conservative whole-resource hazards; no heap aliasing, parallel recording or async queues |
 | [Compute](../../modules/graphics/rhi/include/ludus/graphics/rhi/compute.h) | Single-queue buffer dispatch and indexed indirect drawing on Vulkan, Metal and WebGPU | WebGL 2 requires an authored CPU/direct variant; storage textures and indirect dispatch are deferred |
-| [Vulkan](../../modules/graphics/rhi/src/rhi_vulkan.cpp) and [Metal](../../modules/graphics/rhi/src/rhi_metal.mm) | Both lower the bounded R0–R5 profiles; Vulkan general allocations use private VMA 3.3.0, while legacy frame targets retain their allocation path | Keep native allocation, synchronization and presentation retirement private |
+| [Vulkan](../../modules/graphics/rhi/src/rhi_vulkan.cpp) and [Metal](../../modules/graphics/rhi/src/rhi_metal.mm) | Both lower bounded raster/compute, R6 storage, R7 measurement and R8 transfers; Vulkan general allocations use private VMA 3.3.0, while legacy frame targets retain their allocation path | Keep native allocation, synchronization and presentation retirement private |
 | [Browser dispatcher](../../modules/graphics/rhi/src/rhi_web.cpp) | WebGPU startup with one requirement-aware WebGL 2 fallback and Platform-managed canvas replacement | Preserve ADR 0014 and callback isolation |
 | [Shader build helper](../../cmake/shaders/compile_shader.py) | Pinned Slang emits SPIR-V/WGSL and macOS MSL 2.3; pinned SPIRV-Cross emits GLSL ES 3.00, with bounded raster/compute reflection and target layout validation | Reject unverified layout forms; broader package/feature support is future work |
 
@@ -758,8 +758,10 @@ merged at `859d02d`; its evidence reconciliation used repository revision `56598
 [R0 negotiation, PR 201](https://github.com/Alegruz/Ludus/pull/201), subsequently
 merged at `fb6842c`, adds copied enabled limits, format/use constraints and
 required/preferred admission. The follow-up roadmap was assigned against comparison revision `0344d67`;
-current statuses and evidence are recorded below. R6 is proposed in
-[PR 215](https://github.com/Alegruz/Ludus/pull/215).
+current statuses and evidence are recorded below. R6 was merged in
+[PR 215](https://github.com/Alegruz/Ludus/pull/215); R7 in
+[PR 216](https://github.com/Alegruz/Ludus/pull/216). R8 is submitted in
+[PR 219](https://github.com/Alegruz/Ludus/pull/219).
 R5 source revision `e4a6b7a83ef9a1572e77c92af55ca57c681c5b98` passed all 28
 executed CI checks, including native/browser builds, sanitizer and static-analysis
 checks, installed/relocated SDK consumers and packaged browser rendering tests.
@@ -830,7 +832,8 @@ and deployed physical-browser journeys remain open. See the
 [R8a transfers and R8b mip initialization/staging budgets](../development/fullscreen-rendering.md#mutable-transfers-and-mip-initialization-r8)
 are implemented for the RGBA8 transfer profile. R8b initializes mips incrementally
 and gates the existing full-resource view until all mips are defined. R9a remains
-the prerequisite for sampling a partially initialized allocation through a partial view. R9/R10 and R11a proceed once their listed prerequisites are present.
+the prerequisite for sampling a partially initialized allocation through a partial
+view. R9/R10 and R11a proceed once their listed prerequisites are present.
 R12a reuses R4 and R15a reuses R3 without waiting for the texture/attachment
 series. R14 is a separate ownership
 track. R16a/R17a provide an early native RT query track; scalable bindings,
@@ -852,7 +855,8 @@ evidence links. R6 is Implemented with the
 R7a is Implemented and R7b physical host gates remain open. R8a and R8b's
 initialized-mip/staging primitives are Implemented with their
 [transfer contract and SDK journey](../development/fullscreen-rendering.md#mutable-transfers-and-mip-initialization-r8);
-partial sampled views remain Planned under R9a. R9–R17 subprofiles remain Planned. Implemented means
+partial sampled views remain Planned under R9a. R9–R17 subprofiles remain Planned.
+Implemented means
 the declared operations and failure paths pass SDK/correctness gates; Qualified
 adds the named hardware/workload measurements. Unavailable evidence stays open.
 An umbrella milestone cannot be marked complete by selecting only its easiest

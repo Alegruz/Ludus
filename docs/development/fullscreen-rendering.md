@@ -248,10 +248,10 @@ format limits. R8/RG8 remain sampled only. L4 adds RGBA16F when `HdrColor` is en
 sampling/filtering/blending through a single-mip color attachment, while creation
 uploads remain unsupported. Its format query is zero/Unsupported when unavailable.
 SampleCounts is a bit mask (value 1 for
-one sample); MSAA is not enabled. Storage and general texture copy source/destination
-uses remain false, even if the native driver supports them. Creation uploads and
-frame readback do not constitute general texture-copy APIs. Vulkan checks the
-combined sampled/upload/attachment usage and private-depth bounds; portable
+one sample); MSAA is not enabled. Storage texture uses remain false. R8 enables
+bounded RGBA8Unorm texture copy source/destination uses; other formats remain false.
+Creation uploads and frame readback alone do not constitute those uses. Vulkan
+checks combined sampled/upload/copy/attachment usage and private-depth bounds; portable
 backends intersect their guaranteed normalized formats with Ludus's implemented
 profile. Texture and offscreen pipeline creation enforce the admitted snapshot.
 
@@ -384,8 +384,9 @@ one. Pipelines remain valid on resize because the session target format stays
 fixed. [R2 lifetime services](#lifetime-services-r2) add retained batches and
 bounded buffer upload/readback rings; [R3](#ordered-raster-graphs-r3) adds offscreen
 raster passes and [R4](#buffer-compute-and-indirect-rendering-r4) adds buffer compute.
-Existing-resource updates, general texture copy/readback commands, mip generation
-and storage textures remain extensions.
+[R8](#mutable-transfers-and-mip-initialization-r8) adds completion-gated buffer
+updates and bounded RGBA8 texture update/copy/readback. Mip generation and storage
+textures remain extensions.
 Initial Vulkan texture uploads normally use a synchronous setup copy. A timed-out
 copy remains Pending and retains staging until its fence signals; poll GetStatus.
 This is not a
@@ -577,8 +578,9 @@ resource release on forced WebGPU/WebGL 2 and Auto. The browser harness adds
 pipeline, transfer and mapping failures and device loss. Software-GPU browser
 results remain separate from physical GPU/browser acceptance.
 
-Texture rings, mutable buffer updates, descriptor suballocation, general
-copy/pass APIs and a separate GraphicsDevice module remain later extensions.
+[R8](#mutable-transfers-and-mip-initialization-r8) extends these same rings with
+mutable buffers, texture transfers and mip initialization. Descriptor suballocation,
+extended pass APIs and a separate GraphicsDevice module remain later extensions.
 
 ## Ordered raster graphs (R3)
 
@@ -1274,7 +1276,7 @@ partial sampled views**. R3 hazards remain conservative whole-resource hazards.
 For example, an 8-by-4 texture with three mips begins with mask `0` and no
 initialized bytes. Complete mip uploads publish masks `1`, `3`, then `7`, with
 128, 160 and 168 logical bytes respectively. A full-resource sampled view is
-legal only after mask `7` and transfer completion/release.
+legal only after mask `7` and transfer completion.
 
 ### Staging budgets and qualification
 
@@ -1299,7 +1301,8 @@ zero-timeout polls. A post-command GL error closes the session before unsafe
 reuse. Native teardown may wait; requests and polls do not issue blocking GPU
 waits. Driver calls can still incur host cost.
 
-The R8 reference tests cover output preservation, checked ranges/pitches,
+[R8 implementation, PR 219](https://github.com/Alegruz/Ludus/pull/219), starts from
+merged R7 revision `6828502`. The R8 reference tests cover output preservation, checked ranges/pitches,
 initialized sampling, copied source bytes, retained bindings/batches/graphs,
 unfinished frame ordinals, copy-source destruction, cancellation, pressure,
 terminal failure and loss/restart. The native and installed-SDK `r8.cpp` journey
@@ -1309,5 +1312,7 @@ padded buffer/texture round trips, and renders/readbacks the resulting four-colo
 image. Browser conformance compares complete images on forced WebGPU, forced
 WebGL 2, Auto and authored fallback. Pinned CI additionally runs Vulkan validation,
 sanitizers, browser validation, static analysis and public SDK documentation.
+The browser harness also rejects an injected invalid texture copy and proves
+that delayed completion after device destruction cannot publish old work.
 Software Chromium acceptance does not establish physical-browser performance;
 R7's open hardware/host qualification gates remain open.

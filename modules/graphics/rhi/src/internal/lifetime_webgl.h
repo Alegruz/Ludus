@@ -37,7 +37,7 @@ RasterStatus LifetimeGlStage(LifetimeGlTransfer& transfer, bool readback, bool i
         const auto target = index ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
         glBindBuffer(target, transfer.Staging);
         glBufferData(target,
-                     internal::CurrentStorageLimits().TransferBytes,
+                     static_cast<GLsizeiptr>(internal::CurrentStorageLimits().TransferBytes),
                      nullptr,
                      readback ? GL_STREAM_READ : GL_STREAM_DRAW);
         glBindBuffer(target, 0);

@@ -293,19 +293,23 @@ LifetimeBufferUpdate(usize slot, BufferRole, const internal::LifetimeCopyRange& 
 }
 namespace
 {
+struct LifetimeVkImageTransition final
+{
+    VkImageLayout Before;
+    VkImageLayout After;
+    VkAccessFlags SourceAccess;
+    VkAccessFlags DestinationAccess;
+};
 void LifetimeVkImageBarrier(VkCommandBuffer command,
                             const RasterVulkanTexture& texture,
-                            VkImageLayout oldLayout,
-                            VkImageLayout newLayout,
-                            VkAccessFlags before,
-                            VkAccessFlags after) noexcept
+                            const LifetimeVkImageTransition& transition) noexcept
 {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcAccessMask = oldLayout == VK_IMAGE_LAYOUT_UNDEFINED ? 0U : before;
-    barrier.dstAccessMask = after;
-    barrier.oldLayout = oldLayout;
-    barrier.newLayout = newLayout;
+    barrier.srcAccessMask = transition.Before == VK_IMAGE_LAYOUT_UNDEFINED ? 0U : transition.SourceAccess;
+    barrier.dstAccessMask = transition.DestinationAccess;
+    barrier.oldLayout = transition.Before;
+    barrier.newLayout = transition.After;
     barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = texture.Object;
     barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, texture.Info.MipLevels, 0, 1};
@@ -358,20 +362,24 @@ RasterStatus LifetimeTextureTransfer(usize slot, const internal::TextureTransfer
         const auto& source = gRasterTextures[info.Source];
         LifetimeVkImageBarrier(transfer.Command,
                                source,
-                               source.ColorLayout,
-                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                               source.ColorAccess | source.ColorWriterAccess,
-                               VK_ACCESS_TRANSFER_READ_BIT);
+                               {
+                                   .Before = source.ColorLayout,
+                                   .After = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                   .SourceAccess = source.ColorAccess | source.ColorWriterAccess,
+                                   .DestinationAccess = VK_ACCESS_TRANSFER_READ_BIT,
+                               });
     }
     if (!readback)
     {
         const auto& destination = gRasterTextures[info.Destination];
         LifetimeVkImageBarrier(transfer.Command,
                                destination,
-                               destination.ColorLayout,
-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                               destination.ColorAccess | destination.ColorWriterAccess,
-                               VK_ACCESS_TRANSFER_WRITE_BIT);
+                               {
+                                   .Before = destination.ColorLayout,
+                                   .After = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   .SourceAccess = destination.ColorAccess | destination.ColorWriterAccess,
+                                   .DestinationAccess = VK_ACCESS_TRANSFER_WRITE_BIT,
+                               });
     }
     const auto& region = readback ? info.SourceRegion : info.DestinationRegion;
     VkBufferImageCopy buffer{};
@@ -432,20 +440,24 @@ RasterStatus LifetimeTextureTransfer(usize slot, const internal::TextureTransfer
         const auto& source = gRasterTextures[info.Source];
         LifetimeVkImageBarrier(transfer.Command,
                                source,
-                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                               source.ColorLayout,
-                               VK_ACCESS_TRANSFER_READ_BIT,
-                               memory);
+                               {
+                                   .Before = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                   .After = source.ColorLayout,
+                                   .SourceAccess = VK_ACCESS_TRANSFER_READ_BIT,
+                                   .DestinationAccess = memory,
+                               });
     }
     if (!readback)
     {
         const auto& destination = gRasterTextures[info.Destination];
         LifetimeVkImageBarrier(transfer.Command,
                                destination,
-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                               VK_ACCESS_TRANSFER_WRITE_BIT,
-                               VK_ACCESS_SHADER_READ_BIT);
+                               {
+                                   .Before = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   .After = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                   .SourceAccess = VK_ACCESS_TRANSFER_WRITE_BIT,
+                                   .DestinationAccess = VK_ACCESS_SHADER_READ_BIT,
+                               });
     }
     result = LifetimeVulkanSubmit(transfer);
     if (result == VK_SUCCESS)
