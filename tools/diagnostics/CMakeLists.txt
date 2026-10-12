@@ -49,6 +49,10 @@ if(LUDUS_BUILD_TESTS AND CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$")
             "$<TARGET_FILE:ludus_diagnostic_startup_child>"
             "${LUDUS_ASSERT_DIALOGS_AVAILABLE}")
     set_tests_properties(ludus_diagnostic_startup PROPERTIES LABELS "tools;diagnostic-startup" TIMEOUT 60)
+    add_test(NAME ludus_diagnostic_startup_harness
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/startup_harness_tests.py")
+    set_tests_properties(ludus_diagnostic_startup_harness PROPERTIES LABELS "tools;diagnostic-startup" TIMEOUT 10)
+
 
     # Resumable-ASSERT decision test: a controlled helper scripts the
     # DecisionReply so the no-debugger dialog path (Continue-once / Terminate,

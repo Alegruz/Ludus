@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run paired R5 native image checks and export CPU distributions, never GPU time."""
+"""Run paired RHI images and report CPU/GPU distributions with explicit unavailable evidence."""
 import argparse
 import csv
 import io
@@ -9,11 +9,42 @@ from pathlib import Path
 import platform
 import subprocess
 import hashlib
+from collections import Counter
+from datetime import datetime, timezone
+import math
 
 
 def percentile(values, fraction):
     ordered = sorted(values)
     return ordered[min(len(ordered) - 1, int((len(ordered) - 1) * fraction))]
+
+
+STATE_NAMES = ("empty", "armed", "pending", "available", "unavailable", "disjoint", "failed")
+
+
+def distribution(values):
+    return {"p50": percentile(values, .50), "p95": percentile(values, .95), "p99": percentile(values, .99)}
+
+
+def parse_measurements(output):
+    rows = [[float(value) for value in row[1:]] for row in csv.reader(io.StringIO("\n".join(
+        line for line in output.splitlines() if line.startswith("R7,"))))]
+    if len(rows) != 1024 or any(len(row) != 16 or any(not math.isfinite(value) or value < 0 for value in row) for row in rows):
+        raise ValueError("Incomplete or invalid R7 sample set")
+    for row in rows:
+        if any(row[column] != int(row[column]) for column in (0, 1, 2, 3, 6, 7, 8, 9, 10, 13, 14, 15)):
+            raise ValueError("Invalid integer measurement field")
+        if row[13] not in (0, 1) or (not row[13] and (row[14] or row[15])):
+            raise ValueError("Opaque allocator blocks cannot publish a complete byte count")
+        if not row[8] and (row[9] or row[10]):
+            raise ValueError("Opaque API allocation cannot publish a complete byte count")
+        if row[3] not in range(3, 7) or row[8] not in (0, 1) or (row[3] != 3 and row[4] != 0):
+            raise ValueError("Unavailable/pending GPU measurement must never become a duration")
+    identities = {(int(row[0]), int(row[1]), int(row[2])) for row in rows}
+    expected = {(layers, iteration, merge) for layers in (1, 8, 16, 31) for iteration in range(128) for merge in (0, 1)}
+    if identities != expected:
+        raise ValueError("Invalid R7 paired sample identities")
+    return rows
 
 
 def main():
@@ -22,17 +53,23 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--backend", choices=("metal", "vulkan"), required=True)
     parser.add_argument("--device", required=True, help="Actual device/driver identity from this host")
+    parser.add_argument("--gpu-timing", action="store_true", help="Opt into R7 frame probes; also run an uninstrumented control")
+    parser.add_argument("--qualification-name", default="local-rhi", help="Stable name of this GPU/host qualification record")
     parser.add_argument("--runs", type=int, default=3)
     args = parser.parse_args()
     if not 1 <= args.runs <= 10:
         parser.error("--runs must be 1..10")
     args.output.mkdir(parents=True, exist_ok=True)
+    executable_hash = hashlib.sha256(args.executable.read_bytes()).hexdigest()
     results = []
+    adapter = None
+    enabled_profile = None
     for run in range(args.runs):
         process = subprocess.run(
             [str(args.executable.resolve()), "Portable indexed*", "--section",
              "R5 merged painter order matches unmerged complete image"],
-            env={**os.environ, "LUDUS_RHI_BENCHMARK": "1"}, text=True,
+            env={**{key: value for key, value in os.environ.items() if key != "LUDUS_RHI_GPU_TIMING"},
+                 "LUDUS_RHI_BENCHMARK": "1", **({"LUDUS_RHI_GPU_TIMING": "1"} if args.gpu_timing else {})}, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         (args.output / f"run-{run}.log").write_text(process.stdout)
         if process.returncode:
@@ -44,6 +81,18 @@ def main():
             line for line in process.stdout.splitlines() if line.startswith("R5,")))))
         if len(rows) != 1024:
             raise SystemExit(f"Incomplete measurement: {len(rows)} of 1024 samples")
+        identities = list(csv.reader(io.StringIO("\n".join(line for line in process.stdout.splitlines() if line.startswith("R7ADAPTER,")))))
+        profiles = list(csv.reader(io.StringIO("\n".join(line for line in process.stdout.splitlines() if line.startswith("R7PROFILE,")))))
+        if len(identities) != 1 or len(identities[0]) != 7 or len(profiles) != 1 or len(profiles[0]) != 6:
+            raise ValueError("Missing selected-adapter or enabled-profile observation")
+        current_adapter = {"name": bytes.fromhex(identities[0][1]).decode("utf-8", errors="replace"), "vendor_id": int(identities[0][2]),
+                           "device_id": int(identities[0][3]), "driver_version_raw": int(identities[0][4]) or None,
+                           "software_known": bool(int(identities[0][5])), "software": bool(int(identities[0][6]))}
+        current_profile = dict(zip(("raster", "compute", "ordered_graph", "resources_per_kind", "draws_per_frame"), map(int, profiles[0][1:])))
+        if adapter is not None and (adapter != current_adapter or enabled_profile != current_profile):
+            raise ValueError("Adapter or enabled profile changed between runs")
+        adapter, enabled_profile = current_adapter, current_profile
+        measurements = parse_measurements(process.stdout)
         for layers in (1, 8, 16, 31):
             for merge in (0, 1):
                 selected = [list(map(int, row[1:])) for row in rows
@@ -59,18 +108,54 @@ def main():
                     values = [row[column] for row in selected]
                     result[name] = {"p50": percentile(values, .50),
                                     "p95": percentile(values, .95), "p99": percentile(values, .99)}
+                samples = [row for row in measurements if row[0] == layers and row[2] == merge]
+                gpu = [row[4] for row in samples if row[3] == 3]
+                result["gpu_duration_ns"] = distribution(gpu) if gpu else None
+                result["gpu_states"] = dict(Counter(STATE_NAMES[int(row[3])] for row in samples))
+                result["gpu_clock"] = "device-local; no CPU/display correlation"
+                result["tick_ns"] = samples[0][5] or None
+                result["valid_bits"] = samples[0][6] or None
+                result["logical_bytes"] = max(int(row[7]) for row in samples)
+                api = [int(row[9]) for row in samples if row[8] == 1]
+                result["peak_observed_api_bytes"] = max(int(row[10]) for row in samples) if len(api) == len(samples) else None
+                result["api_bytes"] = max(api) if len(api) == len(samples) else None
+                blocks = [int(row[14]) for row in samples if row[13] == 1]
+                result["allocator_block_bytes"] = max(blocks) if len(blocks) == len(samples) else None
+                result["peak_observed_allocator_block_bytes"] = max(int(row[15]) for row in samples) if len(blocks) == len(samples) else None
+                result["physical_resident_bytes"] = None
+                result["sample_arm_cpu_ns"] = distribution([row[11] for row in samples])
+                result["sample_poll_and_memory_cpu_ns"] = distribution([row[12] for row in samples])
                 results.append(result)
     revision = subprocess.run(["git", "rev-parse", "HEAD"], check=True, text=True,
                               stdout=subprocess.PIPE).stdout.strip()
-    report = {"revision": revision, "backend": args.backend, "device": args.device,
+    control = None
+    if args.gpu_timing:
+        control_output = args.output / "control"
+        subprocess.run([os.environ.get("PYTHON", os.sys.executable), str(Path(__file__).resolve()),
+                        "--executable", str(args.executable), "--output", str(control_output),
+                        "--backend", args.backend, "--device", args.device, "--runs", str(args.runs),
+                        "--qualification-name", args.qualification_name + "-control"], check=True)
+        control_report = json.loads((control_output / "report.json").read_text())
+        if control_report["adapter_observation"] != adapter or control_report["enabled_profile"] != enabled_profile or control_report["executable_sha256"] != executable_hash:
+            raise ValueError("Control executable, adapter or enabled profile differs from the instrumented run")
+        control = control_report["results"]
+    if hashlib.sha256(args.executable.read_bytes()).hexdigest() != executable_hash:
+        raise ValueError("Executable changed during qualification")
+    report = {"schema_version": 1, "name": args.qualification_name,
+              "captured_utc": datetime.now(timezone.utc).isoformat(), "revision": revision, "backend": args.backend, "device": args.device,
               "working_tree_dirty": bool(subprocess.run(["git", "status", "--porcelain"], check=True, text=True, stdout=subprocess.PIPE).stdout),
-              "executable_sha256": hashlib.sha256(args.executable.read_bytes()).hexdigest(),
+              "executable_sha256": executable_hash,
               "host": platform.platform(), "warmup_pairs_per_workload": 16,
               "resolution": [96, 64], "ordering": "alternate merged/unmerged first each pair",
               "correctness": "Every complete RGBA image equals the unmerged oracle",
-              "gpu_duration_ns": None, "input_to_display_ns": None,
+              "adapter_observation": adapter, "enabled_profile": enabled_profile,
+              "gpu_timing_enabled": args.gpu_timing, "control_results": control,
+              "qualification": {"headless_paired_images": "passed", "physical_gpu_identity": "observed" if adapter["software_known"] and not adapter["software"] and adapter["name"] else "open",
+                                "native_surface_resize": "open", "native_surface_loss_recovery": "open",
+                                "wayland_surface": "open", "hosted_browser": "open"},
+              "input_to_display_ns": None,
               "driver_backing_bytes": None, "driver_allocations": None,
-              "note": "CPU timers include authoring/compile or acquire/encode/submit; readback wait is neither GPU time nor presentation latency. Logical imported bytes exclude padding, staging, surface and pool slack.",
+              "note": "CPU timers and GPU execution use independent clocks. Control records expose instrumentation cost without an inferred overhead subtraction. API allocation peaks are sampled, scope is general buffers/textures plus private depth/upload backing; physical residency and display observations remain open. Device label is supplied by the caller until matched against an adapter observation.",
               "results": results}
     path = args.output / "report.json"
     path.write_text(json.dumps(report, indent=2) + "\n")

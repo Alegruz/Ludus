@@ -1,5 +1,6 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
+#include "internal/measurement.h"
 #include "internal/raster.h"
 #include "internal/resources.h"
 #include "internal/webgpu_probe.h"
@@ -24,6 +25,9 @@
 namespace ludus::graphics::rhi::LUDUS_RHI_WEBGPU_NAMESPACE
 {
 void RasterFrameExtent() noexcept;
+void TimingBegin() noexcept;
+void TimingEnd() noexcept;
+void TimingSubmitted() noexcept;
 namespace
 {
 using namespace ludus::foundation;
@@ -266,8 +270,13 @@ void AdapterReady(WGPURequestAdapterStatus status,
     }
     gAdapter = adapter;
     WGPUDeviceDescriptor descriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
-    // No optional features or elevated limits: negotiate browser defaults and
-    // publish actual device dimensions after a validated surface configuration.
+    // Optional timestamps are requested only for an opted-in measurement session.
+    const WGPUFeatureName timestamp = WGPUFeatureName_TimestampQuery;
+    if (internal::GpuTimingRequested() && wgpuAdapterHasFeature(adapter, timestamp))
+    {
+        descriptor.requiredFeatureCount = 1;
+        descriptor.requiredFeatures = &timestamp;
+    }
     descriptor.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
     descriptor.deviceLostCallbackInfo.userdata1 = Userdata(token);
     descriptor.deviceLostCallbackInfo.callback =
@@ -486,6 +495,7 @@ FrameStatus Begin() noexcept
     depth.depthStoreOp = WGPUStoreOp_Discard;
     depth.depthClearValue = 1;
     descriptor.depthStencilAttachment = &depth;
+    TimingBegin();
     gPass = wgpuCommandEncoderBeginRenderPass(gEncoder, &descriptor);
     return gPass != nullptr ? FrameStatus::Ready : FrameFailure();
 }
@@ -495,12 +505,14 @@ FrameStatus End() noexcept
     {
         wgpuRenderPassEncoderEnd(gPass);
     }
+    TimingEnd();
     WGPUCommandBuffer commands = wgpuCommandEncoderFinish(gEncoder, nullptr);
     if (commands == nullptr)
     {
         return FrameFailure();
     }
     wgpuQueueSubmit(gQueue, 1, &commands);
+    TimingSubmitted();
     wgpuCommandBufferRelease(commands);
     ReleaseFrame();
     // WebGPU presents the canvas after submission; there is no Vulkan-style present.
@@ -724,3 +736,5 @@ ResourceStatus Draw(usize slot) noexcept
 #include "internal/raster_webgpu.h"
 
 #include "internal/lifetime_webgpu.h"
+
+#include "internal/measurement_webgpu.h"
