@@ -182,7 +182,8 @@ bool RenderPreview::SetScene(const RenderScene& scene)
         CaptureStarted_ = false;
         LastSamples_ = 0;
     }
-    Residency_ = foundation::Move(residency);
+    // Retire the previous lease and provider through the local owner.
+    Residency_.Swap(residency);
     Scene_ = scene;
     Status_ = QStringLiteral("Applied World preview data updated; preparing the renderer.");
     Camera_ = -1;

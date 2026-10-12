@@ -575,4 +575,19 @@ TEST_CASE("World composes schema meshes into cooked renderer data with bounded f
     }
     CHECK_FALSE(RenderScene::Merge(excessive, {}, level, combined, fixture.Error, {}));
     CHECK(combined.Identity == retained);
+    const auto definition = combined.Definition.toWeakRef();
+    {
+        RenderPreview preview;
+        REQUIRE(preview.SetScene(combined));
+        combined = {};
+        CHECK_FALSE(definition.isNull());
+        REQUIRE(preview.SetScene(fixture.Scene));
+        CHECK(definition.isNull()); // Replacement retires the previous lease and definition.
+        REQUIRE(RenderScene::Merge(fixture.Scene, {}, level, combined, fixture.Error, {}));
+        const auto lastDefinition = combined.Definition.toWeakRef();
+        REQUIRE(preview.SetScene(combined));
+        combined = {};
+        REQUIRE(preview.SetScene({}));
+        CHECK(lastDefinition.isNull());
+    }
 }

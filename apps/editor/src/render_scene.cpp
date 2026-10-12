@@ -769,10 +769,10 @@ bool RenderScene::Merge(const RenderScene& authored,
         }
         stream << static_cast<uint32>(image.width()) << static_cast<uint32>(image.height())
                << static_cast<uint32>(image.width() * image.height() * 4);
+        const int32 rowBytes = image.width() * 4; // Preview textures are bounded to 2048 pixels per axis.
         for (int32 y = 0; y < image.height(); ++y)
         {
-            stream.writeRawData(reinterpret_cast<const char*>(image.constScanLine(y)),
-                                static_cast<int64>(image.width()) * 4);
+            stream.writeRawData(reinterpret_cast<const char*>(image.constScanLine(y)), rowBytes);
         }
     }
     for (const auto& material : imported.Materials)
