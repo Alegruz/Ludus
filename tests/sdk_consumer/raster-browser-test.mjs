@@ -1,7 +1,7 @@
 // Installed-SDK raster conformance. Real shader compilation, indexed instances,
 // depth, texture origin and retained snapshots on both forced APIs and Auto.
 import assert from 'node:assert/strict';
-import {readFile, writeFile, mkdir} from 'node:fs/promises';
+import {readFile, writeFile, mkdir, access} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {resolve, sep} from 'node:path';
 import {createRequire} from 'node:module';
@@ -11,11 +11,15 @@ const {PNG} = require('pngjs');
 const root = resolve(process.argv[2]);
 const output = resolve(process.argv[3] || 'out/raster-browser');
 await mkdir(output, {recursive:true});
+for (const name of ['raster.html','raster.js','raster.wasm','r6.html','r6.js','r6.wasm']) await access(resolve(root,name));
 const server = createServer(async (request, response) => {
   const pathname = new URL(request.url, 'http://localhost').pathname;
   const path = resolve(root, '.' + pathname);
   if (!path.startsWith(root + sep)) {response.writeHead(403).end(); return;}
-  try {response.writeHead(200, {'Content-Type':path.endsWith('.wasm') ? 'application/wasm' : path.endsWith('.js') ? 'text/javascript' : 'text/html'}).end(await readFile(path));}
+  try {
+    const bytes = await readFile(path);
+    response.writeHead(200, {'Content-Type':path.endsWith('.wasm') ? 'application/wasm' : path.endsWith('.js') ? 'text/javascript' : 'text/html'}).end(bytes);
+  }
   catch {response.writeHead(404).end();}
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -23,6 +27,7 @@ const args = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-webgp
 const report = {kind:'real Chromium software GPU; physical GPU acceptance separate', args, cases:[], console:[]};
 let browser, lastPage;
 try {
+  assert.equal((await fetch(`http://127.0.0.1:${server.address().port}/missing-asset`)).status,404);
   browser = await chromium.launch({headless:true, args});
   const pin = JSON.parse(await readFile(new URL('../../config/shader_toolchain.json',import.meta.url))).wgsl_validator;
   assert.equal(browser.version(),pin.chromium_version);

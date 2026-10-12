@@ -1000,8 +1000,11 @@ retain the charge until physical retirement. These counters exclude allocator
 headers, native driver padding/metadata, facade targets and transfer staging; they
 are not physical or resident GPU-memory measurements (R7).
 
-Capacity/budget exhaustion reports `CapacityExceeded`; allocation failure reports
-`OutOfMemory`. Failed creation preserves caller outputs and refunds logical
+Resource/plan operations report `CapacityExceeded` for capacity/budget pressure
+and `OutOfMemory` for allocation failure. Direct frame admission reports
+`DeviceStatus::Failed` when metadata preparation cannot fit/allocate, before
+acquiring the target; the ready device remains available for retry. Startup
+reports failure if a new host budget is below already committed metadata. Failed creation preserves caller outputs and refunds logical
 resource reservations. Setup can retain successfully allocated spare capacity
 when a later allocation fails; that capacity stays charged and reusable. Stable
 metadata pages are retained across shutdown/restart so late browser callback

@@ -755,8 +755,9 @@ The initial milestone series ends with [R5, PR 189](https://github.com/Alegruz/L
 merged at `859d02d`; its evidence reconciliation used repository revision `5659894`.
 [R0 negotiation, PR 201](https://github.com/Alegruz/Ludus/pull/201), subsequently
 merged at `fb6842c`, adds copied enabled limits, format/use constraints and
-required/preferred admission. The follow-up roadmap below uses `0344d67` as its
-comparison revision; its milestones are planned, not shipped.
+required/preferred admission. The follow-up roadmap was assigned against comparison revision `0344d67`;
+current statuses and evidence are recorded below. R6 is proposed in
+[PR 215](https://github.com/Alegruz/Ludus/pull/215).
 R5 source revision `e4a6b7a83ef9a1572e77c92af55ca57c681c5b98` passed all 28
 executed CI checks, including native/browser builds, sanitizer and static-analysis
 checks, installed/relocated SDK consumers and packaged browser rendering tests.
