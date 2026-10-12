@@ -1,9 +1,22 @@
 # Audio content sample
 
-This is a standalone game-owned consumer of `Ludus::AudioContent`. It loads
+This is a standalone game-owned consumer of `Ludus::AudioContent` and
+`Ludus::Resources`. It loads
 stable sound/music IDs, demonstrates copied outbox requests with entity
 generations, and plays resident SFX with file-backed looping BGM. The source
 checkout, Qt editor and DAW are not runtime dependencies.
+
+The Stage 2 sample composes a private sound adapter with the resource coordinator.
+Game and preview scopes request the same sound; cancelling preview leaves the game
+request successful. Game code retains a move-only exact-version lease while using
+the sound descriptor. Music remains an independent AudioContent playback instance.
+See the [implemented Stage 2 profile](../architecture/resource-management.md#implemented-stage-2-profile)
+for fixed capacities, peak reservation accounting, owner lifetime and the adapter's
+single pending/resident sound limitation. Use an immutable packaged content root
+throughout a session. Shutdown must drain the coordinator before its adapter goes
+away. Cold process cleanup joins any outstanding acquisition through the legacy
+Loader boundary; frame-loop request cancellation and manager shutdown remain
+polling-based. This sample's adapter exclusively owns resident clips in its AudioSystem.
 
 ## Build with an installed SDK
 

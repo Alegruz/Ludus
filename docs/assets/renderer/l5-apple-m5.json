@@ -1,0 +1,1086 @@
+{
+  "backend": "metal",
+  "device_driver": "Apple M5, 8 GPU cores; Metal OS driver, macOS 26.6 build 25G72",
+  "host": "macOS-26.6-arm64-arm-64bit",
+  "executable_sha256": "4779c0f28603be4e82545340a764aa9e42c7fe16a9a52083f63e8e428cfbcd5e",
+  "tool_pins": {
+    "tool_versions.json": {
+      "managed": {
+        "cmake": "3.29.6",
+        "ninja": "1.11.1.3",
+        "conan": "2.8.1"
+      },
+      "minimum": {
+        "python": "3.10.0",
+        "clang": "18.0.0",
+        "lld": "18.0.0",
+        "clang-format": "18.0.0",
+        "clang-tidy": "18.0.0"
+      }
+    },
+    "shader_toolchain.json": {
+      "host": "linux-x86_64-glibc-2.38-or-newer",
+      "slang": {
+        "version": "2026.1.2",
+        "url": "https://github.com/shader-slang/slang/releases/download/v2026.1.2/slang-2026.1.2-linux-x86_64-glibc-2.27.tar.gz",
+        "sha256": "bcffdccca2c16057d39f290a07f6f237b9a765238afc1974b68d09762e874b09",
+        "license": "Apache-2.0 WITH LLVM-exception",
+        "macos": {
+          "arm64": {
+            "url": "https://github.com/shader-slang/slang/releases/download/v2026.1.2/slang-2026.1.2-macos-aarch64.tar.gz",
+            "sha256": "442d0053f17013929d38017405fe69966945ad334df0e006556a44ec17eb1225"
+          },
+          "x86_64": {
+            "url": "https://github.com/shader-slang/slang/releases/download/v2026.1.2/slang-2026.1.2-macos-x86_64.tar.gz",
+            "sha256": "fbc22cb51d5f7d83dd9dcdfb13f801fe370bb9e94ff013cfeae8c4cf150d6806"
+          }
+        }
+      },
+      "spirv_tools": {
+        "version": "2025.1~rc1-1~ubuntu0.24.04.2",
+        "url": "https://security.ubuntu.com/ubuntu/pool/universe/s/spirv-tools/spirv-tools_2025.1~rc1-1~ubuntu0.24.04.2_amd64.deb",
+        "sha256": "529e396c337d15beb8ed0f03fcbeb2a066e5a818e032e197b6ef2d3328dc7ae9",
+        "val_sha256": "20c5998a46f02310f56bf11be238c34d374bb50104b7ccf85bb909f9da883ff9",
+        "dis_sha256": "7e69bcb69d0bad2dc46556a7959fa5c2f0334b3b016712657d70ac5c67902a90",
+        "license": "Apache-2.0"
+      },
+      "wgsl_validator": {
+        "playwright": "1.55.1",
+        "chromium_revision": "1193",
+        "chromium_version": "140.0.7339.186",
+        "acquisition": "tools/web-browser-tests/package-lock.json; npx playwright install chromium"
+      }
+    }
+  },
+  "gpu_pass_time_ns": null,
+  "frames_in_flight": 1,
+  "scope": "640x360 paired LDR microfixtures; 8 warmup + 64 samples. CPU clock including serialized completion/readback, not GPU timestamps. Known memory excludes driver/pipelines, retired versions and fixed renderer CPU storage. Cold setup excludes shader/pipeline prewarm. No AAA scene or throughput qualification.",
+  "results": [
+    {
+      "run": 0,
+      "scenario": "localized",
+      "variant": "clustered",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 2648875,
+      "prepare_cpu_ns": {
+        "median": 65208,
+        "p95": 80125,
+        "p99": 83750
+      },
+      "record_cpu_ns": {
+        "median": 82833,
+        "p95": 107625,
+        "p99": 139375
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5038625,
+        "p95": 5536417,
+        "p99": 5698166
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 5188750,
+        "p95": 5679875,
+        "p99": 5886750
+      }
+    },
+    {
+      "run": 0,
+      "scenario": "localized",
+      "variant": "direct-reference",
+      "reference": true,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 256,
+      "culled": 0,
+      "draws": 256,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 996120,
+      "cold_scene_setup_cpu_ns": 2785333,
+      "prepare_cpu_ns": {
+        "median": 92791,
+        "p95": 112459,
+        "p99": 123208
+      },
+      "record_cpu_ns": {
+        "median": 251500,
+        "p95": 324916,
+        "p99": 364292
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5899542,
+        "p95": 6223625,
+        "p99": 6326750
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 6223208,
+        "p95": 6559208,
+        "p99": 6678916
+      }
+    },
+    {
+      "run": 0,
+      "scenario": "localized",
+      "variant": "direct-optimized",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 2801167,
+      "prepare_cpu_ns": {
+        "median": 74542,
+        "p95": 93125,
+        "p99": 106125
+      },
+      "record_cpu_ns": {
+        "median": 98083,
+        "p95": 133500,
+        "p99": 200000
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5695500,
+        "p95": 6046750,
+        "p99": 6142708
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 5870917,
+        "p95": 6272541,
+        "p99": 7323750
+      }
+    },
+    {
+      "run": 0,
+      "scenario": "overflow",
+      "variant": "clustered",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 1674458,
+      "prepare_cpu_ns": {
+        "median": 68083,
+        "p95": 79208,
+        "p99": 91416
+      },
+      "record_cpu_ns": {
+        "median": 87917,
+        "p95": 109875,
+        "p99": 120333
+      },
+      "completion_readback_cpu_ns": {
+        "median": 4514708,
+        "p95": 4773000,
+        "p99": 4870250
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 4687626,
+        "p95": 4935791,
+        "p99": 5032792
+      }
+    },
+    {
+      "run": 0,
+      "scenario": "overflow",
+      "variant": "direct-reference",
+      "reference": true,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 256,
+      "culled": 0,
+      "draws": 256,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 996120,
+      "cold_scene_setup_cpu_ns": 2312500,
+      "prepare_cpu_ns": {
+        "median": 92458,
+        "p95": 123417,
+        "p99": 173625
+      },
+      "record_cpu_ns": {
+        "median": 254083,
+        "p95": 302625,
+        "p99": 400500
+      },
+      "completion_readback_cpu_ns": {
+        "median": 4685958,
+        "p95": 5277458,
+        "p99": 6696084
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 5041458,
+        "p95": 5623582,
+        "p99": 7036084
+      }
+    },
+    {
+      "run": 0,
+      "scenario": "overflow",
+      "variant": "direct-optimized",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 2560584,
+      "prepare_cpu_ns": {
+        "median": 72334,
+        "p95": 105750,
+        "p99": 113417
+      },
+      "record_cpu_ns": {
+        "median": 95250,
+        "p95": 152541,
+        "p99": 194542
+      },
+      "completion_readback_cpu_ns": {
+        "median": 4613958,
+        "p95": 5015209,
+        "p99": 6044250
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 4789917,
+        "p95": 5221709,
+        "p99": 6269208
+      }
+    },
+    {
+      "run": 0,
+      "scenario": "outside-grid",
+      "variant": "clustered",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 2789083,
+      "prepare_cpu_ns": {
+        "median": 66666,
+        "p95": 80417,
+        "p99": 81625
+      },
+      "record_cpu_ns": {
+        "median": 85709,
+        "p95": 121334,
+        "p99": 145958
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5563750,
+        "p95": 5794000,
+        "p99": 5933875
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 5716833,
+        "p95": 5944000,
+        "p99": 6068667
+      }
+    },
+    {
+      "run": 0,
+      "scenario": "outside-grid",
+      "variant": "direct-reference",
+      "reference": true,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 256,
+      "culled": 0,
+      "draws": 256,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 996120,
+      "cold_scene_setup_cpu_ns": 3910417,
+      "prepare_cpu_ns": {
+        "median": 86292,
+        "p95": 99042,
+        "p99": 127459
+      },
+      "record_cpu_ns": {
+        "median": 243083,
+        "p95": 267084,
+        "p99": 272917
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5739625,
+        "p95": 5994500,
+        "p99": 6073500
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 6083000,
+        "p95": 6331543,
+        "p99": 6413749
+      }
+    },
+    {
+      "run": 0,
+      "scenario": "outside-grid",
+      "variant": "direct-optimized",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 2483250,
+      "prepare_cpu_ns": {
+        "median": 56375,
+        "p95": 63375,
+        "p99": 82583
+      },
+      "record_cpu_ns": {
+        "median": 62959,
+        "p95": 79958,
+        "p99": 86417
+      },
+      "completion_readback_cpu_ns": {
+        "median": 3134834,
+        "p95": 3300917,
+        "p99": 4256709
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 3249875,
+        "p95": 3431000,
+        "p99": 4387542
+      }
+    },
+    {
+      "run": 1,
+      "scenario": "localized",
+      "variant": "clustered",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 2955708,
+      "prepare_cpu_ns": {
+        "median": 59458,
+        "p95": 73459,
+        "p99": 82625
+      },
+      "record_cpu_ns": {
+        "median": 70750,
+        "p95": 93166,
+        "p99": 131167
+      },
+      "completion_readback_cpu_ns": {
+        "median": 3051167,
+        "p95": 3727334,
+        "p99": 3852583
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 3178916,
+        "p95": 3867834,
+        "p99": 3988542
+      }
+    },
+    {
+      "run": 1,
+      "scenario": "localized",
+      "variant": "direct-reference",
+      "reference": true,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 256,
+      "culled": 0,
+      "draws": 256,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 996120,
+      "cold_scene_setup_cpu_ns": 3746625,
+      "prepare_cpu_ns": {
+        "median": 84667,
+        "p95": 93834,
+        "p99": 99875
+      },
+      "record_cpu_ns": {
+        "median": 240959,
+        "p95": 266833,
+        "p99": 279416
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5312875,
+        "p95": 5913500,
+        "p99": 6152334
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 5616458,
+        "p95": 6248125,
+        "p99": 6499627
+      }
+    },
+    {
+      "run": 1,
+      "scenario": "localized",
+      "variant": "direct-optimized",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 2261250,
+      "prepare_cpu_ns": {
+        "median": 62458,
+        "p95": 73833,
+        "p99": 78250
+      },
+      "record_cpu_ns": {
+        "median": 78750,
+        "p95": 94250,
+        "p99": 94834
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5559292,
+        "p95": 5774916,
+        "p99": 5845542
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 5710084,
+        "p95": 5920917,
+        "p99": 5991084
+      }
+    },
+    {
+      "run": 1,
+      "scenario": "overflow",
+      "variant": "clustered",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 1668333,
+      "prepare_cpu_ns": {
+        "median": 59833,
+        "p95": 73875,
+        "p99": 78542
+      },
+      "record_cpu_ns": {
+        "median": 72416,
+        "p95": 98000,
+        "p99": 113750
+      },
+      "completion_readback_cpu_ns": {
+        "median": 4413375,
+        "p95": 4664791,
+        "p99": 4961042
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 4552334,
+        "p95": 4790417,
+        "p99": 5109916
+      }
+    },
+    {
+      "run": 1,
+      "scenario": "overflow",
+      "variant": "direct-reference",
+      "reference": true,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 256,
+      "culled": 0,
+      "draws": 256,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 996120,
+      "cold_scene_setup_cpu_ns": 2302333,
+      "prepare_cpu_ns": {
+        "median": 84625,
+        "p95": 99583,
+        "p99": 112917
+      },
+      "record_cpu_ns": {
+        "median": 239333,
+        "p95": 262167,
+        "p99": 264875
+      },
+      "completion_readback_cpu_ns": {
+        "median": 4624958,
+        "p95": 4817334,
+        "p99": 4953458
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 4953583,
+        "p95": 5161376,
+        "p99": 5272291
+      }
+    },
+    {
+      "run": 1,
+      "scenario": "overflow",
+      "variant": "direct-optimized",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 3601000,
+      "prepare_cpu_ns": {
+        "median": 58708,
+        "p95": 66167,
+        "p99": 69708
+      },
+      "record_cpu_ns": {
+        "median": 69000,
+        "p95": 82541,
+        "p99": 88292
+      },
+      "completion_readback_cpu_ns": {
+        "median": 4392375,
+        "p95": 4531209,
+        "p99": 4598209
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 4522043,
+        "p95": 4661334,
+        "p99": 4717250
+      }
+    },
+    {
+      "run": 1,
+      "scenario": "outside-grid",
+      "variant": "clustered",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 2709459,
+      "prepare_cpu_ns": {
+        "median": 60750,
+        "p95": 68625,
+        "p99": 69833
+      },
+      "record_cpu_ns": {
+        "median": 73958,
+        "p95": 87167,
+        "p99": 92916
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5549500,
+        "p95": 5735250,
+        "p99": 5832584
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 5688333,
+        "p95": 5878792,
+        "p99": 5987209
+      }
+    },
+    {
+      "run": 1,
+      "scenario": "outside-grid",
+      "variant": "direct-reference",
+      "reference": true,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 256,
+      "culled": 0,
+      "draws": 256,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 996120,
+      "cold_scene_setup_cpu_ns": 3908708,
+      "prepare_cpu_ns": {
+        "median": 87708,
+        "p95": 110583,
+        "p99": 111792
+      },
+      "record_cpu_ns": {
+        "median": 245875,
+        "p95": 263917,
+        "p99": 300625
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5717000,
+        "p95": 6035958,
+        "p99": 6235250
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 6044875,
+        "p95": 6382375,
+        "p99": 6560333
+      }
+    },
+    {
+      "run": 1,
+      "scenario": "outside-grid",
+      "variant": "direct-optimized",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 3814708,
+      "prepare_cpu_ns": {
+        "median": 67166,
+        "p95": 81000,
+        "p99": 90791
+      },
+      "record_cpu_ns": {
+        "median": 86542,
+        "p95": 106375,
+        "p99": 109333
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5586292,
+        "p95": 5901125,
+        "p99": 6786000
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 5752624,
+        "p95": 6054916,
+        "p99": 6997291
+      }
+    },
+    {
+      "run": 2,
+      "scenario": "localized",
+      "variant": "clustered",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 3019666,
+      "prepare_cpu_ns": {
+        "median": 64250,
+        "p95": 79375,
+        "p99": 85541
+      },
+      "record_cpu_ns": {
+        "median": 80458,
+        "p95": 95500,
+        "p99": 99583
+      },
+      "completion_readback_cpu_ns": {
+        "median": 4915875,
+        "p95": 5195375,
+        "p99": 5244375
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 5064499,
+        "p95": 5338833,
+        "p99": 5390125
+      }
+    },
+    {
+      "run": 2,
+      "scenario": "localized",
+      "variant": "direct-reference",
+      "reference": true,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 256,
+      "culled": 0,
+      "draws": 256,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 996120,
+      "cold_scene_setup_cpu_ns": 2069167,
+      "prepare_cpu_ns": {
+        "median": 87750,
+        "p95": 109375,
+        "p99": 117667
+      },
+      "record_cpu_ns": {
+        "median": 236708,
+        "p95": 283583,
+        "p99": 336084
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5787166,
+        "p95": 6174417,
+        "p99": 6871000
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 6083125,
+        "p95": 6467167,
+        "p99": 7253375
+      }
+    },
+    {
+      "run": 2,
+      "scenario": "localized",
+      "variant": "direct-optimized",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 3383750,
+      "prepare_cpu_ns": {
+        "median": 62000,
+        "p95": 72042,
+        "p99": 81167
+      },
+      "record_cpu_ns": {
+        "median": 77666,
+        "p95": 90792,
+        "p99": 98917
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5550833,
+        "p95": 5893458,
+        "p99": 6050083
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 5680458,
+        "p95": 6012958,
+        "p99": 6230416
+      }
+    },
+    {
+      "run": 2,
+      "scenario": "overflow",
+      "variant": "clustered",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 3162125,
+      "prepare_cpu_ns": {
+        "median": 64041,
+        "p95": 83583,
+        "p99": 88084
+      },
+      "record_cpu_ns": {
+        "median": 79208,
+        "p95": 115875,
+        "p99": 121250
+      },
+      "completion_readback_cpu_ns": {
+        "median": 4421875,
+        "p95": 4640917,
+        "p99": 4868083
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 4572417,
+        "p95": 4811874,
+        "p99": 5050375
+      }
+    },
+    {
+      "run": 2,
+      "scenario": "overflow",
+      "variant": "direct-reference",
+      "reference": true,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 256,
+      "culled": 0,
+      "draws": 256,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 996120,
+      "cold_scene_setup_cpu_ns": 1670500,
+      "prepare_cpu_ns": {
+        "median": 89709,
+        "p95": 106292,
+        "p99": 116250
+      },
+      "record_cpu_ns": {
+        "median": 241166,
+        "p95": 275291,
+        "p99": 315916
+      },
+      "completion_readback_cpu_ns": {
+        "median": 4614209,
+        "p95": 4898500,
+        "p99": 4963208
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 4946500,
+        "p95": 5242459,
+        "p99": 5291584
+      }
+    },
+    {
+      "run": 2,
+      "scenario": "overflow",
+      "variant": "direct-optimized",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 3044625,
+      "prepare_cpu_ns": {
+        "median": 61125,
+        "p95": 71292,
+        "p99": 83292
+      },
+      "record_cpu_ns": {
+        "median": 72792,
+        "p95": 87708,
+        "p99": 102833
+      },
+      "completion_readback_cpu_ns": {
+        "median": 4417000,
+        "p95": 4645500,
+        "p99": 4712750
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 4552624,
+        "p95": 4774417,
+        "p99": 4843958
+      }
+    },
+    {
+      "run": 2,
+      "scenario": "outside-grid",
+      "variant": "clustered",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 2603625,
+      "prepare_cpu_ns": {
+        "median": 65292,
+        "p95": 81208,
+        "p99": 96750
+      },
+      "record_cpu_ns": {
+        "median": 85042,
+        "p95": 101584,
+        "p99": 148292
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5547958,
+        "p95": 5801917,
+        "p99": 5878666
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 5710333,
+        "p95": 5957792,
+        "p99": 6091999
+      }
+    },
+    {
+      "run": 2,
+      "scenario": "outside-grid",
+      "variant": "direct-reference",
+      "reference": true,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 256,
+      "culled": 0,
+      "draws": 256,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 996120,
+      "cold_scene_setup_cpu_ns": 3637125,
+      "prepare_cpu_ns": {
+        "median": 90167,
+        "p95": 121500,
+        "p99": 146542
+      },
+      "record_cpu_ns": {
+        "median": 241750,
+        "p95": 279583,
+        "p99": 309583
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5793041,
+        "p95": 6207417,
+        "p99": 6373625
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 6124917,
+        "p95": 6550041,
+        "p99": 6740333
+      }
+    },
+    {
+      "run": 2,
+      "scenario": "outside-grid",
+      "variant": "direct-optimized",
+      "reference": false,
+      "samples": 64,
+      "resolution": [
+        640,
+        360
+      ],
+      "visible": 128,
+      "culled": 128,
+      "draws": 1,
+      "bounds_tests": 0,
+      "known_scene_gpu_bytes": 971544,
+      "cold_scene_setup_cpu_ns": 2437041,
+      "prepare_cpu_ns": {
+        "median": 63250,
+        "p95": 80042,
+        "p99": 87250
+      },
+      "record_cpu_ns": {
+        "median": 79625,
+        "p95": 104250,
+        "p99": 116625
+      },
+      "completion_readback_cpu_ns": {
+        "median": 5581750,
+        "p95": 5798250,
+        "p99": 5821459
+      },
+      "serialized_frame_cpu_ns": {
+        "median": 5726626,
+        "p95": 5942542,
+        "p99": 5978458
+      }
+    }
+  ],
+  "source_base_revision": "9cc8006474f9f521f603c4eb68b585145ca4ff81",
+  "source_files_sha256": {
+    "cmake/shaders/compile_raster.py": "c651ea30f2c99ad62972e2d0d323446ebcecd000d9f59bb29ea1313885c7f7af",
+    "modules/graphics/renderer/include/ludus/graphics/renderer/lighting.hpp": "c985d04c3baed9df5e46bec10a20e56513c57080491c89fc83b83f25d8da6d62",
+    "modules/graphics/renderer/include/ludus/graphics/renderer/materials.hpp": "5a13598cc7b761f0047a20c57c07e40ed4d25affaa266c5464b858e6b0fd3fa5",
+    "modules/graphics/renderer/include/ludus/graphics/renderer/overlays.hpp": "d5f175189e817036c5c474b264f5f262a42c67ede59c7b3e76a80f31c4f89b7c",
+    "modules/graphics/renderer/include/ludus/graphics/renderer/renderer.hpp": "f98897b3d47dae4c74b14ca668b2d99ab6fc24253273e06e53e624f2a2515566",
+    "modules/graphics/renderer/include/ludus/graphics/renderer/views.hpp": "0ad7a844ed4ab94ca1782ba52f4c993bc5ddd99c09a2065afe72a57fcbb3e509",
+    "modules/graphics/renderer/shaders/renderer_clustered.slang": "dd77879ded6deffb91c3a2024af3d627e6808fa891d4fc6f7b16dc5d5e6c3dc8",
+    "modules/graphics/renderer/shaders/renderer_composite.slang": "f6b31d9fb0675202b7aa632862e9d7bb2e011d2b2b311d22097dd38e7b79e605",
+    "modules/graphics/renderer/shaders/renderer_flat.slang": "75e2f5f534d1b0debcb20f975e21b1bac483a521193c551ec0b476f02c268ada",
+    "modules/graphics/renderer/shaders/renderer_lit.slang": "056af00347aeb1b37d351c2318bdc7be391b7ffbcba421868e6d1736ccf9ab7c",
+    "modules/graphics/renderer/shaders/renderer_material.slang": "10b6c83abad7e4b45c000359aa3f9256c2bc3bab9c76c6c2b98c2ffb076a50f0",
+    "modules/graphics/renderer/shaders/renderer_output.slang": "bc6641e65e76fd22e73d6bc9cc9cf2108d3be2a1d3856a1038ff6f7b95745c04",
+    "modules/graphics/renderer/shaders/renderer_overlay.slang": "873d3b0080d1b30b14a0f510e8bcf6188328f337310e8ec2f5dbc45a391328f3",
+    "modules/graphics/renderer/shaders/renderer_shadow.slang": "1a38bc13919b6d039fd049647384be55797b297a6583fb274e6f97ee4f78b5bf",
+    "modules/graphics/renderer/src/lighting.cpp": "81fcfdc40891f65317c2f59f0cf5c025621bdc2c58bc98ee149ad417245eeee8",
+    "modules/graphics/renderer/src/overlays.cpp": "95b750d8f59de99559be6a87ff11566f391965f6bfcd683ed1c674b3d2ccdde5",
+    "modules/graphics/renderer/src/renderer.cpp": "019e86c361a8f85cb0686a7b69faa621885ca46158d39ed4340cddf8509911c7",
+    "modules/graphics/renderer/src/views.cpp": "df8386cdbc064d8f3fc036d12f141531fbb2aee73681fbf9d918caf5e7e52bbd",
+    "modules/graphics/renderer/tests/reference_backend.cpp": "42570943dc880965e09c1a87a93eae56c3f8447b004aad0d11cbad4750eca953",
+    "modules/graphics/renderer/tests/render_tests.cpp": "26415dc28c6c0229106859e3775fb96600a6c831d904114ee9d85989d8774f3c",
+    "modules/graphics/renderer/tests/renderer_tests.cpp": "2a7fc7a05029a511355ce13f8b47212279e83f103447fa6248959883e301e950",
+    "modules/graphics/renderer/tests/views_tests.cpp": "43e50241cb59e13917840ead2985a1d7d1a4f36469e30ed357885aea5cdfcb8f",
+    "scripts/benchmark-renderer": "8f2abc4a81527f5cb3efdce64d57c92813107e6863cbab3e30ddcefe54558442",
+    "tests/sdk_consumer/l5_scene.h": "39b9b96a20e72ef7bbb21f7de97a54f53519d4fa758c7ca22efae7bdd30d813b"
+  }
+}

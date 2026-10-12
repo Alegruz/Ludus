@@ -22,8 +22,8 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <memory>
 #include <mutex>
+#include <new>
 #include <span>
 #include <string_view>
 #include <thread>
@@ -115,7 +115,7 @@ struct LoggerState
     // when EffectiveMode == Asynchronous; null in the synchronous backend, where
     // Sinks holds them and DispatchMutex serializes access. Retained across a
     // timed-out shutdown so a still-running worker never references freed storage.
-    std::unique_ptr<internal::AsyncBackend> Async;
+    foundation::UniquePtr<internal::AsyncBackend> Async;
 };
 
 LoggerState& state() noexcept
@@ -366,7 +366,7 @@ LogInitResult LogSystem::Initialize(const LogConfig& config)
         if (s.Async)
         {
             (void)s.Async->Stop(2000);
-            s.Async.reset();
+            s.Async.Reset();
         }
         lock.lock();
         flushSinksLocked(s);
@@ -379,7 +379,7 @@ LogInitResult LogSystem::Initialize(const LogConfig& config)
     s.FileHealthy.store(true, std::memory_order_relaxed);
     s.DebuggerHealthy.store(true, std::memory_order_relaxed);
 
-    const LogMode effective = config.Mode;
+    LogMode effective = config.Mode;
     result.Status = LogStatus::Ok;
     s.EffectiveMode.store(effective, std::memory_order_relaxed);
     result.EffectiveMode = effective;
@@ -435,9 +435,21 @@ LogInitResult LogSystem::Initialize(const LogConfig& config)
         // Hand sink ownership to the worker; the worker is the sole owner of the
         // sinks for the async session (requirements R36). The synchronous timed
         // flush thread is NOT started; the worker owns the flush cadence.
-        s.Async = std::make_unique<internal::AsyncBackend>();
-        s.Async->Start(std::move(s.Sinks), config.FlushIntervalMilliseconds);
-        s.Sinks.Clear();
+        s.Async.Reset(new (std::nothrow) internal::AsyncBackend());
+        if (s.Async)
+        {
+            s.Async->Start(Move(s.Sinks), config.FlushIntervalMilliseconds);
+            s.Sinks.Clear();
+        }
+        else
+        {
+            effective = LogMode::Synchronous;
+            s.FlushIntervalMs = 0; // Do not request another allocation for a timed worker after allocation failure.
+            s.EffectiveMode.store(effective, std::memory_order_relaxed);
+            result.EffectiveMode = effective;
+            result.Status = LogStatus::Degraded;
+            internal::EmergencyNote("async backend allocation failed; using synchronous logging");
+        }
     }
 
     // Publish Accepting last, so ShouldLog/dispatch only admit once sinks exist.
@@ -477,7 +489,7 @@ LogStatus LogSystem::Shutdown()
         const bool stopped = s.Async->Stop(5000);
         if (stopped)
         {
-            s.Async.reset();
+            s.Async.Reset();
         }
         else
         {

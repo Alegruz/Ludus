@@ -77,6 +77,10 @@ bool Hex(std::string_view text, uint64& output) noexcept
     return true;
 }
 #endif
+// Thanks to Glenn Fowler, Landon Curt Noll and Phong Vo, "FNV Hash",
+// "FNV-1a alternate algorithm" and "Parameters of the FNV-1/FNV-1a hash":
+// https://www.isthe.com/chongo/tech/comp/fnv/ . Adopt the XOR/multiply sequence
+// and published constants for a non-cryptographic hash; collisions remain possible.
 uint64 Digest(ByteView bytes) noexcept
 {
     uint64 value = 14695981039346656037ULL;

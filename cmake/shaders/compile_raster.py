@@ -19,9 +19,9 @@ def uniform_shape(value):
             return 'Float' + str(value['elementCount'])
         if kind == 'matrix' and value.get('rowCount') == value.get('columnCount') == 4:
             return 'Float4x4'
-    if kind == 'array' and type(value.get('elementCount')) is int and 1 <= value['elementCount'] <= 256:
+    if kind == 'array' and type(value.get('elementCount')) is int and 1 <= value['elementCount'] <= 1024:
         shape = uniform_shape(value.get('elementType', {}))
-        if shape in ('Float4', 'Float4x4'):
+        if shape in ('Float4', 'Float4x4') and value['elementCount'] * (16 if shape == 'Float4' else 64) <= 16384:
             return shape + 'Array'
     return 'Opaque'
 
@@ -187,11 +187,13 @@ def wgsl_uniform_type(code, kind, depth=0):
     if array:
         element, cast_count, bare_count = array.groups()
         count = int(cast_count or bare_count)
-        if not 1 <= count <= 256:
+        if not 1 <= count <= 1024:
             raise RuntimeError('Browser raster uniform array count exceeds bounded profile')
         if element not in ('vec4<f32>', 'mat4x4<f32>') and not re.fullmatch(r'_MatrixStorage_float4x4_(?:ColMajor|RowMajor)std140_\d+', element):
             raise RuntimeError('Browser raster uniforms require bounded vec4/mat4 arrays')
         stride, alignment = wgsl_uniform_type(code, element, depth+1)
+        if stride * count > 16384:
+            raise RuntimeError('Browser raster uniform array exceeds 16384-byte profile')
         return stride * count, alignment
     matrix = re.fullmatch(r'_MatrixStorage_float4x4_(?:ColMajor|RowMajor)std140_\d+', kind)
     wrapped_array = re.fullmatch(r'_Array_std140_matrixx3Cfloatx2C4x2C4x3E\d+_\d+', kind)

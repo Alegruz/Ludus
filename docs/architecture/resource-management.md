@@ -1,13 +1,10 @@
 # Resource manager architecture
 
-Status: Stage 1 AudioContent integration boundary implemented; the existing
-Content catalog and native AudioContent loader remain available. The shared
-resource coordinator (Stage 2 onward), cooked catalog, and general streaming
-policies below remain proposals. Reviewed against
-repository HEAD `144a708` on 2026-10-04, with unrelated local changes present.
-The original architecture review did not implement runtime code or claim
-performance measurements. Stage 1 behavior and validation are recorded in the
-[audio integration evidence](../development/audio-content-evidence.md#resource-manager-stage-1).
+Status: Stage 1 AudioContent integration and the Stage 2 fixed-capacity native
+coordinator are implemented. Cooking, replacement transactions, required DAGs,
+additional consumer adapters and streaming below remain proposals. The initial
+review used repository HEAD `144a708` on 2026-10-04. Stage 2 implementation and
+bounded acceptance are described below; no performance improvement is claimed.
 
 Use **one explicit coordinator for resource metadata and loading, immutable
 resident versions, typed handles for identity, and explicit leases for lifetime**.
@@ -99,7 +96,7 @@ Keep the dependency structure concrete:
 | Proposed boundary | Dependencies and public surface |
 | --- | --- |
 | Existing `Ludus::Content`, `modules/content/` | FoundationBase and private parser/file/hash implementation. Owns catalogs and bytes; knows nothing about Audio, RHI, World, or Qt. |
-| New `Ludus::Resources`, `modules/runtime/resources/` | Content and the required Foundation facilities. Owns generic coordination through private tables and explicit function descriptors. |
+| Implemented Stage 2 `Ludus::Resources`, `modules/runtime/resources/` | Content and the required Foundation facilities. Owns generic coordination through private tables and explicit function descriptors. |
 | Existing `Ludus::AudioContent` | Retains its current Content/Audio dependencies and compatibility API. Do not make Audio depend on the coordinator. |
 | Composition adapters, initially private to the consuming app | Depend on Resources plus AudioContent or RHI. Move to `modules/runtime/resource_adapters/` only when multiple consumers need them. |
 | Cooker and inspection tools | Depend on source decoders and artifact schemas. Runtime does not link authoring tool libraries. Qt remains private to the editor. |
@@ -113,6 +110,89 @@ profiling formatting behind `.cpp`/private-header boundaries. Public headers
 contain small values, spans, views, and thin typed wrappers erasing to non-template
 operations. Share handle mechanics with the proposed identity work when available;
 do not require a new identity module before using an existing compatible value.
+
+## Implemented Stage 2 profile
+
+[`Ludus::Resources`](../../modules/runtime/resources/include/ludus/runtime/resources/manager.h)
+provides explicit fallible initialization, typed 16-byte identity tokens, copied
+version-1 catalog metadata, exact linear ID/type lookup, scopes, durable per-caller
+requests, shared operations, move-only leases, epoch-validated borrowing and
+nonblocking service/close/shutdown. All calls and borrowing use one serialized
+control owner. Adapter function tables are copied at composition; their contexts
+and code outlive the manager. No static registration or Audio/RHI dependency enters
+the coordinator. Its public declaration comments own the exact API contracts.
+
+One incarnation fixes the catalog, preparation profile and adapter set. A load key
+is its exact asset record and adapter epoch; equal requests share one operation
+and peak reservation. Resolve performs no I/O. Even a resident hit creates a
+request. Ready results hold their exact version until claimed, cancelled or closed;
+failed/cancelled results remain observable until EndRequest or scope close. A copied
+raw token creates no hold. Release/Cancel/CloseScope/Shutdown need no normal queue
+slot. Closing never revokes externally claimed leases; GetScope copies their named
+scope and blocker counts. Release the holders and poll close again.
+
+The fixed physical tables hold at most 64 catalog entries, 16 scopes, 32 requests,
+8 operations, 16 candidates/residents/retiring versions and 64 lease records.
+Config can lower admitted capacities without shrinking the physical allocation.
+Slot generations saturate permanently and manager owner identities are never
+reused. Service rotates through at most the requested number of operation/version
+records, capped at one full table traversal; callbacks may perform bounded cold
+installation/cleanup work, so this is not an audio callback or a measured time
+budget. There is no concurrent-producer command queue in this profile.
+
+Initialization checks a fixed metadata byte limit before allocating the PIMPL.
+Admission reserves adapter-declared preparation and resident peaks with checked
+remaining-capacity arithmetic. Deduplicated work is charged once. Preparation
+reservation drops after successful publication; resident reservation survives
+leases, submitted audio voices and delayed retirement. Failed/obsolete work retains
+both reservations until the adapter acknowledges cleanup. Inspect copies these
+conservative reservations and table counts, rather than measured process memory.
+Allocator bookkeeping, opaque decoder/driver heaps, separately owned AudioSystem
+control storage and music playback are outside these counters. A strict complete
+heap/device budget still needs adapter allocation-domain evidence; these limits
+must not be described as a hard process-memory cap.
+
+Idle versions immediately enter retirement when their final request/lease hold
+ends. A request arriving after that point creates a new operation; it cannot
+resurrect retiring storage. Persistent idle caching/LRU, failure caching, priorities,
+transactional replacement, dependency scheduling and cooked artifact revision keys
+remain later work. Keep loose-file roots immutable during an incarnation: copied
+catalog metadata pins names/paths, not changing source-file contents. Loader's
+optional catalog snapshot copies those metadata before worker dispatch and avoids
+reopening catalog.json, while retaining descriptor-bound reads of individual files. The added optional
+Begin parameter preserves source call sites but changes its native symbol; rebuild
+SDK consumers with the updated AudioContent library.
+
+The private [audio sample adapter](../../examples/audio-content/resource_adapter.cpp)
+demonstrates two scoped callers for one Sound, cancelling preview while game
+acquisition succeeds. It retains AudioContent's one worker and deliberately permits
+only one candidate/resident sound at a time. Its AudioSystem must have no other
+resident-clip owner; independently owned music streams remain supported. Retirement
+polls Loader/AudioSystem and requires zero resident PCM, conservatively covering
+partial installation failures and active voices. It cannot finance another sound
+from retiring bytes. Its 128 MiB preparation and 64 MiB resident reservations are
+sample policy allowances, not proven decoder heap bounds. A reusable multi-resident
+adapter needs finer acknowledged retirement/accounting tickets before relaxing
+this limitation. The adapter and sample are native Linux/macOS consumers; browser
+acquisition is still Unsupported.
+
+Typical owner flow is Initialize, OpenScope, Resolve, BeginAcquire, then Service
+and GetRequest/TakeLease while continuing the frame loop. Borrow only during the
+lease interval. CloseScope returns Pending while an external lease remains; release
+it and poll CloseScope. Shutdown closes all scopes and rejects new admission;
+continue Service and release external leases until Shutdown returns Ok before
+reinitializing or destroying the manager/context. A backend unable to prove drain
+keeps returning Pending/error and retains ownership; the caller must retain it or
+use the host's unsafe-stop policy rather than destroying live state.
+
+The [audio sample guide](../examples/audio-content.md) records SDK usage. Deterministic
+core tests cover independent cancellation before/during/after publication, durable
+outcomes under table pressure, cache hits, partial failure/retry, epoch loss,
+output preservation, stale/foreign/reused handles, generation exhaustion, restart
+identity, overflow admission and delayed cleanup. Native audio tests withhold worker
+exit while proving shared installation/cancellation and retain budget until an
+actual submitted voice reaches terminal acknowledgment. These are correctness
+acceptance tests, not cold/warm latency or workload benchmarks.
 
 ## Identity and lifetime
 
@@ -169,8 +249,8 @@ other's mutable state or source provenance by accidental digest equality.
 
 ## Public acquisition contract
 
-Expose a small explicit API. The following names specify behavior, not a compiled
-header or a change to the existing AudioContent ABI. All operations return bounded
+Expose a small explicit API. The following broader contracts guide the remaining stages; the implemented
+Stage 2 subset is specified by its public header and profile above. All operations return bounded
 statuses and are `noexcept`. Failed admission acquires no ownership.
 
 Acquisition output parameters must be empty on entry. A nonempty owning output
@@ -235,14 +315,16 @@ Graphics and audio adapters marshal installation and retirement to their own
 owners. Begin with polling and bounded queues; add worker-pool sophistication
 only when real consumers require it.
 
-The existing AudioContent loader cannot directly satisfy this nonblocking
-contract: its Cancel and completed Poll paths call `pthread_join`, and its native
-Begin rejects browser execution. Integration must either add a separately tested
-request-cancel/poll-drain boundary or keep the entire AudioSystem/Loader control
-owner on a dedicated control worker and marshal bounded messages to it. Merely
-calling Loader from an arbitrary worker violates its existing owner rule. Keep
-legacy lease tokens inside that adapter; the new facade supplies its own owner
-identity and does not infer cross-loader safety from slot/generation alone.
+Stage 1 established the AudioContent integration boundary: RequestCancel signals
+without joining, and Poll detaches a completed worker after its final job access.
+Its legacy Cancel/destructor still join for cold shutdown. Stage 2's sound adapter
+calls Begin, Poll and RequestCancel on AudioSystem's serialized control owner;
+worker completion remains durable inside Loader. It retains legacy lease tokens
+privately and the facade supplies independent manager/request/lease identities.
+Only one acquisition can be pending in Loader, and native Begin remains unsupported
+in browsers. The Stage 2 sample also limits its adapter to one resident sound;
+other work remains queued. See the implemented profile below for retirement and
+budget limitations.
 
 Each adapter explicitly reports its memory estimate and supplies CPU prepare,
 begin/poll install, cancel, begin/poll retire, and CPU cleanup functions as needed.
@@ -681,7 +763,7 @@ The review describes design inspiration; it does not supply copied implementatio
 | Stage | Deliverable and exit condition |
 | --- | --- |
 | 1 (implemented) | Audit existing AudioContent request/lease/session boundaries, joining cancellation, and ownership provenance; preserve version-1 fixtures and its cache/retirement behavior. Establish a tested nonblocking integration boundary before exposing the new runtime API. |
-| 2 | Fixed-capacity coordinator, one owner, exact-ID lookup, scoped requests, deduplicated operations, lease tokens, durable result records, and explicit budgets. Demonstrate two callers acquiring one sound with independent cancellation. |
+| 2 (implemented) | Fixed-capacity coordinator, one owner, exact-ID lookup, scoped requests, deduplicated operations, lease tokens, durable result records, and explicit budgets. Demonstrate two callers acquiring one sound with independent cancellation. |
 | 3 | Add a second demonstrated consumer, initially immutable game definitions or existing shaders. Prove different readiness/retirement adapters share the core without new special-case branches. Keep one-pending AudioContent limitations visible until separately extended. |
 | 4 | Add transactional replacement and required DAG scheduling. Prove diamond sharing, parent/child replacement coherence, last-good retention, and physical retirement. |
 | 5 | Add cooker dependency manifests, exact artifact keys, dump tooling, deterministic release publication, and optional independently chunked packs. Measure against loose files. |

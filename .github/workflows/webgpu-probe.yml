@@ -211,6 +211,9 @@ jobs:
             out/build/renderer-web-sdk/renderer-lighting.js
             out/build/renderer-web-sdk/renderer-lighting.wasm
             out/build/renderer-web-sdk/renderer-lighting.html
+            out/build/renderer-web-sdk/renderer-scaling.js
+            out/build/renderer-web-sdk/renderer-scaling.wasm
+            out/build/renderer-web-sdk/renderer-scaling.html
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
@@ -265,6 +268,22 @@ jobs:
             out/host-tools/venv/bin/cmake --build --preset "$preset" --target ludus_world_demo --parallel 2
             ./scripts/check "$preset" --tidy
           done
+      - name: Review complete browser analyzer baselines
+        continue-on-error: true
+        run: |
+          failed=0
+          for preset in web-emscripten-development web-emscripten-release; do
+            ./scripts/check "$preset" --analyzer || failed=1
+          done
+          exit "$failed"
+      - name: Preserve browser analysis inventories and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analyzer-browser
+          path: out/quality/analysis/
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: world-camera-web-release
@@ -427,6 +446,8 @@ jobs:
         run: node tests/sdk_consumer/raster-browser-test.mjs out/raster-web-sdk-consumer out/browser-qa/results/raster
       - name: Test installed L0/L1/L2/L3/L4 renderer against direct and cross-backend image oracles
         run: node tests/sdk_consumer/renderer-browser-test.mjs out/renderer-web-sdk-consumer out/browser-qa/results/renderer
+      - name: Verify L5 renderer scaling browser pixels
+        run: node tests/sdk_consumer/renderer-scaling-browser-test.mjs out/renderer-web-sdk-consumer out/browser-qa/results/renderer-l5
       - name: Check fixed and follow camera pixels on WebGPU and WebGL
         run: |
           node apps/world_demo/tests/browser-test.mjs out/world-camera-web-release out/browser-qa/results/world-camera-webgpu

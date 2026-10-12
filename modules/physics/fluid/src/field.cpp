@@ -11,7 +11,6 @@
 #include <ludus/foundation/containers/array.hpp>
 #include <ludus/foundation/math/scalar.hpp>
 
-#include <algorithm>
 #include <new>
 
 namespace ludus::physics::fluid
@@ -284,8 +283,14 @@ struct Field::Storage final
                 }
             }
         }
-        std::copy_n(NextU.GetData(), UFaceCount, U.GetData());
-        std::copy_n(NextV.GetData(), VFaceCount, V.GetData());
+        for (usize i = 0; i < UFaceCount; ++i)
+        {
+            U[i] = NextU[i];
+        }
+        for (usize i = 0; i < VFaceCount; ++i)
+        {
+            V[i] = NextV[i];
+        }
         for (usize y = 0; y < Height; ++y)
         {
             for (usize x = 0; x <= Width; ++x)
@@ -346,7 +351,10 @@ struct Field::Storage final
                 }
             }
         }
-        std::copy_n(NextCells.GetData(), CellCount, Cells.GetData());
+        for (usize i = 0; i < CellCount; ++i)
+        {
+            Cells[i] = NextCells[i];
+        }
     }
 };
 
@@ -459,8 +467,14 @@ Status Field::TryReset(std::span<const uint8> solids, std::span<const CellState>
         }
     }
     s.Active = false;
-    std::fill_n(s.U.GetData(), s.UFaceCount, 0.0);
-    std::fill_n(s.V.GetData(), s.VFaceCount, 0.0);
+    for (usize i = 0; i < s.UFaceCount; ++i)
+    {
+        s.U[i] = 0.0;
+    }
+    for (usize i = 0; i < s.VFaceCount; ++i)
+    {
+        s.V[i] = 0.0;
+    }
     for (usize i = 0; i < s.CellCount; ++i)
     {
         s.Solid[i] = solids.empty() ? 0 : solids[i];

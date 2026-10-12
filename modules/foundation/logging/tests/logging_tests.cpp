@@ -4,8 +4,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "format_test_name.hpp"
+
 #include <filesystem>
-#include <format>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -41,7 +42,7 @@ std::string read_file(const std::filesystem::path& path)
 std::filesystem::path make_temp_log_dir(const std::string& tag)
 {
     const auto base =
-        std::filesystem::temp_directory_path() / std::format("ludus_log_test_{}_{}", tag, LUDUS_TEST_GETPID());
+        std::filesystem::temp_directory_path() / FormatTestName("ludus_log_test_{}_{}", tag, LUDUS_TEST_GETPID());
     std::filesystem::remove_all(base);
     std::filesystem::create_directories(base);
     return base;
@@ -195,7 +196,7 @@ TEST_CASE("file retention prunes old sessions but not unrelated files", "[loggin
     // old modification time so they sort as the oldest sessions.
     for (int i = 0; i < 5; ++i)
     {
-        const auto stale_path = dir / std::format("2020-01-01_00-00-0{}_pid-100{}_n{}.log", i, i, i);
+        const auto stale_path = dir / FormatTestName("2020-01-01_00-00-0{}_pid-100{}_n{}.log", i, i, i);
         {
             std::ofstream stale(stale_path);
             stale << "old session " << i << '\n';

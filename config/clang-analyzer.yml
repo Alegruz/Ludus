@@ -1,0 +1,14 @@
+# Platform/tooling owns this advisory baseline. Stable LLVM 18 checkers only;
+# promotion requires the supported native/browser scans and reviewed findings.
+# Thanks to LLVM, "Available Checkers", for the core/C++/Unix family contracts:
+# https://clang.llvm.org/docs/analyzer/checkers.html
+---
+Checks: '-*,clang-analyzer-core.*,clang-analyzer-cplusplus.*,clang-analyzer-unix.*'
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(.*/)?(modules|apps|tools|tests|examples)/.*'
+CheckOptions:
+  # LLVM 18's released Move option retains checks for modeled standard types,
+  # while respecting Ludus-owned types' documented empty/reusable moved state.
+  # https://github.com/llvm/llvm-project/blob/llvmorg-18.1.8/clang/include/clang/StaticAnalyzer/Checkers/Checkers.td#L613
+  - key: clang-analyzer-cplusplus.Move:WarnOn
+    value: KnownsOnly

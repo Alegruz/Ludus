@@ -5,12 +5,24 @@
 #include "internal/trace_event.hpp"
 
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/stable_sort.hpp>
 
-#include <algorithm>
 #include <cstdio>
 #include <string>
 
 // -----------------------------------------------------------------------------
+// Thanks to Google/Chromium contributors, "Trace Event Format", duration,
+// instant and flow events, for the phase/track/timestamp interchange contract:
+// The publisher maintains this living specification (consulted 2026-10-11):
+// https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
+// Thanks also to Perfetto contributors, "Visualizing external trace formats with
+// Perfetto", "Chrome JSON format", pinned documentation confirming those fields
+// and supported phases, with a reference to the original specification:
+// https://github.com/google/perfetto/blob/59400b15c6ff8186ba0bba69f78c2cd454eea8b4/docs/getting-started/other-formats.md
+// Adopt Chrome JSON
+// B/E, instant and flow records; synthesized incomplete ends are Ludus policy.
+// Design owner: docs/architecture/profiling-final.md.
+//
 // Perfetto / Chrome Trace Event JSON exporter (final design §16 primary path).
 //
 // This is the ANALYSIS + VISUALIZATION-export layer: it runs entirely off the
@@ -201,14 +213,24 @@ bool ExportPerfettoTrace(std::string_view path) noexcept
         return false;
     }
 
-    // Pointer iterators are contiguous, so std::stable_sort works unchanged.
-    std::stable_sort(events.begin(), events.end(), [](const FlatEvent& a, const FlatEvent& b) noexcept {
-        if (a.ThreadId != b.ThreadId)
-        {
-            return a.ThreadId < b.ThreadId;
-        }
-        return a.Ticks < b.Ticks;
-    });
+    foundation::Array<FlatEvent> scratch;
+    if (!scratch.TryResize(events.GetSize()))
+    {
+        return false;
+    }
+    if (!foundation::StableSort(events.GetData(),
+                                scratch.GetData(),
+                                events.GetSize(),
+                                [](const FlatEvent& a, const FlatEvent& b) noexcept {
+                                    if (a.ThreadId != b.ThreadId)
+                                    {
+                                        return a.ThreadId < b.ThreadId;
+                                    }
+                                    return a.Ticks < b.Ticks;
+                                }))
+    {
+        return false;
+    }
 
     std::string out;
     out.reserve(events.size() * 96 + 256);

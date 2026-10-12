@@ -104,6 +104,13 @@ struct SceneItem final
 {
     /// Ready owned mesh at snapshot creation; accepted snapshots retain its incarnation.
     Mesh Geometry{};
+    /// Optional coarse mesh incarnation, retained with Geometry. Opaque camera views only.
+    /// Both meshes must use compatible material UVs/normals; shadow views retain full detail.
+    Mesh LodGeometry{};
+    /// Select coarse detail below this projected bounding-box diameter in pixels, positive when authored.
+    ludus::foundation::float32 LodPixels = 0;
+    /// Caller-owned previous coarse selection for hysteresis; copied with this snapshot.
+    bool PreviousLod = false;
     /// Local-to-world for Opaque; local-to-canonical-clip for Overlay (view matrix ignored).
     ludus::foundation::math::Affine3 Transform{};
     /// Copied flat color; default is the error material.
@@ -129,6 +136,16 @@ struct ViewDescription final
     ludus::foundation::float32 CullMargin = 0;
     /// Keep source order and one draw per object, with visibility disabled, for image comparison.
     bool Reference = false;
+    /// L5 diagnostic: evaluate all admitted lights while retaining ordinary culling/batching.
+    bool DirectLighting = false;
+    /// Opt-in screen-size LOD; Reference bypasses LOD, ShadowCasters always uses full geometry.
+    bool EnableLod = false;
+    /// Physical viewport dimensions used only for LOD; both positive when EnableLod is true.
+    ludus::foundation::uint32 LodWidth = 0;
+    /// Physical viewport height for LOD, positive when EnableLod is true.
+    ludus::foundation::uint32 LodHeight = 0;
+    /// Fractional transition band [0,0.5]; previous selection comes from SceneItem::PreviousLod.
+    ludus::foundation::float32 LodHysteresis = 0.1F;
     /// Schedule a bounded R2 upload version instead of immediate immutable creation.
     /// PrepareView then returns Pending; poll GetStatus between frames before drawing.
     /// Caller snapshots/arrays may be released immediately; accepted GPU versions never change.
@@ -164,6 +181,14 @@ struct ViewReport final
     ludus::foundation::uint32 BakeFallbacks = 0;
     /// Visible lit instances using unshadowed direct light after conservative caster invalidation.
     ludus::foundation::uint32 ShadowFallbacks = 0;
+    /// Number of conservative 16-object groups rejected before individual AABB tests.
+    ludus::foundation::uint32 CulledGroups = 0;
+    /// Number of individual AABB tests; fully inside/rejected groups avoid them.
+    ludus::foundation::uint32 BoundsTests = 0;
+    /// Number of visible objects selecting coarse detail.
+    ludus::foundation::uint32 LodObjects = 0;
+    /// Coarse selections in the same order as SourceIds; feed back by source identity for hysteresis.
+    bool SelectedLods[256]{};
     /// Actual per-instance source order; first Visible entries are meaningful.
     ludus::foundation::uint64 SourceIds[256]{};
 };
@@ -257,7 +282,9 @@ public:
                                                        const rhi::RasterShaderDescription& shadowFragment) noexcept;
     /// Advance lighting setup without blocking, between frames.
     [[nodiscard]] rhi::RasterStatus PollLighting() noexcept;
-    /// Validate renderer_lit.slang and prewarm linear RGBA8/RGBA16F plus masked shadow variants.
+    /// Validate renderer_lit.slang or renderer_clustered.slang and prewarm linear RGBA8/RGBA16F plus masked shadows.
+    /// Clustered programs require eight bindings and an 8800-byte fragment uniform range;
+    /// pass LitMaterialDescription::Clusters when creating their materials. Unsupported capabilities reject.
     /// Shadow fragment uses the same typed uniform schema and a subset of the lit bindings.
     /// Sixteen vertex locations required; HDR variants are omitted when HdrColor is false.
     /// Ready/Pending grants program ownership; failure preserves null output.
@@ -386,7 +413,8 @@ private:
                                                        const ludus::foundation::uint8* bytes,
                                                        ludus::foundation::usize size,
                                                        const LitMaterialDescription* lighting,
-                                                       MaterialVersion& output) noexcept;
+                                                       MaterialVersion& output,
+                                                       const LightClusters* clusters = nullptr) noexcept;
     [[nodiscard]] rhi::RasterStatus PreparePresentationData(rhi::TextureHandle source,
                                                             const ViewMapping& mapping,
                                                             const LightingOutput* lighting,

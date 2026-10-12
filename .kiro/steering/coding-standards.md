@@ -50,6 +50,9 @@ New runtime facilities default to Ludus-owned implementations; existing STL
 usage is migration debt, not permission to introduce more. Read the explicit
 allowlist and boundary restrictions before choosing any standard-library or
 CRT operation. Concepts and approved compile-time utilities remain permitted.
+`<format>` and standard format/argument-store calls are banned in repository-owned
+code, including tests. A `.cpp` boundary alone does not authorize a heavy STL
+facility; follow the measured build-time rules in `AGENTS.md`.
 
 ## Other standing rules
 

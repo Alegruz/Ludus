@@ -6,9 +6,21 @@ import sys
 import unittest
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'cmake/shaders'))
-from compile_raster import raster_interface, wgsl_contract, glsl_interface, glsl_varyings, verify_varyings
+from compile_raster import raster_interface, wgsl_contract, glsl_interface, glsl_varyings, verify_varyings, uniform_shape, wgsl_uniform_type
 
 class RasterReflectionTests(unittest.TestCase):
+    def test_cluster_light_arrays_obey_uniform_byte_budget(self):
+        vector = {'kind':'vector','elementCount':4,'elementType':{'kind':'scalar','scalarType':'float32'}}
+        for count in (32,512,1024):
+            self.assertEqual(uniform_shape({'kind':'array','elementCount':count,'elementType':vector}),'Float4Array')
+        self.assertEqual(uniform_shape({'kind':'array','elementCount':1025,'elementType':vector}),'Opaque')
+        matrix = {'kind':'matrix','rowCount':4,'columnCount':4,'elementType':{'kind':'scalar','scalarType':'float32'}}
+        self.assertEqual(uniform_shape({'kind':'array','elementCount':256,'elementType':matrix}),'Float4x4Array')
+        self.assertEqual(uniform_shape({'kind':'array','elementCount':257,'elementType':matrix}),'Opaque')
+        self.assertEqual(wgsl_uniform_type('', 'array<vec4<f32>,512>'), (8192,16))
+        with self.assertRaises(RuntimeError):
+            wgsl_uniform_type('', 'array<mat4x4<f32>,257>')
+
     def test_fragment_varyings_may_be_a_typed_subset(self):
         verify_varyings([(0,'vec2'),(1,'vec3')],[(0,'vec2')])
         verify_varyings([(0,'vec2')],[])

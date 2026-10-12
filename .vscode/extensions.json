@@ -1,7 +1,8 @@
 {
   "recommendations": [
     "llvm-vs-code-extensions.vscode-clangd",
-    "ms-vscode.cmake-tools"
+    "ms-vscode.cmake-tools",
+    "charliermarsh.ruff"
   ],
   "unwantedRecommendations": [
     "ms-vscode.cpptools"
