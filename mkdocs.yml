@@ -76,13 +76,13 @@ nav:
       - Build, run and debug: wiki/guides/build-and-debug.md
       - Projects and setup repair: development/project-sdk-workflow.md
       - Platform targets and compatibility: wiki/guides/platform-targets.md
-      - Engine configuration: wiki/guides/configuration.md
+      - Engine configuration: architecture/engine-configuration.md
       - Filesystem and background reads: wiki/guides/filesystem.md
       - Strings and names: wiki/guides/strings.md
       - Hashing: wiki/guides/hashing.md
       - Deterministic randomness: wiki/guides/randomness.md
       - High-resolution time: wiki/guides/time.md
-      - Audio workflow: wiki/guides/audio.md
+      - Audio workflow: architecture/audio-authoring.md
       - Package and publish a game: development/editor-game-releases.md
       - Troubleshooting: wiki/guides/troubleshooting.md
   - Engine development:

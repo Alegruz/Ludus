@@ -49,7 +49,6 @@ for content changes. Module/sample/tool READMEs link to these owners.
 
 ## Guides and workflows
 
-- [Audio workflow](wiki/guides/audio.md)
 - [Benchmark scenes and system test suites](development/benchmark-scenes.md)
 - [Browser editor](wiki/guides/browser-editor.md)
 - [Browser smoke packaging and itch.io upload](development/web-packaging.md)
@@ -59,7 +58,6 @@ for content changes. Module/sample/tool READMEs link to these owners.
 - [Building the browser editor](development/browser-editor.md)
 - [Checked drag and radial contact kernels](development/dynamics-kernels.md)
 - [Continuous integration](development/continuous-integration.md)
-- [Engine configuration](wiki/guides/configuration.md)
 - [Filesystem measurements](development/filesystem-benchmark.md)
 - [Game release setup, packaging and publishing](development/editor-game-releases.md)
 - [Generated public SDK reference](development/api-reference.md)
@@ -301,6 +299,8 @@ for content changes. Module/sample/tool READMEs link to these owners.
 
 ## Earlier entry points
 
+- [Audio workflow](wiki/guides/audio.md)
+- [Engine configuration](wiki/guides/configuration.md)
 - [Game release setup, packaging and publishing](wiki/guides/releases.md)
 - [Generated public SDK reference](wiki/contribute/api-reference.md)
 - [Independent Ludus game projects and shared SDKs — user guide](wiki/guides/project-setup.md)
