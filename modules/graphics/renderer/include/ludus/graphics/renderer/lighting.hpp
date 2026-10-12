@@ -61,17 +61,56 @@ struct DirectLight final
 /// Stable bounded forward list; entries sorted by SourceId, not brightness or opaque depth.
 struct LightSelection final
 {
-    /// At most eight selected normalized light descriptions.
-    DirectLight Lights[8]{};
+    /// L4 selects at most eight; L5 clustered materials report all admitted lights (up to 128).
+    DirectLight Lights[128]{};
     /// Number of initialized entries in Lights.
     ludus::foundation::uint32 Count = 0;
     /// Submitted count minus Count; positive means a declared quality reduction.
     ludus::foundation::uint32 Dropped = 0;
+    /// L5 cells using full-list fallback; zero for L4 selection.
+    ludus::foundation::uint32 OverflowCells = 0;
+    /// L5 written cell/light entries; zero for L4 selection.
+    ludus::foundation::uint32 Assignments = 0;
 };
 /// Validate up to 128 lights and retain the eight smallest unique SourceIds.
 /// No allocation; invalid/count overflow preserves output. Saturation succeeds with Dropped.
 [[nodiscard]] rhi::RasterStatus
 SelectDirectLights(const DirectLight* lights, ludus::foundation::usize count, LightSelection& output) noexcept;
+/// Regular 8x8x8 grid in a rigidly transformed space, independent of opaque depth.
+struct LightClusterDescription final
+{
+    /// World-to-grid rigid transform; columns must be orthonormal within 1e-5.
+    ludus::foundation::math::Affine3 WorldToGrid{};
+    /// Finite grid-space bounds in meters, each extent [0.01,2000000].
+    /// Surfaces outside this box evaluate the full admitted light list.
+    ludus::foundation::math::Aabb3 Bounds{{-10, -10, -10}, {10, 10, 10}};
+};
+/// Inspectable CPU assignment, copied on success; no resource ownership or allocation.
+struct LightClusters final
+{
+    /// All admitted normalized lights in ascending SourceId order, at most 128.
+    DirectLight Lights[128]{};
+    /// Initialized light count; assignment never drops admitted lights.
+    ludus::foundation::uint32 Count = 0;
+    /// Cell counts, capped at 32; x varies fastest, then y, then z.
+    ludus::foundation::uint8 Counts[512]{};
+    /// Cells with more than 32 intersections evaluate the full list in the shader.
+    bool Overflow[512]{};
+    /// Fixed-stride indices plus one; zero terminates. Overflow starts with 255.
+    /// Uploaded as a nearest-sampled 64x64 RGBA8 texture (32 bytes per cell).
+    ludus::foundation::uint8 Texels[16384]{};
+    /// Number of overflow cells, explicitly reported rather than dropping lights.
+    ludus::foundation::uint32 OverflowCells = 0;
+    /// Written cell/light intersections, at most 512*32.
+    ludus::foundation::uint32 Assignments = 0;
+};
+/// Validate and normalize up to 128 unique lights, then assign conservative sphere/AABB lists.
+/// Directional lights intersect every cell; spot cones use their enclosing range sphere.
+/// No occupied-depth or normal rejection. Failure preserves output; no allocation.
+[[nodiscard]] rhi::RasterStatus BuildLightClusters(const LightClusterDescription& description,
+                                                   const DirectLight* lights,
+                                                   ludus::foundation::usize count,
+                                                   LightClusters& output) noexcept;
 /// Metadata accompanying one baked irradiance chart; no runtime bake or chart packing.
 struct BakedLighting final
 {
@@ -111,10 +150,13 @@ struct LitMaterialDescription final
     ludus::foundation::math::Vector3 EnvironmentRadiance{};
     /// Borrowed list, validated and copied before CreateLitMaterial returns.
     const DirectLight* Lights = nullptr;
-    /// At most 128 input lights; stable saturation retains eight and reports Dropped.
+    /// At most 128 input lights; L4 retains eight, L5 clusters retain all.
     ludus::foundation::usize LightCount = 0;
     /// Optional immutable bake chart/version with explicit direct-light replacement.
     BakedLighting Bake{};
+    /// Optional L5 assignment profile; requires a clustered shader program. Copied during creation.
+    /// Null retains the L4 eight-light selection. Lights/LightCount supply either profile.
+    const LightClusterDescription* Clusters = nullptr;
     /// Ready rendered atlas; null supplies unshadowed direct lighting.
     ShadowAtlas Shadows{};
 };

@@ -13,8 +13,17 @@ struct Parameters
     float4 EnvironmentRadiance;
     float4 BakeScale;
     float4 BakeUv;
+#ifdef LUDUS_CLUSTERED
+    float4 Lights[512];
+#else
     float4 Lights[32];
+#endif
     float4 ShadowData[24];
+#ifdef LUDUS_CLUSTERED
+    float4 GridRows[3];
+    float4 GridMinimum;
+    float4 GridScale;
+#endif
 };
 [[vk::binding(0,0)]] ConstantBuffer<Parameters> material : register(b0);
 [[vk::binding(1,0)]] Texture2D<float4> colorTexture : register(t1);
@@ -22,6 +31,10 @@ struct Parameters
 [[vk::binding(3,0)]] Texture2D<float4> bakeTexture : register(t3);
 [[vk::binding(4,0)]] Texture2D<float4> shadowTexture : register(t4);
 [[vk::binding(5,0)]] SamplerState shadowSampler : register(s5);
+#ifdef LUDUS_CLUSTERED
+[[vk::binding(6,0)]] Texture2D<float4> clusterTexture : register(t6);
+[[vk::binding(7,0)]] SamplerState clusterSampler : register(s7);
+#endif
 struct Input
 {
     [[vk::location(0)]] float3 position : POSITION;
@@ -50,6 +63,9 @@ struct Varying
     float4 eye : TEXCOORD3;
     float2 bakeUv : TEXCOORD4;
     float bakeValid : TEXCOORD5;
+#ifdef LUDUS_CLUSTERED
+    float directReference : TEXCOORD6;
+#endif
 };
 float3 safeNormal(float3 value)
 {
@@ -69,6 +85,9 @@ Varying vertexMain(Input input)
     output.eye = input.eye;
     output.bakeUv = input.bakeUv;
     output.bakeValid = input.color.x;
+#ifdef LUDUS_CLUSTERED
+    output.directReference = input.color.y;
+#endif
     return output;
 }
 float fifth(float x) { float square = x*x; return square*square*x; }
@@ -137,9 +156,34 @@ float4 fragmentMain(Varying input) : SV_Target
     float3 result = material.Emission.rgb;
     if (nv > 0)
         result += irradiance*base.rgb*(1-material.Pbr.x)*(1-f)/3.141592653589793 + material.EnvironmentRadiance.rgb*f;
+#ifdef LUDUS_CLUSTERED
+    float4 world = float4(input.world,1);
+    float3 grid = (float3(dot(material.GridRows[0],world),dot(material.GridRows[1],world),dot(material.GridRows[2],world))-material.GridMinimum.xyz)*material.GridScale.xyz;
+    bool direct = input.directReference > 0.5 || any(grid < 0) || any(grid >= 8);
+    int3 cell = int3(clamp(grid,float3(0),float3(7)));
+    int start = (cell.x+cell.y*8+cell.z*64)*32;
+    float4 first = clusterTexture.SampleLevel(clusterSampler,(float2((start/4)%64,(start/4)/64)+0.5)/64,0);
+    direct = direct || int(first.x*255+0.5) == 255;
+    for (int slot = 0; slot < 128; ++slot)
+    {
+        int i = slot;
+        if (direct)
+        {
+            if (slot >= int(material.Pbr.z)) break;
+        }
+        else
+        {
+            if (slot >= 32) break;
+            int at = start+slot;
+            float4 packed = clusterTexture.SampleLevel(clusterSampler,(float2((at/4)%64,(at/4)/64)+0.5)/64,0);
+            i = int(packed[at%4]*255+0.5)-1;
+            if (i < 0) break;
+        }
+#else
     for (int i = 0; i < 8; ++i)
     {
         if (i >= int(material.Pbr.z)) break;
+#endif
         float4 color = material.Lights[i*4], position = material.Lights[i*4+1], direction = material.Lights[i*4+2], extra = material.Lights[i*4+3];
         float3 l = -direction.xyz;
         float attenuation = 1;
