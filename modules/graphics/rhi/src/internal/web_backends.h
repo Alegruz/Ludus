@@ -6,6 +6,7 @@
 // one browser artifact with no duplicate symbols. rhi_webgpu.cpp is compiled
 // with LUDUS_RHI_WEBGPU_NAMESPACE=webgpu and rhi_webgl.cpp with
 // LUDUS_RHI_WEBGL_NAMESPACE=webgl. The dispatcher routes to the active one.
+#include "measurement.h"
 #include "raster.h"
 #include "resources.h"
 #include <ludus/foundation/base/types.h>
@@ -57,6 +58,12 @@ WGPURenderPassEncoder ProbePass() noexcept;
 
 namespace ludus::graphics::rhi::webgpu
 {
+bool AllocatorBlockBytes(foundation::uint64&) noexcept;
+MeasurementAdapter TimingAdapter() noexcept;
+RasterStatus TimingArm() noexcept;
+GpuTiming TimingPoll() noexcept;
+void TimingReset() noexcept;
+bool RasterAllocationBytes(internal::RasterKind, foundation::usize, foundation::uint64&) noexcept;
 RasterCapabilities RasterLimits() noexcept;
 RasterStatus RasterGrow(internal::RasterKind, foundation::usize) noexcept;
 RasterStatus RasterPrepareStorage() noexcept;
@@ -113,6 +120,12 @@ void LifetimeReset() noexcept;
 } // namespace ludus::graphics::rhi::webgpu
 namespace ludus::graphics::rhi::webgl
 {
+bool AllocatorBlockBytes(foundation::uint64&) noexcept;
+MeasurementAdapter TimingAdapter() noexcept;
+RasterStatus TimingArm() noexcept;
+GpuTiming TimingPoll() noexcept;
+void TimingReset() noexcept;
+bool RasterAllocationBytes(internal::RasterKind, foundation::usize, foundation::uint64&) noexcept;
 RasterCapabilities RasterLimits() noexcept;
 RasterStatus RasterGrow(internal::RasterKind, foundation::usize) noexcept;
 RasterStatus RasterPrepareStorage() noexcept;

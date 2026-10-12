@@ -85,6 +85,8 @@ struct DeviceDescription final
     /// R6 general resource/plan maxima and memory budgets, copied before startup.
     /// Growth is owner-thread only between frames; enabled maxima stay immutable until shutdown.
     StorageLimits Storage;
+    /// Request optional GPU frame timing (R7); absent backend support never fails admission.
+    bool EnableGpuTiming = false;
     /// Copied profile constraints, checked on every enabled backend attempt before Ready.
     /// Nonzero raster/compute constraints imply admission of that workload.
     DeviceProfileRequirements RequiredProfile;

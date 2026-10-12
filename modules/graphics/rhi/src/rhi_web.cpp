@@ -101,6 +101,38 @@ bool Fallback(uint32 token, StartupError error) noexcept
 }
 } // namespace
 
+bool AllocatorBlockBytes(uint64& bytes) noexcept
+{
+    return gActive == Backend::WebGPU ? webgpu::AllocatorBlockBytes(bytes) : webgl::AllocatorBlockBytes(bytes);
+}
+MeasurementAdapter TimingAdapter() noexcept
+{
+    return gActive == Backend::WebGPU ? webgpu::TimingAdapter() : webgl::TimingAdapter();
+}
+RasterStatus TimingArm() noexcept
+{
+    return gActive == Backend::WebGPU ? webgpu::TimingArm() : webgl::TimingArm();
+}
+GpuTiming TimingPoll() noexcept
+{
+    return gActive == Backend::WebGPU ? webgpu::TimingPoll() : webgl::TimingPoll();
+}
+void TimingReset() noexcept
+{
+    if (gActive == Backend::WebGPU)
+    {
+        webgpu::TimingReset();
+    }
+    else
+    {
+        webgl::TimingReset();
+    }
+}
+bool RasterAllocationBytes(internal::RasterKind kind, usize slot, uint64& bytes) noexcept
+{
+    return gActive == Backend::WebGPU ? webgpu::RasterAllocationBytes(kind, slot, bytes)
+                                      : webgl::RasterAllocationBytes(kind, slot, bytes);
+}
 Backend Kind() noexcept
 {
     return gActive;

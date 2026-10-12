@@ -2023,3 +2023,182 @@ TEST_CASE("R6 recycled graph slots reject queries before replacement compilation
     CHECK(GetGraphPassDiagnostic(session.Device, graph, 0, diagnostic) == RasterStatus::NotReady);
     REQUIRE(DiscardOrderedGraph(session.Device, graph) == RasterStatus::Ready);
 }
+
+TEST_CASE("R7 frame probes preserve owners, pending samples and unavailable output", "[rhi][measurement]")
+{
+    Session session;
+    GpuTiming sample{ .State = GpuTimingState::Available, .DurationNanoseconds = 123 };
+    CHECK(GetGpuTiming({}, sample) == RasterStatus::InvalidHandle);
+    CHECK(sample.DurationNanoseconds == 123);
+    CHECK(ArmGpuTiming(session.Device) == RasterStatus::Unsupported);
+    REQUIRE(GetGpuTiming(session.Device, sample) == RasterStatus::Ready);
+    CHECK(sample.State == GpuTimingState::Unavailable);
+    REQUIRE(DestroyDevice(session.Device) == DeviceStatus::Ready);
+    DeviceDescription description;
+    description.EnableGpuTiming = true;
+    session.Surface = {};
+    REQUIRE(CreateDevice({}, {}, description, session.Device, session.Surface) == DeviceStatus::Pending);
+    sample.DurationNanoseconds = 123;
+    CHECK(GetGpuTiming(session.Device, sample) == RasterStatus::NotReady);
+    CHECK(sample.DurationNanoseconds == 0);
+    internal::Complete(backend::PendingToken, StartupError::None, {4096, 16384});
+    reference::TimingAdmission = RasterStatus::OutOfMemory;
+    CHECK(ArmGpuTiming(session.Device) == RasterStatus::OutOfMemory);
+    reference::TimingAdmission = RasterStatus::Ready;
+    REQUIRE(ArmGpuTiming(session.Device) == RasterStatus::Ready);
+    CHECK(ArmGpuTiming(session.Device) == RasterStatus::InvalidState);
+    backend::NextFrame = FrameStatus::Skipped;
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Skipped);
+    REQUIRE(GetGpuTiming(session.Device, sample) == RasterStatus::Ready);
+    CHECK(sample.State == GpuTimingState::Armed);
+    backend::NextFrame = FrameStatus::Ready;
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    CHECK(ArmGpuTiming(session.Device) == RasterStatus::InvalidState);
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+    reference::Timing.State = GpuTimingState::Pending;
+    CHECK(ArmGpuTiming(session.Device) == RasterStatus::InvalidState);
+    for (const auto terminal : {GpuTimingState::Available, GpuTimingState::Disjoint, GpuTimingState::Failed})
+    {
+        reference::Timing = { .State = terminal };
+        REQUIRE(GetGpuTiming(session.Device, sample) == RasterStatus::Ready);
+        CHECK(sample.State == terminal);
+        CHECK(sample.DurationNanoseconds == 0);
+        REQUIRE(ArmGpuTiming(session.Device) == RasterStatus::Ready);
+    }
+    reference::TimingLossToken = backend::PendingToken;
+    sample.DurationNanoseconds = 123;
+    CHECK(GetGpuTiming(session.Device, sample) == RasterStatus::DeviceLost);
+    CHECK(sample.DurationNanoseconds == 0);
+    CHECK(ArmGpuTiming(session.Device) == RasterStatus::DeviceLost);
+}
+TEST_CASE("R7 API allocation telemetry includes detached backing through retirement", "[rhi][measurement]")
+{
+    Session session;
+    backend::ActiveKind = Backend::Metal;
+    reference::AllocationAvailable = true;
+    reference::AllocationBytes = 128;
+    const uint8 data[16]{};
+    BufferHandle buffer;
+    REQUIRE(CreateBuffer(session.Device, {BufferRole::Uniform, 16}, data, buffer) == RasterStatus::Ready);
+    AllocationTelemetry memory;
+    REQUIRE(GetAllocationTelemetry(session.Device, memory) == RasterStatus::Ready);
+    CHECK(memory.ApiBytesAvailable);
+    CHECK(memory.LogicalBytes == 16);
+    CHECK(memory.ApiBytes == 128);
+    CHECK(memory.PeakObservedApiBytes == 128);
+    CHECK_FALSE(memory.PhysicalBytesAvailable);
+    // A binding set keeps the physical allocation alive after the buffer owner goes away.
+    const RasterBinding binding{0, RasterBindingKind::UniformBuffer, RasterVisibility::Both, 16};
+    BindingLayoutHandle layout;
+    BindingSetHandle set;
+    REQUIRE(CreateBindingLayout(session.Device, {&binding, 1}, layout) == RasterStatus::Ready);
+    const RasterBindingResource resource{ .Buffer = buffer, .Size = 16 };
+    REQUIRE(CreateBindingSet(session.Device, layout, {&resource, 1}, set) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, buffer) == RasterStatus::Ready);
+    REQUIRE(GetAllocationTelemetry(session.Device, memory) == RasterStatus::Ready);
+    CHECK(memory.RetiringApiBytes == 128);
+    CHECK(memory.LogicalBytes == 16);
+    reference::AllocationAvailable = false;
+    REQUIRE(GetAllocationTelemetry(session.Device, memory) == RasterStatus::Ready);
+    CHECK_FALSE(memory.ApiBytesAvailable);
+    CHECK(memory.ApiBytes == 0);
+    CHECK(memory.RetiringApiBytes == 0);
+    reference::AllocationAvailable = true;
+    REQUIRE(Destroy(session.Device, set) == RasterStatus::Ready);
+    REQUIRE(PollLifetime(session.Device) == RasterStatus::Ready);
+    REQUIRE(GetAllocationTelemetry(session.Device, memory) == RasterStatus::Ready);
+    CHECK(memory.ApiBytes == 0);
+    CHECK(memory.LogicalBytes == 0);
+    CHECK(memory.PeakObservedApiBytes == 128);
+    memory.LogicalBytes = 123;
+    CHECK(GetAllocationTelemetry({}, memory) == RasterStatus::InvalidHandle);
+    CHECK(memory.LogicalBytes == 123);
+}
+
+TEST_CASE("R7 timestamps reject ambiguous wraps and preserve failed conversion output", "[rhi][measurement]")
+{
+    float64 duration = 123;
+    CHECK(internal::TimestampDuration(250, 4, {8, 2}, 40, duration));
+    CHECK(duration == 20);
+    CHECK_FALSE(internal::TimestampDuration(250, 4, {8, 2}, 512, duration));
+    CHECK(duration == 20);
+    CHECK_FALSE(internal::TimestampDuration(100, 90, {8, 1}, 20, duration));
+    CHECK(duration == 20);
+    CHECK_FALSE(internal::TimestampDuration(1, 2, {0, 1}, 1, duration));
+    CHECK_FALSE(internal::TimestampDuration(1, 2, {65, 1}, 1, duration));
+    CHECK_FALSE(internal::TimestampDuration(1, 2, {64, 0}, 1, duration));
+    CHECK(internal::TimestampDuration(~uint64{0} - 1, 2, {64, .5}, 10, duration));
+    CHECK(duration == 2);
+    CHECK(internal::TimestampDuration(2, 2, {64, 1}, 10, duration));
+    CHECK(duration == 0);
+}
+
+TEST_CASE("R7 allocation observations reject byte counter overflow", "[rhi][measurement]")
+{
+    Session session;
+    backend::ActiveKind = Backend::Metal;
+    const uint8 data[16]{};
+    BufferHandle first, second;
+    REQUIRE(CreateBuffer(session.Device, {BufferRole::Uniform, 16}, data, first) == RasterStatus::Ready);
+    REQUIRE(CreateBuffer(session.Device, {BufferRole::Uniform, 16}, data, second) == RasterStatus::Ready);
+    reference::AllocationBytes = ~uint64{0};
+    AllocationTelemetry memory{ .ApiBytes = 123 };
+    CHECK(GetAllocationTelemetry(session.Device, memory) == RasterStatus::CapacityExceeded);
+    CHECK(memory.ApiBytes == 0);
+    CHECK(memory.LogicalBytes == 0);
+    reference::AllocationBytes = 128;
+}
+
+TEST_CASE("R7 terminal device failure stays distinct from pending startup", "[rhi][measurement]")
+{
+    Session session;
+    internal::Fail(backend::PendingToken, StartupError::RenderingUnavailable);
+    GpuTiming timing{ .DurationNanoseconds = 123 };
+    MeasurementAdapter adapter{ .VendorId = 123 };
+    CHECK(GetGpuTiming(session.Device, timing) == RasterStatus::Failed);
+    CHECK(timing.DurationNanoseconds == 0);
+    CHECK(GetMeasurementAdapter(session.Device, adapter) == RasterStatus::Failed);
+    CHECK(adapter.VendorId == 0);
+    CHECK(ArmGpuTiming(session.Device) == RasterStatus::Failed);
+}
+
+TEST_CASE("R7 failed re-arm preserves every terminal sample", "[rhi][measurement]")
+{
+    Session session;
+    for (const auto state : {GpuTimingState::Available, GpuTimingState::Disjoint, GpuTimingState::Failed})
+    {
+        GpuTiming timing
+        {
+            .State = state,
+            .DurationNanoseconds = state == GpuTimingState::Available ? 123.0 : 0.0,
+            .TickNanoseconds = 2,
+            .ValidBits = 48,
+        };
+        for (const auto failure : {RasterStatus::OutOfMemory, RasterStatus::CapacityExceeded, RasterStatus::Failed})
+        {
+            const auto attempt = [&timing, failure]() noexcept {
+                internal::TimingArmRollback rollback(timing);
+                timing = {}; // The backend releases old native objects before attempting new ones.
+                return failure;
+            };
+            CHECK(attempt() == failure);
+            CHECK(timing.State == state);
+            CHECK(timing.TickNanoseconds == 2);
+            CHECK(timing.ValidBits == 48);
+            CHECK(timing.DurationNanoseconds == (state == GpuTimingState::Available ? 123 : 0));
+        }
+        {
+            internal::TimingArmRollback rollback(timing);
+            timing = { .State = GpuTimingState::Armed };
+            rollback.Accept();
+        }
+        CHECK(timing.State == GpuTimingState::Armed);
+    }
+    GpuTiming lost{ .State = GpuTimingState::Available, .DurationNanoseconds = 123 };
+    {
+        internal::TimingArmRollback rollback(lost);
+        lost = {};
+        internal::Fail(backend::PendingToken, StartupError::DeviceLost);
+    }
+    CHECK(lost.State == GpuTimingState::Empty);
+}

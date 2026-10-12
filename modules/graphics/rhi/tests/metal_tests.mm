@@ -1,5 +1,6 @@
 #include <ludus/foundation/base/pointer.hpp>
 #include <ludus/foundation/base/types.h>
+#include <ludus/graphics/rhi/measurement.h>
 #include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>
 #include <ludus/platform/base/window.h>
@@ -8,6 +9,7 @@
 #include "internal/readback.h"
 
 #include <cstdlib>
+#include <initializer_list>
 #include <span>
 #include <string_view>
 
@@ -199,5 +201,77 @@ TEST_CASE("Metal presents through a borrowed Cocoa view and restores its layer",
         rhi::Shutdown();
         CHECK(view.wantsLayer == wantsLayer);
         CHECK(view.layer == previous);
+    }
+}
+
+TEST_CASE("R7 optional Metal probe survives skipped acquisition, resize and pending teardown",
+          "[rhi][macos][cocoa][measurement][gpu]")
+{
+    if (std::getenv("LUDUS_TEST_COCOA") == nullptr)
+    {
+        SKIP("Set LUDUS_TEST_COCOA=1 with a WindowServer session");
+    }
+    @autoreleasepool
+    {
+        Guard guard;
+        RequireDevice();
+        rhi::Shutdown();
+        ludus::platform::WindowManager manager;
+        REQUIRE(manager.Initialize({}));
+        UniquePtr<ludus::platform::Window> window;
+        REQUIRE(manager.CreateWindow({ .Name = "R7 Metal qualification", .Width = 160, .Height = 120 }, window));
+        Guard connectionGuard;
+        rhi::DeviceHandle device;
+        rhi::SurfaceHandle surface;
+        rhi::DeviceDescription description;
+        description.EnableGpuTiming = true;
+        REQUIRE(rhi::CreateDevice({}, window->GetNativeWindowInfo(), description, device, surface) ==
+                rhi::DeviceStatus::Ready);
+        rhi::MeasurementAdapter adapter;
+        REQUIRE(rhi::GetMeasurementAdapter(device, adapter) == rhi::RasterStatus::Ready);
+        CHECK(adapter.Name[0] != '\0');
+        CHECK(adapter.SoftwareKnown);
+        CHECK_FALSE(adapter.Software);
+        REQUIRE(rhi::ArmGpuTiming(device) == rhi::RasterStatus::Ready);
+        REQUIRE(rhi::SetFrameTarget(device, surface, {}) == rhi::DeviceStatus::Ready);
+        REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Skipped);
+        rhi::GpuTiming timing;
+        REQUIRE(rhi::GetGpuTiming(device, timing) == rhi::RasterStatus::Ready);
+        CHECK(timing.State == rhi::GpuTimingState::Armed);
+        for (const uint32 width : {160U, 80U, 96U})
+        {
+            REQUIRE(rhi::SetFrameTarget(device, surface, { .Width = width, .Height = 64 }) == rhi::DeviceStatus::Ready);
+            REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Ready);
+            rhi::FrameInfo frame;
+            REQUIRE(rhi::GetFrameInfo(device, surface, frame) == rhi::DeviceStatus::Ready);
+            CHECK(frame.Width == width);
+            CHECK(frame.Height == 64);
+            REQUIRE(rhi::EndFrame(device) == rhi::DeviceStatus::Ready);
+            for (uint32 poll = 0; poll < 5000; ++poll)
+            {
+                REQUIRE(rhi::GetGpuTiming(device, timing) == rhi::RasterStatus::Ready);
+                if (timing.State != rhi::GpuTimingState::Pending)
+                {
+                    break;
+                }
+                [NSThread sleepForTimeInterval:.001];
+            }
+            CHECK(timing.State == rhi::GpuTimingState::Available);
+            CHECK(timing.DurationNanoseconds >= 0);
+            REQUIRE(rhi::ArmGpuTiming(device) == rhi::RasterStatus::Ready);
+        }
+        REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Ready);
+        REQUIRE(rhi::EndFrame(device) == rhi::DeviceStatus::Ready);
+        const auto stale = device;
+        REQUIRE(rhi::DestroyDevice(device) == rhi::DeviceStatus::Ready);
+        timing.DurationNanoseconds = 123;
+        CHECK(rhi::GetGpuTiming(stale, timing) == rhi::RasterStatus::InvalidHandle);
+        CHECK(timing.DurationNanoseconds == 123);
+        surface = {};
+        REQUIRE(rhi::CreateDevice({}, window->GetNativeWindowInfo(), description, device, surface) ==
+                rhi::DeviceStatus::Ready);
+        REQUIRE(rhi::GetGpuTiming(device, timing) == rhi::RasterStatus::Ready);
+        CHECK(timing.State == rhi::GpuTimingState::Empty);
+        REQUIRE(rhi::DestroyDevice(device) == rhi::DeviceStatus::Ready);
     }
 }
