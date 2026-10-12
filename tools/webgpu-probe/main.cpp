@@ -1,5 +1,6 @@
 #include <ludus/foundation/base/types.h>
 
+#include <cmath>
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -205,8 +206,12 @@ void adapterReady(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStri
 {
     char label[64];
     char* cursor = label;
-    const char* prefix = gProbe.CompatibilityRequested ? "Compatibility adapter request (status " : "Core adapter request (status ";
-    while (*prefix != '\0') { *cursor++ = *prefix++; }
+    const char* prefix =
+        gProbe.CompatibilityRequested ? "Compatibility adapter request (status " : "Core adapter request (status ";
+    while (*prefix != '\0')
+    {
+        *cursor++ = *prefix++;
+    }
     appendUnsigned(cursor, static_cast<uint32>(status));
     *cursor++ = ')';
     *cursor = '\0';
