@@ -11,7 +11,8 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import editor_launch
 import editor_tool
@@ -21,6 +22,48 @@ import init_ui
 
 
 class SetupTests(unittest.TestCase):
+    def test_automatic_create_and_repair_prepare_with_managed_sdk(self):
+        from ludus_tools import creation_engine, project_setup
+        for operation_name in ("project_create", "project_setup"):
+            for prepared in (True, False):
+                with self.subTest(operation=operation_name, prepared=prepared), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    sdk = root / "Apple SDK with spaces"
+                    sdk.mkdir()
+                    if prepared:
+                        link = root / "out/host-tools/macos-sdk"
+                        link.parent.mkdir(parents=True)
+                        link.symlink_to(sdk, target_is_directory=True)
+                    context = editor_tool.ToolContext(root, engine, None)
+                    operation = editor_tool.Operation(context, Mock(), "0000000000000001",
+                        operation_name, root / "Game", "", -1,
+                        options={"sdk": "", "web_sdk": "", "name": "Game", "prepare_engine": False})
+                    commands = []
+                    def run_stage(stage, argv, cwd, env, code):
+                        commands.append((argv, env.copy()))
+                    def select(root, *, prepare, **kwargs):
+                        return prepare(root / "engine-install")
+                    descriptor = SimpleNamespace(preset="macos-clang-development") if operation_name == "project_setup" else None
+                    with patch.object(platform, "system", return_value="Darwin"), \
+                         patch.dict(os.environ, {"SDKROOT": "/incompatible/MacOSX27.sdk",
+                                                 "LUDUS_INIT_SHELL_SDKROOT": "/stale/sdk"}), \
+                         patch.object(operation, "_check_release_cancel"), \
+                         patch.object(operation, "_run_stage", side_effect=run_stage), \
+                         patch.object(creation_engine, "select_creation_sdk", side_effect=select), \
+                         patch.object(project_setup, "select_repair_sdk", side_effect=lambda path, *, tooling_root, prepare: prepare(root / "engine-install")), \
+                         patch.object(creation_engine, "prepared_sdk_prefix", return_value=root / "engine-install"), \
+                         patch.object(project_setup, "supported_project"), \
+                         patch.object(project_setup, "repair_project", return_value="Verified"), \
+                         patch("ludus_tools.create.create_project"):
+                        self.assertEqual(operation._execute_setup(descriptor).outcome, "success")
+                        self.assertEqual(os.environ["SDKROOT"], "/incompatible/MacOSX27.sdk")
+                    self.assertEqual(len(commands), 4)
+                    self.assertEqual(Path(commands[0][0][0]).name, "init")
+                    for _, env in commands:
+                        self.assertEqual(env.get("SDKROOT"), str(sdk.resolve()) if prepared else None)
+                        self.assertNotIn("LUDUS_INIT_SHELL_SDKROOT", env)
+                        self.assertEqual(env["CI"], "true")
+
     def test_repair_uses_prepared_sdk_instead_of_inherited_sdkroot(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

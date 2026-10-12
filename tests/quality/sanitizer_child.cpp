@@ -2,16 +2,32 @@
 
 #if defined(LUDUS_CONTROL_TSAN)
 #    include <atomic>
-#    include <thread>
-#endif
+#    include <pthread.h>
 
-#if defined(LUDUS_CONTROL_TSAN)
 namespace
 {
-// Match LLVM's shared-global control storage. Repeated conflicting accesses
-// give the runtime more than one opportunity to report the deliberate race.
+// Keep the control slot independent of thread-wrapper allocation/lifetime state.
 alignas(64) volatile ludus::foundation::int32 gRaceValue = 0;
+alignas(64) std::atomic<bool> gParentWritten{false};
+// Bound the repeated conflicting accesses independently of scheduler timing.
 constexpr ludus::foundation::usize CONTROL_WRITES = 4096;
+
+void* WriteRaceValue(void*) noexcept
+{
+    // Relaxed polling orders wall-clock execution without synchronizing the slot.
+    // Thanks to LLVM's compiler-rt, tsan_interface_atomic.cpp (Clang 18.1.8),
+    // AtomicLoad/AtomicStore relaxed fast paths, for confirming no clock acquire
+    // or release is added for this test-only rendezvous.
+    // https://github.com/llvm/llvm-project/blob/llvmorg-18.1.8/compiler-rt/lib/tsan/rtl/tsan_interface_atomic.cpp
+    while (!gParentWritten.load(std::memory_order_relaxed))
+    {
+    }
+    for (ludus::foundation::usize i = 0; i < CONTROL_WRITES; ++i)
+    {
+        gRaceValue = 1;
+    }
+    return nullptr;
+}
 } // namespace
 #endif
 
@@ -41,28 +57,25 @@ int main(int argumentCount, char**)
     return value == 0 ? 1 : 0;
 #elif defined(LUDUS_CONTROL_TSAN)
     // Thanks to LLVM, "ThreadSanitizer", Clang 18.1.8, Usage (tiny_race.c),
-    // for conflicting parent/worker writes before join. Adapted to std::thread,
-    // a pre-write start gate and bounded repeated volatile writes to shared global
-    // storage; no post-write rendezvous or relaxed diagnostic acceptance.
+    // for conflicting parent/worker writes before join. Keep its direct pthread
+    // creation/join topology, adapted to bounded Ludus volatile writes and explicit errors.
     // https://releases.llvm.org/18.1.8/tools/clang/docs/ThreadSanitizer.html
-    std::atomic<bool> ready{false};
-    std::thread worker([&ready] {
-        while (!ready.load(std::memory_order_acquire))
-        {
-        }
-        for (ludus::foundation::usize i = 0; i < CONTROL_WRITES; ++i)
-        {
-            gRaceValue = 1;
-        }
-    });
-    // Both writes follow the release; neither write happens-before the other.
-    // Keep atomics on separate storage and all synchronization before the defect.
-    ready.store(true, std::memory_order_release);
+    pthread_t worker{};
+    if (pthread_create(&worker, nullptr, WriteRaceValue, nullptr) != 0)
+    {
+        return 1;
+    }
+    // Force the worker's conflicting access to observe the live parent's write.
+    // A release/acquire gate here would order the writes and remove the defect.
     for (ludus::foundation::usize i = 0; i < CONTROL_WRITES; ++i)
     {
         gRaceValue = 2;
     }
-    worker.join();
+    gParentWritten.store(true, std::memory_order_relaxed);
+    if (pthread_join(worker, nullptr) != 0)
+    {
+        return 1;
+    }
     return gRaceValue == 0 ? 1 : 0;
 #else
 #    error A sanitizer control kind is required
