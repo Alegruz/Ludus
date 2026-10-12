@@ -765,15 +765,15 @@ namespace
 struct LitFixture final
 {
     rhi::RasterShaderInput Inputs[16];
-    rhi::RasterBinding Bindings[6]{{0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Fragment, 1040},
+    rhi::RasterBinding Bindings[8]{{0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Fragment, 1040},
                                    {1, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
                                    {2, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0},
                                    {3, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
                                    {4, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
                                    {5, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0}};
-    rhi::RasterUniformMember Members[11];
+    rhi::RasterUniformMember Members[14];
     rhi::RasterShaderDescription Vertex, Fragment, Shadow;
-    LitFixture()
+    LitFixture(bool clustered = false)
     {
         for (uint32 i = 0; i < 16; ++i)
         {
@@ -807,8 +807,18 @@ struct LitFixture final
         Fragment.Artifact.Stage = rhi::ShaderStage::Fragment;
         Fragment.Artifact.Wgsl = "lit fragment";
         Fragment.Artifact.WgslEntry = "fragmentMain";
-        Fragment.Bindings = Bindings;
-        Fragment.UniformMembers = Members;
+        if (clustered)
+        {
+            Bindings[0].MinSize = 8800;
+            Bindings[6] = {6, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0};
+            Bindings[7] = {7, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0};
+            Members[10].Offset = 8336;
+            Members[11] = {0, "GridRows", 8720, rhi::RasterUniformShape::Float4Array};
+            Members[12] = {0, "GridMinimum", 8768, rhi::RasterUniformShape::Float4};
+            Members[13] = {0, "GridScale", 8784, rhi::RasterUniformShape::Float4};
+        }
+        Fragment.Bindings = {Bindings, clustered ? 8U : 6U};
+        Fragment.UniformMembers = {Members, clustered ? 14U : 11U};
         Shadow = Fragment;
         Shadow.Artifact.Wgsl = "masked shadow";
         Shadow.Bindings = {Bindings, 3};
@@ -1059,4 +1069,159 @@ TEST_CASE("L4 gutter admission tolerates cooked odd-dimension float rounding", "
     description.Bake.UvTransform = {1, 1, 0, 0};
     CHECK(session.Renderer.CreateLitMaterial(program, description, material, selected) ==
           rhi::RasterStatus::InvalidDescription);
+}
+
+TEST_CASE("L5 conservative clusters preserve lights, boundaries and overflow", "[renderer][l5]")
+{
+    rr::LightClusterDescription description;
+    description.Bounds = {{0, 0, 0}, {8, 8, 8}};
+    rr::DirectLight lights[128];
+    for (usize i = 0; i < 128; ++i)
+    {
+        lights[i].SourceId = 128 - i;
+        lights[i].Kind = rr::LightKind::Point;
+        lights[i].Position = {4, 4, 4};
+        lights[i].Range = .1F;
+    }
+    rr::LightClusters clusters;
+    REQUIRE(rr::BuildLightClusters(description, lights, 128, clusters) == rhi::RasterStatus::Ready);
+    CHECK(clusters.Count == 128);
+    CHECK(clusters.Lights[0].SourceId == 1);
+    CHECK(clusters.Lights[127].SourceId == 128);
+    CHECK(clusters.OverflowCells == 8);
+    CHECK(clusters.Assignments == 256);
+    CHECK(clusters.Overflow[usize{3} + usize{3} * 8 + usize{3} * 64]);
+    CHECK(clusters.Counts[usize{3} + usize{3} * 8 + usize{3} * 64] == 32);
+    CHECK(clusters.Texels[(usize{3} + usize{3} * 8 + usize{3} * 64) * 32] == 255);
+    CHECK(clusters.Counts[0] == 0);
+    auto preserved = clusters;
+    lights[127].SourceId = lights[0].SourceId;
+    CHECK(rr::BuildLightClusters(description, lights, 128, clusters) == rhi::RasterStatus::InvalidDescription);
+    CHECK(clusters.Count == preserved.Count);
+    CHECK(clusters.OverflowCells == preserved.OverflowCells);
+    CHECK(clusters.Assignments == preserved.Assignments);
+    CHECK(std::memcmp(clusters.Texels, preserved.Texels, sizeof(clusters.Texels)) == 0);
+    for (usize i = 0; i < 128; ++i)
+    {
+        CHECK(clusters.Lights[i].SourceId == preserved.Lights[i].SourceId);
+        CHECK(clusters.Lights[i].Position == preserved.Lights[i].Position);
+    }
+    CHECK(rr::BuildLightClusters(description, lights, 129, clusters) == rhi::RasterStatus::CapacityExceeded);
+    description.WorldToGrid.Columns[0].X = 2;
+    CHECK(rr::BuildLightClusters(description, lights, 1, clusters) == rhi::RasterStatus::InvalidDescription);
+    description.WorldToGrid = {};
+    lights[0].Kind = rr::LightKind::Directional;
+    REQUIRE(rr::BuildLightClusters(description, lights, 1, clusters) == rhi::RasterStatus::Ready);
+    CHECK(clusters.Assignments == 512);
+    CHECK(clusters.OverflowCells == 0);
+    lights[0].Kind = rr::LightKind::Spot;
+    lights[0].Position = {4, 4, 4};
+    REQUIRE(rr::BuildLightClusters(description, lights, 1, clusters) == rhi::RasterStatus::Ready);
+    CHECK(clusters.Assignments == 8); // Cone pruning must not miss transparent recipients.
+}
+
+TEST_CASE("L5 groups reject complete ranges and LOD preserves retained incarnations", "[renderer][l5]")
+{
+    Session session;
+    rr::SceneItem items[64];
+    for (usize i = 0; i < 64; ++i)
+    {
+        items[i].Geometry = session.Mesh;
+        items[i].SourceId = i + 1;
+        items[i].Transform.Translation.X = i < 32 ? 5 : 0;
+    }
+    rr::Snapshot snapshot;
+    REQUIRE(session.Renderer.CreateSnapshot(items, 64, snapshot) == rhi::RasterStatus::Ready);
+    rr::PreparedView view;
+    rr::ViewReport report;
+    REQUIRE(session.Renderer.PrepareView(snapshot, {}, view, report) == rhi::RasterStatus::Ready);
+    CHECK(report.Visible == 32);
+    CHECK(report.CulledGroups == 2);
+    CHECK(report.BoundsTests == 0);
+    REQUIRE(session.Renderer.Release(view) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(snapshot) == rhi::RasterStatus::Ready);
+    rr::Mesh coarse;
+    const math::Vector3 positions[]{{-.1F, -.1F, .5F}, {.1F, -.1F, .5F}, {0, .1F, .5F}};
+    const uint32 indices[]{0, 1, 2};
+    REQUIRE(session.Renderer.CreateMesh({positions, 3, indices, 3}, coarse) == rhi::RasterStatus::Ready);
+    items[0].Transform = {};
+    items[0].LodGeometry = coarse;
+    items[0].LodPixels = 10;
+    rr::ViewDescription description;
+    description.EnableLod = true;
+    description.LodWidth = description.LodHeight = 80;
+    REQUIRE(session.Renderer.CreateSnapshot(items, 1, snapshot) == rhi::RasterStatus::Ready);
+    rr::Snapshot previous;
+    items[0].PreviousLod = true;
+    REQUIRE(session.Renderer.CreateSnapshot(items, 1, previous) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(coarse) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.PrepareView(snapshot, description, view, report) == rhi::RasterStatus::Ready);
+    CHECK(report.LodObjects == 1); // 8 pixel diameter, below the 9 pixel admission edge.
+    CHECK(report.SelectedLods[0]);
+    REQUIRE(session.Renderer.Release(view) == rhi::RasterStatus::Ready);
+    description.LodWidth = description.LodHeight = 100;
+    REQUIRE(session.Renderer.PrepareView(snapshot, description, view, report) == rhi::RasterStatus::Ready);
+    CHECK(report.LodObjects == 0); // Hysteresis preserves full detail inside the band.
+    REQUIRE(session.Renderer.Release(view) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.PrepareView(previous, description, view, report) == rhi::RasterStatus::Ready);
+    CHECK(report.LodObjects == 1); // Previous coarse detail survives the 10-pixel hysteresis band.
+    REQUIRE(session.Renderer.Release(view) == rhi::RasterStatus::Ready);
+    description.ShadowCasters = true;
+    REQUIRE(session.Renderer.PrepareView(previous, description, view, report) == rhi::RasterStatus::Ready);
+    CHECK(report.LodObjects == 0);
+    REQUIRE(session.Renderer.Release(view) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(previous) == rhi::RasterStatus::Ready);
+    description.ShadowCasters = false;
+    description.Reference = true;
+    description.LodWidth = description.LodHeight = 1;
+    REQUIRE(session.Renderer.PrepareView(snapshot, description, view, report) == rhi::RasterStatus::Ready);
+    CHECK(report.LodObjects == 0);
+    REQUIRE(session.Renderer.Release(view) == rhi::RasterStatus::Ready);
+    description.LodWidth = 0;
+    CHECK(session.Renderer.PrepareView(snapshot, description, view, report) == rhi::RasterStatus::InvalidDescription);
+    REQUIRE(session.Renderer.Release(snapshot) == rhi::RasterStatus::Ready);
+}
+
+TEST_CASE("L5 clustered material admits all lights and owns texture bindings", "[renderer][l5]")
+{
+    Session session;
+    LitFixture fixture(true);
+    fixture.Enable(session);
+    auto program = fixture.Prewarm(session);
+    rr::DirectLight lights[128];
+    for (usize i = 0; i < 128; ++i)
+    {
+        lights[i].SourceId = i + 1;
+        lights[i].Kind = rr::LightKind::Point;
+        lights[i].Position = {0, 0, 1};
+        lights[i].Range = .75F;
+    }
+    rr::LightClusterDescription grid;
+    grid.Bounds = {{-2, -2, 0}, {2, 2, 2}};
+    rr::LightClusters clusters;
+    REQUIRE(rr::BuildLightClusters(grid, lights, 128, clusters) == rhi::RasterStatus::Ready);
+    rr::LitMaterialDescription description;
+    description.Lights = lights;
+    description.LightCount = 128;
+    description.Clusters = &grid;
+    rr::MaterialVersion material;
+    rr::LightSelection report;
+    const auto beforeBuffers = rhi::reference::Creates[0];
+    const auto status = session.Renderer.CreateLitMaterial(program, description, material, report);
+    INFO("Created buffer delta " << (rhi::reference::Creates[0] - beforeBuffers));
+    REQUIRE(status == rhi::RasterStatus::Ready);
+    CHECK(report.Count == 128);
+    CHECK(report.Dropped == 0);
+    CHECK(report.OverflowCells > 0);
+    REQUIRE(session.Renderer.Release(material) == rhi::RasterStatus::Ready);
+    rhi::reference::Next = rhi::RasterStatus::Pending;
+    rhi::reference::PendingCount = 0;
+    REQUIRE(session.Renderer.CreateLitMaterial(program, description, material, report) == rhi::RasterStatus::Pending);
+    for (usize i = 0; i < rhi::reference::PendingCount; ++i)
+    {
+        rhi::internal::RasterComplete(rhi::reference::PendingRequests[i], rhi::RasterStatus::Ready);
+    }
+    rhi::reference::Next = rhi::RasterStatus::Ready;
+    REQUIRE(session.Renderer.GetStatus(material) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(material) == rhi::RasterStatus::Ready);
 }

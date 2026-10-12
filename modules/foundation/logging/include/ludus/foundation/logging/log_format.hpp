@@ -16,10 +16,6 @@
 // a bad or oversized format degrades to a bounded marker, never a throw, an
 // allocation, or std::terminate (requirements R19, R25, R38).
 //
-// The legacy std::format-based behavior lives in the explicitly-temporary
-// <ludus/foundation/logging/log_compat_format.hpp> adapter for un-migrated call
-// sites (requirements R53); it is excluded from the lightweight-core budget.
-//
 // Escaped braces are handled consistently for every argument count, including
 // zero arguments: "escaped {{braces}}" renders "escaped {braces}" (R17).
 // -----------------------------------------------------------------------------

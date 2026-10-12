@@ -28,9 +28,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "format_test_name.hpp"
+
 #include <chrono>
 #include <filesystem>
-#include <format>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -66,7 +67,7 @@ std::string read_file(const std::filesystem::path& path)
 std::filesystem::path make_temp_log_dir(const std::string& tag)
 {
     const auto base =
-        std::filesystem::temp_directory_path() / std::format("ludus_regr_{}_{}", tag, LUDUS_TEST_GETPID());
+        std::filesystem::temp_directory_path() / FormatTestName("ludus_regr_{}_{}", tag, LUDUS_TEST_GETPID());
     std::filesystem::remove_all(base);
     std::filesystem::create_directories(base);
     return base;

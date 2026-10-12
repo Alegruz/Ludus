@@ -2,7 +2,7 @@
 
 Status: L0 scene submission, L1 views/depth, L2 mutable versions/overlays and
 L3 material/content versions and L4 lighting baseline implemented, October 11, 2026. L4 starts from merged
-L3 at `f9cc7c8`. L5–L6 remain an implementation plan.
+L3 at `f9cc7c8`. L5 portable scaling is implemented with workload-specific measurement gates; L6 remains an implementation plan.
 Correctness fixtures do not establish a measured speedup.
 The initial decisions below were saved before opening the Gems article map.
 The [reference review](renderer-systems-gems-review.md) records the subsequent
@@ -554,6 +554,147 @@ reference BRDF guards, retained atlases and conservative invalidation; cooker te
 cover gutters, revisions and mip admission. These validate correctness, not physical
 GPU performance or production bake quality.
 
+## L5: opt-in portable scaling
+
+L5 adds CPU-built clustered forward lighting, conservative grouped visibility,
+and caller-authored screen-size LOD. The ordinary L4 shader and eight-light path
+remain available. These additions are opt-in; performance qualification is
+workload-specific and does not follow from passing software-GPU fixtures.
+Native parallel recording and compute assignment remain optional future work.
+
+### Clustered lighting and inspection
+
+Cook `renderer_clustered.slang` with `vertexMain`/`fragmentMain` and a separate
+`vertexMain`/`shadowMain` artifact, then use `PrewarmLitProgram`. When cooking,
+list `renderer_lit.slang` in `ludus_compile_shader(DEPENDS ...)`: the clustered
+source includes the existing BRDF/alpha/bake/shadow implementation. The installed
+SDK [scaling consumer](../../tests/sdk_consumer/renderer_scaling.cpp) demonstrates
+this sequence without private renderer access.
+
+Set `LitMaterialDescription::Clusters` to a borrowed `LightClusterDescription`;
+`Lights`/`LightCount` provide up to 128 unique lights. Creation copies everything
+before returning. Program/profile mismatch is rejected without publication.
+`BuildLightClusters` supplies an allocation-free independent inspection API;
+invalid input and count overflow preserve its output. Material reports include
+all admitted normalized lights, written assignments and overflow cell counts.
+
+The regular 8×8×8 grid has finite bounds in a rigidly transformed space. An
+unjittered world-to-view transform gives view-space cells; identity gives
+world-space cells. Columns must be orthonormal within 1e-5, bounds lie within
+±1e6 meters, and extents are [0.01,2e6] meters. Unlike a projection-shaped or
+logarithmic grid, these cells use linear XYZ intervals. Point/spot range spheres
+intersect conservative cell AABBs; spots do not prune by cone, and directional
+lights intersect every cell. A rounding margin protects tangencies. Assignment
+never depends on opaque depth or normals, so it also covers painter recipients.
+
+Each cell stores up to 32 ascending light indices in a fixed stride. Zero
+terminates a partial list; byte 255 marks overflow. Overflow and samples outside
+the box evaluate **all** admitted lights in stable order, preserving lighting
+instead of reducing quality. The reference view also evaluates all lights. `DirectLighting` evaluates that same
+full list while retaining optimized geometry packets, isolating shading cost.
+`Counts` reports written entries, never attempted append counts. Empty cells
+skip direct evaluation. Overflow costs are observable and must be measured.
+
+The portable GPU representation is a 64×64 nearest-sampled RGBA8 index texture
+(16 KiB), plus an 8800-byte fragment uniform containing the lights, existing
+material/shadow terms and grid transform. It needs eight bindings, sixteen vertex
+attributes and that uniform range. Unsupported profiles return Unsupported;
+applications explicitly choose L4 instead. This CPU/texture implementation runs
+on the existing raster backends, including WebGL 2, without requiring storage or
+compute support. Materials own and retire the immutable grid texture and views
+alongside their other bindings. Assignment is setup work, not a draw-time rebuild. Its reusable CPU workspace is
+allocated only on first clustered material creation; ordinary L4 has no grid
+workspace or GPU grid resources. Frequently changing light sets pay assignment
+and immutable upload costs again, so this profile targets cached light sets.
+
+Thanks to Ola Olsson, Markus Billeter and Ulf Assarsson,
+[*Clustered Deferred and Forward Shading*, HPG 2012, pp. 87–96](https://research.chalmers.se/en/publication/161725),
+for the spatial-grouping principle described in their abstract. Ludus uses a
+bounded CPU-built regular grid, without their occupied-sample/normal clustering
+or historical performance claims. The full-list fallback is a deliberate
+correctness choice rather than the earlier proposed saturated eight-light list.
+
+### Grouped visibility and authored LOD
+
+Snapshots cache conservative unions for contiguous groups of sixteen opaque
+objects. Rejected groups skip individual tests; fully inside groups admit their
+members without further AABB tests. Intersecting groups and overlays retain
+individual conservative classification. Input order and painter semantics remain
+unchanged. Homogeneous mesh/material runs preserve source order and skip pairwise
+overlap searches; other runs retain conservative ordering constraints. Reference
+views bypass visibility and packet optimization.
+`ViewReport::CulledGroups` and `BoundsTests` expose the work saved. This fixed
+hierarchy benefits spatially coherent source order; it is not a spatial index.
+
+An opaque `SceneItem` may supply `LodGeometry`, `LodPixels` and `PreviousLod`.
+The snapshot retains both exact mesh incarnations and unions their transformed
+bounds. Lit alternatives need normals; compatible material and bake UV authoring
+is the caller's responsibility. `ViewDescription::EnableLod`, physical
+`LodWidth`/`LodHeight` and fractional `LodHysteresis` select by projected bounding-box
+diameter. Near-plane intersections remain conservatively large. Feed
+`SelectedLods` back by `SourceIds` when authoring the next snapshot, not by array
+position. Shadow and reference views use full geometry. Automatic simplification,
+streaming, spatial indexing and occlusion are outside this implementation.
+
+### Correctness and measurement
+
+The [shared SDK fixture](../../tests/sdk_consumer/l5_scene.h) contains 256 objects,
+128 spatial lights, overflow and outside-grid variants. Native and browser pixels
+compare clustered/optimized against full-list/direct images, with a nonblank
+check and a brightness check requiring all 128 directional lights. Pixel-aligned
+geometry avoids treating backend edge ownership differences as lighting error. Browser checks exercise WebGPU, WebGL 2, Auto and fallback, LDR/HDR and
+120 frames. Unit tests check conservative boundary assignment, malformed input,
+output preservation, grouped rejection and retained LOD selection.
+
+Run physical-adapter measurements separately:
+
+```sh
+python scripts/benchmark-renderer \
+  --executable out/build/<preset>/modules/graphics/renderer/ludus_renderer_render_tests \
+  --backend metal --device "actual adapter and OS/driver" \
+  --runs 3 --output out/renderer-benchmark
+```
+
+The harness checks paired images and reports three variants (clustered, direct reference, direct optimized), cold scene setup, warm view
+preparation, recording, serialized completion/readback latency, median/p95/p99,
+resolution, counters, known scene resource bytes and tool pins. GPU pass timestamps
+are explicitly unavailable; completion/readback CPU latency is not GPU execution
+time. The 640×360 fixtures are not an AAA scene benchmark or a frames-in-flight
+throughput test. Known memory excludes driver/pipeline allocations, retired
+versions and renderer CPU storage. Capacity remains six meshes/eight materials/
+256 objects: this stage does not establish full Sponza or Staircase2 import or
+fidelity. Record adapter-specific results before choosing the clustered profile.
+
+### Apple M5 measurement, October 11, 2026
+
+[Raw measurements and source hashes](../assets/renderer/l5-apple-m5.json) record
+three runs on an Apple M5 (8 GPU cores), Metal OS driver on macOS 26.6 (25G72),
+640×360 LDR, eight warmup frames and 64 samples per variant per run. Values below
+are medians of the three per-run medians/p95s. Host frequency/background work is
+uncontrolled; these are serialized CPU-clock microfixture measurements, not GPU
+pass timings or an FPS/production-scene claim.
+
+| Fixture | Variant | Prepare median (µs) | Serialized median (ms) | Serialized p95 (ms) |
+| --- | --- | ---: | ---: | ---: |
+| localized | clustered | 64.2 | 5.064 | 5.339 |
+| localized | direct-reference | 87.8 | 6.083 | 6.467 |
+| localized | direct-optimized | 62.5 | 5.710 | 6.013 |
+| overflow | clustered | 64.0 | 4.572 | 4.812 |
+| overflow | direct-reference | 89.7 | 4.954 | 5.242 |
+| overflow | direct-optimized | 61.1 | 4.553 | 4.774 |
+| outside-grid | clustered | 65.3 | 5.710 | 5.944 |
+| outside-grid | direct-reference | 87.7 | 6.083 | 6.382 |
+| outside-grid | direct-optimized | 63.2 | 5.727 | 5.943 |
+
+Localized clustering improves this workload versus direct lighting with the same
+optimized geometry. Grouped visibility and homogeneous packet admission reduce
+preparation cost versus the direct reference. Overflow offers no clustering
+benefit and can add cost; outside-grid shading is effectively the full-list path.
+The profile remains opt-in. Benchmark GPU bytes cover geometry, instances, light
+uniform/index texture and scene target only; presentation/driver/retirement and
+CPU workspace memory are excluded. Re-measure after changing lights every frame,
+resolution, layout, backend or adapter before choosing a shipping configuration.
+
 ## Owners and module shape
 
 ```text
@@ -825,11 +966,12 @@ one validated version set; failed reload leaves the prior set usable.
 
 Use a conventional forward baseline with bounded CPU-selected per-object lights.
 Selection is stable and deterministic, with a declared maximum and an overflow
-counter/quality policy. Add clustered forward on compute/storage-capable profiles
-when it outperforms that baseline for many lights. Cluster bounds and light lists
+counter/quality policy. L5 adds an opt-in CPU/texture clustered profile across the
+portable backends. Future compute assignment requires a compute/storage-capable
+profile and its own measurement gate. Cluster bounds and light lists
 must be conservative, capacity-checked and inspectable; overflow uses a declared
 bounded fallback rather than corrupting memory or silently dropping arbitrary
-lights. WebGL 2 retains the CPU light-list variant. Deferred shading, visibility
+lights. WebGL 2 retains CPU assignment and the L4 light-list option. Deferred shading, visibility
 buffers, bindless, mesh shaders and ray tracing are separate options, not startup
 requirements; their bandwidth/material/platform costs need workload evidence.
 
@@ -1297,7 +1439,7 @@ These phases complement RHI R0–R5; they do not rename or claim completion of t
 | L2: mutable data and overlays (implemented) | Completion-scoped replacement uploads; dynamic instances, debug triangles, R8 text adapter | In-flight overwrite stress, line near-plane/degenerate cases, painter/scissor order, atlas pressure, CPU text fixtures and loss/restart |
 | L3: material/content versions (implemented) | Cook/reflection/layout expansion, texture formats/mips and pipeline prewarm | Per-target layout fixtures; invalid reload preserves old image; mip/color semantics; bounded cache/upload overlap and deterministic fallback |
 | L4: lighting baseline (implemented) | Lit material, bounded direct lists, environment, shadows, baked assets, linear intermediate/output | Reference BRDF/color tests; no double lighting, shadow invalidation/atlas borders, saturation/overflow and LDR/HDR capability variants |
-| L5: measured scaling | Clustered forward, improved culling/LOD, optional native parallel recording | Dense-light and many-object fixtures; direct-path comparisons, overflow correctness, physical GPU median/tail/memory/latency evidence |
+| L5: measured scaling (portable implementation) | Opt-in CPU clustered forward, grouped culling and authored LOD; optional native parallel recording deferred | Dense-light and many-object fixtures; direct-path comparisons, overflow correctness, physical GPU median/tail/memory/latency evidence |
 | L6: optional advanced effects | Temporal/GPU-driven/virtual-residency plans and the RT0–RT4 ray plan | Capability probes and disabled-path support; image/temporal tests and workload-specific gains before default enablement |
 
 Use empty, single triangle, Cornell box, transparent intersections, split-screen,

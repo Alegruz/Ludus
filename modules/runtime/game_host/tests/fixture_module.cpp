@@ -141,6 +141,10 @@ uint64 NextRng(uint64& state) noexcept
     return state;
 }
 
+// Thanks to Glenn Fowler, Landon Curt Noll and Phong Vo, "FNV Hash",
+// "FNV-1a alternate algorithm" and "Parameters of the FNV-1/FNV-1a hash":
+// https://www.isthe.com/chongo/tech/comp/fnv/ . Adopt the XOR/multiply sequence
+// and published constants for a non-cryptographic hash; collisions remain possible.
 [[nodiscard]] uint64 Fnv1a(const uint8* data, usize size) noexcept
 {
     uint64 hash = 0xCBF29CE484222325ULL;

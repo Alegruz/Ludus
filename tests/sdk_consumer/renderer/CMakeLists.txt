@@ -72,3 +72,20 @@ if(EMSCRIPTEN)
     set_target_properties(ludus_sdk_renderer_lighting_consumer PROPERTIES OUTPUT_NAME renderer-lighting SUFFIX ".js")
     configure_file(../renderer-lighting.html renderer-lighting.html COPYONLY)
 endif()
+
+add_executable(ludus_sdk_renderer_scaling_consumer ../renderer_scaling.cpp)
+target_link_libraries(ludus_sdk_renderer_scaling_consumer PRIVATE Ludus::GraphicsRenderer Ludus::FoundationTime)
+target_compile_options(ludus_sdk_renderer_scaling_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions)
+foreach(shader renderer_flat renderer_composite renderer_clustered renderer_shadow renderer_output)
+    ludus_compile_shader(TARGET ludus_sdk_renderer_scaling_consumer NAME ${shader} RASTER
+        SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX vertexMain FRAGMENT fragmentMain
+        DEPENDS "${Ludus_DIR}/shaders/renderer_lit.slang")
+endforeach()
+ludus_compile_shader(TARGET ludus_sdk_renderer_scaling_consumer NAME renderer_clustered_shadow RASTER
+    SOURCE "${Ludus_DIR}/shaders/renderer_clustered.slang" VERTEX vertexMain FRAGMENT shadowMain
+    DEPENDS "${Ludus_DIR}/shaders/renderer_lit.slang")
+if(EMSCRIPTEN)
+    target_link_options(ludus_sdk_renderer_scaling_consumer PRIVATE -fno-exceptions -g2 -sENVIRONMENT=web -sALLOW_MEMORY_GROWTH=1 -sASSERTIONS=1)
+    set_target_properties(ludus_sdk_renderer_scaling_consumer PROPERTIES OUTPUT_NAME renderer-scaling SUFFIX ".js")
+    configure_file(../renderer-scaling.html renderer-scaling.html COPYONLY)
+endif()

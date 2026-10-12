@@ -24,6 +24,7 @@ target_sources(ludus_graphics_rhi
 )
 
 target_link_libraries(ludus_graphics_rhi
+    PRIVATE Ludus::FoundationMath
     PUBLIC
         Ludus::FoundationBase
         Ludus::Platform

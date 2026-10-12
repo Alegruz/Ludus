@@ -8,6 +8,15 @@
 
 #include <yyjson.h>
 
+// Thanks to Tim Bray (editor) and the IETF, "The JavaScript Object Notation
+// (JSON) Data Interchange Format", RFC 8259 (2017), sections 2-9 (decoded-key comparison in 8.3):
+// https://www.rfc-editor.org/rfc/rfc8259 . Adopt JSON syntax and decoded-key
+// comparison; duplicate-key rejection and bounded admission are Ludus policies.
+// Thanks to YaoYuan (ibireme) and yyjson contributors, "yyjson 0.10.0",
+// yyjson.h reader/allocator/DOM API: https://github.com/ibireme/yyjson/tree/0.10.0 .
+// This adapter uses the bundled backend with owned pool storage and additional
+// validation; retain its MIT notice in third_party/yyjson/LICENSE.
+// Source review and limits: docs/architecture/parsing-gems-review.md.
 namespace ludus::foundation::parsing
 {
 namespace
