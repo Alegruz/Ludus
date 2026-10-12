@@ -124,6 +124,7 @@ RasterStatus TimingArm() noexcept
         gTiming = { .State = GpuTimingState::Unavailable };
         return RasterStatus::Unsupported;
     }
+    internal::TimingArmRollback rollback(gTiming);
     TimingReset();
     gTimingGeneration = gTimingGenerations.Take();
     if (gTimingGeneration == 0)
@@ -146,6 +147,7 @@ RasterStatus TimingArm() noexcept
         return RasterStatus::OutOfMemory;
     }
     gTiming.State = GpuTimingState::Armed;
+    rollback.Accept();
     return RasterStatus::Ready;
 }
 void TimingBegin() noexcept

@@ -43,7 +43,8 @@ struct GpuTiming final
 /// Enable through DeviceDescription::EnableGpuTiming before startup. Owner-thread only.
 /// Arm between frames; Ready replaces a terminal/empty sample, InvalidState preserves an
 /// armed/pending sample or rejects an open frame. Unsupported means timing was not enabled.
-/// Native query allocation can return OutOfMemory/Failed. Skipped frames keep the probe armed.
+/// Query allocation can return OutOfMemory/Failed; those and identity-capacity failures
+/// preserve the previous terminal sample while the device stays ready. Skipped frames keep it armed.
 /// No blocking or CPU-duration fallback. DestroyDevice cancels and releases its native storage.
 [[nodiscard]] RasterStatus ArmGpuTiming(DeviceHandle) noexcept;
 /// Nonblocking poll/copy. InvalidHandle preserves output; other unavailable device states zero it.

@@ -2161,3 +2161,44 @@ TEST_CASE("R7 terminal device failure stays distinct from pending startup", "[rh
     CHECK(adapter.VendorId == 0);
     CHECK(ArmGpuTiming(session.Device) == RasterStatus::Failed);
 }
+
+TEST_CASE("R7 failed re-arm preserves every terminal sample", "[rhi][measurement]")
+{
+    Session session;
+    for (const auto state : {GpuTimingState::Available, GpuTimingState::Disjoint, GpuTimingState::Failed})
+    {
+        GpuTiming timing
+        {
+            .State = state,
+            .DurationNanoseconds = state == GpuTimingState::Available ? 123.0 : 0.0,
+            .TickNanoseconds = 2,
+            .ValidBits = 48,
+        };
+        for (const auto failure : {RasterStatus::OutOfMemory, RasterStatus::CapacityExceeded, RasterStatus::Failed})
+        {
+            const auto attempt = [&timing, failure]() noexcept {
+                internal::TimingArmRollback rollback(timing);
+                timing = {}; // The backend releases old native objects before attempting new ones.
+                return failure;
+            };
+            CHECK(attempt() == failure);
+            CHECK(timing.State == state);
+            CHECK(timing.TickNanoseconds == 2);
+            CHECK(timing.ValidBits == 48);
+            CHECK(timing.DurationNanoseconds == (state == GpuTimingState::Available ? 123 : 0));
+        }
+        {
+            internal::TimingArmRollback rollback(timing);
+            timing = { .State = GpuTimingState::Armed };
+            rollback.Accept();
+        }
+        CHECK(timing.State == GpuTimingState::Armed);
+    }
+    GpuTiming lost{ .State = GpuTimingState::Available, .DurationNanoseconds = 123 };
+    {
+        internal::TimingArmRollback rollback(lost);
+        lost = {};
+        internal::Fail(backend::PendingToken, StartupError::DeviceLost);
+    }
+    CHECK(lost.State == GpuTimingState::Empty);
+}

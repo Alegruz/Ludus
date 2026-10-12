@@ -1,4 +1,5 @@
 #pragma once
+#include "lifecycle.h"
 #include "raster.h"
 #include <ludus/graphics/rhi/measurement.h>
 namespace ludus::graphics::rhi::internal
@@ -48,6 +49,31 @@ void CopyMeasurementName(const char* source, foundation::usize length, char (&de
     }
     destination[index] = '\0';
 }
+// A failed allocation attempt must preserve the preceding observable terminal sample.
+class TimingArmRollback final
+{
+public:
+    explicit TimingArmRollback(GpuTiming& output) noexcept : Output(output), Previous(output), Owner(DeviceOwner()) {}
+    ~TimingArmRollback() noexcept
+    {
+        if (!Accepted && DeviceOwner() == Owner && GetStartup().State == StartupState::Ready)
+        {
+            Output = Previous;
+        }
+    }
+    TimingArmRollback(const TimingArmRollback&) = delete;
+    TimingArmRollback& operator=(const TimingArmRollback&) = delete;
+    void Accept() noexcept
+    {
+        Accepted = true;
+    }
+
+private:
+    GpuTiming& Output;
+    GpuTiming Previous;
+    foundation::uint64 Owner;
+    bool Accepted = false;
+};
 void SetGpuTimingRequest(bool) noexcept;
 bool GpuTimingRequested() noexcept;
 } // namespace ludus::graphics::rhi::internal
