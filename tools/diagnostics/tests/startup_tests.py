@@ -169,7 +169,10 @@ def test_stderr_closed(child):
             except socket.timeout:
                 # A quiet socket does not mean the sanitized child has finished startup.
                 if child_finished.is_set():
-                    return
+                    # The timeout may have expired before the child sent its last
+                    # report, with this handler resuming only after child exit.
+                    # Drain queued datagrams before stopping on an empty socket.
+                    report_recv.setblocking(False)
             except OSError:
                 return
 
