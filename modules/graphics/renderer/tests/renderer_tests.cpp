@@ -1659,6 +1659,9 @@ TEST_CASE("Renderer capacity validation and exact host budget preserve failed in
     CHECK(session.InitializeStatus(renderer, limits) == rhi::RasterStatus::CapacityExceeded);
     CHECK(renderer.GetHostBytes() == 0);
     limits = {};
+    limits.Views = ~uint32{0} - 3;
+    CHECK(session.InitializeStatus(renderer, limits) == rhi::RasterStatus::InvalidDescription);
+    limits = {};
     limits.Meshes = ~uint32{0} - 1;
     CHECK(session.InitializeStatus(renderer, limits) == rhi::RasterStatus::CapacityExceeded);
     CHECK(renderer.GetHostBytes() == 0);

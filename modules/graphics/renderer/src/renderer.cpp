@@ -100,7 +100,8 @@ bool ValidCapacities(const Limits& limits) noexcept
     }
     // Mesh reference counters cover primary and LOD references in every snapshot.
     return limits.HostBytes != 0 && uint64(limits.Objects) * limits.Snapshots <= invalid / 2 &&
-           uint64(limits.Views) + limits.ShadowAtlases < invalid;
+           // Snapshot references include prepared views, atlases and four RT1 captures.
+           uint64(limits.Views) + limits.ShadowAtlases + 4 <= invalid;
 }
 bool Accepted(Status status) noexcept
 {
