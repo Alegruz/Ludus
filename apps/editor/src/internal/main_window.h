@@ -40,7 +40,6 @@ class ContentWorkspace;
 class ScriptWorkspace;
 class SceneWorkspace;
 class WorldWorkspace;
-class LevelWorkspace;
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -99,7 +98,6 @@ private:
 
     SceneWorkspace* Scene_ = nullptr;
     WorldWorkspace* World_ = nullptr;
-    LevelWorkspace* Level_ = nullptr;
     ScriptWorkspace* Scripts_ = nullptr;
     ConfigurationWorkspace* Configuration_ = nullptr;
     QWidget* ProjectSettings_ = nullptr;

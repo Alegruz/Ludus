@@ -5,7 +5,7 @@
   "components": [
     {
       "id": "transform",
-      "label": "Position",
+      "label": "Transform",
       "help": "Place an entity in the world. Values are in metres.",
       "required": true,
       "properties": [
@@ -367,5 +367,23 @@
       "label": "Ludus logo color texture",
       "kind": "texture"
     }
-  ]
+  ],
+  "scene_transform": {
+    "component": "transform",
+    "position": [
+      "x",
+      "y",
+      "z"
+    ],
+    "rotation": [
+      "rx",
+      "ry",
+      "rz"
+    ],
+    "scale": [
+      "sx",
+      "sy",
+      "sz"
+    ]
+  }
 }

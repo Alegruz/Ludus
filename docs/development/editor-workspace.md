@@ -371,10 +371,14 @@ With the Qt prerequisites installed, include the editor in sanitizer validation:
 
 ## Gameplay world authoring
 
-The **World** tab edits game-owned entity/component data independently of the
-sample-specific **Scene** adapter. It never loads project code or guesses C++
-component layouts. The project supplies `authoring/world.schema.json` under its
-saved source directory; the editor builds its inspector from that schema.
+The **World** tab owns scene placement and game-owned entity/component data in
+one document, entity list, inspector and undo history. Imported geometry is an
+entity: select it to edit its placement and attach gameplay components. The editor
+never loads project code or guesses C++ component layouts. A project may supply
+`authoring/world.schema.json` under its saved source directory; the inspector uses
+that schema for gameplay fields. Without it, World supports scene import and
+placement with an empty gameplay schema. The sample-specific **Scene** adapter
+remains a compatibility workflow for the world-demo format.
 
 ### Start with an example
 
@@ -397,8 +401,8 @@ saved source directory; the editor builds its inspector from that schema.
 The starter includes designer placement, artist presentation, sound asset,
 localization-key, behavior-target and rendering-experiment fields. These are
 **authoring examples**, not a runtime integration for `live-edit-game`: its
-shipped gameplay remains driven by its existing tuning adapter. World does not
-launch a viewport or send edits to Live Inspector. A game adapter must explicitly
+shipped gameplay remains driven by its existing tuning adapter. World previews applied authoring data but does not send edits to Live Inspector.
+A game adapter must explicitly
 read world data and map it to its typed component pools before it can affect
 play. Do not assume Build and Run consumes a World document automatically.
 
@@ -427,11 +431,12 @@ experience level and discipline before calling the interaction broadly usable.
 Both schema and world are strict UTF-8 JSON with `version: 1`. See the editable
 sample's `authoring/world.schema.json` and `authoring/starter.world.json` for
 complete examples. Stable identifiers use 1–64 ASCII letters, digits, `_`, `-`,
-`.` or `:`; they are not runtime generational `EntityId` values. Unknown members,
+`.` or `:`; they are not runtime generational `EntityId` values. Unknown members outside the scene extension described below,
 duplicate object keys, duplicate definition/asset/entity IDs and missing
 properties are rejected. Different entities may have the same display name.
 
-The schema root has `id`, `label`, `components` and `assets`. Each component has
+The schema root has `id`, `label`, `components` and `assets`, and may declare the
+`scene_transform` binding described below. Each component has
 `id`, `label`, `help`, `required` and a `properties` array. Every property has
 `id`, `label`, `help`, `unit`, `type` and `default`:
 
@@ -605,22 +610,75 @@ transform gizmos, hierarchy/prefabs and browser rendering remain later slices.
 
 ## Project-owned 3D levels and reference import
 
-Use **3D Levels** for the Stage 5 scene workflow. The existing **World** and
-sample-specific **Scene** tabs continue to own their existing documents.
+Use **World** for scene placement and gameplay authoring. There is no separate
+**3D Levels** tab. The cooked-scene importer and renderer are services beneath
+World; they do not expose another object hierarchy or authoring document.
 
 1. Create a project or open an existing project. Missing/stale SDK setup is
    reported by the normal project checks; explicit **Repair** owns setup changes.
-2. In **3D Levels**, choose **New 3D scene** or **Open 3D scene**. Choose a
-   project-contained `.lulevel` path, for example `scenes/main.lulevel`.
-3. Choose **Import reference scene** and select `scene-v4.pbrt` from the supplied
-   staircase2 reference directory. Conversion and asset publication are internal
-   operations; no project CMake, renderer, run-argument or schema edits are needed.
-4. The embedded viewport renders progressively. The object list provides names,
-   independent placements and removal. The imported camera frames the scene, and
-   the import notes report the material/filtering approximations.
-5. **Save scene** (or the shared Save action) verifies the required durable assets
-   and saves atomically. Reopening reads the project's cooked assets, even after
-   moving the project, removing the original source directory or deleting `out/`.
+2. In **World**, choose **New World…** or **Open World…**, using a
+   project-contained `.world.json` path, for example `scenes/main.world.json`.
+3. Choose **Import scene…** and select `scene-v4.pbrt` from the supplied
+   staircase2 reference directory. Import cooks assets into the project. The
+   admitted instances join the current World's entity list in one undoable edit.
+4. Select an imported entity. Its **Scene instance** inspector edits local
+   position in metres, rotation in degrees, and positive scale; gameplay fields
+   and **Add Component** are in that same inspector. **Apply Changes** validates
+   placement, name and component values together. The embedded viewport follows
+   applied placement. Camera and material data retain the imported scene profile.
+5. Duplicate/Delete and World Undo/Redo act on the complete entity, including its
+   scene binding and gameplay components. Parent removal is refused while its
+   children remain. Invalid fields preserve the previous applied document.
+6. **Save World** verifies the cooked-scene assets before the atomic document
+   write, independently of viewport availability. While a scene operation runs, editing and Save wait for it to finish;
+   **Cancel scene operation** retains the previous document. Reopen reads the
+   project's cooked assets without needing the original source directory.
+
+**Open World…** also accepts an existing `.lulevel` file. Successful conversion
+creates an unsaved sibling `<level-name>.world.json`; it preserves the original
+level and refuses an existing conversion destination. Failed conversion preserves
+the active World. Save publishes only the converted World document. Existing
+`.world.json` documents without scene data remain readable.
+
+The optional World root `scene` contains the level's `version`, persistent `id`,
+`name`, `profile`, `camera` and `imports`, with no second object list. An imported
+entity's optional `scene` stores `mesh`, `material`, `parent`, the nine-number
+imported affine `basis`, and, without a schema binding, three-number `position`, `rotation` and `scale`.
+The entity ID and name are the only authoritative object identity and label.
+Rotation applies X, then Y, then Z relative to the imported basis; unit scale and
+zero rotation preserve source shear and orientation. Position is local to the
+parent. Placement values are finite and bounded to ±1,000,000; rotations are
+bounded to ±360 degrees and scales must be positive. A schema can explicitly bind a required numeric component with
+`scene_transform`, for example:
+
+```json
+"scene_transform": {
+  "component": "transform",
+  "position": ["x", "y", "z"],
+  "rotation": ["rx", "ry", "rz"],
+  "scale": ["sx", "sy", "sz"]
+}
+```
+
+Each array names three distinct `number` properties; all nine must exist on the
+required component. This binding makes component values the placement source for
+imported instances. Their `scene` then stores only mesh, material, parent and
+basis, and the inspector displays the component's transform fields once.
+The live-edit-game sample declares this binding. The editor does not infer it
+from component names. Without a binding, the built-in Scene instance placement
+fields own the imported transform. Scene metadata and components are saved and
+recovered together, with one history.
+
+When `authoring/render.preview.json` is present, schema-bound visible meshes and
+imported geometry compose into the same embedded viewport. Scene instances use
+their cooked bindings; they are not rendered a second time through the schema
+adapter. The combined resident profile permits six meshes, eight materials,
+eight textures and 128 visible instances; overflow retains the previous viewport
+and reports the capacity. Schema meshes receive generated shading normals and
+matte materials in this combined lit profile; their linear tints are baked into
+transient sRGB texture copies. Original assets are preserved. Worlds without
+imported scene data retain their existing unlit preview adapter.
+
 
 Build the native Editor with
 [the rendered authoring option](#enable-the-rendered-authoring-surface).
@@ -632,7 +690,8 @@ The native viewport selects CPU reference traversal explicitly and shows live
 256 × 256, 64-sample progressive output with no denoising. Browser scene import
 and a game's automatic Play/load integration are outside this initial profile.
 
-Keep `assets/` and `.lulevel` documents with the project. They contain the catalog,
+Keep `assets/` and `.world.json` documents with the project. Retain legacy
+`.lulevel` files when using the scene CLI. They contain the catalog,
 immutable cooked files, exact dependencies and retained licenses. Scene documents
 contain stable logical UUIDs; artifact revisions and hashes live in the catalog.
 Importing the same source again creates independent instances while reusing its
@@ -641,7 +700,8 @@ only after complete validation and renderer admission. A failed/cancelled import
 or save preserves the previous saved data; the last-good viewport remains visible
 while a candidate is prepared.
 
-The installed CLI uses the same backend:
+The installed scene CLI retains its `.lulevel` interchange workflow and uses
+the same asset/import backend. It does not consume World gameplay components:
 
 ```bash
 ludus scene new /path/to/project scenes/main.lulevel --name Main

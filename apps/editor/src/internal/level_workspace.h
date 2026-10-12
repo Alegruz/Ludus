@@ -2,6 +2,7 @@
 
 #include "internal/controller.h"
 #include "internal/render_preview.h"
+#include "internal/world_document.h"
 
 #include <QJsonObject>
 #include <QTemporaryDir>
@@ -43,6 +44,36 @@ public:
         return !Busy_ && !Level_.isEmpty();
     }
     void StopPreview() noexcept;
+    [[nodiscard]] bool CanCancel() const noexcept
+    {
+        return Busy_ && Operation_ != QStringLiteral("save") && !PublishingCatalog_;
+    }
+    void CancelOperation()
+    {
+        Cancel();
+    }
+    [[nodiscard]] bool Busy() const noexcept
+    {
+        return Busy_;
+    }
+    [[nodiscard]] QWidget* TakeViewport(QWidget* parent);
+    void SetWorldSnapshot(const WorldDocument& world)
+    {
+        WorldSnapshot_ = world;
+    }
+    [[nodiscard]] bool VerifyAssets(const QJsonObject& level);
+    [[nodiscard]] bool Assemble(const QJsonObject& level);
+    [[nodiscard]] bool ImportInto(const QJsonObject& level, const QString& source);
+    [[nodiscard]] QString StatusText() const;
+    [[nodiscard]] bool PreviewRunning() const noexcept
+    {
+        return Preview_.Running();
+    }
+    [[nodiscard]] const RenderScene& PreviewScene() const noexcept
+    {
+        return Preview_.Scene();
+    }
+
     [[nodiscard]] QJsonObject Document() const
     {
         return Level_;
@@ -50,6 +81,8 @@ public:
 Q_SIGNALS:
     void DocumentChanged();
     void PreviewStarting();
+    void OperationFinished(bool accepted);
+    void AssetsVerified(bool accepted);
 
 private:
     bool Start(const QString& operation, const QString& path = {}, const QString& source = {});
@@ -81,11 +114,14 @@ private:
 #if !defined(Q_OS_WASM)
     QProcess Process_;
 #endif
+    WorldDocument WorldSnapshot_;
     RenderScene Scene_;
     RenderScene PreviousScene_;
     bool AwaitingViewport_ = false;
     QString Error_;
     RenderPreview Preview_;
+    bool WorldOwned_ = false;
+    bool VerificationOnly_ = false;
     bool Busy_ = false, Dirty_ = false, Cancelling_ = false, Success_ = false, Rendering_ = false;
     QLabel *Status_, *Viewport_, *File_, *Warnings_;
     QListWidget* Objects_;

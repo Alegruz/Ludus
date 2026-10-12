@@ -312,6 +312,52 @@ bool LevelWorkspace::Import(const QString& source)
     }
     return Start(QStringLiteral("import"), {}, source);
 }
+QWidget* LevelWorkspace::TakeViewport(QWidget* parent)
+{
+    WorldOwned_ = true;
+    Dirty_ = false;
+    Viewport_->setParent(parent);
+    return Viewport_;
+}
+QString LevelWorkspace::StatusText() const
+{
+    return Status_->text();
+}
+bool LevelWorkspace::VerifyAssets(const QJsonObject& level)
+{
+    if (Busy_ || level.isEmpty())
+    {
+        return false;
+    }
+    VerificationOnly_ = true;
+    Candidate_ = level;
+    if (!Start(QStringLiteral("assemble")))
+    {
+        VerificationOnly_ = false;
+        return false;
+    }
+    return true;
+}
+bool LevelWorkspace::Assemble(const QJsonObject& level)
+{
+    if (Busy_ || level.isEmpty())
+    {
+        return false;
+    }
+    VerificationOnly_ = false;
+    Candidate_ = level;
+    return Start(QStringLiteral("assemble"));
+}
+bool LevelWorkspace::ImportInto(const QJsonObject& level, const QString& source)
+{
+    if (Busy_ || level.isEmpty())
+    {
+        return false;
+    }
+    // Start(import) copies Level_. Retain the authoritative document for this service operation.
+    Level_ = level;
+    return Import(source);
+}
 bool LevelWorkspace::Save()
 {
     if (!CanSave())
@@ -447,6 +493,21 @@ void LevelWorkspace::Completed()
             {
                 Success_ = RenderScene::LoadCooked(bytes, Candidate_, Scene_, Error_, CandidateRevisions_);
             }
+            auto authoredWorld = WorldSnapshot_;
+            if (Success_ && !VerificationOnly_ && authoredWorld.Loaded() &&
+                (Operation_ == QStringLiteral("import") || Operation_ == QStringLiteral("open")))
+            {
+                // Validate the complete entity/component transaction before any
+                // candidate viewport or catalog can be published.
+                Success_ = authoredWorld.ImportScene(Candidate_, Error_);
+            }
+            if (Success_ && !VerificationOnly_ && authoredWorld.Loaded() &&
+                QFileInfo::exists(QDir(Root_).filePath(QStringLiteral("authoring/render.preview.json"))))
+            {
+                RenderScene authored;
+                Success_ = RenderScene::Load(Root_, authoredWorld, authored, Error_) &&
+                           RenderScene::Merge(authored, bytes, Candidate_, Scene_, Error_, CandidateRevisions_);
+            }
         }
         Decode_.quit();
     });
@@ -483,6 +544,10 @@ void LevelWorkspace::CommitImport()
 void LevelWorkspace::CommitCandidate()
 {
     Level_ = Candidate_;
+    if (Scene_.Identity.isEmpty())
+    {
+        Viewport_->setText(QStringLiteral("No visible scene instances."));
+    }
     Warnings_->setText(PendingWarnings_);
     if (Operation_ == QStringLiteral("save") || Operation_ == QStringLiteral("open"))
     {
@@ -492,13 +557,14 @@ void LevelWorkspace::CommitCandidate()
     {
         Path_ = CandidatePath_;
     }
-    Dirty_ = Operation_ != QStringLiteral("save") && Operation_ != QStringLiteral("open");
+    Dirty_ = !WorldOwned_ && Operation_ != QStringLiteral("save") && Operation_ != QStringLiteral("open");
     Busy_ = false;
     PreviousScene_ = {};
     Status_->setText(Operation_ == QStringLiteral("save")
                          ? QStringLiteral("Scene saved with verified project-owned assets.")
                          : QStringLiteral("Scene ready."));
     Render();
+    Q_EMIT OperationFinished(true);
     ApplyPendingProject();
 }
 void LevelWorkspace::Rollback(const QString& error)
@@ -514,6 +580,7 @@ void LevelWorkspace::Rollback(const QString& error)
     Busy_ = false;
     Status_->setText(error + QStringLiteral(" Previous scene and level retained."));
     Render();
+    Q_EMIT OperationFinished(false);
     ApplyPendingProject();
 }
 void LevelWorkspace::Publish()
@@ -522,7 +589,27 @@ void LevelWorkspace::Publish()
     {
         Busy_ = false;
         Status_->setText(Error_);
+        const bool verification = VerificationOnly_;
+        VerificationOnly_ = false;
         Render();
+        if (verification)
+        {
+            Q_EMIT AssetsVerified(false);
+        }
+        else
+        {
+            Q_EMIT OperationFinished(false);
+        }
+        ApplyPendingProject();
+        return;
+    }
+    if (VerificationOnly_)
+    {
+        VerificationOnly_ = false;
+        Busy_ = false;
+        Status_->setText(QStringLiteral("World scene assets verified."));
+        Render();
+        Q_EMIT AssetsVerified(true);
         ApplyPendingProject();
         return;
     }
@@ -609,7 +696,7 @@ bool LevelWorkspace::ConfirmDiscard()
             QStringLiteral("Finish or cancel the current scene operation before closing/changing projects."));
         return false;
     }
-    if (!Dirty_)
+    if (WorldOwned_ || !Dirty_)
     {
         return true;
     }

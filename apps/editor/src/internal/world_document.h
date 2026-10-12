@@ -68,7 +68,15 @@ public:
     [[nodiscard]] bool Detach(const QString& entity, QString& error, const QString& component);
     // Apply one inspector transaction, including the display name. Outputs and
     // history remain unchanged on failure. Unknown fields are rejected.
-    [[nodiscard]] bool Edit(const QString& entity, const QJsonObject& components, const QString& name, QString& error);
+    [[nodiscard]] bool Edit(const QString& entity,
+                            const QJsonObject& components,
+                            const QString& name,
+                            QString& error,
+                            const QJsonObject* scene = nullptr);
+    // Import is one history transaction. Cooked object IDs become entity IDs.
+    [[nodiscard]] bool ImportScene(const QJsonObject& level, QString& error);
+    [[nodiscard]] QJsonObject SceneLevel() const;
+    [[nodiscard]] QJsonObject ScenePlacement(const QJsonObject& entity) const;
     [[nodiscard]] bool Validate(const QJsonObject& candidate, QString& error) const;
     [[nodiscard]] QByteArray Encode() const;
     [[nodiscard]] bool Restore(const QJsonObject& candidate, QString& error)
