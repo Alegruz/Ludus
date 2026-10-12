@@ -32,7 +32,9 @@ void TimingMapped(WGPUMapAsyncStatus status, WGPUStringView, void* userdata, voi
     }
     wgpuBufferUnmap(gTimingReadback);
     if (Token(userdata) != gTimingGeneration)
+    {
         return;
+    }
     if (mapped != nullptr && values[3] >= values[0])
     {
         gTiming.DurationNanoseconds = static_cast<float64>(values[3] - values[0]);

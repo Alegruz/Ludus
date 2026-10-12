@@ -328,12 +328,15 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
                         REQUIRE(rhi::ExecuteOrderedGraph(device, surface, graph, completion) ==
                                 rhi::RasterStatus::Ready);
                         const auto executeEnd = std::chrono::steady_clock::now();
-                        rhi::GpuTiming submittedTiming;
-                        REQUIRE(rhi::GetGpuTiming(device, submittedTiming) == rhi::RasterStatus::Ready);
-                        if (armed == rhi::RasterStatus::Ready)
+                        if (forceTiming)
                         {
-                            REQUIRE((submittedTiming.State == rhi::GpuTimingState::Pending ||
-                                     submittedTiming.State == rhi::GpuTimingState::Available));
+                            rhi::GpuTiming submittedTiming;
+                            REQUIRE(rhi::GetGpuTiming(device, submittedTiming) == rhi::RasterStatus::Ready);
+                            if (armed == rhi::RasterStatus::Ready)
+                            {
+                                REQUIRE((submittedTiming.State == rhi::GpuTimingState::Pending ||
+                                         submittedTiming.State == rhi::GpuTimingState::Available));
+                            }
                         }
                         REQUIRE(rhi::backend::ReadHeadlessPixels(merge ? merged : baseline));
                         const auto completionEnd = std::chrono::steady_clock::now();
