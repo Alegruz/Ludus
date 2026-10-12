@@ -888,8 +888,12 @@ The storage regressions explicitly forbid importer invocation on moved-project
 reopen. Native offscreen Qt/Metal tests exercise the actual importer/renderer/save
 workflow, remove a private copy of source inputs, move the project and verify
 identical persisted object/camera/material references and successful rendering.
-Offscreen widget tests do not claim direct native GUI interaction; that acceptance
-requires an unlocked desktop. Loose-file `scene publish` emits a deterministic
+A native macOS GUI walkthrough on 2026-10-12 additionally created a level,
+imported staircase2, renamed an object and saved it. After closing the Editor,
+moving the project and removing its private source copy and build cache, reopening
+the saved level restored all seventeen objects, the edited name and live rendering.
+The saved level bytes remained unchanged, and reopening recreated neither source
+inputs nor the project build cache. Loose-file `scene publish` emits a deterministic
 selected catalog, artifacts, licenses, level and runtime interchange packet;
 independently chunked packs remain optional.
 
