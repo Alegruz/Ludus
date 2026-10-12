@@ -408,6 +408,13 @@ Cancellation removes the consumer but keeps physical staging retained until safe
 
 ## Bindings shaders and pipelines
 
+The [render graph authoring proposal](render-graph-authoring.md) adds an offline
+graph/schema compiler and editor workflow above this boundary. It emits explicit
+uses, reflected layouts and finite pipeline recipes through the existing graph
+and pipeline-request seams. Shader configurations belong to the asset author;
+resource connectivity cannot manufacture permutations. RHI retains sole ownership
+of handle lifetime, hazard lowering and accepted-submission state.
+
 Use explicit layouts and immutable binding snapshots. A recommended raster
 scheme groups View/Frame, Material, and Draw data by update frequency, with
 Draw data in uniform slices. These are renderer conventions, not three mandatory

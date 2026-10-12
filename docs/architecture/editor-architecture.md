@@ -136,6 +136,18 @@ does not already expose a general borrowed/multiple-surface editor contract.
 Never couple Qt widget lifetime to live game-module memory. GPU picking and worker results carry
 scene/session revision so delayed hits cannot select obsolete objects.
 
+## Renderer authoring workspace
+
+The proposed Renderer workspace uses the same document/command core for graph,
+schema and shader source editing. Its canonical contracts, typed connection
+domains, camera/scene coverage, explicit configuration counts, compiled-plan
+inspection and version activation are owned by the
+[render graph authoring architecture](render-graph-authoring.md). Shader source
+authors provide computations and requirements; the graph owns resource wiring.
+Preview and live execution share the cooked Renderer/RHI contract, while keeping
+their process, scene and resource-instance ownership explicit. This is future S5
+work with RG0-RG4 acceptance gates, not delivered by the current scene adapter.
+
 ## Performance and observability
 
 Use budgets as targets to measure on a named reference machine, not unverified
