@@ -286,7 +286,7 @@ RasterStatus Reserve(RasterKind kind, usize& slot) noexcept
     auto& records = gRecords[static_cast<usize>(kind)];
     bool exhausted = false;
     const auto limit = static_cast<usize>(kind) < RASTER_KINDS ? usize{CurrentDeviceProfile().Raster.ResourcesPerKind}
-                                                               : RASTER_CAPACITY;
+                                                               : usize{CurrentStorageLimits().RayResourcesPerKind};
     for (slot = 0; slot < limit; ++slot)
     {
         if (slot == records.GetSize())

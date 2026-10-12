@@ -111,10 +111,10 @@ RHI. Poll the returned completion independently from presentation. A skipped tar
 retains a finished batch for retry; terminal failure is still explicit. Reset the
 renderer between frames before destroying its borrowed device.
 
-L0 uses six mesh slots, four snapshot slots, four prepared views and 256 objects per
-snapshot/view. Retained versions consume slots until their last consumer releases.
+L0 compatibility defaults use six mesh slots, four snapshot slots, eight prepared
+views and 256 objects per snapshot/view. [L5.1](#l51-budgeted-scene-capacity) makes these capacities configurable. Retained versions consume slots until their last consumer releases.
 The six meshes require twelve RHI buffers and four nonempty views require four more;
-other RHI consumers and GPU retirement can exhaust that shared sixteen-record budget
+other RHI consumers and GPU retirement can exhaust the configured RHI budget
 earlier. Setup failures preserve public outputs; Ready/Pending creation alone grants
 ownership. Large geometry is also constrained by enabled RHI buffer limits. These are
 bounds of this initial profile, not performance targets or a streaming budget.
@@ -661,9 +661,9 @@ resolution, counters, known scene resource bytes and tool pins. GPU pass timesta
 are explicitly unavailable; completion/readback CPU latency is not GPU execution
 time. The 640×360 fixtures are not an AAA scene benchmark or a frames-in-flight
 throughput test. Known memory excludes driver/pipeline allocations, retired
-versions and renderer CPU storage. Capacity remains six meshes/eight materials/
-256 objects: this stage does not establish full Sponza or Staircase2 import or
-fidelity. Record adapter-specific results before choosing the clustered profile.
+versions and renderer CPU storage. These historical measurements used six meshes/eight materials/256 objects.
+L5.1 removes those fixed ceilings; neither stage establishes full Sponza or
+Staircase2 import or fidelity. Record adapter-specific results before choosing the clustered profile.
 
 ### Apple M5 measurement, October 11, 2026
 
@@ -694,6 +694,81 @@ The profile remains opt-in. Benchmark GPU bytes cover geometry, instances, light
 uniform/index texture and scene target only; presentation/driver/retirement and
 CPU workspace memory are excluded. Re-measure after changing lights every frame,
 resolution, layout, backend or adapter before choosing a shipping configuration.
+
+## L5.1: budgeted scene capacity
+
+Renderer initialization accepts copied `Limits`, preserving the six-mesh,
+eight-material and 256-object compatibility defaults. All registry kinds are
+configurable: meshes, snapshots, prepared views, presentations, material programs,
+material versions and shadow atlases. `GetConfiguredLimits()` returns the selected
+counts; static `GetLimits()` returns defaults. Counts are positive and below
+UINT32_MAX, with checked counter/size bounds. `Objects` must fit the enabled RHI
+`DrawsPerFrame`; an incompatible request returns `Unsupported`.
+
+Registry arrays, each snapshot's items/groups, each view's packets and reusable
+visibility/sort/instance workspaces are reserved exactly once at initialization.
+Their addresses remain stable, and preparation reuses CPU workspace without
+pool growth. `Limits::HostBytes` covers State, reserved metadata/workspaces and
+optional lazily allocated cluster scratch. `GetHostBytes()` reports requested
+reserved bytes, excluding allocator overhead, transient mesh upload conversion,
+RT1's separately budgeted retained data, RHI resources and driver allocations.
+Invalid counts return `InvalidDescription`; checked size overflow or budget
+exhaustion returns `CapacityExceeded`; allocation failure returns `OutOfMemory`.
+Failed initialization remains uninitialized. Reset releases the reservations.
+
+These are maximum renderer incarnations, not GPU resource reservations. Detached
+versions still consume slots while snapshots/views/captures retain them. Renderer
+slot recycling advances generations; RHI separately retains submitted resource
+uses through completion. Other RHI consumers, shader variants, simultaneous views,
+materials, shadows and replacement versions consume the independently configured
+RHI counts/bytes. Increasing renderer capacities alone cannot promise that every
+resource combination fits.
+
+For example, configure device storage before startup and pass renderer limits
+after the device is Ready (shader descriptions come from the installed cooker):
+
+```cpp
+rhi::DeviceDescription deviceDescription;
+deviceDescription.Storage.ResourcesPerKind = 512;
+deviceDescription.Storage.DrawsPerFrame = 2048;
+deviceDescription.Storage.DrawsPerPlan = 2048;
+deviceDescription.Storage.RayResourcesPerKind = 256;
+deviceDescription.Storage.RayInstances = 2048;
+// CreateDevice(..., deviceDescription, device, surface), then poll startup.
+rr::Limits limits;
+limits.Meshes = 128;
+limits.Materials = 128;
+limits.Objects = 2048;
+limits.HostBytes = usize{64} * 1024 * 1024;
+// renderer.Initialize(device, flatVertex, flatFragment, limits).
+```
+
+`ViewReport` counts cover the entire view. Inline `SourceIds`/`SelectedLods` hold
+only the first `Reported = min(Visible, 256)` entries. For full diagnostics, supply
+optional borrowed `SourceIdOutput`/`SelectedLodOutput` arrays and `DetailCapacity`
+through the input report. Either requested array must accommodate every visible
+object; insufficient capacity fails before GPU resource publication. Preparation
+failure preserves the report and output arrays. Successful output follows actual
+packet/instance order, including source-order reference views and LOD selections.
+
+RT1 retains an explicitly budgeted dynamic instance table instead of 256 embedded
+entries. Native RT0 uses R6's stable host-budgeted pages for all ray resource kinds,
+with `StorageLimits::RayResourcesPerKind` independent of general raster counts.
+`StorageLimits::RayInstances` requests the TLAS ceiling; query
+`RayCapabilities::MaxInstances` after startup for the enabled backend limit.
+Vulkan also bounds the returned instance identity to its 24-bit custom-index field.
+Structure/input/opacity/scratch bytes still require explicit per-resource ray
+budgets. Default counts, 4096-ray batches and native per-buffer limits are retained.
+No dynamic AS update/refit, scene ingestion, material expansion or virtual residency
+is added by this capacity milestone.
+
+Validation covers 20 meshes, 16 material versions, a 513-object snapshot with a
+partial final culling group, full-order diagnostics, exhaustion/output preservation,
+detached retention, stale handles and recovery. An RT1 CPU capture shades instance
+512 after owners detach. Native RT0 tests retain 72 distinct BLAS geometries in a
+513-instance TLAS, verify instance identities 0/64/512 and release dependencies
+only after the batch retires. Counts establish capacity and lifetime correctness,
+not full-scene fidelity or performance.
 
 ## Owners and module shape
 
@@ -1081,8 +1156,8 @@ Record any intentionally mixed approximation in the capture's rendering profile.
 
 RT0/RT1 are an opt-in static triangle query profile and progressive RGB reference
 capture. RT2–RT4, temporal effects, GPU-driven submission and virtual residency
-remain plans. The current raster resource/object limits and scene import workflow
-are unchanged; this does not yet establish faithful rendering of Staircase2.
+remain plans. The scene import workflow is unchanged; configurable raster/ray capacities
+are supplied by [L5.1](#l51-budgeted-scene-capacity); this does not yet establish faithful rendering of Staircase2.
 
 RHI owns immutable native BLAS/TLAS incarnations and asynchronous query batches.
 Vulkan negotiates API 1.2, buffer device address, acceleration structures, ray
@@ -1589,6 +1664,7 @@ These phases complement RHI R0–R5; they do not rename or claim completion of t
 | L3: material/content versions (implemented) | Cook/reflection/layout expansion, texture formats/mips and pipeline prewarm | Per-target layout fixtures; invalid reload preserves old image; mip/color semantics; bounded cache/upload overlap and deterministic fallback |
 | L4: lighting baseline (implemented) | Lit material, bounded direct lists, environment, shadows, baked assets, linear intermediate/output | Reference BRDF/color tests; no double lighting, shadow invalidation/atlas borders, saturation/overflow and LDR/HDR capability variants |
 | L5: measured scaling (portable implementation) | Opt-in CPU clustered forward, grouped culling and authored LOD; optional native parallel recording deferred | Dense-light and many-object fixtures; direct-path comparisons, overflow correctness, physical GPU median/tail/memory/latency evidence |
+| L5.1: budgeted scene capacity (implemented) | Initialization-time registry and snapshot/view workspace reservations; full-order borrowed diagnostics; budgeted RT0 records and configurable static TLAS instance limits | Above-default capacity, partial groups, exact-budget rejection, detached/in-flight retention, stale handles and recovery |
 | L6: optional advanced effects | Temporal/GPU-driven/virtual-residency plans and the RT0–RT4 ray plan | Capability probes and disabled-path support; image/temporal tests and workload-specific gains before default enablement |
 
 Use empty, single triangle, Cornell box, transparent intersections, split-screen,
