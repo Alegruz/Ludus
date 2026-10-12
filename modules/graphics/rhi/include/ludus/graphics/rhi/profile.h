@@ -4,7 +4,19 @@
 
 namespace ludus::graphics::rhi
 {
-/// Portable color/data formats; one layer and one sample, with immutable mip chains.
+/// Allocation/sampled-view dimensionality; cube faces use +X,-X,+Y,-Y,+Z,-Z order.
+enum class TextureDimension : ludus::foundation::uint8
+{
+    /// One two-dimensional image.
+    D2,
+    /// Fixed array of two-dimensional images; layers do not shrink with mips.
+    D2Array,
+    /// Six square two-dimensional faces.
+    Cube,
+    /// Volume; depth shrinks with each mip and cannot be selected as array layers.
+    D3,
+};
+/// Original sampled color/data formats; dimensions and uses are independently negotiated.
 enum class RasterFormat : ludus::foundation::uint8
 {
     /// Four unsigned normalized channels, interpreted as linear light.
@@ -15,9 +27,13 @@ enum class RasterFormat : ludus::foundation::uint8
     R8Unorm,
     /// Two normalized linear data channels; sampled only, never an attachment.
     Rg8Unorm,
-    /// Linear binary16 RGBA color attachment, sampleable/filterable/blendable when HdrColor is enabled.
-    /// Uploaded binary16 textures are outside this profile; create with Attachment=true.
+    /// Linear binary16 sampled RGBA; attachment/filter/blend support is capability-gated.
+    /// Original binary16 upload bits are accepted without conversion; attachment use remains separately enabled.
     Rgba16Float,
+    /// BC1 RGBA normalized 4x4 blocks (8 bytes), sampled when enabled; no automatic compression.
+    Bc1RgbaUnorm,
+    /// BC3 RGBA normalized 4x4 blocks (16 bytes), sampled when enabled; no automatic compression.
+    Bc3RgbaUnorm,
 };
 /// Copied R6 storage maxima and explicit byte budgets. Configure before startup.
 /// Counts are limits, not reservations; creation may fail under byte/allocation pressure.
@@ -108,7 +124,7 @@ struct ComputeCapabilities final
 /// Storage remains unimplemented; R8 enables bounded RGBA8Unorm copy uses.
 struct TextureUses final
 {
-    /// Complete original-format sampled views.
+    /// Original-format sampled views in the enabled dimensions.
     bool Sampled = false;
     /// Linear filtering of sampled texels.
     bool Filterable = false;
@@ -138,6 +154,14 @@ struct FormatCapabilities final
     /// Attachment sample counts as a bit mask: bit value 1 means one sample, 4 means four.
     /// The current profile supports only 1; zero when no attachment is supported.
     ludus::foundation::uint32 SampleCounts = 0;
+    /// Maximum enabled sampled array layers; one means D2 only.
+    ludus::foundation::uint32 MaxArrayLayers = 0;
+    /// Maximum enabled cubemap face extent; zero means unsupported.
+    ludus::foundation::uint32 MaxCubeDimension = 0;
+    /// Maximum enabled volume extent along every axis; zero means unsupported.
+    ludus::foundation::uint32 MaxDimension3D = 0;
+    /// Selected mip/layer color views are implemented for this format.
+    bool PartialViews = false;
 };
 /// Fixed public raster interface bounds, independently of larger native adapter limits.
 struct RasterInterfaceCapabilities final
@@ -152,7 +176,7 @@ struct RasterInterfaceCapabilities final
     ludus::foundation::uint32 MaxVertexStride = 0;
     /// Maximum color attachments in one raster pass.
     ludus::foundation::uint32 MaxColorAttachments = 0;
-    /// Maximum texture array layers; array views are not implemented.
+    /// Maximum enabled texture array layers across supported formats.
     ludus::foundation::uint32 MaxTextureLayers = 0;
 };
 /// Immutable effective profile snapshot while the device is ready; zero otherwise.
@@ -187,8 +211,8 @@ struct DeviceProfile final
         .HostBytes = 0,
         .ResourceBytes = 0,
     };
-    /// Five format entries indexed by RasterFormat, including unsupported uses.
-    FormatCapabilities Formats[5]{};
+    /// Seven format entries indexed by RasterFormat, including unsupported uses.
+    FormatCapabilities Formats[7]{};
 };
 /// Raster admission constraints; zero fields impose no additional requirement.
 /// Nonzero fields imply required portable raster for required profile admission.
@@ -247,6 +271,12 @@ struct FormatRequirement final
     ludus::foundation::uint32 MinMipLevels = 1;
     /// Required attachment sample count; a power of two, 1..64. No MSAA is implied.
     ludus::foundation::uint32 SampleCount = 1;
+    /// Required sampled allocation dimension; attachment requests require D2.
+    TextureDimension Dimension = TextureDimension::D2;
+    /// Minimum array layer count or volume depth; zero adds no count constraint.
+    ludus::foundation::uint32 MinDepthOrLayers = 0;
+    /// Require implemented sampled mip/layer subrange views of this format.
+    bool PartialViews = false;
 };
 /// Copied bounded required/preferred profile constraints. Unused array entries are ignored.
 /// Required constraints reject before Ready; preferred constraints only produce diagnostics.
@@ -256,8 +286,8 @@ struct DeviceProfileRequirements final
     RasterRequirements Raster;
     /// Additional compute limits.
     ComputeRequirements Compute;
-    /// At most five unique known format requests.
-    FormatRequirement Formats[5]{};
+    /// At most seven unique known format requests.
+    FormatRequirement Formats[7]{};
     /// Number of valid entries in Formats; larger counts or duplicates are malformed.
     ludus::foundation::uint32 FormatCount = 0;
 };
@@ -302,6 +332,8 @@ enum class ProfileRequirement : ludus::foundation::uint8
     DispatchCount,
     /// Sampled use is unavailable.
     Sampled,
+    /// Requested original-format sampled subrange views are disabled.
+    PartialViews,
     /// Linear filtering is unavailable.
     Filterable,
     /// Color attachment use is unavailable.

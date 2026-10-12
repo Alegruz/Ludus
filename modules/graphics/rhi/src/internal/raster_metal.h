@@ -11,6 +11,13 @@ namespace ludus::graphics::rhi::backend
 {
 namespace
 {
+MTLTextureType RasterMetalTextureType(TextureDimension dimension) noexcept
+{
+    return dimension == TextureDimension::D2Array ? MTLTextureType2DArray
+           : dimension == TextureDimension::Cube  ? MTLTextureTypeCube
+           : dimension == TextureDimension::D3    ? MTLTextureType3D
+                                                  : MTLTextureType2D;
+}
 struct RasterMetalShader final
 {
     id<MTLFunction> Function = nil;
@@ -72,9 +79,13 @@ bool RasterMetalBindings(NSArray<id<MTLBinding>>* bindings,
             {
                 found = ((id<MTLBufferBinding>)binding).bufferDataSize <= entry.MinSize;
             }
-            else if (entry.Kind == RasterBindingKind::Texture2D && binding.type == MTLBindingTypeTexture)
+            else if (internal::TextureBinding(entry.Kind) && binding.type == MTLBindingTypeTexture)
             {
-                found = ((id<MTLTextureBinding>)binding).textureType == MTLTextureType2D &&
+                found = ((id<MTLTextureBinding>)binding).textureType ==
+                            (entry.Kind == RasterBindingKind::Texture2DArray ? MTLTextureType2DArray
+                             : entry.Kind == RasterBindingKind::TextureCube  ? MTLTextureTypeCube
+                             : entry.Kind == RasterBindingKind::Texture3D    ? MTLTextureType3D
+                                                                             : MTLTextureType2D) &&
                         binding.access == MTLBindingAccessReadOnly;
             }
             else if (entry.Kind == RasterBindingKind::Sampler && binding.type == MTLBindingTypeSampler)
@@ -101,7 +112,19 @@ bool RasterMetalBindings(NSArray<id<MTLBinding>>* bindings,
 // no storage/MSAA or R8/RG8 attachment path is advertised. R8 copies use RGBA8Unorm.
 FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
-    return gDevice == nil ? FormatCapabilities{} : internal::PortableFormatLimits(format, RasterLimits());
+    if (gDevice == nil || (internal::CompressedTexture(format) && !gDevice.supportsBCTextureCompression))
+    {
+        return {};
+    }
+    auto result = internal::PortableFormatLimits(format, RasterLimits());
+    if (result.Uses.Sampled)
+    {
+        result.MaxArrayLayers = 256;
+        result.MaxCubeDimension = result.MaxSampledDimension2D;
+        result.MaxDimension3D = internal::CompressedTexture(format) ? 0U : 256U;
+        result.PartialViews = true;
+    }
+    return result;
 }
 uint32 RasterVertexStrideLimit() noexcept
 {
@@ -200,18 +223,24 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     @autoreleasepool
     {
         MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
-            texture2DDescriptorWithPixelFormat:info.Format == RasterFormat::Rgba16Float  ? MTLPixelFormatRGBA16Float
-                                               : info.Format == RasterFormat::Rg8Unorm   ? MTLPixelFormatRG8Unorm
-                                               : info.Format == RasterFormat::R8Unorm    ? MTLPixelFormatR8Unorm
-                                               : info.Format == RasterFormat::Rgba8Unorm ? MTLPixelFormatRGBA8Unorm
+            texture2DDescriptorWithPixelFormat:info.Format == RasterFormat::Bc1RgbaUnorm   ? MTLPixelFormatBC1_RGBA
+                                               : info.Format == RasterFormat::Bc3RgbaUnorm ? MTLPixelFormatBC3_RGBA
+                                               : info.Format == RasterFormat::Rgba16Float  ? MTLPixelFormatRGBA16Float
+                                               : info.Format == RasterFormat::Rg8Unorm     ? MTLPixelFormatRG8Unorm
+                                               : info.Format == RasterFormat::R8Unorm      ? MTLPixelFormatR8Unorm
+                                               : info.Format == RasterFormat::Rgba8Unorm   ? MTLPixelFormatRGBA8Unorm
                                                                                          : MTLPixelFormatRGBA8Unorm_sRGB
                                          width:info.Width
                                         height:info.Height
                                      mipmapped:NO];
+        descriptor.textureType = RasterMetalTextureType(info.Dimension);
+        descriptor.depth = info.Dimension == TextureDimension::D3 ? info.DepthOrLayers : 1;
+        descriptor.arrayLength = info.Dimension == TextureDimension::D2Array ? info.DepthOrLayers : 1;
         descriptor.mipmapLevelCount = info.MipLevels;
-        descriptor.usage =
-            MTLTextureUsageShaderRead | (info.Attachment ? MTLTextureUsageRenderTarget : MTLTextureUsageUnknown);
-        descriptor.storageMode = MTLStorageModeShared;
+        descriptor.usage = MTLTextureUsageShaderRead | MTLTextureUsagePixelFormatView |
+                           (info.Attachment ? MTLTextureUsageRenderTarget : MTLTextureUsageUnknown);
+        descriptor.storageMode =
+            internal::CompressedTexture(info.Format) ? MTLStorageModeManaged : MTLStorageModeShared;
         auto texture = [gDevice newTextureWithDescriptor:descriptor];
         if (texture == nil)
         {
@@ -223,10 +252,33 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
             for (usize level = 0; level < info.MipLevels; ++level)
             {
                 const auto mip = upload.Mips.empty() ? TextureMipUpload{0, upload.RowPitch} : upload.Mips[level];
-                [texture replaceRegion:MTLRegionMake2D(0, 0, width, height)
-                           mipmapLevel:level
-                             withBytes:upload.Bytes.data() + mip.Offset
-                           bytesPerRow:mip.RowPitch];
+                const usize imagePitch = mip.RowPitch * internal::TextureBlockRows(info.Format, height);
+                if (info.Dimension == TextureDimension::D3)
+                {
+                    [texture replaceRegion:MTLRegionMake3D(0,
+                                                           0,
+                                                           0,
+                                                           width,
+                                                           height,
+                                                           internal::TextureSlices(info, static_cast<uint32>(level)))
+                               mipmapLevel:level
+                                     slice:0
+                                 withBytes:upload.Bytes.data() + mip.Offset
+                               bytesPerRow:mip.RowPitch
+                             bytesPerImage:imagePitch];
+                }
+                else
+                {
+                    for (uint32 slice = 0; slice < info.DepthOrLayers; ++slice)
+                    {
+                        [texture replaceRegion:MTLRegionMake2D(0, 0, width, height)
+                                   mipmapLevel:level
+                                         slice:slice
+                                     withBytes:upload.Bytes.data() + mip.Offset + slice * imagePitch
+                                   bytesPerRow:mip.RowPitch
+                                 bytesPerImage:imagePitch];
+                    }
+                }
                 width = width > 1 ? width / 2 : 1;
                 height = height > 1 ? height / 2 : 1;
             }
@@ -249,10 +301,18 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         return RasterStatus::Ready;
     }
 }
+// Thanks to Apple, MTLTexture.newTextureViewWithPixelFormat:textureType:levels:slices:,
+// https://developer.apple.com/documentation/metal/mtltexture, for original-format
+// alias views with explicit mip and slice lifetimes. R9 retains the source allocation.
 RasterStatus RasterCreateView(usize slot, const internal::RasterViewSource& source, uint32) noexcept
 {
-    gRasterViews[slot] = gRasterTextures[source.Texture];
-    return RasterStatus::Ready;
+    auto texture = gRasterTextures[source.Texture];
+    gRasterViews[slot] =
+        [texture newTextureViewWithPixelFormat:texture.pixelFormat
+                                   textureType:RasterMetalTextureType(source.View.Dimension)
+                                        levels:NSMakeRange(source.View.BaseMip, source.View.MipCount)
+                                        slices:NSMakeRange(source.View.BaseLayer, source.View.LayerCount)];
+    return gRasterViews[slot] != nil ? RasterStatus::Ready : RasterStatus::OutOfMemory;
 }
 RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uint32) noexcept
 {
@@ -270,6 +330,8 @@ RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uin
             info.U == RasterAddress::Clamp ? MTLSamplerAddressModeClampToEdge : MTLSamplerAddressModeRepeat;
         descriptor.tAddressMode =
             info.V == RasterAddress::Clamp ? MTLSamplerAddressModeClampToEdge : MTLSamplerAddressModeRepeat;
+        descriptor.rAddressMode =
+            info.W == RasterAddress::Clamp ? MTLSamplerAddressModeClampToEdge : MTLSamplerAddressModeRepeat;
         gRasterSamplers[slot] = [gDevice newSamplerStateWithDescriptor:descriptor];
         return gRasterSamplers[slot] != nil ? RasterStatus::Ready : RasterStatus::OutOfMemory;
     }
@@ -448,7 +510,7 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                 [gEncoder setFragmentBuffer:gRasterBuffers[set.Slots[i]] offset:set.Offsets[i] atIndex:entry.Binding];
             }
         }
-        else if (entry.Kind == RasterBindingKind::Texture2D)
+        else if (internal::TextureBinding(entry.Kind))
         {
             if (vertex)
             {

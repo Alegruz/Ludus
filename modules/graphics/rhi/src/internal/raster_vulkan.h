@@ -268,16 +268,18 @@ VkDescriptorType RasterDescriptor(RasterBindingKind kind) noexcept
     return kind == RasterBindingKind::UniformBuffer ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
            : kind == RasterBindingKind::StorageRead || kind == RasterBindingKind::StorageReadWrite
                ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-           : kind == RasterBindingKind::Texture2D ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-                                                  : VK_DESCRIPTOR_TYPE_SAMPLER;
+           : internal::TextureBinding(kind) ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+                                            : VK_DESCRIPTOR_TYPE_SAMPLER;
 }
 VkFormat RasterPixelFormat(RasterFormat format) noexcept
 {
-    return format == RasterFormat::Rgba16Float  ? VK_FORMAT_R16G16B16A16_SFLOAT
-           : format == RasterFormat::Rg8Unorm   ? VK_FORMAT_R8G8_UNORM
-           : format == RasterFormat::R8Unorm    ? VK_FORMAT_R8_UNORM
-           : format == RasterFormat::Rgba8Unorm ? VK_FORMAT_R8G8B8A8_UNORM
-                                                : VK_FORMAT_R8G8B8A8_SRGB;
+    return format == RasterFormat::Bc1RgbaUnorm   ? VK_FORMAT_BC1_RGBA_UNORM_BLOCK
+           : format == RasterFormat::Bc3RgbaUnorm ? VK_FORMAT_BC3_UNORM_BLOCK
+           : format == RasterFormat::Rgba16Float  ? VK_FORMAT_R16G16B16A16_SFLOAT
+           : format == RasterFormat::Rg8Unorm     ? VK_FORMAT_R8G8_UNORM
+           : format == RasterFormat::R8Unorm      ? VK_FORMAT_R8_UNORM
+           : format == RasterFormat::Rgba8Unorm   ? VK_FORMAT_R8G8B8A8_UNORM
+                                                  : VK_FORMAT_R8G8B8A8_SRGB;
 }
 } // namespace
 // Thanks to Khronos Group, "Vulkan Specification", Formats and
@@ -286,7 +288,13 @@ VkFormat RasterPixelFormat(RasterFormat format) noexcept
 // https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceImageFormatProperties.html
 FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
-    if (gPhysical == VK_NULL_HANDLE || static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Rgba16Float))
+    if (gPhysical == VK_NULL_HANDLE || static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm))
+    {
+        return {};
+    }
+    VkPhysicalDeviceFeatures enabled{};
+    vkGetPhysicalDeviceFeatures(gPhysical, &enabled);
+    if (internal::CompressedTexture(format) && enabled.textureCompressionBC != VK_TRUE)
     {
         return {};
     }
@@ -337,6 +345,47 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     {
         result.MaxMipLevels = sampled.maxMipLevels;
     }
+    result.MaxArrayLayers = sampled.maxArrayLayers < 256 ? sampled.maxArrayLayers : 256;
+    result.PartialViews = true;
+    VkImageFormatProperties cube{}, volume{};
+    if (vkGetPhysicalDeviceImageFormatProperties(gPhysical,
+                                                 pixel,
+                                                 VK_IMAGE_TYPE_2D,
+                                                 VK_IMAGE_TILING_OPTIMAL,
+                                                 usage,
+                                                 VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+                                                 &cube) == VK_SUCCESS &&
+        cube.maxArrayLayers >= 6)
+    {
+        result.MaxCubeDimension = result.MaxSampledDimension2D;
+        if (cube.maxExtent.width < result.MaxCubeDimension)
+        {
+            result.MaxCubeDimension = cube.maxExtent.width;
+        }
+        if (cube.maxExtent.height < result.MaxCubeDimension)
+        {
+            result.MaxCubeDimension = cube.maxExtent.height;
+        }
+    }
+    // Compressed volumes are a separate feature/profile; the R9 BC profile is 2D/array/cube.
+    if (!internal::CompressedTexture(format) && vkGetPhysicalDeviceImageFormatProperties(gPhysical,
+                                                                                         pixel,
+                                                                                         VK_IMAGE_TYPE_3D,
+                                                                                         VK_IMAGE_TILING_OPTIMAL,
+                                                                                         usage,
+                                                                                         0,
+                                                                                         &volume) == VK_SUCCESS)
+    {
+        result.MaxDimension3D = 256;
+        const uint32 bounds[]{volume.maxExtent.width, volume.maxExtent.height, volume.maxExtent.depth};
+        for (const auto bound : bounds)
+        {
+            if (bound < result.MaxDimension3D)
+            {
+                result.MaxDimension3D = bound;
+            }
+        }
+    }
     VkImageFormatProperties color{}, depth{};
     const bool attachment = result.Uses.ColorAttachment &&
                             (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0 &&
@@ -374,10 +423,6 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
         {
             result.MaxAttachmentDimension2D = bound;
         }
-    }
-    if (format == RasterFormat::Rgba16Float && (!result.Uses.ColorAttachment || !result.Uses.Blendable))
-    {
-        return {};
     }
     return result;
 }
@@ -583,11 +628,12 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     texture.Info = info;
     VkImageCreateInfo image{};
     image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    image.imageType = VK_IMAGE_TYPE_2D;
+    image.imageType = info.Dimension == TextureDimension::D3 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
+    image.flags = info.Dimension == TextureDimension::Cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0U;
     image.format = format;
-    image.extent = {info.Width, info.Height, 1};
+    image.extent = {info.Width, info.Height, info.Dimension == TextureDimension::D3 ? info.DepthOrLayers : 1U};
     image.mipLevels = info.MipLevels;
-    image.arrayLayers = 1;
+    image.arrayLayers = info.Dimension == TextureDimension::D3 ? 1U : info.DepthOrLayers;
     image.samples = VK_SAMPLE_COUNT_1_BIT;
     image.tiling = VK_IMAGE_TILING_OPTIMAL;
     image.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
@@ -682,7 +728,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         barrier.image = texture.Object;
-        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, info.MipLevels, 0, 1};
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, info.MipLevels, 0, image.arrayLayers};
         vkCmdPipelineBarrier(command,
                              VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -698,14 +744,16 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         for (uint32 level = 0; level < info.MipLevels; ++level)
         {
             const auto mip = upload.Mips.empty() ? TextureMipUpload{0, upload.RowPitch} : upload.Mips[level];
-            const usize channels = info.Format == RasterFormat::R8Unorm    ? 1U
-                                   : info.Format == RasterFormat::Rg8Unorm ? 2U
-                                                                           : 4U;
+            const auto channels = internal::TextureBlockBytes(info.Format);
+            const auto block = internal::TextureBlockWidth(info.Format);
             copies[level].bufferOffset = mip.Offset;
-            copies[level].bufferRowLength = static_cast<uint32>(mip.RowPitch / channels);
-            copies[level].bufferImageHeight = height;
-            copies[level].imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
-            copies[level].imageExtent = {width, height, 1};
+            copies[level].bufferRowLength = static_cast<uint32>(mip.RowPitch / channels) * block;
+            copies[level].bufferImageHeight = internal::TextureBlockRows(info.Format, height) * block;
+            copies[level].imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, image.arrayLayers};
+            copies[level].imageExtent = {width,
+                                         height,
+                                         info.Dimension == TextureDimension::D3 ? internal::TextureSlices(info, level)
+                                                                                : 1U};
             width = width > 1 ? width / 2 : 1;
             height = height > 1 ? height / 2 : 1;
         }
@@ -791,9 +839,16 @@ RasterStatus RasterCreateView(usize slot, const internal::RasterViewSource& sour
     VkImageViewCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     info.image = gRasterTextures[source.Texture].Object;
-    info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    info.viewType = source.View.Dimension == TextureDimension::D2Array ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                    : source.View.Dimension == TextureDimension::Cube  ? VK_IMAGE_VIEW_TYPE_CUBE
+                    : source.View.Dimension == TextureDimension::D3    ? VK_IMAGE_VIEW_TYPE_3D
+                                                                       : VK_IMAGE_VIEW_TYPE_2D;
     info.format = RasterPixelFormat(gRasterTextures[source.Texture].Info.Format);
-    info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, gRasterTextures[source.Texture].Info.MipLevels, 0, 1};
+    info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT,
+                             source.View.BaseMip,
+                             source.View.MipCount,
+                             source.View.BaseLayer,
+                             source.View.LayerCount};
     return RasterError(vkCreateImageView(gDevice, &info, nullptr, &gRasterViews[slot]));
 }
 RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uint32) noexcept
@@ -809,7 +864,8 @@ RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uin
         info.U == RasterAddress::Clamp ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE : VK_SAMPLER_ADDRESS_MODE_REPEAT;
     create.addressModeV =
         info.V == RasterAddress::Clamp ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE : VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    create.addressModeW =
+        info.W == RasterAddress::Clamp ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE : VK_SAMPLER_ADDRESS_MODE_REPEAT;
     return RasterError(vkCreateSampler(gDevice, &create, nullptr, &gRasterSamplers[slot]));
 }
 RasterStatus RasterCreateShader(usize slot,
@@ -957,7 +1013,7 @@ RasterCreateSet(usize slot, const internal::RasterLayout& layout, const internal
         }
         else
         {
-            if (entry.Kind == RasterBindingKind::Texture2D)
+            if (internal::TextureBinding(entry.Kind))
             {
                 images[i].imageView = gRasterViews[info.Slots[i]];
                 images[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1271,7 +1327,11 @@ void RasterTextureBarrier(usize slot, RasterTextureUse use) noexcept
     barrier.srcAccessMask = texture.ColorWriterAccess | texture.ColorAccess;
     barrier.dstAccessMask = access;
     barrier.image = texture.Object;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT,
+                                0,
+                                texture.Info.MipLevels,
+                                0,
+                                texture.Info.Dimension == TextureDimension::D3 ? 1U : texture.Info.DepthOrLayers};
     vkCmdPipelineBarrier(gFrames[gFrame].Command,
                          texture.ColorStage | texture.ColorWriterStage,
                          stage,

@@ -237,7 +237,7 @@ TEST_CASE("Malformed profile requests never launch a backend and preserve output
     request.RequiredProfile.Formats[0].Uses.Sampled = true;
     SECTION("too many formats")
     {
-        request.RequiredProfile.FormatCount = 6;
+        request.RequiredProfile.FormatCount = 8;
     }
     SECTION("invalid format")
     {
@@ -262,7 +262,7 @@ TEST_CASE("Malformed profile requests never launch a backend and preserve output
     }
     SECTION("malformed preference")
     {
-        request.PreferredProfile.FormatCount = 6;
+        request.PreferredProfile.FormatCount = 8;
     }
     const auto token = backend::PendingToken;
     StartupInfo failure;
@@ -466,7 +466,7 @@ TEST_CASE("Negotiation retains L4 HDR formats and sixteen vertex attributes", "[
     CHECK(format.Uses.Filterable);
     CHECK(format.Uses.ColorAttachment);
     CHECK(format.Uses.Blendable);
-    CHECK(format.MaxMipLevels == 1);
+    CHECK(format.MaxMipLevels == 13);
     TextureHandle texture;
     CHECK(CreateTexture(fixture.Device,
                         { .Width = 16, .Height = 16, .Format = RasterFormat::Rgba16Float, .Attachment = true },
@@ -480,7 +480,7 @@ TEST_CASE("Negotiation retains L4 HDR formats and sixteen vertex attributes", "[
                             .Format = RasterFormat::Rgba16Float,
                         },
                         {},
-                        uploaded) == RasterStatus::Unsupported);
+                        uploaded) == RasterStatus::InvalidDescription);
 }
 
 TEST_CASE("Unavailable HDR requirements reject while preferences preserve the LDR fallback", "[rhi][profile][hdr]")
@@ -511,9 +511,31 @@ TEST_CASE("Unavailable HDR requirements reject while preferences preserve the LD
     if (!required)
     {
         FormatCapabilities format;
-        CHECK(GetFormatCapabilities(fixture.Device, RasterFormat::Rgba16Float, format) == RasterStatus::Unsupported);
-        CHECK(format.MaxMipLevels == 0);
+        CHECK(GetFormatCapabilities(fixture.Device, RasterFormat::Rgba16Float, format) == RasterStatus::Ready);
+        CHECK_FALSE(format.Uses.ColorAttachment);
+        CHECK(format.MaxMipLevels == 13);
         CHECK(GetFormatCapabilities(fixture.Device, RasterFormat::Rgba8Unorm, format) == RasterStatus::Ready);
         CHECK(format.Uses.Blendable);
     }
+}
+
+TEST_CASE("R9 format dimensions and partial view requirements negotiate before Ready", "[rhi][profile][r9]")
+{
+    ProfileFixture fixture;
+    DeviceDescription request;
+    request.RequiredProfile.FormatCount = 1;
+    request.RequiredProfile.Formats[0] =
+    {
+        .Format = RasterFormat::Rgba8Unorm,
+        .Uses = { .Sampled = true },
+        .Dimension = TextureDimension::D2Array,
+        .MinDepthOrLayers = 257,
+        .PartialViews = true,
+    };
+    REQUIRE(fixture.Start(request) == DeviceStatus::Pending);
+    fixture.Complete();
+    DeviceInfo info;
+    REQUIRE(GetDeviceInfo(fixture.Device, info) == DeviceStatus::Failed);
+    CHECK(info.Startup.ProfileFailure.Requirement == ProfileRequirement::TextureLayerCount);
+    CHECK(info.Startup.ProfileFailure.Available == 256);
 }

@@ -15,16 +15,19 @@ bool Any(const TextureUses& uses) noexcept
 } // namespace
 bool ValidProfileRequirements(const DeviceProfileRequirements& requirements) noexcept
 {
-    if (requirements.FormatCount > 5)
+    if (requirements.FormatCount > 7)
     {
         return false;
     }
     for (uint32 i = 0; i < requirements.FormatCount; ++i)
     {
         const auto& entry = requirements.Formats[i];
-        if (static_cast<uint8>(entry.Format) > static_cast<uint8>(RasterFormat::Rgba16Float) || !Any(entry.Uses) ||
-            entry.MinMipLevels == 0 || entry.SampleCount == 0 || entry.SampleCount > 64 ||
-            (entry.SampleCount & (entry.SampleCount - 1)) != 0 ||
+        if (static_cast<uint8>(entry.Format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm) || !Any(entry.Uses) ||
+            static_cast<uint8>(entry.Dimension) > static_cast<uint8>(TextureDimension::D3) ||
+            ((entry.Uses.ColorAttachment || entry.Uses.Blendable) && entry.Dimension != TextureDimension::D2) ||
+            (entry.Dimension == TextureDimension::D2 && entry.MinDepthOrLayers > 1) ||
+            (entry.Dimension == TextureDimension::Cube && entry.MinDepthOrLayers > 6) || entry.MinMipLevels == 0 ||
+            entry.SampleCount == 0 || entry.SampleCount > 64 || (entry.SampleCount & (entry.SampleCount - 1)) != 0 ||
             (entry.SampleCount != 1 && !entry.Uses.ColorAttachment && !entry.Uses.Blendable))
         {
             return false;
@@ -264,17 +267,43 @@ ProfileDiagnostic CheckProfile(const DeviceProfileRequirements& requirements, co
         {
             return { .Requirement = ProfileRequirement::Storage, .Format = request.Format, .Requested = 1 };
         }
-        if (request.Uses.CopySource && !format.Uses.CopySource)
+        if (request.Uses.CopySource && (!format.Uses.CopySource || request.Dimension != TextureDimension::D2))
         {
             return { .Requirement = ProfileRequirement::CopySource, .Format = request.Format, .Requested = 1 };
         }
-        if (request.Uses.CopyDestination && !format.Uses.CopyDestination)
+        if (request.Uses.CopyDestination && (!format.Uses.CopyDestination || request.Dimension != TextureDimension::D2))
         {
             return { .Requirement = ProfileRequirement::CopyDestination, .Format = request.Format, .Requested = 1 };
         }
+        if (request.PartialViews && !format.PartialViews)
+        {
+            return { .Requirement = ProfileRequirement::PartialViews, .Format = request.Format, .Requested = 1 };
+        }
+        const auto layers = request.Dimension == TextureDimension::D3     ? format.MaxDimension3D
+                            : request.Dimension == TextureDimension::Cube ? (format.MaxCubeDimension != 0 ? 6U : 0U)
+                                                                          : format.MaxArrayLayers;
+        if (request.MinDepthOrLayers > layers)
+        {
+            return
+            {
+                .Requirement = ProfileRequirement::TextureLayerCount,
+                .Format = request.Format,
+                .Requested = request.MinDepthOrLayers,
+                .Available = layers,
+            };
+        }
         const bool sampled = request.Uses.Sampled || request.Uses.Filterable;
         const bool attachment = request.Uses.ColorAttachment || request.Uses.Blendable;
-        uint32 dimension = sampled ? format.MaxSampledDimension2D : format.MaxAttachmentDimension2D;
+        const uint32 sampledDimension = request.Dimension == TextureDimension::D3     ? format.MaxDimension3D
+                                        : request.Dimension == TextureDimension::Cube ? format.MaxCubeDimension
+                                        : request.Dimension == TextureDimension::D2Array && format.MaxArrayLayers < 2
+                                            ? 0U
+                                            : format.MaxSampledDimension2D;
+        if (sampled && sampledDimension == 0)
+        {
+            return { .Requirement = ProfileRequirement::FormatDimension, .Format = request.Format, .Requested = 1 };
+        }
+        uint32 dimension = sampled ? sampledDimension : format.MaxAttachmentDimension2D;
         if (attachment && format.MaxAttachmentDimension2D < dimension)
         {
             dimension = format.MaxAttachmentDimension2D;
@@ -332,9 +361,13 @@ DeviceProfile QueryDeviceProfile() noexcept
     }
     result.Interface = {8, 2, result.Raster.MaxVertexAttributes, backend::RasterVertexStrideLimit(), 1, 1};
     result.Compute = backend::ComputeLimits();
-    for (usize i = 0; i < 5; ++i)
+    for (usize i = 0; i < 7; ++i)
     {
         result.Formats[i] = backend::FormatLimits(static_cast<RasterFormat>(i));
+        if (result.Formats[i].MaxArrayLayers > result.Interface.MaxTextureLayers)
+        {
+            result.Interface.MaxTextureLayers = result.Formats[i].MaxArrayLayers;
+        }
     }
     result.Raster.HdrColor = result.Formats[static_cast<usize>(RasterFormat::Rgba16Float)].Uses.Blendable;
     return result;
@@ -342,16 +375,14 @@ DeviceProfile QueryDeviceProfile() noexcept
 FormatCapabilities PortableFormatLimits(RasterFormat format, const RasterCapabilities& limits) noexcept
 {
     if (limits.MaxUniformRange < 16384 || limits.MaxTextureDimension2D == 0 ||
-        static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Rgba16Float))
+        static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm))
     {
         return {};
     }
     const bool hdr = format == RasterFormat::Rgba16Float;
-    if (hdr && !limits.HdrColor)
-    {
-        return {};
-    }
-    const bool attachment = hdr || format == RasterFormat::Rgba8Unorm || format == RasterFormat::Rgba8Srgb;
+    const bool attachment =
+        !CompressedTexture(format) &&
+        ((hdr && limits.HdrColor) || format == RasterFormat::Rgba8Unorm || format == RasterFormat::Rgba8Srgb);
     uint32 levels = 1;
     for (auto extent = limits.MaxTextureDimension2D; extent > 1; extent /= 2)
     {
@@ -370,8 +401,9 @@ FormatCapabilities PortableFormatLimits(RasterFormat format, const RasterCapabil
         },
         .MaxSampledDimension2D = limits.MaxTextureDimension2D,
         .MaxAttachmentDimension2D = attachment ? limits.MaxTextureDimension2D : 0,
-        .MaxMipLevels = hdr ? 1U : (levels < 16 ? levels : 16),
+        .MaxMipLevels = levels < 16 ? levels : 16,
         .SampleCounts = attachment ? 1U : 0U,
+        .MaxArrayLayers = 1,
     };
 }
 } // namespace ludus::graphics::rhi::internal

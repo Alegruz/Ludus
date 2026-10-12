@@ -11,7 +11,7 @@ inline foundation::uint64 AllocationBytes = 128;
 inline bool ProfileAvailable = true;
 inline bool HdrAvailable = true;
 inline bool ComputeAvailable = true;
-inline bool FormatUnavailable[5]{};
+inline bool FormatUnavailable[7]{};
 inline bool FormatBlendUnavailable = false;
 inline bool OverrideRasterLimits = false;
 inline RasterCapabilities RasterLimitOverride;

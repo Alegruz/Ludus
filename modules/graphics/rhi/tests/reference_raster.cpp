@@ -125,12 +125,16 @@ RasterStatus ComputeEncode(const internal::ComputePacket&) noexcept
 void ComputeBufferBarrier(usize, GraphAccessMode) noexcept {}
 FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
-    if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Rgba16Float) ||
+    if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm) ||
         reference::FormatUnavailable[static_cast<usize>(format)])
     {
         return {};
     }
     auto result = internal::PortableFormatLimits(format, RasterLimits());
+    result.MaxArrayLayers = 256;
+    result.MaxCubeDimension = result.MaxSampledDimension2D;
+    result.MaxDimension3D = internal::CompressedTexture(format) ? 0U : 256U;
+    result.PartialViews = result.Uses.Sampled;
     if (reference::FormatBlendUnavailable)
     {
         result.Uses.Blendable = false;
@@ -187,7 +191,8 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         width = width > 1 ? width / 2 : 1;
         height = height > 1 ? height / 2 : 1;
     }
-    if (info.Format == RasterFormat::Rgba8Unorm && size <= internal::LIFETIME_TRANSFER_BYTES)
+    if (info.Format == RasterFormat::Rgba8Unorm && info.Dimension == TextureDimension::D2 &&
+        size <= internal::LIFETIME_TRANSFER_BYTES)
     {
         if (!reference::TextureBytes[slot].TryResize(size))
         {

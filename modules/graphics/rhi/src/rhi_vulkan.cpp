@@ -762,8 +762,12 @@ bool ConnectWindow(const WindowInfo& window) noexcept
                 }
             }
         }
+        VkPhysicalDeviceFeatures supported{}, enabled{};
+        vkGetPhysicalDeviceFeatures(gPhysical, &supported);
+        enabled.textureCompressionBC = supported.textureCompressionBC;
         VkDeviceCreateInfo device{};
         device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        device.pEnabledFeatures = &enabled;
         device.queueCreateInfoCount = 1;
         device.pQueueCreateInfos = &queue;
         device.enabledExtensionCount = enabledExtensions;

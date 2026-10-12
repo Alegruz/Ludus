@@ -72,19 +72,23 @@ def raster_interface(document, stage, metal=False):
             if resource['type'].get('isComparison', False) or 'comparison' in str(resource['type'].get('flavor', '')).lower():
                 raise RuntimeError('Comparison samplers are outside the raster profile')
             kind = 'Sampler'
-        elif kind == 'resource' and resource['type'].get('baseShape') == 'texture2D':
+        elif kind == 'resource' and resource['type'].get('baseShape') in ('texture2D', 'textureCube', 'texture3D'):
             if resource['type'].get('access', 'read') not in ('read', 'readOnly') or resource['type'].get('multisample', False):
                 raise RuntimeError('Raster textures require non-multisampled read-only sampling')
             result = resource['type'].get('resultType', {})
             if result.get('elementType', {}).get('scalarType') != 'float32':
                 raise RuntimeError('Raster textures require float sampling')
-            kind = 'Texture2D'
+            shape = resource['type']['baseShape']
+            array = resource['type'].get('array', False)
+            if array and shape != 'texture2D':
+                raise RuntimeError('Only 2D sampled texture arrays are in the R9 profile')
+            kind = 'Texture2DArray' if array else {'texture2D': 'Texture2D', 'textureCube': 'TextureCube', 'texture3D': 'Texture3D'}[shape]
         else:
             raise RuntimeError('Unsupported raster resource shape: ' + kind)
         if stage == 'compute' and kind not in ('UniformBuffer', 'StorageRead', 'StorageReadWrite'):
             raise RuntimeError('Compute profile accepts buffer bindings only')
         if metal:
-            native_kind = {'StorageRead': 'constantBuffer', 'StorageReadWrite': 'constantBuffer', 'UniformBuffer': 'constantBuffer', 'Texture2D': 'shaderResource', 'Sampler': 'samplerState'}[kind]
+            native_kind = {'StorageRead': 'constantBuffer', 'StorageReadWrite': 'constantBuffer', 'UniformBuffer': 'constantBuffer', 'Texture2D': 'shaderResource', 'Texture2DArray': 'shaderResource', 'TextureCube': 'shaderResource', 'Texture3D': 'shaderResource', 'Sampler': 'samplerState'}[kind]
             native = [b for b in bindings if b.get('kind') == native_kind]
             if len(native) != 1 or native[0]['index'] != index:
                 raise RuntimeError('Metal binding remapping is outside this raster profile')
@@ -158,12 +162,16 @@ def glsl_interface(code, reflected, cross_reflection):
     images = cross_reflection.get('separate_images', [])
     samplers = cross_reflection.get('separate_samplers', [])
     textures = {}
-    for name in re.findall(r'uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?sampler2D\s+(\w+)\s*;', code):
+    for shape, name in re.findall(r'uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?(sampler2DArray|sampler2D|samplerCube|sampler3D)\s+(\w+)\s*;', code):
         pairs = [(image, sampler) for image in images for sampler in samplers
                  if name == 'SPIRV_Cross_Combined' + image['name'] + sampler['name']]
         if len(pairs) != 1:
             raise RuntimeError('Cannot verify GLSL ES combined texture/sampler identity')
         image, sampler = pairs[0]
+        entries = [x for x in reflected['entries'] if x['binding'] == image['binding']]
+        expected = {'sampler2D': 'Texture2D', 'sampler2DArray': 'Texture2DArray', 'samplerCube': 'TextureCube', 'sampler3D': 'Texture3D'}[shape]
+        if len(entries) != 1 or entries[0]['kind'] != expected:
+            raise RuntimeError('GLSL ES emitted texture dimension differs from reflection')
         if image['binding'] in textures:
             raise RuntimeError('One texture with multiple samplers in one stage is outside this profile')
         textures[image['binding']] = {'name': name, 'sampler': sampler['binding']}
@@ -238,6 +246,11 @@ def wgsl_contract(code, reflected, stage):
             raise RuntimeError('WGSL vertex interface is incomplete')
         code = code[:structure.start(1)] + body + code[structure.end(1):]
     for entry in reflected['entries']:
+        if entry['kind'].startswith('Texture'):
+            shape = {'Texture2D': '2d', 'Texture2DArray': '2d_array', 'TextureCube': 'cube', 'Texture3D': '3d'}[entry['kind']]
+            declaration = re.search(r'@binding\(' + str(entry['binding']) + r'\)\s+@group\(0\)\s+var\s+\w+\s*:\s*texture_' + shape + r'<f32>\s*;', code)
+            if declaration is None:
+                raise RuntimeError('WGSL emitted texture dimension differs from reflection')
         if entry['kind'] != 'UniformBuffer':
             continue
         declaration = re.search(r'@binding\(' + str(entry['binding']) + r'\)\s+@group\(0\)\s+var<uniform>\s+\w+\s*:\s*(\w+)\s*;', code)

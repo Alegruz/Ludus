@@ -242,11 +242,12 @@ snapshots are also zero outside Ready, so an earlier ready snapshot must not be
 used after loss/restart.
 
 Format use flags describe implemented operations. All supported formats allow
-complete sampled views and linear filtering. Only RGBA8 linear/sRGB support the
+original-format sampled views and linear filtering. Only RGBA8 linear/sRGB support the
 current single-color/private-depth attachment and blend path, within backend
 format limits. R8/RG8 remain sampled only. L4 adds RGBA16F when `HdrColor` is enabled: it supports
-sampling/filtering/blending through a single-mip color attachment, while creation
-uploads remain unsupported. Its format query is zero/Unsupported when unavailable.
+sampling/filtering/blending through a single-mip color attachment. R9 also accepts
+original binary16 uploads and sampled mip chains. Attachment/blending capability
+is independent of sampled HDR support.
 SampleCounts is a bit mask (value 1 for
 one sample); MSAA is not enabled. Storage texture uses remain false. R8 enables
 bounded RGBA8Unorm texture copy source/destination uses; other formats remain false.
@@ -255,7 +256,7 @@ checks combined sampled/upload/copy/attachment usage and private-depth bounds; p
 backends intersect their guaranteed normalized formats with Ludus's implemented
 profile. Texture and offscreen pipeline creation enforce the admitted snapshot.
 
-A request contains up to five unique format entries; invalid format values, counts,
+A request contains up to seven unique format entries; invalid format values, counts,
 duplicates, empty use sets or invalid sample counts return InvalidDescription
 without launching a backend or publishing outputs. A required constraint miss
 reports `StartupError::RequirementsUnsatisfied`, `RequirementFailure::Profile`
@@ -1275,8 +1276,8 @@ not physical residency, sparse allocation or an eviction policy. All backing is
 charged to the R6 resource budget at creation, including undefined mips.
 The initial sampled view spans the complete allocation and rejects until every
 mip is initialized. This makes R8b's incremental initialization usable safely
-before R9a; **sampling a partially initialized allocation requires R9a's future
-partial sampled views**. R3 hazards remain conservative whole-resource hazards.
+with R8b. R9a's partial sampled views can now expose initialized mips before the
+remaining mips are defined. R3 hazards remain conservative whole-resource hazards.
 
 For example, an 8-by-4 texture with three mips begins with mask `0` and no
 initialized bytes. Complete mip uploads publish masks `1`, `3`, then `7`, with
@@ -1321,3 +1322,101 @@ The browser harness also rejects an injected invalid texture copy and proves
 that delayed completion after device destruction cannot publish old work.
 Software Chromium acceptance does not establish physical-browser performance;
 R7's open hardware/host qualification gates remain open.
+
+
+## Texture types, formats and views (R9)
+
+R9a adds original-format sampled color views and uploaded `Rgba16Float` mip
+chains. R9b adds `D2Array` and `Cube`; R9c adds `D3` volumes and optional
+`Bc1RgbaUnorm`/`Bc3RgbaUnorm` encoded textures. These operations use the existing
+RHI identities, R2 retention and R3 whole-allocation GDI hazards. They do not
+introduce bindless descriptors, finer synchronization or sparse backing.
+
+### Creation and packing
+
+`TextureDescription.Dimension` selects `D2`, `D2Array`, `Cube` or `D3`.
+`DepthOrLayers` is one for D2, an immutable layer count for D2Array, exactly six
+for Cube, or the base depth for D3. Cube faces must be square and upload in
+**+X, -X, +Y, -Y, +Z, -Z** order. Volume depth halves at each mip, clamped to one;
+array layers and cube faces never shrink. Attachments and retained CPU content
+remain D2; deferred initialization and mutable R8 transfers remain RGBA8 D2.
+
+Uploads contain every mip in ascending order. Each mip contains all of its
+layers/faces/depth slices in ascending order. For an uncompressed format a
+slice occupies `RowPitch * mipHeight` bytes. For BC it occupies
+`RowPitch * ceil(mipHeight / 4)` encoded bytes. BC1 uses eight bytes per 4-by-4
+block; BC3 uses sixteen. Pitches must cover `ceil(mipWidth / 4)` blocks and be
+multiples of the block byte count. Base BC width/height are multiples of four;
+small tail mips still occupy complete edge blocks. There is no compression,
+format conversion, mip generation or implicit padding insertion.
+
+Mips must be tightly concatenated; supplied offsets and the exact total byte
+length are validated before backend work. Uncompressed pitches are four-byte
+aligned (binary16 RGBA pitches are eight-byte aligned). HDR bytes are original
+IEEE binary16 channel encodings. Creation consumes/copies all caller bytes and
+metadata before returning; `Pending` owns asynchronous validation/upload work.
+Logical allocation bytes include every slice and rounded-up compressed block.
+
+### Views and bindings
+
+The legacy `CreateTextureView(device, texture, output)` selects the allocation's
+full dimension and range. The overload taking `TextureViewDescription` selects
+mip and layer ranges; zero counts mean the remaining range. Shader LOD zero
+refers to `BaseMip`, and shader array layer zero refers to `BaseLayer`. An
+array/cube may expose a single layer as D2. Cube views select all six faces;
+D3 views select mips, with no layer/depth-slice reinterpretation. Formats cannot
+be reinterpreted. `TextureAspect::Color` is enabled; Depth/Stencil explicitly
+return `Unsupported` until their R10 sampling profile exists.
+
+Only selected sampled mips must be initialized. Thus a deferred RGBA8 texture
+with only mip two initialized can expose `{ .BaseMip = 2, .MipCount = 1 }`;
+the legacy full view still rejects. Attachments retain the existing clear/store
+rules. A view retains its allocation after the public texture owner is destroyed.
+All views, bindings, batches, graphs and submitted uses still exclude mutable
+transfers on that whole allocation, even for disjoint ranges. GDI recognizes all
+new sampled binding kinds and checks initialized views before executing reads.
+
+`RasterBindingKind::Texture2DArray`, `TextureCube` and `Texture3D` must match the
+view dimension. A mismatch rejects binding creation before native work. The
+offline shader helper reflects each target independently and checks the emitted
+WGSL and combined GLSL ES sampler dimension. Metal also verifies its native
+pipeline reflection. Descriptor arrays and compute-stage texture bindings
+remain outside this profile. `SamplerDescription.W` selects volume-depth
+addressing; mip filtering must be enabled to sample LODs beyond level zero.
+
+### Enabled backend matrix
+
+| Operation | Vulkan | Metal | WebGPU | WebGL 2 |
+| --- | --- | --- | --- | --- |
+| Normalized D2/array/cube/volume upload and sampling | Queried | Enabled | Device limits | Context limits |
+| Original RGBA16F upload and sampling | Queried | Enabled | Enabled | Enabled |
+| Original-format mip/layer color views | Native views | Native views | Native views | Budgeted sampled copies |
+| BC1/BC3 D2/array/cube upload and sampling | Enabled BC feature + format queries | Device BC support | Enabled `texture-compression-bc` | Unsupported |
+| BC volumes, cube arrays, format reinterpretation | Unsupported | Unsupported | Unsupported | Unsupported |
+| HDR partial view without float color attachment support | Queried | Enabled | Enabled | Unsupported |
+
+`FormatCapabilities.MaxArrayLayers`, `MaxCubeDimension`, `MaxDimension3D` and
+`PartialViews` describe enabled operations, not raw hardware potential. Array
+layers and volume extents are conservatively capped at 256, sampled 2D/cube
+extents at the existing 4096 profile ceiling, and mip chains at sixteen. Vulkan
+queries combined image usage/type/creation flags; browser limits come from the
+enabled device/context. Compression is independently optional. Required and
+preferred format entries may specify `Dimension`, `MinDepthOrLayers` and
+`PartialViews`; startup reports unmet constraints before Ready.
+
+WebGL 2 has no native texture views. A partial sampled view owns a GPU copy of
+its range, rebased to mip/layer zero. Its logical bytes consume `ResourceBytes`
+while retained, and destruction follows the usual completion gate. Full views
+share the backing. Float snapshot copies require the enabled float color-buffer
+extension. These copies preserve sampled texel order without introducing an
+attachment flip. API allocation/residency remains unknown on the browser paths;
+logical copy bytes are not a physical-residency claim.
+
+The public `tests/sdk_consumer/r9.cpp` journey validates rendered readbacks for
+partial initialized mips, array layers, all six cube directions, volume slices
+and tail mips, binary16 HDR values, and BC1/BC3 where enabled. It destroys texture
+owners before drawing to exercise retained views. The same fixture is built
+natively and through the installed browser SDK; browser QA runs forced WebGPU,
+forced WebGL 2, Auto and Auto fallback. Reference regressions cover malformed
+slice/block packing, range bounds, typed binding mismatches, CPU view-relative
+mips and conservative mutation exclusion. Physical host qualification remains R7b.

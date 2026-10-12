@@ -28,7 +28,7 @@ private:
     /// Grants the private registry access to assign and validate this incarnation.
     friend struct internal::RasterAccess;
 };
-/// Opaque two-dimensional texture identity, scoped to a device, slot and non-wrapping generation.
+/// Opaque texture allocation identity, scoped to a device, slot and non-wrapping generation.
 /// Copies do not transfer ownership. Destroy invalidates resolution immediately;
 /// binding/pipeline and submitted uses keep the underlying record alive.
 struct TextureHandle final
@@ -40,7 +40,7 @@ private:
     /// Grants the private registry access to assign and validate this incarnation.
     friend struct internal::RasterAccess;
 };
-/// Opaque complete sampled texture view identity, scoped to a device, slot and non-wrapping generation.
+/// Opaque immutable sampled texture view identity, scoped to a device, slot and non-wrapping generation.
 /// Copies do not transfer ownership. Destroy invalidates resolution immediately;
 /// binding/pipeline and submitted uses keep the underlying record alive.
 struct TextureViewHandle final
@@ -167,7 +167,7 @@ struct BufferDescription final
     /// Allocation and initial-content length in bytes; nonzero and bounded by capabilities.
     ludus::foundation::usize Size = 0;
 };
-/// Two-dimensional sampled texture or mutable color attachment description.
+/// Sampled color/data allocation or the existing single 2D color attachment.
 struct TextureDescription final
 {
     /// Pixel width, nonzero and bounded by enabled limits.
@@ -181,7 +181,7 @@ struct TextureDescription final
     bool Attachment = false;
     /// Allocated mip levels, 1..floor(log2(max(Width,Height)))+1, at most 16.
     /// Attachments require one; initial upload defines all unless DeferredInitialization.
-    /// Sampled views cover this entire range and require complete initialized contents.
+    /// Each sampled view requires initialized contents only in its selected range.
     ludus::foundation::uint32 MipLevels = 1;
     /// Request nonblocking native upload readiness; Pending owns staging until completion.
     /// Legacy RGBA single-level creation defaults to its existing setup behavior.
@@ -191,23 +191,58 @@ struct TextureDescription final
     bool RetainCpuContent = false;
     /// Allocate undefined RGBA8Unorm sampled mips with an empty upload. R8 full-mip
     /// transfers initialize incrementally; full-resource sampled views require every mip.
-    /// Attachments and retained CPU content reject this option. Partial sampled views follow R9a.
+    /// Attachments, non-D2 dimensions and retained CPU content reject this option.
     bool DeferredInitialization = false;
+    /// Allocation dimension, fixed for its lifetime. Attachments/CPU shadows require D2.
+    TextureDimension Dimension = TextureDimension::D2;
+    /// Array layers, six cube faces, or base volume depth; D2 requires one.
+    ludus::foundation::uint32 DepthOrLayers = 1;
+};
+/// Sampled aspect selection; depth/stencil sampling requires the later R10 profile.
+enum class TextureAspect : ludus::foundation::uint8
+{
+    /// Color/data channels, including normalized and compressed formats.
+    Color,
+    /// Depth component; currently returns Unsupported.
+    Depth,
+    /// Stencil component; currently returns Unsupported.
+    Stencil,
+};
+/// Immutable original-format color view. Mip zero in a shader denotes BaseMip.
+/// Zero counts select the remaining allocation range. D3 requires BaseLayer=0,
+/// LayerCount=0 or 1; its volume slices are not array layers. No format reinterpretation.
+struct TextureViewDescription final
+{
+    /// Shader-visible dimension; must match the allocation, except a single array/cube layer may use D2.
+    TextureDimension Dimension = TextureDimension::D2;
+    /// First allocated mip exposed to sampling.
+    ludus::foundation::uint32 BaseMip = 0;
+    /// Number of exposed mips; zero selects all remaining levels.
+    ludus::foundation::uint32 MipCount = 0;
+    /// First exposed array layer or cube face.
+    ludus::foundation::uint32 BaseLayer = 0;
+    /// Number of exposed layers; zero selects all remaining layers.
+    ludus::foundation::uint32 LayerCount = 0;
+    /// Original-format aspect; only Color is enabled by R9.
+    TextureAspect Aspect = TextureAspect::Color;
 };
 /// One complete initialized mip within the borrowed upload byte blob.
 struct TextureMipUpload final
 {
     /// Four-byte-aligned offset; levels must be tightly concatenated in ascending order.
     ludus::foundation::usize Offset = 0;
-    /// Bytes between rows, multiple of four, including optional padding.
+    /// Encoded bytes between rows or block rows; multiple of four and of the format block size.
     ludus::foundation::usize RowPitch = 0;
 };
-/// Borrowed complete R8/RG8/RGBA8 chain, copied/consumed before CreateTexture returns.
+/// Borrowed complete original-format chain, consumed/copied before return.
+/// Mips are concatenated in ascending order; each contains all layers/faces or
+/// volume slices in ascending order. A slice has RowPitch * block-row-count bytes.
+/// Compressed pitches count encoded block bytes, with rounded-up edge blocks.
 struct TextureUpload final
 {
     /// Rows in top-left image order, including optional padding between rows.
     std::span<const ludus::foundation::uint8> Bytes;
-    /// Bytes between rows; multiple of four and at least Width times the format channel count.
+    /// Encoded row/block-row pitch, at least ceil(Width/blockWidth) * blockBytes; four-byte aligned.
     ludus::foundation::usize RowPitch = 0;
     /// Empty selects the legacy single-mip RowPitch. Otherwise exactly MipLevels
     /// descriptors; RowPitch must be zero. All metadata is consumed before return.
@@ -250,7 +285,7 @@ enum class RasterFilter : ludus::foundation::uint8
     /// Interpolate adjacent texels in linear light.
     Linear,
 };
-/// Portable address mode applied independently along the two texture axes.
+/// Portable address mode applied independently along each sampled texture axis.
 enum class RasterAddress : ludus::foundation::uint8
 {
     /// Clamp coordinates to edge texels.
@@ -283,6 +318,8 @@ struct SamplerDescription final
     ludus::foundation::float32 MinLod = 0;
     /// Finite maximum LOD, MinLod..15; clamped to initialized texture levels by sampling.
     ludus::foundation::float32 MaxLod = 15;
+    /// Volume-depth addressing; cube face selection is defined by direction vectors.
+    RasterAddress W = RasterAddress::Clamp;
 };
 /// Resource kind reflected at a binding in group/set zero.
 enum class RasterBindingKind : ludus::foundation::uint8
@@ -291,6 +328,12 @@ enum class RasterBindingKind : ludus::foundation::uint8
     UniformBuffer,
     /// Non-multisampled, float-sampled two-dimensional texture.
     Texture2D,
+    /// Float-sampled fixed array of two-dimensional images.
+    Texture2DArray,
+    /// Float-sampled six-face cubemap.
+    TextureCube,
+    /// Float-sampled three-dimensional volume.
+    Texture3D,
     /// Non-comparison sampler.
     Sampler,
     /// Read-only compute storage buffer range.
@@ -315,7 +358,7 @@ struct RasterBinding final
 {
     /// Group/set-zero binding number.
     ludus::foundation::uint32 Binding = 0;
-    /// Resource type; resource arrays and storage textures are unsupported.
+    /// Resource type; descriptor arrays and storage textures are unsupported.
     RasterBindingKind Kind = RasterBindingKind::UniformBuffer;
     /// Stages allowed to use this entry.
     RasterVisibility Visibility = RasterVisibility::Both;
@@ -548,10 +591,17 @@ CreateTexture(DeviceHandle, const TextureDescription&, const TextureUpload&, Tex
 /// Copy the immutable description of an owned texture; owner-thread only, including open frames.
 /// Invalid/unready handles preserve output; does not expose native objects or extend ownership.
 [[nodiscard]] RasterStatus GetTextureDescription(DeviceHandle, TextureHandle, TextureDescription&) noexcept;
-/// Create a complete initialized-mip, original-format view, retaining its texture. Partial sampled ranges,
-/// format reinterpretation and separate depth views are unsupported. Deferred sampled allocations
+/// Create a complete initialized-mip view in the allocation dimension and format, retaining its texture.
+/// Use the description overload to select sampled subranges. Deferred sampled allocations
 /// reject InvalidState until every mip is initialized. Failures preserve a null output; owner-thread only.
 [[nodiscard]] RasterStatus CreateTextureView(DeviceHandle, TextureHandle, TextureViewHandle&) noexcept;
+/// Create a bounded original-format color view on the owner thread between frames.
+/// Only selected mips must be initialized (attachments retain existing clear/store rules).
+/// Ready/Pending publishes ownership and retains the allocation; other results preserve output.
+/// Unsupported denotes a disabled dimension/partial-view capability. GDI hazards and
+/// mutation exclusion remain conservative for the whole allocation, including disjoint views.
+[[nodiscard]] RasterStatus
+CreateTextureView(DeviceHandle, TextureHandle, const TextureViewDescription&, TextureViewHandle&) noexcept;
 /// Create immutable filter/address state; no engine allocations on a warmed resource path.
 [[nodiscard]] RasterStatus CreateSampler(DeviceHandle, const SamplerDescription&, SamplerHandle&) noexcept;
 /// Create a reflected stage. Pending owns its output; copied metadata survives caller storage.

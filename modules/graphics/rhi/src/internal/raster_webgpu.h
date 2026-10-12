@@ -194,7 +194,27 @@ RasterCapabilities RasterLimits() noexcept
 // no storage/copy/MSAA or R8/RG8 attachment path is advertised.
 FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
-    return gDevice == nullptr ? FormatCapabilities{} : internal::PortableFormatLimits(format, RasterLimits());
+    if (gDevice == nullptr ||
+        (internal::CompressedTexture(format) && !wgpuDeviceHasFeature(gDevice, WGPUFeatureName_TextureCompressionBC)))
+    {
+        return {};
+    }
+    WGPULimits limits = WGPU_LIMITS_INIT;
+    if (wgpuDeviceGetLimits(gDevice, &limits) != WGPUStatus_Success)
+    {
+        return {};
+    }
+    auto result = internal::PortableFormatLimits(format, RasterLimits());
+    if (result.Uses.Sampled)
+    {
+        result.MaxArrayLayers = limits.maxTextureArrayLayers < 256 ? limits.maxTextureArrayLayers : 256;
+        result.MaxCubeDimension = result.MaxArrayLayers >= 6 ? result.MaxSampledDimension2D : 0U;
+        result.MaxDimension3D = internal::CompressedTexture(format)  ? 0U
+                                : limits.maxTextureDimension3D < 256 ? limits.maxTextureDimension3D
+                                                                     : 256;
+        result.PartialViews = true;
+    }
+    return result;
 }
 
 ComputeCapabilities ComputeLimits() noexcept
@@ -296,14 +316,16 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
 {
     RasterScopes(request);
     WGPUTextureDescriptor descriptor = WGPU_TEXTURE_DESCRIPTOR_INIT;
-    descriptor.size = {info.Width, info.Height, 1};
-    descriptor.dimension = WGPUTextureDimension_2D;
+    descriptor.size = {info.Width, info.Height, info.DepthOrLayers};
+    descriptor.dimension = info.Dimension == TextureDimension::D3 ? WGPUTextureDimension_3D : WGPUTextureDimension_2D;
     descriptor.mipLevelCount = info.MipLevels;
-    descriptor.format = info.Format == RasterFormat::Rgba16Float  ? WGPUTextureFormat_RGBA16Float
-                        : info.Format == RasterFormat::Rg8Unorm   ? WGPUTextureFormat_RG8Unorm
-                        : info.Format == RasterFormat::R8Unorm    ? WGPUTextureFormat_R8Unorm
-                        : info.Format == RasterFormat::Rgba8Unorm ? WGPUTextureFormat_RGBA8Unorm
-                                                                  : WGPUTextureFormat_RGBA8UnormSrgb;
+    descriptor.format = info.Format == RasterFormat::Bc1RgbaUnorm   ? WGPUTextureFormat_BC1RGBAUnorm
+                        : info.Format == RasterFormat::Bc3RgbaUnorm ? WGPUTextureFormat_BC3RGBAUnorm
+                        : info.Format == RasterFormat::Rgba16Float  ? WGPUTextureFormat_RGBA16Float
+                        : info.Format == RasterFormat::Rg8Unorm     ? WGPUTextureFormat_RG8Unorm
+                        : info.Format == RasterFormat::R8Unorm      ? WGPUTextureFormat_R8Unorm
+                        : info.Format == RasterFormat::Rgba8Unorm   ? WGPUTextureFormat_RGBA8Unorm
+                                                                    : WGPUTextureFormat_RGBA8UnormSrgb;
     descriptor.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst |
                        (info.Format == RasterFormat::Rgba8Unorm ? WGPUTextureUsage_CopySrc : WGPUTextureUsage_None) |
                        (info.Attachment ? WGPUTextureUsage_RenderAttachment : WGPUTextureUsage_None);
@@ -321,12 +343,15 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
             destination.mipLevel = level;
             WGPUTexelCopyBufferLayout layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
             layout.bytesPerRow = static_cast<uint32>(mip.RowPitch);
-            layout.rowsPerImage = height;
-            const WGPUExtent3D extent{width, height, 1};
+            layout.rowsPerImage = internal::TextureBlockRows(info.Format, height);
+            const auto block = internal::TextureBlockWidth(info.Format);
+            const WGPUExtent3D extent{internal::TextureBlockRows(info.Format, width) * block,
+                                      internal::TextureBlockRows(info.Format, height) * block,
+                                      internal::TextureSlices(info, level)};
             wgpuQueueWriteTexture(gQueue,
                                   &destination,
                                   upload.Bytes.data() + mip.Offset,
-                                  mip.RowPitch * height,
+                                  mip.RowPitch * layout.rowsPerImage * extent.depthOrArrayLayers,
                                   &layout,
                                   &extent);
             width = width > 1 ? width / 2 : 1;
@@ -357,7 +382,16 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
 RasterStatus RasterCreateView(usize slot, const internal::RasterViewSource& source, uint32 request) noexcept
 {
     RasterScopes(request);
-    gRasterViews[slot] = wgpuTextureCreateView(gRasterTextures[source.Texture], nullptr);
+    WGPUTextureViewDescriptor view = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    view.dimension = source.View.Dimension == TextureDimension::D2Array ? WGPUTextureViewDimension_2DArray
+                     : source.View.Dimension == TextureDimension::Cube  ? WGPUTextureViewDimension_Cube
+                     : source.View.Dimension == TextureDimension::D3    ? WGPUTextureViewDimension_3D
+                                                                        : WGPUTextureViewDimension_2D;
+    view.baseMipLevel = source.View.BaseMip;
+    view.mipLevelCount = source.View.MipCount;
+    view.baseArrayLayer = source.View.BaseLayer;
+    view.arrayLayerCount = source.View.LayerCount;
+    gRasterViews[slot] = wgpuTextureCreateView(gRasterTextures[source.Texture], &view);
     return RasterPop(request);
 }
 RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uint32 request) noexcept
@@ -368,6 +402,7 @@ RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uin
         info.Filter == RasterFilter::Nearest ? WGPUFilterMode_Nearest : WGPUFilterMode_Linear;
     descriptor.addressModeU = info.U == RasterAddress::Clamp ? WGPUAddressMode_ClampToEdge : WGPUAddressMode_Repeat;
     descriptor.addressModeV = info.V == RasterAddress::Clamp ? WGPUAddressMode_ClampToEdge : WGPUAddressMode_Repeat;
+    descriptor.addressModeW = info.W == RasterAddress::Clamp ? WGPUAddressMode_ClampToEdge : WGPUAddressMode_Repeat;
     descriptor.mipmapFilter =
         info.MipFilter == RasterMipFilter::Linear ? WGPUMipmapFilterMode_Linear : WGPUMipmapFilterMode_Nearest;
     descriptor.lodMinClamp = info.MinLod;
@@ -410,10 +445,14 @@ RasterStatus RasterCreateLayout(usize slot, const internal::RasterLayout& info, 
                                                                                 : WGPUBufferBindingType_Storage;
             entry.buffer.minBindingSize = source.MinSize;
         }
-        else if (source.Kind == RasterBindingKind::Texture2D)
+        else if (internal::TextureBinding(source.Kind))
         {
             entry.texture.sampleType = WGPUTextureSampleType_Float;
-            entry.texture.viewDimension = WGPUTextureViewDimension_2D;
+            entry.texture.viewDimension =
+                source.Kind == RasterBindingKind::Texture2DArray ? WGPUTextureViewDimension_2DArray
+                : source.Kind == RasterBindingKind::TextureCube  ? WGPUTextureViewDimension_Cube
+                : source.Kind == RasterBindingKind::Texture3D    ? WGPUTextureViewDimension_3D
+                                                                 : WGPUTextureViewDimension_2D;
         }
         else
         {
@@ -446,7 +485,7 @@ RasterStatus RasterCreateSet(usize slot,
             entry.offset = info.Offsets[i];
             entry.size = info.Sizes[i];
         }
-        else if (source.Kind == RasterBindingKind::Texture2D)
+        else if (internal::TextureBinding(source.Kind))
         {
             entry.textureView = gRasterViews[info.Slots[i]];
         }

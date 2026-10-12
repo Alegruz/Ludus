@@ -5,6 +5,7 @@
 #include <ludus/graphics/rhi/graph.h>
 
 #include "storage.h"
+#include "texture.h"
 
 namespace ludus::graphics::rhi::internal
 {
@@ -68,6 +69,7 @@ struct RasterShaderInfo final
 struct RasterViewSource final
 {
     foundation::usize Texture;
+    TextureViewDescription View;
 };
 struct RasterSet final
 {
