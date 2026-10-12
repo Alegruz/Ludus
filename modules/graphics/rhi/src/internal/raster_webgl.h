@@ -39,7 +39,13 @@ internal::RasterPassInfo gRasterGlPass;
 bool gRasterGlPassOpen = false;
 bool gRasterHdrProbed = false, gRasterHdr = false;
 internal::StorageTable<GLuint> gRasterDepths;
-internal::StorageTable<GLuint> gRasterViews;
+struct RasterGlView final
+{
+    GLuint Object = 0;
+    GLenum Target = GL_TEXTURE_2D;
+    bool Owned = false;
+};
+internal::StorageTable<RasterGlView> gRasterViews;
 internal::StorageTable<GLuint> gRasterSamplers;
 internal::StorageTable<RasterGlShader> gRasterShaders;
 internal::StorageTable<internal::RasterLayout> gRasterLayouts;
@@ -48,6 +54,21 @@ internal::StorageTable<RasterGlPipeline> gRasterPipelines;
 internal::StorageTable<RasterGlCompletion> gRasterCompletions;
 RasterGlCompletion* gRasterReserved = nullptr;
 uint64 gRasterCompleted = 0;
+GLenum RasterGlTextureTarget(TextureDimension dimension) noexcept
+{
+    return dimension == TextureDimension::D2Array ? GL_TEXTURE_2D_ARRAY
+           : dimension == TextureDimension::Cube  ? GL_TEXTURE_CUBE_MAP
+           : dimension == TextureDimension::D3    ? GL_TEXTURE_3D
+                                                  : GL_TEXTURE_2D;
+}
+GLenum RasterGlTextureFormat(RasterFormat format) noexcept
+{
+    return format == RasterFormat::Rgba16Float ? GL_RGBA16F
+           : format == RasterFormat::R8Unorm   ? GL_R8
+           : format == RasterFormat::Rg8Unorm  ? GL_RG8
+           : format == RasterFormat::Rgba8Srgb ? GL_SRGB8_ALPHA8
+                                               : GL_RGBA8;
+}
 RasterStatus RasterGlResult() noexcept
 {
     const auto error = glGetError();
@@ -75,7 +96,7 @@ bool RasterGlInterface(GLuint program, const internal::RasterShaderInfo& shader,
             }
             glUniformBlockBinding(program, block, entry.Binding);
         }
-        else if (entry.Kind == RasterBindingKind::Texture2D)
+        else if (internal::TextureBinding(entry.Kind))
         {
             const GLint location = glGetUniformLocation(program, shader.TextureNames[entry.Binding]);
             if (location < 0)
@@ -176,7 +197,10 @@ bool RasterGlProgram(GLuint program, RasterGlPipeline& pipeline) noexcept
         GLint size = 0;
         GLenum type = 0;
         glGetActiveUniform(program, index, sizeof(name), &length, &size, &type, name);
-        if (size != 1 || type != GL_SAMPLER_2D || length <= 0 || length >= static_cast<GLsizei>(sizeof(name) - 1))
+        if (size != 1 ||
+            (type != GL_SAMPLER_2D && type != GL_SAMPLER_2D_ARRAY && type != GL_SAMPLER_CUBE &&
+             type != GL_SAMPLER_3D) ||
+            length <= 0 || length >= static_cast<GLsizei>(sizeof(name) - 1))
         {
             return false;
         }
@@ -186,7 +210,23 @@ bool RasterGlProgram(GLuint program, RasterGlPipeline& pipeline) noexcept
             if (std::strcmp(name, vertex.TextureNames[binding]) == 0 ||
                 std::strcmp(name, fragment.TextureNames[binding]) == 0)
             {
-                found = true;
+                const internal::RasterShaderInfo* stages[2]{&vertex, &fragment};
+                for (const auto* shader : stages)
+                {
+                    for (usize j = 0; j < shader->Layout.Count; ++j)
+                    {
+                        const auto& entry = shader->Layout.Entries[j];
+                        if (entry.Binding != binding || !internal::TextureBinding(entry.Kind))
+                        {
+                            continue;
+                        }
+                        const GLenum expected = entry.Kind == RasterBindingKind::Texture2DArray ? GL_SAMPLER_2D_ARRAY
+                                                : entry.Kind == RasterBindingKind::TextureCube  ? GL_SAMPLER_CUBE
+                                                : entry.Kind == RasterBindingKind::Texture3D    ? GL_SAMPLER_3D
+                                                                                                : GL_SAMPLER_2D;
+                        found |= type == expected;
+                    }
+                }
             }
         }
         if (!found)
@@ -263,7 +303,29 @@ RasterCapabilities RasterLimits() noexcept
 // no storage/copy/MSAA or R8/RG8 attachment path is advertised.
 FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
-    return gContext <= 0 ? FormatCapabilities{} : internal::PortableFormatLimits(format, RasterLimits());
+    if (gContext <= 0 || internal::CompressedTexture(format))
+    {
+        return {};
+    }
+    auto result = internal::PortableFormatLimits(format, RasterLimits());
+    if (result.Uses.Sampled)
+    {
+        GLint layers = 0, volume = 0, cube = 0;
+        glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &layers);
+        glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &volume);
+        glGetIntegerv(GL_MAX_CUBE_MAP_TEXTURE_SIZE, &cube);
+        result.MaxArrayLayers = layers > 0 ? static_cast<uint32>(layers < 256 ? layers : 256) : 0;
+        result.MaxDimension3D = volume > 0 ? static_cast<uint32>(volume < 256 ? volume : 256) : 0;
+        result.MaxCubeDimension = cube > 0 ? static_cast<uint32>(cube) : 0;
+        if (result.MaxCubeDimension > result.MaxSampledDimension2D)
+        {
+            result.MaxCubeDimension = result.MaxSampledDimension2D;
+        }
+        // Snapshot copies use framebuffer color reads. Normalized formats are core-renderable;
+        // HDR partial copies require the separately probed float color-buffer extension.
+        result.PartialViews = format != RasterFormat::Rgba16Float || result.Uses.ColorAttachment;
+    }
+    return result;
 }
 
 RasterStatus
@@ -290,38 +352,58 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
 {
     gRasterTextureDescriptions[slot] = info;
     glGenTextures(1, &gRasterTextures[slot]);
-    glBindTexture(GL_TEXTURE_2D, gRasterTextures[slot]);
+    const auto target = RasterGlTextureTarget(info.Dimension);
+    glBindTexture(target, gRasterTextures[slot]);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     uint32 width = info.Width, height = info.Height;
     for (uint32 level = 0; level < info.MipLevels; ++level)
     {
         const auto mip = upload.Mips.empty() ? TextureMipUpload{0, upload.RowPitch} : upload.Mips[level];
-        const usize channels = info.Format == RasterFormat::R8Unorm    ? 1U
-                               : info.Format == RasterFormat::Rg8Unorm ? 2U
-                                                                       : 4U;
+        const auto channels = internal::TextureBlockBytes(info.Format);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, static_cast<GLint>(mip.RowPitch / channels));
-        glTexImage2D(GL_TEXTURE_2D,
-                     static_cast<GLint>(level),
-                     info.Format == RasterFormat::Rgba16Float  ? GL_RGBA16F
-                     : info.Format == RasterFormat::R8Unorm    ? GL_R8
-                     : info.Format == RasterFormat::Rg8Unorm   ? GL_RG8
-                     : info.Format == RasterFormat::Rgba8Unorm ? GL_RGBA8
-                                                               : GL_SRGB8_ALPHA8,
-                     static_cast<GLsizei>(width),
-                     static_cast<GLsizei>(height),
-                     0,
-                     info.Format == RasterFormat::R8Unorm    ? GL_RED
-                     : info.Format == RasterFormat::Rg8Unorm ? GL_RG
-                                                             : GL_RGBA,
-                     info.Format == RasterFormat::Rgba16Float ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE,
-                     info.Attachment || info.DeferredInitialization ? nullptr : upload.Bytes.data() + mip.Offset);
+        const auto format = info.Format == RasterFormat::R8Unorm    ? GL_RED
+                            : info.Format == RasterFormat::Rg8Unorm ? GL_RG
+                                                                    : GL_RGBA;
+        const auto type = info.Format == RasterFormat::Rgba16Float ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE;
+        const auto* bytes = info.Attachment || info.DeferredInitialization ? nullptr : upload.Bytes.data() + mip.Offset;
+        if (info.Dimension == TextureDimension::D3 || info.Dimension == TextureDimension::D2Array)
+        {
+            glTexImage3D(target,
+                         static_cast<GLint>(level),
+                         static_cast<GLint>(RasterGlTextureFormat(info.Format)),
+                         static_cast<GLsizei>(width),
+                         static_cast<GLsizei>(height),
+                         static_cast<GLsizei>(internal::TextureSlices(info, level)),
+                         0,
+                         format,
+                         type,
+                         bytes);
+        }
+        else
+        {
+            for (uint32 slice = 0; slice < info.DepthOrLayers; ++slice)
+            {
+                const auto face =
+                    info.Dimension == TextureDimension::Cube ? GL_TEXTURE_CUBE_MAP_POSITIVE_X + slice : target;
+                const auto* source = bytes == nullptr ? nullptr : bytes + slice * mip.RowPitch * height;
+                glTexImage2D(face,
+                             static_cast<GLint>(level),
+                             static_cast<GLint>(RasterGlTextureFormat(info.Format)),
+                             static_cast<GLsizei>(width),
+                             static_cast<GLsizei>(height),
+                             0,
+                             format,
+                             type,
+                             source);
+            }
+        }
         width = width > 1 ? width / 2 : 1;
         height = height > 1 ? height / 2 : 1;
     }
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(info.MipLevels - 1));
+    glTexParameteri(target, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(info.MipLevels - 1));
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindTexture(target, 0);
     if (info.Attachment)
     {
         glGenTextures(1, &gRasterRenderTextures[slot]);
@@ -360,10 +442,129 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     }
     return RasterGlResult();
 }
+// WebGL 2 has no texture-view API. Immutable sampled subranges are copied using
+// framebuffer reads; source retention prevents any mutable transfer until retirement.
 RasterStatus RasterCreateView(usize slot, const internal::RasterViewSource& source, uint32) noexcept
 {
-    gRasterViews[slot] = gRasterTextures[source.Texture];
-    return RasterStatus::Ready;
+    const auto& info = gRasterTextureDescriptions[source.Texture];
+    const auto& range = source.View;
+    auto& view = gRasterViews[slot];
+    view.Target = RasterGlTextureTarget(range.Dimension);
+    const uint32 layers = info.Dimension == TextureDimension::D3 ? 1U : info.DepthOrLayers;
+    if (range.BaseMip == 0 && range.MipCount == info.MipLevels && range.BaseLayer == 0 && range.LayerCount == layers &&
+        range.Dimension == info.Dimension)
+    {
+        view.Object = gRasterTextures[source.Texture];
+        return RasterStatus::Ready;
+    }
+    view.Owned = true;
+    glGenTextures(1, &view.Object);
+    glBindTexture(view.Target, view.Object);
+    GLuint framebuffer = 0;
+    glGenFramebuffers(1, &framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    RasterStatus result = RasterStatus::Ready;
+    for (uint32 level = 0; level < range.MipCount && result == RasterStatus::Ready; ++level)
+    {
+        const uint32 mip = range.BaseMip + level;
+        const auto width = internal::TextureMipExtent(info.Width, mip);
+        const auto height = internal::TextureMipExtent(info.Height, mip);
+        const auto slices =
+            info.Dimension == TextureDimension::D3 ? internal::TextureSlices(info, mip) : range.LayerCount;
+        const auto format = info.Format == RasterFormat::R8Unorm    ? GL_RED
+                            : info.Format == RasterFormat::Rg8Unorm ? GL_RG
+                                                                    : GL_RGBA;
+        const auto type = info.Format == RasterFormat::Rgba16Float ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE;
+        if (range.Dimension == TextureDimension::D3 || range.Dimension == TextureDimension::D2Array)
+        {
+            glTexImage3D(view.Target,
+                         static_cast<GLint>(level),
+                         static_cast<GLint>(RasterGlTextureFormat(info.Format)),
+                         static_cast<GLsizei>(width),
+                         static_cast<GLsizei>(height),
+                         static_cast<GLsizei>(slices),
+                         0,
+                         format,
+                         type,
+                         nullptr);
+        }
+        else
+        {
+            for (uint32 slice = 0; slice < slices; ++slice)
+            {
+                const auto target =
+                    range.Dimension == TextureDimension::Cube ? GL_TEXTURE_CUBE_MAP_POSITIVE_X + slice : view.Target;
+                glTexImage2D(target,
+                             static_cast<GLint>(level),
+                             static_cast<GLint>(RasterGlTextureFormat(info.Format)),
+                             static_cast<GLsizei>(width),
+                             static_cast<GLsizei>(height),
+                             0,
+                             format,
+                             type,
+                             nullptr);
+            }
+        }
+        for (uint32 slice = 0; slice < slices; ++slice)
+        {
+            if (info.Dimension == TextureDimension::D3 || info.Dimension == TextureDimension::D2Array)
+            {
+                glFramebufferTextureLayer(GL_FRAMEBUFFER,
+                                          GL_COLOR_ATTACHMENT0,
+                                          gRasterTextures[source.Texture],
+                                          static_cast<GLint>(mip),
+                                          static_cast<GLint>(range.BaseLayer + slice));
+            }
+            else
+            {
+                const auto target = info.Dimension == TextureDimension::Cube
+                                        ? GL_TEXTURE_CUBE_MAP_POSITIVE_X + range.BaseLayer + slice
+                                        : GL_TEXTURE_2D;
+                glFramebufferTexture2D(GL_FRAMEBUFFER,
+                                       GL_COLOR_ATTACHMENT0,
+                                       target,
+                                       gRasterTextures[source.Texture],
+                                       static_cast<GLint>(mip));
+            }
+            if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            {
+                result = RasterStatus::Unsupported;
+                break;
+            }
+            if (range.Dimension == TextureDimension::D3 || range.Dimension == TextureDimension::D2Array)
+            {
+                glCopyTexSubImage3D(view.Target,
+                                    static_cast<GLint>(level),
+                                    0,
+                                    0,
+                                    static_cast<GLint>(slice),
+                                    0,
+                                    0,
+                                    static_cast<GLsizei>(width),
+                                    static_cast<GLsizei>(height));
+            }
+            else
+            {
+                const auto target =
+                    range.Dimension == TextureDimension::Cube ? GL_TEXTURE_CUBE_MAP_POSITIVE_X + slice : view.Target;
+                glCopyTexSubImage2D(target,
+                                    static_cast<GLint>(level),
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    static_cast<GLsizei>(width),
+                                    static_cast<GLsizei>(height));
+            }
+        }
+    }
+    glTexParameteri(view.Target, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(view.Target, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(range.MipCount - 1));
+    glBindTexture(view.Target, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &framebuffer);
+    const auto error = RasterGlResult();
+    return error != RasterStatus::Ready ? error : result;
 }
 RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uint32) noexcept
 {
@@ -381,6 +582,7 @@ RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uin
     glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, filter);
     glSamplerParameteri(sampler, GL_TEXTURE_WRAP_S, info.U == RasterAddress::Clamp ? GL_CLAMP_TO_EDGE : GL_REPEAT);
     glSamplerParameteri(sampler, GL_TEXTURE_WRAP_T, info.V == RasterAddress::Clamp ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+    glSamplerParameteri(sampler, GL_TEXTURE_WRAP_R, info.W == RasterAddress::Clamp ? GL_CLAMP_TO_EDGE : GL_REPEAT);
     return RasterGlResult();
 }
 RasterStatus RasterCreateShader(usize slot,
@@ -450,7 +652,11 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             gRasterTextures[slot] = 0;
             break;
         case internal::RasterKind::View:
-            gRasterViews[slot] = 0;
+            if (gRasterViews[slot].Owned)
+            {
+                glDeleteTextures(1, &gRasterViews[slot].Object);
+            }
+            gRasterViews[slot] = {};
             break;
         case internal::RasterKind::Sampler:
             glDeleteSamplers(1, &gRasterSamplers[slot]);
@@ -519,7 +725,7 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                               static_cast<GLintptr>(set.Offsets[i]),
                               static_cast<GLsizeiptr>(set.Sizes[i]));
         }
-        else if (entry.Kind == RasterBindingKind::Texture2D)
+        else if (internal::TextureBinding(entry.Kind))
         {
             const uint32 sampler = pipeline.Samplers[entry.Binding];
             GLuint object = 0;
@@ -531,7 +737,8 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
                 }
             }
             glActiveTexture(GL_TEXTURE0 + entry.Binding);
-            glBindTexture(GL_TEXTURE_2D, gRasterViews[set.Slots[i]]);
+            const auto& view = gRasterViews[set.Slots[i]];
+            glBindTexture(view.Target, view.Object);
             glBindSampler(entry.Binding, object);
             glUniform1i(pipeline.Textures[entry.Binding], static_cast<GLint>(entry.Binding));
         }

@@ -14,7 +14,7 @@ bool InitializedMip(const Record& texture, uint32 mip) noexcept
 }
 RasterStatus ValidateRegion(const Record& texture, const TextureRegion& region) noexcept
 {
-    if (texture.Texture.Format != RasterFormat::Rgba8Unorm)
+    if (texture.Texture.Format != RasterFormat::Rgba8Unorm || texture.Texture.Dimension != TextureDimension::D2)
     {
         return RasterStatus::Unsupported;
     }
@@ -419,11 +419,9 @@ RasterStatus GetTextureResidency(DeviceHandle device, TextureHandle handle, Text
         }
         result.InitializedMips |= uint32{1} << mip;
         const auto width = texture->Texture.Width >> mip, height = texture->Texture.Height >> mip;
-        const uint64 channels = texture->Texture.Format == RasterFormat::R8Unorm       ? 1U
-                                : texture->Texture.Format == RasterFormat::Rg8Unorm    ? 2U
-                                : texture->Texture.Format == RasterFormat::Rgba16Float ? 8U
-                                                                                       : 4U;
-        result.InitializedBytes += uint64{width == 0 ? 1 : width} * (height == 0 ? 1 : height) * channels;
+        result.InitializedBytes += uint64{TextureBlockRows(texture->Texture.Format, width == 0 ? 1 : width)} *
+                                   TextureBlockRows(texture->Texture.Format, height == 0 ? 1 : height) *
+                                   TextureBlockBytes(texture->Texture.Format) * TextureSlices(texture->Texture, mip);
     }
     output = result;
     return RasterStatus::Ready;

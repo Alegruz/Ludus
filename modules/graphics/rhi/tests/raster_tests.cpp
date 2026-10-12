@@ -2,6 +2,7 @@
 #include "reference_raster.h"
 
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/graphics/rhi/graph.h>
 #include <ludus/graphics/rhi/lifetime.h>
 
 #include <cstring>
@@ -2467,4 +2468,133 @@ TEST_CASE("R8 format copy uses are negotiated from implemented profiles", "[rhi]
     REQUIRE(GetFormatCapabilities(session.Device, RasterFormat::Rgba8Srgb, format) == RasterStatus::Ready);
     CHECK_FALSE(format.Uses.CopySource);
     CHECK_FALSE(format.Uses.CopyDestination);
+}
+
+TEST_CASE("R9 dimensional uploads validate slices blocks and retained typed views", "[rhi][r9]")
+{
+    Session session;
+    uint8 bytes[768]{};
+    TextureHandle texture;
+    TextureDescription description
+    {
+        .Width = 4,
+        .Height = 4,
+        .Dimension = TextureDimension::D2Array,
+        .DepthOrLayers = 3,
+    };
+    CHECK(CreateTexture(session.Device, description, {{bytes, 191}, 16}, texture) == RasterStatus::InvalidDescription);
+    CHECK(IsNull(texture));
+    REQUIRE(CreateTexture(session.Device, description, {{bytes, 192}, 16}, texture) == RasterStatus::Ready);
+    TextureResidency residency;
+    REQUIRE(GetTextureResidency(session.Device, texture, residency) == RasterStatus::Ready);
+    CHECK(residency.InitializedBytes == 192);
+    TextureViewHandle layer;
+    REQUIRE(CreateTextureView(session.Device, texture, { .BaseLayer = 1, .LayerCount = 1 }, layer) ==
+            RasterStatus::Ready);
+    TextureViewHandle invalid;
+    CHECK(CreateTextureView(session.Device, texture, { .BaseLayer = 2, .LayerCount = 2 }, invalid) ==
+          RasterStatus::InvalidDescription);
+    CHECK(GetStatus(session.Device, invalid) == RasterStatus::InvalidHandle);
+    const RasterBinding entry{0, RasterBindingKind::Texture2DArray, RasterVisibility::Fragment, 0};
+    BindingLayoutHandle layout;
+    REQUIRE(CreateBindingLayout(session.Device, {&entry, 1}, layout) == RasterStatus::Ready);
+    BindingSetHandle set;
+    const RasterBindingResource resource{ .Texture = layer };
+    CHECK(CreateBindingSet(session.Device, layout, {&resource, 1}, set) == RasterStatus::InvalidDescription);
+    TextureViewHandle array;
+    REQUIRE(CreateTextureView(session.Device, texture, array) == RasterStatus::Ready);
+    const RasterBindingResource matching{ .Texture = array };
+    REQUIRE(CreateBindingSet(session.Device, layout, {&matching, 1}, set) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, texture) == RasterStatus::Ready);
+    CHECK(GetStatus(session.Device, array) == RasterStatus::Ready);
+    CHECK(GetStatus(session.Device, set) == RasterStatus::Ready);
+
+    TextureHandle volume;
+    description = { .Width = 4, .Height = 4, .MipLevels = 3, .Dimension = TextureDimension::D3, .DepthOrLayers = 4 };
+    const TextureMipUpload mips[3]{{0, 16}, {256, 8}, {288, 4}};
+    REQUIRE(CreateTexture(session.Device, description, {{bytes, 292}, 0, mips}, volume) == RasterStatus::Ready);
+    REQUIRE(GetTextureResidency(session.Device, volume, residency) == RasterStatus::Ready);
+    CHECK(residency.InitializedBytes == 292);
+    CHECK(CreateTextureView(session.Device, volume, { .Dimension = TextureDimension::D3, .BaseLayer = 1 }, invalid) ==
+          RasterStatus::InvalidDescription);
+    REQUIRE(CreateTextureView(session.Device, volume, { .Dimension = TextureDimension::D3, .BaseMip = 2 }, invalid) ==
+            RasterStatus::Ready);
+
+    TextureHandle compressed;
+    description = { .Width = 8, .Height = 4, .Format = RasterFormat::Bc1RgbaUnorm, .MipLevels = 4 };
+    const TextureMipUpload blocks[4]{{0, 16}, {16, 8}, {24, 8}, {32, 8}};
+    REQUIRE(CreateTexture(session.Device, description, {{bytes, 40}, 0, blocks}, compressed) == RasterStatus::Ready);
+    REQUIRE(GetTextureResidency(session.Device, compressed, residency) == RasterStatus::Ready);
+    CHECK(residency.InitializedBytes == 40);
+    TextureHandle malformed;
+    CHECK(CreateTexture(session.Device, description, {{bytes, 39}, 0, blocks}, malformed) ==
+          RasterStatus::InvalidDescription);
+    description.Width = 7;
+    CHECK(CreateTexture(session.Device, description, {{bytes, 40}, 0, blocks}, malformed) ==
+          RasterStatus::InvalidDescription);
+    description = { .Width = 4, .Height = 2, .Dimension = TextureDimension::Cube, .DepthOrLayers = 6 };
+    CHECK(CreateTexture(session.Device, description, {{bytes, 192}, 16}, malformed) ==
+          RasterStatus::InvalidDescription);
+    description = { .Width = 4, .Height = 4, .Format = RasterFormat::Rgba16Float };
+    REQUIRE(CreateTexture(session.Device, description, {{bytes, 128}, 32}, malformed) == RasterStatus::Ready);
+}
+
+TEST_CASE("R9 partial mip views retain CPU subrange and undefined range exclusion", "[rhi][r9]")
+{
+    Session session;
+    const uint8 bytes[84]{};
+    const TextureMipUpload mips[3]{{0, 16}, {64, 8}, {80, 4}};
+    TextureHandle texture;
+    REQUIRE(CreateTexture(session.Device,
+                          { .Width = 4, .Height = 4, .MipLevels = 3, .RetainCpuContent = true },
+                          {bytes, 0, mips},
+                          texture) == RasterStatus::Ready);
+    TextureViewHandle view;
+    REQUIRE(CreateTextureView(session.Device, texture, { .BaseMip = 1, .MipCount = 1 }, view) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, texture) == RasterStatus::Ready);
+    TextureCpuContent content;
+    REQUIRE(GetTextureCpuContent(session.Device, view, 0, content) == RasterStatus::Ready);
+    CHECK(content.Width == 2);
+    CHECK(content.Size == 16);
+    CHECK(GetTextureCpuContent(session.Device, view, 1, content) == RasterStatus::InvalidDescription);
+    CHECK(content.Width == 2);
+    TextureHandle deferred;
+    REQUIRE(CreateTexture(session.Device,
+                          { .Width = 4, .Height = 4, .MipLevels = 3, .DeferredInitialization = true },
+                          {},
+                          deferred) == RasterStatus::Ready);
+    TextureViewHandle forbidden;
+    CHECK(CreateTextureView(session.Device, deferred, { .BaseMip = 2, .MipCount = 1 }, forbidden) ==
+          RasterStatus::InvalidState);
+    TransferTicket transfer;
+    REQUIRE(RequestTextureUpdate(session.Device, deferred, {2, 0, 0, 1, 1}, bytes, 4, 4, transfer) ==
+            RasterStatus::Pending);
+    reference::Transfers[0][0] = RasterStatus::Ready;
+    REQUIRE(PollLifetime(session.Device) == RasterStatus::Ready);
+    REQUIRE(GetStatus(session.Device, transfer) == RasterStatus::Ready);
+    REQUIRE(Release(session.Device, transfer) == RasterStatus::Ready);
+    REQUIRE(CreateTextureView(session.Device, deferred, { .BaseMip = 2, .MipCount = 1 }, forbidden) ==
+            RasterStatus::Ready);
+    TextureViewHandle full;
+    CHECK(CreateTextureView(session.Device, deferred, full) == RasterStatus::InvalidState);
+    CHECK(RequestTextureUpdate(session.Device, deferred, {0, 0, 0, 4, 4}, bytes, 64, 16, transfer) ==
+          RasterStatus::InvalidState);
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    RasterTextureState state;
+    REQUIRE(GetTextureState(session.Device, deferred, state) == RasterStatus::Ready);
+    CHECK_FALSE(state.ColorDefined);
+    GraphVersion version;
+    REQUIRE(ImportGraphTexture(session.Device, graph, deferred, state, RasterTextureUse::SampledBoth, version) ==
+            RasterStatus::Ready);
+    const GraphUse use{version, GraphAccessMode::Sampled};
+    GraphPassDescription pass;
+    pass.Name = "R9 partial root";
+    pass.Uses = &use;
+    pass.UseCount = 1;
+    pass.SideEffect = true;
+    REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+    REQUIRE(AddGraphRoot(session.Device, graph, version, GraphRoot::Readback) == RasterStatus::Ready);
+    GraphReport report;
+    CHECK(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::InvalidDescription);
 }

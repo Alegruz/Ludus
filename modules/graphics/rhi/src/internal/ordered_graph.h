@@ -321,7 +321,7 @@ RasterStatus ValidatePacketPass(const RasterPacket& packet, const RasterPassInfo
     const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
     for (usize i = 0; i < layout.Count; ++i)
     {
-        if (layout.Entries[i].Kind != RasterBindingKind::Texture2D)
+        if (!internal::TextureBinding(layout.Entries[i].Kind))
         {
             continue;
         }
@@ -343,7 +343,8 @@ RasterStatus ValidatePacketPass(const RasterPacket& packet, const RasterPassInfo
         {
             return RasterStatus::IdentityExhausted;
         }
-        if (contents && !(texture.InFrame ? texture.FrameColorDefined : texture.ColorDefined))
+        if (contents && texture.Texture.Attachment &&
+            !(texture.InFrame ? texture.FrameColorDefined : texture.ColorDefined))
         {
             return RasterStatus::InvalidDescription;
         }
@@ -369,7 +370,7 @@ void RetainPacketTextures(const RasterPacket& packet) noexcept
     const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
     for (usize i = 0; i < layout.Count; ++i)
     {
-        if (layout.Entries[i].Kind != RasterBindingKind::Texture2D)
+        if (!internal::TextureBinding(layout.Entries[i].Kind))
         {
             continue;
         }
@@ -1056,6 +1057,7 @@ struct GraphTrack final
     StorageArray<bool> Readers;
     bool Defined = false;
     bool DepthDefined = false;
+    bool InitializedViews = false;
     GraphAccessMode LastWrite = GraphAccessMode::ColorWrite;
     StorageArray<GraphAccessMode> ReadAccess;
 };
@@ -1123,6 +1125,10 @@ RasterStatus CompileGraph(GraphRecord& graph, FullGraphReport& report, bool refe
         }
         tracks[r].Defined =
             resource.Kind == RasterKind::Buffer || (!resource.Transient && resource.Import.ColorDefined);
+        // Sampling is restricted to retained initialized views. Whole-allocation
+        // roots/load operations must still require complete defined contents.
+        tracks[r].InitializedViews =
+            resource.Kind == RasterKind::Texture && !physical.Texture.Attachment && physical.InitializedMips != 0;
         tracks[r].DepthDefined = !resource.Transient && resource.Import.DepthDefined;
     }
     for (usize p = 0; p < graph.PassCount; ++p)
@@ -1209,7 +1215,9 @@ RasterStatus CompileGraph(GraphRecord& graph, FullGraphReport& report, bool refe
             const auto version = GraphAccess::Version(use.Resource);
             if (!write)
             {
-                if (version != track.Version || !track.Defined)
+                const bool initialized =
+                    track.Defined || (use.Access == GraphAccessMode::Sampled && track.InitializedViews);
+                if (version != track.Version || !initialized)
                 {
                     return RasterStatus::InvalidDescription;
                 }

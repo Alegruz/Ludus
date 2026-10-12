@@ -271,12 +271,17 @@ void AdapterReady(WGPURequestAdapterStatus status,
     gAdapter = adapter;
     WGPUDeviceDescriptor descriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
     // Optional timestamps are requested only for an opted-in measurement session.
+    WGPUFeatureName features[2]{};
+    if (wgpuAdapterHasFeature(adapter, WGPUFeatureName_TextureCompressionBC))
+    {
+        features[descriptor.requiredFeatureCount++] = WGPUFeatureName_TextureCompressionBC;
+    }
     const WGPUFeatureName timestamp = WGPUFeatureName_TimestampQuery;
     if (internal::GpuTimingRequested() && wgpuAdapterHasFeature(adapter, timestamp))
     {
-        descriptor.requiredFeatureCount = 1;
-        descriptor.requiredFeatures = &timestamp;
+        features[descriptor.requiredFeatureCount++] = timestamp;
     }
+    descriptor.requiredFeatures = features;
     descriptor.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
     descriptor.deviceLostCallbackInfo.userdata1 = Userdata(token);
     descriptor.deviceLostCallbackInfo.callback =

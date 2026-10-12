@@ -34,6 +34,23 @@ class RasterReflectionTests(unittest.TestCase):
                   'type':{'kind':'constantBuffer','elementType':{'fields':[{'name':'color','binding':{'offset':0}}]},
                           'elementVarLayout':{'binding':{'size':16}}}}],
                 'entryPoints':[{'stage':'fragment','bindings':[{'name':'settings','binding':{'used':1}}]}]}
+    def test_r9_texture_dimensions_are_verified_per_emitted_target(self):
+        for base, array, kind, wgsl, glsl in [('texture2D',False,'Texture2D','2d','sampler2D'),('texture2D',True,'Texture2DArray','2d_array','sampler2DArray'),('textureCube',False,'TextureCube','cube','samplerCube'),('texture3D',False,'Texture3D','3d','sampler3D')]:
+            data={'parameters':[{'name':'image','binding':{'kind':'descriptorTableSlot','index':1},'type':{'kind':'resource','baseShape':base,'array':array,'resultType':{'kind':'vector','elementType':{'scalarType':'float32'}}}}], 'entryPoints':[{'stage':'fragment','bindings':[{'name':'image','binding':{'used':1}}]}]}
+            value=raster_interface(data,'fragment')
+            self.assertEqual(value['entries'][0]['kind'],kind)
+            code=f'@binding(1) @group(0) var image_0 : texture_{wgsl}<f32>;'
+            self.assertEqual(wgsl_contract(code,value,'fragment'),code)
+            with self.assertRaisesRegex(RuntimeError,'dimension differs'):
+                wgsl_contract(code.replace(f'texture_{wgsl}', 'texture_1d'),value,'fragment')
+            cross={'separate_images':[{'name':'image','binding':1}],'separate_samplers':[{'name':'sampler','binding':2}]}
+            emitted=f'#version 300 es\nuniform highp {glsl} SPIRV_Cross_Combinedimagesampler; void main() {{}}'
+            self.assertEqual(glsl_interface(emitted,value,cross)[1][1]['sampler'],2)
+            with self.assertRaisesRegex(RuntimeError,'dimension differs'):
+                glsl_interface(emitted.replace(glsl,'samplerCube' if glsl!='samplerCube' else 'sampler2D'),value,cross)
+            data['parameters'][0]['type']['multisample']=True
+            with self.assertRaises(RuntimeError): raster_interface(data,'fragment')
+
     def test_missing_stage_usage_is_rejected(self):
         data=self.fixture();data['entryPoints'][0]['bindings'][0]['binding']={}
         with self.assertRaisesRegex(RuntimeError,'compile stages separately'):raster_interface(data,'fragment')
