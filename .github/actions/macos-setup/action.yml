@@ -32,13 +32,14 @@ runs:
     - name: Configure compiler caching
       shell: bash
       run: |
+        ccache_program="$(command -v ccache)"
         echo "CCACHE_DIR=$GITHUB_WORKSPACE/out/ccache" >> "$GITHUB_ENV"
         echo 'LUDUS_ENABLE_CCACHE=1' >> "$GITHUB_ENV"
         # CMake environment defaults also cover independent SDK consumers and
         # Luau host tools; the engine configures its C/C++ launchers explicitly.
-        echo 'CMAKE_C_COMPILER_LAUNCHER=ccache' >> "$GITHUB_ENV"
-        echo 'CMAKE_CXX_COMPILER_LAUNCHER=ccache' >> "$GITHUB_ENV"
-        echo 'CMAKE_OBJCXX_COMPILER_LAUNCHER=ccache' >> "$GITHUB_ENV"
+        echo "CMAKE_C_COMPILER_LAUNCHER=$ccache_program" >> "$GITHUB_ENV"
+        echo "CMAKE_CXX_COMPILER_LAUNCHER=$ccache_program" >> "$GITHUB_ENV"
+        echo "CMAKE_OBJCXX_COMPILER_LAUNCHER=$ccache_program" >> "$GITHUB_ENV"
         CCACHE_DIR="$GITHUB_WORKSPACE/out/ccache" ccache --max-size=500M
         CCACHE_DIR="$GITHUB_WORKSPACE/out/ccache" ccache --zero-stats
     - name: Prepare pinned native dependencies
