@@ -1,8 +1,9 @@
 # Render graph authoring, shader builds and pipeline management
 
-Status: Proposed architecture, October 12, 2026. This defines the renderer
-authoring/compiler contract; it does not claim an implemented graph editor,
-general shader-function compiler or new RHI capability. Baseline: `5c44d19`.
+Status: RG0 offline contract slice implemented, October 12, 2026; RG1-RG4 remain
+proposed. This defines the renderer authoring/compiler contract; it does not
+claim an implemented graph editor, shader-function compiler or new RHI capability.
+Baseline: `5c44d19`. See [RG0 usage and source format](../development/render-graph-authoring.md).
 The existing [Renderer](renderer-systems.md), [RHI/GDI](rhi-gdi.md),
 [editor](editor-architecture.md) and [game reload](project-live-reload.md) retain
 their implementation and lifetime contracts.
@@ -530,6 +531,18 @@ architecture fits Ludus or that current features exist on our pinned tools.
 | RG2: Renderer integration | Scene matching, coverage reports, ready pipeline admission and error route | Mixed layouts/material slots; missing/conflicting roles; alpha/deformation/depth parity; capability rejection; no compile during draw; streaming/resize/history invalidation |
 | RG3: editor and reload | Graph/schema/source editing, preview, undo/save, diagnostics and atomic version activation | CLI/editor equivalent result; mapped errors; draft/save separation; failed reload old pixels preserved; pending pipelines; CPU schema mismatch/migration and unload/completion lifetime fixtures |
 | RG4: measured scheduling/memory work | Optional pooling improvements, merging/aliasing/parallel paths individually | Identical serial-control pixels/effects and actual retained memory; named native/browser profiles; repeated resize/reload and frames in flight; unsupported paths explicit |
+
+RG0 is delivered in `ludus_tools.render_graph` and the installed `ludus
+render-graph` CLI. It saves/imports a reusable raster asset, selects explicit
+ColorAndDepth/DepthOnly configurations, validates typed connections, defined
+resource versions and active camera routes, and emits an inspectable deterministic
+serial plan. The same asset connects to offscreen Export or Present contract
+roots; no implicit shader configuration arises from an unused Color output.
+All closure interfaces are checked; resource initialization and camera routes
+require a selected closed root. The plan reports ShaderBuild, DeviceCapabilities,
+SceneCoverage and GpuExecution pending. These are RG1/RG2 integration gates,
+not checks that an offline contract validator can establish. Current RHI's private
+depth attachments are not represented as already executable exported depth images.
 
 Run representative native and browser raster fixtures under pinned tools, SDK
 consumer checks, warning/format/tidy gates and sanitizers for implementation.

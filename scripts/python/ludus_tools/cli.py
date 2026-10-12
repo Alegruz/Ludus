@@ -386,12 +386,49 @@ def cmd_scene(args) -> int:
     return EXIT_OK
 
 
+def cmd_render_graph(args) -> int:
+    from . import render_graph
+
+    if args.graph_action == "new":
+        path = render_graph.new_workspace(Path(args.destination), output=args.output)
+        payload = {"created": str(path), "stage": "RG0"}
+        human = f"Saved graph sources at {path}; RG0 validates contracts, not GPU execution."
+    elif getattr(args, "library", False):
+        if args.configuration is not None:
+            raise ToolingError("RenderGraphConfiguration", "--library inspects all configurations; omit --configuration")
+        payload = {"library": render_graph.load_library(Path(args.graph), root=args.root)}
+        human = _json.dumps(payload["library"], indent=2)
+    else:
+        plan = render_graph.compile_graph(Path(args.graph), configuration=args.configuration, root=args.root)
+        payload = {"plan": plan}
+        human = render_graph.dump_plan(plan) if args.graph_action == "dump" else (
+            f"Validated {plan['asset']}#{plan['configuration']}: {len(plan['passes'])} serial operations; "
+            f"{len(plan['techniques'])} authored techniques. RG0 contract only.")
+    _emit(args, payload)
+    if not args.json:
+        print(human)
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ludus", description="Ludus host tooling CLI")
     p.add_argument("--version", action="version", version=f"ludus {__version__}")
     p.add_argument("--json", action="store_true", help="emit a versioned JSON result")
     p.add_argument("--store", help="SDK store root (default: $LUDUS_SDK_STORE or the native user data directory)")
     sub = p.add_subparsers(dest="group", required=True)
+    graphs = sub.add_parser("render-graph", help="RG0 graph contracts and serial plans (no GPU execution)").add_subparsers(dest="graph_action", required=True)
+    new_graph = graphs.add_parser("new", help="save RasterizeGraph and a root graph in a new directory")
+    new_graph.add_argument("destination")
+    new_graph.add_argument("--output", choices=("presentation", "offscreen", "depth"), default="presentation")
+    new_graph.set_defaults(func=cmd_render_graph)
+    for action in ("validate", "dump"):
+        graph = graphs.add_parser(action)
+        graph.add_argument("graph", help="saved .lurender.json root graph")
+        graph.add_argument("--root", help="graph package root; imports are relative to it (default: root file directory)")
+        graph.add_argument("--configuration", help="select an explicitly declared root configuration")
+        if action == "validate":
+            graph.add_argument("--library", action="store_true", help="inspect all library interfaces; bindings require a containing graph")
+        graph.set_defaults(func=cmd_render_graph)
     scenes = sub.add_parser("scene", help="project-owned 3D levels and immutable cooked assets").add_subparsers(dest="scene_action", required=True)
     for action in ("new", "open", "import", "dump", "assemble", "publish"):
         command = scenes.add_parser(action)

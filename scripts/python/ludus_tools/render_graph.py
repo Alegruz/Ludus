@@ -1,0 +1,682 @@
+"""RG0 bounded graph documents and deterministic, contract-only serial plans.
+
+This offline backend has no Qt, engine, shader compiler or GPU dependency. It is
+shared by the installed CLI and future editor. Plans are diagnostics, not RHI
+commands or shader packages; RG1/RG2 own those integrations.
+
+Thanks to Donald Revie, "Designing a Data-Driven Renderer", GPU Pro 3, V.4,
+sections 4.4-4.8, and Arseny Kapoulkine, "Writing an Efficient Vulkan Renderer",
+GPU Zen 2, IV.4, sections 4.4-4.6: separate representation/context and enumerate
+complete authored techniques. This original implementation uses explicit ports,
+resource versions and immutable build inputs, not their object/context stacks.
+See docs/architecture/render-graph-authoring.md for contracts and departures.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+import hashlib
+import json
+from pathlib import Path
+import re
+
+from .errors import ToolingError
+
+MAX_ASSET_BYTES = 128 * 1024
+MAX_TOTAL_BYTES = 2 * 1024 * 1024
+MAX_ASSETS = 32
+MAX_DEPTH = 8
+MAX_CONFIGURATIONS = 8
+MAX_NODES = 128
+MAX_EDGES = 512
+MAX_EXPANDED_NODES = 1024
+MAX_PASSES = 256
+TYPES = ("Scene", "View", "ColorTexture", "DepthTexture")
+TEXTURES = TYPES[2:]
+MODES = ("ColorAndDepth", "DepthOnly")
+FORMATS = {"ColorTexture": ("RGBA8Unorm",), "DepthTexture": ("Depth32Float",)}
+IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,62}\Z")
+
+
+def _fail(code, where, message):
+    diagnostic = f"{where}: {message}".encode("utf-8", errors="backslashreplace")
+    if len(diagnostic) > 4096:
+        diagnostic = diagnostic[:4080].decode("utf-8", errors="ignore").encode() + b"... (truncated)"
+    raise ToolingError("RenderGraph" + code, diagnostic.decode("utf-8"))
+
+
+def _require(condition, code, where, message):
+    if not condition:
+        _fail(code, where, message)
+
+
+def _keys(value, required, where, optional=()):
+    _require(type(value) is dict, "Schema", where, "object required")
+    _require(all(type(key) is str for key in value), "Schema", where, "field names must be strings")
+    missing = set(required) - value.keys()
+    unknown = value.keys() - set(required) - set(optional)
+    _require(not missing and not unknown, "Schema", where,
+             f"missing fields {sorted(missing)}; unknown fields {sorted(unknown)}")
+
+
+def _identifier(value, where):
+    _require(type(value) is str and IDENTIFIER.fullmatch(value) is not None,
+             "Schema", where, "identifier must be 1..63 ASCII identifier characters")
+    return value
+
+
+def _enum(value, choices, where):
+    _require(type(value) is str and value in choices, "Schema", where,
+             f"expected one of {', '.join(choices)}")
+
+
+def _boolean(value, where):
+    _require(type(value) is bool, "Schema", where, "Boolean required")
+
+
+def _integer(value, low, high, where):
+    _require(type(value) is int and low <= value <= high, "Capacity", where,
+             f"integer must be in [{low}, {high}]")
+
+
+def _list(value, maximum, where):
+    _require(type(value) is list and len(value) <= maximum, "Capacity", where,
+             f"array with at most {maximum} entries required")
+
+
+def _endpoint(value, where):
+    _require(type(value) is str and value.count(".") == 1,
+             "Schema", where, "endpoint must be node.port (input.port for an interface)")
+    node, port = value.split(".")
+    _identifier(node, where)
+    _identifier(port, where)
+    return node, port
+
+
+def _ports(values, where, outputs=False):
+    _list(values, 8, where)
+    claimed = set()
+    for port in values:
+        _keys(port, ("id", "type", "source", "required") if outputs else ("id", "type"), where)
+        _identifier(port["id"], where)
+        _require(port["id"] not in claimed, "DuplicateIdentity", where, port["id"])
+        claimed.add(port["id"])
+        _enum(port["type"], TEXTURES if outputs else TYPES, where)
+        if outputs:
+            _endpoint(port["source"], where)
+            _boolean(port["required"], where)
+
+
+def _validate_node(node, where):
+    _require(type(node) is dict, "Schema", where, "node object required")
+    kind = node.get("kind")
+    _enum(kind, ("Scene", "Camera", "Target", "Raster", "Subgraph", "Export", "Present"), where)
+    fields = {"id", "kind"}
+    if kind == "Camera":
+        fields |= {"active", "role", "target_type"}
+    elif kind == "Target":
+        fields |= {"type", "format", "extent", "samples", "imported", "initialized", "presentation"}
+    elif kind == "Raster":
+        fields |= {"mode", "vertex_layout", "material", "depth_load", "depth_store"}
+        if node.get("mode") == "ColorAndDepth":
+            fields |= {"color_load", "color_store"}
+    elif kind == "Subgraph":
+        fields |= {"asset", "configuration"}
+    elif kind == "Export":
+        fields |= {"type"}
+    _keys(node, fields, where)
+    _identifier(node["id"], where)
+    _require(node["id"] != "input", "Schema", where, "input is reserved for interface ports")
+    if kind == "Camera":
+        _boolean(node["active"], where)
+        _enum(node["role"], ("Presentation", "Offscreen"), where)
+        _enum(node["target_type"], TEXTURES, where)
+        _require(node["role"] != "Presentation" or node["target_type"] == "ColorTexture",
+                 "TypeMismatch", where, "a presentation camera requires a color target")
+    elif kind == "Target":
+        _enum(node["type"], TEXTURES, where)
+        _enum(node["format"], FORMATS[node["type"]], where)
+        _require(type(node["extent"]) is list and len(node["extent"]) == 2,
+                 "Schema", where, "extent must contain width and height in pixels")
+        for size in node["extent"]:
+            _integer(size, 1, 16384, where)
+        _integer(node["samples"], 1, 1, where)
+        for flag in ("imported", "initialized", "presentation"):
+            _boolean(node[flag], where)
+        _require(not node["initialized"] or node["imported"], "Initialization", where,
+                 "only an imported target may declare existing initialized contents")
+        _require(not node["presentation"] or
+                 (node["imported"] and node["type"] == "ColorTexture"),
+                 "TypeMismatch", where, "presentation requires an imported color target")
+    elif kind == "Raster":
+        _enum(node["mode"], MODES, where)
+        _enum(node["vertex_layout"], ("RendererStatic",), where)
+        _enum(node["material"], ("DefaultOpaque",), where)
+        for aspect in ("depth", "color") if node["mode"] == "ColorAndDepth" else ("depth",):
+            _enum(node[aspect + "_load"], ("Clear", "Load", "Discard"), where)
+            _enum(node[aspect + "_store"], ("Store", "Discard"), where)
+    elif kind == "Subgraph":
+        _require(type(node["asset"]) is str and 0 < len(node["asset"]) <= 255,
+                 "Schema", where, "package-relative asset path required")
+        _identifier(node["configuration"], where)
+    elif kind == "Export":
+        _enum(node["type"], TEXTURES, where)
+
+
+def _validate_document(value, where):
+    _keys(value, ("version", "id", "default", "configurations"), where)
+    _require(type(value["version"]) is int and value["version"] == 1,
+             "Version", where, "only render graph document version 1 is supported")
+    _identifier(value["id"], where)
+    _identifier(value["default"], where)
+    _list(value["configurations"], MAX_CONFIGURATIONS, where)
+    claimed = set()
+    for config in value["configurations"]:
+        _keys(config, ("id", "inputs", "outputs", "nodes", "edges"), where, ("layout",))
+        _identifier(config["id"], where)
+        _require(config["id"] not in claimed, "DuplicateIdentity", where, config["id"])
+        claimed.add(config["id"])
+        location = where + "#" + config["id"]
+        _ports(config["inputs"], location)
+        _ports(config["outputs"], location, outputs=True)
+        _list(config["nodes"], MAX_NODES, location)
+        _list(config["edges"], MAX_EDGES, location)
+        nodes = set()
+        for node in config["nodes"]:
+            _validate_node(node, location)
+            _require(node["id"] not in nodes, "DuplicateIdentity", location, node["id"])
+            nodes.add(node["id"])
+        for edge in config["edges"]:
+            _keys(edge, ("from", "to"), location)
+            _endpoint(edge["from"], location)
+            _endpoint(edge["to"], location)
+        if "layout" in config:
+            layout = config["layout"]
+            _keys(layout, ("positions",), location)
+            _list(layout["positions"], MAX_NODES, location)
+            placed = set()
+            for item in layout["positions"]:
+                _keys(item, ("node", "x", "y"), location)
+                _require(type(item["node"]) is str and item["node"] in nodes
+                         and item["node"] not in placed, "Schema", location, "invalid layout node")
+                placed.add(item["node"])
+                for coordinate in ("x", "y"):
+                    _integer(item[coordinate], -32768, 32768, location)
+    _require(value["default"] in claimed, "Configuration", where, "default configuration is missing")
+
+
+def canonical_asset(value):
+    """Serialize a locally schema-checked v1 asset; imports need closure validation.
+
+    Returns UTF-8 bytes without mutating the caller's document. Rejects oversized
+    sources and unknown fields. Does not write files or resolve resource bindings.
+    """
+    _validate_document(value, "document")
+    data = (json.dumps(value, sort_keys=True, indent=2, ensure_ascii=True) + "\n").encode()
+    _require(len(data) <= MAX_ASSET_BYTES, "Capacity", "document", "asset exceeds 128 KiB")
+    return data
+
+
+def _read(path):
+    try:
+        with path.open("rb") as stream:
+            data = stream.read(MAX_ASSET_BYTES + 1)
+    except (OSError, ValueError) as error:
+        _fail("Source", str(path), str(error))
+    _require(len(data) <= MAX_ASSET_BYTES, "Capacity", str(path), "asset exceeds 128 KiB")
+    return data
+
+
+def _resolve(path, where):
+    try:
+        return Path(path).resolve()
+    except (OSError, RuntimeError, ValueError) as error:
+        _fail("Source", where, str(error))
+
+
+def _parse(data, where):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            _require(key not in result, "Schema", where, f"duplicate JSON field {key}")
+            result[key] = value
+        return result
+
+    def constant(value):
+        _fail("Schema", where, f"nonfinite JSON constant {value}")
+
+    try:
+        value = json.loads(data.decode("utf-8"), object_pairs_hook=unique, parse_constant=constant)
+    except (ValueError, UnicodeError, RecursionError) as error:
+        _fail("Schema", where, str(error))
+    _validate_document(value, where)
+    return value
+
+
+def _configuration(asset, identity, where):
+    for config in asset["configurations"]:
+        if config["id"] == identity:
+            return config
+    _fail("Configuration", where, f"configuration {identity} is not declared by {asset['id']}")
+
+
+class _Library:
+    def __init__(self, root):
+        self.root = _resolve(root, str(root))
+        self.assets = {}
+        self.bytes = {}
+        self.identities = {}
+        self.active = []
+        self.total = 0
+
+    def inside(self, relative, where):
+        _require(type(relative) is str and relative and "\\" not in relative and ":" not in relative,
+                 "Source", where, "imports must use package-relative POSIX paths")
+        path = Path(relative)
+        _require(not path.is_absolute() and ".." not in path.parts,
+                 "Source", where, "import escapes the graph package")
+        resolved = _resolve(self.root / path, where)
+        _require(resolved.is_relative_to(self.root), "Source", where, "import symlink escapes the package")
+        return resolved
+
+    def label(self, path):
+        return path.relative_to(self.root).as_posix()
+
+    def load(self, path):
+        _require(path.is_relative_to(self.root), "Source", str(path), "source must be inside the package")
+        where = self.label(path)
+        _require(path not in self.active, "Recursion", where,
+                 "recursive graph import: " + " -> ".join(self.label(p) for p in [*self.active, path]))
+        if path in self.assets:
+            return self.assets[path]
+        _require(len(self.active) < MAX_DEPTH and len(self.assets) < MAX_ASSETS,
+                 "Capacity", where, "import depth/file capacity exceeded")
+        data = _read(path)
+        self.total += len(data)
+        _require(self.total <= MAX_TOTAL_BYTES, "Capacity", where, "package exceeds 2 MiB of graph sources")
+        asset = _parse(data, where)
+        _require(asset["id"] not in self.identities, "DuplicateIdentity", where,
+                 f"asset identity {asset['id']} is already owned by another file")
+        self.identities[asset["id"]] = path
+        self.assets[path] = asset
+        self.bytes[path] = data
+        self.active.append(path)
+        try:
+            for config in asset["configurations"]:
+                for node in config["nodes"]:
+                    if node["kind"] == "Subgraph":
+                        child = self.load(self.inside(node["asset"], where))
+                        _configuration(child, node["configuration"], where + "/" + node["id"])
+                self.order(path, config)
+        finally:
+            self.active.pop()
+        return asset
+
+    def node_ports(self, node):
+        kind = node["kind"]
+        if kind == "Scene":
+            return {}, {"scene": "Scene"}
+        if kind == "Camera":
+            return {"target": node["target_type"]}, {"view": "View"}
+        if kind == "Target":
+            return {}, {"texture": node["type"]}
+        if kind == "Raster":
+            inputs = {"scene": "Scene", "view": "View", "depth": "DepthTexture"}
+            outputs = {"depth": "DepthTexture"}
+            if node["mode"] == "ColorAndDepth":
+                inputs["color"] = "ColorTexture"
+                outputs["color"] = "ColorTexture"
+            return inputs, outputs
+        if kind == "Subgraph":
+            path = self.inside(node["asset"], node["id"])
+            config = _configuration(self.assets[path], node["configuration"], node["id"])
+            return ({p["id"]: p["type"] for p in config["inputs"]},
+                    {p["id"]: p["type"] for p in config["outputs"]})
+        return {"texture" if kind == "Export" else "color":
+                node["type"] if kind == "Export" else "ColorTexture"}, {}
+
+    def order(self, path, config):
+        where = self.label(path) + "#" + config["id"]
+        nodes = {n["id"]: n for n in config["nodes"]}
+        ports = {key: self.node_ports(node) for key, node in nodes.items()}
+        sources = {"input": {p["id"]: p["type"] for p in config["inputs"]}}
+        sources.update({key: value[1] for key, value in ports.items()})
+        incoming = {key: {} for key in nodes}
+        used = set()
+
+        def source(endpoint):
+            key, port = _endpoint(endpoint, where)
+            _require(key in sources and port in sources[key], "Port", where,
+                     f"unknown output {endpoint}")
+            return sources[key][port]
+
+        for edge in config["edges"]:
+            kind = source(edge["from"])
+            key, port = _endpoint(edge["to"], where)
+            _require(key in ports and port in ports[key][0], "Port", where,
+                     f"unknown input {edge['to']}")
+            _require(port not in incoming[key], "MultipleWriters", where,
+                     f"input {edge['to']} has multiple connections")
+            _require(kind == ports[key][0][port], "TypeMismatch", where,
+                     f"{edge['from']} ({kind}) cannot connect to {edge['to']} ({ports[key][0][port]})")
+            incoming[key][port] = edge["from"]
+            used.add(edge["from"])
+        for output in config["outputs"]:
+            _require(source(output["source"]) == output["type"], "TypeMismatch", where,
+                     f"output {output['id']} has the wrong source type")
+            used.add(output["source"])
+        for key, node in nodes.items():
+            required = set(ports[key][0])
+            if node["kind"] == "Camera" and not node["active"]:
+                required.clear()
+            _require(required <= incoming[key].keys(), "UnboundInput", where + "/" + key,
+                     f"missing inputs {sorted(required - incoming[key].keys())}")
+            if node["kind"] == "Subgraph":
+                child = self.assets[self.inside(node["asset"], where)]
+                selected = _configuration(child, node["configuration"], where)
+                for output in selected["outputs"]:
+                    _require(not output["required"] or key + "." + output["id"] in used,
+                             "UnusedRequiredOutput", where + "/" + key,
+                             f"output {output['id']} requires a consumer")
+        dependencies = {key: {_endpoint(e, where)[0] for e in values.values()} - {"input"}
+                        for key, values in incoming.items()}
+        ordered, done = [], set()
+        while len(done) < len(nodes):
+            ready = next((key for key in nodes if key not in done and dependencies[key] <= done), None)
+            _require(ready is not None, "Cycle", where, "within-frame dependency cycle")
+            ordered.append(nodes[ready])
+            done.add(ready)
+        return ordered, incoming
+
+    def verify_snapshot(self):
+        for path, data in self.bytes.items():
+            _require(_read(path) == data, "SourceChanged", self.label(path),
+                     "graph source changed during validation; retry with a consistent snapshot")
+
+
+@dataclass(frozen=True)
+class _Value:
+    type: str
+    origin: str | None = None
+    resource: str | None = None
+    version: int = 0
+    defined: bool = False
+    producer: str | None = None
+    cameras: tuple[str, ...] = ()
+
+
+class _Compiler:
+    def __init__(self, library):
+        self.library = library
+        self.passes = []
+        self.resources = {}
+        self.writers = set()
+        self.latest = {}
+        self.roots = []
+        self.cameras = []
+        self.techniques = set()
+        self.expanded = 0
+
+    def add_pass(self, entry):
+        _require(len(self.passes) < MAX_PASSES, "Capacity", entry["id"], "serial pass capacity exceeded")
+        self.passes.append(entry)
+
+    def write(self, value, node, aspect, where, camera):
+        load, store = node[aspect + "_load"], node[aspect + "_store"]
+        _require(load != "Load" or value.defined, "Initialization", where,
+                 f"{aspect} Load reads undefined {value.resource}@{value.version}")
+        key = (value.resource, value.version)
+        _require(key not in self.writers, "MultipleWriters", where,
+                 f"multiple writes branch from {value.resource}@{value.version}; connect the preceding version")
+        self.writers.add(key)
+        defined = store == "Store" and (load == "Clear" or (load == "Load" and value.defined))
+        cameras = tuple(sorted(set((*value.cameras, *camera)))) if load == "Load" else camera
+        result = replace(value, version=value.version + 1, defined=defined, producer=where, cameras=cameras)
+        self.latest[value.resource] = result.version
+        return result
+
+    def expand(self, path, config, prefix, bindings, depth=0):
+        _require(depth < MAX_DEPTH, "Capacity", prefix, "expanded subgraph depth exceeded")
+        order, incoming = self.library.order(path, config)
+        values = {"input." + key: value for key, value in bindings.items()}
+        for node in order:
+            self.expanded += 1
+            where = prefix + "/" + node["id"]
+            _require(self.expanded <= MAX_EXPANDED_NODES, "Capacity", where, "expanded node capacity exceeded")
+            inputs = {key: values[endpoint] for key, endpoint in incoming[node["id"]].items()}
+            outputs = {}
+            kind = node["kind"]
+            if kind == "Scene":
+                outputs["scene"] = _Value("Scene", origin=where)
+            elif kind == "Target":
+                self.resources[where] = {key: node[key] for key in
+                    ("type", "format", "extent", "samples", "imported", "initialized", "presentation")}
+                self.latest[where] = 0
+                outputs["texture"] = _Value(node["type"], origin=where, resource=where, defined=node["initialized"])
+            elif kind == "Camera":
+                camera = {"id": where, "active": node["active"], "role": node["role"],
+                          "target": inputs["target"].resource if "target" in inputs else None}
+                if node["active"]:
+                    target = self.resources[camera["target"]]
+                    _require(target["presentation"] == (node["role"] == "Presentation"),
+                             "CameraTarget", where, "camera role does not match its designated target")
+                self.cameras.append(camera)
+                outputs["view"] = _Value("View", origin=where, cameras=(where,) if node["active"] else ())
+            elif kind == "Raster":
+                _require(inputs["view"].cameras, "CameraTarget", where, "raster requires an active camera")
+                if node["mode"] == "ColorAndDepth":
+                    color, depth_target = (self.resources[inputs[aspect].resource] for aspect in ("color", "depth"))
+                    _require((color["extent"], color["samples"]) == (depth_target["extent"], depth_target["samples"]),
+                             "AttachmentMismatch", where, "color/depth extent and samples must agree")
+                for aspect in ("depth", "color") if node["mode"] == "ColorAndDepth" else ("depth",):
+                    outputs[aspect] = self.write(inputs[aspect], node, aspect, where, inputs["view"].cameras)
+                technique = "DefaultStaticOpaque." + node["mode"]
+                self.techniques.add(technique)
+                entry = {"id": where, "kind": "Raster", "configuration": node["mode"],
+                         "technique": technique, "source": self.library.label(path), "asset": self.library.assets[path]["id"],
+                         "asset_configuration": config["id"], "vertex_layout": node["vertex_layout"],
+                         "material": node["material"], "scene": inputs["scene"].origin,
+                         "view": inputs["view"].origin, "cameras": list(inputs["view"].cameras),
+                         "dependencies": sorted({v.producer for v in inputs.values() if v.producer}),
+                         "attachments": {aspect: {"resource": value.resource, "input_version": inputs[aspect].version,
+                            "output_version": value.version, "defined": value.defined,
+                            "load": node[aspect + "_load"], "store": node[aspect + "_store"]}
+                            for aspect, value in outputs.items()}}
+                self.add_pass(entry)
+            elif kind == "Subgraph":
+                child_path = self.library.inside(node["asset"], where)
+                child = self.library.assets[child_path]
+                selected = _configuration(child, node["configuration"], where)
+                outputs = self.expand(child_path, selected, where, inputs, depth + 1)
+            else:
+                value = inputs["texture" if kind == "Export" else "color"]
+                self.root(where, kind, value)
+                self.add_pass({"id": where, "kind": kind, "source": self.library.label(path),
+                               "asset": self.library.assets[path]["id"], "asset_configuration": config["id"],
+                               "dependencies": [value.producer] if value.producer else [],
+                               "resource": value.resource, "version": value.version})
+            values.update({node["id"] + "." + key: value for key, value in outputs.items()})
+        return {p["id"]: values[p["source"]] for p in config["outputs"]}
+
+    def root(self, where, kind, value):
+        _require(value.defined, "Initialization", where,
+                 f"{kind} reads undefined {value.resource}@{value.version}")
+        if kind == "Present":
+            _require(self.resources[value.resource]["presentation"], "CameraTarget", where,
+                     "Present requires the written version of an imported presentation target")
+            _require(not any(r["kind"] == "Present" and r["resource"] == value.resource for r in self.roots),
+                     "MultipleWriters", where, "presentation target has multiple Present operations")
+        self.roots.append({"id": where, "kind": kind, "resource": value.resource,
+                           "version": value.version, "cameras": list(value.cameras)})
+
+    def finish(self):
+        for root in self.roots:
+            _require(root["version"] == self.latest[root["resource"]], "StaleVersion", root["id"],
+                     "export/presentation must consume the final physical resource version")
+        for camera in self.cameras:
+            if camera["active"]:
+                kind = "Present" if camera["role"] == "Presentation" else "Export"
+                _require(any(root["kind"] == kind and root["resource"] == camera["target"] and
+                             camera["id"] in root["cameras"] for root in self.roots),
+                         "CameraRouteMissing", camera["id"],
+                         f"active camera has no rendered route to {kind} on {camera['target']}")
+        _require(self.roots, "UnboundOutput", "root graph", "an execution graph needs an Export or Present root")
+
+
+def _library(path, root):
+    path = _resolve(path, str(path))
+    library = _Library(Path(root) if root is not None else path.parent)
+    library.load(path)
+    return library, path
+
+
+def load_library(path, *, root=None):
+    """Validate all declared interfaces/configurations and recursive imports.
+
+    Reads only package-contained bounded UTF-8 JSON files and verifies the source
+    snapshot before returning an interface report. Resource initialization and
+    camera routes require concrete root bindings and are checked by compile_graph.
+    Failure raises a stable ToolingError; no files or prior plans are modified.
+    """
+    library, path = _library(path, root)
+    asset = library.assets[path]
+    library.verify_snapshot()
+    return {"version": 1, "stage": "RG0", "asset": asset["id"], "default": asset["default"],
+            "validation": "InterfacesOnly", "configurations": [
+                {"id": c["id"], "inputs": c["inputs"], "outputs": c["outputs"]}
+                for c in asset["configurations"]]}
+
+
+def compile_graph(path, *, configuration=None, root=None):
+    """Validate/lower one closed root graph into a deterministic RG0 plan.
+
+    Root interface inputs must be bound by a containing graph, so a root execution
+    configuration has no inputs. Imports select explicit authored configurations.
+    The plan validates initialization, versions and active camera routes; it does
+    not compile shaders, check scene coverage/device capabilities or submit GPU
+    work. Returns copied diagnostic records only after all checks/source snapshots
+    succeed. Failures leave sources and previously returned plans unchanged.
+    """
+    library, path = _library(path, root)
+    asset = library.assets[path]
+    selected = asset["default"] if configuration is None else configuration
+    _identifier(selected, str(path))
+    config = _configuration(asset, selected, library.label(path))
+    _require(not config["inputs"], "UnboundInput", library.label(path),
+             "root interface inputs require a containing graph; use --library to inspect the interface")
+    compiler = _Compiler(library)
+    outputs = compiler.expand(path, config, asset["id"], {})
+    for key, value in outputs.items():
+        compiler.root(asset["id"] + "/output/" + key, "Export", value)
+    compiler.finish()
+    library.verify_snapshot()
+    semantic = []
+    for source in sorted(library.assets, key=library.label):
+        document = library.assets[source]
+        semantic.append({"source": library.label(source), "document": {
+            **document, "configurations": [{k: v for k, v in c.items() if k != "layout"}
+                                          for c in document["configurations"]]}})
+    identity = {"documents": semantic, "configuration": selected}
+    return {"version": 1, "stage": "RG0", "execution": "ContractOnly", "asset": asset["id"],
+            "configuration": selected, "selection": "Default" if configuration is None else "Explicit",
+            "semantic_digest": hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "dependencies": [{"source": library.label(p), "sha256": hashlib.sha256(library.bytes[p]).hexdigest()}
+                             for p in sorted(library.bytes, key=library.label)],
+            "passes": compiler.passes, "resources": compiler.resources, "roots": compiler.roots,
+            "cameras": compiler.cameras, "techniques": sorted(compiler.techniques),
+            "checks_pending": ["ShaderBuild", "DeviceCapabilities", "SceneCoverage", "GpuExecution"]}
+
+
+def dump_plan(plan):
+    """Format the validated plan as readable text; includes source/instance IDs."""
+    lines = [f"RG0 serial plan {plan['asset']}#{plan['configuration']} (contract only)"]
+    for ordinal, entry in enumerate(plan["passes"]):
+        detail = " " + entry["configuration"] if entry["kind"] == "Raster" else ""
+        lines.append(f"{ordinal:03} {entry['id']} {entry['kind']}{detail} [{entry['source']}#{entry['asset_configuration']}]")
+        if entry["kind"] == "Raster":
+            lines.append(f"    scene: {entry['scene']}; view: {entry['view']}; technique: {entry['technique']}")
+        for aspect, attachment in entry.get("attachments", {}).items():
+            lines.append(f"    {aspect}: {attachment['resource']}@{attachment['input_version']} -> "
+                         f"@{attachment['output_version']} {attachment['load']}/{attachment['store']} "
+                         f"defined={str(attachment['defined']).lower()}")
+        if "resource" in entry:
+            lines.append(f"    {entry['resource']}@{entry['version']}")
+        if entry["dependencies"]:
+            lines.append("    after: " + ", ".join(entry["dependencies"]))
+    for root in plan["roots"]:
+        lines.append(f"Root {root['id']}: {root['kind']} {root['resource']}@{root['version']}")
+    lines.append("Authored techniques: " + ", ".join(plan["techniques"]))
+    lines.append("Pending: " + ", ".join(plan["checks_pending"]))
+    return "\n".join(lines)
+
+
+def _target(identity, kind, presentation=False):
+    return {"id": identity, "kind": "Target", "type": kind, "format": FORMATS[kind][0],
+            "extent": [640, 480], "samples": 1, "imported": presentation,
+            "initialized": False, "presentation": presentation}
+
+
+def _raster_asset():
+    configs = []
+    for mode in MODES:
+        node = {"id": "draw", "kind": "Raster", "mode": mode, "vertex_layout": "RendererStatic",
+                "material": "DefaultOpaque", "depth_load": "Clear", "depth_store": "Store"}
+        inputs = [{"id": "scene", "type": "Scene"}, {"id": "view", "type": "View"},
+                  {"id": "depth", "type": "DepthTexture"}]
+        outputs = [{"id": "depth", "type": "DepthTexture", "source": "draw.depth", "required": mode == "DepthOnly"}]
+        if mode == "ColorAndDepth":
+            node.update(color_load="Clear", color_store="Store")
+            inputs.append({"id": "color", "type": "ColorTexture"})
+            outputs.append({"id": "color", "type": "ColorTexture", "source": "draw.color", "required": False})
+        configs.append({"id": mode, "inputs": inputs, "outputs": outputs, "nodes": [node],
+                        "edges": [{"from": "input." + p["id"], "to": "draw." + p["id"]} for p in inputs]})
+    return {"version": 1, "id": "RasterizeGraph", "default": "ColorAndDepth", "configurations": configs}
+
+
+def _root_asset(output):
+    depth_only = output == "depth"
+    presentation = output == "presentation"
+    kind = "DepthTexture" if depth_only else "ColorTexture"
+    nodes = [{"id": "scene", "kind": "Scene"},
+             {"id": "camera", "kind": "Camera", "active": True,
+              "role": "Presentation" if presentation else "Offscreen", "target_type": kind},
+             _target("depth", "DepthTexture"),
+             {"id": "raster", "kind": "Subgraph", "asset": "rasterize.lurender.json",
+              "configuration": "DepthOnly" if depth_only else "ColorAndDepth"},
+             {"id": "output", "kind": "Present"} if presentation else
+             {"id": "output", "kind": "Export", "type": kind}]
+    edges = [{"from": "scene.scene", "to": "raster.scene"},
+             {"from": "camera.view", "to": "raster.view"},
+             {"from": "depth.texture", "to": "raster.depth"}]
+    if not depth_only:
+        nodes.insert(2, _target("color", "ColorTexture", presentation))
+        edges.append({"from": "color.texture", "to": "raster.color"})
+    aspect = "depth" if depth_only else "color"
+    edges += [{"from": aspect + ".texture", "to": "camera.target"},
+              {"from": "raster." + aspect, "to": "output.color" if presentation else "output.texture"}]
+    return {"version": 1, "id": "Main", "default": "Default", "configurations": [
+        {"id": "Default", "inputs": [], "outputs": [], "nodes": nodes, "edges": edges}]}
+
+
+def new_workspace(destination, *, output="presentation"):
+    """Save a reusable raster asset and one example root in a new directory.
+
+    output is presentation, offscreen or depth. Creation never overwrites an
+    existing directory; staged files are validated before publication and cleaned
+    up on failure. This is graph source creation, not game-project/SDK setup.
+    Returns the saved root path; performs no downloads, shader builds or GPU work.
+    """
+    from .templates import TemplateFile, stage_project, publish_project, discard_staging
+
+    _enum(output, ("presentation", "offscreen", "depth"), "new graph")
+    destination = Path(destination).absolute()
+    files = [TemplateFile("rasterize.lurender.json", canonical_asset(_raster_asset()).decode()),
+             TemplateFile("main.lurender.json", canonical_asset(_root_asset(output)).decode())]
+    staged = stage_project(files, destination)
+    try:
+        compile_graph(staged.staging / "main.lurender.json")
+        publish_project(staged)
+    except BaseException:
+        discard_staging(staged)
+        raise
+    return destination / "main.lurender.json"
