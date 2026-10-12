@@ -17,6 +17,8 @@
 #include <atomic>
 #include <new>
 
+#include "internal/reference_data.h"
+
 namespace ludus::graphics::renderer
 {
 using namespace foundation;
@@ -220,6 +222,7 @@ struct Renderer::State final
 {
     struct MeshRecord final : SlotIdentity
     {
+        core::UniquePtr<internal::ReferenceMeshData> Reference;
         rhi::BufferHandle Vertices{}, Indices{};
         uint32 VertexCount = 0, IndexCount = 0, References = 0;
         bool HasNormals = false;
@@ -284,6 +287,7 @@ struct Renderer::State final
     };
     struct MaterialRecord final : SlotIdentity
     {
+        core::UniquePtr<internal::ReferenceSurfaceData> Reference;
         rhi::BufferHandle Parameters{};
         rhi::SamplerHandle Sampler{};
         rhi::TextureViewHandle Texture{};
@@ -342,8 +346,21 @@ struct Renderer::State final
     Candidate Candidates[OBJECTS]{}, Scratch[OBJECTS]{};
     Instance Instances[OBJECTS]{};
     core::UniquePtr<LightClusters> ClusterScratch;
+    core::UniquePtr<internal::ReferenceState> Reference;
+    Status PrepareReferenceMesh(const MeshDescription&,
+                                const struct Vertex*,
+                                core::UniquePtr<internal::ReferenceMeshData>&) noexcept;
+    Status PrepareReferenceSurface(const MaterialDescription&,
+                                   const LitMaterialDescription*,
+                                   core::UniquePtr<internal::ReferenceSurfaceData>&) noexcept;
+    Status
+    BuildReferenceJob(usize, const ReferenceCaptureDescription&, core::UniquePtr<internal::ReferenceJob>&) noexcept;
+    usize RemainingReferenceRayBytes(Status&) noexcept;
+    void DropReferenceCapture(usize) noexcept;
+    void ClearReference() noexcept;
     ~State()
     {
+        ClearReference();
         for (usize i = 0; i < VIEWS; ++i)
         {
             if (ViewRecords[i].Used)
@@ -469,6 +486,11 @@ struct Renderer::State final
             }
             --Programs[m.ProgramSlot].References;
             DropProgram(m.ProgramSlot);
+            if (m.Reference && Reference)
+            {
+                Reference->CpuBytes -= sizeof(internal::ReferenceSurfaceData);
+            }
+            m.Reference.Reset();
             const auto generation = m.Generation + 1;
             m = {};
             m.Generation = generation;
@@ -567,6 +589,11 @@ struct Renderer::State final
         {
             static_cast<void>(rhi::Destroy(Device, mesh.Vertices));
             static_cast<void>(rhi::Destroy(Device, mesh.Indices));
+            if (mesh.Reference && Reference)
+            {
+                Reference->CpuBytes -= mesh.Reference->CpuBytes;
+            }
+            mesh.Reference.Reset();
             Retire(mesh);
         }
     }
@@ -1775,7 +1802,21 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
     {
         return status;
     }
+    core::UniquePtr<internal::ReferenceSurfaceData> referenceSurface;
+    if (s.Reference)
+    {
+        status = s.PrepareReferenceSurface(description, lighting, referenceSurface);
+        if (status != Status::Ready)
+        {
+            return status;
+        }
+    }
     auto& m = s.Materials[slot];
+    if (referenceSurface)
+    {
+        s.Reference->CpuBytes += sizeof(internal::ReferenceSurfaceData);
+    }
+    m.Reference = core::Move(referenceSurface);
     m.Used = m.Owned = true;
     m.ProgramSlot = Access::Slot(program);
     m.Alpha = description.Alpha;
@@ -2061,6 +2102,15 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
         }
         vertices[i] = {input.Positions[i], uv, normal, input.BakeTexcoords != nullptr ? input.BakeTexcoords[i] : uv};
     }
+    core::UniquePtr<internal::ReferenceMeshData> referenceMesh;
+    if (mState->Reference)
+    {
+        status = mState->PrepareReferenceMesh(input, vertices.GetData(), referenceMesh);
+        if (status != Status::Ready)
+        {
+            return status;
+        }
+    }
     const auto vertexBytes = input.VertexCount * sizeof(Vertex), indexBytes = input.IndexCount * sizeof(uint32);
     status = rhi::CreateBuffer(mState->Device,
                                {rhi::BufferRole::Vertex, vertexBytes},
@@ -2079,6 +2129,11 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
         static_cast<void>(rhi::Destroy(mState->Device, mesh.Vertices));
         return second;
     }
+    if (referenceMesh)
+    {
+        mState->Reference->CpuBytes += referenceMesh->CpuBytes;
+    }
+    mesh.Reference = core::Move(referenceMesh);
     mesh.Used = mesh.Owned = true;
     mesh.References = 0;
     mesh.VertexCount = static_cast<uint32>(input.VertexCount);
@@ -2086,7 +2141,10 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
     mesh.Bounds = bounds;
     mesh.HasNormals = input.Normals != nullptr;
     output = Access::Make<Mesh>({mState->Owner, mesh.Generation, slot});
-    return status == Status::Pending || second == Status::Pending ? Status::Pending : Status::Ready;
+    return status == Status::Pending || second == Status::Pending ||
+                   (mesh.Reference && mesh.Reference->NativeStatus == Status::Pending)
+               ? Status::Pending
+               : Status::Ready;
 }
 Status Renderer::GetStatus(Mesh handle) const noexcept
 {
@@ -2100,7 +2158,15 @@ Status Renderer::GetStatus(Mesh handle) const noexcept
         return Status::InvalidHandle;
     }
     auto status = rhi::GetStatus(mState->Device, mesh->Vertices);
-    return status == Status::Ready ? rhi::GetStatus(mState->Device, mesh->Indices) : status;
+    if (status == Status::Ready)
+    {
+        status = rhi::GetStatus(mState->Device, mesh->Indices);
+    }
+    if (status == Status::Ready && mesh->Reference && mesh->Reference->NativeStatus == Status::Pending)
+    {
+        status = rhi::GetStatus(mState->Device, mesh->Reference->Geometry);
+    }
+    return status;
 }
 Status Renderer::Release(Mesh& handle) noexcept
 {
@@ -3373,3 +3439,5 @@ Status Renderer::Release(ShadowAtlas& handle) noexcept
     return Status::Ready;
 }
 } // namespace ludus::graphics::renderer
+
+#include "internal/reference_services.h"

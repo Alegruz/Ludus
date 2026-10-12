@@ -21,6 +21,7 @@ ludus::foundation::uint64 gDeviceOwner = 0;
 bool gLegacy = false;
 bool gRendering = false;
 bool gFrame = false;
+bool gRayProfileRequest = false;
 bool gDrawn = false;
 bool gRasterDrawn = false;
 bool gRequireRaster = false;
@@ -34,6 +35,14 @@ namespace internal
 DeviceProfile CurrentDeviceProfile() noexcept
 {
     return gStartup.State == StartupState::Ready ? gProfile : DeviceProfile{};
+}
+bool RequestsRayProfile() noexcept
+{
+    return gRayProfileRequest;
+}
+void SetRayProfileRequest(bool value) noexcept
+{
+    gRayProfileRequest = value;
 }
 bool FrameOpen() noexcept
 {
@@ -385,6 +394,7 @@ void ShutdownRendering() noexcept
 void Shutdown() noexcept
 {
     gDeviceOwner = 0;
+    gRayProfileRequest = false;
     gFallback = nullptr;
     gToken = 0;
     internal::ReleaseRasterResources();

@@ -31,6 +31,43 @@ bool NormalizeLight(DirectLight& light) noexcept
             math::TryNormalize(light.Direction, light.Direction) == math::MathStatus::Success);
 }
 } // namespace
+rhi::RasterStatus NormalizeDirectLights(const DirectLight* lights, usize count, LightSelection& output) noexcept
+{
+    if (count > 128)
+    {
+        return rhi::RasterStatus::CapacityExceeded;
+    }
+    if (count != 0 && lights == nullptr)
+    {
+        return rhi::RasterStatus::InvalidDescription;
+    }
+    LightSelection result;
+    for (usize i = 0; i < count; ++i)
+    {
+        auto light = lights[i];
+        if (!NormalizeLight(light))
+        {
+            return rhi::RasterStatus::InvalidDescription;
+        }
+        usize at = 0;
+        while (at < result.Count && result.Lights[at].SourceId < light.SourceId)
+        {
+            ++at;
+        }
+        if (at < result.Count && result.Lights[at].SourceId == light.SourceId)
+        {
+            return rhi::RasterStatus::InvalidDescription;
+        }
+        for (usize j = result.Count; j > at; --j)
+        {
+            result.Lights[j] = result.Lights[j - 1];
+        }
+        result.Lights[at] = light;
+        ++result.Count;
+    }
+    output = result;
+    return rhi::RasterStatus::Ready;
+}
 rhi::RasterStatus SelectDirectLights(const DirectLight* lights, usize count, LightSelection& output) noexcept
 {
     if (count > 128)

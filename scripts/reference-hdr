@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Validate a LUHDR01 capture; export linear PFM and a JSON manifest (no tonemapping)."""
+import argparse
+import hashlib
+import json
+import math
+from pathlib import Path
+import struct
+
+
+def decode(data):
+    if len(data) < 256 or data[:8] != b'LUHDR01\0':
+        raise ValueError('Not a LUHDR01 capture')
+    schema, profile, sampler, header, width, height, target, depth, roulette, flags = struct.unpack_from('<10I', data, 8)
+    if (schema, profile, sampler, header) != (1, 1, 1, 256) or not width or not height or flags & ~63:
+        raise ValueError('Unsupported capture profile/header')
+    if len(data) != 256 + width * height * 16 or not 1 <= target <= 16777215 or not 1 <= depth <= 64 or not 1 <= roulette <= 64:
+        raise ValueError('Invalid capture extent or sampling limits')
+    pixels = list(struct.iter_unpack('<fffI', data[256:]))
+    if any(not all(math.isfinite(c) and c >= 0 for c in pixel[:3]) or pixel[3] > 16777215 for pixel in pixels):
+        raise ValueError('Nonfinite/negative radiance or invalid count')
+    counts = [pixel[3] for pixel in pixels]
+    if not flags & 32 and min(counts) < target:
+        raise ValueError('Complete capture has uncommitted pixels')
+    seed, revision, low, high = struct.unpack_from('<4Q', data, 48)
+    metadata = dict(schema=schema, profile=profile, sampler=sampler, width=width, height=height,
+                    target_samples=target, max_depth=depth, roulette_depth=roulette, flags=flags,
+                    seed=seed, revision=revision, scene_fingerprint=f'{high:016x}{low:016x}',
+                    traversal='cpu_oracle' if flags & 1 else 'native_queries',
+                    partial=bool(flags & 32), minimum_samples=min(counts), maximum_samples=max(counts),
+                    secondary_distance=struct.unpack_from('<f', data, 80)[0], texture_mip=struct.unpack_from('<I', data, 84)[0],
+                    light_count=struct.unpack_from('<I', data, 88)[0], world_to_clip=list(struct.unpack_from('<16f', data, 96)),
+                    camera_position=list(struct.unpack_from('<3f', data, 160)), environment=list(struct.unpack_from('<3f', data, 172)),
+                    sha256=hashlib.sha256(data).hexdigest())
+    return metadata, pixels
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('capture', type=Path)
+    parser.add_argument('--pfm', type=Path, required=True)
+    parser.add_argument('--manifest', type=Path, required=True)
+    args = parser.parse_args()
+    metadata, pixels = decode(args.capture.read_bytes())
+    width, height = metadata['width'], metadata['height']
+    with args.pfm.open('wb') as output:
+        output.write(f'PF\n{width} {height}\n-1.0\n'.encode('ascii'))
+        for row in range(height - 1, -1, -1):
+            for pixel in pixels[row * width:(row + 1) * width]:
+                output.write(struct.pack('<fff', *pixel[:3]))
+    args.manifest.write_text(json.dumps(metadata, indent=2) + '\n')
+
+
+if __name__ == '__main__':
+    main()

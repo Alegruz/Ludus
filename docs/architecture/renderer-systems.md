@@ -2,7 +2,7 @@
 
 Status: L0 scene submission, L1 views/depth, L2 mutable versions/overlays and
 L3 material/content versions and L4 lighting baseline implemented, October 11, 2026. L4 starts from merged
-L3 at `f9cc7c8`. L5 portable scaling is implemented with workload-specific measurement gates; L6 remains an implementation plan.
+L3 at `f9cc7c8`. L5 portable scaling is implemented with workload-specific measurement gates; L6 implements the RT0/RT1 static-query and progressive-reference scope below; other advanced effects remain plans.
 Correctness fixtures do not establish a measured speedup.
 The initial decisions below were saved before opening the Gems article map.
 The [reference review](renderer-systems-gems-review.md) records the subsequent
@@ -1076,6 +1076,155 @@ ray-traced indirect diffuse replaces the selected probe/lightmap indirect term.
 Full path tracing evaluates supported emitters and scattering directly; it does
 not also add baked lighting, ambient occlusion or prefiltered IBL approximations.
 Record any intentionally mixed approximation in the capture's rendering profile.
+
+## L6 implemented scope: RT0 and RT1
+
+RT0/RT1 are an opt-in static triangle query profile and progressive RGB reference
+capture. RT2–RT4, temporal effects, GPU-driven submission and virtual residency
+remain plans. The current raster resource/object limits and scene import workflow
+are unchanged; this does not yet establish faithful rendering of Staircase2.
+
+RHI owns immutable native BLAS/TLAS incarnations and asynchronous query batches.
+Vulkan negotiates API 1.2, buffer device address, acceleration structures, ray
+queries and deferred host operations independently of ordinary Vulkan 1.1 raster
+startup. Metal checks `supportsRaytracing` and compiles MSL 2.4. Browser/native
+adapters without the optional profile reject native queries; preferred requests
+preserve raster, required requests fail startup explicitly. Neither ray pipelines,
+updates/refits, procedural primitives, motion nor asynchronous compute are exposed.
+
+The installed `ludus_compile_ray_queries(TARGET ... NAME ...)` helper cooks the
+fixed query kernel with verified Slang/SPIRV-Cross source and binary provenance.
+It emits Vulkan SPIR-V 1.5 and MSL 2.4, preserves all five binding decorations,
+and checks the 48-byte input / 32-byte result ABI and 64-thread workgroup. Linux
+also runs pinned `spirv-val --target-env vulkan1.2`; macOS instead checks structure
+and relies on real Metal compilation/reflection and execution, with that narrower
+validation recorded in its manifest. Tools are prepared explicitly with
+`./scripts/shader-probe bootstrap` and `./scripts/bootstrap-spirv-cross`.
+
+Native scenes retain shared geometry and an ordered instance/opacity table,
+including offscreen instances. Arbitrary finite nonsingular affine transforms,
+eight-bit visibility masks, closest and any-hit visibility queries are supported.
+Candidate acceptance uses explicit opacity/cutoff and optional retained alpha,
+UV transform, nearest/bilinear filtering and clamp/repeat addressing. Geometry,
+scene and program owners can detach while accepted batches retain their versions.
+Polling never waits; shutdown drains accepted work before destroying native state.
+Build/read failures and invalid/stale handles are explicit statuses.
+
+### Reference workflow and frozen profile
+
+After renderer initialization, call `EnableReferenceRendering` **before creating
+meshes/material versions**, with positive CPU budget and tile size (1–2048).
+Select `NativeQueries` explicitly with a cooked query program and ray-byte budget,
+or `CpuOracle` explicitly. The CPU oracle builds a balanced world-space BVH and
+uses double-precision permuted/sheared triangle edge tests. Neither mode performs
+implicit fallback. Ordinary raster use retains no new CPU geometry or texture bytes.
+
+Create lit L4/L5 material versions and meshes, then an immutable snapshot. Color
+textures require `TextureDescription::RetainCpuContent` at upload; RGBA8 unorm/sRGB
+initialized mips are retained, attachments/HDR retention are rejected. Capture
+admission rejects unavailable mips, unlit surfaces, degenerate triangles and
+unsupported normals/content, instead of quietly replacing them. LOD selection,
+bakes, AO, shadow atlases and prefiltered IBL do not enter reference transport.
+
+`BeginReferenceCapture` copies camera/light/integrator settings and retains the
+snapshot. `AdvanceReferenceCapture` advances one bounded stage/tile or polls a
+native batch. Even a Ready **setup** has zero samples until advanced. There are
+four simultaneous capture slots. CPU transport/shading submits batched native
+queries and explicitly reads their completed results; this implementation is an
+offline diagnostic reference, with no GPU-resident transport loop or real-time
+path-tracing performance claim. It never hides a wait/readback in raster submission.
+
+The profile uses L4's isotropic single-scattering GGX, correlated Smith, Schlick
+Fresnel and Fresnel-weighted Lambert, visible-GGX/cosine mixture sampling with
+explicit null events, one uniformly selected analytic/triangle/environment light
+proposal, power-heuristic MIS and compensated roulette. Point/spot range windows
+match L4. Emission is two-sided; reflection is restricted to the geometric and
+shading upper hemispheres. Textured RGB decodes sRGB before fixed-mip filtering;
+alpha stays linear. The capture mip overrides per-material LOD/mip filtering
+and LOD clamps. There is no transmission, volume, spectral transport, coat,
+multiple-scattering energy compensation or shading-normal energy correction.
+Depth and finite secondary range are declared truncations. Local/world geometry, generated ray origins, UVs and transform components are
+bounded to ±1,000,000 for the reference profile. Admission rejects oversized
+finite UV scales before address arithmetic; invalid generated origins fail the
+uncommitted tile equally in CPU/native mode. Reconstruction error uses a conservative absolute
+FP32 affine-product allowance, geometric-normal projection and outward rounding;
+near-zero offsets use a minimum normal float to tolerate GPU flush-to-zero.
+This is not a proof of robustness for arbitrary unresolved thin geometry.
+
+Philox addresses are `(pixel, committed sample, dimension)` with versioned profile,
+sampler and seed. Successful tiles publish compensated raw emission/direct/indirect
+sums atomically; a bad contribution fails the tile, preserves committed means and
+records its pixel/depth. Increasing only the target continues the same samples.
+Changing snapshot incarnation, camera, dimensions, light values, mip, seed or
+integrator settings builds a replacement transactionally and increments revision;
+failed replacement preserves the previous image. Scene fingerprints are diagnostic
+XXH3-128 digests, never identity/reset authority. Retrying the identical failed
+request retries its uncommitted sample addresses. Release/disable cancels future
+work and retires accepted native uses through completion.
+
+CPU budgets cover renderer-owned mesh/material/job arrays and setup scratch,
+including simultaneous old/new jobs during reset. They exclude existing renderer
+state, RHI CPU upload shadows/registry storage, caller arrays and tool/driver memory.
+Native budgets cover device-wide **requested** ray buffer/AS bytes and pending
+build scratch, checked again before query submission. `GetRayResourceStats` reports
+resident, pending scratch and detached bytes; pipeline/driver allocation and VMA
+backing-page overhead are unavailable, not measured zero. These are admission
+budgets, not total process/device-memory measurements. Capacity errors never drop
+instances, lights, pixels or samples.
+
+### Raw capture and installed SDK
+
+`CopyReferencePixels` copies raw linear means and committed counts without
+exposure/tonemapping. `EncodeReferenceHdr` writes `256 + Width*Height*16` bytes:
+magic `LUHDR01\0`, little-endian version/profile/sampler/header sizes at bytes
+8/12/16/20, width/height/target/depth/roulette/flags at 24–44, seed/revision and two
+64-bit scene digest words at 48–72, secondary range/mip/light count at 80–88,
+column-major world-to-clip floats at 96–159, eye at 160–171 and environment at
+172–183. Remaining header bytes are reserved zero. Flags encode CPU (1), center
+rays (2), orthographic (4), reverse-Z (8), infinite far (16), partial (32).
+Each top-left ordered pixel contains three FP32 mean RGB channels and a uint32
+committed count. The light count/digest identify the retained scene; applications
+must save original light/asset inputs for independent scene reconstruction.
+
+The independent [installed SDK fixture](../../tests/sdk_consumer/reference_capture.cpp)
+uses only public APIs and FoundationFilesystem atomic publication. Configure
+`tests/sdk_consumer/renderer` with the installed SDK, shader compiler, validator
+(Linux) and translator paths. Run `ludus_sdk_reference_capture out/reference.luhdr`
+for the explicit CPU oracle, or append `native` to require native queries. Convert
+without changing radiance with:
+
+```sh
+python scripts/reference-hdr out/reference.luhdr --pfm out/reference.pfm --manifest out/reference.json
+```
+
+PFM rows are flipped to its bottom-up convention; JSON retains counts, settings,
+digest and capture SHA-256. Partial files remain visibly marked. Invalid headers,
+counts and negative/nonfinite pixels are rejected.
+
+### Evidence and departures
+
+Unit tests cover deterministic replay, progressive target continuation,
+transactional resets, snapshot retention, export/output preservation, BSDF mixture
+PDF integration versus accepted mass, furnace energy and null proposals. Physical
+Apple M5 Metal execution compares raw direct/indirect/total radiance against the CPU
+BVH at 128 samples/pixel with an offscreen emitter and diffuse wall; RGB-vector
+distance tolerance is 0.002, with nonzero indirect radiance and zero invalid samples.
+Native query tests cover alpha rejection, offscreen instances and detached-owner
+lifetimes. A public-only installed-SDK 32×32 capture at 256 samples/pixel also
+agreed between CPU/native traversal: maximum RGB-vector error 7.3e-8 and RMS
+9.8e-9 on Apple M5; equal scene digests and complete pixel counts were verified. These fixtures establish a baseline, not convergence for the full
+reference scene suite or GPU speedups. Linux CI compiles Vulkan, runs validation
+layers and preserves raster on software devices without the optional ray profile;
+a ray-capable Vulkan hardware qualification remains necessary.
+
+Implementation attribution beside code credits PBRT 4e §6.1/§13.4 for geometric
+origin offsets and MIS/roulette, Heitz JCGT 7(4) §3–4/Appendix B for visible-GGX,
+Woop/Benthin/Wald JCGT 2(1) §3 for the CPU triangle oracle, Filament §4.4/§5.2.2
+for the shared reflection model, W3C CSS Color 4 §10.2 for sRGB transfer, and
+Khronos/Apple for native query/build synchronization. The more ambitious plan below
+retains future goals; it is not a statement that dynamic scenes, GPU transport,
+all parity AOVs, arbitrary content import or full Staircase2 are already qualified.
+
 
 ### Traversal capability and backend boundary
 

@@ -20,7 +20,7 @@ target_sources(ludus_graphics_rhi
         FILE_SET public_headers
         TYPE HEADERS
         BASE_DIRS include
-        FILES include/ludus/graphics/rhi/profile.h include/ludus/graphics/rhi/compute.h include/ludus/graphics/rhi/graph.h include/ludus/graphics/rhi/lifetime.h include/ludus/graphics/rhi/rhi.h include/ludus/graphics/rhi/render.h include/ludus/graphics/rhi/device.h include/ludus/graphics/rhi/raster.h
+        FILES include/ludus/graphics/rhi/ray.h include/ludus/graphics/rhi/profile.h include/ludus/graphics/rhi/compute.h include/ludus/graphics/rhi/graph.h include/ludus/graphics/rhi/lifetime.h include/ludus/graphics/rhi/rhi.h include/ludus/graphics/rhi/render.h include/ludus/graphics/rhi/device.h include/ludus/graphics/rhi/raster.h
 )
 
 target_link_libraries(ludus_graphics_rhi
@@ -36,7 +36,7 @@ if(EMSCRIPTEN)
     # Browser Auto build: both web sub-backends plus the dispatcher are linked
     # into one artifact, each sub-backend in its own leaf namespace, and the
     # dispatcher provides backend:: with the WebGPU->WebGL 2 fallback policy.
-    target_sources(ludus_graphics_rhi PRIVATE src/rhi_web.cpp src/rhi_webgpu.cpp src/rhi_webgl.cpp)
+    target_sources(ludus_graphics_rhi PRIVATE src/rhi_web.cpp src/rhi_webgpu.cpp src/rhi_webgl.cpp src/ray_unsupported.cpp)
     set_source_files_properties(src/rhi_webgpu.cpp PROPERTIES
         COMPILE_DEFINITIONS "LUDUS_RHI_WEBGPU_NAMESPACE=webgpu")
     set_source_files_properties(src/rhi_webgl.cpp PROPERTIES
@@ -70,7 +70,7 @@ else()
     endif()
     target_include_directories(ludus_graphics_rhi SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/third_party/vma")
     target_compile_definitions(ludus_graphics_rhi PRIVATE
-        VMA_STATIC_VULKAN_FUNCTIONS=0 VMA_DYNAMIC_VULKAN_FUNCTIONS=1 VMA_VULKAN_VERSION=1001000)
+        VMA_STATIC_VULKAN_FUNCTIONS=0 VMA_DYNAMIC_VULKAN_FUNCTIONS=1 VMA_VULKAN_VERSION=1002000)
     target_compile_definitions(ludus_graphics_rhi PRIVATE VK_NO_PROTOTYPES)
     if(LUDUS_PLATFORM_ENABLE_WAYLAND)
         target_compile_definitions(ludus_graphics_rhi PRIVATE VK_USE_PLATFORM_WAYLAND_KHR)
@@ -105,7 +105,7 @@ endif()
 
 if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
-    add_executable(ludus_rhi_lifecycle_tests tests/lifecycle_tests.cpp tests/device_tests.cpp tests/profile_tests.cpp tests/raster_tests.cpp tests/compute_tests.cpp tests/reference_raster.cpp src/rhi.cpp src/device.cpp src/profile.cpp src/raster.cpp)
+    add_executable(ludus_rhi_lifecycle_tests tests/lifecycle_tests.cpp tests/device_tests.cpp tests/profile_tests.cpp tests/raster_tests.cpp tests/compute_tests.cpp tests/reference_raster.cpp src/rhi.cpp src/device.cpp src/profile.cpp src/raster.cpp src/ray_unsupported.cpp)
     target_include_directories(ludus_rhi_lifecycle_tests PRIVATE include src)
     target_link_libraries(ludus_rhi_lifecycle_tests PRIVATE Ludus::Platform Ludus::FoundationContainers Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_rhi_lifecycle_tests)
@@ -161,4 +161,17 @@ if(TARGET ludus_rhi_render_tests)
     ludus_compile_shader(TARGET ludus_rhi_render_tests NAME raster RASTER
         SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/raster.slang"
         VERTEX vertexMain FRAGMENT fragmentMain)
+endif()
+
+if(TARGET ludus_rhi_render_tests AND LUDUS_SPIRV_CROSS)
+    add_executable(ludus_rhi_ray_tests tests/ray_tests.cpp)
+    target_link_libraries(ludus_rhi_ray_tests PRIVATE Ludus::GraphicsRhi Ludus::FoundationTime Catch2::Catch2WithMain)
+    ludus_apply_project_defaults(ludus_rhi_ray_tests)
+    ludus_enable_test_exceptions(ludus_rhi_ray_tests)
+    if(APPLE)
+        target_compile_definitions(ludus_rhi_ray_tests PRIVATE LUDUS_TEST_METAL=1)
+    endif()
+    ludus_compile_ray_queries(TARGET ludus_rhi_ray_tests NAME ray_query)
+    add_test(NAME ludus_rhi_ray_queries COMMAND ludus_rhi_ray_tests)
+    set_tests_properties(ludus_rhi_ray_queries PROPERTIES LABELS "rhi;gpu;ray" TIMEOUT 60)
 endif()

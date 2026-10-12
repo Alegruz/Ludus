@@ -1,7 +1,7 @@
 {
-  "host": "linux-x86_64",
+  "host": "linux-x86_64; darwin-arm64; darwin-x86_64",
   "spirv_cross": {
-    "role": "build-time SPIR-V -> GLSL ES 3.00 translator (browser/WebGL 2 backend artifact)",
+    "role": "build-time SPIR-V -> GLSL ES 3.00 raster and MSL 2.4 native ray-query translator",
     "repository": "https://github.com/KhronosGroup/SPIRV-Cross",
     "tag": "vulkan-sdk-1.4.313.0",
     "commit": "2275d0efc4f2fa46851035d9d3c67c105bc8b99e",

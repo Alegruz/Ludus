@@ -895,3 +895,14 @@ generational resources and retained lifetime services; R3 added the reference
 plan validator. Independent multi-device/surface ownership and a separate
 `GraphicsDevice` module remain possible extensions, as recorded in
 [remaining work](#remaining-work-and-decision-gates).
+
+## Optional static ray-query profile
+
+`ray.h` exposes independently requested native static triangle BLAS/TLAS and
+asynchronous closest/visibility batches. Public declarations own validation,
+lifetime and failure contracts; the [RT0/RT1 implementation profile](renderer-systems.md#l6-implemented-scope-rt0-and-rt1)
+owns backend/toolchain, memory accounting and reference transport details. Required
+ray requests reject unsupported startup; preferred requests preserve raster.
+Browser backends return Unsupported and never silently select CPU traversal.
+Texture CPU content is separately opt-in for initialized RGBA8 mips; retained
+views keep the upload shadow alive after the texture owner detaches.

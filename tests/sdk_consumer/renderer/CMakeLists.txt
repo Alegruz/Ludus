@@ -89,3 +89,17 @@ if(EMSCRIPTEN)
     set_target_properties(ludus_sdk_renderer_scaling_consumer PROPERTIES OUTPUT_NAME renderer-scaling SUFFIX ".js")
     configure_file(../renderer-scaling.html renderer-scaling.html COPYONLY)
 endif()
+
+if(NOT EMSCRIPTEN AND LUDUS_SPIRV_CROSS)
+    find_package(Ludus CONFIG REQUIRED COMPONENTS FoundationFilesystem)
+    add_executable(ludus_sdk_reference_capture ../reference_capture.cpp)
+    target_link_libraries(ludus_sdk_reference_capture PRIVATE Ludus::GraphicsRenderer Ludus::FoundationFilesystem Ludus::FoundationTime)
+    target_compile_options(ludus_sdk_reference_capture PRIVATE -Wall -Wextra -Wpedantic -Werror -fno-exceptions)
+    foreach(shader renderer_flat renderer_composite renderer_lit renderer_shadow renderer_output)
+        ludus_compile_shader(TARGET ludus_sdk_reference_capture NAME ${shader} RASTER
+            SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX vertexMain FRAGMENT fragmentMain)
+    endforeach()
+    ludus_compile_shader(TARGET ludus_sdk_reference_capture NAME renderer_lit_shadow RASTER
+        SOURCE "${Ludus_DIR}/shaders/renderer_lit.slang" VERTEX vertexMain FRAGMENT shadowMain)
+    ludus_compile_ray_queries(TARGET ludus_sdk_reference_capture NAME ray_query)
+endif()

@@ -8,6 +8,7 @@
 #include <ludus/foundation/math/vector.hpp>
 #include <ludus/graphics/renderer/lighting.hpp>
 #include <ludus/graphics/renderer/materials.hpp>
+#include <ludus/graphics/renderer/reference.hpp>
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/graph.h>
 #include <ludus/graphics/rhi/lifetime.h>
@@ -241,6 +242,64 @@ public:
     /// Advance asynchronous shader/layout/pipeline setup without blocking. Ready permits scene setup.
     /// Pending/failure retains ownership until Reset; no automatic backend switch.
     [[nodiscard]] rhi::RasterStatus Poll() noexcept;
+    /// Opt in to retained CPU geometry and the selected RT0/RT1 traversal before
+    /// any meshes or material versions are live. Native mode requires ready optional RHI ray support and
+    /// the installed fixed query shader; CpuOracle ignores the shader explicitly.
+    /// Failure preserves disabled state. Owner-thread/between-frames only.
+    [[nodiscard]] rhi::RasterStatus EnableReferenceRendering(const rhi::ShaderDescription&,
+                                                             const ReferenceRenderingOptions&) noexcept;
+    /// Cancel reference jobs, detach their accepted native work and drop retained
+    /// CPU mesh/material copies. Raster versions remain usable. Re-enabling requires
+    /// reauthoring meshes/materials after all existing incarnations are released.
+    /// Owner-thread/between-frames only; no GPU wait or device capability switch.
+    [[nodiscard]] rhi::RasterStatus DisableReferenceRendering() noexcept;
+    /// Freeze all opaque/masked snapshot objects and exact surface/texture versions,
+    /// including offscreen objects and full-detail geometry. Overlays are excluded.
+    /// Unlit/error surfaces or missing CPU texture shadows return Unsupported;
+    /// uninitialized mips return InvalidDescription, pending uploads NotReady.
+    /// Missing geometry, capacity and allocation failures preserve null output.
+    /// Ready/Pending publishes one of at most four renderer-owned capture jobs.
+    /// Native build readiness and progressive samples advance explicitly afterward.
+    [[nodiscard]] rhi::RasterStatus
+    BeginReferenceCapture(Snapshot, const ReferenceCaptureDescription&, ReferenceCapture&) noexcept;
+    /// Advance at most one tile stage without blocking. Pending means native work
+    /// or further stages/samples remain; Ready means the requested target is complete.
+    /// Failed contributions leave that tile's old sums/counts intact and identify
+    /// the offending pixel/depth. Owner-thread/between-frames only; no raster frame
+    /// submission, denoising, silent fallback or synchronous GPU readback occurs.
+    [[nodiscard]] rhi::RasterStatus AdvanceReferenceCapture(ReferenceCapture) noexcept;
+    /// Update the frozen integral transactionally. Snapshot, camera, image extent,
+    /// lights, mip, seed or integrator changes reset accumulation; a TargetSamples
+    /// change alone continues it. Failure preserves the previous image/job. The
+    /// identical request retries a failed uncommitted tile with the same addresses.
+    /// Ready/Pending publishes copied input; caller arrays need not remain alive.
+    [[nodiscard]] rhi::RasterStatus
+    UpdateReferenceCapture(ReferenceCapture, Snapshot, const ReferenceCaptureDescription&) noexcept;
+    /// Query progressive completion without advancing CPU path stages or polling native
+    /// setup/work (AdvanceReferenceCapture performs that bounded polling). Pending/Failed
+    /// remain owned; Update can retry a failed tile or Release cancels it. Invalid
+    /// identity returns InvalidHandle. Owner-thread only.
+    [[nodiscard]] rhi::RasterStatus GetStatus(ReferenceCapture) const noexcept;
+    /// Copy bounded progress and profile evidence. Failure preserves output; valid
+    /// failed captures still report their diagnostic counters. Owner-thread only.
+    [[nodiscard]] rhi::RasterStatus GetReferenceCaptureInfo(ReferenceCapture, ReferenceCaptureInfo&) const noexcept;
+    /// Copy exactly Width*Height raw unexposed means/AOVs and committed counts.
+    /// Incomplete images expose zero/unequal counts; native pending work never
+    /// enters the copied data. Failure preserves output. No allocation or GPU wait.
+    [[nodiscard]] rhi::RasterStatus
+    CopyReferencePixels(ReferenceCapture, ReferencePixel* output, ludus::foundation::usize count) const noexcept;
+    /// Encode the versioned LUHDR01 little-endian FP32 RGB/count capture and frozen
+    /// profile metadata into caller storage. Required bytes and PFM conversion are
+    /// documented in the renderer guide. Capacity/other failure preserves output
+    /// and written; partial images retain exact per-pixel counts. No file I/O/wait.
+    [[nodiscard]] rhi::RasterStatus EncodeReferenceHdr(ReferenceCapture,
+                                                       ludus::foundation::uint8* output,
+                                                       ludus::foundation::usize capacity,
+                                                       ludus::foundation::usize& written) const noexcept;
+    /// Cancel future samples and detach capture ownership. Accepted native batches
+    /// retire through completion; invalid identity preserves handle, success clears
+    /// it. Snapshot/material/mesh references release exactly once. Between frames.
+    [[nodiscard]] rhi::RasterStatus Release(ReferenceCapture&) noexcept;
     /// Enable L1 surface/offscreen reverse-Z and target composition after Initialize is Ready.
     /// Uses the shipped renderer_composite.slang stages; Ready/Pending publishes setup ownership.
     /// Failure preserves the usable L0 profile; failed published setup requires Reset.

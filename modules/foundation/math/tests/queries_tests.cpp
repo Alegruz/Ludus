@@ -290,3 +290,29 @@ TEST_CASE("Classification agrees with direct clip inequalities (no false-negativ
     }
     REQUIRE(tested > 0);
 }
+
+TEST_CASE("Ray origin offsets project error, preserve tangents and fail transactionally", "[math][ray]")
+{
+    Vector3 output{7, 8, 9};
+    RayOriginOffset offset{{100000, 2, 0}, {.001F, .002F, .003F}, {0, 0, 1}, {0, 0, 1}};
+    REQUIRE(TryOffsetRayOrigin(offset, output) == MathStatus::Success);
+    CHECK(output.X == offset.Position.X);
+    CHECK(output.Y == offset.Position.Y);
+    CHECK(output.Z > .003F);
+    CHECK(output.Z < .00301F);
+    offset.Direction = {0, 0, -1};
+    REQUIRE(TryOffsetRayOrigin(offset, output) == MathStatus::Success);
+    CHECK(output.Z < -.003F);
+    offset.Position = {};
+    offset.Error = {};
+    REQUIRE(TryOffsetRayOrigin(offset, output) == MathStatus::Success);
+    CHECK(output.Z == -std::numeric_limits<ludus::foundation::float32>::min());
+    const auto keep = output;
+    offset.Error.X = -1;
+    CHECK(TryOffsetRayOrigin(offset, output) == MathStatus::InvalidArgument);
+    CHECK(output == keep);
+    offset.Error.X = 0;
+    offset.Position.Z = std::numeric_limits<ludus::foundation::float32>::infinity();
+    CHECK(TryOffsetRayOrigin(offset, output) == MathStatus::NonFiniteInput);
+    CHECK(output == keep);
+}

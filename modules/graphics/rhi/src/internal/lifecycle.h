@@ -13,6 +13,9 @@ void SetDeviceOwner(ludus::foundation::uint64 owner) noexcept;
 bool SessionBusy() noexcept;
 // True only while starting an owned session that requires the R4 profile.
 bool RequiresComputeProfile() noexcept;
+// Copied optional native-ray admission request, fixed before backend startup.
+bool RequestsRayProfile() noexcept;
+void SetRayProfileRequest(bool) noexcept;
 void FaultRasterSession() noexcept;
 StartStatus StartOwned(const ApplicationInfo&,
                        const WindowInfo&,

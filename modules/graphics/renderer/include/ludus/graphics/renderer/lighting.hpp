@@ -76,6 +76,11 @@ struct LightSelection final
 /// No allocation; invalid/count overflow preserves output. Saturation succeeds with Dropped.
 [[nodiscard]] rhi::RasterStatus
 SelectDirectLights(const DirectLight* lights, ludus::foundation::usize count, LightSelection& output) noexcept;
+/// Validate/normalize and copy every one of at most 128 unique lights in SourceId
+/// order. No saturation or allocation; failure preserves output. Used by explicit
+/// reference transport, where silently dropping illumination would change the integral.
+[[nodiscard]] rhi::RasterStatus
+NormalizeDirectLights(const DirectLight* lights, ludus::foundation::usize count, LightSelection& output) noexcept;
 /// Regular 8x8x8 grid in a rigidly transformed space, independent of opaque depth.
 struct LightClusterDescription final
 {

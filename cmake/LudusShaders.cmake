@@ -104,6 +104,49 @@ function(ludus_compile_shader)
     target_include_directories(${SH_TARGET} PRIVATE "${output}")
 endfunction()
 
+# Fixed native RT0 query artifact. No browser ray shader is implied by this helper.
+# The existing verified Slang/SPIRV-Cross pins emit Vulkan 1.2 and MSL 2.4 variants.
+function(ludus_compile_ray_queries)
+    cmake_parse_arguments(PARSE_ARGV 0 RAY "" "TARGET;NAME" "")
+    if(RAY_UNPARSED_ARGUMENTS OR NOT TARGET "${RAY_TARGET}" OR
+       NOT RAY_NAME MATCHES "^[A-Za-z_][A-Za-z_0-9]*$")
+        message(FATAL_ERROR "ludus_compile_ray_queries requires TARGET and NAME")
+    endif()
+    ludus_require_tool(LUDUS_SLANG_COMPILER "Native ray shader compilation" "Run ./scripts/shader-probe bootstrap" -version)
+    ludus_require_tool(LUDUS_SPIRV_CROSS "Native ray shader translation" "Run ./scripts/bootstrap-spirv-cross")
+    ludus_require_file("${LUDUS_SPIRV_CROSS}.build.json" "Native ray shader translation" "Restore the pinned translator provenance.")
+    ludus_require_python("Native ray shader compilation")
+    set(directory "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/shaders")
+    set(lock "${directory}/shader_toolchain.json")
+    set(cross_lock "${directory}/spirv_cross_toolchain.json")
+    set(source "${directory}/ray_query.slang")
+    if(EXISTS "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/shader_toolchain.json")
+        set(lock "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/shader_toolchain.json")
+        set(cross_lock "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../config/spirv_cross_toolchain.json")
+        set(source "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../modules/graphics/rhi/shaders/ray_query.slang")
+    endif()
+    set(backend_args)
+    set(backend_depends)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        list(APPEND backend_args --metal)
+    else()
+        ludus_require_tool(LUDUS_SPIRV_VALIDATOR "Native ray SPIR-V validation" "Run ./scripts/shader-probe bootstrap" --version)
+        list(APPEND backend_args --validator "${LUDUS_SPIRV_VALIDATOR}")
+        list(APPEND backend_depends "${LUDUS_SPIRV_VALIDATOR}")
+    endif()
+    set(output "${CMAKE_CURRENT_BINARY_DIR}/ludus-shaders/${RAY_TARGET}/${RAY_NAME}")
+    add_custom_command(OUTPUT "${output}/${RAY_NAME}.h"
+        COMMAND "${Python3_EXECUTABLE}" "${directory}/compile_ray.py" --source "${source}" --output "${output}"
+            --name "${RAY_NAME}" --compiler "${LUDUS_SLANG_COMPILER}" --lock "${lock}"
+            --spirv-cross "${LUDUS_SPIRV_CROSS}" --spirv-cross-lock "${cross_lock}" ${backend_args}
+        DEPENDS "${source}" "${directory}/compile_ray.py" "${directory}/compile_shader.py" "${lock}" "${cross_lock}"
+            "${LUDUS_SLANG_COMPILER}" "${LUDUS_SPIRV_CROSS}" "${LUDUS_SPIRV_CROSS}.build.json" ${backend_depends}
+        BYPRODUCTS "${output}/${RAY_NAME}.spv" "${output}/${RAY_NAME}.metal" "${output}/manifest.json"
+        VERBATIM)
+    target_sources("${RAY_TARGET}" PRIVATE "${output}/${RAY_NAME}.h")
+    target_include_directories("${RAY_TARGET}" PRIVATE "${output}")
+endfunction()
+
 # Cook a bounded raw-texel JSON source into immutable portable upload bytes/mips.
 # This performs no downloads and requires only the existing host Python tool.
 function(ludus_cook_texture)

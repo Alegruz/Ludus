@@ -1023,9 +1023,123 @@ TEST_CASE("L5 clustered lighting matches full-list pixels with many objects and 
         {
             uint8 maximum = 0;
             for (usize i = 0; i < images[0].size(); i += 4)
+            {
                 maximum = images[0][i] > maximum ? images[0][i] : maximum;
+            }
             CHECK(maximum > 130); // 128 directional lights; an accidental eight-light loop is much darker.
             CHECK(maximum < 170);
         }
     }
 }
+
+#if defined(LUDUS_TEST_RAY)
+#    include "l6_scene.h"
+#    include "ray_query.h"
+TEST_CASE("RT1 native and CPU captures agree on MIS emitter, environment and indirect transport",
+          "[renderer][gpu][rt1]")
+{
+    rhi::Shutdown();
+    struct Guard final
+    {
+        ~Guard() noexcept
+        {
+            rhi::Shutdown();
+        }
+    } guard;
+    rhi::DeviceHandle device;
+    rhi::SurfaceHandle surface;
+    rhi::DeviceDescription description;
+    description.Required.PortableRaster = true;
+    description.Preferred.RayQueries = true;
+    const auto started = rhi::CreateDevice({}, { .Width = 8, .Height = 8 }, description, device, surface);
+#    if defined(LUDUS_TEST_METAL)
+    if (started != rhi::DeviceStatus::Ready && rhi::GetStartup().Error == rhi::StartupError::AdapterUnavailable)
+    {
+        SKIP("No Metal adapter");
+    }
+#    endif
+    REQUIRE(started == rhi::DeviceStatus::Ready);
+    rhi::RayCapabilities capabilities;
+    const bool native = rhi::GetRayCapabilities(device, capabilities) == rhi::RasterStatus::Ready;
+    rr::ReferencePixel images[2][4];
+    for (usize variant = 0; variant < (native ? 2U : 1U); ++variant)
+    {
+        rr::Renderer renderer;
+        REQUIRE(renderer.Initialize(device,
+                                    ludus::shaders::renderer_flat::Vertex(),
+                                    ludus::shaders::renderer_flat::Fragment()) == rhi::RasterStatus::Ready);
+        REQUIRE(renderer.InitializeViews(ludus::shaders::renderer_composite::Vertex(),
+                                         ludus::shaders::renderer_composite::Fragment()) == rhi::RasterStatus::Ready);
+        REQUIRE(renderer.InitializeLighting(ludus::shaders::renderer_output::Vertex(),
+                                            ludus::shaders::renderer_output::Fragment(),
+                                            ludus::shaders::renderer_shadow::Fragment()) == rhi::RasterStatus::Ready);
+        rr::ReferenceRenderingOptions options{variant == 0 ? rr::ReferenceTraversal::CpuOracle
+                                                           : rr::ReferenceTraversal::NativeQueries,
+                                              usize{16} * 1024 * 1024,
+                                              usize{64} * 1024 * 1024,
+                                              4};
+        REQUIRE(renderer.EnableReferenceRendering(ludus::shaders::ray_query::Query(), options) ==
+                rhi::RasterStatus::Ready);
+        rr::MaterialProgram program;
+        auto programStatus = renderer.PrewarmLitProgram(ludus::shaders::renderer_lit::Vertex(),
+                                                        ludus::shaders::renderer_lit::Fragment(),
+                                                        ludus::shaders::renderer_lit_shadow::Fragment(),
+                                                        program);
+        const auto programStarted = time::NowTicks();
+        while (programStatus == rhi::RasterStatus::Pending &&
+               time::NowTicks() - programStarted < 10 * time::NANOSECONDS_PER_SECOND)
+        {
+            programStatus = renderer.GetStatus(program);
+        }
+        REQUIRE(programStatus == rhi::RasterStatus::Ready);
+        rr::Snapshot snapshot;
+        REQUIRE(ludus::qa::BuildL6Snapshot(renderer, program, snapshot) == rhi::RasterStatus::Ready);
+        rr::ReferenceCaptureDescription captureDescription;
+        captureDescription.OrthographicCamera = true;
+        captureDescription.Width = captureDescription.Height = 2;
+        captureDescription.TargetSamples = 128;
+        captureDescription.MaxDepth = 4;
+        captureDescription.Seed = 871;
+        captureDescription.Environment = {.3F, .4F, .5F};
+        rr::ReferenceCapture capture;
+        auto status = renderer.BeginReferenceCapture(snapshot, captureDescription, capture);
+        REQUIRE((status == rhi::RasterStatus::Ready || status == rhi::RasterStatus::Pending));
+        // Creating an accepted job starts pending accumulation even when setup is ready.
+        status = rhi::RasterStatus::Pending;
+        const auto captureStarted = time::NowTicks();
+        while (status == rhi::RasterStatus::Pending &&
+               time::NowTicks() - captureStarted < 30 * time::NANOSECONDS_PER_SECOND)
+        {
+            status = renderer.AdvanceReferenceCapture(capture);
+        }
+        REQUIRE(status == rhi::RasterStatus::Ready);
+        REQUIRE(renderer.CopyReferencePixels(capture, images[variant], 4) == rhi::RasterStatus::Ready);
+        rr::ReferenceCaptureInfo info;
+        REQUIRE(renderer.GetReferenceCaptureInfo(capture, info) == rhi::RasterStatus::Ready);
+        CHECK(info.InvalidContributions == 0);
+        CHECK(info.VisibilityQueries > 0);
+        CHECK(info.ClosestQueries > 512);
+        float32 indirect = 0;
+        for (auto pixel : images[variant])
+        {
+            CHECK(pixel.Samples == 128);
+            CHECK(math::IsFinite(pixel.Radiance));
+            CHECK(pixel.Direct.X > 0);
+            indirect += pixel.Indirect.X;
+        }
+        CHECK(indirect > .01F);
+        REQUIRE(renderer.Release(capture) == rhi::RasterStatus::Ready);
+        REQUIRE(renderer.Release(snapshot) == rhi::RasterStatus::Ready);
+        REQUIRE(renderer.Release(program) == rhi::RasterStatus::Ready);
+    }
+    if (native)
+    {
+        for (usize i = 0; i < 4; ++i)
+        {
+            CHECK(math::Length(images[0][i].Radiance - images[1][i].Radiance) < .002F);
+            CHECK(math::Length(images[0][i].Direct - images[1][i].Direct) < .002F);
+            CHECK(math::Length(images[0][i].Indirect - images[1][i].Indirect) < .002F);
+        }
+    }
+}
+#endif

@@ -12,12 +12,14 @@ target_sources(
     ludus_foundation_math
     PRIVATE
         src/scalar.cpp
+        src/color.cpp
         src/vector.cpp
         src/quaternion.cpp
         src/matrix.cpp
         src/transform.cpp
         src/projection.cpp
         src/queries.cpp
+        src/ray_origin.cpp
         src/precision.cpp
         src/random.cpp
         src/addressed_random.cpp

@@ -224,7 +224,8 @@ VkResult RasterAllocator() noexcept
     info.physicalDevice = gPhysical;
     info.device = gDevice;
     info.instance = gInstance;
-    info.vulkanApiVersion = VK_API_VERSION_1_1;
+    info.vulkanApiVersion = gRayEnabled ? VK_API_VERSION_1_2 : VK_API_VERSION_1_1;
+    info.flags = gRayEnabled ? VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT : 0U;
     info.pVulkanFunctions = &functions;
     return vmaCreateAllocator(&info, &gRasterAllocator);
 }
@@ -1130,6 +1131,12 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             vkDestroyPipeline(gDevice, gComputePipelines[slot].Object, nullptr);
             vkDestroyPipelineLayout(gDevice, gComputePipelines[slot].Layout, nullptr);
             gComputePipelines[slot] = {};
+            break;
+        case internal::RasterKind::RayGeometry:
+        case internal::RasterKind::RayScene:
+        case internal::RasterKind::RayProgram:
+        case internal::RasterKind::RayBatch:
+            RayDestroy(kind, slot);
             break;
         case internal::RasterKind::Count:
             break;

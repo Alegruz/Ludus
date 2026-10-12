@@ -1,6 +1,7 @@
 #include "internal/backend.h"
 #include "internal/lifecycle.h"
 #include "internal/raster.h"
+#include "internal/ray_backend.h"
 #include "internal/resources.h"
 #if defined(LUDUS_RHI_TEST_READBACK)
 #    include "internal/readback.h"
@@ -23,6 +24,8 @@
 
 #import <AppKit/AppKit.h>
 #import <Availability.h>
+#import <Metal/MTLAccelerationStructure.h>
+#import <Metal/MTLAccelerationStructureCommandEncoder.h>
 #import <Metal/MTLBlitCommandEncoder.h>
 #import <Metal/MTLBuffer.h>
 #import <Metal/MTLCommandBuffer.h>
@@ -658,3 +661,5 @@ bool ReadHeadlessPixels(std::span<uint8> pixels) noexcept
 #include "internal/raster_metal.h"
 
 #include "internal/lifetime_metal.h"
+
+#include "internal/ray_metal.h"

@@ -49,6 +49,9 @@ struct DeviceFeatures final
     bool Compute = false;
     /// One indexed indirect draw per packet (R4); indirect dispatch is deferred.
     bool IndirectRendering = false;
+    /// Optional static native triangle structures and inline queries (RT0).
+    /// Vulkan negotiates this only when Required/Preferred explicitly requests it.
+    bool RayQueries = false;
     /// Ordered portable raster graph, version/hazard validation and offscreen passes (R3).
     bool OrderedRasterGraph = false;
 };
@@ -132,6 +135,9 @@ struct DeviceInfo final
     DeviceFeatures UnmetPreferences;
     /// First unmet preferred profile constraint; populated only while Ready.
     ProfileDiagnostic UnmetProfilePreference;
+    /// True only during this ready owner's acquired frame. Diagnostic/read-only;
+    /// mutation APIs remain authoritative about their between-frame restrictions.
+    bool FrameOpen = false;
 };
 
 /// Reference admission validator shared by every backend; performs no allocation or GPU work.

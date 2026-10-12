@@ -1252,3 +1252,282 @@ TEST_CASE("L5 clustered material admits all lights and owns texture bindings", "
     REQUIRE(session.Renderer.GetStatus(material) == rhi::RasterStatus::Ready);
     REQUIRE(session.Renderer.Release(material) == rhi::RasterStatus::Ready);
 }
+
+TEST_CASE("RT1 capture replay, target continuation, resets and retained lifetimes", "[renderer][rt1]")
+{
+    Session session;
+    REQUIRE(session.Renderer.Release(session.Mesh) == rhi::RasterStatus::Ready);
+    rr::ReferenceRenderingOptions options{rr::ReferenceTraversal::CpuOracle, usize{4} * 1024 * 1024, 0, 3};
+    REQUIRE(session.Renderer.EnableReferenceRendering({}, options) == rhi::RasterStatus::Ready);
+    rr::Snapshot snapshot;
+    REQUIRE(session.Renderer.CreateSnapshot(nullptr, 0, snapshot) == rhi::RasterStatus::Ready);
+    rr::ReferenceCaptureDescription description;
+    description.OrthographicCamera = true;
+    description.Width = 3;
+    description.Height = 2;
+    description.TargetSamples = 2;
+    description.Environment = {2, 3, 4};
+    description.Seed = 1977;
+    rr::ReferenceCapture first, replay;
+    REQUIRE(session.Renderer.BeginReferenceCapture(snapshot, description, first) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.BeginReferenceCapture(snapshot, description, replay) == rhi::RasterStatus::Ready);
+    const auto finish = [&session](rr::ReferenceCapture capture) {
+        auto status = rhi::RasterStatus::Pending;
+        for (usize i = 0; i < 10000 && status == rhi::RasterStatus::Pending; ++i)
+        {
+            status = session.Renderer.AdvanceReferenceCapture(capture);
+        }
+        REQUIRE(status == rhi::RasterStatus::Ready);
+    };
+    finish(first);
+    finish(replay);
+    rr::ReferencePixel pixels[6], other[6];
+    REQUIRE(session.Renderer.CopyReferencePixels(first, pixels, 6) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.CopyReferencePixels(replay, other, 6) == rhi::RasterStatus::Ready);
+    for (usize i = 0; i < 6; ++i)
+    {
+        CHECK(pixels[i].Samples == 2);
+        CHECK(pixels[i].Radiance == description.Environment);
+        CHECK(pixels[i].Emission == description.Environment);
+        CHECK(pixels[i].Direct == math::Vector3{});
+        CHECK(pixels[i].Indirect == math::Vector3{});
+        CHECK(pixels[i].Radiance == other[i].Radiance);
+    }
+    rr::ReferenceCaptureInfo info;
+    REQUIRE(session.Renderer.GetReferenceCaptureInfo(first, info) == rhi::RasterStatus::Ready);
+    CHECK(info.CommittedSamples == 12);
+    CHECK(info.ClosestQueries == 12);
+    CHECK(info.Complete);
+    uint8 hdr[352]{};
+    usize written = 7;
+    CHECK(session.Renderer.EncodeReferenceHdr(first, hdr, 1, written) == rhi::RasterStatus::CapacityExceeded);
+    CHECK(written == 7);
+    CHECK(hdr[0] == 0);
+    REQUIRE(session.Renderer.EncodeReferenceHdr(first, hdr, sizeof(hdr), written) == rhi::RasterStatus::Ready);
+    CHECK(written == sizeof(hdr));
+    CHECK(hdr[0] == 'L');
+    CHECK(hdr[24] == 3);
+    CHECK(hdr[268] == 2);
+    description.TargetSamples = 4;
+    REQUIRE(session.Renderer.UpdateReferenceCapture(first, snapshot, description) == rhi::RasterStatus::Pending);
+    finish(first);
+    REQUIRE(session.Renderer.GetReferenceCaptureInfo(first, info) == rhi::RasterStatus::Ready);
+    CHECK(info.Revision == 1);
+    CHECK(info.CommittedSamples == 24);
+    auto invalid = description;
+    invalid.Width = 0;
+    CHECK(session.Renderer.UpdateReferenceCapture(first, snapshot, invalid) == rhi::RasterStatus::InvalidDescription);
+    REQUIRE(session.Renderer.GetReferenceCaptureInfo(first, info) == rhi::RasterStatus::Ready);
+    CHECK(info.CommittedSamples == 24);
+    description.Environment = {5, 6, 7};
+    REQUIRE(session.Renderer.UpdateReferenceCapture(first, snapshot, description) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.GetReferenceCaptureInfo(first, info) == rhi::RasterStatus::Ready);
+    CHECK(info.Revision == 2);
+    CHECK(info.CommittedSamples == 0);
+    REQUIRE(session.Renderer.Release(snapshot) == rhi::RasterStatus::Ready);
+    finish(first);
+    REQUIRE(session.Renderer.CopyReferencePixels(first, pixels, 6) == rhi::RasterStatus::Ready);
+    CHECK(pixels[0].Radiance == description.Environment);
+    const auto stale = first;
+    REQUIRE(session.Renderer.Release(first) == rhi::RasterStatus::Ready);
+    CHECK(session.Renderer.GetStatus(stale) == rhi::RasterStatus::InvalidHandle);
+    REQUIRE(session.Renderer.DisableReferenceRendering() == rhi::RasterStatus::Ready);
+    CHECK(session.Renderer.GetStatus(replay) == rhi::RasterStatus::InvalidHandle);
+}
+
+TEST_CASE("RT1 visible-GGX mixture keeps null mass and agrees with hemisphere integration", "[renderer][rt1]")
+{
+    const math::Vector3 normal{0, 0, 1};
+    for (const auto metallic : {0.0F, 1.0F})
+    {
+        const rr::ReferenceBsdf bsdf{{1, 1, 1}, metallic, 1};
+        float64 pdfIntegral = 0, energyIntegral = 0, energySample = 0;
+        usize accepted = 0;
+        constexpr usize side = 256;
+        for (usize y = 0; y < side; ++y)
+        {
+            const auto z = (float32(y) + .5F) / float32(side);
+            for (usize x = 0; x < side; ++x)
+            {
+                const auto angle = math::kTauF * (float32(x) + .5F) / float32(side);
+                const auto radius = math::Sqrt(1 - z * z);
+                rr::ReferenceBsdfEvaluation evaluation;
+                REQUIRE(rr::EvaluateReferenceBsdf(bsdf,
+                                                  normal,
+                                                  normal,
+                                                  {radius * math::Cos(angle), radius * math::Sin(angle), z},
+                                                  evaluation) == rhi::RasterStatus::Ready);
+                pdfIntegral += float64(evaluation.Pdf) * float64(math::kTauF);
+                energyIntegral += float64(evaluation.Value.X * z) * float64(math::kTauF);
+                rr::ReferenceBsdfSample sample;
+                const auto choose = float32((x + y) % side) / float32(side);
+                REQUIRE(rr::SampleReferenceBsdf(bsdf,
+                                                normal,
+                                                normal,
+                                                {choose, z, (float32(x) + .5F) / float32(side)},
+                                                sample) == rhi::RasterStatus::Ready);
+                if (sample.Accepted)
+                {
+                    ++accepted;
+                    rr::ReferenceBsdfEvaluation matched;
+                    REQUIRE(rr::EvaluateReferenceBsdf(bsdf, normal, normal, sample.Direction, matched) ==
+                            rhi::RasterStatus::Ready);
+                    CHECK(matched.Pdf == sample.Evaluation.Pdf);
+                    energySample += float64(sample.Evaluation.Value.X * sample.Direction.Z / sample.Evaluation.Pdf);
+                }
+            }
+        }
+        const auto count = float64(side * side);
+        CHECK(math::Abs(pdfIntegral / count - float64(accepted) / count) < .008);
+        CHECK(math::Abs(energyIntegral / count - energySample / count) < .015);
+        CHECK(energySample / count <= 1.001);
+        CHECK(accepted < side * side);
+    }
+    rr::ReferenceBsdfEvaluation keep{{7, 8, 9}, 11};
+    CHECK(rr::EvaluateReferenceBsdf({}, normal, {0, 0, 2}, normal, keep) == rhi::RasterStatus::InvalidDescription);
+    CHECK(keep.Pdf == 11);
+}
+
+TEST_CASE("RT1 fixed-mip opacity retains texture views and refuses unavailable content", "[renderer][rt1]")
+{
+    Session session;
+    REQUIRE(session.Renderer.Release(session.Mesh) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.EnableReferenceRendering(
+                {},
+                {rr::ReferenceTraversal::CpuOracle, usize{4} * 1024 * 1024, 0, 8}) == rhi::RasterStatus::Ready);
+    LitFixture fixture;
+    fixture.Enable(session);
+    const auto program = fixture.Prewarm(session);
+    const math::Vector3 positions[]{{-1, -1, .5F}, {1, -1, .5F}, {1, 1, .5F}, {-1, 1, .5F}};
+    const math::Vector3 normals[]{{0, 0, -1}, {0, 0, -1}, {0, 0, -1}, {0, 0, -1}};
+    const math::Vector2 uv[]{{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+    const uint32 indices[]{0, 2, 1, 0, 3, 2};
+    rr::MeshDescription meshDescription{positions, 4, indices, 6};
+    meshDescription.Normals = normals;
+    meshDescription.Texcoords = uv;
+    REQUIRE(session.Renderer.CreateMesh(meshDescription, session.Mesh) == rhi::RasterStatus::Ready);
+    const uint8 bytes[]{255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 255, 0, 255, 255, 255, 255};
+    rhi::TextureDescription textureDescription{2, 2};
+    textureDescription.RetainCpuContent = true;
+    rhi::TextureHandle texture;
+    REQUIRE(rhi::CreateTexture(session.Device, textureDescription, {bytes, 8}, texture) == rhi::RasterStatus::Ready);
+    rhi::TextureViewHandle view;
+    REQUIRE(rhi::CreateTextureView(session.Device, texture, view) == rhi::RasterStatus::Ready);
+    rhi::TextureCpuContent content;
+    REQUIRE(rhi::GetTextureCpuContent(session.Device, view, 0, content) == rhi::RasterStatus::Ready);
+    CHECK(content.Width == 2);
+    CHECK(content.Bytes[3] == 0);
+    const auto keep = content;
+    CHECK(rhi::GetTextureCpuContent(session.Device, view, 1, content) == rhi::RasterStatus::InvalidDescription);
+    CHECK(content.Bytes == keep.Bytes);
+    rr::LitMaterialDescription material;
+    material.Surface.Texture = texture;
+    material.Surface.Alpha = rr::MaterialAlpha::Masked;
+    material.Surface.Sampler.Filter = rhi::RasterFilter::Nearest;
+    material.Emission = {3, 2, 1};
+    rr::MaterialVersion version;
+    rr::LightSelection selection;
+    auto extreme = material;
+    extreme.Surface.UvTransform.X = std::numeric_limits<float32>::max();
+    CHECK(session.Renderer.CreateLitMaterial(program, extreme, version, selection) == rhi::RasterStatus::Unsupported);
+    CHECK(session.Renderer.GetStatus(version) == rhi::RasterStatus::InvalidHandle);
+    REQUIRE(session.Renderer.CreateLitMaterial(program, material, version, selection) == rhi::RasterStatus::Ready);
+    rr::SceneItem item;
+    item.SourceId = 1;
+    item.Geometry = session.Mesh;
+    item.Surface = version;
+    rr::Snapshot snapshot;
+    REQUIRE(session.Renderer.CreateSnapshot(&item, 1, snapshot) == rhi::RasterStatus::Ready);
+    rr::ReferenceCaptureDescription description;
+    description.OrthographicCamera = true;
+    description.Width = 2;
+    description.Height = 1;
+    description.CenterRays = true;
+    description.TargetSamples = 2;
+    rr::ReferenceCapture capture;
+    REQUIRE(session.Renderer.BeginReferenceCapture(snapshot, description, capture) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::Destroy(session.Device, texture) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::GetTextureCpuContent(session.Device, view, 0, content) == rhi::RasterStatus::Ready);
+    REQUIRE(rhi::Destroy(session.Device, view) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(version) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(session.Mesh) == rhi::RasterStatus::Ready);
+    auto status = rhi::RasterStatus::Pending;
+    for (usize attempt = 0; attempt < 1000 && status == rhi::RasterStatus::Pending; ++attempt)
+    {
+        status = session.Renderer.AdvanceReferenceCapture(capture);
+    }
+    REQUIRE(status == rhi::RasterStatus::Ready);
+    rr::ReferencePixel pixels[2];
+    REQUIRE(session.Renderer.CopyReferencePixels(capture, pixels, 2) == rhi::RasterStatus::Ready);
+    CHECK(pixels[0].Radiance == math::Vector3{});
+    CHECK(pixels[1].Emission == material.Emission);
+    description.TextureMip = 1;
+    CHECK(session.Renderer.UpdateReferenceCapture(capture, snapshot, description) ==
+          rhi::RasterStatus::InvalidDescription);
+    rr::ReferenceCaptureInfo info;
+    REQUIRE(session.Renderer.GetReferenceCaptureInfo(capture, info) == rhi::RasterStatus::Ready);
+    CHECK(info.Complete);
+    CHECK(info.Revision == 1);
+}
+
+TEST_CASE("RT1 white furnace preserves energy across seeds and explicit depth limits", "[renderer][rt1]")
+{
+    Session session;
+    REQUIRE(session.Renderer.Release(session.Mesh) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.EnableReferenceRendering(
+                {},
+                {rr::ReferenceTraversal::CpuOracle, usize{4} * 1024 * 1024, 0, 1}) == rhi::RasterStatus::Ready);
+    LitFixture fixture;
+    fixture.Enable(session);
+    const auto program = fixture.Prewarm(session);
+    const math::Vector3 positions[]{{-100, -100, .5F}, {100, -100, .5F}, {100, 100, .5F}, {-100, 100, .5F}};
+    const math::Vector3 normals[]{{0, 0, -1}, {0, 0, -1}, {0, 0, -1}, {0, 0, -1}};
+    const uint32 indices[]{0, 2, 1, 0, 3, 2};
+    rr::MeshDescription meshDescription{positions, 4, indices, 6};
+    meshDescription.Normals = normals;
+    REQUIRE(session.Renderer.CreateMesh(meshDescription, session.Mesh) == rhi::RasterStatus::Ready);
+    rr::LitMaterialDescription material;
+    material.Roughness = 1;
+    rr::MaterialVersion version;
+    rr::LightSelection selection;
+    REQUIRE(session.Renderer.CreateLitMaterial(program, material, version, selection) == rhi::RasterStatus::Ready);
+    rr::SceneItem item;
+    item.SourceId = 1;
+    item.Geometry = session.Mesh;
+    item.Surface = version;
+    rr::Snapshot snapshot;
+    REQUIRE(session.Renderer.CreateSnapshot(&item, 1, snapshot) == rhi::RasterStatus::Ready);
+    float32 means[4]{};
+    for (usize experiment = 0; experiment < 4; ++experiment)
+    {
+        rr::ReferenceCaptureDescription description;
+        description.OrthographicCamera = true;
+        description.Width = description.Height = 1;
+        description.CenterRays = true;
+        description.TargetSamples = 8192;
+        description.Environment = {1, 1, 1};
+        description.MaxDepth = experiment % 2 == 0 ? 1 : 4;
+        description.RouletteDepth = 1;
+        description.Seed = experiment / 2 + 1;
+        rr::ReferenceCapture capture;
+        REQUIRE(session.Renderer.BeginReferenceCapture(snapshot, description, capture) == rhi::RasterStatus::Ready);
+        auto status = rhi::RasterStatus::Pending;
+        for (usize attempt = 0; attempt < 1000000 && status == rhi::RasterStatus::Pending; ++attempt)
+        {
+            status = session.Renderer.AdvanceReferenceCapture(capture);
+        }
+        REQUIRE(status == rhi::RasterStatus::Ready);
+        rr::ReferencePixel pixel;
+        REQUIRE(session.Renderer.CopyReferencePixels(capture, &pixel, 1) == rhi::RasterStatus::Ready);
+        CHECK(pixel.Emission == math::Vector3{});
+        CHECK(pixel.Indirect == math::Vector3{});
+        CHECK(pixel.Samples == 8192);
+        CHECK(pixel.Radiance.X > .92F);
+        CHECK(pixel.Radiance.X < 1.01F);
+        means[experiment] = pixel.Radiance.X;
+        REQUIRE(session.Renderer.Release(capture) == rhi::RasterStatus::Ready);
+    }
+    CHECK(means[0] == means[1]);
+    CHECK(means[2] == means[3]);
+    CHECK(math::Abs(means[0] - means[2]) < .035F);
+}

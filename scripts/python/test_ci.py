@@ -351,20 +351,20 @@ class ShaderBootstrapCacheTests(unittest.TestCase):
                    "source_sha256": hashlib.sha256(archive.read_bytes()).hexdigest()}
             (root / "config").mkdir()
             (root / "config/spirv_cross_toolchain.json").write_text(json.dumps({"spirv_cross": pin}))
-            manifest = {**pin, "compiler": "Clang 18", "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest()}
+            manifest = {**pin, "compiler": "clang version 18.1.8", "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest()}
             Path(str(binary) + ".build.json").write_text(json.dumps(manifest))
             namespace = runpy.run_path(str(copy))
-            with patch.object(subprocess, "check_output", return_value="Clang 18\n"), \
+            with patch.object(subprocess, "check_output", return_value="clang version 18.1.8\n"), \
                     patch.object(subprocess, "run") as build, \
                     patch("urllib.request.urlretrieve") as download, contextlib.redirect_stdout(io.StringIO()):
                 namespace["main"]()
             build.assert_not_called()
             download.assert_not_called()
             check = namespace["cached_translator"]
-            self.assertFalse(check(binary.parent.parent, {**pin, "commit": "different"}, "Clang 18"))
+            self.assertFalse(check(binary.parent.parent, {**pin, "commit": "different"}, "clang version 18.1.8"))
             self.assertFalse(check(binary.parent.parent, pin, "Clang 19"))
             binary.write_bytes(b"modified translator")
-            self.assertFalse(check(binary.parent.parent, pin, "Clang 18"))
+            self.assertFalse(check(binary.parent.parent, pin, "clang version 18.1.8"))
 
 
 if __name__ == "__main__":

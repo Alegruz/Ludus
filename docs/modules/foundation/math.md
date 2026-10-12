@@ -195,3 +195,16 @@ are adapted from Melissa O'Neill's PCG reference `pcg-c-basic`
 the small integer algorithm is reimplemented in Ludus style; no source file is
 copied. The frozen known-answer sequence for `seed=42, selector=54` is
 `a15c02b7, 7b47f409, ba1d3330, 83d2f293, bfa4784b, cbed606e`.
+
+## Reference-rendering helpers
+
+`DecodeSrgb` / `EncodeSrgb` implement the W3C CSS Color 4 §10.2 transfer for
+finite channels in [0,1]; outside that domain they return NaN. Alpha is not sRGB.
+`NextFloatDown` returns the adjacent lower FP32 value (IEEE infinities/NaNs follow
+the math boundary). `TryOffsetRayOrigin` accepts finite position, nonnegative
+component error and unit geometric normal/direction, projects error onto the
+oriented normal and rounds each changed component outward. Failure preserves
+output. It follows PBRT 4e §6.1, with a minimum normal step near zero for GPU FTZ;
+callers must supply conservative reconstruction error, not a scene-sized epsilon.
+The [RT1 profile](../../architecture/renderer-systems.md#l6-implemented-scope-rt0-and-rt1)
+records its actual reconstruction allowance and thin-geometry limitations.

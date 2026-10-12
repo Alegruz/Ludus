@@ -40,6 +40,10 @@ enum class RasterKind : foundation::uint8
     Set,
     Pipeline,
     ComputePipeline,
+    RayGeometry,
+    RayScene,
+    RayProgram,
+    RayBatch,
     Count
 };
 struct RasterLayout final

@@ -133,6 +133,18 @@ template <typename ScalarType>
 [[nodiscard]] float64 Floor(float64 value) noexcept;
 [[nodiscard]] float64 Ceil(float64 value) noexcept;
 
+/// Decode a finite [0,1] sRGB channel into linear light with the IEC/W3C piecewise
+/// transfer. Values outside this bounded domain return NaN. No allocation/state.
+/// Alpha/data channels must not use this color transfer.
+[[nodiscard]] float32 DecodeSrgb(float32 value) noexcept;
+/// Encode a finite [0,1] linear-light channel into bounded sRGB. Outside-domain
+/// values return NaN; exposure/tone mapping remain the renderer's responsibility.
+[[nodiscard]] float32 EncodeSrgb(float32 value) noexcept;
+/// Adjacent float32 toward negative infinity. Finite inputs have the IEEE nextafter
+/// result, including subnormals/zero; NaN remains NaN. No allocation/state. Callers
+/// retain interval/domain obligations when excluding a visibility endpoint.
+[[nodiscard]] float32 NextFloatDown(float32 value) noexcept;
+
 // --- Interpolation ----------------------------------------------------------
 /// @brief Lerp is UNCLAMPED and preserves exactly a at t=0 and b at t=1 for finite inputs (it is not the naive a +
 /// t*(b-a), which loses the b endpoint). t outside [0,1] extrapolates and may overflow.
