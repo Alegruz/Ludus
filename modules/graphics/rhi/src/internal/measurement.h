@@ -29,7 +29,12 @@ inline bool TimestampDuration(foundation::uint64 start,
         return false;
     }
     const auto mask = counter.Bits == 64 ? ~foundation::uint64{0} : (foundation::uint64{1} << counter.Bits) - 1;
-    output = static_cast<foundation::float64>((end - start) & mask) * counter.Tick;
+    const auto duration = static_cast<foundation::float64>((end - start) & mask) * counter.Tick;
+    if (duration > static_cast<foundation::float64>(elapsedCpu) + counter.Tick * 2)
+    {
+        return false;
+    }
+    output = duration;
     return true;
 }
 template <foundation::usize N>

@@ -31,6 +31,7 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
           "[rhi][gpu][raster]")
 {
     int32 mode = 0;
+    bool forceTiming = false;
     SECTION("Linear RGBA8 sampling and depth") {}
     SECTION("sRGB sampling decodes to linear output")
     {
@@ -60,6 +61,11 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     {
         mode = 7;
     }
+    SECTION("R7 instrumented graph frames and query reuse")
+    {
+        mode = 7;
+        forceTiming = true;
+    }
     const bool graphMode = mode >= 3;
     const bool computeMode = mode == 5;
     struct Guard final
@@ -74,7 +80,7 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
     rhi::SurfaceHandle surface;
     rhi::StartupInfo failure;
     rhi::DeviceDescription description;
-    description.EnableGpuTiming = std::getenv("LUDUS_RHI_GPU_TIMING") != nullptr;
+    description.EnableGpuTiming = forceTiming || std::getenv("LUDUS_RHI_GPU_TIMING") != nullptr;
     description.Required.PortableRaster = true;
     description.Required.Compute = computeMode;
     const auto started = rhi::CreateDevice({}, { .Width = 96, .Height = 64 }, description, device, surface, &failure);
@@ -322,6 +328,13 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
                         REQUIRE(rhi::ExecuteOrderedGraph(device, surface, graph, completion) ==
                                 rhi::RasterStatus::Ready);
                         const auto executeEnd = std::chrono::steady_clock::now();
+                        rhi::GpuTiming submittedTiming;
+                        REQUIRE(rhi::GetGpuTiming(device, submittedTiming) == rhi::RasterStatus::Ready);
+                        if (armed == rhi::RasterStatus::Ready)
+                        {
+                            REQUIRE((submittedTiming.State == rhi::GpuTimingState::Pending ||
+                                     submittedTiming.State == rhi::GpuTimingState::Available));
+                        }
                         REQUIRE(rhi::backend::ReadHeadlessPixels(merge ? merged : baseline));
                         const auto completionEnd = std::chrono::steady_clock::now();
                         rhi::GpuTiming timing;
@@ -330,6 +343,10 @@ TEST_CASE("Portable indexed instances preserve texture origin, depth and detache
                         REQUIRE(rhi::GetAllocationTelemetry(device, memory) == rhi::RasterStatus::Ready);
                         REQUIRE(timing.State != rhi::GpuTimingState::Armed);
                         REQUIRE(timing.State != rhi::GpuTimingState::Pending);
+                        if (forceTiming && armed == rhi::RasterStatus::Ready)
+                        {
+                            REQUIRE(timing.State == rhi::GpuTimingState::Available);
+                        }
                         const auto pollEnd = std::chrono::steady_clock::now();
                         CHECK(report.RasterPasses == (merge ? 2 : layers + 1));
                         CHECK(report.MergedPasses == (merge ? layers - 1 : 0));

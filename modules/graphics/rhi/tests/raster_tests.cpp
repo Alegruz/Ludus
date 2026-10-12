@@ -2122,6 +2122,8 @@ TEST_CASE("R7 timestamps reject ambiguous wraps and preserve failed conversion o
     CHECK(duration == 20);
     CHECK_FALSE(internal::TimestampDuration(250, 4, {8, 2}, 512, duration));
     CHECK(duration == 20);
+    CHECK_FALSE(internal::TimestampDuration(100, 90, {8, 1}, 20, duration));
+    CHECK(duration == 20);
     CHECK_FALSE(internal::TimestampDuration(1, 2, {0, 1}, 1, duration));
     CHECK_FALSE(internal::TimestampDuration(1, 2, {65, 1}, 1, duration));
     CHECK_FALSE(internal::TimestampDuration(1, 2, {64, 0}, 1, duration));

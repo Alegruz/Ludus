@@ -120,9 +120,13 @@ GpuTiming TimingPoll() noexcept
 void TimingReset() noexcept
 {
     if (gActive == Backend::WebGPU)
+    {
         webgpu::TimingReset();
+    }
     else
+    {
         webgl::TimingReset();
+    }
 }
 bool RasterAllocationBytes(internal::RasterKind kind, usize slot, uint64& bytes) noexcept
 {

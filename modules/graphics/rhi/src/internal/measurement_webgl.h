@@ -18,13 +18,15 @@ EM_JS(int32, TimingGlArm, (), {
     const gl = GL.currentContext?.GLctx;
     if (!gl) return 0;
     const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
-    if (!ext || !gl.getQuery(ext.TIME_ELAPSED_EXT, ext.QUERY_COUNTER_BITS_EXT)) return 0;
+    if (!ext) return 0;
+    const bits = gl.getQuery(ext.TIME_ELAPSED_EXT, ext.QUERY_COUNTER_BITS_EXT);
+    if (!bits) return 0;
     if (Module.ludusTiming) gl.deleteQuery(Module.ludusTiming.query);
     const query = gl.createQuery();
     if (!query) return -1;
     // Clear an earlier disjoint notification before beginning this sample.
     gl.getParameter(ext.GPU_DISJOINT_EXT);
-    Module.ludusTiming = {gl, ext, query, open:false}; return 1;
+    Module.ludusTiming = {gl, ext, query, open:false}; return bits;
 });
 EM_JS(void, TimingGlBegin, (), {
     const t = Module.ludusTiming; t.gl.beginQuery(t.ext.TIME_ELAPSED_EXT, t.query); t.open=true;
@@ -92,8 +94,12 @@ RasterStatus TimingArm() noexcept
         return RasterStatus::InvalidState;
     }
     const auto result = TimingGlArm();
-    gTiming = { .State = result == 1 ? GpuTimingState::Armed : GpuTimingState::Unavailable };
-    return result == 1 ? RasterStatus::Ready : result == 0 ? RasterStatus::Unsupported : RasterStatus::OutOfMemory;
+    gTiming = { .State = result > 0 ? GpuTimingState::Armed : GpuTimingState::Unavailable };
+    if (result > 0)
+    {
+        gTiming.ValidBits = static_cast<uint32>(result);
+    }
+    return result > 0 ? RasterStatus::Ready : result == 0 ? RasterStatus::Unsupported : RasterStatus::OutOfMemory;
 }
 void TimingBegin() noexcept
 {

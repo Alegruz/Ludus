@@ -10,6 +10,7 @@ namespace
 GpuTiming gTiming;
 VkQueryPool gTimingPool = VK_NULL_HANDLE;
 uint64 gTimingCpuStart = 0;
+usize gTimingFrame = 0;
 } // namespace
 // Thanks to AMD GPUOpen, Vulkan Memory Allocator 3.3.0, Statistics:
 // https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/statistics.html
@@ -53,6 +54,22 @@ GpuTiming TimingPoll() noexcept
 {
     if (gTiming.State == GpuTimingState::Pending)
     {
+        // Query reset executes on the GPU. Old values can remain available until then;
+        // the captured submission fence must complete before reading the reused pool.
+        const auto fence = vkGetFenceStatus(gDevice, gFrames[gTimingFrame].Fence);
+        if (fence == VK_NOT_READY)
+        {
+            return gTiming;
+        }
+        if (fence != VK_SUCCESS)
+        {
+            gTiming.State = GpuTimingState::Failed;
+            if (fence == VK_ERROR_DEVICE_LOST)
+            {
+                internal::Fail(gSession, StartupError::DeviceLost);
+            }
+            return gTiming;
+        }
         uint64 values[4]{};
         const auto result = vkGetQueryPoolResults(gDevice,
                                                   gTimingPool,
@@ -88,6 +105,10 @@ GpuTiming TimingPoll() noexcept
 RasterStatus TimingArm() noexcept
 {
     const auto state = TimingPoll().State;
+    if (gDevice == VK_NULL_HANDLE)
+    {
+        return GetStartup().State == StartupState::DeviceLost ? RasterStatus::DeviceLost : RasterStatus::Failed;
+    }
     if (state == GpuTimingState::Armed || state == GpuTimingState::Pending)
     {
         return RasterStatus::InvalidState;
@@ -111,6 +132,12 @@ RasterStatus TimingArm() noexcept
         const auto result = vkCreateQueryPool(gDevice, &info, nullptr, &gTimingPool);
         if (result != VK_SUCCESS)
         {
+            gTimingPool = VK_NULL_HANDLE;
+            if (result == VK_ERROR_DEVICE_LOST)
+            {
+                internal::Fail(gSession, StartupError::DeviceLost);
+                return RasterStatus::DeviceLost;
+            }
             return result == VK_ERROR_OUT_OF_HOST_MEMORY || result == VK_ERROR_OUT_OF_DEVICE_MEMORY
                        ? RasterStatus::OutOfMemory
                        : RasterStatus::Failed;
@@ -119,7 +146,7 @@ RasterStatus TimingArm() noexcept
     gTiming =
     {
         .State = GpuTimingState::Armed,
-        .TickNanoseconds = properties.limits.timestampPeriod,
+        .TickNanoseconds = static_cast<float64>(properties.limits.timestampPeriod),
         .ValidBits = families[gFamily].timestampValidBits,
     };
     return RasterStatus::Ready;
@@ -138,6 +165,13 @@ void TimingEnd() noexcept
     if (gTiming.State == GpuTimingState::Armed)
     {
         vkCmdWriteTimestamp(gFrames[gFrame].Command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gTimingPool, 1);
+        gTimingFrame = gFrame;
+    }
+}
+void TimingSubmitted() noexcept
+{
+    if (gTiming.State == GpuTimingState::Armed)
+    {
         gTiming.State = GpuTimingState::Pending;
     }
 }

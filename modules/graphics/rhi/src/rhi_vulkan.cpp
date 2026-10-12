@@ -22,6 +22,7 @@ namespace ludus::graphics::rhi::backend
 void RasterFrameExtent() noexcept;
 void TimingBegin() noexcept;
 void TimingEnd() noexcept;
+void TimingSubmitted() noexcept;
 namespace
 {
 using namespace foundation;
@@ -1018,6 +1019,12 @@ FrameStatus Begin() noexcept
     {
         return Failure();
     }
+    // Harvest the captured query before its frame fence can be reset for later work.
+    (void)TimingPoll();
+    if (gDevice == VK_NULL_HANDLE)
+    {
+        return FrameStatus::Failed;
+    }
     (void)RasterCompleted();
     if (gDevice == VK_NULL_HANDLE)
     {
@@ -1121,6 +1128,7 @@ FrameStatus End() noexcept
     {
         return Failure();
     }
+    TimingSubmitted();
     gAcquiredWait = false;
     gFrame = (gFrame + 1) % FRAMES;
     if (!gHeadless)

@@ -32,7 +32,7 @@ try {
   const pin = JSON.parse(await readFile(new URL('../../config/shader_toolchain.json',import.meta.url))).wgsl_validator;
   assert.equal(browser.version(),pin.chromium_version);
   report.version = browser.version();
-  for (const scenario of ['webgpu-timing-merge','webgpu-timing-loss-merge','webgpu-no-timestamps-timing-merge','webgl2-timing-merge','webgpu','webgl2','auto','auto-fallback','webgpu-profile-limit-failure','webgl2-profile-limit-failure','auto-profile-limit-fallback','webgpu-stride-256','webgl2-stride-252','webgl2-stride-profile-failure','webgpu-srgb','webgl2-srgb','webgpu-blend','webgl2-blend','webgpu-graph','webgl2-graph','webgpu-graph-reference','webgl2-graph-reference','webgpu-merge','webgpu-merge-reference','webgl2-merge','webgl2-merge-reference','auto-fallback-merge','webgpu-cpu','webgpu-compute','webgpu-compute-reference','webgl2-cpu','webgl2-compute','auto-fallback-compute','webgl2-compute-required','invalid-shader','invalid-pipeline','invalid-upload','invalid-readback','slow-completion','transfer-loss','device-loss']) {
+  for (const scenario of ['webgpu-timing-merge','webgpu-timing-loss-merge','webgpu-no-timestamps-timing-merge','webgl2-timing-merge','webgl2-disjoint-timing-merge','webgpu','webgl2','auto','auto-fallback','webgpu-profile-limit-failure','webgl2-profile-limit-failure','auto-profile-limit-fallback','webgpu-stride-256','webgl2-stride-252','webgl2-stride-profile-failure','webgpu-srgb','webgl2-srgb','webgpu-blend','webgl2-blend','webgpu-graph','webgl2-graph','webgpu-graph-reference','webgl2-graph-reference','webgpu-merge','webgpu-merge-reference','webgl2-merge','webgl2-merge-reference','auto-fallback-merge','webgpu-cpu','webgpu-compute','webgpu-compute-reference','webgl2-cpu','webgl2-compute','auto-fallback-compute','webgl2-compute-required','invalid-shader','invalid-pipeline','invalid-upload','invalid-readback','slow-completion','transfer-loss','device-loss']) {
     const context = await browser.newContext({viewport:{width:200,height:160},deviceScaleFactor:1});
     await context.addInitScript(scenario => {
       window.__qaPause = false;
@@ -95,14 +95,14 @@ try {
           return adapter;
         };
       }
-      if (scenario === 'webgl2-profile-limit-failure') {
+      if (scenario === 'webgl2-profile-limit-failure' || scenario.includes('disjoint')) {
         const getContext = HTMLCanvasElement.prototype.getContext;
         HTMLCanvasElement.prototype.getContext = function(...args) {
           const context = getContext.apply(this,args);
           if (args[0] === 'webgl2' && context && !context.__qaLimits) {
             context.__qaLimits = true;
             const parameter = context.getParameter.bind(context);
-            context.getParameter = name => name === context.MAX_VERTEX_ATTRIBS ? 4 : parameter(name);
+            context.getParameter = name => scenario.includes('disjoint') ? (name === 0x8FBB ? true : parameter(name)) : name === context.MAX_VERTEX_ATTRIBS ? 4 : parameter(name);
           }
           return context;
         };
@@ -135,6 +135,7 @@ try {
         assert.equal(result.timing.apiBytesAvailable,0);
         if (scenario.includes('no-timestamps')) assert.equal(result.timing.state,4);
         else if (scenario.startsWith('webgpu')) assert.equal(result.timing.state,3);
+        else if (scenario.includes('disjoint')) assert.ok([4,5].includes(result.timing.state));
         if (result.timing.state === 3) assert.ok(result.timing.gpuNs >= 0);
         else assert.equal(result.timing.gpuNs,0);
       }
