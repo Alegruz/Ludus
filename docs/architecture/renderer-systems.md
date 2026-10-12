@@ -1002,13 +1002,24 @@ or surface cannot trigger an undocumented backend switch.
 
 ## Materials, shaders and pipeline control
 
+The proposed [render graph authoring architecture](render-graph-authoring.md)
+owns reusable graph/function/resource nodes, camera output routes, scene coverage,
+author-declared compilation configurations, shared schemas, incremental builds
+and editor/reload integration. It is an authoring layer over these Renderer and
+RHI contracts, not a claim that the current material graph editor is implemented.
+Users can consume selected graph outputs; this never synthesizes shader variants.
+Depth-only rendering requires an authored technique preserving geometry/coverage.
+
 A material template declares a small shading family, parameter schema, legal
-texture semantics, render domain and static feature options. A material instance
+texture semantics, render domain and an explicit finite set of legal static
+configuration tuples. Nested graph/function extensions contribute to the same
+shader and pipeline count/budget report. A material instance
 holds immutable values and exact texture versions. Instance edits create a new
 candidate and publish transactionally; old packets retain the old bindings.
 Begin with unlit, metallic/roughness lit, masked and premultiplied transparent
 families. Limit two-sided and specialized effects to justified variants.
-Runtime material graphs and arbitrary per-object shader generation are deferred.
+Runtime shader generation and arbitrary per-object specialization remain deferred;
+the proposed editor compiles authored graphs offline to immutable packages.
 
 Retain Ludus's pinned Slang/tool chain and SPIR-V, MSL, WGSL and GLSL ES artifacts.
 Cook explicit reflection with numeric bindings, stage interfaces, parameter

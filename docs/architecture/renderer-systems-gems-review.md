@@ -1,6 +1,7 @@
 # Low-level renderer systems: reference review and research plan
 
-Status: Design evidence, October 7, 2026; no renderer implementation or benchmark.
+Status: Design evidence, October 7, 2026, with graph/shader authoring follow-up
+October 12, 2026; this review supplies no implementation or benchmark.
 The [architecture](renderer-systems.md) was saved before searching the article map.
 This review records the subsequent source-driven changes. Detailed device,
 camera, resource and text contracts remain in their existing owners.
@@ -211,6 +212,55 @@ The paper's speedup is not a Ludus result. Full estimator review remains necessa
 before RT4 adoption; similarly, PBRT chapter 15's overview was inspected only as
 a wavefront follow-up source. Denoising/resampling never replaces independent
 raw reference samples in correctness comparisons.
+
+## Render graph and shader authoring follow-up
+
+The [graph/shader architecture](render-graph-authoring.md) was first written on
+October 12 against `5c44d19`, before this targeted article-text review. It addresses
+reusable graph nodes, camera/offscreen outputs, scene coverage, author-owned
+permutations, shared layouts and game-module hot reload. The table below records
+actual readings selected from `references/game-dev-gems-toc.md`, not conclusions
+drawn from titles alone. Existing renderer algorithms and their previous evidence
+remain above. No companion code was imported or assessed.
+
+| Source and catalog entry | Sections actually inspected | One-based local PDF pages |
+| --- | --- | --- |
+| Donald Revie, "Designing a Data-Driven Renderer," *GPU Pro 3*, V.4 ([catalog](../../references/game-dev-gems-toc.md#L9743)) | 4.4-4.8, shared representation/context, technique/pass filters, frame traversal, case-study limitations and debug techniques; printed pp. 307-317 | 311-321 |
+| Arseny Kapoulkine, "Writing an Efficient Vulkan Renderer," *GPU Zen 2*, IV.4 ([catalog](../../references/game-dev-gems-toc.md#L10838)) | End of 4.4, 4.5-4.6.3 and conclusion: declared dependency order, attachment intent, complete pipeline states, prewarm and permutation growth; printed pp. 238-247 | 250-259 |
+| Curtiss Murphy, "Support Your Local Artist: Adding Shaders to Your Engine," *Game Programming Gems 7*, 7.4 ([catalog](../../references/game-dev-gems-toc.md#L7296)) | Full article including Test Mode, Prototypes, parameters/cloning, groups, future work and references; printed pp. 541-554 | 574-587 |
+| Rémi Arnaud, "The Game Asset Pipeline," *Game Engine Gems 1*, chapter 2 ([catalog](../../references/game-dev-gems-toc.md#L5552)) | 2.2-2.3, readable intermediate/cooked ownership, editor/source workflow and pull-model dependencies; printed pp. 24-30 | 52-58 |
+| Patrick Cozzi, "A Framework for GLSL Engine Uniforms," *Game Engine Gems 2*, chapter 6 ([catalog](../../references/game-dev-gems-toc.md#L5783)) | Full chapter 6.1-6.6, automatic uniforms, explicit state, implementation and derived-value caching; printed pp. 83-92 | 99-108 |
+| Christopher Maughan / NVIDIA, "The Design of FX Composer," *GPU Gems*, chapter 30 ([catalog](../../references/game-dev-gems-toc.md#L8291)) | Full chapter 30.1-30.9, properties/parameter reconciliation, communication/lifetime costs, UI, device-independent compilation and per-device instantiation | 269-276; this local copy does not preserve printed page labels |
+
+The ignored local PDFs remain in the primary reference library and are not copied
+into public documentation. Readings used extracted page text; rendered checks
+verified Kapoulkine's complete technique example (p. 244), Murphy's parameter
+diagram/duplicate-texture discussion (p. 548), and Cozzi's factory diagram (p. 88).
+The latter two are historical object models, not designs transplanted into Ludus.
+
+### Refinements to the initial proposal
+
+| Source finding | Refinement and rationale | Departure / acceptance gate |
+| --- | --- | --- |
+| Revie reports XML/configuration complexity, special-case friction and runtime optimization costs; filters can leave entities without matching passes | Preserve nested source paths and readable generated plans; compile graph interpretation ahead of runtime; check intended scene participation independently of compatibility filters | No context push/pop or global technique state. RG0/RG2 require route diagnostics and mixed draw-item coverage; no unsupported item can disappear inside selection |
+| Kapoulkine explicitly includes fixed state and target formats in techniques, then discusses multiplying combinations and alternatives to more permutations | Bound pipeline recipes separately from unique shader programs; review runtime work or separate authored effects before adding static tuples | No automatic permutation from unused output, unrestricted Cartesian product or promise of zero driver work. RG1/RG2 count both programs/recipes and reject cold required pipelines before activation |
+| Murphy shares compiled programs between parameterized instances, warns about duplicated texture data and emphasizes seeing the result in the real engine | Clone small values while sharing immutable program/resource versions; add frozen-fixture parity between preview and live package execution | No singleton, virtual parameter per field, scene-state inheritance or direct replacement of executing programs. RG3 verifies retained versions and preview/live parity |
+| Arnaud separates source/intermediate/final assets and warns that editing intermediates loses changes on rebuild | Make generated views read-only and attach Open Source/provenance to selected artifacts; retain readable intermediate plans and transitive invalidation | No COLLADA/DCC dependency or second authored generated source. RG1 tests clean rebuild, source-directed navigation and dependency changes |
+| Cozzi replaces implicit global uniform state with automatic inputs sourced from explicit state, with derived values cached | Add typed engine-value provider nodes and declared view/draw update frequencies | No string-name factory registry, runtime source parsing or virtual dispatch per uniform. RG1/RG2 check provider schema/dependencies and two views with distinct values |
+| Maughan describes parameter reconciliation and compilation independent of device-specific effect instances; the chapter also records ownership/UI complexity and repeated resources across devices | Require stable field/type/semantic migration and visible conflicts; separate document/package/device status; share device-local leases where possible | No COM plug-in framework, device per panel or lazy pipeline creation during draw. RG3 tests changed semantics, missing capabilities, migration rejection and ready admission |
+
+These are refinements of the already saved proposal, not a claim that old APIs
+are contemporary best practice. Thanks to the authors for the design ideas and
+explicit limitations. The architecture places concise attribution beside the
+affected contracts; this review supplements rather than replaces it.
+
+Contemporary primary documentation was also checked: Epic Games' Render Dependency
+Graph (resource declarations, Debugging and Validation), PSO Precaching (Global
+Shader PSO Precaching), Slang reflection/module specialization, and Khronos fragment
+operations. Exact links, scope, departures and pinned-version qualification are in
+the [architecture's cross-checks](render-graph-authoring.md#contemporary-cross-checks).
+These readings are not benchmarks, full engine-source audits, or evidence of new
+Ludus/backend features. No new toolchain version is selected.
 
 ## Conference and journal research plan
 
