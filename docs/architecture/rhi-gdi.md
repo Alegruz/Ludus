@@ -796,7 +796,8 @@ R0 capability, format and limit negotiation is implemented. The remaining
 one-device/surface scope, resource table bounds and restricted operations are
 assigned below. R6 implements configurable, budgeted storage, and R7 provides
 measurement and qualification tooling with explicitly open host acceptance.
-R8–R17 remain **planned and not implemented**. They extend the
+R8 adds mutable transfers and incremental initialized mip primitives; partial
+sampling remains R9a. R9–R17 remain **planned and not implemented**. They extend the
 shipped R0–R5 profiles rather than reopening their original acceptance.
 
 #### Follow-up milestones R6–R17
@@ -812,7 +813,7 @@ requiring those higher-level systems to be implemented first.
 | --- | --- | --- | --- |
 | **R6: scalable resource and plan storage (Implemented)** | Replace fixed general-resource/backend tables and GDI graph/batch storage with stable, budgeted capacity. Negotiate configured maxima before Ready; grow backing between frames, without changing published limits or allocating during command execution. Keep the fullscreen facade's separate compatibility bounds. | R0/R1/R2/R3 | Exceed the historical 64 records per kind, 16 resources/32 passes per graph, 256 draws per retained batch/graph and 1024 draws per frame in independently budgeted fixtures. Include at least 72 small resident textures and 405 prepared draw packets. Test stable handles through growth, allocation rollback, checked capacity arithmetic, generation exhaustion, pending/detached/in-flight retention and loss/restart. Counts prove capacity, not full reference-scene performance. |
 | **R7: GPU measurement and qualification (Measurement/workflow implemented; host gates open)** | R7a: optional GPU timing and actual allocation/retirement telemetry, with logical, API-allocated and physical/resident bytes distinguished. R7b: named physical-GPU and host/surface qualification records. | Existing R2/R3/R5; extend telemetry for each later milestone | Query lifecycle, clock domains, precision/disjointness, reporting overhead and unavailable results are explicit. CPU acquire/encode/submit time is not GPU duration or display latency. Qualification records pin hardware, workload and enabled profile, include resize/loss and selected Wayland/hosted-browser journeys, and report measured CPU/GPU distributions and peak memory. Unavailable physical residency/display observations are not invented; their qualification remains open. |
-| **R8: mutable transfers and residency primitives** | R8a: existing-buffer updates and bounded 2D texture upload/update/copy/readback. R8b: incremental initialized mip residency and staging budgets with explicit source ownership, completion and cancellation. | R8a: R6 plus existing R2/R3; R8b: R8a/R9a initialized-view contracts; use R7 evidence | Round trips, offset/pitch/range checks, partial initialization, RAW/WAR/WAW and cancellation/pressure/loss tests. Mutation must reject, order or rename around retained/in-flight uses; never overwrite host-visible GPU data still in use. Reuse staging only after actual completion. Later texture types/block formats extend these checks in R9. Residency here does not promise sparse GPU memory or consumer eviction policy. |
+| **R8: mutable transfers and residency primitives (Implemented, RGBA8 transfer profile)** | R8a: existing-buffer updates and bounded 2D texture upload/update/copy/readback. R8b: incremental initialized mip residency and staging budgets with explicit source ownership, completion and cancellation. | R8a: R6 plus existing R2/R3; R8b initialization: R8a; sampling partial residency: R9a initialized-view contracts; use R7 evidence | Round trips, offset/pitch/range checks, partial initialization, RAW/WAR/WAW and cancellation/pressure/loss tests. Mutation must reject, order or rename around retained/in-flight uses; never overwrite host-visible GPU data still in use. Reuse staging only after actual completion. Later texture types/block formats extend these checks in R9. Residency here does not promise sparse GPU memory or consumer eviction policy. |
 | **R9: texture types, formats and views** | R9a: partial sampled views/mip/layer/aspect ranges and uploaded HDR formats. R9b: arrays/cubemaps. R9c: 3D textures and compressed formats, each with explicit enabled format/use support and target reflection. | R6/R8a; partial views initially use conservative R3 hazards | Validate block-edge layouts, mip/slice bounds, cube orientation, 3D addressing, initialized sampling and retained view lifetimes. Installed SDK pixels/readback qualify every claimed backend/profile. Unsupported format/use combinations reject explicitly; array/cube/3D and compression capabilities are independent. |
 | **R10: attachment extensions** | R10a: multiple color attachments, sampled depth and stencil. R10b: MSAA/resolve. R10c: partial attachment views and extended GDI load/store declarations. | Existing R1/R3 plus R6; R9a/view aspects for sampled depth and R10c; no dependency on all texture types or transfers | Validate per-format/sample limits, attachment compatibility, resolves, depth/stencil behavior, feedback and undefined loads. Prove graph/direct image agreement, loss/resize retirement and authored alternatives. Conservatively track full-resource hazards until R13a; stencil, attachment counts and MSAA are separate capabilities. |
 | **R11: scalable binding and optional bindless** | R11a: descriptor arenas and dynamic offsets. R11b: reflected binding arrays and separately enabled descriptor indexing/bindless, with explicit reachable-resource declarations and completion-gated reuse. | R11a: R6 and existing R1/R2; R11b: R11a plus verified target reflection/capabilities; R9 only for new texture types/views | Alignment/range checks, descriptor exhaustion/rollback, in-flight replacement and stale index tests. Arrays do not imply runtime-sized/non-uniform indexing or update-after-bind. Retain all declared reachable resources; unsafe or undeclared access rejects. Compare binding CPU cost and retained memory through R7. Bindless is optional and does not remove table/memory budgets. |
@@ -825,9 +826,11 @@ requiring those higher-level systems to be implemented first.
 
 R6 storage and R7a measurement support are implemented; R7b physical Vulkan/Wayland
 and deployed physical-browser journeys remain open. See the
-[R7 usage and named qualification evidence](../development/fullscreen-rendering.md#gpu-measurement-and-qualification-r7). R8a can
-follow directly; R8b follows R9a so partially resident mips have valid sampled
-views. R9/R10 and R11a proceed once their listed prerequisites are present.
+[R7 usage and named qualification evidence](../development/fullscreen-rendering.md#gpu-measurement-and-qualification-r7).
+[R8a transfers and R8b mip initialization/staging budgets](../development/fullscreen-rendering.md#mutable-transfers-and-mip-initialization-r8)
+are implemented for the RGBA8 transfer profile. R8b initializes mips incrementally
+and gates the existing full-resource view until all mips are defined. R9a remains
+the prerequisite for sampling a partially initialized allocation through a partial view. R9/R10 and R11a proceed once their listed prerequisites are present.
 R12a reuses R4 and R15a reuses R3 without waiting for the texture/attachment
 series. R14 is a separate ownership
 track. R16a/R17a provide an early native RT query track; scalable bindings,
@@ -846,7 +849,10 @@ Each named subprofile is tracked separately as **Planned**, **In progress**,
 **Implemented** or **Qualified**, with PR/revision, backend/profile matrix and
 evidence links. R6 is Implemented with the
 [storage contract and SDK fixture](../development/fullscreen-rendering.md#scalable-resource-and-plan-storage-r6);
-R7–R17 subprofiles remain Planned. Implemented means
+R7a is Implemented and R7b physical host gates remain open. R8a and R8b's
+initialized-mip/staging primitives are Implemented with their
+[transfer contract and SDK journey](../development/fullscreen-rendering.md#mutable-transfers-and-mip-initialization-r8);
+partial sampled views remain Planned under R9a. R9–R17 subprofiles remain Planned. Implemented means
 the declared operations and failure paths pass SDK/correctness gates; Qualified
 adds the named hardware/workload measurements. Unavailable evidence stays open.
 An umbrella milestone cannot be marked complete by selecting only its easiest

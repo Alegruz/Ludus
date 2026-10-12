@@ -91,6 +91,12 @@ RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
                    ? RasterStatus::Ready
                    : internal::StorageFailure();
     }
+    if (kind == internal::RasterKind::Texture)
+    {
+        return reference::TextureBytes.EnsureSlots(count) && reference::TextureDescriptions.EnsureSlots(count)
+                   ? RasterStatus::Ready
+                   : internal::StorageFailure();
+    }
     if (kind == internal::RasterKind::Pipeline)
     {
         return reference::Pipelines.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
@@ -169,8 +175,45 @@ RasterCreateBuffer(usize slot, const BufferDescription&, std::span<const uint8> 
     reference::BufferSizes[slot] = bytes.size();
     return Created(internal::RasterKind::Buffer, request);
 }
-RasterStatus RasterCreateTexture(usize, const TextureDescription&, const TextureUpload&, uint32 request) noexcept
+RasterStatus
+RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpload& upload, uint32 request) noexcept
 {
+    reference::TextureDescriptions[slot] = info;
+    usize size = 0;
+    uint32 width = info.Width, height = info.Height;
+    for (uint32 mip = 0; mip < info.MipLevels; ++mip)
+    {
+        size += usize{width} * height * 4;
+        width = width > 1 ? width / 2 : 1;
+        height = height > 1 ? height / 2 : 1;
+    }
+    if (info.Format == RasterFormat::Rgba8Unorm && size <= internal::LIFETIME_TRANSFER_BYTES)
+    {
+        if (!reference::TextureBytes[slot].TryResize(size))
+        {
+            return RasterStatus::OutOfMemory;
+        }
+        std::memset(reference::TextureBytes[slot].GetData(), 0, size);
+        if (!info.Attachment && !info.DeferredInitialization)
+        {
+            width = info.Width;
+            height = info.Height;
+            usize offset = 0;
+            for (uint32 mip = 0; mip < info.MipLevels; ++mip)
+            {
+                const auto rows = upload.Mips.empty() ? TextureMipUpload{0, upload.RowPitch} : upload.Mips[mip];
+                for (uint32 row = 0; row < height; ++row)
+                {
+                    std::memcpy(reference::TextureBytes[slot].GetData() + offset + usize{row} * width * 4,
+                                upload.Bytes.data() + rows.Offset + usize{row} * rows.RowPitch,
+                                usize{width} * 4);
+                }
+                offset += usize{width} * height * 4;
+                width = width > 1 ? width / 2 : 1;
+                height = height > 1 ? height / 2 : 1;
+            }
+        }
+    }
     return Created(internal::RasterKind::Texture, request);
 }
 RasterStatus RasterCreateView(usize, const internal::RasterViewSource&, uint32 request) noexcept
@@ -295,6 +338,59 @@ RasterStatus LifetimeReadback(usize transfer, BufferRole, const internal::Lifeti
     std::memcpy(reference::ReadbackBytes[transfer], bytes + offset, size);
     reference::Transfers[1][transfer] = RasterStatus::Pending;
     reference::TransferOccupied[1][transfer] = true;
+    ++reference::Copies;
+    return RasterStatus::Ready;
+}
+RasterStatus
+LifetimeBufferUpdate(usize slot, BufferRole, const internal::LifetimeCopyRange& range, const uint8* bytes) noexcept
+{
+    if (reference::TransferStart != RasterStatus::Ready)
+    {
+        return reference::TransferStart;
+    }
+    std::memcpy(reference::BufferBytes[range.Buffer].GetData() + range.Offset, bytes, range.Size);
+    reference::Transfers[0][slot] = RasterStatus::Pending;
+    reference::TransferOccupied[0][slot] = true;
+    ++reference::Copies;
+    return RasterStatus::Ready;
+}
+namespace
+{
+usize ReferenceTexel(usize slot, const TextureRegion& region, uint32 row) noexcept
+{
+    const auto& info = reference::TextureDescriptions[slot];
+    usize offset = 0;
+    uint32 width = info.Width, height = info.Height;
+    for (uint32 mip = 0; mip < region.Mip; ++mip)
+    {
+        offset += usize{width} * height * 4;
+        width = width > 1 ? width / 2 : 1;
+        height = height > 1 ? height / 2 : 1;
+    }
+    return offset + (usize{region.Y + row} * width + region.X) * 4;
+}
+} // namespace
+RasterStatus LifetimeTextureTransfer(usize slot, const internal::TextureTransfer& info, const uint8* bytes) noexcept
+{
+    if (reference::TransferStart != RasterStatus::Ready)
+    {
+        return reference::TransferStart;
+    }
+    const bool readback = info.Operation == internal::TextureTransferOperation::Readback;
+    const bool update = info.Operation == internal::TextureTransferOperation::Update;
+    const auto& region = readback ? info.SourceRegion : info.DestinationRegion;
+    for (uint32 row = 0; row < region.Height; ++row)
+    {
+        const auto* source = update ? bytes + usize{row} * info.RowPitch
+                                    : reference::TextureBytes[info.Source].GetData() +
+                                          ReferenceTexel(info.Source, info.SourceRegion, row);
+        auto* destination = readback ? reference::ReadbackBytes[slot] + usize{row} * info.RowPitch
+                                     : reference::TextureBytes[info.Destination].GetData() +
+                                           ReferenceTexel(info.Destination, info.DestinationRegion, row);
+        std::memcpy(destination, source, usize{region.Width} * 4);
+    }
+    reference::Transfers[readback ? 1 : 0][slot] = RasterStatus::Pending;
+    reference::TransferOccupied[readback ? 1 : 0][slot] = true;
     ++reference::Copies;
     return RasterStatus::Ready;
 }

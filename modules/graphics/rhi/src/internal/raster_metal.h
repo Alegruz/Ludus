@@ -98,7 +98,7 @@ bool RasterMetalBindings(NSArray<id<MTLBinding>>* bindings,
 // Thanks to Apple, "Metal Feature Set Tables", ordinary 8/16/32-bit normalized formats.
 // https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf
 // Intersect guaranteed normalized formats and enabled HDR with implemented uses;
-// no storage/copy/MSAA or R8/RG8 attachment path is advertised.
+// no storage/MSAA or R8/RG8 attachment path is advertised. R8 copies use RGBA8Unorm.
 FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
     return gDevice == nil ? FormatCapabilities{} : internal::PortableFormatLimits(format, RasterLimits());
@@ -217,7 +217,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         {
             return RasterStatus::OutOfMemory;
         }
-        if (!info.Attachment)
+        if (!info.Attachment && !info.DeferredInitialization)
         {
             uint32 width = info.Width, height = info.Height;
             for (usize level = 0; level < info.MipLevels; ++level)
@@ -231,7 +231,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
                 height = height > 1 ? height / 2 : 1;
             }
         }
-        else
+        else if (info.Attachment)
         {
             auto depth = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
                                                                             width:info.Width

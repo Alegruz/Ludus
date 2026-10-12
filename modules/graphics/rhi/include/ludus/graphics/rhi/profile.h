@@ -51,6 +51,10 @@ struct StorageLimits final
     ludus::foundation::uint32 RasterPassStates = 192;
     /// Maximum simultaneous submission completion records on callback backends.
     ludus::foundation::uint32 Submissions = 64;
+    /// R8 simultaneous requests per transfer direction, including cancelled in-flight slices; 1..4.
+    ludus::foundation::uint32 TransferSlices = 4;
+    /// R8 bytes per staging slice; four-byte aligned, 256..256 KiB. Separate from ResourceBytes.
+    ludus::foundation::usize TransferBytes = ludus::foundation::usize{256} * 1024;
     /// Host storage budget in bytes: registry/backend metadata, plans, scratch and index copies.
     /// Includes retained page slack and growth overlap; excludes allocator overhead and driver allocations.
     ludus::foundation::usize HostBytes = ludus::foundation::usize{64} * 1024 * 1024;
@@ -96,7 +100,7 @@ struct ComputeCapabilities final
     ludus::foundation::uint32 MaxDispatch[3]{};
 };
 /// Implemented texture operations; native support alone never enables an engine API.
-/// Storage and general copy uses currently remain false on every backend.
+/// Storage remains unimplemented; R8 enables bounded RGBA8Unorm copy uses.
 struct TextureUses final
 {
     /// Complete original-format sampled views.
@@ -157,7 +161,7 @@ struct DeviceProfile final
     RasterInterfaceCapabilities Interface;
     /// Negotiated bounded buffer-compute limits; zero if unavailable.
     ComputeCapabilities Compute;
-    /// Immutable configured R6 storage maxima and budgets; all zero outside Ready.
+    /// Immutable configured resource/plan/staging maxima and budgets; all zero outside Ready.
     StorageLimits Storage
     {
         .ResourcesPerKind = 0,
@@ -171,6 +175,8 @@ struct DeviceProfile final
         .TransientTextures = 0,
         .RasterPassStates = 0,
         .Submissions = 0,
+        .TransferSlices = 0,
+        .TransferBytes = 0,
         .HostBytes = 0,
         .ResourceBytes = 0,
     };

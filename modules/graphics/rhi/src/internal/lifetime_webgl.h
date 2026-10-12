@@ -36,7 +36,10 @@ RasterStatus LifetimeGlStage(LifetimeGlTransfer& transfer, bool readback, bool i
         glGenBuffers(1, &transfer.Staging);
         const auto target = index ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
         glBindBuffer(target, transfer.Staging);
-        glBufferData(target, internal::LIFETIME_TRANSFER_BYTES, nullptr, readback ? GL_STREAM_READ : GL_STREAM_DRAW);
+        glBufferData(target,
+                     internal::CurrentStorageLimits().TransferBytes,
+                     nullptr,
+                     readback ? GL_STREAM_READ : GL_STREAM_DRAW);
         glBindBuffer(target, 0);
         transfer.Index = index;
     }
@@ -47,6 +50,9 @@ RasterStatus LifetimeGlFence(LifetimeGlTransfer& transfer) noexcept
     const auto status = RasterGlResult();
     if (status != RasterStatus::Ready)
     {
+        // Commands may already have changed a destination. A GL error does not
+        // prove completion: close this session before any slice/resource reuse.
+        internal::Fail(gSession, StartupError::RenderingUnavailable);
         return status;
     }
     transfer.Sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
@@ -112,6 +118,121 @@ RasterStatus LifetimeReadback(usize transferSlot, BufferRole role, const interna
                         static_cast<GLsizeiptr>(size));
     glBindBuffer(GL_COPY_READ_BUFFER, 0);
     glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+    return LifetimeGlFence(transfer);
+}
+// Thanks to Khronos, "WebGL 2.0 Specification", 3.7.6 and 3.7.9,
+// https://registry.khronos.org/webgl/specs/latest/2.0/ ; PBO transfers retain fences.
+RasterStatus
+LifetimeBufferUpdate(usize slot, BufferRole role, const internal::LifetimeCopyRange& range, const uint8* bytes) noexcept
+{
+    auto& transfer = gLifetimeGl[0][slot];
+    const auto ready = LifetimeGlStage(transfer, false, role == BufferRole::Index16 || role == BufferRole::Index32);
+    if (ready != RasterStatus::Ready)
+    {
+        return ready;
+    }
+    glBindBuffer(GL_COPY_READ_BUFFER, transfer.Staging);
+    glBufferSubData(GL_COPY_READ_BUFFER, 0, static_cast<GLsizeiptr>(range.Size), bytes);
+    glBindBuffer(GL_COPY_WRITE_BUFFER, gRasterBuffers[range.Buffer]);
+    glCopyBufferSubData(GL_COPY_READ_BUFFER,
+                        GL_COPY_WRITE_BUFFER,
+                        0,
+                        static_cast<GLintptr>(range.Offset),
+                        static_cast<GLsizeiptr>(range.Size));
+    glBindBuffer(GL_COPY_READ_BUFFER, 0);
+    glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+    return LifetimeGlFence(transfer);
+}
+RasterStatus LifetimeTextureTransfer(usize slot, const internal::TextureTransfer& info, const uint8* bytes) noexcept
+{
+    const bool readback = info.Operation == internal::TextureTransferOperation::Readback;
+    auto& transfer = gLifetimeGl[readback ? 1 : 0][slot];
+    const auto ready = LifetimeGlStage(transfer, readback, false);
+    if (ready != RasterStatus::Ready)
+    {
+        return ready;
+    }
+    const auto& source = info.SourceRegion;
+    const auto& destination = info.DestinationRegion;
+    GLuint framebuffer = 0;
+    if (info.Operation == internal::TextureTransferOperation::Update)
+    {
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, transfer.Staging);
+        glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, static_cast<GLsizeiptr>(info.Size), bytes);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, static_cast<GLint>(info.RowPitch / 4));
+        glBindTexture(GL_TEXTURE_2D, gRasterTextures[info.Destination]);
+        glTexSubImage2D(GL_TEXTURE_2D,
+                        static_cast<GLint>(destination.Mip),
+                        static_cast<GLint>(destination.X),
+                        static_cast<GLint>(destination.Y),
+                        static_cast<GLsizei>(destination.Width),
+                        static_cast<GLsizei>(destination.Height),
+                        GL_RGBA,
+                        GL_UNSIGNED_BYTE,
+                        nullptr);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    }
+    else
+    {
+        // Sampled backing already contains top-oriented logical rows. Reading its
+        // physical GL row zero directly preserves that orientation (no second flip).
+        glGenFramebuffers(1, &framebuffer);
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        glFramebufferTexture2D(GL_FRAMEBUFFER,
+                               GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D,
+                               gRasterTextures[info.Source],
+                               static_cast<GLint>(source.Mip));
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glDeleteFramebuffers(1, &framebuffer);
+            return RasterStatus::Failed;
+        }
+        if (readback)
+        {
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, transfer.Staging);
+            glPixelStorei(GL_PACK_ALIGNMENT, 4);
+            glPixelStorei(GL_PACK_ROW_LENGTH, static_cast<GLint>(info.RowPitch / 4));
+            glReadPixels(static_cast<GLint>(source.X),
+                         static_cast<GLint>(source.Y),
+                         static_cast<GLsizei>(source.Width),
+                         static_cast<GLsizei>(source.Height),
+                         GL_RGBA,
+                         GL_UNSIGNED_BYTE,
+                         nullptr);
+            glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        }
+        else
+        {
+            glBindTexture(GL_TEXTURE_2D, gRasterTextures[info.Destination]);
+            glCopyTexSubImage2D(GL_TEXTURE_2D,
+                                static_cast<GLint>(destination.Mip),
+                                static_cast<GLint>(destination.X),
+                                static_cast<GLint>(destination.Y),
+                                static_cast<GLint>(source.X),
+                                static_cast<GLint>(source.Y),
+                                static_cast<GLsizei>(source.Width),
+                                static_cast<GLsizei>(source.Height));
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDeleteFramebuffers(1, &framebuffer);
+    }
+    if (!readback && gRasterTextureDescriptions[info.Destination].Attachment)
+    {
+        const auto& description = gRasterTextureDescriptions[info.Destination];
+        const auto width = static_cast<GLint>(description.Width), height = static_cast<GLint>(description.Height);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, gRasterSampleFramebuffers[info.Destination]);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gRasterFramebuffers[info.Destination]);
+        glDisable(GL_SCISSOR_TEST);
+        glBlitFramebuffer(0, 0, width, height, 0, height, width, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
     return LifetimeGlFence(transfer);
 }
 RasterStatus LifetimePollTransfer(bool readback, usize slot) noexcept

@@ -359,7 +359,15 @@ FormatCapabilities PortableFormatLimits(RasterFormat format, const RasterCapabil
     }
     return
     {
-        .Uses = { .Sampled = true, .Filterable = true, .ColorAttachment = attachment, .Blendable = attachment },
+        .Uses =
+        {
+            .Sampled = true,
+            .Filterable = true,
+            .ColorAttachment = attachment,
+            .Blendable = attachment,
+            .CopySource = format == RasterFormat::Rgba8Unorm,
+            .CopyDestination = format == RasterFormat::Rgba8Unorm,
+        },
         .MaxSampledDimension2D = limits.MaxTextureDimension2D,
         .MaxAttachmentDimension2D = attachment ? limits.MaxTextureDimension2D : 0,
         .MaxMipLevels = hdr ? 1U : (levels < 16 ? levels : 16),
@@ -404,7 +412,9 @@ bool ValidStorageLimits(const StorageLimits& limits) noexcept
             return false;
         }
     }
-    return limits.HostBytes != 0 && limits.ResourceBytes != 0;
+    return limits.HostBytes != 0 && limits.ResourceBytes != 0 && limits.TransferSlices > 0 &&
+           limits.TransferSlices <= 4 && limits.TransferBytes >= 256 &&
+           limits.TransferBytes <= foundation::usize{256} * 1024 && limits.TransferBytes % 4 == 0;
 }
 bool ConfigureStorage(const StorageLimits& limits) noexcept
 {

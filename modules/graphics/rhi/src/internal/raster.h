@@ -174,6 +174,22 @@ struct LifetimeCopyRange final
     foundation::usize Offset = 0;
     foundation::usize Size = 0;
 };
+enum class TextureTransferOperation : foundation::uint8
+{
+    Update,
+    Copy,
+    Readback
+};
+struct TextureTransfer final
+{
+    TextureTransferOperation Operation = TextureTransferOperation::Update;
+    foundation::usize Source = 0;
+    foundation::usize Destination = 0;
+    TextureRegion SourceRegion;
+    TextureRegion DestinationRegion;
+    foundation::usize RowPitch = 0;
+    foundation::usize Size = 0;
+};
 // These hooks join the existing frame/loss owner, not a second session.
 bool FrameOpen() noexcept;
 bool ClaimRasterFrame() noexcept;
@@ -245,6 +261,12 @@ RasterStatus LifetimeUpload(foundation::usize,
                             const foundation::uint8*,
                             foundation::usize) noexcept;
 RasterStatus LifetimeReadback(foundation::usize, BufferRole, const internal::LifetimeCopyRange&) noexcept;
+RasterStatus LifetimeBufferUpdate(foundation::usize,
+                                  BufferRole,
+                                  const internal::LifetimeCopyRange&,
+                                  const foundation::uint8*) noexcept;
+RasterStatus
+LifetimeTextureTransfer(foundation::usize, const internal::TextureTransfer&, const foundation::uint8*) noexcept;
 RasterStatus LifetimePollTransfer(bool, foundation::usize) noexcept;
 RasterStatus LifetimeCopyReadback(foundation::usize, foundation::uint8*, foundation::usize) noexcept;
 void LifetimeReleaseTransfer(bool, foundation::usize) noexcept;

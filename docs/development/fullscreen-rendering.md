@@ -476,8 +476,8 @@ owner thread, between frames unless a query or tracked `EndFrame` says otherwise
 The first service profile has four command batches, 256 draw packets per batch,
 four upload slices and four readback slices independently, 256 KiB per slice,
 and sixteen independently owned pipeline requests. These are historical R2 bounds;
-R6 configures batch/packet/pipeline-request limits, while transfer rings retain
-their existing fixed bounds. Query
+R6 configures batch/packet/pipeline-request limits. R8 configures transfer
+rings within the initial four-slice, 256 KiB upper bounds. Query
 `GetLifetimeCapabilities`; retained/cancelled work counts against capacity.
 Records still count against the R1 per-kind limits. `CapacityExceeded` is
 retryable after safe retirement, without waiting inside an admission call.
@@ -692,7 +692,8 @@ History uses persistent owned attachment textures, roots their produced version,
 and imports the resulting snapshot on the next execution. The caller decides
 which persistent image is the history source/destination; there is no automatic
 frame-index rotation. Readback roots preserve a consumer's data; scheduling and
-copy-out remain separate R2 buffer services. Texture readback is still deferred.
+copy-out remain separate lifetime services. R8 adds bounded texture transfers and
+readback between frames; see [mutable transfers](#mutable-transfers-and-mip-initialization-r8).
 
 `TextureDescription.Attachment=true` allocates undefined color/private depth
 with an empty upload. Direct `BeginRasterPass` switches attachments inside an
@@ -1183,3 +1184,130 @@ unmerged runs is retained rather than filtered out.
 R7's measurement API and qualification workflow are implemented. Physical Vulkan/
 Wayland and deployed physical-browser qualification remain explicit acceptance
 work; the initial Metal and software-browser results do not close those gates.
+
+
+## Mutable transfers and mip initialization (R8)
+
+Include `ludus/graphics/rhi/lifetime.h`. The ready portable raster profile
+supports existing-buffer updates for every enabled buffer role, and 2D
+`Rgba8Unorm` texture updates, GPU copies and readbacks on Vulkan, Metal, WebGPU
+and WebGL 2. Other transfer formats return `Unsupported`; R9 extends texture
+formats/types/views. `FormatCapabilities::Uses.CopySource` and `CopyDestination`
+report the enabled RGBA8Unorm transfer profile and can be required at startup. Allocation descriptions, sizes, formats and roles stay fixed.
+Every call uses the device/context owner between frames.
+
+### Mutate, complete and release
+
+`RequestBufferUpdate(device, buffer, offset, bytes, size, ticket)` copies caller
+bytes before returning. Offset and size must be multiples of four, nonzero,
+and within the original buffer allocation and configured transfer limit.
+Index-buffer CPU validation copies change with accepted updates, so later draw
+validation checks the updated indices. A pending destination returns `NotReady`
+without publishing a ticket. Only `Pending` with a newly owned ticket accepts a
+mutation; preflight failures preserve the output and destination.
+
+The conservative mutation rule rejects `InvalidState` while a binding/view,
+retained batch, graph, ray input or transfer holds a destination lease, or a
+submitted frame's actual GPU completion is outstanding. Release those owners
+and poll completion before retrying. Even disjoint byte/mip rectangles share
+this whole-resource rule. Retained records and host-visible memory are never
+rewritten beneath accepted work. Transfer commands use the existing ordered
+queue; no separate transfer queue or automatic resource renaming is promised.
+Accepted writes advance the R3 content revision after successful completion.
+Graphs import the resulting revision once the transfer has completed and its
+ticket is released; retained graphs reject external mutation.
+
+`TransferTicket` owns notification, staging and destination/source leases.
+`GetStatus` or `PollLifetime` polls without waiting. The destination stays
+`Pending` until actual completion; a terminal transfer failure makes it failed
+rather than exposing uncertain contents. Release the ticket after completion
+before mutating again. `Release` can cancel notification early, but accepted
+GPU writes still execute. Destroying public handles also leaves physical backing
+retained until completion. Cancellation is not rollback.
+
+### Texture rectangles and rows
+
+`TextureRegion{mip, x, y, width, height}` selects a nonempty top-oriented rectangle
+within one allocated mip. `RequestTextureUpdate` consumes exactly
+`rowPitch * height` bytes, with four-byte row alignment and at least `width * 4`
+bytes per row. Padding is ignored. The service packs texels into owned,
+256-byte-aligned staging rows on every backend; both caller bytes and internal
+packed bytes must fit the configured slice. Checked arithmetic rejects
+out-of-range coordinates, mip indices, pitches and overflow before native work.
+CPU-retained texture content remains immutable; updates/copy destinations with
+`RetainCpuContent` return `Unsupported` so ray/reference shading cannot see a
+stale shadow. Partial updates preserve the remaining initialized texels.
+
+`RequestTextureCopy` copies equal-sized rectangles of distinct `Rgba8Unorm`
+textures entirely on the GPU. Source mips must be initialized. Same-texture
+copies reject, including disjoint rectangles; no overlapping-copy semantics are
+inferred. It retains the source and consumes an upload-direction request slot,
+but does not stream its pixels through caller memory.
+
+`RequestTextureReadback` shares `ReadbackTicket`, `GetStatus`, `CopyReadback`
+and `Release` with buffer readback. The source mip must be initialized and the
+caller pitch must meet the same row rules. Once Ready, copy-out returns
+`rowPitch * height` bytes in top-oriented row order and zeroes row padding.
+Pending, undersized output and failures preserve caller bytes. Native mappings
+are never exposed. WebGL reads the sampled backing's logical row order and
+maintains its flipped render backing when an attachment is mutated, preserving
+later `Load` passes.
+
+### Incremental initialized mip residency
+
+Set `TextureDescription::DeferredInitialization = true` and pass an empty
+upload to allocate undefined `Rgba8Unorm` sampled mips. Attachments and copied
+CPU content cannot use this option. Each undefined mip requires a complete-mip
+update/copy: rectangle patches cannot prove that the remaining texels exist.
+Only successful GPU completion marks that mip initialized. Initialized mips may
+subsequently accept partial updates and readbacks.
+
+`GetTextureResidency` returns allocated mip count, an initialized-mip bit mask
+and logical initialized texel bytes. These are content-validity observations,
+not physical residency, sparse allocation or an eviction policy. All backing is
+charged to the R6 resource budget at creation, including undefined mips.
+The initial sampled view spans the complete allocation and rejects until every
+mip is initialized. This makes R8b's incremental initialization usable safely
+before R9a; **sampling a partially initialized allocation requires R9a's future
+partial sampled views**. R3 hazards remain conservative whole-resource hazards.
+
+For example, an 8-by-4 texture with three mips begins with mask `0` and no
+initialized bytes. Complete mip uploads publish masks `1`, `3`, then `7`, with
+128, 160 and 168 logical bytes respectively. A full-resource sampled view is
+legal only after mask `7` and transfer completion/release.
+
+### Staging budgets and qualification
+
+`DeviceDescription::Storage.TransferSlices` configures 1–4 requests per direction.
+`TransferBytes` configures a four-byte-aligned 256–262144-byte staging slice;
+invalid configuration rejects startup. Defaults preserve R2's four 256 KiB
+slices. `GetLifetimeCapabilities` reports the configured values. Upload creation,
+mutations and texture copies share upload-direction slots; buffer/texture
+readbacks share readback slots. Completed owned tickets and cancelled unfinished
+work retain their slots. Backends allocate slices lazily, bounded by twice
+`TransferSlices * TransferBytes` per session; the existing fixed CPU packing/
+copy-out scratch is separate. Transfer staging remains separate from R6's logical
+resource budget. R7 Vulkan allocator-block telemetry includes its allocator
+staging; general resource allocation telemetry keeps its documented scope.
+
+Metal retains shared staging until command-buffer completion. Vulkan retains
+mapped slices, command buffers and fences, flushes uploads, invalidates readback
+and applies whole-resource transfer/host/shader dependencies. WebGPU waits for
+validation, queue progress and read mapping independently; late callbacks keep
+cells occupied across restart. WebGL uses fenced pixel-pack/unpack buffers and
+zero-timeout polls. A post-command GL error closes the session before unsafe
+reuse. Native teardown may wait; requests and polls do not issue blocking GPU
+waits. Driver calls can still incur host cost.
+
+The R8 reference tests cover output preservation, checked ranges/pitches,
+initialized sampling, copied source bytes, retained bindings/batches/graphs,
+unfinished frame ordinals, copy-source destruction, cancellation, pressure,
+terminal failure and loss/restart. The native and installed-SDK `r8.cpp` journey
+uses two 4 KiB slices, updates uniform/vertex data, incrementally initializes
+three mips, copies a rectangle after which its source is destroyed, checks
+padded buffer/texture round trips, and renders/readbacks the resulting four-color
+image. Browser conformance compares complete images on forced WebGPU, forced
+WebGL 2, Auto and authored fallback. Pinned CI additionally runs Vulkan validation,
+sanitizers, browser validation, static analysis and public SDK documentation.
+Software Chromium acceptance does not establish physical-browser performance;
+R7's open hardware/host qualification gates remain open.

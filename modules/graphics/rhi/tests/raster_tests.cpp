@@ -2202,3 +2202,269 @@ TEST_CASE("R7 failed re-arm preserves every terminal sample", "[rhi][measurement
     }
     CHECK(lost.State == GpuTimingState::Empty);
 }
+
+TEST_CASE("R8 mutations copy bytes and reject retained or unfinished destinations", "[rhi][r8]")
+{
+    Session session;
+    uint8 initial[16]{};
+    uint8 patch[4]{9, 8, 7, 6};
+    BufferHandle buffer;
+    REQUIRE(CreateBuffer(session.Device, {BufferRole::Vertex, sizeof(initial)}, initial, buffer) ==
+            RasterStatus::Ready);
+    TransferTicket update;
+    CHECK(RequestBufferUpdate(session.Device, buffer, 13, patch, 4, update) == RasterStatus::InvalidDescription);
+    reference::TransferStart = RasterStatus::OutOfMemory;
+    CHECK(RequestBufferUpdate(session.Device, buffer, 4, patch, 4, update) == RasterStatus::OutOfMemory);
+    CHECK(GetStatus(session.Device, buffer) == RasterStatus::Ready);
+    reference::TransferStart = RasterStatus::Ready;
+    REQUIRE(RequestBufferUpdate(session.Device, buffer, 4, patch, 4, update) == RasterStatus::Pending);
+    patch[0] = 0;
+    CHECK(GetStatus(session.Device, buffer) == RasterStatus::Pending);
+    TransferTicket second;
+    CHECK(RequestBufferUpdate(session.Device, buffer, 4, patch, 4, second) == RasterStatus::NotReady);
+    const auto stale = update;
+    REQUIRE(Release(session.Device, update) == RasterStatus::Ready);
+    CHECK(GetStatus(session.Device, stale) == RasterStatus::InvalidHandle);
+    CHECK(reference::TransferOccupied[0][0]);
+    reference::Transfers[0][0] = RasterStatus::Ready;
+    REQUIRE(PollLifetime(session.Device) == RasterStatus::Ready);
+    ReadbackTicket readback;
+    REQUIRE(RequestBufferReadback(session.Device, buffer, 0, 16, readback) == RasterStatus::Pending);
+    CHECK(RequestBufferUpdate(session.Device, buffer, 4, patch, 4, second) == RasterStatus::InvalidState);
+    reference::Transfers[1][0] = RasterStatus::Ready;
+    uint8 actual[16]{};
+    REQUIRE(CopyReadback(session.Device, readback, actual, 16) == RasterStatus::Ready);
+    CHECK(actual[4] == 9);
+    CHECK(actual[7] == 6);
+    CHECK(actual[0] == 0);
+    REQUIRE(Release(session.Device, readback) == RasterStatus::Ready);
+}
+
+TEST_CASE("R8 incremental mip initialization forbids undefined reads and sampling", "[rhi][r8]")
+{
+    Session session;
+    TextureDescription description;
+    description.Width = description.Height = 2;
+    description.MipLevels = 2;
+    description.DeferredInitialization = true;
+    TextureHandle texture;
+    REQUIRE(CreateTexture(session.Device, description, {}, texture) == RasterStatus::Ready);
+    TextureViewHandle view;
+    CHECK(CreateTextureView(session.Device, texture, view) == RasterStatus::InvalidState);
+    TextureResidency residency;
+    REQUIRE(GetTextureResidency(session.Device, texture, residency) == RasterStatus::Ready);
+    CHECK(residency.InitializedMips == 0);
+    ReadbackTicket readback;
+    CHECK(RequestTextureReadback(session.Device, texture, {0, 0, 0, 2, 2}, 8, readback) == RasterStatus::InvalidState);
+    uint8 pixels[24]{1, 2, 3, 4, 5, 6, 7, 8, 99, 99, 99, 99, 9, 10, 11, 12, 13, 14, 15, 16, 99, 99, 99, 99};
+    TransferTicket update;
+    CHECK(RequestTextureUpdate(session.Device, texture, {0, 0, 0, 1, 1}, pixels, 4, 4, update) ==
+          RasterStatus::InvalidState);
+    REQUIRE(RequestTextureUpdate(session.Device, texture, {0, 0, 0, 2, 2}, pixels, 24, 12, update) ==
+            RasterStatus::Pending);
+    REQUIRE(GetTextureResidency(session.Device, texture, residency) == RasterStatus::Ready);
+    CHECK(residency.InitializedMips == 0);
+    reference::Transfers[0][0] = RasterStatus::Ready;
+    REQUIRE(GetStatus(session.Device, update) == RasterStatus::Ready);
+    REQUIRE(Release(session.Device, update) == RasterStatus::Ready);
+    REQUIRE(GetTextureResidency(session.Device, texture, residency) == RasterStatus::Ready);
+    CHECK(residency.InitializedMips == 1);
+    CHECK(residency.InitializedBytes == 16);
+    CHECK(CreateTextureView(session.Device, texture, view) == RasterStatus::InvalidState);
+    REQUIRE(RequestTextureUpdate(session.Device, texture, {1, 0, 0, 1, 1}, pixels, 4, 4, update) ==
+            RasterStatus::Pending);
+    reference::Transfers[0][0] = RasterStatus::Ready;
+    REQUIRE(GetStatus(session.Device, update) == RasterStatus::Ready);
+    REQUIRE(Release(session.Device, update) == RasterStatus::Ready);
+    REQUIRE(GetTextureResidency(session.Device, texture, residency) == RasterStatus::Ready);
+    CHECK(residency.InitializedMips == 3);
+    CHECK(residency.InitializedBytes == 20);
+    REQUIRE(CreateTextureView(session.Device, texture, view) == RasterStatus::Ready);
+    CHECK(RequestTextureUpdate(session.Device, texture, {0, 0, 0, 2, 2}, pixels, 24, 12, update) ==
+          RasterStatus::InvalidState);
+    REQUIRE(Destroy(session.Device, view) == RasterStatus::Ready);
+    REQUIRE(RequestTextureReadback(session.Device, texture, {0, 0, 0, 2, 2}, 12, readback) == RasterStatus::Pending);
+    REQUIRE(Destroy(session.Device, texture) == RasterStatus::Ready);
+    uint8 actual[24];
+    std::memset(actual, 88, sizeof(actual));
+    CHECK(CopyReadback(session.Device, readback, actual, 24) == RasterStatus::Pending);
+    CHECK(actual[0] == 88);
+    reference::Transfers[1][0] = RasterStatus::Ready;
+    REQUIRE(CopyReadback(session.Device, readback, actual, 24) == RasterStatus::Ready);
+    for (usize i = 0; i < 24; ++i)
+    {
+        CHECK(actual[i] == (i % 12 < 8 ? pixels[i] : 0));
+    }
+    REQUIRE(Release(session.Device, readback) == RasterStatus::Ready);
+}
+
+TEST_CASE("R8 destination leases and GPU ordinals cover retained and in-flight reads", "[rhi][r8]")
+{
+    Session session;
+    Scene scene(session.Device);
+    uint8 bytes[4]{};
+    TransferTicket ticket;
+    CHECK(RequestBufferUpdate(session.Device, scene.Uniform, 0, bytes, 4, ticket) == RasterStatus::InvalidState);
+    CommandBatch batch;
+    REQUIRE(BeginCommands(session.Device, batch) == RasterStatus::Ready);
+    REQUIRE(RecordDraw(session.Device, batch, scene.Draw()) == RasterStatus::Ready);
+    CHECK(RequestBufferUpdate(session.Device, scene.Vertices, 0, bytes, 4, ticket) == RasterStatus::InvalidState);
+    REQUIRE(DiscardCommands(session.Device, batch) == RasterStatus::Ready);
+    OrderedGraph graph;
+    GraphVersion imported;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    REQUIRE(ImportGraphBuffer(session.Device, graph, scene.Vertices, imported) == RasterStatus::Ready);
+    CHECK(RequestBufferUpdate(session.Device, scene.Vertices, 0, bytes, 4, ticket) == RasterStatus::InvalidState);
+    REQUIRE(DiscardOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    REQUIRE(DrawIndexed(session.Device, scene.Draw()) == RasterStatus::Ready);
+    SubmissionToken completion;
+    REQUIRE(EndFrame(session.Device, completion) == RasterStatus::Ready);
+    CHECK(RequestBufferUpdate(session.Device, scene.Vertices, 0, bytes, 4, ticket) == RasterStatus::InvalidState);
+    reference::Completed = reference::Submitted;
+    REQUIRE(RequestBufferUpdate(session.Device, scene.Vertices, 0, bytes, 4, ticket) == RasterStatus::Pending);
+    reference::Transfers[0][0] = RasterStatus::Ready;
+    REQUIRE(GetStatus(session.Device, ticket) == RasterStatus::Ready);
+    REQUIRE(Release(session.Device, ticket) == RasterStatus::Ready);
+}
+
+TEST_CASE("R8 staging pressure includes cancellation and validates arithmetic", "[rhi][r8]")
+{
+    StorageLimits limits;
+    limits.TransferSlices = 1;
+    limits.TransferBytes = 256;
+    Session session(limits);
+    LifetimeCapabilities capabilities;
+    REQUIRE(GetLifetimeCapabilities(session.Device, capabilities) == RasterStatus::Ready);
+    CHECK(capabilities.TransfersPerDirection == 1);
+    CHECK(capabilities.TransferBytes == 256);
+    uint8 pixels[8]{};
+    TextureHandle textures[2];
+    REQUIRE(CreateTexture(session.Device, {2, 1}, {pixels, 8}, textures[0]) == RasterStatus::Ready);
+    REQUIRE(CreateTexture(session.Device, {2, 1}, {pixels, 8}, textures[1]) == RasterStatus::Ready);
+    TransferTicket tickets[2];
+    CHECK(RequestTextureUpdate(session.Device, textures[0], {0, 0, 0, 2, 1}, pixels, 8, ~usize{0} - 3, tickets[0]) ==
+          RasterStatus::CapacityExceeded);
+    CHECK(RequestTextureUpdate(session.Device, textures[0], {0, ~uint32{0}, 0, 2, 1}, pixels, 8, 8, tickets[0]) ==
+          RasterStatus::InvalidDescription);
+    REQUIRE(RequestTextureUpdate(session.Device, textures[0], {0, 0, 0, 2, 1}, pixels, 8, 8, tickets[0]) ==
+            RasterStatus::Pending);
+    REQUIRE(Release(session.Device, tickets[0]) == RasterStatus::Ready);
+    CHECK(RequestTextureUpdate(session.Device, textures[1], {0, 0, 0, 2, 1}, pixels, 8, 8, tickets[1]) ==
+          RasterStatus::CapacityExceeded);
+    reference::Transfers[0][0] = RasterStatus::Ready;
+    REQUIRE(PollLifetime(session.Device) == RasterStatus::Ready);
+    REQUIRE(RequestTextureUpdate(session.Device, textures[1], {0, 0, 0, 2, 1}, pixels, 8, 8, tickets[1]) ==
+            RasterStatus::Pending);
+    reference::Transfers[0][0] = RasterStatus::Failed;
+    CHECK(GetStatus(session.Device, tickets[1]) == RasterStatus::Failed);
+    CHECK(GetStatus(session.Device, textures[1]) == RasterStatus::Failed);
+    REQUIRE(Release(session.Device, tickets[1]) == RasterStatus::Ready);
+}
+
+TEST_CASE("R8 texture copies retain source and validate undefined and overlapping data", "[rhi][r8]")
+{
+    Session session;
+    uint8 pixels[16]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+    TextureHandle source, destination;
+    REQUIRE(CreateTexture(session.Device, {2, 2}, {pixels, 8}, source) == RasterStatus::Ready);
+    TextureDescription description;
+    description.Width = description.Height = 2;
+    description.DeferredInitialization = true;
+    REQUIRE(CreateTexture(session.Device, description, {}, destination) == RasterStatus::Ready);
+    TransferTicket copy;
+    CHECK(RequestTextureCopy(session.Device, source, {0, 0, 0, 2, 2}, source, {0, 0, 0, 2, 2}, copy) ==
+          RasterStatus::InvalidDescription);
+    CHECK(RequestTextureCopy(session.Device, source, {0, 0, 0, 1, 1}, destination, {0, 0, 0, 1, 1}, copy) ==
+          RasterStatus::InvalidState);
+    REQUIRE(RequestTextureCopy(session.Device, source, {0, 0, 0, 2, 2}, destination, {0, 0, 0, 2, 2}, copy) ==
+            RasterStatus::Pending);
+    TransferTicket other;
+    CHECK(RequestTextureUpdate(session.Device, source, {0, 0, 0, 2, 2}, pixels, 16, 8, other) ==
+          RasterStatus::InvalidState);
+    REQUIRE(Destroy(session.Device, source) == RasterStatus::Ready);
+    CHECK(reference::Destroys[1] == 0);
+    reference::Transfers[0][0] = RasterStatus::Ready;
+    REQUIRE(GetStatus(session.Device, copy) == RasterStatus::Ready);
+    REQUIRE(Release(session.Device, copy) == RasterStatus::Ready);
+    CHECK(reference::Destroys[1] == 1);
+    ReadbackTicket read;
+    REQUIRE(RequestTextureReadback(session.Device, destination, {0, 0, 0, 2, 2}, 8, read) == RasterStatus::Pending);
+    reference::Transfers[1][0] = RasterStatus::Ready;
+    uint8 actual[16]{};
+    REQUIRE(CopyReadback(session.Device, read, actual, 16) == RasterStatus::Ready);
+    CHECK(std::memcmp(actual, pixels, 16) == 0);
+    REQUIRE(Release(session.Device, read) == RasterStatus::Ready);
+}
+
+TEST_CASE("R8 loss and restart invalidate mutation ownership", "[rhi][r8]")
+{
+    Session session;
+    uint8 bytes[16]{};
+    BufferHandle buffer;
+    REQUIRE(CreateBuffer(session.Device, {BufferRole::Uniform, 16}, bytes, buffer) == RasterStatus::Ready);
+    TransferTicket ticket;
+    REQUIRE(RequestBufferUpdate(session.Device, buffer, 0, bytes, 16, ticket) == RasterStatus::Pending);
+    internal::Fail(backend::PendingToken, StartupError::DeviceLost);
+    CHECK(GetStatus(session.Device, ticket) == RasterStatus::DeviceLost);
+    Session replacement;
+    CHECK(GetStatus(replacement.Device, ticket) == RasterStatus::InvalidHandle);
+    CHECK(RequestBufferUpdate(replacement.Device, buffer, 0, bytes, 16, ticket) == RasterStatus::InvalidState);
+    TransferTicket fresh;
+    CHECK(RequestBufferUpdate(replacement.Device, buffer, 0, bytes, 16, fresh) == RasterStatus::InvalidHandle);
+}
+
+TEST_CASE("R8 index updates refresh CPU draw bounds", "[rhi][r8]")
+{
+    Session session;
+    Scene scene(session.Device);
+    const uint16 changed[2]{99, 1};
+    TransferTicket update;
+    REQUIRE(RequestBufferUpdate(session.Device, scene.Indices, 0, reinterpret_cast<const uint8*>(changed), 4, update) ==
+            RasterStatus::Pending);
+    reference::Transfers[0][0] = RasterStatus::Ready;
+    REQUIRE(GetStatus(session.Device, update) == RasterStatus::Ready);
+    REQUIRE(Release(session.Device, update) == RasterStatus::Ready);
+    CommandBatch batch;
+    REQUIRE(BeginCommands(session.Device, batch) == RasterStatus::Ready);
+    CHECK(RecordDraw(session.Device, batch, scene.Draw()) == RasterStatus::InvalidDescription);
+    REQUIRE(DiscardCommands(session.Device, batch) == RasterStatus::Ready);
+}
+
+TEST_CASE("R8 staging startup limits reject malformed requests", "[rhi][r8]")
+{
+    DeviceDescription description;
+    SECTION("zero slices")
+    {
+        description.Storage.TransferSlices = 0;
+    }
+    SECTION("too many slices")
+    {
+        description.Storage.TransferSlices = 5;
+    }
+    SECTION("too few bytes")
+    {
+        description.Storage.TransferBytes = 252;
+    }
+    SECTION("too many bytes")
+    {
+        description.Storage.TransferBytes = 262148;
+    }
+    SECTION("unaligned bytes")
+    {
+        description.Storage.TransferBytes = 257;
+    }
+    CHECK(ValidateDeviceDescription(description) == DeviceStatus::InvalidDescription);
+}
+
+TEST_CASE("R8 format copy uses are negotiated from implemented profiles", "[rhi][r8]")
+{
+    Session session;
+    FormatCapabilities format;
+    REQUIRE(GetFormatCapabilities(session.Device, RasterFormat::Rgba8Unorm, format) == RasterStatus::Ready);
+    CHECK(format.Uses.CopySource);
+    CHECK(format.Uses.CopyDestination);
+    REQUIRE(GetFormatCapabilities(session.Device, RasterFormat::Rgba8Srgb, format) == RasterStatus::Ready);
+    CHECK_FALSE(format.Uses.CopySource);
+    CHECK_FALSE(format.Uses.CopyDestination);
+}
