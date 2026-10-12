@@ -811,13 +811,20 @@ struct Manager::Impl final
             }
         }
         auto& snapshot = Catalogs[slot];
-        const auto generation = snapshot.Generation;
-        snapshot = {};
-        snapshot.Generation = generation;
+        // Reset only the bookkeeping in place. Value-assigning this large record
+        // materializes a full snapshot on the Wasm stack, exceeding its 64 KiB
+        // default. Every counted resource/adapter/edge is overwritten below;
+        // uncounted storage is never read. Preserve the nonwrapping generation.
+        snapshot.Used = false;
         snapshot.Revision = graph.Revision;
+        snapshot.AdapterCount = 0;
+        snapshot.EdgeCount = 0;
+        snapshot.OrderCount = 0;
+        snapshot.RootCount = 0;
         for (uint32 i = 0; i < MAX_ASSETS; ++i)
         {
             snapshot.Bindings[i] = NONE;
+            snapshot.ChildCount[i] = 0;
         }
         bool seen[MAX_ASSETS]{};
         for (const auto& resource : catalog.Entries())

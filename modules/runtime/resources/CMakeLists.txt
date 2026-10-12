@@ -5,6 +5,11 @@ target_sources(ludus_resources PUBLIC FILE_SET public_headers TYPE HEADERS BASE_
     FILES include/ludus/runtime/resources/manager.h include/ludus/runtime/resources/mesh.h)
 target_link_libraries(ludus_resources PUBLIC Ludus::Content Ludus::FoundationMath)
 ludus_apply_project_defaults(ludus_resources)
+if(EMSCRIPTEN)
+    # Leave room for callers and bounded DAG recursion in the default 64 KiB stack.
+    # Catch accidental whole-snapshot temporaries during compilation.
+    target_compile_options(ludus_resources PRIVATE -Wframe-larger-than=16384)
+endif()
 install(TARGETS ludus_resources EXPORT LudusTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 if(LUDUS_BUILD_TESTS)

@@ -724,3 +724,44 @@ TEST_CASE("Move assignment empties the source even when it outlives its manager"
     CHECK(source.Release() == r::Status::Ok);
 }
 } // namespace dag_cases
+
+namespace dag_cases
+{
+TEST_CASE("Reused snapshots reset dependency and publication bookkeeping in place", "[resources][replacement]")
+{
+    GraphBackend candidate;
+    r::Config config;
+    config.CatalogSnapshots = 2;
+    Fixture f(config);
+    REQUIRE(f.Manager.CloseScope(f.Scope) == r::Status::Ok);
+    const auto first = f.Replace(candidate, 2);
+    f.Pump();
+    REQUIRE(f.Manager.Commit(first) == r::Status::Ok);
+    REQUIRE(f.Manager.EndTransaction(first) == r::Status::Ok);
+    f.Pump();
+    const auto descriptor = candidate.Descriptor();
+    r::TransactionHandle leaf;
+    REQUIRE(f.Manager.BeginReplacement(f.Catalog, &descriptor, 1, {nullptr, 0, 3}, &f.Root, 1, leaf) == r::Status::Ok);
+    f.Pump();
+    REQUIRE(f.Manager.Commit(leaf) == r::Status::Ok);
+    REQUIRE(f.Manager.EndTransaction(leaf) == r::Status::Ok);
+    f.Pump();
+    CHECK(f.Manager.Inspect().Versions == 1);
+    CHECK(f.Manager.Inspect().ResidentBytes == 20);
+    r::ScopeHandle current;
+    REQUIRE(f.Manager.OpenScope(Id("reused"), current) == r::Status::Ok);
+    const auto request = f.Acquire(current);
+    r::Lease lease;
+    REQUIRE(f.Manager.TakeLease(request, lease) == r::Status::Ok);
+    CHECK(f.Borrow(lease)->Count == 0);
+    REQUIRE(lease.Release() == r::Status::Ok);
+    REQUIRE(f.Manager.CloseScope(current) == r::Status::Ok);
+    const auto diamond = f.Replace(candidate, 4);
+    f.Pump();
+    REQUIRE(f.Manager.Commit(diamond) == r::Status::Ok);
+    REQUIRE(f.Manager.EndTransaction(diamond) == r::Status::Ok);
+    f.Pump();
+    CHECK(f.Manager.Inspect().Versions == 4);
+    CHECK(f.Manager.Inspect().ResidentBytes == 80);
+}
+} // namespace dag_cases

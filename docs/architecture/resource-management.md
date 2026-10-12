@@ -324,7 +324,11 @@ Fixed storage adds four catalog snapshots and four durable transactions (Config
 can lower admission limits); existing 64 assets, 8 operations, 16 versions and
 64 leases remain. MetadataBytes defaults to 512 KiB to cover copied paths, DAGs
 and failure outcomes; Inspect reports the actual coordinator block size, excluding
-allocator overhead and adapter storage. Reinitialization briefly owns both the
+allocator overhead and adapter storage. Snapshot reuse resets bookkeeping in place
+and overwrites counted entries, avoiding a whole-record temporary on the browser's
+64 KiB stack. Reference browser resource builds reject individual stack frames over 16 KiB;
+the existing packaged renderer test covers activation under the default stack size.
+Reinitialization briefly owns both the
 old drained block and the new block. A replacement conservatively prepares its
 entire closure in a new snapshot rather than reusing versions across snapshots.
 Its peak must fit alongside last-good and retiring versions: retiring bytes never
