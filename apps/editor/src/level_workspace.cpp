@@ -164,7 +164,7 @@ LevelWorkspace::LevelWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
 #if !defined(Q_OS_WASM)
     connect(&Process_, &QProcess::readyReadStandardOutput, this, [this]() {
         Output_ += Process_.readAllStandardOutput();
-        if (Output_.size() > qint64{1024} * 1024)
+        if (Output_.size() > foundation::int64{1024} * 1024)
         {
             Cancel();
             Error_ = QStringLiteral("Scene response exceeded its bounded protocol.");
@@ -349,8 +349,8 @@ bool LevelWorkspace::Start(const QString& operation, const QString& path, const 
     QSaveFile file(input);
     const auto bytes = QJsonDocument(request).toJson(QJsonDocument::Compact);
     file.setDirectWriteFallback(false);
-    if (bytes.size() > qint64{1024} * 1024 || !file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() ||
-        !file.commit())
+    if (bytes.size() > foundation::int64{1024} * 1024 || !file.open(QIODevice::WriteOnly) ||
+        file.write(bytes) != bytes.size() || !file.commit())
     {
         Status_->setText(QStringLiteral("Could not write bounded scene request; current scene retained."));
         return false;
@@ -407,7 +407,7 @@ void LevelWorkspace::Completed()
         return;
     }
     if (Cancelling_ || Process_.exitCode() != 0 || !result.value(QStringLiteral("ok")).toBool() ||
-        result.value(QStringLiteral("schema")).toInt() != 1 || Output_.size() > qint64{1024} * 1024)
+        result.value(QStringLiteral("schema")).toInt() != 1 || Output_.size() > foundation::int64{1024} * 1024)
     {
         Error_ = Cancelling_ ? QStringLiteral("Import cancelled; current scene and saved level retained.")
                              : result.value(QStringLiteral("message")).toString();
@@ -435,13 +435,13 @@ void LevelWorkspace::Completed()
     worker->moveToThread(&Decode_);
     connect(&Decode_, &QThread::started, worker, [this]() {
         QFile file(QDir(Scratch_.path()).filePath(QStringLiteral("scene.luscn")));
-        if (!file.open(QIODevice::ReadOnly) || file.size() > qint64{64} * 1024 * 1024)
+        if (!file.open(QIODevice::ReadOnly) || file.size() > foundation::int64{64} * 1024 * 1024)
         {
             Error_ = QStringLiteral("Cooked scene scratch input missing or exceeds 64 MiB.");
         }
         else
         {
-            const auto bytes = file.read(qint64{64} * 1024 * 1024 + 1);
+            const auto bytes = file.read(foundation::int64{64} * 1024 * 1024 + 1);
             Success_ = bytes.isEmpty() && Candidate_.value(QStringLiteral("objects")).toArray().isEmpty();
             if (!Success_)
             {
@@ -643,7 +643,7 @@ void LevelWorkspace::Render()
     Open_->setEnabled(!Busy_ && !Root_.isEmpty());
     Import_->setEnabled(!Busy_ && !Level_.isEmpty());
     Save_->setEnabled(CanSave());
-    Cancel_->setEnabled(Busy_ && !PublishingCatalog_);
+    Cancel_->setEnabled(Busy_ && Operation_ != QStringLiteral("save") && !PublishingCatalog_);
     Objects_->setEnabled(!Busy_);
     Rendering_ = false;
     Inspect();

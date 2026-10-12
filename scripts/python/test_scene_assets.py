@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import struct
 import tempfile
 import unittest
@@ -165,6 +167,135 @@ class SceneAssetsTests(unittest.TestCase):
             assets.commit_import(self.root, candidate, current, expected, self.source)
         self.assertEqual("Conflict", error.exception.code)
         self.assertEqual(before, assets.read(self.root / "assets/catalog.json"))
+
+
+    def test_cli_import_rolls_back_catalog_and_level_on_save_failure(self):
+        value = self.imported()
+        relative = "scenes/test.lulevel"
+        path = self.root / relative
+        previous = assets.save_level(self.root, relative, value)
+        old_catalog = assets.read(self.root / "assets/catalog.json")
+        (self.source / "source").write_text("changed source")
+        real_replace = assets.os.replace
+        def replace(source, destination):
+            if Path(destination).resolve() == path.resolve() and Path(source).name == "next-level":
+                raise OSError("Simulated failed level replacement")
+            return real_replace(source, destination)
+        with patch.object(assets.scene_cook, "cook", side_effect=fixture), patch.object(assets.os, "replace", side_effect=replace):
+            with self.assertRaises(ToolingError) as error:
+                assets.import_saved_level(self.root, relative, self.source)
+        self.assertEqual("StorageFailure", error.exception.code)
+        self.assertEqual(previous, assets.read(path))
+        self.assertEqual(old_catalog, assets.read(self.root / "assets/catalog.json"))
+        self.assertEqual(value, assets.open_level(self.root, relative))
+        self.assertFalse(list(self.root.rglob(".scene-import-*")))
+
+    def test_cli_import_rolls_back_both_files_after_sync_failure(self):
+        value = self.imported()
+        relative = "scenes/test.lulevel"
+        previous = assets.save_level(self.root, relative, value)
+        old_catalog = assets.read(self.root / "assets/catalog.json")
+        (self.source / "source").write_text("changed source")
+        calls = 0
+        def sync(_path):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError("Simulated publication sync failure")
+        with patch.object(assets.scene_cook, "cook", side_effect=fixture), patch.object(assets, "_sync_directory", side_effect=sync):
+            with self.assertRaises(ToolingError):
+                assets.import_saved_level(self.root, relative, self.source)
+        self.assertEqual(previous, assets.read(self.root / relative))
+        self.assertEqual(old_catalog, assets.read(self.root / "assets/catalog.json"))
+
+    def test_cli_import_preserves_external_level_edit_before_commit(self):
+        value = self.imported()
+        relative = "scenes/test.lulevel"
+        path = self.root / relative
+        assets.save_level(self.root, relative, value)
+        old_catalog = assets.read(self.root / "assets/catalog.json")
+        edited = dict(value, name="External edit")
+        def changing(source, output):
+            result = fixture(source, output)
+            path.write_bytes(assets.canonical(edited))
+            return result
+        with patch.object(assets.scene_cook, "cook", side_effect=changing):
+            with self.assertRaises(ToolingError) as error:
+                assets.import_saved_level(self.root, relative, self.source)
+        self.assertEqual("Conflict", error.exception.code)
+        self.assertEqual(assets.canonical(edited), assets.read(path))
+        self.assertEqual(old_catalog, assets.read(self.root / "assets/catalog.json"))
+
+    def test_other_process_cannot_read_midway_through_pair_publication(self):
+        value = self.imported()
+        assets.save_level(self.root, "scenes/test.lulevel", value)
+        with assets.writer(self.root):
+            result = subprocess.run([sys.executable, "-c",
+                "from pathlib import Path; import sys; from ludus_tools import scene_assets as a; "
+                "a.open_level(Path(sys.argv[1]),'scenes/test.lulevel')", str(self.root)],
+                capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Another scene publication is active", result.stderr)
+        self.assertEqual(value, assets.open_level(self.root, "scenes/test.lulevel"))
+
+
+    def test_unwritable_level_stage_fails_before_catalog_publication(self):
+        value = self.imported()
+        relative = "scenes/test.lulevel"
+        previous = assets.save_level(self.root, relative, value)
+        old_catalog = assets.read(self.root / "assets/catalog.json")
+        real_stage = assets.tempfile.mkdtemp
+        def stage(*args, **kwargs):
+            if Path(kwargs.get("dir", "/")).resolve() == (self.root / "scenes").resolve():
+                raise PermissionError("Unwritable scenes directory")
+            return real_stage(*args, **kwargs)
+        with patch.object(assets.scene_cook, "cook", side_effect=fixture), patch.object(assets.tempfile, "mkdtemp", side_effect=stage):
+            with self.assertRaises(ToolingError):
+                assets.import_saved_level(self.root, relative, self.source)
+        self.assertEqual(previous, assets.read(self.root / relative))
+        self.assertEqual(old_catalog, assets.read(self.root / "assets/catalog.json"))
+
+    def test_editor_open_never_reports_an_external_revision_as_its_loaded_bytes(self):
+        from ludus_tools import scene_editor
+        value = self.imported()
+        relative = "scenes/test.lulevel"
+        assets.save_level(self.root, relative, value)
+        real_assemble = assets.assemble
+        def assemble(root, level, current=None):
+            data = real_assemble(root, level, current)
+            (self.root / relative).write_bytes(assets.canonical(dict(value, name="External")))
+            return data
+        request = dict(schema=1, operation="open", project=str(self.root), path=relative,
+                       source="", level={}, expected=None)
+        with patch.object(assets, "assemble", side_effect=assemble):
+            with self.assertRaises(ToolingError) as error:
+                scene_editor.operate(request, self.base / "scratch.luscn")
+        self.assertEqual("Conflict", error.exception.code)
+
+
+    def test_cli_pair_import_succeeds_from_an_empty_saved_level(self):
+        relative = "scenes/test.lulevel"
+        assets.save_level(self.root, relative, assets.new_level())
+        with patch.object(assets.scene_cook, "cook", side_effect=fixture):
+            result = assets.import_saved_level(self.root, relative, self.source)
+        self.assertEqual(1, len(result["objects"]))
+        self.assertEqual(result, assets.open_level(self.root, relative))
+        self.assertFalse(list(self.root.rglob(".scene-import-*")))
+
+    def test_first_cli_import_failure_removes_its_uncommitted_catalog(self):
+        relative = "scenes/test.lulevel"
+        path = self.root / relative
+        previous = assets.save_level(self.root, relative, assets.new_level())
+        real_replace = assets.os.replace
+        def replace(source, destination):
+            if Path(destination).resolve() == path.resolve() and Path(source).name == "next-level":
+                raise OSError("Simulated first import save failure")
+            return real_replace(source, destination)
+        with patch.object(assets.scene_cook, "cook", side_effect=fixture), patch.object(assets.os, "replace", side_effect=replace):
+            with self.assertRaises(ToolingError):
+                assets.import_saved_level(self.root, relative, self.source)
+        self.assertEqual(previous, assets.read(path))
+        self.assertFalse((self.root / "assets/catalog.json").exists())
 
 
 if __name__ == "__main__":

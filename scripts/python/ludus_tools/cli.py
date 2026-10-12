@@ -367,16 +367,14 @@ def cmd_scene(args) -> int:
     from . import scene_assets as assets
     root = Path(args.project)
     relative = args.level
-    path = assets.inside(root, relative)
+    assets.inside(root, relative)
     if args.scene_action == "new":
         value = assets.new_level(args.name)
         assets.save_level(root, relative, value)
     else:
         value = assets.open_level(root, relative)
         if args.scene_action == "import":
-            previous = assets.read(path)
-            value = assets.import_scene(root, Path(args.source), value)
-            assets.save_level(root, relative, value, previous)
+            value = assets.import_saved_level(root, relative, Path(args.source))
         elif args.scene_action == "assemble":
             assets.atomic(Path(args.output), assets.assemble(root, value))
         elif args.scene_action == "publish":

@@ -843,7 +843,14 @@ Cancellation, renderer admission failure and source/catalog conflicts retain the
 previous document and published bindings. Unreachable immutable files may remain;
 release publication includes only the selected closure. Writers use nonblocking
 native file locks that release on process exit. File synchronization precedes the atomic replacement; directory synchronization
-follows it. Level saves additionally compare the previous saved bytes.
+follows it. Level saves additionally compare the previous saved bytes. CLI imports
+stage and sync both catalog and level, then replace them inside one exclusive
+publication lock. A replacement/sync failure rolls both files back from staged
+backups; readers reject an in-flight writer. A rollback failure reports retained
+recovery files instead of claiming preservation. This initial pair publication is
+an operation-error rollback boundary, not a crash-atomic two-file filesystem
+transaction. Abrupt termination/power-loss recovery remains a separate hardening
+step.
 
 `Resources::SceneDefinition::Decode` is the Qt-independent bounded runtime codec.
 Version-two interchange retains sampler addressing explicitly; version-one

@@ -125,5 +125,22 @@ class CookerTests(unittest.TestCase):
             cook.asset_path(self.root, "/outside")
 
 
+    def test_over_capacity_pbrt_rejects_before_replacing_a_bundle(self):
+        source = self.root / "source"
+        source.mkdir()
+        (source / "scene-v4.pbrt").write_text(
+            'Camera "perspective" "float fov" [70]\nWorldBegin\n'
+            'Material "diffuse" "rgb reflectance" [1 1 1]\nAreaLightSource "diffuse" "rgb L" [1 1 1]\n'
+            + 'Shape "disk" "float radius" [0.5]\n' * 125
+            + 'WorldEnd\n')
+        output = self.root / "output"
+        output.mkdir()
+        bundle = output / "scene.luscn"
+        bundle.write_bytes(b"previous bundle")
+        with self.assertRaisesRegex(ValueError, "128 scene items"):
+            cook.cook(source, output)
+        self.assertEqual(bundle.read_bytes(), b"previous bundle")
+
+
 if __name__ == "__main__":
     unittest.main()

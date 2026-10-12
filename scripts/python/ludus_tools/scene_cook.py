@@ -548,6 +548,8 @@ def _cook(source, output):
     camera, fov, texture_names, material_names, shapes = parse_scene(
         source / "scene-v4.pbrt"
     )
+    if 4 + sum(shape["emission"] is not None for shape in shapes) > 128:
+        raise ValueError("renderer profile capacity: at most 128 scene items")
     inputs = {"scene-v4.pbrt", "LICENSE.txt"}
     images = {}
     for name, path in texture_names.items():
@@ -783,7 +785,7 @@ def _cook(source, output):
         }
     )
     items = [identity_item(i, i) for i in range(4)] + emitter_items
-    if len(materials) != 8 or len(meshes) != 6 or len(items) > 256:
+    if len(materials) != 8 or len(meshes) != 6 or len(items) > 128:
         raise ValueError("renderer profile capacity")
     # Camera's PBRT CTM is camera-from-world. This fixture contains a rigid camera.
     rotation = [[camera[c * 4 + r] for c in range(3)] for r in range(3)]

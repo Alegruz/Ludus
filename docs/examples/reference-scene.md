@@ -94,7 +94,7 @@ source and cooked geometry counts, camera, attribution and approximations.
 `LICENSE.txt` accompanies the converted assets. `scene.luscn` is an explicit
 little-endian versioned sample format with bounded counts and finite binary32
 fields; it is not a stable shipping asset format. The capture consumer admits
-six meshes, eight materials, three textures and up to 256 scene items within a
+six meshes, eight materials, three textures and up to 128 scene items within a
 64 MiB bundle. It rejects unsupported versions, truncation, trailing data,
 nonfinite fields and invalid geometry references.
 

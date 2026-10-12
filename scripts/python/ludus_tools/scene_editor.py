@@ -21,7 +21,9 @@ def operate(request, output, cancelled=lambda: False):
     current = None
     expected_catalog = None
     committed = False
+    disk_bytes = None
     if action == "open":
+        disk_bytes = assets.read(assets.inside(root, request["path"]))
         value = assets.open_level(root, request["path"])
     else:
         value = assets.validate_level(request["level"])
@@ -37,7 +39,7 @@ def operate(request, output, cancelled=lambda: False):
             previous = assets.read(path) if path.exists() else None
             if (assets.digest(previous) if previous is not None else None) != request["expected"]:
                 assets.fail("Saved level changed on disk", "Conflict")
-            assets.save_level(root, request["path"], value, previous)
+            disk_bytes = assets.save_level(root, request["path"], value, previous)
         elif action != "assemble":
             assets.fail("Unsupported editor scene operation")
     if not committed:
@@ -54,7 +56,9 @@ def operate(request, output, cancelled=lambda: False):
         warnings.extend(manifest.get("approximations", []))
     result["warnings"] = sorted(set(warnings))
     if action in ("open", "save"):
-        result["disk"] = assets.digest(assets.read(assets.inside(root, request["path"])))
+        if assets.read(assets.inside(root, request["path"])) != disk_bytes:
+            assets.fail("Saved level changed while preparing the response", "Conflict")
+        result["disk"] = assets.digest(disk_bytes)
     return result
 
 

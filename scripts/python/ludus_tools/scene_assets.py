@@ -8,6 +8,8 @@ Neither binding depends on source paths or GPU handles.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
 import hashlib
 import json
 import math
@@ -15,6 +17,7 @@ import os
 from pathlib import Path
 import re
 import struct
+import shutil
 import tempfile
 import uuid
 
@@ -101,27 +104,59 @@ def atomic(path, data, immutable=False, cancelled=lambda: False):
         Path(temporary).unlink(missing_ok=True)
 
 
+_LOCK = ContextVar("scene_asset_lock", default=None)
+
+
 @contextmanager
-def writer(root):
-    # Same nonblocking native flock boundary used by installed SDK/build tooling.
-    # Kernel ownership drains on process exit, including a crash or forced quit.
+def _lock(root, exclusive):
+    identity = str(Path(root).resolve())
+    active = _LOCK.get()
+    if active is not None and active[0] == identity:
+        if exclusive and not active[1]:
+            fail("Cannot upgrade a scene reader to a writer", "Busy")
+        yield
+        return
     try:
         import fcntl
     except ImportError:
-        fail("This initial scene writer requires a macOS or Linux host", "MissingTools")
+        fail("This initial scene host requires macOS or Linux", "MissingTools")
     path = inside(root, "assets/.scene-writer.lock")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as handle:
+    # Older immutable releases may have no coordination file. Readers do not
+    # create files; every editable save/import and new release creates this lock.
+    if not exclusive and not path.exists():
+        yield
+        return
+    if exclusive:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a" if exclusive else "r") as handle:
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(handle, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB)
         except BlockingIOError:
-            fail("Another scene asset writer is active; retry after it completes", "Busy")
+            fail("Another scene publication is active; retry after it completes", "Busy")
+        token = _LOCK.set((identity, exclusive))
         try:
             yield
         finally:
+            _LOCK.reset(token)
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+@contextmanager
+def writer(root):
+    """Exclusive native publication lock, released by the kernel on process exit."""
+    with _lock(root, True):
+        yield
+
+
+def _reader(function):
+    @wraps(function)
+    def read_locked(root, *args, **kwargs):
+        with _lock(root, False):
+            return function(root, *args, **kwargs)
+    return read_locked
+
+
+@_reader
 def catalog(root):
     path = inside(root, "assets/catalog.json")
     value = document(path) if path.exists() else {"version": 1, "resources": {}}
@@ -293,6 +328,7 @@ def _resource_id(value, kind):
     return isinstance(value, str) and re.fullmatch(kind + r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", value) is not None
 
 
+@_reader
 def closure(root, level, current=None):
     validate_level(level)
     resources = (current or catalog(root))["resources"]
@@ -428,29 +464,119 @@ def prepare_import(root, source, level, cancelled=lambda: False):
         return candidate, current, expected_catalog
 
 
+def _validate_import(root, level, candidate_catalog, expected, source, cancelled):
+    """Validate under an already held writer lock, without publishing anything."""
+    path = inside(root, "assets/catalog.json")
+    actual = digest(read(path)) if path.exists() else None
+    if actual != expected:
+        fail("Project asset catalog changed while preparing the candidate", "Conflict")
+    closure(root, level, candidate_catalog)
+    assemble(root, level, candidate_catalog)
+    origin = str(Path(source).resolve())
+    for identity in level["imports"]:
+        record = candidate_catalog["resources"][identity]
+        manifest = document(inside(root, record["path"]))
+        if manifest.get("source_origin") == origin:
+            for name, expected_input in manifest["inputs"].items():
+                if digest(read(scene_cook.asset_path(Path(source), name), MAX_BYTES)) != expected_input:
+                    fail("Source changed before catalog publication", "Conflict")
+    data = canonical(candidate_catalog)
+    if len(data) > MAX_METADATA:
+        fail("Project catalog metadata exceeds 1 MiB")
+    if cancelled():
+        fail("Scene import cancelled", "InstallCancelled")
+    return data
+
+
 def commit_import(root, level, candidate_catalog, expected, source, cancelled=lambda: False):
     """Commit a prevalidated candidate after renderer admission, with compare-and-publish."""
     with writer(root):
-        path = inside(root, "assets/catalog.json")
-        actual = digest(read(path)) if path.exists() else None
-        if actual != expected:
-            fail("Project asset catalog changed while preparing the candidate", "Conflict")
-        closure(root, level, candidate_catalog)
-        assemble(root, level, candidate_catalog)
-        origin = str(Path(source).resolve())
-        for identity in level["imports"]:
-            record = candidate_catalog["resources"][identity]
-            manifest = document(inside(root, record["path"]))
-            if manifest.get("source_origin") == origin:
-                for name, expected_input in manifest["inputs"].items():
-                    if digest(read(scene_cook.asset_path(Path(source), name), MAX_BYTES)) != expected_input:
-                        fail("Source changed before catalog publication", "Conflict")
-        data = canonical(candidate_catalog)
-        if len(data) > MAX_METADATA:
-            fail("Project catalog metadata exceeds 1 MiB")
-        if cancelled():
-            fail("Scene import cancelled", "InstallCancelled")
-        atomic(path, data, cancelled=cancelled)
+        data = _validate_import(root, level, candidate_catalog, expected, source, cancelled)
+        atomic(inside(root, "assets/catalog.json"), data, cancelled=cancelled)
+
+
+def _sync_directory(path):
+    if hasattr(os, "O_DIRECTORY"):
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+
+def import_saved_level(root, relative, source):
+    """CLI pair publication with staged files, exclusive readers and rollback.
+
+    All files are synced before replacement. Failed replacement/synchronization
+    restores catalog and level bytes; a failed rollback retains owned backups and
+    reports RecoveryRequired. This is an operation-error rollback boundary, not a
+    two-file crash-atomic filesystem transaction.
+    """
+    path = inside(root, relative)
+    if path.suffix != ".lulevel":
+        fail("Levels use the .lulevel extension")
+    with _lock(root, False):
+        previous = read(path)
+        level = open_level(root, relative)
+        if read(path) != previous:
+            fail("Saved level changed while reading", "Conflict")
+    candidate, current, expected = prepare_import(root, source, level)
+    with writer(root):
+        data = _validate_import(root, candidate, current, expected, source, lambda: False)
+        if read(path) != previous:
+            fail("Saved level changed during import", "Conflict")
+        level_data = canonical(candidate)
+        if len(level_data) > MAX_METADATA:
+            fail("Level document byte limit")
+        catalog_path = inside(root, "assets/catalog.json")
+        old_catalog = read(catalog_path) if catalog_path.exists() else None
+        catalog_stage = Path(tempfile.mkdtemp(prefix=".scene-import-", dir=catalog_path.parent))
+        level_stage = None
+        retain = False
+        catalog_replaced = level_replaced = False
+        try:
+            # Each stage is on its destination filesystem; an unwritable level
+            # directory fails before the published catalog is changed.
+            level_stage = Path(tempfile.mkdtemp(prefix=".scene-import-", dir=path.parent))
+            atomic(catalog_stage / "next-catalog", data)
+            if old_catalog is not None:
+                atomic(catalog_stage / "previous-catalog", old_catalog)
+            atomic(level_stage / "next-level", level_data)
+            atomic(level_stage / "previous-level", previous)
+            try:
+                if read(path) != previous:
+                    fail("Saved level changed before import publication", "Conflict")
+                os.replace(catalog_stage / "next-catalog", catalog_path)
+                catalog_replaced = True
+                if read(path) != previous:
+                    fail("Saved level changed before import publication", "Conflict")
+                os.replace(level_stage / "next-level", path)
+                level_replaced = True
+                _sync_directory(catalog_path.parent)
+                _sync_directory(path.parent)
+            except (OSError, ToolingError):
+                try:
+                    if level_replaced:
+                        os.replace(level_stage / "previous-level", path)
+                    if catalog_replaced:
+                        if old_catalog is None:
+                            catalog_path.unlink()
+                        else:
+                            os.replace(catalog_stage / "previous-catalog", catalog_path)
+                    _sync_directory(catalog_path.parent)
+                    _sync_directory(path.parent)
+                except OSError as error:
+                    retain = True
+                    fail(f"Import rollback failed; recovery files retained in {catalog_stage} and {level_stage}: {error}", "RecoveryRequired")
+                raise
+        except OSError as error:
+            fail(str(error), "StorageFailure")
+        finally:
+            if not retain:
+                shutil.rmtree(catalog_stage)
+                if level_stage is not None:
+                    shutil.rmtree(level_stage)
+    return candidate
 
 
 def import_scene(root, source, level, cancelled=lambda: False):
@@ -478,6 +604,7 @@ def save_level(root, relative, level, expected=None):
     return data
 
 
+@_reader
 def open_level(root, relative):
     level = validate_level(document(inside(root, relative)))
     closure(root, level)
@@ -485,6 +612,7 @@ def open_level(root, relative):
     return level
 
 
+@_reader
 def assemble(root, level, current=None):
     """Runtime artifact decoding only; this function never calls the source importer.
 
@@ -540,12 +668,14 @@ def assemble(root, level, current=None):
     return bytes(data)
 
 
+@_reader
 def dump(root, level, current=None):
     resources = closure(root, level, current)
     return {"version": 1, "profile": PROFILE, "level": level,
             "resources": resources, "resident_bytes": sum(r["bytes"] for r in resources.values())}
 
 
+@_reader
 def publish(root, level, destination):
     """Publish a deterministic loose-file closure to a new directory, with licenses."""
     destination = Path(destination)
@@ -559,6 +689,7 @@ def publish(root, level, destination):
         for identity, record in resources.items():
             atomic(inside(stage, record["path"]), read(inside(root, record["path"]), MAX_BYTES))
         atomic(inside(stage, "assets/catalog.json"), canonical({"version": 1, "resources": resources}))
+        atomic(inside(stage, "assets/.scene-writer.lock"), b"")
         atomic(inside(stage, "scenes/main.lulevel"), canonical(level))
         atomic(inside(stage, "scene.luscn"), assemble(root, level))
         atomic(inside(stage, "scene-release.json"), canonical(dump(stage, level)))
