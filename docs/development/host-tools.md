@@ -19,6 +19,14 @@ See [independent game projects](project-sdk-workflow.md) for the
 full installation, SDK override/refresh, project creation, migration, direct
 CMake and recovery documentation.
 
+## Render graph contracts
+
+The installed CLI includes `render-graph new`, `render-graph validate` and
+`render-graph dump` for RG0 saved/imported graph contracts and serial plans.
+See [render graph authoring](render-graph-authoring.md) for explicit configurations,
+camera output routes, the JSON format and validation limits. This offline stage
+does not compile shaders or execute GPU rendering.
+
 ## Native release packaging
 
 The installed CLI supports optional `project create --release`, native
