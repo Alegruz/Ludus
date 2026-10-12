@@ -29,7 +29,7 @@ using ludus::foundation::usize;
 
 inline constexpr usize TRACE_CAPACITY = 256;
 
-// What a trace entry captured.
+/// What a trace entry captured.
 enum class TraceKind : uint8
 {
     Transition,
@@ -49,29 +49,33 @@ struct TraceEntry final
     uint32 NativeTimeMs = 0;
     uint32 MapVersion = 0;
     uint64 Sequence = 0;
-    uint64 StepId = 0; // step this entry was assigned to (0 before first step)
+    uint64 StepId = 0; ///< step this entry was assigned to (0 before first step)
 };
 
+/// Fixed-capacity, main-thread diagnostic ring; wrapped or lossy traces are incomplete for replay.
 class InputDebugTrace final
 {
 public:
     InputDebugTrace() noexcept = default;
 
-    // Record one entry. Called by InputSystem on the main thread; cheap, bounded,
-    // no allocation, no formatting. Overflow wraps the ring and marks truncation.
+    /// @brief Record one entry.
+    ///
+    /// Called by InputSystem on the main thread; cheap, bounded, no allocation, no formatting. Overflow wraps
+    /// the ring and marks truncation.
     void Record(const TraceEntry& entry) noexcept;
 
-    // Caller-owned copy of the valid entries in chronological order. The result
-    // references the trace's storage; copy it if you need it after further
-    // recording. Taken outside callbacks.
+    /// @brief Borrow the valid entries in chronological order from internal scratch storage.
+    ///
+    /// The next View or destruction invalidates this view. Take it outside
+    /// callbacks and copy the entries into caller-owned storage for retention.
     [[nodiscard]] std::span<const TraceEntry> View() const noexcept;
 
     [[nodiscard]] bool HasWrapped() const noexcept
     {
         return mWrapped;
     }
-    // Count of entries dropped by ring wrap (trace loss), SEPARATE from gameplay
-    // overflow loss (which is counted as Overflow entries / InputCounters).
+    /// @brief Count of entries dropped by ring wrap (trace loss), SEPARATE from gameplay
+    /// overflow loss (which is counted as Overflow entries / InputCounters).
     [[nodiscard]] uint64 GetTruncatedCount() const noexcept
     {
         return mTruncated;
@@ -81,8 +85,8 @@ public:
         return mTotal;
     }
 
-    // A wrapped trace, or one that saw gameplay overflow, cannot be replayed as
-    // an exact capture.
+    /// @brief A wrapped trace, or one that saw gameplay overflow, cannot be replayed as
+    /// an exact capture.
     [[nodiscard]] bool IsCompleteForReplay() const noexcept
     {
         return !mWrapped && !mSawOverflow;

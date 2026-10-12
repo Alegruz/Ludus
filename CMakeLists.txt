@@ -131,6 +131,8 @@ install(SCRIPT "${PROJECT_BINARY_DIR}/cmake/CheckSdkVariant.cmake" ALL_COMPONENT
 
 include(EngineDependencyPreflight)
 
+include(EngineTestDiagnostics)
+
 add_subdirectory(modules/foundation/base)
 # Portable bounded networking primitives are shared by native and web targets.
 add_subdirectory(modules/network/core)
@@ -177,6 +179,7 @@ if(NOT EMSCRIPTEN)
 endif()
 add_subdirectory(modules/content)
 add_subdirectory(modules/audio/content)
+add_subdirectory(modules/runtime/resources)
 
 # Ludus::GameApi is a header-only INTERFACE target defining the gameplay module
 # ABI (project-live-reload design section 2). It links no engine implementation,
@@ -311,7 +314,7 @@ write_basic_package_version_file(
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationTime FoundationLogging
-    FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content AudioContent GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
+    FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()

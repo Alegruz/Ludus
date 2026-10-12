@@ -16,7 +16,7 @@ enum class WindowSystem : ludus::foundation::uint8
     Cocoa,
 };
 
-// Borrowed handles. The platform window must outlive its RHI connection.
+/// Borrowed handles. The platform window must outlive its RHI connection.
 struct NativeWindowInfo final
 {
     WindowSystem System = WindowSystem::Headless;
@@ -24,9 +24,10 @@ struct NativeWindowInfo final
     ::wl_surface* Surface = nullptr;
     ludus::foundation::uint32 Width = 800;
     ludus::foundation::uint32 Height = 600;
-    // WebCanvas: borrowed selector owned by the platform window. The matching
-    // DOM canvas and window must both outlive the RHI connection. Keep the
-    // selector identifying that same canvas until window destruction. No GPU handle.
+    /// @brief WebCanvas: borrowed selector owned by the platform window.
+    ///
+    /// The matching DOM canvas and window must both outlive the RHI connection. Keep the selector identifying
+    /// that same canvas until window destruction. No GPU handle.
     const char* CanvasSelector = nullptr;
     /// Borrowed NSWindow on macOS; nullptr for other backends or a closed window.
     /// Access only on the main thread while the owning Ludus window remains alive.

@@ -95,7 +95,7 @@ struct Vector3d
 {
     return a.X * b.X + a.Y * b.Y;
 }
-// 2D scalar cross (z of the 3D cross of (x,y,0)); signed parallelogram area.
+/// 2D scalar cross (z of the 3D cross of (x,y,0)); signed parallelogram area.
 [[nodiscard]] constexpr float32 Cross(Vector2 a, Vector2 b) noexcept
 {
     return a.X * b.Y - a.Y * b.X;
@@ -136,7 +136,7 @@ struct Vector3d
 {
     return a.X * b.X + a.Y * b.Y + a.Z * b.Z;
 }
-// Right-handed cross product: Cross(+X,+Y) = +Z.
+/// Right-handed cross product: Cross(+X,+Y) = +Z.
 [[nodiscard]] constexpr Vector3 Cross(Vector3 a, Vector3 b) noexcept
 {
     return Vector3{a.Y * b.Z - a.Z * b.Y, a.Z * b.X - a.X * b.Z, a.X * b.Y - a.Y * b.X};
@@ -234,10 +234,11 @@ struct Vector3d
 [[nodiscard]] Vector4 Lerp(Vector4 a, Vector4 b, float32 t) noexcept;
 
 // --- LengthSquared / Length / Distance --------------------------------------
-// LengthSquared and Dot are ordinary arithmetic and may overflow for extreme
-// inputs (no range-robustness claim). Length uses scaled components so it does
-// not overflow/underflow spuriously, but may still overflow if the true length
-// exceeds the return type's finite range.
+/// @brief LengthSquared and Dot are ordinary arithmetic and may overflow for extreme inputs (no range-robustness
+/// claim).
+///
+/// Length uses scaled components so it does not overflow/underflow spuriously, but may still overflow if the true
+/// length exceeds the return type's finite range.
 [[nodiscard]] constexpr float32 LengthSquared(Vector2 v) noexcept
 {
     return Dot(v, v);
@@ -265,12 +266,12 @@ struct Vector3d
 [[nodiscard]] float64 Distance(Vector3d a, Vector3d b) noexcept;
 
 // --- Checked normalization --------------------------------------------------
-// TryNormalize: requires finite v and finite minLength >= 0. Fails Degenerate
-// for a zero vector (always) or a vector whose true length is <= minLength;
-// fails NonFiniteInput for non-finite v or minLength; fails InvalidArgument for
-// negative minLength. minLength is a LENGTH, not a squared length; default 0
-// admits any representable non-zero finite vector. On any failure *out is
-// unchanged (aliasing with v is supported). The unit result is always finite.
+/// @brief TryNormalize: requires finite v and finite minLength >= 0.
+///
+/// Fails Degenerate for a zero vector (always) or a vector whose true length is <= minLength; fails NonFiniteInput
+/// for non-finite v or minLength; fails InvalidArgument for negative minLength. minLength is a LENGTH, not a
+/// squared length; default 0 admits any representable non-zero finite vector. On any failure *out is unchanged
+/// (aliasing with v is supported). The unit result is always finite.
 [[nodiscard]] MathStatus TryNormalize(Vector2 v, float32 minLength, Vector2& out) noexcept;
 [[nodiscard]] MathStatus TryNormalize(Vector3 v, float32 minLength, Vector3& out) noexcept;
 [[nodiscard]] MathStatus TryNormalize(Vector4 v, float32 minLength, Vector4& out) noexcept;
@@ -278,10 +279,11 @@ struct Vector3d
 [[nodiscard]] MathStatus TryNormalize(Vector3 v, Vector3& out) noexcept;
 [[nodiscard]] MathStatus TryNormalize(Vector4 v, Vector4& out) noexcept;
 
-// TryNormalizeOr: on a Degenerate v, writes the caller-supplied `fallback`
-// (which must itself be a finite unit vector within unitTol, else
-// InvalidArgument). It never invents a default direction. Non-finite v still
-// fails NonFiniteInput. Prefer TryNormalize unless a validated fallback exists.
+/// @brief TryNormalizeOr: on a Degenerate v, writes the caller-supplied `fallback` (which must itself be a finite
+/// unit vector within unitTol, else InvalidArgument).
+///
+/// It never invents a default direction. Non-finite v still fails NonFiniteInput. Prefer TryNormalize unless a
+/// validated fallback exists.
 [[nodiscard]] MathStatus
 TryNormalizeOr(Vector3 v, float32 minLength, Vector3 fallback, float32 unitTol, Vector3& out) noexcept;
 } // namespace ludus::foundation::math

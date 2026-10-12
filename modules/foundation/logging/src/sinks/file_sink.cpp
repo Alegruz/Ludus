@@ -1,17 +1,17 @@
 #include "sinks/file_sink.hpp"
 #include <ludus/foundation/base/config.h>
 
+#include "internal/format_engine.hpp"
 #include "internal/formatter.hpp"
 
 #include <ludus/foundation/containers/array.hpp>
+#include <ludus/foundation/containers/sort.hpp>
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
-#include <format>
 #include <new>
 #include <string>
 #include <string_view>
@@ -55,7 +55,14 @@ std::string sessionFileName(uint32 nonce)
     std::strftime(stamp, sizeof(stamp), "%Y-%m-%d_%H-%M-%S", &broken);
 
     const auto pid = static_cast<long>(LUDUS_GETPID());
-    return std::format("{}_pid-{}_n{}.log", std::string_view(stamp), pid, nonce);
+    char name[96];
+    const FormatArg args[] = {std::string_view(stamp), static_cast<int64>(pid), nonce};
+    const FormatOutcome result = FormatInto(name, "{}_pid-{}_n{}.log", args);
+    if (result.Truncated || result.FormatError)
+    {
+        return {};
+    }
+    return {name, result.BytesWritten};
 }
 
 // The base name of a session file WITHOUT the rotation suffix, used to group all
@@ -235,7 +242,7 @@ void pruneSessions(const std::filesystem::path& directory,
             inactive.Add(&g);
         }
     }
-    std::sort(inactive.begin(), inactive.end(), [](const Group* a, const Group* b) {
+    foundation::Sort(inactive.GetData(), inactive.GetSize(), [](const Group* a, const Group* b) {
         if (a->TimeValid != b->TimeValid)
         {
             return a->TimeValid; // valid times sort before invalid
@@ -363,7 +370,12 @@ FileSink* FileSink::Create(const FileSinkConfig& config)
     for (int attempt = 0; attempt < 64 && file == nullptr; ++attempt)
     {
         const uint32 nonce = gSessionNonce.fetch_add(1, std::memory_order_relaxed);
-        base_path = directory / sessionFileName(nonce);
+        const std::string name = sessionFileName(nonce);
+        if (name.empty())
+        {
+            return nullptr;
+        }
+        base_path = directory / name;
         file = exclusiveCreate(base_path);
     }
     if (file == nullptr)
@@ -425,7 +437,16 @@ void FileSink::RotateIfNeeded(usize incomingBytes) noexcept
     // mBasePathUtf8 ends in ".log"; insert ".<n>" before the extension.
     std::filesystem::path rotated{mBasePathUtf8.GetView()};
     rotated.replace_extension(); // drop ".log"
-    const std::filesystem::path next = std::format("{}.{}.log", rotated.string(), mRotationIndex);
+    char suffix[32];
+    const FormatArg args[] = {mRotationIndex};
+    const FormatOutcome result = FormatInto(suffix, ".{}.log", args);
+    if (result.Truncated || result.FormatError)
+    {
+        mHealthy = false;
+        return;
+    }
+    rotated += std::string_view(suffix, result.BytesWritten);
+    const std::filesystem::path& next = rotated;
 
     // Open the replacement BEFORE relinquishing the old handle so a failed
     // rotation leaves the current segment usable (requirements R44).

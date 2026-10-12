@@ -405,18 +405,27 @@ inputs are shared read-only; every cache, generated shader and output is local.
   guards, cancellation before native publication, document-bound tint callbacks,
   explicit render-session handoff, fixed editor navigation during object edits,
   shared texture/tint versions and reuse of GPU resources for unchanged assets.
-- Complete Development and Debug/UBSan editor suites each pass 143 tests,
-  six explicit skips and 2,602 assertions. UBSan halts on errors. Native
+- Complete Development and Debug/UBSan editor suites each pass 144 tests,
+  six explicit skips and 2,639 assertions. UBSan halts on errors. Native
   Cocoa/Metal acceptance passes 116 assertions (117 when exporting its pixel
   artifact), including shared-material instancing and the independent pixel oracle.
 - Project formatting/foundational include checks, documentation inventory,
-  strict MkDocs/API generation (134 public headers, no new gaps) and wiki parity pass.
+  strict MkDocs/API generation (no new gaps) and wiki parity pass.
 - Local Clang-tidy 18 cannot parse the macOS 26.6 SDK's Objective-C++ libc++
   builtins (`__builtin_clzg`, `__builtin_ctzg`, `__is_nothrow_convertible`). The
   native test compiles warning-clean; its pinned-tidy qualification is a separate
   macOS CI gate, not a locally clean Objective-C++ analysis claim.
 - CI explicitly analyzes the new sources/tests on Linux and macOS and adds the
   native renderer/camera acceptance journey to the macOS job.
+
+The continuation integrates main's standard-formatting/header optimization without
+changing build budgets. Hosted macOS validation exposed a function-type UBSan
+failure in the existing content worker's Qt shared deleter. Content jobs now keep
+copied state inside the worker, poll it only while owned, and retire cancelled
+workers without a GUI join. A destruction-during-work regression covers 32 owners,
+late completion suppression and unchanged catalog data. The two content concurrency
+cases pass 47 assertions; native rendering still passes 116 assertions after the
+integration. Full-suite filesystem-watch checks require host watcher access.
 
 The previously documented local Clang 18 ASan startup deadlock remains a host
 limitation. Local UBSan evidence and reference/native ASan CI are separate gates;

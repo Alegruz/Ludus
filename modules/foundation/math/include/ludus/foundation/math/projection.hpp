@@ -20,30 +20,34 @@ namespace ludus::foundation::math
 {
 using core::float32;
 
-// TryLookAt: right-handed view matrix. backward z = normalize(eye - target),
-// right x = normalize(cross(upHint, z)), y = cross(z, x). Coincident eye/target
-// or a parallel/zero upHint fails Degenerate. No hidden up-axis repair; for roll
-// continuity the caller supplies its previous orientation instead.
+/// @brief TryLookAt: right-handed view matrix. backward z = normalize(eye - target), right x =
+/// normalize(cross(upHint, z)), y = cross(z, x).
+///
+/// Coincident eye/target or a parallel/zero upHint fails Degenerate. No hidden up-axis repair; for roll continuity
+/// the caller supplies its previous orientation instead.
 [[nodiscard]] MathStatus TryLookAt(Vector3 eye, Vector3 target, Vector3 upHint, Matrix4& outView) noexcept;
 
-// Finite reverse-Z perspective. aspect > 0, near > 0, far > near, verticalFov in
-// (0, Pi). Depth 1 at z=-near, 0 at z=-far. Invalid/degenerate inputs fail;
-// coefficients that are not representable fail OutOfRange.
+/// @brief Finite reverse-Z perspective. aspect > 0, near > 0, far > near, verticalFov in (0, Pi).
+///
+/// Depth 1 at z=-near, 0 at z=-far. Invalid/degenerate inputs fail; coefficients that are not representable fail
+/// OutOfRange.
 [[nodiscard]] MathStatus TryPerspectiveReverseZ(float32 verticalFovRadians,
                                                 float32 aspect,
                                                 float32 nearPlane,
                                                 float32 farPlane,
                                                 Matrix4& out) noexcept;
 
-// Infinite reverse-Z perspective (far at infinity). Named factory, NOT a
-// far=infinity sentinel. aspect > 0, near > 0, verticalFov in (0, Pi). A finite
-// camera point at z<0 has depth near/(-z).
+/// @brief Infinite reverse-Z perspective (far at infinity).
+///
+/// Named factory, NOT a far=infinity sentinel. aspect > 0, near > 0, verticalFov in (0, Pi). A finite camera point
+/// at z<0 has depth near/(-z).
 [[nodiscard]] MathStatus
 TryPerspectiveReverseZInfinite(float32 verticalFovRadians, float32 aspect, float32 nearPlane, Matrix4& out) noexcept;
 
-// Finite reverse-Z orthographic. left<right, bottom<top, 0<=near<far. All inputs
-// finite and correctly ordered; an interval too narrow to produce representable
-// coefficients fails OutOfRange. Zero extents are not clamped.
+/// @brief Finite reverse-Z orthographic. left<right, bottom<top, 0<=near<far.
+///
+/// All inputs finite and correctly ordered; an interval too narrow to produce representable coefficients fails
+/// OutOfRange. Zero extents are not clamped.
 [[nodiscard]] MathStatus TryOrthographicReverseZ(float32 left,
                                                  float32 right,
                                                  float32 bottom,
@@ -52,8 +56,9 @@ TryPerspectiveReverseZInfinite(float32 verticalFovRadians, float32 aspect, float
                                                  float32 farPlane,
                                                  Matrix4& out) noexcept;
 
-// Framebuffer rectangle for NDC<->pixel conversion. Top-left origin, Y down,
-// physical pixels. Extents must be positive and finite.
+/// @brief Framebuffer rectangle for NDC<->pixel conversion.
+///
+/// Top-left origin, Y down, physical pixels. Extents must be positive and finite.
 struct Viewport
 {
     float32 X = 0.0f;
@@ -62,13 +67,15 @@ struct Viewport
     float32 Height = 0.0f;
 };
 
-// NDC -> pixel-edge coordinates: px = x + (ndc.x+1)*w/2, py = y + (1-ndc.y)*h/2.
-// Pixel centres are at +0.5; this does not snap to centres or apply DPR. NDC
-// outside [-1,1] maps outside the rectangle (callers clip). Fails on non-finite
-// NDC or a non-positive/non-finite viewport.
+/// @brief NDC -> pixel-edge coordinates: px = x + (ndc.x+1)*w/2, py = y + (1-ndc.y)*h/2.
+///
+/// Pixel centres are at +0.5; this does not snap to centres or apply DPR. NDC
+/// outside [-1,1] maps outside the rectangle (callers clip). Fails on non-finite
+/// NDC or a non-positive/non-finite viewport.
 [[nodiscard]] MathStatus TryNdcToFramebuffer(Vector3 ndc, Viewport viewport, Vector2& out) noexcept;
 
-// Pixel-edge coordinates -> NDC x,y (inverse of the X/Y mapping above). Depth is
-// not inverted here (callers that need z supply it). Same validation.
+/// @brief Pixel-edge coordinates -> NDC x,y (inverse of the X/Y mapping above).
+///
+/// Depth is not inverted here (callers that need z supply it). Same validation.
 [[nodiscard]] MathStatus TryFramebufferToNdc(Vector2 pixel, Viewport viewport, Vector2& out) noexcept;
 } // namespace ludus::foundation::math

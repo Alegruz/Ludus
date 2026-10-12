@@ -61,12 +61,13 @@ struct CubicHermite3 final
     Vector3 EndDerivative;
 };
 
-// Allocation-free checked operations. All controls must be finite; u is finite
-// and in [0,1]. Outputs are unchanged on failure. Arithmetic uses float64
-// intermediates, with rounded float32 results; these are not certified bounds.
-// Endpoints are preserved exactly, including signed zero. Derivatives are with
-// respect to normalized u, not time or distance. Position-only evaluation can
-// succeed when a derivative cannot be represented (sample returns OutOfRange).
+/// @brief Allocation-free checked operations.
+///
+/// All controls must be finite; u is finite and in [0,1]. Outputs are unchanged on failure. Arithmetic uses float64
+/// intermediates, with rounded float32 results; these are not certified bounds.
+/// Endpoints are preserved exactly, including signed zero. Derivatives are with
+/// respect to normalized u, not time or distance. Position-only evaluation can
+/// succeed when a derivative cannot be represented (sample returns OutOfRange).
 [[nodiscard]] MathStatus TryEvaluateCubic(const CubicBezier1& curve, float64 u, float32& out) noexcept;
 [[nodiscard]] MathStatus TryEvaluateCubic(const CubicBezier2& curve, float64 u, Vector2& out) noexcept;
 [[nodiscard]] MathStatus TryEvaluateCubic(const CubicBezier3& curve, float64 u, Vector3& out) noexcept;
@@ -74,15 +75,17 @@ struct CubicHermite3 final
 [[nodiscard]] MathStatus TryEvaluateCubic(const CubicBezier2& curve, float64 u, CubicSample2& out) noexcept;
 [[nodiscard]] MathStatus TryEvaluateCubic(const CubicBezier3& curve, float64 u, CubicSample3& out) noexcept;
 
-// Hermite derivatives are per unit of the external domain. Its finite, positive
-// width h gives B1 = Start + h*StartDerivative/3 and B2 = End - h*EndDerivative/3.
+/// @brief Hermite derivatives are per unit of the external domain.
+///
+/// Its finite, positive width h gives B1 = Start + h*StartDerivative/3 and B2 = End - h*EndDerivative/3.
 [[nodiscard]] MathStatus TryFromHermite(const CubicHermite1& hermite, float64 domainWidth, CubicBezier1& out) noexcept;
 [[nodiscard]] MathStatus TryFromHermite(const CubicHermite2& hermite, float64 domainWidth, CubicBezier2& out) noexcept;
 [[nodiscard]] MathStatus TryFromHermite(const CubicHermite3& hermite, float64 domainWidth, CubicBezier3& out) noexcept;
 
-// Left/right cover [0,u]/[u,1], each with its own normalized parameter.
-// Child derivatives therefore scale by u and 1-u, respectively. At endpoints one
-// child is constant. Input may alias either output; outputs must be distinct.
+/// @brief Left/right cover [0,u]/[u,1], each with its own normalized parameter.
+///
+/// Child derivatives therefore scale by u and 1-u, respectively. At endpoints one
+/// child is constant. Input may alias either output; outputs must be distinct.
 [[nodiscard]] MathStatus
 TrySplitCubic(const CubicBezier1& curve, float64 u, CubicBezier1& left, CubicBezier1& right) noexcept;
 [[nodiscard]] MathStatus

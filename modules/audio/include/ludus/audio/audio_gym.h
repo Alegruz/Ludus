@@ -23,8 +23,8 @@ using ludus::foundation::uint32;
 using ludus::foundation::uint64;
 using ludus::foundation::uint8;
 
-// A captured frame of the gym run: the system snapshot plus the voice info for
-// every handle the scenario is tracking, at a known RenderFrame.
+/// @brief A captured frame of the gym run: the system snapshot plus the voice info for
+/// every handle the scenario is tracking, at a known RenderFrame.
 struct Capture final
 {
     uint64 RenderFrame = 0;
@@ -33,9 +33,10 @@ struct Capture final
     std::vector<OwnerEvent> OwnerEvents;
 };
 
-// A named, reproducible offline scenario. Build one, drive it with Advance /
-// Submit, and read Captures. All data is owner-side and copyable so a scenario
-// can be exported to JSON by a cold tool (not part of the gym itself).
+/// @brief A named, reproducible offline scenario.
+///
+/// Build one, drive it with Advance / Submit, and read Captures. All data is owner-side and copyable so a scenario
+/// can be exported to JSON by a cold tool (not part of the gym itself).
 class Scenario final
 {
 public:
@@ -58,15 +59,15 @@ public:
         return mName;
     }
 
-    // Prepare a clip from encoded bytes; records it for tracking by name.
+    /// Prepare a clip from encoded bytes; records it for tracking by name.
     [[nodiscard]] Status
     PrepareClip(std::span<const uint8> encoded, const ClipDescriptor& descriptor, ClipHandle& out) noexcept;
 
-    // Track a voice handle so subsequent captures include its VoiceInfo.
+    /// Track a voice handle so subsequent captures include its VoiceInfo.
     void Track(VoiceHandle voice) noexcept;
 
-    // Advance the offline renderer by `frames` (stereo interleaved scratch) and
-    // append a capture of the state afterwards.
+    /// @brief Advance the offline renderer by `frames` (stereo interleaved scratch) and
+    /// append a capture of the state afterwards.
     [[nodiscard]] Status Advance(uint32 frames) noexcept;
 
     [[nodiscard]] const std::vector<Capture>& Captures() const noexcept
@@ -74,7 +75,7 @@ public:
         return mCaptures;
     }
 
-    // Filtering helpers over the most recent capture.
+    /// Filtering helpers over the most recent capture.
     [[nodiscard]] std::vector<VoiceInfo> FilterByGroup(uint32 groupIndex) const noexcept;
     [[nodiscard]] std::vector<VoiceInfo> FilterByBus(uint32 busIndex) const noexcept;
     [[nodiscard]] std::vector<VoiceInfo> FilterByTag(uint32 policyTag) const noexcept;

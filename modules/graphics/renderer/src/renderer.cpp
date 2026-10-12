@@ -62,7 +62,7 @@ namespace
 using internal::Access;
 constexpr usize MESHES = 6, SNAPSHOTS = 4, VIEWS = 8, OBJECTS = 256;
 constexpr usize PROGRAMS = 2, MATERIALS = 8, SHADOWS = 2;
-constexpr usize LIT_BYTES = 1040;
+constexpr usize LIT_BYTES = 1040, CLUSTER_BYTES = 8800;
 constexpr uint64 LAST_ID = ~uint64{0};
 // An explicit Initialize reserves identity; no resource registration at static initialization.
 std::atomic<uint64> gNextOwner{1};
@@ -203,6 +203,7 @@ bool Overlap(const Rect& left, const Rect& right) noexcept
 struct Candidate final
 {
     usize Item = 0, MeshSlot = 0, MaterialSlot = MATERIALS;
+    bool Coarse = false;
     Rect Bounds;
     Instance Data;
 };
@@ -233,6 +234,8 @@ struct Renderer::State final
     struct SnapshotRecord final : SlotIdentity
     {
         Item Items[OBJECTS];
+        math::Aabb3 Groups[OBJECTS / 16];
+        bool HasGroup[OBJECTS / 16]{};
         usize Count = 0;
         uint32 References = 0;
     };
@@ -272,7 +275,7 @@ struct Renderer::State final
         rhi::BindingLayoutHandle Layout{};
         rhi::TextureHandle White{};
         rhi::RasterPipelineHandle ShadowPipeline{};
-        bool Lit = false, Hdr = false;
+        bool Lit = false, Hdr = false, Clustered = false;
         uint32 VariantCount = 6;
         rhi::PipelineRequest Requests[7]{};
         rhi::RasterPipelineHandle Pipelines[6]{};
@@ -290,12 +293,13 @@ struct Renderer::State final
         MaterialAlpha Alpha = MaterialAlpha::Opaque;
         bool BindingCreated = false;
         Status Setup = Status::Pending;
-        bool Lit = false, HasBake = false;
+        bool Lit = false, HasBake = false, Clustered = false, ClusterViewCreated = false;
+        rhi::TextureHandle ClusterTexture{};
+        rhi::TextureViewHandle ClusterView{};
         usize ParameterSize = 48, ShadowSlot = SHADOWS;
         rhi::TextureViewHandle BakeTexture{}, ShadowTexture{};
         rhi::SamplerHandle ShadowSampler{};
         BakedLighting Bake;
-        LightSelection Selected;
     };
     struct ShadowRecord final : SlotIdentity
     {
@@ -337,6 +341,7 @@ struct Renderer::State final
     // Reserved once: PrepareView must fit the browser's default 64 KiB stack.
     Candidate Candidates[OBJECTS]{}, Scratch[OBJECTS]{};
     Instance Instances[OBJECTS]{};
+    core::UniquePtr<LightClusters> ClusterScratch;
     ~State()
     {
         for (usize i = 0; i < VIEWS; ++i)
@@ -455,6 +460,8 @@ struct Renderer::State final
             static_cast<void>(rhi::Destroy(Device, m.BakeTexture));
             static_cast<void>(rhi::Destroy(Device, m.ShadowTexture));
             static_cast<void>(rhi::Destroy(Device, m.ShadowSampler));
+            static_cast<void>(rhi::Destroy(Device, m.ClusterView));
+            static_cast<void>(rhi::Destroy(Device, m.ClusterTexture));
             if (m.ShadowSlot != SHADOWS)
             {
                 --Shadows[m.ShadowSlot].References;
@@ -570,6 +577,12 @@ struct Renderer::State final
         {
             for (usize i = 0; i < scene.Count; ++i)
             {
+                const auto coarse = scene.Items[i].Input.LodGeometry;
+                if (Access::Owner(coarse) != 0)
+                {
+                    --MeshRecords[Access::Slot(coarse)].References;
+                    DropMesh(Access::Slot(coarse));
+                }
                 const auto mesh = scene.Items[i].MeshSlot;
                 --MeshRecords[mesh].References;
                 DropMesh(mesh);
@@ -1367,6 +1380,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
                                 MaterialProgram& output) noexcept
 {
     const bool lit = shadow != nullptr;
+    const bool clustered = lit && fragment.Bindings.size() == 8;
     if (!mState || mState->Setup != Status::Ready || (lit && mState->LightingSetup != Status::Ready))
     {
         return Status::NotReady;
@@ -1377,8 +1391,13 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
     }
     if (vertex.Artifact.Stage != rhi::ShaderStage::Vertex || fragment.Artifact.Stage != rhi::ShaderStage::Fragment ||
         vertex.Inputs.size() != (lit ? 16U : 7U) || !vertex.Bindings.empty() || !vertex.UniformMembers.empty() ||
-        !fragment.Inputs.empty() || fragment.Bindings.size() != (lit ? 6U : 3U) ||
-        fragment.UniformMembers.size() != (lit ? 11U : 3U))
+        !fragment.Inputs.empty() ||
+        fragment.Bindings.size() != (clustered ? 8U
+                                     : lit     ? 6U
+                                               : 3U) ||
+        fragment.UniformMembers.size() != (clustered ? 14U
+                                           : lit     ? 11U
+                                                     : 3U))
     {
         return Status::InvalidDescription;
     }
@@ -1392,15 +1411,17 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
             return Status::InvalidDescription;
         }
     }
-    const usize byteSize = lit ? LIT_BYTES : 48;
+    const usize byteSize = clustered ? CLUSTER_BYTES : lit ? LIT_BYTES : 48;
     const rhi::RasterBinding expected[]{
         {0, rhi::RasterBindingKind::UniformBuffer, rhi::RasterVisibility::Fragment, byteSize},
         {1, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
         {2, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0},
         {3, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
         {4, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
-        {5, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0}};
-    for (usize i = 0; i < (lit ? 6U : 3U); ++i)
+        {5, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0},
+        {6, rhi::RasterBindingKind::Texture2D, rhi::RasterVisibility::Fragment, 0},
+        {7, rhi::RasterBindingKind::Sampler, rhi::RasterVisibility::Fragment, 0}};
+    for (usize i = 0; i < (clustered ? 8U : lit ? 6U : 3U); ++i)
     {
         bool found = false;
         for (const auto& binding : fragment.Bindings)
@@ -1423,11 +1444,19 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
                         "BakeScale",
                         "BakeUv",
                         "Lights",
-                        "ShadowData"};
-    for (usize i = 0; i < (lit ? 11U : 3U); ++i)
+                        "ShadowData",
+                        "GridRows",
+                        "GridMinimum",
+                        "GridScale"};
+    for (usize i = 0; i < (clustered ? 14U : lit ? 11U : 3U); ++i)
     {
-        const auto offset = i == 10 ? usize{656} : i * 16;
-        const auto shape = i >= 9 ? rhi::RasterUniformShape::Float4Array : rhi::RasterUniformShape::Float4;
+        const auto offset = i == 10   ? (clustered ? usize{8336} : usize{656})
+                            : i == 11 ? usize{8720}
+                            : i == 12 ? usize{8768}
+                            : i == 13 ? usize{8784}
+                                      : i * 16;
+        const auto shape =
+            i == 9 || i == 10 || i == 11 ? rhi::RasterUniformShape::Float4Array : rhi::RasterUniformShape::Float4;
         bool found = false;
         for (const auto& member : fragment.UniformMembers)
         {
@@ -1477,7 +1506,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
         {
             return ready;
         }
-        if (caps.MaxVertexAttributes < 16)
+        if (caps.MaxVertexAttributes < 16 || caps.MaxUniformRange < byteSize)
         {
             return Status::Unsupported;
         }
@@ -1492,6 +1521,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
     auto& p = s.Programs[slot];
     p.Used = p.Owned = true;
     p.Lit = lit;
+    p.Clustered = clustered;
     p.Hdr = lit && s.Hdr;
     p.VariantCount = lit && !p.Hdr ? 3U : 6U;
     status = rhi::CreateRasterShader(s.Device, vertex, p.Vertex);
@@ -1505,7 +1535,7 @@ Status Renderer::PrewarmProgram(const rhi::RasterShaderDescription& vertex,
     }
     if (Accepted(status))
     {
-        status = rhi::CreateBindingLayout(s.Device, {expected, lit ? 6U : 3U}, p.Layout);
+        status = rhi::CreateBindingLayout(s.Device, {expected, clustered ? 8U : lit ? 6U : 3U}, p.Layout);
     }
     const uint8 white[]{255, 255, 255, 255};
     rhi::TextureDescription texture{1, 1, rhi::RasterFormat::Rgba8Unorm};
@@ -1693,7 +1723,8 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
                                     const uint8* bytes,
                                     usize size,
                                     const LitMaterialDescription* lighting,
-                                    MaterialVersion& output) noexcept
+                                    MaterialVersion& output,
+                                    const LightClusters* clusters) noexcept
 {
     if (!mState)
     {
@@ -1750,6 +1781,7 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
     m.Alpha = description.Alpha;
     ++s.Programs[m.ProgramSlot].References;
     m.Lit = lighting != nullptr;
+    m.Clustered = clusters != nullptr;
     m.ParameterSize = size;
     if (lighting != nullptr)
     {
@@ -1784,6 +1816,13 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
         {
             status = rhi::CreateSampler(s.Device, {}, m.ShadowSampler);
         }
+    }
+    if (Accepted(status) && clusters != nullptr)
+    {
+        status = rhi::CreateTexture(s.Device,
+                                    {64, 64, rhi::RasterFormat::Rgba8Unorm},
+                                    {{clusters->Texels, sizeof(clusters->Texels)}, 256},
+                                    m.ClusterTexture);
     }
     if (!Accepted(status))
     {
@@ -1855,6 +1894,36 @@ Status Renderer::GetStatus(MaterialVersion handle) noexcept
             }
         }
     }
+    if (m->Clustered)
+    {
+        const auto texture = rhi::GetStatus(s.Device, m->ClusterTexture);
+        if (texture != Status::Ready)
+        {
+            if (texture != Status::Pending)
+            {
+                m->Setup = texture;
+            }
+            return texture;
+        }
+        if (!m->ClusterViewCreated)
+        {
+            const auto created = rhi::CreateTextureView(s.Device, m->ClusterTexture, m->ClusterView);
+            m->ClusterViewCreated = Accepted(created);
+            if (!Accepted(created))
+            {
+                return m->Setup = created;
+            }
+        }
+        const auto ready = rhi::GetStatus(s.Device, m->ClusterView);
+        if (ready != Status::Ready)
+        {
+            if (ready != Status::Pending)
+            {
+                m->Setup = ready;
+            }
+            return ready;
+        }
+    }
     if (!m->BindingCreated)
     {
         const rhi::RasterBindingResource values[]{{0, m->Parameters, 0, m->ParameterSize, {}, {}},
@@ -1862,9 +1931,16 @@ Status Renderer::GetStatus(MaterialVersion handle) noexcept
                                                   {2, {}, 0, 0, {}, m->Sampler},
                                                   {3, {}, 0, 0, m->BakeTexture, {}},
                                                   {4, {}, 0, 0, m->ShadowTexture, {}},
-                                                  {5, {}, 0, 0, {}, m->ShadowSampler}};
-        const auto created =
-            rhi::CreateBindingSet(s.Device, s.Programs[m->ProgramSlot].Layout, {values, m->Lit ? 6U : 3U}, m->Bindings);
+                                                  {5, {}, 0, 0, {}, m->ShadowSampler},
+                                                  {6, {}, 0, 0, m->ClusterView, {}},
+                                                  {7, {}, 0, 0, {}, m->ShadowSampler}};
+        const auto created = rhi::CreateBindingSet(s.Device,
+                                                   s.Programs[m->ProgramSlot].Layout,
+                                                   {values,
+                                                    m->Clustered ? 8U
+                                                    : m->Lit     ? 6U
+                                                                 : 3U},
+                                                   m->Bindings);
         if (!Accepted(created))
         {
             return m->Setup = created;
@@ -2089,6 +2165,22 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
         {
             return status == Status::Pending ? Status::NotReady : status;
         }
+        if (Access::Owner(item.LodGeometry) != 0)
+        {
+            status = GetStatus(item.LodGeometry);
+            if (status != Status::Ready)
+            {
+                return status == Status::Pending ? Status::NotReady : status;
+            }
+            if (item.Pass != Layer::Opaque || !math::IsFinite(item.LodPixels) || item.LodPixels <= 0)
+            {
+                return Status::InvalidDescription;
+            }
+        }
+        else if (item.LodPixels != 0 || item.PreviousLod)
+        {
+            return Status::InvalidDescription;
+        }
         usize materialSlot = MATERIALS;
         if (Access::Owner(item.Surface) != 0)
         {
@@ -2099,7 +2191,9 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
             }
             materialSlot = Access::Slot(item.Surface);
             const auto& material = mState->Materials[materialSlot];
-            if (material.Lit && !mState->MeshRecords[Access::Slot(item.Geometry)].HasNormals)
+            if (material.Lit && (!mState->MeshRecords[Access::Slot(item.Geometry)].HasNormals ||
+                                 (Access::Owner(item.LodGeometry) != 0 &&
+                                  !mState->MeshRecords[Access::Slot(item.LodGeometry)].HasNormals)))
             {
                 return Status::InvalidDescription;
             }
@@ -2134,6 +2228,23 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
         {
             return Status::InvalidDescription;
         }
+        if (Access::Owner(item.LodGeometry) != 0)
+        {
+            math::Aabb3 coarse;
+            if (math::TryTransformAabb(item.Transform,
+                                       mState->MeshRecords[Access::Slot(item.LodGeometry)].Bounds,
+                                       coarse) != math::MathStatus::Success)
+            {
+                return Status::InvalidDescription;
+            }
+            auto& b = destination.Bounds;
+            b.Min = {math::Min(b.Min.X, coarse.Min.X),
+                     math::Min(b.Min.Y, coarse.Min.Y),
+                     math::Min(b.Min.Z, coarse.Min.Z)};
+            b.Max = {math::Max(b.Max.X, coarse.Max.X),
+                     math::Max(b.Max.Y, coarse.Max.Y),
+                     math::Max(b.Max.Z, coarse.Max.Z)};
+        }
         if (materialSlot != MATERIALS && mState->Materials[materialSlot].Lit)
         {
             const auto& bounds = destination.Bounds;
@@ -2145,8 +2256,36 @@ Status Renderer::CreateSnapshot(const SceneItem* items, usize count, Snapshot& o
             }
         }
     }
+    for (auto& used : snapshot.HasGroup)
+    {
+        used = false;
+    }
     for (usize i = 0; i < count; ++i)
     {
+        const auto& item = snapshot.Items[i];
+        if (item.Input.Pass == Layer::Opaque)
+        {
+            const auto group = i / 16;
+            auto& b = snapshot.Groups[group];
+            if (!snapshot.HasGroup[group])
+            {
+                b = item.Bounds;
+            }
+            else
+            {
+                b.Min = {math::Min(b.Min.X, item.Bounds.Min.X),
+                         math::Min(b.Min.Y, item.Bounds.Min.Y),
+                         math::Min(b.Min.Z, item.Bounds.Min.Z)};
+                b.Max = {math::Max(b.Max.X, item.Bounds.Max.X),
+                         math::Max(b.Max.Y, item.Bounds.Max.Y),
+                         math::Max(b.Max.Z, item.Bounds.Max.Z)};
+            }
+            snapshot.HasGroup[group] = true;
+        }
+        if (Access::Owner(item.Input.LodGeometry) != 0)
+        {
+            ++mState->MeshRecords[Access::Slot(item.Input.LodGeometry)].References;
+        }
         ++mState->MeshRecords[snapshot.Items[i].MeshSlot].References;
         if (snapshot.Items[i].MaterialSlot != MATERIALS)
         {
@@ -2223,6 +2362,12 @@ Status Renderer::PrepareView(Snapshot handle,
     {
         return Status::InvalidDescription;
     }
+    if (!math::IsFinite(description.LodHysteresis) || description.LodHysteresis < 0 ||
+        description.LodHysteresis > 0.5F ||
+        (description.EnableLod && (description.LodWidth == 0 || description.LodHeight == 0)))
+    {
+        return Status::InvalidDescription;
+    }
     if (description.Depth == DepthConvention::ReverseZ && mState->ViewsSetup != Status::Ready)
     {
         return Status::NotReady;
@@ -2253,6 +2398,24 @@ Status Renderer::PrepareView(Snapshot handle,
     auto& candidates = mState->Candidates;
     auto& scratch = mState->Scratch;
     usize count = 0, opaqueCount = 0;
+    uint32 boundsTests = 0, culledGroups = 0;
+    math::FrustumRelation groups[OBJECTS / 16]{};
+    if (!description.Reference)
+    {
+        for (usize i = 0; i < (snapshot->Count + 15) / 16; ++i)
+        {
+            if (!snapshot->HasGroup[i])
+            {
+                continue;
+            }
+            if (math::TryClassifyAabb(frustum, snapshot->Groups[i], description.CullMargin, groups[i]) !=
+                math::MathStatus::Success)
+            {
+                return Status::InvalidDescription;
+            }
+            culledGroups += groups[i] == math::FrustumRelation::Outside ? 1U : 0U;
+        }
+    }
     const Layer passes[]{Layer::Opaque, Layer::Overlay};
     for (const auto pass : passes)
     {
@@ -2264,8 +2427,13 @@ Status Renderer::PrepareView(Snapshot handle,
                 continue;
             }
             math::FrustumRelation relation;
-            if (!description.Reference)
+            if (!description.Reference && pass == Layer::Opaque && groups[i / 16] == math::FrustumRelation::Outside)
             {
+                continue;
+            }
+            if (!description.Reference && (pass != Layer::Opaque || groups[i / 16] != math::FrustumRelation::Inside))
+            {
+                ++boundsTests;
                 if (math::TryClassifyAabb(pass == Layer::Opaque ? frustum : overlay,
                                           item.Bounds,
                                           pass == Layer::Opaque ? description.CullMargin : 0,
@@ -2283,6 +2451,7 @@ Status Renderer::PrepareView(Snapshot handle,
             candidate.Item = i;
             candidate.MeshSlot = item.MeshSlot;
             candidate.MaterialSlot = item.MaterialSlot;
+            candidate.Coarse = false;
             const auto clip = (pass == Layer::Opaque ? description.WorldToClip : description.OverlayToClip) *
                               Matrix(item.Input.Transform);
             if (!math::IsFinite(clip))
@@ -2296,6 +2465,10 @@ Status Renderer::PrepareView(Snapshot handle,
             }
             candidate.Data.Color =
                 item.MaterialSlot == MATERIALS ? item.Input.Material.Color : math::Vector4{1, 1, 1, 1};
+            if (item.MaterialSlot != MATERIALS && mState->Materials[item.MaterialSlot].Clustered)
+            {
+                candidate.Data.Color.Y = description.Reference || description.DirectLighting ? 1.0F : 0.0F;
+            }
             const auto worldRows = math::Transpose(Matrix(item.Input.Transform));
             for (usize row = 0; row < 3; ++row)
             {
@@ -2350,6 +2523,22 @@ Status Renderer::PrepareView(Snapshot handle,
                 ProjectBounds(item.Bounds,
                               pass == Layer::Opaque ? description.WorldToClip : description.OverlayToClip,
                               pass == Layer::Opaque && description.Depth == DepthConvention::ReverseZ);
+            if (pass == Layer::Opaque && !description.Reference && !description.ShadowCasters &&
+                description.EnableLod && Access::Owner(item.Input.LodGeometry) != 0)
+            {
+                const auto pixels =
+                    math::Max((candidate.Bounds.Right - candidate.Bounds.Left) * description.LodWidth,
+                              (candidate.Bounds.Top - candidate.Bounds.Bottom) * description.LodHeight) *
+                    0.5;
+                const auto threshold = static_cast<float64>(item.Input.LodPixels) *
+                                       (item.Input.PreviousLod ? 1 + static_cast<float64>(description.LodHysteresis)
+                                                               : 1 - static_cast<float64>(description.LodHysteresis));
+                candidate.Coarse = pixels < static_cast<float64>(threshold);
+                if (candidate.Coarse)
+                {
+                    candidate.MeshSlot = Access::Slot(item.Input.LodGeometry);
+                }
+            }
         }
         if (pass == Layer::Opaque)
         {
@@ -2360,7 +2549,15 @@ Status Renderer::PrepareView(Snapshot handle,
     // GPU Pro 3, V.4, sections 4.4-4.8. Thanks for the explicit pass-context distinction;
     // Ludus uses copied concrete packets rather than the chapter's general object/XML pipeline.
     // See docs/architecture/renderer-systems-gems-review.md for consulted source details.
-    if (!description.Reference)
+    bool homogeneous = true;
+    for (usize i = 1; i < opaqueCount; ++i)
+    {
+        homogeneous &= candidates[i].MeshSlot == candidates[0].MeshSlot &&
+                       candidates[i].MaterialSlot == candidates[0].MaterialSlot;
+    }
+    // Already compatible objects need no reordering or pairwise overlap search;
+    // preserving their source order also preserves equal-depth ownership.
+    if (!description.Reference && !homogeneous)
     {
         for (usize first = 0; first < opaqueCount;)
         {
@@ -2386,6 +2583,8 @@ Status Renderer::PrepareView(Snapshot handle,
         }
     }
     ViewReport result;
+    result.BoundsTests = boundsTests;
+    result.CulledGroups = culledGroups;
     result.Submitted = static_cast<uint32>(snapshot->Count);
     result.Visible = static_cast<uint32>(count);
     result.Culled = result.Submitted - result.Visible;
@@ -2397,6 +2596,8 @@ Status Renderer::PrepareView(Snapshot handle,
         const auto& item = snapshot->Items[candidate.Item].Input;
         instances[i] = candidate.Data;
         result.SourceIds[i] = item.SourceId;
+        result.SelectedLods[i] = candidate.Coarse;
+        result.LodObjects += candidate.Coarse ? 1U : 0U;
         if (candidate.MaterialSlot != MATERIALS && mState->Materials[candidate.MaterialSlot].Lit)
         {
             const auto& material = mState->Materials[candidate.MaterialSlot];
@@ -2760,8 +2961,35 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     {
         return Status::InvalidDescription;
     }
+    const bool clustered = description.Clusters != nullptr;
+    if (p->Clustered != clustered)
+    {
+        return Status::InvalidDescription;
+    }
+    if (clustered && !s.ClusterScratch)
+    {
+        auto* workspace = new (std::nothrow) LightClusters;
+        if (workspace == nullptr)
+        {
+            return Status::OutOfMemory;
+        }
+        s.ClusterScratch.Reset(workspace);
+    }
+    auto* clusters = s.ClusterScratch.Get();
     LightSelection selected;
-    auto status = SelectDirectLights(description.Lights, description.LightCount, selected);
+    auto status = clustered
+                      ? BuildLightClusters(*description.Clusters, description.Lights, description.LightCount, *clusters)
+                      : SelectDirectLights(description.Lights, description.LightCount, selected);
+    if (clustered && status == Status::Ready)
+    {
+        selected.Count = clusters->Count;
+        selected.OverflowCells = clusters->OverflowCells;
+        selected.Assignments = clusters->Assignments;
+        for (usize i = 0; i < clusters->Count; ++i)
+        {
+            selected.Lights[i] = clusters->Lights[i];
+        }
+    }
     if (status != Status::Ready)
     {
         return status;
@@ -2831,9 +3059,10 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     {
         math::Vector4 Tint, UvTransform, Options, Pbr, Emission, EnvironmentIrradiance, EnvironmentRadiance, BakeScale,
             BakeUv;
-        math::Vector4 Lights[32]{}, ShadowData[24]{};
+        math::Vector4 Lights[512]{}, ShadowData[24]{};
+        math::Vector4 GridRows[3]{}, GridMinimum{}, GridScale{};
     };
-    static_assert(sizeof(Parameters) == LIT_BYTES);
+    static_assert(sizeof(Parameters) == CLUSTER_BYTES);
     Parameters parameters{};
     parameters.Tint = description.Surface.Tint;
     parameters.UvTransform = description.Surface.UvTransform;
@@ -2891,15 +3120,33 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
             parameters.ShadowData[i * 6 + 5] = {region.Bias, static_cast<float32>(index), 1 / w, 1 / h};
         }
     }
+    uint8 legacy[LIT_BYTES]{};
+    if (clustered)
+    {
+        const auto& grid = *description.Clusters;
+        const auto rows = math::Transpose(Matrix(grid.WorldToGrid));
+        for (usize i = 0; i < 3; ++i)
+        {
+            parameters.GridRows[i] = rows.Columns[i];
+        }
+        parameters.GridMinimum = {grid.Bounds.Min.X, grid.Bounds.Min.Y, grid.Bounds.Min.Z, 0};
+        const auto extent = grid.Bounds.Max - grid.Bounds.Min;
+        parameters.GridScale = {8 / extent.X, 8 / extent.Y, 8 / extent.Z, 0};
+    }
+    else
+    {
+        std::memcpy(legacy, &parameters, 656);
+        std::memcpy(legacy + 656, parameters.ShadowData, sizeof(parameters.ShadowData));
+    }
     status = CreateMaterialData(program,
                                 description.Surface,
-                                reinterpret_cast<const uint8*>(&parameters),
-                                sizeof(parameters),
+                                clustered ? reinterpret_cast<const uint8*>(&parameters) : legacy,
+                                clustered ? sizeof(parameters) : sizeof(legacy),
                                 &description,
-                                output);
+                                output,
+                                clustered ? clusters : nullptr);
     if (Accepted(status))
     {
-        s.Materials[Access::Slot(output)].Selected = selected;
         report = selected;
     }
     return status;

@@ -175,26 +175,28 @@ enum class Key : uint16
     Count,
 };
 
-// Number of dense key slots, including the reserved Unknown slot at index 0.
+/// Number of dense key slots, including the reserved Unknown slot at index 0.
 inline constexpr usize KEY_COUNT = static_cast<usize>(Key::Count);
 
-// True when `key` is a real, in-range key that may index key storage. Unknown
-// is deliberately NOT valid for indexing gameplay state: it is a sink value.
-// This rejects fabricated enum values above Count as well as Unknown.
+/// @brief True when `key` is a real, in-range key that may index key storage.
+///
+/// Unknown is deliberately NOT valid for indexing gameplay state: it is a sink value.
+/// This rejects fabricated enum values above Count as well as Unknown.
 [[nodiscard]] inline constexpr bool IsValidKey(Key key) noexcept
 {
     const uint16 raw = static_cast<uint16>(key);
     return raw > static_cast<uint16>(Key::Unknown) && raw < static_cast<uint16>(Key::Count);
 }
 
-// Dense index for a validated key. The caller MUST have checked IsValidKey.
+/// Dense index for a validated key. The caller MUST have checked IsValidKey.
 [[nodiscard]] inline constexpr usize KeyIndex(Key key) noexcept
 {
     return static_cast<usize>(key);
 }
 
-// Stable physical debug label (e.g. "KeyW", "ShiftLeft"). Never a layout- or
-// locale-dependent character. Returns "Unknown" for Unknown or any value that
-// is not a real key. Intended for diagnostics/trace, not gameplay.
+/// @brief Stable physical debug label (e.g. "KeyW", "ShiftLeft").
+///
+/// Never a layout- or locale-dependent character. Returns "Unknown" for Unknown or any value that is not a real
+/// key. Intended for diagnostics/trace, not gameplay.
 [[nodiscard]] const char* DebugLabel(Key key) noexcept;
 } // namespace ludus::input

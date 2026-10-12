@@ -27,18 +27,21 @@ namespace ludus::audio
 {
 class AudioDebugSnapshotSink; // opt-in trace, declared in audio_debug.h
 
-// Result of submitting a batch: the aggregate acceptance status plus the voice
-// handles assigned to each Play record in submission order. A rejected batch
-// yields no handles and mutates no accounting.
+/// @brief Result of submitting a batch: the aggregate acceptance status plus the voice handles assigned to each
+/// Play record in submission order.
+///
+/// A rejected batch yields no handles and mutates no accounting.
 struct BatchResult final
 {
     Status Result = Status::InvalidArgument;
-    // Filled only on Status::Ok: one handle per Play command, in the order the
-    // Play commands appeared in the batch. Non-Play commands contribute no entry.
+    /// @brief Filled only on Status::Ok: one handle per Play command, in the order the Play commands appeared
+    /// in the batch.
+    ///
+    /// Non-Play commands contribute no entry.
     std::span<const VoiceHandle> Voices;
 };
 
-// Browser async teardown progress (design section 10).
+/// Browser async teardown progress (design section 10).
 enum class ShutdownState : uint8
 {
     NotStarted,
@@ -50,6 +53,12 @@ enum class ShutdownState : uint8
     Failed,
 };
 
+/// @brief Instance-owned audio control surface with one caller-owned control thread.
+///
+/// Public warm operations allocate nothing; preparation and native device setup
+/// are explicit cold operations. Forward requests from other threads to the owner.
+/// Construction is fallible: check IsValid or Initialize. Browser lifecycle is
+/// asynchronous; call Service to advance it. See docs/wiki/guides/audio.md.
 class AudioSystem final
 {
 public:
@@ -79,8 +88,9 @@ public:
     [[nodiscard]] uint32 GetSampleRate() const noexcept;
 
     // --- Preparation (cold; design sections 3, 9) -----------------------
-    // Decode/convert encoded bytes into owned finite PCM at the session rate.
-    // The caller's bytes are borrowed only for the duration of this call.
+    /// @brief Decode/convert encoded bytes into owned finite PCM at the session rate.
+    ///
+    /// The caller's bytes are borrowed only for the duration of this call.
     [[nodiscard]] Status
     PrepareClip(std::span<const uint8> encoded, const ClipDescriptor& descriptor, ClipHandle& outClip) noexcept;
 
@@ -93,15 +103,17 @@ public:
     [[nodiscard]] Status
     PrepareStream(std::span<const uint8> encoded, const StreamDescriptor& descriptor, StreamHandle& outStream) noexcept;
 
-    // Close new admission for an asset; storage is retained for existing
-    // reservations/voices/worker jobs and reclaimed by Service after terminal
-    // acknowledgment. No forced stop.
+    /// @brief Close new admission for an asset; storage is retained for existing reservations/voices/worker
+    /// jobs and reclaimed by Service after terminal acknowledgment.
+    ///
+    /// No forced stop.
     [[nodiscard]] Status RetireClip(ClipHandle clip) noexcept;
+    /// Close stream admission without stopping existing voices; Service reclaims after quiescence.
     [[nodiscard]] Status RetireStream(StreamHandle stream) noexcept;
 
-    // True when `clip` names a currently-prepared, non-retiring resident clip in
-    // this session. Owner-side; lets application descriptor validators check a
-    // variation handle without attempting playback.
+    /// @brief True when `clip` names a currently-prepared, non-retiring resident clip in this session.
+    ///
+    /// Owner-side; lets application descriptor validators check a variation handle without attempting playback.
     [[nodiscard]] bool IsClipReady(ClipHandle clip) const noexcept;
 
     /// Prepare a stream with exclusive input ownership, including on failure.
@@ -120,34 +132,40 @@ public:
     [[nodiscard]] Status InstallClip(PreparedClip& prepared, ClipHandle& outClip) noexcept;
 
     // --- Submission (warm; design section 4) ----------------------------
-    // Validate the whole batch (<= MAX_BATCH_RECORDS), copy all records, reserve
-    // slots and asset pins transactionally, then publish once. The returned
-    // Voices span is owned by the system and remains valid until the next
-    // submission call. noexcept, no allocation, no lock, no wait.
+    /// @brief Validate the whole batch (<= MAX_BATCH_RECORDS), copy all records, reserve slots and asset pins
+    /// transactionally, then publish once.
+    ///
+    /// The returned Voices span is owned by the system and remains valid until the next submission call.
+    /// noexcept, no allocation, no lock, no wait.
     [[nodiscard]] BatchResult TrySubmitBatch(std::span<const Command> commands) noexcept;
 
-    // Convenience single-command Play using the batch path.
+    /// Convenience single-command Play using the batch path.
     [[nodiscard]] Status PlayClip(const PlayParams& params, VoiceHandle& outVoice) noexcept;
 
-    // Stream playback: a prepared StreamHandle is admitted once. A second play
-    // on the same handle returns NotReady.
+    /// @brief Stream playback: a prepared StreamHandle is admitted once.
+    ///
+    /// A second play on the same handle returns NotReady.
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): accepted public shape.
     [[nodiscard]] Status
     PlayStream(StreamHandle stream, uint32 busIndex, uint8 priority, float32 gain, VoiceHandle& outVoice) noexcept;
 
     // --- Cancellation (always available; design section 4) --------------
-    // Stop uses a per-slot generation mailbox independent of normal queue room.
-    // Idempotent for a terminal handle still known to the owner.
+    /// @brief Stop uses a per-slot generation mailbox independent of normal queue room.
+    ///
+    /// Idempotent for a terminal handle still known to the owner.
     [[nodiscard]] Status Stop(VoiceHandle voice) noexcept;
 
-    // Advance the cancellation epoch; affects all voices admitted before this
-    // call, including queued plays. Never needs queue space. Mix settings remain.
+    /// @brief Advance the cancellation epoch; affects all voices admitted before this call, including queued
+    /// plays.
+    ///
+    /// Never needs queue space. Mix settings remain.
     void StopAll() noexcept;
 
     // --- Service (owner/control thread; design section 3) ---------------
-    // Drain diagnostics, acknowledge durable terminals, free retired storage,
-    // and advance setup/worker/backend lifecycle. Not a mixer tick. Output
-    // continuity does not depend on calling this at the game frame rate.
+    /// @brief Drain diagnostics, acknowledge durable terminals, free retired storage, and advance
+    /// setup/worker/backend lifecycle.
+    ///
+    /// Not a mixer tick. Output continuity does not depend on calling this at the game frame rate.
     void Service() noexcept;
 
     // --- Queries (design sections 3, 11) --------------------------------
@@ -157,14 +175,16 @@ public:
     void GetSystemSnapshot(SystemSnapshot& out) const noexcept;
 
     // --- Offline rendering (Offline mode only; design section 5) --------
-    // Run the production render entry serially on the caller thread. Rejects
-    // concurrent device rendering. `output` is validated against layout/frames.
+    /// @brief Run the production render entry serially on the caller thread.
+    ///
+    /// Rejects concurrent device rendering. `output` is validated against layout/frames.
     [[nodiscard]] Status
     RenderOffline(std::span<float32> output, ChannelLayout layout, BufferLayout bufferLayout, uint32 frames) noexcept;
 
     // --- Browser gesture / shutdown (design section 10) -----------------
-    // Must be called inside a genuine DOM activation handler on the browser.
-    // Schedules resume; returns Pending/result.
+    /// @brief Must be called inside a genuine DOM activation handler on the browser.
+    ///
+    /// Schedules resume; returns Pending/result.
     [[nodiscard]] Status ResumeFromUserGesture() noexcept;
 
     /// Close admission, quiesce native callbacks and join the decode worker before
@@ -175,31 +195,35 @@ public:
     [[nodiscard]] ShutdownState GetShutdownState() const noexcept;
 
     // --- Diagnostics opt-in ---------------------------------------------
-    // Attach/detach an owner-side snapshot/trace sink. Does not transfer
-    // ownership; the sink must outlive the attachment. Null detaches.
+    /// @brief Attach/detach an owner-side snapshot/trace sink.
+    ///
+    /// Does not transfer ownership; the sink must outlive the attachment. Null detaches.
     void SetDebugSink(AudioDebugSnapshotSink* sink) noexcept;
 
     // --- Attenuation modifiers (design section 8) -----------------------
-    // Acquire a bounded attenuation-modifier instance with per-bus dB targets
-    // and a weight in [0,1]. Returns a generation-checked ModifierHandle.
-    // Overlapping owners get distinct instances. AssetCapacity-style failure is
-    // reported as Status (no handle). The modifier ramps in on acquisition.
+    /// @brief Acquire a bounded attenuation-modifier instance with per-bus dB targets and a weight in [0,1].
+    ///
+    /// Returns a generation-checked ModifierHandle.
+    /// Overlapping owners get distinct instances. AssetCapacity-style failure is
+    /// reported as Status (no handle). The modifier ramps in on acquisition.
     [[nodiscard]] Status
     AcquireModifier(std::span<const ModifierValue> values, float32 weight, ModifierHandle& outModifier) noexcept;
 
-    // Update a modifier's weight (ramps). Generation-checked.
+    /// Update a modifier's weight (ramps). Generation-checked.
     [[nodiscard]] Status UpdateModifier(ModifierHandle modifier, float32 weight) noexcept;
 
-    // Release a modifier: fades its weight to zero, then retires its slot after
-    // the renderer acknowledges. Removing one instance never removes another.
+    /// @brief Release a modifier: fades its weight to zero, then retires its slot after the renderer
+    /// acknowledges.
+    ///
+    /// Removing one instance never removes another.
     [[nodiscard]] Status ReleaseModifier(ModifierHandle modifier) noexcept;
 
     // --- Owner-side user-gain helper (design section 8) -----------------
-    // Map a normalized slider u in [0,1] through an explicit dB range to a
-    // UserGain amplitude: 0 at u==0 (exact mute), else 10^((u-1)*range/20).
+    /// @brief Map a normalized slider u in [0,1] through an explicit dB range to a
+    /// UserGain amplitude: 0 at u==0 (exact mute), else 10^((u-1)*range/20).
     [[nodiscard]] static float32 UserGainFromSlider(float32 u, float32 dbRange) noexcept;
 
-    // True when construction + Initialize produced usable fixed storage.
+    /// True when construction + Initialize produced usable fixed storage.
     [[nodiscard]] bool IsValid() const noexcept
     {
         return mImpl.Get() != nullptr;

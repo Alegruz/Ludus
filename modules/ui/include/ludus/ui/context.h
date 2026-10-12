@@ -27,7 +27,7 @@ struct Color final
     float32 R = 0;
     float32 G = 0;
     float32 B = 0;
-    float32 A = 0; // Straight alpha, linear RGB. Backend performs attachment conversion.
+    float32 A = 0; ///< Straight alpha, linear RGB. Backend performs attachment conversion.
 };
 enum class Unit : uint8
 {
@@ -71,18 +71,18 @@ struct Layout final
 struct Element final
 {
     WidgetId Id = 0;
-    usize Parent = kRoot; // Parent's index must precede this element. Submission order is paint order.
+    usize Parent = kRoot; ///< Parent's index must precede this element. Submission order is paint order.
     Layout Placement;
     Color Fill;
     Role SemanticRole = Role::Decoration;
     bool Visible = true;
     bool Enabled = true;
     bool ClipChildren = true;
-    bool BlockPointer = false; // Decorations are input-transparent unless explicitly blocking.
+    bool BlockPointer = false; ///< Decorations are input-transparent unless explicitly blocking.
 };
 struct Viewport final
 {
-    Rect Bounds; // Logical pixels, top-left origin, +Y down; caller has removed safe-area insets.
+    Rect Bounds; ///< Logical pixels, top-left origin, +Y down; caller has removed safe-area insets.
 };
 struct LayoutBox final
 {
@@ -96,7 +96,7 @@ struct LayoutBox final
 struct PaintCommand final
 {
     WidgetId Id = 0;
-    Rect Bounds; // Already intersected with Clip. Solid rectangles only in U0.
+    Rect Bounds; ///< Already intersected with Clip. Solid rectangles only in U0.
     Color Fill;
 };
 enum class Status : uint8
@@ -128,7 +128,7 @@ struct Event final
 struct InputResult final
 {
     bool Consumed = false;
-    WidgetId Activated = 0; // Apply game commands after Route returns; no reentrant callbacks.
+    WidgetId Activated = 0; ///< Apply game commands after Route returns; no reentrant callbacks.
     WidgetId Focused = 0;
 };
 struct Stats final
@@ -138,10 +138,11 @@ struct Stats final
     usize LayoutVisits = 0;
 };
 
-// One main-thread context per surface. Initialization allocates bounded storage;
-// document resolution/input never allocate. Documents are copied, with no borrows
-// retained. Failure preserves the last committed layout and input state. Spans
-// expire on the next successful TrySetDocument or context destruction.
+/// @brief One main-thread context per surface.
+///
+/// Initialization allocates bounded storage; document resolution/input never allocate. Documents are copied, with
+/// no borrows retained. Failure preserves the last committed layout and input state. Spans expire on the next
+/// successful TrySetDocument or context destruction.
 class Context final
 {
 public:

@@ -1,5 +1,6 @@
-add_executable(ludus_audio_content_demo "${PROJECT_SOURCE_DIR}/examples/audio-content/main.cpp")
-target_link_libraries(ludus_audio_content_demo PRIVATE Ludus::AudioContent Ludus::FoundationLogging Ludus::FoundationMath)
+add_executable(ludus_audio_content_demo "${PROJECT_SOURCE_DIR}/examples/audio-content/main.cpp"
+    "${PROJECT_SOURCE_DIR}/examples/audio-content/resource_adapter.cpp")
+target_link_libraries(ludus_audio_content_demo PRIVATE Ludus::AudioContent Ludus::Resources Ludus::FoundationLogging Ludus::FoundationMath)
 ludus_apply_project_defaults(ludus_audio_content_demo)
 if(LUDUS_BUILD_TESTS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Python3 REQUIRED COMPONENTS Interpreter)

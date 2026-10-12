@@ -1,8 +1,8 @@
 # Engineering quality and CI architecture
 
-Status: Q0 implemented; Q1–Q4 proposed, October 11, 2026. Q0 implementation
+Status: Q0 implemented; Q1 implemented in advisory rollout; Q2–Q4 proposed, October 11, 2026. Q0 implementation
 baseline: `f9cc7c8`. The initial proposal used `01f5ecf` plus its working tree.
-Only the Q0 failure controls and inventory are implemented; later checks,
+Q0 failure controls/inventory and Q1 analysis/editor tooling are implemented; later checks,
 presets, reports and services remain an implementation plan. The
 [CI guide](../development/continuous-integration.md) owns current behavior.
 The initial decisions were recorded before the
@@ -468,7 +468,7 @@ enter those guides only after implementation and successful evidence.
 | Phase | Deliverables | Acceptance before promotion |
 | --- | --- | --- |
 | Q0: Failure semantics (implemented) | Fatal UBSan, negative controls, complete configured-source inventory, bounded analysis/control logs | Known-bad isolated processes fail; omissions/missing artifacts fail; current clean checks remain green |
-| Q1: Analysis and editor | Reviewed stable analyzer rules, Ruff/actionlint, preset-aware clangd/tasks | Full supported compile databases analyzed; zero required-source omission; repeated repair preserves custom settings |
+| Q1: Analysis and editor (advisory rollout) | Stable analyzer profile, pinned Ruff/actionlint, preset-aware clangd/tasks; [current contracts](../development/continuous-integration.md#q1-analysis-and-host-tooling) | Complete configured inventories; real negative controls; repeated selection preserves custom settings; promotion requires supported-platform findings and runtime review |
 | Q2: Evidence and coverage | Shared report schema, JUnit/raw artifacts, Clang coverage profile | Parallel profiles merge correctly; fresh/moved checkout works; failed tests/reporters cannot yield success; local reproduction succeeds |
 | Q3: Runtime exploration | Expanded TSan/fuzzing, selected Linux Memcheck | Fully instrumented targets, seeded reproducibility, original/minimized crash preservation and bounded runtime |
 | Q4: Platform/performance | Controlled device lanes, calibrated scenarios, artifact promotion | Actual capability evidence, repeated base/head measurements, exact package identity and trusted-runner isolation |

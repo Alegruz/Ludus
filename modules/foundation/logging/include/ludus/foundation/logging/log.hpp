@@ -46,15 +46,16 @@
 namespace ludus::foundation::logging
 {
 
-// Assign a human-readable name to the calling thread. Log output prefers this
-// name (e.g. "[Render]") over an opaque numeric id. Safe to call before
-// Initialize(); the name is stored in thread-local state.
+/// @brief Assign a human-readable name to the calling thread.
+///
+/// Log output prefers this name (e.g. "[Render]") over an opaque numeric id. Safe to call before Initialize(); the
+/// name is stored in thread-local state.
 void SetCurrentThreadName(std::string_view name);
 
-// Cheap, lock-free runtime predicate used by the macros to skip work when a
-// record would be filtered out. It performs only scalar atomic loads: no lock,
-// no allocation, no hash-map lookup, no timestamp, no argument evaluation
-// (requirements R13). Safe to call before Initialize().
+/// @brief Cheap, lock-free runtime predicate used by the macros to skip work when a record would be filtered out.
+///
+/// It performs only scalar atomic loads: no lock, no allocation, no hash-map lookup, no timestamp, no argument
+/// evaluation (requirements R13). Safe to call before Initialize().
 [[nodiscard]] bool ShouldLog(LogLevel level, LogCategory category) noexcept;
 
 } // namespace ludus::foundation::logging
@@ -62,11 +63,11 @@ void SetCurrentThreadName(std::string_view name);
 namespace ludus::foundation::logging
 {
 
-// Result of an explicit direct (debugger-critical) delivery. It reports whether
-// the record reached a healthy direct output endpoint BEFORE the call returned,
-// so a caller/tool can inspect it before hitting a breakpoint (requirements
-// R27 path 2, R28). Delivered means "handed to a selected direct endpoint",
-// never "a GUI painted it".
+/// @brief Result of an explicit direct (debugger-critical) delivery.
+///
+/// It reports whether the record reached a healthy direct output endpoint BEFORE the call returned, so a
+/// caller/tool can inspect it before hitting a breakpoint (requirements R27 path 2, R28). Delivered means "handed
+/// to a selected direct endpoint", never "a GUI painted it".
 enum class DeliveryStatus : uint8
 {
     Delivered,

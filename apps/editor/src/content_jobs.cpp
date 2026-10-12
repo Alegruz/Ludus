@@ -2,7 +2,6 @@
 #include "internal/content_import.h"
 
 #include <QByteArray>
-#include <QSharedPointer>
 #if !defined(Q_OS_WASM)
 #    include <QThread>
 #endif
@@ -83,14 +82,29 @@ void Run(JobState& state)
     }
     state.Done.store(true, std::memory_order_release);
 }
+// Thanks to Qt Group, QThread, "Managing Threads": keep worker execution
+// separate from QObject affinity. This adapter owns the copied state in the
+// thread subclass rather than the previous create()/shared-deleter closure.
+// https://doc.qt.io/qt-6/qthread.html
+class ContentWorker final : public QThread
+{
+public:
+    JobState State;
+
+private:
+    void run() override
+    {
+        Run(State);
+    }
+};
 #endif
 } // namespace
 
 struct ContentJobs::Impl final
 {
-    QSharedPointer<JobState> State;
+    JobState* State = nullptr;
 #if !defined(Q_OS_WASM)
-    QThread* Thread = nullptr;
+    ContentWorker* Thread = nullptr;
 #endif
 };
 ContentJobs::ContentJobs(QObject* parent) : QObject(parent), Impl_(new(std::nothrow) Impl)
@@ -113,6 +127,11 @@ ContentJobs::~ContentJobs()
             delete Impl_->Thread;
         }
     }
+#else
+    if (Impl_ != nullptr)
+    {
+        delete Impl_->State;
+    }
 #endif
     delete Impl_;
 }
@@ -122,32 +141,36 @@ bool ContentJobs::Start(const ContentRequest& request)
     {
         return false;
     }
-    auto state = QSharedPointer<JobState>(new (std::nothrow) JobState);
-    if (state.isNull())
+#if !defined(Q_OS_WASM)
+    auto* thread = new (std::nothrow) ContentWorker;
+    if (thread == nullptr)
     {
         return false;
     }
+    // The worker owns its copied request and result until it finishes. The UI
+    // borrows that state while polling; early UI destruction cancels and retires
+    // the worker through finished/deleteLater without joining or shared deleters.
+    // No worker callback captures this QObject or touches a model.
+    auto* state = &thread->State;
     state->Result.Request = request;
     Impl_->State = state;
-#if !defined(Q_OS_WASM)
-    // Thanks to Qt Group, QThread, "Managing Threads" and create(): separate
-    // worker execution from QObject affinity. Poll copied state during work;
-    // ordinary shutdown acknowledges completion without blocking a GUI wait.
-    // https://doc.qt.io/qt-6/qthread.html
-    // The thread never captures this QObject or touches any model. Its copied
-    // state outlives cancellation/destruction; completion is polled on the UI.
-    auto* thread = QThread::create([state]() { Run(*state); });
     Impl_->Thread = thread;
     thread->start();
     if (!thread->isRunning() && !state->Done.load(std::memory_order_acquire))
     {
         delete thread;
         Impl_->Thread = nullptr;
-        state->Result.Status = content::Status::IoError;
-        state->Result.Message = QStringLiteral("Content worker could not start; retry the operation.");
-        state->Done.store(true, std::memory_order_release);
+        Impl_->State = nullptr;
+        return false;
     }
 #else
+    auto* state = new (std::nothrow) JobState;
+    if (state == nullptr)
+    {
+        return false;
+    }
+    state->Result.Request = request;
+    Impl_->State = state;
     state->Result.Status = content::Status::Unsupported;
     state->Result.Message = QStringLiteral("Content browsing and audio import require the desktop editor.");
     state->Done.store(true, std::memory_order_release);
@@ -158,7 +181,7 @@ bool ContentJobs::Start(const ContentRequest& request)
 }
 bool ContentJobs::Cancel()
 {
-    return Impl_ != nullptr && !Impl_->State.isNull() && !Impl_->State->Done.load(std::memory_order_acquire) &&
+    return Impl_ != nullptr && Impl_->State != nullptr && !Impl_->State->Done.load(std::memory_order_acquire) &&
            Impl_->State->Gate.Cancel();
 }
 void ContentJobs::Shutdown()
@@ -168,7 +191,7 @@ void ContentJobs::Shutdown()
 }
 bool ContentJobs::Busy() const noexcept
 {
-    return Impl_ != nullptr && !Impl_->State.isNull();
+    return Impl_ != nullptr && Impl_->State != nullptr;
 }
 bool ContentJobs::Importing() const noexcept
 {
@@ -189,11 +212,15 @@ void ContentJobs::Poll()
     {
         return;
     }
-    delete Impl_->Thread;
-    Impl_->Thread = nullptr;
 #endif
     const auto result = Impl_->State->Result;
-    Impl_->State.clear();
+#if !defined(Q_OS_WASM)
+    delete Impl_->Thread;
+    Impl_->Thread = nullptr;
+#else
+    delete Impl_->State;
+#endif
+    Impl_->State = nullptr;
     PollTimer_.stop();
     Q_EMIT Completed(result);
     Q_EMIT BusyChanged();

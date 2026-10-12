@@ -9,12 +9,13 @@
 
 namespace ludus::runtime::property_binding
 {
-// Optional module-side projection into the EXISTING copied GameApi records.
-// Only bool/int32/float32 fit the current inspector ABI. Other schema kinds
-// fail explicitly; do not narrow wide integers or rewrite the public ABI.
-// No descriptor, native address, or callback crosses the module boundary.
-// Object identity, module lifetime, revisions, safe-point commit and undo remain
-// the owner's responsibility. All output spans remain unchanged on failure.
+/// @brief Optional module-side projection into the EXISTING copied GameApi records.
+///
+/// Only bool/int32/float32 fit the current inspector ABI. Other schema kinds
+/// fail explicitly; do not narrow wide integers or rewrite the public ABI.
+/// No descriptor, native address, or callback crosses the module boundary.
+/// Object identity, module lifetime, revisions, safe-point commit and undo remain
+/// the owner's responsibility. All output spans remain unchanged on failure.
 [[nodiscard]] foundation::reflection::Status Describe(const foundation::reflection::Schema& schema,
                                                       foundation::uint64 objectId,
                                                       std::span<game_api::PropertyDescriptor> output,

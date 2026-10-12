@@ -12,7 +12,7 @@ using ludus::foundation::uint64;
 using ludus::foundation::uint8;
 using ludus::foundation::usize;
 
-// Application message bound, including our envelope; not a transport path MTU.
+/// Application message bound, including our envelope; not a transport path MTU.
 inline constexpr usize MAX_MESSAGE_BYTES = 1200;
 inline constexpr usize MESSAGE_HEADER_BYTES = 24;
 inline constexpr uint8 WIRE_VERSION = 1;
@@ -35,10 +35,11 @@ enum class WireStatus : uint8
     UnsupportedVersion,
 };
 
-// Each primitive preflights its entire operation. Failure preserves cursor,
-// output and backing bytes. Bits are LSB first; integers therefore little endian.
-// AlignToByte writes/checks zero padding. Byte operations require alignment.
-// Buffers must outlive their stream. Byte copy input/output must not overlap.
+/// @brief Each primitive preflights its entire operation.
+///
+/// Failure preserves cursor, output and backing bytes. Bits are LSB first; integers therefore little endian.
+/// AlignToByte writes/checks zero padding. Byte operations require alignment.
+/// Buffers must outlive their stream. Byte copy input/output must not overlap.
 class BitWriter final
 {
 public:
@@ -60,6 +61,11 @@ private:
     usize mBitCount = 0;
 };
 
+/// @brief Borrowed LSB-first bit reader with transactional primitive reads.
+///
+/// Failure preserves cursor and outputs. AlignToByte requires zero padding;
+/// byte operations require alignment. Input must outlive the reader and must
+/// not overlap byte-copy destinations. No allocation or hidden I/O.
 class BitReader final
 {
 public:
@@ -80,23 +86,26 @@ private:
 struct MessageHeader final
 {
     Channel Lane = Channel::Control;
-    uint16 Kind = 1;     // game schema identifier; zero is reserved
-    uint64 Session = 0;  // nonzero lifecycle epoch, NOT authentication
-    uint32 Sequence = 0; // independent sequence per channel and direction
+    uint16 Kind = 1;     ///< game schema identifier; zero is reserved
+    uint64 Session = 0;  ///< nonzero lifecycle epoch, NOT authentication
+    uint32 Sequence = 0; ///< independent sequence per channel and direction
 };
 
 struct MessageView final
 {
     MessageHeader Header;
-    std::span<const uint8> Payload; // borrowed from the encoded message
+    std::span<const uint8> Payload; ///< borrowed from the encoded message
 };
 
-// Exact length, magic, version, lane, reserved fields and epoch are checked.
-// Failure leaves destination/written/view unchanged. Encode buffers and payload
-// must not overlap. Decode never asserts on untrusted bytes or allocates.
+/// @brief Exact length, magic, version, lane, reserved fields and epoch are checked.
+///
+/// Failure leaves destination/written/view unchanged. Encode buffers and payload
+/// must not overlap. Decode never asserts on untrusted bytes or allocates.
 WireStatus EncodeMessage(const MessageHeader& header,
                          std::span<const uint8> payload,
                          std::span<uint8> destination,
                          usize& written) noexcept;
+/// Validate the complete envelope and return a view borrowed from bytes.
+/// Failure preserves view; the source must outlive use of the resulting payload.
 WireStatus DecodeMessage(std::span<const uint8> bytes, MessageView& view) noexcept;
 } // namespace ludus::network

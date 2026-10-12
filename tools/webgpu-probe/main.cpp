@@ -1,12 +1,5 @@
 #include <ludus/foundation/base/types.h>
 
-#include <charconv>
-#include <cmath>
-#include <expected>
-#include <format>
-#include <string>
-#include <system_error>
-
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <webgpu/webgpu.h>
@@ -62,23 +55,24 @@ void fail(const char* message) noexcept
     showStatus("failed", message);
 }
 
-[[nodiscard]] std::expected<std::string, std::errc> checkLibraryFeatures() noexcept
+// Bounded probe diagnostic conversion; no locale, allocation or format library.
+void appendUnsigned(char*& cursor, uint32 value) noexcept
 {
-    char buffer[32] = {};
-    const auto result = std::to_chars(buffer, buffer + sizeof(buffer), float64{1.25});
-    if (result.ec != std::errc{})
+    char digits[10];
+    usize count = 0;
+    do
     {
-        return std::unexpected(result.ec);
-    }
-    const std::string converted(buffer, result.ptr);
-    if (converted != "1.25" || std::format("{:.2f}", float64{1.25}) != converted)
+        digits[count++] = static_cast<char>('0' + value % 10);
+        value /= 10;
+    } while (value != 0);
+    while (count != 0)
     {
-        return std::unexpected(std::errc::invalid_argument);
+        *cursor++ = digits[--count];
     }
-    return std::format("C++23 library checks passed ({}); requesting a WebGPU adapter…", converted);
+    *cursor = '\0';
 }
 
-EM_BOOL renderFrame(float64 time, void*) noexcept
+EM_BOOL renderFrame(float64, void*) noexcept
 {
     if (gProbe.Failed)
     {
@@ -119,7 +113,10 @@ EM_BOOL renderFrame(float64 time, void*) noexcept
     color.view = view;
     color.loadOp = WGPULoadOp_Clear;
     color.storeOp = WGPUStoreOp_Store;
-    color.clearValue.r = 0.25 + 0.2 * std::sin(time * 0.001);
+    // A bounded triangle pulse shows frame progress without a math-library dependency.
+    const uint32 phase = gProbe.Frames % 240;
+    const uint32 intensity = phase < 120 ? phase : 240 - phase;
+    color.clearValue.r = 0.05 + static_cast<float64>(intensity) / 300.0;
     color.clearValue.g = 0.12;
     color.clearValue.b = 0.45;
     color.clearValue.a = 1.0;
@@ -208,10 +205,18 @@ void requestAdapter(WGPUFeatureLevel featureLevel) noexcept
 
 void adapterReady(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView message, void*, void*) noexcept
 {
-    const auto label = std::format("{} adapter request (status {})",
-                                   gProbe.CompatibilityRequested ? "Compatibility" : "Core",
-                                   static_cast<uint32>(status));
-    diagnose(label.c_str(), message);
+    char label[64];
+    char* cursor = label;
+    const char* prefix =
+        gProbe.CompatibilityRequested ? "Compatibility adapter request (status " : "Core adapter request (status ";
+    while (*prefix != '\0')
+    {
+        *cursor++ = *prefix++;
+    }
+    appendUnsigned(cursor, static_cast<uint32>(status));
+    *cursor++ = ')';
+    *cursor = '\0';
+    diagnose(label, message);
     if (status != WGPURequestAdapterStatus_Success || !adapter)
     {
         if (adapter)
@@ -251,13 +256,7 @@ void adapterReady(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStri
 
 int main()
 {
-    const auto featureCheck = checkLibraryFeatures();
-    if (!featureCheck)
-    {
-        fail("C++23 formatting/conversion checks failed.");
-        return 1;
-    }
-    showStatus("initializing", featureCheck->c_str());
+    showStatus("initializing", "Requesting a WebGPU adapter…");
     gProbe.Instance = wgpuCreateInstance(nullptr);
     if (!gProbe.Instance)
     {

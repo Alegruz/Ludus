@@ -29,8 +29,9 @@ using core::float32;
 using core::uint32;
 using core::uint64;
 
-// Serialisable stream state. version==1 for v1. Byte order on disk is the
-// owner's responsibility (do not dump struct padding).
+/// @brief Serialisable stream state. version==1 for v1.
+///
+/// Byte order on disk is the owner's responsibility (do not dump struct padding).
 struct RandomState
 {
     uint32 Version = 1;
@@ -38,21 +39,27 @@ struct RandomState
     uint64 Increment = 0;
 };
 
+/// @brief Caller-owned, noncryptographic PCG32 stream with explicit logical call order.
+///
+/// Equal seed, selector and call order produce the versioned bit-exact sequence.
+/// No global state, entropy acquisition or automatic reseeding. See RandomState
+/// for explicit replay snapshots and docs/decisions/0010-foundation-math-module.md for conventions.
 class RandomStream
 {
 public:
-    // Default construction uses a DETERMINISTIC seed=0/selector=0 (not entropy).
-    // mState/mIncrement have default member initializers; SeedInternal overwrites
-    // them with the documented two-step PCG seeding for seed=0, selector=0.
+    /// @brief Default construction uses a DETERMINISTIC seed=0/selector=0 (not entropy).
+    ///
+    /// mState/mIncrement have default member initializers; SeedInternal overwrites
+    /// them with the documented two-step PCG seeding for seed=0, selector=0.
     constexpr RandomStream() noexcept
     {
         SeedInternal(0, 0);
     }
 
-    // Reseed to the documented two-step PCG sequence. selector must be
-    // <= 0x7fffffffffffffff (a higher selector would alias its high bit and is
-    // rejected). Returns false and leaves the stream unchanged on an invalid
-    // selector. seed is any uint64.
+    /// @brief Reseed to the documented two-step PCG sequence. selector must be <= 0x7fffffffffffffff (a higher
+    /// selector would alias its high bit and is rejected).
+    ///
+    /// Returns false and leaves the stream unchanged on an invalid selector. seed is any uint64.
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): the (seed, selector) pair is the documented PCG API order.
     [[nodiscard]] bool TryReseed(uint64 seed, uint64 selector) noexcept
     {
@@ -64,27 +71,30 @@ public:
         return true;
     }
 
-    // Next raw uint32 (XSH-RR output). Always advances the stream.
+    /// Next raw uint32 (XSH-RR output). Always advances the stream.
     [[nodiscard]] uint32 NextUInt32() noexcept;
 
-    // Unbiased integer in [0, bound) via rejection sampling. bound must be > 0;
-    // an invalid bound leaves BOTH the output and the stream unchanged and
-    // returns InvalidArgument. The rejection loop has small expected work but NO
-    // hard worst-case iteration bound — never call it from a deadline-bounded
-    // infrastructure callback.
+    /// @brief Unbiased integer in [0, bound) via rejection sampling. bound must be > 0; an invalid bound leaves
+    /// BOTH the output and the stream unchanged and returns InvalidArgument.
+    ///
+    /// The rejection loop has small expected work but NO hard worst-case iteration bound — never call it from a
+    /// deadline-bounded infrastructure callback.
     [[nodiscard]] MathStatus TryNextBounded(uint32 bound, uint32& out) noexcept;
 
-    // Float in [0,1): high 24 bits of one draw times exactly 2^-24. Includes 0,
-    // excludes 1, with a fixed single draw. Always advances the stream.
+    /// @brief Float in [0,1): high 24 bits of one draw times exactly 2^-24.
+    ///
+    /// Includes 0, excludes 1, with a fixed single draw. Always advances the stream.
     [[nodiscard]] float32 NextFloat01() noexcept;
 
-    // Save / restore. GetState captures a versioned snapshot. TryRestore rejects
-    // a mismatched version or an even increment (PCG increments are always odd)
-    // WITHOUT changing the stream, returning InvalidArgument.
+    /// @brief Save / restore.
+    ///
+    /// GetState captures a versioned snapshot. TryRestore rejects a mismatched version or an even increment
+    /// (PCG increments are always odd) WITHOUT changing the stream, returning InvalidArgument.
     [[nodiscard]] RandomState GetState() const noexcept
     {
         return RandomState{1, mState, mIncrement};
     }
+    /// Restore a version-1 snapshot with an odd increment; rejection leaves the stream unchanged.
     [[nodiscard]] MathStatus TryRestore(const RandomState& state) noexcept
     {
         if (state.Version != 1 || (state.Increment & 1ULL) == 0ULL)

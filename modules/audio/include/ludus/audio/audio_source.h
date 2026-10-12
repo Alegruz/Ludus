@@ -8,8 +8,9 @@
 
 namespace ludus::audio
 {
-// Cold decoder input owned by the stream instance. Calls occur only during
-// explicit preparation or on its decode worker, never on the renderer.
+/// @brief Cold decoder input owned by the stream instance.
+///
+/// Calls occur only during explicit preparation or on its decode worker, never on the renderer.
 class StreamInput
 {
 public:
@@ -18,8 +19,10 @@ public:
     [[nodiscard]] virtual Status Seek(foundation::int64 offset, bool relative) noexcept = 0;
 };
 class AudioSystem;
-// A worker-owned decoded candidate. Decode has no AudioSystem access; install
-// transfers immutable storage on the sole control owner after capacity checks.
+/// @brief A worker-owned decoded candidate.
+///
+/// Decode has no AudioSystem access; install transfers immutable storage on the sole control owner after capacity
+/// checks.
 class PreparedClip final
 {
 public:
@@ -42,8 +45,8 @@ struct SourceInfo final
     uint32 Channels = 0;
     float32 Peak = 0.0F;
 };
-// Cold, bounded scratch decode. peaks receives max absolute values in equal
-// source-frame ranges; an empty span requests metadata without a full scan.
+/// @brief Cold, bounded scratch decode. peaks receives max absolute values in equal
+/// source-frame ranges; an empty span requests metadata without a full scan.
 [[nodiscard]] Status InspectSource(std::span<const uint8> encoded,
                                    SourceFormat format,
                                    SourceInfo& output,

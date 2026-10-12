@@ -16,10 +16,6 @@
 // a bad or oversized format degrades to a bounded marker, never a throw, an
 // allocation, or std::terminate (requirements R19, R25, R38).
 //
-// The legacy std::format-based behavior lives in the explicitly-temporary
-// <ludus/foundation/logging/log_compat_format.hpp> adapter for un-migrated call
-// sites (requirements R53); it is excluded from the lightweight-core budget.
-//
 // Escaped braces are handled consistently for every argument count, including
 // zero arguments: "escaped {{braces}}" renders "escaped {braces}" (R17).
 // -----------------------------------------------------------------------------
@@ -35,8 +31,9 @@
 namespace ludus::foundation::logging
 {
 
-// Argument tag for the narrow typed grammar. Kept in the public header because
-// packing happens at the call site; the values are lightweight scalars/views.
+/// @brief Argument tag for the narrow typed grammar.
+///
+/// Kept in the public header because packing happens at the call site; the values are lightweight scalars/views.
 enum class ArgTag : uint8
 {
     StrView,
@@ -47,9 +44,10 @@ enum class ArgTag : uint8
     F64,
 };
 
-// Small POD carried on the producer stack. Strings are BORROWED only for the
-// duration of the submit call; the engine copies formatted bytes into a bounded
-// buffer before returning, so nothing borrowed escapes (requirements R24).
+/// @brief Small POD carried on the producer stack.
+///
+/// Strings are BORROWED only for the duration of the submit call; the engine copies formatted bytes into a bounded
+/// buffer before returning, so nothing borrowed escapes (requirements R24).
 struct FormatArg
 {
     ArgTag Tag;

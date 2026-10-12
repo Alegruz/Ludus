@@ -3,6 +3,9 @@
 #include "l1_scene.h"
 #include "l2_scene.h"
 #include "l4_scene.h"
+#include "l5_scene.h"
+#include "renderer_clustered.h"
+#include "renderer_clustered_shadow.h"
 #include "renderer_composite.h"
 #include "renderer_flat.h"
 #include "renderer_lit.h"
@@ -11,6 +14,9 @@
 #include "renderer_overlay.h"
 #include "renderer_shadow.h"
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
@@ -18,6 +24,7 @@
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/lifetime.h>
 #include <ludus/graphics/rhi/raster.h>
+#include <vector>
 namespace rhi = ludus::graphics::rhi;
 namespace rr = ludus::graphics::renderer;
 using namespace ludus::foundation;
@@ -865,5 +872,160 @@ TEST_CASE("L4 baked direct diffuse and immutable cascade/spot atlases survive ca
             REQUIRE(rhi::Destroy(device, scene.Display) == rhi::RasterStatus::Ready);
         }
         CHECK(std::memcmp(images[0], images[1], sizeof(images[0])) == 0);
+    }
+}
+
+TEST_CASE("L5 clustered lighting matches full-list pixels with many objects and overflow", "[renderer][l5][gpu]")
+{
+    const bool benchmark = std::getenv("LUDUS_RENDERER_BENCHMARK") != nullptr;
+    const uint32 width = benchmark ? 640U : 96U, height = benchmark ? 360U : 64U;
+    rhi::Shutdown();
+    struct Guard
+    {
+        ~Guard()
+        {
+            rhi::Shutdown();
+        }
+    } guard;
+    rhi::DeviceHandle device;
+    rhi::SurfaceHandle surface;
+    rhi::StartupInfo failure;
+    rhi::DeviceDescription description;
+    description.Required.PortableRaster = true;
+    const auto started =
+        rhi::CreateDevice({}, { .Width = width, .Height = height }, description, device, surface, &failure);
+#if defined(LUDUS_TEST_METAL)
+    if (started != rhi::DeviceStatus::Ready && failure.Error == rhi::StartupError::AdapterUnavailable)
+    {
+        SKIP("No Metal adapter on this host");
+    }
+#endif
+    REQUIRE(started == rhi::DeviceStatus::Ready);
+    rhi::RasterCapabilities caps;
+    REQUIRE(rhi::GetRasterCapabilities(device, caps) == rhi::RasterStatus::Ready);
+    if (benchmark)
+    {
+        rhi::DeviceInfo info;
+        REQUIRE(rhi::GetDeviceInfo(device, info) == rhi::DeviceStatus::Ready);
+        std::printf("L5BACKEND,%u\n", static_cast<uint32>(info.Startup.SelectedBackend));
+    }
+    using Clock = std::chrono::steady_clock;
+    const auto ns = [](Clock::time_point start) {
+        return static_cast<uint64>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count());
+    };
+    for (uint32 scenario = 0; scenario < 3; ++scenario)
+    {
+        std::vector<uint8> images[3];
+        for (usize reference = 0; reference < 3; ++reference)
+        {
+            rr::Renderer renderer;
+            REQUIRE(renderer.Initialize(device,
+                                        ludus::shaders::renderer_flat::Vertex(),
+                                        ludus::shaders::renderer_flat::Fragment()) == rhi::RasterStatus::Ready);
+            REQUIRE(renderer.InitializeViews(ludus::shaders::renderer_composite::Vertex(),
+                                             ludus::shaders::renderer_composite::Fragment()) ==
+                    rhi::RasterStatus::Ready);
+            REQUIRE(renderer.InitializeLighting(ludus::shaders::renderer_output::Vertex(),
+                                                ludus::shaders::renderer_output::Fragment(),
+                                                ludus::shaders::renderer_shadow::Fragment()) ==
+                    rhi::RasterStatus::Ready);
+            ludus::qa::L5Scene scene;
+            scene.Reference = reference == 1;
+            scene.Scenario = scenario;
+            scene.Width = width;
+            scene.Height = height;
+            auto warming = renderer.PrewarmLitProgram(ludus::shaders::renderer_clustered::Vertex(),
+                                                      ludus::shaders::renderer_clustered::Fragment(),
+                                                      ludus::shaders::renderer_clustered_shadow::Fragment(),
+                                                      scene.Program);
+            REQUIRE(ludus::qa::L5Scene::Accepted(warming));
+            for (usize i = 0; i < 1000000 && warming == rhi::RasterStatus::Pending; ++i)
+            {
+                warming = renderer.GetStatus(scene.Program);
+            }
+            REQUIRE(warming == rhi::RasterStatus::Ready);
+            const auto setupStart = Clock::now();
+            auto advanced = scene.Advance(renderer, device, surface);
+            for (usize i = 0; i < 1000000 && advanced == rhi::RasterStatus::Pending; ++i)
+            {
+                advanced = scene.Advance(renderer, device, surface);
+            }
+            INFO("L5 setup stage " << scene.Stage << " operation " << scene.Operation);
+            REQUIRE(advanced == rhi::RasterStatus::Ready);
+            const auto setupNs = ns(setupStart);
+            CHECK(scene.Report.Visible == (reference == 1 ? 256 : 128));
+            CHECK(scene.Report.CulledGroups == (reference == 1 ? 0 : 8));
+            CHECK(scene.Report.BoundsTests == 0);
+            images[reference].resize(static_cast<usize>(width) * height * 4);
+            const uint32 frames = benchmark ? 72U : 2U;
+            for (uint32 frame = 0; frame < frames; ++frame)
+            {
+                const auto prepareStart = Clock::now();
+                rr::PreparedView replacement;
+                rr::ViewDescription view;
+                view.Reference = reference == 1;
+                view.DirectLighting = reference == 2;
+                REQUIRE(renderer.PrepareView(scene.Current, view, replacement, scene.Report) ==
+                        rhi::RasterStatus::Ready);
+                REQUIRE(renderer.Release(scene.View) == rhi::RasterStatus::Ready);
+                scene.View = replacement;
+                const auto prepareNs = ns(prepareStart);
+                const auto recordStart = Clock::now();
+                REQUIRE(rhi::BeginFrame(device, surface) == rhi::DeviceStatus::Ready);
+                REQUIRE(scene.Draw(renderer) == rhi::RasterStatus::Ready);
+                rhi::SubmissionToken completion;
+                REQUIRE(rhi::EndFrame(device, completion) == rhi::RasterStatus::Ready);
+                const auto recordNs = ns(recordStart);
+                const auto waitStart = Clock::now();
+                REQUIRE(rhi::backend::ReadHeadlessPixels({images[reference].data(), images[reference].size()}));
+                const auto waitNs = ns(waitStart);
+                if (benchmark && frame >= 8)
+                {
+                    const usize knownBytes = 160 + 24 + 8800 + 16384 + static_cast<usize>(scene.Report.Visible) * 192 +
+                                             static_cast<usize>(width) * height * 4;
+                    std::printf("L5,%u,%u,%u,%llu,%llu,%llu,%llu,%u,%u,%u,%u,%u,%u,%zu\n",
+                                scenario,
+                                static_cast<uint32>(reference),
+                                frame - 8,
+                                static_cast<unsigned long long>(setupNs),
+                                static_cast<unsigned long long>(prepareNs),
+                                static_cast<unsigned long long>(recordNs),
+                                static_cast<unsigned long long>(waitNs),
+                                width,
+                                height,
+                                scene.Report.Visible,
+                                scene.Report.Culled,
+                                scene.Report.Draws,
+                                scene.Report.BoundsTests,
+                                knownBytes);
+                }
+            }
+            renderer.Reset();
+            REQUIRE(rhi::Destroy(device, scene.Target) == rhi::RasterStatus::Ready);
+        }
+        REQUIRE(images[0].size() == images[1].size());
+        usize colored = 0;
+        for (usize i = 0; i < images[0].size(); ++i)
+        {
+            const auto difference = static_cast<int32>(images[0][i]) - static_cast<int32>(images[1][i]);
+            const auto clusteredDifference = static_cast<int32>(images[0][i]) - static_cast<int32>(images[2][i]);
+            REQUIRE(clusteredDifference >= -1);
+            REQUIRE(clusteredDifference <= 1);
+            REQUIRE(difference >= -1);
+            REQUIRE(difference <= 1);
+            if (i % 4 == 0 && images[0][i] > 20)
+            {
+                ++colored;
+            }
+        }
+        CHECK(colored > 100); // Independent nonblank requirement, including overflow/outside-grid cases.
+        if (scenario == 1)
+        {
+            uint8 maximum = 0;
+            for (usize i = 0; i < images[0].size(); i += 4)
+                maximum = images[0][i] > maximum ? images[0][i] : maximum;
+            CHECK(maximum > 130); // 128 directional lights; an accidental eight-light loop is much darker.
+            CHECK(maximum < 170);
+        }
     }
 }
