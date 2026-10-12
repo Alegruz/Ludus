@@ -73,7 +73,7 @@ void appendUnsigned(char*& cursor, uint32 value) noexcept
     *cursor = '\0';
 }
 
-EM_BOOL renderFrame(float64 time, void*) noexcept
+EM_BOOL renderFrame(float64, void*) noexcept
 {
     if (gProbe.Failed)
     {
@@ -114,7 +114,10 @@ EM_BOOL renderFrame(float64 time, void*) noexcept
     color.view = view;
     color.loadOp = WGPULoadOp_Clear;
     color.storeOp = WGPUStoreOp_Store;
-    color.clearValue.r = 0.25 + 0.2 * std::sin(time * 0.001);
+    // A bounded triangle pulse shows frame progress without a math-library dependency.
+    const uint32 phase = gProbe.Frames % 240;
+    const uint32 intensity = phase < 120 ? phase : 240 - phase;
+    color.clearValue.r = 0.05 + static_cast<float64>(intensity) / 300.0;
     color.clearValue.g = 0.12;
     color.clearValue.b = 0.45;
     color.clearValue.a = 1.0;
