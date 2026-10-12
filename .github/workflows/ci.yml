@@ -125,7 +125,7 @@ jobs:
           ./scripts/install-sdk macos-clang-development
           out/host-tools/venv/bin/python -m venv out/project-tooling-venv
           out/project-tooling-venv/bin/python -m pip install --no-deps ./scripts/python
-          PATH="$PWD/out/host-tools/venv/bin:$PWD/out/host-tools/bin:$PATH" PYTHONPATH=scripts/python out/host-tools/venv/bin/python -m unittest test_project_setup test_macos_project_tooling test_creation_engine test_ludus_tools test_ludus_project_ops test_ludus_cli -v
+          PATH="$PWD/out/host-tools/venv/bin:$PWD/out/host-tools/bin:$PATH" PYTHONPATH=scripts/python out/host-tools/venv/bin/python -m unittest test_project_setup test_macos_project_tooling test_creation_engine test_ludus_tools test_ludus_project_ops test_ludus_cli test_scene_assets -v
           out/host-tools/venv/bin/python tests/sdk_consumer/verify_macos_project_tooling.py --sdk "$PWD/out/install/macos-clang-development" --tools "$PWD" --cli "$PWD/out/project-tooling-venv/bin/ludus"
       - name: Verify signed macOS game release packages
         env:
@@ -170,6 +170,7 @@ jobs:
             apps/editor/src/scene_workspace.cpp apps/editor/src/scene_preview.cpp \
             apps/editor/src/world_document.cpp apps/editor/src/world_workspace.cpp \
             apps/editor/src/render_scene.cpp apps/editor/src/render_preview.cpp \
+            apps/editor/src/level_workspace.cpp apps/editor/tests/level_workspace_tests.cpp \
             apps/editor/src/render_load_job.cpp apps/editor/src/render_panel.cpp \
             apps/editor/tests/render_authoring_tests.cpp \
             apps/editor/tests/world_workspace_tests.cpp \
@@ -450,7 +451,9 @@ jobs:
       - name: Test reproducible packs with the independent LZ4 decoder
         run: python3 -m unittest discover -s scripts/python -p test_pack_builder.py -v
       - name: Test scene conversion encodings and geometry
-        run: python3 -m unittest discover -s tools/scene_cooker -v
+        run: |
+          python3 -m unittest discover -s tools/scene_cooker -v
+          PYTHONPATH=scripts/python python3 -m unittest test_scene_assets -v
       - name: Test Metal shader reflection contracts
         run: PYTHONPATH=scripts/python python3 -m unittest test_rhi_measurements test_metal_shaders test_raster_shaders test_texture_cooker -v
       - name: Test optional RAD tooling contracts
@@ -957,6 +960,7 @@ jobs:
           conan-cache-writer: 'false'
       - name: Prepare and configure trusted authoring shaders
         run: |
+          sudo apt-get install -y -qq libvulkan1 mesa-vulkan-drivers
           ./scripts/shader-probe bootstrap
           out/host-tools/venv/bin/cmake --preset linux-clang-development -DLUDUS_EDITOR_RENDER_PREVIEW=ON -DLUDUS_SLANG_COMPILER="$PWD/out/shader-tools/slang/bin/slangc" -DLUDUS_SPIRV_VALIDATOR="$PWD/out/shader-tools/spirv-tools/usr/bin/spirv-val"
       - name: Build Editor application and its test targets
@@ -990,6 +994,7 @@ jobs:
             apps/editor/src/scene_workspace.cpp apps/editor/src/scene_preview.cpp \
             apps/editor/src/world_document.cpp apps/editor/src/world_workspace.cpp \
             apps/editor/src/render_scene.cpp apps/editor/src/render_preview.cpp \
+            apps/editor/src/level_workspace.cpp apps/editor/tests/level_workspace_tests.cpp \
             apps/editor/src/render_load_job.cpp apps/editor/src/render_panel.cpp \
             apps/editor/tests/render_authoring_tests.cpp \
             apps/editor/tests/world_workspace_tests.cpp \

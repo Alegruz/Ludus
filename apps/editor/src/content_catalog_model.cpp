@@ -53,6 +53,8 @@ QVariant ContentCatalogModel::data(const QModelIndex& index, int role) const
                 return QStringLiteral("Sound");
             case content::Kind::Music:
                 return QStringLiteral("Music");
+            case content::Kind::CookedScene:
+                return QStringLiteral("Cooked scene");
             case content::Kind::Mesh:
                 return QStringLiteral("Mesh");
         }

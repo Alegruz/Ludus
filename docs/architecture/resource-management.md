@@ -237,9 +237,10 @@ existing image oracle. Production renderer/RHI tests delay queue completion afte
 CPU teardown. The portable in-memory mesh adapter has no native worker dependency;
 browser acceptance uses the same SDK fixture.
 
-Stage 4 now supplies required dependencies and activation. Complete reference-scene
-support still needs offline conversion/artifact manifests (Stage 5), concrete
-scene/material/texture adapters and larger measured bounded capacities.
+Stage 4 supplies required dependencies and activation. The
+[initial Stage 5 profile](#initial-stage-5-storage-and-renderer-profile) adds project
+artifacts and a fully resident aggregate scene adapter. Per-asset renderer adapters
+and larger measured bounded capacities remain subsequent extensions.
 Texture/material resource adapters and GPU residency accounting remain separate
 work. Stage 2's 64 assets/16 versions and the renderer's own limits still apply.
 Reinitialize an adapter only after all managers using its previous descriptor have
@@ -730,10 +731,10 @@ benefits and explicit release acknowledgment.
 
 ## Project scene import and saved-level workflow
 
-Status: required product workflow; not implemented by the standalone staircase2
-conversion/capture prototype. The editor already opens/creates projects and saves
-project-owned world documents, but reference-scene import, suitable lit 3D asset
-bindings and resource-backed reopening still require integration.
+Status: Stage 5 implements the initial fully resident native **3D Levels** workflow.
+The [Editor guide](../development/editor-workspace.md#project-owned-3d-levels-and-reference-import)
+owns its user-facing steps and source-profile limits. The standalone staircase2
+sample remains historical prototype evidence.
 
 The user-facing acceptance sequence is:
 
@@ -809,6 +810,92 @@ Standalone converter invocations, a special executable for one scene, or a saved
 PNG demonstrate isolated mechanisms. They do not satisfy this editor workflow's
 exit condition. The [staircase2 prototype guide](../examples/reference-scene.md)
 records that limited evidence without claiming product integration.
+
+### Initial Stage 5 storage and renderer profile
+
+The installed `ludus_tools.scene_assets` backend owns the loose-file format and is
+shared by the CLI and native Editor. `assets/catalog.json` maps stable typed UUIDs
+(`mesh/<uuid>`, `material/<uuid>`, `texture/<uuid>`, and import/license records) to
+immutable `assets/objects/<artifact-key>.bin` files. UUIDs identify logical assets;
+they are not content digests. Reimporting the same source origin retains its UUID
+namespace and explicitly commits new artifact bindings. Separate source origins
+retain separate logical ownership even when immutable byte files can be shared.
+
+Artifact keys include source input digests, importer and publisher code digests,
+canonical settings, schema/target profile, output digest and exact required child
+artifact keys. Required dependency UUIDs and their artifact keys are recorded
+before loading. The catalog is limited to 1 MiB/4096 records; an admitted scene
+closure has at most 64 records, depth eight, and 64 MiB of payloads. Missing,
+corrupt or mismatched dependency revisions reject the complete candidate.
+
+A `.lulevel` document stores a UUID, independent object UUIDs, parent relationships,
+affine transforms, mesh/material UUIDs, its authored perspective camera and import
+references. Instances share immutable artifacts but retain independent placement.
+Source locations are optional provenance in import manifests, not level-file
+paths or reopen inputs. Original license text is retained in the required closure.
+
+Import writes immutable artifacts privately, prepares a candidate catalog and
+validates an interchange packet on a worker. The published catalog stays unchanged
+while the renderer prepares the candidate. After its first rendered frame, a
+compare-and-publish operation checks the expected catalog digest and source inputs,
+then atomically commits the catalog before activating the document/viewport.
+Cancellation, renderer admission failure and source/catalog conflicts retain the
+previous document and published bindings. Unreachable immutable files may remain;
+release publication includes only the selected closure. Writers use nonblocking
+native file locks that release on process exit. File synchronization precedes the atomic replacement; directory synchronization
+follows it. Level saves additionally compare the previous saved bytes. CLI imports
+stage and sync both catalog and level, then replace them inside one exclusive
+publication lock. A replacement/sync failure rolls both files back from staged
+backups; readers reject an in-flight writer. A rollback failure reports retained
+recovery files instead of claiming preservation. This initial pair publication is
+an operation-error rollback boundary, not a crash-atomic two-file filesystem
+transaction. Abrupt termination/power-loss recovery remains a separate hardening
+step.
+
+`Resources::SceneDefinition::Decode` is the Qt-independent bounded runtime codec.
+Version-two interchange retains sampler addressing explicitly; version-one
+prototype input remains readable. Scalar fields are little-endian integers/IEEE
+binary32, not native C++ layouts. The worker assembles exact mesh/material/texture
+revisions from project artifacts; it never calls a source importer on reopen.
+The control owner obtains an immutable aggregate scene lease through
+`SceneDefinitionAdapter`. This initial fully resident composition validates the
+per-asset closure in the storage backend and admits one derived scene binding in
+the coordinator; it does not pretend the Stage 4 eight-node profile admits a
+nineteen-node source graph. The existing small `MeshDefinitionAdapter` remains
+unchanged. Per-asset GPU caching and streaming granularity remain later work.
+
+The renderer adapter copies mesh/texture data, prepares lit material bindings and
+owns GPU resources/retirement independently of the CPU lease. The initial profile
+admits six meshes, eight materials, eight textures and 128 instances; combined
+geometry is limited to 500000 vertices, each mesh to 1500000 indices, and textures
+to 16 MiB each/32 MiB combined. A decoded aggregate is capped at 64 MiB; renderer
+reference storage has an explicit 128 MiB budget, with RHI storage accounted in its
+separate R6 budgets. Worker scratch, retained candidate/last-good CPU definitions,
+Qt display images and driver allocations are not misreported as coordinator-owned
+resident bytes. The viewport explicitly uses progressive CPU reference traversal,
+256 square pixels, 64 samples/pixel, depth four and seed 871. It displays live
+renderer output; no saved image substitutes for loading or rendering.
+
+The first importer is the bounded Modern Hall/staircase2 PBRT profile described in
+the [prototype guide](../examples/reference-scene.md#conversion-profile-and-limitations).
+Static room geometry is grouped into four material meshes, with shared quad/disk
+emitter geometry: six meshes, eight materials, three textures and seventeen
+independently placed objects. The source's original PLY shape boundaries are not
+editable nodes in this initial grouped profile. Other source profiles, transmission,
+mips/LOD/chunks and generalized game-play integration are not implied by this import.
+
+The storage regressions explicitly forbid importer invocation on moved-project
+reopen. Native offscreen Qt/Metal tests exercise the actual importer/renderer/save
+workflow, remove a private copy of source inputs, move the project and verify
+identical persisted object/camera/material references and successful rendering.
+A native macOS GUI walkthrough on 2026-10-12 additionally created a level,
+imported staircase2, renamed an object and saved it. After closing the Editor,
+moving the project and removing its private source copy and build cache, reopening
+the saved level restored all seventeen objects, the edited name and live rendering.
+The saved level bytes remained unchanged, and reopening recreated neither source
+inputs nor the project build cache. Loose-file `scene publish` emits a deterministic
+selected catalog, artifacts, licenses, level and runtime interchange packet;
+independently chunked packs remain optional.
 
 ## Cooking and storage
 
@@ -1007,7 +1094,7 @@ The review describes design inspiration; it does not supply copied implementatio
 | 2 (implemented) | Fixed-capacity coordinator, one owner, exact-ID lookup, scoped requests, deduplicated operations, lease tokens, durable result records, and explicit budgets. Demonstrate two callers acquiring one sound with independent cancellation. |
 | 3 (implemented) | Immutable CPU mesh definitions demonstrate a second consumer, bounded staged copies, immediate CPU retirement, mixed native sound/mesh acquisition and an installed-SDK renderer handoff. Renderer/RHI separately own copied GPU data; no graphics-specific branch enters the coordinator. One-pending AudioContent limits remain. |
 | 4 | Implemented: transactional replacement and required DAG scheduling. Prove diamond sharing, parent/child replacement coherence, last-good retention, and physical retirement. |
-| 5 | Add project-owned cooked assets/catalogs, dependency manifests, exact artifact keys, dump tooling and deterministic publication. Complete the [project scene import and saved-level workflow](#project-scene-import-and-saved-level-workflow), including level references and renderer/editor adapters. Reopen a moved saved project without source reimport. Independently chunked packs remain optional; measure against loose files. |
+| 5 (initial resident profile implemented) | Project-owned cooked assets/catalogs, dependency manifests, exact artifact keys, dump tooling and deterministic loose-file publication. Complete the [project scene import and saved-level workflow](#project-scene-import-and-saved-level-workflow), including level references and renderer/editor adapters. Reopen a moved saved project without source reimport. Independently chunked packs remain optional; measure against loose files. |
 | 6 | Add actual mip/LOD/chunk streaming after RHI capabilities exist; implement trace-driven layout, deadlines, and alternative cache policy only with representative evidence. |
 
 Do not introduce remote caches, custom lock-free tables, universal reflection,

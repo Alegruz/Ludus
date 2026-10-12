@@ -3,6 +3,7 @@
 #include "internal/configuration_workspace.h"
 #include "internal/content_browser.h"
 #include "internal/editor_files.h"
+#include "internal/level_workspace.h"
 #include "internal/project_creation_dialog.h"
 #include "internal/project_setup_dialog.h"
 #include "internal/scene_workspace.h"
@@ -84,6 +85,11 @@ MainWindow::MainWindow(EditorController* controller, QWidget* parent, const QStr
         }
     });
     connect(Scene_, &SceneWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
+    connect(Level_, &LevelWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
+    connect(Level_, &LevelWorkspace::PreviewStarting, Scene_, &SceneWorkspace::StopPreview);
+    connect(Level_, &LevelWorkspace::PreviewStarting, World_, &WorldWorkspace::StopPreview);
+    connect(World_, &WorldWorkspace::PreviewStarting, Level_, &LevelWorkspace::StopPreview);
+    connect(Scene_, &SceneWorkspace::PreviewStarting, Level_, &LevelWorkspace::StopPreview);
     connect(World_, &WorldWorkspace::DocumentChanged, this, &MainWindow::RenderDocumentActions);
     connect(World_, &WorldWorkspace::PreviewStarting, Scene_, &SceneWorkspace::StopPreview);
     connect(Scene_, &SceneWorkspace::PreviewStarting, World_, &WorldWorkspace::StopPreview);
@@ -384,12 +390,13 @@ void MainWindow::BuildMenus()
 void MainWindow::LaunchAfterPreview(LaunchAction action, const QString& debugger, bool setup)
 {
     if (AudioLaunchPending_ || AudioClosing_ || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard() ||
-        !World_->ConfirmDiscard())
+        !World_->ConfirmDiscard() || !Level_->ConfirmDiscard())
     {
         return;
     }
     Scene_->StopPreview();
     World_->StopPreview();
+    Level_->StopPreview();
     AudioLaunchPending_ = true;
     Audio_->setEnabled(false);
     Audio_->ShutdownPreview();
@@ -515,7 +522,7 @@ void MainWindow::OpenProjectPath(const QString& path)
 {
     if (path.isEmpty() || !Controller_->Caps().CanOpen || Content_->Importing() || AudioClosing_ ||
         (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard() ||
-         !World_->ConfirmDiscard()))
+         !World_->ConfirmDiscard() || !Level_->ConfirmDiscard()))
     {
         return;
     }
@@ -530,6 +537,11 @@ void MainWindow::OpenProjectPath(const QString& path)
 void MainWindow::OnSaveRequested()
 {
     auto* area = WorkTabs_->currentWidget();
+    if (area == Level_)
+    {
+        (void)Level_->Save();
+        return;
+    }
     if (area == World_)
     {
         (void)World_->Save();
@@ -573,8 +585,9 @@ bool MainWindow::SaveProjectSettings()
         StatusLabel_->setText(QStringLiteral("Finish or cancel content work before saving a changed source root."));
         return false;
     }
-    if (state.Draft.SourceDir != state.Saved.SourceDir && (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() ||
-                                                           !Scene_->ConfirmDiscard() || !World_->ConfirmDiscard()))
+    if (state.Draft.SourceDir != state.Saved.SourceDir &&
+        (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard() ||
+         !World_->ConfirmDiscard() || !Level_->ConfirmDiscard()))
     {
         return false;
     }
@@ -596,7 +609,7 @@ void MainWindow::OnReloadRequested()
     }
     CommitProjectFields();
     if (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard() ||
-        !World_->ConfirmDiscard())
+        !World_->ConfirmDiscard() || !Level_->ConfirmDiscard())
     {
         return;
     }
@@ -658,6 +671,7 @@ void MainWindow::OnStateChanged()
         const auto root = QDir(QFileInfo(state.DescriptorPath).absolutePath()).absoluteFilePath(state.Saved.SourceDir);
         Scene_->SetProject(root, state.ProjectEpoch);
         World_->SetProject(root, state.ProjectEpoch);
+        Level_->SetProject(root, state.ProjectEpoch);
         Scripts_->SetProject(QFileInfo(state.DescriptorPath).absolutePath(), root, state.Saved.Preset);
         Audio_->SetRoot(QDir(root).absoluteFilePath(QStringLiteral("content")));
         Content_->SetProject(QDir(root).absoluteFilePath(QStringLiteral("content")), state.ProjectEpoch);
@@ -667,6 +681,7 @@ void MainWindow::OnStateChanged()
     {
         Scene_->SetProject({}, state.ProjectEpoch);
         World_->SetProject({}, state.ProjectEpoch);
+        Level_->SetProject({}, state.ProjectEpoch);
         Scripts_->SetProject({}, {}, {});
         Audio_->SetRoot(QString());
         Content_->SetProject(QString(), state.ProjectEpoch);
@@ -1141,7 +1156,7 @@ void MainWindow::OnNewProject()
 {
     if (!Controller_->Caps().CanProjectCreate || Content_->Importing() ||
         (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard() ||
-         !World_->ConfirmDiscard()) ||
+         !World_->ConfirmDiscard() || !Level_->ConfirmDiscard()) ||
         !ConfirmProjectChange(QStringLiteral("creating another project")))
     {
         return;
@@ -1157,7 +1172,7 @@ void MainWindow::OnCloseProject()
 {
     if (!Controller_->Caps().CanCloseProject || Content_->Importing() || AudioLaunchPending_ || AudioClosing_ ||
         (!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard() ||
-         !World_->ConfirmDiscard()) ||
+         !World_->ConfirmDiscard() || !Level_->ConfirmDiscard()) ||
         !ConfirmProjectChange(QStringLiteral("closing the project")))
     {
         return;
@@ -1301,7 +1316,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
             return;
         }
         if ((!Audio_->ConfirmDiscard() || !Scripts_->ConfirmDiscard() || !Scene_->ConfirmDiscard() ||
-             !World_->ConfirmDiscard()) ||
+             !World_->ConfirmDiscard() || !Level_->ConfirmDiscard()) ||
             !Configuration_->ConfirmDiscard())
         {
             event->ignore();
@@ -1324,6 +1339,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
         }
         Scene_->StopPreview();
         World_->StopPreview();
+        Level_->StopPreview();
         AudioClosing_ = true;
         Audio_->ShutdownPreview();
         Content_->Shutdown();

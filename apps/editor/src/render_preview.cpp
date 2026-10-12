@@ -1,15 +1,22 @@
 #include "internal/render_preview.h"
 
+#include <ludus/foundation/math/projection.hpp>
+#include <ludus/foundation/math/scalar.hpp>
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/graph.h>
 #include <ludus/graphics/rhi/lifetime.h>
 #include <ludus/graphics/rhi/raster.h>
 #include <ludus/graphics/rhi/rhi.h>
+#include <new>
 
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
 #    include "renderer_composite.h"
 #    include "renderer_flat.h"
+#    include "renderer_lit.h"
+#    include "renderer_lit_shadow.h"
 #    include "renderer_material.h"
+#    include "renderer_output.h"
+#    include "renderer_shadow.h"
 #endif
 
 namespace ludus::editor
@@ -26,6 +33,65 @@ bool Accepted(rhi::RasterStatus s) noexcept
 }
 #endif
 } // namespace
+struct RenderPreview::Residency final
+{
+    QSharedPointer<resources::SceneDefinition> Definition;
+    resources::SceneDefinitionAdapter Adapter;
+    resources::Manager Manager;
+    resources::Lease Lease;
+    ~Residency() noexcept
+    {
+        (void)Lease.Release();
+        auto status = Manager.Shutdown();
+        // CPU-only retirement is immediate. Cover the complete coordinator cursor,
+        // including scope closure, before destroying the borrowed provider context.
+        for (uint32 i = 0; i < 4 && status == resources::Status::Pending; ++i)
+        {
+            Manager.Service(64);
+            status = Manager.Shutdown();
+        }
+        LUDUS_REQUIRE(status == resources::Status::Ok);
+    }
+    bool Initialize(const RenderScene& scene) noexcept
+    {
+        Definition = scene.Definition;
+        content::Resource resource;
+        const auto id = scene.LogicalId.toUtf8();
+        const auto path = QByteArray("revisions/") + scene.Identity.toHex() + QByteArray(".luscn");
+        if (!resource.Id.Set({id.constData(), static_cast<usize>(id.size())}) ||
+            !resource.Path.Set({path.constData(), static_cast<usize>(path.size())}))
+        {
+            return false;
+        }
+        resource.Type = content::Kind::CookedScene;
+        content::Catalog catalog;
+        if (Adapter.Initialize(resource, *Definition) != resources::Status::Ok ||
+            catalog.Put(resource) != content::Status::Ok)
+        {
+            return false;
+        }
+        const auto adapter = Adapter.Descriptor();
+        resources::AssetHandle asset;
+        resources::ScopeHandle scope;
+        content::ResourceId name;
+        resources::RequestHandle request;
+        (void)name.Set("editor-level");
+        if (Manager.Initialize(catalog, &adapter, 1) != resources::Status::Ok ||
+            Manager.Resolve(resource.Id, resource.Type, asset) != resources::Status::Ok ||
+            Manager.OpenScope(name, scope) != resources::Status::Ok ||
+            Manager.BeginAcquire(scope, asset, request) != resources::Status::Ok)
+        {
+            return false;
+        }
+        Manager.Service();
+        Manager.Service();
+        Manager.Service();
+        const void* payload = nullptr;
+        return Manager.TakeLease(request, Lease) == resources::Status::Ok &&
+               Manager.Borrow(Lease.Token(), content::Kind::CookedScene, payload) == resources::Status::Ok &&
+               payload == Definition.data();
+    }
+};
 RenderPreview::RenderPreview(QObject* parent) : QObject(parent)
 {
     Timer_.setInterval(16);
@@ -48,14 +114,14 @@ bool RenderPreview::SetScene(const RenderScene& scene)
                         scene.Surfaces.size() <= 8 && scene.Objects.size() <= 128 && scene.Cameras.size() <= 128);
     for (const auto& surface : scene.Surfaces)
     {
-        valid = valid && surface.Texture >= 0 && surface.Texture < scene.Textures.size();
+        valid = valid && surface.Texture >= (scene.Lit ? -1 : 0) && surface.Texture < scene.Textures.size();
     }
     for (const auto& object : scene.Objects)
     {
-        valid =
-            valid && object.Mesh >= 0 && object.Mesh < scene.Meshes.size() && object.Texture >= -1 &&
-            object.Texture < scene.Textures.size() &&
-            (object.Texture < 0 ? object.Surface == -1 : object.Surface >= 0 && object.Surface < scene.Surfaces.size());
+        valid = valid && object.Mesh >= 0 && object.Mesh < scene.Meshes.size() && object.Texture >= -1 &&
+                object.Texture < scene.Textures.size() &&
+                (scene.Lit || object.Texture >= 0 ? object.Surface >= 0 && object.Surface < scene.Surfaces.size()
+                                                  : object.Surface == -1);
     }
     if (!valid)
     {
@@ -68,6 +134,7 @@ bool RenderPreview::SetScene(const RenderScene& scene)
     {
         Stop();
         Scene_ = {};
+        Residency_.Reset();
         OrbitCenter_ = {};
         OrbitRadius_ = 1;
         Status_.clear();
@@ -95,6 +162,27 @@ bool RenderPreview::SetScene(const RenderScene& scene)
         OrbitCenter_ = scene.Center;
         OrbitRadius_ = scene.Radius;
     }
+    foundation::UniquePtr<Residency> residency;
+    if (scene.Lit)
+    {
+        residency.Reset(new (std::nothrow) Residency);
+        if (!residency || !scene.Definition || !residency->Initialize(scene))
+        {
+            Status_ = QStringLiteral("Resource-manager admission failed; previous scene retained.");
+            Q_EMIT Changed();
+            return false;
+        }
+    }
+    if (scene.Lit && (Scene_.PacketIdentity != scene.PacketIdentity || Scene_.AssetsIdentity != scene.AssetsIdentity))
+    {
+        if (CaptureStarted_)
+        {
+            (void)Renderer_.Release(Capture_);
+        }
+        CaptureStarted_ = false;
+        LastSamples_ = 0;
+    }
+    Residency_ = foundation::Move(residency);
     Scene_ = scene;
     Status_ = QStringLiteral("Applied World preview data updated; preparing the renderer.");
     Camera_ = -1;
@@ -124,6 +212,14 @@ bool RenderPreview::SetScene(const RenderScene& scene)
 }
 void RenderPreview::RestartResources() noexcept
 {
+    if (CaptureStarted_)
+    {
+        (void)Renderer_.Release(Capture_);
+    }
+    CaptureStarted_ = false;
+    Pixels_.Clear();
+    LightingInitialized_ = false;
+    LastSamples_ = 0;
     Renderer_.Reset();
     for (auto& texture : Textures_)
     {
@@ -155,8 +251,10 @@ bool RenderPreview::Start()
         Q_EMIT Changed();
         return false;
     }
+    Timer_.setInterval(Scene_.Lit ? 0 : 16);
     if (Running())
     {
+        Timer_.start();
         return true;
     }
     if (rhi::GetStartup().State != rhi::StartupState::Idle)
@@ -166,10 +264,11 @@ bool RenderPreview::Start()
         return false;
     }
     platform::WindowManager manager;
-    if (!manager.Initialize({}) ||
-        !manager.CreateWindow(
-            { .Name = "Ludus World 3D preview - navigation is in the World panel", .Width = 960, .Height = 640 },
-            Window_))
+    if (!Scene_.Lit &&
+        (!manager.Initialize({}) ||
+         !manager.CreateWindow(
+             { .Name = "Ludus World 3D preview - navigation is in the World panel", .Width = 960, .Height = 640 },
+             Window_)))
     {
         Status_ = QStringLiteral("Native preview window is unavailable. World editing remains available.");
         Q_EMIT Changed();
@@ -178,7 +277,8 @@ bool RenderPreview::Start()
     rhi::DeviceDescription description;
     description.Required.PortableRaster = true;
     const auto started = rhi::CreateDevice({ .Name = "Ludus World preview", .Version = 1 },
-                                           Window_->GetNativeWindowInfo(),
+                                           Scene_.Lit ? platform::NativeWindowInfo{ .Width = 8, .Height = 8 }
+                                                      : Window_->GetNativeWindowInfo(),
                                            description,
                                            Device_,
                                            Surface_);
@@ -271,6 +371,37 @@ bool RenderPreview::Prepare()
     if (Phase_ == 2)
     {
         const auto s = Renderer_.PollViews();
+        if (Scene_.Lit && s == rhi::RasterStatus::Ready)
+        {
+            if (!LightingInitialized_)
+            {
+                const auto lighting = Renderer_.InitializeLighting(ludus::shaders::renderer_output::Vertex(),
+                                                                   ludus::shaders::renderer_output::Fragment(),
+                                                                   ludus::shaders::renderer_shadow::Fragment());
+                if (!Accepted(lighting))
+                {
+                    return false;
+                }
+                LightingInitialized_ = true;
+            }
+            const auto lighting = Renderer_.PollLighting();
+            if (lighting == rhi::RasterStatus::Pending)
+            {
+                return true;
+            }
+            if (lighting != rhi::RasterStatus::Ready ||
+                Renderer_.EnableReferenceRendering(
+                    {},
+                    {rr::ReferenceTraversal::CpuOracle, usize{128} * 1024 * 1024, usize{128} * 1024 * 1024, 64}) !=
+                    rhi::RasterStatus::Ready)
+            {
+                return false;
+            }
+            return advance(Renderer_.PrewarmLitProgram(ludus::shaders::renderer_lit::Vertex(),
+                                                       ludus::shaders::renderer_lit::Fragment(),
+                                                       ludus::shaders::renderer_lit_shadow::Fragment(),
+                                                       Program_));
+        }
         return s == rhi::RasterStatus::Pending ||
                (s == rhi::RasterStatus::Ready &&
                 advance(Renderer_.PrewarmMaterialProgram(ludus::shaders::renderer_material::Vertex(),
@@ -293,15 +424,27 @@ bool RenderPreview::Prepare()
             for (int32 i = 0; i < Scene_.Meshes.size(); ++i)
             {
                 const auto& mesh = Scene_.Meshes[i];
-                if (!Accepted(Renderer_.CreateMesh(
-                        {
-                            .Positions = mesh.Positions.constData(),
-                            .VertexCount = static_cast<usize>(mesh.Positions.size()),
-                            .Indices = mesh.Indices.constData(),
-                            .IndexCount = static_cast<usize>(mesh.Indices.size()),
-                            .Texcoords = mesh.Uvs.constData(),
-                        },
-                        Meshes_[i])))
+                rr::MeshDescription description;
+                if (Scene_.Lit)
+                {
+                    const auto& source = Scene_.Definition->Meshes[static_cast<usize>(i)];
+                    description.Positions = source.Positions.GetData();
+                    description.VertexCount = source.Positions.GetSize();
+                    description.Indices = source.Indices.GetData();
+                    description.IndexCount = source.Indices.GetSize();
+                    description.Texcoords = source.Texcoords.GetData();
+                    description.Normals = source.Normals.GetData();
+                }
+                else
+                {
+                    description.Positions = mesh.Positions.constData();
+                    description.VertexCount = static_cast<usize>(mesh.Positions.size());
+                    description.Indices = mesh.Indices.constData();
+                    description.IndexCount = static_cast<usize>(mesh.Indices.size());
+                    description.Texcoords = mesh.Uvs.constData();
+                    description.Normals = mesh.Normals.isEmpty() ? nullptr : mesh.Normals.constData();
+                }
+                if (!Accepted(Renderer_.CreateMesh(description, Meshes_[i])))
                 {
                     return false;
                 }
@@ -315,6 +458,7 @@ bool RenderPreview::Prepare()
                                                .Width = static_cast<uint32>(image.width()),
                                                .Height = static_cast<uint32>(image.height()),
                                                .Format = rhi::RasterFormat::Rgba8Srgb,
+                                               .RetainCpuContent = Scene_.Lit,
                                            },
                                            {
                                                .Bytes = {image.constBits(), static_cast<usize>(image.sizeInBytes())},
@@ -355,9 +499,22 @@ bool RenderPreview::Prepare()
         {
             const auto& surface = Scene_.Surfaces[i];
             rr::MaterialDescription description;
-            description.Texture = Textures_[surface.Texture];
+            if (surface.Texture >= 0)
+            {
+                description.Texture = Textures_[surface.Texture];
+            }
             description.Tint = surface.Tint;
-            if (!Accepted(Renderer_.CreateMaterial(Program_, description, Materials_[i])))
+            rr::LitMaterialDescription lit;
+            lit.Surface = description;
+            lit.Surface.Sampler.Filter = rhi::RasterFilter::Linear;
+            lit.Surface.Sampler.U = lit.Surface.Sampler.V =
+                surface.Repeat ? rhi::RasterAddress::Repeat : rhi::RasterAddress::Clamp;
+            lit.Metallic = surface.Metallic;
+            lit.Roughness = surface.Roughness;
+            lit.Emission = surface.Emission;
+            rr::LightSelection selection;
+            if (!Accepted(Scene_.Lit ? Renderer_.CreateLitMaterial(Program_, lit, Materials_[i], selection)
+                                     : Renderer_.CreateMaterial(Program_, description, Materials_[i])))
             {
                 return false;
             }
@@ -376,7 +533,7 @@ bool RenderPreview::Prepare()
             item.Transform = object.Transform;
             item.Material.Color = object.Tint;
             item.SourceId = static_cast<uint64>(i) + 1;
-            if (object.Texture >= 0)
+            if (Scene_.Lit || object.Texture >= 0)
             {
                 const auto s = Renderer_.GetStatus(Materials_[object.Surface]);
                 if (!Accepted(s))
@@ -438,11 +595,11 @@ bool RenderPreview::Prepare()
 void RenderPreview::Tick()
 {
 #if defined(LUDUS_EDITOR_NATIVE_PREVIEW)
-    if (!Window_)
+    if (!OwnsDevice_)
     {
         return;
     }
-    if (!Window_->HandleEvent({}))
+    if (Window_ && !Window_->HandleEvent({}))
     {
         Stop();
         Status_ = QStringLiteral("3D preview closed. Reopen it to continue; saved World data is unchanged.");
@@ -457,7 +614,81 @@ void RenderPreview::Tick()
     }
     bool good =
         ready == rhi::DeviceStatus::Ready && rhi::PollLifetime(Device_) == rhi::RasterStatus::Ready && Prepare();
-    if (good && Phase_ >= 5)
+    if (good && Phase_ >= 5 && Scene_.Lit)
+    {
+        if (!CaptureStarted_)
+        {
+            const auto& source = *Scene_.Definition;
+            foundation::math::Matrix4 view, projection;
+            rr::ReferenceCaptureDescription capture;
+            if (foundation::math::TryLookAt(source.Eye, source.Target, source.Up, view) !=
+                    foundation::math::MathStatus::Success ||
+                foundation::math::TryPerspectiveReverseZ(source.VerticalFov, 1, .05F, 100, projection) !=
+                    foundation::math::MathStatus::Success)
+            {
+                good = false;
+            }
+            else
+            {
+                capture.WorldToClip = projection * view;
+                capture.CameraPosition = source.Eye;
+                capture.ReverseZ = true;
+                capture.Width = capture.Height = 256;
+                capture.TargetSamples = 64;
+                capture.Seed = 871;
+                good = Pixels_.TryResize(usize{256} * 256) &&
+                       Accepted(Renderer_.BeginReferenceCapture(Snapshot_, capture, Capture_));
+                CaptureStarted_ = good;
+            }
+        }
+        if (good)
+        {
+            good = Accepted(Renderer_.AdvanceReferenceCapture(Capture_));
+            rr::ReferenceCaptureInfo info;
+            if (good && Renderer_.GetReferenceCaptureInfo(Capture_, info) == rhi::RasterStatus::Ready &&
+                info.MinimumSamples > LastSamples_ &&
+                Renderer_.CopyReferencePixels(Capture_, Pixels_.GetData(), Pixels_.GetSize()) ==
+                    rhi::RasterStatus::Ready)
+            {
+                LastSamples_ = info.MinimumSamples;
+                QImage image(256, 256, QImage::Format_RGB32);
+                if (image.isNull())
+                {
+                    good = false;
+                }
+                else
+                {
+                    auto channel = [](float32 value) {
+                        value = value / (1 + value);
+                        value = foundation::math::EncodeSrgb(value);
+                        return static_cast<int32>(foundation::math::Clamp(value * 255, 0.0F, 255.0F));
+                    };
+                    for (int32 y = 0; y < 256; ++y)
+                    {
+                        auto* row = reinterpret_cast<QRgb*>(image.scanLine(y));
+                        for (int32 x = 0; x < 256; ++x)
+                        {
+                            const auto color = Pixels_[static_cast<usize>(y) * 256 + static_cast<usize>(x)].Radiance;
+                            row[x] = qRgb(channel(color.X), channel(color.Y), channel(color.Z));
+                        }
+                    }
+                    if (info.MinimumSamples == 64)
+                    {
+                        Timer_.stop();
+                    }
+                    Q_EMIT FrameReady(image);
+                    Status_ = QStringLiteral("Rendered viewport · 256×256 · %1/64 samples · CPU reference traversal")
+                                  .arg(info.MinimumSamples);
+                    Q_EMIT Changed();
+                }
+            }
+        }
+        if (good)
+        {
+            return;
+        }
+    }
+    if (good && Phase_ >= 5 && !Scene_.Lit)
     {
         const auto window = Window_->GetNativeWindowInfo();
         const auto target = rhi::SetFrameTarget(Device_, Surface_, { .Width = window.Width, .Height = window.Height });
@@ -527,6 +758,7 @@ void RenderPreview::Tick()
                       "3D renderer stopped or reached its capacity. Reopen to retry. World edits are preserved. ") +
                   detail;
         Q_EMIT Changed();
+        Q_EMIT Failed(Status_);
     }
 #endif
 }

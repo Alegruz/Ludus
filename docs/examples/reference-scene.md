@@ -11,9 +11,10 @@ Ludus CPU-oracle capture: 512 × 512, 256 samples/pixel, depth four, seed 871.
 Preview exposure one; no denoising. Modern Hall by NewSee2l035, CC BY 3.0;
 conversion and display changes are described below.
 
-This is a scene-specific offline vertical slice. The private sample bundle does
-not implement the general Stage 5 cooker, resource catalog, asynchronous GPU
-residency, or editor scene import. Those remain part of the
+This is a scene-specific offline vertical slice. The private sample bundle
+does not itself implement the project workflow. Stage 5 now reuses its converter
+inside the installed backend and integrates project-owned assets, saved levels and
+the native Editor viewport; see the
 [project scene import and saved-level workflow](../architecture/resource-management.md#project-scene-import-and-saved-level-workflow).
 The standalone commands below are prototype evidence; they do not provide the
 project → scene → import → viewport → save/reopen product workflow.
@@ -93,7 +94,7 @@ source and cooked geometry counts, camera, attribution and approximations.
 `LICENSE.txt` accompanies the converted assets. `scene.luscn` is an explicit
 little-endian versioned sample format with bounded counts and finite binary32
 fields; it is not a stable shipping asset format. The capture consumer admits
-six meshes, eight materials, three textures and up to 256 scene items within a
+six meshes, eight materials, three textures and up to 128 scene items within a
 64 MiB bundle. It rejects unsupported versions, truncation, trailing data,
 nonfinite fields and invalid geometry references.
 

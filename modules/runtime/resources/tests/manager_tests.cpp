@@ -447,3 +447,5 @@ TEST_CASE("Initialization validates limits and uses fresh nonwrapping identity",
 #include "mesh_cases.hpp"
 
 #include "dag_cases.hpp"
+
+#include "scene_cases.hpp"

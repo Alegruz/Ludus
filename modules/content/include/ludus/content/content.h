@@ -170,6 +170,7 @@ enum class Kind : uint8
     Sound,       ///< Immutable sound definition referencing audio sources.
     Music,       ///< Immutable music definition; playback state has a separate owner.
     Mesh,        ///< Immutable CPU triangle geometry; renderer installation is separate.
+    CookedScene, ///< Fully resident predecoded scene binding; project assets retain separate identities.
 };
 struct Resource final
 {

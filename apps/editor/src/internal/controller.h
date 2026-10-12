@@ -97,6 +97,10 @@ class EditorController : public QObject
 public:
     explicit EditorController(ToolingPaths tooling, QObject* parent = nullptr, const QString& recentProjectsPath = {});
 
+    [[nodiscard]] const ToolingPaths& Tooling() const noexcept
+    {
+        return Tooling_;
+    }
     [[nodiscard]] const WorkspaceState& State() const noexcept
     {
         return State_;

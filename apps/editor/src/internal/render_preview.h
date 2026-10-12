@@ -35,7 +35,7 @@ public:
     void Tick();
     [[nodiscard]] bool Running() const noexcept
     {
-        return static_cast<bool>(Window_);
+        return OwnsDevice_;
     }
     [[nodiscard]] foundation::uint64 Frames() const noexcept
     {
@@ -57,12 +57,25 @@ public:
     {
         return Report_;
     }
+    [[nodiscard]] bool FrameAvailable() const noexcept
+    {
+        return LastSamples_ != 0;
+    }
     [[nodiscard]] platform::NativeWindowInfo WindowInfo() const noexcept;
 Q_SIGNALS:
     void Changed();
+    void FrameReady(const QImage& frame);
     void Stopped();
+    void Failed(const QString& error);
 
 private:
+    struct Residency;
+    foundation::UniquePtr<Residency> Residency_;
+    graphics::renderer::ReferenceCapture Capture_;
+    foundation::Array<graphics::renderer::ReferencePixel> Pixels_;
+    bool LightingInitialized_ = false;
+    bool CaptureStarted_ = false;
+    foundation::uint32 LastSamples_ = 0;
     [[nodiscard]] bool Prepare();
     void RestartResources() noexcept;
     RenderScene Scene_;

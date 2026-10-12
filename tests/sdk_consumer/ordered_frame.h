@@ -15,8 +15,8 @@ inline uint32 CullCpuInstances(float32 (&output)[4]) noexcept
         const auto x = CULL_CANDIDATES[i * 2];
         if (x >= -.75F && x <= .75F && count < 2)
         {
-            output[usize(count) * 2] = x;
-            output[usize(count) * 2 + 1] = CULL_CANDIDATES[i * 2 + 1];
+            output[usize{count} * 2] = x;
+            output[usize{count} * 2 + 1] = CULL_CANDIDATES[i * 2 + 1];
             ++count;
         }
     }
