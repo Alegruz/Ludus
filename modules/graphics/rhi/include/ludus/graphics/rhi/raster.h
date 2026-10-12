@@ -158,7 +158,8 @@ enum class BufferRole : ludus::foundation::uint8
     /// Mutable compute storage also consumed as one indexed indirect command.
     StorageIndirect,
 };
-/// Immutable buffer description; complete initial bytes are consumed before return.
+/// Fixed buffer allocation/role; complete initial bytes are consumed before return.
+/// R8 RequestBufferUpdate permits completion-gated content changes; allocation size/role never change.
 struct BufferDescription final
 {
     /// Legal use of the created buffer.
@@ -178,8 +179,9 @@ struct TextureDescription final
     /// Allocate undefined color and private depth attachments instead of uploading bytes.
     /// Attachment textures remain sampleable; clear/store defines color contents.
     bool Attachment = false;
-    /// Initialized mip levels, 1..floor(log2(max(Width,Height)))+1, at most 16.
-    /// Attachments require one; sampled views cover this entire initialized range.
+    /// Allocated mip levels, 1..floor(log2(max(Width,Height)))+1, at most 16.
+    /// Attachments require one; initial upload defines all unless DeferredInitialization.
+    /// Sampled views cover this entire range and require complete initialized contents.
     ludus::foundation::uint32 MipLevels = 1;
     /// Request nonblocking native upload readiness; Pending owns staging until completion.
     /// Legacy RGBA single-level creation defaults to its existing setup behavior.
@@ -187,6 +189,10 @@ struct TextureDescription final
     /// Opt-in copied CPU texels for fixed-mip reference shading. Uploaded R8/RG8/RGBA8
     /// only; attachments and RGBA16Float reject. Ordinary textures allocate no shadow.
     bool RetainCpuContent = false;
+    /// Allocate undefined RGBA8Unorm sampled mips with an empty upload. R8 full-mip
+    /// transfers initialize incrementally; full-resource sampled views require every mip.
+    /// Attachments and retained CPU content reject this option. Partial sampled views follow R9a.
+    bool DeferredInitialization = false;
 };
 /// One complete initialized mip within the borrowed upload byte blob.
 struct TextureMipUpload final
@@ -533,7 +539,8 @@ struct RasterDraw final
 [[nodiscard]] RasterStatus
 CreateBuffer(DeviceHandle, const BufferDescription&, std::span<const ludus::foundation::uint8>, BufferHandle&) noexcept;
 /// Create a sampled texture from a complete initialized R8/RG8/RGBA8 mip chain, or an undefined attachment
-/// with empty upload and zero pitch. Invalid description preserves output.
+/// with empty upload and zero pitch. DeferredInitialization allocates undefined sampled RGBA8 mips
+/// for R8 completion-gated full-mip uploads. Invalid description preserves output.
 [[nodiscard]] RasterStatus
 CreateTexture(DeviceHandle, const TextureDescription&, const TextureUpload&, TextureHandle&) noexcept;
 /// Return whether the texture identity is the null surface selector; no ownership/state query.
@@ -542,7 +549,8 @@ CreateTexture(DeviceHandle, const TextureDescription&, const TextureUpload&, Tex
 /// Invalid/unready handles preserve output; does not expose native objects or extend ownership.
 [[nodiscard]] RasterStatus GetTextureDescription(DeviceHandle, TextureHandle, TextureDescription&) noexcept;
 /// Create a complete initialized-mip, original-format view, retaining its texture. Partial sampled ranges,
-/// format reinterpretation and separate depth views are unsupported.
+/// format reinterpretation and separate depth views are unsupported. Deferred sampled allocations
+/// reject InvalidState until every mip is initialized. Failures preserve a null output; owner-thread only.
 [[nodiscard]] RasterStatus CreateTextureView(DeviceHandle, TextureHandle, TextureViewHandle&) noexcept;
 /// Create immutable filter/address state; no engine allocations on a warmed resource path.
 [[nodiscard]] RasterStatus CreateSampler(DeviceHandle, const SamplerDescription&, SamplerHandle&) noexcept;

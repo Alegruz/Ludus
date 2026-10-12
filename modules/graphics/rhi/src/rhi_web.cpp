@@ -537,6 +537,19 @@ LifetimeReadback(foundation::usize transfer, BufferRole role, const internal::Li
     return gActive == Backend::WebGL2 ? webgl::LifetimeReadback(transfer, role, range)
                                       : webgpu::LifetimeReadback(transfer, role, range);
 }
+RasterStatus LifetimeBufferUpdate(usize transfer,
+                                  BufferRole role,
+                                  const internal::LifetimeCopyRange& range,
+                                  const uint8* bytes) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::LifetimeBufferUpdate(transfer, role, range, bytes)
+                                      : webgpu::LifetimeBufferUpdate(transfer, role, range, bytes);
+}
+RasterStatus LifetimeTextureTransfer(usize transfer, const internal::TextureTransfer& info, const uint8* bytes) noexcept
+{
+    return gActive == Backend::WebGL2 ? webgl::LifetimeTextureTransfer(transfer, info, bytes)
+                                      : webgpu::LifetimeTextureTransfer(transfer, info, bytes);
+}
 RasterStatus LifetimePollTransfer(bool readback, foundation::usize slot) noexcept
 {
     return gActive == Backend::WebGL2 ? webgl::LifetimePollTransfer(readback, slot)

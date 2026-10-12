@@ -314,7 +314,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
                      : info.Format == RasterFormat::Rg8Unorm ? GL_RG
                                                              : GL_RGBA,
                      info.Format == RasterFormat::Rgba16Float ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE,
-                     info.Attachment ? nullptr : upload.Bytes.data() + mip.Offset);
+                     info.Attachment || info.DeferredInitialization ? nullptr : upload.Bytes.data() + mip.Offset);
         width = width > 1 ? width / 2 : 1;
         height = height > 1 ? height / 2 : 1;
     }
