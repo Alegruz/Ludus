@@ -100,7 +100,7 @@ struct MeshDefinitionAdapter::State final
         foundation::math::Vector2* Texcoords = nullptr;
         foundation::math::Vector3* Normals = nullptr;
         uint32* Indices = nullptr;
-        usize Vertices = 0, Triangles = 0;
+        usize Vertices = 0, IndicesCopied = 0;
         void Clear() noexcept
         {
             delete[] Positions;
@@ -289,11 +289,11 @@ Status MeshDefinitionAdapter::Poll(void* context, void* candidate, const void*& 
             job->Normals[i] = source.Normals[i];
         }
     }
-    for (usize work = 0; work < 384 && job->Triangles < source.IndexCount; ++work, ++job->Triangles)
+    for (usize work = 0; work < 384 && job->IndicesCopied < source.IndexCount; ++work, ++job->IndicesCopied)
     {
-        job->Indices[job->Triangles] = source.Indices[job->Triangles];
+        job->Indices[job->IndicesCopied] = source.Indices[job->IndicesCopied];
     }
-    if (job->Vertices != source.VertexCount || job->Triangles != source.IndexCount)
+    if (job->Vertices != source.VertexCount || job->IndicesCopied != source.IndexCount)
     {
         return Status::Pending;
     }
@@ -350,7 +350,7 @@ Status MeshDefinitionAdapter::Validate(void* context, const void* payload) noexc
         for (const auto& job : self.mState->Jobs)
         {
             if (job.Used && !job.Cancelled && payload == &job.Payload && job.Source != nullptr &&
-                job.Vertices == job.Source->VertexCount && job.Triangles == job.Source->IndexCount)
+                job.Vertices == job.Source->VertexCount && job.IndicesCopied == job.Source->IndexCount)
             {
                 return Status::Ok;
             }

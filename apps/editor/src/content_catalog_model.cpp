@@ -45,9 +45,18 @@ QVariant ContentCatalogModel::data(const QModelIndex& index, int role) const
     }
     if (index.column() == 1)
     {
-        return row->Kind == content::Kind::Sound   ? QStringLiteral("Sound")
-               : row->Kind == content::Kind::Music ? QStringLiteral("Music")
-                                                   : QStringLiteral("Audio source");
+        switch (row->Kind)
+        {
+            case content::Kind::AudioSource:
+                return QStringLiteral("Audio source");
+            case content::Kind::Sound:
+                return QStringLiteral("Sound");
+            case content::Kind::Music:
+                return QStringLiteral("Music");
+            case content::Kind::Mesh:
+                return QStringLiteral("Mesh");
+        }
+        return QStringLiteral("Unknown");
     }
     return index.column() == 2 ? QVariant(row->Path) : QVariant();
 }

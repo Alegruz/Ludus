@@ -104,7 +104,7 @@ ContentImportResult ImportAudioSource(const ContentImportSource& source,
     const auto* existing = catalog.Find(idView);
     if (existing != nullptr && existing->Type != content::Kind::AudioSource)
     {
-        return failed(CS::Conflict, QStringLiteral("This ID belongs to a sound or music definition."));
+        return failed(CS::Conflict, QStringLiteral("This ID belongs to a different resource kind."));
     }
     QHash<QString, content::Digest> dependencies;
     for (const auto& dependent : catalog.Entries())
@@ -113,7 +113,7 @@ ContentImportResult ImportAudioSource(const ContentImportSource& source,
         {
             return failed(CS::Cancelled, QStringLiteral("Import cancelled during validation."));
         }
-        if (dependent.Type == content::Kind::AudioSource)
+        if (dependent.Type != content::Kind::Sound && dependent.Type != content::Kind::Music)
         {
             continue;
         }

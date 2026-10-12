@@ -73,6 +73,12 @@ bool Run(int argc, char** argv) noexcept
         {
             return false;
         }
+        if (resource->Type != content::Kind::Sound && resource->Type != content::Kind::Music)
+        {
+            LUDUS_LOG_ERROR(ludus::foundation::logging::LOG_CORE,
+                            "Audio packaging requires a sound or music root; mesh roots are unsupported.");
+            return false;
+        }
         if (content::ReadFile(root, resource->Path.View(), content::MAX_DOCUMENT_BYTES, bytes) != content::Status::Ok)
         {
             return false;

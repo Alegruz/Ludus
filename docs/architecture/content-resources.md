@@ -86,6 +86,9 @@ three-kind catalogs retain their byte/schema behavior; older readers reject this
 new kind explicitly. A mesh path is a normalized identity/source label in the
 initial in-memory adapter, not a file-format or runtime-import promise. See the
 [implemented mesh profile](resource-management.md#implemented-stage-3-profile).
+The browser labels mesh entries explicitly and reports that mesh editing is unavailable.
+Audio import preserves those entries without treating them as sound dependencies;
+the audio workspace and audio packaging validator reject mesh roots explicitly.
 Future level catalogs may share this identity policy through a versioned extension; this package does not silently
 change the game-owned level schema. A game binding validates that a level's audio
 key names the required sound/music kind. Numeric resource indices are resolved

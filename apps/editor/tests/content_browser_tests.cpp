@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPersistentModelIndex>
+#include <QPushButton>
 #include <QSignalSpy>
 #include <QSortFilterProxyModel>
 #include <QSysInfo>
@@ -396,4 +397,62 @@ TEST_CASE("Content projection records a 100000 row search and selection baseline
                                   << ", ID lookup=" << selection);
     CHECK(model.rowCount() == ROWS);
     CHECK(model.columnCount() == 3);
+}
+
+TEST_CASE("Mesh catalog entries retain identity during audio import and never activate audio",
+          "[editor][content][mesh]")
+{
+    QTemporaryDir root, exported;
+    content::Catalog catalog;
+    content::Resource mesh;
+    mesh.Type = content::Kind::Mesh;
+    REQUIRE(mesh.Id.Set("mesh/quad"));
+    REQUIRE(mesh.Path.Set("meshes/quad"));
+    REQUIRE(catalog.Put(mesh) == content::Status::Ok);
+    content::Bytes bytes;
+    REQUIRE(catalog.Write(bytes) == content::Status::Ok);
+    Write(root.filePath(QStringLiteral("catalog.json")),
+          QByteArray(bytes.String().data(), static_cast<qsizetype>(bytes.String().size())));
+    const auto file = Wav(exported, 500);
+    ContentImportGate gate;
+    REQUIRE(ImportAudioSource({ .Root = root.path(), .File = file, .Id = QStringLiteral("source/hit") }, gate).Status ==
+            content::Status::Ok);
+    const auto saved = ReadCatalog(root.path());
+    REQUIRE(saved.Find("mesh/quad") != nullptr);
+    CHECK(saved.Find("mesh/quad")->Type == content::Kind::Mesh);
+    CHECK(saved.Find("mesh/quad")->Path.View() == "meshes/quad");
+    ContentImportGate conflict;
+    CHECK(ImportAudioSource(
+              {
+                  .Root = root.path(),
+                  .File = file,
+                  .Id = QStringLiteral("mesh/quad"),
+              },
+              conflict)
+              .Status == content::Status::Conflict);
+
+    ContentWorkspace workspace;
+    QSignalSpy opened(&workspace, &ContentWorkspace::OpenAudio);
+    workspace.SetProject(root.path(), 1);
+    Wait(workspace);
+    auto* table = workspace.findChild<QTableView*>(QStringLiteral("contentTable"));
+    REQUIRE(table != nullptr);
+    QModelIndex selected;
+    for (int row = 0; row < table->model()->rowCount(); ++row)
+    {
+        const auto index = table->model()->index(row, 0);
+        if (index.data(Qt::UserRole).toString() == QStringLiteral("mesh/quad"))
+        {
+            selected = index;
+        }
+    }
+    REQUIRE(selected.isValid());
+    CHECK(table->model()->index(selected.row(), 1).data().toString() == QStringLiteral("Mesh"));
+    table->setCurrentIndex(selected);
+    Q_EMIT table->activated(selected);
+    CHECK(opened.count() == 0);
+    CHECK(workspace.findChild<QLabel*>(QStringLiteral("contentStatus"))->text() ==
+          QStringLiteral("Mesh editing is not available yet."));
+    CHECK_FALSE(workspace.findChild<QPushButton*>(QStringLiteral("contentReimport"))->isEnabled());
+    workspace.Shutdown();
 }
