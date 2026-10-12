@@ -1,6 +1,7 @@
 #include "internal/audio_workspace.h"
 #include "internal/configuration_workspace.h"
 #include "internal/content_browser.h"
+#include "internal/level_workspace.h"
 #include "internal/main_window.h"
 #include "internal/scene_workspace.h"
 #include "internal/script_workspace.h"
@@ -192,6 +193,8 @@ void MainWindow::BuildUi()
     Audio_ = new AudioWorkspace(audioScroll);
     audioScroll->setWidget(Audio_);
     WorkTabs_->addTab(audioScroll, QStringLiteral("&Audio"));
+    Level_ = new LevelWorkspace(Controller_->Tooling(), WorkTabs_);
+    WorkTabs_->addTab(Level_, QStringLiteral("3D &Levels"));
     World_ = new WorldWorkspace(WorkTabs_);
     WorkTabs_->addTab(World_, QStringLiteral("&World"));
     Scene_ = new SceneWorkspace(WorkTabs_);

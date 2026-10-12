@@ -1,4 +1,4 @@
-#include <ludus/foundation/base/byte_order.hpp>
+#include <ludus/foundation/base/checked_integer.hpp>
 #include <ludus/foundation/base/parse_number.hpp>
 
 #include <ludus/foundation/containers/array.hpp>
@@ -10,8 +10,7 @@
 
 #include <ludus/content/content.h>
 #include <ludus/graphics/renderer/renderer.hpp>
-
-#include <cstring>
+#include <ludus/runtime/resources/scene.h>
 
 #include "ray_query.h"
 #include "renderer_composite.h"
@@ -29,56 +28,6 @@ namespace rhi = ludus::graphics::rhi;
 using Status = rhi::RasterStatus;
 LUDUS_DEFINE_LOG_CATEGORY(LOG_SCENE, "ReferenceScene");
 
-// Private versioned sample format; never casts serialized bytes to native objects.
-class Reader final
-{
-public:
-    Reader(const uint8* data, usize size) noexcept : mData(data), mSize(size) {}
-    bool Read(uint32& value) noexcept
-    {
-        if (!core::TryReadLittleEndian<uint32>({mData, mSize}, value))
-        {
-            return false;
-        }
-        mData += 4;
-        mSize -= 4;
-        return true;
-    }
-    bool Read(float32& value) noexcept
-    {
-        uint32 bits = 0;
-        if (!Read(bits))
-        {
-            return false;
-        }
-        std::memcpy(&value, &bits, sizeof(value));
-        return math::IsFinite(value);
-    }
-    bool Read(math::Vector3& value) noexcept
-    {
-        return Read(value.X) && Read(value.Y) && Read(value.Z);
-    }
-    const uint8* Take(usize size) noexcept
-    {
-        if (size > mSize)
-        {
-            return nullptr;
-        }
-        const auto* result = mData;
-        mData += size;
-        mSize -= size;
-        return result;
-    }
-    [[nodiscard]] usize Remaining() const noexcept
-    {
-        return mSize;
-    }
-
-private:
-    const uint8* mData;
-    usize mSize;
-};
-
 template <typename Handle>
 Status Wait(rr::Renderer& renderer, const Handle& handle, Status status) noexcept
 {
@@ -90,172 +39,111 @@ Status Wait(rr::Renderer& renderer, const Handle& handle, Status status) noexcep
     return status;
 }
 
-bool Load(Reader& reader,
+bool Load(const uint8* bytes,
+          usize count,
           rr::Renderer& renderer,
           rhi::DeviceHandle device,
           rr::MaterialProgram program,
           rr::Snapshot& snapshot,
           rr::ReferenceCaptureDescription& capture) noexcept
 {
-    uint32 version = 0, meshCount = 0, materialCount = 0, textureCount = 0, itemCount = 0;
-    const auto* magic = reader.Take(8);
-    if (!magic || std::memcmp(magic, "LUSCN01\0", 8) != 0 || !reader.Read(version) || version != 1 ||
-        !reader.Read(meshCount) || meshCount != 6 || !reader.Read(materialCount) || materialCount != 8 ||
-        !reader.Read(textureCount) || textureCount != 3 || !reader.Read(itemCount) || itemCount == 0 || itemCount > 256)
-    {
-        return false;
-    }
-    math::Vector3 eye, target, up;
-    float32 fov = 0;
-    if (!reader.Read(eye) || !reader.Read(target) || !reader.Read(up) || !reader.Read(fov))
+    ludus::resources::SceneDefinition scene;
+    if (ludus::resources::SceneDefinition::Decode(bytes, count, scene) != ludus::resources::Status::Ok)
     {
         return false;
     }
     math::Matrix4 view, projection;
-    if (math::TryLookAt(eye, target, up, view) != math::MathStatus::Success ||
-        math::TryPerspectiveReverseZ(fov, 1, .05F, 100, projection) != math::MathStatus::Success)
+    if (math::TryLookAt(scene.Eye, scene.Target, scene.Up, view) != math::MathStatus::Success ||
+        math::TryPerspectiveReverseZ(scene.VerticalFov, 1, .05F, 100, projection) != math::MathStatus::Success)
     {
         return false;
     }
     capture.WorldToClip = projection * view;
-    capture.CameraPosition = eye;
+    capture.CameraPosition = scene.Eye;
     capture.ReverseZ = true;
-    rhi::TextureHandle textures[3];
-    for (auto& texture : textures)
+    rhi::TextureHandle textures[8];
+    for (usize i = 0; i < scene.Textures.GetSize(); ++i)
     {
-        uint32 width = 0, height = 0, size = 0;
-        if (!reader.Read(width) || !reader.Read(height) || !reader.Read(size) || width == 0 || height == 0 ||
-            width > 4096 || height > 4096 || size != usize(width) * height * 4)
-        {
-            return false;
-        }
-        const auto* bytes = reader.Take(size);
-        if (!bytes)
-        {
-            return false;
-        }
+        const auto& source = scene.Textures[i];
         rhi::TextureDescription description;
-        description.Width = width;
-        description.Height = height;
+        description.Width = source.Width;
+        description.Height = source.Height;
         description.Format = rhi::RasterFormat::Rgba8Srgb;
         description.RetainCpuContent = true;
-        if (rhi::CreateTexture(device, description, {{bytes, size}, usize(width) * 4}, texture) != Status::Ready)
+        if (rhi::CreateTexture(device,
+                               description,
+                               {{source.Pixels.GetData(), source.Pixels.GetSize()}, usize(source.Width) * 4},
+                               textures[i]) != Status::Ready)
         {
             return false;
         }
     }
     rr::MaterialVersion materials[8];
-    for (auto& material : materials)
+    for (usize i = 0; i < scene.Materials.GetSize(); ++i)
     {
-        uint32 texture = 0;
+        const auto& source = scene.Materials[i];
         rr::LitMaterialDescription description;
-        if (!reader.Read(texture) || !reader.Read(description.Metallic) || !reader.Read(description.Roughness) ||
-            !reader.Read(description.Emission) || (texture >= 3 && texture != 0xffffffffU))
+        description.Metallic = source.Metallic;
+        description.Roughness = source.Roughness;
+        description.Emission = source.Emission;
+        if (source.Texture != ~uint32{0})
         {
-            return false;
-        }
-        if (texture < 3)
-        {
-            description.Surface.Texture = textures[texture];
+            description.Surface.Texture = textures[source.Texture];
             description.Surface.Sampler.Filter = rhi::RasterFilter::Linear;
             description.Surface.Sampler.U = description.Surface.Sampler.V =
-                texture == 0 ? rhi::RasterAddress::Clamp : rhi::RasterAddress::Repeat;
+                source.Repeat ? rhi::RasterAddress::Repeat : rhi::RasterAddress::Clamp;
         }
         else
         {
             description.Surface.Tint = {0, 0, 0, 1};
         }
         rr::LightSelection selection;
-        if (Wait(renderer, material, renderer.CreateLitMaterial(program, description, material, selection)) !=
+        if (Wait(renderer, materials[i], renderer.CreateLitMaterial(program, description, materials[i], selection)) !=
             Status::Ready)
         {
             return false;
         }
     }
     rr::Mesh meshes[6];
-    for (auto& mesh : meshes)
+    for (usize i = 0; i < scene.Meshes.GetSize(); ++i)
     {
-        uint32 vertexCount = 0, indexCount = 0;
-        if (!reader.Read(vertexCount) || !reader.Read(indexCount) || vertexCount == 0 || vertexCount > 1000000 ||
-            indexCount == 0 || indexCount > 3000000 || indexCount % 3 != 0 ||
-            usize(vertexCount) * 32 + usize(indexCount) * 4 > reader.Remaining())
-        {
-            return false;
-        }
-        Array<math::Vector3> positions, normals;
-        Array<math::Vector2> uvs;
-        Array<uint32> indices;
-        if (!positions.TryResize(vertexCount) || !normals.TryResize(vertexCount) || !uvs.TryResize(vertexCount) ||
-            !indices.TryResize(indexCount))
-        {
-            return false;
-        }
-        for (usize i = 0; i < vertexCount; ++i)
-        {
-            if (!reader.Read(positions[i]) || !reader.Read(normals[i]) || !reader.Read(uvs[i].X) ||
-                !reader.Read(uvs[i].Y))
-            {
-                return false;
-            }
-        }
-        for (auto& index : indices)
-        {
-            if (!reader.Read(index) || index >= vertexCount)
-            {
-                return false;
-            }
-        }
-        rr::MeshDescription description{positions.GetData(), vertexCount, indices.GetData(), indexCount};
-        description.Normals = normals.GetData();
-        description.Texcoords = uvs.GetData();
-        if (Wait(renderer, mesh, renderer.CreateMesh(description, mesh)) != Status::Ready)
+        const auto& source = scene.Meshes[i];
+        rr::MeshDescription description{source.Positions.GetData(),
+                                        source.Positions.GetSize(),
+                                        source.Indices.GetData(),
+                                        source.Indices.GetSize()};
+        description.Normals = source.Normals.GetData();
+        description.Texcoords = source.Texcoords.GetData();
+        if (Wait(renderer, meshes[i], renderer.CreateMesh(description, meshes[i])) != Status::Ready)
         {
             return false;
         }
     }
     Array<rr::SceneItem> items;
-    if (!items.TryResize(itemCount))
+    if (!items.TryResize(scene.Objects.GetSize()))
     {
         return false;
     }
-    for (usize i = 0; i < itemCount; ++i)
+    for (usize i = 0; i < scene.Objects.GetSize(); ++i)
     {
-        uint32 mesh = 0, material = 0;
+        const auto& source = scene.Objects[i];
         auto& item = items[i];
-        if (!reader.Read(mesh) || !reader.Read(material) || mesh >= meshCount || material >= materialCount)
-        {
-            return false;
-        }
-        for (auto& column : item.Transform.Columns)
-        {
-            if (!reader.Read(column))
-            {
-                return false;
-            }
-        }
-        if (!reader.Read(item.Transform.Translation))
-        {
-            return false;
-        }
-        item.Geometry = meshes[mesh];
-        item.Surface = materials[material];
+        item.Geometry = meshes[source.Mesh];
+        item.Surface = materials[source.Material];
+        item.Transform = source.Transform;
         item.SourceId = i + 1;
     }
-    if (reader.Remaining() != 0 || renderer.CreateSnapshot(items.GetData(), items.GetSize(), snapshot) != Status::Ready)
+    if (renderer.CreateSnapshot(items.GetData(), items.GetSize(), snapshot) != Status::Ready)
     {
         return false;
     }
-    for (auto mesh : meshes)
+    for (usize i = 0; i < scene.Meshes.GetSize(); ++i)
     {
-        static_cast<void>(renderer.Release(mesh));
+        (void)renderer.Release(meshes[i]);
     }
-    for (auto material : materials)
+    for (usize i = 0; i < scene.Materials.GetSize(); ++i)
     {
-        static_cast<void>(renderer.Release(material));
-    }
-    for (auto texture : textures)
-    {
-        static_cast<void>(rhi::Destroy(device, texture));
+        (void)renderer.Release(materials[i]);
     }
     return true;
 }
@@ -345,9 +233,8 @@ int Run(int argc, char** argv) noexcept
     {
         return 7;
     }
-    Reader reader(bundle.Data().data(), bundle.Data().size());
     rr::Snapshot snapshot;
-    if (!Load(reader, renderer, device, program, snapshot, description))
+    if (!Load(bundle.Data().data(), bundle.Data().size(), renderer, device, program, snapshot, description))
     {
         return 8;
     }

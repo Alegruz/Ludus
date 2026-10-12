@@ -15,8 +15,8 @@ inline uint32 CullCpuInstances(float32 (&output)[4]) noexcept
         const auto x = CULL_CANDIDATES[i * 2];
         if (x >= -.75F && x <= .75F && count < 2)
         {
-            output[count * 2] = x;
-            output[count * 2 + 1] = CULL_CANDIDATES[i * 2 + 1];
+            output[usize{count} * 2] = x;
+            output[usize{count} * 2 + 1] = CULL_CANDIDATES[i * 2 + 1];
             ++count;
         }
     }
@@ -84,17 +84,25 @@ inline rhi::RasterStatus BuildOrderedFrame(rhi::DeviceHandle device,
     {
         status = rhi::ImportGraphBuffer(device, graph, inputs.Candidates, versions[11]);
         if (status != rhi::RasterStatus::Ready)
+        {
             return status;
+        }
         status = rhi::ImportGraphBuffer(device, graph, inputs.Arguments, versions[12]);
         if (status != rhi::RasterStatus::Ready)
+        {
             return status;
+        }
         rhi::GraphVersion outputInstances, outputArguments;
         status = rhi::NextGraphVersion(device, graph, versions[2], outputInstances);
         if (status != rhi::RasterStatus::Ready)
+        {
             return status;
+        }
         status = rhi::NextGraphVersion(device, graph, versions[12], outputArguments);
         if (status != rhi::RasterStatus::Ready)
+        {
             return status;
+        }
         const rhi::GraphUse uses[]{
             {versions[11], rhi::GraphAccessMode::StorageRead, 0, 32, rhi::RasterVisibility::Compute},
             {outputInstances, rhi::GraphAccessMode::StorageReadWrite, 0, 16, rhi::RasterVisibility::Compute},
@@ -107,7 +115,9 @@ inline rhi::RasterStatus BuildOrderedFrame(rhi::DeviceHandle device,
         compute.UseCount = 3;
         status = rhi::AddGraphPass(device, graph, compute);
         if (status != rhi::RasterStatus::Ready)
+        {
             return status;
+        }
         versions[2] = outputInstances;
         versions[12] = outputArguments;
     }
@@ -162,7 +172,9 @@ inline rhi::RasterStatus BuildOrderedFrame(rhi::DeviceHandle device,
     pass.Uses = sceneUses;
     pass.UseCount = inputs.Compute == nullptr ? 9 : 10;
     if (inputs.Compute != nullptr)
+    {
         draws[0].Indirect = inputs.Arguments;
+    }
     pass.Draws = draws;
     pass.DrawCount = 2;
     status = rhi::AddGraphPass(device, graph, pass);

@@ -97,6 +97,8 @@ qt_add_executable(ludus_editor
     src/render_scene.cpp
     src/render_preview.cpp
     src/render_panel.cpp
+    src/internal/level_workspace.h
+    src/level_workspace.cpp
     src/internal/world_workspace.h
     src/world_document.cpp
     src/world_workspace.cpp
@@ -174,6 +176,7 @@ target_link_libraries(ludus_editor
         Ludus::FoundationMath
         Ludus::GameplayCamera
         Ludus::GraphicsRenderer
+        Ludus::Resources
         Ludus::FoundationParsingJson
 )
 ludus_apply_project_defaults(ludus_editor)
@@ -181,9 +184,10 @@ target_link_libraries(ludus_editor PRIVATE Ludus::Platform)
 if(LUDUS_EDITOR_RENDER_PREVIEW AND NOT EMSCRIPTEN)
     target_compile_definitions(ludus_editor PRIVATE LUDUS_EDITOR_NATIVE_PREVIEW=1)
     target_link_libraries(ludus_editor PRIVATE Ludus::GraphicsRhi)
-    foreach(shader renderer_flat renderer_composite renderer_material)
+    foreach(shader renderer_flat renderer_composite renderer_material renderer_lit renderer_output renderer_shadow)
         ludus_compile_shader(TARGET ludus_editor NAME ${shader} RASTER SOURCE "${PROJECT_SOURCE_DIR}/modules/graphics/renderer/shaders/${shader}.slang" VERTEX vertexMain FRAGMENT fragmentMain)
     endforeach()
+    ludus_compile_shader(TARGET ludus_editor NAME renderer_lit_shadow RASTER SOURCE "${PROJECT_SOURCE_DIR}/modules/graphics/renderer/shaders/renderer_lit.slang" VERTEX vertexMain FRAGMENT shadowMain)
     ludus_compile_shader(TARGET ludus_editor NAME editor_scene SOURCE "${PROJECT_SOURCE_DIR}/apps/world_demo/shaders/world_scene.slang" VERTEX vertexMain FRAGMENT fragmentMain)
 endif()
 
@@ -206,6 +210,8 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         src/render_scene.cpp
         src/render_preview.cpp
         src/render_panel.cpp
+        src/internal/level_workspace.h
+        src/level_workspace.cpp
         src/internal/world_workspace.h
         src/world_document.cpp
         src/world_workspace.cpp
@@ -213,6 +219,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
         src/scene_store.cpp
         src/scene_workspace.cpp
         tests/world_workspace_tests.cpp
+        tests/level_workspace_tests.cpp
         tests/render_authoring_tests.cpp
         tests/scene_workspace_tests.cpp
         src/internal/controller.h
@@ -291,6 +298,7 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
             Ludus::FoundationMath
             Ludus::GameplayCamera
             Ludus::GraphicsRenderer
+            Ludus::Resources
             Ludus::FoundationParsingJson
             Catch2::Catch2)
     ludus_apply_project_defaults(ludus_editor_tests)
@@ -298,9 +306,10 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
     if(LUDUS_EDITOR_RENDER_PREVIEW)
         target_compile_definitions(ludus_editor_tests PRIVATE LUDUS_EDITOR_NATIVE_PREVIEW=1)
         target_link_libraries(ludus_editor_tests PRIVATE Ludus::GraphicsRhi)
-        foreach(shader renderer_flat renderer_composite renderer_material)
+        foreach(shader renderer_flat renderer_composite renderer_material renderer_lit renderer_output renderer_shadow)
             ludus_compile_shader(TARGET ludus_editor_tests NAME ${shader} RASTER SOURCE "${PROJECT_SOURCE_DIR}/modules/graphics/renderer/shaders/${shader}.slang" VERTEX vertexMain FRAGMENT fragmentMain)
         endforeach()
+        ludus_compile_shader(TARGET ludus_editor_tests NAME renderer_lit_shadow RASTER SOURCE "${PROJECT_SOURCE_DIR}/modules/graphics/renderer/shaders/renderer_lit.slang" VERTEX vertexMain FRAGMENT shadowMain)
         ludus_compile_shader(TARGET ludus_editor_tests NAME editor_scene SOURCE "${PROJECT_SOURCE_DIR}/apps/world_demo/shaders/world_scene.slang" VERTEX vertexMain FRAGMENT fragmentMain)
     endif()
     if(APPLE AND LUDUS_EDITOR_RENDER_PREVIEW)

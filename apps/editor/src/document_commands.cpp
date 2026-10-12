@@ -3,6 +3,7 @@
 #include "internal/audio_workspace.h"
 #include "internal/configuration_workspace.h"
 #include "internal/content_browser.h"
+#include "internal/level_workspace.h"
 #include "internal/scene_workspace.h"
 #include "internal/script_workspace.h"
 #include "internal/world_workspace.h"
@@ -48,8 +49,10 @@ void MainWindow::RenderDocumentActions()
     const bool scripts = area == Scripts_;
     const bool scene = area == Scene_;
     const bool world = area == World_;
+    const bool level = area == Level_;
     SaveAction_->setText(project         ? QStringLiteral("&Save Project Settings")
                          : audio         ? QStringLiteral("&Save Audio")
+                         : level         ? QStringLiteral("&Save 3D Scene")
                          : world         ? QStringLiteral("&Save World")
                          : scene         ? QStringLiteral("&Save Scene")
                          : scripts       ? QStringLiteral("&Save Script Asset")
@@ -63,6 +66,7 @@ void MainWindow::RenderDocumentActions()
                                         : QString());
     SaveAction_->setEnabled(project   ? Controller_->Caps().CanEdit && !rootBlocked
                             : audio   ? Audio_->CanSave()
+                            : level   ? Level_->CanSave()
                             : world   ? World_->CanSave()
                             : scene   ? Scene_->CanSave()
                             : scripts ? Scripts_->CanSave()

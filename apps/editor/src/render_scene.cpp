@@ -678,4 +678,108 @@ bool RenderScene::View(const PreviewViewOptions& options, rr::ViewDescription& o
     error.clear();
     return true;
 }
+bool RenderScene::LoadCooked(const QByteArray& bytes,
+                             const QJsonObject& level,
+                             RenderScene& output,
+                             QString& error,
+                             const QJsonObject& revisions)
+{
+    RenderScene candidate;
+    candidate.Definition = QSharedPointer<resources::SceneDefinition>::create();
+    if (resources::SceneDefinition::Decode(reinterpret_cast<const uint8*>(bytes.constData()),
+                                           static_cast<usize>(bytes.size()),
+                                           *candidate.Definition) != resources::Status::Ok)
+    {
+        return Fail(error,
+                    QStringLiteral("Cooked scene failed bounded runtime validation. Previous viewport retained."));
+    }
+    const auto& scene = *candidate.Definition;
+    candidate.Lit = true;
+    candidate.LogicalId = QStringLiteral("level/") + level.value(QStringLiteral("id")).toString();
+    for (const auto& source : scene.Meshes)
+    {
+        PreviewMesh mesh;
+        (void)source; // Geometry stays in the immutable leased definition.
+        candidate.Meshes.append(mesh);
+    }
+    for (const auto& source : scene.Textures)
+    {
+        PreviewTexture texture;
+        texture.Pixels = QImage(source.Pixels.GetData(),
+                                static_cast<int32>(source.Width),
+                                static_cast<int32>(source.Height),
+                                QImage::Format_RGBA8888);
+        if (texture.Pixels.isNull())
+        {
+            return Fail(error, QStringLiteral("Texture allocation failed."));
+        }
+        candidate.Textures.append(texture);
+    }
+    for (const auto& source : scene.Materials)
+    {
+        PreviewSurface surface;
+        surface.Texture = source.Texture == ~uint32{0} ? -1 : static_cast<int32>(source.Texture);
+        surface.Tint = surface.Texture < 0 ? math::Vector4{0, 0, 0, 1} : math::Vector4{1, 1, 1, 1};
+        surface.Repeat = source.Repeat;
+        surface.Metallic = source.Metallic;
+        surface.Roughness = source.Roughness;
+        surface.Emission = source.Emission;
+        candidate.Surfaces.append(surface);
+    }
+    const auto objects = level.value(QStringLiteral("objects")).toArray();
+    if (objects.size() != static_cast<qsizetype>(scene.Objects.GetSize()))
+    {
+        return Fail(error, QStringLiteral("Level object count mismatch."));
+    }
+    for (usize i = 0; i < scene.Objects.GetSize(); ++i)
+    {
+        const auto& source = scene.Objects[i];
+        const auto persistent = objects[static_cast<qsizetype>(i)].toObject();
+        PreviewObject object;
+        object.Id = persistent.value(QStringLiteral("id")).toString();
+        object.Name = persistent.value(QStringLiteral("name")).toString();
+        object.Mesh = static_cast<int32>(source.Mesh);
+        object.Surface = static_cast<int32>(source.Material);
+        object.Texture = candidate.Surfaces[object.Surface].Texture;
+        object.Transform = source.Transform;
+        candidate.Objects.append(object);
+    }
+    candidate.PacketIdentity = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256);
+    QJsonArray bindings;
+    QStringList resourceIds;
+    for (const auto& value : objects)
+    {
+        const auto object = value.toObject();
+        const auto mesh = object.value(QStringLiteral("mesh")).toString();
+        const auto material = object.value(QStringLiteral("material")).toString();
+        bindings.append(QJsonObject{{QStringLiteral("id"), object.value(QStringLiteral("id"))},
+                                    {QStringLiteral("mesh"), mesh},
+                                    {QStringLiteral("material"), material}});
+        if (!resourceIds.contains(mesh))
+        {
+            resourceIds.append(mesh);
+        }
+        if (!resourceIds.contains(material))
+        {
+            resourceIds.append(material);
+        }
+    }
+    resourceIds.sort();
+    const auto identities = QJsonDocument(QJsonArray::fromStringList(resourceIds)).toJson(QJsonDocument::Compact);
+    QCryptographicHash assets(QCryptographicHash::Sha256);
+    assets.addData(identities);
+    assets.addData(QJsonDocument(revisions).toJson(QJsonDocument::Compact));
+    candidate.AssetsIdentity = assets.result();
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(candidate.PacketIdentity);
+    hash.addData(candidate.AssetsIdentity);
+    hash.addData(QJsonDocument(QJsonObject{{QStringLiteral("level"), level.value(QStringLiteral("id"))},
+                                           {QStringLiteral("bindings"), bindings},
+                                           {QStringLiteral("resources"), QJsonArray::fromStringList(resourceIds)}})
+                     .toJson(QJsonDocument::Compact));
+    candidate.Identity = hash.result();
+    output = candidate;
+    error.clear();
+    return true;
+}
 } // namespace ludus::editor

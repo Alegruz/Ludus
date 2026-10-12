@@ -363,12 +363,49 @@ def cmd_install_butler(args) -> int:
     return EXIT_OK
 
 
+def cmd_scene(args) -> int:
+    from . import scene_assets as assets
+    root = Path(args.project)
+    relative = args.level
+    path = assets.inside(root, relative)
+    if args.scene_action == "new":
+        value = assets.new_level(args.name)
+        assets.save_level(root, relative, value)
+    else:
+        value = assets.open_level(root, relative)
+        if args.scene_action == "import":
+            previous = assets.read(path)
+            value = assets.import_scene(root, Path(args.source), value)
+            assets.save_level(root, relative, value, previous)
+        elif args.scene_action == "assemble":
+            assets.atomic(Path(args.output), assets.assemble(root, value))
+        elif args.scene_action == "publish":
+            assets.publish(root, value, Path(args.output))
+    payload = assets.dump(root, value)
+    _emit(args, payload)
+    if not getattr(args, "json", False):
+        print(_json.dumps(payload, indent=2))
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ludus", description="Ludus host tooling CLI")
     p.add_argument("--version", action="version", version=f"ludus {__version__}")
     p.add_argument("--json", action="store_true", help="emit a versioned JSON result")
     p.add_argument("--store", help="SDK store root (default: $LUDUS_SDK_STORE or the native user data directory)")
     sub = p.add_subparsers(dest="group", required=True)
+    scenes = sub.add_parser("scene", help="project-owned 3D levels and immutable cooked assets").add_subparsers(dest="scene_action", required=True)
+    for action in ("new", "open", "import", "dump", "assemble", "publish"):
+        command = scenes.add_parser(action)
+        command.add_argument("project")
+        command.add_argument("level", help="project-relative .lulevel path")
+        if action == "new":
+            command.add_argument("--name", default="Scene")
+        if action == "import":
+            command.add_argument("source", help="directory containing the supported PBRT reference profile")
+        if action in ("assemble", "publish"):
+            command.add_argument("output")
+        command.set_defaults(func=cmd_scene)
     tools = sub.add_parser("tools", help="explicitly acquire optional host tools").add_subparsers(dest="cmd", required=True)
     butler = tools.add_parser("install-butler", help="download the pinned host butler executable; never logs in or uploads")
     butler.add_argument("destination", help="directory for butler; an existing executable is never replaced")

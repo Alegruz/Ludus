@@ -6,11 +6,13 @@
 #include <ludus/foundation/math/vector.hpp>
 #include <ludus/gameplay/camera/evaluation.hpp>
 #include <ludus/graphics/renderer/views.hpp>
+#include <ludus/runtime/resources/scene.h>
 
 #include "internal/world_document.h"
 
 #include <QImage>
 #include <QJsonObject>
+#include <QSharedPointer>
 #include <QVector>
 
 namespace ludus::editor
@@ -22,6 +24,7 @@ struct PreviewMesh final
     QString Id;
     QVector<foundation::math::Vector3> Positions;
     QVector<foundation::math::Vector2> Uvs;
+    QVector<foundation::math::Vector3> Normals;
     QVector<foundation::uint32> Indices;
 };
 struct PreviewTexture final
@@ -33,6 +36,10 @@ struct PreviewSurface final
 {
     foundation::int32 Texture = 0;
     foundation::math::Vector4 Tint{1, 1, 1, 1};
+    bool Repeat = false;
+    foundation::float32 Metallic = 0;
+    foundation::float32 Roughness = .5F;
+    foundation::math::Vector3 Emission{};
 };
 struct PreviewObject final
 {
@@ -64,6 +71,15 @@ struct PreviewViewOptions final
 };
 struct RenderScene final
 {
+    QSharedPointer<resources::SceneDefinition> Definition;
+    QString LogicalId;
+    bool Lit = false;
+    // Worker decode; no source importer, engine code execution or device access.
+    [[nodiscard]] static bool LoadCooked(const QByteArray& bytes,
+                                         const QJsonObject& level,
+                                         RenderScene& output,
+                                         QString& error,
+                                         const QJsonObject& revisions);
     QVector<PreviewMesh> Meshes;
     QVector<PreviewTexture> Textures;
     QVector<PreviewObject> Objects;
@@ -72,6 +88,7 @@ struct RenderScene final
     foundation::math::Vector3 Center{};
     foundation::float32 Radius = 1;
     QByteArray Identity;
+    QByteArray PacketIdentity;
     QByteArray AssetsIdentity;
     QJsonObject RenderableBinding;
     [[nodiscard]] static bool

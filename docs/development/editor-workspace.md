@@ -603,6 +603,63 @@ they do not drive live-edit-game's runtime. Lighting, shadows, bake authoring,
 masked/painter surfaces, UV/sampler/mip editing, mesh importers, viewport picking,
 transform gizmos, hierarchy/prefabs and browser rendering remain later slices.
 
+## Project-owned 3D levels and reference import
+
+Use **3D Levels** for the Stage 5 scene workflow. The existing **World** and
+sample-specific **Scene** tabs continue to own their existing documents.
+
+1. Create a project or open an existing project. Missing/stale SDK setup is
+   reported by the normal project checks; explicit **Repair** owns setup changes.
+2. In **3D Levels**, choose **New 3D scene** or **Open 3D scene**. Choose a
+   project-contained `.lulevel` path, for example `scenes/main.lulevel`.
+3. Choose **Import reference scene** and select `scene-v4.pbrt` from the supplied
+   staircase2 reference directory. Conversion and asset publication are internal
+   operations; no project CMake, renderer, run-argument or schema edits are needed.
+4. The embedded viewport renders progressively. The object list provides names,
+   independent placements and removal. The imported camera frames the scene, and
+   the import notes report the material/filtering approximations.
+5. **Save scene** (or the shared Save action) verifies the required durable assets
+   and saves atomically. Reopening reads the project's cooked assets, even after
+   moving the project, removing the original source directory or deleting `out/`.
+
+Build the native Editor with
+[the rendered authoring option](#enable-the-rendered-authoring-surface).
+This first host profile requires macOS or Linux. Its source importer supports
+Modern Hall/staircase2's bounded PBRT/PLY/TGA
+subset, with grouped static room surfaces and emissive geometry. It is not a
+universal PBRT/glTF/OBJ importer. Unsupported features preserve the active scene.
+The native viewport selects CPU reference traversal explicitly and shows live
+256 × 256, 64-sample progressive output with no denoising. Browser scene import
+and a game's automatic Play/load integration are outside this initial profile.
+
+Keep `assets/` and `.lulevel` documents with the project. They contain the catalog,
+immutable cooked files, exact dependencies and retained licenses. Scene documents
+contain stable logical UUIDs; artifact revisions and hashes live in the catalog.
+Importing the same source again creates independent instances while reusing its
+logical assets. An explicit import of changed source data updates those assets
+only after complete validation and renderer admission. A failed/cancelled import
+or save preserves the previous saved data; the last-good viewport remains visible
+while a candidate is prepared.
+
+The installed CLI uses the same backend:
+
+```bash
+ludus scene new /path/to/project scenes/main.lulevel --name Main
+ludus scene import /path/to/project scenes/main.lulevel /path/to/staircase2
+ludus --json scene dump /path/to/project scenes/main.lulevel
+ludus scene open /path/to/moved-project scenes/main.lulevel
+ludus scene publish /path/to/project scenes/main.lulevel /path/to/new-release
+```
+
+`scene publish` writes only the selected required closure and its licenses,
+`scenes/main.lulevel`, `scene-release.json` and a runtime `scene.luscn` packet.
+It refuses an existing destination. `scene assemble PROJECT LEVEL OUTPUT` produces
+an interchange packet without calling the source importer. The owning
+[resource-manager architecture](../architecture/resource-management.md#initial-stage-5-storage-and-renderer-profile)
+documents schemas, identities, capacities and ownership; the
+[staircase2 prototype guide](../examples/reference-scene.md) retains its original
+conversion/visual limitations and higher-quality offline capture evidence.
+
 ## S4 scene authoring
 
 The Scene tab is the first concrete game-owned adapter, using the same v1
