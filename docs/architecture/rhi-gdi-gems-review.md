@@ -10,7 +10,9 @@ on 2026-10-11; the [architecture implementation record](rhi-gdi.md#implementatio
 owns the shipped baseline and its evidence. The planned
 [R6–R17 follow-up milestones](rhi-gdi.md#follow-up-milestones-r6r17), assigned
 on 2026-10-12, are maintained in that architecture; this review does not duplicate
-their scopes or acceptance gates.
+their scopes or acceptance gates. The 2026-10-12 API review recorded beside that
+roadmap separates binding arrays from descriptor indexing and native ray queries
+from dedicated pipelines; it does not add a research-trial adoption.
 
 The durable contribution of these references is explicit ownership and data
 flow, with optimizations selected by workload. The final Ludus proposal retains
