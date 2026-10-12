@@ -480,19 +480,11 @@ def atlas_triangles(vertices, atlas_width, atlas_height):
                 poly = clip(poly, axis, limit, greater)
             for i in range(1, len(poly) - 1):
                 triangle = [poly[0], poly[i], poly[i + 1]]
-                if (
-                    dot(
-                        cross(
-                            sub(triangle[1][0], triangle[0][0]),
-                            sub(triangle[2][0], triangle[0][0]),
-                        ),
-                        cross(
-                            sub(triangle[1][0], triangle[0][0]),
-                            sub(triangle[2][0], triangle[0][0]),
-                        ),
-                    )
-                    < 1e-20
-                ):
+                geometric = cross(
+                    sub(triangle[1][0], triangle[0][0]),
+                    sub(triangle[2][0], triangle[0][0]),
+                )
+                if dot(geometric, geometric) < 1e-20:
                     continue
                 output.append(
                     [

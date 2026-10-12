@@ -807,20 +807,46 @@ class RealProcessTests(unittest.TestCase):
 
     def test_second_instance_on_same_build_tree_is_busy(self) -> None:
         # A separate editor instance holding the per-build-tree lock forces Busy.
-        import fcntl
+        import selectors
+        import subprocess
 
         digest = self.write_project()
         runtime = self.make_runtime("import sys;sys.exit(0)\n")
         lock_dir = self.build / ".cmake"
         lock_dir.mkdir(parents=True, exist_ok=True)
-        holder = (lock_dir / ".ludus-editor.lock").open("a")
-        self.addCleanup(holder.close)
-        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # The protocol harness runs in a thread; a separate child holds the
+        # competing lock so this fixture proves interprocess exclusion.
+        holder = subprocess.Popen(
+            [sys.executable, "-c",
+             "import fcntl,sys\n"
+             "with open(sys.argv[1], 'a') as lock:\n"
+             " fcntl.flock(lock, fcntl.LOCK_EX)\n"
+             " print('locked', flush=True)\n"
+             " sys.stdin.read(1)\n",
+             str(lock_dir / ".ludus-editor.lock")],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True)
+
+        def stop_holder():
+            holder.stdin.close()
+            try:
+                holder.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                holder.kill()
+                holder.wait(timeout=5)
+            holder.stdout.close()
+            holder.stderr.close()
+
+        self.addCleanup(stop_holder)
+        with selectors.DefaultSelector() as selector:
+            selector.register(holder.stdout, selectors.EVENT_READ)
+            self.assertTrue(selector.select(timeout=5), "lock holder did not become ready")
+            self.assertEqual(holder.stdout.readline(), "locked\n")
         client = self.client(self.context(runtime))
         client.send(self.request("build_run", digest))
         events = client.events()
         result = events[-1]
-        self.assertEqual(result["code"], "Busy")
+        self.assertEqual(result.get("code"), "Busy", events)
         self.assertEqual(client.exit_code, 1)
 
     # --- helpers ----------------------------------------------------------- #
