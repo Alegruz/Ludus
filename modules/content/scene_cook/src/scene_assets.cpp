@@ -3336,7 +3336,7 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
 
 [[nodiscard]] bool ReadDiskDigest(std::string_view root,
                                   std::string_view relative,
-                                  bool& outExists,
+                                  bool& outDoesExist,
                                   Array<uint8>& outBytes,
                                   Failure& inoutFailure) noexcept
 {
@@ -3345,9 +3345,9 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
     {
         return false;
     }
-    outExists = DoesPathExist(path.GetView());
+    outDoesExist = DoesPathExist(path.GetView());
     outBytes.Clear();
-    return outExists == false || ReadBytes(path.GetView(), MAX_METADATA_BYTES, outBytes, inoutFailure) == true;
+    return outDoesExist == false || ReadBytes(path.GetView(), MAX_METADATA_BYTES, outBytes, inoutFailure) == true;
 }
 
 [[nodiscard]] bool OperateEditorSceneDocuments(const EditorSceneRequest& request,
@@ -3367,12 +3367,12 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
     ReportStage(request, "validate");
     if (operation == EditorSceneOperation::Open)
     {
-        bool exists = false;
-        if (ReadDiskDigest(root, request.Path, exists, disk, inoutFailure) == false)
+        bool doesExist = false;
+        if (ReadDiskDigest(root, request.Path, doesExist, disk, inoutFailure) == false)
         {
             return false;
         }
-        if (exists == false)
+        if (doesExist == false)
         {
             return inoutFailure.Fail(AssetErrorCode::AssetCorrupt, "No such file or directory");
         }
@@ -3431,16 +3431,16 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
         else if (operation == EditorSceneOperation::Save)
         {
             ReportStage(request, "save");
-            bool exists = false;
+            bool doesExist = false;
             Array<uint8> previous;
-            if (ReadDiskDigest(root, request.Path, exists, previous, inoutFailure) == false)
+            if (ReadDiskDigest(root, request.Path, doesExist, previous, inoutFailure) == false)
             {
                 return false;
             }
             HexDigest actual;
             ComputeHexDigest(GetSpan(previous), actual);
             const bool isExpected =
-                exists == request.HasExpected && (exists == false || actual.View() == request.Expected);
+                doesExist == request.HasExpected && (doesExist == false || actual.View() == request.Expected);
             if (isExpected == false)
             {
                 return inoutFailure.Fail(AssetErrorCode::Conflict, "Saved level changed on disk");
@@ -3448,7 +3448,7 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
             if (SaveLevelDocument(root,
                                   request.Path,
                                   level,
-                                  exists == true ? &previous : nullptr,
+                                  doesExist == true ? &previous : nullptr,
                                   disk,
                                   inoutFailure) == false)
             {
@@ -3525,13 +3525,13 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
     tree.SetMember(response, "warnings", warnings);
     if (operation == EditorSceneOperation::Open || operation == EditorSceneOperation::Save)
     {
-        bool exists = false;
+        bool doesExist = false;
         Array<uint8> now;
-        if (ReadDiskDigest(root, request.Path, exists, now, inoutFailure) == false)
+        if (ReadDiskDigest(root, request.Path, doesExist, now, inoutFailure) == false)
         {
             return false;
         }
-        if (exists == false || AreBytesEqual(GetSpan(now), GetSpan(disk)) == false)
+        if (doesExist == false || AreBytesEqual(GetSpan(now), GetSpan(disk)) == false)
         {
             return inoutFailure.Fail(AssetErrorCode::Conflict, "Saved level changed while preparing the response");
         }

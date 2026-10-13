@@ -703,7 +703,7 @@ TEST_CASE("Converted cooked levels edit placement and gameplay in World and surv
     tools.ToolingRoot = QStringLiteral(LUDUS_EDITOR_PROJECT_ROOT);
     QString prepareError;
     INFO(prepareError.toStdString());
-    const auto external = QDir(directory.path()).filePath(QStringLiteral("external"));
+    const QString external = QDir(directory.path()).filePath(QStringLiteral("external"));
     REQUIRE(ludus::editor::tests::CreateFixtureSource(external));
     REQUIRE(ludus::editor::tests::PrepareImportedLevel(directory.path(),
                                                        QStringLiteral("scenes/room.lulevel"),

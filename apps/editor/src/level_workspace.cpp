@@ -471,7 +471,7 @@ bool LevelWorkspace::Run(const QString& operation,
         EditorSceneProgress progress;
         progress.Context = this;
         progress.Report = [](void* context, std::string_view stage) noexcept {
-            auto* self = static_cast<LevelWorkspace*>(context);
+            LevelWorkspace* self = static_cast<LevelWorkspace*>(context);
             const QString text = DescribeStage(stage);
             if (!text.isEmpty())
             {
@@ -543,7 +543,7 @@ void LevelWorkspace::WaitForOperation()
 void LevelWorkspace::Completed()
 {
 #if !defined(Q_OS_WASM)
-    const auto result = QJsonDocument::fromJson(Response_).object();
+    const QJsonObject result = QJsonDocument::fromJson(Response_).object();
     const bool succeeded = OperationError_.isEmpty() && result.value(QStringLiteral("ok")).toBool();
     if (PublishingCatalog_)
     {
