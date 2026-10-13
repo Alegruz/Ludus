@@ -1,30 +1,33 @@
+#include "raster_bindings.slang"
+
 // GPU-produced RGB/index records are instance attributes, using R4 StorageVertex.
 // No fragment-stage storage binding or host image transfer is required.
-[[vk::binding(0, 0)]] cbuffer ImageParameters
+LUDUS_SHADER_BINDING(0) cbuffer ImageParameters
 {
-    float4 previewExtent;
+    float4 ExtentPixel;
 };
 struct VertexInput
 {
-    float2 corner : POSITION0;
-    float4 display : COLOR0; // Encoded RGB and exact integer-valued pixel index.
+    float2 CornerPixel : POSITION0;
+    float4 DisplayRgbAndIndex : COLOR0; // Encoded RGB and exact integer-valued positionPixel index.
 };
 struct VertexOutput
 {
-    float4 position : SV_Position;
-    float4 color : COLOR0;
+    float4 PositionClip : SV_Position;
+    float4 Color : COLOR0;
 };
-VertexOutput vertexMain(VertexInput input)
+VertexOutput VertexMain(VertexInput input)
 {
     VertexOutput output;
-    uint width = uint(previewExtent.x);
-    float2 pixel = float2(uint(input.display.w) % width, uint(input.display.w) / width) + .5;
-    float2 center = pixel * float2(2 / previewExtent.x, -2 / previewExtent.y) + float2(-1, 1);
-    output.position = float4(center + input.corner / previewExtent.xy, 0, 1);
-    output.color = float4(input.display.xyz, 1);
+    uint width = uint(ExtentPixel.x);
+    float2 positionPixel =
+        float2(uint(input.DisplayRgbAndIndex.w) % width, uint(input.DisplayRgbAndIndex.w) / width) + .5;
+    float2 positionClip = positionPixel * float2(2 / ExtentPixel.x, -2 / ExtentPixel.y) + float2(-1, 1);
+    output.PositionClip = float4(positionClip + input.CornerPixel / ExtentPixel.xy, 0, 1);
+    output.Color = float4(input.DisplayRgbAndIndex.xyz, 1);
     return output;
 }
-float4 fragmentMain(VertexOutput input) : SV_Target0
+float4 FragmentMain(VertexOutput input) : SV_Target0
 {
-    return input.color;
+    return input.Color;
 }

@@ -11,6 +11,7 @@
 
 #include <ludus/content/content.h>
 #include <ludus/graphics/renderer/renderer.hpp>
+#include <ludus/graphics/renderer/viewport.hpp>
 #include <ludus/graphics/rhi/lifetime.h>
 #include <ludus/graphics/rhi/measurement.h>
 #include <ludus/runtime/resources/scene.h>
@@ -348,6 +349,78 @@ bool RasterEvidence(rr::Renderer& renderer,
         .Outcome.Succeeded();
 }
 
+bool ViewportEvidence(rr::Renderer& renderer,
+                      rhi::DeviceHandle device,
+                      rhi::SurfaceHandle surface,
+                      rr::Snapshot snapshot,
+                      const rr::ReferenceCaptureDescription& camera,
+                      filesystem::WriteDirectory& directory) noexcept
+{
+    rr::RasterViewport viewport;
+    Status status = viewport.Initialize(renderer, device, camera.Width, camera.Height);
+    const uint64 deadline = time::NowTicks() + 30 * time::NANOSECONDS_PER_SECOND;
+    while (status == Status::Pending && time::NowTicks() < deadline)
+    {
+        status = viewport.Poll();
+    }
+    if (status != Status::Ready)
+    {
+        return false;
+    }
+    rr::ViewDescription view;
+    view.WorldToClip = camera.WorldToClip;
+    view.CameraPosition = camera.CameraPosition;
+    view.Depth = camera.ReverseZ ? rr::DepthConvention::ReverseZ : rr::DepthConvention::Conventional;
+    rr::ViewReport report;
+    if (viewport.Update(snapshot, view, report) != Status::Ready)
+    {
+        return false;
+    }
+    // Repeated interactive frames have no tracing setup, sample target or history.
+    for (uint32 frame = 0; frame < 2; ++frame)
+    {
+        rhi::SubmissionToken producer;
+        if (viewport.Render(surface, producer) != Status::Ready)
+        {
+            return false;
+        }
+        status = rhi::GetStatus(device, producer);
+        while (status == Status::Pending && time::NowTicks() < deadline)
+        {
+            status = rhi::GetStatus(device, producer);
+        }
+        if (status != Status::Ready)
+        {
+            return false;
+        }
+    }
+    rr::ViewportFrame frame;
+    rr::ViewportImage image;
+    if (viewport.Acquire(frame, image) != Status::Ready)
+    {
+        return false;
+    }
+    // Offline evidence only; a Qt consumer imports this texture directly.
+    rhi::ReadbackTicket ticket;
+    status = rhi::RequestTextureReadback(device,
+                                         image.Texture,
+                                         {0, 0, 0, image.Width, image.Height},
+                                         usize(image.Width) * 4,
+                                         ticket);
+    while (status == Status::Pending && time::NowTicks() < deadline)
+    {
+        status = rhi::GetStatus(device, ticket);
+    }
+    Array<uint8> bytes;
+    if (status != Status::Ready || !bytes.TryResize(usize(image.Width) * image.Height * 4) ||
+        rhi::CopyReadback(device, ticket, bytes.GetData(), bytes.GetSize()) != Status::Ready ||
+        !directory.Publish("viewport.rgba", {bytes.GetData(), bytes.GetSize()}).Outcome.Succeeded())
+    {
+        return false;
+    }
+    return rhi::Release(device, ticket) == Status::Ready && viewport.Release(frame) == Status::Ready;
+}
+
 bool GpuEvidence(rr::Renderer& renderer,
                  rhi::DeviceHandle device,
                  rhi::SurfaceHandle surface,
@@ -356,13 +429,13 @@ bool GpuEvidence(rr::Renderer& renderer,
                  filesystem::WriteDirectory& directory) noexcept
 {
     rr::GpuPreview preview;
-    auto status = renderer.BeginGpuPreview(snapshot, description, preview);
+    Status status = renderer.BeginGpuPreview(snapshot, description, preview);
     if ((status != Status::Ready && status != Status::Pending) || renderer.Release(snapshot) != Status::Ready)
     {
         return false;
     }
     rr::GpuPreviewInfo info;
-    const auto started = time::NowTicks();
+    const uint64 started = time::NowTicks();
     while (!info.Complete && time::NowTicks() - started < 1800 * time::NANOSECONDS_PER_SECOND)
     {
         status = renderer.GetGpuPreviewInfo(preview, info);
@@ -401,7 +474,7 @@ bool GpuEvidence(rr::Renderer& renderer,
                                          {0, 0, 0, image.Width, image.Height},
                                          usize(image.Width) * 4,
                                          ticket);
-    const auto readStarted = time::NowTicks();
+    const uint64 readStarted = time::NowTicks();
     while (status == Status::Pending && time::NowTicks() - readStarted < 30 * time::NANOSECONDS_PER_SECOND)
     {
         status = rhi::GetStatus(device, ticket);
@@ -453,10 +526,11 @@ int Run(int argc, char** argv) noexcept
     {
         return 1; // root-directory, output-directory, square extent, samples
     }
+    const bool viewport = argc == 6 && std::string_view(argv[5]) == "viewport";
     const bool gpu = argc == 6 && std::string_view(argv[5]) == "gpu";
     const bool native = argc == 6 && std::string_view(argv[5]) == "native";
     const bool acceptance = argc == 6 && (native || std::string_view(argv[5]) == "acceptance");
-    if (argc == 6 && !acceptance && !gpu)
+    if (argc == 6 && !acceptance && !gpu && !viewport)
     {
         return 1;
     }
@@ -508,11 +582,12 @@ int Run(int argc, char** argv) noexcept
                                                 usize{128} * 1024 * 1024,
                                                 usize{128} * 1024 * 1024,
                                                 512};
-    const auto enabled = gpu ? renderer.EnableGpuPreview(ludus::shaders::renderer_gpu_preview::Compute(),
-                                                         ludus::shaders::renderer_gpu_preview_image::Vertex(),
-                                                         ludus::shaders::renderer_gpu_preview_image::Fragment(),
-                                                         {usize{128} * 1024 * 1024, usize{128} * 1024 * 1024, 1})
-                             : renderer.EnableReferenceRendering(ludus::shaders::ray_query::Query(), options);
+    const Status enabled = viewport ? Status::Ready
+                           : gpu    ? renderer.EnableGpuPreview(ludus::shaders::renderer_gpu_preview::Compute(),
+                                                             ludus::shaders::renderer_gpu_preview_image::Vertex(),
+                                                             ludus::shaders::renderer_gpu_preview_image::Fragment(),
+                                                                {usize{128} * 1024 * 1024, usize{128} * 1024 * 1024, 1})
+                                    : renderer.EnableReferenceRendering(ludus::shaders::ray_query::Query(), options);
     if (enabled != Status::Ready)
     {
         return 6;
@@ -556,6 +631,10 @@ int Run(int argc, char** argv) noexcept
          renderer.Release(identitySnapshot) != Status::Ready))
     {
         return 15;
+    }
+    if (viewport)
+    {
+        return ViewportEvidence(renderer, device, surface, snapshot, description, directory) ? 0 : 17;
     }
     if (gpu)
     {

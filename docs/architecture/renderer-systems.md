@@ -1675,9 +1675,53 @@ orders architecture/lifetime and shader-debugging reviews before advanced scalin
 Record the consulted source sections and a concrete contract change or experiment
 before promoting a program description into an implementation decision.
 
+## Interactive World viewport
+
+The primary editor viewport renders the selected project's current World/level
+extraction and current camera through the ordinary renderer. World ownership,
+entity-to-mesh/material extraction, selection and camera controls belong above
+GraphicsRenderer; the renderer consumes `Snapshot` and `ViewDescription`, just
+as a game runtime does. It must not substitute a fixed acceptance scene or an
+offline capture for the selected World.
+
+`RasterViewport` packages that existing raster path into GPU output textures.
+Initialize views/lighting on the renderer, then initialize the viewport with
+physical dimensions and exposure. On a World edit, publish a complete replacement
+snapshot; on a camera change, supply its current `WorldToClip` and camera values.
+`Update` atomically prepares the latest snapshot/view and preserves the prior
+view on rejection. `Render` draws that view and tone-maps it on GPU; it requires
+no reference input retention, BVH, compute or ray-query capability and has no
+sample target or convergence state. Poll Pending resource/view setup before
+rendering. No driver shader compilation occurs in the per-frame draw path.
+
+Acquire a completed `ViewportImage` with a `ViewportFrame` lease. Two leased
+images apply backpressure and neither may be overwritten. The image is top-left,
+physical-pixel RGBA8Unorm carrying **sRGB-encoded tone-mapped RGB**, matching the optional PT image convention.
+The consumer must not apply a second tone map or encoding. A Qt adapter must negotiate the exact logical
+GPU device and retain an RHI interop lease through foreign sampling completion,
+then return the renderer frame lease. There is no CPU image presentation fallback.
+For resize prepare a candidate viewport, swap when Ready, and retire the old
+viewport after its consumers finish. Reset the viewport before its borrowed
+Renderer/device; RHI interop leases independently retain external backing.
+
+Raster mode uses authored materials, direct lights, environment and admitted
+bakes/shadows. An emissive material is visible but does not automatically illuminate
+other objects: real-time emissive GI is still a separate lighting capability.
+No editor lights or fake environment are added to hide that limitation. Choose
+optional GPU path tracing explicitly when emissive/indirect transport is wanted;
+do not make it the prerequisite for ordinary scene navigation.
+
+Native acceptance changes a snapshot's material color and its camera while
+retaining a prior GPU image, verifies visible content changes and culling,
+checks two-image backpressure and stale identities, and uses no tracing setup.
+This establishes the renderer output contract. Selected-project loading,
+interactive UI controls and Qt GPU presentation require the editor integration
+and RHI native-sharing bridge; renderer fixture acceptance alone does not claim
+those end-to-end checks are complete.
+
 ## GPU-resident progressive preview
 
-`Renderer::EnableGpuPreview` enables a separate GPU-compute BVH path before mesh
+`Renderer::EnableGpuPreview` explicitly enables an optional GPU-compute BVH path before mesh
 and material creation. It requires negotiated compute, storage buffers and
 StorageVertex support. Cook `renderer_gpu_preview.slang` as compute and
 `renderer_gpu_preview_image.slang` as raster with the installed shader helper;

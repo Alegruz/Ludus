@@ -11,6 +11,7 @@
 #include <ludus/foundation/math/scalar.hpp>
 #include <ludus/foundation/time/time.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
+#include <ludus/graphics/renderer/viewport.hpp>
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/lifetime.h>
 
@@ -28,7 +29,7 @@ using S = rhi::RasterStatus;
 void WaitPreview(rr::Renderer& renderer, rr::GpuPreview preview, uint32 samples)
 {
     rr::GpuPreviewInfo info;
-    const auto start = time::NowTicks();
+    const uint64 start = time::NowTicks();
     S status = S::Pending;
     do
     {
@@ -41,12 +42,12 @@ void ReadImage(rhi::DeviceHandle device, rr::GpuPreviewImage image, uint8* outpu
 {
     // Acceptance only: production preview never calls either readback service.
     rhi::ReadbackTicket ticket;
-    auto status = rhi::RequestTextureReadback(device,
-                                              image.Texture,
-                                              {0, 0, 0, image.Width, image.Height},
-                                              usize(image.Width) * 4,
-                                              ticket);
-    const auto start = time::NowTicks();
+    S status = rhi::RequestTextureReadback(device,
+                                           image.Texture,
+                                           {0, 0, 0, image.Width, image.Height},
+                                           usize(image.Width) * 4,
+                                           ticket);
+    const uint64 start = time::NowTicks();
     while (status == S::Pending && time::NowTicks() - start < 10 * time::NANOSECONDS_PER_SECOND)
     {
         status = rhi::GetStatus(device, ticket);
@@ -58,7 +59,7 @@ void ReadImage(rhi::DeviceHandle device, rr::GpuPreviewImage image, uint8* outpu
 uint8 Display(float32 value)
 {
     value /= 1 + value;
-    const auto encoded = value <= .0031308F ? value * 12.92F : 1.055F * std::pow(value, 1.0F / 2.4F) - .055F;
+    const float32 encoded = value <= .0031308F ? value * 12.92F : 1.055F * std::pow(value, 1.0F / 2.4F) - .055F;
     return static_cast<uint8>(std::lround(encoded * 255));
 }
 } // namespace
@@ -77,7 +78,7 @@ TEST_CASE("GPU preview transports emissive RGB on GPU and preserves leased outpu
     rhi::DeviceDescription description;
     description.Required.PortableRaster = true;
     description.Required.Compute = true;
-    const auto started = rhi::CreateDevice({}, { .Width = 8, .Height = 8 }, description, device, surface);
+    const rhi::DeviceStatus started = rhi::CreateDevice({}, { .Width = 8, .Height = 8 }, description, device, surface);
 #if defined(LUDUS_TEST_METAL)
     if (started != rhi::DeviceStatus::Ready && rhi::GetStartup().Error == rhi::StartupError::AdapterUnavailable)
     {
@@ -99,11 +100,11 @@ TEST_CASE("GPU preview transports emissive RGB on GPU and preserves leased outpu
                                         shaders::renderer_output::Fragment(),
                                         shaders::renderer_shadow::Fragment()) == S::Ready);
     rr::MaterialProgram program;
-    auto status = renderer.PrewarmLitProgram(shaders::renderer_lit::Vertex(),
-                                             shaders::renderer_lit::Fragment(),
-                                             shaders::renderer_lit_shadow::Fragment(),
-                                             program);
-    const auto setupStart = time::NowTicks();
+    S status = renderer.PrewarmLitProgram(shaders::renderer_lit::Vertex(),
+                                          shaders::renderer_lit::Fragment(),
+                                          shaders::renderer_lit_shadow::Fragment(),
+                                          program);
+    const uint64 setupStart = time::NowTicks();
     while (status == S::Pending && time::NowTicks() - setupStart < 10 * time::NANOSECONDS_PER_SECOND)
     {
         status = renderer.GetStatus(program);
@@ -124,7 +125,7 @@ TEST_CASE("GPU preview transports emissive RGB on GPU and preserves leased outpu
     rr::ReferenceCapture oracle;
     REQUIRE(renderer.BeginReferenceCapture(snapshot, capture, oracle) == S::Ready);
     status = S::Pending;
-    const auto oracleStart = time::NowTicks();
+    const uint64 oracleStart = time::NowTicks();
     while (status == S::Pending && time::NowTicks() - oracleStart < 10 * time::NANOSECONDS_PER_SECOND)
     {
         status = renderer.AdvanceReferenceCapture(oracle);
@@ -133,14 +134,14 @@ TEST_CASE("GPU preview transports emissive RGB on GPU and preserves leased outpu
     rr::ReferencePixel reference[4];
     REQUIRE(renderer.CopyReferencePixels(oracle, reference, 4) == S::Ready);
     float32 indirect = 0;
-    for (const auto& pixel : reference)
+    for (const rr::ReferencePixel& pixel : reference)
     {
         indirect += pixel.Indirect.X;
     }
     REQUIRE(indirect > .01F);
     REQUIRE(renderer.Release(oracle) == S::Ready);
     rr::GpuPreview preview;
-    auto rejected = capture;
+    rr::ReferenceCaptureDescription rejected = capture;
     rr::DirectLight light;
     rejected.Lights = &light;
     rejected.LightCount = 1;
@@ -164,7 +165,7 @@ TEST_CASE("GPU preview transports emissive RGB on GPU and preserves leased outpu
     ReadImage(device, images[0], early, sizeof(early));
     rhi::SubmissionToken blocked;
     CHECK(renderer.AdvanceGpuPreview(preview, surface, blocked) == S::NotReady);
-    auto staleFrame = frames[1];
+    rr::GpuPreviewFrame staleFrame = frames[1];
     REQUIRE(renderer.Release(frames[1]) == S::Ready);
     CHECK(renderer.Release(staleFrame) == S::InvalidHandle);
     for (uint32 sample = 3; sample <= capture.TargetSamples; ++sample)
@@ -188,7 +189,7 @@ TEST_CASE("GPU preview transports emissive RGB on GPU and preserves leased outpu
         CHECK(final[pixel * 4 + 3] == 255);
         CHECK_FALSE((final[pixel * 4] == 255 && final[pixel * 4 + 1] == 0 && final[pixel * 4 + 2] == 255));
     }
-    auto staleJob = preview;
+    rr::GpuPreview staleJob = preview;
     REQUIRE(renderer.Release(preview) == S::Ready);
     rr::GpuPreviewInfo info;
     CHECK(renderer.GetGpuPreviewInfo(staleJob, info) == S::InvalidHandle);
@@ -198,4 +199,96 @@ TEST_CASE("GPU preview transports emissive RGB on GPU and preserves leased outpu
     REQUIRE(renderer.Release(frames[0]) == S::Ready);
     REQUIRE(renderer.Release(frames[1]) == S::Ready);
     CHECK(rhi::GetStatus(device, images[1].Texture) == S::InvalidHandle);
+}
+
+TEST_CASE("Interactive raster viewport updates World snapshots and camera without tracing", "[renderer][gpu][viewport]")
+{
+    rhi::Shutdown();
+    struct Guard
+    {
+        ~Guard()
+        {
+            rhi::Shutdown();
+        }
+    } guard;
+    rhi::DeviceHandle device;
+    rhi::SurfaceHandle surface;
+    rhi::DeviceDescription description;
+    description.Required.PortableRaster = true;
+    const rhi::DeviceStatus started = rhi::CreateDevice({}, { .Width = 8, .Height = 8 }, description, device, surface);
+#if defined(LUDUS_TEST_METAL)
+    if (started != rhi::DeviceStatus::Ready && rhi::GetStartup().Error == rhi::StartupError::AdapterUnavailable)
+    {
+        SKIP("No Metal adapter");
+    }
+#endif
+    REQUIRE(started == rhi::DeviceStatus::Ready);
+    rr::Renderer renderer;
+    REQUIRE(renderer.Initialize(device, shaders::renderer_flat::Vertex(), shaders::renderer_flat::Fragment()) ==
+            S::Ready);
+    REQUIRE(renderer.InitializeViews(shaders::renderer_composite::Vertex(), shaders::renderer_composite::Fragment()) ==
+            S::Ready);
+    REQUIRE(renderer.InitializeLighting(shaders::renderer_output::Vertex(),
+                                        shaders::renderer_output::Fragment(),
+                                        shaders::renderer_shadow::Fragment()) == S::Ready);
+    const math::Vector3 positions[]{{-1, -1, .5F}, {1, -1, .5F}, {1, 1, .5F}, {-1, 1, .5F}};
+    const uint32 indices[]{0, 1, 2, 0, 2, 3};
+    rr::Mesh mesh;
+    REQUIRE(renderer.CreateMesh({positions, 4, indices, 6}, mesh) == S::Ready);
+    rr::SceneItem item;
+    item.Geometry = mesh;
+    item.SourceId = 1;
+    item.Material.Color = {1, 0, 0, 1};
+    rr::Snapshot world;
+    REQUIRE(renderer.CreateSnapshot(&item, 1, world) == S::Ready);
+    rr::RasterViewport viewport;
+    REQUIRE(viewport.Initialize(renderer, device, 8, 8) == S::Ready);
+    rr::ViewDescription camera;
+    rr::ViewReport report;
+    REQUIRE(viewport.Update(world, camera, report) == S::Ready);
+    rr::ViewportFrame frames[2];
+    rr::ViewportImage images[2];
+    const auto render = [&](uint32 slot) {
+        rhi::SubmissionToken producer;
+        REQUIRE(viewport.Render(surface, producer) == S::Ready);
+        const uint64 timeout = time::NowTicks();
+        S status = S::Pending;
+        do
+        {
+            status = viewport.Acquire(frames[slot], images[slot]);
+        } while (status == S::Pending && time::NowTicks() - timeout < 10 * time::NANOSECONDS_PER_SECOND);
+        REQUIRE(status == S::Ready);
+    };
+    render(0);
+    constexpr usize center = (usize{4} * 8 + 4) * 4;
+    uint8 oldImage[256], newImage[256], retained[256];
+    ReadImage(device, {images[0].Texture, images[0].Producer, 8, 8, 0}, oldImage, sizeof(oldImage));
+    REQUIRE(oldImage[center] >= 126);
+    REQUIRE(oldImage[center + 1] == 0);
+    item.Material.Color = {0, 1, 0, 1};
+    REQUIRE(renderer.ReplaceSnapshot(&item, 1, world) == S::Ready);
+    REQUIRE(viewport.Update(world, camera, report) == S::Ready);
+    render(1);
+    ReadImage(device, {images[1].Texture, images[1].Producer, 8, 8, 0}, newImage, sizeof(newImage));
+    CHECK(newImage[center] == 0);
+    CHECK(newImage[center + 1] >= 126);
+    rhi::SubmissionToken blocked;
+    CHECK(viewport.Render(surface, blocked) == S::NotReady);
+    ReadImage(device, {images[0].Texture, images[0].Producer, 8, 8, 0}, retained, sizeof(retained));
+    CHECK(std::memcmp(oldImage, retained, sizeof(oldImage)) == 0);
+    rr::ViewportFrame stale = frames[1];
+    REQUIRE(viewport.Release(frames[1]) == S::Ready);
+    CHECK(viewport.Release(stale) == S::InvalidHandle);
+    camera.WorldToClip.Columns[3].X = 4;
+    REQUIRE(viewport.Update(world, camera, report) == S::Ready);
+    CHECK(report.Visible == 0);
+    render(1);
+    ReadImage(device, {images[1].Texture, images[1].Producer, 8, 8, 0}, newImage, sizeof(newImage));
+    CHECK(newImage[center] == 0);
+    CHECK(newImage[center + 1] == 0);
+    REQUIRE(viewport.Release(frames[0]) == S::Ready);
+    REQUIRE(viewport.Release(frames[1]) == S::Ready);
+    REQUIRE(renderer.Release(world) == S::Ready);
+    REQUIRE(renderer.Release(mesh) == S::Ready);
+    viewport.Reset();
 }

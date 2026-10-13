@@ -7,6 +7,7 @@
 #include <ludus/foundation/math/vector.hpp>
 #include <ludus/graphics/renderer/overlays.hpp>
 #include <ludus/graphics/renderer/renderer.hpp>
+#include <ludus/graphics/renderer/viewport.hpp>
 #include <ludus/graphics/renderer/views.hpp>
 #include <ludus/graphics/rhi/device.h>
 #include <ludus/graphics/rhi/lifetime.h>
@@ -1765,8 +1766,8 @@ TEST_CASE("Reference surface admission rejects retained narrow-channel texels", 
                 {rr::ReferenceTraversal::CpuOracle, usize{4} * 1024 * 1024, 0, 8}) == rhi::RasterStatus::Ready);
     LitFixture fixture;
     fixture.Enable(session);
-    auto program = fixture.Prewarm(session);
-    for (const auto format : {rhi::RasterFormat::R8Unorm, rhi::RasterFormat::Rg8Unorm})
+    rr::MaterialProgram program = fixture.Prewarm(session);
+    for (const rhi::RasterFormat format : {rhi::RasterFormat::R8Unorm, rhi::RasterFormat::Rg8Unorm})
     {
         CAPTURE(format);
         const uint8 bytes[]{255, 255, 0, 0};
@@ -1839,4 +1840,58 @@ TEST_CASE("Cancelled GPU producers retain budget until completion", "[renderer][
     REQUIRE(renderer.Release(preview) == rhi::RasterStatus::Ready);
     REQUIRE(renderer.Release(snapshot) == rhi::RasterStatus::Ready);
     renderer.Reset();
+}
+
+TEST_CASE("Raster viewport works without compute and retries an exhausted frame reservation", "[renderer][viewport]")
+{
+    rhi::StorageLimits storage;
+    storage.Submissions = 1;
+    Session session(false, {}, storage, false);
+    LitFixture lighting;
+    lighting.Enable(session);
+    rr::Snapshot snapshot;
+    const rr::SceneItem item = session.Item(7);
+    REQUIRE(session.Renderer.CreateSnapshot(&item, 1, snapshot) == rhi::RasterStatus::Ready);
+    rr::RasterViewport viewport;
+    REQUIRE(viewport.Initialize(session.Renderer, session.Device, 8, 8) == rhi::RasterStatus::Ready);
+    rr::ViewReport report;
+    REQUIRE(viewport.Update(snapshot, {}, report) == rhi::RasterStatus::Ready);
+    rr::PreparedView earlierView;
+    REQUIRE(session.Renderer.PrepareView(snapshot, {}, earlierView, report) == rhi::RasterStatus::Ready);
+    REQUIRE(session.Renderer.Release(snapshot) == rhi::RasterStatus::Ready);
+    // Keep separate work in flight, then inject backend reservation exhaustion.
+    REQUIRE(rhi::BeginFrame(session.Device, session.Surface) == rhi::DeviceStatus::Ready);
+    REQUIRE(session.Renderer.DrawView(earlierView, {}) == rhi::RasterStatus::Ready);
+    rhi::SubmissionToken earlier;
+    REQUIRE(rhi::EndFrame(session.Device, earlier) == rhi::RasterStatus::Ready);
+    CHECK_FALSE(earlier.IsNull());
+    CHECK(viewport.Render(session.Surface, earlier) == rhi::RasterStatus::InvalidDescription);
+    rhi::FrameInfo closed;
+    CHECK(rhi::GetFrameInfo(session.Device, session.Surface, closed) == rhi::DeviceStatus::InvalidState);
+    rhi::reference::Submission = rhi::RasterStatus::CapacityExceeded;
+    rhi::SubmissionToken partial;
+    CHECK(partial.IsNull());
+    CHECK(viewport.Render(session.Surface, partial) == rhi::RasterStatus::CapacityExceeded);
+    rhi::FrameInfo frameInfo;
+    CHECK(rhi::GetFrameInfo(session.Device, session.Surface, frameInfo) == rhi::DeviceStatus::Ready);
+    rhi::reference::Completed = rhi::reference::Submitted;
+    rhi::reference::Submission = rhi::RasterStatus::Ready;
+    // Retry closes exactly the owned frame, preserves the recording failure and
+    // publishes completion for any accepted partial work; no false image success.
+    CHECK(viewport.Render(session.Surface, partial) == rhi::RasterStatus::CapacityExceeded);
+    CHECK(rhi::GetFrameInfo(session.Device, session.Surface, frameInfo) == rhi::DeviceStatus::InvalidState);
+    rhi::reference::Completed = rhi::reference::Submitted;
+    REQUIRE(viewport.Poll() == rhi::RasterStatus::Ready);
+    rr::ViewportFrame frame;
+    rr::ViewportImage image;
+    CHECK(viewport.Acquire(frame, image) == rhi::RasterStatus::NotReady);
+    rhi::SubmissionToken complete;
+    REQUIRE(viewport.Render(session.Surface, complete) == rhi::RasterStatus::Ready);
+    rhi::reference::Completed = rhi::reference::Submitted;
+    REQUIRE(viewport.Acquire(frame, image) == rhi::RasterStatus::Ready);
+    CHECK(rhi::reference::Dispatches == 0);
+    CHECK(rhi::reference::Copies == 0);
+    REQUIRE(viewport.Release(frame) == rhi::RasterStatus::Ready);
+    viewport.Reset();
+    REQUIRE(session.Renderer.Release(earlierView) == rhi::RasterStatus::Ready);
 }

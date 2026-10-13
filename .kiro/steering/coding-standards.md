@@ -65,6 +65,11 @@ and run the required documentation checks before a PR.
 
 ## Other standing rules
 
+Apply [AGENTS.md's explicit-type and shader rules](../../AGENTS.md#explicit-types-and-shader-source)
+and [review/viewport acceptance rules](../../AGENTS.md#review-feedback-and-viewport-acceptance).
+Use the changed-source policy gate; passing CI does not replace reading human
+reviews or validating the selected World's interactive viewport.
+
 - C++23, no compiler extensions; pinned Clang/LLVM 18 toolchain.
 - Browser Foundation modules, Platform, RHI, and the WebGPU probe use a separate pinned Emscripten
   toolchain (`config/web_toolchain.json`, ADR 0009); repository formatting and

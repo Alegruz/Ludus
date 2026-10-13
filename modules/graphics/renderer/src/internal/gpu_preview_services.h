@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ludus/foundation/base/byte_order.hpp>
+
+#include <cstring>
 // Included only by renderer.cpp. CPU work here only
 // freezes input, builds the static BVH, packs bytes, and observes submission state.
 // Transport, accumulation and display conversion are exclusively shader work.
@@ -40,7 +42,7 @@ Status PackGpuScene(const ReferenceJob& job,
                     Array<math::Vector4>& texels,
                     internal::GpuPreviewUniform& uniform) noexcept
 {
-    const auto& scene = job.Scene;
+    const internal::ReferenceSceneData& scene = job.Scene;
     const uint64 nodesWide = uint64(scene.Triangles.GetSize()) * 10;
     const uint64 orderWide = nodesWide + uint64(scene.Nodes.GetSize()) * 3;
     const uint64 emittersWide = orderWide + scene.Order.GetSize();
@@ -61,7 +63,7 @@ Status PackGpuScene(const ReferenceJob& job,
     }
     for (usize i = 0; i < scene.InstanceCount; ++i)
     {
-        const auto& instance = scene.Instances[i];
+        const internal::ReferenceInstance& instance = scene.Instances[i];
         textures[i] = size;
         if (!instance.Surface->HasTexture)
         {
@@ -103,8 +105,8 @@ Status PackGpuScene(const ReferenceJob& job,
     }
     for (usize i = 0; i < scene.Triangles.GetSize(); ++i)
     {
-        const auto& t = scene.Triangles[i];
-        auto* out = data.GetData() + i * 10;
+        const internal::ReferenceTriangle& t = scene.Triangles[i];
+        math::Vector4* out = data.GetData() + i * 10;
         out[0] = GpuVector(t.Positions[0], GpuBits(t.Instance));
         out[1] = GpuVector(t.Positions[1], t.Area);
         out[2] = GpuVector(t.Positions[2], GpuBits(t.Primitive));
@@ -119,8 +121,8 @@ Status PackGpuScene(const ReferenceJob& job,
     }
     for (usize i = 0; i < scene.Nodes.GetSize(); ++i)
     {
-        const auto& n = scene.Nodes[i];
-        auto* out = data.GetData() + nodes + i * 3;
+        const internal::ReferenceBvhNode& n = scene.Nodes[i];
+        math::Vector4* out = data.GetData() + nodes + i * 3;
         out[0] = GpuVector(n.Bounds.Min, GpuBits(n.Left));
         out[1] = GpuVector(n.Bounds.Max, GpuBits(n.Right));
         out[2] = {GpuBits(n.First), GpuBits(n.Count), 0, 0};
@@ -135,9 +137,9 @@ Status PackGpuScene(const ReferenceJob& job,
     }
     for (usize i = 0; i < scene.InstanceCount; ++i)
     {
-        const auto& instance = scene.Instances[i];
-        const auto& s = *instance.Surface;
-        auto* out = data.GetData() + surfaces + i * 6;
+        const internal::ReferenceInstance& instance = scene.Instances[i];
+        const internal::ReferenceSurfaceData& s = *instance.Surface;
+        math::Vector4* out = data.GetData() + surfaces + i * 6;
         out[0] = GpuVector(s.Bsdf.BaseColor, s.Bsdf.Metallic);
         out[1] = {s.Bsdf.Roughness, s.AlphaCutoff, GpuBits(instance.Texture.Width), GpuBits(instance.Texture.Height)};
         out[2] = s.Tint;
@@ -164,7 +166,7 @@ Status PackGpuScene(const ReferenceJob& job,
         {
             continue;
         }
-        const auto& image = instance.Texture;
+        const rhi::TextureCpuContent& image = instance.Texture;
         for (usize y = 0; y < image.Height; ++y)
         {
             for (usize x = 0; x < image.Width; ++x)
@@ -175,8 +177,8 @@ Status PackGpuScene(const ReferenceJob& job,
                     return Status::InvalidDescription;
                 }
                 const usize pixel = y * image.Width + x;
-                auto& v = texels[textures[i] + pixel / 4];
-                const auto bits = GpuBits(word);
+                math::Vector4& v = texels[textures[i] + pixel / 4];
+                const float32 bits = GpuBits(word);
                 switch (pixel % 4)
                 {
                     case 0:
@@ -196,7 +198,8 @@ Status PackGpuScene(const ReferenceJob& job,
         }
     }
     uniform.ClipToWorld = job.ClipToWorld;
-    uniform.Eye = GpuVector(job.Description.CameraPosition, job.Description.OrthographicCamera ? 1.0F : 0.0F);
+    uniform.CameraPositionWorld =
+        GpuVector(job.Description.CameraPosition, job.Description.OrthographicCamera ? 1.0F : 0.0F);
     uniform.Dimensions[0] = job.Description.Width;
     uniform.Dimensions[1] = job.Description.Height;
     uniform.Dimensions[2] = job.Description.MaxDepth;
@@ -215,8 +218,8 @@ Status PackGpuScene(const ReferenceJob& job,
     uniform.Sampling[3] = job.Description.TargetSamples;
     uniform.Environment = GpuVector(job.Description.Environment);
     uniform.Options.X = job.Description.SecondaryDistance;
-    uniform.BoundsMin = GpuVector(scene.Bounds.Min);
-    uniform.BoundsMax = GpuVector(scene.Bounds.Max);
+    uniform.BoundsMinimumWorld = GpuVector(scene.Bounds.Min);
+    uniform.BoundsMaximumWorld = GpuVector(scene.Bounds.Max);
     return Status::Ready;
 }
 Status PollGpuJob(rhi::DeviceHandle device, const GpuPreviewState& state, GpuPreviewRecord& job) noexcept
@@ -229,9 +232,9 @@ Status PollGpuJob(rhi::DeviceHandle device, const GpuPreviewState& state, GpuPre
                                           job.Accumulation,
                                           job.Colors,
                                           job.ImageParameters};
-        for (auto buffer : buffers)
+        for (rhi::BufferHandle buffer : buffers)
         {
-            const auto status = rhi::GetStatus(device, buffer);
+            const Status status = rhi::GetStatus(device, buffer);
             if (status != Status::Ready)
             {
                 return Accepted(status) ? Status::Pending : (job.Setup = status);
@@ -245,7 +248,7 @@ Status PollGpuJob(rhi::DeviceHandle device, const GpuPreviewState& state, GpuPre
                                                         {2, job.Accumulation, 0, pixels * 32},
                                                         {3, job.Colors, 0, pixels * 16},
                                                         {4, job.Texels, 0, job.TexelBytes}};
-            const auto created = rhi::CreateBindingSet(device, state.ComputeLayout, bindings, job.ComputeBindings);
+            const Status created = rhi::CreateBindingSet(device, state.ComputeLayout, bindings, job.ComputeBindings);
             if (!Accepted(created))
             {
                 return job.Setup = created;
@@ -255,14 +258,14 @@ Status PollGpuJob(rhi::DeviceHandle device, const GpuPreviewState& state, GpuPre
         if (!job.ImageBindingsCreated)
         {
             const rhi::RasterBindingResource binding{0, job.ImageParameters, 0, 16};
-            const auto created = rhi::CreateBindingSet(device, state.ImageLayout, {&binding, 1}, job.ImageBindings);
+            const Status created = rhi::CreateBindingSet(device, state.ImageLayout, {&binding, 1}, job.ImageBindings);
             if (!Accepted(created))
             {
                 return job.Setup = created;
             }
             job.ImageBindingsCreated = true;
         }
-        auto status = rhi::GetStatus(device, job.ComputeBindings);
+        Status status = rhi::GetStatus(device, job.ComputeBindings);
         if (status == Status::Ready)
         {
             status = rhi::GetStatus(device, job.ImageBindings);
@@ -287,7 +290,7 @@ Status PollGpuJob(rhi::DeviceHandle device, const GpuPreviewState& state, GpuPre
     }
     if (job.Info.Pending)
     {
-        const auto status = rhi::GetStatus(device, job.Frames[job.PendingFrame].Producer);
+        const Status status = rhi::GetStatus(device, job.Frames[job.PendingFrame].Producer);
         if (status == Status::Pending)
         {
             return status;
@@ -309,7 +312,7 @@ Status PollGpuJob(rhi::DeviceHandle device, const GpuPreviewState& state, GpuPre
 } // namespace
 void Renderer::State::DropGpuPreview(usize slot) noexcept
 {
-    auto& job = GpuPreview->Jobs[slot];
+    GpuPreviewRecord& job = GpuPreview->Jobs[slot];
     static_cast<void>(rhi::Destroy(Device, job.ComputeBindings));
     static_cast<void>(rhi::Destroy(Device, job.ImageBindings));
     static_cast<void>(rhi::Destroy(Device, job.Data));
@@ -318,7 +321,7 @@ void Renderer::State::DropGpuPreview(usize slot) noexcept
     static_cast<void>(rhi::Destroy(Device, job.Accumulation));
     static_cast<void>(rhi::Destroy(Device, job.Colors));
     static_cast<void>(rhi::Destroy(Device, job.ImageParameters));
-    for (auto& frame : job.Frames)
+    for (internal::GpuFrameRecord& frame : job.Frames)
     {
         static_cast<void>(rhi::Destroy(Device, frame.Texture));
         frame.Owned = false;
@@ -341,10 +344,10 @@ void Renderer::State::RetireGpuPreviews() noexcept
 {
     for (usize i = 0; i < 4; ++i)
     {
-        auto& job = GpuPreview->Jobs[i];
+        GpuPreviewRecord& job = GpuPreview->Jobs[i];
         if (job.Used && !job.Owned && !job.Frames[0].Owned && !job.Frames[1].Owned)
         {
-            const auto status = PollGpuJob(Device, *GpuPreview, job);
+            const Status status = PollGpuJob(Device, *GpuPreview, job);
             if (status != Status::Pending && status != Status::NotReady)
             {
                 DropGpuPreview(i);
@@ -365,7 +368,7 @@ void Renderer::State::ClearGpuPreview() noexcept
             DropGpuPreview(i);
         }
     }
-    auto& state = *GpuPreview;
+    internal::GpuPreviewState& state = *GpuPreview;
     static_cast<void>(rhi::Destroy(Device, state.ComputePipeline));
     static_cast<void>(rhi::Destroy(Device, state.ImagePipeline));
     static_cast<void>(rhi::Destroy(Device, state.ComputeLayout));
@@ -390,7 +393,7 @@ Status Renderer::EnableGpuPreview(const rhi::RasterShaderDescription& compute,
     {
         return Status::InvalidState;
     }
-    auto status = RendererAdmission(mState->Device);
+    Status status = RendererAdmission(mState->Device);
     if (status != Status::Ready)
     {
         return status;
@@ -414,8 +417,8 @@ Status Renderer::EnableGpuPreview(const rhi::RasterShaderDescription& compute,
     }
     for (usize i = 0; i < 5; ++i)
     {
-        const auto& a = compute.Bindings[i];
-        const auto& b = GPU_COMPUTE_BINDINGS[i];
+        const ludus::graphics::rhi::RasterBinding& a = compute.Bindings[i];
+        const rhi::RasterBinding& b = GPU_COMPUTE_BINDINGS[i];
         if (a.Binding != b.Binding || a.Kind != b.Kind || a.Visibility != b.Visibility || a.MinSize != b.MinSize)
         {
             return Status::InvalidDescription;
@@ -430,7 +433,7 @@ Status Renderer::EnableGpuPreview(const rhi::RasterShaderDescription& compute,
     {
         return Status::InvalidDescription;
     }
-    auto* allocation = new (std::nothrow) GpuPreviewState;
+    GpuPreviewState* allocation = new (std::nothrow) GpuPreviewState;
     if (allocation == nullptr)
     {
         return Status::OutOfMemory;
@@ -445,7 +448,7 @@ Status Renderer::EnableGpuPreview(const rhi::RasterShaderDescription& compute,
         return status;
     }
     mState->GpuPreview = core::Move(state);
-    auto& target = *mState->GpuPreview;
+    internal::GpuPreviewState& target = *mState->GpuPreview;
     status = rhi::CreateRasterShader(mState->Device, compute, target.ComputeShader);
     if (Accepted(status))
     {
@@ -472,12 +475,12 @@ Status Renderer::PollGpuPreview() noexcept
     {
         return Status::NotReady;
     }
-    auto status = RendererAdmission(mState->Device);
+    Status status = RendererAdmission(mState->Device);
     if (status != Status::Ready)
     {
         return status;
     }
-    auto& state = *mState->GpuPreview;
+    internal::GpuPreviewState& state = *mState->GpuPreview;
     if (state.Setup != Status::Pending)
     {
         if (state.Setup == Status::Ready)
@@ -610,7 +613,7 @@ Status Renderer::BeginGpuPreview(Snapshot snapshot,
     {
         return Status::NotReady;
     }
-    auto status = PollGpuPreview();
+    Status status = PollGpuPreview();
     if (status != Status::Ready)
     {
         return status;
@@ -619,7 +622,7 @@ Status Renderer::BeginGpuPreview(Snapshot snapshot,
     {
         return Status::InvalidState;
     }
-    auto* source = Resolve(mState->SnapshotRecords, mState->Owner, snapshot);
+    State::SnapshotRecord* source = Resolve(mState->SnapshotRecords, mState->Owner, snapshot);
     if (source == nullptr)
     {
         return Status::InvalidHandle;
@@ -629,7 +632,7 @@ Status Renderer::BeginGpuPreview(Snapshot snapshot,
     {
         return Status::Unsupported;
     }
-    auto& state = *mState->GpuPreview;
+    internal::GpuPreviewState& state = *mState->GpuPreview;
     usize slot = 0;
     status = FreeSlot(state.Jobs, slot);
     if (status != Status::Ready)
@@ -642,7 +645,7 @@ Status Renderer::BeginGpuPreview(Snapshot snapshot,
         {
             continue;
         }
-        const auto material = source->Items[i].MaterialSlot;
+        const usize material = source->Items[i].MaterialSlot;
         if (material != NO_MATERIAL &&
             (mState->Materials[material].HasBake || mState->Materials[material].ShadowSlot != NO_SHADOW))
         {
@@ -656,7 +659,7 @@ Status Renderer::BeginGpuPreview(Snapshot snapshot,
         return status;
     }
     // Frozen geometry/BVH and input texels are CPU setup data; no host path state exists.
-    const auto cpuRemaining = mState->Reference->Options.CpuByteBudget - mState->Reference->CpuBytes;
+    const foundation::usize cpuRemaining = mState->Reference->Options.CpuByteBudget - mState->Reference->CpuBytes;
     if (scene->Info.CpuBytes > cpuRemaining)
     {
         return Status::CapacityExceeded;
@@ -704,7 +707,7 @@ Status Renderer::BeginGpuPreview(Snapshot snapshot,
     {
         return Status::OutOfMemory;
     }
-    auto& job = state.Jobs[slot];
+    GpuPreviewRecord& job = state.Jobs[slot];
     job.Used = job.Owned = true;
     job.Setup = Status::Pending;
     job.Info = {};
@@ -759,7 +762,7 @@ Status Renderer::BeginGpuPreview(Snapshot snapshot,
                                    {reinterpret_cast<const uint8*>(&dimensions), sizeof(dimensions)},
                                    job.ImageParameters);
     }
-    for (auto& frame : job.Frames)
+    for (internal::GpuFrameRecord& frame : job.Frames)
     {
         if (Accepted(status))
         {
@@ -789,7 +792,7 @@ Status BuildGpuGraph(rhi::DeviceHandle device,
                      uint32 image,
                      rhi::OrderedGraph& graph) noexcept
 {
-    auto status = rhi::CreateOrderedGraph(device, graph);
+    Status status = rhi::CreateOrderedGraph(device, graph);
     if (status != Status::Ready)
     {
         return status;
@@ -900,13 +903,13 @@ Status Renderer::AdvanceGpuPreview(renderer::GpuPreview handle,
     {
         return Status::InvalidState;
     }
-    auto status = RendererAdmission(mState->Device);
+    Status status = RendererAdmission(mState->Device);
     if (status != Status::Ready)
     {
         return status;
     }
-    auto& state = *mState->GpuPreview;
-    auto* job = Resolve(state.Jobs, 4, mState->Owner, handle);
+    internal::GpuPreviewState& state = *mState->GpuPreview;
+    internal::GpuPreviewRecord* job = Resolve(state.Jobs, 4, mState->Owner, handle);
     if (job == nullptr)
     {
         return Status::InvalidHandle;
@@ -959,18 +962,18 @@ Status Renderer::GetGpuPreviewInfo(renderer::GpuPreview handle, GpuPreviewInfo& 
     {
         return Status::InvalidState;
     }
-    const auto admission = RendererAdmission(mState->Device);
+    const Status admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
     }
-    auto& state = *mState->GpuPreview;
-    auto* job = Resolve(state.Jobs, 4, mState->Owner, handle);
+    internal::GpuPreviewState& state = *mState->GpuPreview;
+    internal::GpuPreviewRecord* job = Resolve(state.Jobs, 4, mState->Owner, handle);
     if (job == nullptr)
     {
         return Status::InvalidHandle;
     }
-    const auto status = PollGpuJob(mState->Device, state, *job);
+    const Status status = PollGpuJob(mState->Device, state, *job);
     if (!Accepted(status))
     {
         return status;
@@ -985,7 +988,7 @@ Renderer::AcquireGpuPreviewFrame(renderer::GpuPreview handle, GpuPreviewFrame& f
     {
         return Status::InvalidState;
     }
-    const auto admission = RendererAdmission(mState->Device);
+    const Status admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
@@ -994,13 +997,13 @@ Renderer::AcquireGpuPreviewFrame(renderer::GpuPreview handle, GpuPreviewFrame& f
     {
         return Status::InvalidState;
     }
-    auto& state = *mState->GpuPreview;
-    auto* job = Resolve(state.Jobs, 4, mState->Owner, handle);
+    internal::GpuPreviewState& state = *mState->GpuPreview;
+    internal::GpuPreviewRecord* job = Resolve(state.Jobs, 4, mState->Owner, handle);
     if (job == nullptr)
     {
         return Status::InvalidHandle;
     }
-    const auto status = PollGpuJob(mState->Device, state, *job);
+    const Status status = PollGpuJob(mState->Device, state, *job);
     if (!Accepted(status))
     {
         return status;
@@ -1009,7 +1012,7 @@ Renderer::AcquireGpuPreviewFrame(renderer::GpuPreview handle, GpuPreviewFrame& f
     {
         return Status::NotReady;
     }
-    auto& image = job->Frames[job->LatestFrame];
+    internal::GpuFrameRecord& image = job->Frames[job->LatestFrame];
     if (image.Generation == LAST_ID)
     {
         return Status::IdentityExhausted;
@@ -1026,12 +1029,12 @@ Status Renderer::Release(renderer::GpuPreview& handle) noexcept
     {
         return Status::InvalidState;
     }
-    const auto admission = RendererAdmission(mState->Device);
+    const Status admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
     }
-    auto* job = Resolve(mState->GpuPreview->Jobs, 4, mState->Owner, handle);
+    internal::GpuPreviewRecord* job = Resolve(mState->GpuPreview->Jobs, 4, mState->Owner, handle);
     if (job == nullptr)
     {
         return Status::InvalidHandle;
@@ -1047,18 +1050,18 @@ Status Renderer::Release(GpuPreviewFrame& handle) noexcept
     {
         return Status::InvalidState;
     }
-    const auto admission = RendererAdmission(mState->Device);
+    const Status admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
     }
-    const auto slot = Access::Slot(handle);
+    const usize slot = Access::Slot(handle);
     if (Access::Owner(handle) != mState->Owner || slot >= 8)
     {
         return Status::InvalidHandle;
     }
-    auto& job = mState->GpuPreview->Jobs[slot / 2];
-    auto& frame = job.Frames[slot % 2];
+    GpuPreviewRecord& job = mState->GpuPreview->Jobs[slot / 2];
+    internal::GpuFrameRecord& frame = job.Frames[slot % 2];
     if (!job.Used || !frame.Owned || frame.Generation != Access::Generation(handle))
     {
         return Status::InvalidHandle;

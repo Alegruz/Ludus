@@ -443,15 +443,17 @@ public:
     /// Detach atlas ownership; materials retain the exact rendered texture and caster version.
     [[nodiscard]] rhi::RasterStatus Release(ShadowAtlas& handle) noexcept;
     /// Prepare retained linear scene/display source and immutable exposure/output parameters.
-    /// Accepts RGBA8 or supported RGBA16F attachments. Encode=false is required for drawing
-    /// into a linear display target; UI can blend there before a second encode-only presentation.
+    /// Accepts RGBA8 or supported RGBA16F attachments. Encode=false selects a linear display
+    /// target for UI blending; Encode=true permits a final sRGB-encoded RGBA8Unorm
+    /// texture for external presentation. Consumers must not encode that again.
     [[nodiscard]] rhi::RasterStatus PrepareLightingPresentation(rhi::TextureHandle source,
                                                                 const ViewMapping& mapping,
                                                                 const LightingOutput& lighting,
                                                                 Presentation& output) noexcept;
     /// Compose a Ready lighting presentation in an acquired frame; select surface or linear RGBA8.
     /// Actual surface encoding selects shader or hardware conversion, exactly once. No blending.
-    /// Draw into a display intermediate with Encode=false, then UI, then an encode-only surface pass.
+    /// Use Encode=false for a linear UI intermediate. Encode=true encodes once for
+    /// RGBA8Unorm offscreen output, or selects shader/hardware surface encoding.
     [[nodiscard]] rhi::RasterStatus DrawLightingPresentation(Presentation handle,
                                                              const rhi::RasterPassDescription& description =
                                                              {

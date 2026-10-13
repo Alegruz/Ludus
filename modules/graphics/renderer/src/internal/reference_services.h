@@ -364,7 +364,7 @@ Status Renderer::EnableReferenceRendering(const rhi::ShaderDescription& shader,
     {
         return Status::InvalidDescription;
     }
-    const auto admission = RendererAdmission(mState->Device);
+    const Status admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
@@ -407,7 +407,7 @@ Status Renderer::DisableReferenceRendering() noexcept
     {
         return Status::InvalidState;
     }
-    const auto admission = RendererAdmission(mState->Device);
+    const Status admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
@@ -798,7 +798,7 @@ Status Renderer::BeginReferenceCapture(Snapshot snapshot,
     {
         return Status::NotReady;
     }
-    const auto admission = RendererAdmission(mState->Device);
+    const Status admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
@@ -840,7 +840,7 @@ Status Renderer::Release(ReferenceCapture& handle) noexcept
     {
         return Status::InvalidHandle;
     }
-    const auto admission = RendererAdmission(mState->Device);
+    const Status admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
@@ -860,7 +860,7 @@ Status Renderer::GetStatus(ReferenceCapture handle) const noexcept
     {
         return Status::InvalidHandle;
     }
-    const auto admission = RendererAdmission(mState->Device, false);
+    const Status admission = RendererAdmission(mState->Device, false);
     if (admission != Status::Ready)
     {
         return admission;
@@ -1020,7 +1020,7 @@ Status Renderer::AdvanceReferenceCapture(ReferenceCapture handle) noexcept
     {
         return Status::InvalidHandle;
     }
-    const auto admission = RendererAdmission(mState->Device);
+    const Status admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;
@@ -1243,7 +1243,7 @@ Status Renderer::UpdateReferenceCapture(ReferenceCapture handle,
     {
         return Status::InvalidHandle;
     }
-    const auto admission = RendererAdmission(mState->Device);
+    const Status admission = RendererAdmission(mState->Device);
     if (admission != Status::Ready)
     {
         return admission;

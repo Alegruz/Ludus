@@ -8,15 +8,17 @@ find_package(Ludus CONFIG REQUIRED COMPONENTS GraphicsRenderer Resources Content
 add_executable(reference_scene src/main.cpp)
 target_link_libraries(reference_scene PRIVATE Ludus::GraphicsRenderer Ludus::Resources Ludus::Content Ludus::FoundationFilesystem Ludus::FoundationTime Ludus::FoundationLogging)
 ludus_apply_app_policy(reference_scene)
-foreach(shader renderer_flat renderer_composite renderer_lit renderer_shadow renderer_output renderer_gpu_preview_image)
+foreach(shader renderer_flat renderer_composite renderer_lit renderer_shadow renderer_output)
     ludus_compile_shader(TARGET reference_scene NAME ${shader} RASTER
         SOURCE "${Ludus_DIR}/shaders/${shader}.slang" VERTEX vertexMain FRAGMENT fragmentMain)
 endforeach()
+ludus_compile_shader(TARGET reference_scene NAME renderer_gpu_preview_image RASTER
+    SOURCE "${Ludus_DIR}/shaders/renderer_gpu_preview_image.slang" VERTEX VertexMain FRAGMENT FragmentMain)
 ludus_compile_shader(TARGET reference_scene NAME renderer_lit_shadow RASTER
     SOURCE "${Ludus_DIR}/shaders/renderer_lit.slang" VERTEX vertexMain FRAGMENT shadowMain)
 ludus_compile_ray_queries(TARGET reference_scene NAME ray_query)
 ludus_compile_shader(TARGET reference_scene NAME renderer_gpu_preview
-    SOURCE "${Ludus_DIR}/shaders/renderer_gpu_preview.slang" COMPUTE computeMain)
+    SOURCE "${Ludus_DIR}/shaders/renderer_gpu_preview.slang" COMPUTE ComputeMain)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(reference_scene PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wundef
@@ -34,6 +36,9 @@ if(LUDUS_SCENE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_link_options(reference_scene PRIVATE -fsanitize=address,undefined)
 endif()
 if(BUILD_TESTING)
+    add_test(NAME scene_raster_viewport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_viewport.py" "$<TARGET_FILE:reference_scene>")
+    set_tests_properties(scene_raster_viewport PROPERTIES TIMEOUT 60)
     add_test(NAME scene_gpu_preview COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_gpu_preview.py" "$<TARGET_FILE:reference_scene>")
     set_tests_properties(scene_gpu_preview PROPERTIES TIMEOUT 60)

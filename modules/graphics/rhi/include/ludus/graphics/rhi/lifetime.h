@@ -169,6 +169,13 @@ private:
 /// A complete higher ordinal covers earlier accepted work in the same device session.
 struct SubmissionToken final
 {
+    /// True only for the default/cleared identity, before accepted submission.
+    /// Pure value query: does not check device ownership or GPU completion.
+    [[nodiscard]] bool IsNull() const noexcept
+    {
+        return Owner == 0 && Ordinal == 0;
+    }
+
 private:
     ludus::foundation::uint64 Owner = 0;
     ludus::foundation::uint64 Ordinal = 0;

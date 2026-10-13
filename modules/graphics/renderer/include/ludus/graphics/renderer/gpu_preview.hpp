@@ -7,9 +7,11 @@
 
 namespace ludus::graphics::renderer
 {
-/// Explicit GPU-compute BVH preview settings. No CPU transport or readback fallback.
+/// Optional progressive GPU path-tracing settings. No CPU transport or readback fallback.
 /// Static RGB reflection/emission uses RT1's admitted surface profile; this is a
-/// progressive, finite-depth preview without denoising or native ray queries.
+/// progressive, finite-depth reference mode without denoising or native ray queries.
+/// Use RasterViewport for ordinary interactive World navigation; this mode freezes
+/// scene/camera input, and requires compute plus retained reference inputs.
 struct GpuPreviewOptions final
 {
     /// Setup/retained geometry budget, including BVH construction and packing/upload scratch. Positive.

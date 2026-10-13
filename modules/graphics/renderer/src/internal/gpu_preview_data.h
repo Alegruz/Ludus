@@ -14,14 +14,14 @@ namespace ludus::graphics::renderer::internal
 struct GpuPreviewUniform final
 {
     math::Matrix4 ClipToWorld;
-    math::Vector4 Eye;
+    math::Vector4 CameraPositionWorld;
     uint32 Dimensions[4]{};
     uint32 Offsets[4]{};
     uint32 Counts[4]{};
     uint32 Sampling[4]{};
     math::Vector4 Environment;
     math::Vector4 Options;
-    math::Vector4 BoundsMin, BoundsMax;
+    math::Vector4 BoundsMinimumWorld, BoundsMaximumWorld;
 };
 static_assert(sizeof(GpuPreviewUniform) == 208);
 struct GpuFrameRecord final

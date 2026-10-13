@@ -563,3 +563,31 @@ Run:
 ```
 
 Doctor reports required and optional tools, versions, paths, and whether each satisfies the project requirements. It exits nonzero only when a required item is missing or invalid.
+
+## Review-derived source checks
+
+Before claiming PR readiness, read the current human review and every inline
+thread, reconcile feedback with implementation/evidence, and repeat after the
+final change. Passing build and test jobs does not satisfy unresolved review
+requirements. Keep generalizable policy in the contributor rules and add
+regressions to the owning check rather than relying on an isolated PR comment.
+
+Run the changed-source gate with an explicit comparison:
+
+```sh
+python3 scripts/python/source_policy.py --base origin/main --clang-format clang-format-18
+PYTHONPATH=scripts/python python3 -m unittest test_source_policy -v
+```
+
+CI uses the PR's actual base commit and includes standalone examples, tests and
+shader includes. The gate rejects newly introduced inferred variable types
+except unspellable lambdas or explained iterator/dependent types, checks Slang
+function/member/out names and coordinate member labels, and keeps target
+annotations at the RHI shader interface boundary. Existing violations are
+migration debt and cannot excuse newly added violations; no debt manifest is
+regenerated. This is a lexical check: it does not resolve C++ types, prove a
+coordinate transform, judge an exception's reason, or validate a native binding.
+Formatting, compilation, independent shader reflection and semantic review
+remain necessary. Shader entry-point renames must update every source and
+installed-SDK cook call; shared includes must be installed and appear in compiler
+depfiles so edits rebuild consumers.

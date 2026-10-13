@@ -265,7 +265,30 @@ The command-line level conversion/capture remains a runtime asset pipeline,
 not a separate editor workspace. Existing `.lulevel` files open in World through
 the documented conversion path.
 
+## Interactive raster viewport acceptance
+
+The installed consumer accepts `reference_scene INPUT OUTPUT SIZE 2 viewport`.
+It loads the supplied cooked scene and its camera, renders two ordinary raster
+frames through `RasterViewport`, and exports `viewport.rgba` for offline evidence.
+It never enables reference capture or requires compute/ray queries. That file
+contains top-left RGBA8Unorm **sRGB-encoded tone-mapped RGB**; the consumer must
+preserve display values without encoding again. The independent emitter fixture checks authored .5 emission
+maps to 156/255 after Reinhard/sRGB. This mode supplies no indirect transport, invented
+lights or CPU image presentation fallback.
+
+The native renderer viewport regression changes the extracted World snapshot's
+material and camera while keeping an earlier image leased, checking changed
+pixels, culling, retained-image immutability, backpressure and stale rejection.
+A real editor must feed the selected project's current World extraction into
+`Update`, respond to scene/camera/resize changes, and import the completed image
+through the RHI/Qt native-sharing bridge. The offline consumer proves the
+installed renderer API; it does not prove editor integration. See the
+[interactive viewport contract](../architecture/renderer-systems.md#interactive-world-viewport).
+
 ## GPU preview acceptance
+
+This is the explicit optional progressive path-tracing reference mode, distinct
+from the primary interactive raster viewport above.
 
 The installed sample also accepts `gpu` as its optional mode. This selects the
 renderer GPU-compute BVH path, requires compute capability and preserves authored

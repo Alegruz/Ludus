@@ -1482,10 +1482,6 @@ Status Renderer::DrawLightingPresentation(Presentation handle, const rhi::Raster
     uint32 width = frame.Width, height = frame.Height;
     if (!surface)
     {
-        if (p->Encode)
-        {
-            return Status::InvalidDescription;
-        }
         rhi::TextureDescription target;
         const auto status = rhi::GetTextureDescription(s.Device, description.Color, target);
         if (status != Status::Ready)
@@ -1512,7 +1508,7 @@ Status Renderer::DrawLightingPresentation(Presentation handle, const rhi::Raster
     {
         return status;
     }
-    const usize mode = surface && p->Encode && frame.Encoding == rhi::SurfaceEncoding::Unorm ? 1U : 0U;
+    const usize mode = p->Encode && (!surface || frame.Encoding == rhi::SurfaceEncoding::Unorm) ? 1U : 0U;
     const rhi::RasterVertexSlice vertices[]{{p->Vertices, 0, 4 * sizeof(math::Vector4)}};
     return rhi::DrawIndexed(
         s.Device,
