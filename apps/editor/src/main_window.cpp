@@ -388,6 +388,8 @@ void MainWindow::LaunchAfterPreview(LaunchAction action, const QString& debugger
     {
         return;
     }
+    ResumeViewport_ = World_->PreviewRunning();
+    ResumeViewportEpoch_ = Controller_->State().ProjectEpoch;
     Scene_->StopPreview();
     World_->StopPreview();
     AudioLaunchPending_ = true;
@@ -656,8 +658,20 @@ void MainWindow::OnStateChanged()
     if (state.Document == DocumentState::ProjectLoaded)
     {
         const auto root = QDir(QFileInfo(state.DescriptorPath).absolutePath()).absoluteFilePath(state.Saved.SourceDir);
+        const bool restore =
+            QFileInfo(root).canonicalFilePath() != ProjectLayoutRoot_ || state.ProjectEpoch != ProjectLayoutEpoch_;
+        if (restore && QFileInfo(root).canonicalFilePath() == ProjectLayoutRoot_)
+        {
+            SaveProjectWorkspace();
+        }
+        ProjectLayoutEpoch_ = state.ProjectEpoch;
+        SetProjectWorkspace(root, false);
         Scene_->SetProject(root, state.ProjectEpoch);
         World_->SetProject(root, state.ProjectEpoch);
+        if (restore)
+        {
+            SetProjectWorkspace(root, true);
+        }
         Scripts_->SetProject(QFileInfo(state.DescriptorPath).absolutePath(), root, state.Saved.Preset);
         Audio_->SetRoot(QDir(root).absoluteFilePath(QStringLiteral("content")));
         Content_->SetProject(QDir(root).absoluteFilePath(QStringLiteral("content")), state.ProjectEpoch);
@@ -665,6 +679,7 @@ void MainWindow::OnStateChanged()
 
     else
     {
+        SetProjectWorkspace({}, false);
         Scene_->SetProject({}, state.ProjectEpoch);
         World_->SetProject({}, state.ProjectEpoch);
         Scripts_->SetProject({}, {}, {});
@@ -672,6 +687,14 @@ void MainWindow::OnStateChanged()
         Content_->SetProject(QString(), state.ProjectEpoch);
     }
 
+    if (ResumeViewport_ && state.OperationPhase == Phase::Idle && !AudioLaunchPending_)
+    {
+        ResumeViewport_ = false;
+        if (!CloseConfirmed_ && loaded && state.ProjectEpoch == ResumeViewportEpoch_)
+        {
+            World_->ResumePreview();
+        }
+    }
     // If a close was requested and the workspace is now closeable, finish.
     RenderProperties();
     if (CloseConfirmed_ && Controller_->Caps().CanCloseImmediately)

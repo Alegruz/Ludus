@@ -1,4 +1,5 @@
 #include "internal/render_panel.h"
+#include "internal/preview_viewport.h"
 #include "internal/render_load_job.h"
 
 #include <QCheckBox>
@@ -19,14 +20,17 @@ RenderPanel::RenderPanel(QWidget* parent) : QWidget(parent), Preview_(this)
     setObjectName(QStringLiteral("worldRenderPanel"));
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
+    Viewport_ = new PreviewViewport(&Preview_, this);
+    Viewport_->setObjectName(QStringLiteral("worldViewport"));
+    Viewport_->hide();
     auto* actions = new QHBoxLayout;
-    Open_ = new QPushButton(QStringLiteral("Preview 3D"), this);
+    Open_ = new QPushButton(QStringLiteral("Resume viewport"), this);
     Open_->setObjectName(QStringLiteral("worldPreview3D"));
-    Open_->setToolTip(QStringLiteral("Validate applied World data and project render.preview.json, then open the "
-                                     "native renderer. Pending fields are not previewed."));
+    Open_->setToolTip(QStringLiteral("Validate the World snapshot and project render.preview.json, then resume the "
+                                     "embedded viewport."));
     Refresh_ = new QPushButton(QStringLiteral("Reload preview assets"), this);
     Refresh_->setObjectName(QStringLiteral("worldPreviewReload"));
-    Stop_ = new QPushButton(QStringLiteral("Close preview"), this);
+    Stop_ = new QPushButton(QStringLiteral("Pause viewport"), this);
     Stop_->setObjectName(QStringLiteral("worldPreviewStop"));
     auto* details = new QPushButton(QStringLiteral("Camera and diagnostics ▸"), this);
     details->setCheckable(true);
@@ -43,7 +47,8 @@ RenderPanel::RenderPanel(QWidget* parent) : QWidget(parent), Preview_(this)
     actions->addStretch();
     layout->addLayout(actions);
     Status_ = new QLabel(
-        QStringLiteral("3D preview uses applied World data. The project supplies authoring/render.preview.json."),
+        QStringLiteral(
+            "Valid World fields update the embedded viewport. The project supplies authoring/render.preview.json."),
         this);
     Status_->setObjectName(QStringLiteral("worldPreviewStatus"));
     Status_->setTextFormat(Qt::PlainText);
@@ -127,6 +132,16 @@ RenderPanel::RenderPanel(QWidget* parent) : QWidget(parent), Preview_(this)
         Again_ = false;
         QueuedLaunch_ = false;
     });
+    connect(&Preview_, &RenderPreview::NavigationChanged, this, [this]() {
+        const auto state = Preview_.Navigation();
+        const QSignalBlocker yaw(Yaw_), pitch(Pitch_), zoom(Zoom_), camera(Cameras_), reference(Reference_);
+        Yaw_->setValue(qRound(state.value(QStringLiteral("yaw")).toDouble()));
+        Pitch_->setValue(qRound(state.value(QStringLiteral("pitch")).toDouble()));
+        Zoom_->setValue(qRound(state.value(QStringLiteral("zoom")).toDouble() * 10));
+        const auto index = Cameras_->findData(state.value(QStringLiteral("camera")).toString());
+        Cameras_->setCurrentIndex(index < 0 ? 0 : index);
+        Reference_->setChecked(state.value(QStringLiteral("reference")).toBool());
+    });
     SetWorld({}, nullptr);
 }
 RenderPanel::~RenderPanel()
@@ -149,15 +164,21 @@ void RenderPanel::SetWorld(const QString& root, const WorldDocument* world)
     }
     Root_ = root;
     World_ = world;
+    PreviewWorld_ = world == nullptr ? WorldDocument{} : *world;
+    Viewport_->ClearFrame(QStringLiteral("Open a World to render it here."));
     Selected_.clear();
     Pending_ = false;
     UpdateTintAction();
     const bool loaded = world != nullptr && world->Loaded();
     Open_->setEnabled(loaded);
+    if (loaded && world->SceneLevel().isEmpty())
+    {
+        (void)Refresh(true);
+    }
     Refresh_->setEnabled(loaded);
-    Status_->setText(loaded ? QStringLiteral("Editor preview uses applied World data; games own runtime binding. "
-                                             "Unapplied fields are not visible.")
-                            : QStringLiteral("Open a World with project render bindings to preview 3D."));
+    Status_->setText(
+        loaded ? QStringLiteral("Valid fields update the viewport; Apply commits them. Games own runtime binding.")
+               : QStringLiteral("Open a World with project render bindings to preview 3D."));
 }
 bool RenderPanel::Refresh(bool launch)
 {
@@ -173,8 +194,8 @@ bool RenderPanel::Refresh(bool launch)
         QueuedLaunch_ = QueuedLaunch_ || launch || inheritedLaunch;
         return true;
     }
-    Status_->setText(QStringLiteral("Validating applied World and preview assets… Editing remains available."));
-    Job_ = new RenderLoadJob(Root_, *World_, Generation_, launch, this);
+    Status_->setText(QStringLiteral("Validating World preview and assets… Editing remains available."));
+    Job_ = new RenderLoadJob(Root_, PreviewWorld_, Generation_, launch, this);
     UpdateTintAction();
     Stop_->setEnabled(true);
     connect(Job_, &RenderLoadJob::Finished, this, [this]() {
@@ -214,7 +235,7 @@ bool RenderPanel::Refresh(bool launch)
 void RenderPanel::Publish(const RenderScene& scene, bool launch)
 {
     Stale_.clear();
-    const auto selected = Cameras_->currentData().toString();
+    const auto selected = Preview_.Navigation().value(QStringLiteral("camera")).toString();
     {
         const QSignalBlocker block(Cameras_);
         Cameras_->clear();
@@ -231,18 +252,21 @@ void RenderPanel::Publish(const RenderScene& scene, bool launch)
         Status_->setText(Preview_.Status());
         return;
     }
-    Navigate();
+    Navigate(false);
     if (launch)
     {
         Q_EMIT Starting();
-        (void)Preview_.Start();
+        if (!Preview_.Start())
+        {
+            Viewport_->ClearFrame(Preview_.Status());
+        }
         return;
     }
     if (!Preview_.Running())
     {
         Status_->setText(
             QStringLiteral(
-                "Preview validated: %1 objects, %2 meshes, %3 textures, %4 cameras. Preview 3D opens the renderer.")
+                "Preview validated: %1 objects, %2 meshes, %3 textures, %4 cameras. Resume viewport starts rendering.")
                 .arg(scene.Objects.size())
                 .arg(scene.Meshes.size())
                 .arg(scene.Textures.size())
@@ -265,9 +289,22 @@ void RenderPanel::UpdateTintAction()
 }
 void RenderPanel::WorldChanged()
 {
-    if (Job_ != nullptr || !Preview_.Scene().Identity.isEmpty())
+    if (World_ != nullptr)
     {
-        (void)Refresh(false);
+        PreviewDraft(*World_);
+    }
+}
+QWidget* RenderPanel::TakeViewport(QWidget* parent)
+{
+    Viewport_->setParent(parent);
+    return Viewport_;
+}
+void RenderPanel::PreviewDraft(const WorldDocument& draft)
+{
+    PreviewWorld_ = draft;
+    if (draft.Loaded() && draft.SceneLevel().isEmpty())
+    {
+        (void)Refresh(Preview_.Running());
     }
 }
 void RenderPanel::Stop() noexcept
@@ -277,20 +314,25 @@ void RenderPanel::Stop() noexcept
     Again_ = false;
     QueuedLaunch_ = false;
     Stop_->setEnabled(false);
-    Status_->setText(QStringLiteral("3D preview closed. Applied World data is preserved."));
+    Open_->setEnabled(World_ != nullptr && World_->Loaded());
+    Status_->setText(QStringLiteral("Viewport paused. World data is preserved."));
 }
-void RenderPanel::Navigate()
+void RenderPanel::Navigate(bool controls)
 {
     const auto camera = Cameras_->currentIndex() - 1;
     const bool orbit = camera < 0;
     Yaw_->setEnabled(orbit);
     Pitch_->setEnabled(orbit);
     Zoom_->setEnabled(orbit);
+    const auto state = Preview_.Navigation();
     Preview_.Navigate(camera,
-                      static_cast<foundation::float32>(Yaw_->value()),
-                      static_cast<foundation::float32>(Pitch_->value()),
-                      static_cast<foundation::float32>(Zoom_->value()) / 10,
-                      Reference_->isChecked());
+                      controls ? static_cast<foundation::float32>(Yaw_->value())
+                               : static_cast<foundation::float32>(state.value(QStringLiteral("yaw")).toDouble()),
+                      controls ? static_cast<foundation::float32>(Pitch_->value())
+                               : static_cast<foundation::float32>(state.value(QStringLiteral("pitch")).toDouble()),
+                      controls ? static_cast<foundation::float32>(Zoom_->value()) / 10
+                               : static_cast<foundation::float32>(state.value(QStringLiteral("zoom")).toDouble()),
+                      controls ? Reference_->isChecked() : state.value(QStringLiteral("reference")).toBool());
     if (orbit)
     {
         Trace_->setText(QStringLiteral(
@@ -312,14 +354,14 @@ void RenderPanel::Navigate()
 }
 void RenderPanel::ShowStatus()
 {
+    Open_->setEnabled(World_ != nullptr && World_->Loaded() && !Preview_.Running());
     Stop_->setEnabled(Preview_.Running() || (Job_ != nullptr && Job_->Generation() == Generation_) || Again_);
     if (!Preview_.Status().isEmpty())
     {
-        Status_->setText(Preview_.Status() +
-                         (Job_ != nullptr ? QStringLiteral(" Loading updated applied data; previous preview is shown.")
-                                          : QString()) +
-                         (Stale_.isEmpty()
-                              ? QString()
+        Status_->setText(
+            Preview_.Status() +
+            (Job_ != nullptr ? QStringLiteral(" Loading updated preview data; previous frame is shown.") : QString()) +
+            (Stale_.isEmpty() ? QString()
                               : QStringLiteral(" Previous preview; latest World/assets rejected: ") + Stale_));
     }
 }
