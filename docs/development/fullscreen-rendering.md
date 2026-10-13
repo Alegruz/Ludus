@@ -1661,7 +1661,9 @@ a dynamic storage write at byte 256 with an untouched prefix/suffix. The native 
 array texture/view owners before drawing and the snapshot before readback;
 retained backing must still produce the expected pixels. Optional non-uniform
 execution is reported unavailable when a Vulkan device cannot enable it.
-`r11.html` exercises dynamic offset pixels, rejected misalignment and exact GDI
+The source fixture enables its native array cases when the pinned translator is
+configured (`LUDUS_R11_NATIVE_ARRAYS`); the installed native SDK fixture requires
+that translator and always qualifies the array profile. `r11.html` exercises dynamic offset pixels, rejected misalignment and exact GDI
 ranges on forced WebGPU/WebGL 2; WebGPU also checks the dynamic storage write. Registry tests cover creation rollback, descriptor
 pressure across delayed completion, stale indices, retained array elements,
 72-descriptor payloads, copied compute offsets and incorrect graph ranges.

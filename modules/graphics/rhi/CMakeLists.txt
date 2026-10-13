@@ -189,16 +189,22 @@ if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN AND LUDUS_SLANG_COMPILER AND (APPLE OR L
     ludus_compile_shader(TARGET ludus_rhi_r11_consumer NAME r11scalar RASTER
         SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r11.slang" VERTEX VertexMain FRAGMENT FragmentMain
         INCLUDES "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders")
-    foreach(entry IN ITEMS arrays constant)
-        if(entry STREQUAL "arrays")
-            set(fragment_entry FragmentMain)
-        else()
-            set(fragment_entry ConstantArrayMain)
-        endif()
-        ludus_compile_shader(TARGET ludus_rhi_r11_consumer NAME r11${entry} RASTER NATIVE_BINDING_ARRAYS
-            SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r11.slang" VERTEX VertexMain FRAGMENT ${fragment_entry}
-            INCLUDES "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders" DEFINES LUDUS_R11_ARRAYS=1)
-    endforeach()
+    # Native binding-array shaders require the explicitly configured translator.
+    # Setup/analysis configurations still compile and exercise the dynamic profile;
+    # native SDK/GPU CI supplies the pinned translator and qualifies both profiles.
+    if(LUDUS_SPIRV_CROSS)
+        target_compile_definitions(ludus_rhi_r11_consumer PRIVATE LUDUS_R11_NATIVE_ARRAYS=1)
+        foreach(entry IN ITEMS arrays constant)
+            if(entry STREQUAL "arrays")
+                set(fragment_entry FragmentMain)
+            else()
+                set(fragment_entry ConstantArrayMain)
+            endif()
+            ludus_compile_shader(TARGET ludus_rhi_r11_consumer NAME r11${entry} RASTER NATIVE_BINDING_ARRAYS
+                SOURCE "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/shaders/r11.slang" VERTEX VertexMain FRAGMENT ${fragment_entry}
+                INCLUDES "${PROJECT_SOURCE_DIR}/modules/graphics/rhi/shaders" DEFINES LUDUS_R11_ARRAYS=1)
+        endforeach()
+    endif()
     add_test(NAME ludus_rhi_r11_consumer COMMAND ludus_rhi_r11_consumer)
     set_tests_properties(ludus_rhi_r11_consumer PROPERTIES LABELS "rhi;gpu;build-contract" TIMEOUT 45)
     add_executable(ludus_rhi_r10_consumer "${PROJECT_SOURCE_DIR}/tests/sdk_consumer/r10.cpp")

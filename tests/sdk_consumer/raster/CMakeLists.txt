@@ -68,6 +68,7 @@ if(NOT EMSCRIPTEN)
     ludus_compile_shader(TARGET ludus_sdk_r11_consumer NAME r11scalar RASTER
         SOURCE ../shaders/r11.slang VERTEX VertexMain FRAGMENT FragmentMain
        )
+    target_compile_definitions(ludus_sdk_r11_consumer PRIVATE LUDUS_R11_NATIVE_ARRAYS=1)
     foreach(entry IN ITEMS arrays constant)
         if(entry STREQUAL "arrays")
             set(fragment_entry FragmentMain)

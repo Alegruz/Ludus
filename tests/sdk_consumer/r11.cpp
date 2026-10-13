@@ -1,6 +1,6 @@
 #include "r11compute.h"
 #include "r11scalar.h"
-#if !defined(LUDUS_PLATFORM_WEB)
+#if defined(LUDUS_R11_NATIVE_ARRAYS)
 #    include "r11arrays.h"
 #    include "r11constant.h"
 #endif
@@ -348,7 +348,7 @@ bool RenderGraph() noexcept
     return IsReady(rhi::CompileOrderedGraph(gDevice, graph, report)) == true &&
            IsReady(rhi::ExecuteOrderedGraph(gDevice, gSurface, graph, submission)) == true;
 }
-#if !defined(LUDUS_PLATFORM_WEB)
+#if defined(LUDUS_R11_NATIVE_ARRAYS)
 bool RenderArrays(const rhi::RasterShaderDescription& fragment, bool isNonUniform) noexcept
 {
     rhi::RasterShaderHandle shader;
@@ -565,7 +565,7 @@ bool Run() noexcept
     {
         return false;
     }
-#if !defined(LUDUS_PLATFORM_WEB)
+#if defined(LUDUS_R11_NATIVE_ARRAYS)
     rhi::DeviceInfo info;
     if (rhi::GetDeviceInfo(gDevice, info) != rhi::DeviceStatus::Ready ||
         RenderArrays(ludus::shaders::r11constant::Fragment(), false) == false)
