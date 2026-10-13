@@ -762,6 +762,60 @@ void CountDiagnostics(const DiagnosticLog& log, ImportSummary& inoutSummary) noe
     }
     return "cannot read the entry file";
 }
+
+/// Append path to inoutInputs unless already listed.
+[[nodiscard]] bool AddInput(std::string_view path, Array<String>& inoutInputs) noexcept
+{
+    for (const String& input : inoutInputs)
+    {
+        if (input.GetView() == path)
+        {
+            return true;
+        }
+    }
+    String copy;
+    return copy.TryAssign(path) == StringStatus::Ok && inoutInputs.TryAdd(static_cast<String&&>(copy)) == true;
+}
+
+/// Every file the import read: sources, PLY files, existing images and the licence.
+[[nodiscard]] bool CollectInputs(const SceneIr& scene, std::string_view root, BestEffortResult& inoutResult) noexcept
+{
+    for (const Array<String>* files : {&scene.SourceFiles, &scene.DataFiles})
+    {
+        for (const String& file : *files)
+        {
+            if (AddInput(file.GetView(), inoutResult.Inputs) == false)
+            {
+                return false;
+            }
+        }
+    }
+    const auto addIfPresent = [&](std::string_view relative) noexcept {
+        String native;
+        const std::string_view parts[] = {root, std::string_view("/"), relative};
+        if (native.TryAppendMany(parts) != StringStatus::Ok)
+        {
+            return false;
+        }
+        return detail::DoesPathExist(native.GetView()) == false || AddInput(relative, inoutResult.Inputs) == true;
+    };
+    for (const IrTexture& texture : scene.Textures)
+    {
+        if (texture.File.IsEmpty() == false && addIfPresent(texture.File.GetView()) == false)
+        {
+            return false;
+        }
+    }
+    if (inoutResult.License.IsEmpty() == false)
+    {
+        const bool isText = addIfPresent("LICENSE.txt");
+        if (isText == false || addIfPresent("LICENSE.md") == false)
+        {
+            return false;
+        }
+    }
+    return true;
+}
 } // namespace
 
 bool ImportPbrtBestEffort(std::string_view entryFile,
@@ -773,6 +827,7 @@ bool ImportPbrtBestEffort(std::string_view entryFile,
     outResult.Bundle.Clear();
     outResult.Report.Clear();
     outResult.License.Clear();
+    outResult.Inputs.Clear();
     outResult.Summary = ImportSummary{};
     SceneIr scene;
     DiagnosticLog log;
@@ -881,7 +936,9 @@ bool ImportPbrtBestEffort(std::string_view entryFile,
         }
         outResult.License.Clear();
     }
-    return true;
+    return CollectInputs(scene, root.GetView(), outResult) == true
+               ? true
+               : FailWith(outError, Status::OutOfMemory, "out of memory");
 }
 
 bool WriteBestEffortImport(std::string_view output, const BestEffortResult& result, CookError& outError) noexcept

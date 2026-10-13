@@ -1655,6 +1655,12 @@ Status SceneReader::loadPly(Directive& inoutDirective, uint32& outMesh) noexcept
     {
         inform(codes::FACE_INDICES_IGNORED, inoutDirective.Line, "extra per-face PLY properties ignored");
     }
+    String dataFile;
+    if (dataFile.TryAssign(resolved.Relative.GetView()) != StringStatus::Ok ||
+        mScene.DataFiles.TryAdd(static_cast<String&&>(dataFile)) == false)
+    {
+        return Status::OutOfMemory;
+    }
     PlyCacheEntry entry;
     entry.Mesh = static_cast<uint32>(mScene.Meshes.GetSize());
     entry.File = static_cast<String&&>(resolved.Relative);

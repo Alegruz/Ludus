@@ -160,6 +160,8 @@ struct SceneIr final
 {
     /// Root-relative source files in first-visit order; shapes refer to them by index.
     Array<String> SourceFiles;
+    /// Root-relative PLY files read for plymesh shapes, in first-use order.
+    Array<String> DataFiles;
     Array<IrTexture> Textures;
     Array<IrMaterial> Materials;
     Array<IrMesh> Meshes;
