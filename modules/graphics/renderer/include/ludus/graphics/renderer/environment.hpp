@@ -17,7 +17,9 @@ struct Access;
 struct EnvironmentDescription final
 {
     /// Tightly packed top-left rows, RGB radiance [0,1e12]; alpha is ignored.
-    const ludus::foundation::math::Vector4* Pixels = nullptr;
+    /// Initialize requires Width*Height records and a nonnull pointer; it copies
+    /// them during the call without retaining the caller's storage.
+    const ludus::foundation::math::Vector4* PixelsOrNull = nullptr;
     /// Positive source dimensions, each at most 4096; need not be powers of two.
     ludus::foundation::uint32 Width = 0;
     /// Positive source height; top row borders the north pole.
@@ -45,10 +47,10 @@ public:
     EnvironmentMap(const EnvironmentMap&) = delete;
     /// Copy assignment is forbidden; move to transfer this owner.
     EnvironmentMap& operator=(const EnvironmentMap&) = delete;
-    /// Transfer ownership, leaving inoutOther empty.
-    EnvironmentMap(EnvironmentMap&& inoutOther) noexcept;
-    /// Release this owner and transfer other, leaving inoutOther empty.
-    EnvironmentMap& operator=(EnvironmentMap&& inoutOther) noexcept;
+    /// Transfer ownership, leaving other empty.
+    EnvironmentMap(EnvironmentMap&& other) noexcept;
+    /// Release this owner and transfer other, leaving other empty.
+    EnvironmentMap& operator=(EnvironmentMap&& other) noexcept;
     /// Prepare CPU data and upload RGBA16F. Empty owner required. Ready/Pending
     /// accepts ownership; every other status preserves this empty owner.
     /// HDR unsupported devices return Unsupported; no LDR fallback or exposure.
@@ -60,7 +62,7 @@ public:
     void Reset() noexcept;
 
 private:
-    internal::EnvironmentData* mData = nullptr;
+    internal::EnvironmentData* mDataOrNull = nullptr;
     /// Grants the renderer access to retain this exact data incarnation.
     friend struct internal::Access;
 };

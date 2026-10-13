@@ -47,7 +47,7 @@ void AddTransport(ReferencePath& path, math::Vector3 contribution, uint32 depth,
 usize LightCount(const ReferenceJob& job) noexcept
 {
     return job.Description.LightCount + job.Scene.Emitters.GetSize() +
-           ((job.Environment != nullptr || Positive(job.Description.Environment)) ? 1U : 0U);
+           ((job.EnvironmentOrNull != nullptr || Positive(job.Description.Environment)) ? 1U : 0U);
 }
 math::Vector3 Position(const ReferenceTriangle& triangle, float32 u, float32 v) noexcept
 {
@@ -175,10 +175,10 @@ LightProposal SampleLight(const ReferenceJob& job, const ReferencePath& path, ma
         }
         return result;
     }
-    if (job.Environment != nullptr)
+    if (job.EnvironmentOrNull != nullptr)
     {
         const EnvironmentSample sample =
-            SampleEnvironment(*job.Environment,
+            SampleEnvironment(*job.EnvironmentOrNull,
                               ReferenceRandom(job, path, static_cast<uint16>(dimension + 1)),
                               ReferenceRandom(job, path, static_cast<uint16>(dimension + 2)));
         result.Direction = sample.DirectionWorld;
@@ -204,15 +204,16 @@ rhi::RasterStatus PrepareReferenceVertex(ReferenceJob& job, ReferencePath& path,
     const auto lights = LightCount(job);
     if (hit.Hit == 0)
     {
-        const float32 environmentPdf = job.Environment != nullptr
-                                           ? EvaluateEnvironmentPdf(*job.Environment, ReferenceDirection(path.Ray))
-                                           : 1 / (4 * math::kPiF);
+        const float32 environmentPdf =
+            job.EnvironmentOrNull != nullptr
+                ? EvaluateEnvironmentPdf(*job.EnvironmentOrNull, ReferenceDirection(path.Ray))
+                : 1 / (4 * math::kPiF);
         const float32 lightPdf = lights == 0 ? 0 : environmentPdf / static_cast<float32>(lights);
         const auto weight = path.Depth == 0 ? 1 : ReferencePowerWeight(path.PreviousPdf, lightPdf);
         AddTransport(path,
                      math::Hadamard(path.Throughput,
-                                    job.Environment != nullptr
-                                        ? EvaluateEnvironment(*job.Environment, ReferenceDirection(path.Ray))
+                                    job.EnvironmentOrNull != nullptr
+                                        ? EvaluateEnvironment(*job.EnvironmentOrNull, ReferenceDirection(path.Ray))
                                         : job.Description.Environment) *
                          weight,
                      path.Depth,

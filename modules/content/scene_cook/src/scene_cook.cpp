@@ -243,7 +243,7 @@ struct CookContext final
     [[nodiscard]] bool CheckCancellation() noexcept
     {
         if (CancelOrNull != nullptr && CancelOrNull->Requested != nullptr &&
-            CancelOrNull->Requested(CancelOrNull->Context) == true)
+            CancelOrNull->Requested(CancelOrNull->ContextOrNull) == true)
         {
             return Errors.Fail(Status::Cancelled, "Scene conversion cancelled");
         }
@@ -2631,8 +2631,8 @@ struct ManifestFacts final
 {
     bool IsStaircase = false;
     std::string_view SourceName;
-    const Array<std::string_view>* Inputs = nullptr;
-    const Array<Digest>* InputDigests = nullptr;
+    const Array<std::string_view>* InputsOrNull = nullptr;
+    const Array<Digest>* InputDigestsOrNull = nullptr;
     Digest Bundle;
     int64 SourceMeshes = 0;
     int64 SourceTriangles = 0;
@@ -2642,7 +2642,7 @@ struct ManifestFacts final
     int64 CookedTriangles = 0;
     int64 RenderedTriangles = 0;
     int64 Bytes = 0;
-    const CameraFrame* Camera = nullptr;
+    const CameraFrame* CameraOrNull = nullptr;
     float64 FieldOfView = 0.0;
 };
 
@@ -2660,6 +2660,10 @@ void WriteHexString(PythonJsonWriter& inoutJson, const Digest& digest) noexcept
 
 [[nodiscard]] bool WriteManifest(const ManifestFacts& facts, Array<uint8>& outManifest) noexcept
 {
+    if (facts.InputsOrNull == nullptr || facts.InputDigestsOrNull == nullptr || facts.CameraOrNull == nullptr)
+    {
+        return false;
+    }
     outManifest.Clear();
     ByteWriter writer(outManifest);
     PythonJsonWriter json(writer);
@@ -2678,10 +2682,10 @@ void WriteHexString(PythonJsonWriter& inoutJson, const Digest& digest) noexcept
     json.WriteString("PBRT v4 subset + binary PLY + uncompressed TGA");
     json.WriteKey("inputs");
     json.BeginObject();
-    for (usize i = 0; i < facts.Inputs->GetSize(); ++i)
+    for (usize i = 0; i < facts.InputsOrNull->GetSize(); ++i)
     {
-        json.WriteKey((*facts.Inputs)[i]);
-        WriteHexString(json, (*facts.InputDigests)[i]);
+        json.WriteKey((*facts.InputsOrNull)[i]);
+        WriteHexString(json, (*facts.InputDigestsOrNull)[i]);
     }
     json.EndObject();
     json.WriteKey("bundle_sha256");
@@ -2712,7 +2716,9 @@ void WriteHexString(PythonJsonWriter& inoutJson, const Digest& digest) noexcept
     {
         std::string_view Key;
         const math::Vector3d* Value;
-    } vectors[3] = {{"eye", &facts.Camera->Eye}, {"target", &facts.Camera->Target}, {"up", &facts.Camera->Up}};
+    } vectors[3] = {{"eye", &facts.CameraOrNull->Eye},
+                    {"target", &facts.CameraOrNull->Target},
+                    {"up", &facts.CameraOrNull->Up}};
     for (const auto& vector : vectors)
     {
         json.WriteKey(vector.Key);
@@ -2908,8 +2914,8 @@ void WriteHexString(PythonJsonWriter& inoutJson, const Digest& digest) noexcept
     ManifestFacts facts;
     facts.IsStaircase = license.String().find("NewSee2l035") != std::string_view::npos;
     facts.SourceName = GetBaseName(inoutContext.Root.GetView());
-    facts.Inputs = &cooker.Inputs;
-    facts.InputDigests = &digests;
+    facts.InputsOrNull = &cooker.Inputs;
+    facts.InputDigestsOrNull = &digests;
     facts.Bundle = Hash(outResult.Bundle.AsSpan());
     facts.SourceMeshes = cooker.SourceMeshes;
     facts.SourceTriangles = cooker.SourceTriangles;
@@ -2925,7 +2931,7 @@ void WriteHexString(PythonJsonWriter& inoutJson, const Digest& digest) noexcept
         facts.RenderedTriangles += static_cast<int64>(cooker.Meshes[item.Mesh].Indices.GetSize() / 3);
     }
     facts.Bytes = static_cast<int64>(outResult.Bundle.GetSize());
-    facts.Camera = &frame;
+    facts.CameraOrNull = &frame;
     facts.FieldOfView = scene.FieldOfView;
     outResult.License.Clear();
     if (WriteManifest(facts, outResult.Manifest) == false || outResult.License.TryAddRange(license.Data()) == false)

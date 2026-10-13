@@ -117,7 +117,7 @@ struct ReferenceCaptureDescription final
     /// Optional ready HDR map, retained at Begin/Update; replaces Environment.
     /// Reference transport samples raw source radiance and its solid-angle CDF,
     /// never raster prefiltered mips or diffuse SH. Same device is required.
-    const EnvironmentMap* EnvironmentTexture = nullptr;
+    const EnvironmentMap* EnvironmentTextureOrNull = nullptr;
     /// Borrowed analytic directional/point/spot lights, validated and copied during
     /// Begin/Update. Existing L4 range/spot windows are part of this declared profile.
     const DirectLight* Lights = nullptr;

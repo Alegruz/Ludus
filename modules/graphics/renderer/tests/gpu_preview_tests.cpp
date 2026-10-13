@@ -625,7 +625,7 @@ TEST_CASE("CPU and GPU reference transport retained HDR source radiance and auth
     pixels[4 * 32 + 9] = {64, 8, 2, 1};
     rr::EnvironmentMap environment;
     rr::EnvironmentDescription hdr;
-    hdr.Pixels = pixels;
+    hdr.PixelsOrNull = pixels;
     hdr.Width = 32;
     hdr.Height = 16;
     hdr.FilterWidth = 16;
@@ -646,7 +646,7 @@ TEST_CASE("CPU and GPU reference transport retained HDR source radiance and auth
     capture.CenterRays = true;
     capture.WorldToClip.Columns[2].Z = -1;
     capture.WorldToClip.Columns[3].Z = 1;
-    capture.EnvironmentTexture = &environment;
+    capture.EnvironmentTextureOrNull = &environment;
     rr::ReferenceCapture oracle;
     REQUIRE(renderer.BeginReferenceCapture(snapshot, capture, oracle) == S::Ready);
     rr::GpuPreview preview;

@@ -81,7 +81,8 @@ reviews or validating the selected World's interactive viewport.
 - Naming (full rules in `AGENTS.md` §Naming): spell names out (no `Arg`,
   `param`, `ctx`); functions start with a verb; booleans read as questions
   (`isOk`, `mIsOk`, `HasFailed`); private member functions are camelCase;
-  nullable pointer parameters end in `OrNull`; non-const reference parameters
+  all nullable pointer variables end in `OrNull`; rvalue reference parameters
+  omit `out`/`inout` prefixes; non-const lvalue reference parameters
   (parameters only, not locals) start with `out` or `inout`; no literal sizes in
   template arguments — use a named constant or shared alias such as
   `MessageText`.

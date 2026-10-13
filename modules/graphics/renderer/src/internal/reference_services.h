@@ -44,7 +44,7 @@ bool SameReferenceIntegral(const ReferenceJob& a,
         d.OrthographicCamera != b.OrthographicCamera || d.ReverseZ != b.ReverseZ || d.InfiniteFar != b.InfiniteFar ||
         d.Width != b.Width || d.Height != b.Height || d.MaxDepth != b.MaxDepth || d.RouletteDepth != b.RouletteDepth ||
         d.SecondaryDistance != b.SecondaryDistance || d.Environment != b.Environment ||
-        a.Environment != Access::GetEnvironment(b.EnvironmentTexture) || d.TextureMip != b.TextureMip ||
+        a.EnvironmentOrNull != Access::GetEnvironment(b.EnvironmentTextureOrNull) || d.TextureMip != b.TextureMip ||
         d.Seed != b.Seed || d.CenterRays != b.CenterRays || d.LightCount != lights.Count)
     {
         return false;
@@ -90,7 +90,7 @@ bool ReferenceFingerprint(ReferenceJob& job, usize budget) noexcept
     const usize triangleBytes = job.Scene.Triangles.GetSize() * FINGERPRINT_TRIANGLE_BYTES;
     usize bytes = triangleBytes + job.Scene.InstanceCount * FINGERPRINT_INSTANCE_BYTES +
                   job.Description.LightCount * FINGERPRINT_LIGHT_BYTES + FINGERPRINT_ENVIRONMENT_BYTES +
-                  (job.Environment != nullptr ? 2 * sizeof(uint64) + 2 * sizeof(uint32) : 0);
+                  (job.EnvironmentOrNull != nullptr ? 2 * sizeof(uint64) + 2 * sizeof(uint32) : 0);
     for (usize i = 0; i < job.Scene.InstanceCount; ++i)
     {
         if (job.Scene.Instances[i].Surface->HasSurfaceMap)
@@ -227,14 +227,14 @@ bool ReferenceFingerprint(ReferenceJob& job, usize budget) noexcept
         scalar(light.OuterCos);
     }
     vector(job.Description.Environment);
-    if (job.Environment != nullptr)
+    if (job.EnvironmentOrNull != nullptr)
     {
-        Put64(stream.GetData() + offset, job.Environment->FingerprintLow);
+        Put64(stream.GetData() + offset, job.EnvironmentOrNull->FingerprintLow);
         offset += sizeof(uint64);
-        Put64(stream.GetData() + offset, job.Environment->FingerprintHigh);
+        Put64(stream.GetData() + offset, job.EnvironmentOrNull->FingerprintHigh);
         offset += sizeof(uint64);
-        word(job.Environment->Width);
-        word(job.Environment->Height);
+        word(job.EnvironmentOrNull->Width);
+        word(job.EnvironmentOrNull->Height);
     }
     if (offset != bytes)
     {
@@ -520,14 +520,14 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
     {
         return status;
     }
-    internal::EnvironmentData* environment = Access::GetEnvironment(description.EnvironmentTexture);
-    if (description.EnvironmentTexture != nullptr)
+    internal::EnvironmentData* environmentOrNull = Access::GetEnvironment(description.EnvironmentTextureOrNull);
+    if (description.EnvironmentTextureOrNull != nullptr)
     {
-        if (environment == nullptr || rhi::GetStatus(Device, environment->Texture) == Status::InvalidHandle)
+        if (environmentOrNull == nullptr || rhi::GetStatus(Device, environmentOrNull->Texture) == Status::InvalidHandle)
         {
             return Status::InvalidDescription;
         }
-        const Status ready = description.EnvironmentTexture->GetStatus();
+        const Status ready = description.EnvironmentTextureOrNull->GetStatus();
         if (ready != Status::Ready)
         {
             return ready == Status::Pending ? Status::NotReady : ready;
@@ -631,7 +631,7 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
     const uint64 signatureBytes =
         uint64(triangles) * FINGERPRINT_TRIANGLE_BYTES + uint64(instances) * FINGERPRINT_INSTANCE_BYTES +
         uint64(surfaceMaps) * FINGERPRINT_SURFACE_MAP_BYTES + uint64(lights.Count) * FINGERPRINT_LIGHT_BYTES +
-        FINGERPRINT_ENVIRONMENT_BYTES + (environment != nullptr ? 2 * sizeof(uint64) + 2 * sizeof(uint32) : 0);
+        FINGERPRINT_ENVIRONMENT_BYTES + (environmentOrNull != nullptr ? 2 * sizeof(uint64) + 2 * sizeof(uint32) : 0);
     const uint64 nativeSetup =
         oracle ? 0
                : uint64(instances) * (sizeof(rhi::RayInstanceDescription) + sizeof(Array<float32>)) +
@@ -656,11 +656,11 @@ Status Renderer::State::BuildReferenceJob(usize snapshotSlot,
         return Status::OutOfMemory;
     }
     core::UniquePtr<ReferenceJob> job(allocation);
-    job->Environment = environment;
-    internal::RetainEnvironment(environment);
+    job->EnvironmentOrNull = environmentOrNull;
+    internal::RetainEnvironment(environmentOrNull);
     job->Device = Device;
     job->Description = description;
-    job->Description.EnvironmentTexture = nullptr;
+    job->Description.EnvironmentTextureOrNull = nullptr;
     job->Description.Lights = job->Lights;
     job->Description.LightCount = lights.Count;
     for (usize i = 0; i < lights.Count; ++i)

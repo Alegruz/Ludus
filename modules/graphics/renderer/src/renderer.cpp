@@ -33,7 +33,7 @@ struct Access final
 {
     static EnvironmentData* GetEnvironment(const EnvironmentMap* mapOrNull) noexcept
     {
-        return mapOrNull != nullptr ? mapOrNull->mData : nullptr;
+        return mapOrNull != nullptr ? mapOrNull->mDataOrNull : nullptr;
     }
     template <typename T>
     static uint64 Owner(T value) noexcept
@@ -385,7 +385,7 @@ struct Renderer::State final
         rhi::TextureViewHandle BakeTexture{};
         rhi::TextureViewHandle ShadowTexture{};
         rhi::TextureViewHandle SurfaceTexture{};
-        internal::EnvironmentData* Environment = nullptr;
+        internal::EnvironmentData* EnvironmentOrNull = nullptr;
         rhi::TextureViewHandle EnvironmentTexture{};
         rhi::TextureViewHandle EmissionTexture{};
         rhi::SamplerHandle ShadowSampler{};
@@ -574,7 +574,7 @@ struct Renderer::State final
             static_cast<void>(rhi::Destroy(Device, m.BakeTexture));
             static_cast<void>(rhi::Destroy(Device, m.SurfaceTexture));
             static_cast<void>(rhi::Destroy(Device, m.EnvironmentTexture));
-            internal::ReleaseEnvironment(m.Environment);
+            internal::ReleaseEnvironment(m.EnvironmentOrNull);
             static_cast<void>(rhi::Destroy(Device, m.EmissionTexture));
             static_cast<void>(rhi::Destroy(Device, m.ShadowTexture));
             static_cast<void>(rhi::Destroy(Device, m.ShadowSampler));
@@ -2067,8 +2067,8 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
     m.ParameterSize = size;
     if (lighting != nullptr)
     {
-        m.Environment = Access::GetEnvironment(lighting->Environment);
-        internal::RetainEnvironment(m.Environment);
+        m.EnvironmentOrNull = Access::GetEnvironment(lighting->EnvironmentOrNull);
+        internal::RetainEnvironment(m.EnvironmentOrNull);
         m.Bake = lighting->Bake;
         m.HasBake = !rhi::IsNull(lighting->Bake.Texture);
         if (Access::Owner(lighting->Shadows) != 0)
@@ -2109,10 +2109,10 @@ Status Renderer::CreateMaterialData(MaterialProgram program,
     }
     if (Accepted(status) && lighting != nullptr && s.Programs[m.ProgramSlot].HasAuthoredProfile)
     {
-        status =
-            rhi::CreateTextureView(s.Device,
-                                   m.Environment != nullptr ? m.Environment->Texture : s.Programs[m.ProgramSlot].White,
-                                   m.EnvironmentTexture);
+        status = rhi::CreateTextureView(s.Device,
+                                        m.EnvironmentOrNull != nullptr ? m.EnvironmentOrNull->Texture
+                                                                       : s.Programs[m.ProgramSlot].White,
+                                        m.EnvironmentTexture);
         if (Accepted(status))
         {
             status = rhi::CreateTextureView(s.Device,
@@ -2285,7 +2285,7 @@ Status Renderer::GetStatus(MaterialVersion handle) noexcept
                                         0,
                                         0,
                                         {},
-                                        m->Environment != nullptr ? m->Environment->Sampler : m->Sampler};
+                                        m->EnvironmentOrNull != nullptr ? m->EnvironmentOrNull->Sampler : m->Sampler};
             values[bindingCount - 1] = {static_cast<uint32>(bindingCount - 1), {}, 0, 0, m->EmissionTexture, {}};
         }
         const Status created =
@@ -2369,17 +2369,25 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
     {
         return Status::InvalidDescription;
     }
-    if (input.Tangents != nullptr && input.Normals == nullptr)
+    if (input.Tangents.IsValid() == false || input.Colors.IsValid() == false ||
+        input.MaterialTexcoords1.IsValid() == false ||
+        (input.Tangents.IsEmpty() == false && input.Tangents.GetSize() != input.VertexCount) ||
+        (input.Colors.IsEmpty() == false && input.Colors.GetSize() != input.VertexCount) ||
+        (input.MaterialTexcoords1.IsEmpty() == false && input.MaterialTexcoords1.GetSize() != input.VertexCount))
+    {
+        return Status::InvalidDescription;
+    }
+    if (input.Tangents.IsEmpty() == false && input.Normals == nullptr)
     {
         return Status::InvalidDescription;
     }
     for (usize i = 0; i < input.VertexCount; ++i)
     {
-        if (input.MaterialTexcoords1 != nullptr && math::IsFinite(input.MaterialTexcoords1[i]) == false)
+        if (input.MaterialTexcoords1.IsEmpty() == false && math::IsFinite(input.MaterialTexcoords1[i]) == false)
         {
             return Status::InvalidDescription;
         }
-        if (input.Colors != nullptr)
+        if (input.Colors.IsEmpty() == false)
         {
             const math::Vector4 color = input.Colors[i];
             if (math::IsFinite(color) == false || color.X < 0 || color.Y < 0 || color.Z < 0 || color.W < 0 ||
@@ -2388,7 +2396,7 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
                 return Status::InvalidDescription;
             }
         }
-        if (input.Tangents != nullptr)
+        if (input.Tangents.IsEmpty() == false)
         {
             const math::Vector4 tangent = input.Tangents[i];
             math::Vector3 normal;
@@ -2444,7 +2452,7 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
             static_cast<void>(math::TryNormalize(input.Normals[i], normal));
         }
         math::Vector4 tangent{};
-        if (input.Tangents != nullptr)
+        if (input.Tangents.IsEmpty() == false)
         {
             const math::Vector4 source = input.Tangents[i];
             math::Vector3 axis{source.X, source.Y, source.Z};
@@ -2463,8 +2471,8 @@ Status Renderer::CreateMesh(const MeshDescription& description, Mesh& output) no
                        normal,
                        input.BakeTexcoords != nullptr ? input.BakeTexcoords[i] : uv,
                        tangent,
-                       input.Colors != nullptr ? input.Colors[i] : math::Vector4{1, 1, 1, 1},
-                       input.MaterialTexcoords1 != nullptr ? input.MaterialTexcoords1[i] : uv};
+                       input.Colors.IsEmpty() == false ? input.Colors[i] : math::Vector4{1, 1, 1, 1},
+                       input.MaterialTexcoords1.IsEmpty() == false ? input.MaterialTexcoords1[i] : uv};
     }
     core::UniquePtr<internal::ReferenceMeshData> referenceMesh;
     if (mState->Reference)
@@ -3420,18 +3428,19 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
     if (description.MaterialUvSet > 1 ||
         (description.MaterialUvSet != 0 && description.AreAuthoredInputsEnabled == false) ||
         (description.AreAuthoredInputsEnabled == true && p->HasAuthoredProfile == false) ||
-        (description.Environment != nullptr && p->HasAuthoredProfile == false))
+        (description.EnvironmentOrNull != nullptr && p->HasAuthoredProfile == false))
     {
         return Status::Unsupported;
     }
-    if (description.Environment != nullptr)
+    if (description.EnvironmentOrNull != nullptr)
     {
-        const internal::EnvironmentData* environment = Access::GetEnvironment(description.Environment);
-        if (environment == nullptr || rhi::GetStatus(s.Device, environment->Texture) == Status::InvalidHandle)
+        const internal::EnvironmentData* environmentOrNull = Access::GetEnvironment(description.EnvironmentOrNull);
+        if (environmentOrNull == nullptr ||
+            rhi::GetStatus(s.Device, environmentOrNull->Texture) == Status::InvalidHandle)
         {
             return Status::InvalidDescription;
         }
-        const Status ready = description.Environment->GetStatus();
+        const Status ready = description.EnvironmentOrNull->GetStatus();
         if (ready != Status::Ready)
         {
             return ready == Status::Pending ? Status::NotReady : ready;
@@ -3635,11 +3644,11 @@ Status Renderer::CreateLitMaterial(MaterialProgram program,
                              0};
     parameters.Authored = {description.AreAuthoredInputsEnabled ? 1.0F : 0.0F,
                            static_cast<float32>(description.MaterialUvSet),
-                           description.Environment != nullptr ? 1.0F : 0.0F,
+                           description.EnvironmentOrNull != nullptr ? 1.0F : 0.0F,
                            0};
-    if (description.Environment != nullptr)
+    if (description.EnvironmentOrNull != nullptr)
     {
-        const internal::EnvironmentData& environment = *Access::GetEnvironment(description.Environment);
+        const internal::EnvironmentData& environment = *Access::GetEnvironment(description.EnvironmentOrNull);
         parameters.Authored.W = static_cast<float32>(environment.MipLevels - 1);
         for (usize coefficient = 0; coefficient < internal::ENVIRONMENT_SH_COUNT; ++coefficient)
         {

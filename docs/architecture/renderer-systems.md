@@ -2093,3 +2093,21 @@ The adopted departures are latitude/longitude prefilter storage, exact row solid
 angles, a flat CDF and the explicit finite RGB profile above. See
 [full static resource acceptance](../examples/reference-scene.md#full-static-sponza-and-suntemple-acceptance)
 for assets, commands and limitations.
+
+### Authored input view and naming contract
+
+`MeshDescription::Tangents`, `Colors` and `MaterialTexcoords1` use Foundation's
+[`BorrowedView<const T>`](container-systems.md#borrowed-contiguous-views).
+Each channel is empty (the documented fallback) or has exactly `VertexCount`
+elements. `CreateMesh` rejects invalid or mismatched views before reading and
+copies accepted data; the views do not extend caller storage lifetime. For an
+array use `geometry.Colors = colors`; for dynamic storage use
+`geometry.Colors = {colors.GetData(), colors.GetSize()}`.
+
+Optional environment owner pointers are named `EnvironmentOrNull` for lit
+materials and `EnvironmentTextureOrNull` for reference captures. Environment
+source pixels are `PixelsOrNull`; successful initialization still requires a
+nonnull pointer with the declared width/height extent. Move parameters are
+named `other`, because they transfer ownership rather than output through an
+lvalue reference. Shared/weak smart pointers are not currently a Foundation
+facility; synchronous mesh borrowing does not require shared ownership.

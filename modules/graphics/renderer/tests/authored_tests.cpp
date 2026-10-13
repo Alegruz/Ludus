@@ -257,7 +257,7 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
     wait(program);
     rr::EnvironmentMap environment;
     rr::EnvironmentDescription hdr;
-    hdr.Pixels = fixture.Environment.data();
+    hdr.PixelsOrNull = fixture.Environment.data();
     hdr.Width = fixture.EnvironmentWidth;
     hdr.Height = fixture.EnvironmentHeight;
     hdr.CpuByteBudget = usize{512} * 1024 * 1024;
@@ -292,7 +292,7 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
         material.SurfaceMap = textures[1];
         material.EmissionMap = textures[2];
         material.AreAuthoredInputsEnabled = true;
-        material.Environment = &environment;
+        material.EnvironmentOrNull = &environment;
         material.Clusters = &clusters;
         material.Lights = fixture.Lights.data();
         material.LightCount = fixture.Lights.size();
@@ -321,9 +321,26 @@ void RenderFixture(const Fixture& fixture, bool isSynthetic)
                                      input.Indices.size()};
         geometry.Normals = input.Normals.data();
         geometry.Texcoords = input.Uvs.data();
-        geometry.MaterialTexcoords1 = input.Uvs1.data();
-        geometry.Tangents = input.HasTangents ? input.Tangents.data() : nullptr;
-        geometry.Colors = input.Colors.data();
+        geometry.MaterialTexcoords1 = {input.Uvs1.data(), input.Uvs1.size()};
+        if (input.HasTangents == true)
+        {
+            geometry.Tangents = {input.Tangents.data(), input.Tangents.size()};
+        }
+        geometry.Colors = {input.Colors.data(), input.Colors.size()};
+        if (isSynthetic == true)
+        {
+            rr::MeshDescription invalid = geometry;
+            invalid.Tangents = {nullptr, input.Positions.size()};
+            rr::Mesh rejected;
+            CHECK(renderer.CreateMesh(invalid, rejected) == Status::InvalidDescription);
+            invalid = geometry;
+            invalid.Colors = {input.Colors.data(), input.Colors.size() - 1};
+            CHECK(renderer.CreateMesh(invalid, rejected) == Status::InvalidDescription);
+            invalid = geometry;
+            invalid.MaterialTexcoords1 = {input.Uvs1.data(), input.Uvs1.size() + 1};
+            CHECK(renderer.CreateMesh(invalid, rejected) == Status::InvalidDescription);
+        }
+
         const Status created = renderer.CreateMesh(geometry, meshes[index]);
         REQUIRE((created == Status::Ready || created == Status::Pending));
         wait(meshes[index]);

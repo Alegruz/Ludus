@@ -126,7 +126,7 @@ struct ReferenceJob final
     rhi::DeviceHandle Device;
     ReferenceCaptureDescription Description;
     DirectLight Lights[128];
-    EnvironmentData* Environment = nullptr;
+    EnvironmentData* EnvironmentOrNull = nullptr;
     math::Matrix4 ClipToWorld;
     math::RandomKey Key;
     ReferenceSceneData Scene;
@@ -140,7 +140,7 @@ struct ReferenceJob final
     usize FirstPixel = 0, PathCount = 0, QueryCount = 0;
     ~ReferenceJob() noexcept
     {
-        ReleaseEnvironment(Environment);
+        ReleaseEnvironment(EnvironmentOrNull);
         static_cast<void>(rhi::Destroy(Device, Batch));
         static_cast<void>(rhi::Destroy(Device, Scene.Native));
     }

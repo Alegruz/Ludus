@@ -61,19 +61,26 @@ int32 main()
     }
     const math::Vector4 pixels[]{{125952, 4, 1, 1}, {0, 2, 0, 1}, {1, 0, 0, 1}, {0, 0, 0, 1}};
     rr::EnvironmentDescription source;
-    source.Pixels = pixels;
+    source.PixelsOrNull = pixels;
     source.Width = source.Height = 2;
     source.FilterWidth = 16;
     source.FilterSamples = 16;
     source.CpuByteBudget = usize{1024} * 1024;
     rr::EnvironmentMap environment;
-    if (environment.Initialize(device, source) != rhi::RasterStatus::Ready)
+    status = environment.Initialize(device, source);
+    const uint64 environmentStart = time::NowTicks();
+    while (status == rhi::RasterStatus::Pending &&
+           time::NowTicks() - environmentStart < 10 * time::NANOSECONDS_PER_SECOND)
+    {
+        status = environment.GetStatus();
+    }
+    if (status != rhi::RasterStatus::Ready)
     {
         return 4;
     }
     rr::LitMaterialDescription description;
     description.AreAuthoredInputsEnabled = true;
-    description.Environment = &environment;
+    description.EnvironmentOrNull = &environment;
     rr::MaterialVersion material;
     rr::LightSelection lights;
     status = renderer.CreateLitMaterial(program, description, material, lights);

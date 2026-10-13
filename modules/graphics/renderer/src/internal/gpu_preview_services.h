@@ -49,7 +49,8 @@ Status PackGpuScene(const ReferenceJob& job,
     const uint64 surfacesWide = emittersWide + scene.Emitters.GetSize();
     const uint64 lightsWide = surfacesWide + uint64(scene.InstanceCount) * LUDUS_GPU_PREVIEW_SURFACE_WORDS;
     const uint64 environmentWide = lightsWide + uint64(job.Description.LightCount) * LUDUS_GPU_PREVIEW_LIGHT_WORDS;
-    const uint64 sizeWide = environmentWide + (job.Environment != nullptr ? 1 + job.Environment->Pixels.GetSize() : 0);
+    const uint64 sizeWide =
+        environmentWide + (job.EnvironmentOrNull != nullptr ? 1 + job.EnvironmentOrNull->Pixels.GetSize() : 0);
     if (sizeWide > ~uint32{0})
     {
         return Status::CapacityExceeded;
@@ -246,9 +247,9 @@ Status PackGpuScene(const ReferenceJob& job,
     uniform.Offsets[1] = static_cast<uint32>(order);
     uniform.Offsets[2] = static_cast<uint32>(emitters);
     uniform.Offsets[3] = static_cast<uint32>(surfaces);
-    if (job.Environment != nullptr)
+    if (job.EnvironmentOrNull != nullptr)
     {
-        const internal::EnvironmentData& environment = *job.Environment;
+        const internal::EnvironmentData& environment = *job.EnvironmentOrNull;
         const usize start = static_cast<usize>(environmentWide);
         data[start] = {GpuBits(environment.Width), GpuBits(environment.Height), 0, 0};
         for (usize pixel = 0; pixel < environment.Pixels.GetSize(); ++pixel)

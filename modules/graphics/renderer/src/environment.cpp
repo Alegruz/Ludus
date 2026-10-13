@@ -214,44 +214,44 @@ EnvironmentMap::~EnvironmentMap() noexcept
 {
     Reset();
 }
-EnvironmentMap::EnvironmentMap(EnvironmentMap&& inoutOther) noexcept : mData(inoutOther.mData)
+EnvironmentMap::EnvironmentMap(EnvironmentMap&& other) noexcept : mDataOrNull(other.mDataOrNull)
 {
-    inoutOther.mData = nullptr;
+    other.mDataOrNull = nullptr;
 }
-EnvironmentMap& EnvironmentMap::operator=(EnvironmentMap&& inoutOther) noexcept
+EnvironmentMap& EnvironmentMap::operator=(EnvironmentMap&& other) noexcept
 {
-    if (this != &inoutOther)
+    if (this != &other)
     {
         Reset();
-        mData = inoutOther.mData;
-        inoutOther.mData = nullptr;
+        mDataOrNull = other.mDataOrNull;
+        other.mDataOrNull = nullptr;
     }
     return *this;
 }
 void EnvironmentMap::Reset() noexcept
 {
-    internal::ReleaseEnvironment(mData);
-    mData = nullptr;
+    internal::ReleaseEnvironment(mDataOrNull);
+    mDataOrNull = nullptr;
 }
 rhi::RasterStatus EnvironmentMap::GetStatus() const noexcept
 {
-    if (mData == nullptr)
+    if (mDataOrNull == nullptr)
     {
         return rhi::RasterStatus::InvalidHandle;
     }
-    const rhi::RasterStatus texture = rhi::GetStatus(mData->Device, mData->Texture);
-    return texture == rhi::RasterStatus::Ready ? rhi::GetStatus(mData->Device, mData->Sampler) : texture;
+    const rhi::RasterStatus texture = rhi::GetStatus(mDataOrNull->Device, mDataOrNull->Texture);
+    return texture == rhi::RasterStatus::Ready ? rhi::GetStatus(mDataOrNull->Device, mDataOrNull->Sampler) : texture;
 }
 rhi::RasterStatus EnvironmentMap::Initialize(rhi::DeviceHandle device,
                                              const EnvironmentDescription& description) noexcept
 {
     using Status = rhi::RasterStatus;
-    if (mData != nullptr)
+    if (mDataOrNull != nullptr)
     {
         return Status::InvalidState;
     }
     const uint32 width = description.FilterWidth;
-    if (description.Pixels == nullptr || description.Width == 0 || description.Height == 0 ||
+    if (description.PixelsOrNull == nullptr || description.Width == 0 || description.Height == 0 ||
         description.Width > 4096 || description.Height > 4096 || width < 16 || width > 512 ||
         (width & (width - 1)) != 0 || description.FilterSamples < 16 || description.FilterSamples > 1024)
     {
@@ -268,37 +268,38 @@ rhi::RasterStatus EnvironmentMap::Initialize(rhi::DeviceHandle device,
     }
     for (usize i = 0; i < count; ++i)
     {
-        const math::Vector4 pixel = description.Pixels[i];
+        const math::Vector4 pixel = description.PixelsOrNull[i];
         if (math::IsFinite(pixel.X) == false || math::IsFinite(pixel.Y) == false || math::IsFinite(pixel.Z) == false ||
             pixel.X < 0 || pixel.Y < 0 || pixel.Z < 0 || pixel.X > 1e12F || pixel.Y > 1e12F || pixel.Z > 1e12F)
         {
             return Status::InvalidDescription;
         }
     }
-    internal::EnvironmentData* data = new (std::nothrow) internal::EnvironmentData;
-    if (data == nullptr)
+    internal::EnvironmentData* dataOrNull = new (std::nothrow) internal::EnvironmentData;
+    if (dataOrNull == nullptr)
     {
         return Status::OutOfMemory;
     }
-    data->Device = device;
-    data->Width = description.Width;
-    data->Height = description.Height;
-    data->CpuBytes = cpuBytes;
-    if (data->Pixels.TryAddRange({description.Pixels, count}) == false || data->Distribution.TryResize(count) == false)
+    dataOrNull->Device = device;
+    dataOrNull->Width = description.Width;
+    dataOrNull->Height = description.Height;
+    dataOrNull->CpuBytes = cpuBytes;
+    if (dataOrNull->Pixels.TryAddRange({description.PixelsOrNull, count}) == false ||
+        dataOrNull->Distribution.TryResize(count) == false)
     {
-        delete data;
+        delete dataOrNull;
         return Status::OutOfMemory;
     }
     Array<uint8> canonical;
     if (canonical.TryResize(sourceEncodingBytes) == false)
     {
-        delete data;
+        delete dataOrNull;
         return Status::OutOfMemory;
     }
     for (usize pixel = 0; pixel < count; ++pixel)
     {
-        const math::Vector4 value = data->Pixels[pixel];
-        data->Pixels[pixel].W = 1;
+        const math::Vector4 value = dataOrNull->Pixels[pixel];
+        dataOrNull->Pixels[pixel].W = 1;
         const float32 channels[]{value.X, value.Y, value.Z};
         for (usize channel = 0; channel < 3; ++channel)
         {
@@ -307,23 +308,24 @@ rhi::RasterStatus EnvironmentMap::Initialize(rhi::DeviceHandle device,
             static_cast<void>(
                 TryWriteLittleEndian(bits,
                                      {canonical.GetData() + (pixel * 3 + channel) * sizeof(uint32), sizeof(uint32)}));
-            data->RadianceScale = math::Max(data->RadianceScale, channels[channel] / HALF_MAXIMUM);
+            dataOrNull->RadianceScale = math::Max(dataOrNull->RadianceScale, channels[channel] / HALF_MAXIMUM);
         }
     }
     const Fingerprint128 fingerprint = StableFingerprint128({canonical.GetData(), canonical.GetSize()});
-    data->FingerprintLow = fingerprint.Low;
-    data->FingerprintHigh = fingerprint.High;
+    dataOrNull->FingerprintLow = fingerprint.Low;
+    dataOrNull->FingerprintHigh = fingerprint.High;
     canonical = {};
     float64 irradiance[internal::ENVIRONMENT_SH_COUNT][3]{};
     for (usize i = 0; i < count; ++i)
     {
-        const math::Vector3 radiance = ReadColor(data->Pixels[i]);
-        const float64 solidAngle = ComputeSolidAngle(*data, i);
-        data->Weight += static_cast<float64>(math::Dot(radiance, math::Vector3{.2126F, .7152F, .0722F})) * solidAngle;
-        data->Distribution[i] = data->Weight;
-        const float32 u = (static_cast<float32>(i % data->Width) + .5F) / static_cast<float32>(data->Width);
-        const usize row = i / data->Width;
-        const float32 v = (static_cast<float32>(row) + .5F) / static_cast<float32>(data->Height);
+        const math::Vector3 radiance = ReadColor(dataOrNull->Pixels[i]);
+        const float64 solidAngle = ComputeSolidAngle(*dataOrNull, i);
+        dataOrNull->Weight +=
+            static_cast<float64>(math::Dot(radiance, math::Vector3{.2126F, .7152F, .0722F})) * solidAngle;
+        dataOrNull->Distribution[i] = dataOrNull->Weight;
+        const float32 u = (static_cast<float32>(i % dataOrNull->Width) + .5F) / static_cast<float32>(dataOrNull->Width);
+        const usize row = i / dataOrNull->Width;
+        const float32 v = (static_cast<float32>(row) + .5F) / static_cast<float32>(dataOrNull->Height);
         float32 basis[internal::ENVIRONMENT_SH_COUNT]{};
         internal::EvaluateEnvironmentBasis(MakeDirectionWorld({u, math::Cos(math::kPiF * v)}), basis);
         for (usize coefficient = 0; coefficient < internal::ENVIRONMENT_SH_COUNT; ++coefficient)
@@ -340,16 +342,16 @@ rhi::RasterStatus EnvironmentMap::Initialize(rhi::DeviceHandle device,
     }
     for (usize coefficient = 0; coefficient < internal::ENVIRONMENT_SH_COUNT; ++coefficient)
     {
-        data->Irradiance[coefficient] = {static_cast<float32>(irradiance[coefficient][0]),
-                                         static_cast<float32>(irradiance[coefficient][1]),
-                                         static_cast<float32>(irradiance[coefficient][2]),
-                                         0};
+        dataOrNull->Irradiance[coefficient] = {static_cast<float32>(irradiance[coefficient][0]),
+                                               static_cast<float32>(irradiance[coefficient][1]),
+                                               static_cast<float32>(irradiance[coefficient][2]),
+                                               0};
     }
-    data->Irradiance[0].W = data->RadianceScale;
+    dataOrNull->Irradiance[0].W = dataOrNull->RadianceScale;
     Array<uint8> bytes;
     if (bytes.TryResize(uploadBytes) == false)
     {
-        delete data;
+        delete dataOrNull;
         return Status::OutOfMemory;
     }
     rhi::TextureMipUpload mips[MAX_ENVIRONMENT_MIPS]{};
@@ -357,16 +359,16 @@ rhi::RasterStatus EnvironmentMap::Initialize(rhi::DeviceHandle device,
     uint32 mipHeight = width / 2;
     while (mipWidth > 1)
     {
-        ++data->MipLevels;
+        ++dataOrNull->MipLevels;
         mipWidth /= 2;
     }
-    ++data->MipLevels;
+    ++dataOrNull->MipLevels;
     mipWidth = width;
     usize offset = 0;
-    for (uint32 mip = 0; mip < data->MipLevels; ++mip)
+    for (uint32 mip = 0; mip < dataOrNull->MipLevels; ++mip)
     {
         mips[mip] = {offset, usize(mipWidth) * HALF_PIXEL_BYTES};
-        const float32 roughness = static_cast<float32>(mip) / static_cast<float32>(data->MipLevels - 1);
+        const float32 roughness = static_cast<float32>(mip) / static_cast<float32>(dataOrNull->MipLevels - 1);
         for (uint32 y = 0; y < mipHeight; ++y)
         {
             for (uint32 x = 0; x < mipWidth; ++x)
@@ -375,7 +377,7 @@ rhi::RasterStatus EnvironmentMap::Initialize(rhi::DeviceHandle device,
                     {(static_cast<float32>(x) + .5F) / static_cast<float32>(mipWidth),
                      math::Cos(math::kPiF * (static_cast<float32>(y) + .5F) / static_cast<float32>(mipHeight))});
                 const math::Vector3 radiance =
-                    Filter(*data, roughness, direction, description.FilterSamples) / data->RadianceScale;
+                    Filter(*dataOrNull, roughness, direction, description.FilterSamples) / dataOrNull->RadianceScale;
                 const float32 channels[]{radiance.X, radiance.Y, radiance.Z, 1};
                 for (usize channel = 0; channel < 4; ++channel)
                 {
@@ -389,9 +391,11 @@ rhi::RasterStatus EnvironmentMap::Initialize(rhi::DeviceHandle device,
         mipHeight = math::Max(1U, mipHeight / 2);
     }
     rhi::TextureDescription texture{width, width / 2, rhi::RasterFormat::Rgba16Float};
-    texture.MipLevels = data->MipLevels;
-    Status status =
-        rhi::CreateTexture(device, texture, {{bytes.GetData(), offset}, 0, {mips, data->MipLevels}}, data->Texture);
+    texture.MipLevels = dataOrNull->MipLevels;
+    Status status = rhi::CreateTexture(device,
+                                       texture,
+                                       {{bytes.GetData(), offset}, 0, {mips, dataOrNull->MipLevels}},
+                                       dataOrNull->Texture);
     if (status == Status::Ready || status == Status::Pending)
     {
         rhi::SamplerDescription sampler;
@@ -399,15 +403,15 @@ rhi::RasterStatus EnvironmentMap::Initialize(rhi::DeviceHandle device,
         sampler.U = rhi::RasterAddress::Repeat;
         sampler.V = rhi::RasterAddress::Clamp;
         sampler.MipFilter = rhi::RasterMipFilter::Linear;
-        sampler.MaxLod = static_cast<float32>(data->MipLevels - 1);
-        status = rhi::CreateSampler(device, sampler, data->Sampler);
+        sampler.MaxLod = static_cast<float32>(dataOrNull->MipLevels - 1);
+        status = rhi::CreateSampler(device, sampler, dataOrNull->Sampler);
     }
     if (status != Status::Ready && status != Status::Pending)
     {
-        delete data;
+        delete dataOrNull;
         return status;
     }
-    mData = data;
+    mDataOrNull = dataOrNull;
     status = GetStatus();
     if (status != Status::Ready && status != Status::Pending)
     {

@@ -3,6 +3,7 @@
 #include <ludus/foundation/base/types.h>
 
 #include <ludus/foundation/base/pointer.hpp>
+#include <ludus/foundation/containers/borrowed_view.hpp>
 #include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/transform.hpp>
 #include <ludus/foundation/math/vector.hpp>
@@ -83,6 +84,8 @@ struct FlatMaterial final
     ludus::foundation::math::Vector4 Color{1, 0, 1, 1};
 };
 /// Borrowed static position/optional-UV triangle-list geometry, copied by CreateMesh.
+/// Authored views must be empty or contain exactly VertexCount elements; creation validates
+/// their extents before reading and copies them without retaining the caller's storage.
 struct MeshDescription final
 {
     /// Finite mesh-local XYZ positions, tightly packed Vector3 records.
@@ -103,14 +106,14 @@ struct MeshDescription final
     /// Optional authored tangent XYZ and handedness W (+1/-1), one per vertex.
     /// Requires normals; finite nonzero XYZ is normalized/orthogonalized on copy.
     /// W=0 explicitly marks an unavailable vertex tangent and selects UV fallback.
-    /// Null keeps the UV-derived frame. Mirrored object transforms adjust handedness.
-    const ludus::foundation::math::Vector4* Tangents = nullptr;
-    /// Optional linear RGBA multiplier [0,1], one per vertex; null supplies white.
+    /// An empty view keeps the UV-derived frame. Mirrored object transforms adjust handedness.
+    ludus::foundation::BorrowedView<const ludus::foundation::math::Vector4> Tangents{};
+    /// Optional linear RGBA multiplier [0,1], one per vertex; an empty view supplies white.
     /// Used by authored material programs, including alpha acceptance.
-    const ludus::foundation::math::Vector4* Colors = nullptr;
-    /// Optional second material UV set, one per vertex; null copies Texcoords.
+    ludus::foundation::BorrowedView<const ludus::foundation::math::Vector4> Colors{};
+    /// Optional second material UV set, one per vertex; an empty view copies Texcoords.
     /// Independent of BakeTexcoords; authored material programs select UV0 or UV1.
-    const ludus::foundation::math::Vector2* MaterialTexcoords1 = nullptr;
+    ludus::foundation::BorrowedView<const ludus::foundation::math::Vector2> MaterialTexcoords1{};
 };
 /// Ordinary scene values; renderer has no ECS, gameplay camera or UI dependency.
 struct SceneItem final

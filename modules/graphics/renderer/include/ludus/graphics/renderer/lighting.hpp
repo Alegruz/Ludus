@@ -168,7 +168,7 @@ struct LitMaterialDescription final
     /// Optional ready HDR map on the same device, retained during creation.
     /// Requires an authored recipe. Its SH/prefiltered specular replace the constant
     /// environment terms; baked diffuse still takes precedence. Null uses constants.
-    const EnvironmentMap* Environment = nullptr;
+    const EnvironmentMap* EnvironmentOrNull = nullptr;
     /// Linear surface emission in [0,10000]; does not create a scene light.
     ludus::foundation::math::Vector3 Emission{};
     /// Optional ready RGBA8 linear/sRGB RGB multiplier for Emission; alpha ignored.

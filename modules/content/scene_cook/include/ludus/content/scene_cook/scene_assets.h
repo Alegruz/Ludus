@@ -77,7 +77,7 @@ struct UuidSource final
     /// Writes 16 big-endian UUID bytes, used verbatim (no version bits are forced).
     void (*Generate)(void* context, uint8 (&outBytes)[16]) noexcept = nullptr;
     /// Opaque pointer passed back to Generate.
-    void* Context = nullptr;
+    void* ContextOrNull = nullptr;
 };
 
 /// @brief Per-call options.
@@ -313,7 +313,7 @@ struct EditorSceneProgress final
     /// Receives a short stage name; must be thread-safe for the caller.
     void (*Report)(void* context, std::string_view stage) noexcept = nullptr;
     /// Opaque pointer passed back to Report.
-    void* Context = nullptr;
+    void* ContextOrNull = nullptr;
 };
 
 /// One Editor scene request; the views must outlive the call.

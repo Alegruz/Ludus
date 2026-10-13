@@ -2059,7 +2059,7 @@ TEST_CASE("HDR environment preparation rejects invalid input and preserves empty
     rr::EnvironmentMap environment;
     rr::EnvironmentDescription description;
     const math::Vector4 pixels[]{{125952, 4, 1, 0}, {0, 2, 0, 1}, {1, 0, 0, 1}, {0, 0, 0, 1}};
-    description.Pixels = pixels;
+    description.PixelsOrNull = pixels;
     description.Width = 2;
     description.Height = 2;
     description.FilterWidth = 16;

@@ -283,7 +283,7 @@ void RemoveLastComponent(NativePath& inoutPath) noexcept
 [[nodiscard]] bool IsCancelled(const Cancellation* cancelOrNull) noexcept
 {
     return cancelOrNull != nullptr && cancelOrNull->Requested != nullptr &&
-           cancelOrNull->Requested(cancelOrNull->Context) == true;
+           cancelOrNull->Requested(cancelOrNull->ContextOrNull) == true;
 }
 
 [[nodiscard]] Status RemoveTreeAt(int parent, const char* name) noexcept

@@ -178,12 +178,12 @@ float3 EvaluateBrdf(float3 baseColor,
     float a = roughness * roughness;
     float a2 = a * a;
     float d = (1 - nh * nh) + nh * nh * a2;
-    float distribution = a2 / (3.141592653589793 * d * d);
+    float distribution = a2 / (PI * d * d);
     float visibility = 0.5 / max(nl * sqrt(nv * nv * (1 - a2) + a2) + nv * sqrt(nl * nl * (1 - a2) + a2), 1e-6);
     float3 f0 = lerp(float3(0.04), baseColor, metallic);
     float3 fresnel = f0 + (1 - f0) * ComputeFifth(1 - lh);
     return nl * (distribution * visibility * fresnel +
-                 baseColor * (1 - metallic) * (1 - fresnel) * (isBakedDiffuse ? 0 : 1) / 3.141592653589793);
+                 baseColor * (1 - metallic) * (1 - fresnel) * (isBakedDiffuse ? 0 : 1) / PI);
 }
 float ComputeShadowVisibility(int light, Varying input)
 {
@@ -246,7 +246,7 @@ float4 SampleBaseTexel(Varying input)
 float2 ComputeEnvironmentUv(in float3 directionWorld)
 {
     float longitude = atan2(directionWorld.z, directionWorld.x) / 6.283185307179586;
-    return float2(longitude - floor(longitude), atan2(length(directionWorld.xz), directionWorld.y) / 3.141592653589793);
+    return float2(longitude - floor(longitude), atan2(length(directionWorld.xz), directionWorld.y) / PI);
 }
 float3 EvaluateEnvironmentIrradiance(in float3 normalWorld)
 {
@@ -353,7 +353,7 @@ float2 EvaluateEnvironmentDfg(float roughness, float cosineView)
     }
 #endif
     if (nv > 0)
-        result += irradiance * baseColor.rgb * (1 - metallic) * (1 - f) / 3.141592653589793 + specularEnvironment;
+        result += irradiance * baseColor.rgb * (1 - metallic) * (1 - f) / PI + specularEnvironment;
 #ifdef LUDUS_CLUSTERED
     float4 world = float4(input.PositionWorld, 1);
     float3 grid =

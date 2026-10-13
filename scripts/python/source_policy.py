@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 from formatting import TOKENS, format_source
+from naming_rules import pointer_findings
 
 CPP = {".cpp", ".cc", ".cxx", ".h", ".hpp", ".mm"}
 ROOTS = {"modules", "apps", "examples", "tests", "tools", "cmake"}
@@ -105,6 +106,12 @@ def violations(path: str, source: str, changed: set[int]) -> list[tuple[int, str
             )
         return found
 
+    # Recognizable copies of FoundationMath PI are forbidden outside its owner.
+    # Other numeric constants need semantic review; tolerances are not blindly banned.
+    if Path(path).suffix == ".slang" and path != "modules/foundation/math/shaders/math.slang":
+        for match in re.finditer(r"(?<![\w.])3\.14159\d*(?:[fF])?(?![\w.])", code):
+            report(match.start(), "reuse FoundationMath PI instead of a duplicated pi literal")
+
     for offset in declaration_commas(code):
         report(
             offset,
@@ -112,6 +119,8 @@ def violations(path: str, source: str, changed: set[int]) -> list[tuple[int, str
         )
 
     if Path(path).suffix in CPP:
+        for offset, _, message in pointer_findings(code):
+            report(offset, message)
         for match in re.finditer(r"!(?!=)|\bnot\b", code):
             report(
                 match.start(),
