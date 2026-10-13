@@ -2058,8 +2058,10 @@ RasterStatus GetAllocationTelemetry(DeviceHandle device, AllocationTelemetry& ou
             output.RetiringBindingDescriptors += At(RasterKind::Layout, record.Set.Layout).Layout.DescriptorCount;
         }
     }
-    output.DescriptorArenasAvailable =
-        backend::GetDescriptorArenaUsage(output.DescriptorArenaPools, output.ReservedArenaDescriptors);
+    internal::DescriptorArenaUsage arenaUsage;
+    output.DescriptorArenasAvailable = backend::GetDescriptorArenaUsage(arenaUsage);
+    output.DescriptorArenaPools = arenaUsage.Pools;
+    output.ReservedArenaDescriptors = arenaUsage.ReservedDescriptors;
     static uint64 lastOwner = 0, peak = 0, blockPeak = 0;
     const auto owner = internal::DeviceOwner();
     if (lastOwner != owner)

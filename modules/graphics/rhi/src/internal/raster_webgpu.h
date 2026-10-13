@@ -173,7 +173,7 @@ uint32 RasterVertexStrideLimit() noexcept
 {
     return 256;
 }
-bool GetDescriptorArenaUsage(uint64&, uint64&) noexcept
+bool GetDescriptorArenaUsage(internal::DescriptorArenaUsage&) noexcept
 {
     return false;
 }

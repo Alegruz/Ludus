@@ -60,6 +60,23 @@ class RasterReflectionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 spirv_array_indexing(data, {'entries': [{'binding': 1, 'count': 4}]})
 
+    def test_whole_array_load_cannot_hide_an_unproved_local_access(self):
+        def instruction(operation, *values):
+            return [(len(values) + 1) << 16 | operation, *values]
+        # A valid direct constant access cannot excuse an additional whole-array
+        # load/copy whose local descriptor lookup escaped the global access scan.
+        words = [0x07230203, 0x00010300, 0, 100, 0]
+        words += instruction(71, 1, 33, 1)
+        words += instruction(21, 2, 32, 0)
+        words += instruction(43, 2, 4, 0)
+        words += instruction(32, 10, 0, 11)
+        words += instruction(59, 10, 1, 0)
+        words += instruction(65, 20, 9, 1, 4)
+        words += instruction(61, 11, 12, 1)
+        data = struct.pack('<' + 'I' * len(words), *words)
+        with self.assertRaisesRegex(RuntimeError, 'pointer forwarding'):
+            spirv_array_indexing(data, {'entries': [{'binding': 1, 'count': 4}]})
+
     def test_cluster_light_arrays_obey_uniform_byte_budget(self):
         vector = {'kind':'vector','elementCount':4,'elementType':{'kind':'scalar','scalarType':'float32'}}
         for count in (32,512,1024):

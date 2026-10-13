@@ -769,24 +769,23 @@ uint32 RasterVertexStrideLimit() noexcept
     return 256;
 }
 bool gRasterHdrProbed = false, gRasterHdr = false;
-bool GetDescriptorArenaUsage(uint64& outPools, uint64& outDescriptors) noexcept
+bool GetDescriptorArenaUsage(internal::DescriptorArenaUsage& outUsage) noexcept
 {
-    outPools = 0;
-    outDescriptors = 0;
+    outUsage = {};
     for (const RasterDescriptorArena& arena : gRasterDescriptorArenas)
     {
         if (arena.Pool == VK_NULL_HANDLE)
         {
             continue;
         }
-        ++outPools;
+        ++outUsage.Pools;
         uint32 descriptorCount = 0;
         for (uint32 count : arena.Counts)
         {
             descriptorCount += count;
         }
         // Empty layouts reserve one otherwise-unused uniform slot per native set.
-        outDescriptors += uint64{descriptorCount == 0 ? 1U : descriptorCount} * arena.Capacity;
+        outUsage.ReservedDescriptors += uint64{descriptorCount == 0 ? 1U : descriptorCount} * arena.Capacity;
     }
     return true;
 }

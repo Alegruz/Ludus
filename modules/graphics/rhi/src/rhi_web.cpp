@@ -365,7 +365,7 @@ ludus::foundation::uint32 RasterVertexStrideLimit() noexcept
 {
     return gActive == Backend::WebGL2 ? webgl::RasterVertexStrideLimit() : webgpu::RasterVertexStrideLimit();
 }
-bool GetDescriptorArenaUsage(uint64&, uint64&) noexcept
+bool GetDescriptorArenaUsage(internal::DescriptorArenaUsage&) noexcept
 {
     return false;
 }

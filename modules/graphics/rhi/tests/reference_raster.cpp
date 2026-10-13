@@ -161,7 +161,7 @@ uint32 RasterVertexStrideLimit() noexcept
 {
     return Kind() == Backend::WebGL2 ? 252U : 256U;
 }
-bool GetDescriptorArenaUsage(uint64&, uint64&) noexcept
+bool GetDescriptorArenaUsage(internal::DescriptorArenaUsage&) noexcept
 {
     return false;
 }

@@ -50,6 +50,11 @@ enum class RasterKind : foundation::uint8
     RayBatch,
     Count
 };
+struct DescriptorArenaUsage final
+{
+    foundation::uint64 Pools = 0;
+    foundation::uint64 ReservedDescriptors = 0;
+};
 struct RasterLayout final
 {
     RasterBinding Entries[RASTER_BINDINGS]{};
@@ -309,7 +314,7 @@ namespace ludus::graphics::rhi::backend
 {
 RasterCapabilities RasterLimits() noexcept;
 BindingCapabilities BindingLimits() noexcept;
-bool GetDescriptorArenaUsage(foundation::uint64& outPools, foundation::uint64& outDescriptors) noexcept;
+bool GetDescriptorArenaUsage(internal::DescriptorArenaUsage& outUsage) noexcept;
 foundation::uint32 RasterColorAttachmentLimit() noexcept;
 ludus::foundation::uint32 RasterVertexStrideLimit() noexcept;
 FormatCapabilities FormatLimits(RasterFormat) noexcept;

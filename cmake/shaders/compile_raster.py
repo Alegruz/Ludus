@@ -373,12 +373,19 @@ def spirv_array_indexing(data, reflected):
     """
     # SPIR-V / GLSL.std.450 enumerants used by this deliberately bounded verifier.
     op_ext_import, op_ext_inst, op_type_int = 11, 12, 21
-    op_constant, op_variable = 43, 59
+    op_type_pointer, op_constant, op_variable = 32, 43, 59
     op_access_chain, op_in_bounds_access_chain = 65, 66
     op_decorate, op_copy_object = 71, 83
     decoration_binding, decoration_non_uniform = 33, 5300
     glsl_unsigned_min, glsl_unsigned_clamp = 38, 44
-    pointer_forward_operations = {54, 55, 57, 65, 66, 67, 83, 124, 169, 245}
+    op_function, op_function_parameter, op_function_call = 54, 55, 57
+    op_load, op_pointer_access_chain = 61, 67
+    op_composite_construct, op_composite_extract, op_composite_insert = 80, 81, 82
+    op_bitcast, op_select, op_phi = 124, 169, 245
+    pointer_forward_operations = {op_function, op_function_parameter, op_function_call, op_load,
+                                  op_access_chain, op_in_bounds_access_chain, op_pointer_access_chain,
+                                  op_composite_construct, op_composite_extract, op_composite_insert,
+                                  op_copy_object, op_bitcast, op_select, op_phi}
     if len(data) % 4 or len(data) < 20:
         raise RuntimeError('Malformed SPIR-V array target')
     words = struct.unpack('<' + 'I' * (len(data) // 4), data)
@@ -427,14 +434,19 @@ def spirv_array_indexing(data, reflected):
                 lower, upper = constants.get(values[5]), constants.get(values[6])
                 return lower is not None and upper is not None and integer_types.get(lower[0]) == (32, 0) and integer_types.get(upper[0]) == (32, 0) and lower[1] <= upper[1] < count
         return False
+    pointer_types = {values[0]: values[2] for operation, values in instructions
+                     if operation == op_type_pointer and len(values) == 3}
     variables = {values[1]: values[0] for operation, values in instructions if operation == op_variable and len(values) >= 3}
     arrays = {entry['binding']: entry for entry in reflected['entries'] if entry.get('count', 1) > 1}
     for entry in arrays.values():
         entry['indexing'] = 'Constant'
-    array_pointer_types = {variables[identifier] for identifier, binding in bindings.items()
-                           if binding in arrays and identifier in variables}
+    array_types = {pointer_types[variables[identifier]] for identifier, binding in bindings.items()
+                   if binding in arrays and identifier in variables and variables[identifier] in pointer_types}
+    # Whole descriptor-array loads and local copies would create another access
+    # path. Reject both value and pointer forwarding, including a different storage class.
+    protected_types = array_types | {pointer for pointer, element in pointer_types.items() if element in array_types}
     for operation, values in instructions:
-        if operation in pointer_forward_operations and len(values) >= 2 and values[0] in array_pointer_types:
+        if operation in pointer_forward_operations and len(values) >= 2 and values[0] in protected_types:
             raise RuntimeError('Native descriptor array pointer forwarding is outside the verified profile')
     accessed = set()
     for operation, values in instructions:
