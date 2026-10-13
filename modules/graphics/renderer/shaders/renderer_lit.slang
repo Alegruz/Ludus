@@ -126,14 +126,18 @@ struct Varying
     // Positive common rescaling keeps cross/determinant products finite without
     // changing normal direction or mirrored handedness.
     float magnitude = max(max(max(abs(column0World.x), abs(column0World.y)), abs(column0World.z)),
-        max(max(max(abs(column1World.x), abs(column1World.y)), abs(column1World.z)), max(max(abs(column2World.x), abs(column2World.y)), abs(column2World.z))));
+                          max(max(max(abs(column1World.x), abs(column1World.y)), abs(column1World.z)),
+                              max(max(abs(column2World.x), abs(column2World.y)), abs(column2World.z))));
     column0World /= magnitude;
     column1World /= magnitude;
     column2World /= magnitude;
     float determinant = dot(column0World, cross(column1World, column2World));
     output.NormalWorld = NormalizeOrZero((cross(column1World, column2World) * input.NormalMesh.x +
-        cross(column2World, column0World) * input.NormalMesh.y + cross(column0World, column1World) * input.NormalMesh.z) / determinant);
-    float3 tangentWorld = column0World * input.TangentMesh.x + column1World * input.TangentMesh.y + column2World * input.TangentMesh.z;
+                                          cross(column2World, column0World) * input.NormalMesh.y +
+                                          cross(column0World, column1World) * input.NormalMesh.z) /
+                                         determinant);
+    float3 tangentWorld =
+        column0World * input.TangentMesh.x + column1World * input.TangentMesh.y + column2World * input.TangentMesh.z;
     output.TangentWorld = float4(tangentWorld, input.TangentMesh.w * (determinant < 0 ? -1 : 1));
     output.ColorVertex = input.ColorVertex;
     output.MaterialUv1 = input.MaterialUv1;
@@ -221,14 +225,16 @@ float4 SampleBaseTexel(Varying input)
 {
     float2 materialUv = input.TexcoordUv;
 #ifdef LUDUS_AUTHORED_INPUTS
-    if (material.Authored.y > .5) materialUv = input.MaterialUv1;
+    if (material.Authored.y > .5)
+        materialUv = input.MaterialUv1;
 #endif
     float2 uv = materialUv * material.UvTransform.xy + material.UvTransform.zw;
     float4 texel = material.Options.y < 0 ? colorTexture.Sample(colorSampler, uv)
                                           : colorTexture.SampleLevel(colorSampler, uv, material.Options.y);
     float4 baseColor = texel * material.Tint;
 #ifdef LUDUS_AUTHORED_INPUTS
-    if (material.Authored.x > .5) baseColor *= input.ColorVertex;
+    if (material.Authored.x > .5)
+        baseColor *= input.ColorVertex;
 #endif
     if (material.Options.z == 1 && baseColor.a < material.Options.x)
         discard;
@@ -244,10 +250,16 @@ float2 ComputeEnvironmentUv(in float3 directionWorld)
 }
 float3 EvaluateEnvironmentIrradiance(in float3 normalWorld)
 {
-    float basis[LUDUS_ENVIRONMENT_SH_COEFFICIENTS] = { .2820947918, .4886025119 * normalWorld.y, .4886025119 * normalWorld.z,
-        .4886025119 * normalWorld.x, 1.0925484306 * normalWorld.x * normalWorld.y,
-        1.0925484306 * normalWorld.y * normalWorld.z, .3153915653 * (3 * normalWorld.z * normalWorld.z - 1),
-        1.0925484306 * normalWorld.x * normalWorld.z, .5462742153 * (normalWorld.x * normalWorld.x - normalWorld.y * normalWorld.y) };
+    float basis[LUDUS_ENVIRONMENT_SH_COEFFICIENTS] = {
+        .2820947918,
+        .4886025119 * normalWorld.y,
+        .4886025119 * normalWorld.z,
+        .4886025119 * normalWorld.x,
+        1.0925484306 * normalWorld.x * normalWorld.y,
+        1.0925484306 * normalWorld.y * normalWorld.z,
+        .3153915653 * (3 * normalWorld.z * normalWorld.z - 1),
+        1.0925484306 * normalWorld.x * normalWorld.z,
+        .5462742153 * (normalWorld.x * normalWorld.x - normalWorld.y * normalWorld.y)};
     float3 irradiance = float3(0);
     for (int coefficient = 0; coefficient < LUDUS_ENVIRONMENT_SH_COEFFICIENTS; ++coefficient)
         irradiance += material.IrradianceSh[coefficient].rgb * basis[coefficient];
@@ -256,7 +268,8 @@ float3 EvaluateEnvironmentIrradiance(in float3 normalWorld)
 float2 EvaluateEnvironmentDfg(float roughness, float cosineView)
 {
     float4 coefficients = roughness * float4(-1, -.0275, -.572, .022) + float4(1, .0425, 1.04, -.04);
-    float approximation = min(coefficients.x * coefficients.x, exp2(-9.28 * cosineView)) * coefficients.x + coefficients.y;
+    float approximation =
+        min(coefficients.x * coefficients.x, exp2(-9.28 * cosineView)) * coefficients.x + coefficients.y;
     return float2(-1.04, 1.04) * approximation + coefficients.zw;
 }
 #endif
@@ -273,7 +286,8 @@ float2 EvaluateEnvironmentDfg(float roughness, float cosineView)
     {
         float2 materialUv = input.TexcoordUv;
 #    ifdef LUDUS_AUTHORED_INPUTS
-        if (material.Authored.y > .5) materialUv = input.MaterialUv1;
+        if (material.Authored.y > .5)
+            materialUv = input.MaterialUv1;
 #    endif
         float2 uv = materialUv * material.UvTransform.xy + material.UvTransform.zw;
         float4 texel = material.Options.y < 0 ? surfaceTexture.Sample(colorSampler, uv)
@@ -284,18 +298,21 @@ float2 EvaluateEnvironmentDfg(float roughness, float cosineView)
 #    ifdef LUDUS_AUTHORED_INPUTS
         if (material.Authored.x > .5 && abs(input.TangentWorld.w) > .5)
         {
-            float3 tangentWorld = NormalizeOrZero(input.TangentWorld.xyz - normalWorld * dot(normalWorld, input.TangentWorld.xyz));
+            float3 tangentWorld =
+                NormalizeOrZero(input.TangentWorld.xyz - normalWorld * dot(normalWorld, input.TangentWorld.xyz));
             float3 bitangentWorld = cross(normalWorld, tangentWorld) * input.TangentWorld.w;
-            normalWorld = NormalizeOrZero(tangentWorld * parameters.NormalTangent.x + bitangentWorld * parameters.NormalTangent.y + normalWorld * parameters.NormalTangent.z);
+            normalWorld =
+                NormalizeOrZero(tangentWorld * parameters.NormalTangent.x +
+                                bitangentWorld * parameters.NormalTangent.y + normalWorld * parameters.NormalTangent.z);
         }
         else
 #    endif
-        normalWorld = ApplyNormalWorld(normalWorld,
-                                       parameters.NormalTangent,
-                                       ddx(input.PositionWorld),
-                                       ddy(input.PositionWorld),
-                                       ddx(uv),
-                                       ddy(uv));
+            normalWorld = ApplyNormalWorld(normalWorld,
+                                           parameters.NormalTangent,
+                                           ddx(input.PositionWorld),
+                                           ddy(input.PositionWorld),
+                                           ddx(uv),
+                                           ddy(uv));
     }
 #endif
     float nv = max(dot(normalWorld, viewDirectionWorld), 0);
@@ -308,7 +325,11 @@ float2 EvaluateEnvironmentDfg(float roughness, float cosineView)
     {
         irradiance = EvaluateEnvironmentIrradiance(normalWorld);
         float3 reflectionWorld = reflect(-viewDirectionWorld, normalWorld);
-        float3 radiance = environmentTexture.SampleLevel(environmentSampler, ComputeEnvironmentUv(reflectionWorld), roughness * material.Authored.w).rgb * material.IrradianceSh[0].w;
+        float3 radiance =
+            environmentTexture
+                .SampleLevel(environmentSampler, ComputeEnvironmentUv(reflectionWorld), roughness * material.Authored.w)
+                .rgb *
+            material.IrradianceSh[0].w;
         float2 dfg = EvaluateEnvironmentDfg(roughness, nv);
         specularEnvironment = radiance * (f0 * dfg.x + dfg.y);
     }
@@ -322,14 +343,17 @@ float2 EvaluateEnvironmentDfg(float roughness, float cosineView)
 #ifdef LUDUS_AUTHORED_INPUTS
     if (material.SurfaceMap.z > .5)
     {
-        float2 emissionUv = (material.Authored.y > .5 ? input.MaterialUv1 : input.TexcoordUv) * material.UvTransform.xy + material.UvTransform.zw;
-        float3 emission = material.Options.y < 0 ? emissionTexture.Sample(colorSampler, emissionUv).rgb : emissionTexture.SampleLevel(colorSampler, emissionUv, material.Options.y).rgb;
+        float2 emissionUv =
+            (material.Authored.y > .5 ? input.MaterialUv1 : input.TexcoordUv) * material.UvTransform.xy +
+            material.UvTransform.zw;
+        float3 emission = material.Options.y < 0
+                              ? emissionTexture.Sample(colorSampler, emissionUv).rgb
+                              : emissionTexture.SampleLevel(colorSampler, emissionUv, material.Options.y).rgb;
         result *= emission;
     }
 #endif
     if (nv > 0)
-        result += irradiance * baseColor.rgb * (1 - metallic) * (1 - f) / 3.141592653589793 +
-                  specularEnvironment;
+        result += irradiance * baseColor.rgb * (1 - metallic) * (1 - f) / 3.141592653589793 + specularEnvironment;
 #ifdef LUDUS_CLUSTERED
     float4 world = float4(input.PositionWorld, 1);
     float3 grid =
