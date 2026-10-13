@@ -6,10 +6,10 @@
 #include "uuid.h"
 
 #include <ludus/content/scene_format/luscn.h>
+#include <ludus/foundation/math/scalar.hpp>
 #include <ludus/foundation/strings/string.hpp>
 
 #include <bit>
-#include <cmath>
 #include <cstring>
 #include <initializer_list>
 #include <numbers>
@@ -19,6 +19,7 @@ namespace ludus::content::scene_cook
 {
 namespace
 {
+namespace math = ludus::foundation::math;
 using namespace detail;
 using foundation::Array;
 using foundation::String;
@@ -274,14 +275,14 @@ WriteCanonical(const JsonTree& tree, JsonIndex node, Array<uint8>& outBytes, Fai
 /// math.isfinite(v) for an int or float.
 [[nodiscard]] bool IsFinitePython(PythonNumber value) noexcept
 {
-    return std::isfinite(value.ToFloat());
+    return math::IsFinite(value.ToFloat());
 }
 
 [[nodiscard]] PythonNumber GetAbsolute(PythonNumber value) noexcept
 {
     if (value.IsFloat == true)
     {
-        return MakeNumber(std::fabs(value.Float));
+        return MakeNumber(math::Abs(value.Float) + 0.0);
     }
     return value.Integer < 0 ? SubtractPython(MakeNumber(int64{0}), value) : value;
 }
@@ -1135,7 +1136,7 @@ public:
         for (usize i = 0; i < outValues.size(); ++i)
         {
             outValues[i] = DecodeFloat(bytes.data() + i * 4);
-            areFinite = areFinite && std::isfinite(outValues[i]);
+            areFinite = areFinite && math::IsFinite(outValues[i]);
         }
         return areFinite == true ? true : inoutFailure.FailInvalid("Nonfinite cooked scene value");
     }
@@ -1242,12 +1243,13 @@ struct BundleParts final
         }
         const float64 metallic = values[0];
         const float64 roughness = values[1];
-        const float64 emissionMinimum = std::fmin(values[2], std::fmin(values[3], values[4]));
-        const float64 emissionMaximum = std::fmax(values[2], std::fmax(values[3], values[4]));
+        const float64 emissionMinimum = math::Min(values[2], math::Min(values[3], values[4]));
+        const float64 emissionMaximum = math::Max(values[2], math::Max(values[3], values[4]));
         if ((texture[0] != format::NO_TEXTURE && texture[0] >= textureCount) ||
             (0 <= metallic && metallic <= 1) == false ||
             (MIN_ROUGHNESS_REFERENCE <= roughness && roughness <= 1) == false || emissionMinimum < 0 ||
-            emissionMaximum > MAX_EMISSION_REFERENCE)
+            emissionMaximum > MAX_EMISSION_REFERENCE || math::IsFinite(values[2]) == false ||
+            math::IsFinite(values[3]) == false || math::IsFinite(values[4]) == false)
         {
             return inoutFailure.FailInvalid("Invalid cooked material");
         }
@@ -1299,7 +1301,7 @@ struct BundleParts final
             for (usize component = 0; component < format::VERTEX_COMPONENTS; ++component)
             {
                 const float64 value = DecodeFloat(base + component * 4);
-                isValid = isValid && std::isfinite(value);
+                isValid = isValid && math::IsFinite(value);
                 if (component >= 3 && component < 6)
                 {
                     length.Add(MakeNumber(value * value));
