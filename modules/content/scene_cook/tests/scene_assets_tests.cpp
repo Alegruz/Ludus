@@ -566,3 +566,131 @@ TEST_CASE("In-process Editor operations match scene_editor.py responses", "[scen
     std::error_code ignored;
     std::filesystem::remove_all(work, ignored);
 }
+
+namespace
+{
+/// Write a small general pbrt-v4 scene (outside the reference profile) to directory/name.
+void WriteBestEffortSource(const std::filesystem::path& directory, std::string_view name)
+{
+    std::filesystem::create_directories(directory);
+    std::ofstream(directory / std::string(name), std::ios::binary)
+        << "LookAt 0 1 4  0 0 0  0 1 0\nCamera \"perspective\" \"float fov\" [ 45 ]\n"
+           "Film \"rgb\" \"integer xresolution\" [ 64 ] \"integer yresolution\" [ 64 ]\n"
+           "Sampler \"halton\"\nWorldBegin\n"
+           "LightSource \"infinite\" \"rgb L\" [ .2 .2 .2 ]\n"
+           "Material \"diffuse\" \"rgb reflectance\" [ .6 .5 .4 ]\n"
+           "Shape \"trianglemesh\" \"point3 P\" [ -1 0 -1  1 0 -1  1 0 1  -1 0 1 ]\n"
+           "  \"integer indices\" [ 0 1 2  0 2 3 ]\n"
+           "AttributeBegin\nAreaLightSource \"diffuse\" \"rgb L\" [ 4 4 4 ]\n"
+           "Shape \"sphere\" \"float radius\" [ .25 ]\nAttributeEnd\n";
+    std::ofstream(directory / "LICENSE.txt", std::ios::binary) << "CC0 synthetic best-effort fixture\n";
+}
+} // namespace
+
+TEST_CASE("Editor import routes general pbrt files to pbrt-best-effort-v1", "[scene_assets]")
+{
+    const std::filesystem::path work = MakeWorkDirectory();
+    const std::filesystem::path project = work / "project";
+    const std::filesystem::path source = work / "source";
+    std::filesystem::create_directories(project);
+    WriteBestEffortSource(source, "room.pbrt");
+    const std::string root = project.string();
+    const std::string sourceText = source.string();
+    SequentialUuids counter;
+    UuidSource uuids{&SequentialUuids::Generate, &counter};
+    AssetOptions options;
+    options.UuidsOrNull = &uuids;
+    options.SourceOrigin = VIRTUAL_ORIGIN;
+    options.SourceEntry = "room.pbrt";
+    AssetError error;
+    Array<uint8> level;
+    REQUIRE(CreateLevel("Best effort", options, level, error));
+    EditorSceneRequest request;
+    request.Root = root;
+    request.Source = sourceText;
+    request.Level = ToSpan(level);
+
+    // The dry-run preview writes nothing and describes the planned cook.
+    request.Operation = EditorSceneOperation::PreviewImport;
+    EditorSceneResult preview;
+    INFO(Describe(error));
+    REQUIRE(OperateEditorScene(request, options, preview, error));
+    const std::string previewText = ToText(preview.Response);
+    CHECK(GetResponseMember(preview.Response, "profile") == "pbrt-best-effort-v1");
+    CHECK(previewText.find("\"dry_run\":true") != std::string::npos);
+    CHECK(previewText.find("ENVIRONMENT_FALLBACK") != std::string::npos);
+    CHECK(preview.Scene.IsEmpty() == true);
+    CHECK(std::filesystem::exists(project / "assets") == false);
+
+    // Import, commit and reassemble: the stored report comes back with the level.
+    request.Operation = EditorSceneOperation::Import;
+    EditorSceneResult imported;
+    const bool isImported = OperateEditorScene(request, options, imported, error);
+    INFO(Describe(error));
+    REQUIRE(isImported);
+    CHECK(imported.Scene.IsEmpty() == false);
+    const std::string candidate = GetResponseMember(imported.Response, "level");
+    request.Operation = EditorSceneOperation::CommitImport;
+    request.Level = ToSpan(candidate);
+    request.Catalog = ToSpan(imported.Catalog);
+    EditorSceneResult committed;
+    REQUIRE(OperateEditorScene(request, options, committed, error));
+    request.Operation = EditorSceneOperation::Assemble;
+    request.Catalog = {};
+    EditorSceneResult assembled;
+    REQUIRE(OperateEditorScene(request, options, assembled, error));
+    const std::string reports = GetResponseMember(assembled.Response, "import_reports");
+    CHECK(reports.find("\"importer\":\"pbrt-best-effort-v1\"") != std::string::npos);
+    CHECK(reports.find("\"dry_run\":false") != std::string::npos);
+    CHECK(GetResponseMember(assembled.Response, "warnings").find("ENVIRONMENT_FALLBACK") != std::string::npos);
+
+    // A changed source input is detected before publication.
+    std::ofstream(source / "room.pbrt", std::ios::app) << "# edited\n";
+    request.Operation = EditorSceneOperation::CommitImport;
+    request.Catalog = ToSpan(imported.Catalog);
+    EditorSceneResult stale;
+    CHECK(OperateEditorScene(request, options, stale, error) == false);
+
+    std::error_code ignored;
+    std::filesystem::remove_all(work, ignored);
+}
+
+TEST_CASE("scene-v4.pbrt keeps pbrt-reference-v1 and falls back only on profile rejection", "[scene_assets]")
+{
+    const std::filesystem::path work = MakeWorkDirectory();
+    const std::filesystem::path project = work / "project";
+    std::filesystem::create_directories(project);
+    const std::string root = project.string();
+    AssetOptions options;
+    options.SourceEntry = "scene-v4.pbrt";
+    AssetError error;
+    EditorSceneRequest request;
+    request.Root = root;
+    request.Operation = EditorSceneOperation::PreviewImport;
+
+    const std::string reference = std::string(GOLDENS) + "/source";
+    request.Source = reference;
+    EditorSceneResult kept;
+    INFO(Describe(error));
+    REQUIRE(OperateEditorScene(request, options, kept, error));
+    CHECK(GetResponseMember(kept.Response, "profile") == "pbrt-reference-v1");
+    CHECK(ToText(kept.Response).find("reference_rejection") == std::string::npos);
+
+    const std::filesystem::path general = work / "general";
+    WriteBestEffortSource(general, "scene-v4.pbrt");
+    const std::string generalText = general.string();
+    request.Source = generalText;
+    EditorSceneResult fallback;
+    REQUIRE(OperateEditorScene(request, options, fallback, error));
+    CHECK(GetResponseMember(fallback.Response, "profile") == "pbrt-best-effort-v1");
+    CHECK(ToText(fallback.Response).find("\"reference_rejection\":") != std::string::npos);
+
+    // An empty entry is the unchanged reference behaviour: no fallback.
+    options.SourceEntry = {};
+    EditorSceneResult rejected;
+    CHECK(OperateEditorScene(request, options, rejected, error) == false);
+    CHECK(error.Code == AssetErrorCode::UnsupportedScene);
+
+    std::error_code ignored;
+    std::filesystem::remove_all(work, ignored);
+}

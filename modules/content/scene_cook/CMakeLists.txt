@@ -10,8 +10,8 @@ target_sources(ludus_scene_cook PUBLIC FILE_SET public_headers TYPE HEADERS BASE
     FILES include/ludus/content/scene_cook/scene_cook.h include/ludus/content/scene_cook/scene_assets.h
     include/ludus/content/scene_cook/best_effort_import.h)
 target_link_libraries(ludus_scene_cook
-    PUBLIC Ludus::Content Ludus::FoundationContainers
-    PRIVATE Ludus::SceneFormat Ludus::FoundationMath Ludus::FoundationParsingJson Ludus::FoundationStrings ludus_stb_image)
+    PUBLIC Ludus::Content Ludus::FoundationContainers Ludus::FoundationStrings
+    PRIVATE Ludus::SceneFormat Ludus::FoundationMath Ludus::FoundationParsingJson ludus_stb_image)
 # Byte identity with the float64 reference requires unfused IEEE arithmetic.
 target_compile_options(ludus_scene_cook PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang,GNU>:-ffp-contract=off>)
 ludus_apply_project_defaults(ludus_scene_cook)
