@@ -328,6 +328,12 @@ void PollTransfers() noexcept
                         destination.InitializedMips |= uint32{1} << record.Region.Mip;
                         destination.ColorDefined =
                             destination.InitializedMips == ((uint32{1} << destination.Texture.MipLevels) - 1);
+                        if (destination.Texture.Attachment)
+                        {
+                            destination.AttachmentState[SubresourceIndex(destination.Texture, record.Region.Mip, 0)] |=
+                                COLOR_DEFINED;
+                            destination.ColorDefined = AllDefined(destination.AttachmentState, COLOR_DEFINED);
+                        }
                         destination.TextureUse = RasterTextureUse::SampledBoth;
                         ++destination.TextureRevision;
                     }

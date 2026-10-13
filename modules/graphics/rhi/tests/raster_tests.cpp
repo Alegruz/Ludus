@@ -1376,7 +1376,8 @@ TEST_CASE("L1 rectangle intersection handles empty and overflowing scissors with
     pass.Viewport = {95, 0, ~uint32{0}, 1};
     CHECK_FALSE(internal::RasterResolveArea(pass, 96, 64, area));
 }
-TEST_CASE("L3 complete immutable mip uploads reject holes, overflow and attachment chains", "[rhi][raster][l3]")
+TEST_CASE("L3 complete immutable mip uploads reject holes and overflow; R10 enables attachment chains",
+          "[rhi][raster][l3]")
 {
     Session session;
     const uint8 bytes[32]{};
@@ -1399,7 +1400,8 @@ TEST_CASE("L3 complete immutable mip uploads reject holes, overflow and attachme
     description.MipLevels = 4;
     CHECK(CreateTexture(session.Device, description, {bytes, 0, mips}, texture) == RasterStatus::InvalidDescription);
     description = {2, 2, RasterFormat::Rgba8Unorm, true, 2};
-    CHECK(CreateTexture(session.Device, description, {}, texture) == RasterStatus::InvalidDescription);
+    REQUIRE(CreateTexture(session.Device, description, {}, texture) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, texture) == RasterStatus::Ready);
     description = {2, 2, RasterFormat::Rg8Unorm};
     const uint8 rg[8]{};
     REQUIRE(CreateTexture(session.Device, description, {rg, 4}, texture) == RasterStatus::Ready);
@@ -2597,4 +2599,373 @@ TEST_CASE("R9 partial mip views retain CPU subrange and undefined range exclusio
     REQUIRE(AddGraphRoot(session.Device, graph, version, GraphRoot::Readback) == RasterStatus::Ready);
     GraphReport report;
     CHECK(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::InvalidDescription);
+}
+namespace
+{
+TextureViewHandle AttachmentView(DeviceHandle device, TextureHandle texture, uint32 mip = 0, uint32 layer = 0)
+{
+    TextureViewHandle view;
+    REQUIRE(CreateTextureView(device,
+                              texture,
+                              {
+                                  .BaseMip = mip,
+                                  .MipCount = 1,
+                                  .BaseLayer = layer,
+                                  .LayerCount = 1,
+                                  .Attachment = true,
+                              },
+                              view) == RasterStatus::Ready);
+    return view;
+}
+} // namespace
+TEST_CASE("R10 selected attachment initialization preserves undefined siblings and aspects", "[rhi][raster][r10]")
+{
+    Session session;
+    TextureHandle texture;
+    REQUIRE(CreateTexture(session.Device,
+                          {
+                              .Width = 8,
+                              .Height = 8,
+                              .Attachment = true,
+                              .MipLevels = 3,
+                              .Dimension = TextureDimension::D2Array,
+                              .DepthOrLayers = 2,
+                              .Stencil = true,
+                          },
+                          {},
+                          texture) == RasterStatus::Ready);
+    auto selected = AttachmentView(session.Device, texture, 1, 1);
+    auto sibling = AttachmentView(session.Device, texture, 1, 0);
+    RasterColorAttachment color{ .View = selected };
+    RasterPassDescription pass;
+    pass.Colors = &color;
+    pass.ColorCount = 1;
+    pass.DepthStore = RasterStore::Store;
+    pass.StencilStore = RasterStore::Store;
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    color.Load = RasterLoad::Load;
+    CHECK(BeginRasterPass(session.Device, pass) == RasterStatus::InvalidDescription);
+    CHECK(reference::Passes == 0);
+    color.Load = RasterLoad::Clear;
+    REQUIRE(BeginRasterPass(session.Device, pass) == RasterStatus::Ready);
+    color.Load = RasterLoad::Load;
+    pass.DepthLoad = RasterLoad::Load;
+    pass.StencilLoad = RasterLoad::Load;
+    REQUIRE(BeginRasterPass(session.Device, pass) == RasterStatus::Ready);
+    color.View = sibling;
+    CHECK(BeginRasterPass(session.Device, pass) == RasterStatus::InvalidDescription);
+    color.View = selected;
+    color.Store = RasterStore::Discard;
+    REQUIRE(BeginRasterPass(session.Device, pass) == RasterStatus::Ready);
+    CHECK(BeginRasterPass(session.Device, pass) == RasterStatus::InvalidDescription);
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+    RasterTextureState state;
+    REQUIRE(GetTextureState(session.Device, texture, state) == RasterStatus::Ready);
+    CHECK_FALSE(state.ColorDefined);
+    CHECK_FALSE(state.DepthDefined);
+    CHECK_FALSE(state.StencilDefined);
+}
+TEST_CASE("R10 attachment sets reject mismatched extents samples and whole-allocation feedback", "[rhi][raster][r10]")
+{
+    Session session;
+    TextureHandle a, b, small, msaa;
+    REQUIRE(CreateTexture(session.Device,
+                          {
+                              .Width = 8,
+                              .Height = 8,
+                              .Attachment = true,
+                          },
+                          {},
+                          a) == RasterStatus::Ready);
+    REQUIRE(CreateTexture(session.Device,
+                          {
+                              .Width = 8,
+                              .Height = 8,
+                              .Attachment = true,
+                          },
+                          {},
+                          b) == RasterStatus::Ready);
+    REQUIRE(CreateTexture(session.Device, { .Width = 4, .Height = 4, .Attachment = true }, {}, small) ==
+            RasterStatus::Ready);
+    REQUIRE(CreateTexture(session.Device,
+                          {
+                              .Width = 8,
+                              .Height = 8,
+                              .Attachment = true,
+                              .SampleCount = 4,
+                          },
+                          {},
+                          msaa) == RasterStatus::Ready);
+    auto av = AttachmentView(session.Device, a), bv = AttachmentView(session.Device, b),
+         sv = AttachmentView(session.Device, small), mv = AttachmentView(session.Device, msaa);
+    TextureViewHandle sampled;
+    CHECK(CreateTextureView(session.Device, msaa, sampled) == RasterStatus::InvalidDescription);
+    RasterColorAttachment colors[2]{{ .View = av }, { .View = bv }};
+    RasterPassDescription pass;
+    pass.Colors = colors;
+    pass.ColorCount = 2;
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    REQUIRE(BeginRasterPass(session.Device, pass) == RasterStatus::Ready);
+    CHECK(reference::Pass.ColorCount == 2);
+    colors[1].View = av;
+    CHECK(BeginRasterPass(session.Device, pass) == RasterStatus::InvalidDescription);
+    colors[1].View = sv;
+    CHECK(BeginRasterPass(session.Device, pass) == RasterStatus::InvalidDescription);
+    colors[1].View = mv;
+    CHECK(BeginRasterPass(session.Device, pass) == RasterStatus::InvalidDescription);
+    colors[0].Resolve = bv;
+    colors[1].View = bv;
+    CHECK(BeginRasterPass(session.Device, pass) == RasterStatus::InvalidDescription);
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+}
+TEST_CASE("R10 color resolve defines its destination independently of source store", "[rhi][raster][r10]")
+{
+    Session session;
+    TextureHandle source, destination;
+    REQUIRE(
+        CreateTexture(session.Device, { .Width = 8, .Height = 8, .Attachment = true, .SampleCount = 4 }, {}, source) ==
+        RasterStatus::Ready);
+    REQUIRE(CreateTexture(session.Device, { .Width = 8, .Height = 8, .Attachment = true }, {}, destination) ==
+            RasterStatus::Ready);
+    auto src = AttachmentView(session.Device, source), dst = AttachmentView(session.Device, destination);
+    RasterColorAttachment color{ .View = src, .Resolve = dst, .Store = RasterStore::Discard };
+    RasterPassDescription pass;
+    pass.Colors = &color;
+    pass.ColorCount = 1;
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    REQUIRE(BeginRasterPass(session.Device, pass) == RasterStatus::Ready);
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+    RasterTextureState state;
+    REQUIRE(GetTextureState(session.Device, source, state) == RasterStatus::Ready);
+    CHECK_FALSE(state.ColorDefined);
+    REQUIRE(GetTextureState(session.Device, destination, state) == RasterStatus::Ready);
+    CHECK(state.ColorDefined);
+    CHECK_FALSE(state.DepthDefined);
+    color.View = dst;
+    color.Resolve = {};
+    color.Load = RasterLoad::Load;
+    color.Store = RasterStore::Store;
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    REQUIRE(BeginRasterPass(session.Device, pass) == RasterStatus::Ready);
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+}
+TEST_CASE("R10 typed aspect bindings and writable views cannot be interchanged", "[rhi][raster][r10]")
+{
+    Session session;
+    TextureHandle texture;
+    REQUIRE(
+        CreateTexture(session.Device, { .Width = 8, .Height = 8, .Attachment = true, .Stencil = true }, {}, texture) ==
+        RasterStatus::Ready);
+    auto attachment = AttachmentView(session.Device, texture);
+    TextureViewHandle depth, stencil, color;
+    REQUIRE(CreateTextureView(session.Device,
+                              texture,
+                              {
+                                  .Aspect = TextureAspect::Depth,
+                              },
+                              depth) == RasterStatus::Ready);
+    REQUIRE(CreateTextureView(session.Device, texture, { .Aspect = TextureAspect::Stencil }, stencil) ==
+            RasterStatus::Ready);
+    REQUIRE(CreateTextureView(session.Device, texture, color) == RasterStatus::Ready);
+    const RasterBinding binding{0, RasterBindingKind::TextureDepth2D, RasterVisibility::Fragment, 0};
+    BindingLayoutHandle layout;
+    BindingSetHandle set;
+    REQUIRE(CreateBindingLayout(session.Device, {&binding, 1}, layout) == RasterStatus::Ready);
+    RasterBindingResource resource{ .Texture = attachment };
+    CHECK(CreateBindingSet(session.Device, layout, {&resource, 1}, set) == RasterStatus::InvalidDescription);
+    resource.Texture = color;
+    CHECK(CreateBindingSet(session.Device, layout, {&resource, 1}, set) == RasterStatus::InvalidDescription);
+    resource.Texture = stencil;
+    CHECK(CreateBindingSet(session.Device, layout, {&resource, 1}, set) == RasterStatus::InvalidDescription);
+    resource.Texture = depth;
+    REQUIRE(CreateBindingSet(session.Device, layout, {&resource, 1}, set) == RasterStatus::Ready);
+}
+TEST_CASE("R10 GDI requires every MRT and resolve output and retains attachment views", "[rhi][raster][r10]")
+{
+    Session session;
+    TextureHandle textures[3];
+    TextureViewHandle views[3];
+    for (usize i = 0; i < 3; ++i)
+    {
+        REQUIRE(CreateTexture(session.Device,
+                              { .Width = 8, .Height = 8, .Attachment = true, .SampleCount = i == 0 ? 4U : 1U },
+                              {},
+                              textures[i]) == RasterStatus::Ready);
+        views[i] = AttachmentView(session.Device, textures[i]);
+    }
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    GraphVersion imports[3], outputs[3];
+    for (usize i = 0; i < 3; ++i)
+    {
+        RasterTextureState state;
+        REQUIRE(GetTextureState(session.Device, textures[i], state) == RasterStatus::Ready);
+        REQUIRE(
+            ImportGraphTexture(session.Device, graph, textures[i], state, RasterTextureUse::SampledBoth, imports[i]) ==
+            RasterStatus::Ready);
+        REQUIRE(NextGraphVersion(session.Device, graph, imports[i], outputs[i]) == RasterStatus::Ready);
+    }
+    RasterColorAttachment color{ .View = views[0], .Resolve = views[1], .Store = RasterStore::Discard };
+    GraphUse uses[2]{{outputs[0], GraphAccessMode::ColorWrite}, {outputs[1], GraphAccessMode::ColorWrite}};
+    GraphPassDescription pass;
+    pass.Name = "resolve";
+    pass.Attachment.Colors = &color;
+    pass.Attachment.ColorCount = 1;
+    pass.Uses = uses;
+    pass.UseCount = 2;
+    REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+    REQUIRE(AddGraphRoot(session.Device, graph, outputs[1], GraphRoot::Readback) == RasterStatus::Ready);
+    // Caller metadata and public attachment-view ownership can end after AddGraphPass.
+    color = {};
+    REQUIRE(Destroy(session.Device, views[0]) == RasterStatus::Ready);
+    REQUIRE(Destroy(session.Device, views[1]) == RasterStatus::Ready);
+    GraphReport report;
+    REQUIRE(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::Ready);
+    SubmissionToken token;
+    REQUIRE(ExecuteOrderedGraph(session.Device, session.Surface, graph, token) == RasterStatus::Ready);
+    RasterTextureState state;
+    REQUIRE(GetTextureState(session.Device, textures[1], state) == RasterStatus::Ready);
+    CHECK(state.ColorDefined);
+    CHECK(reference::Destroys[static_cast<usize>(internal::RasterKind::View)] == 0);
+    reference::Completed = reference::Submitted;
+    REQUIRE(PollLifetime(session.Device) == RasterStatus::Ready);
+    CHECK(reference::Destroys[static_cast<usize>(internal::RasterKind::View)] == 2);
+}
+TEST_CASE("R10 graph compilation rejects undeclared resolve outputs before encoding", "[rhi][raster][r10]")
+{
+    Session session;
+    TextureHandle source, destination;
+    REQUIRE(
+        CreateTexture(session.Device, { .Width = 8, .Height = 8, .Attachment = true, .SampleCount = 4 }, {}, source) ==
+        RasterStatus::Ready);
+    REQUIRE(CreateTexture(session.Device, { .Width = 8, .Height = 8, .Attachment = true }, {}, destination) ==
+            RasterStatus::Ready);
+    auto sourceView = AttachmentView(session.Device, source),
+         destinationView = AttachmentView(session.Device, destination);
+    OrderedGraph graph;
+    REQUIRE(CreateOrderedGraph(session.Device, graph) == RasterStatus::Ready);
+    GraphVersion imported[2], written[2];
+    TextureHandle textures[2]{source, destination};
+    for (usize i = 0; i < 2; ++i)
+    {
+        RasterTextureState state;
+        REQUIRE(GetTextureState(session.Device, textures[i], state) == RasterStatus::Ready);
+        REQUIRE(
+            ImportGraphTexture(session.Device, graph, textures[i], state, RasterTextureUse::SampledBoth, imported[i]) ==
+            RasterStatus::Ready);
+        REQUIRE(NextGraphVersion(session.Device, graph, imported[i], written[i]) == RasterStatus::Ready);
+    }
+    const RasterColorAttachment color{ .View = sourceView, .Resolve = destinationView };
+    const GraphUse use{written[0], GraphAccessMode::ColorWrite};
+    GraphPassDescription pass;
+    pass.Name = "missing resolve declaration";
+    pass.Attachment.Colors = &color;
+    pass.Attachment.ColorCount = 1;
+    pass.Uses = &use;
+    pass.UseCount = 1;
+    pass.SideEffect = true;
+    REQUIRE(AddGraphPass(session.Device, graph, pass) == RasterStatus::Ready);
+    GraphReport report;
+    CHECK(CompileOrderedGraph(session.Device, graph, report) == RasterStatus::InvalidDescription);
+    CHECK(reference::Passes == 0);
+    CHECK(reference::Draws == 0);
+}
+TEST_CASE("R10 sampling checks the retained view's depth aspect independently of color", "[rhi][raster][r10]")
+{
+    Session session;
+    Scene scene(session.Device);
+    TextureHandle texture;
+    TextureViewHandle depth;
+    REQUIRE(CreateTexture(session.Device, { .Width = 8, .Height = 8, .Attachment = true }, {}, texture) ==
+            RasterStatus::Ready);
+    REQUIRE(CreateTextureView(session.Device,
+                              texture,
+                              {
+                                  .Aspect = TextureAspect::Depth,
+                              },
+                              depth) == RasterStatus::Ready);
+    const RasterBinding bindings[2]{{0, RasterBindingKind::UniformBuffer, RasterVisibility::Both, 16},
+                                    {1, RasterBindingKind::TextureDepth2D, RasterVisibility::Fragment, 0}};
+    BindingLayoutHandle layout;
+    BindingSetHandle set;
+    RasterPipelineHandle pipeline;
+    REQUIRE(CreateBindingLayout(session.Device, bindings, layout) == RasterStatus::Ready);
+    const RasterBindingResource resources[2]{
+    {
+        .Buffer = scene.Uniform,
+        .Size = 16,
+    },
+                                             {
+                                                 .Binding = 1,
+                                                 .Texture = depth,
+                                             }};
+    REQUIRE(CreateBindingSet(session.Device, layout, resources, set) == RasterStatus::Ready);
+    const RasterVertexStream stream{12, false};
+    const RasterVertexAttribute attribute{0, 0, 0, RasterVertexFormat::Float3};
+    REQUIRE(CreateRasterPipeline(session.Device,
+                                 {scene.Vertex, scene.Fragment, layout, {&stream, 1}, {&attribute, 1}},
+                                 pipeline) == RasterStatus::Ready);
+    auto draw = scene.Draw();
+    draw.Pipeline = pipeline;
+    draw.Bindings = set;
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    REQUIRE(BeginRasterPass(session.Device, { .Color = texture }) == RasterStatus::Ready);
+    REQUIRE(BeginRasterPass(session.Device, {}) == RasterStatus::Ready);
+    CHECK(DrawIndexed(session.Device, draw) == RasterStatus::InvalidDescription);
+    REQUIRE(BeginRasterPass(session.Device,
+                            { .Color = texture, .ColorLoad = RasterLoad::Load, .DepthStore = RasterStore::Store }) ==
+            RasterStatus::Ready);
+    REQUIRE(BeginRasterPass(session.Device, {}) == RasterStatus::Ready);
+    REQUIRE(DrawIndexed(session.Device, draw) == RasterStatus::Ready);
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
+}
+TEST_CASE("R8 transfers share the R10 selected attachment mip initialization ledger", "[rhi][raster][r10]")
+{
+    Session session;
+    TextureHandle texture;
+    REQUIRE(CreateTexture(session.Device,
+                          {
+                              .Width = 8,
+                              .Height = 8,
+                              .Attachment = true,
+                              .MipLevels = 2,
+                          },
+                          {},
+                          texture) == RasterStatus::Ready);
+    uint8 pixels[64]{};
+    pixels[0] = 203;
+    TransferTicket upload;
+    REQUIRE(RequestTextureUpdate(session.Device, texture, {1, 0, 0, 4, 4}, pixels, sizeof(pixels), 16, upload) ==
+            RasterStatus::Pending);
+    reference::Transfers[0][0] = RasterStatus::Ready;
+    REQUIRE(GetStatus(session.Device, upload) == RasterStatus::Ready);
+    REQUIRE(Release(session.Device, upload) == RasterStatus::Ready);
+    RasterTextureState state;
+    REQUIRE(GetTextureState(session.Device, texture, state) == RasterStatus::Ready);
+    CHECK_FALSE(state.ColorDefined);
+    ReadbackTicket read;
+    CHECK(RequestTextureReadback(session.Device, texture, {0, 0, 0, 8, 8}, 32, read) == RasterStatus::InvalidState);
+    REQUIRE(RequestTextureReadback(session.Device, texture, {1, 0, 0, 4, 4}, 16, read) == RasterStatus::Pending);
+    reference::Transfers[1][0] = RasterStatus::Ready;
+    REQUIRE(GetStatus(session.Device, read) == RasterStatus::Ready);
+    uint8 copied[64]{};
+    REQUIRE(CopyReadback(session.Device, read, copied, sizeof(copied)) == RasterStatus::Ready);
+    CHECK(copied[0] == 203);
+}
+
+TEST_CASE("R10 rejects NaN color and depth clears before backend calls", "[rhi][raster][r10]")
+{
+    Session session;
+    const uint32 nanBits = 0x7fc00000U;
+    float32 nan = 0;
+    std::memcpy(&nan, &nanBits, sizeof(nan));
+    REQUIRE(BeginFrame(session.Device, session.Surface) == DeviceStatus::Ready);
+    RasterPassDescription pass;
+    pass.ClearDepth = nan;
+    CHECK(BeginRasterPass(session.Device, pass) == RasterStatus::InvalidDescription);
+    pass.ClearDepth = 1;
+    pass.Clear[2] = nan;
+    CHECK(BeginRasterPass(session.Device, pass) == RasterStatus::InvalidDescription);
+    CHECK(reference::Passes == 0);
+    REQUIRE(EndFrame(session.Device) == DeviceStatus::Ready);
 }

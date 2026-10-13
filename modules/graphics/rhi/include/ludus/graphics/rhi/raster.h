@@ -167,7 +167,7 @@ struct BufferDescription final
     /// Allocation and initial-content length in bytes; nonzero and bounded by capabilities.
     ludus::foundation::usize Size = 0;
 };
-/// Sampled color/data allocation or the existing single 2D color attachment.
+/// Original-format sampled allocation or color attachment with private depth/stencil.
 struct TextureDescription final
 {
     /// Pixel width, nonzero and bounded by enabled limits.
@@ -181,7 +181,7 @@ struct TextureDescription final
     bool Attachment = false;
     /// Allocated mips, at most floor(log2(largest spatial extent))+1 and sixteen.
     /// D3 includes depth in that extent; array layers and cube face counts do not.
-    /// Attachments require one; initial upload defines all unless DeferredInitialization.
+    /// Single-sample attachments allow mip chains; initial uploads define all unless DeferredInitialization.
     /// Each sampled view requires initialized contents only in its selected range.
     ludus::foundation::uint32 MipLevels = 1;
     /// Request nonblocking native upload readiness; Pending owns staging until completion.
@@ -194,22 +194,29 @@ struct TextureDescription final
     /// transfers initialize incrementally; full-resource sampled views require every mip.
     /// Attachments, non-D2 dimensions and retained CPU content reject this option.
     bool DeferredInitialization = false;
-    /// Allocation dimension, fixed for its lifetime. Attachments/CPU shadows require D2.
+    /// Allocation dimension, fixed for its lifetime. Attachments exclude D3; CPU shadows require D2.
     TextureDimension Dimension = TextureDimension::D2;
     /// Array layers, six cube faces, or base volume depth; D2 requires one.
     ludus::foundation::uint32 DepthOrLayers = 1;
+    /// Attachment sample count: one or capability-enabled four; uploads require one.
+    /// Four samples require D2, one mip and one layer, and cannot be sampled directly.
+    ludus::foundation::uint32 SampleCount = 1;
+    /// Allocate a private depth/stencil image instead of depth alone; attachments only.
+    /// Stencil support is independent of depth sampling and MSAA.
+    bool Stencil = false;
 };
-/// Sampled aspect selection; depth/stencil sampling requires the later R10 profile.
+/// Sampled color or private depth/stencil aspect; capability-gated independently.
 enum class TextureAspect : ludus::foundation::uint8
 {
     /// Color/data channels, including normalized and compressed formats.
     Color,
-    /// Depth component; currently returns Unsupported.
+    /// Private depth component; scalar float loads, without comparison/filtering.
     Depth,
-    /// Stencil component; currently returns Unsupported.
+    /// Private stencil component; scalar unsigned integer loads when enabled.
     Stencil,
 };
-/// Immutable original-format color view. Mip zero in a shader denotes BaseMip.
+/// Immutable original-format sampled aspect or single-subresource writable attachment view.
+/// Mip zero in a shader denotes BaseMip.
 /// Zero counts select the remaining allocation range. D3 requires BaseLayer=0,
 /// LayerCount=0 or 1; its volume slices are not array layers. No format reinterpretation.
 struct TextureViewDescription final
@@ -224,8 +231,12 @@ struct TextureViewDescription final
     ludus::foundation::uint32 BaseLayer = 0;
     /// Number of exposed layers; zero selects all remaining layers.
     ludus::foundation::uint32 LayerCount = 0;
-    /// Original-format aspect; only Color is enabled by R9.
+    /// Original color or private depth/stencil aspect; depth/stencil require a D2 view.
     TextureAspect Aspect = TextureAspect::Color;
+    /// Select a writable attachment view rather than a shader binding. Color only,
+    /// exactly one mip/layer and D2; retains both color and its private depth/stencil.
+    /// Undefined contents are legal until a pass clears them. Not bindable in a set.
+    bool Attachment = false;
 };
 /// One complete initialized mip within the borrowed upload byte blob.
 struct TextureMipUpload final
@@ -337,6 +348,10 @@ enum class RasterBindingKind : ludus::foundation::uint8
     TextureCube,
     /// Float-sampled three-dimensional volume.
     Texture3D,
+    /// Scalar float, unfiltered loads from a D2 private depth aspect; no sampler binding.
+    TextureDepth2D,
+    /// Scalar unsigned integer loads from a D2 private stencil aspect; no sampler binding.
+    TextureStencil2D,
     /// Non-comparison sampler.
     Sampler,
     /// Read-only compute storage buffer range.
@@ -434,7 +449,8 @@ struct RasterShaderDescription final
     std::string_view UniformBlocks[8]{};
     /// Combined GLSL ES sampled-uniform names, indexed by texture binding number.
     std::string_view TextureNames[8]{};
-    /// Sampler binding paired with each GLSL ES texture; irrelevant for other targets.
+    /// Sampler binding paired with each GLSL ES texture; ~uint32{0} denotes an unfiltered depth/stencil load.
+    /// Cooked browser descriptions retain this metadata for target selection.
     ludus::foundation::uint32 TextureSamplers[8]{};
     /// Independently reflected local dimensions for Compute; ignored for raster.
     /// Positive dimensions/product must fit the negotiated compute limits.
@@ -457,7 +473,7 @@ struct RasterBindingResource final
     ludus::foundation::usize Offset = 0;
     /// Uniform byte range, nonzero and at least the layout's reflected minimum.
     ludus::foundation::usize Size = 0;
-    /// Sampled complete view identity; ignored for other entries.
+    /// Sampled view identity of the layout's exact dimension/aspect; writable views reject.
     TextureViewHandle Texture{};
     /// Sampler identity; ignored for other entries.
     SamplerHandle Sampler{};
@@ -508,9 +524,62 @@ enum class RasterDepthCompare : ludus::foundation::uint8
     /// Accept every depth value; DepthWrite still controls writes.
     Always,
 };
+/// Portable stencil comparison against the masked reference and stored value.
+enum class RasterStencilCompare : ludus::foundation::uint8
+{
+    /// Never pass.
+    Never,
+    /// Reference is smaller than the stored value.
+    Less,
+    /// Reference equals the stored value.
+    Equal,
+    /// Reference is smaller than or equal to the stored value.
+    LessEqual,
+    /// Reference is greater than the stored value.
+    Greater,
+    /// Reference differs from the stored value.
+    NotEqual,
+    /// Reference is greater than or equal to the stored value.
+    GreaterEqual,
+    /// Always pass.
+    Always,
+};
+/// Operation on an eight-bit stencil value, after masking by WriteMask.
+enum class RasterStencilOperation : ludus::foundation::uint8
+{
+    /// Preserve the stored value.
+    Keep,
+    /// Write zero.
+    Zero,
+    /// Write Reference.
+    Replace,
+    /// Increment, saturating at 255.
+    IncrementClamp,
+    /// Decrement, saturating at zero.
+    DecrementClamp,
+    /// Invert all eight bits.
+    Invert,
+    /// Increment modulo 256.
+    IncrementWrap,
+    /// Decrement modulo 256.
+    DecrementWrap,
+};
+/// Immutable per-face stencil state. Front/back share masks and reference in a pipeline.
+struct RasterStencilFace final
+{
+    /// Masked comparison.
+    RasterStencilCompare Compare = RasterStencilCompare::Always;
+    /// Stencil comparison failed.
+    RasterStencilOperation Fail = RasterStencilOperation::Keep;
+    /// Stencil passed but depth failed.
+    RasterStencilOperation DepthFail = RasterStencilOperation::Keep;
+    /// Both enabled tests passed.
+    RasterStencilOperation Pass = RasterStencilOperation::Keep;
+};
 /// Immutable triangle-list pipeline, independent of particular buffers or bindings.
 /// Target selects the negotiated surface or an explicit offscreen color format,
-/// with one sample and private depth. Dimensions are dynamic; format changes need
+/// with private depth/stencil. Explicit ColorFormats and SampleCount select R10 offscreen
+/// compatibility. Dimensions are dynamic; format changes need
 /// a compatible pipeline. Depth uses canonical [0,1] coordinates.
 struct RasterPipelineDescription final
 {
@@ -534,6 +603,24 @@ struct RasterPipelineDescription final
     bool DepthWrite = true;
     /// Comparison when Depth is enabled; defaults preserve R1 conventional depth.
     RasterDepthCompare DepthCompare = RasterDepthCompare::Less;
+    /// Explicit offscreen color format sequence, one to four; empty uses Target.
+    /// Copied before return. Every format and sample count must be enabled.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::span<const RasterFormat> ColorFormats{};
+    /// One or enabled four samples; surface pipelines require one.
+    ludus::foundation::uint32 SampleCount = 1;
+    /// Require a depth/stencil attachment even when the stencil write mask is zero.
+    bool Stencil = false;
+    /// Stencil behavior for counter-clockwise triangles in canonical clip-space XY.
+    RasterStencilFace StencilFront{};
+    /// Back-facing triangle stencil behavior.
+    RasterStencilFace StencilBack{};
+    /// Eight-bit comparison mask shared by both faces.
+    ludus::foundation::uint32 StencilReadMask = 255;
+    /// Eight-bit write mask; zero permits a read-only stencil pass.
+    ludus::foundation::uint32 StencilWriteMask = 255;
+    /// Eight-bit reference, set by each accepted draw.
+    ludus::foundation::uint32 StencilReference = 0;
 };
 /// One vertex-stream slice, borrowed during DrawIndexed and retained through submission.
 struct RasterVertexSlice final
@@ -600,7 +687,7 @@ CreateTexture(DeviceHandle, const TextureDescription&, const TextureUpload&, Tex
 /// Use the description overload to select sampled subranges. Deferred sampled allocations
 /// reject InvalidState until every mip is initialized. Failures preserve a null output; owner-thread only.
 [[nodiscard]] RasterStatus CreateTextureView(DeviceHandle, TextureHandle, TextureViewHandle&) noexcept;
-/// Create a bounded original-format color view on the owner thread between frames.
+/// Create a bounded sampled aspect or writable attachment view on the owner thread between frames.
 /// Only selected mips must be initialized (attachments retain existing clear/store rules).
 /// Ready/Pending publishes ownership and retains the allocation; other results preserve output.
 /// Unsupported denotes a disabled dimension/partial-view capability. GDI hazards and

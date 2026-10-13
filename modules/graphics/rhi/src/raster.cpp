@@ -105,6 +105,8 @@ struct Record final
     bool DepthDefined = false;
     bool FrameColorDefined = false;
     bool FrameDepthDefined = false;
+    bool StencilDefined = false, FrameStencilDefined = false;
+    StorageArray<uint8> AttachmentState, FrameAttachmentState;
     usize TextureSlot = 0;
     TextureViewDescription View;
     RasterShaderInfo Shader;
@@ -465,6 +467,47 @@ bool Fits(usize offset, usize size, usize total) noexcept
 {
     return offset <= total && size <= total - offset;
 }
+constexpr uint8 COLOR_DEFINED = 1, DEPTH_DEFINED = 2, STENCIL_DEFINED = 4;
+bool AllDefined(const StorageArray<uint8>& states, uint8 aspect) noexcept
+{
+    if (states.GetSize() == 0)
+    {
+        return false;
+    }
+    for (auto state : states)
+    {
+        if ((state & aspect) == 0)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+usize SubresourceIndex(const TextureDescription& texture, uint32 mip, uint32 layer) noexcept
+{
+    return static_cast<usize>(mip) * texture.DepthOrLayers + layer;
+}
+bool ViewDefined(const Record& texture, const TextureViewDescription& view, const StorageArray<uint8>& states) noexcept
+{
+    if (!texture.Texture.Attachment)
+    {
+        return true;
+    }
+    const uint8 aspect = view.Aspect == TextureAspect::Depth     ? DEPTH_DEFINED
+                         : view.Aspect == TextureAspect::Stencil ? STENCIL_DEFINED
+                                                                 : COLOR_DEFINED;
+    for (uint32 mip = view.BaseMip; mip < view.BaseMip + view.MipCount; ++mip)
+    {
+        for (uint32 layer = view.BaseLayer; layer < view.BaseLayer + view.LayerCount; ++layer)
+        {
+            if ((states[SubresourceIndex(texture.Texture, mip, layer)] & aspect) == 0)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
 void FrameRetain(RasterKind kind, usize slot) noexcept
 {
     auto& record = At(kind, slot);
@@ -474,6 +517,11 @@ void FrameRetain(RasterKind kind, usize slot) noexcept
         record.FrameTextureUse = record.TextureUse;
         record.FrameColorDefined = record.ColorDefined;
         record.FrameDepthDefined = record.DepthDefined;
+        record.FrameStencilDefined = record.StencilDefined;
+        for (usize i = 0; i < record.AttachmentState.GetSize(); ++i)
+        {
+            record.FrameAttachmentState[i] = record.AttachmentState[i];
+        }
         ++record.References;
     }
 }
@@ -598,10 +646,13 @@ RasterStatus CreateTexture(DeviceHandle device,
         (description.Dimension == TextureDimension::D2 && description.DepthOrLayers != 1) ||
         (description.Dimension == TextureDimension::Cube &&
          (description.DepthOrLayers != 6 || description.Width != description.Height)) ||
+        (description.Stencil && !description.Attachment) ||
+        (description.SampleCount != 1 && description.SampleCount != 4) ||
+        (description.SampleCount != 1 &&
+         (!description.Attachment || description.Dimension != TextureDimension::D2 || description.MipLevels != 1)) ||
         (description.Attachment &&
-         (description.Dimension != TextureDimension::D2 || description.MipLevels != 1 ||
-          description.Format == RasterFormat::R8Unorm || description.Format == RasterFormat::Rg8Unorm ||
-          CompressedTexture(description.Format))) ||
+         (description.Dimension == TextureDimension::D3 || description.Format == RasterFormat::R8Unorm ||
+          description.Format == RasterFormat::Rg8Unorm || CompressedTexture(description.Format))) ||
         (description.RetainCpuContent &&
          (description.Attachment || description.Dimension != TextureDimension::D2 ||
           description.Format == RasterFormat::Rgba16Float || CompressedTexture(description.Format))))
@@ -609,13 +660,19 @@ RasterStatus CreateTexture(DeviceHandle device,
         return RasterStatus::InvalidDescription;
     }
     const auto format = internal::CurrentDeviceProfile().Formats[static_cast<usize>(description.Format)];
-    const auto dimension = description.Attachment                            ? format.MaxAttachmentDimension2D
+    const auto dimension = description.Attachment && description.Dimension == TextureDimension::Cube
+                               ? format.MaxAttachmentCubeDimension
+                           : description.Attachment                          ? format.MaxAttachmentDimension2D
                            : description.Dimension == TextureDimension::Cube ? format.MaxCubeDimension
                            : description.Dimension == TextureDimension::D3   ? format.MaxDimension3D
                                                                              : format.MaxSampledDimension2D;
     if (!format.Uses.Sampled || !format.Uses.Filterable || (description.Attachment && !format.Uses.ColorAttachment) ||
         description.Width > dimension || description.Height > dimension ||
         description.MipLevels > format.MaxMipLevels ||
+        (description.Attachment && (description.MipLevels > format.MaxAttachmentMipLevels ||
+                                    description.DepthOrLayers > format.MaxAttachmentLayers ||
+                                    (format.SampleCounts & description.SampleCount) == 0 ||
+                                    (description.Stencil && !format.StencilAttachment))) ||
         (description.Dimension == TextureDimension::D2Array && description.DepthOrLayers > format.MaxArrayLayers) ||
         (description.Dimension == TextureDimension::D3 && description.DepthOrLayers > dimension))
     {
@@ -648,14 +705,21 @@ RasterStatus CreateTexture(DeviceHandle device,
                                      uint64{TextureBlockRows(description.Format, storageHeight)},
                                      pixels) ||
             !foundation::TryMultiply(pixels, uint64{TextureSlices(description, mip)}, pixels) ||
-            !foundation::TryMultiply(pixels, storageChannels, bytes) ||
+            !foundation::TryMultiply(pixels, storageChannels * description.SampleCount, bytes) ||
             !foundation::TryAdd(storageBytes, bytes, storageBytes))
         {
             return RasterStatus::InvalidDescription;
         }
         if (description.Attachment)
         {
-            if (!foundation::TryMultiply(pixels, uint64{4}, bytes) ||
+            if (backend::Kind() == Backend::WebGL2 && (!foundation::TryMultiply(pixels, storageChannels, bytes) ||
+                                                       !foundation::TryAdd(storageBytes, bytes, storageBytes)))
+            {
+                return RasterStatus::InvalidDescription;
+            }
+            if (!foundation::TryMultiply(pixels,
+                                         uint64{description.Stencil ? 8U : 4U} * description.SampleCount,
+                                         bytes) ||
                 !foundation::TryAdd(storageBytes, bytes, storageBytes))
             {
                 return RasterStatus::InvalidDescription;
@@ -681,6 +745,13 @@ RasterStatus CreateTexture(DeviceHandle device,
             output,
             [&](usize slot, Record& record) noexcept {
                 record.Texture = description;
+                if (description.Attachment &&
+                    (!record.AttachmentState.TryResize(static_cast<usize>(description.MipLevels) *
+                                                       description.DepthOrLayers) ||
+                     !record.FrameAttachmentState.TryResize(record.AttachmentState.GetSize())))
+                {
+                    return StorageFailure();
+                }
                 return backend::RasterCreateTexture(slot, description, upload, record.Request);
             },
             storageBytes);
@@ -810,9 +881,15 @@ RasterStatus CreateTextureView(DeviceHandle device,
     {
         return RasterStatus::InvalidDescription;
     }
-    if (description.Aspect != TextureAspect::Color)
+    if ((description.Attachment && (!source->Texture.Attachment || description.Aspect != TextureAspect::Color)) ||
+        (!description.Attachment && source->Texture.SampleCount != 1))
     {
-        return RasterStatus::Unsupported;
+        return RasterStatus::InvalidDescription;
+    }
+    if (description.Aspect != TextureAspect::Color &&
+        (!source->Texture.Attachment || (description.Aspect == TextureAspect::Stencil && !source->Texture.Stencil)))
+    {
+        return RasterStatus::InvalidDescription;
     }
     const auto& allocation = source->Texture;
     auto view = description;
@@ -842,7 +919,13 @@ RasterStatus CreateTextureView(DeviceHandle device,
     const bool partial = view.BaseMip != 0 || view.MipCount != allocation.MipLevels || view.BaseLayer != 0 ||
                          view.LayerCount != layers || view.Dimension != allocation.Dimension;
     const auto caps = internal::CurrentDeviceProfile().Formats[static_cast<usize>(allocation.Format)];
-    if (partial && !caps.PartialViews)
+    if ((view.Attachment && (!caps.AttachmentViews || view.Dimension != TextureDimension::D2 || view.MipCount != 1 ||
+                             view.LayerCount != 1)) ||
+        (view.Aspect == TextureAspect::Depth &&
+         (!caps.DepthSampled || view.Dimension != TextureDimension::D2 || view.LayerCount != 1)) ||
+        (view.Aspect == TextureAspect::Stencil &&
+         (!caps.StencilSampled || view.Dimension != TextureDimension::D2 || view.LayerCount != 1)) ||
+        (partial && !view.Attachment && !caps.PartialViews))
     {
         return RasterStatus::Unsupported;
     }
@@ -854,7 +937,7 @@ RasterStatus CreateTextureView(DeviceHandle device,
     // GLES has no native texture views: its partial views copy a sampled snapshot.
     // Mutation exclusion retains the source; logical copy storage is budgeted here.
     uint64 bytes = 0;
-    if (backend::Kind() == Backend::WebGL2 && partial)
+    if (backend::Kind() == Backend::WebGL2 && partial && !view.Attachment)
     {
         for (uint32 mip = view.BaseMip; mip < view.BaseMip + view.MipCount; ++mip)
         {
@@ -973,9 +1056,17 @@ CreateRasterShader(DeviceHandle device, const RasterShaderDescription& descripti
     }
     for (usize i = 0; i < RASTER_BINDINGS; ++i)
     {
+        bool loadOnly = false;
+        for (usize b = 0; b < info.Layout.Count; ++b)
+        {
+            loadOnly |= info.Layout.Entries[b].Binding == i &&
+                        (info.Layout.Entries[b].Kind == RasterBindingKind::TextureDepth2D ||
+                         info.Layout.Entries[b].Kind == RasterBindingKind::TextureStencil2D);
+        }
         if (!CopyName(description.UniformBlocks[i], info.UniformBlocks[i]) ||
             !CopyName(description.TextureNames[i], info.TextureNames[i]) ||
-            description.TextureSamplers[i] >= RASTER_BINDINGS)
+            (description.TextureSamplers[i] >= RASTER_BINDINGS &&
+             (!loadOnly || description.TextureSamplers[i] != ~uint32{0})))
         {
             return RasterStatus::InvalidDescription;
         }
@@ -1121,7 +1212,11 @@ RasterStatus CreateBindingSet(DeviceHandle device,
         {
             return resource->Status == RasterStatus::Pending ? RasterStatus::NotReady : resource->Status;
         }
-        if (TextureBinding(kind) && TextureBindingType(resource->View.Dimension) != kind)
+        const auto textureType = resource->View.Aspect == TextureAspect::Depth ? RasterBindingKind::TextureDepth2D
+                                 : resource->View.Aspect == TextureAspect::Stencil
+                                     ? RasterBindingKind::TextureStencil2D
+                                     : TextureBindingType(resource->View.Dimension);
+        if (TextureBinding(kind) && (resource->View.Attachment || textureType != kind))
         {
             return RasterStatus::InvalidDescription;
         }
@@ -1221,6 +1316,47 @@ ValidatePipeline(DeviceHandle device, const RasterPipelineDescription& descripti
     }
     info.DepthWrite = description.DepthWrite;
     info.DepthCompare = description.DepthCompare;
+    if (description.ColorFormats.size() > 4 ||
+        description.ColorFormats.size() > internal::CurrentDeviceProfile().Interface.MaxColorAttachments ||
+        (description.SampleCount != 1 && description.SampleCount != 4) ||
+        (description.SampleCount != 1 && description.ColorFormats.empty()) ||
+        (description.Stencil && description.ColorFormats.empty()) || description.StencilReadMask > 255 ||
+        description.StencilWriteMask > 255 || description.StencilReference > 255)
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    info.ColorCount = description.ColorFormats.size();
+    info.SampleCount = description.SampleCount;
+    info.Stencil = description.Stencil;
+    info.StencilFront = description.StencilFront;
+    info.StencilBack = description.StencilBack;
+    info.StencilReadMask = description.StencilReadMask;
+    info.StencilWriteMask = description.StencilWriteMask;
+    info.StencilReference = description.StencilReference;
+    const RasterStencilFace faces[]{description.StencilFront, description.StencilBack};
+    for (const auto& face : faces)
+    {
+        if (static_cast<uint8>(face.Compare) > 7 || static_cast<uint8>(face.Fail) > 7 ||
+            static_cast<uint8>(face.DepthFail) > 7 || static_cast<uint8>(face.Pass) > 7)
+        {
+            return RasterStatus::InvalidDescription;
+        }
+    }
+    for (usize i = 0; i < info.ColorCount; ++i)
+    {
+        const auto format = description.ColorFormats[i];
+        if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm))
+        {
+            return RasterStatus::InvalidDescription;
+        }
+        const auto caps = internal::CurrentDeviceProfile().Formats[static_cast<usize>(format)];
+        if (!caps.Uses.ColorAttachment || (caps.SampleCounts & info.SampleCount) == 0 ||
+            (info.Blend && !caps.Uses.Blendable) || (info.Stencil && !caps.StencilAttachment))
+        {
+            return RasterStatus::Unsupported;
+        }
+        info.ColorFormats[i] = format;
+    }
     info.StreamCount = description.Streams.size();
     info.AttributeCount = description.Attributes.size();
     for (usize i = 0; i < info.StreamCount; ++i)
@@ -1565,6 +1701,11 @@ void RasterEndFrame(bool accepted) noexcept
                     record.TextureUse = record.FrameTextureUse;
                     record.ColorDefined = record.FrameColorDefined;
                     record.DepthDefined = record.FrameDepthDefined;
+                    record.StencilDefined = record.FrameStencilDefined;
+                    for (usize i = 0; i < record.AttachmentState.GetSize(); ++i)
+                    {
+                        record.AttachmentState[i] = record.FrameAttachmentState[i];
+                    }
                     ++record.TextureRevision;
                 }
             }

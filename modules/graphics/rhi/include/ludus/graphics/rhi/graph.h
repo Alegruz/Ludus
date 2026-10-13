@@ -56,9 +56,24 @@ struct RasterRectangle final
     /// Vertical pixel count.
     ludus::foundation::uint32 Height = 0;
 };
-/// One raster pass: one color attachment and its private, same-size depth image.
-/// Null Color selects the acquired surface. One mip/layer/sample; no resolve,
-/// stencil, storage, partial initialization or depth sampling in this profile.
+/// One selected color attachment, with independent initialization and optional MSAA resolve.
+struct RasterColorAttachment final
+{
+    /// Ready attachment view of exactly one mip/layer; retained through execution/completion.
+    TextureViewHandle View{};
+    /// Optional single-sample attachment view of matching extent/format. Source must be four-sample.
+    /// Resolve initializes the destination even when source Store is Discard, provided source is defined.
+    TextureViewHandle Resolve{};
+    /// Full selected-subresource initialization, independent of viewport/scissor.
+    RasterLoad Load = RasterLoad::Clear;
+    /// Validity of the selected source subresource after the pass.
+    RasterStore Store = RasterStore::Store;
+    /// Linear clear RGBA, finite in [0,1].
+    ludus::foundation::float32 Clear[4]{0, 0, 0, 1};
+};
+/// One raster pass: explicit color views or the legacy color/private-depth pair.
+/// With empty Colors, null Color selects the single-sample acquired surface.
+/// Explicit offscreen views select one mip/layer per attachment and optional color resolves.
 struct RasterPassDescription final
 {
     /// Owned attachment texture, or null for the acquired surface.
@@ -85,6 +100,22 @@ struct RasterPassDescription final
     bool UseViewport = false;
     /// False clips only against attachment bounds. An enabled empty scissor is a no-op.
     bool UseScissor = false;
+    /// Borrowed offscreen color entries, consumed by BeginRasterPass or copied by AddGraphPass.
+    /// Non-null when ColorCount is positive; zero count uses Color.
+    /// Nonempty requires null Color. Depth/stencil belongs to the first view's selected
+    /// mip/layer. All sources have matching extents/sample counts; allocations must
+    /// be distinct (including resolves) under conservative whole-allocation hazards.
+    const RasterColorAttachment* Colors = nullptr;
+    /// Number of borrowed Colors entries; zero selects the legacy Color attachment.
+    ludus::foundation::usize ColorCount = 0;
+    /// Private stencil initialization; ignored for a depth-only allocation.
+    RasterLoad StencilLoad = RasterLoad::Clear;
+    /// Stencil validity after the pass; independent of color and depth.
+    RasterStore StencilStore = RasterStore::Discard;
+    /// Read-only stencil requires Load and rejects nonzero pipeline stencil writes.
+    bool StencilReadOnly = false;
+    /// Eight-bit clear stencil value.
+    ludus::foundation::uint32 ClearStencil = 0;
 };
 /// Snapshot from the single RHI registry; describes accepted same-queue work,
 /// including pending GPU uses, rather than presentation or CPU frame numbers.
@@ -100,6 +131,8 @@ struct RasterTextureState final
     bool ColorDefined = false;
     /// Clear followed by Store establishes full valid private depth contents.
     bool DepthDefined = false;
+    /// Every private stencil subresource is initialized and stored.
+    bool StencilDefined = false;
 };
 /// Query an owned texture on the owner thread; failure preserves output.
 [[nodiscard]] RasterStatus GetTextureState(DeviceHandle, TextureHandle, RasterTextureState&) noexcept;

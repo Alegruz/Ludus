@@ -10,11 +10,14 @@ namespace
 {
 bool InitializedMip(const Record& texture, uint32 mip) noexcept
 {
-    return texture.Texture.Attachment ? texture.ColorDefined : (texture.InitializedMips & (uint32{1} << mip)) != 0;
+    return texture.Texture.Attachment
+               ? (texture.AttachmentState[SubresourceIndex(texture.Texture, mip, 0)] & COLOR_DEFINED) != 0
+               : (texture.InitializedMips & (uint32{1} << mip)) != 0;
 }
 RasterStatus ValidateRegion(const Record& texture, const TextureRegion& region) noexcept
 {
-    if (texture.Texture.Format != RasterFormat::Rgba8Unorm || texture.Texture.Dimension != TextureDimension::D2)
+    if (texture.Texture.Format != RasterFormat::Rgba8Unorm || texture.Texture.Dimension != TextureDimension::D2 ||
+        texture.Texture.SampleCount != 1)
     {
         return RasterStatus::Unsupported;
     }

@@ -24,7 +24,7 @@ bool ValidProfileRequirements(const DeviceProfileRequirements& requirements) noe
         const auto& entry = requirements.Formats[i];
         if (static_cast<uint8>(entry.Format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm) || !Any(entry.Uses) ||
             static_cast<uint8>(entry.Dimension) > static_cast<uint8>(TextureDimension::D3) ||
-            ((entry.Uses.ColorAttachment || entry.Uses.Blendable) && entry.Dimension != TextureDimension::D2) ||
+            ((entry.Uses.ColorAttachment || entry.Uses.Blendable) && entry.Dimension == TextureDimension::D3) ||
             (entry.Dimension == TextureDimension::D2 && entry.MinDepthOrLayers > 1) ||
             (entry.Dimension == TextureDimension::Cube && entry.MinDepthOrLayers > 6) || entry.MinMipLevels == 0 ||
             entry.SampleCount == 0 || entry.SampleCount > 64 || (entry.SampleCount & (entry.SampleCount - 1)) != 0 ||
@@ -267,11 +267,13 @@ ProfileDiagnostic CheckProfile(const DeviceProfileRequirements& requirements, co
         {
             return { .Requirement = ProfileRequirement::Storage, .Format = request.Format, .Requested = 1 };
         }
-        if (request.Uses.CopySource && (!format.Uses.CopySource || request.Dimension != TextureDimension::D2))
+        if (request.Uses.CopySource &&
+            (!format.Uses.CopySource || request.Dimension != TextureDimension::D2 || request.SampleCount != 1))
         {
             return { .Requirement = ProfileRequirement::CopySource, .Format = request.Format, .Requested = 1 };
         }
-        if (request.Uses.CopyDestination && (!format.Uses.CopyDestination || request.Dimension != TextureDimension::D2))
+        if (request.Uses.CopyDestination &&
+            (!format.Uses.CopyDestination || request.Dimension != TextureDimension::D2 || request.SampleCount != 1))
         {
             return { .Requirement = ProfileRequirement::CopyDestination, .Format = request.Format, .Requested = 1 };
         }
@@ -279,9 +281,30 @@ ProfileDiagnostic CheckProfile(const DeviceProfileRequirements& requirements, co
         {
             return { .Requirement = ProfileRequirement::PartialViews, .Format = request.Format, .Requested = 1 };
         }
-        const auto layers = request.Dimension == TextureDimension::D3     ? format.MaxDimension3D
-                            : request.Dimension == TextureDimension::Cube ? (format.MaxCubeDimension != 0 ? 6U : 0U)
-                                                                          : format.MaxArrayLayers;
+        if (request.AttachmentViews && !format.AttachmentViews)
+        {
+            return { .Requirement = ProfileRequirement::AttachmentViews, .Format = request.Format, .Requested = 1 };
+        }
+        if (request.DepthSampled && !format.DepthSampled)
+        {
+            return { .Requirement = ProfileRequirement::DepthSampled, .Format = request.Format, .Requested = 1 };
+        }
+        if (request.StencilAttachment && !format.StencilAttachment)
+        {
+            return { .Requirement = ProfileRequirement::StencilAttachment, .Format = request.Format, .Requested = 1 };
+        }
+        if (request.StencilSampled && !format.StencilSampled)
+        {
+            return { .Requirement = ProfileRequirement::StencilSampled, .Format = request.Format, .Requested = 1 };
+        }
+        const auto sampledLayers = request.Dimension == TextureDimension::D3 ? format.MaxDimension3D
+                                   : request.Dimension == TextureDimension::Cube
+                                       ? (format.MaxCubeDimension != 0 ? 6U : 0U)
+                                       : format.MaxArrayLayers;
+        const auto layers =
+            (request.Uses.ColorAttachment || request.Uses.Blendable) && format.MaxAttachmentLayers < sampledLayers
+                ? format.MaxAttachmentLayers
+                : sampledLayers;
         if (request.MinDepthOrLayers > layers)
         {
             return
@@ -304,9 +327,15 @@ ProfileDiagnostic CheckProfile(const DeviceProfileRequirements& requirements, co
             return { .Requirement = ProfileRequirement::FormatDimension, .Format = request.Format, .Requested = 1 };
         }
         uint32 dimension = sampled ? sampledDimension : format.MaxAttachmentDimension2D;
-        if (attachment && format.MaxAttachmentDimension2D < dimension)
+        const auto attachmentDimension = request.Dimension == TextureDimension::Cube ? format.MaxAttachmentCubeDimension
+                                                                                     : format.MaxAttachmentDimension2D;
+        if (attachment && attachmentDimension == 0)
         {
-            dimension = format.MaxAttachmentDimension2D;
+            return { .Requirement = ProfileRequirement::FormatDimension, .Format = request.Format, .Requested = 1 };
+        }
+        if (attachment && attachmentDimension < dimension)
+        {
+            dimension = attachmentDimension;
         }
         if (request.MinDimension2D > dimension)
         {
@@ -324,7 +353,9 @@ ProfileDiagnostic CheckProfile(const DeviceProfileRequirements& requirements, co
             ++extentMips;
         }
         const uint32 sampledMips = format.MaxMipLevels < extentMips ? format.MaxMipLevels : extentMips;
-        const uint32 mips = attachment ? 1 : sampledMips;
+        const uint32 mips = request.SampleCount > 1                                     ? 1
+                            : attachment && format.MaxAttachmentMipLevels < sampledMips ? format.MaxAttachmentMipLevels
+                                                                                        : sampledMips;
         if (request.MinMipLevels > mips)
         {
             return
@@ -335,14 +366,18 @@ ProfileDiagnostic CheckProfile(const DeviceProfileRequirements& requirements, co
                 .Available = mips,
             };
         }
-        if (attachment && (format.SampleCounts & request.SampleCount) == 0)
+        const auto sampleCounts =
+            request.Dimension != TextureDimension::D2 || sampled || request.DepthSampled || request.StencilSampled
+                ? format.SampleCounts & 1U
+                : format.SampleCounts;
+        if (attachment && (sampleCounts & request.SampleCount) == 0)
         {
             return
             {
                 .Requirement = ProfileRequirement::SampleCount,
                 .Format = request.Format,
                 .Requested = request.SampleCount,
-                .Available = format.SampleCounts,
+                .Available = sampleCounts,
             };
         }
     }
@@ -365,7 +400,12 @@ DeviceProfile QueryDeviceProfile() noexcept
     {
         return {};
     }
-    result.Interface = {8, 2, result.Raster.MaxVertexAttributes, backend::RasterVertexStrideLimit(), 1, 1};
+    result.Interface = {8,
+                        2,
+                        result.Raster.MaxVertexAttributes,
+                        backend::RasterVertexStrideLimit(),
+                        backend::RasterColorAttachmentLimit(),
+                        1};
     result.Compute = backend::ComputeLimits();
     for (usize i = 0; i < 7; ++i)
     {

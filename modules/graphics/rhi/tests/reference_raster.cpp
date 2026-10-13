@@ -135,11 +135,21 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     result.MaxCubeDimension = result.MaxSampledDimension2D;
     result.MaxDimension3D = internal::CompressedTexture(format) ? 0U : 256U;
     result.PartialViews = result.Uses.Sampled;
+    result.AttachmentViews = result.DepthSampled = result.StencilAttachment = result.StencilSampled =
+        result.Uses.ColorAttachment;
+    result.SampleCounts = result.Uses.ColorAttachment ? 5U : 0U;
+    result.MaxAttachmentMipLevels = result.Uses.ColorAttachment ? result.MaxMipLevels : 0;
+    result.MaxAttachmentLayers = result.Uses.ColorAttachment ? 256 : 0;
     if (reference::FormatBlendUnavailable)
     {
         result.Uses.Blendable = false;
     }
+    result.MaxAttachmentCubeDimension = result.Uses.ColorAttachment ? result.MaxCubeDimension : 0;
     return result;
+}
+uint32 RasterColorAttachmentLimit() noexcept
+{
+    return 4;
 }
 uint32 RasterVertexStrideLimit() noexcept
 {

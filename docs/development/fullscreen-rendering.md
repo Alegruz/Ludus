@@ -243,13 +243,13 @@ used after loss/restart.
 
 Format use flags describe implemented operations. All supported formats allow
 original-format sampled views and linear filtering. Only RGBA8 linear/sRGB support the
-current single-color/private-depth attachment and blend path, within backend
+current RGBA color/private-depth attachment and blend path, within backend
 format limits. R8/RG8 remain sampled only. L4 adds RGBA16F when `HdrColor` is enabled: it supports
-sampling/filtering/blending through a single-mip color attachment. R9 also accepts
+sampling/filtering/blending through an enabled color attachment. R9 also accepts
 original binary16 uploads and sampled mip chains. Attachment/blending capability
 is independent of sampled HDR support.
 SampleCounts is a bit mask (value 1 for
-one sample); MSAA is not enabled. Storage texture uses remain false. R8 enables
+one sample); R10 independently enables four samples and color resolves. Storage texture uses remain false. R8 enables
 bounded RGBA8Unorm texture copy source/destination uses; other formats remain false.
 Creation uploads and frame readback alone do not constitute those uses. Vulkan
 checks combined sampled/upload/copy/attachment usage and private-depth bounds; portable
@@ -596,12 +596,11 @@ configurable through `DeviceDescription.Storage`. The historical first profile
 was four graphs, sixteen logical resources per graph, thirty-two
 ordered raster passes, sixteen declarations per pass, 256 retained draws per
 graph, and 512 semantic dependency report entries. Capacity rejection occurs
-before frame acquisition. Attachment formats remain single-mip RGBA8 linear/sRGB or capability-gated L4 RGBA16F, one layer and one
-sample, with one color attachment and private same-size depth. L3 additionally
-permits complete sampled R8/RG8/RGBA8 mip chains; graph hazards conservatively
-cover the whole sampled chain.
-R4 extends this profile with buffer compute below. General copy passes, MSAA/resolve,
-stencil, depth sampling and physical heap aliasing remain deferred.
+before frame acquisition. The historical R3 attachment profile was one color and
+private same-size depth, one mip/layer/sample. [R10](#attachment-extensions-r10)
+extends it with explicit color views, stencil, private aspect loads and color
+resolves, while retaining conservative whole-allocation hazards. R4 adds buffer
+compute; general copy passes and physical heap aliasing remain deferred.
 [R5](#measured-pass-merging-r5) adds explicit opt-in merging of compatible
 consecutive raster passes.
 
@@ -1372,7 +1371,7 @@ refers to `BaseMip`, and shader array layer zero refers to `BaseLayer`. An
 array/cube may expose a single layer as D2. Cube views select all six faces;
 D3 views select mips, with no layer/depth-slice reinterpretation. Formats cannot
 be reinterpreted. `TextureAspect::Color` is enabled; Depth/Stencil explicitly
-return `Unsupported` until their R10 sampling profile exists.
+use the separately enabled [R10 private-aspect sampling profile](#attachment-extensions-r10).
 
 Only selected sampled mips must be initialized. Thus a deferred RGBA8 texture
 with only mip two initialized can expose `{ .BaseMip = 2, .MipCount = 1 }`;
@@ -1426,3 +1425,126 @@ natively and through the installed browser SDK; browser QA runs forced WebGPU,
 forced WebGL 2, Auto and Auto fallback. Reference regressions cover malformed
 slice/block packing, range bounds, typed binding mismatches, CPU view-relative
 mips and conservative mutation exclusion. Physical host qualification remains R7b.
+
+## Attachment extensions (R10)
+
+R10a adds up to four offscreen color attachments, private depth sampling and
+independent stencil allocation/testing/sampling capabilities. R10b adds
+capability-enabled four-sample color attachments with pass-end color resolves.
+R10c adds writable views of individual attachment mips and array/cube layers,
+with initialization tracked separately for color, depth and stencil. R13's finer
+hazard tracking remains planned: synchronization and mutation exclusion still
+cover the complete allocation, even for disjoint views or aspects.
+
+### Allocate and select attachments
+
+`TextureDescription.Attachment` allocates undefined color and a private depth
+image. `Stencil=true` selects a private depth/stencil image. Each allocation's
+dimensions, mip count, layers, sample count and stencil choice are immutable.
+Color attachments remain RGBA8 linear/sRGB or enabled RGBA16F; R8/RG8, compressed
+formats and volumes are sampled-only profiles. Single-sample attachments permit
+enabled mip chains, arrays and cubes. Four-sample allocations require D2, one
+mip and one layer; direct sampling and R8 transfers reject them.
+
+Create a `TextureViewDescription` with `Attachment=true`, dimension D2 and
+exactly one selected mip/layer. This view retains its color allocation and the
+corresponding private depth/stencil subresource. It can be created before a
+clear, but cannot enter a sampled binding set. A regular color view or
+`Aspect=Depth/Stencil` selects a sampled view instead. Depth/stencil sampling
+requires a single-sample allocation and D2 view of one layer; shader mips are
+relative to `BaseMip`. There is no public format reinterpretation, standalone
+depth allocation or depth/stencil resolve in this profile.
+
+`FormatCapabilities` publishes `AttachmentViews`, `MaxAttachmentMipLevels`,
+`MaxAttachmentLayers`, `MaxAttachmentCubeDimension`, `DepthSampled`,
+`StencilAttachment`, `StencilSampled` and the enabled `SampleCounts` mask.
+`RasterInterfaceCapabilities.MaxColorAttachments` describes the pass count.
+Format requirements can independently require attachment views, depth sampling,
+stencil allocation or stencil sampling; existing dimension/mip/layer/sample
+constraints apply to attachment uses too. Required misses reject before Ready;
+preferred misses report their exact diagnostic without silently changing a pass.
+
+| R10 operation | Vulkan | Metal | WebGPU | WebGL 2 |
+| --- | --- | --- | --- | --- |
+| Multiple offscreen RGBA color attachments | Queried, up to four | Four | Four | Context limits, up to four |
+| Writable mip/array/cube-face views | Queried native views | Native views | Native views | D2 mip zero only; larger allocations reject |
+| Private depth loads | Queried sampled depth | Enabled | Enabled | Unsupported |
+| Stencil allocation and per-face operations | Queried depth/stencil | Enabled | Enabled | Enabled |
+| Private stencil integer loads | Queried sampled stencil | Enabled | Enabled | Unsupported |
+| Four samples and color resolve | Combined color/depth/stencil query | Device sample-count support | Enabled for admitted colors | Per-format color/depth sample query |
+| Surface MSAA/MRT, depth/stencil resolves, sampled MSAA | Unsupported | Unsupported | Unsupported | Unsupported |
+
+WebGL's authored alternative uses single-sample D2 attachments and the enabled
+stencil test; shaders can use authored color data when private aspect sampling
+is unavailable. The SDK fixture explicitly selects these alternatives. Browser
+software-GPU correctness is separate from R7's open physical-host qualification.
+
+### Pass and pipeline compatibility
+
+The legacy `RasterPassDescription.Color` path remains one D2 mip-zero,
+single-sample color/private-depth pair or the acquired surface. For an explicit
+offscreen pass, set `Colors` to borrowed `RasterColorAttachment` entries and
+`ColorCount` to their count; `Color` must be null. `BeginRasterPass` consumes the
+entries before returning; `AddGraphPass` copies them and retains the views.
+Every source has the same selected extent and sample count. The first color
+view supplies private depth/stencil. Sources and resolve destinations must be
+distinct allocations under the conservative hazard contract.
+
+Each color entry has its own Clear/Load/Discard and Store/Discard. The selected
+subresource is initialized only by Clear, or Load of already-defined contents,
+followed by Store. Clear covers the full selected subresource, independently of
+viewport/scissor. Draw coverage does not repair undefined initialization. Depth
+and stencil have independent load/store controls; their read-only modes require
+Load and reject depth-writing or nonzero stencil-write-mask pipelines.
+
+An optional `Resolve` selects a single-sample writable view with matching format
+and selected extent. The source must have four samples and Clear or defined
+Load. Resolve initializes the destination color before the source store, so
+source `Store=Discard` is valid. It does not initialize destination depth/stencil.
+R8 transfers remain single-sample RGBA8 D2 operations, and update the same selected
+mip initialization ledger after actual completion.
+
+`RasterPipelineDescription.ColorFormats` is the copied offscreen format sequence;
+empty retains the legacy `Target` compatibility. Explicit pipelines specify the
+matching `SampleCount` and private `Stencil` choice. Stencil front/back faces
+have independent comparison/fail/depth-fail/pass operations and shared eight-bit
+read/write masks and reference. Disabled depth preserves private depth even when
+stencil testing is active. Unsupported combinations and mismatched pass/pipeline
+formats, counts, samples or stencil choices reject before an accepted draw.
+
+`TextureDepth2D` reflects `Texture2D<float>` and uses unfiltered scalar loads;
+`TextureStencil2D` reflects `Texture2D<uint>` and uses unsigned loads. These
+bindings reject color views, each other's aspect and writable attachment views.
+The shader tool checks the emitted WGSL scalar type and GLSL sampler dimension;
+unfiltered GLSL loads carry an explicit no-sampler sentinel. Comparison samplers,
+depth filtering and compute-stage texture access are outside the profile.
+
+### GDI declarations, retention and evidence
+
+Import each attachment allocation once. Declare each color source's new version
+as `ColorWrite`, or `ColorReadWrite` when its color load is Load; declare every
+resolve destination as a separate `ColorWrite`. Private depth/stencil operations
+belong to the first color allocation's version. Sampled declarations cover the
+source allocation, and the compiler verifies the actual retained view's selected
+initialized mips/layers/aspect. Missing attachment/resolve declarations, feedback,
+undefined loads and reads of uninitialized siblings reject during compilation.
+Whole-allocation export/readback roots still require every color subresource to
+be defined. `RasterTextureState` reports whole-allocation color/depth/stencil
+validity; its revision also protects partial initialization changes.
+
+Advanced attachment passes preserve their boundaries; optional R5 merging does
+not move resolves or stencil load/store effects. Plans retain their attachment
+views even after the caller destroys view and texture owners. Native objects,
+including cached Vulkan framebuffers, retire after actual completion. Logical
+resource bytes include all mips/layers, enabled samples and private depth/stencil;
+WebGL's separate render/sample color backing is also charged. API allocation and
+physical residency remain separate R7 measurements.
+
+The installed SDK's `tests/sdk_consumer/r10.cpp` journey compares direct and GDI
+pixels for two color outputs, MSAA resolves with discarded sources, selected
+array/cube-face mips, depth/stencil loads, stencil comparison accept/reject, and
+detached attachment owners. It performs seventeen RGBA8 readbacks on each
+selected backend, with explicit fallback cases for unavailable profiles. Native
+tests add malformed range/sample/resolve, typed-binding, undefined-sibling,
+declaration and completion-retention checks. Existing resize/loss suites continue
+to exercise the shared device/frame/resource lifecycle.

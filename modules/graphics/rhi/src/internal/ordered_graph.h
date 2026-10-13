@@ -173,18 +173,21 @@ RasterTextureState TextureState(const Record& record) noexcept
     result.Use = record.TextureUse;
     result.ColorDefined = record.ColorDefined;
     result.DepthDefined = record.DepthDefined;
+    result.StencilDefined = record.StencilDefined;
     return result;
 }
 bool SameTextureState(const RasterTextureState& a, const RasterTextureState& b) noexcept
 {
     return a.Revision == b.Revision && a.Use == b.Use && a.ColorDefined == b.ColorDefined &&
-           a.DepthDefined == b.DepthDefined &&
+           a.DepthDefined == b.DepthDefined && a.StencilDefined == b.StencilDefined &&
            LifetimeAccess::Owner(a.Dependency) == LifetimeAccess::Owner(b.Dependency) &&
            LifetimeAccess::Ordinal(a.Dependency) == LifetimeAccess::Ordinal(b.Dependency);
 }
 bool SameTextureDescription(const TextureDescription& a, const TextureDescription& b) noexcept
 {
-    return a.Width == b.Width && a.Height == b.Height && a.Format == b.Format && a.Attachment == b.Attachment;
+    return a.Width == b.Width && a.Height == b.Height && a.Format == b.Format && a.Attachment == b.Attachment &&
+           a.MipLevels == b.MipLevels && a.Dimension == b.Dimension && a.DepthOrLayers == b.DepthOrLayers &&
+           a.SampleCount == b.SampleCount && a.Stencil == b.Stencil;
 }
 void ResetGraph(GraphRecord& graph) noexcept
 {
@@ -210,6 +213,7 @@ void ResetGraph(GraphRecord& graph) noexcept
     }
     graph.Report = {};
 }
+void PassViews(const RasterPassInfo&, bool, bool = false) noexcept;
 void DropGraph(GraphRecord& graph) noexcept
 {
     for (usize i = 0; i < graph.DrawCount; ++i)
@@ -218,6 +222,7 @@ void DropGraph(GraphRecord& graph) noexcept
     }
     for (usize p = 0; p < graph.PassCount; ++p)
     {
+        PassViews(graph.Passes[p].Info, false);
         if (graph.Passes[p].IsCompute)
         {
             ComputeReferences(graph.Passes[p].Dispatch, false);
@@ -261,58 +266,223 @@ RasterTarget PassTarget(const RasterPassInfo& pass) noexcept
     return At(RasterKind::Texture, pass.Texture).Texture.Format == RasterFormat::Rgba8Unorm ? RasterTarget::Rgba8Unorm
                                                                                             : RasterTarget::Rgba8Srgb;
 }
+
+usize PassColorCount(const RasterPassInfo& pass) noexcept
+{
+    return pass.ColorCount == 0 ? 1 : pass.ColorCount;
+}
+const RasterAttachmentInfo* PassAttachment(const RasterPassInfo& pass, usize slot, bool& resolve) noexcept
+{
+    resolve = false;
+    for (usize i = 0; i < PassColorCount(pass); ++i)
+    {
+        if (pass.Colors[i].Texture == slot)
+        {
+            return &pass.Colors[i];
+        }
+        if (pass.Colors[i].ResolveTexture == slot)
+        {
+            resolve = true;
+            return &pass.Colors[i];
+        }
+    }
+    return nullptr;
+}
+void PassViews(const RasterPassInfo& pass, bool retain, bool frame) noexcept
+{
+    for (usize i = 0; i < pass.ColorCount; ++i)
+    {
+        for (const auto slot : {pass.Colors[i].View, pass.Colors[i].ResolveView})
+        {
+            if (slot != RASTER_INVALID)
+            {
+                if (frame)
+                {
+                    FrameRetain(RasterKind::View, slot);
+                }
+                else if (retain)
+                {
+                    Retain(RasterKind::View, slot);
+                }
+                else
+                {
+                    Release(RasterKind::View, slot);
+                }
+            }
+        }
+    }
+}
 RasterStatus ValidatePassDescription(const RasterPassDescription& description, RasterPassInfo& pass) noexcept
 {
     const bool validDepth = description.ClearDepth >= 0 && description.ClearDepth <= 1;
     if (static_cast<uint8>(description.ColorLoad) > 2 || static_cast<uint8>(description.DepthLoad) > 2 ||
         static_cast<uint8>(description.ColorStore) > 1 || static_cast<uint8>(description.DepthStore) > 1 ||
-        (description.DepthReadOnly && description.DepthLoad != RasterLoad::Load) || !validDepth ||
-        (description.UseViewport && (description.Viewport.Width == 0 || description.Viewport.Height == 0)))
+        static_cast<uint8>(description.StencilLoad) > 2 || static_cast<uint8>(description.StencilStore) > 1 ||
+        (description.DepthReadOnly && description.DepthLoad != RasterLoad::Load) ||
+        (description.StencilReadOnly && description.StencilLoad != RasterLoad::Load) || !validDepth ||
+        description.ClearStencil > 255 ||
+        (description.UseViewport && (description.Viewport.Width == 0 || description.Viewport.Height == 0)) ||
+        (description.ColorCount != 0 && RasterAccess::Owner(description.Color) != 0))
     {
         return RasterStatus::InvalidDescription;
     }
-    for (const auto component : description.Clear)
+    if (description.ColorCount > 4 ||
+        description.ColorCount > internal::CurrentDeviceProfile().Interface.MaxColorAttachments)
     {
-        const bool validClear = component >= 0 && component <= 1;
-        if (!validClear)
+        return RasterStatus::Unsupported;
+    }
+    if (description.ColorCount != 0 && description.Colors == nullptr)
+    {
+        return RasterStatus::InvalidDescription;
+    }
+    pass.Description = description;
+    pass.Description.Colors = nullptr;
+    pass.Description.ColorCount = 0; // Never retain the caller's borrowed array in a compiled plan.
+    pass.ColorCount = description.ColorCount;
+    for (usize i = 0; i < PassColorCount(pass); ++i)
+    {
+        auto& color = pass.Colors[i];
+        color.Load = pass.ColorCount == 0 ? description.ColorLoad : description.Colors[i].Load;
+        color.Store = pass.ColorCount == 0 ? description.ColorStore : description.Colors[i].Store;
+        const auto* clear = pass.ColorCount == 0 ? description.Clear : description.Colors[i].Clear;
+        for (usize c = 0; c < 4; ++c)
+        {
+            const bool validClear = clear[c] >= 0 && clear[c] <= 1;
+            if (!validClear)
+            {
+                return RasterStatus::InvalidDescription;
+            }
+            color.Clear[c] = clear[c];
+        }
+        if (static_cast<uint8>(color.Load) > 2 || static_cast<uint8>(color.Store) > 1)
         {
             return RasterStatus::InvalidDescription;
         }
+        if (pass.ColorCount == 0 && RasterAccess::Owner(description.Color) == 0)
+        {
+            return RasterStatus::Ready;
+        }
+        const Record* texture = nullptr;
+        if (pass.ColorCount == 0)
+        {
+            texture = Resolve(description.Color, RasterKind::Texture);
+            color.Texture = RasterAccess::Slot(description.Color);
+            if (texture && (texture->Texture.Dimension != TextureDimension::D2 || texture->Texture.MipLevels != 1 ||
+                            texture->Texture.SampleCount != 1 || texture->Texture.Stencil))
+            {
+                return RasterStatus::InvalidDescription;
+            }
+        }
+        else
+        {
+            const auto* view = Resolve(description.Colors[i].View, RasterKind::View);
+            if (!view)
+            {
+                return RasterStatus::InvalidHandle;
+            }
+            if (!view->View.Attachment)
+            {
+                return RasterStatus::InvalidDescription;
+            }
+            if (view->Status != RasterStatus::Ready)
+            {
+                return view->Status == RasterStatus::Pending ? RasterStatus::NotReady : view->Status;
+            }
+            color.View = RasterAccess::Slot(description.Colors[i].View);
+            color.Texture = view->TextureSlot;
+            color.Mip = view->View.BaseMip;
+            color.Layer = view->View.BaseLayer;
+            texture = &At(RasterKind::Texture, color.Texture);
+        }
+        if (!texture)
+        {
+            return RasterStatus::InvalidHandle;
+        }
+        if (!texture->Texture.Attachment)
+        {
+            return RasterStatus::InvalidDescription;
+        }
+        if (texture->Status != RasterStatus::Ready)
+        {
+            return texture->Status == RasterStatus::Pending ? RasterStatus::NotReady : texture->Status;
+        }
+        if (texture->TextureRevision == ~uint64{0})
+        {
+            return RasterStatus::IdentityExhausted;
+        }
+        const auto width = TextureMipExtent(texture->Texture.Width, color.Mip),
+                   height = TextureMipExtent(texture->Texture.Height, color.Mip);
+        color.Format = texture->Texture.Format;
+        if (i == 0)
+        {
+            pass.Texture = color.Texture;
+            pass.Width = width;
+            pass.Height = height;
+            pass.SampleCount = texture->Texture.SampleCount;
+            pass.Stencil = texture->Texture.Stencil;
+        }
+        else if (width != pass.Width || height != pass.Height || texture->Texture.SampleCount != pass.SampleCount)
+        {
+            return RasterStatus::InvalidDescription;
+        }
+        if (pass.ColorCount != 0 && RasterAccess::Owner(description.Colors[i].Resolve) != 0)
+        {
+            const auto* view = Resolve(description.Colors[i].Resolve, RasterKind::View);
+            if (!view)
+            {
+                return RasterStatus::InvalidHandle;
+            }
+            if (!view->View.Attachment || color.Load == RasterLoad::Discard)
+            {
+                return RasterStatus::InvalidDescription;
+            }
+            if (view->Status != RasterStatus::Ready)
+            {
+                return view->Status == RasterStatus::Pending ? RasterStatus::NotReady : view->Status;
+            }
+            const auto& destination = At(RasterKind::Texture, view->TextureSlot);
+            if (pass.SampleCount != 4 || destination.Texture.SampleCount != 1 ||
+                destination.Texture.Format != color.Format ||
+                TextureMipExtent(destination.Texture.Width, view->View.BaseMip) != width ||
+                TextureMipExtent(destination.Texture.Height, view->View.BaseMip) != height)
+            {
+                return RasterStatus::InvalidDescription;
+            }
+            if (destination.TextureRevision == ~uint64{0})
+            {
+                return RasterStatus::IdentityExhausted;
+            }
+            color.ResolveView = RasterAccess::Slot(description.Colors[i].Resolve);
+            color.ResolveTexture = view->TextureSlot;
+            color.ResolveMip = view->View.BaseMip;
+            color.ResolveLayer = view->View.BaseLayer;
+        }
+        for (usize j = 0; j <= i; ++j)
+        {
+            const auto& other = pass.Colors[j];
+            if ((j < i && (color.Texture == other.Texture || color.Texture == other.ResolveTexture)) ||
+                (color.ResolveTexture != RASTER_INVALID &&
+                 (color.ResolveTexture == other.Texture || (j < i && color.ResolveTexture == other.ResolveTexture))))
+            {
+                return RasterStatus::InvalidDescription;
+            }
+        }
     }
-    pass.Description = description;
-    if (RasterAccess::Owner(description.Color) == 0)
-    {
-        return RasterStatus::Ready;
-    }
-    const auto* texture = Resolve(description.Color, RasterKind::Texture);
-    if (texture == nullptr)
-    {
-        return RasterStatus::InvalidHandle;
-    }
-    if (!texture->Texture.Attachment)
-    {
-        return RasterStatus::InvalidDescription;
-    }
-    if (texture->Status != RasterStatus::Ready)
-    {
-        return texture->Status == RasterStatus::Pending ? RasterStatus::NotReady : texture->Status;
-    }
-    if (texture->TextureRevision == ~uint64{0})
-    {
-        return RasterStatus::IdentityExhausted;
-    }
-    pass.Texture = RasterAccess::Slot(description.Color);
     RasterArea area;
-    if (!RasterResolveArea(description, texture->Texture.Width, texture->Texture.Height, area))
-    {
-        return RasterStatus::InvalidDescription;
-    }
-    return RasterStatus::Ready;
+    return RasterResolveArea(description, pass.Width, pass.Height, area) ? RasterStatus::Ready
+                                                                         : RasterStatus::InvalidDescription;
 }
 RasterStatus ValidatePacketPass(const RasterPacket& packet, const RasterPassInfo& pass, bool contents) noexcept
 {
     const auto& pipeline = At(RasterKind::Pipeline, packet.Pipeline).Pipeline;
-    if (pipeline.Target != PassTarget(pass) ||
+    bool formats = pipeline.ColorCount == pass.ColorCount;
+    for (usize i = 0; i < pass.ColorCount && formats; ++i)
+    {
+        formats = pipeline.ColorFormats[i] == pass.Colors[i].Format;
+    }
+    if (!formats || (pass.ColorCount == 0 && pipeline.Target != PassTarget(pass)) ||
+        pipeline.SampleCount != pass.SampleCount || pipeline.Stencil != pass.Stencil ||
+        (pass.Description.StencilReadOnly && pipeline.Stencil && pipeline.StencilWriteMask != 0) ||
         (pass.Description.DepthReadOnly && pipeline.Depth && pipeline.DepthWrite))
     {
         return RasterStatus::InvalidDescription;
@@ -327,7 +497,8 @@ RasterStatus ValidatePacketPass(const RasterPacket& packet, const RasterPassInfo
         }
         const auto slot = At(RasterKind::View, set.Slots[i]).TextureSlot;
         const auto& texture = At(RasterKind::Texture, slot);
-        if (slot == pass.Texture)
+        bool resolve = false;
+        if (PassAttachment(pass, slot, resolve) != nullptr)
         {
             return RasterStatus::InvalidDescription;
         }
@@ -344,7 +515,9 @@ RasterStatus ValidatePacketPass(const RasterPacket& packet, const RasterPassInfo
             return RasterStatus::IdentityExhausted;
         }
         if (contents && texture.Texture.Attachment &&
-            !(texture.InFrame ? texture.FrameColorDefined : texture.ColorDefined))
+            !ViewDefined(texture,
+                         At(RasterKind::View, set.Slots[i]).View,
+                         texture.InFrame ? texture.FrameAttachmentState : texture.AttachmentState))
         {
             return RasterStatus::InvalidDescription;
         }
@@ -387,23 +560,84 @@ void RetainPacketTextures(const RasterPacket& packet) noexcept
             alreadySampled && texture.FrameTextureUse != use ? RasterTextureUse::SampledBoth : use;
     }
 }
+
+uint8 ApplyAspect(uint8 value, uint8 bit, RasterLoad load, RasterStore store) noexcept
+{
+    const bool defined = load == RasterLoad::Clear || (load == RasterLoad::Load && (value & bit) != 0);
+    return static_cast<uint8>((value & ~bit) | (store == RasterStore::Store && defined ? bit : 0));
+}
+bool ValidatePassLoads(const RasterPassInfo& pass) noexcept
+{
+    if (pass.Texture == RASTER_INVALID)
+    {
+        return (pass.Description.ColorLoad != RasterLoad::Load || gSurfaceColorDefined) &&
+               (pass.Description.DepthLoad != RasterLoad::Load || gSurfaceDepthDefined);
+    }
+    for (usize i = 0; i < PassColorCount(pass); ++i)
+    {
+        const auto& c = pass.Colors[i];
+        const auto& texture = At(RasterKind::Texture, c.Texture);
+        const auto& states = texture.InFrame ? texture.FrameAttachmentState : texture.AttachmentState;
+        const auto value = states[SubresourceIndex(texture.Texture, c.Mip, c.Layer)];
+        if ((c.Load == RasterLoad::Load && (value & COLOR_DEFINED) == 0) ||
+            (i == 0 &&
+             ((pass.Description.DepthLoad == RasterLoad::Load && (value & DEPTH_DEFINED) == 0) ||
+              (pass.Stencil && pass.Description.StencilLoad == RasterLoad::Load && (value & STENCIL_DEFINED) == 0))))
+        {
+            return false;
+        }
+    }
+    return true;
+}
 void ApplyPassState(const RasterPassInfo& pass) noexcept
 {
     const auto& description = pass.Description;
-    bool* color = &gSurfaceColorDefined;
-    bool* depth = &gSurfaceDepthDefined;
-    if (pass.Texture != RASTER_INVALID)
+    if (pass.Texture == RASTER_INVALID)
     {
-        FrameRetain(RasterKind::Texture, pass.Texture);
-        auto& texture = At(RasterKind::Texture, pass.Texture);
-        texture.FrameTextureUse = RasterTextureUse::ColorAttachment;
-        color = &texture.FrameColorDefined;
-        depth = &texture.FrameDepthDefined;
+        gSurfaceColorDefined = description.ColorStore == RasterStore::Store &&
+                               (description.ColorLoad == RasterLoad::Clear ||
+                                (description.ColorLoad == RasterLoad::Load && gSurfaceColorDefined));
+        gSurfaceDepthDefined = description.DepthStore == RasterStore::Store &&
+                               (description.DepthLoad == RasterLoad::Clear ||
+                                (description.DepthLoad == RasterLoad::Load && gSurfaceDepthDefined));
     }
-    *color = description.ColorStore == RasterStore::Store &&
-             (description.ColorLoad == RasterLoad::Clear || (description.ColorLoad == RasterLoad::Load && *color));
-    *depth = description.DepthStore == RasterStore::Store &&
-             (description.DepthLoad == RasterLoad::Clear || (description.DepthLoad == RasterLoad::Load && *depth));
+    else
+    {
+        for (usize i = 0; i < PassColorCount(pass); ++i)
+        {
+            const auto& c = pass.Colors[i];
+            FrameRetain(RasterKind::Texture, c.Texture);
+            auto& texture = At(RasterKind::Texture, c.Texture);
+            texture.FrameTextureUse = RasterTextureUse::ColorAttachment;
+            auto& value = texture.FrameAttachmentState[SubresourceIndex(texture.Texture, c.Mip, c.Layer)];
+            const bool defined =
+                c.Load == RasterLoad::Clear || (c.Load == RasterLoad::Load && (value & COLOR_DEFINED) != 0);
+            value = ApplyAspect(value, COLOR_DEFINED, c.Load, c.Store);
+            if (i == 0)
+            {
+                value = ApplyAspect(value, DEPTH_DEFINED, description.DepthLoad, description.DepthStore);
+                if (pass.Stencil)
+                {
+                    value = ApplyAspect(value, STENCIL_DEFINED, description.StencilLoad, description.StencilStore);
+                }
+            }
+            texture.FrameColorDefined = AllDefined(texture.FrameAttachmentState, COLOR_DEFINED);
+            texture.FrameDepthDefined = AllDefined(texture.FrameAttachmentState, DEPTH_DEFINED);
+            texture.FrameStencilDefined = AllDefined(texture.FrameAttachmentState, STENCIL_DEFINED);
+            if (c.ResolveTexture != RASTER_INVALID)
+            {
+                FrameRetain(RasterKind::Texture, c.ResolveTexture);
+                auto& destination = At(RasterKind::Texture, c.ResolveTexture);
+                auto& state =
+                    destination
+                        .FrameAttachmentState[SubresourceIndex(destination.Texture, c.ResolveMip, c.ResolveLayer)];
+                state = static_cast<uint8>((state & ~COLOR_DEFINED) | (defined ? COLOR_DEFINED : 0));
+                destination.FrameColorDefined = AllDefined(destination.FrameAttachmentState, COLOR_DEFINED);
+                destination.FrameTextureUse = RasterTextureUse::ColorAttachment;
+            }
+        }
+    }
+    PassViews(pass, true, true);
     gRasterPass = pass;
 }
 RasterStatus StartPass(const RasterPassInfo& pass) noexcept
@@ -413,17 +647,20 @@ RasterStatus StartPass(const RasterPassInfo& pass) noexcept
     {
         return GetStartup().State == StartupState::DeviceLost ? RasterStatus::DeviceLost : RasterStatus::Failed;
     }
-    if (gRasterPass.Texture != RASTER_INVALID && gRasterPass.Texture != pass.Texture)
+    for (usize i = 0; i < PassColorCount(gRasterPass); ++i)
     {
-        backend::RasterTextureBarrier(gRasterPass.Texture, RasterTextureUse::SampledBoth);
-        if (GetStartup().State == StartupState::Ready)
+        for (const auto slot : {gRasterPass.Colors[i].Texture, gRasterPass.Colors[i].ResolveTexture})
         {
-            At(RasterKind::Texture, gRasterPass.Texture).FrameTextureUse = RasterTextureUse::SampledBoth;
+            if (slot != RASTER_INVALID)
+            {
+                backend::RasterTextureBarrier(slot, RasterTextureUse::SampledBoth);
+                if (GetStartup().State != StartupState::Ready)
+                {
+                    return RasterStatus::Failed;
+                }
+                At(RasterKind::Texture, slot).FrameTextureUse = RasterTextureUse::SampledBoth;
+            }
         }
-    }
-    if (GetStartup().State != StartupState::Ready)
-    {
-        return GetStartup().State == StartupState::DeviceLost ? RasterStatus::DeviceLost : RasterStatus::Failed;
     }
     const auto started = backend::RasterBeginPass(pass);
     const auto current = GetStartup().State;
@@ -577,15 +814,7 @@ RasterStatus BeginRasterPass(DeviceHandle device, const RasterPassDescription& d
             return RasterStatus::InvalidDescription;
         }
     }
-    bool color = gSurfaceColorDefined;
-    bool depth = gSurfaceDepthDefined;
-    if (pass.Texture != RASTER_INVALID)
-    {
-        const auto& texture = At(RasterKind::Texture, pass.Texture);
-        color = texture.InFrame ? texture.FrameColorDefined : texture.ColorDefined;
-        depth = texture.InFrame ? texture.FrameDepthDefined : texture.DepthDefined;
-    }
-    if ((description.ColorLoad == RasterLoad::Load && !color) || (description.DepthLoad == RasterLoad::Load && !depth))
+    if (!ValidatePassLoads(pass))
     {
         return RasterStatus::InvalidDescription;
     }
@@ -848,7 +1077,8 @@ RasterStatus AddGraphPass(DeviceHandle device, OrderedGraph handle, const GraphP
     pass.IsCompute = description.Dispatch != nullptr;
     if (pass.IsCompute)
     {
-        if (description.DrawCount != 0 || RasterAccess::Owner(description.Attachment.Color) != 0)
+        if (description.DrawCount != 0 || RasterAccess::Owner(description.Attachment.Color) != 0 ||
+            !(description.Attachment.ColorCount == 0))
         {
             return RasterStatus::InvalidDescription;
         }
@@ -907,6 +1137,7 @@ RasterStatus AddGraphPass(DeviceHandle device, OrderedGraph handle, const GraphP
         return StorageFailure();
     }
     graph->ReportAvailable = false;
+    PassViews(pass.Info, true);
     const auto index = graph->PassCount++;
     graph->Passes[index] = Move(pass);
     if (pass.IsCompute)
@@ -1058,6 +1289,7 @@ struct GraphTrack final
     bool Defined = false;
     bool DepthDefined = false;
     bool InitializedViews = false;
+    StorageArray<uint8> States;
     GraphAccessMode LastWrite = GraphAccessMode::ColorWrite;
     StorageArray<GraphAccessMode> ReadAccess;
 };
@@ -1130,6 +1362,21 @@ RasterStatus CompileGraph(GraphRecord& graph, FullGraphReport& report, bool refe
         tracks[r].InitializedViews =
             resource.Kind == RasterKind::Texture && !physical.Texture.Attachment && physical.InitializedMips != 0;
         tracks[r].DepthDefined = !resource.Transient && resource.Import.DepthDefined;
+        if (physical.Texture.Attachment && resource.Kind == RasterKind::Texture)
+        {
+            if (!tracks[r].States.TryResize(physical.AttachmentState.GetSize()))
+            {
+                return StorageFailure();
+            }
+            for (usize i = 0; i < physical.AttachmentState.GetSize(); ++i)
+            {
+                tracks[r].States[i] = physical.AttachmentState[i];
+            }
+            for (auto value : tracks[r].States)
+            {
+                tracks[r].InitializedViews |= value != 0;
+            }
+        }
     }
     for (usize p = 0; p < graph.PassCount; ++p)
     {
@@ -1235,12 +1482,25 @@ RasterStatus CompileGraph(GraphRecord& graph, FullGraphReport& report, bool refe
                 track.ReadAccess[p] = use.Access;
                 continue;
             }
+            bool resolve = false;
             if (version != track.Version + 1 || version == 0 ||
-                (resource.Kind == RasterKind::Texture && resource.Slot != pass.Info.Texture))
+                (resource.Kind == RasterKind::Texture && PassAttachment(pass.Info, resource.Slot, resolve) == nullptr))
             {
                 return RasterStatus::InvalidDescription;
             }
-            const auto& description = pass.Info.Description;
+            auto description = pass.Info.Description;
+            const auto* selected = PassAttachment(pass.Info, resource.Slot, resolve);
+            if (selected)
+            {
+                description.ColorLoad = resolve ? RasterLoad::Discard : selected->Load;
+                description.ColorStore = resolve ? RasterStore::Store : selected->Store;
+            }
+            const bool first = resource.Slot == pass.Info.Texture;
+            if (!first)
+            {
+                description.DepthLoad = RasterLoad::Discard;
+                description.DepthStore = RasterStore::Discard;
+            }
             const bool bufferWrite = resource.Kind == RasterKind::Buffer;
             const bool load = bufferWrite || description.ColorLoad == RasterLoad::Load;
             if (bufferWrite)
@@ -1253,8 +1513,15 @@ RasterStatus CompileGraph(GraphRecord& graph, FullGraphReport& report, bool refe
             else
             {
                 attachment = true;
-                if (load != (use.Access == GraphAccessMode::ColorReadWrite) || (load && !track.Defined) ||
-                    (description.DepthLoad == RasterLoad::Load && !track.DepthDefined))
+                const auto& texture = At(RasterKind::Texture, resource.Slot);
+                const auto index = SubresourceIndex(texture.Texture,
+                                                    resolve ? selected->ResolveMip : selected->Mip,
+                                                    resolve ? selected->ResolveLayer : selected->Layer);
+                const auto value = track.States[index];
+                if (load != (use.Access == GraphAccessMode::ColorReadWrite) || (load && (value & COLOR_DEFINED) == 0) ||
+                    (description.DepthLoad == RasterLoad::Load && (value & DEPTH_DEFINED) == 0) ||
+                    (first && pass.Info.Stencil && description.StencilLoad == RasterLoad::Load &&
+                     (value & STENCIL_DEFINED) == 0))
                 {
                     return RasterStatus::InvalidDescription;
                 }
@@ -1290,11 +1557,103 @@ RasterStatus CompileGraph(GraphRecord& graph, FullGraphReport& report, bool refe
             track.Writer = static_cast<uint32>(p);
             track.LastWrite = use.Access;
             track.Version = version;
-            track.Defined = bufferWrite || (description.ColorStore == RasterStore::Store &&
-                                            (description.ColorLoad == RasterLoad::Clear || (load && track.Defined)));
-            track.DepthDefined = description.DepthStore == RasterStore::Store &&
-                                 (description.DepthLoad == RasterLoad::Clear ||
-                                  (description.DepthLoad == RasterLoad::Load && track.DepthDefined));
+            if (!bufferWrite)
+            {
+                const auto& texture = At(RasterKind::Texture, resource.Slot);
+                auto& value = track.States[SubresourceIndex(texture.Texture,
+                                                            resolve ? selected->ResolveMip : selected->Mip,
+                                                            resolve ? selected->ResolveLayer : selected->Layer)];
+                if (resolve)
+                {
+                    // Resolve initialization follows the source's pre-store contents.
+                    const auto* sourceUse = FindUse(graph,
+                                                    pass,
+                                                    RasterKind::Texture,
+                                                    selected->Texture,
+                                                    selected->Load == RasterLoad::Load ? GraphAccessMode::ColorReadWrite
+                                                                                       : GraphAccessMode::ColorWrite);
+                    if (!sourceUse || selected->Load == RasterLoad::Discard)
+                    {
+                        return RasterStatus::InvalidDescription;
+                    }
+                    value = static_cast<uint8>(value | COLOR_DEFINED);
+                }
+                else
+                {
+                    value = ApplyAspect(value, COLOR_DEFINED, selected->Load, selected->Store);
+                    if (first)
+                    {
+                        value = ApplyAspect(value, DEPTH_DEFINED, description.DepthLoad, description.DepthStore);
+                        if (pass.Info.Stencil)
+                        {
+                            value =
+                                ApplyAspect(value, STENCIL_DEFINED, description.StencilLoad, description.StencilStore);
+                        }
+                    }
+                }
+                track.Defined = AllDefined(track.States, COLOR_DEFINED);
+                track.DepthDefined = AllDefined(track.States, DEPTH_DEFINED);
+                track.InitializedViews = false;
+                for (auto state : track.States)
+                {
+                    track.InitializedViews |= state != 0;
+                }
+            }
+            else
+            {
+                track.Defined =
+                    bufferWrite || (description.ColorStore == RasterStore::Store &&
+                                    (description.ColorLoad == RasterLoad::Clear || (load && track.Defined)));
+            }
+            if (bufferWrite)
+            {
+                track.DepthDefined = description.DepthStore == RasterStore::Store &&
+                                     (description.DepthLoad == RasterLoad::Clear ||
+                                      (description.DepthLoad == RasterLoad::Load && track.DepthDefined));
+            }
+        }
+        if (!pass.IsCompute && pass.Info.Texture != RASTER_INVALID)
+        {
+            for (usize i = 0; i < PassColorCount(pass.Info); ++i)
+            {
+                const auto& c = pass.Info.Colors[i];
+                if (!FindUse(graph,
+                             pass,
+                             RasterKind::Texture,
+                             c.Texture,
+                             c.Load == RasterLoad::Load ? GraphAccessMode::ColorReadWrite
+                                                        : GraphAccessMode::ColorWrite) ||
+                    (c.ResolveTexture != RASTER_INVALID &&
+                     !FindUse(graph, pass, RasterKind::Texture, c.ResolveTexture, GraphAccessMode::ColorWrite)))
+                {
+                    return RasterStatus::InvalidDescription;
+                }
+            }
+        }
+        for (usize d = 0; d < pass.DrawCount; ++d)
+        {
+            const auto& set = At(RasterKind::Set, graph.Draws[pass.FirstDraw + d].Set).Set;
+            const auto& layout = At(RasterKind::Layout, set.Layout).Layout;
+            for (usize b = 0; b < layout.Count; ++b)
+            {
+                if (TextureBinding(layout.Entries[b].Kind))
+                {
+                    const auto& view = At(RasterKind::View, set.Slots[b]);
+                    const auto& texture = At(RasterKind::Texture, view.TextureSlot);
+                    if (texture.Texture.Attachment)
+                    {
+                        for (usize r = 0; r < graph.ResourceCount; ++r)
+                        {
+                            if (graph.Resources[r].Kind == RasterKind::Texture &&
+                                graph.Resources[r].Slot == view.TextureSlot &&
+                                !ViewDefined(texture, view.View, tracks[r].States))
+                            {
+                                return RasterStatus::InvalidDescription;
+                            }
+                        }
+                    }
+                }
+            }
         }
         if (!attachment && !pass.IsCompute)
         {
@@ -1436,6 +1795,11 @@ bool SameGraphRectangle(const RasterRectangle& a, const RasterRectangle& b) noex
 // See docs/architecture/rhi-gdi.md, "Backend lowering and optional optimization".
 bool CanMergeRaster(const GraphPassRecord& before, const GraphPassRecord& after) noexcept
 {
+    if (before.Info.ColorCount != 0 || after.Info.ColorCount != 0)
+    {
+        return false;
+    }
+
     const auto& a = before.Info.Description;
     const auto& b = after.Info.Description;
     if (before.IsCompute || after.IsCompute || before.SideEffect || after.SideEffect ||
@@ -1521,23 +1885,7 @@ void PlanRasterGroups(const GraphRecord& graph, FullGraphReport& report, bool me
         }
         else
         {
-            const auto& texture = physical.Texture;
-            const uint64 pixels = uint64{texture.Width} * texture.Height;
-            const uint64 channels = texture.Format == RasterFormat::R8Unorm       ? 1U
-                                    : texture.Format == RasterFormat::Rg8Unorm    ? 2U
-                                    : texture.Format == RasterFormat::Rgba16Float ? 8U
-                                                                                  : 4U;
-            uint32 width = texture.Width, height = texture.Height;
-            for (uint32 level = 0; level < texture.MipLevels; ++level)
-            {
-                report.Summary.TextureBytes += uint64{width} * height * channels;
-                width = width > 1 ? width / 2 : 1;
-                height = height > 1 ? height / 2 : 1;
-            }
-            if (texture.Attachment)
-            {
-                report.Summary.TextureBytes += pixels * 4U;
-            }
+            report.Summary.TextureBytes += physical.StorageBytes;
         }
     }
     for (usize p = 0; p < graph.PassCount; ++p)

@@ -33,6 +33,7 @@ internal::StorageTable<id<MTLBuffer>> gRasterBuffers;
 internal::StorageTable<id<MTLTexture>> gRasterTextures;
 internal::StorageTable<id<MTLTexture>> gRasterDepths;
 internal::StorageTable<id<MTLTexture>> gRasterViews;
+internal::StorageTable<id<MTLTexture>> gRasterViewDepths;
 internal::StorageTable<id<MTLSamplerState>> gRasterSamplers;
 internal::StorageTable<RasterMetalShader> gRasterShaders;
 internal::StorageTable<internal::RasterLayout> gRasterLayouts;
@@ -124,7 +125,22 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
         result.MaxDimension3D = internal::CompressedTexture(format) ? 0U : 256U;
         result.PartialViews = true;
     }
+    if (result.Uses.ColorAttachment)
+    {
+        result.MaxAttachmentMipLevels = result.MaxMipLevels;
+        result.MaxAttachmentLayers = result.MaxArrayLayers;
+        result.AttachmentViews = true;
+        result.DepthSampled = true;
+        result.StencilAttachment = true;
+        result.StencilSampled = true;
+        result.SampleCounts = 1U | ([gDevice supportsTextureSampleCount:4] ? 4U : 0U);
+    }
+    result.MaxAttachmentCubeDimension = result.Uses.ColorAttachment ? result.MaxCubeDimension : 0;
     return result;
+}
+uint32 RasterColorAttachmentLimit() noexcept
+{
+    return 4;
 }
 uint32 RasterVertexStrideLimit() noexcept
 {
@@ -233,14 +249,17 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
                                          width:info.Width
                                         height:info.Height
                                      mipmapped:NO];
-        descriptor.textureType = RasterMetalTextureType(info.Dimension);
+        descriptor.textureType =
+            info.SampleCount == 4 ? MTLTextureType2DMultisample : RasterMetalTextureType(info.Dimension);
+        descriptor.sampleCount = info.SampleCount;
         descriptor.depth = info.Dimension == TextureDimension::D3 ? info.DepthOrLayers : 1;
         descriptor.arrayLength = info.Dimension == TextureDimension::D2Array ? info.DepthOrLayers : 1;
         descriptor.mipmapLevelCount = info.MipLevels;
         descriptor.usage = MTLTextureUsageShaderRead | MTLTextureUsagePixelFormatView |
                            (info.Attachment ? MTLTextureUsageRenderTarget : MTLTextureUsageUnknown);
-        descriptor.storageMode =
-            internal::CompressedTexture(info.Format) ? MTLStorageModeManaged : MTLStorageModeShared;
+        descriptor.storageMode = info.Attachment                            ? MTLStorageModePrivate
+                                 : internal::CompressedTexture(info.Format) ? MTLStorageModeManaged
+                                                                            : MTLStorageModeShared;
         auto texture = [gDevice newTextureWithDescriptor:descriptor];
         if (texture == nil)
         {
@@ -285,11 +304,17 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
         }
         else if (info.Attachment)
         {
-            auto depth = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
-                                                                            width:info.Width
-                                                                           height:info.Height
-                                                                        mipmapped:NO];
-            depth.usage = MTLTextureUsageRenderTarget;
+            auto depth = [MTLTextureDescriptor
+                texture2DDescriptorWithPixelFormat:info.Stencil ? MTLPixelFormatDepth32Float_Stencil8
+                                                                : MTLPixelFormatDepth32Float
+                                             width:info.Width
+                                            height:info.Height
+                                         mipmapped:NO];
+            depth.textureType = descriptor.textureType;
+            depth.arrayLength = descriptor.arrayLength;
+            depth.mipmapLevelCount = info.MipLevels;
+            depth.sampleCount = info.SampleCount;
+            depth.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead | MTLTextureUsagePixelFormatView;
             depth.storageMode = MTLStorageModePrivate;
             gRasterDepths[slot] = [gDevice newTextureWithDescriptor:depth];
             if (gRasterDepths[slot] == nil)
@@ -306,12 +331,28 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
 // alias views with explicit mip and slice lifetimes. R9 retains the source allocation.
 RasterStatus RasterCreateView(usize slot, const internal::RasterViewSource& source, uint32) noexcept
 {
-    auto texture = gRasterTextures[source.Texture];
+    auto texture =
+        source.View.Aspect == TextureAspect::Color ? gRasterTextures[source.Texture] : gRasterDepths[source.Texture];
+    const auto format = source.View.Aspect == TextureAspect::Stencil ? MTLPixelFormatX32_Stencil8 : texture.pixelFormat;
+    const auto type =
+        texture.sampleCount == 4 ? MTLTextureType2DMultisample : RasterMetalTextureType(source.View.Dimension);
     gRasterViews[slot] =
-        [texture newTextureViewWithPixelFormat:texture.pixelFormat
-                                   textureType:RasterMetalTextureType(source.View.Dimension)
+        [texture newTextureViewWithPixelFormat:format
+                                   textureType:type
                                         levels:NSMakeRange(source.View.BaseMip, source.View.MipCount)
                                         slices:NSMakeRange(source.View.BaseLayer, source.View.LayerCount)];
+    if (source.View.Attachment)
+    {
+        auto depth = gRasterDepths[source.Texture];
+        gRasterViewDepths[slot] = [depth newTextureViewWithPixelFormat:depth.pixelFormat
+                                                           textureType:type
+                                                                levels:NSMakeRange(source.View.BaseMip, 1)
+                                                                slices:NSMakeRange(source.View.BaseLayer, 1)];
+        if (gRasterViewDepths[slot] == nil)
+        {
+            return RasterStatus::OutOfMemory;
+        }
+    }
     return gRasterViews[slot] != nil ? RasterStatus::Ready : RasterStatus::OutOfMemory;
 }
 RasterStatus RasterCreateSampler(usize slot, const SamplerDescription& info, uint32) noexcept
@@ -388,11 +429,27 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
             : info.Target == RasterTarget::Surface    ? MTLPixelFormatBGRA8Unorm
             : info.Target == RasterTarget::Rgba8Unorm ? MTLPixelFormatRGBA8Unorm
                                                       : MTLPixelFormatRGBA8Unorm_sRGB;
-        descriptor.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
-        auto color = descriptor.colorAttachments[0];
-        color.blendingEnabled = info.Blend;
-        color.sourceRGBBlendFactor = color.sourceAlphaBlendFactor = MTLBlendFactorOne;
-        color.destinationRGBBlendFactor = color.destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+        descriptor.rasterSampleCount = info.SampleCount;
+        descriptor.depthAttachmentPixelFormat =
+            info.Stencil ? MTLPixelFormatDepth32Float_Stencil8 : MTLPixelFormatDepth32Float;
+        if (info.Stencil)
+        {
+            descriptor.stencilAttachmentPixelFormat = MTLPixelFormatDepth32Float_Stencil8;
+        }
+        for (usize i = 0; i < info.ColorCount; ++i)
+        {
+            descriptor.colorAttachments[i].pixelFormat =
+                info.ColorFormats[i] == RasterFormat::Rgba16Float  ? MTLPixelFormatRGBA16Float
+                : info.ColorFormats[i] == RasterFormat::Rgba8Unorm ? MTLPixelFormatRGBA8Unorm
+                                                                   : MTLPixelFormatRGBA8Unorm_sRGB;
+        }
+        for (usize i = 0; i < (info.ColorCount == 0 ? 1 : info.ColorCount); ++i)
+        {
+            auto color = descriptor.colorAttachments[i];
+            color.blendingEnabled = info.Blend;
+            color.sourceRGBBlendFactor = color.sourceAlphaBlendFactor = MTLBlendFactorOne;
+            color.destinationRGBBlendFactor = color.destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+        }
         MTLVertexDescriptor* vertex = [MTLVertexDescriptor vertexDescriptor];
         for (usize i = 0; i < info.StreamCount; ++i)
         {
@@ -435,6 +492,41 @@ RasterStatus RasterCreatePipeline(usize slot, const internal::RasterPipelineInfo
         depth.depthCompareFunction =
             info.Depth ? comparisons[static_cast<usize>(info.DepthCompare)] : MTLCompareFunctionAlways;
         depth.depthWriteEnabled = info.Depth && info.DepthWrite;
+        if (info.Stencil)
+        {
+            const MTLCompareFunction compare[]{MTLCompareFunctionNever,
+                                               MTLCompareFunctionLess,
+                                               MTLCompareFunctionEqual,
+                                               MTLCompareFunctionLessEqual,
+                                               MTLCompareFunctionGreater,
+                                               MTLCompareFunctionNotEqual,
+                                               MTLCompareFunctionGreaterEqual,
+                                               MTLCompareFunctionAlways};
+            const MTLStencilOperation operations[]{MTLStencilOperationKeep,
+                                                   MTLStencilOperationZero,
+                                                   MTLStencilOperationReplace,
+                                                   MTLStencilOperationIncrementClamp,
+                                                   MTLStencilOperationDecrementClamp,
+                                                   MTLStencilOperationInvert,
+                                                   MTLStencilOperationIncrementWrap,
+                                                   MTLStencilOperationDecrementWrap};
+            auto front = [MTLStencilDescriptor new];
+            auto back = [MTLStencilDescriptor new];
+            const RasterStencilFace faces[]{info.StencilFront, info.StencilBack};
+            for (usize i = 0; i < 2; ++i)
+            {
+                auto face = i == 0 ? front : back;
+                const auto& input = faces[i];
+                face.stencilCompareFunction = compare[static_cast<usize>(input.Compare)];
+                face.stencilFailureOperation = operations[static_cast<usize>(input.Fail)];
+                face.depthFailureOperation = operations[static_cast<usize>(input.DepthFail)];
+                face.depthStencilPassOperation = operations[static_cast<usize>(input.Pass)];
+                face.readMask = info.StencilReadMask;
+                face.writeMask = info.StencilWriteMask;
+            }
+            depth.frontFaceStencil = front;
+            depth.backFaceStencil = back;
+        }
         auto state = [gDevice newDepthStencilStateWithDescriptor:depth];
         if (state == nil)
         {
@@ -457,6 +549,7 @@ void RasterDestroy(internal::RasterKind kind, usize slot) noexcept
             break;
         case internal::RasterKind::View:
             gRasterViews[slot] = nil;
+            gRasterViewDepths[slot] = nil;
             break;
         case internal::RasterKind::Sampler:
             gRasterSamplers[slot] = nil;
@@ -494,6 +587,8 @@ RasterStatus RasterDraw(const internal::RasterPacket& packet) noexcept
     const auto& layout = gRasterLayouts[set.Layout];
     [gEncoder setRenderPipelineState:pipeline.Object];
     [gEncoder setDepthStencilState:pipeline.Depth];
+    [gEncoder setStencilReferenceValue:pipeline.Info.StencilReference];
+    [gEncoder setFrontFacingWinding:MTLWindingCounterClockwise];
     for (usize i = 0; i < layout.Count; ++i)
     {
         const auto& entry = layout.Entries[i];
@@ -605,7 +700,9 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
         const auto& state = info.Description;
         const bool surface = info.Texture == internal::RASTER_INVALID;
         auto color = surface ? (gDrawable != nil ? gDrawable.texture : gHeadless) : gRasterTextures[info.Texture];
-        auto depth = surface ? gDepth : gRasterDepths[info.Texture];
+        auto depth = surface                ? gDepth
+                     : info.ColorCount == 0 ? gRasterDepths[info.Texture]
+                                            : gRasterViewDepths[info.Colors[0].View];
         auto pass = [MTLRenderPassDescriptor renderPassDescriptor];
         auto attachment = pass.colorAttachments[0];
         attachment.texture = color;
@@ -617,6 +714,29 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
                                                   static_cast<float64>(state.Clear[1]),
                                                   static_cast<float64>(state.Clear[2]),
                                                   static_cast<float64>(state.Clear[3]));
+        if (info.ColorCount != 0)
+        {
+            for (usize i = 0; i < info.ColorCount; ++i)
+            {
+                const auto& c = info.Colors[i];
+                auto target = pass.colorAttachments[i];
+                target.texture = gRasterViews[c.View];
+                target.loadAction = c.Load == RasterLoad::Clear  ? MTLLoadActionClear
+                                    : c.Load == RasterLoad::Load ? MTLLoadActionLoad
+                                                                 : MTLLoadActionDontCare;
+                target.storeAction = c.Store == RasterStore::Store ? MTLStoreActionStore : MTLStoreActionDontCare;
+                target.clearColor = MTLClearColorMake(static_cast<float64>(c.Clear[0]),
+                                                      static_cast<float64>(c.Clear[1]),
+                                                      static_cast<float64>(c.Clear[2]),
+                                                      static_cast<float64>(c.Clear[3]));
+                if (c.ResolveView != internal::RASTER_INVALID)
+                {
+                    target.resolveTexture = gRasterViews[c.ResolveView];
+                    target.storeAction = c.Store == RasterStore::Store ? MTLStoreActionStoreAndMultisampleResolve
+                                                                       : MTLStoreActionMultisampleResolve;
+                }
+            }
+        }
         pass.depthAttachment.texture = depth;
         pass.depthAttachment.loadAction = state.DepthLoad == RasterLoad::Clear  ? MTLLoadActionClear
                                           : state.DepthLoad == RasterLoad::Load ? MTLLoadActionLoad
@@ -624,10 +744,20 @@ RasterStatus RasterBeginPass(const internal::RasterPassInfo& info) noexcept
         pass.depthAttachment.storeAction =
             state.DepthStore == RasterStore::Store ? MTLStoreActionStore : MTLStoreActionDontCare;
         pass.depthAttachment.clearDepth = static_cast<float64>(state.ClearDepth);
+        if (info.Stencil)
+        {
+            pass.stencilAttachment.texture = depth;
+            pass.stencilAttachment.loadAction = state.StencilLoad == RasterLoad::Clear  ? MTLLoadActionClear
+                                                : state.StencilLoad == RasterLoad::Load ? MTLLoadActionLoad
+                                                                                        : MTLLoadActionDontCare;
+            pass.stencilAttachment.storeAction =
+                state.StencilStore == RasterStore::Store ? MTLStoreActionStore : MTLStoreActionDontCare;
+            pass.stencilAttachment.clearStencil = state.ClearStencil;
+        }
         gEncoder = [gCommand renderCommandEncoderWithDescriptor:pass];
         gRasterRegion = state;
-        gRasterWidth = static_cast<uint32>(color.width);
-        gRasterHeight = static_cast<uint32>(color.height);
+        gRasterWidth = surface ? static_cast<uint32>(color.width) : info.Width;
+        gRasterHeight = surface ? static_cast<uint32>(color.height) : info.Height;
         return gEncoder != nil ? RasterStatus::Ready : RasterStatus::Failed;
     }
 }
@@ -679,7 +809,8 @@ RasterStatus RasterGrow(internal::RasterKind kind, usize count) noexcept
             return gRasterTextures.EnsureSlots(count) && gRasterDepths.EnsureSlots(count) ? RasterStatus::Ready
                                                                                           : internal::StorageFailure();
         case internal::RasterKind::View:
-            return gRasterViews.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
+            return gRasterViews.EnsureSlots(count) && gRasterViewDepths.EnsureSlots(count) ? RasterStatus::Ready
+                                                                                           : internal::StorageFailure();
         case internal::RasterKind::Sampler:
             return gRasterSamplers.EnsureSlots(count) ? RasterStatus::Ready : internal::StorageFailure();
         case internal::RasterKind::Shader:
