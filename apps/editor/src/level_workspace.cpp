@@ -20,8 +20,11 @@
 #include <QUuid>
 #include <QVBoxLayout>
 #if !defined(Q_OS_WASM)
-#    include <QProcessEnvironment>
+#    include <ludus/content/scene_cook/scene_assets.h>
 #endif
+
+#include <span>
+#include <string_view>
 
 namespace ludus::editor
 {
@@ -162,31 +165,6 @@ LevelWorkspace::LevelWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
         }
         Viewport_->ShowFrame(frame);
     });
-#if !defined(Q_OS_WASM)
-    connect(&Process_, &QProcess::readyReadStandardOutput, this, [this]() {
-        Output_ += Process_.readAllStandardOutput();
-        if (Output_.size() > foundation::int64{1024} * 1024)
-        {
-            Cancel();
-            Error_ = QStringLiteral("Scene response exceeded its bounded protocol.");
-        }
-    });
-    connect(&Process_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-        if (error == QProcess::FailedToStart)
-        {
-            Error_ = QStringLiteral("Managed scene tools could not start.");
-            if (PublishingCatalog_)
-            {
-                Rollback(Error_);
-            }
-            else
-            {
-                Publish();
-            }
-        }
-    });
-    connect(&Process_, &QProcess::finished, this, &LevelWorkspace::Completed);
-#endif
     connect(&Decode_, &QThread::finished, this, &LevelWorkspace::Publish);
     Render();
 }
@@ -194,18 +172,8 @@ LevelWorkspace::~LevelWorkspace()
 {
     StopPreview();
     disconnect(&Decode_, nullptr, this, nullptr);
-#if !defined(Q_OS_WASM)
-    disconnect(&Process_, nullptr, this, nullptr);
-    if (Process_.state() != QProcess::NotRunning)
-    {
-        Process_.terminate();
-        if (!Process_.waitForFinished(5000))
-        {
-            Process_.kill();
-            (void)Process_.waitForFinished();
-        }
-    }
-#endif
+    CancelRequested_.store(true);
+    WaitForOperation();
     Decode_.quit();
     (void)Decode_.wait();
 }
@@ -376,7 +344,7 @@ bool LevelWorkspace::Start(const QString& operation, const QString& path, const 
     Status_->setText(QStringLiteral("Reference scene import requires the native Editor and installed host tools."));
     return false;
 #else
-    if (Busy_ || Root_.isEmpty() || !Scratch_.isValid() || Tooling_.PythonPath.isEmpty())
+    if (Busy_ || Root_.isEmpty() || Operate_ != nullptr)
     {
         return false;
     }
@@ -384,38 +352,6 @@ bool LevelWorkspace::Start(const QString& operation, const QString& path, const 
     {
         Candidate_ = Level_;
     }
-    QJsonObject request{
-        {QStringLiteral("schema"), 1},
-        {QStringLiteral("operation"), operation},
-        {QStringLiteral("project"), Root_},
-        {QStringLiteral("path"), path},
-        {QStringLiteral("source"), source},
-        {QStringLiteral("level"), Candidate_},
-        {QStringLiteral("expected"), Disk_.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(Disk_)}};
-    const auto input = QDir(Scratch_.path()).filePath(QStringLiteral("request.json"));
-    QSaveFile file(input);
-    const auto bytes = QJsonDocument(request).toJson(QJsonDocument::Compact);
-    file.setDirectWriteFallback(false);
-    if (bytes.size() > foundation::int64{1024} * 1024 || !file.open(QIODevice::WriteOnly) ||
-        file.write(bytes) != bytes.size() || !file.commit())
-    {
-        Status_->setText(QStringLiteral("Could not write bounded scene request; current scene retained."));
-        return false;
-    }
-    auto environment = QProcessEnvironment::systemEnvironment();
-    const auto modules = QDir(Tooling_.ToolingRoot).filePath(QStringLiteral("scripts/python"));
-    if (QFileInfo::exists(QDir(modules).filePath(QStringLiteral("ludus_tools/scene_editor.py"))))
-    {
-        environment.insert(QStringLiteral("PYTHONPATH"), modules);
-    }
-    Process_.setProcessEnvironment(environment);
-    Process_.setProcessChannelMode(QProcess::SeparateChannels);
-    Process_.setProgram(Tooling_.PythonPath);
-    Process_.setArguments({QStringLiteral("-m"),
-                           QStringLiteral("ludus_tools.scene_editor"),
-                           input,
-                           QDir(Scratch_.path()).filePath(QStringLiteral("scene.luscn"))});
-    Output_.clear();
     Error_.clear();
     Scene_ = {};
     Success_ = false;
@@ -423,23 +359,197 @@ bool LevelWorkspace::Start(const QString& operation, const QString& path, const 
     Source_ = source;
     Operation_ = operation;
     CandidatePath_ = path;
+    const QJsonValue expected = Disk_.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(Disk_);
+    if (!Run(operation, path, source, expected))
+    {
+        Status_->setText(QStringLiteral("Could not start the scene operation; current scene retained."));
+        return false;
+    }
     Busy_ = true;
     Status_->setText(QStringLiteral("Validating scene assets… Previous viewport remains available."));
     Render();
-    Process_.start();
     return true;
 #endif
+}
+#if !defined(Q_OS_WASM)
+namespace
+{
+std::span<const foundation::uint8> ToSpan(const QByteArray& bytes) noexcept
+{
+    return {reinterpret_cast<const foundation::uint8*>(bytes.constData()),
+            static_cast<foundation::usize>(bytes.size())};
+}
+
+std::string_view ToView(const QByteArray& bytes) noexcept
+{
+    return {bytes.constData(), static_cast<foundation::usize>(bytes.size())};
+}
+
+bool IsCancelRequested(void* context) noexcept
+{
+    return static_cast<const std::atomic<bool>*>(context)->load() == true;
+}
+
+QString DescribeStage(std::string_view stage)
+{
+    if (stage == "import")
+    {
+        return QStringLiteral("Importing reference scene… Previous viewport remains available.");
+    }
+    if (stage == "commit")
+    {
+        return QStringLiteral("Committing prepared scene assets…");
+    }
+    if (stage == "save")
+    {
+        return QStringLiteral("Saving scene…");
+    }
+    if (stage == "assemble")
+    {
+        return QStringLiteral("Assembling scene assets…");
+    }
+    return {};
+}
+} // namespace
+#endif
+bool LevelWorkspace::Run(const QString& operation,
+                         const QString& path,
+                         const QString& source,
+                         const QJsonValue& expected)
+{
+#if defined(Q_OS_WASM)
+    (void)operation;
+    (void)path;
+    (void)source;
+    (void)expected;
+    return false;
+#else
+    using namespace ludus::content::scene_cook;
+    EditorSceneOperation kind = EditorSceneOperation::Assemble;
+    if (operation == QStringLiteral("open"))
+    {
+        kind = EditorSceneOperation::Open;
+    }
+    else if (operation == QStringLiteral("import"))
+    {
+        kind = EditorSceneOperation::Import;
+    }
+    else if (operation == QStringLiteral("commit-import"))
+    {
+        kind = EditorSceneOperation::CommitImport;
+    }
+    else if (operation == QStringLiteral("save"))
+    {
+        kind = EditorSceneOperation::Save;
+    }
+    else if (operation != QStringLiteral("assemble"))
+    {
+        return false;
+    }
+    // The worker owns copies of every input; the widget only reads the results
+    // after the thread has finished.
+    QByteArray level = QJsonDocument(Candidate_).toJson(QJsonDocument::Compact);
+    if (level.size() > foundation::int64{1024} * 1024)
+    {
+        return false;
+    }
+    QByteArray root = Root_.toUtf8();
+    QByteArray relative = path.toUtf8();
+    QByteArray from = source.toUtf8();
+    QByteArray digest = expected.isString() ? expected.toString().toUtf8() : QByteArray();
+    QByteArray catalog = kind == EditorSceneOperation::CommitImport ? CandidateCatalog_ : QByteArray();
+    const bool hasExpected = expected.isString();
+    Response_.clear();
+    SceneBytes_.clear();
+    OperationError_.clear();
+    if (kind != EditorSceneOperation::CommitImport)
+    {
+        CandidateCatalog_.clear();
+    }
+    CancelRequested_.store(false);
+    Operate_ = QThread::create([this, kind, hasExpected, level, root, relative, from, digest, catalog]() {
+        EditorSceneProgress progress;
+        progress.Context = this;
+        progress.Report = [](void* context, std::string_view stage) noexcept {
+            auto* self = static_cast<LevelWorkspace*>(context);
+            const QString text = DescribeStage(stage);
+            if (!text.isEmpty())
+            {
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, text]() {
+                        if (self->Busy_ && !self->Cancelling_)
+                        {
+                            self->Status_->setText(text);
+                        }
+                    },
+                    Qt::QueuedConnection);
+            }
+        };
+        Cancellation cancel;
+        cancel.Requested = &IsCancelRequested;
+        cancel.Context = &CancelRequested_;
+        AssetOptions options;
+        options.CancelOrNull = &cancel;
+        EditorSceneRequest request;
+        request.Operation = kind;
+        request.Root = ToView(root);
+        request.Path = ToView(relative);
+        request.Source = ToView(from);
+        request.Level = kind == EditorSceneOperation::Open ? std::span<const foundation::uint8>() : ToSpan(level);
+        request.Catalog = ToSpan(catalog);
+        request.HasExpected = hasExpected;
+        request.Expected = ToView(digest);
+        request.ProgressOrNull = &progress;
+        EditorSceneResult result;
+        AssetError error;
+        if (OperateEditorScene(request, options, result, error))
+        {
+            Response_ = QByteArray(reinterpret_cast<const char*>(result.Response.GetData()),
+                                   static_cast<qsizetype>(result.Response.GetSize()));
+            SceneBytes_ = QByteArray(reinterpret_cast<const char*>(result.Scene.GetData()),
+                                     static_cast<qsizetype>(result.Scene.GetSize()));
+            if (kind == EditorSceneOperation::Import)
+            {
+                CandidateCatalog_ = QByteArray(reinterpret_cast<const char*>(result.Catalog.GetData()),
+                                               static_cast<qsizetype>(result.Catalog.GetSize()));
+            }
+        }
+        else
+        {
+            const std::string_view message = error.Message.View();
+            OperationError_ = QString::fromUtf8(message.data(), static_cast<qsizetype>(message.size()));
+        }
+    });
+    connect(Operate_, &QThread::finished, this, [this]() {
+        Operate_->deleteLater();
+        Operate_ = nullptr;
+        Completed();
+    });
+    Operate_->start();
+    return true;
+#endif
+}
+void LevelWorkspace::WaitForOperation()
+{
+    if (Operate_ != nullptr)
+    {
+        disconnect(Operate_, nullptr, this, nullptr);
+        (void)Operate_->wait();
+        delete Operate_;
+        Operate_ = nullptr;
+    }
 }
 void LevelWorkspace::Completed()
 {
 #if !defined(Q_OS_WASM)
-    Output_ += Process_.readAllStandardOutput();
-    const auto result = QJsonDocument::fromJson(Output_).object();
+    const auto result = QJsonDocument::fromJson(Response_).object();
+    const bool succeeded = OperationError_.isEmpty() && result.value(QStringLiteral("ok")).toBool();
     if (PublishingCatalog_)
     {
         PublishingCatalog_ = false;
         if (result.value(QStringLiteral("schema")).toInt() == 1 && result.value(QStringLiteral("ok")).toBool() &&
-            result.value(QStringLiteral("committed")).toBool() && Process_.exitCode() == 0)
+            result.value(QStringLiteral("committed")).toBool() && succeeded)
         {
             Cancelling_ = false; // Publication already crossed its atomic commit point.
             Viewport_->ShowFrame(CandidateFrame_);
@@ -447,16 +557,16 @@ void LevelWorkspace::Completed()
         }
         else
         {
-            Rollback(result.value(QStringLiteral("message")).toString());
+            Rollback(OperationError_.isEmpty() ? QStringLiteral("Could not publish the prepared catalog.")
+                                               : OperationError_);
         }
         CandidateFrame_ = {};
         return;
     }
-    if (Cancelling_ || Process_.exitCode() != 0 || !result.value(QStringLiteral("ok")).toBool() ||
-        result.value(QStringLiteral("schema")).toInt() != 1 || Output_.size() > foundation::int64{1024} * 1024)
+    if (Cancelling_ || !succeeded || result.value(QStringLiteral("schema")).toInt() != 1)
     {
-        Error_ = Cancelling_ ? QStringLiteral("Import cancelled; current scene and saved level retained.")
-                             : result.value(QStringLiteral("message")).toString();
+        Error_ =
+            Cancelling_ ? QStringLiteral("Import cancelled; current scene and saved level retained.") : OperationError_;
         if (Error_.isEmpty())
         {
             Error_ = QStringLiteral("Scene operation failed; current scene retained.");
@@ -480,14 +590,13 @@ void LevelWorkspace::Completed()
     auto* worker = new QObject;
     worker->moveToThread(&Decode_);
     connect(&Decode_, &QThread::started, worker, [this]() {
-        QFile file(QDir(Scratch_.path()).filePath(QStringLiteral("scene.luscn")));
-        if (!file.open(QIODevice::ReadOnly) || file.size() > foundation::int64{64} * 1024 * 1024)
+        if (SceneBytes_.size() > foundation::int64{64} * 1024 * 1024)
         {
-            Error_ = QStringLiteral("Cooked scene scratch input missing or exceeds 64 MiB.");
+            Error_ = QStringLiteral("Cooked scene exceeds 64 MiB.");
         }
         else
         {
-            const auto bytes = file.read(foundation::int64{64} * 1024 * 1024 + 1);
+            const QByteArray& bytes = SceneBytes_;
             Success_ = bytes.isEmpty() && Candidate_.value(QStringLiteral("objects")).toArray().isEmpty();
             if (!Success_)
             {
@@ -518,25 +627,14 @@ void LevelWorkspace::Completed()
 void LevelWorkspace::CommitImport()
 {
 #if !defined(Q_OS_WASM)
-    QJsonObject request{{QStringLiteral("schema"), 1},
-                        {QStringLiteral("operation"), QStringLiteral("commit-import")},
-                        {QStringLiteral("project"), Root_},
-                        {QStringLiteral("path"), QString()},
-                        {QStringLiteral("source"), Source_},
-                        {QStringLiteral("level"), Candidate_},
-                        {QStringLiteral("expected"), CatalogExpected_}};
-    QSaveFile file(QDir(Scratch_.path()).filePath(QStringLiteral("request.json")));
-    file.setDirectWriteFallback(false);
-    const auto bytes = QJsonDocument(request).toJson(QJsonDocument::Compact);
-    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
+    PublishingCatalog_ = true;
+    if (!Run(QStringLiteral("commit-import"), {}, Source_, CatalogExpected_))
     {
+        PublishingCatalog_ = false;
         Rollback(QStringLiteral("Could not publish the prepared catalog."));
         return;
     }
-    Output_.clear();
-    PublishingCatalog_ = true;
     Status_->setText(QStringLiteral("Committing prepared scene assets…"));
-    Process_.start();
 #else
     Rollback(QStringLiteral("Native host tools are required."));
 #endif
@@ -680,12 +778,7 @@ void LevelWorkspace::Cancel()
         Rollback(QStringLiteral("Import cancelled."));
         return;
     }
-#if !defined(Q_OS_WASM)
-    if (Process_.state() != QProcess::NotRunning)
-    {
-        Process_.terminate();
-    }
-#endif
+    CancelRequested_.store(true);
     Status_->setText(QStringLiteral("Cancelling; waiting for the owned operation to drain…"));
 }
 bool LevelWorkspace::ConfirmDiscard()

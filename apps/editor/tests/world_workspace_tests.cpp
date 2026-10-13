@@ -3,6 +3,7 @@
 #include "internal/main_window.h"
 #include "internal/world_document.h"
 #include "internal/world_workspace.h"
+#include "scene_fixture.h"
 
 #include "internal/workspace_style.h"
 #include <QAction>
@@ -700,24 +701,14 @@ TEST_CASE("Converted cooked levels edit placement and gameplay in World and surv
     const auto path = Fixture(directory);
     ToolingPaths tools;
     tools.ToolingRoot = QStringLiteral(LUDUS_EDITOR_PROJECT_ROOT);
-    tools.PythonPath = QStandardPaths::findExecutable(QStringLiteral("python3"));
-    QProcess prepare;
-    auto environment = QProcessEnvironment::systemEnvironment();
-    environment.insert(QStringLiteral("PYTHONPATH"),
-                       QDir(tools.ToolingRoot).filePath(QStringLiteral("scripts/python")));
-    prepare.setProcessEnvironment(environment);
-    prepare.start(
-        tools.PythonPath,
-        {QStringLiteral("-c"),
-         QStringLiteral("from pathlib import Path; import sys; from unittest.mock import patch; "
-                        "from ludus_tools import scene_assets as a; from test_scene_assets import fixture; "
-                        "r=Path(sys.argv[1]); s=r/'external'; s.mkdir(); (s/'source').write_text('fixture'); "
-                        "p=patch.object(a.scene_cook,'cook',side_effect=fixture); p.start(); "
-                        "v=a.import_scene(r,s,a.new_level()); p.stop(); a.save_level(r,'scenes/room.lulevel',v)"),
-         directory.path()});
-    REQUIRE(prepare.waitForFinished(10000));
-    INFO(prepare.readAllStandardError().constData());
-    REQUIRE(prepare.exitCode() == 0);
+    QString prepareError;
+    INFO(prepareError.toStdString());
+    const auto external = QDir(directory.path()).filePath(QStringLiteral("external"));
+    REQUIRE(ludus::editor::tests::CreateFixtureSource(external));
+    REQUIRE(ludus::editor::tests::PrepareImportedLevel(directory.path(),
+                                                       QStringLiteral("scenes/room.lulevel"),
+                                                       external,
+                                                       prepareError));
     const auto levelPath =
         QDir(QFileInfo(directory.path()).canonicalFilePath()).filePath(QStringLiteral("scenes/room.lulevel"));
     const auto originalLevel = Read(levelPath);
