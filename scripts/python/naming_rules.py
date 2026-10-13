@@ -1,7 +1,13 @@
 """Shared lexical naming rules; callers mask comments/literals before scanning."""
 import re
 
-NULL_POINTER_DECLARATION = re.compile(r"\*\s*(\w+)\s*(?:=\s*nullptr|\{\s*(?:nullptr)?\s*\})")
+# Require a type before the stars: *required = nullptr writes a pointee,
+# and does not establish that required itself is nullable.
+NULL_POINTER_DECLARATION = re.compile(
+    r"\b(?!(?:return|co_return|delete)\b)[A-Za-z_]\w*(?:::\w+)*(?:<[^;{}()]*>)?\s*"
+    r"(?:\*\s*(?:(?:const|volatile)\s+)*)+"
+    r"(\w+)\s*(?:=\s*nullptr|\{\s*(?:nullptr)?\s*\})"
+)
 MOVE_PARAMETER = re.compile(r"(?:\(|,)\s*(?:const\s+)?[\w:]+(?:<[^()]*?>)?\s*&&\s*(\w+)\s*(?=[,)=])")
 
 

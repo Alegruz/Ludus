@@ -15,13 +15,16 @@ class SourcePolicyTests(unittest.TestCase):
         )
 
     def test_nullable_variables_and_move_parameters(self):
-        for source in ["Thing* value = nullptr;", "struct A { Thing* mValue{}; };",
+        for source in ["Thing* value = nullptr;", "struct A { Thing* mValue{}; };", "Thing* const value = nullptr;",
                        "void Move(Thing&& inoutOther);", "void Move(Thing&& outOther);"]:
             self.assertTrue(self.diagnose(source), source)
         for source in ["Thing* valueOrNull = nullptr;", "void Move(Thing&& other);",
                        "void Read(const Thing& input);", "Thing* value = GetRequired();"]:
             self.assertFalse(self.diagnose(source), source)
         self.assertFalse(self.diagnose('// Thing* value = nullptr;\nconst char* text = "Thing&& inoutOther";'))
+
+    def test_pointee_assignment_does_not_make_the_pointer_nullable(self):
+        self.assertFalse(self.diagnose("void Clear(Thing** required) { *required = nullptr; }"))
 
     def test_shader_reuses_owned_pi_constant(self):
         self.assertTrue(self.diagnose("float Shade() { return 1 / 3.141592653589793; }", ".slang"))
