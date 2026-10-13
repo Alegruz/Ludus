@@ -1,14 +1,17 @@
 #include "python_json.h"
 
+#include <ludus/foundation/math/scalar.hpp>
 #include <ludus/foundation/strings/string.hpp>
 
-#include <cmath>
 #include <cstring>
+#include <limits>
 
 namespace ludus::content::scene_cook::detail
 {
 namespace
 {
+namespace math = ludus::foundation::math;
+constexpr float64 INFINITE_FLOAT = std::numeric_limits<float64>::infinity();
 constexpr usize MAX_JSON_NESTING = 900;
 constexpr float64 TWO_POW_127 = 170141183460469231731687303715884105728.0;
 
@@ -31,15 +34,15 @@ constexpr float64 TWO_POW_127 = 170141183460469231731687303715884105728.0;
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 [[nodiscard]] int CompareIntegerFloat(__int128 integer, float64 value) noexcept
 {
-    if (std::isnan(value))
+    if (math::IsNaN(value))
     {
         return 2;
     }
-    if (std::isinf(value))
+    if (math::IsFinite(value) == false)
     {
         return value > 0 ? -1 : 1;
     }
-    const float64 floor = std::floor(value);
+    const float64 floor = math::Floor(value);
     if (floor >= TWO_POW_127)
     {
         return -1;
@@ -69,7 +72,7 @@ constexpr float64 TWO_POW_127 = 170141183460469231731687303715884105728.0;
     }
     if (left.IsFloat == true && right.IsFloat == true)
     {
-        if (std::isnan(left.Float) || std::isnan(right.Float))
+        if (math::IsNaN(left.Float) || math::IsNaN(right.Float))
         {
             return 2;
         }
@@ -319,19 +322,19 @@ private:
         if (startsWith("NaN"))
         {
             mOffset += 3;
-            outNode = mTree.AddFloat(std::nan(""));
+            outNode = mTree.AddFloat(std::numeric_limits<float64>::quiet_NaN());
             return true;
         }
         if (startsWith("Infinity"))
         {
             mOffset += 8;
-            outNode = mTree.AddFloat(HUGE_VAL);
+            outNode = mTree.AddFloat(INFINITE_FLOAT);
             return true;
         }
         if (startsWith("-Infinity"))
         {
             mOffset += 9;
-            outNode = mTree.AddFloat(-HUGE_VAL);
+            outNode = mTree.AddFloat(-INFINITE_FLOAT);
             return true;
         }
         return parseNumber(outNode);
@@ -409,7 +412,7 @@ private:
             }
             if (result == NumberResult::Nonfinite)
             {
-                outNode = mTree.AddFloat(token[0] == '-' ? -HUGE_VAL : HUGE_VAL);
+                outNode = mTree.AddFloat(token[0] == '-' ? -INFINITE_FLOAT : INFINITE_FLOAT);
                 return true;
             }
             outNode = mTree.AddFloat(values[0]);
@@ -752,7 +755,7 @@ public:
                 AppendInteger(mWriter, value.Integer);
                 return true;
             case JsonKind::Float:
-                if (std::isfinite(value.Float) == false)
+                if (math::IsFinite(value.Float) == false)
                 {
                     return false;
                 }
@@ -1244,7 +1247,7 @@ void PythonSum::Add(PythonNumber value) noexcept
     {
         const float64 item = value.Float;
         const float64 total = mFloat + item;
-        if (std::fabs(mFloat) >= std::fabs(item))
+        if (math::Abs(mFloat) >= math::Abs(item))
         {
             mCompensation += (mFloat - total) + item;
         }
@@ -1265,7 +1268,7 @@ PythonNumber PythonSum::GetResult() const noexcept
         return MakeInteger(mInteger);
     }
     float64 result = mFloat;
-    if (mCompensation != 0.0 && std::isfinite(mCompensation))
+    if (mCompensation != 0.0 && math::IsFinite(mCompensation))
     {
         result += mCompensation;
     }
