@@ -495,6 +495,7 @@ struct AllowedParams final
     std::initializer_list<std::string_view> Keys;
 };
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 [[nodiscard]] bool ParamAllowed(std::string_view command, std::string_view key) noexcept
 {
     static const AllowedParams TABLE[] = {
@@ -765,7 +766,7 @@ struct SceneState final
     }
     scene.Fov = state.Values[0];
     state.HaveCamera = true;
-    if (!(0.0 < scene.Fov && scene.Fov < 180.0))
+    if (scene.Fov <= 0.0 || scene.Fov >= 180.0)
     {
         return errors.Invalid("camera field of view");
     }
@@ -1309,8 +1310,8 @@ ReadPly(Context& context, std::string_view path, Array<Point>& points, Array<Tri
     {
         return errors.Invalid("incomplete PLY normals");
     }
-    if (ply.Vertices < 0 || ply.Faces < 0 || ply.IndexFormat == 0 || !(0 < ply.Vertices && ply.Vertices <= 1000000) ||
-        !(0 < ply.Faces && ply.Faces <= 1000000))
+    if (ply.Vertices < 0 || ply.Faces < 0 || ply.IndexFormat == 0 || ply.Vertices <= 0 || ply.Vertices > 1000000 ||
+        ply.Faces <= 0 || ply.Faces > 1000000)
     {
         return errors.Invalid("PLY limits");
     }
@@ -1427,8 +1428,8 @@ ReadPly(Context& context, std::string_view path, Array<Point>& points, Array<Tri
     const usize height = static_cast<usize>(data[14]) | (static_cast<usize>(data[15]) << 8);
     const uint8 bits = data[16];
     const uint8 flags = data[17];
-    if (cmap != 0 || kind != 2 || (bits != 24 && bits != 32) || (flags & 0xC0) != 0 || !(0 < width && width <= 4096) ||
-        !(0 < height && height <= 4096))
+    if (cmap != 0 || kind != 2 || (bits != 24 && bits != 32) || (flags & 0xC0) != 0 || width == 0 || width > 4096 ||
+        height == 0 || height > 4096)
     {
         return errors.Invalid("only bounded uncompressed true-color TGA is supported");
     }
@@ -1565,8 +1566,14 @@ void SetComponent(Vertex& vertex, usize index, float64 value) noexcept
     }
 }
 
-[[nodiscard]] bool
-Clip(const Array<Vertex>& poly, usize axis, float64 limit, bool greater, Array<Vertex>& result) noexcept
+struct ClipPlane final
+{
+    usize Axis = 0;
+    float64 Limit = 0.0;
+    bool Greater = false;
+};
+
+[[nodiscard]] bool Clip(const Array<Vertex>& poly, const ClipPlane& plane, Array<Vertex>& result) noexcept
 {
     result.Clear();
     const usize count = poly.GetSize();
@@ -1574,13 +1581,13 @@ Clip(const Array<Vertex>& poly, usize axis, float64 limit, bool greater, Array<V
     {
         const Vertex& previous = poly[(i + count - 1) % count];
         const Vertex& current = poly[i];
-        const float64 a = previous.Uv[axis];
-        const float64 b = current.Uv[axis];
-        const bool insideA = greater ? a >= limit : a <= limit;
-        const bool insideB = greater ? b >= limit : b <= limit;
+        const float64 a = previous.Uv[plane.Axis];
+        const float64 b = current.Uv[plane.Axis];
+        const bool insideA = plane.Greater ? a >= plane.Limit : a <= plane.Limit;
+        const bool insideB = plane.Greater ? b >= plane.Limit : b <= plane.Limit;
         if (insideA != insideB)
         {
-            const float64 t = (limit - a) / (b - a);
+            const float64 t = (plane.Limit - a) / (b - a);
             Vertex mixed;
             for (usize k = 0; k < 8; ++k)
             {
@@ -1606,13 +1613,7 @@ struct Piece final
     Vertex V[3];
 };
 
-struct ClipPlane final
-{
-    usize Axis = 0;
-    float64 Limit = 0.0;
-    bool Greater = false;
-};
-
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
 [[nodiscard]] bool AtlasCell(Failure& errors,
                              const Vertex (&vertices)[3],
                              float64 x,
@@ -1620,6 +1621,7 @@ struct ClipPlane final
                              float64 atlasWidth,
                              float64 atlasHeight,
                              Array<Piece>& output) noexcept
+// NOLINTEND(bugprone-easily-swappable-parameters)
 {
     Array<Vertex> poly;
     Array<Vertex> next;
@@ -1634,7 +1636,7 @@ struct ClipPlane final
         {
             break;
         }
-        if (!Clip(poly, plane.Axis, plane.Limit, plane.Greater, next))
+        if (!Clip(poly, plane, next))
         {
             return errors.Memory();
         }
@@ -1981,7 +1983,7 @@ struct Cooker final
         {
             return errors.Invalid("list index out of range");
         }
-        if (!(0.0 < radius[0] && radius[0] <= 1.0))
+        if (radius[0] <= 0.0 || radius[0] > 1.0)
         {
             return errors.Invalid("disk radius profile");
         }
@@ -2092,8 +2094,10 @@ struct Cooker final
     }
 
     // Material classification: group index plus an optional fixed solid-colour UV.
+    // NOLINTBEGIN(bugprone-easily-swappable-parameters)
     [[nodiscard]] bool
     Classify(const MaterialRef& material, usize& group, bool& hasFixedUv, float64 (&fixedUv)[2]) noexcept
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     {
         Failure& errors = Ctx.Errors;
         std::string_view type;

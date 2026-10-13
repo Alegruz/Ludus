@@ -12,15 +12,13 @@ ludus_apply_project_defaults(ludus_scene_cook)
 install(TARGETS ludus_scene_cook EXPORT LudusTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
-if(NOT EMSCRIPTEN)
-    add_executable(ludus_cook tool/ludus_cook.cpp)
-    set_target_properties(ludus_cook PROPERTIES OUTPUT_NAME ludus-cook)
-    target_link_libraries(ludus_cook PRIVATE Ludus::SceneCook)
-    ludus_apply_project_defaults(ludus_cook)
-    install(TARGETS ludus_cook RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-endif()
+# Developer tool; built in the tree, not part of the installed SDK.
+add_executable(ludus_cook tool/ludus_cook.cpp)
+set_target_properties(ludus_cook PROPERTIES OUTPUT_NAME ludus-cook)
+target_link_libraries(ludus_cook PRIVATE Ludus::SceneCook)
+ludus_apply_project_defaults(ludus_cook)
 
-if(LUDUS_BUILD_TESTS AND NOT EMSCRIPTEN)
+if(LUDUS_BUILD_TESTS)
     find_package(Catch2 3 REQUIRED CONFIG)
     add_executable(ludus_scene_cook_tests tests/scene_cook_tests.cpp)
     target_include_directories(ludus_scene_cook_tests PRIVATE src)
