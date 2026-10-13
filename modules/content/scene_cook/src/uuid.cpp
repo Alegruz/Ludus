@@ -1,7 +1,9 @@
 #include "uuid.h"
 
+#include <ludus/foundation/base/config.h>
+
 #include <unistd.h>
-#if defined(__APPLE__)
+#if LUDUS_TARGET_OS == LUDUS_OS_MACOS
 #    include <sys/random.h>
 #endif
 
