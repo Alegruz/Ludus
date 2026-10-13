@@ -2,6 +2,8 @@
 
 #include <ludus/foundation/base/types.h>
 
+#include <ludus/foundation/containers/static_array.hpp>
+
 namespace ludus::graphics::rhi
 {
 /// Allocation/sampled-view dimensionality; cube faces use +X,-X,+Y,-Y,+Z,-Z order.
@@ -34,7 +36,13 @@ enum class RasterFormat : ludus::foundation::uint8
     Bc1RgbaUnorm,
     /// BC3 RGBA normalized 4x4 blocks (16 bytes), sampled when enabled; no automatic compression.
     Bc3RgbaUnorm,
+    /// BC5 RG unsigned normalized 4x4 blocks (16 bytes); sampling returns (R,G,0,1).
+    /// Requires enabled compression support; no normal reconstruction, conversion or compression.
+    Bc5RgUnorm,
 };
+/// Number of known formats; profile tables are indexed by RasterFormat.
+inline constexpr ludus::foundation::usize RASTER_FORMAT_COUNT =
+    static_cast<ludus::foundation::usize>(RasterFormat::Bc5RgUnorm) + 1;
 /// Copied R6 storage maxima and explicit byte budgets. Configure before startup.
 /// Counts are limits, not reservations; creation may fail under byte/allocation pressure.
 /// Defaults preserve the original general profiles. The fullscreen facade is separate.
@@ -94,7 +102,8 @@ struct RasterCapabilities final
 {
     /// Maximum bytes per buffer; zero when unavailable.
     ludus::foundation::usize MaxBufferSize = 0;
-    /// Maximum width/height of sampled textures.
+    /// Enabled device/context width/height ceiling in texels; individual formats/uses may be lower.
+    /// Does not reserve memory or override upload/resource byte budgets.
     ludus::foundation::uint32 MaxTextureDimension2D = 0;
     /// Uniform range offset alignment in bytes.
     ludus::foundation::usize UniformOffsetAlignment = 0;
@@ -182,6 +191,9 @@ struct FormatCapabilities final
     bool StencilAttachment = false;
     /// Private stencil aspect permits scalar unsigned loads through a D2 view.
     bool StencilSampled = false;
+    /// Compressed base width/height may end inside a block; uploaded edge blocks remain complete.
+    /// False on the pinned WebGPU compressed profile; no implicit padding/resizing is performed.
+    bool HasUnalignedBlockExtents = false;
 };
 /// Fixed public raster interface bounds, independently of larger native adapter limits.
 struct RasterInterfaceCapabilities final
@@ -254,8 +266,8 @@ struct DeviceProfile final
         .HostBytes = 0,
         .ResourceBytes = 0,
     };
-    /// Seven format entries indexed by RasterFormat, including unsupported uses.
-    FormatCapabilities Formats[7]{};
+    /// Known format entries indexed by RasterFormat, including unsupported uses.
+    ludus::foundation::StaticArray<FormatCapabilities, RASTER_FORMAT_COUNT> Formats{};
 };
 /// Raster admission constraints; zero fields impose no additional requirement.
 /// Nonzero fields imply required portable raster for required profile admission.
@@ -328,6 +340,8 @@ struct FormatRequirement final
     bool StencilAttachment = false;
     /// Require enabled unsigned private stencil aspect loads.
     bool StencilSampled = false;
+    /// Require compressed base dimensions not divisible by block width/height; sampled BC formats only.
+    bool RequiresUnalignedBlockExtents = false;
 };
 /// Copied bounded required/preferred profile constraints. Unused array entries are ignored.
 /// Required constraints reject before Ready; preferred constraints only produce diagnostics.
@@ -337,8 +351,8 @@ struct DeviceProfileRequirements final
     RasterRequirements Raster;
     /// Additional compute limits.
     ComputeRequirements Compute;
-    /// At most seven unique known format requests.
-    FormatRequirement Formats[7]{};
+    /// At most RASTER_FORMAT_COUNT unique known format requests; unused entries are ignored.
+    ludus::foundation::StaticArray<FormatRequirement, RASTER_FORMAT_COUNT> Formats{};
     /// Number of valid entries in Formats; larger counts or duplicates are malformed.
     ludus::foundation::uint32 FormatCount = 0;
 };
@@ -411,6 +425,8 @@ enum class ProfileRequirement : ludus::foundation::uint8
     MipCount,
     /// The format's attachment sample count is unsupported.
     SampleCount,
+    /// Compressed base extents must be block-aligned on the enabled profile.
+    UnalignedBlockExtents,
 };
 /// Bounded negotiation diagnostic; no strings or borrowed request data.
 struct ProfileDiagnostic final

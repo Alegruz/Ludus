@@ -496,6 +496,7 @@ VkFormat RasterPixelFormat(RasterFormat format) noexcept
 {
     return format == RasterFormat::Bc1RgbaUnorm   ? VK_FORMAT_BC1_RGBA_UNORM_BLOCK
            : format == RasterFormat::Bc3RgbaUnorm ? VK_FORMAT_BC3_UNORM_BLOCK
+           : format == RasterFormat::Bc5RgUnorm   ? VK_FORMAT_BC5_UNORM_BLOCK
            : format == RasterFormat::Rgba16Float  ? VK_FORMAT_R16G16B16A16_SFLOAT
            : format == RasterFormat::Rg8Unorm     ? VK_FORMAT_R8G8_UNORM
            : format == RasterFormat::R8Unorm      ? VK_FORMAT_R8_UNORM
@@ -509,7 +510,7 @@ VkFormat RasterPixelFormat(RasterFormat format) noexcept
 // https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceImageFormatProperties.html
 FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
-    if (gPhysical == VK_NULL_HANDLE || static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm))
+    if (gPhysical == VK_NULL_HANDLE || static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc5RgUnorm))
     {
         return {};
     }
@@ -545,7 +546,8 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     {
         return {};
     }
-    auto result = internal::PortableFormatLimits(format, RasterLimits());
+    FormatCapabilities result = internal::PortableFormatLimits(format, RasterLimits());
+    result.HasUnalignedBlockExtents = internal::CompressedTexture(format);
     if (sampled.maxExtent.width < result.MaxSampledDimension2D)
     {
         result.MaxSampledDimension2D = sampled.maxExtent.width;
@@ -631,6 +633,7 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     result.Uses.Blendable =
         attachment && (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT) != 0;
     result.SampleCounts = attachment ? static_cast<uint32>(color.sampleCounts & depth.sampleCounts) & 5U : 0U;
+    uint32 stencilDimension = 0;
     if (attachment)
     {
         VkImageFormatProperties stencil{};
@@ -659,6 +662,8 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
         }
         if (result.StencilAttachment)
         {
+            stencilDimension =
+                stencil.maxExtent.width < stencil.maxExtent.height ? stencil.maxExtent.width : stencil.maxExtent.height;
             result.SampleCounts &= static_cast<uint32>(stencil.sampleCounts);
             if (stencil.maxMipLevels < result.MaxAttachmentMipLevels)
             {
@@ -673,18 +678,25 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     result.MaxAttachmentDimension2D = attachment ? result.MaxSampledDimension2D : 0;
     VkPhysicalDeviceProperties device{};
     vkGetPhysicalDeviceProperties(gPhysical, &device);
-    const uint32 bounds[]{color.maxExtent.width,
-                          color.maxExtent.height,
-                          depth.maxExtent.width,
-                          depth.maxExtent.height,
-                          device.limits.maxFramebufferWidth,
-                          device.limits.maxFramebufferHeight};
-    for (const auto bound : bounds)
+    constexpr usize ATTACHMENT_DIMENSION_BOUND_COUNT = 8;
+    const StaticArray<uint32, ATTACHMENT_DIMENSION_BOUND_COUNT> bounds{{color.maxExtent.width,
+                                                                        color.maxExtent.height,
+                                                                        depth.maxExtent.width,
+                                                                        depth.maxExtent.height,
+                                                                        device.limits.maxFramebufferWidth,
+                                                                        device.limits.maxFramebufferHeight,
+                                                                        device.limits.maxViewportDimensions[0],
+                                                                        device.limits.maxViewportDimensions[1]}};
+    for (const uint32 bound : bounds)
     {
         if (bound < result.MaxAttachmentDimension2D)
         {
             result.MaxAttachmentDimension2D = bound;
         }
+    }
+    if (result.StencilAttachment == true && stencilDimension < result.MaxAttachmentDimension2D)
+    {
+        result.MaxAttachmentDimension2D = stencilDimension;
     }
     if (attachment)
     {
@@ -837,10 +849,10 @@ RasterCapabilities RasterLimits() noexcept
         gRasterHdr = (hdr.optimalTilingFeatures & required) == required;
         gRasterHdrProbed = true;
     }
-    const auto max = properties.limits.maxImageDimension2D;
+    const uint32 max = properties.limits.maxImageDimension2D;
     const usize alignment = properties.limits.minUniformBufferOffsetAlignment;
     return {usize{64} * 1024 * 1024,
-            max < 4096 ? max : 4096,
+            max,
             alignment > 256 ? alignment : 256,
             properties.limits.maxUniformBufferRange < 16384 ? properties.limits.maxUniformBufferRange : 16384,
             internal::CurrentStorageLimits().ResourcesPerKind,

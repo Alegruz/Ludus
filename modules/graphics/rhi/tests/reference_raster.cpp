@@ -17,7 +17,7 @@ void Reset() noexcept
     ComputeAvailable = true;
     FormatBlendUnavailable = false;
     OverrideRasterLimits = false;
-    for (auto& unavailable : FormatUnavailable)
+    for (bool& unavailable : FormatUnavailable)
     {
         unavailable = false;
     }
@@ -131,12 +131,14 @@ RasterStatus ComputeEncode(const internal::ComputePacket& packet) noexcept
 void ComputeBufferBarrier(usize, GraphAccessMode) noexcept {}
 FormatCapabilities FormatLimits(RasterFormat format) noexcept
 {
-    if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc3RgbaUnorm) ||
-        reference::FormatUnavailable[static_cast<usize>(format)])
+    if (static_cast<uint8>(format) > static_cast<uint8>(RasterFormat::Bc5RgUnorm) ||
+        reference::FormatUnavailable[static_cast<usize>(format)] == true)
     {
         return {};
     }
-    auto result = internal::PortableFormatLimits(format, RasterLimits());
+    FormatCapabilities result = internal::PortableFormatLimits(format, RasterLimits());
+    result.HasUnalignedBlockExtents =
+        internal::CompressedTexture(format) == true && (Kind() == Backend::Vulkan || Kind() == Backend::Metal);
     result.MaxArrayLayers = 256;
     result.MaxCubeDimension = result.MaxSampledDimension2D;
     result.MaxDimension3D = internal::CompressedTexture(format) ? 0U : 256U;

@@ -330,8 +330,8 @@ try {
     await page.waitForFunction(() => ['passed','failed'].includes(document.querySelector('#status')?.dataset.state),null,{timeout:45000});
     const status = await page.locator('#status').evaluate(node => ({...node.dataset}));
     assert.equal(status.state,'passed',JSON.stringify(status));
-    assert.equal(status.frames,'14'); assert.deepEqual(errors,[]);
-    report.cases.push({scenario:`r9-${backend}`,frames:14,pixelReadbacks:14});
+    assert.equal(status.frames,'20'); assert.deepEqual(errors,[]);
+    report.cases.push({scenario:`r9-${backend}`,frames:20,pixelReadbacks:20});
     await context.close();
   }
   for (const backend of ['webgpu','webgl2','auto','fallback']) {

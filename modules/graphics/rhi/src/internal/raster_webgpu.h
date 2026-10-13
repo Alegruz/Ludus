@@ -206,7 +206,7 @@ RasterCapabilities RasterLimits() noexcept
     }
     constexpr usize max = usize{64} * 1024 * 1024;
     return {static_cast<usize>(limits.maxBufferSize < max ? limits.maxBufferSize : max),
-            limits.maxTextureDimension2D < 4096 ? limits.maxTextureDimension2D : 4096,
+            limits.maxTextureDimension2D,
             limits.minUniformBufferOffsetAlignment > 256 ? limits.minUniformBufferOffsetAlignment : 256,
             static_cast<usize>(limits.maxUniformBufferBindingSize < 16384 ? limits.maxUniformBufferBindingSize : 16384),
             internal::CurrentStorageLimits().ResourcesPerKind,
@@ -230,7 +230,7 @@ FormatCapabilities FormatLimits(RasterFormat format) noexcept
     {
         return {};
     }
-    auto result = internal::PortableFormatLimits(format, RasterLimits());
+    FormatCapabilities result = internal::PortableFormatLimits(format, RasterLimits());
     if (result.Uses.ColorAttachment)
     {
         result.MaxAttachmentMipLevels = result.MaxMipLevels;
@@ -364,6 +364,7 @@ RasterCreateTexture(usize slot, const TextureDescription& info, const TextureUpl
     descriptor.sampleCount = info.SampleCount;
     descriptor.format = info.Format == RasterFormat::Bc1RgbaUnorm   ? WGPUTextureFormat_BC1RGBAUnorm
                         : info.Format == RasterFormat::Bc3RgbaUnorm ? WGPUTextureFormat_BC3RGBAUnorm
+                        : info.Format == RasterFormat::Bc5RgUnorm   ? WGPUTextureFormat_BC5RGUnorm
                         : info.Format == RasterFormat::Rgba16Float  ? WGPUTextureFormat_RGBA16Float
                         : info.Format == RasterFormat::Rg8Unorm     ? WGPUTextureFormat_RG8Unorm
                         : info.Format == RasterFormat::R8Unorm      ? WGPUTextureFormat_R8Unorm

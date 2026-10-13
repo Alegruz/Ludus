@@ -255,7 +255,7 @@ struct TextureUpload final
     /// Rows in top-left image order, including optional padding between rows.
     std::span<const ludus::foundation::uint8> Bytes;
     /// Encoded row/block-row pitch, at least ceil(Width/blockWidth) * blockBytes.
-    /// Must be a multiple of four and of the format block byte count (eight for HDR/BC1, sixteen for BC3).
+    /// Must be a multiple of four and of the format block byte count (eight for HDR/BC1, sixteen for BC3/BC5).
     ludus::foundation::usize RowPitch = 0;
     /// Empty selects the legacy single-mip RowPitch. Otherwise exactly MipLevels
     /// descriptors; RowPitch must be zero. All metadata is consumed before return.

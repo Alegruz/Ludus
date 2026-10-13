@@ -5,6 +5,7 @@
 #include "internal/resources.h"
 #include "internal/webgpu_probe.h"
 #include <ludus/foundation/base/core.h>
+#include <ludus/foundation/containers/static_array.hpp>
 #include <ludus/foundation/logging/log_format.hpp>
 #include <ludus/graphics/rhi/render.h>
 #include <ludus/graphics/rhi/rhi.h>
@@ -270,8 +271,21 @@ void AdapterReady(WGPURequestAdapterStatus status,
     }
     gAdapter = adapter;
     WGPUDeviceDescriptor descriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
+    // Thanks to W3C GPU for the Web Working Group, WebGPU, GPUDeviceDescriptor.requiredLimits:
+    // https://www.w3.org/TR/webgpu/#dom-gpudevicedescriptor-requiredlimits
+    // Adapter maxima must be requested before device creation; later queries use enabled device limits.
+    WGPULimits adapterLimits = WGPU_LIMITS_INIT;
+    if (wgpuAdapterGetLimits(adapter, &adapterLimits) != WGPUStatus_Success)
+    {
+        internal::Fail(token, StartupError::DeviceUnavailable);
+        return;
+    }
+    WGPULimits requiredLimits = WGPU_LIMITS_INIT;
+    requiredLimits.maxTextureDimension2D = adapterLimits.maxTextureDimension2D;
+    descriptor.requiredLimits = &requiredLimits;
     // Optional timestamps are requested only for an opted-in measurement session.
-    WGPUFeatureName features[2]{};
+    constexpr usize OPTIONAL_FEATURE_COUNT = 2;
+    StaticArray<WGPUFeatureName, OPTIONAL_FEATURE_COUNT> features{};
     if (wgpuAdapterHasFeature(adapter, WGPUFeatureName_TextureCompressionBC))
     {
         features[descriptor.requiredFeatureCount++] = WGPUFeatureName_TextureCompressionBC;
@@ -281,7 +295,7 @@ void AdapterReady(WGPURequestAdapterStatus status,
     {
         features[descriptor.requiredFeatureCount++] = timestamp;
     }
-    descriptor.requiredFeatures = features;
+    descriptor.requiredFeatures = features.GetData();
     descriptor.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
     descriptor.deviceLostCallbackInfo.userdata1 = Userdata(token);
     descriptor.deviceLostCallbackInfo.callback =
