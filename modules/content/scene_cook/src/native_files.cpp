@@ -1,6 +1,8 @@
 #include "native_files.h"
 
-#if defined(__unix__) || defined(__APPLE__)
+#include <ludus/foundation/base/config.h>
+
+#if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
 #    include <cerrno>
 #    include <climits>
 #    include <cstdio>
