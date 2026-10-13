@@ -3361,6 +3361,7 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
     Document current;
     const Document* currentOrNull = nullptr;
     bool isCommitted = false;
+    bool isSaveCommitted = false;
     bool hasExpectedCatalog = false;
     Digest expectedCatalog;
     Array<uint8> disk;
@@ -3445,6 +3446,10 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
             {
                 return inoutFailure.Fail(AssetErrorCode::Conflict, "Saved level changed on disk");
             }
+            if (IsCancelled(options) == true)
+            {
+                return inoutFailure.Fail(AssetErrorCode::InstallCancelled, "Scene save cancelled");
+            }
             if (SaveLevelDocument(root,
                                   request.Path,
                                   level,
@@ -3454,9 +3459,10 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
             {
                 return false;
             }
+            isSaveCommitted = true;
         }
     }
-    if (IsCancelled(options) == true && isCommitted == false)
+    if (IsCancelled(options) == true && isCommitted == false && isSaveCommitted == false)
     {
         return inoutFailure.Fail(AssetErrorCode::InstallCancelled, "Scene import cancelled");
     }
