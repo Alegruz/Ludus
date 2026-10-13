@@ -1656,15 +1656,16 @@ the documented bounds and supply `HasVerifiedArrayBounds`.
 
 `ludus_rhi_r11_consumer` and the installed `ludus_sdk_r11_consumer` compare static
 snapshots, dynamic offsets, GDI execution and constant/non-uniform native arrays
-against the same independently checked color stripes, and GPU compute readback verifies
+against the same independently checked color stripes. GPU compute readback verifies
 a dynamic storage write at byte 256 with an untouched prefix/suffix. The native fixture destroys
 array texture/view owners before drawing and the snapshot before readback;
 retained backing must still produce the expected pixels. Optional non-uniform
 execution is reported unavailable when a Vulkan device cannot enable it.
 The source fixture enables its native array cases when the pinned translator is
 configured (`LUDUS_R11_NATIVE_ARRAYS`); the installed native SDK fixture requires
-that translator and always qualifies the array profile. `r11.html` exercises dynamic offset pixels, rejected misalignment and exact GDI
-ranges on forced WebGPU/WebGL 2; WebGPU also checks the dynamic storage write. Registry tests cover creation rollback, descriptor
+that translator and always qualifies the array profile. `r11.html` exercises dynamic
+offset pixels, rejected misalignment and exact GDI ranges on forced WebGPU/WebGL 2;
+WebGPU also checks the dynamic storage write. Registry tests cover creation rollback, descriptor
 pressure across delayed completion, stale indices, retained array elements,
 72-descriptor payloads, copied compute offsets and incorrect graph ranges.
 Reflection regressions cover fixed/runtime counts, target registers, indexing
@@ -1680,6 +1681,23 @@ residency; driver descriptor allocation bytes remain unavailable. Query
 chosen binding workload, not GPU duration, display latency or universal speedup.
 Named physical GPU qualification remains an R7b gate; optional bindless never
 becomes the default merely because it is implemented.
+
+R11a/R11b implementation is recorded in [PR #239](https://github.com/Alegruz/Ludus/pull/239).
+At code revision `3dace88df9db11a0126fae3d7e2ae7241e5bf01b`, the
+[Linux Development and SDK gate](https://github.com/Alegruz/Ludus/actions/runs/38376845936/job/115228342822)
+passed source and installed R11 Vulkan execution under validation layers with no
+validation errors. Both constant and optional non-uniform arrays ran. The installed
+fixture reported 1,412,602 ns to create 32 static snapshots versus 41,968 ns for one
+dynamic snapshot, 33 populated descriptors and 3 native pools reserving 48 slots.
+Host metadata grew by 165,656 bytes for the static snapshots (including cold
+page/pool growth), then 24 bytes for the additional dynamic snapshot. This is one
+software-driver observation, not a repeated benchmark or physical-GPU qualification.
+The [macOS native gate](https://github.com/Alegruz/Ludus/actions/runs/38376845936/job/115227742875)
+passed its installed Metal shader/consumer step, and the
+[packaged browser gate](https://github.com/Alegruz/Ludus/actions/runs/38376846022/job/115234164137)
+passed the installed SDK's forced WebGPU/WebGL 2 pixel and dynamic-offset journeys.
+Pinned formatting, native/browser analysis, Linux/macOS sanitizers and API
+coverage gates also passed for that code revision.
 
 Thanks to Khronos Group, *Vulkan Specification*,
 [vkCmdBindDescriptorSets](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindDescriptorSets.html),
