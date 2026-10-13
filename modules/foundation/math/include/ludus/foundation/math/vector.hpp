@@ -209,6 +209,11 @@ struct Vector3d
 {
     return a.X * b.X + a.Y * b.Y + a.Z * b.Z;
 }
+/// Right-handed cross product at double precision: Cross(+X,+Y) = +Z.
+[[nodiscard]] constexpr Vector3d Cross(Vector3d a, Vector3d b) noexcept
+{
+    return Vector3d{a.Y * b.Z - a.Z * b.Y, a.Z * b.X - a.X * b.Z, a.X * b.Y - a.Y * b.X};
+}
 
 // --- Finite checks ----------------------------------------------------------
 [[nodiscard]] constexpr bool IsFinite(Vector2 v) noexcept

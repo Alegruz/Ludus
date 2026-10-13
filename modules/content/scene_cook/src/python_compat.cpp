@@ -14,15 +14,15 @@ namespace
     return value >= '0' && value <= '9';
 }
 
-[[nodiscard]] std::string_view StripPySpace(std::string_view text) noexcept
+[[nodiscard]] std::string_view StripPythonSpace(std::string_view text) noexcept
 {
     // Tokens are ASCII-trimmed; Unicode whitespace inside a decoded string literal
     // is outside the reference profile and is reported as a syntax failure.
-    while (!text.empty() && IsPySpace(static_cast<uint8>(text.front())))
+    while (!text.empty() && IsPythonSpace(static_cast<uint8>(text.front())))
     {
         text.remove_prefix(1);
     }
-    while (!text.empty() && IsPySpace(static_cast<uint8>(text.back())))
+    while (!text.empty() && IsPythonSpace(static_cast<uint8>(text.back())))
     {
         text.remove_suffix(1);
     }
@@ -30,24 +30,24 @@ namespace
 }
 
 // digit (["_"] digit)*; appends the digits without underscores.
-[[nodiscard]] bool TakeDigits(std::string_view& text, Sink& digits, usize& count) noexcept
+[[nodiscard]] bool TakeDigits(std::string_view& inoutText, ByteWriter& inoutDigits, usize& inoutCount) noexcept
 {
-    count = 0;
-    if (text.empty() || !IsAsciiDigit(text.front()))
+    inoutCount = 0;
+    if (inoutText.empty() || !IsAsciiDigit(inoutText.front()))
     {
         return true;
     }
-    while (!text.empty())
+    while (!inoutText.empty())
     {
-        if (IsAsciiDigit(text.front()))
+        if (IsAsciiDigit(inoutText.front()))
         {
-            digits.Append(text.front());
-            ++count;
-            text.remove_prefix(1);
+            inoutDigits.Append(inoutText.front());
+            ++inoutCount;
+            inoutText.remove_prefix(1);
         }
-        else if (text.front() == '_' && text.size() > 1 && IsAsciiDigit(text[1]))
+        else if (inoutText.front() == '_' && inoutText.size() > 1 && IsAsciiDigit(inoutText[1]))
         {
-            text.remove_prefix(1);
+            inoutText.remove_prefix(1);
         }
         else
         {
@@ -57,7 +57,7 @@ namespace
     return true;
 }
 
-[[nodiscard]] bool EqualsIgnoreCase(std::string_view text, std::string_view lower) noexcept
+[[nodiscard]] bool IsEqualIgnoringCase(std::string_view text, std::string_view lower) noexcept
 {
     if (text.size() != lower.size())
     {
@@ -86,25 +86,25 @@ enum class FloatSyntax : uint8
 };
 
 // Rewrite Python float() syntax as a JSON real literal.
-[[nodiscard]] FloatSyntax NormaliseFloat(std::string_view text, Sink& json) noexcept
+[[nodiscard]] FloatSyntax NormaliseFloat(std::string_view text, ByteWriter& inoutJson) noexcept
 {
-    text = StripPySpace(text);
-    bool negative = false;
+    text = StripPythonSpace(text);
+    bool isNegative = false;
     if (!text.empty() && (text.front() == '+' || text.front() == '-'))
     {
-        negative = text.front() == '-';
+        isNegative = text.front() == '-';
         text.remove_prefix(1);
     }
-    if (EqualsIgnoreCase(text, "inf") || EqualsIgnoreCase(text, "infinity") || EqualsIgnoreCase(text, "nan"))
+    if (IsEqualIgnoringCase(text, "inf") || IsEqualIgnoringCase(text, "infinity") || IsEqualIgnoringCase(text, "nan"))
     {
         return FloatSyntax::Nonfinite;
     }
     Array<uint8> integerBytes;
     Array<uint8> fractionBytes;
     Array<uint8> exponentBytes;
-    Sink integer(integerBytes);
-    Sink fraction(fractionBytes);
-    Sink exponent(exponentBytes);
+    ByteWriter integer(integerBytes);
+    ByteWriter fraction(fractionBytes);
+    ByteWriter exponent(exponentBytes);
     usize integerCount = 0;
     usize fractionCount = 0;
     (void)TakeDigits(text, integer, integerCount);
@@ -117,14 +117,14 @@ enum class FloatSyntax : uint8
     {
         return FloatSyntax::Invalid;
     }
-    bool exponentNegative = false;
+    bool isExponentNegative = false;
     usize exponentCount = 0;
     if (!text.empty() && (text.front() == 'e' || text.front() == 'E'))
     {
         text.remove_prefix(1);
         if (!text.empty() && (text.front() == '+' || text.front() == '-'))
         {
-            exponentNegative = text.front() == '-';
+            isExponentNegative = text.front() == '-';
             text.remove_prefix(1);
         }
         (void)TakeDigits(text, exponent, exponentCount);
@@ -137,9 +137,9 @@ enum class FloatSyntax : uint8
     {
         return FloatSyntax::Invalid;
     }
-    if (negative)
+    if (isNegative)
     {
-        json.Append('-');
+        inoutJson.Append('-');
     }
     // JSON forbids leading zeroes in the integer part; they never change the value.
     std::string_view digits(reinterpret_cast<const char*>(integerBytes.GetData()), integerBytes.GetSize());
@@ -147,64 +147,65 @@ enum class FloatSyntax : uint8
     {
         digits.remove_prefix(1);
     }
-    json.Append(digits.empty() ? std::string_view("0") : digits);
-    json.Append('.');
-    json.Append(fractionCount == 0 ? std::string_view("0")
-                                   : std::string_view(reinterpret_cast<const char*>(fractionBytes.GetData()),
-                                                      fractionBytes.GetSize()));
+    inoutJson.Append(digits.empty() ? std::string_view("0") : digits);
+    inoutJson.Append('.');
+    inoutJson.Append(fractionCount == 0 ? std::string_view("0")
+                                        : std::string_view(reinterpret_cast<const char*>(fractionBytes.GetData()),
+                                                           fractionBytes.GetSize()));
     if (exponentCount != 0)
     {
-        json.Append(exponentNegative ? std::string_view("e-") : std::string_view("e+"));
-        json.Append(std::string_view(reinterpret_cast<const char*>(exponentBytes.GetData()), exponentBytes.GetSize()));
+        inoutJson.Append(isExponentNegative ? std::string_view("e-") : std::string_view("e+"));
+        inoutJson.Append(
+            std::string_view(reinterpret_cast<const char*>(exponentBytes.GetData()), exponentBytes.GetSize()));
     }
-    return integer.Ok() && fraction.Ok() && exponent.Ok() ? FloatSyntax::Number : FloatSyntax::Invalid;
+    return integer.IsOk() && fraction.IsOk() && exponent.IsOk() ? FloatSyntax::Number : FloatSyntax::Invalid;
 }
 
-void AppendCodeUnitEscape(Sink& sink, uint32 unit) noexcept
+void AppendCodeUnitEscape(ByteWriter& inoutWriter, uint32 unit) noexcept
 {
     constexpr char HEX[] = "0123456789abcdef";
     char text[6] = {'\\', 'u', HEX[(unit >> 12) & 15], HEX[(unit >> 8) & 15], HEX[(unit >> 4) & 15], HEX[unit & 15]};
-    sink.Append(std::string_view(text, sizeof(text)));
+    inoutWriter.Append(std::string_view(text, sizeof(text)));
 }
 } // namespace
 
-void Sink::Append(std::string_view text) noexcept
+void ByteWriter::Append(std::string_view text) noexcept
 {
-    Bytes({reinterpret_cast<const uint8*>(text.data()), text.size()});
+    AppendBytes({reinterpret_cast<const uint8*>(text.data()), text.size()});
 }
 
-void Sink::Bytes(std::span<const uint8> data) noexcept
+void ByteWriter::AppendBytes(std::span<const uint8> data) noexcept
 {
-    if (mOk && !data.empty() && !mOutput.TryAddRange(data))
+    if (mIsOk && !data.empty() && !mBuffer.TryAddRange(data))
     {
-        mOk = false;
+        mIsOk = false;
     }
 }
 
-void Sink::U32(uint32 value) noexcept
+void ByteWriter::AppendUint32(uint32 value) noexcept
 {
     const uint8 bytes[4] = {static_cast<uint8>(value),
                             static_cast<uint8>(value >> 8),
                             static_cast<uint8>(value >> 16),
                             static_cast<uint8>(value >> 24)};
-    Bytes(bytes);
+    AppendBytes(bytes);
 }
 
-void Sink::F32(float64 value) noexcept
+void ByteWriter::AppendFloat32(float64 value) noexcept
 {
     const auto narrow = static_cast<float32>(value);
     const uint32 bits = std::bit_cast<uint32>(narrow);
     if ((bits & 0x7F800000U) == 0x7F800000U &&
         (std::bit_cast<uint64>(value) & 0x7FF0000000000000ULL) != 0x7FF0000000000000ULL)
     {
-        mOverflow = true;
-        mOk = false;
+        mHasOverflowed = true;
+        mIsOk = false;
         return;
     }
-    U32(bits);
+    AppendUint32(bits);
 }
 
-void AppendInteger(Sink& sink, int64 value) noexcept
+void AppendInteger(ByteWriter& inoutWriter, int64 value) noexcept
 {
     char text[24]{};
     usize at = sizeof(text);
@@ -218,15 +219,15 @@ void AppendInteger(Sink& sink, int64 value) noexcept
     {
         text[--at] = '-';
     }
-    sink.Append(std::string_view(text + at, sizeof(text) - at));
+    inoutWriter.Append(std::string_view(text + at, sizeof(text) - at));
 }
 
-void AppendFloatRepr(Sink& sink, float64 value) noexcept
+void AppendFloatRepr(ByteWriter& inoutWriter, float64 value) noexcept
 {
-    const bool negative = (std::bit_cast<uint64>(value) >> 63) != 0;
+    const bool isNegative = (std::bit_cast<uint64>(value) >> 63) != 0;
     if (value == 0.0)
     {
-        sink.Append(negative ? std::string_view("-0.0") : std::string_view("0.0"));
+        inoutWriter.Append(isNegative ? std::string_view("-0.0") : std::string_view("0.0"));
         return;
     }
     // yyjson emits the shortest round-trip digits; reformat them as CPython repr.
@@ -236,7 +237,7 @@ void AppendFloatRepr(Sink& sink, float64 value) noexcept
     std::span<const uint8> written;
     if (writer.Finish(written) != parsing::ParseStatus::Ok)
     {
-        sink.Append(std::string_view("nan")); // Unreachable for finite values; callers validate.
+        inoutWriter.Append(std::string_view("nan")); // Unreachable for finite values; callers validate.
         return;
     }
     std::string_view text(reinterpret_cast<const char*>(written.data()), written.size());
@@ -271,17 +272,17 @@ void AppendFloatRepr(Sink& sink, float64 value) noexcept
     if (index < text.size())
     {
         ++index;
-        bool exponentNegative = false;
+        bool isExponentNegative = false;
         if (index < text.size() && (text[index] == '+' || text[index] == '-'))
         {
-            exponentNegative = text[index] == '-';
+            isExponentNegative = text[index] == '-';
             ++index;
         }
         for (; index < text.size(); ++index)
         {
             exponent = exponent * 10 + (text[index] - '0');
         }
-        if (exponentNegative)
+        if (isExponentNegative)
         {
             exponent = -exponent;
         }
@@ -298,59 +299,59 @@ void AppendFloatRepr(Sink& sink, float64 value) noexcept
         --count;
     }
     const std::string_view significant(digits + first, count - first);
-    const int64 decpt = pointAt + exponent; // value = 0.d1d2... * 10^decpt
-    const auto n = static_cast<int64>(significant.size());
-    if (negative)
+    const int64 decimalExponent = pointAt + exponent; // value = 0.d1d2... * 10^decpt
+    const auto digitCount = static_cast<int64>(significant.size());
+    if (isNegative)
     {
-        sink.Append('-');
+        inoutWriter.Append('-');
     }
-    if (decpt > -4 && decpt <= 16)
+    if (decimalExponent > -4 && decimalExponent <= 16)
     {
-        if (decpt <= 0)
+        if (decimalExponent <= 0)
         {
-            sink.Append("0.");
-            for (int64 i = 0; i < -decpt; ++i)
+            inoutWriter.Append("0.");
+            for (int64 i = 0; i < -decimalExponent; ++i)
             {
-                sink.Append('0');
+                inoutWriter.Append('0');
             }
-            sink.Append(significant);
+            inoutWriter.Append(significant);
         }
-        else if (decpt >= n)
+        else if (decimalExponent >= digitCount)
         {
-            sink.Append(significant);
-            for (int64 i = n; i < decpt; ++i)
+            inoutWriter.Append(significant);
+            for (int64 i = digitCount; i < decimalExponent; ++i)
             {
-                sink.Append('0');
+                inoutWriter.Append('0');
             }
-            sink.Append(".0");
+            inoutWriter.Append(".0");
         }
         else
         {
-            sink.Append(significant.substr(0, static_cast<usize>(decpt)));
-            sink.Append('.');
-            sink.Append(significant.substr(static_cast<usize>(decpt)));
+            inoutWriter.Append(significant.substr(0, static_cast<usize>(decimalExponent)));
+            inoutWriter.Append('.');
+            inoutWriter.Append(significant.substr(static_cast<usize>(decimalExponent)));
         }
         return;
     }
-    sink.Append(significant.substr(0, 1));
-    if (n > 1)
+    inoutWriter.Append(significant.substr(0, 1));
+    if (digitCount > 1)
     {
-        sink.Append('.');
-        sink.Append(significant.substr(1));
+        inoutWriter.Append('.');
+        inoutWriter.Append(significant.substr(1));
     }
-    const int64 shown = decpt - 1;
-    sink.Append(shown < 0 ? std::string_view("e-") : std::string_view("e+"));
+    const int64 shown = decimalExponent - 1;
+    inoutWriter.Append(shown < 0 ? std::string_view("e-") : std::string_view("e+"));
     const int64 magnitude = shown < 0 ? -shown : shown;
     if (magnitude < 10)
     {
-        sink.Append('0');
+        inoutWriter.Append('0');
     }
-    AppendInteger(sink, magnitude);
+    AppendInteger(inoutWriter, magnitude);
 }
 
-void AppendJsonString(Sink& sink, std::string_view value) noexcept
+void AppendJsonString(ByteWriter& inoutWriter, std::string_view value) noexcept
 {
-    sink.Append('"');
+    inoutWriter.Append('"');
     usize i = 0;
     while (i < value.size())
     {
@@ -378,202 +379,180 @@ void AppendJsonString(Sink& sink, std::string_view value) noexcept
         switch (code)
         {
             case '"':
-                sink.Append("\\\"");
+                inoutWriter.Append("\\\"");
                 break;
             case '\\':
-                sink.Append("\\\\");
+                inoutWriter.Append("\\\\");
                 break;
             case '\n':
-                sink.Append("\\n");
+                inoutWriter.Append("\\n");
                 break;
             case '\r':
-                sink.Append("\\r");
+                inoutWriter.Append("\\r");
                 break;
             case '\t':
-                sink.Append("\\t");
+                inoutWriter.Append("\\t");
                 break;
             case '\b':
-                sink.Append("\\b");
+                inoutWriter.Append("\\b");
                 break;
             case '\f':
-                sink.Append("\\f");
+                inoutWriter.Append("\\f");
                 break;
             default:
                 if (code >= 0x20 && code < 0x7F)
                 {
-                    sink.Append(static_cast<char>(code));
+                    inoutWriter.Append(static_cast<char>(code));
                 }
                 else if (code >= 0x10000)
                 {
                     const uint32 offset = code - 0x10000;
-                    AppendCodeUnitEscape(sink, 0xD800 | (offset >> 10));
-                    AppendCodeUnitEscape(sink, 0xDC00 | (offset & 0x3FF));
+                    AppendCodeUnitEscape(inoutWriter, 0xD800 | (offset >> 10));
+                    AppendCodeUnitEscape(inoutWriter, 0xDC00 | (offset & 0x3FF));
                 }
                 else
                 {
-                    AppendCodeUnitEscape(sink, code);
+                    AppendCodeUnitEscape(inoutWriter, code);
                 }
                 break;
         }
     }
-    sink.Append('"');
+    inoutWriter.Append('"');
 }
 
-void AppendHex(Sink& sink, std::span<const uint8> digest) noexcept
+void AppendHex(ByteWriter& inoutWriter, std::span<const uint8> digest) noexcept
 {
     constexpr char HEX[] = "0123456789abcdef";
     for (const uint8 value : digest)
     {
         const char pair[2] = {HEX[value >> 4], HEX[value & 15]};
-        sink.Append(std::string_view(pair, 2));
+        inoutWriter.Append(std::string_view(pair, 2));
     }
 }
 
-void PyJson::Newline() noexcept
+void PythonJsonWriter::writeNewline() noexcept
 {
-    mSink.Append('\n');
+    mWriter.Append('\n');
     for (usize i = 0; i < mDepth; ++i)
     {
-        mSink.Append("  ");
+        mWriter.Append("  ");
     }
 }
 
-void PyJson::BeforeValue() noexcept
+void PythonJsonWriter::beginValue() noexcept
 {
-    if (mAfterKey)
+    if (mIsAfterKey)
     {
-        mAfterKey = false;
+        mIsAfterKey = false;
         return;
     }
     if (mDepth == 0)
     {
         return;
     }
-    if (!mFirst)
+    if (!mIsFirst)
     {
-        mSink.Append(',');
+        mWriter.Append(',');
     }
-    Newline();
+    writeNewline();
 }
 
-void PyJson::BeginObject() noexcept
+void PythonJsonWriter::BeginObject() noexcept
 {
-    BeforeValue();
-    mSink.Append('{');
+    beginValue();
+    mWriter.Append('{');
     ++mDepth;
-    mFirst = true;
+    mIsFirst = true;
 }
 
-void PyJson::EndObject() noexcept
+void PythonJsonWriter::EndObject() noexcept
 {
     --mDepth;
-    if (!mFirst)
+    if (!mIsFirst)
     {
-        Newline();
+        writeNewline();
     }
-    mSink.Append('}');
-    mFirst = false;
+    mWriter.Append('}');
+    mIsFirst = false;
 }
 
-void PyJson::BeginArray() noexcept
+void PythonJsonWriter::BeginArray() noexcept
 {
-    BeforeValue();
-    mSink.Append('[');
+    beginValue();
+    mWriter.Append('[');
     ++mDepth;
-    mFirst = true;
+    mIsFirst = true;
 }
 
-void PyJson::EndArray() noexcept
+void PythonJsonWriter::EndArray() noexcept
 {
     --mDepth;
-    if (!mFirst)
+    if (!mIsFirst)
     {
-        Newline();
+        writeNewline();
     }
-    mSink.Append(']');
-    mFirst = false;
+    mWriter.Append(']');
+    mIsFirst = false;
 }
 
-void PyJson::Key(std::string_view key) noexcept
+void PythonJsonWriter::WriteKey(std::string_view key) noexcept
 {
-    if (!mFirst)
+    if (!mIsFirst)
     {
-        mSink.Append(',');
+        mWriter.Append(',');
     }
-    Newline();
-    AppendJsonString(mSink, key);
-    mSink.Append(": ");
-    mAfterKey = true;
+    writeNewline();
+    AppendJsonString(mWriter, key);
+    mWriter.Append(": ");
+    mIsAfterKey = true;
 }
 
-void PyJson::String(std::string_view value) noexcept
+void PythonJsonWriter::WriteString(std::string_view value) noexcept
 {
-    BeforeValue();
-    AppendJsonString(mSink, value);
-    mFirst = false;
+    beginValue();
+    AppendJsonString(mWriter, value);
+    mIsFirst = false;
 }
 
-void PyJson::Integer(int64 value) noexcept
+void PythonJsonWriter::WriteInteger(int64 value) noexcept
 {
-    BeforeValue();
-    AppendInteger(mSink, value);
-    mFirst = false;
+    beginValue();
+    AppendInteger(mWriter, value);
+    mIsFirst = false;
 }
 
-void PyJson::Float(float64 value) noexcept
+void PythonJsonWriter::WriteFloat(float64 value) noexcept
 {
-    BeforeValue();
-    AppendFloatRepr(mSink, value);
-    mFirst = false;
+    beginValue();
+    AppendFloatRepr(mWriter, value);
+    mIsFirst = false;
 }
 
-void PyJson::Boolean(bool value) noexcept
+void PythonJsonWriter::WriteBoolean(bool isTrue) noexcept
 {
-    BeforeValue();
-    mSink.Append(value ? std::string_view("true") : std::string_view("false"));
-    mFirst = false;
+    beginValue();
+    mWriter.Append(isTrue ? std::string_view("true") : std::string_view("false"));
+    mIsFirst = false;
 }
 
-void PyJson::Null() noexcept
+void PythonJsonWriter::WriteNull() noexcept
 {
-    BeforeValue();
-    mSink.Append("null");
-    mFirst = false;
+    beginValue();
+    mWriter.Append("null");
+    mIsFirst = false;
 }
 
-void PySum::Add(float64 value) noexcept
+NumberResult ParseFloats(std::span<const std::string_view> tokens, Array<float64>& outValues) noexcept
 {
-    const float64 total = Total + value;
-    const float64 absTotal = Total < 0.0 ? -Total : Total;
-    const float64 absValue = value < 0.0 ? -value : value;
-    if (absTotal >= absValue)
-    {
-        Compensation += (Total - total) + value;
-    }
-    else
-    {
-        Compensation += (value - total) + Total;
-    }
-    Total = total;
-}
-
-float64 PySum::Result() const noexcept
-{
-    const bool finite = (std::bit_cast<uint64>(Compensation) & 0x7FF0000000000000ULL) != 0x7FF0000000000000ULL;
-    return Compensation != 0.0 && finite ? Total + Compensation : Total;
-}
-
-NumberResult ParseFloats(std::span<const std::string_view> tokens, Array<float64>& output) noexcept
-{
-    output.Clear();
+    outValues.Clear();
     if (tokens.empty())
     {
         return NumberResult::Ok;
     }
     Array<uint8> jsonBytes;
-    Sink json(jsonBytes);
+    ByteWriter json(jsonBytes);
     json.Append('[');
-    bool nonfinite = false;
+    bool hasNonfinite = false;
     for (usize i = 0; i < tokens.size(); ++i)
     {
         if (i != 0)
@@ -587,16 +566,16 @@ NumberResult ParseFloats(std::span<const std::string_view> tokens, Array<float64
         }
         if (syntax == FloatSyntax::Nonfinite)
         {
-            nonfinite = true;
+            hasNonfinite = true;
             json.Append('0');
         }
     }
     json.Append(']');
-    if (!json.Ok())
+    if (!json.IsOk())
     {
         return NumberResult::OutOfMemory;
     }
-    if (nonfinite)
+    if (hasNonfinite)
     {
         return NumberResult::Nonfinite;
     }
@@ -621,7 +600,7 @@ NumberResult ParseFloats(std::span<const std::string_view> tokens, Array<float64
         return NumberResult::Nonfinite;
     }
     const parsing::JsonValue root = document.Root();
-    if (!output.TryResize(tokens.size()))
+    if (!outValues.TryResize(tokens.size()))
     {
         return NumberResult::OutOfMemory;
     }
@@ -636,18 +615,18 @@ NumberResult ParseFloats(std::span<const std::string_view> tokens, Array<float64
         {
             return NumberResult::Nonfinite;
         }
-        output[i] = value;
+        outValues[i] = value;
     }
     return NumberResult::Ok;
 }
 
-bool ParseInt(std::string_view text, int64& output) noexcept
+bool ParseInt(std::string_view text, int64& outValue) noexcept
 {
-    text = StripPySpace(text);
-    bool negative = false;
+    text = StripPythonSpace(text);
+    bool isNegative = false;
     if (!text.empty() && (text.front() == '+' || text.front() == '-'))
     {
-        negative = text.front() == '-';
+        isNegative = text.front() == '-';
         text.remove_prefix(1);
     }
     if (text.empty() || !IsAsciiDigit(text.front()))
@@ -680,11 +659,11 @@ bool ParseInt(std::string_view text, int64& output) noexcept
     {
         return false;
     }
-    output = negative ? -static_cast<int64>(value) : static_cast<int64>(value);
+    outValue = isNegative ? -static_cast<int64>(value) : static_cast<int64>(value);
     return true;
 }
 
-bool DecodeJsonString(std::string_view token, foundation::String& output) noexcept
+bool DecodeJsonString(std::string_view token, foundation::String& outText) noexcept
 {
     parsing::JsonDocument document;
     parsing::ParseError parseError{};
@@ -699,10 +678,10 @@ bool DecodeJsonString(std::string_view token, foundation::String& output) noexce
     {
         return false;
     }
-    return output.TryAssign(value) == StringStatus::Ok;
+    return outText.TryAssign(value) == StringStatus::Ok;
 }
 
-bool IsPySpace(uint32 codePoint) noexcept
+bool IsPythonSpace(uint32 codePoint) noexcept
 {
     switch (codePoint)
     {

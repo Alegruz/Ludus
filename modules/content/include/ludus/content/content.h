@@ -57,8 +57,17 @@ struct Text final
         return Length <= N ? std::string_view(Data, Length) : std::string_view{};
     }
 };
-using ResourceId = Text<128>;
-using ResourcePath = Text<1024>;
+/// Capacity of a ResourceId, excluding the terminator.
+inline constexpr usize MAX_RESOURCE_ID_BYTES = 128;
+/// Capacity of a ResourcePath, excluding the terminator.
+inline constexpr usize MAX_RESOURCE_PATH_BYTES = 1024;
+/// Capacity of a MessageText, excluding the terminator.
+inline constexpr usize MAX_MESSAGE_BYTES = 255;
+using ResourceId = Text<MAX_RESOURCE_ID_BYTES>;
+using ResourcePath = Text<MAX_RESOURCE_PATH_BYTES>;
+/// Bounded human-readable error or diagnostic message. Reuse this alias rather
+/// than spelling a new Text<N> so every message shares one instantiation.
+using MessageText = Text<MAX_MESSAGE_BYTES>;
 
 class Bytes final
 {

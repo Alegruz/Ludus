@@ -126,6 +126,34 @@ engine code. Discuss such cases in the PR before adding them.
 - Follow the naming conventions already established in the codebase and encoded
   in `.clang-tidy` (types, functions, and members as used by existing modules).
   Match the surrounding code rather than introducing a new style.
+- The rules below apply to all new and changed code. Existing code that predates
+  them is migrated when it is next touched, not in unrelated changes.
+- **Spell names out.** Do not abbreviate identifiers (`Argument`, not `Arg`;
+  `parameter`, not `param`; `context`, not `ctx`; `source`/`destination`, not
+  `src`/`dst`). Well-known acronyms (`Uv`, `Rgba`, `Json`, `Sha256`) and
+  conventional loop or maths names (`i`, `j`, `k`, `x`, `y`, `t`, `u`, `v`) are
+  fine. A type name must say what the type is (`ByteWriter`, not `Sink`).
+- **Functions start with a verb** that states the action: `ParseScene`,
+  `GetBaseName`, `ComputeRectangle`, `MakeQuadItem`, `WriteKey`. Predicates read as
+  questions: `IsFinite`, `HasCamera`, `AreNamesEqual`, `EndsWith`.
+- **Booleans read as yes/no questions.** Prefix boolean variables, members,
+  parameters, and accessors with `is`/`has`/`should`/`can` (or `Is`/`Has`/... for
+  PascalCase members): `isOk`, `mIsOk`, `HasFailed`, `IsInline`,
+  `outIsDegenerate`.
+- **Private member functions are camelCase**; public member functions and free
+  functions are PascalCase (`void beginValue()` under `private:`, `void WriteKey()`
+  under `public:`).
+- **Nullable pointer parameters end in `OrNull`** (`const Cancellation*
+  cancelOrNull = nullptr`). A pointer parameter without the suffix must not be
+  null.
+- **Non-const reference parameters carry their intent as a prefix**: `out` when
+  the function only writes the argument (`CookResult& outResult`), `inout` when it
+  reads and updates it (`Failure& inoutErrors`, `Scene& inoutScene`). Const
+  references and values take no prefix.
+- **No magic sizes in template arguments.** Spell a bounded capacity through a
+  named constant or a shared alias (`MessageText`, `ResourcePath`,
+  `MAX_MESSAGE_BYTES`) rather than a literal such as `Text<255>`; reuse the shared
+  alias so each capacity is instantiated once.
 
 ### Public SDK documentation
 
@@ -357,6 +385,12 @@ headers. Separate the groups with a blank line.
 
 ### Module and dependency layout
 
+- **Reuse engine types before writing your own.** Use FoundationMath
+  (`Vector3d`, `Matrix4d`, `Cross`, `CompensatedSum`, `IsFinite`, `Abs`),
+  FoundationStrings (`StaticString`, `String`) and the shared Content aliases
+  instead of local vector, matrix, identity, or fixed `char[]` buffer types. If
+  the engine lacks a general-purpose facility, add it to the owning Foundation
+  module (with tests) and use it from there.
 - Engine modules live under `modules/<layer>/<module>/` with public headers in
   `include/` and private implementation headers in `src/internal/` (and
   `src/sinks/`, etc.). Only public headers are installed/exported.

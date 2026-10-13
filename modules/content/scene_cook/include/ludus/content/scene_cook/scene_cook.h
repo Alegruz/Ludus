@@ -36,7 +36,7 @@ struct CookError final
     /// reads, Cancelled, Limit, NotFound, IoError or OutOfMemory otherwise.
     Status Result = Status::Ok;
     /// Human-readable message, matching the reference wording where it exists.
-    Text<255> Message;
+    MessageText Message;
 };
 
 /// @brief In-memory cook outputs; written to disk by WriteCook.
@@ -53,18 +53,20 @@ struct CookResult final
 /// Cook one source directory containing scene-v4.pbrt and LICENSE.txt.
 /// @param source Native directory path; resolved before use, and its base name
 /// is recorded when the licence does not identify the staircase2 author.
-/// @param result Replaced on success; contents are unspecified on failure.
-/// @param error Set on failure.
-/// @param cancel Optional cancellation hook.
+/// @param outResult Replaced on success; contents are unspecified on failure.
+/// @param outError Set on failure.
+/// @param cancelOrNull Optional cancellation hook; nullptr disables cancellation.
 /// @return true on success.
 /// @note Synchronous file I/O. Symlinks below the source root are rejected.
-[[nodiscard]] bool
-Cook(std::string_view source, CookResult& result, CookError& error, const Cancellation* cancel = nullptr) noexcept;
+[[nodiscard]] bool Cook(std::string_view source,
+                        CookResult& outResult,
+                        CookError& outError,
+                        const Cancellation* cancelOrNull = nullptr) noexcept;
 
 /// Write scene.luscn, manifest.json and LICENSE.txt below output.
 /// @param output Native directory; created with its parents when absent.
 /// @param result Outputs from Cook.
-/// @param error Set on failure.
+/// @param outError Set on failure.
 /// @return true when every file was atomically replaced.
-[[nodiscard]] bool WriteCook(std::string_view output, const CookResult& result, CookError& error) noexcept;
+[[nodiscard]] bool WriteCook(std::string_view output, const CookResult& result, CookError& outError) noexcept;
 } // namespace ludus::content::scene_cook

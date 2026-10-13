@@ -1,6 +1,9 @@
 #include "native_files.h"
 
 #include <ludus/foundation/base/config.h>
+#include <ludus/foundation/strings/static_string.hpp>
+
+#include <atomic>
 
 #if LUDUS_TARGET_OS == LUDUS_OS_LINUX || LUDUS_TARGET_OS == LUDUS_OS_MACOS
 #    include <cerrno>
@@ -20,129 +23,146 @@ namespace ludus::content::scene_cook::detail
 #if LUDUS_SCENE_COOK_POSIX
 namespace
 {
-constexpr usize MAX_NATIVE_PATH = 4096;
+constexpr usize MAX_NATIVE_PATH_BYTES = 4096;
+/// Bounded, always NUL-terminated native path; overflow is reported, never truncated.
+using NativePath = foundation::StaticString<MAX_NATIVE_PATH_BYTES>;
+/// Attempts at a fresh temporary name before reporting an I/O error.
+constexpr uint32 MAX_TEMPORARY_ATTEMPTS = 64;
 
-[[nodiscard]] bool CopyPath(std::string_view path, char (&buffer)[MAX_NATIVE_PATH + 1]) noexcept
+std::atomic<uint32> gTemporaryCounter{0};
+
+/// Copy path into a NativePath; rejects empty paths and embedded NUL bytes.
+[[nodiscard]] bool TryMakeNativePath(std::string_view path, NativePath& outPath) noexcept
 {
-    if (path.empty() || path.size() > MAX_NATIVE_PATH)
+    if (path.empty() || path.find('\0') != std::string_view::npos)
     {
         return false;
     }
-    for (usize i = 0; i < path.size(); ++i)
+    return outPath.TryAssign(path) == foundation::StringStatus::Ok;
+}
+
+/// stat(2) the path and report whether it names a directory.
+[[nodiscard]] bool IsDirectory(const char* path) noexcept
+{
+    struct stat fileStatus = {};
+    return stat(path, &fileStatus) == 0 && S_ISDIR(fileStatus.st_mode);
+}
+
+/// Append the decimal digits of value.
+[[nodiscard]] bool TryAppendDecimal(NativePath& inoutPath, uint64 value) noexcept
+{
+    char digits[20]{};
+    usize count = 0;
+    do
     {
-        if (path[i] == '\0')
-        {
-            return false;
-        }
-        buffer[i] = path[i];
-    }
-    buffer[path.size()] = '\0';
-    return true;
+        digits[sizeof(digits) - 1 - count] = static_cast<char>('0' + value % 10);
+        value /= 10;
+        ++count;
+    } while (value != 0);
+    return inoutPath.TryAppend(std::string_view(digits + sizeof(digits) - count, count)) ==
+           foundation::StringStatus::Ok;
 }
 } // namespace
 
-Status ResolveDirectory(std::string_view path, foundation::String& output) noexcept
+Status ResolveDirectory(std::string_view path, foundation::String& outPath) noexcept
 {
-    char input[MAX_NATIVE_PATH + 1]{};
-    if (!CopyPath(path, input))
+    NativePath input;
+    if (!TryMakeNativePath(path, input))
     {
         return Status::Invalid;
     }
+    // realpath(3) writes into a caller buffer of at least PATH_MAX bytes; the
+    // result is copied into the engine String straight away.
     char resolved[PATH_MAX + 1]{};
-    if (realpath(input, resolved) == nullptr)
+    if (realpath(input.GetData(), resolved) == nullptr)
     {
         return errno == ENOENT || errno == ENOTDIR ? Status::NotFound : Status::IoError;
     }
-    struct stat info
-    {
-    };
-    if (stat(resolved, &info) != 0 || !S_ISDIR(info.st_mode))
+    if (!IsDirectory(resolved))
     {
         return Status::NotFound;
     }
-    return output.TryAssign(resolved) == foundation::StringStatus::Ok ? Status::Ok : Status::OutOfMemory;
+    return outPath.TryAssign(resolved) == foundation::StringStatus::Ok ? Status::Ok : Status::OutOfMemory;
 }
 
 Status MakeDirectories(std::string_view path) noexcept
 {
-    char buffer[MAX_NATIVE_PATH + 1]{};
-    if (!CopyPath(path, buffer))
+    NativePath full;
+    if (!TryMakeNativePath(path, full))
     {
         return Status::Invalid;
     }
+    NativePath prefix;
     for (usize i = 1; i <= path.size(); ++i)
     {
-        if (i != path.size() && buffer[i] != '/')
+        if (i != path.size() && path[i] != '/')
         {
             continue;
         }
-        const char saved = buffer[i];
-        buffer[i] = '\0';
-        if (mkdir(buffer, 0777) != 0 && errno != EEXIST)
+        if (prefix.TryAssign(path.substr(0, i)) != foundation::StringStatus::Ok)
+        {
+            return Status::Invalid;
+        }
+        if (mkdir(prefix.GetData(), 0777) != 0 && errno != EEXIST)
         {
             return Status::IoError;
         }
-        buffer[i] = saved;
     }
-    struct stat info
-    {
-    };
-    return stat(buffer, &info) == 0 && S_ISDIR(info.st_mode) ? Status::Ok : Status::IoError;
+    return IsDirectory(full.GetData()) ? Status::Ok : Status::IoError;
 }
 
 Status WriteFileAtomic(std::string_view directory, std::string_view name, std::span<const uint8> data) noexcept
 {
-    char target[MAX_NATIVE_PATH + 1]{};
-    char temporary[MAX_NATIVE_PATH + 1]{};
-    constexpr std::string_view SUFFIX = ".ludus-cook-XXXXXX";
-    if (directory.size() + 1 + name.size() + SUFFIX.size() > MAX_NATIVE_PATH)
+    NativePath target;
+    if (target.TryAssign(directory) != foundation::StringStatus::Ok ||
+        target.TryAppend("/") != foundation::StringStatus::Ok || target.TryAppend(name) != foundation::StringStatus::Ok)
     {
         return Status::Limit;
     }
-    usize at = 0;
-    for (const char value : directory)
+    // Create the temporary with mode 0666 and O_EXCL so the kernel applies the
+    // process umask itself, as the reference converter's open() did. The umask
+    // is never read or changed, so concurrent threads are unaffected.
+    NativePath temporary;
+    int file = -1;
+    for (uint32 attempt = 0; attempt < MAX_TEMPORARY_ATTEMPTS && file < 0; ++attempt)
     {
-        target[at++] = value;
+        temporary.Clear();
+        const bool isNamed = temporary.TryAssign(target.GetView()) == foundation::StringStatus::Ok &&
+                             temporary.TryAppend(".ludus-cook-") == foundation::StringStatus::Ok &&
+                             TryAppendDecimal(temporary, static_cast<uint64>(getpid())) &&
+                             temporary.TryAppend("-") == foundation::StringStatus::Ok &&
+                             TryAppendDecimal(temporary, gTemporaryCounter.fetch_add(1, std::memory_order_relaxed));
+        if (!isNamed)
+        {
+            return Status::Limit;
+        }
+        file = open(temporary.GetData(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+        if (file < 0 && errno != EEXIST && errno != EINTR)
+        {
+            return Status::IoError;
+        }
     }
-    target[at++] = '/';
-    for (const char value : name)
-    {
-        target[at++] = value;
-    }
-    for (usize i = 0; i < at; ++i)
-    {
-        temporary[i] = target[i];
-    }
-    for (usize i = 0; i < SUFFIX.size(); ++i)
-    {
-        temporary[at + i] = SUFFIX[i];
-    }
-    const int file = mkstemp(temporary);
     if (file < 0)
     {
         return Status::IoError;
     }
     usize written = 0;
-    bool ok = true;
-    while (ok && written < data.size())
+    bool isOk = true;
+    while (isOk && written < data.size())
     {
         const ssize_t count = write(file, data.data() + written, data.size() - written);
         if (count < 0 && errno == EINTR)
         {
             continue;
         }
-        ok = count > 0;
-        written += ok ? static_cast<usize>(count) : 0;
+        isOk = count > 0;
+        written += isOk ? static_cast<usize>(count) : 0;
     }
-    // Match the reference converter's default-permission files.
-    const mode_t mask = umask(0);
-    (void)umask(mask);
-    ok = ok && fchmod(file, static_cast<mode_t>(0666 & ~mask)) == 0;
-    ok = ok && fsync(file) == 0;
-    ok = close(file) == 0 && ok;
-    if (!ok || rename(temporary, target) != 0)
+    isOk = isOk && fsync(file) == 0;
+    isOk = close(file) == 0 && isOk;
+    if (!isOk || rename(temporary.GetData(), target.GetData()) != 0)
     {
-        (void)unlink(temporary);
+        (void)unlink(temporary.GetData());
         return Status::IoError;
     }
     return Status::Ok;
@@ -162,7 +182,7 @@ Status WriteFileAtomic(std::string_view, std::string_view, std::span<const uint8
 }
 #endif
 
-std::string_view BaseName(std::string_view path) noexcept
+std::string_view GetBaseName(std::string_view path) noexcept
 {
     while (path.size() > 1 && path.back() == '/')
     {

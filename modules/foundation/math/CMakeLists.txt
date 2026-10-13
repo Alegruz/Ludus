@@ -27,6 +27,7 @@ target_sources(
         src/dynamics.cpp
         src/cubic.cpp
         src/patch.cpp
+        src/summation.cpp
     PUBLIC
         FILE_SET public_headers
         TYPE HEADERS
@@ -38,6 +39,7 @@ target_sources(
             include/ludus/foundation/math/vector.hpp
             include/ludus/foundation/math/quaternion.hpp
             include/ludus/foundation/math/matrix.hpp
+            include/ludus/foundation/math/summation.hpp
             include/ludus/foundation/math/transform.hpp
             include/ludus/foundation/math/projection.hpp
             include/ludus/foundation/math/geometry.hpp
@@ -101,6 +103,7 @@ if(LUDUS_BUILD_TESTS)
             tests/layout_tests.cpp
             tests/dynamics_tests.cpp
             tests/bezier_tests.cpp
+            tests/summation_tests.cpp
     )
     target_include_directories(ludus_foundation_math_tests PRIVATE tests src)
     target_link_libraries(

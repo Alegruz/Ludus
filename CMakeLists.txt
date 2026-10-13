@@ -178,10 +178,10 @@ if(NOT EMSCRIPTEN)
     add_subdirectory(tools/configuration)
 endif()
 add_subdirectory(modules/content)
-if(NOT EMSCRIPTEN)
-    # Offline native scene cooker (pbrt-reference-v1) and the ludus-cook CLI.
-    add_subdirectory(modules/content/scene_cook)
-endif()
+# Scene cooker (pbrt-reference-v1). The library builds for every target; its
+# file I/O reports Unsupported where Ludus::Content has no native file access,
+# and the ludus-cook CLI plus golden tests are native-host only.
+add_subdirectory(modules/content/scene_cook)
 add_subdirectory(modules/audio/content)
 add_subdirectory(modules/runtime/resources)
 
@@ -318,7 +318,7 @@ write_basic_package_version_file(
 # Public exported components (one per installed Ludus:: module target).
 foreach(_component
     FoundationBase FoundationMemory FoundationHash FoundationStrings FoundationContainers FoundationThreading FoundationFilesystem FoundationParsing FoundationParsingJson FoundationMath FoundationTime FoundationLogging
-    FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
+    FoundationProfiling FoundationReflection FoundationSerialization GamePropertyBinding NetworkCore Input Audio Content SceneCook AudioContent Resources GameplayWorld GameplayCamera GameApi PhysicsFluid Ui Localization)
     ludus_sdk_register_component(${_component})
     ludus_sdk_register_feature(${_component})
 endforeach()
@@ -328,7 +328,7 @@ if(LUDUS_BUILD_BEHAVIOR)
     ludus_sdk_register_dependency(Luau "1eca9fda3e4753a1592000f6cfdf659aaa778b7d-reviewed-loader-v1" "MIT" bundled)
 endif()
 if(NOT EMSCRIPTEN)
-    foreach(_component Platform GraphicsRhi GraphicsRenderer Text GameHost SceneCook)
+    foreach(_component Platform GraphicsRhi GraphicsRenderer Text GameHost)
         ludus_sdk_register_component(${_component})
         ludus_sdk_register_feature(${_component})
     endforeach()

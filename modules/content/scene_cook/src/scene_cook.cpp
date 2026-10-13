@@ -13,7 +13,10 @@
 #include "native_files.h"
 #include "python_compat.h"
 
+#include <ludus/foundation/math/matrix.hpp>
 #include <ludus/foundation/math/scalar.hpp>
+#include <ludus/foundation/math/summation.hpp>
+#include <ludus/foundation/math/vector.hpp>
 #include <ludus/foundation/parsing/parsing.hpp>
 #include <ludus/foundation/strings/string.hpp>
 
@@ -28,7 +31,6 @@ using foundation::String;
 using foundation::StringStatus;
 using namespace detail;
 
-constexpr float64 IDENTITY[16] = {1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0};
 constexpr std::string_view COMMANDS[] = {
     "Integrator",
     "Transform",
@@ -62,7 +64,7 @@ constexpr std::string_view COMMANDS[] = {
     return false;
 }
 
-[[nodiscard]] std::string_view View(const Array<uint8>& bytes) noexcept
+[[nodiscard]] std::string_view ViewAsText(const Array<uint8>& bytes) noexcept
 {
     return {reinterpret_cast<const char*>(bytes.GetData()), bytes.GetSize()};
 }
@@ -72,35 +74,26 @@ constexpr std::string_view COMMANDS[] = {
     return text.size() >= suffix.size() && text.substr(text.size() - suffix.size()) == suffix;
 }
 
-[[nodiscard]] bool IsFinite(float64 value) noexcept
-{
-    return (std::bit_cast<uint64>(value) & 0x7FF0000000000000ULL) != 0x7FF0000000000000ULL;
-}
-
-[[nodiscard]] float64 Abs(float64 value) noexcept
-{
-    return value < 0.0 ? -value : value;
-}
-
 // ---------------------------------------------------------------------------
 // Failure plumbing.
 
 struct Failure final
 {
     CookError& Error;
-    bool Failed = false;
+    bool HasFailed = false;
 
     bool Fail(Status status, std::string_view message, std::string_view detail = {}) noexcept
     {
-        if (!Failed)
+        if (!HasFailed)
         {
-            Failed = true;
+            HasFailed = true;
             Error.Result = status;
-            char text[256]{};
+            // Truncate message + detail to the shared MessageText capacity.
+            char text[MAX_MESSAGE_BYTES + 1]{};
             usize at = 0;
             for (const std::string_view part : {message, detail})
             {
-                for (usize i = 0; i < part.size() && at < 255; ++i)
+                for (usize i = 0; i < part.size() && at < MAX_MESSAGE_BYTES; ++i)
                 {
                     text[at++] = part[i];
                 }
@@ -109,11 +102,11 @@ struct Failure final
         }
         return false;
     }
-    bool Invalid(std::string_view message, std::string_view detail = {}) noexcept
+    bool FailInvalid(std::string_view message, std::string_view detail = {}) noexcept
     {
         return Fail(Status::Invalid, message, detail);
     }
-    bool Memory() noexcept
+    bool FailOutOfMemory() noexcept
     {
         return Fail(Status::OutOfMemory, "out of memory");
     }
@@ -122,36 +115,36 @@ struct Failure final
 // ---------------------------------------------------------------------------
 // Parsed scene description.
 
-struct Arg final
+struct Argument final
 {
-    bool List = false;
+    bool IsList = false;
     String Text;
     Array<String> Items;
 };
 
-struct Param final
+struct Parameter final
 {
     String Key;
     Array<String> Values;
-    bool Assigned = false;
+    bool IsAssigned = false;
 };
 
 struct Command final
 {
     std::string_view Name;
-    Array<Arg> Names;
-    Array<Param> Params;
+    Array<Argument> Names;
+    Array<Parameter> Params;
 };
 
-struct MaterialRef final
+struct MaterialReference final
 {
     usize CommandIndex = 0;
-    bool Inline = false; // Material directive: "string type" comes from the names.
+    bool IsInline = false; // Material directive: "string type" comes from the names.
 };
 
 struct State final
 {
-    float64 Transform[16]{};
+    math::Matrix4d Transform = math::Matrix4d::Identity();
     int64 Material = -1;
     bool HasEmission = false;
     float64 Emission[3]{};
@@ -163,37 +156,43 @@ struct Shape final
     usize CommandIndex = 0;
 };
 
-struct TextureDecl final
+struct TextureDeclaration final
 {
     std::string_view Name;
     std::string_view File;
 };
 
+struct NamedMaterialSlot final
+{
+    std::string_view Name;
+    usize Slot = 0; // Index into Scene::Materials.
+};
+
 struct Scene final
 {
     Array<Command> Commands;
-    Array<TextureDecl> Textures;
-    Array<std::string_view> MaterialNames;
-    Array<MaterialRef> Materials; // Named materials in declaration order, then inline ones.
+    Array<TextureDeclaration> Textures;
+    Array<NamedMaterialSlot> NamedMaterials;
+    Array<MaterialReference> Materials; // Named and inline materials in directive order.
     Array<Shape> Shapes;
-    float64 Camera[16]{};
-    float64 Fov = 0.0;
+    math::Matrix4d Camera;
+    float64 FieldOfView = 0.0;
 };
 
-[[nodiscard]] const Param* FindParam(const Command& command, std::string_view key) noexcept
+[[nodiscard]] const Parameter* FindParameter(const Command& command, std::string_view key) noexcept
 {
-    for (const Param& param : command.Params)
+    for (const Parameter& parameter : command.Params)
     {
-        if (param.Key.GetView() == key)
+        if (parameter.Key.GetView() == key)
         {
-            return &param;
+            return &parameter;
         }
     }
     return nullptr;
 }
 
 [[nodiscard]] bool
-NamesEqual(const Array<Arg>& names, usize first, std::initializer_list<std::string_view> expected) noexcept
+AreNamesEqual(const Array<Argument>& names, usize first, std::initializer_list<std::string_view> expected) noexcept
 {
     if (names.GetSize() < first || names.GetSize() - first != expected.size())
     {
@@ -202,7 +201,7 @@ NamesEqual(const Array<Arg>& names, usize first, std::initializer_list<std::stri
     usize index = first;
     for (const std::string_view value : expected)
     {
-        if (names[index].List || names[index].Text.GetView() != value)
+        if (names[index].IsList || names[index].Text.GetView() != value)
         {
             return false;
         }
@@ -211,9 +210,10 @@ NamesEqual(const Array<Arg>& names, usize first, std::initializer_list<std::stri
     return true;
 }
 
-[[nodiscard]] bool ValuesEqual(const Param* param, std::string_view value) noexcept
+[[nodiscard]] bool HasSingleValue(const Parameter* parameterOrNull, std::string_view value) noexcept
 {
-    return param != nullptr && param->Values.GetSize() == 1 && param->Values[0].GetView() == value;
+    return parameterOrNull != nullptr && parameterOrNull->Values.GetSize() == 1 &&
+           parameterOrNull->Values[0].GetView() == value;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,18 +225,22 @@ struct ReadRecord final
     Digest Hash;
 };
 
-struct Context final
+struct CookContext final
 {
-    Context(Failure& errors, const Cancellation* cancel) noexcept : Errors(errors), Cancel(cancel) {}
+    CookContext(Failure& inoutErrors, const Cancellation* cancelOrNull) noexcept
+        : Errors(inoutErrors), CancelOrNull(cancelOrNull)
+    {
+    }
 
     Failure& Errors;
-    const Cancellation* Cancel = nullptr;
+    const Cancellation* CancelOrNull = nullptr;
     String Root;
     Array<ReadRecord> Reads;
 
-    [[nodiscard]] bool CheckCancel() noexcept
+    [[nodiscard]] bool CheckCancellation() noexcept
     {
-        if (Cancel != nullptr && Cancel->Requested != nullptr && Cancel->Requested(Cancel->Context))
+        if (CancelOrNull != nullptr && CancelOrNull->Requested != nullptr &&
+            CancelOrNull->Requested(CancelOrNull->Context))
         {
             return Errors.Fail(Status::Cancelled, "Scene conversion cancelled");
         }
@@ -244,15 +248,15 @@ struct Context final
     }
 
     // asset_path(): reject absolute and parent segments; normalise like pathlib.
-    [[nodiscard]] bool AssetPath(std::string_view name, String& output) noexcept
+    [[nodiscard]] bool ResolveAssetPath(std::string_view name, String& outPath) noexcept
     {
         if (!name.empty() && name.front() == '/')
         {
-            return Errors.Invalid("asset path escapes source directory");
+            return Errors.FailInvalid("asset path escapes source directory");
         }
-        if (output.TryAssign("") != StringStatus::Ok)
+        if (outPath.TryAssign("") != StringStatus::Ok)
         {
-            return Errors.Memory();
+            return Errors.FailOutOfMemory();
         }
         usize begin = 0;
         for (usize i = 0; i <= name.size(); ++i)
@@ -269,15 +273,15 @@ struct Context final
             }
             if (part == "..")
             {
-                return Errors.Invalid("asset path escapes source directory");
+                return Errors.FailInvalid("asset path escapes source directory");
             }
-            if ((output.GetSize() != 0 && output.TryAppend("/") != StringStatus::Ok) ||
-                output.TryAppend(part) != StringStatus::Ok)
+            if ((outPath.GetSize() != 0 && outPath.TryAppend("/") != StringStatus::Ok) ||
+                outPath.TryAppend(part) != StringStatus::Ok)
             {
-                return Errors.Memory();
+                return Errors.FailOutOfMemory();
             }
         }
-        if (output.GetSize() == 0)
+        if (outPath.GetSize() == 0)
         {
             return Errors.Fail(Status::IoError, "Is a directory: ", name);
         }
@@ -285,14 +289,14 @@ struct Context final
     }
 
     // bounded_bytes(): bounded read plus repeated-read conflict detection.
-    [[nodiscard]] bool Read(std::string_view relative, usize cap, Bytes& output) noexcept
+    [[nodiscard]] bool ReadBounded(std::string_view relative, usize maxBytes, Bytes& outBytes) noexcept
     {
-        if (!CheckCancel())
+        if (!CheckCancellation())
         {
             return false;
         }
         Bytes data;
-        const Status status = ReadFile(Root.GetView(), relative, cap, data);
+        const Status status = ReadFile(Root.GetView(), relative, maxBytes, data);
         switch (status)
         {
             case Status::Ok:
@@ -302,12 +306,12 @@ struct Context final
             case Status::NotFound:
                 return Errors.Fail(Status::NotFound, "No such file or directory: ", relative);
             case Status::Invalid:
-                return Errors.Invalid("unsupported source path (symlinks and reserved characters are rejected): ",
-                                      relative);
+                return Errors.FailInvalid("unsupported source path (symlinks and reserved characters are rejected): ",
+                                          relative);
             case Status::OutOfMemory:
-                return Errors.Memory();
+                return Errors.FailOutOfMemory();
             case Status::Conflict:
-                return Errors.Fail(Status::Conflict, "Source changed during conversion: ", BaseName(relative));
+                return Errors.Fail(Status::Conflict, "Source changed during conversion: ", GetBaseName(relative));
             default:
                 return Errors.Fail(Status::IoError, "cannot read source file: ", relative);
         }
@@ -318,9 +322,9 @@ struct Context final
             {
                 if (!(record.Hash == digest))
                 {
-                    return Errors.Fail(Status::Conflict, "Source changed during conversion: ", BaseName(relative));
+                    return Errors.Fail(Status::Conflict, "Source changed during conversion: ", GetBaseName(relative));
                 }
-                output = static_cast<Bytes&&>(data);
+                outBytes = static_cast<Bytes&&>(data);
                 return true;
             }
         }
@@ -328,81 +332,82 @@ struct Context final
         record.Hash = digest;
         if (record.Path.TryAssign(relative) != StringStatus::Ok || !Reads.TryAdd(static_cast<ReadRecord&&>(record)))
         {
-            return Errors.Memory();
+            return Errors.FailOutOfMemory();
         }
-        output = static_cast<Bytes&&>(data);
+        outBytes = static_cast<Bytes&&>(data);
         return true;
     }
 
     // finite(): float() every token and reject NaN/infinity.
-    [[nodiscard]] bool Finite(std::span<const std::string_view> tokens, Array<float64>& output) noexcept
+    [[nodiscard]] bool ParseFiniteValues(std::span<const std::string_view> tokens, Array<float64>& outValues) noexcept
     {
-        switch (ParseFloats(tokens, output))
+        switch (ParseFloats(tokens, outValues))
         {
             case NumberResult::Ok:
                 return true;
             case NumberResult::Nonfinite:
-                return Errors.Invalid("nonfinite source number");
+                return Errors.FailInvalid("nonfinite source number");
             case NumberResult::OutOfMemory:
-                return Errors.Memory();
+                return Errors.FailOutOfMemory();
             default:
-                return Errors.Invalid("could not convert string to float");
+                return Errors.FailInvalid("could not convert string to float");
         }
     }
 
-    [[nodiscard]] bool Finite(const Array<String>& values, Array<float64>& output) noexcept
+    [[nodiscard]] bool ParseFiniteValues(const Array<String>& values, Array<float64>& outValues) noexcept
     {
         Array<std::string_view> views;
         if (!views.TryResize(values.GetSize()))
         {
-            return Errors.Memory();
+            return Errors.FailOutOfMemory();
         }
         for (usize i = 0; i < values.GetSize(); ++i)
         {
             views[i] = values[i].GetView();
         }
-        return Finite(views.AsSpan(), output);
+        return ParseFiniteValues(views.AsSpan(), outValues);
     }
 
-    [[nodiscard]] bool FiniteParam(const Param* param, Array<float64>& output, std::string_view key) noexcept
+    [[nodiscard]] bool
+    ParseFiniteParameter(const Parameter* parameterOrNull, Array<float64>& outValues, std::string_view key) noexcept
     {
-        if (param == nullptr)
+        if (parameterOrNull == nullptr)
         {
-            return Errors.Invalid("missing parameter ", key);
+            return Errors.FailInvalid("missing parameter ", key);
         }
-        return Finite(param->Values, output);
+        return ParseFiniteValues(parameterOrNull->Values, outValues);
     }
 };
 
 // ---------------------------------------------------------------------------
 // parse_scene().
 
-[[nodiscard]] uint32 DecodeAt(std::string_view text, usize at, usize& length) noexcept
+[[nodiscard]] uint32 DecodeCodePointAt(std::string_view text, usize at, usize& outLength) noexcept
 {
     const auto lead = static_cast<uint8>(text[at]);
     if (lead < 0x80 || at + 1 >= text.size())
     {
-        length = 1;
+        outLength = 1;
         return lead;
     }
     if (lead >= 0xF0 && at + 3 < text.size())
     {
-        length = 4;
+        outLength = 4;
         return ((lead & 0x07U) << 18) | ((static_cast<uint8>(text[at + 1]) & 0x3FU) << 12) |
                ((static_cast<uint8>(text[at + 2]) & 0x3FU) << 6) | (static_cast<uint8>(text[at + 3]) & 0x3FU);
     }
     if (lead >= 0xE0 && at + 2 < text.size())
     {
-        length = 3;
+        outLength = 3;
         return ((lead & 0x0FU) << 12) | ((static_cast<uint8>(text[at + 1]) & 0x3FU) << 6) |
                (static_cast<uint8>(text[at + 2]) & 0x3FU);
     }
-    length = 2;
+    outLength = 2;
     return ((lead & 0x1FU) << 6) | (static_cast<uint8>(text[at + 1]) & 0x3FU);
 }
 
 // re.findall(r'"(?:[^"\\]|\\.)*"|\[|\]|[^\s\[\]"]+', text) over decoded code points.
-[[nodiscard]] bool Tokenize(std::string_view text, Array<std::string_view>& tokens) noexcept
+[[nodiscard]] bool Tokenize(std::string_view text, Array<std::string_view>& outTokens) noexcept
 {
     usize at = 0;
     while (at < text.size())
@@ -411,12 +416,12 @@ struct Context final
         if (value == '"')
         {
             usize scan = at + 1;
-            bool closed = false;
+            bool isClosed = false;
             while (scan < text.size())
             {
                 if (text[scan] == '"')
                 {
-                    closed = true;
+                    isClosed = true;
                     break;
                 }
                 if (text[scan] == '\\')
@@ -430,9 +435,9 @@ struct Context final
                 }
                 ++scan;
             }
-            if (closed)
+            if (isClosed)
             {
-                if (!tokens.TryAdd(text.substr(at, scan + 1 - at)))
+                if (!outTokens.TryAdd(text.substr(at, scan + 1 - at)))
                 {
                     return false;
                 }
@@ -446,7 +451,7 @@ struct Context final
         }
         if (value == '[' || value == ']')
         {
-            if (!tokens.TryAdd(text.substr(at, 1)))
+            if (!outTokens.TryAdd(text.substr(at, 1)))
             {
                 return false;
             }
@@ -454,7 +459,7 @@ struct Context final
             continue;
         }
         usize length = 1;
-        if (IsPySpace(DecodeAt(text, at, length)))
+        if (IsPythonSpace(DecodeCodePointAt(text, at, length)))
         {
             at += length;
             continue;
@@ -462,13 +467,13 @@ struct Context final
         const usize begin = at;
         while (at < text.size() && text[at] != '"' && text[at] != '[' && text[at] != ']')
         {
-            if (IsPySpace(DecodeAt(text, at, length)))
+            if (IsPythonSpace(DecodeCodePointAt(text, at, length)))
             {
                 break;
             }
             at += length;
         }
-        if (!tokens.TryAdd(text.substr(begin, at - begin)))
+        if (!outTokens.TryAdd(text.substr(begin, at - begin)))
         {
             return false;
         }
@@ -476,17 +481,17 @@ struct Context final
     return true;
 }
 
-[[nodiscard]] bool DecodeValue(Context& context, std::string_view token, String& output) noexcept
+[[nodiscard]] bool DecodeValue(CookContext& inoutContext, std::string_view token, String& outValue) noexcept
 {
     if (!token.empty() && token.front() == '"')
     {
-        if (!DecodeJsonString(token, output))
+        if (!DecodeJsonString(token, outValue))
         {
-            return context.Errors.Invalid("invalid string literal");
+            return inoutContext.Errors.FailInvalid("invalid string literal");
         }
         return true;
     }
-    return output.TryAssign(token) == StringStatus::Ok || context.Errors.Memory();
+    return outValue.TryAssign(token) == StringStatus::Ok || inoutContext.Errors.FailOutOfMemory();
 }
 
 struct AllowedParams final
@@ -496,7 +501,7 @@ struct AllowedParams final
 };
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-[[nodiscard]] bool ParamAllowed(std::string_view command, std::string_view key) noexcept
+[[nodiscard]] bool IsParameterAllowed(std::string_view command, std::string_view key) noexcept
 {
     static const AllowedParams TABLE[] = {
         {"Integrator", {"integer maxdepth", "string lightsampler", "float trainingBudgetRatio"}},
@@ -534,172 +539,174 @@ struct AllowedParams final
     return false;
 }
 
-[[nodiscard]] bool AppendDecoded(Context& context, std::string_view token, Array<String>& values) noexcept
+[[nodiscard]] bool AppendDecoded(CookContext& inoutContext, std::string_view token, Array<String>& inoutValues) noexcept
 {
     String value;
-    if (!DecodeValue(context, token, value))
+    if (!DecodeValue(inoutContext, token, value))
     {
         return false;
     }
-    return values.TryAdd(static_cast<String&&>(value)) || context.Errors.Memory();
+    return inoutValues.TryAdd(static_cast<String&&>(value)) || inoutContext.Errors.FailOutOfMemory();
 }
 
-[[nodiscard]] bool ParseCommands(Context& context, std::span<const std::string_view> tokens, Scene& scene) noexcept
+[[nodiscard]] bool
+ParseCommands(CookContext& inoutContext, std::span<const std::string_view> tokens, Scene& inoutScene) noexcept
 {
-    Failure& errors = context.Errors;
+    Failure& errors = inoutContext.Errors;
     usize i = 0;
     while (i < tokens.size())
     {
         const std::string_view name = tokens[i++];
         if (!IsCommand(name))
         {
-            return errors.Invalid("unsupported directive ", name);
+            return errors.FailInvalid("unsupported directive ", name);
         }
         Command command;
         command.Name = name;
-        Array<Arg> arguments;
+        Array<Argument> arguments;
         while (i < tokens.size() && !IsCommand(tokens[i]))
         {
-            Arg arg;
+            Argument argument;
             if (tokens[i] == "[")
             {
                 ++i;
-                arg.List = true;
+                argument.IsList = true;
                 while (i < tokens.size() && tokens[i] != "]")
                 {
                     String item;
-                    if (item.TryAssign(tokens[i]) != StringStatus::Ok || !arg.Items.TryAdd(static_cast<String&&>(item)))
+                    if (item.TryAssign(tokens[i]) != StringStatus::Ok ||
+                        !argument.Items.TryAdd(static_cast<String&&>(item)))
                     {
-                        return errors.Memory();
+                        return errors.FailOutOfMemory();
                     }
                     ++i;
                 }
                 if (i == tokens.size())
                 {
-                    return errors.Invalid("unterminated array");
+                    return errors.FailInvalid("unterminated array");
                 }
                 ++i;
             }
             else
             {
-                if (arg.Text.TryAssign(tokens[i]) != StringStatus::Ok)
+                if (argument.Text.TryAssign(tokens[i]) != StringStatus::Ok)
                 {
-                    return errors.Memory();
+                    return errors.FailOutOfMemory();
                 }
                 ++i;
             }
-            if (!arguments.TryAdd(static_cast<Arg&&>(arg)))
+            if (!arguments.TryAdd(static_cast<Argument&&>(argument)))
             {
-                return errors.Memory();
+                return errors.FailOutOfMemory();
             }
         }
-        for (Arg& arg : arguments)
+        for (Argument& argument : arguments)
         {
-            const usize paramCount = command.Params.GetSize();
-            if (paramCount != 0 && !command.Params[paramCount - 1].Assigned)
+            const usize parameterCount = command.Params.GetSize();
+            if (parameterCount != 0 && !command.Params[parameterCount - 1].IsAssigned)
             {
-                Param& param = command.Params[paramCount - 1];
-                param.Assigned = true;
-                if (arg.List)
+                Parameter& parameter = command.Params[parameterCount - 1];
+                parameter.IsAssigned = true;
+                if (argument.IsList)
                 {
-                    for (const String& item : arg.Items)
+                    for (const String& item : argument.Items)
                     {
-                        if (!AppendDecoded(context, item.GetView(), param.Values))
+                        if (!AppendDecoded(inoutContext, item.GetView(), parameter.Values))
                         {
                             return false;
                         }
                     }
                 }
-                else if (!AppendDecoded(context, arg.Text.GetView(), param.Values))
+                else if (!AppendDecoded(inoutContext, argument.Text.GetView(), parameter.Values))
                 {
                     return false;
                 }
             }
-            else if (!arg.List && !arg.Text.GetView().empty() && arg.Text.GetView().front() == '"')
+            else if (!argument.IsList && !argument.Text.GetView().empty() && argument.Text.GetView().front() == '"')
             {
                 String value;
-                if (!DecodeValue(context, arg.Text.GetView(), value))
+                if (!DecodeValue(inoutContext, argument.Text.GetView(), value))
                 {
                     return false;
                 }
-                if (value.GetView().find(' ') == std::string_view::npos && paramCount == 0)
+                if (value.GetView().find(' ') == std::string_view::npos && parameterCount == 0)
                 {
-                    Arg decoded;
+                    Argument decoded;
                     decoded.Text = static_cast<String&&>(value);
-                    if (!command.Names.TryAdd(static_cast<Arg&&>(decoded)))
+                    if (!command.Names.TryAdd(static_cast<Argument&&>(decoded)))
                     {
-                        return errors.Memory();
+                        return errors.FailOutOfMemory();
                     }
                 }
                 else
                 {
-                    if (FindParam(command, value.GetView()) != nullptr)
+                    if (FindParameter(command, value.GetView()) != nullptr)
                     {
-                        return errors.Invalid("duplicate parameter");
+                        return errors.FailInvalid("duplicate parameter");
                     }
-                    Param param;
-                    param.Key = static_cast<String&&>(value);
-                    if (!command.Params.TryAdd(static_cast<Param&&>(param)))
+                    Parameter parameter;
+                    parameter.Key = static_cast<String&&>(value);
+                    if (!command.Params.TryAdd(static_cast<Parameter&&>(parameter)))
                     {
-                        return errors.Memory();
+                        return errors.FailOutOfMemory();
                     }
                 }
             }
-            else if (!command.Names.TryAdd(static_cast<Arg&&>(arg)))
+            else if (!command.Names.TryAdd(static_cast<Argument&&>(argument)))
             {
-                return errors.Memory();
+                return errors.FailOutOfMemory();
             }
         }
-        for (const Param& param : command.Params)
+        for (const Parameter& parameter : command.Params)
         {
-            if (!param.Assigned || !ParamAllowed(name, param.Key.GetView()))
+            if (!parameter.IsAssigned || !IsParameterAllowed(name, parameter.Key.GetView()))
             {
-                return errors.Invalid("unsupported or missing parameter for ", name);
+                return errors.FailInvalid("unsupported or missing parameter for ", name);
             }
         }
-        if (!scene.Commands.TryAdd(static_cast<Command&&>(command)))
+        if (!inoutScene.Commands.TryAdd(static_cast<Command&&>(command)))
         {
-            return errors.Memory();
+            return errors.FailOutOfMemory();
         }
     }
     return true;
 }
 
-[[nodiscard]] bool FirstName(Context& context, const Command& command, std::string_view& output) noexcept
+[[nodiscard]] bool GetFirstName(CookContext& inoutContext, const Command& command, std::string_view& outName) noexcept
 {
     if (command.Names.GetSize() == 0)
     {
-        return context.Errors.Invalid("list index out of range");
+        return inoutContext.Errors.FailInvalid("list index out of range");
     }
-    if (command.Names[0].List)
+    if (command.Names[0].IsList)
     {
-        return context.Errors.Invalid("unhashable type: 'list'");
+        return inoutContext.Errors.FailInvalid("unhashable type: 'list'");
     }
-    output = command.Names[0].Text.GetView();
+    outName = command.Names[0].Text.GetView();
     return true;
 }
 
-[[nodiscard]] bool StripComments(std::string_view text, Array<uint8>& output) noexcept
+[[nodiscard]] bool StripComments(std::string_view text, Array<uint8>& outText) noexcept
 {
     // re.sub(r"#[^\n]*", "", text) applies everywhere, including inside strings.
-    Sink sink(output);
+    ByteWriter writer(outText);
     usize at = 0;
     while (at < text.size())
     {
         const usize hash = text.find('#', at);
         if (hash == std::string_view::npos)
         {
-            sink.Append(text.substr(at));
+            writer.Append(text.substr(at));
             break;
         }
-        sink.Append(text.substr(at, hash - at));
+        writer.Append(text.substr(at, hash - at));
         const usize newline = text.find('\n', hash);
         at = newline == std::string_view::npos ? text.size() : newline;
     }
-    return sink.Ok();
+    return writer.IsOk();
 }
 
-struct Saved final
+struct SavedState final
 {
     std::string_view Start;
     State Graphics;
@@ -708,287 +715,281 @@ struct Saved final
 struct SceneState final
 {
     State Current;
-    Array<Saved> Stack;
-    bool HaveCamera = false;
-    bool World = false;
+    Array<SavedState> Stack;
+    bool HasCamera = false;
+    bool IsInWorld = false;
     Array<float64> Values;
 };
 
-[[nodiscard]] bool ApplyTransform(Context& context, const Command& command, SceneState& state) noexcept
+[[nodiscard]] bool ApplyTransform(CookContext& inoutContext, const Command& command, SceneState& inoutState) noexcept
 {
-    Failure& errors = context.Errors;
+    Failure& errors = inoutContext.Errors;
     if (command.Names.GetSize() == 0)
     {
-        return errors.Invalid("list index out of range");
+        return errors.FailInvalid("list index out of range");
     }
-    if (!command.Names[0].List)
+    if (!command.Names[0].IsList)
     {
-        return errors.Invalid("non-affine transform");
+        return errors.FailInvalid("non-affine transform");
     }
-    Array<float64>& values = state.Values;
-    if (!context.Finite(command.Names[0].Items, values))
+    Array<float64>& values = inoutState.Values;
+    if (!inoutContext.ParseFiniteValues(command.Names[0].Items, values))
     {
         return false;
     }
     if (values.GetSize() != 16 || values[3] != 0.0 || values[7] != 0.0 || values[11] != 0.0 || values[15] != 1.0)
     {
-        return errors.Invalid("non-affine transform");
+        return errors.FailInvalid("non-affine transform");
     }
     for (usize k = 0; k < 16; ++k)
     {
-        state.Current.Transform[k] = values[k];
+        inoutState.Current.Transform.Elements[k] = values[k];
     }
     return true;
-}
-
-[[nodiscard]] bool ApplyCamera(Context& context, const Command& command, SceneState& state, Scene& scene) noexcept
-{
-    Failure& errors = context.Errors;
-    if (!NamesEqual(command.Names, 0, {"perspective"}))
-    {
-        return errors.Invalid("only perspective camera is supported");
-    }
-    if (state.HaveCamera)
-    {
-        return errors.Invalid("duplicate camera");
-    }
-    for (usize k = 0; k < 16; ++k)
-    {
-        scene.Camera[k] = state.Current.Transform[k];
-    }
-    if (!context.FiniteParam(FindParam(command, "float fov"), state.Values, "float fov"))
-    {
-        return false;
-    }
-    if (state.Values.GetSize() == 0)
-    {
-        return errors.Invalid("list index out of range");
-    }
-    scene.Fov = state.Values[0];
-    state.HaveCamera = true;
-    if (scene.Fov <= 0.0 || scene.Fov >= 180.0)
-    {
-        return errors.Invalid("camera field of view");
-    }
-    return true;
-}
-
-[[nodiscard]] bool ApplyTexture(Context& context, const Command& command, Scene& scene) noexcept
-{
-    Failure& errors = context.Errors;
-    if (!NamesEqual(command.Names, 1, {"spectrum", "imagemap"}))
-    {
-        return errors.Invalid("unsupported texture");
-    }
-    std::string_view textureName;
-    if (!FirstName(context, command, textureName))
-    {
-        return false;
-    }
-    bool duplicate = false;
-    for (const TextureDecl& texture : scene.Textures)
-    {
-        duplicate = duplicate || texture.Name == textureName;
-    }
-    const Param* filter = FindParam(command, "string filter");
-    if (duplicate || (filter != nullptr && !ValuesEqual(filter, "trilinear")))
-    {
-        return errors.Invalid("unsupported texture profile");
-    }
-    const Param* file = FindParam(command, "string filename");
-    if (file == nullptr || file->Values.GetSize() == 0)
-    {
-        return errors.Invalid("missing parameter string filename");
-    }
-    return scene.Textures.TryAdd(TextureDecl{textureName, file->Values[0].GetView()}) || errors.Memory();
 }
 
 [[nodiscard]] bool
-ApplyMaterial(Context& context, const Command& command, usize index, SceneState& state, Scene& scene) noexcept
+ApplyCamera(CookContext& inoutContext, const Command& command, SceneState& inoutState, Scene& inoutScene) noexcept
 {
-    Failure& errors = context.Errors;
+    Failure& errors = inoutContext.Errors;
+    if (!AreNamesEqual(command.Names, 0, {"perspective"}))
+    {
+        return errors.FailInvalid("only perspective camera is supported");
+    }
+    if (inoutState.HasCamera)
+    {
+        return errors.FailInvalid("duplicate camera");
+    }
+    inoutScene.Camera = inoutState.Current.Transform;
+    if (!inoutContext.ParseFiniteParameter(FindParameter(command, "float fov"), inoutState.Values, "float fov"))
+    {
+        return false;
+    }
+    if (inoutState.Values.GetSize() == 0)
+    {
+        return errors.FailInvalid("list index out of range");
+    }
+    inoutScene.FieldOfView = inoutState.Values[0];
+    inoutState.HasCamera = true;
+    if (inoutScene.FieldOfView <= 0.0 || inoutScene.FieldOfView >= 180.0)
+    {
+        return errors.FailInvalid("camera field of view");
+    }
+    return true;
+}
+
+[[nodiscard]] bool ApplyTexture(CookContext& inoutContext, const Command& command, Scene& inoutScene) noexcept
+{
+    Failure& errors = inoutContext.Errors;
+    if (!AreNamesEqual(command.Names, 1, {"spectrum", "imagemap"}))
+    {
+        return errors.FailInvalid("unsupported texture");
+    }
+    std::string_view textureName;
+    if (!GetFirstName(inoutContext, command, textureName))
+    {
+        return false;
+    }
+    bool isDuplicate = false;
+    for (const TextureDeclaration& texture : inoutScene.Textures)
+    {
+        isDuplicate = isDuplicate || texture.Name == textureName;
+    }
+    const Parameter* filter = FindParameter(command, "string filter");
+    if (isDuplicate || (filter != nullptr && !HasSingleValue(filter, "trilinear")))
+    {
+        return errors.FailInvalid("unsupported texture profile");
+    }
+    const Parameter* file = FindParameter(command, "string filename");
+    if (file == nullptr || file->Values.GetSize() == 0)
+    {
+        return errors.FailInvalid("missing parameter string filename");
+    }
+    return inoutScene.Textures.TryAdd(TextureDeclaration{textureName, file->Values[0].GetView()}) ||
+           errors.FailOutOfMemory();
+}
+
+[[nodiscard]] bool ApplyMaterial(CookContext& inoutContext,
+                                 const Command& command,
+                                 usize index,
+                                 SceneState& inoutState,
+                                 Scene& inoutScene) noexcept
+{
+    Failure& errors = inoutContext.Errors;
     const std::string_view name = command.Name;
     if (name == "Material")
     {
-        if (!scene.Materials.TryAdd(MaterialRef{index, true}))
+        if (!inoutScene.Materials.TryAdd(MaterialReference{index, true}))
         {
-            return errors.Memory();
+            return errors.FailOutOfMemory();
         }
-        state.Current.Material = static_cast<int64>(scene.Materials.GetSize() - 1);
+        inoutState.Current.Material = static_cast<int64>(inoutScene.Materials.GetSize() - 1);
         return true;
     }
     std::string_view materialName;
-    if (!FirstName(context, command, materialName))
+    if (!GetFirstName(inoutContext, command, materialName))
     {
         return false;
     }
     if (name == "MakeNamedMaterial")
     {
-        for (const std::string_view existing : scene.MaterialNames)
+        for (const NamedMaterialSlot& existing : inoutScene.NamedMaterials)
         {
-            if (existing == materialName)
+            if (existing.Name == materialName)
             {
-                return errors.Invalid("duplicate material");
+                return errors.FailInvalid("duplicate material");
             }
         }
-        return (scene.MaterialNames.TryAdd(materialName) && scene.Materials.TryAdd(MaterialRef{index, false})) ||
-               errors.Memory();
+        const usize slot = inoutScene.Materials.GetSize();
+        return (inoutScene.NamedMaterials.TryAdd(NamedMaterialSlot{materialName, slot}) &&
+                inoutScene.Materials.TryAdd(MaterialReference{index, false})) ||
+               errors.FailOutOfMemory();
     }
-    for (usize k = 0; k < scene.MaterialNames.GetSize(); ++k)
+    for (const NamedMaterialSlot& named : inoutScene.NamedMaterials)
     {
-        if (scene.MaterialNames[k] == materialName)
+        if (named.Name == materialName)
         {
-            state.Current.Material = static_cast<int64>(k);
+            inoutState.Current.Material = static_cast<int64>(named.Slot);
             return true;
         }
     }
-    return errors.Invalid("unknown material ", materialName);
+    return errors.FailInvalid("unknown material ", materialName);
 }
 
-[[nodiscard]] bool ApplyEmitter(Context& context, const Command& command, SceneState& state) noexcept
+[[nodiscard]] bool ApplyEmitter(CookContext& inoutContext, const Command& command, SceneState& inoutState) noexcept
 {
-    Failure& errors = context.Errors;
-    if (!NamesEqual(command.Names, 0, {"diffuse"}))
+    Failure& errors = inoutContext.Errors;
+    if (!AreNamesEqual(command.Names, 0, {"diffuse"}))
     {
-        return errors.Invalid("unsupported emitter");
+        return errors.FailInvalid("unsupported emitter");
     }
-    if (!context.FiniteParam(FindParam(command, "rgb L"), state.Values, "rgb L"))
+    if (!inoutContext.ParseFiniteParameter(FindParameter(command, "rgb L"), inoutState.Values, "rgb L"))
     {
         return false;
     }
-    if (state.Values.GetSize() != 3)
+    if (inoutState.Values.GetSize() != 3)
     {
-        return errors.Invalid("emission profile");
+        return errors.FailInvalid("emission profile");
     }
     for (usize k = 0; k < 3; ++k)
     {
-        if (state.Values[k] < 0.0 || state.Values[k] > 10000.0)
+        if (inoutState.Values[k] < 0.0 || inoutState.Values[k] > 10000.0)
         {
-            return errors.Invalid("emission profile");
+            return errors.FailInvalid("emission profile");
         }
-        state.Current.Emission[k] = state.Values[k];
+        inoutState.Current.Emission[k] = inoutState.Values[k];
     }
-    state.Current.HasEmission = true;
+    inoutState.Current.HasEmission = true;
     return true;
 }
 
-[[nodiscard]] bool ApplyStack(Context& context, std::string_view name, SceneState& state) noexcept
+[[nodiscard]] bool ApplyStack(CookContext& inoutContext, std::string_view name, SceneState& inoutState) noexcept
 {
-    Failure& errors = context.Errors;
+    Failure& errors = inoutContext.Errors;
     if (name == "AttributeBegin" || name == "TransformBegin")
     {
-        return state.Stack.TryAdd(Saved{name, state.Current}) || errors.Memory();
+        return inoutState.Stack.TryAdd(SavedState{name, inoutState.Current}) || errors.FailOutOfMemory();
     }
-    if (state.Stack.GetSize() == 0)
+    if (inoutState.Stack.GetSize() == 0)
     {
-        return errors.Invalid("unbalanced state stack");
+        return errors.FailInvalid("unbalanced state stack");
     }
-    const Saved previous = state.Stack[state.Stack.GetSize() - 1];
-    state.Stack.RemoveLast();
-    const bool attribute = previous.Start == "AttributeBegin";
-    if (attribute != (name == "AttributeEnd"))
+    const SavedState previous = inoutState.Stack[inoutState.Stack.GetSize() - 1];
+    inoutState.Stack.RemoveLast();
+    const bool isAttribute = previous.Start == "AttributeBegin";
+    if (isAttribute != (name == "AttributeEnd"))
     {
-        return errors.Invalid("mismatched state stack");
+        return errors.FailInvalid("mismatched state stack");
     }
-    if (attribute)
+    if (isAttribute)
     {
-        state.Current = previous.Graphics;
+        inoutState.Current = previous.Graphics;
         return true;
     }
-    for (usize k = 0; k < 16; ++k)
-    {
-        state.Current.Transform[k] = previous.Graphics.Transform[k];
-    }
+    inoutState.Current.Transform = previous.Graphics.Transform;
     return true;
 }
 
-[[nodiscard]] bool ParseScene(Context& context, Scene& scene) noexcept
+[[nodiscard]] bool ParseScene(CookContext& inoutContext, Scene& inoutScene) noexcept
 {
-    Failure& errors = context.Errors;
+    Failure& errors = inoutContext.Errors;
     Bytes raw;
-    if (!context.Read("scene-v4.pbrt", usize{1024} * 1024, raw))
+    if (!inoutContext.ReadBounded("scene-v4.pbrt", usize{1024} * 1024, raw))
     {
         return false;
     }
     foundation::parsing::ParseError utf8{};
     if (foundation::parsing::ValidateUtf8(raw.String(), utf8) != foundation::parsing::ParseStatus::Ok)
     {
-        return errors.Invalid("'utf-8' codec can't decode scene-v4.pbrt");
+        return errors.FailInvalid("'utf-8' codec can't decode scene-v4.pbrt");
     }
     Array<uint8> stripped;
     Array<std::string_view> tokens;
-    if (!StripComments(raw.String(), stripped) || !Tokenize(View(stripped), tokens))
+    if (!StripComments(raw.String(), stripped) || !Tokenize(ViewAsText(stripped), tokens))
     {
-        return errors.Memory();
+        return errors.FailOutOfMemory();
     }
-    if (!ParseCommands(context, tokens.AsSpan(), scene))
+    if (!ParseCommands(inoutContext, tokens.AsSpan(), inoutScene))
     {
         return false;
     }
     SceneState state;
-    for (usize k = 0; k < 16; ++k)
+    for (usize index = 0; index < inoutScene.Commands.GetSize(); ++index)
     {
-        state.Current.Transform[k] = IDENTITY[k];
-    }
-    for (usize index = 0; index < scene.Commands.GetSize(); ++index)
-    {
-        const Command& command = scene.Commands[index];
+        const Command& command = inoutScene.Commands[index];
         const std::string_view name = command.Name;
-        bool ok = true;
+        bool isOk = true;
         if (name == "Transform")
         {
-            ok = ApplyTransform(context, command, state);
+            isOk = ApplyTransform(inoutContext, command, state);
         }
         else if (name == "Camera")
         {
-            ok = ApplyCamera(context, command, state, scene);
+            isOk = ApplyCamera(inoutContext, command, state, inoutScene);
         }
         else if (name == "WorldBegin")
         {
-            state.World = true;
-            for (usize k = 0; k < 16; ++k)
-            {
-                state.Current.Transform[k] = IDENTITY[k];
-            }
+            state.IsInWorld = true;
+            state.Current.Transform = math::Matrix4d::Identity();
         }
         else if (name == "Texture")
         {
-            ok = ApplyTexture(context, command, scene);
+            isOk = ApplyTexture(inoutContext, command, inoutScene);
         }
         else if (name == "MakeNamedMaterial" || name == "NamedMaterial" || name == "Material")
         {
-            ok = ApplyMaterial(context, command, index, state, scene);
+            isOk = ApplyMaterial(inoutContext, command, index, state, inoutScene);
         }
         else if (name == "AreaLightSource")
         {
-            ok = ApplyEmitter(context, command, state);
+            isOk = ApplyEmitter(inoutContext, command, state);
         }
         else if (name == "AttributeBegin" || name == "TransformBegin" || name == "AttributeEnd" ||
                  name == "TransformEnd")
         {
-            ok = ApplyStack(context, name, state);
+            isOk = ApplyStack(inoutContext, name, state);
         }
         else if (name == "Shape")
         {
-            if (!state.World || state.Current.Material < 0)
+            if (!state.IsInWorld || state.Current.Material < 0)
             {
-                return errors.Invalid("shape outside world or without material");
+                return errors.FailInvalid("shape outside world or without material");
             }
-            ok = scene.Shapes.TryAdd(Shape{state.Current, index}) || errors.Memory();
+            isOk = inoutScene.Shapes.TryAdd(Shape{state.Current, index}) || errors.FailOutOfMemory();
         }
         else if (name == "WorldEnd")
         {
-            state.World = false;
+            state.IsInWorld = false;
         }
         // Integrator, Sampler, PixelFilter and Film are replaced by the documented L6 capture profile.
-        if (!ok)
+        if (!isOk)
         {
             return false;
         }
     }
-    if (state.Stack.GetSize() != 0 || !state.HaveCamera || scene.Shapes.GetSize() == 0)
+    if (state.Stack.GetSize() != 0 || !state.HasCamera || inoutScene.Shapes.GetSize() == 0)
     {
-        return errors.Invalid("incomplete scene");
+        return errors.FailInvalid("incomplete scene");
     }
     return true;
 }
@@ -996,87 +997,65 @@ ApplyMaterial(Context& context, const Command& command, usize index, SceneState&
 // ---------------------------------------------------------------------------
 // Geometry helpers mirroring the reference tuple arithmetic.
 
-struct Vec3 final
+[[nodiscard]] float64 GetAxis(const math::Vector3d& vector, usize axis) noexcept
 {
-    float64 V[3]{};
-};
-
-[[nodiscard]] Vec3 Sub(const Vec3& a, const Vec3& b) noexcept
-{
-    return {{a.V[0] - b.V[0], a.V[1] - b.V[1], a.V[2] - b.V[2]}};
+    return axis == 0 ? vector.X : axis == 1 ? vector.Y : vector.Z;
 }
-[[nodiscard]] Vec3 Add(const Vec3& a, const Vec3& b) noexcept
+void SetAxis(math::Vector3d& inoutVector, usize axis, float64 value) noexcept
 {
-    return {{a.V[0] + b.V[0], a.V[1] + b.V[1], a.V[2] + b.V[2]}};
+    (axis == 0 ? inoutVector.X : axis == 1 ? inoutVector.Y : inoutVector.Z) = value;
 }
-[[nodiscard]] Vec3 Mul(const Vec3& a, float64 b) noexcept
+[[nodiscard]] bool NormaliseVector(Failure& inoutErrors, const math::Vector3d& a, math::Vector3d& outUnit) noexcept
 {
-    return {{a.V[0] * b, a.V[1] * b, a.V[2] * b}};
-}
-[[nodiscard]] float64 Dot(const Vec3& a, const Vec3& b) noexcept
-{
-    PySum sum;
-    for (usize i = 0; i < 3; ++i)
-    {
-        sum.Add(a.V[i] * b.V[i]);
-    }
-    return sum.Result();
-}
-[[nodiscard]] Vec3 Cross(const Vec3& a, const Vec3& b) noexcept
-{
-    return {{a.V[1] * b.V[2] - a.V[2] * b.V[1], a.V[2] * b.V[0] - a.V[0] * b.V[2], a.V[0] * b.V[1] - a.V[1] * b.V[0]}};
-}
-[[nodiscard]] bool Unit(Failure& errors, const Vec3& a, Vec3& output) noexcept
-{
-    const float64 length = math::Sqrt(Dot(a, a));
+    const float64 length = math::Sqrt(math::CompensatedDot(a, a));
     if (length < 1e-12)
     {
-        return errors.Invalid("degenerate geometry");
+        return inoutErrors.FailInvalid("degenerate geometry");
     }
-    output = Mul(a, 1.0 / length);
+    outUnit = a * (1.0 / length);
     return true;
 }
-[[nodiscard]] Vec3 TransformVector(const float64 (&matrix)[16], const Vec3& p) noexcept
+[[nodiscard]] math::Vector3d TransformVector(const math::Matrix4d& matrix, const math::Vector3d& p) noexcept
 {
-    Vec3 output;
+    math::Vector3d output;
     for (usize r = 0; r < 3; ++r)
     {
-        PySum sum;
+        math::CompensatedSum sum;
         for (usize c = 0; c < 3; ++c)
         {
-            sum.Add(matrix[4 * c + r] * p.V[c]);
+            sum.Add(matrix.Elements[4 * c + r] * GetAxis(p, c));
         }
-        output.V[r] = sum.Result();
+        SetAxis(output, r, sum.GetResult());
     }
     return output;
 }
-[[nodiscard]] Vec3 TransformPoint(const float64 (&matrix)[16], const Vec3& p) noexcept
+[[nodiscard]] math::Vector3d TransformPoint(const math::Matrix4d& matrix, const math::Vector3d& p) noexcept
 {
-    Vec3 output = TransformVector(matrix, p);
+    math::Vector3d output = TransformVector(matrix, p);
     for (usize r = 0; r < 3; ++r)
     {
-        output.V[r] = output.V[r] + matrix[12 + r];
+        SetAxis(output, r, GetAxis(output, r) + matrix.Elements[12 + r]);
     }
     return output;
 }
 
 struct Point final
 {
-    Vec3 P;
-    Vec3 N;
+    math::Vector3d Position;
+    math::Vector3d Normal;
     uint8 NormalCount = 0; // 3 for a normal; 0 when absent (Python None or an empty tuple).
     float64 Uv[2]{};
 };
 
 struct Triangle final
 {
-    int64 I[3]{};
+    int64 Indices[3]{};
 };
 
 struct Vertex final
 {
-    Vec3 P;
-    Vec3 N;
+    math::Vector3d Position;
+    math::Vector3d Normal;
     float64 Uv[2]{};
 };
 
@@ -1101,7 +1080,7 @@ struct Material final
     float64 Emission[3]{};
 };
 
-struct Item final
+struct SceneItem final
 {
     uint32 Mesh = 0;
     uint32 Material = 0;
@@ -1111,13 +1090,13 @@ struct Item final
 // ---------------------------------------------------------------------------
 // read_ply() and read_tga().
 
-[[nodiscard]] uint32 LoadU32(const uint8* data) noexcept
+[[nodiscard]] uint32 LoadUint32(const uint8* data) noexcept
 {
     return static_cast<uint32>(data[0]) | (static_cast<uint32>(data[1]) << 8) | (static_cast<uint32>(data[2]) << 16) |
            (static_cast<uint32>(data[3]) << 24);
 }
 
-[[nodiscard]] bool SplitLines(std::string_view header, Array<std::string_view>& lines) noexcept
+[[nodiscard]] bool SplitLines(std::string_view header, Array<std::string_view>& outLines) noexcept
 {
     // str.splitlines() boundaries for ASCII text.
     usize begin = 0;
@@ -1128,7 +1107,7 @@ struct Item final
         if (value == '\n' || value == '\r' || value == '\x0b' || value == '\x0c' || value == '\x1c' ||
             value == '\x1d' || value == '\x1e')
         {
-            if (!lines.TryAdd(header.substr(begin, at - begin)))
+            if (!outLines.TryAdd(header.substr(begin, at - begin)))
             {
                 return false;
             }
@@ -1140,26 +1119,26 @@ struct Item final
             ++at;
         }
     }
-    return begin >= header.size() || lines.TryAdd(header.substr(begin));
+    return begin >= header.size() || outLines.TryAdd(header.substr(begin));
 }
 
-[[nodiscard]] bool SplitFields(std::string_view text, Array<std::string_view>& fields) noexcept
+[[nodiscard]] bool SplitFields(std::string_view text, Array<std::string_view>& outFields) noexcept
 {
     // str.split() with no separator.
-    fields.Clear();
+    outFields.Clear();
     usize at = 0;
     while (at < text.size())
     {
-        while (at < text.size() && IsPySpace(static_cast<uint8>(text[at])))
+        while (at < text.size() && IsPythonSpace(static_cast<uint8>(text[at])))
         {
             ++at;
         }
         const usize begin = at;
-        while (at < text.size() && !IsPySpace(static_cast<uint8>(text[at])))
+        while (at < text.size() && !IsPythonSpace(static_cast<uint8>(text[at])))
         {
             ++at;
         }
-        if (at > begin && !fields.TryAdd(text.substr(begin, at - begin)))
+        if (at > begin && !outFields.TryAdd(text.substr(begin, at - begin)))
         {
             return false;
         }
@@ -1169,38 +1148,38 @@ struct Item final
 
 struct PlyHeader final
 {
-    Array<std::string_view> Props;
+    Array<std::string_view> Properties;
     int64 Vertices = -1;
     int64 Faces = -1;
     char IndexFormat = 0;
 };
 
-[[nodiscard]] bool ParsePlyHeader(Failure& errors, std::string_view header, PlyHeader& ply) noexcept
+[[nodiscard]] bool ParsePlyHeader(Failure& inoutErrors, std::string_view header, PlyHeader& outPly) noexcept
 {
     for (const char value : header)
     {
         if (static_cast<uint8>(value) >= 0x80)
         {
-            return errors.Invalid("'ascii' codec can't decode PLY header");
+            return inoutErrors.FailInvalid("'ascii' codec can't decode PLY header");
         }
     }
     Array<std::string_view> lines;
     if (!SplitLines(header, lines))
     {
-        return errors.Memory();
+        return inoutErrors.FailOutOfMemory();
     }
     if (lines.GetSize() < 2 || lines[0] != "ply" || lines[1] != "format binary_little_endian 1.0")
     {
-        return errors.Invalid("unsupported PLY encoding");
+        return inoutErrors.FailInvalid("unsupported PLY encoding");
     }
     std::string_view element;
-    bool haveElement = false;
+    bool hasElement = false;
     Array<std::string_view> fields;
     for (usize line = 2; line < lines.GetSize(); ++line)
     {
         if (!SplitFields(lines[line], fields))
         {
-            return errors.Memory();
+            return inoutErrors.FailOutOfMemory();
         }
         if (fields.GetSize() == 0 || fields[0] == "comment")
         {
@@ -1210,62 +1189,64 @@ struct PlyHeader final
         {
             if (fields.GetSize() < 2)
             {
-                return errors.Invalid("list index out of range");
+                return inoutErrors.FailInvalid("list index out of range");
             }
             element = fields[1];
-            haveElement = true;
+            hasElement = true;
             if (element != "vertex" && element != "face")
             {
-                return errors.Invalid("unsupported PLY element");
+                return inoutErrors.FailInvalid("unsupported PLY element");
             }
             int64 count = 0;
             if (fields.GetSize() < 3 || !ParseInt(fields[2], count))
             {
-                return errors.Invalid("invalid PLY element count");
+                return inoutErrors.FailInvalid("invalid PLY element count");
             }
-            (element == "vertex" ? ply.Vertices : ply.Faces) = count;
+            (element == "vertex" ? outPly.Vertices : outPly.Faces) = count;
         }
-        else if (fields[0] == "property" && haveElement && element == "vertex")
+        else if (fields[0] == "property" && hasElement && element == "vertex")
         {
             if (fields.GetSize() < 3)
             {
-                return errors.Invalid("list index out of range");
+                return inoutErrors.FailInvalid("list index out of range");
             }
             if (fields[1] != "float")
             {
-                return errors.Invalid("unsupported vertex property");
+                return inoutErrors.FailInvalid("unsupported vertex property");
             }
-            if (!ply.Props.TryAdd(fields[2]))
+            if (!outPly.Properties.TryAdd(fields[2]))
             {
-                return errors.Memory();
+                return inoutErrors.FailOutOfMemory();
             }
         }
-        else if (fields[0] == "property" && haveElement && element == "face")
+        else if (fields[0] == "property" && hasElement && element == "face")
         {
             if (fields.GetSize() < 3 || fields[1] != "list" || (fields[2] != "uint8" && fields[2] != "uchar"))
             {
-                return errors.Invalid("unsupported face list");
+                return inoutErrors.FailInvalid("unsupported face list");
             }
             if (fields.GetSize() < 4)
             {
-                return errors.Invalid("list index out of range");
+                return inoutErrors.FailInvalid("list index out of range");
             }
             if (fields[3] != "int" && fields[3] != "uint")
             {
-                return errors.Invalid("unsupported index type");
+                return inoutErrors.FailInvalid("unsupported index type");
             }
-            ply.IndexFormat = fields[3] == "int" ? 'i' : 'I';
+            outPly.IndexFormat = fields[3] == "int" ? 'i' : 'I';
         }
     }
     return true;
 }
 
-[[nodiscard]] bool
-ReadPly(Context& context, std::string_view path, Array<Point>& points, Array<Triangle>& triangles) noexcept
+[[nodiscard]] bool ReadPly(CookContext& inoutContext,
+                           std::string_view path,
+                           Array<Point>& inoutPoints,
+                           Array<Triangle>& inoutTriangles) noexcept
 {
-    Failure& errors = context.Errors;
+    Failure& errors = inoutContext.Errors;
     Bytes raw;
-    if (!context.Read(path, MAX_SOURCE_BYTES, raw))
+    if (!inoutContext.ReadBounded(path, MAX_SOURCE_BYTES, raw))
     {
         return false;
     }
@@ -1273,7 +1254,7 @@ ReadPly(Context& context, std::string_view path, Array<Point>& points, Array<Tri
     const usize boundary = data.find("end_header\n");
     if (boundary == std::string_view::npos || boundary > 4096)
     {
-        return errors.Invalid("invalid PLY header");
+        return errors.FailInvalid("invalid PLY header");
     }
     PlyHeader ply;
     if (!ParsePlyHeader(errors, data.substr(0, boundary), ply))
@@ -1284,75 +1265,75 @@ ReadPly(Context& context, std::string_view path, Array<Point>& points, Array<Tri
     constexpr std::string_view KNOWN[] = {"x", "y", "z", "nx", "ny", "nz", "u", "v", "s", "t"};
     usize slot[10]{};
     bool present[10]{};
-    bool schemaOk = true;
-    for (usize p = 0; p < ply.Props.GetSize(); ++p)
+    bool isSchemaOk = true;
+    for (usize p = 0; p < ply.Properties.GetSize(); ++p)
     {
-        bool known = false;
+        bool isKnown = false;
         for (usize k = 0; k < 10; ++k)
         {
-            if (ply.Props[p] == KNOWN[k])
+            if (ply.Properties[p] == KNOWN[k])
             {
-                known = true;
-                schemaOk = schemaOk && !present[k];
+                isKnown = true;
+                isSchemaOk = isSchemaOk && !present[k];
                 present[k] = true;
                 slot[k] = p;
             }
         }
-        schemaOk = schemaOk && known;
+        isSchemaOk = isSchemaOk && isKnown;
     }
-    if (!schemaOk || !present[0] || !present[1] || !present[2])
+    if (!isSchemaOk || !present[0] || !present[1] || !present[2])
     {
-        return errors.Invalid("unsupported PLY vertex schema");
+        return errors.FailInvalid("unsupported PLY vertex schema");
     }
-    const bool anyNormal = present[3] || present[4] || present[5];
-    const bool allNormal = present[3] && present[4] && present[5];
-    if (anyNormal && !allNormal)
+    const bool hasAnyNormal = present[3] || present[4] || present[5];
+    const bool hasAllNormals = present[3] && present[4] && present[5];
+    if (hasAnyNormal && !hasAllNormals)
     {
-        return errors.Invalid("incomplete PLY normals");
+        return errors.FailInvalid("incomplete PLY normals");
     }
     if (ply.Vertices < 0 || ply.Faces < 0 || ply.IndexFormat == 0 || ply.Vertices <= 0 || ply.Vertices > 1000000 ||
         ply.Faces <= 0 || ply.Faces > 1000000)
     {
-        return errors.Invalid("PLY limits");
+        return errors.FailInvalid("PLY limits");
     }
-    const usize rowSize = 4 * ply.Props.GetSize();
+    const usize rowSize = 4 * ply.Properties.GetSize();
     usize offset = 0;
-    if (!points.TryResize(static_cast<usize>(ply.Vertices)))
+    if (!inoutPoints.TryResize(static_cast<usize>(ply.Vertices)))
     {
-        return errors.Memory();
+        return errors.FailOutOfMemory();
     }
     float64 row[10]{};
     for (usize index = 0; index < static_cast<usize>(ply.Vertices); ++index)
     {
-        if (index % 256 == 0 && !context.CheckCancel())
+        if (index % 256 == 0 && !inoutContext.CheckCancellation())
         {
             return false;
         }
         if (payload.size() < offset + rowSize)
         {
-            return errors.Invalid("unpack_from requires a buffer of more bytes");
+            return errors.FailInvalid("unpack_from requires a buffer of more bytes");
         }
-        for (usize p = 0; p < ply.Props.GetSize(); ++p)
+        for (usize p = 0; p < ply.Properties.GetSize(); ++p)
         {
-            row[p] = static_cast<float64>(std::bit_cast<float32>(LoadU32(payload.data() + offset + 4 * p)));
-            if (!IsFinite(row[p]))
+            row[p] = static_cast<float64>(std::bit_cast<float32>(LoadUint32(payload.data() + offset + 4 * p)));
+            if (!math::IsFinite(row[p]))
             {
-                return errors.Invalid("nonfinite source number");
+                return errors.FailInvalid("nonfinite source number");
             }
         }
         offset += rowSize;
-        Point& point = points[index];
+        Point& point = inoutPoints[index];
         for (usize k = 0; k < 3; ++k)
         {
-            point.P.V[k] = row[slot[k]];
+            SetAxis(point.Position, k, row[slot[k]]);
         }
         point.NormalCount = 0;
-        if (allNormal)
+        if (hasAllNormals)
         {
             point.NormalCount = 3;
             for (usize k = 0; k < 3; ++k)
             {
-                point.N.V[k] = row[slot[3 + k]];
+                SetAxis(point.Normal, k, row[slot[3 + k]]);
             }
         }
         point.Uv[0] = present[6] ? row[slot[6]] : present[8] ? row[slot[8]] : 0.0;
@@ -1360,28 +1341,28 @@ ReadPly(Context& context, std::string_view path, Array<Point>& points, Array<Tri
     }
     for (int64 index = 0; index < ply.Faces; ++index)
     {
-        if (index % 256 == 0 && !context.CheckCancel())
+        if (index % 256 == 0 && !inoutContext.CheckCancellation())
         {
             return false;
         }
         if (offset >= payload.size())
         {
-            return errors.Invalid("index out of range");
+            return errors.FailInvalid("index out of range");
         }
         const uint8 count = payload[offset];
         offset += 1;
         if (count != 3 && count != 4)
         {
-            return errors.Invalid("only triangle/convex quad faces are supported");
+            return errors.FailInvalid("only triangle/convex quad faces are supported");
         }
         if (payload.size() < offset + 4 * usize{count})
         {
-            return errors.Invalid("unpack_from requires a buffer of more bytes");
+            return errors.FailInvalid("unpack_from requires a buffer of more bytes");
         }
         int64 indices[4]{};
         for (usize k = 0; k < count; ++k)
         {
-            const uint32 bits = LoadU32(payload.data() + offset + 4 * k);
+            const uint32 bits = LoadUint32(payload.data() + offset + 4 * k);
             indices[k] =
                 ply.IndexFormat == 'i' ? static_cast<int64>(static_cast<int32>(bits)) : static_cast<int64>(bits);
         }
@@ -1390,179 +1371,187 @@ ReadPly(Context& context, std::string_view path, Array<Point>& points, Array<Tri
         {
             if (indices[k] < 0 || indices[k] >= ply.Vertices)
             {
-                return errors.Invalid("PLY index range");
+                return errors.FailInvalid("PLY index range");
             }
         }
         for (usize k = 1; k + 1 < count; ++k)
         {
-            if (!triangles.TryAdd(Triangle{{indices[0], indices[k], indices[k + 1]}}))
+            if (!inoutTriangles.TryAdd(Triangle{{indices[0], indices[k], indices[k + 1]}}))
             {
-                return errors.Memory();
+                return errors.FailOutOfMemory();
             }
         }
     }
     if (offset != payload.size())
     {
-        return errors.Invalid("unexpected PLY trailing bytes");
+        return errors.FailInvalid("unexpected PLY trailing bytes");
     }
     return true;
 }
 
-[[nodiscard]] bool ReadTga(Context& context, std::string_view path, Image& image) noexcept
+[[nodiscard]] bool ReadTga(CookContext& inoutContext, std::string_view path, Image& outImage) noexcept
 {
-    Failure& errors = context.Errors;
+    Failure& errors = inoutContext.Errors;
     Bytes raw;
-    if (!context.Read(path, MAX_SOURCE_BYTES, raw))
+    if (!inoutContext.ReadBounded(path, MAX_SOURCE_BYTES, raw))
     {
         return false;
     }
     const std::span<const uint8> data = raw.Data();
     if (data.size() < 18)
     {
-        return errors.Invalid("unpack_from requires a buffer of at least 18 bytes");
+        return errors.FailInvalid("unpack_from requires a buffer of at least 18 bytes");
     }
-    const usize ident = data[0];
-    const uint8 cmap = data[1];
+    const usize identifierLength = data[0];
+    const uint8 colorMapType = data[1];
     const uint8 kind = data[2];
     const usize width = static_cast<usize>(data[12]) | (static_cast<usize>(data[13]) << 8);
     const usize height = static_cast<usize>(data[14]) | (static_cast<usize>(data[15]) << 8);
     const uint8 bits = data[16];
     const uint8 flags = data[17];
-    if (cmap != 0 || kind != 2 || (bits != 24 && bits != 32) || (flags & 0xC0) != 0 || width == 0 || width > 4096 ||
-        height == 0 || height > 4096)
+    if (colorMapType != 0 || kind != 2 || (bits != 24 && bits != 32) || (flags & 0xC0) != 0 || width == 0 ||
+        width > 4096 || height == 0 || height > 4096)
     {
-        return errors.Invalid("only bounded uncompressed true-color TGA is supported");
+        return errors.FailInvalid("only bounded uncompressed true-color TGA is supported");
     }
     if (width * height * 4 > usize{16} * 1024 * 1024)
     {
-        return errors.Invalid("decoded texture byte limit");
+        return errors.FailInvalid("decoded texture byte limit");
     }
     const usize step = bits / 8;
-    const usize offset = 18 + ident;
+    const usize offset = 18 + identifierLength;
     if (data.size() < offset + width * height * step)
     {
-        return errors.Invalid("truncated TGA");
+        return errors.FailInvalid("truncated TGA");
     }
-    if (!image.Rgba.TryResize(width * height * 4))
+    if (!outImage.Rgba.TryResize(width * height * 4))
     {
-        return errors.Memory();
+        return errors.FailOutOfMemory();
     }
     for (usize y = 0; y < height; ++y)
     {
         for (usize x = 0; x < width; ++x)
         {
-            const usize sx = (flags & 0x10) != 0 ? width - 1 - x : x;
-            const usize sy = (flags & 0x20) != 0 ? y : height - 1 - y;
-            const usize index = offset + (sy * width + sx) * step;
-            uint8* out = image.Rgba.GetData() + (y * width + x) * 4;
+            const usize sourceX = (flags & 0x10) != 0 ? width - 1 - x : x;
+            const usize sourceY = (flags & 0x20) != 0 ? y : height - 1 - y;
+            const usize index = offset + (sourceY * width + sourceX) * step;
+            uint8* out = outImage.Rgba.GetData() + (y * width + x) * 4;
             out[0] = data[index + 2];
             out[1] = data[index + 1];
             out[2] = data[index];
             out[3] = step == 4 ? data[index + 3] : 255;
         }
     }
-    for (usize i = 3; i < image.Rgba.GetSize(); i += 4)
+    for (usize i = 3; i < outImage.Rgba.GetSize(); i += 4)
     {
-        if (image.Rgba[i] != 255)
+        if (outImage.Rgba[i] != 255)
         {
-            return errors.Invalid("alpha requires a separate conversion profile");
+            return errors.FailInvalid("alpha requires a separate conversion profile");
         }
     }
-    image.Width = static_cast<uint32>(width);
-    image.Height = static_cast<uint32>(height);
+    outImage.Width = static_cast<uint32>(width);
+    outImage.Height = static_cast<uint32>(height);
     return true;
 }
 
 // ---------------------------------------------------------------------------
 // rectangle(), clip() and atlas_triangles().
 
-[[nodiscard]] bool
-Rectangle(Failure& errors, const Array<Point>& points, const Array<Triangle>& triangles, float64 (&output)[12]) noexcept
+[[nodiscard]] bool ComputeRectangle(Failure& inoutErrors,
+                                    const Array<Point>& points,
+                                    const Array<Triangle>& triangles,
+                                    float64 (&outCorners)[12]) noexcept
 {
     // min()/max() keep the first of equal values, which preserves the sign of zeroes.
-    Vec3 low = points[0].P;
-    Vec3 high = points[0].P;
+    math::Vector3d low = points[0].Position;
+    math::Vector3d high = points[0].Position;
     for (usize i = 0; i < 3; ++i)
     {
         for (const Point& point : points)
         {
-            low.V[i] = point.P.V[i] < low.V[i] ? point.P.V[i] : low.V[i];
-            high.V[i] = point.P.V[i] > high.V[i] ? point.P.V[i] : high.V[i];
+            SetAxis(low,
+                    i,
+                    GetAxis(point.Position, i) < GetAxis(low, i) ? GetAxis(point.Position, i) : GetAxis(low, i));
+            SetAxis(high,
+                    i,
+                    GetAxis(point.Position, i) > GetAxis(high, i) ? GetAxis(point.Position, i) : GetAxis(high, i));
         }
     }
     usize axes[3]{};
     usize axisCount = 0;
     for (usize i = 0; i < 3; ++i)
     {
-        if (high.V[i] - low.V[i] > 1e-5)
+        if (GetAxis(high, i) - GetAxis(low, i) > 1e-5)
         {
             axes[axisCount++] = i;
         }
     }
     if (axisCount != 2)
     {
-        return errors.Invalid("emissive PLY is not an axis-aligned planar rectangle");
+        return inoutErrors.FailInvalid("emissive PLY is not an axis-aligned planar rectangle");
     }
     const Triangle& first = triangles[0];
-    const Vec3& origin = points[static_cast<usize>(first.I[0])].P;
-    Vec3 normal;
-    if (!Unit(errors,
-              Cross(Sub(points[static_cast<usize>(first.I[1])].P, origin),
-                    Sub(points[static_cast<usize>(first.I[2])].P, origin)),
-              normal))
+    const math::Vector3d& origin = points[static_cast<usize>(first.Indices[0])].Position;
+    math::Vector3d normal;
+    if (!NormaliseVector(inoutErrors,
+                         math::Cross((points[static_cast<usize>(first.Indices[1])].Position - origin),
+                                     (points[static_cast<usize>(first.Indices[2])].Position - origin)),
+                         normal))
     {
         return false;
     }
-    Vec3 u;
-    Vec3 v;
-    u.V[axes[0]] = (high.V[axes[0]] - low.V[axes[0]]) / 2.0;
-    v.V[axes[1]] = (high.V[axes[1]] - low.V[axes[1]]) / 2.0;
-    if (Dot(Cross(u, v), normal) < 0.0)
+    math::Vector3d u;
+    math::Vector3d v;
+    SetAxis(u, axes[0], (GetAxis(high, axes[0]) - GetAxis(low, axes[0])) / 2.0);
+    SetAxis(v, axes[1], (GetAxis(high, axes[1]) - GetAxis(low, axes[1])) / 2.0);
+    if (math::CompensatedDot(math::Cross(u, v), normal) < 0.0)
     {
-        v = Mul(v, -1.0);
+        v = (v * -1.0);
     }
-    PySum area;
+    math::CompensatedSum area;
     for (const Triangle& triangle : triangles)
     {
-        const Vec3& a = points[static_cast<usize>(triangle.I[0])].P;
-        const Vec3 n = Cross(Sub(points[static_cast<usize>(triangle.I[1])].P, a),
-                             Sub(points[static_cast<usize>(triangle.I[2])].P, a));
-        area.Add(math::Sqrt(Dot(n, n)) / 2.0);
+        const math::Vector3d& a = points[static_cast<usize>(triangle.Indices[0])].Position;
+        const math::Vector3d faceNormal = math::Cross((points[static_cast<usize>(triangle.Indices[1])].Position - a),
+                                                      (points[static_cast<usize>(triangle.Indices[2])].Position - a));
+        area.Add(math::Sqrt(math::CompensatedDot(faceNormal, faceNormal)) / 2.0);
     }
-    const float64 total = area.Result();
+    const float64 total = area.GetResult();
     const float64 tolerance = 1e-5 >= total * 1e-4 ? 1e-5 : total * 1e-4;
-    if (Abs(total - 4.0 * math::Sqrt(Dot(u, u) * Dot(v, v))) > tolerance)
+    if (math::Abs(total - 4.0 * math::Sqrt(math::CompensatedDot(u, u) * math::CompensatedDot(v, v))) > tolerance)
     {
-        return errors.Invalid("emitter is not a complete rectangle");
+        return inoutErrors.FailInvalid("emitter is not a complete rectangle");
     }
     for (usize i = 0; i < 3; ++i)
     {
-        output[i] = u.V[i];
-        output[3 + i] = v.V[i];
-        output[6 + i] = normal.V[i];
-        output[9 + i] = (low.V[i] + high.V[i]) / 2.0;
+        outCorners[i] = GetAxis(u, i);
+        outCorners[3 + i] = GetAxis(v, i);
+        outCorners[6 + i] = GetAxis(normal, i);
+        outCorners[9 + i] = (GetAxis(low, i) + GetAxis(high, i)) / 2.0;
     }
     return true;
 }
 
-[[nodiscard]] float64 Component(const Vertex& vertex, usize index) noexcept
+[[nodiscard]] float64 GetComponent(const Vertex& vertex, usize index) noexcept
 {
-    return index < 3 ? vertex.P.V[index] : index < 6 ? vertex.N.V[index - 3] : vertex.Uv[index - 6];
+    return index < 3   ? GetAxis(vertex.Position, index)
+           : index < 6 ? GetAxis(vertex.Normal, index - 3)
+                       : vertex.Uv[index - 6];
 }
 
-void SetComponent(Vertex& vertex, usize index, float64 value) noexcept
+void SetComponent(Vertex& inoutVertex, usize index, float64 value) noexcept
 {
     if (index < 3)
     {
-        vertex.P.V[index] = value;
+        SetAxis(inoutVertex.Position, index, value);
     }
     else if (index < 6)
     {
-        vertex.N.V[index - 3] = value;
+        SetAxis(inoutVertex.Normal, index - 3, value);
     }
     else
     {
-        vertex.Uv[index - 6] = value;
+        inoutVertex.Uv[index - 6] = value;
     }
 }
 
@@ -1570,37 +1559,37 @@ struct ClipPlane final
 {
     usize Axis = 0;
     float64 Limit = 0.0;
-    bool Greater = false;
+    bool IsGreater = false;
 };
 
-[[nodiscard]] bool Clip(const Array<Vertex>& poly, const ClipPlane& plane, Array<Vertex>& result) noexcept
+[[nodiscard]] bool Clip(const Array<Vertex>& polygon, const ClipPlane& plane, Array<Vertex>& outPolygon) noexcept
 {
-    result.Clear();
-    const usize count = poly.GetSize();
+    outPolygon.Clear();
+    const usize count = polygon.GetSize();
     for (usize i = 0; i < count; ++i)
     {
-        const Vertex& previous = poly[(i + count - 1) % count];
-        const Vertex& current = poly[i];
+        const Vertex& previous = polygon[(i + count - 1) % count];
+        const Vertex& current = polygon[i];
         const float64 a = previous.Uv[plane.Axis];
         const float64 b = current.Uv[plane.Axis];
-        const bool insideA = plane.Greater ? a >= plane.Limit : a <= plane.Limit;
-        const bool insideB = plane.Greater ? b >= plane.Limit : b <= plane.Limit;
-        if (insideA != insideB)
+        const bool isPreviousInside = plane.IsGreater ? a >= plane.Limit : a <= plane.Limit;
+        const bool isCurrentInside = plane.IsGreater ? b >= plane.Limit : b <= plane.Limit;
+        if (isPreviousInside != isCurrentInside)
         {
             const float64 t = (plane.Limit - a) / (b - a);
             Vertex mixed;
             for (usize k = 0; k < 8; ++k)
             {
-                const float64 x = Component(previous, k);
-                const float64 y = Component(current, k);
+                const float64 x = GetComponent(previous, k);
+                const float64 y = GetComponent(current, k);
                 SetComponent(mixed, k, x + t * (y - x));
             }
-            if (!result.TryAdd(mixed))
+            if (!outPolygon.TryAdd(mixed))
             {
                 return false;
             }
         }
-        if (insideB && !result.TryAdd(current))
+        if (isCurrentInside && !outPolygon.TryAdd(current))
         {
             return false;
         }
@@ -1608,70 +1597,71 @@ struct ClipPlane final
     return true;
 }
 
-struct Piece final
+struct AtlasPiece final
 {
-    Vertex V[3];
+    Vertex Vertices[3];
 };
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
-[[nodiscard]] bool AtlasCell(Failure& errors,
-                             const Vertex (&vertices)[3],
-                             float64 x,
-                             float64 y,
-                             float64 atlasWidth,
-                             float64 atlasHeight,
-                             Array<Piece>& output) noexcept
+[[nodiscard]] bool BuildAtlasCell(Failure& inoutErrors,
+                                  const Vertex (&vertices)[3],
+                                  float64 x,
+                                  float64 y,
+                                  float64 atlasWidth,
+                                  float64 atlasHeight,
+                                  Array<AtlasPiece>& inoutPieces) noexcept
 // NOLINTEND(bugprone-easily-swappable-parameters)
 {
-    Array<Vertex> poly;
+    Array<Vertex> polygon;
     Array<Vertex> next;
-    if (!poly.TryAddRange(std::span<const Vertex>(vertices, 3)))
+    if (!polygon.TryAddRange(std::span<const Vertex>(vertices, 3)))
     {
-        return errors.Memory();
+        return inoutErrors.FailOutOfMemory();
     }
     const ClipPlane planes[4] = {{0, x, true}, {0, x + 1.0, false}, {1, y, true}, {1, y + 1.0, false}};
     for (const ClipPlane& plane : planes)
     {
-        if (poly.GetSize() == 0)
+        if (polygon.GetSize() == 0)
         {
             break;
         }
-        if (!Clip(poly, plane, next))
+        if (!Clip(polygon, plane, next))
         {
-            return errors.Memory();
+            return inoutErrors.FailOutOfMemory();
         }
-        Array<Vertex> swap = static_cast<Array<Vertex>&&>(poly);
-        poly = static_cast<Array<Vertex>&&>(next);
+        Array<Vertex> swap = static_cast<Array<Vertex>&&>(polygon);
+        polygon = static_cast<Array<Vertex>&&>(next);
         next = static_cast<Array<Vertex>&&>(swap);
     }
-    for (usize i = 1; i + 1 < poly.GetSize(); ++i)
+    for (usize i = 1; i + 1 < polygon.GetSize(); ++i)
     {
-        const Vertex triangle[3] = {poly[0], poly[i], poly[i + 1]};
-        const Vec3 geometric = Cross(Sub(triangle[1].P, triangle[0].P), Sub(triangle[2].P, triangle[0].P));
-        if (Dot(geometric, geometric) < 1e-20)
+        const Vertex triangle[3] = {polygon[0], polygon[i], polygon[i + 1]};
+        const math::Vector3d geometric =
+            math::Cross((triangle[1].Position - triangle[0].Position), (triangle[2].Position - triangle[0].Position));
+        if (math::CompensatedDot(geometric, geometric) < 1e-20)
         {
             continue;
         }
-        Piece piece;
+        AtlasPiece piece;
         for (usize k = 0; k < 3; ++k)
         {
-            piece.V[k] = triangle[k];
-            piece.V[k].Uv[0] = (2.0 + (triangle[k].Uv[0] - x) * 512.0) / atlasWidth;
-            piece.V[k].Uv[1] = (2.0 + (triangle[k].Uv[1] - y) * 512.0) / atlasHeight;
+            piece.Vertices[k] = triangle[k];
+            piece.Vertices[k].Uv[0] = (2.0 + (triangle[k].Uv[0] - x) * 512.0) / atlasWidth;
+            piece.Vertices[k].Uv[1] = (2.0 + (triangle[k].Uv[1] - y) * 512.0) / atlasHeight;
         }
-        if (!output.TryAdd(piece))
+        if (!inoutPieces.TryAdd(piece))
         {
-            return errors.Memory();
+            return inoutErrors.FailOutOfMemory();
         }
     }
     return true;
 }
 
-[[nodiscard]] bool AtlasTriangles(Failure& errors,
-                                  const Vertex (&vertices)[3],
-                                  float64 atlasWidth,
-                                  float64 atlasHeight,
-                                  Array<Piece>& output) noexcept
+[[nodiscard]] bool BuildAtlasTriangles(Failure& inoutErrors,
+                                       const Vertex (&vertices)[3],
+                                       float64 atlasWidth,
+                                       float64 atlasHeight,
+                                       Array<AtlasPiece>& outPieces) noexcept
 {
     float64 minimum[2] = {vertices[0].Uv[0], vertices[0].Uv[1]};
     float64 maximum[2] = {vertices[0].Uv[0], vertices[0].Uv[1]};
@@ -1689,13 +1679,13 @@ struct Piece final
     const float64 cellsY = math::Floor(maximum[1]) - lowY + 1.0;
     if (cellsX * cellsY > 256.0)
     {
-        return errors.Invalid("wallpaper repeat clipping limit");
+        return inoutErrors.FailInvalid("wallpaper repeat clipping limit");
     }
-    for (float64 ix = 0.0; ix < cellsX; ix += 1.0)
+    for (float64 cellX = 0.0; cellX < cellsX; cellX += 1.0)
     {
-        for (float64 iy = 0.0; iy < cellsY; iy += 1.0)
+        for (float64 cellY = 0.0; cellY < cellsY; cellY += 1.0)
         {
-            if (!AtlasCell(errors, vertices, lowX + ix, lowY + iy, atlasWidth, atlasHeight, output))
+            if (!BuildAtlasCell(inoutErrors, vertices, lowX + cellX, lowY + cellY, atlasWidth, atlasHeight, outPieces))
             {
                 return false;
             }
@@ -1709,12 +1699,13 @@ struct Piece final
 
 struct Color final
 {
-    float64 V[3]{};
+    float64 Components[3]{};
 };
 
-[[nodiscard]] bool SameColor(const Color& a, const Color& b) noexcept
+[[nodiscard]] bool IsSameColor(const Color& a, const Color& b) noexcept
 {
-    return a.V[0] == b.V[0] && a.V[1] == b.V[1] && a.V[2] == b.V[2];
+    return a.Components[0] == b.Components[0] && a.Components[1] == b.Components[1] &&
+           a.Components[2] == b.Components[2];
 }
 
 struct Cooker final
@@ -1722,9 +1713,9 @@ struct Cooker final
     static constexpr usize ATLAS_WIDTH = 544;
     static constexpr usize ATLAS_HEIGHT = 516;
 
-    Cooker(Context& context, Scene& source) noexcept : Ctx(context), Source(source) {}
+    Cooker(CookContext& inoutContext, Scene& inoutSource) noexcept : Context(inoutContext), Source(inoutSource) {}
 
-    Context& Ctx;
+    CookContext& Context;
     Scene& Source;
     Array<Image> Images;
     usize Wallpaper = 0;
@@ -1733,7 +1724,7 @@ struct Cooker final
     Mesh Meshes[6];
     Array<Material> Materials;
     Array<Color> Emissions;
-    Array<Item> EmitterItems;
+    Array<SceneItem> EmitterItems;
     Array<std::string_view> Inputs;
     int64 SourceTriangles = 0;
     int64 SourceMeshes = 0;
@@ -1749,43 +1740,43 @@ struct Cooker final
                 return true;
             }
         }
-        return Inputs.TryAdd(path) || Ctx.Errors.Memory();
+        return Inputs.TryAdd(path) || Context.Errors.FailOutOfMemory();
     }
 
     // solid(): one 16x16 sRGB block per distinct base colour.
-    [[nodiscard]] bool Solid(const Array<float64>& color, float64 (&uv)[2]) noexcept
+    [[nodiscard]] bool FindOrAddSolidBlock(const Array<float64>& color, float64 (&outUv)[2]) noexcept
     {
-        Failure& errors = Ctx.Errors;
+        Failure& errors = Context.Errors;
         if (color.GetSize() != 3)
         {
-            return errors.Invalid("base color profile");
+            return errors.FailInvalid("base color profile");
         }
         Color value;
         for (usize i = 0; i < 3; ++i)
         {
             if (color[i] < 0.0 || color[i] > 1.0)
             {
-                return errors.Invalid("base color profile");
+                return errors.FailInvalid("base color profile");
             }
-            value.V[i] = color[i];
+            value.Components[i] = color[i];
         }
         usize index = Colors.GetSize();
         for (usize i = 0; i < Colors.GetSize() && index == Colors.GetSize(); ++i)
         {
-            index = SameColor(Colors[i], value) ? i : index;
+            index = IsSameColor(Colors[i], value) ? i : index;
         }
         if (index == Colors.GetSize() && !Colors.TryAdd(value))
         {
-            return errors.Memory();
+            return errors.FailOutOfMemory();
         }
         if (index >= 16)
         {
-            return errors.Invalid("solid atlas limit");
+            return errors.FailInvalid("solid atlas limit");
         }
         uint8 rgba[4] = {0, 0, 0, 255};
         for (usize i = 0; i < 3; ++i)
         {
-            const float64 v = value.V[i];
+            const float64 v = value.Components[i];
             const float64 encoded = v <= 0.0031308 ? 12.92 * v : 1.055 * math::Pow(v, 1.0 / 2.4) - 0.055;
             const float64 rounded = RoundHalfEven(255.0 * encoded);
             rgba[i] = static_cast<uint8>(rounded < 0.0 ? 0.0 : rounded > 255.0 ? 255.0 : rounded);
@@ -1801,368 +1792,374 @@ struct Cooker final
                 }
             }
         }
-        uv[0] = 528.5 / static_cast<float64>(ATLAS_WIDTH);
-        uv[1] = (static_cast<float64>(index * 16) + 8.5) / static_cast<float64>(ATLAS_HEIGHT);
+        outUv[0] = 528.5 / static_cast<float64>(ATLAS_WIDTH);
+        outUv[1] = (static_cast<float64>(index * 16) + 8.5) / static_cast<float64>(ATLAS_HEIGHT);
         return true;
     }
 
-    [[nodiscard]] const Param* MaterialParam(const MaterialRef& material, std::string_view key) const noexcept
+    [[nodiscard]] const Parameter* FindMaterialParameter(const MaterialReference& material,
+                                                         std::string_view key) const noexcept
     {
-        return FindParam(Source.Commands[material.CommandIndex], key);
+        return FindParameter(Source.Commands[material.CommandIndex], key);
     }
 
-    [[nodiscard]] bool MaterialType(const MaterialRef& material, std::string_view& type) noexcept
+    [[nodiscard]] bool GetMaterialType(const MaterialReference& material, std::string_view& outType) noexcept
     {
         const Command& command = Source.Commands[material.CommandIndex];
-        if (material.Inline)
+        if (material.IsInline)
         {
             if (command.Names.GetSize() == 0)
             {
-                return Ctx.Errors.Invalid("list index out of range");
+                return Context.Errors.FailInvalid("list index out of range");
             }
-            type = command.Names[0].List ? std::string_view("<list>") : command.Names[0].Text.GetView();
+            outType = command.Names[0].IsList ? std::string_view("<list>") : command.Names[0].Text.GetView();
             return true;
         }
-        const Param* param = FindParam(command, "string type");
-        if (param == nullptr)
+        const Parameter* parameter = FindParameter(command, "string type");
+        if (parameter == nullptr)
         {
-            return Ctx.Errors.Invalid("missing parameter string type");
+            return Context.Errors.FailInvalid("missing parameter string type");
         }
-        if (param->Values.GetSize() == 0)
+        if (parameter->Values.GetSize() == 0)
         {
-            return Ctx.Errors.Invalid("list index out of range");
+            return Context.Errors.FailInvalid("list index out of range");
         }
-        type = param->Values[0].GetView();
+        outType = parameter->Values[0].GetView();
         return true;
     }
 
     // finite(material.get(key, [])) == [expected]
-    [[nodiscard]] bool
-    RoughnessIs(const MaterialRef& material, std::string_view key, float64 expected, bool& equal) noexcept
+    [[nodiscard]] bool IsRoughnessEqual(const MaterialReference& material,
+                                        std::string_view key,
+                                        float64 expected,
+                                        bool& outIsEqual) noexcept
     {
-        const Param* param = MaterialParam(material, key);
+        const Parameter* parameter = FindMaterialParameter(material, key);
         Array<float64> values;
-        if (param != nullptr && !Ctx.Finite(param->Values, values))
+        if (parameter != nullptr && !Context.ParseFiniteValues(parameter->Values, values))
         {
             return false;
         }
-        equal = values.GetSize() == 1 && values[0] == expected;
+        outIsEqual = values.GetSize() == 1 && values[0] == expected;
         return true;
     }
 
     [[nodiscard]] bool
-    RoughnessProfile(const MaterialRef& material, float64 expected, std::string_view message) noexcept
+    CheckRoughnessProfile(const MaterialReference& material, float64 expected, std::string_view message) noexcept
     {
-        if (!ValuesEqual(MaterialParam(material, "bool remaproughness"), "false"))
+        if (!HasSingleValue(FindMaterialParameter(material, "bool remaproughness"), "false"))
         {
-            return Ctx.Errors.Invalid(message);
+            return Context.Errors.FailInvalid(message);
         }
-        bool uOk = false;
-        bool vOk = false;
-        if (!RoughnessIs(material, "float uroughness", expected, uOk) ||
-            (uOk && !RoughnessIs(material, "float vroughness", expected, vOk)))
+        bool isURoughnessOk = false;
+        bool isVRoughnessOk = false;
+        if (!IsRoughnessEqual(material, "float uroughness", expected, isURoughnessOk) ||
+            (isURoughnessOk && !IsRoughnessEqual(material, "float vroughness", expected, isVRoughnessOk)))
         {
             return false;
         }
-        return (uOk && vOk) || Ctx.Errors.Invalid(message);
+        return (isURoughnessOk && isVRoughnessOk) || Context.Errors.FailInvalid(message);
     }
 
     [[nodiscard]] bool
-    LoadTriangleMesh(const Command& command, Array<Point>& points, Array<Triangle>& triangles) noexcept
+    LoadTriangleMesh(const Command& command, Array<Point>& inoutPoints, Array<Triangle>& inoutTriangles) noexcept
     {
-        Failure& errors = Ctx.Errors;
+        Failure& errors = Context.Errors;
         Array<float64> positions;
         Array<float64> normals;
         Array<float64> uv;
-        if (!Ctx.FiniteParam(FindParam(command, "point3 P"), positions, "point3 P") ||
-            !Ctx.FiniteParam(FindParam(command, "normal N"), normals, "normal N") ||
-            !Ctx.FiniteParam(FindParam(command, "point2 uv"), uv, "point2 uv"))
+        if (!Context.ParseFiniteParameter(FindParameter(command, "point3 P"), positions, "point3 P") ||
+            !Context.ParseFiniteParameter(FindParameter(command, "normal N"), normals, "normal N") ||
+            !Context.ParseFiniteParameter(FindParameter(command, "point2 uv"), uv, "point2 uv"))
         {
             return false;
         }
         if (positions.GetSize() % 3 != 0)
         {
-            return errors.Invalid("trianglemesh positions are not whole points");
+            return errors.FailInvalid("trianglemesh positions are not whole points");
         }
         const usize count = positions.GetSize() / 3;
-        if (!points.TryResize(count))
+        if (!inoutPoints.TryResize(count))
         {
-            return errors.Memory();
+            return errors.FailOutOfMemory();
         }
         for (usize p = 0; p < count; ++p)
         {
-            Point& point = points[p];
+            Point& point = inoutPoints[p];
             for (usize k = 0; k < 3; ++k)
             {
-                point.P.V[k] = positions[3 * p + k];
+                SetAxis(point.Position, k, positions[3 * p + k]);
             }
             const usize available = normals.GetSize() > 3 * p ? normals.GetSize() - 3 * p : 0;
             point.NormalCount = static_cast<uint8>(available >= 3 ? 3 : available);
             for (usize k = 0; k < point.NormalCount; ++k)
             {
-                point.N.V[k] = normals[3 * p + k];
+                SetAxis(point.Normal, k, normals[3 * p + k]);
             }
             if (uv.GetSize() <= 2 * p + 1)
             {
-                return errors.Invalid("list index out of range");
+                return errors.FailInvalid("list index out of range");
             }
             point.Uv[0] = uv[2 * p];
             point.Uv[1] = 1.0 - uv[2 * p + 1];
         }
-        const Param* indices = FindParam(command, "integer indices");
+        const Parameter* indices = FindParameter(command, "integer indices");
         if (indices == nullptr)
         {
-            return errors.Invalid("missing parameter integer indices");
+            return errors.FailInvalid("missing parameter integer indices");
         }
         if (indices->Values.GetSize() % 3 != 0)
         {
-            return errors.Invalid("list index out of range");
+            return errors.FailInvalid("list index out of range");
         }
         for (usize i = 0; i < indices->Values.GetSize(); i += 3)
         {
             Triangle triangle;
             for (usize k = 0; k < 3; ++k)
             {
-                if (!ParseInt(indices->Values[i + k].GetView(), triangle.I[k]))
+                if (!ParseInt(indices->Values[i + k].GetView(), triangle.Indices[k]))
                 {
-                    return errors.Invalid("invalid literal for int() with base 10");
+                    return errors.FailInvalid("invalid literal for int() with base 10");
                 }
             }
-            if (!triangles.TryAdd(triangle))
+            if (!inoutTriangles.TryAdd(triangle))
             {
-                return errors.Memory();
+                return errors.FailOutOfMemory();
             }
         }
-        SourceTriangles += static_cast<int64>(triangles.GetSize());
+        SourceTriangles += static_cast<int64>(inoutTriangles.GetSize());
         return true;
     }
 
-    [[nodiscard]] bool
-    LoadPoints(const Shape& shape, std::string_view kind, Array<Point>& points, Array<Triangle>& triangles) noexcept
+    [[nodiscard]] bool LoadPoints(const Shape& shape,
+                                  std::string_view kind,
+                                  Array<Point>& inoutPoints,
+                                  Array<Triangle>& inoutTriangles) noexcept
     {
-        Failure& errors = Ctx.Errors;
+        Failure& errors = Context.Errors;
         const Command& command = Source.Commands[shape.CommandIndex];
         if (kind == "plymesh")
         {
-            const Param* file = FindParam(command, "string filename");
+            const Parameter* file = FindParameter(command, "string filename");
             if (file == nullptr || file->Values.GetSize() == 0)
             {
-                return errors.Invalid("missing parameter string filename");
+                return errors.FailInvalid("missing parameter string filename");
             }
             const std::string_view path = file->Values[0].GetView();
             String normalised;
-            if (!AddInput(path) || !Ctx.AssetPath(path, normalised) ||
-                !ReadPly(Ctx, normalised.GetView(), points, triangles))
+            if (!AddInput(path) || !Context.ResolveAssetPath(path, normalised) ||
+                !ReadPly(Context, normalised.GetView(), inoutPoints, inoutTriangles))
             {
                 return false;
             }
             SourceMeshes += 1;
-            SourceTriangles += static_cast<int64>(triangles.GetSize());
+            SourceTriangles += static_cast<int64>(inoutTriangles.GetSize());
             return true;
         }
         if (kind == "trianglemesh")
         {
-            return LoadTriangleMesh(command, points, triangles);
+            return LoadTriangleMesh(command, inoutPoints, inoutTriangles);
         }
         if (kind == "disk")
         {
             return true;
         }
-        return errors.Invalid("unsupported shape ", kind);
+        return errors.FailInvalid("unsupported shape ", kind);
     }
 
-    [[nodiscard]] bool DiskItem(const Command& command, const float64 (&transform)[16], Item& item) noexcept
+    [[nodiscard]] bool
+    MakeDiskItem(const Command& command, const math::Matrix4d& transform, SceneItem& outItem) noexcept
     {
-        Failure& errors = Ctx.Errors;
+        Failure& errors = Context.Errors;
         Array<float64> radius;
-        if (!Ctx.FiniteParam(FindParam(command, "float radius"), radius, "float radius"))
+        if (!Context.ParseFiniteParameter(FindParameter(command, "float radius"), radius, "float radius"))
         {
             return false;
         }
         if (radius.GetSize() == 0)
         {
-            return errors.Invalid("list index out of range");
+            return errors.FailInvalid("list index out of range");
         }
         if (radius[0] <= 0.0 || radius[0] > 1.0)
         {
-            return errors.Invalid("disk radius profile");
+            return errors.FailInvalid("disk radius profile");
         }
-        const Vec3 x = Mul(TransformVector(transform, Vec3{{1.0, 0.0, 0.0}}), radius[0]);
-        const Vec3 y = Mul(TransformVector(transform, Vec3{{0.0, 1.0, 0.0}}), radius[0]);
-        const Vec3 z = TransformVector(transform, Vec3{{0.0, 0.0, 1.0}});
-        const Vec3 o = TransformPoint(transform, Vec3{{0.0, 0.0, 0.0}});
-        item.Mesh = 5;
+        const math::Vector3d x = (TransformVector(transform, math::Vector3d{1.0, 0.0, 0.0}) * radius[0]);
+        const math::Vector3d y = (TransformVector(transform, math::Vector3d{0.0, 1.0, 0.0}) * radius[0]);
+        const math::Vector3d z = TransformVector(transform, math::Vector3d{0.0, 0.0, 1.0});
+        const math::Vector3d origin = TransformPoint(transform, math::Vector3d{0.0, 0.0, 0.0});
+        outItem.Mesh = 5;
         for (usize k = 0; k < 3; ++k)
         {
-            item.Transform[k] = x.V[k];
-            item.Transform[3 + k] = y.V[k];
-            item.Transform[6 + k] = z.V[k];
-            item.Transform[9 + k] = o.V[k];
+            outItem.Transform[k] = GetAxis(x, k);
+            outItem.Transform[3 + k] = GetAxis(y, k);
+            outItem.Transform[6 + k] = GetAxis(z, k);
+            outItem.Transform[9 + k] = GetAxis(origin, k);
         }
         return true;
     }
 
-    [[nodiscard]] bool QuadItem(const Array<Point>& points,
-                                const Array<Triangle>& triangles,
-                                const float64 (&transform)[16],
-                                Item& item) noexcept
+    [[nodiscard]] bool MakeQuadItem(const Array<Point>& points,
+                                    const Array<Triangle>& triangles,
+                                    const math::Matrix4d& transform,
+                                    SceneItem& outItem) noexcept
     {
-        Failure& errors = Ctx.Errors;
-        const bool quad = points.GetSize() == 4 && triangles.GetSize() == 2 && triangles[0].I[0] == 0 &&
-                          triangles[0].I[1] == 1 && triangles[0].I[2] == 2 && triangles[1].I[0] == 0 &&
-                          triangles[1].I[1] == 2 && triangles[1].I[2] == 3;
-        if (!quad)
+        Failure& errors = Context.Errors;
+        const bool isQuad = points.GetSize() == 4 && triangles.GetSize() == 2 && triangles[0].Indices[0] == 0 &&
+                            triangles[0].Indices[1] == 1 && triangles[0].Indices[2] == 2 &&
+                            triangles[1].Indices[0] == 0 && triangles[1].Indices[1] == 2 &&
+                            triangles[1].Indices[2] == 3;
+        if (!isQuad)
         {
-            return errors.Invalid("unsupported emissive quad");
+            return errors.FailInvalid("unsupported emissive quad");
         }
-        Vec3 p[4];
+        math::Vector3d p[4];
         for (usize k = 0; k < 4; ++k)
         {
-            p[k] = TransformPoint(transform, points[k].P);
+            p[k] = TransformPoint(transform, points[k].Position);
         }
-        const Vec3 u = Mul(Sub(p[1], p[0]), 0.5);
-        const Vec3 v = Mul(Sub(p[3], p[0]), 0.5);
-        const Vec3 corner = Add(p[0], Add(Mul(u, 2.0), Mul(v, 2.0)));
-        float64 deviation = Abs(corner.V[0] - p[2].V[0]);
+        const math::Vector3d u = ((p[1] - p[0]) * 0.5);
+        const math::Vector3d v = ((p[3] - p[0]) * 0.5);
+        const math::Vector3d corner = (p[0] + ((u * 2.0) + (v * 2.0)));
+        float64 deviation = math::Abs(corner.X - p[2].X);
         for (usize k = 1; k < 3; ++k)
         {
-            const float64 value = Abs(corner.V[k] - p[2].V[k]);
+            const float64 value = math::Abs(GetAxis(corner, k) - GetAxis(p[2], k));
             deviation = value > deviation ? value : deviation;
         }
         if (deviation > 1e-4)
         {
-            return errors.Invalid("non-parallelogram emitter");
+            return errors.FailInvalid("non-parallelogram emitter");
         }
-        Vec3 normal;
-        if (!Unit(errors, Cross(u, v), normal))
+        math::Vector3d normal;
+        if (!NormaliseVector(errors, math::Cross(u, v), normal))
         {
             return false;
         }
-        const Vec3 centre = Mul(Add(p[0], p[2]), 0.5);
-        item.Mesh = 4;
+        const math::Vector3d centre = ((p[0] + p[2]) * 0.5);
+        outItem.Mesh = 4;
         for (usize k = 0; k < 3; ++k)
         {
-            item.Transform[k] = u.V[k];
-            item.Transform[3 + k] = v.V[k];
-            item.Transform[6 + k] = normal.V[k];
-            item.Transform[9 + k] = centre.V[k];
+            outItem.Transform[k] = GetAxis(u, k);
+            outItem.Transform[3 + k] = GetAxis(v, k);
+            outItem.Transform[6 + k] = GetAxis(normal, k);
+            outItem.Transform[9 + k] = GetAxis(centre, k);
         }
         return true;
     }
 
-    [[nodiscard]] bool Emitter(const Shape& shape,
-                               std::string_view kind,
-                               const Array<Point>& points,
-                               const Array<Triangle>& triangles) noexcept
+    [[nodiscard]] bool CookEmitter(const Shape& shape,
+                                   std::string_view kind,
+                                   const Array<Point>& points,
+                                   const Array<Triangle>& triangles) noexcept
     {
-        Failure& errors = Ctx.Errors;
+        Failure& errors = Context.Errors;
         const Color emission{{shape.Graphics.Emission[0], shape.Graphics.Emission[1], shape.Graphics.Emission[2]}};
         usize index = Emissions.GetSize();
         for (usize i = 0; i < Emissions.GetSize() && index == Emissions.GetSize(); ++i)
         {
-            index = SameColor(Emissions[i], emission) ? i : index;
+            index = IsSameColor(Emissions[i], emission) ? i : index;
         }
         if (index == Emissions.GetSize() && !Emissions.TryAdd(emission))
         {
-            return errors.Memory();
+            return errors.FailOutOfMemory();
         }
-        Item item;
+        SceneItem item;
         item.Material = static_cast<uint32>(4 + index);
-        const float64(&transform)[16] = shape.Graphics.Transform;
-        bool ok = false;
+        const math::Matrix4d& transform = shape.Graphics.Transform;
+        bool isOk = false;
         if (kind == "disk")
         {
-            ok = DiskItem(Source.Commands[shape.CommandIndex], transform, item);
+            isOk = MakeDiskItem(Source.Commands[shape.CommandIndex], transform, item);
         }
         else if (kind == "plymesh")
         {
-            for (usize k = 0; k < 16; ++k)
+            if (transform != math::Matrix4d::Identity())
             {
-                if (transform[k] != IDENTITY[k])
-                {
-                    return errors.Invalid("transformed rectangle profile not supported");
-                }
+                return errors.FailInvalid("transformed rectangle profile not supported");
             }
             item.Mesh = 4;
-            ok = Rectangle(errors, points, triangles, item.Transform);
+            isOk = ComputeRectangle(errors, points, triangles, item.Transform);
         }
         else
         {
-            ok = QuadItem(points, triangles, transform, item);
+            isOk = MakeQuadItem(points, triangles, transform, item);
         }
-        return ok && (EmitterItems.TryAdd(item) || errors.Memory());
+        return isOk && (EmitterItems.TryAdd(item) || errors.FailOutOfMemory());
     }
 
     // Material classification: group index plus an optional fixed solid-colour UV.
     // NOLINTBEGIN(bugprone-easily-swappable-parameters)
-    [[nodiscard]] bool
-    Classify(const MaterialRef& material, usize& group, bool& hasFixedUv, float64 (&fixedUv)[2]) noexcept
+    [[nodiscard]] bool ClassifyMaterial(const MaterialReference& material,
+                                        usize& outGroup,
+                                        bool& outHasFixedUv,
+                                        float64 (&outFixedUv)[2]) noexcept
     // NOLINTEND(bugprone-easily-swappable-parameters)
     {
-        Failure& errors = Ctx.Errors;
+        Failure& errors = Context.Errors;
         std::string_view type;
-        if (!MaterialType(material, type))
+        if (!GetMaterialType(material, type))
         {
             return false;
         }
-        hasFixedUv = false;
+        outHasFixedUv = false;
         if (type == "conductor")
         {
-            if (!RoughnessProfile(material, 0.1, "conductor roughness profile"))
+            if (!CheckRoughnessProfile(material, 0.1, "conductor roughness profile"))
             {
                 return false;
             }
             Array<float64> eta;
             Array<float64> k;
-            if (!Ctx.FiniteParam(MaterialParam(material, "rgb eta"), eta, "rgb eta") ||
-                !Ctx.FiniteParam(MaterialParam(material, "rgb k"), k, "rgb k"))
+            if (!Context.ParseFiniteParameter(FindMaterialParameter(material, "rgb eta"), eta, "rgb eta") ||
+                !Context.ParseFiniteParameter(FindMaterialParameter(material, "rgb k"), k, "rgb k"))
             {
                 return false;
             }
             if (eta.GetSize() != 3 || k.GetSize() != 3)
             {
-                return errors.Invalid("conductor eta/k profile");
+                return errors.FailInvalid("conductor eta/k profile");
             }
             Array<float64> color;
             if (!color.TryResize(3))
             {
-                return errors.Memory();
+                return errors.FailOutOfMemory();
             }
             for (usize i = 0; i < 3; ++i)
             {
                 if (eta[i] < 0.0 || k[i] < 0.0)
                 {
-                    return errors.Invalid("conductor eta/k profile");
+                    return errors.FailInvalid("conductor eta/k profile");
                 }
             }
             for (usize i = 0; i < 3; ++i)
             {
-                const float64 e = eta[i];
+                const float64 etaValue = eta[i];
                 const float64 a = k[i];
-                color[i] = (math::Pow(e - 1.0, 2.0) + a * a) / (math::Pow(e + 1.0, 2.0) + a * a);
+                color[i] = (math::Pow(etaValue - 1.0, 2.0) + a * a) / (math::Pow(etaValue + 1.0, 2.0) + a * a);
             }
-            group = 3;
-            hasFixedUv = true;
-            return Solid(color, fixedUv);
+            outGroup = 3;
+            outHasFixedUv = true;
+            return FindOrAddSolidBlock(color, outFixedUv);
         }
         if (type != "diffuse" && type != "coateddiffuse")
         {
-            return errors.Invalid("unsupported material ", type);
+            return errors.FailInvalid("unsupported material ", type);
         }
-        const Param* reflectance = MaterialParam(material, "texture reflectance");
+        const Parameter* reflectance = FindMaterialParameter(material, "texture reflectance");
         bool hasTexture = false;
         std::string_view texture;
         if (reflectance != nullptr)
         {
             if (reflectance->Values.GetSize() == 0)
             {
-                return errors.Invalid("list index out of range");
+                return errors.FailInvalid("list index out of range");
             }
             hasTexture = true;
             texture = reflectance->Values[0].GetView();
         }
         std::string_view textureFile;
-        bool known = false;
+        bool isKnown = false;
         usize textureIndex = 0;
         for (usize i = 0; hasTexture && i < Source.Textures.GetSize(); ++i)
         {
@@ -2170,140 +2167,141 @@ struct Cooker final
             {
                 textureFile = Source.Textures[i].File;
                 textureIndex = i;
-                known = true;
+                isKnown = true;
             }
         }
-        group = EndsWith(textureFile, "wood5.tga") ? 1 : EndsWith(textureFile, "Tiles.tga") ? 2 : 0;
-        if (hasTexture && !known)
+        outGroup = EndsWith(textureFile, "wood5.tga") ? 1 : EndsWith(textureFile, "Tiles.tga") ? 2 : 0;
+        if (hasTexture && !isKnown)
         {
-            return errors.Invalid("unknown reflectance texture");
+            return errors.FailInvalid("unknown reflectance texture");
         }
-        if (hasTexture && group == 0 && textureIndex != Wallpaper)
+        if (hasTexture && outGroup == 0 && textureIndex != Wallpaper)
         {
-            return errors.Invalid("diffuse texture profile");
+            return errors.FailInvalid("diffuse texture profile");
         }
         if (type == "coateddiffuse")
         {
-            if (group != 1 && group != 2)
+            if (outGroup != 1 && outGroup != 2)
             {
-                return errors.Invalid("coated diffuse roughness profile");
+                return errors.FailInvalid("coated diffuse roughness profile");
             }
-            if (!RoughnessProfile(material, group == 1 ? 0.1 : 0.01, "coated diffuse roughness profile"))
+            if (!CheckRoughnessProfile(material, outGroup == 1 ? 0.1 : 0.01, "coated diffuse roughness profile"))
             {
                 return false;
             }
         }
-        else if (group != 0)
+        else if (outGroup != 0)
         {
-            return errors.Invalid("diffuse material profile");
+            return errors.FailInvalid("diffuse material profile");
         }
         if (hasTexture && !texture.empty())
         {
             return true;
         }
         Array<float64> color;
-        const Param* rgb = MaterialParam(material, "rgb reflectance");
+        const Parameter* rgb = FindMaterialParameter(material, "rgb reflectance");
         if (rgb != nullptr)
         {
-            if (!Ctx.Finite(rgb->Values, color))
+            if (!Context.ParseFiniteValues(rgb->Values, color))
             {
                 return false;
             }
         }
         else if (!color.TryResize(3, 0.5))
         {
-            return errors.Memory();
+            return errors.FailOutOfMemory();
         }
-        hasFixedUv = true;
-        return Solid(color, fixedUv);
+        outHasFixedUv = true;
+        return FindOrAddSolidBlock(color, outFixedUv);
     }
 
-    [[nodiscard]] bool TriangleVertices(const Array<Point>& points,
-                                        const Triangle& triangle,
-                                        Vertex (&vertices)[3],
-                                        bool& degenerate) noexcept
+    [[nodiscard]] bool GetTriangleVertices(const Array<Point>& points,
+                                           const Triangle& triangle,
+                                           Vertex (&outVertices)[3],
+                                           bool& outIsDegenerate) noexcept
     {
-        Failure& errors = Ctx.Errors;
+        Failure& errors = Context.Errors;
         const auto count = static_cast<int64>(points.GetSize());
         const Point* source[3]{};
         for (usize k = 0; k < 3; ++k)
         {
-            int64 index = triangle.I[k];
+            int64 index = triangle.Indices[k];
             index = index < 0 ? index + count : index; // Python negative indexing.
             if (index < 0 || index >= count)
             {
-                return errors.Invalid("list index out of range");
+                return errors.FailInvalid("list index out of range");
             }
             source[k] = &points[static_cast<usize>(index)];
         }
-        const Vec3 geometric = Cross(Sub(source[1]->P, source[0]->P), Sub(source[2]->P, source[0]->P));
-        degenerate = Dot(geometric, geometric) < 1e-24;
-        if (degenerate)
+        const math::Vector3d geometric =
+            math::Cross((source[1]->Position - source[0]->Position), (source[2]->Position - source[0]->Position));
+        outIsDegenerate = math::CompensatedDot(geometric, geometric) < 1e-24;
+        if (outIsDegenerate)
         {
             return true;
         }
-        Vec3 normal;
-        if (!Unit(errors, geometric, normal))
+        math::Vector3d normal;
+        if (!NormaliseVector(errors, geometric, normal))
         {
             return false;
         }
         for (usize k = 0; k < 3; ++k)
         {
-            vertices[k].P = source[k]->P;
-            vertices[k].Uv[0] = source[k]->Uv[0];
-            vertices[k].Uv[1] = source[k]->Uv[1];
+            outVertices[k].Position = source[k]->Position;
+            outVertices[k].Uv[0] = source[k]->Uv[0];
+            outVertices[k].Uv[1] = source[k]->Uv[1];
             if (source[k]->NormalCount == 3)
             {
-                if (!Unit(errors, source[k]->N, vertices[k].N))
+                if (!NormaliseVector(errors, source[k]->Normal, outVertices[k].Normal))
                 {
                     return false;
                 }
             }
             else if (source[k]->NormalCount == 0)
             {
-                vertices[k].N = normal;
+                outVertices[k].Normal = normal;
             }
             else
             {
-                return errors.Invalid("incomplete trianglemesh normal");
+                return errors.FailInvalid("incomplete trianglemesh normal");
             }
         }
         return true;
     }
 
     [[nodiscard]] bool
-    Surface(const Shape& shape, const Array<Point>& points, const Array<Triangle>& triangles) noexcept
+    CookSurface(const Shape& shape, const Array<Point>& points, const Array<Triangle>& triangles) noexcept
     {
-        Failure& errors = Ctx.Errors;
+        Failure& errors = Context.Errors;
         usize group = 0;
         bool hasFixedUv = false;
         float64 fixedUv[2]{};
-        if (!Classify(Source.Materials[static_cast<usize>(shape.Graphics.Material)], group, hasFixedUv, fixedUv))
+        if (!ClassifyMaterial(Source.Materials[static_cast<usize>(shape.Graphics.Material)],
+                              group,
+                              hasFixedUv,
+                              fixedUv))
         {
             return false;
         }
-        for (usize k = 0; k < 16; ++k)
+        if (shape.Graphics.Transform != math::Matrix4d::Identity())
         {
-            if (shape.Graphics.Transform[k] != IDENTITY[k])
-            {
-                return errors.Invalid("transformed room mesh profile not supported");
-            }
+            return errors.FailInvalid("transformed room mesh profile not supported");
         }
         Mesh& mesh = Meshes[group];
-        Array<Piece> pieces;
+        Array<AtlasPiece> pieces;
         for (usize triangleIndex = 0; triangleIndex < triangles.GetSize(); ++triangleIndex)
         {
-            if (triangleIndex % 256 == 0 && !Ctx.CheckCancel())
+            if (triangleIndex % 256 == 0 && !Context.CheckCancellation())
             {
                 return false;
             }
             Vertex vertices[3];
-            bool degenerate = false;
-            if (!TriangleVertices(points, triangles[triangleIndex], vertices, degenerate))
+            bool isDegenerate = false;
+            if (!GetTriangleVertices(points, triangles[triangleIndex], vertices, isDegenerate))
             {
                 return false;
             }
-            if (degenerate)
+            if (isDegenerate)
             {
                 DegenerateTriangles += 1;
                 continue;
@@ -2311,33 +2309,33 @@ struct Cooker final
             pieces.Clear();
             if (hasFixedUv)
             {
-                Piece piece{{vertices[0], vertices[1], vertices[2]}};
-                for (Vertex& vertex : piece.V)
+                AtlasPiece piece{{vertices[0], vertices[1], vertices[2]}};
+                for (Vertex& vertex : piece.Vertices)
                 {
                     vertex.Uv[0] = fixedUv[0];
                     vertex.Uv[1] = fixedUv[1];
                 }
                 if (!pieces.TryAdd(piece))
                 {
-                    return errors.Memory();
+                    return errors.FailOutOfMemory();
                 }
             }
             else if (group == 0)
             {
-                if (!AtlasTriangles(errors,
-                                    vertices,
-                                    static_cast<float64>(ATLAS_WIDTH),
-                                    static_cast<float64>(ATLAS_HEIGHT),
-                                    pieces))
+                if (!BuildAtlasTriangles(errors,
+                                         vertices,
+                                         static_cast<float64>(ATLAS_WIDTH),
+                                         static_cast<float64>(ATLAS_HEIGHT),
+                                         pieces))
                 {
                     return false;
                 }
             }
-            else if (!pieces.TryAdd(Piece{{vertices[0], vertices[1], vertices[2]}}))
+            else if (!pieces.TryAdd(AtlasPiece{{vertices[0], vertices[1], vertices[2]}}))
             {
-                return errors.Memory();
+                return errors.FailOutOfMemory();
             }
-            for (const Piece& piece : pieces)
+            for (const AtlasPiece& piece : pieces)
             {
                 CookedVertices += 3;
                 if (CookedVertices > 500000)
@@ -2347,9 +2345,9 @@ struct Cooker final
                 const auto base = static_cast<uint32>(mesh.Vertices.GetSize());
                 for (usize k = 0; k < 3; ++k)
                 {
-                    if (!mesh.Indices.TryAdd(base + static_cast<uint32>(k)) || !mesh.Vertices.TryAdd(piece.V[k]))
+                    if (!mesh.Indices.TryAdd(base + static_cast<uint32>(k)) || !mesh.Vertices.TryAdd(piece.Vertices[k]))
                     {
-                        return errors.Memory();
+                        return errors.FailOutOfMemory();
                     }
                 }
             }
@@ -2358,90 +2356,91 @@ struct Cooker final
     }
 };
 
-[[nodiscard]] bool LoadTextures(Cooker& cooker) noexcept
+[[nodiscard]] bool LoadTextures(Cooker& inoutCooker) noexcept
 {
-    Context& context = cooker.Ctx;
+    CookContext& context = inoutCooker.Context;
     Failure& errors = context.Errors;
     usize decoded = 0;
-    if (!cooker.Images.TryResize(cooker.Source.Textures.GetSize()))
+    if (!inoutCooker.Images.TryResize(inoutCooker.Source.Textures.GetSize()))
     {
-        return errors.Memory();
+        return errors.FailOutOfMemory();
     }
-    for (usize i = 0; i < cooker.Source.Textures.GetSize(); ++i)
+    for (usize i = 0; i < inoutCooker.Source.Textures.GetSize(); ++i)
     {
-        const std::string_view path = cooker.Source.Textures[i].File;
+        const std::string_view path = inoutCooker.Source.Textures[i].File;
         String normalised;
-        if (!cooker.AddInput(path) || !context.AssetPath(path, normalised) ||
-            !ReadTga(context, normalised.GetView(), cooker.Images[i]))
+        if (!inoutCooker.AddInput(path) || !context.ResolveAssetPath(path, normalised) ||
+            !ReadTga(context, normalised.GetView(), inoutCooker.Images[i]))
         {
             return false;
         }
-        decoded += cooker.Images[i].Rgba.GetSize();
+        decoded += inoutCooker.Images[i].Rgba.GetSize();
         if (decoded > usize{32} * 1024 * 1024)
         {
-            return errors.Invalid("decoded texture byte limit");
+            return errors.FailInvalid("decoded texture byte limit");
         }
     }
-    bool found = false;
-    for (usize i = 0; i < cooker.Source.Textures.GetSize() && !found; ++i)
+    bool isFound = false;
+    for (usize i = 0; i < inoutCooker.Source.Textures.GetSize() && !isFound; ++i)
     {
-        if (EndsWith(cooker.Source.Textures[i].File, "Wallpaper.tga"))
+        if (EndsWith(inoutCooker.Source.Textures[i].File, "Wallpaper.tga"))
         {
-            cooker.Wallpaper = i;
-            found = true;
+            inoutCooker.Wallpaper = i;
+            isFound = true;
         }
     }
-    if (!found)
+    if (!isFound)
     {
-        return errors.Invalid("supported PBRT reference profile requires Wallpaper.tga");
+        return errors.FailInvalid("supported PBRT reference profile requires Wallpaper.tga");
     }
-    const Image& wallpaper = cooker.Images[cooker.Wallpaper];
+    const Image& wallpaper = inoutCooker.Images[inoutCooker.Wallpaper];
     if (wallpaper.Width != 512 || wallpaper.Height != 512)
     {
-        return errors.Invalid("staircase2 wallpaper profile requires 512x512");
+        return errors.FailInvalid("staircase2 wallpaper profile requires 512x512");
     }
-    constexpr usize AW = Cooker::ATLAS_WIDTH;
-    if (!cooker.Atlas.TryResize(AW * Cooker::ATLAS_HEIGHT * 4, 0))
+    constexpr usize atlasWidth = Cooker::ATLAS_WIDTH;
+    if (!inoutCooker.Atlas.TryResize(atlasWidth * Cooker::ATLAS_HEIGHT * 4, 0))
     {
-        return errors.Memory();
+        return errors.FailOutOfMemory();
     }
     // 2-pixel wrapped border around the 512x512 wallpaper.
     for (usize y = 0; y < 516; ++y)
     {
         for (usize x = 0; x < 516; ++x)
         {
-            const usize src = (((y + 510) % 512) * 512 + (x + 510) % 512) * 4;
-            const usize dst = (y * AW + x) * 4;
+            const usize sourceOffset = (((y + 510) % 512) * 512 + (x + 510) % 512) * 4;
+            const usize destinationOffset = (y * atlasWidth + x) * 4;
             for (usize k = 0; k < 4; ++k)
             {
-                cooker.Atlas[dst + k] = wallpaper.Rgba[src + k];
+                inoutCooker.Atlas[destinationOffset + k] = wallpaper.Rgba[sourceOffset + k];
             }
         }
     }
     return true;
 }
 
-[[nodiscard]] bool FindTexture(Cooker& cooker, std::string_view suffix, usize& index) noexcept
+[[nodiscard]] bool FindTexture(Cooker& inoutCooker, std::string_view suffix, usize& outIndex) noexcept
 {
-    for (usize i = 0; i < cooker.Source.Textures.GetSize(); ++i)
+    for (usize i = 0; i < inoutCooker.Source.Textures.GetSize(); ++i)
     {
-        if (EndsWith(cooker.Source.Textures[i].File, suffix))
+        if (EndsWith(inoutCooker.Source.Textures[i].File, suffix))
         {
-            index = i;
+            outIndex = i;
             return true;
         }
     }
-    return cooker.Ctx.Errors.Invalid("supported PBRT reference profile requires ", suffix);
+    return inoutCooker.Context.Errors.FailInvalid("supported PBRT reference profile requires ", suffix);
 }
 
-[[nodiscard]] bool AddFixedMeshes(Cooker& cooker) noexcept
+[[nodiscard]] bool AddFixedMeshes(Cooker& inoutCooker) noexcept
 {
     // Unit quad (mesh 4) and 64-segment disk (mesh 5).
-    Mesh& quad = cooker.Meshes[4];
+    Mesh& quad = inoutCooker.Meshes[4];
     const float64 corners[4][2] = {{-1.0, -1.0}, {1.0, -1.0}, {1.0, 1.0}, {-1.0, 1.0}};
     for (const auto& corner : corners)
     {
-        if (!quad.Vertices.TryAdd(Vertex{Vec3{{corner[0], corner[1], 0.0}}, Vec3{{0.0, 0.0, 1.0}}, {0.0, 0.0}}))
+        if (!quad.Vertices.TryAdd(
+                Vertex{math::Vector3d{corner[0], corner[1], 0.0}, math::Vector3d{0.0, 0.0, 1.0}, {0.0, 0.0}}))
         {
             return false;
         }
@@ -2453,8 +2452,8 @@ struct Cooker final
             return false;
         }
     }
-    Mesh& disk = cooker.Meshes[5];
-    if (!disk.Vertices.TryAdd(Vertex{Vec3{{0.0, 0.0, 0.0}}, Vec3{{0.0, 0.0, 1.0}}, {0.0, 0.0}}))
+    Mesh& disk = inoutCooker.Meshes[5];
+    if (!disk.Vertices.TryAdd(Vertex{math::Vector3d{0.0, 0.0, 0.0}, math::Vector3d{0.0, 0.0, 1.0}, {0.0, 0.0}}))
     {
         return false;
     }
@@ -2462,8 +2461,9 @@ struct Cooker final
     for (uint32 i = 0; i < 64; ++i)
     {
         const float64 angle = static_cast<float64>(i) * TAU / 64.0;
-        if (!disk.Vertices.TryAdd(
-                Vertex{Vec3{{math::Cos(angle), math::Sin(angle), 0.0}}, Vec3{{0.0, 0.0, 1.0}}, {0.0, 0.0}}))
+        if (!disk.Vertices.TryAdd(Vertex{math::Vector3d{math::Cos(angle), math::Sin(angle), 0.0},
+                                         math::Vector3d{0.0, 0.0, 1.0},
+                                         {0.0, 0.0}}))
         {
             return false;
         }
@@ -2480,137 +2480,137 @@ struct Cooker final
 
 struct CameraFrame final
 {
-    Vec3 Eye;
-    Vec3 Target;
-    Vec3 Up;
+    math::Vector3d Eye;
+    math::Vector3d Target;
+    math::Vector3d Up;
 };
 
-[[nodiscard]] bool DeriveCamera(Failure& errors, const float64 (&camera)[16], CameraFrame& frame) noexcept
+[[nodiscard]] bool DeriveCamera(Failure& inoutErrors, const math::Matrix4d& camera, CameraFrame& outFrame) noexcept
 {
     // PBRT's CTM is camera-from-world. This profile accepts rigid cameras only.
-    Vec3 rows[3];
+    math::Vector3d rows[3];
     for (usize r = 0; r < 3; ++r)
     {
         for (usize c = 0; c < 3; ++c)
         {
-            rows[r].V[c] = camera[c * 4 + r];
+            SetAxis(rows[r], c, camera.Elements[c * 4 + r]);
         }
     }
     for (usize a = 0; a < 3; ++a)
     {
         for (usize b = 0; b < 3; ++b)
         {
-            if (Abs(Dot(rows[a], rows[b]) - (a == b ? 1.0 : 0.0)) > 1e-5)
+            if (math::Abs(math::CompensatedDot(rows[a], rows[b]) - (a == b ? 1.0 : 0.0)) > 1e-5)
             {
-                return errors.Invalid("camera must be rigid");
+                return inoutErrors.FailInvalid("camera must be rigid");
             }
         }
     }
     for (usize c = 0; c < 3; ++c)
     {
-        PySum sum;
+        math::CompensatedSum sum;
         for (usize r = 0; r < 3; ++r)
         {
-            sum.Add(rows[r].V[c] * camera[12 + r]);
+            sum.Add(GetAxis(rows[r], c) * camera.Elements[12 + r]);
         }
-        frame.Eye.V[c] = -sum.Result();
+        SetAxis(outFrame.Eye, c, -sum.GetResult());
     }
-    frame.Up = rows[1];
-    frame.Target = Add(frame.Eye, rows[2]);
+    outFrame.Up = rows[1];
+    outFrame.Target = (outFrame.Eye + rows[2]);
     return true;
 }
 
-void PackMesh(Sink& blob, const Mesh& mesh) noexcept
+void PackMesh(ByteWriter& inoutBlob, const Mesh& mesh) noexcept
 {
-    blob.U32(static_cast<uint32>(mesh.Vertices.GetSize()));
-    blob.U32(static_cast<uint32>(mesh.Indices.GetSize()));
+    inoutBlob.AppendUint32(static_cast<uint32>(mesh.Vertices.GetSize()));
+    inoutBlob.AppendUint32(static_cast<uint32>(mesh.Indices.GetSize()));
     for (const Vertex& vertex : mesh.Vertices)
     {
         for (usize k = 0; k < 8; ++k)
         {
-            blob.F32(Component(vertex, k));
+            inoutBlob.AppendFloat32(GetComponent(vertex, k));
         }
     }
     for (const uint32 index : mesh.Indices)
     {
-        blob.U32(index);
+        inoutBlob.AppendUint32(index);
     }
 }
 
-[[nodiscard]] bool PackBundle(Cooker& cooker,
-                              const Array<Item>& items,
+[[nodiscard]] bool PackBundle(Cooker& inoutCooker,
+                              const Array<SceneItem>& items,
                               const CameraFrame& frame,
                               usize wood,
                               usize tiles,
-                              Array<uint8>& bundle) noexcept
+                              Array<uint8>& outBundle) noexcept
 {
-    Failure& errors = cooker.Ctx.Errors;
-    bundle.Clear();
-    Sink blob(bundle);
+    Failure& errors = inoutCooker.Context.Errors;
+    outBundle.Clear();
+    ByteWriter blob(outBundle);
     blob.Append(std::string_view("LUSCN01\0", 8));
-    blob.U32(1);
-    blob.U32(6);
-    blob.U32(static_cast<uint32>(cooker.Materials.GetSize()));
-    blob.U32(3);
-    blob.U32(static_cast<uint32>(items.GetSize()));
-    for (const Vec3* vector : {&frame.Eye, &frame.Target, &frame.Up})
+    blob.AppendUint32(1);
+    blob.AppendUint32(6);
+    blob.AppendUint32(static_cast<uint32>(inoutCooker.Materials.GetSize()));
+    blob.AppendUint32(3);
+    blob.AppendUint32(static_cast<uint32>(items.GetSize()));
+    for (const math::Vector3d* vector : {&frame.Eye, &frame.Target, &frame.Up})
     {
-        for (const float64 value : vector->V)
+        for (const float64 value : {vector->X, vector->Y, vector->Z})
         {
-            blob.F32(value);
+            blob.AppendFloat32(value);
         }
     }
     // math.radians(x) is x * (pi / 180).
     constexpr float64 DEGREES_TO_RADIANS = 3.141592653589793 / 180.0;
-    blob.F32(cooker.Source.Fov * DEGREES_TO_RADIANS);
-    blob.U32(static_cast<uint32>(Cooker::ATLAS_WIDTH));
-    blob.U32(static_cast<uint32>(Cooker::ATLAS_HEIGHT));
-    blob.U32(static_cast<uint32>(cooker.Atlas.GetSize()));
-    blob.Bytes(cooker.Atlas.AsSpan());
+    blob.AppendFloat32(inoutCooker.Source.FieldOfView * DEGREES_TO_RADIANS);
+    blob.AppendUint32(static_cast<uint32>(Cooker::ATLAS_WIDTH));
+    blob.AppendUint32(static_cast<uint32>(Cooker::ATLAS_HEIGHT));
+    blob.AppendUint32(static_cast<uint32>(inoutCooker.Atlas.GetSize()));
+    blob.AppendBytes(inoutCooker.Atlas.AsSpan());
     for (const usize index : {wood, tiles})
     {
-        const Image& image = cooker.Images[index];
-        blob.U32(image.Width);
-        blob.U32(image.Height);
-        blob.U32(static_cast<uint32>(image.Rgba.GetSize()));
-        blob.Bytes(image.Rgba.AsSpan());
+        const Image& image = inoutCooker.Images[index];
+        blob.AppendUint32(image.Width);
+        blob.AppendUint32(image.Height);
+        blob.AppendUint32(static_cast<uint32>(image.Rgba.GetSize()));
+        blob.AppendBytes(image.Rgba.AsSpan());
     }
-    for (const Material& material : cooker.Materials)
+    for (const Material& material : inoutCooker.Materials)
     {
-        blob.U32(material.Texture);
-        blob.F32(material.Metallic);
-        blob.F32(material.Roughness);
+        blob.AppendUint32(material.Texture);
+        blob.AppendFloat32(material.Metallic);
+        blob.AppendFloat32(material.Roughness);
         for (const float64 value : material.Emission)
         {
-            blob.F32(value);
+            blob.AppendFloat32(value);
         }
     }
-    for (const Mesh& mesh : cooker.Meshes)
+    for (const Mesh& mesh : inoutCooker.Meshes)
     {
-        if (!cooker.Ctx.CheckCancel())
+        if (!inoutCooker.Context.CheckCancellation())
         {
             return false;
         }
         PackMesh(blob, mesh);
     }
-    for (const Item& item : items)
+    for (const SceneItem& item : items)
     {
-        blob.U32(item.Mesh);
-        blob.U32(item.Material);
+        blob.AppendUint32(item.Mesh);
+        blob.AppendUint32(item.Material);
         for (const float64 value : item.Transform)
         {
-            blob.F32(value);
+            blob.AppendFloat32(value);
         }
     }
-    if (blob.Overflow())
+    if (blob.HasOverflowed())
     {
-        return errors.Invalid("float too large to pack with f format");
+        return errors.FailInvalid("float too large to pack with f format");
     }
-    if (!blob.Ok())
+    if (!blob.IsOk())
     {
-        return errors.Memory();
+        return errors.FailOutOfMemory();
     }
-    if (bundle.GetSize() > MAX_SOURCE_BYTES)
+    if (outBundle.GetSize() > MAX_SOURCE_BYTES)
     {
         return errors.Fail(Status::Limit, "bundle byte limit");
     }
@@ -2633,10 +2633,10 @@ struct ManifestFacts final
     int64 RenderedTriangles = 0;
     int64 Bytes = 0;
     const CameraFrame* Camera = nullptr;
-    float64 Fov = 0.0;
+    float64 FieldOfView = 0.0;
 };
 
-void HexString(PyJson& json, const Digest& digest) noexcept
+void WriteHexString(PythonJsonWriter& inoutJson, const Digest& digest) noexcept
 {
     char text[64]{};
     constexpr char HEX[] = "0123456789abcdef";
@@ -2645,36 +2645,36 @@ void HexString(PyJson& json, const Digest& digest) noexcept
         text[2 * i] = HEX[digest.Data[i] >> 4];
         text[2 * i + 1] = HEX[digest.Data[i] & 15];
     }
-    json.String(std::string_view(text, sizeof(text)));
+    inoutJson.WriteString(std::string_view(text, sizeof(text)));
 }
 
-[[nodiscard]] bool WriteManifest(const ManifestFacts& facts, Array<uint8>& output) noexcept
+[[nodiscard]] bool WriteManifest(const ManifestFacts& facts, Array<uint8>& outManifest) noexcept
 {
-    output.Clear();
-    Sink sink(output);
-    PyJson json(sink);
+    outManifest.Clear();
+    ByteWriter writer(outManifest);
+    PythonJsonWriter json(writer);
     json.BeginObject();
-    json.Key("version");
-    json.Integer(1);
-    json.Key("source");
-    json.String(facts.Staircase ? std::string_view("Modern Hall / staircase2") : facts.SourceName);
-    json.Key("author");
-    json.String(facts.Staircase ? std::string_view("NewSee2l035") : std::string_view("See retained LICENSE.txt"));
-    json.Key("license");
-    json.String(facts.Staircase ? std::string_view("https://creativecommons.org/licenses/by/3.0/")
-                                : std::string_view("See retained LICENSE.txt"));
-    json.Key("source_format");
-    json.String("PBRT v4 subset + binary PLY + uncompressed TGA");
-    json.Key("inputs");
+    json.WriteKey("version");
+    json.WriteInteger(1);
+    json.WriteKey("source");
+    json.WriteString(facts.Staircase ? std::string_view("Modern Hall / staircase2") : facts.SourceName);
+    json.WriteKey("author");
+    json.WriteString(facts.Staircase ? std::string_view("NewSee2l035") : std::string_view("See retained LICENSE.txt"));
+    json.WriteKey("license");
+    json.WriteString(facts.Staircase ? std::string_view("https://creativecommons.org/licenses/by/3.0/")
+                                     : std::string_view("See retained LICENSE.txt"));
+    json.WriteKey("source_format");
+    json.WriteString("PBRT v4 subset + binary PLY + uncompressed TGA");
+    json.WriteKey("inputs");
     json.BeginObject();
     for (usize i = 0; i < facts.Inputs->GetSize(); ++i)
     {
-        json.Key((*facts.Inputs)[i]);
-        HexString(json, (*facts.InputDigests)[i]);
+        json.WriteKey((*facts.Inputs)[i]);
+        WriteHexString(json, (*facts.InputDigests)[i]);
     }
     json.EndObject();
-    json.Key("bundle_sha256");
-    HexString(json, facts.Bundle);
+    json.WriteKey("bundle_sha256");
+    WriteHexString(json, facts.Bundle);
     const struct
     {
         std::string_view Key;
@@ -2692,30 +2692,30 @@ void HexString(PyJson& json, const Digest& digest) noexcept
     };
     for (const auto& count : counts)
     {
-        json.Key(count.Key);
-        json.Integer(count.Value);
+        json.WriteKey(count.Key);
+        json.WriteInteger(count.Value);
     }
-    json.Key("camera");
+    json.WriteKey("camera");
     json.BeginObject();
     const struct
     {
         std::string_view Key;
-        const Vec3* Value;
+        const math::Vector3d* Value;
     } vectors[3] = {{"eye", &facts.Camera->Eye}, {"target", &facts.Camera->Target}, {"up", &facts.Camera->Up}};
     for (const auto& vector : vectors)
     {
-        json.Key(vector.Key);
+        json.WriteKey(vector.Key);
         json.BeginArray();
-        for (const float64 value : vector.Value->V)
+        for (const float64 value : {vector.Value->X, vector.Value->Y, vector.Value->Z})
         {
-            json.Float(value);
+            json.WriteFloat(value);
         }
         json.EndArray();
     }
-    json.Key("fov_degrees");
-    json.Float(facts.Fov);
+    json.WriteKey("fov_degrees");
+    json.WriteFloat(facts.FieldOfView);
     json.EndObject();
-    json.Key("approximations");
+    json.WriteKey("approximations");
     json.BeginArray();
     for (const std::string_view text : {
              "PBRT coated diffuse mapped to frozen RGB GGX/Lambert; no layer multiple scattering",
@@ -2728,39 +2728,39 @@ void HexString(PyJson& json, const Digest& digest) noexcept
              "PBRT integrator/sampler options replaced by explicit L6 capture settings",
          })
     {
-        json.String(text);
+        json.WriteString(text);
     }
     json.EndArray();
     json.EndObject();
-    sink.Append('\n');
-    return sink.Ok();
+    writer.Append('\n');
+    return writer.IsOk();
 }
 
-[[nodiscard]] bool CookShapes(Cooker& cooker) noexcept
+[[nodiscard]] bool CookShapes(Cooker& inoutCooker) noexcept
 {
-    Context& context = cooker.Ctx;
+    CookContext& context = inoutCooker.Context;
     Array<Point> points;
     Array<Triangle> triangles;
-    for (const Shape& shape : cooker.Source.Shapes)
+    for (const Shape& shape : inoutCooker.Source.Shapes)
     {
-        if (!context.CheckCancel())
+        if (!context.CheckCancellation())
         {
             return false;
         }
         std::string_view kind;
-        if (!FirstName(context, cooker.Source.Commands[shape.CommandIndex], kind))
+        if (!GetFirstName(context, inoutCooker.Source.Commands[shape.CommandIndex], kind))
         {
             return false;
         }
         points.Clear();
         triangles.Clear();
-        if (!cooker.LoadPoints(shape, kind, points, triangles))
+        if (!inoutCooker.LoadPoints(shape, kind, points, triangles))
         {
             return false;
         }
-        const bool ok = shape.Graphics.HasEmission ? cooker.Emitter(shape, kind, points, triangles)
-                                                   : cooker.Surface(shape, points, triangles);
-        if (!ok)
+        const bool isOk = shape.Graphics.HasEmission ? inoutCooker.CookEmitter(shape, kind, points, triangles)
+                                                     : inoutCooker.CookSurface(shape, points, triangles);
+        if (!isOk)
         {
             return false;
         }
@@ -2768,10 +2768,10 @@ void HexString(PyJson& json, const Digest& digest) noexcept
     return true;
 }
 
-[[nodiscard]] bool HashInputs(Cooker& cooker, Array<Digest>& digests) noexcept
+[[nodiscard]] bool HashInputs(Cooker& inoutCooker, Array<Digest>& outDigests) noexcept
 {
     // sorted(inputs) by code point, each re-read through asset_path().
-    Array<std::string_view>& inputs = cooker.Inputs;
+    Array<std::string_view>& inputs = inoutCooker.Inputs;
     for (usize i = 1; i < inputs.GetSize(); ++i)
     {
         for (usize j = i; j > 0 && inputs[j] < inputs[j - 1]; --j)
@@ -2785,23 +2785,24 @@ void HexString(PyJson& json, const Digest& digest) noexcept
     {
         String normalised;
         Bytes data;
-        if (!cooker.Ctx.AssetPath(input, normalised) || !cooker.Ctx.Read(normalised.GetView(), MAX_SOURCE_BYTES, data))
+        if (!inoutCooker.Context.ResolveAssetPath(input, normalised) ||
+            !inoutCooker.Context.ReadBounded(normalised.GetView(), MAX_SOURCE_BYTES, data))
         {
             return false;
         }
-        if (!digests.TryAdd(Hash(data.Data())))
+        if (!outDigests.TryAdd(Hash(data.Data())))
         {
-            return cooker.Ctx.Errors.Memory();
+            return inoutCooker.Context.Errors.FailOutOfMemory();
         }
     }
     return true;
 }
 
-[[nodiscard]] bool CookScene(Context& context, CookResult& result) noexcept
+[[nodiscard]] bool CookScene(CookContext& inoutContext, CookResult& outResult) noexcept
 {
-    Failure& errors = context.Errors;
+    Failure& errors = inoutContext.Errors;
     Scene scene;
-    if (!ParseScene(context, scene))
+    if (!ParseScene(inoutContext, scene))
     {
         return false;
     }
@@ -2814,7 +2815,7 @@ void HexString(PyJson& json, const Digest& digest) noexcept
     {
         return errors.Fail(Status::Limit, "renderer profile capacity: at most 128 scene items");
     }
-    Cooker cooker(context, scene);
+    Cooker cooker(inoutContext, scene);
     if (!cooker.AddInput("scene-v4.pbrt") || !cooker.AddInput("LICENSE.txt") || !LoadTextures(cooker))
     {
         return false;
@@ -2834,7 +2835,7 @@ void HexString(PyJson& json, const Digest& digest) noexcept
     };
     if (!cooker.Materials.TryAddRange(std::span<const Material>(base, 4)))
     {
-        return errors.Memory();
+        return errors.FailOutOfMemory();
     }
     if (!CookShapes(cooker))
     {
@@ -2842,45 +2843,49 @@ void HexString(PyJson& json, const Digest& digest) noexcept
     }
     for (const Color& emission : cooker.Emissions)
     {
-        if (!cooker.Materials.TryAdd(Material{0xFFFFFFFFU, 0.0, 1.0, {emission.V[0], emission.V[1], emission.V[2]}}))
+        if (!cooker.Materials.TryAdd(
+                Material{0xFFFFFFFFU,
+                         0.0,
+                         1.0,
+                         {emission.Components[0], emission.Components[1], emission.Components[2]}}))
         {
-            return errors.Memory();
+            return errors.FailOutOfMemory();
         }
     }
     if (!AddFixedMeshes(cooker))
     {
-        return errors.Memory();
+        return errors.FailOutOfMemory();
     }
-    Array<Item> items;
+    Array<SceneItem> items;
     for (uint32 i = 0; i < 4; ++i)
     {
-        if (!items.TryAdd(Item{i, i, {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0}}))
+        if (!items.TryAdd(SceneItem{i, i, {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0}}))
         {
-            return errors.Memory();
+            return errors.FailOutOfMemory();
         }
     }
     if (!items.TryAddRange(cooker.EmitterItems.AsSpan()))
     {
-        return errors.Memory();
+        return errors.FailOutOfMemory();
     }
     if (cooker.Materials.GetSize() != 8 || items.GetSize() > 128)
     {
-        return errors.Invalid("renderer profile capacity");
+        return errors.FailInvalid("renderer profile capacity");
     }
     CameraFrame frame;
-    if (!DeriveCamera(errors, scene.Camera, frame) || !PackBundle(cooker, items, frame, wood, tiles, result.Bundle))
+    if (!DeriveCamera(errors, scene.Camera, frame) || !PackBundle(cooker, items, frame, wood, tiles, outResult.Bundle))
     {
         return false;
     }
     Bytes license;
-    if (!context.Read("LICENSE.txt", usize{1024} * 1024, license))
+    if (!inoutContext.ReadBounded("LICENSE.txt", usize{1024} * 1024, license))
     {
         return false;
     }
     foundation::parsing::ParseError utf8{};
     if (foundation::parsing::ValidateUtf8(license.String(), utf8) != foundation::parsing::ParseStatus::Ok)
     {
-        return errors.Invalid("'utf-8' codec can't decode LICENSE.txt");
+        return errors.FailInvalid("'utf-8' codec can't decode LICENSE.txt");
     }
     Array<Digest> digests;
     if (!HashInputs(cooker, digests))
@@ -2889,10 +2894,10 @@ void HexString(PyJson& json, const Digest& digest) noexcept
     }
     ManifestFacts facts;
     facts.Staircase = license.String().find("NewSee2l035") != std::string_view::npos;
-    facts.SourceName = BaseName(context.Root.GetView());
+    facts.SourceName = GetBaseName(inoutContext.Root.GetView());
     facts.Inputs = &cooker.Inputs;
     facts.InputDigests = &digests;
-    facts.Bundle = Hash(result.Bundle.AsSpan());
+    facts.Bundle = Hash(outResult.Bundle.AsSpan());
     facts.SourceMeshes = cooker.SourceMeshes;
     facts.SourceTriangles = cooker.SourceTriangles;
     facts.Degenerate = cooker.DegenerateTriangles;
@@ -2902,39 +2907,42 @@ void HexString(PyJson& json, const Digest& digest) noexcept
     {
         facts.CookedTriangles += static_cast<int64>(mesh.Indices.GetSize() / 3);
     }
-    for (const Item& item : items)
+    for (const SceneItem& item : items)
     {
         facts.RenderedTriangles += static_cast<int64>(cooker.Meshes[item.Mesh].Indices.GetSize() / 3);
     }
-    facts.Bytes = static_cast<int64>(result.Bundle.GetSize());
+    facts.Bytes = static_cast<int64>(outResult.Bundle.GetSize());
     facts.Camera = &frame;
-    facts.Fov = scene.Fov;
-    result.License.Clear();
-    if (!WriteManifest(facts, result.Manifest) || !result.License.TryAddRange(license.Data()))
+    facts.FieldOfView = scene.FieldOfView;
+    outResult.License.Clear();
+    if (!WriteManifest(facts, outResult.Manifest) || !outResult.License.TryAddRange(license.Data()))
     {
-        return errors.Memory();
+        return errors.FailOutOfMemory();
     }
     return true;
 }
 } // namespace
 
-bool Cook(std::string_view source, CookResult& result, CookError& error, const Cancellation* cancel) noexcept
+bool Cook(std::string_view source,
+          CookResult& outResult,
+          CookError& outError,
+          const Cancellation* cancelOrNull) noexcept
 {
-    error = CookError{};
-    Failure failure{error};
-    Context context(failure, cancel);
+    outError = CookError{};
+    Failure failure{outError};
+    CookContext context(failure, cancelOrNull);
     const Status resolved = ResolveDirectory(source, context.Root);
     if (resolved != Status::Ok)
     {
         return failure.Fail(resolved, "cannot resolve source directory: ", source);
     }
-    return CookScene(context, result);
+    return CookScene(context, outResult);
 }
 
-bool WriteCook(std::string_view output, const CookResult& result, CookError& error) noexcept
+bool WriteCook(std::string_view output, const CookResult& result, CookError& outError) noexcept
 {
-    error = CookError{};
-    Failure failure{error};
+    outError = CookError{};
+    Failure failure{outError};
     const Status made = MakeDirectories(output);
     if (made != Status::Ok)
     {

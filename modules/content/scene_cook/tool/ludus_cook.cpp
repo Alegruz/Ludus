@@ -8,12 +8,13 @@
 
 #include <ludus/content/scene_cook/scene_cook.h>
 
-#include <cstddef>
 #include <string_view>
 #include <unistd.h>
 
 namespace
 {
+using ludus::foundation::core::usize;
+
 void WriteAll(int descriptor, std::string_view text) noexcept
 {
     while (!text.empty())
@@ -23,11 +24,11 @@ void WriteAll(int descriptor, std::string_view text) noexcept
         {
             return;
         }
-        text.remove_prefix(static_cast<std::size_t>(written));
+        text.remove_prefix(static_cast<usize>(written));
     }
 }
 
-int Usage() noexcept
+int PrintUsage() noexcept
 {
     WriteAll(2, "usage: ludus-cook cook SOURCE OUTPUT\n");
     return 2;
@@ -39,7 +40,7 @@ int main(int argc, char** argv)
     using namespace ludus::content::scene_cook;
     if (argc != 4 || std::string_view(argv[1]) != "cook")
     {
-        return Usage();
+        return PrintUsage();
     }
     CookResult result;
     CookError error;

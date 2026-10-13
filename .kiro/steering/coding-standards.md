@@ -73,6 +73,15 @@ and run the required documentation checks before a PR.
 - Run `./scripts/check --all` (clang-format + clang-tidy) before committing.
 - `#pragma once` for header guards.
 - Follow the established naming conventions in the codebase / `.clang-tidy`.
+- Naming (full rules in `AGENTS.md` §Naming): spell names out (no `Arg`,
+  `param`, `ctx`); functions start with a verb; booleans read as questions
+  (`isOk`, `mIsOk`, `HasFailed`); private member functions are camelCase;
+  nullable pointer parameters end in `OrNull`; non-const reference parameters
+  start with `out` or `inout`; no literal sizes in template arguments — use a
+  named constant or shared alias such as `MessageText`.
+- Reuse FoundationMath, FoundationStrings, and shared Content types instead of
+  local vector/matrix/buffer types; add missing general facilities to the
+  owning Foundation module.
 - Keep private implementation headers out of the installed SDK; respect module
   dependency direction (`FoundationBase` depends on nothing higher).
 

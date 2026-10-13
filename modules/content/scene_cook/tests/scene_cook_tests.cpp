@@ -2,6 +2,7 @@
 // captured from the retired Python 3.12 pipeline (tests/goldens/scene_pipeline).
 
 #include <ludus/content/scene_cook/scene_cook.h>
+#include <ludus/foundation/math/summation.hpp>
 
 #include "python_compat.h"
 
@@ -10,6 +11,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unistd.h>
@@ -27,16 +31,16 @@ constexpr std::string_view GOLDENS = LUDUS_SCENE_GOLDENS_DIR;
 std::string Repr(float64 value)
 {
     foundation::Array<uint8> bytes;
-    detail::Sink sink(bytes);
-    detail::AppendFloatRepr(sink, value);
+    detail::ByteWriter writer(bytes);
+    detail::AppendFloatRepr(writer, value);
     return {reinterpret_cast<const char*>(bytes.GetData()), bytes.GetSize()};
 }
 
 std::string Hex(const content::Digest& digest)
 {
     foundation::Array<uint8> bytes;
-    detail::Sink sink(bytes);
-    detail::AppendHex(sink, digest.Data);
+    detail::ByteWriter writer(bytes);
+    detail::AppendHex(writer, digest.Data);
     return {reinterpret_cast<const char*>(bytes.GetData()), bytes.GetSize()};
 }
 
@@ -47,7 +51,7 @@ std::string ReadGolden(std::string_view relative)
     return std::string(bytes.String());
 }
 
-std::string_view View(const foundation::Array<uint8>& bytes)
+std::string_view ViewAsText(const foundation::Array<uint8>& bytes)
 {
     return {reinterpret_cast<const char*>(bytes.GetData()), bytes.GetSize()};
 }
@@ -100,15 +104,15 @@ TEST_CASE("Python float repr is reproduced", "[scene_cook]")
 
 TEST_CASE("Python sum() compensation is reproduced", "[scene_cook]")
 {
-    detail::PySum sum;
+    math::CompensatedSum sum;
     for (const float64 value : {1e100, 1.0, -1e100, 1.0})
     {
         sum.Add(value);
     }
-    CHECK(sum.Result() == 2.0);
-    detail::PySum zero;
+    CHECK(sum.GetResult() == 2.0);
+    math::CompensatedSum zero;
     zero.Add(-0.0);
-    CHECK(Repr(zero.Result()) == "0.0");
+    CHECK(Repr(zero.GetResult()) == "0.0");
 }
 
 TEST_CASE("Python float() and int() syntax is accepted", "[scene_cook]")
@@ -141,15 +145,43 @@ TEST_CASE("Cooked fixture is byte-identical to the Python goldens", "[scene_cook
     const std::string source = std::string(GOLDENS) + "/source";
     CookResult result;
     CookError error;
-    const bool cooked = Cook(source, result, error);
+    const bool isCooked = Cook(source, result, error);
     INFO(std::string(error.Message.View()));
-    REQUIRE(cooked);
+    REQUIRE(isCooked);
 
     const OutputRecord bundle = GoldenOutput("cook/scene.luscn");
     CHECK(result.Bundle.GetSize() == bundle.Bytes);
     CHECK(Hex(content::Hash(result.Bundle.AsSpan())) == bundle.Sha256);
-    CHECK(View(result.Manifest) == ReadGolden("expected/files/cook/manifest.json"));
-    CHECK(View(result.License) == ReadGolden("expected/files/cook/LICENSE.txt"));
+    CHECK(ViewAsText(result.Manifest) == ReadGolden("expected/files/cook/manifest.json"));
+    CHECK(ViewAsText(result.License) == ReadGolden("expected/files/cook/LICENSE.txt"));
+}
+
+TEST_CASE("NamedMaterial selects its own slot after an inline Material", "[scene_cook]")
+{
+    // An inline Material ahead of MakeNamedMaterial takes a material slot but no
+    // name; NamedMaterial must still resolve to the named declaration's slot.
+    char directory[] = "/tmp/ludus-scene-cook-XXXXXX";
+    REQUIRE(mkdtemp(directory) != nullptr);
+    const std::filesystem::path source = std::filesystem::path(directory) / "source";
+    std::filesystem::copy(std::string(GOLDENS) + "/source", source, std::filesystem::copy_options::recursive);
+    std::ifstream input(source / "scene-v4.pbrt", std::ios::binary);
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    input.close();
+    std::string scene = buffer.str();
+    const std::string::size_type first = scene.find("MakeNamedMaterial");
+    REQUIRE(first != std::string::npos);
+    scene.insert(first, "Material \"diffuse\" \"rgb reflectance\" [ 0.5 0.5 0.5 ]\n");
+    std::ofstream(source / "scene-v4.pbrt", std::ios::binary | std::ios::trunc) << scene;
+
+    CookResult result;
+    CookError error;
+    const bool isCooked = Cook(source.string(), result, error);
+    INFO(std::string(error.Message.View()));
+    REQUIRE(isCooked);
+    const OutputRecord bundle = GoldenOutput("cook/scene.luscn");
+    CHECK(Hex(content::Hash(result.Bundle.AsSpan())) == bundle.Sha256);
+    std::filesystem::remove_all(directory);
 }
 
 TEST_CASE("Cook writes the three outputs atomically", "[scene_cook]")
@@ -164,7 +196,7 @@ TEST_CASE("Cook writes the three outputs atomically", "[scene_cook]")
     REQUIRE(WriteCook(output, result, error));
     content::Bytes manifest;
     REQUIRE(content::ReadFile(output, "manifest.json", usize{1} << 20, manifest) == content::Status::Ok);
-    CHECK(manifest.String() == View(result.Manifest));
+    CHECK(manifest.String() == ViewAsText(result.Manifest));
     content::Bytes bundle;
     REQUIRE(content::ReadFile(output, "scene.luscn", usize{64} << 20, bundle) == content::Status::Ok);
     CHECK(bundle.Data().size() == result.Bundle.GetSize());
@@ -173,11 +205,11 @@ TEST_CASE("Cook writes the three outputs atomically", "[scene_cook]")
 TEST_CASE("Cancellation stops the cook", "[scene_cook]")
 {
     const std::string source = std::string(GOLDENS) + "/source";
-    Cancellation cancel;
-    cancel.Requested = [](void*) noexcept { return true; };
+    Cancellation cancellation;
+    cancellation.Requested = [](void*) noexcept { return true; };
     CookResult result;
     CookError error;
-    CHECK_FALSE(Cook(source, result, error, &cancel));
+    CHECK_FALSE(Cook(source, result, error, &cancellation));
     CHECK(error.Result == content::Status::Cancelled);
     CHECK(error.Message.View() == "Scene conversion cancelled");
 }

@@ -12,6 +12,11 @@ ludus_apply_project_defaults(ludus_scene_cook)
 install(TARGETS ludus_scene_cook EXPORT LudusTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     FILE_SET public_headers DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
+# The CLI and golden tests need native file access (Linux and macOS hosts).
+if(EMSCRIPTEN OR NOT CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$")
+    return()
+endif()
+
 # Developer tool; built in the tree, not part of the installed SDK.
 add_executable(ludus_cook tool/ludus_cook.cpp)
 set_target_properties(ludus_cook PROPERTIES OUTPUT_NAME ludus-cook)
@@ -25,7 +30,7 @@ if(LUDUS_BUILD_TESTS)
     target_compile_definitions(ludus_scene_cook_tests PRIVATE
         LUDUS_SCENE_GOLDENS_DIR="${PROJECT_SOURCE_DIR}/tests/goldens/scene_pipeline")
     target_link_libraries(ludus_scene_cook_tests PRIVATE
-        Ludus::SceneCook Ludus::FoundationParsingJson Ludus::FoundationStrings Catch2::Catch2WithMain)
+        Ludus::SceneCook Ludus::FoundationMath Ludus::FoundationParsingJson Ludus::FoundationStrings Catch2::Catch2WithMain)
     ludus_apply_project_defaults(ludus_scene_cook_tests)
     ludus_enable_test_exceptions(ludus_scene_cook_tests)
     add_test(NAME ludus_scene_cook_tests COMMAND ludus_scene_cook_tests)
