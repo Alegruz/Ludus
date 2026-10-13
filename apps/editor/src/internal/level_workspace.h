@@ -23,6 +23,7 @@ namespace ludus::editor
 {
 // Project-owned 3D level surface. The installed host backend owns cooking,
 // immutable catalogs and save conflicts; no project game code is executed.
+class PreviewViewport;
 class LevelWorkspace final : public QWidget
 {
     Q_OBJECT
@@ -44,6 +45,19 @@ public:
         return !Busy_ && !Level_.isEmpty();
     }
     void StopPreview() noexcept;
+    void ResumePreview()
+    {
+        Q_EMIT PreviewStarting();
+        (void)Preview_.Start();
+    }
+    [[nodiscard]] QJsonObject Navigation() const
+    {
+        return Preview_.Navigation();
+    }
+    void RestoreNavigation(const QJsonObject& state)
+    {
+        Preview_.RestoreNavigation(state);
+    }
     [[nodiscard]] bool CanCancel() const noexcept
     {
         return Busy_ && Operation_ != QStringLiteral("save") && !PublishingCatalog_;
@@ -123,7 +137,8 @@ private:
     bool WorldOwned_ = false;
     bool VerificationOnly_ = false;
     bool Busy_ = false, Dirty_ = false, Cancelling_ = false, Success_ = false, Rendering_ = false;
-    QLabel *Status_, *Viewport_, *File_, *Warnings_;
+    QLabel *Status_, *File_, *Warnings_;
+    PreviewViewport* Viewport_;
     QListWidget* Objects_;
     QLineEdit* Name_;
     QDoubleSpinBox* Translation_[3];

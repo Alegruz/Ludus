@@ -1254,7 +1254,10 @@ but does not stream its pixels through caller memory.
 
 `RequestTextureReadback` shares `ReadbackTicket`, `GetStatus`, `CopyReadback`
 and `Release` with buffer readback. The source mip must be initialized and the
-caller pitch must meet the same row rules. Once Ready, copy-out returns
+caller pitch must meet the same row rules. Call between frames on the ready
+owner thread with a null ticket. An accepted request returns Pending and publishes
+an owned ticket; poll its status and release it once, including on cancellation.
+Once Ready, copy-out returns
 `rowPitch * height` bytes in top-oriented row order and zeroes row padding.
 Pending, undersized output and failures preserve caller bytes. Native mappings
 are never exposed. WebGL reads the sampled backing's logical row order and

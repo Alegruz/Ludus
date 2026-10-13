@@ -1,4 +1,5 @@
 #include "internal/level_workspace.h"
+#include "internal/preview_viewport.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -48,9 +49,9 @@ LevelWorkspace::LevelWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
     Objects_ = new QListWidget(this);
     Objects_->setObjectName(QStringLiteral("levelObjects"));
     body->addWidget(Objects_, 1);
-    Viewport_ = new QLabel(QStringLiteral("Import a reference scene to render it here."), this);
+    Viewport_ = new PreviewViewport(&Preview_, this, false);
     Viewport_->setAlignment(Qt::AlignCenter);
-    Viewport_->setMinimumSize(256, 256);
+
     Viewport_->setObjectName(QStringLiteral("levelViewport"));
     body->addWidget(Viewport_, 2);
     layout->addLayout(body, 1);
@@ -159,7 +160,7 @@ LevelWorkspace::LevelWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
             }
             CommitCandidate();
         }
-        Viewport_->setPixmap(QPixmap::fromImage(frame).scaled(512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        Viewport_->ShowFrame(frame);
     });
 #if !defined(Q_OS_WASM)
     connect(&Process_, &QProcess::readyReadStandardOutput, this, [this]() {
@@ -224,7 +225,7 @@ void LevelWorkspace::SetProject(const QString& root, foundation::uint64 epoch)
     }
     StopPreview();
     (void)Preview_.SetScene({});
-    Viewport_->setText(QStringLiteral("Import a reference scene to render it here."));
+    Viewport_->ClearFrame(QStringLiteral("Import a reference scene to render it here."));
     Warnings_->clear();
     Scene_ = {};
     Candidate_ = {};
@@ -276,7 +277,7 @@ bool LevelWorkspace::Create(const QString& path)
     }
     StopPreview();
     (void)Preview_.SetScene({});
-    Viewport_->setText(QStringLiteral("Import a reference scene to render it here."));
+    Viewport_->ClearFrame(QStringLiteral("Import a reference scene to render it here."));
     Warnings_->clear();
     Level_ = QJsonObject{{QStringLiteral("version"), 1},
                          {QStringLiteral("id"), QUuid::createUuid().toString(QUuid::WithoutBraces)},
@@ -441,8 +442,7 @@ void LevelWorkspace::Completed()
             result.value(QStringLiteral("committed")).toBool() && Process_.exitCode() == 0)
         {
             Cancelling_ = false; // Publication already crossed its atomic commit point.
-            Viewport_->setPixmap(
-                QPixmap::fromImage(CandidateFrame_).scaled(512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            Viewport_->ShowFrame(CandidateFrame_);
             CommitCandidate();
         }
         else
@@ -546,7 +546,7 @@ void LevelWorkspace::CommitCandidate()
     Level_ = Candidate_;
     if (Scene_.Identity.isEmpty())
     {
-        Viewport_->setText(QStringLiteral("No visible scene instances."));
+        Viewport_->ClearFrame(QStringLiteral("No visible scene instances."));
     }
     Warnings_->setText(PendingWarnings_);
     if (Operation_ == QStringLiteral("save") || Operation_ == QStringLiteral("open"))

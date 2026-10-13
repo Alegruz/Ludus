@@ -140,7 +140,9 @@ struct TextureResidency final
 /// Schedule RGBA8Unorm texel readback into owned staging; source mip must be initialized.
 /// Caller row pitch is four-byte aligned and at least Width*4; both caller and 256-byte staging
 /// rows must fit TransferBytes. CopyReadback returns RowPitch*Height top-oriented bytes with zero padding.
-/// Pending publishes a null output; rejection preserves it. The source survives public destruction.
+/// Call on the ready device's owner thread between frames, with a null output ticket.
+/// Accepted submission returns Pending and publishes an owned ticket; poll GetStatus and release it once.
+/// Rejection preserves output. The source survives public destruction.
 [[nodiscard]] RasterStatus RequestTextureReadback(DeviceHandle,
                                                   TextureHandle,
                                                   const TextureRegion&,
