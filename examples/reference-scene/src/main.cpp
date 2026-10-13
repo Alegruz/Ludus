@@ -348,8 +348,11 @@ bool RasterEvidence(rr::Renderer& renderer,
         .Outcome.Succeeded();
 }
 
-bool GpuEvidence(rr::Renderer& renderer, rhi::DeviceHandle device, rhi::SurfaceHandle surface,
-                 rr::Snapshot& snapshot, const rr::ReferenceCaptureDescription& description,
+bool GpuEvidence(rr::Renderer& renderer,
+                 rhi::DeviceHandle device,
+                 rhi::SurfaceHandle surface,
+                 rr::Snapshot& snapshot,
+                 const rr::ReferenceCaptureDescription& description,
                  filesystem::WriteDirectory& directory) noexcept
 {
     rr::GpuPreview preview;
@@ -363,38 +366,49 @@ bool GpuEvidence(rr::Renderer& renderer, rhi::DeviceHandle device, rhi::SurfaceH
     while (!info.Complete && time::NowTicks() - started < 1800 * time::NANOSECONDS_PER_SECOND)
     {
         status = renderer.GetGpuPreviewInfo(preview, info);
-        if (status == Status::Pending) continue;
-        if (status != Status::Ready) return false;
+        if (status == Status::Pending)
+            continue;
+        if (status != Status::Ready)
+            return false;
         if (!info.Complete)
         {
             rhi::SubmissionToken producer;
-            if (renderer.AdvanceGpuPreview(preview, surface, producer) != Status::Ready) return false;
+            if (renderer.AdvanceGpuPreview(preview, surface, producer) != Status::Ready)
+                return false;
         }
     }
-    if (!info.Complete) return false;
+    if (!info.Complete)
+        return false;
     rr::GpuPreviewFrame frame;
     rr::GpuPreviewImage image;
-    if (renderer.AcquireGpuPreviewFrame(preview, frame, image) != Status::Ready) return false;
+    if (renderer.AcquireGpuPreviewFrame(preview, frame, image) != Status::Ready)
+        return false;
     // Offline SDK acceptance exports evidence. Interactive presentation retains
     // this exact texture and producer dependency; it never performs this readback.
     rhi::ReadbackTicket ticket;
-    status = rhi::RequestTextureReadback(device, image.Texture, {0,0,0,image.Width,image.Height}, usize(image.Width)*4, ticket);
+    status = rhi::RequestTextureReadback(device,
+                                         image.Texture,
+                                         {0, 0, 0, image.Width, image.Height},
+                                         usize(image.Width) * 4,
+                                         ticket);
     const auto readStarted = time::NowTicks();
     while (status == Status::Pending && time::NowTicks() - readStarted < 30 * time::NANOSECONDS_PER_SECOND)
     {
         status = rhi::GetStatus(device, ticket);
     }
     Array<uint8> bytes;
-    if (status != Status::Ready || !bytes.TryResize(usize(image.Width)*image.Height*4) ||
+    if (status != Status::Ready || !bytes.TryResize(usize(image.Width) * image.Height * 4) ||
         rhi::CopyReadback(device, ticket, bytes.GetData(), bytes.GetSize()) != Status::Ready ||
-        !directory.Publish("gpu-preview.rgba", {bytes.GetData(), bytes.GetSize()}).Outcome.Succeeded()) return false;
+        !directory.Publish("gpu-preview.rgba", {bytes.GetData(), bytes.GetSize()}).Outcome.Succeeded())
+        return false;
     uint8 metadata[32]{};
-    if (!core::TryWriteLittleEndian<uint32>(image.Width, {metadata,4}) ||
-        !core::TryWriteLittleEndian<uint32>(image.Height, {metadata+4,4}) ||
-        !core::TryWriteLittleEndian<uint32>(image.Samples, {metadata+8,4}) ||
-        !core::TryWriteLittleEndian<uint64>(info.SceneFingerprintLow, {metadata+16,8}) ||
-        !core::TryWriteLittleEndian<uint64>(info.SceneFingerprintHigh, {metadata+24,8}) ||
-        !directory.Publish("gpu-preview.bin", {metadata,sizeof(metadata)}).Outcome.Succeeded()) return false;
+    if (!core::TryWriteLittleEndian<uint32>(image.Width, {metadata, 4}) ||
+        !core::TryWriteLittleEndian<uint32>(image.Height, {metadata + 4, 4}) ||
+        !core::TryWriteLittleEndian<uint32>(image.Samples, {metadata + 8, 4}) ||
+        !core::TryWriteLittleEndian<uint64>(info.SceneFingerprintLow, {metadata + 16, 8}) ||
+        !core::TryWriteLittleEndian<uint64>(info.SceneFingerprintHigh, {metadata + 24, 8}) ||
+        !directory.Publish("gpu-preview.bin", {metadata, sizeof(metadata)}).Outcome.Succeeded())
+        return false;
     return rhi::Release(device, ticket) == Status::Ready && renderer.Release(preview) == Status::Ready &&
            renderer.Release(frame) == Status::Ready;
 }
@@ -480,12 +494,11 @@ int Run(int argc, char** argv) noexcept
                                                 usize{128} * 1024 * 1024,
                                                 usize{128} * 1024 * 1024,
                                                 512};
-    const auto enabled = gpu
-        ? renderer.EnableGpuPreview(ludus::shaders::renderer_gpu_preview::Compute(),
-                                    ludus::shaders::renderer_gpu_preview_image::Vertex(),
-                                    ludus::shaders::renderer_gpu_preview_image::Fragment(),
-                                    {usize{128} * 1024 * 1024, usize{128} * 1024 * 1024, 1})
-        : renderer.EnableReferenceRendering(ludus::shaders::ray_query::Query(), options);
+    const auto enabled = gpu ? renderer.EnableGpuPreview(ludus::shaders::renderer_gpu_preview::Compute(),
+                                                         ludus::shaders::renderer_gpu_preview_image::Vertex(),
+                                                         ludus::shaders::renderer_gpu_preview_image::Fragment(),
+                                                         {usize{128} * 1024 * 1024, usize{128} * 1024 * 1024, 1})
+                             : renderer.EnableReferenceRendering(ludus::shaders::ray_query::Query(), options);
     if (enabled != Status::Ready)
     {
         return 6;
@@ -589,11 +602,11 @@ int main(int argc, char** argv)
     const int result = Run(argc, argv);
     if (result != 0)
     {
-        LUDUS_LOG_ERROR(
-            LOG_SCENE,
-            "Scene capture failed at step {}. Usage: reference_scene <cooked-directory> <output-directory> "
-            "<extent:1..1024> <samples:1..4096> [acceptance|native|gpu]. See the reference-scene guide for step meanings.",
-            result);
+        LUDUS_LOG_ERROR(LOG_SCENE,
+                        "Scene capture failed at step {}. Usage: reference_scene <cooked-directory> <output-directory> "
+                        "<extent:1..1024> <samples:1..4096> [acceptance|native|gpu]. See the reference-scene guide for "
+                        "step meanings.",
+                        result);
     }
     else
     {
