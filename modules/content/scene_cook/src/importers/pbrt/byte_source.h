@@ -46,4 +46,43 @@ private:
     std::span<const uint8> mData;
     usize mOffset = 0;
 };
+
+/// ByteSource that forwards another source and hashes every byte it yields, so the
+/// digest covers exactly the bytes the reader consumed.
+class HashingByteSource final : public ByteSource
+{
+public:
+    explicit HashingByteSource(ByteSource& inoutSource) noexcept : mSource(inoutSource) {}
+    [[nodiscard]] Status Read(std::span<uint8> outBuffer, usize& outCount) noexcept override
+    {
+        const Status status = mSource.Read(outBuffer, outCount);
+        if (status == Status::Ok && mHasher.Add(std::span<const uint8>(outBuffer.data(), outCount)) == false)
+        {
+            return Status::Limit;
+        }
+        return status;
+    }
+    /// Hash the bytes the reader left unread (a reader may stop at an error).
+    [[nodiscard]] Status Drain() noexcept
+    {
+        uint8 buffer[4096];
+        while (true)
+        {
+            usize count = 0;
+            const Status status = Read(std::span<uint8>(buffer, sizeof(buffer)), count);
+            if (status != Status::Ok || count == 0)
+            {
+                return status;
+            }
+        }
+    }
+    [[nodiscard]] Digest GetDigest() const noexcept
+    {
+        return mHasher.Finish();
+    }
+
+private:
+    ByteSource& mSource;
+    Hasher mHasher;
+};
 } // namespace ludus::content::scene_cook::importers

@@ -80,8 +80,10 @@ struct BestEffortResult final
     ImportSummary Summary;
     /// Root-relative paths of every file the import read (pbrt sources, PLY files,
     /// referenced images and the licence), without duplicates, in first-use order.
-    /// Callers re-hash these to detect a source that changed during the import.
+    /// Callers re-hash these to detect a source that changed after the import.
     foundation::Array<foundation::String> Inputs;
+    /// SHA-256 of the exact bytes the import consumed from each Inputs entry (parallel array).
+    foundation::Array<Digest> InputDigests;
 };
 
 /// Import a pbrt-v4 entry file with the best-effort profile.

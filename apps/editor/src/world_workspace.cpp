@@ -395,6 +395,7 @@ void WorldWorkspace::SetProject(const QString& root, foundation::uint64 epoch)
     Render_->Preview().RestoreNavigation({});
     Scene_->RestoreNavigation({});
     Scene_->SetProject(canonical, epoch);
+    ClearImportState();
     ValidatedScene_ = {};
     ValidatedWorld_.clear();
     SceneError_.clear();
@@ -557,6 +558,7 @@ bool WorldWorkspace::Open(const QString& path)
     SceneError_.clear();
     ++DocumentGeneration_;
     Document_ = candidate;
+    ClearImportState();
     Render_->SetWorld(Root_, &Document_);
     SchemaDisk_ = schema;
     Disk_ = legacy ? QByteArray() : bytes;
@@ -604,6 +606,7 @@ bool WorldWorkspace::Create(const QString& path)
     SceneError_.clear();
     ++DocumentGeneration_;
     Document_ = candidate;
+    ClearImportState();
     Render_->SetWorld(Root_, &Document_);
     SchemaDisk_ = schema;
     Disk_.clear();
@@ -620,6 +623,10 @@ bool WorldWorkspace::SceneBusy() const noexcept
     return Scene_ != nullptr && Scene_->Busy();
 }
 bool WorldWorkspace::ImportScene(const QString& source)
+{
+    return StartSceneImport(source, false);
+}
+bool WorldWorkspace::StartSceneImport(const QString& source, bool isPreviewed)
 {
     if (!Document_.Loaded() || Pending_ || SceneBusy())
     {
@@ -643,7 +650,9 @@ bool WorldWorkspace::ImportScene(const QString& source)
     SceneGeneration_ = DocumentGeneration_;
     Importing_ = true;
     Scene_->SetWorldSnapshot(Document_);
-    if (!Scene_->ImportInto(level, source))
+    const bool isStarted =
+        isPreviewed == true ? Scene_->ImportPreviewedInto(level, source) : Scene_->ImportInto(level, source);
+    if (isStarted == false)
     {
         Importing_ = false;
         return false;
@@ -676,7 +685,15 @@ bool WorldWorkspace::ConfirmImportPreview()
     }
     PreviewedSource_.clear();
     ShowImportPreview(false);
-    return ImportScene(source);
+    return StartSceneImport(source, true);
+}
+void WorldWorkspace::ClearImportState()
+{
+    PreviewedSource_.clear();
+    Scene_->ClearImportState();
+    ShowImportPreview(false);
+    ImportReport_->clear();
+    ImportReport_->hide();
 }
 void WorldWorkspace::ShowImportPreview(bool isAccepted)
 {

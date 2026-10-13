@@ -1021,15 +1021,22 @@ Status SceneReader::includeFile(Directive& inoutDirective) noexcept
         warn(codes::INCLUDE_FAILED, inoutDirective.Line, "cannot open the included file");
         return Status::Ok;
     }
-    FileByteSource source(file);
+    FileByteSource fileSource(file);
+    HashingByteSource source(fileSource);
     const uint32 fileIndex = static_cast<uint32>(mScene.SourceFiles.GetSize());
     if (mScene.SourceFiles.TryAdd(static_cast<String&&>(resolved.Relative)) == false ||
+        mScene.SourceDigests.TryAdd(Digest{}) == false ||
         mIncludeStack.TryAdd(static_cast<String&&>(resolved.Native)) == false)
     {
         return Status::OutOfMemory;
     }
     const Status status = readFile(source, fileIndex);
     mIncludeStack.RemoveLast();
+    if (source.Drain() != Status::Ok)
+    {
+        return Status::IoError;
+    }
+    mScene.SourceDigests[fileIndex] = source.GetDigest();
     // A syntax error inside an included file stops that file only.
     return status == Status::Invalid ? Status::Ok : status;
 }
@@ -1038,7 +1045,8 @@ Status SceneReader::ReadEntry(ByteSource& inoutSource, std::string_view relative
 {
     String name;
     if (name.TryAssign(relativeName) != StringStatus::Ok ||
-        mScene.SourceFiles.TryAdd(static_cast<String&&>(name)) == false)
+        mScene.SourceFiles.TryAdd(static_cast<String&&>(name)) == false ||
+        mScene.SourceDigests.TryAdd(Digest{}) == false)
     {
         return Status::OutOfMemory;
     }
@@ -1052,7 +1060,14 @@ Status SceneReader::ReadEntry(ByteSource& inoutSource, std::string_view relative
             return Status::OutOfMemory;
         }
     }
-    return readFile(inoutSource, 0);
+    HashingByteSource source(inoutSource);
+    const Status status = readFile(source, 0);
+    if (source.Drain() != Status::Ok)
+    {
+        return Status::IoError;
+    }
+    mScene.SourceDigests[0] = source.GetDigest();
+    return status;
 }
 
 // ---------------------------------------------------------------------------
@@ -1657,7 +1672,8 @@ Status SceneReader::loadPly(Directive& inoutDirective, uint32& outMesh) noexcept
     }
     String dataFile;
     if (dataFile.TryAssign(resolved.Relative.GetView()) != StringStatus::Ok ||
-        mScene.DataFiles.TryAdd(static_cast<String&&>(dataFile)) == false)
+        mScene.DataFiles.TryAdd(static_cast<String&&>(dataFile)) == false ||
+        mScene.DataDigests.TryAdd(Hash(bytes.AsSpan())) == false)
     {
         return Status::OutOfMemory;
     }

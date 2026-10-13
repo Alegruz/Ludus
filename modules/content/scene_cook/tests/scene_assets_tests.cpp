@@ -655,6 +655,100 @@ TEST_CASE("Editor import routes general pbrt files to pbrt-best-effort-v1", "[sc
     std::filesystem::remove_all(work, ignored);
 }
 
+TEST_CASE("A confirmed import must match the approved preview", "[scene_assets]")
+{
+    const std::filesystem::path work = MakeWorkDirectory();
+    const std::filesystem::path project = work / "project";
+    const std::filesystem::path source = work / "source";
+    std::filesystem::create_directories(project);
+    WriteBestEffortSource(source, "room.pbrt");
+    const std::string root = project.string();
+    const std::string sourceText = source.string();
+    AssetOptions options;
+    options.SourceOrigin = VIRTUAL_ORIGIN;
+    options.SourceEntry = "room.pbrt";
+    AssetError error;
+    Array<uint8> level;
+    REQUIRE(CreateLevel("Preview token", options, level, error));
+    EditorSceneRequest request;
+    request.Root = root;
+    request.Source = sourceText;
+    request.Level = ToSpan(level);
+    request.Operation = EditorSceneOperation::PreviewImport;
+    EditorSceneResult preview;
+    INFO(Describe(error));
+    REQUIRE(OperateEditorScene(request, options, preview, error));
+    const std::string token = GetResponseMember(preview.Response, "source_digest");
+    REQUIRE(token.size() == 64); // hexadecimal SHA-256
+    const std::string digest = token;
+
+    request.Operation = EditorSceneOperation::Import;
+    options.ExpectedSourceDigest = digest;
+    EditorSceneResult matching;
+    CHECK(OperateEditorScene(request, options, matching, error) == true);
+
+    std::ofstream(source / "room.pbrt", std::ios::app) << "# edited after the preview\n";
+    EditorSceneResult stale;
+    CHECK(OperateEditorScene(request, options, stale, error) == false);
+    CHECK(error.Code == AssetErrorCode::Conflict);
+
+    std::error_code ignored;
+    std::filesystem::remove_all(work, ignored);
+}
+
+TEST_CASE("Two pbrt entries in one directory keep separate origins", "[scene_assets]")
+{
+    const std::filesystem::path work = MakeWorkDirectory();
+    const std::filesystem::path project = work / "project";
+    const std::filesystem::path source = work / "source";
+    std::filesystem::create_directories(project);
+    WriteBestEffortSource(source, "room.pbrt");
+    WriteBestEffortSource(source, "hall.pbrt");
+    const std::string root = project.string();
+    const std::string sourceText = source.string();
+    SequentialUuids counter;
+    UuidSource uuids{&SequentialUuids::Generate, &counter};
+    AssetOptions options;
+    options.UuidsOrNull = &uuids;
+    AssetError error;
+    Array<uint8> created;
+    REQUIRE(CreateLevel("Two entries", options, created, error));
+    std::string level(reinterpret_cast<const char*>(created.GetData()), created.GetSize());
+    EditorSceneRequest request;
+    request.Root = root;
+    request.Source = sourceText;
+    for (const std::string_view entry : {std::string_view("room.pbrt"), std::string_view("hall.pbrt")})
+    {
+        options.SourceEntry = entry;
+        request.Operation = EditorSceneOperation::Import;
+        request.Level = ToSpan(level);
+        request.Catalog = {};
+        EditorSceneResult imported;
+        INFO(Describe(error));
+        REQUIRE(OperateEditorScene(request, options, imported, error));
+        level = GetResponseMember(imported.Response, "level");
+        const std::string expected = GetResponseMember(imported.Response, "catalog_expected");
+        request.Operation = EditorSceneOperation::CommitImport;
+        request.Level = ToSpan(level);
+        request.Catalog = ToSpan(imported.Catalog);
+        request.HasExpected = expected.size() == 64;
+        request.Expected = expected;
+        EditorSceneResult committed;
+        const bool isCommitted = OperateEditorScene(request, options, committed, error);
+        INFO(Describe(error));
+        REQUIRE(isCommitted);
+        request.HasExpected = false;
+    }
+    // Each entry got its own logical scene rather than replacing the first.
+    const usize importsAt = level.find("\"imports\":[");
+    REQUIRE(importsAt != std::string::npos);
+    const std::string imports = level.substr(importsAt, level.find(']', importsAt) - importsAt);
+    CHECK(imports.find(',') != std::string::npos);
+
+    std::error_code ignored;
+    std::filesystem::remove_all(work, ignored);
+}
+
 TEST_CASE("scene-v4.pbrt keeps pbrt-reference-v1 and falls back only on profile rejection", "[scene_assets]")
 {
     const std::filesystem::path work = MakeWorkDirectory();

@@ -175,14 +175,37 @@ struct HexDigest final
     }
 };
 
-void ComputeHexDigest(std::span<const uint8> data, HexDigest& outHex) noexcept
+void FormatHexDigest(const Digest& digest, HexDigest& outHex) noexcept
 {
     static constexpr char HEX[] = "0123456789abcdef";
-    const Digest digest = Hash(data);
     for (usize i = 0; i < sizeof(digest.Data); ++i)
     {
         outHex.Text[i * 2] = HEX[digest.Data[i] >> 4];
         outHex.Text[i * 2 + 1] = HEX[digest.Data[i] & 0xf];
+    }
+}
+
+void ComputeHexDigest(std::span<const uint8> data, HexDigest& outHex) noexcept
+{
+    FormatHexDigest(Hash(data), outHex);
+}
+
+/// Stream-hash a source input in bounded memory; source files may exceed MAX_ASSET_BYTES.
+[[nodiscard]] bool HashSourceInput(std::string_view path, HexDigest& outHex, Failure& inoutFailure) noexcept
+{
+    Digest digest;
+    const Status status = HashFile(path, digest);
+    switch (status)
+    {
+        case Status::Ok:
+            FormatHexDigest(digest, outHex);
+            return true;
+        case Status::NotFound:
+            return inoutFailure.Fail(AssetErrorCode::AssetCorrupt, {"No such file or directory: '", path, "'"});
+        case Status::Unsupported:
+            return inoutFailure.FailStatus(status, "Read", path);
+        default:
+            return inoutFailure.Fail(AssetErrorCode::AssetCorrupt, {"Cannot read '", path, "'"});
     }
 }
 
@@ -1782,7 +1805,12 @@ void ComposeWorld(const JsonTree& tree, JsonIndex objects, JsonIndex item, Trans
     return writer.IsOk() == true && outText.TryAssign(GetView(bytes)) == foundation::StringStatus::Ok;
 }
 
-/// str(Path(source).resolve()), or the caller's provenance override.
+/// The reference profile's entry file; it keeps the directory as its origin.
+constexpr std::string_view REFERENCE_ENTRY = "scene-v4.pbrt";
+
+/// str(Path(source).resolve()), or the caller's provenance override. A best-effort
+/// entry other than the reference scene-v4.pbrt appends "/<entry>", so two entry files
+/// in one directory keep separate logical identities on reimport.
 [[nodiscard]] bool
 ResolveOrigin(std::string_view source, const AssetOptions& options, String& outOrigin, Failure& inoutFailure) noexcept
 {
@@ -1792,7 +1820,17 @@ ResolveOrigin(std::string_view source, const AssetOptions& options, String& outO
                    ? true
                    : inoutFailure.FailOutOfMemory();
     }
-    return ResolveNative(source, outOrigin, inoutFailure);
+    if (ResolveNative(source, outOrigin, inoutFailure) == false)
+    {
+        return false;
+    }
+    const std::string_view entry = options.SourceEntry;
+    if (entry.empty() == true || entry == REFERENCE_ENTRY)
+    {
+        return true;
+    }
+    const std::string_view parts[] = {std::string_view("/"), entry};
+    return outOrigin.TryAppendMany(parts) == foundation::StringStatus::Ok ? true : inoutFailure.FailOutOfMemory();
 }
 
 /// scene_cook.asset_path(source, name).
@@ -1838,14 +1876,12 @@ ResolveSourceInput(std::string_view source, std::string_view name, String& outPa
     for (usize i = 0; i < tree.GetCount(inputs); ++i)
     {
         String path;
-        Array<uint8> data;
+        HexDigest digest;
         if (ResolveSourceInput(source, tree.GetKey(inputs, i), path, inoutFailure) == false ||
-            ReadBytes(path.GetView(), MAX_ASSET_BYTES, data, inoutFailure) == false)
+            HashSourceInput(path.GetView(), digest, inoutFailure) == false)
         {
             return false;
         }
-        HexDigest digest;
-        ComputeHexDigest(GetSpan(data), digest);
         if (tree.IsString(tree.GetValue(inputs, i), digest.View()) == false)
         {
             return inoutFailure.Fail(AssetErrorCode::Conflict, message);
@@ -2315,9 +2351,6 @@ struct StoredParts final
     return tree.IsOk() == true ? true : inoutFailure.FailOutOfMemory();
 }
 
-/// prepare_import(root, source, level, cancelled).
-/// Entry file of the pbrt-reference-v1 profile.
-constexpr std::string_view REFERENCE_ENTRY = "scene-v4.pbrt";
 /// Licence text recorded when a best-effort source directory has none.
 constexpr std::string_view MISSING_LICENSE_TEXT = "No LICENSE.txt or LICENSE.md was found beside the imported scene.\n";
 
@@ -2402,18 +2435,13 @@ struct RoutedCook final
     tree.SetMember(root, "source_format", tree.AddString("PBRT v4 (best effort)"));
     tree.SetMember(root, "importer", tree.AddString(BEST_EFFORT_PROFILE));
     const JsonIndex inputs = tree.AddObject();
-    for (const String& input : imported.Inputs)
+    // Digests come from the importer's own reads, so they describe exactly the
+    // bytes that produced the bundle even if a source changes mid-import.
+    for (usize i = 0; i < imported.Inputs.GetSize(); ++i)
     {
-        String path;
-        Array<uint8> data;
-        if (ResolveSourceInput(source, input.GetView(), path, inoutFailure) == false ||
-            ReadBytes(path.GetView(), MAX_ASSET_BYTES, data, inoutFailure) == false)
-        {
-            return false;
-        }
         HexDigest digest;
-        ComputeHexDigest(GetSpan(data), digest);
-        tree.SetMember(inputs, input.GetView(), tree.AddString(digest.View()));
+        FormatHexDigest(imported.InputDigests[i], digest);
+        tree.SetMember(inputs, imported.Inputs[i].GetView(), tree.AddString(digest.View()));
     }
     tree.SetMember(root, "inputs", inputs);
     HexDigest bundleDigest;
@@ -2474,6 +2502,25 @@ struct RoutedCook final
     return CookBestEffortSource(source, entry, isDryRun, options, outCook, inoutFailure);
 }
 
+/// SHA-256 of the canonical `inputs` object of a cooked manifest: the token a
+/// PreviewImport response carries as `source_digest` and a confirmed import checks.
+[[nodiscard]] bool
+ComputeSourceDigest(const JsonTree& manifest, JsonIndex root, HexDigest& outHex, Failure& inoutFailure) noexcept
+{
+    const JsonIndex inputs = manifest.GetMember(root, "inputs");
+    Array<uint8> bytes;
+    if (inputs == NO_JSON_NODE || manifest.GetKind(inputs) != JsonKind::Object)
+    {
+        return inoutFailure.FailInvalid("Invalid manifest inputs");
+    }
+    if (WriteCanonical(manifest, inputs, bytes, inoutFailure) == false)
+    {
+        return false;
+    }
+    ComputeHexDigest(GetSpan(bytes), outHex);
+    return true;
+}
+
 [[nodiscard]] bool PrepareImportDocuments(std::string_view root,
                                           std::string_view source,
                                           const Document& level,
@@ -2501,6 +2548,19 @@ struct RoutedCook final
         ParseDocument(GetSpan(cooked.Manifest), AssetErrorCode::UnsupportedScene, manifest, inoutFailure) == false)
     {
         return false;
+    }
+    if (options.ExpectedSourceDigest.empty() == false)
+    {
+        HexDigest current;
+        if (ComputeSourceDigest(manifest.Tree, manifest.Root, current, inoutFailure) == false)
+        {
+            return false;
+        }
+        if (current.View() != options.ExpectedSourceDigest)
+        {
+            return inoutFailure.Fail(AssetErrorCode::Conflict,
+                                     "Source changed since the import preview; preview it again");
+        }
     }
     // Source read consistency is checked before the catalog commit point.
     if (AreSourceInputsUnchanged(source,
@@ -3538,7 +3598,12 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
     // The reference profile has no dry run; its manifest is its report.
     const Array<uint8>& reportBytes = routed.Report.IsEmpty() == true ? routed.Cooked.Manifest : routed.Report;
     Document report;
-    if (ParseDocument(GetSpan(reportBytes), AssetErrorCode::UnsupportedScene, report, inoutFailure) == false)
+    Document manifest;
+    HexDigest sourceDigest;
+    if (ParseDocument(GetSpan(reportBytes), AssetErrorCode::UnsupportedScene, report, inoutFailure) == false ||
+        ParseDocument(GetSpan(routed.Cooked.Manifest), AssetErrorCode::UnsupportedScene, manifest, inoutFailure) ==
+            false ||
+        ComputeSourceDigest(manifest.Tree, manifest.Root, sourceDigest, inoutFailure) == false)
     {
         return false;
     }
@@ -3548,6 +3613,7 @@ void ReportStage(const EditorSceneRequest& request, std::string_view stage) noex
     tree.SetMember(response, "ok", tree.AddBoolean(true));
     tree.SetMember(response, "profile", tree.AddString(routed.Profile));
     tree.SetMember(response, "report", tree.CopyFrom(report.Tree, report.Root));
+    tree.SetMember(response, "source_digest", tree.AddString(sourceDigest.View()));
     if (routed.ReferenceRejection.IsEmpty() == false)
     {
         tree.SetMember(response, "reference_rejection", tree.AddString(routed.ReferenceRejection.GetView()));

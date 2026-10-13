@@ -34,6 +34,9 @@ WriteFileAtomic(std::string_view directory, std::string_view name, std::span<con
 [[nodiscard]] bool DoesPathExist(std::string_view path) noexcept;
 /// scene_cook.bounded_bytes: the whole file, Limit when it exceeds maximum bytes.
 [[nodiscard]] Status ReadFileBounded(std::string_view path, usize maximum, foundation::Array<uint8>& outData) noexcept;
+/// SHA-256 of a whole file, streamed in bounded memory (no size limit).
+/// @return Ok, NotFound, IoError or Unsupported; outDigest is set only on Ok.
+[[nodiscard]] Status HashFile(std::string_view path, content::Digest& outDigest) noexcept;
 
 /// Sequential read-only file handle (POSIX open/read), closed on destruction.
 class SequentialFile final

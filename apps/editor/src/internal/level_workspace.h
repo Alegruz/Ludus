@@ -36,6 +36,9 @@ public:
     /// Import a source directory (pbrt-reference-v1) or a .pbrt file (routed by
     /// Ludus::SceneCook; general scenes use pbrt-best-effort-v1).
     [[nodiscard]] bool Import(const QString& source);
+    /// Import source after the user approved its preview: fails with a conflict,
+    /// asking for a new preview, unless the sources still match ImportPreview().
+    [[nodiscard]] bool ImportPreviewed(const QString& source);
     /// Plan importing source as a dry run on the worker thread (cancellable, with
     /// progress). Nothing is written; ImportPreviewFinished reports the result.
     [[nodiscard]] bool PreviewImport(const QString& source);
@@ -93,6 +96,10 @@ public:
     [[nodiscard]] bool VerifyAssets(const QJsonObject& level);
     [[nodiscard]] bool Assemble(const QJsonObject& level);
     [[nodiscard]] bool ImportInto(const QJsonObject& level, const QString& source);
+    /// ImportInto with the approved-preview check of ImportPreviewed.
+    [[nodiscard]] bool ImportPreviewedInto(const QJsonObject& level, const QString& source);
+    /// Forget the previewed import and the shown import reports (document replaced).
+    void ClearImportState();
     [[nodiscard]] QString StatusText() const;
     [[nodiscard]] bool PreviewRunning() const noexcept
     {
@@ -148,6 +155,8 @@ private:
     QString Source_;
     /// pbrt entry file inside Source_; empty keeps the reference profile.
     QString SourceEntry_;
+    /// source_digest of the approved preview for the next import; empty skips the check.
+    QString ExpectedSourceDigest_;
     /// File picked by the Import button while its preview runs.
     QString PreviewSource_;
     QJsonObject ImportPreview_;

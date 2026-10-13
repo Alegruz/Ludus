@@ -131,6 +131,10 @@ private:
     QPlainTextEdit* ImportReport_ = nullptr;
     void ShowImportPreview(bool isAccepted);
     void ShowImportReports();
+    /// Import source into the World; isPreviewed requires it to match the approved preview.
+    [[nodiscard]] bool StartSceneImport(const QString& source, bool isPreviewed);
+    /// Drop the previewed import and the report panel when the live World is replaced.
+    void ClearImportState();
     bool Importing_ = false;
     bool SavePending_ = false;
     bool SaveValidated_ = false;

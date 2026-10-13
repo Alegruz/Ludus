@@ -125,7 +125,7 @@ LevelWorkspace::LevelWorkspace(const ToolingPaths& tooling, QWidget* parent) : Q
         confirm->setObjectName(QStringLiteral("levelImportPreview"));
         confirm->button(QMessageBox::Ok)->setText(QStringLiteral("Import"));
         confirm->setAttribute(Qt::WA_DeleteOnClose);
-        connect(confirm, &QMessageBox::accepted, this, [this, source]() { (void)Import(source); });
+        connect(confirm, &QMessageBox::accepted, this, [this, source]() { (void)ImportPreviewed(source); });
         confirm->open();
     });
     connect(Save_, &QPushButton::clicked, this, [this]() { (void)Save(); });
@@ -299,7 +299,19 @@ bool LevelWorkspace::Import(const QString& source)
     }
     const ImportSource split = SplitImportSource(source);
     SourceEntry_ = split.Entry;
-    return Start(QStringLiteral("import"), {}, split.Directory);
+    const bool isStarted = Start(QStringLiteral("import"), {}, split.Directory);
+    ExpectedSourceDigest_.clear();
+    return isStarted;
+}
+bool LevelWorkspace::ImportPreviewed(const QString& source)
+{
+    const QString digest = ImportPreview_.value(QStringLiteral("source_digest")).toString();
+    if (digest.isEmpty() == true)
+    {
+        return false;
+    }
+    ExpectedSourceDigest_ = digest;
+    return Import(source);
 }
 bool LevelWorkspace::PreviewImport(const QString& source)
 {
@@ -374,6 +386,22 @@ bool LevelWorkspace::ImportInto(const QJsonObject& level, const QString& source)
     // Start(import) copies Level_. Retain the authoritative document for this service operation.
     Level_ = level;
     return Import(source);
+}
+bool LevelWorkspace::ImportPreviewedInto(const QJsonObject& level, const QString& source)
+{
+    if (Busy_ == true || level.isEmpty() == true)
+    {
+        return false;
+    }
+    Level_ = level;
+    return ImportPreviewed(source);
+}
+void LevelWorkspace::ClearImportState()
+{
+    PreviewSource_.clear();
+    ImportPreview_ = {};
+    ImportReports_ = {};
+    PendingImportReports_ = {};
 }
 bool LevelWorkspace::Save()
 {
@@ -511,6 +539,7 @@ bool LevelWorkspace::Run(const SceneOperationRequest& request)
     QByteArray relative = path.toUtf8();
     QByteArray from = source.toUtf8();
     QByteArray entry = SourceEntry_.toUtf8();
+    QByteArray expectedSource = kind == EditorSceneOperation::Import ? ExpectedSourceDigest_.toUtf8() : QByteArray();
     QByteArray digest = expected.isString() ? expected.toString().toUtf8() : QByteArray();
     QByteArray catalog = kind == EditorSceneOperation::CommitImport ? CandidateCatalog_ : QByteArray();
     const bool hasExpected = expected.isString();
@@ -522,61 +551,63 @@ bool LevelWorkspace::Run(const SceneOperationRequest& request)
         CandidateCatalog_.clear();
     }
     CancelRequested_.store(false);
-    Operate_ = QThread::create([this, kind, hasExpected, level, root, relative, from, entry, digest, catalog]() {
-        EditorSceneProgress progress;
-        progress.Context = this;
-        progress.Report = [](void* context, std::string_view stage) noexcept {
-            LevelWorkspace* self = static_cast<LevelWorkspace*>(context);
-            const QString text = DescribeStage(stage);
-            if (!text.isEmpty())
+    Operate_ = QThread::create(
+        [this, kind, hasExpected, level, root, relative, from, entry, expectedSource, digest, catalog]() {
+            EditorSceneProgress progress;
+            progress.Context = this;
+            progress.Report = [](void* context, std::string_view stage) noexcept {
+                LevelWorkspace* self = static_cast<LevelWorkspace*>(context);
+                const QString text = DescribeStage(stage);
+                if (!text.isEmpty())
+                {
+                    QMetaObject::invokeMethod(
+                        self,
+                        [self, text]() {
+                            if (self->Busy_ && !self->Cancelling_)
+                            {
+                                self->Status_->setText(text);
+                            }
+                        },
+                        Qt::QueuedConnection);
+                }
+            };
+            Cancellation cancel;
+            cancel.Requested = &IsCancelRequested;
+            cancel.Context = &CancelRequested_;
+            AssetOptions options;
+            options.CancelOrNull = &cancel;
+            options.SourceEntry = ToView(entry);
+            options.ExpectedSourceDigest = ToView(expectedSource);
+            EditorSceneRequest request;
+            request.Operation = kind;
+            request.Root = ToView(root);
+            request.Path = ToView(relative);
+            request.Source = ToView(from);
+            request.Level = kind == EditorSceneOperation::Open ? std::span<const foundation::uint8>() : ToSpan(level);
+            request.Catalog = ToSpan(catalog);
+            request.HasExpected = hasExpected;
+            request.Expected = ToView(digest);
+            request.ProgressOrNull = &progress;
+            EditorSceneResult result;
+            AssetError error;
+            if (OperateEditorScene(request, options, result, error))
             {
-                QMetaObject::invokeMethod(
-                    self,
-                    [self, text]() {
-                        if (self->Busy_ && !self->Cancelling_)
-                        {
-                            self->Status_->setText(text);
-                        }
-                    },
-                    Qt::QueuedConnection);
+                Response_ = QByteArray(reinterpret_cast<const char*>(result.Response.GetData()),
+                                       static_cast<qsizetype>(result.Response.GetSize()));
+                SceneBytes_ = QByteArray(reinterpret_cast<const char*>(result.Scene.GetData()),
+                                         static_cast<qsizetype>(result.Scene.GetSize()));
+                if (kind == EditorSceneOperation::Import)
+                {
+                    CandidateCatalog_ = QByteArray(reinterpret_cast<const char*>(result.Catalog.GetData()),
+                                                   static_cast<qsizetype>(result.Catalog.GetSize()));
+                }
             }
-        };
-        Cancellation cancel;
-        cancel.Requested = &IsCancelRequested;
-        cancel.Context = &CancelRequested_;
-        AssetOptions options;
-        options.CancelOrNull = &cancel;
-        options.SourceEntry = ToView(entry);
-        EditorSceneRequest request;
-        request.Operation = kind;
-        request.Root = ToView(root);
-        request.Path = ToView(relative);
-        request.Source = ToView(from);
-        request.Level = kind == EditorSceneOperation::Open ? std::span<const foundation::uint8>() : ToSpan(level);
-        request.Catalog = ToSpan(catalog);
-        request.HasExpected = hasExpected;
-        request.Expected = ToView(digest);
-        request.ProgressOrNull = &progress;
-        EditorSceneResult result;
-        AssetError error;
-        if (OperateEditorScene(request, options, result, error))
-        {
-            Response_ = QByteArray(reinterpret_cast<const char*>(result.Response.GetData()),
-                                   static_cast<qsizetype>(result.Response.GetSize()));
-            SceneBytes_ = QByteArray(reinterpret_cast<const char*>(result.Scene.GetData()),
-                                     static_cast<qsizetype>(result.Scene.GetSize()));
-            if (kind == EditorSceneOperation::Import)
+            else
             {
-                CandidateCatalog_ = QByteArray(reinterpret_cast<const char*>(result.Catalog.GetData()),
-                                               static_cast<qsizetype>(result.Catalog.GetSize()));
+                const std::string_view message = error.Message.View();
+                OperationError_ = QString::fromUtf8(message.data(), static_cast<qsizetype>(message.size()));
             }
-        }
-        else
-        {
-            const std::string_view message = error.Message.View();
-            OperationError_ = QString::fromUtf8(message.data(), static_cast<qsizetype>(message.size()));
-        }
-    });
+        });
     connect(Operate_, &QThread::finished, this, [this]() {
         Operate_->deleteLater();
         Operate_ = nullptr;
