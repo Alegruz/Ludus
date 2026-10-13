@@ -41,7 +41,7 @@ bool FailWith(CookError& outError, Status status, std::string_view message) noex
 [[nodiscard]] uint8 EncodeChannel(float64 linear) noexcept
 {
     const float32 clamped = static_cast<float32>(math::Clamp(linear, 0.0, 1.0));
-    return static_cast<uint8>(math::EncodeSrgb(clamped) * 255.0F + .5F);
+    return static_cast<uint8>(math::Floor(static_cast<float64>(math::EncodeSrgb(clamped)) * 255.0 + 0.5));
 }
 
 [[nodiscard]] float64 DecodeChannel(uint8 value, TextureEncoding encoding, float64 gamma) noexcept
@@ -395,12 +395,14 @@ struct CookedMesh final
                     return Status::OutOfMemory;
                 }
             }
+            const bool isWindingFlipped =
+                shape.IsOrientationReversed != (ComputeLinearDeterminant(placement.Transform) < 0.0);
             for (usize i = 0; i + 2 < mesh.Indices.GetSize(); i += 3)
             {
                 const uint32 a = base + mesh.Indices[i];
                 uint32 b = base + mesh.Indices[i + 1];
                 uint32 c = base + mesh.Indices[i + 2];
-                if (shape.IsWindingFlipped == true)
+                if (isWindingFlipped == true)
                 {
                     const uint32 swapped = b;
                     b = c;
@@ -905,6 +907,14 @@ bool WriteBestEffortImport(std::string_view output, const BestEffortResult& resu
     {
         if (file.Data->IsEmpty() == true)
         {
+            // Drop an output left by an earlier import into the same directory (for
+            // example a licence the new source does not carry). A missing file is fine.
+            String stale;
+            const std::string_view parts[] = {resolved.GetView(), "/", file.Name};
+            if (stale.TryAppendMany(parts) == StringStatus::Ok)
+            {
+                (void)detail::RemoveFile(stale.GetView());
+            }
             continue;
         }
         if (detail::WriteFileAtomic(resolved.GetView(), file.Name, file.Data->AsSpan()) != Status::Ok)

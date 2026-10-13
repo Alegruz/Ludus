@@ -77,8 +77,9 @@ CopyVertices(const ShapeArguments& arguments, IrMesh& outMesh, std::string_view&
     return ShapeResult::Ok;
 }
 
-[[nodiscard]] bool ReadIndex(const ShapeArguments& arguments, usize at, usize vertexCount, uint32& outIndex) noexcept
+[[nodiscard]] bool ReadIndex(const ShapeArguments& arguments, const IrMesh& mesh, usize at, uint32& outIndex) noexcept
 {
+    const usize vertexCount = mesh.GetVertexCount();
     const float64 value = arguments.Indices[at];
     if (value < 0.0 || value >= static_cast<float64>(vertexCount) || math::Floor(value) != value)
     {
@@ -124,7 +125,7 @@ CopyVertices(const ShapeArguments& arguments, IrMesh& outMesh, std::string_view&
         uint32 corners[4] = {0, 0, 0, 0};
         for (usize k = 0; k < cornersPerFace; ++k)
         {
-            if (ReadIndex(arguments, face + k, vertexCount, corners[k]) == false)
+            if (ReadIndex(arguments, outMesh, face + k, corners[k]) == false)
             {
                 outMessage = "index out of range";
                 return ShapeResult::Invalid;
@@ -152,9 +153,15 @@ BuildDisk(const ShapeArguments& arguments, IrMesh& outMesh, std::string_view& ou
         outMessage = "disk radii are invalid";
         return ShapeResult::Invalid;
     }
+    const float64 phiMax = math::DegreesToRadians(math::Clamp(arguments.PhiMaxDegrees, 0.0, 360.0));
+    if (phiMax <= 0.0)
+    {
+        outMessage = "disk phimax is not positive";
+        return ShapeResult::Invalid;
+    }
     for (uint32 segment = 0; segment <= TESSELLATION_SEGMENTS; ++segment)
     {
-        const float64 phi = math::kTau * static_cast<float64>(segment) / TESSELLATION_SEGMENTS;
+        const float64 phi = phiMax * static_cast<float64>(segment) / TESSELLATION_SEGMENTS;
         const float64 cosine = math::Cos(phi);
         const float64 sine = math::Sin(phi);
         const float64 u = static_cast<float64>(segment) / TESSELLATION_SEGMENTS;
@@ -185,14 +192,23 @@ BuildSphere(const ShapeArguments& arguments, IrMesh& outMesh, std::string_view& 
         outMessage = "sphere radius is invalid";
         return ShapeResult::Invalid;
     }
+    // Clip like pbrt: z in [zmin, zmax] and phi in [0, phimax]. Rings are spaced
+    // evenly in z (equal-area bands), which also makes clipping exact.
+    const float64 zTop = math::Clamp(arguments.ZMax / radius, -1.0, 1.0);
+    const float64 zBottom = math::Clamp(arguments.ZMin / radius, -1.0, 1.0);
+    const float64 phiMax = math::DegreesToRadians(math::Clamp(arguments.PhiMaxDegrees, 0.0, 360.0));
+    if (zTop <= zBottom || phiMax <= 0.0)
+    {
+        outMessage = "sphere clipping leaves no surface";
+        return ShapeResult::Invalid;
+    }
     for (uint32 ring = 0; ring <= TESSELLATION_RINGS; ++ring)
     {
-        const float64 theta = math::kPi * static_cast<float64>(ring) / TESSELLATION_RINGS;
-        const float64 z = math::Cos(theta);
-        const float64 ringRadius = math::Sin(theta);
+        const float64 z = zTop + (zBottom - zTop) * static_cast<float64>(ring) / TESSELLATION_RINGS;
+        const float64 ringRadius = math::Sqrt(math::Max(0.0, 1.0 - z * z));
         for (uint32 segment = 0; segment <= TESSELLATION_SEGMENTS; ++segment)
         {
-            const float64 phi = math::kTau * static_cast<float64>(segment) / TESSELLATION_SEGMENTS;
+            const float64 phi = phiMax * static_cast<float64>(segment) / TESSELLATION_SEGMENTS;
             const float64 x = ringRadius * math::Cos(phi);
             const float64 y = ringRadius * math::Sin(phi);
             if (AddVertex(outMesh,

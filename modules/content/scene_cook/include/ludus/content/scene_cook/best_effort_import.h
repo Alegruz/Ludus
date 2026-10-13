@@ -40,11 +40,11 @@ struct ImportSummary final
     uint32 SourcePlacements = 0;
     /// Vertices across all placements before budgeting.
     uint32 SourceVertices = 0;
-    /// Distinct materials referenced by the source.
+    /// Materials defined by the source (named and anonymous Material directives).
     uint32 SourceMaterials = 0;
     /// Image and spectrum textures defined by the source.
     uint32 SourceTextures = 0;
-    /// Area lights (become emissive surfaces).
+    /// AreaLightSource directives (each makes the shapes after it in its block emissive).
     uint32 SourceAreaLights = 0;
     /// Meshes in the cooked bundle (one per material slot).
     uint32 CookedMeshes = 0;

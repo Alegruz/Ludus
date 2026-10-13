@@ -85,7 +85,8 @@ DecodeTga(std::span<const uint8> data, DecodedImage& outImage, std::string_view&
         return ImageResult::Invalid;
     }
     const bool isMapped = baseType == 1;
-    if ((isMapped == true && (colourMapType != 1 || (depth != 8 && depth != 16))) ||
+    if ((isMapped == true && (colourMapType != 1 || (depth != 8 && depth != 16) ||
+                              (mapDepth != 15 && mapDepth != 16 && mapDepth != 24 && mapDepth != 32))) ||
         (baseType == 2 && depth != 24 && depth != 32 && depth != 16 && depth != 15) ||
         (baseType == 3 && depth != 8 && depth != 16))
     {
@@ -311,7 +312,8 @@ DecodePfm(std::span<const uint8> data, DecodedImage& outImage, std::string_view&
                 }
                 float32 value = std::bit_cast<float32>(bits);
                 value = math::IsFinite(value) == true ? math::Clamp(value, 0.0F, 1.0F) : 0.0F;
-                target[k] = static_cast<uint8>(math::EncodeSrgb(value) * 255.0F + .5F);
+                target[k] =
+                    static_cast<uint8>(math::Floor(static_cast<float64>(math::EncodeSrgb(value)) * 255.0 + 0.5));
             }
             target[3] = 255;
         }

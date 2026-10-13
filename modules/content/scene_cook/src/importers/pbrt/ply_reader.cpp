@@ -490,8 +490,11 @@ bool ReadPly(std::span<const uint8> data,
                 outMessage = "PLY vertex count out of range";
                 return false;
             }
-            // Each binary vertex needs at least one byte, which bounds hostile counts.
-            if (header.Format != PlyFormat::Ascii && element.Count > data.size())
+            // Every stored property takes at least one byte (two in ASCII: a digit and a
+            // separator), which bounds hostile counts before allocating.
+            const uint64 bytesPerValue = header.Format == PlyFormat::Ascii ? 2 : 1;
+            const uint64 minimumRowBytes = bytesPerValue * (element.PropertyCount == 0 ? 1 : element.PropertyCount);
+            if (element.Count > (data.size() - header.BodyOffset) / minimumRowBytes)
             {
                 outMessage = "PLY body is truncated";
                 return false;

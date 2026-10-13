@@ -24,6 +24,11 @@ struct ShapeArguments final
     float64 Radius = 1.0;
     float64 InnerRadius = 0.0;
     float64 Height = 0.0;
+    /// Sphere clipping heights, clamped to [-radius, radius]; the defaults keep the full sphere.
+    float64 ZMin = -1.0e300;
+    float64 ZMax = 1.0e300;
+    /// Sweep of disks and spheres, in degrees.
+    float64 PhiMaxDegrees = 360.0;
 };
 
 /// Outcome of TessellateShape.

@@ -209,6 +209,13 @@ private:
     detail::SequentialFile& mFile;
 };
 
+/// A source path inside the import root: root-relative for reports, native for I/O.
+struct ResolvedSourcePath final
+{
+    String Relative;
+    String Native;
+};
+
 class SceneReader final
 {
 public:
@@ -269,7 +276,7 @@ private:
     [[nodiscard]] Status beginObject(Directive& inoutDirective) noexcept;
     [[nodiscard]] Status addInstance(Directive& inoutDirective) noexcept;
     [[nodiscard]] Status loadPly(Directive& inoutDirective, uint32& outMesh) noexcept;
-    [[nodiscard]] bool resolveSourcePath(std::string_view name, String& outRelative, String& outNative) noexcept;
+    [[nodiscard]] bool resolveSourcePath(std::string_view name, ResolvedSourcePath& outPath) noexcept;
     [[nodiscard]] uint32 findSpectrumTexture(std::string_view name) const noexcept;
     [[nodiscard]] const FloatTexture* findFloatTexture(std::string_view name) const noexcept;
     void readRoughness(Directive& inoutDirective, float64 defaultValue, float64& outRoughness) noexcept;
@@ -710,14 +717,14 @@ bool SceneReader::applyTransformDirective(Directive& inoutDirective) noexcept
     {
         if (hasFiniteValues(3) == true)
         {
-            transform = MultiplyMatrices(transform, MakeTranslation(values[0], values[1], values[2]));
+            transform = MultiplyMatrices(transform, MakeTranslation(math::Vector3d{values[0], values[1], values[2]}));
         }
     }
     else if (name == "Scale")
     {
         if (hasFiniteValues(3) == true)
         {
-            transform = MultiplyMatrices(transform, MakeScale(values[0], values[1], values[2]));
+            transform = MultiplyMatrices(transform, MakeScale(math::Vector3d{values[0], values[1], values[2]}));
         }
     }
     else if (name == "Rotate")
@@ -725,7 +732,7 @@ bool SceneReader::applyTransformDirective(Directive& inoutDirective) noexcept
         math::Matrix4d rotation;
         if (hasFiniteValues(4) == true)
         {
-            if (MakeRotation(values[0], values[1], values[2], values[3], rotation) == true)
+            if (MakeRotation(values[0], math::Vector3d{values[1], values[2], values[3]}, rotation) == true)
             {
                 transform = MultiplyMatrices(transform, rotation);
             }
@@ -963,7 +970,7 @@ Status SceneReader::applyDirective(Directive& inoutDirective) noexcept
 // ---------------------------------------------------------------------------
 // Files.
 
-bool SceneReader::resolveSourcePath(std::string_view name, String& outRelative, String& outNative) noexcept
+bool SceneReader::resolveSourcePath(std::string_view name, ResolvedSourcePath& outPath) noexcept
 {
     if (mRoot.empty() == true || name.empty() == true || name.front() == '/' ||
         name.find('\\') != std::string_view::npos || name.find('\0') != std::string_view::npos)
@@ -973,25 +980,24 @@ bool SceneReader::resolveSourcePath(std::string_view name, String& outRelative, 
     String joined;
     const std::string_view parts[] = {mRoot, std::string_view("/"), name};
     if (joined.TryAppendMany(parts) != StringStatus::Ok ||
-        detail::ResolvePath(joined.GetView(), outNative) != Status::Ok)
+        detail::ResolvePath(joined.GetView(), outPath.Native) != Status::Ok)
     {
         return false;
     }
-    const std::string_view native = outNative.GetView();
+    const std::string_view native = outPath.Native.GetView();
     if (native.size() <= mRoot.size() + 1 || native.substr(0, mRoot.size()) != mRoot || native[mRoot.size()] != '/')
     {
         return false;
     }
-    return outRelative.TryAssign(native.substr(mRoot.size() + 1)) == StringStatus::Ok;
+    return outPath.Relative.TryAssign(native.substr(mRoot.size() + 1)) == StringStatus::Ok;
 }
 
 Status SceneReader::includeFile(Directive& inoutDirective) noexcept
 {
     const std::string_view name =
         inoutDirective.Positional.IsEmpty() == false ? inoutDirective.Positional[0].GetView() : std::string_view();
-    String relative;
-    String native;
-    if (resolveSourcePath(name, relative, native) == false)
+    ResolvedSourcePath resolved;
+    if (resolveSourcePath(name, resolved) == false)
     {
         warn(codes::INCLUDE_FAILED, inoutDirective.Line, "path is missing or outside the import root");
         return Status::Ok;
@@ -1003,22 +1009,22 @@ Status SceneReader::includeFile(Directive& inoutDirective) noexcept
     }
     for (const String& open : mIncludeStack)
     {
-        if (open.GetView() == native.GetView())
+        if (open.GetView() == resolved.Native.GetView())
         {
             warn(codes::INCLUDE_FAILED, inoutDirective.Line, "include cycle");
             return Status::Ok;
         }
     }
     detail::SequentialFile file;
-    if (file.Open(native.GetView()) != Status::Ok)
+    if (file.Open(resolved.Native.GetView()) != Status::Ok)
     {
         warn(codes::INCLUDE_FAILED, inoutDirective.Line, "cannot open the included file");
         return Status::Ok;
     }
     FileByteSource source(file);
     const uint32 fileIndex = static_cast<uint32>(mScene.SourceFiles.GetSize());
-    if (mScene.SourceFiles.TryAdd(static_cast<String&&>(relative)) == false ||
-        mIncludeStack.TryAdd(static_cast<String&&>(native)) == false)
+    if (mScene.SourceFiles.TryAdd(static_cast<String&&>(resolved.Relative)) == false ||
+        mIncludeStack.TryAdd(static_cast<String&&>(resolved.Native)) == false)
     {
         return Status::OutOfMemory;
     }
@@ -1134,13 +1140,16 @@ Status SceneReader::defineTexture(Directive& inoutDirective) noexcept
     if (textureClass == "imagemap")
     {
         std::string_view file;
-        String native;
-        if (findString(inoutDirective, "filename", file) == false ||
-            resolveSourcePath(file, texture.File, native) == false)
+        ResolvedSourcePath resolved;
+        if (findString(inoutDirective, "filename", file) == false || resolveSourcePath(file, resolved) == false)
         {
             warn(codes::TEXTURE_UNREADABLE, inoutDirective.Line, "image path is missing or outside the import root");
             texture.File.Clear();
             texture.Scale[0] = texture.Scale[1] = texture.Scale[2] = .5;
+        }
+        else
+        {
+            texture.File = static_cast<String&&>(resolved.Relative);
         }
         std::string_view text;
         if (findString(inoutDirective, "encoding", text) == true)
@@ -1531,12 +1540,14 @@ Status SceneReader::addLight(Directive& inoutDirective) noexcept
         (void)findParameter(inoutDirective, "illuminance");
         (void)findParameter(inoutDirective, "portal");
         std::string_view file;
-        String native;
+        ResolvedSourcePath resolved;
         environment.File.Clear();
-        if (findString(inoutDirective, "filename", file) == true &&
-            resolveSourcePath(file, environment.File, native) == false)
+        if (findString(inoutDirective, "filename", file) == true && resolveSourcePath(file, resolved) == true)
         {
-            environment.File.Clear();
+            environment.File = static_cast<String&&>(resolved.Relative);
+        }
+        else if (file.empty() == false)
+        {
             warn(codes::TEXTURE_UNREADABLE, inoutDirective.Line, "environment map is missing or outside the root");
         }
         environment.IsPresent = true;
@@ -1612,23 +1623,22 @@ Status SceneReader::loadPly(Directive& inoutDirective, uint32& outMesh) noexcept
 {
     outMesh = IR_NONE;
     std::string_view file;
-    String relative;
-    String native;
-    if (findString(inoutDirective, "filename", file) == false || resolveSourcePath(file, relative, native) == false)
+    ResolvedSourcePath resolved;
+    if (findString(inoutDirective, "filename", file) == false || resolveSourcePath(file, resolved) == false)
     {
         warn(codes::SHAPE_FAILED, inoutDirective.Line, "PLY path is missing or outside the import root");
         return Status::Ok;
     }
     for (const PlyCacheEntry& entry : mPlyCache)
     {
-        if (entry.File.GetView() == relative.GetView())
+        if (entry.File.GetView() == resolved.Relative.GetView())
         {
             outMesh = entry.Mesh;
             return Status::Ok;
         }
     }
     Array<uint8> bytes;
-    const Status read = detail::ReadFileBounded(native.GetView(), MAX_PLY_BYTES, bytes);
+    const Status read = detail::ReadFileBounded(resolved.Native.GetView(), MAX_PLY_BYTES, bytes);
     if (read == Status::OutOfMemory)
     {
         return read;
@@ -1647,7 +1657,7 @@ Status SceneReader::loadPly(Directive& inoutDirective, uint32& outMesh) noexcept
     }
     PlyCacheEntry entry;
     entry.Mesh = static_cast<uint32>(mScene.Meshes.GetSize());
-    entry.File = static_cast<String&&>(relative);
+    entry.File = static_cast<String&&>(resolved.Relative);
     outMesh = entry.Mesh;
     if (mScene.Meshes.TryAdd(static_cast<IrMesh&&>(mesh)) == false ||
         mPlyCache.TryAdd(static_cast<PlyCacheEntry&&>(entry)) == false)
@@ -1699,12 +1709,11 @@ Status SceneReader::addShape(Directive& inoutDirective) noexcept
         (void)findFloat(inoutDirective, "radius", arguments.Radius);
         (void)findFloat(inoutDirective, "innerradius", arguments.InnerRadius);
         (void)findFloat(inoutDirective, "height", arguments.Height);
-        for (const std::string_view known : {std::string_view("zmin"),
-                                             std::string_view("zmax"),
-                                             std::string_view("phimax"),
-                                             std::string_view("S"),
-                                             std::string_view("faceIndices"),
-                                             std::string_view("levels")})
+        (void)findFloat(inoutDirective, "zmin", arguments.ZMin);
+        (void)findFloat(inoutDirective, "zmax", arguments.ZMax);
+        (void)findFloat(inoutDirective, "phimax", arguments.PhiMaxDegrees);
+        for (const std::string_view known :
+             {std::string_view("S"), std::string_view("faceIndices"), std::string_view("levels")})
         {
             (void)findParameter(inoutDirective, known);
         }
@@ -1744,7 +1753,7 @@ Status SceneReader::addShape(Directive& inoutDirective) noexcept
     shape.Mesh = meshIndex;
     shape.Material = mState.Material;
     shape.Transform = mState.Transform;
-    shape.IsWindingFlipped = (mState.IsReversed == true) != (ComputeLinearDeterminant(mState.Transform) < 0.0);
+    shape.IsOrientationReversed = mState.IsReversed;
     shape.SourceFile = mCurrentFile;
     shape.Line = inoutDirective.Line;
     if (mState.HasAreaLight == true)
@@ -1872,18 +1881,16 @@ Status SceneReader::Finish() noexcept
 }
 } // namespace
 
-Status ReadSceneFromMemory(std::span<const uint8> text,
-                           std::string_view root,
-                           std::string_view entryName,
+Status ReadSceneFromMemory(const MemoryEntryFile& entry,
                            SceneIr& outScene,
                            DiagnosticLog& inoutLog,
                            const Cancellation* cancelOrNull) noexcept
 {
     SceneIr freshScene;
     outScene = static_cast<SceneIr&&>(freshScene);
-    SceneReader reader(root, outScene, inoutLog, cancelOrNull);
-    MemoryByteSource source(text);
-    return RunReader(reader, source, entryName, inoutLog);
+    SceneReader reader(entry.Root, outScene, inoutLog, cancelOrNull);
+    MemoryByteSource source(entry.Text);
+    return RunReader(reader, source, entry.EntryName, inoutLog);
 }
 
 Status ReadScene(std::string_view entryFile,

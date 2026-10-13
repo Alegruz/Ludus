@@ -43,9 +43,18 @@ inline constexpr usize MAX_PLY_BYTES = usize{1024} * 1024 * 1024;
 /// Same as ReadScene over an in-memory entry file; Include and file-backed shapes
 /// resolve below root. Used by tests and the fuzz target (root may be empty to
 /// forbid all file access).
-[[nodiscard]] Status ReadSceneFromMemory(std::span<const uint8> text,
-                                         std::string_view root,
-                                         std::string_view entryName,
+/// An in-memory entry file for ReadSceneFromMemory.
+struct MemoryEntryFile final
+{
+    /// pbrt source text of the entry file.
+    std::span<const uint8> Text;
+    /// Directory that Include and file-backed shapes resolve below; empty forbids file access.
+    std::string_view Root;
+    /// Name reported in diagnostics.
+    std::string_view EntryName;
+};
+
+[[nodiscard]] Status ReadSceneFromMemory(const MemoryEntryFile& entry,
                                          SceneIr& outScene,
                                          DiagnosticLog& inoutLog,
                                          const Cancellation* cancelOrNull = nullptr) noexcept;

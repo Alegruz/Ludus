@@ -12,6 +12,7 @@
 #include "importers/pbrt/pbrt_parser.h"
 #include "importers/pbrt/pbrt_tokenizer.h"
 #include "importers/pbrt/ply_reader.h"
+#include "importers/pbrt/shape_tessellation.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -407,7 +408,7 @@ TEST_CASE("syntax errors fail with a located error; include errors stay local", 
     SceneIr scene;
     DiagnosticLog log;
     const std::string_view text = "WorldBegin\nShape \"trianglemesh\" \"point3 P\" [ 0 0 0\n  \"unterminated\n";
-    CHECK(pbrt::ReadSceneFromMemory(AsBytes(text), {}, "memory.pbrt", scene, log) == ludus::content::Status::Invalid);
+    CHECK(pbrt::ReadSceneFromMemory({AsBytes(text), {}, "memory.pbrt"}, scene, log) == ludus::content::Status::Invalid);
     REQUIRE(log.HasErrors() == true);
     bool hasLocatedError = false;
     for (const Diagnostic& diagnostic : log.GetEntries())
@@ -419,7 +420,7 @@ TEST_CASE("syntax errors fail with a located error; include errors stay local", 
     CHECK(hasLocatedError == true);
 
     DiagnosticLog fileLog;
-    CHECK(pbrt::ReadSceneFromMemory(AsBytes("Include \"x.pbrt\"\nWorldBegin\n"), {}, "memory.pbrt", scene, fileLog) ==
+    CHECK(pbrt::ReadSceneFromMemory({AsBytes("Include \"x.pbrt\"\nWorldBegin\n"), {}, "memory.pbrt"}, scene, fileLog) ==
           ludus::content::Status::Ok);
     CHECK(fileLog.CountOccurrences(codes::INCLUDE_FAILED) == 1); // No root: file access is refused.
 }
@@ -560,4 +561,78 @@ TEST_CASE("local smoke test: licensed staircase imports with readable limits", "
     {
         REQUIRE(WriteBestEffortImport(output, result, error) == true);
     }
+}
+
+TEST_CASE("sphere and disk tessellation honour zmin, zmax and phimax", "[scene_cook][pbrt]")
+{
+    ShapeArguments arguments;
+    arguments.Radius = 2.0;
+    arguments.ZMax = 0.0;
+    arguments.PhiMaxDegrees = 90.0;
+    IrMesh mesh;
+    std::string_view message;
+    REQUIRE(TessellateShape("sphere", arguments, mesh, message) == ShapeResult::Ok);
+    for (usize v = 0; v < mesh.GetVertexCount(); ++v)
+    {
+        CHECK(mesh.Positions[v * 3] >= -1e-6F);     // x >= 0 within the quarter sweep.
+        CHECK(mesh.Positions[v * 3 + 1] >= -1e-6F); // y >= 0.
+        CHECK(mesh.Positions[v * 3 + 2] <= 1e-6F);  // Lower hemisphere only.
+    }
+    ShapeArguments disk;
+    disk.PhiMaxDegrees = 180.0;
+    REQUIRE(TessellateShape("disk", disk, mesh, message) == ShapeResult::Ok);
+    for (usize v = 0; v < mesh.GetVertexCount(); ++v)
+    {
+        CHECK(mesh.Positions[v * 3 + 1] >= -1e-6F);
+    }
+    ShapeArguments empty;
+    empty.ZMin = 1.0;
+    empty.ZMax = 0.5;
+    CHECK(TessellateShape("sphere", empty, mesh, message) == ShapeResult::Invalid);
+}
+
+TEST_CASE("mirrored instances flip winding through the full placement transform", "[scene_cook][pbrt]")
+{
+    ScratchDirectory scratch;
+    const auto cook = [&](std::string_view instanceTransform) {
+        std::string text = "LookAt 0 0 5  0 0 0  0 1 0\nCamera \"perspective\"\nWorldBegin\n"
+                           "ObjectBegin \"tri\"\nShape \"trianglemesh\" \"point3 P\" [0 0 0 1 0 0 0 1 0] "
+                           "\"integer indices\" [0 1 2]\nObjectEnd\nAttributeBegin\n";
+        text += instanceTransform;
+        text += "\nObjectInstance \"tri\"\nAttributeEnd\n";
+        WriteFile(scratch.Path / "mirror.pbrt", text);
+        BestEffortResult result;
+        CookError error;
+        REQUIRE(ImportPbrtBestEffort((scratch.Path / "mirror.pbrt").string(), {}, result, error) == true);
+        ludus::resources::SceneDefinition decoded;
+        REQUIRE(DecodesAtRuntime(result, decoded) == true);
+        return decoded;
+    };
+    const ludus::resources::SceneDefinition plain = cook("Translate 0 0 0");
+    const ludus::resources::SceneDefinition mirrored = cook("Scale -1 1 1");
+    REQUIRE(plain.Meshes.GetSize() == 1);
+    REQUIRE(mirrored.Meshes.GetSize() == 1);
+    // The mirrored triangle keeps its facing: the second and third indices swap.
+    CHECK(plain.Meshes[0].Indices[1] == mirrored.Meshes[0].Indices[2]);
+    CHECK(plain.Meshes[0].Indices[2] == mirrored.Meshes[0].Indices[1]);
+}
+
+TEST_CASE("PLY counts are bounded by the body size before allocating", "[scene_cook][pbrt]")
+{
+    const std::string text = "ply\nformat ascii 1.0\nelement vertex 2000000000\nproperty float x\n"
+                             "property float y\nproperty float z\nend_header\n0 0 0\n";
+    IrMesh mesh;
+    PlyHeaderSummary summary;
+    std::string_view message;
+    CHECK(ReadPly(AsBytes(text), mesh, summary, message) == false);
+    CHECK(message == "PLY body is truncated");
+}
+
+TEST_CASE("TGA colour maps with unsupported entry depths are rejected", "[scene_cook][pbrt]")
+{
+    // Colour-mapped, 8-bit indices, 8-bit palette entries (unsupported), 1x1.
+    const uint8 data[] = {0, 1, 1, 0, 0, 1, 0, 8, 0, 0, 0, 0, 1, 0, 1, 0, 8, 0, 7, 0};
+    DecodedImage image;
+    std::string_view message;
+    CHECK(DecodeImage("bad.tga", std::span<const uint8>(data, sizeof(data)), image, message) != ImageResult::Ok);
 }

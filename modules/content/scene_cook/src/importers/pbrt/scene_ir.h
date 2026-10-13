@@ -100,8 +100,9 @@ struct IrShape final
     float64 Emission[3] = {0.0, 0.0, 0.0};
     /// Object-to-world (or object-to-instance inside ObjectBegin).
     math::Matrix4d Transform = math::Matrix4d::Identity();
-    /// ReverseOrientation combined with a negative-determinant transform.
-    bool IsWindingFlipped = false;
+    /// ReverseOrientation was active; the bake combines it with the handedness of
+    /// the full placement transform (instance included).
+    bool IsOrientationReversed = false;
     uint32 SourceFile = IR_NONE;
     uint32 Line = 0;
 };
