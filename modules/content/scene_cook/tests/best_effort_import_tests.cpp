@@ -20,8 +20,10 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <stdlib.h> // mkdtemp (POSIX).
 #include <string>
 #include <string_view>
+#include <unistd.h>
 #include <vector>
 
 namespace
@@ -96,7 +98,7 @@ std::string MakeBinaryQuad(bool isBigEndian, float32 offset)
             "property float nx\nproperty float ny\nproperty float nz\nproperty float s\nproperty float t\n"
             "element face 1\nproperty list uchar int vertex_indices\nend_header\n";
     const float32 corners[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-    for (const auto& corner : corners)
+    for (const float32(&corner)[2] : corners)
     {
         for (const float32 value : {corner[0] + offset, corner[1], 0.0F, 0.0F, 0.0F, 1.0F, corner[0], corner[1]})
         {
@@ -446,7 +448,7 @@ TEST_CASE("best-effort import cooks a decodable, deterministic bundle and report
     CHECK(first.License.GetSize() != 0);
     // Exactly one emissive slot, with radiance L x scale.
     usize emissiveSlots = 0;
-    for (const auto& material : decoded.Materials)
+    for (const ludus::resources::SceneMaterial& material : decoded.Materials)
     {
         if (material.Emission.X > 0.0F)
         {

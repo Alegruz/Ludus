@@ -49,7 +49,8 @@ public:
     [[nodiscard]] Status Read(std::span<uint8> outBuffer, usize& outCount) noexcept;
 
 private:
-    int mDescriptor = -1;
+    /// POSIX descriptor; unused where SequentialFile is unsupported.
+    [[maybe_unused]] int mDescriptor = -1;
 };
 
 /// How PublishFile commits its synced temporary.
