@@ -546,11 +546,11 @@ bool Initialize(const ApplicationInfo& app) noexcept
             return false;
         }
         gBorrowedDevice = true;
-        gInstance = static_cast<VkInstance>(imported->Identity.Instance);
+        gInstance = static_cast<VkInstance>(imported->Identity.Instance.GetObject());
         volkLoadInstance(gInstance);
-        gDevice = static_cast<VkDevice>(imported->Identity.Device);
-        gPhysical = static_cast<VkPhysicalDevice>(imported->Identity.PhysicalDevice);
-        gQueue = static_cast<VkQueue>(imported->Identity.CommandQueue);
+        gDevice = static_cast<VkDevice>(imported->Identity.Device.GetObject());
+        gPhysical = static_cast<VkPhysicalDevice>(imported->Identity.PhysicalDevice.GetObject());
+        gQueue = static_cast<VkQueue>(imported->Identity.CommandQueue.GetObject());
         gFamily = imported->Identity.QueueFamily;
         gNativeInstanceVersion = imported->InstanceApiVersion;
         volkLoadDevice(gDevice);

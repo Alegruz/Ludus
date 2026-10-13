@@ -1,14 +1,14 @@
 // Native bridge fixture: producer colors and foreign graphics sampling are
 // GPU-only. The fixture reads only the final validation buffer on the CPU.
 struct Varying { float4 position : SV_Position; };
-Varying vertexMain(uint vertex : SV_VertexID)
+Varying vertexMain(float3 position : POSITION)
 {
-    float2 positions[3] = {float2(-1,-1),float2(3,-1),float2(-1,3)};
-    Varying result; result.position=float4(positions[vertex],0,1); return result;
+    Varying result; result.position=float4(position,1); return result;
 }
 float4 sourceMain(Varying input) : SV_Target0
 {
-    bool right=input.position.x>=2, bottom=input.position.y>=2;
+    bool right=input.position.x>=2;
+    bool bottom=input.position.y>=2;
     return bottom ? (right ? float4(1,1,1,1) : float4(0,0,1,1))
                   : (right ? float4(0,1,0,1) : float4(1,0,0,1));
 }

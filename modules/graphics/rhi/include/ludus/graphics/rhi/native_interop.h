@@ -12,6 +12,172 @@ namespace internal
 struct NativeInteropAccess;
 }
 
+/// Distinct borrowed Vulkan instance identity. No ownership or validation is added.
+/// Construct from the matching native object on its owner thread; a source lifetime
+/// handshake or native lease must keep that object alive during every use.
+class NativeInstance final
+{
+public:
+    /// Construct an empty identity; no native object is borrowed.
+    constexpr NativeInstance() noexcept = default;
+    /// Wrap a matching live native object, or nullptr; never retain or destroy it.
+    explicit constexpr NativeInstance(void* object) noexcept : mObject(object) {}
+    /// Return the borrowed native object for an explicit framework/backend conversion.
+    /// The caller must hold its lifetime pin; nullptr denotes an empty identity.
+    [[nodiscard]] constexpr void* GetObject() const noexcept
+    {
+        return mObject;
+    }
+    /// Whether this identity contains no native object; does not query device health.
+    [[nodiscard]] constexpr bool IsNull() const noexcept
+    {
+        return mObject == nullptr;
+    }
+    /// Compare native object identities only; this does not validate a lease incarnation.
+    [[nodiscard]] constexpr bool operator==(const NativeInstance& other) const noexcept = default;
+
+private:
+    void* mObject = nullptr;
+};
+
+/// Distinct borrowed Vulkan physical device identity. No ownership or validation is added.
+/// Construct from the matching native object on its owner thread; a source lifetime
+/// handshake or native lease must keep that object alive during every use.
+class NativePhysicalDevice final
+{
+public:
+    /// Construct an empty identity; no native object is borrowed.
+    constexpr NativePhysicalDevice() noexcept = default;
+    /// Wrap a matching live native object, or nullptr; never retain or destroy it.
+    explicit constexpr NativePhysicalDevice(void* object) noexcept : mObject(object) {}
+    /// Return the borrowed native object for an explicit framework/backend conversion.
+    /// The caller must hold its lifetime pin; nullptr denotes an empty identity.
+    [[nodiscard]] constexpr void* GetObject() const noexcept
+    {
+        return mObject;
+    }
+    /// Whether this identity contains no native object; does not query device health.
+    [[nodiscard]] constexpr bool IsNull() const noexcept
+    {
+        return mObject == nullptr;
+    }
+    /// Compare native object identities only; this does not validate a lease incarnation.
+    [[nodiscard]] constexpr bool operator==(const NativePhysicalDevice& other) const noexcept = default;
+
+private:
+    void* mObject = nullptr;
+};
+
+/// Distinct borrowed Vulkan logical device or Metal device identity. No ownership or validation is added.
+/// Construct from the matching native object on its owner thread; a source lifetime
+/// handshake or native lease must keep that object alive during every use.
+class NativeLogicalDevice final
+{
+public:
+    /// Construct an empty identity; no native object is borrowed.
+    constexpr NativeLogicalDevice() noexcept = default;
+    /// Wrap a matching live native object, or nullptr; never retain or destroy it.
+    explicit constexpr NativeLogicalDevice(void* object) noexcept : mObject(object) {}
+    /// Return the borrowed native object for an explicit framework/backend conversion.
+    /// The caller must hold its lifetime pin; nullptr denotes an empty identity.
+    [[nodiscard]] constexpr void* GetObject() const noexcept
+    {
+        return mObject;
+    }
+    /// Whether this identity contains no native object; does not query device health.
+    [[nodiscard]] constexpr bool IsNull() const noexcept
+    {
+        return mObject == nullptr;
+    }
+    /// Compare native object identities only; this does not validate a lease incarnation.
+    [[nodiscard]] constexpr bool operator==(const NativeLogicalDevice& other) const noexcept = default;
+
+private:
+    void* mObject = nullptr;
+};
+
+/// Distinct borrowed Vulkan queue or Metal command queue identity. No ownership or validation is added.
+/// Construct from the matching native object on its owner thread; a source lifetime
+/// handshake or native lease must keep that object alive during every use.
+class NativeCommandQueue final
+{
+public:
+    /// Construct an empty identity; no native object is borrowed.
+    constexpr NativeCommandQueue() noexcept = default;
+    /// Wrap a matching live native object, or nullptr; never retain or destroy it.
+    explicit constexpr NativeCommandQueue(void* object) noexcept : mObject(object) {}
+    /// Return the borrowed native object for an explicit framework/backend conversion.
+    /// The caller must hold its lifetime pin; nullptr denotes an empty identity.
+    [[nodiscard]] constexpr void* GetObject() const noexcept
+    {
+        return mObject;
+    }
+    /// Whether this identity contains no native object; does not query device health.
+    [[nodiscard]] constexpr bool IsNull() const noexcept
+    {
+        return mObject == nullptr;
+    }
+    /// Compare native object identities only; this does not validate a lease incarnation.
+    [[nodiscard]] constexpr bool operator==(const NativeCommandQueue& other) const noexcept = default;
+
+private:
+    void* mObject = nullptr;
+};
+
+/// Distinct borrowed Metal texture identity. No ownership or validation is added.
+/// Construct from the matching native object on its owner thread; a source lifetime
+/// handshake or native lease must keep that object alive during every use.
+class NativeMetalTexture final
+{
+public:
+    /// Construct an empty identity; no native object is borrowed.
+    constexpr NativeMetalTexture() noexcept = default;
+    /// Wrap a matching live native object, or nullptr; never retain or destroy it.
+    explicit constexpr NativeMetalTexture(void* object) noexcept : mObject(object) {}
+    /// Return the borrowed native object for an explicit framework/backend conversion.
+    /// The caller must hold its lifetime pin; nullptr denotes an empty identity.
+    [[nodiscard]] constexpr void* GetObject() const noexcept
+    {
+        return mObject;
+    }
+    /// Whether this identity contains no native object; does not query device health.
+    [[nodiscard]] constexpr bool IsNull() const noexcept
+    {
+        return mObject == nullptr;
+    }
+    /// Compare native object identities only; this does not validate a lease incarnation.
+    [[nodiscard]] constexpr bool operator==(const NativeMetalTexture& other) const noexcept = default;
+
+private:
+    void* mObject = nullptr;
+};
+
+/// Distinct borrowed Vulkan image identity, represented by its native 64-bit bits.
+/// Copies do not pin the image; use only while its NativeTextureRead remains open.
+class NativeVulkanImage final
+{
+public:
+    /// Construct an empty image identity.
+    constexpr NativeVulkanImage() noexcept = default;
+    /// Wrap a live VkImage bit representation, or zero; never retain or destroy it.
+    explicit constexpr NativeVulkanImage(ludus::foundation::uint64 bits) noexcept : mBits(bits) {}
+    /// Return the borrowed VkImage bits for explicit conversion using Vulkan's native handle representation.
+    [[nodiscard]] constexpr ludus::foundation::uint64 GetBits() const noexcept
+    {
+        return mBits;
+    }
+    /// Whether this identity contains no image; does not query GPU completion.
+    [[nodiscard]] constexpr bool IsNull() const noexcept
+    {
+        return mBits == 0;
+    }
+    /// Compare image bits only; this does not validate a texture lease incarnation.
+    [[nodiscard]] constexpr bool operator==(const NativeVulkanImage& other) const noexcept = default;
+
+private:
+    ludus::foundation::uint64 mBits = 0;
+};
+
 /// Exact native context for the single-queue sharing profile. These are borrowed
 /// objects, not resource owners. All objects must come from one live native context.
 /// Dispatchable Vulkan handles are converted to void*; do not pass pointers to handles.
@@ -20,13 +186,13 @@ struct NativeDeviceIdentity final
     /// Metal or Vulkan; browser APIs have no native sharing profile.
     Backend Api = Backend::Vulkan;
     /// VkInstance for Vulkan; null for Metal.
-    void* Instance = nullptr;
+    NativeInstance Instance{nullptr};
     /// VkPhysicalDevice for Vulkan; null for Metal. Matching this alone is insufficient.
-    void* PhysicalDevice = nullptr;
+    NativePhysicalDevice PhysicalDevice{nullptr};
     /// VkDevice or id<MTLDevice>, borrowed on the owning thread.
-    void* Device = nullptr;
+    NativeLogicalDevice Device{nullptr};
     /// VkQueue or id<MTLCommandQueue>. Both producers and consumers use this exact queue.
-    void* CommandQueue = nullptr;
+    NativeCommandQueue CommandQueue{nullptr};
     /// Created graphics queue family for Vulkan; zero for Metal.
     ludus::foundation::uint32 QueueFamily = 0;
     /// Created queue index in QueueFamily for Vulkan; zero for Metal.
@@ -52,9 +218,9 @@ struct NativeDeviceLifetime final
 struct NativeDeviceDescription final
 {
     /// Native context to admit; physical and logical identity must agree.
-    NativeDeviceIdentity Identity;
+    NativeDeviceIdentity Identity{};
     /// Required lifetime handshake; the source controls destruction of its context.
-    NativeDeviceLifetime Lifetime;
+    NativeDeviceLifetime Lifetime{};
     /// Vulkan instance API version in Vulkan's packed encoding, at least 1.1; zero for Metal.
     ludus::foundation::uint32 InstanceApiVersion = 0;
     /// Require producer and consumer queue submissions to be serialized on the RHI
@@ -78,8 +244,9 @@ struct NativeInteropCapabilities final
 struct NativeDeviceLease final
 {
 private:
-    ludus::foundation::uint64 Owner = 0, Generation = 0;
-    ludus::foundation::uint32 Slot = 0;
+    ludus::foundation::uint64 mOwner = 0;
+    ludus::foundation::uint64 mGeneration = 0;
+    ludus::foundation::uint32 mSlot = 0;
     /// Grants the bridge registry access to validate retained incarnations.
     friend struct internal::NativeInteropAccess;
 };
@@ -90,8 +257,9 @@ private:
 struct NativeTextureRead final
 {
 private:
-    ludus::foundation::uint64 Owner = 0, Generation = 0;
-    ludus::foundation::uint32 Slot = 0;
+    ludus::foundation::uint64 mOwner = 0;
+    ludus::foundation::uint64 mGeneration = 0;
+    ludus::foundation::uint32 mSlot = 0;
     /// Grants the bridge registry access to validate retained incarnations.
     friend struct internal::NativeInteropAccess;
 };
@@ -100,7 +268,7 @@ private:
 struct NativeDeviceInfo final
 {
     /// Exact logical device, instance and command queue used by RHI.
-    NativeDeviceIdentity Identity;
+    NativeDeviceIdentity Identity{};
     /// RHI session incarnation; native pointer reuse does not revive an old lease.
     ludus::foundation::uint64 Incarnation = 0;
     /// Metal registry ID, or zero on Vulkan.
@@ -120,7 +288,7 @@ struct NativeDeviceInfo final
 struct NativeTextureInfo final
 {
     /// Pinned exact native context and RHI incarnation.
-    NativeDeviceInfo Device;
+    NativeDeviceInfo Device{};
     /// Texture state revision captured at publication.
     ludus::foundation::uint64 Revision = 0;
     /// Producer submission ordinal, retained independently of the public texture owner.
@@ -132,9 +300,9 @@ struct NativeTextureInfo final
     /// Pixel height of the single mip/layer; no scaling is performed by the bridge.
     ludus::foundation::uint32 Height = 0;
     /// id<MTLTexture> for Metal; null for Vulkan. Valid only during the read lease.
-    void* MetalTexture = nullptr;
+    NativeMetalTexture MetalTexture{nullptr};
     /// VkImage bits for Vulkan; zero for Metal. Convert according to the native VkImage type.
-    ludus::foundation::uint64 VulkanImage = 0;
+    NativeVulkanImage VulkanImage{0};
     /// Current Vulkan image layout: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; zero for Metal.
     ludus::foundation::uint32 VulkanLayout = 0;
     /// Native image is borrowed for sampled reads only; foreign writes/ownership transfers reject.

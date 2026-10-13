@@ -69,11 +69,13 @@ bool Run() noexcept
     NATIVE_REQUIRE(native.Identity.Device == session.Foreign.Description.Identity.Device);
     NATIVE_REQUIRE(native.Identity.CommandQueue == session.Foreign.Description.Identity.CommandQueue);
     gStep = 2;
-    rhi::RasterShaderHandle vertex, fragment;
+    rhi::RasterShaderHandle vertex;
+    rhi::RasterShaderHandle fragment;
     rhi::BindingLayoutHandle layout;
     rhi::BindingSetHandle set;
     rhi::RasterPipelineHandle pipeline;
     rhi::BufferHandle indices;
+    rhi::BufferHandle vertices;
     rhi::TextureHandle texture;
     NATIVE_REQUIRE(rhi::CreateRasterShader(session.Device, ludus::shaders::native_source::Vertex(), vertex) ==
                    rhi::RasterStatus::Ready);
@@ -81,36 +83,51 @@ bool Run() noexcept
                    rhi::RasterStatus::Ready);
     NATIVE_REQUIRE(rhi::CreateBindingLayout(session.Device, {}, layout) == rhi::RasterStatus::Ready);
     NATIVE_REQUIRE(rhi::CreateBindingSet(session.Device, layout, {}, set) == rhi::RasterStatus::Ready);
-    rhi::RasterPipelineDescription state;
-    state.Vertex = vertex;
-    state.Fragment = fragment;
-    state.Layout = layout;
-    state.Target = rhi::RasterTarget::Rgba8Unorm;
+    const rhi::RasterVertexStream streams[]{{ .Stride = native_fixture::VERTEX_STRIDE }};
+    const rhi::RasterVertexAttribute attributes[]{{ .Location = 0, .Format = rhi::RasterVertexFormat::Float3 }};
+    const rhi::RasterPipelineDescription state
+    {
+        .Vertex = vertex,
+        .Fragment = fragment,
+        .Layout = layout,
+        .Streams = streams,
+        .Attributes = attributes,
+        .Target = rhi::RasterTarget::Rgba8Unorm,
+    };
     NATIVE_REQUIRE(rhi::CreateRasterPipeline(session.Device, state, pipeline) == rhi::RasterStatus::Ready);
     const uint16 data[]{0, 1, 2};
     NATIVE_REQUIRE(rhi::CreateBuffer(session.Device,
                                      {rhi::BufferRole::Index16, sizeof(data)},
                                      {reinterpret_cast<const uint8*>(data), sizeof(data)},
                                      indices) == rhi::RasterStatus::Ready);
+    NATIVE_REQUIRE(
+        rhi::CreateBuffer(session.Device,
+                          { .Role = rhi::BufferRole::Vertex, .Size = sizeof(native_fixture::TRIANGLE_POSITIONS) },
+                          {reinterpret_cast<const uint8*>(native_fixture::TRIANGLE_POSITIONS),
+                           sizeof(native_fixture::TRIANGLE_POSITIONS)},
+                          vertices) == rhi::RasterStatus::Ready);
     NATIVE_REQUIRE(rhi::CreateTexture(session.Device, { .Width = 4, .Height = 4, .Attachment = true }, {}, texture) ==
                    rhi::RasterStatus::Ready);
     NATIVE_REQUIRE(rhi::BeginFrame(session.Device, session.Surface) == rhi::DeviceStatus::Ready);
-    rhi::RasterPassDescription pass;
-    pass.Color = texture;
+    const rhi::RasterPassDescription pass{ .Color = texture };
     NATIVE_REQUIRE(rhi::BeginRasterPass(session.Device, pass) == rhi::RasterStatus::Ready);
-    rhi::RasterDraw draw;
-    draw.Pipeline = pipeline;
-    draw.Bindings = set;
-    draw.Indices = indices;
-    draw.IndexCount = 3;
-    draw.VertexCount = 3;
+    const rhi::RasterVertexSlice slices[]{{ .Buffer = vertices, .Size = sizeof(native_fixture::TRIANGLE_POSITIONS) }};
+    const rhi::RasterDraw draw
+    {
+        .Pipeline = pipeline,
+        .Bindings = set,
+        .Vertices = slices,
+        .Indices = indices,
+        .IndexCount = 3,
+        .VertexCount = 3,
+    };
     NATIVE_REQUIRE(rhi::DrawIndexed(session.Device, draw) == rhi::RasterStatus::Ready);
     rhi::SubmissionToken producer;
     NATIVE_REQUIRE(rhi::EndFrame(session.Device, producer) == rhi::RasterStatus::Ready);
     gStep = 3;
     rhi::NativeTextureInfo exported;
     auto mismatch = native.Identity;
-    mismatch.CommandQueue = nullptr;
+    mismatch.CommandQueue = {};
     exported.Width = 99;
     NATIVE_REQUIRE(rhi::AcquireNativeTextureRead(session.Lease, mismatch, texture, producer, session.Read, exported) ==
                    rhi::RasterStatus::Unsupported);

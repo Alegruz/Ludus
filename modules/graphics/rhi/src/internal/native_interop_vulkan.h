@@ -14,7 +14,8 @@ struct NativeVulkanRead final
 {
     VkCommandPool Pool = VK_NULL_HANDLE;
     VkCommandBuffer Command = VK_NULL_HANDLE;
-    VkFence Publication = VK_NULL_HANDLE, Completion = VK_NULL_HANDLE;
+    VkFence Publication = VK_NULL_HANDLE;
+    VkFence Completion = VK_NULL_HANDLE;
     bool Released = false;
 };
 internal::StorageTable<NativeVulkanRead> gNativeVulkanReads;
@@ -38,21 +39,30 @@ RasterStatus NativeDeviceSnapshot(NativeDeviceInfo& output) noexcept
     {
         return RasterStatus::NotReady;
     }
-    NativeDeviceInfo result;
-    result.Identity.Api = Backend::Vulkan;
-    result.Identity.Instance = gInstance;
-    result.Identity.PhysicalDevice = gPhysical;
-    result.Identity.Device = gDevice;
-    result.Identity.CommandQueue = gQueue;
-    result.Identity.QueueFamily = gFamily;
     const auto* imported = internal::NativeDeviceRequest();
-    result.Identity.QueueIndex = imported == nullptr ? 0 : imported->Identity.QueueIndex;
-    result.InstanceApiVersion = gNativeInstanceVersion;
-    VkPhysicalDeviceIDProperties identity{};
-    identity.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
-    VkPhysicalDeviceProperties2 properties{};
-    properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    properties.pNext = &identity;
+    NativeDeviceInfo result
+    {
+        .Identity =
+        {
+            .Api = Backend::Vulkan,
+            .Instance = NativeInstance{gInstance},
+            .PhysicalDevice = NativePhysicalDevice{gPhysical},
+            .Device = NativeLogicalDevice{gDevice},
+            .CommandQueue = NativeCommandQueue{gQueue},
+            .QueueFamily = gFamily,
+            .QueueIndex = imported == nullptr ? 0 : imported->Identity.QueueIndex,
+        },
+        .InstanceApiVersion = gNativeInstanceVersion,
+    };
+    VkPhysicalDeviceIDProperties identity
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES,
+    };
+    VkPhysicalDeviceProperties2 properties
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &identity,
+    };
     vkGetPhysicalDeviceProperties2(gPhysical, &properties);
     std::memcpy(result.DeviceUuid, identity.deviceUUID, sizeof(result.DeviceUuid));
     output = result;
@@ -68,26 +78,32 @@ RasterStatus NativeTexturePublish(const internal::NativeTexturePublication& publ
         return internal::StorageFailure();
     }
     auto& read = gNativeVulkanReads[slot];
-    VkCommandPoolCreateInfo pool{};
-    pool.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    pool.queueFamilyIndex = gFamily;
+    VkCommandPoolCreateInfo pool
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .queueFamilyIndex = gFamily,
+    };
     auto result = vkCreateCommandPool(gDevice, &pool, nullptr, &read.Pool);
     if (result != VK_SUCCESS)
     {
         return NativeVkResult(result);
     }
-    VkCommandBufferAllocateInfo allocate{};
-    allocate.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocate.commandPool = read.Pool;
-    allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocate.commandBufferCount = 1;
+    VkCommandBufferAllocateInfo allocate
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = read.Pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
     result = vkAllocateCommandBuffers(gDevice, &allocate, &read.Command);
     if (result != VK_SUCCESS)
     {
         return NativeVkResult(result);
     }
-    VkFenceCreateInfo fence{};
-    fence.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFenceCreateInfo fence
+    {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    };
     result = vkCreateFence(gDevice, &fence, nullptr, &read.Publication);
     if (result != VK_SUCCESS)
     {
@@ -98,24 +114,29 @@ RasterStatus NativeTexturePublish(const internal::NativeTexturePublication& publ
     {
         return NativeVkResult(result);
     }
-    VkCommandBufferBeginInfo begin{};
-    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VkCommandBufferBeginInfo begin
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
     result = vkBeginCommandBuffer(read.Command, &begin);
     if (result != VK_SUCCESS)
     {
         return NativeVkResult(result);
     }
     auto& texture = gRasterTextures[textureSlot];
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout = texture.ColorLayout;
-    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.srcAccessMask = texture.ColorWriterAccess | texture.ColorAccess;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    barrier.image = texture.Object;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkImageMemoryBarrier barrier
+    {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = texture.ColorWriterAccess | texture.ColorAccess,
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        .oldLayout = texture.ColorLayout,
+        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = texture.Object,
+        .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1 },
+    };
     // ALL_COMMANDS includes every enabled shader stage supported by this queue,
     // including a foreign geometry/tessellation/mesh consumer, without requiring
     // those optional features merely to build the publication barrier.
@@ -135,10 +156,12 @@ RasterStatus NativeTexturePublish(const internal::NativeTexturePublication& publ
     {
         return NativeVkResult(result);
     }
-    VkSubmitInfo submit{};
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &read.Command;
+    VkSubmitInfo submit
+    {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &read.Command,
+    };
     result = vkQueueSubmit(gQueue, 1, &submit, read.Publication);
     if (result != VK_SUCCESS)
     {
@@ -149,9 +172,9 @@ RasterStatus NativeTexturePublish(const internal::NativeTexturePublication& publ
     texture.ColorAccess = VK_ACCESS_SHADER_READ_BIT;
     texture.SampleVisibility |= readers;
 #if VK_USE_64_BIT_PTR_DEFINES
-    output.VulkanImage = reinterpret_cast<uint64>(texture.Object);
+    output.VulkanImage = NativeVulkanImage{reinterpret_cast<uint64>(texture.Object)};
 #else
-    output.VulkanImage = texture.Object;
+    output.VulkanImage = NativeVulkanImage{texture.Object};
 #endif
     output.VulkanLayout = static_cast<uint32>(barrier.newLayout);
     return RasterStatus::Ready;

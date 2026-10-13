@@ -58,6 +58,7 @@ using namespace ludus::foundation;
     X(vkEndCommandBuffer)                                                                                              \
     X(vkCmdBeginRenderPass)                                                                                            \
     X(vkCmdEndRenderPass)                                                                                              \
+    X(vkCmdBindVertexBuffers)                                                                                          \
     X(vkCmdBindPipeline)                                                                                               \
     X(vkCmdBindDescriptorSets)                                                                                         \
     X(vkCmdDraw)                                                                                                       \
@@ -88,11 +89,16 @@ struct Source final
     uint32 Family = 0;
     DeviceApi Api;
     VkPhysicalDeviceMemoryProperties Memory{};
-    usize Retained = 0, Released = 0;
+    usize Retained = 0;
+    usize Released = 0;
     VkImage Target = VK_NULL_HANDLE;
-    VkDeviceMemory TargetMemory = VK_NULL_HANDLE, OutputMemory = VK_NULL_HANDLE;
-    VkImageView SourceView = VK_NULL_HANDLE, TargetView = VK_NULL_HANDLE;
+    VkDeviceMemory TargetMemory = VK_NULL_HANDLE;
+    VkDeviceMemory OutputMemory = VK_NULL_HANDLE;
+    VkImageView SourceView = VK_NULL_HANDLE;
+    VkImageView TargetView = VK_NULL_HANDLE;
     VkBuffer Output = VK_NULL_HANDLE;
+    VkBuffer Vertices = VK_NULL_HANDLE;
+    VkDeviceMemory VertexMemory = VK_NULL_HANDLE;
     VkSampler Sampler = VK_NULL_HANDLE;
     VkShaderModule Shaders[2]{};
     VkDescriptorSetLayout SetLayout = VK_NULL_HANDLE;
@@ -133,10 +139,12 @@ bool Allocate(Source& source,
         if ((requirements.memoryTypeBits & (1U << i)) != 0 &&
             (source.Memory.memoryTypes[i].propertyFlags & flags) == flags)
         {
-            VkMemoryAllocateInfo allocate{};
-            allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-            allocate.allocationSize = requirements.size;
-            allocate.memoryTypeIndex = i;
+            VkMemoryAllocateInfo allocate
+            {
+                .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                .allocationSize = requirements.size,
+                .memoryTypeIndex = i,
+            };
             return source.Api.vkAllocateMemory(source.Device, &allocate, nullptr, &output) == VK_SUCCESS;
         }
     }
@@ -148,10 +156,12 @@ bool SignalGate(Source& source, uint64 value) noexcept
     {
         return true;
     }
-    VkSemaphoreSignalInfo signal{};
-    signal.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
-    signal.semaphore = source.Gate;
-    signal.value = value;
+    VkSemaphoreSignalInfo signal
+    {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO,
+        .semaphore = source.Gate,
+        .value = value,
+    };
     const auto result = source.Api.vkSignalSemaphore(source.Device, &signal);
     if (result != VK_SUCCESS && result != VK_ERROR_DEVICE_LOST)
     {
@@ -186,6 +196,8 @@ void RetireSample(Source& source) noexcept
     api.vkFreeMemory(source.Device, source.TargetMemory, nullptr);
     api.vkDestroyBuffer(source.Device, source.Output, nullptr);
     api.vkFreeMemory(source.Device, source.OutputMemory, nullptr);
+    api.vkDestroyBuffer(source.Device, source.Vertices, nullptr);
+    api.vkFreeMemory(source.Device, source.VertexMemory, nullptr);
     source.Commands = VK_NULL_HANDLE;
     source.Fence = VK_NULL_HANDLE;
     source.Pipeline = VK_NULL_HANDLE;
@@ -204,6 +216,8 @@ void RetireSample(Source& source) noexcept
     source.TargetMemory = VK_NULL_HANDLE;
     source.Output = VK_NULL_HANDLE;
     source.OutputMemory = VK_NULL_HANDLE;
+    source.Vertices = VK_NULL_HANDLE;
+    source.VertexMemory = VK_NULL_HANDLE;
 }
 } // namespace
 bool CreateForeign(Foreign& fixture) noexcept
@@ -228,12 +242,16 @@ bool CreateForeign(Foreign& fixture) noexcept
     }
     const auto createInstance =
         reinterpret_cast<PFN_vkCreateInstance>(source->GetInstance(nullptr, "vkCreateInstance"));
-    VkApplicationInfo application{};
-    application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    application.apiVersion = VK_API_VERSION_1_2;
-    VkInstanceCreateInfo instance{};
-    instance.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    instance.pApplicationInfo = &application;
+    VkApplicationInfo application
+    {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .apiVersion = VK_API_VERSION_1_2,
+    };
+    VkInstanceCreateInfo instance
+    {
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pApplicationInfo = &application,
+    };
     NATIVE_VK(createInstance(&instance, nullptr, &source->Instance));
     source->DestroyInstance =
         reinterpret_cast<PFN_vkDestroyInstance>(source->GetInstance(source->Instance, "vkDestroyInstance"));
@@ -280,15 +298,19 @@ bool CreateForeign(Foreign& fixture) noexcept
         return false;
     }
     float32 priority = 1;
-    VkDeviceQueueCreateInfo queue{};
-    queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queue.queueFamilyIndex = source->Family;
-    queue.queueCount = 1;
-    queue.pQueuePriorities = &priority;
-    VkDeviceCreateInfo device{};
-    device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    device.queueCreateInfoCount = 1;
-    device.pQueueCreateInfos = &queue;
+    VkDeviceQueueCreateInfo queue
+    {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .queueFamilyIndex = source->Family,
+        .queueCount = 1,
+        .pQueuePriorities = &priority,
+    };
+    VkDeviceCreateInfo device
+    {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .queueCreateInfoCount = 1,
+        .pQueueCreateInfos = &queue,
+    };
     const auto getFeatures = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
         source->GetInstance(source->Instance, "vkGetPhysicalDeviceFeatures2"));
     const auto getProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(
@@ -299,11 +321,15 @@ bool CreateForeign(Foreign& fixture) noexcept
     {
         return false;
     }
-    VkPhysicalDeviceTimelineSemaphoreFeatures timeline{};
-    timeline.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
-    VkPhysicalDeviceFeatures2 features{};
-    features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    features.pNext = &timeline;
+    VkPhysicalDeviceTimelineSemaphoreFeatures timeline
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES,
+    };
+    VkPhysicalDeviceFeatures2 features
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &timeline,
+    };
     getFeatures(source->Physical, &features);
     if (!timeline.timelineSemaphore)
     {
@@ -316,12 +342,16 @@ bool CreateForeign(Foreign& fixture) noexcept
 #undef LOAD_NATIVE_API
     source->Api.vkGetDeviceQueue(source->Device, source->Family, 0, &source->Queue);
     memory(source->Physical, &source->Memory);
-    VkSemaphoreTypeCreateInfo type{};
-    type.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
-    type.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
-    VkSemaphoreCreateInfo semaphore{};
-    semaphore.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    semaphore.pNext = &type;
+    VkSemaphoreTypeCreateInfo type
+    {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+        .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+    };
+    VkSemaphoreCreateInfo semaphore
+    {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = &type,
+    };
     NATIVE_VK(source->Api.vkCreateSemaphore(source->Device, &semaphore, nullptr, &source->Gate));
     // Thanks to Khronos, "Timeline semaphore", Vulkan Samples, host signalling
     // and avoiding vkDeviceWaitIdle deadlocks. A legal wait-before-signal gate
@@ -329,26 +359,36 @@ bool CreateForeign(Foreign& fixture) noexcept
     // https://docs.vulkan.org/samples/latest/samples/extensions/timeline_semaphore/README.html
     const uint64 value = 1;
     const VkPipelineStageFlags stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    VkTimelineSemaphoreSubmitInfo gate{};
-    gate.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    gate.waitSemaphoreValueCount = 1;
-    gate.pWaitSemaphoreValues = &value;
-    VkSubmitInfo wait{};
-    wait.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    wait.pNext = &gate;
-    wait.waitSemaphoreCount = 1;
-    wait.pWaitSemaphores = &source->Gate;
-    wait.pWaitDstStageMask = &stage;
+    VkTimelineSemaphoreSubmitInfo gate
+    {
+        .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+        .waitSemaphoreValueCount = 1,
+        .pWaitSemaphoreValues = &value,
+    };
+    VkSubmitInfo wait
+    {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = &gate,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &source->Gate,
+        .pWaitDstStageMask = &stage,
+    };
     NATIVE_VK(source->Api.vkQueueSubmit(source->Queue, 1, &wait, VK_NULL_HANDLE));
-    fixture.Description.Identity.Api = ludus::graphics::rhi::Backend::Vulkan;
-    fixture.Description.Identity.Instance = source->Instance;
-    fixture.Description.Identity.PhysicalDevice = source->Physical;
-    fixture.Description.Identity.Device = source->Device;
-    fixture.Description.Identity.CommandQueue = source->Queue;
-    fixture.Description.Identity.QueueFamily = source->Family;
-    fixture.Description.InstanceApiVersion = VK_API_VERSION_1_2;
-    fixture.Description.Lifetime = {source, Source::Retain, Source::Release};
-    fixture.Description.SerializedOwnerQueue = true;
+    fixture.Description =
+    {
+        .Identity =
+        {
+            .Api = ludus::graphics::rhi::Backend::Vulkan,
+            .Instance = ludus::graphics::rhi::NativeInstance{source->Instance},
+            .PhysicalDevice = ludus::graphics::rhi::NativePhysicalDevice{source->Physical},
+            .Device = ludus::graphics::rhi::NativeLogicalDevice{source->Device},
+            .CommandQueue = ludus::graphics::rhi::NativeCommandQueue{source->Queue},
+            .QueueFamily = source->Family,
+        },
+        .Lifetime = { .Context = source, .Retain = Source::Retain, .Release = Source::Release },
+        .InstanceApiVersion = VK_API_VERSION_1_2,
+        .SerializedOwnerQueue = true,
+    };
     return true;
 }
 bool AllowProducer(Foreign& fixture) noexcept
@@ -402,28 +442,34 @@ bool SubmitSample(Foreign& fixture, const ludus::graphics::rhi::NativeTextureInf
 {
     auto& source = *static_cast<Source*>(fixture.Context);
     auto& api = source.Api;
+    const auto imageBits = texture.VulkanImage.GetBits();
 #if VK_USE_64_BIT_PTR_DEFINES
     VkImage shared = VK_NULL_HANDLE;
-    std::memcpy(reinterpret_cast<void*>(&shared), &texture.VulkanImage, sizeof(texture.VulkanImage));
+    std::memcpy(reinterpret_cast<void*>(&shared), &imageBits, sizeof(imageBits));
 #else
-    const auto shared = static_cast<VkImage>(texture.VulkanImage);
+    const auto shared = static_cast<VkImage>(imageBits);
 #endif
-    VkImageViewCreateInfo view{};
-    view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    view.image = shared;
-    view.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    view.format = VK_FORMAT_R8G8B8A8_UNORM;
-    view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkImageViewCreateInfo view
+    {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = shared,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+    };
     NATIVE_VK(api.vkCreateImageView(source.Device, &view, nullptr, &source.SourceView));
-    VkImageCreateInfo image{};
-    image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    image.imageType = VK_IMAGE_TYPE_2D;
-    image.format = VK_FORMAT_R8G8B8A8_UNORM;
-    image.extent = {4, 4, 1};
-    image.mipLevels = image.arrayLayers = 1;
-    image.samples = VK_SAMPLE_COUNT_1_BIT;
-    image.tiling = VK_IMAGE_TILING_OPTIMAL;
-    image.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    VkImageCreateInfo image
+    {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .extent = {4, 4, 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+    };
     NATIVE_VK(api.vkCreateImage(source.Device, &image, nullptr, &source.Target));
     VkMemoryRequirements requirements{};
     api.vkGetImageMemoryRequirements(source.Device, source.Target, &requirements);
@@ -434,10 +480,12 @@ bool SubmitSample(Foreign& fixture, const ludus::graphics::rhi::NativeTextureInf
     NATIVE_VK(api.vkBindImageMemory(source.Device, source.Target, source.TargetMemory, 0));
     view.image = source.Target;
     NATIVE_VK(api.vkCreateImageView(source.Device, &view, nullptr, &source.TargetView));
-    VkBufferCreateInfo buffer{};
-    buffer.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer.size = 64;
-    buffer.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    VkBufferCreateInfo buffer
+    {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = 64,
+        .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    };
     NATIVE_VK(api.vkCreateBuffer(source.Device, &buffer, nullptr, &source.Output));
     api.vkGetBufferMemoryRequirements(source.Device, source.Output, &requirements);
     if (!Allocate(source,
@@ -448,31 +496,56 @@ bool SubmitSample(Foreign& fixture, const ludus::graphics::rhi::NativeTextureInf
         return false;
     }
     NATIVE_VK(api.vkBindBufferMemory(source.Device, source.Output, source.OutputMemory, 0));
-    VkSamplerCreateInfo sampler{};
-    sampler.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampler.magFilter = sampler.minFilter = VK_FILTER_NEAREST;
-    sampler.maxLod = 0;
+    buffer.size = sizeof(TRIANGLE_POSITIONS);
+    buffer.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    NATIVE_VK(api.vkCreateBuffer(source.Device, &buffer, nullptr, &source.Vertices));
+    api.vkGetBufferMemoryRequirements(source.Device, source.Vertices, &requirements);
+    if (!Allocate(source,
+                  requirements,
+                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                  source.VertexMemory))
+    {
+        return false;
+    }
+    NATIVE_VK(api.vkBindBufferMemory(source.Device, source.Vertices, source.VertexMemory, 0));
+    void* mappedVertices = nullptr;
+    NATIVE_VK(api.vkMapMemory(source.Device, source.VertexMemory, 0, sizeof(TRIANGLE_POSITIONS), 0, &mappedVertices));
+    std::memcpy(mappedVertices, TRIANGLE_POSITIONS, sizeof(TRIANGLE_POSITIONS));
+    api.vkUnmapMemory(source.Device, source.VertexMemory);
+    VkSamplerCreateInfo sampler
+    {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_NEAREST,
+        .minFilter = VK_FILTER_NEAREST,
+        .maxLod = 0,
+    };
     NATIVE_VK(api.vkCreateSampler(source.Device, &sampler, nullptr, &source.Sampler));
     const VkDescriptorSetLayoutBinding bindings[2]{
         {0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
         {1, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
-    VkDescriptorSetLayoutCreateInfo layout{};
-    layout.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout.bindingCount = 2;
-    layout.pBindings = bindings;
+    VkDescriptorSetLayoutCreateInfo layout
+    {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 2,
+        .pBindings = bindings,
+    };
     NATIVE_VK(api.vkCreateDescriptorSetLayout(source.Device, &layout, nullptr, &source.SetLayout));
     const VkDescriptorPoolSize sizes[2]{{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1}, {VK_DESCRIPTOR_TYPE_SAMPLER, 1}};
-    VkDescriptorPoolCreateInfo pool{};
-    pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool.maxSets = 1;
-    pool.poolSizeCount = 2;
-    pool.pPoolSizes = sizes;
+    VkDescriptorPoolCreateInfo pool
+    {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = 1,
+        .poolSizeCount = 2,
+        .pPoolSizes = sizes,
+    };
     NATIVE_VK(api.vkCreateDescriptorPool(source.Device, &pool, nullptr, &source.Descriptors));
-    VkDescriptorSetAllocateInfo set{};
-    set.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    set.descriptorPool = source.Descriptors;
-    set.descriptorSetCount = 1;
-    set.pSetLayouts = &source.SetLayout;
+    VkDescriptorSetAllocateInfo set
+    {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = source.Descriptors,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &source.SetLayout,
+    };
     NATIVE_VK(api.vkAllocateDescriptorSets(source.Device, &set, &source.Set));
     const VkDescriptorImageInfo descriptors[2]{
         {VK_NULL_HANDLE, source.SourceView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
@@ -488,18 +561,22 @@ bool SubmitSample(Foreign& fixture, const ludus::graphics::rhi::NativeTextureInf
         writes[i].pImageInfo = &descriptors[i];
     }
     api.vkUpdateDescriptorSets(source.Device, 2, writes, 0, nullptr);
-    VkAttachmentDescription attachment{};
-    attachment.format = VK_FORMAT_R8G8B8A8_UNORM;
-    attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachment.finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    VkAttachmentDescription attachment
+    {
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    };
     const VkAttachmentReference color{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &color;
+    VkSubpassDescription subpass
+    {
+        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color,
+    };
     const VkSubpassDependency dependency{0,
                                          VK_SUBPASS_EXTERNAL,
                                          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -507,20 +584,24 @@ bool SubmitSample(Foreign& fixture, const ludus::graphics::rhi::NativeTextureInf
                                          VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                                          VK_ACCESS_TRANSFER_READ_BIT,
                                          0};
-    VkRenderPassCreateInfo pass{};
-    pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    pass.attachmentCount = 1;
-    pass.pAttachments = &attachment;
-    pass.subpassCount = 1;
-    pass.pSubpasses = &subpass;
-    pass.dependencyCount = 1;
-    pass.pDependencies = &dependency;
+    VkRenderPassCreateInfo pass
+    {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &attachment,
+        .subpassCount = 1,
+        .pSubpasses = &subpass,
+        .dependencyCount = 1,
+        .pDependencies = &dependency,
+    };
     NATIVE_VK(api.vkCreateRenderPass(source.Device, &pass, nullptr, &source.Pass));
-    VkFramebufferCreateInfo frame{};
-    frame.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    frame.renderPass = source.Pass;
-    frame.attachmentCount = 1;
-    frame.pAttachments = &source.TargetView;
+    VkFramebufferCreateInfo frame
+    {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .renderPass = source.Pass,
+        .attachmentCount = 1,
+        .pAttachments = &source.TargetView,
+    };
     frame.width = frame.height = 4;
     frame.layers = 1;
     NATIVE_VK(api.vkCreateFramebuffer(source.Device, &frame, nullptr, &source.Frame));
@@ -530,80 +611,120 @@ bool SubmitSample(Foreign& fixture, const ludus::graphics::rhi::NativeTextureInf
     VkPipelineShaderStageCreateInfo stages[2]{};
     for (usize i = 0; i < 2; ++i)
     {
-        VkShaderModuleCreateInfo module{};
-        module.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        module.codeSize = shaders[i].Spirv.size_bytes();
-        module.pCode = shaders[i].Spirv.data();
+        VkShaderModuleCreateInfo module
+        {
+            .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+            .codeSize = shaders[i].Spirv.size_bytes(),
+            .pCode = shaders[i].Spirv.data(),
+        };
         NATIVE_VK(api.vkCreateShaderModule(source.Device, &module, nullptr, &source.Shaders[i]));
-        stages[i].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stages[i].stage = i == 0 ? VK_SHADER_STAGE_VERTEX_BIT : VK_SHADER_STAGE_FRAGMENT_BIT;
-        stages[i].module = source.Shaders[i];
-        stages[i].pName = shaders[i].SpirvEntry.data();
+        stages[i] =
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = i == 0 ? VK_SHADER_STAGE_VERTEX_BIT : VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = source.Shaders[i],
+            .pName = shaders[i].SpirvEntry.data(),
+        };
     }
-    VkPipelineLayoutCreateInfo pipelineLayout{};
-    pipelineLayout.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayout.setLayoutCount = 1;
-    pipelineLayout.pSetLayouts = &source.SetLayout;
+    VkPipelineLayoutCreateInfo pipelineLayout
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &source.SetLayout,
+    };
     NATIVE_VK(api.vkCreatePipelineLayout(source.Device, &pipelineLayout, nullptr, &source.PipelineLayout));
-    VkPipelineVertexInputStateCreateInfo inputs{};
-    inputs.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    VkPipelineInputAssemblyStateCreateInfo assembly{};
-    assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPipelineVertexInputStateCreateInfo inputs
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    };
+    const VkVertexInputBindingDescription vertexBinding{0, VERTEX_STRIDE, VK_VERTEX_INPUT_RATE_VERTEX};
+    const VkVertexInputAttributeDescription attribute{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0};
+    inputs.vertexBindingDescriptionCount = 1;
+    inputs.pVertexBindingDescriptions = &vertexBinding;
+    inputs.vertexAttributeDescriptionCount = 1;
+    inputs.pVertexAttributeDescriptions = &attribute;
+    VkPipelineInputAssemblyStateCreateInfo assembly
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    };
     const VkViewport viewport{0, 0, 4, 4, 0, 1};
     const VkRect2D scissor{{0, 0}, {4, 4}};
-    VkPipelineViewportStateCreateInfo viewports{};
-    viewports.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewports.viewportCount = viewports.scissorCount = 1;
-    viewports.pViewports = &viewport;
-    viewports.pScissors = &scissor;
-    VkPipelineRasterizationStateCreateInfo raster{};
-    raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    raster.polygonMode = VK_POLYGON_MODE_FILL;
-    raster.lineWidth = 1;
-    VkPipelineMultisampleStateCreateInfo samples{};
-    samples.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    samples.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineColorBlendAttachmentState blend{};
-    blend.colorWriteMask = 15;
-    VkPipelineColorBlendStateCreateInfo blends{};
-    blends.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    blends.attachmentCount = 1;
-    blends.pAttachments = &blend;
-    VkGraphicsPipelineCreateInfo graphics{};
-    graphics.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    graphics.stageCount = 2;
-    graphics.pStages = stages;
-    graphics.pVertexInputState = &inputs;
-    graphics.pInputAssemblyState = &assembly;
-    graphics.pViewportState = &viewports;
-    graphics.pRasterizationState = &raster;
-    graphics.pMultisampleState = &samples;
-    graphics.pColorBlendState = &blends;
-    graphics.layout = source.PipelineLayout;
-    graphics.renderPass = source.Pass;
+    VkPipelineViewportStateCreateInfo viewports
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .pViewports = &viewport,
+        .scissorCount = 1,
+        .pScissors = &scissor,
+    };
+    VkPipelineRasterizationStateCreateInfo raster
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .lineWidth = 1,
+    };
+    VkPipelineMultisampleStateCreateInfo samples
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+    VkPipelineColorBlendAttachmentState blend
+    {
+        .colorWriteMask = 15,
+    };
+    VkPipelineColorBlendStateCreateInfo blends
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &blend,
+    };
+    VkGraphicsPipelineCreateInfo graphics
+    {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = 2,
+        .pStages = stages,
+        .pVertexInputState = &inputs,
+        .pInputAssemblyState = &assembly,
+        .pViewportState = &viewports,
+        .pRasterizationState = &raster,
+        .pMultisampleState = &samples,
+        .pColorBlendState = &blends,
+        .layout = source.PipelineLayout,
+        .renderPass = source.Pass,
+    };
     NATIVE_VK(api.vkCreateGraphicsPipelines(source.Device, VK_NULL_HANDLE, 1, &graphics, nullptr, &source.Pipeline));
-    VkCommandPoolCreateInfo commands{};
-    commands.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    commands.queueFamilyIndex = source.Family;
+    VkCommandPoolCreateInfo commands
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .queueFamilyIndex = source.Family,
+    };
     NATIVE_VK(api.vkCreateCommandPool(source.Device, &commands, nullptr, &source.Commands));
-    VkCommandBufferAllocateInfo allocate{};
-    allocate.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocate.commandPool = source.Commands;
-    allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocate.commandBufferCount = 1;
+    VkCommandBufferAllocateInfo allocate
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = source.Commands,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
     NATIVE_VK(api.vkAllocateCommandBuffers(source.Device, &allocate, &source.Command));
-    VkFenceCreateInfo fence{};
-    fence.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFenceCreateInfo fence
+    {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    };
     NATIVE_VK(api.vkCreateFence(source.Device, &fence, nullptr, &source.Fence));
-    VkCommandBufferBeginInfo begin{};
-    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    VkCommandBufferBeginInfo begin
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+    };
     NATIVE_VK(api.vkBeginCommandBuffer(source.Command, &begin));
-    VkRenderPassBeginInfo render{};
-    render.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    render.renderPass = source.Pass;
-    render.framebuffer = source.Frame;
-    render.renderArea = {{0, 0}, {4, 4}};
+    VkRenderPassBeginInfo render
+    {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = source.Pass,
+        .framebuffer = source.Frame,
+        .renderArea = {{0, 0}, {4, 4}},
+    };
     api.vkCmdBeginRenderPass(source.Command, &render, VK_SUBPASS_CONTENTS_INLINE);
     api.vkCmdBindPipeline(source.Command, VK_PIPELINE_BIND_POINT_GRAPHICS, source.Pipeline);
     api.vkCmdBindDescriptorSets(source.Command,
@@ -614,6 +735,8 @@ bool SubmitSample(Foreign& fixture, const ludus::graphics::rhi::NativeTextureInf
                                 &source.Set,
                                 0,
                                 nullptr);
+    const VkDeviceSize vertexOffset = 0;
+    api.vkCmdBindVertexBuffers(source.Command, 0, 1, &source.Vertices, &vertexOffset);
     api.vkCmdDraw(source.Command, 3, 1, 0, 0);
     api.vkCmdEndRenderPass(source.Command);
     const VkBufferImageCopy copy{0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, {0, 0, 0}, {4, 4, 1}};
@@ -623,10 +746,12 @@ bool SubmitSample(Foreign& fixture, const ludus::graphics::rhi::NativeTextureInf
                                source.Output,
                                1,
                                &copy);
-    VkBufferMemoryBarrier host{};
-    host.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    VkBufferMemoryBarrier host
+    {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+    };
     host.srcQueueFamilyIndex = host.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     host.buffer = source.Output;
     host.size = VK_WHOLE_SIZE;
@@ -641,16 +766,20 @@ bool SubmitSample(Foreign& fixture, const ludus::graphics::rhi::NativeTextureInf
                              0,
                              nullptr);
     NATIVE_VK(api.vkEndCommandBuffer(source.Command));
-    VkSubmitInfo submit{};
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &source.Command;
+    VkSubmitInfo submit
+    {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &source.Command,
+    };
     const uint64 value = 2;
     const VkPipelineStageFlags stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    VkTimelineSemaphoreSubmitInfo gate{};
-    gate.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    gate.waitSemaphoreValueCount = 1;
-    gate.pWaitSemaphoreValues = &value;
+    VkTimelineSemaphoreSubmitInfo gate
+    {
+        .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+        .waitSemaphoreValueCount = 1,
+        .pWaitSemaphoreValues = &value,
+    };
     submit.pNext = &gate;
     submit.waitSemaphoreCount = 1;
     submit.pWaitSemaphores = &source.Gate;

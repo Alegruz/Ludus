@@ -18,7 +18,8 @@ struct Source final
     id<MTLCommandQueue> Queue = nil;
     id<MTLCommandBuffer> Sample = nil;
     id<MTLBuffer> Output = nil;
-    usize Retained = 0, Released = 0;
+    usize Retained = 0;
+    usize Released = 0;
     static bool Retain(void* context) noexcept
     {
         ++static_cast<Source*>(context)->Retained;
@@ -44,11 +45,17 @@ bool CreateForeign(Foreign& fixture) noexcept
     {
         return false;
     }
-    fixture.Description.Identity.Api = ludus::graphics::rhi::Backend::Metal;
-    fixture.Description.Identity.Device = (__bridge void*)source->Device;
-    fixture.Description.Identity.CommandQueue = (__bridge void*)source->Queue;
-    fixture.Description.Lifetime = {source, Source::Retain, Source::Release};
-    fixture.Description.SerializedOwnerQueue = true;
+    fixture.Description =
+    {
+        .Identity =
+        {
+            .Api = ludus::graphics::rhi::Backend::Metal,
+            .Device = ludus::graphics::rhi::NativeLogicalDevice{(__bridge void*)source->Device},
+            .CommandQueue = ludus::graphics::rhi::NativeCommandQueue{(__bridge void*)source->Queue},
+        },
+        .Lifetime = { .Context = source, .Retain = Source::Retain, .Release = Source::Release },
+        .SerializedOwnerQueue = true,
+    };
     return true;
 }
 bool AllowProducer(Foreign&) noexcept
@@ -96,7 +103,7 @@ bool SubmitSample(Foreign& fixture, const ludus::graphics::rhi::NativeTextureInf
         return false;
     }
     [encoder setComputePipelineState:pipeline];
-    [encoder setTexture:(__bridge id<MTLTexture>)image.MetalTexture atIndex:0];
+    [encoder setTexture:(__bridge id<MTLTexture>)image.MetalTexture.GetObject() atIndex:0];
     [encoder setBuffer:source.Output offset:0 atIndex:0];
     [encoder dispatchThreads:MTLSizeMake(4, 4, 1) threadsPerThreadgroup:MTLSizeMake(4, 4, 1)];
     [encoder endEncoding];

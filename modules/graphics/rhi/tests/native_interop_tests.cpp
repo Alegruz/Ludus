@@ -20,7 +20,8 @@ namespace
 {
 struct SourceOwner final
 {
-    usize Retained = 0, Released = 0;
+    usize Retained = 0;
+    usize Released = 0;
     bool Accept = true;
     static bool Retain(void* context) noexcept
     {
@@ -35,16 +36,20 @@ struct SourceOwner final
 };
 NativeDeviceDescription SourceDescription(SourceOwner& source)
 {
-    NativeDeviceDescription result;
-    result.Identity.Api = Backend::Vulkan;
-    result.Identity.Instance = &reference::NativeObjects[0];
-    result.Identity.PhysicalDevice = &reference::NativeObjects[1];
-    result.Identity.Device = &reference::NativeObjects[2];
-    result.Identity.CommandQueue = &reference::NativeObjects[3];
-    result.Lifetime = {&source, SourceOwner::Retain, SourceOwner::Release};
-    result.InstanceApiVersion = (1U << 22) | (1U << 12);
-    result.SerializedOwnerQueue = true;
-    return result;
+    return
+    {
+        .Identity =
+        {
+            .Api = Backend::Vulkan,
+            .Instance = NativeInstance{&reference::NativeObjects[0]},
+            .PhysicalDevice = NativePhysicalDevice{&reference::NativeObjects[1]},
+            .Device = NativeLogicalDevice{&reference::NativeObjects[2]},
+            .CommandQueue = NativeCommandQueue{&reference::NativeObjects[3]},
+        },
+        .Lifetime = { .Context = &source, .Retain = SourceOwner::Retain, .Release = SourceOwner::Release },
+        .InstanceApiVersion = (1U << 22) | (1U << 12),
+        .SerializedOwnerQueue = true,
+    };
 }
 void PrepareReference()
 {
@@ -146,7 +151,7 @@ TEST_CASE("Native reads reject another logical context on the same adapter", "[r
     NativeSession session;
     auto consumer = session.Info.Identity;
     uint32 another = 0;
-    consumer.Device = &another;
+    consumer.Device = NativeLogicalDevice{&another};
     NativeTextureInfo unchanged;
     unchanged.Width = 71;
     CHECK(AcquireNativeTextureRead(session.Lease,
@@ -159,7 +164,7 @@ TEST_CASE("Native reads reject another logical context on the same adapter", "[r
     CHECK(reference::NativePublications == 0);
     CHECK(GetStatus(session.Reads[0]) == RasterStatus::InvalidHandle);
     consumer = session.Info.Identity;
-    consumer.CommandQueue = &another;
+    consumer.CommandQueue = NativeCommandQueue{&another};
     CHECK(AcquireNativeTextureRead(session.Lease,
                                    consumer,
                                    session.Texture,
@@ -175,7 +180,7 @@ TEST_CASE("Native publication orders pending producers and rejects stale depende
     CHECK(GetStatus(session.Device, session.Producer) == RasterStatus::Pending);
     const auto info = session.Acquire();
     CHECK(info.ProducerOrdinal != 0);
-    CHECK(info.VulkanImage != 0);
+    CHECK(!info.VulkanImage.IsNull());
     CHECK(info.VulkanLayout == 5);
     CHECK(GetStatus(session.Reads[0]) == RasterStatus::Ready);
     NativeTextureInfo preserved;
@@ -293,7 +298,7 @@ TEST_CASE("Shutdown retains native image device and source until consumer comple
     NativeTextureInfo image;
     REQUIRE(GetNativeTextureInfo(session.Reads[0], image) == RasterStatus::Ready);
     CHECK(image.Device.Retiring);
-    CHECK(image.VulkanImage != 0);
+    CHECK(!image.VulkanImage.IsNull());
     DeviceHandle replacement;
     SurfaceHandle target;
     CHECK(CreateDevice({}, {}, {}, replacement, target) == DeviceStatus::InvalidState);

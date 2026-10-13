@@ -22,6 +22,10 @@ function(ludus_add_native_interop_fixture target fixture_root)
     else()
         find_package(volk CONFIG REQUIRED)
         target_sources(${target} PRIVATE "${fixture_root}/native_interop_vulkan.cpp")
+        # Vulkan create-info records intentionally zero omitted native fields;
+        # match the RHI's private designated-initializer policy at this boundary.
+        set_source_files_properties("${fixture_root}/native_interop_vulkan.cpp" PROPERTIES
+            COMPILE_OPTIONS "-Wno-missing-field-initializers")
         target_link_libraries(${target} PRIVATE volk::volk_headers ${CMAKE_DL_LIBS})
     endif()
     ludus_compile_shader(TARGET ${target} NAME native_source RASTER

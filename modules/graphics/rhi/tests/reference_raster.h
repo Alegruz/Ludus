@@ -4,9 +4,13 @@
 #include <ludus/graphics/rhi/native_interop.h>
 namespace ludus::graphics::rhi::reference
 {
-inline bool NativeAvailable = true, NativePending = false, NativeLost = false;
+inline bool NativeAvailable = true;
+inline bool NativePending = false;
+inline bool NativeLost = false;
 inline RasterStatus NativePublishResult = RasterStatus::Ready;
-inline foundation::usize NativePublications = 0, NativeReleases = 0, NativeRetirements = 0;
+inline foundation::usize NativePublications = 0;
+inline foundation::usize NativeReleases = 0;
+inline foundation::usize NativeRetirements = 0;
 inline internal::StorageTable<bool> NativeReadReleased;
 inline foundation::uint32 NativeObjects[4]{};
 inline GpuTiming Timing;

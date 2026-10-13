@@ -510,20 +510,24 @@ RasterStatus NativeDeviceSnapshot(NativeDeviceInfo& output) noexcept
     {
         return RasterStatus::Unsupported;
     }
-    output = {};
     if (const auto* source = internal::NativeDeviceRequest())
     {
-        output.Identity = source->Identity;
-        output.InstanceApiVersion = source->InstanceApiVersion;
+        output = { .Identity = source->Identity, .InstanceApiVersion = source->InstanceApiVersion };
     }
     else
     {
-        output.Identity.Api = Kind();
-        output.Identity.Instance = &reference::NativeObjects[0];
-        output.Identity.PhysicalDevice = &reference::NativeObjects[1];
-        output.Identity.Device = &reference::NativeObjects[2];
-        output.Identity.CommandQueue = &reference::NativeObjects[3];
-        output.InstanceApiVersion = (1U << 22) | (1U << 12);
+        output =
+        {
+            .Identity =
+            {
+                .Api = Kind(),
+                .Instance = NativeInstance{&reference::NativeObjects[0]},
+                .PhysicalDevice = NativePhysicalDevice{&reference::NativeObjects[1]},
+                .Device = NativeLogicalDevice{&reference::NativeObjects[2]},
+                .CommandQueue = NativeCommandQueue{&reference::NativeObjects[3]},
+            },
+            .InstanceApiVersion = (1U << 22) | (1U << 12),
+        };
     }
     return RasterStatus::Ready;
 }
@@ -541,7 +545,7 @@ RasterStatus NativeTexturePublish(const internal::NativeTexturePublication& publ
         return internal::StorageFailure();
     }
     reference::NativeReadReleased[slot] = false;
-    output.VulkanImage = textureSlot + 1;
+    output.VulkanImage = NativeVulkanImage{textureSlot + 1};
     output.VulkanLayout = 5;
     ++reference::NativePublications;
     return RasterStatus::Ready;

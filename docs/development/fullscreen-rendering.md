@@ -1571,6 +1571,12 @@ rules. The editor's first tone-mapped preview is opaque.
 
 ### Admit the actual compositor context
 
+`NativeInstance`, `NativePhysicalDevice`, `NativeLogicalDevice` and
+`NativeCommandQueue` are distinct borrowed roles. Explicit constructors wrap the
+matching native objects; `GetObject()` performs the conversion at the framework
+boundary. `NativeMetalTexture` and `NativeVulkanImage` similarly distinguish image
+objects/bits. These types add no ownership and cannot be interchanged implicitly.
+
 Use `CreateNativeDevice` with `NativeDeviceDescription`, rather than creating a
 second device on the same physical GPU. Both the logical device and command queue
 must match the consumer. Vulkan also carries the instance, physical device and
@@ -1586,8 +1592,9 @@ promises the native objects remain valid until release, including loss and
 shutdown cleanup. RHI owns its allocations, command pools and fences, and never
 destroys the foreign Vulkan instance/device. Metal references are strongly held.
 Callbacks run on the owner thread, must not reenter RHI, and release exactly once
-after successful retain. A rejected request preserves output handles; unsupported
-profiles reject before retaining the source. Native handles must be valid objects
+after successful retain. A rejected request preserves output handles. Structural
+native-profile rejection occurs before retaining the source; failures found during
+backend/capability negotiation balance a successful retain with release. Native handles must be valid objects
 with accurate provenance; arbitrary pointer values cannot be safely probed.
 
 All RHI work and foreign queue access must be serialized on the RHI owner thread.

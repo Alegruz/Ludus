@@ -238,8 +238,8 @@ bool Initialize(const ApplicationInfo&) noexcept
         const auto* imported = internal::NativeDeviceRequest();
         if (imported != nullptr)
         {
-            gDevice = (__bridge id<MTLDevice>)imported->Identity.Device;
-            gQueue = (__bridge id<MTLCommandQueue>)imported->Identity.CommandQueue;
+            gDevice = (__bridge id<MTLDevice>)imported->Identity.Device.GetObject();
+            gQueue = (__bridge id<MTLCommandQueue>)imported->Identity.CommandQueue.GetObject();
             if (gQueue.device != gDevice)
             {
                 gQueue = nil;

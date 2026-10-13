@@ -5,6 +5,9 @@
 
 namespace native_fixture
 {
+inline constexpr ludus::foundation::uint32 VERTEX_STRIDE = 3 * sizeof(ludus::foundation::float32);
+inline constexpr ludus::foundation::float32 TRIANGLE_POSITIONS[]{-1, -1, 0, 3, -1, 0, -1, 3, 0};
+
 struct Foreign final
 {
     ludus::graphics::rhi::NativeDeviceDescription Description;

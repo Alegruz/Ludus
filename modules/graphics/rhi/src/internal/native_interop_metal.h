@@ -9,7 +9,8 @@ namespace
 struct NativeMetalRead final
 {
     id<MTLTexture> Texture = nil;
-    id<MTLCommandBuffer> Publication = nil, Completion = nil;
+    id<MTLCommandBuffer> Publication = nil;
+    id<MTLCommandBuffer> Completion = nil;
     bool Released = false;
 };
 internal::StorageTable<NativeMetalRead> gNativeMetalReads;
@@ -24,11 +25,16 @@ RasterStatus NativeDeviceSnapshot(NativeDeviceInfo& output) noexcept
     {
         return RasterStatus::NotReady;
     }
-    output = {};
-    output.Identity.Api = Backend::Metal;
-    output.Identity.Device = (__bridge void*)gDevice;
-    output.Identity.CommandQueue = (__bridge void*)gQueue;
-    output.RegistryId = gDevice.registryID;
+    output =
+    {
+        .Identity =
+        {
+            .Api = Backend::Metal,
+            .Device = NativeLogicalDevice{(__bridge void*)gDevice},
+            .CommandQueue = NativeCommandQueue{(__bridge void*)gQueue},
+        },
+        .RegistryId = gDevice.registryID,
+    };
     return RasterStatus::Ready;
 }
 RasterStatus NativeTexturePublish(const internal::NativeTexturePublication& publication,
@@ -52,7 +58,7 @@ RasterStatus NativeTexturePublish(const internal::NativeTexturePublication& publ
     // RHI allocations use Metal's tracked texture hazards. Both frameworks must
     // enqueue and commit on this exact queue after publication, in owner order.
     [record.Publication commit];
-    output.MetalTexture = (__bridge void*)record.Texture;
+    output.MetalTexture = NativeMetalTexture{(__bridge void*)record.Texture};
     return RasterStatus::Ready;
 }
 RasterStatus NativeTextureRelease(usize slot) noexcept

@@ -5,31 +5,40 @@
 // images on an exact device, and recording completion is not GPU completion.
 // https://doc.qt.io/qt-6/qsgrendererinterface.html
 // This Qt-independent bridge adds retained identities and shared-queue retirement.
+#include <type_traits>
+
 namespace ludus::graphics::rhi::internal
 {
+constexpr uint64 NATIVE_INVALID_OWNER = 0;
+constexpr uint64 NATIVE_FIRST_GENERATION = 1;
+constexpr uint64 NATIVE_EXHAUSTED_GENERATION = 0;
+constexpr usize NATIVE_SLOT_OFFSET = 1;
+constexpr uint32 NATIVE_NULL_SLOT = 0;
+template <typename Handle>
+concept NativeInteropHandle = std::is_same_v<Handle, NativeDeviceLease> || std::is_same_v<Handle, NativeTextureRead>;
 struct NativeInteropAccess final
 {
-    template <typename T>
-    static uint64 Owner(T value) noexcept
+    template <NativeInteropHandle T>
+    static uint64 Owner(const T& value) noexcept
     {
-        return value.Owner;
+        return value.mOwner;
     }
-    template <typename T>
-    static uint64 Generation(T value) noexcept
+    template <NativeInteropHandle T>
+    static uint64 Generation(const T& value) noexcept
     {
-        return value.Generation;
+        return value.mGeneration;
     }
-    template <typename T>
-    static usize Slot(T value) noexcept
+    template <NativeInteropHandle T>
+    static usize Slot(const T& value) noexcept
     {
-        return value.Slot == 0 ? RASTER_INVALID : value.Slot - 1;
+        return value.mSlot == NATIVE_NULL_SLOT ? RASTER_INVALID : value.mSlot - NATIVE_SLOT_OFFSET;
     }
-    template <typename T>
+    template <NativeInteropHandle T>
     static void Set(T& value, const RasterIdentity& identity) noexcept
     {
-        value.Owner = identity.Owner;
-        value.Slot = static_cast<uint32>(identity.Slot + 1);
-        value.Generation = identity.Generation;
+        value.mOwner = identity.Owner;
+        value.mSlot = static_cast<uint32>(identity.Slot + NATIVE_SLOT_OFFSET);
+        value.mGeneration = identity.Generation;
     }
 };
 } // namespace ludus::graphics::rhi::internal
@@ -39,71 +48,87 @@ namespace
 {
 struct NativeLeaseRecord
 {
-    uint64 Owner = 0, Generation = 1;
+    uint64 Owner = NATIVE_INVALID_OWNER;
+    uint64 Generation = NATIVE_FIRST_GENERATION;
 };
-struct NativeDeviceRecord final : NativeLeaseRecord
+struct NativeDeviceRecord final
 {
-    DeviceHandle Session;
-    NativeDeviceInfo Info;
+    NativeLeaseRecord Lease{};
+    DeviceHandle Session{};
+    NativeDeviceInfo Info{};
     usize Reads = 0;
 };
-struct NativeReadRecord final : NativeLeaseRecord
+struct NativeReadRecord final
 {
-    usize Device = RASTER_INVALID, Texture = RASTER_INVALID;
-    NativeTextureInfo Info;
+    NativeLeaseRecord Lease{};
+    usize Device = RASTER_INVALID;
+    usize Texture = RASTER_INVALID;
+    NativeTextureInfo Info{};
     bool Releasing = false;
 };
+template <typename RecordType>
+concept NativeInteropRecord =
+    std::is_same_v<RecordType, NativeDeviceRecord> || std::is_same_v<RecordType, NativeReadRecord>;
+template <typename RecordType, typename Handle>
+concept NativeInteropRecordFor =
+    (std::is_same_v<RecordType, NativeDeviceRecord> && std::is_same_v<Handle, NativeDeviceLease>) ||
+    (std::is_same_v<RecordType, NativeReadRecord> && std::is_same_v<Handle, NativeTextureRead>);
 StorageTable<NativeDeviceRecord> gNativeDevices;
 StorageTable<NativeReadRecord> gNativeReads;
 NativeDeviceDescription gNativeSource;
-uint64 gNativePins = 0;
-bool gNativeSourcePinned = false, gNativeCallback = false, gNativeRetiring = false, gNativeTerminalLoss = false;
+usize gNativePins = 0;
+bool gNativeSourcePinned = false;
+bool gNativeCallback = false;
+bool gNativeRetiring = false;
+bool gNativeTerminalLoss = false;
 
-bool SameNativeContext(const NativeDeviceIdentity& a, const NativeDeviceIdentity& b) noexcept
+bool SameNativeContext(const NativeDeviceIdentity& producer, const NativeDeviceIdentity& consumer) noexcept
 {
-    return a.Api == b.Api && a.Instance == b.Instance && a.PhysicalDevice == b.PhysicalDevice && a.Device == b.Device &&
-           a.CommandQueue == b.CommandQueue && a.QueueFamily == b.QueueFamily && a.QueueIndex == b.QueueIndex;
+    return producer.Api == consumer.Api && producer.Instance == consumer.Instance &&
+           producer.PhysicalDevice == consumer.PhysicalDevice && producer.Device == consumer.Device &&
+           producer.CommandQueue == consumer.CommandQueue && producer.QueueFamily == consumer.QueueFamily &&
+           producer.QueueIndex == consumer.QueueIndex;
 }
-template <typename T, typename H>
-T* NativeResolve(StorageTable<T>& records, H handle) noexcept
+template <NativeInteropRecord T, NativeInteropHandle H>
+    requires NativeInteropRecordFor<T, H>
+T* NativeResolve(StorageTable<T>& records, const H& handle) noexcept
 {
     const auto slot = NativeInteropAccess::Slot(handle);
-    if (NativeInteropAccess::Owner(handle) == 0 || slot >= records.GetSize())
+    if (NativeInteropAccess::Owner(handle) == NATIVE_INVALID_OWNER || slot >= records.GetSize())
     {
         return nullptr;
     }
     auto& record = records[slot];
-    return record.Owner == NativeInteropAccess::Owner(handle) &&
-                   record.Generation == NativeInteropAccess::Generation(handle)
+    return record.Lease.Owner == NativeInteropAccess::Owner(handle) &&
+                   record.Lease.Generation == NativeInteropAccess::Generation(handle)
                ? &record
                : nullptr;
 }
-template <typename T>
+template <NativeInteropRecord T>
 RasterStatus NativeReserve(StorageTable<T>& records, usize& slot) noexcept
 {
     const usize limit = CurrentStorageLimits().ResourcesPerKind;
     bool exhausted = false;
     for (slot = 0; slot < limit; ++slot)
     {
-        if (slot == records.GetSize() && !records.EnsureSlots(slot + 1))
+        if (slot == records.GetSize() && !records.EnsureSlots(slot + NATIVE_SLOT_OFFSET))
         {
             return StorageFailure();
         }
         auto& record = records[slot];
-        exhausted |= record.Generation == 0;
-        if (record.Owner == 0 && record.Generation != 0)
+        exhausted |= record.Lease.Generation == NATIVE_EXHAUSTED_GENERATION;
+        if (record.Lease.Owner == NATIVE_INVALID_OWNER && record.Lease.Generation != NATIVE_EXHAUSTED_GENERATION)
         {
             return RasterStatus::Ready;
         }
     }
     return exhausted ? RasterStatus::IdentityExhausted : RasterStatus::CapacityExceeded;
 }
-template <typename T>
+template <NativeInteropRecord T>
 void NativeReset(T& record) noexcept
 {
-    const auto generation = RasterNextGeneration(record.Generation);
-    record = {};
-    record.Generation = generation;
+    const auto generation = RasterNextGeneration(record.Lease.Generation);
+    record = { .Lease = { .Generation = generation } };
 }
 NativeDeviceInfo NativeSnapshot(const NativeDeviceRecord& record) noexcept
 {
@@ -200,7 +225,7 @@ DeviceStatus PrepareNativeDeviceSource(const NativeDeviceDescription& descriptio
     {
         return DeviceStatus::Unsupported;
     }
-    if (identity.Device == nullptr || identity.CommandQueue == nullptr || description.Lifetime.Context == nullptr ||
+    if (identity.Device.IsNull() || identity.CommandQueue.IsNull() || description.Lifetime.Context == nullptr ||
         description.Lifetime.Retain == nullptr || description.Lifetime.Release == nullptr)
     {
         return DeviceStatus::InvalidDescription;
@@ -208,7 +233,7 @@ DeviceStatus PrepareNativeDeviceSource(const NativeDeviceDescription& descriptio
     if (identity.Api == Backend::Vulkan)
     {
         constexpr uint32 VULKAN_1_1 = (1U << 22) | (1U << 12);
-        if (identity.Instance == nullptr || identity.PhysicalDevice == nullptr)
+        if (identity.Instance.IsNull() || identity.PhysicalDevice.IsNull())
         {
             return DeviceStatus::InvalidDescription;
         }
@@ -217,7 +242,7 @@ DeviceStatus PrepareNativeDeviceSource(const NativeDeviceDescription& descriptio
             return DeviceStatus::Unsupported;
         }
     }
-    else if (identity.Instance != nullptr || identity.PhysicalDevice != nullptr || identity.QueueFamily != 0 ||
+    else if (!identity.Instance.IsNull() || !identity.PhysicalDevice.IsNull() || identity.QueueFamily != 0 ||
              identity.QueueIndex != 0 || description.InstanceApiVersion != 0)
     {
         return DeviceStatus::InvalidDescription;
@@ -282,12 +307,15 @@ RasterStatus AcquireNativeDevice(DeviceHandle device, NativeDeviceLease& output)
         return reserved;
     }
     auto& record = gNativeDevices[slot];
-    record.Owner = DeviceOwner();
-    record.Session = device;
-    info.Incarnation = record.Owner;
-    record.Info = info;
+    info.Incarnation = DeviceOwner();
+    record =
+    {
+        .Lease = { .Owner = info.Incarnation, .Generation = record.Lease.Generation },
+        .Session = device,
+        .Info = info,
+    };
     ++gNativePins;
-    NativeInteropAccess::Set(output, {record.Owner, slot, record.Generation});
+    NativeInteropAccess::Set(output, {record.Lease.Owner, slot, record.Lease.Generation});
     return RasterStatus::Ready;
 }
 RasterStatus GetNativeDeviceInfo(NativeDeviceLease handle, NativeDeviceInfo& output) noexcept
@@ -332,7 +360,7 @@ RasterStatus AcquireNativeTextureRead(NativeDeviceLease device,
     {
         return RasterStatus::InvalidHandle;
     }
-    if (gNativeRetiring || native->Owner != DeviceOwner())
+    if (gNativeRetiring || native->Lease.Owner != DeviceOwner())
     {
         return RasterStatus::InvalidState;
     }
@@ -374,7 +402,7 @@ RasterStatus AcquireNativeTextureRead(NativeDeviceLease device,
         return RasterStatus::IdentityExhausted;
     }
     const auto ordinal = LifetimeAccess::Ordinal(producer);
-    if (LifetimeAccess::Owner(producer) != native->Owner || ordinal == 0 || ordinal != texture->LastUse ||
+    if (LifetimeAccess::Owner(producer) != native->Lease.Owner || ordinal == 0 || ordinal != texture->LastUse ||
         ordinal < gFirstAcceptedSubmission || ordinal > gLastAcceptedSubmission)
     {
         return RasterStatus::InvalidHandle;
@@ -387,7 +415,15 @@ RasterStatus AcquireNativeTextureRead(NativeDeviceLease device,
     {
         return reserved;
     }
-    NativeTextureInfo result;
+    NativeTextureInfo result
+    {
+        .Device = NativeSnapshot(*native),
+        .Revision = texture->TextureRevision + 1,
+        .ProducerOrdinal = ordinal,
+        .Format = description.Format,
+        .Width = description.Width,
+        .Height = description.Height,
+    };
     const auto textureSlot = RasterAccess::Slot(handle);
     Retain(RasterKind::Texture, textureSlot);
     const auto published = backend::NativeTexturePublish({slot, textureSlot}, result);
@@ -400,19 +436,16 @@ RasterStatus AcquireNativeTextureRead(NativeDeviceLease device,
     texture->TextureUse = RasterTextureUse::SampledFragment;
     ++texture->TextureRevision;
     ++texture->ExternalReads;
-    result.Device = NativeSnapshot(*native);
-    result.Revision = texture->TextureRevision;
-    result.ProducerOrdinal = ordinal;
-    result.Format = description.Format;
-    result.Width = description.Width;
-    result.Height = description.Height;
     auto& read = gNativeReads[slot];
-    read.Owner = native->Owner;
-    read.Device = NativeInteropAccess::Slot(device);
-    read.Texture = textureSlot;
-    read.Info = result;
+    read =
+    {
+        .Lease = { .Owner = native->Lease.Owner, .Generation = read.Lease.Generation },
+        .Device = NativeInteropAccess::Slot(device),
+        .Texture = textureSlot,
+        .Info = result,
+    };
     ++native->Reads;
-    NativeInteropAccess::Set(output, {read.Owner, slot, read.Generation});
+    NativeInteropAccess::Set(output, {read.Lease.Owner, slot, read.Lease.Generation});
     info = result;
     return RasterStatus::Ready;
 }
@@ -427,7 +460,7 @@ RasterStatus GetNativeTextureInfo(NativeTextureRead handle, NativeTextureInfo& o
     {
         return RasterStatus::InvalidState;
     }
-    if (gNativeTerminalLoss || (read->Owner == DeviceOwner() && GetStartup().State == StartupState::DeviceLost))
+    if (gNativeTerminalLoss || (read->Lease.Owner == DeviceOwner() && GetStartup().State == StartupState::DeviceLost))
     {
         return RasterStatus::DeviceLost;
     }
@@ -456,7 +489,7 @@ RasterStatus GetStatus(NativeTextureRead handle) noexcept
     {
         return RasterStatus::InvalidHandle;
     }
-    if (gNativeTerminalLoss || (read->Owner == DeviceOwner() && GetStartup().State == StartupState::DeviceLost))
+    if (gNativeTerminalLoss || (read->Lease.Owner == DeviceOwner() && GetStartup().State == StartupState::DeviceLost))
     {
         return RasterStatus::DeviceLost;
     }
