@@ -25,7 +25,9 @@ struct RasterGlPipeline final
     RasterGlPipeline() noexcept
     {
         for (GLint& location : Textures)
+        {
             location = -1;
+        }
     }
 };
 struct RasterGlCompletion final

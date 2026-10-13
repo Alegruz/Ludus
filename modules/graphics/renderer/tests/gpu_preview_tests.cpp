@@ -631,7 +631,13 @@ TEST_CASE("CPU and GPU reference transport retained HDR source radiance and auth
     hdr.FilterWidth = 16;
     hdr.FilterSamples = 16;
     hdr.CpuByteBudget = usize{1024} * 1024;
-    REQUIRE(environment.Initialize(device, hdr) == S::Ready);
+    status = environment.Initialize(device, hdr);
+    const uint64 environmentStart = time::NowTicks();
+    while (status == S::Pending && time::NowTicks() - environmentStart < 10 * time::NANOSECONDS_PER_SECOND)
+    {
+        status = environment.GetStatus();
+    }
+    REQUIRE(status == S::Ready);
     rr::ReferenceCaptureDescription capture;
     capture.OrthographicCamera = true;
     capture.Width = capture.Height = 8;
